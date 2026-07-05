@@ -1,0 +1,106 @@
+# generated: 2026-07-05
+# last_updated: 2026-07-05
+# project: xuyenviet
+# project_key: NOKEY
+# tracking_system: file-system
+# story_location: /home/sonnh/projects/xuyenviet/_bmad-output/implementation-artifacts
+
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+#
+# Epic Status Transitions:
+#   - backlog -> in-progress: Automatically when first story is created (via create-story)
+#   - in-progress -> done: Manually when all stories reach 'done' status
+#
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created in stories folder
+#   - in-progress: Developer actively working on implementation
+#   - review: Ready for code review (via Dev's code-review workflow)
+#   - done: Story completed
+#
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+#
+# Action Item Status:
+#   - open: Committed during a retrospective, not yet addressed
+#   - in-progress: Actively being worked on
+#   - done: Completed
+#
+# WORKFLOW NOTES:
+# ===============
+# - Epic transitions to 'in-progress' automatically when first story is created
+# - Stories can be worked in parallel if team capacity allows
+# - Developer typically creates next story after previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+# - Retrospective appends its action items to action_items; sprint-status surfaces open ones
+
+generated: 2026-07-05
+last_updated: 2026-07-05
+project: xuyenviet
+project_key: NOKEY
+tracking_system: file-system
+story_location: /home/sonnh/projects/xuyenviet/_bmad-output/implementation-artifacts
+
+development_status:
+  epic-1: in-progress
+  1-1-initialize-public-mvp-web-app-foundation: ready-for-dev
+  1-2-public-sign-in-entry-and-ai-ask-gate: backlog
+  1-3-google-login-with-auth-js: backlog
+  1-4-roles-and-separate-admin-area: backlog
+  1-5-audit-trail-for-protected-mutations: backlog
+  1-6-environment-and-public-launch-safety-baseline: backlog
+  1-7-capture-referral-attribution-at-sign-up: backlog
+  epic-1-retrospective: optional
+  epic-2: backlog
+  2-1-authenticated-ai-ask-chat-shell: backlog
+  2-2-create-conversation-and-send-first-message: backlog
+  2-3-generate-vietnamese-initial-ai-answer: backlog
+  2-4-structured-road-trip-answer-format: backlog
+  2-5-continue-conversation-with-context: backlog
+  2-6-basic-chat-responsiveness-and-failure-states: backlog
+  epic-2-retrospective: optional
+  epic-3: backlog
+  3-1-manage-chat-sessions: backlog
+  3-2-create-trip-projects: backlog
+  3-3-extract-chat-and-trip-context: backlog
+  3-4-use-chat-or-trip-context-in-answers: backlog
+  3-5-correct-trip-details-through-chat: backlog
+  3-6-delete-chat-sessions: backlog
+  3-7-delete-trip-projects: backlog
+  epic-3-retrospective: optional
+  epic-4: backlog
+  4-1-submit-travel-source-for-ai-reading: backlog
+  4-2-ai-extracts-knowledge-drafts-from-source: backlog
+  4-3-review-and-edit-ai-prepared-drafts: backlog
+  4-4-ai-suggests-create-or-update-from-source-url: backlog
+  4-5-batch-seed-source-url-intake: backlog
+  4-6-approve-knowledge-for-retrieval: backlog
+  4-7-preserve-source-and-confidence-in-approved-knowledge: backlog
+  4-8-make-approved-knowledge-searchable-by-ai: backlog
+  4-9-track-100-approved-corridor-items: backlog
+  epic-4-retrospective: optional
+  epic-5: backlog
+  5-1-retrieve-approved-knowledge-for-ai-ask: backlog
+  5-2-assemble-context-priority-source-bundle: backlog
+  5-3-web-search-fallback-trigger: backlog
+  5-4-web-search-adapter-and-source-capture: backlog
+  5-5-persist-retrieval-decision-and-answer-provenance: backlog
+  5-6-render-source-and-confidence-section: backlog
+  5-7-uncertainty-and-freshness-warnings: backlog
+  5-8-validate-web-search-fallback-quality: backlog
+  5-9-record-ai-usage-events: backlog
+  epic-5-retrospective: optional
+  epic-6: backlog
+  6-1-detect-children-and-family-travel-needs: backlog
+  6-2-family-aware-driving-and-stop-recommendations: backlog
+  6-3-family-aware-activities-and-suitability-notes: backlog
+  6-4-capture-answer-usefulness-feedback: backlog
+  6-5-run-public-mvp-answer-evaluation-prompt-set: backlog
+  6-6-public-mvp-quality-dashboard: backlog
+  epic-6-retrospective: optional
