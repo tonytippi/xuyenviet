@@ -497,6 +497,11 @@ So that future referral programs can attribute registrations without adding rewa
 
 **Acceptance Criteria:**
 
+**Given** the MVP needs valid referral links for attribution testing
+**When** referral support is configured
+**Then** the system supports a minimal referral-code source through seeded database records, admin-created records, or config-backed campaign records
+**And** validation is performed server-side against that source of truth.
+
 **Given** a public visitor opens XuyenViet with a valid referral code in the URL
 **When** they complete Google sign-in as a new user
 **Then** the system stores referral attribution linking the new user to the referral code and referrer when resolvable
@@ -581,6 +586,11 @@ So that I get useful guidance even before all trip details are known.
 **When** the user is waiting for an answer
 **Then** the app shows a safe error state
 **And** the failed request does not create a misleading assistant message.
+
+**Given** an authenticated AI answer generation attempt starts
+**When** the system calls an AI provider in this story before full usage instrumentation is complete
+**Then** it records at least a minimal usage event or durable usage placeholder with user ID, conversation/message context when available, purpose, provider/model when known, timestamp, and success/failure status
+**And** later Story 5.9 can enrich or standardize usage metadata without retrofitting missing historical AI calls.
 
 ### Story 2.4: Structured Road-Trip Answer Format
 
@@ -827,8 +837,13 @@ So that AI can read travel information and prepare it for review.
 
 **Given** an operator opens the knowledge intake area
 **When** they submit a URL, Facebook post link, pasted text, or screenshot
-**Then** the system stores the submitted source with source type, URL or label, submitted date, and operator ownership
-**And** the raw source is visible only to operators/admins.
+**Then** the system stores a normalized source record with source kind, URL or canonical URL when available, label, publisher when available, collected or checked date, source type, verification status, and official/partner flags when applicable
+**And** the raw submitted material or file metadata is stored separately as operator-only raw source material.
+
+**Given** submitted raw material includes copied text, a screenshot, or provider-specific metadata
+**When** the source is stored
+**Then** traveler-facing source bundles can reference only safe source metadata
+**And** raw text, image-derived notes, and operator-only fields are not exposed to normal travelers.
 
 **Given** the submitted source is a Facebook post or copied community content
 **When** it is stored
@@ -984,8 +999,12 @@ So that AI answers can explain where information came from.
 
 **Given** a knowledge card is approved
 **When** it is saved
-**Then** it keeps a link or label for the original source
-**And** it stores source type, collected/checked date when available, confidence label, and freshness-sensitive flag.
+**Then** it links to at least one normalized source record through card-source linkage
+**And** traveler-facing source metadata comes from linked source rows rather than free-text card fields.
+
+**Given** a linked source has metadata available
+**When** the approved card is saved or rendered later
+**Then** source type, URL or source label, publisher when available, collected or checked date when available, verification status, displayed confidence label, and freshness-sensitive flag remain available for provenance and source display.
 
 **Given** the source is community/Facebook-derived
 **When** the card is approved
@@ -1234,6 +1253,11 @@ I want authenticated AI requests to create usage records,
 So that future credit pricing and cost controls can be designed from real usage data.
 
 **Acceptance Criteria:**
+
+**Given** earlier AI Ask stories may have recorded minimal usage events or placeholders
+**When** full usage tracking is implemented
+**Then** the Usage module standardizes provider usage capture across AI generation, extraction, embedding, evaluation, and search/provider calls where applicable
+**And** existing minimal events remain compatible with the final `ai_usage_events` schema or migration path.
 
 **Given** an authenticated user submits an AI Ask request
 **When** the AI orchestration pipeline calls model, embedding, extraction, evaluation, or search providers where applicable

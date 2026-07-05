@@ -8,26 +8,26 @@
 ## Resolved Product Decisions
 
 - Public MVP surface: AI Ask chat.
-- Launch intent: private beta.
+- Launch intent: public MVP entry with authenticated AI Ask.
 - Initial geography: Hanoi-to-HCMC road-trip corridor.
 - User language: Vietnamese.
 - Authentication: Google Login.
-- Private beta access assumption: simple email allowlist with Google Login.
+- Access model: public sign-in without an email allowlist; Google Login is required before AI Ask.
 - Initial operator model: owner/admin first, expandable to operators later.
-- Minimum first-beta data target: 100 approved knowledge cards.
+- Minimum public-MVP seed data target: 100 approved knowledge cards.
 - Initial confidence labels: `unverified`, `community`, `curated`, `partner`, `official`.
 - Source display minimum: source title/label, source type, URL when available, collected/checked date when available, confidence label, and freshness warning when applicable.
 
 ## Provisional Assumptions For Architecture
 
 - Preferred AI provider: OpenAI.
-- OpenAI must be configured, where available, so private beta data is not used to train provider models.
+- OpenAI must be configured, where available, so project/user data is not used to train provider models.
 - Web search fallback is required in MVP because curated data starts sparse.
 - Web search provider is an architecture decision, but must support Vietnamese, source URLs/titles/snippets, provenance capture, and official/provider-source preference.
 - Google Maps integration is post-MVP.
 - Memory correction can be chat-based in MVP.
-- Memory deletion can begin as a support/account request path in private beta, but architecture must define deletion propagation before implementation.
-- Conversation transcripts may be retained for private beta quality/debugging for 90 days unless privacy review changes this.
+- Memory deletion must support user-owned chat session and trip project deletion for MVP, with deletion propagation defined by architecture before implementation.
+- Conversation transcript retention must follow the final PRD and privacy notice; do not treat earlier debugging-retention assumptions as active requirements unless a later privacy decision reinstates them.
 
 ## Market Context Digest
 
