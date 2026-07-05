@@ -21,17 +21,17 @@ The MVP ships one coherent web application and one owned data plane. Product mod
 flowchart LR
   Traveler[Traveler] --> Web[Next.js Web App]
   Operator[Operator/Admin] --> Web
-  Web --> Auth[Auth + Allowlist]
+  Web --> Auth[Auth + Roles]
   Web --> Chat[AI Ask]
   Web --> Admin[Knowledge Admin]
   Chat --> Orchestrator[AI Orchestrator]
   Admin --> Knowledge[Knowledge Workflow]
-  Orchestrator --> Memory[Memory]
+  Orchestrator --> ChatContext[Chat + Trip Context]
   Orchestrator --> Retrieval[Retrieval]
   Orchestrator --> Search[Web Search Adapter]
   Orchestrator --> OpenAI[OpenAI Adapter]
   Knowledge --> OpenAI
-  Memory --> DB[(PostgreSQL + pgvector)]
+  ChatContext --> DB[(PostgreSQL + pgvector)]
   Retrieval --> DB
   Knowledge --> DB
   Auth --> DB
@@ -53,7 +53,7 @@ Seed: create-next-app TypeScript, App Router, React Server Components where usef
 
 ### AD-2: PostgreSQL Owns Product State And Retrieval State
 
-Binds: users, roles, allowlist, conversations, messages, memory, knowledge cards, source records, embeddings, web results, feedback, audits, and privacy requests share one PostgreSQL data plane.
+Binds: users, roles, conversations, messages, trip projects, chat/trip context, knowledge cards, source records, embeddings, web results, feedback, and audits share one PostgreSQL data plane.
 
 Prevents: provider-hosted vector stores or search tools becoming hidden source-of-truth for approval state, provenance, or deletion.
 
@@ -69,21 +69,21 @@ Prevents: ad hoc SQL drift across AI Ask, admin, retrieval, and evaluation work.
 
 Rule: All persistent tables and indexes are introduced through migrations; raw SQL is allowed only inside reviewed migration/query helpers for pgvector/full-text operations.
 
-### AD-4: Auth Is Google OAuth Plus Server-Side Beta Gates
+### AD-4: Auth Is Public Sign-In Plus Google OAuth And Server-Side Roles
 
-Binds: private beta access to authenticated Google accounts, an email allowlist, and server-side role checks.
+Binds: public sign-in access, required Google OAuth before AI Ask, and server-side role checks for admin/operator capabilities.
 
-Prevents: client-only gating, separate admin auth, or accidental operator access for normal travelers.
+Prevents: client-only authorization, separate admin auth, or accidental operator access for normal travelers.
 
-Rule: Every protected route/action validates session, allowlist membership, and role before reading or mutating data.
+Rule: Public entry/sign-in routes may be reachable without an allowlist; AI Ask routes and actions require an authenticated session; every admin/operator route/action validates session and role before reading or mutating protected data.
 
 Seed: Auth.js Google OAuth with PostgreSQL-backed sessions/accounts. [ASSUMPTION]
 
 ### AD-5: Feature Ownership Boundaries Are Explicit
 
-Binds: module ownership to these domains: Auth, Chat, Memory, Knowledge, Retrieval, Search, AI Orchestration, Admin, Feedback/Eval, Audit.
+Binds: module ownership to these domains: Auth, Chat/Trips, Knowledge, Retrieval, Search, AI Orchestration, Admin, Feedback/Eval, Usage, Referrals, Audit.
 
-Prevents: circular ownership of user memory, knowledge cards, sources, and answer provenance.
+Prevents: circular ownership of chat/trip context, knowledge cards, sources, and answer provenance.
 
 Rule: UI components call their feature's server entrypoints; feature modules do not reach into another module's tables except through exported server functions or query helpers.
 
@@ -94,25 +94,31 @@ flowchart TB
   UI --> Admin
   Chat --> Orchestration
   Admin --> Knowledge
-  Orchestration --> Memory
+  Orchestration --> ChatTrips[Chat/Trips]
   Orchestration --> Retrieval
   Orchestration --> Search
   Orchestration --> AI[AI Provider]
+  Orchestration --> Usage
+  Auth --> Referrals
   Retrieval --> Knowledge
   Knowledge --> Audit
-  Memory --> Audit
+  ChatTrips --> Audit
   Chat --> Feedback
 ```
 
 ### AD-6: Mutations Are Server-Side And Audited
 
-Binds: memory changes, knowledge approval, card edits, source edits, feedback, and deletion requests to authenticated server-side mutation paths with audit context.
+Binds: chat/trip changes, knowledge approval, card edits, source edits, feedback, and deletion actions to authenticated server-side mutation paths with audit context.
 
 Prevents: client-side writes, unaudited operator edits, or AI directly persisting sensitive state.
 
 Rule: Every mutation records actor, target, operation, timestamp, and relevant before/after summary where appropriate.
 
-Rule: Each mutable aggregate has one owning command module: Memory owns user memory, memory embeddings, and privacy requests; Chat owns conversation trip context and messages; Knowledge owns cards, card sources, raw source material, and card embeddings; Search owns web results; AI Orchestration owns assistant response provenance; Feedback/Eval owns feedback and eval runs; Audit owns append-only audit events.
+Rule: Each mutable aggregate has one owning command module: Chat/Trips owns conversations, messages, trip projects, chat/trip context, chat/trip embeddings, and user-owned deletion of chats/trips; Knowledge owns cards, card sources, raw source material, and card embeddings; Search owns web results; AI Orchestration owns assistant response provenance; Usage owns append-only AI usage events; Referrals owns referral codes and referral attribution; Feedback/Eval owns feedback and eval runs; Audit owns append-only audit events.
+
+Rule: Usage events are operational/accounting telemetry and must not be treated as credit ledger entries.
+
+Rule: MVP referral attribution records do not create rewards, balances, payout obligations, ranking status, or credit conversion.
 
 Rule: Non-owning modules may read through query helpers but must not export or call generic table upserts/deletes for another module's aggregate.
 
@@ -134,7 +140,7 @@ Rule: Traveler answer source bundles must not include `raw_source_material.raw_t
 
 ### AD-8: AI Ask Uses A Fixed Context Priority Pipeline
 
-Binds: answer context priority to user memory/current trip context, approved XuyenViet knowledge, web search fallback, then general model reasoning.
+Binds: answer context priority to selected trip project context, current chat session context, approved XuyenViet knowledge, web search fallback, then general model reasoning.
 
 Prevents: feature teams bypassing PRD source/confidence rules or using web/general AI before owned context.
 
@@ -145,14 +151,14 @@ sequenceDiagram
   participant User
   participant Chat
   participant Orchestrator
-  participant Memory
+  participant ChatContext
   participant Retrieval
   participant Search
   participant OpenAI
   participant DB
   User->>Chat: Vietnamese question
   Chat->>Orchestrator: authenticated request
-  Orchestrator->>Memory: load profile + trip context
+  Orchestrator->>ChatContext: load selected trip + chat context
   Orchestrator->>Retrieval: approved-card hybrid search
   Retrieval->>DB: card text + embeddings + filters
   alt missing sparse fresh or conflicting
@@ -185,57 +191,59 @@ Prevents: direct model calls that invent source labels, write memory directly, o
 
 Rule: Every model call declares purpose, model, prompt version, input source bundle, and output schema expectation where applicable.
 
-Rule: OpenAI usage must be configured, where available, so submitted project data is not used for provider model training. Private beta launch is blocked until provider data-processing setting and privacy notice text are verified.
+Rule: AI provider adapter calls must return or emit usage metadata when available, including model, token counts, provider request ID if available, latency, and failure status. The Usage module persists this metadata without storing raw prompt/response content beyond existing message/provenance records.
+
+Rule: OpenAI usage must be configured, where available, so submitted project data is not used for provider model training. Public MVP launch is blocked until provider data-processing setting and privacy notice text are verified.
 
 ### AD-11: Answer Provenance Is Persisted, Not UI-Derived
 
-Binds: every assistant answer to stored provenance categories, knowledge card IDs, memory IDs, web result IDs, model name, prompt version, and evaluation metadata.
+Binds: every assistant answer to stored provenance categories, knowledge card IDs, chat/trip context IDs, web result IDs, model name, prompt version, and evaluation metadata.
 
 Prevents: citations that appear in the UI but cannot be audited, debugged, or measured later.
 
 Rule: The UI renders source/confidence sections from stored response provenance, not by re-parsing the answer text.
 
-Rule: `assistant_response_provenance` is row-per-source-item, not only a JSON blob. Each row stores `message_id`, `source_category`, exactly one nullable source reference for memory/trip/knowledge/web when applicable, source rank, retrieval score, source type, verification status, `used_in_prompt`, `cited_in_answer`, and a source snapshot.
+Rule: `assistant_response_provenance` is row-per-source-item, not only a JSON blob. Each row stores `message_id`, `source_category`, exactly one nullable source reference for chat/trip/knowledge/web when applicable, source rank, retrieval score, source type, verification status, `used_in_prompt`, `cited_in_answer`, and a source snapshot.
 
 Rule: The orchestrator persists provenance with the assistant message in the same transaction; UI, eval, and audits consume this table only.
 
-### AD-12: Memory Is Split Between Persistent Profile And Trip Context
+### AD-12: Context Is Split Between Chat Sessions And Trip Projects
 
-Binds: long-term traveler preferences to `user_memory` and conversation-specific facts to `trip_context`.
+Binds: current discussion facts to chat sessions and focused travel-planning state to trip projects.
 
-Prevents: current-trip details polluting long-term profile or sensitive facts being persisted as memory.
+Prevents: overbuilt global memory and keeps personalization understandable in a ChatGPT/Gemini-like session and project model.
 
-Rule: AI extraction proposes memory updates; the Memory module validates allowed fields before persistence and rejects disallowed sensitive data.
+Rule: AI extraction proposes chat context or trip project updates; the Chat/Trips module validates allowed travel-planning fields before persistence and rejects clearly disallowed sensitive data.
 
-Allowed persistent memory: start city, traveler count, child age range, travel preferences, prior trips, avoided/repeated places, budget range, hotel style, driving tolerance, vehicle/EV needs, food/activity preferences.
+Allowed chat/trip context: start city, traveler count, child age range, travel preferences, prior trips, avoided/repeated places, budget range, hotel style, driving tolerance, vehicle/EV needs, food/activity preferences, itinerary constraints, and current trip details.
 
-### AD-13: Privacy Deletion Is Tracked As A Workflow
+### AD-13: Users Delete Their Own Chats And Trip Projects
 
-Binds: memory deletion requests to a tracked privacy request record, deletion of profile memory, deletion of derived memory embeddings, and tombstone/audit entries.
+Binds: deletion to user-owned chat sessions and trip projects.
 
-Prevents: partial silent deletion or later re-embedding of deleted facts.
+Prevents: heavy support workflows and makes data control match familiar chat-product behavior.
 
-Rule: Conversation transcript deletion remains admin-mediated during private beta; profile memory deletion must not depend on transcript deletion. [ASSUMPTION]
+Rule: A user can delete a chat session they own; deletion removes or disables that conversation's messages, extracted chat context, derived embeddings, and normal retrieval access.
 
-Rule: Profile memory deletion redacts or tombstones every retrievable or displayable copy of the deleted fact, including memory embeddings, provenance snapshots, eval payloads/results, background job payloads, and structured logs where feasible.
+Rule: A user can delete a trip project they own; deletion removes or disables project context, linked project conversations where product behavior requires it, derived embeddings, and normal retrieval access.
 
-Rule: `trip_context` is privacy-scoped to a conversation. Approved conversation transcript deletion deletes or redacts messages, trip context, trip-context embeddings, and provenance snapshots containing trip-context values; retained audit rows keep non-content metadata only.
+Rule: Deletion may retain minimal non-content audit metadata for operational integrity, but deleted chat/project content must not appear in normal user UI or retrieval context.
 
-Rule: New tables that can contain user memory-derived values must register a deletion handler before migration approval.
+Rule: New tables that store chat/project-derived retrievable content must define what happens when the owning chat or trip project is deleted.
 
 ### AD-14: Environments And Secrets Stay Separate
 
 Binds: dev, staging, and production to separate databases, secrets, OAuth config, and search/AI API keys.
 
-Prevents: test data, beta users, admin rights, and provider credentials from mixing.
+Prevents: test data, public users, admin rights, and provider credentials from mixing.
 
-Rule: Production access requires Google OAuth, allowlist membership, and role check; local/dev bypasses must not be deployable defaults.
+Rule: Public sign-in must not require an allowlist; AI Ask and authenticated personalization require Google OAuth; admin/operator access requires Google OAuth plus role check. Local/dev bypasses must not be deployable defaults.
 
 ### AD-15: Deployment Seed Is Serverless-Friendly, Provider Not Yet Final
 
 Binds: implementation to a hosted serverless-friendly Next.js runtime and hosted PostgreSQL with pgvector.
 
-Prevents: relying on unmanaged local infrastructure for private beta.
+Prevents: relying on unmanaged local infrastructure for public MVP traffic.
 
 Rule: Provider-specific features must stay behind config/adapters until deployment and database provider are confirmed.
 
@@ -255,11 +263,16 @@ Seed latency target: first visible answer within 5 seconds without web search an
 
 Core persisted entities:
 
-- `users`, `accounts`, `sessions`, `beta_allowlist`, `roles`
-- `conversations`, `messages`, `assistant_response_provenance`
-- `user_memory`, `trip_context`, `memory_embeddings`, `privacy_requests`
+- `users`, `accounts`, `sessions`, `roles`
+- `referral_codes`, `referral_attributions`
+- `trip_projects`, `conversations`, `messages`, `chat_context`, `assistant_response_provenance`
+- `context_embeddings`
 - `sources`, `raw_source_material`, `knowledge_cards`, `knowledge_card_embeddings`
-- `web_search_results`, `feedback`, `eval_runs`, `audit_events`
+- `web_search_results`, `ai_usage_events`, `feedback`, `eval_runs`, `audit_events`
+
+AI usage event minimum fields: user ID when available, conversation ID when applicable, trip project ID when applicable, message ID when applicable, purpose, provider, model, prompt version when applicable, request timestamp, latency, success/failure status, provider usage metadata when available, and estimated cost fields when configured.
+
+Referral attribution minimum fields: referred user ID, referral code, referrer user ID when resolvable, campaign/source metadata when available, captured timestamp, and immutable first-attribution marker. MVP does not calculate reward amounts.
 
 Confidence labels are fixed for MVP: `unverified`, `community`, `curated`, `partner`, `official`.
 
@@ -280,7 +293,7 @@ Knowledge card types are fixed from the PRD unless changed through PRD update: p
 
 Retrieval returns a normalized source bundle:
 
-- `memory`: allowed remembered facts and current trip context used
+- `chat_trip_context`: selected trip project context and current chat session context used
 - `knowledge`: approved cards with IDs, titles, summaries, confidence, source metadata, freshness flags, and scores
 - `web`: external results with URL, title, snippet/content, checkedAt, provider score, and `unverified` confidence
 - `general`: explicit marker when model reasoning fills gaps without source grounding
@@ -300,18 +313,18 @@ The five PRD beta prompts are the initial required prompt set: magic-moment fami
 Production must have:
 
 - Separate production database and secrets.
-- Server-side auth, allowlist, and role enforcement.
+- Server-side auth and role enforcement for protected personalization/admin capabilities.
 - Audit trail for operator/admin mutations.
 - Logging for model provider, search provider, latency, failures, and answer provenance IDs.
-- Manual admin path for memory deletion requests during private beta.
-- Backup/restore path for PostgreSQL before beta user onboarding.
+- User-owned deletion path for chat sessions and trip projects.
+- Backup/restore path for PostgreSQL before public user onboarding.
 
 ## Deferred
 
 - Final deployment provider and hosted PostgreSQL provider.
 - Final privacy-policy wording after provider setting verification.
 - Facebook content reuse policy beyond provenance and non-official labeling.
-- Dedicated self-service privacy dashboard.
+- Dedicated self-service privacy dashboard beyond chat/trip deletion.
 - Google Maps integration.
-- Public submissions, booking, payment, and partner flows.
+- Public submissions, credit wallets, payment deposits, reward balances, referral reward calculations, ranking multipliers, reward-to-credit conversion, booking transactions, affiliate automation, and partner transaction flows.
 - Mobile app and service decomposition.
