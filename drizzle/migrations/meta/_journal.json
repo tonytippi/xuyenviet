@@ -15,6 +15,13 @@
       "when": 1783317865050,
       "tag": "0001_opposite_doorman",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1783319835932,
+      "tag": "0002_modern_vulture",
+      "breakpoints": true
     }
   ]
 }

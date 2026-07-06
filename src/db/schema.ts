@@ -4,6 +4,9 @@ import { check, index, integer, pgTable, primaryKey, text, timestamp } from "dri
 export const userRoleValues = ["traveler", "operator", "admin"] as const;
 export type UserRole = (typeof userRoleValues)[number];
 
+export const auditOperationValues = ["access_check", "create", "update", "delete", "archive", "approve"] as const;
+export type AuditOperation = (typeof auditOperationValues)[number];
+
 export const users = pgTable("users", {
   id: text("id")
     .primaryKey()
@@ -75,10 +78,39 @@ export const userRoles = pgTable(
   ],
 );
 
+export const auditEvents = pgTable(
+  "audit_events",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    actorUserId: text("actor_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    actorEmail: text("actor_email").notNull(),
+    operation: text("operation").$type<AuditOperation>().notNull(),
+    targetType: text("target_type").notNull(),
+    targetId: text("target_id"),
+    beforeSummary: text("before_summary"),
+    afterSummary: text("after_summary"),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (auditEvent) => [
+    index("audit_events_actor_user_id_idx").on(auditEvent.actorUserId),
+    index("audit_events_target_idx").on(auditEvent.targetType, auditEvent.targetId),
+    index("audit_events_created_at_idx").on(auditEvent.createdAt),
+    check(
+      "audit_events_operation_check",
+      sql`${auditEvent.operation} in ('access_check', 'create', 'update', 'delete', 'archive', 'approve')`,
+    ),
+  ],
+);
+
 export const schema = {
   users,
   accounts,
   sessions,
   verificationTokens,
   userRoles,
+  auditEvents,
 };
