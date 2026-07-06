@@ -53,6 +53,7 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - Public routes may render without auth, but AI Ask and admin/operator routes/actions must resolve auth server-side before reading or mutating protected data.
 - UI and route handlers should call feature-owned server entrypoints, not mutate another module's aggregate directly.
 - Keep the MVP as one Next.js modular monolith. Do not split chat, admin, retrieval, auth, or AI orchestration into separate services.
+- Keep the current root-level Next.js project structure for the web MVP. Do not introduce an `apps/web` monorepo layout, `packages/*` extraction, or shared workspace setup for future mobile support unless a later architecture or correct-course decision explicitly approves that restructure.
 - Preserve Vietnamese-first UX. User-facing copy should use Vietnamese diacritics, `html lang="vi"`, and readable mobile/desktop layouts.
 - Preserve current visual direction unless a UX story changes it: map-paper utility feel, route green, guide amber, no generic travel gradients, no map-first UI.
 - Do not add booking, payments, rewards, credits, Google Maps, affiliate, partner transaction, or referral reward UI. These are PRD non-goals for MVP.

@@ -2,7 +2,7 @@
 title: XuyenViet AI Travel Information MVP Architecture Spine
 status: final
 created: 2026-07-04
-updated: 2026-07-04
+updated: 2026-07-06
 altitude: project MVP
 source_prd: ../../prds/prd-xuyenviet-2026-07-04/prd.md
 ---
@@ -48,6 +48,10 @@ Binds: UI, route handlers, server actions, admin, chat, retrieval orchestration,
 Prevents: independent chat/admin/retrieval implementations choosing incompatible service contracts or release paths.
 
 Rule: Build feature modules with server-side interfaces; do not split into services for MVP.
+
+Rule: Keep the repository as a root-level Next.js app for the MVP. Do not move to an `apps/web` or multi-app workspace structure for future mobile support unless a later architecture or correct-course decision explicitly approves that restructure.
+
+Rule: Treat a future mobile app as a new client channel over stable server/API boundaries, not a reason to extract shared packages or change deployable shape during the web MVP.
 
 Seed: create-next-app TypeScript, App Router, React Server Components where useful, route handlers/server actions for mutations.
 
@@ -327,4 +331,5 @@ Production must have:
 - Dedicated self-service privacy dashboard beyond chat/trip deletion.
 - Google Maps integration.
 - Public submissions, credit wallets, payment deposits, reward balances, referral reward calculations, ranking multipliers, reward-to-credit conversion, booking transactions, affiliate automation, and partner transaction flows.
-- Mobile app and service decomposition.
+- Mobile app channel.
+- Service decomposition.
