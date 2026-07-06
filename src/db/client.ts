@@ -1,7 +1,7 @@
 import "server-only";
 
-import { neon } from "@neondatabase/serverless";
-import { drizzle } from "drizzle-orm/neon-http";
+import postgres from "postgres";
+import { drizzle } from "drizzle-orm/postgres-js";
 
 import { getRequiredServerEnv } from "@/server/env";
 
@@ -14,7 +14,7 @@ function getDatabaseUrl() {
 }
 
 function createDb() {
-  return drizzle(neon(getDatabaseUrl()), { schema });
+  return drizzle(postgres(getDatabaseUrl()), { schema });
 }
 
 export function getDb() {

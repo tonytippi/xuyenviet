@@ -56,8 +56,9 @@ development_status:
   1-5-audit-trail-for-protected-mutations: done
   1-6-environment-and-public-launch-safety-baseline: done
   1-7-capture-referral-attribution-at-sign-up: done
-  epic-1-retrospective: optional
+  epic-1-retrospective: done
   epic-2: backlog
+  2-0-introduce-test-framework-and-retroactive-epic-1-coverage: backlog
   2-1-authenticated-ai-ask-chat-shell: backlog
   2-2-create-conversation-and-send-first-message: backlog
   2-3-generate-vietnamese-initial-ai-answer: backlog

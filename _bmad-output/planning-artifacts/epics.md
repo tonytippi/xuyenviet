@@ -520,6 +520,42 @@ So that future referral programs can attribute registrations without adding rewa
 
 Travelers can ask Vietnamese road-trip questions, refine plans across a conversation, and receive useful structured Vietnamese answers with clarifying questions when needed.
 
+### Story 2.0: Introduce Test Framework And Retroactive Coverage For Epic 1 Protected Paths
+
+As a product team,
+I want a server-side test framework with retroactive coverage for Epic 1 protected paths,
+So that Epic 2 features building on auth gates, roles, audit, and env guards rest on verified foundations.
+
+**Acceptance Criteria:**
+
+**Given** the repository has no test framework
+**When** Story 2.0 is implemented
+**Then** Vitest (or equivalent) is configured with a test database separate from dev/production
+**And** Drizzle migrations run against the test database
+**And** `pnpm test` runs the suite without requiring real OAuth credentials or external providers.
+
+**Given** Story 1.2/1.3 auth gate fail-closed behavior
+**When** server-side integration tests exercise unauthenticated AI Ask route and submission
+**Then** tests verify redirect to `/sign-in?next=/ai-ask` and no side effects on blocked paths.
+
+**Given** Story 1.4 role-protected admin area
+**When** tests exercise `/admin` with traveler, operator, and admin roles
+**Then** traveler access is denied server-side and operator/admin access renders.
+
+**Given** Story 1.5 audit trail for protected mutations
+**When** tests exercise the audited mutation wrapper
+**Then** protected changes and audit rows commit together or not at all.
+
+**Given** Story 1.6 environment and public launch safety baseline
+**When** tests exercise env guards with missing, placeholder, and production database URLs
+**Then** guards fail closed on placeholder/localhost/missing secrets and allow valid dev/staging config.
+
+**Given** the deferred-work.md 1.6 entry
+**When** Story 2.0 ships
+**Then** the env-guard test debt entry is closed.
+
+_Dependencies: Must complete before Story 2.2. May run in parallel with Story 2.1._
+
 ### Story 2.1: Authenticated AI Ask Chat Shell
 
 As an authenticated traveler,

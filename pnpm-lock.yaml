@@ -16,13 +16,16 @@ importers:
         version: 1.1.0
       drizzle-orm:
         specifier: ^0.44.5
-        version: 0.44.7(@neondatabase/serverless@1.1.0)
+        version: 0.44.7(@neondatabase/serverless@1.1.0)(postgres@3.4.9)
       next:
         specifier: ^15.3.5
         version: 15.5.20(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       next-auth:
         specifier: 5.0.0-beta.31
         version: 5.0.0-beta.31(next@15.5.20(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react@19.2.7)
+      postgres:
+        specifier: ^3.4.9
+        version: 3.4.9
       react:
         specifier: ^19.1.0
         version: 19.2.7
@@ -2175,6 +2178,10 @@ packages:
     resolution: {integrity: sha512-vuwillviilfKZsg0VGj5R/YwwcHx4SLsIOI/7K6mQkWx+l5cUHTjj5g0AasTBcyXsbfTgrwsUNmVUb5xVwyPwg==}
     engines: {node: ^10 || ^12 || >=14}
 
+  postgres@3.4.9:
+    resolution: {integrity: sha512-GD3qdB0x1z9xgFI6cdRD6xu2Sp2WCOEoe3mtnyB5Ee0XrrL5Pe+e4CCnJrRMnL1zYtRDZmQQVbvOttLnKDLnaw==}
+    engines: {node: '>=12'}
+
   preact-render-to-string@6.5.11:
     resolution: {integrity: sha512-ubnauqoGczeGISiOh6RjX0/cdaF8v/oDXIjO85XALCQjwQP+SB4RDXXtvZ6yTYSjG+PC1QRP2AhPgCEsM2EvUw==}
     peerDependencies:
@@ -3459,9 +3466,10 @@ snapshots:
       esbuild: 0.25.12
       tsx: 4.23.0
 
-  drizzle-orm@0.44.7(@neondatabase/serverless@1.1.0):
+  drizzle-orm@0.44.7(@neondatabase/serverless@1.1.0)(postgres@3.4.9):
     optionalDependencies:
       '@neondatabase/serverless': 1.1.0
+      postgres: 3.4.9
 
   dunder-proto@1.0.1:
     dependencies:
@@ -4416,6 +4424,8 @@ snapshots:
       nanoid: 3.3.15
       picocolors: 1.1.1
       source-map-js: 1.2.1
+
+  postgres@3.4.9: {}
 
   preact-render-to-string@6.5.11(preact@10.24.3):
     dependencies:
