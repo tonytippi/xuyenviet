@@ -44,7 +44,7 @@ so that authenticated AI Ask and future protected features can be implemented co
   - [x] Follow the UX design direction: responsive web, map-paper utility feel, restrained route green/amber tokens, no booking/payment/reward UI.
 - [x] Document required environment variables with safe placeholders. (AC: 2)
   - [x] Add `.env.example` with safe placeholder values only; never commit real secrets.
-  - [x] Include at minimum `DATABASE_URL`, `AUTH_SECRET`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, `OPENAI_API_KEY`, `TAVILY_API_KEY`, and environment marker if used.
+  - [x] Include at minimum `DATABASE_URL`, `AUTH_SECRET`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, `AI_GATEWAY_BASE_URL`, `AI_GATEWAY_API_KEY`, `TAVILY_API_KEY`, and environment marker if used.
   - [x] Document local setup in `README.md` or a dedicated setup doc without overwriting the product overview.
 - [x] Add server-only utility guardrails for future authenticated mutations. (AC: 3)
   - [x] Create a server-only module for future auth/session entrypoint stubs, e.g. `src/server/auth.ts`, using `server-only` or equivalent import guard.
@@ -154,7 +154,7 @@ If `create-next-app` or shadcn generates a different but conventional file name,
 - Do not create Auth.js OAuth routes beyond harmless placeholders/stubs; Story 1.3 owns real Google Login.
 - Do not create users/accounts/sessions/roles tables yet unless required by a chosen Auth.js adapter setup in a later story. Story 1.1 only configures Drizzle migrations.
 - Do not create chat, trip, knowledge, retrieval, provenance, usage, referral, feedback, or audit domain tables in this story.
-- Do not call OpenAI, Tavily, or any AI/search provider.
+- Do not call OpenAI directly, the AI Gateway, Tavily, or any AI/search provider.
 - Do not implement protected AI Ask, admin authorization, referral attribution, audit trail, or data deletion behavior; preserve clear module boundaries for later stories.
 - Do not add booking, payments, rewards, credits, maps, affiliate, or partner transaction UI.
 

@@ -164,7 +164,7 @@ Rules:
 - Deletion copy must say normal UI and retrieval use are removed/disabled; audit metadata may remain only if architecture requires it.
 - Sensitive-data exclusions are not a UX afterthought: when the assistant appears to extract disallowed sensitive data, do not show it as remembered trip context.
 
-[OPEN QUESTION] Exact privacy-policy wording for OpenAI-backed memory/chat processing still needs legal/product approval before public onboarding.
+[OPEN QUESTION] Exact privacy-policy wording for AI Gateway-backed memory/chat processing still needs legal/product approval before public onboarding.
 
 [OPEN QUESTION] Story 3.7 leaves linked project chat delete-vs-detach behavior open. Story creation should decide the user-facing deletion copy before implementation.
 
@@ -278,7 +278,7 @@ Failure: Referral code invalid. Sign-in still works normally and no reward/error
 
 | Question | Impact | Owner / Next Step |
 |---|---|---|
-| Exact privacy-policy wording for OpenAI-backed memory/chat processing | Public onboarding and storage notice copy | Product/legal before public launch |
+| Exact privacy-policy wording for AI Gateway-backed memory/chat processing | Public onboarding and storage notice copy | Product/legal before public launch |
 | Trip project deletion behavior for linked chats: delete or detach | Story 3.7 UX copy and implementation | Decide during `bmad-create-story` validation |
 | Whether admin review is required to be fully mobile-optimized in MVP | Admin layout scope | Sprint planning/story scoping |
 | Final UI system choice if not shadcn/ui | Component implementation contract | Confirm during app foundation story |

@@ -20,8 +20,8 @@
 
 ## Provisional Assumptions For Architecture
 
-- Preferred AI provider: OpenAI.
-- OpenAI must be configured, where available, so project/user data is not used to train provider models.
+- Preferred AI access path: OpenAI-compatible AI Gateway, not direct OpenAI API calls.
+- The AI Gateway must be configured with its base URL and API key per environment; downstream model/provider data-use settings must ensure project/user data is not used to train provider models where configurable.
 - Web search fallback is required in MVP because curated data starts sparse.
 - Web search provider is an architecture decision, but must support Vietnamese, source URLs/titles/snippets, provenance capture, and official/provider-source preference.
 - Google Maps integration is post-MVP.
@@ -42,6 +42,6 @@
 ## Still Open
 
 - Exact web search provider/mechanism.
-- Exact privacy-policy wording for OpenAI-backed memory and chat processing.
+- Exact privacy-policy wording for AI Gateway-backed memory and chat processing.
 - Whether source URLs are always visible by default or hidden behind expandable details.
 - Detailed Facebook content reuse policy beyond provenance and non-official labeling.

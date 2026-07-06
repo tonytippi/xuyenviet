@@ -69,7 +69,7 @@ Internal owner or future small operations team member who collects travel inform
 - Web search fallback for missing or freshness-sensitive information.
 - Source and confidence display in AI answers.
 - Initial content focus on Hanoi-to-HCMC road-trip planning.
-- OpenAI-backed AI behavior. [ASSUMPTION: OpenAI is acceptable for public MVP data processing under the project's privacy expectations.]
+- OpenAI-compatible AI Gateway-backed AI behavior. [ASSUMPTION: Gateway-routed model processing is acceptable for public MVP data processing under the project's privacy expectations; direct OpenAI API calls are not used.]
 - Basic data controls: users can delete a chat session or trip project, which removes the associated messages and trip context from normal use.
 - AI usage tracking for authenticated AI requests, so future credit-based pricing can be introduced without changing the AI orchestration flow.
 
@@ -304,5 +304,5 @@ The public MVP should focus on the Hanoi-to-HCMC road-trip corridor. Initial kno
 
 - OQ-1: What web search provider or mechanism will be used?
 - OQ-2: Should users see full source URLs directly, summarized source labels, or both?
-- OQ-3: What exact privacy-policy wording is required for OpenAI-backed chat and trip-project processing?
+- OQ-3: What exact privacy-policy wording is required for AI Gateway-backed chat and trip-project processing?
 - OQ-4: How should operators handle Facebook content reuse constraints beyond retaining provenance?

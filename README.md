@@ -39,6 +39,7 @@ Requirements:
 - Node.js 20.9 or newer
 - pnpm 10.x
 - PostgreSQL connection string for database migration commands
+- OpenAI-compatible AI Gateway URL and API key for future AI provider calls
 
 Setup:
 

@@ -170,13 +170,13 @@ NFR-7: The system shall be designed so Google Maps integration, public submissio
 
 - Validate web search fallback quality across candidate providers or mechanisms before relying on it for public MVP: Vietnamese corridor queries, official/provider preference, URL/title/snippet/date availability, cost, rate limits, and failure behavior.
 
-- Keep OpenAI access behind an adapter for chat generation, extraction, embeddings, and evaluation.
+- Keep OpenAI-compatible AI Gateway access behind an adapter for chat generation, extraction, embeddings, and evaluation; do not call OpenAI directly.
 
 - Every model call must declare purpose, model, prompt version, input source bundle, and output schema expectation where applicable.
 
 - Persist AI usage events for authenticated AI requests with user/context references, purpose, provider/model, timestamp, latency, success/failure status, and available usage/cost metadata, without creating credit ledger behavior.
 
-- Block public MVP launch until OpenAI data-processing settings and privacy notice text are verified so project data is not used for provider training where configurable.
+- Block public MVP launch until AI Gateway/provider data-processing settings and privacy notice text are verified so project data is not used for provider training where configurable.
 
 - Persist answer provenance row-per-source-item in assistant_response_provenance and render UI source/confidence from stored provenance, not answer text parsing.
 

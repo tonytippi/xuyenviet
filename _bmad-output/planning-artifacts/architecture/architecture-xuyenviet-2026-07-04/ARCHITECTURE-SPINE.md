@@ -29,8 +29,8 @@ flowchart LR
   Orchestrator --> ChatContext[Chat + Trip Context]
   Orchestrator --> Retrieval[Retrieval]
   Orchestrator --> Search[Web Search Adapter]
-  Orchestrator --> OpenAI[OpenAI Adapter]
-  Knowledge --> OpenAI
+  Orchestrator --> AIGateway[OpenAI-Compatible AI Gateway Adapter]
+  Knowledge --> AIGateway
   ChatContext --> DB[(PostgreSQL + pgvector)]
   Retrieval --> DB
   Knowledge --> DB
@@ -158,7 +158,7 @@ sequenceDiagram
   participant ChatContext
   participant Retrieval
   participant Search
-  participant OpenAI
+  participant AIGateway as AI Gateway
   participant DB
   User->>Chat: Vietnamese question
   Chat->>Orchestrator: authenticated request
@@ -169,8 +169,8 @@ sequenceDiagram
     Orchestrator->>Search: normalized web search
     Search->>DB: persist web result provenance
   end
-  Orchestrator->>OpenAI: source bundle + answer contract
-  OpenAI-->>Orchestrator: Vietnamese answer + provenance map
+  Orchestrator->>AIGateway: source bundle + answer contract
+  AIGateway-->>Orchestrator: Vietnamese answer + provenance map
   Orchestrator->>DB: store response ledger
   Orchestrator-->>Chat: answer with sources and confidence
 ```
@@ -187,9 +187,9 @@ Seed: Tavily Search API for MVP fallback because it returns title, URL, content,
 
 Rule: Tavily remains provisional until an architecture spike validates Vietnamese corridor queries, official/provider preference, URL/title/snippet/date availability, rate limits, and failure behavior.
 
-### AD-10: OpenAI Access Is Adapter-Based And Source-Bundled
+### AD-10: AI Gateway Access Is Adapter-Based And Source-Bundled
 
-Binds: chat generation, extraction, embeddings, and evaluation calls to an OpenAI provider adapter.
+Binds: chat generation, extraction, embeddings, and evaluation calls to an OpenAI-compatible AI Gateway provider adapter.
 
 Prevents: direct model calls that invent source labels, write memory directly, or bypass audit metadata.
 
@@ -197,7 +197,7 @@ Rule: Every model call declares purpose, model, prompt version, input source bun
 
 Rule: AI provider adapter calls must return or emit usage metadata when available, including model, token counts, provider request ID if available, latency, and failure status. The Usage module persists this metadata without storing raw prompt/response content beyond existing message/provenance records.
 
-Rule: OpenAI usage must be configured, where available, so submitted project data is not used for provider model training. Public MVP launch is blocked until provider data-processing setting and privacy notice text are verified.
+Rule: Direct OpenAI API calls are not used. AI calls go through the OpenAI-compatible AI Gateway configured by `AI_GATEWAY_BASE_URL` and `AI_GATEWAY_API_KEY` per environment. Public MVP launch is blocked until gateway/provider data-processing settings and privacy notice text are verified so submitted project data is not used for provider model training where configurable.
 
 ### AD-11: Answer Provenance Is Persisted, Not UI-Derived
 
