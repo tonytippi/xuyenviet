@@ -30,10 +30,12 @@ function buildHref(path: string, params: Record<string, string | undefined>) {
 
 export default async function SignInPage({ searchParams }: SignInPageProps) {
   const params = await searchParams;
-  const nextPath = getFirstParam(params?.next) === "/ai-ask" ? "/ai-ask" : undefined;
+  const requestedNextPath = getFirstParam(params?.next);
+  const nextPath = requestedNextPath === "/ai-ask" || requestedNextPath === "/admin" ? requestedNextPath : undefined;
   const referralCode = getFirstParam(params?.ref);
   const hasAuthError = Boolean(getFirstParam(params?.error));
   const aiAskHref = buildHref("/ai-ask", { ref: referralCode });
+  const gateMessage = nextPath === "/admin" ? "Đăng nhập để vào khu vực quản trị." : "Đăng nhập để hỏi AI.";
 
   return (
     <main className="min-h-screen px-5 py-6 sm:px-8 lg:px-12">
@@ -55,7 +57,7 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
           </p>
           {nextPath ? (
             <p className="mt-5 max-w-2xl rounded-2xl border border-[#c47a24]/45 bg-[#fff8ec] px-5 py-4 text-base leading-7 text-[#5d3f1d]">
-              Đăng nhập để hỏi AI. Cổng AI Ask đã chặn truy cập vì chưa có phiên đăng nhập hợp lệ.
+              {gateMessage} Cổng bảo vệ đã chặn truy cập vì chưa có phiên đăng nhập hợp lệ.
             </p>
           ) : null}
           {hasAuthError ? (

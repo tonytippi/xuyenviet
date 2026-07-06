@@ -3,8 +3,8 @@
 import { signIn, signOut } from "@/auth";
 
 function getSafeRedirectPath(value: FormDataEntryValue | null) {
-  if (value === "/ai-ask") {
-    return "/ai-ask";
+  if (value === "/ai-ask" || value === "/admin") {
+    return value;
   }
 
   return "/ai-ask";

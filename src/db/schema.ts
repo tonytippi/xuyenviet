@@ -1,4 +1,8 @@
-import { integer, pgTable, primaryKey, text, timestamp } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import { check, index, integer, pgTable, primaryKey, text, timestamp } from "drizzle-orm/pg-core";
+
+export const userRoleValues = ["traveler", "operator", "admin"] as const;
+export type UserRole = (typeof userRoleValues)[number];
 
 export const users = pgTable("users", {
   id: text("id")
@@ -56,9 +60,25 @@ export const verificationTokens = pgTable(
   ],
 );
 
+export const userRoles = pgTable(
+  "user_roles",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    role: text("role").$type<UserRole>().notNull(),
+  },
+  (userRole) => [
+    primaryKey({ columns: [userRole.userId, userRole.role] }),
+    index("user_roles_user_id_idx").on(userRole.userId),
+    check("user_roles_role_check", sql`${userRole.role} in ('traveler', 'operator', 'admin')`),
+  ],
+);
+
 export const schema = {
   users,
   accounts,
   sessions,
   verificationTokens,
+  userRoles,
 };
