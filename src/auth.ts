@@ -4,8 +4,10 @@ import Google from "next-auth/providers/google";
 
 import { getDb } from "@/db/client";
 import { accounts, sessions, users, verificationTokens } from "@/db/schema";
+import { assertProductionLaunchEnv } from "@/server/env";
 
 export const { handlers, auth, signIn, signOut } = NextAuth(() => ({
+  ...assertAuthEnvironment(),
   adapter: DrizzleAdapter(getDb(), {
     usersTable: users,
     accountsTable: accounts,
@@ -30,3 +32,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth(() => ({
     },
   },
 }));
+
+function assertAuthEnvironment() {
+  assertProductionLaunchEnv();
+
+  return {};
+}

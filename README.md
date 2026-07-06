@@ -65,3 +65,16 @@ pnpm db:migrate
 ```
 
 `db:generate` and `db:migrate` use `drizzle.config.ts` and `DATABASE_URL`. Story 1.1 intentionally configures Drizzle without adding domain tables.
+
+## Public launch safety
+
+Before public user onboarding, verify each environment separately:
+
+- `APP_ENV` is set to `local`, `staging`, or `production`; staging and production do not share databases, OAuth clients, provider keys, or secret stores.
+- Production `DATABASE_URL`, `AUTH_SECRET`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, `AUTH_URL`, `AI_GATEWAY_BASE_URL`, `AI_GATEWAY_API_KEY`, and `TAVILY_API_KEY` are real values, not `.env.example` placeholders.
+- Production database URLs do not point to localhost or a shared development database.
+- Google OAuth callback URLs are configured for the deployed host, including `/api/auth/callback/google`.
+- At least one initial admin/operator user role is created in PostgreSQL before operator workflows are needed.
+- AI Gateway, search provider, and any model/provider privacy settings are checked so project data is not used for provider training where configurable.
+- PostgreSQL backup and restore expectations are documented for the chosen hosted database, including who can restore and how restore is verified.
+- Local bypasses or development-only shortcuts are not enabled in production defaults.
