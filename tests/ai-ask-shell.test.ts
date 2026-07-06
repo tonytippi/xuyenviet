@@ -69,6 +69,25 @@ describe("AI Ask authenticated shell", () => {
   });
 });
 
+describe("AI Ask structured answer rendering", () => {
+  test("renders recognized assistant headings as scannable sections without source chips", async () => {
+    const { AssistantMessageContent } = await import("@/features/ai/ai-ask-composer");
+    const assistantContent = ["## Kế hoạch gợi ý:", "- Ngày 1: đi nhẹ và nghỉ sớm.", "", "**Nguồn và độ tin cậy:**", "Đây là gợi ý tổng quát, chưa dùng nguồn tuyển chọn.", "", "1. Câu hỏi tiếp theo:", "Bạn đi cùng trẻ nhỏ không?"].join("\n");
+    const html = renderToStaticMarkup(
+      AssistantMessageContent({
+        content: assistantContent,
+      }),
+    );
+
+    expect(html).toContain("## Kế hoạch gợi ý:");
+    expect(html).toContain("**Nguồn và độ tin cậy:**");
+    expect(html).toContain("1. Câu hỏi tiếp theo:");
+    expect(html).toContain("Đây là gợi ý tổng quát, chưa dùng nguồn tuyển chọn.");
+    expect(html).not.toContain("source-chip");
+    expect(html).not.toContain("[1]");
+  });
+});
+
 describe("AI Ask action gate", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -118,6 +137,16 @@ describe("AI Ask action gate", () => {
 
   test("creates an owned conversation, first user message, assistant answer, and successful usage event", async () => {
     await createTestUser("user-1");
+    const assistantContent = [
+      "Kế hoạch gợi ý:",
+      "Bạn có thể đi theo trục Hà Nội - Huế trong 5 ngày và nên chừa thời gian nghỉ giữa chặng.",
+      "",
+      "Nguồn và độ tin cậy:",
+      "Đây là gợi ý tổng quát, chưa dùng nguồn tuyển chọn.",
+      "",
+      "Câu hỏi tiếp theo:",
+      "Bạn muốn lái tối đa bao nhiêu giờ mỗi ngày?",
+    ].join("\n");
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -125,7 +154,7 @@ describe("AI Ask action gate", () => {
           choices: [
             {
               message: {
-                content: "Bạn có thể đi theo trục Hà Nội - Huế trong 5 ngày và nên chừa thời gian nghỉ giữa chặng.",
+                content: assistantContent,
               },
             },
           ],
@@ -156,7 +185,7 @@ describe("AI Ask action gate", () => {
     expect(result.conversationId).toBeTruthy();
     expect(result.userMessage.id).toBeTruthy();
     expect(result.assistantMessage.id).toBeTruthy();
-    expect(result.assistantMessage.content).toBe("Bạn có thể đi theo trục Hà Nội - Huế trong 5 ngày và nên chừa thời gian nghỉ giữa chặng.");
+    expect(result.assistantMessage.content).toBe(assistantContent);
     expect(savedConversations).toHaveLength(1);
     expect(savedConversations[0].id).toBe(result.conversationId);
     expect(savedConversations[0].createdAt).toBeInstanceOf(Date);
@@ -172,7 +201,7 @@ describe("AI Ask action gate", () => {
       id: result.assistantMessage.id,
       userId: "user-1",
       role: "assistant",
-      content: result.assistantMessage.content,
+      content: assistantContent,
     });
     expect(savedUsageEvents).toHaveLength(1);
     expect(savedUsageEvents[0]).toMatchObject({
@@ -183,7 +212,7 @@ describe("AI Ask action gate", () => {
       purpose: "ai_ask_initial_answer",
       provider: "ai_gateway",
       model: "test-model",
-      promptVersion: "ai_ask_initial_v1",
+      promptVersion: "ai_ask_initial_v2",
       status: "success",
       errorCode: null,
       promptTokens: 100,
@@ -193,8 +222,17 @@ describe("AI Ask action gate", () => {
     expect(savedUsageEvents[0].latencyMs).toBeGreaterThanOrEqual(0);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0][0]).toBe("https://test-gateway.example/chat/completions");
-    expect(JSON.stringify(fetchMock.mock.calls[0][1])).toContain("Tiếng Việt");
-    expect(JSON.stringify(fetchMock.mock.calls[0][1])).toContain("1-3 câu hỏi tiếp theo ngắn gọn");
+    const requestJson = JSON.stringify(fetchMock.mock.calls[0][1]);
+    expect(requestJson).toContain("Tiếng Việt");
+    expect(requestJson).toContain("Kế hoạch gợi ý");
+    expect(requestJson).toContain("Vì sao nên đi như vậy");
+    expect(requestJson).toContain("Lưu ý thực tế");
+    expect(requestJson).toContain("Cảnh báo cần kiểm tra");
+    expect(requestJson).toContain("Nguồn và độ tin cậy");
+    expect(requestJson).toContain("Bước tiếp theo");
+    expect(requestJson).toContain("1-3 câu hỏi tiếp theo ngắn gọn");
+    expect(requestJson).toContain("không tạo citation như [1]");
+    expect(requestJson).toContain("tránh khẳng định XuyenViet có dữ liệu địa phương đã kiểm chứng");
   });
 
   test("keeps the user message, records failed usage, and creates no assistant message when provider fails", async () => {
@@ -226,7 +264,7 @@ describe("AI Ask action gate", () => {
       purpose: "ai_ask_initial_answer",
       provider: "ai_gateway",
       model: "xuyenviet-roadtrip-v1",
-      promptVersion: "ai_ask_initial_v1",
+      promptVersion: "ai_ask_initial_v2",
       status: "failure",
       errorCode: "gateway_http_error",
     });

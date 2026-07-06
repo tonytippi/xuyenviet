@@ -12,6 +12,71 @@ type DisplayMessage = {
   content: string;
 };
 
+const assistantSectionHeadings = new Set([
+  "Kế hoạch gợi ý",
+  "Vì sao nên đi như vậy",
+  "Lưu ý thực tế",
+  "Cảnh báo cần kiểm tra",
+  "Nguồn và độ tin cậy",
+  "Bước tiếp theo",
+  "Câu hỏi tiếp theo",
+]);
+
+function normalizeAssistantHeading(line: string) {
+  return line
+    .trim()
+    .replace(/^#{1,6}\s+/, "")
+    .replace(/^\d+[.)]\s+/, "")
+    .replace(/^[-*]\s+/, "")
+    .replace(/^\*\*(.*)\*\*$/, "$1")
+    .replace(/:$/, "")
+    .trim();
+}
+
+function splitAssistantContent(content: string) {
+  const sections: { heading?: string; body: string[] }[] = [];
+
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    const heading = normalizeAssistantHeading(trimmed);
+
+    if (assistantSectionHeadings.has(heading)) {
+      sections.push({ heading: trimmed, body: [] });
+      continue;
+    }
+
+    if (sections.length === 0) {
+      sections.push({ body: [] });
+    }
+
+    sections[sections.length - 1].body.push(line);
+  }
+
+  return sections.map((section) => ({
+    ...section,
+    body: section.body.join("\n").trim(),
+  })).filter((section) => section.heading || section.body);
+}
+
+export function AssistantMessageContent({ content }: { content: string }) {
+  const sections = splitAssistantContent(content);
+
+  if (sections.length <= 1 && !sections[0]?.heading) {
+    return <p className="whitespace-pre-wrap text-base leading-7">{content}</p>;
+  }
+
+  return (
+    <div className="space-y-4">
+      {sections.map((section, index) => (
+        <section className="rounded-2xl border border-[#eadfc8] bg-white/70 p-4" key={`${section.heading || "intro"}-${index}`}>
+          {section.heading ? <h3 className="text-sm font-bold uppercase tracking-[0.12em] text-[#1f5f46]">{section.heading}</h3> : null}
+          {section.body ? <p className="mt-2 whitespace-pre-wrap text-base leading-7">{section.body}</p> : null}
+        </section>
+      ))}
+    </div>
+  );
+}
+
 export function AiAskComposer() {
   const [question, setQuestion] = useState("");
   const [status, setStatus] = useState("Nhập câu hỏi về chuyến đi đường bộ của bạn.");
@@ -107,7 +172,7 @@ export function AiAskComposer() {
               <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] opacity-75">
                 {message.role === "assistant" ? "Trợ lý XuyenViet" : "Bạn"}
               </p>
-              <p className="whitespace-pre-wrap text-base leading-7">{message.content}</p>
+              {message.role === "assistant" ? <AssistantMessageContent content={message.content} /> : <p className="whitespace-pre-wrap text-base leading-7">{message.content}</p>}
             </article>
           ))}
         </section>
