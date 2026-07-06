@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { check, index, integer, pgTable, primaryKey, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, check, index, integer, pgTable, primaryKey, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 
 export const userRoleValues = ["traveler", "operator", "admin"] as const;
 export type UserRole = (typeof userRoleValues)[number];
@@ -106,6 +106,52 @@ export const auditEvents = pgTable(
   ],
 );
 
+export const referralCodes = pgTable(
+  "referral_codes",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    code: text("code").notNull(),
+    referrerUserId: text("referrer_user_id").references(() => users.id, { onDelete: "set null" }),
+    active: boolean("active").default(true).notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (referralCode) => [
+    uniqueIndex("referral_codes_code_idx").on(referralCode.code),
+    index("referral_codes_active_idx").on(referralCode.active),
+    index("referral_codes_referrer_user_id_idx").on(referralCode.referrerUserId),
+    check("referral_codes_code_format_check", sql`${referralCode.code} ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'`),
+  ],
+);
+
+export const referralAttributions = pgTable(
+  "referral_attributions",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    referralCodeId: text("referral_code_id")
+      .notNull()
+      .references(() => referralCodes.id, { onDelete: "restrict" }),
+    referrerUserId: text("referrer_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (referralAttribution) => [
+    uniqueIndex("referral_attributions_user_id_idx").on(referralAttribution.userId),
+    index("referral_attributions_referral_code_id_idx").on(referralAttribution.referralCodeId),
+    index("referral_attributions_referrer_user_id_idx").on(referralAttribution.referrerUserId),
+    index("referral_attributions_created_at_idx").on(referralAttribution.createdAt),
+    check(
+      "referral_attributions_no_self_referral_check",
+      sql`${referralAttribution.referrerUserId} is null or ${referralAttribution.referrerUserId} <> ${referralAttribution.userId}`,
+    ),
+  ],
+);
+
 export const schema = {
   users,
   accounts,
@@ -113,4 +159,6 @@ export const schema = {
   verificationTokens,
   userRoles,
   auditEvents,
+  referralCodes,
+  referralAttributions,
 };

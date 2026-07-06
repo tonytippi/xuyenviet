@@ -4,6 +4,7 @@ import Google from "next-auth/providers/google";
 
 import { getDb } from "@/db/client";
 import { accounts, sessions, users, verificationTokens } from "@/db/schema";
+import { captureFirstTouchReferralAttribution } from "@/features/referrals/attribution";
 import { assertProductionLaunchEnv } from "@/server/env";
 
 export const { handlers, auth, signIn, signOut } = NextAuth(() => ({
@@ -29,6 +30,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth(() => ({
       }
 
       return session;
+    },
+  },
+  events: {
+    async signIn({ user, isNewUser }) {
+      if (isNewUser && user.id) {
+        await captureFirstTouchReferralAttribution(user.id);
+      }
     },
   },
 }));
