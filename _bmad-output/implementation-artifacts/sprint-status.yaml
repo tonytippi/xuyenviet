@@ -59,7 +59,7 @@ development_status:
   epic-1-retrospective: done
   epic-2: in-progress
   2-0-introduce-test-framework-and-retroactive-epic-1-coverage: done
-  2-1-authenticated-ai-ask-chat-shell: backlog
+  2-1-authenticated-ai-ask-chat-shell: done
   2-2-create-conversation-and-send-first-message: backlog
   2-3-generate-vietnamese-initial-ai-answer: backlog
   2-4-structured-road-trip-answer-format: backlog

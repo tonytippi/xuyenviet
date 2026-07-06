@@ -56,6 +56,11 @@ describe("safe sign-in redirects", () => {
 });
 
 describe("AI Ask route gate", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+  });
+
   test("redirects unauthenticated travelers to sign-in before rendering protected content", async () => {
     vi.doMock("next/navigation", () => ({
       redirect: vi.fn((url: string) => {
@@ -74,6 +79,46 @@ describe("AI Ask route gate", () => {
     await expect(AiAskPage({ searchParams: Promise.resolve({}) })).rejects.toThrow("NEXT_REDIRECT:/sign-in?next=%2Fai-ask");
   });
 
+  test("preserves referral code when redirecting unauthenticated travelers", async () => {
+    vi.doMock("next/navigation", () => ({
+      redirect: vi.fn((url: string) => {
+        throw new Error(`NEXT_REDIRECT:${url}`);
+      }),
+    }));
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue(null),
+    }));
+    vi.doMock("@/features/auth/actions", () => ({
+      signOutCurrentUser: vi.fn(),
+    }));
+
+    const { default: AiAskPage } = await import("@/app/ai-ask/page");
+
+    await expect(AiAskPage({ searchParams: Promise.resolve({ ref: "abc" }) })).rejects.toThrow(
+      "NEXT_REDIRECT:/sign-in?next=%2Fai-ask&ref=abc",
+    );
+  });
+
+  test("preserves the first non-empty referral code when redirecting unauthenticated travelers", async () => {
+    vi.doMock("next/navigation", () => ({
+      redirect: vi.fn((url: string) => {
+        throw new Error(`NEXT_REDIRECT:${url}`);
+      }),
+    }));
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue(null),
+    }));
+    vi.doMock("@/features/auth/actions", () => ({
+      signOutCurrentUser: vi.fn(),
+    }));
+
+    const { default: AiAskPage } = await import("@/app/ai-ask/page");
+
+    await expect(AiAskPage({ searchParams: Promise.resolve({ ref: ["", "abc"] }) })).rejects.toThrow(
+      "NEXT_REDIRECT:/sign-in?next=%2Fai-ask&ref=abc",
+    );
+  });
+
   test("renders protected content only for authenticated travelers", async () => {
     vi.doMock("@/server/auth", () => ({
       getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
@@ -84,7 +129,10 @@ describe("AI Ask route gate", () => {
 
     const { default: AiAskPage } = await import("@/app/ai-ask/page");
     const element = await AiAskPage({ searchParams: Promise.resolve({}) });
+    const html = renderToStaticMarkup(element);
 
-    expect(renderToStaticMarkup(element)).toContain("tony@example.com");
+    expect(html).toContain("tony@example.com");
+    expect(html).toContain("Hỏi trợ lý chuyến đi Việt Nam");
+    expect(html).toContain("Câu hỏi của bạn");
   });
 });
