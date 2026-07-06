@@ -56,7 +56,7 @@ export function AiAskComposer() {
 
     try {
       await submitAiAsk({ question: trimmedQuestion });
-      setStatus("Câu hỏi hợp lệ. Lưu hội thoại và câu trả lời AI sẽ được nối ở các story tiếp theo.");
+      setStatus("Đã lưu hội thoại và tin nhắn đầu tiên. Câu trả lời AI sẽ được nối ở story tiếp theo.");
     } catch {
       setStatus("Không thể gửi câu hỏi lúc này. Hãy kiểm tra đăng nhập và thử lại.");
     } finally {

@@ -1,11 +1,14 @@
 import { sql } from "drizzle-orm";
-import { boolean, check, index, integer, pgTable, primaryKey, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { boolean, check, foreignKey, index, integer, pgTable, primaryKey, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 
 export const userRoleValues = ["traveler", "operator", "admin"] as const;
 export type UserRole = (typeof userRoleValues)[number];
 
 export const auditOperationValues = ["access_check", "create", "update", "delete", "archive", "approve"] as const;
 export type AuditOperation = (typeof auditOperationValues)[number];
+
+export const messageRoleValues = ["user", "assistant"] as const;
+export type MessageRole = (typeof messageRoleValues)[number];
 
 export const users = pgTable("users", {
   id: text("id")
@@ -152,6 +155,55 @@ export const referralAttributions = pgTable(
   ],
 );
 
+export const conversations = pgTable(
+  "conversations",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (conversation) => [
+    uniqueIndex("conversations_id_user_id_idx").on(conversation.id, conversation.userId),
+    index("conversations_user_id_updated_at_idx").on(conversation.userId, conversation.updatedAt),
+    index("conversations_user_id_created_at_idx").on(conversation.userId, conversation.createdAt),
+  ],
+);
+
+export const messages = pgTable(
+  "messages",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    role: text("role").$type<MessageRole>().notNull(),
+    content: text("content").notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (message) => [
+    foreignKey({
+      columns: [message.conversationId, message.userId],
+      foreignColumns: [conversations.id, conversations.userId],
+      name: "messages_conversation_owner_fk",
+    }).onDelete("cascade"),
+    index("messages_conversation_id_created_at_idx").on(message.conversationId, message.createdAt),
+    index("messages_user_id_created_at_idx").on(message.userId, message.createdAt),
+    check("messages_role_check", sql`${message.role} in ('user', 'assistant')`),
+    check("messages_content_not_empty_check", sql`length(btrim(${message.content})) > 0`),
+    check("messages_user_content_length_check", sql`${message.role} <> 'user' or char_length(${message.content}) <= 2000`),
+  ],
+);
+
 export const schema = {
   users,
   accounts,
@@ -161,4 +213,6 @@ export const schema = {
   auditEvents,
   referralCodes,
   referralAttributions,
+  conversations,
+  messages,
 };
