@@ -1,6 +1,20 @@
 const routeSegments = ["Hà Nội", "Ninh Bình", "Đà Nẵng", "Đà Lạt", "TP. HCM"];
 
-export default function Home() {
+type HomeProps = {
+  searchParams?: Promise<{
+    ref?: string | string[];
+  }>;
+};
+
+function getFirstParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+export default async function Home({ searchParams }: HomeProps) {
+  const params = await searchParams;
+  const referralCode = getFirstParam(params?.ref);
+  const signInHref = referralCode ? `/sign-in?ref=${encodeURIComponent(referralCode)}` : "/sign-in";
+
   return (
     <main className="min-h-screen px-5 py-6 sm:px-8 lg:px-12">
       <section className="mx-auto grid min-h-[calc(100vh-3rem)] max-w-6xl gap-8 rounded-[2rem] border border-[#d8c9ad] bg-[#fbf7ed]/90 p-6 shadow-[0_24px_80px_rgba(41,33,18,0.14)] sm:p-8 lg:grid-cols-[1.04fr_0.96fr] lg:p-10">
@@ -20,10 +34,10 @@ export default function Home() {
           <div className="grid gap-3 sm:grid-cols-2">
             <a
               className="rounded-2xl bg-[#1f5f46] px-5 py-4 text-center text-base font-semibold text-white shadow-[0_12px_30px_rgba(31,95,70,0.28)] transition hover:bg-[#194d39] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]"
-              href="#ai-ask"
-              aria-label="Mở cổng hỏi AI Ask, tính năng đang chuẩn bị"
+              href={signInHref}
+              aria-label="Đến trang đăng nhập Google để hỏi AI Ask"
             >
-              Đăng nhập để hỏi AI
+              Đăng nhập Google để hỏi AI
             </a>
             <a
               className="rounded-2xl border border-[#c47a24]/45 bg-[#fff8ec] px-5 py-4 text-center text-base font-semibold text-[#8c4f13] transition hover:bg-[#fff1d8] focus:outline-none focus:ring-4 focus:ring-[#e5bd82]"
@@ -68,7 +82,7 @@ export default function Home() {
           <div className="rounded-[1.5rem] border border-dashed border-[#c47a24]/60 bg-[#fff8ec] p-5" id="ai-ask">
             <p className="text-sm font-semibold text-[#8c4f13]">Trạng thái MVP</p>
             <p className="mt-2 text-base leading-7 text-[#4f625a]">
-              Đăng nhập Google và AI Ask sẽ được kích hoạt trong các story tiếp theo. Trang này là lối vào công khai không yêu cầu xác thực.
+              Google là lối vào chính để dùng AI Ask. Trang đăng nhập hiện là bước giới thiệu công khai; đăng nhập Google thật sẽ được kích hoạt ở story tiếp theo.
             </p>
           </div>
         </div>
