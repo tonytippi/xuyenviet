@@ -36,7 +36,7 @@ This repository now contains the public MVP web app foundation.
 
 Requirements:
 
-- Node.js 20.9 or newer
+- Node.js 20.19 or newer
 - pnpm 10.x
 - PostgreSQL connection string for database migration commands
 - OpenAI-compatible AI Gateway URL and API key for future AI provider calls
@@ -56,6 +56,21 @@ pnpm lint
 pnpm typecheck
 pnpm build
 ```
+
+Testing:
+
+```bash
+pnpm test
+pnpm test:run
+```
+
+The integration test suite uses `DATABASE_URL_TEST`, not `DATABASE_URL`. Create a separate local test database before running the suite, for example:
+
+```sql
+CREATE DATABASE xuyenviet_test;
+```
+
+Set `DATABASE_URL_TEST` in `.env` or `.env.local` so it points to that test database. The Vitest global setup runs Drizzle migrations against the test database automatically. Tests use fake OAuth, AI Gateway, and Tavily values and must not require real provider credentials.
 
 Database scripts:
 

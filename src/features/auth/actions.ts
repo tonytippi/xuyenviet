@@ -2,14 +2,7 @@
 
 import { signIn, signOut } from "@/auth";
 import { storePendingReferralCode } from "@/features/referrals/attribution";
-
-function getSafeRedirectPath(value: FormDataEntryValue | null) {
-  if (value === "/ai-ask" || value === "/admin") {
-    return value;
-  }
-
-  return "/ai-ask";
-}
+import { getSafeRedirectPath } from "./redirects";
 
 export async function signInWithGoogle(formData: FormData) {
   await storePendingReferralCode(formData.get("ref"));
