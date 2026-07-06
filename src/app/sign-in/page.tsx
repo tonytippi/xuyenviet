@@ -1,9 +1,12 @@
 import Link from "next/link";
 
+import { signInWithGoogle } from "@/features/auth/actions";
+
 type SignInPageProps = {
   searchParams?: Promise<{
     next?: string | string[];
     ref?: string | string[];
+    error?: string | string[];
   }>;
 };
 
@@ -29,6 +32,7 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
   const params = await searchParams;
   const nextPath = getFirstParam(params?.next) === "/ai-ask" ? "/ai-ask" : undefined;
   const referralCode = getFirstParam(params?.ref);
+  const hasAuthError = Boolean(getFirstParam(params?.error));
   const aiAskHref = buildHref("/ai-ask", { ref: referralCode });
 
   return (
@@ -54,18 +58,26 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
               Đăng nhập để hỏi AI. Cổng AI Ask đã chặn truy cập vì chưa có phiên đăng nhập hợp lệ.
             </p>
           ) : null}
+          {hasAuthError ? (
+            <p className="mt-5 max-w-2xl rounded-2xl border border-[#b94a48]/45 bg-[#fff1ee] px-5 py-4 text-base leading-7 text-[#71322d]">
+              Đăng nhập Google chưa hoàn tất. Vui lòng thử lại hoặc kiểm tra cấu hình OAuth nếu bạn đang chạy môi trường phát triển.
+            </p>
+          ) : null}
         </div>
 
         <div className="grid gap-4 rounded-[1.5rem] border border-dashed border-[#c47a24]/60 bg-[#fff8ec] p-5 sm:p-6">
-          <button
-            className="min-h-12 cursor-not-allowed rounded-2xl bg-[#1f5f46]/70 px-5 py-4 text-center text-base font-semibold text-white shadow-[0_12px_30px_rgba(31,95,70,0.18)] disabled:opacity-80"
-            type="button"
-            disabled
-          >
-            Tiếp tục với Google
-          </button>
+          <form action={signInWithGoogle}>
+            <input name="next" type="hidden" value={nextPath ?? "/ai-ask"} />
+            {referralCode ? <input name="ref" type="hidden" value={referralCode} /> : null}
+            <button
+              className="min-h-12 w-full rounded-2xl bg-[#1f5f46] px-5 py-4 text-center text-base font-semibold text-white shadow-[0_12px_30px_rgba(31,95,70,0.22)] transition hover:bg-[#194d39] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]"
+              type="submit"
+            >
+              Tiếp tục với Google
+            </button>
+          </form>
           <p className="text-sm leading-6 text-[#5d6f67]">
-            Nút này chưa gọi OAuth. Đăng nhập Google thật, cấu hình nhà cung cấp và phiên đăng nhập sẽ được triển khai trong Story 1.3.
+            XuyenViet dùng Auth.js để mở OAuth Google và lưu phiên đăng nhập trong PostgreSQL. Không có kiểm tra allowlist email cho người dùng thường.
           </p>
           <Link
             className="rounded-2xl border border-[#d8c9ad] bg-white/75 px-5 py-4 text-center text-base font-semibold text-[#17342c] transition hover:bg-white focus:outline-none focus:ring-4 focus:ring-[#e5bd82]"

@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 
+import { signOutCurrentUser } from "@/features/auth/actions";
 import { getAuthenticatedSession } from "@/server/auth";
 
 type AiAskPageProps = {
@@ -37,6 +38,14 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
         <p className="max-w-2xl text-lg leading-8 text-[#4f625a]">
           Xin chào {session.email}. Khu vực hỏi AI sẽ được nối với hội thoại, ngữ cảnh hành trình, truy xuất và nhà cung cấp AI trong các story sau.
         </p>
+        <form action={signOutCurrentUser}>
+          <button
+            className="min-h-12 w-fit rounded-2xl border border-[#d8c9ad] bg-white/75 px-5 py-4 text-base font-semibold text-[#17342c] transition hover:bg-white focus:outline-none focus:ring-4 focus:ring-[#e5bd82]"
+            type="submit"
+          >
+            Đăng xuất
+          </button>
+        </form>
       </section>
     </main>
   );
