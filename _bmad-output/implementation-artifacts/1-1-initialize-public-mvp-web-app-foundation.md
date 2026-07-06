@@ -1,6 +1,10 @@
+---
+baseline_commit: deccc4dd224c92b7e8ab9de7adba795da08e64ea
+---
+
 # Story 1.1: Initialize Public MVP Web App Foundation
 
-Status: ready-for-dev
+Status: done
 
 <!-- Note: Validation is optional. Run bmad-create-story with validate action for quality check before dev-story. -->
 
@@ -18,38 +22,45 @@ so that authenticated AI Ask and future protected features can be implemented co
 
 ## Tasks / Subtasks
 
-- [ ] Create the Next.js application foundation in the repository root. (AC: 1, 2)
-  - [ ] Use Next.js App Router, TypeScript, Tailwind CSS, ESLint, and a `src/` directory unless an existing generated default makes this unsafe.
-  - [ ] Keep the app in this repository root; do not create a nested application folder that would make future story paths ambiguous.
-  - [ ] Preserve existing repository docs/config: do not overwrite `README.md`, `AGENTS.md`, `.gitignore`, `_bmad-output/`, or BMad metadata when scaffolding. If a generator wants to replace these, merge manually instead.
-  - [ ] Configure `@/*` import alias to resolve to `src/*`.
-  - [ ] Ensure `src/app/layout.tsx` and `src/app/page.tsx` exist and the root route renders.
-- [ ] Establish feature/module folder structure for the modular monolith. (AC: 1, 3)
-  - [ ] Create `src/features/` with placeholder module boundaries only where useful: `auth`, `chat-trips`, `admin`, `knowledge`, `retrieval`, `search`, `ai`, `usage`, `referrals`, `audit`, `feedback`.
-  - [ ] Add a short module-boundary README or comments if placeholders are created; avoid adding domain implementation tables or fake services in this story.
-  - [ ] Create shared server utility location, e.g. `src/server/` or `src/lib/server/`, that is explicitly server-only.
-- [ ] Configure Drizzle for PostgreSQL migrations without introducing unrelated domain tables. (AC: 1)
-  - [ ] Add Drizzle dependencies and config for PostgreSQL.
-  - [ ] Add `drizzle.config.ts` pointing at schema and migrations output.
-  - [ ] Add a minimal schema entry point such as `src/db/schema.ts` with no business/domain tables yet, or only migration-safe scaffolding required by Drizzle.
-  - [ ] Add package scripts for generating and running migrations, but do not require a live database for normal typecheck/lint.
-- [ ] Implement a public root entry page. (AC: 2)
-  - [ ] Root route `/` loads without authentication.
-  - [ ] Page copy is Vietnamese-first or clearly prepared for Vietnamese-first MVP.
-  - [ ] Page communicates XuyenViet as an AI road-trip planning companion and includes a non-functional sign-in/AI Ask CTA placeholder if auth is not implemented yet.
-  - [ ] Follow the UX design direction: responsive web, map-paper utility feel, restrained route green/amber tokens, no booking/payment/reward UI.
-- [ ] Document required environment variables with safe placeholders. (AC: 2)
-  - [ ] Add `.env.example` with safe placeholder values only; never commit real secrets.
-  - [ ] Include at minimum `DATABASE_URL`, `AUTH_SECRET`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, `OPENAI_API_KEY`, `TAVILY_API_KEY`, and environment marker if used.
-  - [ ] Document local setup in `README.md` or a dedicated setup doc without overwriting the product overview.
-- [ ] Add server-only utility guardrails for future authenticated mutations. (AC: 3)
-  - [ ] Create a server-only module for future auth/session entrypoint stubs, e.g. `src/server/auth.ts`, using `server-only` or equivalent import guard.
-  - [ ] Create a server-only mutation helper or documented pattern that future stories can extend; it must not expose client-side writes.
-  - [ ] Do not implement Google OAuth, roles, admin authorization, audit events, chat persistence, or AI provider calls in this story; those belong to later stories.
-- [ ] Add baseline verification scripts and run them. (AC: 1, 2, 3)
-  - [ ] Ensure `npm run lint` or equivalent exists and passes.
-  - [ ] Ensure `npm run typecheck` or equivalent exists and passes.
-  - [ ] Ensure `npm run build` passes, or record the exact blocker if environment/dependency setup prevents it.
+- [x] Create the Next.js application foundation in the repository root. (AC: 1, 2)
+  - [x] Use Next.js App Router, TypeScript, Tailwind CSS, ESLint, and a `src/` directory unless an existing generated default makes this unsafe.
+  - [x] Keep the app in this repository root; do not create a nested application folder that would make future story paths ambiguous.
+  - [x] Preserve existing repository docs/config: do not overwrite `README.md`, `AGENTS.md`, `.gitignore`, `_bmad-output/`, or BMad metadata when scaffolding. If a generator wants to replace these, merge manually instead.
+  - [x] Configure `@/*` import alias to resolve to `src/*`.
+  - [x] Ensure `src/app/layout.tsx` and `src/app/page.tsx` exist and the root route renders.
+- [x] Establish feature/module folder structure for the modular monolith. (AC: 1, 3)
+  - [x] Create `src/features/` with placeholder module boundaries only where useful: `auth`, `chat-trips`, `admin`, `knowledge`, `retrieval`, `search`, `ai`, `usage`, `referrals`, `audit`, `feedback`.
+  - [x] Add a short module-boundary README or comments if placeholders are created; avoid adding domain implementation tables or fake services in this story.
+  - [x] Create shared server utility location, e.g. `src/server/` or `src/lib/server/`, that is explicitly server-only.
+- [x] Configure Drizzle for PostgreSQL migrations without introducing unrelated domain tables. (AC: 1)
+  - [x] Add Drizzle dependencies and config for PostgreSQL.
+  - [x] Add `drizzle.config.ts` pointing at schema and migrations output.
+  - [x] Add a minimal schema entry point such as `src/db/schema.ts` with no business/domain tables yet, or only migration-safe scaffolding required by Drizzle.
+  - [x] Add package scripts for generating and running migrations, but do not require a live database for normal typecheck/lint.
+- [x] Implement a public root entry page. (AC: 2)
+  - [x] Root route `/` loads without authentication.
+  - [x] Page copy is Vietnamese-first or clearly prepared for Vietnamese-first MVP.
+  - [x] Page communicates XuyenViet as an AI road-trip planning companion and includes a non-functional sign-in/AI Ask CTA placeholder if auth is not implemented yet.
+  - [x] Follow the UX design direction: responsive web, map-paper utility feel, restrained route green/amber tokens, no booking/payment/reward UI.
+- [x] Document required environment variables with safe placeholders. (AC: 2)
+  - [x] Add `.env.example` with safe placeholder values only; never commit real secrets.
+  - [x] Include at minimum `DATABASE_URL`, `AUTH_SECRET`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, `OPENAI_API_KEY`, `TAVILY_API_KEY`, and environment marker if used.
+  - [x] Document local setup in `README.md` or a dedicated setup doc without overwriting the product overview.
+- [x] Add server-only utility guardrails for future authenticated mutations. (AC: 3)
+  - [x] Create a server-only module for future auth/session entrypoint stubs, e.g. `src/server/auth.ts`, using `server-only` or equivalent import guard.
+  - [x] Create a server-only mutation helper or documented pattern that future stories can extend; it must not expose client-side writes.
+  - [x] Do not implement Google OAuth, roles, admin authorization, audit events, chat persistence, or AI provider calls in this story; those belong to later stories.
+- [x] Add baseline verification scripts and run them. (AC: 1, 2, 3)
+  - [x] Ensure `npm run lint` or equivalent exists and passes.
+  - [x] Ensure `npm run typecheck` or equivalent exists and passes.
+  - [x] Ensure `npm run build` passes, or record the exact blocker if environment/dependency setup prevents it.
+
+### Review Findings
+
+- [x] [Review][Patch] Drizzle migration commands can silently use the fallback localhost database instead of the intended environment database. [drizzle.config.ts:8]
+- [x] [Review][Patch] Public Vietnamese copy omits diacritics, weakening the Vietnamese-first and accessibility contract. [src/app/page.tsx:13]
+- [x] [Review][Patch] Small amber section label does not meet WCAG AA contrast on the light card background. [src/app/page.tsx:39]
+- [x] [Review][Patch] Vercel local project metadata is not ignored and can be accidentally committed. [.gitignore:18]
 
 ## Dev Notes
 
@@ -180,15 +191,65 @@ If `create-next-app` or shadcn generates a different but conventional file name,
 
 ### Agent Model Used
 
-TBD by dev agent.
+gpt-5.5-review
 
 ### Debug Log References
+
+- `pnpm install` completed using pnpm 10.26.2 and generated `pnpm-lock.yaml`.
+- `pnpm lint` passed.
+- `pnpm typecheck` passed.
+- `pnpm build` passed and statically prerendered `/`.
 
 ### Completion Notes List
 
 - Story created by BMad create-story workflow.
 - Ultimate context engine analysis completed - comprehensive developer guide created.
+- Implemented a root-level Next.js App Router foundation manually to avoid overwriting existing repository docs and BMad artifacts.
+- Used pnpm consistently as the package manager; package lockfile generated as `pnpm-lock.yaml`.
+- Added TypeScript, Tailwind CSS v4, ESLint flat config, Next.js config, and `@/*` alias to `src/*`.
+- Added Drizzle PostgreSQL configuration with a no-domain-table schema entry point; migration scripts are present and normal lint/typecheck/build do not require a live database.
+- Added reserved modular-monolith feature boundaries and server-only auth/mutation guardrail stubs without implementing OAuth, roles, audit, chat, AI, or domain persistence.
+- Implemented a responsive Vietnamese-first public landing page with map-paper styling, route green/guide amber colors, and non-functional AI Ask/sign-in placeholder.
+- Added safe environment placeholders in `.env.example` and local development instructions in `README.md`.
+- No unit test framework exists yet; Story 1.1 verification is covered by baseline scripts and successful production build of the root route.
+- Resolved code review findings: Drizzle now fails closed if `DATABASE_URL` is missing, public page copy uses Vietnamese diacritics, amber label contrast was darkened, and `.vercel/` is ignored.
+
+### Change Log
+
+- 2026-07-06: Added public MVP Next.js foundation, Drizzle wiring, server-only guardrails, env docs, and baseline verification scripts for Story 1.1.
+- 2026-07-06: Addressed code review patch findings and marked Story 1.1 done.
 
 ### File List
 
+- `.env.example`
+- `.gitignore`
+- `README.md`
 - `_bmad-output/implementation-artifacts/1-1-initialize-public-mvp-web-app-foundation.md`
+- `_bmad-output/implementation-artifacts/sprint-status.yaml`
+- `drizzle.config.ts`
+- `drizzle/migrations/meta/_journal.json`
+- `eslint.config.mjs`
+- `next-env.d.ts`
+- `next.config.ts`
+- `package.json`
+- `pnpm-lock.yaml`
+- `postcss.config.mjs`
+- `src/app/globals.css`
+- `src/app/layout.tsx`
+- `src/app/page.tsx`
+- `src/db/schema.ts`
+- `src/features/README.md`
+- `src/features/admin/.gitkeep`
+- `src/features/ai/.gitkeep`
+- `src/features/audit/.gitkeep`
+- `src/features/auth/.gitkeep`
+- `src/features/chat-trips/.gitkeep`
+- `src/features/feedback/.gitkeep`
+- `src/features/knowledge/.gitkeep`
+- `src/features/referrals/.gitkeep`
+- `src/features/retrieval/.gitkeep`
+- `src/features/search/.gitkeep`
+- `src/features/usage/.gitkeep`
+- `src/server/auth.ts`
+- `src/server/mutations.ts`
+- `tsconfig.json`

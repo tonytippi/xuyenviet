@@ -29,3 +29,38 @@ This should create a more personalized travel experience than searching through 
 ## Vision
 
 XUYENVIET should become a practical AI trip companion for people traveling through Vietnam by car, helping them plan smarter, adapt faster, and discover better options with less effort.
+
+## Local development
+
+This repository now contains the public MVP web app foundation.
+
+Requirements:
+
+- Node.js 20.9 or newer
+- pnpm 10.x
+- PostgreSQL connection string for database migration commands
+
+Setup:
+
+```bash
+pnpm install
+cp .env.example .env.local
+pnpm dev
+```
+
+Quality checks:
+
+```bash
+pnpm lint
+pnpm typecheck
+pnpm build
+```
+
+Database scripts:
+
+```bash
+pnpm db:generate
+pnpm db:migrate
+```
+
+`db:generate` and `db:migrate` use `drizzle.config.ts` and `DATABASE_URL`. Story 1.1 intentionally configures Drizzle without adding domain tables.
