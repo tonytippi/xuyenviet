@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { conversations, messages, users } from "@/db/schema";
+import { aiUsageEvents, conversations, messages, users } from "@/db/schema";
 
 import { testDb } from "./helpers/db";
 
@@ -16,6 +16,10 @@ async function countConversations() {
 
 async function countMessages() {
   return (await testDb.select().from(messages)).length;
+}
+
+async function countUsageEvents() {
+  return (await testDb.select().from(aiUsageEvents)).length;
 }
 
 async function renderAuthenticatedAiAskShell() {
@@ -50,6 +54,7 @@ describe("AI Ask authenticated shell", () => {
     expect(html).toContain("Khu vực hội thoại");
     expect(html).toContain("Câu hỏi của bạn");
     expect(html).toContain("Gửi câu hỏi");
+    expect(html).toContain("Chưa có tin nhắn. Câu trả lời thật và nguồn tham chiếu sẽ xuất hiện ở các story sau");
     expect(html).toContain('aria-describedby="ai-ask-status ai-ask-shortcuts"');
     expect(html).toContain('id="ai-ask-status"');
   });
@@ -80,6 +85,7 @@ describe("AI Ask action gate", () => {
     await expect(submitAiAsk({ question: "   " })).rejects.toThrow("AI Ask question must be between 1 and 2000 characters.");
     expect(await countConversations()).toBe(0);
     expect(await countMessages()).toBe(0);
+    expect(await countUsageEvents()).toBe(0);
   });
 
   test("rejects malformed question payloads", async () => {
@@ -92,6 +98,7 @@ describe("AI Ask action gate", () => {
     await expect(submitAiAsk({} as { question: string })).rejects.toThrow("AI Ask question must be between 1 and 2000 characters.");
     expect(await countConversations()).toBe(0);
     expect(await countMessages()).toBe(0);
+    expect(await countUsageEvents()).toBe(0);
   });
 
   test("rejects over-2000-character questions", async () => {
@@ -106,10 +113,32 @@ describe("AI Ask action gate", () => {
     );
     expect(await countConversations()).toBe(0);
     expect(await countMessages()).toBe(0);
+    expect(await countUsageEvents()).toBe(0);
   });
 
-  test("creates an owned conversation and first user message for valid questions", async () => {
+  test("creates an owned conversation, first user message, assistant answer, and successful usage event", async () => {
     await createTestUser("user-1");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          model: "test-model",
+          choices: [
+            {
+              message: {
+                content: "Bạn có thể đi theo trục Hà Nội - Huế trong 5 ngày và nên chừa thời gian nghỉ giữa chặng.",
+              },
+            },
+          ],
+          usage: {
+            prompt_tokens: 100,
+            completion_tokens: 80,
+            total_tokens: 180,
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
     vi.doMock("@/server/auth", () => ({
       getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
     }));
@@ -118,21 +147,134 @@ describe("AI Ask action gate", () => {
     const result = await submitAiAsk({ question: "  Hà Nội đi Huế 5 ngày nên dừng ở đâu?  " });
     const savedConversations = await testDb.select().from(conversations).where(eq(conversations.userId, "user-1"));
     const savedMessages = await testDb.select().from(messages).where(eq(messages.conversationId, result.conversationId));
+    const savedUsageEvents = await testDb.select().from(aiUsageEvents).where(eq(aiUsageEvents.conversationId, result.conversationId));
 
-    expect(result.status).toBe("conversation-created");
+    expect(result.status).toBe("answer-created");
+    if (result.status !== "answer-created") {
+      throw new Error("Expected answer-created result");
+    }
     expect(result.conversationId).toBeTruthy();
-    expect(result.messageId).toBeTruthy();
+    expect(result.userMessage.id).toBeTruthy();
+    expect(result.assistantMessage.id).toBeTruthy();
+    expect(result.assistantMessage.content).toBe("Bạn có thể đi theo trục Hà Nội - Huế trong 5 ngày và nên chừa thời gian nghỉ giữa chặng.");
     expect(savedConversations).toHaveLength(1);
     expect(savedConversations[0].id).toBe(result.conversationId);
     expect(savedConversations[0].createdAt).toBeInstanceOf(Date);
-    expect(savedMessages).toHaveLength(1);
+    expect(savedMessages).toHaveLength(2);
     expect(savedMessages[0]).toMatchObject({
-      id: result.messageId,
+      id: result.userMessage.id,
       userId: "user-1",
       role: "user",
       content: "Hà Nội đi Huế 5 ngày nên dừng ở đâu?",
     });
     expect(savedMessages[0].createdAt).toBeInstanceOf(Date);
+    expect(savedMessages[1]).toMatchObject({
+      id: result.assistantMessage.id,
+      userId: "user-1",
+      role: "assistant",
+      content: result.assistantMessage.content,
+    });
+    expect(savedUsageEvents).toHaveLength(1);
+    expect(savedUsageEvents[0]).toMatchObject({
+      userId: "user-1",
+      conversationId: result.conversationId,
+      userMessageId: result.userMessage.id,
+      assistantMessageId: result.assistantMessage.id,
+      purpose: "ai_ask_initial_answer",
+      provider: "ai_gateway",
+      model: "test-model",
+      promptVersion: "ai_ask_initial_v1",
+      status: "success",
+      errorCode: null,
+      promptTokens: 100,
+      completionTokens: 80,
+      totalTokens: 180,
+    });
+    expect(savedUsageEvents[0].latencyMs).toBeGreaterThanOrEqual(0);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe("https://test-gateway.example/chat/completions");
+    expect(JSON.stringify(fetchMock.mock.calls[0][1])).toContain("Tiếng Việt");
+    expect(JSON.stringify(fetchMock.mock.calls[0][1])).toContain("1-3 câu hỏi tiếp theo ngắn gọn");
+  });
+
+  test("keeps the user message, records failed usage, and creates no assistant message when provider fails", async () => {
+    await createTestUser("user-1");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status: 500 })));
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
+    }));
+    const { submitAiAsk } = await import("@/features/ai/ask-gate");
+
+    const result = await submitAiAsk({ question: "Hà Nội đi Đà Nẵng?" });
+    const savedMessages = await testDb.select().from(messages).where(eq(messages.conversationId, result.conversationId));
+    const savedUsageEvents = await testDb.select().from(aiUsageEvents).where(eq(aiUsageEvents.conversationId, result.conversationId));
+
+    expect(result.status).toBe("answer-failed");
+    if (result.status !== "answer-failed") {
+      throw new Error("Expected answer-failed result");
+    }
+    expect(result.userMessage.content).toBe("Hà Nội đi Đà Nẵng?");
+    expect(result.errorMessage).toBe("Mình chưa tạo được câu trả lời lúc này. Nội dung của bạn vẫn còn trong ô nhập để gửi lại.");
+    expect(savedMessages).toHaveLength(1);
+    expect(savedMessages[0]).toMatchObject({ role: "user", content: "Hà Nội đi Đà Nẵng?" });
+    expect(savedUsageEvents).toHaveLength(1);
+    expect(savedUsageEvents[0]).toMatchObject({
+      userId: "user-1",
+      conversationId: result.conversationId,
+      userMessageId: result.userMessage.id,
+      assistantMessageId: null,
+      purpose: "ai_ask_initial_answer",
+      provider: "ai_gateway",
+      model: "xuyenviet-roadtrip-v1",
+      promptVersion: "ai_ask_initial_v1",
+      status: "failure",
+      errorCode: "gateway_http_error",
+    });
+  });
+
+  test("records invalid gateway responses without creating assistant messages", async () => {
+    await createTestUser("user-1");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("not-json", { status: 200 })));
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
+    }));
+    const { submitAiAsk } = await import("@/features/ai/ask-gate");
+
+    const result = await submitAiAsk({ question: "Đi Phú Yên 4 ngày?" });
+    const savedMessages = await testDb.select().from(messages).where(eq(messages.conversationId, result.conversationId));
+    const savedUsageEvents = await testDb.select().from(aiUsageEvents).where(eq(aiUsageEvents.conversationId, result.conversationId));
+
+    expect(result.status).toBe("answer-failed");
+    expect(savedMessages).toHaveLength(1);
+    expect(savedUsageEvents).toHaveLength(1);
+    expect(savedUsageEvents[0].errorCode).toBe("invalid_gateway_response");
+  });
+
+  test("sends bounded gateway requests", async () => {
+    await createTestUser("user-1");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: "Nên chia lịch trình nhẹ và hỏi thêm thời gian xuất phát." } }],
+          usage: { prompt_tokens: -1, completion_tokens: 10, total_tokens: 9 },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
+    }));
+    const { submitAiAsk } = await import("@/features/ai/ask-gate");
+
+    const result = await submitAiAsk({ question: "Đi Quy Nhơn 3 ngày?" });
+    const savedUsageEvents = await testDb.select().from(aiUsageEvents).where(eq(aiUsageEvents.conversationId, result.conversationId));
+    const request = fetchMock.mock.calls[0][1] as RequestInit;
+    const body = JSON.parse(String(request.body)) as { max_tokens?: number };
+
+    expect(request.signal).toBeInstanceOf(AbortSignal);
+    expect(body.max_tokens).toBe(900);
+    expect(savedUsageEvents[0]).toMatchObject({ promptTokens: null, completionTokens: 10, totalTokens: 9 });
   });
 
   test("rejects unauthenticated submissions", async () => {
@@ -146,6 +288,7 @@ describe("AI Ask action gate", () => {
     );
     expect(await countConversations()).toBe(0);
     expect(await countMessages()).toBe(0);
+    expect(await countUsageEvents()).toBe(0);
   });
 
   test("returns owned conversations only", async () => {
@@ -155,14 +298,34 @@ describe("AI Ask action gate", () => {
     vi.doMock("@/server/auth", () => ({
       getAuthenticatedSession,
     }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            model: "test-model",
+            choices: [{ message: { content: "Nên chia chặng và giữ lịch trình nhẹ để lái xe an toàn." } }],
+            usage: {},
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      ),
+    );
     const { submitAiAsk } = await import("@/features/ai/ask-gate");
     const { getOwnedConversation } = await import("@/features/chat-trips/conversations");
     const result = await submitAiAsk({ question: "Hà Nội đi Đà Nẵng?" });
 
+    if (result.status !== "answer-created") {
+      throw new Error("Expected answer-created result");
+    }
+
     await expect(getOwnedConversation(result.conversationId)).resolves.toMatchObject({
       id: result.conversationId,
       userId: "user-1",
-      messages: [{ id: result.messageId, role: "user", content: "Hà Nội đi Đà Nẵng?" }],
+      messages: [
+        { id: result.userMessage.id, role: "user", content: "Hà Nội đi Đà Nẵng?" },
+        { id: result.assistantMessage.id, role: "assistant" },
+      ],
     });
     getAuthenticatedSession.mockResolvedValue({ userId: "user-2", email: "user-2@example.com" });
     await expect(getOwnedConversation(result.conversationId)).resolves.toBeNull();

@@ -5,15 +5,30 @@ import "server-only";
 import { getDb } from "@/db/client";
 import { conversations, messages } from "@/db/schema";
 import { runAuthenticatedMutation } from "@/server/mutations";
+import { writeAiUsageEvent } from "@/features/usage/events";
+
+import { generateInitialAiAskAnswer } from "./gateway";
+import { aiAskInitialAnswerModel, aiAskInitialAnswerPromptVersion, aiAskInitialAnswerPurpose, buildInitialAiAskMessages } from "./prompts";
 
 export type AiAskSubmission = {
   question: string;
 };
 
+type ReturnedMessage = {
+  id: string;
+  content: string;
+};
+
 export type AiAskSubmissionResult = {
-  status: "conversation-created";
+  status: "answer-created";
   conversationId: string;
-  messageId: string;
+  userMessage: ReturnedMessage;
+  assistantMessage: ReturnedMessage;
+} | {
+  status: "answer-failed";
+  conversationId: string;
+  userMessage: ReturnedMessage;
+  errorMessage: string;
 };
 
 export async function submitAiAsk(input: AiAskSubmission): Promise<AiAskSubmissionResult> {
@@ -25,7 +40,8 @@ export async function submitAiAsk(input: AiAskSubmission): Promise<AiAskSubmissi
         throw new Error("AI Ask question must be between 1 and 2000 characters.");
       }
 
-      return getDb().transaction(async (transaction) => {
+      const db = getDb();
+      const saved = await db.transaction(async (transaction) => {
         const [conversation] = await transaction
           .insert(conversations)
           .values({ userId: session.userId })
@@ -42,9 +58,73 @@ export async function submitAiAsk(input: AiAskSubmission): Promise<AiAskSubmissi
           .returning({ id: messages.id });
 
         return {
-          status: "conversation-created",
           conversationId: conversation.id,
-          messageId: message.id,
+          userMessage: {
+            id: message.id,
+            content: question,
+          },
+        };
+      });
+
+      const gatewayResult = await generateInitialAiAskAnswer(buildInitialAiAskMessages(question));
+
+      if (!gatewayResult.ok) {
+        await writeAiUsageEvent(db, {
+          userId: session.userId,
+          conversationId: saved.conversationId,
+          userMessageId: saved.userMessage.id,
+          purpose: aiAskInitialAnswerPurpose,
+          provider: gatewayResult.provider,
+          model: gatewayResult.model,
+          promptVersion: aiAskInitialAnswerPromptVersion,
+          status: "failure",
+          latencyMs: gatewayResult.latencyMs,
+          errorCode: gatewayResult.errorCode,
+        });
+
+        return {
+          status: "answer-failed",
+          conversationId: saved.conversationId,
+          userMessage: saved.userMessage,
+          errorMessage: "Mình chưa tạo được câu trả lời lúc này. Nội dung của bạn vẫn còn trong ô nhập để gửi lại.",
+        };
+      }
+
+      return db.transaction(async (transaction) => {
+        const [assistantMessage] = await transaction
+          .insert(messages)
+          .values({
+            conversationId: saved.conversationId,
+            userId: session.userId,
+            role: "assistant",
+            content: gatewayResult.content,
+          })
+          .returning({ id: messages.id });
+
+        await writeAiUsageEvent(transaction, {
+          userId: session.userId,
+          conversationId: saved.conversationId,
+          userMessageId: saved.userMessage.id,
+          assistantMessageId: assistantMessage.id,
+          purpose: aiAskInitialAnswerPurpose,
+          provider: gatewayResult.provider,
+          model: gatewayResult.model || aiAskInitialAnswerModel,
+          promptVersion: aiAskInitialAnswerPromptVersion,
+          status: "success",
+          latencyMs: gatewayResult.latencyMs,
+          promptTokens: gatewayResult.usage.promptTokens,
+          completionTokens: gatewayResult.usage.completionTokens,
+          totalTokens: gatewayResult.usage.totalTokens,
+        });
+
+        return {
+          status: "answer-created",
+          conversationId: saved.conversationId,
+          userMessage: saved.userMessage,
+          assistantMessage: {
+            id: assistantMessage.id,
+            content: gatewayResult.content,
+          },
         };
       });
     },

@@ -10,6 +10,9 @@ export type AuditOperation = (typeof auditOperationValues)[number];
 export const messageRoleValues = ["user", "assistant"] as const;
 export type MessageRole = (typeof messageRoleValues)[number];
 
+export const aiUsageStatusValues = ["success", "failure"] as const;
+export type AiUsageStatus = (typeof aiUsageStatusValues)[number];
+
 export const users = pgTable("users", {
   id: text("id")
     .primaryKey()
@@ -204,6 +207,45 @@ export const messages = pgTable(
   ],
 );
 
+export const aiUsageEvents = pgTable(
+  "ai_usage_events",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    conversationId: text("conversation_id").references(() => conversations.id, { onDelete: "set null" }),
+    userMessageId: text("user_message_id").references(() => messages.id, { onDelete: "set null" }),
+    assistantMessageId: text("assistant_message_id").references(() => messages.id, { onDelete: "set null" }),
+    purpose: text("purpose").notNull(),
+    provider: text("provider").notNull(),
+    model: text("model").notNull(),
+    promptVersion: text("prompt_version").notNull(),
+    status: text("status").$type<AiUsageStatus>().notNull(),
+    latencyMs: integer("latency_ms"),
+    promptTokens: integer("prompt_tokens"),
+    completionTokens: integer("completion_tokens"),
+    totalTokens: integer("total_tokens"),
+    errorCode: text("error_code"),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (aiUsageEvent) => [
+    index("ai_usage_events_user_id_created_at_idx").on(aiUsageEvent.userId, aiUsageEvent.createdAt),
+    index("ai_usage_events_conversation_id_idx").on(aiUsageEvent.conversationId),
+    index("ai_usage_events_status_idx").on(aiUsageEvent.status),
+    check("ai_usage_events_status_check", sql`${aiUsageEvent.status} in ('success', 'failure')`),
+    check("ai_usage_events_latency_non_negative_check", sql`${aiUsageEvent.latencyMs} is null or ${aiUsageEvent.latencyMs} >= 0`),
+    check("ai_usage_events_prompt_tokens_non_negative_check", sql`${aiUsageEvent.promptTokens} is null or ${aiUsageEvent.promptTokens} >= 0`),
+    check(
+      "ai_usage_events_completion_tokens_non_negative_check",
+      sql`${aiUsageEvent.completionTokens} is null or ${aiUsageEvent.completionTokens} >= 0`,
+    ),
+    check("ai_usage_events_total_tokens_non_negative_check", sql`${aiUsageEvent.totalTokens} is null or ${aiUsageEvent.totalTokens} >= 0`),
+  ],
+);
+
 export const schema = {
   users,
   accounts,
@@ -215,4 +257,5 @@ export const schema = {
   referralAttributions,
   conversations,
   messages,
+  aiUsageEvents,
 };

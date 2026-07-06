@@ -61,7 +61,7 @@ development_status:
   2-0-introduce-test-framework-and-retroactive-epic-1-coverage: done
   2-1-authenticated-ai-ask-chat-shell: done
   2-2-create-conversation-and-send-first-message: done
-  2-3-generate-vietnamese-initial-ai-answer: backlog
+  2-3-generate-vietnamese-initial-ai-answer: done
   2-4-structured-road-trip-answer-format: backlog
   2-5-continue-conversation-with-context: backlog
   2-6-basic-chat-responsiveness-and-failure-states: backlog

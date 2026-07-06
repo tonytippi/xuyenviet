@@ -36,6 +36,13 @@
       "when": 1783340643324,
       "tag": "0004_wild_nemesis",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1783344685828,
+      "tag": "0005_spooky_strong_guy",
+      "breakpoints": true
     }
   ]
 }
