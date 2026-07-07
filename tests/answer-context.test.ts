@@ -74,7 +74,7 @@ describe("answer context assembly", () => {
     const section = buildAnswerContextPromptSection(digest);
 
     expect(section).toContain("Ngữ cảnh kế hoạch đã ghi");
-    expect(section).toContain("destination: Huế");
+    expect(section).toContain('destination: "Huế"');
     expect(section).not.toContain("(dự án)");
   });
 
@@ -103,8 +103,8 @@ describe("answer context assembly", () => {
 
     const section = buildAnswerContextPromptSection(digest);
 
-    expect(section).toContain("destination: Đà Nẵng (dự án)");
-    expect(section).toContain("destination: dự án=Đà Nẵng | chat=Huế");
+    expect(section).toContain('destination: "Đà Nẵng" (dự án)');
+    expect(section).toContain('destination: dự án="Đà Nẵng" | chat="Huế"');
     expect(section).toContain("Mâu thuẫn giữa chat và dự án");
   });
 
@@ -157,6 +157,39 @@ describe("answer context assembly", () => {
     const digest = await loadAnswerContext({ userId: "user-1", conversationId: conversation.id });
 
     expect(digest.facts).toEqual([{ field: "destination", value: "Đà Lạt", source: "conversation" }]);
+  });
+
+  test("does not load project context when the conversation belongs to a different project", async () => {
+    await createTestUser("user-1");
+    const [projectA] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế" }).returning({ id: tripProjects.id });
+    const [projectB] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Đà Nẵng" }).returning({ id: tripProjects.id });
+    const { conversation: conversationA } = await createConversationWithUserMessage({ userId: "user-1", tripProjectId: projectA.id });
+    const { conversation: conversationB, message: messageB } = await createConversationWithUserMessage({ userId: "user-1", tripProjectId: projectB.id });
+
+    await seedContextRow({ userId: "user-1", conversationId: conversationB.id, sourceMessageId: messageB.id, field: "destination", value: "Đà Nẵng", scope: "trip_project", tripProjectId: projectB.id });
+
+    const { loadAnswerContext } = await import("@/features/chat-trips/answer-context");
+
+    const digest = await loadAnswerContext({ userId: "user-1", conversationId: conversationA.id, tripProjectId: projectB.id });
+
+    expect(digest).toEqual({ hasProjectScope: true, facts: [], conflicts: [] });
+  });
+
+  test("keeps a fitting conflict visible when long facts exceed the context budget", async () => {
+    const { buildAnswerContextPromptSection } = await import("@/features/chat-trips/answer-context");
+
+    const section = buildAnswerContextPromptSection({
+      hasProjectScope: true,
+      facts: [
+        { field: "notes", value: "a".repeat(1_700), source: "conversation" },
+        { field: "destination", value: "Đà Nẵng", source: "trip_project" },
+      ],
+      conflicts: [{ field: "destination", projectValue: "Đà Nẵng", conversationValue: "Huế" }],
+    });
+
+    expect(section.length).toBeLessThanOrEqual(2_000);
+    expect(section).toContain("Mâu thuẫn giữa chat và dự án");
+    expect(section).toContain('destination: dự án="Đà Nẵng" | chat="Huế"');
   });
 
   test("buildAnswerContextPromptSection returns empty string when no facts", async () => {
@@ -238,7 +271,8 @@ describe("answer context assembly", () => {
 
     expect(responseText).toContain('"type":"done"');
     expect(answerRequestBody).toContain("Ngữ cảnh kế hoạch đã ghi");
-    expect(answerRequestBody).toContain("destination: Huế");
+    const answerRequest = JSON.parse(answerRequestBody) as { messages: Array<{ role: string; content: string }> };
+    expect(answerRequest.messages[0]?.content).toContain('destination: "Huế"');
   });
 
   test("loads project-scoped context shared across conversations of the same project", async () => {

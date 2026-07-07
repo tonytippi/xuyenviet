@@ -3,7 +3,7 @@ import "server-only";
 import { and, desc, eq } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { chatContext, type ChatContextField } from "@/db/schema";
+import { chatContext, chatContextFieldValues, conversations, type ChatContextField } from "@/db/schema";
 
 export type AnswerContextSource = "conversation" | "trip_project";
 
@@ -45,8 +45,20 @@ export async function loadAnswerContext({
 
   const selectColumns = { field: chatContext.field, value: chatContext.value, createdAt: chatContext.createdAt, id: chatContext.id };
 
+  if (tripProjectId) {
+    const [conversation] = await db
+      .select({ id: conversations.id })
+      .from(conversations)
+      .where(and(eq(conversations.id, conversationId), eq(conversations.userId, userId), eq(conversations.tripProjectId, tripProjectId)))
+      .limit(1);
+
+    if (!conversation) {
+      return { hasProjectScope: true, facts: [], conflicts: [] };
+    }
+  }
+
   const conversationRowsPromise = db
-    .select(selectColumns)
+    .selectDistinctOn([chatContext.field], selectColumns)
     .from(chatContext)
     .where(
       and(
@@ -56,11 +68,12 @@ export async function loadAnswerContext({
         eq(chatContext.status, "active"),
       ),
     )
-    .orderBy(desc(chatContext.createdAt), desc(chatContext.id));
+    .orderBy(chatContext.field, desc(chatContext.createdAt), desc(chatContext.id))
+    .limit(chatContextFieldValues.length);
 
   const projectRowsPromise = tripProjectId
     ? db
-        .select(selectColumns)
+        .selectDistinctOn([chatContext.field], selectColumns)
         .from(chatContext)
         .where(
           and(
@@ -70,7 +83,8 @@ export async function loadAnswerContext({
             eq(chatContext.status, "active"),
           ),
         )
-        .orderBy(desc(chatContext.createdAt), desc(chatContext.id))
+        .orderBy(chatContext.field, desc(chatContext.createdAt), desc(chatContext.id))
+        .limit(chatContextFieldValues.length)
     : Promise.resolve([] as ContextRow[]);
 
   const [conversationRows, projectRows] = await Promise.all([conversationRowsPromise, projectRowsPromise]);
@@ -119,19 +133,36 @@ export function buildAnswerContextPromptSection(digest: AnswerContextDigest): st
 
   const factLines = digest.facts.slice(0, maxContextFacts).map((fact) => {
     const tag = fact.source === "trip_project" && digest.hasProjectScope ? " (dự án)" : "";
-    return `- ${fact.field}: ${fact.value}${tag}`;
+    return `- ${fact.field}: ${serializeContextValue(fact.value)}${tag}`;
   });
 
-  const factsBlock = [contextDataGuardPrefix, contextSectionHeader, ...factLines].join("\n");
+  const factsBlock = buildBoundedFactsBlock(factLines, maxContextSectionCharacters);
 
   let section = factsBlock;
 
   if (digest.conflicts.length > 0) {
-    const conflictLines = digest.conflicts.slice(0, maxContextFacts).map((conflict) => `- ${conflict.field}: dự án=${conflict.projectValue} | chat=${conflict.conversationValue}`);
-    const conflictsBlock = [contextConflictHeader, ...conflictLines].join("\n");
+    const conflictLines = digest.conflicts.slice(0, maxContextFacts).map((conflict) => `- ${conflict.field}: dự án=${serializeContextValue(conflict.projectValue)} | chat=${serializeContextValue(conflict.conversationValue)}`);
+    const selectedConflictLines: string[] = [];
+    let conflictsBlock = contextConflictHeader;
 
-    if (`${section}\n${conflictsBlock}`.length <= maxContextSectionCharacters) {
-      section = `${section}\n${conflictsBlock}`;
+    for (const line of conflictLines) {
+      const nextBlock = `${conflictsBlock}\n${line}`;
+
+      if (nextBlock.length > maxContextSectionCharacters) {
+        break;
+      }
+
+      selectedConflictLines.push(line);
+      conflictsBlock = nextBlock;
+    }
+
+    if (selectedConflictLines.length > 0) {
+      const factsBudget = maxContextSectionCharacters - conflictsBlock.length - 1;
+      const truncatedFactsBlock = buildBoundedFactsBlock(factLines, factsBudget);
+
+      if (truncatedFactsBlock) {
+        section = `${truncatedFactsBlock}\n${conflictsBlock}`;
+      }
     }
   }
 
@@ -139,15 +170,28 @@ export function buildAnswerContextPromptSection(digest: AnswerContextDigest): st
     return section;
   }
 
-  const truncated = section.slice(0, maxContextSectionCharacters);
-  const lastNewline = truncated.lastIndexOf("\n");
-  const factsHeaderEnd = contextDataGuardPrefix.length + contextSectionHeader.length + 2;
+  return buildBoundedFactsBlock(factLines, maxContextSectionCharacters);
+}
 
-  if (lastNewline < factsHeaderEnd) {
+function buildBoundedFactsBlock(factLines: string[], maxCharacters: number) {
+  const lines = [contextDataGuardPrefix, contextSectionHeader];
+  let section = lines.join("\n");
+
+  if (section.length > maxCharacters) {
     return "";
   }
 
-  return truncated.slice(0, lastNewline);
+  for (const line of factLines) {
+    const nextSection = `${section}\n${line}`;
+
+    if (nextSection.length > maxCharacters) {
+      continue;
+    }
+
+    section = nextSection;
+  }
+
+  return section;
 }
 
 function dedupeLatest(rows: ContextRow[]): Map<string, string> {
@@ -160,4 +204,8 @@ function dedupeLatest(rows: ContextRow[]): Map<string, string> {
   }
 
   return byField;
+}
+
+function serializeContextValue(value: string) {
+  return JSON.stringify(value);
 }

@@ -82,6 +82,24 @@ Empty -- no bad_spec loopback occurred.
 
 ## Review Triage Log
 
+### Review Findings
+- [x] [Review][Patch] Harden answer-context prompt serialization so user-derived context values are not interpolated as raw Markdown inside the system prompt [src/features/chat-trips/answer-context.ts:120]
+- [x] [Review][Patch] Bound answer-context reads before the streaming critical path instead of loading all active project/conversation rows and deduping only in memory [src/features/chat-trips/answer-context.ts:48]
+- [x] [Review][Patch] Validate the conversation/project pair inside `loadAnswerContext` so direct reuse cannot load project context for a mismatched conversation [src/features/chat-trips/answer-context.ts:61]
+- [x] [Review][Patch] Preserve conflict visibility under the prompt budget instead of silently omitting the entire conflicts block when facts consume the budget [src/features/chat-trips/answer-context.ts:129]
+
+### 2026-07-07 — Follow-up review patch pass
+- intent_gap: 0
+- bad_spec: 0
+- patch: 4 addressed (medium 4)
+- defer: 0
+- dismiss: 2
+- addressed_findings:
+  - `[medium]` `[patch]` `src/features/chat-trips/answer-context.ts` -- context values and conflict values are now serialized as JSON strings inside the prompt section so user-derived values remain explicit data rather than raw Markdown-like instruction text.
+  - `[medium]` `[patch]` `src/features/chat-trips/answer-context.ts` -- context reads now use `selectDistinctOn([field])` with latest ordering and a field-count limit per scope, bounding rows returned before stream setup.
+  - `[medium]` `[patch]` `src/features/chat-trips/answer-context.ts` -- `loadAnswerContext` now validates the requested conversation/project/user tuple before loading project-scoped rows, with regression coverage for mismatched same-user project IDs.
+  - `[medium]` `[patch]` `src/features/chat-trips/answer-context.ts` -- prompt formatting now reserves budget for fitting conflict lines and skips oversized fact lines so conflicts remain visible when possible under the 2,000-character cap.
+
 ### 2026-07-07 — Review pass
 - intent_gap: 0
 - bad_spec: 0
@@ -134,6 +152,13 @@ Empty -- no bad_spec loopback occurred.
 - `pnpm typecheck` -- passed.
 - `pnpm lint` -- passed.
 - `pnpm test:run` -- passed; 10 files, 135 tests.
+- `pnpm build` -- passed; 8 pages generated.
+
+**Follow-up review patch verification performed:**
+- `pnpm test:run tests/answer-context.test.ts` -- passed; 12 tests.
+- `pnpm lint` -- passed.
+- `pnpm typecheck` -- passed.
+- `pnpm test:run` -- passed; 10 files, 137 tests.
 - `pnpm build` -- passed; 8 pages generated.
 
 **Residual risks:**
