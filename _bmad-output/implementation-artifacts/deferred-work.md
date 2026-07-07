@@ -16,3 +16,15 @@
 - source_spec: `spec-2-7-stream-ai-ask-responses-and-accept-traveler-image-input.md`
   summary: Harden SSE parser for multi-line `data:` events if a non-standard OpenAI-compatible gateway is adopted.
   evidence: `processStreamLine` in `src/features/ai/gateway.ts` parses each `data:` line as a complete JSON payload. The SSE spec allows multi-line `data:` fields concatenated with `\n`. OpenAI and most OpenAI-compatible gateways emit single-line events, so this is not reachable today; revisit if XuyenViet adopts a gateway/proxy that emits multi-line SSE data events.
+- source_spec: `spec-3-1-manage-chat-sessions.md`
+  summary: Optimize `listOwnedConversations` query and add a result cap/pagination for users with many conversations.
+  evidence: The current `leftJoin` on `messages` (role='user') with JS dedup is owner-scoped and correct but loads N conversations x M user-messages rows; a naive `.limit()` would under-return conversations because the limit applies to joined rows. A `DISTINCT ON (conversations.id)` or batched 2-query approach plus a cap (e.g. 50) with a later "load more" UX is needed before volume grows.
+- source_spec: `spec-3-1-manage-chat-sessions.md`
+  summary: Deduplicate `previewMaxLength` and `formatPreview` logic across server and client.
+  evidence: `src/features/chat-trips/conversations.ts` and `src/features/ai/ai-ask-composer.tsx` each define a 60-char truncation + "…" rule. If they drift, optimistic sidebar previews won't match server previews after reload. Extract a shared non-server-only module and import from both.
+- source_spec: `spec-3-1-manage-chat-sessions.md`
+  summary: Add a test for the `desc(conversations.id)` ordering tiebreaker in `tests/ai-ask-sessions.test.ts`.
+  evidence: The existing test verifies `updatedAt` desc ordering but does not lock the secondary `desc(conversations.id)` tiebreaker when two conversations share the same `updatedAt`.
+- source_spec: `spec-3-1-manage-chat-sessions.md`
+  summary: Add a full focus-trap (tab cycling) to the mobile session sheet.
+  evidence: The sheet now closes on Escape, focuses the panel on open, and restores focus to the trigger, but Tab focus can still escape behind the modal overlay to page content. A full tab-cycling trap (or a Headless UI/Radix Dialog) is needed for complete modal a11y.
