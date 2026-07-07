@@ -85,6 +85,20 @@
       "when": 1783410460288,
       "tag": "0011_chunky_the_twelve",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1783414560519,
+      "tag": "0012_smart_bastion",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1783415219893,
+      "tag": "0013_quick_random",
+      "breakpoints": true
     }
   ]
 }

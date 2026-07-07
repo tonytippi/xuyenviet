@@ -1,0 +1,2 @@
+CREATE UNIQUE INDEX "conversations_id_trip_project_user_id_idx" ON "conversations" USING btree ("id","trip_project_id","user_id");--> statement-breakpoint
+ALTER TABLE "chat_context" ADD CONSTRAINT "chat_context_conversation_trip_project_owner_fk" FOREIGN KEY ("conversation_id","trip_project_id","user_id") REFERENCES "public"."conversations"("id","trip_project_id","user_id") ON DELETE cascade ON UPDATE no action;

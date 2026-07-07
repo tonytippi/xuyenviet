@@ -16,6 +16,34 @@ export type AiUsageStatus = (typeof aiUsageStatusValues)[number];
 export const aiGatewayModelPurposeValues = ["ai_ask_initial_answer", "extraction", "embeddings", "evaluation"] as const;
 export type AiGatewayModelPurpose = (typeof aiGatewayModelPurposeValues)[number];
 
+export const chatContextFieldValues = [
+  "origin",
+  "destination",
+  "start_date",
+  "end_date",
+  "duration",
+  "adults",
+  "children",
+  "children_ages",
+  "budget",
+  "hotel_style",
+  "driving_tolerance",
+  "vehicle_needs",
+  "food_preferences",
+  "activity_preferences",
+  "itinerary_constraints",
+  "avoid_places",
+  "prior_trips",
+  "notes",
+] as const;
+export type ChatContextField = (typeof chatContextFieldValues)[number];
+
+export const chatContextScopeValues = ["conversation", "trip_project"] as const;
+export type ChatContextScope = (typeof chatContextScopeValues)[number];
+
+export const chatContextStatusValues = ["active", "deleted"] as const;
+export type ChatContextStatus = (typeof chatContextStatusValues)[number];
+
 export const users = pgTable("users", {
   id: text("id")
     .primaryKey()
@@ -207,6 +235,7 @@ export const conversations = pgTable(
       name: "conversations_trip_project_owner_fk",
     }).onDelete("set null"),
     uniqueIndex("conversations_id_user_id_idx").on(conversation.id, conversation.userId),
+    uniqueIndex("conversations_id_trip_project_user_id_idx").on(conversation.id, conversation.tripProjectId, conversation.userId),
     index("conversations_trip_project_id_idx").on(conversation.tripProjectId),
     index("conversations_user_id_trip_project_updated_at_idx").on(conversation.userId, conversation.tripProjectId, conversation.updatedAt),
     index("conversations_user_id_updated_at_idx").on(conversation.userId, conversation.updatedAt),
@@ -288,6 +317,66 @@ export const messageImageAttachments = pgTable(
     index("message_image_attachments_user_id_idx").on(attachment.userId),
     check("message_image_attachments_mime_type_check", sql`${attachment.mimeType} in ('image/jpeg', 'image/png', 'image/webp')`),
     check("message_image_attachments_byte_size_check", sql`${attachment.byteSize} > 0 and ${attachment.byteSize} <= 5242880`),
+  ],
+);
+
+export const chatContext = pgTable(
+  "chat_context",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    conversationId: text("conversation_id").notNull(),
+    tripProjectId: text("trip_project_id"),
+    sourceMessageId: text("source_message_id").notNull(),
+    field: text("field").$type<ChatContextField>().notNull(),
+    scope: text("scope").$type<ChatContextScope>().notNull(),
+    value: text("value").notNull(),
+    confidence: integer("confidence"),
+    status: text("status").$type<ChatContextStatus>().default("active").notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (context) => [
+    foreignKey({
+      columns: [context.conversationId, context.userId],
+      foreignColumns: [conversations.id, conversations.userId],
+      name: "chat_context_conversation_owner_fk",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [context.sourceMessageId, context.conversationId, context.userId],
+      foreignColumns: [messages.id, messages.conversationId, messages.userId],
+      name: "chat_context_source_message_owner_fk",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [context.tripProjectId, context.userId],
+      foreignColumns: [tripProjects.id, tripProjects.userId],
+      name: "chat_context_trip_project_owner_fk",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [context.conversationId, context.tripProjectId, context.userId],
+      foreignColumns: [conversations.id, conversations.tripProjectId, conversations.userId],
+      name: "chat_context_conversation_trip_project_owner_fk",
+    }).onDelete("cascade"),
+    index("chat_context_user_conversation_idx").on(context.userId, context.conversationId, context.createdAt),
+    index("chat_context_user_trip_project_idx").on(context.userId, context.tripProjectId, context.createdAt),
+    index("chat_context_source_message_id_idx").on(context.sourceMessageId),
+    index("chat_context_field_idx").on(context.field),
+    check(
+      "chat_context_field_check",
+      sql`${context.field} in ('origin', 'destination', 'start_date', 'end_date', 'duration', 'adults', 'children', 'children_ages', 'budget', 'hotel_style', 'driving_tolerance', 'vehicle_needs', 'food_preferences', 'activity_preferences', 'itinerary_constraints', 'avoid_places', 'prior_trips', 'notes')`,
+    ),
+    check("chat_context_scope_check", sql`${context.scope} in ('conversation', 'trip_project')`),
+    check("chat_context_status_check", sql`${context.status} in ('active', 'deleted')`),
+    check("chat_context_value_not_empty_check", sql`length(btrim(${context.value})) > 0`),
+    check("chat_context_confidence_check", sql`${context.confidence} is null or (${context.confidence} >= 0 and ${context.confidence} <= 100)`),
+    check(
+      "chat_context_scope_trip_project_check",
+      sql`(${context.scope} = 'conversation' and ${context.tripProjectId} is null) or (${context.scope} = 'trip_project' and ${context.tripProjectId} is not null)`,
+    ),
   ],
 );
 
@@ -432,6 +521,7 @@ export const schema = {
   conversations,
   messages,
   messageImageAttachments,
+  chatContext,
   aiGatewayModels,
   aiUsageEvents,
 };

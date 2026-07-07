@@ -5,8 +5,9 @@ import { conversations, messageImageAttachments, messages, tripProjects } from "
 import { streamInitialAiAskAnswer } from "@/features/ai/gateway";
 import { getAiGatewayPricingSnapshot, selectActiveAiGatewayModel } from "@/features/ai/models";
 import { aiAskInitialAnswerPromptVersion, aiAskInitialAnswerPurpose, buildAiAskMessages } from "@/features/ai/prompts";
+import { extractChatTripContext } from "@/features/chat-trips/context-extraction";
 import { writeAiUsageEvent } from "@/features/usage/events";
-import { getAuthenticatedSession } from "@/server/auth";
+import { getAuthenticatedSession, type AuthenticatedSession } from "@/server/auth";
 
 const maxQuestionLength = 2_000;
 const maxImageByteSize = 5 * 1024 * 1024;
@@ -116,7 +117,7 @@ async function streamAnswer({
   controller: ReadableStreamDefaultController<Uint8Array>;
   encoder: TextEncoder;
   abortSignal: AbortSignal;
-  session: { userId: string };
+  session: AuthenticatedSession;
   question: string;
   conversationId?: string;
   tripProjectId?: string;
@@ -185,6 +186,20 @@ async function streamAnswer({
     const pricingSnapshot = getAiGatewayPricingSnapshot(selectedModel);
     const gatewayMessages = buildAiAskMessages({ question, history: saved.history });
     const finalGatewayMessages = imageDataUrl ? attachImageToFinalUserMessage(gatewayMessages, imageDataUrl) : gatewayMessages;
+    void extractChatTripContext({
+      session,
+      conversationId: saved.conversationId,
+      tripProjectId,
+      userMessage: saved.userMessage,
+      history: saved.history,
+      abortSignal,
+    }).catch((error) => {
+      console.warn("Chat context extraction skipped after failure", {
+        conversationId: saved?.conversationId,
+        userMessageId: saved?.userMessage.id,
+        error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
+      });
+    });
     const gatewayResult = await streamInitialAiAskAnswer({
       model: selectedModel.gatewayModelName,
       messages: finalGatewayMessages,

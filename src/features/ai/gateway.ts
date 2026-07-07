@@ -45,6 +45,16 @@ export type AiGatewayStreamFailure = {
 
 export type AiGatewayStreamResult = AiGatewaySuccess | AiGatewayStreamFailure;
 
+export type AiGatewayExtractionFailure = {
+  ok: false;
+  provider: "ai_gateway";
+  model: string;
+  latencyMs: number;
+  errorCode: "gateway_http_error" | "gateway_network_error" | "invalid_gateway_response" | "client_stream_aborted";
+};
+
+export type AiGatewayExtractionResult = AiGatewaySuccess | AiGatewayExtractionFailure;
+
 export async function streamInitialAiAskAnswer({
   model,
   messages,
@@ -147,6 +157,100 @@ export async function streamInitialAiAskAnswer({
   }
 }
 
+export async function completeExtraction({
+  model,
+  messages,
+  abortSignal,
+}: {
+  model: string;
+  messages: GatewayMessage[];
+  abortSignal?: AbortSignal;
+}): Promise<AiGatewayExtractionResult> {
+  const startedAt = Date.now();
+  const controller = new AbortController();
+  const gatewayTimeoutMs = getGatewayTimeoutMs();
+  const timeout = setTimeout(() => controller.abort(), gatewayTimeoutMs);
+
+  const onExternalAbort = () => controller.abort();
+
+  if (abortSignal) {
+    if (abortSignal.aborted) {
+      controller.abort();
+    } else {
+      abortSignal.addEventListener("abort", onExternalAbort, { once: true });
+    }
+  }
+
+  try {
+    const response = await fetch(buildGatewayUrl(), {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        authorization: `Bearer ${getRequiredServerEnv("AI_GATEWAY_API_KEY")}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        max_tokens: 700,
+        temperature: 0,
+        stream: false,
+      }),
+    });
+
+    const latencyMs = Date.now() - startedAt;
+
+    if (!response.ok) {
+      logGatewayFailure({ errorCode: "gateway_http_error", latencyMs, model, timeoutMs: gatewayTimeoutMs, status: response.status, statusText: response.statusText, purpose: "extraction" });
+
+      return { ok: false, provider: "ai_gateway", model, latencyMs, errorCode: "gateway_http_error" };
+    }
+
+    const payload = await response.json().catch(() => null) as unknown;
+    const content = parseCompletionContent(payload);
+
+    if (!content) {
+      logGatewayFailure({ errorCode: "invalid_gateway_response", latencyMs, model, timeoutMs: gatewayTimeoutMs, reason: "missing_completion_content", purpose: "extraction" });
+
+      return { ok: false, provider: "ai_gateway", model, latencyMs, errorCode: "invalid_gateway_response" };
+    }
+
+    return {
+      ok: true,
+      content,
+      provider: "ai_gateway",
+      model: parseModel(payload) ?? model,
+      latencyMs,
+      usage: parseUsage(payload),
+    };
+  } catch (error) {
+    const latencyMs = Date.now() - startedAt;
+
+    if (abortSignal?.aborted) {
+      logGatewayFailure({ errorCode: "client_stream_aborted", latencyMs, model, timeoutMs: gatewayTimeoutMs, reason: "client_aborted", purpose: "extraction" });
+
+      return { ok: false, provider: "ai_gateway", model, latencyMs, errorCode: "client_stream_aborted" };
+    }
+
+    logGatewayFailure({
+      errorCode: "gateway_network_error",
+      latencyMs,
+      model,
+      timeoutMs: gatewayTimeoutMs,
+      reason: error instanceof Error ? error.name : "unknown_error",
+      message: error instanceof Error ? error.message : undefined,
+      purpose: "extraction",
+    });
+
+    return { ok: false, provider: "ai_gateway", model, latencyMs, errorCode: "gateway_network_error" };
+  } finally {
+    if (abortSignal) {
+      abortSignal.removeEventListener("abort", onExternalAbort);
+    }
+    clearTimeout(timeout);
+  }
+}
+
 function buildGatewayUrl() {
   return `${getRequiredServerEnv("AI_GATEWAY_BASE_URL").replace(/\/+$/, "")}/chat/completions`;
 }
@@ -168,7 +272,7 @@ function getGatewayTimeoutMs() {
 }
 
 function logGatewayFailure(details: {
-  errorCode: AiGatewayStreamFailure["errorCode"];
+  errorCode: AiGatewayStreamFailure["errorCode"] | AiGatewayExtractionFailure["errorCode"];
   latencyMs: number;
   model: string;
   timeoutMs: number;
@@ -176,8 +280,9 @@ function logGatewayFailure(details: {
   statusText?: string;
   reason?: string;
   message?: string;
+  purpose?: "answer" | "extraction";
 }) {
-  console.warn("AI Gateway answer generation failed", {
+  console.warn(details.purpose === "extraction" ? "AI Gateway extraction failed" : "AI Gateway answer generation failed", {
     errorCode: details.errorCode,
     latencyMs: details.latencyMs,
     model: details.model,
@@ -302,6 +407,20 @@ async function processStreamLine(line: string, onDelta: (delta: string) => Promi
   } catch {
     return { content: "", model: null, usage: emptyUsage, failed: true, done: false, finishReason: null };
   }
+}
+
+function parseCompletionContent(payload: unknown) {
+  if (!isRecord(payload) || !Array.isArray(payload.choices)) {
+    return null;
+  }
+
+  const [choice] = payload.choices;
+
+  if (!isRecord(choice) || !isRecord(choice.message) || typeof choice.message.content !== "string") {
+    return null;
+  }
+
+  return choice.message.content.trim() || null;
 }
 
 function parseStreamDelta(payload: unknown) {
