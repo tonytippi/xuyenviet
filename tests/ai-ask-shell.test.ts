@@ -453,9 +453,10 @@ describe("AI Ask streaming route", () => {
     await createTestUser("user-1");
     await createDefaultAiAskModel({ supportsStreaming: true });
     const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
+    const seededHistoryTime = new Date("2026-07-01T00:00:00.000Z");
     await testDb.insert(messages).values([
-      { conversationId: conversation.id, userId: "user-1", role: "user", content: "Hà Nội đi Huế 5 ngày?" },
-      { conversationId: conversation.id, userId: "user-1", role: "assistant", content: "Kế hoạch gợi ý:\nNên chia chặng." },
+      { conversationId: conversation.id, userId: "user-1", role: "user", content: "Hà Nội đi Huế 5 ngày?", createdAt: seededHistoryTime },
+      { conversationId: conversation.id, userId: "user-1", role: "assistant", content: "Kế hoạch gợi ý:\nNên chia chặng.", createdAt: new Date(seededHistoryTime.getTime() + 60_000) },
     ]);
     const fetchMock = vi.fn().mockResolvedValue(new Response([
       'data: {"model":"stream-model","choices":[{"delta":{"content":"Bước tiếp theo:"}}]}\n\n',

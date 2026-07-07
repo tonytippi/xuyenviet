@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 
 import { AiAskComposer } from "@/features/ai/ai-ask-composer";
 import { signOutCurrentUser } from "@/features/auth/actions";
-import { getOwnedConversation } from "@/features/chat-trips/conversations";
+import { getOwnedConversation, listOwnedConversations } from "@/features/chat-trips/conversations";
 import { getAuthenticatedSession } from "@/server/auth";
 
 type AiAskPageProps = {
@@ -43,6 +43,7 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
   }
 
   const loadedConversation = requestedConversationId ? await getOwnedConversation(requestedConversationId) : null;
+  const initialSessions = (await listOwnedConversations()) ?? [];
 
   return (
     <main className="min-h-screen px-5 py-6 sm:px-8 lg:px-12">
@@ -65,40 +66,23 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
           </div>
         </header>
 
-        <div className="grid flex-1 gap-5 lg:grid-cols-[minmax(0,1fr)_22rem]">
-          <div className="flex min-h-[34rem] flex-col justify-between gap-5 rounded-[1.5rem] border border-[#d8c9ad] bg-[#fffdf8]/80 p-4 sm:p-5">
-            <div className="mx-auto flex w-full max-w-[760px] flex-1 flex-col justify-center gap-5 py-8 text-center">
-              <p className="mx-auto w-fit rounded-full border border-[#c47a24]/45 bg-[#fff8ec] px-4 py-2 text-sm font-semibold text-[#8c4f13]">
-                Bắt đầu bằng một câu hỏi hành trình
-              </p>
-              <h2 className="text-3xl font-semibold tracking-[-0.03em] text-[#17342c] sm:text-4xl">Bạn đang muốn đi đâu?</h2>
-              <p className="text-base leading-7 text-[#4f625a] sm:text-lg">
-                Ví dụ: Hà Nội đi Đà Nẵng 7 ngày cùng gia đình. Hãy hỏi rộng trước; hội thoại hiện tại sẽ được nối tiếp để bạn tinh chỉnh kế hoạch.
-              </p>
-              <div className="rounded-2xl border border-dashed border-[#d8c9ad] bg-white/65 p-5 text-left" aria-label={loadedConversation ? "Khu vực tin nhắn đã tải" : "Khu vực tin nhắn đang chờ câu hỏi đầu tiên"}>
-                <p className="text-sm font-semibold text-[#17342c]">Khu vực hội thoại</p>
-                <p className="mt-2 text-sm leading-6 text-[#5d6f67]">
-                  {loadedConversation ? "Tin nhắn đã lưu được tải theo thứ tự thời gian. Bạn có thể tiếp tục hỏi trong cùng hội thoại." : "Chưa có tin nhắn. Câu trả lời thật và nguồn tham chiếu sẽ xuất hiện ở các story sau, không hiển thị dữ liệu giả ở bước này."}
-                </p>
-              </div>
-            </div>
-
-            <AiAskComposer
-              key={loadedConversation?.id || "new-conversation"}
-              initialConversationId={loadedConversation?.id}
-              initialMessages={loadedConversation?.messages.map((message) => ({
-                id: message.id,
-                role: message.role,
-                content: message.content,
-                imageAttachments: message.imageAttachments.map((attachment) => ({
-                  id: attachment.id,
-                  originalFileName: attachment.originalFileName,
-                  mimeType: attachment.mimeType,
-                  byteSize: attachment.byteSize,
-                })),
-              }))}
-            />
-          </div>
+        <div className="grid flex-1 gap-5 lg:grid-cols-[18rem_minmax(0,1fr)_22rem]">
+          <AiAskComposer
+            key={loadedConversation?.id || "new-conversation"}
+            initialConversationId={loadedConversation?.id}
+            initialMessages={loadedConversation?.messages.map((message) => ({
+              id: message.id,
+              role: message.role,
+              content: message.content,
+              imageAttachments: message.imageAttachments.map((attachment) => ({
+                id: attachment.id,
+                originalFileName: attachment.originalFileName,
+                mimeType: attachment.mimeType,
+                byteSize: attachment.byteSize,
+              })),
+            }))}
+            initialSessions={initialSessions}
+          />
 
           <aside className="flex flex-col gap-4">
             <section className="rounded-[1.5rem] border border-[#d8c9ad] bg-white/75 p-5">

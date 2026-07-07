@@ -1,10 +1,19 @@
 import "server-only";
 
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
 import { conversations, messageImageAttachments, messages } from "@/db/schema";
 import { getAuthenticatedSession } from "@/server/auth";
+
+const newConversationPreview = "Hội thoại mới";
+const previewMaxLength = 60;
+
+export type OwnedConversationSummary = {
+  id: string;
+  updatedAt: Date;
+  preview: string;
+};
 
 export async function getOwnedConversation(conversationId: string) {
   const session = await getAuthenticatedSession();
@@ -54,4 +63,58 @@ export async function getOwnedConversation(conversationId: string) {
       imageAttachments: attachmentsByMessageId.get(message.id) ?? [],
     })),
   };
+}
+
+export async function listOwnedConversations(): Promise<OwnedConversationSummary[] | null> {
+  const session = await getAuthenticatedSession();
+
+  if (!session) {
+    return null;
+  }
+
+  const rows = await getDb()
+    .select({
+      id: conversations.id,
+      updatedAt: conversations.updatedAt,
+      messageContent: messages.content,
+    })
+    .from(conversations)
+    .leftJoin(
+      messages,
+      and(
+        eq(messages.conversationId, conversations.id),
+        eq(messages.userId, session.userId),
+        eq(messages.role, "user"),
+      ),
+    )
+    .where(eq(conversations.userId, session.userId))
+    .orderBy(desc(conversations.updatedAt), desc(conversations.id), asc(messages.createdAt), asc(messages.id));
+
+  const seenConversationIds = new Set<string>();
+  const summaries: OwnedConversationSummary[] = [];
+
+  for (const row of rows) {
+    if (seenConversationIds.has(row.id)) {
+      continue;
+    }
+
+    seenConversationIds.add(row.id);
+    summaries.push({ id: row.id, updatedAt: row.updatedAt, preview: formatPreview(row.messageContent) });
+  }
+
+  return summaries;
+}
+
+function formatPreview(content: string | null): string {
+  if (!content) {
+    return newConversationPreview;
+  }
+
+  const trimmed = content.trim();
+
+  if (trimmed.length <= previewMaxLength) {
+    return trimmed;
+  }
+
+  return `${trimmed.slice(0, previewMaxLength).trimEnd()}…`;
 }

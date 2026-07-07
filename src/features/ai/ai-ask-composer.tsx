@@ -1,10 +1,14 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
+
+import { ConversationList, type ChatSessionSummary } from "@/features/chat-trips/conversation-list";
 
 const maxQuestionLength = 2_000;
 const maxImageByteSize = 5 * 1024 * 1024;
 const progressDelayMs = 4_000;
+const previewMaxLength = 60;
 
 type DisplayMessage = {
   id: string;
@@ -21,6 +25,7 @@ type DisplayMessage = {
 type AiAskComposerProps = {
   initialConversationId?: string;
   initialMessages?: DisplayMessage[];
+  initialSessions?: ChatSessionSummary[];
 };
 
 function getUnansweredUserMessageIds(messages: DisplayMessage[]) {
@@ -103,7 +108,8 @@ export function AssistantMessageContent({ content }: { content: string }) {
   );
 }
 
-export function AiAskComposer({ initialConversationId, initialMessages = [] }: AiAskComposerProps) {
+export function AiAskComposer({ initialConversationId, initialMessages = [], initialSessions = [] }: AiAskComposerProps) {
+  const router = useRouter();
   const [question, setQuestion] = useState("");
   const [status, setStatus] = useState(initialMessages.length > 0 ? "Đã tải hội thoại. Bạn có thể tiếp tục kế hoạch." : "Nhập câu hỏi về chuyến đi đường bộ của bạn.");
   const [isPending, setIsPending] = useState(false);
@@ -115,11 +121,16 @@ export function AiAskComposer({ initialConversationId, initialMessages = [] }: A
   const [failedQuestionIds, setFailedQuestionIds] = useState<string[]>(() => getUnansweredUserMessageIds(initialMessages));
   const [messages, setMessages] = useState<DisplayMessage[]>(initialMessages);
   const [conversationId, setConversationId] = useState(initialConversationId);
+  const [sessions, setSessions] = useState<ChatSessionSummary[]>(initialSessions);
+  const [isSessionSheetOpen, setSessionSheetOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const isSubmittingRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const sessionSheetTriggerRef = useRef<HTMLButtonElement>(null);
+  const sessionSheetPanelRef = useRef<HTMLDivElement>(null);
+  const sessionSheetPreviousFocusRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     return () => {
@@ -168,6 +179,28 @@ export function AiAskComposer({ initialConversationId, initialMessages = [] }: A
     return () => URL.revokeObjectURL(url);
   }, [selectedImage]);
 
+  useEffect(() => {
+    if (!isSessionSheetOpen) {
+      return;
+    }
+
+    sessionSheetPreviousFocusRef.current = (document.activeElement as HTMLElement | null) ?? null;
+    sessionSheetPanelRef.current?.focus();
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setSessionSheetOpen(false);
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      sessionSheetPreviousFocusRef.current?.focus();
+    };
+  }, [isSessionSheetOpen]);
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -215,12 +248,18 @@ export function AiAskComposer({ initialConversationId, initialMessages = [] }: A
         const failedUserMessage = result.userMessage;
 
         if (result.conversationId && failedUserMessage) {
-          setConversationId(result.conversationId);
+          const newConversationId = result.conversationId;
+          setConversationId(newConversationId);
           setFailedQuestionIds((currentIds) => [...currentIds, failedUserMessage.id]);
           setMessages((currentMessages) => [
             ...currentMessages,
             { id: failedUserMessage.id, role: "user", content: failedUserMessage.content },
           ]);
+          if (!hadConversation) {
+            setSessions((currentSessions) => [summarizeSession(newConversationId, trimmedQuestion), ...currentSessions]);
+          } else {
+            setSessions((currentSessions) => moveSessionToTop(currentSessions, newConversationId));
+          }
         }
         setStatus(`${result.errorMessage} Chưa có câu trả lời trợ lý nào được lưu cho lượt này.`);
         return;
@@ -235,8 +274,15 @@ export function AiAskComposer({ initialConversationId, initialMessages = [] }: A
       setQuestion("");
       setSelectedImage(null);
       setStatus(hadConversation ? "Đã cập nhật hội thoại của bạn." : "Đã tạo câu trả lời đầu tiên cho chuyến đi của bạn.");
-    } catch {
-      setStatus("Không thể gửi câu hỏi lúc này. Hãy kiểm tra đăng nhập và thử lại. Nội dung vẫn còn trong ô nhập.");
+      if (!hadConversation) {
+        setSessions((currentSessions) => [summarizeSession(result.conversationId, trimmedQuestion), ...currentSessions]);
+      } else {
+        setSessions((currentSessions) => moveSessionToTop(currentSessions, result.conversationId));
+      }
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === "AbortError")) {
+        setStatus("Không thể gửi câu hỏi lúc này. Hãy kiểm tra đăng nhập và thử lại. Nội dung vẫn còn trong ô nhập.");
+      }
     } finally {
       isSubmittingRef.current = false;
       setIsPending(false);
@@ -282,119 +328,199 @@ export function AiAskComposer({ initialConversationId, initialMessages = [] }: A
     }
   }
 
+  function handleSelectSession(id: string) {
+    setSessionSheetOpen(false);
+    router.push(`/ai-ask?conversationId=${encodeURIComponent(id)}`);
+  }
+
+  function handleNewChat() {
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    setSessionSheetOpen(false);
+    setMessages([]);
+    setConversationId(undefined);
+    setQuestion("");
+    setStatus("Nhập câu hỏi về chuyến đi đường bộ của bạn.");
+    setFailedQuestionIds([]);
+    setSelectedImage(null);
+    if (imageInputRef.current) {
+      imageInputRef.current.value = "";
+    }
+    router.push("/ai-ask");
+  }
+
   return (
-    <div className="space-y-4">
-      {messages.length > 0 ? (
-        <section aria-label="Lịch sử hội thoại" aria-live="polite" className="mx-auto max-w-[760px] space-y-4">
-          {messages.map((message) => (
-            <article
-              className={
-                message.role === "assistant"
-                  ? "rounded-[1.5rem] border border-[#d8c9ad] bg-[#fffdf8] p-5 text-[#17342c] shadow-[0_16px_40px_rgba(41,33,18,0.08)]"
-                  : "ml-auto rounded-[1.25rem] bg-[#1f5f46] p-4 text-white shadow-[0_12px_30px_rgba(31,95,70,0.18)] sm:max-w-[80%]"
-              }
-              key={message.id}
-            >
-              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] opacity-75">
-                {message.role === "assistant" ? "Trợ lý XuyenViet" : "Bạn"}
-              </p>
-              {message.role === "assistant" ? <AssistantMessageContent content={message.content} /> : <p className="whitespace-pre-wrap text-base leading-7">{message.content}</p>}
-              {message.role === "user" && message.imageAttachments && message.imageAttachments.length > 0 ? (
-                <p className="mt-2 rounded-lg bg-white/15 text-xs font-semibold uppercase tracking-[0.12em]">
-                  Đã kèm ảnh: {message.imageAttachments.map((attachment) => attachment.originalFileName || "ảnh đính kèm").join(", ")}
-                </p>
-              ) : null}
-              {failedQuestionIds.includes(message.id) ? (
-                <div className="mt-3 rounded-2xl border border-[#f0c8a0] bg-[#fff7ed] p-3 text-sm leading-6 text-[#6f3f12]" role="status">
-                  Trợ lý chưa tạo được câu trả lời cho lượt này. Tin nhắn của bạn đã được lưu; hãy chỉnh câu hỏi trong ô nhập rồi gửi lại khi sẵn sàng.
-                </div>
-              ) : null}
-            </article>
-          ))}
-        </section>
-      ) : null}
-
-      {isPending ? (
-        <section aria-live="polite" className="mx-auto max-w-[760px] rounded-[1.5rem] border border-dashed border-[#d8c9ad] bg-[#fffdf8] p-4 text-[#17342c] shadow-[0_12px_30px_rgba(41,33,18,0.06)]">
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#1f5f46]">Đang xử lý</p>
-          <p className="mt-2 text-base font-semibold">Trợ lý đang chuẩn bị câu trả lời cho câu hỏi của bạn.</p>
-          <p className="mt-2 text-sm leading-6 text-[#4f625a]">
-            {showProgress
-              ? "Quá trình đang lâu hơn bình thường một chút. Mình vẫn đang chờ kết quả từ hệ thống AI và chưa tạo nội dung trợ lý tạm thời."
-              : "Mình đã nhận câu hỏi và đang gửi đến hệ thống AI. Vui lòng không gửi lặp lại trong lúc chờ."}
-          </p>
-          {pendingQuestion ? <p className="mt-3 rounded-2xl bg-white/80 p-3 text-sm leading-6 text-[#4f625a]">“{pendingQuestion}”</p> : null}
-          {streamingContent ? (
-            <div className="mt-3 rounded-2xl border border-[#d8c9ad] bg-white/90 p-3 text-sm leading-6 text-[#17342c]">
-              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#1f5f46]">Đang nhận từng phần</p>
-              <p className="whitespace-pre-wrap">{streamingContent}</p>
-            </div>
-          ) : null}
-        </section>
-      ) : null}
-
-      <form className="rounded-[1.5rem] border border-[#d8c9ad] bg-white/80 p-4 shadow-[0_16px_40px_rgba(41,33,18,0.08)]" onSubmit={handleSubmit} ref={formRef}>
-        <label className="text-sm font-semibold text-[#17342c]" htmlFor="ai-ask-question">
-          Câu hỏi của bạn
-        </label>
-        <textarea
-          className="mt-3 min-h-32 w-full resize-y rounded-2xl border border-[#d8c9ad] bg-[#fffdf8] px-4 py-3 text-base leading-7 text-[#17342c] outline-none transition placeholder:text-[#7b8b84] focus:border-[#1f5f46] focus:ring-4 focus:ring-[#8fb59f]/45"
-          disabled={isPending}
-          aria-describedby="ai-ask-status ai-ask-shortcuts"
-          id="ai-ask-question"
-          maxLength={maxQuestionLength + 1}
-          onChange={(event) => setQuestion(event.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Ví dụ: Hà Nội đi Đà Nẵng 7 ngày cùng gia đình nên dừng ở đâu?"
-          ref={textareaRef}
-          value={question}
+    <>
+      <nav aria-label="Danh sách trò chuyện" className="hidden lg:block">
+        <ConversationList
+          sessions={sessions}
+          activeConversationId={conversationId}
+          onSelect={handleSelectSession}
+          onNewChat={handleNewChat}
         />
-        <div className="mt-3 rounded-2xl border border-dashed border-[#d8c9ad] bg-[#fffdf8] p-3">
-          <label className="text-sm font-semibold text-[#17342c]" htmlFor="ai-ask-image">
-            Ảnh tham khảo tuỳ chọn
-          </label>
-          <input
-            accept="image/jpeg,image/png,image/webp"
-            className="mt-2 block w-full text-sm text-[#4f625a] file:mr-3 file:min-h-11 file:rounded-xl file:border-0 file:bg-[#e5bd82] file:px-4 file:py-2 file:font-semibold file:text-[#17342c]"
-            disabled={isPending}
-            id="ai-ask-image"
-            onChange={handleImageChange}
-            ref={imageInputRef}
-            type="file"
-          />
-          <p className="mt-2 text-xs leading-5 text-[#6b7c75]">Hỗ trợ JPEG, PNG hoặc WebP tối đa 5MB. Ảnh chỉ được gửi qua AI Gateway khi model đã bật khả năng nhận ảnh.</p>
-          {selectedImage ? (
-            <div className="mt-3 flex flex-col gap-2 rounded-xl bg-white/80 p-3 text-sm leading-6 text-[#4f625a] sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex items-center gap-3">
-                {imageUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img alt={selectedImage.name || "ảnh đính kèm"} className="h-12 w-12 rounded-lg border border-[#d8c9ad] object-cover" src={imageUrl} />
-                ) : null}
-                <span className="min-w-0 break-words">
-                  Đã chọn: {selectedImage.name || "ảnh đính kèm"} ({selectedImage.type}, {formatImageSize(selectedImage.size)})
-                </span>
-              </div>
-              <button className="min-h-11 rounded-xl border border-[#d8c9ad] px-3 py-2 font-semibold text-[#17342c]" disabled={isPending} onClick={clearSelectedImage} type="button">
-                Bỏ ảnh
-              </button>
-            </div>
-          ) : null}
-        </div>
-        <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <p aria-live="polite" className="text-sm leading-6 text-[#4f625a]" id="ai-ask-status">
-            {status}
-          </p>
+      </nav>
+
+      <div className="flex min-h-[34rem] flex-col justify-between gap-5 rounded-[1.5rem] border border-[#d8c9ad] bg-[#fffdf8]/80 p-4 sm:p-5">
+        <div className="flex items-center justify-between gap-3 lg:hidden">
           <button
-            className="min-h-12 rounded-2xl bg-[#1f5f46] px-5 py-3 text-base font-semibold text-white shadow-[0_12px_30px_rgba(31,95,70,0.24)] transition hover:bg-[#194d39] focus:outline-none focus:ring-4 focus:ring-[#8fb59f] disabled:cursor-not-allowed disabled:bg-[#8aa89b]"
-            disabled={isPending}
-            type="submit"
+            ref={sessionSheetTriggerRef}
+            type="button"
+            onClick={() => setSessionSheetOpen(true)}
+            className="min-h-11 rounded-2xl border border-[#d8c9ad] bg-white/75 px-4 py-2 text-sm font-semibold text-[#17342c] transition hover:bg-white focus:outline-none focus:ring-4 focus:ring-[#e5bd82]"
           >
-            {isPending ? "Đang gửi, vui lòng chờ" : "Gửi câu hỏi"}
+            Danh sách trò chuyện
           </button>
         </div>
-        <p className="mt-2 text-xs leading-5 text-[#6b7c75]" id="ai-ask-shortcuts">Enter để gửi, Shift+Enter để xuống dòng, nhấn / để focus ô nhập.</p>
-      </form>
-    </div>
+
+        <div className="mx-auto flex w-full max-w-[760px] flex-1 flex-col justify-center gap-5 py-8 text-center">
+          <p className="mx-auto w-fit rounded-full border border-[#c47a24]/45 bg-[#fff8ec] px-4 py-2 text-sm font-semibold text-[#8c4f13]">
+            Bắt đầu bằng một câu hỏi hành trình
+          </p>
+          <h2 className="text-3xl font-semibold tracking-[-0.03em] text-[#17342c] sm:text-4xl">Bạn đang muốn đi đâu?</h2>
+          <p className="text-base leading-7 text-[#4f625a] sm:text-lg">
+            Ví dụ: Hà Nội đi Đà Nẵng 7 ngày cùng gia đình. Hãy hỏi rộng trước; hội thoại hiện tại sẽ được nối tiếp để bạn tinh chỉnh kế hoạch.
+          </p>
+          <div className="rounded-2xl border border-dashed border-[#d8c9ad] bg-white/65 p-5 text-left" aria-label={initialConversationId ? "Khu vực tin nhắn đã tải" : "Khu vực tin nhắn đang chờ câu hỏi đầu tiên"}>
+            <p className="text-sm font-semibold text-[#17342c]">Khu vực hội thoại</p>
+            <p className="mt-2 text-sm leading-6 text-[#5d6f67]">
+              {initialConversationId ? "Tin nhắn đã lưu được tải theo thứ tự thời gian. Bạn có thể tiếp tục hỏi trong cùng hội thoại." : "Chưa có tin nhắn. Câu trả lời thật và nguồn tham chiếu sẽ xuất hiện ở các story sau, không hiển thị dữ liệu giả ở bước này."}
+            </p>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          {messages.length > 0 ? (
+            <section aria-label="Lịch sử hội thoại" aria-live="polite" className="mx-auto max-w-[760px] space-y-4">
+              {messages.map((message) => (
+                <article
+                  className={
+                    message.role === "assistant"
+                      ? "rounded-[1.5rem] border border-[#d8c9ad] bg-[#fffdf8] p-5 text-[#17342c] shadow-[0_16px_40px_rgba(41,33,18,0.08)]"
+                      : "ml-auto rounded-[1.25rem] bg-[#1f5f46] p-4 text-white shadow-[0_12px_30px_rgba(31,95,70,0.18)] sm:max-w-[80%]"
+                  }
+                  key={message.id}
+                >
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] opacity-75">
+                    {message.role === "assistant" ? "Trợ lý XuyenViet" : "Bạn"}
+                  </p>
+                  {message.role === "assistant" ? <AssistantMessageContent content={message.content} /> : <p className="whitespace-pre-wrap text-base leading-7">{message.content}</p>}
+                  {message.role === "user" && message.imageAttachments && message.imageAttachments.length > 0 ? (
+                    <p className="mt-2 rounded-lg bg-white/15 text-xs font-semibold uppercase tracking-[0.12em]">
+                      Đã kèm ảnh: {message.imageAttachments.map((attachment) => attachment.originalFileName || "ảnh đính kèm").join(", ")}
+                    </p>
+                  ) : null}
+                  {failedQuestionIds.includes(message.id) ? (
+                    <div className="mt-3 rounded-2xl border border-[#f0c8a0] bg-[#fff7ed] p-3 text-sm leading-6 text-[#6f3f12]" role="status">
+                      Trợ lý chưa tạo được câu trả lời cho lượt này. Tin nhắn của bạn đã được lưu; hãy chỉnh câu hỏi trong ô nhập rồi gửi lại khi sẵn sàng.
+                    </div>
+                  ) : null}
+                </article>
+              ))}
+            </section>
+          ) : null}
+
+          {isPending ? (
+            <section aria-live="polite" className="mx-auto max-w-[760px] rounded-[1.5rem] border border-dashed border-[#d8c9ad] bg-[#fffdf8] p-4 text-[#17342c] shadow-[0_12px_30px_rgba(41,33,18,0.06)]">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#1f5f46]">Đang xử lý</p>
+              <p className="mt-2 text-base font-semibold">Trợ lý đang chuẩn bị câu trả lời cho câu hỏi của bạn.</p>
+              <p className="mt-2 text-sm leading-6 text-[#4f625a]">
+                {showProgress
+                  ? "Quá trình đang lâu hơn bình thường một chút. Mình vẫn đang chờ kết quả từ hệ thống AI và chưa tạo nội dung trợ lý tạm thời."
+                  : "Mình đã nhận câu hỏi và đang gửi đến hệ thống AI. Vui lòng không gửi lặp lại trong lúc chờ."}
+              </p>
+              {pendingQuestion ? <p className="mt-3 rounded-2xl bg-white/80 p-3 text-sm leading-6 text-[#4f625a]">“{pendingQuestion}”</p> : null}
+              {streamingContent ? (
+                <div className="mt-3 rounded-2xl border border-[#d8c9ad] bg-white/90 p-3 text-sm leading-6 text-[#17342c]">
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#1f5f46]">Đang nhận từng phần</p>
+                  <p className="whitespace-pre-wrap">{streamingContent}</p>
+                </div>
+              ) : null}
+            </section>
+          ) : null}
+
+          <form className="rounded-[1.5rem] border border-[#d8c9ad] bg-white/80 p-4 shadow-[0_16px_40px_rgba(41,33,18,0.08)]" onSubmit={handleSubmit} ref={formRef}>
+            <label className="text-sm font-semibold text-[#17342c]" htmlFor="ai-ask-question">
+              Câu hỏi của bạn
+            </label>
+            <textarea
+              className="mt-3 min-h-32 w-full resize-y rounded-2xl border border-[#d8c9ad] bg-[#fffdf8] px-4 py-3 text-base leading-7 text-[#17342c] outline-none transition placeholder:text-[#7b8b84] focus:border-[#1f5f46] focus:ring-4 focus:ring-[#8fb59f]/45"
+              disabled={isPending}
+              aria-describedby="ai-ask-status ai-ask-shortcuts"
+              id="ai-ask-question"
+              maxLength={maxQuestionLength + 1}
+              onChange={(event) => setQuestion(event.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Ví dụ: Hà Nội đi Đà Nẵng 7 ngày cùng gia đình nên dừng ở đâu?"
+              ref={textareaRef}
+              value={question}
+            />
+            <div className="mt-3 rounded-2xl border border-dashed border-[#d8c9ad] bg-[#fffdf8] p-3">
+              <label className="text-sm font-semibold text-[#17342c]" htmlFor="ai-ask-image">
+                Ảnh tham khảo tuỳ chọn
+              </label>
+              <input
+                accept="image/jpeg,image/png,image/webp"
+                className="mt-2 block w-full text-sm text-[#4f625a] file:mr-3 file:min-h-11 file:rounded-xl file:border-0 file:bg-[#e5bd82] file:px-4 file:py-2 file:font-semibold file:text-[#17342c]"
+                disabled={isPending}
+                id="ai-ask-image"
+                onChange={handleImageChange}
+                ref={imageInputRef}
+                type="file"
+              />
+              <p className="mt-2 text-xs leading-5 text-[#6b7c75]">Hỗ trợ JPEG, PNG hoặc WebP tối đa 5MB. Ảnh chỉ được gửi qua AI Gateway khi model đã bật khả năng nhận ảnh.</p>
+              {selectedImage ? (
+                <div className="mt-3 flex flex-col gap-2 rounded-xl bg-white/80 p-3 text-sm leading-6 text-[#4f625a] sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-3">
+                    {imageUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img alt={selectedImage.name || "ảnh đính kèm"} className="h-12 w-12 rounded-lg border border-[#d8c9ad] object-cover" src={imageUrl} />
+                    ) : null}
+                    <span className="min-w-0 break-words">
+                      Đã chọn: {selectedImage.name || "ảnh đính kèm"} ({selectedImage.type}, {formatImageSize(selectedImage.size)})
+                    </span>
+                  </div>
+                  <button className="min-h-11 rounded-xl border border-[#d8c9ad] px-3 py-2 font-semibold text-[#17342c]" disabled={isPending} onClick={clearSelectedImage} type="button">
+                    Bỏ ảnh
+                  </button>
+                </div>
+              ) : null}
+            </div>
+            <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <p aria-live="polite" className="text-sm leading-6 text-[#4f625a]" id="ai-ask-status">
+                {status}
+              </p>
+              <button
+                className="min-h-12 rounded-2xl bg-[#1f5f46] px-5 py-3 text-base font-semibold text-white shadow-[0_12px_30px_rgba(31,95,70,0.24)] transition hover:bg-[#194d39] focus:outline-none focus:ring-4 focus:ring-[#8fb59f] disabled:cursor-not-allowed disabled:bg-[#8aa89b]"
+                disabled={isPending}
+                type="submit"
+              >
+                {isPending ? "Đang gửi, vui lòng chờ" : "Gửi câu hỏi"}
+              </button>
+            </div>
+            <p className="mt-2 text-xs leading-5 text-[#6b7c75]" id="ai-ask-shortcuts">Enter để gửi, Shift+Enter để xuống dòng, nhấn / để focus ô nhập.</p>
+          </form>
+        </div>
+
+        {isSessionSheetOpen ? (
+          <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true" aria-label="Danh sách trò chuyện">
+            <button
+              type="button"
+              aria-label="Đóng danh sách trò chuyện"
+              onClick={() => setSessionSheetOpen(false)}
+              className="absolute inset-0 bg-[#17342c]/40"
+            />
+            <div ref={sessionSheetPanelRef} tabIndex={-1} className="absolute left-0 top-0 h-full w-80 max-w-[85%] rounded-r-[1.5rem] border-r border-[#d8c9ad] bg-[#fffdf8] p-3 shadow-[0_24px_80px_rgba(41,33,18,0.24)]">
+              <ConversationList
+                sessions={sessions}
+                activeConversationId={conversationId}
+                onSelect={handleSelectSession}
+                onNewChat={handleNewChat}
+              />
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </>
   );
 }
 
@@ -512,4 +638,28 @@ function formatImageSize(bytes: number) {
   }
 
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function summarizeSession(id: string, question: string): ChatSessionSummary {
+  return { id, updatedAt: new Date(), preview: formatPreviewText(question) };
+}
+
+function moveSessionToTop(sessions: ChatSessionSummary[], id: string): ChatSessionSummary[] {
+  const index = sessions.findIndex((session) => session.id === id);
+
+  if (index === -1) {
+    return sessions;
+  }
+
+  return [{ ...sessions[index], updatedAt: new Date() }, ...sessions.slice(0, index), ...sessions.slice(index + 1)];
+}
+
+function formatPreviewText(content: string): string {
+  const trimmed = content.trim();
+
+  if (trimmed.length <= previewMaxLength) {
+    return trimmed;
+  }
+
+  return `${trimmed.slice(0, previewMaxLength).trimEnd()}…`;
 }

@@ -23,6 +23,23 @@ vi.stubGlobal(
 );
 
 beforeEach(async () => {
+  vi.doMock("next/navigation", () => {
+    const router = {
+      push: vi.fn(),
+      replace: vi.fn(),
+      back: vi.fn(),
+      forward: vi.fn(),
+      refresh: vi.fn(),
+      prefetch: vi.fn(),
+    };
+
+    return {
+      redirect: vi.fn((url: string) => {
+        throw new Error(`NEXT_REDIRECT:${url}`);
+      }),
+      useRouter: vi.fn(() => router),
+    };
+  });
   vi.resetModules();
   vi.clearAllMocks();
   await resetTestDatabase();
