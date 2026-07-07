@@ -159,6 +159,41 @@ describe("answer context assembly", () => {
     expect(digest.facts).toEqual([{ field: "destination", value: "Đà Lạt", source: "conversation" }]);
   });
 
+  test("future answers use the corrected latest conversation value and omit the superseded value", async () => {
+    await createTestUser("user-1");
+    const { conversation, message } = await createConversationWithUserMessage();
+
+    await seedContextRow({ userId: "user-1", conversationId: conversation.id, sourceMessageId: message.id, field: "children_ages", value: "6 tuổi", scope: "conversation", createdAt: new Date("2026-07-07T01:00:00.000Z") });
+    await seedContextRow({ userId: "user-1", conversationId: conversation.id, sourceMessageId: message.id, field: "children_ages", value: "8 tuổi", scope: "conversation", createdAt: new Date("2026-07-07T01:05:00.000Z") });
+
+    const { loadAnswerContext, buildAnswerContextPromptSection } = await import("@/features/chat-trips/answer-context");
+
+    const digest = await loadAnswerContext({ userId: "user-1", conversationId: conversation.id });
+    const section = buildAnswerContextPromptSection(digest);
+
+    expect(digest.facts).toEqual([{ field: "children_ages", value: "8 tuổi", source: "conversation" }]);
+    expect(section).toContain('children_ages: "8 tuổi"');
+    expect(section).not.toContain("6 tuổi");
+  });
+
+  test("future project answers use the corrected latest project value and omit the superseded value", async () => {
+    await createTestUser("user-1");
+    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Miền Trung" }).returning({ id: tripProjects.id });
+    const { conversation, message } = await createConversationWithUserMessage({ userId: "user-1", tripProjectId: project.id });
+
+    await seedContextRow({ userId: "user-1", conversationId: conversation.id, sourceMessageId: message.id, field: "destination", value: "Huế", scope: "trip_project", tripProjectId: project.id, createdAt: new Date("2026-07-07T01:00:00.000Z") });
+    await seedContextRow({ userId: "user-1", conversationId: conversation.id, sourceMessageId: message.id, field: "destination", value: "Đà Nẵng", scope: "trip_project", tripProjectId: project.id, createdAt: new Date("2026-07-07T01:05:00.000Z") });
+
+    const { loadAnswerContext, buildAnswerContextPromptSection } = await import("@/features/chat-trips/answer-context");
+
+    const digest = await loadAnswerContext({ userId: "user-1", conversationId: conversation.id, tripProjectId: project.id });
+    const section = buildAnswerContextPromptSection(digest);
+
+    expect(digest.facts).toEqual([{ field: "destination", value: "Đà Nẵng", source: "trip_project" }]);
+    expect(section).toContain('destination: "Đà Nẵng" (dự án)');
+    expect(section).not.toContain("Huế");
+  });
+
   test("does not load project context when the conversation belongs to a different project", async () => {
     await createTestUser("user-1");
     const [projectA] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế" }).returning({ id: tripProjects.id });

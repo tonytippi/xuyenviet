@@ -73,7 +73,7 @@ development_status:
   3-2-create-trip-projects: done
   3-3-extract-chat-and-trip-context: done
   3-4-use-chat-or-trip-context-in-answers: done
-  3-5-correct-trip-details-through-chat: backlog
+  3-5-correct-trip-details-through-chat: done
   3-6-delete-chat-sessions: backlog
   3-7-delete-trip-projects: backlog
   epic-3-retrospective: optional

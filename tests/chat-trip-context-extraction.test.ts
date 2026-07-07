@@ -119,6 +119,113 @@ describe("chat/trip context extraction", () => {
     ]);
   });
 
+  test("stores conversation corrections as a new active latest fact", async () => {
+    await createTestUser("user-1");
+    await createModel();
+    const { conversation, message } = await createConversationWithUserMessage();
+    await testDb.insert(chatContext).values({
+      userId: "user-1",
+      conversationId: conversation.id,
+      sourceMessageId: message.id,
+      field: "children_ages",
+      value: "6 tuổi",
+      scope: "conversation",
+      createdAt: new Date("2026-07-07T01:00:00.000Z"),
+    });
+    mockExtractionResponse({ facts: [{ field: "children_ages", value: "8 tuổi", scope: "conversation", confidence: 92 }] });
+    const { extractChatTripContext } = await import("@/features/chat-trips/context-extraction");
+
+    await expect(extractChatTripContext({
+      session: { userId: "user-1", email: "user-1@example.com" },
+      conversationId: conversation.id,
+      userMessage: { id: message.id, content: "Không phải 6 tuổi, bé 8 tuổi." },
+      history: [{ role: "user", content: "Bé 6 tuổi." }],
+    })).resolves.toEqual({ attemptedProviderCall: true, persistedFacts: 1 });
+
+    await expect(testDb.select().from(chatContext).orderBy(asc(chatContext.createdAt))).resolves.toMatchObject([
+      { field: "children_ages", value: "6 tuổi", scope: "conversation", tripProjectId: null, status: "active" },
+      { field: "children_ages", value: "8 tuổi", scope: "conversation", tripProjectId: null, status: "active", confidence: 92 },
+    ]);
+  });
+
+  test("stores project corrections as a new active project-scoped fact for the selected owned project", async () => {
+    await createTestUser("user-1");
+    await createModel();
+    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế" }).returning({ id: tripProjects.id });
+    const { conversation, message } = await createConversationWithUserMessage({ tripProjectId: project.id });
+    await testDb.insert(chatContext).values({
+      userId: "user-1",
+      conversationId: conversation.id,
+      tripProjectId: project.id,
+      sourceMessageId: message.id,
+      field: "destination",
+      value: "Huế",
+      scope: "trip_project",
+      createdAt: new Date("2026-07-07T01:00:00.000Z"),
+    });
+    mockExtractionResponse({ facts: [{ field: "destination", value: "Đà Nẵng", scope: "trip_project", confidence: 90 }] });
+    const { extractChatTripContext } = await import("@/features/chat-trips/context-extraction");
+
+    await extractChatTripContext({
+      session: { userId: "user-1", email: "user-1@example.com" },
+      conversationId: conversation.id,
+      tripProjectId: project.id,
+      userMessage: { id: message.id, content: "Sửa điểm đến của chuyến này thành Đà Nẵng." },
+      history: [{ role: "user", content: "Chuyến này đi Huế." }],
+    });
+
+    await expect(testDb.select().from(chatContext).orderBy(asc(chatContext.createdAt))).resolves.toMatchObject([
+      { field: "destination", value: "Huế", scope: "trip_project", tripProjectId: project.id, status: "active" },
+      { field: "destination", value: "Đà Nẵng", scope: "trip_project", tripProjectId: project.id, status: "active", confidence: 90 },
+    ]);
+  });
+
+  test("keeps project-scope correction proposals conversation-scoped when no project is selected", async () => {
+    await createTestUser("user-1");
+    await createModel();
+    const { conversation, message } = await createConversationWithUserMessage();
+    mockExtractionResponse({ facts: [{ field: "children_ages", value: "8 tuổi", scope: "trip_project", confidence: 88 }] });
+    const { extractChatTripContext } = await import("@/features/chat-trips/context-extraction");
+
+    await extractChatTripContext({
+      session: { userId: "user-1", email: "user-1@example.com" },
+      conversationId: conversation.id,
+      userMessage: { id: message.id, content: "Không phải 6 tuổi, bé 8 tuổi." },
+      history: [],
+    });
+
+    await expect(testDb.select().from(chatContext)).resolves.toMatchObject([
+      { field: "children_ages", value: "8 tuổi", scope: "conversation", tripProjectId: null, confidence: 88 },
+    ]);
+  });
+
+  test("does not overwrite remembered context for ambiguous corrections", async () => {
+    await createTestUser("user-1");
+    await createModel();
+    const { conversation, message } = await createConversationWithUserMessage();
+    await testDb.insert(chatContext).values({
+      userId: "user-1",
+      conversationId: conversation.id,
+      sourceMessageId: message.id,
+      field: "children_ages",
+      value: "6 tuổi",
+      scope: "conversation",
+    });
+    mockExtractionResponse({ facts: [{ field: "children_ages", value: "8 tuổi", scope: "conversation", confidence: 80 }] });
+    const { extractChatTripContext } = await import("@/features/chat-trips/context-extraction");
+
+    await expect(extractChatTripContext({
+      session: { userId: "user-1", email: "user-1@example.com" },
+      conversationId: conversation.id,
+      userMessage: { id: message.id, content: "Sửa lại thành 8 nhé." },
+      history: [],
+    })).resolves.toEqual({ attemptedProviderCall: true, persistedFacts: 0 });
+
+    await expect(testDb.select().from(chatContext)).resolves.toMatchObject([
+      { field: "children_ages", value: "6 tuổi", scope: "conversation", status: "active" },
+    ]);
+  });
+
   test("ignores unsafe, unknown, blank, and malformed extraction content without blocking usage recording", async () => {
     await createTestUser("user-1");
     await createModel();

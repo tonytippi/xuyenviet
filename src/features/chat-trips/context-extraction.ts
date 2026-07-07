@@ -97,7 +97,7 @@ export async function extractChatTripContext(input: ExtractChatTripContextInput)
     return { attemptedProviderCall: true, persistedFacts: 0 };
   }
 
-  const facts = parseAllowedFacts(extractionResult.content, Boolean(input.tripProjectId));
+  const facts = parseAllowedFacts(extractionResult.content, Boolean(input.tripProjectId), input.userMessage.content);
 
   await recordExtractionUsage(db, {
     userId: input.session.userId,
@@ -163,7 +163,7 @@ export async function extractChatTripContext(input: ExtractChatTripContextInput)
   return { attemptedProviderCall: true, persistedFacts: facts.length };
 }
 
-function parseAllowedFacts(content: string, projectScopeAvailable: boolean) {
+function parseAllowedFacts(content: string, projectScopeAvailable: boolean, latestUserMessage: string) {
   const payload = parseJsonObject(content);
 
   if (!payload || !Array.isArray(payload.facts)) {
@@ -173,6 +173,7 @@ function parseAllowedFacts(content: string, projectScopeAvailable: boolean) {
 
   const facts: Array<{ field: ChatContextField; value: string; scope: ChatContextScope; confidence: number | null }> = [];
   const seen = new Set<string>();
+  const vagueCorrection = isVagueCorrection(latestUserMessage) && !mentionsCorrectionTarget(latestUserMessage);
 
   for (const fact of payload.facts) {
     if (!isRecord(fact) || typeof fact.field !== "string") {
@@ -182,6 +183,11 @@ function parseAllowedFacts(content: string, projectScopeAvailable: boolean) {
 
     if (!allowedContextFields.has(fact.field)) {
       console.warn("Chat context extraction fact rejected for unknown field", { field: fact.field });
+      continue;
+    }
+
+    if (vagueCorrection) {
+      console.warn("Chat context extraction fact rejected for vague correction", { field: fact.field });
       continue;
     }
 
@@ -289,6 +295,34 @@ function normalizeConfidence(value: unknown) {
   }
 
   return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function isVagueCorrection(message: string) {
+  return /\b(?:sửa|sua|đổi|doi|thay|không phải|khong phai|ý tôi là|y toi la|actually)\b/i.test(message);
+}
+
+function mentionsCorrectionTarget(message: string) {
+  const normalized = message.toLowerCase();
+  const targetPatterns = [
+    /\b(?:điểm đến|diem den|destination|đến|den)\b/,
+    /\b(?:điểm xuất phát|diem xuat phat|origin|từ|tu)\b/,
+    /\b(?:ngày đi|ngay di|ngày về|ngay ve|start|end|date|ngày|ngay)\b/,
+    /\b(?:thời lượng|thoi luong|duration|mấy ngày|may ngay|ngày|ngay)\b/,
+    /\b(?:người lớn|nguoi lon|adults?)\b/,
+    /\b(?:trẻ em|tre em|children|con|bé|be|tuổi|tuoi)\b/,
+    /\b(?:ngân sách|ngan sach|budget|triệu|trieu)\b/,
+    /\b(?:khách sạn|khach san|hotel)\b/,
+    /\b(?:lái|lai|driving|xe|vehicle|ev|ô tô|oto)\b/,
+    /\b(?:ăn|an|food|món|mon|ẩm thực|am thuc)\b/,
+    /\b(?:hoạt động|hoat dong|activity|chơi|choi)\b/,
+    /\b(?:lịch trình|lich trinh|itinerary|ràng buộc|rang buoc)\b/,
+    /\b(?:tránh|tranh|avoid)\b/,
+    /\b(?:đã đi|da di|prior|trước đây|truoc day)\b/,
+    /\b(?:ghi chú|ghi chu|note)\b/,
+    /\b(?:chat|dự án|du an|chuyến|chuyen|trip)\b/,
+  ];
+
+  return targetPatterns.some((pattern) => pattern.test(normalized));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
