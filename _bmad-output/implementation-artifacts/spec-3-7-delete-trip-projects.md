@@ -6,7 +6,7 @@ status: 'done'
 review_loop_iteration: 0
 followup_review_recommended: false
 baseline_revision: '31a36ae040d7e9485afe7290d3dd8591a64cdfb4'
-final_revision: '6e177be4c1b9dd16f468b8d3d7bddaa07be8913b'
+final_revision: 'eb0117bbb8482d0db785b767cb66855ae46fc12e'
 context:
   - '{project-root}/_bmad-output/implementation-artifacts/epic-3-context.md'
   - '{project-root}/_bmad-output/implementation-artifacts/spec-3-6-delete-chat-sessions.md'
