@@ -91,6 +91,31 @@ Empty — no bad_spec loopback occurred.
 
 ## Review Triage Log
 
+### Review Findings
+- [x] [Review][Patch] Guard pending stream state when starting or selecting another chat [src/features/ai/ai-ask-composer.tsx:239]
+- [x] [Review][Patch] Keep sidebar consistent when an in-flight new conversation is aborted after server persistence [src/features/ai/ai-ask-composer.tsx:336]
+- [x] [Review][Patch] Make the mobile session sheet truly modal for keyboard users [src/features/ai/ai-ask-composer.tsx:182]
+- [x] [Review][Patch] Prevent background page scroll while the mobile session sheet is open [src/features/ai/ai-ask-composer.tsx:504]
+- [x] [Review][Patch] Stabilize relative timestamp rendering and invalid-date fallback [src/features/chat-trips/conversation-list.tsx:67]
+
+### 2026-07-07 — Review pass 2
+- intent_gap: 0
+- bad_spec: 0
+- patch: 5 (high 0, medium 3, low 2) — all applied.
+- defer: 0
+- reject: 1
+- addressed_findings:
+  - [medium] [patch] session switching and new-chat actions are disabled while a stream is pending, with request-id guards preventing stale stream callbacks from mutating a later UI state.
+  - [medium] [patch] aborted in-flight new-conversation persistence can no longer be hidden by a new-chat action because the action is blocked until the stream completes.
+  - [medium] [patch] mobile session sheet now traps Tab/Shift+Tab focus while open.
+  - [low] [patch] mobile session sheet locks body scroll while open.
+  - [low] [patch] relative session times now hydrate from a stable absolute date, update client-side every minute, and fall back safely for invalid timestamps.
+- verification:
+  - `pnpm lint` — clean, no errors.
+  - `pnpm typecheck` — clean, no errors.
+  - `pnpm test:run tests/ai-ask-sessions.test.ts tests/ai-ask-shell.test.ts` — 2 files, 38 tests passed.
+  - `pnpm build` — successful production build; `/ai-ask` route 6.88 kB.
+
 ### 2026-07-07 — Review pass 1
 - intent_gap: 0
 - bad_spec: 0

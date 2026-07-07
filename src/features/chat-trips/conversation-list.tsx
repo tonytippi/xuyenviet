@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useState } from "react";
+
 export type ChatSessionSummary = {
   id: string;
   updatedAt: Date | string;
@@ -9,17 +11,28 @@ export type ChatSessionSummary = {
 type ConversationListProps = {
   sessions: ChatSessionSummary[];
   activeConversationId?: string;
+  isDisabled?: boolean;
   onSelect: (id: string) => void;
   onNewChat: () => void;
 };
 
-export function ConversationList({ sessions, activeConversationId, onSelect, onNewChat }: ConversationListProps) {
+export function ConversationList({ sessions, activeConversationId, isDisabled = false, onSelect, onNewChat }: ConversationListProps) {
+  const [now, setNow] = useState<number | null>(null);
+
+  useEffect(() => {
+    setNow(Date.now());
+    const interval = window.setInterval(() => setNow(Date.now()), 60_000);
+
+    return () => window.clearInterval(interval);
+  }, []);
+
   return (
     <section className="flex h-full flex-col gap-3 rounded-[1.5rem] border border-[#d8c9ad] bg-[#fffdf8]/80 p-3">
       <button
         type="button"
         onClick={onNewChat}
-        className="min-h-11 w-full rounded-2xl bg-[#1f5f46] px-4 py-3 text-sm font-semibold text-white shadow-[0_12px_30px_rgba(31,95,70,0.18)] transition hover:bg-[#194d39] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]"
+        disabled={isDisabled}
+        className="min-h-11 w-full rounded-2xl bg-[#1f5f46] px-4 py-3 text-sm font-semibold text-white shadow-[0_12px_30px_rgba(31,95,70,0.18)] transition hover:bg-[#194d39] focus:outline-none focus:ring-4 focus:ring-[#8fb59f] disabled:cursor-not-allowed disabled:bg-[#8aa89b]"
       >
         Cuộc trò chuyện mới
       </button>
@@ -38,11 +51,12 @@ export function ConversationList({ sessions, activeConversationId, onSelect, onN
                 <button
                   type="button"
                   onClick={() => onSelect(session.id)}
+                  disabled={isDisabled}
                   aria-current={isActive ? "page" : undefined}
                   className={
                     isActive
-                      ? "flex w-full flex-col gap-1 rounded-2xl border border-[#1f5f46]/45 bg-[#1f5f46]/10 p-3 text-left transition focus:outline-none focus:ring-4 focus:ring-[#8fb59f]"
-                      : "flex w-full flex-col gap-1 rounded-2xl border border-transparent p-3 text-left transition hover:border-[#d8c9ad] hover:bg-[#f3ead8] focus:outline-none focus:ring-4 focus:ring-[#e5bd82]"
+                      ? "flex w-full flex-col gap-1 rounded-2xl border border-[#1f5f46]/45 bg-[#1f5f46]/10 p-3 text-left transition focus:outline-none focus:ring-4 focus:ring-[#8fb59f] disabled:cursor-not-allowed disabled:opacity-70"
+                      : "flex w-full flex-col gap-1 rounded-2xl border border-transparent p-3 text-left transition hover:border-[#d8c9ad] hover:bg-[#f3ead8] focus:outline-none focus:ring-4 focus:ring-[#e5bd82] disabled:cursor-not-allowed disabled:opacity-70"
                   }
                 >
                   <span className="flex items-center gap-2">
@@ -51,8 +65,8 @@ export function ConversationList({ sessions, activeConversationId, onSelect, onN
                       {session.preview}
                     </span>
                   </span>
-                  <span className="text-xs font-medium uppercase tracking-[0.12em] text-[#7b8b84]">
-                    {formatRelativeTime(session.updatedAt)}
+                  <span className="text-xs font-medium uppercase tracking-[0.12em] text-[#7b8b84]" suppressHydrationWarning>
+                    {formatRelativeTime(session.updatedAt, now)}
                   </span>
                 </button>
               </li>
@@ -64,12 +78,21 @@ export function ConversationList({ sessions, activeConversationId, onSelect, onN
   );
 }
 
-function formatRelativeTime(value: Date | string): string {
+function formatRelativeTime(value: Date | string, now: number | null): string {
   const date = typeof value === "string" ? new Date(value) : value;
-  const diffMs = Date.now() - date.getTime();
+
+  if (Number.isNaN(date.getTime())) {
+    return "Ngày không rõ";
+  }
+
+  if (now === null) {
+    return formatAbsoluteDate(date);
+  }
+
+  const diffMs = now - date.getTime();
 
   if (diffMs < 0) {
-    return date.toLocaleDateString("vi-VN", { day: "numeric", month: "numeric", year: "numeric" });
+    return formatAbsoluteDate(date);
   }
 
   const seconds = Math.floor(diffMs / 1000);
@@ -106,5 +129,9 @@ function formatRelativeTime(value: Date | string): string {
     return `${weeks} tuần trước`;
   }
 
+  return formatAbsoluteDate(date);
+}
+
+function formatAbsoluteDate(date: Date): string {
   return date.toLocaleDateString("vi-VN", { day: "numeric", month: "numeric", year: "numeric" });
 }

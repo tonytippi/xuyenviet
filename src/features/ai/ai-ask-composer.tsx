@@ -128,6 +128,7 @@ export function AiAskComposer({ initialConversationId, initialMessages = [], ini
   const formRef = useRef<HTMLFormElement>(null);
   const isSubmittingRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const activeRequestIdRef = useRef(0);
   const sessionSheetTriggerRef = useRef<HTMLButtonElement>(null);
   const sessionSheetPanelRef = useRef<HTMLDivElement>(null);
   const sessionSheetPreviousFocusRef = useRef<HTMLElement | null>(null);
@@ -190,13 +191,44 @@ export function AiAskComposer({ initialConversationId, initialMessages = [], ini
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         setSessionSheetOpen(false);
+        return;
+      }
+
+      if (event.key !== "Tab" || !sessionSheetPanelRef.current) {
+        return;
+      }
+
+      const focusableElements = Array.from(
+        sessionSheetPanelRef.current.querySelectorAll<HTMLElement>(
+          'button:not(:disabled), [href], input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])',
+        ),
+      );
+
+      if (focusableElements.length === 0) {
+        event.preventDefault();
+        sessionSheetPanelRef.current.focus();
+        return;
+      }
+
+      const firstElement = focusableElements[0];
+      const lastElement = focusableElements[focusableElements.length - 1];
+
+      if (event.shiftKey && document.activeElement === firstElement) {
+        event.preventDefault();
+        lastElement.focus();
+      } else if (!event.shiftKey && document.activeElement === lastElement) {
+        event.preventDefault();
+        firstElement.focus();
       }
     }
 
     window.addEventListener("keydown", onKeyDown);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
 
     return () => {
       window.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = previousOverflow;
       sessionSheetPreviousFocusRef.current?.focus();
     };
   }, [isSessionSheetOpen]);
@@ -230,6 +262,8 @@ export function AiAskComposer({ initialConversationId, initialMessages = [], ini
     }
 
     isSubmittingRef.current = true;
+    const requestId = activeRequestIdRef.current + 1;
+    activeRequestIdRef.current = requestId;
     setIsPending(true);
     setShowProgress(false);
     setPendingQuestion(trimmedQuestion);
@@ -241,8 +275,16 @@ export function AiAskComposer({ initialConversationId, initialMessages = [], ini
       const controller = new AbortController();
       abortControllerRef.current = controller;
       const result = await submitAiAskStream({ question: trimmedQuestion, conversationId, image: selectedImage, signal: controller.signal, onDelta: (content) => {
+        if (activeRequestIdRef.current !== requestId) {
+          return;
+        }
+
         setStreamingContent((currentContent) => currentContent + content);
       } });
+
+      if (activeRequestIdRef.current !== requestId) {
+        return;
+      }
 
       if (result.status === "answer-failed") {
         const failedUserMessage = result.userMessage;
@@ -280,15 +322,17 @@ export function AiAskComposer({ initialConversationId, initialMessages = [], ini
         setSessions((currentSessions) => moveSessionToTop(currentSessions, result.conversationId));
       }
     } catch (error) {
-      if (!(error instanceof DOMException && error.name === "AbortError")) {
+      if (activeRequestIdRef.current === requestId && !(error instanceof DOMException && error.name === "AbortError")) {
         setStatus("Không thể gửi câu hỏi lúc này. Hãy kiểm tra đăng nhập và thử lại. Nội dung vẫn còn trong ô nhập.");
       }
     } finally {
-      isSubmittingRef.current = false;
-      setIsPending(false);
-      setPendingQuestion("");
-      setStreamingContent("");
-      abortControllerRef.current = null;
+      if (activeRequestIdRef.current === requestId) {
+        isSubmittingRef.current = false;
+        setIsPending(false);
+        setPendingQuestion("");
+        setStreamingContent("");
+        abortControllerRef.current = null;
+      }
     }
   }
 
@@ -329,13 +373,21 @@ export function AiAskComposer({ initialConversationId, initialMessages = [], ini
   }
 
   function handleSelectSession(id: string) {
+    if (isPending) {
+      setStatus("Vui lòng chờ câu trả lời hiện tại hoàn tất trước khi đổi hội thoại.");
+      return;
+    }
+
     setSessionSheetOpen(false);
     router.push(`/ai-ask?conversationId=${encodeURIComponent(id)}`);
   }
 
   function handleNewChat() {
-    abortControllerRef.current?.abort();
-    abortControllerRef.current = null;
+    if (isPending) {
+      setStatus("Vui lòng chờ câu trả lời hiện tại hoàn tất trước khi mở cuộc trò chuyện mới.");
+      return;
+    }
+
     setSessionSheetOpen(false);
     setMessages([]);
     setConversationId(undefined);
@@ -355,6 +407,7 @@ export function AiAskComposer({ initialConversationId, initialMessages = [], ini
         <ConversationList
           sessions={sessions}
           activeConversationId={conversationId}
+          isDisabled={isPending}
           onSelect={handleSelectSession}
           onNewChat={handleNewChat}
         />
@@ -510,12 +563,13 @@ export function AiAskComposer({ initialConversationId, initialMessages = [], ini
               className="absolute inset-0 bg-[#17342c]/40"
             />
             <div ref={sessionSheetPanelRef} tabIndex={-1} className="absolute left-0 top-0 h-full w-80 max-w-[85%] rounded-r-[1.5rem] border-r border-[#d8c9ad] bg-[#fffdf8] p-3 shadow-[0_24px_80px_rgba(41,33,18,0.24)]">
-              <ConversationList
-                sessions={sessions}
-                activeConversationId={conversationId}
-                onSelect={handleSelectSession}
-                onNewChat={handleNewChat}
-              />
+                <ConversationList
+                  sessions={sessions}
+                  activeConversationId={conversationId}
+                  isDisabled={isPending}
+                  onSelect={handleSelectSession}
+                  onNewChat={handleNewChat}
+                />
             </div>
           </div>
         ) : null}
