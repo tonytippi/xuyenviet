@@ -85,6 +85,11 @@ Empty -- no bad_spec loopback occurred.
 
 ## Review Triage Log
 
+### 2026-07-07 -- Code review follow-up
+- [x] [Review][Patch] Active stale-deleted session is removed from the list but not cleared or rerouted [src/features/ai/ai-ask-composer.tsx:443] -- fixed by routing `not_found` active deletes through the same active-session cleanup helper as successful deletes.
+- [x] [Review][Patch] Delete audit counts can undercount rows removed by cascade during concurrent writes [src/features/chat-trips/conversations.ts:123] -- fixed by locking the owned conversation row with `FOR UPDATE` before counting rows and deleting.
+- [x] [Review][Patch] Session selection is not synchronously guarded while a delete is in flight [src/features/ai/ai-ask-composer.tsx:414] -- fixed by checking `deletingConversationIdRef.current` before session navigation.
+
 ### 2026-07-07 -- Review pass
 - intent_gap: 0
 - bad_spec: 0

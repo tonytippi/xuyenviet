@@ -124,7 +124,8 @@ export async function deleteOwnedConversation(conversationId: string): Promise<D
         .select({ id: conversations.id, tripProjectId: conversations.tripProjectId })
         .from(conversations)
         .where(and(eq(conversations.id, conversationId), eq(conversations.userId, session.userId)))
-        .limit(1);
+        .limit(1)
+        .for("update");
 
       if (!conversation) {
         return { success: false, reason: "not_found" };

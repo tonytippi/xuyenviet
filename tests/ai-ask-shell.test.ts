@@ -310,11 +310,21 @@ describe("AI Ask structured answer rendering", () => {
     expect(source).toContain("sessionActionsDisabled = isPending || Boolean(deletingConversationId)");
     expect(source).toContain("deletingConversationIdRef.current");
     expect(source).toContain("Vui lòng chờ câu trả lời hiện tại hoàn tất trước khi xoá cuộc trò chuyện");
+    expect(source).toContain("Vui lòng chờ thao tác xoá cuộc trò chuyện hoàn tất trước khi đổi hội thoại.");
     expect(source).toContain("Không thể xoá cuộc trò chuyện lúc này. Vui lòng thử lại.");
     expect(source).toContain("if (result.reason === \"not_found\")");
+    expect(source).toContain("function clearActiveConversation()");
     expect(source).toContain("setSessions((currentSessions) => currentSessions.filter((session) => session.id !== id))");
     expect(source).toContain("if (id === conversationId)");
     expect(source).toContain("router.push(activeTripProjectId ? `/ai-ask?tripProjectId=${encodeURIComponent(activeTripProjectId)}` : \"/ai-ask\")");
+  });
+
+  test("conversation deletion source locks before counting cascade audit rows", () => {
+    const source = readFileSync("src/features/chat-trips/conversations.ts", "utf8");
+    const deleteSource = source.slice(source.indexOf("export async function deleteOwnedConversation"));
+
+    expect(deleteSource).toContain(".for(\"update\")");
+    expect(deleteSource.indexOf(".for(\"update\")")).toBeLessThan(deleteSource.indexOf("const conversationMessages"));
   });
 });
 

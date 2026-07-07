@@ -411,9 +411,26 @@ export function AiAskComposer({
     }
   }
 
+  function clearActiveConversation() {
+    setMessages([]);
+    setConversationId(undefined);
+    setQuestion("");
+    setFailedQuestionIds([]);
+    setSelectedImage(null);
+    if (imageInputRef.current) {
+      imageInputRef.current.value = "";
+    }
+    router.push(activeTripProjectId ? `/ai-ask?tripProjectId=${encodeURIComponent(activeTripProjectId)}` : "/ai-ask");
+  }
+
   function handleSelectSession(id: string) {
     if (isPending) {
       setStatus("Vui lòng chờ câu trả lời hiện tại hoàn tất trước khi đổi hội thoại.");
+      return;
+    }
+
+    if (deletingConversationIdRef.current) {
+      setStatus("Vui lòng chờ thao tác xoá cuộc trò chuyện hoàn tất trước khi đổi hội thoại.");
       return;
     }
 
@@ -443,6 +460,10 @@ export function AiAskComposer({
       if (!result.success) {
         if (result.reason === "not_found") {
           setSessions((currentSessions) => currentSessions.filter((session) => session.id !== id));
+          if (id === conversationId) {
+            setSessionSheetOpen(false);
+            clearActiveConversation();
+          }
         }
         setStatus(result.error ?? "Không thể xoá cuộc trò chuyện lúc này. Vui lòng thử lại.");
         return;
@@ -452,15 +473,7 @@ export function AiAskComposer({
       setSessionSheetOpen(false);
 
       if (id === conversationId) {
-        setMessages([]);
-        setConversationId(undefined);
-        setQuestion("");
-        setFailedQuestionIds([]);
-        setSelectedImage(null);
-        if (imageInputRef.current) {
-          imageInputRef.current.value = "";
-        }
-        router.push(activeTripProjectId ? `/ai-ask?tripProjectId=${encodeURIComponent(activeTripProjectId)}` : "/ai-ask");
+        clearActiveConversation();
       }
 
       setStatus("Đã xoá cuộc trò chuyện và các chi tiết đã ghi nhớ từ cuộc trò chuyện này.");
