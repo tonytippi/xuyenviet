@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { AiAskComposer } from "@/features/ai/ai-ask-composer";
 import { signOutCurrentUser } from "@/features/auth/actions";
 import { getOwnedConversation, listOwnedConversations } from "@/features/chat-trips/conversations";
-import { createTripProjectFromForm } from "@/features/chat-trips/actions";
+import { createTripProjectFromForm, deleteConversationAction } from "@/features/chat-trips/actions";
 import { getOwnedTripProjectSummary, listOwnedTripProjects } from "@/features/chat-trips/trip-projects";
 import { getAuthenticatedSession } from "@/server/auth";
 
@@ -122,6 +122,7 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
             initialTripProjects={initialTripProjects}
             selectedTripProject={selectedTripProjectForComposer}
             createTripProjectAction={createTripProjectFromForm}
+            deleteConversationAction={deleteConversationAction}
           />
 
           <aside className="flex flex-col gap-4">

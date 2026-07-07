@@ -274,6 +274,48 @@ describe("AI Ask structured answer rendering", () => {
     expect(html).toContain("Trợ lý chưa tạo được câu trả lời cho lượt này");
     expect(html).not.toContain("clientAssistant");
   });
+
+  test("renders delete affordance and confirmation copy for chat sessions", async () => {
+    const { AiAskComposer } = await import("@/features/ai/ai-ask-composer");
+    const html = renderToStaticMarkup(
+      createElement(AiAskComposer, {
+        initialConversationId: "conversation-1",
+        initialSessions: [{ id: "conversation-1", preview: "Hà Nội đi Huế?", updatedAt: new Date("2026-07-07T00:00:00.000Z") }],
+        deleteConversationAction: async () => ({ success: true }),
+      }),
+    );
+
+    expect(html).toContain("Xoá");
+    expect(html).toContain("Xoá cuộc trò chuyện: Hà Nội đi Huế?");
+  });
+
+  test("does not render delete affordance without a delete action", async () => {
+    const { AiAskComposer } = await import("@/features/ai/ai-ask-composer");
+    const html = renderToStaticMarkup(
+      createElement(AiAskComposer, {
+        initialConversationId: "conversation-1",
+        initialSessions: [{ id: "conversation-1", preview: "Hà Nội đi Huế?", updatedAt: new Date("2026-07-07T00:00:00.000Z") }],
+      }),
+    );
+
+    expect(html).not.toContain("Xoá cuộc trò chuyện: Hà Nội đi Huế?");
+  });
+
+  test("composer source keeps delete pending, failure, and active-session clearing contracts", () => {
+    const source = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
+    const listSource = readFileSync("src/features/chat-trips/conversation-list.tsx", "utf8");
+
+    expect(listSource).toContain("window.confirm");
+    expect(listSource).toContain("Tin nhắn, ảnh đính kèm và các chi tiết chuyến đi đã ghi nhớ");
+    expect(source).toContain("sessionActionsDisabled = isPending || Boolean(deletingConversationId)");
+    expect(source).toContain("deletingConversationIdRef.current");
+    expect(source).toContain("Vui lòng chờ câu trả lời hiện tại hoàn tất trước khi xoá cuộc trò chuyện");
+    expect(source).toContain("Không thể xoá cuộc trò chuyện lúc này. Vui lòng thử lại.");
+    expect(source).toContain("if (result.reason === \"not_found\")");
+    expect(source).toContain("setSessions((currentSessions) => currentSessions.filter((session) => session.id !== id))");
+    expect(source).toContain("if (id === conversationId)");
+    expect(source).toContain("router.push(activeTripProjectId ? `/ai-ask?tripProjectId=${encodeURIComponent(activeTripProjectId)}` : \"/ai-ask\")");
+  });
 });
 
 describe("AI Ask prompt construction", () => {

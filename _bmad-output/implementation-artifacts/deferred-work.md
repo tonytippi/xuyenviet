@@ -46,3 +46,6 @@
 - source_spec: `spec-3-3-extract-chat-and-trip-context.md`
   summary: Use grapheme-aware truncation in `sanitizeContextValue` instead of UTF-16 code-unit `.slice(0, 500)`.
   evidence: Follow-up code review (pass 2, 2026-07-07). `src/features/chat-trips/context-extraction.ts:241` slices by UTF-16 code unit, which can split a decomposed Vietnamese diacritic (NFD form) or an emoji mid-cluster, leaving a dangling combining mark as the last stored character. Vietnamese text is almost always NFC so this is rarely reachable; a grapheme-aware slice (`Intl.Segmenter` or a small surrogate-pair-aware helper) adds complexity for a narrow case. Revisit if user input with decomposed characters or emoji in context values becomes common.
+- source_spec: `spec-3-6-delete-chat-sessions.md`
+  summary: Add external object-storage cleanup before non-null `message_image_attachments.storage_key` is used in production.
+  evidence: Story 3.6 deletes image attachment metadata through conversation cascades, but no object-storage deletion helper exists yet. Current stream inserts `storageKey: null`, so this is not reachable today; once non-null storage keys are introduced, chat deletion must delete or enqueue deletion of the referenced objects before losing the pointer.

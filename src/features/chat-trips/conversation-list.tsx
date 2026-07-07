@@ -13,10 +13,11 @@ type ConversationListProps = {
   activeConversationId?: string;
   isDisabled?: boolean;
   onSelect: (id: string) => void;
+  onDelete?: (id: string) => void;
   onNewChat: () => void;
 };
 
-export function ConversationList({ sessions, activeConversationId, isDisabled = false, onSelect, onNewChat }: ConversationListProps) {
+export function ConversationList({ sessions, activeConversationId, isDisabled = false, onSelect, onDelete, onNewChat }: ConversationListProps) {
   const [now, setNow] = useState<number | null>(null);
 
   useEffect(() => {
@@ -47,7 +48,8 @@ export function ConversationList({ sessions, activeConversationId, isDisabled = 
             const isActive = session.id === activeConversationId;
 
             return (
-              <li key={session.id}>
+              <li className="rounded-2xl" key={session.id}>
+                <div className={isActive ? "flex gap-2 rounded-2xl border border-[#1f5f46]/45 bg-[#1f5f46]/10 p-2" : "flex gap-2 rounded-2xl border border-transparent p-2 transition hover:border-[#d8c9ad] hover:bg-[#f3ead8]"}>
                 <button
                   type="button"
                   onClick={() => onSelect(session.id)}
@@ -55,8 +57,8 @@ export function ConversationList({ sessions, activeConversationId, isDisabled = 
                   aria-current={isActive ? "page" : undefined}
                   className={
                     isActive
-                      ? "flex w-full flex-col gap-1 rounded-2xl border border-[#1f5f46]/45 bg-[#1f5f46]/10 p-3 text-left transition focus:outline-none focus:ring-4 focus:ring-[#8fb59f] disabled:cursor-not-allowed disabled:opacity-70"
-                      : "flex w-full flex-col gap-1 rounded-2xl border border-transparent p-3 text-left transition hover:border-[#d8c9ad] hover:bg-[#f3ead8] focus:outline-none focus:ring-4 focus:ring-[#e5bd82] disabled:cursor-not-allowed disabled:opacity-70"
+                      ? "flex min-w-0 flex-1 flex-col gap-1 rounded-xl p-2 text-left transition focus:outline-none focus:ring-4 focus:ring-[#8fb59f] disabled:cursor-not-allowed disabled:opacity-70"
+                      : "flex min-w-0 flex-1 flex-col gap-1 rounded-xl p-2 text-left transition focus:outline-none focus:ring-4 focus:ring-[#e5bd82] disabled:cursor-not-allowed disabled:opacity-70"
                   }
                 >
                   <span className="flex items-center gap-2">
@@ -69,6 +71,22 @@ export function ConversationList({ sessions, activeConversationId, isDisabled = 
                     {formatRelativeTime(session.updatedAt, now)}
                   </span>
                 </button>
+                {onDelete ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (window.confirm("Xoá cuộc trò chuyện này? Tin nhắn, ảnh đính kèm và các chi tiết chuyến đi đã ghi nhớ từ cuộc trò chuyện này sẽ bị xoá khỏi sử dụng thông thường.")) {
+                        onDelete(session.id);
+                      }
+                    }}
+                    disabled={isDisabled}
+                    aria-label={`Xoá cuộc trò chuyện: ${session.preview}`}
+                    className="min-h-10 shrink-0 rounded-xl border border-[#d8c9ad] px-3 text-xs font-bold uppercase tracking-[0.12em] text-[#8c2f1d] transition hover:border-[#c45b3b] hover:bg-[#fff1ed] focus:outline-none focus:ring-4 focus:ring-[#f0c8a0] disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Xoá
+                  </button>
+                ) : null}
+                </div>
               </li>
             );
           })}

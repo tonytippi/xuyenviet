@@ -2,9 +2,11 @@
 
 import { redirect } from "next/navigation";
 
+import { deleteOwnedConversation } from "@/features/chat-trips/conversations";
 import { createTripProject } from "@/features/chat-trips/trip-projects";
 
 export type CreateTripProjectFormState = { error?: string };
+export type DeleteConversationActionState = { success: boolean; error?: string; reason?: "not_found" };
 
 const stringFieldNames = ["title", "origin", "destination", "startDate", "endDate", "travelers", "notes"] as const;
 
@@ -45,4 +47,18 @@ export async function createTripProjectFromForm(
   }
 
   redirect(`/ai-ask?tripProjectId=${encodeURIComponent(project.id)}`);
+}
+
+export async function deleteConversationAction(conversationId: string): Promise<DeleteConversationActionState> {
+  const result = await deleteOwnedConversation(conversationId);
+
+  if (result.reason === "unauthenticated") {
+    redirect("/sign-in?next=/ai-ask");
+  }
+
+  if (!result.success) {
+    return { success: false, error: "Không thể xoá cuộc trò chuyện lúc này. Vui lòng thử lại.", reason: result.reason === "not_found" ? "not_found" : undefined };
+  }
+
+  return { success: true };
 }

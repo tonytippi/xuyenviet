@@ -38,6 +38,8 @@ type CreateTripProjectAction = (
   formData: FormData,
 ) => Promise<CreateTripProjectFormState | undefined>;
 
+type DeleteConversationAction = (conversationId: string) => Promise<{ success: boolean; error?: string; reason?: "not_found" }>;
+
 type AiAskComposerProps = {
   initialConversationId?: string;
   initialMessages?: DisplayMessage[];
@@ -45,6 +47,7 @@ type AiAskComposerProps = {
   initialTripProjects?: TripProjectSummary[];
   selectedTripProject?: TripProjectSummary | null;
   createTripProjectAction?: CreateTripProjectAction;
+  deleteConversationAction?: DeleteConversationAction;
 };
 
 function getUnansweredUserMessageIds(messages: DisplayMessage[]) {
@@ -134,6 +137,7 @@ export function AiAskComposer({
   initialTripProjects = [],
   selectedTripProject = null,
   createTripProjectAction,
+  deleteConversationAction,
 }: AiAskComposerProps) {
   const router = useRouter();
   const activeTripProjectId = selectedTripProject?.id;
@@ -150,17 +154,20 @@ export function AiAskComposer({
   const [conversationId, setConversationId] = useState(initialConversationId);
   const [sessions, setSessions] = useState<ChatSessionSummary[]>(initialSessions);
   const [isSessionSheetOpen, setSessionSheetOpen] = useState(false);
+  const [deletingConversationId, setDeletingConversationId] = useState<string | null>(null);
   const [createProjectState, createProjectFormAction, isCreatingProject] = useActionState<CreateTripProjectFormState | undefined, FormData>(
     createTripProjectAction ?? noOpCreateTripProjectAction,
     undefined,
   );
   const createFormDisabled = isPending || isCreatingProject;
+  const sessionActionsDisabled = isPending || Boolean(deletingConversationId);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const isSubmittingRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const activeRequestIdRef = useRef(0);
+  const deletingConversationIdRef = useRef<string | null>(null);
   const sessionSheetTriggerRef = useRef<HTMLButtonElement>(null);
   const sessionSheetPanelRef = useRef<HTMLDivElement>(null);
   const sessionSheetPreviousFocusRef = useRef<HTMLElement | null>(null);
@@ -416,6 +423,55 @@ export function AiAskComposer({
     router.push(`/ai-ask?${searchParams.toString()}`);
   }
 
+  async function handleDeleteSession(id: string) {
+    if (isPending) {
+      setStatus("Vui lòng chờ câu trả lời hiện tại hoàn tất trước khi xoá cuộc trò chuyện.");
+      return;
+    }
+
+    if (!deleteConversationAction || deletingConversationIdRef.current) {
+      return;
+    }
+
+    deletingConversationIdRef.current = id;
+    setDeletingConversationId(id);
+    setStatus("Đang xoá cuộc trò chuyện...");
+
+    try {
+      const result = await deleteConversationAction(id);
+
+      if (!result.success) {
+        if (result.reason === "not_found") {
+          setSessions((currentSessions) => currentSessions.filter((session) => session.id !== id));
+        }
+        setStatus(result.error ?? "Không thể xoá cuộc trò chuyện lúc này. Vui lòng thử lại.");
+        return;
+      }
+
+      setSessions((currentSessions) => currentSessions.filter((session) => session.id !== id));
+      setSessionSheetOpen(false);
+
+      if (id === conversationId) {
+        setMessages([]);
+        setConversationId(undefined);
+        setQuestion("");
+        setFailedQuestionIds([]);
+        setSelectedImage(null);
+        if (imageInputRef.current) {
+          imageInputRef.current.value = "";
+        }
+        router.push(activeTripProjectId ? `/ai-ask?tripProjectId=${encodeURIComponent(activeTripProjectId)}` : "/ai-ask");
+      }
+
+      setStatus("Đã xoá cuộc trò chuyện và các chi tiết đã ghi nhớ từ cuộc trò chuyện này.");
+    } catch {
+      setStatus("Không thể xoá cuộc trò chuyện lúc này. Vui lòng thử lại.");
+    } finally {
+      deletingConversationIdRef.current = null;
+      setDeletingConversationId(null);
+    }
+  }
+
   function handleNewChat() {
     if (isPending) {
       setStatus("Vui lòng chờ câu trả lời hiện tại hoàn tất trước khi mở cuộc trò chuyện mới.");
@@ -450,8 +506,9 @@ export function AiAskComposer({
         <ConversationList
           sessions={sessions}
           activeConversationId={conversationId}
-          isDisabled={isPending}
+          isDisabled={sessionActionsDisabled}
           onSelect={handleSelectSession}
+          onDelete={deleteConversationAction ? handleDeleteSession : undefined}
           onNewChat={handleNewChat}
         />
       </nav>
@@ -661,8 +718,9 @@ export function AiAskComposer({
                 <ConversationList
                   sessions={sessions}
                   activeConversationId={conversationId}
-                  isDisabled={isPending}
+                  isDisabled={sessionActionsDisabled}
                   onSelect={handleSelectSession}
+                  onDelete={deleteConversationAction ? handleDeleteSession : undefined}
                   onNewChat={handleNewChat}
                 />
             </div>
