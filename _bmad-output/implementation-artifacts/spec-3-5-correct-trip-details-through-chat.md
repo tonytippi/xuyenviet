@@ -80,6 +80,13 @@ Empty -- no bad_spec loopback occurred.
 
 ## Review Triage Log
 
+### Review Findings -- 2026-07-07 follow-up
+- [x] [Review][Patch] Extraction prompt example uses an invalid `scope` value that the parser rejects [`src/features/ai/prompts.ts:91`] -- fixed by using a valid `trip_project`/`conversation` example scope.
+- [x] [Review][Patch] Vague-correction guard rejects all facts for some valid ordinary corrections [`src/features/chat-trips/context-extraction.ts:176`] -- fixed by replacing the broad message-wide guard with value-only ambiguous correction rejection, with regression coverage for `Không phải Huế, Đà Nẵng nhé`.
+- [x] [Review][Patch] Scope-only words can let ambiguous corrections persist as model guesses [`src/features/chat-trips/context-extraction.ts:322`] -- fixed by removing scope-only words from field-target detection and covering `Sửa chuyến này thành 8 nhé`.
+- [x] [Review][Patch] Accented correction triggers can bypass the ambiguity guard [`src/features/chat-trips/context-extraction.ts:300`] -- fixed by normalizing Vietnamese diacritics before correction parsing and covering `Đổi lại thành 8 nhé`.
+- [x] [Review][Patch] Ambiguous correction in a mixed message drops unrelated clear facts [`src/features/chat-trips/context-extraction.ts:189`] -- fixed by rejecting only facts matching the ambiguous correction value, preserving unrelated clear facts from the same turn.
+
 ### 2026-07-07 -- Review pass
 - intent_gap: 0
 - bad_spec: 0

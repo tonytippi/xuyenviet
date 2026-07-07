@@ -93,7 +93,7 @@ export function buildChatContextExtractionMessages({
             {
               field: "one_allowed_field_name",
               value: "corrected_or_new_value",
-              scope: projectScopeAvailable ? "trip_project_or_conversation" : "conversation",
+              scope: projectScopeAvailable ? "trip_project" : "conversation",
               confidence: 85,
             },
           ],

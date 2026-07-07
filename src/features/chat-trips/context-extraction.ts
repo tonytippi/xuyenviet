@@ -173,7 +173,8 @@ function parseAllowedFacts(content: string, projectScopeAvailable: boolean, late
 
   const facts: Array<{ field: ChatContextField; value: string; scope: ChatContextScope; confidence: number | null }> = [];
   const seen = new Set<string>();
-  const vagueCorrection = isVagueCorrection(latestUserMessage) && !mentionsCorrectionTarget(latestUserMessage);
+  const vagueCorrectionValue = getVagueCorrectionValue(latestUserMessage);
+  const hasCorrectionFieldTarget = mentionsCorrectionFieldTarget(latestUserMessage);
 
   for (const fact of payload.facts) {
     if (!isRecord(fact) || typeof fact.field !== "string") {
@@ -186,7 +187,7 @@ function parseAllowedFacts(content: string, projectScopeAvailable: boolean, late
       continue;
     }
 
-    if (vagueCorrection) {
+    if (!hasCorrectionFieldTarget && isVagueCorrectionGuess(vagueCorrectionValue, fact.value)) {
       console.warn("Chat context extraction fact rejected for vague correction", { field: fact.field });
       continue;
     }
@@ -297,32 +298,60 @@ function normalizeConfidence(value: unknown) {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
 
-function isVagueCorrection(message: string) {
-  return /\b(?:sửa|sua|đổi|doi|thay|không phải|khong phai|ý tôi là|y toi la|actually)\b/i.test(message);
+function getVagueCorrectionValue(message: string) {
+  const normalized = normalizeCorrectionText(message);
+  const match = normalized.match(/(?:sua|doi|thay|y toi la|actually)(?:\s+\S+){0,4}?\s+(?:thanh|to|is)\s+([^,.!?\n]{1,80})/i);
+
+  return match?.[1]?.trim() ?? null;
 }
 
-function mentionsCorrectionTarget(message: string) {
-  const normalized = message.toLowerCase();
+function isVagueCorrectionGuess(vagueCorrectionValue: string | null, factValue: unknown) {
+  if (!vagueCorrectionValue) {
+    return false;
+  }
+
+  const normalizedCorrectionValue = stripCorrectionValueFiller(normalizeCorrectionText(vagueCorrectionValue));
+  const normalizedFactValue = normalizeCorrectionText(coerceFactValue(factValue) ?? "");
+
+  return Boolean(normalizedCorrectionValue && normalizedFactValue && (normalizedFactValue.includes(normalizedCorrectionValue) || normalizedCorrectionValue.includes(normalizedFactValue)));
+}
+
+function stripCorrectionValueFiller(value: string) {
+  return value.replace(/\b(?:nhe|nha|a|di|vao|cho minh|giup minh)\b/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function mentionsCorrectionFieldTarget(message: string) {
+  const normalized = normalizeCorrectionText(message);
   const targetPatterns = [
-    /\b(?:điểm đến|diem den|destination|đến|den)\b/,
-    /\b(?:điểm xuất phát|diem xuat phat|origin|từ|tu)\b/,
-    /\b(?:ngày đi|ngay di|ngày về|ngay ve|start|end|date|ngày|ngay)\b/,
-    /\b(?:thời lượng|thoi luong|duration|mấy ngày|may ngay|ngày|ngay)\b/,
-    /\b(?:người lớn|nguoi lon|adults?)\b/,
-    /\b(?:trẻ em|tre em|children|con|bé|be|tuổi|tuoi)\b/,
-    /\b(?:ngân sách|ngan sach|budget|triệu|trieu)\b/,
-    /\b(?:khách sạn|khach san|hotel)\b/,
-    /\b(?:lái|lai|driving|xe|vehicle|ev|ô tô|oto)\b/,
-    /\b(?:ăn|an|food|món|mon|ẩm thực|am thuc)\b/,
-    /\b(?:hoạt động|hoat dong|activity|chơi|choi)\b/,
-    /\b(?:lịch trình|lich trinh|itinerary|ràng buộc|rang buoc)\b/,
-    /\b(?:tránh|tranh|avoid)\b/,
-    /\b(?:đã đi|da di|prior|trước đây|truoc day)\b/,
-    /\b(?:ghi chú|ghi chu|note)\b/,
-    /\b(?:chat|dự án|du an|chuyến|chuyen|trip)\b/,
+    /\b(?:diem den|destination|den)\b/,
+    /\b(?:diem xuat phat|origin|tu)\b/,
+    /\b(?:ngay di|ngay ve|start|end|date|ngay)\b/,
+    /\b(?:thoi luong|duration|may ngay)\b/,
+    /\b(?:nguoi lon|adults?)\b/,
+    /\b(?:tre em|children|con|be|tuoi)\b/,
+    /\b(?:ngan sach|budget|trieu)\b/,
+    /\b(?:khach san|hotel)\b/,
+    /\b(?:driving|xe|vehicle|ev|o to|oto)\b/,
+    /\b(?:an|food|mon|am thuc)\b/,
+    /\b(?:hoat dong|activity|choi)\b/,
+    /\b(?:lich trinh|itinerary|rang buoc)\b/,
+    /\b(?:tranh|avoid)\b/,
+    /\b(?:da di|prior|truoc day)\b/,
+    /\b(?:ghi chu|note)\b/,
   ];
 
   return targetPatterns.some((pattern) => pattern.test(normalized));
+}
+
+function normalizeCorrectionText(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "d")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
