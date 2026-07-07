@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { asc, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { aiGatewayModels, aiUsageEvents, conversations, messages, users } from "@/db/schema";
+import { aiGatewayModels, aiUsageEvents, conversations, messageImageAttachments, messages, users } from "@/db/schema";
 
 import { testDb } from "./helpers/db";
 
@@ -149,12 +149,23 @@ describe("AI Ask structured answer rendering", () => {
     const source = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
 
     expect(source).toContain("const progressDelayMs = 4_000");
-    expect(source).toContain("Đang gửi câu hỏi và chuẩn bị câu trả lời");
+    expect(source).toContain("Đang gửi câu hỏi và chuẩn bị luồng trả lời");
     expect(source).toContain("Trợ lý vẫn đang xử lý câu hỏi");
     expect(source).toContain("Quá trình đang lâu hơn bình thường một chút");
     expect(source).toContain("chưa tạo nội dung trợ lý tạm thời");
     expect(source).toContain("Vui lòng không gửi lặp lại trong lúc chờ");
+    expect(source).toContain("Đang nhận từng phần");
     expect(source).toContain("aria-live=\"polite\"");
+  });
+
+  test("composer source accepts removable validated traveler images", () => {
+    const source = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
+
+    expect(source).toContain("Ảnh tham khảo tuỳ chọn");
+    expect(source).toContain("accept=\"image/jpeg,image/png,image/webp\"");
+    expect(source).toContain("maxImageByteSize = 5 * 1024 * 1024");
+    expect(source).toContain("Bỏ ảnh");
+    expect(source).toContain("model đã bật khả năng nhận ảnh");
   });
 
   test("composer source keeps duplicate-send controls guarded while pending", () => {
@@ -169,7 +180,7 @@ describe("AI Ask structured answer rendering", () => {
     const source = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
 
     expect(source).toContain("getUnansweredUserMessageIds(initialMessages)");
-    expect(source).toContain("setFailedQuestionIds((currentIds) => [...currentIds, result.userMessage.id])");
+    expect(source).toContain("setFailedQuestionIds((currentIds) => [...currentIds, failedUserMessage.id])");
     expect(source).toContain("Chưa có câu trả lời trợ lý nào được lưu cho lượt này");
     expect(source).toContain("Trợ lý chưa tạo được câu trả lời cho lượt này");
     expect(source).not.toContain("clientAssistant");
@@ -743,6 +754,36 @@ describe("AI Ask action gate", () => {
     await expect(getOwnedConversation(result.conversationId)).resolves.toBeNull();
   });
 
+  test("loads owned image attachment metadata with conversation history", async () => {
+    await createTestUser("user-1");
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }),
+    }));
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
+    const [message] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "user", content: "Xem ảnh này" }).returning({ id: messages.id });
+    await testDb.insert(messageImageAttachments).values({
+      conversationId: conversation.id,
+      messageId: message.id,
+      userId: "user-1",
+      originalFileName: "road.png",
+      mimeType: "image/png",
+      byteSize: 16,
+    });
+    const { getOwnedConversation } = await import("@/features/chat-trips/conversations");
+
+    await expect(getOwnedConversation(conversation.id)).resolves.toMatchObject({
+      id: conversation.id,
+      messages: [
+        {
+          id: message.id,
+          imageAttachments: [
+            { originalFileName: "road.png", mimeType: "image/png", byteSize: 16 },
+          ],
+        },
+      ],
+    });
+  });
+
   test("records no-model failure without calling the gateway", async () => {
     await createTestUser("user-1");
     const fetchMock = vi.fn();
@@ -767,5 +808,230 @@ describe("AI Ask action gate", () => {
       errorCode: "no_active_ai_gateway_model",
       estimatedTotalCostMicros: null,
     });
+  });
+
+  test("streams text and image input through the route before persisting the final assistant message", async () => {
+    await createTestUser("user-1");
+    await createDefaultAiAskModel({
+      id: "ai-ask-stream-model",
+      gatewayModelName: "cx/gpt-5.5-stream",
+      supportsStreaming: true,
+      supportsImageInput: true,
+    });
+    const fetchMock = vi.fn().mockResolvedValue(new Response([
+      'data: {"model":"stream-model","choices":[{"delta":{"content":"Kế hoạch "}}]}\n\n',
+      'data: {"choices":[{"delta":{"content":"gợi ý"}}]}\n\n',
+      'data: {"usage":{"prompt_tokens":50,"completion_tokens":20,"total_tokens":70}}\n\n',
+      'data: {"choices":[{"finish_reason":"stop"}]}\n\n',
+      "data: [DONE]\n\n",
+    ].join(""), { status: 200, headers: { "content-type": "text/event-stream" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
+    }));
+    const formData = new FormData();
+    formData.set("question", "Ảnh này có phù hợp cho chuyến Hà Giang không?");
+    formData.set("image", new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3])], "ha-giang.png", { type: "image/png" }));
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const body = await response.text();
+    const savedMessages = await testDb.select().from(messages).orderBy(asc(messages.createdAt), asc(messages.id));
+    const savedAttachments = await testDb.select().from(messageImageAttachments);
+    const savedUsageEvents = await testDb.select().from(aiUsageEvents);
+    const requestBody = JSON.parse(String(fetchMock.mock.calls[0][1].body)) as { stream?: boolean; messages: Array<{ role: string; content: unknown }> };
+    const finalUserContent = requestBody.messages.at(-1)?.content;
+
+    expect(response.status).toBe(200);
+    expect(body).toContain('{"type":"delta","content":"Kế hoạch "}');
+    expect(body).toContain('{"type":"done"');
+    expect(savedMessages.map((message) => ({ role: message.role, content: message.content }))).toEqual([
+      { role: "user", content: "Ảnh này có phù hợp cho chuyến Hà Giang không?" },
+      { role: "assistant", content: "Kế hoạch gợi ý" },
+    ]);
+    expect(savedAttachments).toHaveLength(1);
+    expect(savedAttachments[0]).toMatchObject({
+      userId: "user-1",
+      conversationId: savedMessages[0].conversationId,
+      messageId: savedMessages[0].id,
+      originalFileName: "ha-giang.png",
+      mimeType: "image/png",
+      byteSize: 11,
+      storageKey: null,
+    });
+    expect(savedUsageEvents).toHaveLength(1);
+    expect(savedUsageEvents[0]).toMatchObject({
+      status: "success",
+      model: "stream-model",
+      aiGatewayModelId: "ai-ask-stream-model",
+      promptTokens: 50,
+      completionTokens: 20,
+      totalTokens: 70,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(requestBody.stream).toBe(true);
+    expect(JSON.stringify(finalUserContent)).toContain("data:image/png;base64,iVBORw0KGgoBAgM=");
+  });
+
+  test("does not persist assistant messages for malformed or incomplete streams", async () => {
+    await createTestUser("user-1");
+    await createDefaultAiAskModel({ id: "ai-ask-bad-stream-model", gatewayModelName: "cx/gpt-5.5-stream", supportsStreaming: true });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const fetchMock = vi.fn().mockResolvedValue(new Response([
+      'data: {"choices":[{"delta":{"content":"Một phần"}}]}\n\n',
+      "data: {bad-json}\n\n",
+      "data: [DONE]\n\n",
+    ].join(""), { status: 200, headers: { "content-type": "text/event-stream" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
+    }));
+    const formData = new FormData();
+    formData.set("question", "Đi Hà Giang thế nào?");
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const body = await response.text();
+    const savedMessages = await testDb.select().from(messages).orderBy(asc(messages.createdAt), asc(messages.id));
+    const savedUsageEvents = await testDb.select().from(aiUsageEvents);
+
+    expect(response.status).toBe(200);
+    expect(body).toContain('{"type":"delta","content":"Một phần"}');
+    expect(body).toContain('{"type":"error"');
+    expect(savedMessages.map((message) => message.role)).toEqual(["user"]);
+    expect(savedUsageEvents).toHaveLength(1);
+    expect(savedUsageEvents[0]).toMatchObject({ status: "failure", errorCode: "gateway_stream_failed" });
+    expect(warnSpy).toHaveBeenCalledWith("AI Gateway answer generation failed", expect.objectContaining({ reason: "stream_parse_failed" }));
+  });
+
+  test("does not persist assistant messages for truncated streams without done", async () => {
+    await createTestUser("user-1");
+    await createDefaultAiAskModel({ gatewayModelName: "cx/gpt-5.5-stream", supportsStreaming: true });
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response('data: {"choices":[{"delta":{"content":"Một phần"}}]}\n\n', { status: 200, headers: { "content-type": "text/event-stream" } })));
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
+    }));
+    const formData = new FormData();
+    formData.set("question", "Đi Hà Giang thế nào?");
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    await response.text();
+    const savedMessages = await testDb.select().from(messages);
+    const savedUsageEvents = await testDb.select().from(aiUsageEvents);
+
+    expect(savedMessages.map((message) => message.role)).toEqual(["user"]);
+    expect(savedUsageEvents[0]).toMatchObject({ status: "failure", errorCode: "invalid_gateway_response" });
+  });
+
+  test("rejects invalid stream image submissions before persistence or provider calls", async () => {
+    await createTestUser("user-1");
+    await createDefaultAiAskModel({ supportsStreaming: true, supportsImageInput: true });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
+    }));
+    const formData = new FormData();
+    formData.set("question", "Xem ảnh giúp tôi");
+    formData.set("image", new File([new Uint8Array([1])], "note.txt", { type: "text/plain" }));
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+
+    expect(response.status).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(await countConversations()).toBe(0);
+    expect(await countMessages()).toBe(0);
+    expect(await countUsageEvents()).toBe(0);
+  });
+
+  test("rejects zero-byte stream images before treating the request as text-only", async () => {
+    await createTestUser("user-1");
+    await createDefaultAiAskModel({ supportsStreaming: true, supportsImageInput: true });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
+    }));
+    const formData = new FormData();
+    formData.set("question", "Xem ảnh giúp tôi");
+    formData.set("image", new File([], "empty.png", { type: "image/png" }));
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+
+    expect(response.status).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(await countConversations()).toBe(0);
+    expect(await countMessages()).toBe(0);
+    expect(await countUsageEvents()).toBe(0);
+  });
+
+  test("rejects oversized stream submissions before parsing multipart body", async () => {
+    await createTestUser("user-1");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
+    }));
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", {
+      method: "POST",
+      body: "oversized",
+      headers: { "content-length": String(7 * 1024 * 1024) },
+    }) as never);
+
+    expect(response.status).toBe(413);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(await countConversations()).toBe(0);
+    expect(await countMessages()).toBe(0);
+    expect(await countUsageEvents()).toBe(0);
+  });
+
+  test("rejects spoofed image MIME bytes before persistence or provider calls", async () => {
+    await createTestUser("user-1");
+    await createDefaultAiAskModel({ supportsStreaming: true, supportsImageInput: true });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
+    }));
+    const formData = new FormData();
+    formData.set("question", "Xem ảnh giúp tôi");
+    formData.set("image", new File([new Uint8Array([1, 2, 3])], "fake.png", { type: "image/png" }));
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+
+    expect(response.status).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(await countConversations()).toBe(0);
+    expect(await countMessages()).toBe(0);
+    expect(await countUsageEvents()).toBe(0);
+  });
+
+  test("rejects image streaming when the selected model lacks image capability before side effects", async () => {
+    await createTestUser("user-1");
+    await createDefaultAiAskModel({ supportsStreaming: true, supportsImageInput: false });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
+    }));
+    const formData = new FormData();
+    formData.set("question", "Ảnh này nên đi cung nào?");
+    formData.set("image", new File([new Uint8Array([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50])], "road.webp", { type: "image/webp" }));
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+
+    expect(response.status).toBe(409);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(await countConversations()).toBe(0);
+    expect(await countMessages()).toBe(0);
+    expect(await countUsageEvents()).toBe(0);
   });
 });

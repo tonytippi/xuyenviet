@@ -202,11 +202,58 @@ export const messages = pgTable(
       foreignColumns: [conversations.id, conversations.userId],
       name: "messages_conversation_owner_fk",
     }).onDelete("cascade"),
+    uniqueIndex("messages_id_user_id_idx").on(message.id, message.userId),
+    uniqueIndex("messages_id_conversation_id_user_id_idx").on(message.id, message.conversationId, message.userId),
     index("messages_conversation_id_created_at_idx").on(message.conversationId, message.createdAt),
     index("messages_user_id_created_at_idx").on(message.userId, message.createdAt),
     check("messages_role_check", sql`${message.role} in ('user', 'assistant')`),
     check("messages_content_not_empty_check", sql`length(btrim(${message.content})) > 0`),
     check("messages_user_content_length_check", sql`${message.role} <> 'user' or char_length(${message.content}) <= 2000`),
+  ],
+);
+
+export const messageImageAttachments = pgTable(
+  "message_image_attachments",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    messageId: text("message_id")
+      .notNull()
+      .references(() => messages.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    originalFileName: text("original_file_name"),
+    mimeType: text("mime_type").notNull(),
+    byteSize: integer("byte_size").notNull(),
+    storageKey: text("storage_key"),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (attachment) => [
+    foreignKey({
+      columns: [attachment.conversationId, attachment.userId],
+      foreignColumns: [conversations.id, conversations.userId],
+      name: "message_image_attachments_conversation_owner_fk",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [attachment.messageId, attachment.userId],
+      foreignColumns: [messages.id, messages.userId],
+      name: "message_image_attachments_message_owner_fk",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [attachment.messageId, attachment.conversationId, attachment.userId],
+      foreignColumns: [messages.id, messages.conversationId, messages.userId],
+      name: "message_image_attachments_message_conversation_owner_fk",
+    }).onDelete("cascade"),
+    index("message_image_attachments_conversation_id_idx").on(attachment.conversationId),
+    index("message_image_attachments_message_id_idx").on(attachment.messageId),
+    index("message_image_attachments_user_id_idx").on(attachment.userId),
+    check("message_image_attachments_mime_type_check", sql`${attachment.mimeType} in ('image/jpeg', 'image/png', 'image/webp')`),
+    check("message_image_attachments_byte_size_check", sql`${attachment.byteSize} > 0 and ${attachment.byteSize} <= 5242880`),
   ],
 );
 
@@ -349,6 +396,7 @@ export const schema = {
   referralAttributions,
   conversations,
   messages,
+  messageImageAttachments,
   aiGatewayModels,
   aiUsageEvents,
 };

@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
-
-import { submitAiAsk } from "./ask-gate";
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 
 const maxQuestionLength = 2_000;
+const maxImageByteSize = 5 * 1024 * 1024;
 const progressDelayMs = 4_000;
 
 type DisplayMessage = {
@@ -104,10 +103,13 @@ export function AiAskComposer({ initialConversationId, initialMessages = [] }: A
   const [isPending, setIsPending] = useState(false);
   const [showProgress, setShowProgress] = useState(false);
   const [pendingQuestion, setPendingQuestion] = useState("");
+  const [streamingContent, setStreamingContent] = useState("");
+  const [selectedImage, setSelectedImage] = useState<File | null>(null);
   const [failedQuestionIds, setFailedQuestionIds] = useState<string[]>(() => getUnansweredUserMessageIds(initialMessages));
   const [messages, setMessages] = useState<DisplayMessage[]>(initialMessages);
   const [conversationId, setConversationId] = useState(initialConversationId);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const isSubmittingRef = useRef(false);
 
@@ -148,6 +150,7 @@ export function AiAskComposer({ initialConversationId, initialMessages = [] }: A
     }
 
     const trimmedQuestion = question.trim();
+    const imageError = validateSelectedImage(selectedImage);
 
     if (!trimmedQuestion) {
       setStatus("Vui lòng nhập câu hỏi trước khi gửi.");
@@ -161,23 +164,36 @@ export function AiAskComposer({ initialConversationId, initialMessages = [] }: A
       return;
     }
 
+    if (imageError) {
+      setStatus(imageError);
+      imageInputRef.current?.focus();
+      return;
+    }
+
     isSubmittingRef.current = true;
     setIsPending(true);
     setShowProgress(false);
     setPendingQuestion(trimmedQuestion);
-    setStatus("Đang gửi câu hỏi và chuẩn bị câu trả lời...");
+    setStreamingContent("");
+    setStatus(selectedImage ? "Đang kiểm tra ảnh và chuẩn bị luồng trả lời..." : "Đang gửi câu hỏi và chuẩn bị luồng trả lời...");
 
     try {
       const hadConversation = Boolean(conversationId || messages.length > 0);
-      const result = await submitAiAsk({ question: trimmedQuestion, conversationId });
+      const result = await submitAiAskStream({ question: trimmedQuestion, conversationId, image: selectedImage, onDelta: (content) => {
+        setStreamingContent((currentContent) => currentContent + content);
+      } });
 
       if (result.status === "answer-failed") {
-        setConversationId(result.conversationId);
-        setFailedQuestionIds((currentIds) => [...currentIds, result.userMessage.id]);
-        setMessages((currentMessages) => [
-          ...currentMessages,
-          { id: result.userMessage.id, role: "user", content: result.userMessage.content },
-        ]);
+        const failedUserMessage = result.userMessage;
+
+        if (result.conversationId && failedUserMessage) {
+          setConversationId(result.conversationId);
+          setFailedQuestionIds((currentIds) => [...currentIds, failedUserMessage.id]);
+          setMessages((currentMessages) => [
+            ...currentMessages,
+            { id: failedUserMessage.id, role: "user", content: failedUserMessage.content },
+          ]);
+        }
         setStatus(`${result.errorMessage} Chưa có câu trả lời trợ lý nào được lưu cho lượt này.`);
         return;
       }
@@ -189,6 +205,7 @@ export function AiAskComposer({ initialConversationId, initialMessages = [] }: A
         { id: result.assistantMessage.id, role: "assistant", content: result.assistantMessage.content },
       ]);
       setQuestion("");
+      setSelectedImage(null);
       setStatus(hadConversation ? "Đã cập nhật hội thoại của bạn." : "Đã tạo câu trả lời đầu tiên cho chuyến đi của bạn.");
     } catch {
       setStatus("Không thể gửi câu hỏi lúc này. Hãy kiểm tra đăng nhập và thử lại. Nội dung vẫn còn trong ô nhập.");
@@ -196,6 +213,36 @@ export function AiAskComposer({ initialConversationId, initialMessages = [] }: A
       isSubmittingRef.current = false;
       setIsPending(false);
       setPendingQuestion("");
+      setStreamingContent("");
+    }
+  }
+
+  function handleImageChange(event: ChangeEvent<HTMLInputElement>) {
+    const [file] = Array.from(event.target.files ?? []);
+
+    if (!file) {
+      setSelectedImage(null);
+      return;
+    }
+
+    const imageError = validateSelectedImage(file);
+
+    if (imageError) {
+      setSelectedImage(null);
+      event.target.value = "";
+      setStatus(imageError);
+      return;
+    }
+
+    setSelectedImage(file);
+    setStatus(`Đã chọn ảnh “${file.name || "ảnh đính kèm"}”. Ảnh sẽ được kiểm tra quyền sở hữu trước khi gọi AI.`);
+  }
+
+  function clearSelectedImage() {
+    setSelectedImage(null);
+
+    if (imageInputRef.current) {
+      imageInputRef.current.value = "";
     }
   }
 
@@ -243,6 +290,12 @@ export function AiAskComposer({ initialConversationId, initialMessages = [] }: A
               : "Mình đã nhận câu hỏi và đang gửi đến hệ thống AI. Vui lòng không gửi lặp lại trong lúc chờ."}
           </p>
           {pendingQuestion ? <p className="mt-3 rounded-2xl bg-white/80 p-3 text-sm leading-6 text-[#4f625a]">“{pendingQuestion}”</p> : null}
+          {streamingContent ? (
+            <div className="mt-3 rounded-2xl border border-[#d8c9ad] bg-white/90 p-3 text-sm leading-6 text-[#17342c]">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#1f5f46]">Đang nhận từng phần</p>
+              <p className="whitespace-pre-wrap">{streamingContent}</p>
+            </div>
+          ) : null}
         </section>
       ) : null}
 
@@ -262,6 +315,29 @@ export function AiAskComposer({ initialConversationId, initialMessages = [] }: A
           ref={textareaRef}
           value={question}
         />
+        <div className="mt-3 rounded-2xl border border-dashed border-[#d8c9ad] bg-[#fffdf8] p-3">
+          <label className="text-sm font-semibold text-[#17342c]" htmlFor="ai-ask-image">
+            Ảnh tham khảo tuỳ chọn
+          </label>
+          <input
+            accept="image/jpeg,image/png,image/webp"
+            className="mt-2 block w-full text-sm text-[#4f625a] file:mr-3 file:min-h-11 file:rounded-xl file:border-0 file:bg-[#e5bd82] file:px-4 file:py-2 file:font-semibold file:text-[#17342c]"
+            disabled={isPending}
+            id="ai-ask-image"
+            onChange={handleImageChange}
+            ref={imageInputRef}
+            type="file"
+          />
+          <p className="mt-2 text-xs leading-5 text-[#6b7c75]">Hỗ trợ JPEG, PNG hoặc WebP tối đa 5MB. Ảnh chỉ được gửi qua AI Gateway khi model đã bật khả năng nhận ảnh.</p>
+          {selectedImage ? (
+            <div className="mt-3 flex flex-col gap-2 rounded-xl bg-white/80 p-3 text-sm leading-6 text-[#4f625a] sm:flex-row sm:items-center sm:justify-between">
+              <span>Đã chọn: {selectedImage.name || "ảnh đính kèm"}</span>
+              <button className="min-h-11 rounded-xl border border-[#d8c9ad] px-3 py-2 font-semibold text-[#17342c]" disabled={isPending} onClick={clearSelectedImage} type="button">
+                Bỏ ảnh
+              </button>
+            </div>
+          ) : null}
+        </div>
         <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <p aria-live="polite" className="text-sm leading-6 text-[#4f625a]" id="ai-ask-status">
             {status}
@@ -278,4 +354,106 @@ export function AiAskComposer({ initialConversationId, initialMessages = [] }: A
       </form>
     </div>
   );
+}
+
+type StreamResult = {
+  status: "answer-created";
+  conversationId: string;
+  userMessage: DisplayMessage;
+  assistantMessage: DisplayMessage;
+} | {
+  status: "answer-failed";
+  conversationId?: string;
+  userMessage?: DisplayMessage;
+  errorMessage: string;
+};
+
+async function submitAiAskStream({
+  question,
+  conversationId,
+  image,
+  onDelta,
+}: {
+  question: string;
+  conversationId?: string;
+  image: File | null;
+  onDelta: (content: string) => void;
+}): Promise<StreamResult> {
+  const formData = new FormData();
+
+  formData.set("question", question);
+  if (conversationId) formData.set("conversationId", conversationId);
+  if (image) formData.set("image", image);
+
+  const response = await fetch("/api/ai-ask/stream", { method: "POST", body: formData });
+
+  if (!response.ok || !response.body) {
+    const payload = await response.json().catch(() => null) as { error?: string } | null;
+
+    return { status: "answer-failed", errorMessage: payload?.error ?? "Mình chưa tạo được câu trả lời lúc này." };
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffered = "";
+  let terminalResult: StreamResult | null = null;
+
+  while (true) {
+    const { value, done } = await reader.read();
+    buffered += decoder.decode(value, { stream: !done });
+    const lines = buffered.split("\n");
+    buffered = lines.pop() ?? "";
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+
+      const event = parseStreamEvent(trimmed);
+
+      if (!event) {
+        terminalResult ??= { status: "answer-failed", errorMessage: "Luồng trả lời bị gián đoạn trước khi hoàn tất." };
+        continue;
+      }
+
+      if (event.type === "delta" && event.content) {
+        onDelta(event.content);
+      }
+
+      if (event.type === "done" && event.conversationId && event.userMessage && event.assistantMessage) {
+        terminalResult = { status: "answer-created", conversationId: event.conversationId, userMessage: event.userMessage, assistantMessage: event.assistantMessage };
+      }
+
+      if (event.type === "error") {
+        terminalResult = { status: "answer-failed", conversationId: event.conversationId, userMessage: event.userMessage, errorMessage: event.errorMessage ?? "Mình chưa tạo được câu trả lời lúc này." };
+      }
+    }
+
+    if (done) break;
+  }
+
+  return terminalResult ?? { status: "answer-failed", errorMessage: "Luồng trả lời kết thúc trước khi lưu câu trả lời hoàn chỉnh." };
+}
+
+function parseStreamEvent(line: string) {
+  try {
+    return JSON.parse(line) as { type: string; content?: string; conversationId?: string; userMessage?: DisplayMessage; assistantMessage?: DisplayMessage; errorMessage?: string };
+  } catch {
+    return null;
+  }
+}
+
+function validateSelectedImage(image: File | null) {
+  if (!image) {
+    return null;
+  }
+
+  if (!["image/jpeg", "image/png", "image/webp"].includes(image.type)) {
+    return "Ảnh chỉ hỗ trợ JPEG, PNG hoặc WebP.";
+  }
+
+  if (image.size <= 0 || image.size > maxImageByteSize) {
+    return "Ảnh phải nhỏ hơn hoặc bằng 5MB.";
+  }
+
+  return null;
 }

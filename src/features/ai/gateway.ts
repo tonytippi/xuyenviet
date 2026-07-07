@@ -4,8 +4,14 @@ import { getRequiredServerEnv } from "@/server/env";
 
 type GatewayMessage = {
   role: "system" | "user" | "assistant";
-  content: string;
+  content: GatewayMessageContent;
 };
+
+type GatewayMessageContent = string | Array<{
+  type: "text" | "image_url";
+  text?: string;
+  image_url?: { url: string };
+}>;
 
 type GatewayUsage = {
   promptTokens: number | null;
@@ -38,6 +44,16 @@ export type AiGatewayFailure = {
 };
 
 export type AiGatewayResult = AiGatewaySuccess | AiGatewayFailure;
+
+export type AiGatewayStreamFailure = AiGatewayFailure | {
+  ok: false;
+  provider: "ai_gateway";
+  model: string;
+  latencyMs: number;
+  errorCode: "gateway_stream_failed";
+};
+
+export type AiGatewayStreamResult = AiGatewaySuccess | AiGatewayStreamFailure;
 
 export async function generateInitialAiAskAnswer({ model, messages }: { model: string; messages: GatewayMessage[] }): Promise<AiGatewayResult> {
   const startedAt = Date.now();
@@ -119,6 +135,86 @@ export async function generateInitialAiAskAnswer({ model, messages }: { model: s
       latencyMs,
       errorCode: "gateway_network_error",
     };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export async function streamInitialAiAskAnswer({
+  model,
+  messages,
+  onDelta,
+}: {
+  model: string;
+  messages: GatewayMessage[];
+  onDelta: (delta: string) => Promise<void> | void;
+}): Promise<AiGatewayStreamResult> {
+  const startedAt = Date.now();
+  const controller = new AbortController();
+  const gatewayTimeoutMs = getGatewayTimeoutMs();
+  const timeout = setTimeout(() => controller.abort(), gatewayTimeoutMs);
+
+  try {
+    const response = await fetch(buildGatewayUrl(), {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        authorization: `Bearer ${getRequiredServerEnv("AI_GATEWAY_API_KEY")}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        max_tokens: maxCompletionTokens,
+        temperature: 0.3,
+        stream: true,
+      }),
+    });
+
+    const latencyMs = Date.now() - startedAt;
+
+    if (!response.ok) {
+      logGatewayFailure({ errorCode: "gateway_http_error", latencyMs, model, timeoutMs: gatewayTimeoutMs, status: response.status, statusText: response.statusText });
+
+      return { ok: false, provider: "ai_gateway", model, latencyMs, errorCode: "gateway_http_error" };
+    }
+
+    if (!response.body) {
+      logGatewayFailure({ errorCode: "invalid_gateway_response", latencyMs, model, timeoutMs: gatewayTimeoutMs, reason: "missing_stream_body" });
+
+      return { ok: false, provider: "ai_gateway", model, latencyMs, errorCode: "invalid_gateway_response" };
+    }
+
+    const streamResult = await readOpenAiCompatibleStream(response.body, onDelta);
+    const finalLatencyMs = Date.now() - startedAt;
+
+    if (streamResult.failed || !streamResult.done || streamResult.finishReason !== "stop" || !streamResult.content) {
+      logGatewayFailure({ errorCode: "invalid_gateway_response", latencyMs: finalLatencyMs, model, timeoutMs: gatewayTimeoutMs, reason: streamResult.failed ? "stream_parse_failed" : "empty_stream_content" });
+
+      return { ok: false, provider: "ai_gateway", model, latencyMs: finalLatencyMs, errorCode: streamResult.failed ? "gateway_stream_failed" : "invalid_gateway_response" };
+    }
+
+    return {
+      ok: true,
+      content: streamResult.content,
+      provider: "ai_gateway",
+      model: streamResult.model ?? model,
+      latencyMs: finalLatencyMs,
+      usage: streamResult.usage,
+    };
+  } catch (error) {
+    const latencyMs = Date.now() - startedAt;
+
+    logGatewayFailure({
+      errorCode: "gateway_network_error",
+      latencyMs,
+      model,
+      timeoutMs: gatewayTimeoutMs,
+      reason: error instanceof Error ? error.name : "unknown_error",
+      message: error instanceof Error ? error.message : undefined,
+    });
+
+    return { ok: false, provider: "ai_gateway", model, latencyMs, errorCode: "gateway_network_error" };
   } finally {
     clearTimeout(timeout);
   }
@@ -209,6 +305,129 @@ function parseUsage(payload: unknown): GatewayUsage {
     totalTokens: parseTokenCount(payload.usage.total_tokens),
     cachedPromptTokens: parseCachedPromptTokens(payload.usage),
     cacheWritePromptTokens: parseCacheWritePromptTokens(payload.usage),
+  };
+}
+
+async function readOpenAiCompatibleStream(body: ReadableStream<Uint8Array>, onDelta: (delta: string) => Promise<void> | void) {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffered = "";
+  let content = "";
+  let model: string | null = null;
+  let usage: GatewayUsage = { promptTokens: null, completionTokens: null, totalTokens: null, cachedPromptTokens: null, cacheWritePromptTokens: null };
+  let failed = false;
+  let doneReceived = false;
+  let finishReason: string | null = null;
+
+  while (true) {
+    const { value, done } = await reader.read();
+    buffered += decoder.decode(value, { stream: !done });
+    const lines = buffered.split("\n");
+    buffered = lines.pop() ?? "";
+
+    for (const line of lines) {
+      const result = await processStreamLine(line, onDelta);
+      content += result.content;
+      model = result.model ?? model;
+      usage = mergeUsage(usage, result.usage);
+      failed = failed || result.failed;
+      doneReceived = doneReceived || result.done;
+      finishReason = result.finishReason ?? finishReason;
+    }
+
+    if (done) {
+      break;
+    }
+  }
+
+  if (buffered.trim()) {
+    const result = await processStreamLine(buffered, onDelta);
+    content += result.content;
+    model = result.model ?? model;
+    usage = mergeUsage(usage, result.usage);
+    failed = failed || result.failed;
+    doneReceived = doneReceived || result.done;
+    finishReason = result.finishReason ?? finishReason;
+  }
+
+  return { content: content.trim(), model, usage, failed, done: doneReceived, finishReason };
+}
+
+async function processStreamLine(line: string, onDelta: (delta: string) => Promise<void> | void) {
+  const emptyUsage: GatewayUsage = { promptTokens: null, completionTokens: null, totalTokens: null, cachedPromptTokens: null, cacheWritePromptTokens: null };
+  const trimmed = line.trim();
+
+  if (!trimmed || trimmed.startsWith(":")) {
+    return { content: "", model: null, usage: emptyUsage, failed: false, done: false, finishReason: null };
+  }
+
+  const data = trimmed.startsWith("data:") ? trimmed.slice(5).trim() : trimmed;
+
+  if (data === "[DONE]") {
+    return { content: "", model: null, usage: emptyUsage, failed: false, done: true, finishReason: null };
+  }
+
+  try {
+    const payload = JSON.parse(data) as unknown;
+
+    if (isRecord(payload) && isRecord(payload.error)) {
+      return { content: "", model: parseModel(payload), usage: parseUsage(payload), failed: true, done: false, finishReason: null };
+    }
+
+    const delta = parseStreamDelta(payload);
+
+    if (delta) {
+      await onDelta(delta);
+    }
+
+    return {
+      content: delta ?? "",
+      model: parseModel(payload),
+      usage: parseUsage(payload),
+      failed: false,
+      done: false,
+      finishReason: parseFinishReason(payload),
+    };
+  } catch {
+    return { content: "", model: null, usage: emptyUsage, failed: true, done: false, finishReason: null };
+  }
+}
+
+function parseStreamDelta(payload: unknown) {
+  if (!isRecord(payload) || !Array.isArray(payload.choices)) {
+    return null;
+  }
+
+  const [choice] = payload.choices;
+
+  if (!isRecord(choice) || !isRecord(choice.delta) || typeof choice.delta.content !== "string") {
+    return null;
+  }
+
+  return choice.delta.content;
+}
+
+function parseFinishReason(payload: unknown) {
+  if (!isRecord(payload) || !Array.isArray(payload.choices)) {
+    return null;
+  }
+
+  const [choice] = payload.choices;
+
+  if (!isRecord(choice) || typeof choice.finish_reason !== "string") {
+    return null;
+  }
+
+  return choice.finish_reason;
+}
+
+function mergeUsage(current: GatewayUsage, next: GatewayUsage): GatewayUsage {
+  return {
+    promptTokens: next.promptTokens ?? current.promptTokens,
+    completionTokens: next.completionTokens ?? current.completionTokens,
+    totalTokens: next.totalTokens ?? current.totalTokens,
+    cachedPromptTokens: next.cachedPromptTokens ?? current.cachedPromptTokens,
+    cacheWritePromptTokens: next.cacheWritePromptTokens ?? current.cacheWritePromptTokens,
   };
 }
 

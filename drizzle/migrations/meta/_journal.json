@@ -64,6 +64,20 @@
       "when": 1783396475443,
       "tag": "0008_sharp_pride",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1783397760697,
+      "tag": "0009_breezy_namorita",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1783398163015,
+      "tag": "0010_chilly_kronos",
+      "breakpoints": true
     }
   ]
 }

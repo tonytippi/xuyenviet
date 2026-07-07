@@ -2,9 +2,11 @@
 title: 'Story 2.7: Stream AI Ask Responses And Accept Traveler Image Input'
 type: 'feature'
 created: '2026-07-07'
-status: 'blocked'
+status: 'done'
 review_loop_iteration: 0
 followup_review_recommended: false
+baseline_revision: 'e1a7ed95ef9d9eee68eaf54db330c04f0e3df2ca'
+final_revision: 'e1a7ed95ef9d9eee68eaf54db330c04f0e3df2ca'
 context:
   - '{project-root}/_bmad-output/project-context.md'
   - '{project-root}/_bmad-output/implementation-artifacts/epic-2-context.md'
@@ -56,12 +58,12 @@ warnings: []
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `src/db/schema.ts` and `drizzle/migrations/*` -- add or reuse approved model capability/catalog and image attachment metadata only after the prerequisite decision is resolved -- avoid hard-coded, unowned multimodal behavior.
-- [ ] `src/features/ai/gateway.ts` -- add an OpenAI-compatible streaming adapter and multimodal request content type behind explicit capability checks -- keep provider access centralized and auditable.
-- [ ] `src/app/api/ai-ask/stream/route.ts` or an approved equivalent server boundary -- stream transient chunks, accumulate final text server-side, persist the assistant message only after successful completion, and record usage -- support progressive UI without losing persisted source-of-truth semantics.
-- [ ] `src/features/ai/ai-ask-composer.tsx` -- add image selection/removal UI and streamed transient assistant rendering that reconciles to persisted final messages -- improve responsiveness while preserving failure recovery.
-- [ ] `tests/ai-ask-shell.test.ts` or focused new tests under `tests/` -- cover streaming success/failure, invalid image fail-closed behavior, capability rejection, persisted final-message source of truth, and no fake sources -- verify all edge cases feasible without a browser E2E framework.
-- [ ] `_bmad-output/implementation-artifacts/sprint-status.yaml` -- update Story 2.7 status only when implementation actually begins and completes -- keep BMad status truthful.
+- [x] `src/db/schema.ts` and `drizzle/migrations/*` -- add or reuse approved model capability/catalog and image attachment metadata only after the prerequisite decision is resolved -- avoid hard-coded, unowned multimodal behavior.
+- [x] `src/features/ai/gateway.ts` -- add an OpenAI-compatible streaming adapter and multimodal request content type behind explicit capability checks -- keep provider access centralized and auditable.
+- [x] `src/app/api/ai-ask/stream/route.ts` or an approved equivalent server boundary -- stream transient chunks, accumulate final text server-side, persist the assistant message only after successful completion, and record usage -- support progressive UI without losing persisted source-of-truth semantics.
+- [x] `src/features/ai/ai-ask-composer.tsx` -- add image selection/removal UI and streamed transient assistant rendering that reconciles to persisted final messages -- improve responsiveness while preserving failure recovery.
+- [x] `tests/ai-ask-shell.test.ts` or focused new tests under `tests/` -- cover streaming success/failure, invalid image fail-closed behavior, capability rejection, persisted final-message source of truth, and no fake sources -- verify all edge cases feasible without a browser E2E framework.
+- [x] `_bmad-output/implementation-artifacts/sprint-status.yaml` -- update Story 2.7 status only when implementation actually begins and completes -- keep BMad status truthful.
 
 **Acceptance Criteria:**
 - Given the selected model supports streaming and required context/source/provenance inputs are prepared, when an authenticated user submits text, then assistant text streams progressively and the final rendered completed answer matches the persisted assistant message.
@@ -73,6 +75,23 @@ warnings: []
 ## Spec Change Log
 
 ## Review Triage Log
+
+### 2026-07-07 — Review pass
+- intent_gap: 0
+- bad_spec: 0
+- patch: 9: (high 2, medium 6, low 1)
+- defer: 1: (high 0, medium 1, low 0)
+- reject: 1
+- addressed_findings:
+  - `[high]` `[patch]` Malformed or partial provider streams could persist partial assistant content; streaming parser now fails malformed frames, missing `[DONE]`, and non-stop finish states, with regression tests.
+  - `[high]` `[patch]` Spoofed image MIME types were trusted; route now validates PNG/JPEG/WebP magic bytes before persistence or Gateway forwarding, with regression tests.
+  - `[medium]` `[patch]` Attachment metadata could cross-link a same-user message from another conversation; schema now adds a composite message/conversation/user invariant and migration.
+  - `[medium]` `[patch]` Zero-byte images were treated as text-only submissions; route now rejects zero-byte image files before model selection or persistence.
+  - `[medium]` `[patch]` Oversized multipart requests could be parsed before aggregate size checks; route now rejects `content-length` above 6MB before `formData()`.
+  - `[medium]` `[patch]` Suspicious uploaded filenames were stored verbatim; route now strips control/path characters and caps stored filenames.
+  - `[medium]` `[patch]` Client NDJSON parsing could throw on malformed lines; composer now guards malformed stream events and returns a recoverable failed state.
+  - `[medium]` `[patch]` Loaded conversation history dropped persisted image metadata; owned conversation loading now includes attachment metadata per message.
+  - `[low]` `[patch]` Client abort behavior could try to enqueue/close after disconnect; route now guards enqueue/close and records aborted streams as failed before final persistence.
 
 ## Design Notes
 
@@ -87,6 +106,14 @@ The approved change proposal explicitly says Story 2.7 should be implemented aft
 - `pnpm typecheck` -- expected: passes after implementation.
 - `pnpm build` -- expected: passes after implementation.
 
+Performed:
+- `pnpm db:generate` -- passed; generated migrations `0009_breezy_namorita.sql` and `0010_chilly_kronos.sql`.
+- `pnpm test:run tests/ai-ask-shell.test.ts` -- passed, 35 tests.
+- `pnpm test:run` -- passed, 6 test files, 98 tests.
+- `pnpm lint` -- passed.
+- `pnpm typecheck` -- passed.
+- `pnpm build` -- passed.
+
 ## Auto Run Result
 
 Status: blocked
@@ -97,3 +124,39 @@ Evidence:
 - `_bmad-output/planning-artifacts/epics.md` states: "Story 5.0 should provide the model capability catalog before Story 2.7 implementation unless a temporary hard-coded capability gate is explicitly approved for the story."
 - `_bmad-output/planning-artifacts/sprint-change-proposal-2026-07-07-ai-gateway-models-streaming-multimodal.md` recommends implementing Story 5.0 first unless the temporary gate is explicitly approved.
 - Current code has text-only messages, a non-streaming server action, a non-streaming Gateway adapter, hard-coded model selection, no image attachment metadata, and no upload/storage/deletion contract.
+
+---
+
+Status: done
+
+Summary: Implemented Story 2.7 after Story 5.0 resolved the model capability prerequisite. AI Ask now submits through an authenticated streaming route, selects a streaming/image-capable AI Gateway model from the catalog, streams transient deltas to the UI, persists only the final successful assistant message, records usage success/failure, and accepts validated traveler image input with owner-scoped attachment metadata. Invalid images, capability mismatches, malformed streams, truncated streams, unauthenticated submissions, and oversized submissions fail before provider calls or final assistant persistence as appropriate.
+
+Files changed:
+- `src/app/api/ai-ask/stream/route.ts` -- added authenticated NDJSON streaming route with text/image validation, model capability checks, owner-scoped persistence, usage recording, stream integrity handling, and client-abort guards.
+- `src/features/ai/gateway.ts` -- added OpenAI-compatible streaming adapter, multimodal request content support, SSE parsing, usage/model parsing, malformed stream detection, and terminal-state validation.
+- `src/features/ai/ai-ask-composer.tsx` -- added image selection/removal UI, client-side image validation, streamed transient assistant rendering, NDJSON parsing, and final persisted-message reconciliation.
+- `src/db/schema.ts` -- added `message_image_attachments` metadata table and composite ownership/consistency constraints.
+- `src/features/chat-trips/conversations.ts` -- included image attachment metadata when loading owned conversation history.
+- `drizzle/migrations/0009_breezy_namorita.sql` and metadata -- created attachment metadata table and owner indexes/constraints.
+- `drizzle/migrations/0010_chilly_kronos.sql` and metadata -- added message/conversation/user composite constraint for attachment consistency.
+- `tests/ai-ask-shell.test.ts` -- added streaming success/failure, image validation, capability rejection, attachment metadata, malformed/truncated stream, and no-side-effect regression coverage.
+- `_bmad-output/implementation-artifacts/sprint-status.yaml` -- marked Story 2.7 and Epic 2 done.
+- `_bmad-output/implementation-artifacts/spec-2-7-stream-ai-ask-responses-and-accept-traveler-image-input.md` -- recorded implementation, review triage, and verification.
+
+Verification performed:
+- `pnpm db:generate` -- passed.
+- `pnpm test:run tests/ai-ask-shell.test.ts` -- passed, 35 tests.
+- `pnpm test:run` -- passed, 6 test files, 98 tests.
+- `pnpm lint` -- passed.
+- `pnpm typecheck` -- passed.
+- `pnpm build` -- passed.
+
+Review findings breakdown: 9 patch findings fixed, 1 deferred, 1 rejected as not required for this story.
+
+Follow-up review recommendation: false.
+
+Commit status: not committed because explicit commit permission was not provided.
+
+Residual risks:
+- The route uses `content-length` for aggregate multipart rejection; deployments/proxies should still enforce request body limits at the platform edge.
+- Image bytes are forwarded to the configured AI Gateway as data URLs and only metadata is persisted; future durable file storage, if added, must preserve the same owner/deletion contract.

@@ -1,0 +1,2 @@
+CREATE UNIQUE INDEX "messages_id_conversation_id_user_id_idx" ON "messages" USING btree ("id","conversation_id","user_id");--> statement-breakpoint
+ALTER TABLE "message_image_attachments" ADD CONSTRAINT "message_image_attachments_message_conversation_owner_fk" FOREIGN KEY ("message_id","conversation_id","user_id") REFERENCES "public"."messages"("id","conversation_id","user_id") ON DELETE cascade ON UPDATE no action;

@@ -3,7 +3,7 @@ import "server-only";
 import { and, asc, eq } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { conversations, messages } from "@/db/schema";
+import { conversations, messageImageAttachments, messages } from "@/db/schema";
 import { getAuthenticatedSession } from "@/server/auth";
 
 export async function getOwnedConversation(conversationId: string) {
@@ -29,5 +29,29 @@ export async function getOwnedConversation(conversationId: string) {
     .where(and(eq(messages.conversationId, conversation.id), eq(messages.userId, session.userId)))
     .orderBy(asc(messages.createdAt), asc(messages.id));
 
-  return { ...conversation, messages: conversationMessages };
+  const attachments = await getDb()
+    .select({
+      id: messageImageAttachments.id,
+      messageId: messageImageAttachments.messageId,
+      originalFileName: messageImageAttachments.originalFileName,
+      mimeType: messageImageAttachments.mimeType,
+      byteSize: messageImageAttachments.byteSize,
+    })
+    .from(messageImageAttachments)
+    .where(and(eq(messageImageAttachments.conversationId, conversation.id), eq(messageImageAttachments.userId, session.userId)))
+    .orderBy(asc(messageImageAttachments.createdAt), asc(messageImageAttachments.id));
+
+  const attachmentsByMessageId = new Map<string, typeof attachments>();
+
+  for (const attachment of attachments) {
+    attachmentsByMessageId.set(attachment.messageId, [...(attachmentsByMessageId.get(attachment.messageId) ?? []), attachment]);
+  }
+
+  return {
+    ...conversation,
+    messages: conversationMessages.map((message) => ({
+      ...message,
+      imageAttachments: attachmentsByMessageId.get(message.id) ?? [],
+    })),
+  };
 }
