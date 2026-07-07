@@ -1,6 +1,6 @@
 export const aiAskInitialAnswerPurpose = "ai_ask_initial_answer" as const;
 export const aiAskInitialAnswerPromptVersion = "ai_ask_initial_v3" as const;
-export const aiAskInitialAnswerModel = "xuyenviet-roadtrip-v1" as const;
+export const aiAskInitialAnswerModel = "cx/gpt-5.5" as const;
 
 type PromptHistoryMessage = {
   role: "user" | "assistant";

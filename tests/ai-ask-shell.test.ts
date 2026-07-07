@@ -5,6 +5,7 @@ import { asc, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { aiUsageEvents, conversations, messages, users } from "@/db/schema";
+import { aiAskInitialAnswerModel } from "@/features/ai/prompts";
 
 import { testDb } from "./helpers/db";
 
@@ -445,6 +446,8 @@ describe("AI Ask action gate", () => {
 
   test("keeps follow-up user message, records failed usage, and creates no assistant message when continuation provider fails", async () => {
     await createTestUser("user-1");
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(
         new Response(
@@ -493,6 +496,8 @@ describe("AI Ask action gate", () => {
 
   test("keeps the user message, records failed usage, and creates no assistant message when provider fails", async () => {
     await createTestUser("user-1");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status: 500 })));
     vi.doMock("@/server/auth", () => ({
       getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
@@ -520,15 +525,44 @@ describe("AI Ask action gate", () => {
       assistantMessageId: null,
       purpose: "ai_ask_initial_answer",
       provider: "ai_gateway",
-      model: "xuyenviet-roadtrip-v1",
+      model: aiAskInitialAnswerModel,
       promptVersion: "ai_ask_initial_v3",
       status: "failure",
       errorCode: "gateway_http_error",
     });
+    expect(warnSpy).toHaveBeenCalledWith("AI Gateway answer generation failed", expect.objectContaining({
+      errorCode: "gateway_http_error",
+      model: aiAskInitialAnswerModel,
+      status: 500,
+      timeoutMs: 30_000,
+    }));
+  });
+
+  test("uses configured AI Gateway timeout for slow model debugging", async () => {
+    await createTestUser("user-1");
+    process.env.AI_GATEWAY_TIMEOUT_MS = "45000";
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status: 500 })));
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
+    }));
+    const { submitAiAsk } = await import("@/features/ai/ask-gate");
+
+    const result = await submitAiAsk({ question: "Hà Nội đi Đà Nẵng?" });
+
+    delete process.env.AI_GATEWAY_TIMEOUT_MS;
+    expect(result.status).toBe("answer-failed");
+    expect(warnSpy).toHaveBeenCalledWith("AI Gateway answer generation failed", expect.objectContaining({
+      errorCode: "gateway_http_error",
+      timeoutMs: 45_000,
+    }));
   });
 
   test("records invalid gateway responses without creating assistant messages", async () => {
     await createTestUser("user-1");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("not-json", { status: 200 })));
     vi.doMock("@/server/auth", () => ({
       getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
@@ -543,6 +577,33 @@ describe("AI Ask action gate", () => {
     expect(savedMessages).toHaveLength(1);
     expect(savedUsageEvents).toHaveLength(1);
     expect(savedUsageEvents[0].errorCode).toBe("invalid_gateway_response");
+    expect(warnSpy).toHaveBeenCalledWith("AI Gateway answer generation failed", expect.objectContaining({
+      errorCode: "invalid_gateway_response",
+      reason: "json_parse_failed",
+    }));
+  });
+
+  test("logs network and environment gateway failures without request bodies or secrets", async () => {
+    await createTestUser("user-1");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("connect ECONNREFUSED 127.0.0.1:443")));
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
+    }));
+    const { submitAiAsk } = await import("@/features/ai/ask-gate");
+
+    const result = await submitAiAsk({ question: "Đi Phú Yên 4 ngày?" });
+    const loggedDetails = warnSpy.mock.calls[0][1] as Record<string, unknown>;
+
+    expect(result.status).toBe("answer-failed");
+    expect(warnSpy).toHaveBeenCalledWith("AI Gateway answer generation failed", expect.objectContaining({
+      errorCode: "gateway_network_error",
+      reason: "Error",
+    }));
+    expect(JSON.stringify(loggedDetails)).not.toContain("test-ai-gateway-key");
+    expect(JSON.stringify(loggedDetails)).not.toContain("messages");
+    expect(JSON.stringify(loggedDetails)).not.toContain("Đi Phú Yên");
   });
 
   test("sends bounded gateway requests", async () => {

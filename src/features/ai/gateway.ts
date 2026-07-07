@@ -15,7 +15,9 @@ type GatewayUsage = {
   totalTokens: number | null;
 };
 
-const gatewayTimeoutMs = 30_000;
+const defaultGatewayTimeoutMs = 30_000;
+const minGatewayTimeoutMs = 1_000;
+const maxGatewayTimeoutMs = 180_000;
 const maxCompletionTokens = 900;
 
 export type AiGatewaySuccess = {
@@ -41,6 +43,7 @@ export async function generateInitialAiAskAnswer(messages: GatewayMessage[]): Pr
   const startedAt = Date.now();
   const model = aiAskInitialAnswerModel;
   const controller = new AbortController();
+  const gatewayTimeoutMs = getGatewayTimeoutMs();
   const timeout = setTimeout(() => controller.abort(), gatewayTimeoutMs);
 
   try {
@@ -62,18 +65,31 @@ export async function generateInitialAiAskAnswer(messages: GatewayMessage[]): Pr
     const latencyMs = Date.now() - startedAt;
 
     if (!response.ok) {
+      logGatewayFailure({
+        errorCode: "gateway_http_error",
+        latencyMs,
+        model,
+        timeoutMs: gatewayTimeoutMs,
+        status: response.status,
+        statusText: response.statusText,
+      });
+
       return { ok: false, provider: "ai_gateway", model, latencyMs, errorCode: "gateway_http_error" };
     }
 
     const payload = await parseJson(response);
 
     if (!payload) {
+      logGatewayFailure({ errorCode: "invalid_gateway_response", latencyMs, model, timeoutMs: gatewayTimeoutMs, reason: "json_parse_failed" });
+
       return { ok: false, provider: "ai_gateway", model, latencyMs, errorCode: "invalid_gateway_response" };
     }
 
     const content = parseContent(payload);
 
     if (!content) {
+      logGatewayFailure({ errorCode: "invalid_gateway_response", latencyMs, model, timeoutMs: gatewayTimeoutMs, reason: "missing_choice_message_content" });
+
       return { ok: false, provider: "ai_gateway", model, latencyMs, errorCode: "invalid_gateway_response" };
     }
 
@@ -85,12 +101,23 @@ export async function generateInitialAiAskAnswer(messages: GatewayMessage[]): Pr
       latencyMs,
       usage: parseUsage(payload),
     };
-  } catch {
+  } catch (error) {
+    const latencyMs = Date.now() - startedAt;
+
+    logGatewayFailure({
+      errorCode: "gateway_network_error",
+      latencyMs,
+      model,
+      timeoutMs: gatewayTimeoutMs,
+      reason: error instanceof Error ? error.name : "unknown_error",
+      message: error instanceof Error ? error.message : undefined,
+    });
+
     return {
       ok: false,
       provider: "ai_gateway",
       model,
-      latencyMs: Date.now() - startedAt,
+      latencyMs,
       errorCode: "gateway_network_error",
     };
   } finally {
@@ -100,6 +127,44 @@ export async function generateInitialAiAskAnswer(messages: GatewayMessage[]): Pr
 
 function buildGatewayUrl() {
   return `${getRequiredServerEnv("AI_GATEWAY_BASE_URL").replace(/\/+$/, "")}/chat/completions`;
+}
+
+function getGatewayTimeoutMs() {
+  const configuredValue = process.env.AI_GATEWAY_TIMEOUT_MS;
+
+  if (!configuredValue) {
+    return defaultGatewayTimeoutMs;
+  }
+
+  const parsedValue = Number(configuredValue);
+
+  if (!Number.isFinite(parsedValue)) {
+    return defaultGatewayTimeoutMs;
+  }
+
+  return Math.min(Math.max(Math.trunc(parsedValue), minGatewayTimeoutMs), maxGatewayTimeoutMs);
+}
+
+function logGatewayFailure(details: {
+  errorCode: AiGatewayFailure["errorCode"];
+  latencyMs: number;
+  model: string;
+  timeoutMs: number;
+  status?: number;
+  statusText?: string;
+  reason?: string;
+  message?: string;
+}) {
+  console.warn("AI Gateway answer generation failed", {
+    errorCode: details.errorCode,
+    latencyMs: details.latencyMs,
+    model: details.model,
+    timeoutMs: details.timeoutMs,
+    status: details.status,
+    statusText: details.statusText,
+    reason: details.reason,
+    message: details.message,
+  });
 }
 
 function parseContent(payload: unknown) {
