@@ -39,6 +39,11 @@ type CreateTripProjectAction = (
 ) => Promise<CreateTripProjectFormState | undefined>;
 
 type DeleteConversationAction = (conversationId: string) => Promise<{ success: boolean; error?: string; reason?: "not_found" }>;
+type DeleteTripProjectAction = (tripProjectId: string) => Promise<{ success: boolean; error?: string; reason?: "not_found" }>;
+
+const emptyMessages: DisplayMessage[] = [];
+const emptySessions: ChatSessionSummary[] = [];
+const emptyTripProjects: TripProjectSummary[] = [];
 
 type AiAskComposerProps = {
   initialConversationId?: string;
@@ -48,6 +53,7 @@ type AiAskComposerProps = {
   selectedTripProject?: TripProjectSummary | null;
   createTripProjectAction?: CreateTripProjectAction;
   deleteConversationAction?: DeleteConversationAction;
+  deleteTripProjectAction?: DeleteTripProjectAction;
 };
 
 function getUnansweredUserMessageIds(messages: DisplayMessage[]) {
@@ -132,12 +138,13 @@ export function AssistantMessageContent({ content }: { content: string }) {
 
 export function AiAskComposer({
   initialConversationId,
-  initialMessages = [],
-  initialSessions = [],
-  initialTripProjects = [],
+  initialMessages = emptyMessages,
+  initialSessions = emptySessions,
+  initialTripProjects = emptyTripProjects,
   selectedTripProject = null,
   createTripProjectAction,
   deleteConversationAction,
+  deleteTripProjectAction,
 }: AiAskComposerProps) {
   const router = useRouter();
   const activeTripProjectId = selectedTripProject?.id;
@@ -153,14 +160,17 @@ export function AiAskComposer({
   const [messages, setMessages] = useState<DisplayMessage[]>(initialMessages);
   const [conversationId, setConversationId] = useState(initialConversationId);
   const [sessions, setSessions] = useState<ChatSessionSummary[]>(initialSessions);
+  const [tripProjects, setTripProjects] = useState<TripProjectSummary[]>(initialTripProjects);
   const [isSessionSheetOpen, setSessionSheetOpen] = useState(false);
   const [deletingConversationId, setDeletingConversationId] = useState<string | null>(null);
+  const [deletingTripProjectId, setDeletingTripProjectId] = useState<string | null>(null);
   const [createProjectState, createProjectFormAction, isCreatingProject] = useActionState<CreateTripProjectFormState | undefined, FormData>(
     createTripProjectAction ?? noOpCreateTripProjectAction,
     undefined,
   );
   const createFormDisabled = isPending || isCreatingProject;
-  const sessionActionsDisabled = isPending || Boolean(deletingConversationId);
+  const sessionActionsDisabled = isPending || Boolean(deletingConversationId) || Boolean(deletingTripProjectId);
+  const projectActionsDisabled = isPending || Boolean(deletingConversationId) || Boolean(deletingTripProjectId);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
@@ -168,6 +178,7 @@ export function AiAskComposer({
   const abortControllerRef = useRef<AbortController | null>(null);
   const activeRequestIdRef = useRef(0);
   const deletingConversationIdRef = useRef<string | null>(null);
+  const deletingTripProjectIdRef = useRef<string | null>(null);
   const sessionSheetTriggerRef = useRef<HTMLButtonElement>(null);
   const sessionSheetPanelRef = useRef<HTMLDivElement>(null);
   const sessionSheetPreviousFocusRef = useRef<HTMLElement | null>(null);
@@ -177,6 +188,20 @@ export function AiAskComposer({
       abortControllerRef.current?.abort();
     };
   }, []);
+
+  useEffect(() => {
+    setTripProjects(initialTripProjects);
+  }, [initialTripProjects]);
+
+  useEffect(() => {
+    setSessions(initialSessions);
+  }, [initialSessions]);
+
+  useEffect(() => {
+    setMessages(initialMessages);
+    setConversationId(initialConversationId);
+    setFailedQuestionIds(getUnansweredUserMessageIds(initialMessages));
+  }, [initialConversationId, initialMessages]);
 
   useEffect(() => {
     function handleShortcut(event: globalThis.KeyboardEvent) {
@@ -510,7 +535,80 @@ export function AiAskComposer({
       return;
     }
 
+    if (deletingTripProjectIdRef.current) {
+      setStatus("Vui lòng chờ thao tác xoá dự án chuyến đi hoàn tất trước khi đổi dự án.");
+      return;
+    }
+
     router.push(projectId ? `/ai-ask?tripProjectId=${encodeURIComponent(projectId)}` : "/ai-ask");
+  }
+
+  async function handleDeleteTripProject() {
+    if (!selectedTripProject || !deleteTripProjectAction) {
+      return;
+    }
+
+    if (isPending) {
+      setStatus("Vui lòng chờ câu trả lời hiện tại hoàn tất trước khi xoá dự án chuyến đi.");
+      return;
+    }
+
+    if (deletingConversationIdRef.current || deletingTripProjectIdRef.current) {
+      return;
+    }
+
+    const confirmed = window.confirm(`Xoá dự án chuyến đi “${selectedTripProject.title}”? Ngữ cảnh đã ghi nhớ cho dự án sẽ bị xoá khỏi phần sử dụng bình thường. Các cuộc trò chuyện liên kết sẽ không bị xoá; chúng sẽ được chuyển về lịch sử trò chuyện thường.`);
+
+    if (!confirmed) {
+      return;
+    }
+
+    const projectId = selectedTripProject.id;
+    deletingTripProjectIdRef.current = projectId;
+    setDeletingTripProjectId(projectId);
+    setStatus("Đang xoá dự án chuyến đi...");
+
+    try {
+      const result = await deleteTripProjectAction(projectId);
+
+      if (!result.success) {
+        if (result.reason === "not_found") {
+          setTripProjects((currentProjects) => currentProjects.filter((project) => project.id !== projectId));
+          setSessionSheetOpen(false);
+          setSessions([]);
+          setMessages([]);
+          setConversationId(undefined);
+          setQuestion("");
+          setFailedQuestionIds([]);
+          setSelectedImage(null);
+          if (imageInputRef.current) {
+            imageInputRef.current.value = "";
+          }
+          router.push("/ai-ask");
+        }
+        setStatus(result.error ?? "Không thể xoá dự án chuyến đi lúc này. Vui lòng thử lại.");
+        return;
+      }
+
+      setTripProjects((currentProjects) => currentProjects.filter((project) => project.id !== projectId));
+      setSessionSheetOpen(false);
+      setSessions([]);
+      setMessages([]);
+      setConversationId(undefined);
+      setQuestion("");
+      setFailedQuestionIds([]);
+      setSelectedImage(null);
+      if (imageInputRef.current) {
+        imageInputRef.current.value = "";
+      }
+      router.push("/ai-ask");
+      setStatus("Đã xoá dự án chuyến đi. Các cuộc trò chuyện liên kết đã được chuyển về lịch sử trò chuyện thường.");
+    } catch {
+      setStatus("Không thể xoá dự án chuyến đi lúc này. Vui lòng thử lại.");
+    } finally {
+      deletingTripProjectIdRef.current = null;
+      setDeletingTripProjectId(null);
+    }
   }
 
   return (
@@ -544,17 +642,31 @@ export function AiAskComposer({
               Chọn dự án
               <select
                 className="min-h-11 rounded-2xl border border-[#d8c9ad] bg-[#fffdf8] px-3 py-2 text-sm text-[#17342c] outline-none focus:border-[#1f5f46] focus:ring-4 focus:ring-[#8fb59f]/45"
-                disabled={isPending}
+                disabled={projectActionsDisabled}
                 onChange={(event) => handleSelectTripProject(event.target.value)}
                 value={activeTripProjectId ?? ""}
               >
                 <option value="">Trò chuyện thường</option>
-                {initialTripProjects.map((project) => (
+                {tripProjects.map((project) => (
                   <option key={project.id} value={project.id}>{formatTripProjectLabel(project)}</option>
                 ))}
               </select>
             </label>
           </div>
+
+          {selectedTripProject && deleteTripProjectAction ? (
+            <div className="mt-4 rounded-2xl border border-[#f0c8a0] bg-[#fff7ed] p-3 text-sm leading-6 text-[#6f3f12]">
+              <p>Dự án có thể xoá khi bạn không chờ câu trả lời AI. Ngữ cảnh dự án sẽ bị xoá; các cuộc trò chuyện liên kết sẽ chuyển về lịch sử thường.</p>
+              <button
+                className="mt-3 min-h-11 rounded-2xl border border-[#b45309] bg-white px-4 py-2 text-sm font-semibold text-[#7c2d12] transition hover:bg-[#ffedd5] focus:outline-none focus:ring-4 focus:ring-[#f0c8a0] disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={projectActionsDisabled}
+                onClick={handleDeleteTripProject}
+                type="button"
+              >
+                {deletingTripProjectId === selectedTripProject.id ? "Đang xoá dự án..." : "Xoá dự án chuyến đi"}
+              </button>
+            </div>
+          ) : null}
 
           {createTripProjectAction ? (
             <details className="mt-4 rounded-2xl border border-dashed border-[#d8c9ad] bg-[#fffdf8] p-3">

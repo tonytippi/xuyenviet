@@ -157,6 +157,17 @@ describe("AI Ask authenticated shell", () => {
     expect(html).not.toContain("Dự án riêng user-2");
   });
 
+  test("renders selected trip project delete affordance and detach confirmation copy", async () => {
+    await createTestUser("user-1");
+    const [ownProject] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Đà Nẵng gia đình", origin: "Hà Nội", destination: "Đà Nẵng" }).returning({ id: tripProjects.id });
+
+    const html = await renderAuthenticatedAiAskShell({ tripProjectId: ownProject.id });
+
+    expect(html).toContain("Xoá dự án chuyến đi");
+    expect(html).toContain("Ngữ cảnh dự án sẽ bị xoá");
+    expect(html).toContain("các cuộc trò chuyện liên kết sẽ chuyển về lịch sử thường");
+  });
+
   test("falls back to ordinary chat when opening another user's trip project", async () => {
     await createTestUser("user-1");
     await createTestUser("user-2");
@@ -319,12 +330,40 @@ describe("AI Ask structured answer rendering", () => {
     expect(source).toContain("router.push(activeTripProjectId ? `/ai-ask?tripProjectId=${encodeURIComponent(activeTripProjectId)}` : \"/ai-ask\")");
   });
 
+  test("composer source keeps delete trip project pending, failure, and active-project cleanup contracts", () => {
+    const source = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
+    const pageSource = readFileSync("src/app/ai-ask/page.tsx", "utf8");
+
+    expect(pageSource).toContain("deleteTripProjectAction={deleteTripProjectAction}");
+    expect(source).toContain("deleteTripProjectAction?: DeleteTripProjectAction");
+    expect(source).toContain("window.confirm(`Xoá dự án chuyến đi");
+    expect(source).toContain("Các cuộc trò chuyện liên kết sẽ không bị xoá; chúng sẽ được chuyển về lịch sử trò chuyện thường.");
+    expect(source).toContain("projectActionsDisabled = isPending || Boolean(deletingConversationId) || Boolean(deletingTripProjectId)");
+    expect(source).toContain("deletingTripProjectIdRef.current");
+    expect(source).toContain("Vui lòng chờ câu trả lời hiện tại hoàn tất trước khi xoá dự án chuyến đi.");
+    expect(source).toContain("Không thể xoá dự án chuyến đi lúc này. Vui lòng thử lại.");
+    expect(source).toContain("setTripProjects((currentProjects) => currentProjects.filter((project) => project.id !== projectId))");
+    expect(source).toContain("setMessages([])");
+    expect(source).toContain("setConversationId(undefined)");
+    expect(source).toContain("setSessionSheetOpen(false)");
+    expect(source).toContain("router.push(\"/ai-ask\")");
+  });
+
   test("conversation deletion source locks before counting cascade audit rows", () => {
     const source = readFileSync("src/features/chat-trips/conversations.ts", "utf8");
     const deleteSource = source.slice(source.indexOf("export async function deleteOwnedConversation"));
 
     expect(deleteSource).toContain(".for(\"update\")");
     expect(deleteSource.indexOf(".for(\"update\")")).toBeLessThan(deleteSource.indexOf("const conversationMessages"));
+  });
+
+  test("trip project deletion source locks before counting detach and cascade audit rows", () => {
+    const source = readFileSync("src/features/chat-trips/trip-projects.ts", "utf8");
+    const deleteSource = source.slice(source.indexOf("export async function deleteOwnedTripProject"));
+
+    expect(deleteSource).toContain(".for(\"update\")");
+    expect(deleteSource.indexOf(".for(\"update\")")).toBeLessThan(deleteSource.indexOf("const [linkedConversationCount]"));
+    expect(deleteSource).toContain("linkedConversationsDetached");
   });
 });
 

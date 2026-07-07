@@ -1,9 +1,9 @@
 import "server-only";
 
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, count, desc, eq } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { conversations, messages, tripProjects } from "@/db/schema";
+import { chatContext, conversations, messages, tripProjects } from "@/db/schema";
 import { recordAuditEvent } from "@/features/audit/events";
 import { getAuthenticatedSession } from "@/server/auth";
 
@@ -39,6 +39,11 @@ export type OwnedTripProjectSummary = {
   travelers: string | null;
   notes: string | null;
   updatedAt: Date;
+};
+
+export type DeleteOwnedTripProjectResult = {
+  success: boolean;
+  reason?: "unauthenticated" | "not_found" | "failed";
 };
 
 export async function createTripProject(input: TripProjectInput): Promise<OwnedTripProjectSummary> {
@@ -145,6 +150,59 @@ export async function getOwnedTripProjectSummary(tripProjectId: string) {
   }
 
   return { ...project, relatedChats };
+}
+
+export async function deleteOwnedTripProject(tripProjectId: string): Promise<DeleteOwnedTripProjectResult> {
+  const session = await getAuthenticatedSession();
+
+  if (!session) {
+    return { success: false, reason: "unauthenticated" };
+  }
+
+  try {
+    return await getDb().transaction(async (transaction) => {
+      const [project] = await transaction
+        .select({ id: tripProjects.id })
+        .from(tripProjects)
+        .where(and(eq(tripProjects.id, tripProjectId), eq(tripProjects.userId, session.userId)))
+        .limit(1)
+        .for("update");
+
+      if (!project) {
+        return { success: false, reason: "not_found" };
+      }
+
+      const [linkedConversationCount] = await transaction.select({ count: count() }).from(conversations).where(and(eq(conversations.tripProjectId, project.id), eq(conversations.userId, session.userId)));
+      const [projectContextCount] = await transaction.select({ count: count() }).from(chatContext).where(and(eq(chatContext.tripProjectId, project.id), eq(chatContext.userId, session.userId)));
+
+      const deletedRows = await transaction
+        .delete(tripProjects)
+        .where(and(eq(tripProjects.id, project.id), eq(tripProjects.userId, session.userId)))
+        .returning({ id: tripProjects.id });
+
+      if (deletedRows.length !== 1) {
+        return { success: false, reason: "not_found" };
+      }
+
+      await recordAuditEvent({
+        actor: session,
+        operation: "delete",
+        targetType: "trip_project",
+        targetId: project.id,
+        beforeSummary: JSON.stringify({
+          tripProjectId: project.id,
+          linkedConversationCount: linkedConversationCount?.count ?? 0,
+          chatContextCount: projectContextCount?.count ?? 0,
+        }),
+        afterSummary: JSON.stringify({ deleted: true, linkedConversationsDetached: true }),
+      }, transaction);
+
+      return { success: true };
+    });
+  } catch (error) {
+    console.error("Failed to delete owned trip project.", { tripProjectId, userId: session.userId, error });
+    return { success: false, reason: "failed" };
+  }
 }
 
 async function getOwnedTripProjectForSession(session: { userId: string }, tripProjectId: string) {

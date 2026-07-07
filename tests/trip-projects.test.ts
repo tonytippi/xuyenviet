@@ -1,7 +1,7 @@
 import { asc, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { auditEvents, conversations, messages, tripProjects, users } from "@/db/schema";
+import { auditEvents, chatContext, conversations, messages, tripProjects, users } from "@/db/schema";
 
 import { testDb } from "./helpers/db";
 
@@ -112,5 +112,67 @@ describe("Trip project helpers", () => {
     const [savedConversation] = await testDb.select().from(conversations).where(eq(conversations.id, conversation.id));
 
     expect(savedConversation).toMatchObject({ id: conversation.id, userId: "user-1", tripProjectId: null });
+  });
+
+  test("returns unauthenticated and does not delete a trip project without a session", async () => {
+    await createTestUser("user-1");
+    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế" }).returning({ id: tripProjects.id });
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue(null),
+    }));
+    const { deleteOwnedTripProject } = await import("@/features/chat-trips/trip-projects");
+
+    await expect(deleteOwnedTripProject(project.id)).resolves.toEqual({ success: false, reason: "unauthenticated" });
+    await expect(testDb.select().from(tripProjects)).resolves.toHaveLength(1);
+    await expect(testDb.select().from(auditEvents)).resolves.toHaveLength(0);
+  });
+
+  test("returns not_found and does not delete another user's trip project", async () => {
+    await createTestUser("user-1");
+    await createTestUser("user-2");
+    const [project] = await testDb.insert(tripProjects).values({ userId: "user-2", title: "Riêng tư user-2" }).returning({ id: tripProjects.id });
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }),
+    }));
+    const { deleteOwnedTripProject } = await import("@/features/chat-trips/trip-projects");
+
+    await expect(deleteOwnedTripProject(project.id)).resolves.toEqual({ success: false, reason: "not_found" });
+    await expect(testDb.select().from(tripProjects)).resolves.toHaveLength(1);
+    await expect(testDb.select().from(auditEvents)).resolves.toHaveLength(0);
+  });
+
+  test("deletes an owned trip project, detaches linked chats, cascades project context, and audits counts without content", async () => {
+    await createTestUser("user-1");
+    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Đà Nẵng bí mật", notes: "Không ghi vào audit" }).returning({ id: tripProjects.id });
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id }).returning({ id: conversations.id });
+    const [message] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "user", content: "Gia đình thích biển" }).returning({ id: messages.id });
+    await testDb.insert(chatContext).values({
+      userId: "user-1",
+      conversationId: conversation.id,
+      tripProjectId: project.id,
+      sourceMessageId: message.id,
+      field: "destination",
+      scope: "trip_project",
+      value: "Đà Nẵng bí mật",
+      confidence: 90,
+    });
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }),
+    }));
+    const { deleteOwnedTripProject } = await import("@/features/chat-trips/trip-projects");
+
+    await expect(deleteOwnedTripProject(project.id)).resolves.toEqual({ success: true });
+    await expect(testDb.select().from(tripProjects)).resolves.toHaveLength(0);
+    await expect(testDb.select().from(chatContext)).resolves.toHaveLength(0);
+    const [savedConversation] = await testDb.select().from(conversations).where(eq(conversations.id, conversation.id));
+    const [audit] = await testDb.select().from(auditEvents);
+
+    expect(savedConversation).toMatchObject({ id: conversation.id, userId: "user-1", tripProjectId: null });
+    expect(audit).toMatchObject({ actorUserId: "user-1", operation: "delete", targetType: "trip_project", targetId: project.id });
+    expect(audit.beforeSummary).toContain('"linkedConversationCount":1');
+    expect(audit.beforeSummary).toContain('"chatContextCount":1');
+    expect(audit.afterSummary).toContain("linkedConversationsDetached");
+    expect(audit.beforeSummary).not.toContain("Đà Nẵng bí mật");
+    expect(audit.beforeSummary).not.toContain("Gia đình thích biển");
   });
 });
