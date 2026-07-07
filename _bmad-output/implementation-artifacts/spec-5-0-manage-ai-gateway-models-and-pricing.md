@@ -2,10 +2,11 @@
 title: 'Story 5.0: Manage AI Gateway Models And Pricing'
 type: 'feature'
 created: '2026-07-07'
-status: 'in-review'
+status: 'done'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 baseline_revision: 'e9c38c4b2a82c71b912841e7bd288da9f9da318e'
+final_revision: 'f1bfa1eeb6d00451925d1b768c71e9dded9d5d82'
 context:
   - '{project-root}/_bmad-output/project-context.md'
   - '{project-root}/_bmad-output/implementation-artifacts/epic-5-context.md'
