@@ -1,0 +1,12 @@
+ALTER TABLE "ai_usage_events" ADD COLUMN "cache_write_prompt_tokens" integer;--> statement-breakpoint
+ALTER TABLE "ai_usage_events" ADD COLUMN "input_token_price_micros" integer;--> statement-breakpoint
+ALTER TABLE "ai_usage_events" ADD COLUMN "output_token_price_micros" integer;--> statement-breakpoint
+ALTER TABLE "ai_usage_events" ADD COLUMN "cache_read_token_price_micros" integer;--> statement-breakpoint
+ALTER TABLE "ai_usage_events" ADD COLUMN "cache_write_token_price_micros" integer;--> statement-breakpoint
+ALTER TABLE "ai_usage_events" ADD COLUMN "pricing_effective_at" timestamp;--> statement-breakpoint
+ALTER TABLE "ai_gateway_models" ADD CONSTRAINT "ai_gateway_models_priced_currency_check" CHECK (("ai_gateway_models"."input_token_price_micros" is null and "ai_gateway_models"."output_token_price_micros" is null and "ai_gateway_models"."cache_read_token_price_micros" is null and "ai_gateway_models"."cache_write_token_price_micros" is null) or "ai_gateway_models"."pricing_currency" is not null);--> statement-breakpoint
+ALTER TABLE "ai_usage_events" ADD CONSTRAINT "ai_usage_events_cache_write_prompt_tokens_non_negative_check" CHECK ("ai_usage_events"."cache_write_prompt_tokens" is null or "ai_usage_events"."cache_write_prompt_tokens" >= 0);--> statement-breakpoint
+ALTER TABLE "ai_usage_events" ADD CONSTRAINT "ai_usage_events_input_price_non_negative_check" CHECK ("ai_usage_events"."input_token_price_micros" is null or "ai_usage_events"."input_token_price_micros" >= 0);--> statement-breakpoint
+ALTER TABLE "ai_usage_events" ADD CONSTRAINT "ai_usage_events_output_price_non_negative_check" CHECK ("ai_usage_events"."output_token_price_micros" is null or "ai_usage_events"."output_token_price_micros" >= 0);--> statement-breakpoint
+ALTER TABLE "ai_usage_events" ADD CONSTRAINT "ai_usage_events_cache_read_price_non_negative_check" CHECK ("ai_usage_events"."cache_read_token_price_micros" is null or "ai_usage_events"."cache_read_token_price_micros" >= 0);--> statement-breakpoint
+ALTER TABLE "ai_usage_events" ADD CONSTRAINT "ai_usage_events_cache_write_price_non_negative_check" CHECK ("ai_usage_events"."cache_write_token_price_micros" is null or "ai_usage_events"."cache_write_token_price_micros" >= 0);

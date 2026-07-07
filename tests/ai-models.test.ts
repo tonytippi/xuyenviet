@@ -61,13 +61,23 @@ describe("AI Gateway model catalog", () => {
   test("selects the active default model constrained by purpose and capabilities", async () => {
     await createModel({ id: "inactive", gatewayModelName: "cx/inactive", active: false, defaultForPurpose: false });
     await createModel({ id: "wrong-purpose", gatewayModelName: "cx/extract", purpose: "extraction", supportsExtraction: true, defaultForPurpose: true });
-    await createModel({ id: "no-image", gatewayModelName: "cx/text", defaultForPurpose: true, supportsImageInput: false });
-    await createModel({ id: "image", gatewayModelName: "cx/image", defaultForPurpose: false, supportsImageInput: true });
+    await createModel({ id: "non-default", gatewayModelName: "cx/non-default", defaultForPurpose: false, supportsImageInput: true });
+    await createModel({ id: "image", gatewayModelName: "cx/image", defaultForPurpose: true, supportsImageInput: true });
     const { selectActiveAiGatewayModel } = await import("@/features/ai/models");
 
     await expect(
       selectActiveAiGatewayModel({ purpose: "ai_ask_initial_answer", requiredCapabilities: { textInput: true, imageInput: true } }),
     ).resolves.toMatchObject({ id: "image", gatewayModelName: "cx/image" });
+  });
+
+  test("does not silently fall back to a non-default capable model", async () => {
+    await createModel({ id: "text-default", gatewayModelName: "cx/text-default", defaultForPurpose: true, supportsImageInput: false });
+    await createModel({ id: "image-non-default", gatewayModelName: "cx/image-non-default", defaultForPurpose: false, supportsImageInput: true });
+    const { selectActiveAiGatewayModel } = await import("@/features/ai/models");
+
+    await expect(
+      selectActiveAiGatewayModel({ purpose: "ai_ask_initial_answer", requiredCapabilities: { textInput: true, imageInput: true } }),
+    ).resolves.toBeNull();
   });
 
   test("returns null before provider calls when no capable model exists", async () => {
@@ -85,6 +95,7 @@ describe("AI Gateway model catalog", () => {
       inputTokenPriceMicros: 2_000_000,
       outputTokenPriceMicros: 6_000_000,
       cacheReadTokenPriceMicros: 500_000,
+      cacheWriteTokenPriceMicros: 250_000,
       pricingVersion: "priced-v1",
     });
     const { estimateAiUsageCost, getAiGatewayPricingSnapshot } = await import("@/features/ai/models");
@@ -94,16 +105,46 @@ describe("AI Gateway model catalog", () => {
         promptTokens: 1_500,
         completionTokens: 750,
         cachedPromptTokens: 200,
+        cacheWritePromptTokens: 100,
       }),
     ).toMatchObject({
       estimatedInputCostMicros: 2_600,
       estimatedOutputCostMicros: 4_500,
       estimatedCacheReadCostMicros: 100,
-      estimatedCacheWriteCostMicros: null,
-      estimatedTotalCostMicros: 7_200,
+      estimatedCacheWriteCostMicros: 25,
+      estimatedTotalCostMicros: 7_225,
       pricingCurrency: "USD",
+      inputTokenPriceMicros: 2_000_000,
+      outputTokenPriceMicros: 6_000_000,
+      cacheReadTokenPriceMicros: 500_000,
+      cacheWriteTokenPriceMicros: 250_000,
       pricingUnitTokens: 1_000_000,
       pricingVersion: "priced-v1",
+      pricingEffectiveAt: new Date("2026-07-07T00:00:00.000Z"),
+    });
+  });
+
+  test("keeps total cost nullable when a present token component lacks pricing", async () => {
+    const model = await createModel({ id: "partial-price", cacheReadTokenPriceMicros: null });
+    const { estimateAiUsageCost, getAiGatewayPricingSnapshot } = await import("@/features/ai/models");
+
+    expect(estimateAiUsageCost(getAiGatewayPricingSnapshot(model), { promptTokens: 100, completionTokens: 10, cachedPromptTokens: 20 })).toMatchObject({
+      estimatedInputCostMicros: 80,
+      estimatedOutputCostMicros: 30,
+      estimatedCacheReadCostMicros: null,
+      estimatedTotalCostMicros: null,
+    });
+  });
+
+  test("ignores impossible cached token counts", async () => {
+    const model = await createModel({ id: "cached-overflow", cacheReadTokenPriceMicros: 500_000 });
+    const { estimateAiUsageCost, getAiGatewayPricingSnapshot } = await import("@/features/ai/models");
+
+    expect(estimateAiUsageCost(getAiGatewayPricingSnapshot(model), { promptTokens: 100, completionTokens: 10, cachedPromptTokens: 120 })).toMatchObject({
+      estimatedInputCostMicros: 100,
+      estimatedOutputCostMicros: 30,
+      estimatedCacheReadCostMicros: null,
+      estimatedTotalCostMicros: 130,
     });
   });
 
@@ -130,6 +171,10 @@ describe("AI Gateway model catalog", () => {
 
     await expect(
       testDb.execute(sql`insert into ai_gateway_models (id, gateway_model_name, display_label, purpose, active, default_for_purpose) values ('inactive-default', 'cx/inactive-default', 'Inactive default', 'ai_ask_initial_answer', false, true)`),
+    ).rejects.toThrow();
+
+    await expect(
+      testDb.execute(sql`insert into ai_gateway_models (id, gateway_model_name, display_label, purpose, pricing_currency, input_token_price_micros) values ('priced-no-currency', 'cx/priced-no-currency', 'Priced without currency', 'ai_ask_initial_answer', null, 1)`),
     ).rejects.toThrow();
   });
 
@@ -170,7 +215,7 @@ describe("AI Gateway model catalog", () => {
     const chatDefault = await createModel({ id: "chat-default", gatewayModelName: "cx/chat-default", defaultForPurpose: true });
     const { updateAiGatewayModel } = await import("@/features/admin/actions");
 
-    await updateAiGatewayModel(chatDefault.id, { purpose: "evaluation" });
+    await updateAiGatewayModel(chatDefault.id, { purpose: "evaluation", supportsEvaluation: true });
 
     await expect(testDb.select().from(aiGatewayModels).where(eq(aiGatewayModels.id, existingEvaluationDefault.id))).resolves.toMatchObject([
       { defaultForPurpose: false },
@@ -180,6 +225,41 @@ describe("AI Gateway model catalog", () => {
     ]);
     await expect(updateAiGatewayModel(chatDefault.id, { active: false })).rejects.toThrow("Default AI Gateway model must be active.");
     await expect(updateAiGatewayModel(chatDefault.id, { active: false, defaultForPurpose: false })).resolves.toMatchObject({ active: false, defaultForPurpose: false });
+  });
+
+  test("admin actions reject default models without purpose-required capabilities", async () => {
+    await createUser("admin-capability-user", ["admin"]);
+    authMock.mockResolvedValue({ user: { id: "admin-capability-user", email: "admin-capability-user@example.com" } });
+    const model = await createModel({ id: "capability-model", gatewayModelName: "cx/capability", defaultForPurpose: false, supportsTextInput: false });
+    const { createAiGatewayModel, setDefaultAiGatewayModel } = await import("@/features/admin/actions");
+
+    await expect(
+      createAiGatewayModel({
+        gatewayModelName: "cx/no-text-default",
+        displayLabel: "No text default",
+        purpose: "ai_ask_initial_answer",
+        defaultForPurpose: true,
+        supportsTextInput: false,
+      }),
+    ).rejects.toThrow("Default AI Ask model must support text input.");
+    await expect(setDefaultAiGatewayModel(model.id)).rejects.toThrow("Default AI Ask model must support text input.");
+  });
+
+  test("admin actions reject token prices without a currency", async () => {
+    await createUser("admin-pricing-user", ["admin"]);
+    authMock.mockResolvedValue({ user: { id: "admin-pricing-user", email: "admin-pricing-user@example.com" } });
+    const { createAiGatewayModel } = await import("@/features/admin/actions");
+
+    await expect(
+      createAiGatewayModel({
+        gatewayModelName: "cx/no-currency",
+        displayLabel: "No currency",
+        purpose: "ai_ask_initial_answer",
+        supportsTextInput: true,
+        pricingCurrency: null,
+        inputTokenPriceMicros: 1,
+      }),
+    ).rejects.toThrow("Pricing currency is required when any token price is configured.");
   });
 
   test("traveler is denied before model catalog mutation side effects", async () => {

@@ -57,6 +57,13 @@
       "when": 1783395300907,
       "tag": "0007_jittery_champions",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1783396475443,
+      "tag": "0008_sharp_pride",
+      "breakpoints": true
     }
   ]
 }

@@ -311,6 +311,7 @@ describe("AI Ask action gate", () => {
             total_tokens: 180,
             prompt_tokens_details: {
               cached_tokens: 25,
+              cache_creation_tokens: 10,
             },
           },
         }),
@@ -370,12 +371,18 @@ describe("AI Ask action gate", () => {
       completionTokens: 80,
       totalTokens: 180,
       cachedPromptTokens: 25,
+      cacheWritePromptTokens: 10,
       estimatedInputCostMicros: 150,
       estimatedOutputCostMicros: 320,
-      estimatedTotalCostMicros: 470,
+      estimatedTotalCostMicros: null,
       pricingCurrency: "USD",
+      inputTokenPriceMicros: 2_000_000,
+      outputTokenPriceMicros: 4_000_000,
+      cacheReadTokenPriceMicros: null,
+      cacheWriteTokenPriceMicros: null,
       pricingUnitTokens: 1_000_000,
       pricingVersion: "test-pricing-v1",
+      pricingEffectiveAt: new Date("2026-07-07T00:00:00.000Z"),
     });
     expect(savedUsageEvents[0].latencyMs).toBeGreaterThanOrEqual(0);
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -660,7 +667,7 @@ describe("AI Ask action gate", () => {
       new Response(
         JSON.stringify({
           choices: [{ message: { content: "Nên chia lịch trình nhẹ và hỏi thêm thời gian xuất phát." } }],
-          usage: { prompt_tokens: -1, completion_tokens: 10, total_tokens: 9 },
+          usage: { prompt_tokens: 3_000_000_000, completion_tokens: 10, total_tokens: 9 },
         }),
         { status: 200, headers: { "content-type": "application/json" } },
       ),

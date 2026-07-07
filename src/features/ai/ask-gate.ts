@@ -174,6 +174,7 @@ export async function submitAiAsk(input: AiAskSubmission): Promise<AiAskSubmissi
           completionTokens: gatewayResult.usage.completionTokens,
           totalTokens: gatewayResult.usage.totalTokens,
           cachedPromptTokens: gatewayResult.usage.cachedPromptTokens,
+          cacheWritePromptTokens: gatewayResult.usage.cacheWritePromptTokens,
           pricingSnapshot,
         });
 

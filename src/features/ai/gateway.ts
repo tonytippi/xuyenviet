@@ -12,6 +12,7 @@ type GatewayUsage = {
   completionTokens: number | null;
   totalTokens: number | null;
   cachedPromptTokens: number | null;
+  cacheWritePromptTokens: number | null;
 };
 
 const defaultGatewayTimeoutMs = 30_000;
@@ -199,7 +200,7 @@ function parseModel(payload: unknown) {
 
 function parseUsage(payload: unknown): GatewayUsage {
   if (!isRecord(payload) || !isRecord(payload.usage)) {
-    return { promptTokens: null, completionTokens: null, totalTokens: null, cachedPromptTokens: null };
+    return { promptTokens: null, completionTokens: null, totalTokens: null, cachedPromptTokens: null, cacheWritePromptTokens: null };
   }
 
   return {
@@ -207,6 +208,7 @@ function parseUsage(payload: unknown): GatewayUsage {
     completionTokens: parseTokenCount(payload.usage.completion_tokens),
     totalTokens: parseTokenCount(payload.usage.total_tokens),
     cachedPromptTokens: parseCachedPromptTokens(payload.usage),
+    cacheWritePromptTokens: parseCacheWritePromptTokens(payload.usage),
   };
 }
 
@@ -218,8 +220,16 @@ function parseCachedPromptTokens(usage: Record<string, unknown>) {
   return parseTokenCount(usage.prompt_tokens_details.cached_tokens);
 }
 
+function parseCacheWritePromptTokens(usage: Record<string, unknown>) {
+  if (!isRecord(usage.prompt_tokens_details)) {
+    return null;
+  }
+
+  return parseTokenCount(usage.prompt_tokens_details.cache_creation_tokens ?? usage.prompt_tokens_details.cache_write_tokens);
+}
+
 function parseTokenCount(value: unknown) {
-  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null;
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 2_147_483_647 ? value : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

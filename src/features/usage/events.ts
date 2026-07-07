@@ -26,6 +26,7 @@ export type WriteAiUsageEventInput = {
   completionTokens?: number | null;
   totalTokens?: number | null;
   cachedPromptTokens?: number | null;
+  cacheWritePromptTokens?: number | null;
   pricingSnapshot?: AiGatewayPricingSnapshot | null;
   errorCode?: string | null;
 };
@@ -35,6 +36,7 @@ export async function writeAiUsageEvent(db: UsageEventDb, input: WriteAiUsageEve
     promptTokens: input.promptTokens,
     completionTokens: input.completionTokens,
     cachedPromptTokens: input.cachedPromptTokens,
+    cacheWritePromptTokens: input.cacheWritePromptTokens,
   });
 
   await db.insert(aiUsageEvents).values({
@@ -49,18 +51,28 @@ export async function writeAiUsageEvent(db: UsageEventDb, input: WriteAiUsageEve
     promptVersion: input.promptVersion,
     status: input.status,
     latencyMs: input.latencyMs,
-    promptTokens: input.promptTokens ?? null,
-    completionTokens: input.completionTokens ?? null,
-    totalTokens: input.totalTokens ?? null,
-    cachedPromptTokens: input.cachedPromptTokens ?? null,
+    promptTokens: normalizeDbInteger(input.promptTokens),
+    completionTokens: normalizeDbInteger(input.completionTokens),
+    totalTokens: normalizeDbInteger(input.totalTokens),
+    cachedPromptTokens: normalizeDbInteger(input.cachedPromptTokens),
+    cacheWritePromptTokens: normalizeDbInteger(input.cacheWritePromptTokens),
     estimatedInputCostMicros: cost.estimatedInputCostMicros,
     estimatedOutputCostMicros: cost.estimatedOutputCostMicros,
     estimatedCacheReadCostMicros: cost.estimatedCacheReadCostMicros,
     estimatedCacheWriteCostMicros: cost.estimatedCacheWriteCostMicros,
     estimatedTotalCostMicros: cost.estimatedTotalCostMicros,
     pricingCurrency: cost.pricingCurrency,
+    inputTokenPriceMicros: cost.inputTokenPriceMicros,
+    outputTokenPriceMicros: cost.outputTokenPriceMicros,
+    cacheReadTokenPriceMicros: cost.cacheReadTokenPriceMicros,
+    cacheWriteTokenPriceMicros: cost.cacheWriteTokenPriceMicros,
     pricingUnitTokens: cost.pricingUnitTokens,
     pricingVersion: cost.pricingVersion,
+    pricingEffectiveAt: cost.pricingEffectiveAt,
     errorCode: input.errorCode ?? null,
   });
+}
+
+function normalizeDbInteger(value: number | null | undefined) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 2_147_483_647 ? value : null;
 }

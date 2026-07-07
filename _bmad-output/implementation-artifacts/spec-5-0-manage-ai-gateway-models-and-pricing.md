@@ -4,7 +4,7 @@ type: 'feature'
 created: '2026-07-07'
 status: 'done'
 review_loop_iteration: 0
-followup_review_recommended: true
+followup_review_recommended: false
 baseline_revision: 'e9c38c4b2a82c71b912841e7bd288da9f9da318e'
 final_revision: 'f1bfa1eeb6d00451925d1b768c71e9dded9d5d82'
 context:
@@ -69,6 +69,17 @@ warnings: []
 - [x] `tests/ai-ask-shell.test.ts` and `tests/ai-models.test.ts` -- cover matrix scenarios, no-model fail-closed behavior, capability filtering, cost snapshots, admin authorization/audit, and schema constraints -- verify Story 5.0 behavior.
 - [x] `_bmad-output/implementation-artifacts/sprint-status.yaml` -- update Story 5.0 workflow status -- keep BMad tracking aligned.
 
+### Review Findings
+
+- [x] [Review][Patch] Model selection can silently fall back to non-default active models [src/features/ai/models.ts:59]
+- [x] [Review][Patch] Usage rows do not persist enough immutable pricing snapshot metadata [src/features/usage/events.ts:56]
+- [x] [Review][Patch] Gateway usage token parser accepts values larger than PostgreSQL integer columns [src/features/ai/gateway.ts:221]
+- [x] [Review][Patch] Cached prompt tokens can exceed prompt tokens and overstate cache-read cost [src/features/ai/models.ts:100]
+- [x] [Review][Patch] Configured cache-write pricing is never usable because cache-write tokens are not parsed or stored [src/features/ai/models.ts:107]
+- [x] [Review][Patch] Admin actions allow monetary prices without a currency [src/features/admin/actions.ts:182]
+- [x] [Review][Patch] Default model mutations do not validate purpose-required capabilities [src/features/admin/actions.ts:55]
+- [x] [Review][Patch] Total estimated cost treats missing priced components as zero [src/features/ai/models.ts:108]
+
 **Acceptance Criteria:**
 - Given AI Gateway access is configured, when catalog rows are seeded or managed, then each active model can store gateway model name, display label, intended purposes, capability flags, active status, pricing currency, input/output/cache pricing fields when supported, pricing unit, and effective timestamp or version.
 - Given AI orchestration prepares a call, when it selects a model for chat, extraction, embeddings, evaluation, streaming, or image input, then selection is constrained by configured purpose and capability flags and feature code does not scatter direct hard-coded model strings.
@@ -92,6 +103,21 @@ warnings: []
   - `[medium]` `[patch]` Cached prompt tokens would be double-counted; cost estimation now subtracts cached tokens from billable input tokens and guards invalid token counts.
   - `[medium]` `[patch]` Admin tests missed update/default invariant paths; added coverage for purpose moves, inactive-default rejection, and multiple-default DB rejection.
   - `[low]` `[patch]` Usage writer could receive invalid token counts from future callers; normalized token inputs before cost estimation.
+
+### 2026-07-07 — Follow-up code review pass
+- decision_needed: 0
+- patch: 8: fixed
+- defer: 0
+- dismiss: 0
+- addressed_findings:
+  - `[patch]` Required active defaults during model selection so AI Ask no longer silently falls back to non-default capable models.
+  - `[patch]` Added durable usage snapshot fields for pricing effective date and per-token prices.
+  - `[patch]` Bounded Gateway and usage token normalization to PostgreSQL integer-safe values.
+  - `[patch]` Ignored impossible cached/cache-write token counts that exceed prompt tokens.
+  - `[patch]` Parsed and stored cache-write prompt tokens from Gateway usage details.
+  - `[patch]` Required pricing currency when any token price is configured, in admin actions and database constraints.
+  - `[patch]` Validated default model capability requirements by purpose in admin mutations.
+  - `[patch]` Kept total estimated cost nullable when present token components have missing prices.
 
 ## Design Notes
 
@@ -120,6 +146,7 @@ Files changed:
 - `_bmad-output/implementation-artifacts/spec-5-0-manage-ai-gateway-models-and-pricing.md` -- recorded spec, review triage, verification, and auto-run result.
 - `drizzle/migrations/0006_cheerful_george_stacy.sql` and migration metadata -- added model catalog, seed row, and usage cost snapshot columns.
 - `drizzle/migrations/0007_jittery_champions.sql` and migration metadata -- added default-model invariant constraints from review fixes.
+- `drizzle/migrations/0008_sharp_pride.sql` and migration metadata -- added usage pricing snapshot fields, cache-write token metadata, and pricing currency constraints.
 - `src/db/schema.ts` -- added AI Gateway model schema and usage cost snapshot fields.
 - `src/features/admin/actions.ts` -- added audited admin/operator catalog mutation actions and invariant validation.
 - `src/features/ai/ask-gate.ts` -- resolved AI Ask model selection from catalog and propagated pricing snapshots to usage events.
@@ -131,16 +158,16 @@ Files changed:
 - `tests/ai-models.test.ts` -- added catalog, pricing, constraints, admin action, and invariant tests.
 
 Verification performed:
-- `pnpm db:generate` -- passed; generated migrations `0006_cheerful_george_stacy.sql` and `0007_jittery_champions.sql` during implementation/review fixes.
-- `pnpm test:run tests/ai-models.test.ts tests/ai-ask-shell.test.ts` -- passed, 34 tests.
-- `pnpm test:run` -- passed, 6 test files, 83 tests.
+- `pnpm db:generate` -- passed; generated migrations `0006_cheerful_george_stacy.sql`, `0007_jittery_champions.sql`, and `0008_sharp_pride.sql` during implementation/review fixes.
+- `pnpm test:run tests/ai-models.test.ts tests/ai-ask-shell.test.ts` -- passed, 39 tests.
+- `pnpm test:run` -- passed, 6 test files, 88 tests.
 - `pnpm lint` -- passed.
 - `pnpm typecheck` -- passed.
 - `pnpm build` -- passed.
 
-Review findings breakdown: 7 patch findings fixed, 0 deferred, 1 rejected as duplicate/noise.
+Review findings breakdown: 15 patch findings fixed across initial and follow-up review passes, 0 deferred, 1 rejected as duplicate/noise.
 
-Follow-up review recommendation: true.
+Follow-up review recommendation: false.
 
 Residual risks:
 - Pricing seed values are zero-cost placeholders for the current Gateway model until verified provider pricing is entered through the catalog.

@@ -55,6 +55,8 @@ export async function createAiGatewayModel(input: AiGatewayModelMutationInput) {
       const active = values.active ?? true;
       const defaultForPurpose = values.defaultForPurpose ?? false;
       validateActiveDefault(active, defaultForPurpose);
+      validatePricingCurrency(values);
+      validateDefaultCapabilities({ ...values, active, defaultForPurpose });
 
       if (defaultForPurpose) {
         await transaction.update(aiGatewayModels).set({ defaultForPurpose: false, updatedAt: new Date() }).where(eq(aiGatewayModels.purpose, values.purpose));
@@ -88,7 +90,10 @@ export async function updateAiGatewayModel(modelId: string, input: Partial<AiGat
       const nextPurpose = values.purpose ?? existing.purpose;
       const nextActive = values.active ?? existing.active;
       const nextDefaultForPurpose = values.defaultForPurpose ?? existing.defaultForPurpose;
+      const nextValues = { ...existing, ...values, purpose: nextPurpose, active: nextActive, defaultForPurpose: nextDefaultForPurpose };
       validateActiveDefault(nextActive, nextDefaultForPurpose);
+      validatePricingCurrency(nextValues);
+      validateDefaultCapabilities(nextValues);
 
       if (nextDefaultForPurpose) {
         await transaction
@@ -150,6 +155,8 @@ export async function setDefaultAiGatewayModel(modelId: string) {
       if (!existing) {
         throw new Error("AI Gateway model not found.");
       }
+
+      validateDefaultCapabilities({ ...existing, active: true, defaultForPurpose: true });
 
       await transaction.update(aiGatewayModels).set({ defaultForPurpose: false, updatedAt: new Date() }).where(eq(aiGatewayModels.purpose, existing.purpose));
 
@@ -263,6 +270,36 @@ function normalizePositiveInteger(value: number, label: string) {
 function validateActiveDefault(active: boolean, defaultForPurpose: boolean) {
   if (!active && defaultForPurpose) {
     throw new Error("Default AI Gateway model must be active.");
+  }
+}
+
+function validatePricingCurrency(values: Partial<typeof aiGatewayModels.$inferInsert>) {
+  const hasPrice = values.inputTokenPriceMicros !== null && values.inputTokenPriceMicros !== undefined
+    || values.outputTokenPriceMicros !== null && values.outputTokenPriceMicros !== undefined
+    || values.cacheReadTokenPriceMicros !== null && values.cacheReadTokenPriceMicros !== undefined
+    || values.cacheWriteTokenPriceMicros !== null && values.cacheWriteTokenPriceMicros !== undefined;
+
+  if (hasPrice && !values.pricingCurrency) {
+    throw new Error("Pricing currency is required when any token price is configured.");
+  }
+}
+
+function validateDefaultCapabilities(values: Partial<typeof aiGatewayModels.$inferInsert>) {
+  if (!values.defaultForPurpose) {
+    return;
+  }
+
+  if (values.purpose === "ai_ask_initial_answer" && !values.supportsTextInput) {
+    throw new Error("Default AI Ask model must support text input.");
+  }
+  if (values.purpose === "extraction" && !values.supportsExtraction) {
+    throw new Error("Default extraction model must support extraction.");
+  }
+  if (values.purpose === "embeddings" && !values.supportsEmbeddings) {
+    throw new Error("Default embeddings model must support embeddings.");
+  }
+  if (values.purpose === "evaluation" && !values.supportsEvaluation) {
+    throw new Error("Default evaluation model must support evaluation.");
   }
 }
 
