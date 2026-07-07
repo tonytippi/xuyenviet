@@ -168,9 +168,11 @@ export function AiAskComposer({
     createTripProjectAction ?? noOpCreateTripProjectAction,
     undefined,
   );
-  const createFormDisabled = isPending || isCreatingProject;
+  const mutationInFlight = Boolean(deletingConversationId) || Boolean(deletingTripProjectId);
+  const createFormDisabled = isPending || isCreatingProject || mutationInFlight;
   const sessionActionsDisabled = isPending || Boolean(deletingConversationId) || Boolean(deletingTripProjectId);
   const projectActionsDisabled = isPending || Boolean(deletingConversationId) || Boolean(deletingTripProjectId);
+  const askFormDisabled = isPending || Boolean(deletingTripProjectId);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
@@ -301,6 +303,11 @@ export function AiAskComposer({
     event.preventDefault();
 
     if (isSubmittingRef.current) {
+      return;
+    }
+
+    if (deletingTripProjectIdRef.current) {
+      setStatus("Vui lòng chờ thao tác xoá dự án chuyến đi hoàn tất trước khi gửi câu hỏi.");
       return;
     }
 
@@ -456,6 +463,11 @@ export function AiAskComposer({
 
     if (deletingConversationIdRef.current) {
       setStatus("Vui lòng chờ thao tác xoá cuộc trò chuyện hoàn tất trước khi đổi hội thoại.");
+      return;
+    }
+
+    if (deletingTripProjectIdRef.current) {
+      setStatus("Vui lòng chờ thao tác xoá dự án chuyến đi hoàn tất trước khi đổi hội thoại.");
       return;
     }
 
@@ -774,7 +786,7 @@ export function AiAskComposer({
             </label>
             <textarea
               className="mt-3 min-h-32 w-full resize-y rounded-2xl border border-[#d8c9ad] bg-[#fffdf8] px-4 py-3 text-base leading-7 text-[#17342c] outline-none transition placeholder:text-[#7b8b84] focus:border-[#1f5f46] focus:ring-4 focus:ring-[#8fb59f]/45"
-              disabled={isPending}
+              disabled={askFormDisabled}
               aria-describedby="ai-ask-status ai-ask-shortcuts"
               id="ai-ask-question"
               maxLength={maxQuestionLength + 1}
@@ -791,7 +803,7 @@ export function AiAskComposer({
               <input
                 accept="image/jpeg,image/png,image/webp"
                 className="mt-2 block w-full text-sm text-[#4f625a] file:mr-3 file:min-h-11 file:rounded-xl file:border-0 file:bg-[#e5bd82] file:px-4 file:py-2 file:font-semibold file:text-[#17342c]"
-                disabled={isPending}
+                disabled={askFormDisabled}
                 id="ai-ask-image"
                 onChange={handleImageChange}
                 ref={imageInputRef}
@@ -809,7 +821,7 @@ export function AiAskComposer({
                       Đã chọn: {selectedImage.name || "ảnh đính kèm"} ({selectedImage.type}, {formatImageSize(selectedImage.size)})
                     </span>
                   </div>
-                  <button className="min-h-11 rounded-xl border border-[#d8c9ad] px-3 py-2 font-semibold text-[#17342c]" disabled={isPending} onClick={clearSelectedImage} type="button">
+                  <button className="min-h-11 rounded-xl border border-[#d8c9ad] px-3 py-2 font-semibold text-[#17342c]" disabled={askFormDisabled} onClick={clearSelectedImage} type="button">
                     Bỏ ảnh
                   </button>
                 </div>
@@ -821,10 +833,10 @@ export function AiAskComposer({
               </p>
               <button
                 className="min-h-12 rounded-2xl bg-[#1f5f46] px-5 py-3 text-base font-semibold text-white shadow-[0_12px_30px_rgba(31,95,70,0.24)] transition hover:bg-[#194d39] focus:outline-none focus:ring-4 focus:ring-[#8fb59f] disabled:cursor-not-allowed disabled:bg-[#8aa89b]"
-                disabled={isPending}
+                disabled={askFormDisabled}
                 type="submit"
               >
-                {isPending ? "Đang gửi, vui lòng chờ" : "Gửi câu hỏi"}
+                {isPending ? "Đang gửi, vui lòng chờ" : deletingTripProjectId ? "Đang xoá dự án, vui lòng chờ" : "Gửi câu hỏi"}
               </button>
             </div>
             <p className="mt-2 text-xs leading-5 text-[#6b7c75]" id="ai-ask-shortcuts">Enter để gửi, Shift+Enter để xuống dòng, nhấn / để focus ô nhập.</p>

@@ -87,6 +87,9 @@ Empty -- no bad_spec loopback occurred.
 
 ## Review Triage Log
 
+### 2026-07-07 -- Code review follow-up
+- [x] [Review][Patch] Project deletion did not fully block competing submit/create/session actions [src/features/ai/ai-ask-composer.tsx] -- fixed by adding a delete-aware `askFormDisabled`, including destructive mutation state in project creation disables, and guarding session selection plus form submit while project deletion is in flight.
+
 ### 2026-07-07 -- Review pass
 - intent_gap: 0
 - bad_spec: 0

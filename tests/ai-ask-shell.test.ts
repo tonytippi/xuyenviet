@@ -234,7 +234,8 @@ describe("AI Ask structured answer rendering", () => {
     const source = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
 
     expect(source).toContain("if (isSubmittingRef.current)");
-    expect(source).toContain("disabled={isPending}");
+    expect(source).toContain("const askFormDisabled = isPending || Boolean(deletingTripProjectId)");
+    expect(source).toContain("disabled={askFormDisabled}");
     expect(source).toContain("Đang gửi, vui lòng chờ");
   });
 
