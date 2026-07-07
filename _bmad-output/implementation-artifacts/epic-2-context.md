@@ -4,7 +4,7 @@
 
 ## Goal
 
-Epic 2 delivers the core traveler conversation loop: an authenticated Vietnamese AI Ask chat shell where a traveler can ask broad road-trip planning questions, get useful structured Vietnamese answers with concise follow-ups when details are missing, and refine the plan across a multi-message conversation. It also inserts Story 2.0, a test-framework lead-in that retroactively covers Epic 1 protected paths (auth gate, roles, audit, env guards) so Epic 2 features rest on verified foundations and closes the env-guard test debt carried from Epic 1. Epic 2 ships answers using chat-session context plus general reasoning only; retrieval, web search fallback, trip-project context priority, and full source/provenance display arrive in later epics.
+Epic 2 delivers the first usable AI Ask conversation loop for authenticated travelers: a Vietnamese-first chat surface where users can ask broad Vietnam road-trip planning questions, receive useful initial guidance without completing a form, refine the answer across messages, and recover from loading or provider failures. This epic makes the product's public MVP value visible while establishing the conversation, message persistence, AI generation, answer-structure, usage-placeholder, and testing foundations that later chat/trip context, retrieval, provenance, and feedback work will build on.
 
 ## Stories
 
@@ -18,50 +18,48 @@ Epic 2 delivers the core traveler conversation loop: an authenticated Vietnamese
 
 ## Requirements & Constraints
 
-AI Ask is Vietnamese-first and available only to authenticated Google users; unauthenticated attempts to open AI Ask or submit a question must not create a conversation, message, chat/trip context, retrieval work, or AI provider call. The chat shell must present a clear empty state inviting a Vietnam road-trip question.
-
-Users must be able to ask broad, underspecified planning questions and receive useful initial guidance without first completing a long form. When important planning details are missing, the answer includes a small number of concise follow-up questions while still providing an initial plan. Responses are Vietnamese by default.
-
-Assistant answers must be structured into practical sections that appear only when relevant: suggested plan/options, rationale, practical tips, warnings, sources, uncertainty notes, and next steps. The format must reserve a source/confidence section contract for later integration without inventing fake citations or source labels. Outside the Hanoi-to-HCMC focus, the assistant may give general guidance but must not overclaim curated coverage.
-
-Conversations and messages are owned by the authenticated user; cross-user access is denied server-side with no messages exposed. Empty or invalid submission is rejected with a clear validation message and creates no conversation or AI call. AI provider failure must show a safe error state, keep the user's draft for retry, and must not create a misleading assistant message. The displayed answer must match the persisted assistant message; no client-only answer state becomes the source of truth.
-
-Chat must feel responsive: first visible answer within 5 seconds without web search and within 10 seconds with web search, and streaming must not start before the orchestrator knows which source categories were used. The first AI answer generation in this epic must record at least a minimal AI usage event (or durable placeholder) with user ID, conversation/message context when available, purpose, provider/model when known, timestamp, and success/failure status, so later usage instrumentation can enrich metadata without retrofitting historical calls.
-
-Story 2.0 requires a server-side test framework (Vitest or equivalent) with a test database separate from dev/production, Drizzle migrations run against the test database, and `pnpm test` runnable without real OAuth credentials or external providers. Retroactive coverage must verify Epic 1 auth-gate, role-protected admin, audited mutation commit semantics, and env-guard fail-closed behavior on placeholder/localhost/missing secrets. Shipping Story 2.0 closes the deferred-work env-guard test debt entry.
+- AI Ask is only available to authenticated Google users. Unauthenticated access must redirect or block before loading chat data, creating conversations/messages, or calling an AI provider.
+- The chat interface and assistant output are Vietnamese-first. User questions may be broad or underspecified, and the assistant should provide useful initial road-trip guidance before asking for more details.
+- When important planning details are missing, answers should ask only a few concise follow-up questions and still include an initial plan or direction.
+- Answers must support iterative refinement across a conversation by loading prior messages for the owner and considering recent conversation context.
+- Conversation and message data belongs to the authenticated user. Server-side checks must deny access to another user's conversation and avoid exposing message history.
+- Empty or invalid messages must be rejected with clear validation and must not create conversations, messages, or AI calls.
+- AI provider failures must produce a safe recoverable UI state, preserve or allow retry of the user's draft/request, and must not create misleading assistant messages.
+- AI answers should include practical sections when relevant: suggested plan/options, rationale, practical tips, warnings, source/confidence placeholder support, uncertainty notes, and next steps. Source/provenance details are not fully implemented in this epic, so answers must not invent fake citations or source labels.
+- Authenticated AI answer attempts in this epic must record at least a minimal durable usage event or placeholder with user, conversation/message context when available, purpose, provider/model when known, timestamp, and success/failure status so later usage instrumentation can be standardized without missing historical AI calls.
+- User-facing chat should feel responsive enough for interactive planning. The architecture seed target is first visible answer within 5 seconds without web search and within 10 seconds with web search, but Epic 2 should not introduce web search as an MVP dependency.
+- Story 2.0 must establish a test framework and cover Epic 1 protected paths before AI generation work depends on those gates.
 
 ## Technical Decisions
 
-The MVP is a root-level Next.js App Router TypeScript modular monolith. PostgreSQL plus pgvector is the owned data plane; Drizzle owns schema and migrations. Feature ownership is explicit: Chat/Trips owns conversations, messages, chat/trip context, chat/trip embeddings, and user-owned deletion; AI Orchestration owns assistant response provenance; Usage owns append-only AI usage events. Non-owning modules must not perform generic cross-module upserts or deletes for aggregates they do not own.
-
-AI Ask routes and actions require an authenticated session inherited from Epic 1. Conversations and messages are persisted with owner, timestamp, and conversation ID; cross-user reads are rejected server-side.
-
-All model calls go through the OpenAI-compatible AI Gateway adapter (`AI_GATEWAY_BASE_URL`, `AI_GATEWAY_API_KEY` per environment); direct OpenAI API calls are forbidden. Every call declares purpose, model, prompt version, and output schema expectation, and the adapter returns usage metadata (model, token counts, latency, failure status).
-
-Answer provenance is persisted row-per-source-item in `assistant_response_provenance` and rendered from stored provenance, not by re-parsing answer text. The orchestrator persists the assistant message and provenance in the same transaction. In Epic 2 this contract is reserved; the source bundle is general reasoning plus current chat history, and Epic 5 later fills knowledge/web/chat-trip provenance categories.
-
-The fixed context priority pipeline is selected trip project context, current chat session context, approved knowledge, web search fallback, then general reasoning. Epic 2 only uses current chat-session context plus general reasoning; trip-project context priority, approved-knowledge retrieval, and web search fallback are deferred to Epics 3 and 5. AI usage events are operational/accounting telemetry, not a credit ledger, storing user ID, context refs, purpose, provider/model, timestamp, latency, and success/failure status.
-
-The test framework uses a dedicated test database isolated from dev and production. Integration tests must exercise real Drizzle migrations and server-side auth/role/audit/env behavior without hitting external OAuth or AI providers.
+- The app remains a root-level Next.js App Router modular monolith in TypeScript. Use server-side feature entrypoints, route handlers, and server actions for protected mutations instead of client-side writes.
+- PostgreSQL is the owned data plane for users, sessions, conversations, messages, usage events, provenance, and later retrieval state. Drizzle owns schema definitions, migrations, and typed data access.
+- Feature ownership stays explicit. Chat/Trips owns conversations and messages; AI Orchestration owns model-call flow and assistant response handling; Usage owns append-only AI usage events; Audit owns audit events where protected mutations require them.
+- Direct OpenAI calls are prohibited. Chat generation must go through the OpenAI-compatible AI Gateway adapter configured by environment, with every model call declaring purpose, model, prompt version, input source bundle, and output expectations where applicable.
+- AI provider adapter calls should return or emit usage metadata when available, including model, token counts, provider request ID when available, latency, and failure status. Usage persistence must not become the source of truth for chat content or answer provenance.
+- Assistant message persistence must be the durable source of truth for what the UI displays. Client-only answer state must not replace saved assistant messages.
+- The fixed context-priority pipeline for later epics is selected trip project context, current chat session context, approved knowledge, web search fallback, then general reasoning. Epic 2 can use current conversation history/general reasoning, but should leave seams for the full orchestrator and source-bundle model.
+- Streaming is allowed only after context/provenance inputs are assembled. For Epic 2, avoid streaming designs that would later prevent source/confidence and usage/provenance records from being stored consistently with assistant messages.
+- Test setup must use a test database separate from dev and production, run Drizzle migrations against it, and avoid real OAuth or provider credentials.
 
 ## UX & Interaction Patterns
 
-AI Ask is the primary app nav after auth and is Vietnamese-first. The chat composer accepts Vietnamese free text; empty or invalid submission is blocked client-side and server-side. Submit is disabled while sending unless retrying a failed draft. `Enter` submits, `Shift+Enter` inserts a newline, `/` focuses the composer on desktop, `Esc` closes the topmost sheet/drawer/dialog.
-
-The first AI Ask empty state invites a road-trip question with example prompts such as `Bạn đang muốn đi đâu? Ví dụ: Hà Nội đi Đà Nẵng 7 ngày cùng gia đình.` A low-friction storage notice appears near first AI Ask use explaining chat/trip details may be stored; it must not block asking.
-
-Assistant answers render as scannable blocks: suggested plan/options, rationale, practical tips, warnings, sources, uncertainty, next steps. Sections appear only when relevant; warnings and next steps are easier to find than raw source metadata. Follow-up questions sit in the answer footer as 1-3 concise items; tappable suggestions may prefill the composer and the user can edit before sending. Source chips and the source detail drawer are reserved contracts for Epic 5; Epic 2 must not populate fake citations.
-
-States: pending state while the answer is prepared, composer guarded against duplicate submit, progress copy after delay (`Mình đang kiểm tra ngữ cảnh và nguồn phù hợp...`) without implying completion, and on AI provider failure the user draft remains visible as a retryable draft with no assistant message created. Generated answer text is not editable by the traveler; corrections are made by sending another message.
-
-Visual contract: Route Green for primary actions, Guide Amber for suggested next question and recommended follow-up (never warnings), Warning Red reserved for failure states. Chat answer max reading width 760px with 20px section gap. Accessibility floor: WCAG 2.2 AA, keyboard-reachable controls, 44px mobile touch targets, legible Vietnamese diacritics at 200% zoom, polite `aria-live` regions for state changes, reduced motion for non-essential transitions.
+- AI Ask should have a clear empty state inviting a Vietnam road-trip question and example prompts. The visual language should feel like a practical Vietnamese road companion: calm, trustworthy, readable, and not a generic global chatbot.
+- Desktop uses visible app navigation with the chat centered; mobile uses a top bar and sheet navigation with the chat composer pinned near the bottom. Chat content must remain readable on desktop and mobile.
+- The composer accepts Vietnamese free text. Empty or invalid submissions are blocked client-side and server-side. Submit is disabled or safely guarded while sending, except for explicit retry flows.
+- Pending and long-running states should communicate progress without implying completion, using calm Vietnamese copy such as checking context and suitable sources.
+- Assistant answers should render as scannable blocks with spacing between major sections. Warnings and next steps should be easier to find than raw metadata. Maximum reading width for chat answer content is 760px.
+- Follow-up questions appear as 1-3 concise questions in the answer footer. Tappable suggestions may prefill the composer, but the user can edit before sending.
+- Source/confidence UI should be progressively disclosed via compact chips or placeholder sections where relevant, but Epic 2 must avoid fake provenance. Long URLs and detailed provenance should not be embedded after every paragraph.
+- Storage notice behavior belongs primarily to later chat/trip context work, but the AI Ask surface should be compatible with a low-friction inline notice near first meaningful use.
+- Accessibility floor: keyboard reachable controls, readable Vietnamese diacritics at 200% zoom and mobile widths, at least 44px mobile touch targets, polite `aria-live` announcements for pending/completed/error chat states, and color never being the only source/confidence indicator.
 
 ## Cross-Story Dependencies
 
-Story 2.0 (test framework plus retroactive Epic 1 coverage) must complete before Story 2.2 and may run in parallel with Story 2.1. Shipping it closes the deferred-work env-guard test debt entry carried from Epic 1.
-
-Story 2.1 depends on Epic 1's AI Ask auth gate (Story 1.2) and Google session resolution (Story 1.3) to render the authenticated chat shell. Story 2.2 depends on Story 2.0 (test framework) and Story 2.1 (chat shell) to persist the first conversation and message.
-
-Story 2.3 depends on Story 2.2 for conversation/message persistence and on the AI Gateway adapter to generate the initial Vietnamese answer; its minimal usage event enables Story 5.9 to enrich usage metadata later without retrofitting historical AI calls. Story 2.4 depends on Story 2.3 and reserves the source/confidence section contract for Epic 5 integration.
-
-Story 2.5 depends on Story 2.2 and Story 2.3 to reload prior messages and continue the thread. Full chat/trip context reuse, trip-project context priority, and chat-based trip-detail correction arrive in Epic 3; Epic 2 only reuses conversation message history. Story 2.6 depends on Story 2.3 and Story 2.5 to define pending, progress, and failure states consistently.
+- Story 2.0 must complete before Story 2.2 because conversation creation and authenticated submission paths depend on verified auth gates, admin role behavior, audited mutation wrapper behavior, and environment guard tests.
+- Story 2.1 depends on Epic 1 authenticated route gating and provides the UI shell that Stories 2.2 through 2.6 extend.
+- Story 2.2 creates the owned conversation/message persistence path required by Stories 2.3, 2.5, and 2.6.
+- Story 2.3 depends on Story 2.2 for persisted user messages and introduces AI generation plus minimal usage recording.
+- Story 2.4 depends on generated assistant content from Story 2.3 and establishes the answer-format contract that later Epic 5 provenance/source display will fill in.
+- Story 2.5 depends on persisted conversation history from Story 2.2 and assistant messages from Story 2.3.
+- Story 2.6 depends on the send/generate/persist loop from Stories 2.2 and 2.3 and must ensure the UI displays persisted assistant messages rather than transient client-only output.

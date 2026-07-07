@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { createElement } from "react";
+import { readFileSync } from "node:fs";
 import { asc, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
@@ -116,6 +117,37 @@ describe("AI Ask authenticated shell", () => {
 });
 
 describe("AI Ask structured answer rendering", () => {
+  test("composer source includes explicit pending and long-running progress contracts", () => {
+    const source = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
+
+    expect(source).toContain("const progressDelayMs = 4_000");
+    expect(source).toContain("Đang gửi câu hỏi và chuẩn bị câu trả lời");
+    expect(source).toContain("Trợ lý vẫn đang xử lý câu hỏi");
+    expect(source).toContain("Quá trình đang lâu hơn bình thường một chút");
+    expect(source).toContain("chưa tạo nội dung trợ lý tạm thời");
+    expect(source).toContain("Vui lòng không gửi lặp lại trong lúc chờ");
+    expect(source).toContain("aria-live=\"polite\"");
+  });
+
+  test("composer source keeps duplicate-send controls guarded while pending", () => {
+    const source = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
+
+    expect(source).toContain("if (isSubmittingRef.current)");
+    expect(source).toContain("disabled={isPending}");
+    expect(source).toContain("Đang gửi, vui lòng chờ");
+  });
+
+  test("composer source presents provider failure without an assistant bubble", () => {
+    const source = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
+
+    expect(source).toContain("getUnansweredUserMessageIds(initialMessages)");
+    expect(source).toContain("setFailedQuestionIds((currentIds) => [...currentIds, result.userMessage.id])");
+    expect(source).toContain("Chưa có câu trả lời trợ lý nào được lưu cho lượt này");
+    expect(source).toContain("Trợ lý chưa tạo được câu trả lời cho lượt này");
+    expect(source).not.toContain("clientAssistant");
+    expect(source).not.toContain("optimisticAssistant");
+  });
+
   test("renders recognized assistant headings as scannable sections without source chips", async () => {
     const { AssistantMessageContent } = await import("@/features/ai/ai-ask-composer");
     const assistantContent = ["## Kế hoạch gợi ý:", "- Ngày 1: đi nhẹ và nghỉ sớm.", "", "**Nguồn và độ tin cậy:**", "Đây là gợi ý tổng quát, chưa dùng nguồn tuyển chọn.", "", "1. Câu hỏi tiếp theo:", "Bạn đi cùng trẻ nhỏ không?"].join("\n");
@@ -149,6 +181,8 @@ describe("AI Ask structured answer rendering", () => {
     expect(html).toContain("Hà Nội đi Huế?");
     expect(html).toContain("Nên đi Huế trước.");
     expect(html).toContain("Vậy ngày thứ 2 thì sao?");
+    expect(html).toContain("Trợ lý chưa tạo được câu trả lời cho lượt này");
+    expect(html).not.toContain("clientAssistant");
   });
 });
 
@@ -473,6 +507,7 @@ describe("AI Ask action gate", () => {
     if (result.status !== "answer-failed") {
       throw new Error("Expected answer-failed result");
     }
+    expect("assistantMessage" in result).toBe(false);
     expect(result.userMessage.content).toBe("Hà Nội đi Đà Nẵng?");
     expect(result.errorMessage).toBe("Mình chưa tạo được câu trả lời lúc này. Nội dung của bạn vẫn còn trong ô nhập để gửi lại.");
     expect(savedMessages).toHaveLength(1);

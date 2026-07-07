@@ -5,6 +5,7 @@ import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent as Reac
 import { submitAiAsk } from "./ask-gate";
 
 const maxQuestionLength = 2_000;
+const progressDelayMs = 4_000;
 
 type DisplayMessage = {
   id: string;
@@ -16,6 +17,21 @@ type AiAskComposerProps = {
   initialConversationId?: string;
   initialMessages?: DisplayMessage[];
 };
+
+function getUnansweredUserMessageIds(messages: DisplayMessage[]) {
+  const unansweredIds: string[] = [];
+
+  for (const message of messages) {
+    if (message.role === "user") {
+      unansweredIds.push(message.id);
+      continue;
+    }
+
+    unansweredIds.length = 0;
+  }
+
+  return unansweredIds;
+}
 
 const assistantSectionHeadings = new Set([
   "Kế hoạch gợi ý",
@@ -86,6 +102,9 @@ export function AiAskComposer({ initialConversationId, initialMessages = [] }: A
   const [question, setQuestion] = useState("");
   const [status, setStatus] = useState(initialMessages.length > 0 ? "Đã tải hội thoại. Bạn có thể tiếp tục kế hoạch." : "Nhập câu hỏi về chuyến đi đường bộ của bạn.");
   const [isPending, setIsPending] = useState(false);
+  const [showProgress, setShowProgress] = useState(false);
+  const [pendingQuestion, setPendingQuestion] = useState("");
+  const [failedQuestionIds, setFailedQuestionIds] = useState<string[]>(() => getUnansweredUserMessageIds(initialMessages));
   const [messages, setMessages] = useState<DisplayMessage[]>(initialMessages);
   const [conversationId, setConversationId] = useState(initialConversationId);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -106,6 +125,20 @@ export function AiAskComposer({ initialConversationId, initialMessages = [] }: A
     window.addEventListener("keydown", handleShortcut);
     return () => window.removeEventListener("keydown", handleShortcut);
   }, []);
+
+  useEffect(() => {
+    if (!isPending) {
+      setShowProgress(false);
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setShowProgress(true);
+      setStatus("Trợ lý vẫn đang xử lý câu hỏi. Bạn cứ giữ nguyên màn hình này, mình sẽ cập nhật khi có kết quả.");
+    }, progressDelayMs);
+
+    return () => window.clearTimeout(timeout);
+  }, [isPending]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -130,7 +163,9 @@ export function AiAskComposer({ initialConversationId, initialMessages = [] }: A
 
     isSubmittingRef.current = true;
     setIsPending(true);
-    setStatus("Đang kiểm tra câu hỏi...");
+    setShowProgress(false);
+    setPendingQuestion(trimmedQuestion);
+    setStatus("Đang gửi câu hỏi và chuẩn bị câu trả lời...");
 
     try {
       const hadConversation = Boolean(conversationId || messages.length > 0);
@@ -138,11 +173,12 @@ export function AiAskComposer({ initialConversationId, initialMessages = [] }: A
 
       if (result.status === "answer-failed") {
         setConversationId(result.conversationId);
+        setFailedQuestionIds((currentIds) => [...currentIds, result.userMessage.id]);
         setMessages((currentMessages) => [
           ...currentMessages,
           { id: result.userMessage.id, role: "user", content: result.userMessage.content },
         ]);
-        setStatus(result.errorMessage);
+        setStatus(`${result.errorMessage} Chưa có câu trả lời trợ lý nào được lưu cho lượt này.`);
         return;
       }
 
@@ -155,10 +191,11 @@ export function AiAskComposer({ initialConversationId, initialMessages = [] }: A
       setQuestion("");
       setStatus(hadConversation ? "Đã cập nhật hội thoại của bạn." : "Đã tạo câu trả lời đầu tiên cho chuyến đi của bạn.");
     } catch {
-      setStatus("Không thể gửi câu hỏi lúc này. Hãy kiểm tra đăng nhập và thử lại.");
+      setStatus("Không thể gửi câu hỏi lúc này. Hãy kiểm tra đăng nhập và thử lại. Nội dung vẫn còn trong ô nhập.");
     } finally {
       isSubmittingRef.current = false;
       setIsPending(false);
+      setPendingQuestion("");
     }
   }
 
@@ -186,8 +223,26 @@ export function AiAskComposer({ initialConversationId, initialMessages = [] }: A
                 {message.role === "assistant" ? "Trợ lý XuyenViet" : "Bạn"}
               </p>
               {message.role === "assistant" ? <AssistantMessageContent content={message.content} /> : <p className="whitespace-pre-wrap text-base leading-7">{message.content}</p>}
+              {failedQuestionIds.includes(message.id) ? (
+                <div className="mt-3 rounded-2xl border border-[#f0c8a0] bg-[#fff7ed] p-3 text-sm leading-6 text-[#6f3f12]" role="status">
+                  Trợ lý chưa tạo được câu trả lời cho lượt này. Tin nhắn của bạn đã được lưu; hãy chỉnh câu hỏi trong ô nhập rồi gửi lại khi sẵn sàng.
+                </div>
+              ) : null}
             </article>
           ))}
+        </section>
+      ) : null}
+
+      {isPending ? (
+        <section aria-live="polite" className="mx-auto max-w-[760px] rounded-[1.5rem] border border-dashed border-[#d8c9ad] bg-[#fffdf8] p-4 text-[#17342c] shadow-[0_12px_30px_rgba(41,33,18,0.06)]">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#1f5f46]">Đang xử lý</p>
+          <p className="mt-2 text-base font-semibold">Trợ lý đang chuẩn bị câu trả lời cho câu hỏi của bạn.</p>
+          <p className="mt-2 text-sm leading-6 text-[#4f625a]">
+            {showProgress
+              ? "Quá trình đang lâu hơn bình thường một chút. Mình vẫn đang chờ kết quả từ hệ thống AI và chưa tạo nội dung trợ lý tạm thời."
+              : "Mình đã nhận câu hỏi và đang gửi đến hệ thống AI. Vui lòng không gửi lặp lại trong lúc chờ."}
+          </p>
+          {pendingQuestion ? <p className="mt-3 rounded-2xl bg-white/80 p-3 text-sm leading-6 text-[#4f625a]">“{pendingQuestion}”</p> : null}
         </section>
       ) : null}
 
@@ -216,7 +271,7 @@ export function AiAskComposer({ initialConversationId, initialMessages = [] }: A
             disabled={isPending}
             type="submit"
           >
-            {isPending ? "Đang gửi..." : "Gửi câu hỏi"}
+            {isPending ? "Đang gửi, vui lòng chờ" : "Gửi câu hỏi"}
           </button>
         </div>
         <p className="mt-2 text-xs leading-5 text-[#6b7c75]" id="ai-ask-shortcuts">Enter để gửi, Shift+Enter để xuống dòng, nhấn / để focus ô nhập.</p>
