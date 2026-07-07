@@ -2,7 +2,7 @@
 title: XuyenViet AI Travel Information MVP PRD
 status: final
 created: 2026-07-04
-updated: 2026-07-04
+updated: 2026-07-07
 ---
 
 # XuyenViet AI Travel Information MVP PRD
@@ -60,7 +60,8 @@ Internal owner or future small operations team member who collects travel inform
 
 ### 6.1 Must Have
 
-- AI Ask chat in Vietnamese.
+- AI Ask chat in Vietnamese, with streaming assistant responses after required context/provenance inputs are assembled.
+- AI Ask image input for authenticated users, so travelers can ask about relevant road-trip screenshots or photos when supported by the selected Gateway model.
 - Google Login required before a user can ask AI.
 - Chat sessions and trip projects tied to the logged-in user.
 - Chat-level and trip-level context extraction.
@@ -70,6 +71,7 @@ Internal owner or future small operations team member who collects travel inform
 - Source and confidence display in AI answers.
 - Initial content focus on Hanoi-to-HCMC road-trip planning.
 - OpenAI-compatible AI Gateway-backed AI behavior. [ASSUMPTION: Gateway-routed model processing is acceptable for public MVP data processing under the project's privacy expectations; direct OpenAI API calls are not used.]
+- AI Gateway model management for MVP model records, including gateway model name, supported capabilities, and input/output/cache pricing metadata used for usage cost estimation.
 - Basic data controls: users can delete a chat session or trip project, which removes the associated messages and trip context from normal use.
 - AI usage tracking for authenticated AI requests, so future credit-based pricing can be introduced without changing the AI orchestration flow.
 
@@ -88,6 +90,7 @@ Internal owner or future small operations team member who collects travel inform
 - Shareable AI answer or itinerary summary.
 - Basic feedback buttons on answer usefulness.
 - Destination/route summary page generated from knowledge cards.
+- AI-generated image output for travel planning, only if a concrete MVP workflow and Gateway model capability are approved later.
 
 ## 7. User Journeys
 
@@ -122,6 +125,9 @@ Internal owner or future small operations team member who collects travel inform
 - FR-4: The system shall provide useful initial guidance even when some trip details are missing.
 - FR-5: The system shall ask concise follow-up questions when important planning details are missing.
 - FR-6: The system shall support iterative refinement across a conversation.
+- FR-6A: The system shall stream AI Ask assistant responses when the selected Gateway model and orchestration path support streaming, but only after required context, source-bundle, and provenance inputs are assembled.
+- FR-6B: The system shall allow authenticated users to submit supported image inputs with AI Ask messages when using an image-capable Gateway model.
+- FR-6C: The system shall validate image inputs for size, type, ownership, and safety before any provider call, and invalid image submissions shall not create provider calls.
 - FR-7: The system shall format travel answers with suggested plan/options, rationale, practical tips, warnings, sources, uncertainty notes, and next steps.
 
 ### 8.2 User Authentication, Chats, And Trips
@@ -182,6 +188,8 @@ Internal owner or future small operations team member who collects travel inform
 - FR-46: The system shall capture a simple usefulness rating for AI answers during the public MVP.
 - FR-47: The system shall record AI usage events for authenticated AI requests, including user, conversation or trip context when applicable, AI purpose, provider/model, timestamp, and available usage/cost metadata.
 - FR-48: The system shall capture referral attribution when a new user signs in or registers through a valid referral link, without calculating rewards, ranking, payout, or credit conversion in MVP.
+- FR-49: The system shall manage AI Gateway model records with gateway model name, intended purpose, supported input/output capabilities, active status, and input/output/cache pricing metadata.
+- FR-50: The system shall use configured model pricing metadata to estimate AI usage cost when provider usage token metadata is available, without creating credit balance or billing behavior in MVP.
 
 ## 9. Non-Functional Requirements
 
@@ -242,6 +250,9 @@ Counter-metrics: track hallucinated unsupported claims, missing uncertainty labe
 
 - AI usage tracking is for cost visibility, abuse investigation, and future pricing design; MVP shall not show or enforce credit balances.
 - Usage events shall not become the source of truth for chat content or answer provenance.
+- AI model pricing metadata is used for internal cost estimation only; MVP shall not expose credit balances, charge users, or block requests for insufficient funds.
+- Usage cost estimates must identify the model pricing record or pricing version used when available.
+- Cache pricing, if supported by the Gateway/provider, must be tracked separately from ordinary input and output pricing.
 - Referral attribution capture stores who referred a new user and the referral code or campaign used when available.
 - MVP referral attribution does not create reward liability, payout entitlement, ranking status, or credit conversion.
 
@@ -290,6 +301,9 @@ The public MVP should focus on the Hanoi-to-HCMC road-trip corridor. Initial kno
 - AC-14: AI quality evaluation can be run against the five-prompt public-MVP evaluation set using the rubric in this PRD.
 - AC-15: Authenticated AI requests create AI usage records with enough metadata to support future cost analysis.
 - AC-16: A valid referral link can be captured during sign-in or registration and associated with the new user without exposing referral reward UI.
+- AC-17: AI Ask can stream an assistant response after context/provenance preparation without treating partial streamed text as final persisted answer content.
+- AC-18: An authenticated user can submit a supported image input with an AI Ask message, and unsupported or invalid images are rejected before provider calls.
+- AC-19: Active AI Gateway models can be configured with model name, capability flags, and input/output/cache pricing metadata used by usage tracking.
 
 ## 14. Risks
 
@@ -306,3 +320,4 @@ The public MVP should focus on the Hanoi-to-HCMC road-trip corridor. Initial kno
 - OQ-2: Should users see full source URLs directly, summarized source labels, or both?
 - OQ-3: What exact privacy-policy wording is required for AI Gateway-backed chat and trip-project processing?
 - OQ-4: How should operators handle Facebook content reuse constraints beyond retaining provenance?
+- OQ-5: Should AI-generated image output become an MVP workflow, or remain deferred until after text/image-input planning is validated?

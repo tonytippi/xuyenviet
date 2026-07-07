@@ -3,13 +3,14 @@ name: XuyenViet
 status: draft
 project: xuyenviet
 created: 2026-07-05
-updated: 2026-07-05
+updated: 2026-07-07
 sources:
   - ../../prds/prd-xuyenviet-2026-07-04/prd.md
   - ../../architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md
   - ../../epics.md
   - ../../implementation-readiness-report-2026-07-05.md
   - ../../sprint-change-proposal-2026-07-05-ai-usage-referral.md
+  - ../../sprint-change-proposal-2026-07-07-ai-gateway-models-streaming-multimodal.md
 ---
 
 # XuyenViet — Experience Spine
@@ -85,8 +86,9 @@ Behavioral patterns. Visual specs live in `DESIGN.md.Components`.
 | Public entry hero | Root route | Explains AI road-trip assistant value in one screen. Primary CTA is Google sign-in. If `ref` exists, preserve it silently through auth. |
 | Google sign-in button | Public entry, protected-route gate | Opens OAuth flow. Failure returns safe message without exposing provider details or secrets. |
 | Protected-route gate | AI Ask/admin | If unauthenticated, redirect or block before loading chat/trip/admin data. No AI call or conversation is created. |
-| Chat composer | AI Ask | Accepts Vietnamese free text. Empty/invalid submission blocked client-side and server-side. Submit disabled while sending unless retrying failed draft. |
+| Chat composer | AI Ask | Accepts Vietnamese free text and supported image attachments. Empty/invalid submission blocked client-side and server-side. Unsupported image type/size is rejected before provider calls. Submit disabled while sending unless retrying failed draft. |
 | Assistant answer | Chat | Structured sections: suggested plan/options, rationale, practical tips, warnings, sources, uncertainty, next steps. Sections appear only when relevant. |
+| Streaming assistant answer | AI Ask | Shows incremental assistant text after context/source preparation starts generation. Partial text is visually pending and reconciles to the persisted final assistant message when complete. If streaming fails, show retry/recovery and do not imply the partial answer is saved as final. |
 | Follow-up questions | Assistant answer footer | 1-3 concise questions. Tappable suggestions may prefill composer; user can edit before sending. |
 | Source summary row | Assistant answer | Shows compact chips/counts by source category. Opens source detail drawer. Does not expose raw operator-only material. |
 | Source detail drawer | Answer/source chips | Lists each source with title/label, type, URL when available, collected/checked date, confidence, freshness-sensitive flag. |
@@ -110,7 +112,10 @@ Behavioral patterns. Visual specs live in `DESIGN.md.Components`.
 | Auth failure | Sign-in | Safe message, retry button. No secret/provider diagnostic. |
 | First AI Ask empty | AI Ask | Empty state invites a road-trip question. Provide example prompts for Vietnam road trips. |
 | Sending message | AI Ask | Pending state in chat, composer disabled or guarded against duplicate submit. |
+| Streaming AI response | AI Ask | Answer text may appear progressively after source/context preparation. Keep composer guarded, expose stop/retry only if implementation supports safe cancellation, and announce completion through `aria-live`. |
 | Long AI response | AI Ask | Progress copy after delay: `Mình đang kiểm tra ngữ cảnh và nguồn phù hợp...` Do not imply completion. |
+| Image attached to prompt | AI Ask | Show thumbnail/file row with remove action, type/size validation, and accessible label. Do not upload or submit unsupported images to the provider. |
+| Image input rejected | AI Ask | Explain allowed file types/size and keep the user's text draft intact. No provider call is made. |
 | AI provider failure | AI Ask | Keep user draft. Show retry. Do not create misleading assistant message. |
 | No curated knowledge | Assistant answer | Say curated XuyenViet knowledge was not found and whether web/general reasoning was used. |
 | Freshness-sensitive answer | Assistant answer | Show freshness warning near relevant section and in source details. |

@@ -32,6 +32,12 @@ FR-5: The system shall ask concise follow-up questions when important planning d
 
 FR-6: The system shall support iterative refinement across a conversation.
 
+FR-6A: The system shall stream AI Ask assistant responses when the selected Gateway model and orchestration path support streaming, but only after required context, source-bundle, and provenance inputs are assembled.
+
+FR-6B: The system shall allow authenticated users to submit supported image inputs with AI Ask messages when using an image-capable Gateway model.
+
+FR-6C: The system shall validate image inputs for size, type, ownership, and safety before any provider call, and invalid image submissions shall not create provider calls.
+
 FR-7: The system shall format travel answers with suggested plan/options, rationale, practical tips, warnings, sources, uncertainty notes, and next steps.
 
 FR-8: The system shall require Google Login before a user can ask AI.
@@ -115,6 +121,10 @@ FR-46: The system shall capture a simple usefulness rating for AI answers during
 FR-47: The system shall record AI usage events for authenticated AI requests, including user, conversation or trip context when applicable, AI purpose, provider/model, timestamp, and available usage/cost metadata.
 
 FR-48: The system shall capture referral attribution when a new user signs in or registers through a valid referral link, without calculating rewards, ranking, payout, or credit conversion in MVP.
+
+FR-49: The system shall manage AI Gateway model records with gateway model name, intended purpose, supported input/output capabilities, active status, and input/output/cache pricing metadata.
+
+FR-50: The system shall use configured model pricing metadata to estimate AI usage cost when provider usage token metadata is available, without creating credit balance or billing behavior in MVP.
 
 ### NonFunctional Requirements
 
@@ -214,7 +224,7 @@ NFR-7: The system shall be designed so Google Maps integration, public submissio
 
 ### UX Design Requirements
 
-No UX design contract was found. UX-specific requirements are not extracted in this run.
+UX design requirements are defined in `_bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-2026-07-05/EXPERIENCE.md` and `DESIGN.md`. Traveler-facing surfaces remain Vietnamese-first, responsive, provenance-aware, and must now include streaming answer states plus supported image attachment/rejection states for AI Ask.
 
 ### FR Coverage Map
 
@@ -229,6 +239,12 @@ FR-4: Epic 2 - Useful initial guidance with missing details
 FR-5: Epic 2 - Concise follow-up questions
 
 FR-6: Epic 2 - Iterative refinement
+
+FR-6A: Epic 2 - Streaming AI Ask responses
+
+FR-6B: Epic 2 - AI Ask image input
+
+FR-6C: Epic 2 - Image input validation before provider calls
 
 FR-7: Epic 2 - Structured travel answer format
 
@@ -314,6 +330,10 @@ FR-47: Epic 5 - AI usage event recording
 
 FR-48: Epic 1 - Referral attribution capture
 
+FR-49: Epic 5 - AI Gateway model catalog and pricing
+
+FR-50: Epic 5 - Usage cost estimation from model pricing
+
 ## Epic List
 
 ### Epic 1: Public Sign-In And App Foundation
@@ -324,9 +344,9 @@ Travelers can access the public app entry point, sign in with Google without an 
 
 ### Epic 2: AI Ask Conversation Experience
 
-Travelers can ask Vietnamese road-trip questions, refine plans across a conversation, and receive useful structured Vietnamese answers with clarifying questions when needed.
+Travelers can ask Vietnamese road-trip questions, refine plans across a conversation, receive useful structured Vietnamese answers with clarifying questions when needed, stream responses, and submit supported image inputs.
 
-**FRs covered:** FR-1, FR-2, FR-3, FR-4, FR-5, FR-6, FR-7
+**FRs covered:** FR-1, FR-2, FR-3, FR-4, FR-5, FR-6, FR-6A, FR-6B, FR-6C, FR-7
 
 ### Epic 3: Chat Sessions And Trip Projects
 
@@ -342,9 +362,9 @@ Operators can submit travel links or copied content, AI prepares structured know
 
 ### Epic 5: Grounded Retrieval, Web Search, And Provenance
 
-Traveler answers use the required context priority pipeline: selected trip project context, current chat session context, approved knowledge, web search fallback, and general reasoning, with stored provenance, source/confidence display, uncertainty handling, and freshness warnings.
+Traveler answers use the required context priority pipeline: selected trip project context, current chat session context, approved knowledge, web search fallback, and general reasoning, with stored provenance, source/confidence display, uncertainty handling, freshness warnings, AI Gateway model management, pricing metadata, and AI usage event recording.
 
-**FRs covered:** FR-29, FR-30, FR-31, FR-32, FR-33, FR-34, FR-35, FR-36, FR-37, FR-47
+**FRs covered:** FR-29, FR-30, FR-31, FR-32, FR-33, FR-34, FR-35, FR-36, FR-37, FR-47, FR-49, FR-50
 
 ### Epic 6: Family-Aware Planning And Public MVP Quality Loop
 
@@ -518,7 +538,7 @@ So that future referral programs can attribute registrations without adding rewa
 
 ## Epic 2: AI Ask Conversation Experience
 
-Travelers can ask Vietnamese road-trip questions, refine plans across a conversation, and receive useful structured Vietnamese answers with clarifying questions when needed.
+Travelers can ask Vietnamese road-trip questions, refine plans across a conversation, receive useful structured Vietnamese answers with clarifying questions when needed, stream responses, and submit supported image inputs.
 
 ### Story 2.0: Introduce Test Framework And Retroactive Coverage For Epic 1 Protected Paths
 
@@ -696,6 +716,40 @@ So that the chat feels usable during public MVP testing.
 **When** the UI renders the response
 **Then** the displayed message matches the persisted assistant message
 **And** no client-only answer state becomes the source of truth.
+
+### Story 2.7: Stream AI Ask Responses And Accept Traveler Image Input
+
+As an authenticated traveler,
+I want AI Ask to stream responses and accept relevant image inputs,
+So that planning feels responsive and I can ask about screenshots or photos without leaving chat.
+
+**Acceptance Criteria:**
+
+**Given** an authenticated user submits a text-only AI Ask message
+**When** the source/context preparation is complete and the selected Gateway model supports streaming
+**Then** the assistant response streams progressively in the UI
+**And** the final persisted assistant message remains the source of truth after completion.
+
+**Given** streaming fails before completion
+**When** the user is viewing the partial response
+**Then** the app shows a recoverable failure state
+**And** it does not create a misleading completed assistant message.
+
+**Given** an authenticated user attaches a supported image to an AI Ask message
+**When** the message is submitted
+**Then** the system validates file type, size, ownership, and model image-input capability before any provider call
+**And** the Gateway request includes the image only through the approved adapter path.
+
+**Given** an image is unsupported, too large, unauthenticated, or attached to invalid text
+**When** submission is attempted
+**Then** the request is rejected before provider calls
+**And** no message, usage event, or provider call is created unless the implementation explicitly supports text-only fallback and the user confirms it.
+
+**Given** an image was accepted into a conversation
+**When** the owning chat/session is deleted in later deletion stories
+**Then** image metadata/files and image-derived retrievable content are removed or disabled from normal UI and retrieval according to the deletion contract.
+
+_Dependency: Story 5.0 should provide the model capability catalog before Story 2.7 implementation unless a temporary hard-coded capability gate is explicitly approved for the story._
 
 ## Epic 3: Chat Sessions And Trip Projects
 
@@ -917,6 +971,11 @@ So that I do not need to manually rewrite every post or review.
 **Then** those facts are marked as unverified or needing operator review
 **And** AI does not approve them automatically.
 
+**Given** the submitted source includes an image or screenshot
+**When** AI extraction runs
+**Then** the system uses a Gateway model configured for image input and extraction purpose
+**And** extraction fails safely if no active capable model is configured.
+
 ### Story 4.3: Review And Edit AI-Prepared Drafts
 
 As an operator,
@@ -1098,7 +1157,33 @@ So that the public MVP has enough curated examples before evaluation.
 
 ## Epic 5: Grounded Retrieval, Web Search, And Provenance
 
-Traveler answers use the required context priority pipeline: selected trip project context, current chat session context, approved knowledge, web search fallback, and general reasoning, with stored provenance, source/confidence display, uncertainty handling, freshness warnings, and AI usage event recording.
+Traveler answers use the required context priority pipeline: selected trip project context, current chat session context, approved knowledge, web search fallback, and general reasoning, with stored provenance, source/confidence display, uncertainty handling, freshness warnings, AI Gateway model management, pricing metadata, and AI usage event recording.
+
+### Story 5.0: Manage AI Gateway Models And Pricing
+
+As a product owner/operator,
+I want XuyenViet to manage callable AI Gateway models and pricing metadata,
+So that AI orchestration can select capable models and estimate usage cost consistently.
+
+**Acceptance Criteria:**
+
+**Given** the app has AI Gateway access configured
+**When** model records are seeded or managed
+**Then** each active model has gateway model name, display label, intended purposes, capability flags, active status, pricing currency, input unit price, output unit price, cache pricing fields when supported, pricing unit, and effective timestamp or version.
+
+**Given** AI orchestration prepares a model call
+**When** it selects a model for chat, extraction, embeddings, evaluation, or image input
+**Then** selection is constrained by configured purpose and capability flags
+**And** direct hard-coded model strings are not scattered across feature code.
+
+**Given** provider usage metadata is available
+**When** a usage event is recorded
+**Then** the Usage module can estimate cost from the selected model pricing record
+**And** records missing pricing safely when a model has no configured price.
+
+**Given** future billing is not part of MVP
+**When** model pricing exists
+**Then** the system does not show balances, charge users, enforce credits, or create payment obligations.
 
 ### Story 5.1: Retrieve Approved Knowledge For AI Ask
 
@@ -1304,6 +1389,16 @@ So that future credit pricing and cost controls can be designed from real usage 
 **When** the request completes
 **Then** the usage event is still recorded with available metadata
 **And** missing usage fields are represented safely without blocking the user answer.
+
+**Given** a usage event has provider token metadata and a selected model pricing record
+**When** the event is persisted
+**Then** the Usage module records estimated input, output, cache, and total cost fields where calculable
+**And** references the model/pricing record or version used for the calculation.
+
+**Given** provider cache token metadata is unavailable or the selected model has no cache pricing
+**When** cost is estimated
+**Then** missing cache cost is represented safely
+**And** it does not block the user answer.
 
 **Given** future credit billing is not part of MVP
 **When** usage events are stored

@@ -4,13 +4,14 @@ description: Responsive web UX for an AI-first Vietnam road-trip planning compan
 status: draft
 project: xuyenviet
 created: 2026-07-05
-updated: 2026-07-05
+updated: 2026-07-07
 sources:
   - ../../prds/prd-xuyenviet-2026-07-04/prd.md
   - ../../architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md
   - ../../epics.md
   - ../../implementation-readiness-report-2026-07-05.md
   - ../../sprint-change-proposal-2026-07-05-ai-usage-referral.md
+  - ../../sprint-change-proposal-2026-07-07-ai-gateway-models-streaming-multimodal.md
 colors:
   primary: '#14532D'
   primary-foreground: '#FFFFFF'
@@ -177,6 +178,8 @@ Shape language is soft but not playful.
 - **Primary button** uses `{components.button-primary}`. Label with action verbs: `Đăng nhập bằng Google`, `Hỏi AI`, `Lưu bản nháp`, `Phê duyệt`.
 - **Route card** uses `{components.route-card}` for day plans, route segments, hotel-area suggestions, and practical stop lists. Route cards should support a short title, distance/time if known, confidence/source summary, and a clear next step.
 - **Answer source chips** use confidence label colors. They summarize source category in the answer body: `Curated`, `Community`, `Official`, `Unverified`, `Partner`. Detailed URLs appear in expandable source detail rows.
+- **Image attachment row** uses shadcn input/card primitives with compact thumbnail, filename or generic image label, size/status text, and a clear remove action. It must not look like an approved source chip.
+- **Streaming answer state** uses subtle pending treatment and normal answer typography; avoid flashy typewriter effects that reduce readability or conflict with reduced-motion settings.
 - **Freshness warning** uses `{components.freshness-warning}`. It must be compact and specific: `Giá/giờ mở cửa có thể thay đổi. Kiểm tra lại trước khi đi.`
 - **Storage notice** is a low-friction inline callout near first AI Ask use. It should not look like an error. Use muted shadcn surface with one link to privacy/details.
 - **Delete confirmation** uses shadcn destructive dialog styling. The destructive action must name the object: `Xóa cuộc trò chuyện`, `Xóa dự án chuyến đi`.

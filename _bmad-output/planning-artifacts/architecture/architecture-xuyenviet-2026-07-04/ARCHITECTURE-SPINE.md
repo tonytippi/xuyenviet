@@ -2,7 +2,7 @@
 title: XuyenViet AI Travel Information MVP Architecture Spine
 status: final
 created: 2026-07-04
-updated: 2026-07-06
+updated: 2026-07-07
 altitude: project MVP
 source_prd: ../../prds/prd-xuyenviet-2026-07-04/prd.md
 ---
@@ -197,6 +197,12 @@ Rule: Every model call declares purpose, model, prompt version, input source bun
 
 Rule: AI provider adapter calls must return or emit usage metadata when available, including model, token counts, provider request ID if available, latency, and failure status. The Usage module persists this metadata without storing raw prompt/response content beyond existing message/provenance records.
 
+Rule: AI Gateway model selection reads from a managed model catalog, not from scattered hard-coded model strings. Each active model record includes gateway model name, intended purposes, capability flags, pricing metadata, and effective date/version information.
+
+Rule: Model capability flags must represent at least text input, image input, image output, embeddings, extraction, evaluation, streaming, and cache pricing support where applicable.
+
+Rule: Usage cost estimates are derived from provider usage metadata plus the selected model pricing record when available. Missing pricing must not block safe answer generation, but it must be visible as missing-cost metadata in usage records.
+
 Rule: Direct OpenAI API calls are not used. AI calls go through the OpenAI-compatible AI Gateway configured by `AI_GATEWAY_BASE_URL` and `AI_GATEWAY_API_KEY` per environment. Public MVP launch is blocked until gateway/provider data-processing settings and privacy notice text are verified so submitted project data is not used for provider model training where configurable.
 
 ### AD-11: Answer Provenance Is Persisted, Not UI-Derived
@@ -261,6 +267,10 @@ Prevents: partial AI answers that cannot satisfy source/confidence display requi
 
 Rule: Long-running extraction and embedding may run as background tasks with status; user answers must not stream before the orchestrator knows which source categories were used.
 
+Rule: During streaming, partial assistant tokens are transient UI state. The final assistant message, retrieval decision, provenance rows, and usage events are persisted through the orchestrator; the UI must reconcile to persisted final content after completion.
+
+Rule: If streaming fails before finalization, the app shows a recoverable failure state and must not create a misleading completed assistant message.
+
 Seed latency target: first visible answer within 5 seconds without web search and within 10 seconds with web search. [ASSUMPTION]
 
 ## Shared Data Contracts
@@ -272,9 +282,13 @@ Core persisted entities:
 - `trip_projects`, `conversations`, `messages`, `chat_context`, `assistant_response_provenance`
 - `context_embeddings`
 - `sources`, `raw_source_material`, `knowledge_cards`, `knowledge_card_embeddings`
-- `web_search_results`, `ai_usage_events`, `feedback`, `eval_runs`, `audit_events`
+- `ai_gateway_models`, `web_search_results`, `ai_usage_events`, `feedback`, `eval_runs`, `audit_events`
 
 AI usage event minimum fields: user ID when available, conversation ID when applicable, trip project ID when applicable, message ID when applicable, purpose, provider, model, prompt version when applicable, request timestamp, latency, success/failure status, provider usage metadata when available, and estimated cost fields when configured.
+
+AI Gateway model record minimum fields: gateway model name, display label, provider/gateway identifier when available, intended purposes, capability flags, active status, pricing currency, input unit price, output unit price, cache read/write unit prices when supported, pricing unit, effective timestamp or version, created/updated timestamps, and operator/admin audit metadata where applicable.
+
+Usage events reference the model record or pricing version used for cost estimation when available. Usage events may also retain the raw gateway model name returned by the provider for reconciliation.
 
 Referral attribution minimum fields: referred user ID, referral code, referrer user ID when resolvable, campaign/source metadata when available, captured timestamp, and immutable first-attribution marker. MVP does not calculate reward amounts.
 
@@ -292,6 +306,10 @@ Canonical source linkage:
 Retrieval must join embeddings back to current owner rows and filter current owner status. Draft or archived knowledge cards must have no active retrievable embeddings. Updating retrievable text marks previous embeddings stale or disabled in the same transaction before new embeddings become active.
 
 Knowledge card types are fixed from the PRD unless changed through PRD update: place, food, hotel area, activity, service, route note, warning, cost note, parking, EV charging, kid-friendly tip, discount/promotion, general travel tip.
+
+Multimodal input rule: User-submitted AI Ask images are owned by the conversation/chat session or selected trip project context that accepted them. Operator-submitted knowledge images are owned by source/raw-source records. New image-bearing tables must define deletion behavior before migration approval.
+
+Multimodal provider rule: Image inputs passed to the Gateway must be validated for allowed MIME type, size, ownership, and surface before provider calls. Raw provider payloads and image-derived notes must not be exposed outside their owning traveler/admin surface.
 
 ## Retrieval Contract
 
@@ -330,6 +348,7 @@ Production must have:
 - Facebook content reuse policy beyond provenance and non-official labeling.
 - Dedicated self-service privacy dashboard beyond chat/trip deletion.
 - Google Maps integration.
+- AI-generated image output until a concrete traveler or operator workflow is approved.
 - Public submissions, credit wallets, payment deposits, reward balances, referral reward calculations, ranking multipliers, reward-to-credit conversion, booking transactions, affiliate automation, and partner transaction flows.
 - Mobile app channel.
 - Service decomposition.
