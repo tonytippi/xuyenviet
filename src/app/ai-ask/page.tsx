@@ -49,6 +49,9 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
   let loadedConversation = requestedConversationId ? await getOwnedConversation(requestedConversationId) : null;
   let selectedTripProject = requestedTripProjectId ? await getOwnedTripProjectSummary(requestedTripProjectId) : null;
 
+  // Enforce project scope alignment: reject a linked conversation whose project differs from the
+  // selected project, reject an ordinary conversation shown under a selected project, and infer the
+  // project scope when a linked conversation is opened directly without a selected project in the URL.
   if (loadedConversation?.tripProjectId) {
     if (selectedTripProject && selectedTripProject.id !== loadedConversation.tripProjectId) {
       loadedConversation = null;
@@ -61,8 +64,23 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
     loadedConversation = null;
   }
 
-  const initialTripProjects = (await listOwnedTripProjects()) ?? [];
+  const initialTripProjects = ((await listOwnedTripProjects()) ?? []).map((project) => ({
+    id: project.id,
+    title: project.title,
+    origin: project.origin,
+    destination: project.destination,
+    updatedAt: project.updatedAt,
+  }));
   const initialSessions = selectedTripProject ? selectedTripProject.relatedChats : (await listOwnedConversations()) ?? [];
+  const selectedTripProjectForComposer = selectedTripProject
+    ? {
+        id: selectedTripProject.id,
+        title: selectedTripProject.title,
+        origin: selectedTripProject.origin,
+        destination: selectedTripProject.destination,
+        updatedAt: selectedTripProject.updatedAt,
+      }
+    : null;
 
   return (
     <main className="min-h-screen px-5 py-6 sm:px-8 lg:px-12">
@@ -102,16 +120,7 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
             }))}
             initialSessions={initialSessions}
             initialTripProjects={initialTripProjects}
-            selectedTripProject={selectedTripProject ? {
-              id: selectedTripProject.id,
-              title: selectedTripProject.title,
-              origin: selectedTripProject.origin,
-              destination: selectedTripProject.destination,
-              startDate: selectedTripProject.startDate,
-              endDate: selectedTripProject.endDate,
-              travelers: selectedTripProject.travelers,
-              notes: selectedTripProject.notes,
-            } : null}
+            selectedTripProject={selectedTripProjectForComposer}
             createTripProjectAction={createTripProjectFromForm}
           />
 

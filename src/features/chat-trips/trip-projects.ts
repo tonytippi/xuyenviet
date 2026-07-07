@@ -7,7 +7,17 @@ import { conversations, messages, tripProjects } from "@/db/schema";
 import { recordAuditEvent } from "@/features/audit/events";
 import { getAuthenticatedSession } from "@/server/auth";
 
+import { formatTripProjectLabel } from "./labels";
+
+export { formatTripProjectLabel };
+
 const previewMaxLength = 60;
+const maxTitleLength = 160;
+const maxTripFieldLength = 500;
+const maxNotesLength = 2_000;
+const maxOwnedTripProjectsLimit = 100;
+const maxRelatedChatsRowLimit = 1_000;
+const tripDatePattern = /^\d{4}-\d{2}-\d{2}$/;
 
 export type TripProjectInput = {
   title: string;
@@ -87,7 +97,8 @@ export async function listOwnedTripProjects(): Promise<OwnedTripProjectSummary[]
     })
     .from(tripProjects)
     .where(eq(tripProjects.userId, session.userId))
-    .orderBy(desc(tripProjects.updatedAt), desc(tripProjects.id));
+    .orderBy(desc(tripProjects.updatedAt), desc(tripProjects.id))
+    .limit(maxOwnedTripProjectsLimit);
 }
 
 export async function getOwnedTripProject(tripProjectId: string) {
@@ -97,6 +108,46 @@ export async function getOwnedTripProject(tripProjectId: string) {
     return null;
   }
 
+  return getOwnedTripProjectForSession(session, tripProjectId);
+}
+
+export async function getOwnedTripProjectSummary(tripProjectId: string) {
+  const session = await getAuthenticatedSession();
+
+  if (!session) {
+    return null;
+  }
+
+  const project = await getOwnedTripProjectForSession(session, tripProjectId);
+
+  if (!project) {
+    return null;
+  }
+
+  const rows = await getDb()
+    .select({ id: conversations.id, updatedAt: conversations.updatedAt, messageContent: messages.content })
+    .from(conversations)
+    .leftJoin(messages, and(eq(messages.conversationId, conversations.id), eq(messages.userId, session.userId), eq(messages.role, "user")))
+    .where(and(eq(conversations.userId, session.userId), eq(conversations.tripProjectId, tripProjectId)))
+    .orderBy(desc(conversations.updatedAt), desc(conversations.id), asc(messages.createdAt), asc(messages.id))
+    .limit(maxRelatedChatsRowLimit);
+
+  const seenConversationIds = new Set<string>();
+  const relatedChats: Array<{ id: string; updatedAt: Date; preview: string }> = [];
+
+  for (const row of rows) {
+    if (seenConversationIds.has(row.id)) {
+      continue;
+    }
+
+    seenConversationIds.add(row.id);
+    relatedChats.push({ id: row.id, updatedAt: row.updatedAt, preview: formatPreview(row.messageContent) });
+  }
+
+  return { ...project, relatedChats };
+}
+
+async function getOwnedTripProjectForSession(session: { userId: string }, tripProjectId: string) {
   const [project] = await getDb()
     .select({
       id: tripProjects.id,
@@ -116,42 +167,6 @@ export async function getOwnedTripProject(tripProjectId: string) {
   return project ?? null;
 }
 
-export async function getOwnedTripProjectSummary(tripProjectId: string) {
-  const project = await getOwnedTripProject(tripProjectId);
-  const session = await getAuthenticatedSession();
-
-  if (!project || !session) {
-    return null;
-  }
-
-  const rows = await getDb()
-    .select({ id: conversations.id, updatedAt: conversations.updatedAt, messageContent: messages.content })
-    .from(conversations)
-    .leftJoin(messages, and(eq(messages.conversationId, conversations.id), eq(messages.userId, session.userId), eq(messages.role, "user")))
-    .where(and(eq(conversations.userId, session.userId), eq(conversations.tripProjectId, tripProjectId)))
-    .orderBy(desc(conversations.updatedAt), desc(conversations.id), asc(messages.createdAt), asc(messages.id));
-
-  const seenConversationIds = new Set<string>();
-  const relatedChats: Array<{ id: string; updatedAt: Date; preview: string }> = [];
-
-  for (const row of rows) {
-    if (seenConversationIds.has(row.id)) {
-      continue;
-    }
-
-    seenConversationIds.add(row.id);
-    relatedChats.push({ id: row.id, updatedAt: row.updatedAt, preview: formatPreview(row.messageContent) });
-  }
-
-  return { ...project, relatedChats };
-}
-
-export function formatTripProjectLabel(project: Pick<OwnedTripProjectSummary, "title" | "origin" | "destination">) {
-  const route = [project.origin, project.destination].filter(Boolean).join(" → ");
-
-  return route ? `${project.title} (${route})` : project.title;
-}
-
 function normalizeTripProjectInput(input: TripProjectInput) {
   const title = input.title.trim();
 
@@ -159,30 +174,65 @@ function normalizeTripProjectInput(input: TripProjectInput) {
     throw new Error("Trip project title is required.");
   }
 
+  if (title.length > maxTitleLength) {
+    throw new Error(`Trip project title must be ${maxTitleLength} characters or fewer.`);
+  }
+
+  const startDate = normalizeTripDate(input.startDate);
+  const endDate = normalizeTripDate(input.endDate);
+
+  if (startDate && endDate && startDate > endDate) {
+    throw new Error("Trip project end date cannot be before the start date.");
+  }
+
   return {
     title,
-    origin: normalizeOptionalText(input.origin),
-    destination: normalizeOptionalText(input.destination),
-    startDate: normalizeOptionalText(input.startDate),
-    endDate: normalizeOptionalText(input.endDate),
-    travelers: normalizeOptionalText(input.travelers),
-    notes: normalizeOptionalText(input.notes),
+    origin: normalizeOptionalText(input.origin, maxTripFieldLength),
+    destination: normalizeOptionalText(input.destination, maxTripFieldLength),
+    startDate,
+    endDate,
+    travelers: normalizeOptionalText(input.travelers, maxTripFieldLength),
+    notes: normalizeOptionalText(input.notes, maxNotesLength),
   };
 }
 
-function normalizeOptionalText(value: string | null | undefined) {
+function normalizeOptionalText(value: string | null | undefined, maxLength: number) {
   const trimmed = value?.trim();
 
-  return trimmed ? trimmed : null;
+  if (!trimmed) {
+    return null;
+  }
+
+  if (trimmed.length > maxLength) {
+    throw new Error(`Trip project field must be ${maxLength} characters or fewer.`);
+  }
+
+  return trimmed;
 }
 
-function formatTripProjectAuditSummary(project: Pick<OwnedTripProjectSummary, "title" | "origin" | "destination" | "startDate" | "endDate">) {
+function normalizeTripDate(value: string | null | undefined) {
+  const trimmed = value?.trim();
+
+  if (!trimmed) {
+    return null;
+  }
+
+  if (!tripDatePattern.test(trimmed) || Number.isNaN(Date.parse(trimmed))) {
+    throw new Error("Trip project dates must use the YYYY-MM-DD format.");
+  }
+
+  return trimmed;
+}
+
+function formatTripProjectAuditSummary(project: Pick<OwnedTripProjectSummary, "title" | "origin" | "destination" | "startDate" | "endDate" | "travelers" | "notes">) {
   return JSON.stringify({
     titleLength: project.title.length,
     hasOrigin: Boolean(project.origin),
     hasDestination: Boolean(project.destination),
     hasStartDate: Boolean(project.startDate),
     hasEndDate: Boolean(project.endDate),
+    hasTravelers: Boolean(project.travelers),
+    hasNotes: Boolean(project.notes),
   });
 }
 

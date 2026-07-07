@@ -28,3 +28,15 @@
 - source_spec: `spec-3-1-manage-chat-sessions.md`
   summary: Add a full focus-trap (tab cycling) to the mobile session sheet.
   evidence: The sheet now closes on Escape, focuses the panel on open, and restores focus to the trigger, but Tab focus can still escape behind the modal overlay to page content. A full tab-cycling trap (or a Headless UI/Radix Dialog) is needed for complete modal a11y.
+- source_spec: `spec-3-2-create-trip-projects.md`
+  summary: Allow re-associating an orphaned conversation with a trip project after its project is deleted.
+  evidence: Follow-up code review (pass 2, 2026-07-07). `src/app/api/ai-ask/stream/route.ts:149-155` rejects any `conversationId + tripProjectId` pairing that does not match the stored `conversation.tripProjectId`. After `ON DELETE SET NULL` nulls `trip_project_id`, the conversation can be continued as ordinary chat but has no UI/path to attach to a new project. Deferred to Story 3.7 (delete trip projects) or a future project-edit story.
+- source_spec: `spec-3-2-create-trip-projects.md`
+  summary: Enforce `tripProjects.updatedAt` (and `conversations.updatedAt`) refresh on update via a DB trigger or shared helper.
+  evidence: Follow-up code review (pass 2, 2026-07-07). `src/db/schema.ts:181` uses `defaultNow()` which only fires on INSERT. No update operation exists in Story 3.2, but a future update story that forgets `.set({ updatedAt: new Date() })` will leave stale timestamps. `conversations.updatedAt` is already manually maintained in the stream route.
+- source_spec: `spec-3-2-create-trip-projects.md`
+  summary: Handle the TOCTOU race where a linked conversation's project is deleted between the two reads in `src/app/ai-ask/page.tsx`.
+  evidence: Follow-up code review (pass 2, 2026-07-07). `page.tsx:52-62` reads the conversation (gets `tripProjectId`), then calls `getOwnedTripProjectSummary(tripProjectId)` which may return null if the project was deleted concurrently. The conversation then renders with no project scope, is excluded from the ordinary session list (filter `isNull(tripProjectId)` misses the stale non-null value), and continuing it hits the "Project-scoped conversation requires its trip project scope" stream error. Narrow race; revisit when Story 3.7 implements project deletion.
+- source_spec: `spec-3-2-create-trip-projects.md`
+  summary: Translate pre-existing English error messages in the AI Ask stream route to Vietnamese.
+  evidence: Follow-up code review (pass 2, 2026-07-07). `src/app/api/ai-ask/stream/route.ts:25` ("Authentication required.") and `:48` ("AI Ask question must be between 1 and 2000 characters.") pre-date Story 3.2 and surface to the user via `payload?.error`, conflicting with the Vietnamese-first UX rule. The 3.2-introduced project-ownership error is tracked as a patch in this review; the pre-existing ones are deferred to a separate cleanup.

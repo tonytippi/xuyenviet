@@ -1,9 +1,10 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useActionState, useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 
 import { ConversationList, type ChatSessionSummary } from "@/features/chat-trips/conversation-list";
+import { formatTripProjectLabel } from "@/features/chat-trips/labels";
 
 const maxQuestionLength = 2_000;
 const maxImageByteSize = 5 * 1024 * 1024;
@@ -27,12 +28,15 @@ type TripProjectSummary = {
   title: string;
   origin: string | null;
   destination: string | null;
-  startDate: string | null;
-  endDate: string | null;
-  travelers: string | null;
-  notes: string | null;
   updatedAt?: Date | string;
 };
+
+type CreateTripProjectFormState = { error?: string };
+
+type CreateTripProjectAction = (
+  state: CreateTripProjectFormState | undefined,
+  formData: FormData,
+) => Promise<CreateTripProjectFormState | undefined>;
 
 type AiAskComposerProps = {
   initialConversationId?: string;
@@ -40,7 +44,7 @@ type AiAskComposerProps = {
   initialSessions?: ChatSessionSummary[];
   initialTripProjects?: TripProjectSummary[];
   selectedTripProject?: TripProjectSummary | null;
-  createTripProjectAction?: (formData: FormData) => void | Promise<void>;
+  createTripProjectAction?: CreateTripProjectAction;
 };
 
 function getUnansweredUserMessageIds(messages: DisplayMessage[]) {
@@ -146,6 +150,11 @@ export function AiAskComposer({
   const [conversationId, setConversationId] = useState(initialConversationId);
   const [sessions, setSessions] = useState<ChatSessionSummary[]>(initialSessions);
   const [isSessionSheetOpen, setSessionSheetOpen] = useState(false);
+  const [createProjectState, createProjectFormAction, isCreatingProject] = useActionState<CreateTripProjectFormState | undefined, FormData>(
+    createTripProjectAction ?? noOpCreateTripProjectAction,
+    undefined,
+  );
+  const createFormDisabled = isPending || isCreatingProject;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
@@ -480,18 +489,21 @@ export function AiAskComposer({
           {createTripProjectAction ? (
             <details className="mt-4 rounded-2xl border border-dashed border-[#d8c9ad] bg-[#fffdf8] p-3">
               <summary className="cursor-pointer text-sm font-semibold text-[#17342c]">Tạo dự án chuyến đi mới</summary>
-              <form action={createTripProjectAction} className="mt-3 grid gap-3 sm:grid-cols-2">
+              <form action={createProjectFormAction} className="mt-3 grid gap-3 sm:grid-cols-2">
                 <label className="sm:col-span-2 text-sm font-semibold text-[#17342c]">
                   Tên dự án <span className="text-[#8c4f13]">*</span>
-                  <input className="mt-1 min-h-11 w-full rounded-xl border border-[#d8c9ad] bg-white px-3 py-2 text-sm" disabled={isPending} maxLength={160} name="title" required placeholder="Ví dụ: Đà Nẵng 7 ngày cùng gia đình" />
+                  <input className="mt-1 min-h-11 w-full rounded-xl border border-[#d8c9ad] bg-white px-3 py-2 text-sm" disabled={createFormDisabled} maxLength={160} name="title" required placeholder="Ví dụ: Đà Nẵng 7 ngày cùng gia đình" />
                 </label>
-                <label className="text-sm font-semibold text-[#17342c]">Điểm đi<input className="mt-1 min-h-11 w-full rounded-xl border border-[#d8c9ad] bg-white px-3 py-2 text-sm" disabled={isPending} name="origin" placeholder="Hà Nội" /></label>
-                <label className="text-sm font-semibold text-[#17342c]">Điểm đến<input className="mt-1 min-h-11 w-full rounded-xl border border-[#d8c9ad] bg-white px-3 py-2 text-sm" disabled={isPending} name="destination" placeholder="Đà Nẵng" /></label>
-                <label className="text-sm font-semibold text-[#17342c]">Ngày đi<input className="mt-1 min-h-11 w-full rounded-xl border border-[#d8c9ad] bg-white px-3 py-2 text-sm" disabled={isPending} name="startDate" placeholder="2026-08-01" /></label>
-                <label className="text-sm font-semibold text-[#17342c]">Ngày về<input className="mt-1 min-h-11 w-full rounded-xl border border-[#d8c9ad] bg-white px-3 py-2 text-sm" disabled={isPending} name="endDate" placeholder="2026-08-07" /></label>
-                <label className="sm:col-span-2 text-sm font-semibold text-[#17342c]">Người đi<input className="mt-1 min-h-11 w-full rounded-xl border border-[#d8c9ad] bg-white px-3 py-2 text-sm" disabled={isPending} name="travelers" placeholder="2 người lớn, 1 trẻ em" /></label>
-                <label className="sm:col-span-2 text-sm font-semibold text-[#17342c]">Ghi chú<textarea className="mt-1 min-h-20 w-full rounded-xl border border-[#d8c9ad] bg-white px-3 py-2 text-sm" disabled={isPending} name="notes" placeholder="Sở thích, nhịp di chuyển, điều cần tránh..." /></label>
-                <button className="min-h-11 rounded-2xl bg-[#e5bd82] px-4 py-2 text-sm font-semibold text-[#17342c] transition hover:bg-[#d9a65c] focus:outline-none focus:ring-4 focus:ring-[#e5bd82] disabled:cursor-not-allowed disabled:opacity-60" disabled={isPending} type="submit">Tạo và chọn dự án</button>
+                <label className="text-sm font-semibold text-[#17342c]">Điểm đi<input className="mt-1 min-h-11 w-full rounded-xl border border-[#d8c9ad] bg-white px-3 py-2 text-sm" disabled={createFormDisabled} name="origin" placeholder="Hà Nội" /></label>
+                <label className="text-sm font-semibold text-[#17342c]">Điểm đến<input className="mt-1 min-h-11 w-full rounded-xl border border-[#d8c9ad] bg-white px-3 py-2 text-sm" disabled={createFormDisabled} name="destination" placeholder="Đà Nẵng" /></label>
+                <label className="text-sm font-semibold text-[#17342c]">Ngày đi<input className="mt-1 min-h-11 w-full rounded-xl border border-[#d8c9ad] bg-white px-3 py-2 text-sm" disabled={createFormDisabled} name="startDate" placeholder="2026-08-01" /></label>
+                <label className="text-sm font-semibold text-[#17342c]">Ngày về<input className="mt-1 min-h-11 w-full rounded-xl border border-[#d8c9ad] bg-white px-3 py-2 text-sm" disabled={createFormDisabled} name="endDate" placeholder="2026-08-07" /></label>
+                <label className="sm:col-span-2 text-sm font-semibold text-[#17342c]">Người đi<input className="mt-1 min-h-11 w-full rounded-xl border border-[#d8c9ad] bg-white px-3 py-2 text-sm" disabled={createFormDisabled} name="travelers" placeholder="2 người lớn, 1 trẻ em" /></label>
+                <label className="sm:col-span-2 text-sm font-semibold text-[#17342c]">Ghi chú<textarea className="mt-1 min-h-20 w-full rounded-xl border border-[#d8c9ad] bg-white px-3 py-2 text-sm" disabled={createFormDisabled} name="notes" placeholder="Sở thích, nhịp di chuyển, điều cần tránh..." /></label>
+                {createProjectState?.error ? (
+                  <p className="sm:col-span-2 rounded-2xl border border-[#f0c8a0] bg-[#fff7ed] p-3 text-sm leading-6 text-[#6f3f12]" role="alert">{createProjectState.error}</p>
+                ) : null}
+                <button className="min-h-11 rounded-2xl bg-[#e5bd82] px-4 py-2 text-sm font-semibold text-[#17342c] transition hover:bg-[#d9a65c] focus:outline-none focus:ring-4 focus:ring-[#e5bd82] disabled:cursor-not-allowed disabled:opacity-60" disabled={createFormDisabled} type="submit">{isCreatingProject ? "Đang tạo dự án..." : "Tạo và chọn dự án"}</button>
               </form>
             </details>
           ) : null}
@@ -804,8 +816,6 @@ function formatPreviewText(content: string): string {
   return `${trimmed.slice(0, previewMaxLength).trimEnd()}…`;
 }
 
-function formatTripProjectLabel(project: Pick<TripProjectSummary, "title" | "origin" | "destination">) {
-  const route = [project.origin, project.destination].filter(Boolean).join(" → ");
-
-  return route ? `${project.title} (${route})` : project.title;
+async function noOpCreateTripProjectAction(state: CreateTripProjectFormState | undefined): Promise<CreateTripProjectFormState | undefined> {
+  return state;
 }

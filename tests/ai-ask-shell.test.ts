@@ -676,6 +676,55 @@ describe("AI Ask streaming route", () => {
     expect(await countUsageEvents()).toBe(0);
   });
 
+  test("continues an existing project-scoped conversation when the matching trip project is selected", async () => {
+    await createTestUser("user-1");
+    await createDefaultAiAskModel({ supportsStreaming: true });
+    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế 5 ngày" }).returning({ id: tripProjects.id });
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id }).returning({ id: conversations.id });
+    const seededHistoryTime = new Date("2026-07-01T00:00:00.000Z");
+    await testDb.insert(messages).values([
+      { conversationId: conversation.id, userId: "user-1", role: "user", content: "Lịch trình Huế 5 ngày?", createdAt: seededHistoryTime },
+      { conversationId: conversation.id, userId: "user-1", role: "assistant", content: "Nên chia chặng nhẹ.", createdAt: new Date(seededHistoryTime.getTime() + 60_000) },
+    ]);
+    const fetchMock = vi.fn().mockResolvedValue(new Response([
+      'data: {"choices":[{"delta":{"content":"Ngày 3 nghỉ Huế."}}]}\n\n',
+      'data: {"choices":[{"finish_reason":"stop"}]}\n\n',
+      "data: [DONE]\n\n",
+    ].join(""), { status: 200, headers: { "content-type": "text/event-stream" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
+    }));
+    const formData = new FormData();
+    formData.set("question", "Ngày thứ 3 nên nghỉ ở đâu?");
+    formData.set("conversationId", conversation.id);
+    formData.set("tripProjectId", project.id);
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    await response.text();
+    const savedConversation = (await testDb.select().from(conversations).where(eq(conversations.id, conversation.id)))[0];
+    const savedMessages = await testDb.select().from(messages).where(eq(messages.conversationId, conversation.id)).orderBy(asc(messages.createdAt), asc(messages.id));
+    const gatewayMessages = getGatewayRequestMessages(fetchMock, 0);
+
+    expect(response.status).toBe(200);
+    expect(savedConversation).toMatchObject({ id: conversation.id, userId: "user-1", tripProjectId: project.id });
+    expect(savedMessages.map((message) => ({ role: message.role, content: message.content }))).toEqual([
+      { role: "user", content: "Lịch trình Huế 5 ngày?" },
+      { role: "assistant", content: "Nên chia chặng nhẹ." },
+      { role: "user", content: "Ngày thứ 3 nên nghỉ ở đâu?" },
+      { role: "assistant", content: "Ngày 3 nghỉ Huế." },
+    ]);
+    expect(gatewayMessages).toMatchObject([
+      { role: "system" },
+      { role: "user", content: "Lịch trình Huế 5 ngày?" },
+      { role: "assistant", content: "Nên chia chặng nhẹ." },
+      { role: "user", content: "Ngày thứ 3 nên nghỉ ở đâu?" },
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(await countConversations()).toBe(1);
+  });
+
   test("sends bounded streaming gateway requests with max_tokens 900", async () => {
     await createTestUser("user-1");
     await createDefaultAiAskModel({ supportsStreaming: true });

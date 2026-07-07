@@ -73,7 +73,7 @@ export async function POST(request: Request) {
       .limit(1);
 
     if (!project) {
-      return Response.json({ error: "Trip project not found or access denied." }, { status: 400 });
+      return Response.json({ error: "Không tìm thấy dự án hoặc bạn không có quyền truy cập." }, { status: 400 });
     }
   }
 
@@ -325,7 +325,13 @@ async function streamAnswer({
         errorMessage: "Mình đã tạo được câu trả lời nhưng chưa lưu được lúc này. Hãy thử lại sau.",
       });
     }
-  } catch {
+  } catch (error) {
+    console.error("AI Ask stream answer failed", {
+      conversationId: saved?.conversationId,
+      userMessageId: saved?.userMessage?.id,
+      error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
+    });
+
     sendEvent(controller, encoder, {
       type: "error",
       conversationId: saved?.conversationId,

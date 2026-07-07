@@ -3,8 +3,8 @@ title: 'Create Trip Projects'
 type: 'feature'
 created: '2026-07-07'
 status: 'done'
-review_loop_iteration: 0
-followup_review_recommended: true
+review_loop_iteration: 1
+followup_review_recommended: false
 baseline_revision: '2573d0fbb22966884e4d8000b83d7ada37e28aa1'
 final_revision: 'COMMITTED_BY_USER_REQUEST'
 context:
@@ -97,6 +97,34 @@ Empty — no bad_spec loopback occurred.
   - `[high]` `[patch]` Fixed mismatched owned `conversationId` + `tripProjectId` rendering by validating the pairing in `src/app/ai-ask/page.tsx` and added a page regression test.
   - `[medium]` `[patch]` Fixed project-linked conversations appearing as ordinary chats by excluding linked conversations from ordinary session listing, inferring project scope when opening a linked conversation, and rejecting linked-conversation stream continuation without project scope.
   - `[medium]` `[patch]` Reduced trip-project creation audit summaries to non-sensitive metadata flags/lengths and added a regression assertion that route/date/title content is not copied into audit logs.
+
+### Review Findings (2026-07-07 — pass 2, follow-up)
+
+Triaged from Blind Hunter + Edge Case Hunter + Acceptance Auditor. Acceptance Auditor found no new spec violations; all 4 prior-pass findings verified resolved. 0 decision-needed, 15 patch, 4 defer, 3 dismissed.
+
+**Pass 2 outcome:** all 15 patches applied and verified — `pnpm lint`, `pnpm typecheck`, `pnpm test:run` (116 tests, +1 happy-path continuation test), `pnpm build` all pass. Deferred items logged to `deferred-work.md`. Status remains `done`.
+
+- [x] [Review][Patch] Migration 0012 is redundant (0011 already has `ON DELETE SET NULL`) and its `0012_snapshot.json` is missing while the journal lists idx 12 — breaks drizzle-kit integrity [drizzle/migrations/0012_fix_trip_project_owner_fk.sql, drizzle/migrations/meta/_journal.json] (high)
+- [x] [Review][Patch] No server-side length validation on trip-project text fields; client `maxLength={160}` on title is unenforced server-side, other fields have no cap; a crafted request can store ~1MB per field (Server Action default body cap) [src/features/chat-trips/trip-projects.ts:155-171] (medium)
+- [x] [Review][Patch] No date format or `startDate <= endDate` validation; any string (e.g. `"abc"`, `"2026-13-99"`, inverted range) persists and will break Stories 3.3/3.4 context extraction [src/features/chat-trips/trip-projects.ts:166-167] (medium)
+- [x] [Review][Patch] `streamAnswer` outer `catch {}` swallows errors with no server-side logging; specific throw causes (project-scope violation, FK error) vanish without a trace [src/app/api/ai-ask/stream/route.ts:328] (medium)
+- [x] [Review][Patch] `createTripProjectFromForm` has no error handling; a whitespace-only title or expired session surfaces as an opaque Next.js error boundary instead of a form error / sign-in redirect [src/features/chat-trips/actions.ts:7-18] (medium)
+- [x] [Review][Patch] English error message at the project-ownership guard violates Vietnamese-first UX; surfaces to the user via `payload?.error` [src/app/api/ai-ask/stream/route.ts:76] (medium)
+- [x] [Review][Patch] `notes` and other unused trip fields are shipped to the client in `selectedTripProject`/`initialTripProjects` though the composer only reads id/title/origin/destination [src/app/ai-ask/page.tsx:105-114, src/features/chat-trips/trip-projects.ts:76-91] (low)
+- [x] [Review][Patch] `getOwnedTripProjectSummary` resolves the authenticated session up to 3x per call (and page.tsx can call it 2x per render) [src/features/chat-trips/trip-projects.ts:119-121] (low)
+- [x] [Review][Patch] `page.tsx` project/conversation resolution is split across two disjoint `if` blocks — consolidate for readability/maintainability [src/app/ai-ask/page.tsx:52-62] (low)
+- [x] [Review][Patch] `formatTripProjectAuditSummary` omits `hasTravelers`/`hasNotes` while recording other field-presence flags — inconsistent audit shape [src/features/chat-trips/trip-projects.ts:179-187] (low)
+- [x] [Review][Patch] `formatTripProjectLabel` is duplicated between the server module and the client composer — extract to a shared non-server module to prevent drift [src/features/chat-trips/trip-projects.ts:149-153, src/features/ai/ai-ask-composer.tsx:807] (low)
+- [x] [Review][Patch] No test covers the happy path of continuing an existing project-scoped conversation with its matching `tripProjectId` (only rejection/mismatch cases are tested) [tests/ai-ask-shell.test.ts] (low)
+- [x] [Review][Patch] Create-project form has no submission loading state; `isPending` tracks the chat stream, not the Server Action — invites duplicate submits [src/features/ai/ai-ask-composer.tsx:480-497] (low)
+- [x] [Review][Patch] `createTripProjectFromForm` coerces `formData.get(...)` via `String()`; a multipart File field becomes `"[object File]"` and is stored as the title [src/features/chat-trips/actions.ts:9-15] (low)
+- [x] [Review][Patch] `listOwnedTripProjects` and `getOwnedTripProjectSummary` have no `LIMIT`; a user with many projects/conversations loads unbounded rows [src/features/chat-trips/trip-projects.ts:76-90, 127-132] (low)
+- [x] [Review][Defer] Conversations can never be re-associated with a project after orphaning (project deleted → `tripProjectId` null); no update path exists [src/app/api/ai-ask/stream/route.ts:149-155] — deferred to Story 3.7 / future edit story
+- [x] [Review][Defer] `tripProjects.updatedAt` has no DB trigger; relies on manual `.set()` which a future update story could forget [src/db/schema.ts:181] — deferred, no update op in 3.2
+- [x] [Review][Defer] TOCTOU race: a linked conversation's project deleted between the two reads in `page.tsx` leaves the conversation hidden from both lists and blocked on reply [src/app/ai-ask/page.tsx:52-62] — deferred to Story 3.7 delete story
+- [x] [Review][Defer] Pre-existing English error messages in the stream route (auth/question-length guards) pre-date 3.2 [src/app/api/ai-ask/stream/route.ts:25,48] — deferred, pre-existing
+
+Dismissed (3): `startDate`/`endDate` stored as `text` (intentional per spec "date-ish text fields"); empty-string `trip_project_id` (app only writes null via Drizzle); PG 14 column-list `SET NULL` syntax (target is Neon PG 15+).
 
 ## Verification
 
