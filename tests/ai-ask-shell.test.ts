@@ -350,6 +350,11 @@ describe("AI Ask streaming route", () => {
     vi.resetModules();
     vi.clearAllMocks();
     delete process.env.AI_GATEWAY_TIMEOUT_MS;
+    vi.doMock("next/server", () => ({
+      after: (callback: () => Promise<void> | void) => {
+        void Promise.resolve(callback()).catch(() => undefined);
+      },
+    }));
   });
 
   test("rejects empty stream questions before persistence or provider calls", async () => {

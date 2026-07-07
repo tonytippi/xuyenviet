@@ -3,8 +3,8 @@ title: 'Extract Chat And Trip Context'
 type: 'feature'
 created: '2026-07-07'
 status: 'done'
-review_loop_iteration: 0
-followup_review_recommended: true
+review_loop_iteration: 1
+followup_review_recommended: false
 baseline_revision: '039e2a000ace86760d04a651c6066a3557417ef5'
 final_revision: 'UNCOMMITTED'
 context:
@@ -99,6 +99,30 @@ Empty — no bad_spec loopback occurred.
   - `[medium]` `[patch]` Stopped coercing unsupported provider scopes to `conversation`; unsupported scopes are now ignored.
   - `[medium]` `[patch]` Classified extraction request aborts as `client_stream_aborted` instead of generic gateway network failures.
   - `[medium]` `[patch]` Made context insertion, audit recording, and successful extraction usage recording atomic in one transaction.
+
+### 2026-07-07 — Follow-up review (pass 2, code review workflow)
+- Layers run: Blind Hunter, Edge Case Hunter, Acceptance Auditor (all completed).
+- Acceptance Auditor: all 4 acceptance criteria satisfied; all Always/Block If/Never constraints respected; 1 low observability finding.
+- Triage: 2 decision-needed, 12 patch (high 1, medium 4, low 7), 1 defer, 1 dismissed.
+
+### Review Findings (2026-07-07 — pass 2, follow-up)
+
+- [x] [Review][Patch] Best-effort extraction is coupled to the request lifecycle — restructure with `after()` from `next/server` so extraction runs after the response is sent, decoupled from `request.signal` and serverless freezing [src/app/api/ai-ask/stream/route.ts:189-202] [high] (resolved from decision-needed: user chose `after()`)
+- [x] [Review][Patch] `unrelatedPersonalPatterns` requires an explicit name marker — relax to match relationship word + capitalized proper noun so 'vợ Lan' is caught while 'vợ tôi thích đi biển' still passes [src/features/chat-trips/context-extraction.ts:38] [medium] (resolved from decision-needed: user chose relax to catch proper nouns)
+- [x] [Review][Patch] Child-name safety net requires an age suffix — `src/features/chat-trips/context-extraction.ts:36` [high]
+- [x] [Review][Patch] Vietnamese three-word full names escape the child-name pattern (regex matches at most two capitalized words before the age) — `src/features/chat-trips/context-extraction.ts:36` [medium]
+- [x] [Review][Patch] Successful extraction usage event is lost when the persistence transaction rolls back (usage event is inside `db.transaction` while failure/no-facts paths write directly to `db`) — `src/features/chat-trips/context-extraction.ts:125-171` [medium]
+- [x] [Review][Patch] `max_tokens: 700` can truncate valid JSON and silently drop all facts with no distinction between model garbage and gateway cutoff — `src/features/ai/gateway.ts:195` [medium]
+- [x] [Review][Patch] Non-string fact values (numbers, arrays) are silently dropped; allowlisted numeric/array fields like `adults`, `children`, `children_ages`, `budget`, `duration` can never persist when the model uses native JSON types — `src/features/chat-trips/context-extraction.ts:196` [medium]
+- [x] [Review][Patch] Markdown-wrapped JSON (``` ```json ... ``` ```) from the model is not stripped before `JSON.parse`, causing silent total loss of facts — `src/features/chat-trips/context-extraction.ts:228-236` [medium]
+- [x] [Review][Patch] Phone regex misses common formatted numbers (parentheses, no leading 0/84) — `src/features/chat-trips/context-extraction.ts:30` [low]
+- [x] [Review][Patch] Sensitive-data check runs after `sanitizeContextValue` truncation; a pattern straddling the 500-char boundary can survive — `src/features/chat-trips/context-extraction.ts:204-206` [low]
+- [x] [Review][Patch] Failure/no-facts `writeAiUsageEvent` writes are unguarded; a throw masks the original extraction error and loses the usage audit row — `src/features/chat-trips/context-extraction.ts:82,103` [low]
+- [x] [Review][Patch] Duplicate facts (same `field` + `scope`) within one extraction are both persisted; no in-memory dedup and no DB unique constraint — `src/features/chat-trips/context-extraction.ts:195-223` [low]
+- [x] [Review][Patch] Unicode invisible characters (`\u200B`, `\u202E`, `\uFEFF`) are not stripped by `sanitizeContextValue`, enabling display-spoofing in `notes`-style fields — `src/features/chat-trips/context-extraction.ts:238-242` [low]
+- [x] [Review][Patch] Provider error in a 200 response body (`{"error": {...}}` with no `choices`) is not surfaced; `parseCompletionContent` logs only `missing_completion_content` and discards the provider message — `src/features/ai/gateway.ts:412-424` [low]
+- [x] [Review][Patch] Individual rejected facts (unknown field, sensitive data, blank value, unsupported scope) are silently skipped without a server-side warning, contrary to the I/O matrix's "Log server-side warning only" — `src/features/chat-trips/context-extraction.ts:200-212` [low]
+- [x] [Review][Defer] `.slice(0, 500)` can split grapheme clusters / decomposed Vietnamese diacritics (NFD) — `src/features/chat-trips/context-extraction.ts:241` — deferred, Vietnamese text is almost always NFC and grapheme-aware slicing adds complexity for a rare case
 
 ## Design Notes
 

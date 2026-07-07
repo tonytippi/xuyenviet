@@ -25,6 +25,7 @@ const defaultGatewayTimeoutMs = 30_000;
 const minGatewayTimeoutMs = 1_000;
 const maxGatewayTimeoutMs = 180_000;
 const maxCompletionTokens = 900;
+const maxExtractionTokens = 1500;
 
 export type AiGatewaySuccess = {
   ok: true;
@@ -192,7 +193,7 @@ export async function completeExtraction({
       body: JSON.stringify({
         model,
         messages,
-        max_tokens: 700,
+        max_tokens: maxExtractionTokens,
         temperature: 0,
         stream: false,
       }),
@@ -207,6 +208,14 @@ export async function completeExtraction({
     }
 
     const payload = await response.json().catch(() => null) as unknown;
+
+    if (isRecord(payload) && isRecord(payload.error)) {
+      const errorMessage = typeof payload.error.message === "string" ? payload.error.message : "unknown_error";
+      logGatewayFailure({ errorCode: "invalid_gateway_response", latencyMs, model, timeoutMs: gatewayTimeoutMs, reason: "provider_error_in_body", message: errorMessage, purpose: "extraction" });
+
+      return { ok: false, provider: "ai_gateway", model, latencyMs, errorCode: "invalid_gateway_response" };
+    }
+
     const content = parseCompletionContent(payload);
 
     if (!content) {

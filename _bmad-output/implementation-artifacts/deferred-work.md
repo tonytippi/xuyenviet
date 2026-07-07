@@ -40,3 +40,9 @@
 - source_spec: `spec-3-2-create-trip-projects.md`
   summary: Translate pre-existing English error messages in the AI Ask stream route to Vietnamese.
   evidence: Follow-up code review (pass 2, 2026-07-07). `src/app/api/ai-ask/stream/route.ts:25` ("Authentication required.") and `:48` ("AI Ask question must be between 1 and 2000 characters.") pre-date Story 3.2 and surface to the user via `payload?.error`, conflicting with the Vietnamese-first UX rule. The 3.2-introduced project-ownership error is tracked as a patch in this review; the pre-existing ones are deferred to a separate cleanup.
+
+## Deferred from: code review of spec-3-3-extract-chat-and-trip-context (2026-07-07)
+
+- source_spec: `spec-3-3-extract-chat-and-trip-context.md`
+  summary: Use grapheme-aware truncation in `sanitizeContextValue` instead of UTF-16 code-unit `.slice(0, 500)`.
+  evidence: Follow-up code review (pass 2, 2026-07-07). `src/features/chat-trips/context-extraction.ts:241` slices by UTF-16 code unit, which can split a decomposed Vietnamese diacritic (NFD form) or an emoji mid-cluster, leaving a dangling combining mark as the last stored character. Vietnamese text is almost always NFC so this is rarely reachable; a grapheme-aware slice (`Intl.Segmenter` or a small surrogate-pair-aware helper) adds complexity for a narrow case. Revisit if user input with decomposed characters or emoji in context values becomes common.

@@ -205,6 +205,11 @@ describe("chat/trip context extraction", () => {
       ].join(""), { status: 200, headers: { "content-type": "text/event-stream" } });
     });
     vi.stubGlobal("fetch", fetchMock);
+    vi.doMock("next/server", () => ({
+      after: (callback: () => Promise<void> | void) => {
+        void Promise.resolve(callback()).catch(() => undefined);
+      },
+    }));
     vi.doMock("@/server/auth", () => ({
       getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }),
     }));
@@ -250,6 +255,11 @@ describe("chat/trip context extraction", () => {
       ].join(""), { status: 200, headers: { "content-type": "text/event-stream" } });
     });
     vi.stubGlobal("fetch", fetchMock);
+    vi.doMock("next/server", () => ({
+      after: (callback: () => Promise<void> | void) => {
+        void Promise.resolve(callback()).catch(() => undefined);
+      },
+    }));
     vi.doMock("@/server/auth", () => ({
       getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }),
     }));
@@ -277,6 +287,11 @@ describe("chat/trip context extraction", () => {
     const [otherProject] = await testDb.insert(tripProjects).values({ userId: "user-2", title: "Riêng" }).returning({ id: tripProjects.id });
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
+    vi.doMock("next/server", () => ({
+      after: (callback: () => Promise<void> | void) => {
+        void Promise.resolve(callback()).catch(() => undefined);
+      },
+    }));
     vi.doMock("@/server/auth", () => ({
       getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }),
     }));

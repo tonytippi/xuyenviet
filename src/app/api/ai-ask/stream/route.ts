@@ -1,4 +1,5 @@
 import { and, asc, eq } from "drizzle-orm";
+import { after } from "next/server";
 
 import { getDb } from "@/db/client";
 import { conversations, messageImageAttachments, messages, tripProjects } from "@/db/schema";
@@ -186,20 +187,20 @@ async function streamAnswer({
     const pricingSnapshot = getAiGatewayPricingSnapshot(selectedModel);
     const gatewayMessages = buildAiAskMessages({ question, history: saved.history });
     const finalGatewayMessages = imageDataUrl ? attachImageToFinalUserMessage(gatewayMessages, imageDataUrl) : gatewayMessages;
-    void extractChatTripContext({
+    const extractionInput = saved;
+    after(() => extractChatTripContext({
       session,
-      conversationId: saved.conversationId,
+      conversationId: extractionInput.conversationId,
       tripProjectId,
-      userMessage: saved.userMessage,
-      history: saved.history,
-      abortSignal,
+      userMessage: extractionInput.userMessage,
+      history: extractionInput.history,
     }).catch((error) => {
       console.warn("Chat context extraction skipped after failure", {
-        conversationId: saved?.conversationId,
-        userMessageId: saved?.userMessage.id,
+        conversationId: extractionInput.conversationId,
+        userMessageId: extractionInput.userMessage.id,
         error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
       });
-    });
+    }));
     const gatewayResult = await streamInitialAiAskAnswer({
       model: selectedModel.gatewayModelName,
       messages: finalGatewayMessages,
