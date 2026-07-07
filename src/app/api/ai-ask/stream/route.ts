@@ -6,6 +6,7 @@ import { conversations, messageImageAttachments, messages, tripProjects } from "
 import { streamInitialAiAskAnswer } from "@/features/ai/gateway";
 import { getAiGatewayPricingSnapshot, selectActiveAiGatewayModel } from "@/features/ai/models";
 import { aiAskInitialAnswerPromptVersion, aiAskInitialAnswerPurpose, buildAiAskMessages } from "@/features/ai/prompts";
+import { buildAnswerContextPromptSection, loadAnswerContext } from "@/features/chat-trips/answer-context";
 import { extractChatTripContext } from "@/features/chat-trips/context-extraction";
 import { writeAiUsageEvent } from "@/features/usage/events";
 import { getAuthenticatedSession, type AuthenticatedSession } from "@/server/auth";
@@ -185,7 +186,24 @@ async function streamAnswer({
     });
 
     const pricingSnapshot = getAiGatewayPricingSnapshot(selectedModel);
-    const gatewayMessages = buildAiAskMessages({ question, history: saved.history });
+    let contextSection = "";
+
+    try {
+      const answerContext = await loadAnswerContext({
+        userId: session.userId,
+        conversationId: saved.conversationId,
+        tripProjectId,
+      });
+      contextSection = buildAnswerContextPromptSection(answerContext);
+    } catch (error) {
+      console.warn("Answer context load skipped after failure", {
+        conversationId: saved.conversationId,
+        userMessageId: saved.userMessage.id,
+        error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
+      });
+    }
+
+    const gatewayMessages = buildAiAskMessages({ question, history: saved.history, contextSection });
     const finalGatewayMessages = imageDataUrl ? attachImageToFinalUserMessage(gatewayMessages, imageDataUrl) : gatewayMessages;
     const extractionInput = saved;
     after(() => extractChatTripContext({

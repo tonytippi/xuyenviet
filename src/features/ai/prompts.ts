@@ -1,5 +1,5 @@
 export const aiAskInitialAnswerPurpose = "ai_ask_initial_answer" as const;
-export const aiAskInitialAnswerPromptVersion = "ai_ask_initial_v3" as const;
+export const aiAskInitialAnswerPromptVersion = "ai_ask_initial_v4" as const;
 export const chatContextExtractionPurpose = "extraction" as const;
 export const chatContextExtractionPromptVersion = "chat_context_extraction_v1" as const;
 
@@ -34,13 +34,22 @@ export function buildInitialAiAskMessages(question: string) {
   return buildAiAskMessages({ question, history: [] });
 }
 
-export function buildAiAskMessages({ question, history }: { question: string; history: PromptHistoryMessage[] }) {
+export function buildAiAskMessages({
+  question,
+  history,
+  contextSection,
+}: {
+  question: string;
+  history: PromptHistoryMessage[];
+  contextSection?: string;
+}) {
   const recentHistory = selectRecentPromptHistory(history);
+  const systemContent = contextSection ? `${aiAskSystemPrompt}\n\n${contextSection}` : aiAskSystemPrompt;
 
   return [
     {
       role: "system" as const,
-      content: aiAskSystemPrompt,
+      content: systemContent,
     },
     ...recentHistory.map((message) => ({
       role: message.role,
