@@ -70,7 +70,7 @@ development_status:
   epic-2-retrospective: done
   epic-3: in-progress
   3-1-manage-chat-sessions: done
-  3-2-create-trip-projects: backlog
+  3-2-create-trip-projects: done
   3-3-extract-chat-and-trip-context: backlog
   3-4-use-chat-or-trip-context-in-answers: backlog
   3-5-correct-trip-details-through-chat: backlog

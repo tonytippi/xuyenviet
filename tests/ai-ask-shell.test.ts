@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { asc, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { aiGatewayModels, aiUsageEvents, conversations, messageImageAttachments, messages, users } from "@/db/schema";
+import { aiGatewayModels, aiUsageEvents, conversations, messageImageAttachments, messages, tripProjects, users } from "@/db/schema";
 
 import { testDb } from "./helpers/db";
 
@@ -140,6 +140,57 @@ describe("AI Ask authenticated shell", () => {
     const html = await renderAuthenticatedAiAskShell({ conversationId: conversation.id });
 
     expect(html).not.toContain("Tin nhắn riêng của user-2");
+    expect(html).toContain("Chưa có tin nhắn.");
+  });
+
+  test("renders only owned trip projects and selected project scope on the AI Ask page", async () => {
+    await createTestUser("user-1");
+    await createTestUser("user-2");
+    const [ownProject] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Đà Nẵng gia đình", origin: "Hà Nội", destination: "Đà Nẵng" }).returning({ id: tripProjects.id });
+    await testDb.insert(tripProjects).values({ userId: "user-2", title: "Dự án riêng user-2" });
+
+    const html = await renderAuthenticatedAiAskShell({ tripProjectId: ownProject.id });
+
+    expect(html).toContain("Phạm vi lập kế hoạch");
+    expect(html).toContain("Dự án: Đà Nẵng gia đình (Hà Nội → Đà Nẵng)");
+    expect(html).toContain("Tạo dự án chuyến đi mới");
+    expect(html).not.toContain("Dự án riêng user-2");
+  });
+
+  test("falls back to ordinary chat when opening another user's trip project", async () => {
+    await createTestUser("user-1");
+    await createTestUser("user-2");
+    const [otherProject] = await testDb.insert(tripProjects).values({ userId: "user-2", title: "Dự án riêng user-2" }).returning({ id: tripProjects.id });
+
+    const html = await renderAuthenticatedAiAskShell({ tripProjectId: otherProject.id });
+
+    expect(html).toContain("Trò chuyện thường");
+    expect(html).not.toContain("Dự án riêng user-2");
+  });
+
+  test("infers project scope when opening a linked project conversation", async () => {
+    await createTestUser("user-1");
+    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế", origin: "Hà Nội", destination: "Huế" }).returning({ id: tripProjects.id });
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id }).returning({ id: conversations.id });
+    await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "user", content: "Tin trong dự án Huế" });
+
+    const html = await renderAuthenticatedAiAskShell({ conversationId: conversation.id });
+
+    expect(html).toContain("Dự án: Huế (Hà Nội → Huế)");
+    expect(html).toContain("Tin trong dự án Huế");
+  });
+
+  test("does not render a conversation under a mismatched selected project", async () => {
+    await createTestUser("user-1");
+    const [projectA] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế" }).returning({ id: tripProjects.id });
+    const [projectB] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Đà Lạt" }).returning({ id: tripProjects.id });
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: projectA.id }).returning({ id: conversations.id });
+    await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "user", content: "Tin chỉ thuộc dự án Huế" });
+
+    const html = await renderAuthenticatedAiAskShell({ conversationId: conversation.id, tripProjectId: projectB.id });
+
+    expect(html).toContain("Dự án: Đà Lạt");
+    expect(html).not.toContain("Tin chỉ thuộc dự án Huế");
     expect(html).toContain("Chưa có tin nhắn.");
   });
 });
@@ -515,6 +566,112 @@ describe("AI Ask streaming route", () => {
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect(body).toContain('{"type":"error"');
+    expect(await countMessages()).toBe(1);
+    expect(await countUsageEvents()).toBe(0);
+  });
+
+  test("links a new conversation to the selected owned trip project", async () => {
+    await createTestUser("user-1");
+    await createDefaultAiAskModel({ supportsStreaming: true });
+    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế 5 ngày" }).returning({ id: tripProjects.id });
+    const fetchMock = vi.fn().mockResolvedValue(new Response([
+      'data: {"choices":[{"delta":{"content":"Nên chia chặng."}}]}\n\n',
+      'data: {"choices":[{"finish_reason":"stop"}]}\n\n',
+      "data: [DONE]\n\n",
+    ].join(""), { status: 200, headers: { "content-type": "text/event-stream" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
+    }));
+    const formData = new FormData();
+    formData.set("question", "Hà Nội đi Huế thế nào?");
+    formData.set("tripProjectId", project.id);
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    await response.text();
+    const savedConversations = await testDb.select().from(conversations);
+
+    expect(response.status).toBe(200);
+    expect(savedConversations).toHaveLength(1);
+    expect(savedConversations[0]).toMatchObject({ userId: "user-1", tripProjectId: project.id });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("rejects cross-user selected trip project before provider calls or messages", async () => {
+    await createTestUser("user-1");
+    await createTestUser("user-2");
+    await createDefaultAiAskModel({ supportsStreaming: true });
+    const [otherProject] = await testDb.insert(tripProjects).values({ userId: "user-2", title: "Riêng tư" }).returning({ id: tripProjects.id });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
+    }));
+    const formData = new FormData();
+    formData.set("question", "Cho tôi lập kế hoạch");
+    formData.set("tripProjectId", otherProject.id);
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+
+    expect(response.status).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(await countConversations()).toBe(0);
+    expect(await countMessages()).toBe(0);
+    expect(await countUsageEvents()).toBe(0);
+  });
+
+  test("rejects conversation and selected project mismatch before provider calls or new messages", async () => {
+    await createTestUser("user-1");
+    await createDefaultAiAskModel({ supportsStreaming: true });
+    const [projectA] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế" }).returning({ id: tripProjects.id });
+    const [projectB] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Đà Lạt" }).returning({ id: tripProjects.id });
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: projectA.id }).returning({ id: conversations.id });
+    await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "user", content: "Tin cũ" });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
+    }));
+    const formData = new FormData();
+    formData.set("question", "Hỏi tiếp");
+    formData.set("conversationId", conversation.id);
+    formData.set("tripProjectId", projectB.id);
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const body = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(body).toContain('{"type":"error"');
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(await countMessages()).toBe(1);
+    expect(await countUsageEvents()).toBe(0);
+  });
+
+  test("rejects continuing a project-linked conversation without project scope", async () => {
+    await createTestUser("user-1");
+    await createDefaultAiAskModel({ supportsStreaming: true });
+    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế" }).returning({ id: tripProjects.id });
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id }).returning({ id: conversations.id });
+    await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "user", content: "Tin cũ" });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
+    }));
+    const formData = new FormData();
+    formData.set("question", "Hỏi tiếp");
+    formData.set("conversationId", conversation.id);
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const body = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(body).toContain('{"type":"error"');
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(await countMessages()).toBe(1);
     expect(await countUsageEvents()).toBe(0);
   });

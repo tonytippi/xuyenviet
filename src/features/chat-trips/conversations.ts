@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, isNull } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
 import { conversations, messageImageAttachments, messages } from "@/db/schema";
@@ -23,7 +23,7 @@ export async function getOwnedConversation(conversationId: string) {
   }
 
   const [conversation] = await getDb()
-    .select({ id: conversations.id, userId: conversations.userId, createdAt: conversations.createdAt, updatedAt: conversations.updatedAt })
+    .select({ id: conversations.id, userId: conversations.userId, tripProjectId: conversations.tripProjectId, createdAt: conversations.createdAt, updatedAt: conversations.updatedAt })
     .from(conversations)
     .where(and(eq(conversations.id, conversationId), eq(conversations.userId, session.userId)))
     .limit(1);
@@ -87,7 +87,7 @@ export async function listOwnedConversations(): Promise<OwnedConversationSummary
         eq(messages.role, "user"),
       ),
     )
-    .where(eq(conversations.userId, session.userId))
+    .where(and(eq(conversations.userId, session.userId), isNull(conversations.tripProjectId)))
     .orderBy(desc(conversations.updatedAt), desc(conversations.id), asc(messages.createdAt), asc(messages.id));
 
   const seenConversationIds = new Set<string>();

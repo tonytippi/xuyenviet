@@ -1,7 +1,7 @@
 import { and, asc, eq } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { conversations, messageImageAttachments, messages } from "@/db/schema";
+import { conversations, messageImageAttachments, messages, tripProjects } from "@/db/schema";
 import { streamInitialAiAskAnswer } from "@/features/ai/gateway";
 import { getAiGatewayPricingSnapshot, selectActiveAiGatewayModel } from "@/features/ai/models";
 import { aiAskInitialAnswerPromptVersion, aiAskInitialAnswerPurpose, buildAiAskMessages } from "@/features/ai/prompts";
@@ -41,6 +41,7 @@ export async function POST(request: Request) {
 
   const question = String(formData.get("question") ?? "").trim();
   const conversationId = String(formData.get("conversationId") ?? "").trim() || undefined;
+  const tripProjectId = String(formData.get("tripProjectId") ?? "").trim() || undefined;
   const image = formData.get("image");
 
   if (!question || question.length > maxQuestionLength) {
@@ -64,6 +65,18 @@ export async function POST(request: Request) {
     return Response.json({ error: imageDataUrlResult.error }, { status: 400 });
   }
 
+  if (tripProjectId) {
+    const [project] = await getDb()
+      .select({ id: tripProjects.id })
+      .from(tripProjects)
+      .where(and(eq(tripProjects.id, tripProjectId), eq(tripProjects.userId, session.userId)))
+      .limit(1);
+
+    if (!project) {
+      return Response.json({ error: "Trip project not found or access denied." }, { status: 400 });
+    }
+  }
+
   const selectedModel = await selectActiveAiGatewayModel({
     purpose: aiAskInitialAnswerPurpose,
     requiredCapabilities: { textInput: true, streaming: true, imageInput: Boolean(imageFile) },
@@ -76,7 +89,7 @@ export async function POST(request: Request) {
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
-      void streamAnswer({ controller, encoder, abortSignal: request.signal, session, question, conversationId, imageFile, imageDataUrl: imageDataUrlResult.dataUrl, selectedModel });
+      void streamAnswer({ controller, encoder, abortSignal: request.signal, session, question, conversationId, tripProjectId, imageFile, imageDataUrl: imageDataUrlResult.dataUrl, selectedModel });
     },
   });
 
@@ -95,6 +108,7 @@ async function streamAnswer({
   session,
   question,
   conversationId,
+  tripProjectId,
   imageFile,
   imageDataUrl,
   selectedModel,
@@ -105,6 +119,7 @@ async function streamAnswer({
   session: { userId: string };
   question: string;
   conversationId?: string;
+  tripProjectId?: string;
   imageFile: File | null;
   imageDataUrl: string | null;
   selectedModel: NonNullable<Awaited<ReturnType<typeof selectActiveAiGatewayModel>>>;
@@ -120,15 +135,23 @@ async function streamAnswer({
     saved = await db.transaction(async (transaction) => {
       const [conversation] = conversationId
         ? await transaction
-            .select({ id: conversations.id })
+            .select({ id: conversations.id, tripProjectId: conversations.tripProjectId })
             .from(conversations)
             .where(and(eq(conversations.id, conversationId), eq(conversations.userId, session.userId)))
             .limit(1)
             .for("update")
-        : await transaction.insert(conversations).values({ userId: session.userId }).returning({ id: conversations.id });
+        : await transaction.insert(conversations).values({ userId: session.userId, tripProjectId }).returning({ id: conversations.id, tripProjectId: conversations.tripProjectId });
 
       if (!conversation) {
         throw new Error("Conversation not found or access denied.");
+      }
+
+      if (conversationId && tripProjectId && conversation.tripProjectId !== tripProjectId) {
+        throw new Error("Conversation does not belong to the selected trip project.");
+      }
+
+      if (conversationId && conversation.tripProjectId && !tripProjectId) {
+        throw new Error("Project-scoped conversation requires its trip project scope.");
       }
 
       const history = await transaction

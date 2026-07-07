@@ -161,6 +161,32 @@ export const referralAttributions = pgTable(
   ],
 );
 
+export const tripProjects = pgTable(
+  "trip_projects",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    origin: text("origin"),
+    destination: text("destination"),
+    startDate: text("start_date"),
+    endDate: text("end_date"),
+    travelers: text("travelers"),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (tripProject) => [
+    uniqueIndex("trip_projects_id_user_id_idx").on(tripProject.id, tripProject.userId),
+    index("trip_projects_user_id_updated_at_idx").on(tripProject.userId, tripProject.updatedAt),
+    check("trip_projects_title_not_empty_check", sql`length(btrim(${tripProject.title})) > 0`),
+  ],
+);
+
 export const conversations = pgTable(
   "conversations",
   {
@@ -170,11 +196,19 @@ export const conversations = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    tripProjectId: text("trip_project_id"),
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
   },
   (conversation) => [
+    foreignKey({
+      columns: [conversation.tripProjectId, conversation.userId],
+      foreignColumns: [tripProjects.id, tripProjects.userId],
+      name: "conversations_trip_project_owner_fk",
+    }).onDelete("set null"),
     uniqueIndex("conversations_id_user_id_idx").on(conversation.id, conversation.userId),
+    index("conversations_trip_project_id_idx").on(conversation.tripProjectId),
+    index("conversations_user_id_trip_project_updated_at_idx").on(conversation.userId, conversation.tripProjectId, conversation.updatedAt),
     index("conversations_user_id_updated_at_idx").on(conversation.userId, conversation.updatedAt),
     index("conversations_user_id_created_at_idx").on(conversation.userId, conversation.createdAt),
   ],
@@ -394,6 +428,7 @@ export const schema = {
   auditEvents,
   referralCodes,
   referralAttributions,
+  tripProjects,
   conversations,
   messages,
   messageImageAttachments,

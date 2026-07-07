@@ -22,10 +22,25 @@ type DisplayMessage = {
   }>;
 };
 
+type TripProjectSummary = {
+  id: string;
+  title: string;
+  origin: string | null;
+  destination: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  travelers: string | null;
+  notes: string | null;
+  updatedAt?: Date | string;
+};
+
 type AiAskComposerProps = {
   initialConversationId?: string;
   initialMessages?: DisplayMessage[];
   initialSessions?: ChatSessionSummary[];
+  initialTripProjects?: TripProjectSummary[];
+  selectedTripProject?: TripProjectSummary | null;
+  createTripProjectAction?: (formData: FormData) => void | Promise<void>;
 };
 
 function getUnansweredUserMessageIds(messages: DisplayMessage[]) {
@@ -108,10 +123,18 @@ export function AssistantMessageContent({ content }: { content: string }) {
   );
 }
 
-export function AiAskComposer({ initialConversationId, initialMessages = [], initialSessions = [] }: AiAskComposerProps) {
+export function AiAskComposer({
+  initialConversationId,
+  initialMessages = [],
+  initialSessions = [],
+  initialTripProjects = [],
+  selectedTripProject = null,
+  createTripProjectAction,
+}: AiAskComposerProps) {
   const router = useRouter();
+  const activeTripProjectId = selectedTripProject?.id;
   const [question, setQuestion] = useState("");
-  const [status, setStatus] = useState(initialMessages.length > 0 ? "Đã tải hội thoại. Bạn có thể tiếp tục kế hoạch." : "Nhập câu hỏi về chuyến đi đường bộ của bạn.");
+  const [status, setStatus] = useState(initialMessages.length > 0 ? "Đã tải hội thoại. Bạn có thể tiếp tục kế hoạch." : selectedTripProject ? `Bạn đang lập kế hoạch trong dự án “${selectedTripProject.title}”.` : "Nhập câu hỏi về chuyến đi đường bộ của bạn.");
   const [isPending, setIsPending] = useState(false);
   const [showProgress, setShowProgress] = useState(false);
   const [pendingQuestion, setPendingQuestion] = useState("");
@@ -274,7 +297,7 @@ export function AiAskComposer({ initialConversationId, initialMessages = [], ini
       const hadConversation = Boolean(conversationId || messages.length > 0);
       const controller = new AbortController();
       abortControllerRef.current = controller;
-      const result = await submitAiAskStream({ question: trimmedQuestion, conversationId, image: selectedImage, signal: controller.signal, onDelta: (content) => {
+      const result = await submitAiAskStream({ question: trimmedQuestion, conversationId, tripProjectId: activeTripProjectId, image: selectedImage, signal: controller.signal, onDelta: (content) => {
         if (activeRequestIdRef.current !== requestId) {
           return;
         }
@@ -379,7 +402,9 @@ export function AiAskComposer({ initialConversationId, initialMessages = [], ini
     }
 
     setSessionSheetOpen(false);
-    router.push(`/ai-ask?conversationId=${encodeURIComponent(id)}`);
+    const searchParams = new URLSearchParams({ conversationId: id });
+    if (activeTripProjectId) searchParams.set("tripProjectId", activeTripProjectId);
+    router.push(`/ai-ask?${searchParams.toString()}`);
   }
 
   function handleNewChat() {
@@ -392,13 +417,22 @@ export function AiAskComposer({ initialConversationId, initialMessages = [], ini
     setMessages([]);
     setConversationId(undefined);
     setQuestion("");
-    setStatus("Nhập câu hỏi về chuyến đi đường bộ của bạn.");
+    setStatus(selectedTripProject ? `Cuộc trò chuyện mới sẽ nằm trong dự án “${selectedTripProject.title}”.` : "Nhập câu hỏi về chuyến đi đường bộ của bạn.");
     setFailedQuestionIds([]);
     setSelectedImage(null);
     if (imageInputRef.current) {
       imageInputRef.current.value = "";
     }
-    router.push("/ai-ask");
+    router.push(activeTripProjectId ? `/ai-ask?tripProjectId=${encodeURIComponent(activeTripProjectId)}` : "/ai-ask");
+  }
+
+  function handleSelectTripProject(projectId: string) {
+    if (isPending) {
+      setStatus("Vui lòng chờ câu trả lời hiện tại hoàn tất trước khi đổi dự án chuyến đi.");
+      return;
+    }
+
+    router.push(projectId ? `/ai-ask?tripProjectId=${encodeURIComponent(projectId)}` : "/ai-ask");
   }
 
   return (
@@ -414,6 +448,55 @@ export function AiAskComposer({ initialConversationId, initialMessages = [], ini
       </nav>
 
       <div className="flex min-h-[34rem] flex-col justify-between gap-5 rounded-[1.5rem] border border-[#d8c9ad] bg-[#fffdf8]/80 p-4 sm:p-5">
+        <section className="rounded-[1.25rem] border border-[#d8c9ad] bg-white/75 p-4 text-left">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#8c4f13]">Phạm vi lập kế hoạch</p>
+              <h2 className="mt-1 text-lg font-semibold text-[#17342c]">
+                {selectedTripProject ? `Dự án: ${formatTripProjectLabel(selectedTripProject)}` : "Trò chuyện thường"}
+              </h2>
+              <p className="mt-2 text-sm leading-6 text-[#4f625a]">
+                {selectedTripProject
+                  ? "Tin nhắn mới sẽ được gắn với dự án chuyến đi này. Ngữ cảnh bền vững sẽ được dùng ở các story sau."
+                  : "Bạn đang hỏi trong hội thoại thường. Chọn hoặc tạo dự án nếu muốn gom kế hoạch cho một chuyến cụ thể."}
+              </p>
+            </div>
+            <label className="flex min-w-56 flex-col gap-2 text-sm font-semibold text-[#17342c]">
+              Chọn dự án
+              <select
+                className="min-h-11 rounded-2xl border border-[#d8c9ad] bg-[#fffdf8] px-3 py-2 text-sm text-[#17342c] outline-none focus:border-[#1f5f46] focus:ring-4 focus:ring-[#8fb59f]/45"
+                disabled={isPending}
+                onChange={(event) => handleSelectTripProject(event.target.value)}
+                value={activeTripProjectId ?? ""}
+              >
+                <option value="">Trò chuyện thường</option>
+                {initialTripProjects.map((project) => (
+                  <option key={project.id} value={project.id}>{formatTripProjectLabel(project)}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          {createTripProjectAction ? (
+            <details className="mt-4 rounded-2xl border border-dashed border-[#d8c9ad] bg-[#fffdf8] p-3">
+              <summary className="cursor-pointer text-sm font-semibold text-[#17342c]">Tạo dự án chuyến đi mới</summary>
+              <form action={createTripProjectAction} className="mt-3 grid gap-3 sm:grid-cols-2">
+                <label className="sm:col-span-2 text-sm font-semibold text-[#17342c]">
+                  Tên dự án <span className="text-[#8c4f13]">*</span>
+                  <input className="mt-1 min-h-11 w-full rounded-xl border border-[#d8c9ad] bg-white px-3 py-2 text-sm" disabled={isPending} maxLength={160} name="title" required placeholder="Ví dụ: Đà Nẵng 7 ngày cùng gia đình" />
+                </label>
+                <label className="text-sm font-semibold text-[#17342c]">Điểm đi<input className="mt-1 min-h-11 w-full rounded-xl border border-[#d8c9ad] bg-white px-3 py-2 text-sm" disabled={isPending} name="origin" placeholder="Hà Nội" /></label>
+                <label className="text-sm font-semibold text-[#17342c]">Điểm đến<input className="mt-1 min-h-11 w-full rounded-xl border border-[#d8c9ad] bg-white px-3 py-2 text-sm" disabled={isPending} name="destination" placeholder="Đà Nẵng" /></label>
+                <label className="text-sm font-semibold text-[#17342c]">Ngày đi<input className="mt-1 min-h-11 w-full rounded-xl border border-[#d8c9ad] bg-white px-3 py-2 text-sm" disabled={isPending} name="startDate" placeholder="2026-08-01" /></label>
+                <label className="text-sm font-semibold text-[#17342c]">Ngày về<input className="mt-1 min-h-11 w-full rounded-xl border border-[#d8c9ad] bg-white px-3 py-2 text-sm" disabled={isPending} name="endDate" placeholder="2026-08-07" /></label>
+                <label className="sm:col-span-2 text-sm font-semibold text-[#17342c]">Người đi<input className="mt-1 min-h-11 w-full rounded-xl border border-[#d8c9ad] bg-white px-3 py-2 text-sm" disabled={isPending} name="travelers" placeholder="2 người lớn, 1 trẻ em" /></label>
+                <label className="sm:col-span-2 text-sm font-semibold text-[#17342c]">Ghi chú<textarea className="mt-1 min-h-20 w-full rounded-xl border border-[#d8c9ad] bg-white px-3 py-2 text-sm" disabled={isPending} name="notes" placeholder="Sở thích, nhịp di chuyển, điều cần tránh..." /></label>
+                <button className="min-h-11 rounded-2xl bg-[#e5bd82] px-4 py-2 text-sm font-semibold text-[#17342c] transition hover:bg-[#d9a65c] focus:outline-none focus:ring-4 focus:ring-[#e5bd82] disabled:cursor-not-allowed disabled:opacity-60" disabled={isPending} type="submit">Tạo và chọn dự án</button>
+              </form>
+            </details>
+          ) : null}
+        </section>
+
         <div className="flex items-center justify-between gap-3 lg:hidden">
           <button
             ref={sessionSheetTriggerRef}
@@ -593,12 +676,14 @@ type StreamResult = {
 async function submitAiAskStream({
   question,
   conversationId,
+  tripProjectId,
   image,
   signal,
   onDelta,
 }: {
   question: string;
   conversationId?: string;
+  tripProjectId?: string;
   image: File | null;
   signal?: AbortSignal;
   onDelta: (content: string) => void;
@@ -607,6 +692,7 @@ async function submitAiAskStream({
 
   formData.set("question", question);
   if (conversationId) formData.set("conversationId", conversationId);
+  if (tripProjectId) formData.set("tripProjectId", tripProjectId);
   if (image) formData.set("image", image);
 
   const response = await fetch("/api/ai-ask/stream", { method: "POST", body: formData, signal });
@@ -716,4 +802,10 @@ function formatPreviewText(content: string): string {
   }
 
   return `${trimmed.slice(0, previewMaxLength).trimEnd()}…`;
+}
+
+function formatTripProjectLabel(project: Pick<TripProjectSummary, "title" | "origin" | "destination">) {
+  const route = [project.origin, project.destination].filter(Boolean).join(" → ");
+
+  return route ? `${project.title} (${route})` : project.title;
 }

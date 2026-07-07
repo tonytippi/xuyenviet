@@ -3,12 +3,15 @@ import { redirect } from "next/navigation";
 import { AiAskComposer } from "@/features/ai/ai-ask-composer";
 import { signOutCurrentUser } from "@/features/auth/actions";
 import { getOwnedConversation, listOwnedConversations } from "@/features/chat-trips/conversations";
+import { createTripProjectFromForm } from "@/features/chat-trips/actions";
+import { getOwnedTripProjectSummary, listOwnedTripProjects } from "@/features/chat-trips/trip-projects";
 import { getAuthenticatedSession } from "@/server/auth";
 
 type AiAskPageProps = {
   searchParams?: Promise<{
     ref?: string | string[];
     conversationId?: string | string[];
+    tripProjectId?: string | string[];
   }>;
 };
 
@@ -30,6 +33,7 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
   const params = await searchParams;
   const referralCode = getFirstParam(params?.ref);
   const requestedConversationId = getFirstParam(params?.conversationId)?.trim();
+  const requestedTripProjectId = getFirstParam(params?.tripProjectId)?.trim();
   const session = await getAuthenticatedSession();
 
   if (!session) {
@@ -42,8 +46,23 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
     redirect(`/sign-in?${signInParams.toString()}`);
   }
 
-  const loadedConversation = requestedConversationId ? await getOwnedConversation(requestedConversationId) : null;
-  const initialSessions = (await listOwnedConversations()) ?? [];
+  let loadedConversation = requestedConversationId ? await getOwnedConversation(requestedConversationId) : null;
+  let selectedTripProject = requestedTripProjectId ? await getOwnedTripProjectSummary(requestedTripProjectId) : null;
+
+  if (loadedConversation?.tripProjectId) {
+    if (selectedTripProject && selectedTripProject.id !== loadedConversation.tripProjectId) {
+      loadedConversation = null;
+    } else if (!selectedTripProject) {
+      selectedTripProject = await getOwnedTripProjectSummary(loadedConversation.tripProjectId);
+    }
+  }
+
+  if (loadedConversation && selectedTripProject && loadedConversation.tripProjectId !== selectedTripProject.id) {
+    loadedConversation = null;
+  }
+
+  const initialTripProjects = (await listOwnedTripProjects()) ?? [];
+  const initialSessions = selectedTripProject ? selectedTripProject.relatedChats : (await listOwnedConversations()) ?? [];
 
   return (
     <main className="min-h-screen px-5 py-6 sm:px-8 lg:px-12">
@@ -82,6 +101,18 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
               })),
             }))}
             initialSessions={initialSessions}
+            initialTripProjects={initialTripProjects}
+            selectedTripProject={selectedTripProject ? {
+              id: selectedTripProject.id,
+              title: selectedTripProject.title,
+              origin: selectedTripProject.origin,
+              destination: selectedTripProject.destination,
+              startDate: selectedTripProject.startDate,
+              endDate: selectedTripProject.endDate,
+              travelers: selectedTripProject.travelers,
+              notes: selectedTripProject.notes,
+            } : null}
+            createTripProjectAction={createTripProjectFromForm}
           />
 
           <aside className="flex flex-col gap-4">
