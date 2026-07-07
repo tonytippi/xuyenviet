@@ -12,6 +12,11 @@ type DisplayMessage = {
   content: string;
 };
 
+type AiAskComposerProps = {
+  initialConversationId?: string;
+  initialMessages?: DisplayMessage[];
+};
+
 const assistantSectionHeadings = new Set([
   "Kế hoạch gợi ý",
   "Vì sao nên đi như vậy",
@@ -77,11 +82,12 @@ export function AssistantMessageContent({ content }: { content: string }) {
   );
 }
 
-export function AiAskComposer() {
+export function AiAskComposer({ initialConversationId, initialMessages = [] }: AiAskComposerProps) {
   const [question, setQuestion] = useState("");
-  const [status, setStatus] = useState("Nhập câu hỏi về chuyến đi đường bộ của bạn.");
+  const [status, setStatus] = useState(initialMessages.length > 0 ? "Đã tải hội thoại. Bạn có thể tiếp tục kế hoạch." : "Nhập câu hỏi về chuyến đi đường bộ của bạn.");
   const [isPending, setIsPending] = useState(false);
-  const [messages, setMessages] = useState<DisplayMessage[]>([]);
+  const [messages, setMessages] = useState<DisplayMessage[]>(initialMessages);
+  const [conversationId, setConversationId] = useState(initialConversationId);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const isSubmittingRef = useRef(false);
@@ -127,20 +133,27 @@ export function AiAskComposer() {
     setStatus("Đang kiểm tra câu hỏi...");
 
     try {
-      const result = await submitAiAsk({ question: trimmedQuestion });
+      const hadConversation = Boolean(conversationId || messages.length > 0);
+      const result = await submitAiAsk({ question: trimmedQuestion, conversationId });
 
       if (result.status === "answer-failed") {
-        setMessages([]);
+        setConversationId(result.conversationId);
+        setMessages((currentMessages) => [
+          ...currentMessages,
+          { id: result.userMessage.id, role: "user", content: result.userMessage.content },
+        ]);
         setStatus(result.errorMessage);
         return;
       }
 
-      setMessages([
+      setConversationId(result.conversationId);
+      setMessages((currentMessages) => [
+        ...currentMessages,
         { id: result.userMessage.id, role: "user", content: result.userMessage.content },
         { id: result.assistantMessage.id, role: "assistant", content: result.assistantMessage.content },
       ]);
       setQuestion("");
-      setStatus("Đã tạo câu trả lời đầu tiên cho chuyến đi của bạn.");
+      setStatus(hadConversation ? "Đã cập nhật hội thoại của bạn." : "Đã tạo câu trả lời đầu tiên cho chuyến đi của bạn.");
     } catch {
       setStatus("Không thể gửi câu hỏi lúc này. Hãy kiểm tra đăng nhập và thử lại.");
     } finally {
@@ -159,7 +172,7 @@ export function AiAskComposer() {
   return (
     <div className="space-y-4">
       {messages.length > 0 ? (
-        <section aria-label="Tin nhắn vừa tạo" aria-live="polite" className="mx-auto max-w-[760px] space-y-4">
+        <section aria-label="Lịch sử hội thoại" aria-live="polite" className="mx-auto max-w-[760px] space-y-4">
           {messages.map((message) => (
             <article
               className={

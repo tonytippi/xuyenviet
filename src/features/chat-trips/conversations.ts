@@ -26,7 +26,7 @@ export async function getOwnedConversation(conversationId: string) {
   const conversationMessages = await getDb()
     .select({ id: messages.id, role: messages.role, content: messages.content, createdAt: messages.createdAt })
     .from(messages)
-    .where(eq(messages.conversationId, conversation.id))
+    .where(and(eq(messages.conversationId, conversation.id), eq(messages.userId, session.userId)))
     .orderBy(asc(messages.createdAt), asc(messages.id));
 
   return { ...conversation, messages: conversationMessages };

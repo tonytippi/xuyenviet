@@ -2,20 +2,24 @@
 
 import "server-only";
 
+import { and, asc, eq } from "drizzle-orm";
+
 import { getDb } from "@/db/client";
 import { conversations, messages } from "@/db/schema";
 import { runAuthenticatedMutation } from "@/server/mutations";
 import { writeAiUsageEvent } from "@/features/usage/events";
 
 import { generateInitialAiAskAnswer } from "./gateway";
-import { aiAskInitialAnswerModel, aiAskInitialAnswerPromptVersion, aiAskInitialAnswerPurpose, buildInitialAiAskMessages } from "./prompts";
+import { aiAskInitialAnswerModel, aiAskInitialAnswerPromptVersion, aiAskInitialAnswerPurpose, buildAiAskMessages } from "./prompts";
 
 export type AiAskSubmission = {
   question: string;
+  conversationId?: string;
 };
 
 type ReturnedMessage = {
   id: string;
+  role?: "user" | "assistant";
   content: string;
 };
 
@@ -42,10 +46,24 @@ export async function submitAiAsk(input: AiAskSubmission): Promise<AiAskSubmissi
 
       const db = getDb();
       const saved = await db.transaction(async (transaction) => {
-        const [conversation] = await transaction
-          .insert(conversations)
-          .values({ userId: session.userId })
-          .returning({ id: conversations.id });
+        const requestedConversationId = typeof input?.conversationId === "string" ? input.conversationId.trim() : "";
+        const [conversation] = requestedConversationId
+          ? await transaction
+              .select({ id: conversations.id })
+              .from(conversations)
+              .where(and(eq(conversations.id, requestedConversationId), eq(conversations.userId, session.userId)))
+              .limit(1)
+          : await transaction.insert(conversations).values({ userId: session.userId }).returning({ id: conversations.id });
+
+        if (!conversation) {
+          throw new Error("Conversation not found or access denied.");
+        }
+
+        const history = await transaction
+          .select({ role: messages.role, content: messages.content })
+          .from(messages)
+          .where(and(eq(messages.conversationId, conversation.id), eq(messages.userId, session.userId)))
+          .orderBy(asc(messages.createdAt), asc(messages.id));
 
         const [message] = await transaction
           .insert(messages)
@@ -57,8 +75,11 @@ export async function submitAiAsk(input: AiAskSubmission): Promise<AiAskSubmissi
           })
           .returning({ id: messages.id });
 
+        await transaction.update(conversations).set({ updatedAt: new Date() }).where(eq(conversations.id, conversation.id));
+
         return {
           conversationId: conversation.id,
+          history,
           userMessage: {
             id: message.id,
             content: question,
@@ -66,7 +87,7 @@ export async function submitAiAsk(input: AiAskSubmission): Promise<AiAskSubmissi
         };
       });
 
-      const gatewayResult = await generateInitialAiAskAnswer(buildInitialAiAskMessages(question));
+      const gatewayResult = await generateInitialAiAskAnswer(buildAiAskMessages({ question, history: saved.history }));
 
       if (!gatewayResult.ok) {
         await writeAiUsageEvent(db, {
@@ -100,6 +121,8 @@ export async function submitAiAsk(input: AiAskSubmission): Promise<AiAskSubmissi
             content: gatewayResult.content,
           })
           .returning({ id: messages.id });
+
+        await transaction.update(conversations).set({ updatedAt: new Date() }).where(eq(conversations.id, saved.conversationId));
 
         await writeAiUsageEvent(transaction, {
           userId: session.userId,

@@ -63,7 +63,7 @@ development_status:
   2-2-create-conversation-and-send-first-message: done
   2-3-generate-vietnamese-initial-ai-answer: done
   2-4-structured-road-trip-answer-format: done
-  2-5-continue-conversation-with-context: backlog
+  2-5-continue-conversation-with-context: done
   2-6-basic-chat-responsiveness-and-failure-states: backlog
   epic-2-retrospective: optional
   epic-3: backlog

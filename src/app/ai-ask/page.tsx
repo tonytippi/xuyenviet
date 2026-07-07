@@ -2,11 +2,13 @@ import { redirect } from "next/navigation";
 
 import { AiAskComposer } from "@/features/ai/ai-ask-composer";
 import { signOutCurrentUser } from "@/features/auth/actions";
+import { getOwnedConversation } from "@/features/chat-trips/conversations";
 import { getAuthenticatedSession } from "@/server/auth";
 
 type AiAskPageProps = {
   searchParams?: Promise<{
     ref?: string | string[];
+    conversationId?: string | string[];
   }>;
 };
 
@@ -27,6 +29,7 @@ const examplePrompts = [
 export default async function AiAskPage({ searchParams }: AiAskPageProps) {
   const params = await searchParams;
   const referralCode = getFirstParam(params?.ref);
+  const requestedConversationId = getFirstParam(params?.conversationId)?.trim();
   const session = await getAuthenticatedSession();
 
   if (!session) {
@@ -38,6 +41,8 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
 
     redirect(`/sign-in?${signInParams.toString()}`);
   }
+
+  const loadedConversation = requestedConversationId ? await getOwnedConversation(requestedConversationId) : null;
 
   return (
     <main className="min-h-screen px-5 py-6 sm:px-8 lg:px-12">
@@ -68,15 +73,25 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
               </p>
               <h2 className="text-3xl font-semibold tracking-[-0.03em] text-[#17342c] sm:text-4xl">Bạn đang muốn đi đâu?</h2>
               <p className="text-base leading-7 text-[#4f625a] sm:text-lg">
-                Ví dụ: Hà Nội đi Đà Nẵng 7 ngày cùng gia đình. Hãy hỏi rộng trước; những bước sau sẽ nối lưu hội thoại và câu trả lời AI.
+                Ví dụ: Hà Nội đi Đà Nẵng 7 ngày cùng gia đình. Hãy hỏi rộng trước; hội thoại hiện tại sẽ được nối tiếp để bạn tinh chỉnh kế hoạch.
               </p>
-              <div className="rounded-2xl border border-dashed border-[#d8c9ad] bg-white/65 p-5 text-left" aria-label="Khu vực tin nhắn đang chờ câu hỏi đầu tiên">
+              <div className="rounded-2xl border border-dashed border-[#d8c9ad] bg-white/65 p-5 text-left" aria-label={loadedConversation ? "Khu vực tin nhắn đã tải" : "Khu vực tin nhắn đang chờ câu hỏi đầu tiên"}>
                 <p className="text-sm font-semibold text-[#17342c]">Khu vực hội thoại</p>
-                <p className="mt-2 text-sm leading-6 text-[#5d6f67]">Chưa có tin nhắn. Câu trả lời thật và nguồn tham chiếu sẽ xuất hiện ở các story sau, không hiển thị dữ liệu giả ở bước này.</p>
+                <p className="mt-2 text-sm leading-6 text-[#5d6f67]">
+                  {loadedConversation ? "Tin nhắn đã lưu được tải theo thứ tự thời gian. Bạn có thể tiếp tục hỏi trong cùng hội thoại." : "Chưa có tin nhắn. Câu trả lời thật và nguồn tham chiếu sẽ xuất hiện ở các story sau, không hiển thị dữ liệu giả ở bước này."}
+                </p>
               </div>
             </div>
 
-            <AiAskComposer />
+            <AiAskComposer
+              key={loadedConversation?.id || "new-conversation"}
+              initialConversationId={loadedConversation?.id}
+              initialMessages={loadedConversation?.messages.map((message) => ({
+                id: message.id,
+                role: message.role,
+                content: message.content,
+              }))}
+            />
           </div>
 
           <aside className="flex flex-col gap-4">
