@@ -10,7 +10,8 @@ import { runAuthenticatedMutation } from "@/server/mutations";
 import { writeAiUsageEvent } from "@/features/usage/events";
 
 import { generateInitialAiAskAnswer } from "./gateway";
-import { aiAskInitialAnswerModel, aiAskInitialAnswerPromptVersion, aiAskInitialAnswerPurpose, buildAiAskMessages } from "./prompts";
+import { getAiGatewayPricingSnapshot, selectActiveAiGatewayModel } from "./models";
+import { aiAskInitialAnswerPromptVersion, aiAskInitialAnswerPurpose, buildAiAskMessages } from "./prompts";
 
 export type AiAskSubmission = {
   question: string;
@@ -87,7 +88,38 @@ export async function submitAiAsk(input: AiAskSubmission): Promise<AiAskSubmissi
         };
       });
 
-      const gatewayResult = await generateInitialAiAskAnswer(buildAiAskMessages({ question, history: saved.history }));
+      const selectedModel = await selectActiveAiGatewayModel({
+        purpose: aiAskInitialAnswerPurpose,
+        requiredCapabilities: { textInput: true },
+      });
+
+      if (!selectedModel) {
+        await writeAiUsageEvent(db, {
+          userId: session.userId,
+          conversationId: saved.conversationId,
+          userMessageId: saved.userMessage.id,
+          purpose: aiAskInitialAnswerPurpose,
+          provider: "ai_gateway",
+          model: "unconfigured",
+          promptVersion: aiAskInitialAnswerPromptVersion,
+          status: "failure",
+          latencyMs: 0,
+          errorCode: "no_active_ai_gateway_model",
+        });
+
+        return {
+          status: "answer-failed",
+          conversationId: saved.conversationId,
+          userMessage: saved.userMessage,
+          errorMessage: "Mình chưa tạo được câu trả lời lúc này. Nội dung của bạn vẫn còn trong ô nhập để gửi lại.",
+        };
+      }
+
+      const pricingSnapshot = getAiGatewayPricingSnapshot(selectedModel);
+      const gatewayResult = await generateInitialAiAskAnswer({
+        model: selectedModel.gatewayModelName,
+        messages: buildAiAskMessages({ question, history: saved.history }),
+      });
 
       if (!gatewayResult.ok) {
         await writeAiUsageEvent(db, {
@@ -97,9 +129,11 @@ export async function submitAiAsk(input: AiAskSubmission): Promise<AiAskSubmissi
           purpose: aiAskInitialAnswerPurpose,
           provider: gatewayResult.provider,
           model: gatewayResult.model,
+          aiGatewayModelId: selectedModel.id,
           promptVersion: aiAskInitialAnswerPromptVersion,
           status: "failure",
           latencyMs: gatewayResult.latencyMs,
+          pricingSnapshot,
           errorCode: gatewayResult.errorCode,
         });
 
@@ -131,13 +165,16 @@ export async function submitAiAsk(input: AiAskSubmission): Promise<AiAskSubmissi
           assistantMessageId: assistantMessage.id,
           purpose: aiAskInitialAnswerPurpose,
           provider: gatewayResult.provider,
-          model: gatewayResult.model || aiAskInitialAnswerModel,
+          model: gatewayResult.model,
+          aiGatewayModelId: selectedModel.id,
           promptVersion: aiAskInitialAnswerPromptVersion,
           status: "success",
           latencyMs: gatewayResult.latencyMs,
           promptTokens: gatewayResult.usage.promptTokens,
           completionTokens: gatewayResult.usage.completionTokens,
           totalTokens: gatewayResult.usage.totalTokens,
+          cachedPromptTokens: gatewayResult.usage.cachedPromptTokens,
+          pricingSnapshot,
         });
 
         return {

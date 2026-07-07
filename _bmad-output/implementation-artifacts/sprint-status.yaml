@@ -88,8 +88,8 @@ development_status:
   4-8-make-approved-knowledge-searchable-by-ai: backlog
   4-9-track-100-approved-corridor-items: backlog
   epic-4-retrospective: optional
-  epic-5: backlog
-  5-0-manage-ai-gateway-models-and-pricing: backlog
+  epic-5: in-progress
+  5-0-manage-ai-gateway-models-and-pricing: done
   5-1-retrieve-approved-knowledge-for-ai-ask: backlog
   5-2-assemble-context-priority-source-bundle: backlog
   5-3-web-search-fallback-trigger: backlog

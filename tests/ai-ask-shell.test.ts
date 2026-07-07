@@ -4,13 +4,39 @@ import { readFileSync } from "node:fs";
 import { asc, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { aiUsageEvents, conversations, messages, users } from "@/db/schema";
-import { aiAskInitialAnswerModel } from "@/features/ai/prompts";
+import { aiGatewayModels, aiUsageEvents, conversations, messages, users } from "@/db/schema";
 
 import { testDb } from "./helpers/db";
 
 async function createTestUser(userId: string) {
   await testDb.insert(users).values({ id: userId, email: `${userId}@example.com` });
+}
+
+async function createDefaultAiAskModel(values: Partial<typeof aiGatewayModels.$inferInsert> = {}) {
+  await testDb.insert(aiGatewayModels).values({
+    id: values.id ?? `model-${crypto.randomUUID()}`,
+    gatewayModelName: values.gatewayModelName ?? "cx/gpt-5.5-test",
+    displayLabel: values.displayLabel ?? "Test AI Ask model",
+    purpose: "ai_ask_initial_answer",
+    active: values.active ?? true,
+    defaultForPurpose: values.defaultForPurpose ?? true,
+    supportsTextInput: values.supportsTextInput ?? true,
+    supportsImageInput: values.supportsImageInput ?? false,
+    supportsImageOutput: values.supportsImageOutput ?? false,
+    supportsEmbeddings: values.supportsEmbeddings ?? false,
+    supportsExtraction: values.supportsExtraction ?? false,
+    supportsEvaluation: values.supportsEvaluation ?? false,
+    supportsStreaming: values.supportsStreaming ?? false,
+    supportsCachePricing: values.supportsCachePricing ?? false,
+    pricingCurrency: values.pricingCurrency ?? "USD",
+    inputTokenPriceMicros: values.inputTokenPriceMicros ?? 2_000_000,
+    outputTokenPriceMicros: values.outputTokenPriceMicros ?? 4_000_000,
+    cacheReadTokenPriceMicros: values.cacheReadTokenPriceMicros ?? null,
+    cacheWriteTokenPriceMicros: values.cacheWriteTokenPriceMicros ?? null,
+    pricingUnitTokens: values.pricingUnitTokens ?? 1_000_000,
+    pricingVersion: values.pricingVersion ?? "test-pricing-v1",
+    pricingEffectiveAt: values.pricingEffectiveAt ?? new Date("2026-07-07T00:00:00.000Z"),
+  });
 }
 
 async function countConversations() {
@@ -50,6 +76,7 @@ describe("AI Ask authenticated shell", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
+    delete process.env.AI_GATEWAY_TIMEOUT_MS;
   });
 
   test("renders the visible Story 2.1 shell contract", async () => {
@@ -256,6 +283,7 @@ describe("AI Ask action gate", () => {
 
   test("creates an owned conversation, first user message, assistant answer, and successful usage event", async () => {
     await createTestUser("user-1");
+    await createDefaultAiAskModel({ id: "ai-ask-model-1", gatewayModelName: "cx/gpt-5.5-test" });
     const assistantContent = [
       "Kế hoạch gợi ý:",
       "Bạn có thể đi theo trục Hà Nội - Huế trong 5 ngày và nên chừa thời gian nghỉ giữa chặng.",
@@ -281,6 +309,9 @@ describe("AI Ask action gate", () => {
             prompt_tokens: 100,
             completion_tokens: 80,
             total_tokens: 180,
+            prompt_tokens_details: {
+              cached_tokens: 25,
+            },
           },
         }),
         { status: 200, headers: { "content-type": "application/json" } },
@@ -331,16 +362,25 @@ describe("AI Ask action gate", () => {
       purpose: "ai_ask_initial_answer",
       provider: "ai_gateway",
       model: "test-model",
+      aiGatewayModelId: "ai-ask-model-1",
       promptVersion: "ai_ask_initial_v3",
       status: "success",
       errorCode: null,
       promptTokens: 100,
       completionTokens: 80,
       totalTokens: 180,
+      cachedPromptTokens: 25,
+      estimatedInputCostMicros: 150,
+      estimatedOutputCostMicros: 320,
+      estimatedTotalCostMicros: 470,
+      pricingCurrency: "USD",
+      pricingUnitTokens: 1_000_000,
+      pricingVersion: "test-pricing-v1",
     });
     expect(savedUsageEvents[0].latencyMs).toBeGreaterThanOrEqual(0);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0][0]).toBe("https://test-gateway.example/chat/completions");
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1].body))).toMatchObject({ model: "cx/gpt-5.5-test" });
     const requestJson = JSON.stringify(fetchMock.mock.calls[0][1]);
     expect(requestJson).toContain("Tiếng Việt");
     expect(requestJson).toContain("Kế hoạch gợi ý");
@@ -360,6 +400,7 @@ describe("AI Ask action gate", () => {
 
   test("continues an owned conversation with prior messages in the gateway prompt", async () => {
     await createTestUser("user-1");
+    await createDefaultAiAskModel();
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(
         new Response(
@@ -446,6 +487,7 @@ describe("AI Ask action gate", () => {
 
   test("keeps follow-up user message, records failed usage, and creates no assistant message when continuation provider fails", async () => {
     await createTestUser("user-1");
+    await createDefaultAiAskModel();
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
     const fetchMock = vi.fn()
@@ -496,6 +538,7 @@ describe("AI Ask action gate", () => {
 
   test("keeps the user message, records failed usage, and creates no assistant message when provider fails", async () => {
     await createTestUser("user-1");
+    await createDefaultAiAskModel({ id: "ai-ask-failure-model", gatewayModelName: "cx/gpt-5.5-failure" });
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status: 500 })));
@@ -525,14 +568,15 @@ describe("AI Ask action gate", () => {
       assistantMessageId: null,
       purpose: "ai_ask_initial_answer",
       provider: "ai_gateway",
-      model: aiAskInitialAnswerModel,
+      model: "cx/gpt-5.5-failure",
+      aiGatewayModelId: "ai-ask-failure-model",
       promptVersion: "ai_ask_initial_v3",
       status: "failure",
       errorCode: "gateway_http_error",
     });
     expect(warnSpy).toHaveBeenCalledWith("AI Gateway answer generation failed", expect.objectContaining({
       errorCode: "gateway_http_error",
-      model: aiAskInitialAnswerModel,
+      model: "cx/gpt-5.5-failure",
       status: 500,
       timeoutMs: 30_000,
     }));
@@ -540,6 +584,7 @@ describe("AI Ask action gate", () => {
 
   test("uses configured AI Gateway timeout for slow model debugging", async () => {
     await createTestUser("user-1");
+    await createDefaultAiAskModel();
     process.env.AI_GATEWAY_TIMEOUT_MS = "45000";
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
@@ -561,6 +606,7 @@ describe("AI Ask action gate", () => {
 
   test("records invalid gateway responses without creating assistant messages", async () => {
     await createTestUser("user-1");
+    await createDefaultAiAskModel();
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("not-json", { status: 200 })));
@@ -585,6 +631,7 @@ describe("AI Ask action gate", () => {
 
   test("logs network and environment gateway failures without request bodies or secrets", async () => {
     await createTestUser("user-1");
+    await createDefaultAiAskModel();
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("connect ECONNREFUSED 127.0.0.1:443")));
@@ -608,6 +655,7 @@ describe("AI Ask action gate", () => {
 
   test("sends bounded gateway requests", async () => {
     await createTestUser("user-1");
+    await createDefaultAiAskModel();
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -650,6 +698,7 @@ describe("AI Ask action gate", () => {
   test("returns owned conversations only", async () => {
     await createTestUser("user-1");
     await createTestUser("user-2");
+    await createDefaultAiAskModel();
     const getAuthenticatedSession = vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" });
     vi.doMock("@/server/auth", () => ({
       getAuthenticatedSession,
@@ -685,5 +734,31 @@ describe("AI Ask action gate", () => {
     });
     getAuthenticatedSession.mockResolvedValue({ userId: "user-2", email: "user-2@example.com" });
     await expect(getOwnedConversation(result.conversationId)).resolves.toBeNull();
+  });
+
+  test("records no-model failure without calling the gateway", async () => {
+    await createTestUser("user-1");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
+    }));
+    const { submitAiAsk } = await import("@/features/ai/ask-gate");
+
+    const result = await submitAiAsk({ question: "Hà Nội đi Huế?" });
+    const savedMessages = await testDb.select().from(messages).where(eq(messages.conversationId, result.conversationId));
+    const savedUsageEvents = await testDb.select().from(aiUsageEvents).where(eq(aiUsageEvents.conversationId, result.conversationId));
+
+    expect(result.status).toBe("answer-failed");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(savedMessages).toHaveLength(1);
+    expect(savedUsageEvents).toHaveLength(1);
+    expect(savedUsageEvents[0]).toMatchObject({
+      model: "unconfigured",
+      aiGatewayModelId: null,
+      status: "failure",
+      errorCode: "no_active_ai_gateway_model",
+      estimatedTotalCostMicros: null,
+    });
   });
 });

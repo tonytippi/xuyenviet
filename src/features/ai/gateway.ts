@@ -2,8 +2,6 @@ import "server-only";
 
 import { getRequiredServerEnv } from "@/server/env";
 
-import { aiAskInitialAnswerModel } from "./prompts";
-
 type GatewayMessage = {
   role: "system" | "user" | "assistant";
   content: string;
@@ -13,6 +11,7 @@ type GatewayUsage = {
   promptTokens: number | null;
   completionTokens: number | null;
   totalTokens: number | null;
+  cachedPromptTokens: number | null;
 };
 
 const defaultGatewayTimeoutMs = 30_000;
@@ -39,9 +38,8 @@ export type AiGatewayFailure = {
 
 export type AiGatewayResult = AiGatewaySuccess | AiGatewayFailure;
 
-export async function generateInitialAiAskAnswer(messages: GatewayMessage[]): Promise<AiGatewayResult> {
+export async function generateInitialAiAskAnswer({ model, messages }: { model: string; messages: GatewayMessage[] }): Promise<AiGatewayResult> {
   const startedAt = Date.now();
-  const model = aiAskInitialAnswerModel;
   const controller = new AbortController();
   const gatewayTimeoutMs = getGatewayTimeoutMs();
   const timeout = setTimeout(() => controller.abort(), gatewayTimeoutMs);
@@ -201,14 +199,23 @@ function parseModel(payload: unknown) {
 
 function parseUsage(payload: unknown): GatewayUsage {
   if (!isRecord(payload) || !isRecord(payload.usage)) {
-    return { promptTokens: null, completionTokens: null, totalTokens: null };
+    return { promptTokens: null, completionTokens: null, totalTokens: null, cachedPromptTokens: null };
   }
 
   return {
     promptTokens: parseTokenCount(payload.usage.prompt_tokens),
     completionTokens: parseTokenCount(payload.usage.completion_tokens),
     totalTokens: parseTokenCount(payload.usage.total_tokens),
+    cachedPromptTokens: parseCachedPromptTokens(payload.usage),
   };
+}
+
+function parseCachedPromptTokens(usage: Record<string, unknown>) {
+  if (!isRecord(usage.prompt_tokens_details)) {
+    return null;
+  }
+
+  return parseTokenCount(usage.prompt_tokens_details.cached_tokens);
 }
 
 function parseTokenCount(value: unknown) {

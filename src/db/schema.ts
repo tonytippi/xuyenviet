@@ -13,6 +13,9 @@ export type MessageRole = (typeof messageRoleValues)[number];
 export const aiUsageStatusValues = ["success", "failure"] as const;
 export type AiUsageStatus = (typeof aiUsageStatusValues)[number];
 
+export const aiGatewayModelPurposeValues = ["ai_ask_initial_answer", "extraction", "embeddings", "evaluation"] as const;
+export type AiGatewayModelPurpose = (typeof aiGatewayModelPurposeValues)[number];
+
 export const users = pgTable("users", {
   id: text("id")
     .primaryKey()
@@ -207,6 +210,62 @@ export const messages = pgTable(
   ],
 );
 
+export const aiGatewayModels = pgTable(
+  "ai_gateway_models",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    gatewayModelName: text("gateway_model_name").notNull(),
+    displayLabel: text("display_label").notNull(),
+    purpose: text("purpose").$type<AiGatewayModelPurpose>().notNull(),
+    active: boolean("active").default(true).notNull(),
+    defaultForPurpose: boolean("default_for_purpose").default(false).notNull(),
+    supportsTextInput: boolean("supports_text_input").default(false).notNull(),
+    supportsImageInput: boolean("supports_image_input").default(false).notNull(),
+    supportsImageOutput: boolean("supports_image_output").default(false).notNull(),
+    supportsEmbeddings: boolean("supports_embeddings").default(false).notNull(),
+    supportsExtraction: boolean("supports_extraction").default(false).notNull(),
+    supportsEvaluation: boolean("supports_evaluation").default(false).notNull(),
+    supportsStreaming: boolean("supports_streaming").default(false).notNull(),
+    supportsCachePricing: boolean("supports_cache_pricing").default(false).notNull(),
+    pricingCurrency: text("pricing_currency"),
+    inputTokenPriceMicros: integer("input_token_price_micros"),
+    outputTokenPriceMicros: integer("output_token_price_micros"),
+    cacheReadTokenPriceMicros: integer("cache_read_token_price_micros"),
+    cacheWriteTokenPriceMicros: integer("cache_write_token_price_micros"),
+    pricingUnitTokens: integer("pricing_unit_tokens").default(1_000_000).notNull(),
+    pricingVersion: text("pricing_version"),
+    pricingEffectiveAt: timestamp("pricing_effective_at", { mode: "date" }).defaultNow().notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (model) => [
+    uniqueIndex("ai_gateway_models_gateway_model_purpose_idx").on(model.gatewayModelName, model.purpose),
+    index("ai_gateway_models_purpose_active_idx").on(model.purpose, model.active),
+    uniqueIndex("ai_gateway_models_one_default_per_purpose_idx").on(model.purpose).where(sql`${model.defaultForPurpose} = true`),
+    index("ai_gateway_models_default_idx").on(model.purpose, model.defaultForPurpose),
+    check(
+      "ai_gateway_models_purpose_check",
+      sql`${model.purpose} in ('ai_ask_initial_answer', 'extraction', 'embeddings', 'evaluation')`,
+    ),
+    check("ai_gateway_models_display_label_not_empty_check", sql`length(btrim(${model.displayLabel})) > 0`),
+    check("ai_gateway_models_gateway_model_name_not_empty_check", sql`length(btrim(${model.gatewayModelName})) > 0`),
+    check("ai_gateway_models_pricing_unit_positive_check", sql`${model.pricingUnitTokens} > 0`),
+    check("ai_gateway_models_default_active_check", sql`${model.defaultForPurpose} = false or ${model.active} = true`),
+    check("ai_gateway_models_input_price_non_negative_check", sql`${model.inputTokenPriceMicros} is null or ${model.inputTokenPriceMicros} >= 0`),
+    check("ai_gateway_models_output_price_non_negative_check", sql`${model.outputTokenPriceMicros} is null or ${model.outputTokenPriceMicros} >= 0`),
+    check(
+      "ai_gateway_models_cache_read_price_non_negative_check",
+      sql`${model.cacheReadTokenPriceMicros} is null or ${model.cacheReadTokenPriceMicros} >= 0`,
+    ),
+    check(
+      "ai_gateway_models_cache_write_price_non_negative_check",
+      sql`${model.cacheWriteTokenPriceMicros} is null or ${model.cacheWriteTokenPriceMicros} >= 0`,
+    ),
+  ],
+);
+
 export const aiUsageEvents = pgTable(
   "ai_usage_events",
   {
@@ -222,18 +281,29 @@ export const aiUsageEvents = pgTable(
     purpose: text("purpose").notNull(),
     provider: text("provider").notNull(),
     model: text("model").notNull(),
+    aiGatewayModelId: text("ai_gateway_model_id").references(() => aiGatewayModels.id, { onDelete: "set null" }),
     promptVersion: text("prompt_version").notNull(),
     status: text("status").$type<AiUsageStatus>().notNull(),
     latencyMs: integer("latency_ms"),
     promptTokens: integer("prompt_tokens"),
     completionTokens: integer("completion_tokens"),
     totalTokens: integer("total_tokens"),
+    cachedPromptTokens: integer("cached_prompt_tokens"),
+    estimatedInputCostMicros: integer("estimated_input_cost_micros"),
+    estimatedOutputCostMicros: integer("estimated_output_cost_micros"),
+    estimatedCacheReadCostMicros: integer("estimated_cache_read_cost_micros"),
+    estimatedCacheWriteCostMicros: integer("estimated_cache_write_cost_micros"),
+    estimatedTotalCostMicros: integer("estimated_total_cost_micros"),
+    pricingCurrency: text("pricing_currency"),
+    pricingUnitTokens: integer("pricing_unit_tokens"),
+    pricingVersion: text("pricing_version"),
     errorCode: text("error_code"),
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
   },
   (aiUsageEvent) => [
     index("ai_usage_events_user_id_created_at_idx").on(aiUsageEvent.userId, aiUsageEvent.createdAt),
     index("ai_usage_events_conversation_id_idx").on(aiUsageEvent.conversationId),
+    index("ai_usage_events_ai_gateway_model_id_idx").on(aiUsageEvent.aiGatewayModelId),
     index("ai_usage_events_status_idx").on(aiUsageEvent.status),
     check("ai_usage_events_status_check", sql`${aiUsageEvent.status} in ('success', 'failure')`),
     check("ai_usage_events_latency_non_negative_check", sql`${aiUsageEvent.latencyMs} is null or ${aiUsageEvent.latencyMs} >= 0`),
@@ -243,6 +313,13 @@ export const aiUsageEvents = pgTable(
       sql`${aiUsageEvent.completionTokens} is null or ${aiUsageEvent.completionTokens} >= 0`,
     ),
     check("ai_usage_events_total_tokens_non_negative_check", sql`${aiUsageEvent.totalTokens} is null or ${aiUsageEvent.totalTokens} >= 0`),
+    check("ai_usage_events_cached_prompt_tokens_non_negative_check", sql`${aiUsageEvent.cachedPromptTokens} is null or ${aiUsageEvent.cachedPromptTokens} >= 0`),
+    check("ai_usage_events_estimated_input_cost_non_negative_check", sql`${aiUsageEvent.estimatedInputCostMicros} is null or ${aiUsageEvent.estimatedInputCostMicros} >= 0`),
+    check("ai_usage_events_estimated_output_cost_non_negative_check", sql`${aiUsageEvent.estimatedOutputCostMicros} is null or ${aiUsageEvent.estimatedOutputCostMicros} >= 0`),
+    check("ai_usage_events_estimated_cache_read_cost_non_negative_check", sql`${aiUsageEvent.estimatedCacheReadCostMicros} is null or ${aiUsageEvent.estimatedCacheReadCostMicros} >= 0`),
+    check("ai_usage_events_estimated_cache_write_cost_non_negative_check", sql`${aiUsageEvent.estimatedCacheWriteCostMicros} is null or ${aiUsageEvent.estimatedCacheWriteCostMicros} >= 0`),
+    check("ai_usage_events_estimated_total_cost_non_negative_check", sql`${aiUsageEvent.estimatedTotalCostMicros} is null or ${aiUsageEvent.estimatedTotalCostMicros} >= 0`),
+    check("ai_usage_events_pricing_unit_positive_check", sql`${aiUsageEvent.pricingUnitTokens} is null or ${aiUsageEvent.pricingUnitTokens} > 0`),
   ],
 );
 
@@ -257,5 +334,6 @@ export const schema = {
   referralAttributions,
   conversations,
   messages,
+  aiGatewayModels,
   aiUsageEvents,
 };

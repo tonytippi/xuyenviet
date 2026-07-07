@@ -1,0 +1,2 @@
+CREATE UNIQUE INDEX "ai_gateway_models_one_default_per_purpose_idx" ON "ai_gateway_models" USING btree ("purpose") WHERE "ai_gateway_models"."default_for_purpose" = true;--> statement-breakpoint
+ALTER TABLE "ai_gateway_models" ADD CONSTRAINT "ai_gateway_models_default_active_check" CHECK ("ai_gateway_models"."default_for_purpose" = false or "ai_gateway_models"."active" = true);
