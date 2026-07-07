@@ -31,7 +31,14 @@ export async function POST(request: Request) {
     return Response.json({ error: "AI Ask submissions must be 6MB or smaller." }, { status: 413 });
   }
 
-  const formData = await request.formData();
+  let formData: FormData;
+
+  try {
+    formData = await request.formData();
+  } catch {
+    return Response.json({ error: "Invalid form data." }, { status: 400 });
+  }
+
   const question = String(formData.get("question") ?? "").trim();
   const conversationId = String(formData.get("conversationId") ?? "").trim() || undefined;
   const image = formData.get("image");
@@ -117,6 +124,7 @@ async function streamAnswer({
             .from(conversations)
             .where(and(eq(conversations.id, conversationId), eq(conversations.userId, session.userId)))
             .limit(1)
+            .for("update")
         : await transaction.insert(conversations).values({ userId: session.userId }).returning({ id: conversations.id });
 
       if (!conversation) {
@@ -157,11 +165,8 @@ async function streamAnswer({
     const gatewayResult = await streamInitialAiAskAnswer({
       model: selectedModel.gatewayModelName,
       messages: finalGatewayMessages,
+      abortSignal,
       onDelta: (content) => {
-        if (abortSignal.aborted) {
-          throw new Error("client_aborted_stream");
-        }
-
         sendEvent(controller, encoder, { type: "delta", content });
       },
     });
@@ -203,6 +208,11 @@ async function streamAnswer({
         promptVersion: aiAskInitialAnswerPromptVersion,
         status: "failure",
         latencyMs: gatewayResult.latencyMs,
+        promptTokens: gatewayResult.usage.promptTokens,
+        completionTokens: gatewayResult.usage.completionTokens,
+        totalTokens: gatewayResult.usage.totalTokens,
+        cachedPromptTokens: gatewayResult.usage.cachedPromptTokens,
+        cacheWritePromptTokens: gatewayResult.usage.cacheWritePromptTokens,
         pricingSnapshot,
         errorCode: "client_stream_aborted",
       });
@@ -214,38 +224,84 @@ async function streamAnswer({
     }
 
     const savedTurn = saved;
-    const completed = await db.transaction(async (transaction) => {
-      const [assistantMessage] = await transaction
-        .insert(messages)
-        .values({ conversationId: savedTurn.conversationId, userId: session.userId, role: "assistant", content: gatewayResult.content })
-        .returning({ id: messages.id });
+    let completed: { id: string; content: string } | null = null;
 
-      await transaction.update(conversations).set({ updatedAt: new Date() }).where(eq(conversations.id, savedTurn.conversationId));
+    try {
+      completed = await db.transaction(async (transaction) => {
+        const [assistantMessage] = await transaction
+          .insert(messages)
+          .values({ conversationId: savedTurn.conversationId, userId: session.userId, role: "assistant", content: gatewayResult.content })
+          .returning({ id: messages.id });
 
-      await writeAiUsageEvent(transaction, {
-        userId: session.userId,
-        conversationId: savedTurn.conversationId,
-        userMessageId: savedTurn.userMessage.id,
-        assistantMessageId: assistantMessage.id,
-        purpose: aiAskInitialAnswerPurpose,
-        provider: gatewayResult.provider,
-        model: gatewayResult.model,
-        aiGatewayModelId: selectedModel.id,
-        promptVersion: aiAskInitialAnswerPromptVersion,
-        status: "success",
-        latencyMs: gatewayResult.latencyMs,
-        promptTokens: gatewayResult.usage.promptTokens,
-        completionTokens: gatewayResult.usage.completionTokens,
-        totalTokens: gatewayResult.usage.totalTokens,
-        cachedPromptTokens: gatewayResult.usage.cachedPromptTokens,
-        cacheWritePromptTokens: gatewayResult.usage.cacheWritePromptTokens,
-        pricingSnapshot,
+        await transaction.update(conversations).set({ updatedAt: new Date() }).where(eq(conversations.id, savedTurn.conversationId));
+
+        await writeAiUsageEvent(transaction, {
+          userId: session.userId,
+          conversationId: savedTurn.conversationId,
+          userMessageId: savedTurn.userMessage.id,
+          assistantMessageId: assistantMessage.id,
+          purpose: aiAskInitialAnswerPurpose,
+          provider: gatewayResult.provider,
+          model: gatewayResult.model,
+          aiGatewayModelId: selectedModel.id,
+          promptVersion: aiAskInitialAnswerPromptVersion,
+          status: "success",
+          latencyMs: gatewayResult.latencyMs,
+          promptTokens: gatewayResult.usage.promptTokens,
+          completionTokens: gatewayResult.usage.completionTokens,
+          totalTokens: gatewayResult.usage.totalTokens,
+          cachedPromptTokens: gatewayResult.usage.cachedPromptTokens,
+          cacheWritePromptTokens: gatewayResult.usage.cacheWritePromptTokens,
+          pricingSnapshot,
+        });
+
+        return { id: assistantMessage.id, content: gatewayResult.content };
       });
+    } catch {
+      // The atomic persistence failed (e.g. transient DB error or concurrent conversation deletion).
+      // Retry the assistant message insert outside the transaction so the streamed answer is not lost.
+      try {
+        const [assistantMessage] = await db
+          .insert(messages)
+          .values({ conversationId: savedTurn.conversationId, userId: session.userId, role: "assistant", content: gatewayResult.content })
+          .returning({ id: messages.id });
 
-      return { id: assistantMessage.id, content: gatewayResult.content };
-    });
+        await writeAiUsageEvent(db, {
+          userId: session.userId,
+          conversationId: savedTurn.conversationId,
+          userMessageId: savedTurn.userMessage.id,
+          assistantMessageId: assistantMessage.id,
+          purpose: aiAskInitialAnswerPurpose,
+          provider: gatewayResult.provider,
+          model: gatewayResult.model,
+          aiGatewayModelId: selectedModel.id,
+          promptVersion: aiAskInitialAnswerPromptVersion,
+          status: "success",
+          latencyMs: gatewayResult.latencyMs,
+          promptTokens: gatewayResult.usage.promptTokens,
+          completionTokens: gatewayResult.usage.completionTokens,
+          totalTokens: gatewayResult.usage.totalTokens,
+          cachedPromptTokens: gatewayResult.usage.cachedPromptTokens,
+          cacheWritePromptTokens: gatewayResult.usage.cacheWritePromptTokens,
+          pricingSnapshot,
+        });
 
-    sendEvent(controller, encoder, { type: "done", conversationId: savedTurn.conversationId, userMessage: savedTurn.userMessage, assistantMessage: completed });
+        completed = { id: assistantMessage.id, content: gatewayResult.content };
+      } catch {
+        completed = null;
+      }
+    }
+
+    if (completed) {
+      sendEvent(controller, encoder, { type: "done", conversationId: savedTurn.conversationId, userMessage: savedTurn.userMessage, assistantMessage: completed });
+    } else {
+      sendEvent(controller, encoder, {
+        type: "error",
+        conversationId: savedTurn.conversationId,
+        userMessage: savedTurn.userMessage,
+        errorMessage: "Mình đã tạo được câu trả lời nhưng chưa lưu được lúc này. Hãy thử lại sau.",
+      });
+    }
   } catch {
     sendEvent(controller, encoder, {
       type: "error",
@@ -294,7 +350,7 @@ function hasValidImageSignature(buffer: Buffer, mimeType: string) {
   }
 
   if (mimeType === "image/jpeg") {
-    return buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
+    return buffer.length >= 4 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff && (buffer[3] === 0xe0 || buffer[3] === 0xe1);
   }
 
   if (mimeType === "image/webp") {

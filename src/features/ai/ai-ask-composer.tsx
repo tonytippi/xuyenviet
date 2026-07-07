@@ -10,6 +10,12 @@ type DisplayMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
+  imageAttachments?: Array<{
+    id: string;
+    originalFileName: string | null;
+    mimeType: string;
+    byteSize: number;
+  }>;
 };
 
 type AiAskComposerProps = {
@@ -105,6 +111,7 @@ export function AiAskComposer({ initialConversationId, initialMessages = [] }: A
   const [pendingQuestion, setPendingQuestion] = useState("");
   const [streamingContent, setStreamingContent] = useState("");
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [failedQuestionIds, setFailedQuestionIds] = useState<string[]>(() => getUnansweredUserMessageIds(initialMessages));
   const [messages, setMessages] = useState<DisplayMessage[]>(initialMessages);
   const [conversationId, setConversationId] = useState(initialConversationId);
@@ -112,6 +119,13 @@ export function AiAskComposer({ initialConversationId, initialMessages = [] }: A
   const imageInputRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const isSubmittingRef = useRef(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => {
+      abortControllerRef.current?.abort();
+    };
+  }, []);
 
   useEffect(() => {
     function handleShortcut(event: globalThis.KeyboardEvent) {
@@ -141,6 +155,18 @@ export function AiAskComposer({ initialConversationId, initialMessages = [] }: A
 
     return () => window.clearTimeout(timeout);
   }, [isPending]);
+
+  useEffect(() => {
+    if (!selectedImage) {
+      setImageUrl(null);
+      return;
+    }
+
+    const url = URL.createObjectURL(selectedImage);
+    setImageUrl(url);
+
+    return () => URL.revokeObjectURL(url);
+  }, [selectedImage]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -179,7 +205,9 @@ export function AiAskComposer({ initialConversationId, initialMessages = [] }: A
 
     try {
       const hadConversation = Boolean(conversationId || messages.length > 0);
-      const result = await submitAiAskStream({ question: trimmedQuestion, conversationId, image: selectedImage, onDelta: (content) => {
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+      const result = await submitAiAskStream({ question: trimmedQuestion, conversationId, image: selectedImage, signal: controller.signal, onDelta: (content) => {
         setStreamingContent((currentContent) => currentContent + content);
       } });
 
@@ -214,6 +242,7 @@ export function AiAskComposer({ initialConversationId, initialMessages = [] }: A
       setIsPending(false);
       setPendingQuestion("");
       setStreamingContent("");
+      abortControllerRef.current = null;
     }
   }
 
@@ -270,6 +299,11 @@ export function AiAskComposer({ initialConversationId, initialMessages = [] }: A
                 {message.role === "assistant" ? "Trợ lý XuyenViet" : "Bạn"}
               </p>
               {message.role === "assistant" ? <AssistantMessageContent content={message.content} /> : <p className="whitespace-pre-wrap text-base leading-7">{message.content}</p>}
+              {message.role === "user" && message.imageAttachments && message.imageAttachments.length > 0 ? (
+                <p className="mt-2 rounded-lg bg-white/15 text-xs font-semibold uppercase tracking-[0.12em]">
+                  Đã kèm ảnh: {message.imageAttachments.map((attachment) => attachment.originalFileName || "ảnh đính kèm").join(", ")}
+                </p>
+              ) : null}
               {failedQuestionIds.includes(message.id) ? (
                 <div className="mt-3 rounded-2xl border border-[#f0c8a0] bg-[#fff7ed] p-3 text-sm leading-6 text-[#6f3f12]" role="status">
                   Trợ lý chưa tạo được câu trả lời cho lượt này. Tin nhắn của bạn đã được lưu; hãy chỉnh câu hỏi trong ô nhập rồi gửi lại khi sẵn sàng.
@@ -331,7 +365,15 @@ export function AiAskComposer({ initialConversationId, initialMessages = [] }: A
           <p className="mt-2 text-xs leading-5 text-[#6b7c75]">Hỗ trợ JPEG, PNG hoặc WebP tối đa 5MB. Ảnh chỉ được gửi qua AI Gateway khi model đã bật khả năng nhận ảnh.</p>
           {selectedImage ? (
             <div className="mt-3 flex flex-col gap-2 rounded-xl bg-white/80 p-3 text-sm leading-6 text-[#4f625a] sm:flex-row sm:items-center sm:justify-between">
-              <span>Đã chọn: {selectedImage.name || "ảnh đính kèm"}</span>
+              <div className="flex items-center gap-3">
+                {imageUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img alt={selectedImage.name || "ảnh đính kèm"} className="h-12 w-12 rounded-lg border border-[#d8c9ad] object-cover" src={imageUrl} />
+                ) : null}
+                <span className="min-w-0 break-words">
+                  Đã chọn: {selectedImage.name || "ảnh đính kèm"} ({selectedImage.type}, {formatImageSize(selectedImage.size)})
+                </span>
+              </div>
               <button className="min-h-11 rounded-xl border border-[#d8c9ad] px-3 py-2 font-semibold text-[#17342c]" disabled={isPending} onClick={clearSelectedImage} type="button">
                 Bỏ ảnh
               </button>
@@ -372,11 +414,13 @@ async function submitAiAskStream({
   question,
   conversationId,
   image,
+  signal,
   onDelta,
 }: {
   question: string;
   conversationId?: string;
   image: File | null;
+  signal?: AbortSignal;
   onDelta: (content: string) => void;
 }): Promise<StreamResult> {
   const formData = new FormData();
@@ -385,7 +429,7 @@ async function submitAiAskStream({
   if (conversationId) formData.set("conversationId", conversationId);
   if (image) formData.set("image", image);
 
-  const response = await fetch("/api/ai-ask/stream", { method: "POST", body: formData });
+  const response = await fetch("/api/ai-ask/stream", { method: "POST", body: formData, signal });
 
   if (!response.ok || !response.body) {
     const payload = await response.json().catch(() => null) as { error?: string } | null;
@@ -423,7 +467,7 @@ async function submitAiAskStream({
         terminalResult = { status: "answer-created", conversationId: event.conversationId, userMessage: event.userMessage, assistantMessage: event.assistantMessage };
       }
 
-      if (event.type === "error") {
+      if (event.type === "error" && terminalResult?.status !== "answer-created") {
         terminalResult = { status: "answer-failed", conversationId: event.conversationId, userMessage: event.userMessage, errorMessage: event.errorMessage ?? "Mình chưa tạo được câu trả lời lúc này." };
       }
     }
@@ -456,4 +500,16 @@ function validateSelectedImage(image: File | null) {
   }
 
   return null;
+}
+
+function formatImageSize(bytes: number) {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+
+  if (bytes < 1024 * 1024) {
+    return `${Math.round(bytes / 1024)} KB`;
+  }
+
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }

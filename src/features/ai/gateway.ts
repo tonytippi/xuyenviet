@@ -35,124 +35,41 @@ export type AiGatewaySuccess = {
   usage: GatewayUsage;
 };
 
-export type AiGatewayFailure = {
+export type AiGatewayStreamFailure = {
   ok: false;
   provider: "ai_gateway";
   model: string;
   latencyMs: number;
-  errorCode: "gateway_http_error" | "gateway_network_error" | "invalid_gateway_response";
-};
-
-export type AiGatewayResult = AiGatewaySuccess | AiGatewayFailure;
-
-export type AiGatewayStreamFailure = AiGatewayFailure | {
-  ok: false;
-  provider: "ai_gateway";
-  model: string;
-  latencyMs: number;
-  errorCode: "gateway_stream_failed";
+  errorCode: "gateway_http_error" | "gateway_network_error" | "invalid_gateway_response" | "gateway_stream_failed" | "client_stream_aborted";
 };
 
 export type AiGatewayStreamResult = AiGatewaySuccess | AiGatewayStreamFailure;
-
-export async function generateInitialAiAskAnswer({ model, messages }: { model: string; messages: GatewayMessage[] }): Promise<AiGatewayResult> {
-  const startedAt = Date.now();
-  const controller = new AbortController();
-  const gatewayTimeoutMs = getGatewayTimeoutMs();
-  const timeout = setTimeout(() => controller.abort(), gatewayTimeoutMs);
-
-  try {
-    const response = await fetch(buildGatewayUrl(), {
-      method: "POST",
-      signal: controller.signal,
-      headers: {
-        authorization: `Bearer ${getRequiredServerEnv("AI_GATEWAY_API_KEY")}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model,
-        messages,
-        max_tokens: maxCompletionTokens,
-        temperature: 0.3,
-      }),
-    });
-
-    const latencyMs = Date.now() - startedAt;
-
-    if (!response.ok) {
-      logGatewayFailure({
-        errorCode: "gateway_http_error",
-        latencyMs,
-        model,
-        timeoutMs: gatewayTimeoutMs,
-        status: response.status,
-        statusText: response.statusText,
-      });
-
-      return { ok: false, provider: "ai_gateway", model, latencyMs, errorCode: "gateway_http_error" };
-    }
-
-    const payload = await parseJson(response);
-
-    if (!payload) {
-      logGatewayFailure({ errorCode: "invalid_gateway_response", latencyMs, model, timeoutMs: gatewayTimeoutMs, reason: "json_parse_failed" });
-
-      return { ok: false, provider: "ai_gateway", model, latencyMs, errorCode: "invalid_gateway_response" };
-    }
-
-    const content = parseContent(payload);
-
-    if (!content) {
-      logGatewayFailure({ errorCode: "invalid_gateway_response", latencyMs, model, timeoutMs: gatewayTimeoutMs, reason: "missing_choice_message_content" });
-
-      return { ok: false, provider: "ai_gateway", model, latencyMs, errorCode: "invalid_gateway_response" };
-    }
-
-    return {
-      ok: true,
-      content,
-      provider: "ai_gateway",
-      model: parseModel(payload) ?? model,
-      latencyMs,
-      usage: parseUsage(payload),
-    };
-  } catch (error) {
-    const latencyMs = Date.now() - startedAt;
-
-    logGatewayFailure({
-      errorCode: "gateway_network_error",
-      latencyMs,
-      model,
-      timeoutMs: gatewayTimeoutMs,
-      reason: error instanceof Error ? error.name : "unknown_error",
-      message: error instanceof Error ? error.message : undefined,
-    });
-
-    return {
-      ok: false,
-      provider: "ai_gateway",
-      model,
-      latencyMs,
-      errorCode: "gateway_network_error",
-    };
-  } finally {
-    clearTimeout(timeout);
-  }
-}
 
 export async function streamInitialAiAskAnswer({
   model,
   messages,
   onDelta,
+  abortSignal,
 }: {
   model: string;
   messages: GatewayMessage[];
   onDelta: (delta: string) => Promise<void> | void;
+  abortSignal?: AbortSignal;
 }): Promise<AiGatewayStreamResult> {
   const startedAt = Date.now();
   const controller = new AbortController();
   const gatewayTimeoutMs = getGatewayTimeoutMs();
   const timeout = setTimeout(() => controller.abort(), gatewayTimeoutMs);
+
+  const onExternalAbort = () => controller.abort();
+
+  if (abortSignal) {
+    if (abortSignal.aborted) {
+      controller.abort();
+    } else {
+      abortSignal.addEventListener("abort", onExternalAbort, { once: true });
+    }
+  }
 
   try {
     const response = await fetch(buildGatewayUrl(), {
@@ -187,9 +104,10 @@ export async function streamInitialAiAskAnswer({
 
     const streamResult = await readOpenAiCompatibleStream(response.body, onDelta);
     const finalLatencyMs = Date.now() - startedAt;
+    const terminated = streamResult.done || streamResult.finishReason === "stop" || streamResult.finishReason === "length";
 
-    if (streamResult.failed || !streamResult.done || streamResult.finishReason !== "stop" || !streamResult.content) {
-      logGatewayFailure({ errorCode: "invalid_gateway_response", latencyMs: finalLatencyMs, model, timeoutMs: gatewayTimeoutMs, reason: streamResult.failed ? "stream_parse_failed" : "empty_stream_content" });
+    if (streamResult.failed || !terminated || !streamResult.content) {
+      logGatewayFailure({ errorCode: "invalid_gateway_response", latencyMs: finalLatencyMs, model, timeoutMs: gatewayTimeoutMs, reason: streamResult.failed ? "stream_parse_failed" : streamResult.done ? "empty_stream_content" : "missing_terminal_signal" });
 
       return { ok: false, provider: "ai_gateway", model, latencyMs: finalLatencyMs, errorCode: streamResult.failed ? "gateway_stream_failed" : "invalid_gateway_response" };
     }
@@ -205,6 +123,12 @@ export async function streamInitialAiAskAnswer({
   } catch (error) {
     const latencyMs = Date.now() - startedAt;
 
+    if (abortSignal?.aborted) {
+      logGatewayFailure({ errorCode: "client_stream_aborted", latencyMs, model, timeoutMs: gatewayTimeoutMs, reason: "client_aborted" });
+
+      return { ok: false, provider: "ai_gateway", model, latencyMs, errorCode: "client_stream_aborted" };
+    }
+
     logGatewayFailure({
       errorCode: "gateway_network_error",
       latencyMs,
@@ -216,6 +140,9 @@ export async function streamInitialAiAskAnswer({
 
     return { ok: false, provider: "ai_gateway", model, latencyMs, errorCode: "gateway_network_error" };
   } finally {
+    if (abortSignal) {
+      abortSignal.removeEventListener("abort", onExternalAbort);
+    }
     clearTimeout(timeout);
   }
 }
@@ -241,7 +168,7 @@ function getGatewayTimeoutMs() {
 }
 
 function logGatewayFailure(details: {
-  errorCode: AiGatewayFailure["errorCode"];
+  errorCode: AiGatewayStreamFailure["errorCode"];
   latencyMs: number;
   model: string;
   timeoutMs: number;
@@ -260,30 +187,6 @@ function logGatewayFailure(details: {
     reason: details.reason,
     message: details.message,
   });
-}
-
-function parseContent(payload: unknown) {
-  if (!isRecord(payload) || !Array.isArray(payload.choices)) {
-    return null;
-  }
-
-  const [choice] = payload.choices;
-
-  if (!isRecord(choice) || !isRecord(choice.message) || typeof choice.message.content !== "string") {
-    return null;
-  }
-
-  const content = choice.message.content.trim();
-
-  return content || null;
-}
-
-async function parseJson(response: Response) {
-  try {
-    return (await response.json()) as unknown;
-  } catch {
-    return null;
-  }
 }
 
 function parseModel(payload: unknown) {
@@ -361,10 +264,18 @@ async function processStreamLine(line: string, onDelta: (delta: string) => Promi
     return { content: "", model: null, usage: emptyUsage, failed: false, done: false, finishReason: null };
   }
 
-  const data = trimmed.startsWith("data:") ? trimmed.slice(5).trim() : trimmed;
+  if (!trimmed.startsWith("data:")) {
+    return { content: "", model: null, usage: emptyUsage, failed: false, done: false, finishReason: null };
+  }
+
+  const data = trimmed.slice(5).trim();
 
   if (data === "[DONE]") {
     return { content: "", model: null, usage: emptyUsage, failed: false, done: true, finishReason: null };
+  }
+
+  if (!data) {
+    return { content: "", model: null, usage: emptyUsage, failed: false, done: false, finishReason: null };
   }
 
   try {

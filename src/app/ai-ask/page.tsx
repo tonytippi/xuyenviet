@@ -90,6 +90,12 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
                 id: message.id,
                 role: message.role,
                 content: message.content,
+                imageAttachments: message.imageAttachments.map((attachment) => ({
+                  id: attachment.id,
+                  originalFileName: attachment.originalFileName,
+                  mimeType: attachment.mimeType,
+                  byteSize: attachment.byteSize,
+                })),
               }))}
             />
           </div>

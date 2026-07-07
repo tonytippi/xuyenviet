@@ -245,513 +245,10 @@ describe("AI Ask prompt construction", () => {
   });
 });
 
-describe("AI Ask action gate", () => {
+describe("AI Ask conversation data layer", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
-  });
-
-  test("rejects empty questions", async () => {
-    await createTestUser("user-1");
-    vi.doMock("@/server/auth", () => ({
-      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
-    }));
-    const { submitAiAsk } = await import("@/features/ai/ask-gate");
-
-    await expect(submitAiAsk({ question: "   " })).rejects.toThrow("AI Ask question must be between 1 and 2000 characters.");
-    expect(await countConversations()).toBe(0);
-    expect(await countMessages()).toBe(0);
-    expect(await countUsageEvents()).toBe(0);
-  });
-
-  test("rejects malformed question payloads", async () => {
-    await createTestUser("user-1");
-    vi.doMock("@/server/auth", () => ({
-      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
-    }));
-    const { submitAiAsk } = await import("@/features/ai/ask-gate");
-
-    await expect(submitAiAsk({} as { question: string })).rejects.toThrow("AI Ask question must be between 1 and 2000 characters.");
-    expect(await countConversations()).toBe(0);
-    expect(await countMessages()).toBe(0);
-    expect(await countUsageEvents()).toBe(0);
-  });
-
-  test("rejects over-2000-character questions", async () => {
-    await createTestUser("user-1");
-    vi.doMock("@/server/auth", () => ({
-      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
-    }));
-    const { submitAiAsk } = await import("@/features/ai/ask-gate");
-
-    await expect(submitAiAsk({ question: "a".repeat(2_001) })).rejects.toThrow(
-      "AI Ask question must be between 1 and 2000 characters.",
-    );
-    expect(await countConversations()).toBe(0);
-    expect(await countMessages()).toBe(0);
-    expect(await countUsageEvents()).toBe(0);
-  });
-
-  test("creates an owned conversation, first user message, assistant answer, and successful usage event", async () => {
-    await createTestUser("user-1");
-    await createDefaultAiAskModel({ id: "ai-ask-model-1", gatewayModelName: "cx/gpt-5.5-test" });
-    const assistantContent = [
-      "Kế hoạch gợi ý:",
-      "Bạn có thể đi theo trục Hà Nội - Huế trong 5 ngày và nên chừa thời gian nghỉ giữa chặng.",
-      "",
-      "Nguồn và độ tin cậy:",
-      "Đây là gợi ý tổng quát, chưa dùng nguồn tuyển chọn.",
-      "",
-      "Câu hỏi tiếp theo:",
-      "Bạn muốn lái tối đa bao nhiêu giờ mỗi ngày?",
-    ].join("\n");
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          model: "test-model",
-          choices: [
-            {
-              message: {
-                content: assistantContent,
-              },
-            },
-          ],
-          usage: {
-            prompt_tokens: 100,
-            completion_tokens: 80,
-            total_tokens: 180,
-            prompt_tokens_details: {
-              cached_tokens: 25,
-              cache_creation_tokens: 10,
-            },
-          },
-        }),
-        { status: 200, headers: { "content-type": "application/json" } },
-      ),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-    vi.doMock("@/server/auth", () => ({
-      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
-    }));
-    const { submitAiAsk } = await import("@/features/ai/ask-gate");
-
-    const result = await submitAiAsk({ question: "  Hà Nội đi Huế 5 ngày nên dừng ở đâu?  " });
-    const savedConversations = await testDb.select().from(conversations).where(eq(conversations.userId, "user-1"));
-    const savedMessages = await testDb.select().from(messages).where(eq(messages.conversationId, result.conversationId));
-    const savedUsageEvents = await testDb.select().from(aiUsageEvents).where(eq(aiUsageEvents.conversationId, result.conversationId));
-
-    expect(result.status).toBe("answer-created");
-    if (result.status !== "answer-created") {
-      throw new Error("Expected answer-created result");
-    }
-    expect(result.conversationId).toBeTruthy();
-    expect(result.userMessage.id).toBeTruthy();
-    expect(result.assistantMessage.id).toBeTruthy();
-    expect(result.assistantMessage.content).toBe(assistantContent);
-    expect(savedConversations).toHaveLength(1);
-    expect(savedConversations[0].id).toBe(result.conversationId);
-    expect(savedConversations[0].createdAt).toBeInstanceOf(Date);
-    expect(savedMessages).toHaveLength(2);
-    expect(savedMessages[0]).toMatchObject({
-      id: result.userMessage.id,
-      userId: "user-1",
-      role: "user",
-      content: "Hà Nội đi Huế 5 ngày nên dừng ở đâu?",
-    });
-    expect(savedMessages[0].createdAt).toBeInstanceOf(Date);
-    expect(savedMessages[1]).toMatchObject({
-      id: result.assistantMessage.id,
-      userId: "user-1",
-      role: "assistant",
-      content: assistantContent,
-    });
-    expect(savedUsageEvents).toHaveLength(1);
-    expect(savedUsageEvents[0]).toMatchObject({
-      userId: "user-1",
-      conversationId: result.conversationId,
-      userMessageId: result.userMessage.id,
-      assistantMessageId: result.assistantMessage.id,
-      purpose: "ai_ask_initial_answer",
-      provider: "ai_gateway",
-      model: "test-model",
-      aiGatewayModelId: "ai-ask-model-1",
-      promptVersion: "ai_ask_initial_v3",
-      status: "success",
-      errorCode: null,
-      promptTokens: 100,
-      completionTokens: 80,
-      totalTokens: 180,
-      cachedPromptTokens: 25,
-      cacheWritePromptTokens: 10,
-      estimatedInputCostMicros: 150,
-      estimatedOutputCostMicros: 320,
-      estimatedTotalCostMicros: null,
-      pricingCurrency: "USD",
-      inputTokenPriceMicros: 2_000_000,
-      outputTokenPriceMicros: 4_000_000,
-      cacheReadTokenPriceMicros: null,
-      cacheWriteTokenPriceMicros: null,
-      pricingUnitTokens: 1_000_000,
-      pricingVersion: "test-pricing-v1",
-      pricingEffectiveAt: new Date("2026-07-07T00:00:00.000Z"),
-    });
-    expect(savedUsageEvents[0].latencyMs).toBeGreaterThanOrEqual(0);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0][0]).toBe("https://test-gateway.example/chat/completions");
-    expect(JSON.parse(String(fetchMock.mock.calls[0][1].body))).toMatchObject({ model: "cx/gpt-5.5-test" });
-    const requestJson = JSON.stringify(fetchMock.mock.calls[0][1]);
-    expect(requestJson).toContain("Tiếng Việt");
-    expect(requestJson).toContain("Kế hoạch gợi ý");
-    expect(requestJson).toContain("Vì sao nên đi như vậy");
-    expect(requestJson).toContain("Lưu ý thực tế");
-    expect(requestJson).toContain("Cảnh báo cần kiểm tra");
-    expect(requestJson).toContain("Nguồn và độ tin cậy");
-    expect(requestJson).toContain("Bước tiếp theo");
-    expect(requestJson).toContain("1-3 câu hỏi tiếp theo ngắn gọn");
-    expect(requestJson).toContain("không tạo citation như [1]");
-    expect(requestJson).toContain("tránh khẳng định XuyenViet có dữ liệu địa phương đã kiểm chứng");
-    expect(getGatewayRequestMessages(fetchMock)).toMatchObject([
-      { role: "system" },
-      { role: "user", content: "Hà Nội đi Huế 5 ngày nên dừng ở đâu?" },
-    ]);
-  });
-
-  test("continues an owned conversation with prior messages in the gateway prompt", async () => {
-    await createTestUser("user-1");
-    await createDefaultAiAskModel();
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            model: "test-model",
-            choices: [{ message: { content: "Kế hoạch gợi ý:\nNên chia chặng Hà Nội - Đồng Hới - Huế." } }],
-            usage: {},
-          }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        ),
-      )
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            model: "test-model",
-            choices: [{ message: { content: "Bước tiếp theo:\nNgày thứ 3 nên nghỉ ở Huế để lịch lái nhẹ hơn." } }],
-            usage: { prompt_tokens: 120, completion_tokens: 40, total_tokens: 160 },
-          }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        ),
-      );
-    vi.stubGlobal("fetch", fetchMock);
-    vi.doMock("@/server/auth", () => ({
-      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
-    }));
-    const { submitAiAsk } = await import("@/features/ai/ask-gate");
-
-    const firstResult = await submitAiAsk({ question: "Hà Nội đi Huế 5 ngày?" });
-    if (firstResult.status !== "answer-created") {
-      throw new Error("Expected first answer-created result");
-    }
-    const secondResult = await submitAiAsk({ question: "Ngày thứ 3 nên nghỉ ở đâu?", conversationId: firstResult.conversationId });
-    const savedConversations = await testDb.select().from(conversations).where(eq(conversations.userId, "user-1"));
-    const savedMessages = await testDb
-      .select()
-      .from(messages)
-      .where(eq(messages.conversationId, firstResult.conversationId))
-      .orderBy(asc(messages.createdAt), asc(messages.id));
-    const savedUsageEvents = await testDb.select().from(aiUsageEvents).where(eq(aiUsageEvents.conversationId, firstResult.conversationId));
-
-    expect(secondResult.status).toBe("answer-created");
-    expect(secondResult.conversationId).toBe(firstResult.conversationId);
-    expect(savedConversations).toHaveLength(1);
-    expect(savedMessages.map((message) => ({ role: message.role, content: message.content }))).toEqual([
-      { role: "user", content: "Hà Nội đi Huế 5 ngày?" },
-      { role: "assistant", content: "Kế hoạch gợi ý:\nNên chia chặng Hà Nội - Đồng Hới - Huế." },
-      { role: "user", content: "Ngày thứ 3 nên nghỉ ở đâu?" },
-      { role: "assistant", content: "Bước tiếp theo:\nNgày thứ 3 nên nghỉ ở Huế để lịch lái nhẹ hơn." },
-    ]);
-    expect(savedUsageEvents).toHaveLength(2);
-    expect(getGatewayRequestMessages(fetchMock, 1)).toMatchObject([
-      { role: "system" },
-      { role: "user", content: "Hà Nội đi Huế 5 ngày?" },
-      { role: "assistant", content: "Kế hoạch gợi ý:\nNên chia chặng Hà Nội - Đồng Hới - Huế." },
-      { role: "user", content: "Ngày thứ 3 nên nghỉ ở đâu?" },
-    ]);
-  });
-
-  test("rejects cross-user conversation continuation without side effects", async () => {
-    await createTestUser("user-1");
-    await createTestUser("user-2");
-    const [conversation] = await testDb.insert(conversations).values({ userId: "user-2" }).returning({ id: conversations.id });
-    await testDb.insert(messages).values({
-      conversationId: conversation.id,
-      userId: "user-2",
-      role: "user",
-      content: "Tin nhắn riêng của user-2",
-    });
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-    vi.doMock("@/server/auth", () => ({
-      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
-    }));
-    const { submitAiAsk } = await import("@/features/ai/ask-gate");
-
-    await expect(submitAiAsk({ question: "Cho tôi hỏi tiếp", conversationId: conversation.id })).rejects.toThrow(
-      "Conversation not found or access denied.",
-    );
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(await countConversations()).toBe(1);
-    expect(await countMessages()).toBe(1);
-    expect(await countUsageEvents()).toBe(0);
-  });
-
-  test("keeps follow-up user message, records failed usage, and creates no assistant message when continuation provider fails", async () => {
-    await createTestUser("user-1");
-    await createDefaultAiAskModel();
-    vi.spyOn(console, "warn").mockImplementation(() => undefined);
-
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            choices: [{ message: { content: "Kế hoạch gợi ý:\nNên đi Huế trước." } }],
-            usage: {},
-          }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        ),
-      )
-      .mockResolvedValueOnce(new Response("{}", { status: 500 }));
-    vi.stubGlobal("fetch", fetchMock);
-    vi.doMock("@/server/auth", () => ({
-      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
-    }));
-    const { submitAiAsk } = await import("@/features/ai/ask-gate");
-
-    const firstResult = await submitAiAsk({ question: "Hà Nội đi Huế?" });
-    if (firstResult.status !== "answer-created") {
-      throw new Error("Expected first answer-created result");
-    }
-    const failedResult = await submitAiAsk({ question: "Vậy ngày thứ 2 thì sao?", conversationId: firstResult.conversationId });
-    const savedMessages = await testDb
-      .select()
-      .from(messages)
-      .where(eq(messages.conversationId, firstResult.conversationId))
-      .orderBy(asc(messages.createdAt), asc(messages.id));
-    const savedUsageEvents = await testDb.select().from(aiUsageEvents).where(eq(aiUsageEvents.conversationId, firstResult.conversationId));
-
-    expect(failedResult.status).toBe("answer-failed");
-    expect(failedResult.conversationId).toBe(firstResult.conversationId);
-    expect(savedMessages.map((message) => ({ role: message.role, content: message.content }))).toEqual([
-      { role: "user", content: "Hà Nội đi Huế?" },
-      { role: "assistant", content: "Kế hoạch gợi ý:\nNên đi Huế trước." },
-      { role: "user", content: "Vậy ngày thứ 2 thì sao?" },
-    ]);
-    expect(savedUsageEvents).toHaveLength(2);
-    expect(savedUsageEvents[1]).toMatchObject({
-      conversationId: firstResult.conversationId,
-      userMessageId: failedResult.userMessage.id,
-      assistantMessageId: null,
-      status: "failure",
-      errorCode: "gateway_http_error",
-    });
-  });
-
-  test("keeps the user message, records failed usage, and creates no assistant message when provider fails", async () => {
-    await createTestUser("user-1");
-    await createDefaultAiAskModel({ id: "ai-ask-failure-model", gatewayModelName: "cx/gpt-5.5-failure" });
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status: 500 })));
-    vi.doMock("@/server/auth", () => ({
-      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
-    }));
-    const { submitAiAsk } = await import("@/features/ai/ask-gate");
-
-    const result = await submitAiAsk({ question: "Hà Nội đi Đà Nẵng?" });
-    const savedMessages = await testDb.select().from(messages).where(eq(messages.conversationId, result.conversationId));
-    const savedUsageEvents = await testDb.select().from(aiUsageEvents).where(eq(aiUsageEvents.conversationId, result.conversationId));
-
-    expect(result.status).toBe("answer-failed");
-    if (result.status !== "answer-failed") {
-      throw new Error("Expected answer-failed result");
-    }
-    expect("assistantMessage" in result).toBe(false);
-    expect(result.userMessage.content).toBe("Hà Nội đi Đà Nẵng?");
-    expect(result.errorMessage).toBe("Mình chưa tạo được câu trả lời lúc này. Nội dung của bạn vẫn còn trong ô nhập để gửi lại.");
-    expect(savedMessages).toHaveLength(1);
-    expect(savedMessages[0]).toMatchObject({ role: "user", content: "Hà Nội đi Đà Nẵng?" });
-    expect(savedUsageEvents).toHaveLength(1);
-    expect(savedUsageEvents[0]).toMatchObject({
-      userId: "user-1",
-      conversationId: result.conversationId,
-      userMessageId: result.userMessage.id,
-      assistantMessageId: null,
-      purpose: "ai_ask_initial_answer",
-      provider: "ai_gateway",
-      model: "cx/gpt-5.5-failure",
-      aiGatewayModelId: "ai-ask-failure-model",
-      promptVersion: "ai_ask_initial_v3",
-      status: "failure",
-      errorCode: "gateway_http_error",
-    });
-    expect(warnSpy).toHaveBeenCalledWith("AI Gateway answer generation failed", expect.objectContaining({
-      errorCode: "gateway_http_error",
-      model: "cx/gpt-5.5-failure",
-      status: 500,
-      timeoutMs: 30_000,
-    }));
-  });
-
-  test("uses configured AI Gateway timeout for slow model debugging", async () => {
-    await createTestUser("user-1");
-    await createDefaultAiAskModel();
-    process.env.AI_GATEWAY_TIMEOUT_MS = "45000";
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status: 500 })));
-    vi.doMock("@/server/auth", () => ({
-      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
-    }));
-    const { submitAiAsk } = await import("@/features/ai/ask-gate");
-
-    const result = await submitAiAsk({ question: "Hà Nội đi Đà Nẵng?" });
-
-    delete process.env.AI_GATEWAY_TIMEOUT_MS;
-    expect(result.status).toBe("answer-failed");
-    expect(warnSpy).toHaveBeenCalledWith("AI Gateway answer generation failed", expect.objectContaining({
-      errorCode: "gateway_http_error",
-      timeoutMs: 45_000,
-    }));
-  });
-
-  test("records invalid gateway responses without creating assistant messages", async () => {
-    await createTestUser("user-1");
-    await createDefaultAiAskModel();
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("not-json", { status: 200 })));
-    vi.doMock("@/server/auth", () => ({
-      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
-    }));
-    const { submitAiAsk } = await import("@/features/ai/ask-gate");
-
-    const result = await submitAiAsk({ question: "Đi Phú Yên 4 ngày?" });
-    const savedMessages = await testDb.select().from(messages).where(eq(messages.conversationId, result.conversationId));
-    const savedUsageEvents = await testDb.select().from(aiUsageEvents).where(eq(aiUsageEvents.conversationId, result.conversationId));
-
-    expect(result.status).toBe("answer-failed");
-    expect(savedMessages).toHaveLength(1);
-    expect(savedUsageEvents).toHaveLength(1);
-    expect(savedUsageEvents[0].errorCode).toBe("invalid_gateway_response");
-    expect(warnSpy).toHaveBeenCalledWith("AI Gateway answer generation failed", expect.objectContaining({
-      errorCode: "invalid_gateway_response",
-      reason: "json_parse_failed",
-    }));
-  });
-
-  test("logs network and environment gateway failures without request bodies or secrets", async () => {
-    await createTestUser("user-1");
-    await createDefaultAiAskModel();
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("connect ECONNREFUSED 127.0.0.1:443")));
-    vi.doMock("@/server/auth", () => ({
-      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
-    }));
-    const { submitAiAsk } = await import("@/features/ai/ask-gate");
-
-    const result = await submitAiAsk({ question: "Đi Phú Yên 4 ngày?" });
-    const loggedDetails = warnSpy.mock.calls[0][1] as Record<string, unknown>;
-
-    expect(result.status).toBe("answer-failed");
-    expect(warnSpy).toHaveBeenCalledWith("AI Gateway answer generation failed", expect.objectContaining({
-      errorCode: "gateway_network_error",
-      reason: "Error",
-    }));
-    expect(JSON.stringify(loggedDetails)).not.toContain("test-ai-gateway-key");
-    expect(JSON.stringify(loggedDetails)).not.toContain("messages");
-    expect(JSON.stringify(loggedDetails)).not.toContain("Đi Phú Yên");
-  });
-
-  test("sends bounded gateway requests", async () => {
-    await createTestUser("user-1");
-    await createDefaultAiAskModel();
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          choices: [{ message: { content: "Nên chia lịch trình nhẹ và hỏi thêm thời gian xuất phát." } }],
-          usage: { prompt_tokens: 3_000_000_000, completion_tokens: 10, total_tokens: 9 },
-        }),
-        { status: 200, headers: { "content-type": "application/json" } },
-      ),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-    vi.doMock("@/server/auth", () => ({
-      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
-    }));
-    const { submitAiAsk } = await import("@/features/ai/ask-gate");
-
-    const result = await submitAiAsk({ question: "Đi Quy Nhơn 3 ngày?" });
-    const savedUsageEvents = await testDb.select().from(aiUsageEvents).where(eq(aiUsageEvents.conversationId, result.conversationId));
-    const request = fetchMock.mock.calls[0][1] as RequestInit;
-    const body = JSON.parse(String(request.body)) as { max_tokens?: number };
-
-    expect(request.signal).toBeInstanceOf(AbortSignal);
-    expect(body.max_tokens).toBe(900);
-    expect(savedUsageEvents[0]).toMatchObject({ promptTokens: null, completionTokens: 10, totalTokens: 9 });
-  });
-
-  test("rejects unauthenticated submissions", async () => {
-    vi.doMock("@/server/auth", () => ({
-      getAuthenticatedSession: vi.fn().mockResolvedValue(null),
-    }));
-    const { submitAiAsk } = await import("@/features/ai/ask-gate");
-
-    await expect(submitAiAsk({ question: "Hà Nội đi Đà Nẵng?" })).rejects.toThrow(
-      "Authentication required for this server mutation.",
-    );
-    expect(await countConversations()).toBe(0);
-    expect(await countMessages()).toBe(0);
-    expect(await countUsageEvents()).toBe(0);
-  });
-
-  test("returns owned conversations only", async () => {
-    await createTestUser("user-1");
-    await createTestUser("user-2");
-    await createDefaultAiAskModel();
-    const getAuthenticatedSession = vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" });
-    vi.doMock("@/server/auth", () => ({
-      getAuthenticatedSession,
-    }));
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            model: "test-model",
-            choices: [{ message: { content: "Nên chia chặng và giữ lịch trình nhẹ để lái xe an toàn." } }],
-            usage: {},
-          }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        ),
-      ),
-    );
-    const { submitAiAsk } = await import("@/features/ai/ask-gate");
-    const { getOwnedConversation } = await import("@/features/chat-trips/conversations");
-    const result = await submitAiAsk({ question: "Hà Nội đi Đà Nẵng?" });
-
-    if (result.status !== "answer-created") {
-      throw new Error("Expected answer-created result");
-    }
-
-    await expect(getOwnedConversation(result.conversationId)).resolves.toMatchObject({
-      id: result.conversationId,
-      userId: "user-1",
-      messages: [
-        { id: result.userMessage.id, role: "user", content: "Hà Nội đi Đà Nẵng?" },
-        { id: result.assistantMessage.id, role: "assistant" },
-      ],
-    });
-    getAuthenticatedSession.mockResolvedValue({ userId: "user-2", email: "user-2@example.com" });
-    await expect(getOwnedConversation(result.conversationId)).resolves.toBeNull();
   });
 
   test("loads owned image attachment metadata with conversation history", async () => {
@@ -784,30 +281,348 @@ describe("AI Ask action gate", () => {
     });
   });
 
-  test("records no-model failure without calling the gateway", async () => {
+  test("returns null for conversations owned by another user", async () => {
+    await createTestUser("user-1");
+    await createTestUser("user-2");
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-2" }).returning({ id: conversations.id });
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }),
+    }));
+    const { getOwnedConversation } = await import("@/features/chat-trips/conversations");
+
+    await expect(getOwnedConversation(conversation.id)).resolves.toBeNull();
+  });
+});
+
+describe("AI Ask streaming route", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    delete process.env.AI_GATEWAY_TIMEOUT_MS;
+  });
+
+  test("rejects empty stream questions before persistence or provider calls", async () => {
     await createTestUser("user-1");
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     vi.doMock("@/server/auth", () => ({
       getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
     }));
-    const { submitAiAsk } = await import("@/features/ai/ask-gate");
+    const formData = new FormData();
+    formData.set("question", "   ");
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const result = await submitAiAsk({ question: "Hà Nội đi Huế?" });
-    const savedMessages = await testDb.select().from(messages).where(eq(messages.conversationId, result.conversationId));
-    const savedUsageEvents = await testDb.select().from(aiUsageEvents).where(eq(aiUsageEvents.conversationId, result.conversationId));
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
 
-    expect(result.status).toBe("answer-failed");
+    expect(response.status).toBe(400);
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(savedMessages).toHaveLength(1);
+    expect(await countConversations()).toBe(0);
+    expect(await countMessages()).toBe(0);
+    expect(await countUsageEvents()).toBe(0);
+  });
+
+  test("rejects over-2000-character stream questions before persistence or provider calls", async () => {
+    await createTestUser("user-1");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
+    }));
+    const formData = new FormData();
+    formData.set("question", "a".repeat(2_001));
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+
+    expect(response.status).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(await countConversations()).toBe(0);
+    expect(await countMessages()).toBe(0);
+    expect(await countUsageEvents()).toBe(0);
+  });
+
+  test("rejects unauthenticated stream submissions before side effects", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue(null),
+    }));
+    const formData = new FormData();
+    formData.set("question", "Hà Nội đi Đà Nẵng?");
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+
+    expect(response.status).toBe(401);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(await countConversations()).toBe(0);
+    expect(await countMessages()).toBe(0);
+    expect(await countUsageEvents()).toBe(0);
+  });
+
+  test("rejects text submissions when no streaming-capable model is configured before side effects", async () => {
+    await createTestUser("user-1");
+    await createDefaultAiAskModel({ supportsStreaming: false });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
+    }));
+    const formData = new FormData();
+    formData.set("question", "Hà Nội đi Huế?");
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+
+    expect(response.status).toBe(409);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(await countConversations()).toBe(0);
+    expect(await countMessages()).toBe(0);
+    expect(await countUsageEvents()).toBe(0);
+  });
+
+  test("records failed usage and creates no assistant message when the gateway returns HTTP 500", async () => {
+    await createTestUser("user-1");
+    await createDefaultAiAskModel({ id: "ai-ask-500-model", gatewayModelName: "cx/gpt-5.5-500", supportsStreaming: true });
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status: 500 })));
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
+    }));
+    const formData = new FormData();
+    formData.set("question", "Hà Nội đi Đà Nẵng?");
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const body = await response.text();
+    const savedMessages = await testDb.select().from(messages).orderBy(asc(messages.createdAt), asc(messages.id));
+    const savedUsageEvents = await testDb.select().from(aiUsageEvents);
+
+    expect(body).toContain('{"type":"error"');
+    expect(savedMessages.map((message) => message.role)).toEqual(["user"]);
     expect(savedUsageEvents).toHaveLength(1);
-    expect(savedUsageEvents[0]).toMatchObject({
-      model: "unconfigured",
-      aiGatewayModelId: null,
-      status: "failure",
-      errorCode: "no_active_ai_gateway_model",
-      estimatedTotalCostMicros: null,
-    });
+    expect(savedUsageEvents[0]).toMatchObject({ status: "failure", errorCode: "gateway_http_error", model: "cx/gpt-5.5-500", aiGatewayModelId: "ai-ask-500-model" });
+  });
+
+  test("records failed usage and creates no assistant message when the gateway network call fails", async () => {
+    await createTestUser("user-1");
+    await createDefaultAiAskModel({ supportsStreaming: true });
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("connect ECONNREFUSED 127.0.0.1:443")));
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
+    }));
+    const formData = new FormData();
+    formData.set("question", "Đi Phú Yên 4 ngày?");
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const body = await response.text();
+    const savedMessages = await testDb.select().from(messages);
+    const savedUsageEvents = await testDb.select().from(aiUsageEvents);
+
+    expect(body).toContain('{"type":"error"');
+    expect(savedMessages.map((message) => message.role)).toEqual(["user"]);
+    expect(savedUsageEvents).toHaveLength(1);
+    expect(savedUsageEvents[0]).toMatchObject({ status: "failure", errorCode: "gateway_network_error" });
+  });
+
+  test("returns 400 for malformed multipart bodies without side effects", async () => {
+    await createTestUser("user-1");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
+    }));
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", {
+      method: "POST",
+      body: "not-a-valid-multipart-body",
+      headers: { "content-type": "multipart/form-data; boundary=bad" },
+    }) as never);
+
+    expect(response.status).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(await countConversations()).toBe(0);
+    expect(await countMessages()).toBe(0);
+    expect(await countUsageEvents()).toBe(0);
+  });
+
+  test("continues an owned conversation with prior messages in the gateway prompt", async () => {
+    await createTestUser("user-1");
+    await createDefaultAiAskModel({ supportsStreaming: true });
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
+    await testDb.insert(messages).values([
+      { conversationId: conversation.id, userId: "user-1", role: "user", content: "Hà Nội đi Huế 5 ngày?" },
+      { conversationId: conversation.id, userId: "user-1", role: "assistant", content: "Kế hoạch gợi ý:\nNên chia chặng." },
+    ]);
+    const fetchMock = vi.fn().mockResolvedValue(new Response([
+      'data: {"model":"stream-model","choices":[{"delta":{"content":"Bước tiếp theo:"}}]}\n\n',
+      'data: {"choices":[{"delta":{"content":"Ngày 3 nghỉ Huế."}}]}\n\n',
+      'data: {"choices":[{"finish_reason":"stop"}]}\n\n',
+      "data: [DONE]\n\n",
+    ].join(""), { status: 200, headers: { "content-type": "text/event-stream" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
+    }));
+    const formData = new FormData();
+    formData.set("question", "Ngày thứ 3 nên nghỉ ở đâu?");
+    formData.set("conversationId", conversation.id);
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    await response.text();
+    const savedMessages = await testDb.select().from(messages).where(eq(messages.conversationId, conversation.id)).orderBy(asc(messages.createdAt), asc(messages.id));
+    const gatewayMessages = getGatewayRequestMessages(fetchMock, 0);
+
+    expect(response.status).toBe(200);
+    expect(savedMessages.map((message) => ({ role: message.role, content: message.content }))).toEqual([
+      { role: "user", content: "Hà Nội đi Huế 5 ngày?" },
+      { role: "assistant", content: "Kế hoạch gợi ý:\nNên chia chặng." },
+      { role: "user", content: "Ngày thứ 3 nên nghỉ ở đâu?" },
+      { role: "assistant", content: "Bước tiếp theo:Ngày 3 nghỉ Huế." },
+    ]);
+    expect(gatewayMessages).toMatchObject([
+      { role: "system" },
+      { role: "user", content: "Hà Nội đi Huế 5 ngày?" },
+      { role: "assistant", content: "Kế hoạch gợi ý:\nNên chia chặng." },
+      { role: "user", content: "Ngày thứ 3 nên nghỉ ở đâu?" },
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("rejects cross-user conversation continuation without side effects", async () => {
+    await createTestUser("user-1");
+    await createTestUser("user-2");
+    await createDefaultAiAskModel({ supportsStreaming: true });
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-2" }).returning({ id: conversations.id });
+    await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-2", role: "user", content: "Tin nhắn riêng của user-2" });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
+    }));
+    const formData = new FormData();
+    formData.set("question", "Cho tôi hỏi tiếp");
+    formData.set("conversationId", conversation.id);
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const body = await response.text();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(body).toContain('{"type":"error"');
+    expect(await countMessages()).toBe(1);
+    expect(await countUsageEvents()).toBe(0);
+  });
+
+  test("sends bounded streaming gateway requests with max_tokens 900", async () => {
+    await createTestUser("user-1");
+    await createDefaultAiAskModel({ supportsStreaming: true });
+    const fetchMock = vi.fn().mockResolvedValue(new Response([
+      'data: {"model":"stream-model","choices":[{"delta":{"content":"Nên đi nhẹ."}}]}\n\n',
+      'data: {"choices":[{"finish_reason":"stop"}]}\n\n',
+      "data: [DONE]\n\n",
+    ].join(""), { status: 200, headers: { "content-type": "text/event-stream" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
+    }));
+    const formData = new FormData();
+    formData.set("question", "Đi Quy Nhơn 3 ngày?");
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    await response.text();
+    const requestBody = JSON.parse(String(fetchMock.mock.calls[0][1].body)) as { max_tokens?: number; stream?: boolean };
+
+    expect(requestBody.max_tokens).toBe(900);
+    expect(requestBody.stream).toBe(true);
+  });
+
+  test("persists a truncated assistant message when finish_reason is length", async () => {
+    await createTestUser("user-1");
+    await createDefaultAiAskModel({ supportsStreaming: true });
+    const fetchMock = vi.fn().mockResolvedValue(new Response([
+      'data: {"choices":[{"delta":{"content":"Kế hoạch"}}]}\n\n',
+      'data: {"choices":[{"delta":{"content":" dài"}}]}\n\n',
+      'data: {"usage":{"prompt_tokens":40,"completion_tokens":900,"total_tokens":940}}\n\n',
+      'data: {"choices":[{"finish_reason":"length"}]}\n\n',
+      "data: [DONE]\n\n",
+    ].join(""), { status: 200, headers: { "content-type": "text/event-stream" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
+    }));
+    const formData = new FormData();
+    formData.set("question", "Kể cho tôi nghe lịch trình chi tiết 30 ngày?");
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const body = await response.text();
+    const savedMessages = await testDb.select().from(messages).orderBy(asc(messages.createdAt), asc(messages.id));
+    const savedUsageEvents = await testDb.select().from(aiUsageEvents);
+
+    expect(response.status).toBe(200);
+    expect(body).toContain('{"type":"done"');
+    expect(savedMessages.map((message) => ({ role: message.role, content: message.content }))).toEqual([
+      { role: "user", content: "Kể cho tôi nghe lịch trình chi tiết 30 ngày?" },
+      { role: "assistant", content: "Kế hoạch dài" },
+    ]);
+    expect(savedUsageEvents[0]).toMatchObject({ status: "success", completionTokens: 900 });
+  });
+
+  test("persists the assistant message when the stream ends with finish_reason stop but no DONE marker", async () => {
+    await createTestUser("user-1");
+    await createDefaultAiAskModel({ supportsStreaming: true });
+    const fetchMock = vi.fn().mockResolvedValue(new Response([
+      'data: {"choices":[{"delta":{"content":"Gợi ý chặng nhẹ."}}]}\n\n',
+      'data: {"choices":[{"finish_reason":"stop"}]}\n\n',
+    ].join(""), { status: 200, headers: { "content-type": "text/event-stream" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
+    }));
+    const formData = new FormData();
+    formData.set("question", "Đi Tây Bắc 3 ngày?");
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const body = await response.text();
+    const savedMessages = await testDb.select().from(messages).orderBy(asc(messages.createdAt), asc(messages.id));
+
+    expect(response.status).toBe(200);
+    expect(body).toContain('{"type":"done"');
+    expect(savedMessages).toHaveLength(2);
+    expect(savedMessages[1]).toMatchObject({ role: "assistant", content: "Gợi ý chặng nhẹ." });
+  });
+
+  test("ignores SSE event keepalive lines without failing the stream", async () => {
+    await createTestUser("user-1");
+    await createDefaultAiAskModel({ supportsStreaming: true });
+    const fetchMock = vi.fn().mockResolvedValue(new Response([
+      "event: ping\n\n",
+      'data: {"choices":[{"delta":{"content":"Kế hoạch gợi ý."}}]}\n\n',
+      'data: {"choices":[{"finish_reason":"stop"}]}\n\n',
+      "data: [DONE]\n\n",
+    ].join(""), { status: 200, headers: { "content-type": "text/event-stream" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
+    }));
+    const formData = new FormData();
+    formData.set("question", "Đi Hà Giang?");
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const body = await response.text();
+    const savedMessages = await testDb.select().from(messages).orderBy(asc(messages.createdAt), asc(messages.id));
+
+    expect(response.status).toBe(200);
+    expect(body).toContain('{"type":"done"');
+    expect(savedMessages[1]).toMatchObject({ role: "assistant", content: "Kế hoạch gợi ý." });
   });
 
   test("streams text and image input through the route before persisting the final assistant message", async () => {
@@ -904,7 +719,7 @@ describe("AI Ask action gate", () => {
     expect(warnSpy).toHaveBeenCalledWith("AI Gateway answer generation failed", expect.objectContaining({ reason: "stream_parse_failed" }));
   });
 
-  test("does not persist assistant messages for truncated streams without done", async () => {
+  test("does not persist assistant messages for truncated streams without a terminal signal", async () => {
     await createTestUser("user-1");
     await createDefaultAiAskModel({ gatewayModelName: "cx/gpt-5.5-stream", supportsStreaming: true });
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
