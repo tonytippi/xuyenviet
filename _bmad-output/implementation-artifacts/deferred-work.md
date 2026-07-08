@@ -49,3 +49,9 @@
 - source_spec: `spec-3-6-delete-chat-sessions.md`
   summary: Add external object-storage cleanup before non-null `message_image_attachments.storage_key` is used in production.
   evidence: Story 3.6 deletes image attachment metadata through conversation cascades, but no object-storage deletion helper exists yet. Current stream inserts `storageKey: null`, so this is not reachable today; once non-null storage keys are introduced, chat deletion must delete or enqueue deletion of the referenced objects before losing the pointer.
+
+## Future brainstorm: retrieval and tool-calling strategy
+
+- source_spec: `epic-3-retrospective`
+  summary: Revisit how XuyenViet should use large backend knowledge effectively before or during Epic 5 retrieval/provenance work.
+  evidence: During the Epic 3 retrospective, Tony flagged that user context and backend knowledge must stay compact but sufficient. Current MVP direction remains server-controlled retrieval: store structured knowledge in PostgreSQL, retrieve approved relevant items server-side, assemble a bounded data-only source bundle, and persist provenance independently. Future brainstorm should compare this against model tool-calling for agentic workflows, including auth/role enforcement, raw-source privacy, approved-only retrieval, source-bundle size, ranking, cost, latency, and provenance observability.

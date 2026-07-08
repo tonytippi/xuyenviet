@@ -1,5 +1,5 @@
 # generated: 2026-07-05
-# last_updated: 2026-07-07
+# last_updated: 2026-07-08
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -41,7 +41,7 @@
 # - Retrospective appends its action items to action_items; sprint-status surfaces open ones
 
 generated: 2026-07-05
-last_updated: 2026-07-07
+last_updated: 2026-07-08
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -68,7 +68,7 @@ development_status:
   2-7-stream-ai-ask-responses-and-accept-traveler-image-input: done
   # Covers completed Stories 2.0-2.7; Story 2.7 completed as the post-epic streaming/image follow-up.
   epic-2-retrospective: done
-  epic-3: in-progress
+  epic-3: done
   3-1-manage-chat-sessions: done
   3-2-create-trip-projects: done
   3-3-extract-chat-and-trip-context: done
@@ -76,7 +76,7 @@ development_status:
   3-5-correct-trip-details-through-chat: done
   3-6-delete-chat-sessions: done
   3-7-delete-trip-projects: done
-  epic-3-retrospective: optional
+  epic-3-retrospective: done
   epic-4: backlog
   4-1-submit-travel-source-for-ai-reading: backlog
   4-2-ai-extracts-knowledge-drafts-from-source: backlog
@@ -108,3 +108,25 @@ development_status:
   6-5-run-public-mvp-answer-evaluation-prompt-set: backlog
   6-6-public-mvp-quality-dashboard: backlog
   epic-6-retrospective: optional
+
+action_items:
+  - epic: 3
+    action: Create a context digest policy before retrieval/provenance work.
+    owner: Winston and Amelia
+    status: open
+  - epic: 3
+    action: Keep server-controlled retrieval as the MVP default and defer model tool-calling to a future brainstorm unless explicitly approved.
+    owner: Winston and Amelia
+    status: open
+  - epic: 3
+    action: Define raw-source privacy boundaries in Story 4.1 so raw operator-only material cannot leak into traveler AI Ask prompts.
+    owner: Amelia and Tony
+    status: open
+  - epic: 3
+    action: Resolve or explicitly defer same-conversation concurrency hardening before deeper retrieval/context orchestration.
+    owner: Winston and Amelia
+    status: open
+  - epic: 3
+    action: Confirm Epic 1 manual OAuth/admin/referral smoke leftovers or mark obsolete.
+    owner: Tony
+    status: open
