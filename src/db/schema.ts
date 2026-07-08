@@ -51,6 +51,9 @@ export type KnowledgeConfidence = (typeof knowledgeConfidenceValues)[number];
 export const knowledgeSourceSupportValues = ["primary", "supporting", "conflicting"] as const;
 export type KnowledgeSourceSupport = (typeof knowledgeSourceSupportValues)[number];
 
+export const knowledgeSearchDocumentStatusValues = ["active", "disabled", "stale"] as const;
+export type KnowledgeSearchDocumentStatus = (typeof knowledgeSearchDocumentStatusValues)[number];
+
 export const knowledgeSuggestionActionValues = ["create", "update", "conflict", "duplicate", "no_action"] as const;
 export type KnowledgeSuggestionAction = (typeof knowledgeSuggestionActionValues)[number];
 
@@ -613,6 +616,39 @@ export const knowledgeCardSources = pgTable(
   ],
 );
 
+export const knowledgeCardSearchDocuments = pgTable(
+  "knowledge_card_search_documents",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    knowledgeCardId: text("knowledge_card_id")
+      .notNull()
+      .references(() => knowledgeCards.id, { onDelete: "cascade" }),
+    status: text("status").$type<KnowledgeSearchDocumentStatus>().default("active").notNull(),
+    searchableText: text("searchable_text").notNull(),
+    textHash: text("text_hash").notNull(),
+    sourceCount: integer("source_count").notNull(),
+    confidence: text("confidence").$type<KnowledgeConfidence>().notNull(),
+    freshnessSensitive: boolean("freshness_sensitive").notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
+    disabledAt: timestamp("disabled_at", { mode: "date" }),
+  },
+  (document) => [
+    uniqueIndex("knowledge_card_search_documents_card_idx").on(document.knowledgeCardId),
+    uniqueIndex("knowledge_card_search_documents_active_card_idx").on(document.knowledgeCardId).where(sql`${document.status} = 'active'`),
+    index("knowledge_card_search_documents_status_updated_idx").on(document.status, document.updatedAt),
+    index("knowledge_card_search_documents_confidence_idx").on(document.confidence),
+    check("knowledge_card_search_documents_status_check", sql`${document.status} in ('active', 'disabled', 'stale')`),
+    check("knowledge_card_search_documents_confidence_check", sql`${document.confidence} in ('unverified', 'community', 'curated', 'partner', 'official')`),
+    check("knowledge_card_search_documents_text_not_empty_check", sql`length(btrim(${document.searchableText})) > 0`),
+    check("knowledge_card_search_documents_hash_check", sql`${document.textHash} ~ '^[a-f0-9]{64}$'`),
+    check("knowledge_card_search_documents_source_count_check", sql`${document.sourceCount} > 0`),
+    check("knowledge_card_search_documents_disabled_at_check", sql`(${document.status} = 'active' and ${document.disabledAt} is null) or (${document.status} <> 'active' and ${document.disabledAt} is not null)`),
+  ],
+);
+
 export const knowledgeSourceSuggestions = pgTable(
   "knowledge_source_suggestions",
   {
@@ -782,6 +818,7 @@ export const schema = {
   rawSourceMaterial,
   knowledgeCards,
   knowledgeCardSources,
+  knowledgeCardSearchDocuments,
   knowledgeSourceSuggestions,
   knowledgeSeedBatches,
   knowledgeSeedBatchItems,
