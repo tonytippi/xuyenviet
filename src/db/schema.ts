@@ -54,6 +54,9 @@ export type KnowledgeSourceSupport = (typeof knowledgeSourceSupportValues)[numbe
 export const knowledgeSuggestionActionValues = ["create", "update", "conflict", "duplicate", "no_action"] as const;
 export type KnowledgeSuggestionAction = (typeof knowledgeSuggestionActionValues)[number];
 
+export const knowledgeSeedBatchItemStatusValues = ["pending", "reading", "extracted", "needs_review", "approved", "failed", "duplicate", "rejected"] as const;
+export type KnowledgeSeedBatchItemStatus = (typeof knowledgeSeedBatchItemStatusValues)[number];
+
 export const chatContextFieldValues = [
   "origin",
   "destination",
@@ -648,6 +651,58 @@ export const knowledgeSourceSuggestions = pgTable(
   ],
 );
 
+export const knowledgeSeedBatches = pgTable(
+  "knowledge_seed_batches",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    label: text("label"),
+    submittedByUserId: text("submitted_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (batch) => [
+    index("knowledge_seed_batches_created_at_idx").on(batch.createdAt),
+    index("knowledge_seed_batches_submitted_by_user_id_idx").on(batch.submittedByUserId),
+    check("knowledge_seed_batches_label_check", sql`${batch.label} is null or (length(btrim(${batch.label})) between 1 and 160 and position(chr(10) in ${batch.label}) = 0 and position(chr(13) in ${batch.label}) = 0)`),
+  ],
+);
+
+export const knowledgeSeedBatchItems = pgTable(
+  "knowledge_seed_batch_items",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    batchId: text("batch_id")
+      .notNull()
+      .references(() => knowledgeSeedBatches.id, { onDelete: "cascade" }),
+    lineNumber: integer("line_number").notNull(),
+    submittedUrl: text("submitted_url").notNull(),
+    canonicalUrl: text("canonical_url"),
+    sourceId: text("source_id").references(() => sources.id, { onDelete: "set null" }),
+    status: text("status").$type<KnowledgeSeedBatchItemStatus>().notNull(),
+    errorSummary: text("error_summary"),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (item) => [
+    index("knowledge_seed_batch_items_batch_id_idx").on(item.batchId),
+    index("knowledge_seed_batch_items_source_id_idx").on(item.sourceId),
+    index("knowledge_seed_batch_items_status_idx").on(item.status),
+    uniqueIndex("knowledge_seed_batch_items_batch_line_idx").on(item.batchId, item.lineNumber),
+    check("knowledge_seed_batch_items_status_check", sql`${item.status} in ('pending', 'reading', 'extracted', 'needs_review', 'approved', 'failed', 'duplicate', 'rejected')`),
+    check("knowledge_seed_batch_items_line_number_check", sql`${item.lineNumber} > 0`),
+    check("knowledge_seed_batch_items_submitted_url_check", sql`length(btrim(${item.submittedUrl})) between 1 and 2048`),
+    check("knowledge_seed_batch_items_canonical_url_check", sql`${item.canonicalUrl} is null or length(btrim(${item.canonicalUrl})) between 1 and 2048`),
+    check("knowledge_seed_batch_items_error_summary_check", sql`${item.errorSummary} is null or (length(btrim(${item.errorSummary})) between 1 and 500 and position(chr(10) in ${item.errorSummary}) = 0 and position(chr(13) in ${item.errorSummary}) = 0)`),
+    check("knowledge_seed_batch_items_failure_shape_check", sql`${item.status} <> 'failed' or ${item.errorSummary} is not null`),
+    check("knowledge_seed_batch_items_source_shape_check", sql`${item.status} in ('failed', 'duplicate') or ${item.sourceId} is not null`),
+  ],
+);
+
 export const aiUsageEvents = pgTable(
   "ai_usage_events",
   {
@@ -728,6 +783,8 @@ export const schema = {
   knowledgeCards,
   knowledgeCardSources,
   knowledgeSourceSuggestions,
+  knowledgeSeedBatches,
+  knowledgeSeedBatchItems,
   referralCodes,
   referralAttributions,
   tripProjects,

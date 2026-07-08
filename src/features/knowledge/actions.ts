@@ -6,6 +6,7 @@ import { rawSourceMaterial, sources } from "@/db/schema";
 import { AdminAuthorizationError } from "@/server/auth";
 import { runAuditedAdminMutation } from "@/server/mutations";
 
+import { isKnowledgeBatchIntakeError, submitKnowledgeSeedUrlBatch as submitKnowledgeSeedUrlBatchService } from "./batch-intake";
 import { extractKnowledgeDraftsFromSource as extractKnowledgeDraftsFromSourceService, isKnowledgeExtractionError } from "./extraction";
 import {
   isKnowledgeDraftReviewError,
@@ -69,6 +70,10 @@ export async function rejectKnowledgeDraft(draftId: string) {
 
 export async function suggestKnowledgeFromSourceUrl(sourceId: string) {
   return suggestKnowledgeFromSourceUrlService(sourceId);
+}
+
+export async function submitKnowledgeSeedUrlBatch(input: Parameters<typeof submitKnowledgeSeedUrlBatchService>[0]) {
+  return submitKnowledgeSeedUrlBatchService(input);
 }
 
 export async function updateKnowledgeDraftForm(formData: FormData) {
@@ -203,6 +208,38 @@ export async function submitTravelSourceForm(formData: FormData) {
   }
 
   redirect(`/admin/knowledge/intake?success=1&sourceId=${encodeURIComponent(source?.id ?? "")}`);
+}
+
+export async function submitKnowledgeSeedUrlBatchForm(formData: FormData) {
+  let result: Awaited<ReturnType<typeof submitKnowledgeSeedUrlBatch>> | null = null;
+  let failureMessage: string | null = null;
+
+  try {
+    result = await submitKnowledgeSeedUrlBatch({
+      urls: getOptionalFormString(formData, "batchUrls") ?? "",
+      label: getOptionalFormString(formData, "batchLabel"),
+      publisher: getOptionalFormString(formData, "batchPublisher"),
+      collectedDate: getOptionalFormString(formData, "batchCollectedDate"),
+    });
+  } catch (error) {
+    if (error instanceof AdminAuthorizationError || (error instanceof Error && error.name === "AdminAuthorizationError")) {
+      throw error;
+    }
+
+    failureMessage = isKnowledgeBatchIntakeError(error) && error instanceof Error ? error.message : "Không thể nạp batch URL. Vui lòng kiểm tra lại dữ liệu.";
+  }
+
+  if (failureMessage) {
+    redirect(`/admin/knowledge/intake?batchError=${encodeURIComponent(failureMessage)}`);
+  }
+
+  if (!result) {
+    redirect(`/admin/knowledge/intake?batchError=${encodeURIComponent("Không thể nạp batch URL. Vui lòng thử lại.")}`);
+  }
+
+  redirect(
+    `/admin/knowledge/intake?batchId=${encodeURIComponent(result.batchId)}&batchTotal=${result.totalItems}&batchPending=${result.pendingCount}&batchFailed=${result.failedCount}&batchDuplicate=${result.duplicateCount}`,
+  );
 }
 
 function getOptionalFormString(formData: FormData, key: string) {

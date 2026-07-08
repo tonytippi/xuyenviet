@@ -1,6 +1,7 @@
 import Link from "next/link";
 
-import { extractKnowledgeDraftsFromSourceForm, submitTravelSourceForm, suggestKnowledgeFromSourceUrlForm } from "@/features/knowledge/actions";
+import { extractKnowledgeDraftsFromSourceForm, submitKnowledgeSeedUrlBatchForm, submitTravelSourceForm, suggestKnowledgeFromSourceUrlForm } from "@/features/knowledge/actions";
+import { listRecentKnowledgeSeedBatches } from "@/features/knowledge/batch-intake";
 import { listKnowledgeSourceSuggestionTraces } from "@/features/knowledge/suggestions";
 
 type KnowledgeIntakePageProps = {
@@ -8,6 +9,12 @@ type KnowledgeIntakePageProps = {
     error?: string;
     extractError?: string;
     extracted?: string;
+    batchDuplicate?: string;
+    batchError?: string;
+    batchFailed?: string;
+    batchId?: string;
+    batchPending?: string;
+    batchTotal?: string;
     suggestError?: string;
     suggested?: string;
     suggestionActions?: string;
@@ -19,6 +26,7 @@ type KnowledgeIntakePageProps = {
 export default async function KnowledgeIntakePage({ searchParams }: KnowledgeIntakePageProps) {
   const params = await searchParams;
   const suggestionTraces = params.sourceId ? await listKnowledgeSourceSuggestionTraces(params.sourceId) : [];
+  const recentBatches = await listRecentKnowledgeSeedBatches();
 
   return (
     <div>
@@ -92,6 +100,19 @@ export default async function KnowledgeIntakePage({ searchParams }: KnowledgeInt
         </section>
       ) : null}
 
+      {params.batchError ? (
+        <p className="mt-6 rounded-2xl border border-[#d99a93] bg-[#fff0ee] px-4 py-3 font-semibold text-[#9b2f29]" role="alert">
+          {params.batchError}
+        </p>
+      ) : null}
+      {params.batchId ? (
+        <div className="mt-6 rounded-2xl border border-[#8fb59f] bg-[#edf7ef] px-4 py-3 font-semibold text-[#1f5f46]" role="status">
+          <p>
+            Đã tạo batch {params.batchId}: {params.batchTotal ?? 0} dòng, {params.batchPending ?? 0} pending, {params.batchFailed ?? 0} lỗi, {params.batchDuplicate ?? 0} trùng.
+          </p>
+        </div>
+      ) : null}
+
       <form action={submitTravelSourceForm} className="mt-8 grid gap-6 rounded-[1.5rem] border border-[#d8c9ad] bg-white/70 p-5 sm:p-6">
         <div className="grid gap-2">
           <label className="font-semibold text-[#17342c]" htmlFor="url">
@@ -162,6 +183,72 @@ export default async function KnowledgeIntakePage({ searchParams }: KnowledgeInt
           Lưu nguồn để AI đọc sau
         </button>
       </form>
+
+      <section className="mt-8 rounded-[1.5rem] border border-[#d8c9ad] bg-[#fbf7ed] p-5 sm:p-6">
+        <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#8c4f13]">Bước 4.5</p>
+        <h2 className="mt-3 text-2xl font-semibold tracking-[-0.03em] text-[#17342c]">Nạp batch URL seed</h2>
+        <p className="mt-3 max-w-2xl leading-7 text-[#4f625a]">
+          Dán tối đa 50 URL, mỗi dòng một nguồn. Hệ thống chỉ tạo source/raw metadata và trạng thái từng dòng; không crawl, không gọi AI, không duyệt thẻ.
+        </p>
+        <form action={submitKnowledgeSeedUrlBatchForm} className="mt-5 grid gap-4">
+          <div className="grid gap-2">
+            <label className="font-semibold text-[#17342c]" htmlFor="batchUrls">
+              Danh sách URL seed
+            </label>
+            <textarea
+              className="min-h-44 rounded-2xl border border-[#d8c9ad] bg-white/80 px-4 py-3 text-base outline-none focus:ring-4 focus:ring-[#e5bd82]"
+              id="batchUrls"
+              name="batchUrls"
+              placeholder="https://example.com/dia-diem-1&#10;https://example.com/dia-diem-2"
+              required
+            />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <input className="min-h-12 rounded-2xl border border-[#d8c9ad] bg-white/80 px-4 text-base outline-none focus:ring-4 focus:ring-[#e5bd82]" maxLength={160} name="batchLabel" placeholder="Nhãn batch" />
+            <input className="min-h-12 rounded-2xl border border-[#d8c9ad] bg-white/80 px-4 text-base outline-none focus:ring-4 focus:ring-[#e5bd82]" maxLength={160} name="batchPublisher" placeholder="Publisher chung nếu có" />
+            <input className="min-h-12 rounded-2xl border border-[#d8c9ad] bg-white/80 px-4 text-base outline-none focus:ring-4 focus:ring-[#e5bd82]" name="batchCollectedDate" type="date" />
+          </div>
+          <button
+            className="min-h-12 w-fit rounded-2xl bg-[#1f5f46] px-5 py-4 text-base font-semibold text-white shadow-[0_12px_30px_rgba(31,95,70,0.22)] transition hover:bg-[#194d39] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]"
+            type="submit"
+          >
+            Tạo batch seed URL
+          </button>
+        </form>
+      </section>
+
+      {recentBatches.length > 0 ? (
+        <section className="mt-8 rounded-[1.5rem] border border-[#d8c9ad] bg-white/70 p-5 sm:p-6">
+          <h2 className="text-2xl font-semibold tracking-[-0.03em] text-[#17342c]">Batch URL gần đây</h2>
+          <div className="mt-4 grid gap-4">
+            {recentBatches.map((batch) => (
+              <article key={batch.id} className="rounded-2xl border border-[#e2d3ba] bg-[#fbf7ed] p-4">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <p className="font-semibold text-[#17342c]">{batch.label ?? "Batch seed URL"}</p>
+                    <p className="mt-1 text-xs text-[#4f625a]">{batch.id}</p>
+                  </div>
+                  <p className="text-sm font-semibold text-[#1f5f46]">
+                    Pending {batch.counts.pending} · Reading {batch.counts.reading} · Review {batch.counts.needs_review} · Approved {batch.counts.approved} · Lỗi {batch.counts.failed + batch.counts.duplicate + batch.counts.rejected}
+                  </p>
+                </div>
+                <div className="mt-3 grid gap-2">
+                  {batch.items.map((item) => (
+                    <div key={item.id} className="rounded-xl border border-[#e2d3ba] bg-white/70 p-3 text-sm">
+                      <p className="break-all font-semibold text-[#17342c]">
+                        Dòng {item.lineNumber}: {item.canonicalUrl ?? item.submittedUrl}
+                      </p>
+                      <p className="mt-1 uppercase tracking-[0.12em] text-[#8c4f13]">{item.status}</p>
+                      {item.errorSummary ? <p className="mt-1 text-[#9b2f29]">{item.errorSummary}</p> : null}
+                      {item.sourceId ? <p className="mt-1 text-xs text-[#4f625a]">Source: {item.sourceId}</p> : null}
+                    </div>
+                  ))}
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <section className="mt-8 rounded-[1.5rem] border border-[#d8c9ad] bg-[#f4ead7] p-5 sm:p-6">
         <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#8c4f13]">Bước 4.2</p>

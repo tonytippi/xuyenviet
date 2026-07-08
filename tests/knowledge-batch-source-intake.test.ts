@@ -1,0 +1,193 @@
+import { eq, sql } from "drizzle-orm";
+import { beforeEach, describe, expect, test, vi } from "vitest";
+
+import { auditEvents, knowledgeCardSources, knowledgeCards, knowledgeSeedBatchItems, knowledgeSeedBatches, knowledgeSourceSuggestions, rawSourceMaterial, sources, userRoles, users, type UserRole } from "@/db/schema";
+
+import { testDb } from "./helpers/db";
+
+const authMock = vi.fn();
+
+vi.mock("@/auth", () => ({
+  auth: authMock,
+  signIn: vi.fn(),
+  signOut: vi.fn(),
+}));
+
+async function createUser(userId: string, roles: UserRole[] = []) {
+  await testDb.insert(users).values({ id: userId, email: `${userId}@example.com` });
+
+  if (roles.length > 0) {
+    await testDb.insert(userRoles).values(roles.map((role) => ({ userId, role })));
+  }
+}
+
+describe("knowledge batch source intake", () => {
+  beforeEach(() => {
+    authMock.mockReset();
+  });
+
+  test("operator batch intake persists valid URLs and failed invalid rows without rollback", async () => {
+    await createUser("batch-operator", ["operator"]);
+    authMock.mockResolvedValue({ user: { id: "batch-operator", email: "batch-operator@example.com" } });
+    const { submitKnowledgeSeedUrlBatch } = await import("@/features/knowledge/actions");
+
+    const result = await submitKnowledgeSeedUrlBatch({
+      urls: "https://example.com/a?utm_source=x&keep=1\nnot-a-url\nhttps://fb.watch/post?fbclid=abc",
+      label: "Seed miền Trung",
+      publisher: "Curated list",
+      collectedDate: "2026-07-08",
+    });
+
+    expect(result).toMatchObject({ totalItems: 3, pendingCount: 2, failedCount: 1, duplicateCount: 0 });
+    await expect(testDb.select().from(knowledgeSeedBatches).where(eq(knowledgeSeedBatches.id, result.batchId))).resolves.toMatchObject([{ label: "Seed miền Trung" }]);
+    await expect(testDb.select().from(sources)).resolves.toHaveLength(2);
+    await expect(testDb.select().from(rawSourceMaterial)).resolves.toHaveLength(2);
+
+    const items = await testDb.select().from(knowledgeSeedBatchItems).orderBy(knowledgeSeedBatchItems.lineNumber);
+    expect(items).toMatchObject([
+      { lineNumber: 1, status: "pending", canonicalUrl: "https://example.com/a?keep=1", errorSummary: null },
+      { lineNumber: 2, status: "failed", canonicalUrl: null, sourceId: null },
+      { lineNumber: 3, status: "pending", canonicalUrl: "https://fb.watch/post" },
+    ]);
+    expect(items[1].errorSummary).toContain("URL nguồn không hợp lệ");
+    await expect(testDb.select().from(auditEvents).where(eq(auditEvents.targetType, "knowledge_seed_batch"))).resolves.toHaveLength(1);
+  });
+
+  test("canonical duplicates within one batch create one source and a duplicate item", async () => {
+    await createUser("duplicate-operator", ["operator"]);
+    authMock.mockResolvedValue({ user: { id: "duplicate-operator", email: "duplicate-operator@example.com" } });
+    const { submitKnowledgeSeedUrlBatch } = await import("@/features/knowledge/actions");
+
+    const result = await submitKnowledgeSeedUrlBatch({ urls: "https://example.com/a?utm_campaign=x&b=2\nhttps://example.com/a?b=2" });
+
+    expect(result).toMatchObject({ totalItems: 2, pendingCount: 1, failedCount: 0, duplicateCount: 1 });
+    await expect(testDb.select().from(sources)).resolves.toHaveLength(1);
+    const items = await testDb.select().from(knowledgeSeedBatchItems).orderBy(knowledgeSeedBatchItems.lineNumber);
+    expect(items).toMatchObject([
+      { lineNumber: 1, status: "pending", canonicalUrl: "https://example.com/a?b=2" },
+      { lineNumber: 2, status: "duplicate", canonicalUrl: "https://example.com/a?b=2", sourceId: null },
+    ]);
+    expect(items[1].errorSummary).toContain("URL trùng trong cùng batch");
+  });
+
+  test("recent batch listing derives later statuses from linked cards and suggestion traces", async () => {
+    await createUser("status-operator", ["operator"]);
+    authMock.mockResolvedValue({ user: { id: "status-operator", email: "status-operator@example.com" } });
+    const { listRecentKnowledgeSeedBatches, submitKnowledgeSeedUrlBatch } = await import("@/features/knowledge/batch-intake");
+
+    await submitKnowledgeSeedUrlBatch({ urls: "https://example.com/draft\nhttps://example.com/approved\nhttps://example.com/duplicate" });
+    const items = await testDb.select().from(knowledgeSeedBatchItems).orderBy(knowledgeSeedBatchItems.lineNumber);
+    const draftSourceId = items[0].sourceId ?? "";
+    const approvedSourceId = items[1].sourceId ?? "";
+    const duplicateSourceId = items[2].sourceId ?? "";
+
+    const [draftCard] = await testDb
+      .insert(knowledgeCards)
+      .values({
+        id: "draft-card",
+        status: "draft",
+        type: "place",
+        title: "Điểm dừng cần duyệt",
+        locationName: "Đà Nẵng",
+        summary: "Bản nháp cần vận hành duyệt.",
+        confidence: "unverified",
+        aiPromptVersion: "test",
+        createdByUserId: "status-operator",
+      })
+      .returning({ id: knowledgeCards.id });
+    await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: draftCard.id, sourceId: draftSourceId, supportLevel: "primary" });
+
+    const [approvedCard] = await testDb
+      .insert(knowledgeCards)
+      .values({
+        id: "approved-card",
+        status: "approved",
+        needsReview: false,
+        type: "place",
+        title: "Điểm đã duyệt",
+        locationName: "Huế",
+        summary: "Thẻ đã được duyệt.",
+        confidence: "curated",
+        aiPromptVersion: "test",
+        createdByUserId: "status-operator",
+      })
+      .returning({ id: knowledgeCards.id });
+    await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: approvedCard.id, sourceId: approvedSourceId, supportLevel: "primary" });
+    await testDb.insert(knowledgeSourceSuggestions).values({
+      sourceId: duplicateSourceId,
+      action: "duplicate",
+      targetCardId: approvedCard.id,
+      rationale: "Nguồn trùng nội dung hiện có.",
+      aiPromptVersion: "test",
+      createdByUserId: "status-operator",
+    });
+
+    const [batch] = await listRecentKnowledgeSeedBatches();
+    expect(batch.items.map((item) => item.status)).toEqual(["needs_review", "approved", "duplicate"]);
+    expect(batch.counts).toMatchObject({ needs_review: 1, approved: 1, duplicate: 1, pending: 0, reading: 0 });
+    expect(batch.items[0]).not.toHaveProperty("rawText");
+
+    const persistedItems = await testDb.select().from(knowledgeSeedBatchItems).orderBy(knowledgeSeedBatchItems.lineNumber);
+    expect(persistedItems.map((item) => item.status)).toEqual(["needs_review", "approved", "duplicate"]);
+  });
+
+  test("batch intake handles carriage-return lines and oversized URLs as item failures", async () => {
+    await createUser("edge-operator", ["operator"]);
+    authMock.mockResolvedValue({ user: { id: "edge-operator", email: "edge-operator@example.com" } });
+    const { submitKnowledgeSeedUrlBatch } = await import("@/features/knowledge/actions");
+    const oversizedUrl = `https://example.com/${"x".repeat(2050)}`;
+
+    const result = await submitKnowledgeSeedUrlBatch({ urls: `https://example.com/a\r${oversizedUrl}` });
+
+    expect(result).toMatchObject({ totalItems: 2, pendingCount: 1, failedCount: 1 });
+    await expect(testDb.select().from(sources)).resolves.toHaveLength(1);
+    const items = await testDb.select().from(knowledgeSeedBatchItems).orderBy(knowledgeSeedBatchItems.lineNumber);
+    expect(items).toMatchObject([
+      { lineNumber: 1, status: "pending", canonicalUrl: "https://example.com/a" },
+      { lineNumber: 2, status: "failed", canonicalUrl: null, sourceId: null },
+    ]);
+    expect(items[1].errorSummary).toContain("URL nguồn quá dài");
+  });
+
+  test("traveler is denied before parsing, validation, inserts, or audit", async () => {
+    await createUser("batch-traveler", ["traveler"]);
+    authMock.mockResolvedValue({ user: { id: "batch-traveler", email: "batch-traveler@example.com" } });
+    const { submitKnowledgeSeedUrlBatch } = await import("@/features/knowledge/actions");
+
+    await expect(submitKnowledgeSeedUrlBatch({ urls: "not-a-url" })).rejects.toMatchObject({ name: "AdminAuthorizationError" });
+    await expect(testDb.select().from(knowledgeSeedBatches)).resolves.toHaveLength(0);
+    await expect(testDb.select().from(knowledgeSeedBatchItems)).resolves.toHaveLength(0);
+    await expect(testDb.select().from(sources)).resolves.toHaveLength(0);
+    await expect(testDb.select().from(rawSourceMaterial)).resolves.toHaveLength(0);
+    await expect(testDb.select().from(auditEvents)).resolves.toHaveLength(0);
+  });
+
+  test("batch cap fails closed with no side effects", async () => {
+    await createUser("cap-operator", ["operator"]);
+    authMock.mockResolvedValue({ user: { id: "cap-operator", email: "cap-operator@example.com" } });
+    const { submitKnowledgeSeedUrlBatch } = await import("@/features/knowledge/actions");
+    const urls = Array.from({ length: 51 }, (_, index) => `https://example.com/${index}`).join("\n");
+
+    await expect(submitKnowledgeSeedUrlBatch({ urls })).rejects.toThrow("tối đa 50 URL");
+    await expect(testDb.select().from(knowledgeSeedBatches)).resolves.toHaveLength(0);
+    await expect(testDb.select().from(knowledgeSeedBatchItems)).resolves.toHaveLength(0);
+    await expect(testDb.select().from(sources)).resolves.toHaveLength(0);
+  });
+
+  test("database rejects invalid batch item constraints", async () => {
+    await createUser("constraint-operator", ["operator"]);
+    await testDb.execute(sql`insert into knowledge_seed_batches (id, submitted_by_user_id) values ('constraint-batch', 'constraint-operator')`);
+
+    await expect(
+      testDb.execute(sql`insert into knowledge_seed_batch_items (id, batch_id, line_number, submitted_url, status) values ('bad-status', 'constraint-batch', 1, 'https://example.com', 'unknown')`),
+    ).rejects.toThrow();
+
+    await expect(
+      testDb.execute(sql`insert into knowledge_seed_batch_items (id, batch_id, line_number, submitted_url, status) values ('bad-failed', 'constraint-batch', 1, 'https://example.com', 'failed')`),
+    ).rejects.toThrow();
+
+    await expect(
+      testDb.execute(sql`insert into knowledge_seed_batch_items (id, batch_id, line_number, submitted_url, status) values ('bad-source-shape', 'constraint-batch', 2, 'https://example.com', 'pending')`),
+    ).rejects.toThrow();
+  });
+});

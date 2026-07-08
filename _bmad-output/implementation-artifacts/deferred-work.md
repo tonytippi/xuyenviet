@@ -55,3 +55,9 @@
 - source_spec: `epic-3-retrospective`
   summary: Revisit how XuyenViet should use large backend knowledge effectively before or during Epic 5 retrieval/provenance work.
   evidence: During the Epic 3 retrospective, Tony flagged that user context and backend knowledge must stay compact but sufficient. Current MVP direction remains server-controlled retrieval: store structured knowledge in PostgreSQL, retrieve approved relevant items server-side, assemble a bounded data-only source bundle, and persist provenance independently. Future brainstorm should compare this against model tool-calling for agentic workflows, including auth/role enforcement, raw-source privacy, approved-only retrieval, source-bundle size, ranking, cost, latency, and provenance observability.
+- source_spec: `spec-4-5-batch-seed-source-url-intake.md`
+  summary: Define cross-batch/global duplicate policy for canonical source URLs.
+  evidence: Story 4.5 rejects duplicate canonical URLs within one submitted batch, but does not decide whether a canonical URL already submitted in another batch or single-source intake should be skipped, linked, or allowed as separate provenance.
+- source_spec: `spec-4-5-batch-seed-source-url-intake.md`
+  summary: Decide whether recent seed batches should be scoped by submitting operator or globally visible to all operators/admins.
+  evidence: The Story 4.5 admin intake page shows recent seed batches to any authorized operator/admin. This matches the current admin-wide knowledge workflow, but per-operator privacy was not specified and may be needed if seed URLs become sensitive.
