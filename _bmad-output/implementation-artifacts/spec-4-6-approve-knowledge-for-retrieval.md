@@ -88,6 +88,11 @@ warnings: []
 Deferred findings:
 - First-class `approvedByUserId` and `approvedAt` columns are not required for Story 4.6 because approval provenance is recorded in audit events, but this may be useful for future card-level UI or retrieval diagnostics and was added to `deferred-work.md`.
 
+### Review Findings
+- [x] [Review][Patch] Make approval version guard atomic with the lifecycle update [`src/features/knowledge/review.ts:282`] -- fixed by adding `updatedAt` to the approval update predicate when the form supplies a version.
+- [x] [Review][Patch] Authorize approval form submissions before confirmation validation [`src/features/knowledge/actions.ts:134`] -- fixed by requiring admin/operator authorization before form confirmation validation.
+- [x] [Review][Patch] Re-run raw-source leak validation before approving persisted draft fields [`src/features/knowledge/review.ts:332`] -- fixed by loading linked raw-source corpus and validating persisted approval fields before lifecycle transition.
+
 ## Design Notes
 
 Approval intentionally does not normalize or rewrite draft fields again. Story 4.3 owns edit-time validation, and approval should preserve the operator-reviewed card exactly while changing lifecycle state and audit trail. The reviewable-draft loader remains the approval gate so orphan, rejected, duplicate, archived, approved, and non-review-needed records are all fail-closed.
@@ -107,11 +112,16 @@ Approval intentionally does not normalize or rewrite draft fields again. Story 4
 - `pnpm typecheck` -- passed.
 - `pnpm lint` -- passed.
 - `pnpm build` -- passed; Next.js production build completed successfully.
+- Review patch verification: `pnpm test:run tests/knowledge-draft-review.test.ts` -- passed; 17 tests passed after approval hardening.
+- Review patch verification: `pnpm typecheck` -- passed.
+- Review patch verification: `pnpm lint` -- passed.
+- Review patch verification: `pnpm build` -- passed; Next.js production build completed successfully.
 
 ## Implementation Notes
 
 - Added `approveKnowledgeDraft` as an operator/admin-protected service that authorizes before lookup, reuses the reviewable draft/source-link gate, sets `status = "approved"`, clears `needsReview`, preserves existing card fields and source links, and records an `approve` audit event without raw source material.
 - Review hardening added approval-ready field validation, a post-update source-link recheck in the transaction, and an `updatedAt` form version guard to avoid approving content changed after page render.
+- Review patch hardening made the approval version check atomic with the lifecycle update, moved approval form authorization before confirmation validation, and re-runs raw-source leak validation before approving persisted card fields.
 - Added direct and form server actions for approval with safe Vietnamese error redirects and a success redirect back to the draft queue.
 - Added explicit approval UI copy, a required confirmation checkbox, and queue success messaging clarifying that approval is lifecycle eligibility only and does not create embeddings.
 - Extended draft review tests for approval success, queue/detail exclusion after approval, source-link preservation, safe audit content, invalid lifecycle/orphan failure, and authorization-before-side-effects.

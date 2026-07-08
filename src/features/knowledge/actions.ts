@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 
 import { rawSourceMaterial, sources } from "@/db/schema";
-import { AdminAuthorizationError } from "@/server/auth";
+import { AdminAuthorizationError, requireAdminSession } from "@/server/auth";
 import { runAuditedAdminMutation } from "@/server/mutations";
 
 import { isKnowledgeBatchIntakeError, submitKnowledgeSeedUrlBatch as submitKnowledgeSeedUrlBatchService } from "./batch-intake";
@@ -132,6 +132,8 @@ export async function rejectKnowledgeDraftForm(formData: FormData) {
 }
 
 export async function approveKnowledgeDraftForm(formData: FormData) {
+  await requireAdminSession();
+
   const draftId = getOptionalFormString(formData, "draftId") ?? "";
   let failureMessage: string | null = null;
 

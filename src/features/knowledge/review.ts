@@ -282,6 +282,8 @@ export async function approveKnowledgeDraft(draftId: string, expectedUpdatedAt?:
     const draft = await loadReviewableDraft(transaction, normalizedDraftId);
     assertApprovalVersionCurrent(draft.card, expectedUpdatedAt);
     assertApprovalReady(draft.card);
+    const rawLeakCorpus = await loadRawLeakCorpusForSources(transaction, draft.sources.map((source) => source.id));
+    assertApprovalSafeFields(draft.card, rawLeakCorpus);
 
     const [updatedDraft] = await transaction
       .update(knowledgeCards)
@@ -290,7 +292,14 @@ export async function approveKnowledgeDraft(draftId: string, expectedUpdatedAt?:
         needsReview: false,
         updatedAt: new Date(),
       })
-      .where(and(eq(knowledgeCards.id, normalizedDraftId), eq(knowledgeCards.status, "draft"), eq(knowledgeCards.needsReview, true)))
+      .where(
+        and(
+          eq(knowledgeCards.id, normalizedDraftId),
+          eq(knowledgeCards.status, "draft"),
+          eq(knowledgeCards.needsReview, true),
+          ...(expectedUpdatedAt ? [eq(knowledgeCards.updatedAt, new Date(expectedUpdatedAt))] : []),
+        ),
+      )
       .returning({ id: knowledgeCards.id });
 
     if (!updatedDraft) {
@@ -337,6 +346,15 @@ function assertApprovalReady(card: KnowledgeDraftReviewCard) {
   if (!card.title.trim() || !card.summary.trim() || (!card.locationName?.trim() && !card.routeSegment?.trim())) {
     throw new KnowledgeDraftReviewError("Bản nháp cần đủ tiêu đề, tóm tắt và địa điểm hoặc cung đường trước khi phê duyệt.", "invalid_draft");
   }
+}
+
+function assertApprovalSafeFields(card: KnowledgeDraftReviewCard, rawTexts: string[]) {
+  rejectUnsafeSafeFields(
+    [card.title, card.locationName, card.routeSegment, card.summary, ...card.tags, ...Object.keys(card.practicalDetails), ...flattenDetailStrings(card.practicalDetails)].filter(
+      (value): value is string => typeof value === "string",
+    ),
+    rawTexts,
+  );
 }
 
 async function loadReviewableDraft(db: Pick<ReviewDb, "select">, draftId: string) {

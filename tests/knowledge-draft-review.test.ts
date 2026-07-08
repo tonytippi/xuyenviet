@@ -238,6 +238,41 @@ describe("knowledge draft review", () => {
     await expect(testDb.select().from(auditEvents)).resolves.toHaveLength(0);
   });
 
+  test("approve rejects drafts changed after the operator opened the page", async () => {
+    await createUser("stale-approve-operator", ["operator"]);
+    authMock.mockResolvedValue({ user: { id: "stale-approve-operator", email: "stale-approve-operator@example.com" } });
+    const { draft } = await createDraft("stale-approve-operator");
+    const { approveKnowledgeDraft, updateKnowledgeDraft } = await import("@/features/knowledge/review");
+    const staleUpdatedAt = draft.updatedAt.toISOString();
+
+    await updateKnowledgeDraft(draft.id, {
+      type: "food",
+      title: "Bản nháp đã đổi sau khi mở trang",
+      locationName: "Huế",
+      summary: "Nội dung mới cần được người vận hành kiểm tra trước khi phê duyệt.",
+      practicalDetails: {},
+      tags: [],
+      confidence: "community",
+      freshnessSensitive: true,
+    });
+
+    await expect(approveKnowledgeDraft(draft.id, staleUpdatedAt)).rejects.toMatchObject({ code: "not_reviewable" });
+    await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, draft.id))).resolves.toMatchObject([{ status: "draft", needsReview: true }]);
+  });
+
+  test("approve rechecks persisted draft fields for raw source leaks", async () => {
+    await createUser("unsafe-approve-operator", ["operator"]);
+    authMock.mockResolvedValue({ user: { id: "unsafe-approve-operator", email: "unsafe-approve-operator@example.com" } });
+    const { draft } = await createDraft("unsafe-approve-operator", {
+      summary: "Số điện thoại riêng 0901234567 và ghi chú thô không được xuất hiện trong review UI.",
+    });
+    const { approveKnowledgeDraft } = await import("@/features/knowledge/review");
+
+    await expect(approveKnowledgeDraft(draft.id)).rejects.toMatchObject({ code: "invalid_input" });
+    await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, draft.id))).resolves.toMatchObject([{ status: "draft", needsReview: true }]);
+    await expect(testDb.select().from(auditEvents)).resolves.toHaveLength(0);
+  });
+
   test("approve form requires explicit confirmation and redirects with the approved draft id", async () => {
     vi.doMock("next/navigation", () => ({
       redirect: vi.fn((url: string) => {
@@ -259,6 +294,19 @@ describe("knowledge draft review", () => {
     confirmedForm.set("approvalConfirmed", "on");
     await expect(approveKnowledgeDraftForm(confirmedForm)).rejects.toThrow(`NEXT_REDIRECT:/admin/knowledge/drafts?approved=${draft.id}`);
     await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, draft.id))).resolves.toMatchObject([{ status: "approved", needsReview: false }]);
+  });
+
+  test("approve form authorizes before confirmation validation", async () => {
+    await createUser("traveler-approve-form", ["traveler"]);
+    authMock.mockResolvedValue({ user: { id: "traveler-approve-form", email: "traveler-approve-form@example.com" } });
+    const { approveKnowledgeDraftForm } = await import("@/features/knowledge/actions");
+
+    const form = new FormData();
+    form.set("draftId", "missing-draft");
+
+    await expect(approveKnowledgeDraftForm(form)).rejects.toMatchObject({ name: "AdminAuthorizationError" });
+    await expect(testDb.select().from(knowledgeCards)).resolves.toHaveLength(0);
+    await expect(testDb.select().from(auditEvents)).resolves.toHaveLength(0);
   });
 
   test("invalid edit does not mutate draft or write audit", async () => {
