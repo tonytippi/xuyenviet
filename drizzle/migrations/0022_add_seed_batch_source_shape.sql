@@ -1,1 +1,1 @@
-ALTER TABLE "knowledge_seed_batch_items" ADD CONSTRAINT "knowledge_seed_batch_items_source_shape_check" CHECK ("knowledge_seed_batch_items"."status" in ('failed', 'duplicate') or "knowledge_seed_batch_items"."source_id" is not null) NOT VALID;
+-- Consolidated into 0020_stormy_caretaker.sql before Story 4.5 shipped.

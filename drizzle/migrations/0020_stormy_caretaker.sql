@@ -14,7 +14,8 @@ CREATE TABLE "knowledge_seed_batch_items" (
 	CONSTRAINT "knowledge_seed_batch_items_submitted_url_check" CHECK (length(btrim("knowledge_seed_batch_items"."submitted_url")) between 1 and 2048),
 	CONSTRAINT "knowledge_seed_batch_items_canonical_url_check" CHECK ("knowledge_seed_batch_items"."canonical_url" is null or length(btrim("knowledge_seed_batch_items"."canonical_url")) between 1 and 2048),
 	CONSTRAINT "knowledge_seed_batch_items_error_summary_check" CHECK ("knowledge_seed_batch_items"."error_summary" is null or (length(btrim("knowledge_seed_batch_items"."error_summary")) between 1 and 500 and position(chr(10) in "knowledge_seed_batch_items"."error_summary") = 0 and position(chr(13) in "knowledge_seed_batch_items"."error_summary") = 0)),
-	CONSTRAINT "knowledge_seed_batch_items_failure_shape_check" CHECK ("knowledge_seed_batch_items"."status" not in ('failed', 'duplicate') or "knowledge_seed_batch_items"."error_summary" is not null)
+	CONSTRAINT "knowledge_seed_batch_items_failure_shape_check" CHECK ("knowledge_seed_batch_items"."status" <> 'failed' or "knowledge_seed_batch_items"."error_summary" is not null),
+	CONSTRAINT "knowledge_seed_batch_items_source_shape_check" CHECK ("knowledge_seed_batch_items"."status" in ('failed', 'duplicate') or "knowledge_seed_batch_items"."source_id" is not null)
 );
 --> statement-breakpoint
 CREATE TABLE "knowledge_seed_batches" (
@@ -26,7 +27,7 @@ CREATE TABLE "knowledge_seed_batches" (
 );
 --> statement-breakpoint
 ALTER TABLE "knowledge_seed_batch_items" ADD CONSTRAINT "knowledge_seed_batch_items_batch_id_knowledge_seed_batches_id_fk" FOREIGN KEY ("batch_id") REFERENCES "public"."knowledge_seed_batches"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "knowledge_seed_batch_items" ADD CONSTRAINT "knowledge_seed_batch_items_source_id_sources_id_fk" FOREIGN KEY ("source_id") REFERENCES "public"."sources"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "knowledge_seed_batch_items" ADD CONSTRAINT "knowledge_seed_batch_items_source_id_sources_id_fk" FOREIGN KEY ("source_id") REFERENCES "public"."sources"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "knowledge_seed_batches" ADD CONSTRAINT "knowledge_seed_batches_submitted_by_user_id_users_id_fk" FOREIGN KEY ("submitted_by_user_id") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "knowledge_seed_batch_items_batch_id_idx" ON "knowledge_seed_batch_items" USING btree ("batch_id");--> statement-breakpoint
 CREATE INDEX "knowledge_seed_batch_items_source_id_idx" ON "knowledge_seed_batch_items" USING btree ("source_id");--> statement-breakpoint

@@ -91,6 +91,13 @@ Deferred findings:
 - Cross-batch/global canonical URL duplicate policy is not defined by Story 4.5; current implementation only rejects duplicates inside one submitted batch.
 - Recent batch listing is global to authorized operators/admins; if per-operator privacy becomes required, scope or role-gate listing in a later story.
 
+### 2026-07-08 — Retry code review
+- patch: 2: (high 0, medium 2, low 0)
+- defer: 0
+- dismissed: 4
+- [x] [Review][Patch] Align batch item source deletion behavior with the source-shape constraint [`src/db/schema.ts:685`] -- fixed by changing batch item `source_id` to `ON DELETE restrict` and consolidating Story 4.5 migration SQL around the same behavior.
+- [x] [Review][Patch] Regenerate or repair Drizzle migration metadata for the final source-shape constraint [`drizzle/migrations/meta/0020_snapshot.json:1955`] -- fixed by regenerating Drizzle metadata, adding `0023_snapshot.json`, and confirming `pnpm db:generate` reports no schema changes.
+
 ## Design Notes
 
 Use batch tables rather than adding workflow state to `sources`. Source rows remain provenance records; batch item rows represent one operator seed run and can derive later status from cards/suggestions without changing source semantics.
@@ -119,6 +126,10 @@ Use batch tables rather than adding workflow state to `sources`. Source rows rem
 - Review patch verification: `pnpm lint` -- passed.
 - Review patch verification: `pnpm test:run` -- passed; 15 files / 208 tests passed. Existing expected stderr appeared in AI Ask failure-path tests and provider-failure tests.
 - Review patch verification: `pnpm build` -- passed.
+- Retry review patch verification: `pnpm db:generate` -- passed; no schema changes after migration metadata repair.
+- Retry review patch verification: `pnpm test:run tests/knowledge-batch-source-intake.test.ts` -- passed; 7 tests passed. PostgreSQL emitted existing migration schema/relation notices.
+- Retry review patch verification: `pnpm typecheck` -- passed.
+- Retry review patch verification: `pnpm lint` -- passed.
 
 ## Implementation Notes
 
@@ -128,6 +139,7 @@ Use batch tables rather than adding workflow state to `sources`. Source rows rem
 - Added `listRecentKnowledgeSeedBatches` to derive and persist operator-visible item statuses from linked cards and Story 4.4 suggestion traces without loading or returning raw source material.
 - Wired a server action and admin intake UI for newline-separated batch URLs, shared safe metadata, success/error summaries, and recent batch status visibility.
 - Review fixes added CR-only line handling, oversized URL item failures, deterministic listing order, no-action vs duplicate distinction, archived-to-rejected mapping, additive constraint migrations for existing databases, and fail-closed batch redirect behavior.
+- Retry review fixes aligned batch item source deletion with the source-shape constraint using `ON DELETE restrict` and repaired Drizzle metadata drift for the final Story 4.5 schema.
 - No crawler, AI automation, approval, embeddings, approved-card mutation, or raw material exposure was added.
 
 ## Auto Run Result
@@ -151,7 +163,9 @@ Residual risks: Cross-batch/global duplicate canonical URL policy and per-operat
 - `drizzle/migrations/0020_stormy_caretaker.sql`
 - `drizzle/migrations/0021_fix_seed_batch_failure_shape.sql`
 - `drizzle/migrations/0022_add_seed_batch_source_shape.sql`
+- `drizzle/migrations/0023_fancy_moondragon.sql`
 - `drizzle/migrations/meta/0020_snapshot.json`
+- `drizzle/migrations/meta/0023_snapshot.json`
 - `drizzle/migrations/meta/_journal.json`
 - `src/app/admin/knowledge/intake/page.tsx`
 - `src/db/schema.ts`

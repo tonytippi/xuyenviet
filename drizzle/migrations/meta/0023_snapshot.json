@@ -1,6 +1,6 @@
 {
-  "id": "bbcbc0fd-28eb-4848-b0c4-b09b5c224409",
-  "prevId": "123c46fe-c208-4b44-a14c-a7a4a366b374",
+  "id": "96cc023a-5c08-4623-b819-fa611242c400",
+  "prevId": "bbcbc0fd-28eb-4848-b0c4-b09b5c224409",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -687,7 +687,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "set null",
           "onUpdate": "no action"
         },
         "ai_usage_events_user_message_id_messages_id_fk": {
@@ -1945,7 +1945,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },

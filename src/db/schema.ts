@@ -682,7 +682,7 @@ export const knowledgeSeedBatchItems = pgTable(
     lineNumber: integer("line_number").notNull(),
     submittedUrl: text("submitted_url").notNull(),
     canonicalUrl: text("canonical_url"),
-    sourceId: text("source_id").references(() => sources.id, { onDelete: "set null" }),
+    sourceId: text("source_id").references(() => sources.id, { onDelete: "restrict" }),
     status: text("status").$type<KnowledgeSeedBatchItemStatus>().notNull(),
     errorSummary: text("error_summary"),
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
