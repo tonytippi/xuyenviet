@@ -1,0 +1,628 @@
+import "server-only";
+
+import { and, desc, eq, inArray } from "drizzle-orm";
+
+import { getDb } from "@/db/client";
+import {
+  knowledgeCards,
+  knowledgeCardSources,
+  knowledgeCardTypeValues,
+  knowledgeConfidenceValues,
+  rawSourceMaterial,
+  sources,
+  type KnowledgeConfidence,
+  type KnowledgeSourceSupport,
+} from "@/db/schema";
+import { recordAuditEvent } from "@/features/audit/events";
+import { requireAdminSession } from "@/server/auth";
+
+const maxTitleLength = 160;
+const maxLocationLength = 160;
+const maxRouteSegmentLength = 160;
+const maxSummaryLength = 1200;
+const maxDetailKeyLength = 60;
+const maxDetailStringLength = 500;
+const maxDetailEntries = 20;
+const maxDetailArrayItems = 10;
+const maxPracticalDetailsJsonLength = 10_000;
+const maxTags = 12;
+const maxTagLength = 40;
+const emailLikePattern = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
+const phoneLikePattern = /(?:\+?84|0)(?:[\s.-]?\d){8,10}/;
+const sensitiveTokenPattern = /(provider[_-]?payload|storage[_-]?key|raw[_-]?metadata|raw[_-]?source)/i;
+
+type ReviewDb = ReturnType<typeof getDb>;
+
+export type KnowledgeDraftReviewSource = Pick<
+  typeof sources.$inferSelect,
+  "id" | "kind" | "url" | "canonicalUrl" | "label" | "publisher" | "collectedDate" | "sourceType" | "verificationStatus" | "official" | "partner"
+> & {
+  supportLevel: KnowledgeSourceSupport;
+};
+
+export type KnowledgeDraftReviewCard = Pick<
+  typeof knowledgeCards.$inferSelect,
+  | "id"
+  | "status"
+  | "type"
+  | "title"
+  | "locationName"
+  | "routeSegment"
+  | "summary"
+  | "practicalDetails"
+  | "tags"
+  | "confidence"
+  | "freshnessSensitive"
+  | "needsReview"
+  | "updatedAt"
+  | "createdAt"
+> & {
+  sources: KnowledgeDraftReviewSource[];
+};
+
+export type KnowledgeDraftUpdateInput = {
+  type: string;
+  title: string;
+  locationName?: string | null;
+  routeSegment?: string | null;
+  summary: string;
+  practicalDetails?: unknown;
+  tags?: unknown;
+  confidence: string;
+  freshnessSensitive?: boolean | string | null;
+};
+
+export type KnowledgeDraftReviewResult = {
+  draftId: string;
+};
+
+export class KnowledgeDraftReviewError extends Error {
+  constructor(
+    message: string,
+    public readonly code: "invalid_draft" | "invalid_input" | "not_reviewable",
+  ) {
+    super(message);
+    this.name = "KnowledgeDraftReviewError";
+  }
+}
+
+export function isKnowledgeDraftReviewError(error: unknown) {
+  return error instanceof KnowledgeDraftReviewError || (error instanceof Error && error.name === "KnowledgeDraftReviewError");
+}
+
+export async function listKnowledgeDraftsForReview(): Promise<KnowledgeDraftReviewCard[]> {
+  await requireAdminSession();
+
+  const rows = await getDb()
+    .select({
+      card: knowledgeCards,
+      source: {
+        id: sources.id,
+        kind: sources.kind,
+        url: sources.url,
+        canonicalUrl: sources.canonicalUrl,
+        label: sources.label,
+        publisher: sources.publisher,
+        collectedDate: sources.collectedDate,
+        sourceType: sources.sourceType,
+        verificationStatus: sources.verificationStatus,
+        official: sources.official,
+        partner: sources.partner,
+        supportLevel: knowledgeCardSources.supportLevel,
+      },
+    })
+    .from(knowledgeCards)
+    .leftJoin(knowledgeCardSources, eq(knowledgeCardSources.knowledgeCardId, knowledgeCards.id))
+    .leftJoin(sources, eq(sources.id, knowledgeCardSources.sourceId))
+    .where(and(eq(knowledgeCards.status, "draft"), eq(knowledgeCards.needsReview, true)))
+    .orderBy(desc(knowledgeCards.createdAt));
+
+  return groupDraftRows(rows).filter((draft) => draft.sources.length > 0);
+}
+
+export async function getKnowledgeDraftForReview(draftId: string): Promise<KnowledgeDraftReviewCard | null> {
+  await requireAdminSession();
+  const normalizedDraftId = draftId.trim();
+
+  if (!normalizedDraftId) {
+    throw new KnowledgeDraftReviewError("Không tìm thấy bản nháp cần duyệt.", "invalid_draft");
+  }
+
+  const rows = await getDb()
+    .select({
+      card: knowledgeCards,
+      source: {
+        id: sources.id,
+        kind: sources.kind,
+        url: sources.url,
+        canonicalUrl: sources.canonicalUrl,
+        label: sources.label,
+        publisher: sources.publisher,
+        collectedDate: sources.collectedDate,
+        sourceType: sources.sourceType,
+        verificationStatus: sources.verificationStatus,
+        official: sources.official,
+        partner: sources.partner,
+        supportLevel: knowledgeCardSources.supportLevel,
+      },
+    })
+    .from(knowledgeCards)
+    .leftJoin(knowledgeCardSources, eq(knowledgeCardSources.knowledgeCardId, knowledgeCards.id))
+    .leftJoin(sources, eq(sources.id, knowledgeCardSources.sourceId))
+    .where(and(eq(knowledgeCards.id, normalizedDraftId), eq(knowledgeCards.status, "draft"), eq(knowledgeCards.needsReview, true)));
+
+  return groupDraftRows(rows)[0] ?? null;
+}
+
+export async function updateKnowledgeDraft(draftId: string, input: KnowledgeDraftUpdateInput): Promise<KnowledgeDraftReviewResult> {
+  const session = await requireAdminSession();
+  const normalizedDraftId = draftId.trim();
+
+  if (!normalizedDraftId) {
+    throw new KnowledgeDraftReviewError("Không tìm thấy bản nháp cần lưu.", "invalid_draft");
+  }
+
+  const db = getDb();
+  return db.transaction(async (transaction) => {
+    const draft = await loadReviewableDraft(transaction, normalizedDraftId);
+    const rawTexts = await loadRawTextsForSources(transaction, draft.sources.map((source) => source.id));
+    const values = normalizeDraftUpdateInput(input, draft.sources, rawTexts);
+
+    const [updatedDraft] = await transaction
+      .update(knowledgeCards)
+      .set({
+        type: values.type,
+        title: values.title,
+        locationName: values.locationName,
+        routeSegment: values.routeSegment,
+        summary: values.summary,
+        practicalDetails: values.practicalDetails,
+        tags: values.tags,
+        confidence: values.confidence,
+        freshnessSensitive: values.freshnessSensitive,
+        status: "draft",
+        needsReview: true,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(knowledgeCards.id, normalizedDraftId), eq(knowledgeCards.status, "draft"), eq(knowledgeCards.needsReview, true)))
+      .returning({ id: knowledgeCards.id });
+
+    if (!updatedDraft) {
+      throw new KnowledgeDraftReviewError("Bản nháp này không còn trong trạng thái cần duyệt.", "not_reviewable");
+    }
+
+    await recordAuditEvent(
+      {
+        actor: session,
+        operation: "update",
+        targetType: "knowledge_draft",
+        targetId: normalizedDraftId,
+        beforeSummary: summarizeDraft(draft.card),
+        afterSummary: `Operator edited review-needed draft fields: type=${values.type}; confidence=${values.confidence}; freshnessSensitive=${values.freshnessSensitive}; tags=${values.tags.length}.`,
+      },
+      transaction,
+    );
+
+    return { draftId: normalizedDraftId };
+  });
+}
+
+export async function rejectKnowledgeDraft(draftId: string): Promise<KnowledgeDraftReviewResult> {
+  const session = await requireAdminSession();
+  const normalizedDraftId = draftId.trim();
+
+  if (!normalizedDraftId) {
+    throw new KnowledgeDraftReviewError("Không tìm thấy bản nháp cần từ chối.", "invalid_draft");
+  }
+
+  const db = getDb();
+  return db.transaction(async (transaction) => {
+    const draft = await loadReviewableDraft(transaction, normalizedDraftId);
+
+    const [updatedDraft] = await transaction
+      .update(knowledgeCards)
+      .set({
+        status: "rejected",
+        needsReview: false,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(knowledgeCards.id, normalizedDraftId), eq(knowledgeCards.status, "draft"), eq(knowledgeCards.needsReview, true)))
+      .returning({ id: knowledgeCards.id });
+
+    if (!updatedDraft) {
+      throw new KnowledgeDraftReviewError("Bản nháp này không còn trong trạng thái cần duyệt.", "not_reviewable");
+    }
+
+    await recordAuditEvent(
+      {
+        actor: session,
+        operation: "update",
+        targetType: "knowledge_draft",
+        targetId: normalizedDraftId,
+        beforeSummary: summarizeDraft(draft.card),
+        afterSummary: "Operator rejected the draft knowledge card; source links remain preserved and no retrieval state was created.",
+      },
+      transaction,
+    );
+
+    return { draftId: normalizedDraftId };
+  });
+}
+
+async function loadReviewableDraft(db: Pick<ReviewDb, "select">, draftId: string) {
+  const draft = await getKnowledgeDraftForReviewFromDb(db, draftId);
+
+  if (!draft) {
+    throw new KnowledgeDraftReviewError("Không tìm thấy bản nháp cần duyệt.", "invalid_draft");
+  }
+
+  if (draft.card.status !== "draft" || !draft.card.needsReview) {
+    throw new KnowledgeDraftReviewError("Bản nháp này không còn trong trạng thái cần duyệt.", "not_reviewable");
+  }
+
+  if (draft.sources.length === 0) {
+    throw new KnowledgeDraftReviewError("Bản nháp cần ít nhất một nguồn liên kết trước khi lưu.", "invalid_draft");
+  }
+
+  return draft;
+}
+
+async function getKnowledgeDraftForReviewFromDb(db: Pick<ReviewDb, "select">, draftId: string) {
+  const rows = await db
+    .select({
+      card: knowledgeCards,
+      source: {
+        id: sources.id,
+        kind: sources.kind,
+        url: sources.url,
+        canonicalUrl: sources.canonicalUrl,
+        label: sources.label,
+        publisher: sources.publisher,
+        collectedDate: sources.collectedDate,
+        sourceType: sources.sourceType,
+        verificationStatus: sources.verificationStatus,
+        official: sources.official,
+        partner: sources.partner,
+        supportLevel: knowledgeCardSources.supportLevel,
+      },
+    })
+    .from(knowledgeCards)
+    .leftJoin(knowledgeCardSources, eq(knowledgeCardSources.knowledgeCardId, knowledgeCards.id))
+    .leftJoin(sources, eq(sources.id, knowledgeCardSources.sourceId))
+    .where(eq(knowledgeCards.id, draftId));
+
+  const grouped = groupDraftRows(rows);
+  const card = grouped[0];
+
+  return card ? { card, sources: card.sources } : null;
+}
+
+async function loadRawTextsForSources(db: Pick<ReviewDb, "select">, sourceIds: string[]) {
+  if (sourceIds.length === 0) {
+    return [];
+  }
+
+  const rows = await db
+    .select({ rawText: rawSourceMaterial.rawText })
+    .from(rawSourceMaterial)
+    .where(inArray(rawSourceMaterial.sourceId, sourceIds));
+
+  return rows.map((row) => row.rawText).filter((rawText): rawText is string => Boolean(rawText));
+}
+
+function normalizeDraftUpdateInput(input: KnowledgeDraftUpdateInput, linkedSources: KnowledgeDraftReviewSource[], rawTexts: string[]) {
+  const type = normalizeEnum(input.type, knowledgeCardTypeValues);
+  const title = normalizeBoundedString(input.title, maxTitleLength);
+  const locationName = normalizeOptionalBoundedString(input.locationName, maxLocationLength);
+  const routeSegment = normalizeOptionalBoundedString(input.routeSegment, maxRouteSegmentLength);
+  const summary = normalizeBoundedString(input.summary, maxSummaryLength);
+  const confidence = clampConfidence(normalizeEnum(input.confidence, knowledgeConfidenceValues), linkedSources);
+  const freshnessSensitive = normalizeFreshnessSensitive(input.freshnessSensitive);
+  const practicalDetails = normalizePracticalDetails(input.practicalDetails);
+  const tags = normalizeTags(input.tags);
+
+  if (!type || !title || !summary || !confidence || freshnessSensitive === null) {
+    throw new KnowledgeDraftReviewError("Dữ liệu bản nháp không hợp lệ. Vui lòng kiểm tra tiêu đề, loại, tóm tắt, độ tin cậy và freshness.", "invalid_input");
+  }
+
+  if (!locationName && !routeSegment) {
+    throw new KnowledgeDraftReviewError("Bản nháp cần ít nhất một địa điểm hoặc cung đường.", "invalid_input");
+  }
+
+  rejectUnsafeSafeFields([title, locationName, routeSegment, summary, ...tags, ...flattenDetailStrings(practicalDetails)].filter((value): value is string => typeof value === "string"), rawTexts);
+
+  return { type, title, locationName, routeSegment, summary, practicalDetails, tags, confidence, freshnessSensitive };
+}
+
+function groupDraftRows(
+  rows: Array<{
+    card: typeof knowledgeCards.$inferSelect;
+    source: {
+      id: string | null;
+      kind: KnowledgeDraftReviewSource["kind"] | null;
+      url: string | null;
+      canonicalUrl: string | null;
+      label: string | null;
+      publisher: string | null;
+      collectedDate: string | null;
+      sourceType: KnowledgeDraftReviewSource["sourceType"] | null;
+      verificationStatus: KnowledgeDraftReviewSource["verificationStatus"] | null;
+      official: boolean | null;
+      partner: boolean | null;
+      supportLevel: KnowledgeDraftReviewSource["supportLevel"] | null;
+    } | null;
+  }>,
+): KnowledgeDraftReviewCard[] {
+  const drafts = new Map<string, KnowledgeDraftReviewCard>();
+
+  for (const row of rows) {
+    const existing = drafts.get(row.card.id);
+    const card = existing ?? { ...row.card, sources: [] };
+
+    const source = normalizeJoinedSource(row.source);
+
+    if (source && !card.sources.some((existingSource) => existingSource.id === source.id)) {
+      card.sources.push(source);
+    }
+
+    drafts.set(row.card.id, card);
+  }
+
+  return Array.from(drafts.values());
+}
+
+function normalizeJoinedSource(source: Parameters<typeof groupDraftRows>[0][number]["source"]): KnowledgeDraftReviewSource | null {
+  if (!source?.id || !source.kind || !source.label || !source.sourceType || !source.verificationStatus || !source.supportLevel || source.official === null || source.partner === null) {
+    return null;
+  }
+
+  return {
+    id: source.id,
+    kind: source.kind,
+    url: source.url,
+    canonicalUrl: source.canonicalUrl,
+    label: source.label,
+    publisher: source.publisher,
+    collectedDate: source.collectedDate,
+    sourceType: source.sourceType,
+    verificationStatus: source.verificationStatus,
+    official: source.official,
+    partner: source.partner,
+    supportLevel: source.supportLevel,
+  };
+}
+
+function normalizeEnum<T extends readonly string[]>(value: unknown, allowed: T): T[number] | null {
+  return typeof value === "string" && (allowed as readonly string[]).includes(value) ? value : null;
+}
+
+function clampConfidence(confidence: KnowledgeConfidence | null, linkedSources: KnowledgeDraftReviewSource[]): KnowledgeConfidence | null {
+  if (!confidence) {
+    return null;
+  }
+
+  const requestedRank = confidenceRank(confidence);
+  const confidenceSources = linkedSources.filter((source) => source.supportLevel !== "conflicting");
+  const ceilingRank = Math.max(...confidenceSources.map((source) => confidenceRank(sourceConfidenceCeiling(source))), confidenceRank("unverified"));
+  const persistedRank = Math.min(requestedRank, ceilingRank);
+
+  return knowledgeConfidenceValues[persistedRank];
+}
+
+function confidenceRank(confidence: KnowledgeConfidence) {
+  return knowledgeConfidenceValues.indexOf(confidence);
+}
+
+function sourceConfidenceCeiling(source: KnowledgeDraftReviewSource): KnowledgeConfidence {
+  if (source.official) return "official";
+  if (source.partner) return "partner";
+  if (source.sourceType === "community") return "community";
+  if (source.verificationStatus === "verified") return "curated";
+  return "unverified";
+}
+
+function normalizeFreshnessSensitive(value: KnowledgeDraftUpdateInput["freshnessSensitive"]) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    if (value === "true" || value === "on") return true;
+    if (value === "false" || value === "") return false;
+  }
+
+  if (value === null || value === undefined) {
+    return false;
+  }
+
+  return null;
+}
+
+function normalizeBoundedString(value: unknown, maxLength: number) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized && normalized.length <= maxLength ? normalized : null;
+}
+
+function normalizeOptionalBoundedString(value: unknown, maxLength: number) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+
+  const normalized = normalizeBoundedString(value, maxLength);
+
+  if (!normalized) {
+    throw new KnowledgeDraftReviewError("Trường địa điểm hoặc cung đường không hợp lệ.", "invalid_input");
+  }
+
+  return normalized;
+}
+
+function normalizePracticalDetails(value: unknown): Record<string, unknown> {
+  const parsed = typeof value === "string" ? parseDetailsJson(value) : value;
+
+  if (!isRecord(parsed)) {
+    throw new KnowledgeDraftReviewError("Chi tiết thực tế phải là JSON object hợp lệ.", "invalid_input");
+  }
+
+  const details: Record<string, unknown> = {};
+  const entries = Object.entries(parsed);
+
+  if (entries.length > maxDetailEntries) {
+    throw new KnowledgeDraftReviewError("Chi tiết thực tế chỉ được có tối đa 20 mục.", "invalid_input");
+  }
+
+  for (const [key, detailValue] of entries) {
+    const safeKey = normalizeBoundedString(key, maxDetailKeyLength);
+
+    if (!safeKey) {
+      throw new KnowledgeDraftReviewError("Khóa chi tiết thực tế không hợp lệ.", "invalid_input");
+    }
+
+    const safeValue = normalizeDetailValue(detailValue);
+
+    details[safeKey] = safeValue;
+  }
+
+  return details;
+}
+
+function parseDetailsJson(value: string) {
+  const trimmed = value.trim();
+
+  if (trimmed.length > maxPracticalDetailsJsonLength) {
+    throw new KnowledgeDraftReviewError("Chi tiết thực tế quá dài.", "invalid_input");
+  }
+
+  if (!trimmed) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(trimmed) as unknown;
+  } catch {
+    throw new KnowledgeDraftReviewError("Chi tiết thực tế phải là JSON object hợp lệ.", "invalid_input");
+  }
+}
+
+function normalizeDetailValue(value: unknown): string | string[] {
+  if (typeof value === "string") {
+    const normalized = normalizeBoundedString(value, maxDetailStringLength);
+
+    if (!normalized) {
+      throw new KnowledgeDraftReviewError("Giá trị chi tiết thực tế không hợp lệ.", "invalid_input");
+    }
+
+    return normalized;
+  }
+
+  if (Array.isArray(value)) {
+    if (value.length > maxDetailArrayItems) {
+      throw new KnowledgeDraftReviewError("Mỗi chi tiết thực tế chỉ được có tối đa 10 dòng.", "invalid_input");
+    }
+
+    const values = value.map((item) => {
+      const normalized = normalizeBoundedString(item, maxDetailStringLength);
+
+      if (!normalized) {
+        throw new KnowledgeDraftReviewError("Danh sách chi tiết thực tế chứa giá trị không hợp lệ.", "invalid_input");
+      }
+
+      return normalized;
+    });
+
+    return values;
+  }
+
+  throw new KnowledgeDraftReviewError("Giá trị chi tiết thực tế không hợp lệ.", "invalid_input");
+}
+
+function normalizeTags(value: unknown) {
+  const tagValues = typeof value === "string" ? (value.trim() ? value.split(",") : []) : value;
+
+  if (!Array.isArray(tagValues)) {
+    throw new KnowledgeDraftReviewError("Tags phải là danh sách hợp lệ.", "invalid_input");
+  }
+
+  if (tagValues.length > maxTags) {
+    throw new KnowledgeDraftReviewError("Bản nháp chỉ được có tối đa 12 tags.", "invalid_input");
+  }
+
+  const normalizedTags = tagValues.map((tag) => {
+    const normalized = normalizeBoundedString(tag, maxTagLength);
+
+    if (!normalized) {
+      throw new KnowledgeDraftReviewError("Tags chứa giá trị trống hoặc quá dài.", "invalid_input");
+    }
+
+    return normalized;
+  });
+
+  const tags = Array.from(new Set(normalizedTags));
+
+  return tags;
+}
+
+function rejectUnsafeSafeFields(values: string[], rawTexts: string[]) {
+  const rawCorpus = rawTexts.map(normalizeForOverlap).join(" ");
+
+  for (const value of values) {
+    if (emailLikePattern.test(value) || phoneLikePattern.test(value) || sensitiveTokenPattern.test(value)) {
+      throw new KnowledgeDraftReviewError("Trường an toàn không được chứa số liên hệ, email hoặc metadata thô.", "invalid_input");
+    }
+
+    const normalized = normalizeForOverlap(value);
+
+    if (normalized.length >= 24 && rawCorpus.includes(normalized)) {
+      throw new KnowledgeDraftReviewError("Trường an toàn không được sao chép nguyên văn nội dung nguồn thô.", "invalid_input");
+    }
+  }
+}
+
+function flattenDetailStrings(details: Record<string, unknown>) {
+  return Object.values(details).flatMap((value) => (Array.isArray(value) ? value : [value])).filter((value): value is string => typeof value === "string");
+}
+
+function normalizeForOverlap(value: string) {
+  return value.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function summarizeDraft(card: Pick<KnowledgeDraftReviewCard, "status" | "type" | "confidence" | "needsReview" | "freshnessSensitive">) {
+  return `Draft before mutation: status=${card.status}; type=${card.type}; confidence=${card.confidence}; needsReview=${card.needsReview}; freshnessSensitive=${card.freshnessSensitive}.`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export function parseKnowledgeDraftFormData(formData: FormData): KnowledgeDraftUpdateInput {
+  return {
+    type: getRequiredFormString(formData, "type"),
+    title: getRequiredFormString(formData, "title"),
+    locationName: getOptionalFormString(formData, "locationName"),
+    routeSegment: getOptionalFormString(formData, "routeSegment"),
+    summary: getRequiredFormString(formData, "summary"),
+    practicalDetails: getRequiredFormString(formData, "practicalDetails"),
+    tags: getOptionalFormString(formData, "tags") ?? "",
+    confidence: getRequiredFormString(formData, "confidence"),
+    freshnessSensitive: formData.get("freshnessSensitive") === "on",
+  };
+}
+
+function getRequiredFormString(formData: FormData, key: string) {
+  const value = getOptionalFormString(formData, key);
+
+  if (!value) {
+    return "";
+  }
+
+  return value;
+}
+
+function getOptionalFormString(formData: FormData, key: string) {
+  const value = formData.get(key);
+  return typeof value === "string" ? value.trim() || null : null;
+}

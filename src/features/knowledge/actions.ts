@@ -7,6 +7,12 @@ import { AdminAuthorizationError } from "@/server/auth";
 import { runAuditedAdminMutation } from "@/server/mutations";
 
 import { extractKnowledgeDraftsFromSource as extractKnowledgeDraftsFromSourceService, isKnowledgeExtractionError } from "./extraction";
+import {
+  isKnowledgeDraftReviewError,
+  parseKnowledgeDraftFormData,
+  rejectKnowledgeDraft as rejectKnowledgeDraftService,
+  updateKnowledgeDraft as updateKnowledgeDraftService,
+} from "./review";
 import { isSourceValidationError, normalizeTravelSourceInput, type TravelSourceInput } from "./sources";
 
 export type SafeSourceResult = Pick<
@@ -50,6 +56,64 @@ export async function submitTravelSourceForAiReading(input: TravelSourceInput): 
 
 export async function extractKnowledgeDraftsFromSource(sourceId: string) {
   return extractKnowledgeDraftsFromSourceService(sourceId);
+}
+
+export async function updateKnowledgeDraft(draftId: string, formData: FormData) {
+  return updateKnowledgeDraftService(draftId, parseKnowledgeDraftFormData(formData));
+}
+
+export async function rejectKnowledgeDraft(draftId: string) {
+  return rejectKnowledgeDraftService(draftId);
+}
+
+export async function updateKnowledgeDraftForm(formData: FormData) {
+  const draftId = getOptionalFormString(formData, "draftId") ?? "";
+  let failureMessage: string | null = null;
+
+  try {
+    await updateKnowledgeDraft(draftId, formData);
+  } catch (error) {
+    if (error instanceof AdminAuthorizationError || (error instanceof Error && error.name === "AdminAuthorizationError")) {
+      throw error;
+    }
+
+    failureMessage = isKnowledgeDraftReviewError(error) && error instanceof Error ? error.message : "Không thể lưu bản nháp. Vui lòng kiểm tra lại dữ liệu.";
+  }
+
+  if (failureMessage) {
+    if (!draftId) {
+      redirect(`/admin/knowledge/drafts?error=${encodeURIComponent(failureMessage)}`);
+    }
+
+    redirect(`/admin/knowledge/drafts/${encodeURIComponent(draftId)}?error=${encodeURIComponent(failureMessage)}`);
+  }
+
+  redirect(`/admin/knowledge/drafts/${encodeURIComponent(draftId)}?saved=1`);
+}
+
+export async function rejectKnowledgeDraftForm(formData: FormData) {
+  const draftId = getOptionalFormString(formData, "draftId") ?? "";
+  let failureMessage: string | null = null;
+
+  try {
+    await rejectKnowledgeDraft(draftId);
+  } catch (error) {
+    if (error instanceof AdminAuthorizationError || (error instanceof Error && error.name === "AdminAuthorizationError")) {
+      throw error;
+    }
+
+    failureMessage = isKnowledgeDraftReviewError(error) && error instanceof Error ? error.message : "Không thể từ chối bản nháp này.";
+  }
+
+  if (failureMessage) {
+    if (!draftId) {
+      redirect(`/admin/knowledge/drafts?error=${encodeURIComponent(failureMessage)}`);
+    }
+
+    redirect(`/admin/knowledge/drafts/${encodeURIComponent(draftId)}?error=${encodeURIComponent(failureMessage)}`);
+  }
+
+  redirect("/admin/knowledge/drafts?rejected=1");
 }
 
 export async function extractKnowledgeDraftsFromSourceForm(formData: FormData) {

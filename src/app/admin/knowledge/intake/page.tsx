@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import { extractKnowledgeDraftsFromSourceForm, submitTravelSourceForm } from "@/features/knowledge/actions";
 
 type KnowledgeIntakePageProps = {
@@ -29,9 +31,12 @@ export default async function KnowledgeIntakePage({ searchParams }: KnowledgeInt
         </p>
       ) : null}
       {params.success ? (
-        <p className="mt-6 rounded-2xl border border-[#8fb59f] bg-[#edf7ef] px-4 py-3 font-semibold text-[#1f5f46]" role="status">
-          Đã lưu nguồn an toàn để AI đọc ở bước sau{params.sourceId ? `: ${params.sourceId}` : ""}.
-        </p>
+        <div className="mt-6 rounded-2xl border border-[#8fb59f] bg-[#edf7ef] px-4 py-3 font-semibold text-[#1f5f46]" role="status">
+          <p>Đã lưu nguồn an toàn để AI đọc ở bước sau{params.sourceId ? `: ${params.sourceId}` : ""}.</p>
+          <Link className="mt-3 inline-flex rounded-xl border border-[#8fb59f] bg-white/70 px-3 py-2 text-sm text-[#17342c] transition hover:bg-white" href="/admin/knowledge/drafts">
+            Mở hàng đợi duyệt bản nháp
+          </Link>
+        </div>
       ) : null}
       {params.extractError ? (
         <p className="mt-6 rounded-2xl border border-[#d99a93] bg-[#fff0ee] px-4 py-3 font-semibold text-[#9b2f29]" role="alert">
@@ -39,9 +44,12 @@ export default async function KnowledgeIntakePage({ searchParams }: KnowledgeInt
         </p>
       ) : null}
       {params.extracted ? (
-        <p className="mt-6 rounded-2xl border border-[#8fb59f] bg-[#edf7ef] px-4 py-3 font-semibold text-[#1f5f46]" role="status">
-          AI đã tạo {params.extracted} bản nháp tri thức cần duyệt cho nguồn {params.sourceId ?? "đã chọn"}.
-        </p>
+        <div className="mt-6 rounded-2xl border border-[#8fb59f] bg-[#edf7ef] px-4 py-3 font-semibold text-[#1f5f46]" role="status">
+          <p>AI đã tạo {params.extracted} bản nháp tri thức cần duyệt cho nguồn {params.sourceId ?? "đã chọn"}.</p>
+          <Link className="mt-3 inline-flex rounded-xl border border-[#8fb59f] bg-white/70 px-3 py-2 text-sm text-[#17342c] transition hover:bg-white" href="/admin/knowledge/drafts">
+            Duyệt các bản nháp AI
+          </Link>
+        </div>
       ) : null}
 
       <form action={submitTravelSourceForm} className="mt-8 grid gap-6 rounded-[1.5rem] border border-[#d8c9ad] bg-white/70 p-5 sm:p-6">
