@@ -77,7 +77,7 @@ development_status:
   3-6-delete-chat-sessions: done
   3-7-delete-trip-projects: done
   epic-3-retrospective: done
-  epic-4: in-progress
+  epic-4: done
   4-1-submit-travel-source-for-ai-reading: done
   4-2-ai-extracts-knowledge-drafts-from-source: done
   4-3-review-and-edit-ai-prepared-drafts: done
@@ -87,7 +87,7 @@ development_status:
   4-7-preserve-source-and-confidence-in-approved-knowledge: done
   4-8-make-approved-knowledge-searchable-by-ai: done
   4-9-track-100-approved-corridor-items: done
-  epic-4-retrospective: optional
+  epic-4-retrospective: done
   epic-5: in-progress
   5-0-manage-ai-gateway-models-and-pricing: done
   5-1-retrieve-approved-knowledge-for-ai-ask: backlog
@@ -129,4 +129,40 @@ action_items:
   - epic: 3
     action: Confirm Epic 1 manual OAuth/admin/referral smoke leftovers or mark obsolete.
     owner: Tony
+    status: open
+  - epic: 4
+    action: Document Epic 5 context/source-bundle policy before Story 5.1/5.2 implementation.
+    owner: Winston and Amelia, with Tony review
+    status: open
+  - epic: 4
+    action: Decide Epic 5 retrieval path, PostgreSQL search first or pgvector embeddings now.
+    owner: Winston
+    status: open
+  - epic: 4
+    action: Add indexing/backfill orchestration plan for approved knowledge.
+    owner: Amelia
+    status: open
+  - epic: 4
+    action: Keep retrieval eligibility fail-closed in Epic 5 tests.
+    owner: Dana and Amelia
+    status: open
+  - epic: 4
+    action: Resolve source label/publisher safety before traveler-facing source rendering.
+    owner: Amelia and Tony
+    status: open
+  - epic: 4
+    action: Plan web search provider validation before dependency hardens.
+    owner: Winston and Tony
+    status: open
+  - epic: 4
+    action: Standardize AI usage event semantics across extraction, suggestion, chat, retrieval, embeddings, evaluation, and web/search providers.
+    owner: Amelia
+    status: open
+  - epic: 4
+    action: Close or re-defer Epic 3 chat concurrency and Epic 1 manual smoke leftovers.
+    owner: Tony, Winston, and Amelia
+    status: open
+  - epic: 4
+    action: Document DB-backed test execution sequencing.
+    owner: Dana
     status: open
