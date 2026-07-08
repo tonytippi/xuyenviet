@@ -70,6 +70,9 @@ warnings: []
 
 ## Review Triage Log
 
+### Review Findings
+- [x] [Review][Patch] Route/location distribution misclassifies specific stops when broad route segments include earlier corridor aliases [`src/features/knowledge/batch-intake.ts:420`]
+
 ### 2026-07-08 — Review pass
 - intent_gap: 0
 - bad_spec: 0

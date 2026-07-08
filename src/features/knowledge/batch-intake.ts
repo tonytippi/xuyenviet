@@ -420,7 +420,7 @@ function countByType(cards: Array<{ type: KnowledgeCardType }>) {
 function countByRouteOrLocation(cards: Array<{ locationName: string | null; routeSegment: string | null }>) {
   const counts = new Map<string, number>(corridorBuckets.map((bucket) => [bucket.label, 0]));
   for (const card of cards) {
-    const key = getCorridorBucketLabel(card.routeSegment, card.locationName);
+    const key = getCorridorBucketLabel(null, card.locationName) ?? getCorridorBucketLabel(card.routeSegment, null);
     if (key) {
       counts.set(key, (counts.get(key) ?? 0) + 1);
     }

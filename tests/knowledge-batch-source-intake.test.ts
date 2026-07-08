@@ -190,7 +190,8 @@ describe("knowledge batch source intake", () => {
     expect(progress).toMatchObject({ targetApprovedItems: 100, approvedCorridorItems: 1, remainingApprovedItems: 99, isComplete: false });
     expect(progress.byType.find((item) => item.type === "food")).toEqual({ type: "food", count: 1 });
     expect(progress.byType.find((item) => item.type === "place")).toEqual({ type: "place", count: 0 });
-    expect(progress.byRouteOrLocation.find((item) => item.routeOrLocation === "Hà Nội")).toEqual({ routeOrLocation: "Hà Nội", count: 1 });
+    expect(progress.byRouteOrLocation.find((item) => item.routeOrLocation === "Huế")).toEqual({ routeOrLocation: "Huế", count: 1 });
+    expect(progress.byRouteOrLocation.find((item) => item.routeOrLocation === "Hà Nội")).toEqual({ routeOrLocation: "Hà Nội", count: 0 });
     expect(progress.byRouteOrLocation.find((item) => item.routeOrLocation === "Nha Trang / Khánh Hòa")).toEqual({ routeOrLocation: "Nha Trang / Khánh Hòa", count: 0 });
     expect(progress.seedItemStatusCounts).toMatchObject({ approved: 2, duplicate: 1, pending: 0, needs_review: 1 });
 
