@@ -86,7 +86,7 @@ development_status:
   4-6-approve-knowledge-for-retrieval: done
   4-7-preserve-source-and-confidence-in-approved-knowledge: done
   4-8-make-approved-knowledge-searchable-by-ai: done
-  4-9-track-100-approved-corridor-items: backlog
+  4-9-track-100-approved-corridor-items: done
   epic-4-retrospective: optional
   epic-5: in-progress
   5-0-manage-ai-gateway-models-and-pricing: done

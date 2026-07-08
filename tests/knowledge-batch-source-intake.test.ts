@@ -1,7 +1,7 @@
 import { eq, sql } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { auditEvents, knowledgeCardSources, knowledgeCards, knowledgeSeedBatchItems, knowledgeSeedBatches, knowledgeSourceSuggestions, rawSourceMaterial, sources, userRoles, users, type UserRole } from "@/db/schema";
+import { auditEvents, knowledgeCardSources, knowledgeCards, knowledgeSeedBatchItems, knowledgeSeedBatches, knowledgeSourceSuggestions, rawSourceMaterial, sources, userRoles, users, type KnowledgeCardType, type UserRole } from "@/db/schema";
 
 import { testDb } from "./helpers/db";
 
@@ -162,6 +162,59 @@ describe("knowledge batch source intake", () => {
     await expect(testDb.select().from(auditEvents)).resolves.toHaveLength(0);
   });
 
+  test("operator progress counts only approved reviewed source-linked corridor cards and persists derived seed statuses", async () => {
+    await createUser("progress-operator", ["operator"]);
+    authMock.mockResolvedValue({ user: { id: "progress-operator", email: "progress-operator@example.com" } });
+    const { getApprovedCorridorSeedProgress, submitKnowledgeSeedUrlBatch } = await import("@/features/knowledge/batch-intake");
+
+    await submitKnowledgeSeedUrlBatch({ urls: "https://example.com/hue-food\nhttps://example.com/needs-review\nhttps://example.com/dalat\nhttps://example.com/duplicate" });
+    const items = await testDb.select().from(knowledgeSeedBatchItems).orderBy(knowledgeSeedBatchItems.lineNumber);
+    const [eligibleItem, needsReviewItem, nonCorridorItem, duplicateItem] = items;
+
+    await insertCardWithOptionalSource({ id: "eligible-hue-food", sourceId: eligibleItem!.sourceId, status: "approved", needsReview: false, type: "food", locationName: "Huế", routeSegment: "Hà Nội - TP.HCM" });
+    await insertCardWithOptionalSource({ id: "ineligible-needs-review", sourceId: needsReviewItem!.sourceId, status: "approved", needsReview: true, type: "place", locationName: "Đà Nẵng" });
+    await insertCardWithOptionalSource({ id: "ineligible-non-corridor", sourceId: nonCorridorItem!.sourceId, status: "approved", needsReview: false, type: "place", locationName: "Vinhomes Central Park" });
+    await insertCardWithOptionalSource({ id: "source-orphan-hanoi", sourceId: null, status: "approved", needsReview: false, type: "warning", locationName: "Hà Nội" });
+    await insertCardWithOptionalSource({ id: "archived-danang", sourceId: null, status: "archived", needsReview: false, type: "route_note", locationName: "Đà Nẵng" });
+    await testDb.insert(knowledgeSourceSuggestions).values({
+      sourceId: duplicateItem!.sourceId ?? "",
+      action: "duplicate",
+      targetCardId: "eligible-hue-food",
+      rationale: "Nguồn trùng nội dung hiện có.",
+      aiPromptVersion: "test",
+      createdByUserId: "progress-operator",
+    });
+
+    const progress = await getApprovedCorridorSeedProgress();
+
+    expect(progress).toMatchObject({ targetApprovedItems: 100, approvedCorridorItems: 1, remainingApprovedItems: 99, isComplete: false });
+    expect(progress.byType.find((item) => item.type === "food")).toEqual({ type: "food", count: 1 });
+    expect(progress.byType.find((item) => item.type === "place")).toEqual({ type: "place", count: 0 });
+    expect(progress.byRouteOrLocation.find((item) => item.routeOrLocation === "Hà Nội")).toEqual({ routeOrLocation: "Hà Nội", count: 1 });
+    expect(progress.byRouteOrLocation.find((item) => item.routeOrLocation === "Nha Trang / Khánh Hòa")).toEqual({ routeOrLocation: "Nha Trang / Khánh Hòa", count: 0 });
+    expect(progress.seedItemStatusCounts).toMatchObject({ approved: 2, duplicate: 1, pending: 0, needs_review: 1 });
+
+    const persistedItems = await testDb.select().from(knowledgeSeedBatchItems).orderBy(knowledgeSeedBatchItems.lineNumber);
+    expect(persistedItems.map((item) => item.status)).toEqual(["approved", "needs_review", "approved", "duplicate"]);
+    expect(JSON.stringify(progress)).not.toContain("raw");
+    expect(JSON.stringify(progress)).not.toContain("submittedUrl");
+  });
+
+  test("traveler cannot read approved corridor seed progress or trigger status derivation", async () => {
+    await createUser("progress-operator-denied", ["operator"]);
+    await createUser("progress-traveler", ["traveler"]);
+    authMock.mockResolvedValueOnce({ user: { id: "progress-operator-denied", email: "progress-operator-denied@example.com" } });
+    const { getApprovedCorridorSeedProgress, submitKnowledgeSeedUrlBatch } = await import("@/features/knowledge/batch-intake");
+
+    await submitKnowledgeSeedUrlBatch({ urls: "https://example.com/hanoi" });
+    const [item] = await testDb.select().from(knowledgeSeedBatchItems);
+    await insertCardWithOptionalSource({ id: "denied-approved-card", sourceId: item!.sourceId, status: "approved", needsReview: false, type: "place", locationName: "Hà Nội", createdByUserId: "progress-operator-denied" });
+    authMock.mockResolvedValue({ user: { id: "progress-traveler", email: "progress-traveler@example.com" } });
+
+    await expect(getApprovedCorridorSeedProgress()).rejects.toMatchObject({ name: "AdminAuthorizationError" });
+    await expect(testDb.select().from(knowledgeSeedBatchItems)).resolves.toMatchObject([{ status: "pending" }]);
+  });
+
   test("batch cap fails closed with no side effects", async () => {
     await createUser("cap-operator", ["operator"]);
     authMock.mockResolvedValue({ user: { id: "cap-operator", email: "cap-operator@example.com" } });
@@ -191,3 +244,32 @@ describe("knowledge batch source intake", () => {
     ).rejects.toThrow();
   });
 });
+
+async function insertCardWithOptionalSource(input: {
+  id: string;
+  sourceId: string | null | undefined;
+  status: "draft" | "approved" | "archived" | "rejected" | "duplicate" | "no_action";
+  needsReview: boolean;
+  type: KnowledgeCardType;
+  locationName?: string | null;
+  routeSegment?: string | null;
+  createdByUserId?: string;
+}) {
+  await testDb.insert(knowledgeCards).values({
+    id: input.id,
+    status: input.status,
+    needsReview: input.needsReview,
+    type: input.type,
+    title: input.id,
+    locationName: input.locationName ?? null,
+    routeSegment: input.routeSegment ?? null,
+    summary: "Thẻ kiểm thử cho tiến độ seed corridor.",
+    confidence: "curated",
+    aiPromptVersion: "test",
+    createdByUserId: input.createdByUserId ?? "progress-operator",
+  });
+
+  if (input.sourceId) {
+    await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: input.id, sourceId: input.sourceId, supportLevel: "primary" });
+  }
+}

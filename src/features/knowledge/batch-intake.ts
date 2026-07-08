@@ -3,7 +3,7 @@ import "server-only";
 import { and, desc, eq, inArray, or } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { knowledgeCards, knowledgeCardSources, knowledgeSeedBatchItems, knowledgeSeedBatches, knowledgeSourceSuggestions, rawSourceMaterial, sources, type KnowledgeSeedBatchItemStatus } from "@/db/schema";
+import { knowledgeCards, knowledgeCardSources, knowledgeCardTypeValues, knowledgeSeedBatchItems, knowledgeSeedBatches, knowledgeSourceSuggestions, rawSourceMaterial, sources, type KnowledgeCardType, type KnowledgeSeedBatchItemStatus } from "@/db/schema";
 import { recordAuditEvent } from "@/features/audit/events";
 import { requireAdminSession } from "@/server/auth";
 
@@ -14,6 +14,27 @@ const maxBatchLabelLength = 160;
 const maxRecentBatches = 5;
 const maxSubmittedUrlLength = 2048;
 const maxSafeErrorLength = 500;
+const approvedCorridorSeedTarget = 100;
+const corridorBuckets = [
+  { label: "Hà Nội", aliases: ["ha noi", "hanoi"] },
+  { label: "Ninh Bình", aliases: ["ninh binh"] },
+  { label: "Thanh Hóa", aliases: ["thanh hoa"] },
+  { label: "Nghệ An / Vinh", aliases: ["nghe an", "vinh"] },
+  { label: "Hà Tĩnh", aliases: ["ha tinh"] },
+  { label: "Quảng Bình / Đồng Hới", aliases: ["quang binh", "dong hoi"] },
+  { label: "Quảng Trị", aliases: ["quang tri"] },
+  { label: "Huế", aliases: ["hue"] },
+  { label: "Đà Nẵng", aliases: ["da nang"] },
+  { label: "Hội An / Quảng Nam", aliases: ["hoi an", "quang nam"] },
+  { label: "Quảng Ngãi", aliases: ["quang ngai"] },
+  { label: "Quy Nhơn / Bình Định", aliases: ["quy nhon", "binh dinh"] },
+  { label: "Phú Yên / Tuy Hòa", aliases: ["phu yen", "tuy hoa"] },
+  { label: "Nha Trang / Khánh Hòa", aliases: ["nha trang", "khanh hoa"] },
+  { label: "Phan Rang / Ninh Thuận", aliases: ["phan rang", "ninh thuan"] },
+  { label: "Phan Thiết / Bình Thuận", aliases: ["phan thiet", "binh thuan"] },
+  { label: "Đồng Nai", aliases: ["dong nai"] },
+  { label: "TP.HCM / Sài Gòn", aliases: ["tp hcm", "tphcm", "ho chi minh", "sai gon", "hcmc"] },
+];
 
 type BatchDb = ReturnType<typeof getDb>;
 
@@ -39,6 +60,16 @@ export type KnowledgeSeedBatchListItem = Pick<typeof knowledgeSeedBatchItems.$in
 export type KnowledgeSeedBatchListEntry = Pick<typeof knowledgeSeedBatches.$inferSelect, "id" | "label" | "createdAt"> & {
   items: KnowledgeSeedBatchListItem[];
   counts: Record<KnowledgeSeedBatchItemStatus, number>;
+};
+
+export type ApprovedCorridorSeedProgress = {
+  targetApprovedItems: number;
+  approvedCorridorItems: number;
+  remainingApprovedItems: number;
+  isComplete: boolean;
+  seedItemStatusCounts: Record<KnowledgeSeedBatchItemStatus, number>;
+  byType: Array<{ type: KnowledgeCardType; count: number }>;
+  byRouteOrLocation: Array<{ routeOrLocation: string; count: number }>;
 };
 
 export class KnowledgeBatchIntakeError extends Error {
@@ -158,12 +189,12 @@ export async function listRecentKnowledgeSeedBatches(limit = maxRecentBatches): 
   const rows = await db.select().from(knowledgeSeedBatchItems).where(inArray(knowledgeSeedBatchItems.batchId, batchIds)).orderBy(knowledgeSeedBatchItems.batchId, knowledgeSeedBatchItems.lineNumber);
   const derivedStatuses = await deriveStatusesForSourceItems(db, rows.filter((row) => row.sourceId));
   const itemsByBatch = new Map<string, KnowledgeSeedBatchListItem[]>();
-  const staleStatusUpdates: Array<{ id: string; status: KnowledgeSeedBatchItemStatus }> = [];
+  const staleStatusUpdates: Array<{ id: string; previousStatus: KnowledgeSeedBatchItemStatus; status: KnowledgeSeedBatchItemStatus }> = [];
 
   for (const row of rows) {
     const status = row.sourceId ? (derivedStatuses.get(row.sourceId) ?? row.status) : row.status;
     if (status !== row.status) {
-      staleStatusUpdates.push({ id: row.id, status });
+      staleStatusUpdates.push({ id: row.id, previousStatus: row.status, status });
     }
     const item = { ...row, status };
     const items = itemsByBatch.get(row.batchId) ?? [];
@@ -177,6 +208,47 @@ export async function listRecentKnowledgeSeedBatches(limit = maxRecentBatches): 
     const items = itemsByBatch.get(batch.id) ?? [];
     return { ...batch, items, counts: countStatuses(items) };
   });
+}
+
+export async function getApprovedCorridorSeedProgress(): Promise<ApprovedCorridorSeedProgress> {
+  await requireAdminSession();
+  const db = getDb();
+  const seedItems = await db.select().from(knowledgeSeedBatchItems);
+  const derivedStatuses = await deriveStatusesForSourceItems(db, seedItems.filter((row) => row.sourceId));
+  const staleStatusUpdates: Array<{ id: string; previousStatus: KnowledgeSeedBatchItemStatus; status: KnowledgeSeedBatchItemStatus }> = [];
+  const itemsWithDerivedStatuses: KnowledgeSeedBatchListItem[] = seedItems.map((row) => {
+    const status = row.sourceId ? (derivedStatuses.get(row.sourceId) ?? row.status) : row.status;
+    if (status !== row.status) {
+      staleStatusUpdates.push({ id: row.id, previousStatus: row.status, status });
+    }
+    return { ...row, status };
+  });
+
+  await persistDerivedStatuses(db, staleStatusUpdates);
+
+  const cardRows = await db
+    .select({ id: knowledgeCards.id, type: knowledgeCards.type, locationName: knowledgeCards.locationName, routeSegment: knowledgeCards.routeSegment })
+    .from(knowledgeCards)
+    .innerJoin(knowledgeCardSources, eq(knowledgeCardSources.knowledgeCardId, knowledgeCards.id))
+    .where(and(eq(knowledgeCards.status, "approved"), eq(knowledgeCards.needsReview, false)));
+
+  const uniqueEligibleCards = new Map<string, { type: KnowledgeCardType; locationName: string | null; routeSegment: string | null }>();
+  for (const row of cardRows) {
+    if (!uniqueEligibleCards.has(row.id) && hasCorridorSignal(row.routeSegment, row.locationName)) {
+      uniqueEligibleCards.set(row.id, { type: row.type, locationName: row.locationName, routeSegment: row.routeSegment });
+    }
+  }
+
+  const approvedCorridorItems = uniqueEligibleCards.size;
+  return {
+    targetApprovedItems: approvedCorridorSeedTarget,
+    approvedCorridorItems,
+    remainingApprovedItems: Math.max(approvedCorridorSeedTarget - approvedCorridorItems, 0),
+    isComplete: approvedCorridorItems >= approvedCorridorSeedTarget,
+    seedItemStatusCounts: countStatuses(itemsWithDerivedStatuses),
+    byType: countByType(Array.from(uniqueEligibleCards.values())),
+    byRouteOrLocation: countByRouteOrLocation(Array.from(uniqueEligibleCards.values())),
+  };
 }
 
 function parseSubmittedUrlLines(input: string) {
@@ -218,9 +290,12 @@ async function insertFailedItem(
   });
 }
 
-async function persistDerivedStatuses(db: Pick<BatchDb, "update">, updates: Array<{ id: string; status: KnowledgeSeedBatchItemStatus }>) {
+async function persistDerivedStatuses(db: Pick<BatchDb, "update">, updates: Array<{ id: string; previousStatus: KnowledgeSeedBatchItemStatus; status: KnowledgeSeedBatchItemStatus }>) {
   for (const update of updates) {
-    await db.update(knowledgeSeedBatchItems).set({ status: update.status, updatedAt: new Date() }).where(eq(knowledgeSeedBatchItems.id, update.id));
+    await db
+      .update(knowledgeSeedBatchItems)
+      .set({ status: update.status, updatedAt: new Date() })
+      .where(and(eq(knowledgeSeedBatchItems.id, update.id), eq(knowledgeSeedBatchItems.status, update.previousStatus)));
   }
 }
 
@@ -273,6 +348,7 @@ async function deriveStatusesForSourceItems(db: Pick<BatchDb, "select">, items: 
 }
 
 function mapCardStatus(status: typeof knowledgeCards.$inferSelect.status, needsReview: boolean): KnowledgeSeedBatchItemStatus {
+  if (status === "approved" && needsReview) return "needs_review";
   if (status === "approved") return "approved";
   if (status === "archived") return "rejected";
   if (status === "rejected") return "rejected";
@@ -313,4 +389,53 @@ function countStatuses(items: KnowledgeSeedBatchListItem[]) {
   }
 
   return counts;
+}
+
+function hasCorridorSignal(routeSegment: string | null, locationName: string | null) {
+  return getCorridorBucketLabel(routeSegment, locationName) !== null;
+}
+
+function normalizeSearchText(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "d")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function countByType(cards: Array<{ type: KnowledgeCardType }>) {
+  const counts = new Map<KnowledgeCardType, number>(knowledgeCardTypeValues.map((type) => [type, 0]));
+  for (const card of cards) {
+    counts.set(card.type, (counts.get(card.type) ?? 0) + 1);
+  }
+  return Array.from(counts.entries())
+    .map(([type, count]) => ({ type, count }))
+    .sort((a, b) => b.count - a.count || a.type.localeCompare(b.type));
+}
+
+function countByRouteOrLocation(cards: Array<{ locationName: string | null; routeSegment: string | null }>) {
+  const counts = new Map<string, number>(corridorBuckets.map((bucket) => [bucket.label, 0]));
+  for (const card of cards) {
+    const key = getCorridorBucketLabel(card.routeSegment, card.locationName);
+    if (key) {
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+  }
+  return Array.from(counts.entries())
+    .map(([routeOrLocation, count]) => ({ routeOrLocation, count }))
+    .sort((a, b) => b.count - a.count || a.routeOrLocation.localeCompare(b.routeOrLocation));
+}
+
+function getCorridorBucketLabel(routeSegment: string | null, locationName: string | null) {
+  const normalizedValue = ` ${normalizeSearchText([routeSegment, locationName].filter(Boolean).join(" "))} `;
+  for (const bucket of corridorBuckets) {
+    if (bucket.aliases.some((alias) => normalizedValue.includes(` ${normalizeSearchText(alias)} `))) {
+      return bucket.label;
+    }
+  }
+  return null;
 }

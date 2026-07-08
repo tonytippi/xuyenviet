@@ -73,3 +73,9 @@
 - source_spec: `spec-4-7-preserve-source-and-confidence-in-approved-knowledge.md`
   summary: Add pagination or a bounded default limit for the approved-card list before the approved knowledge corpus grows materially.
   evidence: `listApprovedKnowledgeCards()` currently loads every approved card and every linked source for `/admin/knowledge/approved`. This is acceptable for the current 100-item seed target but should become paginated or capped before a larger corpus makes server rendering slow or memory-heavy.
+- source_spec: `spec-4-9-track-100-approved-corridor-items.md`
+  summary: Add SQL aggregation, batching, or pagination to the seed progress helper if source intake grows substantially beyond the MVP 100-item target.
+  evidence: `getApprovedCorridorSeedProgress()` derives all seed item statuses and filters approved source-linked cards in process. This is acceptable for the public-MVP seed scale but can become slow or hit query parameter limits with a much larger corpus.
+- source_spec: `spec-4-9-track-100-approved-corridor-items.md`
+  summary: Decide whether seed progress should require source provenance from seed batches only.
+  evidence: Story 4.9 counts approved, reviewed, source-linked corridor knowledge regardless of whether the linked source came from batch seed intake. This matches the broader approved-corridor seed requirement, but a later operator report may need a stricter batch-seeded-only definition.
