@@ -106,6 +106,13 @@ warnings: []
   - `[medium]` `[patch]` Rejected non-boolean `freshness_sensitive` values instead of silently coercing them to false.
   - `[medium]` `[patch]` Redirected source submission with `sourceId` and prefilled the extraction form so newly submitted sources are reachable from the Story 4.2 UI.
 
+### 2026-07-08 — Follow-up Review Findings
+- [x] [Review][Patch] Make same-source duplicate extraction protection atomic before the provider call [`src/features/knowledge/extraction.ts:91`] -- fixed with a transaction-scoped advisory lock covering the active-draft check, provider call, and draft insert.
+- [x] [Review][Patch] Tighten raw-source leak protection for short snippets and practical details [`src/features/knowledge/extraction.ts:265`] -- fixed with lower verbatim-overlap threshold and phone/email-like value rejection across safe draft fields.
+- [x] [Review][Patch] Block only active review-needed drafts when checking same-source extraction state [`src/features/knowledge/extraction.ts:187`] -- fixed by joining `knowledge_cards` and blocking only `draft` or `needs_review` linked cards.
+- [x] [Review][Patch] Require extracted drafts to carry either location or route segment [`src/features/knowledge/extraction.ts:260`] -- fixed by rejecting drafts where both normalized fields are absent.
+- [x] [Review][Patch] Add database JSON-shape checks for knowledge card details and tags [`src/db/schema.ts:557`] -- fixed with PostgreSQL `jsonb_typeof` checks and generated migration `0017_tiny_rattler.sql`.
+
 ## Design Notes
 
 Story 4.2 intentionally supports raw-text extraction first. Story 4.1 screenshot intake stores metadata only, with no upload or readable image URL; screenshot-only extraction must therefore fail safely until a later story introduces a real storage reader. This still preserves the AI Gateway image-capability boundary for future use without pretending metadata is image content.
@@ -134,6 +141,12 @@ Story 4.2 intentionally supports raw-text extraction first. Story 4.1 screenshot
 - Review fix verification: `pnpm test:run tests/knowledge-source-intake.test.ts` -- passed; 8 tests passed.
 - Review fix verification: `pnpm test:run` -- passed; 12 files / 180 tests passed.
 - Review fix verification: `pnpm build` -- passed.
+- Follow-up review fix verification: `pnpm db:generate` -- passed; generated `drizzle/migrations/0017_tiny_rattler.sql` and `drizzle/migrations/meta/0017_snapshot.json`.
+- Follow-up review fix verification: `pnpm test:run tests/knowledge-draft-extraction.test.ts` -- initially failed while aligning durable usage writes and stricter raw-overlap fixtures; fixed, reran, passed 13 tests.
+- Follow-up review fix verification: `pnpm typecheck` -- passed.
+- Follow-up review fix verification: `pnpm lint` -- passed.
+- Follow-up review fix verification: `pnpm test:run` -- passed; 12 files / 183 tests passed.
+- Follow-up review fix verification: `pnpm build` -- passed.
 
 ## Implementation Notes
 
@@ -144,6 +157,7 @@ Story 4.2 intentionally supports raw-text extraction first. Story 4.1 screenshot
 - Provider failures record safe usage failure rows without draft/audit persistence; malformed successful provider output records usage but creates no drafts or audit rows.
 - Screenshot-only sources fail safely because Story 4.1 stores metadata only; no file reader, approvals, retrieval, embeddings, or traveler display behavior was added.
 - Review fixes reject long verbatim raw-source overlap, require boolean freshness flags, prevent same-source duplicate extraction, clamp unverified curated source confidence, and pass the saved `sourceId` into the extraction form.
+- Follow-up review fixes make same-source extraction locking atomic, block only active review-needed linked cards, require route/location on drafts, reject shorter raw snippets and phone/email-like values, and add DB JSON-shape constraints for practical details and tags.
 
 ## Auto Run Result
 
@@ -151,9 +165,9 @@ Status: done
 
 Summary: Implemented Story 4.2 AI extraction from raw text sources into review-needed draft knowledge cards linked to normalized sources, with safe usage/audit behavior and a minimal admin intake trigger.
 
-Review findings breakdown: 6 patch findings fixed across implementation inspection and review, 0 deferred, 0 rejected. Follow-up review recommended: false.
+Review findings breakdown: 11 patch findings fixed across implementation inspection, review, and follow-up review, 0 deferred, 0 rejected. Follow-up review recommended: false.
 
-Verification performed: `pnpm db:generate`, focused Story 4.2 and Story 4.1 tests, `pnpm typecheck`, `pnpm lint`, full `pnpm test:run`, and `pnpm build` all passed after the noted fixes. After review patches, focused Story 4.2 tests passed with 10 tests, and typecheck/lint/full tests/build were rerun and passed.
+Verification performed: `pnpm db:generate`, focused Story 4.2 and Story 4.1 tests, `pnpm typecheck`, `pnpm lint`, full `pnpm test:run`, and `pnpm build` all passed after the noted fixes. After review patches, focused Story 4.2 tests passed with 13 tests, and typecheck/lint/full tests/build were rerun and passed.
 
 Residual risks: This story intentionally supports raw-text extraction only; screenshot/image extraction still requires a later storage/file-reader story. No git commit was created per user instruction.
 
@@ -162,7 +176,9 @@ Residual risks: This story intentionally supports raw-text extraction only; scre
 - `_bmad-output/implementation-artifacts/spec-4-2-ai-extracts-knowledge-drafts-from-source.md`
 - `_bmad-output/implementation-artifacts/sprint-status.yaml`
 - `drizzle/migrations/0016_robust_zemo.sql`
+- `drizzle/migrations/0017_tiny_rattler.sql`
 - `drizzle/migrations/meta/0016_snapshot.json`
+- `drizzle/migrations/meta/0017_snapshot.json`
 - `drizzle/migrations/meta/_journal.json`
 - `src/app/admin/knowledge/intake/page.tsx`
 - `src/db/schema.ts`

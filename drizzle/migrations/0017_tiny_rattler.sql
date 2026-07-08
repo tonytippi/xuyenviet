@@ -1,0 +1,2 @@
+ALTER TABLE "knowledge_cards" ADD CONSTRAINT "knowledge_cards_details_object_check" CHECK (jsonb_typeof("knowledge_cards"."practical_details") = 'object');--> statement-breakpoint
+ALTER TABLE "knowledge_cards" ADD CONSTRAINT "knowledge_cards_tags_array_check" CHECK (jsonb_typeof("knowledge_cards"."tags") = 'array');

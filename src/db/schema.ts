@@ -582,6 +582,8 @@ export const knowledgeCards = pgTable(
     check("knowledge_cards_summary_length_check", sql`length(btrim(${card.summary})) between 1 and 1200`),
     check("knowledge_cards_location_length_check", sql`${card.locationName} is null or length(btrim(${card.locationName})) between 1 and 160`),
     check("knowledge_cards_route_segment_length_check", sql`${card.routeSegment} is null or length(btrim(${card.routeSegment})) between 1 and 160`),
+    check("knowledge_cards_details_object_check", sql`jsonb_typeof(${card.practicalDetails}) = 'object'`),
+    check("knowledge_cards_tags_array_check", sql`jsonb_typeof(${card.tags}) = 'array'`),
     check("knowledge_cards_draft_review_check", sql`${card.status} <> 'draft' or ${card.needsReview} = true`),
   ],
 );

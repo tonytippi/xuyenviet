@@ -1,6 +1,6 @@
 import "server-only";
 
-import { eq } from "drizzle-orm";
+import { and, eq, or, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
 import {
@@ -34,6 +34,8 @@ const maxTags = 12;
 const maxTagLength = 40;
 
 type ExtractionDb = ReturnType<typeof getDb>;
+type ExtractionQueryDb = Pick<ExtractionDb, "select">;
+type ExtractionLockDb = { execute: (query: ReturnType<typeof sql>) => Promise<unknown> };
 
 type DraftInsert = Pick<
   typeof knowledgeCards.$inferInsert,
@@ -72,6 +74,7 @@ export function isKnowledgeExtractionError(error: unknown) {
 export async function extractKnowledgeDraftsFromSource(sourceId: string): Promise<KnowledgeDraftExtractionResult> {
   const session = await requireAdminSession();
   const normalizedSourceId = sourceId.trim();
+  let providerUsage: Parameters<typeof writeUsageForProviderCall>[3] | null = null;
 
   if (!normalizedSourceId) {
     throw new KnowledgeExtractionError("Không tìm thấy nguồn cần trích xuất.", "invalid_source");
@@ -87,10 +90,7 @@ export async function extractKnowledgeDraftsFromSource(sourceId: string): Promis
   if (!sourceBundle.raw.rawText?.trim()) {
     throw new KnowledgeExtractionError("Nguồn này chưa có văn bản đọc được để AI trích xuất.", "unsupported_material");
   }
-
-  if (await sourceAlreadyHasDrafts(db, sourceBundle.source.id)) {
-    throw new KnowledgeExtractionError("Nguồn này đã có bản nháp cần duyệt. Vui lòng duyệt hoặc xử lý bản nháp hiện có trước khi trích xuất lại.", "already_extracted");
-  }
+  const rawText = sourceBundle.raw.rawText;
 
   const model = await selectActiveAiGatewayModel({
     purpose: sourceKnowledgeDraftExtractionPurpose,
@@ -102,74 +102,93 @@ export async function extractKnowledgeDraftsFromSource(sourceId: string): Promis
     throw new KnowledgeExtractionError("Chưa có model AI extraction đang hoạt động.", "model_unavailable");
   }
 
-  const gatewayResult = await completeExtraction({
-    model: model.gatewayModelName,
-    messages: buildSourceKnowledgeDraftExtractionMessages({
-      source: {
-        kind: sourceBundle.source.kind,
-        label: sourceBundle.source.label,
-        publisher: sourceBundle.source.publisher,
-        collectedDate: sourceBundle.source.collectedDate,
-        sourceType: sourceBundle.source.sourceType,
-        verificationStatus: sourceBundle.source.verificationStatus,
-        official: sourceBundle.source.official,
-        partner: sourceBundle.source.partner,
-      },
-      rawText: sourceBundle.raw.rawText,
-    }),
-  });
+  try {
+    const extraction = await db.transaction(async (transaction) => {
+      await lockSourceExtraction(transaction, sourceBundle.source.id);
 
-  if (!gatewayResult.ok) {
-    await writeUsageForProviderCall(db, session.userId, model, {
-      status: "failure",
-      provider: gatewayResult.provider,
-      model: gatewayResult.model,
-      latencyMs: gatewayResult.latencyMs,
-      errorCode: gatewayResult.errorCode,
+      if (await sourceAlreadyHasDrafts(transaction, sourceBundle.source.id)) {
+        throw new KnowledgeExtractionError("Nguồn này đã có bản nháp cần duyệt. Vui lòng duyệt hoặc xử lý bản nháp hiện có trước khi trích xuất lại.", "already_extracted");
+      }
+
+      const gatewayResult = await completeExtraction({
+        model: model.gatewayModelName,
+        messages: buildSourceKnowledgeDraftExtractionMessages({
+          source: {
+            kind: sourceBundle.source.kind,
+            label: sourceBundle.source.label,
+            publisher: sourceBundle.source.publisher,
+            collectedDate: sourceBundle.source.collectedDate,
+            sourceType: sourceBundle.source.sourceType,
+            verificationStatus: sourceBundle.source.verificationStatus,
+            official: sourceBundle.source.official,
+            partner: sourceBundle.source.partner,
+          },
+          rawText,
+        }),
+      });
+
+      if (!gatewayResult.ok) {
+        providerUsage = {
+          status: "failure" as const,
+          provider: gatewayResult.provider ?? "unknown",
+          model: gatewayResult.model ?? model.gatewayModelName,
+          latencyMs: gatewayResult.latencyMs,
+          errorCode: gatewayResult.errorCode,
+        };
+        throw new KnowledgeExtractionError("AI chưa trích xuất được nguồn này. Vui lòng thử lại sau.", "provider_failed");
+      }
+
+      providerUsage = {
+        status: "success",
+        provider: gatewayResult.provider,
+        model: gatewayResult.model,
+        latencyMs: gatewayResult.latencyMs,
+        promptTokens: gatewayResult.usage.promptTokens,
+        completionTokens: gatewayResult.usage.completionTokens,
+        totalTokens: gatewayResult.usage.totalTokens,
+        cachedPromptTokens: gatewayResult.usage.cachedPromptTokens,
+        cacheWritePromptTokens: gatewayResult.usage.cacheWritePromptTokens,
+      };
+
+      const drafts = parseDrafts(gatewayResult.content, sourceBundle.source, rawText);
+
+      if (drafts.length === 0) {
+        throw new KnowledgeExtractionError("AI không tìm thấy tri thức du lịch đủ rõ để tạo bản nháp.", "invalid_model_output");
+      }
+
+      const inserted = await transaction.insert(knowledgeCards).values(drafts.map((draft) => ({ ...draft, createdByUserId: session.userId, aiGatewayModelId: model.id }))).returning({ id: knowledgeCards.id });
+
+      await transaction.insert(knowledgeCardSources).values(inserted.map((card) => ({ knowledgeCardId: card.id, sourceId: sourceBundle.source.id, supportLevel: "primary" as const })));
+
+      await recordAuditEvent(
+        {
+          actor: session,
+          operation: "create",
+          targetType: "knowledge_draft_extraction",
+          targetId: sourceBundle.source.id,
+          afterSummary: `AI extraction created ${inserted.length} draft knowledge card(s) from one source.`,
+        },
+        transaction,
+      );
+
+      return {
+        sourceId: sourceBundle.source.id,
+        draftCount: inserted.length,
+        draftIds: inserted.map((card) => card.id),
+      };
     });
-    throw new KnowledgeExtractionError("AI chưa trích xuất được nguồn này. Vui lòng thử lại sau.", "provider_failed");
+
+    if (providerUsage) {
+      await writeUsageForProviderCall(db, session.userId, model, providerUsage);
+    }
+
+    return extraction;
+  } catch (error) {
+    if (providerUsage && error instanceof KnowledgeExtractionError) {
+      await writeUsageForProviderCall(db, session.userId, model, providerUsage);
+    }
+    throw error;
   }
-
-  await writeUsageForProviderCall(db, session.userId, model, {
-    status: "success",
-    provider: gatewayResult.provider,
-    model: gatewayResult.model,
-    latencyMs: gatewayResult.latencyMs,
-    promptTokens: gatewayResult.usage.promptTokens,
-    completionTokens: gatewayResult.usage.completionTokens,
-    totalTokens: gatewayResult.usage.totalTokens,
-    cachedPromptTokens: gatewayResult.usage.cachedPromptTokens,
-    cacheWritePromptTokens: gatewayResult.usage.cacheWritePromptTokens,
-  });
-
-  const drafts = parseDrafts(gatewayResult.content, sourceBundle.source, sourceBundle.raw.rawText);
-
-  if (drafts.length === 0) {
-    throw new KnowledgeExtractionError("AI không tìm thấy tri thức du lịch đủ rõ để tạo bản nháp.", "invalid_model_output");
-  }
-
-  return db.transaction(async (transaction) => {
-    const inserted = await transaction.insert(knowledgeCards).values(drafts.map((draft) => ({ ...draft, createdByUserId: session.userId, aiGatewayModelId: model.id }))).returning({ id: knowledgeCards.id });
-
-    await transaction.insert(knowledgeCardSources).values(inserted.map((card) => ({ knowledgeCardId: card.id, sourceId: sourceBundle.source.id, supportLevel: "primary" as const })));
-
-    await recordAuditEvent(
-      {
-        actor: session,
-        operation: "create",
-        targetType: "knowledge_draft_extraction",
-        targetId: sourceBundle.source.id,
-        afterSummary: `AI extraction created ${inserted.length} draft knowledge card(s) from one source.`,
-      },
-      transaction,
-    );
-
-    return {
-      sourceId: sourceBundle.source.id,
-      draftCount: inserted.length,
-      draftIds: inserted.map((card) => card.id),
-    };
-  });
 }
 
 async function loadSourceBundle(db: ExtractionDb, sourceId: string) {
@@ -184,9 +203,18 @@ async function loadSourceBundle(db: ExtractionDb, sourceId: string) {
   return raw ? { source, raw } : null;
 }
 
-async function sourceAlreadyHasDrafts(db: ExtractionDb, sourceId: string) {
-  const [existingLink] = await db.select({ sourceId: knowledgeCardSources.sourceId }).from(knowledgeCardSources).where(eq(knowledgeCardSources.sourceId, sourceId)).limit(1);
+async function sourceAlreadyHasDrafts(db: ExtractionQueryDb, sourceId: string) {
+  const [existingLink] = await db
+    .select({ sourceId: knowledgeCardSources.sourceId })
+    .from(knowledgeCardSources)
+    .innerJoin(knowledgeCards, eq(knowledgeCards.id, knowledgeCardSources.knowledgeCardId))
+    .where(and(eq(knowledgeCardSources.sourceId, sourceId), or(eq(knowledgeCards.status, "draft"), eq(knowledgeCards.needsReview, true))))
+    .limit(1);
   return Boolean(existingLink);
+}
+
+async function lockSourceExtraction(db: ExtractionLockDb, sourceId: string) {
+  await db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${sourceId}, 42))`);
 }
 
 async function writeUsageForProviderCall(
@@ -259,6 +287,11 @@ function normalizeDraft(value: unknown, source: typeof sources.$inferSelect, raw
 
   const locationName = normalizeBoundedString(value.location_name, maxLocationLength);
   const routeSegment = normalizeBoundedString(value.route_segment, maxRouteSegmentLength);
+
+  if (!locationName && !routeSegment) {
+    return null;
+  }
+
   const practicalDetails = normalizePracticalDetails(value.practical_details);
   const tags = normalizeTags(value.tags);
 
@@ -373,8 +406,12 @@ function containsUnsafeRawOverlap(values: Array<string | null>, rawText: string)
   return values.some((value) => {
     if (!value) return false;
     const normalizedValue = normalizeForOverlap(value);
-    return normalizedValue.length >= 80 && normalizedRaw.includes(normalizedValue);
+    return containsSensitivePattern(normalizedValue) || (normalizedValue.length >= 24 && normalizedRaw.includes(normalizedValue));
   });
+}
+
+function containsSensitivePattern(value: string) {
+  return /(?:\+?84|0)(?:[\s.-]?\d){8,10}\b/.test(value) || /\b[\w.%+-]+@[\w.-]+\.[a-z]{2,}\b/.test(value);
 }
 
 function normalizeForOverlap(value: string) {

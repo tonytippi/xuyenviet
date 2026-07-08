@@ -234,8 +234,9 @@ describe("knowledge draft extraction", () => {
         drafts: [
           {
             type: "service",
-            title: "Điểm dừng có bãi xe rộng",
-            summary: "Điểm dừng cần được vận hành kiểm tra thêm trước khi dùng làm tri thức chính thức.",
+            title: "Trạm dừng tiện ích ven quốc lộ",
+            route_segment: "Quốc lộ 1A",
+            summary: "Điểm dừng ven tuyến cần được kiểm tra lại tiện ích trước khi duyệt thành tri thức chính thức.",
             practical_details: { tips: ["Kiểm tra lại tiện ích trước khi duyệt"] },
             tags: ["diem-dung"],
             confidence: "curated",
@@ -262,6 +263,7 @@ describe("knowledge draft extraction", () => {
           {
             type: "food",
             title: "Quán ăn dừng chân",
+            location_name: "Huế",
             summary: "Quán phù hợp để tạo bản nháp đầu tiên cho nguồn này.",
             practical_details: { tips: ["Duyệt lại trước khi dùng"] },
             tags: ["an-uong"],
@@ -309,6 +311,92 @@ describe("knowledge draft extraction", () => {
     await expect(testDb.select().from(knowledgeCards)).resolves.toHaveLength(0);
   });
 
+  test("model output without route or location is rejected", async () => {
+    await createUser("missing-location-operator", ["operator"]);
+    authMock.mockResolvedValue({ user: { id: "missing-location-operator", email: "missing-location-operator@example.com" } });
+    await createExtractionModel();
+    const source = await createTextSource("missing-location-operator");
+    mockGatewayJson(
+      JSON.stringify({
+        drafts: [
+          {
+            type: "general_travel_tip",
+            title: "Mẹo chuẩn bị chuyến đi",
+            summary: "Mẹo cần được gắn với một địa điểm hoặc cung đường trước khi lưu thành bản nháp.",
+            practical_details: { tips: ["Duyệt lại trước khi dùng"] },
+            tags: ["meo-di-duong"],
+            confidence: "community",
+            freshness_sensitive: false,
+          },
+        ],
+      }),
+    );
+    const { extractKnowledgeDraftsFromSource } = await import("@/features/knowledge/actions");
+
+    await expect(extractKnowledgeDraftsFromSource(source.id)).rejects.toMatchObject({ code: "invalid_model_output" });
+    await expect(testDb.select().from(knowledgeCards)).resolves.toHaveLength(0);
+  });
+
+  test("short raw snippets and phone-like values are rejected from safe draft fields", async () => {
+    await createUser("short-snippet-operator", ["operator"]);
+    authMock.mockResolvedValue({ user: { id: "short-snippet-operator", email: "short-snippet-operator@example.com" } });
+    await createExtractionModel();
+    const source = await createTextSource("short-snippet-operator", "Liên hệ 0901234567 khi tới bãi xe phía bắc Huế.");
+    mockGatewayJson(
+      JSON.stringify({
+        drafts: [
+          {
+            type: "parking",
+            title: "Bãi xe phía bắc Huế",
+            location_name: "Huế",
+            summary: "Liên hệ 0901234567 khi tới bãi xe.",
+            practical_details: { contact: "0901234567" },
+            tags: ["bai-xe"],
+            confidence: "community",
+            freshness_sensitive: false,
+          },
+        ],
+      }),
+    );
+    const { extractKnowledgeDraftsFromSource } = await import("@/features/knowledge/actions");
+
+    await expect(extractKnowledgeDraftsFromSource(source.id)).rejects.toMatchObject({ code: "invalid_model_output" });
+    await expect(testDb.select().from(knowledgeCards)).resolves.toHaveLength(0);
+  });
+
+  test("non-review linked cards do not block a new extraction", async () => {
+    await createUser("reextract-operator", ["operator"]);
+    authMock.mockResolvedValue({ user: { id: "reextract-operator", email: "reextract-operator@example.com" } });
+    await createExtractionModel();
+    const source = await createTextSource("reextract-operator");
+    const [rejectedCard] = await testDb
+      .insert(knowledgeCards)
+      .values({ status: "rejected", needsReview: false, type: "food", title: "Rejected", locationName: "Huế", summary: "Rejected summary", aiPromptVersion: "source_knowledge_draft_extraction_v1", createdByUserId: "reextract-operator" })
+      .returning();
+    await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: rejectedCard.id, sourceId: source.id });
+    mockGatewayJson(
+      JSON.stringify({
+        drafts: [
+          {
+            type: "food",
+            title: "Quán ăn mới để duyệt",
+            location_name: "Huế",
+            summary: "Bản nháp mới cần được duyệt lại từ nguồn đã từng bị từ chối.",
+            practical_details: { tips: ["Duyệt lại trước khi dùng"] },
+            tags: ["an-uong"],
+            confidence: "community",
+            freshness_sensitive: false,
+          },
+        ],
+      }),
+    );
+    const { extractKnowledgeDraftsFromSource } = await import("@/features/knowledge/actions");
+
+    await expect(extractKnowledgeDraftsFromSource(source.id)).resolves.toMatchObject({ sourceId: source.id, draftCount: 1 });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    await expect(testDb.select().from(knowledgeCards)).resolves.toHaveLength(2);
+  });
+
   test("database rejects non-draft review and invalid knowledge linkage constraints", async () => {
     await createUser("constraint-user", ["operator"]);
     const source = await createTextSource("constraint-user");
@@ -332,6 +420,12 @@ describe("knowledge draft extraction", () => {
       .returning();
 
     await expect(testDb.insert(knowledgeCardSources).values({ knowledgeCardId: card.id, sourceId: source.id, supportLevel: "invalid" as "primary" })).rejects.toThrow();
+    await expect(
+      testDb.insert(knowledgeCards).values({ type: "food", title: "Bad details", summary: "Bad details", practicalDetails: [] as unknown as Record<string, unknown>, aiPromptVersion: "source_knowledge_draft_extraction_v1", createdByUserId: "constraint-user" }),
+    ).rejects.toThrow();
+    await expect(
+      testDb.insert(knowledgeCards).values({ type: "food", title: "Bad tags", summary: "Bad tags", tags: {} as unknown as string[], aiPromptVersion: "source_knowledge_draft_extraction_v1", createdByUserId: "constraint-user" }),
+    ).rejects.toThrow();
     await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, card.id))).resolves.toHaveLength(1);
   });
 });
