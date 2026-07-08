@@ -174,7 +174,7 @@ export async function suggestKnowledgeFromSourceUrl(sourceId: string): Promise<K
 
           suggestedCardId = card.id;
           draftIds.push(card.id);
-          await transaction.insert(knowledgeCardSources).values({ knowledgeCardId: card.id, sourceId: sourceBundle.source.id, supportLevel: suggestion.action === "conflict" ? "conflicting" : "primary" });
+          await transaction.insert(knowledgeCardSources).values({ knowledgeCardId: card.id, sourceId: sourceBundle.source.id, supportLevel: "primary" });
         }
 
         await transaction.insert(knowledgeSourceSuggestions).values({
@@ -213,8 +213,8 @@ export async function suggestKnowledgeFromSourceUrl(sourceId: string): Promise<K
 
     return result;
   } catch (error) {
-    if (providerUsage && error instanceof KnowledgeSuggestionError) {
-      await writeUsageForProviderCall(db, session.userId, model, providerUsage);
+    if (providerUsage) {
+      await writeUsageBestEffort(db, session.userId, model, providerUsage);
     }
     throw error;
   }
@@ -272,7 +272,11 @@ async function loadSafeCandidates(db: Pick<SuggestionDb, "select">) {
 }
 
 async function sourceAlreadyHasSuggestions(db: Pick<SuggestionDb, "select">, sourceId: string) {
-  const [suggestion] = await db.select({ id: knowledgeSourceSuggestions.id }).from(knowledgeSourceSuggestions).where(eq(knowledgeSourceSuggestions.sourceId, sourceId)).limit(1);
+  const [suggestion] = await db
+    .select({ id: knowledgeSourceSuggestions.id })
+    .from(knowledgeSourceSuggestions)
+    .where(and(eq(knowledgeSourceSuggestions.sourceId, sourceId), or(eq(knowledgeSourceSuggestions.action, "create"), eq(knowledgeSourceSuggestions.action, "update"), eq(knowledgeSourceSuggestions.action, "conflict"))))
+    .limit(1);
   return Boolean(suggestion);
 }
 
@@ -340,8 +344,9 @@ function parseSuggestions(content: string, source: typeof sources.$inferSelect, 
   const payload = parseJsonObject(content);
   const values = Array.isArray(payload.suggestions) ? payload.suggestions : null;
   if (!values) throw new KnowledgeSuggestionError("AI trả về cấu trúc gợi ý không hợp lệ.", "invalid_model_output");
+  if (values.length > maxSuggestionsPerRun) throw new KnowledgeSuggestionError("AI trả về quá nhiều gợi ý cho một lần chạy.", "invalid_model_output");
 
-  const suggestions = values.slice(0, maxSuggestionsPerRun).map((value) => normalizeSuggestion(value, source, rawLeakCorpus, candidateIds));
+  const suggestions = values.map((value) => normalizeSuggestion(value, source, rawLeakCorpus, candidateIds));
   if (suggestions.some((suggestion) => suggestion === null)) throw new KnowledgeSuggestionError("AI trả về gợi ý không hợp lệ.", "invalid_model_output");
   return suggestions as NormalizedSuggestion[];
 }
@@ -463,11 +468,27 @@ function normalizeTags(value: unknown) {
 function rejectUnsafeSafeFields(values: string[], rawTexts: string[]) {
   const normalizedRawValues = rawTexts.map(normalizeForOverlap).filter(Boolean);
   const rawCorpus = normalizedRawValues.join(" ");
+  const rawSnippets = normalizedRawValues.flatMap(buildRawOverlapSnippets);
   for (const value of values) {
     if (emailLikePattern.test(value) || phoneLikePattern.test(value) || sensitiveTokenPattern.test(value)) throw new KnowledgeSuggestionError("Gợi ý AI chứa dữ liệu không an toàn.", "invalid_model_output");
     const normalized = normalizeForOverlap(value);
-    if (normalizedRawValues.includes(normalized) || (normalized.length >= 24 && rawCorpus.includes(normalized))) throw new KnowledgeSuggestionError("Gợi ý AI sao chép nguyên văn nội dung nguồn thô.", "invalid_model_output");
+    if (normalizedRawValues.includes(normalized) || (normalized.length >= 24 && rawCorpus.includes(normalized)) || rawSnippets.some((snippet) => normalized.includes(snippet))) {
+      throw new KnowledgeSuggestionError("Gợi ý AI sao chép nguyên văn nội dung nguồn thô.", "invalid_model_output");
+    }
   }
+}
+
+function buildRawOverlapSnippets(normalizedRawText: string) {
+  const snippets = normalizedRawText
+    .split(/(?<=[.!?。！？])\s+|[\n\r]+/)
+    .map((snippet) => snippet.trim())
+    .filter((snippet) => snippet.length >= 24 && snippet.length <= maxSuggestionSummaryLength);
+  const words = normalizedRawText.split(" ").filter(Boolean);
+  for (let index = 0; index <= words.length - 8; index += 1) {
+    const snippet = words.slice(index, index + 8).join(" ");
+    if (snippet.length >= 24) snippets.push(snippet);
+  }
+  return Array.from(new Set(snippets));
 }
 
 function flattenDetailStrings(details: Record<string, unknown>) {
@@ -482,7 +503,11 @@ function flattenMetadataStrings(value: unknown): string[] {
 }
 
 function normalizeForOverlap(value: string) {
-  return value.toLowerCase().replace(/\s+/g, " ").trim();
+  return value
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

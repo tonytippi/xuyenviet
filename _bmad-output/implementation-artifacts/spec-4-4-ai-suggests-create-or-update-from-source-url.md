@@ -85,6 +85,18 @@ warnings: []
 
 - 2026-07-08: No deferred implementation findings. A parallel adjacent-test run hit shared test database contention; rerunning sequentially passed.
 
+### 2026-07-08 — Follow-up code review
+- intent_gap: 0
+- bad_spec: 0
+- patch: 5: (high 0, medium 5, low 0)
+- defer: 0
+- dismiss: 6
+- [x] [Review][Patch] Reject or explicitly handle over-limit suggestion arrays before persisting a partial run [`src/features/knowledge/suggestions.ts:339`] -- fixed by rejecting over-limit arrays before normalization/persistence and testing no partial writes.
+- [x] [Review][Patch] Harden raw-source leak detection against punctuation-normalized and embedded copied snippets [`src/features/knowledge/suggestions.ts:463`] -- fixed by punctuation-normalized overlap checks plus sentence/window snippet detection.
+- [x] [Review][Patch] Link conflict suggestion drafts to their new URL source as primary support, not conflicting support [`src/features/knowledge/suggestions.ts:177`] -- fixed by storing Story 4.4 suggestion draft source links as primary while conflict semantics stay in suggestion metadata.
+- [x] [Review][Patch] Preserve provider usage telemetry for unexpected post-provider failures without masking the original operator error [`src/features/knowledge/suggestions.ts:215`] -- fixed by best-effort usage recording for any post-provider error.
+- [x] [Review][Patch] Allow operators to rerun sources that only have trace-only duplicate/no-action outcomes or add a resolvable trace lifecycle [`src/features/knowledge/suggestions.ts:274`] -- fixed by blocking reruns only when reviewable create/update/conflict suggestions exist.
+
 ### 2026-07-08 — Review pass
 - intent_gap: 0
 - bad_spec: 0
@@ -132,6 +144,9 @@ Use a compact first-class suggestion model instead of overloading free-text summ
 - Review patch verification: `pnpm lint` -- passed.
 - Review patch verification: `pnpm test:run` -- passed; 14 files / 200 tests passed. Existing expected stderr appeared in AI Ask and provider-failure tests.
 - Review patch verification: `pnpm build` -- passed.
+- Follow-up review patch verification: `pnpm test:run tests/knowledge-source-suggestions.test.ts` -- passed; 7 tests passed. Expected provider-failure stderr appeared.
+- Follow-up review patch verification: `pnpm typecheck` -- passed.
+- Follow-up review patch verification: `pnpm lint` -- passed.
 
 ## Implementation Notes
 
@@ -141,6 +156,7 @@ Use a compact first-class suggestion model instead of overloading free-text summ
 - Review queue/detail now returns and renders safe suggestion action, rationale, before/after/conflict summaries, and target card context without loading raw source material.
 - Added intake form action and UI for running Story 4.4 suggestions from a source ID.
 - Review fixes hardened candidate coverage, same-source concurrency, required update/conflict summaries, action relationship constraints, target revalidation, trace-only outcome visibility, raw metadata privacy checks, and post-commit usage failure behavior.
+- Follow-up review fixes reject over-limit model output instead of partial persistence, harden copied raw-snippet detection, preserve conflict draft source links as primary support, make post-provider usage telemetry best-effort for all error types, and allow reruns after trace-only duplicate/no-action outcomes.
 
 ## Auto Run Result
 

@@ -134,7 +134,7 @@ describe("knowledge source suggestions", () => {
     await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, target.id))).resolves.toMatchObject([{ title: "Bãi đậu xe cũ", status: "approved" }]);
     await expect(testDb.select().from(knowledgeCards)).resolves.toHaveLength(3);
     await expect(testDb.select().from(knowledgeSourceSuggestions)).resolves.toMatchObject([{ action: "update", targetCardId: target.id }, { action: "conflict", targetCardId: target.id }]);
-    await expect(testDb.select().from(knowledgeCardSources).where(eq(knowledgeCardSources.supportLevel, "conflicting"))).resolves.toHaveLength(1);
+    await expect(testDb.select().from(knowledgeCardSources).where(eq(knowledgeCardSources.supportLevel, "primary"))).resolves.toHaveLength(2);
   });
 
   test("duplicate and no_action persist non-retrievable trace records without card changes", async () => {
@@ -157,6 +157,9 @@ describe("knowledge source suggestions", () => {
       { action: "duplicate", targetCardId: target.id, suggestedCardId: null },
       { action: "no_action", targetCardId: null, suggestedCardId: null },
     ]);
+
+    mockGatewayJson(JSON.stringify({ suggestions: [{ action: "no_action", rationale: "Vẫn chưa có tri thức mới." }] }));
+    await expect(suggestKnowledgeFromSourceUrl(source.id)).resolves.toMatchObject({ suggestionCount: 1, draftIds: [], actions: ["no_action"] });
   });
 
   test("invalid action relationships, missing summaries, and raw metadata leaks are rejected", async () => {
@@ -169,6 +172,7 @@ describe("knowledge source suggestions", () => {
 
     mockGatewayJson(JSON.stringify({ suggestions: [{ action: "update", target_card_id: target.id, before_summary: "Thông tin cũ.", draft: { type: "place", title: "Thiếu after summary", location_name: "Huế", summary: "Bản nháp thiếu tóm tắt sau cập nhật.", practical_details: {}, tags: [], confidence: "curated", freshness_sensitive: false } }] }));
     await expect(suggestKnowledgeFromSourceUrl(source.id)).rejects.toMatchObject({ code: "invalid_model_output" });
+    await expect(testDb.select().from(aiUsageEvents)).resolves.toMatchObject([{ status: "success" }]);
 
     mockGatewayJson(JSON.stringify({ suggestions: [{ action: "create", target_card_id: target.id, rationale: "hidden-provider", draft: { type: "place", title: "Rò rỉ metadata", location_name: "Huế", summary: "Bản nháp có rationale không an toàn.", practical_details: {}, tags: [], confidence: "curated", freshness_sensitive: false } }] }));
     await expect(suggestKnowledgeFromSourceUrl(source.id)).rejects.toMatchObject({ code: "invalid_model_output" });
@@ -179,6 +183,25 @@ describe("knowledge source suggestions", () => {
     expect(result).toMatchObject({ actions: ["no_action"], draftIds: [] });
     await expect(testDb.select().from(knowledgeCards)).resolves.toHaveLength(1);
     await expect(testDb.select().from(knowledgeSourceSuggestions)).resolves.toMatchObject([{ action: "no_action", targetCardId: null, suggestedCardId: null }]);
+  });
+
+  test("over-limit suggestions and copied raw snippets are rejected without partial persistence", async () => {
+    await createUser("privacy-operator", ["operator"]);
+    authMock.mockResolvedValue({ user: { id: "privacy-operator", email: "privacy-operator@example.com" } });
+    await createExtractionModel();
+    const source = await createUrlSource("privacy-operator", "Hue-Da Nang parking tip needs operator review before traveler use.");
+    const validDraft = { type: "place", title: "Điểm dừng kiểm tra", location_name: "Huế", summary: "Bản nháp an toàn để vận hành kiểm tra.", practical_details: {}, tags: [], confidence: "curated", freshness_sensitive: false };
+    const { suggestKnowledgeFromSourceUrl } = await import("@/features/knowledge/actions");
+
+    mockGatewayJson(JSON.stringify({ suggestions: Array.from({ length: 13 }, () => ({ action: "create", draft: validDraft })) }));
+    await expect(suggestKnowledgeFromSourceUrl(source.id)).rejects.toMatchObject({ code: "invalid_model_output" });
+    await expect(testDb.select().from(knowledgeCards)).resolves.toHaveLength(0);
+    await expect(testDb.select().from(knowledgeSourceSuggestions)).resolves.toHaveLength(0);
+
+    mockGatewayJson(JSON.stringify({ suggestions: [{ action: "create", draft: { ...validDraft, summary: "Gợi ý này chép Hue Da Nang parking tip needs operator review từ nguồn thô." } }] }));
+    await expect(suggestKnowledgeFromSourceUrl(source.id)).rejects.toMatchObject({ code: "invalid_model_output" });
+    await expect(testDb.select().from(knowledgeCards)).resolves.toHaveLength(0);
+    await expect(testDb.select().from(knowledgeSourceSuggestions)).resolves.toHaveLength(0);
   });
 
   test("unsupported source, unavailable model, invalid output, and provider failure do not mutate cards", async () => {
