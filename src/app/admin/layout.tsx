@@ -43,7 +43,12 @@ export default async function AdminLayout({ children }: AdminLayoutProps) {
         <aside className="rounded-[1.5rem] border border-[#5f8176] bg-[#17342c] p-5">
           <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[#e5bd82]">Admin</p>
           <nav className="mt-8 grid gap-3" aria-label="Điều hướng quản trị">
-            <span className="rounded-2xl bg-[#fbf7ed] px-4 py-3 font-semibold text-[#17342c]">Tổng quan vận hành</span>
+            <Link className="rounded-2xl bg-[#fbf7ed] px-4 py-3 font-semibold text-[#17342c]" href="/admin">
+              Tổng quan vận hành
+            </Link>
+            <Link className="rounded-2xl border border-[#5f8176] px-4 py-3 font-semibold text-[#fbf7ed] transition hover:bg-[#264d41]" href="/admin/knowledge/intake">
+              Nạp nguồn tri thức
+            </Link>
           </nav>
         </aside>
 

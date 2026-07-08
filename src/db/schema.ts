@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { boolean, check, foreignKey, index, integer, pgTable, primaryKey, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { boolean, check, foreignKey, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 
 export const userRoleValues = ["traveler", "operator", "admin"] as const;
 export type UserRole = (typeof userRoleValues)[number];
@@ -15,6 +15,15 @@ export type AiUsageStatus = (typeof aiUsageStatusValues)[number];
 
 export const aiGatewayModelPurposeValues = ["ai_ask_initial_answer", "extraction", "embeddings", "evaluation"] as const;
 export type AiGatewayModelPurpose = (typeof aiGatewayModelPurposeValues)[number];
+
+export const sourceKindValues = ["url", "facebook", "copied_post", "pasted_text", "screenshot"] as const;
+export type SourceKind = (typeof sourceKindValues)[number];
+
+export const sourceTypeValues = ["curated", "community"] as const;
+export type SourceType = (typeof sourceTypeValues)[number];
+
+export const sourceVerificationStatusValues = ["unverified", "verified"] as const;
+export type SourceVerificationStatus = (typeof sourceVerificationStatusValues)[number];
 
 export const chatContextFieldValues = [
   "origin",
@@ -139,6 +148,72 @@ export const auditEvents = pgTable(
     check(
       "audit_events_operation_check",
       sql`${auditEvent.operation} in ('access_check', 'create', 'update', 'delete', 'archive', 'approve')`,
+    ),
+  ],
+);
+
+export const sources = pgTable(
+  "sources",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    kind: text("kind").$type<SourceKind>().notNull(),
+    url: text("url"),
+    canonicalUrl: text("canonical_url"),
+    label: text("label").notNull(),
+    publisher: text("publisher"),
+    collectedDate: text("collected_date"),
+    sourceType: text("source_type").$type<SourceType>().notNull(),
+    verificationStatus: text("verification_status").$type<SourceVerificationStatus>().default("unverified").notNull(),
+    official: boolean("official").default(false).notNull(),
+    partner: boolean("partner").default(false).notNull(),
+    submittedByUserId: text("submitted_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (source) => [
+    index("sources_kind_created_at_idx").on(source.kind, source.createdAt),
+    index("sources_canonical_url_idx").on(source.canonicalUrl),
+    index("sources_submitted_by_user_id_idx").on(source.submittedByUserId),
+    check("sources_kind_check", sql`${source.kind} in ('url', 'facebook', 'copied_post', 'pasted_text', 'screenshot')`),
+    check("sources_source_type_check", sql`${source.sourceType} in ('curated', 'community')`),
+    check("sources_verification_status_check", sql`${source.verificationStatus} in ('unverified', 'verified')`),
+    check("sources_label_not_empty_check", sql`length(btrim(${source.label})) > 0`),
+    check("sources_collected_date_format_check", sql`${source.collectedDate} is null or ${source.collectedDate} ~ '^\\d{4}-\\d{2}-\\d{2}$'`),
+    check("sources_url_kind_check", sql`${source.kind} not in ('url', 'facebook') or ${source.url} is not null`),
+    check("sources_no_url_for_textual_kind_check", sql`${source.kind} not in ('copied_post', 'pasted_text', 'screenshot') or ${source.url} is null`),
+    check("sources_community_defaults_check", sql`${source.sourceType} <> 'community' or (${source.verificationStatus} = 'unverified' and ${source.official} = false and ${source.partner} = false)`),
+  ],
+);
+
+export const rawSourceMaterial = pgTable(
+  "raw_source_material",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    sourceId: text("source_id")
+      .notNull()
+      .references(() => sources.id, { onDelete: "cascade" }),
+    rawText: text("raw_text"),
+    fileName: text("file_name"),
+    mimeType: text("mime_type"),
+    byteSize: integer("byte_size"),
+    storageKey: text("storage_key"),
+    rawMetadata: jsonb("raw_metadata").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (material) => [
+    index("raw_source_material_source_id_idx").on(material.sourceId),
+    check("raw_source_material_text_length_check", sql`${material.rawText} is null or (length(btrim(${material.rawText})) > 0 and char_length(${material.rawText}) <= 20000)`),
+    check("raw_source_material_file_name_check", sql`${material.fileName} is null or length(btrim(${material.fileName})) > 0`),
+    check("raw_source_material_mime_type_check", sql`${material.mimeType} is null or ${material.mimeType} in ('image/jpeg', 'image/png', 'image/webp')`),
+    check("raw_source_material_byte_size_check", sql`${material.byteSize} is null or (${material.byteSize} > 0 and ${material.byteSize} <= 5242880)`),
+    check(
+      "raw_source_material_file_metadata_complete_check",
+      sql`(${material.fileName} is null and ${material.mimeType} is null and ${material.byteSize} is null) or (${material.fileName} is not null and ${material.mimeType} is not null and ${material.byteSize} is not null)`,
     ),
   ],
 );
@@ -515,6 +590,8 @@ export const schema = {
   verificationTokens,
   userRoles,
   auditEvents,
+  sources,
+  rawSourceMaterial,
   referralCodes,
   referralAttributions,
   tripProjects,

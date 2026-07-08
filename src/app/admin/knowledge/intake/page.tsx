@@ -1,0 +1,106 @@
+import { submitTravelSourceForm } from "@/features/knowledge/actions";
+
+type KnowledgeIntakePageProps = {
+  searchParams: Promise<{
+    error?: string;
+    success?: string;
+  }>;
+};
+
+export default async function KnowledgeIntakePage({ searchParams }: KnowledgeIntakePageProps) {
+  const params = await searchParams;
+
+  return (
+    <div>
+      <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[#8c4f13]">Nạp nguồn tri thức</p>
+      <h1 className="mt-4 max-w-3xl text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">
+        Gửi nguồn du lịch để AI đọc ở bước sau.
+      </h1>
+      <p className="mt-5 max-w-2xl text-lg leading-8 text-[#4f625a]">
+        Form này chỉ lưu metadata nguồn an toàn và phần thô dành riêng cho vận hành. Chưa tạo thẻ tri thức, chưa duyệt, và chưa gọi AI.
+      </p>
+
+      {params.error ? (
+        <p className="mt-6 rounded-2xl border border-[#d99a93] bg-[#fff0ee] px-4 py-3 font-semibold text-[#9b2f29]" role="alert">
+          {params.error}
+        </p>
+      ) : null}
+      {params.success ? (
+        <p className="mt-6 rounded-2xl border border-[#8fb59f] bg-[#edf7ef] px-4 py-3 font-semibold text-[#1f5f46]" role="status">
+          Đã lưu nguồn an toàn để AI đọc ở bước sau.
+        </p>
+      ) : null}
+
+      <form action={submitTravelSourceForm} className="mt-8 grid gap-6 rounded-[1.5rem] border border-[#d8c9ad] bg-white/70 p-5 sm:p-6">
+        <div className="grid gap-2">
+          <label className="font-semibold text-[#17342c]" htmlFor="url">
+            URL hoặc link Facebook
+          </label>
+          <input
+            className="min-h-12 rounded-2xl border border-[#d8c9ad] bg-[#fbf7ed] px-4 text-base outline-none focus:ring-4 focus:ring-[#e5bd82]"
+            id="url"
+            name="url"
+            placeholder="https://example.com/bai-viet"
+            type="url"
+          />
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-2">
+            <label className="font-semibold text-[#17342c]" htmlFor="label">
+              Nhãn nguồn an toàn
+            </label>
+            <input className="min-h-12 rounded-2xl border border-[#d8c9ad] bg-[#fbf7ed] px-4 text-base outline-none focus:ring-4 focus:ring-[#e5bd82]" id="label" name="label" />
+          </div>
+          <div className="grid gap-2">
+            <label className="font-semibold text-[#17342c]" htmlFor="publisher">
+              Nhà xuất bản / cộng đồng
+            </label>
+            <input className="min-h-12 rounded-2xl border border-[#d8c9ad] bg-[#fbf7ed] px-4 text-base outline-none focus:ring-4 focus:ring-[#e5bd82]" id="publisher" name="publisher" />
+          </div>
+        </div>
+
+        <div className="grid gap-2">
+          <label className="font-semibold text-[#17342c]" htmlFor="collectedDate">
+            Ngày thu thập / kiểm tra
+          </label>
+          <input className="min-h-12 rounded-2xl border border-[#d8c9ad] bg-[#fbf7ed] px-4 text-base outline-none focus:ring-4 focus:ring-[#e5bd82]" id="collectedDate" name="collectedDate" type="date" />
+        </div>
+
+        <div className="grid gap-2">
+          <label className="font-semibold text-[#17342c]" htmlFor="rawText">
+            Nội dung đã sao chép hoặc văn bản dán
+          </label>
+          <textarea
+            className="min-h-40 rounded-2xl border border-[#d8c9ad] bg-[#fbf7ed] px-4 py-3 text-base outline-none focus:ring-4 focus:ring-[#e5bd82]"
+            id="rawText"
+            maxLength={20000}
+            name="rawText"
+            placeholder="Dán nội dung bài viết, ghi chú cộng đồng hoặc đoạn văn bản thô..."
+          />
+          <label className="flex items-start gap-3 text-sm font-semibold text-[#4f625a]">
+            <input className="mt-1 size-4 accent-[#1f5f46]" name="copiedCommunityContent" type="checkbox" />
+            Đánh dấu là nội dung cộng đồng đã sao chép. Nguồn sẽ mặc định community/unverified và không official/partner.
+          </label>
+        </div>
+
+        <fieldset className="grid gap-4 rounded-2xl border border-[#d8c9ad] p-4">
+          <legend className="px-2 font-semibold text-[#17342c]">Metadata ảnh chụp</legend>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <input className="min-h-12 rounded-2xl border border-[#d8c9ad] bg-[#fbf7ed] px-4 text-base outline-none focus:ring-4 focus:ring-[#e5bd82]" name="screenshotFileName" placeholder="ten-file.png" />
+            <input className="min-h-12 rounded-2xl border border-[#d8c9ad] bg-[#fbf7ed] px-4 text-base outline-none focus:ring-4 focus:ring-[#e5bd82]" name="screenshotMimeType" placeholder="image/png" />
+            <input className="min-h-12 rounded-2xl border border-[#d8c9ad] bg-[#fbf7ed] px-4 text-base outline-none focus:ring-4 focus:ring-[#e5bd82]" min={1} name="screenshotByteSize" placeholder="Dung lượng byte" type="number" />
+          </div>
+          <input className="min-h-12 rounded-2xl border border-[#d8c9ad] bg-[#fbf7ed] px-4 text-base outline-none focus:ring-4 focus:ring-[#e5bd82]" name="screenshotStorageKey" placeholder="Storage key nếu đã có" />
+        </fieldset>
+
+        <button
+          className="min-h-12 w-fit rounded-2xl bg-[#1f5f46] px-5 py-4 text-base font-semibold text-white shadow-[0_12px_30px_rgba(31,95,70,0.22)] transition hover:bg-[#194d39] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]"
+          type="submit"
+        >
+          Lưu nguồn để AI đọc sau
+        </button>
+      </form>
+    </div>
+  );
+}
