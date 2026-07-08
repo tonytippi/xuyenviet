@@ -67,3 +67,9 @@
 - source_spec: `spec-4-7-preserve-source-and-confidence-in-approved-knowledge.md`
   summary: Decide whether source labels and publishers need stricter safe-metadata validation.
   evidence: Story 4.7 approved-card projections avoid raw source material and exact DTO tests prevent raw/file/provider field leaks, but existing source intake treats operator-entered label and publisher as safe bounded metadata without rejecting phone, email, raw-token, or operator-note patterns.
+
+## Deferred from: code review of spec-4-7-preserve-source-and-confidence-in-approved-knowledge.md (2026-07-08)
+
+- source_spec: `spec-4-7-preserve-source-and-confidence-in-approved-knowledge.md`
+  summary: Add pagination or a bounded default limit for the approved-card list before the approved knowledge corpus grows materially.
+  evidence: `listApprovedKnowledgeCards()` currently loads every approved card and every linked source for `/admin/knowledge/approved`. This is acceptable for the current 100-item seed target but should become paginated or capped before a larger corpus makes server rendering slow or memory-heavy.

@@ -88,6 +88,11 @@ warnings: []
 Deferred findings:
 - Source label/publisher normalization predates Story 4.7 and accepts operator-entered strings as safe metadata. Approved-card projections now avoid raw material fields, but a future source-metadata hardening story should decide whether to reject phone/email/raw-token patterns in source labels and publishers at intake/edit time.
 
+### Review Findings
+- [x] [Review][Patch] Exclude inconsistent approved cards that still need review [`src/features/knowledge/review.ts:234`] -- fixed by requiring `needsReview = false` in approved list/detail queries and adding a regression test.
+- [x] [Review][Defer] Harden approved source metadata values beyond raw-field omission [`src/features/knowledge/review.ts:216`] -- deferred, pre-existing
+- [x] [Review][Defer] Add pagination or a bounded default limit for the approved-card list [`src/features/knowledge/review.ts:196`] -- deferred, future scale
+
 ## Design Notes
 
 This story deliberately avoids adding approval actor/time columns. Story 4.6 records approval provenance in audit events and deferred first-class approval metadata as a future decision. Story 4.7 should instead lock the next required invariant for retrieval: approved card consumers must use normalized source links and safe source metadata, not free-text card summaries or raw source material.

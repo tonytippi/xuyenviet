@@ -186,10 +186,12 @@ describe("approved knowledge cards", () => {
     const archived = await createCard("lifecycle-operator", { id: "archived-hidden", status: "archived", needsReview: false });
     const rejected = await createCard("lifecycle-operator", { id: "rejected-hidden", status: "rejected", needsReview: false });
     const orphaned = await createCard("lifecycle-operator", { id: "approved-orphan-hidden", status: "approved", needsReview: false });
+    const inconsistent = await createCard("lifecycle-operator", { id: "approved-still-needs-review-hidden", status: "approved", needsReview: true });
     await testDb.insert(knowledgeCardSources).values([
       { knowledgeCardId: approved.id, sourceId: source.id, supportLevel: "primary" },
       { knowledgeCardId: archived.id, sourceId: source.id, supportLevel: "primary" },
       { knowledgeCardId: rejected.id, sourceId: source.id, supportLevel: "primary" },
+      { knowledgeCardId: inconsistent.id, sourceId: source.id, supportLevel: "primary" },
     ]);
     const { getApprovedKnowledgeCard, listApprovedKnowledgeCards } = await import("@/features/knowledge/review");
 
@@ -198,6 +200,7 @@ describe("approved knowledge cards", () => {
     await expect(getApprovedKnowledgeCard(archived.id)).resolves.toBeNull();
     await expect(getApprovedKnowledgeCard(rejected.id)).resolves.toBeNull();
     await expect(getApprovedKnowledgeCard(orphaned.id)).resolves.toBeNull();
+    await expect(getApprovedKnowledgeCard(inconsistent.id)).resolves.toBeNull();
   });
 
   test("approved reads authorize before lookup and do not leak existence", async () => {
