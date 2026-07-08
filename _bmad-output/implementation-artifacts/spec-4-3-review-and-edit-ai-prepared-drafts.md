@@ -67,6 +67,12 @@ warnings: []
 - [x] `_bmad-output/implementation-artifacts/spec-4-3-review-and-edit-ai-prepared-drafts.md` -- update status, checkboxes, verification, notes, and file list as implementation progresses -- keep BMad artifacts aligned.
 - [x] `_bmad-output/implementation-artifacts/sprint-status.yaml` -- update Story 4.3 status through implementation/review/done -- keep sprint tracking aligned.
 
+### Review Findings
+
+- [x] [Review][Patch] Validate practical-detail keys against unsafe raw/source metadata patterns [`src/features/knowledge/review.ts:332`] -- fixed by checking practical-detail keys with the same unsafe safe-field guard used for values.
+- [x] [Review][Patch] Include raw source metadata values in safe-field leak checks [`src/features/knowledge/review.ts:305`] -- fixed by adding raw file name, storage key, and raw metadata string values to the leak corpus, with exact-value rejection for shorter metadata tokens.
+- [x] [Review][Patch] Hide no-source drafts from direct detail review access [`src/features/knowledge/review.ts:154`] -- fixed by returning `null` for detail reads that have no valid linked safe source rows.
+
 **Acceptance Criteria:**
 - Given an operator opens the draft review queue, when review-needed draft cards exist, then the queue shows structured draft fields and safe source metadata without raw source material or provider payloads.
 - Given an operator saves valid edits to a draft, when the mutation completes, then the card remains a review-needed draft, source links are preserved, updated fields are persisted, and a safe audit event is written.
@@ -126,6 +132,9 @@ warnings: []
 - Review patch verification: `pnpm test:run tests/knowledge-draft-extraction.test.ts` -- passed sequentially; 13 tests passed. A prior parallel run failed from shared test database contention while full-suite tests were running at the same time, not from the Story 4.3 code.
 - Review patch verification: `pnpm test:run` -- passed sequentially; 13 files / 192 tests passed.
 - Review patch verification: `pnpm build` -- passed.
+- Follow-up review patch verification: `pnpm test:run tests/knowledge-draft-review.test.ts` -- initially failed 1/11 while exact raw metadata values shorter than the long raw-text overlap threshold were still accepted; fixed exact metadata matching and reran, passed 11 tests.
+- Follow-up review patch verification: `pnpm typecheck` -- passed.
+- Follow-up review patch verification: `pnpm lint` -- passed.
 
 ## Implementation Notes
 
@@ -135,6 +144,7 @@ warnings: []
 - Added admin navigation, draft queue page, draft detail/edit/reject page, and intake success/extraction links to make the workflow discoverable.
 - Added focused Vitest coverage for queue privacy, edit persistence/audit, reject behavior, invalid edits, unauthorized denial, and confidence boundary clamping.
 - Review fixes harden edit validation against lossy truncation, sensitive/raw-source leakage, non-review detail access, conflicting-source confidence upgrades, and concurrent state changes.
+- Follow-up review fixes extend raw-source privacy checks to practical-detail keys plus source file/storage/raw-metadata values, and keep orphan/no-source drafts out of direct detail review access.
 
 ## Auto Run Result
 

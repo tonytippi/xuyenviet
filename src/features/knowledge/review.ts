@@ -151,7 +151,8 @@ export async function getKnowledgeDraftForReview(draftId: string): Promise<Knowl
     .leftJoin(sources, eq(sources.id, knowledgeCardSources.sourceId))
     .where(and(eq(knowledgeCards.id, normalizedDraftId), eq(knowledgeCards.status, "draft"), eq(knowledgeCards.needsReview, true)));
 
-  return groupDraftRows(rows)[0] ?? null;
+  const draft = groupDraftRows(rows)[0];
+  return draft && draft.sources.length > 0 ? draft : null;
 }
 
 export async function updateKnowledgeDraft(draftId: string, input: KnowledgeDraftUpdateInput): Promise<KnowledgeDraftReviewResult> {
@@ -165,8 +166,8 @@ export async function updateKnowledgeDraft(draftId: string, input: KnowledgeDraf
   const db = getDb();
   return db.transaction(async (transaction) => {
     const draft = await loadReviewableDraft(transaction, normalizedDraftId);
-    const rawTexts = await loadRawTextsForSources(transaction, draft.sources.map((source) => source.id));
-    const values = normalizeDraftUpdateInput(input, draft.sources, rawTexts);
+    const rawLeakCorpus = await loadRawLeakCorpusForSources(transaction, draft.sources.map((source) => source.id));
+    const values = normalizeDraftUpdateInput(input, draft.sources, rawLeakCorpus);
 
     const [updatedDraft] = await transaction
       .update(knowledgeCards)
@@ -297,17 +298,22 @@ async function getKnowledgeDraftForReviewFromDb(db: Pick<ReviewDb, "select">, dr
   return card ? { card, sources: card.sources } : null;
 }
 
-async function loadRawTextsForSources(db: Pick<ReviewDb, "select">, sourceIds: string[]) {
+async function loadRawLeakCorpusForSources(db: Pick<ReviewDb, "select">, sourceIds: string[]) {
   if (sourceIds.length === 0) {
     return [];
   }
 
   const rows = await db
-    .select({ rawText: rawSourceMaterial.rawText })
+    .select({
+      rawText: rawSourceMaterial.rawText,
+      fileName: rawSourceMaterial.fileName,
+      storageKey: rawSourceMaterial.storageKey,
+      rawMetadata: rawSourceMaterial.rawMetadata,
+    })
     .from(rawSourceMaterial)
     .where(inArray(rawSourceMaterial.sourceId, sourceIds));
 
-  return rows.map((row) => row.rawText).filter((rawText): rawText is string => Boolean(rawText));
+  return rows.flatMap((row) => [row.rawText, row.fileName, row.storageKey, ...flattenMetadataStrings(row.rawMetadata)]).filter((value): value is string => Boolean(value));
 }
 
 function normalizeDraftUpdateInput(input: KnowledgeDraftUpdateInput, linkedSources: KnowledgeDraftReviewSource[], rawTexts: string[]) {
@@ -329,7 +335,10 @@ function normalizeDraftUpdateInput(input: KnowledgeDraftUpdateInput, linkedSourc
     throw new KnowledgeDraftReviewError("Bản nháp cần ít nhất một địa điểm hoặc cung đường.", "invalid_input");
   }
 
-  rejectUnsafeSafeFields([title, locationName, routeSegment, summary, ...tags, ...flattenDetailStrings(practicalDetails)].filter((value): value is string => typeof value === "string"), rawTexts);
+  rejectUnsafeSafeFields(
+    [title, locationName, routeSegment, summary, ...tags, ...Object.keys(practicalDetails), ...flattenDetailStrings(practicalDetails)].filter((value): value is string => typeof value === "string"),
+    rawTexts,
+  );
 
   return { type, title, locationName, routeSegment, summary, practicalDetails, tags, confidence, freshnessSensitive };
 }
@@ -567,7 +576,8 @@ function normalizeTags(value: unknown) {
 }
 
 function rejectUnsafeSafeFields(values: string[], rawTexts: string[]) {
-  const rawCorpus = rawTexts.map(normalizeForOverlap).join(" ");
+  const normalizedRawValues = rawTexts.map(normalizeForOverlap).filter(Boolean);
+  const rawCorpus = normalizedRawValues.join(" ");
 
   for (const value of values) {
     if (emailLikePattern.test(value) || phoneLikePattern.test(value) || sensitiveTokenPattern.test(value)) {
@@ -576,7 +586,7 @@ function rejectUnsafeSafeFields(values: string[], rawTexts: string[]) {
 
     const normalized = normalizeForOverlap(value);
 
-    if (normalized.length >= 24 && rawCorpus.includes(normalized)) {
+    if (normalizedRawValues.includes(normalized) || (normalized.length >= 24 && rawCorpus.includes(normalized))) {
       throw new KnowledgeDraftReviewError("Trường an toàn không được sao chép nguyên văn nội dung nguồn thô.", "invalid_input");
     }
   }
@@ -584,6 +594,22 @@ function rejectUnsafeSafeFields(values: string[], rawTexts: string[]) {
 
 function flattenDetailStrings(details: Record<string, unknown>) {
   return Object.values(details).flatMap((value) => (Array.isArray(value) ? value : [value])).filter((value): value is string => typeof value === "string");
+}
+
+function flattenMetadataStrings(value: unknown): string[] {
+  if (typeof value === "string") {
+    return [value];
+  }
+
+  if (Array.isArray(value)) {
+    return value.flatMap(flattenMetadataStrings);
+  }
+
+  if (isRecord(value)) {
+    return Object.entries(value).flatMap(([key, metadataValue]) => [key, ...flattenMetadataStrings(metadataValue)]);
+  }
+
+  return [];
 }
 
 function normalizeForOverlap(value: string) {

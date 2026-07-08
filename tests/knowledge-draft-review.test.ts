@@ -294,6 +294,69 @@ describe("knowledge draft review", () => {
     await expect(testDb.select().from(auditEvents)).resolves.toHaveLength(0);
   });
 
+  test("unsafe practical detail keys and raw metadata values are rejected", async () => {
+    await createUser("metadata-operator", ["operator"]);
+    authMock.mockResolvedValue({ user: { id: "metadata-operator", email: "metadata-operator@example.com" } });
+    const { draft } = await createDraft("metadata-operator");
+    const { updateKnowledgeDraft } = await import("@/features/knowledge/review");
+
+    await expect(
+      updateKnowledgeDraft(draft.id, {
+        type: "service",
+        title: "Điểm dừng an toàn",
+        locationName: "Huế",
+        summary: "Tóm tắt hợp lệ để kiểm tra khóa metadata thô.",
+        practicalDetails: { provider_payload: "không được lưu" },
+        tags: [],
+        confidence: "community",
+        freshnessSensitive: false,
+      }),
+    ).rejects.toMatchObject({ code: "invalid_input" });
+
+    await expect(
+      updateKnowledgeDraft(draft.id, {
+        type: "service",
+        title: "Điểm dừng an toàn",
+        locationName: "Huế",
+        summary: "hidden-provider-data",
+        practicalDetails: {},
+        tags: [],
+        confidence: "community",
+        freshnessSensitive: false,
+      }),
+    ).rejects.toMatchObject({ code: "invalid_input" });
+
+    await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, draft.id))).resolves.toMatchObject([{ title: draft.title, summary: draft.summary }]);
+    await expect(testDb.select().from(auditEvents)).resolves.toHaveLength(0);
+  });
+
+  test("direct detail lookup excludes drafts without valid source links", async () => {
+    await createUser("orphan-operator", ["operator"]);
+    authMock.mockResolvedValue({ user: { id: "orphan-operator", email: "orphan-operator@example.com" } });
+    const [draft] = await testDb
+      .insert(knowledgeCards)
+      .values({
+        id: "orphan-draft",
+        status: "draft",
+        type: "food",
+        title: "Bản nháp thiếu nguồn",
+        locationName: "Huế",
+        summary: "Không được mở trực tiếp vì thiếu nguồn an toàn liên kết.",
+        practicalDetails: {},
+        tags: [],
+        confidence: "unverified",
+        freshnessSensitive: false,
+        needsReview: true,
+        aiPromptVersion: "source_knowledge_draft_extraction_v1",
+        createdByUserId: "orphan-operator",
+      })
+      .returning();
+    const { getKnowledgeDraftForReview, listKnowledgeDraftsForReview } = await import("@/features/knowledge/review");
+
+    await expect(listKnowledgeDraftsForReview()).resolves.toHaveLength(0);
+    await expect(getKnowledgeDraftForReview(draft.id)).resolves.toBeNull();
+  });
+
   test("review detail excludes rejected cards and conflicting sources do not raise confidence ceiling", async () => {
     await createUser("edge-operator", ["operator"]);
     authMock.mockResolvedValue({ user: { id: "edge-operator", email: "edge-operator@example.com" } });
