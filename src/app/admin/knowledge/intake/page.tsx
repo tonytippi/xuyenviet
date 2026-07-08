@@ -50,13 +50,13 @@ export default async function KnowledgeIntakePage({ searchParams }: KnowledgeInt
             <label className="font-semibold text-[#17342c]" htmlFor="label">
               Nhãn nguồn an toàn
             </label>
-            <input className="min-h-12 rounded-2xl border border-[#d8c9ad] bg-[#fbf7ed] px-4 text-base outline-none focus:ring-4 focus:ring-[#e5bd82]" id="label" name="label" />
+            <input className="min-h-12 rounded-2xl border border-[#d8c9ad] bg-[#fbf7ed] px-4 text-base outline-none focus:ring-4 focus:ring-[#e5bd82]" id="label" maxLength={200} name="label" />
           </div>
           <div className="grid gap-2">
             <label className="font-semibold text-[#17342c]" htmlFor="publisher">
               Nhà xuất bản / cộng đồng
             </label>
-            <input className="min-h-12 rounded-2xl border border-[#d8c9ad] bg-[#fbf7ed] px-4 text-base outline-none focus:ring-4 focus:ring-[#e5bd82]" id="publisher" name="publisher" />
+            <input className="min-h-12 rounded-2xl border border-[#d8c9ad] bg-[#fbf7ed] px-4 text-base outline-none focus:ring-4 focus:ring-[#e5bd82]" id="publisher" maxLength={160} name="publisher" />
           </div>
         </div>
 

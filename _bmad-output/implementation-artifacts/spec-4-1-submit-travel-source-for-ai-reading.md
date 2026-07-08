@@ -93,6 +93,13 @@ warnings: []
   - `[medium]` `[patch]` Tightened collected-date validation to reject calendar rollover dates such as `2026-02-31`.
   - `[medium]` `[patch]` Generalized derived screenshot source labels so file names stay in raw source material rather than safe source metadata or audit summaries.
 
+### 2026-07-08 — Follow-up Review Findings
+- [x] [Review][Patch] Bound safe source metadata so label/publisher cannot become raw-content leaks [`src/features/knowledge/sources.ts:57`] -- fixed with app and DB safe metadata limits.
+- [x] [Review][Patch] Map unexpected form failures to a generic safe error instead of redirecting with raw exception messages [`src/features/knowledge/actions.ts:75`] -- fixed with allowlisted validation errors.
+- [x] [Review][Patch] Classify Facebook short-link hosts such as `fb.watch` as community Facebook sources [`src/features/knowledge/sources.ts:129`] -- fixed and covered by focused test.
+- [x] [Review][Patch] Enforce the one-raw-material-row-per-source intake invariant at the database layer [`src/db/schema.ts:191`] -- fixed with a unique index migration.
+- [x] [Review][Patch] Strengthen `collected_date` persistence validity beyond regex-only dates [`src/db/schema.ts:184`] -- fixed with a DB calendar-date check.
+
 ## Design Notes
 
 Use a metadata-only screenshot path for this story. The accepted screenshot input represents a file already known to the operator UI by name/type/size/storage key; actual upload/storage and image extraction are later responsibilities unless already available in the codebase. This keeps Story 4.1 focused on the source/raw boundary required by later AI extraction.
@@ -119,6 +126,12 @@ Use a metadata-only screenshot path for this story. The accepted screenshot inpu
 - Review fix verification: `pnpm typecheck` -- passed.
 - Review fix verification: `pnpm test:run` -- passed; 11 files / 170 tests passed.
 - Review fix verification: `pnpm build` -- passed.
+- Follow-up review fix verification: `pnpm db:generate` -- passed; generated `drizzle/migrations/0015_glorious_inertia.sql` and `drizzle/migrations/meta/0015_snapshot.json`.
+- Follow-up review fix verification: `pnpm test:run tests/knowledge-source-intake.test.ts` -- passed; 8 tests passed.
+- Follow-up review fix verification: `pnpm lint` -- passed.
+- Follow-up review fix verification: `pnpm typecheck` -- passed after tightening catch-block error narrowing.
+- Follow-up review fix verification: `pnpm test:run` -- passed; 11 files / 170 tests passed.
+- Follow-up review fix verification: `pnpm build` -- passed.
 
 ## Implementation Notes
 
@@ -145,7 +158,9 @@ Residual risks: Screenshot handling is intentionally metadata-only; real file up
 - `_bmad-output/implementation-artifacts/spec-4-1-submit-travel-source-for-ai-reading.md`
 - `_bmad-output/implementation-artifacts/sprint-status.yaml`
 - `drizzle/migrations/0014_nappy_wither.sql`
+- `drizzle/migrations/0015_glorious_inertia.sql`
 - `drizzle/migrations/meta/0014_snapshot.json`
+- `drizzle/migrations/meta/0015_snapshot.json`
 - `drizzle/migrations/meta/_journal.json`
 - `src/app/admin/knowledge/intake/page.tsx`
 - `src/app/admin/layout.tsx`

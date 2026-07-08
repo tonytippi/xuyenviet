@@ -64,6 +64,7 @@ describe("knowledge source intake", () => {
     const { submitTravelSourceForAiReading } = await import("@/features/knowledge/actions");
 
     const facebook = await submitTravelSourceForAiReading({ url: "https://web.facebook.com/groups/xuyenviet/posts/123?fbclid=abc" });
+    const facebookShortLink = await submitTravelSourceForAiReading({ url: "https://fb.watch/example-video?fbclid=abc" });
     const copied = await submitTravelSourceForAiReading({ rawText: "Quán này có bãi đậu xe rộng.", copiedCommunityContent: true });
 
     expect(facebook).toMatchObject({
@@ -75,6 +76,7 @@ describe("knowledge source intake", () => {
       official: false,
       partner: false,
     });
+    expect(facebookShortLink).toMatchObject({ kind: "facebook", canonicalUrl: "https://fb.watch/example-video", sourceType: "community" });
     expect(copied).toMatchObject({ kind: "copied_post", sourceType: "community", verificationStatus: "unverified", official: false, partner: false });
   });
 
@@ -115,6 +117,8 @@ describe("knowledge source intake", () => {
     await expect(submitTravelSourceForAiReading({ rawText: "" })).rejects.toThrow("Cần nhập URL");
     await expect(submitTravelSourceForAiReading({ rawText: "x".repeat(20_001) })).rejects.toThrow("Nội dung nguồn quá dài");
     await expect(submitTravelSourceForAiReading({ rawText: "Ngày sai", collectedDate: "2026-02-31" })).rejects.toThrow("Ngày thu thập");
+    await expect(submitTravelSourceForAiReading({ rawText: "Metadata sai", label: "x".repeat(201) })).rejects.toThrow("Nhãn nguồn");
+    await expect(submitTravelSourceForAiReading({ rawText: "Metadata sai", publisher: "Nguồn\nthô" })).rejects.toThrow("Nhà xuất bản");
     await expect(submitTravelSourceForAiReading({ screenshot: { fileName: "bad.gif", mimeType: "image/gif", byteSize: 100 } })).rejects.toThrow("Ảnh chụp chỉ hỗ trợ");
 
     await expect(testDb.select().from(sources)).resolves.toHaveLength(0);
@@ -154,7 +158,17 @@ describe("knowledge source intake", () => {
     await testDb.execute(sql`insert into sources (id, kind, label, source_type, verification_status, submitted_by_user_id) values ('good-source', 'pasted_text', 'Good', 'curated', 'unverified', 'constraint-operator')`);
 
     await expect(
+      testDb.execute(sql`insert into sources (id, kind, label, collected_date, source_type, verification_status, submitted_by_user_id) values ('bad-date', 'pasted_text', 'Bad date', '2026-02-31', 'curated', 'unverified', 'constraint-operator')`),
+    ).rejects.toThrow();
+
+    await expect(
       testDb.execute(sql`insert into raw_source_material (id, source_id, file_name, mime_type, byte_size) values ('bad-material', 'good-source', 'bad.gif', 'image/gif', 10)`),
+    ).rejects.toThrow();
+
+    await testDb.execute(sql`insert into raw_source_material (id, source_id, raw_text) values ('good-material', 'good-source', 'Một nguồn thô')`);
+
+    await expect(
+      testDb.execute(sql`insert into raw_source_material (id, source_id, raw_text) values ('duplicate-material', 'good-source', 'Nguồn thô trùng')`),
     ).rejects.toThrow();
   });
 });

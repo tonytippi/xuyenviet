@@ -3,6 +3,8 @@ import "server-only";
 import type { rawSourceMaterial, sources, SourceKind, SourceType } from "@/db/schema";
 
 const maxRawTextLength = 20_000;
+const maxLabelLength = 200;
+const maxPublisherLength = 160;
 const maxScreenshotByteSize = 5 * 1024 * 1024;
 const allowedScreenshotMimeTypes = ["image/jpeg", "image/png", "image/webp"] as const;
 const trackingParamPrefixes = ["utm_"];
@@ -36,6 +38,17 @@ export type NormalizedTravelSource = {
   rawMaterial: Omit<typeof rawSourceMaterial.$inferInsert, "id" | "sourceId" | "createdAt">;
 };
 
+export class SourceValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SourceValidationError";
+  }
+}
+
+export function isSourceValidationError(error: unknown) {
+  return error instanceof SourceValidationError || (error instanceof Error && error.name === "SourceValidationError");
+}
+
 export function normalizeTravelSourceInput(input: TravelSourceInput): NormalizedTravelSource {
   const url = normalizeOptionalString(input.url);
   const rawText = normalizeOptionalString(input.rawText);
@@ -43,18 +56,18 @@ export function normalizeTravelSourceInput(input: TravelSourceInput): Normalized
   const copiedCommunityContent = input.copiedCommunityContent === true;
 
   if (!url && !rawText && !screenshot) {
-    throw new Error("Cần nhập URL, nội dung văn bản hoặc metadata ảnh chụp.");
+    throw new SourceValidationError("Cần nhập URL, nội dung văn bản hoặc metadata ảnh chụp.");
   }
 
   if (rawText && rawText.length > maxRawTextLength) {
-    throw new Error("Nội dung nguồn quá dài. Giới hạn hiện tại là 20.000 ký tự.");
+    throw new SourceValidationError("Nội dung nguồn quá dài. Giới hạn hiện tại là 20.000 ký tự.");
   }
 
   const parsedUrl = url ? parseUrl(url) : null;
   const isFacebook = parsedUrl ? isFacebookUrl(parsedUrl) : false;
   const kind = getSourceKind({ url: parsedUrl, rawText, screenshot, copiedCommunityContent, isFacebook });
   const sourceType: SourceType = isFacebook || copiedCommunityContent ? "community" : "curated";
-  const label = normalizeOptionalString(input.label) ?? deriveLabel({ parsedUrl, rawText, screenshot, kind });
+  const label = normalizeSafeMetadataString(input.label, "Nhãn nguồn", maxLabelLength) ?? deriveLabel({ parsedUrl, rawText, screenshot, kind });
 
   return {
     source: {
@@ -62,7 +75,7 @@ export function normalizeTravelSourceInput(input: TravelSourceInput): Normalized
       url: parsedUrl ? canonicalizeUrl(parsedUrl) : null,
       canonicalUrl: parsedUrl ? canonicalizeUrl(parsedUrl) : null,
       label,
-      publisher: normalizeOptionalString(input.publisher) ?? derivePublisher(parsedUrl),
+      publisher: normalizeSafeMetadataString(input.publisher, "Nhà xuất bản", maxPublisherLength) ?? derivePublisher(parsedUrl),
       collectedDate: normalizeCollectedDate(input.collectedDate),
       sourceType,
       verificationStatus: "unverified",
@@ -104,11 +117,11 @@ function parseUrl(value: string) {
   try {
     const parsed = new URL(value);
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-      throw new Error("URL nguồn phải dùng http hoặc https.");
+      throw new SourceValidationError("URL nguồn phải dùng http hoặc https.");
     }
     return parsed;
   } catch {
-    throw new Error("URL nguồn không hợp lệ.");
+    throw new SourceValidationError("URL nguồn không hợp lệ.");
   }
 }
 
@@ -128,7 +141,7 @@ function canonicalizeUrl(url: URL) {
 
 function isFacebookUrl(url: URL) {
   const host = url.hostname.toLowerCase().replace(/^www\./, "");
-  return host === "facebook.com" || host.endsWith(".facebook.com") || host === "fb.com";
+  return host === "facebook.com" || host.endsWith(".facebook.com") || host === "fb.com" || host === "fb.watch";
 }
 
 function normalizeScreenshot(screenshot: TravelSourceInput["screenshot"]) {
@@ -141,15 +154,15 @@ function normalizeScreenshot(screenshot: TravelSourceInput["screenshot"]) {
   const byteSize = screenshot.byteSize;
 
   if (!fileName || !mimeType || byteSize === null || byteSize === undefined) {
-    throw new Error("Metadata ảnh chụp cần đủ tên file, loại file và dung lượng.");
+    throw new SourceValidationError("Metadata ảnh chụp cần đủ tên file, loại file và dung lượng.");
   }
 
   if (!allowedScreenshotMimeTypes.includes(mimeType as (typeof allowedScreenshotMimeTypes)[number])) {
-    throw new Error("Ảnh chụp chỉ hỗ trợ JPEG, PNG hoặc WebP.");
+    throw new SourceValidationError("Ảnh chụp chỉ hỗ trợ JPEG, PNG hoặc WebP.");
   }
 
   if (!Number.isInteger(byteSize) || byteSize <= 0 || byteSize > maxScreenshotByteSize) {
-    throw new Error("Dung lượng ảnh chụp phải lớn hơn 0 và không vượt quá 5MB.");
+    throw new SourceValidationError("Dung lượng ảnh chụp phải lớn hơn 0 và không vượt quá 5MB.");
   }
 
   return {
@@ -170,7 +183,7 @@ function normalizeCollectedDate(value: string | null | undefined) {
   const date = new Date(`${normalized}T00:00:00.000Z`);
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized) || Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== normalized) {
-    throw new Error("Ngày thu thập cần theo định dạng YYYY-MM-DD.");
+    throw new SourceValidationError("Ngày thu thập cần theo định dạng YYYY-MM-DD.");
   }
 
   return normalized;
@@ -182,6 +195,20 @@ function normalizeOptionalString(value: string | null | undefined) {
   }
 
   return value.trim() || null;
+}
+
+function normalizeSafeMetadataString(value: string | null | undefined, fieldName: string, maxLength: number) {
+  const normalized = normalizeOptionalString(value);
+
+  if (!normalized) {
+    return null;
+  }
+
+  if (normalized.includes("\n") || normalized.includes("\r") || normalized.length > maxLength) {
+    throw new SourceValidationError(`${fieldName} cần ngắn gọn và không chứa nội dung thô.`);
+  }
+
+  return normalized;
 }
 
 function deriveLabel({ parsedUrl, rawText, screenshot, kind }: { parsedUrl: URL | null; rawText: string | null; screenshot: { fileName: string } | null; kind: SourceKind }) {

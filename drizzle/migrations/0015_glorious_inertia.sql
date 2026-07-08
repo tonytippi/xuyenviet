@@ -1,0 +1,7 @@
+ALTER TABLE "sources" DROP CONSTRAINT "sources_label_not_empty_check";--> statement-breakpoint
+ALTER TABLE "sources" DROP CONSTRAINT "sources_collected_date_format_check";--> statement-breakpoint
+DROP INDEX "raw_source_material_source_id_idx";--> statement-breakpoint
+CREATE UNIQUE INDEX "raw_source_material_source_id_idx" ON "raw_source_material" USING btree ("source_id");--> statement-breakpoint
+ALTER TABLE "sources" ADD CONSTRAINT "sources_label_safe_metadata_check" CHECK (length(btrim("sources"."label")) between 1 and 200 and position(chr(10) in "sources"."label") = 0 and position(chr(13) in "sources"."label") = 0);--> statement-breakpoint
+ALTER TABLE "sources" ADD CONSTRAINT "sources_publisher_safe_metadata_check" CHECK ("sources"."publisher" is null or (length(btrim("sources"."publisher")) between 1 and 160 and position(chr(10) in "sources"."publisher") = 0 and position(chr(13) in "sources"."publisher") = 0));--> statement-breakpoint
+ALTER TABLE "sources" ADD CONSTRAINT "sources_collected_date_valid_check" CHECK ("sources"."collected_date" is null or ("sources"."collected_date" ~ '^\d{4}-\d{2}-\d{2}$' and to_char(to_date("sources"."collected_date", 'YYYY-MM-DD'), 'YYYY-MM-DD') = "sources"."collected_date"));

@@ -6,7 +6,7 @@ import { rawSourceMaterial, sources } from "@/db/schema";
 import { AdminAuthorizationError } from "@/server/auth";
 import { runAuditedAdminMutation } from "@/server/mutations";
 
-import { normalizeTravelSourceInput, type TravelSourceInput } from "./sources";
+import { isSourceValidationError, normalizeTravelSourceInput, type TravelSourceInput } from "./sources";
 
 export type SafeSourceResult = Pick<
   typeof sources.$inferSelect,
@@ -77,7 +77,7 @@ export async function submitTravelSourceForm(formData: FormData) {
       throw error;
     }
 
-    failureMessage = error instanceof Error ? error.message : "Không thể lưu nguồn. Vui lòng kiểm tra lại dữ liệu.";
+    failureMessage = isSourceValidationError(error) && error instanceof Error ? error.message : "Không thể lưu nguồn. Vui lòng kiểm tra lại dữ liệu.";
   }
 
   if (failureMessage) {
