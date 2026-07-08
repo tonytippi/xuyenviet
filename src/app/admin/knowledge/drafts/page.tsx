@@ -23,9 +23,12 @@ export default async function KnowledgeDraftsPage({ searchParams }: KnowledgeDra
       </p>
 
       {params.approved ? (
-        <p className="mt-6 rounded-2xl border border-[#8fb59f] bg-[#edf7ef] px-4 py-3 font-semibold text-[#1f5f46]" role="status">
-          Đã phê duyệt bản nháp {params.approved}. Thẻ đã chuyển sang approved, không còn nằm trong hàng đợi mặc định và chưa tạo embedding.
-        </p>
+        <div className="mt-6 rounded-2xl border border-[#8fb59f] bg-[#edf7ef] px-4 py-3 font-semibold text-[#1f5f46]" role="status">
+          <p>Đã phê duyệt bản nháp {params.approved}. Thẻ đã chuyển sang approved, không còn nằm trong hàng đợi mặc định và chưa tạo embedding.</p>
+          <Link className="mt-2 inline-flex underline underline-offset-4" href={`/admin/knowledge/approved/${params.approved}`}>
+            Kiểm tra source, confidence và freshness đã preserved
+          </Link>
+        </div>
       ) : null}
       {params.rejected ? (
         <p className="mt-6 rounded-2xl border border-[#8fb59f] bg-[#edf7ef] px-4 py-3 font-semibold text-[#1f5f46]" role="status">

@@ -64,3 +64,6 @@
 - source_spec: `spec-4-6-approve-knowledge-for-retrieval.md`
   summary: Decide whether approved knowledge cards need first-class `approvedByUserId` and `approvedAt` columns.
   evidence: Story 4.6 records approval provenance in the audit log only, which satisfies the current approval lifecycle gate. Future card-level admin UI or retrieval diagnostics may need approval actor/time without querying audit history.
+- source_spec: `spec-4-7-preserve-source-and-confidence-in-approved-knowledge.md`
+  summary: Decide whether source labels and publishers need stricter safe-metadata validation.
+  evidence: Story 4.7 approved-card projections avoid raw source material and exact DTO tests prevent raw/file/provider field leaks, but existing source intake treats operator-entered label and publisher as safe bounded metadata without rejecting phone, email, raw-token, or operator-note patterns.

@@ -52,6 +52,9 @@ export default async function AdminLayout({ children }: AdminLayoutProps) {
             <Link className="rounded-2xl border border-[#5f8176] px-4 py-3 font-semibold text-[#fbf7ed] transition hover:bg-[#264d41]" href="/admin/knowledge/drafts">
               Duyệt bản nháp AI
             </Link>
+            <Link className="rounded-2xl border border-[#5f8176] px-4 py-3 font-semibold text-[#fbf7ed] transition hover:bg-[#264d41]" href="/admin/knowledge/approved">
+              Tri thức đã duyệt
+            </Link>
           </nav>
         </aside>
 
