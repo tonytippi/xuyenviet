@@ -61,3 +61,6 @@
 - source_spec: `spec-4-5-batch-seed-source-url-intake.md`
   summary: Decide whether recent seed batches should be scoped by submitting operator or globally visible to all operators/admins.
   evidence: The Story 4.5 admin intake page shows recent seed batches to any authorized operator/admin. This matches the current admin-wide knowledge workflow, but per-operator privacy was not specified and may be needed if seed URLs become sensitive.
+- source_spec: `spec-4-6-approve-knowledge-for-retrieval.md`
+  summary: Decide whether approved knowledge cards need first-class `approvedByUserId` and `approvedAt` columns.
+  evidence: Story 4.6 records approval provenance in the audit log only, which satisfies the current approval lifecycle gate. Future card-level admin UI or retrieval diagnostics may need approval actor/time without querying audit history.

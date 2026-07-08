@@ -83,7 +83,7 @@ development_status:
   4-3-review-and-edit-ai-prepared-drafts: done
   4-4-ai-suggests-create-or-update-from-source-url: done
   4-5-batch-seed-source-url-intake: done
-  4-6-approve-knowledge-for-retrieval: backlog
+  4-6-approve-knowledge-for-retrieval: done
   4-7-preserve-source-and-confidence-in-approved-knowledge: backlog
   4-8-make-approved-knowledge-searchable-by-ai: backlog
   4-9-track-100-approved-corridor-items: backlog

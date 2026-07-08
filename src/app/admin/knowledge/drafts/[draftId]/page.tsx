@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { rejectKnowledgeDraftForm, updateKnowledgeDraftForm } from "@/features/knowledge/actions";
+import { approveKnowledgeDraftForm, rejectKnowledgeDraftForm, updateKnowledgeDraftForm } from "@/features/knowledge/actions";
 import { getKnowledgeDraftForReview } from "@/features/knowledge/review";
 import { knowledgeCardTypeValues, knowledgeConfidenceValues } from "@/db/schema";
 
@@ -33,7 +33,7 @@ export default async function KnowledgeDraftDetailPage({ params, searchParams }:
       <p className="mt-6 text-sm font-semibold uppercase tracking-[0.2em] text-[#8c4f13]">Sửa bản nháp AI</p>
       <h1 className="mt-4 max-w-3xl text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">{draft.title}</h1>
       <p className="mt-5 max-w-2xl text-lg leading-8 text-[#4f625a]">
-        Chỉnh trường cấu trúc trước các story phê duyệt sau này. Lưu vẫn giữ bản nháp ở trạng thái cần duyệt; từ chối không tạo tri thức truy xuất.
+        Chỉnh trường cấu trúc trước khi phê duyệt. Lưu vẫn giữ bản nháp ở trạng thái cần duyệt; phê duyệt chỉ bật lifecycle approved cho truy xuất sau này, chưa tạo embedding.
       </p>
 
       {query.error ? (
@@ -164,6 +164,22 @@ export default async function KnowledgeDraftDetailPage({ params, searchParams }:
 
         <button className="min-h-12 w-fit rounded-2xl bg-[#1f5f46] px-5 py-4 text-base font-semibold text-white shadow-[0_12px_30px_rgba(31,95,70,0.22)] transition hover:bg-[#194d39] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]" type="submit">
           Lưu bản nháp
+        </button>
+      </form>
+
+      <form action={approveKnowledgeDraftForm} className="mt-6 rounded-[1.5rem] border border-[#8fb59f] bg-[#edf7ef] p-5 sm:p-6">
+        <input name="draftId" type="hidden" value={draft.id} />
+        <input name="updatedAt" type="hidden" value={draft.updatedAt.toISOString()} />
+        <h2 className="text-2xl font-semibold tracking-[-0.03em] text-[#1f5f46]">Phê duyệt cho truy xuất</h2>
+        <p className="mt-3 max-w-2xl leading-7 text-[#34594b]">
+          Chỉ dùng sau khi đã kiểm tra nội dung, nguồn an toàn, confidence và freshness. Hành động này chuyển thẻ sang approved, bỏ khỏi hàng đợi bản nháp và không gọi AI hay tạo embedding.
+        </p>
+        <label className="mt-5 flex items-start gap-3 text-sm font-semibold text-[#34594b]">
+          <input className="mt-1 size-4 accent-[#1f5f46]" name="approvalConfirmed" type="checkbox" />
+          Tôi đã kiểm tra nguồn, confidence và freshness; thẻ này sẵn sàng chuyển sang approved.
+        </label>
+        <button className="mt-5 min-h-12 rounded-2xl bg-[#1f5f46] px-5 py-4 text-base font-semibold text-white shadow-[0_12px_30px_rgba(31,95,70,0.22)] transition hover:bg-[#194d39] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]" type="submit">
+          Phê duyệt bản nháp
         </button>
       </form>
 

@@ -5,6 +5,7 @@ import { listKnowledgeDraftsForReview } from "@/features/knowledge/review";
 type KnowledgeDraftsPageProps = {
   searchParams: Promise<{
     error?: string;
+    approved?: string;
     rejected?: string;
   }>;
 };
@@ -18,9 +19,14 @@ export default async function KnowledgeDraftsPage({ searchParams }: KnowledgeDra
       <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[#8c4f13]">Duyệt bản nháp AI</p>
       <h1 className="mt-4 max-w-3xl text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">Hàng đợi tri thức cần vận hành kiểm tra.</h1>
       <p className="mt-5 max-w-2xl text-lg leading-8 text-[#4f625a]">
-        Chỉ hiển thị trường bản nháp và metadata nguồn an toàn. Nội dung thô, file ảnh, storage key và payload nhà cung cấp không được tải lên giao diện này.
+        Chỉ hiển thị bản nháp còn cần duyệt và metadata nguồn an toàn. Thẻ đã phê duyệt rời khỏi hàng đợi này để các story truy xuất sau lọc bằng status approved.
       </p>
 
+      {params.approved ? (
+        <p className="mt-6 rounded-2xl border border-[#8fb59f] bg-[#edf7ef] px-4 py-3 font-semibold text-[#1f5f46]" role="status">
+          Đã phê duyệt bản nháp {params.approved}. Thẻ đã chuyển sang approved, không còn nằm trong hàng đợi mặc định và chưa tạo embedding.
+        </p>
+      ) : null}
       {params.rejected ? (
         <p className="mt-6 rounded-2xl border border-[#8fb59f] bg-[#edf7ef] px-4 py-3 font-semibold text-[#1f5f46]" role="status">
           Đã từ chối bản nháp. Bản nháp đó không còn nằm trong hàng đợi mặc định.
@@ -53,7 +59,7 @@ export default async function KnowledgeDraftsPage({ searchParams }: KnowledgeDra
                   ) : null}
                 </div>
                 <Link className="min-h-12 rounded-2xl bg-[#1f5f46] px-5 py-3 text-center font-semibold text-white transition hover:bg-[#194d39] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]" href={`/admin/knowledge/drafts/${draft.id}`}>
-                  Sửa / từ chối
+                  Sửa / phê duyệt / từ chối
                 </Link>
               </div>
 

@@ -9,6 +9,7 @@ import { runAuditedAdminMutation } from "@/server/mutations";
 import { isKnowledgeBatchIntakeError, submitKnowledgeSeedUrlBatch as submitKnowledgeSeedUrlBatchService } from "./batch-intake";
 import { extractKnowledgeDraftsFromSource as extractKnowledgeDraftsFromSourceService, isKnowledgeExtractionError } from "./extraction";
 import {
+  approveKnowledgeDraft as approveKnowledgeDraftService,
   isKnowledgeDraftReviewError,
   parseKnowledgeDraftFormData,
   rejectKnowledgeDraft as rejectKnowledgeDraftService,
@@ -68,6 +69,10 @@ export async function rejectKnowledgeDraft(draftId: string) {
   return rejectKnowledgeDraftService(draftId);
 }
 
+export async function approveKnowledgeDraft(draftId: string, expectedUpdatedAt?: string | null) {
+  return approveKnowledgeDraftService(draftId, expectedUpdatedAt);
+}
+
 export async function suggestKnowledgeFromSourceUrl(sourceId: string) {
   return suggestKnowledgeFromSourceUrlService(sourceId);
 }
@@ -124,6 +129,34 @@ export async function rejectKnowledgeDraftForm(formData: FormData) {
   }
 
   redirect("/admin/knowledge/drafts?rejected=1");
+}
+
+export async function approveKnowledgeDraftForm(formData: FormData) {
+  const draftId = getOptionalFormString(formData, "draftId") ?? "";
+  let failureMessage: string | null = null;
+
+  try {
+    if (formData.get("approvalConfirmed") !== "on") {
+      throw new Error("Vui lòng xác nhận đã kiểm tra nguồn, confidence và freshness trước khi phê duyệt.");
+    }
+
+    await approveKnowledgeDraftService(draftId, getOptionalFormString(formData, "updatedAt"));
+  } catch (error) {
+    if (error instanceof AdminAuthorizationError || (error instanceof Error && error.name === "AdminAuthorizationError")) {
+      throw error;
+    }
+
+    failureMessage = isKnowledgeDraftReviewError(error) && error instanceof Error ? error.message : "Không thể phê duyệt bản nháp này.";
+    if (error instanceof Error && error.message.startsWith("Vui lòng xác nhận")) {
+      failureMessage = error.message;
+    }
+  }
+
+  if (failureMessage) {
+    redirect(`/admin/knowledge/drafts?error=${encodeURIComponent(failureMessage)}`);
+  }
+
+  redirect(`/admin/knowledge/drafts?approved=${encodeURIComponent(draftId)}`);
 }
 
 export async function extractKnowledgeDraftsFromSourceForm(formData: FormData) {

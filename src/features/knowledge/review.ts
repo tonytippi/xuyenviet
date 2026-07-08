@@ -269,6 +269,76 @@ export async function rejectKnowledgeDraft(draftId: string): Promise<KnowledgeDr
   });
 }
 
+export async function approveKnowledgeDraft(draftId: string, expectedUpdatedAt?: string | null): Promise<KnowledgeDraftReviewResult> {
+  const session = await requireAdminSession();
+  const normalizedDraftId = draftId.trim();
+
+  if (!normalizedDraftId) {
+    throw new KnowledgeDraftReviewError("Không tìm thấy bản nháp cần phê duyệt.", "invalid_draft");
+  }
+
+  const db = getDb();
+  return db.transaction(async (transaction) => {
+    const draft = await loadReviewableDraft(transaction, normalizedDraftId);
+    assertApprovalVersionCurrent(draft.card, expectedUpdatedAt);
+    assertApprovalReady(draft.card);
+
+    const [updatedDraft] = await transaction
+      .update(knowledgeCards)
+      .set({
+        status: "approved",
+        needsReview: false,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(knowledgeCards.id, normalizedDraftId), eq(knowledgeCards.status, "draft"), eq(knowledgeCards.needsReview, true)))
+      .returning({ id: knowledgeCards.id });
+
+    if (!updatedDraft) {
+      throw new KnowledgeDraftReviewError("Bản nháp này không còn trong trạng thái cần duyệt.", "not_reviewable");
+    }
+
+    const approvedCard = await getKnowledgeDraftForReviewFromDb(transaction, normalizedDraftId);
+
+    if (!approvedCard || approvedCard.sources.length === 0) {
+      throw new KnowledgeDraftReviewError("Bản nháp cần ít nhất một nguồn liên kết trước khi phê duyệt.", "invalid_draft");
+    }
+
+    await recordAuditEvent(
+      {
+        actor: session,
+        operation: "approve",
+        targetType: "knowledge_draft",
+        targetId: normalizedDraftId,
+        beforeSummary: summarizeDraft(draft.card),
+        afterSummary: `Operator approved draft for retrieval eligibility: status=approved; needsReview=false; linkedSources=${draft.sources.length}. Embeddings were not created.`,
+      },
+      transaction,
+    );
+
+    return { draftId: normalizedDraftId };
+  });
+}
+
+function assertApprovalVersionCurrent(card: Pick<KnowledgeDraftReviewCard, "updatedAt">, expectedUpdatedAt?: string | null) {
+  if (!expectedUpdatedAt) {
+    return;
+  }
+
+  if (card.updatedAt.toISOString() !== expectedUpdatedAt) {
+    throw new KnowledgeDraftReviewError("Bản nháp đã thay đổi sau khi trang được mở. Vui lòng tải lại và kiểm tra lại trước khi phê duyệt.", "not_reviewable");
+  }
+}
+
+function assertApprovalReady(card: KnowledgeDraftReviewCard) {
+  if (!knowledgeCardTypeValues.includes(card.type) || !knowledgeConfidenceValues.includes(card.confidence)) {
+    throw new KnowledgeDraftReviewError("Bản nháp có loại thẻ hoặc confidence không hợp lệ.", "invalid_draft");
+  }
+
+  if (!card.title.trim() || !card.summary.trim() || (!card.locationName?.trim() && !card.routeSegment?.trim())) {
+    throw new KnowledgeDraftReviewError("Bản nháp cần đủ tiêu đề, tóm tắt và địa điểm hoặc cung đường trước khi phê duyệt.", "invalid_draft");
+  }
+}
+
 async function loadReviewableDraft(db: Pick<ReviewDb, "select">, draftId: string) {
   const draft = await getKnowledgeDraftForReviewFromDb(db, draftId);
 
