@@ -9,6 +9,7 @@ import { knowledgeCards, knowledgeCardSearchDocuments, knowledgeCardSources, sou
 
 const defaultSearchLimit = 5;
 const maxSearchLimit = 10;
+const maxSearchQueryLength = 500;
 
 type KnowledgeSearchDb = ReturnType<typeof getDb>;
 
@@ -143,6 +144,8 @@ export async function searchApprovedKnowledge(query: string | null | undefined, 
 
       if (card) {
         results.push({ ...card, score: document.score });
+      } else {
+        await disableKnowledgeSearchDocument(document.knowledgeCardId, "disabled", db);
       }
     }
 
@@ -274,7 +277,7 @@ function buildSearchableText(card: Omit<KnowledgeSearchResult, "score">) {
     ]),
   ];
 
-  return values.filter((value): value is string => Boolean(value?.trim())).join("\n");
+  return values.map(normalizeSearchableValue).filter((value): value is string => Boolean(value)).join("\n");
 }
 
 function hashSearchableText(searchableText: string) {
@@ -322,7 +325,11 @@ function normalizeSearchQuery(query: string | null | undefined) {
     return "";
   }
 
-  return query.toLowerCase().replace(/\s+/g, " ").trim();
+  return query.toLowerCase().replace(/\s+/g, " ").trim().slice(0, maxSearchQueryLength).trim();
+}
+
+function normalizeSearchableValue(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
 }
 
 function normalizeSearchLimit(limit: number | undefined) {

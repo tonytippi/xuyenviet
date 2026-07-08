@@ -216,6 +216,41 @@ describe("approved knowledge search documents", () => {
     await expect(searchApprovedKnowledge("mới Huế")).resolves.toMatchObject([{ id: card.id }]);
   });
 
+  test("ignores malformed tag values while indexing approved cards", async () => {
+    await createUser("malformed-tags-operator", ["operator"]);
+    const card = await createCard("malformed-tags-operator", {
+      id: "malformed-tags-card",
+      tags: ["safe-tag", 42, null] as unknown as string[],
+    });
+    const source = await createSource("malformed-tags-operator", { id: "malformed-tags-source" });
+    await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: card.id, sourceId: source.id, supportLevel: "primary" });
+    const { indexApprovedKnowledgeCard } = await import("@/features/knowledge/search");
+
+    await expect(indexApprovedKnowledgeCard(card.id)).resolves.toMatchObject({ cardId: card.id, indexed: true });
+
+    const [document] = await testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, card.id));
+    expect(document?.searchableText).toContain("safe-tag");
+    expect(document?.searchableText).not.toContain("42");
+    expect(document?.searchableText).not.toContain("null");
+  });
+
+  test("bounds long search queries before matching documents", async () => {
+    await createUser("long-query-operator", ["operator"]);
+    const source = await createSource("long-query-operator", { id: "long-query-source" });
+    const card = await createCard("long-query-operator", {
+      id: "long-query-card",
+      title: "Điểm nghỉ Huế với truy vấn dài",
+      summary: "Có chỗ đỗ xe và khu vực nghỉ ngắn cho gia đình.",
+    });
+    await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: card.id, sourceId: source.id, supportLevel: "primary" });
+    const { indexApprovedKnowledgeCard, searchApprovedKnowledge } = await import("@/features/knowledge/search");
+    await indexApprovedKnowledgeCard(card.id);
+
+    const results = await searchApprovedKnowledge(`Huế ${"x".repeat(5_000)}`, { limit: 1 });
+
+    expect(results).toMatchObject([{ id: card.id }]);
+  });
+
   test("continues filling bounded results when active documents become ineligible between document and card loads", async () => {
     await createUser("stale-fill-operator", ["operator"]);
     const source = await createSource("stale-fill-operator", { id: "stale-fill-source" });
@@ -233,11 +268,13 @@ describe("approved knowledge search documents", () => {
     for (const card of cards) {
       await indexApprovedKnowledgeCard(card.id);
     }
-    await testDb.update(knowledgeCards).set({ status: "archived" }).where(eq(knowledgeCards.id, cards[0]!.id));
+    await testDb.delete(knowledgeCardSources).where(eq(knowledgeCardSources.knowledgeCardId, cards[0]!.id));
 
-    const results = await searchApprovedKnowledge("Huế stale", { limit: 3 });
+    const results = await searchApprovedKnowledge("Huế stale", { limit: 4 });
 
     expect(results).toHaveLength(3);
     expect(results.map((result) => result.id)).not.toContain(cards[0]!.id);
+    const [disabledDocument] = await testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, cards[0]!.id));
+    expect(disabledDocument).toMatchObject({ status: "disabled", disabledAt: expect.any(Date) });
   });
 });

@@ -70,6 +70,24 @@ warnings: []
 
 ## Review Triage Log
 
+### Review Findings
+- [x] [Review][Patch] Add the missing Drizzle snapshot metadata for migration 0024 [`drizzle/migrations/meta/_journal.json:173`]
+- [x] [Review][Patch] Guard searchable-text construction against non-string tag values [`src/features/knowledge/search.ts:252`]
+- [x] [Review][Patch] Bound normalized search query length before building ILIKE patterns [`src/features/knowledge/search.ts:97`]
+- [x] [Review][Patch] Disable active search documents that become source-orphaned during safe card reload [`src/features/knowledge/search.ts:142`]
+
+### 2026-07-08 — Follow-up review pass
+- intent_gap: 0
+- bad_spec: 0
+- patch: 4 fixed: (high 0, medium 4, low 0)
+- defer: 0
+- reject: 2
+- addressed_findings:
+  - `[medium]` `[patch]` Missing Drizzle migration snapshot for `0024_add_knowledge_search_documents`; fixed by adding `drizzle/migrations/meta/0024_snapshot.json` and keeping the journal aligned without a duplicate 0025 migration.
+  - `[medium]` `[patch]` Searchable-text construction assumed all tag values were strings; fixed by normalizing searchable values from `unknown` and ignoring non-string values, with regression coverage.
+  - `[medium]` `[patch]` Runtime search queries were not length-bounded before ILIKE pattern construction; fixed by clamping normalized queries to 500 characters, with regression coverage.
+  - `[medium]` `[patch]` Active documents for still-approved but source-orphaned cards were skipped during safe reload but left active; fixed by disabling those documents during search, with regression coverage.
+
 ### 2026-07-08 — Review pass
 - intent_gap: 0
 - bad_spec: 0
@@ -94,7 +112,7 @@ This story deliberately uses a PostgreSQL text-search document rather than a vec
 - `pnpm build` -- expected: production build succeeds.
 
 **Results:**
- - `pnpm test:run tests/knowledge-search.test.ts` -- passed; 5 tests passed after review fixes.
+- `pnpm test:run tests/knowledge-search.test.ts` -- passed; 7 tests passed after follow-up review fixes.
 - `pnpm test:run tests/knowledge-approved-cards.test.ts` -- passed; 4 tests passed.
 - `pnpm typecheck` -- passed.
 - `pnpm lint` -- passed.
@@ -106,7 +124,7 @@ This story deliberately uses a PostgreSQL text-search document rather than a vec
 - Added `src/features/knowledge/search.ts` as a server-only indexing/search boundary. It indexes only approved, `needsReview = false`, source-linked cards; disables active documents for ineligible cards; and searches bounded active documents without provider calls.
 - Searchable text and result DTOs are built only from reviewed card fields and safe normalized source metadata. Raw source material, file metadata, provider payloads, practical details, creator IDs, and AI model fields are not selected or serialized.
 - Added database-backed tests for eligible indexing, ineligible disable behavior, bounded safe search results, exact DTO/source keys, raw privacy, empty-query behavior, and reindex updates without duplicate active documents.
-- Review hardening added runtime null/undefined query safety and continued bounded result filling when stale active documents are skipped during safe card reload.
+- Review hardening added runtime null/undefined query safety, bounded query length, defensive searchable-value normalization, disabling of source-orphaned active documents during safe reload, and continued bounded result filling when stale active documents are skipped.
 - No embeddings providers, pgvector, external vector store, AI Ask wiring, traveler-answer behavior, URL fetching, or assistant provenance persistence was added.
 
 ## Auto Run Result
@@ -115,9 +133,9 @@ Status: done
 
 Summary: Implemented Story 4.8 approved knowledge search documents with PostgreSQL schema/migration, server-only indexing/search helpers, focused tests, review fixes, and BMad status updates.
 
-Review findings breakdown: 2 patch findings fixed (1 medium, 1 low), 0 deferred, 18 rejected as out of scope/noise against this story's manual approved-search boundary.
+Review findings breakdown: 6 patch findings fixed across review passes (5 medium, 1 low), 0 deferred, 20 rejected as out of scope/noise against this story's manual approved-search boundary.
 
-Follow-up review recommended: false. Review-driven changes were localized to query input safety and bounded result filling, with focused regression coverage.
+Follow-up review recommended: false. Review-driven changes were localized to migration metadata, query input safety, searchable value normalization, source-orphan stale cleanup, and bounded result filling, with focused regression coverage.
 
 Verification performed: `pnpm test:run tests/knowledge-search.test.ts`, `pnpm test:run tests/knowledge-approved-cards.test.ts`, `pnpm typecheck`, `pnpm lint`, and `pnpm build` all passed after review fixes.
 
@@ -129,6 +147,7 @@ Residual risks: Search population remains a server helper/manual boundary for Ep
 - `_bmad-output/implementation-artifacts/sprint-status.yaml`
 - `drizzle/migrations/0024_add_knowledge_search_documents.sql`
 - `drizzle/migrations/meta/_journal.json`
+- `drizzle/migrations/meta/0024_snapshot.json`
 - `src/db/schema.ts`
 - `src/features/knowledge/search.ts`
 - `tests/knowledge-search.test.ts`
