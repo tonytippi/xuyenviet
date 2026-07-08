@@ -81,7 +81,7 @@ development_status:
   4-1-submit-travel-source-for-ai-reading: done
   4-2-ai-extracts-knowledge-drafts-from-source: done
   4-3-review-and-edit-ai-prepared-drafts: done
-  4-4-ai-suggests-create-or-update-from-source-url: backlog
+  4-4-ai-suggests-create-or-update-from-source-url: done
   4-5-batch-seed-source-url-intake: backlog
   4-6-approve-knowledge-for-retrieval: backlog
   4-7-preserve-source-and-confidence-in-approved-knowledge: backlog

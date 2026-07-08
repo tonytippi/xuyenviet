@@ -14,6 +14,7 @@ import {
   updateKnowledgeDraft as updateKnowledgeDraftService,
 } from "./review";
 import { isSourceValidationError, normalizeTravelSourceInput, type TravelSourceInput } from "./sources";
+import { isKnowledgeSuggestionError, suggestKnowledgeFromSourceUrl as suggestKnowledgeFromSourceUrlService } from "./suggestions";
 
 export type SafeSourceResult = Pick<
   typeof sources.$inferSelect,
@@ -64,6 +65,10 @@ export async function updateKnowledgeDraft(draftId: string, formData: FormData) 
 
 export async function rejectKnowledgeDraft(draftId: string) {
   return rejectKnowledgeDraftService(draftId);
+}
+
+export async function suggestKnowledgeFromSourceUrl(sourceId: string) {
+  return suggestKnowledgeFromSourceUrlService(sourceId);
 }
 
 export async function updateKnowledgeDraftForm(formData: FormData) {
@@ -135,6 +140,27 @@ export async function extractKnowledgeDraftsFromSourceForm(formData: FormData) {
   }
 
   redirect(`/admin/knowledge/intake?extracted=${result?.draftCount ?? 0}&sourceId=${encodeURIComponent(result?.sourceId ?? "")}`);
+}
+
+export async function suggestKnowledgeFromSourceUrlForm(formData: FormData) {
+  let result: Awaited<ReturnType<typeof suggestKnowledgeFromSourceUrl>> | null = null;
+  let failureMessage: string | null = null;
+
+  try {
+    result = await suggestKnowledgeFromSourceUrl(getOptionalFormString(formData, "sourceId") ?? "");
+  } catch (error) {
+    if (error instanceof AdminAuthorizationError || (error instanceof Error && error.name === "AdminAuthorizationError")) {
+      throw error;
+    }
+
+    failureMessage = isKnowledgeSuggestionError(error) && error instanceof Error ? error.message : "Không thể tạo gợi ý create/update từ URL này.";
+  }
+
+  if (failureMessage) {
+    redirect(`/admin/knowledge/intake?suggestError=${encodeURIComponent(failureMessage)}`);
+  }
+
+  redirect(`/admin/knowledge/intake?suggested=${result?.suggestionCount ?? 0}&suggestionActions=${encodeURIComponent(result?.actions.join(",") ?? "")}&sourceId=${encodeURIComponent(result?.sourceId ?? "")}`);
 }
 
 export async function submitTravelSourceForm(formData: FormData) {

@@ -64,6 +64,46 @@ export default async function KnowledgeDraftDetailPage({ params, searchParams }:
         </div>
       </section>
 
+      {draft.suggestion ? (
+        <section className="mt-8 rounded-[1.5rem] border border-[#d8c9ad] bg-white/75 p-5 sm:p-6">
+          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#8c4f13]">Metadata gợi ý AI</p>
+          <h2 className="mt-3 text-2xl font-semibold tracking-[-0.03em] text-[#17342c]">Hành động đề xuất: {draft.suggestion.action}</h2>
+          <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
+            {draft.suggestion.beforeSummary ? (
+              <div className="rounded-2xl bg-[#fbf7ed] p-3">
+                <dt className="font-semibold text-[#17342c]">Trước</dt>
+                <dd className="mt-1 leading-6 text-[#4f625a]">{draft.suggestion.beforeSummary}</dd>
+              </div>
+            ) : null}
+            {draft.suggestion.afterSummary ? (
+              <div className="rounded-2xl bg-[#fbf7ed] p-3">
+                <dt className="font-semibold text-[#17342c]">Sau</dt>
+                <dd className="mt-1 leading-6 text-[#4f625a]">{draft.suggestion.afterSummary}</dd>
+              </div>
+            ) : null}
+            {draft.suggestion.conflictSummary ? (
+              <div className="rounded-2xl bg-[#fff0ee] p-3">
+                <dt className="font-semibold text-[#9b2f29]">Xung đột</dt>
+                <dd className="mt-1 leading-6 text-[#6d3f3a]">{draft.suggestion.conflictSummary}</dd>
+              </div>
+            ) : null}
+            {draft.suggestion.rationale ? (
+              <div className="rounded-2xl bg-[#fbf7ed] p-3">
+                <dt className="font-semibold text-[#17342c]">Lý do</dt>
+                <dd className="mt-1 leading-6 text-[#4f625a]">{draft.suggestion.rationale}</dd>
+              </div>
+            ) : null}
+          </dl>
+          {draft.suggestion.targetCard ? (
+            <div className="mt-5 rounded-2xl border border-[#d8c9ad] bg-[#f4ead7] p-4 text-sm text-[#4f625a]">
+              <p className="font-semibold text-[#17342c]">Thẻ mục tiêu chưa bị thay đổi</p>
+              <p className="mt-2">{draft.suggestion.targetCard.title} · {draft.suggestion.targetCard.status} · {draft.suggestion.targetCard.type} · {draft.suggestion.targetCard.confidence}</p>
+              <p className="mt-2 leading-6">{draft.suggestion.targetCard.summary}</p>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
       <form action={updateKnowledgeDraftForm} className="mt-8 grid gap-6 rounded-[1.5rem] border border-[#d8c9ad] bg-white/75 p-5 sm:p-6">
         <input name="draftId" type="hidden" value={draft.id} />
 

@@ -4,6 +4,8 @@ export const chatContextExtractionPurpose = "extraction" as const;
 export const chatContextExtractionPromptVersion = "chat_context_extraction_v2" as const;
 export const sourceKnowledgeDraftExtractionPurpose = "extraction" as const;
 export const sourceKnowledgeDraftExtractionPromptVersion = "source_knowledge_draft_extraction_v1" as const;
+export const sourceKnowledgeSuggestionPurpose = "extraction" as const;
+export const sourceKnowledgeSuggestionPromptVersion = "source_knowledge_suggestion_v1" as const;
 
 type PromptHistoryMessage = {
   role: "user" | "assistant";
@@ -45,6 +47,19 @@ const sourceKnowledgeDraftExtractionSystemPrompt = [
   "Use freshness_sensitive=true for prices, schedules, opening hours, availability, road conditions, service status, promotions, parking capacity, weather, or other facts likely to change.",
   "Extract practical, atomic cards useful for a Hanoi-to-HCMC road trip review queue. If the source has no useful travel facts, return {\"drafts\":[]}.",
   "Never approve, publish, embed, retrieve, or instruct the system to mutate existing knowledge. These are drafts for human review only.",
+].join("\n");
+
+const sourceKnowledgeSuggestionSystemPrompt = [
+  "You compare one operator-provided URL source against existing safe Vietnam road-trip knowledge summaries.",
+  "Return only strict JSON with a suggestions array. Do not include markdown, commentary, citations, raw source snippets, provider metadata, file metadata, or storage keys.",
+  "Each suggestion action must be one of: create, update, conflict, duplicate, no_action.",
+  "For create/update/conflict, include a reviewable draft object with: type, title, summary, practical_details, tags, confidence, freshness_sensitive, and location_name or route_segment.",
+  "For update/conflict/duplicate, include target_card_id from the provided candidates. Never invent target ids.",
+  "Use before_summary, after_summary, conflict_summary, and rationale as short safe operator summaries, not source quotes.",
+  "Allowed types: place, food, hotel_area, activity, service, route_note, warning, cost_note, parking, ev_charging, kid_friendly_tip, discount_promotion, general_travel_tip.",
+  "Allowed confidence labels: unverified, community, curated, partner, official. Community/unverified sources must not be upgraded beyond their source metadata.",
+  "Use duplicate when the source adds no meaningful new facts to an existing card. Use no_action when it has no useful road-trip knowledge.",
+  "Never approve, publish, embed, retrieve, or instruct the system to mutate existing knowledge. These are review suggestions only.",
 ].join("\n");
 
 export function buildInitialAiAskMessages(question: string) {
@@ -160,6 +175,75 @@ export function buildSourceKnowledgeDraftExtractionMessages({
               tags: ["short_tag"],
               confidence: source.sourceType === "community" ? "community" : "unverified",
               freshness_sensitive: false,
+            },
+          ],
+        },
+      }),
+    },
+  ];
+}
+
+export function buildSourceKnowledgeSuggestionMessages({
+  source,
+  rawText,
+  candidates,
+}: {
+  source: {
+    kind: string;
+    label: string;
+    publisher: string | null;
+    collectedDate: string | null;
+    sourceType: string;
+    verificationStatus: string;
+    official: boolean;
+    partner: boolean;
+    canonicalUrl: string | null;
+  };
+  rawText: string;
+  candidates: Array<{
+    id: string;
+    status: string;
+    type: string;
+    title: string;
+    locationName: string | null;
+    routeSegment: string | null;
+    summary: string;
+    confidence: string;
+    freshnessSensitive: boolean;
+    tags: string[];
+  }>;
+}) {
+  return [
+    {
+      role: "system" as const,
+      content: sourceKnowledgeSuggestionSystemPrompt,
+    },
+    {
+      role: "user" as const,
+      content: JSON.stringify({
+        source_metadata: source,
+        source_text: rawText,
+        existing_candidates: candidates,
+        expected_output: {
+          suggestions: [
+            {
+              action: "update",
+              target_card_id: "existing_candidate_id_when_needed",
+              before_summary: "Short safe current-state summary for operator review",
+              after_summary: "Short safe proposed change summary for operator review",
+              conflict_summary: "Short safe conflict summary when action is conflict",
+              rationale: "Why this action is suggested",
+              draft: {
+                type: "place",
+                title: "Short safe title",
+                location_name: "Place or area when known",
+                route_segment: "Route segment when known",
+                summary: "Reviewable proposed knowledge without copied source snippets",
+                practical_details: { tips: ["short practical tip"] },
+                tags: ["short_tag"],
+                confidence: source.sourceType === "community" ? "community" : "unverified",
+                freshness_sensitive: false,
+              },
             },
           ],
         },

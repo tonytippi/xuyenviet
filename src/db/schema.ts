@@ -51,6 +51,9 @@ export type KnowledgeConfidence = (typeof knowledgeConfidenceValues)[number];
 export const knowledgeSourceSupportValues = ["primary", "supporting", "conflicting"] as const;
 export type KnowledgeSourceSupport = (typeof knowledgeSourceSupportValues)[number];
 
+export const knowledgeSuggestionActionValues = ["create", "update", "conflict", "duplicate", "no_action"] as const;
+export type KnowledgeSuggestionAction = (typeof knowledgeSuggestionActionValues)[number];
+
 export const chatContextFieldValues = [
   "origin",
   "destination",
@@ -607,6 +610,44 @@ export const knowledgeCardSources = pgTable(
   ],
 );
 
+export const knowledgeSourceSuggestions = pgTable(
+  "knowledge_source_suggestions",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    sourceId: text("source_id")
+      .notNull()
+      .references(() => sources.id, { onDelete: "restrict" }),
+    suggestedCardId: text("suggested_card_id").references(() => knowledgeCards.id, { onDelete: "cascade" }),
+    action: text("action").$type<KnowledgeSuggestionAction>().notNull(),
+    targetCardId: text("target_card_id").references(() => knowledgeCards.id, { onDelete: "restrict" }),
+    beforeSummary: text("before_summary"),
+    afterSummary: text("after_summary"),
+    conflictSummary: text("conflict_summary"),
+    rationale: text("rationale"),
+    aiPromptVersion: text("ai_prompt_version").notNull(),
+    aiGatewayModelId: text("ai_gateway_model_id").references(() => aiGatewayModels.id, { onDelete: "set null" }),
+    createdByUserId: text("created_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (suggestion) => [
+    index("knowledge_source_suggestions_source_id_idx").on(suggestion.sourceId),
+    index("knowledge_source_suggestions_suggested_card_id_idx").on(suggestion.suggestedCardId),
+    index("knowledge_source_suggestions_target_card_id_idx").on(suggestion.targetCardId),
+    index("knowledge_source_suggestions_action_created_at_idx").on(suggestion.action, suggestion.createdAt),
+    check("knowledge_source_suggestions_action_check", sql`${suggestion.action} in ('create', 'update', 'conflict', 'duplicate', 'no_action')`),
+    check("knowledge_source_suggestions_review_card_check", sql`${suggestion.action} not in ('create', 'update', 'conflict') or ${suggestion.suggestedCardId} is not null`),
+    check("knowledge_source_suggestions_target_check", sql`${suggestion.action} not in ('update', 'conflict', 'duplicate') or ${suggestion.targetCardId} is not null`),
+    check("knowledge_source_suggestions_relationship_check", sql`(${suggestion.action} in ('create', 'no_action') and ${suggestion.targetCardId} is null or ${suggestion.action} not in ('create', 'no_action')) and (${suggestion.action} in ('duplicate', 'no_action') and ${suggestion.suggestedCardId} is null or ${suggestion.action} not in ('duplicate', 'no_action')) and (${suggestion.suggestedCardId} is null or ${suggestion.targetCardId} is null or ${suggestion.suggestedCardId} <> ${suggestion.targetCardId})`),
+    check("knowledge_source_suggestions_required_summary_check", sql`${suggestion.action} <> 'update' or (${suggestion.beforeSummary} is not null and ${suggestion.afterSummary} is not null)`),
+    check("knowledge_source_suggestions_conflict_summary_check", sql`${suggestion.action} <> 'conflict' or ${suggestion.conflictSummary} is not null`),
+    check("knowledge_source_suggestions_summary_length_check", sql`(${suggestion.beforeSummary} is null or length(btrim(${suggestion.beforeSummary})) between 1 and 1200) and (${suggestion.afterSummary} is null or length(btrim(${suggestion.afterSummary})) between 1 and 1200) and (${suggestion.conflictSummary} is null or length(btrim(${suggestion.conflictSummary})) between 1 and 1200) and (${suggestion.rationale} is null or length(btrim(${suggestion.rationale})) between 1 and 1200)`),
+  ],
+);
+
 export const aiUsageEvents = pgTable(
   "ai_usage_events",
   {
@@ -686,6 +727,7 @@ export const schema = {
   rawSourceMaterial,
   knowledgeCards,
   knowledgeCardSources,
+  knowledgeSourceSuggestions,
   referralCodes,
   referralAttributions,
   tripProjects,

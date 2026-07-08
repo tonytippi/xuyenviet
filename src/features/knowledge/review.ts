@@ -1,11 +1,13 @@
 import "server-only";
 
 import { and, desc, eq, inArray } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 
 import { getDb } from "@/db/client";
 import {
   knowledgeCards,
   knowledgeCardSources,
+  knowledgeSourceSuggestions,
   knowledgeCardTypeValues,
   knowledgeConfidenceValues,
   rawSourceMaterial,
@@ -30,6 +32,7 @@ const maxTagLength = 40;
 const emailLikePattern = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
 const phoneLikePattern = /(?:\+?84|0)(?:[\s.-]?\d){8,10}/;
 const sensitiveTokenPattern = /(provider[_-]?payload|storage[_-]?key|raw[_-]?metadata|raw[_-]?source)/i;
+const targetKnowledgeCards = alias(knowledgeCards, "target_card");
 
 type ReviewDb = ReturnType<typeof getDb>;
 
@@ -58,6 +61,14 @@ export type KnowledgeDraftReviewCard = Pick<
   | "createdAt"
 > & {
   sources: KnowledgeDraftReviewSource[];
+  suggestion: KnowledgeDraftReviewSuggestion | null;
+};
+
+export type KnowledgeDraftReviewSuggestion = Pick<
+  typeof knowledgeSourceSuggestions.$inferSelect,
+  "id" | "action" | "targetCardId" | "beforeSummary" | "afterSummary" | "conflictSummary" | "rationale" | "createdAt"
+> & {
+  targetCard: Pick<typeof knowledgeCards.$inferSelect, "id" | "status" | "type" | "title" | "locationName" | "routeSegment" | "summary" | "confidence" | "freshnessSensitive"> | null;
 };
 
 export type KnowledgeDraftUpdateInput = {
@@ -110,10 +121,14 @@ export async function listKnowledgeDraftsForReview(): Promise<KnowledgeDraftRevi
         partner: sources.partner,
         supportLevel: knowledgeCardSources.supportLevel,
       },
+      suggestion: knowledgeSourceSuggestions,
+      targetCard: targetKnowledgeCards,
     })
     .from(knowledgeCards)
     .leftJoin(knowledgeCardSources, eq(knowledgeCardSources.knowledgeCardId, knowledgeCards.id))
     .leftJoin(sources, eq(sources.id, knowledgeCardSources.sourceId))
+    .leftJoin(knowledgeSourceSuggestions, eq(knowledgeSourceSuggestions.suggestedCardId, knowledgeCards.id))
+    .leftJoin(targetKnowledgeCards, eq(targetKnowledgeCards.id, knowledgeSourceSuggestions.targetCardId))
     .where(and(eq(knowledgeCards.status, "draft"), eq(knowledgeCards.needsReview, true)))
     .orderBy(desc(knowledgeCards.createdAt));
 
@@ -145,10 +160,14 @@ export async function getKnowledgeDraftForReview(draftId: string): Promise<Knowl
         partner: sources.partner,
         supportLevel: knowledgeCardSources.supportLevel,
       },
+      suggestion: knowledgeSourceSuggestions,
+      targetCard: targetKnowledgeCards,
     })
     .from(knowledgeCards)
     .leftJoin(knowledgeCardSources, eq(knowledgeCardSources.knowledgeCardId, knowledgeCards.id))
     .leftJoin(sources, eq(sources.id, knowledgeCardSources.sourceId))
+    .leftJoin(knowledgeSourceSuggestions, eq(knowledgeSourceSuggestions.suggestedCardId, knowledgeCards.id))
+    .leftJoin(targetKnowledgeCards, eq(targetKnowledgeCards.id, knowledgeSourceSuggestions.targetCardId))
     .where(and(eq(knowledgeCards.id, normalizedDraftId), eq(knowledgeCards.status, "draft"), eq(knowledgeCards.needsReview, true)));
 
   const draft = groupDraftRows(rows)[0];
@@ -286,10 +305,14 @@ async function getKnowledgeDraftForReviewFromDb(db: Pick<ReviewDb, "select">, dr
         partner: sources.partner,
         supportLevel: knowledgeCardSources.supportLevel,
       },
+      suggestion: knowledgeSourceSuggestions,
+      targetCard: targetKnowledgeCards,
     })
     .from(knowledgeCards)
     .leftJoin(knowledgeCardSources, eq(knowledgeCardSources.knowledgeCardId, knowledgeCards.id))
     .leftJoin(sources, eq(sources.id, knowledgeCardSources.sourceId))
+    .leftJoin(knowledgeSourceSuggestions, eq(knowledgeSourceSuggestions.suggestedCardId, knowledgeCards.id))
+    .leftJoin(targetKnowledgeCards, eq(targetKnowledgeCards.id, knowledgeSourceSuggestions.targetCardId))
     .where(eq(knowledgeCards.id, draftId));
 
   const grouped = groupDraftRows(rows);
@@ -360,13 +383,25 @@ function groupDraftRows(
       partner: boolean | null;
       supportLevel: KnowledgeDraftReviewSource["supportLevel"] | null;
     } | null;
+    suggestion: typeof knowledgeSourceSuggestions.$inferSelect | null;
+    targetCard: {
+      id: string | null;
+      status: typeof knowledgeCards.$inferSelect.status | null;
+      type: typeof knowledgeCards.$inferSelect.type | null;
+      title: string | null;
+      locationName: string | null;
+      routeSegment: string | null;
+      summary: string | null;
+      confidence: typeof knowledgeCards.$inferSelect.confidence | null;
+      freshnessSensitive: boolean | null;
+    } | null;
   }>,
 ): KnowledgeDraftReviewCard[] {
   const drafts = new Map<string, KnowledgeDraftReviewCard>();
 
   for (const row of rows) {
     const existing = drafts.get(row.card.id);
-    const card = existing ?? { ...row.card, sources: [] };
+    const card = existing ?? { ...row.card, sources: [], suggestion: null };
 
     const source = normalizeJoinedSource(row.source);
 
@@ -374,10 +409,53 @@ function groupDraftRows(
       card.sources.push(source);
     }
 
+    if (!card.suggestion) {
+      card.suggestion = normalizeJoinedSuggestion(row.suggestion, row.targetCard);
+    }
+
     drafts.set(row.card.id, card);
   }
 
   return Array.from(drafts.values());
+}
+
+function normalizeJoinedSuggestion(
+  suggestion: typeof knowledgeSourceSuggestions.$inferSelect | null,
+  targetCard: Parameters<typeof groupDraftRows>[0][number]["targetCard"],
+): KnowledgeDraftReviewSuggestion | null {
+  if (!suggestion?.id) {
+    return null;
+  }
+
+  return {
+    id: suggestion.id,
+    action: suggestion.action,
+    targetCardId: suggestion.targetCardId,
+    beforeSummary: suggestion.beforeSummary,
+    afterSummary: suggestion.afterSummary,
+    conflictSummary: suggestion.conflictSummary,
+    rationale: suggestion.rationale,
+    createdAt: suggestion.createdAt,
+    targetCard: normalizeJoinedTargetCard(targetCard),
+  };
+}
+
+function normalizeJoinedTargetCard(targetCard: Parameters<typeof groupDraftRows>[0][number]["targetCard"]) {
+  if (!targetCard?.id || !targetCard.status || !targetCard.type || !targetCard.title || !targetCard.summary || !targetCard.confidence || targetCard.freshnessSensitive === null) {
+    return null;
+  }
+
+  return {
+    id: targetCard.id,
+    status: targetCard.status,
+    type: targetCard.type,
+    title: targetCard.title,
+    locationName: targetCard.locationName,
+    routeSegment: targetCard.routeSegment,
+    summary: targetCard.summary,
+    confidence: targetCard.confidence,
+    freshnessSensitive: targetCard.freshnessSensitive,
+  };
 }
 
 function normalizeJoinedSource(source: Parameters<typeof groupDraftRows>[0][number]["source"]): KnowledgeDraftReviewSource | null {

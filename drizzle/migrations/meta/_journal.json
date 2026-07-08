@@ -127,6 +127,20 @@
       "when": 1783482886958,
       "tag": "0017_tiny_rattler",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1783486544506,
+      "tag": "0018_slow_betty_brant",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1783487058703,
+      "tag": "0019_nifty_gorilla_man",
+      "breakpoints": true
     }
   ]
 }

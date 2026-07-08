@@ -1,12 +1,16 @@
 import Link from "next/link";
 
-import { extractKnowledgeDraftsFromSourceForm, submitTravelSourceForm } from "@/features/knowledge/actions";
+import { extractKnowledgeDraftsFromSourceForm, submitTravelSourceForm, suggestKnowledgeFromSourceUrlForm } from "@/features/knowledge/actions";
+import { listKnowledgeSourceSuggestionTraces } from "@/features/knowledge/suggestions";
 
 type KnowledgeIntakePageProps = {
   searchParams: Promise<{
     error?: string;
     extractError?: string;
     extracted?: string;
+    suggestError?: string;
+    suggested?: string;
+    suggestionActions?: string;
     success?: string;
     sourceId?: string;
   }>;
@@ -14,6 +18,7 @@ type KnowledgeIntakePageProps = {
 
 export default async function KnowledgeIntakePage({ searchParams }: KnowledgeIntakePageProps) {
   const params = await searchParams;
+  const suggestionTraces = params.sourceId ? await listKnowledgeSourceSuggestionTraces(params.sourceId) : [];
 
   return (
     <div>
@@ -50,6 +55,41 @@ export default async function KnowledgeIntakePage({ searchParams }: KnowledgeInt
             Duyệt các bản nháp AI
           </Link>
         </div>
+      ) : null}
+      {params.suggestError ? (
+        <p className="mt-6 rounded-2xl border border-[#d99a93] bg-[#fff0ee] px-4 py-3 font-semibold text-[#9b2f29]" role="alert">
+          {params.suggestError}
+        </p>
+      ) : null}
+      {params.suggested ? (
+        <div className="mt-6 rounded-2xl border border-[#8fb59f] bg-[#edf7ef] px-4 py-3 font-semibold text-[#1f5f46]" role="status">
+          <p>
+            AI đã lưu {params.suggested} gợi ý cho nguồn {params.sourceId ?? "đã chọn"}
+            {params.suggestionActions ? `: ${params.suggestionActions}` : ""}.
+          </p>
+          <Link className="mt-3 inline-flex rounded-xl border border-[#8fb59f] bg-white/70 px-3 py-2 text-sm text-[#17342c] transition hover:bg-white" href="/admin/knowledge/drafts">
+            Duyệt gợi ý create/update/conflict
+          </Link>
+        </div>
+      ) : null}
+      {suggestionTraces.length > 0 ? (
+        <section className="mt-6 rounded-2xl border border-[#d8c9ad] bg-white/70 p-4 text-sm text-[#17342c]">
+          <h2 className="text-base font-semibold">Gợi ý đã lưu cho nguồn này</h2>
+          <div className="mt-3 grid gap-3">
+            {suggestionTraces.map((trace) => (
+              <article key={trace.id} className="rounded-xl border border-[#e2d3ba] bg-[#fbf7ed] p-3">
+                <p className="font-semibold uppercase tracking-[0.12em] text-[#8c4f13]">{trace.action}</p>
+                <p className="mt-1 text-[#4f625a]">{trace.rationale ?? trace.conflictSummary ?? trace.afterSummary ?? trace.beforeSummary ?? "Đã lưu trace gợi ý để vận hành kiểm tra."}</p>
+                {trace.targetCardId ? <p className="mt-2 text-xs text-[#4f625a]">Target card: {trace.targetCardId}</p> : null}
+                {trace.suggestedCardId ? (
+                  <Link className="mt-2 inline-flex text-xs font-semibold text-[#1f5f46] underline" href={`/admin/knowledge/drafts/${encodeURIComponent(trace.suggestedCardId)}`}>
+                    Mở bản nháp gợi ý
+                  </Link>
+                ) : null}
+              </article>
+            ))}
+          </div>
+        </section>
       ) : null}
 
       <form action={submitTravelSourceForm} className="mt-8 grid gap-6 rounded-[1.5rem] border border-[#d8c9ad] bg-white/70 p-5 sm:p-6">
@@ -145,6 +185,32 @@ export default async function KnowledgeIntakePage({ searchParams }: KnowledgeInt
             type="submit"
           >
             Tạo bản nháp bằng AI
+          </button>
+        </form>
+      </section>
+
+      <section className="mt-8 rounded-[1.5rem] border border-[#d8c9ad] bg-white/70 p-5 sm:p-6">
+        <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#8c4f13]">Bước 4.4</p>
+        <h2 className="mt-3 text-2xl font-semibold tracking-[-0.03em] text-[#17342c]">Gợi ý tạo mới hoặc cập nhật từ URL</h2>
+        <p className="mt-3 max-w-2xl leading-7 text-[#4f625a]">
+          Chỉ chạy với nguồn kind=url đã có văn bản thô đọc được. AI so với thẻ draft/approved hiện có và lưu metadata gợi ý để vận hành duyệt; không cập nhật thẻ approved.
+        </p>
+        <form action={suggestKnowledgeFromSourceUrlForm} className="mt-5 flex flex-col gap-3 sm:flex-row">
+          <label className="sr-only" htmlFor="suggestSourceId">
+            Source ID
+          </label>
+          <input
+            className="min-h-12 flex-1 rounded-2xl border border-[#d8c9ad] bg-[#fbf7ed] px-4 text-base outline-none focus:ring-4 focus:ring-[#e5bd82]"
+            id="suggestSourceId"
+            name="sourceId"
+            placeholder="Dán source ID URL để AI gợi ý"
+            defaultValue={params.sourceId ?? ""}
+          />
+          <button
+            className="min-h-12 rounded-2xl bg-[#17342c] px-5 py-4 text-base font-semibold text-white shadow-[0_12px_30px_rgba(23,52,44,0.18)] transition hover:bg-[#102720] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]"
+            type="submit"
+          >
+            Gợi ý create/update
           </button>
         </form>
       </section>

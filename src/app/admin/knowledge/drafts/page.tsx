@@ -45,6 +45,12 @@ export default async function KnowledgeDraftsPage({ searchParams }: KnowledgeDra
                 <div>
                   <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#8c4f13]">{draft.type}</p>
                   <h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-[#17342c]">{draft.title}</h2>
+                  {draft.suggestion ? (
+                    <p className="mt-3 inline-flex rounded-full border border-[#d8c9ad] bg-[#f4ead7] px-3 py-1 text-sm font-semibold text-[#8c4f13]">
+                      Gợi ý AI: {draft.suggestion.action}
+                      {draft.suggestion.targetCard ? ` · mục tiêu: ${draft.suggestion.targetCard.title}` : ""}
+                    </p>
+                  ) : null}
                 </div>
                 <Link className="min-h-12 rounded-2xl bg-[#1f5f46] px-5 py-3 text-center font-semibold text-white transition hover:bg-[#194d39] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]" href={`/admin/knowledge/drafts/${draft.id}`}>
                   Sửa / từ chối
@@ -52,6 +58,7 @@ export default async function KnowledgeDraftsPage({ searchParams }: KnowledgeDra
               </div>
 
               <p className="mt-4 leading-7 text-[#4f625a]">{draft.summary}</p>
+              {draft.suggestion?.rationale ? <p className="mt-3 rounded-2xl bg-[#fbf7ed] p-3 text-sm leading-6 text-[#4f625a]">Lý do gợi ý: {draft.suggestion.rationale}</p> : null}
 
               <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
                 <div className="rounded-2xl bg-[#fbf7ed] p-3">
