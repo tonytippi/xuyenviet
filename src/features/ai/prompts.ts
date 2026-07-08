@@ -2,6 +2,8 @@ export const aiAskInitialAnswerPurpose = "ai_ask_initial_answer" as const;
 export const aiAskInitialAnswerPromptVersion = "ai_ask_initial_v5" as const;
 export const chatContextExtractionPurpose = "extraction" as const;
 export const chatContextExtractionPromptVersion = "chat_context_extraction_v2" as const;
+export const sourceKnowledgeDraftExtractionPurpose = "extraction" as const;
+export const sourceKnowledgeDraftExtractionPromptVersion = "source_knowledge_draft_extraction_v1" as const;
 
 type PromptHistoryMessage = {
   role: "user" | "assistant";
@@ -32,6 +34,17 @@ const chatContextExtractionSystemPrompt = [
   "If a correction is ambiguous and you cannot identify the allowed field or whether it applies to the selected trip project, return no fact for that correction; the answer assistant should ask a concise clarification.",
   "Never invent a target field for vague corrections such as 'sửa lại thành 8 nhé'. When project_scope_available is false, use conversation scope even if the wording mentions a trip.",
   "Do not extract child full names, phone numbers, emails, addresses, government IDs, medical details, payment data, credentials, unrelated personal facts, image facts, or any unknown fields.",
+].join("\n");
+
+const sourceKnowledgeDraftExtractionSystemPrompt = [
+  "You extract reviewable Vietnam road-trip knowledge drafts from operator-provided source text.",
+  "Return only strict JSON with a drafts array. Do not include markdown, commentary, citations, provider metadata, source snippets, or raw source text.",
+  "Each draft must include: type, title, summary, practical_details, tags, confidence, freshness_sensitive. It may include location_name and route_segment.",
+  "Allowed types: place, food, hotel_area, activity, service, route_note, warning, cost_note, parking, ev_charging, kid_friendly_tip, discount_promotion, general_travel_tip.",
+  "Allowed confidence labels: unverified, community, curated, partner, official. Community/Facebook/copied material must stay unverified or community unless source metadata explicitly says official or partner.",
+  "Use freshness_sensitive=true for prices, schedules, opening hours, availability, road conditions, service status, promotions, parking capacity, weather, or other facts likely to change.",
+  "Extract practical, atomic cards useful for a Hanoi-to-HCMC road trip review queue. If the source has no useful travel facts, return {\"drafts\":[]}.",
+  "Never approve, publish, embed, retrieve, or instruct the system to mutate existing knowledge. These are drafts for human review only.",
 ].join("\n");
 
 export function buildInitialAiAskMessages(question: string) {
@@ -95,6 +108,58 @@ export function buildChatContextExtractionMessages({
               value: "corrected_or_new_value",
               scope: projectScopeAvailable ? "trip_project" : "conversation",
               confidence: 85,
+            },
+          ],
+        },
+      }),
+    },
+  ];
+}
+
+export function buildSourceKnowledgeDraftExtractionMessages({
+  source,
+  rawText,
+}: {
+  source: {
+    kind: string;
+    label: string;
+    publisher: string | null;
+    collectedDate: string | null;
+    sourceType: string;
+    verificationStatus: string;
+    official: boolean;
+    partner: boolean;
+  };
+  rawText: string;
+}) {
+  return [
+    {
+      role: "system" as const,
+      content: sourceKnowledgeDraftExtractionSystemPrompt,
+    },
+    {
+      role: "user" as const,
+      content: JSON.stringify({
+        source_metadata: source,
+        source_text: rawText,
+        expected_output: {
+          drafts: [
+            {
+              type: "place",
+              title: "Short safe title",
+              location_name: "Place or area when known",
+              route_segment: "Route segment when known",
+              summary: "Reviewable fact summary without copied source snippets",
+              practical_details: {
+                tips: ["short practical tip"],
+                warnings: ["short warning when relevant"],
+                cost_notes: ["price or fee note when relevant"],
+                parking_notes: ["parking note when relevant"],
+                kid_notes: ["family note when relevant"],
+              },
+              tags: ["short_tag"],
+              confidence: source.sourceType === "community" ? "community" : "unverified",
+              freshness_sensitive: false,
             },
           ],
         },

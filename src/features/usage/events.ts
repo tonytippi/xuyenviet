@@ -12,8 +12,8 @@ type UsageEventDb = {
 
 export type WriteAiUsageEventInput = {
   userId: string;
-  conversationId: string;
-  userMessageId: string;
+  conversationId?: string | null;
+  userMessageId?: string | null;
   assistantMessageId?: string | null;
   purpose: string;
   provider: string;
@@ -41,8 +41,8 @@ export async function writeAiUsageEvent(db: UsageEventDb, input: WriteAiUsageEve
 
   await db.insert(aiUsageEvents).values({
     userId: input.userId,
-    conversationId: input.conversationId,
-    userMessageId: input.userMessageId,
+    conversationId: input.conversationId ?? null,
+    userMessageId: input.userMessageId ?? null,
     assistantMessageId: input.assistantMessageId ?? null,
     purpose: input.purpose,
     provider: input.provider,

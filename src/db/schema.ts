@@ -25,6 +25,32 @@ export type SourceType = (typeof sourceTypeValues)[number];
 export const sourceVerificationStatusValues = ["unverified", "verified"] as const;
 export type SourceVerificationStatus = (typeof sourceVerificationStatusValues)[number];
 
+export const knowledgeCardStatusValues = ["draft", "approved", "archived", "rejected", "duplicate", "no_action"] as const;
+export type KnowledgeCardStatus = (typeof knowledgeCardStatusValues)[number];
+
+export const knowledgeCardTypeValues = [
+  "place",
+  "food",
+  "hotel_area",
+  "activity",
+  "service",
+  "route_note",
+  "warning",
+  "cost_note",
+  "parking",
+  "ev_charging",
+  "kid_friendly_tip",
+  "discount_promotion",
+  "general_travel_tip",
+] as const;
+export type KnowledgeCardType = (typeof knowledgeCardTypeValues)[number];
+
+export const knowledgeConfidenceValues = ["unverified", "community", "curated", "partner", "official"] as const;
+export type KnowledgeConfidence = (typeof knowledgeConfidenceValues)[number];
+
+export const knowledgeSourceSupportValues = ["primary", "supporting", "conflicting"] as const;
+export type KnowledgeSourceSupport = (typeof knowledgeSourceSupportValues)[number];
+
 export const chatContextFieldValues = [
   "origin",
   "destination",
@@ -516,6 +542,69 @@ export const aiGatewayModels = pgTable(
   ],
 );
 
+export const knowledgeCards = pgTable(
+  "knowledge_cards",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    status: text("status").$type<KnowledgeCardStatus>().default("draft").notNull(),
+    type: text("type").$type<KnowledgeCardType>().notNull(),
+    title: text("title").notNull(),
+    locationName: text("location_name"),
+    routeSegment: text("route_segment"),
+    summary: text("summary").notNull(),
+    practicalDetails: jsonb("practical_details").$type<Record<string, unknown>>().default({}).notNull(),
+    tags: jsonb("tags").$type<string[]>().default([]).notNull(),
+    confidence: text("confidence").$type<KnowledgeConfidence>().default("unverified").notNull(),
+    freshnessSensitive: boolean("freshness_sensitive").default(false).notNull(),
+    needsReview: boolean("needs_review").default(true).notNull(),
+    aiPromptVersion: text("ai_prompt_version").notNull(),
+    aiGatewayModelId: text("ai_gateway_model_id").references(() => aiGatewayModels.id, { onDelete: "set null" }),
+    createdByUserId: text("created_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (card) => [
+    index("knowledge_cards_status_created_at_idx").on(card.status, card.createdAt),
+    index("knowledge_cards_type_status_idx").on(card.type, card.status),
+    index("knowledge_cards_confidence_idx").on(card.confidence),
+    index("knowledge_cards_created_by_user_id_idx").on(card.createdByUserId),
+    check("knowledge_cards_status_check", sql`${card.status} in ('draft', 'approved', 'archived', 'rejected', 'duplicate', 'no_action')`),
+    check(
+      "knowledge_cards_type_check",
+      sql`${card.type} in ('place', 'food', 'hotel_area', 'activity', 'service', 'route_note', 'warning', 'cost_note', 'parking', 'ev_charging', 'kid_friendly_tip', 'discount_promotion', 'general_travel_tip')`,
+    ),
+    check("knowledge_cards_confidence_check", sql`${card.confidence} in ('unverified', 'community', 'curated', 'partner', 'official')`),
+    check("knowledge_cards_title_length_check", sql`length(btrim(${card.title})) between 1 and 160`),
+    check("knowledge_cards_summary_length_check", sql`length(btrim(${card.summary})) between 1 and 1200`),
+    check("knowledge_cards_location_length_check", sql`${card.locationName} is null or length(btrim(${card.locationName})) between 1 and 160`),
+    check("knowledge_cards_route_segment_length_check", sql`${card.routeSegment} is null or length(btrim(${card.routeSegment})) between 1 and 160`),
+    check("knowledge_cards_draft_review_check", sql`${card.status} <> 'draft' or ${card.needsReview} = true`),
+  ],
+);
+
+export const knowledgeCardSources = pgTable(
+  "knowledge_card_sources",
+  {
+    knowledgeCardId: text("knowledge_card_id")
+      .notNull()
+      .references(() => knowledgeCards.id, { onDelete: "cascade" }),
+    sourceId: text("source_id")
+      .notNull()
+      .references(() => sources.id, { onDelete: "restrict" }),
+    supportLevel: text("support_level").$type<KnowledgeSourceSupport>().default("primary").notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (link) => [
+    primaryKey({ columns: [link.knowledgeCardId, link.sourceId] }),
+    index("knowledge_card_sources_source_id_idx").on(link.sourceId),
+    check("knowledge_card_sources_support_level_check", sql`${link.supportLevel} in ('primary', 'supporting', 'conflicting')`),
+  ],
+);
+
 export const aiUsageEvents = pgTable(
   "ai_usage_events",
   {
@@ -593,6 +682,8 @@ export const schema = {
   auditEvents,
   sources,
   rawSourceMaterial,
+  knowledgeCards,
+  knowledgeCardSources,
   referralCodes,
   referralAttributions,
   tripProjects,

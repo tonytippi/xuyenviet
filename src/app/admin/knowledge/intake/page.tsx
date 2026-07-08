@@ -1,9 +1,12 @@
-import { submitTravelSourceForm } from "@/features/knowledge/actions";
+import { extractKnowledgeDraftsFromSourceForm, submitTravelSourceForm } from "@/features/knowledge/actions";
 
 type KnowledgeIntakePageProps = {
   searchParams: Promise<{
     error?: string;
+    extractError?: string;
+    extracted?: string;
     success?: string;
+    sourceId?: string;
   }>;
 };
 
@@ -27,7 +30,17 @@ export default async function KnowledgeIntakePage({ searchParams }: KnowledgeInt
       ) : null}
       {params.success ? (
         <p className="mt-6 rounded-2xl border border-[#8fb59f] bg-[#edf7ef] px-4 py-3 font-semibold text-[#1f5f46]" role="status">
-          Đã lưu nguồn an toàn để AI đọc ở bước sau.
+          Đã lưu nguồn an toàn để AI đọc ở bước sau{params.sourceId ? `: ${params.sourceId}` : ""}.
+        </p>
+      ) : null}
+      {params.extractError ? (
+        <p className="mt-6 rounded-2xl border border-[#d99a93] bg-[#fff0ee] px-4 py-3 font-semibold text-[#9b2f29]" role="alert">
+          {params.extractError}
+        </p>
+      ) : null}
+      {params.extracted ? (
+        <p className="mt-6 rounded-2xl border border-[#8fb59f] bg-[#edf7ef] px-4 py-3 font-semibold text-[#1f5f46]" role="status">
+          AI đã tạo {params.extracted} bản nháp tri thức cần duyệt cho nguồn {params.sourceId ?? "đã chọn"}.
         </p>
       ) : null}
 
@@ -101,6 +114,32 @@ export default async function KnowledgeIntakePage({ searchParams }: KnowledgeInt
           Lưu nguồn để AI đọc sau
         </button>
       </form>
+
+      <section className="mt-8 rounded-[1.5rem] border border-[#d8c9ad] bg-[#f4ead7] p-5 sm:p-6">
+        <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#8c4f13]">Bước 4.2</p>
+        <h2 className="mt-3 text-2xl font-semibold tracking-[-0.03em] text-[#17342c]">Trích xuất bản nháp tri thức từ nguồn đã lưu</h2>
+        <p className="mt-3 max-w-2xl leading-7 text-[#4f625a]">
+          Chỉ chạy với nguồn có văn bản thô đọc được. AI tạo bản nháp cần duyệt, không phê duyệt, không embedding và không đưa vào truy xuất cho khách.
+        </p>
+        <form action={extractKnowledgeDraftsFromSourceForm} className="mt-5 flex flex-col gap-3 sm:flex-row">
+          <label className="sr-only" htmlFor="extractSourceId">
+            Source ID
+          </label>
+          <input
+            className="min-h-12 flex-1 rounded-2xl border border-[#d8c9ad] bg-[#fbf7ed] px-4 text-base outline-none focus:ring-4 focus:ring-[#e5bd82]"
+            id="extractSourceId"
+            name="sourceId"
+            placeholder="Dán source ID để trích xuất"
+            defaultValue={params.sourceId ?? ""}
+          />
+          <button
+            className="min-h-12 rounded-2xl bg-[#8c4f13] px-5 py-4 text-base font-semibold text-white shadow-[0_12px_30px_rgba(140,79,19,0.18)] transition hover:bg-[#713f0f] focus:outline-none focus:ring-4 focus:ring-[#e5bd82]"
+            type="submit"
+          >
+            Tạo bản nháp bằng AI
+          </button>
+        </form>
+      </section>
     </div>
   );
 }

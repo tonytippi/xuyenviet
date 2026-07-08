@@ -6,6 +6,7 @@ import { rawSourceMaterial, sources } from "@/db/schema";
 import { AdminAuthorizationError } from "@/server/auth";
 import { runAuditedAdminMutation } from "@/server/mutations";
 
+import { extractKnowledgeDraftsFromSource as extractKnowledgeDraftsFromSourceService, isKnowledgeExtractionError } from "./extraction";
 import { isSourceValidationError, normalizeTravelSourceInput, type TravelSourceInput } from "./sources";
 
 export type SafeSourceResult = Pick<
@@ -47,6 +48,31 @@ export async function submitTravelSourceForAiReading(input: TravelSourceInput): 
   });
 }
 
+export async function extractKnowledgeDraftsFromSource(sourceId: string) {
+  return extractKnowledgeDraftsFromSourceService(sourceId);
+}
+
+export async function extractKnowledgeDraftsFromSourceForm(formData: FormData) {
+  let result: Awaited<ReturnType<typeof extractKnowledgeDraftsFromSource>> | null = null;
+  let failureMessage: string | null = null;
+
+  try {
+    result = await extractKnowledgeDraftsFromSource(getOptionalFormString(formData, "sourceId") ?? "");
+  } catch (error) {
+    if (error instanceof AdminAuthorizationError || (error instanceof Error && error.name === "AdminAuthorizationError")) {
+      throw error;
+    }
+
+    failureMessage = isKnowledgeExtractionError(error) && error instanceof Error ? error.message : "Không thể trích xuất bản nháp từ nguồn này.";
+  }
+
+  if (failureMessage) {
+    redirect(`/admin/knowledge/intake?extractError=${encodeURIComponent(failureMessage)}`);
+  }
+
+  redirect(`/admin/knowledge/intake?extracted=${result?.draftCount ?? 0}&sourceId=${encodeURIComponent(result?.sourceId ?? "")}`);
+}
+
 export async function submitTravelSourceForm(formData: FormData) {
   const byteSizeValue = getOptionalFormString(formData, "screenshotByteSize");
   const screenshotFileName = getOptionalFormString(formData, "screenshotFileName");
@@ -54,8 +80,10 @@ export async function submitTravelSourceForm(formData: FormData) {
 
   let failureMessage: string | null = null;
 
+  let source: Awaited<ReturnType<typeof submitTravelSourceForAiReading>> | null = null;
+
   try {
-    await submitTravelSourceForAiReading({
+    source = await submitTravelSourceForAiReading({
       url: getOptionalFormString(formData, "url"),
       label: getOptionalFormString(formData, "label"),
       publisher: getOptionalFormString(formData, "publisher"),
@@ -84,7 +112,7 @@ export async function submitTravelSourceForm(formData: FormData) {
     redirect(`/admin/knowledge/intake?error=${encodeURIComponent(failureMessage)}`);
   }
 
-  redirect("/admin/knowledge/intake?success=1");
+  redirect(`/admin/knowledge/intake?success=1&sourceId=${encodeURIComponent(source?.id ?? "")}`);
 }
 
 function getOptionalFormString(formData: FormData, key: string) {
