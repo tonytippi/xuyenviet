@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { boolean, check, foreignKey, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { boolean, check, foreignKey, index, integer, jsonb, pgTable, primaryKey, real, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 
 export const userRoleValues = ["traveler", "operator", "admin"] as const;
 export type UserRole = (typeof userRoleValues)[number];
@@ -53,6 +53,12 @@ export type KnowledgeSourceSupport = (typeof knowledgeSourceSupportValues)[numbe
 
 export const knowledgeSearchDocumentStatusValues = ["active", "disabled", "stale"] as const;
 export type KnowledgeSearchDocumentStatus = (typeof knowledgeSearchDocumentStatusValues)[number];
+
+export const webSearchResultSourceTypeValues = ["official", "provider", "community", "general"] as const;
+export type WebSearchResultSourceType = (typeof webSearchResultSourceTypeValues)[number];
+
+export const webSearchResultConfidenceValues = ["official", "provider", "unverified"] as const;
+export type WebSearchResultConfidence = (typeof webSearchResultConfidenceValues)[number];
 
 export const knowledgeSuggestionActionValues = ["create", "update", "conflict", "duplicate", "no_action"] as const;
 export type KnowledgeSuggestionAction = (typeof knowledgeSuggestionActionValues)[number];
@@ -807,6 +813,59 @@ export const aiUsageEvents = pgTable(
   ],
 );
 
+export const webSearchResults = pgTable(
+  "web_search_results",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    conversationId: text("conversation_id").notNull(),
+    userMessageId: text("user_message_id").notNull(),
+    query: text("query").notNull(),
+    title: text("title").notNull(),
+    url: text("url").notNull(),
+    snippet: text("snippet").notNull(),
+    content: text("content"),
+    provider: text("provider").notNull(),
+    providerScore: real("provider_score"),
+    checkedAt: timestamp("checked_at", { mode: "date" }).notNull(),
+    sourceType: text("source_type").$type<WebSearchResultSourceType>().notNull(),
+    confidence: text("confidence").$type<WebSearchResultConfidence>().notNull(),
+    triggerReason: text("trigger_reason").notNull(),
+    rank: integer("rank").notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (result) => [
+    foreignKey({
+      columns: [result.conversationId, result.userId],
+      foreignColumns: [conversations.id, conversations.userId],
+      name: "web_search_results_conversation_owner_fk",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [result.userMessageId, result.conversationId, result.userId],
+      foreignColumns: [messages.id, messages.conversationId, messages.userId],
+      name: "web_search_results_user_message_owner_fk",
+    }).onDelete("cascade"),
+    index("web_search_results_user_message_rank_idx").on(result.userMessageId, result.rank),
+    index("web_search_results_conversation_created_at_idx").on(result.conversationId, result.createdAt),
+    index("web_search_results_user_id_created_at_idx").on(result.userId, result.createdAt),
+    check("web_search_results_query_length_check", sql`length(btrim(${result.query})) between 1 and 500`),
+    check("web_search_results_title_length_check", sql`length(btrim(${result.title})) between 1 and 300`),
+    check("web_search_results_url_length_check", sql`length(btrim(${result.url})) between 1 and 2048`),
+    check("web_search_results_snippet_length_check", sql`length(btrim(${result.snippet})) between 1 and 1200`),
+    check("web_search_results_content_length_check", sql`${result.content} is null or length(btrim(${result.content})) between 1 and 2000`),
+    check("web_search_results_provider_check", sql`length(btrim(${result.provider})) between 1 and 80`),
+    check("web_search_results_score_check", sql`${result.providerScore} is null or (${result.providerScore} >= 0 and ${result.providerScore} <= 1)`),
+    check("web_search_results_source_type_check", sql`${result.sourceType} in ('official', 'provider', 'community', 'general')`),
+    check("web_search_results_confidence_check", sql`${result.confidence} in ('official', 'provider', 'unverified')`),
+    check("web_search_results_trigger_reason_check", sql`${result.triggerReason} in ('no_approved_knowledge', 'insufficient_approved_knowledge', 'freshness_sensitive_request', 'approved_knowledge_may_be_stale', 'source_conflict', 'approved_knowledge_unavailable')`),
+    check("web_search_results_rank_check", sql`${result.rank} > 0`),
+  ],
+);
+
 export const schema = {
   users,
   accounts,
@@ -831,4 +890,5 @@ export const schema = {
   chatContext,
   aiGatewayModels,
   aiUsageEvents,
+  webSearchResults,
 };

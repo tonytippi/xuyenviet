@@ -1,0 +1,172 @@
+import { eq } from "drizzle-orm";
+import { beforeEach, describe, expect, test, vi } from "vitest";
+
+import { conversations, messages, users, webSearchResults } from "@/db/schema";
+
+import { testDb } from "./helpers/db";
+
+async function seedTurn() {
+  await testDb.insert(users).values({ id: "web-user", email: "web-user@example.com" });
+  const [conversation] = await testDb.insert(conversations).values({ userId: "web-user" }).returning({ id: conversations.id });
+  const [message] = await testDb.insert(messages).values({ userId: "web-user", conversationId: conversation.id, role: "user", content: "Giá vé hiện tại ở Huế?" }).returning({ id: messages.id });
+
+  return { conversationId: conversation.id, userMessageId: message.id };
+}
+
+describe("web search adapter", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  });
+
+  test("normalizes Tavily results, prefers official/provider-looking sources, and filters low scores", async () => {
+    const { searchWebForSourceBundle } = await import("@/features/retrieval/web-search");
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({
+      results: [
+        { title: "Forum repost", url: "https://facebook.com/post", content: "Bài đăng cộng đồng", score: 0.95, raw_provider_payload: "must-not-leak" },
+        { title: "Official Hue Ticket", url: "https://hue.gov.vn/ticket", content: "Giá vé chính thức", score: 0.8 },
+        { title: "Hotel Provider", url: "https://hotel.example/rooms", content: "Còn phòng", score: 0.7 },
+        { title: "Low quality official", url: "https://official.example/low", content: "Không đủ điểm", score: 0.1 },
+        { title: "Missing URL", content: "Không dùng được", score: 0.9 },
+      ],
+    }), { status: 200 }));
+
+    const result = await searchWebForSourceBundle({
+      query: "Giá vé hiện tại ở Huế?",
+      triggerReasons: ["freshness_sensitive_request"],
+      fetcher,
+      now: () => new Date("2026-07-09T10:00:00.000Z"),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.results).toHaveLength(3);
+    expect(result.results.map((item) => item.sourceType)).toEqual(["official", "provider", "community"]);
+    expect(result.results.map((item) => item.rank)).toEqual([1, 2, 3]);
+    expect(JSON.stringify(result.results)).not.toContain("raw_provider_payload");
+  });
+
+  test("returns safe failure codes for provider errors, invalid responses, low quality, timeout, and missing key", async () => {
+    const { searchWebForSourceBundle } = await import("@/features/retrieval/web-search");
+    const previousKey = process.env.TAVILY_API_KEY;
+
+    const providerFailure = await searchWebForSourceBundle({
+      query: "Huế",
+      triggerReasons: ["no_approved_knowledge"],
+      fetcher: vi.fn(async () => new Response("nope", { status: 503 })),
+    });
+    const invalidResponse = await searchWebForSourceBundle({
+      query: "Huế",
+      triggerReasons: ["no_approved_knowledge"],
+      fetcher: vi.fn(async () => new Response(JSON.stringify({ answer: "not results" }), { status: 200 })),
+    });
+    const invalidJson = await searchWebForSourceBundle({
+      query: "Huế",
+      triggerReasons: ["no_approved_knowledge"],
+      fetcher: vi.fn(async () => new Response("not-json", { status: 200 })),
+    });
+    const lowQuality = await searchWebForSourceBundle({
+      query: "Huế",
+      triggerReasons: ["no_approved_knowledge"],
+      fetcher: vi.fn(async () => new Response(JSON.stringify({ results: [{ title: "Low", url: "https://example.com", content: "x", score: 0.1 }] }), { status: 200 })),
+    });
+    const timeout = await searchWebForSourceBundle({
+      query: "Huế",
+      triggerReasons: ["no_approved_knowledge"],
+      fetcher: vi.fn((_input, init) => new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+      })),
+    });
+
+    delete process.env.TAVILY_API_KEY;
+    const missingKey = await searchWebForSourceBundle({ query: "Huế", triggerReasons: ["no_approved_knowledge"] });
+    if (previousKey) {
+      process.env.TAVILY_API_KEY = previousKey;
+    } else {
+      delete process.env.TAVILY_API_KEY;
+    }
+
+    expect(providerFailure).toEqual({ ok: false, code: "provider_request_failed" });
+    expect(invalidResponse).toEqual({ ok: false, code: "invalid_provider_response" });
+    expect(invalidJson).toEqual({ ok: false, code: "invalid_provider_response" });
+    expect(lowQuality).toEqual({ ok: false, code: "low_quality_results" });
+    expect(timeout).toEqual({ ok: false, code: "provider_timeout" });
+    expect(missingKey).toEqual({ ok: false, code: "missing_api_key" });
+  });
+
+  test("minimizes personal details before sending query to provider", async () => {
+    const { minimizeWebSearchQuery, searchWebForSourceBundle } = await import("@/features/retrieval/web-search");
+    let requestBody = "";
+    const fetcher: typeof fetch = async (_input, init) => {
+      requestBody = String(init?.body);
+      return new Response(JSON.stringify({ results: [{ title: "Hue", url: "https://hue.gov.vn", content: "Thông tin", score: 0.8 }] }), { status: 200 });
+    };
+    const privateQuestion = "Tên tôi là Nguyễn Văn A, email a@example.com, số 0912 345 678, con 6 tuổi. Giá vé Huế hiện tại?";
+
+    await searchWebForSourceBundle({ query: privateQuestion, triggerReasons: ["freshness_sensitive_request"], fetcher });
+
+    const sentBody = JSON.parse(requestBody) as { query: string };
+    expect(minimizeWebSearchQuery(privateQuestion)).not.toContain("a@example.com");
+    expect(sentBody.query).not.toContain("Nguyễn Văn A");
+    expect(sentBody.query).not.toContain("a@example.com");
+    expect(sentBody.query).not.toContain("0912");
+    expect(sentBody.query).not.toContain("6 tuổi");
+    expect(sentBody.query).toContain("Giá vé Huế hiện tại");
+  });
+
+  test("drops overlong URLs instead of truncating invalid source URLs", async () => {
+    const { normalizeTavilyResults } = await import("@/features/retrieval/web-search");
+
+    const results = normalizeTavilyResults({
+      payload: { results: [{ title: "Long URL", url: `https://example.com/${"a".repeat(2_100)}`, content: "Có nội dung", score: 0.8 }] },
+      query: "Huế",
+      triggerReason: "no_approved_knowledge",
+      checkedAt: new Date("2026-07-09T10:00:00.000Z"),
+    });
+
+    expect(results).toEqual([]);
+  });
+
+  test("captures normalized result rows linked to the traveler turn without raw provider payloads", async () => {
+    const { conversationId, userMessageId } = await seedTurn();
+    const { captureWebSearchResults, normalizeTavilyResults } = await import("@/features/retrieval/web-search");
+    const results = normalizeTavilyResults({
+      payload: { results: [{ title: "Official Hue Ticket", url: "https://hue.gov.vn/ticket", content: "Giá vé chính thức", score: 0.8, raw_payload: { secret: true } }] },
+      query: "Giá vé hiện tại ở Huế?",
+      triggerReason: "freshness_sensitive_request",
+      checkedAt: new Date("2026-07-09T10:00:00.000Z"),
+    });
+
+    await captureWebSearchResults({ db: testDb, userId: "web-user", conversationId, userMessageId, results });
+
+    const rows = await testDb.select().from(webSearchResults).where(eq(webSearchResults.userMessageId, userMessageId));
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      userId: "web-user",
+      conversationId,
+      userMessageId,
+      title: "Official Hue Ticket",
+      url: "https://hue.gov.vn/ticket",
+      provider: "tavily",
+      sourceType: "official",
+      confidence: "official",
+      triggerReason: "freshness_sensitive_request",
+      rank: 1,
+    });
+    expect(JSON.stringify(rows[0])).not.toContain("raw_payload");
+  });
+
+  test("rejects capture when the message is not a user turn", async () => {
+    const { conversationId } = await seedTurn();
+    const [assistantMessage] = await testDb.insert(messages).values({ userId: "web-user", conversationId, role: "assistant", content: "Trả lời" }).returning({ id: messages.id });
+    const { captureWebSearchResults, normalizeTavilyResults } = await import("@/features/retrieval/web-search");
+    const results = normalizeTavilyResults({
+      payload: { results: [{ title: "Official Hue Ticket", url: "https://hue.gov.vn/ticket", content: "Giá vé chính thức", score: 0.8 }] },
+      query: "Giá vé hiện tại ở Huế?",
+      triggerReason: "freshness_sensitive_request",
+      checkedAt: new Date("2026-07-09T10:00:00.000Z"),
+    });
+
+    await expect(captureWebSearchResults({ db: testDb, userId: "web-user", conversationId, userMessageId: assistantMessage.id, results })).rejects.toThrow("user message");
+  });
+});
