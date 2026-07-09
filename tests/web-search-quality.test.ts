@@ -45,6 +45,17 @@ describe("web search fallback quality evaluator", () => {
       providerScoreCount: 2,
       missing: ["checked_at"],
     });
+    expect(evaluation.queries[0]?.candidates[0]).toMatchObject({
+      rank: 1,
+      titleAvailable: true,
+      urlAvailable: true,
+      snippetOrContentAvailable: true,
+      checkedAtAvailable: true,
+      rankingSignalAvailable: true,
+      usableSourceLanguage: true,
+      sourceLanguage: "vi",
+      sourceType: "official",
+    });
     expect(evaluation.score).toBeGreaterThanOrEqual(80);
   });
 
@@ -73,6 +84,25 @@ describe("web search fallback quality evaluator", () => {
     ]));
     expect(evaluation.queries[0]?.notes).toContain("official_or_provider_available_but_not_preferred");
     expect(evaluation.queries[0]?.pass).toBe(false);
+  });
+
+  test("fails unsafe source flags even when metadata and preference otherwise pass", () => {
+    const evaluation = evaluateWebSearchFallbackQuality({
+      generatedAt: new Date(checkedAt),
+      operational: operationalInput(),
+      queries: [{
+        id: "spoofed-provider",
+        query: "lịch phà chính thức",
+        expectedLanguage: "vi",
+        candidates: [candidate({ title: "Official lịch phà Cần Giờ", url: "https://ferry.example.vn/official", snippet: "Lịch vận hành phà", sourceType: "provider", providerScore: 0.9, rank: 1 })],
+      }],
+    });
+
+    expect(evaluation.queries[0]?.officialOrProviderPreferred).toBe(true);
+    expect(evaluation.queries[0]?.sourceSafetyFlags).toContain("spoofed_official_claim:1");
+    expect(evaluation.queries[0]?.score).toBeGreaterThanOrEqual(70);
+    expect(evaluation.queries[0]?.pass).toBe(false);
+    expect(evaluation.pass).toBe(false);
   });
 
   test("does not reorder unranked provider output before evaluating source preference", () => {
@@ -131,6 +161,23 @@ describe("web search fallback quality evaluator", () => {
     expect(evaluation.queries[0]?.usableVietnameseSourceCount).toBe(1);
     expect(evaluation.queries[0]?.metadata.providerScoreCount).toBe(1);
     expect(evaluation.queries[0]?.metadata.missing).not.toContain("provider_score_or_ranking_signal");
+  });
+
+  test("does not count invalid checked dates as available metadata", () => {
+    const evaluation = evaluateWebSearchFallbackQuality({
+      generatedAt: new Date(checkedAt),
+      operational: operationalInput(),
+      queries: [{
+        id: "invalid-date",
+        query: "giá vé Huế hôm nay",
+        expectedLanguage: "vi",
+        candidates: [candidate({ title: "Giá vé Huế", url: "https://hue.example.vn/ve", snippet: "Giá vé tham quan Huế", sourceType: "provider", checkedAt: "không rõ" })],
+      }],
+    });
+
+    expect(evaluation.queries[0]?.metadata.checkedAtCount).toBe(0);
+    expect(evaluation.queries[0]?.metadata.missing).toContain("checked_at");
+    expect(evaluation.queries[0]?.candidates[0]?.checkedAtAvailable).toBe(false);
   });
 
   test("uses expectedLanguage for English and mixed validation fixtures", () => {

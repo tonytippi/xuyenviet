@@ -68,6 +68,19 @@ final_revision: 'c14374b'
 
 ## Review Triage Log
 
+### Review Findings
+
+- [x] [Review][Patch] Unsafe community/spoofed source flags can still pass validation [src/features/retrieval/web-search-quality.ts:117]
+- [x] [Review][Patch] Evaluation output does not expose per-candidate metadata needed to audit source language and metadata availability [src/features/retrieval/web-search-quality.ts:47]
+- [x] [Review][Patch] Invalid checked-at values count as available freshness metadata [src/features/retrieval/web-search-quality.ts:100]
+
+### 2026-07-09 — Follow-up review patch
+- patch: 3 fixed (medium 3)
+- addressed_findings:
+  - `[medium]` `[patch]` Unsafe community-promoted or spoofed-official source flags now block query pass status instead of only lowering the score.
+  - `[medium]` `[patch]` Query evaluations now include per-candidate metadata availability and detected source-language audit fields.
+  - `[medium]` `[patch]` `checkedAt` metadata now counts only valid `Date` or parseable date-string values.
+
 ### 2026-07-09 — Review pass
 - intent_gap: 0
 - bad_spec: 0
@@ -117,11 +130,16 @@ Story 5.8 is a validation story, not a runtime provider migration. The smallest 
 - `pnpm lint` -- passed after final review patch.
 - `pnpm typecheck` -- passed after final review patch.
 - `pnpm build` -- passed after final review patch.
+- `pnpm test:run tests/web-search-quality.test.ts tests/web-search-adapter.test.ts` -- passed, 18 tests after follow-up review patch.
+- `pnpm lint` -- passed after follow-up review patch.
+- `pnpm typecheck` -- initially failed when run concurrently with `pnpm build` because `.next/types` files were regenerated during TypeScript program loading; rerun standalone passed.
+- `pnpm build` -- passed after follow-up review patch.
 
 ### Change Log
 
 - 2026-07-09: Implemented deterministic web-search fallback quality evaluator, fixture tests, validation report, and sprint-status review update.
 - 2026-07-09: Applied review patches for empty-run pass behavior, provider-order preservation, ranking-signal handling, language scoring, spoof/failure handling, source-type counts, and full verification.
+- 2026-07-09: Applied follow-up review patches for unsafe source pass blocking, per-candidate metadata audit output, and checked-date validation.
 
 ### File List
 
@@ -142,7 +160,7 @@ Files changed:
 - `_bmad-output/implementation-artifacts/sprint-status.yaml` -- marked Story 5.8 done.
 - `_bmad-output/implementation-artifacts/web-search-fallback-quality-report.md` -- documented validation scope, fixture findings, source preference, operational risks, MVP recommendation, and verification command.
 - `src/features/retrieval/web-search-quality.ts` -- added deterministic quality evaluator with provider-order preservation, language-aware usability scoring, ranking-signal metadata, source-type counts, safe-failure handling, and operational recommendation output.
-- `tests/web-search-quality.test.ts` -- added fixture regressions for metadata scoring, source preference/safety, failures, provider independence, empty runs, rank-only metadata, unaccented place names, unranked order, and expected-language behavior.
+- `tests/web-search-quality.test.ts` -- added fixture regressions for metadata scoring, source preference/safety, failures, provider independence, empty runs, rank-only metadata, unaccented place names, unranked order, expected-language behavior, per-candidate audit output, unsafe source pass blocking, and invalid checked dates.
 
 Review findings breakdown: 9 patch findings fixed (0 high, 7 medium, 2 low), 0 deferred, 10 rejected.
 

@@ -54,6 +54,7 @@ export type WebSearchQualityQueryEvaluation = {
   officialOrProviderPreferred: boolean;
   topSourceType?: WebSearchResultSourceType;
   sourceTypeCounts: Record<WebSearchResultSourceType, number>;
+  candidates: WebSearchQualityCandidateEvaluation[];
   metadata: {
     titleCount: number;
     urlCount: number;
@@ -64,6 +65,18 @@ export type WebSearchQualityQueryEvaluation = {
   };
   sourceSafetyFlags: string[];
   notes: string[];
+};
+
+export type WebSearchQualityCandidateEvaluation = {
+  rank: number;
+  titleAvailable: boolean;
+  urlAvailable: boolean;
+  snippetOrContentAvailable: boolean;
+  checkedAtAvailable: boolean;
+  rankingSignalAvailable: boolean;
+  usableSourceLanguage: boolean;
+  sourceLanguage: "vi" | "en" | "mixed" | "unknown";
+  sourceType: WebSearchResultSourceType;
 };
 
 export function evaluateWebSearchFallbackQuality({
@@ -97,13 +110,15 @@ function evaluateQueryQuality(query: WebSearchQualityQuery): WebSearchQualityQue
   const titleCount = candidates.filter((candidate) => hasText(candidate.title)).length;
   const urlCount = candidates.filter((candidate) => hasSafeUrl(candidate.url)).length;
   const snippetOrContentCount = candidates.filter((candidate) => hasText(candidate.snippet) || hasText(candidate.content)).length;
-  const checkedAtCount = candidates.filter((candidate) => Boolean(candidate.checkedAt)).length;
+  const checkedAtCount = candidates.filter((candidate) => hasValidCheckedAt(candidate.checkedAt)).length;
   const providerScoreCount = candidates.filter(hasRankingSignal).length;
   const usableVietnameseSourceCount = candidates.filter((candidate) => isUsableLanguageCandidate(candidate, query.expectedLanguage ?? "vi")).length;
+  const candidateEvaluations = candidates.map((candidate, index) => evaluateCandidateMetadata(candidate, index + 1, query.expectedLanguage ?? "vi"));
   const topSourceType = candidates[0]?.sourceType;
   const sourceTypeCounts = countSourceTypes(candidates);
   const officialOrProviderPreferred = topSourceType === "official" || topSourceType === "provider" || !candidates.some((candidate) => candidate.sourceType === "official" || candidate.sourceType === "provider");
   const sourceSafetyFlags = buildSourceSafetyFlags(candidates);
+  const hasBlockingSafetyFlag = sourceSafetyFlags.some(isBlockingSafetyFlag);
   const missing = buildMissingMetadata({ resultCount, titleCount, urlCount, snippetOrContentCount, checkedAtCount, providerScoreCount });
   const metadataScore = resultCount === 0 ? 0 : average([
     titleCount / resultCount,
@@ -114,7 +129,7 @@ function evaluateQueryQuality(query: WebSearchQualityQuery): WebSearchQualityQue
   ]);
   const preferenceScore = officialOrProviderPreferred ? 1 : 0;
   const languageScore = resultCount === 0 ? 0 : usableVietnameseSourceCount / resultCount;
-  const safetyScore = sourceSafetyFlags.some((flag) => flag.includes("community_promoted") || flag.includes("spoofed_official_claim")) ? 0.65 : 1;
+  const safetyScore = hasBlockingSafetyFlag ? 0.65 : 1;
   const score = round(100 * average([metadataScore, preferenceScore, languageScore, safetyScore]));
   const notes = buildQueryNotes({ query, officialOrProviderPreferred, missing, sourceSafetyFlags });
 
@@ -122,16 +137,35 @@ function evaluateQueryQuality(query: WebSearchQualityQuery): WebSearchQualityQue
     id: query.id,
     query: query.query,
     score,
-    pass: !query.failureCode && score >= 70 && officialOrProviderPreferred,
+    pass: !query.failureCode && score >= 70 && officialOrProviderPreferred && !hasBlockingSafetyFlag,
     resultCount,
     usableVietnameseSourceCount,
     officialOrProviderPreferred,
     topSourceType,
     sourceTypeCounts,
+    candidates: candidateEvaluations,
     metadata: { titleCount, urlCount, snippetOrContentCount, checkedAtCount, providerScoreCount, missing },
     sourceSafetyFlags,
     notes,
   };
+}
+
+function evaluateCandidateMetadata(candidate: WebSearchQualityCandidate, rank: number, expectedLanguage: "vi" | "en" | "mixed"): WebSearchQualityCandidateEvaluation {
+  return {
+    rank,
+    titleAvailable: hasText(candidate.title),
+    urlAvailable: hasSafeUrl(candidate.url),
+    snippetOrContentAvailable: hasText(candidate.snippet) || hasText(candidate.content),
+    checkedAtAvailable: hasValidCheckedAt(candidate.checkedAt),
+    rankingSignalAvailable: hasRankingSignal(candidate),
+    usableSourceLanguage: isUsableLanguageCandidate(candidate, expectedLanguage),
+    sourceLanguage: detectSourceLanguage(candidate),
+    sourceType: candidate.sourceType,
+  };
+}
+
+function isBlockingSafetyFlag(flag: string) {
+  return flag.includes("community_promoted") || flag.includes("spoofed_official_claim");
 }
 
 function orderCandidates(candidates: WebSearchQualityCandidate[]) {
@@ -301,6 +335,16 @@ function containsAsciiTravelSignal(candidate: WebSearchQualityCandidate) {
   return /\b(vietnam|route|ticket|hotel|ferry|schedule|weather|road|condition|availability)\b/.test(normalizeForMatch(`${candidate.title ?? ""} ${candidate.snippet ?? ""} ${candidate.content ?? ""} ${candidate.url ?? ""}`));
 }
 
+function detectSourceLanguage(candidate: WebSearchQualityCandidate): "vi" | "en" | "mixed" | "unknown" {
+  const hasVietnamese = containsVietnameseSignal(candidate);
+  const hasEnglish = containsAsciiTravelSignal(candidate);
+
+  if (hasVietnamese && hasEnglish) return "mixed";
+  if (hasVietnamese) return "vi";
+  if (hasEnglish) return "en";
+  return "unknown";
+}
+
 function hasText(value: string | undefined) {
   return typeof value === "string" && value.trim().length > 0;
 }
@@ -314,6 +358,13 @@ function hasSafeUrl(value: string | undefined) {
   } catch {
     return false;
   }
+}
+
+function hasValidCheckedAt(value: Date | string | undefined) {
+  if (!value) return false;
+
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isFinite(date.getTime());
 }
 
 function hasRankingSignal(candidate: WebSearchQualityCandidate) {
