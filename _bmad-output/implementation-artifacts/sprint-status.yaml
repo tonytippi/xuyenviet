@@ -88,7 +88,7 @@ development_status:
   4-8-make-approved-knowledge-searchable-by-ai: done
   4-9-track-100-approved-corridor-items: done
   epic-4-retrospective: done
-  epic-5: in-progress
+  epic-5: done
   5-0-manage-ai-gateway-models-and-pricing: done
   5-1-retrieve-approved-knowledge-for-ai-ask: done
   5-2-assemble-context-priority-source-bundle: done
@@ -99,7 +99,7 @@ development_status:
   5-7-uncertainty-and-freshness-warnings: done
   5-8-validate-web-search-fallback-quality: done
   5-9-record-ai-usage-events: done
-  epic-5-retrospective: optional
+  epic-5-retrospective: done
   epic-6: backlog
   6-1-detect-children-and-family-travel-needs: backlog
   6-2-family-aware-driving-and-stop-recommendations: backlog
@@ -113,15 +113,15 @@ action_items:
   - epic: 3
     action: Create a context digest policy before retrieval/provenance work.
     owner: Winston and Amelia
-    status: open
+    status: done
   - epic: 3
     action: Keep server-controlled retrieval as the MVP default and defer model tool-calling to a future brainstorm unless explicitly approved.
     owner: Winston and Amelia
-    status: open
+    status: done
   - epic: 3
     action: Define raw-source privacy boundaries in Story 4.1 so raw operator-only material cannot leak into traveler AI Ask prompts.
     owner: Amelia and Tony
-    status: open
+    status: done
   - epic: 3
     action: Resolve or explicitly defer same-conversation concurrency hardening before deeper retrieval/context orchestration.
     owner: Winston and Amelia
@@ -133,29 +133,53 @@ action_items:
   - epic: 4
     action: Document Epic 5 context/source-bundle policy before Story 5.1/5.2 implementation.
     owner: Winston and Amelia, with Tony review
-    status: open
+    status: done
   - epic: 4
     action: Decide Epic 5 retrieval path, PostgreSQL search first or pgvector embeddings now.
     owner: Winston
-    status: open
+    status: done
   - epic: 4
     action: Add indexing/backfill orchestration plan for approved knowledge.
     owner: Amelia
-    status: open
+    status: done
   - epic: 4
     action: Keep retrieval eligibility fail-closed in Epic 5 tests.
     owner: Dana and Amelia
-    status: open
+    status: done
   - epic: 4
     action: Resolve source label/publisher safety before traveler-facing source rendering.
     owner: Amelia and Tony
-    status: open
+    status: done
   - epic: 4
     action: Plan web search provider validation before dependency hardens.
     owner: Winston and Tony
-    status: open
+    status: done
   - epic: 4
     action: Standardize AI usage event semantics across extraction, suggestion, chat, retrieval, embeddings, evaluation, and web/search providers.
+    owner: Amelia
+    status: done
+  - epic: 5
+    action: Replace zero placeholder AI Gateway pricing with verified provider pricing before cost reporting is trusted.
+    owner: Tony and Winston
+    status: open
+  - epic: 5
+    action: Add live Tavily quality, cost, rate-limit, and failure monitoring before relying on web fallback for public scale.
+    owner: Winston and Tony
+    status: open
+  - epic: 5
+    action: Decide whether AI Ask assistant/provenance persistence should remain coupled to usage insert success.
+    owner: Winston and Amelia
+    status: open
+  - epic: 5
+    action: Add assistant-turn idempotency if duplicate assistant answers on ambiguous commit failures become unacceptable.
+    owner: Amelia
+    status: open
+  - epic: 5
+    action: Keep Epic 6 family context limited to travel-relevant child and family details, excluding sensitive child data.
+    owner: Amelia and Tony
+    status: open
+  - epic: 5
+    action: Reuse stored retrieval decisions and provenance as the source of truth for Epic 6 feedback, evaluation, and dashboard work.
     owner: Amelia
     status: open
   - epic: 4
