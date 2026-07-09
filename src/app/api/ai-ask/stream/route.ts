@@ -6,16 +6,14 @@ import { conversations, messageImageAttachments, messages, tripProjects } from "
 import { streamInitialAiAskAnswer } from "@/features/ai/gateway";
 import { getAiGatewayPricingSnapshot, selectActiveAiGatewayModel } from "@/features/ai/models";
 import { aiAskInitialAnswerPromptVersion, aiAskInitialAnswerPurpose, buildAiAskMessages } from "@/features/ai/prompts";
-import { buildAnswerContextPromptSection, loadAnswerContext } from "@/features/chat-trips/answer-context";
 import { extractChatTripContext } from "@/features/chat-trips/context-extraction";
-import { buildApprovedKnowledgePromptSection, loadApprovedKnowledgeForAiAsk } from "@/features/retrieval/approved-knowledge";
+import { assembleContextPrioritySourceBundle, buildSourceBundlePromptSection } from "@/features/retrieval/source-bundle";
 import { writeAiUsageEvent } from "@/features/usage/events";
 import { getAuthenticatedSession, type AuthenticatedSession } from "@/server/auth";
 
 const maxQuestionLength = 2_000;
 const maxImageByteSize = 5 * 1024 * 1024;
 const maxMultipartBodySize = 6 * 1024 * 1024;
-const approvedKnowledgeRetrievalTimeoutMs = 1_500;
 const acceptedImageTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 type StreamEvent =
@@ -188,38 +186,15 @@ async function streamAnswer({
     });
 
     const pricingSnapshot = getAiGatewayPricingSnapshot(selectedModel);
-    let contextSection = "";
-
-    try {
-      const answerContext = await loadAnswerContext({
-        userId: session.userId,
-        conversationId: saved.conversationId,
-        tripProjectId,
-      });
-      contextSection = buildAnswerContextPromptSection(answerContext);
-    } catch (error) {
-      console.warn("Answer context load skipped after failure", {
-        conversationId: saved.conversationId,
-        userMessageId: saved.userMessage.id,
-        error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
-      });
-    }
-
-    let approvedKnowledgeSection = "";
-
-    try {
-      const approvedKnowledge = await withTimeout(loadApprovedKnowledgeForAiAsk(question), approvedKnowledgeRetrievalTimeoutMs);
-      approvedKnowledgeSection = buildApprovedKnowledgePromptSection(approvedKnowledge);
-    } catch (error) {
-      console.warn("Approved knowledge retrieval skipped after failure", {
-        conversationId: saved.conversationId,
-        userMessageId: saved.userMessage.id,
-        error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
-      });
-    }
-
-    const combinedContextSection = [contextSection, approvedKnowledgeSection].filter(Boolean).join("\n\n");
-    const gatewayMessages = buildAiAskMessages({ question, history: saved.history, contextSection: combinedContextSection });
+    const sourceBundle = await assembleContextPrioritySourceBundle({
+      userId: session.userId,
+      conversationId: saved.conversationId,
+      tripProjectId,
+      question,
+      userMessageId: saved.userMessage.id,
+    });
+    const contextSection = buildSourceBundlePromptSection(sourceBundle);
+    const gatewayMessages = buildAiAskMessages({ question, history: saved.history, contextSection });
     const finalGatewayMessages = imageDataUrl ? attachImageToFinalUserMessage(gatewayMessages, imageDataUrl) : gatewayMessages;
     const extractionInput = saved;
     after(() => extractChatTripContext({
@@ -467,21 +442,4 @@ function sendEvent(controller: ReadableStreamDefaultController<Uint8Array>, enco
   } catch {
     // The client may have already closed the stream.
   }
-}
-
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number) {
-  return new Promise<T>((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error("Approved knowledge retrieval timed out.")), timeoutMs);
-
-    promise.then(
-      (value) => {
-        clearTimeout(timeout);
-        resolve(value);
-      },
-      (error: unknown) => {
-        clearTimeout(timeout);
-        reject(error);
-      },
-    );
-  });
 }
