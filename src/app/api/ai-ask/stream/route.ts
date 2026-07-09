@@ -7,7 +7,7 @@ import { streamInitialAiAskAnswer } from "@/features/ai/gateway";
 import { getAiGatewayPricingSnapshot, selectActiveAiGatewayModel } from "@/features/ai/models";
 import { aiAskInitialAnswerPromptVersion, aiAskInitialAnswerPurpose, buildAiAskMessages } from "@/features/ai/prompts";
 import { extractChatTripContext } from "@/features/chat-trips/context-extraction";
-import { persistAssistantAnswerProvenance } from "@/features/retrieval/provenance";
+import { persistAssistantAnswerProvenance, type AssistantMessageProvenanceItem } from "@/features/retrieval/provenance";
 import { assembleContextPrioritySourceBundle, buildSourceBundlePromptSection } from "@/features/retrieval/source-bundle";
 import { writeAiUsageEvent } from "@/features/usage/events";
 import { getAuthenticatedSession, type AuthenticatedSession } from "@/server/auth";
@@ -19,7 +19,7 @@ const acceptedImageTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 type StreamEvent =
   | { type: "delta"; content: string }
-  | { type: "done"; conversationId: string; userMessage: { id: string; content: string }; assistantMessage: { id: string; content: string } }
+  | { type: "done"; conversationId: string; userMessage: { id: string; content: string }; assistantMessage: { id: string; content: string; provenance?: AssistantMessageProvenanceItem[] } }
   | { type: "error"; conversationId?: string; userMessage?: { id: string; content: string }; errorMessage: string };
 
 export async function POST(request: Request) {
@@ -274,7 +274,7 @@ async function streamAnswer({
     }
 
     const savedTurn = saved;
-    let completed: { id: string; content: string } | null = null;
+    let completed: { id: string; content: string; provenance: AssistantMessageProvenanceItem[] } | null = null;
 
     try {
       completed = await db.transaction(async (transaction) => {
@@ -285,7 +285,7 @@ async function streamAnswer({
 
         await transaction.update(conversations).set({ updatedAt: new Date() }).where(eq(conversations.id, savedTurn.conversationId));
 
-        await persistAssistantAnswerProvenance(transaction, {
+        const provenance = await persistAssistantAnswerProvenance(transaction, {
           userId: session.userId,
           conversationId: savedTurn.conversationId,
           userMessageId: savedTurn.userMessage.id,
@@ -314,7 +314,7 @@ async function streamAnswer({
           pricingSnapshot,
         });
 
-        return { id: assistantMessage.id, content: gatewayResult.content };
+        return { id: assistantMessage.id, content: gatewayResult.content, provenance };
       });
     } catch {
       // Retry atomic assistant/provenance/usage persistence so the streamed answer is not lost to a transient failure.
@@ -327,7 +327,7 @@ async function streamAnswer({
 
           await transaction.update(conversations).set({ updatedAt: new Date() }).where(eq(conversations.id, savedTurn.conversationId));
 
-          await persistAssistantAnswerProvenance(transaction, {
+          const provenance = await persistAssistantAnswerProvenance(transaction, {
             userId: session.userId,
             conversationId: savedTurn.conversationId,
             userMessageId: savedTurn.userMessage.id,
@@ -356,7 +356,7 @@ async function streamAnswer({
             pricingSnapshot,
           });
 
-          return { id: assistantMessage.id, content: gatewayResult.content };
+          return { id: assistantMessage.id, content: gatewayResult.content, provenance };
         });
       } catch {
         completed = null;

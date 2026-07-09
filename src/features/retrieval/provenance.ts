@@ -10,7 +10,27 @@ const maxSnapshotDepth = 4;
 
 type ProvenanceDb = {
   insert(table: typeof assistantRetrievalDecisions): { values(value: typeof assistantRetrievalDecisions.$inferInsert): Promise<unknown> };
-  insert(table: typeof assistantResponseProvenance): { values(value: Array<typeof assistantResponseProvenance.$inferInsert>): Promise<unknown> };
+  insert(table: typeof assistantResponseProvenance): { values(value: Array<typeof assistantResponseProvenance.$inferInsert>): { returning(): Promise<Array<typeof assistantResponseProvenance.$inferSelect>> } };
+};
+
+type AssistantProvenanceRow = Pick<typeof assistantResponseProvenance.$inferSelect,
+  "id" | "sourceCategory" | "rank" | "retrievalScore" | "sourceType" | "verificationStatus" | "usedInPrompt" | "citedInAnswer" | "sourceSnapshot"
+>;
+
+export type AssistantMessageProvenanceItem = {
+  id: string;
+  rank: number;
+  sourceCategory: AssistantProvenanceSourceCategory;
+  title: string;
+  sourceType: string | null;
+  url: string | null;
+  checkedAt: string | null;
+  confidenceLabel: string;
+  verificationStatus: "verified" | "unverified";
+  usedInPrompt: boolean;
+  citedInAnswer: boolean;
+  retrievalScore: number | null;
+  freshnessSensitive: boolean;
 };
 
 export async function persistAssistantAnswerProvenance(db: ProvenanceDb, input: {
@@ -44,8 +64,35 @@ export async function persistAssistantAnswerProvenance(db: ProvenanceDb, input: 
   const rows = buildProvenanceRows({ userId, conversationId, userMessageId, assistantMessageId, sourceBundle, promptSection });
 
   if (rows.length > 0) {
-    await db.insert(assistantResponseProvenance).values(rows);
+    const insertedRows = await db.insert(assistantResponseProvenance).values(rows).returning();
+    return formatAssistantMessageProvenance(insertedRows);
   }
+
+  return [];
+}
+
+export function formatAssistantMessageProvenance(rows: AssistantProvenanceRow[]): AssistantMessageProvenanceItem[] {
+  return rows
+    .slice()
+    .sort((left, right) => left.rank - right.rank)
+    .map((row) => {
+      const snapshot = isRecord(row.sourceSnapshot) ? row.sourceSnapshot : {};
+      return {
+        id: row.id,
+        rank: row.rank,
+        sourceCategory: row.sourceCategory,
+        title: getSourceTitle(row.sourceCategory, snapshot),
+        sourceType: getOptionalString(snapshot.sourceType) ?? row.sourceType,
+        url: getSafeHttpUrl(getOptionalString(snapshot.url) ?? getKnowledgeSourceString(snapshot, "canonicalUrl") ?? getKnowledgeSourceString(snapshot, "url")),
+        checkedAt: getOptionalString(snapshot.checkedAt) ?? getKnowledgeSourceString(snapshot, "collectedDate"),
+        confidenceLabel: getConfidenceLabel(row.sourceCategory, row.verificationStatus, snapshot),
+        verificationStatus: row.verificationStatus,
+        usedInPrompt: row.usedInPrompt,
+        citedInAnswer: row.citedInAnswer,
+        retrievalScore: row.retrievalScore,
+        freshnessSensitive: snapshot.freshnessSensitive === true,
+      };
+    });
 }
 
 function buildProvenanceRows({
@@ -96,7 +143,7 @@ function buildProvenanceRows({
         routeSegment: result.routeSegment,
         confidence: result.confidence,
         freshnessSensitive: result.freshnessSensitive,
-        sources: result.sources.map((source) => ({ id: source.id, label: source.label, publisher: source.publisher, sourceType: source.sourceType, verificationStatus: source.verificationStatus, supportLevel: source.supportLevel })),
+        sources: result.sources.map((source) => ({ id: source.id, label: source.label, publisher: source.publisher, url: source.url, canonicalUrl: source.canonicalUrl, collectedDate: source.collectedDate, sourceType: source.sourceType, verificationStatus: source.verificationStatus, supportLevel: source.supportLevel })),
       },
     }));
   }
@@ -203,6 +250,83 @@ function formatDateSnapshot(value: Date) {
 
 function normalizeScore(value: number | null | undefined) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function getSourceTitle(sourceCategory: AssistantProvenanceSourceCategory, snapshot: Record<string, unknown>) {
+  if (sourceCategory === "general") {
+    return "Suy luận tổng quát của AI";
+  }
+
+  const directTitle = getOptionalString(snapshot.title) ?? getOptionalString(snapshot.label);
+
+  if (directTitle) {
+    return directTitle;
+  }
+
+  if (sourceCategory === "trip_context") {
+    return `Ngữ cảnh dự án: ${getOptionalString(snapshot.field) ?? "thông tin chuyến đi"}`;
+  }
+
+  if (sourceCategory === "chat_context") {
+    return `Ngữ cảnh hội thoại: ${getOptionalString(snapshot.field) ?? "thông tin đã trao đổi"}`;
+  }
+
+  return sourceCategory === "web" ? "Nguồn web chưa xác minh" : "Nguồn XuyenViet";
+}
+
+function getConfidenceLabel(sourceCategory: AssistantProvenanceSourceCategory, verificationStatus: "verified" | "unverified", snapshot: Record<string, unknown>) {
+  const confidence = getOptionalString(snapshot.confidence);
+
+  if (confidence) {
+    return confidence;
+  }
+
+  if (sourceCategory === "general") {
+    return "suy luận chưa xác minh";
+  }
+
+  return verificationStatus === "verified" ? "đã xác minh" : "chưa xác minh";
+}
+
+function getOptionalString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function getSafeHttpUrl(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
+function getKnowledgeSourceString(snapshot: Record<string, unknown>, key: "canonicalUrl" | "url" | "collectedDate") {
+  if (!Array.isArray(snapshot.sources)) {
+    return null;
+  }
+
+  for (const source of snapshot.sources) {
+    if (!isRecord(source)) {
+      continue;
+    }
+
+    const value = getOptionalString(source[key]);
+
+    if (value) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function boundSnapshot(snapshot: Record<string, unknown>): Record<string, unknown> {

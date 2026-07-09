@@ -126,6 +126,60 @@ describe("AI Ask authenticated shell", () => {
     expect(thirdIndex).toBeGreaterThan(secondIndex);
   });
 
+  test("renders source and confidence section from stored provenance, not answer text", async () => {
+    await createTestUser("user-1");
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
+    const [userMessage] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "user", content: "Bãi đỗ ở Huế?" }).returning({ id: messages.id });
+    const [assistantMessage] = await testDb.insert(messages).values({
+      conversationId: conversation.id,
+      userId: "user-1",
+      role: "assistant",
+      content: "Kế hoạch gợi ý:\nNên dừng sớm. Nguồn giả trong chữ: Fake Parking Blog.",
+    }).returning({ id: messages.id });
+    await testDb.insert(assistantResponseProvenance).values([
+      {
+        userId: "user-1",
+        conversationId: conversation.id,
+        userMessageId: userMessage.id,
+        assistantMessageId: assistantMessage.id,
+        sourceCategory: "knowledge",
+        rank: 1,
+        sourceType: "parking",
+        verificationStatus: "verified",
+        usedInPrompt: true,
+        citedInAnswer: false,
+        sourceSnapshot: { title: "Bãi đỗ chính thức Huế", confidence: "official", freshnessSensitive: true, sources: [{ canonicalUrl: "https://xuyenviet.example/hue-parking", collectedDate: "2026-07-08" }] },
+      },
+      {
+        userId: "user-1",
+        conversationId: conversation.id,
+        userMessageId: userMessage.id,
+        assistantMessageId: assistantMessage.id,
+        sourceCategory: "web",
+        rank: 2,
+        sourceType: "official",
+        verificationStatus: "unverified",
+        usedInPrompt: true,
+        citedInAnswer: false,
+        sourceSnapshot: { title: "Nguồn không an toàn", url: "javascript:alert(1)", checkedAt: "2026-07-09T10:00:00.000Z", confidence: "unverified" },
+      },
+    ]);
+
+    const html = await renderAuthenticatedAiAskShell({ conversationId: conversation.id });
+
+    expect(html).toContain("Nguồn và độ tin cậy");
+    expect(html).toContain("Bãi đỗ chính thức Huế");
+    expect(html).toContain("Nguồn không an toàn");
+    expect(html).toContain("https://xuyenviet.example/hue-parking");
+    expect(html).toContain("8/7/2026");
+    expect(html).toContain("Mở nguồn tham khảo");
+    expect(html).toContain("Thông tin có thể thay đổi");
+    expect(html).toContain("Fake Parking Blog");
+    expect(html).not.toContain("javascript:alert");
+    expect(html).not.toContain("source-chip");
+    expect(html).not.toContain("[1]");
+  });
+
   test("does not expose another user's conversation history on the AI Ask page", async () => {
     await createTestUser("user-1");
     await createTestUser("user-2");
@@ -422,6 +476,33 @@ describe("AI Ask conversation data layer", () => {
         },
       ],
     });
+  });
+
+  test("loads ordered assistant provenance for owned conversation history only", async () => {
+    await createTestUser("user-1");
+    await createTestUser("user-2");
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }),
+    }));
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
+    const [otherConversation] = await testDb.insert(conversations).values({ userId: "user-2" }).returning({ id: conversations.id });
+    const [userMessage] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "user", content: "Huế?" }).returning({ id: messages.id });
+    const [assistantMessage] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "assistant", content: "Nên đi." }).returning({ id: messages.id });
+    const [otherUserMessage] = await testDb.insert(messages).values({ conversationId: otherConversation.id, userId: "user-2", role: "user", content: "Private" }).returning({ id: messages.id });
+    const [otherAssistantMessage] = await testDb.insert(messages).values({ conversationId: otherConversation.id, userId: "user-2", role: "assistant", content: "Private answer" }).returning({ id: messages.id });
+    await testDb.insert(assistantResponseProvenance).values([
+      { userId: "user-1", conversationId: conversation.id, userMessageId: userMessage.id, assistantMessageId: assistantMessage.id, sourceCategory: "web", rank: 2, verificationStatus: "unverified", usedInPrompt: true, citedInAnswer: false, sourceSnapshot: { title: "Web Huế", url: "https://hue.example" } },
+      { userId: "user-1", conversationId: conversation.id, userMessageId: userMessage.id, assistantMessageId: assistantMessage.id, sourceCategory: "knowledge", rank: 1, verificationStatus: "verified", usedInPrompt: true, citedInAnswer: false, sourceSnapshot: { title: "Nguồn duyệt Huế", confidence: "curated" } },
+      { userId: "user-2", conversationId: otherConversation.id, userMessageId: otherUserMessage.id, assistantMessageId: otherAssistantMessage.id, sourceCategory: "knowledge", rank: 1, verificationStatus: "verified", usedInPrompt: true, citedInAnswer: false, sourceSnapshot: { title: "Nguồn riêng user-2" } },
+    ]);
+    const { getOwnedConversation } = await import("@/features/chat-trips/conversations");
+
+    const result = await getOwnedConversation(conversation.id);
+    const assistant = result?.messages.find((message) => message.role === "assistant");
+
+    expect(assistant?.provenance.map((item) => item.title)).toEqual(["Nguồn duyệt Huế", "Web Huế"]);
+    expect(assistant?.provenance.map((item) => item.sourceCategory)).toEqual(["knowledge", "web"]);
+    expect(JSON.stringify(result)).not.toContain("Nguồn riêng user-2");
   });
 
   test("returns null for conversations owned by another user", async () => {

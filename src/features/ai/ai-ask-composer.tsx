@@ -5,6 +5,7 @@ import { useActionState, useEffect, useRef, useState, type ChangeEvent, type For
 
 import { ConversationList, type ChatSessionSummary } from "@/features/chat-trips/conversation-list";
 import { formatTripProjectLabel } from "@/features/chat-trips/labels";
+import type { AssistantMessageProvenanceItem } from "@/features/retrieval/provenance";
 
 const maxQuestionLength = 2_000;
 const maxImageByteSize = 5 * 1024 * 1024;
@@ -21,6 +22,7 @@ type DisplayMessage = {
     mimeType: string;
     byteSize: number;
   }>;
+  provenance?: AssistantMessageProvenanceItem[];
 };
 
 type TripProjectSummary = {
@@ -76,7 +78,6 @@ const assistantSectionHeadings = new Set([
   "Vì sao nên đi như vậy",
   "Lưu ý thực tế",
   "Cảnh báo cần kiểm tra",
-  "Nguồn và độ tin cậy",
   "Bước tiếp theo",
   "Câu hỏi tiếp theo",
 ]);
@@ -133,6 +134,48 @@ export function AssistantMessageContent({ content }: { content: string }) {
         </section>
       ))}
     </div>
+  );
+}
+
+export function AssistantProvenanceBlock({ provenance }: { provenance?: AssistantMessageProvenanceItem[] }) {
+  const visibleItems = provenance?.filter((item) => item.usedInPrompt || item.sourceCategory === "general") ?? [];
+
+  if (visibleItems.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="mt-4 rounded-2xl border border-[#d8c9ad] bg-[#fff8ec] p-4" aria-label="Nguồn và độ tin cậy">
+      <h3 className="text-sm font-bold uppercase tracking-[0.12em] text-[#8c4f13]">Nguồn và độ tin cậy</h3>
+      <ul className="mt-3 space-y-3">
+        {visibleItems.map((item) => (
+          <li className="rounded-xl border border-[#eadfc8] bg-white/80 p-3 text-sm leading-6 text-[#17342c]" key={item.id}>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <p className="font-semibold">{item.title}</p>
+              <span className="w-fit rounded-full border border-[#d8c9ad] bg-[#fffdf8] px-2 py-1 text-xs font-semibold uppercase tracking-[0.08em] text-[#4f625a]">
+                {formatProvenanceCategory(item)}
+              </span>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2 text-xs font-semibold text-[#4f625a]">
+              <span>{item.confidenceLabel}</span>
+              {item.sourceType ? <span>Loại: {item.sourceType}</span> : null}
+              {item.checkedAt ? <span>Kiểm tra: {formatProvenanceDate(item.checkedAt)}</span> : null}
+            </div>
+            {item.url ? (
+              <a className="mt-2 block break-words text-sm font-semibold text-[#1f5f46] underline decoration-[#8fb59f] underline-offset-4 focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45" href={item.url} rel="noreferrer" target="_blank">
+                Mở nguồn tham khảo
+              </a>
+            ) : null}
+            {item.sourceCategory === "general" ? (
+              <p className="mt-2 text-sm leading-6 text-[#6f3f12]">Phần này là suy luận tổng quát của AI, không phải nguồn đã xác minh.</p>
+            ) : null}
+            {item.freshnessSensitive ? (
+              <p className="mt-2 text-sm leading-6 text-[#6f3f12]">Thông tin có thể thay đổi. Kiểm tra lại trước khi đi hoặc đặt dịch vụ.</p>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -382,7 +425,7 @@ export function AiAskComposer({
       setMessages((currentMessages) => [
         ...currentMessages,
         { id: result.userMessage.id, role: "user", content: result.userMessage.content },
-        { id: result.assistantMessage.id, role: "assistant", content: result.assistantMessage.content },
+        { id: result.assistantMessage.id, role: "assistant", content: result.assistantMessage.content, provenance: result.assistantMessage.provenance },
       ]);
       setQuestion("");
       setSelectedImage(null);
@@ -745,7 +788,12 @@ export function AiAskComposer({
                   <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] opacity-75">
                     {message.role === "assistant" ? "Trợ lý XuyenViet" : "Bạn"}
                   </p>
-                  {message.role === "assistant" ? <AssistantMessageContent content={message.content} /> : <p className="whitespace-pre-wrap text-base leading-7">{message.content}</p>}
+                  {message.role === "assistant" ? (
+                    <>
+                      <AssistantMessageContent content={message.content} />
+                      <AssistantProvenanceBlock provenance={message.provenance} />
+                    </>
+                  ) : <p className="whitespace-pre-wrap text-base leading-7">{message.content}</p>}
                   {message.role === "user" && message.imageAttachments && message.imageAttachments.length > 0 ? (
                     <p className="mt-2 rounded-lg bg-white/15 text-xs font-semibold uppercase tracking-[0.12em]">
                       Đã kèm ảnh: {message.imageAttachments.map((attachment) => attachment.originalFileName || "ảnh đính kèm").join(", ")}
@@ -973,6 +1021,36 @@ function validateSelectedImage(image: File | null) {
   }
 
   return null;
+}
+
+function formatProvenanceCategory(item: AssistantMessageProvenanceItem) {
+  if (item.sourceCategory === "knowledge") {
+    return "XuyenViet";
+  }
+
+  if (item.sourceCategory === "web") {
+    return "Web chưa xác minh";
+  }
+
+  if (item.sourceCategory === "trip_context") {
+    return "Dự án";
+  }
+
+  if (item.sourceCategory === "chat_context") {
+    return "Hội thoại";
+  }
+
+  return "Suy luận";
+}
+
+function formatProvenanceDate(value: string) {
+  const date = new Date(value);
+
+  if (!Number.isFinite(date.getTime())) {
+    return value;
+  }
+
+  return date.toLocaleDateString("vi-VN");
 }
 
 function formatImageSize(bytes: number) {

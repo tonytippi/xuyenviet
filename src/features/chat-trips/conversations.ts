@@ -3,8 +3,9 @@ import "server-only";
 import { and, asc, desc, eq, isNull } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { aiUsageEvents, chatContext, conversations, messageImageAttachments, messages } from "@/db/schema";
+import { aiUsageEvents, assistantResponseProvenance, chatContext, conversations, messageImageAttachments, messages } from "@/db/schema";
 import { recordAuditEvent } from "@/features/audit/events";
+import { formatAssistantMessageProvenance } from "@/features/retrieval/provenance";
 import { getAuthenticatedSession } from "@/server/auth";
 
 const newConversationPreview = "Hội thoại mới";
@@ -62,11 +63,36 @@ export async function getOwnedConversation(conversationId: string) {
     attachmentsByMessageId.set(attachment.messageId, [...(attachmentsByMessageId.get(attachment.messageId) ?? []), attachment]);
   }
 
+  const provenanceRows = await getDb()
+    .select({
+      id: assistantResponseProvenance.id,
+      assistantMessageId: assistantResponseProvenance.assistantMessageId,
+      sourceCategory: assistantResponseProvenance.sourceCategory,
+      rank: assistantResponseProvenance.rank,
+      retrievalScore: assistantResponseProvenance.retrievalScore,
+      sourceType: assistantResponseProvenance.sourceType,
+      verificationStatus: assistantResponseProvenance.verificationStatus,
+      usedInPrompt: assistantResponseProvenance.usedInPrompt,
+      citedInAnswer: assistantResponseProvenance.citedInAnswer,
+      sourceSnapshot: assistantResponseProvenance.sourceSnapshot,
+    })
+    .from(assistantResponseProvenance)
+    .where(and(eq(assistantResponseProvenance.conversationId, conversation.id), eq(assistantResponseProvenance.userId, session.userId)))
+    .orderBy(asc(assistantResponseProvenance.assistantMessageId), asc(assistantResponseProvenance.rank));
+
+  const provenanceByMessageId = new Map<string, ReturnType<typeof formatAssistantMessageProvenance>>();
+
+  for (const row of provenanceRows) {
+    const { assistantMessageId, ...provenanceRow } = row;
+    provenanceByMessageId.set(assistantMessageId, [...(provenanceByMessageId.get(assistantMessageId) ?? []), ...formatAssistantMessageProvenance([provenanceRow])]);
+  }
+
   return {
     ...conversation,
     messages: conversationMessages.map((message) => ({
       ...message,
       imageAttachments: attachmentsByMessageId.get(message.id) ?? [],
+      provenance: message.role === "assistant" ? provenanceByMessageId.get(message.id) ?? [] : [],
     })),
   };
 }
