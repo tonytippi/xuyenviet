@@ -158,7 +158,7 @@ export function AssistantProvenanceBlock({ provenance }: { provenance?: Assistan
             </div>
             <div className="mt-2 flex flex-wrap gap-2 text-xs font-semibold text-[#4f625a]">
               <span>{item.confidenceLabel}</span>
-              {item.sourceType ? <span>Loại: {item.sourceType}</span> : null}
+              <span>{formatProvenanceSourceType(item)}</span>
               {item.checkedAt ? <span>Kiểm tra: {formatProvenanceDate(item.checkedAt)}</span> : null}
             </div>
             {item.url ? (
@@ -1041,6 +1041,40 @@ function formatProvenanceCategory(item: AssistantMessageProvenanceItem) {
   }
 
   return "Suy luận";
+}
+
+function formatProvenanceSourceType(item: AssistantMessageProvenanceItem) {
+  const sourceType = item.sourceType?.toLocaleLowerCase("vi-VN") ?? null;
+
+  if (item.sourceCategory === "web") {
+    if (sourceType === "community" || sourceType === "facebook" || sourceType === "cộng đồng") {
+      return "Nguồn cộng đồng bên ngoài, chưa xác minh";
+    }
+
+    if (sourceType === "official" || sourceType === "provider") {
+      return `Nguồn web tự ghi ${sourceType}, vẫn chưa được XuyenViet duyệt`;
+    }
+
+    return "Nguồn web bên ngoài, chưa xác minh";
+  }
+
+  if (item.sourceCategory === "general") {
+    return "Không phải nguồn đã xác minh";
+  }
+
+  if (sourceType === "community" || sourceType === "facebook" || sourceType === "cộng đồng") {
+    return "Nguồn cộng đồng";
+  }
+
+  if (item.sourceCategory === "trip_context") {
+    return "Ngữ cảnh dự án do người dùng cung cấp";
+  }
+
+  if (item.sourceCategory === "chat_context") {
+    return "Ngữ cảnh hội thoại do người dùng cung cấp";
+  }
+
+  return item.sourceType ? `Loại nguồn: ${item.sourceType}` : "Loại nguồn: chưa có nhãn";
 }
 
 function formatProvenanceDate(value: string) {

@@ -190,8 +190,11 @@ describe("AI Ask authenticated shell", () => {
     expect(html).toContain("Mở nguồn tham khảo");
     expect(html).toContain("Thông tin có thể thay đổi");
     expect(html).toContain("chưa xác minh");
+    expect(html).toContain("Nguồn web tự ghi official, vẫn chưa được XuyenViet duyệt");
+    expect(html).toContain("Nguồn cộng đồng bên ngoài, chưa xác minh");
     expect(html).toContain("Fake Parking Blog");
     expect(html).not.toContain("official</span><span>Loại: official");
+    expect(html).not.toContain("Loại: community");
     expect(html).not.toContain("javascript:alert");
     expect(html).not.toContain("source-chip");
     expect(html).not.toContain("[1]");

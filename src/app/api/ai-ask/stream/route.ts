@@ -274,13 +274,14 @@ async function streamAnswer({
     }
 
     const savedTurn = saved;
+    const assistantContent = ensureFreshnessWarning(gatewayResult.content, sourceBundle);
     let completed: { id: string; content: string; provenance: AssistantMessageProvenanceItem[] } | null = null;
 
     try {
       completed = await db.transaction(async (transaction) => {
         const [assistantMessage] = await transaction
           .insert(messages)
-          .values({ conversationId: savedTurn.conversationId, userId: session.userId, role: "assistant", content: gatewayResult.content })
+          .values({ conversationId: savedTurn.conversationId, userId: session.userId, role: "assistant", content: assistantContent })
           .returning({ id: messages.id });
 
         await transaction.update(conversations).set({ updatedAt: new Date() }).where(eq(conversations.id, savedTurn.conversationId));
@@ -314,7 +315,7 @@ async function streamAnswer({
           pricingSnapshot,
         });
 
-        return { id: assistantMessage.id, content: gatewayResult.content, provenance };
+        return { id: assistantMessage.id, content: assistantContent, provenance };
       });
     } catch {
       // Retry atomic assistant/provenance/usage persistence so the streamed answer is not lost to a transient failure.
@@ -322,7 +323,7 @@ async function streamAnswer({
         completed = await db.transaction(async (transaction) => {
           const [assistantMessage] = await transaction
             .insert(messages)
-            .values({ conversationId: savedTurn.conversationId, userId: session.userId, role: "assistant", content: gatewayResult.content })
+            .values({ conversationId: savedTurn.conversationId, userId: session.userId, role: "assistant", content: assistantContent })
             .returning({ id: messages.id });
 
           await transaction.update(conversations).set({ updatedAt: new Date() }).where(eq(conversations.id, savedTurn.conversationId));
@@ -356,7 +357,7 @@ async function streamAnswer({
             pricingSnapshot,
           });
 
-          return { id: assistantMessage.id, content: gatewayResult.content, provenance };
+          return { id: assistantMessage.id, content: assistantContent, provenance };
         });
       } catch {
         completed = null;
@@ -393,6 +394,18 @@ async function streamAnswer({
       // The client may have already closed the stream.
     }
   }
+}
+
+function ensureFreshnessWarning(content: string, sourceBundle: Awaited<ReturnType<typeof assembleContextPrioritySourceBundle>>) {
+  if (!sourceBundle.retrievalDecision.freshnessRequired && sourceBundle.web.length === 0) {
+    return content;
+  }
+
+  if (/cảnh báo cần kiểm tra/i.test(content.normalize("NFC"))) {
+    return content;
+  }
+
+  return `${content.trimEnd()}\n\nCảnh báo cần kiểm tra\nThông tin về giá, lịch, tình trạng còn chỗ, đường sá, giờ mở cửa, thời tiết, dịch vụ hoặc khuyến mãi có thể thay đổi. Hãy kiểm tra lại với nguồn chính thức hoặc nhà cung cấp trước khi đi, hành động hoặc đặt dịch vụ.`;
 }
 
 function validateImageFileMetadata(image: File | null) {

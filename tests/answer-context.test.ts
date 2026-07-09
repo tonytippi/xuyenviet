@@ -466,6 +466,33 @@ describe("answer context assembly", () => {
     expect(answerRequest.messages[0]?.content).toContain('destination: "Huế"');
   });
 
+  test("stream route appends freshness warning when model omits it", async () => {
+    await createTestUser("user-1");
+    await seedAnswerModel();
+    const { conversation } = await createConversationWithUserMessage({ userId: "user-1" });
+
+    mockStreamingGateway(() => undefined);
+    mockRouteAuth();
+    mockWebSearch({ ok: false, code: "low_quality_results" });
+
+    const formData = new FormData();
+    formData.set("question", "Giá vé tham quan ở Huế hiện nay bao nhiêu?");
+    formData.set("conversationId", conversation.id);
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const responseText = await response.text();
+    const doneEvent = responseText
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { type: string; assistantMessage?: { content?: string } })
+      .find((event) => event.type === "done");
+
+    expect(doneEvent?.assistantMessage?.content).toContain("Nên đi 5 ngày.");
+    expect(doneEvent?.assistantMessage?.content).toContain("Cảnh báo cần kiểm tra");
+    expect(doneEvent?.assistantMessage?.content).toContain("kiểm tra lại với nguồn chính thức hoặc nhà cung cấp");
+  });
+
   test("stream route assembles source bundle in priority order in the gateway answer request", async () => {
     await createTestUser("user-1");
     await seedAnswerModel();
@@ -691,6 +718,50 @@ describe("answer context assembly", () => {
     expect(section).toContain("Kích hoạt tìm web: có (no_approved_knowledge, freshness_sensitive_request)");
     expect(section).toContain("Nếu không có dữ liệu web");
     expect(section).toContain("không nói đã tra cứu web");
+    expect(section).toContain("Cảnh báo cần kiểm tra");
+    expect(section).toContain("kiểm tra lại trước khi đi, hành động hoặc đặt dịch vụ");
+  });
+
+  test("source bundle prompt preserves freshness and unverified web instructions when compacted", async () => {
+    const { buildSourceBundlePromptSection } = await import("@/features/retrieval/source-bundle");
+
+    const section = buildSourceBundlePromptSection(createSourceBundle({
+      chatTripContext: {
+        tripProjectFacts: [{ field: "notes", value: "x".repeat(6_000), source: "trip_project" }],
+        chatFacts: [],
+        conflicts: [],
+      },
+      retrievalDecision: {
+        approvedKnowledgeCandidateCount: 0,
+        approvedKnowledgeSelectedCount: 0,
+        approvedKnowledgeTargetCount: 3,
+        approvedKnowledgeRelevanceThreshold: 1,
+        broadPlanningQuestion: false,
+        freshnessRequired: true,
+        conflictDetected: false,
+        webSearchTriggered: true,
+        webSearchTriggerReasons: ["freshness_sensitive_request"],
+        generalReasoningUsed: true,
+      },
+      web: [{
+        query: "Giá vé Huế?",
+        title: "Bảng giá tham khảo",
+        url: "https://hue.gov.vn/ticket",
+        snippet: "Giá có thể thay đổi.",
+        provider: "tavily",
+        providerScore: 0.8,
+        checkedAt: new Date("2026-07-09T10:00:00.000Z"),
+        sourceType: "official",
+        confidence: "unverified",
+        triggerReason: "freshness_sensitive_request",
+        rank: 1,
+      }],
+    }));
+
+    expect(section).toContain("Cảnh báo cần kiểm tra");
+    expect(section).toContain("Nguồn web luôn là nguồn ngoài/chưa xác minh");
+    expect(section).toContain("kể cả khi sourceType ghi official/provider");
+    expect(section).toContain("không trình bày như nguồn chính thức");
   });
 
   test("source bundle prompt tolerates inconsistent retrieval decision objects", async () => {
@@ -912,6 +983,52 @@ describe("answer context assembly", () => {
     expect(provenance.every((row) => row.citedInAnswer === false)).toBe(true);
     expect(provenance.find((row) => row.sourceCategory === "knowledge")).toMatchObject({ sourceReferenceId: "ai-ask-safe-card", sourceReferenceType: "knowledge_card", verificationStatus: "verified" });
     expect(provenance.find((row) => row.sourceCategory === "web")).toMatchObject({ sourceReferenceType: "web_search_result_rank", verificationStatus: "unverified", sourceType: "official" });
+  });
+
+  test("web provenance is freshness-sensitive when retrieval decision requires freshness", async () => {
+    await createTestUser("user-1");
+    const { conversation, message } = await createConversationWithUserMessage({ userId: "user-1" });
+    const [assistantMessage] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "assistant", content: "Cần kiểm tra lại giá." }).returning({ id: messages.id });
+    const { persistAssistantAnswerProvenance } = await import("@/features/retrieval/provenance");
+
+    const inserted = await persistAssistantAnswerProvenance(testDb, {
+      userId: "user-1",
+      conversationId: conversation.id,
+      userMessageId: message.id,
+      assistantMessageId: assistantMessage.id,
+      promptSection: 'url="https://example.com/price"',
+      sourceBundle: createSourceBundle({
+        retrievalDecision: {
+          approvedKnowledgeCandidateCount: 0,
+          approvedKnowledgeSelectedCount: 0,
+          approvedKnowledgeTargetCount: 3,
+          approvedKnowledgeRelevanceThreshold: 1,
+          broadPlanningQuestion: false,
+          freshnessRequired: true,
+          conflictDetected: false,
+          webSearchTriggered: true,
+          webSearchTriggerReasons: ["freshness_sensitive_request"],
+          generalReasoningUsed: true,
+        },
+        web: [{
+          query: "Giá hiện tại?",
+          title: "Bảng giá",
+          url: "https://example.com/price",
+          snippet: "Tham khảo.",
+          provider: "tavily",
+          providerScore: 0.7,
+          checkedAt: new Date("2026-07-09T10:00:00.000Z"),
+          sourceType: "provider",
+          confidence: "unverified",
+          triggerReason: "no_approved_knowledge",
+          rank: 1,
+        }],
+      }),
+    });
+
+    expect(inserted).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sourceCategory: "web", confidenceLabel: "chưa xác minh", verificationStatus: "unverified", freshnessSensitive: true }),
+    ]));
   });
 
   test("source bundle does not call web search or create web rows when fallback is false", async () => {

@@ -173,6 +173,7 @@ function buildProvenanceRows({
         sourceType: result.sourceType,
         confidence: result.confidence,
         triggerReason: result.triggerReason,
+        freshnessSensitive: sourceBundle.retrievalDecision.freshnessRequired || isFreshnessSensitiveWebTrigger(result.triggerReason),
         rank: result.rank,
       },
     }));
