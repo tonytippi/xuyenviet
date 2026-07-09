@@ -64,6 +64,9 @@ warnings: []
 - Given approved knowledge is included, when the prompt section is built, then it contains only safe card/source metadata and no raw source material, operator notes, storage keys, or provider payloads.
 - Given approved knowledge retrieval fails or returns no matches, when AI Ask streams a response, then the traveler still receives the normal streamed answer and no retrieval internals are exposed.
 
+### Review Findings
+- [x] [Review][Patch] Compact first-result fallback can exceed the approved-knowledge prompt budget [src/features/retrieval/approved-knowledge.ts:29]
+
 ## Spec Change Log
 
 - 2026-07-09: Implemented approved-knowledge retrieval seam for AI Ask and moved story to review.
@@ -112,6 +115,7 @@ Story 5.1 intentionally uses the existing PostgreSQL search-document path. Epic 
 - `pnpm lint` -- passed.
 - `pnpm typecheck` -- passed.
 - `pnpm build` -- passed.
+- `pnpm test:run tests/answer-context.test.ts` -- passed after review patch, 19 tests.
 
 ### File List
 

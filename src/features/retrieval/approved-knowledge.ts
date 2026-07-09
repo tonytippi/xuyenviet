@@ -28,7 +28,12 @@ export function buildApprovedKnowledgePromptSection(results: KnowledgeSearchResu
 
     if (candidate.length > maxKnowledgeSectionLength) {
       if (lines.length === 3) {
-        lines.push(...formatCompactKnowledgeResult(index + 1, result));
+        const compactLines = formatCompactKnowledgeResult(index + 1, result);
+        const compactCandidate = [...lines, ...compactLines, "END_APPROVED_KNOWLEDGE_DATA"].join("\n");
+
+        if (compactCandidate.length <= maxKnowledgeSectionLength) {
+          lines.push(...compactLines);
+        }
       }
       break;
     }

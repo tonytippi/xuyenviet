@@ -463,6 +463,30 @@ describe("answer context assembly", () => {
     expect(section).toContain("END_APPROVED_KNOWLEDGE_DATA");
   });
 
+  test("approved knowledge prompt stays bounded when compact fallback receives pathological values", async () => {
+    const { buildApprovedKnowledgePromptSection } = await import("@/features/retrieval/approved-knowledge");
+
+    const section = buildApprovedKnowledgePromptSection([
+      {
+        id: "card-1",
+        type: "warning".repeat(1_200),
+        title: "oversized".repeat(1_200),
+        locationName: null,
+        routeSegment: null,
+        summary: "summary".repeat(1_200),
+        tags: [],
+        confidence: "community".repeat(1_200) as "community",
+        freshnessSensitive: false,
+        updatedAt: new Date("2026-07-09T00:00:00.000Z"),
+        createdAt: new Date("2026-07-09T00:00:00.000Z"),
+        score: 3,
+        sources: [],
+      },
+    ]);
+
+    expect(section).toBe("");
+  });
+
   test("stream route omits approved knowledge section when retrieval has no matches", async () => {
     await createTestUser("user-1");
     await seedAnswerModel();
