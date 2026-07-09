@@ -2,7 +2,7 @@
 title: XuyenViet AI Travel Information MVP Architecture Spine
 status: final
 created: 2026-07-04
-updated: 2026-07-07
+updated: 2026-07-09
 altitude: project MVP
 source_prd: ../../prds/prd-xuyenviet-2026-07-04/prd.md
 ---
@@ -63,7 +63,7 @@ Prevents: provider-hosted vector stores or search tools becoming hidden source-o
 
 Rule: Persist embeddings in pgvector tables linked to first-class product rows; never store retrievable knowledge only inside an external vector store.
 
-Seed: hosted PostgreSQL with pgvector, HNSW index once data size requires it, Postgres full-text search plus vector similarity for hybrid retrieval.
+Seed: hosted PostgreSQL with pgvector available for later hybrid retrieval. Epic 5 starts with deterministic metadata-filtered retrieval over approved knowledge-card records; Postgres full-text search and vector similarity are deferred until metadata eligibility, provenance, and source-bundle contracts are stable.
 
 ### AD-3: Drizzle Owns Schema And Migrations
 
@@ -163,8 +163,8 @@ sequenceDiagram
   User->>Chat: Vietnamese question
   Chat->>Orchestrator: authenticated request
   Orchestrator->>ChatContext: load selected trip + chat context
-  Orchestrator->>Retrieval: approved-card hybrid search
-  Retrieval->>DB: card text + embeddings + filters
+  Orchestrator->>Retrieval: approved-card retrieval
+  Retrieval->>DB: card metadata + reviewed summaries + filters
   alt missing sparse fresh or conflicting
     Orchestrator->>Search: normalized web search
     Search->>DB: persist web result provenance
@@ -273,6 +273,22 @@ Rule: If streaming fails before finalization, the app shows a recoverable failur
 
 Seed latency target: first visible answer within 5 seconds without web search and within 10 seconds with web search. [ASSUMPTION]
 
+### AD-17: Epic 5 Retrieval Starts With Metadata-Filtered Approved Cards
+
+Binds: Story 5.1 retrieval behavior, approved-card eligibility, source-bundle inputs, and later hybrid retrieval upgrades.
+
+Prevents: Story 5.1 depending on full-text ranking, embedding generation, vector indexes, or provider-specific ranking before the product has proven safe retrieval eligibility and auditable provenance.
+
+Rule: The Epic 5 MVP retrieval path uses deterministic PostgreSQL metadata filters over current `knowledge_cards`, linked `sources`, and reviewed card summaries. It does not use Postgres full-text search or pgvector ranking for traveler AI Ask retrieval in Story 5.1.
+
+Rule: Traveler retrieval is fail-closed. A card is retrievable only when the current card status is `approved`, linked source metadata is traveler-safe, the card is not archived/rejected/draft, and all required retrieval metadata is present. Unknown, missing, stale, disabled, or operator-only state excludes the item.
+
+Rule: Retrieval filtering must support at least card type, route segment/location, tags, freshness-sensitive flag, confidence/verification labels, and source type. Simple reviewed-title/summary containment checks may narrow candidates only after metadata eligibility filters; they must not become the primary ranking or recall mechanism.
+
+Rule: Hybrid retrieval is introduced later behind the Retrieval module only after metadata-filtered retrieval, source-bundle snapshots, provenance persistence, and fail-closed tests are stable. Full-text/vector scores may add ranking signals later, but they must not bypass current owner-row eligibility filters.
+
+Rule: Indexing/backfill work for later search or embeddings must define activation, stale/disabled transitions, and rebuild behavior before those rows influence traveler answers.
+
 ## Shared Data Contracts
 
 Core persisted entities:
@@ -320,6 +336,12 @@ Retrieval returns a normalized source bundle:
 - `web`: external results with URL, title, snippet/content, checkedAt, provider score, and `unverified` confidence
 - `general`: explicit marker when model reasoning fills gaps without source grounding
 
+Traveler AI Ask source bundles contain traveler-safe snapshots only. They may include selected trip context, current chat context, approved knowledge-card summaries, linked source metadata, web snippets, and the general-reasoning marker. They must not include `raw_source_material.raw_text`, copied post bodies, image OCR/vision notes, operator-only fields, or admin-only metadata.
+
+Epic 5 Story 5.1 retrieval is metadata-filtered approved-card retrieval. Candidate selection filters current card rows by approved status, traveler-safe source linkage, card type, route/location, tags, freshness-sensitive flag, confidence/verification labels, and source type. Broad semantic ranking, Postgres full-text ranking, and pgvector ranking are later hybrid-search enhancements, not Story 5.1 requirements.
+
+If retrieval eligibility cannot be proven for a candidate, retrieval excludes it and records the exclusion as an implementation-visible reason where practical. Tests for Story 5.1 must prove draft, archived, rejected, stale, disabled, source-missing, and operator-only/raw-source-backed records do not enter traveler source bundles.
+
 Web search triggers when no relevant approved cards are retrieved, fewer than three relevant approved cards are retrieved for a broad planning question, the user asks about freshness-sensitive facts, or retrieved cards conflict.
 
 Every assistant answer stores a `retrieval_decision`: knowledge candidate count, selected knowledge count, relevance threshold, freshness-required flag, conflict-detected flag, web-search-triggered flag, web-search reason, and general-reasoning-used flag. If web results are used because cards conflict or are stale, provenance includes both relevant card IDs and web result IDs.
@@ -352,3 +374,4 @@ Production must have:
 - Public submissions, credit wallets, payment deposits, reward balances, referral reward calculations, ranking multipliers, reward-to-credit conversion, booking transactions, affiliate automation, and partner transaction flows.
 - Mobile app channel.
 - Service decomposition.
+- Postgres full-text ranking and pgvector/hybrid retrieval for AI Ask, until metadata-filtered retrieval and provenance behavior are stable enough to upgrade behind the Retrieval module.
