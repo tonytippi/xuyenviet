@@ -11,7 +11,7 @@ context:
   - '{project-root}/_bmad-output/implementation-artifacts/spec-5-8-validate-web-search-fallback-quality.md'
 warnings: []
 baseline_revision: '543f557'
-final_revision: '543f557'
+final_revision: '5c77aac'
 ---
 
 <intent-contract>
@@ -80,6 +80,12 @@ final_revision: '543f557'
 
 ## Review Triage Log
 
+### Review Findings
+
+- [x] [Review][Patch] Cache pricing remains uncalculated when prompt tokens are missing [src/features/usage/events.ts:58]
+- [x] [Review][Patch] Timeout and caller abort races can misclassify provider timeouts as client aborts [src/features/retrieval/web-search.ts:131]
+- [x] [Review][Patch] Story revision metadata does not point to the implementation commit [_bmad-output/implementation-artifacts/spec-5-9-record-ai-usage-events.md:13]
+
 ### 2026-07-09 — Review pass
 - intent_gap: 0
 - bad_spec: 0
@@ -125,11 +131,17 @@ The existing schema and most AI Gateway paths are already in place. Treat this s
 - `pnpm typecheck` -- passed after review patches.
 - `pnpm lint` -- passed after review patches.
 - `pnpm build` -- passed after review patches.
+- `pnpm test:run tests/ai-usage-events.test.ts tests/ai-ask-shell.test.ts tests/web-search-adapter.test.ts` -- initially failed after follow-up review patch because the new timeout attribution regression referenced an unimported module symbol and left fake timers active; fixed the test.
+- `pnpm test:run tests/ai-usage-events.test.ts tests/ai-ask-shell.test.ts tests/web-search-adapter.test.ts` -- passed after follow-up review patches, 67 tests.
+- `pnpm typecheck` -- initially failed when run concurrently with `pnpm build` because `.next/types` files were regenerated during TypeScript program loading; rerun standalone passed.
+- `pnpm lint` -- passed after follow-up review patches.
+- `pnpm build` -- passed after follow-up review patches.
 
 ### Change Log
 
 - 2026-07-09: Implemented Usage-owned AI usage semantics and safe Tavily web-search usage event recording with focused tests and sprint-status review update.
 - 2026-07-09: Applied review patches for partial cache-token preservation, client-abort web-search telemetry, and unexpected adapter exception safety.
+- 2026-07-09: Applied follow-up review patches for cache-cost calculation when prompt token bounds are missing, timeout/client-abort race attribution, and story revision metadata.
 
 ### File List
 
@@ -138,6 +150,7 @@ The existing schema and most AI Gateway paths are already in place. Treat this s
 - `_bmad-output/implementation-artifacts/deferred-work.md`
 - `src/app/api/ai-ask/stream/route.ts`
 - `src/features/ai/prompts.ts`
+- `src/features/ai/models.ts`
 - `src/features/retrieval/source-bundle.ts`
 - `src/features/retrieval/web-search.ts`
 - `src/features/usage/events.ts`

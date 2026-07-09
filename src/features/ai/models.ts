@@ -156,7 +156,7 @@ function normalizeTokenCount(tokens: number | null | undefined) {
 function normalizeRelatedTokenCount(tokens: number | null | undefined, upperBound: number | null) {
   const normalized = normalizeTokenCount(tokens);
 
-  if (normalized === null || upperBound === null || normalized > upperBound) {
+  if (normalized === null || (upperBound !== null && normalized > upperBound)) {
     return null;
   }
 

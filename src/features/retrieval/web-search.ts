@@ -85,12 +85,20 @@ export async function searchWebForSourceBundle({
   }
 
   const abortController = new AbortController();
-  const timeout = setTimeout(() => abortController.abort(), tavilyTimeoutMs);
-  const abortFromCaller = () => abortController.abort();
+  let abortFailureCode: Extract<WebSearchFailureCode, "client_aborted" | "provider_timeout"> | null = null;
+  const timeout = setTimeout(() => {
+    abortFailureCode ??= "provider_timeout";
+    abortController.abort();
+  }, tavilyTimeoutMs);
+  const abortFromCaller = () => {
+    abortFailureCode ??= "client_aborted";
+    abortController.abort();
+  };
   abortSignal?.addEventListener("abort", abortFromCaller, { once: true });
 
   try {
     if (abortSignal?.aborted) {
+      abortFailureCode ??= "client_aborted";
       abortController.abort();
     }
 
@@ -129,7 +137,7 @@ export async function searchWebForSourceBundle({
     return { ok: true, results, attempt: webSearchSuccess(startedAt) };
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
-      return webSearchFailure(abortSignal?.aborted ? "client_aborted" : "provider_timeout", startedAt);
+      return webSearchFailure(abortFailureCode ?? "provider_timeout", startedAt);
     }
 
     return webSearchFailure("provider_request_failed", startedAt);

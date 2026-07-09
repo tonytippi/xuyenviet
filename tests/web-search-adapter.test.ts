@@ -143,6 +143,34 @@ describe("web search adapter", () => {
     expect(result).toMatchObject({ ok: false, code: "client_aborted", attempt: { provider: "tavily", mechanism: "search", status: "failure", errorCode: "client_aborted" } });
   });
 
+  test("keeps provider timeout attribution when caller abort arrives after timeout", async () => {
+    const { searchWebForSourceBundle } = await import("@/features/retrieval/web-search");
+    process.env.TAVILY_API_KEY = "tvly-test";
+    vi.useFakeTimers();
+    const abortController = new AbortController();
+    const fetcher = vi.fn((_url: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })), { once: true });
+    }));
+
+    const pending = searchWebForSourceBundle({
+      query: "Giá vé Huế hiện tại",
+      triggerReasons: ["freshness_sensitive_request"],
+      fetcher: fetcher as typeof fetch,
+      abortSignal: abortController.signal,
+    });
+
+    let result;
+    try {
+      await vi.advanceTimersByTimeAsync(5_000);
+      abortController.abort();
+      result = await pending;
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(result).toMatchObject({ ok: false, code: "provider_timeout", attempt: { provider: "tavily", mechanism: "search", status: "failure", errorCode: "provider_timeout" } });
+  });
+
   test("minimizes personal details before sending query to provider", async () => {
     const { minimizeWebSearchQuery, searchWebForSourceBundle } = await import("@/features/retrieval/web-search");
     let requestBody = "";

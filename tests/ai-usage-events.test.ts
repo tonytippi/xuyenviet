@@ -145,6 +145,44 @@ describe("AI usage events", () => {
     });
   });
 
+  test("calculates cache costs when cache token metadata exists without prompt token bounds", async () => {
+    const { db, rows } = createUsageDb();
+
+    await writeAiUsageEvent(db, {
+      userId: "user-1",
+      purpose: aiUsagePurposes.aiAskInitialAnswer,
+      provider: "ai_gateway",
+      model: "cx/gpt-5.5-test",
+      promptVersion: aiUsagePromptVersions.aiAskInitialAnswer,
+      status: "success",
+      latencyMs: 100,
+      promptTokens: null,
+      cachedPromptTokens: 200,
+      cacheWritePromptTokens: 50,
+      pricingSnapshot: {
+        aiGatewayModelId: "model-1",
+        pricingCurrency: "USD",
+        inputTokenPriceMicros: 2_000_000,
+        outputTokenPriceMicros: 4_000_000,
+        cacheReadTokenPriceMicros: 500_000,
+        cacheWriteTokenPriceMicros: 1_000_000,
+        pricingUnitTokens: 1_000_000,
+        pricingVersion: "v1",
+        pricingEffectiveAt: new Date("2026-07-09T00:00:00.000Z"),
+      },
+    });
+
+    expect(rows[0]).toMatchObject({
+      promptTokens: null,
+      cachedPromptTokens: 200,
+      cacheWritePromptTokens: 50,
+      estimatedInputCostMicros: null,
+      estimatedCacheReadCostMicros: 100,
+      estimatedCacheWriteCostMicros: 50,
+      estimatedTotalCostMicros: 150,
+    });
+  });
+
   test("records web-search provider usage without raw query, result, prompt, or answer fields", async () => {
     const { db, rows } = createUsageDb();
 
