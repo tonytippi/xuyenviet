@@ -193,6 +193,7 @@ async function streamAnswer({
       tripProjectId,
       question,
       userMessageId: saved.userMessage.id,
+      webSearchUsageContext: { userId: session.userId, conversationId: saved.conversationId, userMessageId: saved.userMessage.id },
       abortSignal,
     });
     const contextSection = buildSourceBundlePromptSection(sourceBundle);

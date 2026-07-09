@@ -82,3 +82,6 @@
 - source_spec: `spec-5-5-persist-retrieval-decision-and-answer-provenance.md`
   summary: AI Ask assistant-message retry can duplicate an answer if the first transaction commits but the caller observes an ambiguous commit/connection failure.
   evidence: Story 5.5 preserves the existing retry behavior in `src/app/api/ai-ask/stream/route.ts`; there is no idempotency key or per-turn uniqueness constraint for assistant answers yet.
+- source_spec: `spec-5-9-record-ai-usage-events.md`
+  summary: Decide whether AI Ask assistant/provenance persistence should remain coupled to AI usage insert success.
+  evidence: `src/app/api/ai-ask/stream/route.ts` persists assistant message, provenance, and AI Gateway usage in one transaction per Story 5.5. If usage insert fails twice after a successful provider answer, the streamed answer is not saved. Decoupling this would change the existing atomicity contract and needs a separate design decision.

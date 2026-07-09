@@ -1,11 +1,13 @@
-export const aiAskInitialAnswerPurpose = "ai_ask_initial_answer" as const;
-export const aiAskInitialAnswerPromptVersion = "ai_ask_initial_v5" as const;
-export const chatContextExtractionPurpose = "extraction" as const;
-export const chatContextExtractionPromptVersion = "chat_context_extraction_v2" as const;
-export const sourceKnowledgeDraftExtractionPurpose = "extraction" as const;
-export const sourceKnowledgeDraftExtractionPromptVersion = "source_knowledge_draft_extraction_v1" as const;
-export const sourceKnowledgeSuggestionPurpose = "extraction" as const;
-export const sourceKnowledgeSuggestionPromptVersion = "source_knowledge_suggestion_v1" as const;
+import { aiUsagePromptVersions, aiUsagePurposes } from "@/features/usage/events";
+
+export const aiAskInitialAnswerPurpose = aiUsagePurposes.aiAskInitialAnswer;
+export const aiAskInitialAnswerPromptVersion = aiUsagePromptVersions.aiAskInitialAnswer;
+export const chatContextExtractionPurpose = aiUsagePurposes.extraction;
+export const chatContextExtractionPromptVersion = aiUsagePromptVersions.chatContextExtraction;
+export const sourceKnowledgeDraftExtractionPurpose = aiUsagePurposes.extraction;
+export const sourceKnowledgeDraftExtractionPromptVersion = aiUsagePromptVersions.sourceKnowledgeDraftExtraction;
+export const sourceKnowledgeSuggestionPurpose = aiUsagePurposes.extraction;
+export const sourceKnowledgeSuggestionPromptVersion = aiUsagePromptVersions.sourceKnowledgeSuggestion;
 
 type PromptHistoryMessage = {
   role: "user" | "assistant";

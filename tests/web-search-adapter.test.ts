@@ -114,14 +114,15 @@ describe("web search adapter", () => {
       delete process.env.TAVILY_API_KEY;
     }
 
-    expect(providerFailure).toEqual({ ok: false, code: "provider_request_failed" });
-    expect(invalidResponse).toEqual({ ok: false, code: "invalid_provider_response" });
-    expect(invalidJson).toEqual({ ok: false, code: "invalid_provider_response" });
-    expect(lowQuality).toEqual({ ok: false, code: "low_quality_results" });
-    expect(timeout).toEqual({ ok: false, code: "provider_timeout" });
-    expect(emptyQuery).toEqual({ ok: false, code: "empty_query" });
-    expect(oversizedResponse).toEqual({ ok: false, code: "invalid_provider_response" });
-    expect(missingKey).toEqual({ ok: false, code: "missing_api_key" });
+    expect(providerFailure).toMatchObject({ ok: false, code: "provider_request_failed", attempt: { provider: "tavily", mechanism: "search", status: "failure", errorCode: "provider_request_failed" } });
+    expect(invalidResponse).toMatchObject({ ok: false, code: "invalid_provider_response", attempt: { provider: "tavily", mechanism: "search", status: "failure", errorCode: "invalid_provider_response" } });
+    expect(invalidJson).toMatchObject({ ok: false, code: "invalid_provider_response", attempt: { provider: "tavily", mechanism: "search", status: "failure", errorCode: "invalid_provider_response" } });
+    expect(lowQuality).toMatchObject({ ok: false, code: "low_quality_results", attempt: { provider: "tavily", mechanism: "search", status: "failure", errorCode: "low_quality_results" } });
+    expect(timeout).toMatchObject({ ok: false, code: "provider_timeout", attempt: { provider: "tavily", mechanism: "search", status: "failure", errorCode: "provider_timeout" } });
+    expect(emptyQuery).toMatchObject({ ok: false, code: "empty_query", attempt: { provider: "tavily", mechanism: "search", status: "failure", errorCode: "empty_query" } });
+    expect(oversizedResponse).toMatchObject({ ok: false, code: "invalid_provider_response", attempt: { provider: "tavily", mechanism: "search", status: "failure", errorCode: "invalid_provider_response" } });
+    expect(missingKey).toMatchObject({ ok: false, code: "missing_api_key", attempt: { provider: "tavily", mechanism: "search", status: "failure", errorCode: "missing_api_key" } });
+    expect(providerFailure.attempt.latencyMs).toEqual(expect.any(Number));
   });
 
   test("passes caller abort signal to provider requests", async () => {
@@ -139,7 +140,7 @@ describe("web search adapter", () => {
       abortSignal: abortController.signal,
     });
 
-    expect(result).toEqual({ ok: false, code: "provider_timeout" });
+    expect(result).toMatchObject({ ok: false, code: "client_aborted", attempt: { provider: "tavily", mechanism: "search", status: "failure", errorCode: "client_aborted" } });
   });
 
   test("minimizes personal details before sending query to provider", async () => {

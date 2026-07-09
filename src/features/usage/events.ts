@@ -4,6 +4,28 @@ import { aiUsageEvents, type AiUsageStatus } from "@/db/schema";
 
 import { estimateAiUsageCost, type AiGatewayPricingSnapshot } from "@/features/ai/models";
 
+export const aiUsagePurposes = {
+  aiAskInitialAnswer: "ai_ask_initial_answer",
+  extraction: "extraction",
+  webSearchFallback: "web_search_fallback",
+} as const;
+
+export const aiUsagePromptVersions = {
+  aiAskInitialAnswer: "ai_ask_initial_v5",
+  chatContextExtraction: "chat_context_extraction_v2",
+  sourceKnowledgeDraftExtraction: "source_knowledge_draft_extraction_v1",
+  sourceKnowledgeSuggestion: "source_knowledge_suggestion_v1",
+  webSearchFallback: "web_search_fallback_v1",
+} as const;
+
+export const aiUsageProviders = {
+  tavily: "tavily",
+} as const;
+
+export const aiUsageMechanisms = {
+  webSearch: "search",
+} as const;
+
 type UsageEventDb = {
   insert: (table: typeof aiUsageEvents) => {
     values: (value: typeof aiUsageEvents.$inferInsert) => Promise<unknown>;
@@ -32,11 +54,12 @@ export type WriteAiUsageEventInput = {
 };
 
 export async function writeAiUsageEvent(db: UsageEventDb, input: WriteAiUsageEventInput) {
+  const tokens = normalizeUsageTokens(input);
   const cost = estimateAiUsageCost(input.pricingSnapshot, {
-    promptTokens: input.promptTokens,
-    completionTokens: input.completionTokens,
-    cachedPromptTokens: input.cachedPromptTokens,
-    cacheWritePromptTokens: input.cacheWritePromptTokens,
+    promptTokens: tokens.promptTokens,
+    completionTokens: tokens.completionTokens,
+    cachedPromptTokens: tokens.cachedPromptTokens,
+    cacheWritePromptTokens: tokens.cacheWritePromptTokens,
   });
 
   await db.insert(aiUsageEvents).values({
@@ -51,11 +74,11 @@ export async function writeAiUsageEvent(db: UsageEventDb, input: WriteAiUsageEve
     promptVersion: input.promptVersion,
     status: input.status,
     latencyMs: input.latencyMs,
-    promptTokens: normalizeDbInteger(input.promptTokens),
-    completionTokens: normalizeDbInteger(input.completionTokens),
-    totalTokens: normalizeDbInteger(input.totalTokens),
-    cachedPromptTokens: normalizeDbInteger(input.cachedPromptTokens),
-    cacheWritePromptTokens: normalizeDbInteger(input.cacheWritePromptTokens),
+    promptTokens: tokens.promptTokens,
+    completionTokens: tokens.completionTokens,
+    totalTokens: tokens.totalTokens,
+    cachedPromptTokens: tokens.cachedPromptTokens,
+    cacheWritePromptTokens: tokens.cacheWritePromptTokens,
     estimatedInputCostMicros: cost.estimatedInputCostMicros,
     estimatedOutputCostMicros: cost.estimatedOutputCostMicros,
     estimatedCacheReadCostMicros: cost.estimatedCacheReadCostMicros,
@@ -73,6 +96,29 @@ export async function writeAiUsageEvent(db: UsageEventDb, input: WriteAiUsageEve
   });
 }
 
+function normalizeUsageTokens(input: WriteAiUsageEventInput) {
+  const promptTokens = normalizeDbInteger(input.promptTokens);
+  const completionTokens = normalizeDbInteger(input.completionTokens);
+
+  return {
+    promptTokens,
+    completionTokens,
+    totalTokens: normalizeDbInteger(input.totalTokens),
+    cachedPromptTokens: normalizeCacheTokenMetadata(input.cachedPromptTokens, promptTokens),
+    cacheWritePromptTokens: normalizeCacheTokenMetadata(input.cacheWritePromptTokens, promptTokens),
+  };
+}
+
 function normalizeDbInteger(value: number | null | undefined) {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 2_147_483_647 ? value : null;
+}
+
+function normalizeCacheTokenMetadata(value: number | null | undefined, upperBound: number | null) {
+  const normalized = normalizeDbInteger(value);
+
+  if (normalized === null) {
+    return null;
+  }
+
+  return upperBound === null || normalized <= upperBound ? normalized : null;
 }

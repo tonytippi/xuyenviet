@@ -5,6 +5,7 @@ import { type AnswerContextDigest, type AnswerContextFact, loadAnswerContext } f
 import { buildApprovedKnowledgePromptSection, loadApprovedKnowledgeForAiAsk } from "@/features/retrieval/approved-knowledge";
 import { captureWebSearchResults, searchWebForSourceBundle, type NormalizedWebSearchResult } from "@/features/retrieval/web-search";
 import type { KnowledgeSearchResult } from "@/features/knowledge/search";
+import { aiUsageMechanisms, aiUsagePromptVersions, aiUsageProviders, aiUsagePurposes, writeAiUsageEvent } from "@/features/usage/events";
 
 const answerContextLoadTimeoutMs = 1_500;
 const approvedKnowledgeRetrievalTimeoutMs = 1_500;
@@ -55,6 +56,7 @@ export async function assembleContextPrioritySourceBundle({
   tripProjectId,
   question,
   userMessageId,
+  webSearchUsageContext,
   abortSignal,
 }: {
   userId: string;
@@ -62,6 +64,7 @@ export async function assembleContextPrioritySourceBundle({
   tripProjectId?: string;
   question: string;
   userMessageId?: string;
+  webSearchUsageContext?: WebSearchUsageContext;
   abortSignal?: AbortSignal;
 }): Promise<ContextPrioritySourceBundle> {
   const warnings: SourceBundleWarning[] = [];
@@ -104,7 +107,7 @@ export async function assembleContextPrioritySourceBundle({
   };
 
   const retrievalDecision = decideWebSearchFallback({ question, knowledge, approvedKnowledgeCandidateCount, chatTripContext, warnings });
-  const web = await loadTriggeredWebSearch({ userId, conversationId, userMessageId, question, retrievalDecision, warnings, abortSignal });
+  const web = await loadTriggeredWebSearch({ userId, conversationId, userMessageId, webSearchUsageContext, question, retrievalDecision, warnings, abortSignal });
 
   return {
     chatTripContext,
@@ -116,10 +119,17 @@ export async function assembleContextPrioritySourceBundle({
   };
 }
 
+type WebSearchUsageContext = {
+  userId: string;
+  conversationId: string;
+  userMessageId: string;
+};
+
 async function loadTriggeredWebSearch({
   userId,
   conversationId,
   userMessageId,
+  webSearchUsageContext,
   question,
   retrievalDecision,
   warnings,
@@ -128,6 +138,7 @@ async function loadTriggeredWebSearch({
   userId: string;
   conversationId: string;
   userMessageId?: string;
+  webSearchUsageContext?: WebSearchUsageContext;
   question: string;
   retrievalDecision: RetrievalDecision;
   warnings: SourceBundleWarning[];
@@ -148,7 +159,21 @@ async function loadTriggeredWebSearch({
     return [];
   }
 
-  const searchResult = await searchWebForSourceBundle({ query: question, triggerReasons: retrievalDecision.webSearchTriggerReasons, abortSignal });
+  let searchResult: Awaited<ReturnType<typeof searchWebForSourceBundle>>;
+
+  try {
+    searchResult = await searchWebForSourceBundle({ query: question, triggerReasons: retrievalDecision.webSearchTriggerReasons, abortSignal });
+  } catch (error) {
+    warnings.push("web_search_load_failed");
+    console.warn("Web search skipped after unexpected failure", {
+      conversationId,
+      userMessageId,
+      error: formatWarningError(error),
+    });
+    return [];
+  }
+
+  await recordWebSearchUsage({ usageContext: webSearchUsageContext ?? { userId, conversationId, userMessageId }, searchResult });
 
   if (!searchResult.ok) {
     warnings.push(searchResult.code === "low_quality_results" ? "web_search_low_quality" : "web_search_load_failed");
@@ -174,6 +199,35 @@ async function loadTriggeredWebSearch({
   }
 
   return searchResult.results;
+}
+
+async function recordWebSearchUsage({
+  usageContext,
+  searchResult,
+}: {
+  usageContext: WebSearchUsageContext;
+  searchResult: Awaited<ReturnType<typeof searchWebForSourceBundle>>;
+}) {
+  try {
+    await writeAiUsageEvent(getDb(), {
+      userId: usageContext.userId,
+      conversationId: usageContext.conversationId,
+      userMessageId: usageContext.userMessageId,
+      purpose: aiUsagePurposes.webSearchFallback,
+      provider: aiUsageProviders.tavily,
+      model: aiUsageMechanisms.webSearch,
+      promptVersion: aiUsagePromptVersions.webSearchFallback,
+      status: searchResult.attempt.status,
+      latencyMs: searchResult.attempt.latencyMs,
+      errorCode: searchResult.attempt.errorCode,
+    });
+  } catch (error) {
+    console.warn("Web search usage event skipped after failure", {
+      conversationId: usageContext.conversationId,
+      userMessageId: usageContext.userMessageId,
+      error: formatWarningError(error),
+    });
+  }
 }
 
 export function decideWebSearchFallback({

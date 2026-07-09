@@ -51,6 +51,10 @@ async function countUsageEvents() {
   return (await testDb.select().from(aiUsageEvents)).length;
 }
 
+function findUsageEvent(rows: Array<typeof aiUsageEvents.$inferSelect>, purpose: string, provider?: string) {
+  return rows.find((row) => row.purpose === purpose && (!provider || row.provider === provider));
+}
+
 async function renderAuthenticatedAiAskShell(searchParams: Record<string, string> = {}) {
   vi.doMock("@/server/auth", () => ({
     getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
@@ -549,7 +553,11 @@ describe("AI Ask streaming route", () => {
       },
     }));
     vi.doMock("@/features/retrieval/web-search", () => ({
-      searchWebForSourceBundle: vi.fn().mockResolvedValue({ ok: false, code: "low_quality_results" }),
+      searchWebForSourceBundle: vi.fn().mockResolvedValue({
+        ok: false,
+        code: "low_quality_results",
+        attempt: { provider: "tavily", mechanism: "search", latencyMs: 12, status: "failure", errorCode: "low_quality_results" },
+      }),
       captureWebSearchResults: vi.fn().mockResolvedValue(undefined),
     }));
   });
@@ -653,8 +661,9 @@ describe("AI Ask streaming route", () => {
 
     expect(body).toContain('{"type":"error"');
     expect(savedMessages.map((message) => message.role)).toEqual(["user"]);
-    expect(savedUsageEvents).toHaveLength(1);
-    expect(savedUsageEvents[0]).toMatchObject({ status: "failure", errorCode: "gateway_http_error", model: "cx/gpt-5.5-500", aiGatewayModelId: "ai-ask-500-model" });
+    expect(savedUsageEvents).toHaveLength(2);
+    expect(findUsageEvent(savedUsageEvents, "web_search_fallback", "tavily")).toMatchObject({ status: "failure", model: "search", errorCode: "low_quality_results" });
+    expect(findUsageEvent(savedUsageEvents, "ai_ask_initial_answer", "ai_gateway")).toMatchObject({ status: "failure", errorCode: "gateway_http_error", model: "cx/gpt-5.5-500", aiGatewayModelId: "ai-ask-500-model" });
   });
 
   test("records failed usage and creates no assistant message when the gateway network call fails", async () => {
@@ -676,8 +685,9 @@ describe("AI Ask streaming route", () => {
 
     expect(body).toContain('{"type":"error"');
     expect(savedMessages.map((message) => message.role)).toEqual(["user"]);
-    expect(savedUsageEvents).toHaveLength(1);
-    expect(savedUsageEvents[0]).toMatchObject({ status: "failure", errorCode: "gateway_network_error" });
+    expect(savedUsageEvents).toHaveLength(2);
+    expect(findUsageEvent(savedUsageEvents, "web_search_fallback", "tavily")).toMatchObject({ status: "failure", model: "search", errorCode: "low_quality_results" });
+    expect(findUsageEvent(savedUsageEvents, "ai_ask_initial_answer", "ai_gateway")).toMatchObject({ status: "failure", errorCode: "gateway_network_error" });
   });
 
   test("returns 400 for malformed multipart bodies without side effects", async () => {
@@ -980,7 +990,70 @@ describe("AI Ask streaming route", () => {
       { role: "user", content: "Kể cho tôi nghe lịch trình chi tiết 30 ngày?" },
       { role: "assistant", content: "Kế hoạch dài" },
     ]);
-    expect(savedUsageEvents[0]).toMatchObject({ status: "success", completionTokens: 900 });
+    expect(savedUsageEvents).toHaveLength(2);
+    expect(findUsageEvent(savedUsageEvents, "web_search_fallback", "tavily")).toMatchObject({ status: "failure", model: "search", errorCode: "low_quality_results" });
+    expect(findUsageEvent(savedUsageEvents, "ai_ask_initial_answer", "ai_gateway")).toMatchObject({ status: "success", completionTokens: 900 });
+  });
+
+  test("records safe Tavily success usage during AI Ask without raw web content in usage rows", async () => {
+    await createTestUser("user-1");
+    await createDefaultAiAskModel({ supportsStreaming: true });
+    vi.doMock("@/features/retrieval/web-search", () => ({
+      searchWebForSourceBundle: vi.fn().mockResolvedValue({
+        ok: true,
+        attempt: { provider: "tavily", mechanism: "search", latencyMs: 34, status: "success", errorCode: null },
+        results: [{
+          query: "Giá vé Huế hiện tại?",
+          title: "Official Hue Ticket",
+          url: "https://hue.gov.vn/ticket",
+          snippet: "Giá vé chính thức",
+          provider: "tavily",
+          providerScore: 0.8,
+          checkedAt: new Date("2026-07-09T10:00:00.000Z"),
+          sourceType: "official",
+          confidence: "unverified",
+          triggerReason: "freshness_sensitive_request",
+          rank: 1,
+        }],
+      }),
+      captureWebSearchResults: vi.fn().mockResolvedValue(undefined),
+    }));
+    const fetchMock = vi.fn().mockResolvedValue(new Response([
+      'data: {"choices":[{"delta":{"content":"Cần kiểm tra nguồn chính thức."}}]}\n\n',
+      'data: {"choices":[{"finish_reason":"stop"}]}\n\n',
+      "data: [DONE]\n\n",
+    ].join(""), { status: 200, headers: { "content-type": "text/event-stream" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
+    }));
+    const formData = new FormData();
+    formData.set("question", "Giá vé Huế hiện tại?");
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    await response.text();
+    const savedUsageEvents = await testDb.select().from(aiUsageEvents);
+    const webUsage = findUsageEvent(savedUsageEvents, "web_search_fallback", "tavily");
+
+    expect(response.status).toBe(200);
+    expect(webUsage).toMatchObject({
+      userId: "user-1",
+      purpose: "web_search_fallback",
+      provider: "tavily",
+      model: "search",
+      promptVersion: "web_search_fallback_v1",
+      status: "success",
+      latencyMs: 34,
+      errorCode: null,
+      promptTokens: null,
+      completionTokens: null,
+      totalTokens: null,
+      estimatedTotalCostMicros: null,
+    });
+    expect(JSON.stringify(webUsage)).not.toContain("Giá vé Huế hiện tại");
+    expect(JSON.stringify(webUsage)).not.toContain("Giá vé chính thức");
+    expect(JSON.stringify(webUsage)).not.toContain("Official Hue Ticket");
   });
 
   test("persists the assistant message when the stream ends with finish_reason stop but no DONE marker", async () => {
@@ -1083,8 +1156,9 @@ describe("AI Ask streaming route", () => {
       byteSize: 11,
       storageKey: null,
     });
-    expect(savedUsageEvents).toHaveLength(1);
-    expect(savedUsageEvents[0]).toMatchObject({
+    expect(savedUsageEvents).toHaveLength(2);
+    expect(findUsageEvent(savedUsageEvents, "web_search_fallback", "tavily")).toMatchObject({ status: "failure", model: "search", errorCode: "low_quality_results" });
+    expect(findUsageEvent(savedUsageEvents, "ai_ask_initial_answer", "ai_gateway")).toMatchObject({
       status: "success",
       model: "stream-model",
       aiGatewayModelId: "ai-ask-stream-model",
@@ -1123,8 +1197,9 @@ describe("AI Ask streaming route", () => {
     expect(body).toContain('{"type":"delta","content":"Một phần"}');
     expect(body).toContain('{"type":"error"');
     expect(savedMessages.map((message) => message.role)).toEqual(["user"]);
-    expect(savedUsageEvents).toHaveLength(1);
-    expect(savedUsageEvents[0]).toMatchObject({ status: "failure", errorCode: "gateway_stream_failed" });
+    expect(savedUsageEvents).toHaveLength(2);
+    expect(findUsageEvent(savedUsageEvents, "web_search_fallback", "tavily")).toMatchObject({ status: "failure", model: "search", errorCode: "low_quality_results" });
+    expect(findUsageEvent(savedUsageEvents, "ai_ask_initial_answer", "ai_gateway")).toMatchObject({ status: "failure", errorCode: "gateway_stream_failed" });
     await expect(testDb.select().from(assistantRetrievalDecisions)).resolves.toHaveLength(0);
     await expect(testDb.select().from(assistantResponseProvenance)).resolves.toHaveLength(0);
     expect(warnSpy).toHaveBeenCalledWith("AI Gateway answer generation failed", expect.objectContaining({ reason: "stream_parse_failed" }));
@@ -1148,7 +1223,9 @@ describe("AI Ask streaming route", () => {
     const savedUsageEvents = await testDb.select().from(aiUsageEvents);
 
     expect(savedMessages.map((message) => message.role)).toEqual(["user"]);
-    expect(savedUsageEvents[0]).toMatchObject({ status: "failure", errorCode: "invalid_gateway_response" });
+    expect(savedUsageEvents).toHaveLength(2);
+    expect(findUsageEvent(savedUsageEvents, "web_search_fallback", "tavily")).toMatchObject({ status: "failure", model: "search", errorCode: "low_quality_results" });
+    expect(findUsageEvent(savedUsageEvents, "ai_ask_initial_answer", "ai_gateway")).toMatchObject({ status: "failure", errorCode: "invalid_gateway_response" });
   });
 
   test("rejects invalid stream image submissions before persistence or provider calls", async () => {

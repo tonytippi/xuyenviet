@@ -16,7 +16,15 @@ const maxProviderResponseBytes = 512_000;
 const maxResults = 5;
 const minProviderScore = 0.2;
 
-export type WebSearchFailureCode = "missing_api_key" | "empty_query" | "provider_request_failed" | "provider_timeout" | "invalid_provider_response" | "low_quality_results";
+export type WebSearchFailureCode = "missing_api_key" | "empty_query" | "provider_request_failed" | "provider_timeout" | "client_aborted" | "invalid_provider_response" | "low_quality_results";
+
+export type WebSearchAttempt = {
+  provider: "tavily";
+  mechanism: "search";
+  latencyMs: number | null;
+  status: "success" | "failure";
+  errorCode: WebSearchFailureCode | null;
+};
 
 export type NormalizedWebSearchResult = {
   query: string;
@@ -34,8 +42,8 @@ export type NormalizedWebSearchResult = {
 };
 
 export type WebSearchResult =
-  | { ok: true; results: NormalizedWebSearchResult[] }
-  | { ok: false; code: WebSearchFailureCode };
+  | { ok: true; results: NormalizedWebSearchResult[]; attempt: WebSearchAttempt }
+  | { ok: false; code: WebSearchFailureCode; attempt: WebSearchAttempt };
 
 type TavilyResult = {
   title?: unknown;
@@ -64,15 +72,16 @@ export async function searchWebForSourceBundle({
   now?: () => Date;
   abortSignal?: AbortSignal;
 }): Promise<WebSearchResult> {
+  const startedAt = Date.now();
   const apiKey = getTavilyApiKey();
   const providerQuery = minimizeWebSearchQuery(query);
 
   if (!apiKey) {
-    return { ok: false, code: "missing_api_key" };
+    return webSearchFailure("missing_api_key", startedAt);
   }
 
   if (!hasSearchableText(providerQuery)) {
-    return { ok: false, code: "empty_query" };
+    return webSearchFailure("empty_query", startedAt);
   }
 
   const abortController = new AbortController();
@@ -102,32 +111,40 @@ export async function searchWebForSourceBundle({
     });
 
     if (!response.ok) {
-      return { ok: false, code: "provider_request_failed" };
+      return webSearchFailure("provider_request_failed", startedAt);
     }
 
     const payload = await readJsonResponse(response);
 
     if (!payload || !Array.isArray(payload.results)) {
-      return { ok: false, code: "invalid_provider_response" };
+      return webSearchFailure("invalid_provider_response", startedAt);
     }
 
     const results = normalizeTavilyResults({ payload, query: providerQuery, triggerReason: triggerReasons[0] ?? "no_approved_knowledge", checkedAt: now() });
 
     if (results.length === 0) {
-      return { ok: false, code: "low_quality_results" };
+      return webSearchFailure("low_quality_results", startedAt);
     }
 
-    return { ok: true, results };
+    return { ok: true, results, attempt: webSearchSuccess(startedAt) };
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
-      return { ok: false, code: "provider_timeout" };
+      return webSearchFailure(abortSignal?.aborted ? "client_aborted" : "provider_timeout", startedAt);
     }
 
-    return { ok: false, code: "provider_request_failed" };
+    return webSearchFailure("provider_request_failed", startedAt);
   } finally {
     abortSignal?.removeEventListener("abort", abortFromCaller);
     clearTimeout(timeout);
   }
+}
+
+function webSearchSuccess(startedAt: number): WebSearchAttempt {
+  return { provider: "tavily", mechanism: "search", latencyMs: Date.now() - startedAt, status: "success", errorCode: null };
+}
+
+function webSearchFailure(code: WebSearchFailureCode, startedAt: number): WebSearchResult {
+  return { ok: false, code, attempt: { provider: "tavily", mechanism: "search", latencyMs: Date.now() - startedAt, status: "failure", errorCode: code } };
 }
 
 export function normalizeTavilyResults({
