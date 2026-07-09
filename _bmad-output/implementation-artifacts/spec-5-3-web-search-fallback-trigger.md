@@ -66,6 +66,11 @@ final_revision: 'a820fc1138e3d24f9dcd98e4af63b90ff214aa8a'
 - Given the user asks about freshness-sensitive facts, when the prompt is prepared, then fallback is triggered or the prompt instructs the assistant to clearly say current details cannot be verified.
 - Given approved cards conflict with each other or look stale, when the source bundle is rendered, then fallback is triggered to verify or contextualize the risk.
 
+### Review Findings
+
+- [x] [Review][Patch] Freshness keyword matching over-triggers on ordinary Vietnamese route/family wording [src/features/retrieval/source-bundle.ts:157]
+- [x] [Review][Patch] Same-title approved-card conflicts can be missed when metadata differs [src/features/retrieval/source-bundle.ts:220]
+
 ## Spec Change Log
 
 - 2026-07-09: Implemented in-memory web search fallback trigger and moved story to review.
@@ -115,6 +120,9 @@ Story 5.3 intentionally stops at a trigger/decision contract. Story 5.4 owns the
 - `pnpm lint` -- passed.
 - `pnpm typecheck` -- passed.
 - `pnpm build` -- passed.
+- `pnpm test:run tests/answer-context.test.ts` -- passed, 30 tests after follow-up review patches.
+- `pnpm lint` -- passed after follow-up review patches.
+- `pnpm typecheck` -- passed after follow-up review patches.
 
 ### File List
 

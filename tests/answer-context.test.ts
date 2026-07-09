@@ -579,6 +579,27 @@ describe("answer context assembly", () => {
     expect(ordinaryTravelDecision.webSearchTriggerReasons).not.toContain("freshness_sensitive_request");
   });
 
+  test("freshness matching avoids route and family substring false positives", async () => {
+    const { decideWebSearchFallback } = await import("@/features/retrieval/source-bundle");
+    const knowledge = [makeKnowledgeResult("card-1", "Món ăn Huế"), makeKnowledgeResult("card-2", "Bãi đỗ Huế"), makeKnowledgeResult("card-3", "Điểm dừng Huế")];
+
+    const routeDecision = decideWebSearchFallback({
+      question: "Gợi ý cung đường Hà Nội đi Huế cho cuối tuần",
+      knowledge,
+      chatTripContext: { tripProjectFacts: [], chatFacts: [], conflicts: [] },
+      warnings: [],
+    });
+    const familyDecision = decideWebSearchFallback({
+      question: "Gia đình có trẻ nhỏ nên dừng ở đâu khi đi Huế?",
+      knowledge,
+      chatTripContext: { tripProjectFacts: [], chatFacts: [], conflicts: [] },
+      warnings: [],
+    });
+
+    expect(routeDecision.webSearchTriggerReasons).not.toContain("freshness_sensitive_request");
+    expect(familyDecision.webSearchTriggerReasons).not.toContain("freshness_sensitive_request");
+  });
+
   test("web search fallback triggers for source conflicts and unavailable approved knowledge", async () => {
     const { decideWebSearchFallback } = await import("@/features/retrieval/source-bundle");
 
@@ -603,6 +624,23 @@ describe("answer context assembly", () => {
       knowledge: [
         makeKnowledgeResult("card-1", "Bãi đỗ xe trung tâm", { type: "parking", locationName: "Huế", confidence: "official", freshnessSensitive: true }),
         makeKnowledgeResult("card-2", "Điểm dừng xe gần Đại Nội", { type: "parking", locationName: "Hue", confidence: "community", freshnessSensitive: false }),
+      ],
+      chatTripContext: { tripProjectFacts: [], chatFacts: [], conflicts: [] },
+      warnings: [],
+    });
+
+    expect(decision.conflictDetected).toBe(true);
+    expect(decision.webSearchTriggerReasons).toContain("source_conflict");
+  });
+
+  test("web search fallback detects same-title approved-card conflicts even when metadata differs", async () => {
+    const { decideWebSearchFallback } = await import("@/features/retrieval/source-bundle");
+
+    const decision = decideWebSearchFallback({
+      question: "Bãi đỗ xe trung tâm có đáng tin không?",
+      knowledge: [
+        makeKnowledgeResult("card-1", "Bãi đỗ xe trung tâm", { type: "parking", locationName: "Huế", confidence: "official", freshnessSensitive: true }),
+        makeKnowledgeResult("card-2", "Bãi đỗ xe trung tâm", { type: "parking", locationName: "Đà Nẵng", confidence: "community", freshnessSensitive: false }),
       ],
       chatTripContext: { tripProjectFacts: [], chatFacts: [], conflicts: [] },
       warnings: [],

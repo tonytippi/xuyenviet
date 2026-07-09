@@ -155,7 +155,11 @@ export function decideWebSearchFallback({
 const approvedKnowledgeTargetCount = 3;
 
 const freshnessKeywords = [
-  "giá",
+  "giá vé",
+  "giá phòng",
+  "giá dịch vụ",
+  "bao nhiêu tiền",
+  "gia ve",
   "phí",
   "vé",
   "lịch chạy",
@@ -165,9 +169,12 @@ const freshnessKeywords = [
   "lịch phà",
   "lịch hoạt động",
   "giờ mở cửa",
+  "gio mo cua",
   "mở cửa",
   "đóng cửa",
-  "đường",
+  "tình trạng đường",
+  "duong dang",
+  "đường đang",
   "kẹt xe",
   "sạt lở",
   "thời tiết",
@@ -214,29 +221,52 @@ function isBroadPlanningQuestion(question: string) {
 
 function includesAnyKeyword(value: string, keywords: string[]) {
   const normalized = normalizeForMatch(value);
-  return keywords.some((keyword) => normalized.includes(normalizeForMatch(keyword)));
+  return keywords.some((keyword) => matchesKeyword(normalized, normalizeForMatch(keyword)));
+}
+
+function matchesKeyword(normalizedValue: string, normalizedKeyword: string) {
+  if (normalizedKeyword.length <= 3) {
+    return new RegExp(`(^|[^a-z0-9])${escapeRegExp(normalizedKeyword)}($|[^a-z0-9])`).test(normalizedValue);
+  }
+
+  return normalizedValue.includes(normalizedKeyword);
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function hasApprovedKnowledgeConflict(knowledge: KnowledgeSearchResult[]) {
-  const byTitle = new Map<string, KnowledgeSearchResult>();
+  const byKey = new Map<string, KnowledgeSearchResult>();
 
   for (const result of knowledge) {
-    const key = getKnowledgeConflictKey(result);
-    const previous = byTitle.get(key);
+    const keys = getKnowledgeConflictKeys(result);
 
-    if (previous && (previous.confidence !== result.confidence || previous.freshnessSensitive !== result.freshnessSensitive)) {
-      return true;
+    for (const key of keys) {
+      const previous = byKey.get(key);
+
+      if (previous && (previous.confidence !== result.confidence || previous.freshnessSensitive !== result.freshnessSensitive)) {
+        return true;
+      }
     }
 
-    byTitle.set(key, result);
+    for (const key of keys) {
+      byKey.set(key, result);
+    }
   }
 
   return false;
 }
 
-function getKnowledgeConflictKey(result: KnowledgeSearchResult) {
+function getKnowledgeConflictKeys(result: KnowledgeSearchResult) {
   const entityParts = [result.type, result.locationName, result.routeSegment].filter(Boolean);
-  return entityParts.length > 1 ? entityParts.map((part) => normalizeForMatch(String(part))).join("|") : normalizeForMatch(result.title);
+  const titleKey = `title:${normalizeForMatch(result.title)}`;
+
+  if (entityParts.length <= 1) {
+    return [titleKey];
+  }
+
+  return [`entity:${entityParts.map((part) => normalizeForMatch(String(part))).join("|")}`, titleKey];
 }
 
 function normalizeForMatch(value: string) {
