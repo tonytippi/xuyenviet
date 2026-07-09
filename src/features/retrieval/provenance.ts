@@ -28,9 +28,10 @@ export async function persistAssistantAnswerProvenance(db: ProvenanceDb, input: 
     conversationId,
     userMessageId,
     assistantMessageId,
-    approvedKnowledgeCandidateCount: sourceBundle.knowledge.length,
+    approvedKnowledgeCandidateCount: sourceBundle.retrievalDecision.approvedKnowledgeCandidateCount,
     approvedKnowledgeSelectedCount: sourceBundle.retrievalDecision.approvedKnowledgeSelectedCount,
     approvedKnowledgeTargetCount: sourceBundle.retrievalDecision.approvedKnowledgeTargetCount,
+    approvedKnowledgeRelevanceThreshold: sourceBundle.retrievalDecision.approvedKnowledgeRelevanceThreshold,
     broadPlanningQuestion: sourceBundle.retrievalDecision.broadPlanningQuestion,
     freshnessRequired: sourceBundle.retrievalDecision.freshnessRequired,
     conflictDetected: sourceBundle.retrievalDecision.conflictDetected,
@@ -66,11 +67,11 @@ function buildProvenanceRows({
   let rank = 1;
 
   for (const fact of sourceBundle.chatTripContext.tripProjectFacts) {
-    rows.push(createRow({ userId, conversationId, userMessageId, assistantMessageId, rank: rank++, sourceCategory: "trip_context", verificationStatus: "verified", sourceType: fact.field, usedInPrompt: promptIncludesFact(promptSection, fact.field, fact.value), sourceSnapshot: { field: fact.field, source: fact.source } }));
+    rows.push(createRow({ userId, conversationId, userMessageId, assistantMessageId, rank: rank++, sourceCategory: "trip_context", verificationStatus: "verified", sourceType: fact.field, usedInPrompt: promptSection.includes(`${fact.field}: ${formatPromptValue(fact.value)}`), sourceSnapshot: { field: fact.field, source: fact.source } }));
   }
 
   for (const fact of sourceBundle.chatTripContext.chatFacts) {
-    rows.push(createRow({ userId, conversationId, userMessageId, assistantMessageId, rank: rank++, sourceCategory: "chat_context", verificationStatus: "verified", sourceType: fact.field, usedInPrompt: promptIncludesFact(promptSection, fact.field, fact.value), sourceSnapshot: { field: fact.field, source: fact.source } }));
+    rows.push(createRow({ userId, conversationId, userMessageId, assistantMessageId, rank: rank++, sourceCategory: "chat_context", verificationStatus: "verified", sourceType: fact.field, usedInPrompt: promptSection.includes(`${fact.field}: ${formatPromptValue(fact.value)}`), sourceSnapshot: { field: fact.field, source: fact.source } }));
   }
 
   for (const result of sourceBundle.knowledge) {
@@ -86,7 +87,7 @@ function buildProvenanceRows({
       retrievalScore: result.score,
       sourceType: result.type,
       verificationStatus: "verified",
-      usedInPrompt: promptSection.includes(result.title),
+      usedInPrompt: promptSection.includes(`title=${formatPromptValue(result.title)}`),
       sourceSnapshot: {
         id: result.id,
         title: result.title,
@@ -113,7 +114,7 @@ function buildProvenanceRows({
       retrievalScore: result.providerScore,
       sourceType: result.sourceType,
       verificationStatus: "unverified",
-      usedInPrompt: promptSection.includes(result.url) || promptSection.includes(result.title),
+      usedInPrompt: promptSection.includes(`url=${formatPromptValue(result.url, 300)}`) || promptSection.includes(`title=${formatPromptValue(result.title, 180)}`),
       sourceSnapshot: {
         query: result.query,
         title: result.title,
@@ -181,8 +182,18 @@ function createRow(input: {
   };
 }
 
-function promptIncludesFact(promptSection: string, field: string, value: string) {
-  return promptSection.includes(`${field}: ${JSON.stringify(value)}`);
+function formatPromptValue(value: string, maxLength = 280) {
+  return JSON.stringify(clip(value, maxLength));
+}
+
+function clip(value: string, maxLength: number) {
+  const normalized = value.replace(/\s+/g, " ").trim();
+
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, maxLength - 1).trim()}…`;
 }
 
 function formatDateSnapshot(value: Date) {

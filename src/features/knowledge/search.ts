@@ -96,10 +96,20 @@ export async function disableKnowledgeSearchDocument(cardId: string, status: "di
 }
 
 export async function searchApprovedKnowledge(query: string | null | undefined, options: { limit?: number } = {}): Promise<KnowledgeSearchResult[]> {
+  const { results } = await searchApprovedKnowledgeInternal(query, options, false);
+
+  return results;
+}
+
+export async function searchApprovedKnowledgeWithCandidateCount(query: string | null | undefined, options: { limit?: number } = {}): Promise<{ results: KnowledgeSearchResult[]; candidateCount: number }> {
+  return searchApprovedKnowledgeInternal(query, options, true);
+}
+
+async function searchApprovedKnowledgeInternal(query: string | null | undefined, options: { limit?: number }, countAllCandidates: boolean): Promise<{ results: KnowledgeSearchResult[]; candidateCount: number }> {
   const normalizedQuery = normalizeSearchQuery(query);
 
   if (!normalizedQuery) {
-    return [];
+    return { results: [], candidateCount: 0 };
   }
 
   const limit = normalizeSearchLimit(options.limit);
@@ -108,8 +118,9 @@ export async function searchApprovedKnowledge(query: string | null | undefined, 
   let offset = 0;
   const db = getDb();
   const results: KnowledgeSearchResult[] = [];
+  let candidateCount = 0;
 
-  while (results.length < limit) {
+  while (countAllCandidates || results.length < limit) {
     const matchingDocuments = await db
       .select({ knowledgeCardId: knowledgeCardSearchDocuments.knowledgeCardId, searchableText: knowledgeCardSearchDocuments.searchableText, updatedAt: knowledgeCardSearchDocuments.updatedAt })
       .from(knowledgeCardSearchDocuments)
@@ -136,14 +147,18 @@ export async function searchApprovedKnowledge(query: string | null | undefined, 
       .sort((left, right) => right.score - left.score || right.updatedAt.getTime() - left.updatedAt.getTime());
 
     for (const document of scoredDocuments) {
-      if (results.length >= limit) {
+      if (!countAllCandidates && results.length >= limit) {
         break;
       }
 
       const card = await loadEligibleApprovedCard(db, document.knowledgeCardId);
 
       if (card) {
-        results.push({ ...card, score: document.score });
+        candidateCount += 1;
+
+        if (results.length < limit) {
+          results.push({ ...card, score: document.score });
+        }
       } else {
         await disableKnowledgeSearchDocument(document.knowledgeCardId, "disabled", db);
       }
@@ -156,7 +171,7 @@ export async function searchApprovedKnowledge(query: string | null | undefined, 
     offset += batchSize;
   }
 
-  return results;
+  return { results, candidateCount: countAllCandidates ? candidateCount : results.length };
 }
 
 export class KnowledgeSearchError extends Error {

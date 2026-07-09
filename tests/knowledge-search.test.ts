@@ -143,14 +143,17 @@ describe("approved knowledge search documents", () => {
       ),
     );
     await testDb.insert(knowledgeCardSources).values(cards.map((card) => ({ knowledgeCardId: card.id, sourceId: source.id, supportLevel: "primary" as const })));
-    const { indexApprovedKnowledgeCard, searchApprovedKnowledge } = await import("@/features/knowledge/search");
+    const { indexApprovedKnowledgeCard, searchApprovedKnowledge, searchApprovedKnowledgeWithCandidateCount } = await import("@/features/knowledge/search");
     for (const card of cards) {
       await indexApprovedKnowledgeCard(card.id);
     }
 
     const results = await searchApprovedKnowledge("Huế chỗ đỗ", { limit: 2 });
+    const countedResults = await searchApprovedKnowledgeWithCandidateCount("Huế chỗ đỗ", { limit: 2 });
 
     expect(results).toHaveLength(2);
+    expect(countedResults.results).toHaveLength(2);
+    expect(countedResults.candidateCount).toBe(3);
     expect(Object.keys(results[0] ?? {}).sort()).toEqual([
       "confidence",
       "createdAt",

@@ -90,6 +90,19 @@ final_revision: 'f320ab79f898ed89907a2374083e32b01a8fc9aa'
 Deferred:
 - `[medium]` `[defer]` Ambiguous transaction-commit failures can still make the AI Ask assistant retry duplicate an answer/usage event; recorded in `deferred-work.md` for a future idempotency hardening story.
 
+### Review Findings
+
+- [x] [Review][Patch] Persist the retrieval relevance threshold in assistant retrieval decisions [src/db/schema.ts:887]
+- [x] [Review][Patch] Store a real approved-knowledge candidate count instead of the selected result length [src/features/retrieval/provenance.ts:31]
+- [x] [Review][Patch] Compute `used_in_prompt` from the rendered prompt format, not raw source values [src/features/retrieval/provenance.ts:68]
+
+### 2026-07-09 — Follow-up review patch
+
+- Added retrieval relevance threshold persistence to assistant retrieval decisions, including migration coverage for databases that already applied Story 5.5's original migration.
+- Added counted approved-knowledge retrieval so candidate count is distinct from selected result count.
+- Aligned provenance `used_in_prompt` checks with rendered prompt clipping/JSON formatting for chat/trip facts, approved knowledge titles, and web title/url fields.
+- Added regression coverage for counted knowledge candidates and clipped/normalized provenance prompt detection.
+
 ## Design Notes
 
 Story 5.5 should prefer compact normalized columns plus a safe JSON snapshot over storing prompt text. Story 5.6 can render source/confidence from these rows without re-reading or parsing assistant answer content.
@@ -117,6 +130,10 @@ Story 5.5 should prefer compact normalized columns plus a safe JSON snapshot ove
 - `pnpm lint` -- passed.
 - `pnpm typecheck` -- passed.
 - `pnpm build` -- passed.
+- `pnpm test:run tests/answer-context.test.ts tests/knowledge-search.test.ts tests/ai-ask-sessions.test.ts` -- passed, 50 tests after follow-up review patches.
+- `pnpm lint` -- passed after follow-up review patches.
+- `pnpm typecheck` -- passed after follow-up review patches.
+- `pnpm build` -- passed after follow-up review patches.
 
 ### File List
 
@@ -124,14 +141,20 @@ Story 5.5 should prefer compact normalized columns plus a safe JSON snapshot ove
 - `_bmad-output/implementation-artifacts/spec-5-5-persist-retrieval-decision-and-answer-provenance.md`
 - `_bmad-output/implementation-artifacts/sprint-status.yaml`
 - `drizzle/migrations/0027_conscious_vapor.sql`
+- `drizzle/migrations/0028_story_5_5_review_patch.sql`
 - `drizzle/migrations/meta/0027_snapshot.json`
+- `drizzle/migrations/meta/0028_snapshot.json`
 - `drizzle/migrations/meta/_journal.json`
 - `src/app/api/ai-ask/stream/route.ts`
 - `src/db/schema.ts`
+- `src/features/knowledge/search.ts`
+- `src/features/retrieval/approved-knowledge.ts`
 - `src/features/retrieval/provenance.ts`
+- `src/features/retrieval/source-bundle.ts`
 - `tests/ai-ask-sessions.test.ts`
 - `tests/ai-ask-shell.test.ts`
 - `tests/answer-context.test.ts`
+- `tests/knowledge-search.test.ts`
 
 ## Auto Run Result
 

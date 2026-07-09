@@ -53,6 +53,7 @@ async function seedContextRow({
 }
 
 async function seedApprovedKnowledge(userId: string) {
+  const longTitle = `Bãi đỗ xe an toàn ở Huế ${"có khoảng trắng ".repeat(4)}`;
   const [source] = await testDb
     .insert(sources)
     .values({
@@ -76,7 +77,7 @@ async function seedApprovedKnowledge(userId: string) {
       id: "ai-ask-safe-card",
       status: "approved",
       type: "parking",
-      title: "Bãi đỗ xe an toàn ở Huế",
+      title: longTitle,
       locationName: "Huế",
       routeSegment: "Đà Nẵng - Huế",
       summary: "Có bãi đỗ rộng, phù hợp dừng nghỉ khi đi gia đình.",
@@ -144,8 +145,10 @@ function createSourceBundle(overrides: Partial<ContextPrioritySourceBundle> = {}
     web: [],
     general: { available: true },
     retrievalDecision: {
+      approvedKnowledgeCandidateCount: 0,
       approvedKnowledgeSelectedCount: 0,
       approvedKnowledgeTargetCount: 3,
+      approvedKnowledgeRelevanceThreshold: 1,
       broadPlanningQuestion: false,
       freshnessRequired: false,
       conflictDetected: false,
@@ -671,8 +674,10 @@ describe("answer context assembly", () => {
 
     const section = buildSourceBundlePromptSection(createSourceBundle({
       retrievalDecision: {
+        approvedKnowledgeCandidateCount: 0,
         approvedKnowledgeSelectedCount: 0,
         approvedKnowledgeTargetCount: 3,
+        approvedKnowledgeRelevanceThreshold: 1,
         broadPlanningQuestion: true,
         freshnessRequired: true,
         conflictDetected: false,
@@ -693,8 +698,10 @@ describe("answer context assembly", () => {
 
     const section = buildSourceBundlePromptSection(createSourceBundle({
       retrievalDecision: {
+        approvedKnowledgeCandidateCount: 2,
         approvedKnowledgeSelectedCount: 2,
         approvedKnowledgeTargetCount: 3,
+        approvedKnowledgeRelevanceThreshold: 1,
         broadPlanningQuestion: false,
         freshnessRequired: false,
         conflictDetected: false,
@@ -836,8 +843,8 @@ describe("answer context assembly", () => {
     await seedAnswerModel();
     const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế" }).returning({ id: tripProjects.id });
     const { conversation, message } = await createConversationWithUserMessage({ userId: "user-1", tripProjectId: project.id });
-    await seedContextRow({ userId: "user-1", conversationId: conversation.id, sourceMessageId: message.id, field: "destination", value: "Huế", scope: "trip_project", tripProjectId: project.id });
-    await seedContextRow({ userId: "user-1", conversationId: conversation.id, sourceMessageId: message.id, field: "budget", value: "15 triệu", scope: "conversation" });
+    await seedContextRow({ userId: "user-1", conversationId: conversation.id, sourceMessageId: message.id, field: "destination", value: `Huế ${"với ghi chú dài".repeat(30)}`, scope: "trip_project", tripProjectId: project.id });
+    await seedContextRow({ userId: "user-1", conversationId: conversation.id, sourceMessageId: message.id, field: "budget", value: "15     triệu\nưu tiên nghỉ ngơi", scope: "conversation" });
     await seedApprovedKnowledge("user-1");
     const checkedAt = new Date("2026-07-09T10:00:00.000Z");
 
@@ -847,7 +854,7 @@ describe("answer context assembly", () => {
       ok: true,
       results: [{
         query: "Giá vé hiện tại ở Huế?",
-        title: "Cổng thông tin Huế",
+        title: `Cổng thông tin Huế ${"giá vé".repeat(30)}`,
         url: "https://hue.gov.vn/ticket",
         snippet: "Thông tin giá vé tham khảo.",
         provider: "tavily",
@@ -880,8 +887,10 @@ describe("answer context assembly", () => {
       userId: "user-1",
       conversationId: conversation.id,
       assistantMessageId: assistantMessage?.id,
+      approvedKnowledgeCandidateCount: 1,
       approvedKnowledgeSelectedCount: 1,
       approvedKnowledgeTargetCount: 3,
+      approvedKnowledgeRelevanceThreshold: 1,
       freshnessRequired: true,
       webSearchTriggered: true,
       generalReasoningUsed: true,
@@ -900,7 +909,7 @@ describe("answer context assembly", () => {
     const knowledge = [makeKnowledgeResult("card-1", "A"), makeKnowledgeResult("card-2", "B"), makeKnowledgeResult("card-3", "C")];
     const searchWebForSourceBundle = vi.fn();
     vi.doMock("@/features/retrieval/approved-knowledge", () => ({
-      loadApprovedKnowledgeForAiAsk: vi.fn().mockResolvedValue(knowledge),
+      loadApprovedKnowledgeForAiAsk: vi.fn().mockResolvedValue({ results: knowledge, candidateCount: knowledge.length }),
       buildApprovedKnowledgePromptSection: vi.fn().mockReturnValue("BEGIN_APPROVED_KNOWLEDGE_DATA\nEND_APPROVED_KNOWLEDGE_DATA"),
     }));
     vi.doMock("@/features/retrieval/web-search", () => ({
@@ -930,7 +939,7 @@ describe("answer context assembly", () => {
     const abortController = new AbortController();
     abortController.abort();
     vi.doMock("@/features/retrieval/approved-knowledge", () => ({
-      loadApprovedKnowledgeForAiAsk: vi.fn().mockResolvedValue([]),
+      loadApprovedKnowledgeForAiAsk: vi.fn().mockResolvedValue({ results: [], candidateCount: 0 }),
       buildApprovedKnowledgePromptSection: vi.fn().mockReturnValue(""),
     }));
     vi.doMock("@/features/retrieval/web-search", () => ({

@@ -24,8 +24,10 @@ export type WebSearchTriggerReason =
   | "approved_knowledge_unavailable";
 
 export type RetrievalDecision = {
+  approvedKnowledgeCandidateCount: number;
   approvedKnowledgeSelectedCount: number;
   approvedKnowledgeTargetCount: number;
+  approvedKnowledgeRelevanceThreshold: number;
   broadPlanningQuestion: boolean;
   freshnessRequired: boolean;
   conflictDetected: boolean;
@@ -65,6 +67,7 @@ export async function assembleContextPrioritySourceBundle({
   const warnings: SourceBundleWarning[] = [];
   let answerContext: AnswerContextDigest = { hasProjectScope: Boolean(tripProjectId), facts: [], conflicts: [] };
   let knowledge: KnowledgeSearchResult[] = [];
+  let approvedKnowledgeCandidateCount = 0;
 
   const [answerContextResult, knowledgeResult] = await Promise.allSettled([
     withTimeout(loadAnswerContext({ userId, conversationId, tripProjectId }), answerContextLoadTimeoutMs, "Answer context load timed out."),
@@ -83,7 +86,8 @@ export async function assembleContextPrioritySourceBundle({
   }
 
   if (knowledgeResult.status === "fulfilled") {
-    knowledge = knowledgeResult.value;
+    knowledge = knowledgeResult.value.results;
+    approvedKnowledgeCandidateCount = knowledgeResult.value.candidateCount;
   } else {
     warnings.push("approved_knowledge_load_failed");
     console.warn("Approved knowledge retrieval skipped after failure", {
@@ -99,7 +103,7 @@ export async function assembleContextPrioritySourceBundle({
     conflicts: answerContext.conflicts,
   };
 
-  const retrievalDecision = decideWebSearchFallback({ question, knowledge, chatTripContext, warnings });
+  const retrievalDecision = decideWebSearchFallback({ question, knowledge, approvedKnowledgeCandidateCount, chatTripContext, warnings });
   const web = await loadTriggeredWebSearch({ userId, conversationId, userMessageId, question, retrievalDecision, warnings, abortSignal });
 
   return {
@@ -175,11 +179,13 @@ async function loadTriggeredWebSearch({
 export function decideWebSearchFallback({
   question,
   knowledge,
+  approvedKnowledgeCandidateCount = knowledge.length,
   chatTripContext,
   warnings,
 }: {
   question: string;
   knowledge: KnowledgeSearchResult[];
+  approvedKnowledgeCandidateCount?: number;
   chatTripContext: ContextPrioritySourceBundle["chatTripContext"];
   warnings: SourceBundleWarning[];
 }): RetrievalDecision {
@@ -209,8 +215,10 @@ export function decideWebSearchFallback({
   }
 
   return {
+    approvedKnowledgeCandidateCount,
     approvedKnowledgeSelectedCount: knowledge.length,
     approvedKnowledgeTargetCount,
+    approvedKnowledgeRelevanceThreshold,
     broadPlanningQuestion,
     freshnessRequired,
     conflictDetected,
@@ -221,6 +229,7 @@ export function decideWebSearchFallback({
 }
 
 const approvedKnowledgeTargetCount = 3;
+const approvedKnowledgeRelevanceThreshold = 1;
 
 const freshnessKeywords = [
   "giá vé",
@@ -420,6 +429,7 @@ function appendRetrievalDecisionSection(lines: string[], decision: RetrievalDeci
 
   lines.push("Quyết định truy xuất trước khi trả lời");
   lines.push(`- Số mục kiến thức đã duyệt: ${decision.approvedKnowledgeSelectedCount}/${decision.approvedKnowledgeTargetCount}`);
+  lines.push(`- Ứng viên kiến thức đã duyệt: ${decision.approvedKnowledgeCandidateCount}; ngưỡng liên quan: ${decision.approvedKnowledgeRelevanceThreshold}`);
   lines.push(`- Câu hỏi lập kế hoạch rộng: ${decision.broadPlanningQuestion ? "có" : "không"}`);
   lines.push(`- Cần kiểm tra thông tin mới: ${decision.freshnessRequired ? "có" : "không"}`);
   lines.push(`- Có mâu thuẫn nguồn/ngữ cảnh: ${decision.conflictDetected ? "có" : "không"}`);

@@ -32,6 +32,7 @@ CREATE TABLE "assistant_retrieval_decisions" (
 	"approved_knowledge_candidate_count" integer NOT NULL,
 	"approved_knowledge_selected_count" integer NOT NULL,
 	"approved_knowledge_target_count" integer NOT NULL,
+	"approved_knowledge_relevance_threshold" real NOT NULL,
 	"broad_planning_question" boolean NOT NULL,
 	"freshness_required" boolean NOT NULL,
 	"conflict_detected" boolean NOT NULL,
@@ -43,6 +44,7 @@ CREATE TABLE "assistant_retrieval_decisions" (
 	CONSTRAINT "assistant_retrieval_decisions_candidate_count_check" CHECK ("assistant_retrieval_decisions"."approved_knowledge_candidate_count" >= "assistant_retrieval_decisions"."approved_knowledge_selected_count"),
 	CONSTRAINT "assistant_retrieval_decisions_selected_count_check" CHECK ("assistant_retrieval_decisions"."approved_knowledge_selected_count" >= 0),
 	CONSTRAINT "assistant_retrieval_decisions_target_count_check" CHECK ("assistant_retrieval_decisions"."approved_knowledge_target_count" > 0),
+	CONSTRAINT "assistant_retrieval_decisions_relevance_threshold_check" CHECK ("assistant_retrieval_decisions"."approved_knowledge_relevance_threshold" > 0),
 	CONSTRAINT "assistant_retrieval_decisions_reasons_array_check" CHECK (jsonb_typeof("assistant_retrieval_decisions"."web_search_trigger_reasons") = 'array'),
 	CONSTRAINT "assistant_retrieval_decisions_warnings_array_check" CHECK (jsonb_typeof("assistant_retrieval_decisions"."warnings") = 'array')
 );

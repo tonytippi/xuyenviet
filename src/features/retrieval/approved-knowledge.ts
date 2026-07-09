@@ -1,6 +1,6 @@
 import "server-only";
 
-import { searchApprovedKnowledge, type KnowledgeSearchResult } from "@/features/knowledge/search";
+import { searchApprovedKnowledgeWithCandidateCount, type KnowledgeSearchResult } from "@/features/knowledge/search";
 
 const approvedKnowledgeResultLimit = 3;
 const maxKnowledgeSectionLength = 2_400;
@@ -8,7 +8,7 @@ const maxFieldLength = 280;
 const maxSourcesPerCard = 2;
 
 export async function loadApprovedKnowledgeForAiAsk(question: string) {
-  return searchApprovedKnowledge(question, { limit: approvedKnowledgeResultLimit });
+  return searchApprovedKnowledgeWithCandidateCount(question, { limit: approvedKnowledgeResultLimit });
 }
 
 export function buildApprovedKnowledgePromptSection(results: KnowledgeSearchResult[]) {
