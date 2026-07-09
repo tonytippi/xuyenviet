@@ -92,7 +92,7 @@ development_status:
   5-0-manage-ai-gateway-models-and-pricing: done
   5-1-retrieve-approved-knowledge-for-ai-ask: done
   5-2-assemble-context-priority-source-bundle: done
-  5-3-web-search-fallback-trigger: backlog
+  5-3-web-search-fallback-trigger: done
   5-4-web-search-adapter-and-source-capture: backlog
   5-5-persist-retrieval-decision-and-answer-provenance: backlog
   5-6-render-source-and-confidence-section: backlog
