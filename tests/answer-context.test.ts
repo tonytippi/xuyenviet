@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import { asc } from "drizzle-orm";
 
-import { chatContext, conversations, knowledgeCards, knowledgeCardSources, messages, sources, tripProjects, users, webSearchResults, type ChatContextField, type ChatContextScope } from "@/db/schema";
+import { assistantResponseProvenance, assistantRetrievalDecisions, chatContext, conversations, knowledgeCards, knowledgeCardSources, messages, sources, tripProjects, users, webSearchResults, type ChatContextField, type ChatContextScope } from "@/db/schema";
 import type { KnowledgeSearchResult } from "@/features/knowledge/search";
 import type { ContextPrioritySourceBundle } from "@/features/retrieval/source-bundle";
 
@@ -828,6 +829,69 @@ describe("answer context assembly", () => {
     expect(systemPrompt).toContain("END_UNTRUSTED_WEB_SEARCH_DATA");
     expect(systemPrompt.indexOf("Quyết định truy xuất trước khi trả lời")).toBeLessThan(systemPrompt.indexOf("4. Nguồn web chưa xác minh"));
     expect(systemPrompt.indexOf("4. Nguồn web chưa xác minh")).toBeLessThan(systemPrompt.indexOf("5. Suy luận tổng quát"));
+  });
+
+  test("stream route persists retrieval decision and answer provenance for assistant answers", async () => {
+    await createTestUser("user-1");
+    await seedAnswerModel();
+    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế" }).returning({ id: tripProjects.id });
+    const { conversation, message } = await createConversationWithUserMessage({ userId: "user-1", tripProjectId: project.id });
+    await seedContextRow({ userId: "user-1", conversationId: conversation.id, sourceMessageId: message.id, field: "destination", value: "Huế", scope: "trip_project", tripProjectId: project.id });
+    await seedContextRow({ userId: "user-1", conversationId: conversation.id, sourceMessageId: message.id, field: "budget", value: "15 triệu", scope: "conversation" });
+    await seedApprovedKnowledge("user-1");
+    const checkedAt = new Date("2026-07-09T10:00:00.000Z");
+
+    mockStreamingGateway(() => undefined);
+    mockRouteAuth();
+    mockWebSearch({
+      ok: true,
+      results: [{
+        query: "Giá vé hiện tại ở Huế?",
+        title: "Cổng thông tin Huế",
+        url: "https://hue.gov.vn/ticket",
+        snippet: "Thông tin giá vé tham khảo.",
+        provider: "tavily",
+        providerScore: 0.9,
+        checkedAt,
+        sourceType: "official",
+        confidence: "unverified",
+        triggerReason: "freshness_sensitive_request",
+        rank: 1,
+      }],
+    });
+
+    const formData = new FormData();
+    formData.set("question", "Giá vé hiện tại ở Huế?");
+    formData.set("conversationId", conversation.id);
+    formData.set("tripProjectId", project.id);
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const responseText = await response.text();
+    const savedMessages = await testDb.select().from(messages).orderBy(asc(messages.createdAt), asc(messages.id));
+    const decisions = await testDb.select().from(assistantRetrievalDecisions);
+    const provenance = await testDb.select().from(assistantResponseProvenance).orderBy(asc(assistantResponseProvenance.rank));
+    const assistantMessage = savedMessages.find((row) => row.role === "assistant");
+
+    expect(responseText).toContain('"type":"done"');
+    expect(assistantMessage).toBeDefined();
+    expect(decisions).toHaveLength(1);
+    expect(decisions[0]).toMatchObject({
+      userId: "user-1",
+      conversationId: conversation.id,
+      assistantMessageId: assistantMessage?.id,
+      approvedKnowledgeSelectedCount: 1,
+      approvedKnowledgeTargetCount: 3,
+      freshnessRequired: true,
+      webSearchTriggered: true,
+      generalReasoningUsed: true,
+    });
+    expect(decisions[0].webSearchTriggerReasons).toEqual(expect.arrayContaining(["freshness_sensitive_request", "approved_knowledge_may_be_stale"]));
+    expect(provenance.map((row) => row.sourceCategory)).toEqual(["trip_context", "chat_context", "knowledge", "web", "general"]);
+    expect(provenance.every((row) => row.usedInPrompt)).toBe(true);
+    expect(provenance.every((row) => row.citedInAnswer === false)).toBe(true);
+    expect(provenance.find((row) => row.sourceCategory === "knowledge")).toMatchObject({ sourceReferenceId: "ai-ask-safe-card", sourceReferenceType: "knowledge_card", verificationStatus: "verified" });
+    expect(provenance.find((row) => row.sourceCategory === "web")).toMatchObject({ sourceReferenceType: "web_search_result_rank", verificationStatus: "unverified", sourceType: "official" });
   });
 
   test("source bundle does not call web search or create web rows when fallback is false", async () => {

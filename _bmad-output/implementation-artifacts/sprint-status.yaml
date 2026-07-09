@@ -94,7 +94,7 @@ development_status:
   5-2-assemble-context-priority-source-bundle: done
   5-3-web-search-fallback-trigger: done
   5-4-web-search-adapter-and-source-capture: done
-  5-5-persist-retrieval-decision-and-answer-provenance: backlog
+  5-5-persist-retrieval-decision-and-answer-provenance: done
   5-6-render-source-and-confidence-section: backlog
   5-7-uncertainty-and-freshness-warnings: backlog
   5-8-validate-web-search-fallback-quality: backlog

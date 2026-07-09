@@ -7,6 +7,7 @@ import { streamInitialAiAskAnswer } from "@/features/ai/gateway";
 import { getAiGatewayPricingSnapshot, selectActiveAiGatewayModel } from "@/features/ai/models";
 import { aiAskInitialAnswerPromptVersion, aiAskInitialAnswerPurpose, buildAiAskMessages } from "@/features/ai/prompts";
 import { extractChatTripContext } from "@/features/chat-trips/context-extraction";
+import { persistAssistantAnswerProvenance } from "@/features/retrieval/provenance";
 import { assembleContextPrioritySourceBundle, buildSourceBundlePromptSection } from "@/features/retrieval/source-bundle";
 import { writeAiUsageEvent } from "@/features/usage/events";
 import { getAuthenticatedSession, type AuthenticatedSession } from "@/server/auth";
@@ -284,6 +285,15 @@ async function streamAnswer({
 
         await transaction.update(conversations).set({ updatedAt: new Date() }).where(eq(conversations.id, savedTurn.conversationId));
 
+        await persistAssistantAnswerProvenance(transaction, {
+          userId: session.userId,
+          conversationId: savedTurn.conversationId,
+          userMessageId: savedTurn.userMessage.id,
+          assistantMessageId: assistantMessage.id,
+          sourceBundle,
+          promptSection: contextSection,
+        });
+
         await writeAiUsageEvent(transaction, {
           userId: session.userId,
           conversationId: savedTurn.conversationId,
@@ -307,35 +317,47 @@ async function streamAnswer({
         return { id: assistantMessage.id, content: gatewayResult.content };
       });
     } catch {
-      // The atomic persistence failed (e.g. transient DB error or concurrent conversation deletion).
-      // Retry the assistant message insert outside the transaction so the streamed answer is not lost.
+      // Retry atomic assistant/provenance/usage persistence so the streamed answer is not lost to a transient failure.
       try {
-        const [assistantMessage] = await db
-          .insert(messages)
-          .values({ conversationId: savedTurn.conversationId, userId: session.userId, role: "assistant", content: gatewayResult.content })
-          .returning({ id: messages.id });
+        completed = await db.transaction(async (transaction) => {
+          const [assistantMessage] = await transaction
+            .insert(messages)
+            .values({ conversationId: savedTurn.conversationId, userId: session.userId, role: "assistant", content: gatewayResult.content })
+            .returning({ id: messages.id });
 
-        await writeAiUsageEvent(db, {
-          userId: session.userId,
-          conversationId: savedTurn.conversationId,
-          userMessageId: savedTurn.userMessage.id,
-          assistantMessageId: assistantMessage.id,
-          purpose: aiAskInitialAnswerPurpose,
-          provider: gatewayResult.provider,
-          model: gatewayResult.model,
-          aiGatewayModelId: selectedModel.id,
-          promptVersion: aiAskInitialAnswerPromptVersion,
-          status: "success",
-          latencyMs: gatewayResult.latencyMs,
-          promptTokens: gatewayResult.usage.promptTokens,
-          completionTokens: gatewayResult.usage.completionTokens,
-          totalTokens: gatewayResult.usage.totalTokens,
-          cachedPromptTokens: gatewayResult.usage.cachedPromptTokens,
-          cacheWritePromptTokens: gatewayResult.usage.cacheWritePromptTokens,
-          pricingSnapshot,
+          await transaction.update(conversations).set({ updatedAt: new Date() }).where(eq(conversations.id, savedTurn.conversationId));
+
+          await persistAssistantAnswerProvenance(transaction, {
+            userId: session.userId,
+            conversationId: savedTurn.conversationId,
+            userMessageId: savedTurn.userMessage.id,
+            assistantMessageId: assistantMessage.id,
+            sourceBundle,
+            promptSection: contextSection,
+          });
+
+          await writeAiUsageEvent(transaction, {
+            userId: session.userId,
+            conversationId: savedTurn.conversationId,
+            userMessageId: savedTurn.userMessage.id,
+            assistantMessageId: assistantMessage.id,
+            purpose: aiAskInitialAnswerPurpose,
+            provider: gatewayResult.provider,
+            model: gatewayResult.model,
+            aiGatewayModelId: selectedModel.id,
+            promptVersion: aiAskInitialAnswerPromptVersion,
+            status: "success",
+            latencyMs: gatewayResult.latencyMs,
+            promptTokens: gatewayResult.usage.promptTokens,
+            completionTokens: gatewayResult.usage.completionTokens,
+            totalTokens: gatewayResult.usage.totalTokens,
+            cachedPromptTokens: gatewayResult.usage.cachedPromptTokens,
+            cacheWritePromptTokens: gatewayResult.usage.cacheWritePromptTokens,
+            pricingSnapshot,
+          });
+
+          return { id: assistantMessage.id, content: gatewayResult.content };
         });
-
-        completed = { id: assistantMessage.id, content: gatewayResult.content };
       } catch {
         completed = null;
       }

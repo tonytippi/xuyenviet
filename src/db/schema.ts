@@ -60,6 +60,12 @@ export type WebSearchResultSourceType = (typeof webSearchResultSourceTypeValues)
 export const webSearchResultConfidenceValues = ["unverified"] as const;
 export type WebSearchResultConfidence = (typeof webSearchResultConfidenceValues)[number];
 
+export const assistantProvenanceSourceCategoryValues = ["trip_context", "chat_context", "knowledge", "web", "general"] as const;
+export type AssistantProvenanceSourceCategory = (typeof assistantProvenanceSourceCategoryValues)[number];
+
+export const assistantProvenanceVerificationStatusValues = ["unverified", "verified"] as const;
+export type AssistantProvenanceVerificationStatus = (typeof assistantProvenanceVerificationStatusValues)[number];
+
 export const knowledgeSuggestionActionValues = ["create", "update", "conflict", "duplicate", "no_action"] as const;
 export type KnowledgeSuggestionAction = (typeof knowledgeSuggestionActionValues)[number];
 
@@ -866,6 +872,109 @@ export const webSearchResults = pgTable(
   ],
 );
 
+export const assistantRetrievalDecisions = pgTable(
+  "assistant_retrieval_decisions",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    conversationId: text("conversation_id").notNull(),
+    userMessageId: text("user_message_id").notNull(),
+    assistantMessageId: text("assistant_message_id").notNull(),
+    approvedKnowledgeCandidateCount: integer("approved_knowledge_candidate_count").notNull(),
+    approvedKnowledgeSelectedCount: integer("approved_knowledge_selected_count").notNull(),
+    approvedKnowledgeTargetCount: integer("approved_knowledge_target_count").notNull(),
+    broadPlanningQuestion: boolean("broad_planning_question").notNull(),
+    freshnessRequired: boolean("freshness_required").notNull(),
+    conflictDetected: boolean("conflict_detected").notNull(),
+    webSearchTriggered: boolean("web_search_triggered").notNull(),
+    webSearchTriggerReasons: jsonb("web_search_trigger_reasons").$type<string[]>().default([]).notNull(),
+    generalReasoningUsed: boolean("general_reasoning_used").notNull(),
+    warnings: jsonb("warnings").$type<string[]>().default([]).notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (decision) => [
+    foreignKey({
+      columns: [decision.conversationId, decision.userId],
+      foreignColumns: [conversations.id, conversations.userId],
+      name: "assistant_retrieval_decisions_conversation_owner_fk",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [decision.userMessageId, decision.conversationId, decision.userId],
+      foreignColumns: [messages.id, messages.conversationId, messages.userId],
+      name: "assistant_retrieval_decisions_user_message_owner_fk",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [decision.assistantMessageId, decision.conversationId, decision.userId],
+      foreignColumns: [messages.id, messages.conversationId, messages.userId],
+      name: "assistant_retrieval_decisions_assistant_message_owner_fk",
+    }).onDelete("cascade"),
+    uniqueIndex("assistant_retrieval_decisions_assistant_message_idx").on(decision.assistantMessageId),
+    index("assistant_retrieval_decisions_conversation_created_at_idx").on(decision.conversationId, decision.createdAt),
+    index("assistant_retrieval_decisions_user_id_created_at_idx").on(decision.userId, decision.createdAt),
+    check("assistant_retrieval_decisions_candidate_count_check", sql`${decision.approvedKnowledgeCandidateCount} >= ${decision.approvedKnowledgeSelectedCount}`),
+    check("assistant_retrieval_decisions_selected_count_check", sql`${decision.approvedKnowledgeSelectedCount} >= 0`),
+    check("assistant_retrieval_decisions_target_count_check", sql`${decision.approvedKnowledgeTargetCount} > 0`),
+    check("assistant_retrieval_decisions_reasons_array_check", sql`jsonb_typeof(${decision.webSearchTriggerReasons}) = 'array'`),
+    check("assistant_retrieval_decisions_warnings_array_check", sql`jsonb_typeof(${decision.warnings}) = 'array'`),
+  ],
+);
+
+export const assistantResponseProvenance = pgTable(
+  "assistant_response_provenance",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    conversationId: text("conversation_id").notNull(),
+    userMessageId: text("user_message_id").notNull(),
+    assistantMessageId: text("assistant_message_id").notNull(),
+    sourceCategory: text("source_category").$type<AssistantProvenanceSourceCategory>().notNull(),
+    sourceReferenceId: text("source_reference_id"),
+    sourceReferenceType: text("source_reference_type"),
+    rank: integer("rank").notNull(),
+    retrievalScore: real("retrieval_score"),
+    sourceType: text("source_type"),
+    verificationStatus: text("verification_status").$type<AssistantProvenanceVerificationStatus>().notNull(),
+    usedInPrompt: boolean("used_in_prompt").default(true).notNull(),
+    citedInAnswer: boolean("cited_in_answer").default(false).notNull(),
+    sourceSnapshot: jsonb("source_snapshot").$type<Record<string, unknown>>().default({}).notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (provenance) => [
+    foreignKey({
+      columns: [provenance.conversationId, provenance.userId],
+      foreignColumns: [conversations.id, conversations.userId],
+      name: "assistant_response_provenance_conversation_owner_fk",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [provenance.userMessageId, provenance.conversationId, provenance.userId],
+      foreignColumns: [messages.id, messages.conversationId, messages.userId],
+      name: "assistant_response_provenance_user_message_owner_fk",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [provenance.assistantMessageId, provenance.conversationId, provenance.userId],
+      foreignColumns: [messages.id, messages.conversationId, messages.userId],
+      name: "assistant_response_provenance_assistant_message_owner_fk",
+    }).onDelete("cascade"),
+    uniqueIndex("assistant_response_provenance_assistant_rank_idx").on(provenance.assistantMessageId, provenance.rank),
+    index("assistant_response_provenance_conversation_created_at_idx").on(provenance.conversationId, provenance.createdAt),
+    index("assistant_response_provenance_source_reference_idx").on(provenance.sourceReferenceType, provenance.sourceReferenceId),
+    check("assistant_response_provenance_category_check", sql`${provenance.sourceCategory} in ('trip_context', 'chat_context', 'knowledge', 'web', 'general')`),
+    check("assistant_response_provenance_verification_check", sql`${provenance.verificationStatus} in ('unverified', 'verified')`),
+    check("assistant_response_provenance_rank_check", sql`${provenance.rank} > 0`),
+    check("assistant_response_provenance_score_check", sql`${provenance.retrievalScore} is null or ${provenance.retrievalScore} >= 0`),
+    check("assistant_response_provenance_snapshot_object_check", sql`jsonb_typeof(${provenance.sourceSnapshot}) = 'object'`),
+    check("assistant_response_provenance_reference_pair_check", sql`(${provenance.sourceReferenceId} is null and ${provenance.sourceReferenceType} is null) or (${provenance.sourceReferenceId} is not null and ${provenance.sourceReferenceType} is not null)`),
+  ],
+);
+
 export const schema = {
   users,
   accounts,
@@ -891,4 +1000,6 @@ export const schema = {
   aiGatewayModels,
   aiUsageEvents,
   webSearchResults,
+  assistantRetrievalDecisions,
+  assistantResponseProvenance,
 };

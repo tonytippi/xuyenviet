@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { asc, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { aiGatewayModels, aiUsageEvents, conversations, messageImageAttachments, messages, tripProjects, users } from "@/db/schema";
+import { aiGatewayModels, aiUsageEvents, assistantResponseProvenance, assistantRetrievalDecisions, conversations, messageImageAttachments, messages, tripProjects, users } from "@/db/schema";
 
 import { testDb } from "./helpers/db";
 
@@ -446,6 +446,10 @@ describe("AI Ask streaming route", () => {
       after: (callback: () => Promise<void> | void) => {
         void Promise.resolve(callback()).catch(() => undefined);
       },
+    }));
+    vi.doMock("@/features/retrieval/web-search", () => ({
+      searchWebForSourceBundle: vi.fn().mockResolvedValue({ ok: false, code: "low_quality_results" }),
+      captureWebSearchResults: vi.fn().mockResolvedValue(undefined),
     }));
   });
 
@@ -1020,6 +1024,8 @@ describe("AI Ask streaming route", () => {
     expect(savedMessages.map((message) => message.role)).toEqual(["user"]);
     expect(savedUsageEvents).toHaveLength(1);
     expect(savedUsageEvents[0]).toMatchObject({ status: "failure", errorCode: "gateway_stream_failed" });
+    await expect(testDb.select().from(assistantRetrievalDecisions)).resolves.toHaveLength(0);
+    await expect(testDb.select().from(assistantResponseProvenance)).resolves.toHaveLength(0);
     expect(warnSpy).toHaveBeenCalledWith("AI Gateway answer generation failed", expect.objectContaining({ reason: "stream_parse_failed" }));
   });
 

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { eq } from "drizzle-orm";
 
-import { aiUsageEvents, auditEvents, chatContext, conversations, messageImageAttachments, messages, tripProjects, users } from "@/db/schema";
+import { aiUsageEvents, assistantResponseProvenance, assistantRetrievalDecisions, auditEvents, chatContext, conversations, messageImageAttachments, messages, tripProjects, users } from "@/db/schema";
 
 import { testDb } from "./helpers/db";
 
@@ -137,6 +137,8 @@ describe("AI Ask owned conversation deletion", () => {
     await testDb.insert(messageImageAttachments).values({ conversationId: conversation.id, messageId: userMessage.id, userId: "user-1", originalFileName: "road.png", mimeType: "image/png", byteSize: 16 });
     await testDb.insert(chatContext).values({ conversationId: conversation.id, sourceMessageId: userMessage.id, userId: "user-1", field: "destination", scope: "conversation", value: "Huế", confidence: 90 });
     await testDb.insert(aiUsageEvents).values({ userId: "user-1", conversationId: conversation.id, userMessageId: userMessage.id, assistantMessageId: assistantMessage.id, purpose: "ai_ask_initial_answer", provider: "ai_gateway", model: "test-model", promptVersion: "test-v1", status: "success" });
+    await testDb.insert(assistantRetrievalDecisions).values({ userId: "user-1", conversationId: conversation.id, userMessageId: userMessage.id, assistantMessageId: assistantMessage.id, approvedKnowledgeCandidateCount: 1, approvedKnowledgeSelectedCount: 1, approvedKnowledgeTargetCount: 3, broadPlanningQuestion: false, freshnessRequired: false, conflictDetected: false, webSearchTriggered: false, webSearchTriggerReasons: [], generalReasoningUsed: true, warnings: [] });
+    await testDb.insert(assistantResponseProvenance).values({ userId: "user-1", conversationId: conversation.id, userMessageId: userMessage.id, assistantMessageId: assistantMessage.id, sourceCategory: "general", rank: 1, verificationStatus: "unverified", usedInPrompt: true, citedInAnswer: false, sourceSnapshot: { available: true } });
     vi.doMock("@/server/auth", () => ({
       getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }),
     }));
@@ -148,6 +150,8 @@ describe("AI Ask owned conversation deletion", () => {
     await expect(testDb.select().from(messages)).resolves.toHaveLength(0);
     await expect(testDb.select().from(messageImageAttachments)).resolves.toHaveLength(0);
     await expect(testDb.select().from(chatContext)).resolves.toHaveLength(0);
+    await expect(testDb.select().from(assistantRetrievalDecisions)).resolves.toHaveLength(0);
+    await expect(testDb.select().from(assistantResponseProvenance)).resolves.toHaveLength(0);
     const usageRows = await testDb.select().from(aiUsageEvents);
     const auditRows = await testDb.select().from(auditEvents);
 

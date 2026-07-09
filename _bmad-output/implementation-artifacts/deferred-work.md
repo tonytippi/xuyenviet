@@ -79,3 +79,6 @@
 - source_spec: `spec-4-9-track-100-approved-corridor-items.md`
   summary: Decide whether seed progress should require source provenance from seed batches only.
   evidence: Story 4.9 counts approved, reviewed, source-linked corridor knowledge regardless of whether the linked source came from batch seed intake. This matches the broader approved-corridor seed requirement, but a later operator report may need a stricter batch-seeded-only definition.
+- source_spec: `spec-5-5-persist-retrieval-decision-and-answer-provenance.md`
+  summary: AI Ask assistant-message retry can duplicate an answer if the first transaction commits but the caller observes an ambiguous commit/connection failure.
+  evidence: Story 5.5 preserves the existing retry behavior in `src/app/api/ai-ask/stream/route.ts`; there is no idempotency key or per-turn uniqueness constraint for assistant answers yet.
