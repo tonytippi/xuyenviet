@@ -306,7 +306,7 @@
               "nulls": "last"
             }
           ],
-          "isUnique": false,
+          "isUnique": true,
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -4102,7 +4102,7 @@
         },
         "web_search_results_confidence_check": {
           "name": "web_search_results_confidence_check",
-          "value": "\"web_search_results\".\"confidence\" in ('official', 'provider', 'unverified')"
+          "value": "\"web_search_results\".\"confidence\" = 'unverified'"
         },
         "web_search_results_trigger_reason_check": {
           "name": "web_search_results_trigger_reason_check",

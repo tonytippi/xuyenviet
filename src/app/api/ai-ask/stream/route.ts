@@ -192,6 +192,7 @@ async function streamAnswer({
       tripProjectId,
       question,
       userMessageId: saved.userMessage.id,
+      abortSignal,
     });
     const contextSection = buildSourceBundlePromptSection(sourceBundle);
     const gatewayMessages = buildAiAskMessages({ question, history: saved.history, contextSection });

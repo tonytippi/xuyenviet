@@ -53,12 +53,14 @@ export async function assembleContextPrioritySourceBundle({
   tripProjectId,
   question,
   userMessageId,
+  abortSignal,
 }: {
   userId: string;
   conversationId: string;
   tripProjectId?: string;
   question: string;
   userMessageId?: string;
+  abortSignal?: AbortSignal;
 }): Promise<ContextPrioritySourceBundle> {
   const warnings: SourceBundleWarning[] = [];
   let answerContext: AnswerContextDigest = { hasProjectScope: Boolean(tripProjectId), facts: [], conflicts: [] };
@@ -98,7 +100,7 @@ export async function assembleContextPrioritySourceBundle({
   };
 
   const retrievalDecision = decideWebSearchFallback({ question, knowledge, chatTripContext, warnings });
-  const web = await loadTriggeredWebSearch({ userId, conversationId, userMessageId, question, retrievalDecision, warnings });
+  const web = await loadTriggeredWebSearch({ userId, conversationId, userMessageId, question, retrievalDecision, warnings, abortSignal });
 
   return {
     chatTripContext,
@@ -117,6 +119,7 @@ async function loadTriggeredWebSearch({
   question,
   retrievalDecision,
   warnings,
+  abortSignal,
 }: {
   userId: string;
   conversationId: string;
@@ -124,6 +127,7 @@ async function loadTriggeredWebSearch({
   question: string;
   retrievalDecision: RetrievalDecision;
   warnings: SourceBundleWarning[];
+  abortSignal?: AbortSignal;
 }) {
   if (!retrievalDecision.webSearchTriggered || retrievalDecision.webSearchTriggerReasons.length === 0) {
     return [];
@@ -135,7 +139,12 @@ async function loadTriggeredWebSearch({
     return [];
   }
 
-  const searchResult = await searchWebForSourceBundle({ query: question, triggerReasons: retrievalDecision.webSearchTriggerReasons });
+  if (abortSignal?.aborted) {
+    warnings.push("web_search_load_failed");
+    return [];
+  }
+
+  const searchResult = await searchWebForSourceBundle({ query: question, triggerReasons: retrievalDecision.webSearchTriggerReasons, abortSignal });
 
   if (!searchResult.ok) {
     warnings.push(searchResult.code === "low_quality_results" ? "web_search_low_quality" : "web_search_load_failed");
@@ -144,6 +153,11 @@ async function loadTriggeredWebSearch({
   }
 
   try {
+    if (abortSignal?.aborted) {
+      warnings.push("web_search_load_failed");
+      return [];
+    }
+
     await captureWebSearchResults({ db: getDb(), userId, conversationId, userMessageId, results: searchResult.results });
   } catch (error) {
     warnings.push("web_search_load_failed");

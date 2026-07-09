@@ -24,7 +24,7 @@ CREATE TABLE "web_search_results" (
 	CONSTRAINT "web_search_results_provider_check" CHECK (length(btrim("web_search_results"."provider")) between 1 and 80),
 	CONSTRAINT "web_search_results_score_check" CHECK ("web_search_results"."provider_score" is null or ("web_search_results"."provider_score" >= 0 and "web_search_results"."provider_score" <= 1)),
 	CONSTRAINT "web_search_results_source_type_check" CHECK ("web_search_results"."source_type" in ('official', 'provider', 'community', 'general')),
-	CONSTRAINT "web_search_results_confidence_check" CHECK ("web_search_results"."confidence" in ('official', 'provider', 'unverified')),
+	CONSTRAINT "web_search_results_confidence_check" CHECK ("web_search_results"."confidence" = 'unverified'),
 	CONSTRAINT "web_search_results_trigger_reason_check" CHECK ("web_search_results"."trigger_reason" in ('no_approved_knowledge', 'insufficient_approved_knowledge', 'freshness_sensitive_request', 'approved_knowledge_may_be_stale', 'source_conflict', 'approved_knowledge_unavailable')),
 	CONSTRAINT "web_search_results_rank_check" CHECK ("web_search_results"."rank" > 0)
 );
@@ -35,7 +35,7 @@ ALTER TABLE "web_search_results" ADD CONSTRAINT "web_search_results_conversation
 --> statement-breakpoint
 ALTER TABLE "web_search_results" ADD CONSTRAINT "web_search_results_user_message_owner_fk" FOREIGN KEY ("user_message_id","conversation_id","user_id") REFERENCES "public"."messages"("id","conversation_id","user_id") ON DELETE cascade ON UPDATE no action;
 --> statement-breakpoint
-CREATE INDEX "web_search_results_user_message_rank_idx" ON "web_search_results" USING btree ("user_message_id","rank");
+CREATE UNIQUE INDEX "web_search_results_user_message_rank_idx" ON "web_search_results" USING btree ("user_message_id","rank");
 --> statement-breakpoint
 CREATE INDEX "web_search_results_conversation_created_at_idx" ON "web_search_results" USING btree ("conversation_id","created_at");
 --> statement-breakpoint

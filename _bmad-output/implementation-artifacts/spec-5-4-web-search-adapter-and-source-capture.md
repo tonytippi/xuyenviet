@@ -4,7 +4,7 @@ type: 'feature'
 created: '2026-07-09'
 status: 'done'
 review_loop_iteration: 0
-followup_review_recommended: true
+followup_review_recommended: false
 context:
   - '{project-root}/_bmad-output/project-context.md'
   - '{project-root}/_bmad-output/implementation-artifacts/epic-5-context.md'
@@ -91,6 +91,14 @@ final_revision: 'a820fc1138e3d24f9dcd98e4af63b90ff214aa8a'
   - `[low]` `[patch]` Rejected overlong provider URLs instead of truncating them into invalid persisted/prompted URLs.
   - `[medium]` `[patch]` Asserted captured web results link to a user message, preventing accidental attachment to assistant turns.
 
+### 2026-07-09 — Follow-up review findings
+- [x] [Review][Patch] Keep web-search confidence externally unverified until operator approval [src/features/retrieval/web-search.ts:241] -- Fixed by narrowing web-search result confidence to `unverified` in schema, migration metadata, normalized DTOs, capture rows, prompt tests, and persistence tests.
+- [x] [Review][Patch] Classify official web sources from parsed hostnames, not URL substrings or title text [src/features/retrieval/web-search.ts:264] -- Fixed by classifying official sources from parsed `.gov.vn` hostnames only and adding spoofed URL/title regression coverage.
+- [x] [Review][Patch] Skip provider calls when privacy minimization leaves an empty query [src/features/retrieval/web-search.ts:64] -- Fixed by returning `empty_query` before provider calls when minimization leaves no searchable text, with privacy-label stripping for orphaned personal-detail labels.
+- [x] [Review][Patch] Make web result capture idempotent for the same traveler turn [src/features/retrieval/web-search.ts:143] -- Fixed by replacing existing provider rows for the same user/conversation/user message before insert and making the `(user_message_id, rank)` index unique.
+- [x] [Review][Patch] Propagate request cancellation into web search before external call and capture [src/features/retrieval/source-bundle.ts:138] -- Fixed by threading `AbortSignal` from the stream route into source-bundle assembly, provider fetch, and pre-capture checks.
+- [x] [Review][Patch] Bound provider response/body size before JSON parsing and text normalization [src/features/retrieval/web-search.ts:95] -- Fixed by limiting provider response reads before JSON parse and slicing raw text before whitespace normalization/clipping.
+
 ## Design Notes
 
 Web result records are linked to the user message, not the assistant message, because this story captures search results before answer generation. Story 5.5 can later attach assistant-message provenance to these records transactionally with the final assistant message.
@@ -123,6 +131,8 @@ Web result records are linked to the user message, not the assistant message, be
 - `pnpm lint` -- passed after review patches.
 - `pnpm typecheck` -- passed after review patches when rerun serially after `pnpm build` regenerated `.next/types`.
 - `pnpm build` -- passed after review patches.
+- `pnpm test:run tests/web-search-adapter.test.ts tests/answer-context.test.ts` -- passed, 41 tests after follow-up review patches.
+- `pnpm lint && pnpm typecheck && pnpm build` -- passed after follow-up review patches.
 
 ### File List
 
@@ -152,8 +162,8 @@ Files changed:
 - `src/db/schema.ts` -- added web search result types/table and schema export.
 - `src/features/retrieval/source-bundle.ts` -- integrated triggered web search, capture, warnings, and untrusted web prompt rendering.
 - `src/features/retrieval/web-search.ts` -- added Tavily adapter, query minimization, normalization/ranking/filtering, capture helper, and safe failure handling.
-- `tests/answer-context.test.ts` -- added source-bundle and AI Ask route coverage for web fallback integration and failure paths.
-- `tests/web-search-adapter.test.ts` -- added adapter, privacy, quality, timeout, URL, persistence, and user-message role tests.
+- `tests/answer-context.test.ts` -- added source-bundle and AI Ask route coverage for web fallback integration, abort handling, and failure paths.
+- `tests/web-search-adapter.test.ts` -- added adapter, privacy, quality, timeout, URL spoofing, bounded response, idempotent persistence, and user-message role tests.
 
 Review findings breakdown: 8 patch findings fixed (1 high, 3 medium, 4 low), 0 deferred, 0 rejected.
 

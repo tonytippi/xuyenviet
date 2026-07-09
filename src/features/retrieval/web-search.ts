@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 
 import type { getDb } from "@/db/client";
 import { messages, webSearchResults, type WebSearchResultConfidence, type WebSearchResultSourceType } from "@/db/schema";
@@ -12,10 +12,11 @@ const tavilyEndpoint = "https://api.tavily.com/search";
 const tavilyTimeoutMs = 3_000;
 const maxQueryLength = 500;
 const maxProviderQueryLength = 220;
+const maxProviderResponseBytes = 512_000;
 const maxResults = 5;
 const minProviderScore = 0.2;
 
-export type WebSearchFailureCode = "missing_api_key" | "provider_request_failed" | "provider_timeout" | "invalid_provider_response" | "low_quality_results";
+export type WebSearchFailureCode = "missing_api_key" | "empty_query" | "provider_request_failed" | "provider_timeout" | "invalid_provider_response" | "low_quality_results";
 
 export type NormalizedWebSearchResult = {
   query: string;
@@ -55,11 +56,13 @@ export async function searchWebForSourceBundle({
   triggerReasons,
   fetcher = fetch,
   now = () => new Date(),
+  abortSignal,
 }: {
   query: string;
   triggerReasons: WebSearchTriggerReason[];
   fetcher?: typeof fetch;
   now?: () => Date;
+  abortSignal?: AbortSignal;
 }): Promise<WebSearchResult> {
   const apiKey = getTavilyApiKey();
   const providerQuery = minimizeWebSearchQuery(query);
@@ -68,10 +71,20 @@ export async function searchWebForSourceBundle({
     return { ok: false, code: "missing_api_key" };
   }
 
+  if (!hasSearchableText(providerQuery)) {
+    return { ok: false, code: "empty_query" };
+  }
+
   const abortController = new AbortController();
   const timeout = setTimeout(() => abortController.abort(), tavilyTimeoutMs);
+  const abortFromCaller = () => abortController.abort();
+  abortSignal?.addEventListener("abort", abortFromCaller, { once: true });
 
   try {
+    if (abortSignal?.aborted) {
+      abortController.abort();
+    }
+
     const response = await fetcher(tavilyEndpoint, {
       method: "POST",
       headers: {
@@ -92,7 +105,7 @@ export async function searchWebForSourceBundle({
       return { ok: false, code: "provider_request_failed" };
     }
 
-    const payload = await response.json().catch(() => null) as TavilyResponse | null;
+    const payload = await readJsonResponse(response);
 
     if (!payload || !Array.isArray(payload.results)) {
       return { ok: false, code: "invalid_provider_response" };
@@ -112,6 +125,7 @@ export async function searchWebForSourceBundle({
 
     return { ok: false, code: "provider_request_failed" };
   } finally {
+    abortSignal?.removeEventListener("abort", abortFromCaller);
     clearTimeout(timeout);
   }
 }
@@ -158,6 +172,12 @@ export async function captureWebSearchResults({
   }
 
   await assertUserMessageRole({ db, userId, conversationId, userMessageId });
+  await db.delete(webSearchResults).where(and(
+    eq(webSearchResults.userId, userId),
+    eq(webSearchResults.conversationId, conversationId),
+    eq(webSearchResults.userMessageId, userMessageId),
+    inArray(webSearchResults.provider, [...new Set(results.map((result) => result.provider))]),
+  ));
 
   await db.insert(webSearchResults).values(results.map((result) => ({
     userId,
@@ -172,7 +192,7 @@ export async function captureWebSearchResults({
     providerScore: result.providerScore,
     checkedAt: result.checkedAt,
     sourceType: result.sourceType,
-    confidence: result.confidence,
+    confidence: "unverified" as const,
     triggerReason: result.triggerReason,
     rank: result.rank,
   })));
@@ -181,9 +201,10 @@ export async function captureWebSearchResults({
 export function minimizeWebSearchQuery(query: string) {
   return clip(query
     .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, " ")
-    .replace(/(?:\+?84|0)(?:[\s.-]*\d){8,10}\b/g, " ")
-    .replace(/\b\d{1,2}\s*(?:tuổi|tuoi|yrs?|years? old)\b/gi, " ")
-    .replace(/\b(?:tên tôi là|toi ten la|my name is)\s+[^,.!?]+/gi, " ")
+    .replace(/(?:\+?84|0)(?:[\s.-]*\d){8,10}/g, " ")
+    .replace(/\d{1,2}\s*(?:tuổi|tuoi|yrs?|years? old)/gi, " ")
+    .replace(/(?:tên tôi là|toi ten la|my name is)\s+[^,.!?]+/gi, " ")
+    .replace(/(?:email|số điện thoại|so dien thoai|số|so|con)/gi, " ")
     .replace(/\s+/g, " ")
     .trim(), maxProviderQueryLength);
 }
@@ -238,7 +259,7 @@ function normalizeTavilyResult(result: unknown, query: string, triggerReason: We
     providerScore,
     checkedAt,
     sourceType,
-    confidence: sourceType === "official" ? "official" : sourceType === "provider" ? "provider" : "unverified",
+    confidence: "unverified",
     triggerReason,
   };
 }
@@ -262,14 +283,14 @@ function sourceTypePriority(sourceType: WebSearchResultSourceType) {
 }
 
 function classifySourceType(url: string, title: string): WebSearchResultSourceType {
-  const normalizedUrl = url.toLocaleLowerCase("vi-VN");
+  const hostname = new URL(url).hostname.toLocaleLowerCase("en-US");
   const normalizedTitle = normalizeForMatch(title);
 
-  if (normalizedUrl.includes("facebook.com") || normalizedUrl.includes("tiktok.com") || normalizedUrl.includes("forum") || normalizedTitle.includes("review")) {
+  if (isHostOrSubdomain(hostname, "facebook.com") || isHostOrSubdomain(hostname, "tiktok.com") || hostname.includes("forum") || normalizedTitle.includes("review")) {
     return "community";
   }
 
-  if (normalizedUrl.endsWith(".gov.vn") || normalizedUrl.includes(".gov.vn/") || normalizedTitle.includes("official") || normalizedTitle.includes("chinh thuc")) {
+  if (hostname === "gov.vn" || hostname.endsWith(".gov.vn")) {
     return "official";
   }
 
@@ -294,7 +315,61 @@ function getTavilyApiKey() {
 }
 
 function cleanText(value: unknown, maxLength: number) {
-  return typeof value === "string" ? clip(value.replace(/\s+/g, " ").trim(), maxLength) : "";
+  return typeof value === "string" ? clip(value.slice(0, maxLength * 4).replace(/\s+/g, " ").trim(), maxLength) : "";
+}
+
+async function readJsonResponse(response: Response): Promise<TavilyResponse | null> {
+  const reader = response.body?.getReader();
+
+  if (!reader) {
+    return response.json().catch(() => null) as Promise<TavilyResponse | null>;
+  }
+
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+
+    if (done) {
+      break;
+    }
+
+    totalBytes += value.byteLength;
+
+    if (totalBytes > maxProviderResponseBytes) {
+      await reader.cancel().catch(() => undefined);
+      return null;
+    }
+
+    chunks.push(value);
+  }
+
+  try {
+    return JSON.parse(new TextDecoder().decode(concatUint8Arrays(chunks, totalBytes))) as TavilyResponse;
+  } catch {
+    return null;
+  }
+}
+
+function concatUint8Arrays(chunks: Uint8Array[], totalBytes: number) {
+  const result = new Uint8Array(totalBytes);
+  let offset = 0;
+
+  for (const chunk of chunks) {
+    result.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+
+  return result;
+}
+
+function isHostOrSubdomain(hostname: string, domain: string) {
+  return hostname === domain || hostname.endsWith(`.${domain}`);
+}
+
+function hasSearchableText(value: string) {
+  return /[\p{L}\p{N}]/u.test(value);
 }
 
 function cleanUrl(value: unknown) {

@@ -57,7 +57,7 @@ export type KnowledgeSearchDocumentStatus = (typeof knowledgeSearchDocumentStatu
 export const webSearchResultSourceTypeValues = ["official", "provider", "community", "general"] as const;
 export type WebSearchResultSourceType = (typeof webSearchResultSourceTypeValues)[number];
 
-export const webSearchResultConfidenceValues = ["official", "provider", "unverified"] as const;
+export const webSearchResultConfidenceValues = ["unverified"] as const;
 export type WebSearchResultConfidence = (typeof webSearchResultConfidenceValues)[number];
 
 export const knowledgeSuggestionActionValues = ["create", "update", "conflict", "duplicate", "no_action"] as const;
@@ -849,7 +849,7 @@ export const webSearchResults = pgTable(
       foreignColumns: [messages.id, messages.conversationId, messages.userId],
       name: "web_search_results_user_message_owner_fk",
     }).onDelete("cascade"),
-    index("web_search_results_user_message_rank_idx").on(result.userMessageId, result.rank),
+    uniqueIndex("web_search_results_user_message_rank_idx").on(result.userMessageId, result.rank),
     index("web_search_results_conversation_created_at_idx").on(result.conversationId, result.createdAt),
     index("web_search_results_user_id_created_at_idx").on(result.userId, result.createdAt),
     check("web_search_results_query_length_check", sql`length(btrim(${result.query})) between 1 and 500`),
@@ -860,7 +860,7 @@ export const webSearchResults = pgTable(
     check("web_search_results_provider_check", sql`length(btrim(${result.provider})) between 1 and 80`),
     check("web_search_results_score_check", sql`${result.providerScore} is null or (${result.providerScore} >= 0 and ${result.providerScore} <= 1)`),
     check("web_search_results_source_type_check", sql`${result.sourceType} in ('official', 'provider', 'community', 'general')`),
-    check("web_search_results_confidence_check", sql`${result.confidence} in ('official', 'provider', 'unverified')`),
+    check("web_search_results_confidence_check", sql`${result.confidence} = 'unverified'`),
     check("web_search_results_trigger_reason_check", sql`${result.triggerReason} in ('no_approved_knowledge', 'insufficient_approved_knowledge', 'freshness_sensitive_request', 'approved_knowledge_may_be_stale', 'source_conflict', 'approved_knowledge_unavailable')`),
     check("web_search_results_rank_check", sql`${result.rank} > 0`),
   ],

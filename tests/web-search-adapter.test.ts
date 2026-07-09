@@ -41,8 +41,27 @@ describe("web search adapter", () => {
     if (!result.ok) return;
     expect(result.results).toHaveLength(3);
     expect(result.results.map((item) => item.sourceType)).toEqual(["official", "provider", "community"]);
+    expect(result.results.map((item) => item.confidence)).toEqual(["unverified", "unverified", "unverified"]);
     expect(result.results.map((item) => item.rank)).toEqual([1, 2, 3]);
     expect(JSON.stringify(result.results)).not.toContain("raw_provider_payload");
+  });
+
+  test("does not promote spoofed URL substrings or title text to official source type", async () => {
+    const { normalizeTavilyResults } = await import("@/features/retrieval/web-search");
+
+    const results = normalizeTavilyResults({
+      payload: { results: [
+        { title: "Official Hue Ticket", url: "https://scammer.example/path/.gov.vn/ticket", content: "Giá vé giả", score: 0.95 },
+        { title: "Thông tin chính thức", url: "https://example.com/?next=https://hue.gov.vn", content: "Tin ngoài", score: 0.9 },
+        { title: "Hue Portal", url: "https://hue.gov.vn/ticket", content: "Giá vé", score: 0.5 },
+      ] },
+      query: "Giá vé Huế",
+      triggerReason: "freshness_sensitive_request",
+      checkedAt: new Date("2026-07-09T10:00:00.000Z"),
+    });
+
+    expect(results.map((item) => item.sourceType)).toEqual(["official", "general", "general"]);
+    expect(results[0]?.url).toBe("https://hue.gov.vn/ticket");
   });
 
   test("returns safe failure codes for provider errors, invalid responses, low quality, timeout, and missing key", async () => {
@@ -76,6 +95,16 @@ describe("web search adapter", () => {
         init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
       })),
     });
+    const emptyQuery = await searchWebForSourceBundle({
+      query: "Tên tôi là Nguyễn Văn A, email a@example.com, số 0912 345 678, con 6 tuổi.",
+      triggerReasons: ["no_approved_knowledge"],
+      fetcher: vi.fn(),
+    });
+    const oversizedResponse = await searchWebForSourceBundle({
+      query: "Huế",
+      triggerReasons: ["no_approved_knowledge"],
+      fetcher: vi.fn(async () => new Response(JSON.stringify({ results: [{ title: "Huge", url: "https://example.com", content: "x".repeat(600_000), score: 0.8 }] }), { status: 200 })),
+    });
 
     delete process.env.TAVILY_API_KEY;
     const missingKey = await searchWebForSourceBundle({ query: "Huế", triggerReasons: ["no_approved_knowledge"] });
@@ -90,7 +119,27 @@ describe("web search adapter", () => {
     expect(invalidJson).toEqual({ ok: false, code: "invalid_provider_response" });
     expect(lowQuality).toEqual({ ok: false, code: "low_quality_results" });
     expect(timeout).toEqual({ ok: false, code: "provider_timeout" });
+    expect(emptyQuery).toEqual({ ok: false, code: "empty_query" });
+    expect(oversizedResponse).toEqual({ ok: false, code: "invalid_provider_response" });
     expect(missingKey).toEqual({ ok: false, code: "missing_api_key" });
+  });
+
+  test("passes caller abort signal to provider requests", async () => {
+    const { searchWebForSourceBundle } = await import("@/features/retrieval/web-search");
+    const abortController = new AbortController();
+    const fetcher = vi.fn((_input, init) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+      abortController.abort();
+    }));
+
+    const result = await searchWebForSourceBundle({
+      query: "Giá vé Huế hiện tại?",
+      triggerReasons: ["freshness_sensitive_request"],
+      fetcher,
+      abortSignal: abortController.signal,
+    });
+
+    expect(result).toEqual({ ok: false, code: "provider_timeout" });
   });
 
   test("minimizes personal details before sending query to provider", async () => {
@@ -126,7 +175,7 @@ describe("web search adapter", () => {
     expect(results).toEqual([]);
   });
 
-  test("captures normalized result rows linked to the traveler turn without raw provider payloads", async () => {
+  test("captures normalized result rows idempotently linked to the traveler turn without raw provider payloads", async () => {
     const { conversationId, userMessageId } = await seedTurn();
     const { captureWebSearchResults, normalizeTavilyResults } = await import("@/features/retrieval/web-search");
     const results = normalizeTavilyResults({
@@ -136,6 +185,7 @@ describe("web search adapter", () => {
       checkedAt: new Date("2026-07-09T10:00:00.000Z"),
     });
 
+    await captureWebSearchResults({ db: testDb, userId: "web-user", conversationId, userMessageId, results });
     await captureWebSearchResults({ db: testDb, userId: "web-user", conversationId, userMessageId, results });
 
     const rows = await testDb.select().from(webSearchResults).where(eq(webSearchResults.userMessageId, userMessageId));
@@ -149,7 +199,7 @@ describe("web search adapter", () => {
       url: "https://hue.gov.vn/ticket",
       provider: "tavily",
       sourceType: "official",
-      confidence: "official",
+      confidence: "unverified",
       triggerReason: "freshness_sensitive_request",
       rank: 1,
     });
