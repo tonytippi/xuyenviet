@@ -90,7 +90,7 @@ export function formatAssistantMessageProvenance(rows: AssistantProvenanceRow[])
         usedInPrompt: row.usedInPrompt,
         citedInAnswer: row.citedInAnswer,
         retrievalScore: row.retrievalScore,
-        freshnessSensitive: snapshot.freshnessSensitive === true,
+        freshnessSensitive: snapshot.freshnessSensitive === true || isFreshnessSensitiveWebTrigger(snapshot.triggerReason),
       };
     });
 }
@@ -275,17 +275,25 @@ function getSourceTitle(sourceCategory: AssistantProvenanceSourceCategory, snaps
 }
 
 function getConfidenceLabel(sourceCategory: AssistantProvenanceSourceCategory, verificationStatus: "verified" | "unverified", snapshot: Record<string, unknown>) {
-  const confidence = getOptionalString(snapshot.confidence);
-
-  if (confidence) {
-    return confidence;
+  if (sourceCategory === "web") {
+    return "chưa xác minh";
   }
 
   if (sourceCategory === "general") {
     return "suy luận chưa xác minh";
   }
 
+  const confidence = getOptionalString(snapshot.confidence);
+
+  if (confidence) {
+    return confidence;
+  }
+
   return verificationStatus === "verified" ? "đã xác minh" : "chưa xác minh";
+}
+
+function isFreshnessSensitiveWebTrigger(value: unknown) {
+  return value === "freshness_sensitive_request" || value === "approved_knowledge_may_be_stale";
 }
 
 function getOptionalString(value: unknown) {

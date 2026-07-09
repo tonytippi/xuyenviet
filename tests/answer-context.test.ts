@@ -889,7 +889,7 @@ describe("answer context assembly", () => {
     expect(doneEvent?.assistantMessage?.provenance?.map((item) => item.sourceCategory)).toEqual(["trip_context", "chat_context", "knowledge", "web", "general"]);
     expect(doneEvent?.assistantMessage?.provenance).toEqual(expect.arrayContaining([
       expect.objectContaining({ sourceCategory: "knowledge", title: expect.stringContaining("Bãi đỗ xe an toàn ở Huế"), confidenceLabel: "official", verificationStatus: "verified" }),
-      expect.objectContaining({ sourceCategory: "web", title: expect.stringContaining("Cổng thông tin Huế"), confidenceLabel: "unverified", verificationStatus: "unverified", url: "https://hue.gov.vn/ticket" }),
+      expect.objectContaining({ sourceCategory: "web", title: expect.stringContaining("Cổng thông tin Huế"), confidenceLabel: "chưa xác minh", verificationStatus: "unverified", url: "https://hue.gov.vn/ticket", freshnessSensitive: true }),
       expect.objectContaining({ sourceCategory: "general", title: "Suy luận tổng quát của AI", confidenceLabel: "suy luận chưa xác minh" }),
     ]));
     expect(assistantMessage).toBeDefined();

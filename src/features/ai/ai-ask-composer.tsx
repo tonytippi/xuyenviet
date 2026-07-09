@@ -163,7 +163,7 @@ export function AssistantProvenanceBlock({ provenance }: { provenance?: Assistan
             </div>
             {item.url ? (
               <a className="mt-2 block break-words text-sm font-semibold text-[#1f5f46] underline decoration-[#8fb59f] underline-offset-4 focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45" href={item.url} rel="noreferrer" target="_blank">
-                Mở nguồn tham khảo
+                Mở nguồn tham khảo: {formatProvenanceUrl(item.url)}
               </a>
             ) : null}
             {item.sourceCategory === "general" ? (
@@ -1051,6 +1051,15 @@ function formatProvenanceDate(value: string) {
   }
 
   return date.toLocaleDateString("vi-VN");
+}
+
+function formatProvenanceUrl(value: string) {
+  try {
+    const url = new URL(value);
+    return `${url.hostname}${url.pathname === "/" ? "" : url.pathname}`;
+  } catch {
+    return value;
+  }
 }
 
 function formatImageSize(bytes: number) {

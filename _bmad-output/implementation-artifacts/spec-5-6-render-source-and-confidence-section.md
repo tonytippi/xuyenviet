@@ -72,6 +72,19 @@ final_revision: 'fc3f668c9cc4edd13bac81b26647a46fa60de606'
 
 ## Review Triage Log
 
+### Review Findings
+
+- [x] [Review][Patch] Render freshness cues for freshness-triggered web provenance [src/features/retrieval/provenance.ts:93]
+- [x] [Review][Patch] Show the actual source URL or domain when a provenance URL is available [src/features/ai/ai-ask-composer.tsx:164]
+- [x] [Review][Patch] Do not let unverified web/general provenance display a trusted snapshot confidence label [src/features/retrieval/provenance.ts:277]
+
+### 2026-07-09 — Follow-up review patch
+
+- Web provenance now marks freshness-sensitive trigger reasons as freshness-sensitive in the traveler DTO.
+- Source links now show a visible host/path label instead of only generic link text.
+- Web and general provenance labels now remain explicitly unverified regardless of raw snapshot confidence values.
+- Added regression coverage for visible URLs, web freshness warnings, and unverified web confidence labels.
+
 ### 2026-07-09 — Review pass
 - intent_gap: 0
 - bad_spec: 0
@@ -114,6 +127,10 @@ The UI section should be a simple list rather than citation chips. The persisted
 - `pnpm lint` -- passed after review patches.
 - `pnpm typecheck` -- passed after review patches.
 - `pnpm build` -- passed after review patches.
+- `pnpm test:run tests/ai-ask-sessions.test.ts tests/ai-ask-shell.test.ts tests/answer-context.test.ts` -- passed, 95 tests after follow-up review patches.
+- `pnpm lint` -- passed after follow-up review patches.
+- `pnpm typecheck` -- initially failed when run concurrently with `pnpm build` because `.next/types` files were regenerated during TypeScript program loading; rerun standalone passed after follow-up review patches.
+- `pnpm build` -- passed after follow-up review patches.
 
 ### File List
 

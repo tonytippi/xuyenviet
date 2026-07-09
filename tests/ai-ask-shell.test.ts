@@ -161,6 +161,19 @@ describe("AI Ask authenticated shell", () => {
         verificationStatus: "unverified",
         usedInPrompt: true,
         citedInAnswer: false,
+        sourceSnapshot: { title: "Nguồn web cập nhật", url: "https://hue.gov.vn/ticket", checkedAt: "2026-07-09T10:00:00.000Z", confidence: "official", triggerReason: "freshness_sensitive_request" },
+      },
+      {
+        userId: "user-1",
+        conversationId: conversation.id,
+        userMessageId: userMessage.id,
+        assistantMessageId: assistantMessage.id,
+        sourceCategory: "web",
+        rank: 3,
+        sourceType: "community",
+        verificationStatus: "unverified",
+        usedInPrompt: true,
+        citedInAnswer: false,
         sourceSnapshot: { title: "Nguồn không an toàn", url: "javascript:alert(1)", checkedAt: "2026-07-09T10:00:00.000Z", confidence: "unverified" },
       },
     ]);
@@ -169,12 +182,16 @@ describe("AI Ask authenticated shell", () => {
 
     expect(html).toContain("Nguồn và độ tin cậy");
     expect(html).toContain("Bãi đỗ chính thức Huế");
+    expect(html).toContain("Nguồn web cập nhật");
     expect(html).toContain("Nguồn không an toàn");
     expect(html).toContain("https://xuyenviet.example/hue-parking");
+    expect(html).toContain("hue.gov.vn/ticket");
     expect(html).toContain("8/7/2026");
     expect(html).toContain("Mở nguồn tham khảo");
     expect(html).toContain("Thông tin có thể thay đổi");
+    expect(html).toContain("chưa xác minh");
     expect(html).toContain("Fake Parking Blog");
+    expect(html).not.toContain("official</span><span>Loại: official");
     expect(html).not.toContain("javascript:alert");
     expect(html).not.toContain("source-chip");
     expect(html).not.toContain("[1]");
