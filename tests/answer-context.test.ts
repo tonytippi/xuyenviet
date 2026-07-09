@@ -482,14 +482,58 @@ describe("answer context assembly", () => {
 
     const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
     const responseText = await response.text();
+    const events = responseText
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { type: string; content?: string; assistantMessage?: { content?: string } });
     const doneEvent = responseText
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line) as { type: string; assistantMessage?: { content?: string } })
       .find((event) => event.type === "done");
 
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "delta", content: expect.stringContaining("Cảnh báo cần kiểm tra") }),
+    ]));
     expect(doneEvent?.assistantMessage?.content).toContain("Nên đi 5 ngày.");
     expect(doneEvent?.assistantMessage?.content).toContain("Cảnh báo cần kiểm tra");
+    expect(doneEvent?.assistantMessage?.content).toContain("kiểm tra lại với nguồn chính thức hoặc nhà cung cấp");
+  });
+
+  test("stream route appends freshness warning when model only emits warning heading", async () => {
+    await createTestUser("user-1");
+    await seedAnswerModel();
+    const { conversation } = await createConversationWithUserMessage({ userId: "user-1" });
+    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { stream?: boolean };
+
+      if (body.stream === false) {
+        return new Response(JSON.stringify({ model: "cx/extract", choices: [{ message: { content: JSON.stringify({ facts: [] }) } }] }), { status: 200 });
+      }
+
+      return new Response([
+        'data: {"model":"cx/answer","choices":[{"delta":{"content":"Nên đi 5 ngày.\\n\\nCảnh báo cần kiểm tra"}}]}\n\n',
+        'data: {"choices":[{"finish_reason":"stop"}]}\n\n',
+        "data: [DONE]\n\n",
+      ].join(""), { status: 200, headers: { "content-type": "text/event-stream" } });
+    }));
+    mockRouteAuth();
+    mockWebSearch({ ok: false, code: "low_quality_results" });
+
+    const formData = new FormData();
+    formData.set("question", "Giá vé tham quan ở Huế hiện nay bao nhiêu?");
+    formData.set("conversationId", conversation.id);
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const events = (await response.text())
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { type: string; content?: string; assistantMessage?: { content?: string } });
+    const warningDeltas = events.filter((event) => event.type === "delta" && event.content?.includes("Cảnh báo cần kiểm tra"));
+    const doneEvent = events.find((event) => event.type === "done");
+
+    expect(warningDeltas).toHaveLength(2);
     expect(doneEvent?.assistantMessage?.content).toContain("kiểm tra lại với nguồn chính thức hoặc nhà cung cấp");
   });
 
@@ -907,6 +951,50 @@ describe("answer context assembly", () => {
     expect(systemPrompt).toContain("END_UNTRUSTED_WEB_SEARCH_DATA");
     expect(systemPrompt.indexOf("Quyết định truy xuất trước khi trả lời")).toBeLessThan(systemPrompt.indexOf("4. Nguồn web chưa xác minh"));
     expect(systemPrompt.indexOf("4. Nguồn web chưa xác minh")).toBeLessThan(systemPrompt.indexOf("5. Suy luận tổng quát"));
+  });
+
+  test("stream route does not append freshness warning for non-freshness web fallback", async () => {
+    await createTestUser("user-1");
+    await seedAnswerModel();
+    const { conversation } = await createConversationWithUserMessage({ userId: "user-1" });
+    const checkedAt = new Date("2026-07-09T10:00:00.000Z");
+
+    mockStreamingGateway(() => undefined);
+    mockRouteAuth();
+    mockWebSearch({
+      ok: true,
+      results: [{
+        query: "Món ăn nên thử ở Huế?",
+        title: "Gợi ý món ăn Huế",
+        url: "https://example.com/hue-food",
+        snippet: "Một số món ăn địa phương.",
+        provider: "tavily",
+        providerScore: 0.7,
+        checkedAt,
+        sourceType: "community",
+        confidence: "unverified",
+        triggerReason: "no_approved_knowledge",
+        rank: 1,
+      }],
+    });
+
+    const formData = new FormData();
+    formData.set("question", "Món ăn nên thử ở Huế?");
+    formData.set("conversationId", conversation.id);
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const events = (await response.text())
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { type: string; content?: string; assistantMessage?: { content?: string } });
+    const doneEvent = events.find((event) => event.type === "done");
+
+    expect(events).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "delta", content: expect.stringContaining("Cảnh báo cần kiểm tra") }),
+    ]));
+    expect(doneEvent?.assistantMessage?.content).toContain("Nên đi 5 ngày.");
+    expect(doneEvent?.assistantMessage?.content).not.toContain("Cảnh báo cần kiểm tra");
   });
 
   test("stream route persists retrieval decision and answer provenance for assistant answers", async () => {

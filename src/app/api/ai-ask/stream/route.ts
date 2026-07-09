@@ -275,13 +275,16 @@ async function streamAnswer({
 
     const savedTurn = saved;
     const assistantContent = ensureFreshnessWarning(gatewayResult.content, sourceBundle);
+    if (assistantContent.appendedWarning) {
+      sendEvent(controller, encoder, { type: "delta", content: assistantContent.appendedWarning });
+    }
     let completed: { id: string; content: string; provenance: AssistantMessageProvenanceItem[] } | null = null;
 
     try {
       completed = await db.transaction(async (transaction) => {
         const [assistantMessage] = await transaction
           .insert(messages)
-          .values({ conversationId: savedTurn.conversationId, userId: session.userId, role: "assistant", content: assistantContent })
+          .values({ conversationId: savedTurn.conversationId, userId: session.userId, role: "assistant", content: assistantContent.content })
           .returning({ id: messages.id });
 
         await transaction.update(conversations).set({ updatedAt: new Date() }).where(eq(conversations.id, savedTurn.conversationId));
@@ -315,7 +318,7 @@ async function streamAnswer({
           pricingSnapshot,
         });
 
-        return { id: assistantMessage.id, content: assistantContent, provenance };
+        return { id: assistantMessage.id, content: assistantContent.content, provenance };
       });
     } catch {
       // Retry atomic assistant/provenance/usage persistence so the streamed answer is not lost to a transient failure.
@@ -323,7 +326,7 @@ async function streamAnswer({
         completed = await db.transaction(async (transaction) => {
           const [assistantMessage] = await transaction
             .insert(messages)
-            .values({ conversationId: savedTurn.conversationId, userId: session.userId, role: "assistant", content: assistantContent })
+            .values({ conversationId: savedTurn.conversationId, userId: session.userId, role: "assistant", content: assistantContent.content })
             .returning({ id: messages.id });
 
           await transaction.update(conversations).set({ updatedAt: new Date() }).where(eq(conversations.id, savedTurn.conversationId));
@@ -357,7 +360,7 @@ async function streamAnswer({
             pricingSnapshot,
           });
 
-          return { id: assistantMessage.id, content: assistantContent, provenance };
+          return { id: assistantMessage.id, content: assistantContent.content, provenance };
         });
       } catch {
         completed = null;
@@ -397,15 +400,27 @@ async function streamAnswer({
 }
 
 function ensureFreshnessWarning(content: string, sourceBundle: Awaited<ReturnType<typeof assembleContextPrioritySourceBundle>>) {
-  if (!sourceBundle.retrievalDecision.freshnessRequired && sourceBundle.web.length === 0) {
-    return content;
+  const warningRequired = sourceBundle.retrievalDecision.freshnessRequired || sourceBundle.web.some((source) => isFreshnessSensitiveWebTrigger(source.triggerReason));
+
+  if (!warningRequired) {
+    return { content, appendedWarning: "" };
   }
 
-  if (/cảnh báo cần kiểm tra/i.test(content.normalize("NFC"))) {
-    return content;
+  const normalizedContent = content.normalize("NFC");
+  const warningHeading = /cảnh báo cần kiểm tra/i.exec(normalizedContent);
+  const warningBody = warningHeading ? normalizedContent.slice(warningHeading.index + warningHeading[0].length) : "";
+  const hasActionableWarning = Boolean(warningHeading) && /(kiểm tra|xác minh|nguồn chính thức|nhà cung cấp)/i.test(warningBody);
+
+  if (hasActionableWarning) {
+    return { content, appendedWarning: "" };
   }
 
-  return `${content.trimEnd()}\n\nCảnh báo cần kiểm tra\nThông tin về giá, lịch, tình trạng còn chỗ, đường sá, giờ mở cửa, thời tiết, dịch vụ hoặc khuyến mãi có thể thay đổi. Hãy kiểm tra lại với nguồn chính thức hoặc nhà cung cấp trước khi đi, hành động hoặc đặt dịch vụ.`;
+  const appendedWarning = "\n\nCảnh báo cần kiểm tra\nThông tin về giá, lịch, tình trạng còn chỗ, đường sá, giờ mở cửa, thời tiết, dịch vụ hoặc khuyến mãi có thể thay đổi. Hãy kiểm tra lại với nguồn chính thức hoặc nhà cung cấp trước khi đi, hành động hoặc đặt dịch vụ.";
+  return { content: `${content.trimEnd()}${appendedWarning}`, appendedWarning };
+}
+
+function isFreshnessSensitiveWebTrigger(reason: string) {
+  return reason === "freshness_sensitive_request" || reason === "approved_knowledge_may_be_stale";
 }
 
 function validateImageFileMetadata(image: File | null) {

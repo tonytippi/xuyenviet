@@ -70,6 +70,19 @@ final_revision: 'fe66e59'
 
 ## Review Triage Log
 
+### Review Findings
+
+- [x] [Review][Patch] Appended freshness warning is not streamed before final completion [src/app/api/ai-ask/stream/route.ts:277]
+- [x] [Review][Patch] Warning-present detection accepts a heading without actionable verification guidance [src/app/api/ai-ask/stream/route.ts:404]
+- [x] [Review][Patch] Deterministic warning insertion treats any web row as freshness-sensitive [src/app/api/ai-ask/stream/route.ts:399]
+
+### 2026-07-09 — Follow-up review patch
+- patch: 3 fixed (medium 3)
+- addressed_findings:
+  - `[medium]` `[patch]` Deterministic freshness warnings appended after model output are now also emitted as a final stream delta before the done event, so live streaming display and persisted content stay aligned.
+  - `[medium]` `[patch]` Warning-present detection now requires actionable verification language after the `Cảnh báo cần kiểm tra` heading, so heading-only model output no longer suppresses the deterministic warning.
+  - `[medium]` `[patch]` Deterministic warning insertion now triggers for retrieval-level freshness requirements or freshness-sensitive web trigger reasons, not for every generic web fallback row.
+
 ### 2026-07-09 — Review pass
 - intent_gap: 0
 - bad_spec: 0
@@ -111,6 +124,10 @@ Story 5.6 already renders provenance from stored rows, so Story 5.7 should not a
 - `pnpm lint` -- passed.
 - `pnpm typecheck` -- passed.
 - `pnpm build` -- passed.
+- `pnpm test:run tests/answer-context.test.ts tests/ai-ask-shell.test.ts` -- passed, 91 tests after follow-up review patch.
+- `pnpm lint` -- passed after follow-up review patch.
+- `pnpm typecheck` -- passed after follow-up review patch.
+- `pnpm build` -- passed after follow-up review patch.
 
 ### File List
 
@@ -155,3 +172,10 @@ Verification performed:
 Residual risks:
 - Prompt compliance still depends on model behavior; tests verify prompt contracts and provenance/UI behavior, not live model output wording.
 - No commit was created because repository instructions require explicit user approval before committing.
+
+### Follow-up Review Patch Notes
+
+- Emitted appended deterministic freshness warnings as final stream deltas before completion.
+- Tightened warning detection to require actionable verification guidance after the warning heading.
+- Narrowed web-based deterministic warning insertion to freshness-sensitive web triggers rather than any web fallback.
+- Added regressions for streamed warning suffixes, heading-only warnings, and non-freshness web fallback.
