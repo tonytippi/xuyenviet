@@ -8,12 +8,14 @@ import { getAiGatewayPricingSnapshot, selectActiveAiGatewayModel } from "@/featu
 import { aiAskInitialAnswerPromptVersion, aiAskInitialAnswerPurpose, buildAiAskMessages } from "@/features/ai/prompts";
 import { buildAnswerContextPromptSection, loadAnswerContext } from "@/features/chat-trips/answer-context";
 import { extractChatTripContext } from "@/features/chat-trips/context-extraction";
+import { buildApprovedKnowledgePromptSection, loadApprovedKnowledgeForAiAsk } from "@/features/retrieval/approved-knowledge";
 import { writeAiUsageEvent } from "@/features/usage/events";
 import { getAuthenticatedSession, type AuthenticatedSession } from "@/server/auth";
 
 const maxQuestionLength = 2_000;
 const maxImageByteSize = 5 * 1024 * 1024;
 const maxMultipartBodySize = 6 * 1024 * 1024;
+const approvedKnowledgeRetrievalTimeoutMs = 1_500;
 const acceptedImageTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 type StreamEvent =
@@ -203,7 +205,21 @@ async function streamAnswer({
       });
     }
 
-    const gatewayMessages = buildAiAskMessages({ question, history: saved.history, contextSection });
+    let approvedKnowledgeSection = "";
+
+    try {
+      const approvedKnowledge = await withTimeout(loadApprovedKnowledgeForAiAsk(question), approvedKnowledgeRetrievalTimeoutMs);
+      approvedKnowledgeSection = buildApprovedKnowledgePromptSection(approvedKnowledge);
+    } catch (error) {
+      console.warn("Approved knowledge retrieval skipped after failure", {
+        conversationId: saved.conversationId,
+        userMessageId: saved.userMessage.id,
+        error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
+      });
+    }
+
+    const combinedContextSection = [contextSection, approvedKnowledgeSection].filter(Boolean).join("\n\n");
+    const gatewayMessages = buildAiAskMessages({ question, history: saved.history, contextSection: combinedContextSection });
     const finalGatewayMessages = imageDataUrl ? attachImageToFinalUserMessage(gatewayMessages, imageDataUrl) : gatewayMessages;
     const extractionInput = saved;
     after(() => extractChatTripContext({
@@ -451,4 +467,21 @@ function sendEvent(controller: ReadableStreamDefaultController<Uint8Array>, enco
   } catch {
     // The client may have already closed the stream.
   }
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number) {
+  return new Promise<T>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("Approved knowledge retrieval timed out.")), timeoutMs);
+
+    promise.then(
+      (value) => {
+        clearTimeout(timeout);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timeout);
+        reject(error);
+      },
+    );
+  });
 }
