@@ -69,6 +69,11 @@ final_revision: '86aca20d2f25ce60d68206f2c1b3a4a6b9fba667'
 
 ## Spec Change Log
 
+### Review Findings
+- [x] [Review][Patch] Compacted source-bundle rendering can erase the entire source bundle when the compact fallback still exceeds the prompt budget [src/features/retrieval/source-bundle.ts:107]
+- [x] [Review][Patch] Source-bundle assembly applies context and knowledge timeouts sequentially, so two slow loaders can delay the gateway request by roughly twice the intended source-loading budget [src/features/retrieval/source-bundle.ts:46]
+- [x] [Review][Patch] Approved-knowledge formatting is duplicated inside source-bundle rendering instead of reusing Story 5.1 safety/budget formatting logic [src/features/retrieval/source-bundle.ts:154]
+
 - 2026-07-09: Implemented normalized source-bundle assembly seam for AI Ask and moved story to review.
 
 ## Review Triage Log
@@ -83,6 +88,17 @@ final_revision: '86aca20d2f25ce60d68206f2c1b3a4a6b9fba667'
   - `[medium]` `[patch]` Source-bundle priority was only implied by section order; added an explicit conflict-resolution priority instruction to normal and compact prompt rendering.
   - `[medium]` `[patch]` Compacted source-bundle rendering dropped chat/project conflict guidance; included bounded conflict lines in the compact path.
   - `[medium]` `[patch]` Answer context loading could stall before the gateway call; added a timeout matching the approved-knowledge timeout and surfaced a source-loading warning in the prompt.
+
+### 2026-07-09 — Follow-up review pass
+- intent_gap: 0
+- bad_spec: 0
+- patch: 3: (high 0, medium 2, low 1)
+- defer: 0
+- reject: 1
+- addressed_findings:
+  - `[medium]` `[patch]` Compacted source-bundle rendering could erase the entire source bundle; added a minimal fallback that preserves priority, warning, reserved web, and general-reasoning guidance.
+  - `[medium]` `[patch]` Context and approved-knowledge loading timeouts were sequential; changed source-bundle assembly to run both loaders concurrently with independent warning-only failure handling.
+  - `[low]` `[patch]` Approved-knowledge prompt formatting was duplicated in source-bundle rendering; reused Story 5.1 `buildApprovedKnowledgePromptSection`.
 
 ## Design Notes
 
@@ -115,6 +131,9 @@ The bundle is an in-memory contract for this story. It should be shaped for late
 - `pnpm typecheck` -- passed.
 - `pnpm build` -- passed.
 - `pnpm test:run tests/answer-context.test.ts` and `pnpm test:run tests/knowledge-search.test.ts` in parallel -- failed due shared DB test interference; reran sequentially and both passed.
+- `pnpm test:run tests/answer-context.test.ts` and `pnpm test:run tests/knowledge-search.test.ts` in parallel after follow-up review patches -- failed due shared DB test interference; reran sequentially and both passed.
+- `pnpm lint` after follow-up review patches -- passed.
+- `pnpm typecheck` after follow-up review patches -- passed.
 
 ### File List
 
