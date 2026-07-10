@@ -5,6 +5,7 @@ opencode.jsonc
 
 node_modules/
 .next/
+.playwright/
 .vercel/
 out/
 build/

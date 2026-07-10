@@ -1,3 +1,19 @@
+---
+stepsCompleted:
+  - step-01-document-discovery
+  - step-02-prd-analysis
+  - step-03-epic-coverage-validation
+  - step-04-ux-alignment
+  - step-05-epic-quality-review
+  - step-06-final-assessment
+selectedFiles:
+  prd: _bmad-output/planning-artifacts/prds/prd-xuyenviet-2026-07-04/prd.md
+  architecture: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md
+  epics: _bmad-output/planning-artifacts/epics.md
+  uxDesign: _bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-2026-07-05/DESIGN.md
+  uxExperience: _bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-2026-07-05/EXPERIENCE.md
+---
+
 # Implementation Readiness Assessment Report
 
 **Date:** 2026-07-10
@@ -20,6 +36,7 @@
 - UX review file exists in the UX folder, but it is a review artifact, not a duplicate UX source.
 - Existing readiness reports from `2026-07-05` and `2026-07-10` are prior outputs, not input conflicts.
 - No blocking whole-vs-sharded duplicate document formats were found.
+- Architecture and UX artifacts are stored in dated folders without `index.md`; selected files were confirmed for assessment.
 
 ## PRD Analysis
 

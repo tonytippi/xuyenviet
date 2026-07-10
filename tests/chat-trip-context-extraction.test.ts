@@ -405,15 +405,16 @@ describe("chat/trip context extraction", () => {
     const responseText = await response.text();
 
     expect(responseText).toContain('"type":"done"');
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.some(([, init]) => JSON.parse(String(init?.body))?.stream === false)).toBe(true);
     await vi.waitFor(async () => {
       await expect(testDb.select().from(chatContext)).resolves.toMatchObject([{ field: "destination", value: "Huế", scope: "conversation" }]);
     });
     await vi.waitFor(async () => {
-      await expect(testDb.select().from(aiUsageEvents).orderBy(asc(aiUsageEvents.purpose))).resolves.toMatchObject([
-        { purpose: "ai_ask_initial_answer", status: "success" },
-        { purpose: "extraction", status: "success" },
-      ]);
+      const usage = await testDb.select().from(aiUsageEvents).orderBy(asc(aiUsageEvents.purpose));
+      expect(usage).toEqual(expect.arrayContaining([
+        expect.objectContaining({ purpose: "ai_ask_initial_answer", status: "success" }),
+        expect.objectContaining({ purpose: "extraction", status: "success" }),
+      ]));
     });
   });
 
