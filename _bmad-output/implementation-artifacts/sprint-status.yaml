@@ -101,6 +101,13 @@ development_status:
   5-8-validate-web-search-fallback-quality: done
   5-9-record-ai-usage-events: done
   epic-5-retrospective: done
+  epic-ui: in-progress
+  ui-1-public-logged-out-homepage-redesign: ready-for-dev
+  ui-2-authenticated-empty-ai-ask-shell-redesign: ready-for-dev
+  ui-3-active-three-panel-ai-ask-shell: ready-for-dev
+  ui-4-selectable-answer-entities-and-detail-panel: ready-for-dev
+  ui-5-mobile-sidebar-and-detail-drawers: ready-for-dev
+  epic-ui-retrospective: optional
   epic-6: backlog
   6-1-detect-children-and-family-travel-needs: backlog
   6-2-family-aware-driving-and-stop-recommendations: backlog
