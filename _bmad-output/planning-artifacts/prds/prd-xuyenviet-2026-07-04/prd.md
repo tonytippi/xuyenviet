@@ -2,7 +2,7 @@
 title: XuyenViet AI Travel Information MVP PRD
 status: final
 created: 2026-07-04
-updated: 2026-07-07
+updated: 2026-07-10
 ---
 
 # XuyenViet AI Travel Information MVP PRD
@@ -28,7 +28,7 @@ The MVP is not a complete travel marketplace, booking product, Google Maps repla
 - Booking, payments, credit wallets, reward balances, referral payouts, ranking-based rewards, or partner transaction flows.
 - Affiliate automation or commission-based answer ranking.
 - Google Maps integration for the first cut.
-- Fully automated scraping at scale.
+- Fully automated scraping at scale or bypassing third-party access controls.
 - Public user submissions as a dependency for first release.
 - Complete nationwide coverage.
 - Polished standalone UIs for every information category.
@@ -78,6 +78,7 @@ Internal owner or future small operations team member who collects travel inform
 ### 6.2 Should Have
 
 - AI-assisted extraction from pasted URLs, text, copied Facebook post content, or images/screenshots.
+- Operator-assisted Facebook capture automation for queued Facebook URLs, using a controlled browser session to populate operator-only raw source text before AI extraction.
 - Family-aware planning rules for travelers with children.
 - Answer quality checks that push responses toward practical tips, risks, and next steps.
 - Basic operator roles prepared for future multi-operator workflows. [ASSUMPTION: first release can start with one admin/operator role and expand later.]
@@ -110,10 +111,12 @@ Internal owner or future small operations team member who collects travel inform
 
 1. Operator opens the admin knowledge area.
 2. Operator pastes a source URL, raw text, copied post content, or image/screenshot.
-3. AI proposes one or more structured knowledge cards.
-4. Operator reviews, edits, tags, and sets confidence/freshness flags.
-5. Operator approves the cards.
-6. Approved cards become available for AI retrieval.
+3. If the source is a Facebook URL without readable text, the source remains queued for operator-assisted capture.
+4. Operator runs the controlled capture tool against queued Facebook URLs and confirms the extracted visible text before it is stored as operator-only raw source material.
+5. AI proposes one or more structured knowledge cards from readable raw material.
+6. Operator reviews, edits, tags, and sets confidence/freshness flags.
+7. Operator approves the cards.
+8. Approved cards become available for AI retrieval.
 
 ## 8. Functional Requirements
 
@@ -154,6 +157,8 @@ Internal owner or future small operations team member who collects travel inform
 ### 8.4 Knowledge Collection
 
 - FR-23: Operators shall be able to submit raw source material as URL, raw text, copied post content, or image/screenshot.
+- FR-23A: The system shall support queued Facebook URLs whose visible post content can be captured later by an operator-run browser automation tool.
+- FR-23B: Facebook capture automation shall populate operator-only raw source material only after operator-visible content is extracted and confirmed; it shall not store browser credentials, cookies, tokens, local storage, full HTML dumps, or hidden page data.
 - FR-24: The system shall use AI to propose structured knowledge cards from submitted source material.
 - FR-25: The system shall require human approval before extracted cards become searchable by AI.
 - FR-26: The system shall support confidence labels such as unverified, community, curated, partner, or official. [ASSUMPTION: exact label names can be refined during UX/architecture.]
@@ -200,6 +205,7 @@ Internal owner or future small operations team member who collects travel inform
 - NFR-5: The system shall support Vietnamese content input, retrieval, and output.
 - NFR-6: The MVP shall tolerate sparse internal knowledge by using web search fallback and clearly labeling uncertainty.
 - NFR-7: The system shall be designed so Google Maps integration, public submissions, and booking/partner flows can be added later without becoming MVP dependencies.
+- NFR-8: Browser automation for Facebook capture shall run as an operator-controlled operations tool, not as public request-path app logic or unattended mass crawling.
 
 ## 10. MVP Product Contracts
 
@@ -294,6 +300,7 @@ The public MVP should focus on the Hanoi-to-HCMC road-trip corridor. Initial kno
 - AC-7: The system stores and reuses non-sensitive context within chat sessions and trip projects owned by the authenticated user.
 - AC-8: The user can correct trip details through chat and delete chat sessions or trip projects they own.
 - AC-9: An operator can submit raw source material, review AI-extracted card drafts, approve cards, and make approved cards retrievable by AI.
+- AC-9A: An operator can queue Facebook URLs, run operator-assisted capture to add readable raw text, and then use the existing AI extraction and review flow without changing Facebook-derived trust defaults.
 - AC-10: At least 100 approved knowledge cards exist for the Hanoi-to-HCMC corridor before first public-MVP evaluation.
 - AC-11: Web search fallback is used only when curated knowledge is missing, sparse, or freshness-sensitive, and search-derived facts are labeled as external/unverified.
 - AC-12: Public MVP answer feedback is captured for usefulness evaluation.
@@ -313,11 +320,12 @@ The public MVP should focus on the Hanoi-to-HCMC road-trip corridor. Initial kno
 - R-4: Sparse initial knowledge may make XuyenViet feel no better than generic AI.
 - R-5: Chat/project data retention may create user expectations that need clear product wording.
 - R-6: Vietnamese language quality and local nuance may be insufficient if prompts, data, or evaluation are weak.
+- R-7: Facebook browser automation may be fragile because page structure, login state, access permissions, and third-party terms can change.
 
 ## 15. Open Questions
 
 - OQ-1: What web search provider or mechanism will be used?
 - OQ-2: Should users see full source URLs directly, summarized source labels, or both?
 - OQ-3: What exact privacy-policy wording is required for AI Gateway-backed chat and trip-project processing?
-- OQ-4: How should operators handle Facebook content reuse constraints beyond retaining provenance?
+- OQ-4: What detailed Facebook content reuse policy should govern captured post text retention, operator review, quoting, and deletion beyond provenance and non-official labeling?
 - OQ-5: Should AI-generated image output become an MVP workflow, or remain deferred until after text/image-input planning is validated?

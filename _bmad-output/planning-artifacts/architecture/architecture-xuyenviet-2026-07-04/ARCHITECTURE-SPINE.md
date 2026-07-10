@@ -2,7 +2,7 @@
 title: XuyenViet AI Travel Information MVP Architecture Spine
 status: final
 created: 2026-07-04
-updated: 2026-07-09
+updated: 2026-07-10
 altitude: project MVP
 source_prd: ../../prds/prd-xuyenviet-2026-07-04/prd.md
 ---
@@ -34,6 +34,8 @@ flowchart LR
   ChatContext --> DB[(PostgreSQL + pgvector)]
   Retrieval --> DB
   Knowledge --> DB
+  Capture[Operator Facebook Capture Tool] --> Knowledge
+  Capture --> DB
   Auth --> DB
   Chat --> DB
   Search --> Tavily[Tavily Seed Provider]
@@ -141,6 +143,22 @@ Rule: Every approved card links to at least one normalized `sources` row through
 Rule: Knowledge collection accepts URL, raw text, copied post content, and image/screenshot inputs. Image/screenshot ingestion stores file metadata and operator-only raw material, extracts text/vision notes for operator review, and preserves the image-derived provenance before card approval.
 
 Rule: Traveler answer source bundles must not include `raw_source_material.raw_text` or operator-only fields; operator/admin retrieval paths are separate role-checked functions.
+
+### AD-7A: Facebook Capture Is Operator-Controlled And Raw-Material Only
+
+Binds: queued Facebook URL intake, browser automation capture, raw source material persistence, and later AI extraction.
+
+Prevents: Facebook URL ingestion diverging into public request-path scraping, stored Facebook credentials, unreviewed traveler-visible content, or automated trust upgrades.
+
+Rule: Facebook URLs are first-class `sources` rows with `kind = facebook`; a URL without readable raw text is a queued source, not a failed source and not an AI-readable source.
+
+Rule: The capture mechanism is an operations tool, seeded as a Playwright-based browser automation script using an operator-controlled persistent browser profile on the Ubuntu Desktop operations machine. It is not part of the public traveler request path and must not run from user-triggered web requests.
+
+Rule: The capture tool may read queued Facebook sources, open the canonical URL in the operator's visible browser session, extract visible post text and safe capture metadata, show a confirmation preview, then update the existing `raw_source_material` row. It must not store or persist Facebook cookies, access tokens, local storage, passwords, full HTML dumps, hidden page data, or browser profile data in PostgreSQL.
+
+Rule: Captured Facebook text remains operator-only raw source material. AI extraction can create drafts from it only through the existing knowledge workflow, and every resulting card keeps Facebook/community trust defaults unless an operator explicitly changes source metadata under the approved source policy.
+
+Rule: Capture writes must be auditable as operator/admin mutations where practical: source ID, actor or operations identity, capture timestamp, capture method, before/after raw-text presence, and non-sensitive error summary on failure.
 
 ### AD-8: AI Ask Uses A Fixed Context Priority Pipeline
 
@@ -362,12 +380,14 @@ Production must have:
 - Logging for model provider, search provider, latency, failures, and answer provenance IDs.
 - User-owned deletion path for chat sessions and trip projects.
 - Backup/restore path for PostgreSQL before public user onboarding.
+- Facebook capture, if enabled, must run from an operator-controlled operations environment with a separate local browser profile and no stored Facebook credentials in application secrets or the database.
 
 ## Deferred
 
 - Final deployment provider and hosted PostgreSQL provider.
 - Final privacy-policy wording after provider setting verification.
 - Facebook content reuse policy beyond provenance and non-official labeling.
+- Whether Facebook capture needs explicit per-source retention/deletion controls before broader operator use.
 - Dedicated self-service privacy dashboard beyond chat/trip deletion.
 - Google Maps integration.
 - AI-generated image output until a concrete traveler or operator workflow is approved.

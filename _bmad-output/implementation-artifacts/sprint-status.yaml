@@ -1,5 +1,5 @@
 # generated: 2026-07-05
-# last_updated: 2026-07-09
+# last_updated: 2026-07-10
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -41,7 +41,7 @@
 # - Retrospective appends its action items to action_items; sprint-status surfaces open ones
 
 generated: 2026-07-05
-last_updated: 2026-07-09
+last_updated: 2026-07-10
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -77,8 +77,9 @@ development_status:
   3-6-delete-chat-sessions: done
   3-7-delete-trip-projects: done
   epic-3-retrospective: done
-  epic-4: done
+  epic-4: in-progress
   4-1-submit-travel-source-for-ai-reading: done
+  4-1a-capture-queued-facebook-source-text-with-operator-browser-automation: ready-for-dev
   4-2-ai-extracts-knowledge-drafts-from-source: done
   4-3-review-and-edit-ai-prepared-drafts: done
   4-4-ai-suggests-create-or-update-from-source-url: done

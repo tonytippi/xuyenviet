@@ -72,6 +72,10 @@ FR-22: Knowledge cards shall preserve source provenance enough for users or oper
 
 FR-23: Operators shall be able to submit raw source material as URL, raw text, copied post content, or image/screenshot.
 
+FR-23A: The system shall support queued Facebook URLs whose visible post content can be captured later by an operator-run browser automation tool.
+
+FR-23B: Facebook capture automation shall populate operator-only raw source material only after operator-visible content is extracted and confirmed; it shall not store browser credentials, cookies, tokens, local storage, full HTML dumps, or hidden page data.
+
 FR-24: The system shall use AI to propose structured knowledge cards from submitted source material.
 
 FR-25: The system shall require human approval before extracted cards become searchable by AI.
@@ -141,6 +145,8 @@ NFR-5: The system shall support Vietnamese content input, retrieval, and output.
 NFR-6: The MVP shall tolerate sparse internal knowledge by using web search fallback and clearly labeling uncertainty.
 
 NFR-7: The system shall be designed so Google Maps integration, public submissions, and booking/partner flows can be added later without becoming MVP dependencies.
+
+NFR-8: Browser automation for Facebook capture shall run as an operator-controlled operations tool, not as public request-path app logic or unattended mass crawling.
 
 ### Additional Requirements
 
@@ -280,6 +286,10 @@ FR-22: Epic 4 - Source provenance preservation
 
 FR-23: Epic 4 - Raw source submission formats
 
+FR-23A: Epic 4 - Queued Facebook URL capture
+
+FR-23B: Epic 4 - Operator-only confirmed Facebook raw material capture
+
 FR-24: Epic 4 - AI-assisted card extraction
 
 FR-25: Epic 4 - Human approval before retrieval
@@ -358,7 +368,7 @@ Travelers can organize planning across chat sessions and trip projects, reuse re
 
 Operators can submit travel links or copied content, AI prepares structured knowledge drafts, operators approve useful items, and approved knowledge becomes available for traveler answers.
 
-**FRs covered:** FR-17, FR-18, FR-19, FR-20, FR-21, FR-22, FR-23, FR-24, FR-25, FR-26, FR-27, FR-28
+**FRs covered:** FR-17, FR-18, FR-19, FR-20, FR-21, FR-22, FR-23, FR-23A, FR-23B, FR-24, FR-25, FR-26, FR-27, FR-28
 
 ### Epic 5: Grounded Retrieval, Web Search, And Provenance
 
@@ -944,6 +954,48 @@ So that AI can read travel information and prepare it for review.
 **When** the operator submits it
 **Then** the system shows a recoverable error
 **And** no approved knowledge is created automatically.
+
+### Story 4.1A: Capture Queued Facebook Source Text With Operator Browser Automation
+
+As an operator,
+I want a Playwright-based operations tool to capture readable text from queued Facebook URLs,
+So that Facebook sources can enter the existing AI extraction workflow without manual copy/paste for every post.
+
+**Acceptance Criteria:**
+
+**Given** Facebook sources exist with `kind=facebook` and no readable raw text
+**When** the operator runs the capture tool with a limit or source ID
+**Then** the tool lists or selects only queued Facebook sources that still need raw text
+**And** it does not process non-Facebook sources or sources that already have raw text unless an explicit safe override is later approved.
+
+**Given** the capture tool opens a Facebook URL
+**When** the operator's persistent browser profile has access to the post
+**Then** the tool extracts visible post text and safe metadata such as capture method, captured timestamp, source URL, final URL, author text when visible, and timestamp text when visible
+**And** it does not persist cookies, access tokens, local storage, passwords, full HTML dumps, hidden page data, or browser profile data.
+
+**Given** visible text is extracted
+**When** the tool prepares to write to PostgreSQL
+**Then** it shows an operator confirmation preview before updating `raw_source_material.rawText`
+**And** the operator can skip the source without changing the database.
+
+**Given** the operator confirms the captured text
+**When** the update is saved
+**Then** the existing `raw_source_material` row is updated with the captured raw text and safe `rawMetadata`
+**And** the linked `sources` row remains Facebook/community/unverified with `official=false` and `partner=false` unless separately changed by an approved operator workflow.
+
+**Given** the Facebook URL is inaccessible, blocked, expired, requires permissions the operator does not have, or selectors fail
+**When** capture runs
+**Then** the tool records or displays a non-sensitive failure reason
+**And** no raw text is fabricated or written.
+
+**Given** captured raw text exists for the source
+**When** the operator runs AI extraction
+**Then** the existing Story 4.2 extraction flow can create review-needed drafts from that source
+**And** no draft is approved or made retrievable without human review.
+
+**Given** capture writes to source material
+**When** audit support is available from the operations context
+**Then** an audit event records source ID, operation identity or actor, capture method, timestamp, and before/after raw-text presence without storing captured post text in the audit summary.
 
 ### Story 4.2: AI Extracts Knowledge Drafts From Source
 
