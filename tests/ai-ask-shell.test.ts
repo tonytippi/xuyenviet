@@ -59,6 +59,8 @@ function findUsageEvent(rows: Array<typeof aiUsageEvents.$inferSelect>, purpose:
 async function renderAuthenticatedAiAskShell(searchParams: Record<string, string> = {}) {
   vi.doMock("@/server/auth", () => ({
     getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
+    getAuthenticatedSessionWithRoles: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com", roles: [] }),
+    hasAdminAccess: vi.fn((roles: string[]) => roles.includes("admin") || roles.includes("operator")),
   }));
   vi.doMock("@/features/auth/actions", () => ({
     signOutCurrentUser: vi.fn(),
@@ -91,6 +93,8 @@ describe("AI Ask authenticated shell", () => {
     expect(html).toContain("tony@example.com");
     expect(html).toContain("Đăng xuất");
     expect(html).toContain("Danh sách trò chuyện và dự án chuyến đi");
+    expect(html).toContain("Tài khoản và quyền riêng tư");
+    expect(html).toContain("Về trang giới thiệu");
     expect(html).toContain("Mình sẽ đi đâu?");
     expect(html).toContain("Bắt đầu bằng một câu hỏi tự nhiên");
     expect(html).toContain("Hà Nội đi Đà Nẵng 7 ngày cùng gia đình");
@@ -163,6 +167,28 @@ describe("AI Ask authenticated shell", () => {
     expect(sheetMarkup).toContain("<ConversationList");
     expect(source).toContain("sessionSheetPreviousFocusRef.current?.focus()");
     expect(source).toContain("sessionSheetPanelRef.current?.focus()");
+    expect(source).toContain("sessionSheetPreviousFocusRef.current = textareaRef.current");
+    expect(source).toContain("aria-label=\"Mở danh sách trò chuyện, dự án chuyến đi và tài khoản\"");
+    expect(source).toContain("aria-label=\"Tài khoản và quyền riêng tư\"");
+    expect(source).toContain("canAccessAdmin ?");
+  });
+
+  test("composer source keeps mobile sidebar and selected detail as separate accessible drawers", () => {
+    const source = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
+    const sheetStart = source.indexOf('role="dialog" aria-modal="true" aria-label="Danh sách trò chuyện và dự án chuyến đi"');
+    const detailStart = source.indexOf('role="dialog" aria-modal="true" aria-label="Bảng chi tiết đã chọn"');
+    const detailMarkup = source.slice(detailStart, source.indexOf("</div>", detailStart));
+
+    expect(sheetStart).toBeGreaterThan(-1);
+    expect(detailStart).toBeGreaterThan(-1);
+    expect(detailStart).toBeGreaterThan(sheetStart);
+    expect(source).toContain("selectedAnswerEntity && !isSessionSheetOpen");
+    expect(source).toContain("Đóng bảng chi tiết đã chọn");
+    expect(source).toContain("mobileAnswerDetailDialogRef");
+    expect(source).toContain("getFocusableElements(activeDialog)");
+    expect(source).toContain("document.body.style.overflow = \"hidden\"");
+    expect(detailMarkup).toContain("bottom-0 left-0 right-0");
+    expect(detailMarkup).not.toContain("<ConversationList");
   });
 
   test("starter cards preserve an existing public ask draft", () => {

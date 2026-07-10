@@ -91,3 +91,6 @@
 - source_spec: `spec-ui-4-selectable-answer-entities-and-detail-panel.md`
   summary: Add DOM interaction coverage for answer detail selection and close behavior.
   evidence: UI.4 currently verifies selection contracts mostly through server-rendered markup and source assertions. Click selection, Escape close, selected-state updates, and focus restoration need a browser/DOM interaction harness such as Testing Library/user-event or Playwright to catch behavioral regressions.
+- source_spec: `spec-ui-5-mobile-sidebar-and-detail-drawers.md`
+  summary: Add browser interaction coverage for mobile sidebar/detail drawers when a DOM or E2E harness exists.
+  evidence: UI.5 has static/source assertions and server-render checks, but Tab cycling, Escape, focus restoration, scroll-lock cleanup, and admin/non-admin mobile drawer visibility are best verified with a browser-capable test harness rather than brittle source assertions.

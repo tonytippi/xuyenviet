@@ -6,7 +6,7 @@ import { normalizePublicAskDraft } from "@/features/auth/redirects";
 import { getOwnedConversation, listOwnedConversations } from "@/features/chat-trips/conversations";
 import { createTripProjectFromForm, deleteConversationAction, deleteTripProjectAction } from "@/features/chat-trips/actions";
 import { getOwnedTripProjectSummary, listOwnedTripProjects } from "@/features/chat-trips/trip-projects";
-import { getAuthenticatedSession } from "@/server/auth";
+import { getAuthenticatedSessionWithRoles, hasAdminAccess } from "@/server/auth";
 
 type AiAskPageProps = {
   searchParams?: Promise<{
@@ -31,7 +31,7 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
   const publicDraft = normalizePublicAskDraft(getFirstParam(params?.draft));
   const requestedConversationId = getFirstParam(params?.conversationId)?.trim();
   const requestedTripProjectId = getFirstParam(params?.tripProjectId)?.trim();
-  const session = await getAuthenticatedSession();
+  const session = await getAuthenticatedSessionWithRoles();
 
   if (!session) {
     const signInParams = new URLSearchParams({ next: "/ai-ask" });
@@ -120,6 +120,8 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
             initialSessions={initialSessions}
             initialTripProjects={initialTripProjects}
             selectedTripProject={selectedTripProjectForComposer}
+            userEmail={session.email}
+            canAccessAdmin={hasAdminAccess(session.roles)}
             createTripProjectAction={createTripProjectFromForm}
             deleteConversationAction={deleteConversationAction}
             deleteTripProjectAction={deleteTripProjectAction}

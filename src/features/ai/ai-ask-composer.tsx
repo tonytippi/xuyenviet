@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useActionState, useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from "react";
 
 import { ConversationList, type ChatSessionSummary } from "@/features/chat-trips/conversation-list";
@@ -86,6 +87,8 @@ type AiAskComposerProps = {
   initialSessions?: ChatSessionSummary[];
   initialTripProjects?: TripProjectSummary[];
   selectedTripProject?: TripProjectSummary | null;
+  userEmail?: string;
+  canAccessAdmin?: boolean;
   createTripProjectAction?: CreateTripProjectAction;
   deleteConversationAction?: DeleteConversationAction;
   deleteTripProjectAction?: DeleteTripProjectAction;
@@ -292,6 +295,14 @@ export function AnswerDetailPanel({ selectedEntity, panelId, panelRef, onClose }
   );
 }
 
+function getFocusableElements(container: HTMLElement) {
+  return Array.from(
+    container.querySelectorAll<HTMLElement>(
+      'button:not(:disabled), [href], input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])',
+    ),
+  ).filter((element) => element.offsetParent !== null && !element.closest("[inert], [aria-hidden='true']"));
+}
+
 export function AiAskComposer({
   initialQuestion = "",
   initialConversationId,
@@ -299,6 +310,8 @@ export function AiAskComposer({
   initialSessions = emptySessions,
   initialTripProjects = emptyTripProjects,
   selectedTripProject = null,
+  userEmail,
+  canAccessAdmin = false,
   createTripProjectAction,
   deleteConversationAction,
   deleteTripProjectAction,
@@ -342,6 +355,7 @@ export function AiAskComposer({
   const sessionSheetTriggerRef = useRef<HTMLButtonElement>(null);
   const sessionSheetPanelRef = useRef<HTMLDivElement>(null);
   const sessionSheetPreviousFocusRef = useRef<HTMLElement | null>(null);
+  const mobileAnswerDetailDialogRef = useRef<HTMLDivElement>(null);
   const mobileAnswerDetailPanelRef = useRef<HTMLDivElement>(null);
   const desktopAnswerDetailPanelRef = useRef<HTMLDivElement>(null);
   const answerEntityTriggerRef = useRef<HTMLElement | null>(null);
@@ -406,6 +420,64 @@ export function AiAskComposer({
   }, [isSessionSheetOpen, selectedAnswerEntity]);
 
   useEffect(() => {
+    const activeDialog = mobileAnswerDetailDialogRef.current;
+    const composer = textareaRef.current;
+
+    if (!selectedAnswerEntity || isSessionSheetOpen || !activeDialog || window.matchMedia("(min-width: 1024px)").matches) {
+      return;
+    }
+
+    const dialog = activeDialog;
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Tab") {
+        return;
+      }
+
+      const focusableElements = getFocusableElements(dialog);
+
+      if (focusableElements.length === 0) {
+        event.preventDefault();
+        dialog.focus();
+        return;
+      }
+
+      const firstElement = focusableElements[0];
+      const lastElement = focusableElements[focusableElements.length - 1];
+      const activeElement = document.activeElement;
+
+      if (!activeElement || !dialog.contains(activeElement)) {
+        event.preventDefault();
+        (event.shiftKey ? lastElement : firstElement).focus();
+      } else if (event.shiftKey && activeElement === firstElement) {
+        event.preventDefault();
+        lastElement.focus();
+      } else if (!event.shiftKey && activeElement === lastElement) {
+        event.preventDefault();
+        firstElement.focus();
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = previousOverflow;
+
+      if (document.activeElement instanceof HTMLElement && dialog.contains(document.activeElement)) {
+        const trigger = answerEntityTriggerRef.current;
+        if (trigger?.isConnected) {
+          trigger.focus();
+        } else {
+          composer?.focus();
+        }
+      }
+    };
+  }, [isSessionSheetOpen, selectedAnswerEntity]);
+
+  useEffect(() => {
     function handleShortcut(event: globalThis.KeyboardEvent) {
       const target = event.target as HTMLElement | null;
       const isTyping = target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.isContentEditable;
@@ -464,11 +536,7 @@ export function AiAskComposer({
         return;
       }
 
-      const focusableElements = Array.from(
-        sessionSheetPanelRef.current.querySelectorAll<HTMLElement>(
-          'button:not(:disabled), [href], input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])',
-        ),
-      );
+      const focusableElements = getFocusableElements(sessionSheetPanelRef.current);
 
       if (focusableElements.length === 0) {
         event.preventDefault();
@@ -673,7 +741,10 @@ export function AiAskComposer({
       return;
     }
 
-    setSessionSheetOpen(false);
+    if (isSessionSheetOpen) {
+      sessionSheetPreviousFocusRef.current = textareaRef.current;
+      setSessionSheetOpen(false);
+    }
     const searchParams = new URLSearchParams({ conversationId: id });
     if (activeTripProjectId) searchParams.set("tripProjectId", activeTripProjectId);
     router.push(`/ai-ask?${searchParams.toString()}`);
@@ -730,7 +801,10 @@ export function AiAskComposer({
       return;
     }
 
-    setSessionSheetOpen(false);
+    if (isSessionSheetOpen) {
+      sessionSheetPreviousFocusRef.current = textareaRef.current;
+      setSessionSheetOpen(false);
+    }
     setMessages([]);
     setConversationId(undefined);
     setQuestion("");
@@ -772,6 +846,11 @@ export function AiAskComposer({
     if (deletingTripProjectIdRef.current) {
       setStatus("Vui lòng chờ thao tác xoá dự án chuyến đi hoàn tất trước khi đổi dự án.");
       return;
+    }
+
+    if (isSessionSheetOpen) {
+      sessionSheetPreviousFocusRef.current = textareaRef.current;
+      setSessionSheetOpen(false);
     }
 
     router.push(projectId ? `/ai-ask?tripProjectId=${encodeURIComponent(projectId)}` : "/ai-ask");
@@ -917,6 +996,24 @@ export function AiAskComposer({
     </section>
   );
 
+  const accountPrivacyLinks = (
+    <section className="rounded-[1.25rem] border border-[#d8c9ad] bg-white/75 p-4 text-left" aria-label="Tài khoản và quyền riêng tư">
+      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#8c4f13]">Tài khoản</p>
+      {userEmail ? <p className="mt-2 break-words text-sm font-semibold text-[#17342c]">{userEmail}</p> : null}
+      <p className="mt-2 text-sm leading-6 text-[#4f625a]">Chat và dự án chuyến đi thuộc tài khoản của bạn. Dùng các nút xoá hiển thị sẵn để xoá hội thoại hoặc ngữ cảnh dự án.</p>
+      <div className="mt-3 flex flex-col gap-2">
+        {canAccessAdmin ? (
+          <Link className="min-h-11 rounded-2xl bg-[#17342c] px-4 py-3 text-center text-sm font-semibold text-white transition hover:bg-[#24483e] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]" href="/admin">
+            Vào khu vực quản trị
+          </Link>
+        ) : null}
+        <Link className="min-h-11 rounded-2xl border border-[#d8c9ad] bg-[#fffdf8] px-4 py-3 text-center text-sm font-semibold text-[#17342c] transition hover:bg-white focus:outline-none focus:ring-4 focus:ring-[#e5bd82]" href="/">
+          Về trang giới thiệu
+        </Link>
+      </div>
+    </section>
+  );
+
   return (
     <>
       <nav aria-label="Danh sách trò chuyện và dự án chuyến đi" className="hidden min-h-0 flex-col gap-3 lg:col-start-1 lg:row-start-1 lg:flex">
@@ -931,6 +1028,7 @@ export function AiAskComposer({
           />
         </div>
         {planningScope}
+        {accountPrivacyLinks}
       </nav>
 
       <div className="flex min-h-[34rem] min-w-0 flex-col justify-between gap-5 rounded-[1.5rem] border border-[#d8c9ad] bg-[radial-gradient(circle_at_50%_0%,rgba(20,83,45,0.1),transparent_30%),#fffdf8] p-4 sm:p-5 lg:col-start-2 lg:row-start-1 lg:w-full xl:max-w-[760px]">
@@ -938,7 +1036,12 @@ export function AiAskComposer({
           <button
             ref={sessionSheetTriggerRef}
             type="button"
-            onClick={() => setSessionSheetOpen(true)}
+            onClick={() => {
+              setSelectedAnswerEntity(null);
+              answerEntityTriggerRef.current = null;
+              setSessionSheetOpen(true);
+            }}
+            aria-label="Mở danh sách trò chuyện, dự án chuyến đi và tài khoản"
             className="min-h-11 rounded-2xl border border-[#d8c9ad] bg-white/75 px-4 py-2 text-sm font-semibold text-[#17342c] transition hover:bg-white focus:outline-none focus:ring-4 focus:ring-[#e5bd82]"
           >
             Danh sách trò chuyện
@@ -996,12 +1099,6 @@ export function AiAskComposer({
                   ) : null}
                 </article>
               ))}
-            </section>
-          ) : null}
-
-          {showContextPanel && selectedAnswerEntity ? (
-            <section aria-label="Bảng chi tiết đã chọn" className="rounded-[1.5rem] border border-[#d8c9ad] bg-[linear-gradient(180deg,#fffdf8_0%,#ffffff_42%,#f7fbf8_100%)] p-4 text-[#17342c] shadow-[0_16px_40px_rgba(41,33,18,0.08)] lg:hidden">
-              <AnswerDetailPanel selectedEntity={selectedAnswerEntity} panelId={mobileAnswerDetailPanelId} panelRef={mobileAnswerDetailPanelRef} onClose={closeAnswerDetailPanel} />
             </section>
           ) : null}
 
@@ -1148,7 +1245,24 @@ export function AiAskComposer({
                   onDelete={deleteConversationAction ? handleDeleteSession : undefined}
                   onNewChat={handleNewChat}
                 />
+                <div className="mt-3">
+                  {accountPrivacyLinks}
+                </div>
             </div>
+          </div>
+        ) : null}
+
+        {showContextPanel && selectedAnswerEntity && !isSessionSheetOpen ? (
+          <div ref={mobileAnswerDetailDialogRef} tabIndex={-1} className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true" aria-label="Bảng chi tiết đã chọn">
+            <button
+              type="button"
+              aria-label="Đóng bảng chi tiết đã chọn"
+              onClick={closeAnswerDetailPanel}
+              className="absolute inset-0 bg-[#17342c]/40"
+            />
+            <section className="absolute bottom-0 left-0 right-0 max-h-[82vh] overflow-y-auto rounded-t-[1.5rem] border border-[#d8c9ad] bg-[linear-gradient(180deg,#fffdf8_0%,#ffffff_42%,#f7fbf8_100%)] p-4 text-[#17342c] shadow-[0_-24px_80px_rgba(41,33,18,0.24)]" aria-label="Chi tiết nguồn hoặc cảnh báo đã chọn">
+              <AnswerDetailPanel selectedEntity={selectedAnswerEntity} panelId={mobileAnswerDetailPanelId} panelRef={mobileAnswerDetailPanelRef} onClose={closeAnswerDetailPanel} />
+            </section>
           </div>
         ) : null}
       </div>
