@@ -105,7 +105,7 @@ development_status:
   ui-1-public-logged-out-homepage-redesign: done
   ui-2-authenticated-empty-ai-ask-shell-redesign: done
   ui-3-active-three-panel-ai-ask-shell: done
-  ui-4-selectable-answer-entities-and-detail-panel: ready-for-dev
+  ui-4-selectable-answer-entities-and-detail-panel: done
   ui-5-mobile-sidebar-and-detail-drawers: ready-for-dev
   epic-ui-retrospective: optional
   epic-6: backlog

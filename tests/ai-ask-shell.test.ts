@@ -5,6 +5,7 @@ import { asc, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { aiGatewayModels, aiUsageEvents, assistantResponseProvenance, assistantRetrievalDecisions, conversations, messageImageAttachments, messages, tripProjects, users } from "@/db/schema";
+import type { AnswerEntityDescriptor } from "@/features/ai/ai-ask-composer";
 
 import { testDb } from "./helpers/db";
 
@@ -101,7 +102,7 @@ describe("AI Ask authenticated shell", () => {
     expect(html).toContain("Câu hỏi của bạn");
     expect(html).toContain("Gửi câu hỏi");
     expect(html).not.toContain("Gợi ý câu hỏi</h2>");
-    expect(html).not.toContain("Bảng chi tiết");
+    expect(html).not.toContain("Bảng chi tiết đã chọn");
     expect(html).not.toContain("Bảng ngữ cảnh hội thoại");
     expect(html).not.toContain("Chưa có chi tiết được chọn");
     expect(html).not.toContain("right detail panel");
@@ -126,7 +127,7 @@ describe("AI Ask authenticated shell", () => {
     expect(html).toContain("Chọn chi tiết trong câu trả lời");
     expect(html).toContain("Chưa có chi tiết được chọn");
     expect(html).toContain("không tự tạo thông tin chi tiết từ nội dung trả lời");
-    expect(html).not.toContain("Bảng chi tiết");
+    expect(html).toContain("Bảng chi tiết đã chọn");
     expect(html).not.toContain("source-chip");
   });
 
@@ -261,6 +262,10 @@ describe("AI Ask authenticated shell", () => {
     expect(html).toContain("Bãi đỗ chính thức Huế");
     expect(html).toContain("Nguồn web cập nhật");
     expect(html).toContain("Nguồn không an toàn");
+    expect(html).toContain("Xem chi tiết nguồn: Bãi đỗ chính thức Huế");
+    expect(html).toContain('aria-pressed="false"');
+    expect(html).not.toContain('role="option"');
+    expect(html).not.toContain('aria-selected="false"');
     expect(html).toContain("https://xuyenviet.example/hue-parking");
     expect(html).toContain("hue.gov.vn/ticket");
     expect(html).toContain("8/7/2026");
@@ -275,6 +280,86 @@ describe("AI Ask authenticated shell", () => {
     expect(html).not.toContain("javascript:alert");
     expect(html).not.toContain("source-chip");
     expect(html).not.toContain("[1]");
+  });
+
+  test("renders selected answer detail panel from a transient safe descriptor", async () => {
+    const { AnswerDetailPanel } = await import("@/features/ai/ai-ask-composer");
+    const selectedEntity: AnswerEntityDescriptor = {
+      type: "source",
+      label: "Nguồn web cập nhật",
+      section: "Nguồn và độ tin cậy",
+      sourceCategory: "web",
+      owner: { table: "assistant_response_provenance", id: "provenance-1" },
+      detail: {
+        "Loại": "Web chưa xác minh",
+        "URL": "https://hue.gov.vn/ticket",
+        "Ngày kiểm tra": "9/7/2026",
+        "Độ tin cậy": "chưa xác minh",
+        "Độ mới": "Thông tin có thể thay đổi, cần kiểm tra lại trước khi đi hoặc đặt dịch vụ.",
+      },
+      provenanceIds: ["provenance-1"],
+    };
+
+    const html = renderToStaticMarkup(createElement(AnswerDetailPanel, { selectedEntity, onClose: () => undefined }));
+
+    expect(html).toContain("Chi tiết đã chọn");
+    expect(html).toContain("Nguồn web cập nhật");
+    expect(html).toContain("Đây là nguồn web bên ngoài và vẫn chưa xác minh");
+    expect(html).toContain("Thông tin nhanh");
+    expect(html).toContain("Web chưa xác minh");
+    expect(html).toContain("https://hue.gov.vn/ticket");
+    expect(html).toContain("9/7/2026");
+    expect(html).toContain("Thông tin có thể thay đổi");
+    expect(html).toContain("Provenance liên quan");
+    expect(html).toContain("Nguồn 1");
+    expect(html).not.toContain("#provenance-1");
+    expect(html).toContain("Đóng bảng chi tiết");
+    expect(html).not.toContain("raw_source_material");
+    expect(html).not.toContain("providerScore");
+    expect(html).not.toContain("operator");
+  });
+
+  test("labels selected general reasoning as unverified without a fake source URL", async () => {
+    const { AnswerDetailPanel } = await import("@/features/ai/ai-ask-composer");
+    const selectedEntity: AnswerEntityDescriptor = {
+      type: "source",
+      label: "Suy luận tổng quát của AI",
+      section: "Nguồn và độ tin cậy",
+      sourceCategory: "general",
+      detail: {
+        "Loại": "Suy luận",
+        "Độ tin cậy": "suy luận chưa xác minh",
+        "Nhãn nguồn": "Không phải nguồn đã xác minh",
+      },
+      provenanceIds: ["general-1"],
+    };
+
+    const html = renderToStaticMarkup(createElement(AnswerDetailPanel, { selectedEntity, onClose: () => undefined }));
+
+    expect(html).toContain("Suy luận tổng quát của AI");
+    expect(html).toContain("chưa được xác minh");
+    expect(html).toContain("Không phải nguồn đã xác minh");
+    expect(html).not.toContain("Mở nguồn tham khảo");
+    expect(html).not.toContain("https://");
+  });
+
+  test("composer source keeps answer entity selection transient, accessible, and provenance-only", () => {
+    const source = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
+
+    expect(source).toContain("type AnswerEntityDescriptor");
+    expect(source).toContain("const [selectedAnswerEntity, setSelectedAnswerEntity] = useState<AnswerEntityDescriptor | null>(null)");
+    expect(source).toContain("createProvenanceAnswerEntityDescriptor(item)");
+    expect(source).toContain("owner: { table: \"assistant_response_provenance\", id: item.id }");
+    expect(source).toContain("aria-pressed={selectedEntityId === item.id}");
+    expect(source).toContain("Bảng chi tiết đã chọn");
+    expect(source).toContain("focus:ring-4 focus:ring-[#8fb59f]/45");
+    expect(source).toContain("event.key !== \"Escape\"");
+    expect(source).toContain("isSessionSheetOpen || isTyping");
+    expect(source).toContain("answerEntityTriggerRef.current?.focus()");
+    expect(source).not.toContain("localStorage");
+    expect(source).not.toContain("sessionStorage");
+    expect(source).not.toContain("sourceSnapshot");
+    expect(source).not.toContain("raw_source_material");
   });
 
   test("does not expose another user's conversation history on the AI Ask page", async () => {

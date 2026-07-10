@@ -25,6 +25,19 @@ type DisplayMessage = {
   provenance?: AssistantMessageProvenanceItem[];
 };
 
+export type AnswerEntityDescriptor = {
+  type: "source" | "warning" | "trip_fact" | "action";
+  label: string;
+  section?: string;
+  sourceCategory?: AssistantMessageProvenanceItem["sourceCategory"];
+  owner?: {
+    table: string;
+    id: string;
+  };
+  detail?: Record<string, string>;
+  provenanceIds?: string[];
+};
+
 type TripProjectSummary = {
   id: string;
   title: string;
@@ -157,7 +170,7 @@ export function AssistantMessageContent({ content }: { content: string }) {
   );
 }
 
-export function AssistantProvenanceBlock({ provenance }: { provenance?: AssistantMessageProvenanceItem[] }) {
+export function AssistantProvenanceBlock({ provenance, selectedEntityId, onSelectEntity }: { provenance?: AssistantMessageProvenanceItem[]; selectedEntityId?: string; onSelectEntity?: (entity: AnswerEntityDescriptor, trigger: HTMLElement) => void }) {
   const visibleItems = provenance?.filter((item) => item.usedInPrompt || item.sourceCategory === "general") ?? [];
 
   if (visibleItems.length === 0) {
@@ -170,12 +183,18 @@ export function AssistantProvenanceBlock({ provenance }: { provenance?: Assistan
       <ul className="mt-3 space-y-3">
         {visibleItems.map((item) => (
           <li className="rounded-xl border border-[#eadfc8] bg-white/80 p-3 text-sm leading-6 text-[#17342c]" key={item.id}>
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-              <p className="font-semibold">{item.title}</p>
+            <button
+              aria-label={`Xem chi tiết nguồn: ${item.title}`}
+              aria-pressed={selectedEntityId === item.id}
+              className="-m-2 flex w-[calc(100%+1rem)] flex-col gap-2 rounded-xl p-2 text-left transition hover:bg-[#fff8ec] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45 aria-pressed:border aria-pressed:border-[#1f5f46] aria-pressed:bg-[#edf7f0] sm:flex-row sm:items-start sm:justify-between"
+              onClick={(event) => onSelectEntity?.(createProvenanceAnswerEntityDescriptor(item), event.currentTarget)}
+              type="button"
+            >
+              <span className="font-semibold">{item.title}</span>
               <span className="w-fit rounded-full border border-[#d8c9ad] bg-[#fffdf8] px-2 py-1 text-xs font-semibold uppercase tracking-[0.08em] text-[#4f625a]">
                 {formatProvenanceCategory(item)}
               </span>
-            </div>
+            </button>
             <div className="mt-2 flex flex-wrap gap-2 text-xs font-semibold text-[#4f625a]">
               <span>{item.confidenceLabel}</span>
               <span>{formatProvenanceSourceType(item)}</span>
@@ -196,6 +215,73 @@ export function AssistantProvenanceBlock({ provenance }: { provenance?: Assistan
         ))}
       </ul>
     </section>
+  );
+}
+
+export function AnswerDetailPanel({ selectedEntity, onClose }: { selectedEntity: AnswerEntityDescriptor | null; onClose: () => void }) {
+  if (!selectedEntity) {
+    return (
+      <div className="flex flex-1 flex-col justify-center gap-4 py-8">
+        <div className="rounded-[1.5rem] border border-dashed border-[#d8c9ad] bg-white/75 p-5">
+          <p className="text-sm font-bold text-[#17342c]">Chưa có chi tiết được chọn</p>
+          <p className="mt-2 text-sm leading-6 text-[#4f625a]">
+            Chọn một nguồn hoặc cảnh báo trong câu trả lời để xem thông tin kiểm chứng. XuyenViet không tự tạo thông tin chi tiết từ nội dung trả lời tự do.
+          </p>
+        </div>
+        <div className="rounded-2xl border border-[#eadfc8] bg-[#fff8ec] p-4 text-sm leading-6 text-[#6f3f12]">
+          Nguồn và độ tin cậy dựa trên provenance đã lưu, không dựa trên việc đọc lại văn bản trợ lý.
+        </div>
+      </div>
+    );
+  }
+
+  const detailEntries = Object.entries(selectedEntity.detail ?? {});
+
+  return (
+    <div className="flex flex-1 flex-col gap-4 overflow-y-auto py-4">
+      <div className="rounded-[1.5rem] border border-[#d8c9ad] bg-white/85 p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#8c4f13]">Chi tiết đã chọn</p>
+            <h3 className="mt-1 text-xl font-semibold tracking-[-0.03em] text-[#17342c]">{selectedEntity.label}</h3>
+          </div>
+          <button
+            aria-label="Đóng bảng chi tiết"
+            className="min-h-10 rounded-xl border border-[#d8c9ad] bg-[#fffdf8] px-3 py-2 text-sm font-semibold text-[#17342c] transition hover:bg-white focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45"
+            onClick={onClose}
+            type="button"
+          >
+            Đóng
+          </button>
+        </div>
+        <p className="mt-3 text-sm leading-6 text-[#4f625a]">{formatAnswerEntitySummary(selectedEntity)}</p>
+      </div>
+
+      {detailEntries.length > 0 ? (
+        <section className="rounded-[1.5rem] border border-[#eadfc8] bg-white/75 p-4" aria-label="Thông tin nhanh">
+          <h4 className="text-sm font-bold uppercase tracking-[0.12em] text-[#1f5f46]">Thông tin nhanh</h4>
+          <dl className="mt-3 space-y-3 text-sm leading-6">
+            {detailEntries.map(([label, value], index) => (
+              <div className="rounded-xl bg-[#fffdf8] p-3" key={`${label}-${index}`}>
+                <dt className="text-xs font-bold uppercase tracking-[0.12em] text-[#6b7c75]">{label}</dt>
+                <dd className="mt-1 break-words font-semibold text-[#17342c]">{value}</dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+      ) : null}
+
+      {selectedEntity.provenanceIds && selectedEntity.provenanceIds.length > 0 ? (
+        <section className="rounded-2xl border border-[#eadfc8] bg-[#fff8ec] p-4 text-sm leading-6 text-[#6f3f12]" aria-label="Provenance liên quan">
+          <h4 className="text-sm font-bold uppercase tracking-[0.12em] text-[#8c4f13]">Provenance liên quan</h4>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {selectedEntity.provenanceIds.map((id, index) => (
+              <span className="rounded-full border border-[#d8c9ad] bg-white px-3 py-1 text-xs font-semibold text-[#4f625a]" key={id}>Nguồn {index + 1}</span>
+            ))}
+          </div>
+        </section>
+      ) : null}
+    </div>
   );
 }
 
@@ -228,6 +314,7 @@ export function AiAskComposer({
   const [isSessionSheetOpen, setSessionSheetOpen] = useState(false);
   const [deletingConversationId, setDeletingConversationId] = useState<string | null>(null);
   const [deletingTripProjectId, setDeletingTripProjectId] = useState<string | null>(null);
+  const [selectedAnswerEntity, setSelectedAnswerEntity] = useState<AnswerEntityDescriptor | null>(null);
   const [createProjectState, createProjectFormAction, isCreatingProject] = useActionState<CreateTripProjectFormState | undefined, FormData>(
     createTripProjectAction ?? noOpCreateTripProjectAction,
     undefined,
@@ -248,9 +335,11 @@ export function AiAskComposer({
   const sessionSheetTriggerRef = useRef<HTMLButtonElement>(null);
   const sessionSheetPanelRef = useRef<HTMLDivElement>(null);
   const sessionSheetPreviousFocusRef = useRef<HTMLElement | null>(null);
+  const answerEntityTriggerRef = useRef<HTMLElement | null>(null);
   const hasMessages = messages.length > 0;
   const showEmptyState = !hasMessages && !isPending;
   const showContextPanel = hasMessages;
+  const selectedAnswerEntityId = selectedAnswerEntity?.provenanceIds?.[0];
 
   useEffect(() => {
     return () => {
@@ -270,7 +359,29 @@ export function AiAskComposer({
     setMessages(initialMessages);
     setConversationId(initialConversationId);
     setFailedQuestionIds(getUnansweredUserMessageIds(initialMessages));
+    setSelectedAnswerEntity(null);
   }, [initialConversationId, initialMessages]);
+
+  useEffect(() => {
+    if (!selectedAnswerEntity) {
+      return;
+    }
+
+    function handleDetailPanelShortcut(event: globalThis.KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      const isTyping = target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.tagName === "SELECT" || target?.isContentEditable;
+
+      if (event.defaultPrevented || isSessionSheetOpen || isTyping || event.key !== "Escape") {
+        return;
+      }
+
+      event.preventDefault();
+      closeAnswerDetailPanel();
+    }
+
+    window.addEventListener("keydown", handleDetailPanelShortcut);
+    return () => window.removeEventListener("keydown", handleDetailPanelShortcut);
+  }, [isSessionSheetOpen, selectedAnswerEntity]);
 
   useEffect(() => {
     function handleShortcut(event: globalThis.KeyboardEvent) {
@@ -516,6 +627,7 @@ export function AiAskComposer({
     setQuestion("");
     setFailedQuestionIds([]);
     setSelectedImage(null);
+    setSelectedAnswerEntity(null);
     if (imageInputRef.current) {
       imageInputRef.current.value = "";
     }
@@ -602,10 +714,21 @@ export function AiAskComposer({
     setStatus(selectedTripProject ? `Cuộc trò chuyện mới sẽ nằm trong dự án “${selectedTripProject.title}”.` : "Nhập câu hỏi về chuyến đi đường bộ của bạn.");
     setFailedQuestionIds([]);
     setSelectedImage(null);
+    setSelectedAnswerEntity(null);
     if (imageInputRef.current) {
       imageInputRef.current.value = "";
     }
     router.push(activeTripProjectId ? `/ai-ask?tripProjectId=${encodeURIComponent(activeTripProjectId)}` : "/ai-ask");
+  }
+
+  function handleSelectAnswerEntity(entity: AnswerEntityDescriptor, trigger: HTMLElement) {
+    answerEntityTriggerRef.current = trigger;
+    setSelectedAnswerEntity(entity);
+  }
+
+  function closeAnswerDetailPanel() {
+    setSelectedAnswerEntity(null);
+    answerEntityTriggerRef.current?.focus();
   }
 
   function handleSelectTripProject(projectId: string) {
@@ -660,6 +783,7 @@ export function AiAskComposer({
           setQuestion("");
           setFailedQuestionIds([]);
           setSelectedImage(null);
+          setSelectedAnswerEntity(null);
           if (imageInputRef.current) {
             imageInputRef.current.value = "";
           }
@@ -677,6 +801,7 @@ export function AiAskComposer({
       setQuestion("");
       setFailedQuestionIds([]);
       setSelectedImage(null);
+      setSelectedAnswerEntity(null);
       if (imageInputRef.current) {
         imageInputRef.current.value = "";
       }
@@ -822,7 +947,7 @@ export function AiAskComposer({
                   {message.role === "assistant" ? (
                     <>
                       <AssistantMessageContent content={message.content} />
-                      <AssistantProvenanceBlock provenance={message.provenance} />
+                      <AssistantProvenanceBlock provenance={message.provenance} selectedEntityId={selectedAnswerEntityId} onSelectEntity={handleSelectAnswerEntity} />
                     </>
                   ) : <p className="whitespace-pre-wrap text-base leading-7">{message.content}</p>}
                   {message.role === "user" && message.imageAttachments && message.imageAttachments.length > 0 ? (
@@ -837,6 +962,12 @@ export function AiAskComposer({
                   ) : null}
                 </article>
               ))}
+            </section>
+          ) : null}
+
+          {showContextPanel ? (
+            <section aria-label="Bảng chi tiết đã chọn" className="rounded-[1.5rem] border border-[#d8c9ad] bg-[linear-gradient(180deg,#fffdf8_0%,#ffffff_42%,#f7fbf8_100%)] p-4 text-[#17342c] shadow-[0_16px_40px_rgba(41,33,18,0.08)] lg:hidden">
+              <AnswerDetailPanel selectedEntity={selectedAnswerEntity} onClose={closeAnswerDetailPanel} />
             </section>
           ) : null}
 
@@ -997,17 +1128,7 @@ export function AiAskComposer({
             </div>
             <span aria-hidden="true" className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-[#e8f3ec] text-sm font-black text-[#14532d]">XV</span>
           </div>
-          <div className="flex flex-1 flex-col justify-center gap-4 py-8">
-            <div className="rounded-[1.5rem] border border-dashed border-[#d8c9ad] bg-white/75 p-5">
-              <p className="text-sm font-bold text-[#17342c]">Chưa có chi tiết được chọn</p>
-              <p className="mt-2 text-sm leading-6 text-[#4f625a]">
-                Panel này sẽ hiển thị địa điểm, chặng đường hoặc mục cần kiểm chứng khi dữ liệu chọn chi tiết được triển khai. Hiện tại XuyenViet không tự tạo thông tin chi tiết từ nội dung trả lời.
-              </p>
-            </div>
-            <div className="rounded-2xl border border-[#eadfc8] bg-[#fff8ec] p-4 text-sm leading-6 text-[#6f3f12]">
-              Nguồn và độ tin cậy vẫn nằm trong từng câu trả lời ở cột giữa, dựa trên provenance đã lưu thay vì đọc lại văn bản trợ lý.
-            </div>
-          </div>
+          <AnswerDetailPanel selectedEntity={selectedAnswerEntity} onClose={closeAnswerDetailPanel} />
         </aside>
       ) : null}
     </>
@@ -1139,6 +1260,59 @@ function formatProvenanceCategory(item: AssistantMessageProvenanceItem) {
   }
 
   return "Suy luận";
+}
+
+function createProvenanceAnswerEntityDescriptor(item: AssistantMessageProvenanceItem): AnswerEntityDescriptor {
+  const detail: Record<string, string> = {
+    "Loại": formatProvenanceCategory(item),
+    "Độ tin cậy": item.confidenceLabel,
+    "Nhãn nguồn": formatProvenanceSourceType(item),
+    "Trạng thái": item.verificationStatus === "verified" && item.sourceCategory !== "web" && item.sourceCategory !== "general" ? "đã xác minh" : "chưa xác minh",
+  };
+
+  if (item.url) {
+    detail["URL"] = item.url;
+  }
+
+  if (item.checkedAt) {
+    detail["Ngày kiểm tra"] = formatProvenanceDate(item.checkedAt);
+  }
+
+  if (item.freshnessSensitive) {
+    detail["Độ mới"] = "Thông tin có thể thay đổi, cần kiểm tra lại trước khi đi hoặc đặt dịch vụ.";
+  } else {
+    detail["Độ mới"] = "Không có cảnh báo độ mới riêng trong provenance đã lưu.";
+  }
+
+  return {
+    type: item.sourceCategory === "general" ? "action" : item.freshnessSensitive ? "warning" : "source",
+    label: item.title,
+    section: "Nguồn và độ tin cậy",
+    sourceCategory: item.sourceCategory,
+    owner: { table: "assistant_response_provenance", id: item.id },
+    detail,
+    provenanceIds: [item.id],
+  };
+}
+
+function formatAnswerEntitySummary(entity: AnswerEntityDescriptor) {
+  if (entity.sourceCategory === "general") {
+    return "Đây là suy luận tổng quát của AI. Nội dung này chưa được xác minh như nguồn XuyenViet hoặc nguồn chính thức.";
+  }
+
+  if (entity.sourceCategory === "web") {
+    return "Đây là nguồn web bên ngoài và vẫn chưa xác minh, kể cả khi trang tự ghi là official hoặc provider.";
+  }
+
+  if (entity.type === "warning") {
+    return "Mục này cần kiểm tra lại trước khi ra quyết định đi, hành động hoặc đặt dịch vụ.";
+  }
+
+  if (entity.sourceCategory === "trip_context" || entity.sourceCategory === "chat_context") {
+    return "Chi tiết này đến từ ngữ cảnh người dùng đã cung cấp trong dự án hoặc hội thoại, không phải nguồn bên ngoài đã duyệt.";
+  }
+
+  return "Chi tiết này được dựng từ provenance đã lưu của câu trả lời, không trích xuất từ văn bản tự do của trợ lý.";
 }
 
 function formatProvenanceSourceType(item: AssistantMessageProvenanceItem) {

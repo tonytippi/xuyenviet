@@ -2,7 +2,10 @@
 title: 'Story UI.4: Selectable Answer Entities And Detail Panel'
 type: 'feature'
 created: '2026-07-10'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: 'c6ef64187c0f9229e71f37a026e39042955e3886'
+followup_review_recommended: true
+final_revision: 'c6ef64187c0f9229e71f37a026e39042955e3886'
 context:
   - '{project-root}/_bmad-output/project-context.md'
   - '{project-root}/_bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-2026-07-05/DESIGN.md'
@@ -10,8 +13,7 @@ context:
   - '{project-root}/_bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-2026-07-05/mockups/three-panel-chat-map.html'
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/frontend-shell-implementation-notes.md'
   - '{project-root}/_bmad-output/implementation-artifacts/spec-5-6-render-source-and-confidence-section.md'
-warnings:
-  - 'Artifact-only retrofit story. No application code has been changed yet.'
+warnings: []
 ---
 
 <intent-contract>
@@ -54,12 +56,12 @@ warnings:
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `src/features/ai/ai-ask-composer.tsx` -- Add a minimal `AnswerEntityDescriptor` type aligned to the architecture note -- keep selection transient client state.
-- [ ] `src/features/ai/ai-ask-composer.tsx` -- Make source/provenance rows or chips selectable and keyboard-focusable -- allow opening the right detail panel from safe provenance data.
-- [ ] `src/features/ai/ai-ask-composer.tsx` -- Render the right detail panel with selected entity header, summary, quick facts, related details, and provenance chips where data exists -- avoid duplicating whole answers.
-- [ ] `src/features/ai/ai-ask-composer.tsx` -- Add close/Esc behavior and focus restoration for selected detail -- meet accessibility floor.
-- [ ] Tests -- Cover selected source detail rendering from stored provenance, general reasoning unverified labeling, no detail fabrication from answer text, and keyboard-accessible controls where current test stack allows -- prevent trust regressions.
-- [ ] `_bmad-output/implementation-artifacts/sprint-status.yaml` -- Move UI.4 through `in-progress`, `review`, and `done` as work advances -- keep BMad tracking aligned.
+- [x] `src/features/ai/ai-ask-composer.tsx` -- Add a minimal `AnswerEntityDescriptor` type aligned to the architecture note -- keep selection transient client state.
+- [x] `src/features/ai/ai-ask-composer.tsx` -- Make source/provenance rows or chips selectable and keyboard-focusable -- allow opening the right detail panel from safe provenance data.
+- [x] `src/features/ai/ai-ask-composer.tsx` -- Render the right detail panel with selected entity header, summary, quick facts, related details, and provenance chips where data exists -- avoid duplicating whole answers.
+- [x] `src/features/ai/ai-ask-composer.tsx` -- Add close/Esc behavior and focus restoration for selected detail -- meet accessibility floor.
+- [x] Tests -- Cover selected source detail rendering from stored provenance, general reasoning unverified labeling, no detail fabrication from answer text, and keyboard-accessible controls where current test stack allows -- prevent trust regressions.
+- [x] `_bmad-output/implementation-artifacts/sprint-status.yaml` -- Move UI.4 through `in-progress`, `review`, and `done` as work advances -- keep BMad tracking aligned.
 
 **Acceptance Criteria:**
 - Given an assistant answer has source provenance rows, when the traveler selects a source row/chip, then the right detail panel opens with source title/label, type/category, URL when available, collected/checked date when available, confidence label, and freshness warning when applicable.
@@ -84,13 +86,67 @@ The right detail panel is an inspector for selected answer entities, not a secon
 
 ### Completion Notes
 
-- Pending implementation.
+- Implemented transient `AnswerEntityDescriptor` client state in `src/features/ai/ai-ask-composer.tsx` with provenance-only descriptor creation.
+- Made stored provenance rows selectable with keyboard-focusable buttons, visible focus styles, and `aria-pressed` selected state.
+- Added right detail panel rendering for selected source/general/warning descriptors with title, type/category, URL, checked date, confidence, freshness, and unverified labeling.
+- Added close button, scoped Escape close behavior, and focus restoration to the triggering provenance control.
+- Added a mobile-visible selected detail surface so selected provenance details are not desktop-only.
+- Preserved the empty/no-selection panel as non-fabricating copy and did not parse assistant text into source details.
+- Addressed review findings by removing invalid `role=option`/`aria-selected` markup, avoiding raw provenance IDs in the traveler panel, tightening general-reasoning descriptor typing, and removing stale story warnings.
+
+## Review Triage Log
+
+### 2026-07-10 — Review pass
+- intent_gap: 0
+- bad_spec: 0
+- patch: 8: (high 1, medium 5, low 2)
+- defer: 1: (low 1)
+- reject: 2: (medium 2, low 0)
+- addressed_findings:
+  - `[medium]` `[patch]` Removed invalid `role="option"` / `aria-selected` usage without a listbox parent and kept the valid button `aria-pressed` selected state.
+  - `[high]` `[patch]` Added a mobile-visible selected detail surface so provenance selection is not invisible below desktop breakpoints.
+  - `[medium]` `[patch]` Scoped Escape close behavior away from typing targets and the session sheet to avoid competing overlay/textarea handling.
+  - `[medium]` `[patch]` Changed general-reasoning descriptors from `source` to non-source `action` type while preserving unverified copy.
+  - `[medium]` `[patch]` Removed stale story warning that claimed no application code had changed.
+  - `[low]` `[patch]` Replaced raw provenance ID chips with human-readable `Nguồn 1` labels.
+  - `[low]` `[patch]` Made detail entry React keys robust against duplicate labels.
+  - `[low]` `[defer]` Behavioral client interaction tests for click/Escape/focus would be stronger than current server-render/string coverage, but the current test stack does not include a DOM interaction harness.
+
+## Auto Run Result
+
+Status: done
+
+Summary: Implemented Story UI.4. AI Ask provenance rows are now selectable answer entities backed by safe stored provenance DTOs, opening a contextual detail panel with source/category, URL, checked date, confidence, freshness, and unverified reasoning labels without parsing assistant prose.
+
+Files changed:
+- `src/features/ai/ai-ask-composer.tsx` -- added transient answer entity selection, selectable provenance controls, desktop/mobile detail panels, safe descriptor creation, scoped Escape close, and focus restoration.
+- `tests/ai-ask-shell.test.ts` -- added regression coverage for selectable provenance markup, selected web/general detail rendering, mobile detail surface, and provenance-only/transient selection contracts.
+- `_bmad-output/implementation-artifacts/spec-ui-4-selectable-answer-entities-and-detail-panel.md` -- recorded implementation, review triage, verification, and final result.
+- `_bmad-output/implementation-artifacts/sprint-status.yaml` -- marked UI.4 done.
+
+Review findings breakdown: 8 patch findings fixed, 1 low-severity test-depth item deferred, 2 findings rejected as outside this story's effective scope or already mitigated by the implementation.
+
+Follow-up review recommendation: true, because review-driven changes touched accessibility, responsive behavior, and trust labeling.
+
+Verification performed:
+- `pnpm test:run tests/ai-ask-shell.test.ts tests/answer-context.test.ts` -- passed, 99 tests.
+- `pnpm lint` -- passed.
+- `pnpm typecheck` -- passed standalone after an earlier concurrent run raced with `pnpm build` regenerating `.next/types`.
+- `pnpm build` -- passed.
+
+Residual risks:
+- Current tests verify several interaction contracts through server-rendered markup and source assertions rather than a browser DOM interaction test harness.
+- No commit was created because repository instructions require explicit approval before committing, even though the BMad auto-dev review step normally asks to commit.
 
 ### Verification Results
 
-- Pending implementation.
+- `pnpm test:run tests/ai-ask-shell.test.ts tests/answer-context.test.ts` -- passed, 99 tests.
+- `pnpm typecheck` -- passed.
+- `pnpm lint` -- passed.
 
 ### File List
 
 - `_bmad-output/implementation-artifacts/spec-ui-4-selectable-answer-entities-and-detail-panel.md`
 - `_bmad-output/implementation-artifacts/sprint-status.yaml`
+- `src/features/ai/ai-ask-composer.tsx`
+- `tests/ai-ask-shell.test.ts`
