@@ -2,7 +2,10 @@
 title: 'Story UI.3: Active Three-Panel AI Ask Shell'
 type: 'feature'
 created: '2026-07-10'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: 'afd49574d54c097b459ee32afaa516ad3fc14d67'
+final_revision: 'afd49574d54c097b459ee32afaa516ad3fc14d67'
+followup_review_recommended: false
 context:
   - '{project-root}/_bmad-output/project-context.md'
   - '{project-root}/_bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-2026-07-05/DESIGN.md'
@@ -55,12 +58,12 @@ warnings:
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `src/app/ai-ask/page.tsx` -- Establish active-state desktop layout with left sidebar, middle answer column, and right contextual panel region -- align to `three-panel-chat-map.html` without changing empty state.
-- [ ] `src/features/ai/ai-ask-composer.tsx` -- Adapt active message list, section blocks, streaming state, failed-turn notice, image attachment rows, and composer to the middle column -- preserve existing behavior.
-- [ ] `src/features/ai/ai-ask-composer.tsx` -- Add a safe right-panel placeholder/selection prompt for active conversations if no real selected entity exists yet -- prepare UI.4 without inventing data.
-- [ ] `src/features/ai/ai-ask-composer.tsx` -- Ensure source/confidence block stays provenance-backed and readable inside the new layout -- do not parse answer prose.
-- [ ] Tests -- Update focused AI Ask shell tests for active three-panel rendering and regression coverage for no right panel in empty state -- prevent layout state bleed.
-- [ ] `_bmad-output/implementation-artifacts/sprint-status.yaml` -- Move UI.3 through `in-progress`, `review`, and `done` as work advances -- keep BMad tracking aligned.
+- [x] `src/app/ai-ask/page.tsx` -- Establish active-state desktop layout with left sidebar, middle answer column, and right contextual panel region -- align to `three-panel-chat-map.html` without changing empty state.
+- [x] `src/features/ai/ai-ask-composer.tsx` -- Adapt active message list, section blocks, streaming state, failed-turn notice, image attachment rows, and composer to the middle column -- preserve existing behavior.
+- [x] `src/features/ai/ai-ask-composer.tsx` -- Add a safe right-panel placeholder/selection prompt for active conversations if no real selected entity exists yet -- prepare UI.4 without inventing data.
+- [x] `src/features/ai/ai-ask-composer.tsx` -- Ensure source/confidence block stays provenance-backed and readable inside the new layout -- do not parse answer prose.
+- [x] Tests -- Update focused AI Ask shell tests for active three-panel rendering and regression coverage for no right panel in empty state -- prevent layout state bleed.
+- [x] `_bmad-output/implementation-artifacts/sprint-status.yaml` -- Move UI.3 through `in-progress`, `review`, and `done` as work advances -- keep BMad tracking aligned.
 
 **Acceptance Criteria:**
 - Given an owned conversation has messages, when the authenticated traveler opens it on desktop, then the page renders left history/projects, a middle conversation/answer column, and a right contextual panel region.
@@ -72,6 +75,20 @@ warnings:
 ## Design Notes
 
 Use the accepted `three-panel-chat-map.html` mockup, but respect the final architecture note that the right surface is contextual detail, not a map-first integration. This story may create the layout foundation before selectable entity data is available.
+
+## Review Triage Log
+
+### 2026-07-10 — Review pass
+- intent_gap: 0
+- bad_spec: 0
+- patch: 4: (high 1, medium 3, low 0)
+- defer: 0
+- reject: 0
+- addressed_findings:
+  - `[high]` `[patch]` Removed the unconditional explicit third desktop grid track so the empty state no longer reserves a blank right column.
+  - `[medium]` `[patch]` Restored empty-state-safe shell sizing while allowing the active panel to use an implicit third column only when rendered.
+  - `[medium]` `[patch]` Guarded the context panel against first-question pending state before a conversation exists, avoiding detail-selection guidance before any answer/content exists.
+  - `[medium]` `[patch]` Finalized sprint status to `done` only during workflow finalization so BMad tracking no longer contradicts the completed task checklist.
 
 ## Verification
 
@@ -85,13 +102,50 @@ Use the accepted `three-panel-chat-map.html` mockup, but respect the final archi
 
 ### Completion Notes
 
-- Pending implementation.
+- Implemented the active AI Ask desktop shell with persistent left history/projects, a constrained center conversation/composer column, and a safe right contextual placeholder for active conversations.
+- Preserved the UI.2 empty state by keeping the right contextual panel absent and avoiding a reserved third desktop grid track when no conversation content exists.
+- Kept source/confidence rendering provenance-backed in the center answer column and avoided parsing assistant prose or fabricating detail facts.
+- Applied review fixes for empty-state layout bleed, active-shell sizing, first-question pending behavior, and final BMad status alignment.
 
 ### Verification Results
 
-- Pending implementation.
+- `pnpm test:run tests/ai-ask-shell.test.ts tests/ai-ask-sessions.test.ts tests/answer-context.test.ts` -- passed, 104 tests.
+- `pnpm lint` -- passed.
+- `pnpm typecheck` -- passed.
+- `pnpm build` -- passed.
 
 ### File List
 
 - `_bmad-output/implementation-artifacts/spec-ui-3-active-three-panel-ai-ask-shell.md`
 - `_bmad-output/implementation-artifacts/sprint-status.yaml`
+- `src/app/ai-ask/page.tsx`
+- `src/features/ai/ai-ask-composer.tsx`
+- `tests/ai-ask-shell.test.ts`
+
+## Auto Run Result
+
+Status: done
+
+Summary: Implemented Story UI.3. Active AI Ask conversations now render a desktop three-panel shell with left history/projects, a middle conversation/composer column, and a safe right contextual placeholder. Empty AI Ask state remains a two-column shell with no right detail/context panel or reserved blank panel space.
+
+Files changed:
+- `src/app/ai-ask/page.tsx` -- updated shell sizing and grid behavior so active conversations can host a third panel without changing empty-state layout.
+- `src/features/ai/ai-ask-composer.tsx` -- added active-shell grid placement and safe right contextual placeholder while preserving composer, streaming, failed-turn, image, and provenance behavior.
+- `tests/ai-ask-shell.test.ts` -- added active three-panel and empty-state regression coverage.
+- `_bmad-output/implementation-artifacts/sprint-status.yaml` -- marked UI.3 done after implementation, verification, and review.
+- `_bmad-output/implementation-artifacts/spec-ui-3-active-three-panel-ai-ask-shell.md` -- recorded task completion, review triage, verification, and auto-run result.
+
+Review findings breakdown: 4 patch findings fixed (1 high, 3 medium), 0 deferred, 0 rejected.
+
+Follow-up review recommendation: false.
+
+Verification performed:
+- `pnpm test:run tests/ai-ask-shell.test.ts tests/ai-ask-sessions.test.ts tests/answer-context.test.ts` -- passed, 104 tests.
+- `pnpm lint` -- passed.
+- `pnpm typecheck` -- passed.
+- `pnpm build` -- passed.
+
+Residual risks:
+- The right contextual surface is intentionally a placeholder until UI.4 introduces selectable answer entity descriptors and real detail data.
+- No browser visual regression suite exists; layout coverage is static/server-rendered plus build verification.
+- No commit was created because explicit commit permission was not provided.

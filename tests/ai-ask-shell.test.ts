@@ -102,9 +102,32 @@ describe("AI Ask authenticated shell", () => {
     expect(html).toContain("Gửi câu hỏi");
     expect(html).not.toContain("Gợi ý câu hỏi</h2>");
     expect(html).not.toContain("Bảng chi tiết");
+    expect(html).not.toContain("Bảng ngữ cảnh hội thoại");
+    expect(html).not.toContain("Chưa có chi tiết được chọn");
     expect(html).not.toContain("right detail panel");
     expect(html).toContain('aria-describedby="ai-ask-status ai-ask-shortcuts"');
     expect(html).toContain('id="ai-ask-status"');
+  });
+
+  test("renders the active desktop three-panel shell with a safe contextual placeholder", async () => {
+    await createTestUser("user-1");
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
+    await testDb.insert(messages).values([
+      { conversationId: conversation.id, userId: "user-1", role: "user", content: "Hà Nội đi Huế 5 ngày." },
+      { conversationId: conversation.id, userId: "user-1", role: "assistant", content: "Kế hoạch gợi ý:\nNên đi nhẹ và nghỉ sớm." },
+    ]);
+
+    const html = await renderAuthenticatedAiAskShell({ conversationId: conversation.id });
+
+    expect(html).toContain("Danh sách trò chuyện và dự án chuyến đi");
+    expect(html).toContain("Lịch sử hội thoại");
+    expect(html).toContain("Hà Nội đi Huế 5 ngày.");
+    expect(html).toContain("Bảng ngữ cảnh hội thoại");
+    expect(html).toContain("Chọn chi tiết trong câu trả lời");
+    expect(html).toContain("Chưa có chi tiết được chọn");
+    expect(html).toContain("không tự tạo thông tin chi tiết từ nội dung trả lời");
+    expect(html).not.toContain("Bảng chi tiết");
+    expect(html).not.toContain("source-chip");
   });
 
   test("keeps trip project controls in the desktop sidebar and mobile sheet contract", () => {
@@ -112,6 +135,7 @@ describe("AI Ask authenticated shell", () => {
     const navStart = source.indexOf('<nav aria-label="Danh sách trò chuyện và dự án chuyến đi"');
     const navEnd = source.indexOf("</nav>", navStart);
     const mainStart = source.indexOf('<div className="flex min-h-[34rem]', navEnd);
+    const contextPanelStart = source.indexOf('aria-label="Bảng ngữ cảnh hội thoại"', mainStart);
     const sheetStart = source.indexOf('role="dialog" aria-modal="true" aria-label="Danh sách trò chuyện và dự án chuyến đi"');
     const sheetEnd = source.indexOf("</div>", source.indexOf("<ConversationList", sheetStart));
     const navMarkup = source.slice(navStart, navEnd);
@@ -122,6 +146,7 @@ describe("AI Ask authenticated shell", () => {
     expect(navMarkup).toContain("<ConversationList");
     expect(navMarkup).toContain("{planningScope}");
     expect(mainOpening).not.toContain("{planningScope}");
+    expect(contextPanelStart).toBeGreaterThan(mainStart);
     expect(sheetMarkup).toContain("{planningScope}");
     expect(sheetMarkup).toContain("<ConversationList");
     expect(source).toContain("sessionSheetPreviousFocusRef.current?.focus()");

@@ -250,6 +250,7 @@ export function AiAskComposer({
   const sessionSheetPreviousFocusRef = useRef<HTMLElement | null>(null);
   const hasMessages = messages.length > 0;
   const showEmptyState = !hasMessages && !isPending;
+  const showContextPanel = hasMessages || Boolean(conversationId);
 
   useEffect(() => {
     return () => {
@@ -759,7 +760,7 @@ export function AiAskComposer({
 
   return (
     <>
-      <nav aria-label="Danh sách trò chuyện và dự án chuyến đi" className="hidden min-h-0 flex-col gap-3 lg:flex">
+      <nav aria-label="Danh sách trò chuyện và dự án chuyến đi" className="hidden min-h-0 flex-col gap-3 lg:col-start-1 lg:row-start-1 lg:flex">
         <div className="min-h-0 flex-1">
           <ConversationList
             sessions={sessions}
@@ -773,7 +774,7 @@ export function AiAskComposer({
         {planningScope}
       </nav>
 
-      <div className="flex min-h-[34rem] flex-col justify-between gap-5 rounded-[1.5rem] border border-[#d8c9ad] bg-[radial-gradient(circle_at_50%_0%,rgba(20,83,45,0.1),transparent_30%),#fffdf8] p-4 sm:p-5">
+      <div className="flex min-h-[34rem] min-w-0 flex-col justify-between gap-5 rounded-[1.5rem] border border-[#d8c9ad] bg-[radial-gradient(circle_at_50%_0%,rgba(20,83,45,0.1),transparent_30%),#fffdf8] p-4 sm:p-5 lg:col-start-2 lg:row-start-1 lg:w-[min(760px,calc(100vw-31rem))] xl:w-[760px]">
         <div className="flex items-center justify-between gap-3 lg:hidden">
           <button
             ref={sessionSheetTriggerRef}
@@ -986,6 +987,29 @@ export function AiAskComposer({
           </div>
         ) : null}
       </div>
+
+      {showContextPanel ? (
+        <aside aria-label="Bảng ngữ cảnh hội thoại" className="hidden min-h-0 min-w-0 flex-col rounded-[1.5rem] border border-[#d8c9ad] bg-[linear-gradient(180deg,#fffdf8_0%,#ffffff_42%,#f7fbf8_100%)] p-4 text-[#17342c] shadow-[0_16px_40px_rgba(41,33,18,0.08)] lg:col-start-3 lg:row-start-1 lg:flex lg:w-80 xl:w-[23rem]">
+          <div className="flex items-start justify-between gap-3 border-b border-[#eadfc8] pb-4">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#8c4f13]">Ngữ cảnh</p>
+              <h2 className="mt-1 text-xl font-semibold tracking-[-0.03em] text-[#17342c]">Chọn chi tiết trong câu trả lời</h2>
+            </div>
+            <span aria-hidden="true" className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-[#e8f3ec] text-sm font-black text-[#14532d]">XV</span>
+          </div>
+          <div className="flex flex-1 flex-col justify-center gap-4 py-8">
+            <div className="rounded-[1.5rem] border border-dashed border-[#d8c9ad] bg-white/75 p-5">
+              <p className="text-sm font-bold text-[#17342c]">Chưa có chi tiết được chọn</p>
+              <p className="mt-2 text-sm leading-6 text-[#4f625a]">
+                Panel này sẽ hiển thị địa điểm, chặng đường hoặc mục cần kiểm chứng khi dữ liệu chọn chi tiết được triển khai. Hiện tại XuyenViet không tự tạo thông tin chi tiết từ nội dung trả lời.
+              </p>
+            </div>
+            <div className="rounded-2xl border border-[#eadfc8] bg-[#fff8ec] p-4 text-sm leading-6 text-[#6f3f12]">
+              Nguồn và độ tin cậy vẫn nằm trong từng câu trả lời ở cột giữa, dựa trên provenance đã lưu thay vì đọc lại văn bản trợ lý.
+            </div>
+          </div>
+        </aside>
+      ) : null}
     </>
   );
 }

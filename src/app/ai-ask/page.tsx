@@ -81,7 +81,7 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
 
   return (
     <main className="min-h-screen bg-white px-5 py-6 sm:px-8 lg:px-12">
-      <section className="mx-auto flex min-h-[calc(100vh-3rem)] max-w-6xl flex-col gap-6 overflow-hidden rounded-[2rem] border border-[#d8c9ad] bg-[#fbf7ed]/90 p-5 shadow-[0_24px_80px_rgba(41,33,18,0.14)] sm:p-8 lg:p-10">
+      <section className="mx-auto flex min-h-[calc(100vh-3rem)] w-full max-w-6xl flex-col gap-6 overflow-hidden rounded-[2rem] border border-[#d8c9ad] bg-[#fbf7ed]/90 p-5 shadow-[0_24px_80px_rgba(41,33,18,0.14)] sm:p-8 lg:w-fit lg:max-w-[96rem] lg:p-10">
         <header className="flex flex-col gap-4 border-b border-[#d8c9ad] pb-5 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[#8c4f13]">AI Ask</p>
@@ -100,7 +100,7 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
           </div>
         </header>
 
-        <div className="grid flex-1 gap-5 lg:grid-cols-[18rem_minmax(0,1fr)]">
+        <div className="grid flex-1 gap-5 lg:auto-cols-max lg:grid-cols-[18rem_minmax(0,1fr)] xl:grid-cols-[19rem_minmax(0,1fr)]">
           <AiAskComposer
             key={loadedConversation?.id || "new-conversation"}
             initialQuestion={publicDraft}
