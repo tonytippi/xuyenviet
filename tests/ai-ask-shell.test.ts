@@ -89,7 +89,7 @@ describe("AI Ask authenticated shell", () => {
     expect(html).toContain("Hỏi trợ lý chuyến đi Việt Nam");
     expect(html).toContain("tony@example.com");
     expect(html).toContain("Đăng xuất");
-    expect(html).toContain("Danh sách trò chuyện");
+    expect(html).toContain("Danh sách trò chuyện và dự án chuyến đi");
     expect(html).toContain("Mình sẽ đi đâu?");
     expect(html).toContain("Bắt đầu bằng một câu hỏi tự nhiên");
     expect(html).toContain("Hà Nội đi Đà Nẵng 7 ngày cùng gia đình");
@@ -105,6 +105,37 @@ describe("AI Ask authenticated shell", () => {
     expect(html).not.toContain("right detail panel");
     expect(html).toContain('aria-describedby="ai-ask-status ai-ask-shortcuts"');
     expect(html).toContain('id="ai-ask-status"');
+  });
+
+  test("keeps trip project controls in the desktop sidebar and mobile sheet contract", () => {
+    const source = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
+    const navStart = source.indexOf('<nav aria-label="Danh sách trò chuyện và dự án chuyến đi"');
+    const navEnd = source.indexOf("</nav>", navStart);
+    const mainStart = source.indexOf('<div className="flex min-h-[34rem]', navEnd);
+    const sheetStart = source.indexOf('role="dialog" aria-modal="true" aria-label="Danh sách trò chuyện và dự án chuyến đi"');
+    const sheetEnd = source.indexOf("</div>", source.indexOf("<ConversationList", sheetStart));
+    const navMarkup = source.slice(navStart, navEnd);
+    const mainOpening = source.slice(mainStart, mainStart + 300);
+    const sheetMarkup = source.slice(sheetStart, sheetEnd);
+
+    expect(navStart).toBeGreaterThan(-1);
+    expect(navMarkup).toContain("<ConversationList");
+    expect(navMarkup).toContain("{planningScope}");
+    expect(mainOpening).not.toContain("{planningScope}");
+    expect(sheetMarkup).toContain("{planningScope}");
+    expect(sheetMarkup).toContain("<ConversationList");
+    expect(source).toContain("sessionSheetPreviousFocusRef.current?.focus()");
+    expect(source).toContain("sessionSheetPanelRef.current?.focus()");
+  });
+
+  test("starter cards preserve an existing public ask draft", () => {
+    const source = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
+    const starterClickStart = source.indexOf("setStatus(\"Ô nhập đã có nội dung");
+    const setQuestionStart = source.indexOf("setQuestion(card.description)");
+
+    expect(starterClickStart).toBeGreaterThan(-1);
+    expect(starterClickStart).toBeLessThan(setQuestionStart);
+    expect(source).toContain("if (question.trim())");
   });
 
   test("does not render fake citations, source chips, or assistant answers", async () => {

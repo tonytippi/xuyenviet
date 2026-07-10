@@ -4,7 +4,7 @@ type: 'feature'
 created: '2026-07-10'
 status: 'done'
 baseline_revision: '29b66aecd727af77cebcdbb2dc21090521d30e06'
-final_revision: '29b66aecd727af77cebcdbb2dc21090521d30e06'
+final_revision: '25c69b030beeb9c6f0d46ffe43bb723ddd2a135c'
 followup_review_recommended: false
 context:
   - '{project-root}/_bmad-output/project-context.md'
@@ -110,6 +110,13 @@ Use the accepted `home-logged-in-empty.html` mockup. Keep the empty state calm a
 - `tests/ai-ask-shell.test.ts`
 
 ## Review Triage Log
+
+### 2026-07-10 — Follow-up review findings
+- [x] [Review][Patch] Desktop trip projects are outside the left sidebar, contrary to the sidebar IA contract [src/features/ai/ai-ask-composer.tsx:762]
+- [x] [Review][Patch] Starter cards can overwrite a preserved public ask draft on the empty state [src/features/ai/ai-ask-composer.tsx:924]
+- [x] [Review][Patch] Mobile sidebar/sheet acceptance behavior is not covered by an interaction test [tests/ai-ask-shell.test.ts:86]
+- [x] [Review][Patch] Mobile sheet accessible name says only conversation list while it also contains trip-project controls [src/features/ai/ai-ask-composer.tsx:960]
+- [x] [Review][Patch] Story frontmatter final_revision still points at the baseline revision instead of the reviewed UI.2 commit [spec-ui-2-authenticated-empty-ai-ask-shell-redesign.md:6]
 
 ### 2026-07-10 — Review pass
 - intent_gap: 0

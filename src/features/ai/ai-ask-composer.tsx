@@ -691,7 +691,7 @@ export function AiAskComposer({
 
   const planningScope = (
     <section className="rounded-[1.25rem] border border-[#d8c9ad] bg-white/75 p-4 text-left">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+      <div className="flex flex-col gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#8c4f13]">Phạm vi lập kế hoạch</p>
           <h2 className="mt-1 text-lg font-semibold text-[#17342c]">
@@ -703,7 +703,7 @@ export function AiAskComposer({
               : "Bạn đang hỏi trong hội thoại thường. Chọn hoặc tạo dự án nếu muốn gom kế hoạch cho một chuyến cụ thể."}
           </p>
         </div>
-        <label className="flex min-w-56 flex-col gap-2 text-sm font-semibold text-[#17342c]">
+        <label className="flex flex-col gap-2 text-sm font-semibold text-[#17342c]">
           Chọn dự án
           <select
             className="min-h-11 rounded-2xl border border-[#d8c9ad] bg-[#fffdf8] px-3 py-2 text-sm text-[#17342c] outline-none focus:border-[#1f5f46] focus:ring-4 focus:ring-[#8fb59f]/45"
@@ -759,22 +759,21 @@ export function AiAskComposer({
 
   return (
     <>
-      <nav aria-label="Danh sách trò chuyện" className="hidden lg:block">
-        <ConversationList
-          sessions={sessions}
-          activeConversationId={conversationId}
-          isDisabled={sessionActionsDisabled}
-          onSelect={handleSelectSession}
-          onDelete={deleteConversationAction ? handleDeleteSession : undefined}
-          onNewChat={handleNewChat}
-        />
+      <nav aria-label="Danh sách trò chuyện và dự án chuyến đi" className="hidden min-h-0 flex-col gap-3 lg:flex">
+        <div className="min-h-0 flex-1">
+          <ConversationList
+            sessions={sessions}
+            activeConversationId={conversationId}
+            isDisabled={sessionActionsDisabled}
+            onSelect={handleSelectSession}
+            onDelete={deleteConversationAction ? handleDeleteSession : undefined}
+            onNewChat={handleNewChat}
+          />
+        </div>
+        {planningScope}
       </nav>
 
       <div className="flex min-h-[34rem] flex-col justify-between gap-5 rounded-[1.5rem] border border-[#d8c9ad] bg-[radial-gradient(circle_at_50%_0%,rgba(20,83,45,0.1),transparent_30%),#fffdf8] p-4 sm:p-5">
-        <div className="hidden lg:block">
-          {planningScope}
-        </div>
-
         <div className="flex items-center justify-between gap-3 lg:hidden">
           <button
             ref={sessionSheetTriggerRef}
@@ -933,6 +932,12 @@ export function AiAskComposer({
                         return;
                       }
 
+                      if (question.trim()) {
+                        setStatus("Ô nhập đã có nội dung. Hãy xoá hoặc chỉnh câu hỏi hiện tại trước khi dùng gợi ý bắt đầu.");
+                        textareaRef.current?.focus();
+                        return;
+                      }
+
                       setQuestion(card.description);
                       textareaRef.current?.focus();
                     }}
@@ -958,7 +963,7 @@ export function AiAskComposer({
         </div>
 
         {isSessionSheetOpen ? (
-          <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true" aria-label="Danh sách trò chuyện">
+          <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true" aria-label="Danh sách trò chuyện và dự án chuyến đi">
             <button
               type="button"
               aria-label="Đóng danh sách trò chuyện"
