@@ -55,6 +55,52 @@ describe("safe sign-in redirects", () => {
   });
 });
 
+describe("public logged-out homepage", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+  });
+
+  test("renders the public AI-first homepage without protected shell content", async () => {
+    const { default: HomePage } = await import("@/app/page");
+    const element = await HomePage({ searchParams: Promise.resolve({}) });
+    const html = renderToStaticMarkup(element);
+
+    expect(html).toContain("Lên kế hoạch xuyên Việt trong một cuộc trò chuyện.");
+    expect(html).toContain("Đăng nhập Google");
+    expect(html).toContain("Bạn muốn đi đâu? Ví dụ: Hà Nội đi Huế 5 ngày cùng gia đình...");
+    expect(html).toContain("Bạn cần đăng nhập trước khi XuyenViet tạo hội thoại");
+    expect(html).toContain("Tuyến đường Hà Nội - Huế 5 ngày");
+    expect(html).toContain("Trò chuyện ở giữa. Chi tiết ở bên phải.");
+    expect(html).not.toContain("tony@example.com");
+    expect(html).not.toContain("Đăng xuất");
+    expect(html).not.toContain("Khu vực hội thoại");
+  });
+
+  test("preserves referral code through public sign-in and gated ask entry points", async () => {
+    const { default: HomePage } = await import("@/app/page");
+    const element = await HomePage({ searchParams: Promise.resolve({ ref: "abc 123" }) });
+    const html = renderToStaticMarkup(element);
+
+    expect(html).toContain("/sign-in?next=%2Fai-ask&amp;ref=abc+123");
+    expect(html).toContain('action="/sign-in"');
+    expect(html).toContain('type="hidden" name="next" value="/ai-ask"');
+    expect(html).toContain('type="hidden" name="ref" value="abc 123"');
+    expect(html).not.toContain("reward");
+    expect(html).not.toContain("credit");
+    expect(html).not.toContain("payout");
+  });
+
+  test("uses the first non-empty referral code when duplicate ref params are present", async () => {
+    const { default: HomePage } = await import("@/app/page");
+    const element = await HomePage({ searchParams: Promise.resolve({ ref: ["", "abc"] }) });
+    const html = renderToStaticMarkup(element);
+
+    expect(html).toContain("/sign-in?next=%2Fai-ask&amp;ref=abc");
+    expect(html).toContain('type="hidden" name="ref" value="abc"');
+  });
+});
+
 describe("AI Ask route gate", () => {
   beforeEach(() => {
     vi.resetModules();

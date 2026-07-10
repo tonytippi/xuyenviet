@@ -102,7 +102,7 @@ development_status:
   5-9-record-ai-usage-events: done
   epic-5-retrospective: done
   epic-ui: in-progress
-  ui-1-public-logged-out-homepage-redesign: ready-for-dev
+  ui-1-public-logged-out-homepage-redesign: done
   ui-2-authenticated-empty-ai-ask-shell-redesign: ready-for-dev
   ui-3-active-three-panel-ai-ask-shell: ready-for-dev
   ui-4-selectable-answer-entities-and-detail-panel: ready-for-dev

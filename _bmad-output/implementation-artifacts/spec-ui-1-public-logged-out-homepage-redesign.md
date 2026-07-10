@@ -2,7 +2,10 @@
 title: 'Story UI.1: Public Logged-Out Homepage Redesign'
 type: 'feature'
 created: '2026-07-10'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: '77ec84afb1777d307f089b3bfde8291ea97b1244'
+followup_review_recommended: false
+final_revision: 'NO_COMMIT_PER_INSTRUCTION'
 context:
   - '{project-root}/_bmad-output/project-context.md'
   - '{project-root}/_bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-2026-07-05/DESIGN.md'
@@ -53,12 +56,12 @@ warnings:
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `src/app/page.tsx` -- Implement the accepted logged-out homepage with Vietnamese headline, sign-in CTA, starter prompts, and sign-in-gated ask box -- align root route to `home-logged-out.html`.
-- [ ] `src/app/page.tsx` -- Preserve `ref` query in all sign-in entry points, including gated ask submission -- keep referral attribution silent and non-rewarding.
-- [ ] `src/app/page.tsx` -- Ensure no authenticated sidebar, conversation history, trip projects, admin nav, or protected payload is requested or rendered -- preserve public boundary.
-- [ ] `src/app/globals.css` -- Introduce only necessary typography/token refinements and preserve existing map-paper background unless the mockup requires a bounded replacement -- avoid design-system churn.
-- [ ] Tests -- Add/adjust assertions for public logged-out rendering, referral-preserving sign-in path, and no public AI side effects where existing test seams allow -- protect auth/referral regressions.
-- [ ] `_bmad-output/implementation-artifacts/sprint-status.yaml` -- Move UI.1 through `in-progress`, `review`, and `done` as work advances -- keep BMad tracking aligned.
+- [x] `src/app/page.tsx` -- Implement the accepted logged-out homepage with Vietnamese headline, sign-in CTA, starter prompts, and sign-in-gated ask box -- align root route to `home-logged-out.html`.
+- [x] `src/app/page.tsx` -- Preserve `ref` query in all sign-in entry points, including gated ask submission -- keep referral attribution silent and non-rewarding.
+- [x] `src/app/page.tsx` -- Ensure no authenticated sidebar, conversation history, trip projects, admin nav, or protected payload is requested or rendered -- preserve public boundary.
+- [x] `src/app/globals.css` -- Introduce only necessary typography/token refinements and preserve existing map-paper background unless the mockup requires a bounded replacement -- avoid design-system churn.
+- [x] Tests -- Add/adjust assertions for public logged-out rendering, referral-preserving sign-in path, and no public AI side effects where existing test seams allow -- protect auth/referral regressions.
+- [x] `_bmad-output/implementation-artifacts/sprint-status.yaml` -- Move UI.1 through `in-progress`, `review`, and `done` as work advances -- keep BMad tracking aligned.
 
 **Acceptance Criteria:**
 - Given a logged-out visitor opens `/`, when the page renders, then they see the accepted public homepage direction with Vietnamese value proposition, Google sign-in CTA, starter prompts, and a sign-in-gated ask box.
@@ -82,13 +85,44 @@ Use the accepted `home-logged-out.html` mockup as the visual reference. The page
 
 ### Completion Notes
 
-- Pending implementation.
+- Replaced the root public page with the accepted logged-out homepage direction: centered Vietnamese value proposition, Google sign-in CTA, starter prompts, composer-like gated ask box, and product preview panel.
+- Preserved referral attribution silently through all public sign-in entry points, including CTA links, starter prompt links, and gated ask form submission.
+- Kept the page public and static/server-rendered without auth lookups, protected payloads, conversation history, trip projects, admin controls, AI calls, retrieval, usage events, or persistence.
+- No global CSS changes were needed; the redesign uses existing Tailwind utility styling and avoids design-system churn.
+- Review patch fixed GET form submission semantics so `next` and `ref` are submitted as hidden inputs rather than relying on query parameters in the form action.
 
 ### Verification Results
 
-- Pending implementation.
+- `pnpm test:run tests/auth-gate.test.ts` -- passed, 20 tests.
+- `pnpm test:run` -- passed, 21 files / 289 tests.
+- `pnpm lint` -- passed.
+- `pnpm build` -- passed.
+- `pnpm typecheck` -- passed.
+
+## Review Triage Log
+
+### 2026-07-10 — Review pass
+- intent_gap: 0
+- bad_spec: 0
+- patch: 1: (high 1, medium 0, low 0)
+- defer: 0
+- reject: 5
+- addressed_findings:
+  - `[high]` `[patch]` Gated ask form submission could lose `next` and `ref` because GET forms may not preserve action query parameters; changed the form to submit to `/sign-in` with hidden `next` and `ref` inputs and added assertions for hidden referral preservation.
+
+## Auto Run Result
+
+- Status: done
+- Summary: Implemented UI.1 public logged-out homepage redesign with referral-preserving, sign-in-gated entry and static rendering coverage.
+- Files changed: `src/app/page.tsx` public homepage; `tests/auth-gate.test.ts` public/referral assertions; `_bmad-output/implementation-artifacts/sprint-status.yaml` BMad tracking; this spec record.
+- Review findings breakdown: 1 patch applied; 0 deferred; 5 rejected as out of scope/noise after classification.
+- Follow-up review recommended: false.
+- Verification performed: `pnpm test:run tests/auth-gate.test.ts`, `pnpm test:run`, `pnpm lint`, `pnpm build`, `pnpm typecheck` all passed.
+- Residual risks: Visual fidelity was verified by code/static rendering only; no browser screenshot review was run.
 
 ### File List
 
 - `_bmad-output/implementation-artifacts/spec-ui-1-public-logged-out-homepage-redesign.md`
 - `_bmad-output/implementation-artifacts/sprint-status.yaml`
+- `src/app/page.tsx`
+- `tests/auth-gate.test.ts`
