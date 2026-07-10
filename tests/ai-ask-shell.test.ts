@@ -127,7 +127,7 @@ describe("AI Ask authenticated shell", () => {
     expect(html).toContain("Chọn chi tiết trong câu trả lời");
     expect(html).toContain("Chưa có chi tiết được chọn");
     expect(html).toContain("không tự tạo thông tin chi tiết từ nội dung trả lời");
-    expect(html).toContain("Bảng chi tiết đã chọn");
+    expect(html).not.toContain("Bảng chi tiết đã chọn");
     expect(html).not.toContain("source-chip");
   });
 
@@ -262,7 +262,9 @@ describe("AI Ask authenticated shell", () => {
     expect(html).toContain("Bãi đỗ chính thức Huế");
     expect(html).toContain("Nguồn web cập nhật");
     expect(html).toContain("Nguồn không an toàn");
-    expect(html).toContain("Xem chi tiết nguồn: Bãi đỗ chính thức Huế");
+    expect(html).toContain("Xem chi tiết cảnh báo: Bãi đỗ chính thức Huế");
+    expect(html).toContain("Xem chi tiết cảnh báo: Nguồn web cập nhật");
+    expect(html).toContain("Xem chi tiết nguồn: Nguồn không an toàn");
     expect(html).toContain('aria-pressed="false"');
     expect(html).not.toContain('role="option"');
     expect(html).not.toContain('aria-selected="false"');
@@ -350,12 +352,17 @@ describe("AI Ask authenticated shell", () => {
     expect(source).toContain("const [selectedAnswerEntity, setSelectedAnswerEntity] = useState<AnswerEntityDescriptor | null>(null)");
     expect(source).toContain("createProvenanceAnswerEntityDescriptor(item)");
     expect(source).toContain("owner: { table: \"assistant_response_provenance\", id: item.id }");
-    expect(source).toContain("aria-pressed={selectedEntityId === item.id}");
+    expect(source).toContain("aria-pressed={isSelected}");
+    expect(source).toContain("aria-controls={detailPanelIds}");
+    expect(source).toContain("aria-expanded={isSelected}");
+    expect(source).toContain("panel?.focus({ preventScroll: true })");
+    expect(source).toContain("trigger?.isConnected");
+    expect(source).toContain("Xem chi tiết suy luận AI");
+    expect(source).toContain("showContextPanel && selectedAnswerEntity");
     expect(source).toContain("Bảng chi tiết đã chọn");
     expect(source).toContain("focus:ring-4 focus:ring-[#8fb59f]/45");
     expect(source).toContain("event.key !== \"Escape\"");
     expect(source).toContain("isSessionSheetOpen || isTyping");
-    expect(source).toContain("answerEntityTriggerRef.current?.focus()");
     expect(source).not.toContain("localStorage");
     expect(source).not.toContain("sessionStorage");
     expect(source).not.toContain("sourceSnapshot");

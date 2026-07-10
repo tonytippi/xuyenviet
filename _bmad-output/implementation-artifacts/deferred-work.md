@@ -85,3 +85,9 @@
 - source_spec: `spec-5-9-record-ai-usage-events.md`
   summary: Decide whether AI Ask assistant/provenance persistence should remain coupled to AI usage insert success.
   evidence: `src/app/api/ai-ask/stream/route.ts` persists assistant message, provenance, and AI Gateway usage in one transaction per Story 5.5. If usage insert fails twice after a successful provider answer, the streamed answer is not saved. Decoupling this would change the existing atomicity contract and needs a separate design decision.
+
+## Deferred from: code review of spec-ui-4-selectable-answer-entities-and-detail-panel.md (2026-07-10)
+
+- source_spec: `spec-ui-4-selectable-answer-entities-and-detail-panel.md`
+  summary: Add DOM interaction coverage for answer detail selection and close behavior.
+  evidence: UI.4 currently verifies selection contracts mostly through server-rendered markup and source assertions. Click selection, Escape close, selected-state updates, and focus restoration need a browser/DOM interaction harness such as Testing Library/user-event or Playwright to catch behavioral regressions.

@@ -70,6 +70,14 @@ warnings: []
 - Given the traveler uses keyboard navigation, when they open and close the detail panel, then focus is visible, selected state is exposed, and focus returns to the triggering control.
 - Given no answer entity is selected, when the active shell renders, then the right panel does not fabricate place, hotel, route, cost, warning, or source details.
 
+### Review Findings
+
+- [x] [Review][Patch] Announce and connect opened detail panel for keyboard/screen-reader users [`src/features/ai/ai-ask-composer.tsx:186`, `src/features/ai/ai-ask-composer.tsx:724`, `src/features/ai/ai-ask-composer.tsx:968`, `src/features/ai/ai-ask-composer.tsx:1122`]
+- [x] [Review][Patch] Do not show the empty mobile detail inspector before a source is selected [`src/features/ai/ai-ask-composer.tsx:968`]
+- [x] [Review][Patch] Guard close focus restoration when the original provenance trigger is detached [`src/features/ai/ai-ask-composer.tsx:729`]
+- [x] [Review][Patch] Use non-source accessible labels for general-reasoning provenance rows [`src/features/ai/ai-ask-composer.tsx:187`]
+- [x] [Review][Defer] Add DOM interaction coverage for click selection, Escape close, selected-state updates, and focus restoration [`tests/ai-ask-shell.test.ts:346`] -- deferred, pre-existing test harness gap
+
 ## Design Notes
 
 The right detail panel is an inspector for selected answer entities, not a second chat and not a Google Maps panel. It should use compact facts and provenance chips. Prefer safe source/provenance entities first; richer place/hotel extraction can be a later story if it has trusted structured data.
@@ -137,6 +145,18 @@ Verification performed:
 Residual risks:
 - Current tests verify several interaction contracts through server-rendered markup and source assertions rather than a browser DOM interaction test harness.
 - No commit was created because repository instructions require explicit approval before committing, even though the BMad auto-dev review step normally asks to commit.
+
+### Follow-up Review Patch Result
+
+- Addressed 4 patch findings from follow-up code review: connected provenance triggers to detail panel IDs, exposed expanded state, moved focus to the visible detail panel on selection, guarded close focus restoration for detached triggers, hid the mobile detail inspector until an entity is selected, and used non-source accessible labels for general reasoning and warning rows.
+- Deferred DOM interaction coverage remains tracked in `_bmad-output/implementation-artifacts/deferred-work.md` until the project adopts a browser interaction test harness.
+
+### Follow-up Verification Results
+
+- `pnpm test:run tests/ai-ask-shell.test.ts tests/answer-context.test.ts` -- passed, 99 tests.
+- `pnpm lint` -- passed.
+- `pnpm build` -- passed.
+- `pnpm typecheck` -- passed after rerun. The first parallel run failed because `pnpm build` regenerated `.next/types` while `tsc --noEmit` was reading them.
 
 ### Verification Results
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useActionState, useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useActionState, useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from "react";
 
 import { ConversationList, type ChatSessionSummary } from "@/features/chat-trips/conversation-list";
 import { formatTripProjectLabel } from "@/features/chat-trips/labels";
@@ -170,7 +170,7 @@ export function AssistantMessageContent({ content }: { content: string }) {
   );
 }
 
-export function AssistantProvenanceBlock({ provenance, selectedEntityId, onSelectEntity }: { provenance?: AssistantMessageProvenanceItem[]; selectedEntityId?: string; onSelectEntity?: (entity: AnswerEntityDescriptor, trigger: HTMLElement) => void }) {
+export function AssistantProvenanceBlock({ provenance, selectedEntityId, detailPanelIds, onSelectEntity }: { provenance?: AssistantMessageProvenanceItem[]; selectedEntityId?: string; detailPanelIds?: string; onSelectEntity?: (entity: AnswerEntityDescriptor, trigger: HTMLElement) => void }) {
   const visibleItems = provenance?.filter((item) => item.usedInPrompt || item.sourceCategory === "general") ?? [];
 
   if (visibleItems.length === 0) {
@@ -181,11 +181,17 @@ export function AssistantProvenanceBlock({ provenance, selectedEntityId, onSelec
     <section className="mt-4 rounded-2xl border border-[#d8c9ad] bg-[#fff8ec] p-4" aria-label="Nguồn và độ tin cậy">
       <h3 className="text-sm font-bold uppercase tracking-[0.12em] text-[#8c4f13]">Nguồn và độ tin cậy</h3>
       <ul className="mt-3 space-y-3">
-        {visibleItems.map((item) => (
+        {visibleItems.map((item) => {
+          const isSelected = selectedEntityId === item.id;
+          const detailActionLabel = item.sourceCategory === "general" ? "Xem chi tiết suy luận AI" : item.freshnessSensitive ? "Xem chi tiết cảnh báo" : "Xem chi tiết nguồn";
+
+          return (
           <li className="rounded-xl border border-[#eadfc8] bg-white/80 p-3 text-sm leading-6 text-[#17342c]" key={item.id}>
             <button
-              aria-label={`Xem chi tiết nguồn: ${item.title}`}
-              aria-pressed={selectedEntityId === item.id}
+              aria-controls={detailPanelIds}
+              aria-expanded={isSelected}
+              aria-label={`${detailActionLabel}: ${item.title}`}
+              aria-pressed={isSelected}
               className="-m-2 flex w-[calc(100%+1rem)] flex-col gap-2 rounded-xl p-2 text-left transition hover:bg-[#fff8ec] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45 aria-pressed:border aria-pressed:border-[#1f5f46] aria-pressed:bg-[#edf7f0] sm:flex-row sm:items-start sm:justify-between"
               onClick={(event) => onSelectEntity?.(createProvenanceAnswerEntityDescriptor(item), event.currentTarget)}
               type="button"
@@ -212,16 +218,17 @@ export function AssistantProvenanceBlock({ provenance, selectedEntityId, onSelec
               <p className="mt-2 text-sm leading-6 text-[#6f3f12]">Thông tin có thể thay đổi. Kiểm tra lại trước khi đi hoặc đặt dịch vụ.</p>
             ) : null}
           </li>
-        ))}
+          );
+        })}
       </ul>
     </section>
   );
 }
 
-export function AnswerDetailPanel({ selectedEntity, onClose }: { selectedEntity: AnswerEntityDescriptor | null; onClose: () => void }) {
+export function AnswerDetailPanel({ selectedEntity, panelId, panelRef, onClose }: { selectedEntity: AnswerEntityDescriptor | null; panelId?: string; panelRef?: RefObject<HTMLDivElement | null>; onClose: () => void }) {
   if (!selectedEntity) {
     return (
-      <div className="flex flex-1 flex-col justify-center gap-4 py-8">
+      <div className="flex flex-1 flex-col justify-center gap-4 py-8" id={panelId} ref={panelRef} tabIndex={-1}>
         <div className="rounded-[1.5rem] border border-dashed border-[#d8c9ad] bg-white/75 p-5">
           <p className="text-sm font-bold text-[#17342c]">Chưa có chi tiết được chọn</p>
           <p className="mt-2 text-sm leading-6 text-[#4f625a]">
@@ -238,7 +245,7 @@ export function AnswerDetailPanel({ selectedEntity, onClose }: { selectedEntity:
   const detailEntries = Object.entries(selectedEntity.detail ?? {});
 
   return (
-    <div className="flex flex-1 flex-col gap-4 overflow-y-auto py-4">
+    <div aria-live="polite" className="flex flex-1 flex-col gap-4 overflow-y-auto py-4 focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45" id={panelId} ref={panelRef} tabIndex={-1}>
       <div className="rounded-[1.5rem] border border-[#d8c9ad] bg-white/85 p-4">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -335,10 +342,15 @@ export function AiAskComposer({
   const sessionSheetTriggerRef = useRef<HTMLButtonElement>(null);
   const sessionSheetPanelRef = useRef<HTMLDivElement>(null);
   const sessionSheetPreviousFocusRef = useRef<HTMLElement | null>(null);
+  const mobileAnswerDetailPanelRef = useRef<HTMLDivElement>(null);
+  const desktopAnswerDetailPanelRef = useRef<HTMLDivElement>(null);
   const answerEntityTriggerRef = useRef<HTMLElement | null>(null);
   const hasMessages = messages.length > 0;
   const showEmptyState = !hasMessages && !isPending;
   const showContextPanel = hasMessages;
+  const mobileAnswerDetailPanelId = "ai-ask-selected-answer-detail-mobile";
+  const desktopAnswerDetailPanelId = "ai-ask-selected-answer-detail-desktop";
+  const answerDetailPanelIds = `${mobileAnswerDetailPanelId} ${desktopAnswerDetailPanelId}`;
   const selectedAnswerEntityId = selectedAnswerEntity?.provenanceIds?.[0];
 
   useEffect(() => {
@@ -360,7 +372,17 @@ export function AiAskComposer({
     setConversationId(initialConversationId);
     setFailedQuestionIds(getUnansweredUserMessageIds(initialMessages));
     setSelectedAnswerEntity(null);
+    answerEntityTriggerRef.current = null;
   }, [initialConversationId, initialMessages]);
+
+  useEffect(() => {
+    if (!selectedAnswerEntity) {
+      return;
+    }
+
+    const panel = window.matchMedia("(min-width: 1024px)").matches ? desktopAnswerDetailPanelRef.current : mobileAnswerDetailPanelRef.current;
+    panel?.focus({ preventScroll: true });
+  }, [selectedAnswerEntity]);
 
   useEffect(() => {
     if (!selectedAnswerEntity) {
@@ -628,6 +650,7 @@ export function AiAskComposer({
     setFailedQuestionIds([]);
     setSelectedImage(null);
     setSelectedAnswerEntity(null);
+    answerEntityTriggerRef.current = null;
     if (imageInputRef.current) {
       imageInputRef.current.value = "";
     }
@@ -715,6 +738,7 @@ export function AiAskComposer({
     setFailedQuestionIds([]);
     setSelectedImage(null);
     setSelectedAnswerEntity(null);
+    answerEntityTriggerRef.current = null;
     if (imageInputRef.current) {
       imageInputRef.current.value = "";
     }
@@ -728,7 +752,15 @@ export function AiAskComposer({
 
   function closeAnswerDetailPanel() {
     setSelectedAnswerEntity(null);
-    answerEntityTriggerRef.current?.focus();
+    const trigger = answerEntityTriggerRef.current;
+    answerEntityTriggerRef.current = null;
+
+    if (trigger?.isConnected) {
+      trigger.focus();
+      return;
+    }
+
+    textareaRef.current?.focus();
   }
 
   function handleSelectTripProject(projectId: string) {
@@ -784,6 +816,7 @@ export function AiAskComposer({
           setFailedQuestionIds([]);
           setSelectedImage(null);
           setSelectedAnswerEntity(null);
+          answerEntityTriggerRef.current = null;
           if (imageInputRef.current) {
             imageInputRef.current.value = "";
           }
@@ -802,6 +835,7 @@ export function AiAskComposer({
       setFailedQuestionIds([]);
       setSelectedImage(null);
       setSelectedAnswerEntity(null);
+      answerEntityTriggerRef.current = null;
       if (imageInputRef.current) {
         imageInputRef.current.value = "";
       }
@@ -947,7 +981,7 @@ export function AiAskComposer({
                   {message.role === "assistant" ? (
                     <>
                       <AssistantMessageContent content={message.content} />
-                      <AssistantProvenanceBlock provenance={message.provenance} selectedEntityId={selectedAnswerEntityId} onSelectEntity={handleSelectAnswerEntity} />
+                      <AssistantProvenanceBlock provenance={message.provenance} selectedEntityId={selectedAnswerEntityId} detailPanelIds={answerDetailPanelIds} onSelectEntity={handleSelectAnswerEntity} />
                     </>
                   ) : <p className="whitespace-pre-wrap text-base leading-7">{message.content}</p>}
                   {message.role === "user" && message.imageAttachments && message.imageAttachments.length > 0 ? (
@@ -965,9 +999,9 @@ export function AiAskComposer({
             </section>
           ) : null}
 
-          {showContextPanel ? (
+          {showContextPanel && selectedAnswerEntity ? (
             <section aria-label="Bảng chi tiết đã chọn" className="rounded-[1.5rem] border border-[#d8c9ad] bg-[linear-gradient(180deg,#fffdf8_0%,#ffffff_42%,#f7fbf8_100%)] p-4 text-[#17342c] shadow-[0_16px_40px_rgba(41,33,18,0.08)] lg:hidden">
-              <AnswerDetailPanel selectedEntity={selectedAnswerEntity} onClose={closeAnswerDetailPanel} />
+              <AnswerDetailPanel selectedEntity={selectedAnswerEntity} panelId={mobileAnswerDetailPanelId} panelRef={mobileAnswerDetailPanelRef} onClose={closeAnswerDetailPanel} />
             </section>
           ) : null}
 
@@ -1128,7 +1162,7 @@ export function AiAskComposer({
             </div>
             <span aria-hidden="true" className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-[#e8f3ec] text-sm font-black text-[#14532d]">XV</span>
           </div>
-          <AnswerDetailPanel selectedEntity={selectedAnswerEntity} onClose={closeAnswerDetailPanel} />
+          <AnswerDetailPanel selectedEntity={selectedAnswerEntity} panelId={desktopAnswerDetailPanelId} panelRef={desktopAnswerDetailPanelRef} onClose={closeAnswerDetailPanel} />
         </aside>
       ) : null}
     </>
