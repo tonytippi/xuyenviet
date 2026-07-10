@@ -47,6 +47,25 @@ const emptyMessages: DisplayMessage[] = [];
 const emptySessions: ChatSessionSummary[] = [];
 const emptyTripProjects: TripProjectSummary[] = [];
 
+const starterCards = [
+  {
+    title: "Lên route",
+    description: "Hà Nội → Huế trong 5 ngày",
+  },
+  {
+    title: "Tìm nơi ở",
+    description: "khu nào tiện cho gia đình",
+  },
+  {
+    title: "Điểm dừng",
+    description: "nghỉ ăn, chơi nhẹ, trẻ em",
+  },
+  {
+    title: "Kiểm tra nguồn",
+    description: "curated, official, web",
+  },
+];
+
 type AiAskComposerProps = {
   initialQuestion?: string;
   initialConversationId?: string;
@@ -229,6 +248,8 @@ export function AiAskComposer({
   const sessionSheetTriggerRef = useRef<HTMLButtonElement>(null);
   const sessionSheetPanelRef = useRef<HTMLDivElement>(null);
   const sessionSheetPreviousFocusRef = useRef<HTMLElement | null>(null);
+  const hasMessages = messages.length > 0;
+  const showEmptyState = !hasMessages && !isPending;
 
   useEffect(() => {
     return () => {
@@ -668,6 +689,74 @@ export function AiAskComposer({
     }
   }
 
+  const planningScope = (
+    <section className="rounded-[1.25rem] border border-[#d8c9ad] bg-white/75 p-4 text-left">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#8c4f13]">Phạm vi lập kế hoạch</p>
+          <h2 className="mt-1 text-lg font-semibold text-[#17342c]">
+            {selectedTripProject ? `Dự án: ${formatTripProjectLabel(selectedTripProject)}` : "Trò chuyện thường"}
+          </h2>
+          <p className="mt-2 text-sm leading-6 text-[#4f625a]">
+            {selectedTripProject
+              ? "Tin nhắn mới sẽ được gắn với dự án chuyến đi này. Ngữ cảnh bền vững sẽ được dùng ở các story sau."
+              : "Bạn đang hỏi trong hội thoại thường. Chọn hoặc tạo dự án nếu muốn gom kế hoạch cho một chuyến cụ thể."}
+          </p>
+        </div>
+        <label className="flex min-w-56 flex-col gap-2 text-sm font-semibold text-[#17342c]">
+          Chọn dự án
+          <select
+            className="min-h-11 rounded-2xl border border-[#d8c9ad] bg-[#fffdf8] px-3 py-2 text-sm text-[#17342c] outline-none focus:border-[#1f5f46] focus:ring-4 focus:ring-[#8fb59f]/45"
+            disabled={projectActionsDisabled}
+            onChange={(event) => handleSelectTripProject(event.target.value)}
+            value={activeTripProjectId ?? ""}
+          >
+            <option value="">Trò chuyện thường</option>
+            {tripProjects.map((project) => (
+              <option key={project.id} value={project.id}>{formatTripProjectLabel(project)}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      {selectedTripProject && deleteTripProjectAction ? (
+        <div className="mt-4 rounded-2xl border border-[#f0c8a0] bg-[#fff7ed] p-3 text-sm leading-6 text-[#6f3f12]">
+          <p>Dự án có thể xoá khi bạn không chờ câu trả lời AI. Ngữ cảnh dự án sẽ bị xoá; các cuộc trò chuyện liên kết sẽ chuyển về lịch sử thường.</p>
+          <button
+            className="mt-3 min-h-11 rounded-2xl border border-[#b45309] bg-white px-4 py-2 text-sm font-semibold text-[#7c2d12] transition hover:bg-[#ffedd5] focus:outline-none focus:ring-4 focus:ring-[#f0c8a0] disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={projectActionsDisabled}
+            onClick={handleDeleteTripProject}
+            type="button"
+          >
+            {deletingTripProjectId === selectedTripProject.id ? "Đang xoá dự án..." : "Xoá dự án chuyến đi"}
+          </button>
+        </div>
+      ) : null}
+
+      {createTripProjectAction ? (
+        <details className="mt-4 rounded-2xl border border-dashed border-[#d8c9ad] bg-[#fffdf8] p-3">
+          <summary className="cursor-pointer text-sm font-semibold text-[#17342c]">Tạo dự án chuyến đi mới</summary>
+          <form action={createProjectFormAction} className="mt-3 grid gap-3 sm:grid-cols-2">
+            <label className="sm:col-span-2 text-sm font-semibold text-[#17342c]">
+              Tên dự án <span className="text-[#8c4f13]">*</span>
+              <input className="mt-1 min-h-11 w-full rounded-xl border border-[#d8c9ad] bg-white px-3 py-2 text-sm" disabled={createFormDisabled} maxLength={160} name="title" required placeholder="Ví dụ: Đà Nẵng 7 ngày cùng gia đình" />
+            </label>
+            <label className="text-sm font-semibold text-[#17342c]">Điểm đi<input className="mt-1 min-h-11 w-full rounded-xl border border-[#d8c9ad] bg-white px-3 py-2 text-sm" disabled={createFormDisabled} name="origin" placeholder="Hà Nội" /></label>
+            <label className="text-sm font-semibold text-[#17342c]">Điểm đến<input className="mt-1 min-h-11 w-full rounded-xl border border-[#d8c9ad] bg-white px-3 py-2 text-sm" disabled={createFormDisabled} name="destination" placeholder="Đà Nẵng" /></label>
+            <label className="text-sm font-semibold text-[#17342c]">Ngày đi<input className="mt-1 min-h-11 w-full rounded-xl border border-[#d8c9ad] bg-white px-3 py-2 text-sm" disabled={createFormDisabled} name="startDate" placeholder="2026-08-01" /></label>
+            <label className="text-sm font-semibold text-[#17342c]">Ngày về<input className="mt-1 min-h-11 w-full rounded-xl border border-[#d8c9ad] bg-white px-3 py-2 text-sm" disabled={createFormDisabled} name="endDate" placeholder="2026-08-07" /></label>
+            <label className="sm:col-span-2 text-sm font-semibold text-[#17342c]">Người đi<input className="mt-1 min-h-11 w-full rounded-xl border border-[#d8c9ad] bg-white px-3 py-2 text-sm" disabled={createFormDisabled} name="travelers" placeholder="2 người lớn, 1 trẻ em" /></label>
+            <label className="sm:col-span-2 text-sm font-semibold text-[#17342c]">Ghi chú<textarea className="mt-1 min-h-20 w-full rounded-xl border border-[#d8c9ad] bg-white px-3 py-2 text-sm" disabled={createFormDisabled} name="notes" placeholder="Sở thích, nhịp di chuyển, điều cần tránh..." /></label>
+            {createProjectState?.error ? (
+              <p className="sm:col-span-2 rounded-2xl border border-[#f0c8a0] bg-[#fff7ed] p-3 text-sm leading-6 text-[#6f3f12]" role="alert">{createProjectState.error}</p>
+            ) : null}
+            <button className="min-h-11 rounded-2xl bg-[#e5bd82] px-4 py-2 text-sm font-semibold text-[#17342c] transition hover:bg-[#d9a65c] focus:outline-none focus:ring-4 focus:ring-[#e5bd82] disabled:cursor-not-allowed disabled:opacity-60" disabled={createFormDisabled} type="submit">{isCreatingProject ? "Đang tạo dự án..." : "Tạo và chọn dự án"}</button>
+          </form>
+        </details>
+      ) : null}
+    </section>
+  );
+
   return (
     <>
       <nav aria-label="Danh sách trò chuyện" className="hidden lg:block">
@@ -681,72 +770,10 @@ export function AiAskComposer({
         />
       </nav>
 
-      <div className="flex min-h-[34rem] flex-col justify-between gap-5 rounded-[1.5rem] border border-[#d8c9ad] bg-[#fffdf8]/80 p-4 sm:p-5">
-        <section className="rounded-[1.25rem] border border-[#d8c9ad] bg-white/75 p-4 text-left">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#8c4f13]">Phạm vi lập kế hoạch</p>
-              <h2 className="mt-1 text-lg font-semibold text-[#17342c]">
-                {selectedTripProject ? `Dự án: ${formatTripProjectLabel(selectedTripProject)}` : "Trò chuyện thường"}
-              </h2>
-              <p className="mt-2 text-sm leading-6 text-[#4f625a]">
-                {selectedTripProject
-                  ? "Tin nhắn mới sẽ được gắn với dự án chuyến đi này. Ngữ cảnh bền vững sẽ được dùng ở các story sau."
-                  : "Bạn đang hỏi trong hội thoại thường. Chọn hoặc tạo dự án nếu muốn gom kế hoạch cho một chuyến cụ thể."}
-              </p>
-            </div>
-            <label className="flex min-w-56 flex-col gap-2 text-sm font-semibold text-[#17342c]">
-              Chọn dự án
-              <select
-                className="min-h-11 rounded-2xl border border-[#d8c9ad] bg-[#fffdf8] px-3 py-2 text-sm text-[#17342c] outline-none focus:border-[#1f5f46] focus:ring-4 focus:ring-[#8fb59f]/45"
-                disabled={projectActionsDisabled}
-                onChange={(event) => handleSelectTripProject(event.target.value)}
-                value={activeTripProjectId ?? ""}
-              >
-                <option value="">Trò chuyện thường</option>
-                {tripProjects.map((project) => (
-                  <option key={project.id} value={project.id}>{formatTripProjectLabel(project)}</option>
-                ))}
-              </select>
-            </label>
-          </div>
-
-          {selectedTripProject && deleteTripProjectAction ? (
-            <div className="mt-4 rounded-2xl border border-[#f0c8a0] bg-[#fff7ed] p-3 text-sm leading-6 text-[#6f3f12]">
-              <p>Dự án có thể xoá khi bạn không chờ câu trả lời AI. Ngữ cảnh dự án sẽ bị xoá; các cuộc trò chuyện liên kết sẽ chuyển về lịch sử thường.</p>
-              <button
-                className="mt-3 min-h-11 rounded-2xl border border-[#b45309] bg-white px-4 py-2 text-sm font-semibold text-[#7c2d12] transition hover:bg-[#ffedd5] focus:outline-none focus:ring-4 focus:ring-[#f0c8a0] disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={projectActionsDisabled}
-                onClick={handleDeleteTripProject}
-                type="button"
-              >
-                {deletingTripProjectId === selectedTripProject.id ? "Đang xoá dự án..." : "Xoá dự án chuyến đi"}
-              </button>
-            </div>
-          ) : null}
-
-          {createTripProjectAction ? (
-            <details className="mt-4 rounded-2xl border border-dashed border-[#d8c9ad] bg-[#fffdf8] p-3">
-              <summary className="cursor-pointer text-sm font-semibold text-[#17342c]">Tạo dự án chuyến đi mới</summary>
-              <form action={createProjectFormAction} className="mt-3 grid gap-3 sm:grid-cols-2">
-                <label className="sm:col-span-2 text-sm font-semibold text-[#17342c]">
-                  Tên dự án <span className="text-[#8c4f13]">*</span>
-                  <input className="mt-1 min-h-11 w-full rounded-xl border border-[#d8c9ad] bg-white px-3 py-2 text-sm" disabled={createFormDisabled} maxLength={160} name="title" required placeholder="Ví dụ: Đà Nẵng 7 ngày cùng gia đình" />
-                </label>
-                <label className="text-sm font-semibold text-[#17342c]">Điểm đi<input className="mt-1 min-h-11 w-full rounded-xl border border-[#d8c9ad] bg-white px-3 py-2 text-sm" disabled={createFormDisabled} name="origin" placeholder="Hà Nội" /></label>
-                <label className="text-sm font-semibold text-[#17342c]">Điểm đến<input className="mt-1 min-h-11 w-full rounded-xl border border-[#d8c9ad] bg-white px-3 py-2 text-sm" disabled={createFormDisabled} name="destination" placeholder="Đà Nẵng" /></label>
-                <label className="text-sm font-semibold text-[#17342c]">Ngày đi<input className="mt-1 min-h-11 w-full rounded-xl border border-[#d8c9ad] bg-white px-3 py-2 text-sm" disabled={createFormDisabled} name="startDate" placeholder="2026-08-01" /></label>
-                <label className="text-sm font-semibold text-[#17342c]">Ngày về<input className="mt-1 min-h-11 w-full rounded-xl border border-[#d8c9ad] bg-white px-3 py-2 text-sm" disabled={createFormDisabled} name="endDate" placeholder="2026-08-07" /></label>
-                <label className="sm:col-span-2 text-sm font-semibold text-[#17342c]">Người đi<input className="mt-1 min-h-11 w-full rounded-xl border border-[#d8c9ad] bg-white px-3 py-2 text-sm" disabled={createFormDisabled} name="travelers" placeholder="2 người lớn, 1 trẻ em" /></label>
-                <label className="sm:col-span-2 text-sm font-semibold text-[#17342c]">Ghi chú<textarea className="mt-1 min-h-20 w-full rounded-xl border border-[#d8c9ad] bg-white px-3 py-2 text-sm" disabled={createFormDisabled} name="notes" placeholder="Sở thích, nhịp di chuyển, điều cần tránh..." /></label>
-                {createProjectState?.error ? (
-                  <p className="sm:col-span-2 rounded-2xl border border-[#f0c8a0] bg-[#fff7ed] p-3 text-sm leading-6 text-[#6f3f12]" role="alert">{createProjectState.error}</p>
-                ) : null}
-                <button className="min-h-11 rounded-2xl bg-[#e5bd82] px-4 py-2 text-sm font-semibold text-[#17342c] transition hover:bg-[#d9a65c] focus:outline-none focus:ring-4 focus:ring-[#e5bd82] disabled:cursor-not-allowed disabled:opacity-60" disabled={createFormDisabled} type="submit">{isCreatingProject ? "Đang tạo dự án..." : "Tạo và chọn dự án"}</button>
-              </form>
-            </details>
-          ) : null}
-        </section>
+      <div className="flex min-h-[34rem] flex-col justify-between gap-5 rounded-[1.5rem] border border-[#d8c9ad] bg-[radial-gradient(circle_at_50%_0%,rgba(20,83,45,0.1),transparent_30%),#fffdf8] p-4 sm:p-5">
+        <div className="hidden lg:block">
+          {planningScope}
+        </div>
 
         <div className="flex items-center justify-between gap-3 lg:hidden">
           <button
@@ -759,21 +786,23 @@ export function AiAskComposer({
           </button>
         </div>
 
-        <div className="mx-auto flex w-full max-w-[760px] flex-1 flex-col justify-center gap-5 py-8 text-center">
+        {showEmptyState ? (
+        <div className="mx-auto flex w-full max-w-[780px] flex-1 flex-col justify-center gap-5 py-8 text-center">
           <p className="mx-auto w-fit rounded-full border border-[#c47a24]/45 bg-[#fff8ec] px-4 py-2 text-sm font-semibold text-[#8c4f13]">
             Bắt đầu bằng một câu hỏi hành trình
           </p>
-          <h2 className="text-3xl font-semibold tracking-[-0.03em] text-[#17342c] sm:text-4xl">Bạn đang muốn đi đâu?</h2>
+          <h2 className="text-4xl font-semibold tracking-[-0.06em] text-[#17342c] sm:text-6xl">Mình sẽ đi đâu?</h2>
           <p className="text-base leading-7 text-[#4f625a] sm:text-lg">
-            Ví dụ: Hà Nội đi Đà Nẵng 7 ngày cùng gia đình. Hãy hỏi rộng trước; hội thoại hiện tại sẽ được nối tiếp để bạn tinh chỉnh kế hoạch.
+            Bắt đầu bằng một câu hỏi tự nhiên. XuyenViet sẽ giúp bạn lên route, chọn điểm dừng, nơi ở và những điều cần kiểm chứng.
           </p>
-          <div className="rounded-2xl border border-dashed border-[#d8c9ad] bg-white/65 p-5 text-left" aria-label={initialConversationId ? "Khu vực tin nhắn đã tải" : "Khu vực tin nhắn đang chờ câu hỏi đầu tiên"}>
-            <p className="text-sm font-semibold text-[#17342c]">Khu vực hội thoại</p>
-            <p className="mt-2 text-sm leading-6 text-[#5d6f67]">
-              {initialConversationId ? "Tin nhắn đã lưu được tải theo thứ tự thời gian. Bạn có thể tiếp tục hỏi trong cùng hội thoại." : "Chưa có tin nhắn. Câu trả lời thật và nguồn tham chiếu sẽ xuất hiện ở các story sau, không hiển thị dữ liệu giả ở bước này."}
+
+          {selectedTripProject ? (
+            <p className="mx-auto max-w-2xl rounded-2xl border border-[#8fb59f] bg-[#edf7f0] px-4 py-3 text-sm font-semibold leading-6 text-[#17342c]">
+              Đang hỏi trong dự án: {formatTripProjectLabel(selectedTripProject)}. Tin nhắn mới sẽ dùng ngữ cảnh dự án này, không mở bảng chi tiết bên phải.
             </p>
-          </div>
+          ) : null}
         </div>
+        ) : null}
 
         <div className="space-y-4">
           {messages.length > 0 ? (
@@ -830,7 +859,7 @@ export function AiAskComposer({
             </section>
           ) : null}
 
-          <form className="rounded-[1.5rem] border border-[#d8c9ad] bg-white/80 p-4 shadow-[0_16px_40px_rgba(41,33,18,0.08)]" onSubmit={handleSubmit} ref={formRef}>
+          <form className="mx-auto max-w-[760px] rounded-[1.75rem] border border-[#d8c9ad] bg-white/90 p-4 shadow-[0_20px_60px_rgba(41,33,18,0.14)]" onSubmit={handleSubmit} ref={formRef}>
             <label className="text-sm font-semibold text-[#17342c]" htmlFor="ai-ask-question">
               Câu hỏi của bạn
             </label>
@@ -891,6 +920,41 @@ export function AiAskComposer({
             </div>
             <p className="mt-2 text-xs leading-5 text-[#6b7c75]" id="ai-ask-shortcuts">Enter để gửi, Shift+Enter để xuống dòng, nhấn / để focus ô nhập.</p>
           </form>
+
+          {showEmptyState ? (
+            <>
+              <div className="mx-auto grid max-w-[760px] gap-3 sm:grid-cols-2" aria-label="Gợi ý câu hỏi bắt đầu">
+                {starterCards.map((card) => (
+                  <button
+                    className="grid min-h-[76px] grid-cols-[2.25rem_minmax(0,1fr)] items-center gap-3 rounded-[1.25rem] border border-[#d8c9ad] bg-white/80 p-4 text-left shadow-[0_12px_36px_rgba(31,41,55,0.06)] transition hover:border-[#8fb59f] hover:bg-white focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45"
+                    key={card.title}
+                    onClick={() => {
+                      if (askFormDisabled) {
+                        return;
+                      }
+
+                      setQuestion(card.description);
+                      textareaRef.current?.focus();
+                    }}
+                    disabled={askFormDisabled}
+                    type="button"
+                  >
+                    <span aria-hidden="true" className="grid h-9 w-9 place-items-center rounded-xl bg-[#e8f3ec] text-sm font-black text-[#14532d]">+</span>
+                    <span>
+                      <span className="block text-sm font-bold text-[#17342c]">{card.title}</span>
+                      <span className="mt-1 block text-xs leading-5 text-[#5d6f67]">{card.description}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+              <section className="mx-auto max-w-[760px] rounded-2xl border border-[#d8c9ad] bg-white/70 p-4 text-left">
+                <h2 className="text-sm font-bold text-[#17342c]">Lưu trữ hội thoại</h2>
+                <p className="mt-2 text-sm leading-6 text-[#4f625a]">
+                  Thông tin chuyến đi có thể được lưu để tiếp tục kế hoạch trong các bước sau. Thông báo này không chặn việc đặt câu hỏi.
+                </p>
+              </section>
+            </>
+          ) : null}
         </div>
 
         {isSessionSheetOpen ? (
@@ -901,7 +965,10 @@ export function AiAskComposer({
               onClick={() => setSessionSheetOpen(false)}
               className="absolute inset-0 bg-[#17342c]/40"
             />
-            <div ref={sessionSheetPanelRef} tabIndex={-1} className="absolute left-0 top-0 h-full w-80 max-w-[85%] rounded-r-[1.5rem] border-r border-[#d8c9ad] bg-[#fffdf8] p-3 shadow-[0_24px_80px_rgba(41,33,18,0.24)]">
+            <div ref={sessionSheetPanelRef} tabIndex={-1} className="absolute left-0 top-0 h-full w-80 max-w-[85%] overflow-y-auto rounded-r-[1.5rem] border-r border-[#d8c9ad] bg-[#fffdf8] p-3 shadow-[0_24px_80px_rgba(41,33,18,0.24)]">
+                <div className="mb-3">
+                  {planningScope}
+                </div>
                 <ConversationList
                   sessions={sessions}
                   activeConversationId={conversationId}

@@ -83,19 +83,26 @@ describe("AI Ask authenticated shell", () => {
     delete process.env.AI_GATEWAY_TIMEOUT_MS;
   });
 
-  test("renders the visible Story 2.1 shell contract", async () => {
+  test("renders the authenticated empty AI Ask shell contract", async () => {
     const html = await renderAuthenticatedAiAskShell();
 
     expect(html).toContain("Hỏi trợ lý chuyến đi Việt Nam");
     expect(html).toContain("tony@example.com");
     expect(html).toContain("Đăng xuất");
-    expect(html).toContain("Bạn đang muốn đi đâu?");
+    expect(html).toContain("Danh sách trò chuyện");
+    expect(html).toContain("Mình sẽ đi đâu?");
+    expect(html).toContain("Bắt đầu bằng một câu hỏi tự nhiên");
     expect(html).toContain("Hà Nội đi Đà Nẵng 7 ngày cùng gia đình");
+    expect(html).toContain("Lên route");
+    expect(html).toContain("Tìm nơi ở");
+    expect(html).toContain("Điểm dừng");
+    expect(html).toContain("Kiểm tra nguồn");
     expect(html).toContain("Lưu trữ hội thoại");
-    expect(html).toContain("Khu vực hội thoại");
     expect(html).toContain("Câu hỏi của bạn");
     expect(html).toContain("Gửi câu hỏi");
-    expect(html).toContain("Chưa có tin nhắn. Câu trả lời thật và nguồn tham chiếu sẽ xuất hiện ở các story sau");
+    expect(html).not.toContain("Gợi ý câu hỏi</h2>");
+    expect(html).not.toContain("Bảng chi tiết");
+    expect(html).not.toContain("right detail panel");
     expect(html).toContain('aria-describedby="ai-ask-status ai-ask-shortcuts"');
     expect(html).toContain('id="ai-ask-status"');
   });
@@ -123,7 +130,6 @@ describe("AI Ask authenticated shell", () => {
     const secondIndex = html.indexOf("Nên chia chặng nhẹ.");
     const thirdIndex = html.indexOf("Ngày thứ 3 nên nghỉ ở đâu?");
 
-    expect(html).toContain("Tin nhắn đã lưu được tải theo thứ tự thời gian");
     expect(html).toContain("Đã tải hội thoại. Bạn có thể tiếp tục kế hoạch.");
     expect(firstIndex).toBeGreaterThan(-1);
     expect(secondIndex).toBeGreaterThan(firstIndex);
@@ -218,7 +224,7 @@ describe("AI Ask authenticated shell", () => {
     const html = await renderAuthenticatedAiAskShell({ conversationId: conversation.id });
 
     expect(html).not.toContain("Tin nhắn riêng của user-2");
-    expect(html).toContain("Chưa có tin nhắn.");
+    expect(html).toContain("Mình sẽ đi đâu?");
   });
 
   test("renders only owned trip projects and selected project scope on the AI Ask page", async () => {
@@ -280,7 +286,7 @@ describe("AI Ask authenticated shell", () => {
 
     expect(html).toContain("Dự án: Đà Lạt");
     expect(html).not.toContain("Tin chỉ thuộc dự án Huế");
-    expect(html).toContain("Chưa có tin nhắn.");
+    expect(html).toContain("Mình sẽ đi đâu?");
   });
 });
 

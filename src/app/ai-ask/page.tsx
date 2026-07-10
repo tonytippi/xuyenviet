@@ -25,12 +25,6 @@ function getFirstParam(value: string | string[] | undefined) {
   return value;
 }
 
-const examplePrompts = [
-  "Hà Nội đi Đà Nẵng 7 ngày cùng gia đình nên dừng ở đâu?",
-  "Đi Tây Bắc bằng ô tô tự lái mùa mưa cần lưu ý gì?",
-  "TP. HCM đi Đà Lạt cuối tuần, lịch trình nào đỡ mệt?",
-];
-
 export default async function AiAskPage({ searchParams }: AiAskPageProps) {
   const params = await searchParams;
   const referralCode = getFirstParam(params?.ref);
@@ -86,8 +80,8 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
     : null;
 
   return (
-    <main className="min-h-screen px-5 py-6 sm:px-8 lg:px-12">
-      <section className="mx-auto flex min-h-[calc(100vh-3rem)] max-w-6xl flex-col gap-6 rounded-[2rem] border border-[#d8c9ad] bg-[#fbf7ed]/90 p-5 shadow-[0_24px_80px_rgba(41,33,18,0.14)] sm:p-8 lg:p-10">
+    <main className="min-h-screen bg-white px-5 py-6 sm:px-8 lg:px-12">
+      <section className="mx-auto flex min-h-[calc(100vh-3rem)] max-w-6xl flex-col gap-6 overflow-hidden rounded-[2rem] border border-[#d8c9ad] bg-[#fbf7ed]/90 p-5 shadow-[0_24px_80px_rgba(41,33,18,0.14)] sm:p-8 lg:p-10">
         <header className="flex flex-col gap-4 border-b border-[#d8c9ad] pb-5 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[#8c4f13]">AI Ask</p>
@@ -106,7 +100,7 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
           </div>
         </header>
 
-        <div className="grid flex-1 gap-5 lg:grid-cols-[18rem_minmax(0,1fr)_22rem]">
+        <div className="grid flex-1 gap-5 lg:grid-cols-[18rem_minmax(0,1fr)]">
           <AiAskComposer
             key={loadedConversation?.id || "new-conversation"}
             initialQuestion={publicDraft}
@@ -130,26 +124,6 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
             deleteConversationAction={deleteConversationAction}
             deleteTripProjectAction={deleteTripProjectAction}
           />
-
-          <aside className="flex flex-col gap-4">
-            <section className="rounded-[1.5rem] border border-[#d8c9ad] bg-white/75 p-5">
-              <h2 className="text-lg font-semibold text-[#17342c]">Gợi ý câu hỏi</h2>
-              <div className="mt-4 grid gap-3">
-                {examplePrompts.map((prompt) => (
-                  <p className="rounded-2xl border border-[#c47a24]/35 bg-[#fff8ec] p-4 text-sm font-semibold leading-6 text-[#8c4f13]" key={prompt}>
-                    {prompt}
-                  </p>
-                ))}
-              </div>
-            </section>
-
-            <section className="rounded-[1.5rem] border border-[#d8c9ad] bg-white/75 p-5">
-              <h2 className="text-lg font-semibold text-[#17342c]">Lưu trữ hội thoại</h2>
-              <p className="mt-3 text-sm leading-6 text-[#4f625a]">
-                Thông tin chuyến đi có thể được lưu để tiếp tục kế hoạch trong các bước sau. Thông báo này không chặn việc đặt câu hỏi.
-              </p>
-            </section>
-          </aside>
         </div>
       </section>
     </main>

@@ -2,7 +2,10 @@
 title: 'Story UI.2: Authenticated Empty AI Ask Shell Redesign'
 type: 'feature'
 created: '2026-07-10'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: '29b66aecd727af77cebcdbb2dc21090521d30e06'
+final_revision: '29b66aecd727af77cebcdbb2dc21090521d30e06'
+followup_review_recommended: false
 context:
   - '{project-root}/_bmad-output/project-context.md'
   - '{project-root}/_bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-2026-07-05/DESIGN.md'
@@ -11,7 +14,7 @@ context:
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/frontend-shell-implementation-notes.md'
   - '{project-root}/_bmad-output/implementation-artifacts/spec-2-1-authenticated-ai-ask-chat-shell.md'
 warnings:
-  - 'Artifact-only retrofit story. No application code has been changed yet.'
+  - 'Implemented as a focused UI retrofit without changing persistence schemas or server auth boundaries.'
 ---
 
 <intent-contract>
@@ -55,12 +58,12 @@ warnings:
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `src/app/ai-ask/page.tsx` -- Route authenticated empty state into a shell with left sidebar plus centered main start surface and no right detail panel -- align to `home-logged-in-empty.html`.
-- [ ] `src/features/ai/ai-ask-composer.tsx` -- Refactor only as needed to separate empty start UI from active-message UI while preserving existing submit, streaming, image, delete, project, and session behavior -- reduce regression risk.
-- [ ] `src/features/chat-trips/conversation-list.tsx` -- Ensure desktop sidebar rows, active state, new-chat action, delete action, and keyboard/touch affordances remain usable in the redesigned shell -- preserve ownership behavior.
-- [ ] Tests -- Update empty AI Ask shell assertions to require centered greeting/composer/starter cards and absence of a right detail panel before messages -- protect accepted mockup behavior.
-- [ ] Tests -- Re-run existing auth/session/composer tests and add focused coverage for no protected data on unauthenticated access if missing -- preserve security boundary.
-- [ ] `_bmad-output/implementation-artifacts/sprint-status.yaml` -- Move UI.2 through `in-progress`, `review`, and `done` as work advances -- keep BMad tracking aligned.
+- [x] `src/app/ai-ask/page.tsx` -- Route authenticated empty state into a shell with left sidebar plus centered main start surface and no right detail panel -- align to `home-logged-in-empty.html`.
+- [x] `src/features/ai/ai-ask-composer.tsx` -- Refactor only as needed to separate empty start UI from active-message UI while preserving existing submit, streaming, image, delete, project, and session behavior -- reduce regression risk.
+- [x] `src/features/chat-trips/conversation-list.tsx` -- Ensure desktop sidebar rows, active state, new-chat action, delete action, and keyboard/touch affordances remain usable in the redesigned shell -- preserve ownership behavior.
+- [x] Tests -- Update empty AI Ask shell assertions to require centered greeting/composer/starter cards and absence of a right detail panel before messages -- protect accepted mockup behavior.
+- [x] Tests -- Re-run existing auth/session/composer tests and add focused coverage for no protected data on unauthenticated access if missing -- preserve security boundary.
+- [x] `_bmad-output/implementation-artifacts/sprint-status.yaml` -- Move UI.2 through `in-progress`, `review`, and `done` as work advances -- keep BMad tracking aligned.
 
 **Acceptance Criteria:**
 - Given a signed-in traveler opens `/ai-ask` without an active conversation, when the page renders, then it shows a left sidebar, centered Vietnamese greeting, centered composer, starter cards, and no right detail panel.
@@ -85,13 +88,59 @@ Use the accepted `home-logged-in-empty.html` mockup. Keep the empty state calm a
 
 ### Completion Notes
 
-- Pending implementation.
+- Redesigned authenticated `/ai-ask` empty state to two desktop columns: persistent left conversation sidebar plus centered main greeting/composer/starter surface.
+- Removed the previous right-side suggestions/storage panel from the route; storage notice and starter cards now live under the centered empty composer.
+- Kept server-side auth gating, owned conversation/project reads, submit streaming path, image validation, delete flows, and focus-restoring mobile sheet behavior intact.
+- Mobile sheet now includes trip-project scope controls plus conversation history so history/projects remain reachable without enabling a right detail panel.
+- Review patch fixed the first-answer pending state so empty starter UI is hidden while a response is in flight and starter cards cannot overwrite pending input.
 
 ### Verification Results
 
-- Pending implementation.
+- `pnpm test:run tests/auth-gate.test.ts tests/ai-ask-shell.test.ts tests/ai-ask-sessions.test.ts` -- passed, 3 files, 84 tests.
+- `pnpm lint` -- passed.
+- `pnpm typecheck` -- passed.
+- `pnpm build` -- passed.
 
 ### File List
 
 - `_bmad-output/implementation-artifacts/spec-ui-2-authenticated-empty-ai-ask-shell-redesign.md`
 - `_bmad-output/implementation-artifacts/sprint-status.yaml`
+- `src/app/ai-ask/page.tsx`
+- `src/features/ai/ai-ask-composer.tsx`
+- `tests/ai-ask-shell.test.ts`
+
+## Review Triage Log
+
+### 2026-07-10 — Review pass
+- intent_gap: 0
+- bad_spec: 0
+- patch: 1: (high 0, medium 1, low 0)
+- defer: 0
+- reject: 0
+- addressed_findings:
+  - `[medium]` `[patch]` Empty starter UI remained visible and interactive while the first answer was pending; added `showEmptyState = !hasMessages && !isPending` and disabled/guarded starter cards with `askFormDisabled`.
+
+## Auto Run Result
+
+Status: done
+
+Summary: Implemented the authenticated empty AI Ask redesign with a left sidebar, centered Vietnamese greeting/composer, starter cards, project context, and no right detail panel before active messages.
+
+Files changed:
+- `../../src/app/ai-ask/page.tsx` -- removed the right aside and changed the authenticated shell to a two-column layout.
+- `../../src/features/ai/ai-ask-composer.tsx` -- separated empty start UI from active-message UI, added starter cards, moved storage notice, preserved mobile sheet access to history/projects, and fixed first-answer pending starter state.
+- `../../tests/ai-ask-shell.test.ts` -- updated empty-shell assertions for UI.2.
+- `sprint-status.yaml` -- marked UI.2 done.
+- `spec-ui-2-authenticated-empty-ai-ask-shell-redesign.md` -- recorded implementation, verification, and review outcome.
+
+Review findings breakdown: 1 medium patch applied; 0 deferred; 0 rejected.
+
+Follow-up review recommendation: false.
+
+Verification performed:
+- `pnpm test:run tests/auth-gate.test.ts tests/ai-ask-shell.test.ts tests/ai-ask-sessions.test.ts` -- passed, 3 files, 84 tests.
+- `pnpm lint` -- passed.
+- `pnpm typecheck` -- passed.
+- `pnpm build` -- passed.
+
+Residual risks: none known.
