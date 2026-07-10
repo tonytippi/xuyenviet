@@ -20,7 +20,11 @@ type HomeProps = {
 };
 
 function getFirstParam(value: string | string[] | undefined) {
-  return Array.isArray(value) ? value.find(Boolean) : value;
+  if (Array.isArray(value)) {
+    return value.find((item) => item.trim());
+  }
+
+  return value?.trim() ? value : undefined;
 }
 
 export default async function Home({ searchParams }: HomeProps) {
@@ -86,16 +90,18 @@ export default async function Home({ searchParams }: HomeProps) {
             <input
               className="min-h-14 rounded-2xl border-0 bg-transparent px-4 text-base text-[#1f2937] outline-none placeholder:text-[#6b7280] focus:ring-4 focus:ring-[#8fb59f]"
               id="public-ask-draft"
+              maxLength={500}
+              name="draft"
               placeholder="Bạn muốn đi đâu? Ví dụ: Hà Nội đi Huế 5 ngày cùng gia đình..."
               type="text"
             />
             <button
-              className="min-h-14 rounded-2xl bg-[#14532d] px-6 text-base font-black text-white transition hover:bg-[#0f3f22] focus:outline-none focus:ring-4 focus:ring-[#8fb59f] sm:size-14 sm:px-0"
+              className="min-h-14 rounded-2xl bg-[#14532d] px-6 text-base font-black text-white transition hover:bg-[#0f3f22] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]"
               type="submit"
               aria-label="Đăng nhập để hỏi AI"
             >
-              <span aria-hidden="true">→</span>
-              <span className="ml-2 sm:sr-only">Đăng nhập để hỏi</span>
+              <span>Đăng nhập để hỏi</span>
+              <span className="ml-2" aria-hidden="true">→</span>
             </button>
           </form>
           <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-[#6b7280]">

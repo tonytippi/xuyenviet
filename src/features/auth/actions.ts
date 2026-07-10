@@ -6,7 +6,7 @@ import { getSafeRedirectPath } from "./redirects";
 
 export async function signInWithGoogle(formData: FormData) {
   await storePendingReferralCode(formData.get("ref"));
-  const redirectTo = getSafeRedirectPath(formData.get("next"));
+  const redirectTo = getSafeRedirectPath(formData.get("next"), { draft: formData.get("draft") });
 
   await signIn("google", { redirectTo });
 }

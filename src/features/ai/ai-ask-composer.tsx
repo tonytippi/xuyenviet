@@ -48,6 +48,7 @@ const emptySessions: ChatSessionSummary[] = [];
 const emptyTripProjects: TripProjectSummary[] = [];
 
 type AiAskComposerProps = {
+  initialQuestion?: string;
   initialConversationId?: string;
   initialMessages?: DisplayMessage[];
   initialSessions?: ChatSessionSummary[];
@@ -180,6 +181,7 @@ export function AssistantProvenanceBlock({ provenance }: { provenance?: Assistan
 }
 
 export function AiAskComposer({
+  initialQuestion = "",
   initialConversationId,
   initialMessages = emptyMessages,
   initialSessions = emptySessions,
@@ -191,7 +193,7 @@ export function AiAskComposer({
 }: AiAskComposerProps) {
   const router = useRouter();
   const activeTripProjectId = selectedTripProject?.id;
-  const [question, setQuestion] = useState("");
+  const [question, setQuestion] = useState(initialQuestion);
   const [status, setStatus] = useState(initialMessages.length > 0 ? "Đã tải hội thoại. Bạn có thể tiếp tục kế hoạch." : selectedTripProject ? `Bạn đang lập kế hoạch trong dự án “${selectedTripProject.title}”.` : "Nhập câu hỏi về chuyến đi đường bộ của bạn.");
   const [isPending, setIsPending] = useState(false);
   const [showProgress, setShowProgress] = useState(false);

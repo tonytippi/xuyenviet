@@ -48,6 +48,15 @@ describe("safe sign-in redirects", () => {
     expect(getSafeRedirectPath(path)).toBe(path);
   });
 
+  test("preserves a public ask draft only for the AI Ask redirect", async () => {
+    const { getSafeRedirectPath } = await import("@/features/auth/redirects");
+
+    expect(getSafeRedirectPath("/ai-ask", { draft: "  Hà Nội đi Huế 5 ngày  " })).toBe(
+      "/ai-ask?draft=H%C3%A0+N%E1%BB%99i+%C4%91i+Hu%E1%BA%BF+5+ng%C3%A0y",
+    );
+    expect(getSafeRedirectPath("/admin", { draft: "không dùng" })).toBe("/admin");
+  });
+
   test.each(["//evil.example", "https://evil.example", "/unknown", "", null])("falls back for %s", async (path) => {
     const { getSafeRedirectPath } = await import("@/features/auth/redirects");
 
@@ -86,6 +95,7 @@ describe("public logged-out homepage", () => {
     expect(html).toContain('action="/sign-in"');
     expect(html).toContain('type="hidden" name="next" value="/ai-ask"');
     expect(html).toContain('type="hidden" name="ref" value="abc 123"');
+    expect(html).toContain('name="draft"');
     expect(html).not.toContain("reward");
     expect(html).not.toContain("credit");
     expect(html).not.toContain("payout");
@@ -98,6 +108,16 @@ describe("public logged-out homepage", () => {
 
     expect(html).toContain("/sign-in?next=%2Fai-ask&amp;ref=abc");
     expect(html).toContain('type="hidden" name="ref" value="abc"');
+  });
+
+  test("omits whitespace-only referral values from public sign-in entry points", async () => {
+    const { default: HomePage } = await import("@/app/page");
+    const element = await HomePage({ searchParams: Promise.resolve({ ref: "   " }) });
+    const html = renderToStaticMarkup(element);
+
+    expect(html).toContain("/sign-in?next=%2Fai-ask");
+    expect(html).not.toContain("&amp;ref=");
+    expect(html).not.toContain('name="ref"');
   });
 });
 

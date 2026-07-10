@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 
 import { AiAskComposer } from "@/features/ai/ai-ask-composer";
 import { signOutCurrentUser } from "@/features/auth/actions";
+import { normalizePublicAskDraft } from "@/features/auth/redirects";
 import { getOwnedConversation, listOwnedConversations } from "@/features/chat-trips/conversations";
 import { createTripProjectFromForm, deleteConversationAction, deleteTripProjectAction } from "@/features/chat-trips/actions";
 import { getOwnedTripProjectSummary, listOwnedTripProjects } from "@/features/chat-trips/trip-projects";
@@ -10,6 +11,7 @@ import { getAuthenticatedSession } from "@/server/auth";
 type AiAskPageProps = {
   searchParams?: Promise<{
     ref?: string | string[];
+    draft?: string | string[];
     conversationId?: string | string[];
     tripProjectId?: string | string[];
   }>;
@@ -32,6 +34,7 @@ const examplePrompts = [
 export default async function AiAskPage({ searchParams }: AiAskPageProps) {
   const params = await searchParams;
   const referralCode = getFirstParam(params?.ref);
+  const publicDraft = normalizePublicAskDraft(getFirstParam(params?.draft));
   const requestedConversationId = getFirstParam(params?.conversationId)?.trim();
   const requestedTripProjectId = getFirstParam(params?.tripProjectId)?.trim();
   const session = await getAuthenticatedSession();
@@ -106,6 +109,7 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
         <div className="grid flex-1 gap-5 lg:grid-cols-[18rem_minmax(0,1fr)_22rem]">
           <AiAskComposer
             key={loadedConversation?.id || "new-conversation"}
+            initialQuestion={publicDraft}
             initialConversationId={loadedConversation?.id}
             initialMessages={loadedConversation?.messages.map((message) => ({
               id: message.id,

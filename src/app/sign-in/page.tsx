@@ -1,17 +1,23 @@
 import Link from "next/link";
 
 import { signInWithGoogle } from "@/features/auth/actions";
+import { normalizePublicAskDraft } from "@/features/auth/redirects";
 
 type SignInPageProps = {
   searchParams?: Promise<{
     next?: string | string[];
     ref?: string | string[];
+    draft?: string | string[];
     error?: string | string[];
   }>;
 };
 
 function getFirstParam(value: string | string[] | undefined) {
-  return Array.isArray(value) ? value[0] : value;
+  if (Array.isArray(value)) {
+    return value.find((item) => item.trim());
+  }
+
+  return value?.trim() ? value : undefined;
 }
 
 function buildHref(path: string, params: Record<string, string | undefined>) {
@@ -33,8 +39,9 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
   const requestedNextPath = getFirstParam(params?.next);
   const nextPath = requestedNextPath === "/ai-ask" || requestedNextPath === "/admin" ? requestedNextPath : undefined;
   const referralCode = getFirstParam(params?.ref);
+  const publicDraft = normalizePublicAskDraft(getFirstParam(params?.draft));
   const hasAuthError = Boolean(getFirstParam(params?.error));
-  const aiAskHref = buildHref("/ai-ask", { ref: referralCode });
+  const aiAskHref = buildHref("/ai-ask", { ref: referralCode, draft: publicDraft });
   const gateMessage = nextPath === "/admin" ? "Đăng nhập để vào khu vực quản trị." : "Đăng nhập để hỏi AI.";
 
   return (
@@ -71,6 +78,7 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
           <form action={signInWithGoogle}>
             <input name="next" type="hidden" value={nextPath ?? "/ai-ask"} />
             {referralCode ? <input name="ref" type="hidden" value={referralCode} /> : null}
+            {publicDraft ? <input name="draft" type="hidden" value={publicDraft} /> : null}
             <button
               className="min-h-12 w-full rounded-2xl bg-[#1f5f46] px-5 py-4 text-center text-base font-semibold text-white shadow-[0_12px_30px_rgba(31,95,70,0.22)] transition hover:bg-[#194d39] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]"
               type="submit"

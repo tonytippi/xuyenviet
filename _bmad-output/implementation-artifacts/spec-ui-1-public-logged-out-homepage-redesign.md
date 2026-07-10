@@ -110,6 +110,11 @@ Use the accepted `home-logged-out.html` mockup as the visual reference. The page
 - addressed_findings:
   - `[high]` `[patch]` Gated ask form submission could lose `next` and `ref` because GET forms may not preserve action query parameters; changed the form to submit to `/sign-in` with hidden `next` and `ref` inputs and added assertions for hidden referral preservation.
 
+### Review Findings
+- [x] [Review][Decision] Visible ask-box text is currently discarded on submit — resolved by preserving a trimmed, bounded public draft through `/sign-in` to `/ai-ask?draft=...` without creating any pre-auth conversation, retrieval, usage, or provider side effects.
+- [x] [Review][Patch] Desktop ask submit button hides its Vietnamese action text [src/app/page.tsx:92]
+- [x] [Review][Patch] Whitespace-only referral values are preserved as `ref` instead of treated as empty [src/app/page.tsx:22]
+
 ## Auto Run Result
 
 - Status: done
