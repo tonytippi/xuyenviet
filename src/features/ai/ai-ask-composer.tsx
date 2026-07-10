@@ -335,6 +335,7 @@ export function AiAskComposer({
   const [deletingConversationId, setDeletingConversationId] = useState<string | null>(null);
   const [deletingTripProjectId, setDeletingTripProjectId] = useState<string | null>(null);
   const [selectedAnswerEntity, setSelectedAnswerEntity] = useState<AnswerEntityDescriptor | null>(null);
+  const [isDesktopViewport, setIsDesktopViewport] = useState(false);
   const [createProjectState, createProjectFormAction, isCreatingProject] = useActionState<CreateTripProjectFormState | undefined, FormData>(
     createTripProjectAction ?? noOpCreateTripProjectAction,
     undefined,
@@ -368,6 +369,19 @@ export function AiAskComposer({
   const selectedAnswerEntityId = selectedAnswerEntity?.provenanceIds?.[0];
 
   useEffect(() => {
+    const desktopQuery = window.matchMedia("(min-width: 1024px)");
+
+    setIsDesktopViewport(desktopQuery.matches);
+
+    function handleViewportChange(event: MediaQueryListEvent) {
+      setIsDesktopViewport(event.matches);
+    }
+
+    desktopQuery.addEventListener("change", handleViewportChange);
+    return () => desktopQuery.removeEventListener("change", handleViewportChange);
+  }, []);
+
+  useEffect(() => {
     return () => {
       abortControllerRef.current?.abort();
     };
@@ -394,9 +408,9 @@ export function AiAskComposer({
       return;
     }
 
-    const panel = window.matchMedia("(min-width: 1024px)").matches ? desktopAnswerDetailPanelRef.current : mobileAnswerDetailPanelRef.current;
+    const panel = isDesktopViewport ? desktopAnswerDetailPanelRef.current : mobileAnswerDetailPanelRef.current;
     panel?.focus({ preventScroll: true });
-  }, [selectedAnswerEntity]);
+  }, [isDesktopViewport, selectedAnswerEntity]);
 
   useEffect(() => {
     if (!selectedAnswerEntity) {
@@ -423,7 +437,7 @@ export function AiAskComposer({
     const activeDialog = mobileAnswerDetailDialogRef.current;
     const composer = textareaRef.current;
 
-    if (!selectedAnswerEntity || isSessionSheetOpen || !activeDialog || window.matchMedia("(min-width: 1024px)").matches) {
+    if (!selectedAnswerEntity || isSessionSheetOpen || !activeDialog || isDesktopViewport) {
       return;
     }
 
@@ -475,7 +489,7 @@ export function AiAskComposer({
         }
       }
     };
-  }, [isSessionSheetOpen, selectedAnswerEntity]);
+  }, [isDesktopViewport, isSessionSheetOpen, selectedAnswerEntity]);
 
   useEffect(() => {
     function handleShortcut(event: globalThis.KeyboardEvent) {
@@ -519,7 +533,7 @@ export function AiAskComposer({
   }, [selectedImage]);
 
   useEffect(() => {
-    if (!isSessionSheetOpen) {
+    if (!isSessionSheetOpen || isDesktopViewport) {
       return;
     }
 
@@ -546,11 +560,15 @@ export function AiAskComposer({
 
       const firstElement = focusableElements[0];
       const lastElement = focusableElements[focusableElements.length - 1];
+      const activeElement = document.activeElement;
 
-      if (event.shiftKey && document.activeElement === firstElement) {
+      if (!activeElement || !sessionSheetPanelRef.current.contains(activeElement)) {
+        event.preventDefault();
+        (event.shiftKey ? lastElement : firstElement).focus();
+      } else if (event.shiftKey && activeElement === firstElement) {
         event.preventDefault();
         lastElement.focus();
-      } else if (!event.shiftKey && document.activeElement === lastElement) {
+      } else if (!event.shiftKey && activeElement === lastElement) {
         event.preventDefault();
         firstElement.focus();
       }
@@ -565,7 +583,7 @@ export function AiAskComposer({
       document.body.style.overflow = previousOverflow;
       sessionSheetPreviousFocusRef.current?.focus();
     };
-  }, [isSessionSheetOpen]);
+  }, [isDesktopViewport, isSessionSheetOpen]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1234,6 +1252,14 @@ export function AiAskComposer({
               className="absolute inset-0 bg-[#17342c]/40"
             />
             <div ref={sessionSheetPanelRef} tabIndex={-1} className="absolute left-0 top-0 h-full w-80 max-w-[85%] overflow-y-auto rounded-r-[1.5rem] border-r border-[#d8c9ad] bg-[#fffdf8] p-3 shadow-[0_24px_80px_rgba(41,33,18,0.24)]">
+                <button
+                  type="button"
+                  aria-label="Đóng danh sách trò chuyện"
+                  onClick={() => setSessionSheetOpen(false)}
+                  className="mb-3 min-h-11 w-full rounded-2xl border border-[#d8c9ad] bg-white/80 px-4 py-3 text-sm font-semibold text-[#17342c] transition hover:bg-white focus:outline-none focus:ring-4 focus:ring-[#e5bd82]"
+                >
+                  Đóng danh sách
+                </button>
                 <div className="mb-3">
                   {planningScope}
                 </div>

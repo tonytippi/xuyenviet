@@ -89,15 +89,37 @@ This story is the responsive completion pass for the accepted shell. Avoid addin
 - Mobile selected answer details now render as a separate bottom drawer, with close overlay/control, `Esc` handling, scroll lock, focus containment, and trigger/composer focus restoration.
 - Conversation/project row destructive actions remain visible buttons with confirmation copy; existing auth, ownership, deletion, submit, streaming, image validation, and provenance safety behavior was preserved.
 - The dev-auto review pass found one focus-restore gap after sheet-driven conversation/project selection; it was patched so those selections restore to the composer instead of the menu trigger.
+- Code-review follow-up patched sidebar keyboard close reachability, focus recovery from outside the sheet panel, viewport resize cleanup for mobile modal effects, and admin/non-admin render coverage.
 
 ### Verification Results
 
-- `pnpm test:run tests/ai-ask-shell.test.ts tests/ai-ask-sessions.test.ts` -- passed, 70 tests.
+- `pnpm test:run tests/ai-ask-shell.test.ts tests/ai-ask-sessions.test.ts` -- passed, 71 tests.
 - `pnpm lint` -- passed.
 - `pnpm typecheck` -- passed.
 - `pnpm build` -- passed.
 
 ## Review Triage Log
+
+### Review Findings
+- [x] [Review][Patch] Mobile sidebar sheet focus trap excludes the close control and can leak focus from the initially focused panel [src/features/ai/ai-ask-composer.tsx:521]
+- [x] [Review][Patch] Mobile sidebar/detail drawers remain logically modal after resizing to desktop, leaving scroll lock and Tab trapping active on hidden mobile dialogs [src/features/ai/ai-ask-composer.tsx:422]
+- [x] [Review][Patch] Admin sidebar affordance lacks render coverage for authorized and unauthorized roles [tests/ai-ask-shell.test.ts:59]
+
+### 2026-07-10 -- Code review follow-up
+- intent_gap: 0
+- bad_spec: 0
+- patch: 3: (high 0, medium 2, low 1)
+- defer: 0
+- reject: 1
+- addressed_findings:
+  - `[medium]` `[patch]` Mobile sidebar sheet focus trap excluded the keyboard close control and could leak focus from the initially focused panel; patched an in-panel close button and out-of-panel focus recovery.
+  - `[medium]` `[patch]` Mobile sidebar/detail drawers remained logically modal after resizing to desktop; patched breakpoint state so scroll lock and focus traps clean up on desktop resize.
+  - `[low]` `[patch]` Admin sidebar affordance lacked role render coverage; added explicit non-admin and operator assertions.
+- verification:
+  - `pnpm test:run tests/ai-ask-shell.test.ts tests/ai-ask-sessions.test.ts` -- passed, 71 tests.
+  - `pnpm lint` -- passed.
+  - `pnpm typecheck` -- passed.
+  - `pnpm build` -- passed.
 
 ### 2026-07-10 -- Review pass
 - intent_gap: 0
