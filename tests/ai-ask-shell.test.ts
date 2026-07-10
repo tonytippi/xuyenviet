@@ -130,6 +130,17 @@ describe("AI Ask authenticated shell", () => {
     expect(html).not.toContain("source-chip");
   });
 
+  test("keeps the right context panel hidden for an empty existing conversation", async () => {
+    await createTestUser("user-1");
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
+
+    const html = await renderAuthenticatedAiAskShell({ conversationId: conversation.id });
+
+    expect(html).toContain("Mình sẽ đi đâu?");
+    expect(html).not.toContain("Bảng ngữ cảnh hội thoại");
+    expect(html).not.toContain("Chưa có chi tiết được chọn");
+  });
+
   test("keeps trip project controls in the desktop sidebar and mobile sheet contract", () => {
     const source = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
     const navStart = source.indexOf('<nav aria-label="Danh sách trò chuyện và dự án chuyến đi"');

@@ -250,7 +250,7 @@ export function AiAskComposer({
   const sessionSheetPreviousFocusRef = useRef<HTMLElement | null>(null);
   const hasMessages = messages.length > 0;
   const showEmptyState = !hasMessages && !isPending;
-  const showContextPanel = hasMessages || Boolean(conversationId);
+  const showContextPanel = hasMessages;
 
   useEffect(() => {
     return () => {
@@ -774,7 +774,7 @@ export function AiAskComposer({
         {planningScope}
       </nav>
 
-      <div className="flex min-h-[34rem] min-w-0 flex-col justify-between gap-5 rounded-[1.5rem] border border-[#d8c9ad] bg-[radial-gradient(circle_at_50%_0%,rgba(20,83,45,0.1),transparent_30%),#fffdf8] p-4 sm:p-5 lg:col-start-2 lg:row-start-1 lg:w-[min(760px,calc(100vw-31rem))] xl:w-[760px]">
+      <div className="flex min-h-[34rem] min-w-0 flex-col justify-between gap-5 rounded-[1.5rem] border border-[#d8c9ad] bg-[radial-gradient(circle_at_50%_0%,rgba(20,83,45,0.1),transparent_30%),#fffdf8] p-4 sm:p-5 lg:col-start-2 lg:row-start-1 lg:w-full xl:max-w-[760px]">
         <div className="flex items-center justify-between gap-3 lg:hidden">
           <button
             ref={sessionSheetTriggerRef}
@@ -989,7 +989,7 @@ export function AiAskComposer({
       </div>
 
       {showContextPanel ? (
-        <aside aria-label="Bảng ngữ cảnh hội thoại" className="hidden min-h-0 min-w-0 flex-col rounded-[1.5rem] border border-[#d8c9ad] bg-[linear-gradient(180deg,#fffdf8_0%,#ffffff_42%,#f7fbf8_100%)] p-4 text-[#17342c] shadow-[0_16px_40px_rgba(41,33,18,0.08)] lg:col-start-3 lg:row-start-1 lg:flex lg:w-80 xl:w-[23rem]">
+        <aside aria-label="Bảng ngữ cảnh hội thoại" className="hidden min-h-0 min-w-0 flex-col rounded-[1.5rem] border border-[#d8c9ad] bg-[linear-gradient(180deg,#fffdf8_0%,#ffffff_42%,#f7fbf8_100%)] p-4 text-[#17342c] shadow-[0_16px_40px_rgba(41,33,18,0.08)] lg:col-start-3 lg:row-start-1 lg:flex lg:w-full xl:w-[23rem]">
           <div className="flex items-start justify-between gap-3 border-b border-[#eadfc8] pb-4">
             <div>
               <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#8c4f13]">Ngữ cảnh</p>

@@ -4,7 +4,7 @@ type: 'feature'
 created: '2026-07-10'
 status: 'done'
 baseline_revision: 'afd49574d54c097b459ee32afaa516ad3fc14d67'
-final_revision: 'afd49574d54c097b459ee32afaa516ad3fc14d67'
+final_revision: '3597a5cab99ea29964f24f41cf62c0cc858ec8b6'
 followup_review_recommended: false
 context:
   - '{project-root}/_bmad-output/project-context.md'
@@ -78,6 +78,19 @@ Use the accepted `three-panel-chat-map.html` mockup, but respect the final archi
 
 ## Review Triage Log
 
+### Review Findings
+
+- [x] [Review][Patch] Empty persisted conversations can render the right context panel [src/features/ai/ai-ask-composer.tsx:253]
+- [x] [Review][Patch] Desktop three-panel layout can overflow or clip at `lg` widths [src/app/ai-ask/page.tsx:83]
+- [x] [Review][Patch] Story revision metadata records the baseline as the final revision [_bmad-output/implementation-artifacts/spec-ui-3-active-three-panel-ai-ask-shell.md:6]
+
+### 2026-07-10 — Follow-up review patch
+
+- Guarded the right context placeholder with actual messages only, so an existing empty conversation remains in the UI.2 empty state without a right panel.
+- Relaxed the active desktop grid to shrink the center and right columns inside the shell at `lg` widths while retaining the 760px answer cap and wider detail panel at `xl`.
+- Corrected `final_revision` to the implementation commit under review.
+- Added regression coverage for an empty existing conversation.
+
 ### 2026-07-10 — Review pass
 - intent_gap: 0
 - bad_spec: 0
@@ -113,6 +126,10 @@ Use the accepted `three-panel-chat-map.html` mockup, but respect the final archi
 - `pnpm lint` -- passed.
 - `pnpm typecheck` -- passed.
 - `pnpm build` -- passed.
+- `pnpm test:run tests/ai-ask-shell.test.ts tests/ai-ask-sessions.test.ts tests/answer-context.test.ts` -- passed after follow-up review patches, 105 tests.
+- `pnpm lint` -- passed after follow-up review patches.
+- `pnpm typecheck` -- initially failed when run concurrently with `pnpm build` because `.next/types` files were regenerated during TypeScript program loading; rerun standalone passed after follow-up review patches.
+- `pnpm build` -- passed after follow-up review patches.
 
 ### File List
 
