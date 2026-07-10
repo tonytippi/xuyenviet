@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>XuyenViet - Trò chuyện ba vùng với panel chi tiết</title>
+  <style>
+    :root {
+      --green: #16a34a;
+      --green-dark: #14532d;
+      --purple: #8b5cf6;
+      --amber: #d97706;
+      --ink: #1f2937;
+      --muted: #6b7280;
+      --line: #e5e7eb;
+      --soft: #f8fafc;
+      --sidebar: #f7f7f3;
+      --active: #e8f3ec;
+      --shadow: 0 12px 40px rgba(31, 41, 55, 0.1);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      background: #fff;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.55;
+    }
+    button { font: inherit; cursor: pointer; }
+
+    .app {
+      display: grid;
+      grid-template-columns: 276px minmax(0, 1fr) minmax(410px, 0.72fr);
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    .sidebar {
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr) auto;
+      gap: 14px;
+      min-width: 0;
+      padding: 14px 12px;
+      border-right: 1px solid var(--line);
+      background: var(--sidebar);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 4px 4px 0;
+    }
+
+    .brand-left {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      font-weight: 850;
+      letter-spacing: -0.03em;
+    }
+
+    .logo {
+      display: grid;
+      width: 34px;
+      height: 34px;
+      place-items: center;
+      border-radius: 12px;
+      background: linear-gradient(135deg, var(--green-dark), #0f766e);
+      color: white;
+      font-size: 13px;
+      font-weight: 900;
+    }
+
+    .icon-button {
+      display: grid;
+      width: 34px;
+      height: 34px;
+      place-items: center;
+      border: 1px solid transparent;
+      border-radius: 11px;
+      background: transparent;
+      color: var(--muted);
+    }
+
+    .icon-button:hover { background: white; border-color: var(--line); }
+
+    .new-chat {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-height: 42px;
+      border: 0;
+      border-radius: 13px;
+      background: var(--green-dark);
+      color: white;
+      font-weight: 800;
+    }
+
+    .sidebar-scroll {
+      min-height: 0;
+      overflow: auto;
+      display: grid;
+      align-content: start;
+      gap: 16px;
+    }
+
+    .section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin: 0 6px 7px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 850;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .row-list { display: grid; gap: 4px; }
+
+    .side-row {
+      display: grid;
+      grid-template-columns: 28px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 8px;
+      min-height: 48px;
+      padding: 6px 8px;
+      border: 1px solid transparent;
+      border-radius: 13px;
+      color: var(--ink);
+      text-decoration: none;
+    }
+
+    .side-row:hover,
+    .side-row.active { background: white; border-color: var(--line); }
+    .side-row.active { background: var(--active); color: var(--green-dark); }
+
+    .side-row img { width: 21px; height: 21px; opacity: 0.78; }
+    .side-title { display: block; overflow: hidden; font-size: 13px; font-weight: 760; text-overflow: ellipsis; white-space: nowrap; }
+    .side-meta { display: block; overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+    .side-count { color: var(--muted); font-size: 12px; }
+
+    .sidebar-footer {
+      display: grid;
+      gap: 4px;
+      padding-top: 10px;
+      border-top: 1px solid var(--line);
+    }
+
+    .footer-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      min-height: 38px;
+      padding: 7px 8px;
+      border-radius: 12px;
+      color: var(--ink);
+      font-size: 13px;
+      text-decoration: none;
+    }
+    .footer-row:hover { background: white; }
+
+    .conversation {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      min-width: 0;
+      border-right: 1px solid var(--line);
+      background: #fff;
+    }
+
+    .nav-tabs {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 52px;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--line);
+      overflow-x: auto;
+      white-space: nowrap;
+    }
+
+    .tab {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      min-height: 34px;
+      padding: 7px 12px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fff;
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 750;
+      box-shadow: 0 2px 10px rgba(31, 41, 55, 0.04);
+    }
+    .tab.active { border-color: rgba(22, 163, 74, 0.25); background: #ecfdf3; color: var(--green-dark); }
+    .tab img { width: 17px; height: 17px; }
+
+    .answer-scroll { overflow: auto; padding: 18px 40px 28px; }
+    .answer { max-width: 760px; margin: 0 auto; }
+    .place-line { margin: 0 0 14px; font-size: 15px; }
+    .place-chip { display: inline-flex; align-items: center; gap: 5px; color: var(--green-dark); font-weight: 850; text-decoration: none; }
+    .place-chip.purple { color: var(--purple); }
+    .place-dot { display: inline-grid; width: 19px; height: 19px; place-items: center; border-radius: 999px; background: #dcfce7; color: var(--green-dark); font-size: 11px; font-weight: 900; }
+    .place-chip.purple .place-dot { background: #ede9fe; color: var(--purple); }
+
+    .section-title { display: flex; align-items: center; gap: 8px; margin: 28px 0 12px; font-size: 17px; }
+    .section-title .place-dot { width: 24px; height: 24px; font-size: 13px; }
+    .tips-table { width: 100%; border-collapse: collapse; margin: 12px 0 18px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; display: table; font-size: 14px; }
+    .tips-table th, .tips-table td { padding: 11px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    .tips-table th { background: #f3f4f6; font-weight: 850; }
+    .tips-table tr:last-child td { border-bottom: 0; }
+    .paragraph { color: #374151; font-size: 15px; }
+    .next-section { display: inline-flex; align-items: center; gap: 8px; margin-top: 22px; color: var(--purple); font-size: 22px; font-weight: 850; letter-spacing: -0.03em; }
+
+    .detail-panel { min-width: 0; height: 100vh; overflow: auto; padding: 16px; background: linear-gradient(180deg, #fbfaf7 0%, #ffffff 38%); }
+    .detail-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+    .detail-kicker { color: var(--muted); font-size: 11px; font-weight: 850; letter-spacing: .05em; text-transform: uppercase; }
+    .detail-title { margin: 2px 0 0; font-size: 20px; line-height: 1.2; letter-spacing: -.03em; }
+    .detail-close { display: grid; width: 34px; height: 34px; place-items: center; border: 1px solid var(--line); border-radius: 11px; background: #fff; color: var(--muted); }
+    .hero-detail { position: relative; min-height: 170px; margin-bottom: 14px; padding: 16px; overflow: hidden; border: 1px solid var(--line); border-radius: 20px; background: radial-gradient(circle at 22% 28%, rgba(22,163,74,.18), transparent 28%), radial-gradient(circle at 82% 16%, rgba(139,92,246,.18), transparent 24%), #fff; box-shadow: var(--shadow); }
+    .hero-detail::after { content: ""; position: absolute; right: -36px; bottom: -44px; width: 150px; height: 150px; border-radius: 999px; background: rgba(22,163,74,.1); }
+    .detail-icon { display: grid; width: 54px; height: 54px; place-items: center; margin-bottom: 18px; border-radius: 18px; background: rgba(255,255,255,.82); box-shadow: 0 10px 28px rgba(31,41,55,.12); }
+    .detail-icon img { width: 32px; height: 32px; }
+    .detail-summary { max-width: 31ch; margin: 0; color: #374151; font-size: 14px; }
+    .detail-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 16px; }
+    .detail-action { min-height: 34px; padding: 7px 11px; border: 1px solid var(--line); border-radius: 999px; background: #fff; color: var(--ink); font-size: 12px; font-weight: 800; }
+    .detail-action.primary { border-color: rgba(22,163,74,.25); background: var(--active); color: var(--green-dark); }
+    .detail-card { margin-bottom: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 17px; background: #fff; }
+    .detail-card h3 { margin: 0 0 10px; font-size: 14px; }
+    .fact-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .fact { padding: 10px; border-radius: 13px; background: var(--soft); color: var(--muted); font-size: 12px; }
+    .fact strong { display: block; margin-bottom: 2px; color: var(--ink); font-size: 14px; }
+    .mini-row { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px; align-items: start; padding: 10px 0; border-top: 1px solid var(--line); font-size: 13px; }
+    .mini-row:first-of-type { border-top: 0; padding-top: 0; }
+    .mini-row img { width: 24px; height: 24px; }
+    .mini-row strong { display: block; margin-bottom: 2px; }
+    .mini-row span { color: var(--muted); }
+    .source-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+    .source-chip { display: inline-flex; min-height: 29px; align-items: center; padding: 5px 9px; border-radius: 999px; background: var(--active); color: var(--green-dark); font-size: 12px; font-weight: 800; }
+
+    @media (max-width: 1180px) { .app { grid-template-columns: 74px minmax(0, 1fr) minmax(360px, .72fr); } .sidebar { padding: 14px 8px; } .brand-left span, .new-chat span:last-child, .section-head, .side-title, .side-meta, .side-count, .sidebar-footer { display: none; } .side-row { grid-template-columns: 1fr; justify-items: center; } }
+    @media (max-width: 900px) { .app { grid-template-columns: 64px 1fr; height: auto; overflow: auto; } .detail-panel { min-height: 520px; height: auto; grid-column: 1 / -1; } .conversation { min-height: 100vh; } }
+    @media (max-width: 640px) { .app { display: block; } .sidebar { display: none; } .answer-scroll { padding: 14px 18px 24px; } .tips-table { font-size: 13px; } .detail-panel { min-height: auto; } }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar" aria-label="Sidebar navigation">
+      <div class="brand">
+        <div class="brand-left"><span class="logo">XV</span><span>XuyenViet</span></div>
+        <button class="icon-button" type="button" aria-label="Collapse sidebar">☰</button>
+      </div>
+      <button class="new-chat" type="button"><span>＋</span><span>Trò chuyện mới</span></button>
+      <div class="sidebar-scroll">
+        <section>
+          <div class="section-head"><span>Trò chuyện</span><span>Gần đây</span></div>
+          <div class="row-list">
+            <a class="side-row active" href="#"><img src="https://img.icons8.com/?id=3726&amp;format=png&amp;size=48" alt="" /><span><span class="side-title">Hà Nội → Huế</span><span class="side-meta">Chi tiết đang theo câu trả lời</span></span><span class="side-count">11</span></a>
+            <a class="side-row" href="#"><img src="https://img.icons8.com/?id=3726&amp;format=png&amp;size=48" alt="" /><span><span class="side-title">Đồng Hới ăn gì?</span><span class="side-meta">3 nguồn cộng đồng</span></span><span class="side-count">3</span></a>
+            <a class="side-row" href="#"><img src="https://img.icons8.com/?id=37075&amp;format=png&amp;size=48" alt="" /><span><span class="side-title">Dừng nghỉ gần Vinh</span><span class="side-meta">Cần verify</span></span><span class="side-count">5</span></a>
+          </div>
+        </section>
+        <section>
+          <div class="section-head"><span>Chuyến đi</span><span>Dự án</span></div>
+          <div class="row-list">
+            <a class="side-row" href="#"><img src="https://img.icons8.com/?id=843&amp;format=png&amp;size=48" alt="" /><span><span class="side-title">Tết Đà Lạt</span><span class="side-meta">2 lớn · bé 5 tuổi</span></span><span class="side-count">8</span></a>
+            <a class="side-row" href="#"><img src="https://img.icons8.com/?id=843&amp;format=png&amp;size=48" alt="" /><span><span class="side-title">Hè miền Trung</span><span class="side-meta">Đà Nẵng · Huế</span></span><span class="side-count">6</span></a>
+          </div>
+        </section>
+      </div>
+      <div class="sidebar-footer">
+        <a class="footer-row" href="#"><span>Riêng tư</span><span>›</span></a>
+        <a class="footer-row" href="#"><span>Admin</span><span>↗</span></a>
+        <a class="footer-row" href="#"><span>Tony</span><span>⎋</span></a>
+      </div>
+    </aside>
+
+    <main class="conversation">
+      <nav class="nav-tabs" aria-label="Các mục trong chuyến đi">
+        <button class="tab"><img src="https://img.icons8.com/?id=13800&amp;format=png&amp;size=48" alt="" />Ăn gì?</button>
+        <button class="tab active"><img src="https://img.icons8.com/?id=37078&amp;format=png&amp;size=48" alt="" />Đi đâu?</button>
+        <button class="tab"><img src="https://img.icons8.com/?id=12338&amp;format=png&amp;size=64" alt="" />Ở đâu?</button>
+        <button class="tab"><img src="https://img.icons8.com/?id=34307&amp;format=png&amp;size=48" alt="" />Về chuyến đi</button>
+        <button class="tab"><img src="https://img.icons8.com/?id=742&amp;format=png&amp;size=48" alt="" />Cần biết</button>
+        <button class="tab"><img src="https://img.icons8.com/?id=15126&amp;format=png&amp;size=48" alt="" />Chi phí và mẹo</button>
+      </nav>
+      <section class="answer-scroll" aria-label="Conversation answer">
+        <article class="answer">
+          <p class="place-line"><a class="place-chip" href="#"><span class="place-dot">1</span>Bảo Tàng Lịch Sử Cách Mạng Huế</a> là điểm hợp với gia đình muốn hiểu lịch sử Huế. <a class="place-chip" href="#"><span class="place-dot">2</span>Historical and Revolutionary Museum</a> mở detail bên phải khi được chọn.</p>
+          <p class="place-line"><a class="place-chip purple" href="#"><span class="place-dot">3</span>Asia Park</a> tại Đà Nẵng là điểm dừng buổi tối nhẹ. <a class="place-chip purple" href="#"><span class="place-dot">4</span>Sun Wheel</a> phù hợp nếu bé còn đủ năng lượng.</p>
+          <h2 class="section-title"><span class="place-dot">!</span>Lưu Ý Thực Tế Khi Đi Hà Nội → Huế Tháng 7</h2>
+          <table class="tips-table" aria-label="Practical tips">
+            <thead><tr><th>Chủ đề</th><th>Lời khuyên thực tế</th></tr></thead>
+            <tbody>
+              <tr><td>🌦️ Thời tiết</td><td>Tháng 7 nắng nóng, có mưa bất chợt. Mang áo mưa mỏng, mũ, nước.</td></tr>
+              <tr><td>🚗 Lái xe</td><td>Chia chặng 4-5 giờ. Tránh chạy tối qua các đoạn đèo hoặc đường lạ.</td></tr>
+              <tr><td>💵 Thanh toán</td><td>Mang tiền mặt VND cho trạm thu phí, bến đỗ và quán nhỏ.</td></tr>
+              <tr><td>⚠️ Sai lầm</td><td>Đừng ước lượng quá sát thời gian giữa các điểm. Dự phòng nghỉ cho trẻ.</td></tr>
+            </tbody>
+          </table>
+          <p class="paragraph">Bảy ngày đường đi từ đồng bằng Bắc Bộ đến miền Trung là một hành trình đẹp nhưng dễ mệt nếu lịch quá dày. Panel bên phải theo dõi địa điểm, khách sạn, nguồn, hoặc route đang được chọn trong câu trả lời.</p>
+          <div class="next-section"><span class="place-dot">Ở</span>Ở đâu?</div>
+        </article>
+      </section>
+    </main>
+
+    <aside class="detail-panel" aria-label="Chi tiết mục đã chọn">
+      <div class="detail-top">
+        <div>
+          <div class="detail-kicker">Đã chọn từ câu trả lời</div>
+          <h2 class="detail-title">Asia Park</h2>
+        </div>
+        <button class="detail-close" type="button" aria-label="Close detail">×</button>
+      </div>
+
+      <section class="hero-detail">
+        <span class="detail-icon"><img src="https://img.icons8.com/?id=13800&amp;format=png&amp;size=48" alt="" /></span>
+        <p class="detail-summary">Điểm dừng buổi tối ở Đà Nẵng. Phù hợp nếu bé vẫn còn năng lượng sau một ngày di chuyển.</p>
+      </section>
+
+      <div class="detail-actions">
+        <button class="detail-action primary" type="button">Dùng trong kế hoạch</button>
+        <button class="detail-action" type="button">Xem tuyến đường</button>
+        <button class="detail-action" type="button">Lưu</button>
+      </div>
+
+      <section class="detail-card">
+        <h3>Thông tin nhanh</h3>
+        <div class="fact-grid">
+          <div class="fact"><strong>Buổi tối</strong>thời điểm phù hợp</div>
+          <div class="fact"><strong>Gia đình</strong>phù hợp</div>
+          <div class="fact"><strong>Cần kiểm tra</strong>giờ mở cửa/giá</div>
+          <div class="fact"><strong>Cộng đồng</strong>loại nguồn</div>
+        </div>
+      </section>
+
+      <section class="detail-card">
+        <h3>Chi tiết liên quan</h3>
+        <div class="mini-row"><img src="https://img.icons8.com/?id=37078&amp;format=png&amp;size=48" alt="" /><div><strong>Ảnh hưởng tới route</strong><span>Nên thêm sau khi nhận phòng, không đặt trước chặng lái dài.</span></div></div>
+        <div class="mini-row"><img src="https://img.icons8.com/?id=12338&amp;format=png&amp;size=64" alt="" /><div><strong>Nơi ở gần đó</strong><span>Ưu tiên trung tâm Đà Nẵng hoặc khu ven sông để di chuyển ngắn.</span></div></div>
+        <div class="mini-row"><img src="https://img.icons8.com/?id=15126&amp;format=png&amp;size=48" alt="" /><div><strong>Lưu ý lái xe</strong><span>Giữ lịch sáng hôm sau nhẹ nếu về muộn.</span></div></div>
+      </section>
+
+      <section class="detail-card">
+        <h3>Nguồn tham khảo</h3>
+        <div class="source-chips"><span class="source-chip">Cộng đồng · chưa xác minh</span><span class="source-chip">Cần kiểm tra độ mới</span><span class="source-chip">Không lộ nguồn thô</span></div>
+      </section>
+    </aside>
+  </div>
+</body>
+</html>

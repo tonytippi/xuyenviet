@@ -307,7 +307,75 @@ Rule: Hybrid retrieval is introduced later behind the Retrieval module only afte
 
 Rule: Indexing/backfill work for later search or embeddings must define activation, stale/disabled transitions, and rebuild behavior before those rows influence traveler answers.
 
+### AD-18: Traveler Frontend Has Three Canonical Shell States
+
+Binds: public entry, first signed-in use, and active AI Ask planning to one frontend state model.
+
+Prevents: homepage, chat-empty, and active-chat stories creating incompatible route/shell/detail behavior.
+
+Rule: The public logged-out homepage is the root entry surface with sign-in CTA and sign-in-gated ask box. It does not render the authenticated app sidebar.
+
+Rule: The logged-in empty AI Ask state renders the app sidebar, centered greeting, centered composer, and starter prompts. It must not render an empty right detail panel before the first answer or selected entity exists.
+
+Rule: Active AI Ask renders left sidebar, center answer/conversation surface, and a right contextual detail panel when a selected answer entity exists.
+
+Seed: Keep `/` as public entry and `/ai-ask` as the authenticated planning shell in the existing Next.js App Router structure.
+
+### AD-19: Contextual Detail Panel Is Derived UI State
+
+Binds: right-panel content to persisted assistant message content, retrieval decisions, and provenance/source-bundle snapshots.
+
+Prevents: the detail panel becoming a second mutable aggregate, a second chat thread, or a UI-only source of truth.
+
+Rule: Detail panel state is derived from selected answer entities and resolved through owning feature read models: Chat/Trips for conversations/projects/context, Retrieval/Knowledge/Search for source-backed detail, and AI Orchestration provenance for assistant-answer source usage.
+
+Rule: The detail panel may expose actions such as `Dùng trong kế hoạch`, `Xem tuyến đường`, or `Lưu` only by calling the owning server-side command module. It must not mutate another feature's aggregate directly.
+
+Rule: The detail panel is not map-first. Google Maps or map-like spatial integration remains deferred and must not be introduced as an implicit dependency of this redesign.
+
+### AD-20: Selectable Answer Entities Use Render Descriptors, Not Free-Text Parsing
+
+Binds: inline answer places, hotels, route segments, source chips, warnings, costs, and trip facts to a stable render contract.
+
+Prevents: UI teams independently parsing Vietnamese answer prose to create links, detail panels, or provenance claims.
+
+Rule: Selectable answer entities are render descriptors derived at answer-render time from assistant message structure plus stored provenance/retrieval/source-bundle snapshots.
+
+Rule: A descriptor may include entity type, display label, answer text range or section, source category, owning row references when available, and safe snapshot metadata. It must not include raw source material, operator-only fields, provider payloads, or inferred source claims not present in provenance.
+
+Rule: Source/confidence UI remains governed by AD-11: render from stored provenance, not by re-parsing answer text.
+
+### AD-21: Sidebar Read Models Are Chat/Trips-Owned And Server-Gated
+
+Binds: conversation history, trip project lists, active row state, and account/admin navigation to a single shell read model.
+
+Prevents: client-side ownership filtering, duplicated sidebar data loaders, or admin links leaking to normal travelers.
+
+Rule: Conversation history and trip project sidebar data are loaded through Chat/Trips-owned server read functions scoped to the authenticated user.
+
+Rule: Admin/operator navigation entries are included only after server-side role checks. Normal traveler payloads must not include admin-only navigation or counts.
+
+Rule: The sidebar may collapse to an icon rail or mobile sheet, but data ownership and authorization rules do not change across breakpoints.
+
 ## Shared Data Contracts
+
+Frontend shell state contract:
+
+- Public logged-out state: root entry, sign-in CTA, sign-in-gated ask box, no authenticated sidebar payload.
+- Logged-in empty state: authenticated shell, user-scoped sidebar payload, centered composer, starter prompts, no right detail panel.
+- Active AI Ask state: authenticated shell, user-scoped sidebar payload, selected conversation/trip context, answer sections, selectable answer entity descriptors, optional right detail panel.
+
+Selectable answer entity descriptor minimum fields:
+
+- `type`: `place | hotel_area | route_segment | source | warning | cost | trip_fact | action`
+- `label`: Vietnamese display label
+- `section`: answer section identifier when available
+- `sourceCategory`: `chat_trip_context | knowledge | web | general` when applicable
+- `owner`: safe reference to the owning row or snapshot when available
+- `detail`: traveler-safe summary fields for the right panel
+- `provenance`: stored provenance row IDs or safe source snapshot references when applicable
+
+Detail panel payloads are read models. They are not persisted as separate product state.
 
 Core persisted entities:
 
@@ -390,6 +458,8 @@ Production must have:
 - Whether Facebook capture needs explicit per-source retention/deletion controls before broader operator use.
 - Dedicated self-service privacy dashboard beyond chat/trip deletion.
 - Google Maps integration.
+- Whether selected right-detail panel state is URL-addressable or transient UI state. Default implementation may keep it transient unless shareability/back-button semantics become a story requirement.
+- Dedicated map canvas or map provider integration for answer entities.
 - AI-generated image output until a concrete traveler or operator workflow is approved.
 - Public submissions, credit wallets, payment deposits, reward balances, referral reward calculations, ranking multipliers, reward-to-credit conversion, booking transactions, affiliate automation, and partner transaction flows.
 - Mobile app channel.

@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>XuyenViet - Trang chủ khi chưa đăng nhập</title>
+  <style>
+    :root {
+      --green: #14532d;
+      --route: #0f766e;
+      --purple: #8b5cf6;
+      --amber: #d97706;
+      --ink: #1f2937;
+      --muted: #6b7280;
+      --line: #e5e7eb;
+      --paper: #fbf8f1;
+      --soft: #f8fafc;
+      --active: #e8f3ec;
+      --shadow: 0 24px 80px rgba(31, 41, 55, 0.12);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 18% 12%, rgba(20, 83, 45, .12), transparent 30%),
+        radial-gradient(circle at 86% 14%, rgba(139, 92, 246, .12), transparent 28%),
+        linear-gradient(180deg, #fffdf8 0%, #ffffff 48%);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    button { font: inherit; cursor: pointer; }
+
+    .page {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr) auto;
+      min-height: 100vh;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 18px clamp(18px, 4vw, 48px);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--ink);
+      font-weight: 900;
+      letter-spacing: -.03em;
+      text-decoration: none;
+    }
+
+    .logo {
+      display: grid;
+      width: 38px;
+      height: 38px;
+      place-items: center;
+      border-radius: 14px;
+      background: linear-gradient(135deg, var(--green), var(--route));
+      color: white;
+      font-size: 13px;
+    }
+
+    .nav-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .ghost,
+    .primary {
+      min-height: 40px;
+      padding: 9px 14px;
+      border-radius: 999px;
+      font-weight: 800;
+    }
+
+    .ghost {
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.72);
+      color: var(--ink);
+    }
+
+    .primary {
+      border: 0;
+      background: var(--green);
+      color: white;
+    }
+
+    .hero {
+      display: grid;
+      place-items: center;
+      padding: 36px 18px 64px;
+      text-align: center;
+    }
+
+    .hero-inner {
+      width: min(100%, 900px);
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 18px;
+      padding: 7px 12px;
+      border: 1px solid rgba(20, 83, 45, .16);
+      border-radius: 999px;
+      background: rgba(232, 243, 236, .82);
+      color: var(--green);
+      font-size: 13px;
+      font-weight: 850;
+    }
+
+    h1 {
+      max-width: 780px;
+      margin: 0 auto;
+      font-size: clamp(46px, 9vw, 92px);
+      line-height: .96;
+      letter-spacing: -.08em;
+    }
+
+    .subtitle {
+      max-width: 620px;
+      margin: 22px auto 0;
+      color: var(--muted);
+      font-size: clamp(17px, 2vw, 21px);
+      line-height: 1.55;
+    }
+
+    .ask-card {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+      width: min(100%, 780px);
+      margin: 34px auto 0;
+      padding: 12px;
+      border: 1px solid rgba(229, 231, 235, .9);
+      border-radius: 28px;
+      background: rgba(255,255,255,.9);
+      box-shadow: var(--shadow);
+      text-align: left;
+    }
+
+    .fake-input {
+      display: flex;
+      align-items: center;
+      min-height: 56px;
+      padding: 0 8px 0 14px;
+      color: var(--muted);
+      font-size: 16px;
+    }
+
+    .ask-submit {
+      width: 56px;
+      height: 56px;
+      border: 0;
+      border-radius: 20px;
+      background: var(--green);
+      color: white;
+      font-size: 22px;
+      font-weight: 900;
+    }
+
+    .starter-row {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 10px;
+      margin-top: 22px;
+    }
+
+    .starter {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 42px;
+      padding: 8px 13px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255,255,255,.74);
+      color: var(--ink);
+      font-weight: 750;
+    }
+
+    .starter img { width: 20px; height: 20px; }
+
+    .preview {
+      display: grid;
+      grid-template-columns: 1.1fr .9fr;
+      gap: 16px;
+      width: min(100%, 980px);
+      margin: 42px auto 0;
+      text-align: left;
+    }
+
+    .preview-card {
+      min-height: 180px;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      background: rgba(255,255,255,.78);
+      box-shadow: 0 16px 48px rgba(31,41,55,.08);
+    }
+
+    .preview-card h2 {
+      margin: 0 0 10px;
+      font-size: 18px;
+    }
+
+    .preview-card p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+
+    .mini-detail {
+      display: grid;
+      gap: 10px;
+    }
+
+    .mini-row {
+      display: grid;
+      grid-template-columns: 28px minmax(0, 1fr);
+      gap: 10px;
+      align-items: center;
+      padding: 10px;
+      border-radius: 14px;
+      background: var(--soft);
+    }
+
+    .mini-row img { width: 24px; height: 24px; }
+    .mini-row strong { display: block; font-size: 14px; }
+    .mini-row span { color: var(--muted); font-size: 12px; }
+
+    .footer {
+      padding: 18px;
+      color: var(--muted);
+      font-size: 13px;
+      text-align: center;
+    }
+
+    @media (max-width: 760px) {
+      .topbar { padding: 14px 16px; }
+      .ghost { display: none; }
+      .ask-card { grid-template-columns: 1fr; border-radius: 24px; }
+      .ask-submit { width: 100%; }
+      .preview { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header class="topbar">
+      <a class="brand" href="#"><span class="logo">XV</span><span>XuyenViet</span></a>
+      <div class="nav-actions">
+        <button class="ghost" type="button">Khám phá</button>
+        <button class="primary" type="button">Đăng nhập Google</button>
+      </div>
+    </header>
+
+    <main class="hero">
+      <div class="hero-inner">
+        <div class="eyebrow">Vietnam road trips · AI-first</div>
+        <h1>Lên kế hoạch xuyên Việt trong một cuộc trò chuyện.</h1>
+        <p class="subtitle">Hỏi bằng tiếng Việt. XuyenViet gợi ý tuyến đường, điểm dừng, khách sạn, nguồn tham khảo và các lưu ý cần kiểm chứng.</p>
+
+        <div class="ask-card" aria-label="Sign-in gated ask box">
+          <div class="fake-input">Bạn muốn đi đâu? Ví dụ: Hà Nội đi Huế 5 ngày cùng gia đình...</div>
+          <button class="ask-submit" type="button" aria-label="Đăng nhập để hỏi">→</button>
+        </div>
+
+        <div class="starter-row">
+          <button class="starter" type="button"><img src="https://img.icons8.com/?id=37078&amp;format=png&amp;size=48" alt="" />Tuyến đường</button>
+          <button class="starter" type="button"><img src="https://img.icons8.com/?id=12338&amp;format=png&amp;size=64" alt="" />Khách sạn</button>
+          <button class="starter" type="button"><img src="https://img.icons8.com/?id=13800&amp;format=png&amp;size=48" alt="" />Điểm dừng</button>
+          <button class="starter" type="button"><img src="https://img.icons8.com/?id=742&amp;format=png&amp;size=48" alt="" />Nguồn</button>
+        </div>
+
+        <section class="preview" aria-label="Product preview">
+          <div class="preview-card">
+            <h2>Trò chuyện ở giữa. Chi tiết ở bên phải.</h2>
+            <p>Khi bạn chọn một địa điểm, khách sạn, nguồn hoặc chặng đường trong câu trả lời, XuyenViet mở panel chi tiết để xem nhanh thông tin liên quan.</p>
+          </div>
+          <div class="preview-card mini-detail">
+            <div class="mini-row"><img src="https://img.icons8.com/?id=13800&amp;format=png&amp;size=48" alt="" /><span><strong>Asia Park</strong><span>điểm dừng buổi tối</span></span></div>
+            <div class="mini-row"><img src="https://img.icons8.com/?id=12338&amp;format=png&amp;size=64" alt="" /><span><strong>Nơi ở gần đó</strong><span>gợi ý khu vực lưu trú</span></span></div>
+            <div class="mini-row"><img src="https://img.icons8.com/?id=742&amp;format=png&amp;size=48" alt="" /><span><strong>Nguồn tham khảo</strong><span>đã duyệt · chính thức · web</span></span></div>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <footer class="footer">Câu trả lời AI có thể chứa thông tin du lịch thay đổi theo thời gian. Hãy kiểm tra giá, giờ mở cửa, tình trạng đường và đặt chỗ trước khi quyết định.</footer>
+  </div>
+</body>
+</html>

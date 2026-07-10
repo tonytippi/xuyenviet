@@ -8,6 +8,12 @@ stepsCompleted:
 inputDocuments:
   - _bmad-output/planning-artifacts/prds/prd-xuyenviet-2026-07-04/prd.md
   - _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md
+  - _bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-2026-07-05/DESIGN.md
+  - _bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-2026-07-05/EXPERIENCE.md
+  - _bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-2026-07-05/mockups/home-logged-out.html
+  - _bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-2026-07-05/mockups/home-logged-in-empty.html
+  - _bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-2026-07-05/mockups/three-panel-chat-map.html
+  - _bmad-output/project-context.md
 ---
 
 # xuyenviet - Epic Breakdown
@@ -230,7 +236,67 @@ NFR-8: Browser automation for Facebook capture shall run as an operator-controll
 
 ### UX Design Requirements
 
-UX design requirements are defined in `_bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-2026-07-05/EXPERIENCE.md` and `DESIGN.md`. Traveler-facing surfaces remain Vietnamese-first, responsive, provenance-aware, and must now include streaming answer states plus supported image attachment/rejection states for AI Ask.
+UX-DR1: Public logged-out homepage at `/` must show Vietnamese value proposition, Google sign-in CTA, starter chips, and sign-in-gated ask box with no authenticated sidebar.
+
+UX-DR2: Logged-in empty state must show left sidebar, centered Vietnamese greeting, centered composer, starter cards, and no right detail panel.
+
+UX-DR3: Active chat must show left sidebar, center answer surface, and right contextual detail panel only when an answer entity is selected or useful.
+
+UX-DR4: Visible traveler UI copy must be Vietnamese-first with diacritics and `html lang="vi"` where applicable.
+
+UX-DR5: Left sidebar must include `Cuộc trò chuyện mới`, recent conversations, trip projects, account/privacy, and admin entry only when server-authorized.
+
+UX-DR6: Conversation and trip project rows must be user-owned, keyboard-accessible, show active state, and avoid hover-only actions.
+
+UX-DR7: Trip project selection must make active planning context visible in the sidebar and main chat header/composer.
+
+UX-DR8: Public ask box must require authentication before creating conversation, retrieval, usage event, or provider call.
+
+UX-DR9: Chat composer must support Vietnamese text and accepted image attachments, with invalid/empty submission blocked client-side and server-side.
+
+UX-DR10: Image attachment UI must show thumbnail/file row, size/status text, remove action, and not look like an approved source chip.
+
+UX-DR11: Assistant answers must use scannable sections: plan/options, rationale, practical tips, warnings, sources, uncertainty, and next steps.
+
+UX-DR12: Section chips must support answer navigation such as `Ăn gì?`, `Đi đâu?`, `Ở đâu?`, `Về chuyến đi`, `Cần biết`, and `Chi phí và mẹo`.
+
+UX-DR13: Selectable answer entities must include places, hotel areas, route segments, source chips, warnings, costs, and trip facts.
+
+UX-DR14: Right detail panel must show selected title, summary, actions, quick facts, related details, and provenance chips.
+
+UX-DR15: Right detail panel actions such as `Dùng trong kế hoạch`, `Xem tuyến đường`, and `Lưu` must call owning server command modules when implemented.
+
+UX-DR16: Right detail panel must not be map-first; Google Maps remains deferred.
+
+UX-DR17: Source detail must show source title/label, type, URL when available, collected/checked date, confidence, and freshness-sensitive warning.
+
+UX-DR18: Source/confidence UI must be label-based, not color-only, and must not expose raw operator-only material.
+
+UX-DR19: Streaming answer state must show pending/progressive text only after source/context preparation and reconcile to persisted final content.
+
+UX-DR20: Streaming failure must show recoverable retry/failure state and avoid implying a partial answer is saved as final.
+
+UX-DR21: Storage notice must explain chat/trip details may be stored for session/project support without blocking first ask unless policy later requires it.
+
+UX-DR22: Delete confirmations must name the object and explain normal UI/retrieval removal.
+
+UX-DR23: Mobile layout must use top bar/navigation sheet, single-column chat, reachable composer, and detail/source sheets.
+
+UX-DR24: Desktop active chat must preserve readable center column width around 760px and right detail panel width around 380px.
+
+UX-DR25: Visual design must use route green, guide amber, map paper, road ink, confidence source colors, sidebar surface, and detail-panel surface from `DESIGN.md`.
+
+UX-DR26: Typography should use Inter for functional UI and Vietnamese body text, with Fraunces only for sparse display moments.
+
+UX-DR27: Accessibility floor is WCAG 2.2 AA target, keyboard reachability, visible focus, `aria-current`, `aria-live`, 44px mobile touch targets, and reduced-motion support.
+
+UX-DR28: Admin surfaces must remain separate from traveler chat and use structured forms/review queues for knowledge cards.
+
+UX-DR29: Feedback/usefulness rating must be lightweight, optional, and never block chat.
+
+UX-DR30: Referral link UX must preserve attribution silently without reward, credit, ranking, payout, or points UI.
+
+UX-DR31: Mockup evidence confirms the canonical visible states: logged-out public homepage, logged-in empty chat, and active three-panel chat with contextual detail panel.
 
 ### FR Coverage Map
 
@@ -348,43 +414,43 @@ FR-50: Epic 5 - Usage cost estimation from model pricing
 
 ### Epic 1: Public Sign-In And App Foundation
 
-Travelers can access the public app entry point, sign in with Google without an email allowlist, use AI Ask only after authentication, and operators have role-protected admin access with audited protected mutations and the baseline production-ready app/data foundation.
+Travelers can access the public Vietnamese entry point, see the sign-in-gated ask experience, sign in with Google, and reach protected AI Ask only after authentication. Operators have server-role-gated admin entry, and referral attribution can be captured silently without reward UI.
 
 **FRs covered:** FR-8, FR-42, FR-43, FR-44, FR-45, FR-48
 
-### Epic 2: AI Ask Conversation Experience
+### Epic 2: Traveler AI Planning Shell And Conversation Experience
 
-Travelers can ask Vietnamese road-trip questions, refine plans across a conversation, receive useful structured Vietnamese answers with clarifying questions when needed, stream responses, and submit supported image inputs.
+Authenticated travelers can use the canonical AI planning shell: logged-in empty start, sidebar, centered composer, Vietnamese AI Ask, structured answers, streaming states, image input, and active chat with selectable answer entities that can open a contextual right detail panel.
 
 **FRs covered:** FR-1, FR-2, FR-3, FR-4, FR-5, FR-6, FR-6A, FR-6B, FR-6C, FR-7
 
 ### Epic 3: Chat Sessions And Trip Projects
 
-Travelers can organize planning across chat sessions and trip projects, reuse relevant context within each scope, correct trip details through chat, and delete chats or trip projects they own.
+Travelers can organize planning through user-owned conversations and trip projects, revisit history from the sidebar, make the active trip context visible, reuse context, correct trip details through chat, and delete owned chats or projects.
 
 **FRs covered:** FR-9, FR-10, FR-11, FR-12, FR-13, FR-14, FR-15, FR-16
 
 ### Epic 4: AI-Assisted Knowledge Intake And Approval
 
-Operators can submit travel links or copied content, AI prepares structured knowledge drafts, operators approve useful items, and approved knowledge becomes available for traveler answers.
+Operators can submit travel sources, including URLs, copied posts, raw text, screenshots, and queued Facebook URLs; AI prepares knowledge drafts; operators review, edit, approve, archive, and seed the Hanoi-to-HCMC corridor with approved cards.
 
 **FRs covered:** FR-17, FR-18, FR-19, FR-20, FR-21, FR-22, FR-23, FR-23A, FR-23B, FR-24, FR-25, FR-26, FR-27, FR-28
 
-### Epic 5: Grounded Retrieval, Web Search, And Provenance
+### Epic 5: Grounded Retrieval, Web Search, Provenance, And Usage
 
-Traveler answers use the required context priority pipeline: selected trip project context, current chat session context, approved knowledge, web search fallback, and general reasoning, with stored provenance, source/confidence display, uncertainty handling, freshness warnings, AI Gateway model management, pricing metadata, and AI usage event recording.
+Traveler answers use the required context priority pipeline, retrieve approved knowledge, use web search fallback when needed, persist provenance, show source/confidence details, manage AI Gateway model capabilities/pricing, and record authenticated AI usage events.
 
 **FRs covered:** FR-29, FR-30, FR-31, FR-32, FR-33, FR-34, FR-35, FR-36, FR-37, FR-47, FR-49, FR-50
 
 ### Epic 6: Family-Aware Planning And Public MVP Quality Loop
 
-When children are part of a trip, answers adapt planning advice for family needs, and public MVP feedback/evaluation measures whether answers are useful, grounded, and better than generic ChatGPT.
+When children are part of a trip, answers adapt recommendations for family travel, and the product captures usefulness feedback and evaluation data to measure whether XuyenViet is more useful than generic ChatGPT.
 
 **FRs covered:** FR-38, FR-39, FR-40, FR-41, FR-46
 
 ## Epic 1: Public Sign-In And App Foundation
 
-Travelers can access the public app entry point, sign in with Google without an email allowlist, use AI Ask only after authentication, referral attribution can be captured for new users, and operators have role-protected admin access with audited protected mutations and the baseline production-ready app/data foundation.
+Travelers can access the public Vietnamese entry point, see the sign-in-gated ask experience, sign in with Google, and reach protected AI Ask only after authentication. Operators have server-role-gated admin entry, and referral attribution can be captured silently without reward UI.
 
 ### Story 1.1: Initialize Public MVP Web App Foundation
 
@@ -419,12 +485,22 @@ So that XuyenViet is publicly reachable while AI usage remains tied to an authen
 **Given** a user is not signed in
 **When** they open the public app entry route
 **Then** the route is accessible without email allowlist validation
-**And** the app presents Google sign-in as the path to AI Ask.
+**And** the app presents a Vietnamese logged-out homepage with value proposition, Google sign-in CTA, starter chips, and a sign-in-gated ask box.
+
+**Given** a user is not signed in
+**When** they view the public homepage
+**Then** the page does not render the authenticated app sidebar, conversation history, trip projects, admin navigation, or user-owned data
+**And** visible traveler copy remains Vietnamese-first with readable diacritics.
 
 **Given** a user is not signed in
 **When** they attempt to open AI Ask or submit an AI question
 **Then** access is blocked or redirected to sign-in
-**And** no conversation, chat/trip context, retrieval, or AI provider call is created for that request.
+**And** no conversation, chat/trip context, retrieval, usage event, or AI provider call is created for that request.
+
+**Given** a public visitor arrives with a referral parameter
+**When** they view the logged-out homepage and choose sign-in
+**Then** referral attribution data is preserved silently through the auth flow when possible
+**And** the page does not show reward, credit, payout, points, or ranking UI.
 
 **Given** a user is signed in with Google
 **When** they open AI Ask
@@ -546,9 +622,9 @@ So that future referral programs can attribute registrations without adding rewa
 **When** they open a different referral link later
 **Then** the first attribution is preserved unless an explicit admin correction feature is implemented later.
 
-## Epic 2: AI Ask Conversation Experience
+## Epic 2: Traveler AI Planning Shell And Conversation Experience
 
-Travelers can ask Vietnamese road-trip questions, refine plans across a conversation, receive useful structured Vietnamese answers with clarifying questions when needed, stream responses, and submit supported image inputs.
+Authenticated travelers can use the canonical AI planning shell: logged-in empty start, sidebar, centered composer, Vietnamese AI Ask, structured answers, streaming states, image input, and active chat with selectable answer entities that can open a contextual right detail panel.
 
 ### Story 2.0: Introduce Test Framework And Retroactive Coverage For Epic 1 Protected Paths
 
@@ -589,14 +665,14 @@ _Dependencies: Must complete before Story 2.2. May run in parallel with Story 2.
 ### Story 2.1: Authenticated AI Ask Chat Shell
 
 As an authenticated traveler,
-I want to open a Vietnamese AI Ask chat screen,
-So that I can start asking XuyenViet for road-trip planning help.
+I want to open the empty Vietnamese AI planning shell,
+So that I can start a road-trip planning conversation from a familiar, focused workspace.
 
 **Acceptance Criteria:**
 
 **Given** a user is signed in with Google
 **When** they open AI Ask
-**Then** they see a chat interface for asking road-trip planning questions
+**Then** they see the logged-in empty AI Ask state with left sidebar, centered Vietnamese greeting, centered composer, and starter cards
 **And** the interface is Vietnamese-first.
 
 **Given** a user is not signed in
@@ -606,7 +682,18 @@ So that I can start asking XuyenViet for road-trip planning help.
 
 **Given** the chat screen loads
 **When** no conversation has started
-**Then** the UI provides a clear prompt or empty state that invites the user to ask a Vietnam road-trip question.
+**Then** the UI provides a clear prompt or empty state that invites the user to ask a Vietnam road-trip question
+**And** it does not render an empty right detail panel before an answer or selected entity exists.
+
+**Given** the authenticated AI Ask shell renders on desktop
+**When** sidebar data is available
+**Then** the shell shows the `Cuộc trò chuyện mới` action, conversation area, trip project area, account/privacy access, and admin entry only when server-authorized
+**And** normal traveler payloads do not include admin-only navigation.
+
+**Given** the authenticated AI Ask shell renders on mobile
+**When** the user opens navigation
+**Then** conversation history and trip projects are available through a mobile sheet or equivalent responsive navigation
+**And** the centered composer remains reachable without showing a persistent desktop sidebar.
 
 ### Story 2.2: Create Conversation And Send First Message
 
@@ -668,13 +755,23 @@ So that I can quickly understand options, warnings, and next steps.
 
 **Given** the user asks a trip-planning question
 **When** the assistant responds
-**Then** the answer includes suggested plan/options, rationale, practical tips, warnings, and next steps when relevant
+**Then** the answer includes suggested plan/options, rationale, practical tips, warnings, sources, uncertainty, and next steps when relevant
 **And** the format remains readable on desktop and mobile.
+
+**Given** the assistant answer contains multiple planning topics
+**When** the answer is displayed
+**Then** section chips or equivalent navigation can represent sections such as `Ăn gì?`, `Đi đâu?`, `Ở đâu?`, `Về chuyến đi`, `Cần biết`, and `Chi phí và mẹo` when relevant
+**And** the answer remains scannable instead of rendering every section with equal visual weight.
 
 **Given** source/provenance features are not yet implemented in this epic
 **When** the assistant formats the answer
 **Then** it reserves or supports a source/confidence section contract for later Epic 5 integration
 **And** it does not invent fake citations or source labels.
+
+**Given** answer copy is rendered to travelers
+**When** Vietnamese text includes place names, warnings, or follow-up questions
+**Then** diacritics remain readable across common desktop/mobile widths
+**And** labels do not rely on color alone.
 
 **Given** the question is outside the Hanoi-to-HCMC focus
 **When** the assistant responds
@@ -761,9 +858,47 @@ So that planning feels responsive and I can ask about screenshots or photos with
 
 _Dependency: Story 5.0 should provide the model capability catalog before Story 2.7 implementation unless a temporary hard-coded capability gate is explicitly approved for the story._
 
+### Story 2.8: Selectable Answer Entities And Contextual Detail Panel
+
+As an authenticated traveler,
+I want to select places, routes, sources, and trip facts inside an answer,
+So that I can inspect useful details without leaving the conversation.
+
+**Acceptance Criteria:**
+
+**Given** an active assistant answer contains selectable places, hotel areas, route segments, source chips, warnings, costs, or trip facts
+**When** the answer is rendered
+**Then** selectable items are represented through structured render descriptors derived from assistant message structure and stored source/provenance snapshots
+**And** the UI does not parse Vietnamese free text to invent links, details, or source claims.
+
+**Given** a traveler selects or keyboard-focuses a selectable answer entity
+**When** detail data is available
+**Then** the right contextual detail panel opens on desktop with selected title, Vietnamese summary, contextual actions, quick facts, related details, and provenance area
+**And** the panel content is a read model, not a separately persisted mutable product aggregate.
+
+**Given** the active chat has no selected answer entity
+**When** the conversation is displayed
+**Then** the UI does not force a blank right detail panel
+**And** the logged-in empty state remains free of the right detail panel.
+
+**Given** the traveler is on mobile
+**When** they select an answer entity or source chip
+**Then** the selected detail opens as a sheet or drawer
+**And** closing it returns focus to the selected entity or opening control.
+
+**Given** the detail panel exposes actions such as `Dùng trong kế hoạch`, `Xem tuyến đường`, or `Lưu`
+**When** the user activates an action
+**Then** the action calls the owning server-side command module when implemented
+**And** the detail panel does not directly mutate another feature's aggregate.
+
+**Given** the selected entity relates to location or route guidance
+**When** its detail panel is shown
+**Then** the detail is not map-first and does not require Google Maps integration
+**And** route/place guidance remains text, card, or detail-panel based until a later map story is approved.
+
 ## Epic 3: Chat Sessions And Trip Projects
 
-Travelers can organize planning across chat sessions and trip projects, reuse relevant context within each scope, correct trip details through chat, and delete chats or trip projects they own.
+Travelers can organize planning through user-owned conversations and trip projects, revisit history from the sidebar, make the active trip context visible, reuse context, correct trip details through chat, and delete owned chats or projects.
 
 ### Story 3.1: Manage Chat Sessions
 
@@ -783,10 +918,20 @@ So that I can plan different travel questions without mixing every conversation 
 **Then** they can see and reopen their own sessions
 **And** sessions from other users are never visible.
 
+**Given** conversation history is shown in the AI planning shell sidebar or mobile sheet
+**When** rows are rendered
+**Then** each conversation row shows a user-owned title or preview, active state when selected, and a row action entry for delete or future rename
+**And** row actions are keyboard-accessible and not hover-only.
+
 **Given** a user continues an existing chat session
 **When** they send a follow-up message
 **Then** the assistant can use relevant previous messages from that session
 **And** unrelated chat sessions are not included by default.
+
+**Given** the sidebar read model is loaded
+**When** conversation rows are returned to the client
+**Then** the data is scoped server-side to the authenticated user
+**And** the client does not filter out other users' conversations because they are never included in the payload.
 
 ### Story 3.2: Create Trip Projects
 
@@ -806,10 +951,20 @@ So that I can keep planning for one trip focused in one place.
 **Then** they can see the project context and related chat sessions
 **And** they can continue planning within that trip scope.
 
+**Given** trip projects are shown in the AI planning shell sidebar or mobile sheet
+**When** the user selects a trip project
+**Then** the selected project row shows active state
+**And** the main chat header or composer clearly indicates that the conversation is scoped to the selected trip project.
+
 **Given** a user attempts to open another user's trip project
 **When** the request reaches the server
 **Then** access is denied
 **And** no project data is exposed.
+
+**Given** the trip project sidebar read model is loaded
+**When** trip rows are returned to the client
+**Then** the data is scoped server-side to the authenticated user
+**And** row actions for project settings/delete are keyboard-accessible and not hover-only.
 
 ### Story 3.3: Extract Chat And Trip Context
 
@@ -925,7 +1080,7 @@ So that I can remove a focused planning workspace and its stored trip context.
 
 ## Epic 4: AI-Assisted Knowledge Intake And Approval
 
-Operators can submit travel links or copied content, AI prepares structured knowledge drafts, operators approve useful items, and approved knowledge becomes available for traveler answers.
+Operators can submit travel sources, including URLs, copied posts, raw text, screenshots, and queued Facebook URLs; AI prepares knowledge drafts; operators review, edit, approve, archive, and seed the Hanoi-to-HCMC corridor with approved cards.
 
 ### Story 4.1: Submit Travel Source For AI Reading
 
@@ -1038,12 +1193,18 @@ So that only useful and understandable knowledge enters XuyenViet.
 
 **Given** AI has prepared knowledge drafts
 **When** the operator opens the review screen
-**Then** they can see each draft with title, type, route/location, summary, tags, source, confidence label, and freshness-sensitive flag.
+**Then** they can see each draft with title, type, route/location, summary, tags, source, confidence label, and freshness-sensitive flag
+**And** the review UI is a structured admin workflow separate from traveler chat.
 
 **Given** a draft contains wrong, duplicated, or low-value information
 **When** the operator reviews it
 **Then** they can edit it, reject it, or keep it as draft
 **And** rejected drafts are not retrievable.
+
+**Given** operators edit draft/card fields
+**When** the edit form is displayed
+**Then** operators use structured fields rather than editing raw AI prose in-place without field structure
+**And** approval remains a distinct action that cannot happen accidentally.
 
 **Given** a draft includes changing information such as price, schedule, opening hours, availability, road condition, or service status
 **When** the operator reviews it
@@ -1207,7 +1368,7 @@ So that the public MVP has enough curated examples before evaluation.
 **Then** the system reports the seed set as incomplete
 **And** it shows how many more approved items are needed.
 
-## Epic 5: Grounded Retrieval, Web Search, And Provenance
+## Epic 5: Grounded Retrieval, Web Search, Provenance, And Usage
 
 Traveler answers use the required context priority pipeline: selected trip project context, current chat session context, approved knowledge, web search fallback, and general reasoning, with stored provenance, source/confidence display, uncertainty handling, freshness warnings, AI Gateway model management, pricing metadata, and AI usage event recording.
 
@@ -1366,10 +1527,20 @@ So that I know what to trust and what to verify.
 **When** the source section is displayed
 **Then** it shows source label/title, source type, URL when available, collected/checked date when available, confidence label, and freshness warning when applicable.
 
+**Given** a traveler opens source detail from an answer source chip or contextual detail panel
+**When** the detail is displayed
+**Then** it uses stored provenance and traveler-safe source snapshots to show source title/label, type, URL when available, collected/checked date, confidence, and freshness warning
+**And** it never exposes raw source material, copied post bodies, operator-only notes, or provider payloads.
+
 **Given** an answer uses general reasoning without supporting source
 **When** the source section is displayed
 **Then** the answer clearly distinguishes that content from sourced knowledge
 **And** it avoids fake citations.
+
+**Given** source/confidence UI is rendered in the answer or right detail panel
+**When** confidence categories are shown
+**Then** labels are visible alongside any color treatment
+**And** source/confidence claims are not derived by parsing answer prose.
 
 ### Story 5.7: Uncertainty And Freshness Warnings
 
@@ -1538,6 +1709,11 @@ So that we can measure whether XuyenViet is helping public MVP users.
 **When** the user provides a usefulness rating
 **Then** the rating is stored and linked to the assistant response
 **And** the user can optionally leave short feedback text.
+
+**Given** an assistant answer is displayed
+**When** the usefulness rating control is available
+**Then** the feedback action is lightweight and optional
+**And** it never blocks reading the answer, continuing chat, opening sources, or using the detail panel.
 
 **Given** a user has already rated an answer
 **When** they change their rating
