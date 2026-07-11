@@ -890,6 +890,18 @@ describe("answer context assembly", () => {
       chatTripContext: { tripProjectFacts: [], chatFacts: [], conflicts: [] },
       warnings: [],
     });
+    const childDiscountDecision = decideWebSearchFallback({
+      question: "Tre em co duoc giam gia hoac discount o Dai Noi khong?",
+      knowledge: [makeKnowledgeResult("card-1", "Điểm tham quan Huế"), makeKnowledgeResult("card-2", "Hoạt động gia đình"), makeKnowledgeResult("card-3", "Gợi ý Đại Nội")],
+      chatTripContext: { tripProjectFacts: [], chatFacts: [], conflicts: [] },
+      warnings: [],
+    });
+    const childOfferDecision = decideWebSearchFallback({
+      question: "Trẻ em có ưu đãi ở Đại Nội không?",
+      knowledge: [makeKnowledgeResult("card-1", "Điểm tham quan Huế"), makeKnowledgeResult("card-2", "Hoạt động gia đình"), makeKnowledgeResult("card-3", "Gợi ý Đại Nội")],
+      chatTripContext: { tripProjectFacts: [], chatFacts: [], conflicts: [] },
+      warnings: [],
+    });
     const ordinaryTravelDecision = decideWebSearchFallback({
       question: "Du lich Hue nen an mon gi?",
       knowledge: [makeKnowledgeResult("card-1", "Món ăn Huế"), makeKnowledgeResult("card-2", "Bún bò Huế"), makeKnowledgeResult("card-3", "Quán địa phương")],
@@ -898,6 +910,8 @@ describe("answer context assembly", () => {
     });
 
     expect(unaccentedDecision.webSearchTriggerReasons).toContain("freshness_sensitive_request");
+    expect(childDiscountDecision.webSearchTriggerReasons).toContain("freshness_sensitive_request");
+    expect(childOfferDecision.webSearchTriggerReasons).toContain("freshness_sensitive_request");
     expect(ordinaryTravelDecision.webSearchTriggerReasons).not.toContain("freshness_sensitive_request");
   });
 

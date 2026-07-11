@@ -81,6 +81,9 @@ warnings: []
 - addressed_findings:
   - none
 
+### Review Findings
+- [x] [Review][Patch] Child discount questions are not treated as freshness-sensitive retrieval triggers [src/features/retrieval/source-bundle.ts:288]
+
 ## Verification
 
 **Commands:**
@@ -93,6 +96,9 @@ warnings: []
 - `pnpm test:run tests/answer-context.test.ts tests/ai-usage-events.test.ts` -- passed, 55 tests.
 - `pnpm typecheck` -- passed.
 - `pnpm lint` -- passed.
+- Review patch: `pnpm test:run tests/answer-context.test.ts tests/ai-usage-events.test.ts` -- passed, 55 tests.
+- Review patch: `pnpm typecheck` -- passed.
+- Review patch: `pnpm lint` -- passed.
 
 ## Dev Agent Record
 
@@ -102,6 +108,7 @@ warnings: []
 - Preserved existing conditional behavior: no family guidance without positive family context and no-child facts suppress stale family facts.
 - Preserved source-bundle prompt caps while keeping essential family activity guidance visible in minimal/compacted bundles.
 - Added source/confidence and verification warning instructions for changing family activity facts such as child discounts, prices, promotions, schedules, opening hours, and service availability.
+- Review patch added discount-specific freshness matching so direct child-discount and offer questions trigger freshness-sensitive retrieval decisions.
 - Bumped AI Ask initial answer prompt version to `ai_ask_initial_v8` because answer prompt behavior changed.
 
 ### File List
@@ -122,14 +129,15 @@ Summary: Implemented family-aware activity suitability guidance and regression c
 
 Files changed:
 - `src/features/retrieval/source-bundle.ts` -- Expanded conditional family guidance to activity suitability, warnings for unsuitable/tiring/boring/risky activities, parent-child balance, backups, and changing-fact verification.
+- `src/features/retrieval/source-bundle.ts` -- Review patch added freshness trigger keywords for discounts/offers.
 - `src/features/ai/prompts.ts` -- Added family activity answer guidance to the AI Ask system prompt.
 - `src/features/usage/events.ts` -- Bumped AI Ask initial answer prompt version to `ai_ask_initial_v8`.
-- `tests/answer-context.test.ts` -- Added and updated regression coverage for family activity guidance, suppression, and capped bundles.
+- `tests/answer-context.test.ts` -- Added and updated regression coverage for family activity guidance, suppression, capped bundles, and child-discount freshness triggers.
 - `tests/ai-usage-events.test.ts` -- Updated prompt version expectation.
 - `_bmad-output/implementation-artifacts/sprint-status.yaml` -- Marked Story 6.3 done.
 - `_bmad-output/implementation-artifacts/spec-6-3-family-aware-activities-and-suitability-notes.md` -- Recorded spec, implementation, review, verification, and final status.
 
-Review findings breakdown: 0 patches applied, 0 deferred, 0 rejected; blind and edge-case review passes returned no findings.
+Review findings breakdown: 1 patch applied, 0 deferred, 1 dismissed; blind and edge-case review passes returned one actionable child-discount freshness trigger issue and one dismissed prompt-guard concern.
 
 Follow-up review recommendation: false.
 
@@ -137,5 +145,8 @@ Verification performed:
 - `pnpm test:run tests/answer-context.test.ts tests/ai-usage-events.test.ts` -- passed, 55 tests.
 - `pnpm typecheck` -- passed.
 - `pnpm lint` -- passed.
+- Review patch: `pnpm test:run tests/answer-context.test.ts tests/ai-usage-events.test.ts` -- passed, 55 tests.
+- Review patch: `pnpm typecheck` -- passed.
+- Review patch: `pnpm lint` -- passed.
 
 Residual risks: This change strengthens prompt behavior but does not guarantee model output format for every provider response; downstream answer quality still depends on model adherence and available approved/provenance data.
