@@ -69,6 +69,18 @@ export type AssistantProvenanceVerificationStatus = (typeof assistantProvenanceV
 export const answerUsefulnessRatingValues = ["useful", "not_useful"] as const;
 export type AnswerUsefulnessRating = (typeof answerUsefulnessRatingValues)[number];
 
+export const publicMvpEvaluationPromptTypeValues = ["magic_moment_family_trip", "sparse_data", "freshness_sensitive", "service_activity", "route_logistics"] as const;
+export type PublicMvpEvaluationPromptType = (typeof publicMvpEvaluationPromptTypeValues)[number];
+
+export const publicMvpEvaluationRunStatusValues = ["running", "completed", "partial_failed", "failed"] as const;
+export type PublicMvpEvaluationRunStatus = (typeof publicMvpEvaluationRunStatusValues)[number];
+
+export const publicMvpEvaluationResultStatusValues = ["scored", "failed", "unscored"] as const;
+export type PublicMvpEvaluationResultStatus = (typeof publicMvpEvaluationResultStatusValues)[number];
+
+export const publicMvpEvaluationScoreDimensionValues = ["user_context_use", "practical_specificity", "source_grounding", "uncertainty_handling", "family_awareness", "vietnamese_clarity"] as const;
+export type PublicMvpEvaluationScoreDimension = (typeof publicMvpEvaluationScoreDimensionValues)[number];
+
 export const knowledgeSuggestionActionValues = ["create", "update", "conflict", "duplicate", "no_action"] as const;
 export type KnowledgeSuggestionAction = (typeof knowledgeSuggestionActionValues)[number];
 
@@ -1018,6 +1030,113 @@ export const answerUsefulnessFeedback = pgTable(
   ],
 );
 
+export const publicMvpEvaluationPromptSets = pgTable(
+  "public_mvp_evaluation_prompt_sets",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    version: text("version").notNull(),
+    rubricVersion: text("rubric_version").notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (promptSet) => [
+    uniqueIndex("public_mvp_evaluation_prompt_sets_version_idx").on(promptSet.version),
+    check("public_mvp_evaluation_prompt_sets_version_check", sql`length(btrim(${promptSet.version})) between 1 and 80`),
+    check("public_mvp_evaluation_prompt_sets_rubric_version_check", sql`length(btrim(${promptSet.rubricVersion})) between 1 and 80`),
+  ],
+);
+
+export const publicMvpEvaluationRuns = pgTable(
+  "public_mvp_evaluation_runs",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    promptSetId: text("prompt_set_id")
+      .notNull()
+      .references(() => publicMvpEvaluationPromptSets.id, { onDelete: "restrict" }),
+    promptSetVersion: text("prompt_set_version").notNull(),
+    actorUserId: text("actor_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    aiGatewayModelId: text("ai_gateway_model_id").references(() => aiGatewayModels.id, { onDelete: "set null" }),
+    modelVersion: text("model_version").notNull(),
+    status: text("status").$type<PublicMvpEvaluationRunStatus>().notNull(),
+    runMetadata: jsonb("run_metadata").$type<Record<string, unknown>>().default({}).notNull(),
+    startedAt: timestamp("started_at", { mode: "date" }).defaultNow().notNull(),
+    completedAt: timestamp("completed_at", { mode: "date" }),
+  },
+  (run) => [
+    index("public_mvp_evaluation_runs_actor_created_idx").on(run.actorUserId, run.startedAt),
+    index("public_mvp_evaluation_runs_prompt_set_idx").on(run.promptSetId),
+    check("public_mvp_evaluation_runs_status_check", sql`${run.status} in ('running', 'completed', 'partial_failed', 'failed')`),
+    check("public_mvp_evaluation_runs_prompt_set_version_check", sql`length(btrim(${run.promptSetVersion})) between 1 and 80`),
+    check("public_mvp_evaluation_runs_model_version_check", sql`length(btrim(${run.modelVersion})) between 1 and 160`),
+    check("public_mvp_evaluation_runs_metadata_object_check", sql`jsonb_typeof(${run.runMetadata}) = 'object'`),
+  ],
+);
+
+export const publicMvpEvaluationResults = pgTable(
+  "public_mvp_evaluation_results",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    runId: text("run_id")
+      .notNull()
+      .references(() => publicMvpEvaluationRuns.id, { onDelete: "cascade" }),
+    promptSetId: text("prompt_set_id")
+      .notNull()
+      .references(() => publicMvpEvaluationPromptSets.id, { onDelete: "restrict" }),
+    promptSetVersion: text("prompt_set_version").notNull(),
+    promptType: text("prompt_type").$type<PublicMvpEvaluationPromptType>().notNull(),
+    promptVersion: text("prompt_version").notNull(),
+    modelVersion: text("model_version").notNull(),
+    status: text("status").$type<PublicMvpEvaluationResultStatus>().notNull(),
+    answerText: text("answer_text"),
+    safeErrorCode: text("safe_error_code"),
+    unsupportedClaimFlag: boolean("unsupported_claim_flag").default(false).notNull(),
+    missingUncertaintyFlag: boolean("missing_uncertainty_flag").default(false).notNull(),
+    noBetterThanGenericFlag: boolean("no_better_than_generic_flag").default(false).notNull(),
+    assistantMessageId: text("assistant_message_id").references(() => messages.id, { onDelete: "set null" }),
+    retrievalDecisionId: text("retrieval_decision_id").references(() => assistantRetrievalDecisions.id, { onDelete: "set null" }),
+    provenanceId: text("provenance_id").references(() => assistantResponseProvenance.id, { onDelete: "set null" }),
+    usageEventId: text("usage_event_id").references(() => aiUsageEvents.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (result) => [
+    uniqueIndex("public_mvp_evaluation_results_run_prompt_idx").on(result.runId, result.promptType),
+    index("public_mvp_evaluation_results_prompt_type_idx").on(result.promptType, result.createdAt),
+    index("public_mvp_evaluation_results_status_idx").on(result.status),
+    check("public_mvp_evaluation_results_prompt_type_check", sql`${result.promptType} in ('magic_moment_family_trip', 'sparse_data', 'freshness_sensitive', 'service_activity', 'route_logistics')`),
+    check("public_mvp_evaluation_results_status_check", sql`${result.status} in ('scored', 'failed', 'unscored')`),
+    check("public_mvp_evaluation_results_prompt_set_version_check", sql`length(btrim(${result.promptSetVersion})) between 1 and 80`),
+    check("public_mvp_evaluation_results_prompt_version_check", sql`length(btrim(${result.promptVersion})) between 1 and 80`),
+    check("public_mvp_evaluation_results_model_version_check", sql`length(btrim(${result.modelVersion})) between 1 and 160`),
+    check("public_mvp_evaluation_results_answer_length_check", sql`${result.answerText} is null or length(btrim(${result.answerText})) between 1 and 12000`),
+    check("public_mvp_evaluation_results_safe_error_check", sql`${result.safeErrorCode} is null or ${result.safeErrorCode} in ('evaluator_failed', 'invalid_score_payload')`),
+    check("public_mvp_evaluation_results_status_shape_check", sql`(${result.status} = 'scored' and ${result.answerText} is not null and ${result.safeErrorCode} is null) or (${result.status} <> 'scored' and ${result.safeErrorCode} is not null)`),
+  ],
+);
+
+export const publicMvpEvaluationResultScores = pgTable(
+  "public_mvp_evaluation_result_scores",
+  {
+    resultId: text("result_id")
+      .notNull()
+      .references(() => publicMvpEvaluationResults.id, { onDelete: "cascade" }),
+    dimension: text("dimension").$type<PublicMvpEvaluationScoreDimension>().notNull(),
+    score: integer("score").notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (score) => [
+    primaryKey({ columns: [score.resultId, score.dimension] }),
+    check("public_mvp_evaluation_result_scores_dimension_check", sql`${score.dimension} in ('user_context_use', 'practical_specificity', 'source_grounding', 'uncertainty_handling', 'family_awareness', 'vietnamese_clarity')`),
+    check("public_mvp_evaluation_result_scores_bounds_check", sql`${score.score} between 1 and 10`),
+  ],
+);
+
 export const schema = {
   users,
   accounts,
@@ -1046,4 +1165,8 @@ export const schema = {
   assistantRetrievalDecisions,
   assistantResponseProvenance,
   answerUsefulnessFeedback,
+  publicMvpEvaluationPromptSets,
+  publicMvpEvaluationRuns,
+  publicMvpEvaluationResults,
+  publicMvpEvaluationResultScores,
 };

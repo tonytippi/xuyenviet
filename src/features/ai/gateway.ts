@@ -26,6 +26,7 @@ const minGatewayTimeoutMs = 1_000;
 const maxGatewayTimeoutMs = 180_000;
 const maxCompletionTokens = 900;
 const maxExtractionTokens = 1500;
+const maxEvaluationTokens = 1800;
 
 export type AiGatewaySuccess = {
   ok: true;
@@ -55,6 +56,8 @@ export type AiGatewayExtractionFailure = {
 };
 
 export type AiGatewayExtractionResult = AiGatewaySuccess | AiGatewayExtractionFailure;
+
+export type AiGatewayCompletionPurpose = "extraction" | "evaluation";
 
 export async function streamInitialAiAskAnswer({
   model,
@@ -167,6 +170,34 @@ export async function completeExtraction({
   messages: GatewayMessage[];
   abortSignal?: AbortSignal;
 }): Promise<AiGatewayExtractionResult> {
+  return completeGatewayPrompt({ model, messages, abortSignal, purpose: "extraction", maxTokens: maxExtractionTokens });
+}
+
+export async function completeEvaluation({
+  model,
+  messages,
+  abortSignal,
+}: {
+  model: string;
+  messages: GatewayMessage[];
+  abortSignal?: AbortSignal;
+}): Promise<AiGatewayExtractionResult> {
+  return completeGatewayPrompt({ model, messages, abortSignal, purpose: "evaluation", maxTokens: maxEvaluationTokens });
+}
+
+async function completeGatewayPrompt({
+  model,
+  messages,
+  abortSignal,
+  purpose,
+  maxTokens,
+}: {
+  model: string;
+  messages: GatewayMessage[];
+  abortSignal?: AbortSignal;
+  purpose: AiGatewayCompletionPurpose;
+  maxTokens: number;
+}): Promise<AiGatewayExtractionResult> {
   const startedAt = Date.now();
   const controller = new AbortController();
   const gatewayTimeoutMs = getGatewayTimeoutMs();
@@ -193,7 +224,7 @@ export async function completeExtraction({
       body: JSON.stringify({
         model,
         messages,
-        max_tokens: maxExtractionTokens,
+        max_tokens: maxTokens,
         temperature: 0,
         stream: false,
       }),
@@ -202,7 +233,7 @@ export async function completeExtraction({
     const latencyMs = Date.now() - startedAt;
 
     if (!response.ok) {
-      logGatewayFailure({ errorCode: "gateway_http_error", latencyMs, model, timeoutMs: gatewayTimeoutMs, status: response.status, statusText: response.statusText, purpose: "extraction" });
+      logGatewayFailure({ errorCode: "gateway_http_error", latencyMs, model, timeoutMs: gatewayTimeoutMs, status: response.status, statusText: response.statusText, purpose });
 
       return { ok: false, provider: "ai_gateway", model, latencyMs, errorCode: "gateway_http_error" };
     }
@@ -211,7 +242,7 @@ export async function completeExtraction({
 
     if (isRecord(payload) && isRecord(payload.error)) {
       const errorMessage = typeof payload.error.message === "string" ? payload.error.message : "unknown_error";
-      logGatewayFailure({ errorCode: "invalid_gateway_response", latencyMs, model, timeoutMs: gatewayTimeoutMs, reason: "provider_error_in_body", message: errorMessage, purpose: "extraction" });
+      logGatewayFailure({ errorCode: "invalid_gateway_response", latencyMs, model, timeoutMs: gatewayTimeoutMs, reason: "provider_error_in_body", message: errorMessage, purpose });
 
       return { ok: false, provider: "ai_gateway", model, latencyMs, errorCode: "invalid_gateway_response" };
     }
@@ -219,7 +250,7 @@ export async function completeExtraction({
     const content = parseCompletionContent(payload);
 
     if (!content) {
-      logGatewayFailure({ errorCode: "invalid_gateway_response", latencyMs, model, timeoutMs: gatewayTimeoutMs, reason: "missing_completion_content", purpose: "extraction" });
+      logGatewayFailure({ errorCode: "invalid_gateway_response", latencyMs, model, timeoutMs: gatewayTimeoutMs, reason: "missing_completion_content", purpose });
 
       return { ok: false, provider: "ai_gateway", model, latencyMs, errorCode: "invalid_gateway_response" };
     }
@@ -236,7 +267,7 @@ export async function completeExtraction({
     const latencyMs = Date.now() - startedAt;
 
     if (abortSignal?.aborted) {
-      logGatewayFailure({ errorCode: "client_stream_aborted", latencyMs, model, timeoutMs: gatewayTimeoutMs, reason: "client_aborted", purpose: "extraction" });
+      logGatewayFailure({ errorCode: "client_stream_aborted", latencyMs, model, timeoutMs: gatewayTimeoutMs, reason: "client_aborted", purpose });
 
       return { ok: false, provider: "ai_gateway", model, latencyMs, errorCode: "client_stream_aborted" };
     }
@@ -248,7 +279,7 @@ export async function completeExtraction({
       timeoutMs: gatewayTimeoutMs,
       reason: error instanceof Error ? error.name : "unknown_error",
       message: error instanceof Error ? error.message : undefined,
-      purpose: "extraction",
+      purpose,
     });
 
     return { ok: false, provider: "ai_gateway", model, latencyMs, errorCode: "gateway_network_error" };
@@ -289,9 +320,9 @@ function logGatewayFailure(details: {
   statusText?: string;
   reason?: string;
   message?: string;
-  purpose?: "answer" | "extraction";
+  purpose?: "answer" | AiGatewayCompletionPurpose;
 }) {
-  console.warn(details.purpose === "extraction" ? "AI Gateway extraction failed" : "AI Gateway answer generation failed", {
+  console.warn(details.purpose === "extraction" || details.purpose === "evaluation" ? `AI Gateway ${details.purpose} failed` : "AI Gateway answer generation failed", {
     errorCode: details.errorCode,
     latencyMs: details.latencyMs,
     model: details.model,

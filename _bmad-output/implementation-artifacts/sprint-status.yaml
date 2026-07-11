@@ -113,7 +113,7 @@ development_status:
   6-2-family-aware-driving-and-stop-recommendations: done
   6-3-family-aware-activities-and-suitability-notes: done
   6-4-capture-answer-usefulness-feedback: done
-  6-5-run-public-mvp-answer-evaluation-prompt-set: backlog
+  6-5-run-public-mvp-answer-evaluation-prompt-set: done
   6-6-public-mvp-quality-dashboard: backlog
   epic-6-retrospective: optional
 

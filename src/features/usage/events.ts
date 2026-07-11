@@ -7,6 +7,7 @@ import { estimateAiUsageCost, type AiGatewayPricingSnapshot } from "@/features/a
 export const aiUsagePurposes = {
   aiAskInitialAnswer: "ai_ask_initial_answer",
   extraction: "extraction",
+  evaluation: "evaluation",
   webSearchFallback: "web_search_fallback",
 } as const;
 
@@ -15,6 +16,7 @@ export const aiUsagePromptVersions = {
   chatContextExtraction: "chat_context_extraction_v3",
   sourceKnowledgeDraftExtraction: "source_knowledge_draft_extraction_v1",
   sourceKnowledgeSuggestion: "source_knowledge_suggestion_v1",
+  publicMvpAnswerEvaluation: "public_mvp_answer_evaluation_v1",
   webSearchFallback: "web_search_fallback_v1",
 } as const;
 
@@ -54,6 +56,7 @@ export type WriteAiUsageEventInput = {
 };
 
 export async function writeAiUsageEvent(db: UsageEventDb, input: WriteAiUsageEventInput) {
+  const id = crypto.randomUUID();
   const tokens = normalizeUsageTokens(input);
   const cost = estimateAiUsageCost(input.pricingSnapshot, {
     promptTokens: tokens.promptTokens,
@@ -63,6 +66,7 @@ export async function writeAiUsageEvent(db: UsageEventDb, input: WriteAiUsageEve
   });
 
   await db.insert(aiUsageEvents).values({
+    id,
     userId: input.userId,
     conversationId: input.conversationId ?? null,
     userMessageId: input.userMessageId ?? null,
@@ -94,6 +98,8 @@ export async function writeAiUsageEvent(db: UsageEventDb, input: WriteAiUsageEve
     pricingEffectiveAt: cost.pricingEffectiveAt,
     errorCode: input.errorCode ?? null,
   });
+
+  return id;
 }
 
 function normalizeUsageTokens(input: WriteAiUsageEventInput) {
