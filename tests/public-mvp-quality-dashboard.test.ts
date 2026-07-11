@@ -55,6 +55,7 @@ async function seedEvaluationResult({
   createdAt = new Date(),
   flags = {},
   withRetrieval = true,
+  provenanceUsed = true,
 }: {
   userId: string;
   promptType: PublicMvpEvaluationPromptType;
@@ -62,6 +63,7 @@ async function seedEvaluationResult({
   createdAt?: Date;
   flags?: Partial<{ unsupportedClaim: boolean; missingUncertainty: boolean; noBetterThanGeneric: boolean }>;
   withRetrieval?: boolean;
+  provenanceUsed?: boolean;
 }) {
   const [promptSet] = await testDb
     .insert(publicMvpEvaluationPromptSets)
@@ -98,9 +100,9 @@ async function seedEvaluationResult({
   const [knowledgeProvenance] = await testDb
     .insert(assistantResponseProvenance)
     .values([
-      { userId, conversationId: answer.conversation.id, userMessageId: answer.userMessage.id, assistantMessageId: answer.assistantMessage.id, sourceCategory: "knowledge", rank: 1, sourceType: "knowledge_card", verificationStatus: "verified", sourceSnapshot: { title: "safe metadata" } },
-      { userId, conversationId: answer.conversation.id, userMessageId: answer.userMessage.id, assistantMessageId: answer.assistantMessage.id, sourceCategory: "web", rank: 2, sourceType: "web_search", verificationStatus: "unverified", sourceSnapshot: { title: "safe web metadata" } },
-      { userId, conversationId: answer.conversation.id, userMessageId: answer.userMessage.id, assistantMessageId: answer.assistantMessage.id, sourceCategory: "chat_context", rank: 3, sourceType: "chat_context", verificationStatus: "verified", sourceSnapshot: { field: "children" } },
+      { userId, conversationId: answer.conversation.id, userMessageId: answer.userMessage.id, assistantMessageId: answer.assistantMessage.id, sourceCategory: "knowledge", rank: 1, sourceType: "knowledge_card", verificationStatus: "verified", usedInPrompt: provenanceUsed, citedInAnswer: false, sourceSnapshot: { title: "safe metadata" } },
+      { userId, conversationId: answer.conversation.id, userMessageId: answer.userMessage.id, assistantMessageId: answer.assistantMessage.id, sourceCategory: "web", rank: 2, sourceType: "web_search", verificationStatus: "unverified", usedInPrompt: provenanceUsed, citedInAnswer: false, sourceSnapshot: { title: "safe web metadata" } },
+      { userId, conversationId: answer.conversation.id, userMessageId: answer.userMessage.id, assistantMessageId: answer.assistantMessage.id, sourceCategory: "chat_context", rank: 3, sourceType: "chat_context", verificationStatus: "verified", usedInPrompt: provenanceUsed, citedInAnswer: false, sourceSnapshot: { field: "children" } },
     ])
     .returning();
   const [result] = await testDb
@@ -154,6 +156,22 @@ async function seedFeedbackForAssistantMessage(userId: string, conversationId: s
   });
 }
 
+async function seedFeedbackForAssistantMessages(userId: string, results: Array<{ conversationId: string; assistantMessageId: string | null }>, usefulCount: number) {
+  for (const [index, result] of results.entries()) {
+    if (!result.assistantMessageId) {
+      continue;
+    }
+
+    await testDb.insert(answerUsefulnessFeedback).values({
+      userId,
+      conversationId: result.conversationId,
+      assistantMessageId: result.assistantMessageId,
+      rating: index < usefulCount ? "useful" : "not_useful",
+      comment: index === 0 ? "Feedback magic-moment." : null,
+    });
+  }
+}
+
 describe("public MVP quality dashboard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -189,6 +207,7 @@ describe("public MVP quality dashboard", () => {
     expect(dashboard.evaluation.averageScore).toBeCloseTo(7.3, 1);
     expect(dashboard.evaluation.counterMetrics).toEqual({ unsupportedClaims: 1, missingUncertainty: 1, noBetterThanGeneric: 1 });
     expect(dashboard.readiness.status).toBe("not_ready");
+    expect(dashboard.readiness.missingSignals).toContain("Cần thêm 10 phản hồi usefulness cho magic-moment.");
     expect(dashboard.readiness.missingSignals).toContain("Cần thêm 7 kết quả eval được chấm điểm đầy đủ.");
     expect(dashboard.recentResults[0].retrieval.available).toBe(true);
     expect(dashboard.recentResults[0].provenance.knowledge).toBe(true);
@@ -248,8 +267,46 @@ describe("public MVP quality dashboard", () => {
     if (!dashboard.success) return;
     expect(dashboard.feedback.total).toBe(0);
     expect(dashboard.readiness.status).toBe("not_ready");
-    expect(dashboard.readiness.missingSignals).toContain("Cần thêm 10 phản hồi usefulness.");
+    expect(dashboard.readiness.missingSignals).toContain("Cần thêm 10 phản hồi usefulness cho magic-moment.");
     expect(dashboard.recentResults[0].retrieval.available).toBe(false);
     expect(dashboard.recentResults[0].likelyIssues).toContain("retrieval_decision_unavailable");
+  });
+
+  test("requires magic-moment-linked feedback for readiness instead of global feedback", async () => {
+    await createUser("admin", ["admin"]);
+    await mockSession("admin", ["admin"]);
+    await seedFeedback("admin", 10, 10);
+    const magicMomentResults = [];
+
+    for (let index = 0; index < 10; index += 1) {
+      magicMomentResults.push(await seedEvaluationResult({ userId: "admin", promptType: "magic_moment_family_trip", score: 8 }));
+    }
+
+    await seedFeedbackForAssistantMessages("admin", magicMomentResults, 7);
+    const { getPublicMvpQualityDashboard } = await import("@/features/feedback/quality-dashboard");
+
+    const withoutLinkedFeedback = await getPublicMvpQualityDashboard({ db: testDb, range: "all", promptType: "route_logistics" });
+    const withLinkedFeedback = await getPublicMvpQualityDashboard({ db: testDb, range: "all" });
+
+    expect(withoutLinkedFeedback.success ? withoutLinkedFeedback.readiness.status : null).toBe("not_ready");
+    expect(withoutLinkedFeedback.success ? withoutLinkedFeedback.readiness.missingSignals : []).toContain("Cần thêm 10 phản hồi usefulness cho magic-moment.");
+    expect(withLinkedFeedback.success ? withLinkedFeedback.readiness.status : null).toBe("ready");
+  });
+
+  test("does not report provenance categories that were stored but not used or cited", async () => {
+    await createUser("admin", ["admin"]);
+    await mockSession("admin", ["admin"]);
+    await seedEvaluationResult({ userId: "admin", promptType: "service_activity", score: 6, flags: { unsupportedClaim: true }, provenanceUsed: false });
+    const { getPublicMvpQualityDashboard } = await import("@/features/feedback/quality-dashboard");
+
+    const dashboard = await getPublicMvpQualityDashboard({ db: testDb, range: "all" });
+
+    expect(dashboard.success).toBe(true);
+    if (!dashboard.success) return;
+    expect(dashboard.recentResults[0].provenance.knowledge).toBe(false);
+    expect(dashboard.recentResults[0].provenance.web).toBe(false);
+    expect(dashboard.recentResults[0].provenance.chat_context).toBe(false);
+    expect(dashboard.recentResults[0].likelyIssues).toContain("unsupported_without_source_signal");
+    expect(dashboard.recentResults[0].likelyIssues).toContain("provenance_unavailable");
   });
 });

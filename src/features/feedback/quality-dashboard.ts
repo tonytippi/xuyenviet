@@ -150,7 +150,7 @@ export async function getPublicMvpQualityDashboard(input: PublicMvpQualityDashbo
   const feedback = summarizeFeedback(feedbackRows);
   const evaluation = summarizeEvaluation(resultRows, scoreRows);
   const recentResults = await buildRecentResults({ db, resultRows: resultRows.slice(0, 10), scoreRows });
-  const readiness = buildReadiness({ feedback, resultRows, scoreRows });
+  const readiness = buildReadiness({ magicMomentFeedback: summarizeFeedback(filterFeedbackRowsForMagicMoment(feedbackRows, resultRows)), resultRows, scoreRows });
 
   return { success: true, filters, feedback, evaluation, readiness, recentResults };
 }
@@ -171,6 +171,20 @@ function filterFeedbackRowsForPrompt({
   const evaluatedAssistantMessageIds = new Set(resultRows.map((row) => row.assistantMessageId).filter((id): id is string => Boolean(id)));
 
   return feedbackRows.filter((row) => evaluatedAssistantMessageIds.has(row.assistantMessageId));
+}
+
+function filterFeedbackRowsForMagicMoment(
+  feedbackRows: Array<{ assistantMessageId: string; rating: string; comment: string | null }>,
+  resultRows: Array<{ assistantMessageId: string | null; promptType: PublicMvpEvaluationPromptType }>,
+) {
+  const magicMomentAssistantMessageIds = new Set(
+    resultRows
+      .filter((row) => row.promptType === "magic_moment_family_trip")
+      .map((row) => row.assistantMessageId)
+      .filter((id): id is string => Boolean(id)),
+  );
+
+  return feedbackRows.filter((row) => magicMomentAssistantMessageIds.has(row.assistantMessageId));
 }
 
 function normalizeFilters(input: PublicMvpQualityDashboardInput): PublicMvpQualityDashboard["filters"] {
@@ -256,7 +270,7 @@ async function buildRecentResults({
       : Promise.resolve([]),
     assistantMessageIds.length > 0
       ? db
-          .select({ assistantMessageId: assistantResponseProvenance.assistantMessageId, sourceCategory: assistantResponseProvenance.sourceCategory })
+          .select({ assistantMessageId: assistantResponseProvenance.assistantMessageId, sourceCategory: assistantResponseProvenance.sourceCategory, usedInPrompt: assistantResponseProvenance.usedInPrompt, citedInAnswer: assistantResponseProvenance.citedInAnswer })
           .from(assistantResponseProvenance)
           .where(inArray(assistantResponseProvenance.assistantMessageId, assistantMessageIds))
       : Promise.resolve([]),
@@ -265,6 +279,10 @@ async function buildRecentResults({
   const provenanceByAssistantMessageId = new Map<string, Set<AssistantProvenanceSourceCategory>>();
 
   for (const row of provenanceRows) {
+    if (!row.usedInPrompt && !row.citedInAnswer) {
+      continue;
+    }
+
     const categories = provenanceByAssistantMessageId.get(row.assistantMessageId) ?? new Set<AssistantProvenanceSourceCategory>();
     categories.add(row.sourceCategory);
     provenanceByAssistantMessageId.set(row.assistantMessageId, categories);
@@ -340,11 +358,11 @@ function buildLikelyIssues({
 }
 
 function buildReadiness({
-  feedback,
+  magicMomentFeedback,
   resultRows,
   scoreRows,
 }: {
-  feedback: PublicMvpQualityDashboard["feedback"];
+  magicMomentFeedback: PublicMvpQualityDashboard["feedback"];
   resultRows: Array<{ id: string; promptType: PublicMvpEvaluationPromptType; status: string; noBetterThanGenericFlag: boolean }>;
   scoreRows: Array<{ resultId: string; dimension: PublicMvpEvaluationScoreDimension; score: number }>;
 }): PublicMvpQualityDashboard["readiness"] {
@@ -362,12 +380,15 @@ function buildReadiness({
   const checks = [
     {
       key: "usefulness_feedback_sample",
-      label: "Tối thiểu 10 phản hồi usefulness, ít nhất 7 useful",
-      passed: feedback.total >= 10 && feedback.useful >= 7,
-      current: feedback.useful,
+      label: "Tối thiểu 10 phản hồi usefulness cho magic-moment, ít nhất 7 useful",
+      passed: magicMomentFeedback.total >= 10 && magicMomentFeedback.useful >= 7,
+      current: magicMomentFeedback.useful,
       target: 7,
-      missing: Math.max(0, 10 - feedback.total),
-      message: feedback.total >= 10 ? `${feedback.useful}/${feedback.total} phản hồi useful.` : `Cần thêm ${Math.max(0, 10 - feedback.total)} phản hồi usefulness.`,
+      missing: Math.max(0, 10 - magicMomentFeedback.total, 7 - magicMomentFeedback.useful),
+      message:
+        magicMomentFeedback.total >= 10
+          ? `${magicMomentFeedback.useful}/${magicMomentFeedback.total} phản hồi magic-moment useful.`
+          : `Cần thêm ${Math.max(0, 10 - magicMomentFeedback.total)} phản hồi usefulness cho magic-moment.`,
     },
     {
       key: "magic_moment_scored",
