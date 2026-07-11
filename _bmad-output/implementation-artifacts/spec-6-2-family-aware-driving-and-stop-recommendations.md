@@ -82,6 +82,9 @@ warnings: []
   - `[medium]` `[patch]` The minimal source-bundle cap could clip the closing context marker after adding family guidance; fixed minimal fallback budgeting so the general-reasoning line and `END_CONTEXT_PRIORITY_SOURCE_BUNDLE` survive clipping, with regression coverage.
   - `[medium]` `[patch]` Numeric `0` inside ordinary family notes was treated as no-child context, which could incorrectly remove family guidance from long capped prompts; fixed negative-family detection so numeric zero is only handled by the `children` field path.
 
+### 2026-07-11 — Code review rerun findings
+- [x] [Review][Patch] Zero-count family wording in non-`children` fields can still trigger family-driving guidance [src/features/retrieval/source-bundle.ts:622]
+
 ## Verification
 
 **Commands:**
@@ -98,6 +101,9 @@ warnings: []
 - Review rerun: `pnpm test:run tests/answer-context.test.ts tests/ai-usage-events.test.ts` -- passed, 53 tests.
 - Review rerun: `pnpm typecheck` -- passed.
 - Review rerun: `pnpm lint` -- passed.
+- Code review rerun patch: `pnpm test:run tests/answer-context.test.ts tests/ai-usage-events.test.ts` -- passed, 54 tests.
+- Code review rerun patch: `pnpm typecheck` -- passed.
+- Code review rerun patch: `pnpm lint` -- passed.
 
 ## Dev Agent Record
 

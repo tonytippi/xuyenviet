@@ -703,6 +703,20 @@ describe("answer context assembly", () => {
     expect(section).not.toContain("Hướng dẫn gia đình");
   });
 
+  test("source bundle prompt treats zero-count family wording in notes as no-children context", async () => {
+    const { buildSourceBundlePromptSection } = await import("@/features/retrieval/source-bundle");
+
+    const section = buildSourceBundlePromptSection(createSourceBundle({
+      chatTripContext: {
+        tripProjectFacts: [{ field: "children_ages", value: "5 và 8 tuổi", source: "trip_project" }],
+        chatFacts: [{ field: "notes", value: "0 trẻ em đi cùng chuyến này", source: "conversation" }],
+        conflicts: [],
+      },
+    }));
+
+    expect(section).not.toContain("Hướng dẫn gia đình");
+  });
+
   test("source bundle prompt ignores negated family wording in either order", async () => {
     const { buildSourceBundlePromptSection } = await import("@/features/retrieval/source-bundle");
 

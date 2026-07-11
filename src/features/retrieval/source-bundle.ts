@@ -630,7 +630,14 @@ function isNoChildrenFact(fact: AnswerContextFact) {
     return true;
   }
 
-  return isNegativeFamilyValue(normalizedValue);
+  return isZeroCountFamilyValue(normalizedValue) || isNegativeFamilyValue(normalizedValue);
+}
+
+function isZeroCountFamilyValue(normalizedValue: string) {
+  const familyTerm = "(?:tre|tre em|con|be|em be|children|kids?)";
+
+  return new RegExp(`\\b0\\b.{0,12}\\b${familyTerm}\\b`).test(normalizedValue)
+    || new RegExp(`\\b${familyTerm}\\b.{0,12}\\b0\\b`).test(normalizedValue);
 }
 
 function isNegativeFamilyValue(normalizedValue: string) {
