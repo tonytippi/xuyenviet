@@ -94,3 +94,6 @@
 - source_spec: `spec-ui-5-mobile-sidebar-and-detail-drawers.md`
   summary: Add browser interaction coverage for mobile sidebar/detail drawers when a DOM or E2E harness exists.
   evidence: UI.5 has static/source assertions and server-render checks, but Tab cycling, Escape, focus restoration, scroll-lock cleanup, and admin/non-admin mobile drawer visibility are best verified with a browser-capable test harness rather than brittle source assertions.
+- source_spec: `spec-6-6-public-mvp-quality-dashboard.md`
+  summary: Add PII-aware redaction or classification for admin-visible usefulness feedback comments.
+  evidence: Story 6.6 truncates and restricts comments to admin/operator dashboard access, but user-entered comments can still contain traveler PII or child details. A future privacy hardening pass should classify or redact sensitive patterns before comments appear in quality reporting.
