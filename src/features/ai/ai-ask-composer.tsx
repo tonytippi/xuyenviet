@@ -6,6 +6,8 @@ import { useActionState, useEffect, useRef, useState, type ChangeEvent, type For
 
 import { ConversationList, type ChatSessionSummary } from "@/features/chat-trips/conversation-list";
 import { formatTripProjectLabel } from "@/features/chat-trips/labels";
+import { answerUsefulnessCommentMaxLength, type AnswerUsefulnessFeedbackSummary } from "@/features/feedback/types";
+import type { AnswerUsefulnessRating } from "@/db/schema";
 import type { AssistantMessageProvenanceItem } from "@/features/retrieval/provenance";
 
 const maxQuestionLength = 2_000;
@@ -24,6 +26,7 @@ type DisplayMessage = {
     byteSize: number;
   }>;
   provenance?: AssistantMessageProvenanceItem[];
+  feedback?: AnswerUsefulnessFeedbackSummary | null;
 };
 
 export type AnswerEntityDescriptor = {
@@ -56,6 +59,7 @@ type CreateTripProjectAction = (
 
 type DeleteConversationAction = (conversationId: string) => Promise<{ success: boolean; error?: string; reason?: "not_found" }>;
 type DeleteTripProjectAction = (tripProjectId: string) => Promise<{ success: boolean; error?: string; reason?: "not_found" }>;
+type SaveAnswerUsefulnessFeedbackAction = (input: { assistantMessageId: string; rating: AnswerUsefulnessRating; comment?: string | null }) => Promise<{ success: boolean; feedback?: AnswerUsefulnessFeedbackSummary; reason?: "unauthenticated" | "not_found" | "invalid_target" | "invalid_rating" | "comment_too_long" | "failed" }>;
 
 const emptyMessages: DisplayMessage[] = [];
 const emptySessions: ChatSessionSummary[] = [];
@@ -92,7 +96,86 @@ type AiAskComposerProps = {
   createTripProjectAction?: CreateTripProjectAction;
   deleteConversationAction?: DeleteConversationAction;
   deleteTripProjectAction?: DeleteTripProjectAction;
+  saveAnswerUsefulnessFeedbackAction?: SaveAnswerUsefulnessFeedbackAction;
 };
+
+function AnswerUsefulnessFeedbackControl({
+  messageId,
+  feedback,
+  pending,
+  onSubmit,
+}: {
+  messageId: string;
+  feedback?: AnswerUsefulnessFeedbackSummary | null;
+  pending: boolean;
+  onSubmit: (messageId: string, rating: AnswerUsefulnessRating, comment?: string | null) => void;
+}) {
+  const [comment, setComment] = useState(feedback?.comment ?? "");
+  const selectedRating = feedback?.rating;
+
+  useEffect(() => {
+    setComment(feedback?.comment ?? "");
+  }, [feedback?.comment, messageId]);
+
+  return (
+    <section className="mt-4 rounded-2xl border border-[#d8c9ad] bg-white/70 p-4" aria-label="Đánh giá độ hữu ích của câu trả lời">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 className="text-sm font-bold uppercase tracking-[0.12em] text-[#1f5f46]">Câu trả lời này hữu ích không?</h3>
+          <p className="mt-1 text-sm leading-6 text-[#4f625a]">Đánh giá là tuỳ chọn và không ảnh hưởng việc tiếp tục chat hoặc mở nguồn.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            aria-pressed={selectedRating === "useful"}
+            className="min-h-11 rounded-xl border border-[#8fb59f] bg-[#edf7f0] px-3 py-2 text-sm font-semibold text-[#17342c] transition hover:bg-white focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45 disabled:cursor-not-allowed disabled:opacity-60 aria-pressed:bg-[#1f5f46] aria-pressed:text-white"
+            disabled={pending}
+            onClick={() => onSubmit(messageId, "useful", comment)}
+            type="button"
+          >
+            Hữu ích
+          </button>
+          <button
+            aria-pressed={selectedRating === "not_useful"}
+            className="min-h-11 rounded-xl border border-[#d8c9ad] bg-[#fff8ec] px-3 py-2 text-sm font-semibold text-[#17342c] transition hover:bg-white focus:outline-none focus:ring-4 focus:ring-[#e5bd82] disabled:cursor-not-allowed disabled:opacity-60 aria-pressed:bg-[#8c4f13] aria-pressed:text-white"
+            disabled={pending}
+            onClick={() => onSubmit(messageId, "not_useful", comment)}
+            type="button"
+          >
+            Chưa hữu ích
+          </button>
+        </div>
+      </div>
+      {selectedRating ? (
+        <div className="mt-3">
+          <label className="text-sm font-semibold text-[#17342c]" htmlFor={`answer-feedback-comment-${messageId}`}>
+            Ghi chú ngắn tuỳ chọn
+          </label>
+          <textarea
+            className="mt-2 min-h-20 w-full resize-y rounded-xl border border-[#d8c9ad] bg-[#fffdf8] px-3 py-2 text-sm leading-6 text-[#17342c] outline-none transition focus:border-[#1f5f46] focus:ring-4 focus:ring-[#8fb59f]/45"
+            disabled={pending}
+            id={`answer-feedback-comment-${messageId}`}
+            maxLength={answerUsefulnessCommentMaxLength + 1}
+            onChange={(event) => setComment(event.target.value)}
+            placeholder="Ví dụ: thiếu thời gian di chuyển thực tế, hoặc gợi ý rất đúng nhu cầu gia đình."
+            value={comment}
+          />
+          <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs leading-5 text-[#6b7c75]">Tối đa {answerUsefulnessCommentMaxLength} ký tự. Không nhập thông tin nhạy cảm của trẻ em hoặc giấy tờ cá nhân.</p>
+            <button
+              className="min-h-10 rounded-xl border border-[#d8c9ad] bg-white/80 px-3 py-2 text-sm font-semibold text-[#17342c] transition hover:bg-white focus:outline-none focus:ring-4 focus:ring-[#e5bd82] disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={pending}
+              onClick={() => onSubmit(messageId, selectedRating, comment)}
+              type="button"
+            >
+              Lưu ghi chú
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {pending ? <p className="mt-2 text-sm font-semibold text-[#4f625a]">Đang lưu đánh giá...</p> : null}
+    </section>
+  );
+}
 
 function getUnansweredUserMessageIds(messages: DisplayMessage[]) {
   const unansweredIds: string[] = [];
@@ -315,6 +398,7 @@ export function AiAskComposer({
   createTripProjectAction,
   deleteConversationAction,
   deleteTripProjectAction,
+  saveAnswerUsefulnessFeedbackAction,
 }: AiAskComposerProps) {
   const router = useRouter();
   const activeTripProjectId = selectedTripProject?.id;
@@ -334,6 +418,7 @@ export function AiAskComposer({
   const [isSessionSheetOpen, setSessionSheetOpen] = useState(false);
   const [deletingConversationId, setDeletingConversationId] = useState<string | null>(null);
   const [deletingTripProjectId, setDeletingTripProjectId] = useState<string | null>(null);
+  const [feedbackPendingMessageId, setFeedbackPendingMessageId] = useState<string | null>(null);
   const [selectedAnswerEntity, setSelectedAnswerEntity] = useState<AnswerEntityDescriptor | null>(null);
   const [isDesktopViewport, setIsDesktopViewport] = useState(false);
   const [createProjectState, createProjectFormAction, isCreatingProject] = useActionState<CreateTripProjectFormState | undefined, FormData>(
@@ -813,6 +898,45 @@ export function AiAskComposer({
     }
   }
 
+  async function handleSubmitFeedback(messageId: string, rating: AnswerUsefulnessRating, comment?: string | null) {
+    if (!saveAnswerUsefulnessFeedbackAction || feedbackPendingMessageId) {
+      if (feedbackPendingMessageId && feedbackPendingMessageId !== messageId) {
+        setStatus("Vui lòng chờ đánh giá hiện tại lưu xong trước khi đánh giá câu trả lời khác.");
+      }
+      return;
+    }
+
+    if ((comment?.trim().length ?? 0) > answerUsefulnessCommentMaxLength) {
+      setStatus(`Ghi chú đánh giá tối đa ${answerUsefulnessCommentMaxLength} ký tự. Hãy rút gọn trước khi lưu.`);
+      return;
+    }
+
+    setFeedbackPendingMessageId(messageId);
+    setStatus("Đang lưu đánh giá câu trả lời...");
+
+    try {
+      const result = await saveAnswerUsefulnessFeedbackAction({ assistantMessageId: messageId, rating, comment });
+
+      if (!result.success || !result.feedback) {
+        if (result.reason === "comment_too_long") {
+          setStatus(`Ghi chú đánh giá tối đa ${answerUsefulnessCommentMaxLength} ký tự. Hãy rút gọn trước khi lưu.`);
+        } else {
+          setStatus("Không thể lưu đánh giá cho câu trả lời này. Vui lòng thử lại.");
+        }
+        return;
+      }
+
+      setMessages((currentMessages) => currentMessages.map((message) => (
+        message.id === messageId && message.role === "assistant" ? { ...message, feedback: result.feedback } : message
+      )));
+      setStatus("Đã lưu đánh giá câu trả lời. Bạn vẫn có thể tiếp tục chat hoặc mở nguồn.");
+    } catch {
+      setStatus("Không thể lưu đánh giá cho câu trả lời này. Vui lòng thử lại.");
+    } finally {
+      setFeedbackPendingMessageId(null);
+    }
+  }
+
   function handleNewChat() {
     if (isPending) {
       setStatus("Vui lòng chờ câu trả lời hiện tại hoàn tất trước khi mở cuộc trò chuyện mới.");
@@ -1103,6 +1227,14 @@ export function AiAskComposer({
                     <>
                       <AssistantMessageContent content={message.content} />
                       <AssistantProvenanceBlock provenance={message.provenance} selectedEntityId={selectedAnswerEntityId} detailPanelIds={answerDetailPanelIds} onSelectEntity={handleSelectAnswerEntity} />
+                      {saveAnswerUsefulnessFeedbackAction ? (
+                        <AnswerUsefulnessFeedbackControl
+                          feedback={message.feedback}
+                          messageId={message.id}
+                          onSubmit={handleSubmitFeedback}
+                          pending={feedbackPendingMessageId === message.id}
+                        />
+                      ) : null}
                     </>
                   ) : <p className="whitespace-pre-wrap text-base leading-7">{message.content}</p>}
                   {message.role === "user" && message.imageAttachments && message.imageAttachments.length > 0 ? (

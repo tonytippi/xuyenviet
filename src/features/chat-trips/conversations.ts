@@ -3,7 +3,7 @@ import "server-only";
 import { and, asc, desc, eq, isNull } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { aiUsageEvents, assistantResponseProvenance, chatContext, conversations, messageImageAttachments, messages } from "@/db/schema";
+import { aiUsageEvents, answerUsefulnessFeedback, assistantResponseProvenance, chatContext, conversations, messageImageAttachments, messages } from "@/db/schema";
 import { recordAuditEvent } from "@/features/audit/events";
 import { formatAssistantMessageProvenance } from "@/features/retrieval/provenance";
 import { getAuthenticatedSession } from "@/server/auth";
@@ -87,12 +87,26 @@ export async function getOwnedConversation(conversationId: string) {
     provenanceByMessageId.set(assistantMessageId, [...(provenanceByMessageId.get(assistantMessageId) ?? []), ...formatAssistantMessageProvenance([provenanceRow])]);
   }
 
+  const feedbackRows = await getDb()
+    .select({
+      assistantMessageId: answerUsefulnessFeedback.assistantMessageId,
+      rating: answerUsefulnessFeedback.rating,
+      comment: answerUsefulnessFeedback.comment,
+      updatedAt: answerUsefulnessFeedback.updatedAt,
+    })
+    .from(answerUsefulnessFeedback)
+    .where(and(eq(answerUsefulnessFeedback.conversationId, conversation.id), eq(answerUsefulnessFeedback.userId, session.userId)))
+    .orderBy(asc(answerUsefulnessFeedback.assistantMessageId));
+
+  const feedbackByMessageId = new Map(feedbackRows.map((row) => [row.assistantMessageId, { rating: row.rating, comment: row.comment, updatedAt: row.updatedAt }]));
+
   return {
     ...conversation,
     messages: conversationMessages.map((message) => ({
       ...message,
       imageAttachments: attachmentsByMessageId.get(message.id) ?? [],
       provenance: message.role === "assistant" ? provenanceByMessageId.get(message.id) ?? [] : [],
+      feedback: message.role === "assistant" ? feedbackByMessageId.get(message.id) ?? null : null,
     })),
   };
 }

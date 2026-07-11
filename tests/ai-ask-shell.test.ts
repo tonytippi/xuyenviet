@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { asc, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { aiGatewayModels, aiUsageEvents, assistantResponseProvenance, assistantRetrievalDecisions, conversations, messageImageAttachments, messages, tripProjects, users } from "@/db/schema";
+import { aiGatewayModels, aiUsageEvents, answerUsefulnessFeedback, assistantResponseProvenance, assistantRetrievalDecisions, conversations, messageImageAttachments, messages, tripProjects, users } from "@/db/schema";
 import type { AnswerEntityDescriptor } from "@/features/ai/ai-ask-composer";
 
 import { testDb } from "./helpers/db";
@@ -133,6 +133,29 @@ describe("AI Ask authenticated shell", () => {
     expect(html).toContain("không tự tạo thông tin chi tiết từ nội dung trả lời");
     expect(html).not.toContain("Bảng chi tiết đã chọn");
     expect(html).not.toContain("source-chip");
+  });
+
+  test("renders assistant answer usefulness feedback controls and persisted state", async () => {
+    await createTestUser("user-1");
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
+    await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "user", content: "Hà Nội đi Huế 5 ngày." });
+    const [assistantMessage] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "assistant", content: "Kế hoạch gợi ý:\nNên chia chặng." }).returning({ id: messages.id });
+    await testDb.insert(answerUsefulnessFeedback).values({
+      userId: "user-1",
+      conversationId: conversation.id,
+      assistantMessageId: assistantMessage.id,
+      rating: "useful",
+      comment: "Đúng nhu cầu gia đình.",
+    });
+
+    const html = await renderAuthenticatedAiAskShell({ conversationId: conversation.id });
+
+    expect(html).toContain("Câu trả lời này hữu ích không?");
+    expect(html).toContain("Đánh giá là tuỳ chọn và không ảnh hưởng việc tiếp tục chat hoặc mở nguồn.");
+    expect(html).toContain("Hữu ích");
+    expect(html).toContain("Chưa hữu ích");
+    expect(html).toContain("Đúng nhu cầu gia đình.");
+    expect(html).toContain('aria-pressed="true"');
   });
 
   test("keeps the right context panel hidden for an empty existing conversation", async () => {

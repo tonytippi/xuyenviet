@@ -6,6 +6,7 @@ import { normalizePublicAskDraft } from "@/features/auth/redirects";
 import { getOwnedConversation, listOwnedConversations } from "@/features/chat-trips/conversations";
 import { createTripProjectFromForm, deleteConversationAction, deleteTripProjectAction } from "@/features/chat-trips/actions";
 import { getOwnedTripProjectSummary, listOwnedTripProjects } from "@/features/chat-trips/trip-projects";
+import { saveAnswerUsefulnessFeedbackAction } from "@/features/feedback/actions";
 import { getAuthenticatedSessionWithRoles, hasAdminAccess } from "@/server/auth";
 
 type AiAskPageProps = {
@@ -116,6 +117,7 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
                 byteSize: attachment.byteSize,
               })),
               provenance: message.provenance,
+              feedback: message.feedback,
             }))}
             initialSessions={initialSessions}
             initialTripProjects={initialTripProjects}
@@ -125,6 +127,7 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
             createTripProjectAction={createTripProjectFromForm}
             deleteConversationAction={deleteConversationAction}
             deleteTripProjectAction={deleteTripProjectAction}
+            saveAnswerUsefulnessFeedbackAction={saveAnswerUsefulnessFeedbackAction}
           />
         </div>
       </section>

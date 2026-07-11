@@ -66,6 +66,9 @@ export type AssistantProvenanceSourceCategory = (typeof assistantProvenanceSourc
 export const assistantProvenanceVerificationStatusValues = ["unverified", "verified"] as const;
 export type AssistantProvenanceVerificationStatus = (typeof assistantProvenanceVerificationStatusValues)[number];
 
+export const answerUsefulnessRatingValues = ["useful", "not_useful"] as const;
+export type AnswerUsefulnessRating = (typeof answerUsefulnessRatingValues)[number];
+
 export const knowledgeSuggestionActionValues = ["create", "update", "conflict", "duplicate", "no_action"] as const;
 export type KnowledgeSuggestionAction = (typeof knowledgeSuggestionActionValues)[number];
 
@@ -390,6 +393,7 @@ export const messages = pgTable(
     }).onDelete("cascade"),
     uniqueIndex("messages_id_user_id_idx").on(message.id, message.userId),
     uniqueIndex("messages_id_conversation_id_user_id_idx").on(message.id, message.conversationId, message.userId),
+    uniqueIndex("messages_id_conversation_id_user_id_role_unique").on(message.id, message.conversationId, message.userId, message.role),
     index("messages_conversation_id_created_at_idx").on(message.conversationId, message.createdAt),
     index("messages_user_id_created_at_idx").on(message.userId, message.createdAt),
     check("messages_role_check", sql`${message.role} in ('user', 'assistant')`),
@@ -977,6 +981,43 @@ export const assistantResponseProvenance = pgTable(
   ],
 );
 
+export const answerUsefulnessFeedback = pgTable(
+  "answer_usefulness_feedback",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    conversationId: text("conversation_id").notNull(),
+    assistantMessageId: text("assistant_message_id").notNull(),
+    assistantMessageRole: text("assistant_message_role").$type<MessageRole>().default("assistant").notNull(),
+    rating: text("rating").$type<AnswerUsefulnessRating>().notNull(),
+    comment: text("comment"),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (feedback) => [
+    foreignKey({
+      columns: [feedback.conversationId, feedback.userId],
+      foreignColumns: [conversations.id, conversations.userId],
+      name: "answer_usefulness_feedback_conversation_owner_fk",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [feedback.assistantMessageId, feedback.conversationId, feedback.userId, feedback.assistantMessageRole],
+      foreignColumns: [messages.id, messages.conversationId, messages.userId, messages.role],
+      name: "answer_usefulness_feedback_assistant_message_owner_fk",
+    }).onDelete("cascade"),
+    uniqueIndex("answer_usefulness_feedback_assistant_user_idx").on(feedback.assistantMessageId, feedback.userId),
+    index("answer_usefulness_feedback_conversation_created_at_idx").on(feedback.conversationId, feedback.createdAt),
+    index("answer_usefulness_feedback_user_id_created_at_idx").on(feedback.userId, feedback.createdAt),
+    check("answer_usefulness_feedback_rating_check", sql`${feedback.rating} in ('useful', 'not_useful')`),
+    check("answer_usefulness_feedback_assistant_role_check", sql`${feedback.assistantMessageRole} = 'assistant'`),
+    check("answer_usefulness_feedback_comment_length_check", sql`${feedback.comment} is null or length(btrim(${feedback.comment})) between 1 and 500`),
+  ],
+);
+
 export const schema = {
   users,
   accounts,
@@ -1004,4 +1045,5 @@ export const schema = {
   webSearchResults,
   assistantRetrievalDecisions,
   assistantResponseProvenance,
+  answerUsefulnessFeedback,
 };
