@@ -493,7 +493,7 @@ function buildMinimalSourceBundlePromptSection(
   appendWebSection(lines, web, warnings);
   lines.push("5. Suy luận tổng quát: chỉ dùng sau các nguồn trên; phải nói rõ khi câu trả lời chỉ là gợi ý tổng quát.");
   lines.push("END_CONTEXT_PRIORITY_SOURCE_BUNDLE");
-  return lines.join("\n");
+  return clip(lines.join("\n"), maxSourceBundleSectionLength);
 }
 
 function appendRetrievalDecisionSection(lines: string[], decision: RetrievalDecision) {
@@ -580,7 +580,9 @@ function appendConflictSection(lines: string[], conflicts: AnswerContextDigest["
 }
 
 function appendFamilyGuidance(lines: string[], chatTripContext: ContextPrioritySourceBundle["chatTripContext"]) {
-  const familyFacts = [...chatTripContext.tripProjectFacts, ...chatTripContext.chatFacts].filter(isPositiveFamilyFact);
+  const facts = [...chatTripContext.tripProjectFacts, ...chatTripContext.chatFacts];
+  const hasNoChildrenFact = facts.some(isNoChildrenFact);
+  const familyFacts = facts.filter((fact) => isPositiveFamilyFact(fact, hasNoChildrenFact));
 
   if (familyFacts.length === 0) {
     return;
@@ -593,10 +595,10 @@ function appendFamilyGuidance(lines: string[], chatTripContext: ContextPriorityS
   lines.push("Hướng dẫn gia đình: vì ngữ cảnh có trẻ em, hãy điều chỉnh kế hoạch bằng Tiếng Việt với chặng lái ngắn hơn, điểm nghỉ/ăn/vệ sinh hợp lý, hoạt động thân thiện với trẻ, cảnh báo điểm có thể mệt/không phù hợp, phương án dự phòng và chỉ hỏi 1-3 câu tiếp theo ngắn khi còn thiếu tuổi hoặc nhu cầu quan trọng.");
 }
 
-function isPositiveFamilyFact(fact: AnswerContextFact) {
+function isPositiveFamilyFact(fact: AnswerContextFact, hasNoChildrenFact: boolean) {
   const normalizedValue = normalizeForMatch(fact.value);
 
-  if (/\b(?:0|khong co|khong di cung|khong mang theo|no|none|without)\b.*\b(?:tre|con|be|children|kids?)\b/.test(normalizedValue)) {
+  if (isNegativeFamilyValue(normalizedValue)) {
     return false;
   }
 
@@ -605,11 +607,29 @@ function isPositiveFamilyFact(fact: AnswerContextFact) {
   }
 
   if (fact.field === "children_ages") {
-    return true;
+    return !hasNoChildrenFact && !/^\s*0\s*$/.test(fact.value.trim()) && !/\b(?:khong ro|chua ro|unknown|none|n\/a|na)\b/.test(normalizedValue);
   }
 
   return ["driving_tolerance", "activity_preferences", "itinerary_constraints", "hotel_style", "food_preferences", "notes"].includes(fact.field)
     && /\b(?:tre|tre em|con|be|em be|gia dinh|children|kids?|family)\b/.test(normalizedValue);
+}
+
+function isNoChildrenFact(fact: AnswerContextFact) {
+  const normalizedValue = normalizeForMatch(fact.value);
+
+  if (fact.field === "children" && (/^\s*0\s*$/.test(fact.value.trim()) || /\b(?:khong co|khong di cung|khong mang theo|no|none|without)\b/.test(normalizedValue))) {
+    return true;
+  }
+
+  return isNegativeFamilyValue(normalizedValue);
+}
+
+function isNegativeFamilyValue(normalizedValue: string) {
+  const negation = "(?:0|khong co|khong can|khong di cung|khong mang theo|khong co tre em|no|none|without|not joining|not coming|not traveling)";
+  const familyTerm = "(?:tre|tre em|con|be|em be|children|kids?|family|gia dinh)";
+
+  return new RegExp(`\\b${negation}\\b.{0,40}\\b${familyTerm}\\b`).test(normalizedValue)
+    || new RegExp(`\\b${familyTerm}\\b.{0,40}\\b${negation}\\b`).test(normalizedValue);
 }
 
 function appendKnowledgeSection(lines: string[], knowledge: KnowledgeSearchResult[]) {

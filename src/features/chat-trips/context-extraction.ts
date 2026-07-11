@@ -33,7 +33,7 @@ const sensitivePatterns = [
   /\b(?:dị ứng|tiểu đường|huyết áp|bệnh|medical|medicine|thuốc)\b/i,
   /\b(?:địa chỉ nhà|home address|street address)\b/i,
 ];
-const childNamePattern = /\b(?:con|bé|trẻ|child|kid)\s+(?:(?:tên|named|name is)\s+)?[A-ZÀ-Ỹ][\p{L}]{1,30}(?:\s+[A-ZÀ-Ỹ][\p{L}]{1,30}){0,2}(?:\s+(?:\d{1,2}\s*tuổi|years? old|yo))?\b/iu;
+const childNamePattern = /\b(?:con|bé|trẻ|child|kid)\s+(?:(?:tôi|mình|của tôi|của mình|cua toi|cua minh)\s+)?(?:(?:tên|named|name is)\s+)?[\p{L}]{2,30}(?:\s+[\p{L}]{2,30}){0,2}(?:\s+(?:\d{1,2}\s*tuổi|years? old|yo))?\b/iu;
 const unrelatedPersonalPatterns = [
   /\b(?:vợ|chồng|bạn gái|bạn trai|wife|husband|girlfriend|boyfriend)\s+(?:[A-ZÀ-Ỹ][\p{L}]{1,30}(?:\s+[A-ZÀ-Ỹ][\p{L}]{1,30})?|(?:tên|named|name is)\s+[^,.\n]{2,80})/iu,
   /\b(?:làm ở|works at|company|công ty)\s+[^,.\n]{2,80}/i,

@@ -373,6 +373,8 @@ describe("chat/trip context extraction", () => {
       { field: "children", value: "1", scope: "conversation", confidence: 95 },
       { field: "children_ages", value: "7 tuổi", scope: "conversation", confidence: 90 },
       { field: "notes", value: "bé Minh 7 tuổi", scope: "conversation", confidence: 80 },
+      { field: "notes", value: "bé minh 7 tuổi", scope: "conversation", confidence: 80 },
+      { field: "notes", value: "con tôi tên An 8 tuổi", scope: "conversation", confidence: 80 },
       { field: "notes", value: "trẻ bị dị ứng hải sản", scope: "conversation", confidence: 80 },
       { field: "notes", value: "CCCD của con là 012345678901", scope: "conversation", confidence: 80 },
       { field: "food_preferences", value: "ưu tiên món đơn giản, ít cay", scope: "conversation", confidence: 75 },

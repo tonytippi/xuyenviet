@@ -69,6 +69,23 @@ warnings: []
 
 ## Review Triage Log
 
+### 2026-07-11 — Code review rerun
+- decision_needed: 0
+- patch: 5: (high 2, medium 3, low 0)
+- defer: 0
+- dismissed: 3
+- review_findings:
+  - [x] [Review][Patch] Child-name sensitive filtering misses lowercase names [src/features/chat-trips/context-extraction.ts:36] — `childNamePattern` now matches lowercase child-name phrases such as `bé minh 7 tuổi`, with regression coverage.
+  - [x] [Review][Patch] Child-name sensitive filtering misses common pronoun phrasing [src/features/chat-trips/context-extraction.ts:36] — `childNamePattern` now allows common pronoun/possessive tokens before a child name marker, with regression coverage for `con tôi tên An 8 tuổi`.
+  - [x] [Review][Patch] Stale or negative `children_ages` facts always trigger family guidance [src/features/retrieval/source-bundle.ts:607] — family guidance now suppresses child-age facts when an explicit no-children fact exists and rejects unknown/negative child-age values.
+  - [x] [Review][Patch] Negative family wording is only detected when negation precedes the child term [src/features/retrieval/source-bundle.ts:599] — negative family detection now handles negation before or after child/family terms, with regression coverage.
+  - [x] [Review][Patch] Minimal source-bundle fallback can exceed the prompt-size guard after appending family facts [src/features/retrieval/source-bundle.ts:465] — minimal source-bundle output now applies a final `maxSourceBundleSectionLength` cap, with regression coverage.
+
+Applied verification:
+- `pnpm test:run tests/chat-trip-context-extraction.test.ts tests/answer-context.test.ts tests/ai-usage-events.test.ts` -- passed, 70 tests.
+- `pnpm typecheck` -- passed.
+- `pnpm lint` -- passed.
+
 ### 2026-07-11 — Review pass
 - intent_gap: 0
 - bad_spec: 0

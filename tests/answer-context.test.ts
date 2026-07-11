@@ -672,6 +672,54 @@ describe("answer context assembly", () => {
     expect(section).not.toContain("Ngữ cảnh gia đình/trẻ em cần giữ khi trả lời");
   });
 
+  test("source bundle prompt suppresses stale child ages after an explicit no-children fact", async () => {
+    const { buildSourceBundlePromptSection } = await import("@/features/retrieval/source-bundle");
+
+    const section = buildSourceBundlePromptSection(createSourceBundle({
+      chatTripContext: {
+        tripProjectFacts: [{ field: "children_ages", value: "5 và 8 tuổi", source: "trip_project" }],
+        chatFacts: [{ field: "children", value: "0", source: "conversation" }],
+        conflicts: [],
+      },
+    }));
+
+    expect(section).not.toContain("Hướng dẫn gia đình");
+  });
+
+  test("source bundle prompt ignores negated family wording in either order", async () => {
+    const { buildSourceBundlePromptSection } = await import("@/features/retrieval/source-bundle");
+
+    const section = buildSourceBundlePromptSection(createSourceBundle({
+      chatTripContext: {
+        tripProjectFacts: [{ field: "notes", value: "trẻ em không đi cùng chuyến này", source: "trip_project" }],
+        chatFacts: [{ field: "activity_preferences", value: "không cần hoạt động cho trẻ", source: "conversation" }],
+        conflicts: [],
+      },
+    }));
+
+    expect(section).not.toContain("Hướng dẫn gia đình");
+  });
+
+  test("minimal source bundle keeps family guidance inside the prompt length cap", async () => {
+    const { buildSourceBundlePromptSection } = await import("@/features/retrieval/source-bundle");
+    const longFacts = Array.from({ length: 40 }, (_, index) => ({
+      field: "notes" as const,
+      value: `gia đình có trẻ em cần nhịp đi chậm ${index} ${"chi tiết ".repeat(80)}`,
+      source: "conversation" as const,
+    }));
+
+    const section = buildSourceBundlePromptSection(createSourceBundle({
+      chatTripContext: {
+        tripProjectFacts: longFacts,
+        chatFacts: longFacts,
+        conflicts: [],
+      },
+      knowledge: Array.from({ length: 20 }, (_, index) => makeKnowledgeResult(`k-${index}`, `${"Kiến thức dài ".repeat(40)} ${index}`)),
+    }));
+
+    expect(section.length).toBeLessThanOrEqual(5_000);
+  });
+
   test("web search fallback triggers when approved knowledge is missing", async () => {
     const { decideWebSearchFallback } = await import("@/features/retrieval/source-bundle");
 
