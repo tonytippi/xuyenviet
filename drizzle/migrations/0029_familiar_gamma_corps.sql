@@ -13,9 +13,9 @@ CREATE TABLE "answer_usefulness_feedback" (
 	CONSTRAINT "answer_usefulness_feedback_comment_length_check" CHECK ("answer_usefulness_feedback"."comment" is null or length(btrim("answer_usefulness_feedback"."comment")) between 1 and 500)
 );
 --> statement-breakpoint
-ALTER TABLE "messages" ADD CONSTRAINT "messages_id_conversation_id_user_id_role_unique" UNIQUE ("id","conversation_id","user_id","role");--> statement-breakpoint
 ALTER TABLE "answer_usefulness_feedback" ADD CONSTRAINT "answer_usefulness_feedback_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "answer_usefulness_feedback" ADD CONSTRAINT "answer_usefulness_feedback_conversation_owner_fk" FOREIGN KEY ("conversation_id","user_id") REFERENCES "public"."conversations"("id","user_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+CREATE UNIQUE INDEX "messages_id_conversation_id_user_id_role_unique" ON "messages" USING btree ("id","conversation_id","user_id","role");--> statement-breakpoint
 ALTER TABLE "answer_usefulness_feedback" ADD CONSTRAINT "answer_usefulness_feedback_assistant_message_owner_fk" FOREIGN KEY ("assistant_message_id","conversation_id","user_id","assistant_message_role") REFERENCES "public"."messages"("id","conversation_id","user_id","role") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE UNIQUE INDEX "answer_usefulness_feedback_assistant_user_idx" ON "answer_usefulness_feedback" USING btree ("assistant_message_id","user_id");--> statement-breakpoint
 CREATE INDEX "answer_usefulness_feedback_conversation_created_at_idx" ON "answer_usefulness_feedback" USING btree ("conversation_id","created_at");--> statement-breakpoint

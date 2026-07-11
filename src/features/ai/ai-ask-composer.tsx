@@ -6,7 +6,7 @@ import { useActionState, useEffect, useRef, useState, type ChangeEvent, type For
 
 import { ConversationList, type ChatSessionSummary } from "@/features/chat-trips/conversation-list";
 import { formatTripProjectLabel } from "@/features/chat-trips/labels";
-import { answerUsefulnessCommentMaxLength, type AnswerUsefulnessFeedbackSummary } from "@/features/feedback/types";
+import { answerUsefulnessCommentMaxLength, countAnswerUsefulnessCommentCharacters, type AnswerUsefulnessFeedbackSummary } from "@/features/feedback/types";
 import type { AnswerUsefulnessRating } from "@/db/schema";
 import type { AssistantMessageProvenanceItem } from "@/features/retrieval/provenance";
 
@@ -59,7 +59,7 @@ type CreateTripProjectAction = (
 
 type DeleteConversationAction = (conversationId: string) => Promise<{ success: boolean; error?: string; reason?: "not_found" }>;
 type DeleteTripProjectAction = (tripProjectId: string) => Promise<{ success: boolean; error?: string; reason?: "not_found" }>;
-type SaveAnswerUsefulnessFeedbackAction = (input: { assistantMessageId: string; rating: AnswerUsefulnessRating; comment?: string | null }) => Promise<{ success: boolean; feedback?: AnswerUsefulnessFeedbackSummary; reason?: "unauthenticated" | "not_found" | "invalid_target" | "invalid_rating" | "comment_too_long" | "failed" }>;
+type SaveAnswerUsefulnessFeedbackAction = (input: { assistantMessageId: string; rating: AnswerUsefulnessRating; comment?: string | null }) => Promise<{ success: boolean; feedback?: AnswerUsefulnessFeedbackSummary; reason?: "unauthenticated" | "not_found" | "invalid_target" | "invalid_input" | "invalid_rating" | "comment_too_long" | "failed" }>;
 
 const emptyMessages: DisplayMessage[] = [];
 const emptySessions: ChatSessionSummary[] = [];
@@ -154,7 +154,6 @@ function AnswerUsefulnessFeedbackControl({
             className="mt-2 min-h-20 w-full resize-y rounded-xl border border-[#d8c9ad] bg-[#fffdf8] px-3 py-2 text-sm leading-6 text-[#17342c] outline-none transition focus:border-[#1f5f46] focus:ring-4 focus:ring-[#8fb59f]/45"
             disabled={pending}
             id={`answer-feedback-comment-${messageId}`}
-            maxLength={answerUsefulnessCommentMaxLength + 1}
             onChange={(event) => setComment(event.target.value)}
             placeholder="Ví dụ: thiếu thời gian di chuyển thực tế, hoặc gợi ý rất đúng nhu cầu gia đình."
             value={comment}
@@ -906,7 +905,7 @@ export function AiAskComposer({
       return;
     }
 
-    if ((comment?.trim().length ?? 0) > answerUsefulnessCommentMaxLength) {
+    if (comment && countAnswerUsefulnessCommentCharacters(comment.trim()) > answerUsefulnessCommentMaxLength) {
       setStatus(`Ghi chú đánh giá tối đa ${answerUsefulnessCommentMaxLength} ký tự. Hãy rút gọn trước khi lưu.`);
       return;
     }

@@ -90,6 +90,14 @@ warnings: []
   - `[medium]` `[patch]` Added generated Drizzle migration snapshot/metadata by keeping `0029_familiar_gamma_corps.sql` and `meta/0029_snapshot.json`, avoiding inconsistent migration history.
   - `[medium]` `[patch]` Added DB-level assistant-role enforcement with `assistant_message_role`, a messages role composite uniqueness constraint, and an assistant-role FK/check guard, preventing direct SQL feedback on user messages.
   - `[low]` `[patch]` Added user-facing status when another feedback save is already pending, avoiding silently dropped clicks.
+  - `[medium]` `[patch]` Removed redundant unsnapshotted 0030 migration journal entry because 0029 already contains the generated assistant-role guard schema, preventing Drizzle metadata drift.
+  - `[medium]` `[patch]` Added runtime input-shape validation for feedback saves so malformed server-action payloads return `invalid_input` instead of throwing before typed error handling.
+  - `[low]` `[patch]` Aligned feedback comment length validation with PostgreSQL character semantics by counting Unicode code points rather than UTF-16 code units.
+
+### Review Findings
+- [x] [Review][Patch] Remove redundant unsnapshotted migration 0030 metadata [drizzle/migrations/meta/_journal.json:209]
+- [x] [Review][Patch] Validate malformed feedback action payloads before dereferencing fields [src/features/feedback/answer-usefulness.ts:32]
+- [x] [Review][Patch] Align comment length counting with PostgreSQL character semantics [src/features/feedback/answer-usefulness.ts:45]
 
 ## Verification
 
@@ -112,6 +120,11 @@ warnings: []
 - Review patch: `pnpm typecheck` -- passed.
 - Review patch: `pnpm lint` -- passed.
 - Review patch: `pnpm build` -- passed.
+- Follow-up review patch: `pnpm test:run tests/answer-usefulness-feedback.test.ts tests/ai-ask-shell.test.ts tests/ai-ask-sessions.test.ts` -- passed, 77 tests.
+- Follow-up review patch: `pnpm typecheck` -- passed.
+- Follow-up review patch: `pnpm lint` -- passed.
+- Follow-up review patch: `pnpm db:generate` -- passed with no schema changes after aligning the 0029 migration SQL with the generated snapshot.
+- Follow-up review patch: `pnpm build` -- passed.
 
 ## Dev Agent Record
 
@@ -129,7 +142,6 @@ warnings: []
 
 - `src/db/schema.ts`
 - `drizzle/migrations/0029_familiar_gamma_corps.sql`
-- `drizzle/migrations/0030_answer_feedback_role_guard_patch.sql`
 - `drizzle/migrations/meta/_journal.json`
 - `drizzle/migrations/meta/0029_snapshot.json`
 - `src/features/feedback/types.ts`

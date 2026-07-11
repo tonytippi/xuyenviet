@@ -3540,8 +3540,8 @@
           "method": "btree",
           "with": {}
         },
-        "messages_id_conversation_id_user_id_role_idx": {
-          "name": "messages_id_conversation_id_user_id_role_idx",
+        "messages_id_conversation_id_user_id_role_unique": {
+          "name": "messages_id_conversation_id_user_id_role_unique",
           "columns": [
             {
               "expression": "id",

@@ -69,6 +69,20 @@ describe("answer usefulness feedback", () => {
     expect(rows[0].comment).toBeNull();
   });
 
+  test("handles malformed payloads and counts comment length as characters", async () => {
+    await createTestUser("user-1");
+    const { assistantMessage } = await seedConversationMessages();
+    await mockSession("user-1");
+    const { saveAnswerUsefulnessFeedback } = await import("@/features/feedback/answer-usefulness");
+
+    const malformedResult = await saveAnswerUsefulnessFeedback({ assistantMessageId: assistantMessage.id, rating: "useful", comment: 123 });
+    const emojiResult = await saveAnswerUsefulnessFeedback({ assistantMessageId: assistantMessage.id, rating: "useful", comment: "😀".repeat(500) });
+
+    expect(malformedResult).toMatchObject({ success: false, reason: "invalid_input" });
+    expect(emojiResult.success).toBe(true);
+    expect(emojiResult.feedback?.comment).toBe("😀".repeat(500));
+  });
+
   test("does not write unauthenticated, cross-user, or user-message feedback", async () => {
     await createTestUser("user-1");
     await createTestUser("user-2");
