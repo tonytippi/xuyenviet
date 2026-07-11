@@ -601,7 +601,7 @@ function appendFamilyGuidance(lines: string[], chatTripContext: ContextPriorityS
   for (const fact of familyFacts.slice(0, maxFamilyFacts)) {
     lines.push(`- ${fact.field}: ${formatPromptValue(fact.value)}`);
   }
-  lines.push("Hướng dẫn gia đình: vì ngữ cảnh có trẻ em, hãy điều chỉnh kế hoạch lái xe bằng Tiếng Việt với chặng lái ngắn hơn, nhịp đi thực tế, điểm nghỉ chân, nghỉ vệ sinh và ăn uống hợp lý, cảnh báo các đoạn đường dài/mệt hoặc dễ quá sức, hoạt động thân thiện với trẻ, phương án dự phòng và chỉ hỏi 1-3 câu tiếp theo ngắn khi còn thiếu tuổi hoặc sức chịu lái xe quan trọng.");
+  lines.push("Hướng dẫn gia đình: vì ngữ cảnh có trẻ em, hãy điều chỉnh kế hoạch bằng Tiếng Việt với chặng lái ngắn hơn, nhịp đi thực tế, điểm nghỉ chân, nghỉ vệ sinh và ăn uống hợp lý, cảnh báo các đoạn đường dài/mệt hoặc dễ quá sức, hoạt động thân thiện với trẻ, ghi chú độ phù hợp theo tuổi/sở thích, cảnh báo hoạt động có thể nhàm chán, khó, mệt, rủi ro hoặc chưa hợp độ tuổi, cân bằng mục tiêu của phụ huynh với sức trẻ, gợi ý phương án ngắn hơn và phương án dự phòng. Chỉ hỏi 1-3 câu tiếp theo ngắn khi còn thiếu tuổi, sở thích, sức chịu lái xe hoặc khả năng vận động quan trọng. Nếu nhắc giảm giá trẻ em, giá vé, khuyến mãi, lịch hoạt động, giờ mở cửa hoặc tình trạng dịch vụ, phải dùng nguồn/độ tin cậy trong gói nguồn và thêm cảnh báo kiểm tra lại, không khẳng định chắc chắn khi chưa xác minh.");
 }
 
 function isPositiveFamilyFact(fact: AnswerContextFact, hasNoChildrenFact: boolean) {

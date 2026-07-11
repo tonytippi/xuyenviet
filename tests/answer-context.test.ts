@@ -625,8 +625,33 @@ describe("answer context assembly", () => {
     expect(section).toContain("ăn uống");
     expect(section).toContain("đoạn đường dài/mệt");
     expect(section).toContain("hoạt động thân thiện với trẻ");
+    expect(section).toContain("độ phù hợp theo tuổi/sở thích");
+    expect(section).toContain("nhàm chán, khó, mệt, rủi ro hoặc chưa hợp độ tuổi");
+    expect(section).toContain("cân bằng mục tiêu của phụ huynh với sức trẻ");
     expect(section).toContain("phương án dự phòng");
+    expect(section).toContain("giảm giá trẻ em");
+    expect(section).toContain("cảnh báo kiểm tra lại");
     expect(section).toContain("câu tiếp theo");
+  });
+
+  test("source bundle prompt adds family activity suitability guidance when family activity context exists", async () => {
+    const { buildSourceBundlePromptSection } = await import("@/features/retrieval/source-bundle");
+
+    const section = buildSourceBundlePromptSection(createSourceBundle({
+      chatTripContext: {
+        tripProjectFacts: [{ field: "children", value: "2", source: "trip_project" }],
+        chatFacts: [{ field: "activity_preferences", value: "ưu tiên điểm chơi nhẹ, có phương án trong nhà cho trẻ", source: "conversation" }],
+        conflicts: [],
+      },
+    }));
+
+    expect(section).toContain("Hướng dẫn gia đình");
+    expect(section).toContain("hoạt động thân thiện với trẻ");
+    expect(section).toContain("độ phù hợp theo tuổi/sở thích");
+    expect(section).toContain("nhàm chán, khó, mệt, rủi ro hoặc chưa hợp độ tuổi");
+    expect(section).toContain("phương án ngắn hơn");
+    expect(section).toContain("phương án dự phòng");
+    expect(section).toContain("tuổi, sở thích");
   });
 
   test("source bundle prompt omits family guidance when family context is absent", async () => {
@@ -642,6 +667,7 @@ describe("answer context assembly", () => {
 
     expect(section).not.toContain("Hướng dẫn gia đình");
     expect(section).not.toContain("hoạt động thân thiện với trẻ");
+    expect(section).not.toContain("độ phù hợp theo tuổi/sở thích");
   });
 
   test("source bundle prompt adds family guidance for family needs stored in existing non-child fields", async () => {
@@ -673,6 +699,7 @@ describe("answer context assembly", () => {
 
     expect(section).not.toContain("Hướng dẫn gia đình");
     expect(section).not.toContain("Ngữ cảnh gia đình/trẻ em cần giữ khi trả lời");
+    expect(section).not.toContain("độ phù hợp theo tuổi/sở thích");
   });
 
   test("source bundle prompt suppresses stale child ages after an explicit no-children fact", async () => {
@@ -755,6 +782,8 @@ describe("answer context assembly", () => {
     expect(section).toContain("nghỉ vệ sinh");
     expect(section).toContain("ăn uống");
     expect(section).toContain("đoạn đường dài/mệt");
+    expect(section).toContain("độ phù hợp theo tuổi/sở thích");
+    expect(section).toContain("phương án dự phòng");
     expect(section).toContain("END_CONTEXT_PRIORITY_SOURCE_BUNDLE");
   });
 
