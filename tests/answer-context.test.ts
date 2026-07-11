@@ -619,9 +619,12 @@ describe("answer context assembly", () => {
     expect(section).toContain("Ngữ cảnh gia đình/trẻ em cần giữ khi trả lời");
     expect(section).toContain('children_ages: "5 và 8 tuổi"');
     expect(section).toContain("chặng lái ngắn hơn");
-    expect(section).toContain("điểm nghỉ/ăn/vệ sinh");
+    expect(section).toContain("nhịp đi thực tế");
+    expect(section).toContain("điểm nghỉ chân");
+    expect(section).toContain("nghỉ vệ sinh");
+    expect(section).toContain("ăn uống");
+    expect(section).toContain("đoạn đường dài/mệt");
     expect(section).toContain("hoạt động thân thiện với trẻ");
-    expect(section).toContain("cảnh báo điểm có thể mệt/không phù hợp");
     expect(section).toContain("phương án dự phòng");
     expect(section).toContain("câu tiếp theo");
   });
@@ -686,6 +689,20 @@ describe("answer context assembly", () => {
     expect(section).not.toContain("Hướng dẫn gia đình");
   });
 
+  test("source bundle prompt suppresses stale child count after an explicit no-children note", async () => {
+    const { buildSourceBundlePromptSection } = await import("@/features/retrieval/source-bundle");
+
+    const section = buildSourceBundlePromptSection(createSourceBundle({
+      chatTripContext: {
+        tripProjectFacts: [{ field: "children", value: "2", source: "trip_project" }],
+        chatFacts: [{ field: "notes", value: "không đi cùng trẻ em chuyến này", source: "conversation" }],
+        conflicts: [],
+      },
+    }));
+
+    expect(section).not.toContain("Hướng dẫn gia đình");
+  });
+
   test("source bundle prompt ignores negated family wording in either order", async () => {
     const { buildSourceBundlePromptSection } = await import("@/features/retrieval/source-bundle");
 
@@ -718,6 +735,62 @@ describe("answer context assembly", () => {
     }));
 
     expect(section.length).toBeLessThanOrEqual(5_000);
+    expect(section).toContain("Hướng dẫn gia đình");
+    expect(section).toContain("chặng lái ngắn hơn");
+    expect(section).toContain("điểm nghỉ chân");
+    expect(section).toContain("nghỉ vệ sinh");
+    expect(section).toContain("ăn uống");
+    expect(section).toContain("đoạn đường dài/mệt");
+    expect(section).toContain("END_CONTEXT_PRIORITY_SOURCE_BUNDLE");
+  });
+
+  test("minimal source bundle preserves closing marker and freshness warning with family guidance", async () => {
+    const { buildSourceBundlePromptSection } = await import("@/features/retrieval/source-bundle");
+    const longFacts = Array.from({ length: 60 }, (_, index) => ({
+      field: "notes" as const,
+      value: `gia đình có trẻ em cần nhịp đi chậm ${index} ${"chi tiết ".repeat(120)}`,
+      source: "conversation" as const,
+    }));
+
+    const section = buildSourceBundlePromptSection(createSourceBundle({
+      chatTripContext: {
+        tripProjectFacts: longFacts,
+        chatFacts: longFacts,
+        conflicts: [],
+      },
+      knowledge: Array.from({ length: 30 }, (_, index) => makeKnowledgeResult(`k-${index}`, `${"Kiến thức dài ".repeat(80)} ${index}`)),
+      retrievalDecision: {
+        approvedKnowledgeCandidateCount: 0,
+        approvedKnowledgeSelectedCount: 0,
+        approvedKnowledgeTargetCount: 3,
+        approvedKnowledgeRelevanceThreshold: 1,
+        broadPlanningQuestion: false,
+        freshnessRequired: true,
+        conflictDetected: false,
+        webSearchTriggered: true,
+        webSearchTriggerReasons: ["freshness_sensitive_request"],
+        generalReasoningUsed: true,
+      },
+      web: [{
+        query: "điểm dừng gia đình",
+        title: "Điểm dừng có thể thay đổi giờ mở cửa",
+        url: "https://example.com/stop",
+        snippet: "Giờ mở cửa và dịch vụ có thể thay đổi.",
+        provider: "tavily",
+        providerScore: 0.7,
+        checkedAt: new Date("2026-07-09T10:00:00.000Z"),
+        sourceType: "official",
+        confidence: "unverified",
+        triggerReason: "freshness_sensitive_request",
+        rank: 1,
+      }],
+    }));
+
+    expect(section.length).toBeLessThanOrEqual(5_000);
+    expect(section).toContain("Hướng dẫn gia đình");
+    expect(section).toContain("Bắt buộc thêm cảnh báo xác minh");
+    expect(section).toContain("Nguồn web luôn là nguồn ngoài/chưa xác minh");
+    expect(section).toContain("END_CONTEXT_PRIORITY_SOURCE_BUNDLE");
   });
 
   test("web search fallback triggers when approved knowledge is missing", async () => {

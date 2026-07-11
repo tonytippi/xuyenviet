@@ -11,7 +11,7 @@ export const aiUsagePurposes = {
 } as const;
 
 export const aiUsagePromptVersions = {
-  aiAskInitialAnswer: "ai_ask_initial_v6",
+  aiAskInitialAnswer: "ai_ask_initial_v7",
   chatContextExtraction: "chat_context_extraction_v3",
   sourceKnowledgeDraftExtraction: "source_knowledge_draft_extraction_v1",
   sourceKnowledgeSuggestion: "source_knowledge_suggestion_v1",

@@ -108,9 +108,9 @@ development_status:
   ui-4-selectable-answer-entities-and-detail-panel: done
   ui-5-mobile-sidebar-and-detail-drawers: done
   epic-ui-retrospective: optional
-  epic-6: backlog
+  epic-6: in-progress
   6-1-detect-children-and-family-travel-needs: done
-  6-2-family-aware-driving-and-stop-recommendations: backlog
+  6-2-family-aware-driving-and-stop-recommendations: done
   6-3-family-aware-activities-and-suitability-notes: backlog
   6-4-capture-answer-usefulness-feedback: backlog
   6-5-run-public-mvp-answer-evaluation-prompt-set: backlog

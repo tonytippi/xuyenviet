@@ -488,12 +488,21 @@ function buildMinimalSourceBundlePromptSection(
 
   appendWarningSection(lines, warnings);
   if (chatTripContext) {
-    appendFamilyGuidance(lines, chatTripContext);
+    appendFamilyGuidance(lines, chatTripContext, 3);
   }
   appendWebSection(lines, web, warnings);
   lines.push("5. Suy luận tổng quát: chỉ dùng sau các nguồn trên; phải nói rõ khi câu trả lời chỉ là gợi ý tổng quát.");
   lines.push("END_CONTEXT_PRIORITY_SOURCE_BUNDLE");
-  return clip(lines.join("\n"), maxSourceBundleSectionLength);
+
+  let section = lines.join("\n");
+  if (section.length <= maxSourceBundleSectionLength) {
+    return section;
+  }
+
+  const footer = "\n5. Suy luận tổng quát: chỉ dùng sau các nguồn trên; phải nói rõ khi câu trả lời chỉ là gợi ý tổng quát.\nEND_CONTEXT_PRIORITY_SOURCE_BUNDLE";
+  const body = section.endsWith(footer) ? section.slice(0, -footer.length) : section;
+  section = `${clip(body, maxSourceBundleSectionLength - footer.length)}${footer}`;
+  return section.length <= maxSourceBundleSectionLength ? section : section.slice(0, maxSourceBundleSectionLength);
 }
 
 function appendRetrievalDecisionSection(lines: string[], decision: RetrievalDecision) {
@@ -579,20 +588,20 @@ function appendConflictSection(lines: string[], conflicts: AnswerContextDigest["
   }
 }
 
-function appendFamilyGuidance(lines: string[], chatTripContext: ContextPrioritySourceBundle["chatTripContext"]) {
+function appendFamilyGuidance(lines: string[], chatTripContext: ContextPrioritySourceBundle["chatTripContext"], maxFamilyFacts = maxContextFacts) {
   const facts = [...chatTripContext.tripProjectFacts, ...chatTripContext.chatFacts];
   const hasNoChildrenFact = facts.some(isNoChildrenFact);
   const familyFacts = facts.filter((fact) => isPositiveFamilyFact(fact, hasNoChildrenFact));
 
-  if (familyFacts.length === 0) {
+  if (hasNoChildrenFact || familyFacts.length === 0) {
     return;
   }
 
   lines.push("Ngữ cảnh gia đình/trẻ em cần giữ khi trả lời");
-  for (const fact of familyFacts.slice(0, maxContextFacts)) {
+  for (const fact of familyFacts.slice(0, maxFamilyFacts)) {
     lines.push(`- ${fact.field}: ${formatPromptValue(fact.value)}`);
   }
-  lines.push("Hướng dẫn gia đình: vì ngữ cảnh có trẻ em, hãy điều chỉnh kế hoạch bằng Tiếng Việt với chặng lái ngắn hơn, điểm nghỉ/ăn/vệ sinh hợp lý, hoạt động thân thiện với trẻ, cảnh báo điểm có thể mệt/không phù hợp, phương án dự phòng và chỉ hỏi 1-3 câu tiếp theo ngắn khi còn thiếu tuổi hoặc nhu cầu quan trọng.");
+  lines.push("Hướng dẫn gia đình: vì ngữ cảnh có trẻ em, hãy điều chỉnh kế hoạch lái xe bằng Tiếng Việt với chặng lái ngắn hơn, nhịp đi thực tế, điểm nghỉ chân, nghỉ vệ sinh và ăn uống hợp lý, cảnh báo các đoạn đường dài/mệt hoặc dễ quá sức, hoạt động thân thiện với trẻ, phương án dự phòng và chỉ hỏi 1-3 câu tiếp theo ngắn khi còn thiếu tuổi hoặc sức chịu lái xe quan trọng.");
 }
 
 function isPositiveFamilyFact(fact: AnswerContextFact, hasNoChildrenFact: boolean) {
@@ -603,7 +612,7 @@ function isPositiveFamilyFact(fact: AnswerContextFact, hasNoChildrenFact: boolea
   }
 
   if (fact.field === "children") {
-    return !/^\s*0\s*$/.test(fact.value.trim()) && !/\b(?:khong co|khong di cung|khong mang theo|no|none|without)\b/.test(normalizedValue);
+    return !hasNoChildrenFact && !/^\s*0\s*$/.test(fact.value.trim()) && !/\b(?:khong co|khong di cung|khong mang theo|no|none|without)\b/.test(normalizedValue);
   }
 
   if (fact.field === "children_ages") {
@@ -625,7 +634,7 @@ function isNoChildrenFact(fact: AnswerContextFact) {
 }
 
 function isNegativeFamilyValue(normalizedValue: string) {
-  const negation = "(?:0|khong co|khong can|khong di cung|khong mang theo|khong co tre em|no|none|without|not joining|not coming|not traveling)";
+  const negation = "(?:khong co|khong can|khong di cung|khong mang theo|khong co tre em|no|none|without|not joining|not coming|not traveling)";
   const familyTerm = "(?:tre|tre em|con|be|em be|children|kids?|family|gia dinh)";
 
   return new RegExp(`\\b${negation}\\b.{0,40}\\b${familyTerm}\\b`).test(normalizedValue)
