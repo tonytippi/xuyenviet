@@ -57,7 +57,7 @@ export type AiGatewayExtractionFailure = {
 
 export type AiGatewayExtractionResult = AiGatewaySuccess | AiGatewayExtractionFailure;
 
-export type AiGatewayCompletionPurpose = "extraction" | "evaluation";
+export type AiGatewayCompletionPurpose = "ai_ask" | "extraction" | "evaluation";
 
 export async function streamInitialAiAskAnswer({
   model,
@@ -171,6 +171,18 @@ export async function completeExtraction({
   abortSignal?: AbortSignal;
 }): Promise<AiGatewayExtractionResult> {
   return completeGatewayPrompt({ model, messages, abortSignal, purpose: "extraction", maxTokens: maxExtractionTokens });
+}
+
+export async function completeInitialAiAskAnswer({
+  model,
+  messages,
+  abortSignal,
+}: {
+  model: string;
+  messages: GatewayMessage[];
+  abortSignal?: AbortSignal;
+}): Promise<AiGatewayExtractionResult> {
+  return completeGatewayPrompt({ model, messages, abortSignal, purpose: "ai_ask", maxTokens: maxCompletionTokens });
 }
 
 export async function completeEvaluation({

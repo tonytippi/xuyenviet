@@ -11,6 +11,7 @@ import {
   type PublicMvpEvaluationPromptType,
   type PublicMvpEvaluationScoreDimension,
 } from "@/db/schema";
+import { generateEvaluationAiAskAnswer, type EvaluationAiAskAnswer } from "@/features/ai/evaluation-answer";
 import { completeEvaluation, type AiGatewayExtractionResult } from "@/features/ai/gateway";
 import { getAiGatewayPricingSnapshot, selectActiveAiGatewayModel, type SelectedAiGatewayModel } from "@/features/ai/models";
 import { aiUsagePromptVersions, aiUsagePurposes, writeAiUsageEvent } from "@/features/usage/events";
@@ -111,7 +112,8 @@ export type PublicMvpEvaluationResultSummary = {
 type EvaluationDependencies = {
   db?: ReturnType<typeof getDb>;
   selectModel?: typeof selectActiveAiGatewayModel;
-  scorer?: (input: { db: ReturnType<typeof getDb>; prompt: PublicMvpEvaluationPromptDefinition; model: SelectedAiGatewayModel; actorUserId: string }) => Promise<EvaluationScorerOutput>;
+  answerGenerator?: (input: { db: ReturnType<typeof getDb>; prompt: PublicMvpEvaluationPromptDefinition; actorUserId: string }) => Promise<{ ok: true; answer: EvaluationAiAskAnswer } | { ok: false; usageEventId: string | null }>;
+  scorer?: (input: { db: ReturnType<typeof getDb>; prompt: PublicMvpEvaluationPromptDefinition; model: SelectedAiGatewayModel; actorUserId: string; answer: EvaluationAiAskAnswer }) => Promise<EvaluationScorerOutput>;
 };
 
 type InvalidScorePayloadError = Error & { code: "invalid_score_payload" };
@@ -145,11 +147,12 @@ export async function runPublicMvpAnswerEvaluationPromptSet(dependencies: Evalua
     })
     .returning();
   const scorer = dependencies.scorer ?? scoreWithEvaluationModel;
+  const answerGenerator = dependencies.answerGenerator ?? ((input) => generateEvaluationAiAskAnswer({ db: input.db, userId: input.actorUserId, question: input.prompt.prompt }));
   const results: PublicMvpEvaluationResultSummary[] = [];
 
   try {
     for (const prompt of publicMvpEvaluationPrompts) {
-      const result = await runSinglePrompt({ db, runId: run.id, promptSet, prompt, model, scorer, actorUserId: session.userId });
+      const result = await runSinglePrompt({ db, runId: run.id, promptSet, prompt, model, scorer, answerGenerator, actorUserId: session.userId });
       results.push(result);
     }
   } finally {
@@ -202,6 +205,7 @@ async function runSinglePrompt({
   prompt,
   model,
   scorer,
+  answerGenerator,
   actorUserId,
 }: {
   db: ReturnType<typeof getDb>;
@@ -209,15 +213,22 @@ async function runSinglePrompt({
   promptSet: typeof publicMvpEvaluationPromptSets.$inferSelect;
   prompt: PublicMvpEvaluationPromptDefinition;
   model: SelectedAiGatewayModel;
-  scorer: (input: { db: ReturnType<typeof getDb>; prompt: PublicMvpEvaluationPromptDefinition; model: SelectedAiGatewayModel; actorUserId: string }) => Promise<EvaluationScorerOutput>;
+  scorer: (input: { db: ReturnType<typeof getDb>; prompt: PublicMvpEvaluationPromptDefinition; model: SelectedAiGatewayModel; actorUserId: string; answer: EvaluationAiAskAnswer }) => Promise<EvaluationScorerOutput>;
+  answerGenerator: NonNullable<EvaluationDependencies["answerGenerator"]>;
   actorUserId: string;
 }): Promise<PublicMvpEvaluationResultSummary> {
   try {
-    const output = await scorer({ db, prompt, model, actorUserId });
+    const generatedAnswer = await answerGenerator({ db, prompt, actorUserId });
+
+    if (!generatedAnswer.ok) {
+      return insertFailedResult({ db, runId, promptSet, prompt, model, safeErrorCode: "evaluator_failed", usageEventId: generatedAnswer.usageEventId });
+    }
+
+    const output = await scorer({ db, prompt, model, actorUserId, answer: generatedAnswer.answer });
     const validation = validateScorerOutput(output);
 
     if (!validation.valid) {
-      return insertFailedResult({ db, runId, promptSet, prompt, model, safeErrorCode: "invalid_score_payload" });
+      return insertFailedResult({ db, runId, promptSet, prompt, model, safeErrorCode: "invalid_score_payload", usageEventId: output.usageEventId ?? generatedAnswer.answer.usageEventId });
     }
 
     const result = await db.transaction(async (tx) => {
@@ -229,13 +240,16 @@ async function runSinglePrompt({
           promptSetVersion: promptSet.version,
           promptType: prompt.type,
           promptVersion: prompt.version,
-          modelVersion: model.gatewayModelName,
+          modelVersion: generatedAnswer.answer.modelVersion,
           status: "scored",
-          answerText: output.answerText.trim(),
+          answerText: generatedAnswer.answer.answerText.trim(),
           unsupportedClaimFlag: output.flags.unsupportedClaim,
           missingUncertaintyFlag: output.flags.missingUncertainty,
           noBetterThanGenericFlag: output.flags.noBetterThanGeneric,
-          usageEventId: output.usageEventId ?? null,
+          assistantMessageId: generatedAnswer.answer.assistantMessageId,
+          retrievalDecisionId: generatedAnswer.answer.retrievalDecisionId,
+          provenanceId: generatedAnswer.answer.provenanceId,
+          usageEventId: output.usageEventId ?? generatedAnswer.answer.usageEventId,
         })
         .returning();
 
@@ -252,7 +266,7 @@ async function runSinglePrompt({
 
     return summarizeResult(result.id, prompt, "scored", null, output.scores, output.flags);
   } catch (error) {
-    return insertFailedResult({ db, runId, promptSet, prompt, model, safeErrorCode: isInvalidScorePayloadError(error) ? "invalid_score_payload" : "evaluator_failed" });
+    return insertFailedResult({ db, runId, promptSet, prompt, model, safeErrorCode: isInvalidScorePayloadError(error) ? "invalid_score_payload" : "evaluator_failed", usageEventId: getUsageEventId(error) });
   }
 }
 
@@ -263,6 +277,7 @@ async function insertFailedResult({
   prompt,
   model,
   safeErrorCode,
+  usageEventId,
 }: {
   db: ReturnType<typeof getDb>;
   runId: string;
@@ -270,6 +285,7 @@ async function insertFailedResult({
   prompt: PublicMvpEvaluationPromptDefinition;
   model: SelectedAiGatewayModel;
   safeErrorCode: "evaluator_failed" | "invalid_score_payload";
+  usageEventId?: string | null;
 }) {
   const [result] = await db
     .insert(publicMvpEvaluationResults)
@@ -282,6 +298,7 @@ async function insertFailedResult({
       modelVersion: model.gatewayModelName,
       status: "failed",
       safeErrorCode,
+      usageEventId: usageEventId ?? null,
     })
     .returning();
 
@@ -289,6 +306,10 @@ async function insertFailedResult({
 }
 
 function validateScorerOutput(output: EvaluationScorerOutput) {
+  if (!isRecord(output) || !isRecord(output.scores) || !isRecord(output.flags)) {
+    return { valid: false };
+  }
+
   const answerText = typeof output.answerText === "string" ? output.answerText.trim() : "";
 
   if (!answerText || answerText.length > 12_000) {
@@ -310,26 +331,30 @@ function validateScorerOutput(output: EvaluationScorerOutput) {
   return { valid: true };
 }
 
-async function scoreWithEvaluationModel({ db, prompt, model, actorUserId }: { db: ReturnType<typeof getDb>; prompt: PublicMvpEvaluationPromptDefinition; model: SelectedAiGatewayModel; actorUserId: string }): Promise<EvaluationScorerOutput> {
+async function scoreWithEvaluationModel({ db, prompt, model, actorUserId, answer }: { db: ReturnType<typeof getDb>; prompt: PublicMvpEvaluationPromptDefinition; model: SelectedAiGatewayModel; actorUserId: string; answer: EvaluationAiAskAnswer }): Promise<EvaluationScorerOutput> {
   const gatewayResult = await completeEvaluation({
     model: model.gatewayModelName,
     messages: [
       {
         role: "system",
         content:
-          "You evaluate XuyenViet public MVP assistant quality. Return only JSON with answerText, scores, and flags. Scores are integers 1-10 for user_context_use, practical_specificity, source_grounding, uncertainty_handling, family_awareness, vietnamese_clarity. Flags are booleans unsupportedClaim, missingUncertainty, noBetterThanGeneric. Do not include raw source material or provider payloads.",
+          "You evaluate XuyenViet public MVP assistant quality. Score the provided assistant answer for the provided traveler prompt. Return only JSON with scores and flags. Scores are integers 1-10 for user_context_use, practical_specificity, source_grounding, uncertainty_handling, family_awareness, vietnamese_clarity. Flags are booleans unsupportedClaim, missingUncertainty, noBetterThanGeneric. Do not include raw source material or provider payloads.",
       },
-      { role: "user", content: prompt.prompt },
+      { role: "user", content: JSON.stringify({ traveler_prompt: prompt.prompt, assistant_answer: answer.answerText }) },
     ],
   });
 
   const usageEventId = await recordEvaluationUsage(db, model, gatewayResult, actorUserId);
 
   if (!gatewayResult.ok) {
-    throw new Error("Evaluation gateway failed.");
+    throwWithUsageEventId(new Error("Evaluation gateway failed."), usageEventId);
   }
 
-  return { ...parseScorerJson(gatewayResult.content), usageEventId };
+  try {
+    return { ...parseScorerJson(gatewayResult.content, answer.answerText), usageEventId };
+  } catch (error) {
+    throwWithUsageEventId(error, usageEventId);
+  }
 }
 
 async function recordEvaluationUsage(db: ReturnType<typeof getDb>, model: SelectedAiGatewayModel, gatewayResult: AiGatewayExtractionResult, actorUserId: string) {
@@ -352,10 +377,16 @@ async function recordEvaluationUsage(db: ReturnType<typeof getDb>, model: Select
   });
 }
 
-function parseScorerJson(content: string): EvaluationScorerOutput {
-  const parsed = JSON.parse(content) as unknown;
+function parseScorerJson(content: string, answerText: string): EvaluationScorerOutput {
+  let parsed: unknown;
 
-  if (!isRecord(parsed) || !isRecord(parsed.scores) || !isRecord(parsed.flags) || typeof parsed.answerText !== "string") {
+  try {
+    parsed = JSON.parse(content) as unknown;
+  } catch {
+    throwInvalidScorePayload();
+  }
+
+  if (!isRecord(parsed) || !isRecord(parsed.scores) || !isRecord(parsed.flags)) {
     throwInvalidScorePayload();
   }
 
@@ -363,7 +394,7 @@ function parseScorerJson(content: string): EvaluationScorerOutput {
   const flagPayload = parsed.flags;
 
   return {
-    answerText: parsed.answerText,
+    answerText,
     scores: Object.fromEntries(publicMvpEvaluationScoreDimensions.map((dimension) => [dimension, scorePayload[dimension]])) as EvaluationScores,
     flags: {
       unsupportedClaim: requireBooleanFlag(flagPayload.unsupportedClaim),
@@ -389,6 +420,21 @@ function throwInvalidScorePayload(): never {
 
 function isInvalidScorePayloadError(error: unknown): error is InvalidScorePayloadError {
   return isRecord(error) && error.code === "invalid_score_payload";
+}
+
+function throwWithUsageEventId(error: unknown, usageEventId: string): never {
+  if (isRecord(error)) {
+    error.usageEventId = usageEventId;
+    throw error;
+  }
+
+  const wrapped = new Error("Evaluation scorer failed.");
+  (wrapped as Error & { usageEventId?: string }).usageEventId = usageEventId;
+  throw wrapped;
+}
+
+function getUsageEventId(error: unknown) {
+  return isRecord(error) && typeof error.usageEventId === "string" ? error.usageEventId : null;
 }
 
 function summarizeResult(

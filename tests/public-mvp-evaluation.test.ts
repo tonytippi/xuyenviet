@@ -3,10 +3,14 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import {
   aiGatewayModels,
+  assistantRetrievalDecisions,
+  assistantResponseProvenance,
   publicMvpEvaluationPromptSets,
   publicMvpEvaluationResultScores,
   publicMvpEvaluationResults,
   publicMvpEvaluationRuns,
+  conversations,
+  messages,
   userRoles,
   users,
   type PublicMvpEvaluationScoreDimension,
@@ -68,6 +72,61 @@ function validScores(score = 8) {
   } satisfies Record<PublicMvpEvaluationScoreDimension, number>;
 }
 
+async function createPersistedEvaluationAnswer(userId: string, promptType: string) {
+  const [conversation] = await testDb.insert(conversations).values({ userId }).returning({ id: conversations.id });
+  const [userMessage] = await testDb.insert(messages).values({ conversationId: conversation.id, userId, role: "user", content: `Prompt ${promptType}` }).returning({ id: messages.id });
+  const [assistantMessage] = await testDb.insert(messages).values({ conversationId: conversation.id, userId, role: "assistant", content: `Câu trả lời AI Ask cho ${promptType}` }).returning({ id: messages.id });
+  const [decision] = await testDb
+    .insert(assistantRetrievalDecisions)
+    .values({
+      userId,
+      conversationId: conversation.id,
+      userMessageId: userMessage.id,
+      assistantMessageId: assistantMessage.id,
+      approvedKnowledgeCandidateCount: 0,
+      approvedKnowledgeSelectedCount: 0,
+      approvedKnowledgeTargetCount: 3,
+      approvedKnowledgeRelevanceThreshold: 1,
+      broadPlanningQuestion: true,
+      freshnessRequired: false,
+      conflictDetected: false,
+      webSearchTriggered: false,
+      webSearchTriggerReasons: [],
+      generalReasoningUsed: true,
+      warnings: [],
+    })
+    .returning({ id: assistantRetrievalDecisions.id });
+  const [provenance] = await testDb
+    .insert(assistantResponseProvenance)
+    .values({
+      userId,
+      conversationId: conversation.id,
+      userMessageId: userMessage.id,
+      assistantMessageId: assistantMessage.id,
+      sourceCategory: "general",
+      rank: 1,
+      sourceType: "general_reasoning",
+      verificationStatus: "unverified",
+      sourceSnapshot: { available: true },
+    })
+    .returning({ id: assistantResponseProvenance.id });
+
+  return {
+    answerText: `Câu trả lời AI Ask cho ${promptType}`,
+    conversationId: conversation.id,
+    userMessageId: userMessage.id,
+    assistantMessageId: assistantMessage.id,
+    retrievalDecisionId: decision.id,
+    provenanceId: provenance.id,
+    usageEventId: null,
+    modelVersion: "cx/ai-ask",
+  };
+}
+
+function answerGenerator(userId = "admin") {
+  return async ({ prompt }: { prompt: { type: string } }) => ({ ok: true as const, answer: await createPersistedEvaluationAnswer(userId, prompt.type) });
+}
+
 describe("public MVP answer evaluation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -119,6 +178,7 @@ describe("public MVP answer evaluation", () => {
 
     const result = await runPublicMvpAnswerEvaluationPromptSet({
       db: testDb,
+      answerGenerator: answerGenerator("admin"),
       scorer: async ({ prompt }) => ({
         answerText: `Câu trả lời an toàn cho ${prompt.type}`,
         scores: validScores(prompt.type === "magic_moment_family_trip" ? 9 : 8),
@@ -140,6 +200,9 @@ describe("public MVP answer evaluation", () => {
     expect(runs).toHaveLength(1);
     expect(rows.map((row) => row.promptType).sort()).toEqual([...publicMvpEvaluationPrompts.map((prompt) => prompt.type)].sort());
     expect(rows).toHaveLength(5);
+    expect(rows.every((row) => row.answerText?.startsWith("Câu trả lời AI Ask cho"))).toBe(true);
+    expect(rows.every((row) => row.modelVersion === "cx/ai-ask")).toBe(true);
+    expect(rows.every((row) => row.assistantMessageId && row.retrievalDecisionId && row.provenanceId)).toBe(true);
     expect(scores).toHaveLength(30);
     expect(scores.every((score) => Number.isInteger(score.score) && score.score >= 1 && score.score <= 10)).toBe(true);
     expect(rows.find((row) => row.promptType === "service_activity")?.unsupportedClaimFlag).toBe(true);
@@ -156,6 +219,7 @@ describe("public MVP answer evaluation", () => {
 
     const result = await runPublicMvpAnswerEvaluationPromptSet({
       db: testDb,
+      answerGenerator: answerGenerator("operator"),
       scorer: async ({ prompt }) => ({
         answerText: `Answer for ${prompt.type}`,
         scores: prompt.type === "magic_moment_family_trip" ? { ...validScores(), source_grounding: 11 } : validScores(),
@@ -179,6 +243,7 @@ describe("public MVP answer evaluation", () => {
 
     const result = await runPublicMvpAnswerEvaluationPromptSet({
       db: testDb,
+      answerGenerator: answerGenerator("admin"),
       scorer: async ({ prompt }) => ({
         answerText: `Answer for ${prompt.type}`,
         scores: validScores(),
@@ -202,5 +267,22 @@ describe("public MVP answer evaluation", () => {
         answerText: "Duplicate",
       }),
     ).rejects.toThrow();
+  });
+
+  test("stores structurally malformed scorer output as invalid score payload", async () => {
+    await createUser("operator", ["operator"]);
+    await createEvaluationModel();
+    await mockSession("operator", ["operator"]);
+    const { runPublicMvpAnswerEvaluationPromptSet } = await import("@/features/feedback/evaluation");
+
+    await runPublicMvpAnswerEvaluationPromptSet({
+      db: testDb,
+      answerGenerator: answerGenerator("operator"),
+      scorer: async () => ({ answerText: "Answer", scores: null, flags: null }) as never,
+    });
+    const rows = await testDb.select().from(publicMvpEvaluationResults);
+
+    expect(rows).toHaveLength(5);
+    expect(rows.every((row) => row.status === "failed" && row.safeErrorCode === "invalid_score_payload")).toBe(true);
   });
 });

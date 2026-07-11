@@ -3,6 +3,7 @@ import { after } from "next/server";
 
 import { getDb } from "@/db/client";
 import { conversations, messageImageAttachments, messages, tripProjects } from "@/db/schema";
+import { ensureAiAskFreshnessWarning } from "@/features/ai/answer-freshness";
 import { streamInitialAiAskAnswer } from "@/features/ai/gateway";
 import { getAiGatewayPricingSnapshot, selectActiveAiGatewayModel } from "@/features/ai/models";
 import { aiAskInitialAnswerPromptVersion, aiAskInitialAnswerPurpose, buildAiAskMessages } from "@/features/ai/prompts";
@@ -275,7 +276,7 @@ async function streamAnswer({
     }
 
     const savedTurn = saved;
-    const assistantContent = ensureFreshnessWarning(gatewayResult.content, sourceBundle);
+    const assistantContent = ensureAiAskFreshnessWarning(gatewayResult.content, sourceBundle);
     if (assistantContent.appendedWarning) {
       sendEvent(controller, encoder, { type: "delta", content: assistantContent.appendedWarning });
     }
@@ -398,30 +399,6 @@ async function streamAnswer({
       // The client may have already closed the stream.
     }
   }
-}
-
-function ensureFreshnessWarning(content: string, sourceBundle: Awaited<ReturnType<typeof assembleContextPrioritySourceBundle>>) {
-  const warningRequired = sourceBundle.retrievalDecision.freshnessRequired || sourceBundle.web.some((source) => isFreshnessSensitiveWebTrigger(source.triggerReason));
-
-  if (!warningRequired) {
-    return { content, appendedWarning: "" };
-  }
-
-  const normalizedContent = content.normalize("NFC");
-  const warningHeading = /cảnh báo cần kiểm tra/i.exec(normalizedContent);
-  const warningBody = warningHeading ? normalizedContent.slice(warningHeading.index + warningHeading[0].length) : "";
-  const hasActionableWarning = Boolean(warningHeading) && /(kiểm tra|xác minh|nguồn chính thức|nhà cung cấp)/i.test(warningBody);
-
-  if (hasActionableWarning) {
-    return { content, appendedWarning: "" };
-  }
-
-  const appendedWarning = "\n\nCảnh báo cần kiểm tra\nThông tin về giá, lịch, tình trạng còn chỗ, đường sá, giờ mở cửa, thời tiết, dịch vụ hoặc khuyến mãi có thể thay đổi. Hãy kiểm tra lại với nguồn chính thức hoặc nhà cung cấp trước khi đi, hành động hoặc đặt dịch vụ.";
-  return { content: `${content.trimEnd()}${appendedWarning}`, appendedWarning };
-}
-
-function isFreshnessSensitiveWebTrigger(reason: string) {
-  return reason === "freshness_sensitive_request" || reason === "approved_knowledge_may_be_stale";
 }
 
 function validateImageFileMetadata(image: File | null) {

@@ -96,6 +96,12 @@ warnings: []
   - `[medium]` `[patch]` Stored successful evaluation usage event IDs on evaluation results so cost/token/latency records are traceable from results.
   - `[low]` `[patch]` Normalized the redundant Drizzle-generated follow-up migration back into the uncommitted `0030_rare_peter_parker.sql` migration and confirmed no schema drift.
 
+### Review Findings
+- [x] [Review][Decision] Decide whether Story 6.5 must evaluate production AI Ask outputs instead of evaluator-generated answers — Resolved by extracting a reusable non-streaming AI Ask evaluation answer path that persists assistant messages, retrieval decisions, provenance, and usage links before scorer evaluation. Evidence: `src/features/ai/evaluation-answer.ts`, `src/features/feedback/evaluation.ts`.
+- [x] [Review][Patch] Preserve available failure usage links on failed evaluation results [src/features/feedback/evaluation.ts:326]
+- [x] [Review][Patch] Classify malformed scorer JSON as invalid_score_payload instead of evaluator_failed [src/features/feedback/evaluation.ts:355]
+- [x] [Review][Patch] Guard structurally malformed injected scorer outputs before dereferencing scores or flags [src/features/feedback/evaluation.ts:291]
+
 ## Design Notes
 
 For this story, a deterministic test scorer is acceptable behind dependency injection for automated tests, but production code must preserve the same persistence shape used by model-backed scoring. The dashboard is deliberately deferred to Story 6.6; this story only creates trustworthy stored signals and safe summaries.
@@ -130,6 +136,14 @@ For this story, a deterministic test scorer is acceptable behind dependency inje
 - Review patch: `pnpm typecheck` -- passed.
 - Review patch: `pnpm lint` -- passed.
 - Review patch: `pnpm build` -- passed.
+- Follow-up review patch: `pnpm test:run tests/public-mvp-evaluation.test.ts` -- passed, 7 tests.
+- Follow-up review patch: `pnpm typecheck` -- first run failed because the injected answer-generator signature and nullable test usage link fixture did not match the production type; fixed by adapting the default generator wrapper and allowing nullable answer usage links for injected/test paths.
+- Follow-up review patch: `pnpm typecheck` -- passed.
+- Follow-up review patch: `pnpm test:run tests/public-mvp-evaluation.test.ts tests/ai-usage-events.test.ts` -- first run failed because test answer fixtures returned fake usage IDs that violated the evaluation-result usage-event FK; fixed by making injected answer usage links nullable while production still returns real usage IDs.
+- Follow-up review patch: `pnpm test:run tests/public-mvp-evaluation.test.ts tests/ai-usage-events.test.ts` -- passed, 12 tests.
+- Follow-up review patch: `pnpm lint` -- passed.
+- Follow-up review patch: `pnpm build` -- passed.
+- Follow-up review patch: `pnpm db:generate` -- passed with no schema changes.
 
 ## Dev Agent Record
 
@@ -150,6 +164,8 @@ For this story, a deterministic test scorer is acceptable behind dependency inje
 - `drizzle/migrations/meta/0030_snapshot.json`
 - `src/features/feedback/evaluation.ts`
 - `src/features/feedback/evaluation-actions.ts`
+- `src/features/ai/answer-freshness.ts`
+- `src/features/ai/evaluation-answer.ts`
 - `src/features/ai/gateway.ts`
 - `src/features/usage/events.ts`
 - `tests/public-mvp-evaluation.test.ts`
