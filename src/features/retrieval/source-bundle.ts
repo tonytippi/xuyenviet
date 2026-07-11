@@ -422,6 +422,7 @@ export function buildSourceBundlePromptSection(bundle: ContextPrioritySourceBund
 
   appendFactSection(lines, "1. Ngữ cảnh dự án chuyến đi đã chọn", bundle.chatTripContext.tripProjectFacts);
   appendFactSection(lines, "2. Ngữ cảnh phiên chat hiện tại", bundle.chatTripContext.chatFacts);
+  appendFamilyGuidance(lines, bundle.chatTripContext);
   appendConflictSection(lines, bundle.chatTripContext.conflicts);
   appendKnowledgeSection(lines, bundle.knowledge);
   appendRetrievalDecisionSection(lines, bundle.retrievalDecision);
@@ -451,6 +452,7 @@ function buildCompactedSourceBundlePromptSection(bundle: ContextPrioritySourceBu
 
   appendFactSection(lines, "1. Ngữ cảnh dự án chuyến đi đã chọn", bundle.chatTripContext.tripProjectFacts.slice(0, 10));
   appendFactSection(lines, "2. Ngữ cảnh phiên chat hiện tại", bundle.chatTripContext.chatFacts.slice(0, 10));
+  appendFamilyGuidance(lines, bundle.chatTripContext);
   appendConflictSection(lines, bundle.chatTripContext.conflicts.slice(0, 10));
   appendKnowledgeSection(lines, bundle.knowledge.slice(0, 1));
   appendRetrievalDecisionSection(lines, bundle.retrievalDecision);
@@ -460,10 +462,17 @@ function buildCompactedSourceBundlePromptSection(bundle: ContextPrioritySourceBu
   lines.push("END_CONTEXT_PRIORITY_SOURCE_BUNDLE");
 
   const section = lines.join("\n");
-  return section.length <= maxSourceBundleSectionLength ? section : buildMinimalSourceBundlePromptSection(bundle.warnings, bundle.retrievalDecision, bundle.web.slice(0, 1));
+  return section.length <= maxSourceBundleSectionLength
+    ? section
+    : buildMinimalSourceBundlePromptSection(bundle.warnings, bundle.retrievalDecision, bundle.web.slice(0, 1), bundle.chatTripContext);
 }
 
-function buildMinimalSourceBundlePromptSection(warnings: SourceBundleWarning[], decision?: RetrievalDecision, web: NormalizedWebSearchResult[] = []) {
+function buildMinimalSourceBundlePromptSection(
+  warnings: SourceBundleWarning[],
+  decision?: RetrievalDecision,
+  web: NormalizedWebSearchResult[] = [],
+  chatTripContext?: ContextPrioritySourceBundle["chatTripContext"],
+) {
   const lines = [
     "Gói nguồn ưu tiên cho AI Ask",
     "BEGIN_CONTEXT_PRIORITY_SOURCE_BUNDLE",
@@ -478,6 +487,9 @@ function buildMinimalSourceBundlePromptSection(warnings: SourceBundleWarning[], 
   }
 
   appendWarningSection(lines, warnings);
+  if (chatTripContext) {
+    appendFamilyGuidance(lines, chatTripContext);
+  }
   appendWebSection(lines, web, warnings);
   lines.push("5. Suy luận tổng quát: chỉ dùng sau các nguồn trên; phải nói rõ khi câu trả lời chỉ là gợi ý tổng quát.");
   lines.push("END_CONTEXT_PRIORITY_SOURCE_BUNDLE");
@@ -565,6 +577,39 @@ function appendConflictSection(lines: string[], conflicts: AnswerContextDigest["
   for (const conflict of conflicts.slice(0, maxContextFacts)) {
     lines.push(`- ${conflict.field}: dự án=${formatPromptValue(conflict.projectValue)} | chat=${formatPromptValue(conflict.conversationValue)}`);
   }
+}
+
+function appendFamilyGuidance(lines: string[], chatTripContext: ContextPrioritySourceBundle["chatTripContext"]) {
+  const familyFacts = [...chatTripContext.tripProjectFacts, ...chatTripContext.chatFacts].filter(isPositiveFamilyFact);
+
+  if (familyFacts.length === 0) {
+    return;
+  }
+
+  lines.push("Ngữ cảnh gia đình/trẻ em cần giữ khi trả lời");
+  for (const fact of familyFacts.slice(0, maxContextFacts)) {
+    lines.push(`- ${fact.field}: ${formatPromptValue(fact.value)}`);
+  }
+  lines.push("Hướng dẫn gia đình: vì ngữ cảnh có trẻ em, hãy điều chỉnh kế hoạch bằng Tiếng Việt với chặng lái ngắn hơn, điểm nghỉ/ăn/vệ sinh hợp lý, hoạt động thân thiện với trẻ, cảnh báo điểm có thể mệt/không phù hợp, phương án dự phòng và chỉ hỏi 1-3 câu tiếp theo ngắn khi còn thiếu tuổi hoặc nhu cầu quan trọng.");
+}
+
+function isPositiveFamilyFact(fact: AnswerContextFact) {
+  const normalizedValue = normalizeForMatch(fact.value);
+
+  if (/\b(?:0|khong co|khong di cung|khong mang theo|no|none|without)\b.*\b(?:tre|con|be|children|kids?)\b/.test(normalizedValue)) {
+    return false;
+  }
+
+  if (fact.field === "children") {
+    return !/^\s*0\s*$/.test(fact.value.trim()) && !/\b(?:khong co|khong di cung|khong mang theo|no|none|without)\b/.test(normalizedValue);
+  }
+
+  if (fact.field === "children_ages") {
+    return true;
+  }
+
+  return ["driving_tolerance", "activity_preferences", "itinerary_constraints", "hotel_style", "food_preferences", "notes"].includes(fact.field)
+    && /\b(?:tre|tre em|con|be|em be|gia dinh|children|kids?|family)\b/.test(normalizedValue);
 }
 
 function appendKnowledgeSection(lines: string[], knowledge: KnowledgeSearchResult[]) {

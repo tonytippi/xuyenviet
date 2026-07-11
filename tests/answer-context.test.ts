@@ -604,6 +604,74 @@ describe("answer context assembly", () => {
     expect(section).toContain("END_CONTEXT_PRIORITY_SOURCE_BUNDLE");
   });
 
+  test("source bundle prompt adds family guidance when family context exists", async () => {
+    const { buildSourceBundlePromptSection } = await import("@/features/retrieval/source-bundle");
+
+    const section = buildSourceBundlePromptSection(createSourceBundle({
+      chatTripContext: {
+        tripProjectFacts: [{ field: "children_ages", value: "5 và 8 tuổi", source: "trip_project" }],
+        chatFacts: [{ field: "driving_tolerance", value: "mỗi chặng tối đa 2 giờ", source: "conversation" }],
+        conflicts: [],
+      },
+    }));
+
+    expect(section).toContain("Hướng dẫn gia đình");
+    expect(section).toContain("Ngữ cảnh gia đình/trẻ em cần giữ khi trả lời");
+    expect(section).toContain('children_ages: "5 và 8 tuổi"');
+    expect(section).toContain("chặng lái ngắn hơn");
+    expect(section).toContain("điểm nghỉ/ăn/vệ sinh");
+    expect(section).toContain("hoạt động thân thiện với trẻ");
+    expect(section).toContain("cảnh báo điểm có thể mệt/không phù hợp");
+    expect(section).toContain("phương án dự phòng");
+    expect(section).toContain("câu tiếp theo");
+  });
+
+  test("source bundle prompt omits family guidance when family context is absent", async () => {
+    const { buildSourceBundlePromptSection } = await import("@/features/retrieval/source-bundle");
+
+    const section = buildSourceBundlePromptSection(createSourceBundle({
+      chatTripContext: {
+        tripProjectFacts: [{ field: "destination", value: "Huế", source: "trip_project" }],
+        chatFacts: [{ field: "driving_tolerance", value: "mỗi ngày lái 4 giờ", source: "conversation" }],
+        conflicts: [],
+      },
+    }));
+
+    expect(section).not.toContain("Hướng dẫn gia đình");
+    expect(section).not.toContain("hoạt động thân thiện với trẻ");
+  });
+
+  test("source bundle prompt adds family guidance for family needs stored in existing non-child fields", async () => {
+    const { buildSourceBundlePromptSection } = await import("@/features/retrieval/source-bundle");
+
+    const section = buildSourceBundlePromptSection(createSourceBundle({
+      chatTripContext: {
+        tripProjectFacts: [{ field: "itinerary_constraints", value: "cần điểm dừng dễ ăn và vệ sinh sạch cho trẻ", source: "trip_project" }],
+        chatFacts: [{ field: "activity_preferences", value: "ưu tiên hoạt động nhẹ cho gia đình", source: "conversation" }],
+        conflicts: [],
+      },
+    }));
+
+    expect(section).toContain("Hướng dẫn gia đình");
+    expect(section).toContain('itinerary_constraints: "cần điểm dừng dễ ăn và vệ sinh sạch cho trẻ"');
+    expect(section).toContain('activity_preferences: "ưu tiên hoạt động nhẹ cho gia đình"');
+  });
+
+  test("source bundle prompt does not add family guidance when context says there are no children", async () => {
+    const { buildSourceBundlePromptSection } = await import("@/features/retrieval/source-bundle");
+
+    const section = buildSourceBundlePromptSection(createSourceBundle({
+      chatTripContext: {
+        tripProjectFacts: [{ field: "children", value: "0", source: "trip_project" }],
+        chatFacts: [{ field: "notes", value: "không đi cùng trẻ em", source: "conversation" }],
+        conflicts: [],
+      },
+    }));
+
+    expect(section).not.toContain("Hướng dẫn gia đình");
+    expect(section).not.toContain("Ngữ cảnh gia đình/trẻ em cần giữ khi trả lời");
+  });
+
   test("web search fallback triggers when approved knowledge is missing", async () => {
     const { decideWebSearchFallback } = await import("@/features/retrieval/source-bundle");
 

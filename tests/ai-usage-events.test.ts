@@ -57,7 +57,7 @@ describe("AI usage events", () => {
       purpose: "ai_ask_initial_answer",
       provider: "ai_gateway",
       model: "cx/gpt-5.5-test",
-      promptVersion: "ai_ask_initial_v5",
+      promptVersion: "ai_ask_initial_v6",
       status: "success",
       promptTokens: 1_000,
       completionTokens: 500,

@@ -303,6 +303,41 @@ describe("chat/trip context extraction", () => {
     ]);
   });
 
+  test("stores safe family travel facts using existing fields", async () => {
+    await createTestUser("user-1");
+    await createModel();
+    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Gia đình đi Huế" }).returning({ id: tripProjects.id });
+    const { conversation, message } = await createConversationWithUserMessage({ userId: "user-1", tripProjectId: project.id });
+    mockExtractionResponse({ facts: [
+      { field: "children", value: "2", scope: "trip_project", confidence: 95 },
+      { field: "children_ages", value: "5 và 8 tuổi", scope: "trip_project", confidence: 94 },
+      { field: "driving_tolerance", value: "mỗi chặng lái tối đa khoảng 2 giờ", scope: "trip_project", confidence: 90 },
+      { field: "activity_preferences", value: "ưu tiên hoạt động nhẹ, có chỗ nghỉ cho trẻ", scope: "trip_project", confidence: 88 },
+      { field: "itinerary_constraints", value: "cần điểm dừng dễ ăn và vệ sinh sạch", scope: "trip_project", confidence: 86 },
+      { field: "hotel_style", value: "khách sạn gần trung tâm, tiện đi bộ", scope: "trip_project", confidence: 82 },
+      { field: "food_preferences", value: "món dễ ăn cho trẻ", scope: "trip_project", confidence: 80 },
+    ] });
+    const { extractChatTripContext } = await import("@/features/chat-trips/context-extraction");
+
+    await expect(extractChatTripContext({
+      session: { userId: "user-1", email: "user-1@example.com" },
+      conversationId: conversation.id,
+      tripProjectId: project.id,
+      userMessage: { id: message.id, content: "Nhà tôi có 2 bé 5 và 8 tuổi, cần chặng lái ngắn và điểm dừng dễ ăn." },
+      history: [],
+    })).resolves.toEqual({ attemptedProviderCall: true, persistedFacts: 7 });
+
+    await expect(testDb.select().from(chatContext).orderBy(asc(chatContext.field))).resolves.toMatchObject([
+      { field: "activity_preferences", value: "ưu tiên hoạt động nhẹ, có chỗ nghỉ cho trẻ", scope: "trip_project", tripProjectId: project.id },
+      { field: "children", value: "2", scope: "trip_project", tripProjectId: project.id },
+      { field: "children_ages", value: "5 và 8 tuổi", scope: "trip_project", tripProjectId: project.id },
+      { field: "driving_tolerance", value: "mỗi chặng lái tối đa khoảng 2 giờ", scope: "trip_project", tripProjectId: project.id },
+      { field: "food_preferences", value: "món dễ ăn cho trẻ", scope: "trip_project", tripProjectId: project.id },
+      { field: "hotel_style", value: "khách sạn gần trung tâm, tiện đi bộ", scope: "trip_project", tripProjectId: project.id },
+      { field: "itinerary_constraints", value: "cần điểm dừng dễ ăn và vệ sinh sạch", scope: "trip_project", tripProjectId: project.id },
+    ]);
+  });
+
   test("ignores unsafe, unknown, blank, and malformed extraction content without blocking usage recording", async () => {
     await createTestUser("user-1");
     await createModel();
@@ -328,6 +363,34 @@ describe("chat/trip context extraction", () => {
 
     await expect(testDb.select().from(chatContext)).resolves.toMatchObject([{ field: "budget", value: "15 triệu" }]);
     await expect(testDb.select().from(aiUsageEvents)).resolves.toHaveLength(1);
+  });
+
+  test("rejects sensitive child details while preserving safe family facts", async () => {
+    await createTestUser("user-1");
+    await createModel();
+    const { conversation, message } = await createConversationWithUserMessage();
+    mockExtractionResponse({ facts: [
+      { field: "children", value: "1", scope: "conversation", confidence: 95 },
+      { field: "children_ages", value: "7 tuổi", scope: "conversation", confidence: 90 },
+      { field: "notes", value: "bé Minh 7 tuổi", scope: "conversation", confidence: 80 },
+      { field: "notes", value: "trẻ bị dị ứng hải sản", scope: "conversation", confidence: 80 },
+      { field: "notes", value: "CCCD của con là 012345678901", scope: "conversation", confidence: 80 },
+      { field: "food_preferences", value: "ưu tiên món đơn giản, ít cay", scope: "conversation", confidence: 75 },
+    ] });
+    const { extractChatTripContext } = await import("@/features/chat-trips/context-extraction");
+
+    await expect(extractChatTripContext({
+      session: { userId: "user-1", email: "user-1@example.com" },
+      conversationId: conversation.id,
+      userMessage: { id: message.id, content: "Tôi đi với một bé 7 tuổi, cần món ít cay." },
+      history: [],
+    })).resolves.toEqual({ attemptedProviderCall: true, persistedFacts: 3 });
+
+    await expect(testDb.select().from(chatContext).orderBy(asc(chatContext.field))).resolves.toMatchObject([
+      { field: "children", value: "1", scope: "conversation" },
+      { field: "children_ages", value: "7 tuổi", scope: "conversation" },
+      { field: "food_preferences", value: "ưu tiên món đơn giản, ít cay", scope: "conversation" },
+    ]);
   });
 
   test("does not call the provider or write context when no extraction-capable model exists", async () => {
