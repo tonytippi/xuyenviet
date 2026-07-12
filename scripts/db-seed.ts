@@ -38,6 +38,11 @@ async function main() {
       name: "Seed Fixture Traveler",
       email: "fixture-traveler@xuyenviet.local",
     },
+    {
+      id: "system-facebook-capture",
+      name: "System Facebook Capture",
+      email: "system-facebook-capture@xuyenviet.internal",
+    },
   ]).onConflictDoNothing();
 
   await db.insert(userRoles).values([

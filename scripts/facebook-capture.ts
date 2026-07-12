@@ -1,13 +1,14 @@
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 
+import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { chromium, type Page } from "playwright";
 
-import { schema } from "../src/db/schema";
+import { schema, users } from "../src/db/schema";
 import { listQueuedFacebookSources, recordFacebookCaptureFailure, updateQueuedFacebookSourceRawText, type SafeFacebookCaptureMetadata } from "../src/features/knowledge/facebook-capture";
-import { getDatabaseUrl } from "./db-env";
+import { getDatabaseUrl, getEnvValue } from "./db-env";
 
 type CliOptions = {
   sourceId?: string;
@@ -23,6 +24,9 @@ type ExtractedFacebookText = {
   timestampText?: string;
   diagnostics: Record<string, string | number | boolean | null>;
 };
+
+const DEFAULT_SYSTEM_ACTOR_USER_ID = "system-facebook-capture";
+const DEFAULT_SYSTEM_ACTOR_EMAIL = "system-facebook-capture@xuyenviet.internal";
 
 function getRequiredOptionValue(argv: string[], index: number, option: string) {
   const value = argv[index + 1];
@@ -84,8 +88,8 @@ function parseArgs(argv: string[]): CliOptions {
     throw new Error(`Unknown or incomplete option: ${arg}`);
   }
 
-  if (!options.actorUserId || !options.actorEmail) {
-    throw new Error("Provide both --actor-user-id and --actor-email to capture Facebook source text.");
+  if ((options.actorUserId && !options.actorEmail) || (!options.actorUserId && options.actorEmail)) {
+    throw new Error("Provide both --actor-user-id and --actor-email, or omit both to use the configured system capture actor.");
   }
 
   return options;
@@ -103,13 +107,31 @@ Options:
   --source-id       Capture one queued Facebook source by ID.
   --limit           Capture up to this many queued Facebook sources. Defaults to 5.
   --yes, -y         Save captured visible text without interactive confirmation.
-  --actor-user-id   Required operator user ID for audit_events.
-  --actor-email     Required operator email for audit_events.
+  --actor-user-id   Optional operator user ID for audit_events. Omit to use FACEBOOK_CAPTURE_ACTOR_USER_ID or the default system actor.
+  --actor-email     Optional operator email for audit_events. Omit to use FACEBOOK_CAPTURE_ACTOR_EMAIL or the default system actor.
 
 First run opens a headed Chromium profile at .playwright/facebook-profile.
 Log into Facebook manually in that browser, close or leave it open, then rerun this command.
 Profile data stays local and must never be committed, copied into app secrets, or stored in PostgreSQL.
+Scheduled runs should use a service user row matching FACEBOOK_CAPTURE_ACTOR_USER_ID and FACEBOOK_CAPTURE_ACTOR_EMAIL.
 This tool captures visible post text only. Broad Facebook content reuse, quoting, retention, and deletion policy remains an open product/legal operations question.`);
+}
+
+async function resolveCaptureActor(db: ReturnType<typeof drizzle<typeof schema>>, options: CliOptions) {
+  const actor = {
+    userId: options.actorUserId ?? getEnvValue("FACEBOOK_CAPTURE_ACTOR_USER_ID") ?? DEFAULT_SYSTEM_ACTOR_USER_ID,
+    email: options.actorEmail ?? getEnvValue("FACEBOOK_CAPTURE_ACTOR_EMAIL") ?? DEFAULT_SYSTEM_ACTOR_EMAIL,
+  };
+
+  const [user] = await db.select({ id: users.id, email: users.email }).from(users).where(eq(users.id, actor.userId)).limit(1);
+
+  if (!user || user.email !== actor.email) {
+    throw new Error(
+      `Facebook capture audit actor not found or email mismatch. Create a users row with id=${actor.userId} and email=${actor.email}, set FACEBOOK_CAPTURE_ACTOR_USER_ID/FACEBOOK_CAPTURE_ACTOR_EMAIL, or pass --actor-user-id and --actor-email.`,
+    );
+  }
+
+  return actor;
 }
 
 function previewText(text: string) {
@@ -154,16 +176,12 @@ export async function extractVisibleFacebookText(page: Page): Promise<ExtractedF
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
-  if (!options.actorUserId || !options.actorEmail) {
-    throw new Error("Provide both --actor-user-id and --actor-email to capture Facebook source text.");
-  }
-
-  const actor = { userId: options.actorUserId, email: options.actorEmail };
   const client = postgres(getDatabaseUrl(), { max: 1 });
   const db = drizzle(client, { schema });
   let context: Awaited<ReturnType<typeof chromium.launchPersistentContext>> | null = null;
 
   try {
+    const actor = await resolveCaptureActor(db, options);
     context = await chromium.launchPersistentContext(".playwright/facebook-profile", { headless: false });
     const queued = await listQueuedFacebookSources(db, { sourceId: options.sourceId, limit: options.limit });
 

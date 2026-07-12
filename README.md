@@ -81,6 +81,14 @@ pnpm db:migrate
 
 `db:generate` and `db:migrate` use `drizzle.config.ts` and `DATABASE_URL`. Story 1.1 intentionally configures Drizzle without adding domain tables.
 
+Operations scripts:
+
+```bash
+pnpm facebook:capture --limit 5
+```
+
+`facebook:capture` reads queued Facebook source links from PostgreSQL and saves visible captured text for later operator review. Scheduled runs use a configured service audit actor; see `docs/facebook-capture-operations.md`.
+
 ## Public launch safety
 
 Before public user onboarding, verify each environment separately:
