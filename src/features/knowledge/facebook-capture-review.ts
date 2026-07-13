@@ -1,6 +1,7 @@
 import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
+import { sourceKnowledgeDraftExtractionPromptVersion } from "../ai/prompts";
 import { auditEvents, facebookCaptureReviews, knowledgeCards, knowledgeCardSources, rawSourceMaterial, schema, sources, type FacebookCaptureReviewStatus } from "../../db/schema";
 
 export type FacebookCaptureReviewDb = Pick<PostgresJsDatabase<typeof schema>, "select" | "insert" | "update">;
@@ -13,19 +14,39 @@ export type FacebookCaptureReviewActor = {
 
 const maxSafeReasonLength = 500;
 const unsafeSummaryPattern = /provider[_-]?payload|raw[_-]?text|cookie|token|password|localstorage|local_storage|<html|secret/i;
+const allowedTransitionSourceStatuses: Record<Exclude<FacebookCaptureReviewStatus, "needs_review">, FacebookCaptureReviewStatus[]> = {
+  rejected: ["needs_review", "extraction_failed"],
+  extracted: ["needs_review", "extraction_failed"],
+  extracted_approved: ["extracted"],
+  extraction_failed: ["needs_review"],
+};
 
 function capturedRawTextCondition() {
   return and(isNotNull(rawSourceMaterial.rawText), sql`length(btrim(${rawSourceMaterial.rawText})) > 0`);
 }
 
-function normalizeSafeSummary(value: string | undefined, fieldName: string) {
+function normalizeForOverlap(value: string) {
+  return value.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function containsRawTextOverlap(value: string, rawText: string | null) {
+  if (!rawText) {
+    return false;
+  }
+
+  const normalizedValue = normalizeForOverlap(value);
+  const normalizedRawText = normalizeForOverlap(rawText);
+  return normalizedValue.length >= 24 && normalizedRawText.includes(normalizedValue);
+}
+
+function normalizeSafeSummary(value: string | undefined, fieldName: string, rawText: string | null) {
   if (value === undefined) {
     return null;
   }
 
   const normalized = value.trim();
 
-  if (!normalized || normalized.length > maxSafeReasonLength || normalized.includes("\n") || normalized.includes("\r") || unsafeSummaryPattern.test(normalized)) {
+  if (!normalized || normalized.length > maxSafeReasonLength || normalized.includes("\n") || normalized.includes("\r") || unsafeSummaryPattern.test(normalized) || containsRawTextOverlap(normalized, rawText)) {
     throw new Error(`${fieldName} must be a short safe summary.`);
   }
 
@@ -33,7 +54,24 @@ function normalizeSafeSummary(value: string | undefined, fieldName: string) {
 }
 
 async function loadReviewById(db: FacebookCaptureReviewDb, reviewId: string) {
-  const [review] = await db.select().from(facebookCaptureReviews).where(eq(facebookCaptureReviews.id, reviewId)).limit(1);
+  const [review] = await db
+    .select({
+      id: facebookCaptureReviews.id,
+      sourceId: facebookCaptureReviews.sourceId,
+      rawSourceMaterialId: facebookCaptureReviews.rawSourceMaterialId,
+      status: facebookCaptureReviews.status,
+      reviewerUserId: facebookCaptureReviews.reviewerUserId,
+      reviewedAt: facebookCaptureReviews.reviewedAt,
+      rejectionReason: facebookCaptureReviews.rejectionReason,
+      extractionError: facebookCaptureReviews.extractionError,
+      createdAt: facebookCaptureReviews.createdAt,
+      updatedAt: facebookCaptureReviews.updatedAt,
+      rawText: rawSourceMaterial.rawText,
+    })
+    .from(facebookCaptureReviews)
+    .innerJoin(rawSourceMaterial, eq(rawSourceMaterial.id, facebookCaptureReviews.rawSourceMaterialId))
+    .where(eq(facebookCaptureReviews.id, reviewId))
+    .limit(1);
   return review ?? null;
 }
 
@@ -67,7 +105,16 @@ export async function ensureFacebookCaptureReviewForCapturedSource(
       createdAt: input.now,
       updatedAt: input.now,
     })
+    .onConflictDoNothing({ target: facebookCaptureReviews.sourceId })
     .returning();
+
+  if (!review) {
+    const [concurrentReview] = await db.select().from(facebookCaptureReviews).where(eq(facebookCaptureReviews.sourceId, input.sourceId)).limit(1);
+    if (concurrentReview) {
+      return { status: "exists" as const, review: concurrentReview };
+    }
+    throw new Error("Facebook capture review could not be created.");
+  }
 
   return { status: "created" as const, review };
 }
@@ -92,6 +139,9 @@ export async function listFacebookCaptureReviews(db: FacebookCaptureReviewDb, in
       verificationStatus: sources.verificationStatus,
       official: sources.official,
       partner: sources.partner,
+      captureMethod: sql<string | null>`${rawSourceMaterial.rawMetadata}->>'captureMethod'`,
+      capturedAt: sql<string | null>`${rawSourceMaterial.rawMetadata}->>'capturedAt'`,
+      finalUrl: sql<string | null>`${rawSourceMaterial.rawMetadata}->>'finalUrl'`,
     })
     .from(facebookCaptureReviews)
     .innerJoin(sources, eq(sources.id, facebookCaptureReviews.sourceId))
@@ -99,7 +149,12 @@ export async function listFacebookCaptureReviews(db: FacebookCaptureReviewDb, in
     .where(input.status ? eq(facebookCaptureReviews.status, input.status) : undefined)
     .orderBy(desc(facebookCaptureReviews.updatedAt));
 
-  return rows;
+  return Promise.all(
+    rows.map(async (row) => ({
+      ...row,
+      existingCards: await getExistingCardsForCaptureSource(db, row.sourceId),
+    })),
+  );
 }
 
 export async function getExistingCardsForCaptureSource(db: FacebookCaptureReviewDb, sourceId: string) {
@@ -109,6 +164,7 @@ export async function getExistingCardsForCaptureSource(db: FacebookCaptureReview
       status: knowledgeCards.status,
       title: knowledgeCards.title,
       type: knowledgeCards.type,
+      aiPromptVersion: knowledgeCards.aiPromptVersion,
       updatedAt: knowledgeCards.updatedAt,
     })
     .from(knowledgeCardSources)
@@ -129,6 +185,10 @@ export async function markFacebookCaptureReviewStatus(
   },
 ) {
   return db.transaction(async (transaction) => {
+    if (!Object.hasOwn(allowedTransitionSourceStatuses, input.status)) {
+      throw new Error("Unsupported Facebook capture review transition status.");
+    }
+
     const review = await loadReviewById(transaction, input.reviewId);
 
     if (!review) {
@@ -136,13 +196,22 @@ export async function markFacebookCaptureReviewStatus(
     }
 
     const existingCards = await getExistingCardsForCaptureSource(transaction, review.sourceId);
+    const existingExtractionCards = existingCards.filter((card) => card.aiPromptVersion === sourceKnowledgeDraftExtractionPromptVersion);
 
-    if ((input.status === "extracted" || input.status === "extracted_approved") && existingCards.length > 0) {
-      return { status: "blocked_existing_cards" as const, existingCards };
+    if (input.status === "extracted" && existingExtractionCards.length === 0) {
+      return { status: "missing_extracted_cards" as const };
     }
 
-    const rejectionReason = normalizeSafeSummary(input.rejectionReason, "rejectionReason");
-    const extractionError = normalizeSafeSummary(input.extractionError, "extractionError");
+    if (input.status === "extracted_approved" && existingExtractionCards.length === 0) {
+      return { status: "missing_extracted_cards" as const };
+    }
+
+    if (!allowedTransitionSourceStatuses[input.status].includes(review.status)) {
+      return { status: "invalid_transition" as const, currentStatus: review.status };
+    }
+
+    const rejectionReason = normalizeSafeSummary(input.rejectionReason, "rejectionReason", review.rawText);
+    const extractionError = normalizeSafeSummary(input.extractionError, "extractionError", review.rawText);
 
     if (input.status === "rejected" && !rejectionReason) {
       throw new Error("rejectionReason is required when rejecting a capture.");
@@ -164,8 +233,12 @@ export async function markFacebookCaptureReviewStatus(
         extractionError: input.status === "extraction_failed" ? extractionError : null,
         updatedAt: now,
       })
-      .where(eq(facebookCaptureReviews.id, input.reviewId))
+      .where(and(eq(facebookCaptureReviews.id, input.reviewId), eq(facebookCaptureReviews.status, review.status)))
       .returning();
+
+    if (!updated) {
+      return { status: "stale_review" as const };
+    }
 
     await transaction.insert(auditEvents).values({
       actorUserId: input.actor.userId,

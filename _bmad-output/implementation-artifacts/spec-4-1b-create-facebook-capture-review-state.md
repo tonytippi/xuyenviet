@@ -2,7 +2,7 @@
 title: 'Story 4.1B: Create Facebook Capture Review State'
 type: 'feature'
 created: '2026-07-13'
-status: 'review'
+status: 'done'
 baseline_commit: '1798323ec9c480ddab6a17803c1787080c1f70a2'
 context:
   - '{project-root}/_bmad-output/project-context.md'
@@ -19,7 +19,7 @@ warnings:
 
 # Story 4.1B: Create Facebook Capture Review State
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run bmad-create-story validate for quality check before bmad-dev-story. -->
 
@@ -91,6 +91,15 @@ so that admin review, extraction, approval, rejection, and retry behavior are co
   - [x] Update `docs/facebook-capture-operations.md` workflow language so captured rows enter the Facebook capture review state/queue before extraction instead of requiring operators to paste source IDs into the intake page.
   - [x] Keep this story file updated during implementation: task checkboxes, Dev Agent Record, Completion Notes, Debug Log References, File List, and Change Log.
   - [x] Move `_bmad-output/implementation-artifacts/sprint-status.yaml` story key `4-1b-create-facebook-capture-review-state` through implementation statuses.
+
+### Review Findings
+
+- [x] [Review][Patch] Transition reasons can still copy raw captured text into review rows and audit summaries [`src/features/knowledge/facebook-capture-review.ts:21`]
+- [x] [Review][Patch] Extraction success states are blocked when extracted cards already exist [`src/features/knowledge/facebook-capture-review.ts:138`]
+- [x] [Review][Patch] Duplicate-extraction checks are broader than the existing AI extraction invariant [`src/features/knowledge/facebook-capture-review.ts:105`]
+- [x] [Review][Patch] Review status transitions allow arbitrary overwrites and stale concurrent updates [`src/features/knowledge/facebook-capture-review.ts:120`]
+- [x] [Review][Patch] Idempotent review creation can throw on concurrent capture completion [`src/features/knowledge/facebook-capture-review.ts:40`]
+- [x] [Review][Patch] Review queue read model omits specified safe capture metadata and linked card references [`src/features/knowledge/facebook-capture-review.ts:75`]
 
 ## Dev Notes
 
@@ -268,7 +277,7 @@ gpt-5.5-review
 
 ### Debug Log References
 
-- `pnpm test:run tests/facebook-capture-review.test.ts` passed: 5 tests.
+- `pnpm test:run tests/facebook-capture-review.test.ts` passed: 6 tests after review fixes.
 - `pnpm test:run tests/facebook-capture.test.ts` passed: 7 tests.
 - `pnpm test:run tests/knowledge-draft-extraction.test.ts` passed: 13 tests.
 - `pnpm lint` passed.
@@ -276,6 +285,7 @@ gpt-5.5-review
 - `pnpm test:run` passed: 25 files, 338 tests.
 - `pnpm build` passed.
 - Note: Running multiple DB-backed Vitest commands in parallel caused shared test DB reset/migration contention. Sequential runs passed.
+- Review fix verification: `pnpm test:run tests/facebook-capture-review.test.ts`, `pnpm test:run tests/facebook-capture.test.ts`, `pnpm lint`, and `pnpm typecheck` passed on 2026-07-13.
 
 ### Completion Notes List
 
@@ -286,6 +296,7 @@ gpt-5.5-review
 - Preserved extraction/approval boundaries: no automatic extraction, approval, embeddings, retrieval records, traveler rendering, admin queue UI, or navigation integration added in this story.
 - Updated Facebook capture operations docs to describe review-state creation before later admin queue/extraction work.
 - Fixed stale `tests/auth-gate.test.ts` auth mock during full-suite verification so it matches the current `getAuthenticatedSessionWithRoles` page contract.
+- Addressed code review findings by preventing raw-text overlap in transition summaries, making review creation conflict-safe, aligning extraction state checks with the AI extraction prompt version, adding transition/stale-update guards, and enriching review list output with safe capture metadata plus linked cards.
 
 ### File List
 
@@ -306,3 +317,4 @@ gpt-5.5-review
 
 - 2026-07-13: Story created by BMad create-story workflow. Ultimate context engine analysis completed; comprehensive developer guide created.
 - 2026-07-13: Implemented Facebook capture review state schema, migration, script-safe helpers, capture transaction wiring, status transition audit helpers, tests, and operations documentation; moved story to review.
+- 2026-07-13: Addressed code review findings and moved story to done.

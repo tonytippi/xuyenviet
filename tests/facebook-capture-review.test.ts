@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test } from "vitest";
 
 import { auditEvents, facebookCaptureReviews, knowledgeCards, knowledgeCardSources, rawSourceMaterial, sources, users } from "@/db/schema";
+import { sourceKnowledgeDraftExtractionPromptVersion } from "@/features/ai/prompts";
 import {
   ensureFacebookCaptureReviewForCapturedSource,
   getExistingCardsForCaptureSource,
@@ -100,7 +101,14 @@ describe("Facebook capture review state", () => {
     if (first.status !== "created" || second.status !== "created") throw new Error("test setup failed");
     await markFacebookCaptureReviewStatus(testDb, { reviewId: second.review.id, status: "extraction_failed", actor: { userId: "operator-user", email: "operator-user@example.com" }, extractionError: "Model unavailable", now: new Date("2026-07-13T01:00:00.000Z") });
 
-    await expect(listFacebookCaptureReviews(testDb, { status: "needs_review" })).resolves.toMatchObject([{ sourceId: "needs-review", status: "needs_review" }]);
+    await expect(listFacebookCaptureReviews(testDb, { status: "needs_review" })).resolves.toMatchObject([
+      {
+        sourceId: "needs-review",
+        status: "needs_review",
+        captureMethod: "playwright_operator_browser",
+        existingCards: [],
+      },
+    ]);
     await expect(listFacebookCaptureReviews(testDb, { status: "extraction_failed" })).resolves.toMatchObject([{ sourceId: "failed-review", status: "extraction_failed" }]);
   });
 
@@ -125,14 +133,38 @@ describe("Facebook capture review state", () => {
     expect(audits).toHaveLength(1);
     expect(audits[0].afterSummary).toContain("needs_review -> rejected");
     expect(audits[0].afterSummary).not.toContain("Raw Facebook text");
+
+    await expect(
+      markFacebookCaptureReviewStatus(testDb, {
+        reviewId: ensured.review.id,
+        status: "extraction_failed",
+        actor: { userId: "operator-user", email: "operator-user@example.com" },
+        extractionError: "Follow-up failure",
+      }),
+    ).resolves.toMatchObject({ status: "invalid_transition", currentStatus: "rejected" });
   });
 
-  test("existing linked cards block extraction transitions and are returned for UI linking", async () => {
-    await createSource({ id: "already-extracted", rawText: "Captured text" });
-    const ensured = await ensureFacebookCaptureReviewForCapturedSource(testDb, { sourceId: "already-extracted", rawSourceMaterialId: "raw-already-extracted" });
+  test("transition summaries reject captured raw text overlap", async () => {
+    await createSource({ id: "raw-leak-facebook", rawText: "This captured Facebook paragraph should never move into audit summaries." });
+    const ensured = await ensureFacebookCaptureReviewForCapturedSource(testDb, { sourceId: "raw-leak-facebook", rawSourceMaterialId: "raw-raw-leak-facebook" });
     if (ensured.status !== "created") throw new Error("test setup failed");
-    await testDb.insert(knowledgeCards).values({ id: "existing-draft", status: "draft", type: "route_note", title: "Existing draft", routeSegment: "Huế - Đà Nẵng", summary: "Existing summary", confidence: "community", aiPromptVersion: "source_knowledge_draft_extraction_v1", createdByUserId: "operator-user" });
-    await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: "existing-draft", sourceId: "already-extracted" });
+
+    await expect(
+      markFacebookCaptureReviewStatus(testDb, {
+        reviewId: ensured.review.id,
+        status: "rejected",
+        actor: { userId: "operator-user", email: "operator-user@example.com" },
+        rejectionReason: "captured Facebook paragraph should never move into audit",
+      }),
+    ).rejects.toThrow("rejectionReason must be a short safe summary.");
+  });
+
+  test("extraction transitions require extracted cards and ignore unrelated linked cards", async () => {
+    await createSource({ id: "already-extracted", rawText: "Captured text" });
+    const ensured = await ensureFacebookCaptureReviewForCapturedSource(testDb, { sourceId: "already-extracted", rawSourceMaterialId: "raw-already-extracted", now: new Date("2026-07-13T00:00:00.000Z") });
+    if (ensured.status !== "created") throw new Error("test setup failed");
+    await testDb.insert(knowledgeCards).values({ id: "manual-draft", status: "draft", type: "route_note", title: "Manual draft", routeSegment: "Huế - Đà Nẵng", summary: "Existing summary", confidence: "community", aiPromptVersion: "manual_test_prompt", createdByUserId: "operator-user" });
+    await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: "manual-draft", sourceId: "already-extracted" });
 
     await expect(
       markFacebookCaptureReviewStatus(testDb, {
@@ -140,7 +172,24 @@ describe("Facebook capture review state", () => {
         status: "extracted",
         actor: { userId: "operator-user", email: "operator-user@example.com" },
       }),
-    ).resolves.toMatchObject({ status: "blocked_existing_cards", existingCards: [{ id: "existing-draft", status: "draft" }] });
-    await expect(getExistingCardsForCaptureSource(testDb, "already-extracted")).resolves.toMatchObject([{ id: "existing-draft", status: "draft" }]);
+    ).resolves.toMatchObject({ status: "missing_extracted_cards" });
+
+    await testDb.insert(knowledgeCards).values({ id: "existing-draft", status: "draft", type: "route_note", title: "Existing draft", routeSegment: "Huế - Đà Nẵng", summary: "Existing summary", confidence: "community", aiPromptVersion: sourceKnowledgeDraftExtractionPromptVersion, createdByUserId: "operator-user" });
+    await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: "existing-draft", sourceId: "already-extracted" });
+
+    await expect(
+      markFacebookCaptureReviewStatus(testDb, {
+        reviewId: ensured.review.id,
+        status: "extracted",
+        actor: { userId: "operator-user", email: "operator-user@example.com" },
+        now: new Date("2026-07-13T03:00:00.000Z"),
+      }),
+    ).resolves.toMatchObject({ status: "updated", review: { status: "extracted" } });
+    await expect(getExistingCardsForCaptureSource(testDb, "already-extracted")).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "existing-draft", status: "draft", aiPromptVersion: sourceKnowledgeDraftExtractionPromptVersion }),
+        expect.objectContaining({ id: "manual-draft", status: "draft", aiPromptVersion: "manual_test_prompt" }),
+      ]),
+    );
   });
 });
