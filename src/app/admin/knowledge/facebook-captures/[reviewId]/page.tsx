@@ -59,8 +59,12 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
   const approveAllStatus = getSearchParam(query.approveAllStatus);
   const approveAllRecoveryStatus = getSearchParam(query.approveAllRecoveryStatus);
   const approvalFailed = getSearchParam(query.approvalFailed) === "1";
+  const approvalError = getSearchParam(query.approvalError);
   const recoveryStatus = getSearchParam(query.recoveryStatus);
   const failureStatus = getSearchParam(query.failureStatus);
+  const errorCode = getSearchParam(query.errorCode);
+  const errorDetail = getSearchParam(query.errorDetail);
+  const statusReason = getSearchParam(query.statusReason);
   const alreadyExtracted = getSearchParam(query.alreadyExtracted) === "1";
 
   return (
@@ -132,6 +136,10 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
             <p>
               {approveAllError}
               {failureStatus === "updated" ? " Trạng thái đã được cập nhật an toàn nếu phù hợp." : " Kiểm tra trạng thái review và thẻ liên kết hiện có trước khi thử lại."}
+              {errorCode ? ` Mã lỗi an toàn: ${errorCode}.` : null}
+              {errorDetail ? ` Chi tiết an toàn: ${errorDetail}.` : null}
+              {failureStatus ? ` Cập nhật trạng thái lỗi: ${failureStatus}.` : null}
+              {statusReason ? ` Lý do cập nhật trạng thái: ${statusReason}.` : null}
             </p>
           ) : null}
           {approveAllStatus ? <p>Capture này không còn ở trạng thái có thể trích xuất và phê duyệt tất cả ({approveAllStatus}).</p> : null}
@@ -143,6 +151,7 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
                 hàng đợi bản nháp
               </Link>{" "}
               trước khi thử lại.
+              {approvalError ? ` Mã lỗi an toàn: ${approvalError}.` : null}
             </p>
           ) : null}
           {recoveryStatus ? <p>Không thể hoàn tất cập nhật trạng thái sau khi trích xuất ({recoveryStatus}). Kiểm tra trạng thái review và các thẻ liên kết hiện có.</p> : null}

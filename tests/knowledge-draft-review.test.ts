@@ -432,6 +432,31 @@ describe("knowledge draft review", () => {
     await expect(testDb.select().from(auditEvents)).resolves.toHaveLength(0);
   });
 
+  test("public hotel contact details are allowed only in explicit contact detail fields", async () => {
+    await createUser("hotel-review-operator", ["operator"]);
+    authMock.mockResolvedValue({ user: { id: "hotel-review-operator", email: "hotel-review-operator@example.com" } });
+    const { draft } = await createDraft("hotel-review-operator", {}, { label: "Nguồn khách sạn", kind: "copied_post" });
+    const { approveKnowledgeDraft, updateKnowledgeDraft } = await import("@/features/knowledge/review");
+
+    await expect(
+      updateKnowledgeDraft(draft.id, {
+        type: "hotel_area",
+        title: "Khu khách sạn ven biển Đà Nẵng",
+        locationName: "Đà Nẵng",
+        summary: "Khu lưu trú cần operator kiểm tra lại tình trạng phòng và điều kiện đặt trước khi dùng cho khách.",
+        practicalDetails: { booking_contact: ["0901234567", "booking@hotel.example"] },
+        tags: ["khach-san"],
+        confidence: "community",
+        freshnessSensitive: true,
+      }),
+    ).resolves.toMatchObject({ draftId: draft.id });
+
+    await expect(approveKnowledgeDraft(draft.id)).resolves.toMatchObject({ draftId: draft.id });
+    await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, draft.id))).resolves.toMatchObject([
+      { status: "approved", practicalDetails: { booking_contact: ["0901234567", "booking@hotel.example"] } },
+    ]);
+  });
+
   test("unsafe practical detail keys and raw metadata values are rejected", async () => {
     await createUser("metadata-operator", ["operator"]);
     authMock.mockResolvedValue({ user: { id: "metadata-operator", email: "metadata-operator@example.com" } });

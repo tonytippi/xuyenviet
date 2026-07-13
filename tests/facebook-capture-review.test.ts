@@ -129,6 +129,26 @@ describe("Facebook capture review state", () => {
     ).resolves.toMatchObject({ status: "updated", review: { status: "extraction_failed", rejectionReason: null, extractionError: "Extraction failed: model_unavailable" } });
   });
 
+  test("status transitions do not write timestamps before review creation", async () => {
+    await createSource({ id: "future-created-review", rawText: "Captured text for future-created review." });
+    const createdAt = new Date("2026-07-13T09:41:36.669Z");
+    const ensured = await ensureFacebookCaptureReviewForCapturedSource(testDb, { sourceId: "future-created-review", rawSourceMaterialId: "raw-future-created-review", now: createdAt });
+    if (ensured.status !== "created") throw new Error("test setup failed");
+
+    const result = await markFacebookCaptureReviewStatus(testDb, {
+      reviewId: ensured.review.id,
+      status: "extraction_failed",
+      actor: { userId: "operator-user", email: "operator-user@example.com" },
+      extractionError: "Extraction failed: invalid_model_output",
+      now: new Date("2026-07-13T09:00:00.000Z"),
+    });
+
+    expect(result).toMatchObject({ status: "updated", review: { status: "extraction_failed" } });
+    await expect(testDb.select().from(facebookCaptureReviews).where(eq(facebookCaptureReviews.id, ensured.review.id))).resolves.toMatchObject([
+      { status: "extraction_failed", reviewedAt: createdAt, updatedAt: createdAt },
+    ]);
+  });
+
   test("status transitions store safe reviewer metadata and audit without raw captured text", async () => {
     await createSource({ id: "transition-facebook", rawText: "Raw Facebook text that must not be copied into audit." });
     const ensured = await ensureFacebookCaptureReviewForCapturedSource(testDb, { sourceId: "transition-facebook", rawSourceMaterialId: "raw-transition-facebook", now: new Date("2026-07-13T00:00:00.000Z") });

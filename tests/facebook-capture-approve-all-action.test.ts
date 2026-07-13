@@ -165,6 +165,35 @@ describe("Facebook capture extract and approve all action", () => {
     await expect(testDb.select().from(facebookCaptureReviews).where(eq(facebookCaptureReviews.id, review.id))).resolves.toMatchObject([{ status: "extracted_approved", reviewerUserId: "operator-user" }]);
   });
 
+  test("recovers existing generated drafts when extraction succeeded but review status stayed needs_review", async () => {
+    authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
+    await createExtractionModel();
+    const review = await createCapturedFacebookReview({ id: "partial-success", rawText: "Đà Nẵng có nhiều điểm dừng cần duyệt lại trước khi dùng." });
+    const [generatedDraft] = await testDb
+      .insert(knowledgeCards)
+      .values({
+        type: "route_note",
+        title: "Gợi ý điểm dừng ở Đà Nẵng",
+        locationName: "Đà Nẵng",
+        summary: "Thông tin cộng đồng cần được operator kiểm tra trước khi dùng cho lịch trình.",
+        practicalDetails: { tips: ["Kiểm tra lại trước khi đi"] },
+        tags: ["da-nang"],
+        confidence: "community",
+        freshnessSensitive: false,
+        aiPromptVersion: sourceKnowledgeDraftExtractionPromptVersion,
+        createdByUserId: "operator-user",
+      })
+      .returning();
+    await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: generatedDraft.id, sourceId: "partial-success", supportLevel: "primary" });
+    const { extractAndApproveFacebookCaptureDraftsForm } = await import("@/features/knowledge/actions");
+
+    await expect(extractAndApproveFacebookCaptureDraftsForm(approveAllFormData(review.id))).rejects.toThrow(/NEXT_REDIRECT:.*recoveredExistingExtraction=1/);
+
+    expect(fetch).not.toHaveBeenCalled();
+    await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, generatedDraft.id))).resolves.toMatchObject([{ status: "approved", needsReview: false }]);
+    await expect(testDb.select().from(facebookCaptureReviews).where(eq(facebookCaptureReviews.id, review.id))).resolves.toMatchObject([{ status: "extracted_approved", reviewerUserId: "operator-user" }]);
+  });
+
   test("invalid provider output marks extraction_failed and approves no cards", async () => {
     authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
     await createExtractionModel();
@@ -178,6 +207,23 @@ describe("Facebook capture extract and approve all action", () => {
     await expect(testDb.select().from(facebookCaptureReviews).where(eq(facebookCaptureReviews.id, review.id))).resolves.toMatchObject([
       { status: "extraction_failed", extractionError: "Extraction failed: invalid_model_output" },
     ]);
+  });
+
+  test("detail page renders safe approve-all extraction error diagnostics", async () => {
+    authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
+    const review = await createCapturedFacebookReview({ id: "error-diagnostics", rawText: "Readable captured Facebook text." });
+    const { default: FacebookCaptureReviewDetailPage } = await import("@/app/admin/knowledge/facebook-captures/[reviewId]/page");
+
+    const element = await FacebookCaptureReviewDetailPage({
+      params: Promise.resolve({ reviewId: review.id }),
+      searchParams: Promise.resolve({ approveAllError: "Không thể trích xuất và phê duyệt capture này.", errorCode: "invalid_model_output", errorDetail: "missing_location_or_route", failureStatus: "status_update_failed", statusReason: "23514:facebook_capture_reviews_reviewer_shape_check" }),
+    });
+
+    const html = renderToStaticMarkup(element);
+    expect(html).toContain("Mã lỗi an toàn: invalid_model_output");
+    expect(html).toContain("Chi tiết an toàn: missing_location_or_route");
+    expect(html).toContain("Cập nhật trạng thái lỗi: status_update_failed");
+    expect(html).toContain("Lý do cập nhật trạng thái: 23514:facebook_capture_reviews_reviewer_shape_check");
   });
 
   test("provider failure marks extraction_failed, records safe usage failure, and approves no cards", async () => {
@@ -270,6 +316,19 @@ describe("Facebook capture extract and approve all action", () => {
     const audits = await testDb.select().from(auditEvents);
     expect(audits.some((audit) => audit.targetType === "knowledge_draft_extraction")).toBe(true);
     expect(audits.some((audit) => audit.operation === "approve")).toBe(false);
+  });
+
+  test("detail page renders safe approve-all approval failure diagnostics", async () => {
+    authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
+    const review = await createCapturedFacebookReview({ id: "approval-error-diagnostics", rawText: "Readable captured Facebook text." });
+    const { default: FacebookCaptureReviewDetailPage } = await import("@/app/admin/knowledge/facebook-captures/[reviewId]/page");
+
+    const element = await FacebookCaptureReviewDetailPage({
+      params: Promise.resolve({ reviewId: review.id }),
+      searchParams: Promise.resolve({ approvalFailed: "1", approvalError: "not_reviewable" }),
+    });
+
+    expect(renderToStaticMarkup(element)).toContain("Mã lỗi an toàn: not_reviewable");
   });
 
   test("unauthorized users fail before review lookup, provider calls, usage writes, or mutations", async () => {

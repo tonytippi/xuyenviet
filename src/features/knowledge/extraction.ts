@@ -64,6 +64,7 @@ export class KnowledgeExtractionError extends Error {
   constructor(
     message: string,
     public readonly code: "invalid_source" | "model_unavailable" | "unsupported_material" | "provider_failed" | "invalid_model_output" | "already_extracted" | "capture_not_actionable",
+    public readonly safeDetail?: string,
   ) {
     super(message);
     this.name = "KnowledgeExtractionError";
@@ -275,21 +276,26 @@ function parseDrafts(content: string, source: typeof sources.$inferSelect, rawTe
   const draftValues = Array.isArray(payload.drafts) ? payload.drafts : null;
 
   if (!draftValues) {
-    throw new KnowledgeExtractionError("AI trả về cấu trúc bản nháp không hợp lệ.", "invalid_model_output");
+    throw new KnowledgeExtractionError("AI trả về cấu trúc bản nháp không hợp lệ.", "invalid_model_output", "missing_drafts_array");
   }
 
-  const drafts = draftValues.slice(0, maxDraftsPerExtraction).map((draft) => normalizeDraft(draft, source, rawText));
-
-  if (drafts.some((draft) => draft === null)) {
-    throw new KnowledgeExtractionError("AI trả về bản nháp không hợp lệ.", "invalid_model_output");
+  if (draftValues.length === 0) {
+    return [];
   }
 
-  return drafts as DraftInsert[];
+  const normalizedDrafts = draftValues.slice(0, maxDraftsPerExtraction).map((draft) => normalizeDraft(draft, source, rawText));
+  const firstInvalidDraft = normalizedDrafts.find((draft) => draft.result === null);
+
+  if (firstInvalidDraft) {
+    throw new KnowledgeExtractionError("AI trả về bản nháp không hợp lệ.", "invalid_model_output", firstInvalidDraft.reason);
+  }
+
+  return normalizedDrafts.map((draft) => draft.result as DraftInsert);
 }
 
-function normalizeDraft(value: unknown, source: typeof sources.$inferSelect, rawText: string): DraftInsert | null {
+function normalizeDraft(value: unknown, source: typeof sources.$inferSelect, rawText: string): { result: DraftInsert | null; reason: string } {
   if (!isRecord(value)) {
-    return null;
+    return { result: null, reason: "draft_not_object" };
   }
 
   const type = normalizeEnum(value.type, knowledgeCardTypeValues);
@@ -299,34 +305,43 @@ function normalizeDraft(value: unknown, source: typeof sources.$inferSelect, raw
   const freshnessSensitive = normalizeFreshnessSensitive(value.freshness_sensitive);
 
   if (!type || !title || !summary || !confidence || freshnessSensitive === null) {
-    return null;
+    return { result: null, reason: "missing_or_invalid_required_field" };
   }
 
-  const locationName = normalizeBoundedString(value.location_name, maxLocationLength);
-  const routeSegment = normalizeBoundedString(value.route_segment, maxRouteSegmentLength);
+  let locationName = normalizeBoundedString(value.location_name, maxLocationLength);
+  let routeSegment = normalizeBoundedString(value.route_segment, maxRouteSegmentLength);
 
   if (!locationName && !routeSegment) {
-    return null;
+    const fallback = inferLocationFallback(rawText);
+    locationName = fallback.locationName ?? null;
+    routeSegment = fallback.routeSegment ?? null;
+
+    if (!locationName && !routeSegment) {
+      return { result: null, reason: "missing_location_or_route" };
+    }
   }
 
   const practicalDetails = normalizePracticalDetails(value.practical_details);
   const tags = normalizeTags(value.tags);
 
-  if (containsUnsafeRawOverlap([title, locationName, routeSegment, summary, ...flattenDetailValues(practicalDetails), ...tags], rawText)) {
-    return null;
+  if (containsUnsafeDraftFields({ title, locationName, routeSegment, summary, practicalDetails, tags }, rawText)) {
+    return { result: null, reason: "unsafe_raw_overlap_or_sensitive_value" };
   }
 
   return {
-    type,
-    title,
-    locationName,
-    routeSegment,
-    summary,
-    practicalDetails,
-    tags,
-    confidence,
-    freshnessSensitive,
-    aiPromptVersion: sourceKnowledgeDraftExtractionPromptVersion,
+    result: {
+      type,
+      title,
+      locationName,
+      routeSegment,
+      summary,
+      practicalDetails,
+      tags,
+      confidence,
+      freshnessSensitive,
+      aiPromptVersion: sourceKnowledgeDraftExtractionPromptVersion,
+    },
+    reason: "valid",
   };
 }
 
@@ -340,7 +355,7 @@ function parseJsonObject(content: string) {
     // Fall through to safe operational error.
   }
 
-  throw new KnowledgeExtractionError("AI trả về JSON không hợp lệ.", "invalid_model_output");
+  throw new KnowledgeExtractionError("AI trả về JSON không hợp lệ.", "invalid_model_output", "invalid_json");
 }
 
 function normalizeEnum<T extends readonly string[]>(value: unknown, allowed: T): T[number] | null {
@@ -414,17 +429,54 @@ function normalizeTags(value: unknown) {
   return Array.from(new Set(value.map((tag) => normalizeBoundedString(tag, maxTagLength)).filter((tag): tag is string => tag !== null))).slice(0, maxTags);
 }
 
-function flattenDetailValues(details: Record<string, unknown>) {
-  return Object.values(details).flatMap((value) => (Array.isArray(value) ? value : [value])).filter((value): value is string => typeof value === "string");
+function inferLocationFallback(rawText: string): { locationName: string | null; routeSegment: string | null } {
+  const normalizedRaw = normalizeForOverlap(rawText);
+  const mentionsDaNang = /(?:đà nẵng|da nang)/i.test(normalizedRaw);
+  const mentionsHoiAn = /(?:hội an|hoi an)/i.test(normalizedRaw);
+  const mentionsHue = /(?:huế|hue)/i.test(normalizedRaw);
+  const mentionsLangCo = /(?:lăng cô|lang co)/i.test(normalizedRaw);
+  const mentionsHaiVan = /(?:hải vân|hai van)/i.test(normalizedRaw);
+
+  if (mentionsDaNang && mentionsHoiAn) {
+    return { locationName: "Đà Nẵng - Hội An", routeSegment: "Đà Nẵng - Hội An" };
+  }
+
+  if (mentionsLangCo && mentionsDaNang && mentionsHaiVan) {
+    return { locationName: "Đèo Hải Vân", routeSegment: "Lăng Cô - Đà Nẵng" };
+  }
+
+  if (mentionsHue && mentionsDaNang) {
+    return { locationName: null, routeSegment: "Huế - Đà Nẵng" };
+  }
+
+  if (mentionsDaNang) return { locationName: "Đà Nẵng", routeSegment: null };
+  if (mentionsHoiAn) return { locationName: "Hội An", routeSegment: null };
+  if (mentionsHue) return { locationName: "Huế", routeSegment: null };
+
+  return { locationName: null, routeSegment: null };
 }
 
-function containsUnsafeRawOverlap(values: Array<string | null>, rawText: string) {
+function containsUnsafeDraftFields(input: { title: string; locationName: string | null; routeSegment: string | null; summary: string; practicalDetails: Record<string, unknown>; tags: string[] }, rawText: string) {
+  const strictValues = [input.title, input.locationName, input.routeSegment, input.summary, ...input.tags, ...Object.keys(input.practicalDetails)];
+  const detailValues = flattenDetailEntries(input.practicalDetails);
+  return containsUnsafeRawOverlap(strictValues, rawText, { allowContactValues: false }) || detailValues.some((detail) => containsUnsafeRawOverlap([detail.value], rawText, { allowContactValues: isPublicContactDetailKey(detail.key) }));
+}
+
+function flattenDetailEntries(details: Record<string, unknown>) {
+  return Object.entries(details).flatMap(([key, value]) => (Array.isArray(value) ? value : [value]).filter((item): item is string => typeof item === "string").map((item) => ({ key, value: item })));
+}
+
+function containsUnsafeRawOverlap(values: Array<string | null>, rawText: string, options: { allowContactValues: boolean }) {
   const normalizedRaw = normalizeForOverlap(rawText);
   return values.some((value) => {
     if (!value) return false;
     const normalizedValue = normalizeForOverlap(value);
-    return containsSensitivePattern(normalizedValue) || (normalizedValue.length >= 24 && normalizedRaw.includes(normalizedValue));
+    return (!options.allowContactValues && containsSensitivePattern(normalizedValue)) || (normalizedValue.length >= 24 && normalizedRaw.includes(normalizedValue));
   });
+}
+
+function isPublicContactDetailKey(key: string) {
+  return /contact|phone|tel|hotline|email|booking|reservation|zalo/i.test(key);
 }
 
 function containsSensitivePattern(value: string) {

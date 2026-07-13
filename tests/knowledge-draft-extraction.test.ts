@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { aiGatewayModels, aiUsageEvents, auditEvents, knowledgeCards, knowledgeCardSources, rawSourceMaterial, sources, userRoles, users, type UserRole } from "@/db/schema";
+import { buildSourceKnowledgeDraftExtractionMessages, buildSourceKnowledgeSuggestionMessages } from "@/features/ai/prompts";
 
 import { testDb } from "./helpers/db";
 
@@ -153,6 +154,80 @@ describe("knowledge draft extraction", () => {
     expect(audits[0]?.afterSummary).not.toContain("80.000đ");
   });
 
+  test("source extraction prompt asks for Vietnamese draft content by default", () => {
+    const messages = buildSourceKnowledgeDraftExtractionMessages({
+      source: {
+        kind: "facebook",
+        label: "Bài Facebook cộng đồng",
+        publisher: null,
+        collectedDate: null,
+        sourceType: "community",
+        verificationStatus: "unverified",
+        official: false,
+        partner: false,
+      },
+      rawText: "Đèo Hải Vân có điểm dừng ngắm cảnh, cần kiểm tra chỗ đậu xe trước khi duyệt.",
+    });
+
+    const systemMessage = messages.find((message) => message.role === "system")?.content ?? "";
+    const userMessage = messages.find((message) => message.role === "user")?.content ?? "";
+
+    expect(systemMessage).toContain("Write all user-facing draft values in natural Vietnamese by default");
+    expect(systemMessage).toContain("Keep JSON keys and enum values exactly as specified in English");
+    expect(systemMessage).toContain("Paraphrase aggressively");
+    expect(systemMessage).toContain("do not copy any phrase");
+    expect(userMessage).toContain("Tiêu đề ngắn an toàn");
+    expect(userMessage).toContain("Tóm tắt sự kiện cần duyệt");
+    expect(userMessage).toContain("the_ngan");
+    expect(userMessage).not.toContain("Short safe title");
+    expect(userMessage).not.toContain("Reviewable fact summary");
+  });
+
+  test("source suggestion prompt asks for Vietnamese suggestion and draft content by default", () => {
+    const messages = buildSourceKnowledgeSuggestionMessages({
+      source: {
+        kind: "url",
+        label: "Nguồn URL du lịch",
+        publisher: null,
+        collectedDate: null,
+        sourceType: "curated",
+        verificationStatus: "unverified",
+        official: false,
+        partner: false,
+        canonicalUrl: "https://example.com/source",
+      },
+      rawText: "Bãi xe phía bắc Huế có điểm dừng phù hợp gia đình, cần kiểm tra sức chứa.",
+      candidates: [
+        {
+          id: "existing-card",
+          status: "approved",
+          type: "parking",
+          title: "Bãi xe cũ ở Huế",
+          locationName: "Huế",
+          routeSegment: null,
+          summary: "Thông tin đã duyệt trước đó.",
+          confidence: "curated",
+          freshnessSensitive: true,
+          tags: ["hue"],
+        },
+      ],
+    });
+
+    const systemMessage = messages.find((message) => message.role === "system")?.content ?? "";
+    const userMessage = messages.find((message) => message.role === "user")?.content ?? "";
+
+    expect(systemMessage).toContain("Write all user-facing suggestion and draft values in natural Vietnamese by default");
+    expect(systemMessage).toContain("Keep JSON keys and enum values exactly as specified in English");
+    expect(systemMessage).toContain("Paraphrase aggressively");
+    expect(systemMessage).toContain("do not copy any phrase");
+    expect(userMessage).toContain("Tóm tắt ngắn trạng thái hiện tại");
+    expect(userMessage).toContain("Lý do đề xuất action này");
+    expect(userMessage).toContain("Tiêu đề ngắn an toàn");
+    expect(userMessage).toContain("the_ngan");
+    expect(userMessage).not.toContain("Short safe current-state summary");
+    expect(userMessage).not.toContain("Why this action is suggested");
+  });
+
   test("provider failure records safe usage failure and stores no drafts", async () => {
     await createUser("provider-operator", ["operator"]);
     authMock.mockResolvedValue({ user: { id: "provider-operator", email: "provider-operator@example.com" } });
@@ -217,7 +292,7 @@ describe("knowledge draft extraction", () => {
     mockGatewayJson(JSON.stringify({ drafts: [{ type: "food", title: "Missing summary" }] }));
     const { extractKnowledgeDraftsFromSource } = await import("@/features/knowledge/actions");
 
-    await expect(extractKnowledgeDraftsFromSource(source.id)).rejects.toMatchObject({ code: "invalid_model_output" });
+    await expect(extractKnowledgeDraftsFromSource(source.id)).rejects.toMatchObject({ code: "invalid_model_output", safeDetail: "missing_or_invalid_required_field" });
     await expect(testDb.select().from(aiUsageEvents)).resolves.toMatchObject([{ status: "success" }]);
     await expect(testDb.select().from(knowledgeCards)).resolves.toHaveLength(0);
     await expect(testDb.select().from(knowledgeCardSources)).resolves.toHaveLength(0);
@@ -306,7 +381,7 @@ describe("knowledge draft extraction", () => {
     );
     const { extractKnowledgeDraftsFromSource } = await import("@/features/knowledge/actions");
 
-    await expect(extractKnowledgeDraftsFromSource(source.id)).rejects.toMatchObject({ code: "invalid_model_output" });
+    await expect(extractKnowledgeDraftsFromSource(source.id)).rejects.toMatchObject({ code: "invalid_model_output", safeDetail: "missing_or_invalid_required_field" });
     await expect(testDb.select().from(aiUsageEvents)).resolves.toMatchObject([{ status: "success" }]);
     await expect(testDb.select().from(knowledgeCards)).resolves.toHaveLength(0);
   });
@@ -315,7 +390,7 @@ describe("knowledge draft extraction", () => {
     await createUser("missing-location-operator", ["operator"]);
     authMock.mockResolvedValue({ user: { id: "missing-location-operator", email: "missing-location-operator@example.com" } });
     await createExtractionModel();
-    const source = await createTextSource("missing-location-operator");
+    const source = await createTextSource("missing-location-operator", "Mẹo chuẩn bị đồ dùng chung cho chuyến đi dài, không nêu địa điểm hoặc cung đường cụ thể.");
     mockGatewayJson(
       JSON.stringify({
         drafts: [
@@ -333,8 +408,34 @@ describe("knowledge draft extraction", () => {
     );
     const { extractKnowledgeDraftsFromSource } = await import("@/features/knowledge/actions");
 
-    await expect(extractKnowledgeDraftsFromSource(source.id)).rejects.toMatchObject({ code: "invalid_model_output" });
+    await expect(extractKnowledgeDraftsFromSource(source.id)).rejects.toMatchObject({ code: "invalid_model_output", safeDetail: "missing_location_or_route" });
     await expect(testDb.select().from(knowledgeCards)).resolves.toHaveLength(0);
+  });
+
+  test("central Vietnam Facebook drafts can infer a safe location fallback when model omits route fields", async () => {
+    await createUser("fallback-location-operator", ["operator"]);
+    authMock.mockResolvedValue({ user: { id: "fallback-location-operator", email: "fallback-location-operator@example.com" } });
+    await createExtractionModel();
+    const source = await createTextSource("fallback-location-operator", "Bài chia sẻ kinh nghiệm đi Đà Nẵng và phố cổ Hội An, có nhắc cung Lăng Cô qua đèo Hải Vân.");
+    mockGatewayJson(
+      JSON.stringify({
+        drafts: [
+          {
+            type: "route_note",
+            title: "Gợi ý cung miền Trung",
+            summary: "Bản nháp cần operator kiểm tra lại trước khi dùng cho lịch trình xuyên Việt.",
+            practical_details: { tips: ["Soát lại điều kiện đường trước khi đi"] },
+            tags: ["mien-trung"],
+            confidence: "community",
+            freshness_sensitive: false,
+          },
+        ],
+      }),
+    );
+    const { extractKnowledgeDraftsFromSource } = await import("@/features/knowledge/actions");
+
+    await expect(extractKnowledgeDraftsFromSource(source.id)).resolves.toMatchObject({ draftCount: 1 });
+    await expect(testDb.select().from(knowledgeCards)).resolves.toMatchObject([{ locationName: "Đà Nẵng - Hội An", routeSegment: "Đà Nẵng - Hội An" }]);
   });
 
   test("short raw snippets and phone-like values are rejected from safe draft fields", async () => {
@@ -360,8 +461,37 @@ describe("knowledge draft extraction", () => {
     );
     const { extractKnowledgeDraftsFromSource } = await import("@/features/knowledge/actions");
 
-    await expect(extractKnowledgeDraftsFromSource(source.id)).rejects.toMatchObject({ code: "invalid_model_output" });
+    await expect(extractKnowledgeDraftsFromSource(source.id)).rejects.toMatchObject({ code: "invalid_model_output", safeDetail: "unsafe_raw_overlap_or_sensitive_value" });
     await expect(testDb.select().from(knowledgeCards)).resolves.toHaveLength(0);
+  });
+
+  test("hotel public contact details are allowed in explicit contact detail fields", async () => {
+    await createUser("hotel-contact-operator", ["operator"]);
+    authMock.mockResolvedValue({ user: { id: "hotel-contact-operator", email: "hotel-contact-operator@example.com" } });
+    await createExtractionModel();
+    const source = await createTextSource("hotel-contact-operator", "Khách sạn ven biển Đà Nẵng công bố hotline 0901234567 và email booking@hotel.example cho đặt phòng.");
+    mockGatewayJson(
+      JSON.stringify({
+        drafts: [
+          {
+            type: "hotel_area",
+            title: "Khu khách sạn ven biển Đà Nẵng",
+            location_name: "Đà Nẵng",
+            summary: "Khu lưu trú ven biển cần operator kiểm tra lại tình trạng phòng và điều kiện đặt trước khi dùng cho khách.",
+            practical_details: { booking_contact: ["0901234567", "booking@hotel.example"] },
+            tags: ["khach-san"],
+            confidence: "community",
+            freshness_sensitive: true,
+          },
+        ],
+      }),
+    );
+    const { extractKnowledgeDraftsFromSource } = await import("@/features/knowledge/actions");
+
+    await expect(extractKnowledgeDraftsFromSource(source.id)).resolves.toMatchObject({ draftCount: 1 });
+    await expect(testDb.select().from(knowledgeCards)).resolves.toMatchObject([
+      { type: "hotel_area", practicalDetails: { booking_contact: ["0901234567", "booking@hotel.example"] } },
+    ]);
   });
 
   test("previous extraction cards block re-extraction even after review is closed", async () => {

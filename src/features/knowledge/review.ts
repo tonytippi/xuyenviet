@@ -500,12 +500,7 @@ function assertApprovalReady(card: KnowledgeDraftReviewCard) {
 }
 
 function assertApprovalSafeFields(card: KnowledgeDraftReviewCard, rawTexts: string[]) {
-  rejectUnsafeSafeFields(
-    [card.title, card.locationName, card.routeSegment, card.summary, ...card.tags, ...Object.keys(card.practicalDetails), ...flattenDetailStrings(card.practicalDetails)].filter(
-      (value): value is string => typeof value === "string",
-    ),
-    rawTexts,
-  );
+  rejectUnsafeCardFields({ title: card.title, locationName: card.locationName, routeSegment: card.routeSegment, summary: card.summary, tags: card.tags, practicalDetails: card.practicalDetails }, rawTexts);
 }
 
 async function loadReviewableDraft(db: Pick<ReviewDb, "select">, draftId: string) {
@@ -597,10 +592,7 @@ function normalizeDraftUpdateInput(input: KnowledgeDraftUpdateInput, linkedSourc
     throw new KnowledgeDraftReviewError("Bản nháp cần ít nhất một địa điểm hoặc cung đường.", "invalid_input");
   }
 
-  rejectUnsafeSafeFields(
-    [title, locationName, routeSegment, summary, ...tags, ...Object.keys(practicalDetails), ...flattenDetailStrings(practicalDetails)].filter((value): value is string => typeof value === "string"),
-    rawTexts,
-  );
+  rejectUnsafeCardFields({ title, locationName, routeSegment, summary, tags, practicalDetails }, rawTexts);
 
   return { type, title, locationName, routeSegment, summary, practicalDetails, tags, confidence, freshnessSensitive };
 }
@@ -949,12 +941,20 @@ function normalizeTags(value: unknown) {
   return tags;
 }
 
-function rejectUnsafeSafeFields(values: string[], rawTexts: string[]) {
+function rejectUnsafeCardFields(input: { title: string; locationName: string | null; routeSegment: string | null; summary: string; tags: string[]; practicalDetails: Record<string, unknown> }, rawTexts: string[]) {
+  rejectUnsafeSafeFields([input.title, input.locationName, input.routeSegment, input.summary, ...input.tags, ...Object.keys(input.practicalDetails)].filter((value): value is string => typeof value === "string"), rawTexts, { allowContactValues: false });
+
+  for (const detail of flattenDetailEntries(input.practicalDetails)) {
+    rejectUnsafeSafeFields([detail.value], rawTexts, { allowContactValues: isPublicContactDetailKey(detail.key) });
+  }
+}
+
+function rejectUnsafeSafeFields(values: string[], rawTexts: string[], options: { allowContactValues: boolean }) {
   const normalizedRawValues = rawTexts.map(normalizeForOverlap).filter(Boolean);
   const rawCorpus = normalizedRawValues.join(" ");
 
   for (const value of values) {
-    if (emailLikePattern.test(value) || phoneLikePattern.test(value) || sensitiveTokenPattern.test(value)) {
+    if ((!options.allowContactValues && (emailLikePattern.test(value) || phoneLikePattern.test(value))) || sensitiveTokenPattern.test(value)) {
       throw new KnowledgeDraftReviewError("Trường an toàn không được chứa số liên hệ, email hoặc metadata thô.", "invalid_input");
     }
 
@@ -966,8 +966,12 @@ function rejectUnsafeSafeFields(values: string[], rawTexts: string[]) {
   }
 }
 
-function flattenDetailStrings(details: Record<string, unknown>) {
-  return Object.values(details).flatMap((value) => (Array.isArray(value) ? value : [value])).filter((value): value is string => typeof value === "string");
+function flattenDetailEntries(details: Record<string, unknown>) {
+  return Object.entries(details).flatMap(([key, value]) => (Array.isArray(value) ? value : [value]).filter((item): item is string => typeof item === "string").map((item) => ({ key, value: item })));
+}
+
+function isPublicContactDetailKey(key: string) {
+  return /contact|phone|tel|hotline|email|booking|reservation|zalo/i.test(key);
 }
 
 function flattenMetadataStrings(value: unknown): string[] {

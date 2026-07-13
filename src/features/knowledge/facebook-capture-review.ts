@@ -245,17 +245,18 @@ export async function markFacebookCaptureReviewStatusInTransaction(
       throw new Error("extractionError is required when marking extraction failure.");
     }
 
-    const now = input.now ?? new Date();
+    const now = input.now ? getMutationTimestamp(input.now, review.createdAt) : null;
+    const mutationTimestamp = now ?? sql<Date>`greatest(now(), ${facebookCaptureReviews.createdAt})`;
 
     const [updated] = await db
       .update(facebookCaptureReviews)
       .set({
         status: input.status,
         reviewerUserId: input.actor.userId,
-        reviewedAt: now,
+        reviewedAt: mutationTimestamp,
         rejectionReason: input.status === "rejected" ? rejectionReason : null,
         extractionError: input.status === "extraction_failed" ? extractionError : null,
-        updatedAt: now,
+        updatedAt: mutationTimestamp,
       })
       .where(and(eq(facebookCaptureReviews.id, input.reviewId), eq(facebookCaptureReviews.status, review.status)))
       .returning();
@@ -272,7 +273,7 @@ export async function markFacebookCaptureReviewStatusInTransaction(
       targetId: review.id,
       beforeSummary: `Facebook capture review ${review.id}: status=${review.status}; sourceId=${review.sourceId}.`,
       afterSummary: `Facebook capture review ${review.id}: ${review.status} -> ${input.status}; sourceId=${review.sourceId}; reason=${rejectionReason ?? extractionError ?? "none"}.`,
-      createdAt: now,
+      createdAt: updated.updatedAt,
     });
 
     return { status: "updated" as const, review: updated };
@@ -304,7 +305,8 @@ export async function reopenFacebookCaptureForRecapture(
       throw new Error("reopenReason is required when reopening a capture for recapture.");
     }
 
-    const now = input.now ?? new Date();
+    const now = input.now ? getMutationTimestamp(input.now, review.createdAt) : null;
+    const mutationTimestamp = now ?? sql<Date>`greatest(now(), ${facebookCaptureReviews.createdAt})`;
 
     const [updatedReview] = await transaction
       .update(facebookCaptureReviews)
@@ -314,7 +316,7 @@ export async function reopenFacebookCaptureForRecapture(
         reviewedAt: null,
         rejectionReason: null,
         extractionError: null,
-        updatedAt: now,
+        updatedAt: mutationTimestamp,
       })
       .where(and(eq(facebookCaptureReviews.id, input.reviewId), eq(facebookCaptureReviews.status, "rejected")))
       .returning();
@@ -333,9 +335,14 @@ export async function reopenFacebookCaptureForRecapture(
       targetId: review.id,
       beforeSummary: `Facebook capture review ${review.id}: status=rejected; sourceId=${review.sourceId}; rawTextPresent=${Boolean(review.rawText?.trim())}.`,
       afterSummary: `Facebook capture review ${review.id}: rejected -> recapture-ready; sourceId=${review.sourceId}; rawSourceMaterialId=${review.rawSourceMaterialId}; reason=${reopenReason}.`,
-      createdAt: now,
+      createdAt: updatedReview.updatedAt,
     });
 
     return { status: "updated" as const, review: updatedReview };
   });
+}
+
+function getMutationTimestamp(requested: Date | undefined, createdAt: Date) {
+  const now = requested ?? new Date();
+  return now >= createdAt ? now : createdAt;
 }

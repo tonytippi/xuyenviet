@@ -79,9 +79,32 @@ async function markFacebookCaptureExtractionFailed(input: { reviewId: string; ac
       actor: input.actor,
       extractionError: input.extractionError,
     });
-  } catch {
-    return { status: "status_update_failed" as const };
+  } catch (error) {
+    const reason = getSafeDatabaseFailureReason(error);
+    return { status: "status_update_failed" as const, reason: normalizeSafeRedirectCode(reason) };
   }
+}
+
+function getSafeDatabaseFailureReason(error: unknown) {
+  const cause = error instanceof Error ? error.cause : null;
+
+  if (isRecord(cause)) {
+    const constraint = typeof cause.constraint_name === "string" ? cause.constraint_name : null;
+    const code = typeof cause.code === "string" ? cause.code : null;
+    if (constraint && code) return `${code}:${constraint}`;
+    if (constraint) return constraint;
+    if (code) return code;
+  }
+
+  return error instanceof Error ? error.message : "unknown";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function normalizeSafeRedirectCode(value: string) {
+  return value.replace(/[^a-zA-Z0-9_.:-]+/g, "_").slice(0, 120) || "unknown";
 }
 
 export async function updateKnowledgeDraft(draftId: string, formData: FormData) {
@@ -253,6 +276,7 @@ export async function extractKnowledgeDraftsFromFacebookCaptureForm(formData: Fo
 
     if (isKnowledgeExtractionError(error) && error instanceof Error) {
       const code = "code" in error && typeof error.code === "string" ? error.code : "unknown";
+      const detail = "safeDetail" in error && typeof error.safeDetail === "string" ? error.safeDetail : undefined;
 
       if (code === "already_extracted") {
         const existingCards = target?.existingCards.length ?? 0;
@@ -357,6 +381,43 @@ export async function extractAndApproveFacebookCaptureDraftsForm(formData: FormD
 
       if (!target) {
         redirectPath = getFacebookCaptureRedirectPath(reviewId, { approveAllError: "Không tìm thấy capture cần trích xuất và phê duyệt." });
+      } else if (target.existingCards.some((card) => card.aiPromptVersion === sourceKnowledgeDraftExtractionPromptVersion) && (target.status === "needs_review" || target.status === "extracted")) {
+        const extractionTarget = target;
+        const existingExtractionCards = extractionTarget.existingCards.filter((card) => card.aiPromptVersion === sourceKnowledgeDraftExtractionPromptVersion);
+        const existingDraftIds = existingExtractionCards.filter((card) => card.status === "draft").map((card) => card.id);
+        const extractedStatusResult =
+          extractionTarget.status === "needs_review" ? await markFacebookCaptureReviewStatus(getDb(), { reviewId: extractionTarget.id, status: "extracted", actor: extractionTarget.actor }) : ({ status: "updated" } as const);
+
+        if (extractedStatusResult.status !== "updated") {
+          redirectPath = getFacebookCaptureRedirectPath(extractionTarget.id, { approveAllRecoveryStatus: extractedStatusResult.status, existingCards: String(existingExtractionCards.length) });
+        } else {
+          let finalStatusFailure: string | null = null;
+
+          try {
+            const approvalResult = await getDb().transaction(async (transaction) => {
+              const approved = existingDraftIds.length > 0 ? await approveKnowledgeDraftBatchInTransaction(transaction, session, existingDraftIds) : { draftIds: [] };
+              const approvedStatusResult = await markFacebookCaptureReviewStatusInTransaction(transaction, { reviewId: extractionTarget.id, status: "extracted_approved", actor: extractionTarget.actor });
+
+              if (approvedStatusResult.status !== "updated") {
+                finalStatusFailure = approvedStatusResult.status;
+                throw new Error("approve_all_status_transition_failed");
+              }
+
+              return approved;
+            });
+
+            redirectPath = getFacebookCaptureRedirectPath(extractionTarget.id, { approvedAll: String(approvalResult.draftIds.length), sourceId: extractionTarget.sourceId, recoveredExistingExtraction: "1" });
+          } catch (error) {
+            if (finalStatusFailure) {
+              redirectPath = getFacebookCaptureRedirectPath(extractionTarget.id, { approveAllRecoveryStatus: finalStatusFailure, existingCards: String(existingExtractionCards.length) });
+            } else if (error instanceof AdminAuthorizationError || (error instanceof Error && error.name === "AdminAuthorizationError")) {
+              throw error;
+            } else {
+              const failureCode = isKnowledgeDraftReviewError(error) && error instanceof Error && "code" in error && typeof error.code === "string" ? error.code : "approval_failed";
+              redirectPath = getFacebookCaptureRedirectPath(extractionTarget.id, { approvalFailed: "1", approvalError: failureCode, existingCards: String(existingExtractionCards.length) });
+            }
+          }
+        }
       } else if (target.existingCards.some((card) => card.aiPromptVersion === sourceKnowledgeDraftExtractionPromptVersion)) {
         redirectPath = getFacebookCaptureRedirectPath(target.id, { alreadyExtracted: "1", existingCards: String(target.existingCards.length) });
       } else if (target.status !== "needs_review") {
@@ -410,6 +471,7 @@ export async function extractAndApproveFacebookCaptureDraftsForm(formData: FormD
 
     if (isKnowledgeExtractionError(error) && error instanceof Error) {
       const code = "code" in error && typeof error.code === "string" ? error.code : "unknown";
+      const detail = "safeDetail" in error && typeof error.safeDetail === "string" ? error.safeDetail : undefined;
 
       if (code === "already_extracted") {
         const existingCards = target?.existingCards.length ?? 0;
@@ -424,9 +486,11 @@ export async function extractAndApproveFacebookCaptureDraftsForm(formData: FormD
             extractionError: `Extraction failed: ${code}`,
           });
           failureStatus = statusResult.status;
+          const statusReason = "reason" in statusResult && typeof statusResult.reason === "string" ? statusResult.reason : undefined;
+          redirectPath = getFacebookCaptureRedirectPath(target?.id ?? reviewId, { approveAllError: "Không thể trích xuất và phê duyệt capture này.", errorCode: code, errorDetail: detail, failureStatus, statusReason });
+        } else {
+          redirectPath = getFacebookCaptureRedirectPath(target?.id ?? reviewId, { approveAllError: "Không thể trích xuất và phê duyệt capture này.", errorCode: code, errorDetail: detail, failureStatus });
         }
-
-        redirectPath = getFacebookCaptureRedirectPath(target?.id ?? reviewId, { approveAllError: "Không thể trích xuất và phê duyệt capture này.", errorCode: code, failureStatus });
       }
     } else {
       let failureStatus = "not_updated";
@@ -438,9 +502,11 @@ export async function extractAndApproveFacebookCaptureDraftsForm(formData: FormD
           extractionError: "Extraction failed: unknown",
         });
         failureStatus = statusResult.status;
+        const statusReason = "reason" in statusResult && typeof statusResult.reason === "string" ? statusResult.reason : undefined;
+        redirectPath = getFacebookCaptureRedirectPath(target?.id ?? reviewId, { approveAllError: "Không thể trích xuất và phê duyệt capture này.", failureStatus, statusReason });
+      } else {
+        redirectPath = getFacebookCaptureRedirectPath(target?.id ?? reviewId, { approveAllError: "Không thể trích xuất và phê duyệt capture này.", failureStatus });
       }
-
-      redirectPath = getFacebookCaptureRedirectPath(target?.id ?? reviewId, { approveAllError: "Không thể trích xuất và phê duyệt capture này.", failureStatus });
     }
   }
 
@@ -547,7 +613,7 @@ function getOptionalFormString(formData: FormData, key: string) {
   return typeof value === "string" ? value.trim() || null : null;
 }
 
-function getFacebookCaptureRedirectPath(reviewId: string, params: Record<string, string>) {
+function getFacebookCaptureRedirectPath(reviewId: string, params: Record<string, string | undefined>) {
   const pathReviewId = encodeURIComponent(reviewId || "unknown");
   const searchParams = new URLSearchParams();
 
