@@ -1,4 +1,4 @@
-import { aiUsagePromptVersions, aiUsagePurposes } from "@/features/usage/events";
+import { aiUsagePromptVersions, aiUsagePurposes } from "@/features/usage/constants";
 
 export const aiAskInitialAnswerPurpose = aiUsagePurposes.aiAskInitialAnswer;
 export const aiAskInitialAnswerPromptVersion = aiUsagePromptVersions.aiAskInitialAnswer;

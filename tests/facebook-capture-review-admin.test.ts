@@ -56,7 +56,7 @@ describe("admin Facebook capture review helpers", () => {
     await createUserWithRoles("operator-user", ["operator"]);
   });
 
-  test.each(["operator", "admin"] as UserRole[])("%s can read default actionable queue without raw text", async (role) => {
+  test.each(["operator", "admin"] as UserRole[])("%s can read default actionable queue with raw text for review", async (role) => {
     await createUserWithRoles(`${role}-reader`, [role]);
     authMock.mockResolvedValue({ user: { id: `${role}-reader`, email: `${role}-reader@example.com` } });
     await createCapturedFacebookSource({
@@ -90,9 +90,10 @@ describe("admin Facebook capture review helpers", () => {
         finalUrl: "https://m.facebook.com/groups/xuyenviet/posts/needs-review",
         authorText: "Cộng đồng Xuyên Việt",
         timestampText: "2 giờ trước",
+        rawText: "Raw Facebook text must stay out of queue rows.",
       },
     ]);
-    expect(JSON.stringify(reviews)).not.toContain("Raw Facebook text");
+    expect(JSON.stringify(reviews)).toContain("Raw Facebook text");
   });
 
   test("explicit status filters include non-actionable captures and linked existing cards", async () => {
@@ -210,7 +211,7 @@ describe("admin Facebook capture review helpers", () => {
     await expect(getAdminFacebookCaptureReviewDetail(review.id)).rejects.toThrow(AdminAuthorizationError);
   });
 
-  test("queue page renders Vietnamese labels without raw captured text", async () => {
+  test("queue page renders Vietnamese labels with raw captured text for operators", async () => {
     authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
     await createCapturedFacebookSource({
       id: "queue-page",
@@ -229,7 +230,8 @@ describe("admin Facebook capture review helpers", () => {
     expect(html).toContain("Hàng đợi duyệt capture Facebook");
     expect(html).toContain("Nguồn Facebook/cộng đồng, chưa xác minh");
     expect(html).toContain("Tác giả cộng đồng");
-    expect(html).not.toContain("Queue page must not render");
+    expect(html).toContain("Nội dung đã capture");
+    expect(html).toContain("Queue page must not render this raw Facebook paragraph.");
   });
 
   test("admin overview and intake page expose Facebook capture workflow routing", async () => {
@@ -269,7 +271,7 @@ describe("admin Facebook capture review helpers", () => {
     expect(rejectedHtml).toContain("chưa tạo thẻ tri thức cho traveler");
   });
 
-  test("rejected queue page renders safe rejection reason without raw captured text", async () => {
+  test("rejected queue page renders safe rejection reason and raw captured text", async () => {
     authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
     const review = await createCapturedFacebookSource({ id: "rejected-queue-page", rawText: "Rejected queue raw Facebook paragraph." });
     await markFacebookCaptureReviewStatus(testDb, {
@@ -285,7 +287,7 @@ describe("admin Facebook capture review helpers", () => {
 
     expect(html).toContain("Lý do từ chối");
     expect(html).toContain("Wrong visible post content");
-    expect(html).not.toContain("Rejected queue raw Facebook paragraph");
+    expect(html).toContain("Rejected queue raw Facebook paragraph.");
   });
 
   test("detail page renders raw text but not unsafe metadata values", async () => {

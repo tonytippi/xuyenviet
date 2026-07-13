@@ -3,30 +3,7 @@ import "server-only";
 import { aiUsageEvents, type AiUsageStatus } from "@/db/schema";
 
 import { estimateAiUsageCost, type AiGatewayPricingSnapshot } from "@/features/ai/models";
-
-export const aiUsagePurposes = {
-  aiAskInitialAnswer: "ai_ask_initial_answer",
-  extraction: "extraction",
-  evaluation: "evaluation",
-  webSearchFallback: "web_search_fallback",
-} as const;
-
-export const aiUsagePromptVersions = {
-  aiAskInitialAnswer: "ai_ask_initial_v8",
-  chatContextExtraction: "chat_context_extraction_v3",
-  sourceKnowledgeDraftExtraction: "source_knowledge_draft_extraction_v1",
-  sourceKnowledgeSuggestion: "source_knowledge_suggestion_v1",
-  publicMvpAnswerEvaluation: "public_mvp_answer_evaluation_v1",
-  webSearchFallback: "web_search_fallback_v1",
-} as const;
-
-export const aiUsageProviders = {
-  tavily: "tavily",
-} as const;
-
-export const aiUsageMechanisms = {
-  webSearch: "search",
-} as const;
+export { aiUsageMechanisms, aiUsagePromptVersions, aiUsageProviders, aiUsagePurposes } from "@/features/usage/constants";
 
 type UsageEventDb = {
   insert: (table: typeof aiUsageEvents) => {

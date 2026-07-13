@@ -141,6 +141,7 @@ export async function listFacebookCaptureReviews(db: FacebookCaptureReviewDb, in
       verificationStatus: sources.verificationStatus,
       official: sources.official,
       partner: sources.partner,
+      rawText: rawSourceMaterial.rawText,
       captureMethod: sql<string | null>`${rawSourceMaterial.rawMetadata}->>'captureMethod'`,
       capturedAt: sql<string | null>`${rawSourceMaterial.rawMetadata}->>'capturedAt'`,
       finalUrl: sql<string | null>`${rawSourceMaterial.rawMetadata}->>'finalUrl'`,

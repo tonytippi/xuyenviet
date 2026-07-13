@@ -71,6 +71,19 @@ export async function extractKnowledgeDraftsFromSource(sourceId: string, options
   return extractKnowledgeDraftsFromSourceService(sourceId, options);
 }
 
+async function markFacebookCaptureExtractionFailed(input: { reviewId: string; actor: FacebookCaptureReviewActor; extractionError: string }) {
+  try {
+    return await markFacebookCaptureReviewStatus(getDb(), {
+      reviewId: input.reviewId,
+      status: "extraction_failed",
+      actor: input.actor,
+      extractionError: input.extractionError,
+    });
+  } catch {
+    return { status: "status_update_failed" as const };
+  }
+}
+
 export async function updateKnowledgeDraft(draftId: string, formData: FormData) {
   return updateKnowledgeDraftService(draftId, parseKnowledgeDraftFormData(formData));
 }
@@ -248,9 +261,8 @@ export async function extractKnowledgeDraftsFromFacebookCaptureForm(formData: Fo
         let failureStatus = "not_updated";
 
         if (target?.status === "needs_review") {
-          const statusResult = await markFacebookCaptureReviewStatus(getDb(), {
+          const statusResult = await markFacebookCaptureExtractionFailed({
             reviewId: target.id,
-            status: "extraction_failed",
             actor: target.actor,
             extractionError: `Extraction failed: ${code}`,
           });
@@ -263,9 +275,8 @@ export async function extractKnowledgeDraftsFromFacebookCaptureForm(formData: Fo
       let failureStatus = "not_updated";
 
       if (target?.status === "needs_review") {
-        const statusResult = await markFacebookCaptureReviewStatus(getDb(), {
+        const statusResult = await markFacebookCaptureExtractionFailed({
           reviewId: target.id,
-          status: "extraction_failed",
           actor: target.actor,
           extractionError: "Extraction failed: unknown",
         });
@@ -407,9 +418,8 @@ export async function extractAndApproveFacebookCaptureDraftsForm(formData: FormD
         let failureStatus = "not_updated";
 
         if (target?.status === "needs_review") {
-          const statusResult = await markFacebookCaptureReviewStatus(getDb(), {
+          const statusResult = await markFacebookCaptureExtractionFailed({
             reviewId: target.id,
-            status: "extraction_failed",
             actor: target.actor,
             extractionError: `Extraction failed: ${code}`,
           });
@@ -422,9 +432,8 @@ export async function extractAndApproveFacebookCaptureDraftsForm(formData: FormD
       let failureStatus = "not_updated";
 
       if (target?.status === "needs_review") {
-        const statusResult = await markFacebookCaptureReviewStatus(getDb(), {
+        const statusResult = await markFacebookCaptureExtractionFailed({
           reviewId: target.id,
-          status: "extraction_failed",
           actor: target.actor,
           extractionError: "Extraction failed: unknown",
         });

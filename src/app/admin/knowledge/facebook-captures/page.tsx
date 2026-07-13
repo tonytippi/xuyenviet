@@ -59,7 +59,7 @@ export default async function FacebookCaptureReviewQueuePage({ searchParams }: F
       <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[#8c4f13]">Nguồn Facebook/cộng đồng</p>
       <h1 className="mt-4 max-w-3xl text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">Hàng đợi duyệt capture Facebook.</h1>
       <p className="mt-5 max-w-2xl text-lg leading-8 text-[#4f625a]">
-        Nguồn Facebook/cộng đồng, chưa xác minh. Hàng đợi mặc định chỉ hiển thị capture còn cần vận hành xử lý; nội dung bài viết thô chỉ nằm trong trang chi tiết đã khóa quyền admin/operator.
+        Nguồn Facebook/cộng đồng, chưa xác minh. Hàng đợi mặc định hiển thị capture còn cần vận hành xử lý, gồm text đã capture để admin/operator kiểm tra nhanh trước khi trích xuất.
       </p>
 
       <nav className="mt-6 flex flex-wrap gap-2" aria-label="Lọc trạng thái capture Facebook">
@@ -128,6 +128,10 @@ export default async function FacebookCaptureReviewQueuePage({ searchParams }: F
                     <dd className="mt-2 text-[#4f625a]">Capture đã từ chối không còn nằm trong hàng đợi cần xử lý và chưa tạo thẻ tri thức cho traveler.</dd>
                   </div>
                 ) : null}
+                <div className="rounded-2xl bg-[#fbf7ed] p-3 sm:col-span-2">
+                  <dt className="font-semibold text-[#17342c]">Nội dung đã capture</dt>
+                  <dd className="mt-2 whitespace-pre-wrap break-words text-[#4f625a]">{review.rawText?.trim() || "Chưa có nội dung text."}</dd>
+                </div>
               </dl>
             </article>
           ))

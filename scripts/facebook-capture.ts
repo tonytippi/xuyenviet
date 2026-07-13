@@ -156,62 +156,129 @@ async function confirmSave(sourceId: string, text: string) {
 export async function extractVisibleFacebookText(page: Page): Promise<ExtractedFacebookText> {
   const result = await page.evaluate(`(() => {
     const normalizeText = (value) => value.replace(/\s+/g, " ").trim();
+    const isVisible = (element) => {
+      const rect = element.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    };
     const messageSelectors = [
+      '[data-ad-rendering-role="story_message"]',
       '[data-ad-preview="message"]',
       '[data-ad-comet-preview="message"]',
       '[data-testid="post_message"]',
     ];
+    const articleSelector = '[role="article"], [data-pagelet*="FeedUnit"], [data-pagelet*="Stories"]';
 
-    const messageCandidates = Array.from(document.querySelectorAll(messageSelectors.join(", ")))
+    const isCommentArticle = (element) => {
+      const ariaLabel = element.getAttribute("aria-label") ?? "";
+      return /^(Comment|Reply) by /i.test(ariaLabel);
+    };
+
+    const getDialogPostRoots = (dialog) => {
+      const positionedArticles = Array.from(dialog.querySelectorAll('[role="article"][aria-posinset]'))
+        .filter((element) => element instanceof HTMLElement)
+        .filter((element) => isVisible(element) && !isCommentArticle(element));
+
+      if (positionedArticles.length > 0) {
+        return positionedArticles;
+      }
+
+      const messageArticles = Array.from(dialog.querySelectorAll('[role="article"]'))
+        .filter((element) => element instanceof HTMLElement)
+        .filter((element) => isVisible(element) && !isCommentArticle(element) && element.querySelector(messageSelectors.join(", ")));
+
+      return messageArticles.length > 0 ? messageArticles : [dialog];
+    };
+
+    const collectCandidates = (root, scope) => {
+      const messageCandidates = Array.from(root.querySelectorAll(messageSelectors.join(", ")))
+        .filter((element) => element instanceof HTMLElement)
+        .map((element) => {
+          const rect = element.getBoundingClientRect();
+          const text = normalizeText(element.innerText ?? "");
+
+          return {
+            element,
+            text,
+            scope,
+            usedPostMessageSelector: true,
+            visible: rect.width > 0 && rect.height > 0,
+            rectArea: Math.round(rect.width * rect.height),
+            top: rect.top,
+          };
+        })
+        .filter((candidate) => candidate.visible && candidate.text.length > 0)
+        .sort((left, right) => left.top - right.top || right.text.length - left.text.length);
+
+      const articleCandidates = Array.from(root.querySelectorAll(articleSelector))
+        .filter((element) => element instanceof HTMLElement)
+        .map((element) => {
+          const rect = element.getBoundingClientRect();
+          const text = normalizeText(element.innerText ?? "");
+
+          return {
+            element,
+            text,
+            scope,
+            usedPostMessageSelector: false,
+            visible: rect.width > 0 && rect.height > 0,
+            rectArea: Math.round(rect.width * rect.height),
+            top: rect.top,
+          };
+        })
+        .filter((candidate) => candidate.visible && candidate.text.length > 0)
+        .sort((left, right) => left.top - right.top || right.text.length - left.text.length);
+
+      return {
+        messageCandidates,
+        articleCandidates,
+        candidates: messageCandidates.length > 0 ? messageCandidates : articleCandidates,
+      };
+    };
+
+    const dialogRoots = Array.from(document.querySelectorAll('[role="dialog"], [aria-modal="true"]'))
       .filter((element) => element instanceof HTMLElement)
-      .map((element) => {
-        const rect = element.getBoundingClientRect();
-        const text = normalizeText(element.innerText ?? "");
-
-        return {
-          element,
-          text,
-          visible: rect.width > 0 && rect.height > 0,
-          rectArea: Math.round(rect.width * rect.height),
-          top: rect.top,
-        };
-      })
-      .filter((candidate) => candidate.visible && candidate.text.length > 0)
-      .sort((left, right) => left.top - right.top || right.text.length - left.text.length);
-
-    const articleCandidates = Array.from(document.querySelectorAll('[role="article"], [data-pagelet*="FeedUnit"], [data-pagelet*="Stories"]'))
-      .filter((element) => element instanceof HTMLElement)
-      .map((element) => {
-        const rect = element.getBoundingClientRect();
-        const text = normalizeText(element.innerText ?? "");
-
-        return {
-          element,
-          text,
-          visible: rect.width > 0 && rect.height > 0,
-          rectArea: Math.round(rect.width * rect.height),
-          top: rect.top,
-        };
-      })
-      .filter((candidate) => candidate.visible && candidate.text.length > 0)
-      .sort((left, right) => left.top - right.top || right.text.length - left.text.length);
-
-    const candidates = messageCandidates.length > 0 ? messageCandidates : articleCandidates;
+      .filter(isVisible)
+      .sort((left, right) => {
+        const leftRect = left.getBoundingClientRect();
+        const rightRect = right.getBoundingClientRect();
+        return Math.round(rightRect.width * rightRect.height) - Math.round(leftRect.width * leftRect.height);
+      });
+    const dialogPostRoots = dialogRoots.flatMap(getDialogPostRoots);
+    const dialogCandidateSets = dialogPostRoots.map((root) => collectCandidates(root, "dialog"));
+    const dialogMessageCandidates = dialogCandidateSets.flatMap((set) => set.messageCandidates);
+    const pageCandidateSet = collectCandidates(document, "page");
+    const selectedSet = dialogRoots.length > 0 ? { candidates: dialogMessageCandidates } : pageCandidateSet;
+    const candidates = selectedSet.candidates;
     const best = candidates[0];
-    const article = best?.element;
+    const article = best?.element.closest?.('[role="article"]') ?? best?.element;
+    const messageTop = best?.element.getBoundingClientRect?.().top ?? Number.POSITIVE_INFINITY;
+    const authorCandidate = article
+      ? Array.from(article.querySelectorAll("strong"))
+          .filter((element) => element instanceof HTMLElement)
+          .find((element) => !best?.element.contains(element) && element.getBoundingClientRect().top <= messageTop)
+      : undefined;
+    const timestampCandidate = article
+      ? Array.from(article.querySelectorAll('a[href*="/posts/"], a[href*="story_fbid"], a[href*="/permalink/"]'))
+          .filter((element) => element instanceof HTMLElement)
+          .find((element) => !best?.element.contains(element) && element.getBoundingClientRect().top <= messageTop)
+      : undefined;
     const text = best?.text ?? "";
-    const authorText = article?.querySelector("strong")?.textContent?.trim() || undefined;
-    const timestampText = article?.querySelector('a[href*="/posts/"], a[href*="story_fbid"], a[href*="/permalink/"]')?.textContent?.trim() || undefined;
+    const authorText = authorCandidate?.textContent?.trim() || undefined;
+    const timestampText = timestampCandidate?.textContent?.trim() || undefined;
 
     return {
       text,
       authorText,
       timestampText,
       diagnostics: {
+        usedDialogScope: best?.scope === "dialog",
         usedArticleRole: Boolean(article?.matches('[role="article"]')),
-        usedPostMessageSelector: messageCandidates.length > 0,
-        messageCandidateCount: messageCandidates.length,
-        articleCandidateCount: articleCandidates.length,
+        usedPostMessageSelector: Boolean(best?.usedPostMessageSelector),
+        dialogRootCount: dialogRoots.length,
+        dialogPostRootCount: dialogPostRoots.length,
+        dialogCandidateCount: dialogMessageCandidates.length,
+        messageCandidateCount: pageCandidateSet.messageCandidates.length,
+        articleCandidateCount: pageCandidateSet.articleCandidates.length,
         candidateCount: candidates.length,
         longestCandidateLength: candidates[0]?.text.length ?? 0,
         secondCandidateLength: candidates[1]?.text.length ?? 0,

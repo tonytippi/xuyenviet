@@ -113,6 +113,22 @@ describe("Facebook capture review state", () => {
     await expect(listFacebookCaptureReviews(testDb, { status: "extraction_failed" })).resolves.toMatchObject([{ sourceId: "failed-review", status: "extraction_failed" }]);
   });
 
+  test("model-unavailable extraction failures can mark needs-review captures as failed", async () => {
+    await createSource({ id: "model-unavailable-review", rawText: "Captured text for extraction failure recovery." });
+    const ensured = await ensureFacebookCaptureReviewForCapturedSource(testDb, { sourceId: "model-unavailable-review", rawSourceMaterialId: "raw-model-unavailable-review", now: new Date("2026-07-13T08:37:53.462Z") });
+    if (ensured.status !== "created") throw new Error("test setup failed");
+
+    await expect(
+      markFacebookCaptureReviewStatus(testDb, {
+        reviewId: ensured.review.id,
+        status: "extraction_failed",
+        actor: { userId: "operator-user", email: "operator-user@example.com" },
+        extractionError: "Extraction failed: model_unavailable",
+        now: new Date("2026-07-13T08:47:58.514Z"),
+      }),
+    ).resolves.toMatchObject({ status: "updated", review: { status: "extraction_failed", rejectionReason: null, extractionError: "Extraction failed: model_unavailable" } });
+  });
+
   test("status transitions store safe reviewer metadata and audit without raw captured text", async () => {
     await createSource({ id: "transition-facebook", rawText: "Raw Facebook text that must not be copied into audit." });
     const ensured = await ensureFacebookCaptureReviewForCapturedSource(testDb, { sourceId: "transition-facebook", rawSourceMaterialId: "raw-transition-facebook", now: new Date("2026-07-13T00:00:00.000Z") });
