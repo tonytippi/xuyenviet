@@ -87,6 +87,9 @@ export type KnowledgeSuggestionAction = (typeof knowledgeSuggestionActionValues)
 export const knowledgeSeedBatchItemStatusValues = ["pending", "reading", "extracted", "needs_review", "approved", "failed", "duplicate", "rejected"] as const;
 export type KnowledgeSeedBatchItemStatus = (typeof knowledgeSeedBatchItemStatusValues)[number];
 
+export const facebookCaptureReviewStatusValues = ["needs_review", "rejected", "extracted", "extracted_approved", "extraction_failed"] as const;
+export type FacebookCaptureReviewStatus = (typeof facebookCaptureReviewStatusValues)[number];
+
 export const chatContextFieldValues = [
   "origin",
   "destination",
@@ -278,6 +281,41 @@ export const rawSourceMaterial = pgTable(
       "raw_source_material_file_metadata_complete_check",
       sql`(${material.fileName} is null and ${material.mimeType} is null and ${material.byteSize} is null) or (${material.fileName} is not null and ${material.mimeType} is not null and ${material.byteSize} is not null)`,
     ),
+  ],
+);
+
+export const facebookCaptureReviews = pgTable(
+  "facebook_capture_reviews",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    sourceId: text("source_id")
+      .notNull()
+      .references(() => sources.id, { onDelete: "restrict" }),
+    rawSourceMaterialId: text("raw_source_material_id").notNull(),
+    status: text("status").$type<FacebookCaptureReviewStatus>().default("needs_review").notNull(),
+    reviewerUserId: text("reviewer_user_id").references(() => users.id, { onDelete: "restrict" }),
+    reviewedAt: timestamp("reviewed_at", { mode: "date" }),
+    rejectionReason: text("rejection_reason"),
+    extractionError: text("extraction_error"),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (review) => [
+    uniqueIndex("facebook_capture_reviews_source_id_idx").on(review.sourceId),
+    index("facebook_capture_reviews_raw_material_id_idx").on(review.rawSourceMaterialId),
+    index("facebook_capture_reviews_status_updated_at_idx").on(review.status, review.updatedAt),
+    foreignKey({
+      columns: [review.rawSourceMaterialId],
+      foreignColumns: [rawSourceMaterial.id],
+      name: "facebook_capture_reviews_raw_material_fk",
+    }).onDelete("restrict"),
+    check("facebook_capture_reviews_status_check", sql`${review.status} in ('needs_review', 'rejected', 'extracted', 'extracted_approved', 'extraction_failed')`),
+    check("facebook_capture_reviews_rejection_reason_check", sql`${review.rejectionReason} is null or (${review.status} = 'rejected' and length(btrim(${review.rejectionReason})) between 1 and 500 and position(chr(10) in ${review.rejectionReason}) = 0 and position(chr(13) in ${review.rejectionReason}) = 0)`),
+    check("facebook_capture_reviews_extraction_error_check", sql`${review.extractionError} is null or (${review.status} = 'extraction_failed' and length(btrim(${review.extractionError})) between 1 and 500 and position(chr(10) in ${review.extractionError}) = 0 and position(chr(13) in ${review.extractionError}) = 0)`),
+    check("facebook_capture_reviews_reviewer_shape_check", sql`${review.status} = 'needs_review' or (${review.reviewerUserId} is not null and ${review.reviewedAt} is not null)`),
+    check("facebook_capture_reviews_updated_after_created_check", sql`${review.updatedAt} >= ${review.createdAt}`),
   ],
 );
 
@@ -1146,6 +1184,7 @@ export const schema = {
   auditEvents,
   sources,
   rawSourceMaterial,
+  facebookCaptureReviews,
   knowledgeCards,
   knowledgeCardSources,
   knowledgeCardSearchDocuments,

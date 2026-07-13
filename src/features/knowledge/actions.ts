@@ -2,12 +2,14 @@
 
 import { redirect } from "next/navigation";
 
-import { rawSourceMaterial, sources } from "@/db/schema";
+import { getDb } from "@/db/client";
+import { rawSourceMaterial, sources, type FacebookCaptureReviewStatus } from "@/db/schema";
 import { AdminAuthorizationError, requireAdminSession } from "@/server/auth";
 import { runAuditedAdminMutation } from "@/server/mutations";
 
 import { isKnowledgeBatchIntakeError, submitKnowledgeSeedUrlBatch as submitKnowledgeSeedUrlBatchService } from "./batch-intake";
 import { extractKnowledgeDraftsFromSource as extractKnowledgeDraftsFromSourceService, isKnowledgeExtractionError } from "./extraction";
+import { markFacebookCaptureReviewStatus, type FacebookCaptureReviewActor } from "./facebook-capture-review";
 import {
   approveKnowledgeDraft as approveKnowledgeDraftService,
   isKnowledgeDraftReviewError,
@@ -79,6 +81,18 @@ export async function suggestKnowledgeFromSourceUrl(sourceId: string) {
 
 export async function submitKnowledgeSeedUrlBatch(input: Parameters<typeof submitKnowledgeSeedUrlBatchService>[0]) {
   return submitKnowledgeSeedUrlBatchService(input);
+}
+
+export async function markFacebookCaptureReviewStatusAsAdmin(input: {
+  reviewId: string;
+  status: Exclude<FacebookCaptureReviewStatus, "needs_review">;
+  rejectionReason?: string;
+  extractionError?: string;
+}) {
+  const session = await requireAdminSession();
+  const actor: FacebookCaptureReviewActor = { userId: session.userId, email: session.email };
+
+  return markFacebookCaptureReviewStatus(getDb(), { ...input, actor });
 }
 
 export async function updateKnowledgeDraftForm(formData: FormData) {

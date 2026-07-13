@@ -134,7 +134,8 @@ describe("AI Ask route gate", () => {
       }),
     }));
     vi.doMock("@/server/auth", () => ({
-      getAuthenticatedSession: vi.fn().mockResolvedValue(null),
+      getAuthenticatedSessionWithRoles: vi.fn().mockResolvedValue(null),
+      hasAdminAccess: vi.fn().mockReturnValue(false),
     }));
     vi.doMock("@/features/auth/actions", () => ({
       signOutCurrentUser: vi.fn(),
@@ -152,7 +153,8 @@ describe("AI Ask route gate", () => {
       }),
     }));
     vi.doMock("@/server/auth", () => ({
-      getAuthenticatedSession: vi.fn().mockResolvedValue(null),
+      getAuthenticatedSessionWithRoles: vi.fn().mockResolvedValue(null),
+      hasAdminAccess: vi.fn().mockReturnValue(false),
     }));
     vi.doMock("@/features/auth/actions", () => ({
       signOutCurrentUser: vi.fn(),
@@ -172,7 +174,8 @@ describe("AI Ask route gate", () => {
       }),
     }));
     vi.doMock("@/server/auth", () => ({
-      getAuthenticatedSession: vi.fn().mockResolvedValue(null),
+      getAuthenticatedSessionWithRoles: vi.fn().mockResolvedValue(null),
+      hasAdminAccess: vi.fn().mockReturnValue(false),
     }));
     vi.doMock("@/features/auth/actions", () => ({
       signOutCurrentUser: vi.fn(),
@@ -188,6 +191,8 @@ describe("AI Ask route gate", () => {
   test("renders protected content only for authenticated travelers", async () => {
     vi.doMock("@/server/auth", () => ({
       getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
+      getAuthenticatedSessionWithRoles: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com", roles: [] }),
+      hasAdminAccess: vi.fn().mockReturnValue(false),
     }));
     vi.doMock("@/features/auth/actions", () => ({
       signOutCurrentUser: vi.fn(),

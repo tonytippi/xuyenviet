@@ -2,6 +2,7 @@ import { and, asc, eq, isNull, or, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
 import { auditEvents, rawSourceMaterial, schema, sources } from "../../db/schema";
+import { ensureFacebookCaptureReviewForCapturedSource } from "./facebook-capture-review";
 
 export type FacebookCaptureDb = PostgresJsDatabase<typeof schema>;
 
@@ -191,6 +192,16 @@ export async function updateQueuedFacebookSourceRawText(
       return { status: "no_longer_queued" as const };
     }
 
+    const review = await ensureFacebookCaptureReviewForCapturedSource(transaction, {
+      sourceId: queued.sourceId,
+      rawSourceMaterialId: queued.rawMaterialId,
+      now: input.now,
+    });
+
+    if (review.status === "not_reviewable") {
+      throw new Error("Captured Facebook source could not enter review state.");
+    }
+
     if (input.actor) {
       await transaction.insert(auditEvents).values({
         actorUserId: input.actor.userId,
@@ -204,7 +215,7 @@ export async function updateQueuedFacebookSourceRawText(
       });
     }
 
-    return { status: "updated" as const, rawMaterialId: updated[0].id };
+    return { status: "updated" as const, rawMaterialId: updated[0].id, reviewId: review.review.id };
   });
 }
 
