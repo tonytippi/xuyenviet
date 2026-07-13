@@ -252,7 +252,7 @@ export async function extractKnowledgeDraftsFromFacebookCaptureForm(formData: Fo
       redirectPath = getFacebookCaptureRedirectPath(reviewId, { extractError: "Không tìm thấy capture cần trích xuất." });
     } else if (target.existingCards.some((card) => card.aiPromptVersion === sourceKnowledgeDraftExtractionPromptVersion)) {
       redirectPath = getFacebookCaptureRedirectPath(target.id, { alreadyExtracted: "1", existingCards: String(target.existingCards.length) });
-    } else if (target.status !== "needs_review") {
+    } else if (target.status !== "needs_review" && target.status !== "extraction_failed") {
       redirectPath = getFacebookCaptureRedirectPath(target.id, { extractStatus: target.status, existingCards: String(target.existingCards.length) });
     } else if (target.sourceKind !== "facebook" || target.sourceType !== "community" || !target.rawText?.trim()) {
       redirectPath = getFacebookCaptureRedirectPath(target.id, { extractError: "Capture này không đủ điều kiện trích xuất bản nháp." });
@@ -420,7 +420,7 @@ export async function extractAndApproveFacebookCaptureDraftsForm(formData: FormD
         }
       } else if (target.existingCards.some((card) => card.aiPromptVersion === sourceKnowledgeDraftExtractionPromptVersion)) {
         redirectPath = getFacebookCaptureRedirectPath(target.id, { alreadyExtracted: "1", existingCards: String(target.existingCards.length) });
-      } else if (target.status !== "needs_review") {
+      } else if (target.status !== "needs_review" && target.status !== "extraction_failed") {
         redirectPath = getFacebookCaptureRedirectPath(target.id, { approveAllStatus: target.status, existingCards: String(target.existingCards.length) });
       } else if (target.sourceKind !== "facebook" || target.sourceType !== "community" || !target.rawText?.trim()) {
         redirectPath = getFacebookCaptureRedirectPath(target.id, { approveAllError: "Capture này không đủ điều kiện trích xuất và phê duyệt tất cả." });

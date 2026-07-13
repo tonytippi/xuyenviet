@@ -1,4 +1,4 @@
-import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
+import { and, count, desc, eq, isNotNull, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
 import { sourceKnowledgeDraftExtractionPromptVersion } from "../ai/prompts";
@@ -119,9 +119,11 @@ export async function ensureFacebookCaptureReviewForCapturedSource(
   return { status: "created" as const, review };
 }
 
-export async function listFacebookCaptureReviews(db: FacebookCaptureReviewDb, input: { status?: FacebookCaptureReviewStatus } = {}) {
+export async function listFacebookCaptureReviews(db: FacebookCaptureReviewDb, input: { status?: FacebookCaptureReviewStatus; limit?: number; offset?: number } = {}) {
   const statusCondition = input.status ? eq(facebookCaptureReviews.status, input.status) : undefined;
   const rawTextCondition = input.status === "needs_review" ? capturedRawTextCondition() : undefined;
+  const limit = input.limit ?? 25;
+  const offset = input.offset ?? 0;
   const rows = await db
     .select({
       id: facebookCaptureReviews.id,
@@ -152,7 +154,9 @@ export async function listFacebookCaptureReviews(db: FacebookCaptureReviewDb, in
     .innerJoin(sources, eq(sources.id, facebookCaptureReviews.sourceId))
     .innerJoin(rawSourceMaterial, eq(rawSourceMaterial.id, facebookCaptureReviews.rawSourceMaterialId))
     .where(and(statusCondition, rawTextCondition))
-    .orderBy(desc(facebookCaptureReviews.updatedAt));
+    .orderBy(desc(facebookCaptureReviews.updatedAt))
+    .limit(limit)
+    .offset(offset);
 
   return Promise.all(
     rows.map(async (row) => ({
@@ -160,6 +164,17 @@ export async function listFacebookCaptureReviews(db: FacebookCaptureReviewDb, in
       existingCards: await getExistingCardsForCaptureSource(db, row.sourceId),
     })),
   );
+}
+
+export async function countFacebookCaptureReviewsByStatus(db: FacebookCaptureReviewDb) {
+  const rows = await db
+    .select({ status: facebookCaptureReviews.status, count: count() })
+    .from(facebookCaptureReviews)
+    .innerJoin(rawSourceMaterial, eq(rawSourceMaterial.id, facebookCaptureReviews.rawSourceMaterialId))
+    .where(capturedRawTextCondition())
+    .groupBy(facebookCaptureReviews.status);
+
+  return Object.fromEntries(rows.map((row) => [row.status, row.count])) as Partial<Record<FacebookCaptureReviewStatus, number>>;
 }
 
 export async function getExistingCardsForCaptureSource(db: FacebookCaptureReviewDb, sourceId: string) {

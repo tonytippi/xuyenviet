@@ -6,6 +6,8 @@ import { sourceKnowledgeDraftExtractionPromptVersion } from "@/features/ai/promp
 import { extractAndApproveFacebookCaptureDraftsForm, extractKnowledgeDraftsFromFacebookCaptureForm, rejectFacebookCaptureReviewForm, reopenFacebookCaptureForRecaptureForm } from "@/features/knowledge/actions";
 import { getAdminFacebookCaptureReviewDetail } from "@/features/knowledge/facebook-capture-review-admin";
 
+import { ApproveAllSubmitStatus } from "./approve-all-submit-status";
+
 type FacebookCaptureReviewDetailPageProps = {
   params: Promise<{
     reviewId: string;
@@ -39,7 +41,8 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
   }
 
   const hasExtractionCards = review.existingCards.some((card) => card.aiPromptVersion === sourceKnowledgeDraftExtractionPromptVersion);
-  const canExtract = review.status === "needs_review" && Boolean(review.rawText?.trim()) && review.sourceType === "community" && !hasExtractionCards;
+  const isRetryableExtractionStatus = review.status === "needs_review" || review.status === "extraction_failed";
+  const canExtract = isRetryableExtractionStatus && Boolean(review.rawText?.trim()) && review.sourceType === "community" && !hasExtractionCards;
   const canExtractAndApproveAll = canExtract;
   const hasRawText = Boolean(review.rawText?.trim());
   const canReject = (review.status === "needs_review" || review.status === "extraction_failed") && hasRawText;
@@ -202,7 +205,9 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
         <p className="mt-3 rounded-2xl border border-[#d99a93] bg-[#fff0ee] p-3 text-sm font-semibold leading-6 text-[#9b2f29]">
           Raw text chỉ hiển thị trong route admin/operator này. Không hiển thị cookie, token, local storage, HTML dump, hidden data, provider payload hoặc browser profile.
         </p>
-        <pre className="mt-5 whitespace-pre-wrap break-words rounded-2xl border border-[#d8c9ad] bg-[#fbf7ed] p-4 text-sm leading-7 text-[#17342c]">{review.rawText ?? "Chưa có nội dung text."}</pre>
+        <div className="mt-5 whitespace-pre-wrap break-words rounded-2xl border border-[#d8c9ad] bg-[#fbf7ed] p-5 text-base leading-8 text-[#17342c] sm:p-6">
+          {review.rawText ?? "Chưa có nội dung text."}
+        </div>
       </section>
 
       <section className="mt-8 rounded-[1.5rem] border border-[#d8c9ad] bg-white/75 p-5 sm:p-6">
@@ -254,13 +259,11 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
                   <input className="mt-1 size-4 accent-[#1f5f46]" name="approveAllConfirmed" type="checkbox" />
                   <span>Tôi đã kiểm tra nội dung capture, trust/confidence và freshness; có thể trích xuất và phê duyệt tất cả thẻ được tạo.</span>
                 </label>
-                <button className="min-h-12 rounded-2xl bg-[#9b2f29] px-5 py-3 font-semibold text-white transition hover:bg-[#7d261f] focus:outline-none focus:ring-4 focus:ring-[#d99a93]" type="submit">
-                  Trích xuất và phê duyệt tất cả
-                </button>
+                <ApproveAllSubmitStatus />
               </form>
             </div>
           ) : (
-            <p className="rounded-2xl border border-[#d8c9ad] bg-white/75 p-4 text-sm leading-6 text-[#4f625a]">Extract & Approve All chỉ khả dụng khi capture đang cần duyệt, có raw text đọc được, chưa có thẻ trích xuất và vẫn là nguồn Facebook/cộng đồng chưa xác minh.</p>
+            <p className="rounded-2xl border border-[#d8c9ad] bg-white/75 p-4 text-sm leading-6 text-[#4f625a]">Extract & Approve All chỉ khả dụng khi capture đang cần duyệt hoặc trích xuất lỗi, có raw text đọc được, chưa có thẻ trích xuất và vẫn là nguồn Facebook/cộng đồng chưa xác minh.</p>
           )}
           {canReject ? (
             <form action={rejectFacebookCaptureReviewForm} className="rounded-2xl border border-[#d99a93] bg-[#fff7f2] p-4">

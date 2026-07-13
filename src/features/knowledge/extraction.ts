@@ -204,7 +204,7 @@ export async function assertFacebookCaptureStillNeedsReview(db: ExtractionQueryD
     .where(and(eq(facebookCaptureReviews.id, input.reviewId), eq(facebookCaptureReviews.sourceId, input.sourceId)))
     .limit(1);
 
-  if (!review || review.status !== "needs_review") {
+  if (!review || (review.status !== "needs_review" && review.status !== "extraction_failed")) {
     throw new KnowledgeExtractionError("Capture này không còn ở trạng thái có thể trích xuất.", "capture_not_actionable");
   }
 }

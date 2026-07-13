@@ -1,13 +1,17 @@
 import Link from "next/link";
 
 import { facebookCaptureReviewStatusValues, type FacebookCaptureReviewStatus } from "@/db/schema";
-import { listAdminFacebookCaptureReviews, parseFacebookCaptureReviewStatus } from "@/features/knowledge/facebook-capture-review-admin";
+import { listAdminFacebookCaptureReviewStatusCounts, listAdminFacebookCaptureReviews, parseFacebookCaptureReviewStatus } from "@/features/knowledge/facebook-capture-review-admin";
 
 type FacebookCaptureReviewQueuePageProps = {
   searchParams: Promise<{
+    page?: string;
     status?: string;
   }>;
 };
+
+const pageSize = 25;
+const rawTextPreviewLength = 420;
 
 const statusLabels: Record<FacebookCaptureReviewStatus, string> = {
   needs_review: "Cần duyệt",
@@ -40,6 +44,14 @@ const emptyStateCopy: Record<FacebookCaptureReviewStatus, { title: string; body:
   },
 };
 
+const nextActionCopy: Record<FacebookCaptureReviewStatus, string> = {
+  needs_review: "Kiểm tra raw text trong chi tiết rồi trích xuất bản nháp hoặc từ chối.",
+  rejected: "Đã loại khỏi hàng đợi xử lý; chỉ mở lại nếu cần capture lại.",
+  extracted: "Mở thẻ nháp đã liên kết để duyệt tiếp trước khi dùng cho traveler.",
+  extracted_approved: "Đã tạo thẻ approved; kiểm tra thư viện nếu cần rà soát provenance.",
+  extraction_failed: "Kiểm tra lỗi an toàn trong chi tiết, thử lại hoặc từ chối capture.",
+};
+
 function formatDate(value: Date | string | null) {
   if (!value) {
     return "Chưa có";
@@ -48,33 +60,67 @@ function formatDate(value: Date | string | null) {
   return new Date(value).toLocaleString("vi-VN", { dateStyle: "medium", timeStyle: "short" });
 }
 
+function parsePage(value: string | undefined) {
+  const parsed = Number.parseInt(value ?? "1", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+}
+
+function formatRawTextPreview(value: string | null) {
+  const text = value?.trim().replace(/\s+/g, " ");
+
+  if (!text) {
+    return "Chưa có nội dung text.";
+  }
+
+  return text.length > rawTextPreviewLength ? `${text.slice(0, rawTextPreviewLength).trim()}...` : text;
+}
+
+function buildStatusHref(status: FacebookCaptureReviewStatus, page = 1) {
+  const params = new URLSearchParams({ status });
+
+  if (page > 1) {
+    params.set("page", String(page));
+  }
+
+  return `/admin/knowledge/facebook-captures?${params.toString()}`;
+}
+
 export default async function FacebookCaptureReviewQueuePage({ searchParams }: FacebookCaptureReviewQueuePageProps) {
   const params = await searchParams;
   const status = parseFacebookCaptureReviewStatus(params.status);
-  const reviews = await listAdminFacebookCaptureReviews({ status });
+  const currentPage = parsePage(params.page);
+  const offset = (currentPage - 1) * pageSize;
+  const [reviews, statusCounts] = await Promise.all([listAdminFacebookCaptureReviews({ status, limit: pageSize, offset }), listAdminFacebookCaptureReviewStatusCounts()]);
   const emptyState = emptyStateCopy[status];
+  const totalCount = statusCounts[status];
+  const hasPreviousPage = currentPage > 1;
+  const hasNextPage = offset + reviews.length < totalCount;
 
   return (
     <div>
       <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[#8c4f13]">Nguồn Facebook/cộng đồng</p>
       <h1 className="mt-4 max-w-3xl text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">Hàng đợi duyệt capture Facebook.</h1>
       <p className="mt-5 max-w-2xl text-lg leading-8 text-[#4f625a]">
-        Nguồn Facebook/cộng đồng, chưa xác minh. Hàng đợi mặc định hiển thị capture còn cần vận hành xử lý, gồm text đã capture để admin/operator kiểm tra nhanh trước khi trích xuất.
+        Nguồn Facebook/cộng đồng, chưa xác minh. Hàng đợi mặc định ưu tiên capture còn cần vận hành xử lý; danh sách chỉ hiển thị tóm tắt, mở chi tiết để đọc toàn bộ raw text trước khi trích xuất.
       </p>
 
-      <nav className="mt-6 flex flex-wrap gap-2" aria-label="Lọc trạng thái capture Facebook">
-        {facebookCaptureReviewStatusValues.map((item) => (
-          <Link
-            className={`rounded-full border px-4 py-2 text-sm font-semibold transition focus:outline-none focus:ring-4 focus:ring-[#e5bd82]/35 ${
-              item === status ? "border-[#1f5f46] bg-[#1f5f46] text-white" : "border-[#d8c9ad] bg-white/70 text-[#4f625a] hover:bg-[#f4ead7]"
-            }`}
-            href={`/admin/knowledge/facebook-captures?status=${item}`}
-            key={item}
-          >
-            {statusLabels[item]}
-          </Link>
-        ))}
-      </nav>
+      <section className="mt-6 rounded-[1.5rem] border border-[#d8c9ad] bg-white/70 p-4">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          {facebookCaptureReviewStatusValues.map((item) => (
+            <Link
+              className={`rounded-2xl border p-4 transition focus:outline-none focus:ring-4 focus:ring-[#e5bd82]/35 ${
+                item === status ? "border-[#1f5f46] bg-[#1f5f46] text-white" : "border-[#d8c9ad] bg-[#fbf7ed] text-[#4f625a] hover:bg-[#f4ead7]"
+              }`}
+              href={buildStatusHref(item)}
+              key={item}
+            >
+              <span className="block text-xs font-semibold uppercase tracking-[0.18em] opacity-80">{item === "needs_review" || item === "extraction_failed" ? "Cần xử lý" : "Lịch sử"}</span>
+              <span className="mt-2 block text-2xl font-semibold tracking-[-0.03em]">{statusCounts[item]}</span>
+              <span className="mt-1 block text-sm font-semibold">{statusLabels[item]}</span>
+            </Link>
+          ))}
+        </div>
+      </section>
 
       <section className="mt-8 grid gap-4">
         {reviews.length === 0 ? (
@@ -96,14 +142,15 @@ export default async function FacebookCaptureReviewQueuePage({ searchParams }: F
                 </Link>
               </div>
 
-              <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
+              <div className="mt-5 rounded-2xl border border-[#8fb59f] bg-[#edf7ef] p-3 text-sm leading-6 text-[#1f5f46]">
+                <span className="font-semibold">Bước tiếp theo: </span>
+                {nextActionCopy[review.status]}
+              </div>
+
+              <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
                 <div className="rounded-2xl bg-[#fbf7ed] p-3">
-                  <dt className="font-semibold text-[#17342c]">URL nguồn</dt>
+                  <dt className="font-semibold text-[#17342c]">URL</dt>
                   <dd className="mt-1 break-all text-[#4f625a]">{review.sourceCanonicalUrl ?? review.sourceUrl ?? "Chưa có"}</dd>
-                </div>
-                <div className="rounded-2xl bg-[#fbf7ed] p-3">
-                  <dt className="font-semibold text-[#17342c]">Final URL capture</dt>
-                  <dd className="mt-1 break-all text-[#4f625a]">{review.finalUrl ?? "Chưa có"}</dd>
                 </div>
                 <div className="rounded-2xl bg-[#fbf7ed] p-3">
                   <dt className="font-semibold text-[#17342c]">Thời điểm capture</dt>
@@ -114,7 +161,7 @@ export default async function FacebookCaptureReviewQueuePage({ searchParams }: F
                   <dd className="mt-1 text-[#4f625a]">{[review.authorText, review.timestampText].filter(Boolean).join(" · ") || "Chưa có"}</dd>
                 </div>
                 <div className="rounded-2xl bg-[#fbf7ed] p-3">
-                  <dt className="font-semibold text-[#17342c]">Trust mặc định</dt>
+                  <dt className="font-semibold text-[#17342c]">Trust</dt>
                   <dd className="mt-1 text-[#4f625a]">{review.sourceType}/{review.verificationStatus} · official: {review.official ? "có" : "không"} · partner: {review.partner ? "có" : "không"}</dd>
                 </div>
                 <div className="rounded-2xl bg-[#fbf7ed] p-3">
@@ -129,14 +176,35 @@ export default async function FacebookCaptureReviewQueuePage({ searchParams }: F
                   </div>
                 ) : null}
                 <div className="rounded-2xl bg-[#fbf7ed] p-3 sm:col-span-2">
-                  <dt className="font-semibold text-[#17342c]">Nội dung đã capture</dt>
-                  <dd className="mt-2 whitespace-pre-wrap break-words text-[#4f625a]">{review.rawText?.trim() || "Chưa có nội dung text."}</dd>
+                  <dt className="font-semibold text-[#17342c]">Preview nội dung đã capture</dt>
+                  <dd className="mt-2 break-words text-[#4f625a]">{formatRawTextPreview(review.rawText)}</dd>
+                  <dd className="mt-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#8c4f13]">Mở chi tiết để đọc toàn bộ raw text</dd>
                 </div>
               </dl>
             </article>
           ))
         )}
       </section>
+
+      {(hasPreviousPage || hasNextPage) && (
+        <nav className="mt-8 flex flex-col gap-3 rounded-[1.5rem] border border-[#d8c9ad] bg-white/70 p-4 text-sm font-semibold text-[#4f625a] sm:flex-row sm:items-center sm:justify-between" aria-label="Phân trang capture Facebook">
+          <p>
+            Trang {currentPage} · hiển thị {reviews.length} / {totalCount} capture trong trạng thái {statusLabels[status]}.
+          </p>
+          <div className="flex gap-2">
+            {hasPreviousPage ? (
+              <Link className="rounded-2xl border border-[#d8c9ad] bg-[#fbf7ed] px-4 py-2 text-[#17342c] transition hover:bg-[#f4ead7]" href={buildStatusHref(status, currentPage - 1)}>
+                Trang trước
+              </Link>
+            ) : null}
+            {hasNextPage ? (
+              <Link className="rounded-2xl border border-[#1f5f46] bg-[#1f5f46] px-4 py-2 text-white transition hover:bg-[#194d39]" href={buildStatusHref(status, currentPage + 1)}>
+                Trang sau
+              </Link>
+            ) : null}
+          </div>
+        </nav>
+      )}
     </div>
   );
 }

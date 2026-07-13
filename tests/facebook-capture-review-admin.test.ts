@@ -211,11 +211,11 @@ describe("admin Facebook capture review helpers", () => {
     await expect(getAdminFacebookCaptureReviewDetail(review.id)).rejects.toThrow(AdminAuthorizationError);
   });
 
-  test("queue page renders Vietnamese labels with raw captured text for operators", async () => {
+  test("queue page renders compact Vietnamese labels with captured text preview for operators", async () => {
     authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
     await createCapturedFacebookSource({
       id: "queue-page",
-      rawText: "Queue page must not render this raw Facebook paragraph.",
+      rawText: `${"Queue preview sentence. ".repeat(30)}Sensitive tail should only be on detail.`,
       rawMetadata: {
         capturedAt: "2026-07-13T08:00:00.000Z",
         authorText: "Tác giả cộng đồng",
@@ -230,8 +230,35 @@ describe("admin Facebook capture review helpers", () => {
     expect(html).toContain("Hàng đợi duyệt capture Facebook");
     expect(html).toContain("Nguồn Facebook/cộng đồng, chưa xác minh");
     expect(html).toContain("Tác giả cộng đồng");
-    expect(html).toContain("Nội dung đã capture");
-    expect(html).toContain("Queue page must not render this raw Facebook paragraph.");
+    expect(html).toContain("Preview nội dung đã capture");
+    expect(html).toContain("Mở chi tiết để đọc toàn bộ raw text");
+    expect(html).toContain("Bước tiếp theo");
+    expect(html).toContain("Cần xử lý");
+    expect(html).toContain("Cần duyệt");
+    expect(html).toContain("1");
+    expect(html).toContain("Queue preview sentence.");
+    expect(html).not.toContain("Sensitive tail should only be on detail.");
+  });
+
+  test("queue page paginates capture rows", async () => {
+    authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
+
+    for (let index = 0; index < 26; index += 1) {
+      await createCapturedFacebookSource({ id: `queue-page-${index}`, rawText: `Captured queue page text ${index}` });
+    }
+
+    const { default: FacebookCaptureReviewQueuePage } = await import("@/app/admin/knowledge/facebook-captures/page");
+    const firstPageElement = await FacebookCaptureReviewQueuePage({ searchParams: Promise.resolve({}) });
+    const firstPageHtml = renderToStaticMarkup(firstPageElement);
+
+    expect(firstPageHtml).toContain("Trang sau");
+    expect(firstPageHtml).toContain("hiển thị 25 / 26 capture");
+
+    const secondPageElement = await FacebookCaptureReviewQueuePage({ searchParams: Promise.resolve({ page: "2" }) });
+    const secondPageHtml = renderToStaticMarkup(secondPageElement);
+
+    expect(secondPageHtml).toContain("Trang trước");
+    expect(secondPageHtml).toContain("hiển thị 1 / 26 capture");
   });
 
   test("admin overview exposes Facebook routing and intake stays URL-only", async () => {
@@ -377,9 +404,9 @@ describe("admin Facebook capture review helpers", () => {
     expect(rejectedHtml).toContain("chưa tạo thẻ tri thức cho traveler");
   });
 
-  test("rejected queue page renders safe rejection reason and raw captured text", async () => {
+  test("rejected queue page renders safe rejection reason and captured text preview", async () => {
     authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
-    const review = await createCapturedFacebookSource({ id: "rejected-queue-page", rawText: "Rejected queue raw Facebook paragraph." });
+    const review = await createCapturedFacebookSource({ id: "rejected-queue-page", rawText: `${"Rejected queue preview. ".repeat(30)}Rejected tail should only be on detail.` });
     await markFacebookCaptureReviewStatus(testDb, {
       reviewId: review.id,
       status: "rejected",
@@ -393,7 +420,8 @@ describe("admin Facebook capture review helpers", () => {
 
     expect(html).toContain("Lý do từ chối");
     expect(html).toContain("Wrong visible post content");
-    expect(html).toContain("Rejected queue raw Facebook paragraph.");
+    expect(html).toContain("Rejected queue preview.");
+    expect(html).not.toContain("Rejected tail should only be on detail.");
   });
 
   test("detail page renders raw text but not unsafe metadata values", async () => {

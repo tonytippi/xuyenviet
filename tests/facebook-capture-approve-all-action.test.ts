@@ -242,6 +242,40 @@ describe("Facebook capture extract and approve all action", () => {
     expect(JSON.stringify(await testDb.select().from(facebookCaptureReviews))).not.toContain("raw provider payload");
   });
 
+  test("retries approve-all after provider failure left capture in extraction_failed", async () => {
+    authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
+    await createExtractionModel();
+    const review = await createCapturedFacebookReview({ id: "retry-provider-failure", rawText: "Huế và Đà Nẵng có ghi chú cộng đồng cần duyệt lại." });
+    await markFacebookCaptureReviewStatus(testDb, {
+      reviewId: review.id,
+      status: "extraction_failed",
+      actor: { userId: "operator-user", email: "operator-user@example.com" },
+      extractionError: "Extraction failed: provider_failed",
+    });
+    mockGatewayJson(
+      JSON.stringify({
+        drafts: [
+          {
+            type: "route_note",
+            title: "Ghi chú cung Huế - Đà Nẵng",
+            route_segment: "Huế - Đà Nẵng",
+            summary: "Thông tin cộng đồng về cung Huế - Đà Nẵng cần giữ confidence phù hợp.",
+            practical_details: { tips: ["Kiểm tra lại trước khi đi"] },
+            tags: ["hue-da-nang"],
+            confidence: "community",
+            freshness_sensitive: true,
+          },
+        ],
+      }),
+    );
+    const { extractAndApproveFacebookCaptureDraftsForm } = await import("@/features/knowledge/actions");
+
+    await expect(extractAndApproveFacebookCaptureDraftsForm(approveAllFormData(review.id))).rejects.toThrow(/NEXT_REDIRECT:.*approvedAll=1/);
+
+    await expect(testDb.select().from(knowledgeCards)).resolves.toMatchObject([{ status: "approved", needsReview: false }]);
+    await expect(testDb.select().from(facebookCaptureReviews).where(eq(facebookCaptureReviews.id, review.id))).resolves.toMatchObject([{ status: "extracted_approved", reviewerUserId: "operator-user" }]);
+  });
+
   test("model unavailable marks extraction_failed without provider payload or approvals", async () => {
     authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
     await createExtractionModel({ supportsExtraction: false });
@@ -403,6 +437,6 @@ describe("Facebook capture extract and approve all action", () => {
     });
     const nonActionableElement = await FacebookCaptureReviewDetailPage({ params: Promise.resolve({ reviewId: failedReview.id }) });
     const nonActionableHtml = renderToStaticMarkup(nonActionableElement);
-    expect(nonActionableHtml).not.toContain("approveAllConfirmed");
+    expect(nonActionableHtml).toContain("approveAllConfirmed");
   });
 });

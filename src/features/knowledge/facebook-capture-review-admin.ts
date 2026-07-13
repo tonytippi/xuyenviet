@@ -4,7 +4,7 @@ import { eq, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
 import { facebookCaptureReviews, facebookCaptureReviewStatusValues, rawSourceMaterial, sources, type FacebookCaptureReviewStatus } from "@/db/schema";
-import { getExistingCardsForCaptureSource, listFacebookCaptureReviews } from "@/features/knowledge/facebook-capture-review";
+import { countFacebookCaptureReviewsByStatus, getExistingCardsForCaptureSource, listFacebookCaptureReviews } from "@/features/knowledge/facebook-capture-review";
 import { requireAdminSession } from "@/server/auth";
 
 const defaultReviewStatus: FacebookCaptureReviewStatus = "needs_review";
@@ -19,13 +19,21 @@ export function parseFacebookCaptureReviewStatus(value: string | undefined): Fac
   return defaultReviewStatus;
 }
 
-export async function listAdminFacebookCaptureReviews(input: { status?: FacebookCaptureReviewStatus } = {}) {
+export async function listAdminFacebookCaptureReviews(input: { status?: FacebookCaptureReviewStatus; limit?: number; offset?: number } = {}) {
   await requireAdminSession();
   const db = getDb();
   const status = input.status ?? defaultReviewStatus;
-  const reviews = await listFacebookCaptureReviews(db, { status });
+  const reviews = await listFacebookCaptureReviews(db, { status, limit: input.limit, offset: input.offset });
 
   return reviews.map(sanitizeReviewMetadata);
+}
+
+export async function listAdminFacebookCaptureReviewStatusCounts() {
+  await requireAdminSession();
+  const db = getDb();
+  const counts = await countFacebookCaptureReviewsByStatus(db);
+
+  return Object.fromEntries(facebookCaptureReviewStatusValues.map((status) => [status, counts[status] ?? 0])) as Record<FacebookCaptureReviewStatus, number>;
 }
 
 export async function getAdminFacebookCaptureReviewDetail(reviewId: string) {
