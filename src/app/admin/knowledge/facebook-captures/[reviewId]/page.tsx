@@ -83,7 +83,7 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
           ) : null}
           {approveAllError ? (
             <p>
-              Không thể trích xuất và phê duyệt capture này.
+              {approveAllError}
               {failureStatus === "updated" ? " Trạng thái đã được cập nhật an toàn nếu phù hợp." : " Kiểm tra trạng thái review và thẻ liên kết hiện có trước khi thử lại."}
             </p>
           ) : null}

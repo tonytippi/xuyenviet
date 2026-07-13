@@ -4,7 +4,7 @@ baseline_commit: 066a87861491ea7febf1f09791fd6f466d226af0
 
 # Story 4.1E: Extract And Approve All Captured Facebook Drafts With Guardrails
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run bmad-create-story validate for quality check before bmad-dev-story. -->
 
@@ -73,6 +73,13 @@ so that low-risk captured source material can move faster into approved knowledg
 - [x] Update story tracking (AC: all)
   - [x] Keep this story file updated during implementation: task checkboxes, Dev Agent Record, Completion Notes, Debug Log References, File List, and Change Log.
   - [x] Move `_bmad-output/implementation-artifacts/sprint-status.yaml` story key `4-1e-extract-and-approve-all-captured-facebook-drafts-with-guardrails` through implementation statuses.
+
+### Review Findings
+
+- [x] [Review][Patch] Final `extracted_approved` transition is not atomic with approvals [src/features/knowledge/actions.ts:315]
+- [x] [Review][Patch] Missing approve-all provider-failure coverage [tests/facebook-capture-approve-all-action.test.ts:168]
+- [x] [Review][Patch] Render test does not cover extracted and rejected non-actionable states [tests/facebook-capture-approve-all-action.test.ts:274]
+- [x] [Review][Patch] Missing-confirmation redirect message is discarded by the UI [src/app/admin/knowledge/facebook-captures/[reviewId]/page.tsx:84]
 
 ## Dev Notes
 
@@ -209,6 +216,12 @@ gpt-5.5-review
 - `pnpm typecheck` passed.
 - `pnpm test:run` passed: 28 files, 363 tests.
 - `pnpm build` passed.
+- Code review patch verification: `pnpm test:run tests/facebook-capture-approve-all-action.test.ts` passed: 9 tests.
+- Code review patch verification: `pnpm typecheck` passed.
+- Code review patch verification: `pnpm lint` passed.
+- Code review patch verification: DB-heavy adjacent tests initially failed when run in parallel due shared test database contention, then passed sequentially: `pnpm test:run tests/knowledge-draft-review.test.ts && pnpm test:run tests/facebook-capture-review-admin.test.ts`.
+- Code review patch verification: `pnpm test:run` passed: 28 files, 364 tests.
+- Code review patch verification: `pnpm build` passed.
 
 ### Completion Notes List
 
@@ -217,6 +230,7 @@ gpt-5.5-review
 - Coordinated `needs_review -> extracted -> extracted_approved` transitions through existing `markFacebookCaptureReviewStatus(...)` return values, with safe recovery redirects and `extraction_failed` handling for extraction failures.
 - Replaced the disabled 4.1E placeholder with a guarded Vietnamese-first approve-all form, confirmation checkbox, safe success/failure/partial-failure copy, and approved-card navigation while keeping 4.1F disabled.
 - Added focused approve-all action/UI coverage for confirmation, success, invalid output, model unavailable, stale review state, approval failure, unauthorized users, and actionable/non-actionable rendering.
+- Addressed code review findings by making batch approval and the final `extracted_approved` transition share one rollback boundary, adding provider-failure and non-actionable render coverage, and rendering the specific approve-all confirmation error.
 
 ### File List
 
@@ -224,6 +238,7 @@ gpt-5.5-review
 - `_bmad-output/implementation-artifacts/sprint-status.yaml`
 - `src/app/admin/knowledge/facebook-captures/[reviewId]/page.tsx`
 - `src/features/knowledge/actions.ts`
+- `src/features/knowledge/facebook-capture-review.ts`
 - `src/features/knowledge/review.ts`
 - `tests/facebook-capture-approve-all-action.test.ts`
 - `tests/facebook-capture-review-admin.test.ts`
@@ -232,3 +247,4 @@ gpt-5.5-review
 
 - 2026-07-13: Story created by BMad create-story workflow. Ultimate context engine analysis completed; comprehensive developer guide created.
 - 2026-07-13: Implemented guarded Facebook capture extract-and-approve-all action, batch approval helper, UI wiring, focused tests, and validation; story moved to review.
+- 2026-07-13: Addressed code review findings, reran targeted and baseline verification, and moved story to done.

@@ -16,9 +16,9 @@ import {
   type KnowledgeDraftExtractionPreProviderGuard,
 } from "./extraction";
 import { getAdminFacebookCaptureReviewExtractionTarget } from "./facebook-capture-review-admin";
-import { markFacebookCaptureReviewStatus, type FacebookCaptureReviewActor } from "./facebook-capture-review";
+import { markFacebookCaptureReviewStatus, markFacebookCaptureReviewStatusInTransaction, type FacebookCaptureReviewActor } from "./facebook-capture-review";
 import {
-  approveKnowledgeDraftBatch,
+  approveKnowledgeDraftBatchInTransaction,
   approveKnowledgeDraft as approveKnowledgeDraftService,
   isKnowledgeDraftReviewError,
   parseKnowledgeDraftFormData,
@@ -280,7 +280,7 @@ export async function extractKnowledgeDraftsFromFacebookCaptureForm(formData: Fo
 }
 
 export async function extractAndApproveFacebookCaptureDraftsForm(formData: FormData) {
-  await requireAdminSession();
+  const session = await requireAdminSession();
 
   const reviewId = getOptionalFormString(formData, "reviewId") ?? "";
   let redirectPath = getFacebookCaptureRedirectPath(reviewId, { approveAllError: "Không thể trích xuất và phê duyệt capture này." });
@@ -311,22 +311,31 @@ export async function extractAndApproveFacebookCaptureDraftsForm(formData: FormD
         if (extractedStatusResult.status !== "updated") {
           redirectPath = getFacebookCaptureRedirectPath(extractionTarget.id, { approveAllRecoveryStatus: extractedStatusResult.status, existingCards: String(result.draftCount) });
         } else {
+          let finalStatusFailure: string | null = null;
+
           try {
-            const approvalResult = await approveKnowledgeDraftBatch(result.draftIds);
-            const approvedStatusResult = await markFacebookCaptureReviewStatus(getDb(), { reviewId: extractionTarget.id, status: "extracted_approved", actor: extractionTarget.actor });
+            const approvalResult = await getDb().transaction(async (transaction) => {
+              const approved = await approveKnowledgeDraftBatchInTransaction(transaction, session, result.draftIds);
+              const approvedStatusResult = await markFacebookCaptureReviewStatusInTransaction(transaction, { reviewId: extractionTarget.id, status: "extracted_approved", actor: extractionTarget.actor });
 
-            if (approvedStatusResult.status === "updated") {
-              redirectPath = getFacebookCaptureRedirectPath(extractionTarget.id, { approvedAll: String(approvalResult.draftIds.length), sourceId: result.sourceId });
-            } else {
-              redirectPath = getFacebookCaptureRedirectPath(extractionTarget.id, { approveAllRecoveryStatus: approvedStatusResult.status, existingCards: String(approvalResult.draftIds.length) });
-            }
+              if (approvedStatusResult.status !== "updated") {
+                finalStatusFailure = approvedStatusResult.status;
+                throw new Error("approve_all_status_transition_failed");
+              }
+
+              return approved;
+            });
+
+            redirectPath = getFacebookCaptureRedirectPath(extractionTarget.id, { approvedAll: String(approvalResult.draftIds.length), sourceId: result.sourceId });
           } catch (error) {
-            if (error instanceof AdminAuthorizationError || (error instanceof Error && error.name === "AdminAuthorizationError")) {
+            if (finalStatusFailure) {
+              redirectPath = getFacebookCaptureRedirectPath(extractionTarget.id, { approveAllRecoveryStatus: finalStatusFailure, existingCards: String(result.draftCount) });
+            } else if (error instanceof AdminAuthorizationError || (error instanceof Error && error.name === "AdminAuthorizationError")) {
               throw error;
+            } else {
+              const failureCode = isKnowledgeDraftReviewError(error) && error instanceof Error && "code" in error && typeof error.code === "string" ? error.code : "approval_failed";
+              redirectPath = getFacebookCaptureRedirectPath(extractionTarget.id, { approvalFailed: "1", approvalError: failureCode, existingCards: String(result.draftCount) });
             }
-
-            const failureCode = isKnowledgeDraftReviewError(error) && error instanceof Error && "code" in error && typeof error.code === "string" ? error.code : "approval_failed";
-            redirectPath = getFacebookCaptureRedirectPath(extractionTarget.id, { approvalFailed: "1", approvalError: failureCode, existingCards: String(result.draftCount) });
           }
         }
       }

@@ -180,6 +180,22 @@ describe("Facebook capture extract and approve all action", () => {
     ]);
   });
 
+  test("provider failure marks extraction_failed, records safe usage failure, and approves no cards", async () => {
+    authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
+    await createExtractionModel();
+    const review = await createCapturedFacebookReview({ id: "provider-failure", rawText: "Raw text must not leak when provider fails." });
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "raw provider payload" } }), { status: 200 }));
+    const { extractAndApproveFacebookCaptureDraftsForm } = await import("@/features/knowledge/actions");
+
+    await expect(extractAndApproveFacebookCaptureDraftsForm(approveAllFormData(review.id))).rejects.toThrow(/NEXT_REDIRECT:.*approveAllError=/);
+
+    await expect(testDb.select().from(knowledgeCards)).resolves.toHaveLength(0);
+    await expect(testDb.select().from(facebookCaptureReviews).where(eq(facebookCaptureReviews.id, review.id))).resolves.toMatchObject([{ status: "extraction_failed", extractionError: "Extraction failed: provider_failed" }]);
+    await expect(testDb.select().from(aiUsageEvents)).resolves.toMatchObject([{ status: "failure", errorCode: "invalid_gateway_response" }]);
+    expect(JSON.stringify(await testDb.select().from(facebookCaptureReviews))).not.toContain("Raw text must not leak");
+    expect(JSON.stringify(await testDb.select().from(facebookCaptureReviews))).not.toContain("raw provider payload");
+  });
+
   test("model unavailable marks extraction_failed without provider payload or approvals", async () => {
     authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
     await createExtractionModel({ supportsExtraction: false });
@@ -282,13 +298,51 @@ describe("Facebook capture extract and approve all action", () => {
     expect(actionableHtml).toContain("Tôi đã kiểm tra nội dung capture, trust/confidence và freshness");
     expect(actionableHtml).toContain("Reject / reopen capture (4.1F)");
 
+    const missingConfirmationElement = await FacebookCaptureReviewDetailPage({
+      params: Promise.resolve({ reviewId: review.id }),
+      searchParams: Promise.resolve({ approveAllError: "Vui lòng xác nhận đã kiểm tra capture, trust/confidence và freshness trước khi phê duyệt tất cả." }),
+    });
+    expect(renderToStaticMarkup(missingConfirmationElement)).toContain("Vui lòng xác nhận đã kiểm tra capture, trust/confidence và freshness trước khi phê duyệt tất cả.");
+
+    await testDb.insert(knowledgeCards).values({
+      id: "render-extracted-card",
+      status: "draft",
+      type: "route_note",
+      title: "Extracted render card",
+      routeSegment: "Huế - Đà Nẵng",
+      summary: "Existing extracted card makes the review non-actionable.",
+      confidence: "community",
+      freshnessSensitive: false,
+      aiPromptVersion: sourceKnowledgeDraftExtractionPromptVersion,
+      createdByUserId: "operator-user",
+    });
+    await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: "render-extracted-card", sourceId: "render-approve-all" });
     await markFacebookCaptureReviewStatus(testDb, {
       reviewId: review.id,
+      status: "extracted",
+      actor: { userId: "operator-user", email: "operator-user@example.com" },
+    });
+    const extractedElement = await FacebookCaptureReviewDetailPage({ params: Promise.resolve({ reviewId: review.id }) });
+    expect(renderToStaticMarkup(extractedElement)).not.toContain("approveAllConfirmed");
+
+    const rejectedReview = await createCapturedFacebookReview({ id: "render-rejected", rawText: "Rejected detail page raw text." });
+    await markFacebookCaptureReviewStatus(testDb, {
+      reviewId: rejectedReview.id,
+      status: "rejected",
+      actor: { userId: "operator-user", email: "operator-user@example.com" },
+      rejectionReason: "Not useful for route planning",
+    });
+    const rejectedElement = await FacebookCaptureReviewDetailPage({ params: Promise.resolve({ reviewId: rejectedReview.id }) });
+    expect(renderToStaticMarkup(rejectedElement)).not.toContain("approveAllConfirmed");
+
+    const failedReview = await createCapturedFacebookReview({ id: "render-failed", rawText: "Failed detail page raw text." });
+    await markFacebookCaptureReviewStatus(testDb, {
+      reviewId: failedReview.id,
       status: "extraction_failed",
       actor: { userId: "operator-user", email: "operator-user@example.com" },
       extractionError: "Extraction failed: test_non_actionable",
     });
-    const nonActionableElement = await FacebookCaptureReviewDetailPage({ params: Promise.resolve({ reviewId: review.id }) });
+    const nonActionableElement = await FacebookCaptureReviewDetailPage({ params: Promise.resolve({ reviewId: failedReview.id }) });
     const nonActionableHtml = renderToStaticMarkup(nonActionableElement);
     expect(nonActionableHtml).not.toContain("approveAllConfirmed");
   });

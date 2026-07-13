@@ -187,17 +187,32 @@ export async function markFacebookCaptureReviewStatus(
   },
 ) {
   return db.transaction(async (transaction) => {
+    return markFacebookCaptureReviewStatusInTransaction(transaction, input);
+  });
+}
+
+export async function markFacebookCaptureReviewStatusInTransaction(
+  db: FacebookCaptureReviewDb,
+  input: {
+    reviewId: string;
+    status: Exclude<FacebookCaptureReviewStatus, "needs_review">;
+    actor: FacebookCaptureReviewActor;
+    rejectionReason?: string;
+    extractionError?: string;
+    now?: Date;
+  },
+) {
     if (!Object.hasOwn(allowedTransitionSourceStatuses, input.status)) {
       throw new Error("Unsupported Facebook capture review transition status.");
     }
 
-    const review = await loadReviewById(transaction, input.reviewId);
+    const review = await loadReviewById(db, input.reviewId);
 
     if (!review) {
       return { status: "not_found" as const };
     }
 
-    const existingCards = await getExistingCardsForCaptureSource(transaction, review.sourceId);
+    const existingCards = await getExistingCardsForCaptureSource(db, review.sourceId);
     const existingExtractionCards = existingCards.filter((card) => card.aiPromptVersion === sourceKnowledgeDraftExtractionPromptVersion);
 
     if (input.status === "extracted" && existingExtractionCards.length === 0) {
@@ -225,7 +240,7 @@ export async function markFacebookCaptureReviewStatus(
 
     const now = input.now ?? new Date();
 
-    const [updated] = await transaction
+    const [updated] = await db
       .update(facebookCaptureReviews)
       .set({
         status: input.status,
@@ -242,7 +257,7 @@ export async function markFacebookCaptureReviewStatus(
       return { status: "stale_review" as const };
     }
 
-    await transaction.insert(auditEvents).values({
+    await db.insert(auditEvents).values({
       actorUserId: input.actor.userId,
       actorEmail: input.actor.email,
       operation: "update",
@@ -254,5 +269,4 @@ export async function markFacebookCaptureReviewStatus(
     });
 
     return { status: "updated" as const, review: updated };
-  });
 }

@@ -406,15 +406,23 @@ export async function approveKnowledgeDraftBatch(draftIds: string[]): Promise<{ 
 
   const db = getDb();
   return db.transaction(async (transaction) => {
-    const approvedDraftIds: string[] = [];
-
-    for (const draftId of normalizedDraftIds) {
-      const result = await approveKnowledgeDraftInTransaction(transaction, session, draftId);
-      approvedDraftIds.push(result.draftId);
-    }
-
-    return { draftIds: approvedDraftIds };
+    return approveKnowledgeDraftBatchInTransaction(transaction, session, normalizedDraftIds);
   });
+}
+
+export async function approveKnowledgeDraftBatchInTransaction(transaction: ReviewMutationDb, session: AuthenticatedSessionWithRoles, normalizedDraftIds: string[]): Promise<{ draftIds: string[] }> {
+  if (normalizedDraftIds.length === 0) {
+    throw new KnowledgeDraftReviewError("Không có bản nháp nào để phê duyệt.", "invalid_draft");
+  }
+
+  const approvedDraftIds: string[] = [];
+
+  for (const draftId of normalizedDraftIds) {
+    const result = await approveKnowledgeDraftInTransaction(transaction, session, draftId);
+    approvedDraftIds.push(result.draftId);
+  }
+
+  return { draftIds: approvedDraftIds };
 }
 
 async function approveKnowledgeDraftInTransaction(
