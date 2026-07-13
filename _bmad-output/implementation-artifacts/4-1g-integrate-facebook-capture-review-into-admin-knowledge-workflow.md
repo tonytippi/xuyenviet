@@ -4,7 +4,7 @@ baseline_commit: afde2f2
 
 # Story 4.1G: Integrate Facebook Capture Review Into Admin Knowledge Workflow
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run bmad-create-story validate for quality check before bmad-dev-story. -->
 
@@ -24,6 +24,10 @@ so that I do not need to remember source IDs or CLI-only next steps.
 6. Given the admin UI displays Facebook capture workflow states, when statuses, buttons, or empty states are shown, then copy uses Vietnamese-first operator-facing language consistent with existing admin knowledge pages, and it does not imply Facebook content is official, verified, or traveler-visible before approval.
 
 ## Tasks / Subtasks
+
+### Review Findings
+
+- [x] [Review][Patch] Non-draft linked cards are routed to draft detail pages [src/app/admin/knowledge/facebook-captures/[reviewId]/page.tsx:47]
 
 - [x] Add Facebook capture workflow entry points to admin overview and knowledge intake (AC: 1, 2, 6)
   - [x] Update `src/app/admin/page.tsx` so the command-center dashboard clearly includes the Facebook capture workflow, with a link to `/admin/knowledge/facebook-captures` and copy that says captured Facebook/community material remains unverified until reviewed.
@@ -210,6 +214,7 @@ gpt-5.5-review
 - Added capture detail next-step links to draft/approved queues and direct linked cards while preserving duplicate-extraction guards and trust/raw-text warnings.
 - Added focused render/read tests for admin overview, intake, queue empty/rejected states, detail extracted/approved routing, duplicate-action absence, and existing unauthorized raw-text protections.
 - Validation passed: `pnpm test:run tests/facebook-capture-review-admin.test.ts`, related Facebook action tests sequentially, `pnpm lint`, `pnpm typecheck`, `pnpm test:run`, and `pnpm build`.
+- Review patch fixed non-draft/non-approved linked cards so rejected/archived/duplicate/no-action cards are not routed to draft detail pages, with focused regression coverage.
 
 ### File List
 

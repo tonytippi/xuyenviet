@@ -388,6 +388,36 @@ describe("admin Facebook capture review helpers", () => {
     expect(approvedHtml).not.toContain("approveAllConfirmed");
   });
 
+  test("detail page does not link non-draft linked cards to the draft route", async () => {
+    authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
+    const review = await createCapturedFacebookSource({ id: "detail-rejected-linked-card", rawText: "Rejected linked card raw text." });
+    await testDb.insert(knowledgeCards).values({
+      id: "rejected-linked-card",
+      status: "rejected",
+      needsReview: false,
+      type: "route_note",
+      title: "Rejected linked card",
+      routeSegment: "Huế - Đà Nẵng",
+      summary: "Rejected from capture detail",
+      confidence: "community",
+      aiPromptVersion: "knowledge_source_extraction_v1",
+      createdByUserId: "operator-user",
+    });
+    await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: "rejected-linked-card", sourceId: "detail-rejected-linked-card" });
+    await testDb
+      .update(facebookCaptureReviews)
+      .set({ status: "extracted", reviewerUserId: "operator-user", reviewedAt: new Date("2026-07-13T04:00:00.000Z"), updatedAt: new Date("2026-07-13T04:00:00.000Z") })
+      .where(eq(facebookCaptureReviews.id, review.id));
+
+    const { default: FacebookCaptureReviewDetailPage } = await import("@/app/admin/knowledge/facebook-captures/[reviewId]/page");
+    const element = await FacebookCaptureReviewDetailPage({ params: Promise.resolve({ reviewId: review.id }), searchParams: Promise.resolve({ extracted: "1" }) });
+    const html = renderToStaticMarkup(element);
+
+    expect(html).toContain("Rejected linked card");
+    expect(html).toContain("route_note · rejected");
+    expect(html).not.toContain("/admin/knowledge/drafts/rejected-linked-card");
+  });
+
   test("detail page renders reopen form for rejected captures and no extract actions", async () => {
     authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
     const review = await createCapturedFacebookSource({ id: "reopen-action", rawText: "Rejected detail page raw text." });

@@ -44,7 +44,7 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
   const hasRawText = Boolean(review.rawText?.trim());
   const canReject = (review.status === "needs_review" || review.status === "extraction_failed") && hasRawText;
   const canReopenForRecapture = review.status === "rejected";
-  const draftCards = review.existingCards.filter((card) => card.status !== "approved");
+  const draftCards = review.existingCards.filter((card) => card.status === "draft");
   const approvedCards = review.existingCards.filter((card) => card.status === "approved");
   const extractedCount = getSearchParam(query.extracted);
   const approvedAllCount = getSearchParam(query.approvedAll);
@@ -204,9 +204,13 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
           ) : (
             review.existingCards.map((card) => (
               <div key={card.id} className="rounded-2xl border border-[#d8c9ad] bg-[#fbf7ed] p-4 text-sm text-[#4f625a]">
-                <Link className="font-semibold text-[#17342c] underline underline-offset-4" href={card.status === "approved" ? `/admin/knowledge/approved/${encodeURIComponent(card.id)}` : `/admin/knowledge/drafts/${encodeURIComponent(card.id)}`}>
-                  {card.title}
-                </Link>
+                {card.status === "approved" || card.status === "draft" ? (
+                  <Link className="font-semibold text-[#17342c] underline underline-offset-4" href={card.status === "approved" ? `/admin/knowledge/approved/${encodeURIComponent(card.id)}` : `/admin/knowledge/drafts/${encodeURIComponent(card.id)}`}>
+                    {card.title}
+                  </Link>
+                ) : (
+                  <p className="font-semibold text-[#17342c]">{card.title}</p>
+                )}
                 <p className="mt-1">{card.type} · {card.status} · prompt: {card.aiPromptVersion}</p>
               </div>
             ))

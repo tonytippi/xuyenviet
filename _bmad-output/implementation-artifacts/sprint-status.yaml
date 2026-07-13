@@ -85,7 +85,7 @@ development_status:
   4-1d-extract-draft-knowledge-from-reviewed-facebook-capture: done
   4-1e-extract-and-approve-all-captured-facebook-drafts-with-guardrails: done
   4-1f-reject-captured-facebook-source-material: done
-  4-1g-integrate-facebook-capture-review-into-admin-knowledge-workflow: review
+  4-1g-integrate-facebook-capture-review-into-admin-knowledge-workflow: done
   4-2-ai-extracts-knowledge-drafts-from-source: done
   4-3-review-and-edit-ai-prepared-drafts: done
   4-4-ai-suggests-create-or-update-from-source-url: done
