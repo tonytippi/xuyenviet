@@ -1,0 +1,107 @@
+import Link from "next/link";
+
+import { facebookCaptureReviewStatusValues, type FacebookCaptureReviewStatus } from "@/db/schema";
+import { listAdminFacebookCaptureReviews, parseFacebookCaptureReviewStatus } from "@/features/knowledge/facebook-capture-review-admin";
+
+type FacebookCaptureReviewQueuePageProps = {
+  searchParams: Promise<{
+    status?: string;
+  }>;
+};
+
+const statusLabels: Record<FacebookCaptureReviewStatus, string> = {
+  needs_review: "Cần duyệt",
+  rejected: "Đã từ chối",
+  extracted: "Đã trích xuất",
+  extracted_approved: "Đã trích xuất và duyệt",
+  extraction_failed: "Trích xuất lỗi",
+};
+
+function formatDate(value: Date | string | null) {
+  if (!value) {
+    return "Chưa có";
+  }
+
+  return new Date(value).toLocaleString("vi-VN", { dateStyle: "medium", timeStyle: "short" });
+}
+
+export default async function FacebookCaptureReviewQueuePage({ searchParams }: FacebookCaptureReviewQueuePageProps) {
+  const params = await searchParams;
+  const status = parseFacebookCaptureReviewStatus(params.status);
+  const reviews = await listAdminFacebookCaptureReviews({ status });
+
+  return (
+    <div>
+      <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[#8c4f13]">Nguồn Facebook/cộng đồng</p>
+      <h1 className="mt-4 max-w-3xl text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">Hàng đợi duyệt capture Facebook.</h1>
+      <p className="mt-5 max-w-2xl text-lg leading-8 text-[#4f625a]">
+        Nguồn Facebook/cộng đồng, chưa xác minh. Hàng đợi mặc định chỉ hiển thị capture còn cần vận hành xử lý; nội dung bài viết thô chỉ nằm trong trang chi tiết đã khóa quyền admin/operator.
+      </p>
+
+      <nav className="mt-6 flex flex-wrap gap-2" aria-label="Lọc trạng thái capture Facebook">
+        {facebookCaptureReviewStatusValues.map((item) => (
+          <Link
+            className={`rounded-full border px-4 py-2 text-sm font-semibold transition focus:outline-none focus:ring-4 focus:ring-[#e5bd82]/35 ${
+              item === status ? "border-[#1f5f46] bg-[#1f5f46] text-white" : "border-[#d8c9ad] bg-white/70 text-[#4f625a] hover:bg-[#f4ead7]"
+            }`}
+            href={`/admin/knowledge/facebook-captures?status=${item}`}
+            key={item}
+          >
+            {statusLabels[item]}
+          </Link>
+        ))}
+      </nav>
+
+      <section className="mt-8 grid gap-4">
+        {reviews.length === 0 ? (
+          <div className="rounded-[1.5rem] border border-[#d8c9ad] bg-white/70 p-5">
+            <h2 className="text-2xl font-semibold tracking-[-0.03em] text-[#17342c]">Chưa có capture trong trạng thái này</h2>
+            <p className="mt-3 leading-7 text-[#4f625a]">Capture mới sẽ xuất hiện tại đây sau khi script vận hành lưu văn bản Facebook thành công.</p>
+          </div>
+        ) : (
+          reviews.map((review) => (
+            <article key={review.id} className="rounded-[1.5rem] border border-[#d8c9ad] bg-white/75 p-5 shadow-[0_12px_30px_rgba(41,33,18,0.08)]">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#8c4f13]">{statusLabels[review.status]}</p>
+                  <h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-[#17342c]">{review.sourceLabel}</h2>
+                  <p className="mt-3 inline-flex rounded-full border border-[#d8c9ad] bg-[#f4ead7] px-3 py-1 text-sm font-semibold text-[#8c4f13]">Nguồn Facebook/cộng đồng, chưa xác minh</p>
+                </div>
+                <Link className="min-h-12 rounded-2xl bg-[#1f5f46] px-5 py-3 text-center font-semibold text-white transition hover:bg-[#194d39] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]" href={`/admin/knowledge/facebook-captures/${encodeURIComponent(review.id)}`}>
+                  Mở chi tiết duyệt
+                </Link>
+              </div>
+
+              <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
+                <div className="rounded-2xl bg-[#fbf7ed] p-3">
+                  <dt className="font-semibold text-[#17342c]">URL nguồn</dt>
+                  <dd className="mt-1 break-all text-[#4f625a]">{review.sourceCanonicalUrl ?? review.sourceUrl ?? "Chưa có"}</dd>
+                </div>
+                <div className="rounded-2xl bg-[#fbf7ed] p-3">
+                  <dt className="font-semibold text-[#17342c]">Final URL capture</dt>
+                  <dd className="mt-1 break-all text-[#4f625a]">{review.finalUrl ?? "Chưa có"}</dd>
+                </div>
+                <div className="rounded-2xl bg-[#fbf7ed] p-3">
+                  <dt className="font-semibold text-[#17342c]">Thời điểm capture</dt>
+                  <dd className="mt-1 text-[#4f625a]">{review.capturedAt ?? formatDate(review.createdAt)}</dd>
+                </div>
+                <div className="rounded-2xl bg-[#fbf7ed] p-3">
+                  <dt className="font-semibold text-[#17342c]">Tác giả / timestamp hiển thị</dt>
+                  <dd className="mt-1 text-[#4f625a]">{[review.authorText, review.timestampText].filter(Boolean).join(" · ") || "Chưa có"}</dd>
+                </div>
+                <div className="rounded-2xl bg-[#fbf7ed] p-3">
+                  <dt className="font-semibold text-[#17342c]">Trust mặc định</dt>
+                  <dd className="mt-1 text-[#4f625a]">{review.sourceType}/{review.verificationStatus} · official: {review.official ? "có" : "không"} · partner: {review.partner ? "có" : "không"}</dd>
+                </div>
+                <div className="rounded-2xl bg-[#fbf7ed] p-3">
+                  <dt className="font-semibold text-[#17342c]">Thẻ đã liên kết</dt>
+                  <dd className="mt-1 text-[#4f625a]">{review.existingCards.length === 0 ? "Chưa có" : `${review.existingCards.length} thẻ`}</dd>
+                </div>
+              </dl>
+            </article>
+          ))
+        )}
+      </section>
+    </div>
+  );
+}

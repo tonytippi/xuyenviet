@@ -1,0 +1,122 @@
+import Link from "next/link";
+import { notFound } from "next/navigation";
+
+import { type FacebookCaptureReviewStatus } from "@/db/schema";
+import { getAdminFacebookCaptureReviewDetail } from "@/features/knowledge/facebook-capture-review-admin";
+
+type FacebookCaptureReviewDetailPageProps = {
+  params: Promise<{
+    reviewId: string;
+  }>;
+};
+
+const statusLabels: Record<FacebookCaptureReviewStatus, string> = {
+  needs_review: "Cần duyệt",
+  rejected: "Đã từ chối",
+  extracted: "Đã trích xuất",
+  extracted_approved: "Đã trích xuất và duyệt",
+  extraction_failed: "Trích xuất lỗi",
+};
+
+function formatDate(value: Date | string | null) {
+  if (!value) {
+    return "Chưa có";
+  }
+
+  return new Date(value).toLocaleString("vi-VN", { dateStyle: "medium", timeStyle: "short" });
+}
+
+export default async function FacebookCaptureReviewDetailPage({ params }: FacebookCaptureReviewDetailPageProps) {
+  const { reviewId } = await params;
+  const review = await getAdminFacebookCaptureReviewDetail(reviewId);
+
+  if (!review) {
+    notFound();
+  }
+
+  return (
+    <div>
+      <Link className="text-sm font-semibold text-[#1f5f46] underline underline-offset-4" href={`/admin/knowledge/facebook-captures?status=${review.status}`}>
+        Quay lại hàng đợi Facebook
+      </Link>
+      <p className="mt-6 text-sm font-semibold uppercase tracking-[0.2em] text-[#8c4f13]">Capture Facebook cần vận hành kiểm tra</p>
+      <h1 className="mt-4 max-w-3xl text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">{review.sourceLabel}</h1>
+      <p className="mt-5 max-w-2xl text-lg leading-8 text-[#4f625a]">
+        Nội dung này chỉ dành cho vận hành. Chưa trích xuất, chưa duyệt, chưa dùng cho câu trả lời của khách.
+      </p>
+
+      <section className="mt-8 rounded-[1.5rem] border border-[#d8c9ad] bg-[#f4ead7] p-5 sm:p-6">
+        <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#8c4f13]">Nguồn Facebook/cộng đồng, chưa xác minh</p>
+        <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
+          <div className="rounded-2xl bg-white/70 p-3">
+            <dt className="font-semibold text-[#17342c]">Trạng thái review</dt>
+            <dd className="mt-1 text-[#4f625a]">{statusLabels[review.status]}</dd>
+          </div>
+          <div className="rounded-2xl bg-white/70 p-3">
+            <dt className="font-semibold text-[#17342c]">Trust mặc định</dt>
+            <dd className="mt-1 text-[#4f625a]">{review.sourceType}/{review.verificationStatus} · official: {review.official ? "có" : "không"} · partner: {review.partner ? "có" : "không"}</dd>
+          </div>
+          <div className="rounded-2xl bg-white/70 p-3">
+            <dt className="font-semibold text-[#17342c]">URL nguồn</dt>
+            <dd className="mt-1 break-all text-[#4f625a]">{review.sourceCanonicalUrl ?? review.sourceUrl ?? "Chưa có"}</dd>
+          </div>
+          <div className="rounded-2xl bg-white/70 p-3">
+            <dt className="font-semibold text-[#17342c]">Final URL capture</dt>
+            <dd className="mt-1 break-all text-[#4f625a]">{review.finalUrl ?? "Chưa có"}</dd>
+          </div>
+          <div className="rounded-2xl bg-white/70 p-3">
+            <dt className="font-semibold text-[#17342c]">Capture metadata an toàn</dt>
+            <dd className="mt-1 text-[#4f625a]">{review.captureMethod ?? "Chưa có"} · {review.capturedAt ?? formatDate(review.createdAt)}</dd>
+          </div>
+          <div className="rounded-2xl bg-white/70 p-3">
+            <dt className="font-semibold text-[#17342c]">Tác giả / timestamp hiển thị</dt>
+            <dd className="mt-1 text-[#4f625a]">{[review.authorText, review.timestampText].filter(Boolean).join(" · ") || "Chưa có"}</dd>
+          </div>
+          <div className="rounded-2xl bg-white/70 p-3">
+            <dt className="font-semibold text-[#17342c]">Reviewer</dt>
+            <dd className="mt-1 text-[#4f625a]">{review.reviewerUserId ?? "Chưa có"} · {formatDate(review.reviewedAt)}</dd>
+          </div>
+          <div className="rounded-2xl bg-white/70 p-3">
+            <dt className="font-semibold text-[#17342c]">Lỗi / lý do từ chối</dt>
+            <dd className="mt-1 text-[#4f625a]">{review.rejectionReason ?? review.extractionError ?? "Chưa có"}</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section className="mt-8 rounded-[1.5rem] border border-[#d8c9ad] bg-white/75 p-5 sm:p-6">
+        <h2 className="text-2xl font-semibold tracking-[-0.03em] text-[#17342c]">Nội dung bài viết đã capture</h2>
+        <p className="mt-3 rounded-2xl border border-[#d99a93] bg-[#fff0ee] p-3 text-sm font-semibold leading-6 text-[#9b2f29]">
+          Raw text chỉ hiển thị trong route admin/operator này. Không hiển thị cookie, token, local storage, HTML dump, hidden data, provider payload hoặc browser profile.
+        </p>
+        <pre className="mt-5 whitespace-pre-wrap break-words rounded-2xl border border-[#d8c9ad] bg-[#fbf7ed] p-4 text-sm leading-7 text-[#17342c]">{review.rawText ?? "Chưa có nội dung text."}</pre>
+      </section>
+
+      <section className="mt-8 rounded-[1.5rem] border border-[#d8c9ad] bg-white/75 p-5 sm:p-6">
+        <h2 className="text-2xl font-semibold tracking-[-0.03em] text-[#17342c]">Thẻ tri thức đã liên kết</h2>
+        <div className="mt-4 grid gap-3">
+          {review.existingCards.length === 0 ? (
+            <p className="rounded-2xl bg-[#fbf7ed] p-3 text-[#4f625a]">Chưa có thẻ draft/approved liên kết với capture này.</p>
+          ) : (
+            review.existingCards.map((card) => (
+              <div key={card.id} className="rounded-2xl border border-[#d8c9ad] bg-[#fbf7ed] p-4 text-sm text-[#4f625a]">
+                <p className="font-semibold text-[#17342c]">{card.title}</p>
+                <p className="mt-1">{card.type} · {card.status} · prompt: {card.aiPromptVersion}</p>
+              </div>
+            ))
+          )}
+        </div>
+      </section>
+
+      <section className="mt-8 rounded-[1.5rem] border border-[#d8c9ad] bg-[#fbf7ed] p-5 sm:p-6">
+        <h2 className="text-2xl font-semibold tracking-[-0.03em] text-[#17342c]">Hành động ở story sau</h2>
+        <div className="mt-4 flex flex-wrap gap-3">
+          {['Extract (4.1D)', 'Extract & Approve All (4.1E)', 'Reject / reopen capture (4.1F)'].map((label) => (
+            <button className="min-h-12 cursor-not-allowed rounded-2xl border border-[#d8c9ad] bg-white/70 px-5 py-3 font-semibold text-[#4f625a]" disabled key={label} type="button">
+              {label}
+            </button>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
