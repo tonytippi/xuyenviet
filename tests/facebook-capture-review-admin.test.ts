@@ -160,6 +160,43 @@ describe("admin Facebook capture review helpers", () => {
     expect(JSON.stringify(detail)).not.toContain("secret-storage");
   });
 
+  test("admin read models sanitize unsafe values inside allowed metadata fields", async () => {
+    authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
+    const review = await createCapturedFacebookSource({
+      id: "unsafe-allowed-values",
+      rawText: "Raw text remains available only on detail.",
+      rawMetadata: {
+        captureMethod: "cookie capture method",
+        capturedAt: "localStorage timestamp",
+        finalUrl: "https://m.facebook.com/detail?token=secret-token&safe=1",
+        authorText: "browser profile /tmp/playwright/facebook-profile",
+        timestampText: "providerPayload hidden data",
+      },
+    });
+
+    const { getAdminFacebookCaptureReviewDetail, listAdminFacebookCaptureReviews } = await import("@/features/knowledge/facebook-capture-review-admin");
+    const [queueRow] = await listAdminFacebookCaptureReviews();
+    const detail = await getAdminFacebookCaptureReviewDetail(review.id);
+
+    expect(queueRow).toMatchObject({
+      captureMethod: null,
+      capturedAt: null,
+      finalUrl: "https://m.facebook.com/detail?safe=1",
+      authorText: null,
+      timestampText: null,
+    });
+    expect(detail).toMatchObject({
+      captureMethod: null,
+      capturedAt: null,
+      finalUrl: "https://m.facebook.com/detail?safe=1",
+      authorText: null,
+      timestampText: null,
+    });
+    expect(JSON.stringify({ queueRow, detail })).not.toContain("secret-token");
+    expect(JSON.stringify({ queueRow, detail })).not.toContain("playwright/facebook-profile");
+    expect(JSON.stringify({ queueRow, detail })).not.toContain("providerPayload");
+  });
+
   test("traveler and unauthenticated users fail before raw text is returned", async () => {
     const review = await createCapturedFacebookSource({ id: "private", rawText: "Private Facebook text" });
     const { AdminAuthorizationError } = await import("@/server/auth");

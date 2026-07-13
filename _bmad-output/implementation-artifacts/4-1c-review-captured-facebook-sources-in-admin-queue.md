@@ -4,7 +4,7 @@ baseline_commit: e6a1d83f8beac90c364060b88bd019b53285362b
 
 # Story 4.1C: Review Captured Facebook Sources In Admin Queue
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run bmad-create-story validate for quality check before bmad-dev-story. -->
 
@@ -66,6 +66,10 @@ so that I can inspect captured content before using AI extraction.
   - [x] Update `docs/facebook-capture-operations.md` to name the admin review queue path once implemented.
   - [x] Keep this story file updated during implementation: task checkboxes, Dev Agent Record, Completion Notes, Debug Log References, File List, and Change Log.
   - [x] Move `_bmad-output/implementation-artifacts/sprint-status.yaml` story key `4-1c-review-captured-facebook-sources-in-admin-queue` through implementation statuses.
+
+### Review Findings
+
+- [x] [Review][Patch] Sanitize allowlisted capture metadata values before returning or rendering them [src/features/knowledge/facebook-capture-review-admin.ts:58] — AC1 requires safe author/timestamp metadata and AC3 forbids displaying cookies, local storage, full HTML dumps, hidden page data, provider payloads, tokens, or browser profile data. The implementation selects only allowlisted raw metadata keys (`captureMethod`, `capturedAt`, `finalUrl`, `authorText`, `timestampText`), but returns/renders their values directly in both queue and detail surfaces. Because `raw_source_material.raw_metadata` is arbitrary JSONB, unsafe strings placed inside an allowed key can still leak through the admin-safe read model and UI. Add value-level projection sanitization/validation for metadata-derived fields, return `null` for unsafe values, and cover unsafe values inside allowed keys in tests. Fixed in review by sanitizing admin read-model metadata values and adding regression coverage for unsafe values inside allowed keys.
 
 ## Dev Notes
 
@@ -175,6 +179,9 @@ gpt-5.5-review
 - `pnpm typecheck` passed.
 - `pnpm test:run` passed: 26 files, 346 tests.
 - `pnpm build` passed.
+- Review fix: `pnpm test:run tests/facebook-capture-review-admin.test.ts` passed: 8 tests.
+- Review fix: `pnpm lint` passed.
+- Review fix: `pnpm typecheck` passed.
 
 ### Completion Notes List
 
@@ -183,6 +190,7 @@ gpt-5.5-review
 - Added `/admin/knowledge/facebook-captures` with default `needs_review` queue and explicit status filter links for all review statuses.
 - Added `/admin/knowledge/facebook-captures/[reviewId]` detail page that renders raw captured text only through the admin-gated helper, displays safe metadata and linked cards, and shows disabled placeholders for future extraction/reject stories without implementing mutations.
 - Added focused admin helper and render tests covering admin/operator access, unauthenticated/traveler denial, default actionable filtering, explicit non-actionable filtering, linked cards, safe metadata, unsafe metadata exclusion, Vietnamese trust labels, and queue raw-text non-leakage.
+- Review fix sanitized metadata-derived admin read-model values, including unsafe values inside allowlisted keys, before queue/detail rendering.
 - Updated Facebook capture operations documentation to name the admin review queue path.
 
 ### File List
@@ -200,4 +208,5 @@ gpt-5.5-review
 ## Change Log
 
 - 2026-07-13: Implemented admin Facebook capture queue/detail review surface with gated read helpers, tests, docs, and validation.
+- 2026-07-13: Addressed code review finding for metadata value sanitization and marked story done.
 - 2026-07-13: Story created by BMad create-story workflow. Ultimate context engine analysis completed; comprehensive developer guide created.
