@@ -4,11 +4,13 @@ import { redirect } from "next/navigation";
 
 import { getDb } from "@/db/client";
 import { rawSourceMaterial, sources, type FacebookCaptureReviewStatus } from "@/db/schema";
+import { sourceKnowledgeDraftExtractionPromptVersion } from "@/features/ai/prompts";
 import { AdminAuthorizationError, requireAdminSession } from "@/server/auth";
 import { runAuditedAdminMutation } from "@/server/mutations";
 
 import { isKnowledgeBatchIntakeError, submitKnowledgeSeedUrlBatch as submitKnowledgeSeedUrlBatchService } from "./batch-intake";
 import { extractKnowledgeDraftsFromSource as extractKnowledgeDraftsFromSourceService, isKnowledgeExtractionError } from "./extraction";
+import { getAdminFacebookCaptureReviewExtractionTarget } from "./facebook-capture-review-admin";
 import { markFacebookCaptureReviewStatus, type FacebookCaptureReviewActor } from "./facebook-capture-review";
 import {
   approveKnowledgeDraft as approveKnowledgeDraftService,
@@ -196,6 +198,72 @@ export async function extractKnowledgeDraftsFromSourceForm(formData: FormData) {
   redirect(`/admin/knowledge/intake?extracted=${result?.draftCount ?? 0}&sourceId=${encodeURIComponent(result?.sourceId ?? "")}`);
 }
 
+export async function extractKnowledgeDraftsFromFacebookCaptureForm(formData: FormData) {
+  const reviewId = getOptionalFormString(formData, "reviewId") ?? "";
+  let redirectPath = getFacebookCaptureRedirectPath(reviewId, { extractError: "Không thể trích xuất capture này." });
+  let target: Awaited<ReturnType<typeof getAdminFacebookCaptureReviewExtractionTarget>> | null = null;
+
+  try {
+    target = await getAdminFacebookCaptureReviewExtractionTarget(reviewId);
+
+    if (!target) {
+      redirectPath = getFacebookCaptureRedirectPath(reviewId, { extractError: "Không tìm thấy capture cần trích xuất." });
+    } else if (target.existingCards.some((card) => card.aiPromptVersion === sourceKnowledgeDraftExtractionPromptVersion)) {
+      redirectPath = getFacebookCaptureRedirectPath(target.id, { alreadyExtracted: "1", existingCards: String(target.existingCards.length) });
+    } else if (target.status !== "needs_review") {
+      redirectPath = getFacebookCaptureRedirectPath(target.id, { extractStatus: target.status, existingCards: String(target.existingCards.length) });
+    } else if (target.sourceKind !== "facebook" || target.sourceType !== "community" || !target.rawText?.trim()) {
+      redirectPath = getFacebookCaptureRedirectPath(target.id, { extractError: "Capture này không đủ điều kiện trích xuất bản nháp." });
+    } else {
+      const result = await extractKnowledgeDraftsFromSource(target.sourceId);
+      const statusResult = await markFacebookCaptureReviewStatus(getDb(), { reviewId: target.id, status: "extracted", actor: target.actor });
+
+      if (statusResult.status === "updated") {
+        redirectPath = getFacebookCaptureRedirectPath(target.id, { extracted: String(result.draftCount), sourceId: result.sourceId });
+      } else {
+        redirectPath = getFacebookCaptureRedirectPath(target.id, { extractStatus: statusResult.status, existingCards: String(result.draftCount) });
+      }
+    }
+  } catch (error) {
+    if (error instanceof AdminAuthorizationError || (error instanceof Error && error.name === "AdminAuthorizationError")) {
+      throw error;
+    }
+
+    if (isKnowledgeExtractionError(error) && error instanceof Error) {
+      const code = "code" in error && typeof error.code === "string" ? error.code : "unknown";
+
+      if (code === "already_extracted") {
+        const existingCards = target?.existingCards.length ?? 0;
+        redirectPath = getFacebookCaptureRedirectPath(target?.id ?? reviewId, { alreadyExtracted: "1", existingCards: String(existingCards) });
+      } else {
+        if (target?.status === "needs_review") {
+          await markFacebookCaptureReviewStatus(getDb(), {
+            reviewId: target.id,
+            status: "extraction_failed",
+            actor: target.actor,
+            extractionError: `Extraction failed: ${code}`,
+          });
+        }
+
+        redirectPath = getFacebookCaptureRedirectPath(target?.id ?? reviewId, { extractError: "Không thể trích xuất capture này.", errorCode: code });
+      }
+    } else {
+      if (target?.status === "needs_review") {
+        await markFacebookCaptureReviewStatus(getDb(), {
+          reviewId: target.id,
+          status: "extraction_failed",
+          actor: target.actor,
+          extractionError: "Extraction failed: unknown",
+        });
+      }
+
+      redirectPath = getFacebookCaptureRedirectPath(target?.id ?? reviewId, { extractError: "Không thể trích xuất capture này." });
+    }
+  }
+
+  redirect(redirectPath);
+}
+
 export async function suggestKnowledgeFromSourceUrlForm(formData: FormData) {
   let result: Awaited<ReturnType<typeof suggestKnowledgeFromSourceUrl>> | null = null;
   let failureMessage: string | null = null;
@@ -294,4 +362,18 @@ export async function submitKnowledgeSeedUrlBatchForm(formData: FormData) {
 function getOptionalFormString(formData: FormData, key: string) {
   const value = formData.get(key);
   return typeof value === "string" ? value.trim() || null : null;
+}
+
+function getFacebookCaptureRedirectPath(reviewId: string, params: Record<string, string>) {
+  const pathReviewId = encodeURIComponent(reviewId || "unknown");
+  const searchParams = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value) {
+      searchParams.set(key, value);
+    }
+  }
+
+  const query = searchParams.toString();
+  return `/admin/knowledge/facebook-captures/${pathReviewId}${query ? `?${query}` : ""}`;
 }

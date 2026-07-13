@@ -79,6 +79,44 @@ export async function getAdminFacebookCaptureReviewDetail(reviewId: string) {
   };
 }
 
+export async function getAdminFacebookCaptureReviewExtractionTarget(reviewId: string) {
+  const session = await requireAdminSession();
+  const normalizedReviewId = reviewId.trim();
+
+  if (!normalizedReviewId) {
+    return null;
+  }
+
+  const db = getDb();
+  const [review] = await db
+    .select({
+      id: facebookCaptureReviews.id,
+      sourceId: facebookCaptureReviews.sourceId,
+      status: facebookCaptureReviews.status,
+      sourceKind: sources.kind,
+      sourceType: sources.sourceType,
+      verificationStatus: sources.verificationStatus,
+      official: sources.official,
+      partner: sources.partner,
+      rawText: rawSourceMaterial.rawText,
+    })
+    .from(facebookCaptureReviews)
+    .innerJoin(sources, eq(sources.id, facebookCaptureReviews.sourceId))
+    .innerJoin(rawSourceMaterial, eq(rawSourceMaterial.id, facebookCaptureReviews.rawSourceMaterialId))
+    .where(eq(facebookCaptureReviews.id, normalizedReviewId))
+    .limit(1);
+
+  if (!review) {
+    return null;
+  }
+
+  return {
+    ...review,
+    actor: { userId: session.userId, email: session.email },
+    existingCards: await getExistingCardsForCaptureSource(db, review.sourceId),
+  };
+}
+
 function sanitizeReviewMetadata<T extends { captureMethod: string | null; capturedAt: string | null; finalUrl: string | null; authorText: string | null; timestampText: string | null }>(review: T): T {
   return {
     ...review,

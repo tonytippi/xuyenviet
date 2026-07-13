@@ -82,7 +82,7 @@ development_status:
   4-1a-capture-queued-facebook-source-text-with-operator-browser-automation: done
   4-1b-create-facebook-capture-review-state: done
   4-1c-review-captured-facebook-sources-in-admin-queue: done
-  4-1d-extract-draft-knowledge-from-reviewed-facebook-capture: backlog
+  4-1d-extract-draft-knowledge-from-reviewed-facebook-capture: review
   4-1e-extract-and-approve-all-captured-facebook-drafts-with-guardrails: backlog
   4-1f-reject-captured-facebook-source-material: backlog
   4-1g-integrate-facebook-capture-review-into-admin-knowledge-workflow: backlog

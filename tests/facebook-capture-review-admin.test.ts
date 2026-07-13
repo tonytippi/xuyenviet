@@ -256,4 +256,19 @@ describe("admin Facebook capture review helpers", () => {
     expect(html).not.toContain("unsafe-cookie-value");
     expect(html).not.toContain("unsafe-provider-token");
   });
+
+  test("detail page renders real Extract form for needs-review captures and keeps future actions disabled", async () => {
+    authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
+    const review = await createCapturedFacebookSource({ id: "extract-action", rawText: "Readable captured Facebook text." });
+
+    const { default: FacebookCaptureReviewDetailPage } = await import("@/app/admin/knowledge/facebook-captures/[reviewId]/page");
+    const element = await FacebookCaptureReviewDetailPage({ params: Promise.resolve({ reviewId: review.id }) });
+    const html = renderToStaticMarkup(element);
+
+    expect(html).toContain("Trích xuất bản nháp");
+    expect(html).toContain("AI sẽ tạo thẻ nháp để bạn duyệt");
+    expect(html).toContain(`name="reviewId" value="${review.id}"`);
+    expect(html).toContain("Extract &amp; Approve All (4.1E)");
+    expect(html).toContain("Reject / reopen capture (4.1F)");
+  });
 });

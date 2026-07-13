@@ -2,12 +2,14 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { type FacebookCaptureReviewStatus } from "@/db/schema";
+import { extractKnowledgeDraftsFromFacebookCaptureForm } from "@/features/knowledge/actions";
 import { getAdminFacebookCaptureReviewDetail } from "@/features/knowledge/facebook-capture-review-admin";
 
 type FacebookCaptureReviewDetailPageProps = {
   params: Promise<{
     reviewId: string;
   }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
 
 const statusLabels: Record<FacebookCaptureReviewStatus, string> = {
@@ -26,13 +28,20 @@ function formatDate(value: Date | string | null) {
   return new Date(value).toLocaleString("vi-VN", { dateStyle: "medium", timeStyle: "short" });
 }
 
-export default async function FacebookCaptureReviewDetailPage({ params }: FacebookCaptureReviewDetailPageProps) {
+export default async function FacebookCaptureReviewDetailPage({ params, searchParams }: FacebookCaptureReviewDetailPageProps) {
   const { reviewId } = await params;
+  const query = (await searchParams) ?? {};
   const review = await getAdminFacebookCaptureReviewDetail(reviewId);
 
   if (!review) {
     notFound();
   }
+
+  const hasExtractionCards = review.existingCards.some((card) => card.aiPromptVersion === "source_knowledge_draft_extraction_v1");
+  const canExtract = review.status === "needs_review" && Boolean(review.rawText?.trim()) && review.sourceType === "community" && !hasExtractionCards;
+  const extractedCount = getSearchParam(query.extracted);
+  const extractError = getSearchParam(query.extractError);
+  const alreadyExtracted = getSearchParam(query.alreadyExtracted) === "1";
 
   return (
     <div>
@@ -44,6 +53,14 @@ export default async function FacebookCaptureReviewDetailPage({ params }: Facebo
       <p className="mt-5 max-w-2xl text-lg leading-8 text-[#4f625a]">
         Nội dung này chỉ dành cho vận hành. Chưa trích xuất, chưa duyệt, chưa dùng cho câu trả lời của khách.
       </p>
+
+      {(extractedCount || extractError || alreadyExtracted) && (
+        <section className="mt-6 rounded-2xl border border-[#d8c9ad] bg-white/80 p-4 text-sm leading-6 text-[#17342c]">
+          {extractedCount ? <p>Đã tạo {extractedCount} bản nháp. Mở hàng đợi duyệt để kiểm tra trước khi phê duyệt.</p> : null}
+          {extractError ? <p>Không thể trích xuất capture này. Trạng thái đã chuyển sang Trích xuất lỗi để bạn kiểm tra hoặc thử lại.</p> : null}
+          {alreadyExtracted ? <p>Capture này đã có thẻ được trích xuất. Kiểm tra các thẻ liên kết thay vì trích xuất lại.</p> : null}
+        </section>
+      )}
 
       <section className="mt-8 rounded-[1.5rem] border border-[#d8c9ad] bg-[#f4ead7] p-5 sm:p-6">
         <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#8c4f13]">Nguồn Facebook/cộng đồng, chưa xác minh</p>
@@ -99,7 +116,9 @@ export default async function FacebookCaptureReviewDetailPage({ params }: Facebo
           ) : (
             review.existingCards.map((card) => (
               <div key={card.id} className="rounded-2xl border border-[#d8c9ad] bg-[#fbf7ed] p-4 text-sm text-[#4f625a]">
-                <p className="font-semibold text-[#17342c]">{card.title}</p>
+                <Link className="font-semibold text-[#17342c] underline underline-offset-4" href={`/admin/knowledge/drafts/${encodeURIComponent(card.id)}`}>
+                  {card.title}
+                </Link>
                 <p className="mt-1">{card.type} · {card.status} · prompt: {card.aiPromptVersion}</p>
               </div>
             ))
@@ -108,9 +127,24 @@ export default async function FacebookCaptureReviewDetailPage({ params }: Facebo
       </section>
 
       <section className="mt-8 rounded-[1.5rem] border border-[#d8c9ad] bg-[#fbf7ed] p-5 sm:p-6">
-        <h2 className="text-2xl font-semibold tracking-[-0.03em] text-[#17342c]">Hành động ở story sau</h2>
+        <h2 className="text-2xl font-semibold tracking-[-0.03em] text-[#17342c]">Hành động vận hành</h2>
+        {canExtract ? (
+          <div className="mt-4 rounded-2xl border border-[#d8c9ad] bg-white/75 p-4">
+            <p className="text-sm font-semibold text-[#17342c]">AI sẽ tạo thẻ nháp để bạn duyệt. Chưa có thẻ nào được phê duyệt hoặc dùng cho câu trả lời của khách.</p>
+            <form action={extractKnowledgeDraftsFromFacebookCaptureForm} className="mt-4">
+              <input name="reviewId" type="hidden" value={review.id} />
+              <button className="min-h-12 rounded-2xl bg-[#1f5f46] px-5 py-3 font-semibold text-white transition hover:bg-[#194d39] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]" type="submit">
+                Trích xuất bản nháp
+              </button>
+            </form>
+          </div>
+        ) : (
+          <p className="mt-4 rounded-2xl border border-[#d8c9ad] bg-white/75 p-4 text-sm leading-6 text-[#4f625a]">
+            Capture này không còn ở trạng thái có thể trích xuất mới. Kiểm tra trạng thái review và thẻ liên kết hiện có.
+          </p>
+        )}
         <div className="mt-4 flex flex-wrap gap-3">
-          {['Extract (4.1D)', 'Extract & Approve All (4.1E)', 'Reject / reopen capture (4.1F)'].map((label) => (
+          {['Extract & Approve All (4.1E)', 'Reject / reopen capture (4.1F)'].map((label) => (
             <button className="min-h-12 cursor-not-allowed rounded-2xl border border-[#d8c9ad] bg-white/70 px-5 py-3 font-semibold text-[#4f625a]" disabled key={label} type="button">
               {label}
             </button>
@@ -119,4 +153,8 @@ export default async function FacebookCaptureReviewDetailPage({ params }: Facebo
       </section>
     </div>
   );
+}
+
+function getSearchParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
 }
