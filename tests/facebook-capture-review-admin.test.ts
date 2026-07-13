@@ -234,7 +234,7 @@ describe("admin Facebook capture review helpers", () => {
     expect(html).toContain("Queue page must not render this raw Facebook paragraph.");
   });
 
-  test("admin overview and intake page expose Facebook capture workflow routing", async () => {
+  test("admin overview exposes Facebook routing and intake stays URL-only", async () => {
     authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
 
     const { default: AdminPage } = await import("@/app/admin/page");
@@ -244,13 +244,83 @@ describe("admin Facebook capture review helpers", () => {
     expect(adminHtml).toContain("/admin/knowledge/facebook-captures");
     expect(adminHtml).toContain("Nguồn Facebook/cộng đồng vẫn chưa xác minh");
 
+    await testDb.insert(sources).values([
+      {
+        id: "older-url-source",
+        kind: "url",
+        url: "https://example.com/older?access_token=unsafe-token&place=hue",
+        canonicalUrl: "https://example.com/older?access_token=unsafe-token&place=hue",
+        label: "Older URL source",
+        sourceType: "curated",
+        verificationStatus: "unverified",
+        official: false,
+        partner: false,
+        submittedByUserId: "operator-user",
+        createdAt: new Date("2026-07-13T01:00:00.000Z"),
+      },
+      {
+        id: "newer-facebook-source",
+        kind: "facebook",
+        url: "https://facebook.com/groups/xuyenviet/posts/newer-facebook-source",
+        canonicalUrl: "https://facebook.com/groups/xuyenviet/posts/newer-facebook-source",
+        label: "Newer Facebook source",
+        sourceType: "community",
+        verificationStatus: "unverified",
+        official: false,
+        partner: false,
+        submittedByUserId: "operator-user",
+        createdAt: new Date("2026-07-13T02:00:00.000Z"),
+      },
+    ]);
+    await testDb.insert(rawSourceMaterial).values({
+      id: "raw-newer-facebook-source",
+      sourceId: "newer-facebook-source",
+      rawText: "Captured Facebook text for intake status.",
+    });
+    await testDb.insert(facebookCaptureReviews).values({
+      id: "review-newer-facebook-source",
+      sourceId: "newer-facebook-source",
+      rawSourceMaterialId: "raw-newer-facebook-source",
+      status: "extracted",
+      reviewerUserId: "operator-user",
+      reviewedAt: new Date("2026-07-13T03:00:00.000Z"),
+      createdAt: new Date("2026-07-13T02:30:00.000Z"),
+      updatedAt: new Date("2026-07-13T03:00:00.000Z"),
+    });
+    await testDb.insert(knowledgeCards).values({
+      id: "card-newer-facebook-source",
+      status: "draft",
+      type: "route_note",
+      title: "Draft from captured source",
+      routeSegment: "Huế - Đà Nẵng",
+      summary: "Draft linked to captured source.",
+      confidence: "community",
+      aiPromptVersion: "test",
+      createdByUserId: "operator-user",
+    });
+    await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: "card-newer-facebook-source", sourceId: "newer-facebook-source" });
+
     const { default: KnowledgeIntakePage } = await import("@/app/admin/knowledge/intake/page");
     const intakeElement = await KnowledgeIntakePage({ searchParams: Promise.resolve({ success: "1", sourceId: "facebook-source" }) });
     const intakeHtml = renderToStaticMarkup(intakeElement);
 
-    expect(intakeHtml).toContain("Nếu chỉ lưu link Facebook chưa có raw text, hãy chạy công cụ Playwright operator trước");
-    expect(intakeHtml).toContain("Mở hàng đợi duyệt capture Facebook");
-    expect(intakeHtml).toContain("/admin/knowledge/facebook-captures");
+    expect(intakeHtml).toContain("Quản lý các URL nguồn đã nhập");
+    expect(intakeHtml).toContain("URL nguồn");
+    expect(intakeHtml).toContain("Tất cả URL đã nhập");
+    expect(intakeHtml).toContain("Facebook");
+    expect(intakeHtml).toContain("Capture");
+    expect(intakeHtml).toContain("Extract");
+    expect(intakeHtml).toContain("Đã capture");
+    expect(intakeHtml).toContain("Đã extract");
+    expect(intakeHtml).toContain("Không áp dụng");
+    expect(intakeHtml).toContain("/admin/knowledge/facebook-captures/review-newer-facebook-source");
+    expect(intakeHtml).toContain("https://facebook.com/groups/xuyenviet/posts/newer-facebook-source");
+    expect(intakeHtml).toContain("https://example.com/older?access_token=");
+    expect(intakeHtml).not.toContain("unsafe-token");
+    expect(intakeHtml).not.toContain("name=\"rawText\"");
+    expect(intakeHtml).not.toContain("name=\"screenshotFileName\"");
+    expect(intakeHtml).not.toContain("name=\"batchPublisher\"");
+    expect(intakeHtml.indexOf("newer-facebook-source")).toBeLessThan(intakeHtml.indexOf("https://example.com/older"));
   });
 
   test("default and rejected queue empty states explain actionable workflow outcomes", async () => {

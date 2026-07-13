@@ -1,6 +1,10 @@
 import "server-only";
 
-import type { rawSourceMaterial, sources, SourceKind, SourceType } from "@/db/schema";
+import { desc, eq, inArray } from "drizzle-orm";
+
+import { getDb } from "@/db/client";
+import { facebookCaptureReviews, knowledgeCards, knowledgeCardSources, sources, type FacebookCaptureReviewStatus, type rawSourceMaterial, type SourceKind, type SourceType } from "@/db/schema";
+import { requireAdminSession } from "@/server/auth";
 
 const maxRawTextLength = 20_000;
 const maxLabelLength = 200;
@@ -36,6 +40,12 @@ export type TravelSourceInput = {
 export type NormalizedTravelSource = {
   source: Omit<typeof sources.$inferInsert, "id" | "submittedByUserId" | "createdAt">;
   rawMaterial: Omit<typeof rawSourceMaterial.$inferInsert, "id" | "sourceId" | "createdAt">;
+};
+
+export type KnowledgeUrlSourceListItem = Pick<typeof sources.$inferSelect, "id" | "kind" | "url" | "canonicalUrl" | "label" | "publisher" | "createdAt"> & {
+  facebookCaptureReviewId: string | null;
+  facebookCaptureStatus: FacebookCaptureReviewStatus | null;
+  linkedKnowledgeCardCount: number;
 };
 
 export class SourceValidationError extends Error {
@@ -91,6 +101,56 @@ export function normalizeTravelSourceInput(input: TravelSourceInput): Normalized
       rawMetadata: input.rawMetadata ?? null,
     },
   };
+}
+
+export async function listKnowledgeUrlSources(): Promise<KnowledgeUrlSourceListItem[]> {
+  await requireAdminSession();
+  const db = getDb();
+
+  const rows = await db
+    .select({
+      id: sources.id,
+      kind: sources.kind,
+      url: sources.url,
+      canonicalUrl: sources.canonicalUrl,
+      label: sources.label,
+      publisher: sources.publisher,
+      createdAt: sources.createdAt,
+    })
+    .from(sources)
+    .where(inArray(sources.kind, ["url", "facebook"]))
+    .orderBy(desc(sources.createdAt), desc(sources.id));
+
+  if (rows.length === 0) {
+    return [];
+  }
+
+  const sourceIds = rows.map((source) => source.id);
+  const reviewRows = await db
+    .select({ id: facebookCaptureReviews.id, sourceId: facebookCaptureReviews.sourceId, status: facebookCaptureReviews.status })
+    .from(facebookCaptureReviews)
+    .where(inArray(facebookCaptureReviews.sourceId, sourceIds));
+  const cardRows = await db
+    .select({ sourceId: knowledgeCardSources.sourceId, knowledgeCardId: knowledgeCards.id })
+    .from(knowledgeCardSources)
+    .innerJoin(knowledgeCards, eq(knowledgeCards.id, knowledgeCardSources.knowledgeCardId))
+    .where(inArray(knowledgeCardSources.sourceId, sourceIds));
+  const reviewsBySourceId = new Map(reviewRows.map((review) => [review.sourceId, review]));
+  const cardCountsBySourceId = new Map<string, number>();
+
+  for (const row of cardRows) {
+    cardCountsBySourceId.set(row.sourceId, (cardCountsBySourceId.get(row.sourceId) ?? 0) + 1);
+  }
+
+  return rows.map((source) => {
+    const review = reviewsBySourceId.get(source.id);
+    return {
+      ...source,
+      facebookCaptureReviewId: review?.id ?? null,
+      facebookCaptureStatus: review?.status ?? null,
+      linkedKnowledgeCardCount: cardCountsBySourceId.get(source.id) ?? 0,
+    };
+  });
 }
 
 function getSourceKind({
