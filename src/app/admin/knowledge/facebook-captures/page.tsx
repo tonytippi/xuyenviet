@@ -97,6 +97,12 @@ export default async function FacebookCaptureReviewQueuePage({ searchParams }: F
                   <dt className="font-semibold text-[#17342c]">Thẻ đã liên kết</dt>
                   <dd className="mt-1 text-[#4f625a]">{review.existingCards.length === 0 ? "Chưa có" : `${review.existingCards.length} thẻ`}</dd>
                 </div>
+                {review.status === "rejected" ? (
+                  <div className="rounded-2xl bg-[#fbf7ed] p-3 sm:col-span-2">
+                    <dt className="font-semibold text-[#17342c]">Lý do từ chối</dt>
+                    <dd className="mt-1 text-[#4f625a]">{review.rejectionReason ?? "Chưa có"}</dd>
+                  </div>
+                ) : null}
               </dl>
             </article>
           ))

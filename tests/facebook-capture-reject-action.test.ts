@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { aiUsageEvents, auditEvents, facebookCaptureReviews, knowledgeCards, rawSourceMaterial, sources, userRoles, users, type UserRole } from "@/db/schema";
-import { ensureFacebookCaptureReviewForCapturedSource, markFacebookCaptureReviewStatus } from "@/features/knowledge/facebook-capture-review";
+import { ensureFacebookCaptureReviewForCapturedSource, listFacebookCaptureReviews, markFacebookCaptureReviewStatus } from "@/features/knowledge/facebook-capture-review";
 import { listQueuedFacebookSources } from "@/features/knowledge/facebook-capture";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
@@ -107,6 +107,9 @@ describe("Facebook capture reject and reopen actions", () => {
     await expect(testDb.select().from(rawSourceMaterial).where(eq(rawSourceMaterial.id, review.rawSourceMaterialId))).resolves.toMatchObject([{ rawText: null }]);
     await expect(testDb.select().from(facebookCaptureReviews).where(eq(facebookCaptureReviews.id, review.id))).resolves.toMatchObject([{ status: "needs_review", rejectionReason: null }]);
     await expect(listQueuedFacebookSources(testDb, { sourceId: review.sourceId })).resolves.toMatchObject([{ sourceId: review.sourceId, rawMaterialId: review.rawSourceMaterialId }]);
+    await expect(listFacebookCaptureReviews(testDb, { status: "needs_review" })).resolves.toEqual([]);
+    const { rejectFacebookCaptureReviewForm } = await import("@/features/knowledge/actions");
+    await expect(rejectFacebookCaptureReviewForm(formData({ reviewId: review.id, rejectionReason: "Still missing captured text" }))).rejects.toThrow(/NEXT_REDIRECT:.*rejectStatus=missing_raw_text/);
   });
 
   test("unauthorized users fail before review lookup, raw text clearing, audits, provider calls, or status updates", async () => {

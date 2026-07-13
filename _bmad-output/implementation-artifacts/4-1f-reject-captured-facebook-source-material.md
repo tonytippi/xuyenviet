@@ -4,7 +4,7 @@ baseline_commit: 0aa139f
 
 # Story 4.1F: Reject Captured Facebook Source Material
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run bmad-create-story validate for quality check before bmad-dev-story. -->
 
@@ -70,6 +70,13 @@ so that unusable, private, irrelevant, or low-quality captures do not continue t
 - [x] Update story tracking (AC: all)
   - [x] Keep this story file updated during implementation: task checkboxes, Dev Agent Record, Completion Notes, Debug Log References, File List, and Change Log.
   - [x] Move `_bmad-output/implementation-artifacts/sprint-status.yaml` story key `4-1f-reject-captured-facebook-source-material` through implementation statuses.
+
+### Review Findings
+
+- [x] [Review][Patch] Reopen returns an empty capture to the actionable `needs_review` queue before recapture succeeds [`src/features/knowledge/facebook-capture-review.ts:302`]
+- [x] [Review][Patch] Reopened empty capture can be rejected again without replacement raw text [`src/features/knowledge/facebook-capture-review.ts:230`]
+- [x] [Review][Patch] Reject/reopen error query parameters render arbitrary operator-facing text [`src/app/admin/knowledge/facebook-captures/[reviewId]/page.tsx:78`]
+- [x] [Review][Patch] Rejected queue rows omit the safe rejection reason required for filtered review [`src/app/admin/knowledge/facebook-captures/page.tsx:75`]
 
 ## Dev Notes
 
@@ -146,6 +153,7 @@ so that unusable, private, irrelevant, or low-quality captures do not continue t
 - `pnpm typecheck`
 - `pnpm test:run`
 - `pnpm build`
+- `pnpm test:run tests/facebook-capture-review.test.ts && pnpm test:run tests/facebook-capture-reject-action.test.ts && pnpm test:run tests/facebook-capture-review-admin.test.ts`
 
 ### Previous Story Intelligence
 
@@ -218,6 +226,7 @@ gpt-5.5-review
 - Replaced the disabled capture-detail placeholder with Vietnamese-first reject and reopen forms, safe result messages, and status-gated availability while preserving extract/approve-all restrictions for rejected captures.
 - Extended service, action, and admin render tests for rejection, reopen, queue filtering, safe reason handling, unauthorized behavior, no provider/card side effects, and controlled recapture through `updateQueuedFacebookSourceRawText(...)`.
 - Verified with targeted tests, lint, typecheck, full test suite, and production build.
+- Review fixes: recapture-ready rows remain available to the capture tool but are excluded from actionable `needs_review` review rows until raw text is present; rejection now fails when current raw text is missing; reject/reopen query messages are fixed safe copy; rejected queue rows show the safe rejection reason.
 
 ### File List
 

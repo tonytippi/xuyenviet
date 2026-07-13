@@ -41,7 +41,8 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
   const hasExtractionCards = review.existingCards.some((card) => card.aiPromptVersion === sourceKnowledgeDraftExtractionPromptVersion);
   const canExtract = review.status === "needs_review" && Boolean(review.rawText?.trim()) && review.sourceType === "community" && !hasExtractionCards;
   const canExtractAndApproveAll = canExtract;
-  const canReject = review.status === "needs_review" || review.status === "extraction_failed";
+  const hasRawText = Boolean(review.rawText?.trim());
+  const canReject = (review.status === "needs_review" || review.status === "extraction_failed") && hasRawText;
   const canReopenForRecapture = review.status === "rejected";
   const extractedCount = getSearchParam(query.extracted);
   const approvedAllCount = getSearchParam(query.approvedAll);
@@ -75,10 +76,10 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
         <section className="mt-6 rounded-2xl border border-[#d8c9ad] bg-white/80 p-4 text-sm leading-6 text-[#17342c]">
           {extractedCount ? <p>Đã tạo {extractedCount} bản nháp. Mở hàng đợi duyệt để kiểm tra trước khi phê duyệt.</p> : null}
           {rejected ? <p>Đã từ chối capture. Nội dung này không còn nằm trong hàng đợi cần xử lý và chưa tạo thẻ tri thức.</p> : null}
-          {rejectError ? <p>{rejectError}</p> : null}
+          {rejectError ? <p>Lý do từ chối không an toàn hoặc capture này không thể từ chối.</p> : null}
           {rejectStatus ? <p>Capture này không chuyển sang trạng thái từ chối ({rejectStatus}). Kiểm tra trạng thái hiện tại trước khi thử lại.</p> : null}
           {reopened ? <p>Đã mở lại nguồn để capture lại. Chạy công cụ capture Facebook để lấy text mới rồi duyệt lại.</p> : null}
-          {reopenError ? <p>{reopenError}</p> : null}
+          {reopenError ? <p>Lý do mở lại không an toàn hoặc capture này không thể mở lại.</p> : null}
           {reopenStatus ? <p>Capture này không thể mở lại để capture lại ({reopenStatus}). Kiểm tra trạng thái hiện tại trước khi thử lại.</p> : null}
           {approvedAllCount ? (
             <p>

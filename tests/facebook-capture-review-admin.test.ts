@@ -232,6 +232,25 @@ describe("admin Facebook capture review helpers", () => {
     expect(html).not.toContain("Queue page must not render");
   });
 
+  test("rejected queue page renders safe rejection reason without raw captured text", async () => {
+    authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
+    const review = await createCapturedFacebookSource({ id: "rejected-queue-page", rawText: "Rejected queue raw Facebook paragraph." });
+    await markFacebookCaptureReviewStatus(testDb, {
+      reviewId: review.id,
+      status: "rejected",
+      actor: { userId: "operator-user", email: "operator-user@example.com" },
+      rejectionReason: "Wrong visible post content",
+    });
+
+    const { default: FacebookCaptureReviewQueuePage } = await import("@/app/admin/knowledge/facebook-captures/page");
+    const element = await FacebookCaptureReviewQueuePage({ searchParams: Promise.resolve({ status: "rejected" }) });
+    const html = renderToStaticMarkup(element);
+
+    expect(html).toContain("Lý do từ chối");
+    expect(html).toContain("Wrong visible post content");
+    expect(html).not.toContain("Rejected queue raw Facebook paragraph");
+  });
+
   test("detail page renders raw text but not unsafe metadata values", async () => {
     authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
     const review = await createCapturedFacebookSource({
@@ -293,5 +312,22 @@ describe("admin Facebook capture review helpers", () => {
     expect(html).toContain("Text cũ không được dùng để trích xuất");
     expect(html).not.toContain("Trích xuất bản nháp</button>");
     expect(html).not.toContain("approveAllConfirmed");
+  });
+
+  test("detail page maps reject and reopen error query params to fixed safe messages", async () => {
+    authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
+    const review = await createCapturedFacebookSource({ id: "safe-query", rawText: "Detail raw text remains only in raw text panel." });
+
+    const { default: FacebookCaptureReviewDetailPage } = await import("@/app/admin/knowledge/facebook-captures/[reviewId]/page");
+    const element = await FacebookCaptureReviewDetailPage({
+      params: Promise.resolve({ reviewId: review.id }),
+      searchParams: Promise.resolve({ rejectError: "raw text token should not render", reopenError: "provider payload should not render" }),
+    });
+    const html = renderToStaticMarkup(element);
+
+    expect(html).toContain("Lý do từ chối không an toàn hoặc capture này không thể từ chối.");
+    expect(html).toContain("Lý do mở lại không an toàn hoặc capture này không thể mở lại.");
+    expect(html).not.toContain("raw text token should not render");
+    expect(html).not.toContain("provider payload should not render");
   });
 });

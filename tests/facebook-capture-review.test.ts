@@ -197,6 +197,15 @@ describe("Facebook capture review state", () => {
       },
     ]);
     await expect(listQueuedFacebookSources(testDb, { sourceId: "recapture-facebook" })).resolves.toMatchObject([{ sourceId: "recapture-facebook", rawMaterialId: "raw-recapture-facebook" }]);
+    await expect(listFacebookCaptureReviews(testDb, { status: "needs_review" })).resolves.toEqual([]);
+    await expect(
+      markFacebookCaptureReviewStatus(testDb, {
+        reviewId: ensured.review.id,
+        status: "rejected",
+        actor: { userId: "operator-user", email: "operator-user@example.com" },
+        rejectionReason: "Still missing captured text",
+      }),
+    ).resolves.toMatchObject({ status: "missing_raw_text" });
 
     await expect(
       updateQueuedFacebookSourceRawText(testDb, {
@@ -213,6 +222,7 @@ describe("Facebook capture review state", () => {
       }),
     ).resolves.toMatchObject({ status: "updated", rawMaterialId: "raw-recapture-facebook", reviewId: ensured.review.id });
     await expect(testDb.select().from(facebookCaptureReviews).where(eq(facebookCaptureReviews.id, ensured.review.id))).resolves.toMatchObject([{ status: "needs_review", rejectionReason: null, extractionError: null }]);
+    await expect(listFacebookCaptureReviews(testDb, { status: "needs_review" })).resolves.toMatchObject([{ sourceId: "recapture-facebook", status: "needs_review" }]);
 
     const audits = await testDb.select().from(auditEvents).where(eq(auditEvents.targetId, ensured.review.id));
     expect(audits.some((audit) => audit.afterSummary?.includes("rejected -> recapture-ready"))).toBe(true);

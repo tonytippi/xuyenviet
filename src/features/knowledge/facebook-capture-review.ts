@@ -120,6 +120,8 @@ export async function ensureFacebookCaptureReviewForCapturedSource(
 }
 
 export async function listFacebookCaptureReviews(db: FacebookCaptureReviewDb, input: { status?: FacebookCaptureReviewStatus } = {}) {
+  const statusCondition = input.status ? eq(facebookCaptureReviews.status, input.status) : undefined;
+  const rawTextCondition = input.status === "needs_review" ? capturedRawTextCondition() : undefined;
   const rows = await db
     .select({
       id: facebookCaptureReviews.id,
@@ -148,7 +150,7 @@ export async function listFacebookCaptureReviews(db: FacebookCaptureReviewDb, in
     .from(facebookCaptureReviews)
     .innerJoin(sources, eq(sources.id, facebookCaptureReviews.sourceId))
     .innerJoin(rawSourceMaterial, eq(rawSourceMaterial.id, facebookCaptureReviews.rawSourceMaterialId))
-    .where(input.status ? eq(facebookCaptureReviews.status, input.status) : undefined)
+    .where(and(statusCondition, rawTextCondition))
     .orderBy(desc(facebookCaptureReviews.updatedAt));
 
   return Promise.all(
@@ -232,6 +234,10 @@ export async function markFacebookCaptureReviewStatusInTransaction(
 
     if (input.status === "rejected" && !rejectionReason) {
       throw new Error("rejectionReason is required when rejecting a capture.");
+    }
+
+    if (input.status === "rejected" && !review.rawText?.trim()) {
+      return { status: "missing_raw_text" as const };
     }
 
     if (input.status === "extraction_failed" && !extractionError) {
