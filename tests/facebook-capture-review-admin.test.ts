@@ -259,11 +259,24 @@ describe("admin Facebook capture review helpers", () => {
         createdAt: new Date("2026-07-13T01:00:00.000Z"),
       },
       {
+        id: "captured-only-facebook-source",
+        kind: "facebook",
+        url: "https://facebook.com/groups/xuyenviet/posts/captured-only-facebook-source",
+        canonicalUrl: "https://facebook.com/groups/xuyenviet/posts/captured-only-facebook-source",
+        label: "Facebook post 2CapturedOnly",
+        sourceType: "community",
+        verificationStatus: "unverified",
+        official: false,
+        partner: false,
+        submittedByUserId: "operator-user",
+        createdAt: new Date("2026-07-13T01:30:00.000Z"),
+      },
+      {
         id: "newer-facebook-source",
         kind: "facebook",
         url: "https://facebook.com/groups/xuyenviet/posts/newer-facebook-source",
         canonicalUrl: "https://facebook.com/groups/xuyenviet/posts/newer-facebook-source",
-        label: "Newer Facebook source",
+        label: "Facebook post 1BaXNWkVRS",
         sourceType: "community",
         verificationStatus: "unverified",
         official: false,
@@ -276,6 +289,12 @@ describe("admin Facebook capture review helpers", () => {
       id: "raw-newer-facebook-source",
       sourceId: "newer-facebook-source",
       rawText: "Captured Facebook text for intake status.",
+      rawMetadata: { authorText: "Tác giả cộng đồng", timestampText: "Hôm qua" },
+    });
+    await testDb.insert(rawSourceMaterial).values({
+      id: "raw-captured-only-facebook-source",
+      sourceId: "captured-only-facebook-source",
+      rawText: "Captured-only Facebook text for intake title.",
     });
     await testDb.insert(facebookCaptureReviews).values({
       id: "review-newer-facebook-source",
@@ -286,6 +305,14 @@ describe("admin Facebook capture review helpers", () => {
       reviewedAt: new Date("2026-07-13T03:00:00.000Z"),
       createdAt: new Date("2026-07-13T02:30:00.000Z"),
       updatedAt: new Date("2026-07-13T03:00:00.000Z"),
+    });
+    await testDb.insert(facebookCaptureReviews).values({
+      id: "review-captured-only-facebook-source",
+      sourceId: "captured-only-facebook-source",
+      rawSourceMaterialId: "raw-captured-only-facebook-source",
+      status: "needs_review",
+      createdAt: new Date("2026-07-13T01:45:00.000Z"),
+      updatedAt: new Date("2026-07-13T01:45:00.000Z"),
     });
     await testDb.insert(knowledgeCards).values({
       id: "card-newer-facebook-source",
@@ -307,6 +334,12 @@ describe("admin Facebook capture review helpers", () => {
     expect(intakeHtml).toContain("Quản lý các URL nguồn đã nhập");
     expect(intakeHtml).toContain("URL nguồn");
     expect(intakeHtml).toContain("Tất cả URL đã nhập");
+    expect(intakeHtml).toContain("Tiêu đề");
+    expect(intakeHtml).toContain("Older URL source");
+    expect(intakeHtml).toContain("Draft from captured source");
+    expect(intakeHtml).toContain("Captured-only Facebook text for intake title.");
+    expect(intakeHtml).not.toContain("Facebook post 1BaXNWkVRS");
+    expect(intakeHtml).not.toContain("Facebook post 2CapturedOnly");
     expect(intakeHtml).toContain("Facebook");
     expect(intakeHtml).toContain("Capture");
     expect(intakeHtml).toContain("Extract");
@@ -315,11 +348,14 @@ describe("admin Facebook capture review helpers", () => {
     expect(intakeHtml).toContain("Không áp dụng");
     expect(intakeHtml).toContain("/admin/knowledge/facebook-captures/review-newer-facebook-source");
     expect(intakeHtml).toContain("https://facebook.com/groups/xuyenviet/posts/newer-facebook-source");
+    expect(intakeHtml).toContain("target=\"_blank\"");
+    expect(intakeHtml).toContain("rel=\"noreferrer\"");
     expect(intakeHtml).toContain("https://example.com/older?access_token=");
     expect(intakeHtml).not.toContain("unsafe-token");
     expect(intakeHtml).not.toContain("name=\"rawText\"");
     expect(intakeHtml).not.toContain("name=\"screenshotFileName\"");
     expect(intakeHtml).not.toContain("name=\"batchPublisher\"");
+    expect(intakeHtml.indexOf("URL</th>")).toBeLessThan(intakeHtml.indexOf("Tiêu đề</th>"));
     expect(intakeHtml.indexOf("newer-facebook-source")).toBeLessThan(intakeHtml.indexOf("https://example.com/older"));
   });
 

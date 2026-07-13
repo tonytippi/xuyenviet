@@ -3,7 +3,7 @@ import "server-only";
 import { desc, eq, inArray } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { facebookCaptureReviews, knowledgeCards, knowledgeCardSources, sources, type FacebookCaptureReviewStatus, type rawSourceMaterial, type SourceKind, type SourceType } from "@/db/schema";
+import { facebookCaptureReviews, knowledgeCards, knowledgeCardSources, rawSourceMaterial, sources, type FacebookCaptureReviewStatus, type SourceKind, type SourceType } from "@/db/schema";
 import { requireAdminSession } from "@/server/auth";
 
 const maxRawTextLength = 20_000;
@@ -13,6 +13,7 @@ const maxScreenshotByteSize = 5 * 1024 * 1024;
 const allowedScreenshotMimeTypes = ["image/jpeg", "image/png", "image/webp"] as const;
 const trackingParamPrefixes = ["utm_"];
 const trackingParams = new Set(["fbclid", "gclid"]);
+const unsafeMetadataValuePattern = /cookie|token|local\s*storage|localStorage|provider\s*payload|providerPayload|browser\s*profile|playwright\/facebook-profile|<html|<!doctype|hidden\s*data/i;
 
 type ScreenshotMetadata = {
   fileName: string;
@@ -43,6 +44,7 @@ export type NormalizedTravelSource = {
 };
 
 export type KnowledgeUrlSourceListItem = Pick<typeof sources.$inferSelect, "id" | "kind" | "url" | "canonicalUrl" | "label" | "publisher" | "createdAt"> & {
+  displayTitle: string;
   facebookCaptureReviewId: string | null;
   facebookCaptureStatus: FacebookCaptureReviewStatus | null;
   linkedKnowledgeCardCount: number;
@@ -127,30 +129,85 @@ export async function listKnowledgeUrlSources(): Promise<KnowledgeUrlSourceListI
 
   const sourceIds = rows.map((source) => source.id);
   const reviewRows = await db
-    .select({ id: facebookCaptureReviews.id, sourceId: facebookCaptureReviews.sourceId, status: facebookCaptureReviews.status })
+    .select({
+      id: facebookCaptureReviews.id,
+      sourceId: facebookCaptureReviews.sourceId,
+      status: facebookCaptureReviews.status,
+      rawMetadata: rawSourceMaterial.rawMetadata,
+      rawText: rawSourceMaterial.rawText,
+    })
     .from(facebookCaptureReviews)
+    .innerJoin(rawSourceMaterial, eq(rawSourceMaterial.id, facebookCaptureReviews.rawSourceMaterialId))
     .where(inArray(facebookCaptureReviews.sourceId, sourceIds));
   const cardRows = await db
-    .select({ sourceId: knowledgeCardSources.sourceId, knowledgeCardId: knowledgeCards.id })
+    .select({ sourceId: knowledgeCardSources.sourceId, knowledgeCardId: knowledgeCards.id, title: knowledgeCards.title })
     .from(knowledgeCardSources)
     .innerJoin(knowledgeCards, eq(knowledgeCards.id, knowledgeCardSources.knowledgeCardId))
-    .where(inArray(knowledgeCardSources.sourceId, sourceIds));
+    .where(inArray(knowledgeCardSources.sourceId, sourceIds))
+    .orderBy(desc(knowledgeCards.updatedAt));
   const reviewsBySourceId = new Map(reviewRows.map((review) => [review.sourceId, review]));
   const cardCountsBySourceId = new Map<string, number>();
+  const firstCardTitleBySourceId = new Map<string, string>();
 
   for (const row of cardRows) {
     cardCountsBySourceId.set(row.sourceId, (cardCountsBySourceId.get(row.sourceId) ?? 0) + 1);
+    if (!firstCardTitleBySourceId.has(row.sourceId)) {
+      firstCardTitleBySourceId.set(row.sourceId, row.title);
+    }
   }
 
   return rows.map((source) => {
     const review = reviewsBySourceId.get(source.id);
+    const metadataTitle = review ? deriveCapturedMetadataTitle(review.rawMetadata) : null;
+    const capturedTextTitle = review ? deriveCapturedTextTitle(review.rawText) : null;
     return {
       ...source,
+      displayTitle: firstCardTitleBySourceId.get(source.id) ?? metadataTitle ?? capturedTextTitle ?? source.label,
       facebookCaptureReviewId: review?.id ?? null,
       facebookCaptureStatus: review?.status ?? null,
       linkedKnowledgeCardCount: cardCountsBySourceId.get(source.id) ?? 0,
     };
   });
+}
+
+function deriveCapturedMetadataTitle(metadata: Record<string, unknown> | null) {
+  const authorText = sanitizeMetadataText(readMetadataString(metadata, "authorText"));
+  const timestampText = sanitizeMetadataText(readMetadataString(metadata, "timestampText"));
+
+  if (authorText && timestampText) {
+    return `${authorText} · ${timestampText}`;
+  }
+
+  return authorText ?? timestampText;
+}
+
+function readMetadataString(metadata: Record<string, unknown> | null, key: string) {
+  const value = metadata?.[key];
+  return typeof value === "string" ? value : null;
+}
+
+function sanitizeMetadataText(value: string | null) {
+  const text = value?.replace(/[\u0000-\u001f\u007f]+/g, " ").trim();
+
+  if (!text || unsafeMetadataValuePattern.test(text)) {
+    return null;
+  }
+
+  return text.slice(0, maxLabelLength);
+}
+
+function deriveCapturedTextTitle(rawText: string | null) {
+  const firstLine = rawText
+    ?.replace(/[\u0000-\u001f\u007f]+/g, " ")
+    .split(/\s{2,}/)
+    .map((part) => part.trim())
+    .find(Boolean);
+
+  if (!firstLine) {
+    return null;
+  }
+
+  return firstLine.length > maxLabelLength ? `${firstLine.slice(0, maxLabelLength - 1)}…` : firstLine;
 }
 
 function getSourceKind({

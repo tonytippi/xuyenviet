@@ -84,6 +84,7 @@ export default async function KnowledgeIntakePage({ searchParams }: KnowledgeInt
               <thead className="text-xs uppercase tracking-[0.14em] text-[#8c4f13]">
                 <tr>
                   <th className="px-3 py-2 font-semibold">URL</th>
+                  <th className="px-3 py-2 font-semibold">Tiêu đề</th>
                   <th className="px-3 py-2 font-semibold">Loại</th>
                   <th className="px-3 py-2 font-semibold">Capture</th>
                   <th className="px-3 py-2 font-semibold">Extract</th>
@@ -93,7 +94,16 @@ export default async function KnowledgeIntakePage({ searchParams }: KnowledgeInt
               <tbody>
                 {sources.map((source) => (
                   <tr key={source.id} className="rounded-2xl bg-white/80 text-[#17342c]">
-                    <td className="max-w-[42rem] break-all rounded-l-2xl px-3 py-3 font-semibold">{formatDisplayUrl(source.canonicalUrl ?? source.url)}</td>
+                    <td className="max-w-[42rem] break-all rounded-l-2xl px-3 py-3 font-semibold">
+                      {getExternalUrl(source.canonicalUrl ?? source.url) ? (
+                        <a className="text-[#1f5f46] underline underline-offset-4" href={getExternalUrl(source.canonicalUrl ?? source.url) ?? undefined} rel="noreferrer" target="_blank">
+                          {formatDisplayUrl(source.canonicalUrl ?? source.url)}
+                        </a>
+                      ) : (
+                        formatDisplayUrl(null)
+                      )}
+                    </td>
+                    <td className="px-3 py-3 font-semibold">{source.displayTitle}</td>
                     <td className="px-3 py-3 text-[#4f625a]">{source.kind === "facebook" ? "Facebook" : "URL"}</td>
                     <td className="px-3 py-3 text-[#4f625a]">
                       {source.facebookCaptureReviewId ? (
@@ -171,6 +181,18 @@ function formatDisplayUrl(value: string | null) {
     return url.toString();
   } catch {
     return value;
+  }
+}
+
+function getExternalUrl(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    return new URL(formatDisplayUrl(value)).toString();
+  } catch {
+    return null;
   }
 }
 
