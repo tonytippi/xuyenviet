@@ -257,7 +257,7 @@ describe("admin Facebook capture review helpers", () => {
     expect(html).not.toContain("unsafe-provider-token");
   });
 
-  test("detail page renders real Extract form for needs-review captures and keeps future actions disabled", async () => {
+  test("detail page renders real Extract and approve-all forms for needs-review captures and keeps reject/reopen disabled", async () => {
     authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
     const review = await createCapturedFacebookSource({ id: "extract-action", rawText: "Readable captured Facebook text." });
 
@@ -268,7 +268,8 @@ describe("admin Facebook capture review helpers", () => {
     expect(html).toContain("Trích xuất bản nháp");
     expect(html).toContain("AI sẽ tạo thẻ nháp để bạn duyệt");
     expect(html).toContain(`name="reviewId" value="${review.id}"`);
-    expect(html).toContain("Extract &amp; Approve All (4.1E)");
+    expect(html).toContain("Trích xuất và phê duyệt tất cả");
+    expect(html).toContain("Tôi đã kiểm tra nội dung capture, trust/confidence và freshness");
     expect(html).toContain("Reject / reopen capture (4.1F)");
   });
 });

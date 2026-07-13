@@ -18,6 +18,7 @@ import {
 import { getAdminFacebookCaptureReviewExtractionTarget } from "./facebook-capture-review-admin";
 import { markFacebookCaptureReviewStatus, type FacebookCaptureReviewActor } from "./facebook-capture-review";
 import {
+  approveKnowledgeDraftBatch,
   approveKnowledgeDraft as approveKnowledgeDraftService,
   isKnowledgeDraftReviewError,
   parseKnowledgeDraftFormData,
@@ -272,6 +273,104 @@ export async function extractKnowledgeDraftsFromFacebookCaptureForm(formData: Fo
       }
 
       redirectPath = getFacebookCaptureRedirectPath(target?.id ?? reviewId, { extractError: "Không thể trích xuất capture này.", failureStatus });
+    }
+  }
+
+  redirect(redirectPath);
+}
+
+export async function extractAndApproveFacebookCaptureDraftsForm(formData: FormData) {
+  await requireAdminSession();
+
+  const reviewId = getOptionalFormString(formData, "reviewId") ?? "";
+  let redirectPath = getFacebookCaptureRedirectPath(reviewId, { approveAllError: "Không thể trích xuất và phê duyệt capture này." });
+  let target: Awaited<ReturnType<typeof getAdminFacebookCaptureReviewExtractionTarget>> | null = null;
+
+  try {
+    if (formData.get("approveAllConfirmed") !== "on") {
+      redirectPath = getFacebookCaptureRedirectPath(reviewId, { approveAllError: "Vui lòng xác nhận đã kiểm tra capture, trust/confidence và freshness trước khi phê duyệt tất cả." });
+    } else {
+      target = await getAdminFacebookCaptureReviewExtractionTarget(reviewId);
+
+      if (!target) {
+        redirectPath = getFacebookCaptureRedirectPath(reviewId, { approveAllError: "Không tìm thấy capture cần trích xuất và phê duyệt." });
+      } else if (target.existingCards.some((card) => card.aiPromptVersion === sourceKnowledgeDraftExtractionPromptVersion)) {
+        redirectPath = getFacebookCaptureRedirectPath(target.id, { alreadyExtracted: "1", existingCards: String(target.existingCards.length) });
+      } else if (target.status !== "needs_review") {
+        redirectPath = getFacebookCaptureRedirectPath(target.id, { approveAllStatus: target.status, existingCards: String(target.existingCards.length) });
+      } else if (target.sourceKind !== "facebook" || target.sourceType !== "community" || !target.rawText?.trim()) {
+        redirectPath = getFacebookCaptureRedirectPath(target.id, { approveAllError: "Capture này không đủ điều kiện trích xuất và phê duyệt tất cả." });
+      } else {
+        const extractionTarget = target;
+        const result = await extractKnowledgeDraftsFromSource(extractionTarget.sourceId, {
+          preProviderGuard: ({ db, sourceId }) => assertFacebookCaptureStillNeedsReview(db, { reviewId: extractionTarget.id, sourceId }),
+        });
+
+        const extractedStatusResult = await markFacebookCaptureReviewStatus(getDb(), { reviewId: extractionTarget.id, status: "extracted", actor: extractionTarget.actor });
+
+        if (extractedStatusResult.status !== "updated") {
+          redirectPath = getFacebookCaptureRedirectPath(extractionTarget.id, { approveAllRecoveryStatus: extractedStatusResult.status, existingCards: String(result.draftCount) });
+        } else {
+          try {
+            const approvalResult = await approveKnowledgeDraftBatch(result.draftIds);
+            const approvedStatusResult = await markFacebookCaptureReviewStatus(getDb(), { reviewId: extractionTarget.id, status: "extracted_approved", actor: extractionTarget.actor });
+
+            if (approvedStatusResult.status === "updated") {
+              redirectPath = getFacebookCaptureRedirectPath(extractionTarget.id, { approvedAll: String(approvalResult.draftIds.length), sourceId: result.sourceId });
+            } else {
+              redirectPath = getFacebookCaptureRedirectPath(extractionTarget.id, { approveAllRecoveryStatus: approvedStatusResult.status, existingCards: String(approvalResult.draftIds.length) });
+            }
+          } catch (error) {
+            if (error instanceof AdminAuthorizationError || (error instanceof Error && error.name === "AdminAuthorizationError")) {
+              throw error;
+            }
+
+            const failureCode = isKnowledgeDraftReviewError(error) && error instanceof Error && "code" in error && typeof error.code === "string" ? error.code : "approval_failed";
+            redirectPath = getFacebookCaptureRedirectPath(extractionTarget.id, { approvalFailed: "1", approvalError: failureCode, existingCards: String(result.draftCount) });
+          }
+        }
+      }
+    }
+  } catch (error) {
+    if (error instanceof AdminAuthorizationError || (error instanceof Error && error.name === "AdminAuthorizationError")) {
+      throw error;
+    }
+
+    if (isKnowledgeExtractionError(error) && error instanceof Error) {
+      const code = "code" in error && typeof error.code === "string" ? error.code : "unknown";
+
+      if (code === "already_extracted") {
+        const existingCards = target?.existingCards.length ?? 0;
+        redirectPath = getFacebookCaptureRedirectPath(target?.id ?? reviewId, { alreadyExtracted: "1", existingCards: String(existingCards) });
+      } else {
+        let failureStatus = "not_updated";
+
+        if (target?.status === "needs_review") {
+          const statusResult = await markFacebookCaptureReviewStatus(getDb(), {
+            reviewId: target.id,
+            status: "extraction_failed",
+            actor: target.actor,
+            extractionError: `Extraction failed: ${code}`,
+          });
+          failureStatus = statusResult.status;
+        }
+
+        redirectPath = getFacebookCaptureRedirectPath(target?.id ?? reviewId, { approveAllError: "Không thể trích xuất và phê duyệt capture này.", errorCode: code, failureStatus });
+      }
+    } else {
+      let failureStatus = "not_updated";
+
+      if (target?.status === "needs_review") {
+        const statusResult = await markFacebookCaptureReviewStatus(getDb(), {
+          reviewId: target.id,
+          status: "extraction_failed",
+          actor: target.actor,
+          extractionError: "Extraction failed: unknown",
+        });
+        failureStatus = statusResult.status;
+      }
+
+      redirectPath = getFacebookCaptureRedirectPath(target?.id ?? reviewId, { approveAllError: "Không thể trích xuất và phê duyệt capture này.", failureStatus });
     }
   }
 

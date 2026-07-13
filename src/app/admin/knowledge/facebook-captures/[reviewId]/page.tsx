@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 
 import { type FacebookCaptureReviewStatus } from "@/db/schema";
 import { sourceKnowledgeDraftExtractionPromptVersion } from "@/features/ai/prompts";
-import { extractKnowledgeDraftsFromFacebookCaptureForm } from "@/features/knowledge/actions";
+import { extractAndApproveFacebookCaptureDraftsForm, extractKnowledgeDraftsFromFacebookCaptureForm } from "@/features/knowledge/actions";
 import { getAdminFacebookCaptureReviewDetail } from "@/features/knowledge/facebook-capture-review-admin";
 
 type FacebookCaptureReviewDetailPageProps = {
@@ -40,8 +40,14 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
 
   const hasExtractionCards = review.existingCards.some((card) => card.aiPromptVersion === sourceKnowledgeDraftExtractionPromptVersion);
   const canExtract = review.status === "needs_review" && Boolean(review.rawText?.trim()) && review.sourceType === "community" && !hasExtractionCards;
+  const canExtractAndApproveAll = canExtract;
   const extractedCount = getSearchParam(query.extracted);
+  const approvedAllCount = getSearchParam(query.approvedAll);
   const extractError = getSearchParam(query.extractError);
+  const approveAllError = getSearchParam(query.approveAllError);
+  const approveAllStatus = getSearchParam(query.approveAllStatus);
+  const approveAllRecoveryStatus = getSearchParam(query.approveAllRecoveryStatus);
+  const approvalFailed = getSearchParam(query.approvalFailed) === "1";
   const recoveryStatus = getSearchParam(query.recoveryStatus);
   const failureStatus = getSearchParam(query.failureStatus);
   const alreadyExtracted = getSearchParam(query.alreadyExtracted) === "1";
@@ -57,13 +63,39 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
         Nội dung này chỉ dành cho vận hành. Chưa trích xuất, chưa duyệt, chưa dùng cho câu trả lời của khách.
       </p>
 
-      {(extractedCount || extractError || recoveryStatus || alreadyExtracted) && (
+      {(extractedCount || approvedAllCount || extractError || approveAllError || approveAllStatus || approveAllRecoveryStatus || approvalFailed || recoveryStatus || alreadyExtracted) && (
         <section className="mt-6 rounded-2xl border border-[#d8c9ad] bg-white/80 p-4 text-sm leading-6 text-[#17342c]">
           {extractedCount ? <p>Đã tạo {extractedCount} bản nháp. Mở hàng đợi duyệt để kiểm tra trước khi phê duyệt.</p> : null}
+          {approvedAllCount ? (
+            <p>
+              Đã trích xuất và phê duyệt {approvedAllCount} thẻ. Confidence nguồn Facebook/cộng đồng vẫn được giữ theo guardrail. Mở{" "}
+              <Link className="font-semibold text-[#1f5f46] underline underline-offset-4" href="/admin/knowledge/approved">
+                danh sách thẻ đã duyệt
+              </Link>
+              .
+            </p>
+          ) : null}
           {extractError ? (
             <p>
               Không thể trích xuất capture này.
               {failureStatus === "updated" ? " Trạng thái đã chuyển sang Trích xuất lỗi để bạn kiểm tra hoặc thử lại." : " Trạng thái review có thể đã thay đổi; kiểm tra trạng thái và thẻ liên kết hiện có trước khi thử lại."}
+            </p>
+          ) : null}
+          {approveAllError ? (
+            <p>
+              Không thể trích xuất và phê duyệt capture này.
+              {failureStatus === "updated" ? " Trạng thái đã được cập nhật an toàn nếu phù hợp." : " Kiểm tra trạng thái review và thẻ liên kết hiện có trước khi thử lại."}
+            </p>
+          ) : null}
+          {approveAllStatus ? <p>Capture này không còn ở trạng thái có thể trích xuất và phê duyệt tất cả ({approveAllStatus}).</p> : null}
+          {approveAllRecoveryStatus ? <p>Không thể hoàn tất cập nhật trạng thái approve-all ({approveAllRecoveryStatus}). Kiểm tra trạng thái review và các thẻ liên kết hiện có.</p> : null}
+          {approvalFailed ? (
+            <p>
+              Đã tạo bản nháp nhưng chưa phê duyệt toàn bộ. Kiểm tra{" "}
+              <Link className="font-semibold text-[#1f5f46] underline underline-offset-4" href="/admin/knowledge/drafts">
+                hàng đợi bản nháp
+              </Link>{" "}
+              trước khi thử lại.
             </p>
           ) : null}
           {recoveryStatus ? <p>Không thể hoàn tất cập nhật trạng thái sau khi trích xuất ({recoveryStatus}). Kiểm tra trạng thái review và các thẻ liên kết hiện có.</p> : null}
@@ -125,7 +157,7 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
           ) : (
             review.existingCards.map((card) => (
               <div key={card.id} className="rounded-2xl border border-[#d8c9ad] bg-[#fbf7ed] p-4 text-sm text-[#4f625a]">
-                <Link className="font-semibold text-[#17342c] underline underline-offset-4" href={`/admin/knowledge/drafts/${encodeURIComponent(card.id)}`}>
+                <Link className="font-semibold text-[#17342c] underline underline-offset-4" href={card.status === "approved" ? `/admin/knowledge/approved/${encodeURIComponent(card.id)}` : `/admin/knowledge/drafts/${encodeURIComponent(card.id)}`}>
                   {card.title}
                 </Link>
                 <p className="mt-1">{card.type} · {card.status} · prompt: {card.aiPromptVersion}</p>
@@ -152,12 +184,27 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
             Capture này không còn ở trạng thái có thể trích xuất mới. Kiểm tra trạng thái review và thẻ liên kết hiện có.
           </p>
         )}
-        <div className="mt-4 flex flex-wrap gap-3">
-          {['Extract & Approve All (4.1E)', 'Reject / reopen capture (4.1F)'].map((label) => (
-            <button className="min-h-12 cursor-not-allowed rounded-2xl border border-[#d8c9ad] bg-white/70 px-5 py-3 font-semibold text-[#4f625a]" disabled key={label} type="button">
-              {label}
-            </button>
-          ))}
+        <div className="mt-4 grid gap-3 lg:grid-cols-2">
+          {canExtractAndApproveAll ? (
+            <div className="rounded-2xl border border-[#d99a93] bg-[#fff7f2] p-4">
+              <p className="text-sm font-semibold leading-6 text-[#9b2f29]">Hành động này tạo thẻ bằng AI rồi phê duyệt ngay. Chỉ dùng khi capture đáng tin cậy và đã được kiểm tra.</p>
+              <form action={extractAndApproveFacebookCaptureDraftsForm} className="mt-4 space-y-4">
+                <input name="reviewId" type="hidden" value={review.id} />
+                <label className="flex gap-3 rounded-2xl border border-[#d8c9ad] bg-white/80 p-3 text-sm font-semibold leading-6 text-[#17342c]">
+                  <input className="mt-1 size-4 accent-[#1f5f46]" name="approveAllConfirmed" type="checkbox" />
+                  <span>Tôi đã kiểm tra nội dung capture, trust/confidence và freshness; có thể trích xuất và phê duyệt tất cả thẻ được tạo.</span>
+                </label>
+                <button className="min-h-12 rounded-2xl bg-[#9b2f29] px-5 py-3 font-semibold text-white transition hover:bg-[#7d261f] focus:outline-none focus:ring-4 focus:ring-[#d99a93]" type="submit">
+                  Trích xuất và phê duyệt tất cả
+                </button>
+              </form>
+            </div>
+          ) : (
+            <p className="rounded-2xl border border-[#d8c9ad] bg-white/75 p-4 text-sm leading-6 text-[#4f625a]">Extract & Approve All chỉ khả dụng khi capture đang cần duyệt, có raw text đọc được, chưa có thẻ trích xuất và vẫn là nguồn Facebook/cộng đồng chưa xác minh.</p>
+          )}
+          <button className="min-h-12 cursor-not-allowed rounded-2xl border border-[#d8c9ad] bg-white/70 px-5 py-3 font-semibold text-[#4f625a]" disabled type="button">
+            Reject / reopen capture (4.1F)
+          </button>
         </div>
       </section>
     </div>

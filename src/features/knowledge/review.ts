@@ -16,7 +16,7 @@ import {
   type KnowledgeSourceSupport,
 } from "@/db/schema";
 import { recordAuditEvent } from "@/features/audit/events";
-import { requireAdminSession } from "@/server/auth";
+import { requireAdminSession, type AuthenticatedSessionWithRoles } from "@/server/auth";
 
 const maxTitleLength = 160;
 const maxLocationLength = 160;
@@ -35,6 +35,7 @@ const sensitiveTokenPattern = /(provider[_-]?payload|storage[_-]?key|raw[_-]?met
 const targetKnowledgeCards = alias(knowledgeCards, "target_card");
 
 type ReviewDb = ReturnType<typeof getDb>;
+type ReviewMutationDb = Pick<ReviewDb, "select" | "update" | "insert">;
 
 export type KnowledgeDraftReviewSource = Pick<
   typeof sources.$inferSelect,
@@ -391,53 +392,83 @@ export async function approveKnowledgeDraft(draftId: string, expectedUpdatedAt?:
 
   const db = getDb();
   return db.transaction(async (transaction) => {
-    const draft = await loadReviewableDraft(transaction, normalizedDraftId);
-    assertApprovalVersionCurrent(draft.card, expectedUpdatedAt);
-    assertApprovalReady(draft.card);
-    const rawLeakCorpus = await loadRawLeakCorpusForSources(transaction, draft.sources.map((source) => source.id));
-    assertApprovalSafeFields(draft.card, rawLeakCorpus);
-
-    const [updatedDraft] = await transaction
-      .update(knowledgeCards)
-      .set({
-        status: "approved",
-        needsReview: false,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(knowledgeCards.id, normalizedDraftId),
-          eq(knowledgeCards.status, "draft"),
-          eq(knowledgeCards.needsReview, true),
-          ...(expectedUpdatedAt ? [eq(knowledgeCards.updatedAt, new Date(expectedUpdatedAt))] : []),
-        ),
-      )
-      .returning({ id: knowledgeCards.id });
-
-    if (!updatedDraft) {
-      throw new KnowledgeDraftReviewError("Bản nháp này không còn trong trạng thái cần duyệt.", "not_reviewable");
-    }
-
-    const approvedCard = await getKnowledgeDraftForReviewFromDb(transaction, normalizedDraftId);
-
-    if (!approvedCard || approvedCard.sources.length === 0) {
-      throw new KnowledgeDraftReviewError("Bản nháp cần ít nhất một nguồn liên kết trước khi phê duyệt.", "invalid_draft");
-    }
-
-    await recordAuditEvent(
-      {
-        actor: session,
-        operation: "approve",
-        targetType: "knowledge_draft",
-        targetId: normalizedDraftId,
-        beforeSummary: summarizeDraft(draft.card),
-        afterSummary: `Operator approved draft for retrieval eligibility: status=approved; needsReview=false; linkedSources=${draft.sources.length}. Embeddings were not created.`,
-      },
-      transaction,
-    );
-
-    return { draftId: normalizedDraftId };
+    return approveKnowledgeDraftInTransaction(transaction, session, normalizedDraftId, expectedUpdatedAt);
   });
+}
+
+export async function approveKnowledgeDraftBatch(draftIds: string[]): Promise<{ draftIds: string[] }> {
+  const session = await requireAdminSession();
+  const normalizedDraftIds = draftIds.map((draftId) => draftId.trim()).filter(Boolean);
+
+  if (normalizedDraftIds.length === 0) {
+    throw new KnowledgeDraftReviewError("Không có bản nháp nào để phê duyệt.", "invalid_draft");
+  }
+
+  const db = getDb();
+  return db.transaction(async (transaction) => {
+    const approvedDraftIds: string[] = [];
+
+    for (const draftId of normalizedDraftIds) {
+      const result = await approveKnowledgeDraftInTransaction(transaction, session, draftId);
+      approvedDraftIds.push(result.draftId);
+    }
+
+    return { draftIds: approvedDraftIds };
+  });
+}
+
+async function approveKnowledgeDraftInTransaction(
+  transaction: ReviewMutationDb,
+  session: AuthenticatedSessionWithRoles,
+  normalizedDraftId: string,
+  expectedUpdatedAt?: string | null,
+): Promise<KnowledgeDraftReviewResult> {
+  const draft = await loadReviewableDraft(transaction, normalizedDraftId);
+  assertApprovalVersionCurrent(draft.card, expectedUpdatedAt);
+  assertApprovalReady(draft.card);
+  const rawLeakCorpus = await loadRawLeakCorpusForSources(transaction, draft.sources.map((source) => source.id));
+  assertApprovalSafeFields(draft.card, rawLeakCorpus);
+
+  const [updatedDraft] = await transaction
+    .update(knowledgeCards)
+    .set({
+      status: "approved",
+      needsReview: false,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(knowledgeCards.id, normalizedDraftId),
+        eq(knowledgeCards.status, "draft"),
+        eq(knowledgeCards.needsReview, true),
+        ...(expectedUpdatedAt ? [eq(knowledgeCards.updatedAt, new Date(expectedUpdatedAt))] : []),
+      ),
+    )
+    .returning({ id: knowledgeCards.id });
+
+  if (!updatedDraft) {
+    throw new KnowledgeDraftReviewError("Bản nháp này không còn trong trạng thái cần duyệt.", "not_reviewable");
+  }
+
+  const approvedCard = await getKnowledgeDraftForReviewFromDb(transaction, normalizedDraftId);
+
+  if (!approvedCard || approvedCard.sources.length === 0) {
+    throw new KnowledgeDraftReviewError("Bản nháp cần ít nhất một nguồn liên kết trước khi phê duyệt.", "invalid_draft");
+  }
+
+  await recordAuditEvent(
+    {
+      actor: session,
+      operation: "approve",
+      targetType: "knowledge_draft",
+      targetId: normalizedDraftId,
+      beforeSummary: summarizeDraft(draft.card),
+      afterSummary: `Operator approved draft for retrieval eligibility: status=approved; needsReview=false; linkedSources=${draft.sources.length}. Embeddings were not created.`,
+    },
+    transaction,
+  );
+
+  return { draftId: normalizedDraftId };
 }
 
 function assertApprovalVersionCurrent(card: Pick<KnowledgeDraftReviewCard, "updatedAt">, expectedUpdatedAt?: string | null) {
