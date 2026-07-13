@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { aiGatewayModels, aiUsageEvents, facebookCaptureReviews, knowledgeCards, knowledgeCardSources, rawSourceMaterial, sources, userRoles, users, type UserRole } from "@/db/schema";
-import { ensureFacebookCaptureReviewForCapturedSource } from "@/features/knowledge/facebook-capture-review";
+import { ensureFacebookCaptureReviewForCapturedSource, markFacebookCaptureReviewStatus } from "@/features/knowledge/facebook-capture-review";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
 
@@ -163,6 +163,61 @@ describe("Facebook capture extraction action", () => {
 
     expect(fetch).not.toHaveBeenCalled();
     await expect(testDb.select().from(facebookCaptureReviews).where(eq(facebookCaptureReviews.id, review.id))).resolves.toMatchObject([{ status: "needs_review" }]);
+  });
+
+  test("rechecks review status under the extraction lock before provider calls", async () => {
+    authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
+    await createExtractionModel();
+    const review = await createCapturedFacebookReview({ id: "stale-before-provider", rawText: "Readable raw text that should not reach the provider." });
+    const { assertFacebookCaptureStillNeedsReview } = await import("@/features/knowledge/extraction");
+    const { extractKnowledgeDraftsFromSource } = await import("@/features/knowledge/actions");
+
+    await markFacebookCaptureReviewStatus(testDb, {
+      reviewId: review.id,
+      status: "rejected",
+      actor: { userId: "operator-user", email: "operator-user@example.com" },
+      rejectionReason: "Not useful for route planning",
+    });
+
+    await expect(
+      extractKnowledgeDraftsFromSource(review.sourceId, {
+        preProviderGuard: ({ db, sourceId }) => assertFacebookCaptureStillNeedsReview(db, { reviewId: review.id, sourceId }),
+      }),
+    ).rejects.toMatchObject({ name: "KnowledgeExtractionError", code: "capture_not_actionable" });
+
+    expect(fetch).not.toHaveBeenCalled();
+    await expect(testDb.select().from(knowledgeCards)).resolves.toHaveLength(0);
+  });
+
+  test("renders recovery status instead of silently ignoring non-updated extraction transitions", async () => {
+    authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
+    const review = await createCapturedFacebookReview({ id: "recovery-status", rawText: "Readable captured Facebook text." });
+    const { default: FacebookCaptureReviewDetailPage } = await import("@/app/admin/knowledge/facebook-captures/[reviewId]/page");
+    const { renderToStaticMarkup } = await import("react-dom/server");
+
+    const element = await FacebookCaptureReviewDetailPage({
+      params: Promise.resolve({ reviewId: review.id }),
+      searchParams: Promise.resolve({ recoveryStatus: "stale_review", existingCards: "1" }),
+    });
+    const html = renderToStaticMarkup(element);
+
+    expect(html).toContain("Không thể hoàn tất cập nhật trạng thái sau khi trích xuất (stale_review)");
+  });
+
+  test("does not claim extraction_failed status changed when failure transition was not updated", async () => {
+    authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
+    const review = await createCapturedFacebookReview({ id: "failure-status", rawText: "Readable captured Facebook text." });
+    const { default: FacebookCaptureReviewDetailPage } = await import("@/app/admin/knowledge/facebook-captures/[reviewId]/page");
+    const { renderToStaticMarkup } = await import("react-dom/server");
+
+    const element = await FacebookCaptureReviewDetailPage({
+      params: Promise.resolve({ reviewId: review.id }),
+      searchParams: Promise.resolve({ extractError: "1", failureStatus: "stale_review" }),
+    });
+    const html = renderToStaticMarkup(element);
+
+    expect(html).toContain("Trạng thái review có thể đã thay đổi");
+    expect(html).not.toContain("Trạng thái đã chuyển sang Trích xuất lỗi");
   });
 
   test("unauthorized users fail before reading source material or mutating extraction state", async () => {

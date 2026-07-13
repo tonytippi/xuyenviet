@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { type FacebookCaptureReviewStatus } from "@/db/schema";
+import { sourceKnowledgeDraftExtractionPromptVersion } from "@/features/ai/prompts";
 import { extractKnowledgeDraftsFromFacebookCaptureForm } from "@/features/knowledge/actions";
 import { getAdminFacebookCaptureReviewDetail } from "@/features/knowledge/facebook-capture-review-admin";
 
@@ -37,10 +38,12 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
     notFound();
   }
 
-  const hasExtractionCards = review.existingCards.some((card) => card.aiPromptVersion === "source_knowledge_draft_extraction_v1");
+  const hasExtractionCards = review.existingCards.some((card) => card.aiPromptVersion === sourceKnowledgeDraftExtractionPromptVersion);
   const canExtract = review.status === "needs_review" && Boolean(review.rawText?.trim()) && review.sourceType === "community" && !hasExtractionCards;
   const extractedCount = getSearchParam(query.extracted);
   const extractError = getSearchParam(query.extractError);
+  const recoveryStatus = getSearchParam(query.recoveryStatus);
+  const failureStatus = getSearchParam(query.failureStatus);
   const alreadyExtracted = getSearchParam(query.alreadyExtracted) === "1";
 
   return (
@@ -54,10 +57,16 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
         Nội dung này chỉ dành cho vận hành. Chưa trích xuất, chưa duyệt, chưa dùng cho câu trả lời của khách.
       </p>
 
-      {(extractedCount || extractError || alreadyExtracted) && (
+      {(extractedCount || extractError || recoveryStatus || alreadyExtracted) && (
         <section className="mt-6 rounded-2xl border border-[#d8c9ad] bg-white/80 p-4 text-sm leading-6 text-[#17342c]">
           {extractedCount ? <p>Đã tạo {extractedCount} bản nháp. Mở hàng đợi duyệt để kiểm tra trước khi phê duyệt.</p> : null}
-          {extractError ? <p>Không thể trích xuất capture này. Trạng thái đã chuyển sang Trích xuất lỗi để bạn kiểm tra hoặc thử lại.</p> : null}
+          {extractError ? (
+            <p>
+              Không thể trích xuất capture này.
+              {failureStatus === "updated" ? " Trạng thái đã chuyển sang Trích xuất lỗi để bạn kiểm tra hoặc thử lại." : " Trạng thái review có thể đã thay đổi; kiểm tra trạng thái và thẻ liên kết hiện có trước khi thử lại."}
+            </p>
+          ) : null}
+          {recoveryStatus ? <p>Không thể hoàn tất cập nhật trạng thái sau khi trích xuất ({recoveryStatus}). Kiểm tra trạng thái review và các thẻ liên kết hiện có.</p> : null}
           {alreadyExtracted ? <p>Capture này đã có thẻ được trích xuất. Kiểm tra các thẻ liên kết thay vì trích xuất lại.</p> : null}
         </section>
       )}

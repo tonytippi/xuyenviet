@@ -4,6 +4,7 @@ import { and, eq, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
 import {
+  facebookCaptureReviews,
   knowledgeCards,
   knowledgeCardSources,
   knowledgeCardTypeValues,
@@ -37,6 +38,8 @@ type ExtractionDb = ReturnType<typeof getDb>;
 type ExtractionQueryDb = Pick<ExtractionDb, "select">;
 type ExtractionLockDb = { execute: (query: ReturnType<typeof sql>) => Promise<unknown> };
 
+export type KnowledgeDraftExtractionPreProviderGuard = (input: { db: ExtractionQueryDb; sourceId: string }) => Promise<void>;
+
 type DraftInsert = Pick<
   typeof knowledgeCards.$inferInsert,
   | "type"
@@ -60,7 +63,7 @@ export type KnowledgeDraftExtractionResult = {
 export class KnowledgeExtractionError extends Error {
   constructor(
     message: string,
-    public readonly code: "invalid_source" | "model_unavailable" | "unsupported_material" | "provider_failed" | "invalid_model_output" | "already_extracted",
+    public readonly code: "invalid_source" | "model_unavailable" | "unsupported_material" | "provider_failed" | "invalid_model_output" | "already_extracted" | "capture_not_actionable",
   ) {
     super(message);
     this.name = "KnowledgeExtractionError";
@@ -71,7 +74,7 @@ export function isKnowledgeExtractionError(error: unknown) {
   return error instanceof KnowledgeExtractionError || (error instanceof Error && error.name === "KnowledgeExtractionError");
 }
 
-export async function extractKnowledgeDraftsFromSource(sourceId: string): Promise<KnowledgeDraftExtractionResult> {
+export async function extractKnowledgeDraftsFromSource(sourceId: string, options: { preProviderGuard?: KnowledgeDraftExtractionPreProviderGuard } = {}): Promise<KnowledgeDraftExtractionResult> {
   const session = await requireAdminSession();
   const normalizedSourceId = sourceId.trim();
   let providerUsage: Parameters<typeof writeUsageForProviderCall>[3] | null = null;
@@ -109,6 +112,8 @@ export async function extractKnowledgeDraftsFromSource(sourceId: string): Promis
       if (await sourceAlreadyHasExtraction(transaction, sourceBundle.source.id)) {
         throw new KnowledgeExtractionError("Nguồn này đã được AI trích xuất trước đó. Vui lòng duyệt, sửa hoặc xử lý các thẻ đã tạo thay vì trích xuất lại.", "already_extracted");
       }
+
+      await options.preProviderGuard?.({ db: transaction, sourceId: sourceBundle.source.id });
 
       const gatewayResult = await completeExtraction({
         model: model.gatewayModelName,
@@ -188,6 +193,18 @@ export async function extractKnowledgeDraftsFromSource(sourceId: string): Promis
       await writeUsageForProviderCall(db, session.userId, model, providerUsage);
     }
     throw error;
+  }
+}
+
+export async function assertFacebookCaptureStillNeedsReview(db: ExtractionQueryDb, input: { reviewId: string; sourceId: string }) {
+  const [review] = await db
+    .select({ status: facebookCaptureReviews.status })
+    .from(facebookCaptureReviews)
+    .where(and(eq(facebookCaptureReviews.id, input.reviewId), eq(facebookCaptureReviews.sourceId, input.sourceId)))
+    .limit(1);
+
+  if (!review || review.status !== "needs_review") {
+    throw new KnowledgeExtractionError("Capture này không còn ở trạng thái có thể trích xuất.", "capture_not_actionable");
   }
 }
 

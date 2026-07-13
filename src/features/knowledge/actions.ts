@@ -9,7 +9,12 @@ import { AdminAuthorizationError, requireAdminSession } from "@/server/auth";
 import { runAuditedAdminMutation } from "@/server/mutations";
 
 import { isKnowledgeBatchIntakeError, submitKnowledgeSeedUrlBatch as submitKnowledgeSeedUrlBatchService } from "./batch-intake";
-import { extractKnowledgeDraftsFromSource as extractKnowledgeDraftsFromSourceService, isKnowledgeExtractionError } from "./extraction";
+import {
+  assertFacebookCaptureStillNeedsReview,
+  extractKnowledgeDraftsFromSource as extractKnowledgeDraftsFromSourceService,
+  isKnowledgeExtractionError,
+  type KnowledgeDraftExtractionPreProviderGuard,
+} from "./extraction";
 import { getAdminFacebookCaptureReviewExtractionTarget } from "./facebook-capture-review-admin";
 import { markFacebookCaptureReviewStatus, type FacebookCaptureReviewActor } from "./facebook-capture-review";
 import {
@@ -61,8 +66,8 @@ export async function submitTravelSourceForAiReading(input: TravelSourceInput): 
   });
 }
 
-export async function extractKnowledgeDraftsFromSource(sourceId: string) {
-  return extractKnowledgeDraftsFromSourceService(sourceId);
+export async function extractKnowledgeDraftsFromSource(sourceId: string, options: { preProviderGuard?: KnowledgeDraftExtractionPreProviderGuard } = {}) {
+  return extractKnowledgeDraftsFromSourceService(sourceId, options);
 }
 
 export async function updateKnowledgeDraft(draftId: string, formData: FormData) {
@@ -215,13 +220,16 @@ export async function extractKnowledgeDraftsFromFacebookCaptureForm(formData: Fo
     } else if (target.sourceKind !== "facebook" || target.sourceType !== "community" || !target.rawText?.trim()) {
       redirectPath = getFacebookCaptureRedirectPath(target.id, { extractError: "Capture này không đủ điều kiện trích xuất bản nháp." });
     } else {
-      const result = await extractKnowledgeDraftsFromSource(target.sourceId);
-      const statusResult = await markFacebookCaptureReviewStatus(getDb(), { reviewId: target.id, status: "extracted", actor: target.actor });
+      const extractionTarget = target;
+      const result = await extractKnowledgeDraftsFromSource(extractionTarget.sourceId, {
+        preProviderGuard: ({ db, sourceId }) => assertFacebookCaptureStillNeedsReview(db, { reviewId: extractionTarget.id, sourceId }),
+      });
+      const statusResult = await markFacebookCaptureReviewStatus(getDb(), { reviewId: extractionTarget.id, status: "extracted", actor: extractionTarget.actor });
 
       if (statusResult.status === "updated") {
-        redirectPath = getFacebookCaptureRedirectPath(target.id, { extracted: String(result.draftCount), sourceId: result.sourceId });
+        redirectPath = getFacebookCaptureRedirectPath(extractionTarget.id, { extracted: String(result.draftCount), sourceId: result.sourceId });
       } else {
-        redirectPath = getFacebookCaptureRedirectPath(target.id, { extractStatus: statusResult.status, existingCards: String(result.draftCount) });
+        redirectPath = getFacebookCaptureRedirectPath(extractionTarget.id, { recoveryStatus: statusResult.status, existingCards: String(result.draftCount) });
       }
     }
   } catch (error) {
@@ -236,28 +244,34 @@ export async function extractKnowledgeDraftsFromFacebookCaptureForm(formData: Fo
         const existingCards = target?.existingCards.length ?? 0;
         redirectPath = getFacebookCaptureRedirectPath(target?.id ?? reviewId, { alreadyExtracted: "1", existingCards: String(existingCards) });
       } else {
+        let failureStatus = "not_updated";
+
         if (target?.status === "needs_review") {
-          await markFacebookCaptureReviewStatus(getDb(), {
+          const statusResult = await markFacebookCaptureReviewStatus(getDb(), {
             reviewId: target.id,
             status: "extraction_failed",
             actor: target.actor,
             extractionError: `Extraction failed: ${code}`,
           });
+          failureStatus = statusResult.status;
         }
 
-        redirectPath = getFacebookCaptureRedirectPath(target?.id ?? reviewId, { extractError: "Không thể trích xuất capture này.", errorCode: code });
+        redirectPath = getFacebookCaptureRedirectPath(target?.id ?? reviewId, { extractError: "Không thể trích xuất capture này.", errorCode: code, failureStatus });
       }
     } else {
+      let failureStatus = "not_updated";
+
       if (target?.status === "needs_review") {
-        await markFacebookCaptureReviewStatus(getDb(), {
+        const statusResult = await markFacebookCaptureReviewStatus(getDb(), {
           reviewId: target.id,
           status: "extraction_failed",
           actor: target.actor,
           extractionError: "Extraction failed: unknown",
         });
+        failureStatus = statusResult.status;
       }
 
-      redirectPath = getFacebookCaptureRedirectPath(target?.id ?? reviewId, { extractError: "Không thể trích xuất capture này." });
+      redirectPath = getFacebookCaptureRedirectPath(target?.id ?? reviewId, { extractError: "Không thể trích xuất capture này.", failureStatus });
     }
   }
 

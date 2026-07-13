@@ -4,7 +4,7 @@ baseline_commit: 32f8709
 
 # Story 4.1D: Extract Draft Knowledge From Reviewed Facebook Capture
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run bmad-create-story validate for quality check before bmad-dev-story. -->
 
@@ -69,6 +69,12 @@ so that AI creates draft cards without me copying source IDs manually.
 - [x] Update story tracking (AC: all)
   - [x] Keep this story file updated during implementation: task checkboxes, Dev Agent Record, Completion Notes, Debug Log References, File List, and Change Log.
   - [x] Move `_bmad-output/implementation-artifacts/sprint-status.yaml` story key `4-1d-extract-draft-knowledge-from-reviewed-facebook-capture` through implementation statuses.
+
+### Review Findings
+
+- [x] [Review][Patch] Extraction can create drafts after a concurrent review-state change [src/features/knowledge/actions.ts:218]
+- [x] [Review][Patch] Non-updated extraction transition redirects to query params the page never renders [src/features/knowledge/actions.ts:224]
+- [x] [Review][Patch] Failed extraction transition result is ignored while UI claims the status changed [src/features/knowledge/actions.ts:240]
 
 ## Dev Notes
 
@@ -199,6 +205,10 @@ gpt-5.5-review
 - `pnpm typecheck` passed.
 - `pnpm test:run` passed: 27 files, 352 tests.
 - `pnpm build` passed.
+- `pnpm test:run tests/facebook-capture-extraction-action.test.ts` passed after review fixes: 7 tests.
+- `pnpm typecheck` passed after review fixes.
+- `pnpm test:run tests/facebook-capture-review-admin.test.ts` passed after review fixes: 9 tests.
+- `pnpm lint` passed after review fixes.
 
 ### Completion Notes List
 
@@ -207,6 +217,7 @@ gpt-5.5-review
 - Replaced the disabled 4.1D Extract placeholder with a real Vietnamese-first form for actionable captures while leaving 4.1E and 4.1F disabled.
 - Added safe query/result handling and direct linked-card navigation to draft detail routes.
 - Added focused action and render tests covering success, unavailable model failure, duplicate blocking, authorization, and UI rendering.
+- Addressed review findings by rechecking Facebook review actionability inside the extraction service's source advisory lock before provider calls, rendering non-updated transition recovery states, and only claiming `extraction_failed` status when that transition updates.
 
 ### File List
 
@@ -222,3 +233,4 @@ gpt-5.5-review
 
 - 2026-07-13: Story created by BMad create-story workflow. Ultimate context engine analysis completed; comprehensive developer guide created.
 - 2026-07-13: Implemented Facebook capture draft extraction action, guarded UI, linked-card navigation, tests, and validation; story moved to review.
+- 2026-07-13: Addressed code review findings and moved story to done.
