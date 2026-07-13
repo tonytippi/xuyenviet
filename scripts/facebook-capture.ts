@@ -4,7 +4,7 @@ import { stdin as input, stdout as output } from "node:process";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
-import { chromium, type Page } from "playwright";
+import { chromium, type Page, type Response } from "playwright";
 
 import { schema, users } from "../src/db/schema";
 import { listQueuedFacebookSources, recordFacebookCaptureFailure, updateQueuedFacebookSourceRawText, type SafeFacebookCaptureMetadata } from "../src/features/knowledge/facebook-capture";
@@ -24,6 +24,208 @@ type ExtractedFacebookText = {
   timestampText?: string;
   diagnostics: Record<string, string | number | boolean | null>;
 };
+
+type CaptureTextSource = "dom" | "graphql";
+
+type GraphqlTextCandidate = {
+  text: string;
+  postId: string | null;
+};
+
+export function chooseFacebookCaptureText(input: { innerText?: string | null; textContent?: string | null; renderedText?: string | null; htmlText?: string | null }) {
+  const normalizeText = (value: string | null | undefined) => (value ?? "").replace(/\s+/g, " ").trim();
+  const innerText = normalizeText(input.innerText);
+  const textContent = normalizeText(input.textContent);
+  const renderedText = normalizeText(input.renderedText);
+  const htmlText = normalizeText(input.htmlText);
+
+  if (!innerText) return { text: htmlText || renderedText || textContent, source: htmlText ? "htmlText" as const : renderedText ? "renderedText" as const : "textContent" as const, innerTextLength: innerText.length, textContentLength: textContent.length };
+
+  const compactInnerText = innerText.replace(/\s+/g, "");
+  const compactTextContent = textContent.replace(/\s+/g, "");
+  const compactRenderedText = renderedText.replace(/\s+/g, "");
+  const compactHtmlText = htmlText.replace(/\s+/g, "");
+  const htmlExtraLength = htmlText.length - innerText.length;
+  const boundedHtmlExtra = htmlExtraLength > 0 && htmlExtraLength <= Math.max(120, Math.round(innerText.length * 0.25));
+
+  if (boundedHtmlExtra && isSubsequence(compactInnerText, compactHtmlText)) {
+    return { text: htmlText, source: "htmlText" as const, innerTextLength: innerText.length, textContentLength: textContent.length };
+  }
+
+  const renderedExtraLength = renderedText.length - innerText.length;
+  const boundedRenderedExtra = renderedExtraLength > 0 && renderedExtraLength <= Math.max(120, Math.round(innerText.length * 0.25));
+
+  if (boundedRenderedExtra && isSubsequence(compactInnerText, compactRenderedText)) {
+    return { text: renderedText, source: "renderedText" as const, innerTextLength: innerText.length, textContentLength: textContent.length };
+  }
+
+  if (!textContent || textContent === innerText) return { text: innerText, source: "innerText" as const, innerTextLength: innerText.length, textContentLength: textContent.length };
+
+  const extraLength = textContent.length - innerText.length;
+  const boundedExtra = extraLength > 0 && extraLength <= Math.max(120, Math.round(innerText.length * 0.25));
+
+  if (boundedExtra && isSubsequence(compactInnerText, compactTextContent)) {
+    return { text: textContent, source: "textContent" as const, innerTextLength: innerText.length, textContentLength: textContent.length };
+  }
+
+  return { text: innerText, source: "innerText" as const, innerTextLength: innerText.length, textContentLength: textContent.length };
+}
+
+function isSubsequence(needle: string, haystack: string) {
+  let index = 0;
+
+  for (const char of haystack) {
+    if (char === needle[index]) {
+      index += 1;
+    }
+
+    if (index === needle.length) {
+      return true;
+    }
+  }
+
+  return needle.length === 0;
+}
+
+export function extractFacebookGraphqlText(rawTexts: string[], input: { finalUrl?: string | null } = {}) {
+  const targetPostId = extractFacebookPostId(input.finalUrl ?? "");
+  const candidates: GraphqlTextCandidate[] = [];
+
+  for (const rawText of rawTexts) {
+    for (const payload of parseJsonPayloads(rawText)) {
+      walkJson(payload, (node) => {
+        if (!isRecord(node)) return;
+
+        const text = extractMessageText(node);
+        if (!text) return;
+
+        const postId = typeof node.post_id === "string" || typeof node.post_id === "number" ? String(node.post_id) : null;
+        candidates.push({ text, postId });
+      });
+    }
+  }
+
+  const matchingCandidates = targetPostId ? candidates.filter((candidate) => candidate.postId === targetPostId) : [];
+  const best = (matchingCandidates.length > 0 ? matchingCandidates : candidates).sort((left, right) => right.text.length - left.text.length)[0];
+
+  return best ?? null;
+}
+
+export function chooseBestFacebookCaptureText(input: { domText: string; graphqlText?: string | null }) {
+  return chooseBestFacebookCaptureTextCandidate({ domText: input.domText, candidates: [{ source: "graphql", text: input.graphqlText }] });
+}
+
+export function chooseBestFacebookCaptureTextCandidate(input: { domText: string; candidates: Array<{ source: Exclude<CaptureTextSource, "dom">; text?: string | null }> }) {
+  const domText = input.domText.trim();
+  let best: { text: string; source: CaptureTextSource } = { text: domText, source: "dom" };
+
+  for (const candidate of input.candidates) {
+    const text = candidate.text?.trim() ?? "";
+    if (!text) continue;
+
+    if (!best.text || isPlausibleSameCaptureText({ currentText: best.text, candidateText: text })) {
+      best = { text, source: candidate.source };
+    }
+  }
+
+  return best;
+}
+
+function isPlausibleSameCaptureText(input: { currentText: string; candidateText: string }) {
+  const currentText = input.currentText.trim();
+  const candidateText = input.candidateText.trim();
+
+  if (!currentText) return Boolean(candidateText);
+  if (!candidateText) return false;
+
+  const compactCurrentText = currentText.replace(/\s+/g, "");
+  const compactCandidateText = candidateText.replace(/\s+/g, "");
+  const lengthRatio = candidateText.length / Math.max(currentText.length, 1);
+  const plausibleSamePost = lengthRatio >= 0.75 && lengthRatio <= 1.35;
+
+  return plausibleSamePost && (isSubsequence(compactCurrentText, compactCandidateText) || candidateText.length >= currentText.length);
+}
+
+function parseJsonPayloads(rawText: string) {
+  const payloads: unknown[] = [];
+  const trimmed = rawText.trim();
+
+  if (!trimmed) return payloads;
+
+  try {
+    payloads.push(JSON.parse(trimmed) as unknown);
+    return payloads;
+  } catch {
+    // GraphQL responses may be newline-delimited JSON.
+  }
+
+  for (const line of trimmed.split("\n")) {
+    const item = line.trim();
+    if (!item) continue;
+
+    try {
+      payloads.push(JSON.parse(item) as unknown);
+    } catch {
+      // Ignore non-JSON diagnostics in mixed responses.
+    }
+  }
+
+  return payloads;
+}
+
+function walkJson(value: unknown, visit: (node: unknown) => void, depth = 0) {
+  if (!value || typeof value !== "object" || depth > 40) return;
+
+  visit(value);
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      walkJson(item, visit, depth + 1);
+    }
+    return;
+  }
+
+  for (const item of Object.values(value)) {
+    walkJson(item, visit, depth + 1);
+  }
+}
+
+function extractMessageText(node: Record<string, unknown>) {
+  const directText = getNestedString(node, ["comet_sections", "content", "story", "message", "text"]) ?? getNestedString(node, ["message", "text"]) ?? getNestedString(node, ["story", "message", "text"]);
+
+  if (directText) {
+    return directText.replace(/\s+/g, " ").trim();
+  }
+
+  return null;
+}
+
+function getNestedString(value: unknown, path: string[]) {
+  let current = value;
+
+  for (const key of path) {
+    if (!isRecord(current)) return null;
+    current = current[key];
+  }
+
+  return typeof current === "string" && current.trim() ? current.trim() : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function extractFacebookPostId(url: string) {
+  const patterns = [/\/permalink\/(\d+)/, /\/posts\/(\d+)/, /story_fbid=(\d+)/];
+
+  for (const pattern of patterns) {
+    const match = url.match(pattern);
+    if (match) return match[1];
+  }
+
+  return null;
+}
+
 
 const DEFAULT_SYSTEM_ACTOR_USER_ID = "system-facebook-capture";
 const DEFAULT_SYSTEM_ACTOR_EMAIL = "system-facebook-capture@xuyenviet.internal";
@@ -154,8 +356,79 @@ async function confirmSave(sourceId: string, text: string) {
 }
 
 export async function extractVisibleFacebookText(page: Page): Promise<ExtractedFacebookText> {
-  const result = await page.evaluate(`(() => {
+  const result = await page.evaluate(String.raw`(() => {
     const normalizeText = (value) => value.replace(/\s+/g, " ").trim();
+    const getHtmlText = (element) => {
+      const container = document.createElement("div");
+      container.innerHTML = element.innerHTML.replace(/<\/?(div|p|br|li|ul|ol|h[1-6])\b[^>]*>/gi, "\n");
+      return container.textContent ?? "";
+    };
+    const getCssGeneratedText = (element, pseudoElement) => {
+      const content = window.getComputedStyle(element, pseudoElement).content;
+      if (!content || content === "none" || content === "normal") return "";
+
+      try {
+        return JSON.parse(content);
+      } catch {
+        return content.replace(/^['\"]|['\"]$/g, "");
+      }
+    };
+    const getRenderedText = (node) => {
+      if (node.nodeType === Node.TEXT_NODE) return node.nodeValue ?? "";
+      if (!(node instanceof HTMLElement)) return "";
+      if (["SCRIPT", "STYLE", "NOSCRIPT"].includes(node.tagName)) return "";
+
+      const beforeText = getCssGeneratedText(node, "::before");
+      const childText = Array.from(node.childNodes).map(getRenderedText).join("");
+      const afterText = getCssGeneratedText(node, "::after");
+
+      return beforeText + childText + afterText;
+    };
+    const isSubsequence = (needle, haystack) => {
+      let index = 0;
+      for (const char of haystack) {
+        if (char === needle[index]) index += 1;
+        if (index === needle.length) return true;
+      }
+      return needle.length === 0;
+    };
+    const chooseText = (element) => {
+      const innerText = normalizeText(element.innerText ?? "");
+      const textContent = normalizeText(element.textContent ?? "");
+      const renderedText = normalizeText(getRenderedText(element));
+      const htmlText = normalizeText(getHtmlText(element));
+
+      if (!innerText) return { text: htmlText || renderedText || textContent, source: htmlText ? "htmlText" : renderedText ? "renderedText" : "textContent", innerTextLength: innerText.length, textContentLength: textContent.length, htmlTextLength: htmlText.length };
+
+      const compactInnerText = innerText.replace(/\s+/g, "");
+      const compactTextContent = textContent.replace(/\s+/g, "");
+      const compactRenderedText = renderedText.replace(/\s+/g, "");
+      const compactHtmlText = htmlText.replace(/\s+/g, "");
+      const htmlExtraLength = htmlText.length - innerText.length;
+      const boundedHtmlExtra = htmlExtraLength > 0 && htmlExtraLength <= Math.max(120, Math.round(innerText.length * 0.25));
+
+      if (boundedHtmlExtra && isSubsequence(compactInnerText, compactHtmlText)) {
+        return { text: htmlText, source: "htmlText", innerTextLength: innerText.length, textContentLength: textContent.length, htmlTextLength: htmlText.length };
+      }
+
+      const renderedExtraLength = renderedText.length - innerText.length;
+      const boundedRenderedExtra = renderedExtraLength > 0 && renderedExtraLength <= Math.max(120, Math.round(innerText.length * 0.25));
+
+      if (boundedRenderedExtra && isSubsequence(compactInnerText, compactRenderedText)) {
+        return { text: renderedText, source: "renderedText", innerTextLength: innerText.length, textContentLength: textContent.length, htmlTextLength: htmlText.length };
+      }
+
+      if (!textContent || textContent === innerText) return { text: innerText, source: "innerText", innerTextLength: innerText.length, textContentLength: textContent.length, htmlTextLength: htmlText.length };
+
+      const extraLength = textContent.length - innerText.length;
+      const boundedExtra = extraLength > 0 && extraLength <= Math.max(120, Math.round(innerText.length * 0.25));
+
+      if (boundedExtra && isSubsequence(compactInnerText, compactTextContent)) {
+        return { text: textContent, source: "textContent", innerTextLength: innerText.length, textContentLength: textContent.length, htmlTextLength: htmlText.length };
+      }
+
+      return { text: innerText, source: "innerText", innerTextLength: innerText.length, textContentLength: textContent.length, htmlTextLength: htmlText.length };
+    };
     const isVisible = (element) => {
       const rect = element.getBoundingClientRect();
       return rect.width > 0 && rect.height > 0;
@@ -194,11 +467,15 @@ export async function extractVisibleFacebookText(page: Page): Promise<ExtractedF
         .filter((element) => element instanceof HTMLElement)
         .map((element) => {
           const rect = element.getBoundingClientRect();
-          const text = normalizeText(element.innerText ?? "");
+          const selectedText = chooseText(element);
 
           return {
             element,
-            text,
+            text: selectedText.text,
+            selectedTextSource: selectedText.source,
+            innerTextLength: selectedText.innerTextLength,
+            textContentLength: selectedText.textContentLength,
+            htmlTextLength: selectedText.htmlTextLength,
             scope,
             usedPostMessageSelector: true,
             visible: rect.width > 0 && rect.height > 0,
@@ -213,11 +490,15 @@ export async function extractVisibleFacebookText(page: Page): Promise<ExtractedF
         .filter((element) => element instanceof HTMLElement)
         .map((element) => {
           const rect = element.getBoundingClientRect();
-          const text = normalizeText(element.innerText ?? "");
+          const selectedText = chooseText(element);
 
           return {
             element,
-            text,
+            text: selectedText.text,
+            selectedTextSource: selectedText.source,
+            innerTextLength: selectedText.innerTextLength,
+            textContentLength: selectedText.textContentLength,
+            htmlTextLength: selectedText.htmlTextLength,
             scope,
             usedPostMessageSelector: false,
             visible: rect.width > 0 && rect.height > 0,
@@ -282,6 +563,10 @@ export async function extractVisibleFacebookText(page: Page): Promise<ExtractedF
         candidateCount: candidates.length,
         longestCandidateLength: candidates[0]?.text.length ?? 0,
         secondCandidateLength: candidates[1]?.text.length ?? 0,
+        selectedTextSource: best?.selectedTextSource ?? null,
+        selectedInnerTextLength: best?.innerTextLength ?? 0,
+        selectedTextContentLength: best?.textContentLength ?? 0,
+        selectedHtmlTextLength: best?.htmlTextLength ?? 0,
         selectedRectArea: best?.rectArea ?? 0,
         textLength: text.length,
       },
@@ -318,10 +603,24 @@ async function main() {
       }
 
       try {
+        const graphqlTexts: string[] = [];
+        const onResponse = async (response: Response) => {
+          if (!/\/graphql/i.test(response.url())) return;
+
+          try {
+            const text = await response.text();
+            if (text) graphqlTexts.push(text);
+          } catch {
+            // Some responses may be consumed by the browser or unavailable.
+          }
+        };
+
+        page.on("response", onResponse);
         await page.goto(sourceUrl, { waitUntil: "domcontentloaded", timeout: 45_000 });
         await page.waitForTimeout(2_000);
 
         const extracted = await extractVisibleFacebookText(page);
+        page.off("response", onResponse);
 
         if (!extracted.text.trim()) {
           console.log(recordFacebookCaptureFailure(source.sourceId, extracted.diagnostics.usedArticleRole ? "no_visible_post_text" : "facebook_article_not_found"));
@@ -329,6 +628,11 @@ async function main() {
         }
 
         const finalUrl = page.url();
+        const graphqlCandidate = extractFacebookGraphqlText(graphqlTexts, { finalUrl });
+        const selectedText = chooseBestFacebookCaptureTextCandidate({
+          domText: extracted.text,
+          candidates: [{ source: "graphql", text: graphqlCandidate?.text }],
+        });
         const metadata: SafeFacebookCaptureMetadata = {
           captureMethod: "playwright_operator_browser",
           capturedAt: new Date().toISOString(),
@@ -336,10 +640,15 @@ async function main() {
           finalUrl,
           authorText: extracted.authorText,
           timestampText: extracted.timestampText,
-          diagnostics: extracted.diagnostics,
+          diagnostics: {
+            ...extracted.diagnostics,
+            graphqlResponseCount: graphqlTexts.length,
+            graphqlCandidateLength: graphqlCandidate?.text.length ?? 0,
+            selectedCaptureTextSource: selectedText.source,
+          },
         };
 
-        const shouldSave = options.yes || (await confirmSave(source.sourceId, extracted.text));
+        const shouldSave = options.yes || (await confirmSave(source.sourceId, selectedText.text));
 
         if (!shouldSave) {
           console.log(`Skipped ${source.sourceId}; database unchanged.`);
@@ -348,7 +657,7 @@ async function main() {
 
         const result = await updateQueuedFacebookSourceRawText(db, {
           sourceId: source.sourceId,
-          rawText: extracted.text,
+          rawText: selectedText.text,
           captureMetadata: metadata,
           actor,
         });

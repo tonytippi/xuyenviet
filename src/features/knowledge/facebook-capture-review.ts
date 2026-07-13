@@ -357,6 +357,76 @@ export async function reopenFacebookCaptureForRecapture(
   });
 }
 
+export async function requestFacebookCaptureRecapture(
+  db: FacebookCaptureReviewTransitionDb,
+  input: {
+    reviewId: string;
+    actor: FacebookCaptureReviewActor;
+    reason?: string;
+    now?: Date;
+  },
+) {
+  return db.transaction(async (transaction) => {
+    const review = await loadReviewById(transaction, input.reviewId);
+
+    if (!review) {
+      return { status: "not_found" as const };
+    }
+
+    if (review.status !== "needs_review" && review.status !== "extraction_failed" && review.status !== "rejected") {
+      return { status: "invalid_transition" as const, currentStatus: review.status };
+    }
+
+    const existingCards = await getExistingCardsForCaptureSource(transaction, review.sourceId);
+    const existingExtractionCards = existingCards.filter((card) => card.aiPromptVersion === sourceKnowledgeDraftExtractionPromptVersion);
+
+    if (existingExtractionCards.length > 0) {
+      return { status: "already_extracted" as const, existingCards: existingExtractionCards.length };
+    }
+
+    const recaptureReason = normalizeSafeSummary(input.reason ?? "Recapture requested by operator", "recaptureReason", review.rawText);
+
+    if (!recaptureReason) {
+      throw new Error("recaptureReason must be a short safe summary.");
+    }
+
+    const now = input.now ? getMutationTimestamp(input.now, review.createdAt) : null;
+    const mutationTimestamp = now ?? sql<Date>`greatest(now(), ${facebookCaptureReviews.createdAt})`;
+
+    const [updatedReview] = await transaction
+      .update(facebookCaptureReviews)
+      .set({
+        status: "needs_review",
+        reviewerUserId: null,
+        reviewedAt: null,
+        rejectionReason: null,
+        extractionError: null,
+        updatedAt: mutationTimestamp,
+      })
+      .where(and(eq(facebookCaptureReviews.id, input.reviewId), eq(facebookCaptureReviews.status, review.status)))
+      .returning();
+
+    if (!updatedReview) {
+      return { status: "stale_review" as const };
+    }
+
+    await transaction.update(rawSourceMaterial).set({ rawText: null, rawMetadata: null }).where(eq(rawSourceMaterial.id, review.rawSourceMaterialId));
+
+    await transaction.insert(auditEvents).values({
+      actorUserId: input.actor.userId,
+      actorEmail: input.actor.email,
+      operation: "update",
+      targetType: "facebook_capture_review",
+      targetId: review.id,
+      beforeSummary: `Facebook capture review ${review.id}: status=${review.status}; sourceId=${review.sourceId}; rawTextPresent=${Boolean(review.rawText?.trim())}.`,
+      afterSummary: `Facebook capture review ${review.id}: ${review.status} -> recapture-ready; sourceId=${review.sourceId}; rawSourceMaterialId=${review.rawSourceMaterialId}; reason=${recaptureReason}.`,
+      createdAt: updatedReview.updatedAt,
+    });
+
+    return { status: "updated" as const, review: updatedReview };
+  });
+}
+
 function getMutationTimestamp(requested: Date | undefined, createdAt: Date) {
   const now = requested ?? new Date();
   return now >= createdAt ? now : createdAt;

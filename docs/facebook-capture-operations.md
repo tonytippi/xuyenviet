@@ -102,3 +102,7 @@ If the script reports no queued sources, no matching Facebook source rows need r
 If the script reports an audit actor error, create the service user row or set `FACEBOOK_CAPTURE_ACTOR_USER_ID` and `FACEBOOK_CAPTURE_ACTOR_EMAIL` to an existing user row.
 
 If Facebook shows login, blocked, or empty content, refresh the local Playwright profile manually and rerun the command.
+
+If captured text is incomplete or corrupted, use the admin review detail page `Recapture` action. This clears `raw_source_material.raw_text` and capture metadata, resets the review to `needs_review`, and queues the source for another `pnpm facebook:capture --source-id <source-id>` run. Recapture is blocked once extraction cards already exist for that capture version.
+
+Capture metadata includes diagnostics that identify the selected text path. Useful fields are `selectedTextSource`, `selectedCaptureTextSource`, `selectedInnerTextLength`, `selectedTextContentLength`, `selectedHtmlTextLength`, `graphqlResponseCount`, and `graphqlCandidateLength`. Current extraction order tries direct DOM text, serialized HTML text, CSS-rendered text, text content, and finally a matching GraphQL post-message candidate when available.

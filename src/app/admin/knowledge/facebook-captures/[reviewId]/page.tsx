@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 
 import { type FacebookCaptureReviewStatus } from "@/db/schema";
 import { sourceKnowledgeDraftExtractionPromptVersion } from "@/features/ai/prompts";
-import { extractAndApproveFacebookCaptureDraftsForm, extractKnowledgeDraftsFromFacebookCaptureForm, rejectFacebookCaptureReviewForm, reopenFacebookCaptureForRecaptureForm } from "@/features/knowledge/actions";
+import { extractAndApproveFacebookCaptureDraftsForm, extractKnowledgeDraftsFromFacebookCaptureForm, requestFacebookCaptureRecaptureForm } from "@/features/knowledge/actions";
 import { getAdminFacebookCaptureReviewDetail } from "@/features/knowledge/facebook-capture-review-admin";
 
 import { ApproveAllSubmitStatus } from "./approve-all-submit-status";
@@ -44,9 +44,7 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
   const isRetryableExtractionStatus = review.status === "needs_review" || review.status === "extraction_failed";
   const canExtract = isRetryableExtractionStatus && Boolean(review.rawText?.trim()) && review.sourceType === "community" && !hasExtractionCards;
   const canExtractAndApproveAll = canExtract;
-  const hasRawText = Boolean(review.rawText?.trim());
-  const canReject = (review.status === "needs_review" || review.status === "extraction_failed") && hasRawText;
-  const canReopenForRecapture = review.status === "rejected";
+  const canRecapture = (review.status === "needs_review" || review.status === "extraction_failed" || review.status === "rejected") && !hasExtractionCards;
   const draftCards = review.existingCards.filter((card) => card.status === "draft");
   const approvedCards = review.existingCards.filter((card) => card.status === "approved");
   const extractedCount = getSearchParam(query.extracted);
@@ -57,6 +55,9 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
   const reopened = getSearchParam(query.reopened) === "1";
   const reopenError = getSearchParam(query.reopenError);
   const reopenStatus = getSearchParam(query.reopenStatus);
+  const recaptureRequested = getSearchParam(query.recaptureRequested) === "1";
+  const recaptureError = getSearchParam(query.recaptureError);
+  const recaptureStatus = getSearchParam(query.recaptureStatus);
   const extractError = getSearchParam(query.extractError);
   const approveAllError = getSearchParam(query.approveAllError);
   const approveAllStatus = getSearchParam(query.approveAllStatus);
@@ -81,7 +82,7 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
         Nội dung này chỉ dành cho vận hành. Chưa trích xuất, chưa duyệt, chưa dùng cho câu trả lời của khách.
       </p>
 
-      {(extractedCount || approvedAllCount || rejected || rejectError || rejectStatus || reopened || reopenError || reopenStatus || extractError || approveAllError || approveAllStatus || approveAllRecoveryStatus || approvalFailed || recoveryStatus || alreadyExtracted) && (
+      {(extractedCount || approvedAllCount || rejected || rejectError || rejectStatus || reopened || reopenError || reopenStatus || recaptureRequested || recaptureError || recaptureStatus || extractError || approveAllError || approveAllStatus || approveAllRecoveryStatus || approvalFailed || recoveryStatus || alreadyExtracted) && (
         <section className="mt-6 rounded-2xl border border-[#d8c9ad] bg-white/80 p-4 text-sm leading-6 text-[#17342c]">
           {extractedCount ? (
             <div>
@@ -109,6 +110,9 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
           {reopened ? <p>Đã mở lại nguồn để capture lại. Chạy công cụ capture Facebook để lấy text mới rồi duyệt lại.</p> : null}
           {reopenError ? <p>Lý do mở lại không an toàn hoặc capture này không thể mở lại.</p> : null}
           {reopenStatus ? <p>Capture này không thể mở lại để capture lại ({reopenStatus}). Kiểm tra trạng thái hiện tại trước khi thử lại.</p> : null}
+          {recaptureRequested ? <p>Đã đưa capture này về hàng đợi recapture. Chạy công cụ capture Facebook để lấy text mới rồi quay lại duyệt.</p> : null}
+          {recaptureError ? <p>Lý do recapture không an toàn hoặc capture này không thể recapture.</p> : null}
+          {recaptureStatus ? <p>Capture này không thể recapture ({recaptureStatus}). Kiểm tra trạng thái review và thẻ liên kết hiện có.</p> : null}
           {approvedAllCount ? (
             <div>
               <p>
@@ -265,38 +269,20 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
           ) : (
             <p className="rounded-2xl border border-[#d8c9ad] bg-white/75 p-4 text-sm leading-6 text-[#4f625a]">Extract & Approve All chỉ khả dụng khi capture đang cần duyệt hoặc trích xuất lỗi, có raw text đọc được, chưa có thẻ trích xuất và vẫn là nguồn Facebook/cộng đồng chưa xác minh.</p>
           )}
-          {canReject ? (
-            <form action={rejectFacebookCaptureReviewForm} className="rounded-2xl border border-[#d99a93] bg-[#fff7f2] p-4">
+          {canRecapture ? (
+            <form action={requestFacebookCaptureRecaptureForm} className="rounded-2xl border border-[#d8c9ad] bg-white/75 p-4">
               <input name="reviewId" type="hidden" value={review.id} />
-              <label className="block text-sm font-semibold leading-6 text-[#17342c]" htmlFor="rejectionReason">
-                Lý do từ chối an toàn
-              </label>
+              <input name="recaptureReason" type="hidden" value="Operator requested recapture from detail page" />
+              <p className="text-sm font-semibold leading-6 text-[#17342c]">Recapture</p>
               <p className="mt-2 text-sm leading-6 text-[#4f625a]">
-                Không nhập nguyên văn bài viết, cookie, token, payload, hoặc dữ liệu nhạy cảm. Chỉ ghi tóm tắt ngắn như: Sai bài viết, Nội dung riêng tư, Không liên quan, Text capture thiếu.
+                Xóa text capture hiện tại và đưa nguồn về hàng đợi capture lại. Dùng khi text bị lỗi, mất ký tự, chọn nhầm bài, hoặc cần lấy lại bằng script mới.
               </p>
-              <input className="mt-3 min-h-12 w-full rounded-2xl border border-[#d8c9ad] bg-white px-4 py-3 text-sm text-[#17342c] focus:outline-none focus:ring-4 focus:ring-[#d99a93]" id="rejectionReason" maxLength={500} name="rejectionReason" required type="text" />
-              <button className="mt-4 min-h-12 rounded-2xl bg-[#9b2f29] px-5 py-3 font-semibold text-white transition hover:bg-[#7d261f] focus:outline-none focus:ring-4 focus:ring-[#d99a93]" type="submit">
-                Từ chối capture
-              </button>
-            </form>
-          ) : null}
-          {canReopenForRecapture ? (
-            <form action={reopenFacebookCaptureForRecaptureForm} className="rounded-2xl border border-[#d8c9ad] bg-white/75 p-4">
-              <input name="reviewId" type="hidden" value={review.id} />
-              <p className="text-sm font-semibold leading-6 text-[#17342c]">Mở lại để capture lại</p>
-              <p className="mt-2 text-sm leading-6 text-[#4f625a]">
-                Hành động này đưa nguồn về hàng đợi capture lại. Text cũ không được dùng để trích xuất; lần capture mới vẫn phải được duyệt trước khi trích xuất.
-              </p>
-              <label className="mt-4 block text-sm font-semibold leading-6 text-[#17342c]" htmlFor="reopenReason">
-                Lý do mở lại an toàn
-              </label>
-              <input className="mt-3 min-h-12 w-full rounded-2xl border border-[#d8c9ad] bg-white px-4 py-3 text-sm text-[#17342c] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]" id="reopenReason" maxLength={500} name="reopenReason" required type="text" />
               <button className="mt-4 min-h-12 rounded-2xl bg-[#1f5f46] px-5 py-3 font-semibold text-white transition hover:bg-[#194d39] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]" type="submit">
-                Mở lại để capture lại
+                Recapture
               </button>
             </form>
           ) : null}
-          {!canReject && !canReopenForRecapture ? <p className="rounded-2xl border border-[#d8c9ad] bg-white/75 p-4 text-sm leading-6 text-[#4f625a]">Reject/reopen chỉ khả dụng cho capture cần duyệt, trích xuất lỗi, hoặc đã từ chối cần capture lại.</p> : null}
+          {!canRecapture ? <p className="rounded-2xl border border-[#d8c9ad] bg-white/75 p-4 text-sm leading-6 text-[#4f625a]">Recapture chỉ khả dụng khi capture chưa có thẻ trích xuất được liên kết.</p> : null}
         </div>
       </section>
     </div>

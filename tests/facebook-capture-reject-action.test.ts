@@ -100,9 +100,9 @@ describe("Facebook capture reject and reopen actions", () => {
       actor: { userId: "operator-user", email: "operator-user@example.com" },
       rejectionReason: "Wrong visible post content",
     });
-    const { reopenFacebookCaptureForRecaptureForm } = await import("@/features/knowledge/actions");
+    const { requestFacebookCaptureRecaptureForm } = await import("@/features/knowledge/actions");
 
-    await expect(reopenFacebookCaptureForRecaptureForm(formData({ reviewId: review.id, reopenReason: "Capture script selected incomplete text" }))).rejects.toThrow(/NEXT_REDIRECT:.*reopened=1/);
+    await expect(requestFacebookCaptureRecaptureForm(formData({ reviewId: review.id, recaptureReason: "Capture script selected incomplete text" }))).rejects.toThrow(/NEXT_REDIRECT:.*recaptureRequested=1/);
 
     await expect(testDb.select().from(rawSourceMaterial).where(eq(rawSourceMaterial.id, review.rawSourceMaterialId))).resolves.toMatchObject([{ rawText: null }]);
     await expect(testDb.select().from(facebookCaptureReviews).where(eq(facebookCaptureReviews.id, review.id))).resolves.toMatchObject([{ status: "needs_review", rejectionReason: null }]);
@@ -117,10 +117,11 @@ describe("Facebook capture reject and reopen actions", () => {
     await createUser("traveler-user", ["traveler"]);
     authMock.mockResolvedValue({ user: { id: "traveler-user", email: "traveler-user@example.com" } });
     const { AdminAuthorizationError } = await import("@/server/auth");
-    const { rejectFacebookCaptureReviewForm, reopenFacebookCaptureForRecaptureForm } = await import("@/features/knowledge/actions");
+    const { rejectFacebookCaptureReviewForm, reopenFacebookCaptureForRecaptureForm, requestFacebookCaptureRecaptureForm } = await import("@/features/knowledge/actions");
 
     await expect(rejectFacebookCaptureReviewForm(formData({ reviewId: review.id, rejectionReason: "Wrong visible post content" }))).rejects.toThrow(AdminAuthorizationError);
     await expect(reopenFacebookCaptureForRecaptureForm(formData({ reviewId: review.id, reopenReason: "Capture script selected incomplete text" }))).rejects.toThrow(AdminAuthorizationError);
+    await expect(requestFacebookCaptureRecaptureForm(formData({ reviewId: review.id, recaptureReason: "Capture script selected incomplete text" }))).rejects.toThrow(AdminAuthorizationError);
 
     expect(fetch).not.toHaveBeenCalled();
     await expect(testDb.select().from(auditEvents)).resolves.toHaveLength(0);

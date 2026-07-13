@@ -449,7 +449,7 @@ describe("admin Facebook capture review helpers", () => {
     expect(html).not.toContain("unsafe-provider-token");
   });
 
-  test("detail page renders reject form for needs-review captures", async () => {
+  test("detail page renders recapture form for needs-review captures", async () => {
     authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
     const review = await createCapturedFacebookSource({ id: "extract-action", rawText: "Readable captured Facebook text." });
 
@@ -462,8 +462,10 @@ describe("admin Facebook capture review helpers", () => {
     expect(html).toContain(`name="reviewId" value="${review.id}"`);
     expect(html).toContain("Trích xuất và phê duyệt tất cả");
     expect(html).toContain("Tôi đã kiểm tra nội dung capture, trust/confidence và freshness");
-    expect(html).toContain("Từ chối capture");
-    expect(html).toContain("Lý do từ chối an toàn");
+    expect(html).toContain("Recapture");
+    expect(html).toContain("Xóa text capture hiện tại");
+    expect(html).not.toContain("Từ chối capture");
+    expect(html).not.toContain("Lý do từ chối an toàn");
     expect(html).not.toContain("Reject / reopen capture (4.1F)");
   });
 
@@ -554,7 +556,7 @@ describe("admin Facebook capture review helpers", () => {
     expect(html).not.toContain("/admin/knowledge/drafts/rejected-linked-card");
   });
 
-  test("detail page renders reopen form for rejected captures and no extract actions", async () => {
+  test("detail page renders recapture form for rejected captures and no extract actions", async () => {
     authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
     const review = await createCapturedFacebookSource({ id: "reopen-action", rawText: "Rejected detail page raw text." });
     await markFacebookCaptureReviewStatus(testDb, {
@@ -568,8 +570,10 @@ describe("admin Facebook capture review helpers", () => {
     const element = await FacebookCaptureReviewDetailPage({ params: Promise.resolve({ reviewId: review.id }) });
     const html = renderToStaticMarkup(element);
 
-    expect(html).toContain("Mở lại để capture lại");
-    expect(html).toContain("Text cũ không được dùng để trích xuất");
+    expect(html).toContain("Recapture");
+    expect(html).toContain("Xóa text capture hiện tại");
+    expect(html).not.toContain("Mở lại để capture lại");
+    expect(html).not.toContain("Từ chối capture");
     expect(html).not.toContain("Trích xuất bản nháp</button>");
     expect(html).not.toContain("approveAllConfirmed");
   });

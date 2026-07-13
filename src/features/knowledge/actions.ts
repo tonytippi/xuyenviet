@@ -16,7 +16,7 @@ import {
   type KnowledgeDraftExtractionPreProviderGuard,
 } from "./extraction";
 import { getAdminFacebookCaptureReviewExtractionTarget } from "./facebook-capture-review-admin";
-import { markFacebookCaptureReviewStatus, markFacebookCaptureReviewStatusInTransaction, reopenFacebookCaptureForRecapture, type FacebookCaptureReviewActor } from "./facebook-capture-review";
+import { markFacebookCaptureReviewStatus, markFacebookCaptureReviewStatusInTransaction, reopenFacebookCaptureForRecapture, requestFacebookCaptureRecapture, type FacebookCaptureReviewActor } from "./facebook-capture-review";
 import {
   approveKnowledgeDraftBatchInTransaction,
   approveKnowledgeDraft as approveKnowledgeDraftService,
@@ -361,6 +361,32 @@ export async function reopenFacebookCaptureForRecaptureForm(formData: FormData) 
     }
 
     redirectPath = getFacebookCaptureRedirectPath(reviewId, { reopenError: "Lý do mở lại không an toàn hoặc capture này không thể mở lại." });
+  }
+
+  redirect(redirectPath);
+}
+
+export async function requestFacebookCaptureRecaptureForm(formData: FormData) {
+  const session = await requireAdminSession();
+  const actor: FacebookCaptureReviewActor = { userId: session.userId, email: session.email };
+  const reviewId = getOptionalFormString(formData, "reviewId") ?? "";
+  const reason = getOptionalFormString(formData, "recaptureReason") ?? "Recapture requested by operator";
+  let redirectPath = getFacebookCaptureRedirectPath(reviewId, { recaptureError: "Không thể đưa capture này về hàng đợi recapture." });
+
+  try {
+    const statusResult = await requestFacebookCaptureRecapture(getDb(), { reviewId, actor, reason });
+
+    if (statusResult.status === "updated") {
+      redirectPath = getFacebookCaptureRedirectPath(statusResult.review.id, { recaptureRequested: "1" });
+    } else {
+      redirectPath = getFacebookCaptureRedirectPath(reviewId, { recaptureStatus: statusResult.status });
+    }
+  } catch (error) {
+    if (error instanceof AdminAuthorizationError || (error instanceof Error && error.name === "AdminAuthorizationError")) {
+      throw error;
+    }
+
+    redirectPath = getFacebookCaptureRedirectPath(reviewId, { recaptureError: "Lý do recapture không an toàn hoặc capture này không thể recapture." });
   }
 
   redirect(redirectPath);

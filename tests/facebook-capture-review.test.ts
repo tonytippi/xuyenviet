@@ -9,6 +9,7 @@ import {
   listFacebookCaptureReviews,
   markFacebookCaptureReviewStatus,
   reopenFacebookCaptureForRecapture,
+  requestFacebookCaptureRecapture,
 } from "@/features/knowledge/facebook-capture-review";
 import { listQueuedFacebookSources, updateQueuedFacebookSourceRawText } from "@/features/knowledge/facebook-capture";
 
@@ -293,6 +294,51 @@ describe("Facebook capture review state", () => {
         reason: "cookie token provider_payload",
       }),
     ).rejects.toThrow("reopenReason must be a short safe summary.");
+  });
+
+  test("direct recapture clears raw text from actionable captures without requiring rejection", async () => {
+    await createSource({
+      id: "direct-recapture-facebook",
+      rawText: "Captured text with missing visible characters should be replaced.",
+      rawMetadata: { captureMethod: "playwright_operator_browser", capturedAt: "2026-07-13T00:00:00.000Z" },
+    });
+    const ensured = await ensureFacebookCaptureReviewForCapturedSource(testDb, { sourceId: "direct-recapture-facebook", rawSourceMaterialId: "raw-direct-recapture-facebook", now: new Date("2026-07-13T00:00:00.000Z") });
+    if (ensured.status !== "created") throw new Error("test setup failed");
+
+    await expect(
+      requestFacebookCaptureRecapture(testDb, {
+        reviewId: ensured.review.id,
+        actor: { userId: "operator-user", email: "operator-user@example.com" },
+        reason: "Capture text lost characters",
+        now: new Date("2026-07-13T01:00:00.000Z"),
+      }),
+    ).resolves.toMatchObject({ status: "updated", review: { status: "needs_review", sourceId: "direct-recapture-facebook" } });
+
+    await expect(testDb.select().from(rawSourceMaterial).where(eq(rawSourceMaterial.id, "raw-direct-recapture-facebook"))).resolves.toMatchObject([{ rawText: null, rawMetadata: null }]);
+    await expect(listQueuedFacebookSources(testDb, { sourceId: "direct-recapture-facebook" })).resolves.toMatchObject([{ sourceId: "direct-recapture-facebook", rawMaterialId: "raw-direct-recapture-facebook" }]);
+    await expect(listFacebookCaptureReviews(testDb, { status: "needs_review" })).resolves.toEqual([]);
+
+    const audits = await testDb.select().from(auditEvents).where(eq(auditEvents.targetId, ensured.review.id));
+    expect(audits.some((audit) => audit.afterSummary?.includes("needs_review -> recapture-ready"))).toBe(true);
+    expect(JSON.stringify(audits)).not.toContain("Captured text with missing visible characters");
+  });
+
+  test("direct recapture blocks already extracted captures", async () => {
+    await createSource({ id: "direct-recapture-extracted", rawText: "Captured text already has extraction cards." });
+    const ensured = await ensureFacebookCaptureReviewForCapturedSource(testDb, { sourceId: "direct-recapture-extracted", rawSourceMaterialId: "raw-direct-recapture-extracted" });
+    if (ensured.status !== "created") throw new Error("test setup failed");
+    await testDb.insert(knowledgeCards).values({ id: "direct-recapture-card", status: "draft", type: "route_note", title: "Existing extraction", routeSegment: "Huế - Đà Nẵng", summary: "Existing extracted card.", confidence: "community", aiPromptVersion: sourceKnowledgeDraftExtractionPromptVersion, createdByUserId: "operator-user" });
+    await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: "direct-recapture-card", sourceId: "direct-recapture-extracted" });
+
+    await expect(
+      requestFacebookCaptureRecapture(testDb, {
+        reviewId: ensured.review.id,
+        actor: { userId: "operator-user", email: "operator-user@example.com" },
+        reason: "Try recapture after extraction",
+      }),
+    ).resolves.toMatchObject({ status: "already_extracted", existingCards: 1 });
+
+    await expect(testDb.select().from(rawSourceMaterial).where(eq(rawSourceMaterial.id, "raw-direct-recapture-extracted"))).resolves.toMatchObject([{ rawText: "Captured text already has extraction cards." }]);
   });
 
   test("extraction transitions require extracted cards and ignore unrelated linked cards", async () => {
