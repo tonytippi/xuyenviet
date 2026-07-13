@@ -8,8 +8,9 @@ import {
   getExistingCardsForCaptureSource,
   listFacebookCaptureReviews,
   markFacebookCaptureReviewStatus,
+  reopenFacebookCaptureForRecapture,
 } from "@/features/knowledge/facebook-capture-review";
-import { updateQueuedFacebookSourceRawText } from "@/features/knowledge/facebook-capture";
+import { listQueuedFacebookSources, updateQueuedFacebookSourceRawText } from "@/features/knowledge/facebook-capture";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
 
@@ -157,6 +158,95 @@ describe("Facebook capture review state", () => {
         rejectionReason: "captured Facebook paragraph should never move into audit",
       }),
     ).rejects.toThrow("rejectionReason must be a short safe summary.");
+  });
+
+  test("reopen clears rejected raw text, preserves provenance, audits safely, and allows controlled recapture", async () => {
+    await createSource({
+      id: "recapture-facebook",
+      rawText: "Rejected raw Facebook text that must not survive recapture reopen.",
+      rawMetadata: {
+        captureMethod: "playwright_operator_browser",
+        capturedAt: "2026-07-13T00:00:00.000Z",
+        finalUrl: "https://m.facebook.com/groups/xuyenviet/posts/recapture-facebook",
+      },
+    });
+    const ensured = await ensureFacebookCaptureReviewForCapturedSource(testDb, { sourceId: "recapture-facebook", rawSourceMaterialId: "raw-recapture-facebook", now: new Date("2026-07-13T00:00:00.000Z") });
+    if (ensured.status !== "created") throw new Error("test setup failed");
+    await markFacebookCaptureReviewStatus(testDb, {
+      reviewId: ensured.review.id,
+      status: "rejected",
+      actor: { userId: "operator-user", email: "operator-user@example.com" },
+      rejectionReason: "Wrong visible post content",
+      now: new Date("2026-07-13T01:00:00.000Z"),
+    });
+
+    await expect(
+      reopenFacebookCaptureForRecapture(testDb, {
+        reviewId: ensured.review.id,
+        actor: { userId: "operator-user", email: "operator-user@example.com" },
+        reason: "Capture script selected incomplete text",
+        now: new Date("2026-07-13T02:00:00.000Z"),
+      }),
+    ).resolves.toMatchObject({ status: "updated", review: { status: "needs_review", sourceId: "recapture-facebook", rawSourceMaterialId: "raw-recapture-facebook" } });
+
+    await expect(testDb.select().from(rawSourceMaterial).where(eq(rawSourceMaterial.id, "raw-recapture-facebook"))).resolves.toMatchObject([
+      {
+        id: "raw-recapture-facebook",
+        sourceId: "recapture-facebook",
+        rawText: null,
+      },
+    ]);
+    await expect(listQueuedFacebookSources(testDb, { sourceId: "recapture-facebook" })).resolves.toMatchObject([{ sourceId: "recapture-facebook", rawMaterialId: "raw-recapture-facebook" }]);
+
+    await expect(
+      updateQueuedFacebookSourceRawText(testDb, {
+        sourceId: "recapture-facebook",
+        rawText: "New controlled recapture text for operator review.",
+        captureMetadata: {
+          captureMethod: "playwright_operator_browser",
+          capturedAt: "2026-07-13T03:00:00.000Z",
+          sourceUrl: "https://facebook.com/groups/xuyenviet/posts/recapture-facebook",
+          finalUrl: "https://m.facebook.com/groups/xuyenviet/posts/recapture-facebook",
+        },
+        actor: { userId: "operator-user", email: "operator-user@example.com" },
+        now: new Date("2026-07-13T03:00:00.000Z"),
+      }),
+    ).resolves.toMatchObject({ status: "updated", rawMaterialId: "raw-recapture-facebook", reviewId: ensured.review.id });
+    await expect(testDb.select().from(facebookCaptureReviews).where(eq(facebookCaptureReviews.id, ensured.review.id))).resolves.toMatchObject([{ status: "needs_review", rejectionReason: null, extractionError: null }]);
+
+    const audits = await testDb.select().from(auditEvents).where(eq(auditEvents.targetId, ensured.review.id));
+    expect(audits.some((audit) => audit.afterSummary?.includes("rejected -> recapture-ready"))).toBe(true);
+    expect(JSON.stringify(audits)).not.toContain("Rejected raw Facebook text");
+  });
+
+  test("reopen only accepts rejected captures and safe short reasons", async () => {
+    await createSource({ id: "not-rejected", rawText: "Captured text" });
+    const ensured = await ensureFacebookCaptureReviewForCapturedSource(testDb, { sourceId: "not-rejected", rawSourceMaterialId: "raw-not-rejected" });
+    if (ensured.status !== "created") throw new Error("test setup failed");
+
+    await expect(
+      reopenFacebookCaptureForRecapture(testDb, {
+        reviewId: ensured.review.id,
+        actor: { userId: "operator-user", email: "operator-user@example.com" },
+        reason: "Capture script selected incomplete text",
+      }),
+    ).resolves.toMatchObject({ status: "invalid_transition", currentStatus: "needs_review" });
+
+    await markFacebookCaptureReviewStatus(testDb, {
+      reviewId: ensured.review.id,
+      status: "rejected",
+      actor: { userId: "operator-user", email: "operator-user@example.com" },
+      rejectionReason: "Wrong visible post content",
+      now: new Date("2026-07-13T14:00:00.000Z"),
+    });
+
+    await expect(
+      reopenFacebookCaptureForRecapture(testDb, {
+        reviewId: ensured.review.id,
+        actor: { userId: "operator-user", email: "operator-user@example.com" },
+        reason: "cookie token provider_payload",
+      }),
+    ).rejects.toThrow("reopenReason must be a short safe summary.");
   });
 
   test("extraction transitions require extracted cards and ignore unrelated linked cards", async () => {

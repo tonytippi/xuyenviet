@@ -270,3 +270,65 @@ export async function markFacebookCaptureReviewStatusInTransaction(
 
     return { status: "updated" as const, review: updated };
 }
+
+export async function reopenFacebookCaptureForRecapture(
+  db: FacebookCaptureReviewTransitionDb,
+  input: {
+    reviewId: string;
+    actor: FacebookCaptureReviewActor;
+    reason?: string;
+    now?: Date;
+  },
+) {
+  return db.transaction(async (transaction) => {
+    const review = await loadReviewById(transaction, input.reviewId);
+
+    if (!review) {
+      return { status: "not_found" as const };
+    }
+
+    if (review.status !== "rejected") {
+      return { status: "invalid_transition" as const, currentStatus: review.status };
+    }
+
+    const reopenReason = normalizeSafeSummary(input.reason, "reopenReason", review.rawText);
+
+    if (!reopenReason) {
+      throw new Error("reopenReason is required when reopening a capture for recapture.");
+    }
+
+    const now = input.now ?? new Date();
+
+    const [updatedReview] = await transaction
+      .update(facebookCaptureReviews)
+      .set({
+        status: "needs_review",
+        reviewerUserId: null,
+        reviewedAt: null,
+        rejectionReason: null,
+        extractionError: null,
+        updatedAt: now,
+      })
+      .where(and(eq(facebookCaptureReviews.id, input.reviewId), eq(facebookCaptureReviews.status, "rejected")))
+      .returning();
+
+    if (!updatedReview) {
+      return { status: "stale_review" as const };
+    }
+
+    await transaction.update(rawSourceMaterial).set({ rawText: null, rawMetadata: null }).where(eq(rawSourceMaterial.id, review.rawSourceMaterialId));
+
+    await transaction.insert(auditEvents).values({
+      actorUserId: input.actor.userId,
+      actorEmail: input.actor.email,
+      operation: "update",
+      targetType: "facebook_capture_review",
+      targetId: review.id,
+      beforeSummary: `Facebook capture review ${review.id}: status=rejected; sourceId=${review.sourceId}; rawTextPresent=${Boolean(review.rawText?.trim())}.`,
+      afterSummary: `Facebook capture review ${review.id}: rejected -> recapture-ready; sourceId=${review.sourceId}; rawSourceMaterialId=${review.rawSourceMaterialId}; reason=${reopenReason}.`,
+      createdAt: now,
+    });
+
+    return { status: "updated" as const, review: updatedReview };
+  });
+}

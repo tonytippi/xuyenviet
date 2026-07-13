@@ -296,7 +296,7 @@ describe("Facebook capture extract and approve all action", () => {
     const actionableHtml = renderToStaticMarkup(actionableElement);
     expect(actionableHtml).toContain("Trích xuất và phê duyệt tất cả");
     expect(actionableHtml).toContain("Tôi đã kiểm tra nội dung capture, trust/confidence và freshness");
-    expect(actionableHtml).toContain("Reject / reopen capture (4.1F)");
+    expect(actionableHtml).toContain("Từ chối capture");
 
     const missingConfirmationElement = await FacebookCaptureReviewDetailPage({
       params: Promise.resolve({ reviewId: review.id }),

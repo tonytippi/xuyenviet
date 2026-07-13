@@ -257,7 +257,7 @@ describe("admin Facebook capture review helpers", () => {
     expect(html).not.toContain("unsafe-provider-token");
   });
 
-  test("detail page renders real Extract and approve-all forms for needs-review captures and keeps reject/reopen disabled", async () => {
+  test("detail page renders reject form for needs-review captures", async () => {
     authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
     const review = await createCapturedFacebookSource({ id: "extract-action", rawText: "Readable captured Facebook text." });
 
@@ -270,6 +270,28 @@ describe("admin Facebook capture review helpers", () => {
     expect(html).toContain(`name="reviewId" value="${review.id}"`);
     expect(html).toContain("Trích xuất và phê duyệt tất cả");
     expect(html).toContain("Tôi đã kiểm tra nội dung capture, trust/confidence và freshness");
-    expect(html).toContain("Reject / reopen capture (4.1F)");
+    expect(html).toContain("Từ chối capture");
+    expect(html).toContain("Lý do từ chối an toàn");
+    expect(html).not.toContain("Reject / reopen capture (4.1F)");
+  });
+
+  test("detail page renders reopen form for rejected captures and no extract actions", async () => {
+    authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
+    const review = await createCapturedFacebookSource({ id: "reopen-action", rawText: "Rejected detail page raw text." });
+    await markFacebookCaptureReviewStatus(testDb, {
+      reviewId: review.id,
+      status: "rejected",
+      actor: { userId: "operator-user", email: "operator-user@example.com" },
+      rejectionReason: "Wrong visible post content",
+    });
+
+    const { default: FacebookCaptureReviewDetailPage } = await import("@/app/admin/knowledge/facebook-captures/[reviewId]/page");
+    const element = await FacebookCaptureReviewDetailPage({ params: Promise.resolve({ reviewId: review.id }) });
+    const html = renderToStaticMarkup(element);
+
+    expect(html).toContain("Mở lại để capture lại");
+    expect(html).toContain("Text cũ không được dùng để trích xuất");
+    expect(html).not.toContain("Trích xuất bản nháp</button>");
+    expect(html).not.toContain("approveAllConfirmed");
   });
 });

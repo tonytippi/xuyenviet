@@ -16,7 +16,7 @@ import {
   type KnowledgeDraftExtractionPreProviderGuard,
 } from "./extraction";
 import { getAdminFacebookCaptureReviewExtractionTarget } from "./facebook-capture-review-admin";
-import { markFacebookCaptureReviewStatus, markFacebookCaptureReviewStatusInTransaction, type FacebookCaptureReviewActor } from "./facebook-capture-review";
+import { markFacebookCaptureReviewStatus, markFacebookCaptureReviewStatusInTransaction, reopenFacebookCaptureForRecapture, type FacebookCaptureReviewActor } from "./facebook-capture-review";
 import {
   approveKnowledgeDraftBatchInTransaction,
   approveKnowledgeDraft as approveKnowledgeDraftService,
@@ -274,6 +274,58 @@ export async function extractKnowledgeDraftsFromFacebookCaptureForm(formData: Fo
 
       redirectPath = getFacebookCaptureRedirectPath(target?.id ?? reviewId, { extractError: "Không thể trích xuất capture này.", failureStatus });
     }
+  }
+
+  redirect(redirectPath);
+}
+
+export async function rejectFacebookCaptureReviewForm(formData: FormData) {
+  const session = await requireAdminSession();
+  const actor: FacebookCaptureReviewActor = { userId: session.userId, email: session.email };
+  const reviewId = getOptionalFormString(formData, "reviewId") ?? "";
+  const rejectionReason = getOptionalFormString(formData, "rejectionReason") ?? undefined;
+  let redirectPath = getFacebookCaptureRedirectPath(reviewId, { rejectError: "Không thể từ chối capture này." });
+
+  try {
+    const statusResult = await markFacebookCaptureReviewStatus(getDb(), { reviewId, status: "rejected", actor, rejectionReason });
+
+    if (statusResult.status === "updated") {
+      redirectPath = getFacebookCaptureRedirectPath(statusResult.review.id, { rejected: "1" });
+    } else {
+      redirectPath = getFacebookCaptureRedirectPath(reviewId, { rejectStatus: statusResult.status });
+    }
+  } catch (error) {
+    if (error instanceof AdminAuthorizationError || (error instanceof Error && error.name === "AdminAuthorizationError")) {
+      throw error;
+    }
+
+    redirectPath = getFacebookCaptureRedirectPath(reviewId, { rejectError: "Lý do từ chối không an toàn hoặc capture này không thể từ chối." });
+  }
+
+  redirect(redirectPath);
+}
+
+export async function reopenFacebookCaptureForRecaptureForm(formData: FormData) {
+  const session = await requireAdminSession();
+  const actor: FacebookCaptureReviewActor = { userId: session.userId, email: session.email };
+  const reviewId = getOptionalFormString(formData, "reviewId") ?? "";
+  const reason = getOptionalFormString(formData, "reopenReason") ?? undefined;
+  let redirectPath = getFacebookCaptureRedirectPath(reviewId, { reopenError: "Không thể mở lại capture này." });
+
+  try {
+    const statusResult = await reopenFacebookCaptureForRecapture(getDb(), { reviewId, actor, reason });
+
+    if (statusResult.status === "updated") {
+      redirectPath = getFacebookCaptureRedirectPath(statusResult.review.id, { reopened: "1" });
+    } else {
+      redirectPath = getFacebookCaptureRedirectPath(reviewId, { reopenStatus: statusResult.status });
+    }
+  } catch (error) {
+    if (error instanceof AdminAuthorizationError || (error instanceof Error && error.name === "AdminAuthorizationError")) {
+      throw error;
+    }
+
+    redirectPath = getFacebookCaptureRedirectPath(reviewId, { reopenError: "Lý do mở lại không an toàn hoặc capture này không thể mở lại." });
   }
 
   redirect(redirectPath);
