@@ -17,6 +17,29 @@ const statusLabels: Record<FacebookCaptureReviewStatus, string> = {
   extraction_failed: "Trích xuất lỗi",
 };
 
+const emptyStateCopy: Record<FacebookCaptureReviewStatus, { title: string; body: string }> = {
+  needs_review: {
+    title: "Chưa có capture cần duyệt",
+    body: "Nếu vừa lưu link Facebook, hãy chạy công cụ capture trước; nếu đã xử lý xong, kiểm tra các filter Đã trích xuất, Đã trích xuất và duyệt, hoặc Đã từ chối.",
+  },
+  rejected: {
+    title: "Chưa có capture đã từ chối",
+    body: "Capture đã từ chối không còn nằm trong hàng đợi cần xử lý và chưa tạo thẻ tri thức cho traveler.",
+  },
+  extracted: {
+    title: "Chưa có capture đã trích xuất",
+    body: "Capture đã trích xuất sẽ liên kết tới bản nháp để vận hành duyệt tiếp. Nguồn Facebook/cộng đồng vẫn chưa xác minh cho tới khi thẻ được phê duyệt.",
+  },
+  extracted_approved: {
+    title: "Chưa có capture đã trích xuất và duyệt",
+    body: "Capture ở trạng thái này đã tạo thẻ approved nhưng vẫn giữ guardrail confidence cho nguồn Facebook/cộng đồng.",
+  },
+  extraction_failed: {
+    title: "Chưa có capture trích xuất lỗi",
+    body: "Nếu AI trích xuất lỗi, capture sẽ xuất hiện tại đây để vận hành kiểm tra an toàn trước khi thử lại hoặc từ chối.",
+  },
+};
+
 function formatDate(value: Date | string | null) {
   if (!value) {
     return "Chưa có";
@@ -29,6 +52,7 @@ export default async function FacebookCaptureReviewQueuePage({ searchParams }: F
   const params = await searchParams;
   const status = parseFacebookCaptureReviewStatus(params.status);
   const reviews = await listAdminFacebookCaptureReviews({ status });
+  const emptyState = emptyStateCopy[status];
 
   return (
     <div>
@@ -55,8 +79,8 @@ export default async function FacebookCaptureReviewQueuePage({ searchParams }: F
       <section className="mt-8 grid gap-4">
         {reviews.length === 0 ? (
           <div className="rounded-[1.5rem] border border-[#d8c9ad] bg-white/70 p-5">
-            <h2 className="text-2xl font-semibold tracking-[-0.03em] text-[#17342c]">Chưa có capture trong trạng thái này</h2>
-            <p className="mt-3 leading-7 text-[#4f625a]">Capture mới sẽ xuất hiện tại đây sau khi script vận hành lưu văn bản Facebook thành công.</p>
+            <h2 className="text-2xl font-semibold tracking-[-0.03em] text-[#17342c]">{emptyState.title}</h2>
+            <p className="mt-3 leading-7 text-[#4f625a]">{emptyState.body}</p>
           </div>
         ) : (
           reviews.map((review) => (
@@ -101,6 +125,7 @@ export default async function FacebookCaptureReviewQueuePage({ searchParams }: F
                   <div className="rounded-2xl bg-[#fbf7ed] p-3 sm:col-span-2">
                     <dt className="font-semibold text-[#17342c]">Lý do từ chối</dt>
                     <dd className="mt-1 text-[#4f625a]">{review.rejectionReason ?? "Chưa có"}</dd>
+                    <dd className="mt-2 text-[#4f625a]">Capture đã từ chối không còn nằm trong hàng đợi cần xử lý và chưa tạo thẻ tri thức cho traveler.</dd>
                   </div>
                 ) : null}
               </dl>

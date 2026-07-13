@@ -46,9 +46,17 @@ export default async function KnowledgeIntakePage({ searchParams }: KnowledgeInt
       {params.success ? (
         <div className="mt-6 rounded-2xl border border-[#8fb59f] bg-[#edf7ef] px-4 py-3 font-semibold text-[#1f5f46]" role="status">
           <p>Đã lưu nguồn an toàn để AI đọc ở bước sau{params.sourceId ? `: ${params.sourceId}` : ""}.</p>
-          <Link className="mt-3 inline-flex rounded-xl border border-[#8fb59f] bg-white/70 px-3 py-2 text-sm text-[#17342c] transition hover:bg-white" href="/admin/knowledge/drafts">
-            Mở hàng đợi duyệt bản nháp
-          </Link>
+          <p className="mt-2 text-sm leading-6 text-[#17342c]">
+            Nếu chỉ lưu link Facebook chưa có raw text, hãy chạy công cụ Playwright operator trước. Sau khi capture thành công, nguồn sẽ xuất hiện trong hàng đợi duyệt Facebook.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Link className="inline-flex rounded-xl border border-[#8fb59f] bg-white/70 px-3 py-2 text-sm text-[#17342c] transition hover:bg-white" href="/admin/knowledge/drafts">
+              Mở hàng đợi duyệt bản nháp
+            </Link>
+            <Link className="inline-flex rounded-xl border border-[#8fb59f] bg-white/70 px-3 py-2 text-sm text-[#17342c] transition hover:bg-white" href="/admin/knowledge/facebook-captures">
+              Mở hàng đợi duyệt capture Facebook
+            </Link>
+          </div>
         </div>
       ) : null}
       {params.extractError ? (
@@ -160,6 +168,12 @@ export default async function KnowledgeIntakePage({ searchParams }: KnowledgeInt
             name="rawText"
             placeholder="Dán nội dung bài viết, ghi chú cộng đồng hoặc đoạn văn bản thô..."
           />
+          <p className="text-sm leading-6 text-[#4f625a]">
+            Nếu chỉ lưu link Facebook chưa có raw text, hãy chạy công cụ Playwright operator trước. Sau khi capture thành công, nguồn sẽ xuất hiện trong hàng đợi duyệt Facebook.
+          </p>
+          <Link className="w-fit text-sm font-semibold text-[#1f5f46] underline underline-offset-4" href="/admin/knowledge/facebook-captures">
+            Mở hàng đợi duyệt capture Facebook
+          </Link>
           <label className="flex items-start gap-3 text-sm font-semibold text-[#4f625a]">
             <input className="mt-1 size-4 accent-[#1f5f46]" name="copiedCommunityContent" type="checkbox" />
             Đánh dấu là nội dung cộng đồng đã sao chép. Nguồn sẽ mặc định community/unverified và không official/partner.

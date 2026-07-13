@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import { validateAdminActionAccess } from "@/features/admin/actions";
 
 const operations = [
@@ -68,12 +70,25 @@ export default function AdminPage() {
           </ul>
         </div>
 
-        <div className="rounded-[1.75rem] border border-[#1f5f46]/20 bg-[#17342c] p-5 text-white sm:p-6">
-          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#e5bd82]">Nguyên tắc an toàn</p>
-          <h2 className="mt-3 text-3xl font-semibold tracking-[-0.04em]">Không có shortcut client-side.</h2>
-          <p className="mt-4 leading-7 text-[#c9d7d1]">
-            Admin UI chỉ là bề mặt thao tác. Dữ liệu nhạy cảm, quyền vai trò, raw source material và provenance vẫn được bảo vệ ở server boundary.
-          </p>
+        <div className="grid gap-6">
+          <article className="rounded-[1.75rem] border border-[#1f5f46]/20 bg-[#17342c] p-5 text-white sm:p-6">
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#e5bd82]">Capture Facebook</p>
+            <h2 className="mt-3 text-3xl font-semibold tracking-[-0.04em]">Duyệt capture Facebook.</h2>
+            <p className="mt-4 leading-7 text-[#c9d7d1]">
+              Link Facebook đã capture text sẽ vào hàng đợi duyệt. Nguồn Facebook/cộng đồng vẫn chưa xác minh cho tới khi vận hành review và phê duyệt thẻ.
+            </p>
+            <Link className="mt-5 inline-flex min-h-12 rounded-2xl bg-white px-5 py-3 font-semibold text-[#17342c] transition hover:bg-[#fbf7ed] focus:outline-none focus:ring-4 focus:ring-[#e5bd82]/40" href="/admin/knowledge/facebook-captures">
+              Mở hàng đợi duyệt capture Facebook
+            </Link>
+          </article>
+
+          <article className="rounded-[1.75rem] border border-[#1f5f46]/20 bg-[#17342c] p-5 text-white sm:p-6">
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#e5bd82]">Nguyên tắc an toàn</p>
+            <h2 className="mt-3 text-3xl font-semibold tracking-[-0.04em]">Không có shortcut client-side.</h2>
+            <p className="mt-4 leading-7 text-[#c9d7d1]">
+              Admin UI chỉ là bề mặt thao tác. Dữ liệu nhạy cảm, quyền vai trò, raw source material và provenance vẫn được bảo vệ ở server boundary.
+            </p>
+          </article>
         </div>
       </section>
     </div>

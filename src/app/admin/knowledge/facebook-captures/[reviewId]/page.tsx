@@ -44,6 +44,8 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
   const hasRawText = Boolean(review.rawText?.trim());
   const canReject = (review.status === "needs_review" || review.status === "extraction_failed") && hasRawText;
   const canReopenForRecapture = review.status === "rejected";
+  const draftCards = review.existingCards.filter((card) => card.status !== "approved");
+  const approvedCards = review.existingCards.filter((card) => card.status === "approved");
   const extractedCount = getSearchParam(query.extracted);
   const approvedAllCount = getSearchParam(query.approvedAll);
   const rejected = getSearchParam(query.rejected) === "1";
@@ -74,7 +76,26 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
 
       {(extractedCount || approvedAllCount || rejected || rejectError || rejectStatus || reopened || reopenError || reopenStatus || extractError || approveAllError || approveAllStatus || approveAllRecoveryStatus || approvalFailed || recoveryStatus || alreadyExtracted) && (
         <section className="mt-6 rounded-2xl border border-[#d8c9ad] bg-white/80 p-4 text-sm leading-6 text-[#17342c]">
-          {extractedCount ? <p>Đã tạo {extractedCount} bản nháp. Mở hàng đợi duyệt để kiểm tra trước khi phê duyệt.</p> : null}
+          {extractedCount ? (
+            <div>
+              <p>
+                Đã tạo {extractedCount} bản nháp. Mở{" "}
+                <Link className="font-semibold text-[#1f5f46] underline underline-offset-4" href="/admin/knowledge/drafts">
+                  hàng đợi bản nháp
+                </Link>{" "}
+                để kiểm tra trước khi phê duyệt.
+              </p>
+              {draftCards.length > 0 ? (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {draftCards.map((card) => (
+                    <Link className="rounded-xl border border-[#8fb59f] bg-[#edf7ef] px-3 py-2 font-semibold text-[#1f5f46]" href={`/admin/knowledge/drafts/${encodeURIComponent(card.id)}`} key={card.id}>
+                      Mở draft: {card.title}
+                    </Link>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           {rejected ? <p>Đã từ chối capture. Nội dung này không còn nằm trong hàng đợi cần xử lý và chưa tạo thẻ tri thức.</p> : null}
           {rejectError ? <p>Lý do từ chối không an toàn hoặc capture này không thể từ chối.</p> : null}
           {rejectStatus ? <p>Capture này không chuyển sang trạng thái từ chối ({rejectStatus}). Kiểm tra trạng thái hiện tại trước khi thử lại.</p> : null}
@@ -82,13 +103,24 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
           {reopenError ? <p>Lý do mở lại không an toàn hoặc capture này không thể mở lại.</p> : null}
           {reopenStatus ? <p>Capture này không thể mở lại để capture lại ({reopenStatus}). Kiểm tra trạng thái hiện tại trước khi thử lại.</p> : null}
           {approvedAllCount ? (
-            <p>
-              Đã trích xuất và phê duyệt {approvedAllCount} thẻ. Confidence nguồn Facebook/cộng đồng vẫn được giữ theo guardrail. Mở{" "}
-              <Link className="font-semibold text-[#1f5f46] underline underline-offset-4" href="/admin/knowledge/approved">
-                danh sách thẻ đã duyệt
-              </Link>
-              .
-            </p>
+            <div>
+              <p>
+                Đã trích xuất và phê duyệt {approvedAllCount} thẻ. Confidence nguồn Facebook/cộng đồng vẫn được giữ theo guardrail. Mở{" "}
+                <Link className="font-semibold text-[#1f5f46] underline underline-offset-4" href="/admin/knowledge/approved">
+                  danh sách thẻ đã duyệt
+                </Link>
+                .
+              </p>
+              {approvedCards.length > 0 ? (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {approvedCards.map((card) => (
+                    <Link className="rounded-xl border border-[#8fb59f] bg-[#edf7ef] px-3 py-2 font-semibold text-[#1f5f46]" href={`/admin/knowledge/approved/${encodeURIComponent(card.id)}`} key={card.id}>
+                      Mở thẻ approved: {card.title}
+                    </Link>
+                  ))}
+                </div>
+              ) : null}
+            </div>
           ) : null}
           {extractError ? (
             <p>
@@ -196,7 +228,7 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
           </div>
         ) : (
           <p className="mt-4 rounded-2xl border border-[#d8c9ad] bg-white/75 p-4 text-sm leading-6 text-[#4f625a]">
-            Capture này không còn ở trạng thái có thể trích xuất mới. Kiểm tra trạng thái review và thẻ liên kết hiện có.
+            Capture này đã có thẻ liên kết hoặc không còn ở trạng thái có thể trích xuất mới. Kiểm tra bản nháp hoặc thẻ đã duyệt thay vì trích xuất lại.
           </p>
         )}
         <div className="mt-4 grid gap-3 lg:grid-cols-2">

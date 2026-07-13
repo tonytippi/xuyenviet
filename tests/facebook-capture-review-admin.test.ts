@@ -232,6 +232,43 @@ describe("admin Facebook capture review helpers", () => {
     expect(html).not.toContain("Queue page must not render");
   });
 
+  test("admin overview and intake page expose Facebook capture workflow routing", async () => {
+    authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
+
+    const { default: AdminPage } = await import("@/app/admin/page");
+    const adminHtml = renderToStaticMarkup(AdminPage());
+
+    expect(adminHtml).toContain("Duyệt capture Facebook");
+    expect(adminHtml).toContain("/admin/knowledge/facebook-captures");
+    expect(adminHtml).toContain("Nguồn Facebook/cộng đồng vẫn chưa xác minh");
+
+    const { default: KnowledgeIntakePage } = await import("@/app/admin/knowledge/intake/page");
+    const intakeElement = await KnowledgeIntakePage({ searchParams: Promise.resolve({ success: "1", sourceId: "facebook-source" }) });
+    const intakeHtml = renderToStaticMarkup(intakeElement);
+
+    expect(intakeHtml).toContain("Nếu chỉ lưu link Facebook chưa có raw text, hãy chạy công cụ Playwright operator trước");
+    expect(intakeHtml).toContain("Mở hàng đợi duyệt capture Facebook");
+    expect(intakeHtml).toContain("/admin/knowledge/facebook-captures");
+  });
+
+  test("default and rejected queue empty states explain actionable workflow outcomes", async () => {
+    authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
+
+    const { default: FacebookCaptureReviewQueuePage } = await import("@/app/admin/knowledge/facebook-captures/page");
+    const defaultElement = await FacebookCaptureReviewQueuePage({ searchParams: Promise.resolve({}) });
+    const defaultHtml = renderToStaticMarkup(defaultElement);
+
+    expect(defaultHtml).toContain("Chưa có capture cần duyệt");
+    expect(defaultHtml).toContain("hãy chạy công cụ capture trước");
+    expect(defaultHtml).toContain("kiểm tra các filter Đã trích xuất, Đã trích xuất và duyệt, hoặc Đã từ chối");
+
+    const rejectedElement = await FacebookCaptureReviewQueuePage({ searchParams: Promise.resolve({ status: "rejected" }) });
+    const rejectedHtml = renderToStaticMarkup(rejectedElement);
+
+    expect(rejectedHtml).toContain("Capture đã từ chối không còn nằm trong hàng đợi cần xử lý");
+    expect(rejectedHtml).toContain("chưa tạo thẻ tri thức cho traveler");
+  });
+
   test("rejected queue page renders safe rejection reason without raw captured text", async () => {
     authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
     const review = await createCapturedFacebookSource({ id: "rejected-queue-page", rawText: "Rejected queue raw Facebook paragraph." });
@@ -292,6 +329,63 @@ describe("admin Facebook capture review helpers", () => {
     expect(html).toContain("Từ chối capture");
     expect(html).toContain("Lý do từ chối an toàn");
     expect(html).not.toContain("Reject / reopen capture (4.1F)");
+  });
+
+  test("detail page routes extracted and approved captures to next workflow steps without duplicate extraction", async () => {
+    authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
+    const extractedReview = await createCapturedFacebookSource({ id: "detail-extracted", rawText: "Extracted detail raw text." });
+    await testDb.insert(knowledgeCards).values({
+      id: "draft-detail-card",
+      status: "draft",
+      type: "route_note",
+      title: "Draft detail card",
+      routeSegment: "Huế - Đà Nẵng",
+      summary: "Draft from capture detail",
+      confidence: "community",
+      aiPromptVersion: "knowledge_source_extraction_v1",
+      createdByUserId: "operator-user",
+    });
+    await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: "draft-detail-card", sourceId: "detail-extracted" });
+    await testDb
+      .update(facebookCaptureReviews)
+      .set({ status: "extracted", reviewerUserId: "operator-user", reviewedAt: new Date("2026-07-13T02:00:00.000Z"), updatedAt: new Date("2026-07-13T02:00:00.000Z") })
+      .where(eq(facebookCaptureReviews.id, extractedReview.id));
+
+    const approvedReview = await createCapturedFacebookSource({ id: "detail-approved", rawText: "Approved detail raw text." });
+    await testDb.insert(knowledgeCards).values({
+      id: "approved-detail-card",
+      status: "approved",
+      type: "route_note",
+      title: "Approved detail card",
+      routeSegment: "Đà Nẵng - Hội An",
+      summary: "Approved from capture detail",
+      confidence: "community",
+      aiPromptVersion: "knowledge_source_extraction_v1",
+      createdByUserId: "operator-user",
+    });
+    await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: "approved-detail-card", sourceId: "detail-approved" });
+    await testDb
+      .update(facebookCaptureReviews)
+      .set({ status: "extracted_approved", reviewerUserId: "operator-user", reviewedAt: new Date("2026-07-13T03:00:00.000Z"), updatedAt: new Date("2026-07-13T03:00:00.000Z") })
+      .where(eq(facebookCaptureReviews.id, approvedReview.id));
+
+    const { default: FacebookCaptureReviewDetailPage } = await import("@/app/admin/knowledge/facebook-captures/[reviewId]/page");
+    const extractedElement = await FacebookCaptureReviewDetailPage({ params: Promise.resolve({ reviewId: extractedReview.id }), searchParams: Promise.resolve({ extracted: "1" }) });
+    const extractedHtml = renderToStaticMarkup(extractedElement);
+
+    expect(extractedHtml).toContain("hàng đợi bản nháp");
+    expect(extractedHtml).toContain("/admin/knowledge/drafts/draft-detail-card");
+    expect(extractedHtml).toContain("Capture này đã có thẻ liên kết");
+    expect(extractedHtml).not.toContain("Trích xuất bản nháp</button>");
+    expect(extractedHtml).not.toContain("approveAllConfirmed");
+
+    const approvedElement = await FacebookCaptureReviewDetailPage({ params: Promise.resolve({ reviewId: approvedReview.id }), searchParams: Promise.resolve({ approvedAll: "1" }) });
+    const approvedHtml = renderToStaticMarkup(approvedElement);
+
+    expect(approvedHtml).toContain("/admin/knowledge/approved/approved-detail-card");
+    expect(approvedHtml).toContain("Confidence nguồn Facebook/cộng đồng vẫn được giữ theo guardrail");
+    expect(approvedHtml).not.toContain("Trích xuất bản nháp</button>");
+    expect(approvedHtml).not.toContain("approveAllConfirmed");
   });
 
   test("detail page renders reopen form for rejected captures and no extract actions", async () => {

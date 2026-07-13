@@ -247,7 +247,7 @@ describe("Facebook capture review state", () => {
       status: "rejected",
       actor: { userId: "operator-user", email: "operator-user@example.com" },
       rejectionReason: "Wrong visible post content",
-      now: new Date("2026-07-13T14:00:00.000Z"),
+      now: new Date("2026-07-14T14:00:00.000Z"),
     });
 
     await expect(
