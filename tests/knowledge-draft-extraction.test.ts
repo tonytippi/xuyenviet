@@ -364,7 +364,7 @@ describe("knowledge draft extraction", () => {
     await expect(testDb.select().from(knowledgeCards)).resolves.toHaveLength(0);
   });
 
-  test("non-review linked cards do not block a new extraction", async () => {
+  test("previous extraction cards block re-extraction even after review is closed", async () => {
     await createUser("reextract-operator", ["operator"]);
     authMock.mockResolvedValue({ user: { id: "reextract-operator", email: "reextract-operator@example.com" } });
     await createExtractionModel();
@@ -374,27 +374,11 @@ describe("knowledge draft extraction", () => {
       .values({ status: "rejected", needsReview: false, type: "food", title: "Rejected", locationName: "Huế", summary: "Rejected summary", aiPromptVersion: "source_knowledge_draft_extraction_v1", createdByUserId: "reextract-operator" })
       .returning();
     await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: rejectedCard.id, sourceId: source.id });
-    mockGatewayJson(
-      JSON.stringify({
-        drafts: [
-          {
-            type: "food",
-            title: "Quán ăn mới để duyệt",
-            location_name: "Huế",
-            summary: "Bản nháp mới cần được duyệt lại từ nguồn đã từng bị từ chối.",
-            practical_details: { tips: ["Duyệt lại trước khi dùng"] },
-            tags: ["an-uong"],
-            confidence: "community",
-            freshness_sensitive: false,
-          },
-        ],
-      }),
-    );
     const { extractKnowledgeDraftsFromSource } = await import("@/features/knowledge/actions");
 
-    await expect(extractKnowledgeDraftsFromSource(source.id)).resolves.toMatchObject({ sourceId: source.id, draftCount: 1 });
-    expect(fetch).toHaveBeenCalledTimes(1);
-    await expect(testDb.select().from(knowledgeCards)).resolves.toHaveLength(2);
+    await expect(extractKnowledgeDraftsFromSource(source.id)).rejects.toMatchObject({ code: "already_extracted" });
+    expect(fetch).not.toHaveBeenCalled();
+    await expect(testDb.select().from(knowledgeCards)).resolves.toHaveLength(1);
   });
 
   test("database rejects non-draft review and invalid knowledge linkage constraints", async () => {

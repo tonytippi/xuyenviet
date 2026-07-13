@@ -2,6 +2,15 @@
 
 The Facebook capture script is an operator-controlled operations tool. It reads queued Facebook source links from PostgreSQL, opens a Playwright Chromium browser, captures visible post text, and writes that text to `raw_source_material` for later extraction, review, and approval.
 
+## Install
+
+```
+pnpm exec playwright install-deps
+pnpm exec playwright install
+# Login Facebook
+pnpm exec tsx scripts/facebook-login.ts
+```
+
 ## Queue Contract
 
 A source is queued when all conditions are true:
@@ -77,9 +86,11 @@ Production scheduling should decide explicitly where this browser profile lives 
 1. Operator submits Facebook links through admin intake or batch intake.
 2. Scheduled capture runs `pnpm facebook:capture --limit 25 --yes` with the service audit actor.
 3. Captured text is stored in `raw_source_material` with safe capture metadata.
-4. Extraction creates draft knowledge cards from captured raw material.
+4. Operator opens `/admin/knowledge/intake`, pastes the captured source ID into step 4.2, and runs AI extraction.
 5. Operator reviews, edits, approves, or rejects drafts.
 6. Approved cards become eligible for traveler retrieval according to the knowledge workflow.
+
+Capture does not currently run extraction automatically. The Playwright script is an operations process with a service audit actor, while AI extraction runs through the authenticated admin workflow so the resulting drafts have an accountable admin/operator actor and remain human-reviewed before approval.
 
 ## Failure Modes
 

@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, eq, or, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
 import {
@@ -106,8 +106,8 @@ export async function extractKnowledgeDraftsFromSource(sourceId: string): Promis
     const extraction = await db.transaction(async (transaction) => {
       await lockSourceExtraction(transaction, sourceBundle.source.id);
 
-      if (await sourceAlreadyHasDrafts(transaction, sourceBundle.source.id)) {
-        throw new KnowledgeExtractionError("Nguồn này đã có bản nháp cần duyệt. Vui lòng duyệt hoặc xử lý bản nháp hiện có trước khi trích xuất lại.", "already_extracted");
+      if (await sourceAlreadyHasExtraction(transaction, sourceBundle.source.id)) {
+        throw new KnowledgeExtractionError("Nguồn này đã được AI trích xuất trước đó. Vui lòng duyệt, sửa hoặc xử lý các thẻ đã tạo thay vì trích xuất lại.", "already_extracted");
       }
 
       const gatewayResult = await completeExtraction({
@@ -203,12 +203,12 @@ async function loadSourceBundle(db: ExtractionDb, sourceId: string) {
   return raw ? { source, raw } : null;
 }
 
-async function sourceAlreadyHasDrafts(db: ExtractionQueryDb, sourceId: string) {
+async function sourceAlreadyHasExtraction(db: ExtractionQueryDb, sourceId: string) {
   const [existingLink] = await db
     .select({ sourceId: knowledgeCardSources.sourceId })
     .from(knowledgeCardSources)
     .innerJoin(knowledgeCards, eq(knowledgeCards.id, knowledgeCardSources.knowledgeCardId))
-    .where(and(eq(knowledgeCardSources.sourceId, sourceId), or(eq(knowledgeCards.status, "draft"), eq(knowledgeCards.needsReview, true))))
+    .where(and(eq(knowledgeCardSources.sourceId, sourceId), eq(knowledgeCards.aiPromptVersion, sourceKnowledgeDraftExtractionPromptVersion)))
     .limit(1);
   return Boolean(existingLink);
 }

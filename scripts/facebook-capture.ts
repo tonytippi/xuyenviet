@@ -154,24 +154,74 @@ async function confirmSave(sourceId: string, text: string) {
 }
 
 export async function extractVisibleFacebookText(page: Page): Promise<ExtractedFacebookText> {
-  const result = await page.evaluate(() => {
-    const article = document.querySelector('[role="article"]');
-    const text = (article as HTMLElement | null)?.innerText?.trim() ?? "";
-    const authorText = document.querySelector('[role="article"] strong')?.textContent?.trim() || undefined;
-    const timestampText = document.querySelector('[role="article"] a[href*="/posts/"], [role="article"] a[href*="story_fbid"]')?.textContent?.trim() || undefined;
+  const result = await page.evaluate(`(() => {
+    const normalizeText = (value) => value.replace(/\s+/g, " ").trim();
+    const messageSelectors = [
+      '[data-ad-preview="message"]',
+      '[data-ad-comet-preview="message"]',
+      '[data-testid="post_message"]',
+    ];
+
+    const messageCandidates = Array.from(document.querySelectorAll(messageSelectors.join(", ")))
+      .filter((element) => element instanceof HTMLElement)
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        const text = normalizeText(element.innerText ?? "");
+
+        return {
+          element,
+          text,
+          visible: rect.width > 0 && rect.height > 0,
+          rectArea: Math.round(rect.width * rect.height),
+          top: rect.top,
+        };
+      })
+      .filter((candidate) => candidate.visible && candidate.text.length > 0)
+      .sort((left, right) => left.top - right.top || right.text.length - left.text.length);
+
+    const articleCandidates = Array.from(document.querySelectorAll('[role="article"], [data-pagelet*="FeedUnit"], [data-pagelet*="Stories"]'))
+      .filter((element) => element instanceof HTMLElement)
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        const text = normalizeText(element.innerText ?? "");
+
+        return {
+          element,
+          text,
+          visible: rect.width > 0 && rect.height > 0,
+          rectArea: Math.round(rect.width * rect.height),
+          top: rect.top,
+        };
+      })
+      .filter((candidate) => candidate.visible && candidate.text.length > 0)
+      .sort((left, right) => left.top - right.top || right.text.length - left.text.length);
+
+    const candidates = messageCandidates.length > 0 ? messageCandidates : articleCandidates;
+    const best = candidates[0];
+    const article = best?.element;
+    const text = best?.text ?? "";
+    const authorText = article?.querySelector("strong")?.textContent?.trim() || undefined;
+    const timestampText = article?.querySelector('a[href*="/posts/"], a[href*="story_fbid"], a[href*="/permalink/"]')?.textContent?.trim() || undefined;
 
     return {
       text,
       authorText,
       timestampText,
       diagnostics: {
-        usedArticleRole: Boolean(document.querySelector('[role="article"]')),
+        usedArticleRole: Boolean(article?.matches('[role="article"]')),
+        usedPostMessageSelector: messageCandidates.length > 0,
+        messageCandidateCount: messageCandidates.length,
+        articleCandidateCount: articleCandidates.length,
+        candidateCount: candidates.length,
+        longestCandidateLength: candidates[0]?.text.length ?? 0,
+        secondCandidateLength: candidates[1]?.text.length ?? 0,
+        selectedRectArea: best?.rectArea ?? 0,
         textLength: text.length,
       },
     };
-  });
+  })()`);
 
-  return result;
+  return result as ExtractedFacebookText;
 }
 
 async function main() {

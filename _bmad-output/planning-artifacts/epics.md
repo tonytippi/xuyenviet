@@ -1130,8 +1130,8 @@ So that Facebook sources can enter the existing AI extraction workflow without m
 
 **Given** visible text is extracted
 **When** the tool prepares to write to PostgreSQL
-**Then** it shows an operator confirmation preview before updating `raw_source_material.rawText`
-**And** the operator can skip the source without changing the database.
+**Then** it can save the captured text without an interactive confirmation because Admin UI review is the required confirmation gate before extraction
+**And** it still supports an explicit preview/confirm or dry-run mode for debugging selector changes before writing.
 
 **Given** the operator confirms the captured text
 **When** the update is saved
@@ -1144,13 +1144,226 @@ So that Facebook sources can enter the existing AI extraction workflow without m
 **And** no raw text is fabricated or written.
 
 **Given** captured raw text exists for the source
-**When** the operator runs AI extraction
-**Then** the existing Story 4.2 extraction flow can create review-needed drafts from that source
-**And** no draft is approved or made retrievable without human review.
+**When** the operator returns to the admin knowledge workflow
+**Then** the captured source appears in a Facebook capture review queue before AI extraction
+**And** no draft is extracted, approved, or made retrievable without an authenticated admin/operator action.
 
 **Given** capture writes to source material
 **When** audit support is available from the operations context
 **Then** an audit event records source ID, operation identity or actor, capture method, timestamp, and before/after raw-text presence without storing captured post text in the audit summary.
+
+### Story 4.1B: Create Facebook Capture Review State
+
+As an operator,
+I want captured Facebook source material to have explicit review workflow state,
+So that admin review, extraction, approval, rejection, and retry behavior are consistent.
+
+**Acceptance Criteria:**
+
+**Given** a Facebook source has captured raw text
+**When** capture review state is created
+**Then** the system stores a `facebook_capture_reviews` row linked to the source and raw source material
+**And** the initial status is `needs_review`.
+
+**Given** Facebook capture review state exists
+**When** the system queries reviewable captures
+**Then** it can filter by status: `needs_review`, `rejected`, `extracted`, `extracted_approved`, or `extraction_failed`
+**And** review queue filtering does not depend on parsing `raw_source_material.rawMetadata` JSON.
+
+**Given** capture review state changes
+**When** an admin/operator extracts, approves all, rejects, or encounters extraction failure
+**Then** the review row records the current status, reviewer user ID when applicable, review timestamp when applicable, safe rejection reason or extraction error when applicable, and updated timestamp
+**And** raw captured text remains in `raw_source_material` as operator-only material.
+
+**Given** a Facebook source has already been extracted through the AI extraction workflow
+**When** review state is displayed or updated
+**Then** duplicate extraction is blocked
+**And** the UI can link to existing draft or approved cards instead of creating another extraction set.
+
+**Given** the review table is added
+**When** migrations run
+**Then** database constraints preserve one active review state per captured Facebook source
+**And** non-Facebook sources are not accidentally added to the Facebook capture review queue.
+
+### Story 4.1C: Review Captured Facebook Sources In Admin Queue
+
+As an operator,
+I want to see captured Facebook source material in an admin review queue,
+So that I can inspect captured content before using AI extraction.
+
+**Acceptance Criteria:**
+
+**Given** one or more Facebook captures have `needs_review` status
+**When** an admin opens the Facebook capture review queue
+**Then** they see captured sources with source label, source URL, final URL when available, captured timestamp, safe author/timestamp metadata when available, and review status
+**And** raw captured post text is visible only inside authenticated admin/operator routes.
+
+**Given** a captured source is already extracted, extracted-and-approved, rejected, or failed
+**When** the queue is displayed
+**Then** actionable review queues show only sources that still need operator action
+**And** non-actionable statuses remain accessible through filters or status links where useful.
+
+**Given** an admin opens a capture detail page
+**When** the page loads
+**Then** it shows the captured raw text, source metadata, capture metadata, trust defaults, existing extraction status, and available actions
+**And** it never displays cookies, local storage, full HTML dumps, hidden page data, provider payloads, or browser profile data.
+
+**Given** a normal traveler or unauthenticated user requests the Facebook capture review pages
+**When** authorization runs
+**Then** access is denied before raw source material is read
+**And** no raw captured Facebook text is exposed.
+
+**Given** a Facebook source remains community/unverified
+**When** the review UI displays it
+**Then** the UI clearly labels the content as Facebook/community-derived and not official by default
+**And** copy does not imply captured content is verified or traveler-ready.
+
+### Story 4.1D: Extract Draft Knowledge From Reviewed Facebook Capture
+
+As an operator,
+I want to click `Extract` from a reviewed Facebook capture,
+So that AI creates draft cards without me copying source IDs manually.
+
+**Acceptance Criteria:**
+
+**Given** an admin is viewing a captured Facebook source with readable raw text and `needs_review` status
+**When** they click `Extract`
+**Then** the existing AI extraction workflow creates one or more draft knowledge cards linked to that source
+**And** the generated cards remain `draft` and `needsReview=true`.
+
+**Given** extraction succeeds
+**When** the action completes
+**Then** the capture review status becomes `extracted`
+**And** the admin is shown links to the generated draft cards or the draft review queue.
+
+**Given** extraction fails because no capable model is active, provider output is invalid, or the provider call fails
+**When** the action completes
+**Then** the review status becomes `extraction_failed`
+**And** a safe, non-provider-payload error is shown to the admin.
+
+**Given** the source was already extracted
+**When** an admin attempts extraction again
+**Then** the action is blocked before any provider call
+**And** the admin sees links to existing linked cards where available.
+
+**Given** AI extraction creates cards from Facebook/community content
+**When** drafts are saved
+**Then** confidence and source trust defaults remain community or unverified unless separately changed under an approved operator workflow
+**And** no draft is approved or made retrievable by the `Extract` action.
+
+### Story 4.1E: Extract And Approve All Captured Facebook Drafts With Guardrails
+
+As an operator,
+I want an `Extract & Approve All` action for trusted reviewed captures,
+So that low-risk captured source material can move faster into approved knowledge while preserving safeguards.
+
+**Acceptance Criteria:**
+
+**Given** an admin is viewing a captured Facebook source with readable raw text and `needs_review` status
+**When** they select `Extract & Approve All`
+**Then** the UI requires explicit confirmation that they reviewed the captured text, source trust, confidence, and freshness before proceeding
+**And** the action is available to authenticated admin and operator roles, but cannot run without confirmation.
+
+**Given** confirmation is provided
+**When** extraction produces valid draft cards
+**Then** the system approves all generated cards in the same operator-initiated workflow
+**And** the capture review status becomes `extracted_approved`.
+
+**Given** extraction produces zero valid drafts or invalid output
+**When** `Extract & Approve All` runs
+**Then** no cards are approved
+**And** the review status becomes `extraction_failed` with a safe error.
+
+**Given** generated cards come from a Facebook/community source
+**When** they are approved through this action
+**Then** they remain community or unverified unless source metadata already identifies an official/provider-backed source
+**And** traveler answers cannot present them as guaranteed or official facts.
+
+**Given** an approved card includes freshness-sensitive facts such as price, schedule, availability, road condition, opening hours, weather, service status, or promotions
+**When** approve-all runs
+**Then** freshness-sensitive flags from extraction are preserved
+**And** cards remain eligible for later freshness warnings in retrieval/provenance flows.
+
+**Given** any card approval fails during the action
+**When** the workflow completes
+**Then** the system does not leave a partially approved set without a safe status and audit trail
+**And** the admin can see whether retry or manual review is required.
+
+### Story 4.1F: Reject Captured Facebook Source Material
+
+As an operator,
+I want to reject captured Facebook source material,
+So that unusable, private, irrelevant, or low-quality captures do not continue through extraction.
+
+**Acceptance Criteria:**
+
+**Given** an admin is viewing a captured Facebook source with `needs_review` or `extraction_failed` status
+**When** they click `Reject Capture`
+**Then** the system requires or accepts a safe rejection reason
+**And** the review status becomes `rejected`.
+
+**Given** a capture is rejected
+**When** the actionable review queue is displayed
+**Then** the rejected capture no longer appears as needing action
+**And** it remains available to admins through status filtering or audit trail where appropriate.
+
+**Given** a rejected capture has raw source material
+**When** rejection is saved
+**Then** raw captured text remains operator-only and is not exposed to travelers
+**And** no knowledge draft or approved card is created by the rejection action.
+
+**Given** a capture was rejected because the capture script selected wrong or incomplete text
+**When** the operator wants to update the script and rerun capture
+**Then** the UI provides an explicit audited reopen-for-recapture action
+**And** the source can return to a recapture-ready state without losing source provenance or prior audit history.
+
+**Given** a rejected capture is reopened for recapture
+**When** the capture tool is rerun successfully for the same source
+**Then** the new captured raw text replaces the prior rejected raw text only through the controlled capture workflow
+**And** the review status returns to `needs_review` for operator inspection before extraction.
+
+**Given** rejection is audited
+**When** the audit event is recorded
+**Then** it includes source ID, actor, operation, status transition, timestamp, and safe rejection reason
+**And** it does not include the full captured post text.
+
+### Story 4.1G: Integrate Facebook Capture Review Into Admin Knowledge Workflow
+
+As an operator,
+I want the admin knowledge area to route me from Facebook capture to review, extraction, drafts, and approved cards,
+So that I do not need to remember source IDs or CLI-only next steps.
+
+**Acceptance Criteria:**
+
+**Given** an admin opens the knowledge admin area
+**When** Facebook captures exist that need review
+**Then** navigation or dashboard copy exposes a clear entry point to the Facebook capture review queue
+**And** the operator can reach review without manually copying a source ID.
+
+**Given** an operator submits or queues a Facebook source in intake
+**When** the source is saved or shown in intake status
+**Then** the UI explains that Playwright capture must run before review if raw text is missing
+**And** it links to the review queue once captured text exists.
+
+**Given** `Extract` succeeds from a capture detail page
+**When** the result is shown
+**Then** the admin sees next-step links to generated draft cards or the draft queue
+**And** already-extracted captures show status and links instead of active duplicate extraction buttons.
+
+**Given** `Extract & Approve All` succeeds
+**When** the result is shown
+**Then** the admin sees links to approved cards or the approved knowledge list
+**And** the UI confirms that Facebook/community confidence guardrails were preserved.
+
+**Given** a capture is rejected
+**When** the admin returns to the workflow
+**Then** rejected captures are absent from the default actionable queue
+**And** status filters or safe messages make it clear why the item no longer appears.
+
+**Given** the admin UI displays Facebook capture workflow states
+**When** statuses, buttons, or empty states are shown
+**Then** copy uses Vietnamese-first operator-facing language consistent with existing admin knowledge pages
+**And** it does not imply Facebook content is official, verified, or traveler-visible before approval.
 
 ### Story 4.2: AI Extracts Knowledge Drafts From Source
 
