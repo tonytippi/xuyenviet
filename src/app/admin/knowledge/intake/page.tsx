@@ -1,8 +1,9 @@
 import Link from "next/link";
 
-import { submitKnowledgeSeedUrlBatchForm } from "@/features/knowledge/actions";
 import { listRecentKnowledgeSeedBatches } from "@/features/knowledge/batch-intake";
 import { listKnowledgeUrlSources } from "@/features/knowledge/sources";
+
+import { IntakeUrlModal } from "./intake-url-modal";
 
 type KnowledgeIntakePageProps = {
   searchParams: Promise<{
@@ -47,27 +48,7 @@ export default async function KnowledgeIntakePage({ searchParams }: KnowledgeInt
 
       <section className="mt-8 rounded-[1.5rem] border border-[#d8c9ad] bg-white/70 p-5 sm:p-6">
         <h2 className="text-2xl font-semibold tracking-[-0.03em] text-[#17342c]">Thêm URL nguồn</h2>
-        <p className="mt-3 max-w-2xl leading-7 text-[#4f625a]">Dán một hoặc nhiều URL, mỗi dòng một URL. Không cần nhập nhãn, publisher, ngày, nội dung thô hoặc metadata ảnh.</p>
-        <form action={submitKnowledgeSeedUrlBatchForm} className="mt-5 grid gap-4">
-          <div className="grid gap-2">
-            <label className="font-semibold text-[#17342c]" htmlFor="batchUrls">
-              URL nguồn
-            </label>
-            <textarea
-              className="min-h-44 rounded-2xl border border-[#d8c9ad] bg-white/80 px-4 py-3 text-base outline-none focus:ring-4 focus:ring-[#e5bd82]"
-              id="batchUrls"
-              name="batchUrls"
-              placeholder="https://example.com/dia-diem-1&#10;https://example.com/dia-diem-2"
-              required
-            />
-          </div>
-          <button
-            className="min-h-12 w-fit rounded-2xl bg-[#1f5f46] px-5 py-4 text-base font-semibold text-white shadow-[0_12px_30px_rgba(31,95,70,0.22)] transition hover:bg-[#194d39] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]"
-            type="submit"
-          >
-            Thêm URL
-          </button>
-        </form>
+        <IntakeUrlModal />
       </section>
 
       <section className="mt-8 rounded-[1.5rem] border border-[#d8c9ad] bg-[#fbf7ed] p-5 sm:p-6">
