@@ -74,6 +74,7 @@ export type ApprovedKnowledgeCard = Pick<
   | "locationName"
   | "routeSegment"
   | "summary"
+  | "practicalDetails"
   | "tags"
   | "confidence"
   | "freshnessSensitive"
@@ -207,6 +208,7 @@ export async function listApprovedKnowledgeCards(): Promise<ApprovedKnowledgeCar
         locationName: knowledgeCards.locationName,
         routeSegment: knowledgeCards.routeSegment,
         summary: knowledgeCards.summary,
+        practicalDetails: knowledgeCards.practicalDetails,
         tags: knowledgeCards.tags,
         confidence: knowledgeCards.confidence,
         freshnessSensitive: knowledgeCards.freshnessSensitive,
@@ -256,6 +258,7 @@ export async function getApprovedKnowledgeCard(cardId: string): Promise<Approved
         locationName: knowledgeCards.locationName,
         routeSegment: knowledgeCards.routeSegment,
         summary: knowledgeCards.summary,
+        practicalDetails: knowledgeCards.practicalDetails,
         tags: knowledgeCards.tags,
         confidence: knowledgeCards.confidence,
         freshnessSensitive: knowledgeCards.freshnessSensitive,
@@ -682,6 +685,7 @@ function toApprovedKnowledgeCard(card: Omit<ApprovedKnowledgeCard, "sources">): 
     locationName: card.locationName,
     routeSegment: card.routeSegment,
     summary: card.summary,
+    practicalDetails: card.practicalDetails,
     tags: card.tags,
     confidence: card.confidence,
     freshnessSensitive: card.freshnessSensitive,

@@ -9,6 +9,22 @@ type ApprovedKnowledgeDetailPageProps = {
   }>;
 };
 
+function formatDetailLabel(value: string) {
+  return value.replaceAll("_", " ");
+}
+
+function stringifyDetailValue(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+
+  return JSON.stringify(value, null, 2);
+}
+
 export default async function ApprovedKnowledgeDetailPage({ params }: ApprovedKnowledgeDetailPageProps) {
   const { cardId } = await params;
   const card = await getApprovedKnowledgeCard(cardId);
@@ -16,6 +32,8 @@ export default async function ApprovedKnowledgeDetailPage({ params }: ApprovedKn
   if (!card) {
     notFound();
   }
+
+  const practicalDetails = Object.entries(card.practicalDetails);
 
   return (
     <div>
@@ -30,7 +48,7 @@ export default async function ApprovedKnowledgeDetailPage({ params }: ApprovedKn
 
       <section className="mt-8 rounded-[1.5rem] border border-[#d8c9ad] bg-white/75 p-5 sm:p-6">
         <h2 className="text-2xl font-semibold tracking-[-0.03em] text-[#17342c]">Nội dung đã phê duyệt</h2>
-        <p className="mt-4 leading-7 text-[#4f625a]">{card.summary}</p>
+        <div className="mt-4 whitespace-pre-wrap break-words leading-7 text-[#4f625a]">{card.summary}</div>
         <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
           <div className="rounded-2xl bg-[#fbf7ed] p-3">
             <dt className="font-semibold text-[#17342c]">Trạng thái</dt>
@@ -57,6 +75,22 @@ export default async function ApprovedKnowledgeDetailPage({ params }: ApprovedKn
           ))}
         </div>
       </section>
+
+      {practicalDetails.length > 0 ? (
+        <section className="mt-8 rounded-[1.5rem] border border-[#d8c9ad] bg-white/75 p-5 sm:p-6">
+          <h2 className="text-2xl font-semibold tracking-[-0.03em] text-[#17342c]">Chi tiết thực tế</h2>
+          <dl className="mt-4 grid gap-3">
+            {practicalDetails.map(([key, value]) => (
+              <div key={key} className="rounded-2xl bg-[#fbf7ed] p-4">
+                <dt className="font-semibold text-[#17342c]">{formatDetailLabel(key)}</dt>
+                <dd className="mt-2 whitespace-pre-wrap break-words leading-7 text-[#4f625a]">
+                  {Array.isArray(value) ? value.map((item) => stringifyDetailValue(item)).join("\n") : stringifyDetailValue(value)}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+      ) : null}
 
       <section className="mt-8 rounded-[1.5rem] border border-[#d8c9ad] bg-[#f4ead7] p-5 sm:p-6">
         <h2 className="text-2xl font-semibold tracking-[-0.03em] text-[#17342c]">Nguồn an toàn liên kết</h2>

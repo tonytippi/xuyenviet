@@ -127,6 +127,7 @@ describe("approved knowledge cards", () => {
       "id",
       "locationName",
       "needsReview",
+      "practicalDetails",
       "routeSegment",
       "sources",
       "status",
@@ -172,7 +173,6 @@ describe("approved knowledge cards", () => {
     expect(serialized).not.toContain("rawText");
     expect(serialized).not.toContain("rawMetadata");
     expect(serialized).not.toContain("storageKey");
-    expect(serialized).not.toContain("practicalDetails");
     expect(serialized).not.toContain("createdByUserId");
     expect(serialized).not.toContain("aiPromptVersion");
     expect(serialized).not.toContain("aiGatewayModelId");

@@ -40,7 +40,7 @@ export default async function ApprovedKnowledgePage({ searchParams }: ApprovedKn
                   <h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-[#17342c]">{card.title}</h2>
                 </div>
                 <Link className="min-h-12 rounded-2xl bg-[#1f5f46] px-5 py-3 text-center font-semibold text-white transition hover:bg-[#194d39] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]" href={`/admin/knowledge/approved/${card.id}`}>
-                  Xem provenance
+                  Xem chi tiết
                 </Link>
               </div>
 
