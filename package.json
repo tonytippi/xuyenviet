@@ -16,7 +16,8 @@
     "db:reset": "tsx scripts/db-reset.ts",
     "db:promote-admin": "tsx scripts/db-promote-admin.ts",
     "facebook:capture": "tsx scripts/facebook-capture.ts",
-    "knowledge:extraction-worker": "node --conditions react-server --import tsx scripts/knowledge-extraction-worker.ts"
+    "knowledge:extraction-worker": "node --conditions react-server --import tsx scripts/knowledge-extraction-worker.ts",
+    "knowledge:indexing-worker": "node --conditions react-server --import tsx scripts/knowledge-indexing-worker.ts"
   },
   "dependencies": {
     "@auth/drizzle-adapter": "^1.11.2",

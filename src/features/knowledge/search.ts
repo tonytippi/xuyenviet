@@ -46,7 +46,7 @@ export async function indexApprovedKnowledgeCard(cardId: string) {
 
     const searchableText = buildSearchableText(eligibleCard);
     const textHash = hashSearchableText(searchableText);
-    const now = new Date();
+    const now = getSearchDocumentUpdatedAt(eligibleCard.updatedAt);
 
     const [document] = await transaction
       .insert(knowledgeCardSearchDocuments)
@@ -113,7 +113,7 @@ async function searchApprovedKnowledgeInternal(query: string | null | undefined,
   }
 
   const limit = normalizeSearchLimit(options.limit);
-  const terms = normalizedQuery.split(" ").slice(0, 6);
+  const terms = getSearchTerms(normalizedQuery);
   const batchSize = limit * 3;
   let offset = 0;
   const db = getDb();
@@ -299,6 +299,10 @@ function hashSearchableText(searchableText: string) {
   return createHash("sha256").update(searchableText).digest("hex");
 }
 
+function getSearchDocumentUpdatedAt(cardUpdatedAt: Date) {
+  return new Date(Math.max(Date.now(), cardUpdatedAt.getTime() + 1));
+}
+
 type JoinedKnowledgeSearchSource = {
   id: string | null;
   kind: KnowledgeSearchSource["kind"] | null;
@@ -355,9 +359,23 @@ function normalizeSearchLimit(limit: number | undefined) {
   return Math.min(Math.max(limit ?? defaultSearchLimit, 1), maxSearchLimit);
 }
 
+function getSearchTerms(normalizedQuery: string) {
+  const rawTerms = normalizedQuery.split(" ").filter(Boolean);
+  const significantTerms = rawTerms.filter((term) => term.length > 2);
+  const selectedTerms = Array.from(new Set([...significantTerms, ...rawTerms])).slice(0, 12);
+
+  return selectedTerms.length > 0 ? selectedTerms : rawTerms.slice(0, 12);
+}
+
 function scoreSearchDocument(searchableText: string, terms: string[]) {
   const normalizedText = searchableText.toLowerCase();
-  return terms.reduce((score, term) => score + (normalizedText.includes(term) ? 1 : 0), 0);
+  return terms.reduce((score, term) => {
+    if (!normalizedText.includes(term)) {
+      return score;
+    }
+
+    return score + (term.length > 2 ? 2 : 1);
+  }, 0);
 }
 
 function escapeLikePattern(value: string) {

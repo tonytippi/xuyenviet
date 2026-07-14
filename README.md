@@ -87,11 +87,15 @@ Operations scripts:
 pnpm facebook:capture --limit 5
 pnpm knowledge:extraction-worker
 pnpm knowledge:extraction-worker --once
+pnpm knowledge:indexing-worker
+pnpm knowledge:indexing-worker --once
 ```
 
 `facebook:capture` reads queued Facebook source links from PostgreSQL and saves visible captured text for later operator review. Scheduled runs use a configured service audit actor; see `docs/facebook-capture-operations.md`.
 
 `knowledge:extraction-worker` runs queued AI knowledge extraction jobs outside the admin request path. Use the default long-running mode for production worker processes, or `--once` for local/debug runs. The worker uses PostgreSQL job state, retries transient provider failures, and requeues stale `running` jobs after `KNOWLEDGE_EXTRACTION_WORKER_STALE_MS`.
+
+`knowledge:indexing-worker` continuously indexes approved, source-linked knowledge cards into active search documents for AI Ask retrieval. Use `--once` to backfill the next batch locally/debug. Tune polling with `KNOWLEDGE_INDEXING_WORKER_POLL_MS` and batch size with `KNOWLEDGE_INDEXING_WORKER_BATCH_SIZE`.
 
 ## Public launch safety
 

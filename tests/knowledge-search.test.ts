@@ -254,6 +254,37 @@ describe("approved knowledge search documents", () => {
     expect(results).toMatchObject([{ id: card.id }]);
   });
 
+  test("keeps location terms when ranking approved knowledge for longer Vietnamese questions", async () => {
+    await createUser("location-ranking-operator", ["operator"]);
+    const source = await createSource("location-ranking-operator", { id: "location-ranking-source" });
+    const phanThiet = await createCard("location-ranking-operator", {
+      id: "location-ranking-phan-thiet",
+      title: "Các điểm biển ở Phan Thiết",
+      locationName: "Phan Thiết",
+      routeSegment: "Mũi Né - Phan Thiết",
+      summary: "Có nhiều điểm chơi biển và hoạt động tham quan ven biển.",
+    });
+    const quyNhon = await createCard("location-ranking-operator", {
+      id: "location-ranking-quy-nhon",
+      title: "Chơi biển và lặn ngắm san hô ở Hòn Khô",
+      locationName: "Hòn Khô",
+      routeSegment: "Quy Nhơn",
+      summary: "Khu vực Hòn Khô gần Quy Nhơn phù hợp chơi biển và lặn ngắm san hô.",
+    });
+    await testDb.insert(knowledgeCardSources).values([
+      { knowledgeCardId: phanThiet.id, sourceId: source.id, supportLevel: "primary" },
+      { knowledgeCardId: quyNhon.id, sourceId: source.id, supportLevel: "primary" },
+    ]);
+    const { indexApprovedKnowledgeCard, searchApprovedKnowledge } = await import("@/features/knowledge/search");
+    await indexApprovedKnowledgeCard(phanThiet.id);
+    await indexApprovedKnowledgeCard(quyNhon.id);
+
+    const results = await searchApprovedKnowledge("Thông tin chơi biển và lặn ngắm san hô ở Quy Nhơn", { limit: 2 });
+
+    expect(results[0]).toMatchObject({ id: quyNhon.id });
+    expect(results.map((result) => result.id)).not.toEqual([phanThiet.id, quyNhon.id]);
+  });
+
   test("continues filling bounded results when active documents become ineligible between document and card loads", async () => {
     await createUser("stale-fill-operator", ["operator"]);
     const source = await createSource("stale-fill-operator", { id: "stale-fill-source" });
@@ -279,5 +310,51 @@ describe("approved knowledge search documents", () => {
     expect(results.map((result) => result.id)).not.toContain(cards[0]!.id);
     const [disabledDocument] = await testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, cards[0]!.id));
     expect(disabledDocument).toMatchObject({ status: "disabled", disabledAt: expect.any(Date) });
+  });
+
+  test("approved knowledge indexing worker indexes missing active search documents in batches", async () => {
+    await createUser("indexing-worker-operator", ["operator"]);
+    const source = await createSource("indexing-worker-operator", { id: "indexing-worker-source" });
+    const cards = await Promise.all([
+      createCard("indexing-worker-operator", { id: "indexing-worker-card-a", title: "Điểm nghỉ worker A" }),
+      createCard("indexing-worker-operator", { id: "indexing-worker-card-b", title: "Điểm nghỉ worker B" }),
+    ]);
+    await testDb.insert(knowledgeCardSources).values(cards.map((card) => ({ knowledgeCardId: card.id, sourceId: source.id, supportLevel: "primary" as const })));
+    const { processNextApprovedKnowledgeIndexingBatch } = await import("@/features/knowledge/indexing-worker");
+
+    await expect(processNextApprovedKnowledgeIndexingBatch({ batchSize: 1 })).resolves.toMatchObject({ status: "indexed", indexedCount: 1, skippedCount: 0 });
+    await expect(testDb.select().from(knowledgeCardSearchDocuments)).resolves.toHaveLength(1);
+
+    await expect(processNextApprovedKnowledgeIndexingBatch({ batchSize: 10 })).resolves.toMatchObject({ status: "indexed", indexedCount: 1, skippedCount: 0 });
+    const documents = await testDb.select().from(knowledgeCardSearchDocuments);
+    expect(documents).toHaveLength(2);
+    expect(documents.map((document) => document.status)).toEqual(["active", "active"]);
+
+    await expect(processNextApprovedKnowledgeIndexingBatch({ batchSize: 10 })).resolves.toMatchObject({ status: "no_job" });
+  });
+
+  test("approved knowledge indexing worker refreshes stale active documents", async () => {
+    await createUser("indexing-worker-stale-operator", ["operator"]);
+    const source = await createSource("indexing-worker-stale-operator", { id: "indexing-worker-stale-source" });
+    const card = await createCard("indexing-worker-stale-operator", { id: "indexing-worker-stale-card", title: "Tên cũ cho worker" });
+    await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: card.id, sourceId: source.id, supportLevel: "primary" });
+    const { indexApprovedKnowledgeCard, searchApprovedKnowledge } = await import("@/features/knowledge/search");
+    const { processNextApprovedKnowledgeIndexingBatch } = await import("@/features/knowledge/indexing-worker");
+
+    await indexApprovedKnowledgeCard(card.id);
+    const [initial] = await testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, card.id));
+    await testDb.update(knowledgeCards).set({ title: "Tên mới cho worker", updatedAt: new Date((initial?.updatedAt.getTime() ?? Date.now()) + 10_000) }).where(eq(knowledgeCards.id, card.id));
+
+    await expect(processNextApprovedKnowledgeIndexingBatch({ batchSize: 10 })).resolves.toMatchObject({ status: "indexed", indexedCount: 1, cardIds: [card.id] });
+
+    const [updated] = await testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, card.id));
+    expect(updated?.id).toBe(initial?.id);
+    expect(updated?.textHash).not.toBe(initial?.textHash);
+    expect(updated?.searchableText).toContain("Tên mới cho worker");
+    await expect(searchApprovedKnowledge("Tên mới worker", { limit: 1 })).resolves.toMatchObject([{ id: card.id }]);
+  });
+
+  test("approved knowledge indexing worker script entrypoint can be imported by vitest", async () => {
+    await expect(import("../scripts/knowledge-indexing-worker")).resolves.toBeDefined();
   });
 });
