@@ -480,8 +480,8 @@ export function AnswerDetailPanel({ selectedEntity, panelId, panelRef, onClose }
       ) : null}
 
       {selectedEntity.provenanceIds && selectedEntity.provenanceIds.length > 0 ? (
-        <section className="rounded-2xl border border-[#eadfc8] bg-[#fff8ec] p-4 text-sm leading-6 text-[#6f3f12]" aria-label="Provenance liên quan">
-          <h4 className="text-sm font-bold uppercase tracking-[0.12em] text-[#8c4f13]">Provenance liên quan</h4>
+        <section className="rounded-2xl border border-[#eadfc8] bg-[#fff8ec] p-4 text-sm leading-6 text-[#6f3f12]" aria-label="Cơ sở gợi ý">
+          <h4 className="text-sm font-bold uppercase tracking-[0.12em] text-[#8c4f13]">Cơ sở gợi ý</h4>
           <div className="mt-3 flex flex-wrap gap-2">
             {selectedEntity.provenanceIds.map((id, index) => (
               <span className="rounded-full border border-[#d8c9ad] bg-white px-3 py-1 text-xs font-semibold text-[#4f625a]" key={id}>Nguồn {index + 1}</span>
@@ -1702,7 +1702,7 @@ function createProvenanceAnswerEntityDescriptor(item: AssistantMessageProvenance
   if (item.freshnessSensitive) {
     detail["Độ mới"] = "Thông tin có thể thay đổi, cần kiểm tra lại trước khi đi hoặc đặt dịch vụ.";
   } else {
-    detail["Độ mới"] = "Không có cảnh báo độ mới riêng trong provenance đã lưu.";
+    detail["Độ mới"] = "Chưa có cảnh báo riêng về độ mới của nguồn này.";
   }
 
   return {

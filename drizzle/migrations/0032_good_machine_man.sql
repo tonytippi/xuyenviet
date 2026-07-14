@@ -1,0 +1,2 @@
+ALTER TABLE "messages" ADD COLUMN "answer_annotations" jsonb DEFAULT '[]'::jsonb NOT NULL;--> statement-breakpoint
+ALTER TABLE "messages" ADD CONSTRAINT "messages_answer_annotations_array_check" CHECK (jsonb_typeof("messages"."answer_annotations") = 'array');

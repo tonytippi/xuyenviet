@@ -452,6 +452,26 @@ describe("AI Ask authenticated shell", () => {
     expect(html).not.toContain("providerScore");
   });
 
+  test("renders persisted answer annotations when reopening conversation history", async () => {
+    await createTestUser("user-1");
+    const content = "Kế hoạch gợi ý:\nBãi đỗ chính thức Huế phù hợp để kiểm tra trước khi vào trung tâm.";
+    const annotations = [makeAnnotation("ann-knowledge", content, "Bãi đỗ chính thức Huế", "source", "knowledge-1", "source")];
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
+    await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "user", content: "Bãi đỗ ở Huế?" });
+    await testDb.insert(messages).values({
+      conversationId: conversation.id,
+      userId: "user-1",
+      role: "assistant",
+      content,
+      answerAnnotations: annotations,
+    });
+
+    const html = await renderAuthenticatedAiAskShell({ conversationId: conversation.id });
+
+    expect(html).toContain("Mở chi tiết annotation: Bãi đỗ chính thức Huế");
+    expect(html).toContain("aria-controls=\"ai-ask-selected-answer-detail-mobile ai-ask-selected-answer-detail-desktop\"");
+  });
+
   test("renders annotation ranges in headings and does not mark provenance-less actions selected by default", async () => {
     const { AssistantMessageContent } = await import("@/features/ai/ai-ask-composer");
     const content = "Nguồn và độ tin cậy\nBước tiếp theo";
@@ -502,7 +522,7 @@ describe("AI Ask authenticated shell", () => {
     expect(html).toContain("https://hue.gov.vn/ticket");
     expect(html).toContain("9/7/2026");
     expect(html).toContain("Thông tin có thể thay đổi");
-    expect(html).toContain("Provenance liên quan");
+    expect(html).toContain("Cơ sở gợi ý");
     expect(html).toContain("Nguồn 1");
     expect(html).not.toContain("#provenance-1");
     expect(html).toContain("Đóng bảng chi tiết");

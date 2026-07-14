@@ -1,5 +1,6 @@
 import "server-only";
 
+import { completeInitialAiAskAnswer } from "@/features/ai/gateway";
 import type { AssistantMessageProvenanceItem } from "@/features/retrieval/provenance";
 
 export type AnswerAnnotationType = "source" | "warning" | "trip_fact" | "action";
@@ -86,6 +87,41 @@ export function validateAnswerAnnotations(input: {
   return accepted;
 }
 
+export async function buildValidatedAnswerAnnotations({
+  answerText,
+  provenance,
+  model,
+  abortSignal,
+}: {
+  answerText: string;
+  provenance: AssistantMessageProvenanceItem[];
+  model: string;
+  abortSignal?: AbortSignal;
+}): Promise<AnswerAnnotation[]> {
+  const annotationProvenance = getAnnotationProposalProvenance(provenance);
+
+  if (abortSignal?.aborted || annotationProvenance.length === 0) {
+    return [];
+  }
+
+  try {
+    const result = await completeInitialAiAskAnswer({
+      model,
+      abortSignal,
+      messages: buildAnnotationProposalMessages({ answerText, provenance: annotationProvenance }),
+    });
+
+    if (!result.ok) {
+      return [];
+    }
+
+    const proposals = parseAnswerAnnotationProposals(result.content);
+    return validateAnswerAnnotations({ answerText, proposals, provenance });
+  } catch {
+    return [];
+  }
+}
+
 export function buildAnswerAnnotationDetail(input: {
   type: AnswerAnnotationType;
   text: string;
@@ -161,6 +197,41 @@ export function parseAnswerAnnotationProposals(content: string): AnswerAnnotatio
   }
 
   return proposals;
+}
+
+function getAnnotationProposalProvenance(provenance: AssistantMessageProvenanceItem[]) {
+  return provenance.filter((item) => item.usedInPrompt && item.sourceCategory !== "general");
+}
+
+function buildAnnotationProposalMessages({ answerText, provenance }: { answerText: string; provenance: AssistantMessageProvenanceItem[] }) {
+  const handles = provenance
+    .map((item) => ({
+      id: item.id,
+      title: item.title,
+      sourceCategory: item.sourceCategory,
+      confidenceLabel: item.confidenceLabel,
+      verificationStatus: item.verificationStatus,
+      freshnessSensitive: item.freshnessSensitive,
+    }));
+
+  return [
+    {
+      role: "system" as const,
+      content: [
+        "Bạn tạo annotation nội bộ cho câu trả lời AI Ask.",
+        "Chỉ trả về JSON hợp lệ dạng {\"annotations\":[...]}. Không markdown, không giải thích.",
+        "Mỗi annotation gồm id, start, end, quote, type, provenanceIds.",
+        "start/end là offset UTF-16 trong answerText cuối cùng. quote phải khớp chính xác đoạn chữ đó.",
+        "type chỉ là source, warning, trip_fact, hoặc action.",
+        "Chỉ dùng provenanceIds có trong danh sách handles. Không tự tạo URL, nhãn nguồn, metadata, hoặc chi tiết hiển thị.",
+        "Nếu không có cụm đáng mở chi tiết hoặc không chắc offset, trả {\"annotations\":[]}.",
+      ].join("\n"),
+    },
+    {
+      role: "user" as const,
+      content: JSON.stringify({ answerText, handles }),
+    },
+  ];
 }
 
 function parseJson(content: string) {

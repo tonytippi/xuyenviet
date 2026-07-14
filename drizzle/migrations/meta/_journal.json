@@ -225,6 +225,13 @@
       "when": 1783998805135,
       "tag": "0031_broad_grandmaster",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1784035339445,
+      "tag": "0032_good_machine_man",
+      "breakpoints": true
     }
   ]
 }

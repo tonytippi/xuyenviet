@@ -487,6 +487,7 @@ export const messages = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     role: text("role").$type<MessageRole>().notNull(),
     content: text("content").notNull(),
+    answerAnnotations: jsonb("answer_annotations").$type<Array<Record<string, unknown>>>().default([]).notNull(),
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
   },
   (message) => [
@@ -503,6 +504,7 @@ export const messages = pgTable(
     check("messages_role_check", sql`${message.role} in ('user', 'assistant')`),
     check("messages_content_not_empty_check", sql`length(btrim(${message.content})) > 0`),
     check("messages_user_content_length_check", sql`${message.role} <> 'user' or char_length(${message.content}) <= 2000`),
+    check("messages_answer_annotations_array_check", sql`jsonb_typeof(${message.answerAnnotations}) = 'array'`),
   ],
 );
 
