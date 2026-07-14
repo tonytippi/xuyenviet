@@ -1,5 +1,3 @@
-import "server-only";
-
 import { getDb } from "@/db/client";
 import { auditEvents, type AuditOperation } from "@/db/schema";
 import type { AuthenticatedSession } from "@/server/auth";

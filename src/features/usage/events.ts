@@ -1,5 +1,3 @@
-import "server-only";
-
 import { aiUsageEvents, type AiUsageStatus } from "@/db/schema";
 
 import { estimateAiUsageCost, type AiGatewayPricingSnapshot } from "@/features/ai/models";

@@ -1,5 +1,3 @@
-import "server-only";
-
 export const appEnvironments = ["local", "staging", "production"] as const;
 
 export type AppEnvironment = (typeof appEnvironments)[number];

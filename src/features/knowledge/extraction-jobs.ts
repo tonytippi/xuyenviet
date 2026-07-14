@@ -1,10 +1,7 @@
-import "server-only";
-
 import { and, asc, eq, inArray, isNotNull, lte, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
 import {
-  auditEvents,
   knowledgeCards,
   knowledgeCardSources,
   knowledgeExtractionJobs,
@@ -16,6 +13,7 @@ import { sourceKnowledgeDraftExtractionPromptVersion } from "@/features/ai/promp
 import { extractKnowledgeDraftsFromSourceAsActor, isKnowledgeExtractionError, KnowledgeExtractionError } from "@/features/knowledge/extraction";
 import { assertFacebookCaptureStillNeedsReview } from "@/features/knowledge/extraction";
 import { markFacebookCaptureReviewStatus, markFacebookCaptureReviewStatusInTransaction, type FacebookCaptureReviewActor } from "@/features/knowledge/facebook-capture-review";
+import { approveKnowledgeDraftBatchForActorInTransaction } from "@/features/knowledge/review-approval-core";
 
 type ExtractionJobDb = ReturnType<typeof getDb>;
 
@@ -42,6 +40,8 @@ export async function enqueueKnowledgeExtractionJob(input: EnqueueKnowledgeExtra
   }
 
   return db.transaction(async (transaction) => {
+    await lockSourceJobEnqueue(transaction, sourceId);
+
     const [source] = await transaction.select({ id: sources.id }).from(sources).where(eq(sources.id, sourceId)).limit(1);
 
     if (!source) {
@@ -187,11 +187,12 @@ export async function processKnowledgeExtractionJob(jobId: string, db = getDb())
       await finalizeExistingDrafts(job, actor, db);
     } else {
       const result = await extractKnowledgeDraftsFromSourceAsActor(job.sourceId, actor, {
+        resultJobId: job.id,
         preProviderGuard: job.facebookCaptureReviewId ? ({ db: guardDb, sourceId }) => assertFacebookCaptureStillNeedsReview(guardDb, { reviewId: job.facebookCaptureReviewId as string, sourceId }) : undefined,
       });
 
       await db.update(knowledgeExtractionJobs).set({ resultDraftIds: result.draftIds, resultDraftCount: result.draftCount, updatedAt: new Date() }).where(eq(knowledgeExtractionJobs.id, job.id));
-      await finalizeJobSuccess(job.id, job.mode, result, actor, job.facebookCaptureReviewId, db);
+      await finalizeJobSuccess(job, result, actor, db);
     }
 
     return { status: "processed" as const, jobId: job.id };
@@ -202,32 +203,34 @@ export async function processKnowledgeExtractionJob(jobId: string, db = getDb())
 }
 
 async function finalizeExistingDrafts(job: typeof knowledgeExtractionJobs.$inferSelect, actor: KnowledgeExtractionJobActor, db: ExtractionJobDb) {
-  const result = { sourceId: job.sourceId, draftIds: job.resultDraftIds ?? [], draftCount: job.resultDraftIds?.length ?? 0 };
-  await finalizeJobSuccess(job.id, job.mode, result, actor, job.facebookCaptureReviewId, db);
+  const draftIds = job.resultDraftIds ?? [];
+  await assertJobDraftIdsBelongToSource(db, job.sourceId, draftIds, job.resultDraftCount);
+  const result = { sourceId: job.sourceId, draftIds, draftCount: draftIds.length };
+  await finalizeJobSuccess(job, result, actor, db);
 }
 
 async function finalizeJobSuccess(
-  jobId: string,
-  mode: KnowledgeExtractionJobMode,
+  job: typeof knowledgeExtractionJobs.$inferSelect,
   result: { sourceId: string; draftIds: string[]; draftCount: number },
   actor: KnowledgeExtractionJobActor,
-  reviewId: string | null,
   db: ExtractionJobDb,
 ) {
   await db.transaction(async (transaction) => {
-    if (mode === "extract_and_approve_all") {
-      await approveJobDraftsInTransaction(transaction, actor, result.draftIds);
+    await assertJobDraftIdsBelongToSource(transaction, job.sourceId, result.draftIds, result.draftCount);
+
+    if (job.mode === "extract_and_approve_all") {
+      await approveKnowledgeDraftBatchForActorInTransaction(transaction, actor, result.draftIds);
     }
 
-    if (reviewId) {
-      const extractedStatus = await markFacebookCaptureReviewStatusInTransaction(transaction, { reviewId, status: "extracted", actor });
+    if (job.facebookCaptureReviewId) {
+      const extractedStatus = await markFacebookCaptureReviewStatusInTransaction(transaction, { reviewId: job.facebookCaptureReviewId, status: "extracted", actor });
 
-      if (extractedStatus.status !== "updated" && extractedStatus.status !== "invalid_transition") {
+      if (extractedStatus.status !== "updated") {
         throw new Error(`extract_status_${extractedStatus.status}`);
       }
 
-      if (mode === "extract_and_approve_all") {
-        const approvedStatus = await markFacebookCaptureReviewStatusInTransaction(transaction, { reviewId, status: "extracted_approved", actor });
+      if (job.mode === "extract_and_approve_all") {
+        const approvedStatus = await markFacebookCaptureReviewStatusInTransaction(transaction, { reviewId: job.facebookCaptureReviewId, status: "extracted_approved", actor });
 
         if (approvedStatus.status !== "updated") {
           throw new Error(`approve_all_status_${approvedStatus.status}`);
@@ -238,50 +241,28 @@ async function finalizeJobSuccess(
     await transaction
       .update(knowledgeExtractionJobs)
       .set({ status: "succeeded", resultDraftIds: result.draftIds, resultDraftCount: result.draftCount, finishedAt: new Date(), lockedAt: null, lockedBy: null, updatedAt: new Date(), lastErrorCode: null, lastErrorMessage: null })
-      .where(eq(knowledgeExtractionJobs.id, jobId));
+      .where(and(eq(knowledgeExtractionJobs.id, job.id), eq(knowledgeExtractionJobs.status, "running"), eq(knowledgeExtractionJobs.lockedBy, job.lockedBy ?? "")));
   });
 }
 
-async function approveJobDraftsInTransaction(db: Pick<ExtractionJobDb, "select" | "update" | "insert">, actor: KnowledgeExtractionJobActor, draftIds: string[]) {
+async function assertJobDraftIdsBelongToSource(db: Pick<ExtractionJobDb, "select">, sourceId: string, draftIds: string[], expectedCount: number | null) {
   if (draftIds.length === 0) {
-    throw new Error("approval_failed_empty_drafts");
+    throw new Error("job_result_empty_drafts");
   }
 
-  for (const draftId of draftIds) {
-    const [draft] = await db
-      .select({ id: knowledgeCards.id, status: knowledgeCards.status, needsReview: knowledgeCards.needsReview, title: knowledgeCards.title, summary: knowledgeCards.summary, locationName: knowledgeCards.locationName, routeSegment: knowledgeCards.routeSegment, type: knowledgeCards.type, confidence: knowledgeCards.confidence, practicalDetails: knowledgeCards.practicalDetails })
-      .from(knowledgeCards)
-      .where(eq(knowledgeCards.id, draftId))
-      .limit(1);
-
-    if (!draft || draft.status !== "draft" || !draft.needsReview || !draft.title.trim() || !draft.summary.trim() || (!draft.locationName?.trim() && !draft.routeSegment?.trim()) || hasUnsafeApprovalDetails(draft.practicalDetails)) {
-      throw new Error("approval_failed_invalid_draft");
-    }
-
-    const [updated] = await db
-      .update(knowledgeCards)
-      .set({ status: "approved", needsReview: false, updatedAt: new Date() })
-      .where(and(eq(knowledgeCards.id, draftId), eq(knowledgeCards.status, "draft"), eq(knowledgeCards.needsReview, true)))
-      .returning({ id: knowledgeCards.id });
-
-    if (!updated) {
-      throw new Error("approval_failed_not_reviewable");
-    }
-
-    await db.insert(auditEvents).values({
-      actorUserId: actor.userId,
-      actorEmail: actor.email,
-      operation: "approve",
-      targetType: "knowledge_draft",
-      targetId: draftId,
-      beforeSummary: `Draft pending approval: type=${draft.type}; confidence=${draft.confidence}.`,
-      afterSummary: "Operator-approved async extraction draft for retrieval eligibility. Embeddings were not created.",
-    });
+  if (new Set(draftIds).size !== draftIds.length || (expectedCount !== null && expectedCount !== draftIds.length)) {
+    throw new Error("job_result_mismatch");
   }
-}
 
-function hasUnsafeApprovalDetails(value: Record<string, unknown>) {
-  return Object.keys(value).some((key) => /raw[_-]?source|raw[_-]?metadata|provider[_-]?payload|storage[_-]?key/i.test(key));
+  const rows = await db
+    .select({ id: knowledgeCards.id })
+    .from(knowledgeCards)
+    .innerJoin(knowledgeCardSources, eq(knowledgeCardSources.knowledgeCardId, knowledgeCards.id))
+    .where(and(inArray(knowledgeCards.id, draftIds), eq(knowledgeCardSources.sourceId, sourceId), eq(knowledgeCards.aiPromptVersion, sourceKnowledgeDraftExtractionPromptVersion)));
+
+  if (rows.length !== draftIds.length) {
+    throw new Error("job_result_source_mismatch");
+  }
 }
 
 async function handleJobFailure(job: typeof knowledgeExtractionJobs.$inferSelect, error: unknown, db: ExtractionJobDb) {
@@ -292,16 +273,16 @@ async function handleJobFailure(job: typeof knowledgeExtractionJobs.$inferSelect
 
   if (retryable && attemptsRemain) {
     await db
-      .update(knowledgeExtractionJobs)
-      .set({ status: "queued", nextRunAt: new Date(now.getTime() + getRetryDelayMs(job.attemptCount)), lockedAt: null, lockedBy: null, lastErrorCode: safe.code, lastErrorMessage: safe.message, updatedAt: now })
-      .where(eq(knowledgeExtractionJobs.id, job.id));
+        .update(knowledgeExtractionJobs)
+        .set({ status: "queued", nextRunAt: new Date(now.getTime() + getRetryDelayMs(job.attemptCount)), lockedAt: null, lockedBy: null, lastErrorCode: safe.code, lastErrorMessage: safe.message, updatedAt: now })
+      .where(and(eq(knowledgeExtractionJobs.id, job.id), eq(knowledgeExtractionJobs.status, "running"), eq(knowledgeExtractionJobs.lockedBy, job.lockedBy ?? "")));
     return;
   }
 
   await db
     .update(knowledgeExtractionJobs)
     .set({ status: "failed", finishedAt: now, lockedAt: null, lockedBy: null, lastErrorCode: safe.code, lastErrorMessage: safe.message, updatedAt: now })
-    .where(eq(knowledgeExtractionJobs.id, job.id));
+    .where(and(eq(knowledgeExtractionJobs.id, job.id), eq(knowledgeExtractionJobs.status, "running"), eq(knowledgeExtractionJobs.lockedBy, job.lockedBy ?? "")));
 
   if (job.facebookCaptureReviewId) {
     await markFacebookCaptureReviewStatus(db, { reviewId: job.facebookCaptureReviewId, status: "extraction_failed", actor: { userId: job.createdByUserId, email: job.createdByEmail }, extractionError: `Extraction failed: ${safe.code}` }).catch(() => undefined);
@@ -312,13 +293,29 @@ export async function recoverStaleKnowledgeExtractionJobs(options: { now?: Date;
   const now = options.now ?? new Date();
   const staleBefore = new Date(now.getTime() - (options.staleMs ?? getStaleRunningMs()));
 
+  const failedRows = await db
+    .update(knowledgeExtractionJobs)
+    .set({ status: "failed", finishedAt: now, lockedAt: null, lockedBy: null, lastErrorCode: "stale_max_attempts", lastErrorMessage: "Extraction failed: stale_max_attempts", updatedAt: now })
+    .where(and(eq(knowledgeExtractionJobs.status, "running"), isNotNull(knowledgeExtractionJobs.lockedAt), lte(knowledgeExtractionJobs.lockedAt, staleBefore), sql`${knowledgeExtractionJobs.attemptCount} >= ${knowledgeExtractionJobs.maxAttempts}`))
+    .returning({ id: knowledgeExtractionJobs.id, facebookCaptureReviewId: knowledgeExtractionJobs.facebookCaptureReviewId, createdByUserId: knowledgeExtractionJobs.createdByUserId, createdByEmail: knowledgeExtractionJobs.createdByEmail });
+
+  for (const row of failedRows) {
+    if (row.facebookCaptureReviewId) {
+      await markFacebookCaptureReviewStatus(db, { reviewId: row.facebookCaptureReviewId, status: "extraction_failed", actor: { userId: row.createdByUserId, email: row.createdByEmail }, extractionError: "Extraction failed: stale_max_attempts" }).catch(() => undefined);
+    }
+  }
+
   const rows = await db
     .update(knowledgeExtractionJobs)
     .set({ status: "queued", lockedAt: null, lockedBy: null, nextRunAt: now, updatedAt: now })
-    .where(and(eq(knowledgeExtractionJobs.status, "running"), isNotNull(knowledgeExtractionJobs.lockedAt), lte(knowledgeExtractionJobs.lockedAt, staleBefore)))
+    .where(and(eq(knowledgeExtractionJobs.status, "running"), isNotNull(knowledgeExtractionJobs.lockedAt), lte(knowledgeExtractionJobs.lockedAt, staleBefore), sql`${knowledgeExtractionJobs.attemptCount} < ${knowledgeExtractionJobs.maxAttempts}`))
     .returning({ id: knowledgeExtractionJobs.id });
 
-  return { recoveredCount: rows.length, jobIds: rows.map((row) => row.id) };
+  return { recoveredCount: rows.length, failedCount: failedRows.length, jobIds: rows.map((row) => row.id) };
+}
+
+async function lockSourceJobEnqueue(db: { execute: (query: ReturnType<typeof sql>) => Promise<unknown> }, sourceId: string) {
+  await db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${sourceId}, 43))`);
 }
 
 async function sourceAlreadyHasExtraction(db: Pick<ExtractionJobDb, "select">, sourceId: string) {

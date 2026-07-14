@@ -4,7 +4,7 @@ baseline_commit: d074c6bab12e8aac26804add1614ce4ce7e4cd8a
 
 # Story OPS.1: Async Knowledge Extraction Worker
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run bmad-create-story validate for quality check before bmad-dev-story. -->
 
@@ -114,6 +114,18 @@ so that long AI Gateway extraction calls can finish or retry without timing out 
   - [x] Update `.env.example` if new worker timeout, poll interval, or stale-lock settings are env-backed.
   - [x] Update this story file during implementation: task checkboxes, Dev Agent Record, Completion Notes, Debug Log References, File List, and Change Log.
   - [x] Add this story key to `_bmad-output/implementation-artifacts/sprint-status.yaml` as `ready-for-dev` or the active implementation status.
+
+### Review Findings
+
+- [x] [Review][Patch] Worker-imported modules still depend on `server-only`, violating script-safe worker requirements [scripts/knowledge-extraction-worker.ts:1]
+- [x] [Review][Patch] Duplicate active job enqueue is race-prone because the read-then-insert guard has no DB-enforced uniqueness or source lock [src/features/knowledge/extraction-jobs.ts:61]
+- [x] [Review][Patch] Stale recovery can reclaim an actually running worker and terminal updates are not lease-guarded [src/features/knowledge/extraction-jobs.ts:311]
+- [x] [Review][Patch] Stale recovery at max attempts requeues a job that cannot be claimed without violating the attempt-count check [src/features/knowledge/extraction-jobs.ts:315]
+- [x] [Review][Patch] Approve-all retry/idempotency has a crash window before job-owned draft IDs are persisted [src/features/knowledge/extraction-jobs.ts:189]
+- [x] [Review][Patch] Async approve-all bypasses the existing draft approval guardrails and raw-source leak checks [src/features/knowledge/extraction-jobs.ts:245]
+- [x] [Review][Patch] Resuming `resultDraftIds` does not validate that every draft belongs to this job source and prompt version [src/features/knowledge/extraction-jobs.ts:204]
+- [x] [Review][Patch] Worker success can ignore a failed Facebook review transition by accepting `invalid_transition` [src/features/knowledge/extraction-jobs.ts:222]
+- [x] [Review][Patch] Generic source-intake async extraction is not exposed or covered in the intake UI/tests [src/app/admin/knowledge/intake/page.tsx:71]
 
 ## Dev Notes
 
@@ -254,6 +266,13 @@ gpt-5.5-review
 - `pnpm test:run tests/facebook-capture-approve-all-action.test.ts` passed.
 - `pnpm test:run` passed: 32 files, 410 tests.
 - `pnpm knowledge:extraction-worker --once` loads script/env, but local direct run requires the target `DATABASE_URL` database to have migration `0031_broad_grandmaster.sql` applied; the attempted local DB run failed on missing `knowledge_extraction_jobs` relation before migration.
+- Code review fixes: `pnpm test:run tests/knowledge-extraction-worker.test.ts` passed: 8 tests.
+- Code review fixes: `pnpm typecheck` passed.
+- Code review fixes: `pnpm test:run tests/facebook-capture-extraction-action.test.ts tests/facebook-capture-approve-all-action.test.ts` passed: 20 tests.
+- Code review fixes: `pnpm lint` passed.
+- Code review fixes: `pnpm build` passed.
+- Code review fixes: `pnpm test:run` was retried twice; the suite timed out at 240s then 600s while test files were still passing and no assertion failure was reported.
+- Code review fixes: remaining unobserved test files from the timed-out full run were run directly and passed: `pnpm test:run tests/ai-usage-events.test.ts tests/public-mvp-evaluation.test.ts tests/knowledge-source-intake.test.ts tests/facebook-capture-reject-action.test.ts tests/facebook-capture-script.test.ts tests/answer-usefulness-feedback.test.ts tests/knowledge-approved-cards.test.ts tests/audit-mutation.test.ts tests/knowledge-search.test.ts`.
 
 ### Completion Notes List
 
@@ -264,6 +283,7 @@ gpt-5.5-review
 - Added extraction-specific AI Gateway timeout configuration through `AI_GATEWAY_EXTRACTION_TIMEOUT_MS` without changing chat/evaluation defaults.
 - Updated Facebook capture detail UI to show Vietnamese queued/running extraction state and disable duplicate extract / approve-all submissions while active jobs exist.
 - Added focused enqueue, worker, approve-all idempotency, stale recovery, and worker import coverage; full regression passed.
+- Resolved code review findings by making worker imports script-safe, serializing enqueue per source, hardening stale recovery/lease-guarded terminal updates, persisting job-owned draft IDs atomically, reusing approval guardrails, validating resumed draft IDs, and exposing source-intake async extraction state.
 
 ### File List
 
@@ -283,6 +303,9 @@ gpt-5.5-review
 - `src/features/knowledge/extraction-jobs.ts`
 - `src/features/knowledge/extraction.ts`
 - `src/features/knowledge/facebook-capture-review-admin.ts`
+- `src/features/knowledge/review-approval-core.ts`
+- `src/features/knowledge/sources.ts`
+- `src/app/admin/knowledge/intake/page.tsx`
 - `tests/facebook-capture-approve-all-action.test.ts`
 - `tests/facebook-capture-extraction-action.test.ts`
 - `tests/knowledge-extraction-worker.test.ts`
@@ -292,6 +315,7 @@ gpt-5.5-review
 - 2026-07-14: Created ready-for-dev story for durable async knowledge extraction via long-running worker.
 - 2026-07-14: Validated story and tightened worker script-safety, approve-all idempotency, duplicate cross-mode blocking, in-progress status, and extraction timeout requirements.
 - 2026-07-14: Implemented async PostgreSQL-backed extraction jobs, worker processing, async approve-all, UI in-progress state, operations docs, and test coverage; moved story to review.
+- 2026-07-14: Applied code review fixes and moved story to done.
 
 ## Open Questions
 

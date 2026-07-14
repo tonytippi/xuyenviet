@@ -123,7 +123,7 @@ development_status:
   6-6-public-mvp-quality-dashboard: done
   epic-6-retrospective: optional
   epic-ops: in-progress
-  ops-1-async-knowledge-extraction-worker: review
+  ops-1-async-knowledge-extraction-worker: done
 
 action_items:
   - epic: 3

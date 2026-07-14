@@ -56,6 +56,22 @@ async function createCapturedFacebookReview(id: string) {
   return ensured.review;
 }
 
+async function createUrlSource(id: string) {
+  await testDb.insert(sources).values({
+    id,
+    kind: "url",
+    url: `https://example.com/${id}`,
+    canonicalUrl: `https://example.com/${id}`,
+    label: `URL source ${id}`,
+    sourceType: "curated",
+    verificationStatus: "unverified",
+    official: false,
+    partner: false,
+    submittedByUserId: "operator-user",
+  });
+  await testDb.insert(rawSourceMaterial).values({ id: `raw-${id}`, sourceId: id, rawText: "Nguồn URL có nội dung đọc được để AI trích xuất." });
+}
+
 describe("knowledge extraction worker jobs", () => {
   beforeEach(async () => {
     await resetTestDatabase();
@@ -72,12 +88,44 @@ describe("knowledge extraction worker jobs", () => {
     await expect(testDb.select().from(knowledgeExtractionJobs)).resolves.toHaveLength(1);
   });
 
+  test("serializes concurrent enqueue attempts for the same source", async () => {
+    const review = await createCapturedFacebookReview("duplicate-concurrent-job");
+    const actor = { userId: "operator-user", email: "operator-user@example.com" };
+
+    const results = await Promise.all([
+      enqueueKnowledgeExtractionJob({ sourceId: review.sourceId, facebookCaptureReviewId: review.id, mode: "extract_only", actor }, testDb),
+      enqueueKnowledgeExtractionJob({ sourceId: review.sourceId, facebookCaptureReviewId: review.id, mode: "extract_and_approve_all", actor }, testDb),
+    ]);
+
+    expect(results.map((result) => result.status).sort()).toEqual(["already_active", "queued"]);
+    await expect(testDb.select().from(knowledgeExtractionJobs)).resolves.toHaveLength(1);
+  });
+
   test("recovers stale running jobs", async () => {
     const review = await createCapturedFacebookReview("stale-job");
     const [job] = await testDb.insert(knowledgeExtractionJobs).values({ sourceId: review.sourceId, facebookCaptureReviewId: review.id, mode: "extract_only", status: "running", attemptCount: 1, lockedAt: new Date("2026-07-14T00:00:00.000Z"), lockedBy: "dead-worker", startedAt: new Date("2026-07-14T00:00:00.000Z"), createdByUserId: "operator-user", createdByEmail: "operator-user@example.com" }).returning();
 
     await expect(recoverStaleKnowledgeExtractionJobs({ now: new Date("2026-07-14T00:20:00.000Z"), staleMs: 15 * 60_000 }, testDb)).resolves.toMatchObject({ recoveredCount: 1, jobIds: [job.id] });
     await expect(testDb.select().from(knowledgeExtractionJobs).where(eq(knowledgeExtractionJobs.id, job.id))).resolves.toMatchObject([{ status: "queued", lockedAt: null, lockedBy: null }]);
+  });
+
+  test("fails stale running jobs that have no attempts remaining", async () => {
+    const review = await createCapturedFacebookReview("stale-max-attempt-job");
+    const [job] = await testDb.insert(knowledgeExtractionJobs).values({ sourceId: review.sourceId, facebookCaptureReviewId: review.id, mode: "extract_only", status: "running", attemptCount: 3, maxAttempts: 3, lockedAt: new Date("2026-07-14T00:00:00.000Z"), lockedBy: "dead-worker", startedAt: new Date("2026-07-14T00:00:00.000Z"), createdByUserId: "operator-user", createdByEmail: "operator-user@example.com" }).returning();
+
+    await expect(recoverStaleKnowledgeExtractionJobs({ now: new Date("2026-07-14T00:20:00.000Z"), staleMs: 15 * 60_000 }, testDb)).resolves.toMatchObject({ recoveredCount: 0, failedCount: 1 });
+    await expect(testDb.select().from(knowledgeExtractionJobs).where(eq(knowledgeExtractionJobs.id, job.id))).resolves.toMatchObject([{ status: "failed", lastErrorCode: "stale_max_attempts" }]);
+    await expect(testDb.select().from(facebookCaptureReviews).where(eq(facebookCaptureReviews.id, review.id))).resolves.toMatchObject([{ status: "extraction_failed" }]);
+  });
+
+  test("source intake list exposes active async extraction job state", async () => {
+    authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
+    await createUrlSource("url-active-job");
+    const actor = { userId: "operator-user", email: "operator-user@example.com" };
+    const queued = await enqueueKnowledgeExtractionJob({ sourceId: "url-active-job", mode: "extract_only", actor }, testDb);
+
+    const { listKnowledgeUrlSources } = await import("@/features/knowledge/sources");
+    await expect(listKnowledgeUrlSources()).resolves.toMatchObject([{ id: "url-active-job", activeExtractionJob: { id: queued.job.id, status: "queued", mode: "extract_only" } }]);
   });
 
   test("one-shot worker exits when no jobs are available", async () => {

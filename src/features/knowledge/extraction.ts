@@ -1,5 +1,3 @@
-import "server-only";
-
 import { and, eq, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
@@ -7,6 +5,7 @@ import {
   facebookCaptureReviews,
   knowledgeCards,
   knowledgeCardSources,
+  knowledgeExtractionJobs,
   knowledgeCardTypeValues,
   knowledgeConfidenceValues,
   rawSourceMaterial,
@@ -81,7 +80,7 @@ export async function extractKnowledgeDraftsFromSource(sourceId: string, options
   return extractKnowledgeDraftsFromSourceAsActor(sourceId, session, options);
 }
 
-export async function extractKnowledgeDraftsFromSourceAsActor(sourceId: string, actor: AuthenticatedSession, options: { preProviderGuard?: KnowledgeDraftExtractionPreProviderGuard } = {}): Promise<KnowledgeDraftExtractionResult> {
+export async function extractKnowledgeDraftsFromSourceAsActor(sourceId: string, actor: AuthenticatedSession, options: { preProviderGuard?: KnowledgeDraftExtractionPreProviderGuard; resultJobId?: string } = {}): Promise<KnowledgeDraftExtractionResult> {
   const normalizedSourceId = sourceId.trim();
   let providerUsage: Parameters<typeof writeUsageForProviderCall>[3] | null = null;
 
@@ -181,6 +180,19 @@ export async function extractKnowledgeDraftsFromSourceAsActor(sourceId: string, 
 
       await transaction.insert(knowledgeCardSources).values(inserted.map((card) => ({ knowledgeCardId: card.id, sourceId: sourceBundle.source.id, supportLevel: "primary" as const })));
 
+      const extraction = {
+        sourceId: sourceBundle.source.id,
+        draftCount: inserted.length,
+        draftIds: inserted.map((card) => card.id),
+      };
+
+      if (options.resultJobId) {
+        await transaction
+          .update(knowledgeExtractionJobs)
+          .set({ resultDraftIds: extraction.draftIds, resultDraftCount: extraction.draftCount, updatedAt: new Date() })
+          .where(eq(knowledgeExtractionJobs.id, options.resultJobId));
+      }
+
       await recordAuditEvent(
         {
           actor,
@@ -192,11 +204,7 @@ export async function extractKnowledgeDraftsFromSourceAsActor(sourceId: string, 
         transaction,
       );
 
-      return {
-        sourceId: sourceBundle.source.id,
-        draftCount: inserted.length,
-        draftIds: inserted.map((card) => card.id),
-      };
+      return extraction;
     });
 
     if (providerUsage) {

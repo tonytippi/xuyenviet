@@ -1,5 +1,3 @@
-import "server-only";
-
 import { getRequiredServerEnv } from "@/server/env";
 
 type GatewayMessage = {
