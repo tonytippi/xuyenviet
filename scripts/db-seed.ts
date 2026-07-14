@@ -48,8 +48,8 @@ async function main() {
   await db.insert(aiGatewayModels).values([
     {
       id: "seed-model-answer",
-      gatewayModelName: "cx/gpt-5.4-mini",
-      displayLabel: "GPT 5.4 Mini",
+      gatewayModelName: "cx/gpt-5.6-luna",
+      displayLabel: "GPT 5.6 Luna",
       purpose: "ai_ask_initial_answer",
       active: true,
       defaultForPurpose: true,
@@ -62,8 +62,8 @@ async function main() {
     },
     {
       id: "seed-model-extraction",
-      gatewayModelName: "cx/gpt-5.4-mini",
-      displayLabel: "GPT 5.4 Mini Extraction",
+      gatewayModelName: "cx/gpt-5.6-luna",
+      displayLabel: "GPT 5.6 Luna Extraction",
       purpose: "extraction",
       active: true,
       defaultForPurpose: true,
@@ -89,8 +89,8 @@ async function main() {
     },
     {
       id: "seed-model-evaluation",
-      gatewayModelName: "cx/gpt-5.4-mini",
-      displayLabel: "GPT 5.4 Mini Evaluation",
+      gatewayModelName: "cx/gpt-5.6-luna",
+      displayLabel: "GPT 5.6 Luna Evaluation",
       purpose: "evaluation",
       active: true,
       defaultForPurpose: true,
