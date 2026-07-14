@@ -3,6 +3,7 @@ import { after } from "next/server";
 
 import { getDb } from "@/db/client";
 import { conversations, messageImageAttachments, messages, tripProjects } from "@/db/schema";
+import { buildDefaultAnswerAnnotations, type AnswerAnnotation } from "@/features/ai/answer-annotations";
 import { ensureAiAskFreshnessWarning } from "@/features/ai/answer-freshness";
 import { streamInitialAiAskAnswer } from "@/features/ai/gateway";
 import { getAiGatewayPricingSnapshot, selectActiveAiGatewayModel } from "@/features/ai/models";
@@ -20,7 +21,7 @@ const acceptedImageTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 type StreamEvent =
   | { type: "delta"; content: string }
-  | { type: "done"; conversationId: string; userMessage: { id: string; content: string }; assistantMessage: { id: string; content: string; provenance?: AssistantMessageProvenanceItem[] } }
+  | { type: "done"; conversationId: string; userMessage: { id: string; content: string }; assistantMessage: { id: string; content: string; provenance?: AssistantMessageProvenanceItem[]; annotations?: AnswerAnnotation[] } }
   | { type: "error"; conversationId?: string; userMessage?: { id: string; content: string }; errorMessage: string };
 
 export async function POST(request: Request) {
@@ -280,7 +281,7 @@ async function streamAnswer({
     if (assistantContent.appendedWarning) {
       sendEvent(controller, encoder, { type: "delta", content: assistantContent.appendedWarning });
     }
-    let completed: { id: string; content: string; provenance: AssistantMessageProvenanceItem[] } | null = null;
+    let completed: { id: string; content: string; provenance: AssistantMessageProvenanceItem[]; annotations: AnswerAnnotation[] } | null = null;
 
     try {
       completed = await db.transaction(async (transaction) => {
@@ -320,7 +321,9 @@ async function streamAnswer({
           pricingSnapshot,
         });
 
-        return { id: assistantMessage.id, content: assistantContent.content, provenance };
+        const annotations = buildDefaultAnswerAnnotations({ answerText: assistantContent.content, provenance });
+
+        return { id: assistantMessage.id, content: assistantContent.content, provenance, annotations };
       });
     } catch {
       // Retry atomic assistant/provenance/usage persistence so the streamed answer is not lost to a transient failure.
@@ -362,7 +365,9 @@ async function streamAnswer({
             pricingSnapshot,
           });
 
-          return { id: assistantMessage.id, content: assistantContent.content, provenance };
+          const annotations = buildDefaultAnswerAnnotations({ answerText: assistantContent.content, provenance });
+
+          return { id: assistantMessage.id, content: assistantContent.content, provenance, annotations };
         });
       } catch {
         completed = null;

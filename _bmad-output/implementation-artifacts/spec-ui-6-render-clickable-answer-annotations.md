@@ -2,7 +2,8 @@
 title: 'UI 6: Render Clickable Answer Annotations'
 type: 'feature'
 created: '2026-07-14'
-status: 'ready-for-dev'
+status: 'review'
+baseline_commit: 6eb591600b1bb5df8d2bf8cea8344284f9a77038
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
@@ -67,13 +68,13 @@ warnings: []
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `src/features/ai/ai-ask-composer.tsx` -- extend the assistant display message shape with optional structured annotations and add an annotation renderer -- makes answer text capable of safe inline selection without backend persistence changes.
-- [ ] `src/features/ai/ai-ask-composer.tsx` -- keep `AssistantMessageContent` section splitting and render annotations inside section bodies where possible -- prevents regression of structured Vietnamese answer cards.
-- [ ] `src/features/ai/ai-ask-composer.tsx` -- route annotation clicks through the existing `handleSelectAnswerEntity` flow -- reuses the right panel/mobile drawer instead of adding parallel selection state.
-- [ ] `src/features/ai/ai-ask-composer.tsx` -- validate/sort/drop invalid or overlapping annotations before rendering -- prevents broken text splitting, nested controls, and crashes.
-- [ ] `src/features/ai/ai-ask-composer.tsx` -- keep `AssistantProvenanceBlock` available as compact fallback/source review -- preserves trust transparency while inline coverage is incomplete.
-- [ ] `tests/ai-ask-shell.test.ts` -- cover annotated rendering, selected state, invalid/overlap handling, unannotated fallback, mobile drawer contract, and unsafe-field absence -- pins the UX and safety contract.
-- [ ] `_bmad-output/implementation-artifacts/sprint-status.yaml` -- update story state during implementation and completion -- keep BMad status aligned.
+- [x] `src/features/ai/ai-ask-composer.tsx` -- extend the assistant display message shape with optional structured annotations and add an annotation renderer -- makes answer text capable of safe inline selection without backend persistence changes.
+- [x] `src/features/ai/ai-ask-composer.tsx` -- keep `AssistantMessageContent` section splitting and render annotations inside section bodies where possible -- prevents regression of structured Vietnamese answer cards.
+- [x] `src/features/ai/ai-ask-composer.tsx` -- route annotation clicks through the existing `handleSelectAnswerEntity` flow -- reuses the right panel/mobile drawer instead of adding parallel selection state.
+- [x] `src/features/ai/ai-ask-composer.tsx` -- validate/sort/drop invalid or overlapping annotations before rendering -- prevents broken text splitting, nested controls, and crashes.
+- [x] `src/features/ai/ai-ask-composer.tsx` -- keep `AssistantProvenanceBlock` available as compact fallback/source review -- preserves trust transparency while inline coverage is incomplete.
+- [x] `tests/ai-ask-shell.test.ts` -- cover annotated rendering, selected state, invalid/overlap handling, unannotated fallback, mobile drawer contract, and unsafe-field absence -- pins the UX and safety contract.
+- [x] `_bmad-output/implementation-artifacts/sprint-status.yaml` -- update story state during implementation and completion -- keep BMad status aligned.
 
 **Acceptance Criteria:**
 - Given an assistant message includes valid structured annotations, when the answer renders, then the annotated ranges are interactive inline highlights and the surrounding answer text remains unchanged.
@@ -99,3 +100,38 @@ warnings: []
 - `pnpm typecheck` -- expected: no type errors.
 - `pnpm test:run` -- expected: full suite passes.
 - `pnpm build` -- expected: production build succeeds.
+
+## Dev Agent Record
+
+### Implementation Notes
+
+- Extended `DisplayMessage` with optional `annotations` and passed them from stream and loaded conversation data.
+- `AssistantMessageContent` still uses recognized Vietnamese heading section cards and now renders validated annotation spans inside each section body.
+- Inline annotations are buttons that call the existing `handleSelectAnswerEntity` path, so desktop right panel and mobile detail drawer behavior remain shared with provenance rows.
+- Client renderer revalidates display ranges, detail presence, duplicate ids, and overlap before rendering to avoid nested controls or crashes.
+- `AssistantProvenanceBlock` remains unchanged as the fallback source-review UI for broad provenance and unannotated answers.
+
+### Debug Log
+
+- `pnpm test:run tests/answer-annotations.test.ts tests/ai-ask-shell.test.ts` passed.
+- `pnpm lint` passed.
+- `pnpm typecheck` passed.
+- `pnpm build` passed.
+- `pnpm test:run` exceeded 360s and isolated failure reproduced in `pnpm test:run tests/facebook-capture-review.test.ts`: `reopen only accepts rejected captures and safe short reasons` violates `facebook_capture_reviews_updated_after_created_check`. This is outside annotation changes.
+
+### Completion Notes
+
+- Implemented clickable inline answer annotations, section-preserving rendering, selected-state ARIA, invalid annotation dropping, fallback provenance behavior, and unsafe-field tests.
+- Full regression is blocked by the existing Facebook capture review timestamp constraint failure noted above; annotation-focused coverage passes.
+
+### File List
+
+- `_bmad-output/implementation-artifacts/spec-ui-6-render-clickable-answer-annotations.md`
+- `_bmad-output/implementation-artifacts/sprint-status.yaml`
+- `src/app/ai-ask/page.tsx`
+- `src/features/ai/ai-ask-composer.tsx`
+- `tests/ai-ask-shell.test.ts`
+
+### Change Log
+
+- 2026-07-14: Added inline clickable annotation rendering and moved story to review.

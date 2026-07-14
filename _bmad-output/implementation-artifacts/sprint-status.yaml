@@ -106,7 +106,7 @@ development_status:
   5-7-uncertainty-and-freshness-warnings: done
   5-8-validate-web-search-fallback-quality: done
   5-9-record-ai-usage-events: done
-  5-10-generate-and-validate-answer-annotations: ready-for-dev
+  5-10-generate-and-validate-answer-annotations: review
   epic-5-retrospective: done
   epic-ui: in-progress
   ui-1-public-logged-out-homepage-redesign: done
@@ -114,7 +114,7 @@ development_status:
   ui-3-active-three-panel-ai-ask-shell: done
   ui-4-selectable-answer-entities-and-detail-panel: done
   ui-5-mobile-sidebar-and-detail-drawers: done
-  ui-6-render-clickable-answer-annotations: ready-for-dev
+  ui-6-render-clickable-answer-annotations: review
   epic-ui-retrospective: optional
   epic-6: in-progress
   6-1-detect-children-and-family-travel-needs: done

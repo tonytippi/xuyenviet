@@ -2,12 +2,13 @@
 
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { useActionState, useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from "react";
+import { useActionState, useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
 
 import { ConversationList, type ChatSessionSummary } from "@/features/chat-trips/conversation-list";
 import { formatTripProjectLabel } from "@/features/chat-trips/labels";
 import { answerUsefulnessCommentMaxLength, countAnswerUsefulnessCommentCharacters, type AnswerUsefulnessFeedbackSummary } from "@/features/feedback/types";
 import type { AnswerUsefulnessRating } from "@/db/schema";
+import type { AnswerAnnotation } from "@/features/ai/answer-annotations";
 import type { AssistantMessageProvenanceItem } from "@/features/retrieval/provenance";
 
 const maxQuestionLength = 2_000;
@@ -26,6 +27,7 @@ type DisplayMessage = {
     byteSize: number;
   }>;
   provenance?: AssistantMessageProvenanceItem[];
+  annotations?: AnswerAnnotation[];
   feedback?: AnswerUsefulnessFeedbackSummary | null;
 };
 
@@ -236,23 +238,126 @@ function splitAssistantContent(content: string) {
   })).filter((section) => section.heading || section.body);
 }
 
-export function AssistantMessageContent({ content }: { content: string }) {
+export function AssistantMessageContent({ content, annotations, selectedEntityId, detailPanelIds, onSelectEntity }: { content: string; annotations?: AnswerAnnotation[]; selectedEntityId?: string; detailPanelIds?: string; onSelectEntity?: (entity: AnswerEntityDescriptor, trigger: HTMLElement) => void }) {
   const sections = splitAssistantContent(content);
 
   if (sections.length <= 1 && !sections[0]?.heading) {
-    return <p className="whitespace-pre-wrap text-base leading-7">{content}</p>;
+    return <p className="whitespace-pre-wrap text-base leading-7"><AnnotatedAnswerText content={content} annotations={annotations} selectedEntityId={selectedEntityId} detailPanelIds={detailPanelIds} onSelectEntity={onSelectEntity} /></p>;
   }
+
+  let cursor = 0;
 
   return (
     <div className="space-y-4">
-      {sections.map((section, index) => (
-        <section className="rounded-2xl border border-[#eadfc8] bg-white/70 p-4" key={`${section.heading || "intro"}-${index}`}>
-          {section.heading ? <h3 className="text-sm font-bold uppercase tracking-[0.12em] text-[#1f5f46]">{section.heading}</h3> : null}
-          {section.body ? <p className="mt-2 whitespace-pre-wrap text-base leading-7">{section.body}</p> : null}
-        </section>
-      ))}
+      {sections.map((section, index) => {
+        const bodyStart = section.body ? content.indexOf(section.body, cursor) : -1;
+        const bodyEnd = bodyStart >= 0 ? bodyStart + section.body.length : -1;
+        const sectionAnnotations = bodyStart >= 0 && bodyEnd >= 0 ? annotations?.filter((annotation) => annotation.start >= bodyStart && annotation.end <= bodyEnd).map((annotation) => ({ ...annotation, start: annotation.start - bodyStart, end: annotation.end - bodyStart })) : [];
+        cursor = bodyEnd >= 0 ? bodyEnd : cursor;
+
+        return (
+          <section className="rounded-2xl border border-[#eadfc8] bg-white/70 p-4" key={`${section.heading || "intro"}-${index}`}>
+            {section.heading ? <h3 className="text-sm font-bold uppercase tracking-[0.12em] text-[#1f5f46]">{section.heading}</h3> : null}
+            {section.body ? <p className="mt-2 whitespace-pre-wrap text-base leading-7"><AnnotatedAnswerText content={section.body} annotations={sectionAnnotations} selectedEntityId={selectedEntityId} detailPanelIds={detailPanelIds} onSelectEntity={onSelectEntity} /></p> : null}
+          </section>
+        );
+      })}
     </div>
   );
+}
+
+function AnnotatedAnswerText({ content, annotations, selectedEntityId, detailPanelIds, onSelectEntity }: { content: string; annotations?: AnswerAnnotation[]; selectedEntityId?: string; detailPanelIds?: string; onSelectEntity?: (entity: AnswerEntityDescriptor, trigger: HTMLElement) => void }) {
+  const validAnnotations = normalizeDisplayAnnotations(content, annotations);
+
+  if (validAnnotations.length === 0) {
+    return content;
+  }
+
+  const parts: ReactNode[] = [];
+  let cursor = 0;
+
+  for (const annotation of validAnnotations) {
+    if (annotation.start > cursor) {
+      parts.push(content.slice(cursor, annotation.start));
+    }
+
+    const entity = createAnnotationAnswerEntityDescriptor(annotation);
+    const isSelected = selectedEntityId === entity.provenanceIds?.[0];
+
+    parts.push(
+      <button
+        aria-controls={detailPanelIds}
+        aria-expanded={isSelected}
+        aria-label={`Mở chi tiết annotation: ${annotation.text}`}
+        aria-pressed={isSelected}
+        className={`mx-0.5 rounded-lg border px-1.5 py-0.5 text-left font-semibold underline decoration-2 underline-offset-4 transition focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45 ${getAnnotationClassName(annotation)}`}
+        key={annotation.id}
+        onClick={(event) => onSelectEntity?.(entity, event.currentTarget)}
+        type="button"
+      >
+        {annotation.text}
+      </button>,
+    );
+    cursor = annotation.end;
+  }
+
+  if (cursor < content.length) {
+    parts.push(content.slice(cursor));
+  }
+
+  return parts;
+}
+
+function normalizeDisplayAnnotations(content: string, annotations?: AnswerAnnotation[]) {
+  const accepted: AnswerAnnotation[] = [];
+  const seenIds = new Set<string>();
+
+  for (const annotation of (annotations ?? []).slice().sort((left, right) => left.start - right.start || left.end - right.end)) {
+    if (!annotation.id || seenIds.has(annotation.id) || !annotation.detail || !Number.isInteger(annotation.start) || !Number.isInteger(annotation.end)) {
+      continue;
+    }
+
+    if (annotation.start < 0 || annotation.end <= annotation.start || annotation.end > content.length || content.slice(annotation.start, annotation.end) !== annotation.text) {
+      continue;
+    }
+
+    if (accepted.some((current) => annotation.start < current.end && annotation.end > current.start)) {
+      continue;
+    }
+
+    seenIds.add(annotation.id);
+    accepted.push(annotation);
+  }
+
+  return accepted;
+}
+
+function createAnnotationAnswerEntityDescriptor(annotation: AnswerAnnotation): AnswerEntityDescriptor {
+  return {
+    type: annotation.detail.type,
+    label: annotation.detail.label,
+    section: annotation.detail.section,
+    sourceCategory: annotation.detail.sourceCategory,
+    owner: annotation.detail.owner,
+    detail: annotation.detail.detail,
+    provenanceIds: annotation.detail.provenanceIds,
+  };
+}
+
+function getAnnotationClassName(annotation: AnswerAnnotation) {
+  if (annotation.type === "warning") {
+    return "border-[#e5bd82] bg-[#fff8ec] text-[#6f3f12] decoration-[#d9a65c]";
+  }
+
+  if (annotation.type === "trip_fact") {
+    return "border-[#8fb59f] bg-[#edf7f0] text-[#14532d] decoration-[#1f5f46]";
+  }
+
+  if (annotation.type === "action") {
+    return "border-[#cfd8d3] bg-[#f4f7f5] text-[#4f625a] decoration-dotted";
+  }
+
+  return "border-[#8fb59f] bg-white text-[#1f5f46] decoration-[#8fb59f]";
 }
 
 export function AssistantProvenanceBlock({ provenance, selectedEntityId, detailPanelIds, onSelectEntity }: { provenance?: AssistantMessageProvenanceItem[]; selectedEntityId?: string; detailPanelIds?: string; onSelectEntity?: (entity: AnswerEntityDescriptor, trigger: HTMLElement) => void }) {
@@ -752,7 +857,7 @@ export function AiAskComposer({
       setMessages((currentMessages) => [
         ...currentMessages,
         { id: result.userMessage.id, role: "user", content: result.userMessage.content },
-        { id: result.assistantMessage.id, role: "assistant", content: result.assistantMessage.content, provenance: result.assistantMessage.provenance },
+        { id: result.assistantMessage.id, role: "assistant", content: result.assistantMessage.content, provenance: result.assistantMessage.provenance, annotations: result.assistantMessage.annotations },
       ]);
       setQuestion("");
       setSelectedImage(null);
@@ -1224,7 +1329,7 @@ export function AiAskComposer({
                   </p>
                   {message.role === "assistant" ? (
                     <>
-                      <AssistantMessageContent content={message.content} />
+                      <AssistantMessageContent content={message.content} annotations={message.annotations} selectedEntityId={selectedAnswerEntityId} detailPanelIds={answerDetailPanelIds} onSelectEntity={handleSelectAnswerEntity} />
                       <AssistantProvenanceBlock provenance={message.provenance} selectedEntityId={selectedAnswerEntityId} detailPanelIds={answerDetailPanelIds} onSelectEntity={handleSelectAnswerEntity} />
                       {saveAnswerUsefulnessFeedbackAction ? (
                         <AnswerUsefulnessFeedbackControl

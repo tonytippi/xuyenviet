@@ -5,6 +5,7 @@ import { asc, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { aiGatewayModels, aiUsageEvents, answerUsefulnessFeedback, assistantResponseProvenance, assistantRetrievalDecisions, conversations, messageImageAttachments, messages, tripProjects, users } from "@/db/schema";
+import type { AnswerAnnotation } from "@/features/ai/answer-annotations";
 import type { AnswerEntityDescriptor } from "@/features/ai/ai-ask-composer";
 
 import { testDb } from "./helpers/db";
@@ -77,6 +78,26 @@ function getGatewayRequestMessages(fetchMock: ReturnType<typeof vi.fn>, callInde
   const body = JSON.parse(String(request.body)) as { messages: { role: string; content: string }[] };
 
   return body.messages;
+}
+
+function makeAnnotation(id: string, content: string, text: string, type: AnswerAnnotation["type"], provenanceId: string, detailType: AnswerEntityDescriptor["type"]): AnswerAnnotation {
+  const start = content.indexOf(text);
+
+  return {
+    id,
+    start,
+    end: start + text.length,
+    text,
+    type,
+    detail: {
+      type: detailType,
+      label: text,
+      section: "Nguồn và độ tin cậy",
+      owner: { table: "assistant_response_provenance", id: provenanceId },
+      detail: { "Độ tin cậy": "đã xác minh" },
+      provenanceIds: [provenanceId],
+    },
+  };
 }
 
 describe("AI Ask authenticated shell", () => {
@@ -220,6 +241,8 @@ describe("AI Ask authenticated shell", () => {
     expect(detailStart).toBeGreaterThan(-1);
     expect(detailStart).toBeGreaterThan(sheetStart);
     expect(source).toContain("selectedAnswerEntity && !isSessionSheetOpen");
+    expect(source).toContain("handleSelectAnswerEntity");
+    expect(source).toContain("Mở chi tiết annotation");
     expect(source).toContain("Đóng bảng chi tiết đã chọn");
     expect(source).toContain("mobileAnswerDetailDialogRef");
     expect(source).toContain("getFocusableElements(dialog)");
@@ -345,6 +368,87 @@ describe("AI Ask authenticated shell", () => {
     expect(html).not.toContain("javascript:alert");
     expect(html).not.toContain("source-chip");
     expect(html).not.toContain("[1]");
+  });
+
+  test("renders backend annotations as inline accessible highlights while preserving section cards", async () => {
+    const { AssistantMessageContent } = await import("@/features/ai/ai-ask-composer");
+    const content = "Kế hoạch gợi ý:\nNên dừng ở Bãi đỗ chính thức Huế.\nCảnh báo cần kiểm tra:\nGiá xem Nguồn web cập nhật.";
+    const annotations: AnswerAnnotation[] = [
+      makeAnnotation("ann-knowledge", content, "Bãi đỗ chính thức Huế", "source", "knowledge-1", "source"),
+      makeAnnotation("ann-web", content, "Nguồn web cập nhật", "warning", "web-1", "warning"),
+    ];
+
+    const html = renderToStaticMarkup(createElement(AssistantMessageContent, { content, annotations, selectedEntityId: "web-1", detailPanelIds: "mobile desktop" }));
+
+    expect(html).toContain("Kế hoạch gợi ý");
+    expect(html).toContain("Cảnh báo cần kiểm tra");
+    expect(html).toContain("Mở chi tiết annotation: Bãi đỗ chính thức Huế");
+    expect(html).toContain("Mở chi tiết annotation: Nguồn web cập nhật");
+    expect(html).toContain('aria-controls="mobile desktop"');
+    expect(html).toContain('aria-pressed="true"');
+    expect(html).toContain("Nên dừng ở ");
+    expect(html).not.toContain("source-chip");
+    expect(html).not.toContain("[1]");
+  });
+
+  test("ignores invalid and overlapping inline annotations without hiding the answer", async () => {
+    const { AssistantMessageContent } = await import("@/features/ai/ai-ask-composer");
+    const content = "Nên dừng ở Huế và kiểm tra giá.";
+    const annotations: AnswerAnnotation[] = [
+      makeAnnotation("valid", content, "Huế", "source", "knowledge-1", "source"),
+      makeAnnotation("overlap", content, "Huế và", "warning", "web-1", "warning"),
+      { ...makeAnnotation("bad-text", content, "giá", "warning", "web-2", "warning"), text: "giá vé" },
+      { ...makeAnnotation("missing-detail", content, "kiểm tra", "action", "action-1", "action"), detail: undefined as never },
+    ];
+
+    const html = renderToStaticMarkup(createElement(AssistantMessageContent, { content, annotations }));
+
+    expect(html).toContain("Nên dừng ở ");
+    expect(html).toContain("Mở chi tiết annotation: Huế");
+    expect(html).not.toContain("Mở chi tiết annotation: Huế và");
+    expect(html).not.toContain("giá vé");
+    expect(html).not.toContain("Mở chi tiết annotation: kiểm tra");
+  });
+
+  test("keeps unannotated assistant answers readable with fallback provenance available", async () => {
+    const { AssistantMessageContent } = await import("@/features/ai/ai-ask-composer");
+    const html = renderToStaticMarkup(createElement(AssistantMessageContent, { content: "Kế hoạch gợi ý:\nNên đi nhẹ." }));
+
+    expect(html).toContain("Kế hoạch gợi ý");
+    expect(html).toContain("Nên đi nhẹ.");
+    expect(html).not.toContain("Mở chi tiết annotation");
+  });
+
+  test("renders persisted matching provenance as an inline annotation without unsafe fields", async () => {
+    await createTestUser("user-1");
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
+    const [userMessage] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "user", content: "Bãi đỗ ở Huế?" }).returning({ id: messages.id });
+    const [assistantMessage] = await testDb.insert(messages).values({
+      conversationId: conversation.id,
+      userId: "user-1",
+      role: "assistant",
+      content: "Kế hoạch gợi ý:\nBãi đỗ chính thức Huế phù hợp để kiểm tra trước khi vào trung tâm.",
+    }).returning({ id: messages.id });
+    await testDb.insert(assistantResponseProvenance).values({
+      userId: "user-1",
+      conversationId: conversation.id,
+      userMessageId: userMessage.id,
+      assistantMessageId: assistantMessage.id,
+      sourceCategory: "knowledge",
+      rank: 1,
+      sourceType: "parking",
+      verificationStatus: "verified",
+      usedInPrompt: true,
+      citedInAnswer: false,
+      sourceSnapshot: { title: "Bãi đỗ chính thức Huế", confidence: "official", sourceSnapshot: "unsafe", providerScore: 1, raw_source_material: "raw" },
+    });
+
+    const html = await renderAuthenticatedAiAskShell({ conversationId: conversation.id });
+
+    expect(html).toContain("Mở chi tiết annotation: Bãi đỗ chính thức Huế");
+    expect(html).toContain("Nguồn và độ tin cậy");
+    expect(html).not.toContain("raw_source_material");
+    expect(html).not.toContain("providerScore");
   });
 
   test("renders selected answer detail panel from a transient safe descriptor", async () => {

@@ -2,7 +2,8 @@
 title: 'Story 5.10: Generate And Validate Answer Annotations'
 type: 'feature'
 created: '2026-07-14'
-status: 'ready-for-dev'
+status: 'review'
+baseline_commit: 6eb591600b1bb5df8d2bf8cea8344284f9a77038
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
@@ -71,15 +72,15 @@ warnings: []
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] Define the canonical server-side `AnswerAnnotation` proposal and sanitized read-model types -- makes the backend/frontend contract explicit.
-- [ ] Update AI Ask prompt/schema expectation so the model may propose annotations with text ranges and current-turn provenance/context references -- enables backend-sourced highlights without frontend guessing.
-- [ ] Add server validation for offsets, text match when available, duplicate ids, overlap, current-answer provenance ownership, and allowed annotation types -- prevents misleading or unsafe highlights.
-- [ ] Build annotation detail descriptors from stored provenance/context data only -- keeps source/trust labels authoritative and traveler-safe.
-- [ ] Attach sanitized annotations to assistant messages returned in the stream `done` event and any later conversation read model, preserving no-annotation fallback -- wires the backend contract into the existing UI renderer.
-- [ ] Keep annotation failure outside the atomic assistant/provenance/usage success path unless annotations are persisted in the same transaction by explicit design -- prevents optional highlight generation from causing a completed answer to be reported as failed.
-- [ ] If annotations are persisted, add schema/migration plus conversation/project deletion behavior; otherwise document why annotations are transient/read-model only -- prevents hidden retrievable content from escaping deletion rules.
-- [ ] Add tests for knowledge, web, chat/trip context, general reasoning, freshness warning, invalid offsets, overlap, malformed output, and cross-user/cross-answer reference rejection -- pins correctness and safety.
-- [ ] `_bmad-output/implementation-artifacts/sprint-status.yaml` -- update story state during implementation and completion -- keep BMad status aligned.
+- [x] Define the canonical server-side `AnswerAnnotation` proposal and sanitized read-model types -- makes the backend/frontend contract explicit.
+- [x] Update AI Ask prompt/schema expectation so the model may propose annotations with text ranges and current-turn provenance/context references -- enables backend-sourced highlights without frontend guessing.
+- [x] Add server validation for offsets, text match when available, duplicate ids, overlap, current-answer provenance ownership, and allowed annotation types -- prevents misleading or unsafe highlights.
+- [x] Build annotation detail descriptors from stored provenance/context data only -- keeps source/trust labels authoritative and traveler-safe.
+- [x] Attach sanitized annotations to assistant messages returned in the stream `done` event and any later conversation read model, preserving no-annotation fallback -- wires the backend contract into the existing UI renderer.
+- [x] Keep annotation failure outside the atomic assistant/provenance/usage success path unless annotations are persisted in the same transaction by explicit design -- prevents optional highlight generation from causing a completed answer to be reported as failed.
+- [x] If annotations are persisted, add schema/migration plus conversation/project deletion behavior; otherwise document why annotations are transient/read-model only -- prevents hidden retrievable content from escaping deletion rules.
+- [x] Add tests for knowledge, web, chat/trip context, general reasoning, freshness warning, invalid offsets, overlap, malformed output, and cross-user/cross-answer reference rejection -- pins correctness and safety.
+- [x] `_bmad-output/implementation-artifacts/sprint-status.yaml` -- update story state during implementation and completion -- keep BMad status aligned.
 
 **Acceptance Criteria:**
 - Given the model proposes annotations for a final assistant answer, when server validation succeeds, then the client receives sanitized annotations that render as clickable inline highlights tied to the existing detail panel.
@@ -105,3 +106,46 @@ warnings: []
 - `pnpm typecheck` -- expected: no type errors.
 - `pnpm test:run` -- expected: full suite passes.
 - `pnpm build` -- expected: production build succeeds.
+
+## Dev Agent Record
+
+### Implementation Notes
+
+- Added `src/features/ai/answer-annotations.ts` as the canonical server-side annotation contract and validator.
+- Annotation descriptors are built only from sanitized `AssistantMessageProvenanceItem` fields. Model/provider raw metadata, raw source material, snippets, and operator-only fields are not exposed.
+- Annotations are transient read-model data generated from final assistant text plus current assistant-message provenance. No table/migration was added, so existing conversation/project deletion contracts remain unchanged and there is no hidden annotation persistence source of truth.
+- AI Ask prompt version advanced to `ai_ask_initial_v9_annotations` and prompt guidance now allows internal annotation proposals without placing JSON in traveler-visible answer text.
+- Stream `done` events and owned conversation history now include optional sanitized annotations when final answer text matches current-turn provenance titles.
+
+### Debug Log
+
+- `pnpm test:run tests/answer-annotations.test.ts` passed.
+- `pnpm test:run tests/answer-annotations.test.ts tests/ai-ask-shell.test.ts` passed.
+- `pnpm lint` passed.
+- `pnpm typecheck` passed.
+- `pnpm build` passed.
+- `pnpm test:run` exceeded 360s and isolated failure reproduced in `pnpm test:run tests/facebook-capture-review.test.ts`: `reopen only accepts rejected captures and safe short reasons` violates `facebook_capture_reviews_updated_after_created_check`. This is outside annotation changes.
+
+### Completion Notes
+
+- Implemented backend annotation proposal/read-model types, validation, safe detail construction, prompt versioning, stream payload wiring, and conversation read-model wiring.
+- Preserved no-annotation fallback and kept annotations outside durable persistence.
+- Full regression is blocked by the existing Facebook capture review timestamp constraint failure noted above; annotation-focused coverage passes.
+
+### File List
+
+- `_bmad-output/implementation-artifacts/spec-5-10-generate-and-validate-answer-annotations.md`
+- `_bmad-output/implementation-artifacts/sprint-status.yaml`
+- `src/app/ai-ask/page.tsx`
+- `src/app/api/ai-ask/stream/route.ts`
+- `src/features/ai/answer-annotations.ts`
+- `src/features/ai/ai-ask-composer.tsx`
+- `src/features/ai/prompts.ts`
+- `src/features/chat-trips/conversations.ts`
+- `src/features/usage/constants.ts`
+- `tests/answer-annotations.test.ts`
+- `tests/ai-ask-shell.test.ts`
+
+### Change Log
+
+- 2026-07-14: Added transient validated answer annotations and moved story to review.

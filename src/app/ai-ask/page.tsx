@@ -117,6 +117,7 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
                 byteSize: attachment.byteSize,
               })),
               provenance: message.provenance,
+              annotations: message.annotations,
               feedback: message.feedback,
             }))}
             initialSessions={initialSessions}

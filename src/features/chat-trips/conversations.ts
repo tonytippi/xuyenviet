@@ -4,6 +4,7 @@ import { and, asc, desc, eq, isNull } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
 import { aiUsageEvents, answerUsefulnessFeedback, assistantResponseProvenance, chatContext, conversations, messageImageAttachments, messages } from "@/db/schema";
+import { buildDefaultAnswerAnnotations } from "@/features/ai/answer-annotations";
 import { recordAuditEvent } from "@/features/audit/events";
 import { formatAssistantMessageProvenance } from "@/features/retrieval/provenance";
 import { getAuthenticatedSession } from "@/server/auth";
@@ -102,12 +103,17 @@ export async function getOwnedConversation(conversationId: string) {
 
   return {
     ...conversation,
-    messages: conversationMessages.map((message) => ({
-      ...message,
-      imageAttachments: attachmentsByMessageId.get(message.id) ?? [],
-      provenance: message.role === "assistant" ? provenanceByMessageId.get(message.id) ?? [] : [],
-      feedback: message.role === "assistant" ? feedbackByMessageId.get(message.id) ?? null : null,
-    })),
+    messages: conversationMessages.map((message) => {
+      const provenance = message.role === "assistant" ? provenanceByMessageId.get(message.id) ?? [] : [];
+
+      return {
+        ...message,
+        imageAttachments: attachmentsByMessageId.get(message.id) ?? [],
+        provenance,
+        annotations: message.role === "assistant" ? buildDefaultAnswerAnnotations({ answerText: message.content, provenance }) : [],
+        feedback: message.role === "assistant" ? feedbackByMessageId.get(message.id) ?? null : null,
+      };
+    }),
   };
 }
 
