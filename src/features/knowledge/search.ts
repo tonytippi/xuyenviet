@@ -10,6 +10,7 @@ import { knowledgeCards, knowledgeCardSearchDocuments, knowledgeCardSources, sou
 const defaultSearchLimit = 5;
 const maxSearchLimit = 10;
 const maxSearchQueryLength = 500;
+const maxSearchCandidateDocuments = 200;
 
 type KnowledgeSearchDb = ReturnType<typeof getDb>;
 
@@ -114,13 +115,20 @@ async function searchApprovedKnowledgeInternal(query: string | null | undefined,
 
   const limit = normalizeSearchLimit(options.limit);
   const terms = getSearchTerms(normalizedQuery);
-  const batchSize = limit * 3;
+  const batchSize = Math.max(limit * 3, 30);
   let offset = 0;
   const db = getDb();
   const results: KnowledgeSearchResult[] = [];
   let candidateCount = 0;
+  const scoredDocuments: Array<{ knowledgeCardId: string; searchableText: string; updatedAt: Date; score: number }> = [];
 
-  while (countAllCandidates || results.length < limit) {
+  while (countAllCandidates || offset < maxSearchCandidateDocuments) {
+    const currentBatchSize = countAllCandidates ? batchSize : Math.min(batchSize, maxSearchCandidateDocuments - offset);
+
+    if (currentBatchSize <= 0) {
+      break;
+    }
+
     const matchingDocuments = await db
       .select({ knowledgeCardId: knowledgeCardSearchDocuments.knowledgeCardId, searchableText: knowledgeCardSearchDocuments.searchableText, updatedAt: knowledgeCardSearchDocuments.updatedAt })
       .from(knowledgeCardSearchDocuments)
@@ -134,41 +142,40 @@ async function searchApprovedKnowledgeInternal(query: string | null | undefined,
         ),
       )
       .orderBy(desc(knowledgeCardSearchDocuments.updatedAt))
-      .limit(batchSize)
+      .limit(currentBatchSize)
       .offset(offset);
 
     if (matchingDocuments.length === 0) {
       break;
     }
 
-    const scoredDocuments = matchingDocuments
-      .map((document) => ({ ...document, score: scoreSearchDocument(document.searchableText, terms) }))
-      .filter((document) => document.score > 0)
-      .sort((left, right) => right.score - left.score || right.updatedAt.getTime() - left.updatedAt.getTime());
+    scoredDocuments.push(...matchingDocuments.map((document) => ({ ...document, score: scoreSearchDocument(document.searchableText, terms) })).filter((document) => document.score > 0));
 
-    for (const document of scoredDocuments) {
-      if (!countAllCandidates && results.length >= limit) {
-        break;
-      }
-
-      const card = await loadEligibleApprovedCard(db, document.knowledgeCardId);
-
-      if (card) {
-        candidateCount += 1;
-
-        if (results.length < limit) {
-          results.push({ ...card, score: document.score });
-        }
-      } else {
-        await disableKnowledgeSearchDocument(document.knowledgeCardId, "disabled", db);
-      }
-    }
-
-    if (matchingDocuments.length < batchSize) {
+    if (matchingDocuments.length < currentBatchSize) {
       break;
     }
 
-    offset += batchSize;
+    offset += currentBatchSize;
+  }
+
+  scoredDocuments.sort((left, right) => right.score - left.score || right.updatedAt.getTime() - left.updatedAt.getTime());
+
+  for (const document of scoredDocuments) {
+    if (!countAllCandidates && results.length >= limit) {
+      break;
+    }
+
+    const card = await loadEligibleApprovedCard(db, document.knowledgeCardId);
+
+    if (card) {
+      candidateCount += 1;
+
+      if (results.length < limit) {
+        results.push({ ...card, score: document.score });
+      }
+    } else {
+      await disableKnowledgeSearchDocument(document.knowledgeCardId, "disabled", db);
+    }
   }
 
   return { results, candidateCount: countAllCandidates ? candidateCount : results.length };

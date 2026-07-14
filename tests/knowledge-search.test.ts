@@ -285,6 +285,39 @@ describe("approved knowledge search documents", () => {
     expect(results.map((result) => result.id)).not.toEqual([phanThiet.id, quyNhon.id]);
   });
 
+  test("ranks relevant older location card above newer weak matches for long questions", async () => {
+    await createUser("long-location-ranking-operator", ["operator"]);
+    const source = await createSource("long-location-ranking-operator", { id: "long-location-ranking-source" });
+    const honKho = await createCard("long-location-ranking-operator", {
+      id: "long-location-ranking-hon-kho",
+      title: "Chơi biển và lặn ngắm san hô ở Hòn Khô",
+      locationName: "Hòn Khô",
+      routeSegment: "Quy Nhơn",
+      summary: "Khu vực Hòn Khô gần Quy Nhơn phù hợp chơi biển và lặn ngắm san hô.",
+    });
+    const noisyCards = await Promise.all(
+      Array.from({ length: 35 }, (_, index) =>
+        createCard("long-location-ranking-operator", {
+          id: `long-location-ranking-noise-${index}`,
+          title: `Thông tin chơi biển tổng hợp ${index}`,
+          locationName: index % 2 === 0 ? "Phan Thiết" : "Nha Trang",
+          routeSegment: index % 2 === 0 ? "Mũi Né - Phan Thiết" : "Nha Trang - Cam Ranh",
+          summary: "Có thông tin chơi biển và hoạt động ven biển cho gia đình.",
+        }),
+      ),
+    );
+    await testDb.insert(knowledgeCardSources).values([honKho, ...noisyCards].map((card) => ({ knowledgeCardId: card.id, sourceId: source.id, supportLevel: "primary" as const })));
+    const { indexApprovedKnowledgeCard, searchApprovedKnowledge } = await import("@/features/knowledge/search");
+    await indexApprovedKnowledgeCard(honKho.id);
+    for (const card of noisyCards) {
+      await indexApprovedKnowledgeCard(card.id);
+    }
+
+    const results = await searchApprovedKnowledge("Thông tin chơi biển và lặn ngắm san hô ở Quy Nhơn", { limit: 5 });
+
+    expect(results[0]).toMatchObject({ id: honKho.id });
+  });
+
   test("continues filling bounded results when active documents become ineligible between document and card loads", async () => {
     await createUser("stale-fill-operator", ["operator"]);
     const source = await createSource("stale-fill-operator", { id: "stale-fill-source" });
