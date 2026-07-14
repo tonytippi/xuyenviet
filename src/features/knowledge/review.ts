@@ -6,6 +6,7 @@ import { alias } from "drizzle-orm/pg-core";
 import { getDb } from "@/db/client";
 import {
   knowledgeCards,
+  knowledgeCardSearchDocuments,
   knowledgeCardSources,
   knowledgeSourceSuggestions,
   knowledgeCardTypeValues,
@@ -83,6 +84,17 @@ export type ApprovedKnowledgeCard = Pick<
   | "createdAt"
 > & {
   sources: KnowledgeDraftReviewSource[];
+};
+
+export type ApprovedKnowledgeIndexStatus = {
+  state: "indexed" | "needs_indexing" | "stale_index" | "inactive_index";
+  label: string;
+  documentStatus: string | null;
+  indexedAt: Date | null;
+};
+
+export type ApprovedKnowledgeCardWithIndexStatus = ApprovedKnowledgeCard & {
+  indexStatus: ApprovedKnowledgeIndexStatus;
 };
 
 export type KnowledgeDraftReviewSuggestion = Pick<
@@ -238,6 +250,16 @@ export async function listApprovedKnowledgeCards(): Promise<ApprovedKnowledgeCar
     .orderBy(desc(knowledgeCards.updatedAt));
 
   return groupApprovedRows(rows).filter((card) => card.sources.length > 0);
+}
+
+export async function listApprovedKnowledgeCardsWithIndexStatus(): Promise<ApprovedKnowledgeCardWithIndexStatus[]> {
+  const cards = await listApprovedKnowledgeCards();
+  return attachIndexStatus(cards);
+}
+
+export async function getApprovedKnowledgeIndexStatuses(cardIds: string[]): Promise<Map<string, ApprovedKnowledgeIndexStatus>> {
+  await requireAdminSession();
+  return loadApprovedKnowledgeIndexStatuses(cardIds);
 }
 
 export async function getApprovedKnowledgeCard(cardId: string): Promise<ApprovedKnowledgeCard | null> {
@@ -674,6 +696,77 @@ function groupApprovedRows(
   }
 
   return Array.from(cards.values());
+}
+
+async function attachIndexStatus(cards: ApprovedKnowledgeCard[]): Promise<ApprovedKnowledgeCardWithIndexStatus[]> {
+  const statuses = await loadApprovedKnowledgeIndexStatuses(cards.map((card) => card.id));
+  return cards.map((card) => ({ ...card, indexStatus: statuses.get(card.id) ?? toMissingIndexStatus() }));
+}
+
+async function loadApprovedKnowledgeIndexStatuses(cardIds: string[]) {
+  const uniqueCardIds = Array.from(new Set(cardIds.map((cardId) => cardId.trim()).filter(Boolean)));
+  const statuses = new Map<string, ApprovedKnowledgeIndexStatus>();
+
+  if (uniqueCardIds.length === 0) {
+    return statuses;
+  }
+
+  const rows = await getDb()
+    .select({
+      cardId: knowledgeCards.id,
+      cardUpdatedAt: knowledgeCards.updatedAt,
+      documentStatus: knowledgeCardSearchDocuments.status,
+      documentUpdatedAt: knowledgeCardSearchDocuments.updatedAt,
+    })
+    .from(knowledgeCards)
+    .leftJoin(knowledgeCardSearchDocuments, eq(knowledgeCardSearchDocuments.knowledgeCardId, knowledgeCards.id))
+    .where(and(inArray(knowledgeCards.id, uniqueCardIds), eq(knowledgeCards.status, "approved"), eq(knowledgeCards.needsReview, false)));
+
+  for (const row of rows) {
+    statuses.set(row.cardId, toIndexStatus(row.documentStatus, row.documentUpdatedAt, row.cardUpdatedAt));
+  }
+
+  return statuses;
+}
+
+function toMissingIndexStatus(): ApprovedKnowledgeIndexStatus {
+  return {
+    state: "needs_indexing",
+    label: "Chưa index",
+    documentStatus: null,
+    indexedAt: null,
+  };
+}
+
+function toIndexStatus(documentStatus: string | null, documentUpdatedAt: Date | null, cardUpdatedAt: Date): ApprovedKnowledgeIndexStatus {
+  if (!documentStatus || !documentUpdatedAt) {
+    return toMissingIndexStatus();
+  }
+
+  if (documentStatus !== "active") {
+    return {
+      state: "inactive_index",
+      label: "Index không active",
+      documentStatus,
+      indexedAt: documentUpdatedAt,
+    };
+  }
+
+  if (documentUpdatedAt.getTime() <= cardUpdatedAt.getTime()) {
+    return {
+      state: "stale_index",
+      label: "Index cần refresh",
+      documentStatus,
+      indexedAt: documentUpdatedAt,
+    };
+  }
+
+  return {
+    state: "indexed",
+    label: "Đã index",
+    documentStatus,
+    indexedAt: documentUpdatedAt,
+  };
 }
 
 function toApprovedKnowledgeCard(card: Omit<ApprovedKnowledgeCard, "sources">): ApprovedKnowledgeCard {

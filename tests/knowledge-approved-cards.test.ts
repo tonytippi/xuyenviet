@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import { eq } from "drizzle-orm";
 
-import { auditEvents, knowledgeCards, knowledgeCardSources, rawSourceMaterial, sources, userRoles, users, type UserRole } from "@/db/schema";
+import { auditEvents, knowledgeCards, knowledgeCardSearchDocuments, knowledgeCardSources, rawSourceMaterial, sources, userRoles, users, type UserRole } from "@/db/schema";
 
 import { testDb } from "./helpers/db";
 
@@ -201,6 +202,32 @@ describe("approved knowledge cards", () => {
     await expect(getApprovedKnowledgeCard(rejected.id)).resolves.toBeNull();
     await expect(getApprovedKnowledgeCard(orphaned.id)).resolves.toBeNull();
     await expect(getApprovedKnowledgeCard(inconsistent.id)).resolves.toBeNull();
+  });
+
+  test("approved list reports worker-owned index status", async () => {
+    await createUser("index-status-operator", ["operator"]);
+    authMock.mockResolvedValue({ user: { id: "index-status-operator", email: "index-status-operator@example.com" } });
+    const source = await createSource("index-status-operator", { id: "index-status-source" });
+    const indexed = await createCard("index-status-operator", { id: "index-status-indexed", status: "approved", needsReview: false, title: "Đã có index" });
+    const missing = await createCard("index-status-operator", { id: "index-status-missing", status: "approved", needsReview: false, title: "Chưa có index" });
+    const stale = await createCard("index-status-operator", { id: "index-status-stale", status: "approved", needsReview: false, title: "Index cũ" });
+    await testDb.insert(knowledgeCardSources).values([indexed, missing, stale].map((card) => ({ knowledgeCardId: card.id, sourceId: source.id, supportLevel: "primary" as const })));
+    const { indexApprovedKnowledgeCard } = await import("@/features/knowledge/search");
+    await indexApprovedKnowledgeCard(indexed.id);
+    await indexApprovedKnowledgeCard(stale.id);
+    const [staleDocument] = await testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, stale.id));
+    await testDb.update(knowledgeCards).set({ updatedAt: new Date((staleDocument?.updatedAt.getTime() ?? Date.now()) + 10_000) }).where(eq(knowledgeCards.id, stale.id));
+    const { getApprovedKnowledgeIndexStatuses, listApprovedKnowledgeCardsWithIndexStatus } = await import("@/features/knowledge/review");
+
+    const cards = await listApprovedKnowledgeCardsWithIndexStatus();
+    const statuses = new Map(cards.map((card) => [card.id, card.indexStatus.state]));
+
+    expect(statuses.get(indexed.id)).toBe("indexed");
+    expect(statuses.get(missing.id)).toBe("needs_indexing");
+    expect(statuses.get(stale.id)).toBe("stale_index");
+    const selectedStatuses = await getApprovedKnowledgeIndexStatuses([indexed.id, missing.id]);
+    expect(selectedStatuses.get(indexed.id)).toMatchObject({ state: "indexed", documentStatus: "active" });
+    expect(selectedStatuses.get(missing.id)).toMatchObject({ state: "needs_indexing", documentStatus: null });
   });
 
   test("approved reads authorize before lookup and do not leak existence", async () => {
