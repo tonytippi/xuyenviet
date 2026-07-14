@@ -18,12 +18,15 @@ Epic 5 makes AI Ask answers grounded, auditable, and cost-visible by enforcing t
 - Story 5.7: Uncertainty And Freshness Warnings
 - Story 5.8: Validate Web Search Fallback Quality
 - Story 5.9: Record AI Usage Events
+- Story 5.10: Generate And Validate Answer Annotations
 
 ## Requirements & Constraints
 
 Traveler answers must retrieve only approved XuyenViet knowledge cards and must exclude draft, rejected, archived, stale, disabled, source-missing, or operator-only/raw-source-backed records from traveler source bundles. Retrieval must explicitly record when no relevant approved cards are found so downstream orchestration can decide whether web fallback is needed.
 
 Answer context must preserve source category labels for chat/trip context, XuyenViet knowledge, web search, and general reasoning. Selected trip project context outranks current chat-session context; both outrank approved knowledge and web search. Unrelated sessions or projects are not included by default.
+
+Inline answer annotations, when present, must be generated or validated server-side and tied to the current assistant answer's safe provenance/context read models. The frontend must not parse Vietnamese answer text to invent highlights or source claims.
 
 Web search fallback is required when no relevant approved cards are retrieved, fewer than three relevant approved cards exist for a broad planning question, freshness-sensitive facts are requested, approved cards conflict, or retrieved cards look stale. Search-derived facts remain external/unverified until approved into knowledge cards. Official/provider pages should be preferred where possible, while reposted, unattributed, Facebook-derived, or community sources must not be treated as official unless source metadata identifies an official/provider page.
 
@@ -68,3 +71,5 @@ Story 5.6 depends on Story 5.5 because source/confidence rendering must come fro
 Story 5.7 depends on Story 5.4 and Story 5.5 for web result metadata, freshness flags, conflict/fallback reasons, and provenance rows. Story 5.8 should validate the web search provider or fallback mechanism without coupling UI/source display to that provider.
 
 Story 5.9 depends on Story 5.0 for model pricing records and on the AI Gateway adapter path for provider usage metadata. Story 2.7 streaming and image input should use Story 5.0 model capabilities unless an explicit temporary capability gate is approved.
+
+Story 5.10 depends on Story 5.5 and Story 5.6 because annotations must reference stored answer provenance and render through the existing source/detail-panel trust model. It also depends on UI 6 for the frontend renderer contract.

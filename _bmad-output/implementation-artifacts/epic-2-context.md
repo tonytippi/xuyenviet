@@ -15,6 +15,7 @@ Epic 2 delivers the first usable AI Ask conversation loop for authenticated trav
 - Story 2.4: Structured Road-Trip Answer Format
 - Story 2.5: Continue Conversation With Context
 - Story 2.6: Basic Chat Responsiveness And Failure States
+- UI 6: Render Clickable Answer Annotations
 
 ## Requirements & Constraints
 
@@ -51,6 +52,7 @@ Epic 2 delivers the first usable AI Ask conversation loop for authenticated trav
 - Assistant answers should render as scannable blocks with spacing between major sections. Warnings and next steps should be easier to find than raw metadata. Maximum reading width for chat answer content is 760px.
 - Follow-up questions appear as 1-3 concise questions in the answer footer. Tappable suggestions may prefill the composer, but the user can edit before sending.
 - Source/confidence UI should be progressively disclosed via compact chips or placeholder sections where relevant, but Epic 2 must avoid fake provenance. Long URLs and detailed provenance should not be embedded after every paragraph.
+- Inline answer highlights should be rendered only from structured annotation descriptors and should open the contextual detail panel. The UI must not parse Vietnamese free text to invent links, details, or source claims.
 - Storage notice behavior belongs primarily to later chat/trip context work, but the AI Ask surface should be compatible with a low-friction inline notice near first meaningful use.
 - Accessibility floor: keyboard reachable controls, readable Vietnamese diacritics at 200% zoom and mobile widths, at least 44px mobile touch targets, polite `aria-live` announcements for pending/completed/error chat states, and color never being the only source/confidence indicator.
 
@@ -63,3 +65,4 @@ Epic 2 delivers the first usable AI Ask conversation loop for authenticated trav
 - Story 2.4 depends on generated assistant content from Story 2.3 and establishes the answer-format contract that later Epic 5 provenance/source display will fill in.
 - Story 2.5 depends on persisted conversation history from Story 2.2 and assistant messages from Story 2.3.
 - Story 2.6 depends on the send/generate/persist loop from Stories 2.2 and 2.3 and must ensure the UI displays persisted assistant messages rather than transient client-only output.
+- UI 6 depends on the existing selectable-entity/detail-panel shell and on Epic 5 provenance rendering for safe source descriptors. Backend-generated annotations are handled separately by Story 5.10.
