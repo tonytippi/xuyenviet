@@ -584,6 +584,60 @@ describe("answer context assembly", () => {
     expect(systemPrompt).not.toContain("không vào prompt");
   });
 
+  test("stream route validates structured annotation proposals after final answer persistence", async () => {
+    await createTestUser("user-1");
+    await seedAnswerModel();
+    const { conversation } = await createConversationWithUserMessage({ userId: "user-1" });
+    await seedApprovedKnowledge("user-1");
+
+    const answerText = "Nên dừng ở Bãi đỗ xe an toàn ở Huế có khoảng trắng có khoảng trắng có khoảng trắng có khoảng trắng.";
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { stream?: boolean; messages?: Array<{ content: string }> };
+
+      if (body.stream === false && body.messages?.[0]?.content.includes("Bạn tạo annotation nội bộ")) {
+        const annotationInput = JSON.parse(body.messages[1]?.content ?? "{}") as { handles?: Array<{ id: string; title: string }> };
+        const provenanceId = annotationInput.handles?.find((handle) => handle.title.startsWith("Bãi đỗ xe an toàn ở Huế"))?.id ?? "missing";
+        const quote = "Bãi đỗ xe an toàn ở Huế";
+        const start = answerText.indexOf(quote);
+
+        return new Response(JSON.stringify({
+          model: "cx/answer",
+          choices: [{ message: { content: JSON.stringify({ annotations: [
+            { id: "valid", start, end: start + quote.length, quote, type: "source", provenanceIds: [provenanceId] },
+            { id: "bad-provenance", start, end: start + quote.length, quote, type: "source", provenanceIds: ["other-user"] },
+          ] }) } }],
+        }), { status: 200 });
+      }
+
+      if (body.stream === false) {
+        return new Response(JSON.stringify({ model: "cx/extract", choices: [{ message: { content: JSON.stringify({ facts: [] }) } }] }), { status: 200 });
+      }
+
+      return new Response([
+        `data: {"model":"cx/answer","choices":[{"delta":{"content":${JSON.stringify(answerText)}}}]}\n\n`,
+        'data: {"choices":[{"finish_reason":"stop"}]}\n\n',
+        "data: [DONE]\n\n",
+      ].join(""), { status: 200, headers: { "content-type": "text/event-stream" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    mockRouteAuth();
+    mockWebSearch({ ok: false, code: "low_quality_results" });
+
+    const formData = new FormData();
+    formData.set("question", "Có bãi đỗ nào ở Huế không?");
+    formData.set("conversationId", conversation.id);
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const doneEvent = (await response.text())
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { type: string; assistantMessage?: { annotations?: Array<{ id: string; text: string }> } })
+      .find((event) => event.type === "done");
+
+    expect(doneEvent?.assistantMessage?.annotations).toEqual([expect.objectContaining({ id: "valid", text: "Bãi đỗ xe an toàn ở Huế" })]);
+  });
+
   test("source bundle renderer keeps instruction-like context values delimited as data", async () => {
     const { buildSourceBundlePromptSection } = await import("@/features/retrieval/source-bundle");
 

@@ -3,9 +3,9 @@ import { after } from "next/server";
 
 import { getDb } from "@/db/client";
 import { conversations, messageImageAttachments, messages, tripProjects } from "@/db/schema";
-import { buildDefaultAnswerAnnotations, type AnswerAnnotation } from "@/features/ai/answer-annotations";
+import { parseAnswerAnnotationProposals, validateAnswerAnnotations, type AnswerAnnotation } from "@/features/ai/answer-annotations";
 import { ensureAiAskFreshnessWarning } from "@/features/ai/answer-freshness";
-import { streamInitialAiAskAnswer } from "@/features/ai/gateway";
+import { completeInitialAiAskAnswer, streamInitialAiAskAnswer } from "@/features/ai/gateway";
 import { getAiGatewayPricingSnapshot, selectActiveAiGatewayModel } from "@/features/ai/models";
 import { aiAskInitialAnswerPromptVersion, aiAskInitialAnswerPurpose, buildAiAskMessages } from "@/features/ai/prompts";
 import { extractChatTripContext } from "@/features/chat-trips/context-extraction";
@@ -321,9 +321,7 @@ async function streamAnswer({
           pricingSnapshot,
         });
 
-        const annotations = buildDefaultAnswerAnnotations({ answerText: assistantContent.content, provenance });
-
-        return { id: assistantMessage.id, content: assistantContent.content, provenance, annotations };
+        return { id: assistantMessage.id, content: assistantContent.content, provenance, annotations: [] };
       });
     } catch {
       // Retry atomic assistant/provenance/usage persistence so the streamed answer is not lost to a transient failure.
@@ -365,9 +363,7 @@ async function streamAnswer({
             pricingSnapshot,
           });
 
-          const annotations = buildDefaultAnswerAnnotations({ answerText: assistantContent.content, provenance });
-
-          return { id: assistantMessage.id, content: assistantContent.content, provenance, annotations };
+          return { id: assistantMessage.id, content: assistantContent.content, provenance, annotations: [] };
         });
       } catch {
         completed = null;
@@ -375,6 +371,7 @@ async function streamAnswer({
     }
 
     if (completed) {
+      completed.annotations = await buildValidatedAnswerAnnotations({ answerText: completed.content, provenance: completed.provenance, model: selectedModel.gatewayModelName, abortSignal });
       sendEvent(controller, encoder, { type: "done", conversationId: savedTurn.conversationId, userMessage: savedTurn.userMessage, assistantMessage: completed });
     } else {
       sendEvent(controller, encoder, {
@@ -404,6 +401,76 @@ async function streamAnswer({
       // The client may have already closed the stream.
     }
   }
+}
+
+async function buildValidatedAnswerAnnotations({
+  answerText,
+  provenance,
+  model,
+  abortSignal,
+}: {
+  answerText: string;
+  provenance: AssistantMessageProvenanceItem[];
+  model: string;
+  abortSignal: AbortSignal;
+}): Promise<AnswerAnnotation[]> {
+  const annotationProvenance = getAnnotationProposalProvenance(provenance);
+
+  if (abortSignal.aborted || annotationProvenance.length === 0) {
+    return [];
+  }
+
+  try {
+    const result = await completeInitialAiAskAnswer({
+      model,
+      abortSignal,
+      messages: buildAnnotationProposalMessages({ answerText, provenance: annotationProvenance }),
+    });
+
+    if (!result.ok) {
+      return [];
+    }
+
+    const proposals = parseAnswerAnnotationProposals(result.content);
+    return validateAnswerAnnotations({ answerText, proposals, provenance });
+  } catch {
+    return [];
+  }
+}
+
+function getAnnotationProposalProvenance(provenance: AssistantMessageProvenanceItem[]) {
+  return provenance.filter((item) => item.usedInPrompt && item.sourceCategory !== "general");
+}
+
+function buildAnnotationProposalMessages({ answerText, provenance }: { answerText: string; provenance: AssistantMessageProvenanceItem[] }) {
+  const handles = provenance
+    .map((item) => ({
+      id: item.id,
+      title: item.title,
+      sourceCategory: item.sourceCategory,
+      confidenceLabel: item.confidenceLabel,
+      verificationStatus: item.verificationStatus,
+      freshnessSensitive: item.freshnessSensitive,
+    }));
+
+  return [
+    {
+      role: "system" as const,
+      content: [
+        "Bạn tạo annotation nội bộ cho câu trả lời AI Ask.",
+        "Chỉ trả về JSON hợp lệ dạng {\"annotations\":[...]}. Không markdown, không giải thích.",
+        "Mỗi annotation gồm id, start, end, quote, type, provenanceIds.",
+        "start/end là offset UTF-16 trong answerText cuối cùng. quote phải khớp chính xác đoạn chữ đó.",
+        "type chỉ là source, warning, trip_fact, hoặc action.",
+        "Chỉ dùng provenanceIds có trong danh sách handles. Không tự tạo URL, nhãn nguồn, metadata, hoặc chi tiết hiển thị.",
+        "Nếu không có cụm đáng mở chi tiết hoặc không chắc offset, trả {\"annotations\":[]}.",
+      ].join("\n"),
+    },
+    {
+      role: "user" as const,
+      content: JSON.stringify({ answerText, handles }),
+    },
+  ];
 }
 
 function validateImageFileMetadata(image: File | null) {

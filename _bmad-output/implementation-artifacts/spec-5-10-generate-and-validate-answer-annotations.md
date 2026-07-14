@@ -2,7 +2,7 @@
 title: 'Story 5.10: Generate And Validate Answer Annotations'
 type: 'feature'
 created: '2026-07-14'
-status: 'review'
+status: 'done'
 baseline_commit: 6eb591600b1bb5df8d2bf8cea8344284f9a77038
 review_loop_iteration: 0
 followup_review_recommended: false
@@ -125,6 +125,9 @@ warnings: []
 - `pnpm typecheck` passed.
 - `pnpm build` passed.
 - `pnpm test:run` exceeded 360s and isolated failure reproduced in `pnpm test:run tests/facebook-capture-review.test.ts`: `reopen only accepts rejected captures and safe short reasons` violates `facebook_capture_reviews_updated_after_created_check`. This is outside annotation changes.
+- Code review patches: `pnpm test:run tests/answer-annotations.test.ts tests/ai-ask-shell.test.ts tests/answer-context.test.ts` passed.
+- Code review patches: `pnpm lint` passed.
+- Code review patches: `pnpm typecheck` passed.
 
 ### Completion Notes
 
@@ -149,3 +152,12 @@ warnings: []
 ### Change Log
 
 - 2026-07-14: Added transient validated answer annotations and moved story to review.
+
+### Review Findings
+
+- [x] [Review][Decision] Backend annotation source is not implemented as specified — resolved by implementing a separate structured annotation proposal pass after assistant persistence and validating proposals before the `done` event.
+- [x] [Review][Patch] Title-matching generated annotations violate the structured-proposal contract and miss realistic trip/chat context spans [src/features/ai/answer-annotations.ts:138]
+- [x] [Review][Patch] Action annotations without provenance are selected when no entity is selected [src/features/ai/ai-ask-composer.tsx:285]
+- [x] [Review][Patch] `Nguồn và độ tin cậy` prompt heading is not recognized by the section renderer [src/features/ai/ai-ask-composer.tsx:196]
+- [x] [Review][Patch] Annotations whose ranges fall in section headings are silently dropped [src/features/ai/ai-ask-composer.tsx:253]
+- [x] [Review][Patch] Section body offset remapping can target the wrong repeated text occurrence [src/features/ai/ai-ask-composer.tsx:253]

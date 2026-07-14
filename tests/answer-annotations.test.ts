@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { buildAnswerAnnotationDetail, validateAnswerAnnotations, type AnswerAnnotationProposal } from "@/features/ai/answer-annotations";
+import { buildAnswerAnnotationDetail, parseAnswerAnnotationProposals, validateAnswerAnnotations, type AnswerAnnotationProposal } from "@/features/ai/answer-annotations";
 import type { AssistantMessageProvenanceItem } from "@/features/retrieval/provenance";
 
 const provenance: AssistantMessageProvenanceItem[] = [
@@ -116,6 +116,19 @@ describe("answer annotation validation", () => {
       detail: expect.objectContaining({ URL: "https://hue.gov.vn/ticket", "Độ tin cậy": "chưa xác minh" }),
     });
     expect(JSON.stringify(detail)).not.toMatch(/sourceSnapshot|providerScore|raw_source_material|operatorOnly|snippet/);
+  });
+
+  test("parses only bounded structured annotation proposal JSON", () => {
+    const proposals = parseAnswerAnnotationProposals(JSON.stringify({
+      annotations: [
+        { id: "valid", start: 0, end: 3, quote: "Huế", type: "source", provenanceIds: ["prov-knowledge", 123] },
+        { id: "missing-range", type: "source", provenanceIds: ["prov-knowledge"] },
+        "bad",
+      ],
+    }));
+
+    expect(proposals).toEqual([{ id: "valid", start: 0, end: 3, quote: "Huế", type: "source", provenanceIds: ["prov-knowledge"] }]);
+    expect(parseAnswerAnnotationProposals("not json")).toEqual([]);
   });
 });
 

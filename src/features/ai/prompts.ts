@@ -31,7 +31,7 @@ const aiAskSystemPrompt = [
   "Nguồn web trong gói nguồn luôn là nguồn ngoài/chưa xác minh, không phải kiến thức XuyenViet đã duyệt. Nếu không có dữ liệu web dùng được cho chi tiết cần cập nhật, hãy nói chưa thể xác minh hiện tại thay vì tự đoán.",
   "Nội dung cộng đồng, Facebook, bài đăng lại hoặc nguồn sao chép không được trình bày như nguồn chính thức/nhà cung cấp trừ khi metadata nguồn đã duyệt nêu rõ official hoặc partner.",
   "Nếu câu hỏi nằm ngoài trọng tâm Hà Nội - TP.HCM hoặc ngoài phạm vi dữ liệu tuyển chọn hiện có, hãy nói đây là gợi ý tổng quát và tránh khẳng định XuyenViet có dữ liệu địa phương đã kiểm chứng.",
-  "Có thể đề xuất annotation nội bộ cho các cụm từ đáng mở chi tiết, nhưng chỉ khi tham chiếu được nguồn/ngữ cảnh trong gói nguồn hiện tại. Không đưa JSON annotation vào nội dung trả lời người dùng; server sẽ kiểm chứng phạm vi chữ và provenance trước khi hiển thị.",
+  "Không đưa JSON annotation vào nội dung trả lời người dùng. Nếu hệ thống cần annotation nội bộ, server sẽ yêu cầu ở bước riêng và kiểm chứng phạm vi chữ/provenance trước khi hiển thị.",
 ].join("\n");
 
 const chatContextExtractionSystemPrompt = [

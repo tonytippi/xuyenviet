@@ -419,7 +419,7 @@ describe("AI Ask authenticated shell", () => {
     expect(html).not.toContain("Mở chi tiết annotation");
   });
 
-  test("renders persisted matching provenance as an inline annotation without unsafe fields", async () => {
+  test("does not synthesize persisted provenance title matches into inline annotations", async () => {
     await createTestUser("user-1");
     const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
     const [userMessage] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "user", content: "Bãi đỗ ở Huế?" }).returning({ id: messages.id });
@@ -445,10 +445,33 @@ describe("AI Ask authenticated shell", () => {
 
     const html = await renderAuthenticatedAiAskShell({ conversationId: conversation.id });
 
-    expect(html).toContain("Mở chi tiết annotation: Bãi đỗ chính thức Huế");
+    expect(html).not.toContain("Mở chi tiết annotation: Bãi đỗ chính thức Huế");
+    expect(html).toContain("Bãi đỗ chính thức Huế");
     expect(html).toContain("Nguồn và độ tin cậy");
     expect(html).not.toContain("raw_source_material");
     expect(html).not.toContain("providerScore");
+  });
+
+  test("renders annotation ranges in headings and does not mark provenance-less actions selected by default", async () => {
+    const { AssistantMessageContent } = await import("@/features/ai/ai-ask-composer");
+    const content = "Nguồn và độ tin cậy\nBước tiếp theo";
+    const annotations: AnswerAnnotation[] = [
+      makeAnnotation("heading-source", content, "Nguồn và độ tin cậy", "source", "source-1", "source"),
+      {
+        id: "action-heading",
+        start: content.indexOf("Bước tiếp theo"),
+        end: content.indexOf("Bước tiếp theo") + "Bước tiếp theo".length,
+        text: "Bước tiếp theo",
+        type: "action",
+        detail: { type: "action", label: "Bước tiếp theo", section: "Gợi ý hành động", detail: { "Nhãn": "Hành động" } },
+      },
+    ];
+
+    const html = renderToStaticMarkup(createElement(AssistantMessageContent, { content, annotations }));
+
+    expect(html).toContain("Mở chi tiết annotation: Nguồn và độ tin cậy");
+    expect(html).toContain("Mở chi tiết annotation: Bước tiếp theo");
+    expect(html).not.toContain('aria-pressed="true"');
   });
 
   test("renders selected answer detail panel from a transient safe descriptor", async () => {

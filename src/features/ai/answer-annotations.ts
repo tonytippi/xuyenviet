@@ -36,6 +36,7 @@ export type AnswerAnnotationDetailDescriptor = {
 };
 
 const allowedTypes = new Set<AnswerAnnotationType>(["source", "warning", "trip_fact", "action"]);
+const maxAnnotationProposals = 20;
 
 export function validateAnswerAnnotations(input: {
   answerText: string;
@@ -135,46 +136,39 @@ export function buildAnswerAnnotationDetail(input: {
   };
 }
 
-export function buildDefaultAnswerAnnotations(input: {
-  answerText: string;
-  provenance: AssistantMessageProvenanceItem[];
-}): AnswerAnnotation[] {
+export function parseAnswerAnnotationProposals(content: string): AnswerAnnotationProposal[] {
+  const payload = parseJson(content);
+
+  if (!isRecord(payload) || !Array.isArray(payload.annotations)) {
+    return [];
+  }
+
   const proposals: AnswerAnnotationProposal[] = [];
 
-  for (const item of input.provenance) {
-    if (!item.usedInPrompt && item.sourceCategory !== "general") {
-      continue;
-    }
-
-    const range = findAnnotationRange(input.answerText, item.title);
-
-    if (!range) {
+  for (const item of payload.annotations.slice(0, maxAnnotationProposals)) {
+    if (!isRecord(item) || typeof item.id !== "string" || typeof item.start !== "number" || typeof item.end !== "number" || typeof item.type !== "string") {
       continue;
     }
 
     proposals.push({
-      id: `annotation-${item.id}`,
-      start: range.start,
-      end: range.end,
-      quote: input.answerText.slice(range.start, range.end),
-      type: item.freshnessSensitive ? "warning" : item.sourceCategory === "trip_context" || item.sourceCategory === "chat_context" ? "trip_fact" : "source",
-      provenanceIds: [item.id],
+      id: item.id,
+      start: item.start,
+      end: item.end,
+      quote: typeof item.quote === "string" ? item.quote : undefined,
+      type: item.type as AnswerAnnotationType,
+      provenanceIds: Array.isArray(item.provenanceIds) ? item.provenanceIds.filter((id): id is string => typeof id === "string") : undefined,
     });
   }
 
-  return validateAnswerAnnotations({ answerText: input.answerText, proposals, provenance: input.provenance });
+  return proposals;
 }
 
-function findAnnotationRange(answerText: string, title: string) {
-  const needle = title.trim();
-
-  if (!needle || needle.length < 3) {
+function parseJson(content: string) {
+  try {
+    return JSON.parse(content) as unknown;
+  } catch {
     return null;
   }
-
-  const start = answerText.indexOf(needle);
-
-  return start >= 0 ? { start, end: start + needle.length } : null;
 }
 
 function formatAnnotationSourceType(item: AssistantMessageProvenanceItem) {
@@ -195,4 +189,8 @@ function formatAnnotationSourceType(item: AssistantMessageProvenanceItem) {
   }
 
   return "Kiến thức XuyenViet đã duyệt";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

@@ -198,6 +198,7 @@ const assistantSectionHeadings = new Set([
   "Vì sao nên đi như vậy",
   "Lưu ý thực tế",
   "Cảnh báo cần kiểm tra",
+  "Nguồn và độ tin cậy",
   "Bước tiếp theo",
   "Câu hỏi tiếp theo",
 ]);
@@ -214,28 +215,42 @@ function normalizeAssistantHeading(line: string) {
 }
 
 function splitAssistantContent(content: string) {
-  const sections: { heading?: string; body: string[] }[] = [];
+  const sections: { heading?: string; headingStart?: number; headingEnd?: number; bodyLines: { line: string; start: number; end: number }[] }[] = [];
+  const lines = content.split("\n");
+  let offset = 0;
 
-  for (const line of content.split("\n")) {
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const lineStart = offset;
+    const lineEnd = lineStart + line.length;
     const trimmed = line.trim();
     const heading = normalizeAssistantHeading(trimmed);
 
     if (assistantSectionHeadings.has(heading)) {
-      sections.push({ heading: trimmed, body: [] });
+      sections.push({ heading: trimmed, headingStart: lineStart, headingEnd: lineEnd, bodyLines: [] });
+      offset = lineEnd + (index < lines.length - 1 ? 1 : 0);
       continue;
     }
 
     if (sections.length === 0) {
-      sections.push({ body: [] });
+      sections.push({ bodyLines: [] });
     }
 
-    sections[sections.length - 1].body.push(line);
+    sections[sections.length - 1].bodyLines.push({ line, start: lineStart, end: lineEnd });
+    offset = lineEnd + (index < lines.length - 1 ? 1 : 0);
   }
 
-  return sections.map((section) => ({
-    ...section,
-    body: section.body.join("\n").trim(),
-  })).filter((section) => section.heading || section.body);
+  return sections.map((section) => {
+    const firstBodyLine = section.bodyLines[0];
+    const lastBodyLine = section.bodyLines.at(-1);
+    const rawBody = firstBodyLine && lastBodyLine ? content.slice(firstBodyLine.start, lastBodyLine.end) : "";
+    const leadingTrimLength = rawBody.length - rawBody.trimStart().length;
+    const body = rawBody.trim();
+    const bodyStart = firstBodyLine ? firstBodyLine.start + leadingTrimLength : -1;
+    const bodyEnd = body ? bodyStart + body.length : -1;
+
+    return { heading: section.heading, headingStart: section.headingStart, headingEnd: section.headingEnd, body, bodyStart, bodyEnd };
+  }).filter((section) => section.heading || section.body);
 }
 
 export function AssistantMessageContent({ content, annotations, selectedEntityId, detailPanelIds, onSelectEntity }: { content: string; annotations?: AnswerAnnotation[]; selectedEntityId?: string; detailPanelIds?: string; onSelectEntity?: (entity: AnswerEntityDescriptor, trigger: HTMLElement) => void }) {
@@ -245,19 +260,15 @@ export function AssistantMessageContent({ content, annotations, selectedEntityId
     return <p className="whitespace-pre-wrap text-base leading-7"><AnnotatedAnswerText content={content} annotations={annotations} selectedEntityId={selectedEntityId} detailPanelIds={detailPanelIds} onSelectEntity={onSelectEntity} /></p>;
   }
 
-  let cursor = 0;
-
   return (
     <div className="space-y-4">
       {sections.map((section, index) => {
-        const bodyStart = section.body ? content.indexOf(section.body, cursor) : -1;
-        const bodyEnd = bodyStart >= 0 ? bodyStart + section.body.length : -1;
-        const sectionAnnotations = bodyStart >= 0 && bodyEnd >= 0 ? annotations?.filter((annotation) => annotation.start >= bodyStart && annotation.end <= bodyEnd).map((annotation) => ({ ...annotation, start: annotation.start - bodyStart, end: annotation.end - bodyStart })) : [];
-        cursor = bodyEnd >= 0 ? bodyEnd : cursor;
+        const headingAnnotations = section.heading && section.headingStart !== undefined && section.headingEnd !== undefined ? annotations?.filter((annotation) => annotation.start >= section.headingStart! && annotation.end <= section.headingEnd!).map((annotation) => ({ ...annotation, start: annotation.start - section.headingStart!, end: annotation.end - section.headingStart! })) : [];
+        const sectionAnnotations = section.bodyStart >= 0 && section.bodyEnd >= 0 ? annotations?.filter((annotation) => annotation.start >= section.bodyStart && annotation.end <= section.bodyEnd).map((annotation) => ({ ...annotation, start: annotation.start - section.bodyStart, end: annotation.end - section.bodyStart })) : [];
 
         return (
           <section className="rounded-2xl border border-[#eadfc8] bg-white/70 p-4" key={`${section.heading || "intro"}-${index}`}>
-            {section.heading ? <h3 className="text-sm font-bold uppercase tracking-[0.12em] text-[#1f5f46]">{section.heading}</h3> : null}
+            {section.heading ? <h3 className="text-sm font-bold uppercase tracking-[0.12em] text-[#1f5f46]"><AnnotatedAnswerText content={section.heading} annotations={headingAnnotations} selectedEntityId={selectedEntityId} detailPanelIds={detailPanelIds} onSelectEntity={onSelectEntity} /></h3> : null}
             {section.body ? <p className="mt-2 whitespace-pre-wrap text-base leading-7"><AnnotatedAnswerText content={section.body} annotations={sectionAnnotations} selectedEntityId={selectedEntityId} detailPanelIds={detailPanelIds} onSelectEntity={onSelectEntity} /></p> : null}
           </section>
         );
@@ -282,7 +293,7 @@ function AnnotatedAnswerText({ content, annotations, selectedEntityId, detailPan
     }
 
     const entity = createAnnotationAnswerEntityDescriptor(annotation);
-    const isSelected = selectedEntityId === entity.provenanceIds?.[0];
+    const isSelected = Boolean(selectedEntityId && entity.provenanceIds?.[0] && selectedEntityId === entity.provenanceIds[0]);
 
     parts.push(
       <button
