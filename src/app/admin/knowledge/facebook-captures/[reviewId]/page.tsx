@@ -72,9 +72,10 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
   const errorDetail = getSearchParam(query.errorDetail);
   const statusReason = getSearchParam(query.statusReason);
   const alreadyExtracted = getSearchParam(query.alreadyExtracted) === "1";
-  const extractQueued = getSearchParam(query.extractQueued) === "1";
-  const approveAllQueued = getSearchParam(query.approveAllQueued) === "1";
   const jobId = getSearchParam(query.jobId);
+  const queuedJobStillActive = hasActiveExtractionJob && (!jobId || activeExtractionJob?.id === jobId);
+  const extractQueued = getSearchParam(query.extractQueued) === "1" && queuedJobStillActive;
+  const approveAllQueued = getSearchParam(query.approveAllQueued) === "1" && queuedJobStillActive;
 
   return (
     <div>

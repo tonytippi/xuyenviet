@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { facebookCaptureReviews, knowledgeCards, knowledgeCardSources, rawSourceMaterial, sources, userRoles, users, type UserRole } from "@/db/schema";
+import { facebookCaptureReviews, knowledgeCards, knowledgeCardSources, knowledgeExtractionJobs, rawSourceMaterial, sources, userRoles, users, type UserRole } from "@/db/schema";
 import { ensureFacebookCaptureReviewForCapturedSource, markFacebookCaptureReviewStatus } from "@/features/knowledge/facebook-capture-review";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
@@ -593,5 +593,51 @@ describe("admin Facebook capture review helpers", () => {
     expect(html).toContain("Lý do mở lại không an toàn hoặc capture này không thể mở lại.");
     expect(html).not.toContain("raw text token should not render");
     expect(html).not.toContain("provider payload should not render");
+  });
+
+  test("detail page suppresses stale queued notice after extraction job succeeds", async () => {
+    authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
+    const review = await createCapturedFacebookSource({ id: "completed-queued-notice", rawText: "Completed extraction raw text." });
+    await testDb.insert(knowledgeCards).values({
+      id: "draft-completed-queued-notice",
+      status: "draft",
+      type: "route_note",
+      title: "Draft after queued job",
+      routeSegment: "Huế - Đà Nẵng",
+      summary: "Created by completed worker job",
+      confidence: "community",
+      aiPromptVersion: "knowledge_source_extraction_v1",
+      createdByUserId: "operator-user",
+    });
+    await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: "draft-completed-queued-notice", sourceId: review.sourceId });
+    await testDb.insert(knowledgeExtractionJobs).values({
+      id: "completed-job",
+      sourceId: review.sourceId,
+      facebookCaptureReviewId: review.id,
+      mode: "extract_only",
+      status: "succeeded",
+      attemptCount: 1,
+      maxAttempts: 3,
+      resultDraftIds: ["draft-completed-queued-notice"],
+      resultDraftCount: 1,
+      createdByUserId: "operator-user",
+      createdByEmail: "operator-user@example.com",
+      finishedAt: new Date("2026-07-13T01:00:00.000Z"),
+    });
+    await testDb
+      .update(facebookCaptureReviews)
+      .set({ status: "extracted", reviewerUserId: "operator-user", reviewedAt: new Date("2026-07-13T01:00:00.000Z"), updatedAt: new Date("2026-07-13T01:00:00.000Z") })
+      .where(eq(facebookCaptureReviews.id, review.id));
+
+    const { default: FacebookCaptureReviewDetailPage } = await import("@/app/admin/knowledge/facebook-captures/[reviewId]/page");
+    const element = await FacebookCaptureReviewDetailPage({
+      params: Promise.resolve({ reviewId: review.id }),
+      searchParams: Promise.resolve({ extractQueued: "1", jobId: "completed-job" }),
+    });
+    const html = renderToStaticMarkup(element);
+
+    expect(html).not.toContain("Yêu cầu trích xuất đã được đưa vào hàng đợi");
+    expect(html).toContain("Đã trích xuất");
+    expect(html).toContain("Draft after queued job");
   });
 });
