@@ -1,0 +1,103 @@
+import { eq } from "drizzle-orm";
+import { beforeEach, describe, expect, test, vi } from "vitest";
+
+import { aiGatewayModels, facebookCaptureReviews, knowledgeCards, knowledgeCardSources, knowledgeExtractionJobs, rawSourceMaterial, sources, userRoles, users, type UserRole } from "@/db/schema";
+import { ensureFacebookCaptureReviewForCapturedSource } from "@/features/knowledge/facebook-capture-review";
+import { enqueueKnowledgeExtractionJob, processKnowledgeExtractionJob, recoverStaleKnowledgeExtractionJobs, runKnowledgeExtractionWorkerLoop } from "@/features/knowledge/extraction-jobs";
+
+import { resetTestDatabase, testDb } from "./helpers/db";
+
+const authMock = vi.hoisted(() => vi.fn());
+
+vi.mock("@/auth", () => ({
+  auth: authMock,
+  signIn: vi.fn(),
+  signOut: vi.fn(),
+}));
+
+async function createUser(userId: string, roles: UserRole[] = []) {
+  await testDb.insert(users).values({ id: userId, email: `${userId}@example.com` });
+
+  if (roles.length > 0) {
+    await testDb.insert(userRoles).values(roles.map((role) => ({ userId, role })));
+  }
+}
+
+async function createExtractionModel() {
+  await testDb.insert(aiGatewayModels).values({
+    id: "extract-model",
+    gatewayModelName: "cx/extract",
+    displayLabel: "Extract model",
+    purpose: "extraction",
+    active: true,
+    defaultForPurpose: true,
+    supportsTextInput: true,
+    supportsExtraction: true,
+    pricingUnitTokens: 1_000_000,
+    pricingEffectiveAt: new Date("2026-07-08T00:00:00.000Z"),
+  });
+}
+
+async function createCapturedFacebookReview(id: string) {
+  await testDb.insert(sources).values({
+    id,
+    kind: "facebook",
+    url: `https://facebook.com/posts/${id}`,
+    label: `Facebook source ${id}`,
+    sourceType: "community",
+    verificationStatus: "unverified",
+    official: false,
+    partner: false,
+    submittedByUserId: "operator-user",
+  });
+  await testDb.insert(rawSourceMaterial).values({ id: `raw-${id}`, sourceId: id, rawText: "Đèo Hải Vân có điểm dừng ngắm cảnh cần kiểm tra trước khi đi." });
+  const ensured = await ensureFacebookCaptureReviewForCapturedSource(testDb, { sourceId: id, rawSourceMaterialId: `raw-${id}` });
+  if (ensured.status !== "created") throw new Error("setup failed");
+  return ensured.review;
+}
+
+describe("knowledge extraction worker jobs", () => {
+  beforeEach(async () => {
+    await resetTestDatabase();
+    await createUser("operator-user", ["operator"]);
+    vi.mocked(fetch).mockReset();
+  });
+
+  test("blocks active duplicate jobs across extraction modes", async () => {
+    const review = await createCapturedFacebookReview("duplicate-active-job");
+    const actor = { userId: "operator-user", email: "operator-user@example.com" };
+
+    await expect(enqueueKnowledgeExtractionJob({ sourceId: review.sourceId, facebookCaptureReviewId: review.id, mode: "extract_only", actor }, testDb)).resolves.toMatchObject({ status: "queued" });
+    await expect(enqueueKnowledgeExtractionJob({ sourceId: review.sourceId, facebookCaptureReviewId: review.id, mode: "extract_and_approve_all", actor }, testDb)).resolves.toMatchObject({ status: "already_active" });
+    await expect(testDb.select().from(knowledgeExtractionJobs)).resolves.toHaveLength(1);
+  });
+
+  test("recovers stale running jobs", async () => {
+    const review = await createCapturedFacebookReview("stale-job");
+    const [job] = await testDb.insert(knowledgeExtractionJobs).values({ sourceId: review.sourceId, facebookCaptureReviewId: review.id, mode: "extract_only", status: "running", attemptCount: 1, lockedAt: new Date("2026-07-14T00:00:00.000Z"), lockedBy: "dead-worker", startedAt: new Date("2026-07-14T00:00:00.000Z"), createdByUserId: "operator-user", createdByEmail: "operator-user@example.com" }).returning();
+
+    await expect(recoverStaleKnowledgeExtractionJobs({ now: new Date("2026-07-14T00:20:00.000Z"), staleMs: 15 * 60_000 }, testDb)).resolves.toMatchObject({ recoveredCount: 1, jobIds: [job.id] });
+    await expect(testDb.select().from(knowledgeExtractionJobs).where(eq(knowledgeExtractionJobs.id, job.id))).resolves.toMatchObject([{ status: "queued", lockedAt: null, lockedBy: null }]);
+  });
+
+  test("one-shot worker exits when no jobs are available", async () => {
+    await expect(runKnowledgeExtractionWorkerLoop({ once: true, workerId: "test-worker" })).resolves.toMatchObject({ status: "no_job" });
+  });
+
+  test("approve-all retry resumes job-owned draft IDs without calling provider again", async () => {
+    await createExtractionModel();
+    const review = await createCapturedFacebookReview("approve-retry-owned-drafts");
+    const [draft] = await testDb.insert(knowledgeCards).values({ type: "route_note", title: "Owned draft", routeSegment: "Huế - Đà Nẵng", summary: "Thông tin cộng đồng cần duyệt trước khi dùng.", confidence: "community", freshnessSensitive: false, aiPromptVersion: "source_knowledge_draft_extraction_v1", createdByUserId: "operator-user" }).returning();
+    await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: draft.id, sourceId: review.sourceId, supportLevel: "primary" });
+    const [job] = await testDb.insert(knowledgeExtractionJobs).values({ sourceId: review.sourceId, facebookCaptureReviewId: review.id, mode: "extract_and_approve_all", status: "running", attemptCount: 2, lockedAt: new Date(), lockedBy: "retry-worker", startedAt: new Date(), resultDraftIds: [draft.id], resultDraftCount: 1, createdByUserId: "operator-user", createdByEmail: "operator-user@example.com" }).returning();
+
+    await expect(processKnowledgeExtractionJob(job.id, testDb)).resolves.toMatchObject({ status: "processed" });
+    expect(fetch).not.toHaveBeenCalled();
+    await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, draft.id))).resolves.toMatchObject([{ status: "approved", needsReview: false }]);
+    await expect(testDb.select().from(facebookCaptureReviews).where(eq(facebookCaptureReviews.id, review.id))).resolves.toMatchObject([{ status: "extracted_approved" }]);
+  });
+
+  test("worker script entrypoint can be imported by vitest", async () => {
+    await expect(import("../scripts/knowledge-extraction-worker")).resolves.toBeDefined();
+  });
+});

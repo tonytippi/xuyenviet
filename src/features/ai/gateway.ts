@@ -212,7 +212,7 @@ async function completeGatewayPrompt({
 }): Promise<AiGatewayExtractionResult> {
   const startedAt = Date.now();
   const controller = new AbortController();
-  const gatewayTimeoutMs = getGatewayTimeoutMs();
+  const gatewayTimeoutMs = getGatewayTimeoutMs(purpose);
   const timeout = setTimeout(() => controller.abort(), gatewayTimeoutMs);
 
   const onExternalAbort = () => controller.abort();
@@ -307,8 +307,8 @@ function buildGatewayUrl() {
   return `${getRequiredServerEnv("AI_GATEWAY_BASE_URL").replace(/\/+$/, "")}/chat/completions`;
 }
 
-function getGatewayTimeoutMs() {
-  const configuredValue = process.env.AI_GATEWAY_TIMEOUT_MS;
+function getGatewayTimeoutMs(purpose?: AiGatewayCompletionPurpose) {
+  const configuredValue = purpose === "extraction" ? process.env.AI_GATEWAY_EXTRACTION_TIMEOUT_MS ?? process.env.AI_GATEWAY_TIMEOUT_MS : process.env.AI_GATEWAY_TIMEOUT_MS;
 
   if (!configuredValue) {
     return defaultGatewayTimeoutMs;

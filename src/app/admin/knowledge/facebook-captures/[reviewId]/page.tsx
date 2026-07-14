@@ -41,8 +41,10 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
   }
 
   const hasExtractionCards = review.existingCards.some((card) => card.aiPromptVersion === sourceKnowledgeDraftExtractionPromptVersion);
+  const activeExtractionJob = review.activeExtractionJob;
+  const hasActiveExtractionJob = Boolean(activeExtractionJob);
   const isRetryableExtractionStatus = review.status === "needs_review" || review.status === "extraction_failed";
-  const canExtract = isRetryableExtractionStatus && Boolean(review.rawText?.trim()) && review.sourceType === "community" && !hasExtractionCards;
+  const canExtract = isRetryableExtractionStatus && Boolean(review.rawText?.trim()) && review.sourceType === "community" && !hasExtractionCards && !hasActiveExtractionJob;
   const canExtractAndApproveAll = canExtract;
   const canRecapture = (review.status === "needs_review" || review.status === "extraction_failed" || review.status === "rejected") && !hasExtractionCards;
   const draftCards = review.existingCards.filter((card) => card.status === "draft");
@@ -70,6 +72,9 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
   const errorDetail = getSearchParam(query.errorDetail);
   const statusReason = getSearchParam(query.statusReason);
   const alreadyExtracted = getSearchParam(query.alreadyExtracted) === "1";
+  const extractQueued = getSearchParam(query.extractQueued) === "1";
+  const approveAllQueued = getSearchParam(query.approveAllQueued) === "1";
+  const jobId = getSearchParam(query.jobId);
 
   return (
     <div>
@@ -82,7 +87,7 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
         Nội dung này chỉ dành cho vận hành. Chưa trích xuất, chưa duyệt, chưa dùng cho câu trả lời của khách.
       </p>
 
-      {(extractedCount || approvedAllCount || rejected || rejectError || rejectStatus || reopened || reopenError || reopenStatus || recaptureRequested || recaptureError || recaptureStatus || extractError || approveAllError || approveAllStatus || approveAllRecoveryStatus || approvalFailed || recoveryStatus || alreadyExtracted) && (
+      {(extractedCount || approvedAllCount || rejected || rejectError || rejectStatus || reopened || reopenError || reopenStatus || recaptureRequested || recaptureError || recaptureStatus || extractError || approveAllError || approveAllStatus || approveAllRecoveryStatus || approvalFailed || recoveryStatus || alreadyExtracted || extractQueued || approveAllQueued) && (
         <section className="mt-6 rounded-2xl border border-[#d8c9ad] bg-white/80 p-4 text-sm leading-6 text-[#17342c]">
           {extractedCount ? (
             <div>
@@ -163,8 +168,19 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
           ) : null}
           {recoveryStatus ? <p>Không thể hoàn tất cập nhật trạng thái sau khi trích xuất ({recoveryStatus}). Kiểm tra trạng thái review và các thẻ liên kết hiện có.</p> : null}
           {alreadyExtracted ? <p>Capture này đã có thẻ được trích xuất. Kiểm tra các thẻ liên kết thay vì trích xuất lại.</p> : null}
+          {extractQueued ? <p>Yêu cầu trích xuất đã được đưa vào hàng đợi. Bạn có thể quay lại sau để xem bản nháp.{jobId ? ` Job: ${jobId}.` : null}</p> : null}
+          {approveAllQueued ? <p>Yêu cầu trích xuất và phê duyệt tất cả đã được đưa vào hàng đợi. Không cần bấm lại; hệ thống sẽ cập nhật khi hoàn tất.{jobId ? ` Job: ${jobId}.` : null}</p> : null}
         </section>
       )}
+
+      {activeExtractionJob ? (
+        <section className="mt-6 rounded-2xl border border-[#8fb59f] bg-[#edf7ef] p-4 text-sm leading-6 text-[#17342c]">
+          <p className="font-semibold">Đang trích xuất bằng AI</p>
+          <p className="mt-1">AI đang đọc nguồn này. Không cần bấm lại; hệ thống sẽ cập nhật khi hoàn tất.</p>
+          <p className="mt-1 text-[#4f625a]">Job {activeExtractionJob.id} · {activeExtractionJob.mode} · {activeExtractionJob.status} · lần thử {activeExtractionJob.attemptCount}/{activeExtractionJob.maxAttempts}</p>
+          {activeExtractionJob.lastErrorMessage ? <p className="mt-1 text-[#9b2f29]">Trích xuất lỗi tạm thời. Hệ thống sẽ thử lại tự động.</p> : null}
+        </section>
+      ) : null}
 
       <section className="mt-8 rounded-[1.5rem] border border-[#d8c9ad] bg-[#f4ead7] p-5 sm:p-6">
         <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#8c4f13]">Nguồn Facebook/cộng đồng, chưa xác minh</p>
@@ -250,7 +266,7 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
           </div>
         ) : (
           <p className="mt-4 rounded-2xl border border-[#d8c9ad] bg-white/75 p-4 text-sm leading-6 text-[#4f625a]">
-            Capture này đã có thẻ liên kết hoặc không còn ở trạng thái có thể trích xuất mới. Kiểm tra bản nháp hoặc thẻ đã duyệt thay vì trích xuất lại.
+            {hasActiveExtractionJob ? "Capture này đang được trích xuất bằng AI. Không cần bấm lại." : "Capture này đã có thẻ liên kết hoặc không còn ở trạng thái có thể trích xuất mới. Kiểm tra bản nháp hoặc thẻ đã duyệt thay vì trích xuất lại."}
           </p>
         )}
         <div className="mt-4 grid gap-3 lg:grid-cols-2">

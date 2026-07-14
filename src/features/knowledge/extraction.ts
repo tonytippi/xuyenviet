@@ -23,7 +23,7 @@ import {
 } from "@/features/ai/prompts";
 import { recordAuditEvent } from "@/features/audit/events";
 import { writeAiUsageEvent } from "@/features/usage/events";
-import { requireAdminSession } from "@/server/auth";
+import type { AuthenticatedSession } from "@/server/auth";
 
 const maxDraftsPerExtraction = 12;
 const maxTitleLength = 160;
@@ -76,7 +76,12 @@ export function isKnowledgeExtractionError(error: unknown) {
 }
 
 export async function extractKnowledgeDraftsFromSource(sourceId: string, options: { preProviderGuard?: KnowledgeDraftExtractionPreProviderGuard } = {}): Promise<KnowledgeDraftExtractionResult> {
+  const { requireAdminSession } = await import("@/server/auth");
   const session = await requireAdminSession();
+  return extractKnowledgeDraftsFromSourceAsActor(sourceId, session, options);
+}
+
+export async function extractKnowledgeDraftsFromSourceAsActor(sourceId: string, actor: AuthenticatedSession, options: { preProviderGuard?: KnowledgeDraftExtractionPreProviderGuard } = {}): Promise<KnowledgeDraftExtractionResult> {
   const normalizedSourceId = sourceId.trim();
   let providerUsage: Parameters<typeof writeUsageForProviderCall>[3] | null = null;
 
@@ -107,6 +112,62 @@ export async function extractKnowledgeDraftsFromSource(sourceId: string, options
   }
 
   try {
+    await db.transaction(async (transaction) => {
+      await lockSourceExtraction(transaction, sourceBundle.source.id);
+
+      if (await sourceAlreadyHasExtraction(transaction, sourceBundle.source.id)) {
+        throw new KnowledgeExtractionError("Nguồn này đã được AI trích xuất trước đó. Vui lòng duyệt, sửa hoặc xử lý các thẻ đã tạo thay vì trích xuất lại.", "already_extracted");
+      }
+
+      await options.preProviderGuard?.({ db: transaction, sourceId: sourceBundle.source.id });
+    });
+
+    const gatewayResult = await completeExtraction({
+      model: model.gatewayModelName,
+      messages: buildSourceKnowledgeDraftExtractionMessages({
+        source: {
+          kind: sourceBundle.source.kind,
+          label: sourceBundle.source.label,
+          publisher: sourceBundle.source.publisher,
+          collectedDate: sourceBundle.source.collectedDate,
+          sourceType: sourceBundle.source.sourceType,
+          verificationStatus: sourceBundle.source.verificationStatus,
+          official: sourceBundle.source.official,
+          partner: sourceBundle.source.partner,
+        },
+        rawText,
+      }),
+    });
+
+    if (!gatewayResult.ok) {
+      providerUsage = {
+        status: "failure" as const,
+        provider: gatewayResult.provider ?? "unknown",
+        model: gatewayResult.model ?? model.gatewayModelName,
+        latencyMs: gatewayResult.latencyMs,
+        errorCode: gatewayResult.errorCode,
+      };
+      throw new KnowledgeExtractionError("AI chưa trích xuất được nguồn này. Vui lòng thử lại sau.", "provider_failed");
+    }
+
+    providerUsage = {
+      status: "success",
+      provider: gatewayResult.provider,
+      model: gatewayResult.model,
+      latencyMs: gatewayResult.latencyMs,
+      promptTokens: gatewayResult.usage.promptTokens,
+      completionTokens: gatewayResult.usage.completionTokens,
+      totalTokens: gatewayResult.usage.totalTokens,
+      cachedPromptTokens: gatewayResult.usage.cachedPromptTokens,
+      cacheWritePromptTokens: gatewayResult.usage.cacheWritePromptTokens,
+    };
+
+    const drafts = parseDrafts(gatewayResult.content, sourceBundle.source, rawText);
+
+    if (drafts.length === 0) {
+      throw new KnowledgeExtractionError("AI không tìm thấy tri thức du lịch đủ rõ để tạo bản nháp.", "invalid_model_output");
+    }
+
     const extraction = await db.transaction(async (transaction) => {
       await lockSourceExtraction(transaction, sourceBundle.source.id);
 
@@ -116,59 +177,13 @@ export async function extractKnowledgeDraftsFromSource(sourceId: string, options
 
       await options.preProviderGuard?.({ db: transaction, sourceId: sourceBundle.source.id });
 
-      const gatewayResult = await completeExtraction({
-        model: model.gatewayModelName,
-        messages: buildSourceKnowledgeDraftExtractionMessages({
-          source: {
-            kind: sourceBundle.source.kind,
-            label: sourceBundle.source.label,
-            publisher: sourceBundle.source.publisher,
-            collectedDate: sourceBundle.source.collectedDate,
-            sourceType: sourceBundle.source.sourceType,
-            verificationStatus: sourceBundle.source.verificationStatus,
-            official: sourceBundle.source.official,
-            partner: sourceBundle.source.partner,
-          },
-          rawText,
-        }),
-      });
-
-      if (!gatewayResult.ok) {
-        providerUsage = {
-          status: "failure" as const,
-          provider: gatewayResult.provider ?? "unknown",
-          model: gatewayResult.model ?? model.gatewayModelName,
-          latencyMs: gatewayResult.latencyMs,
-          errorCode: gatewayResult.errorCode,
-        };
-        throw new KnowledgeExtractionError("AI chưa trích xuất được nguồn này. Vui lòng thử lại sau.", "provider_failed");
-      }
-
-      providerUsage = {
-        status: "success",
-        provider: gatewayResult.provider,
-        model: gatewayResult.model,
-        latencyMs: gatewayResult.latencyMs,
-        promptTokens: gatewayResult.usage.promptTokens,
-        completionTokens: gatewayResult.usage.completionTokens,
-        totalTokens: gatewayResult.usage.totalTokens,
-        cachedPromptTokens: gatewayResult.usage.cachedPromptTokens,
-        cacheWritePromptTokens: gatewayResult.usage.cacheWritePromptTokens,
-      };
-
-      const drafts = parseDrafts(gatewayResult.content, sourceBundle.source, rawText);
-
-      if (drafts.length === 0) {
-        throw new KnowledgeExtractionError("AI không tìm thấy tri thức du lịch đủ rõ để tạo bản nháp.", "invalid_model_output");
-      }
-
-      const inserted = await transaction.insert(knowledgeCards).values(drafts.map((draft) => ({ ...draft, createdByUserId: session.userId, aiGatewayModelId: model.id }))).returning({ id: knowledgeCards.id });
+      const inserted = await transaction.insert(knowledgeCards).values(drafts.map((draft) => ({ ...draft, createdByUserId: actor.userId, aiGatewayModelId: model.id }))).returning({ id: knowledgeCards.id });
 
       await transaction.insert(knowledgeCardSources).values(inserted.map((card) => ({ knowledgeCardId: card.id, sourceId: sourceBundle.source.id, supportLevel: "primary" as const })));
 
       await recordAuditEvent(
         {
-          actor: session,
+          actor,
           operation: "create",
           targetType: "knowledge_draft_extraction",
           targetId: sourceBundle.source.id,
@@ -185,13 +200,13 @@ export async function extractKnowledgeDraftsFromSource(sourceId: string, options
     });
 
     if (providerUsage) {
-      await writeUsageForProviderCall(db, session.userId, model, providerUsage);
+      await writeUsageForProviderCall(db, actor.userId, model, providerUsage);
     }
 
     return extraction;
   } catch (error) {
     if (providerUsage && error instanceof KnowledgeExtractionError) {
-      await writeUsageForProviderCall(db, session.userId, model, providerUsage);
+      await writeUsageForProviderCall(db, actor.userId, model, providerUsage);
     }
     throw error;
   }

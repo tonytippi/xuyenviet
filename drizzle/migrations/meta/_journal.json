@@ -218,6 +218,13 @@
       "when": 1783911697261,
       "tag": "0031_round_the_call",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1783998805135,
+      "tag": "0031_broad_grandmaster",
+      "breakpoints": true
     }
   ]
 }

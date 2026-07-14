@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { aiGatewayModels, aiUsageEvents, auditEvents, facebookCaptureReviews, knowledgeCards, knowledgeCardSources, rawSourceMaterial, sources, userRoles, users, type UserRole } from "@/db/schema";
+import { aiGatewayModels, aiUsageEvents, auditEvents, facebookCaptureReviews, knowledgeCards, knowledgeCardSources, knowledgeExtractionJobs, rawSourceMaterial, sources, userRoles, users, type UserRole } from "@/db/schema";
 import { sourceKnowledgeDraftExtractionPromptVersion } from "@/features/ai/prompts";
 import { ensureFacebookCaptureReviewForCapturedSource, markFacebookCaptureReviewStatus } from "@/features/knowledge/facebook-capture-review";
 
@@ -150,7 +150,13 @@ describe("Facebook capture extract and approve all action", () => {
     );
     const { extractAndApproveFacebookCaptureDraftsForm } = await import("@/features/knowledge/actions");
 
-    await expect(extractAndApproveFacebookCaptureDraftsForm(approveAllFormData(review.id, { sourceId: "attacker-source" }))).rejects.toThrow(/NEXT_REDIRECT:.*approvedAll=1/);
+    await expect(extractAndApproveFacebookCaptureDraftsForm(approveAllFormData(review.id, { sourceId: "attacker-source" }))).rejects.toThrow(/NEXT_REDIRECT:.*approveAllQueued=1/);
+
+    await expect(testDb.select().from(knowledgeExtractionJobs)).resolves.toMatchObject([{ mode: "extract_and_approve_all", status: "queued", sourceId: "approve-success" }]);
+    expect(fetch).not.toHaveBeenCalled();
+
+    const { processNextKnowledgeExtractionJob } = await import("@/features/knowledge/extraction-jobs");
+    await expect(processNextKnowledgeExtractionJob({ workerId: "test-worker" })).resolves.toMatchObject({ status: "processed" });
 
     const cards = await testDb.select().from(knowledgeCards);
     expect(cards).toEqual(
@@ -201,7 +207,10 @@ describe("Facebook capture extract and approve all action", () => {
     mockGatewayJson(JSON.stringify({ drafts: [] }));
     const { extractAndApproveFacebookCaptureDraftsForm } = await import("@/features/knowledge/actions");
 
-    await expect(extractAndApproveFacebookCaptureDraftsForm(approveAllFormData(review.id))).rejects.toThrow(/NEXT_REDIRECT:.*approveAllError=/);
+    await expect(extractAndApproveFacebookCaptureDraftsForm(approveAllFormData(review.id))).rejects.toThrow(/NEXT_REDIRECT:.*approveAllQueued=1/);
+
+    const { processNextKnowledgeExtractionJob } = await import("@/features/knowledge/extraction-jobs");
+    await expect(processNextKnowledgeExtractionJob({ workerId: "test-worker" })).resolves.toMatchObject({ status: "failed" });
 
     await expect(testDb.select().from(knowledgeCards)).resolves.toHaveLength(0);
     await expect(testDb.select().from(facebookCaptureReviews).where(eq(facebookCaptureReviews.id, review.id))).resolves.toMatchObject([
@@ -233,10 +242,13 @@ describe("Facebook capture extract and approve all action", () => {
     vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "raw provider payload" } }), { status: 200 }));
     const { extractAndApproveFacebookCaptureDraftsForm } = await import("@/features/knowledge/actions");
 
-    await expect(extractAndApproveFacebookCaptureDraftsForm(approveAllFormData(review.id))).rejects.toThrow(/NEXT_REDIRECT:.*approveAllError=/);
+    await expect(extractAndApproveFacebookCaptureDraftsForm(approveAllFormData(review.id))).rejects.toThrow(/NEXT_REDIRECT:.*approveAllQueued=1/);
+
+    const { processNextKnowledgeExtractionJob } = await import("@/features/knowledge/extraction-jobs");
+    await expect(processNextKnowledgeExtractionJob({ workerId: "test-worker" })).resolves.toMatchObject({ status: "failed" });
 
     await expect(testDb.select().from(knowledgeCards)).resolves.toHaveLength(0);
-    await expect(testDb.select().from(facebookCaptureReviews).where(eq(facebookCaptureReviews.id, review.id))).resolves.toMatchObject([{ status: "extraction_failed", extractionError: "Extraction failed: provider_failed" }]);
+    await expect(testDb.select().from(knowledgeExtractionJobs)).resolves.toMatchObject([{ status: "queued", lastErrorCode: "provider_failed" }]);
     await expect(testDb.select().from(aiUsageEvents)).resolves.toMatchObject([{ status: "failure", errorCode: "invalid_gateway_response" }]);
     expect(JSON.stringify(await testDb.select().from(facebookCaptureReviews))).not.toContain("Raw text must not leak");
     expect(JSON.stringify(await testDb.select().from(facebookCaptureReviews))).not.toContain("raw provider payload");
@@ -270,7 +282,10 @@ describe("Facebook capture extract and approve all action", () => {
     );
     const { extractAndApproveFacebookCaptureDraftsForm } = await import("@/features/knowledge/actions");
 
-    await expect(extractAndApproveFacebookCaptureDraftsForm(approveAllFormData(review.id))).rejects.toThrow(/NEXT_REDIRECT:.*approvedAll=1/);
+    await expect(extractAndApproveFacebookCaptureDraftsForm(approveAllFormData(review.id))).rejects.toThrow(/NEXT_REDIRECT:.*approveAllQueued=1/);
+
+    const { processNextKnowledgeExtractionJob } = await import("@/features/knowledge/extraction-jobs");
+    await expect(processNextKnowledgeExtractionJob({ workerId: "test-worker" })).resolves.toMatchObject({ status: "processed" });
 
     await expect(testDb.select().from(knowledgeCards)).resolves.toMatchObject([{ status: "approved", needsReview: false }]);
     await expect(testDb.select().from(facebookCaptureReviews).where(eq(facebookCaptureReviews.id, review.id))).resolves.toMatchObject([{ status: "extracted_approved", reviewerUserId: "operator-user" }]);
@@ -282,7 +297,10 @@ describe("Facebook capture extract and approve all action", () => {
     const review = await createCapturedFacebookReview({ id: "no-model", rawText: "Raw text must not appear in errors." });
     const { extractAndApproveFacebookCaptureDraftsForm } = await import("@/features/knowledge/actions");
 
-    await expect(extractAndApproveFacebookCaptureDraftsForm(approveAllFormData(review.id))).rejects.toThrow(/NEXT_REDIRECT:.*approveAllError=/);
+    await expect(extractAndApproveFacebookCaptureDraftsForm(approveAllFormData(review.id))).rejects.toThrow(/NEXT_REDIRECT:.*approveAllQueued=1/);
+
+    const { processNextKnowledgeExtractionJob } = await import("@/features/knowledge/extraction-jobs");
+    await expect(processNextKnowledgeExtractionJob({ workerId: "test-worker" })).resolves.toMatchObject({ status: "failed" });
 
     expect(fetch).not.toHaveBeenCalled();
     await expect(testDb.select().from(knowledgeCards)).resolves.toHaveLength(0);
@@ -340,13 +358,16 @@ describe("Facebook capture extract and approve all action", () => {
     );
     const { extractAndApproveFacebookCaptureDraftsForm } = await import("@/features/knowledge/actions");
 
-    await expect(extractAndApproveFacebookCaptureDraftsForm(approveAllFormData(review.id))).rejects.toThrow(/NEXT_REDIRECT:.*approvalFailed=1/);
+    await expect(extractAndApproveFacebookCaptureDraftsForm(approveAllFormData(review.id))).rejects.toThrow(/NEXT_REDIRECT:.*approveAllQueued=1/);
+
+    const { processNextKnowledgeExtractionJob } = await import("@/features/knowledge/extraction-jobs");
+    await expect(processNextKnowledgeExtractionJob({ workerId: "test-worker" })).resolves.toMatchObject({ status: "failed" });
 
     await expect(testDb.select().from(knowledgeCards)).resolves.toMatchObject([
       { status: "draft", needsReview: true },
       { status: "draft", needsReview: true },
     ]);
-    await expect(testDb.select().from(facebookCaptureReviews).where(eq(facebookCaptureReviews.id, review.id))).resolves.toMatchObject([{ status: "extracted" }]);
+    await expect(testDb.select().from(facebookCaptureReviews).where(eq(facebookCaptureReviews.id, review.id))).resolves.toMatchObject([{ status: "extraction_failed" }]);
     const audits = await testDb.select().from(auditEvents);
     expect(audits.some((audit) => audit.targetType === "knowledge_draft_extraction")).toBe(true);
     expect(audits.some((audit) => audit.operation === "approve")).toBe(false);
@@ -389,7 +410,6 @@ describe("Facebook capture extract and approve all action", () => {
     const actionableHtml = renderToStaticMarkup(actionableElement);
     expect(actionableHtml).toContain("Trích xuất và phê duyệt tất cả");
     expect(actionableHtml).toContain("Tôi đã kiểm tra nội dung capture, trust/confidence và freshness");
-    expect(actionableHtml).toContain("Từ chối capture");
 
     const missingConfirmationElement = await FacebookCaptureReviewDetailPage({
       params: Promise.resolve({ reviewId: review.id }),

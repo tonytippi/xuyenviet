@@ -5,6 +5,7 @@ import { eq, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { facebookCaptureReviews, facebookCaptureReviewStatusValues, rawSourceMaterial, sources, type FacebookCaptureReviewStatus } from "@/db/schema";
 import { countFacebookCaptureReviewsByStatus, getExistingCardsForCaptureSource, listFacebookCaptureReviews } from "@/features/knowledge/facebook-capture-review";
+import { getActiveKnowledgeExtractionJobForSource } from "@/features/knowledge/extraction-jobs";
 import { requireAdminSession } from "@/server/auth";
 
 const defaultReviewStatus: FacebookCaptureReviewStatus = "needs_review";
@@ -84,6 +85,7 @@ export async function getAdminFacebookCaptureReviewDetail(reviewId: string) {
   return {
     ...sanitizeReviewMetadata(review),
     existingCards: await getExistingCardsForCaptureSource(db, review.sourceId),
+    activeExtractionJob: await getActiveKnowledgeExtractionJobForSource(db, review.sourceId),
   };
 }
 

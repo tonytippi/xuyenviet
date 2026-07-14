@@ -90,6 +90,12 @@ export type KnowledgeSeedBatchItemStatus = (typeof knowledgeSeedBatchItemStatusV
 export const facebookCaptureReviewStatusValues = ["needs_review", "rejected", "extracted", "extracted_approved", "extraction_failed"] as const;
 export type FacebookCaptureReviewStatus = (typeof facebookCaptureReviewStatusValues)[number];
 
+export const knowledgeExtractionJobModeValues = ["extract_only", "extract_and_approve_all"] as const;
+export type KnowledgeExtractionJobMode = (typeof knowledgeExtractionJobModeValues)[number];
+
+export const knowledgeExtractionJobStatusValues = ["queued", "running", "succeeded", "failed", "cancelled"] as const;
+export type KnowledgeExtractionJobStatus = (typeof knowledgeExtractionJobStatusValues)[number];
+
 export const chatContextFieldValues = [
   "origin",
   "destination",
@@ -316,6 +322,54 @@ export const facebookCaptureReviews = pgTable(
     check("facebook_capture_reviews_extraction_error_check", sql`${review.extractionError} is null or (${review.status} = 'extraction_failed' and length(btrim(${review.extractionError})) between 1 and 500 and position(chr(10) in ${review.extractionError}) = 0 and position(chr(13) in ${review.extractionError}) = 0)`),
     check("facebook_capture_reviews_reviewer_shape_check", sql`${review.status} = 'needs_review' or (${review.reviewerUserId} is not null and ${review.reviewedAt} is not null)`),
     check("facebook_capture_reviews_updated_after_created_check", sql`${review.updatedAt} >= ${review.createdAt}`),
+  ],
+);
+
+export const knowledgeExtractionJobs = pgTable(
+  "knowledge_extraction_jobs",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    sourceId: text("source_id")
+      .notNull()
+      .references(() => sources.id, { onDelete: "restrict" }),
+    facebookCaptureReviewId: text("facebook_capture_review_id").references(() => facebookCaptureReviews.id, { onDelete: "set null" }),
+    mode: text("mode").$type<KnowledgeExtractionJobMode>().notNull(),
+    status: text("status").$type<KnowledgeExtractionJobStatus>().default("queued").notNull(),
+    attemptCount: integer("attempt_count").default(0).notNull(),
+    maxAttempts: integer("max_attempts").default(3).notNull(),
+    nextRunAt: timestamp("next_run_at", { mode: "date" }).defaultNow().notNull(),
+    lockedAt: timestamp("locked_at", { mode: "date" }),
+    lockedBy: text("locked_by"),
+    startedAt: timestamp("started_at", { mode: "date" }),
+    finishedAt: timestamp("finished_at", { mode: "date" }),
+    lastErrorCode: text("last_error_code"),
+    lastErrorMessage: text("last_error_message"),
+    resultDraftIds: jsonb("result_draft_ids").$type<string[]>(),
+    resultDraftCount: integer("result_draft_count"),
+    createdByUserId: text("created_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    createdByEmail: text("created_by_email").notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (job) => [
+    index("knowledge_extraction_jobs_queue_idx").on(job.status, job.nextRunAt, job.createdAt),
+    index("knowledge_extraction_jobs_source_status_idx").on(job.sourceId, job.status),
+    index("knowledge_extraction_jobs_review_status_idx").on(job.facebookCaptureReviewId, job.status),
+    index("knowledge_extraction_jobs_stale_running_idx").on(job.status, job.lockedAt),
+    check("knowledge_extraction_jobs_mode_check", sql`${job.mode} in ('extract_only', 'extract_and_approve_all')`),
+    check("knowledge_extraction_jobs_status_check", sql`${job.status} in ('queued', 'running', 'succeeded', 'failed', 'cancelled')`),
+    check("knowledge_extraction_jobs_attempt_count_check", sql`${job.attemptCount} >= 0 and ${job.attemptCount} <= ${job.maxAttempts}`),
+    check("knowledge_extraction_jobs_max_attempts_check", sql`${job.maxAttempts} between 1 and 10`),
+    check("knowledge_extraction_jobs_lock_shape_check", sql`(${job.status} <> 'running') or (${job.lockedAt} is not null and ${job.lockedBy} is not null and ${job.startedAt} is not null)`),
+    check("knowledge_extraction_jobs_finished_shape_check", sql`${job.status} not in ('succeeded', 'failed', 'cancelled') or ${job.finishedAt} is not null`),
+    check("knowledge_extraction_jobs_error_message_check", sql`${job.lastErrorMessage} is null or (length(btrim(${job.lastErrorMessage})) between 1 and 500 and position(chr(10) in ${job.lastErrorMessage}) = 0 and position(chr(13) in ${job.lastErrorMessage}) = 0)`),
+    check("knowledge_extraction_jobs_result_draft_ids_check", sql`${job.resultDraftIds} is null or jsonb_typeof(${job.resultDraftIds}) = 'array'`),
+    check("knowledge_extraction_jobs_result_draft_count_check", sql`${job.resultDraftCount} is null or ${job.resultDraftCount} >= 0`),
+    check("knowledge_extraction_jobs_created_by_email_check", sql`length(btrim(${job.createdByEmail})) > 0 and char_length(${job.createdByEmail}) <= 320`),
   ],
 );
 
@@ -1185,6 +1239,7 @@ export const schema = {
   sources,
   rawSourceMaterial,
   facebookCaptureReviews,
+  knowledgeExtractionJobs,
   knowledgeCards,
   knowledgeCardSources,
   knowledgeCardSearchDocuments,

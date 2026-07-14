@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { aiGatewayModels, aiUsageEvents, facebookCaptureReviews, knowledgeCards, knowledgeCardSources, rawSourceMaterial, sources, userRoles, users, type UserRole } from "@/db/schema";
+import { aiGatewayModels, aiUsageEvents, facebookCaptureReviews, knowledgeCards, knowledgeCardSources, knowledgeExtractionJobs, rawSourceMaterial, sources, userRoles, users, type UserRole } from "@/db/schema";
 import { ensureFacebookCaptureReviewForCapturedSource, markFacebookCaptureReviewStatus } from "@/features/knowledge/facebook-capture-review";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
@@ -96,7 +96,7 @@ describe("Facebook capture extraction action", () => {
     await createUser("operator-user", ["operator"]);
   });
 
-  test("extracts drafts from a needs-review capture and marks review extracted", async () => {
+  test("queues extraction from a needs-review capture and worker marks review extracted", async () => {
     authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
     await createExtractionModel();
     const review = await createCapturedFacebookReview({ id: "success", rawText: "Đèo Hải Vân có điểm dừng ngắm cảnh, cần kiểm tra chỗ đậu xe trước khi duyệt." });
@@ -118,7 +118,13 @@ describe("Facebook capture extraction action", () => {
     );
     const { extractKnowledgeDraftsFromFacebookCaptureForm } = await import("@/features/knowledge/actions");
 
-    await expect(extractKnowledgeDraftsFromFacebookCaptureForm(formData({ reviewId: review.id, sourceId: "attacker-source" }))).rejects.toThrow(/NEXT_REDIRECT:.*extracted=1/);
+    await expect(extractKnowledgeDraftsFromFacebookCaptureForm(formData({ reviewId: review.id, sourceId: "attacker-source" }))).rejects.toThrow(/NEXT_REDIRECT:.*extractQueued=1/);
+
+    await expect(testDb.select().from(knowledgeExtractionJobs)).resolves.toMatchObject([{ status: "queued", mode: "extract_only", sourceId: "success" }]);
+    expect(fetch).not.toHaveBeenCalled();
+
+    const { processNextKnowledgeExtractionJob } = await import("@/features/knowledge/extraction-jobs");
+    await expect(processNextKnowledgeExtractionJob({ workerId: "test-worker" })).resolves.toMatchObject({ status: "processed" });
 
     await expect(testDb.select().from(knowledgeCards)).resolves.toMatchObject([{ status: "draft", needsReview: true, confidence: "unverified" }]);
     await expect(testDb.select().from(knowledgeCardSources)).resolves.toMatchObject([{ sourceId: "success", supportLevel: "primary" }]);
@@ -127,19 +133,23 @@ describe("Facebook capture extraction action", () => {
     ]);
   });
 
-  test("marks extraction_failed with a safe summary when no capable model is active", async () => {
+  test("worker marks extraction_failed with a safe summary when no capable model is active", async () => {
     authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
     await createExtractionModel({ id: "bad-model", supportsExtraction: false });
     const review = await createCapturedFacebookReview({ id: "no-model", rawText: "Raw Facebook text that must not appear in errors." });
     const { extractKnowledgeDraftsFromFacebookCaptureForm } = await import("@/features/knowledge/actions");
 
-    await expect(extractKnowledgeDraftsFromFacebookCaptureForm(formData({ reviewId: review.id }))).rejects.toThrow(/NEXT_REDIRECT:.*extractError=/);
+    await expect(extractKnowledgeDraftsFromFacebookCaptureForm(formData({ reviewId: review.id }))).rejects.toThrow(/NEXT_REDIRECT:.*extractQueued=1/);
+
+    const { processNextKnowledgeExtractionJob } = await import("@/features/knowledge/extraction-jobs");
+    await expect(processNextKnowledgeExtractionJob({ workerId: "test-worker" })).resolves.toMatchObject({ status: "failed" });
 
     expect(fetch).not.toHaveBeenCalled();
     await expect(testDb.select().from(knowledgeCards)).resolves.toHaveLength(0);
     await expect(testDb.select().from(facebookCaptureReviews).where(eq(facebookCaptureReviews.id, review.id))).resolves.toMatchObject([
       { status: "extraction_failed", extractionError: "Extraction failed: model_unavailable" },
     ]);
+    await expect(testDb.select().from(knowledgeExtractionJobs)).resolves.toMatchObject([{ status: "failed", lastErrorCode: "model_unavailable" }]);
   });
 
   test("blocks duplicate extraction before provider calls and exposes existing card context", async () => {

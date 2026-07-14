@@ -1,6 +1,6 @@
 {
-  "id": "e039a6e6-f38b-484e-a500-1ce61ef7d22e",
-  "prevId": "0b96ed7a-6b5f-4cd6-a1ef-ea4505ee8262",
+  "id": "83e048bc-2589-4f3e-839f-d16bc62bd54f",
+  "prevId": "e039a6e6-f38b-484e-a500-1ce61ef7d22e",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -2286,12 +2286,12 @@
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
-        "facebook_capture_reviews_raw_material_fk": {
-          "name": "facebook_capture_reviews_raw_material_fk",
+        "facebook_capture_reviews_reviewer_user_id_users_id_fk": {
+          "name": "facebook_capture_reviews_reviewer_user_id_users_id_fk",
           "tableFrom": "facebook_capture_reviews",
-          "tableTo": "raw_source_material",
+          "tableTo": "users",
           "columnsFrom": [
-            "raw_source_material_id"
+            "reviewer_user_id"
           ],
           "columnsTo": [
             "id"
@@ -2299,12 +2299,12 @@
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
-        "facebook_capture_reviews_reviewer_user_id_users_id_fk": {
-          "name": "facebook_capture_reviews_reviewer_user_id_users_id_fk",
+        "facebook_capture_reviews_raw_material_fk": {
+          "name": "facebook_capture_reviews_raw_material_fk",
           "tableFrom": "facebook_capture_reviews",
-          "tableTo": "users",
+          "tableTo": "raw_source_material",
           "columnsFrom": [
-            "reviewer_user_id"
+            "raw_source_material_id"
           ],
           "columnsTo": [
             "id"
@@ -2884,6 +2884,317 @@
         "knowledge_cards_draft_review_check": {
           "name": "knowledge_cards_draft_review_check",
           "value": "\"knowledge_cards\".\"status\" <> 'draft' or \"knowledge_cards\".\"needs_review\" = true"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.knowledge_extraction_jobs": {
+      "name": "knowledge_extraction_jobs",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "source_id": {
+          "name": "source_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "facebook_capture_review_id": {
+          "name": "facebook_capture_review_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "mode": {
+          "name": "mode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'queued'"
+        },
+        "attempt_count": {
+          "name": "attempt_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "max_attempts": {
+          "name": "max_attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 3
+        },
+        "next_run_at": {
+          "name": "next_run_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "locked_at": {
+          "name": "locked_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "locked_by": {
+          "name": "locked_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "finished_at": {
+          "name": "finished_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_error_code": {
+          "name": "last_error_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_error_message": {
+          "name": "last_error_message",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "result_draft_ids": {
+          "name": "result_draft_ids",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "result_draft_count": {
+          "name": "result_draft_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by_user_id": {
+          "name": "created_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_by_email": {
+          "name": "created_by_email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "knowledge_extraction_jobs_queue_idx": {
+          "name": "knowledge_extraction_jobs_queue_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "next_run_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "knowledge_extraction_jobs_source_status_idx": {
+          "name": "knowledge_extraction_jobs_source_status_idx",
+          "columns": [
+            {
+              "expression": "source_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "knowledge_extraction_jobs_review_status_idx": {
+          "name": "knowledge_extraction_jobs_review_status_idx",
+          "columns": [
+            {
+              "expression": "facebook_capture_review_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "knowledge_extraction_jobs_stale_running_idx": {
+          "name": "knowledge_extraction_jobs_stale_running_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "locked_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "knowledge_extraction_jobs_source_id_sources_id_fk": {
+          "name": "knowledge_extraction_jobs_source_id_sources_id_fk",
+          "tableFrom": "knowledge_extraction_jobs",
+          "tableTo": "sources",
+          "columnsFrom": [
+            "source_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "knowledge_extraction_jobs_facebook_capture_review_id_facebook_capture_reviews_id_fk": {
+          "name": "knowledge_extraction_jobs_facebook_capture_review_id_facebook_capture_reviews_id_fk",
+          "tableFrom": "knowledge_extraction_jobs",
+          "tableTo": "facebook_capture_reviews",
+          "columnsFrom": [
+            "facebook_capture_review_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "knowledge_extraction_jobs_created_by_user_id_users_id_fk": {
+          "name": "knowledge_extraction_jobs_created_by_user_id_users_id_fk",
+          "tableFrom": "knowledge_extraction_jobs",
+          "tableTo": "users",
+          "columnsFrom": [
+            "created_by_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "knowledge_extraction_jobs_mode_check": {
+          "name": "knowledge_extraction_jobs_mode_check",
+          "value": "\"knowledge_extraction_jobs\".\"mode\" in ('extract_only', 'extract_and_approve_all')"
+        },
+        "knowledge_extraction_jobs_status_check": {
+          "name": "knowledge_extraction_jobs_status_check",
+          "value": "\"knowledge_extraction_jobs\".\"status\" in ('queued', 'running', 'succeeded', 'failed', 'cancelled')"
+        },
+        "knowledge_extraction_jobs_attempt_count_check": {
+          "name": "knowledge_extraction_jobs_attempt_count_check",
+          "value": "\"knowledge_extraction_jobs\".\"attempt_count\" >= 0 and \"knowledge_extraction_jobs\".\"attempt_count\" <= \"knowledge_extraction_jobs\".\"max_attempts\""
+        },
+        "knowledge_extraction_jobs_max_attempts_check": {
+          "name": "knowledge_extraction_jobs_max_attempts_check",
+          "value": "\"knowledge_extraction_jobs\".\"max_attempts\" between 1 and 10"
+        },
+        "knowledge_extraction_jobs_lock_shape_check": {
+          "name": "knowledge_extraction_jobs_lock_shape_check",
+          "value": "(\"knowledge_extraction_jobs\".\"status\" <> 'running') or (\"knowledge_extraction_jobs\".\"locked_at\" is not null and \"knowledge_extraction_jobs\".\"locked_by\" is not null and \"knowledge_extraction_jobs\".\"started_at\" is not null)"
+        },
+        "knowledge_extraction_jobs_finished_shape_check": {
+          "name": "knowledge_extraction_jobs_finished_shape_check",
+          "value": "\"knowledge_extraction_jobs\".\"status\" not in ('succeeded', 'failed', 'cancelled') or \"knowledge_extraction_jobs\".\"finished_at\" is not null"
+        },
+        "knowledge_extraction_jobs_error_message_check": {
+          "name": "knowledge_extraction_jobs_error_message_check",
+          "value": "\"knowledge_extraction_jobs\".\"last_error_message\" is null or (length(btrim(\"knowledge_extraction_jobs\".\"last_error_message\")) between 1 and 500 and position(chr(10) in \"knowledge_extraction_jobs\".\"last_error_message\") = 0 and position(chr(13) in \"knowledge_extraction_jobs\".\"last_error_message\") = 0)"
+        },
+        "knowledge_extraction_jobs_result_draft_ids_check": {
+          "name": "knowledge_extraction_jobs_result_draft_ids_check",
+          "value": "\"knowledge_extraction_jobs\".\"result_draft_ids\" is null or jsonb_typeof(\"knowledge_extraction_jobs\".\"result_draft_ids\") = 'array'"
+        },
+        "knowledge_extraction_jobs_result_draft_count_check": {
+          "name": "knowledge_extraction_jobs_result_draft_count_check",
+          "value": "\"knowledge_extraction_jobs\".\"result_draft_count\" is null or \"knowledge_extraction_jobs\".\"result_draft_count\" >= 0"
+        },
+        "knowledge_extraction_jobs_created_by_email_check": {
+          "name": "knowledge_extraction_jobs_created_by_email_check",
+          "value": "length(btrim(\"knowledge_extraction_jobs\".\"created_by_email\")) > 0 and char_length(\"knowledge_extraction_jobs\".\"created_by_email\") <= 320"
         }
       },
       "isRLSEnabled": false

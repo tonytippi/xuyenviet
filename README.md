@@ -85,9 +85,13 @@ Operations scripts:
 
 ```bash
 pnpm facebook:capture --limit 5
+pnpm knowledge:extraction-worker
+pnpm knowledge:extraction-worker --once
 ```
 
 `facebook:capture` reads queued Facebook source links from PostgreSQL and saves visible captured text for later operator review. Scheduled runs use a configured service audit actor; see `docs/facebook-capture-operations.md`.
+
+`knowledge:extraction-worker` runs queued AI knowledge extraction jobs outside the admin request path. Use the default long-running mode for production worker processes, or `--once` for local/debug runs. The worker uses PostgreSQL job state, retries transient provider failures, and requeues stale `running` jobs after `KNOWLEDGE_EXTRACTION_WORKER_STALE_MS`.
 
 ## Public launch safety
 
