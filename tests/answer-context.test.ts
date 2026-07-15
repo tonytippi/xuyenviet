@@ -262,6 +262,34 @@ describe("answer context assembly", () => {
     expect(section).toContain("Mâu thuẫn giữa chat và dự án");
   });
 
+  test("includes persisted trip route and dates before any chat context exists", async () => {
+    await createTestUser("user-1");
+    const [project] = await testDb.insert(tripProjects).values({
+      userId: "user-1",
+      title: "Hà Nội đi Huế",
+      origin: "Hà Nội",
+      destination: "Huế",
+      startDate: "2026-08-01",
+      endDate: "2026-08-05",
+    }).returning({ id: tripProjects.id });
+    const { conversation } = await createConversationWithUserMessage({ tripProjectId: project.id });
+    const { loadAnswerContext, buildAnswerContextPromptSection } = await import("@/features/chat-trips/answer-context");
+
+    const digest = await loadAnswerContext({ userId: "user-1", conversationId: conversation.id, tripProjectId: project.id });
+    const section = buildAnswerContextPromptSection(digest);
+
+    expect(digest.facts).toEqual(expect.arrayContaining([
+      { field: "origin", value: "Hà Nội", source: "trip_project" },
+      { field: "destination", value: "Huế", source: "trip_project" },
+      { field: "start_date", value: "2026-08-01", source: "trip_project" },
+      { field: "end_date", value: "2026-08-05", source: "trip_project" },
+    ]));
+    expect(section).toContain('origin: "Hà Nội" (dự án)');
+    expect(section).toContain('destination: "Huế" (dự án)');
+    expect(section).toContain('start_date: "2026-08-01" (dự án)');
+    expect(section).toContain('end_date: "2026-08-05" (dự án)');
+  });
+
   test("does not load context from other conversations or projects", async () => {
     await createTestUser("user-1");
     const { conversation: conversationA, message: messageA } = await createConversationWithUserMessage({ userId: "user-1" });
@@ -332,7 +360,7 @@ describe("answer context assembly", () => {
 
   test("future project answers use the corrected latest project value and omit the superseded value", async () => {
     await createTestUser("user-1");
-    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Miền Trung" }).returning({ id: tripProjects.id });
+    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Miền Trung", destination: "Huế" }).returning({ id: tripProjects.id });
     const { conversation, message } = await createConversationWithUserMessage({ userId: "user-1", tripProjectId: project.id });
 
     await seedContextRow({ userId: "user-1", conversationId: conversation.id, sourceMessageId: message.id, field: "destination", value: "Huế", scope: "trip_project", tripProjectId: project.id, createdAt: new Date("2026-07-07T01:00:00.000Z") });
@@ -540,10 +568,14 @@ describe("answer context assembly", () => {
   test("stream route assembles source bundle in priority order in the gateway answer request", async () => {
     await createTestUser("user-1");
     await seedAnswerModel();
-    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Miền Trung" }).returning({ id: tripProjects.id });
-    const { conversation, message } = await createConversationWithUserMessage({ userId: "user-1", tripProjectId: project.id });
-    await seedContextRow({ userId: "user-1", conversationId: conversation.id, sourceMessageId: message.id, field: "destination", value: "Huế", scope: "trip_project", tripProjectId: project.id });
-    await seedContextRow({ userId: "user-1", conversationId: conversation.id, sourceMessageId: message.id, field: "budget", value: "15 triệu", scope: "conversation" });
+    const [project] = await testDb.insert(tripProjects).values({
+      userId: "user-1",
+      title: "Miền Trung",
+      origin: "Hà Nội",
+      destination: "Huế",
+      startDate: "2026-08-01",
+      endDate: "2026-08-05",
+    }).returning({ id: tripProjects.id });
     await seedApprovedKnowledge("user-1");
 
     let answerRequestBody = "";
@@ -555,7 +587,6 @@ describe("answer context assembly", () => {
 
     const formData = new FormData();
     formData.set("question", "Có bãi đỗ nào ở Huế không?");
-    formData.set("conversationId", conversation.id);
     formData.set("tripProjectId", project.id);
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
@@ -567,18 +598,20 @@ describe("answer context assembly", () => {
     expect(responseText).toContain('"type":"done"');
     expect(systemPrompt).toContain("BEGIN_CONTEXT_PRIORITY_SOURCE_BUNDLE");
     expect(systemPrompt).toContain("1. Ngữ cảnh dự án chuyến đi đã chọn");
-    expect(systemPrompt).toContain("2. Ngữ cảnh phiên chat hiện tại");
     expect(systemPrompt).toContain("3. Kiến thức Xuyên Việt đã duyệt");
     expect(systemPrompt).toContain("4. Nguồn web chưa xác minh");
     expect(systemPrompt).toContain("5. Suy luận tổng quát");
     expect(systemPrompt).toContain("BEGIN_APPROVED_KNOWLEDGE_DATA");
     expect(systemPrompt).toContain("END_APPROVED_KNOWLEDGE_DATA");
-    expect(systemPrompt.indexOf("1. Ngữ cảnh dự án chuyến đi đã chọn")).toBeLessThan(systemPrompt.indexOf("2. Ngữ cảnh phiên chat hiện tại"));
-    expect(systemPrompt.indexOf("2. Ngữ cảnh phiên chat hiện tại")).toBeLessThan(systemPrompt.indexOf("3. Kiến thức Xuyên Việt đã duyệt"));
+    expect(systemPrompt).not.toContain("2. Ngữ cảnh phiên chat hiện tại");
+    expect(systemPrompt.indexOf("1. Ngữ cảnh dự án chuyến đi đã chọn")).toBeLessThan(systemPrompt.indexOf("3. Kiến thức Xuyên Việt đã duyệt"));
     expect(systemPrompt.indexOf("3. Kiến thức Xuyên Việt đã duyệt")).toBeLessThan(systemPrompt.indexOf("4. Nguồn web chưa xác minh"));
     expect(systemPrompt.indexOf("4. Nguồn web chưa xác minh")).toBeLessThan(systemPrompt.indexOf("5. Suy luận tổng quát"));
+    expect(systemPrompt).toContain('origin: "Hà Nội"');
     expect(systemPrompt).toContain('destination: "Huế"');
-    expect(systemPrompt).toContain('budget: "15 triệu"');
+    expect(systemPrompt).toContain('start_date: "2026-08-01"');
+    expect(systemPrompt).toContain('end_date: "2026-08-05"');
+    expect(systemPrompt).not.toContain("Ngữ cảnh phiên chat hiện tại\n- budget:");
     expect(systemPrompt).toContain("Bãi đỗ xe an toàn ở Huế");
     expect(systemPrompt).toContain("Trang bãi đỗ Huế");
     expect(systemPrompt).not.toContain("không vào prompt");

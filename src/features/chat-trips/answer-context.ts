@@ -3,7 +3,7 @@ import "server-only";
 import { and, desc, eq } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { chatContext, chatContextFieldValues, conversations, type ChatContextField } from "@/db/schema";
+import { chatContext, chatContextFieldValues, conversations, tripProjects, type ChatContextField } from "@/db/schema";
 
 export type AnswerContextSource = "conversation" | "trip_project";
 
@@ -32,6 +32,13 @@ type ContextRow = {
   id: string;
 };
 
+type PersistedProjectDetails = {
+  origin: string | null;
+  destination: string | null;
+  startDate: string | null;
+  endDate: string | null;
+};
+
 export async function loadAnswerContext({
   userId,
   conversationId,
@@ -45,16 +52,27 @@ export async function loadAnswerContext({
 
   const selectColumns = { field: chatContext.field, value: chatContext.value, createdAt: chatContext.createdAt, id: chatContext.id };
 
+  let persistedProjectDetails: PersistedProjectDetails | null = null;
+
   if (tripProjectId) {
     const [conversation] = await db
-      .select({ id: conversations.id })
+      .select({
+        id: conversations.id,
+        origin: tripProjects.origin,
+        destination: tripProjects.destination,
+        startDate: tripProjects.startDate,
+        endDate: tripProjects.endDate,
+      })
       .from(conversations)
+      .innerJoin(tripProjects, and(eq(tripProjects.id, conversations.tripProjectId), eq(tripProjects.userId, conversations.userId)))
       .where(and(eq(conversations.id, conversationId), eq(conversations.userId, userId), eq(conversations.tripProjectId, tripProjectId)))
       .limit(1);
 
     if (!conversation) {
       return { hasProjectScope: true, facts: [], conflicts: [] };
     }
+
+    persistedProjectDetails = conversation;
   }
 
   const conversationRowsPromise = db
@@ -90,7 +108,12 @@ export async function loadAnswerContext({
   const [conversationRows, projectRows] = await Promise.all([conversationRowsPromise, projectRowsPromise]);
 
   const conversationByField = dedupeLatest(conversationRows);
-  const projectByField = dedupeLatest(projectRows);
+  const projectByField = new Map<string, string>(getPersistedProjectFacts(persistedProjectDetails));
+
+  for (const [field, value] of dedupeLatest(projectRows)) {
+    // Explicit project-scoped chat corrections supersede the project's original form values.
+    projectByField.set(field, value);
+  }
 
   const facts: AnswerContextFact[] = [];
   const conflicts: AnswerContextConflict[] = [];
@@ -204,6 +227,19 @@ function dedupeLatest(rows: ContextRow[]): Map<string, string> {
   }
 
   return byField;
+}
+
+function getPersistedProjectFacts(project: PersistedProjectDetails | null): Array<[ChatContextField, string]> {
+  if (!project) {
+    return [];
+  }
+
+  return [
+    ["origin", project.origin],
+    ["destination", project.destination],
+    ["start_date", project.startDate],
+    ["end_date", project.endDate],
+  ].filter((fact): fact is [ChatContextField, string] => fact[1] !== null);
 }
 
 function serializeContextValue(value: string) {
