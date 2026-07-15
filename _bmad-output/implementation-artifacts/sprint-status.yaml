@@ -1,5 +1,5 @@
 # generated: 2026-07-05
-# last_updated: 2026-07-14
+# last_updated: 2026-07-15
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -41,7 +41,7 @@
 # - Retrospective appends its action items to action_items; sprint-status surfaces open ones
 
 generated: 2026-07-05
-last_updated: 2026-07-14
+last_updated: 2026-07-15
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -94,6 +94,7 @@ development_status:
   4-7-preserve-source-and-confidence-in-approved-knowledge: done
   4-8-make-approved-knowledge-searchable-by-ai: done
   4-9-track-100-approved-corridor-items: done
+  4-10-capture-youtube-video-sources-for-knowledge-extraction: backlog
   epic-4-retrospective: done
   epic-5: done
   5-0-manage-ai-gateway-models-and-pricing: done

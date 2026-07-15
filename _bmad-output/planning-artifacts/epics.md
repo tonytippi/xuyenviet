@@ -1581,6 +1581,56 @@ So that the public MVP has enough curated examples before evaluation.
 **Then** the system reports the seed set as incomplete
 **And** it shows how many more approved items are needed.
 
+### Story 4.10: Capture YouTube Video Sources For Knowledge Extraction
+
+As an operator,
+I want to capture usable public text from a submitted YouTube video,
+So that the existing AI extraction and human-approval workflow can prepare travel knowledge cards from the video.
+
+**Acceptance Criteria:**
+
+**Given** an operator submits a canonical YouTube video URL, including `youtube.com/watch`, `youtu.be`, `youtube.com/shorts`, or `youtube.com/live`
+**When** the source is saved
+**Then** it is classified as a queued YouTube video source with normalized safe URL metadata
+**And** it remains unverified and is not AI-readable until the capture step stores usable operator-only raw text.
+
+**Given** a queued public YouTube video has an available permitted transcript or captions
+**When** the operator-run YouTube capture adapter runs
+**Then** it stores a bounded transcript or captions as `raw_source_material.raw_text` together with safe metadata such as canonical video URL, title, channel name, published date when available, capture timestamp, and capture method
+**And** it does not persist account credentials, cookies, OAuth tokens, full page HTML, hidden provider payloads, or video/audio binary content.
+
+**Given** a queued YouTube video lacks a usable transcript or captions, is private, is age/region restricted, is unavailable, or cannot be read through the approved adapter
+**When** capture runs
+**Then** the source remains unextracted and the operator receives a safe failure reason such as `no_transcript_available`
+**And** no raw text, knowledge draft, or knowledge card is fabricated.
+
+**Given** capture stores usable YouTube video text
+**When** the operator invokes the existing knowledge extraction workflow
+**Then** the system can create draft, review-needed knowledge cards linked to the YouTube source
+**And** the existing human review and approval lifecycle remains required before retrieval.
+
+**Given** extracted video content includes changing travel facts such as price, schedules, road conditions, opening hours, service availability, or promotions
+**When** drafts are prepared
+**Then** those facts remain unverified by default and can be marked freshness-sensitive
+**And** traveler-facing provenance retains the video URL, channel/title metadata when safe, and capture or publication date when available without exposing the transcript.
+
+**Given** an operator submits a YouTube channel URL, including `/@handle`, `/channel/<id>`, `/c/<name>`, or `/user/<name>`
+**When** intake or capture evaluates the source
+**Then** it is identified as a channel, not as a video
+**And** the system does not automatically enumerate, scrape, or capture the channel's videos in this story.
+
+**Given** a submitted YouTube URL is ambiguous, malformed, or resolves from a short URL to a channel rather than a video
+**When** the capture adapter resolves it
+**Then** it records a safe `youtube_channel_not_supported` or validation outcome
+**And** the operator can submit a specific video URL or use a future explicit channel-ingestion workflow.
+
+**Given** YouTube capture writes source material or changes capture state
+**When** the mutation succeeds or fails
+**Then** the operation is auditable with actor, source ID, capture method, timestamp, and safe outcome summary
+**And** no raw transcript text, provider payload, or credential data appears in audit summaries.
+
+_Dependencies: Story 4.1 source/raw boundary, Story 4.2 draft extraction, Story 4.3 review/edit, Story 4.6 approval, and Story 4.7 provenance. Requires a product/legal and technical decision on the permitted YouTube metadata/transcript provider before implementation._
+
 ## Epic 5: Grounded Retrieval, Web Search, Provenance, And Usage
 
 Traveler answers use the required context priority pipeline: selected trip project context, current chat session context, approved knowledge, web search fallback, and general reasoning, with stored provenance, source/confidence display, uncertainty handling, freshness warnings, AI Gateway model management, pricing metadata, and AI usage event recording.
