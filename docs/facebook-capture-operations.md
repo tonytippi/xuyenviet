@@ -86,10 +86,11 @@ Production scheduling should decide explicitly where this browser profile lives 
 1. Operator submits Facebook links through admin intake or batch intake.
 2. Scheduled capture runs `pnpm facebook:capture --limit 25 --yes` with the service audit actor.
 3. Captured text is stored in `raw_source_material` with safe capture metadata.
-4. Capture creates or confirms a `facebook_capture_reviews` row with `needs_review` status for the captured source.
-5. Operator uses the admin Facebook capture review queue at `/admin/knowledge/facebook-captures` to inspect the captured material before AI extraction.
-6. Operator reviews, edits, approves, or rejects drafts after extraction.
-7. Approved cards become eligible for traveler retrieval according to the knowledge workflow.
+4. Capture queues up to 20 unique linked Facebook post/share URLs from the captured post for a later run. Links that already match a stored canonical source URL are skipped; capture does not recursively open them in the same run.
+5. Capture creates or confirms a `facebook_capture_reviews` row with `needs_review` status for the captured source.
+6. Operator uses the admin Facebook capture review queue at `/admin/knowledge/facebook-captures` to inspect the captured material before AI extraction.
+7. Operator reviews, edits, approves, or rejects drafts after extraction.
+8. Approved cards become eligible for traveler retrieval according to the knowledge workflow.
 
 Capture does not currently run extraction automatically. The Playwright script is an operations process with a service audit actor, while AI extraction runs through the authenticated admin workflow so the resulting drafts have an accountable admin/operator actor and remain human-reviewed before approval.
 

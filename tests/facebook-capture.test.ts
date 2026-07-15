@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test } from "vitest";
 
 import { auditEvents, knowledgeCards, knowledgeCardSources, rawSourceMaterial, sources, users } from "@/db/schema";
-import { listQueuedFacebookSources, recordFacebookCaptureFailure, updateQueuedFacebookSourceRawText } from "@/features/knowledge/facebook-capture";
+import { listQueuedFacebookSources, normalizeDiscoveredFacebookPosts, queueDiscoveredFacebookPosts, recordFacebookCaptureFailure, updateQueuedFacebookSourceRawText } from "@/features/knowledge/facebook-capture";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
 
@@ -164,6 +164,74 @@ describe("Facebook capture queue", () => {
 
     expect(recordFacebookCaptureFailure("blocked-facebook", "login_required")).toEqual({ sourceId: "blocked-facebook", status: "failed", reason: "login_required" });
     await expect(testDb.select().from(rawSourceMaterial).where(eq(rawSourceMaterial.sourceId, "blocked-facebook"))).resolves.toMatchObject([{ rawText: null }]);
+  });
+
+  test("queues shared Facebook post links and skips sources already present", async () => {
+    await createSource({ id: "summary", kind: "facebook", rawText: "Summary post" });
+    await createSource({ id: "existing-post", kind: "facebook", rawText: null });
+    await testDb.update(sources).set({
+      url: "https://www.facebook.com/share/p/existing",
+      canonicalUrl: "https://www.facebook.com/share/p/existing",
+    }).where(eq(sources.id, "existing-post"));
+
+    const result = await queueDiscoveredFacebookPosts(testDb, {
+      sourceId: "summary",
+      sourceUrl: "https://web.facebook.com/share/p/summary/",
+      urls: [
+        "https://web.facebook.com/share/p/new-post/?fbclid=ignored",
+        "https://m.facebook.com/share/p/existing/?fbclid=ignored",
+        "https://web.facebook.com/share/p/new-post/",
+        "https://web.facebook.com/groups/xuyenviet",
+        "https://example.com/not-facebook",
+      ],
+      actor: { userId: "operator-user", email: "operator@example.com" },
+    });
+
+    expect(result).toEqual({ queuedCount: 1, duplicateCount: 1 });
+    await expect(listQueuedFacebookSources(testDb, { limit: 10 })).resolves.toMatchObject([
+      { sourceId: "existing-post" },
+      { canonicalUrl: "https://facebook.com/share/p/new-post", rawMetadata: { discoveredFromSourceId: "summary" } },
+    ]);
+  });
+
+  test("normalizes only unique Facebook post and share links", () => {
+    expect(normalizeDiscoveredFacebookPosts([
+      "https://web.facebook.com/share/p/child/?fbclid=ignored",
+      "https://www.facebook.com/share/p/child",
+      "https://facebook.com/groups/xuyenviet",
+      "https://facebook.com/groups/xuyenviet/posts/123",
+    ], "https://web.facebook.com/share/p/summary/")).toEqual([
+      { url: "https://web.facebook.com/share/p/child/?fbclid=ignored", canonicalUrl: "https://facebook.com/share/p/child" },
+      { url: "https://facebook.com/groups/xuyenviet/posts/123", canonicalUrl: "https://facebook.com/groups/xuyenviet/posts/123" },
+    ]);
+  });
+
+  test("does not discover another generation from a discovered post", async () => {
+    await createSource({ id: "summary", kind: "facebook", rawText: null });
+    const actor = { userId: "operator-user", email: "operator@example.com" };
+
+    const summaryResult = await updateQueuedFacebookSourceRawText(testDb, {
+      sourceId: "summary",
+      rawText: "Summary post",
+      captureMetadata: { captureMethod: "playwright_operator_browser", capturedAt: "2026-07-15T00:00:00.000Z", sourceUrl: "https://facebook.com/share/p/summary", finalUrl: "https://facebook.com/share/p/summary" },
+      sourceUrl: "https://facebook.com/share/p/summary",
+      discoveredUrls: ["https://facebook.com/share/p/child"],
+      actor,
+    });
+    const [child] = await testDb.select({ id: sources.id }).from(sources).where(eq(sources.canonicalUrl, "https://facebook.com/share/p/child"));
+
+    const childResult = await updateQueuedFacebookSourceRawText(testDb, {
+      sourceId: child.id,
+      rawText: "Child post",
+      captureMetadata: { captureMethod: "playwright_operator_browser", capturedAt: "2026-07-15T00:00:00.000Z", sourceUrl: "https://facebook.com/share/p/child", finalUrl: "https://facebook.com/share/p/child" },
+      sourceUrl: "https://facebook.com/share/p/child",
+      discoveredUrls: ["https://facebook.com/share/p/grandchild"],
+      actor,
+    });
+
+    expect(summaryResult).toMatchObject({ status: "updated", discovered: { queuedCount: 1 } });
+    expect(childResult).toMatchObject({ status: "updated", discovered: { queuedCount: 0 } });
+    await expect(testDb.select().from(sources).where(eq(sources.canonicalUrl, "https://facebook.com/share/p/grandchild"))).resolves.toEqual([]);
   });
 
   test("captured raw text remains readable by the existing extraction handoff", async () => {

@@ -20,6 +20,7 @@ type CliOptions = {
 
 type ExtractedFacebookText = {
   text: string;
+  linkedPostUrls: string[];
   authorText?: string;
   timestampText?: string;
   diagnostics: Record<string, string | number | boolean | null>;
@@ -544,11 +545,17 @@ export async function extractVisibleFacebookText(page: Page): Promise<ExtractedF
           .find((element) => !best?.element.contains(element) && element.getBoundingClientRect().top <= messageTop)
       : undefined;
     const text = best?.text ?? "";
+    const linkedPostUrls = article
+      ? Array.from(article.querySelectorAll("a[href]"))
+          .map((element) => element.href)
+          .filter((href) => /facebook\.com|fb\.watch|fb\.com/i.test(href))
+      : [];
     const authorText = authorCandidate?.textContent?.trim() || undefined;
     const timestampText = timestampCandidate?.textContent?.trim() || undefined;
 
     return {
       text,
+      linkedPostUrls,
       authorText,
       timestampText,
       diagnostics: {
@@ -660,9 +667,14 @@ async function main() {
           rawText: selectedText.text,
           captureMetadata: metadata,
           actor,
+          discoveredUrls: extracted.linkedPostUrls,
+          sourceUrl,
         });
 
         console.log(`Capture result for ${source.sourceId}: ${result.status}`);
+        if (result.status === "updated") {
+          console.log(`Discovered Facebook posts for ${source.sourceId}: queued=${result.discovered.queuedCount}; existing=${result.discovered.duplicateCount}.`);
+        }
       } catch (error) {
         const reason = error instanceof Error ? error.message.slice(0, 300) : "unknown_capture_error";
         console.log(recordFacebookCaptureFailure(source.sourceId, reason));

@@ -30,9 +30,15 @@ export type FacebookCaptureActor = {
   email: string;
 };
 
+export type DiscoveredFacebookPost = {
+  url: string;
+  canonicalUrl: string;
+};
+
 const DEFAULT_QUEUE_LIMIT = 5;
 const MAX_RAW_TEXT_LENGTH = 20_000;
 const MAX_METADATA_STRING_LENGTH = 500;
+const MAX_DISCOVERED_POSTS_PER_CAPTURE = 20;
 const unsafeMetadataKeyPattern = /cookie|token|password|localstorage|local_storage|html|profile|storage|secret/i;
 const safeMetadataKeys = new Set<keyof SafeFacebookCaptureMetadata>([
   "captureMethod",
@@ -156,6 +162,8 @@ export async function updateQueuedFacebookSourceRawText(
     captureMetadata: SafeFacebookCaptureMetadata & Record<string, unknown>;
     actor?: FacebookCaptureActor;
     now?: Date;
+    discoveredUrls?: string[];
+    sourceUrl?: string;
   },
 ) {
   const rawText = normalizeRawText(input.rawText);
@@ -215,8 +223,143 @@ export async function updateQueuedFacebookSourceRawText(
       });
     }
 
-    return { status: "updated" as const, rawMaterialId: updated[0].id, reviewId: review.review.id };
+    const discovered = input.actor && input.sourceUrl && !queued.rawMetadata?.discoveredFromSourceId
+      ? await queueDiscoveredFacebookPostsInTransaction(transaction, {
+          sourceId: queued.sourceId,
+          sourceUrl: input.sourceUrl,
+          urls: input.discoveredUrls ?? [],
+          actor: input.actor,
+        })
+      : { queuedCount: 0, duplicateCount: 0 };
+
+    return { status: "updated" as const, rawMaterialId: updated[0].id, reviewId: review.review.id, discovered };
   });
+}
+
+export async function queueDiscoveredFacebookPosts(
+  db: FacebookCaptureDb,
+  input: {
+    sourceId: string;
+    sourceUrl: string;
+    urls: string[];
+    actor: FacebookCaptureActor;
+  },
+) {
+  const discoveredPosts = normalizeDiscoveredFacebookPosts(input.urls, input.sourceUrl);
+
+  if (discoveredPosts.length === 0) {
+    return { queuedCount: 0, duplicateCount: 0 };
+  }
+
+  return db.transaction(async (transaction) => {
+    return queueDiscoveredFacebookPostsInTransaction(transaction, input, discoveredPosts);
+  });
+}
+
+async function queueDiscoveredFacebookPostsInTransaction(
+  transaction: Parameters<Parameters<FacebookCaptureDb["transaction"]>[0]>[0],
+  input: { sourceId: string; sourceUrl: string; urls: string[]; actor: FacebookCaptureActor },
+  discoveredPosts = normalizeDiscoveredFacebookPosts(input.urls, input.sourceUrl),
+) {
+  if (discoveredPosts.length === 0) {
+    return { queuedCount: 0, duplicateCount: 0 };
+  }
+
+  for (const post of discoveredPosts) {
+    await transaction.execute(sql`select pg_advisory_xact_lock(hashtext(${post.canonicalUrl}))`);
+  }
+
+  const existing = await transaction
+    .select({ canonicalUrl: sources.canonicalUrl })
+    .from(sources)
+    .where(eq(sources.kind, "facebook"));
+  const existingCanonicalUrls = new Set(existing.flatMap((source) => {
+    const canonicalUrl = source.canonicalUrl ? canonicalizeFacebookUrl(source.canonicalUrl) : null;
+    return canonicalUrl ? [canonicalUrl] : [];
+  }));
+  const postsToQueue = discoveredPosts.filter((post) => !existingCanonicalUrls.has(post.canonicalUrl));
+
+  if (postsToQueue.length > 0) {
+    const queuedSources = await transaction
+      .insert(sources)
+      .values(postsToQueue.map((post) => ({
+        kind: "facebook" as const,
+        url: post.url,
+        canonicalUrl: post.canonicalUrl,
+        label: "Facebook post discovered from summary",
+        publisher: "Facebook",
+        sourceType: "community" as const,
+        verificationStatus: "unverified" as const,
+        official: false,
+        partner: false,
+        submittedByUserId: input.actor.userId,
+      })))
+      .returning({ id: sources.id });
+    await transaction.insert(rawSourceMaterial).values(queuedSources.map((source) => ({
+      sourceId: source.id,
+      rawMetadata: { discoveredFromSourceId: input.sourceId },
+    })));
+  }
+
+  await transaction.insert(auditEvents).values({
+    actorUserId: input.actor.userId,
+    actorEmail: input.actor.email,
+    operation: "create",
+    targetType: "facebook_capture_discovered_posts",
+    targetId: input.sourceId,
+    afterSummary: `Facebook capture discovered posts: queued=${postsToQueue.length}; existing=${discoveredPosts.length - postsToQueue.length}.`,
+  });
+
+  return { queuedCount: postsToQueue.length, duplicateCount: discoveredPosts.length - postsToQueue.length };
+}
+
+export function normalizeDiscoveredFacebookPosts(urls: string[], sourceUrl: string): DiscoveredFacebookPost[] {
+  const sourceCanonicalUrl = canonicalizeFacebookUrl(sourceUrl);
+  const posts = new Map<string, DiscoveredFacebookPost>();
+
+  for (const url of urls) {
+    const canonicalUrl = canonicalizeFacebookUrl(url);
+    if (!canonicalUrl || canonicalUrl === sourceCanonicalUrl || posts.has(canonicalUrl)) {
+      continue;
+    }
+
+    posts.set(canonicalUrl, { url, canonicalUrl });
+    if (posts.size === MAX_DISCOVERED_POSTS_PER_CAPTURE) {
+      break;
+    }
+  }
+
+  return Array.from(posts.values());
+}
+
+function canonicalizeFacebookUrl(value: string) {
+  try {
+    const url = new URL(value);
+    const hostname = url.hostname.toLowerCase();
+    const isFacebookHost = hostname === "facebook.com" || hostname.endsWith(".facebook.com") || hostname === "fb.com" || hostname === "fb.watch";
+    const isPostUrl = /\/share\/|\/posts\/|\/permalink\//.test(url.pathname) || url.searchParams.has("story_fbid");
+
+    if ((url.protocol !== "http:" && url.protocol !== "https:") || !isFacebookHost || !isPostUrl) {
+      return null;
+    }
+
+    url.hash = "";
+    url.protocol = "https:";
+    if (hostname === "fb.com" || hostname === "fb.watch") {
+      return url.toString();
+    }
+    url.hostname = "facebook.com";
+    url.pathname = url.pathname.replace(/\/+$/, "") || "/";
+    for (const key of Array.from(url.searchParams.keys())) {
+      if (key.toLowerCase() === "fbclid" || key.toLowerCase().startsWith("utm_")) {
+        url.searchParams.delete(key);
+      }
+    }
+    url.searchParams.sort();
+    return url.toString();
+  } catch {
+    return null;
+  }
 }
 
 export function recordFacebookCaptureFailure(sourceId: string, reason: string) {
