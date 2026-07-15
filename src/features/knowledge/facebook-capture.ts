@@ -323,7 +323,7 @@ export function normalizeDiscoveredFacebookPosts(urls: string[], sourceUrl: stri
       continue;
     }
 
-    posts.set(canonicalUrl, { url, canonicalUrl });
+    posts.set(canonicalUrl, { url: canonicalUrl, canonicalUrl });
     if (posts.size === MAX_DISCOVERED_POSTS_PER_CAPTURE) {
       break;
     }
@@ -349,9 +349,13 @@ function canonicalizeFacebookUrl(value: string) {
       return url.toString();
     }
     url.hostname = "facebook.com";
+    const shareMatch = url.pathname.match(/^(\/share\/[^/]+\/[^/]+)/i);
+    if (shareMatch) {
+      url.pathname = shareMatch[1];
+    }
     url.pathname = url.pathname.replace(/\/+$/, "") || "/";
     for (const key of Array.from(url.searchParams.keys())) {
-      if (key.toLowerCase() === "fbclid" || key.toLowerCase().startsWith("utm_")) {
+      if (key.toLowerCase() === "fbclid" || key.toLowerCase().startsWith("utm_") || key.startsWith("__")) {
         url.searchParams.delete(key);
       }
     }

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { chooseBestFacebookCaptureText, chooseFacebookCaptureText, extractFacebookGraphqlText } from "../scripts/facebook-capture";
+import { chooseBestFacebookCaptureText, chooseFacebookCaptureText, detectFacebookCaptureStopReason, extractFacebookGraphqlText, getFacebookCaptureDelayMs } from "../scripts/facebook-capture";
 
 describe("Facebook capture script text selection", () => {
   test("prefers textContent when innerText drops bounded visible characters", () => {
@@ -90,4 +90,30 @@ describe("Facebook capture script text selection", () => {
     });
   });
 
+});
+
+describe("Facebook capture pacing and safety stops", () => {
+  test("chooses an inclusive randomized delay within the configured bounds", () => {
+    expect(getFacebookCaptureDelayMs({ delayMinMs: 12_000, delayMaxMs: 25_000 }, () => 0)).toBe(12_000);
+    expect(getFacebookCaptureDelayMs({ delayMinMs: 12_000, delayMaxMs: 25_000 }, () => 0.999999)).toBe(25_000);
+  });
+
+  test.each([
+    ["https://www.facebook.com/login/?next=/groups/example", "", "facebook_login_or_checkpoint"],
+    ["https://www.facebook.com/checkpoint/", "", "facebook_login_or_checkpoint"],
+    ["https://www.facebook.com/groups/example", "We limit how often you can post, comment or do other things in a given amount of time.", "facebook_rate_limited_or_blocked"],
+    ["https://www.facebook.com/groups/example", "You are temporarily blocked from using this feature.", "facebook_rate_limited_or_blocked"],
+    ["https://www.facebook.com/groups/example", "Bạn hiện không thể sử dụng tính năng này vì bị tạm thời chặn.", "facebook_rate_limited_or_blocked"],
+    ["https://www.facebook.com/groups/example", "Confirm your identity to continue.", "facebook_security_check"],
+    ["https://www.facebook.com/groups/example", "Xác nhận danh tính vì chúng tôi phát hiện hoạt động bất thường.", "facebook_security_check"],
+  ])("stops capture for %s", (url, bodyText, expected) => {
+    expect(detectFacebookCaptureStopReason({ url, bodyText })).toBe(expected);
+  });
+
+  test("continues when the page has no known interruption signal", () => {
+    expect(detectFacebookCaptureStopReason({
+      url: "https://www.facebook.com/groups/example/permalink/123",
+      bodyText: "A normal Facebook post about a road trip.",
+    })).toBeNull();
+  });
 });

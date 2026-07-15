@@ -201,8 +201,24 @@ describe("Facebook capture queue", () => {
       "https://facebook.com/groups/xuyenviet",
       "https://facebook.com/groups/xuyenviet/posts/123",
     ], "https://web.facebook.com/share/p/summary/")).toEqual([
-      { url: "https://web.facebook.com/share/p/child/?fbclid=ignored", canonicalUrl: "https://facebook.com/share/p/child" },
+      { url: "https://facebook.com/share/p/child", canonicalUrl: "https://facebook.com/share/p/child" },
       { url: "https://facebook.com/groups/xuyenviet/posts/123", canonicalUrl: "https://facebook.com/groups/xuyenviet/posts/123" },
+    ]);
+  });
+
+  test("strips encoded browser artifacts after a shared post ID before queueing", () => {
+    expect(normalizeDiscoveredFacebookPosts([
+      "https://www.facebook.com/share/p/15jVBc5eRR/%EF%BF%BC%EF%BF%BC",
+    ], "https://facebook.com/share/p/summary")).toEqual([
+      { url: "https://facebook.com/share/p/15jVBc5eRR", canonicalUrl: "https://facebook.com/share/p/15jVBc5eRR" },
+    ]);
+  });
+
+  test("strips Facebook tracking query parameters from group post links before queueing", () => {
+    expect(normalizeDiscoveredFacebookPosts([
+      "https://facebook.com/groups/1689835535154625/posts/1900464420758401?__cft__%5B0%5D=AZb8gL5cXP0OBmCPYmvza1OR-VG6NWsD7cImIeK5cKF8mzObF__AoSZAFjh85de9l7Q7odoJvSiJJL2A5DqnzCINPNnhr5TM8A0goiSUAU9JWjnu_AdNko43VObIlQLJq4VS4VXzBOoDCQW8qvrKFcm17a-AgQkzizCiLqQ_UaWJgs-ZuRz6YVQhnmHVMS2EXnSMc_h0z8189exLzb3a-eCqNZfYNUlxbdKRUDC7jxQ-SA&__tn__=-UK-R",
+    ], "https://facebook.com/share/p/summary")).toEqual([
+      { url: "https://facebook.com/groups/1689835535154625/posts/1900464420758401", canonicalUrl: "https://facebook.com/groups/1689835535154625/posts/1900464420758401" },
     ]);
   });
 

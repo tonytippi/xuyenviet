@@ -18,6 +18,13 @@ type CliOptions = {
   actorEmail?: string;
 };
 
+export type FacebookCapturePacing = {
+  delayMinMs: number;
+  delayMaxMs: number;
+  batchSize: number;
+  batchCooldownMs: number;
+};
+
 type ExtractedFacebookText = {
   text: string;
   linkedPostUrls: string[];
@@ -230,6 +237,55 @@ function extractFacebookPostId(url: string) {
 
 const DEFAULT_SYSTEM_ACTOR_USER_ID = "system-facebook-capture";
 const DEFAULT_SYSTEM_ACTOR_EMAIL = "system-facebook-capture@xuyenviet.internal";
+const DEFAULT_CAPTURE_DELAY_MIN_MS = 12_000;
+const DEFAULT_CAPTURE_DELAY_MAX_MS = 25_000;
+const DEFAULT_CAPTURE_BATCH_SIZE = 10;
+const DEFAULT_CAPTURE_BATCH_COOLDOWN_MS = 60_000;
+
+function getNonNegativeIntegerEnv(name: string, defaultValue: number) {
+  const value = getEnvValue(name);
+
+  if (value === undefined) return defaultValue;
+
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new Error(`${name} must be a non-negative integer.`);
+  }
+
+  return parsed;
+}
+
+export function getFacebookCapturePacing(): FacebookCapturePacing {
+  const delayMinMs = getNonNegativeIntegerEnv("FACEBOOK_CAPTURE_DELAY_MIN_MS", DEFAULT_CAPTURE_DELAY_MIN_MS);
+  const delayMaxMs = getNonNegativeIntegerEnv("FACEBOOK_CAPTURE_DELAY_MAX_MS", DEFAULT_CAPTURE_DELAY_MAX_MS);
+  const batchSize = getNonNegativeIntegerEnv("FACEBOOK_CAPTURE_BATCH_SIZE", DEFAULT_CAPTURE_BATCH_SIZE);
+  const batchCooldownMs = getNonNegativeIntegerEnv("FACEBOOK_CAPTURE_BATCH_COOLDOWN_MS", DEFAULT_CAPTURE_BATCH_COOLDOWN_MS);
+
+  if (delayMaxMs < delayMinMs) {
+    throw new Error("FACEBOOK_CAPTURE_DELAY_MAX_MS must be greater than or equal to FACEBOOK_CAPTURE_DELAY_MIN_MS.");
+  }
+
+  if (batchSize < 1) {
+    throw new Error("FACEBOOK_CAPTURE_BATCH_SIZE must be at least 1.");
+  }
+
+  return { delayMinMs, delayMaxMs, batchSize, batchCooldownMs };
+}
+
+export function getFacebookCaptureDelayMs(pacing: Pick<FacebookCapturePacing, "delayMinMs" | "delayMaxMs">, random = Math.random) {
+  return pacing.delayMinMs + Math.floor(random() * (pacing.delayMaxMs - pacing.delayMinMs + 1));
+}
+
+export function detectFacebookCaptureStopReason(input: { url: string; bodyText: string }) {
+  const url = input.url.toLowerCase();
+  const bodyText = input.bodyText.toLowerCase().replace(/\s+/g, " ");
+
+  if (/facebook\.com\/(login|checkpoint)/.test(url)) return "facebook_login_or_checkpoint";
+  if (/you('?| a)re temporarily blocked|you have been temporarily blocked|we limit how often|rate limit|too many requests|tạm thời bị chặn|bạn hiện không thể|giới hạn tần suất/.test(bodyText)) return "facebook_rate_limited_or_blocked";
+  if (/confirm your identity|unusual activity|security check|xác nhận danh tính|hoạt động bất thường|kiểm tra bảo mật/.test(bodyText)) return "facebook_security_check";
+
+  return null;
+}
 
 function getRequiredOptionValue(argv: string[], index: number, option: string) {
   const value = argv[index + 1];
@@ -317,6 +373,9 @@ First run opens a headed Chromium profile at .playwright/facebook-profile.
 Log into Facebook manually in that browser, close or leave it open, then rerun this command.
 Profile data stays local and must never be committed, copied into app secrets, or stored in PostgreSQL.
 Scheduled runs should use a service user row matching FACEBOOK_CAPTURE_ACTOR_USER_ID and FACEBOOK_CAPTURE_ACTOR_EMAIL.
+Pacing is configured through FACEBOOK_CAPTURE_DELAY_MIN_MS, FACEBOOK_CAPTURE_DELAY_MAX_MS,
+FACEBOOK_CAPTURE_BATCH_SIZE, and FACEBOOK_CAPTURE_BATCH_COOLDOWN_MS. Defaults are a randomized
+12-25 second delay between attempts and a one-minute cooldown after every 10 attempts.
 This tool captures visible post text only. Broad Facebook content reuse, quoting, retention, and deletion policy remains an open product/legal operations question.`);
 }
 
@@ -591,6 +650,7 @@ async function main() {
 
   try {
     const actor = await resolveCaptureActor(db, options);
+    const pacing = getFacebookCapturePacing();
     context = await chromium.launchPersistentContext(".playwright/facebook-profile", { headless: false });
     const queued = await listQueuedFacebookSources(db, { sourceId: options.sourceId, limit: options.limit });
 
@@ -601,7 +661,20 @@ async function main() {
 
     let page = await context.newPage();
 
-    for (const source of queued) {
+    for (const [index, source] of queued.entries()) {
+      if (index > 0) {
+        if (index % pacing.batchSize === 0 && pacing.batchCooldownMs > 0) {
+          console.log(`Facebook capture cooldown: waiting ${pacing.batchCooldownMs}ms after ${index} attempts.`);
+          await page.waitForTimeout(pacing.batchCooldownMs);
+        } else {
+          const delayMs = getFacebookCaptureDelayMs(pacing);
+          if (delayMs > 0) {
+            console.log(`Facebook capture pacing: waiting ${delayMs}ms before the next attempt.`);
+            await page.waitForTimeout(delayMs);
+          }
+        }
+      }
+
       const sourceUrl = source.canonicalUrl?.trim() || source.url?.trim();
 
       if (!sourceUrl) {
@@ -625,6 +698,16 @@ async function main() {
         page.on("response", onResponse);
         await page.goto(sourceUrl, { waitUntil: "domcontentloaded", timeout: 45_000 });
         await page.waitForTimeout(2_000);
+
+        const stopReason = detectFacebookCaptureStopReason({
+          url: page.url(),
+          bodyText: await page.locator("body").innerText().catch(() => ""),
+        });
+        if (stopReason) {
+          page.off("response", onResponse);
+          console.log(`Stopping Facebook capture: ${stopReason}. No further queued sources will be opened.`);
+          break;
+        }
 
         const extracted = await extractVisibleFacebookText(page);
         page.off("response", onResponse);
@@ -683,6 +766,7 @@ async function main() {
           page = await context.newPage();
         }
       }
+
     }
   } finally {
     try {

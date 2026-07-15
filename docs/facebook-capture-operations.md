@@ -94,6 +94,21 @@ Production scheduling should decide explicitly where this browser profile lives 
 
 Capture does not currently run extraction automatically. The Playwright script is an operations process with a service audit actor, while AI extraction runs through the authenticated admin workflow so the resulting drafts have an accountable admin/operator actor and remain human-reviewed before approval.
 
+## Pacing And Safety Stops
+
+Capture opens each queued permalink directly rather than attempting in-page click traversal. This keeps the queue deterministic and auditable.
+
+Default pacing is a randomized 12-25 second delay between attempts and a one-minute cooldown after every 10 attempts. Configure it per environment with non-negative integer millisecond values:
+
+```bash
+FACEBOOK_CAPTURE_DELAY_MIN_MS=12000
+FACEBOOK_CAPTURE_DELAY_MAX_MS=25000
+FACEBOOK_CAPTURE_BATCH_SIZE=10
+FACEBOOK_CAPTURE_BATCH_COOLDOWN_MS=60000
+```
+
+The script stops the current run without opening further queued sources when Facebook redirects to login or checkpoint pages, or page text indicates a rate limit, temporary block, identity confirmation, unusual activity, or security check. Refresh the approved local browser profile and investigate the account state before manually starting another run. Pacing is responsible operational rate limiting, not a mechanism to bypass platform controls.
+
 The web review queue is an admin/operator-only surface. Operators should not treat captured text as extracted, approved, or traveler-ready just because raw text exists.
 
 ## Failure Modes
