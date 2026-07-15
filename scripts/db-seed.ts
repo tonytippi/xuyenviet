@@ -15,10 +15,25 @@ import {
   webSearchResults,
 } from "../src/db/schema";
 import { getDatabaseUrl } from "./db-env";
+import { loadFacebookSeedUrls } from "./facebook-seed-urls";
 
 const databaseUrl = getDatabaseUrl();
 const client = postgres(databaseUrl, { max: 1 });
 const db = drizzle(client);
+const facebookSources = loadFacebookSeedUrls().map((source) => ({
+  id: source.id,
+  kind: "facebook" as const,
+  url: source.url,
+  canonicalUrl: source.url,
+  label: source.label,
+  publisher: "Facebook",
+  collectedDate: "2026-07-01",
+  sourceType: "community" as const,
+  verificationStatus: "unverified" as const,
+  official: false,
+  partner: false,
+  submittedByUserId: "seed-fixture-operator-user",
+}));
 
 async function main() {
   const now = new Date("2026-07-01T00:00:00.000Z");
@@ -169,144 +184,13 @@ async function main() {
     },
   ]).onConflictDoNothing();
 
-  await db.insert(sources).values([
-    {
-      id: "seed-facebook-source-1",
-      kind: "facebook",
-      url: "https://web.facebook.com/share/p/1Au7d6TG15/",
-      canonicalUrl: "https://web.facebook.com/share/p/1Au7d6TG15/",
-      label: "Facebook post 1Au7d6TG15",
-      publisher: "Facebook",
-      collectedDate: "2026-07-01",
-      sourceType: "community",
-      verificationStatus: "unverified",
-      official: false,
-      partner: false,
-      submittedByUserId: "seed-fixture-operator-user",
-    },
-    {
-      id: "seed-facebook-source-2",
-      kind: "facebook",
-      url: "https://web.facebook.com/share/p/1ExJpcQEic/",
-      canonicalUrl: "https://web.facebook.com/share/p/1ExJpcQEic/",
-      label: "Facebook post 1ExJpcQEic",
-      publisher: "Facebook",
-      collectedDate: "2026-07-01",
-      sourceType: "community",
-      verificationStatus: "unverified",
-      official: false,
-      partner: false,
-      submittedByUserId: "seed-fixture-operator-user",
-    },
-    {
-      id: "seed-facebook-source-3",
-      kind: "facebook",
-      url: "https://web.facebook.com/share/p/1BPCbfxVdx/",
-      canonicalUrl: "https://web.facebook.com/share/p/1BPCbfxVdx/",
-      label: "Facebook post 1BPCbfxVdx",
-      publisher: "Facebook",
-      collectedDate: "2026-07-01",
-      sourceType: "community",
-      verificationStatus: "unverified",
-      official: false,
-      partner: false,
-      submittedByUserId: "seed-fixture-operator-user",
-    },
-    {
-      id: "seed-facebook-source-4",
-      kind: "facebook",
-      url: "https://web.facebook.com/share/p/1QGQbv6JQb/",
-      canonicalUrl: "https://web.facebook.com/share/p/1QGQbv6JQb/",
-      label: "Facebook post 1QGQbv6JQb",
-      publisher: "Facebook",
-      collectedDate: "2026-07-01",
-      sourceType: "community",
-      verificationStatus: "unverified",
-      official: false,
-      partner: false,
-      submittedByUserId: "seed-fixture-operator-user",
-    },
-    {
-      id: "seed-facebook-source-5",
-      kind: "facebook",
-      url: "https://web.facebook.com/share/p/16eYit2seR/",
-      canonicalUrl: "https://web.facebook.com/share/p/16eYit2seR/",
-      label: "Facebook post 16eYit2seR",
-      publisher: "Facebook",
-      collectedDate: "2026-07-01",
-      sourceType: "community",
-      verificationStatus: "unverified",
-      official: false,
-      partner: false,
-      submittedByUserId: "seed-fixture-operator-user",
-    },
-    {
-      id: "seed-facebook-source-6",
-      kind: "facebook",
-      url: "https://web.facebook.com/share/p/1CWYr55n5V/",
-      canonicalUrl: "https://web.facebook.com/share/p/1CWYr55n5V/",
-      label: "Facebook post 1CWYr55n5V",
-      publisher: "Facebook",
-      collectedDate: "2026-07-01",
-      sourceType: "community",
-      verificationStatus: "unverified",
-      official: false,
-      partner: false,
-      submittedByUserId: "seed-fixture-operator-user",
-    },
-    {
-      id: "seed-facebook-source-7",
-      kind: "facebook",
-      url: "https://web.facebook.com/share/p/1BaXNWkVRS/",
-      canonicalUrl: "https://web.facebook.com/share/p/1BaXNWkVRS/",
-      label: "Facebook post 1BaXNWkVRS",
-      publisher: "Facebook",
-      collectedDate: "2026-07-01",
-      sourceType: "community",
-      verificationStatus: "unverified",
-      official: false,
-      partner: false,
-      submittedByUserId: "seed-fixture-operator-user",
-    },
-  ]).onConflictDoNothing();
+  await db.insert(sources).values(facebookSources).onConflictDoNothing();
 
-  await db.insert(rawSourceMaterial).values([
-    {
-      id: "seed-facebook-raw-1",
-      sourceId: "seed-facebook-source-1",
-      rawMetadata: { sourceUrl: "https://web.facebook.com/share/p/1Au7d6TG15/" },
-    },
-    {
-      id: "seed-facebook-raw-2",
-      sourceId: "seed-facebook-source-2",
-      rawMetadata: { sourceUrl: "https://web.facebook.com/share/p/1ExJpcQEic/" },
-    },
-    {
-      id: "seed-facebook-raw-3",
-      sourceId: "seed-facebook-source-3",
-      rawMetadata: { sourceUrl: "https://web.facebook.com/share/p/1BPCbfxVdx/" },
-    },
-    {
-      id: "seed-facebook-raw-4",
-      sourceId: "seed-facebook-source-4",
-      rawMetadata: { sourceUrl: "https://web.facebook.com/share/p/1QGQbv6JQb/" },
-    },
-    {
-      id: "seed-facebook-raw-5",
-      sourceId: "seed-facebook-source-5",
-      rawMetadata: { sourceUrl: "https://web.facebook.com/share/p/16eYit2seR/" },
-    },
-    {
-      id: "seed-facebook-raw-6",
-      sourceId: "seed-facebook-source-6",
-      rawMetadata: { sourceUrl: "https://web.facebook.com/share/p/1CWYr55n5V/" },
-    },
-    {
-      id: "seed-facebook-raw-7",
-      sourceId: "seed-facebook-source-7",
-      rawMetadata: { sourceUrl: "https://web.facebook.com/share/p/1BaXNWkVRS/" },
-    },
-  ]).onConflictDoNothing();
+  await db.insert(rawSourceMaterial).values(facebookSources.map((source) => ({
+    id: source.id.replace("source", "raw"),
+    sourceId: source.id,
+    rawMetadata: { sourceUrl: source.url },
+  }))).onConflictDoNothing();
 
   await db.insert(webSearchResults).values({
     id: "seed-web-result-hue-weather",
