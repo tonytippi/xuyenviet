@@ -171,8 +171,8 @@ export default async function FacebookCaptureReviewQueuePage({ searchParams }: F
                   <dd className="mt-1 text-[#4f625a]">{review.capturedAt ?? formatDate(review.createdAt)}</dd>
                 </div>
                 <div className="rounded-2xl bg-[#fbf7ed] p-3">
-                  <dt className="font-semibold text-[#17342c]">Tác giả / timestamp hiển thị</dt>
-                  <dd className="mt-1 text-[#4f625a]">{[review.authorText, review.timestampText].filter(Boolean).join(" · ") || "Chưa có"}</dd>
+                  <dt className="font-semibold text-[#17342c]">Nhóm / tác giả / ngày đăng gốc</dt>
+                  <dd className="mt-1 text-[#4f625a]">{[review.groupName, review.authorText, review.postCreatedAt ? formatDate(review.postCreatedAt) : null].filter(Boolean).join(" · ") || "Chưa có metadata bài viết đáng tin cậy"}</dd>
                 </div>
                 <div className="rounded-2xl bg-[#fbf7ed] p-3">
                   <dt className="font-semibold text-[#17342c]">Trust</dt>

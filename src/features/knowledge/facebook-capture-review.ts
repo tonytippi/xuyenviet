@@ -146,9 +146,11 @@ export async function listFacebookCaptureReviews(db: FacebookCaptureReviewDb, in
       rawText: rawSourceMaterial.rawText,
       captureMethod: sql<string | null>`${rawSourceMaterial.rawMetadata}->>'captureMethod'`,
       capturedAt: sql<string | null>`${rawSourceMaterial.rawMetadata}->>'capturedAt'`,
-      finalUrl: sql<string | null>`${rawSourceMaterial.rawMetadata}->>'finalUrl'`,
-      authorText: sql<string | null>`${rawSourceMaterial.rawMetadata}->>'authorText'`,
-      timestampText: sql<string | null>`${rawSourceMaterial.rawMetadata}->>'timestampText'`,
+       finalUrl: sql<string | null>`${rawSourceMaterial.rawMetadata}->>'finalUrl'`,
+       authorText: sql<string | null>`${rawSourceMaterial.rawMetadata}->>'authorText'`,
+       groupName: sql<string | null>`${rawSourceMaterial.rawMetadata}->>'groupName'`,
+       timestampText: sql<string | null>`${rawSourceMaterial.rawMetadata}->>'timestampText'`,
+       postCreatedAt: sql<string | null>`${rawSourceMaterial.rawMetadata}->>'postCreatedAt'`,
     })
     .from(facebookCaptureReviews)
     .innerJoin(sources, eq(sources.id, facebookCaptureReviews.sourceId))

@@ -21,7 +21,9 @@ export type SafeFacebookCaptureMetadata = {
   sourceUrl: string;
   finalUrl: string;
   authorText?: string;
+  groupName?: string;
   timestampText?: string;
+  postCreatedAt?: string;
   diagnostics?: Record<string, string | number | boolean | null>;
 };
 
@@ -46,7 +48,9 @@ const safeMetadataKeys = new Set<keyof SafeFacebookCaptureMetadata>([
   "sourceUrl",
   "finalUrl",
   "authorText",
+  "groupName",
   "timestampText",
+  "postCreatedAt",
   "diagnostics",
 ]);
 
@@ -355,7 +359,7 @@ function canonicalizeFacebookUrl(value: string) {
     }
     url.pathname = url.pathname.replace(/\/+$/, "") || "/";
     for (const key of Array.from(url.searchParams.keys())) {
-      if (key.toLowerCase() === "fbclid" || key.toLowerCase().startsWith("utm_") || key.startsWith("__")) {
+      if (key.toLowerCase() === "fbclid" || key.toLowerCase() === "rdid" || key.toLowerCase().startsWith("utm_") || key.startsWith("__")) {
         url.searchParams.delete(key);
       }
     }

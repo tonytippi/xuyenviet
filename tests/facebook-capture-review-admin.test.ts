@@ -67,6 +67,7 @@ describe("admin Facebook capture review helpers", () => {
         capturedAt: "2026-07-13T08:00:00.000Z",
         finalUrl: "https://m.facebook.com/groups/xuyenviet/posts/needs-review",
         authorText: "Cộng đồng Xuyên Việt",
+        groupName: "Nhóm Xuyên Việt",
         timestampText: "2 giờ trước",
       },
     });
@@ -89,6 +90,7 @@ describe("admin Facebook capture review helpers", () => {
         capturedAt: "2026-07-13T08:00:00.000Z",
         finalUrl: "https://m.facebook.com/groups/xuyenviet/posts/needs-review",
         authorText: "Cộng đồng Xuyên Việt",
+        groupName: "Nhóm Xuyên Việt",
         timestampText: "2 giờ trước",
         rawText: "Raw Facebook text must stay out of queue rows.",
       },
@@ -136,6 +138,7 @@ describe("admin Facebook capture review helpers", () => {
         capturedAt: "2026-07-13T08:00:00.000Z",
         finalUrl: "https://m.facebook.com/detail",
         authorText: "Safe author",
+        groupName: "Safe group",
         timestampText: "Hôm qua",
         cookies: "secret-cookie",
         providerPayload: { hidden: true },
@@ -152,9 +155,10 @@ describe("admin Facebook capture review helpers", () => {
       rawText: "Raw detail text for admin review only.",
       captureMethod: "playwright_operator_browser",
       capturedAt: "2026-07-13T08:00:00.000Z",
-      finalUrl: "https://m.facebook.com/detail",
-      authorText: "Safe author",
-      timestampText: "Hôm qua",
+        finalUrl: "https://m.facebook.com/detail",
+        authorText: "Safe author",
+        groupName: "Safe group",
+        timestampText: "Hôm qua",
     });
     expect(JSON.stringify(detail)).not.toContain("secret-cookie");
     expect(JSON.stringify(detail)).not.toContain("providerPayload");
@@ -171,6 +175,7 @@ describe("admin Facebook capture review helpers", () => {
         capturedAt: "localStorage timestamp",
         finalUrl: "https://m.facebook.com/detail?token=secret-token&safe=1",
         authorText: "browser profile /tmp/playwright/facebook-profile",
+        groupName: "providerPayload hidden data",
         timestampText: "providerPayload hidden data",
       },
     });
@@ -182,16 +187,18 @@ describe("admin Facebook capture review helpers", () => {
     expect(queueRow).toMatchObject({
       captureMethod: null,
       capturedAt: null,
-      finalUrl: "https://m.facebook.com/detail?safe=1",
-      authorText: null,
-      timestampText: null,
+        finalUrl: "https://m.facebook.com/detail?safe=1",
+        authorText: null,
+        groupName: null,
+        timestampText: null,
     });
     expect(detail).toMatchObject({
       captureMethod: null,
       capturedAt: null,
-      finalUrl: "https://m.facebook.com/detail?safe=1",
-      authorText: null,
-      timestampText: null,
+        finalUrl: "https://m.facebook.com/detail?safe=1",
+        authorText: null,
+        groupName: null,
+        timestampText: null,
     });
     expect(JSON.stringify({ queueRow, detail })).not.toContain("secret-token");
     expect(JSON.stringify({ queueRow, detail })).not.toContain("playwright/facebook-profile");

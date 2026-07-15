@@ -79,7 +79,9 @@ describe("Facebook capture queue", () => {
         sourceUrl: "https://facebook.com/groups/xuyenviet/posts/queued-facebook",
         finalUrl: "https://www.facebook.com/groups/xuyenviet/posts/queued-facebook",
         authorText: "Xuyen Viet member",
+        groupName: "Cộng đồng Xuyên Việt",
         timestampText: "Hôm qua lúc 10:00",
+        postCreatedAt: "2026-07-09T10:00:00.000Z",
         cookies: "must-not-store",
         localStorage: { secret: true },
         html: "<html>hidden dump</html>",
@@ -99,7 +101,9 @@ describe("Facebook capture queue", () => {
       sourceUrl: "https://facebook.com/groups/xuyenviet/posts/queued-facebook",
       finalUrl: "https://www.facebook.com/groups/xuyenviet/posts/queued-facebook",
       authorText: "Xuyen Viet member",
+      groupName: "Cộng đồng Xuyên Việt",
       timestampText: "Hôm qua lúc 10:00",
+      postCreatedAt: "2026-07-09T10:00:00.000Z",
     });
     expect(raw.rawMetadata).not.toHaveProperty("cookies");
     expect(raw.rawMetadata).not.toHaveProperty("localStorage");
@@ -178,7 +182,7 @@ describe("Facebook capture queue", () => {
       sourceId: "summary",
       sourceUrl: "https://web.facebook.com/share/p/summary/",
       urls: [
-        "https://web.facebook.com/share/p/new-post/?fbclid=ignored",
+      "https://web.facebook.com/share/p/new-post/?fbclid=ignored&rdid=ignored",
         "https://m.facebook.com/share/p/existing/?fbclid=ignored",
         "https://web.facebook.com/share/p/new-post/",
         "https://web.facebook.com/groups/xuyenviet",

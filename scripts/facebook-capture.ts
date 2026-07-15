@@ -29,15 +29,19 @@ type ExtractedFacebookText = {
   text: string;
   linkedPostUrls: string[];
   authorText?: string;
+  groupName?: string;
   timestampText?: string;
+  postCreatedAt?: string;
   diagnostics: Record<string, string | number | boolean | null>;
 };
 
 type CaptureTextSource = "dom" | "graphql";
 
 type GraphqlTextCandidate = {
-  text: string;
+  text: string | null;
   postId: string | null;
+  authorText: string | null;
+  postCreatedAt: string | null;
 };
 
 export function chooseFacebookCaptureText(input: { innerText?: string | null; textContent?: string | null; renderedText?: string | null; htmlText?: string | null }) {
@@ -104,19 +108,75 @@ export function extractFacebookGraphqlText(rawTexts: string[], input: { finalUrl
       walkJson(payload, (node) => {
         if (!isRecord(node)) return;
 
-        const text = extractMessageText(node);
-        if (!text) return;
+        const postId = extractGraphqlPostId(node);
+        if (!postId) return;
 
-        const postId = typeof node.post_id === "string" || typeof node.post_id === "number" ? String(node.post_id) : null;
-        candidates.push({ text, postId });
+        candidates.push({
+          text: extractMessageText(node),
+          postId,
+          authorText: extractAuthorText(node),
+          postCreatedAt: extractPostCreatedAt(node),
+        });
       });
     }
   }
 
   const matchingCandidates = targetPostId ? candidates.filter((candidate) => candidate.postId === targetPostId) : [];
-  const best = (matchingCandidates.length > 0 ? matchingCandidates : candidates).sort((left, right) => right.text.length - left.text.length)[0];
+  const matchingTextCandidates = matchingCandidates.filter((candidate) => candidate.text);
+  const textCandidates = (matchingTextCandidates.length > 0 ? matchingTextCandidates : candidates.filter((candidate) => candidate.text))
+    .sort((left, right) => (right.text?.length ?? 0) - (left.text?.length ?? 0));
+  const best = textCandidates[0] ?? matchingCandidates[0] ?? candidates[0];
 
-  return best ?? null;
+  if (!best) return null;
+
+  const exactMetadataCandidate = matchingCandidates.find((candidate) => candidate.authorText || candidate.postCreatedAt);
+
+  // Exact provenance must belong to the post opened after Facebook redirects a share link.
+  return {
+    ...best,
+    text: best.text ?? "",
+    authorText: exactMetadataCandidate?.authorText ?? null,
+    postCreatedAt: exactMetadataCandidate?.postCreatedAt ?? null,
+  };
+}
+
+function extractGraphqlPostId(node: Record<string, unknown>) {
+  const urlPostId = extractPostIdFromGraphqlUrl(node);
+  if (urlPostId) return urlPostId;
+
+  for (const key of ["post_id", "postID", "story_fbid", "legacy_fbid", "fbid", "ft_ent_identifier", "id"]) {
+    const postId = extractPostIdValue(node[key]);
+    if (postId) return postId;
+  }
+
+  return null;
+}
+
+function extractPostIdFromGraphqlUrl(node: Record<string, unknown>) {
+  for (const key of ["permalink_url", "permalinkUrl", "post_url", "postUrl", "shareable_url", "shareableUrl", "url"]) {
+    const value = node[key];
+    if (typeof value !== "string") continue;
+
+    const postId = extractFacebookPostId(value);
+    if (postId) return postId;
+  }
+
+  return null;
+}
+
+function extractPostIdValue(value: unknown) {
+  if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) return String(value);
+  if (typeof value !== "string") return null;
+  if (/^\d+$/.test(value)) return value;
+
+  const directStoryId = value.match(/Story:(\d+)/)?.[1];
+  if (directStoryId) return directStoryId;
+
+  try {
+    return Buffer.from(value, "base64").toString("utf8").match(/(?:Story|feedback):(\d+)/)?.[1] ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export function chooseBestFacebookCaptureText(input: { domText: string; graphqlText?: string | null }) {
@@ -161,14 +221,14 @@ function parseJsonPayloads(rawText: string) {
   if (!trimmed) return payloads;
 
   try {
-    payloads.push(JSON.parse(trimmed) as unknown);
+    payloads.push(JSON.parse(stripFacebookJsonPrefix(trimmed)) as unknown);
     return payloads;
   } catch {
     // GraphQL responses may be newline-delimited JSON.
   }
 
   for (const line of trimmed.split("\n")) {
-    const item = line.trim();
+    const item = stripFacebookJsonPrefix(line.trim());
     if (!item) continue;
 
     try {
@@ -179,6 +239,10 @@ function parseJsonPayloads(rawText: string) {
   }
 
   return payloads;
+}
+
+function stripFacebookJsonPrefix(value: string) {
+  return value.replace(/^(?:for\s*\(;;\);|while\s*\(1\);)\s*/, "");
 }
 
 function walkJson(value: unknown, visit: (node: unknown) => void, depth = 0) {
@@ -208,7 +272,65 @@ function extractMessageText(node: Record<string, unknown>) {
   return null;
 }
 
+function extractAuthorText(node: Record<string, unknown>) {
+  const actors = getNestedValue(node, ["comet_sections", "content", "story", "actors"]) ?? node.actors;
+
+  const directName = extractActorName(actors);
+  if (directName) return directName;
+
+  return findNestedAuthorText(node);
+}
+
+function extractActorName(value: unknown) {
+  if (!Array.isArray(value) || !isRecord(value[0])) return null;
+
+  const name = value[0].name;
+  return typeof name === "string" && name.trim() ? name.trim() : null;
+}
+
+function findNestedAuthorText(value: unknown, depth = 0): string | null {
+  if (!isRecord(value) || depth > 12) return null;
+
+  const actorName = extractActorName(value.actors);
+  if (actorName) return actorName;
+
+  for (const child of Object.values(value)) {
+    if (Array.isArray(child)) continue;
+    const authorText = findNestedAuthorText(child, depth + 1);
+    if (authorText) return authorText;
+  }
+
+  return null;
+}
+
+function extractPostCreatedAt(node: Record<string, unknown>) {
+  const value = findNestedCreationTime(node);
+
+  if (value === null || !Number.isInteger(value) || value <= 0 || value > 9_999_999_999) return null;
+
+  const date = new Date(value * 1_000);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function findNestedCreationTime(value: unknown, depth = 0): number | null {
+  if (!isRecord(value) || depth > 12) return null;
+  if (typeof value.creation_time === "number") return value.creation_time;
+
+  for (const child of Object.values(value)) {
+    if (Array.isArray(child)) continue;
+    const creationTime = findNestedCreationTime(child, depth + 1);
+    if (creationTime !== null) return creationTime;
+  }
+
+  return null;
+}
+
 function getNestedString(value: unknown, path: string[]) {
+  const nested = getNestedValue(value, path);
+  return typeof nested === "string" && nested.trim() ? nested.trim() : null;
+}
+
+function getNestedValue(value: unknown, path: string[]) {
   let current = value;
 
   for (const key of path) {
@@ -216,7 +338,7 @@ function getNestedString(value: unknown, path: string[]) {
     current = current[key];
   }
 
-  return typeof current === "string" && current.trim() ? current.trim() : null;
+  return current;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -224,7 +346,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function extractFacebookPostId(url: string) {
-  const patterns = [/\/permalink\/(\d+)/, /\/posts\/(\d+)/, /story_fbid=(\d+)/];
+  const patterns = [
+    /\/permalink\/(\d+)/i,
+    /\/posts\/(\d+)/i,
+    /[?&](?:story_fbid|fbid|ft_ent_identifier)=(\d+)/i,
+  ];
 
   for (const pattern of patterns) {
     const match = url.match(pattern);
@@ -232,6 +358,24 @@ function extractFacebookPostId(url: string) {
   }
 
   return null;
+}
+
+function normalizeFacebookCaptureUrl(value: string) {
+  try {
+    const url = new URL(value);
+
+    for (const key of Array.from(url.searchParams.keys())) {
+      if (key.toLowerCase() === "fbclid" || key.toLowerCase() === "rdid" || key.toLowerCase().startsWith("utm_") || key.startsWith("__")) {
+        url.searchParams.delete(key);
+      }
+    }
+
+    url.hash = "";
+    url.searchParams.sort();
+    return url.toString();
+  } catch {
+    return value;
+  }
 }
 
 
@@ -415,7 +559,7 @@ async function confirmSave(sourceId: string, text: string) {
   }
 }
 
-export async function extractVisibleFacebookText(page: Page): Promise<ExtractedFacebookText> {
+export async function extractVisibleFacebookText(page: Page, finalUrl: string): Promise<ExtractedFacebookText> {
   const result = await page.evaluate(String.raw`(() => {
     const normalizeText = (value) => value.replace(/\s+/g, " ").trim();
     const getHtmlText = (element) => {
@@ -592,31 +736,51 @@ export async function extractVisibleFacebookText(page: Page): Promise<ExtractedF
     const candidates = selectedSet.candidates;
     const best = candidates[0];
     const article = best?.element.closest?.('[role="article"]') ?? best?.element;
-    const messageTop = best?.element.getBoundingClientRect?.().top ?? Number.POSITIVE_INFINITY;
-    const authorCandidate = article
-      ? Array.from(article.querySelectorAll("strong"))
+    const targetPostId = ${JSON.stringify(extractFacebookPostId(finalUrl))};
+    const getPostId = (href) => {
+      const match = href.match(/\/permalink\/(\d+)|\/posts\/(\d+)|[?&](?:story_fbid|fbid|ft_ent_identifier)=(\d+)/i);
+      return match?.[1] ?? match?.[2] ?? match?.[3] ?? null;
+    };
+    const targetLinks = targetPostId
+      ? Array.from(document.querySelectorAll('a[href]')).filter((element) => getPostId(element.href) === targetPostId)
+      : [];
+    const targetPostRoot = targetLinks
+      .map((link) => link.closest('[role="article"], [data-pagelet*="FeedUnit"], [data-pagelet*="Stories"]') ?? findPostRoot(link))
+      .find((root) => root instanceof HTMLElement && isVisible(root));
+    const hasTargetPermalink = Boolean(targetPostRoot);
+    const authorCandidate = targetPostRoot
+      ? Array.from(targetPostRoot.querySelectorAll('strong, h2, h3, a[role="link"]'))
           .filter((element) => element instanceof HTMLElement)
-          .find((element) => !best?.element.contains(element) && element.getBoundingClientRect().top <= messageTop)
+          .find((element) => {
+            const text = element.textContent?.trim() ?? "";
+            return text.length > 0 && text.length <= 200 && !targetLinks.includes(element);
+          })
       : undefined;
-    const timestampCandidate = article
-      ? Array.from(article.querySelectorAll('a[href*="/posts/"], a[href*="story_fbid"], a[href*="/permalink/"]'))
-          .filter((element) => element instanceof HTMLElement)
-          .find((element) => !best?.element.contains(element) && element.getBoundingClientRect().top <= messageTop)
-      : undefined;
+    const timestampCandidate = targetLinks[0];
+    const timestampElement = targetPostRoot?.querySelector('time[datetime], abbr[data-utime]');
+    const dateTime = timestampElement?.getAttribute('datetime');
+    const unixTime = timestampElement?.getAttribute('data-utime');
+    const postCreatedAt = dateTime && !Number.isNaN(Date.parse(dateTime))
+      ? new Date(dateTime).toISOString()
+      : unixTime && /^\d+$/.test(unixTime)
+        ? new Date(Number(unixTime) * 1000).toISOString()
+        : undefined;
     const text = best?.text ?? "";
     const linkedPostUrls = article
       ? Array.from(article.querySelectorAll("a[href]"))
           .map((element) => element.href)
           .filter((href) => /facebook\.com|fb\.watch|fb\.com/i.test(href))
       : [];
-    const authorText = authorCandidate?.textContent?.trim() || undefined;
-    const timestampText = timestampCandidate?.textContent?.trim() || undefined;
+    const groupName = authorCandidate?.textContent?.trim() || undefined;
+    const rawTimestampText = timestampCandidate?.textContent?.trim() || undefined;
+    const timestampText = isPlausibleTimestampText(rawTimestampText) ? rawTimestampText : undefined;
 
     return {
       text,
       linkedPostUrls,
-      authorText,
+      groupName,
       timestampText,
+      postCreatedAt,
       diagnostics: {
         usedDialogScope: best?.scope === "dialog",
         usedArticleRole: Boolean(article?.matches('[role="article"]')),
@@ -634,9 +798,28 @@ export async function extractVisibleFacebookText(page: Page): Promise<ExtractedF
         selectedTextContentLength: best?.textContentLength ?? 0,
         selectedHtmlTextLength: best?.htmlTextLength ?? 0,
         selectedRectArea: best?.rectArea ?? 0,
+        domTargetPermalinkLinkCount: targetLinks.length,
+        domTargetPermalinkMatched: Boolean(hasTargetPermalink),
+        domMachineTimestampFound: Boolean(postCreatedAt),
         textLength: text.length,
       },
     };
+
+    function findPostRoot(element) {
+      let current = element.parentElement;
+      while (current && current !== document.body) {
+        if (current.querySelector(messageSelectors.join(", "))) return current;
+        current = current.parentElement;
+      }
+      return element.parentElement;
+    }
+
+    function isPlausibleTimestampText(value) {
+      if (!value || value.length > 100) return false;
+      const letters = (value.match(/[\p{L}]/gu) ?? []).length;
+      const digits = (value.match(/\d/g) ?? []).length;
+      return letters >= 2 && digits <= 12;
+    }
   })()`);
 
   return result as ExtractedFacebookText;
@@ -709,7 +892,8 @@ async function main() {
           break;
         }
 
-        const extracted = await extractVisibleFacebookText(page);
+        const finalUrl = normalizeFacebookCaptureUrl(page.url());
+        const extracted = await extractVisibleFacebookText(page, finalUrl);
         page.off("response", onResponse);
 
         if (!extracted.text.trim()) {
@@ -717,7 +901,6 @@ async function main() {
           continue;
         }
 
-        const finalUrl = page.url();
         const graphqlCandidate = extractFacebookGraphqlText(graphqlTexts, { finalUrl });
         const selectedText = chooseBestFacebookCaptureTextCandidate({
           domText: extracted.text,
@@ -728,12 +911,18 @@ async function main() {
           capturedAt: new Date().toISOString(),
           sourceUrl,
           finalUrl,
-          authorText: extracted.authorText,
+          authorText: graphqlCandidate?.authorText ?? extracted.authorText,
+          groupName: extracted.groupName,
           timestampText: extracted.timestampText,
+          postCreatedAt: graphqlCandidate?.postCreatedAt ?? extracted.postCreatedAt,
           diagnostics: {
             ...extracted.diagnostics,
             graphqlResponseCount: graphqlTexts.length,
             graphqlCandidateLength: graphqlCandidate?.text.length ?? 0,
+            graphqlTargetPostId: extractFacebookPostId(finalUrl) ?? "none",
+            graphqlCandidatePostId: graphqlCandidate?.postId ?? "none",
+            graphqlPostMatched: Boolean(graphqlCandidate?.postId && graphqlCandidate.postId === extractFacebookPostId(finalUrl)),
+            graphqlMetadataMatched: Boolean(graphqlCandidate?.postCreatedAt || graphqlCandidate?.authorText),
             selectedCaptureTextSource: selectedText.source,
           },
         };

@@ -73,9 +73,11 @@ export async function getAdminFacebookCaptureReviewDetail(reviewId: string) {
       rawText: rawSourceMaterial.rawText,
       captureMethod: sql<string | null>`${rawSourceMaterial.rawMetadata}->>'captureMethod'`,
       capturedAt: sql<string | null>`${rawSourceMaterial.rawMetadata}->>'capturedAt'`,
-      finalUrl: sql<string | null>`${rawSourceMaterial.rawMetadata}->>'finalUrl'`,
-      authorText: sql<string | null>`${rawSourceMaterial.rawMetadata}->>'authorText'`,
-      timestampText: sql<string | null>`${rawSourceMaterial.rawMetadata}->>'timestampText'`,
+       finalUrl: sql<string | null>`${rawSourceMaterial.rawMetadata}->>'finalUrl'`,
+       authorText: sql<string | null>`${rawSourceMaterial.rawMetadata}->>'authorText'`,
+       groupName: sql<string | null>`${rawSourceMaterial.rawMetadata}->>'groupName'`,
+       timestampText: sql<string | null>`${rawSourceMaterial.rawMetadata}->>'timestampText'`,
+       postCreatedAt: sql<string | null>`${rawSourceMaterial.rawMetadata}->>'postCreatedAt'`,
     })
     .from(facebookCaptureReviews)
     .innerJoin(sources, eq(sources.id, facebookCaptureReviews.sourceId))
@@ -132,15 +134,25 @@ export async function getAdminFacebookCaptureReviewExtractionTarget(reviewId: st
   };
 }
 
-function sanitizeReviewMetadata<T extends { captureMethod: string | null; capturedAt: string | null; finalUrl: string | null; authorText: string | null; timestampText: string | null }>(review: T): T {
+function sanitizeReviewMetadata<T extends { captureMethod: string | null; capturedAt: string | null; finalUrl: string | null; authorText: string | null; groupName: string | null; timestampText: string | null; postCreatedAt: string | null }>(review: T): T {
   return {
     ...review,
     captureMethod: sanitizeMetadataText(review.captureMethod),
     capturedAt: sanitizeMetadataText(review.capturedAt),
     finalUrl: sanitizeMetadataUrl(review.finalUrl),
     authorText: sanitizeMetadataText(review.authorText),
+    groupName: sanitizeMetadataText(review.groupName),
     timestampText: sanitizeMetadataText(review.timestampText),
+    postCreatedAt: sanitizeMetadataTimestamp(review.postCreatedAt),
   };
+}
+
+function sanitizeMetadataTimestamp(value: string | null) {
+  const text = sanitizeMetadataText(value);
+  if (!text) return null;
+
+  const date = new Date(text);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
 function sanitizeMetadataText(value: string | null) {
