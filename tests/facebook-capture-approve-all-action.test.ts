@@ -171,6 +171,15 @@ describe("Facebook capture extract and approve all action", () => {
     await expect(testDb.select().from(facebookCaptureReviews).where(eq(facebookCaptureReviews.id, review.id))).resolves.toMatchObject([{ status: "extracted_approved", reviewerUserId: "operator-user" }]);
   });
 
+  test("returns queue actions to the Facebook capture list after queueing", async () => {
+    authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
+    await createExtractionModel();
+    const review = await createCapturedFacebookReview({ id: "queue-return", rawText: "Readable captured Facebook text." });
+    const { extractAndApproveFacebookCaptureDraftsForm } = await import("@/features/knowledge/actions");
+
+    await expect(extractAndApproveFacebookCaptureDraftsForm(approveAllFormData(review.id, { returnTo: "facebook_capture_queue" }))).rejects.toThrow(/NEXT_REDIRECT:.*\/admin\/knowledge\/facebook-captures\?status=needs_review&approveAllQueued=1/);
+  });
+
   test("recovers existing generated drafts when extraction succeeded but review status stayed needs_review", async () => {
     authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
     await createExtractionModel();

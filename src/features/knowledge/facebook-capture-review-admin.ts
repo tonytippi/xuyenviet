@@ -26,7 +26,12 @@ export async function listAdminFacebookCaptureReviews(input: { status?: Facebook
   const status = input.status ?? defaultReviewStatus;
   const reviews = await listFacebookCaptureReviews(db, { status, limit: input.limit, offset: input.offset });
 
-  return reviews.map(sanitizeReviewMetadata);
+  return Promise.all(
+    reviews.map(async (review) => ({
+      ...sanitizeReviewMetadata(review),
+      activeExtractionJob: await getActiveKnowledgeExtractionJobForSource(db, review.sourceId),
+    })),
+  );
 }
 
 export async function listAdminFacebookCaptureReviewStatusCounts() {

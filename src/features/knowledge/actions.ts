@@ -386,6 +386,7 @@ export async function extractAndApproveFacebookCaptureDraftsForm(formData: FormD
   const session = await requireAdminSession();
 
   const reviewId = getOptionalFormString(formData, "reviewId") ?? "";
+  const returnToQueue = formData.get("returnTo") === "facebook_capture_queue";
   let redirectPath = getFacebookCaptureRedirectPath(reviewId, { approveAllError: "Không thể trích xuất và phê duyệt capture này." });
   let target: Awaited<ReturnType<typeof getAdminFacebookCaptureReviewExtractionTarget>> | null = null;
 
@@ -491,7 +492,7 @@ export async function extractAndApproveFacebookCaptureDraftsForm(formData: FormD
     }
   }
 
-  redirect(redirectPath);
+  redirect(returnToQueue ? getFacebookCaptureQueueRedirectPath(redirectPath) : redirectPath);
 }
 
 export async function suggestKnowledgeFromSourceUrlForm(formData: FormData) {
@@ -606,4 +607,16 @@ function getFacebookCaptureRedirectPath(reviewId: string, params: Record<string,
 
   const query = searchParams.toString();
   return `/admin/knowledge/facebook-captures/${pathReviewId}${query ? `?${query}` : ""}`;
+}
+
+function getFacebookCaptureQueueRedirectPath(detailPath: string) {
+  const detailUrl = new URL(detailPath, "https://xuyenviet.internal");
+  const params = new URLSearchParams({ status: "needs_review" });
+
+  for (const key of ["approveAllQueued", "jobId"]) {
+    const value = detailUrl.searchParams.get(key);
+    if (value) params.set(key, value);
+  }
+
+  return `/admin/knowledge/facebook-captures?${params.toString()}`;
 }

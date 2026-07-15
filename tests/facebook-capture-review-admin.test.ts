@@ -213,7 +213,7 @@ describe("admin Facebook capture review helpers", () => {
 
   test("queue page renders compact Vietnamese labels with captured text preview for operators", async () => {
     authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
-    await createCapturedFacebookSource({
+    const review = await createCapturedFacebookSource({
       id: "queue-page",
       rawText: `${"Queue preview sentence. ".repeat(30)}Sensitive tail should only be on detail.`,
       rawMetadata: {
@@ -237,7 +237,19 @@ describe("admin Facebook capture review helpers", () => {
     expect(html).toContain("Cần duyệt");
     expect(html).toContain("1");
     expect(html).toContain("Queue preview sentence.");
+    expect(html).toContain("Trích xuất và phê duyệt tất cả");
+    expect(html).toContain(`name="reviewId" value="${review.id}"`);
+    expect(html).toContain("name=\"returnTo\" value=\"facebook_capture_queue\"");
+    expect(html).toContain("name=\"approveAllConfirmed\"");
     expect(html).not.toContain("Sensitive tail should only be on detail.");
+  });
+
+  test("queue page confirms an approve-all job without leaving the list", async () => {
+    authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
+    const { default: FacebookCaptureReviewQueuePage } = await import("@/app/admin/knowledge/facebook-captures/page");
+    const element = await FacebookCaptureReviewQueuePage({ searchParams: Promise.resolve({ approveAllQueued: "1", jobId: "queued-job" }) });
+
+    expect(renderToStaticMarkup(element)).toContain("Yêu cầu trích xuất và phê duyệt tất cả đã được đưa vào hàng đợi");
   });
 
   test("queue page paginates capture rows", async () => {
@@ -422,6 +434,7 @@ describe("admin Facebook capture review helpers", () => {
     expect(html).toContain("Wrong visible post content");
     expect(html).toContain("Rejected queue preview.");
     expect(html).not.toContain("Rejected tail should only be on detail.");
+    expect(html).not.toContain("approveAllConfirmed");
   });
 
   test("detail page renders raw text but not unsafe metadata values", async () => {
