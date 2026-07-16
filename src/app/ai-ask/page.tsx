@@ -81,28 +81,9 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
     : null;
 
   return (
-    <main className="min-h-screen bg-white px-5 py-6 sm:px-8 lg:px-12">
-      <section className="mx-auto flex min-h-[calc(100vh-3rem)] w-full max-w-6xl flex-col gap-6 overflow-hidden rounded-[2rem] border border-[#d8c9ad] bg-[#fbf7ed]/90 p-5 shadow-[0_24px_80px_rgba(41,33,18,0.14)] sm:p-8 lg:max-w-[96rem] lg:p-10">
-        <header className="flex flex-col gap-4 border-b border-[#d8c9ad] pb-5 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[#8c4f13]">AI Ask</p>
-            <h1 className="mt-2 text-3xl font-semibold tracking-[-0.04em] text-[#17342c] sm:text-5xl">Hỏi trợ lý chuyến đi Việt Nam</h1>
-          </div>
-          <div className="flex flex-col gap-3 sm:items-end">
-            <p className="rounded-full border border-[#d8c9ad] bg-white/70 px-4 py-2 text-sm font-semibold text-[#17342c]">{session.email}</p>
-            <form action={signOutCurrentUser}>
-              <button
-                className="min-h-11 rounded-2xl border border-[#d8c9ad] bg-white/75 px-4 py-3 text-sm font-semibold text-[#17342c] transition hover:bg-white focus:outline-none focus:ring-4 focus:ring-[#e5bd82]"
-                type="submit"
-              >
-                Đăng xuất
-              </button>
-            </form>
-          </div>
-        </header>
-
-        <div className="grid flex-1 gap-5 lg:auto-cols-[minmax(0,18rem)] lg:grid-cols-[18rem_minmax(0,1fr)] xl:auto-cols-[23rem] xl:grid-cols-[19rem_minmax(0,1fr)]">
-          <AiAskComposer
+    <main className="min-h-screen bg-white text-[#17342c]">
+      <h1 className="sr-only">Hỏi trợ lý chuyến đi Việt Nam</h1>
+      <AiAskComposer
             key={loadedConversation?.id || "new-conversation"}
             initialQuestion={publicDraft}
             initialConversationId={loadedConversation?.id}
@@ -129,9 +110,8 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
             deleteConversationAction={deleteConversationAction}
             deleteTripProjectAction={deleteTripProjectAction}
             saveAnswerUsefulnessFeedbackAction={saveAnswerUsefulnessFeedbackAction}
-          />
-        </div>
-      </section>
+            signOutAction={signOutCurrentUser}
+      />
     </main>
   );
 }

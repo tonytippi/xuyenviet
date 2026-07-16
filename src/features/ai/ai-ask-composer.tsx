@@ -10,6 +10,7 @@ import { answerUsefulnessCommentMaxLength, countAnswerUsefulnessCommentCharacter
 import type { AnswerUsefulnessRating } from "@/db/schema";
 import type { AnswerAnnotation } from "@/features/ai/answer-annotations";
 import type { AssistantMessageProvenanceItem } from "@/features/retrieval/provenance";
+import { AccountIcon, AttachmentIcon, ChatIcon, CloseIcon, LoadingIcon, NewChatIcon, ProjectIcon, SendIcon, SourceIcon } from "@/components/ui/icons";
 
 const maxQuestionLength = 2_000;
 const maxImageByteSize = 5 * 1024 * 1024;
@@ -62,6 +63,7 @@ type CreateTripProjectAction = (
 type DeleteConversationAction = (conversationId: string) => Promise<{ success: boolean; error?: string; reason?: "not_found" }>;
 type DeleteTripProjectAction = (tripProjectId: string) => Promise<{ success: boolean; error?: string; reason?: "not_found" }>;
 type SaveAnswerUsefulnessFeedbackAction = (input: { assistantMessageId: string; rating: AnswerUsefulnessRating; comment?: string | null }) => Promise<{ success: boolean; feedback?: AnswerUsefulnessFeedbackSummary; reason?: "unauthenticated" | "not_found" | "invalid_target" | "invalid_input" | "invalid_rating" | "comment_too_long" | "failed" }>;
+type SignOutAction = () => Promise<void>;
 
 const emptyMessages: DisplayMessage[] = [];
 const emptySessions: ChatSessionSummary[] = [];
@@ -71,18 +73,22 @@ const starterCards = [
   {
     title: "Lên route",
     description: "Hà Nội → Huế trong 5 ngày",
+    Icon: NewChatIcon,
   },
   {
     title: "Tìm nơi ở",
     description: "khu nào tiện cho gia đình",
+    Icon: ProjectIcon,
   },
   {
     title: "Điểm dừng",
     description: "nghỉ ăn, chơi nhẹ, trẻ em",
+    Icon: ChatIcon,
   },
   {
     title: "Kiểm tra nguồn",
     description: "curated, official, web",
+    Icon: SourceIcon,
   },
 ];
 
@@ -99,6 +105,7 @@ type AiAskComposerProps = {
   deleteConversationAction?: DeleteConversationAction;
   deleteTripProjectAction?: DeleteTripProjectAction;
   saveAnswerUsefulnessFeedbackAction?: SaveAnswerUsefulnessFeedbackAction;
+  signOutAction?: SignOutAction;
 };
 
 function AnswerUsefulnessFeedbackControl({
@@ -514,6 +521,7 @@ export function AiAskComposer({
   deleteConversationAction,
   deleteTripProjectAction,
   saveAnswerUsefulnessFeedbackAction,
+  signOutAction,
 }: AiAskComposerProps) {
   const router = useRouter();
   const activeTripProjectId = selectedTripProject?.id;
@@ -1133,7 +1141,7 @@ export function AiAskComposer({
       return;
     }
 
-    const confirmed = window.confirm(`Xoá dự án chuyến đi “${selectedTripProject.title}”? Ngữ cảnh đã ghi nhớ cho dự án sẽ bị xoá khỏi phần sử dụng bình thường. Các cuộc trò chuyện liên kết sẽ không bị xoá; chúng sẽ được chuyển về lịch sử trò chuyện thường.`);
+    const confirmed = window.confirm(`Xoá dự án chuyến đi “${selectedTripProject.title}”? Dự án này, các cuộc trò chuyện liên kết và thông tin ngữ cảnh đã lưu sẽ bị xóa khỏi giao diện thông thường và không còn được dùng để gợi ý trong tương lai. Hành động này không thể hoàn tác.`);
 
     if (!confirmed) {
       return;
@@ -1182,7 +1190,7 @@ export function AiAskComposer({
         imageInputRef.current.value = "";
       }
       router.push("/ai-ask");
-      setStatus("Đã xoá dự án chuyến đi. Các cuộc trò chuyện liên kết đã được chuyển về lịch sử trò chuyện thường.");
+      setStatus("Đã xoá dự án chuyến đi và các cuộc trò chuyện liên kết.");
     } catch {
       setStatus("Không thể xoá dự án chuyến đi lúc này. Vui lòng thử lại.");
     } finally {
@@ -1192,7 +1200,7 @@ export function AiAskComposer({
   }
 
   const planningScope = (
-    <section className="rounded-[1.25rem] border border-[#d8c9ad] bg-white/75 p-4 text-left">
+    <section className="border-t border-[#d8c9ad] pt-4 text-left">
       <div className="flex flex-col gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#8c4f13]">Phạm vi lập kế hoạch</p>
@@ -1223,7 +1231,7 @@ export function AiAskComposer({
 
       {selectedTripProject && deleteTripProjectAction ? (
         <div className="mt-4 rounded-2xl border border-[#f0c8a0] bg-[#fff7ed] p-3 text-sm leading-6 text-[#6f3f12]">
-          <p>Dự án có thể xoá khi bạn không chờ câu trả lời AI. Ngữ cảnh dự án sẽ bị xoá; các cuộc trò chuyện liên kết sẽ chuyển về lịch sử thường.</p>
+          <p>Dự án, các cuộc trò chuyện liên kết và thông tin ngữ cảnh đã lưu sẽ bị xoá khỏi giao diện thông thường và không còn được dùng để gợi ý trong tương lai.</p>
           <button
             className="mt-3 min-h-11 rounded-2xl border border-[#b45309] bg-white px-4 py-2 text-sm font-semibold text-[#7c2d12] transition hover:bg-[#ffedd5] focus:outline-none focus:ring-4 focus:ring-[#f0c8a0] disabled:cursor-not-allowed disabled:opacity-60"
             disabled={projectActionsDisabled}
@@ -1260,26 +1268,31 @@ export function AiAskComposer({
   );
 
   const accountPrivacyLinks = (
-    <section className="rounded-[1.25rem] border border-[#d8c9ad] bg-white/75 p-4 text-left" aria-label="Tài khoản và quyền riêng tư">
+    <section className="border-t border-[#d8c9ad] pt-4 text-left" aria-label="Tài khoản và quyền riêng tư">
       <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#8c4f13]">Tài khoản</p>
-      {userEmail ? <p className="mt-2 break-words text-sm font-semibold text-[#17342c]">{userEmail}</p> : null}
-      <p className="mt-2 text-sm leading-6 text-[#4f625a]">Chat và dự án chuyến đi thuộc tài khoản của bạn. Dùng các nút xoá hiển thị sẵn để xoá hội thoại hoặc ngữ cảnh dự án.</p>
+      {userEmail ? <p className="mt-2 flex items-center gap-2 break-words text-sm font-semibold text-[#17342c]"><AccountIcon className="text-base text-[#1f5f46]" />{userEmail}</p> : null}
+      <p className="mt-2 text-sm leading-6 text-[#4f625a]">Chat và dự án chuyến đi thuộc tài khoản của bạn.</p>
       <div className="mt-3 flex flex-col gap-2">
         {canAccessAdmin ? (
           <Link className="min-h-11 rounded-2xl bg-[#17342c] px-4 py-3 text-center text-sm font-semibold text-white transition hover:bg-[#24483e] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]" href="/admin">
             Vào khu vực quản trị
           </Link>
         ) : null}
-        <Link className="min-h-11 rounded-2xl border border-[#d8c9ad] bg-[#fffdf8] px-4 py-3 text-center text-sm font-semibold text-[#17342c] transition hover:bg-white focus:outline-none focus:ring-4 focus:ring-[#e5bd82]" href="/">
-          Về trang giới thiệu
+        <Link className="min-h-11 rounded-2xl border border-[#d8c9ad] bg-[#fffdf8] px-4 py-3 text-center text-sm font-semibold text-[#17342c] transition hover:bg-white focus:outline-none focus:ring-4 focus:ring-[#e5bd82]" href="/#quyen-rieng-tu">
+          Tìm hiểu thêm về quyền riêng tư
         </Link>
+        {signOutAction ? <form action={signOutAction}><button className="min-h-11 w-full rounded-2xl border border-[#d8c9ad] bg-white px-4 py-3 text-sm font-semibold text-[#17342c] transition hover:bg-[#fff8ec] focus:outline-none focus:ring-4 focus:ring-[#e5bd82]" type="submit">Đăng xuất</button></form> : null}
       </div>
     </section>
   );
 
   return (
-    <>
-      <nav aria-label="Danh sách trò chuyện và dự án chuyến đi" className="hidden min-h-0 flex-col gap-3 lg:col-start-1 lg:row-start-1 lg:flex">
+    <div className="flex min-h-screen">
+      <nav aria-label="Danh sách trò chuyện và dự án chuyến đi" className="hidden min-h-screen w-[276px] shrink-0 flex-col gap-5 border-r border-[#d8c9ad] bg-[#f5f1e8] p-4 lg:flex">
+        <Link className="flex min-h-11 items-center gap-2 rounded-xl px-2 text-lg font-bold tracking-[-0.04em] text-[#17342c] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]" href="/">
+          <span className="grid h-8 w-8 place-items-center rounded-lg bg-[#1f5f46] text-xs font-black text-white">XV</span>
+          XuyenViet
+        </Link>
         <div className="min-h-0 flex-1">
           <ConversationList
             sessions={sessions}
@@ -1290,11 +1303,18 @@ export function AiAskComposer({
             onNewChat={handleNewChat}
           />
         </div>
+        <section className="border-t border-[#d8c9ad] pt-4" aria-labelledby="trip-project-list-heading">
+          <h2 className="text-xs font-semibold uppercase tracking-[0.16em] text-[#66776f]" id="trip-project-list-heading">Chuyến đi</h2>
+          <div className="mt-2 flex flex-col gap-1">
+            <button aria-current={!selectedTripProject ? "page" : undefined} className={!selectedTripProject ? "min-h-11 rounded-xl bg-[#1f5f46]/10 px-3 py-2 text-left text-sm font-semibold text-[#17342c] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]" : "min-h-11 rounded-xl px-3 py-2 text-left text-sm font-semibold text-[#17342c] hover:bg-white/60 focus:outline-none focus:ring-4 focus:ring-[#8fb59f]"} disabled={projectActionsDisabled} onClick={() => handleSelectTripProject("")} type="button">Trò chuyện thường</button>
+            {tripProjects.map((project) => <button aria-current={project.id === activeTripProjectId ? "page" : undefined} className={project.id === activeTripProjectId ? "min-h-11 rounded-xl bg-[#1f5f46]/10 px-3 py-2 text-left text-sm font-semibold text-[#17342c] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]" : "min-h-11 rounded-xl px-3 py-2 text-left text-sm font-semibold text-[#17342c] hover:bg-white/60 focus:outline-none focus:ring-4 focus:ring-[#8fb59f]"} disabled={projectActionsDisabled} key={project.id} onClick={() => handleSelectTripProject(project.id)} type="button">{formatTripProjectLabel(project)}</button>)}
+          </div>
+        </section>
         {planningScope}
         {accountPrivacyLinks}
       </nav>
 
-      <div className="flex min-h-[34rem] min-w-0 flex-col justify-between gap-5 rounded-[1.5rem] border border-[#d8c9ad] bg-[radial-gradient(circle_at_50%_0%,rgba(20,83,45,0.1),transparent_30%),#fffdf8] p-4 sm:p-5 lg:col-start-2 lg:row-start-1 lg:w-full xl:max-w-[760px]">
+      <div className="flex min-h-screen min-w-0 flex-1 flex-col justify-between gap-5 bg-white p-4 sm:p-6 lg:max-w-[calc(100%-276px)]">
         <div className="flex items-center justify-between gap-3 lg:hidden">
           <button
             ref={sessionSheetTriggerRef}
@@ -1323,7 +1343,7 @@ export function AiAskComposer({
 
           {selectedTripProject ? (
             <p className="mx-auto max-w-2xl rounded-2xl border border-[#8fb59f] bg-[#edf7f0] px-4 py-3 text-sm font-semibold leading-6 text-[#17342c]">
-              Đang hỏi trong dự án: {formatTripProjectLabel(selectedTripProject)}. Tin nhắn mới sẽ dùng ngữ cảnh dự án này, không mở bảng chi tiết bên phải.
+              Đang hỏi trong dự án: {formatTripProjectLabel(selectedTripProject)}. Tin nhắn mới sẽ dùng ngữ cảnh dự án này.
             </p>
           ) : null}
         </div>
@@ -1416,8 +1436,8 @@ export function AiAskComposer({
                   title="Đính kèm ảnh"
                   htmlFor="ai-ask-image"
                 >
-                  <PaperclipIcon />
-                  <span className="sr-only">Đính kèm ảnh tham khảo</span>
+                  <AttachmentIcon />
+                  <span className="sr-only">Đính kèm ảnh tham khảo tuỳ chọn</span>
                 </label>
               <input
                 accept="image/jpeg,image/png,image/webp"
@@ -1454,14 +1474,14 @@ export function AiAskComposer({
               </div>
             ) : null}
             <p aria-live="polite" className="sr-only" id="ai-ask-status">
-              {status}
+              {isPending ? "Đang gửi, vui lòng chờ" : status}
             </p>
           </form>
 
           {showEmptyState ? (
             <>
               <div className="mx-auto grid max-w-[760px] gap-3 sm:grid-cols-2" aria-label="Gợi ý câu hỏi bắt đầu">
-                {starterCards.map((card) => (
+                {starterCards.map(({ Icon, ...card }) => (
                   <button
                     className="grid min-h-[76px] grid-cols-[2.25rem_minmax(0,1fr)] items-center gap-3 rounded-[1.25rem] border border-[#d8c9ad] bg-white/80 p-4 text-left shadow-[0_12px_36px_rgba(31,41,55,0.06)] transition hover:border-[#8fb59f] hover:bg-white focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45"
                     key={card.title}
@@ -1482,7 +1502,7 @@ export function AiAskComposer({
                     disabled={askFormDisabled}
                     type="button"
                   >
-                    <span aria-hidden="true" className="grid h-9 w-9 place-items-center rounded-xl bg-[#e8f3ec] text-sm font-black text-[#14532d]">+</span>
+                    <span aria-hidden="true" className="grid h-9 w-9 place-items-center rounded-xl bg-[#e8f3ec] text-lg text-[#14532d]"><Icon /></span>
                     <span>
                       <span className="block text-sm font-bold text-[#17342c]">{card.title}</span>
                       <span className="mt-1 block text-xs leading-5 text-[#5d6f67]">{card.description}</span>
@@ -1493,8 +1513,9 @@ export function AiAskComposer({
               <section className="mx-auto max-w-[760px] rounded-2xl border border-[#d8c9ad] bg-white/70 p-4 text-left">
                 <h2 className="text-sm font-bold text-[#17342c]">Lưu trữ hội thoại</h2>
                 <p className="mt-2 text-sm leading-6 text-[#4f625a]">
-                  Thông tin chuyến đi có thể được lưu để tiếp tục kế hoạch trong các bước sau. Thông báo này không chặn việc đặt câu hỏi.
+                  Để hỗ trợ cuộc trò chuyện và kế hoạch chuyến đi, XuyenViet có thể lưu nội dung bạn cung cấp và gửi yêu cầu đến dịch vụ AI đã cấu hình để tạo câu trả lời. Bạn có thể xóa cuộc trò chuyện hoặc dự án chuyến đi bất cứ lúc nào.
                 </p>
+                <Link className="mt-3 inline-flex text-sm font-semibold text-[#1f5f46] underline underline-offset-4 focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45" href="/#quyen-rieng-tu">Tìm hiểu thêm về quyền riêng tư</Link>
               </section>
             </>
           ) : null}
@@ -1550,7 +1571,7 @@ export function AiAskComposer({
         ) : null}
       </div>
 
-      {showContextPanel ? (
+      {showContextPanel && selectedAnswerEntity ? (
         <aside aria-label="Bảng ngữ cảnh hội thoại" className="hidden min-h-0 min-w-0 flex-col rounded-[1.5rem] border border-[#d8c9ad] bg-[linear-gradient(180deg,#fffdf8_0%,#ffffff_42%,#f7fbf8_100%)] p-4 text-[#17342c] shadow-[0_16px_40px_rgba(41,33,18,0.08)] lg:col-start-3 lg:row-start-1 lg:flex lg:w-full xl:w-[23rem]">
           <div className="flex items-start justify-between gap-3 border-b border-[#eadfc8] pb-4">
             <div>
@@ -1562,7 +1583,7 @@ export function AiAskComposer({
           <AnswerDetailPanel selectedEntity={selectedAnswerEntity} panelId={desktopAnswerDetailPanelId} panelRef={desktopAnswerDetailPanelRef} onClose={closeAnswerDetailPanel} />
         </aside>
       ) : null}
-    </>
+    </div>
   );
 }
 
@@ -1809,39 +1830,6 @@ function formatImageSize(bytes: number) {
   }
 
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function PaperclipIcon() {
-  return (
-    <svg aria-hidden="true" className="h-5 w-5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24">
-      <path d="m21.4 11.6-8.5 8.5a6 6 0 0 1-8.5-8.5l8.1-8.1a4 4 0 1 1 5.7 5.7l-8.1 8.1a2 2 0 0 1-2.8-2.8l7.7-7.7" />
-    </svg>
-  );
-}
-
-function SendIcon() {
-  return (
-    <svg aria-hidden="true" className="h-5 w-5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24">
-      <path d="m22 2-7 20-4-9-9-4Z" />
-      <path d="M22 2 11 13" />
-    </svg>
-  );
-}
-
-function CloseIcon() {
-  return (
-    <svg aria-hidden="true" className="h-5 w-5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24">
-      <path d="m18 6-12 12M6 6l12 12" />
-    </svg>
-  );
-}
-
-function LoadingIcon() {
-  return (
-    <svg aria-hidden="true" className="h-5 w-5 animate-spin" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="2" viewBox="0 0 24 24">
-      <path d="M12 3a9 9 0 1 1-9 9" />
-    </svg>
-  );
 }
 
 function summarizeSession(id: string, question: string): ChatSessionSummary {

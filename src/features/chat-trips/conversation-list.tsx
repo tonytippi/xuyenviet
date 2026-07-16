@@ -28,18 +28,20 @@ export function ConversationList({ sessions, activeConversationId, isDisabled = 
   }, []);
 
   return (
-    <section className="flex h-full flex-col gap-3 rounded-[1.5rem] border border-[#d8c9ad] bg-[#fffdf8]/80 p-3">
+    <section className="flex h-full flex-col gap-3" aria-labelledby="conversation-list-heading">
       <button
         type="button"
         onClick={onNewChat}
         disabled={isDisabled}
-        className="min-h-11 w-full rounded-2xl bg-[#1f5f46] px-4 py-3 text-sm font-semibold text-white shadow-[0_12px_30px_rgba(31,95,70,0.18)] transition hover:bg-[#194d39] focus:outline-none focus:ring-4 focus:ring-[#8fb59f] disabled:cursor-not-allowed disabled:bg-[#8aa89b]"
+        className="min-h-11 w-full rounded-xl bg-[#1f5f46] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#194d39] focus:outline-none focus:ring-4 focus:ring-[#8fb59f] disabled:cursor-not-allowed disabled:bg-[#8aa89b]"
       >
-        Cuộc trò chuyện mới
+        Trò chuyện mới
       </button>
 
+      <h2 className="text-xs font-semibold uppercase tracking-[0.16em] text-[#66776f]" id="conversation-list-heading">Trò chuyện</h2>
+
       {sessions.length === 0 ? (
-        <p className="rounded-2xl border border-dashed border-[#d8c9ad] bg-white/60 p-4 text-sm leading-6 text-[#5d6f67]">
+        <p className="rounded-xl border border-dashed border-[#d8c9ad] bg-white/45 p-3 text-sm leading-6 text-[#5d6f67]">
           Chưa có cuộc trò chuyện nào. Hãy đặt câu hỏi để bắt đầu kế hoạch chuyến đi.
         </p>
       ) : (
@@ -48,8 +50,8 @@ export function ConversationList({ sessions, activeConversationId, isDisabled = 
             const isActive = session.id === activeConversationId;
 
             return (
-              <li className="rounded-2xl" key={session.id}>
-                <div className={isActive ? "flex gap-2 rounded-2xl border border-[#1f5f46]/45 bg-[#1f5f46]/10 p-2" : "flex gap-2 rounded-2xl border border-transparent p-2 transition hover:border-[#d8c9ad] hover:bg-[#f3ead8]"}>
+              <li className="rounded-xl" key={session.id}>
+                <div className={isActive ? "flex gap-2 rounded-xl border border-[#1f5f46]/45 bg-[#1f5f46]/10 p-2" : "flex gap-2 rounded-xl border border-transparent p-2 transition hover:border-[#d8c9ad] hover:bg-[#f3ead8]"}>
                 <button
                   type="button"
                   onClick={() => onSelect(session.id)}
@@ -75,7 +77,7 @@ export function ConversationList({ sessions, activeConversationId, isDisabled = 
                   <button
                     type="button"
                     onClick={() => {
-                      if (window.confirm("Xoá cuộc trò chuyện này? Tin nhắn, ảnh đính kèm và các chi tiết chuyến đi đã ghi nhớ từ cuộc trò chuyện này sẽ bị xoá khỏi sử dụng thông thường.")) {
+                      if (window.confirm(`Xoá cuộc trò chuyện “${session.preview}”? Tin nhắn, ảnh đính kèm và các chi tiết chuyến đi đã ghi nhớ từ cuộc trò chuyện này sẽ bị xoá khỏi giao diện thông thường và không còn được dùng để gợi ý trong tương lai.`)) {
                         onDelete(session.id);
                       }
                     }}

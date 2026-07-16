@@ -146,8 +146,8 @@ export default async function Home({ searchParams }: HomeProps) {
         </section>
       </main>
 
-      <footer className="px-5 py-5 text-center text-sm leading-6 text-[#6b7280]">
-        Câu trả lời AI có thể chứa thông tin du lịch thay đổi theo thời gian. Hãy kiểm tra giá, giờ mở cửa, tình trạng đường và đặt chỗ trước khi quyết định.
+      <footer className="px-5 py-5 text-center text-sm leading-6 text-[#6b7280]" id="quyen-rieng-tu">
+        Quyền riêng tư: XuyenViet chỉ lưu nội dung cần thiết để hỗ trợ cuộc trò chuyện và kế hoạch chuyến đi; bạn có thể xoá chúng bất cứ lúc nào. Câu trả lời AI có thể chứa thông tin du lịch thay đổi theo thời gian. Hãy kiểm tra giá, giờ mở cửa, tình trạng đường và đặt chỗ trước khi quyết định.
       </footer>
     </div>
   );

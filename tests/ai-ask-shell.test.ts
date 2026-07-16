@@ -112,10 +112,10 @@ describe("AI Ask authenticated shell", () => {
 
     expect(html).toContain("Hỏi trợ lý chuyến đi Việt Nam");
     expect(html).toContain("tony@example.com");
-    expect(html).toContain("Đăng xuất");
+    expect(html).toContain("XuyenViet");
     expect(html).toContain("Danh sách trò chuyện và dự án chuyến đi");
     expect(html).toContain("Tài khoản và quyền riêng tư");
-    expect(html).toContain("Về trang giới thiệu");
+    expect(html).toContain("Tìm hiểu thêm về quyền riêng tư");
     expect(html).toContain("Mình sẽ đi đâu?");
     expect(html).toContain("Bắt đầu bằng một câu hỏi tự nhiên");
     expect(html).toContain("Hà Nội đi Đà Nẵng 7 ngày cùng gia đình");
@@ -131,11 +131,11 @@ describe("AI Ask authenticated shell", () => {
     expect(html).not.toContain("Bảng ngữ cảnh hội thoại");
     expect(html).not.toContain("Chưa có chi tiết được chọn");
     expect(html).not.toContain("right detail panel");
-    expect(html).toContain('aria-describedby="ai-ask-status ai-ask-shortcuts"');
+    expect(html).toContain('aria-describedby="ai-ask-status"');
     expect(html).toContain('id="ai-ask-status"');
   });
 
-  test("renders the active desktop three-panel shell with a safe contextual placeholder", async () => {
+  test("renders the active desktop shell without a blank contextual placeholder", async () => {
     await createTestUser("user-1");
     const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
     await testDb.insert(messages).values([
@@ -148,10 +148,9 @@ describe("AI Ask authenticated shell", () => {
     expect(html).toContain("Danh sách trò chuyện và dự án chuyến đi");
     expect(html).toContain("Lịch sử hội thoại");
     expect(html).toContain("Hà Nội đi Huế 5 ngày.");
-    expect(html).toContain("Bảng ngữ cảnh hội thoại");
-    expect(html).toContain("Chọn chi tiết trong câu trả lời");
-    expect(html).toContain("Chưa có chi tiết được chọn");
-    expect(html).toContain("không tự tạo thông tin chi tiết từ nội dung trả lời");
+    expect(html).not.toContain("Bảng ngữ cảnh hội thoại");
+    expect(html).not.toContain("Chọn chi tiết trong câu trả lời");
+    expect(html).not.toContain("Chưa có chi tiết được chọn");
     expect(html).not.toContain("Bảng chi tiết đã chọn");
     expect(html).not.toContain("source-chip");
   });
@@ -610,15 +609,14 @@ describe("AI Ask authenticated shell", () => {
     expect(html).not.toContain("Dự án riêng user-2");
   });
 
-  test("renders selected trip project delete affordance and detach confirmation copy", async () => {
+  test("renders selected trip project delete affordance and cascading deletion copy", async () => {
     await createTestUser("user-1");
     const [ownProject] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Đà Nẵng gia đình", origin: "Hà Nội", destination: "Đà Nẵng" }).returning({ id: tripProjects.id });
 
     const html = await renderAuthenticatedAiAskShell({ tripProjectId: ownProject.id });
 
     expect(html).toContain("Xoá dự án chuyến đi");
-    expect(html).toContain("Ngữ cảnh dự án sẽ bị xoá");
-    expect(html).toContain("các cuộc trò chuyện liên kết sẽ chuyển về lịch sử thường");
+    expect(html).toContain("các cuộc trò chuyện liên kết và thông tin ngữ cảnh đã lưu sẽ bị xoá");
   });
 
   test("falls back to ordinary chat when opening another user's trip project", async () => {
@@ -676,11 +674,11 @@ describe("AI Ask structured answer rendering", () => {
   test("composer source accepts removable validated traveler images", () => {
     const source = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
 
-    expect(source).toContain("Ảnh tham khảo tuỳ chọn");
+    expect(source).toContain("Đính kèm ảnh tham khảo");
     expect(source).toContain("accept=\"image/jpeg,image/png,image/webp\"");
     expect(source).toContain("maxImageByteSize = 5 * 1024 * 1024");
     expect(source).toContain("Bỏ ảnh");
-    expect(source).toContain("model đã bật khả năng nhận ảnh");
+    expect(source).toContain("AttachmentIcon");
   });
 
   test("composer source keeps duplicate-send controls guarded while pending", () => {
@@ -791,7 +789,7 @@ describe("AI Ask structured answer rendering", () => {
     expect(pageSource).toContain("deleteTripProjectAction={deleteTripProjectAction}");
     expect(source).toContain("deleteTripProjectAction?: DeleteTripProjectAction");
     expect(source).toContain("window.confirm(`Xoá dự án chuyến đi");
-    expect(source).toContain("Các cuộc trò chuyện liên kết sẽ không bị xoá; chúng sẽ được chuyển về lịch sử trò chuyện thường.");
+    expect(source).toContain("các cuộc trò chuyện liên kết và thông tin ngữ cảnh đã lưu sẽ bị xóa");
     expect(source).toContain("projectActionsDisabled = isPending || Boolean(deletingConversationId) || Boolean(deletingTripProjectId)");
     expect(source).toContain("deletingTripProjectIdRef.current");
     expect(source).toContain("Vui lòng chờ câu trả lời hiện tại hoàn tất trước khi xoá dự án chuyến đi.");
@@ -811,13 +809,15 @@ describe("AI Ask structured answer rendering", () => {
     expect(deleteSource.indexOf(".for(\"update\")")).toBeLessThan(deleteSource.indexOf("const conversationMessages"));
   });
 
-  test("trip project deletion source locks before counting detach and cascade audit rows", () => {
+  test("trip project deletion source locks before counting and deleting linked conversation rows", () => {
     const source = readFileSync("src/features/chat-trips/trip-projects.ts", "utf8");
     const deleteSource = source.slice(source.indexOf("export async function deleteOwnedTripProject"));
 
     expect(deleteSource).toContain(".for(\"update\")");
     expect(deleteSource.indexOf(".for(\"update\")")).toBeLessThan(deleteSource.indexOf("const [linkedConversationCount]"));
-    expect(deleteSource).toContain("linkedConversationsDetached");
+    expect(deleteSource.indexOf("const [linkedConversationCount]")).toBeLessThan(deleteSource.indexOf(".delete(conversations)"));
+    expect(deleteSource).toContain("linkedConversationsDeleted");
+    expect(deleteSource).not.toContain("linkedConversationsDetached");
   });
 });
 
