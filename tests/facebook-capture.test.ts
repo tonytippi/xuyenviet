@@ -118,6 +118,64 @@ describe("Facebook capture queue", () => {
     expect(audit.afterSummary).not.toContain("Nội dung bài viết");
   });
 
+  test("uses a resolved Facebook permalink as the source canonical URL", async () => {
+    await createSource({ id: "redirected-facebook", kind: "facebook", rawText: null });
+
+    await updateQueuedFacebookSourceRawText(testDb, {
+      sourceId: "redirected-facebook",
+      rawText: "Visible Facebook post text",
+      captureMetadata: {
+        captureMethod: "playwright_operator_browser",
+        capturedAt: "2026-07-16T00:00:00.000Z",
+        sourceUrl: "https://facebook.com/share/p/redirected-facebook",
+        finalUrl: "https://www.facebook.com/groups/xuyenviet/posts/123?fbclid=ignored",
+      },
+    });
+
+    await expect(testDb.select({ url: sources.url, canonicalUrl: sources.canonicalUrl }).from(sources).where(eq(sources.id, "redirected-facebook"))).resolves.toEqual([
+      {
+        url: "https://facebook.com/groups/xuyenviet/posts/redirected-facebook",
+        canonicalUrl: "https://facebook.com/groups/xuyenviet/posts/123",
+      },
+    ]);
+  });
+
+  test("skips a capture that resolves to an existing canonical Facebook source", async () => {
+    await createSource({ id: "existing-facebook", kind: "facebook", rawText: "Existing post text" });
+    await testDb.update(sources).set({ canonicalUrl: "https://web.facebook.com/groups/xuyenviet/posts/123?fbclid=ignored" }).where(eq(sources.id, "existing-facebook"));
+    await createSource({ id: "duplicate-facebook", kind: "facebook", rawText: null });
+
+    const result = await updateQueuedFacebookSourceRawText(testDb, {
+      sourceId: "duplicate-facebook",
+      rawText: "Duplicate post text that must not be saved",
+      captureMetadata: {
+        captureMethod: "playwright_operator_browser",
+        capturedAt: "2026-07-16T00:00:00.000Z",
+        sourceUrl: "https://facebook.com/share/p/duplicate-facebook",
+        finalUrl: "https://www.facebook.com/groups/xuyenviet/posts/123?fbclid=ignored",
+      },
+      actor: { userId: "operator-user", email: "operator@example.com" },
+    });
+
+    expect(result).toEqual({ status: "duplicate", duplicateSourceId: "existing-facebook" });
+    await expect(testDb.select({ label: sources.label, canonicalUrl: sources.canonicalUrl }).from(sources).where(eq(sources.id, "duplicate-facebook"))).resolves.toEqual([
+      {
+        label: "Duplicate source existing-facebook",
+        canonicalUrl: "https://facebook.com/groups/xuyenviet/posts/duplicate-facebook",
+      },
+    ]);
+    await expect(testDb.select({ rawText: rawSourceMaterial.rawText, rawMetadata: rawSourceMaterial.rawMetadata }).from(rawSourceMaterial).where(eq(rawSourceMaterial.sourceId, "duplicate-facebook"))).resolves.toEqual([
+      {
+        rawText: null,
+        rawMetadata: {
+          duplicateSourceId: "existing-facebook",
+          duplicateCanonicalUrl: "https://facebook.com/groups/xuyenviet/posts/123",
+        },
+      },
+    ]);
+    await expect(listQueuedFacebookSources(testDb, { limit: 10 })).resolves.not.toContainEqual(expect.objectContaining({ sourceId: "duplicate-facebook" }));
+  });
+
   test("removes unsafe existing metadata and nested diagnostics before update", async () => {
     await createSource({
       id: "metadata-facebook",
@@ -223,6 +281,14 @@ describe("Facebook capture queue", () => {
       "https://facebook.com/groups/1689835535154625/posts/1900464420758401?__cft__%5B0%5D=AZb8gL5cXP0OBmCPYmvza1OR-VG6NWsD7cImIeK5cKF8mzObF__AoSZAFjh85de9l7Q7odoJvSiJJL2A5DqnzCINPNnhr5TM8A0goiSUAU9JWjnu_AdNko43VObIlQLJq4VS4VXzBOoDCQW8qvrKFcm17a-AgQkzizCiLqQ_UaWJgs-ZuRz6YVQhnmHVMS2EXnSMc_h0z8189exLzb3a-eCqNZfYNUlxbdKRUDC7jxQ-SA&__tn__=-UK-R",
     ], "https://facebook.com/share/p/summary")).toEqual([
       { url: "https://facebook.com/groups/1689835535154625/posts/1900464420758401", canonicalUrl: "https://facebook.com/groups/1689835535154625/posts/1900464420758401" },
+    ]);
+  });
+
+  test("normalizes fb.com aliases, tracking parameters, and trailing slash on post links", () => {
+    expect(normalizeDiscoveredFacebookPosts([
+      "https://fb.com/share/p/child/?fbclid=ignored&rdid=ignored",
+    ], "https://facebook.com/share/p/summary")).toEqual([
+      { url: "https://facebook.com/share/p/child", canonicalUrl: "https://facebook.com/share/p/child" },
     ]);
   });
 

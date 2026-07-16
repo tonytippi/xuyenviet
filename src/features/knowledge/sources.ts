@@ -86,7 +86,7 @@ export function normalizeTravelSourceInput(input: TravelSourceInput): Normalized
     source: {
       kind,
       url: parsedUrl ? canonicalizeUrl(parsedUrl) : null,
-      canonicalUrl: parsedUrl ? canonicalizeUrl(parsedUrl) : null,
+      canonicalUrl: null,
       label,
       publisher: normalizeSafeMetadataString(input.publisher, "Nhà xuất bản", maxPublisherLength) ?? derivePublisher(parsedUrl),
       collectedDate: normalizeCollectedDate(input.collectedDate),

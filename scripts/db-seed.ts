@@ -24,7 +24,6 @@ const facebookSources = loadFacebookSeedUrls().map((source) => ({
   id: source.id,
   kind: "facebook" as const,
   url: source.url,
-  canonicalUrl: source.url,
   label: source.label,
   publisher: "Facebook",
   collectedDate: "2026-07-01",

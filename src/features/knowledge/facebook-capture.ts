@@ -55,7 +55,10 @@ const safeMetadataKeys = new Set<keyof SafeFacebookCaptureMetadata>([
 ]);
 
 function queuedRawTextCondition() {
-  return or(isNull(rawSourceMaterial.rawText), sql`length(btrim(${rawSourceMaterial.rawText})) = 0`);
+  return and(
+    or(isNull(rawSourceMaterial.rawText), sql`length(btrim(${rawSourceMaterial.rawText})) = 0`),
+    sql`${rawSourceMaterial.rawMetadata}->>'duplicateSourceId' is null`,
+  );
 }
 
 function normalizeLimit(limit?: number) {
@@ -171,8 +174,13 @@ export async function updateQueuedFacebookSourceRawText(
   },
 ) {
   const rawText = normalizeRawText(input.rawText);
+  const canonicalFinalUrl = canonicalizeFacebookUrl(input.captureMetadata.finalUrl);
 
   return db.transaction(async (transaction) => {
+    if (canonicalFinalUrl) {
+      await transaction.execute(sql`select pg_advisory_xact_lock(hashtext(${canonicalFinalUrl}))`);
+    }
+
     const [queued] = await transaction
       .select({
         sourceId: sources.id,
@@ -189,6 +197,45 @@ export async function updateQueuedFacebookSourceRawText(
       return { status: "not_queued" as const };
     }
 
+    if (canonicalFinalUrl) {
+      const existingFacebookSources = await transaction
+        .select({ id: sources.id, canonicalUrl: sources.canonicalUrl })
+        .from(sources)
+        .where(eq(sources.kind, "facebook"));
+      const duplicate = existingFacebookSources.find((source) => source.id !== queued.sourceId && canonicalizeFacebookUrl(source.canonicalUrl ?? "") === canonicalFinalUrl);
+
+      if (duplicate) {
+        await transaction
+          .update(sources)
+          .set({ label: `Duplicate source ${duplicate.id}` })
+          .where(eq(sources.id, queued.sourceId));
+        await transaction
+          .update(rawSourceMaterial)
+          .set({
+            rawMetadata: {
+              ...sanitizeExistingRawMetadata(queued.rawMetadata),
+              duplicateSourceId: duplicate.id,
+              duplicateCanonicalUrl: canonicalFinalUrl,
+            },
+          })
+          .where(eq(rawSourceMaterial.id, queued.rawMaterialId));
+
+        if (input.actor) {
+          await transaction.insert(auditEvents).values({
+            actorUserId: input.actor.userId,
+            actorEmail: input.actor.email,
+            operation: "update",
+            targetType: "sources",
+            targetId: queued.sourceId,
+            afterSummary: `Facebook capture skipped as duplicate of source ${duplicate.id}.`,
+            createdAt: input.now,
+          });
+        }
+
+        return { status: "duplicate" as const, duplicateSourceId: duplicate.id };
+      }
+    }
+
     const rawMetadata = {
       ...sanitizeExistingRawMetadata(queued.rawMetadata),
       ...sanitizeCaptureMetadata(input.captureMetadata),
@@ -202,6 +249,13 @@ export async function updateQueuedFacebookSourceRawText(
 
     if (updated.length === 0) {
       return { status: "no_longer_queued" as const };
+    }
+
+    if (canonicalFinalUrl) {
+      await transaction
+        .update(sources)
+        .set({ canonicalUrl: canonicalFinalUrl })
+        .where(eq(sources.id, queued.sourceId));
     }
 
     const review = await ensureFacebookCaptureReviewForCapturedSource(transaction, {
@@ -349,9 +403,6 @@ function canonicalizeFacebookUrl(value: string) {
 
     url.hash = "";
     url.protocol = "https:";
-    if (hostname === "fb.com" || hostname === "fb.watch") {
-      return url.toString();
-    }
     url.hostname = "facebook.com";
     const shareMatch = url.pathname.match(/^(\/share\/[^/]+\/[^/]+)/i);
     if (shareMatch) {

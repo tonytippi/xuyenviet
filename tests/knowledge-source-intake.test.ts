@@ -42,7 +42,7 @@ describe("knowledge source intake", () => {
     expect(result).toMatchObject({
       kind: "url",
       url: "https://example.com/path?keep=1",
-      canonicalUrl: "https://example.com/path?keep=1",
+      canonicalUrl: null,
       label: "Bài gợi ý dừng chân",
       publisher: "Example Travel",
       collectedDate: "2026-07-08",
@@ -70,13 +70,13 @@ describe("knowledge source intake", () => {
     expect(facebook).toMatchObject({
       kind: "facebook",
       url: "https://web.facebook.com/groups/xuyenviet/posts/123",
-      canonicalUrl: "https://web.facebook.com/groups/xuyenviet/posts/123",
+      canonicalUrl: null,
       sourceType: "community",
       verificationStatus: "unverified",
       official: false,
       partner: false,
     });
-    expect(facebookShortLink).toMatchObject({ kind: "facebook", canonicalUrl: "https://fb.watch/example-video", sourceType: "community" });
+    expect(facebookShortLink).toMatchObject({ kind: "facebook", canonicalUrl: null, sourceType: "community" });
     expect(copied).toMatchObject({ kind: "copied_post", sourceType: "community", verificationStatus: "unverified", official: false, partner: false });
   });
 
