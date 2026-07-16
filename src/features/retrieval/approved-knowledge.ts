@@ -57,6 +57,12 @@ function formatKnowledgeResult(index: number, result: KnowledgeSearchResult) {
     lines.push(`Vị trí/cung đường: ${location}`);
   }
 
+  const practicalDetails = formatPracticalDetails(result.practicalDetails);
+
+  if (practicalDetails) {
+    lines.push(`Chi tiết thực tế: ${practicalDetails}`);
+  }
+
   const sourceLabels = result.sources.slice(0, maxSourcesPerCard).map((source) => {
     const publisher = source.publisher ? `, publisher=${formatPromptValue(source.publisher)}` : "";
     const collectedDate = source.collectedDate ? `, thu thập ${source.collectedDate}` : "";
@@ -79,6 +85,17 @@ function formatCompactKnowledgeResult(index: number, result: KnowledgeSearchResu
     `summary=${formatPromptValue(result.summary, 160)}`,
     `Độ tin cậy: ${result.confidence}; cần kiểm tra mới: ${result.freshnessSensitive ? "có" : "không"}; điểm khớp: ${result.score}`,
   ];
+}
+
+function formatPracticalDetails(details: Record<string, unknown>) {
+  const entries = Object.entries(details)
+    .slice(0, 6)
+    .flatMap(([key, value]) => {
+      const values = typeof value === "string" ? [value] : Array.isArray(value) ? value.filter((item): item is string => typeof item === "string").slice(0, 4) : [];
+      return values.length > 0 ? [`${formatPromptValue(key, 60)}=${formatPromptValue(values.join("; "))}`] : [];
+    });
+
+  return entries.join("; ");
 }
 
 function formatPromptValue(value: string, maxLength = maxFieldLength) {

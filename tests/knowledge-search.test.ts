@@ -66,7 +66,7 @@ async function createCard(userId: string, values: Partial<typeof knowledgeCards.
       locationName: values.locationName ?? "Huế",
       routeSegment: values.routeSegment ?? "Đà Nẵng - Huế",
       summary: values.summary ?? "Bãi đỗ rộng, dễ nghỉ chân cho gia đình trên cung đường xuyên Việt.",
-      practicalDetails: values.practicalDetails ?? { private: "Không được đưa vào search text" },
+      practicalDetails: values.practicalDetails ?? { tips: "Khu vực có điểm nghỉ yên tĩnh" },
       tags: values.tags ?? ["hue", "family-stop"],
       confidence: values.confidence ?? "curated",
       freshnessSensitive: values.freshnessSensitive ?? false,
@@ -101,7 +101,7 @@ describe("approved knowledge search documents", () => {
     expect(documents[0]?.searchableText).toContain("Trang địa phương");
     expect(documents[0]?.searchableText).not.toContain("0901234567");
     expect(documents[0]?.searchableText).not.toContain("hidden-provider-data");
-    expect(documents[0]?.searchableText).not.toContain("Không được đưa vào search text");
+    expect(documents[0]?.searchableText).toContain("Khu vực có điểm nghỉ yên tĩnh");
   });
 
   test("disables active documents for ineligible lifecycle, review-needed, and source-orphaned cards", async () => {
@@ -160,6 +160,7 @@ describe("approved knowledge search documents", () => {
       "freshnessSensitive",
       "id",
       "locationName",
+      "practicalDetails",
       "routeSegment",
       "score",
       "sources",
@@ -193,7 +194,7 @@ describe("approved knowledge search documents", () => {
     expect(serialized).not.toContain("provider_payload");
     expect(serialized).not.toContain("rawMetadata");
     expect(serialized).not.toContain("storageKey");
-    expect(serialized).not.toContain("practicalDetails");
+    expect(serialized).toContain("practicalDetails");
     expect(serialized).not.toContain("createdByUserId");
     expect(serialized).not.toContain("aiPromptVersion");
   });
@@ -217,6 +218,42 @@ describe("approved knowledge search documents", () => {
     expect(documents[0]?.searchableText).toContain("Điểm nghỉ mới ở Huế");
     expect(documents[0]?.searchableText).not.toContain("Điểm nghỉ cũ ở Huế");
     await expect(searchApprovedKnowledge("mới Huế")).resolves.toMatchObject([{ id: card.id }]);
+  });
+
+  test("finds cards by reviewed practical details", async () => {
+    await createUser("detail-search-operator", ["operator"]);
+    const source = await createSource("detail-search-operator", { id: "detail-search-source" });
+    const card = await createCard("detail-search-operator", {
+      id: "detail-search-card",
+      title: "Điểm dừng trên đường Huế",
+      practicalDetails: { parking_notes: ["Có chỗ đỗ xe qua đêm có bảo vệ"] },
+    });
+    await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: card.id, sourceId: source.id, supportLevel: "primary" });
+    const { indexApprovedKnowledgeCard, searchApprovedKnowledge } = await import("@/features/knowledge/search");
+
+    await indexApprovedKnowledgeCard(card.id);
+
+    await expect(searchApprovedKnowledge("bảo vệ qua đêm")).resolves.toMatchObject([{ id: card.id, practicalDetails: { parking_notes: ["Có chỗ đỗ xe qua đêm có bảo vệ"] } }]);
+  });
+
+  test("bounds malformed practical detail values before indexing", async () => {
+    await createUser("bounded-details-operator", ["operator"]);
+    const source = await createSource("bounded-details-operator", { id: "bounded-details-source" });
+    const card = await createCard("bounded-details-operator", {
+      id: "bounded-details-card",
+      practicalDetails: {
+        [`key-${"x".repeat(100)}`]: Array.from({ length: 12 }, (_, index) => `value-${index}-${"y".repeat(600)}-marker`),
+      },
+    });
+    await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: card.id, sourceId: source.id, supportLevel: "primary" });
+    const { indexApprovedKnowledgeCard } = await import("@/features/knowledge/search");
+
+    await indexApprovedKnowledgeCard(card.id);
+
+    const [document] = await testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, card.id));
+    expect(document?.searchableText).toContain("value-0-");
+    expect(document?.searchableText).not.toContain("value-10-");
+    expect(document?.searchableText).not.toContain("marker");
   });
 
   test("ignores malformed tag values while indexing approved cards", async () => {

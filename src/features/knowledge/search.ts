@@ -11,6 +11,10 @@ const defaultSearchLimit = 5;
 const maxSearchLimit = 10;
 const maxSearchQueryLength = 500;
 const maxSearchCandidateDocuments = 200;
+const maxPracticalDetailEntries = 20;
+const maxPracticalDetailKeyLength = 60;
+const maxPracticalDetailValuesPerEntry = 10;
+const maxPracticalDetailValueLength = 500;
 
 type KnowledgeSearchDb = ReturnType<typeof getDb>;
 
@@ -23,7 +27,7 @@ export type KnowledgeSearchSource = Pick<
 
 export type KnowledgeSearchResult = Pick<
   typeof knowledgeCards.$inferSelect,
-  "id" | "type" | "title" | "locationName" | "routeSegment" | "summary" | "tags" | "confidence" | "freshnessSensitive" | "updatedAt" | "createdAt"
+  "id" | "type" | "title" | "locationName" | "routeSegment" | "summary" | "practicalDetails" | "tags" | "confidence" | "freshnessSensitive" | "updatedAt" | "createdAt"
 > & {
   score: number;
   sources: KnowledgeSearchSource[];
@@ -202,6 +206,7 @@ async function loadEligibleApprovedCard(db: Pick<KnowledgeSearchDb, "select">, c
         locationName: knowledgeCards.locationName,
         routeSegment: knowledgeCards.routeSegment,
         summary: knowledgeCards.summary,
+        practicalDetails: knowledgeCards.practicalDetails,
         tags: knowledgeCards.tags,
         confidence: knowledgeCards.confidence,
         freshnessSensitive: knowledgeCards.freshnessSensitive,
@@ -264,6 +269,7 @@ function toSearchResult(card: Omit<KnowledgeSearchResult, "score" | "sources">):
     locationName: card.locationName,
     routeSegment: card.routeSegment,
     summary: card.summary,
+    practicalDetails: card.practicalDetails,
     tags: card.tags,
     confidence: card.confidence,
     freshnessSensitive: card.freshnessSensitive,
@@ -281,6 +287,7 @@ function buildSearchableText(card: Omit<KnowledgeSearchResult, "score">) {
     card.locationName,
     card.routeSegment,
     card.summary,
+    ...getPracticalDetailSearchValues(card.practicalDetails),
     ...card.tags,
     card.confidence,
     card.freshnessSensitive ? "freshness sensitive" : null,
@@ -300,6 +307,22 @@ function buildSearchableText(card: Omit<KnowledgeSearchResult, "score">) {
   ];
 
   return values.map(normalizeSearchableValue).filter((value): value is string => Boolean(value)).join("\n");
+}
+
+function getPracticalDetailSearchValues(details: Record<string, unknown>) {
+  return Object.entries(details)
+    .slice(0, maxPracticalDetailEntries)
+    .flatMap(([key, value]) => {
+      const safeKey = normalizePracticalDetailValue(key, maxPracticalDetailKeyLength);
+      const rawValues = typeof value === "string" ? [value] : Array.isArray(value) ? value : [];
+      const safeValues = rawValues.slice(0, maxPracticalDetailValuesPerEntry).map((item) => normalizePracticalDetailValue(item, maxPracticalDetailValueLength)).filter((item): item is string => Boolean(item));
+
+      return safeKey ? [safeKey, ...safeValues] : safeValues;
+    });
+}
+
+function normalizePracticalDetailValue(value: unknown, maxLength: number) {
+  return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
 }
 
 function hashSearchableText(searchableText: string) {
