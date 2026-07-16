@@ -127,7 +127,7 @@ development_status:
   epic-6-retrospective: optional
   epic-7: in-progress
   7-1-establish-the-traveler-ui-foundation: done
-  7-2-deliver-the-focused-public-entry: backlog
+  7-2-deliver-the-focused-public-entry: done
   7-3-deliver-the-authenticated-desktop-shell: backlog
   7-4-keep-workspace-selection-canonical-across-devices: backlog
   7-5-refine-the-ai-ask-composer-and-streaming-feedback: backlog
