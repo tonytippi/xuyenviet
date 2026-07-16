@@ -132,7 +132,7 @@ development_status:
   7-4-keep-workspace-selection-canonical-across-devices: done
   7-5-refine-the-ai-ask-composer-and-streaming-feedback: done
   7-6-present-scannable-answer-content: done
-  7-7-inspect-persisted-answer-details-responsively: backlog
+  7-7-inspect-persisted-answer-details-responsively: done
   epic-7-retrospective: optional
   epic-ops: in-progress
   ops-1-async-knowledge-extraction-worker: done
