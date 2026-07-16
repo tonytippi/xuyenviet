@@ -1,16 +1,17 @@
 import Link from "next/link";
+import { AccountIcon, ChatIcon, ProjectIcon, SourceIcon } from "@/components/ui/icons";
 
 const starterPrompts = [
-  "Tuyến đường Hà Nội - Huế 5 ngày",
-  "Khách sạn phù hợp gia đình",
-  "Điểm dừng an toàn cho trẻ nhỏ",
-  "Nguồn nào cần kiểm chứng?",
+  { label: "Tuyến đường Hà Nội - Huế 5 ngày", icon: ProjectIcon },
+  { label: "Khách sạn phù hợp gia đình", icon: AccountIcon },
+  { label: "Điểm dừng an toàn cho trẻ nhỏ", icon: ChatIcon },
+  { label: "Nguồn nào cần kiểm chứng?", icon: SourceIcon },
 ];
 
 const previewRows = [
-  { title: "Asia Park", description: "điểm dừng buổi tối" },
-  { title: "Nơi ở gần đó", description: "gợi ý khu vực lưu trú" },
-  { title: "Nguồn tham khảo", description: "đã duyệt · chính thức · web" },
+  { title: "Asia Park", description: "điểm dừng buổi tối", icon: ProjectIcon },
+  { title: "Nơi ở gần đó", description: "gợi ý khu vực lưu trú", icon: AccountIcon },
+  { title: "Nguồn tham khảo", description: "đã duyệt · chính thức · web", icon: SourceIcon },
 ];
 
 type HomeProps = {
@@ -109,13 +110,14 @@ export default async function Home({ searchParams }: HomeProps) {
           </p>
 
           <div className="mt-6 flex flex-wrap justify-center gap-3" aria-label="Gợi ý bắt đầu">
-            {starterPrompts.map((prompt) => (
+            {starterPrompts.map(({ icon: Icon, label }) => (
               <a
-                className="inline-flex min-h-11 items-center rounded-full border border-[#e5e0d6] bg-white/75 px-4 py-2 text-sm font-bold text-[#1f2937] transition hover:bg-white focus:outline-none focus:ring-4 focus:ring-[#e5bd82]"
+                className="inline-flex min-h-11 items-center gap-2 rounded-full border border-[#e5e0d6] bg-white/75 px-4 py-2 text-sm font-bold text-[#1f2937] transition hover:bg-white focus:outline-none focus:ring-4 focus:ring-[#e5bd82]"
                 href={signInHref}
-                key={prompt}
+                key={label}
               >
-                {prompt}
+                <Icon className="public-starter-icon size-4 text-[#14532d]" />
+                {label}
               </a>
             ))}
           </div>
@@ -128,10 +130,10 @@ export default async function Home({ searchParams }: HomeProps) {
               </p>
             </article>
             <article className="grid gap-3 rounded-3xl border border-[#e5e0d6] bg-white/80 p-5 shadow-[0_16px_48px_rgba(31,41,55,0.08)]" aria-label="Ví dụ panel chi tiết">
-              {previewRows.map((row) => (
+              {previewRows.map(({ icon: Icon, ...row }) => (
                 <div className="grid grid-cols-[2rem_minmax(0,1fr)] items-center gap-3 rounded-2xl bg-[#f8fafc] p-3" key={row.title}>
                   <span className="grid size-8 place-items-center rounded-xl bg-[#e8f3ec] text-sm font-black text-[#14532d]" aria-hidden="true">
-                    •
+                    <Icon className="public-preview-icon size-4" />
                   </span>
                   <span>
                     <strong className="block text-sm text-[#1f2937]">{row.title}</strong>
@@ -144,8 +146,8 @@ export default async function Home({ searchParams }: HomeProps) {
         </section>
       </main>
 
-      <footer className="px-5 py-5 text-center text-sm leading-6 text-[#6b7280]">
-        Câu trả lời AI có thể chứa thông tin du lịch thay đổi theo thời gian. Hãy kiểm tra giá, giờ mở cửa, tình trạng đường và đặt chỗ trước khi quyết định.
+      <footer className="px-5 py-5 text-center text-sm leading-6 text-[#6b7280]" id="quyen-rieng-tu">
+        Quyền riêng tư: XuyenViet chỉ lưu nội dung cần thiết để hỗ trợ cuộc trò chuyện và kế hoạch chuyến đi; bạn có thể xoá chúng bất cứ lúc nào. Câu trả lời AI có thể chứa thông tin du lịch thay đổi theo thời gian. Hãy kiểm tra giá, giờ mở cửa, tình trạng đường và đặt chỗ trước khi quyết định.
       </footer>
     </div>
   );

@@ -1,7 +1,7 @@
 import { asc, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { auditEvents, chatContext, conversations, messages, tripProjects, users } from "@/db/schema";
+import { aiUsageEvents, answerUsefulnessFeedback, assistantResponseProvenance, assistantRetrievalDecisions, auditEvents, chatContext, conversations, messageImageAttachments, messages, tripProjects, users, webSearchResults } from "@/db/schema";
 
 import { testDb } from "./helpers/db";
 
@@ -141,11 +141,18 @@ describe("Trip project helpers", () => {
     await expect(testDb.select().from(auditEvents)).resolves.toHaveLength(0);
   });
 
-  test("deletes an owned trip project, detaches linked chats, cascades project context, and audits counts without content", async () => {
+  test("deletes an owned trip project, its linked chats, and project context with an auditable summary", async () => {
     await createTestUser("user-1");
     const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Đà Nẵng bí mật", notes: "Không ghi vào audit" }).returning({ id: tripProjects.id });
     const [conversation] = await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id }).returning({ id: conversations.id });
     const [message] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "user", content: "Gia đình thích biển" }).returning({ id: messages.id });
+    const [assistantMessage] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "assistant", content: "Nên đi biển." }).returning({ id: messages.id });
+    await testDb.insert(messageImageAttachments).values({ conversationId: conversation.id, messageId: message.id, userId: "user-1", mimeType: "image/png", byteSize: 12 });
+    await testDb.insert(aiUsageEvents).values({ userId: "user-1", conversationId: conversation.id, userMessageId: message.id, assistantMessageId: assistantMessage.id, purpose: "ai_ask_initial_answer", provider: "ai_gateway", model: "test", promptVersion: "test", status: "success" });
+    await testDb.insert(assistantRetrievalDecisions).values({ userId: "user-1", conversationId: conversation.id, userMessageId: message.id, assistantMessageId: assistantMessage.id, approvedKnowledgeCandidateCount: 1, approvedKnowledgeSelectedCount: 1, approvedKnowledgeTargetCount: 1, approvedKnowledgeRelevanceThreshold: 1, broadPlanningQuestion: false, freshnessRequired: false, conflictDetected: false, webSearchTriggered: false, webSearchTriggerReasons: [], generalReasoningUsed: true, warnings: [] });
+    await testDb.insert(assistantResponseProvenance).values({ userId: "user-1", conversationId: conversation.id, userMessageId: message.id, assistantMessageId: assistantMessage.id, sourceCategory: "general", rank: 1, verificationStatus: "unverified", usedInPrompt: true, citedInAnswer: false, sourceSnapshot: {} });
+    await testDb.insert(answerUsefulnessFeedback).values({ userId: "user-1", conversationId: conversation.id, assistantMessageId: assistantMessage.id, rating: "useful" });
+    await testDb.insert(webSearchResults).values({ userId: "user-1", conversationId: conversation.id, userMessageId: message.id, query: "Đà Nẵng", title: "Nguồn", url: "https://example.com", snippet: "Thông tin", provider: "test", checkedAt: new Date(), sourceType: "general", confidence: "unverified", triggerReason: "no_approved_knowledge", rank: 1 });
     await testDb.insert(chatContext).values({
       userId: "user-1",
       conversationId: conversation.id,
@@ -164,14 +171,28 @@ describe("Trip project helpers", () => {
     await expect(deleteOwnedTripProject(project.id)).resolves.toEqual({ success: true });
     await expect(testDb.select().from(tripProjects)).resolves.toHaveLength(0);
     await expect(testDb.select().from(chatContext)).resolves.toHaveLength(0);
-    const [savedConversation] = await testDb.select().from(conversations).where(eq(conversations.id, conversation.id));
+    const savedConversations = await testDb.select().from(conversations).where(eq(conversations.id, conversation.id));
+    const savedMessages = await testDb.select().from(messages).where(eq(messages.conversationId, conversation.id));
+    const attachments = await testDb.select().from(messageImageAttachments).where(eq(messageImageAttachments.conversationId, conversation.id));
+    const retrieval = await testDb.select().from(assistantRetrievalDecisions).where(eq(assistantRetrievalDecisions.conversationId, conversation.id));
+    const provenance = await testDb.select().from(assistantResponseProvenance).where(eq(assistantResponseProvenance.conversationId, conversation.id));
+    const feedback = await testDb.select().from(answerUsefulnessFeedback).where(eq(answerUsefulnessFeedback.conversationId, conversation.id));
+    const searchRows = await testDb.select().from(webSearchResults).where(eq(webSearchResults.conversationId, conversation.id));
+    const [usage] = await testDb.select().from(aiUsageEvents);
     const [audit] = await testDb.select().from(auditEvents);
 
-    expect(savedConversation).toMatchObject({ id: conversation.id, userId: "user-1", tripProjectId: null });
+    expect(savedConversations).toHaveLength(0);
+    expect(savedMessages).toHaveLength(0);
+    expect(attachments).toHaveLength(0);
+    expect(retrieval).toHaveLength(0);
+    expect(provenance).toHaveLength(0);
+    expect(feedback).toHaveLength(0);
+    expect(searchRows).toHaveLength(0);
+    expect(usage).toMatchObject({ conversationId: null, userMessageId: null, assistantMessageId: null });
     expect(audit).toMatchObject({ actorUserId: "user-1", operation: "delete", targetType: "trip_project", targetId: project.id });
     expect(audit.beforeSummary).toContain('"linkedConversationCount":1');
     expect(audit.beforeSummary).toContain('"chatContextCount":1');
-    expect(audit.afterSummary).toContain("linkedConversationsDetached");
+    expect(audit.afterSummary).toContain("linkedConversationsDeleted");
     expect(audit.beforeSummary).not.toContain("Đà Nẵng bí mật");
     expect(audit.beforeSummary).not.toContain("Gia đình thích biển");
   });

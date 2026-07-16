@@ -175,6 +175,12 @@ export async function deleteOwnedTripProject(tripProjectId: string): Promise<Del
       const [linkedConversationCount] = await transaction.select({ count: count() }).from(conversations).where(and(eq(conversations.tripProjectId, project.id), eq(conversations.userId, session.userId)));
       const [projectContextCount] = await transaction.select({ count: count() }).from(chatContext).where(and(eq(chatContext.tripProjectId, project.id), eq(chatContext.userId, session.userId)));
 
+      // The project deletion promise includes every linked conversation. Their owned dependent
+      // records cascade through the conversation foreign-key graph before the project is removed.
+      await transaction
+        .delete(conversations)
+        .where(and(eq(conversations.tripProjectId, project.id), eq(conversations.userId, session.userId)));
+
       const deletedRows = await transaction
         .delete(tripProjects)
         .where(and(eq(tripProjects.id, project.id), eq(tripProjects.userId, session.userId)))
@@ -194,7 +200,7 @@ export async function deleteOwnedTripProject(tripProjectId: string): Promise<Del
           linkedConversationCount: linkedConversationCount?.count ?? 0,
           chatContextCount: projectContextCount?.count ?? 0,
         }),
-        afterSummary: JSON.stringify({ deleted: true, linkedConversationsDetached: true }),
+        afterSummary: JSON.stringify({ deleted: true, linkedConversationsDeleted: true }),
       }, transaction);
 
       return { success: true };

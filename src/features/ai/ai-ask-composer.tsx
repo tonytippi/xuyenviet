@@ -10,10 +10,10 @@ import { answerUsefulnessCommentMaxLength, countAnswerUsefulnessCommentCharacter
 import type { AnswerUsefulnessRating } from "@/db/schema";
 import type { AnswerAnnotation } from "@/features/ai/answer-annotations";
 import type { AssistantMessageProvenanceItem } from "@/features/retrieval/provenance";
+import { AccountIcon, AttachmentIcon, ChatIcon, CloseIcon, CostIcon, HotelAreaIcon, LoadingIcon, NewChatIcon, PlaceIcon, ProjectIcon, RouteSegmentIcon, SendIcon, SourceIcon } from "@/components/ui/icons";
 
 const maxQuestionLength = 2_000;
 const maxImageByteSize = 5 * 1024 * 1024;
-const progressDelayMs = 4_000;
 const previewMaxLength = 60;
 
 type DisplayMessage = {
@@ -32,15 +32,17 @@ type DisplayMessage = {
 };
 
 export type AnswerEntityDescriptor = {
-  type: "source" | "warning" | "trip_fact" | "action";
+  type: AnswerAnnotation["type"];
   label: string;
   section?: string;
+  summary?: string;
   sourceCategory?: AssistantMessageProvenanceItem["sourceCategory"];
   owner?: {
     table: string;
     id: string;
   };
   detail?: Record<string, string>;
+  quickFacts?: Array<{ label: string; value: string }>;
   provenanceIds?: string[];
 };
 
@@ -62,27 +64,42 @@ type CreateTripProjectAction = (
 type DeleteConversationAction = (conversationId: string) => Promise<{ success: boolean; error?: string; reason?: "not_found" }>;
 type DeleteTripProjectAction = (tripProjectId: string) => Promise<{ success: boolean; error?: string; reason?: "not_found" }>;
 type SaveAnswerUsefulnessFeedbackAction = (input: { assistantMessageId: string; rating: AnswerUsefulnessRating; comment?: string | null }) => Promise<{ success: boolean; feedback?: AnswerUsefulnessFeedbackSummary; reason?: "unauthenticated" | "not_found" | "invalid_target" | "invalid_input" | "invalid_rating" | "comment_too_long" | "failed" }>;
+type SignOutAction = () => Promise<void>;
 
 const emptyMessages: DisplayMessage[] = [];
 const emptySessions: ChatSessionSummary[] = [];
 const emptyTripProjects: TripProjectSummary[] = [];
 
+function buildCanonicalAiAskUrl(conversationId?: string, tripProjectId?: string) {
+  const searchParams = new URLSearchParams();
+
+  if (conversationId) searchParams.set("conversationId", conversationId);
+  if (tripProjectId) searchParams.set("tripProjectId", tripProjectId);
+
+  const query = searchParams.toString();
+  return query ? `/ai-ask?${query}` : "/ai-ask";
+}
+
 const starterCards = [
   {
     title: "Lên route",
     description: "Hà Nội → Huế trong 5 ngày",
+    Icon: NewChatIcon,
   },
   {
     title: "Tìm nơi ở",
     description: "khu nào tiện cho gia đình",
+    Icon: ProjectIcon,
   },
   {
     title: "Điểm dừng",
     description: "nghỉ ăn, chơi nhẹ, trẻ em",
+    Icon: ChatIcon,
   },
   {
     title: "Kiểm tra nguồn",
     description: "curated, official, web",
+    Icon: SourceIcon,
   },
 ];
 
@@ -93,12 +110,14 @@ type AiAskComposerProps = {
   initialSessions?: ChatSessionSummary[];
   initialTripProjects?: TripProjectSummary[];
   selectedTripProject?: TripProjectSummary | null;
+  supportsImageInput?: boolean;
   userEmail?: string;
   canAccessAdmin?: boolean;
   createTripProjectAction?: CreateTripProjectAction;
   deleteConversationAction?: DeleteConversationAction;
   deleteTripProjectAction?: DeleteTripProjectAction;
   saveAnswerUsefulnessFeedbackAction?: SaveAnswerUsefulnessFeedbackAction;
+  signOutAction?: SignOutAction;
 };
 
 function AnswerUsefulnessFeedbackControl({
@@ -199,6 +218,7 @@ const assistantSectionHeadings = new Set([
   "Lưu ý thực tế",
   "Cảnh báo cần kiểm tra",
   "Nguồn và độ tin cậy",
+  "Điều chưa chắc chắn",
   "Bước tiếp theo",
   "Câu hỏi tiếp theo",
 ]);
@@ -253,8 +273,9 @@ function splitAssistantContent(content: string) {
   }).filter((section) => section.heading || section.body);
 }
 
-export function AssistantMessageContent({ content, annotations, selectedEntityId, detailPanelIds, onSelectEntity }: { content: string; annotations?: AnswerAnnotation[]; selectedEntityId?: string; detailPanelIds?: string; onSelectEntity?: (entity: AnswerEntityDescriptor, trigger: HTMLElement) => void }) {
+export function AssistantMessageContent({ messageId, content, annotations, selectedEntityId, detailPanelIds, onSelectEntity }: { messageId?: string; content: string; annotations?: AnswerAnnotation[]; selectedEntityId?: string; detailPanelIds?: string; onSelectEntity?: (entity: AnswerEntityDescriptor, trigger: HTMLElement) => void }) {
   const sections = splitAssistantContent(content);
+  const navigableSections = messageId ? sections.filter((section) => section.heading) : [];
 
   if (sections.length <= 1 && !sections[0]?.heading) {
     return <p className="whitespace-pre-wrap text-base leading-7"><AnnotatedAnswerText content={content} annotations={annotations} selectedEntityId={selectedEntityId} detailPanelIds={detailPanelIds} onSelectEntity={onSelectEntity} /></p>;
@@ -262,12 +283,25 @@ export function AssistantMessageContent({ content, annotations, selectedEntityId
 
   return (
     <div className="space-y-4">
+      {navigableSections.length > 0 ? (
+        <nav aria-label="Các mục trong câu trả lời" className="-mx-1 overflow-x-auto pb-1">
+          <ul className="flex w-max min-w-full gap-2 px-1">
+            {navigableSections.map((section, index) => (
+              <li key={`${section.heading}-${index}`}>
+                <a className="block whitespace-nowrap rounded-full border border-[#8fb59f] bg-[#edf7f0] px-3 py-2 text-sm font-semibold text-[#14532d] transition hover:bg-white focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45" href={`#answer-${messageId}-section-${index}`}>
+                  {normalizeAssistantHeading(section.heading!)}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </nav>
+      ) : null}
       {sections.map((section, index) => {
         const headingAnnotations = section.heading && section.headingStart !== undefined && section.headingEnd !== undefined ? annotations?.filter((annotation) => annotation.start >= section.headingStart! && annotation.end <= section.headingEnd!).map((annotation) => ({ ...annotation, start: annotation.start - section.headingStart!, end: annotation.end - section.headingStart! })) : [];
         const sectionAnnotations = section.bodyStart >= 0 && section.bodyEnd >= 0 ? annotations?.filter((annotation) => annotation.start >= section.bodyStart && annotation.end <= section.bodyEnd).map((annotation) => ({ ...annotation, start: annotation.start - section.bodyStart, end: annotation.end - section.bodyStart })) : [];
 
         return (
-          <section className="rounded-2xl border border-[#eadfc8] bg-white/70 p-4" key={`${section.heading || "intro"}-${index}`}>
+          <section className="rounded-2xl border border-[#eadfc8] bg-white/70 p-4" id={section.heading && messageId ? `answer-${messageId}-section-${navigableSections.indexOf(section)}` : undefined} key={`${section.heading || "intro"}-${index}`}>
             {section.heading ? <h3 className="text-sm font-bold uppercase tracking-[0.12em] text-[#1f5f46]"><AnnotatedAnswerText content={section.heading} annotations={headingAnnotations} selectedEntityId={selectedEntityId} detailPanelIds={detailPanelIds} onSelectEntity={onSelectEntity} /></h3> : null}
             {section.body ? <p className="mt-2 whitespace-pre-wrap text-base leading-7"><AnnotatedAnswerText content={section.body} annotations={sectionAnnotations} selectedEntityId={selectedEntityId} detailPanelIds={detailPanelIds} onSelectEntity={onSelectEntity} /></p> : null}
           </section>
@@ -348,9 +382,11 @@ function createAnnotationAnswerEntityDescriptor(annotation: AnswerAnnotation): A
     type: annotation.detail.type,
     label: annotation.detail.label,
     section: annotation.detail.section,
+    summary: annotation.detail.summary,
     sourceCategory: annotation.detail.sourceCategory,
     owner: annotation.detail.owner,
     detail: annotation.detail.detail,
+    quickFacts: annotation.detail.quickFacts,
     provenanceIds: annotation.detail.provenanceIds,
   };
 }
@@ -443,15 +479,19 @@ export function AnswerDetailPanel({ selectedEntity, panelId, panelRef, onClose }
     );
   }
 
-  const detailEntries = Object.entries(selectedEntity.detail ?? {});
+  const detailEntries = selectedEntity.quickFacts ?? Object.entries(selectedEntity.detail ?? {}).map(([label, value]) => ({ label, value }));
+  const DetailIcon = getAnswerEntityIcon(selectedEntity.type);
 
   return (
     <div aria-live="polite" className="flex flex-1 flex-col gap-4 overflow-y-auto py-4 focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45" id={panelId} ref={panelRef} tabIndex={-1}>
       <div className="rounded-[1.5rem] border border-[#d8c9ad] bg-white/85 p-4">
         <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#8c4f13]">Chi tiết đã chọn</p>
-            <h3 className="mt-1 text-xl font-semibold tracking-[-0.03em] text-[#17342c]">{selectedEntity.label}</h3>
+          <div className="flex min-w-0 items-start gap-3">
+            <span aria-hidden="true" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#e8f3ec] text-xl text-[#14532d]"><DetailIcon /></span>
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#8c4f13]">Chi tiết đã chọn</p>
+              <h3 className="mt-1 text-xl font-semibold tracking-[-0.03em] text-[#17342c]">{selectedEntity.label}</h3>
+            </div>
           </div>
           <button
             aria-label="Đóng bảng chi tiết"
@@ -462,14 +502,14 @@ export function AnswerDetailPanel({ selectedEntity, panelId, panelRef, onClose }
             Đóng
           </button>
         </div>
-        <p className="mt-3 text-sm leading-6 text-[#4f625a]">{formatAnswerEntitySummary(selectedEntity)}</p>
+        <p className="mt-3 text-sm leading-6 text-[#4f625a]">{selectedEntity.summary ?? formatAnswerEntitySummary(selectedEntity)}</p>
       </div>
 
       {detailEntries.length > 0 ? (
         <section className="rounded-[1.5rem] border border-[#eadfc8] bg-white/75 p-4" aria-label="Thông tin nhanh">
           <h4 className="text-sm font-bold uppercase tracking-[0.12em] text-[#1f5f46]">Thông tin nhanh</h4>
           <dl className="mt-3 space-y-3 text-sm leading-6">
-            {detailEntries.map(([label, value], index) => (
+            {detailEntries.map(({ label, value }, index) => (
               <div className="rounded-xl bg-[#fffdf8] p-3" key={`${label}-${index}`}>
                 <dt className="text-xs font-bold uppercase tracking-[0.12em] text-[#6b7c75]">{label}</dt>
                 <dd className="mt-1 break-words font-semibold text-[#17342c]">{value}</dd>
@@ -508,19 +548,22 @@ export function AiAskComposer({
   initialSessions = emptySessions,
   initialTripProjects = emptyTripProjects,
   selectedTripProject = null,
+  supportsImageInput = false,
   userEmail,
   canAccessAdmin = false,
   createTripProjectAction,
   deleteConversationAction,
   deleteTripProjectAction,
   saveAnswerUsefulnessFeedbackAction,
+  signOutAction,
 }: AiAskComposerProps) {
   const router = useRouter();
   const activeTripProjectId = selectedTripProject?.id;
   const [question, setQuestion] = useState(initialQuestion);
   const [status, setStatus] = useState(initialMessages.length > 0 ? "Đã tải hội thoại. Bạn có thể tiếp tục kế hoạch." : selectedTripProject ? `Bạn đang lập kế hoạch trong dự án “${selectedTripProject.title}”.` : "Nhập câu hỏi về chuyến đi đường bộ của bạn.");
   const [isPending, setIsPending] = useState(false);
-  const [showProgress, setShowProgress] = useState(false);
+  const [isPreparing, setIsPreparing] = useState(false);
+  const [recoveryMessage, setRecoveryMessage] = useState<string | null>(null);
   const [pendingQuestion, setPendingQuestion] = useState("");
   const [streamingContent, setStreamingContent] = useState("");
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
@@ -567,6 +610,16 @@ export function AiAskComposer({
   const desktopAnswerDetailPanelId = "ai-ask-selected-answer-detail-desktop";
   const answerDetailPanelIds = `${mobileAnswerDetailPanelId} ${desktopAnswerDetailPanelId}`;
   const selectedAnswerEntityId = selectedAnswerEntity?.provenanceIds?.[0];
+  const activeWorkspaceTitle = selectedTripProject
+    ? formatTripProjectLabel(selectedTripProject)
+    : conversationId
+      ? sessions.find((session) => session.id === conversationId)?.preview ?? "Trò chuyện thường"
+      : "Trò chuyện mới";
+
+  function reconcileSelection(nextConversationId?: string, nextTripProjectId?: string) {
+    router.replace(buildCanonicalAiAskUrl(nextConversationId, nextTripProjectId));
+    router.refresh();
+  }
 
   useEffect(() => {
     const desktopQuery = window.matchMedia("(min-width: 1024px)");
@@ -707,20 +760,6 @@ export function AiAskComposer({
   }, []);
 
   useEffect(() => {
-    if (!isPending) {
-      setShowProgress(false);
-      return;
-    }
-
-    const timeout = window.setTimeout(() => {
-      setShowProgress(true);
-      setStatus("Trợ lý vẫn đang xử lý câu hỏi. Bạn cứ giữ nguyên màn hình này, mình sẽ cập nhật khi có kết quả.");
-    }, progressDelayMs);
-
-    return () => window.clearTimeout(timeout);
-  }, [isPending]);
-
-  useEffect(() => {
     if (!selectedImage) {
       setImageUrl(null);
       return;
@@ -813,6 +852,7 @@ export function AiAskComposer({
     }
 
     if (imageError) {
+      setRecoveryMessage(imageError);
       setStatus(imageError);
       imageInputRef.current?.focus();
       return;
@@ -822,7 +862,8 @@ export function AiAskComposer({
     const requestId = activeRequestIdRef.current + 1;
     activeRequestIdRef.current = requestId;
     setIsPending(true);
-    setShowProgress(false);
+    setIsPreparing(false);
+    setRecoveryMessage(null);
     setPendingQuestion(trimmedQuestion);
     setStreamingContent("");
     setStatus(selectedImage ? "Đang kiểm tra ảnh và chuẩn bị luồng trả lời..." : "Đang gửi câu hỏi và chuẩn bị luồng trả lời...");
@@ -831,11 +872,17 @@ export function AiAskComposer({
       const hadConversation = Boolean(conversationId || messages.length > 0);
       const controller = new AbortController();
       abortControllerRef.current = controller;
-      const result = await submitAiAskStream({ question: trimmedQuestion, conversationId, tripProjectId: activeTripProjectId, image: selectedImage, signal: controller.signal, onDelta: (content) => {
+      const result = await submitAiAskStream({ question: trimmedQuestion, conversationId, tripProjectId: activeTripProjectId, image: selectedImage, signal: controller.signal, onPreparing: () => {
+        if (activeRequestIdRef.current === requestId) {
+          setIsPreparing(true);
+          setStatus("Trợ lý đang chuẩn bị ngữ cảnh cho câu hỏi của bạn.");
+        }
+      }, onDelta: (content) => {
         if (activeRequestIdRef.current !== requestId) {
           return;
         }
 
+        setIsPreparing(true);
         setStreamingContent((currentContent) => currentContent + content);
       } });
 
@@ -859,11 +906,15 @@ export function AiAskComposer({
           } else {
             setSessions((currentSessions) => moveSessionToTop(currentSessions, newConversationId));
           }
-          const searchParams = new URLSearchParams({ conversationId: newConversationId });
-          if (activeTripProjectId) searchParams.set("tripProjectId", activeTripProjectId);
-          router.replace(`/ai-ask?${searchParams.toString()}`);
+          reconcileSelection(newConversationId, activeTripProjectId);
         }
-        setStatus(`${result.errorMessage} Chưa có câu trả lời trợ lý nào được lưu cho lượt này.`);
+        if (result.conversationId && failedUserMessage) {
+          setStatus(`${result.errorMessage} Chưa có câu trả lời trợ lý nào được lưu cho lượt này.`);
+          setRecoveryMessage("Tin nhắn đã được lưu nhưng chưa có câu trả lời. Bạn có thể chỉnh câu hỏi rồi gửi lại.");
+        } else {
+          setStatus(`${result.errorMessage} Nội dung vẫn còn trong ô nhập để bạn thử lại.`);
+          setRecoveryMessage("Không thể gửi yêu cầu. Nội dung của bạn vẫn còn trong ô nhập để thử lại.");
+        }
         return;
       }
 
@@ -881,17 +932,17 @@ export function AiAskComposer({
       } else {
         setSessions((currentSessions) => moveSessionToTop(currentSessions, result.conversationId));
       }
-      const searchParams = new URLSearchParams({ conversationId: result.conversationId });
-      if (activeTripProjectId) searchParams.set("tripProjectId", activeTripProjectId);
-      router.replace(`/ai-ask?${searchParams.toString()}`);
+      reconcileSelection(result.conversationId, activeTripProjectId);
     } catch (error) {
       if (activeRequestIdRef.current === requestId && !(error instanceof DOMException && error.name === "AbortError")) {
         setStatus("Không thể gửi câu hỏi lúc này. Hãy kiểm tra đăng nhập và thử lại. Nội dung vẫn còn trong ô nhập.");
+        setRecoveryMessage("Không thể gửi yêu cầu. Nội dung của bạn vẫn còn trong ô nhập để thử lại.");
       }
     } finally {
       if (activeRequestIdRef.current === requestId) {
         isSubmittingRef.current = false;
         setIsPending(false);
+        setIsPreparing(false);
         setPendingQuestion("");
         setStreamingContent("");
         abortControllerRef.current = null;
@@ -912,16 +963,19 @@ export function AiAskComposer({
     if (imageError) {
       setSelectedImage(null);
       event.target.value = "";
+      setRecoveryMessage(imageError);
       setStatus(imageError);
       return;
     }
 
+    setRecoveryMessage(null);
     setSelectedImage(file);
     setStatus(`Đã chọn ảnh “${file.name || "ảnh đính kèm"}”. Ảnh sẽ được kiểm tra quyền sở hữu trước khi gọi AI.`);
   }
 
   function clearSelectedImage() {
     setSelectedImage(null);
+    setRecoveryMessage(null);
 
     if (imageInputRef.current) {
       imageInputRef.current.value = "";
@@ -946,7 +1000,7 @@ export function AiAskComposer({
     if (imageInputRef.current) {
       imageInputRef.current.value = "";
     }
-    router.push(activeTripProjectId ? `/ai-ask?tripProjectId=${encodeURIComponent(activeTripProjectId)}` : "/ai-ask");
+    router.push(buildCanonicalAiAskUrl(undefined, activeTripProjectId));
   }
 
   function handleSelectSession(id: string) {
@@ -969,9 +1023,7 @@ export function AiAskComposer({
       sessionSheetPreviousFocusRef.current = textareaRef.current;
       setSessionSheetOpen(false);
     }
-    const searchParams = new URLSearchParams({ conversationId: id });
-    if (activeTripProjectId) searchParams.set("tripProjectId", activeTripProjectId);
-    router.push(`/ai-ask?${searchParams.toString()}`);
+    router.push(buildCanonicalAiAskUrl(id, activeTripProjectId));
   }
 
   async function handleDeleteSession(id: string) {
@@ -998,6 +1050,7 @@ export function AiAskComposer({
             setSessionSheetOpen(false);
             clearActiveConversation();
           }
+          router.refresh();
         }
         setStatus(result.error ?? "Không thể xoá cuộc trò chuyện lúc này. Vui lòng thử lại.");
         return;
@@ -1011,6 +1064,7 @@ export function AiAskComposer({
       }
 
       setStatus("Đã xoá cuộc trò chuyện và các chi tiết đã ghi nhớ từ cuộc trò chuyện này.");
+      router.refresh();
     } catch {
       setStatus("Không thể xoá cuộc trò chuyện lúc này. Vui lòng thử lại.");
     } finally {
@@ -1079,7 +1133,7 @@ export function AiAskComposer({
     if (imageInputRef.current) {
       imageInputRef.current.value = "";
     }
-    router.push(activeTripProjectId ? `/ai-ask?tripProjectId=${encodeURIComponent(activeTripProjectId)}` : "/ai-ask");
+    router.push(buildCanonicalAiAskUrl(undefined, activeTripProjectId));
   }
 
   function handleSelectAnswerEntity(entity: AnswerEntityDescriptor, trigger: HTMLElement) {
@@ -1116,7 +1170,7 @@ export function AiAskComposer({
       setSessionSheetOpen(false);
     }
 
-    router.push(projectId ? `/ai-ask?tripProjectId=${encodeURIComponent(projectId)}` : "/ai-ask");
+    router.push(buildCanonicalAiAskUrl(undefined, projectId));
   }
 
   async function handleDeleteTripProject() {
@@ -1133,7 +1187,7 @@ export function AiAskComposer({
       return;
     }
 
-    const confirmed = window.confirm(`Xoá dự án chuyến đi “${selectedTripProject.title}”? Ngữ cảnh đã ghi nhớ cho dự án sẽ bị xoá khỏi phần sử dụng bình thường. Các cuộc trò chuyện liên kết sẽ không bị xoá; chúng sẽ được chuyển về lịch sử trò chuyện thường.`);
+    const confirmed = window.confirm(`Xoá dự án chuyến đi “${selectedTripProject.title}”? Dự án này, các cuộc trò chuyện liên kết và thông tin ngữ cảnh đã lưu sẽ bị xóa khỏi giao diện thông thường và không còn được dùng để gợi ý trong tương lai. Hành động này không thể hoàn tác.`);
 
     if (!confirmed) {
       return;
@@ -1162,7 +1216,7 @@ export function AiAskComposer({
           if (imageInputRef.current) {
             imageInputRef.current.value = "";
           }
-          router.push("/ai-ask");
+          reconcileSelection();
         }
         setStatus(result.error ?? "Không thể xoá dự án chuyến đi lúc này. Vui lòng thử lại.");
         return;
@@ -1181,8 +1235,8 @@ export function AiAskComposer({
       if (imageInputRef.current) {
         imageInputRef.current.value = "";
       }
-      router.push("/ai-ask");
-      setStatus("Đã xoá dự án chuyến đi. Các cuộc trò chuyện liên kết đã được chuyển về lịch sử trò chuyện thường.");
+      reconcileSelection();
+      setStatus("Đã xoá dự án chuyến đi và các cuộc trò chuyện liên kết.");
     } catch {
       setStatus("Không thể xoá dự án chuyến đi lúc này. Vui lòng thử lại.");
     } finally {
@@ -1192,7 +1246,7 @@ export function AiAskComposer({
   }
 
   const planningScope = (
-    <section className="rounded-[1.25rem] border border-[#d8c9ad] bg-white/75 p-4 text-left">
+    <section className="border-t border-[#d8c9ad] pt-4 text-left">
       <div className="flex flex-col gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#8c4f13]">Phạm vi lập kế hoạch</p>
@@ -1223,7 +1277,7 @@ export function AiAskComposer({
 
       {selectedTripProject && deleteTripProjectAction ? (
         <div className="mt-4 rounded-2xl border border-[#f0c8a0] bg-[#fff7ed] p-3 text-sm leading-6 text-[#6f3f12]">
-          <p>Dự án có thể xoá khi bạn không chờ câu trả lời AI. Ngữ cảnh dự án sẽ bị xoá; các cuộc trò chuyện liên kết sẽ chuyển về lịch sử thường.</p>
+          <p>Dự án, các cuộc trò chuyện liên kết và thông tin ngữ cảnh đã lưu sẽ bị xoá khỏi giao diện thông thường và không còn được dùng để gợi ý trong tương lai.</p>
           <button
             className="mt-3 min-h-11 rounded-2xl border border-[#b45309] bg-white px-4 py-2 text-sm font-semibold text-[#7c2d12] transition hover:bg-[#ffedd5] focus:outline-none focus:ring-4 focus:ring-[#f0c8a0] disabled:cursor-not-allowed disabled:opacity-60"
             disabled={projectActionsDisabled}
@@ -1260,26 +1314,31 @@ export function AiAskComposer({
   );
 
   const accountPrivacyLinks = (
-    <section className="rounded-[1.25rem] border border-[#d8c9ad] bg-white/75 p-4 text-left" aria-label="Tài khoản và quyền riêng tư">
+    <section className="border-t border-[#d8c9ad] pt-4 text-left" aria-label="Tài khoản và quyền riêng tư">
       <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#8c4f13]">Tài khoản</p>
-      {userEmail ? <p className="mt-2 break-words text-sm font-semibold text-[#17342c]">{userEmail}</p> : null}
-      <p className="mt-2 text-sm leading-6 text-[#4f625a]">Chat và dự án chuyến đi thuộc tài khoản của bạn. Dùng các nút xoá hiển thị sẵn để xoá hội thoại hoặc ngữ cảnh dự án.</p>
+      {userEmail ? <p className="mt-2 flex items-center gap-2 break-words text-sm font-semibold text-[#17342c]"><AccountIcon className="text-base text-[#1f5f46]" />{userEmail}</p> : null}
+      <p className="mt-2 text-sm leading-6 text-[#4f625a]">Chat và dự án chuyến đi thuộc tài khoản của bạn.</p>
       <div className="mt-3 flex flex-col gap-2">
         {canAccessAdmin ? (
           <Link className="min-h-11 rounded-2xl bg-[#17342c] px-4 py-3 text-center text-sm font-semibold text-white transition hover:bg-[#24483e] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]" href="/admin">
             Vào khu vực quản trị
           </Link>
         ) : null}
-        <Link className="min-h-11 rounded-2xl border border-[#d8c9ad] bg-[#fffdf8] px-4 py-3 text-center text-sm font-semibold text-[#17342c] transition hover:bg-white focus:outline-none focus:ring-4 focus:ring-[#e5bd82]" href="/">
-          Về trang giới thiệu
+        <Link className="min-h-11 rounded-2xl border border-[#d8c9ad] bg-[#fffdf8] px-4 py-3 text-center text-sm font-semibold text-[#17342c] transition hover:bg-white focus:outline-none focus:ring-4 focus:ring-[#e5bd82]" href="/#quyen-rieng-tu">
+          Tìm hiểu thêm về quyền riêng tư
         </Link>
+        {signOutAction ? <form action={signOutAction}><button className="min-h-11 w-full rounded-2xl border border-[#d8c9ad] bg-white px-4 py-3 text-sm font-semibold text-[#17342c] transition hover:bg-[#fff8ec] focus:outline-none focus:ring-4 focus:ring-[#e5bd82]" type="submit">Đăng xuất</button></form> : null}
       </div>
     </section>
   );
 
   return (
-    <>
-      <nav aria-label="Danh sách trò chuyện và dự án chuyến đi" className="hidden min-h-0 flex-col gap-3 lg:col-start-1 lg:row-start-1 lg:flex">
+    <div className="flex min-h-screen">
+      <nav aria-label="Danh sách trò chuyện và dự án chuyến đi" className="hidden min-h-screen w-[276px] shrink-0 flex-col gap-5 border-r border-[#d8c9ad] bg-[#f5f1e8] p-4 lg:flex">
+        <Link className="flex min-h-11 items-center gap-2 rounded-xl px-2 text-lg font-bold tracking-[-0.04em] text-[#17342c] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]" href="/">
+          <span className="grid h-8 w-8 place-items-center rounded-lg bg-[#1f5f46] text-xs font-black text-white">XV</span>
+          XuyenViet
+        </Link>
         <div className="min-h-0 flex-1">
           <ConversationList
             sessions={sessions}
@@ -1290,11 +1349,18 @@ export function AiAskComposer({
             onNewChat={handleNewChat}
           />
         </div>
+        <section className="border-t border-[#d8c9ad] pt-4" aria-labelledby="trip-project-list-heading">
+          <h2 className="text-xs font-semibold uppercase tracking-[0.16em] text-[#66776f]" id="trip-project-list-heading">Chuyến đi</h2>
+          <div className="mt-2 flex flex-col gap-1">
+            <button aria-current={!selectedTripProject ? "page" : undefined} className={!selectedTripProject ? "min-h-11 rounded-xl bg-[#1f5f46]/10 px-3 py-2 text-left text-sm font-semibold text-[#17342c] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]" : "min-h-11 rounded-xl px-3 py-2 text-left text-sm font-semibold text-[#17342c] hover:bg-white/60 focus:outline-none focus:ring-4 focus:ring-[#8fb59f]"} disabled={projectActionsDisabled} onClick={() => handleSelectTripProject("")} type="button">Trò chuyện thường</button>
+            {tripProjects.map((project) => <button aria-current={project.id === activeTripProjectId ? "page" : undefined} className={project.id === activeTripProjectId ? "min-h-11 rounded-xl bg-[#1f5f46]/10 px-3 py-2 text-left text-sm font-semibold text-[#17342c] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]" : "min-h-11 rounded-xl px-3 py-2 text-left text-sm font-semibold text-[#17342c] hover:bg-white/60 focus:outline-none focus:ring-4 focus:ring-[#8fb59f]"} disabled={projectActionsDisabled} key={project.id} onClick={() => handleSelectTripProject(project.id)} type="button">{formatTripProjectLabel(project)}</button>)}
+          </div>
+        </section>
         {planningScope}
         {accountPrivacyLinks}
       </nav>
 
-      <div className="flex min-h-[34rem] min-w-0 flex-col justify-between gap-5 rounded-[1.5rem] border border-[#d8c9ad] bg-[radial-gradient(circle_at_50%_0%,rgba(20,83,45,0.1),transparent_30%),#fffdf8] p-4 sm:p-5 lg:col-start-2 lg:row-start-1 lg:w-full xl:max-w-[760px]">
+      <div className="flex min-h-screen min-w-0 flex-1 flex-col justify-between gap-5 bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:p-6 lg:max-w-[calc(100%-276px)]">
         <div className="flex items-center justify-between gap-3 lg:hidden">
           <button
             ref={sessionSheetTriggerRef}
@@ -1309,6 +1375,16 @@ export function AiAskComposer({
           >
             Danh sách trò chuyện
           </button>
+          <h2 className="min-w-0 flex-1 truncate text-center text-sm font-semibold text-[#17342c]" aria-label={`Không gian đang mở: ${activeWorkspaceTitle}`}>
+            {activeWorkspaceTitle}
+          </h2>
+          <Link
+            aria-label="Tài khoản và quyền riêng tư"
+            className="grid min-h-11 min-w-11 place-items-center rounded-2xl border border-[#d8c9ad] bg-white/75 text-[#17342c] transition hover:bg-white focus:outline-none focus:ring-4 focus:ring-[#e5bd82]"
+            href="/#quyen-rieng-tu"
+          >
+            <AccountIcon />
+          </Link>
         </div>
 
         {showEmptyState ? (
@@ -1323,7 +1399,7 @@ export function AiAskComposer({
 
           {selectedTripProject ? (
             <p className="mx-auto max-w-2xl rounded-2xl border border-[#8fb59f] bg-[#edf7f0] px-4 py-3 text-sm font-semibold leading-6 text-[#17342c]">
-              Đang hỏi trong dự án: {formatTripProjectLabel(selectedTripProject)}. Tin nhắn mới sẽ dùng ngữ cảnh dự án này, không mở bảng chi tiết bên phải.
+              Đang hỏi trong dự án: {formatTripProjectLabel(selectedTripProject)}. Tin nhắn mới sẽ dùng ngữ cảnh dự án này.
             </p>
           ) : null}
         </div>
@@ -1346,7 +1422,7 @@ export function AiAskComposer({
                   </p>
                   {message.role === "assistant" ? (
                     <>
-                      <AssistantMessageContent content={message.content} annotations={message.annotations} selectedEntityId={selectedAnswerEntityId} detailPanelIds={answerDetailPanelIds} onSelectEntity={handleSelectAnswerEntity} />
+                      <AssistantMessageContent messageId={message.id} content={message.content} annotations={message.annotations} selectedEntityId={selectedAnswerEntityId} detailPanelIds={answerDetailPanelIds} onSelectEntity={handleSelectAnswerEntity} />
                       <AssistantProvenanceBlock provenance={message.provenance} selectedEntityId={selectedAnswerEntityId} detailPanelIds={answerDetailPanelIds} onSelectEntity={handleSelectAnswerEntity} />
                       {saveAnswerUsefulnessFeedbackAction ? (
                         <AnswerUsefulnessFeedbackControl
@@ -1373,14 +1449,12 @@ export function AiAskComposer({
             </section>
           ) : null}
 
-          {isPending ? (
+          {isPreparing ? (
             <section aria-live="polite" className="mx-auto max-w-[760px] rounded-[1.5rem] border border-dashed border-[#d8c9ad] bg-[#fffdf8] p-4 text-[#17342c] shadow-[0_12px_30px_rgba(41,33,18,0.06)]">
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#1f5f46]">Đang xử lý</p>
               <p className="mt-2 text-base font-semibold">Trợ lý đang chuẩn bị câu trả lời cho câu hỏi của bạn.</p>
               <p className="mt-2 text-sm leading-6 text-[#4f625a]">
-                {showProgress
-                  ? "Quá trình đang lâu hơn bình thường một chút. Mình vẫn đang chờ kết quả từ hệ thống AI và chưa tạo nội dung trợ lý tạm thời."
-                  : "Mình đã nhận câu hỏi và đang gửi đến hệ thống AI. Vui lòng không gửi lặp lại trong lúc chờ."}
+                Mình đang chuẩn bị ngữ cảnh và nguồn liên quan. Nội dung đang nhận chỉ là tạm thời cho đến khi được lưu hoàn chỉnh.
               </p>
               {pendingQuestion ? <p className="mt-3 rounded-2xl bg-white/80 p-3 text-sm leading-6 text-[#4f625a]">“{pendingQuestion}”</p> : null}
               {streamingContent ? (
@@ -1392,12 +1466,12 @@ export function AiAskComposer({
             </section>
           ) : null}
 
-          <form className="mx-auto max-w-[760px] rounded-[1.75rem] border border-[#d8c9ad] bg-white/90 p-3 shadow-[0_20px_60px_rgba(41,33,18,0.14)]" onSubmit={handleSubmit} ref={formRef}>
+          <form className="mx-auto max-w-[760px] rounded-[1.75rem] border border-[#d8c9ad] bg-white/90 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_20px_60px_rgba(41,33,18,0.14)]" onSubmit={handleSubmit} ref={formRef}>
             <label className="sr-only" htmlFor="ai-ask-question">
               Câu hỏi của bạn
             </label>
             <textarea
-              className="min-h-28 w-full resize-y rounded-2xl border-0 bg-transparent px-3 py-2 text-base leading-7 text-[#17342c] outline-none placeholder:text-[#7b8b84] focus:ring-4 focus:ring-[#8fb59f]/45"
+              className="min-h-24 w-full resize-y rounded-2xl border-0 bg-transparent px-3 py-2 text-base leading-7 text-[#17342c] outline-none placeholder:text-[#7b8b84] focus:ring-4 focus:ring-[#8fb59f]/45"
               disabled={askFormDisabled}
               aria-describedby="ai-ask-status"
               id="ai-ask-question"
@@ -1409,26 +1483,28 @@ export function AiAskComposer({
               value={question}
             />
             <div className="mt-2 flex items-center justify-between gap-3 border-t border-[#eadfc8] pt-2">
-              <div className="flex items-center gap-2">
-                <label
-                  aria-label="Đính kèm ảnh tham khảo"
-                  className={`grid h-10 w-10 cursor-pointer place-items-center rounded-xl text-[#4f625a] transition hover:bg-[#edf7f0] hover:text-[#14532d] focus-within:outline-none focus-within:ring-4 focus-within:ring-[#8fb59f]/45 ${askFormDisabled ? "cursor-not-allowed opacity-50" : ""}`}
-                  title="Đính kèm ảnh"
-                  htmlFor="ai-ask-image"
-                >
-                  <PaperclipIcon />
-                  <span className="sr-only">Đính kèm ảnh tham khảo</span>
-                </label>
-              <input
-                accept="image/jpeg,image/png,image/webp"
-                className="sr-only"
-                disabled={askFormDisabled}
-                id="ai-ask-image"
-                onChange={handleImageChange}
-                ref={imageInputRef}
-                type="file"
-              />
-              </div>
+              {supportsImageInput ? (
+                <div className="flex items-center gap-2">
+                  <label
+                    aria-label="Đính kèm ảnh tham khảo"
+                    className={`grid h-11 w-11 cursor-pointer place-items-center rounded-xl text-[#4f625a] transition hover:bg-[#edf7f0] hover:text-[#14532d] focus-within:outline-none focus-within:ring-4 focus-within:ring-[#8fb59f]/45 ${askFormDisabled ? "cursor-not-allowed opacity-50" : ""}`}
+                    htmlFor="ai-ask-image"
+                    title="Đính kèm ảnh"
+                  >
+                    <AttachmentIcon />
+                    <span className="sr-only">Đính kèm ảnh tham khảo tuỳ chọn</span>
+                  </label>
+                  <input
+                    accept="image/jpeg,image/png,image/webp"
+                    className="sr-only"
+                    disabled={askFormDisabled}
+                    id="ai-ask-image"
+                    onChange={handleImageChange}
+                    ref={imageInputRef}
+                    type="file"
+                  />
+                </div>
+              ) : null}
               <button
                 aria-label={isPending ? "Đang gửi câu hỏi" : deletingTripProjectId ? "Đang xoá dự án chuyến đi" : "Gửi câu hỏi"}
                 className="grid h-11 w-11 place-items-center rounded-2xl bg-[#1f5f46] text-white shadow-[0_12px_30px_rgba(31,95,70,0.24)] transition hover:bg-[#194d39] focus:outline-none focus:ring-4 focus:ring-[#8fb59f] disabled:cursor-not-allowed disabled:bg-[#8aa89b]"
@@ -1448,20 +1524,21 @@ export function AiAskComposer({
                   ) : null}
                   <span className="truncate">{selectedImage.name || "Ảnh đính kèm"} ({formatImageSize(selectedImage.size)})</span>
                 </div>
-                <button aria-label="Bỏ ảnh đính kèm" className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-[#4f625a] transition hover:bg-[#fff1ed] hover:text-[#8c2f1d] focus:outline-none focus:ring-4 focus:ring-[#f0c8a0]" disabled={askFormDisabled} onClick={clearSelectedImage} title="Bỏ ảnh" type="button">
+                <button aria-label="Bỏ ảnh đính kèm" className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-[#4f625a] transition hover:bg-[#fff1ed] hover:text-[#8c2f1d] focus:outline-none focus:ring-4 focus:ring-[#f0c8a0]" disabled={askFormDisabled} onClick={clearSelectedImage} title="Bỏ ảnh" type="button">
                   <CloseIcon />
                 </button>
               </div>
             ) : null}
+            {recoveryMessage ? <p className="mt-3 rounded-xl border border-[#f0c8a0] bg-[#fff7ed] px-3 py-2 text-sm leading-6 text-[#6f3f12]" role="status">{recoveryMessage}</p> : null}
             <p aria-live="polite" className="sr-only" id="ai-ask-status">
-              {status}
+              {isPending ? "Đang gửi, vui lòng chờ" : status}
             </p>
           </form>
 
           {showEmptyState ? (
             <>
               <div className="mx-auto grid max-w-[760px] gap-3 sm:grid-cols-2" aria-label="Gợi ý câu hỏi bắt đầu">
-                {starterCards.map((card) => (
+                {starterCards.map(({ Icon, ...card }) => (
                   <button
                     className="grid min-h-[76px] grid-cols-[2.25rem_minmax(0,1fr)] items-center gap-3 rounded-[1.25rem] border border-[#d8c9ad] bg-white/80 p-4 text-left shadow-[0_12px_36px_rgba(31,41,55,0.06)] transition hover:border-[#8fb59f] hover:bg-white focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45"
                     key={card.title}
@@ -1482,7 +1559,7 @@ export function AiAskComposer({
                     disabled={askFormDisabled}
                     type="button"
                   >
-                    <span aria-hidden="true" className="grid h-9 w-9 place-items-center rounded-xl bg-[#e8f3ec] text-sm font-black text-[#14532d]">+</span>
+                    <span aria-hidden="true" className="grid h-9 w-9 place-items-center rounded-xl bg-[#e8f3ec] text-lg text-[#14532d]"><Icon /></span>
                     <span>
                       <span className="block text-sm font-bold text-[#17342c]">{card.title}</span>
                       <span className="mt-1 block text-xs leading-5 text-[#5d6f67]">{card.description}</span>
@@ -1493,8 +1570,9 @@ export function AiAskComposer({
               <section className="mx-auto max-w-[760px] rounded-2xl border border-[#d8c9ad] bg-white/70 p-4 text-left">
                 <h2 className="text-sm font-bold text-[#17342c]">Lưu trữ hội thoại</h2>
                 <p className="mt-2 text-sm leading-6 text-[#4f625a]">
-                  Thông tin chuyến đi có thể được lưu để tiếp tục kế hoạch trong các bước sau. Thông báo này không chặn việc đặt câu hỏi.
+                  Để hỗ trợ cuộc trò chuyện và kế hoạch chuyến đi, XuyenViet có thể lưu nội dung bạn cung cấp và gửi yêu cầu đến dịch vụ AI đã cấu hình để tạo câu trả lời. Bạn có thể xóa cuộc trò chuyện hoặc dự án chuyến đi bất cứ lúc nào.
                 </p>
+                <Link className="mt-3 inline-flex text-sm font-semibold text-[#1f5f46] underline underline-offset-4 focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45" href="/#quyen-rieng-tu">Tìm hiểu thêm về quyền riêng tư</Link>
               </section>
             </>
           ) : null}
@@ -1550,7 +1628,7 @@ export function AiAskComposer({
         ) : null}
       </div>
 
-      {showContextPanel ? (
+      {showContextPanel && selectedAnswerEntity ? (
         <aside aria-label="Bảng ngữ cảnh hội thoại" className="hidden min-h-0 min-w-0 flex-col rounded-[1.5rem] border border-[#d8c9ad] bg-[linear-gradient(180deg,#fffdf8_0%,#ffffff_42%,#f7fbf8_100%)] p-4 text-[#17342c] shadow-[0_16px_40px_rgba(41,33,18,0.08)] lg:col-start-3 lg:row-start-1 lg:flex lg:w-full xl:w-[23rem]">
           <div className="flex items-start justify-between gap-3 border-b border-[#eadfc8] pb-4">
             <div>
@@ -1562,7 +1640,7 @@ export function AiAskComposer({
           <AnswerDetailPanel selectedEntity={selectedAnswerEntity} panelId={desktopAnswerDetailPanelId} panelRef={desktopAnswerDetailPanelRef} onClose={closeAnswerDetailPanel} />
         </aside>
       ) : null}
-    </>
+    </div>
   );
 }
 
@@ -1584,6 +1662,7 @@ async function submitAiAskStream({
   tripProjectId,
   image,
   signal,
+  onPreparing,
   onDelta,
 }: {
   question: string;
@@ -1591,6 +1670,7 @@ async function submitAiAskStream({
   tripProjectId?: string;
   image: File | null;
   signal?: AbortSignal;
+  onPreparing: () => void;
   onDelta: (content: string) => void;
 }): Promise<StreamResult> {
   const formData = new FormData();
@@ -1628,6 +1708,10 @@ async function submitAiAskStream({
       if (!event) {
         terminalResult ??= { status: "answer-failed", errorMessage: "Luồng trả lời bị gián đoạn trước khi hoàn tất." };
         continue;
+      }
+
+      if (event.type === "preparing") {
+        onPreparing();
       }
 
       if (event.type === "delta" && event.content) {
@@ -1719,9 +1803,11 @@ function createProvenanceAnswerEntityDescriptor(item: AssistantMessageProvenance
     type: item.sourceCategory === "general" ? "action" : item.freshnessSensitive ? "warning" : "source",
     label: item.title,
     section: "Nguồn và độ tin cậy",
+    summary: item.sourceCategory === "general" ? "Đây là suy luận tổng quát của AI, chưa được xác minh như một nguồn." : undefined,
     sourceCategory: item.sourceCategory,
     owner: { table: "assistant_response_provenance", id: item.id },
     detail,
+    quickFacts: Object.entries(detail).slice(0, 6).map(([label, value]) => ({ label, value })),
     provenanceIds: [item.id],
   };
 }
@@ -1744,6 +1830,17 @@ function formatAnswerEntitySummary(entity: AnswerEntityDescriptor) {
   }
 
   return "Chi tiết này được dựng từ provenance đã lưu của câu trả lời, không trích xuất từ văn bản tự do của trợ lý.";
+}
+
+function getAnswerEntityIcon(type: AnswerEntityDescriptor["type"]) {
+  if (type === "place") return PlaceIcon;
+  if (type === "hotel_area") return HotelAreaIcon;
+  if (type === "route_segment") return RouteSegmentIcon;
+  if (type === "cost") return CostIcon;
+  if (type === "warning") return SourceIcon;
+  if (type === "trip_fact") return ProjectIcon;
+  if (type === "action") return ChatIcon;
+  return SourceIcon;
 }
 
 function formatProvenanceSourceType(item: AssistantMessageProvenanceItem) {
@@ -1809,39 +1906,6 @@ function formatImageSize(bytes: number) {
   }
 
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function PaperclipIcon() {
-  return (
-    <svg aria-hidden="true" className="h-5 w-5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24">
-      <path d="m21.4 11.6-8.5 8.5a6 6 0 0 1-8.5-8.5l8.1-8.1a4 4 0 1 1 5.7 5.7l-8.1 8.1a2 2 0 0 1-2.8-2.8l7.7-7.7" />
-    </svg>
-  );
-}
-
-function SendIcon() {
-  return (
-    <svg aria-hidden="true" className="h-5 w-5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24">
-      <path d="m22 2-7 20-4-9-9-4Z" />
-      <path d="M22 2 11 13" />
-    </svg>
-  );
-}
-
-function CloseIcon() {
-  return (
-    <svg aria-hidden="true" className="h-5 w-5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24">
-      <path d="m18 6-12 12M6 6l12 12" />
-    </svg>
-  );
-}
-
-function LoadingIcon() {
-  return (
-    <svg aria-hidden="true" className="h-5 w-5 animate-spin" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="2" viewBox="0 0 24 24">
-      <path d="M12 3a9 9 0 1 1-9 9" />
-    </svg>
-  );
 }
 
 function summarizeSession(id: string, question: string): ChatSessionSummary {

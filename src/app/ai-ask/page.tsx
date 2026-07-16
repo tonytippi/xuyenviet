@@ -7,6 +7,8 @@ import { getOwnedConversation, listOwnedConversations } from "@/features/chat-tr
 import { createTripProjectFromForm, deleteConversationAction, deleteTripProjectAction } from "@/features/chat-trips/actions";
 import { getOwnedTripProjectSummary, listOwnedTripProjects } from "@/features/chat-trips/trip-projects";
 import { saveAnswerUsefulnessFeedbackAction } from "@/features/feedback/actions";
+import { selectActiveAiGatewayModel } from "@/features/ai/models";
+import { aiAskInitialAnswerPurpose } from "@/features/ai/prompts";
 import { getAuthenticatedSessionWithRoles, hasAdminAccess } from "@/server/auth";
 
 type AiAskPageProps = {
@@ -26,9 +28,39 @@ function getFirstParam(value: string | string[] | undefined) {
   return value;
 }
 
+function buildCanonicalAiAskUrl({
+  conversationId,
+  tripProjectId,
+  referralCode,
+  draft,
+}: {
+  conversationId?: string;
+  tripProjectId?: string;
+  referralCode?: string;
+  draft?: string;
+}) {
+  const searchParams = new URLSearchParams();
+
+  if (conversationId) searchParams.set("conversationId", conversationId);
+  if (tripProjectId) searchParams.set("tripProjectId", tripProjectId);
+  if (referralCode) searchParams.set("ref", referralCode);
+  if (draft) searchParams.set("draft", draft);
+
+  const query = searchParams.toString();
+  return query ? `/ai-ask?${query}` : "/ai-ask";
+}
+
+function hasCanonicalParam(value: string | string[] | undefined, expected: string | undefined) {
+  if (!expected) {
+    return value === undefined;
+  }
+
+  return typeof value === "string" && value === expected;
+}
+
 export default async function AiAskPage({ searchParams }: AiAskPageProps) {
   const params = await searchParams;
-  const referralCode = getFirstParam(params?.ref);
+  const referralCode = getFirstParam(params?.ref)?.trim() || undefined;
   const publicDraft = normalizePublicAskDraft(getFirstParam(params?.draft));
   const requestedConversationId = getFirstParam(params?.conversationId)?.trim();
   const requestedTripProjectId = getFirstParam(params?.tripProjectId)?.trim();
@@ -70,6 +102,10 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
     updatedAt: project.updatedAt,
   }));
   const initialSessions = selectedTripProject ? selectedTripProject.relatedChats : (await listOwnedConversations()) ?? [];
+  const imageInputModel = await selectActiveAiGatewayModel({
+    purpose: aiAskInitialAnswerPurpose,
+    requiredCapabilities: { textInput: true, streaming: true, imageInput: true },
+  });
   const selectedTripProjectForComposer = selectedTripProject
     ? {
         id: selectedTripProject.id,
@@ -79,30 +115,27 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
         updatedAt: selectedTripProject.updatedAt,
       }
     : null;
+  const canonicalUrl = buildCanonicalAiAskUrl({
+    conversationId: loadedConversation?.id,
+    tripProjectId: selectedTripProject?.id,
+    referralCode,
+    draft: publicDraft,
+  });
+
+  if (
+    Object.keys(params ?? {}).some((key) => !["conversationId", "tripProjectId", "ref", "draft"].includes(key)) ||
+    !hasCanonicalParam(params?.conversationId, loadedConversation?.id) ||
+    !hasCanonicalParam(params?.tripProjectId, selectedTripProject?.id) ||
+    !hasCanonicalParam(params?.ref, referralCode) ||
+    !hasCanonicalParam(params?.draft, publicDraft)
+  ) {
+    redirect(canonicalUrl);
+  }
 
   return (
-    <main className="min-h-screen bg-white px-5 py-6 sm:px-8 lg:px-12">
-      <section className="mx-auto flex min-h-[calc(100vh-3rem)] w-full max-w-6xl flex-col gap-6 overflow-hidden rounded-[2rem] border border-[#d8c9ad] bg-[#fbf7ed]/90 p-5 shadow-[0_24px_80px_rgba(41,33,18,0.14)] sm:p-8 lg:max-w-[96rem] lg:p-10">
-        <header className="flex flex-col gap-4 border-b border-[#d8c9ad] pb-5 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[#8c4f13]">AI Ask</p>
-            <h1 className="mt-2 text-3xl font-semibold tracking-[-0.04em] text-[#17342c] sm:text-5xl">Hỏi trợ lý chuyến đi Việt Nam</h1>
-          </div>
-          <div className="flex flex-col gap-3 sm:items-end">
-            <p className="rounded-full border border-[#d8c9ad] bg-white/70 px-4 py-2 text-sm font-semibold text-[#17342c]">{session.email}</p>
-            <form action={signOutCurrentUser}>
-              <button
-                className="min-h-11 rounded-2xl border border-[#d8c9ad] bg-white/75 px-4 py-3 text-sm font-semibold text-[#17342c] transition hover:bg-white focus:outline-none focus:ring-4 focus:ring-[#e5bd82]"
-                type="submit"
-              >
-                Đăng xuất
-              </button>
-            </form>
-          </div>
-        </header>
-
-        <div className="grid flex-1 gap-5 lg:auto-cols-[minmax(0,18rem)] lg:grid-cols-[18rem_minmax(0,1fr)] xl:auto-cols-[23rem] xl:grid-cols-[19rem_minmax(0,1fr)]">
-          <AiAskComposer
+    <main className="min-h-screen bg-white text-[#17342c]">
+      <h1 className="sr-only">Hỏi trợ lý chuyến đi Việt Nam</h1>
+      <AiAskComposer
             key={loadedConversation?.id || "new-conversation"}
             initialQuestion={publicDraft}
             initialConversationId={loadedConversation?.id}
@@ -123,15 +156,15 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
             initialSessions={initialSessions}
             initialTripProjects={initialTripProjects}
             selectedTripProject={selectedTripProjectForComposer}
+            supportsImageInput={Boolean(imageInputModel)}
             userEmail={session.email}
             canAccessAdmin={hasAdminAccess(session.roles)}
             createTripProjectAction={createTripProjectFromForm}
             deleteConversationAction={deleteConversationAction}
             deleteTripProjectAction={deleteTripProjectAction}
             saveAnswerUsefulnessFeedbackAction={saveAnswerUsefulnessFeedbackAction}
-          />
-        </div>
-      </section>
+            signOutAction={signOutCurrentUser}
+      />
     </main>
   );
 }

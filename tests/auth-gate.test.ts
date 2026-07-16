@@ -81,9 +81,14 @@ describe("public logged-out homepage", () => {
     expect(html).toContain("Bạn cần đăng nhập trước khi XuyenViet tạo hội thoại");
     expect(html).toContain("Tuyến đường Hà Nội - Huế 5 ngày");
     expect(html).toContain("Trò chuyện ở giữa. Chi tiết ở bên phải.");
+    expect(html).toContain('class="public-starter-icon size-4 text-[#14532d]"');
+    expect(html.match(/public-starter-icon/g)).toHaveLength(4);
+    expect(html).toContain('class="public-preview-icon size-4"');
+    expect(html.match(/public-preview-icon/g)).toHaveLength(3);
     expect(html).not.toContain("tony@example.com");
     expect(html).not.toContain("Đăng xuất");
     expect(html).not.toContain("Khu vực hội thoại");
+    expect(html).not.toContain("Quản trị");
   });
 
   test("preserves referral code through public sign-in and gated ask entry points", async () => {

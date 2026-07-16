@@ -73,6 +73,25 @@ async function renderAuthenticatedAiAskShell(searchParams: Record<string, string
   return renderToStaticMarkup(element);
 }
 
+async function getAuthenticatedAiAskRedirect(searchParams: Record<string, string | string[]> = {}) {
+  const redirect = vi.fn((url: string) => {
+    throw new Error(`redirect:${url}`);
+  });
+  vi.doMock("next/navigation", () => ({ redirect }));
+  vi.doMock("@/server/auth", () => ({
+    getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
+    getAuthenticatedSessionWithRoles: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com", roles: [] }),
+    hasAdminAccess: vi.fn().mockReturnValue(false),
+  }));
+  vi.doMock("@/features/auth/actions", () => ({ signOutCurrentUser: vi.fn() }));
+  vi.resetModules();
+
+  const { default: AiAskPage } = await import("@/app/ai-ask/page");
+
+  await expect(AiAskPage({ searchParams: Promise.resolve(searchParams) })).rejects.toThrow(/^redirect:/);
+  return redirect.mock.calls[0]?.[0];
+}
+
 function getGatewayRequestMessages(fetchMock: ReturnType<typeof vi.fn>, callIndex = 0) {
   const request = fetchMock.mock.calls[callIndex][1] as RequestInit;
   const body = JSON.parse(String(request.body)) as { messages: { role: string; content: string }[] };
@@ -92,9 +111,7 @@ function makeAnnotation(id: string, content: string, text: string, type: AnswerA
     detail: {
       type: detailType,
       label: text,
-      section: "Nguồn và độ tin cậy",
       owner: { table: "assistant_response_provenance", id: provenanceId },
-      detail: { "Độ tin cậy": "đã xác minh" },
       provenanceIds: [provenanceId],
     },
   };
@@ -112,10 +129,10 @@ describe("AI Ask authenticated shell", () => {
 
     expect(html).toContain("Hỏi trợ lý chuyến đi Việt Nam");
     expect(html).toContain("tony@example.com");
-    expect(html).toContain("Đăng xuất");
+    expect(html).toContain("XuyenViet");
     expect(html).toContain("Danh sách trò chuyện và dự án chuyến đi");
     expect(html).toContain("Tài khoản và quyền riêng tư");
-    expect(html).toContain("Về trang giới thiệu");
+    expect(html).toContain("Tìm hiểu thêm về quyền riêng tư");
     expect(html).toContain("Mình sẽ đi đâu?");
     expect(html).toContain("Bắt đầu bằng một câu hỏi tự nhiên");
     expect(html).toContain("Hà Nội đi Đà Nẵng 7 ngày cùng gia đình");
@@ -131,11 +148,11 @@ describe("AI Ask authenticated shell", () => {
     expect(html).not.toContain("Bảng ngữ cảnh hội thoại");
     expect(html).not.toContain("Chưa có chi tiết được chọn");
     expect(html).not.toContain("right detail panel");
-    expect(html).toContain('aria-describedby="ai-ask-status ai-ask-shortcuts"');
+    expect(html).toContain('aria-describedby="ai-ask-status"');
     expect(html).toContain('id="ai-ask-status"');
   });
 
-  test("renders the active desktop three-panel shell with a safe contextual placeholder", async () => {
+  test("renders the active desktop shell without a blank contextual placeholder", async () => {
     await createTestUser("user-1");
     const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
     await testDb.insert(messages).values([
@@ -148,10 +165,9 @@ describe("AI Ask authenticated shell", () => {
     expect(html).toContain("Danh sách trò chuyện và dự án chuyến đi");
     expect(html).toContain("Lịch sử hội thoại");
     expect(html).toContain("Hà Nội đi Huế 5 ngày.");
-    expect(html).toContain("Bảng ngữ cảnh hội thoại");
-    expect(html).toContain("Chọn chi tiết trong câu trả lời");
-    expect(html).toContain("Chưa có chi tiết được chọn");
-    expect(html).toContain("không tự tạo thông tin chi tiết từ nội dung trả lời");
+    expect(html).not.toContain("Bảng ngữ cảnh hội thoại");
+    expect(html).not.toContain("Chọn chi tiết trong câu trả lời");
+    expect(html).not.toContain("Chưa có chi tiết được chọn");
     expect(html).not.toContain("Bảng chi tiết đã chọn");
     expect(html).not.toContain("source-chip");
   });
@@ -457,13 +473,26 @@ describe("AI Ask authenticated shell", () => {
     const content = "Kế hoạch gợi ý:\nBãi đỗ chính thức Huế phù hợp để kiểm tra trước khi vào trung tâm.";
     const annotations = [makeAnnotation("ann-knowledge", content, "Bãi đỗ chính thức Huế", "source", "knowledge-1", "source")];
     const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
-    await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "user", content: "Bãi đỗ ở Huế?" });
-    await testDb.insert(messages).values({
+    const [userMessage] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "user", content: "Bãi đỗ ở Huế?" }).returning({ id: messages.id });
+    const [assistantMessage] = await testDb.insert(messages).values({
       conversationId: conversation.id,
       userId: "user-1",
       role: "assistant",
       content,
       answerAnnotations: annotations,
+    }).returning({ id: messages.id });
+    await testDb.insert(assistantResponseProvenance).values({
+      id: "knowledge-1",
+      userId: "user-1",
+      conversationId: conversation.id,
+      userMessageId: userMessage.id,
+      assistantMessageId: assistantMessage.id,
+      sourceCategory: "knowledge",
+      rank: 1,
+      verificationStatus: "verified",
+      usedInPrompt: true,
+      citedInAnswer: false,
+      sourceSnapshot: { title: "Bãi đỗ chính thức Huế" },
     });
 
     const html = await renderAuthenticatedAiAskShell({ conversationId: conversation.id });
@@ -590,10 +619,7 @@ describe("AI Ask authenticated shell", () => {
       content: "Tin nhắn riêng của user-2",
     });
 
-    const html = await renderAuthenticatedAiAskShell({ conversationId: conversation.id });
-
-    expect(html).not.toContain("Tin nhắn riêng của user-2");
-    expect(html).toContain("Mình sẽ đi đâu?");
+    await expect(getAuthenticatedAiAskRedirect({ conversationId: conversation.id })).resolves.toBe("/ai-ask");
   });
 
   test("renders only owned trip projects and selected project scope on the AI Ask page", async () => {
@@ -610,77 +636,107 @@ describe("AI Ask authenticated shell", () => {
     expect(html).not.toContain("Dự án riêng user-2");
   });
 
-  test("renders selected trip project delete affordance and detach confirmation copy", async () => {
+  test("renders selected trip project delete affordance and cascading deletion copy", async () => {
     await createTestUser("user-1");
     const [ownProject] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Đà Nẵng gia đình", origin: "Hà Nội", destination: "Đà Nẵng" }).returning({ id: tripProjects.id });
 
     const html = await renderAuthenticatedAiAskShell({ tripProjectId: ownProject.id });
 
     expect(html).toContain("Xoá dự án chuyến đi");
-    expect(html).toContain("Ngữ cảnh dự án sẽ bị xoá");
-    expect(html).toContain("các cuộc trò chuyện liên kết sẽ chuyển về lịch sử thường");
+    expect(html).toContain("các cuộc trò chuyện liên kết và thông tin ngữ cảnh đã lưu sẽ bị xoá");
   });
 
-  test("falls back to ordinary chat when opening another user's trip project", async () => {
+  test("redirects to ordinary chat when opening another user's trip project", async () => {
     await createTestUser("user-1");
     await createTestUser("user-2");
     const [otherProject] = await testDb.insert(tripProjects).values({ userId: "user-2", title: "Dự án riêng user-2" }).returning({ id: tripProjects.id });
 
-    const html = await renderAuthenticatedAiAskShell({ tripProjectId: otherProject.id });
-
-    expect(html).toContain("Trò chuyện thường");
-    expect(html).not.toContain("Dự án riêng user-2");
+    await expect(getAuthenticatedAiAskRedirect({ tripProjectId: otherProject.id })).resolves.toBe("/ai-ask");
   });
 
-  test("infers project scope when opening a linked project conversation", async () => {
+  test("redirects an owned linked project conversation to its project scope", async () => {
     await createTestUser("user-1");
     const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế", origin: "Hà Nội", destination: "Huế" }).returning({ id: tripProjects.id });
     const [conversation] = await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id }).returning({ id: conversations.id });
-    await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "user", content: "Tin trong dự án Huế" });
-
-    const html = await renderAuthenticatedAiAskShell({ conversationId: conversation.id });
-
-    expect(html).toContain("Dự án: Huế (Hà Nội → Huế)");
-    expect(html).toContain("Tin trong dự án Huế");
+    await expect(getAuthenticatedAiAskRedirect({ conversationId: conversation.id })).resolves.toBe(`/ai-ask?conversationId=${conversation.id}&tripProjectId=${project.id}`);
   });
 
-  test("does not render a conversation under a mismatched selected project", async () => {
+  test("redirects a direct owned project conversation to its canonical project scope while preserving ref and normalized draft", async () => {
+    await createTestUser("user-1");
+    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế" }).returning({ id: tripProjects.id });
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id }).returning({ id: conversations.id });
+
+    const redirectUrl = await getAuthenticatedAiAskRedirect({ conversationId: conversation.id, ref: "ROAD-7", draft: "  Đi Huế  " });
+
+    expect(redirectUrl).toBe(`/ai-ask?conversationId=${conversation.id}&tripProjectId=${project.id}&ref=ROAD-7&draft=%C4%90i+Hu%E1%BA%BF`);
+  });
+
+  test("redirects stale or unauthorized selection to the safe owned fallback", async () => {
+    await createTestUser("user-1");
+    await createTestUser("user-2");
+    const [ownedProject] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế" }).returning({ id: tripProjects.id });
+    const [otherConversation] = await testDb.insert(conversations).values({ userId: "user-2" }).returning({ id: conversations.id });
+
+    await expect(getAuthenticatedAiAskRedirect({ conversationId: otherConversation.id, tripProjectId: ownedProject.id })).resolves.toBe(`/ai-ask?tripProjectId=${ownedProject.id}`);
+    vi.resetModules();
+    await expect(getAuthenticatedAiAskRedirect({ conversationId: "stale-conversation", tripProjectId: "stale-project" })).resolves.toBe("/ai-ask");
+  });
+
+  test("removes unsupported and empty selection parameters from the canonical URL", async () => {
+    await expect(getAuthenticatedAiAskRedirect({ ref: "   ", legacy: "ignored" } as Record<string, string>)).resolves.toBe("/ai-ask");
+  });
+
+  test("redirects a mismatched owned conversation and project to the resolved project only", async () => {
     await createTestUser("user-1");
     const [projectA] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế" }).returning({ id: tripProjects.id });
     const [projectB] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Đà Lạt" }).returning({ id: tripProjects.id });
     const [conversation] = await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: projectA.id }).returning({ id: conversations.id });
-    await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "user", content: "Tin chỉ thuộc dự án Huế" });
 
-    const html = await renderAuthenticatedAiAskShell({ conversationId: conversation.id, tripProjectId: projectB.id });
-
-    expect(html).toContain("Dự án: Đà Lạt");
-    expect(html).not.toContain("Tin chỉ thuộc dự án Huế");
-    expect(html).toContain("Mình sẽ đi đâu?");
+    await expect(getAuthenticatedAiAskRedirect({ conversationId: conversation.id, tripProjectId: projectB.id })).resolves.toBe(`/ai-ask?tripProjectId=${projectB.id}`);
   });
+
+  test("composer source exposes the active mobile workspace, direct account access, and safe-area composer", () => {
+    const source = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
+
+    expect(source).toContain("const activeWorkspaceTitle");
+    expect(source).toContain("Không gian đang mở:");
+    expect(source).toContain('aria-label="Tài khoản và quyền riêng tư"');
+    expect(source).toContain('href="/#quyen-rieng-tu"');
+    expect(source).toContain("env(safe-area-inset-bottom)");
+    expect(source).toContain("function reconcileSelection");
+    expect(source).toContain("router.refresh()");
+  });
+
 });
 
 describe("AI Ask structured answer rendering", () => {
   test("composer source includes explicit pending and long-running progress contracts", () => {
     const source = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
 
-    expect(source).toContain("const progressDelayMs = 4_000");
+    expect(source).toContain("const [isPreparing, setIsPreparing] = useState(false)");
+    expect(source).toContain('if (event.type === "preparing")');
     expect(source).toContain("Đang gửi câu hỏi và chuẩn bị luồng trả lời");
-    expect(source).toContain("Trợ lý vẫn đang xử lý câu hỏi");
-    expect(source).toContain("Quá trình đang lâu hơn bình thường một chút");
-    expect(source).toContain("chưa tạo nội dung trợ lý tạm thời");
-    expect(source).toContain("Vui lòng không gửi lặp lại trong lúc chờ");
+    expect(source).toContain("Trợ lý đang chuẩn bị ngữ cảnh cho câu hỏi của bạn.");
+    expect(source).toContain("Nội dung đang nhận chỉ là tạm thời cho đến khi được lưu hoàn chỉnh.");
     expect(source).toContain("Đang nhận từng phần");
     expect(source).toContain("aria-live=\"polite\"");
+    expect(source).toContain("setIsPreparing(true);\n        setStreamingContent");
   });
 
   test("composer source accepts removable validated traveler images", () => {
     const source = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
 
-    expect(source).toContain("Ảnh tham khảo tuỳ chọn");
+    expect(source).toContain("Đính kèm ảnh tham khảo");
     expect(source).toContain("accept=\"image/jpeg,image/png,image/webp\"");
     expect(source).toContain("maxImageByteSize = 5 * 1024 * 1024");
     expect(source).toContain("Bỏ ảnh");
-    expect(source).toContain("model đã bật khả năng nhận ảnh");
+    expect(source).toContain("AttachmentIcon");
+    expect(source).toContain("{supportsImageInput ? (");
+    expect(source).toContain("supportsImageInput?: boolean");
+    expect(source).toContain("setRecoveryMessage");
+    expect(source).toContain("setRecoveryMessage(null);\n    setSelectedImage(file);");
+    expect(source).toContain("function clearSelectedImage() {\n    setSelectedImage(null);\n    setRecoveryMessage(null);");
+    expect(readFileSync("src/app/ai-ask/page.tsx", "utf8")).toContain("supportsImageInput={Boolean(imageInputModel)}");
   });
 
   test("composer source keeps duplicate-send controls guarded while pending", () => {
@@ -703,21 +759,42 @@ describe("AI Ask structured answer rendering", () => {
     expect(source).not.toContain("optimisticAssistant");
   });
 
-  test("renders recognized assistant headings as scannable sections without source chips", async () => {
+  test("renders answer-scoped navigation and uncertainty sections without source chips", async () => {
     const { AssistantMessageContent } = await import("@/features/ai/ai-ask-composer");
-    const assistantContent = ["## Kế hoạch gợi ý:", "- Ngày 1: đi nhẹ và nghỉ sớm.", "", "**Nguồn và độ tin cậy:**", "Đây là gợi ý tổng quát, chưa dùng nguồn tuyển chọn.", "", "1. Câu hỏi tiếp theo:", "Bạn đi cùng trẻ nhỏ không?"].join("\n");
+    const assistantContent = ["## Kế hoạch gợi ý:", "- Ngày 1: đi nhẹ và nghỉ sớm.", "", "**Điều chưa chắc chắn:**", "Cần xác minh giờ mở cửa.", "", "**Nguồn và độ tin cậy:**", "Đây là gợi ý tổng quát, chưa dùng nguồn tuyển chọn.", "", "1. Câu hỏi tiếp theo:", "Bạn đi cùng trẻ nhỏ không?"].join("\n");
     const html = renderToStaticMarkup(
       AssistantMessageContent({
+        messageId: "assistant-1",
         content: assistantContent,
       }),
     );
 
+    expect(html).toContain('aria-label="Các mục trong câu trả lời"');
+    expect(html).toContain('href="#answer-assistant-1-section-0"');
+    expect(html).toContain('href="#answer-assistant-1-section-1"');
+    expect(html).toContain('id="answer-assistant-1-section-0"');
+    expect(html).toContain('id="answer-assistant-1-section-1"');
     expect(html).toContain("## Kế hoạch gợi ý:");
+    expect(html).toContain("**Điều chưa chắc chắn:**");
     expect(html).toContain("**Nguồn và độ tin cậy:**");
     expect(html).toContain("1. Câu hỏi tiếp theo:");
     expect(html).toContain("Đây là gợi ý tổng quát, chưa dùng nguồn tuyển chọn.");
     expect(html).not.toContain("source-chip");
     expect(html).not.toContain("[1]");
+  });
+
+  test("omits answer navigation for unstructured content and namespaces repeated headings", async () => {
+    const { AssistantMessageContent } = await import("@/features/ai/ai-ask-composer");
+    const unstructuredHtml = renderToStaticMarkup(createElement(AssistantMessageContent, { messageId: "assistant-1", content: "Một câu trả lời không có tiêu đề được nhận diện." }));
+    const firstAnswerHtml = renderToStaticMarkup(createElement(AssistantMessageContent, { messageId: "assistant-1", content: "Kế hoạch gợi ý:\nĐi nhẹ." }));
+    const secondAnswerHtml = renderToStaticMarkup(createElement(AssistantMessageContent, { messageId: "assistant-2", content: "Kế hoạch gợi ý:\nĐi sớm." }));
+
+    expect(unstructuredHtml).not.toContain("Các mục trong câu trả lời");
+    expect(unstructuredHtml).not.toContain("answer-assistant-1-section");
+    expect(firstAnswerHtml).toContain('href="#answer-assistant-1-section-0"');
+    expect(firstAnswerHtml).toContain('id="answer-assistant-1-section-0"');
+    expect(secondAnswerHtml).toContain('href="#answer-assistant-2-section-0"');
+    expect(secondAnswerHtml).toContain('id="answer-assistant-2-section-0"');
   });
 
   test("renders persisted failed user-only turns so refreshed history matches storage", async () => {
@@ -781,7 +858,7 @@ describe("AI Ask structured answer rendering", () => {
     expect(source).toContain("function clearActiveConversation()");
     expect(source).toContain("setSessions((currentSessions) => currentSessions.filter((session) => session.id !== id))");
     expect(source).toContain("if (id === conversationId)");
-    expect(source).toContain("router.push(activeTripProjectId ? `/ai-ask?tripProjectId=${encodeURIComponent(activeTripProjectId)}` : \"/ai-ask\")");
+    expect(source).toContain("router.push(buildCanonicalAiAskUrl(undefined, activeTripProjectId))");
   });
 
   test("composer source keeps delete trip project pending, failure, and active-project cleanup contracts", () => {
@@ -791,7 +868,7 @@ describe("AI Ask structured answer rendering", () => {
     expect(pageSource).toContain("deleteTripProjectAction={deleteTripProjectAction}");
     expect(source).toContain("deleteTripProjectAction?: DeleteTripProjectAction");
     expect(source).toContain("window.confirm(`Xoá dự án chuyến đi");
-    expect(source).toContain("Các cuộc trò chuyện liên kết sẽ không bị xoá; chúng sẽ được chuyển về lịch sử trò chuyện thường.");
+    expect(source).toContain("các cuộc trò chuyện liên kết và thông tin ngữ cảnh đã lưu sẽ bị xóa");
     expect(source).toContain("projectActionsDisabled = isPending || Boolean(deletingConversationId) || Boolean(deletingTripProjectId)");
     expect(source).toContain("deletingTripProjectIdRef.current");
     expect(source).toContain("Vui lòng chờ câu trả lời hiện tại hoàn tất trước khi xoá dự án chuyến đi.");
@@ -800,7 +877,7 @@ describe("AI Ask structured answer rendering", () => {
     expect(source).toContain("setMessages([])");
     expect(source).toContain("setConversationId(undefined)");
     expect(source).toContain("setSessionSheetOpen(false)");
-    expect(source).toContain("router.push(\"/ai-ask\")");
+    expect(source).toContain("reconcileSelection();");
   });
 
   test("conversation deletion source locks before counting cascade audit rows", () => {
@@ -811,13 +888,15 @@ describe("AI Ask structured answer rendering", () => {
     expect(deleteSource.indexOf(".for(\"update\")")).toBeLessThan(deleteSource.indexOf("const conversationMessages"));
   });
 
-  test("trip project deletion source locks before counting detach and cascade audit rows", () => {
+  test("trip project deletion source locks before counting and deleting linked conversation rows", () => {
     const source = readFileSync("src/features/chat-trips/trip-projects.ts", "utf8");
     const deleteSource = source.slice(source.indexOf("export async function deleteOwnedTripProject"));
 
     expect(deleteSource).toContain(".for(\"update\")");
     expect(deleteSource.indexOf(".for(\"update\")")).toBeLessThan(deleteSource.indexOf("const [linkedConversationCount]"));
-    expect(deleteSource).toContain("linkedConversationsDetached");
+    expect(deleteSource.indexOf("const [linkedConversationCount]")).toBeLessThan(deleteSource.indexOf(".delete(conversations)"));
+    expect(deleteSource).toContain("linkedConversationsDeleted");
+    expect(deleteSource).not.toContain("linkedConversationsDetached");
   });
 });
 
@@ -951,6 +1030,7 @@ describe("AI Ask streaming route", () => {
     const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
 
     expect(response.status).toBe(400);
+    expect(await response.text()).not.toContain('"type":"preparing"');
     expect(fetchMock).not.toHaveBeenCalled();
     expect(await countConversations()).toBe(0);
     expect(await countMessages()).toBe(0);
@@ -1112,11 +1192,13 @@ describe("AI Ask streaming route", () => {
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
     const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
-    await response.text();
+    const body = await response.text();
     const savedMessages = await testDb.select().from(messages).where(eq(messages.conversationId, conversation.id)).orderBy(asc(messages.createdAt), asc(messages.id));
     const gatewayMessages = getGatewayRequestMessages(fetchMock, 0);
 
     expect(response.status).toBe(200);
+    expect(body.indexOf('{"type":"preparing"')).toBeGreaterThan(-1);
+    expect(body.indexOf('{"type":"preparing"')).toBeLessThan(body.indexOf('{"type":"delta"'));
     expect(savedMessages.map((message) => ({ role: message.role, content: message.content }))).toEqual([
       { role: "user", content: "Hà Nội đi Huế 5 ngày?" },
       { role: "assistant", content: "Kế hoạch gợi ý:\nNên chia chặng." },

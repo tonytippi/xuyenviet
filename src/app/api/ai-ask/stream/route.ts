@@ -3,7 +3,7 @@ import { after } from "next/server";
 
 import { getDb } from "@/db/client";
 import { conversations, messageImageAttachments, messages, tripProjects } from "@/db/schema";
-import { buildValidatedAnswerAnnotations, type AnswerAnnotation } from "@/features/ai/answer-annotations";
+import { buildValidatedAnswerAnnotations, sanitizeStoredAnswerAnnotations, type AnswerAnnotation } from "@/features/ai/answer-annotations";
 import { ensureAiAskFreshnessWarning } from "@/features/ai/answer-freshness";
 import { streamInitialAiAskAnswer } from "@/features/ai/gateway";
 import { getAiGatewayPricingSnapshot, selectActiveAiGatewayModel } from "@/features/ai/models";
@@ -20,6 +20,7 @@ const maxMultipartBodySize = 6 * 1024 * 1024;
 const acceptedImageTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 type StreamEvent =
+  | { type: "preparing" }
   | { type: "delta"; content: string }
   | { type: "done"; conversationId: string; userMessage: { id: string; content: string }; assistantMessage: { id: string; content: string; provenance?: AssistantMessageProvenanceItem[]; annotations?: AnswerAnnotation[] } }
   | { type: "error"; conversationId?: string; userMessage?: { id: string; content: string }; errorMessage: string };
@@ -187,6 +188,8 @@ async function streamAnswer({
 
       return { conversationId: conversation.id, history, userMessage: { id: message.id, content: question } };
     });
+
+    sendEvent(controller, encoder, { type: "preparing" });
 
     const pricingSnapshot = getAiGatewayPricingSnapshot(selectedModel);
     const sourceBundle = await assembleContextPrioritySourceBundle({
@@ -371,7 +374,11 @@ async function streamAnswer({
     }
 
     if (completed) {
-      completed.annotations = await buildValidatedAnswerAnnotations({ answerText: completed.content, provenance: completed.provenance, model: selectedModel.gatewayModelName, abortSignal });
+      completed.annotations = sanitizeStoredAnswerAnnotations({
+        answerText: completed.content,
+        annotations: await buildValidatedAnswerAnnotations({ answerText: completed.content, provenance: completed.provenance, model: selectedModel.gatewayModelName, abortSignal }),
+        provenance: completed.provenance,
+      });
       if (completed.annotations.length > 0) {
         try {
           await db.update(messages).set({ answerAnnotations: completed.annotations }).where(eq(messages.id, completed.id));
