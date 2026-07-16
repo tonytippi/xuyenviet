@@ -5,7 +5,7 @@ import { and, asc, desc, eq, isNull } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { aiUsageEvents, answerUsefulnessFeedback, assistantResponseProvenance, chatContext, conversations, messageImageAttachments, messages } from "@/db/schema";
 import { recordAuditEvent } from "@/features/audit/events";
-import { buildValidatedAnswerAnnotations, type AnswerAnnotation } from "@/features/ai/answer-annotations";
+import { buildValidatedAnswerAnnotations, sanitizeStoredAnswerAnnotations } from "@/features/ai/answer-annotations";
 import { selectActiveAiGatewayModel } from "@/features/ai/models";
 import { formatAssistantMessageProvenance } from "@/features/retrieval/provenance";
 import { getAuthenticatedSession } from "@/server/auth";
@@ -105,11 +105,15 @@ export async function getOwnedConversation(conversationId: string) {
   const backfillModel = shouldBackfillAnnotations ? await selectActiveAiGatewayModel({ purpose: "ai_ask_initial_answer", requiredCapabilities: { textInput: true } }) : null;
   const messagesWithAnnotations = await Promise.all(conversationMessages.map(async (message) => {
     const provenance = message.role === "assistant" ? provenanceByMessageId.get(message.id) ?? [] : [];
-    const storedAnnotations = message.role === "assistant" ? sanitizeStoredAnswerAnnotations(message.answerAnnotations, message.content) : [];
+    const storedAnnotations = message.role === "assistant" ? sanitizeStoredAnswerAnnotations({ answerText: message.content, annotations: message.answerAnnotations, provenance }) : [];
     let annotations = storedAnnotations;
 
     if (message.role === "assistant" && annotations.length === 0 && provenance.length > 0 && backfillModel) {
-      annotations = await buildValidatedAnswerAnnotations({ answerText: message.content, provenance, model: backfillModel.gatewayModelName });
+      annotations = sanitizeStoredAnswerAnnotations({
+        answerText: message.content,
+        annotations: await buildValidatedAnswerAnnotations({ answerText: message.content, provenance, model: backfillModel.gatewayModelName }),
+        provenance,
+      });
 
       if (annotations.length > 0) {
         try {
@@ -133,32 +137,6 @@ export async function getOwnedConversation(conversationId: string) {
     ...conversation,
     messages: messagesWithAnnotations,
   };
-}
-
-function sanitizeStoredAnswerAnnotations(value: unknown, content: string): AnswerAnnotation[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  const annotations: AnswerAnnotation[] = [];
-
-  for (const item of value) {
-    if (!isRecord(item) || typeof item.id !== "string" || typeof item.start !== "number" || typeof item.end !== "number" || typeof item.text !== "string" || typeof item.type !== "string" || !isRecord(item.detail)) {
-      continue;
-    }
-
-    if (!Number.isInteger(item.start) || !Number.isInteger(item.end) || item.start < 0 || item.end <= item.start || item.end > content.length || content.slice(item.start, item.end) !== item.text) {
-      continue;
-    }
-
-    annotations.push(item as AnswerAnnotation);
-  }
-
-  return annotations;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 export async function listOwnedConversations(): Promise<OwnedConversationSummary[] | null> {

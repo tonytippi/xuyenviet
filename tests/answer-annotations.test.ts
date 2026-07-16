@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { buildAnswerAnnotationDetail, parseAnswerAnnotationProposals, validateAnswerAnnotations, type AnswerAnnotationProposal } from "@/features/ai/answer-annotations";
+import { buildAnswerAnnotationDetail, parseAnswerAnnotationProposals, sanitizeStoredAnswerAnnotations, validateAnswerAnnotations, type AnswerAnnotationProposal } from "@/features/ai/answer-annotations";
 import type { AssistantMessageProvenanceItem } from "@/features/retrieval/provenance";
 
 const provenance: AssistantMessageProvenanceItem[] = [
@@ -110,7 +110,7 @@ describe("answer annotation validation", () => {
     const detail = buildAnswerAnnotationDetail({ type: "source", text: "Huế", provenance: [provenance[1]] });
 
     expect(detail).toMatchObject({
-      type: "warning",
+      type: "source",
       label: "Nguồn web cập nhật",
       owner: { table: "assistant_response_provenance", id: "prov-web" },
       detail: expect.objectContaining({ URL: "https://hue.gov.vn/ticket", "Độ tin cậy": "chưa xác minh" }),
@@ -129,6 +129,73 @@ describe("answer annotation validation", () => {
 
     expect(proposals).toEqual([{ id: "valid", start: 0, end: 3, quote: "Huế", type: "source", provenanceIds: ["prov-knowledge"] }]);
     expect(parseAnswerAnnotationProposals("not json")).toEqual([]);
+  });
+
+  test("uses UTF-16 ranges and supports every persisted descriptor type", () => {
+    const answerText = "🚗 Huế | khu ven sông | chặng Đà Nẵng - Huế | 500.000đ | nguồn | cảnh báo | gia đình | bước tiếp";
+    const proposals: AnswerAnnotationProposal[] = [
+      makeProposal("place", answerText, "Huế", "place", ["prov-knowledge"]),
+      makeProposal("hotel", answerText, "khu ven sông", "hotel_area", ["prov-knowledge"]),
+      makeProposal("route", answerText, "chặng Đà Nẵng - Huế", "route_segment", ["prov-knowledge"]),
+      makeProposal("cost", answerText, "500.000đ", "cost", ["prov-knowledge"]),
+      makeProposal("source", answerText, "nguồn", "source", ["prov-knowledge"]),
+      makeProposal("warning", answerText, "cảnh báo", "warning", ["prov-web"]),
+      makeProposal("fact", answerText, "gia đình", "trip_fact", ["prov-context"]),
+      makeProposal("action", answerText, "bước tiếp", "action", []),
+    ];
+
+    const annotations = validateAnswerAnnotations({ answerText, proposals, provenance });
+
+    expect(annotations.map((annotation) => annotation.type)).toEqual(["place", "hotel_area", "route_segment", "cost", "source", "warning", "trip_fact", "action"]);
+    expect(annotations[0]).toMatchObject({ start: answerText.indexOf("Huế"), text: "Huế" });
+    expect(annotations.filter((annotation) => annotation.type === "place" || annotation.type === "hotel_area" || annotation.type === "route_segment" || annotation.type === "cost").every((annotation) => annotation.detail.owner?.id === "prov-knowledge")).toBe(true);
+  });
+
+  test("rejects persisted descriptors with cross-message provenance, unsafe fields, duplicate provenance, or unbounded quick facts", () => {
+    const answerText = "Huế phù hợp.";
+    const trusted = buildAnswerAnnotationDetail({ type: "place", text: "Huế", provenance: [provenance[0]] })!;
+    const valid = {
+      id: "valid",
+      start: 0,
+      end: 3,
+      text: "Huế",
+      type: "place",
+      detail: trusted,
+    };
+
+    const sanitize = (annotation: unknown) => sanitizeStoredAnswerAnnotations({
+      answerText,
+      provenance: [provenance[0]],
+      annotations: [annotation],
+    });
+
+    expect(sanitize(valid)).toEqual([expect.objectContaining({ id: "valid", type: "place" })]);
+    expect(sanitize({ ...valid, id: "unknown", detail: { ...valid.detail, owner: { table: "assistant_response_provenance", id: "other-message" }, provenanceIds: ["other-message"] } })).toEqual([]);
+    expect(sanitize({ ...valid, id: "duplicate", detail: { ...valid.detail, provenanceIds: ["prov-knowledge", "prov-knowledge"] } })).toEqual([]);
+    expect(sanitize({ ...valid, id: "unsafe", detail: { ...valid.detail, detail: { providerScore: "1" } } })).toEqual([]);
+    expect(sanitize({ ...valid, id: "unbounded", detail: { ...valid.detail, quickFacts: Array.from({ length: 7 }, () => ({ label: "Loại", value: "Điểm dừng" })) } })).toEqual([]);
+    expect(sanitizeStoredAnswerAnnotations({ answerText, provenance: [provenance[0]], annotations: [{ ...valid, start: -1 }, valid] })).toEqual([]);
+  });
+
+  test("preserves compatible legacy source warnings and bounds provenance-derived quick facts", () => {
+    const answerText = "Nguồn web cập nhật";
+    const legacy = {
+      id: "legacy-warning",
+      start: 0,
+      end: answerText.length,
+      text: answerText,
+      type: "source",
+      detail: {
+        type: "warning",
+        label: answerText,
+        owner: { table: "assistant_response_provenance", id: "prov-web" },
+        provenanceIds: ["prov-web"],
+      },
+    };
+    const longProvenance = { ...provenance[0], confidenceLabel: "x".repeat(200) };
+
+    expect(sanitizeStoredAnswerAnnotations({ answerText, annotations: [legacy], provenance: [provenance[1]] })).toEqual([expect.objectContaining({ id: "legacy-warning" })]);
+    expect(buildAnswerAnnotationDetail({ type: "source", text: "Huế", provenance: [longProvenance] })?.quickFacts?.every((fact) => fact.label.length <= 160 && fact.value.length <= 160)).toBe(true);
   });
 });
 

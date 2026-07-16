@@ -55,6 +55,22 @@ export function SourceIcon(props: IconProps) {
   return <Icon {...props}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" /><path d="M14 2v6h6M8 13h8M8 17h6" /></Icon>;
 }
 
+export function PlaceIcon(props: IconProps) {
+  return <Icon {...props}><path d="M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 1 1 16 0Z" /><circle cx="12" cy="10" r="2.5" /></Icon>;
+}
+
+export function HotelAreaIcon(props: IconProps) {
+  return <Icon {...props}><path d="M4 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16" /><path d="M14 10h4a2 2 0 0 1 2 2v9M8 7h2M8 11h2M8 15h2M2 21h20" /></Icon>;
+}
+
+export function RouteSegmentIcon(props: IconProps) {
+  return <Icon {...props}><circle cx="6" cy="5" r="2" /><circle cx="18" cy="19" r="2" /><path d="M6 7v4a4 4 0 0 0 4 4h4a4 4 0 0 1 4 4" /></Icon>;
+}
+
+export function CostIcon(props: IconProps) {
+  return <Icon {...props}><circle cx="12" cy="12" r="9" /><path d="M15 9.5c-.5-.8-1.5-1.3-2.7-1.3-1.5 0-2.7.8-2.7 2s1.2 1.8 2.7 2c1.5.2 2.7.8 2.7 2s-1.2 2-2.7 2c-1.2 0-2.2-.5-2.7-1.3M12 6.5v11" /></Icon>;
+}
+
 export function AccountIcon(props: IconProps) {
   return <Icon {...props}><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></Icon>;
 }

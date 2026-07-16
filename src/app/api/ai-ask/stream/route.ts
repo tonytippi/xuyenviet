@@ -3,7 +3,7 @@ import { after } from "next/server";
 
 import { getDb } from "@/db/client";
 import { conversations, messageImageAttachments, messages, tripProjects } from "@/db/schema";
-import { buildValidatedAnswerAnnotations, type AnswerAnnotation } from "@/features/ai/answer-annotations";
+import { buildValidatedAnswerAnnotations, sanitizeStoredAnswerAnnotations, type AnswerAnnotation } from "@/features/ai/answer-annotations";
 import { ensureAiAskFreshnessWarning } from "@/features/ai/answer-freshness";
 import { streamInitialAiAskAnswer } from "@/features/ai/gateway";
 import { getAiGatewayPricingSnapshot, selectActiveAiGatewayModel } from "@/features/ai/models";
@@ -374,7 +374,11 @@ async function streamAnswer({
     }
 
     if (completed) {
-      completed.annotations = await buildValidatedAnswerAnnotations({ answerText: completed.content, provenance: completed.provenance, model: selectedModel.gatewayModelName, abortSignal });
+      completed.annotations = sanitizeStoredAnswerAnnotations({
+        answerText: completed.content,
+        annotations: await buildValidatedAnswerAnnotations({ answerText: completed.content, provenance: completed.provenance, model: selectedModel.gatewayModelName, abortSignal }),
+        provenance: completed.provenance,
+      });
       if (completed.annotations.length > 0) {
         try {
           await db.update(messages).set({ answerAnnotations: completed.annotations }).where(eq(messages.id, completed.id));

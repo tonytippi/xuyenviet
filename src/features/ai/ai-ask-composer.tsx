@@ -10,7 +10,7 @@ import { answerUsefulnessCommentMaxLength, countAnswerUsefulnessCommentCharacter
 import type { AnswerUsefulnessRating } from "@/db/schema";
 import type { AnswerAnnotation } from "@/features/ai/answer-annotations";
 import type { AssistantMessageProvenanceItem } from "@/features/retrieval/provenance";
-import { AccountIcon, AttachmentIcon, ChatIcon, CloseIcon, LoadingIcon, NewChatIcon, ProjectIcon, SendIcon, SourceIcon } from "@/components/ui/icons";
+import { AccountIcon, AttachmentIcon, ChatIcon, CloseIcon, CostIcon, HotelAreaIcon, LoadingIcon, NewChatIcon, PlaceIcon, ProjectIcon, RouteSegmentIcon, SendIcon, SourceIcon } from "@/components/ui/icons";
 
 const maxQuestionLength = 2_000;
 const maxImageByteSize = 5 * 1024 * 1024;
@@ -32,15 +32,17 @@ type DisplayMessage = {
 };
 
 export type AnswerEntityDescriptor = {
-  type: "source" | "warning" | "trip_fact" | "action";
+  type: AnswerAnnotation["type"];
   label: string;
   section?: string;
+  summary?: string;
   sourceCategory?: AssistantMessageProvenanceItem["sourceCategory"];
   owner?: {
     table: string;
     id: string;
   };
   detail?: Record<string, string>;
+  quickFacts?: Array<{ label: string; value: string }>;
   provenanceIds?: string[];
 };
 
@@ -380,9 +382,11 @@ function createAnnotationAnswerEntityDescriptor(annotation: AnswerAnnotation): A
     type: annotation.detail.type,
     label: annotation.detail.label,
     section: annotation.detail.section,
+    summary: annotation.detail.summary,
     sourceCategory: annotation.detail.sourceCategory,
     owner: annotation.detail.owner,
     detail: annotation.detail.detail,
+    quickFacts: annotation.detail.quickFacts,
     provenanceIds: annotation.detail.provenanceIds,
   };
 }
@@ -475,15 +479,19 @@ export function AnswerDetailPanel({ selectedEntity, panelId, panelRef, onClose }
     );
   }
 
-  const detailEntries = Object.entries(selectedEntity.detail ?? {});
+  const detailEntries = selectedEntity.quickFacts ?? Object.entries(selectedEntity.detail ?? {}).map(([label, value]) => ({ label, value }));
+  const DetailIcon = getAnswerEntityIcon(selectedEntity.type);
 
   return (
     <div aria-live="polite" className="flex flex-1 flex-col gap-4 overflow-y-auto py-4 focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45" id={panelId} ref={panelRef} tabIndex={-1}>
       <div className="rounded-[1.5rem] border border-[#d8c9ad] bg-white/85 p-4">
         <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#8c4f13]">Chi tiết đã chọn</p>
-            <h3 className="mt-1 text-xl font-semibold tracking-[-0.03em] text-[#17342c]">{selectedEntity.label}</h3>
+          <div className="flex min-w-0 items-start gap-3">
+            <span aria-hidden="true" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#e8f3ec] text-xl text-[#14532d]"><DetailIcon /></span>
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#8c4f13]">Chi tiết đã chọn</p>
+              <h3 className="mt-1 text-xl font-semibold tracking-[-0.03em] text-[#17342c]">{selectedEntity.label}</h3>
+            </div>
           </div>
           <button
             aria-label="Đóng bảng chi tiết"
@@ -494,14 +502,14 @@ export function AnswerDetailPanel({ selectedEntity, panelId, panelRef, onClose }
             Đóng
           </button>
         </div>
-        <p className="mt-3 text-sm leading-6 text-[#4f625a]">{formatAnswerEntitySummary(selectedEntity)}</p>
+        <p className="mt-3 text-sm leading-6 text-[#4f625a]">{selectedEntity.summary ?? formatAnswerEntitySummary(selectedEntity)}</p>
       </div>
 
       {detailEntries.length > 0 ? (
         <section className="rounded-[1.5rem] border border-[#eadfc8] bg-white/75 p-4" aria-label="Thông tin nhanh">
           <h4 className="text-sm font-bold uppercase tracking-[0.12em] text-[#1f5f46]">Thông tin nhanh</h4>
           <dl className="mt-3 space-y-3 text-sm leading-6">
-            {detailEntries.map(([label, value], index) => (
+            {detailEntries.map(({ label, value }, index) => (
               <div className="rounded-xl bg-[#fffdf8] p-3" key={`${label}-${index}`}>
                 <dt className="text-xs font-bold uppercase tracking-[0.12em] text-[#6b7c75]">{label}</dt>
                 <dd className="mt-1 break-words font-semibold text-[#17342c]">{value}</dd>
@@ -1795,9 +1803,11 @@ function createProvenanceAnswerEntityDescriptor(item: AssistantMessageProvenance
     type: item.sourceCategory === "general" ? "action" : item.freshnessSensitive ? "warning" : "source",
     label: item.title,
     section: "Nguồn và độ tin cậy",
+    summary: item.sourceCategory === "general" ? "Đây là suy luận tổng quát của AI, chưa được xác minh như một nguồn." : undefined,
     sourceCategory: item.sourceCategory,
     owner: { table: "assistant_response_provenance", id: item.id },
     detail,
+    quickFacts: Object.entries(detail).slice(0, 6).map(([label, value]) => ({ label, value })),
     provenanceIds: [item.id],
   };
 }
@@ -1820,6 +1830,17 @@ function formatAnswerEntitySummary(entity: AnswerEntityDescriptor) {
   }
 
   return "Chi tiết này được dựng từ provenance đã lưu của câu trả lời, không trích xuất từ văn bản tự do của trợ lý.";
+}
+
+function getAnswerEntityIcon(type: AnswerEntityDescriptor["type"]) {
+  if (type === "place") return PlaceIcon;
+  if (type === "hotel_area") return HotelAreaIcon;
+  if (type === "route_segment") return RouteSegmentIcon;
+  if (type === "cost") return CostIcon;
+  if (type === "warning") return SourceIcon;
+  if (type === "trip_fact") return ProjectIcon;
+  if (type === "action") return ChatIcon;
+  return SourceIcon;
 }
 
 function formatProvenanceSourceType(item: AssistantMessageProvenanceItem) {

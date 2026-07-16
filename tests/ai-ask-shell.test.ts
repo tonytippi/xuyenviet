@@ -111,9 +111,7 @@ function makeAnnotation(id: string, content: string, text: string, type: AnswerA
     detail: {
       type: detailType,
       label: text,
-      section: "Nguồn và độ tin cậy",
       owner: { table: "assistant_response_provenance", id: provenanceId },
-      detail: { "Độ tin cậy": "đã xác minh" },
       provenanceIds: [provenanceId],
     },
   };
@@ -475,13 +473,26 @@ describe("AI Ask authenticated shell", () => {
     const content = "Kế hoạch gợi ý:\nBãi đỗ chính thức Huế phù hợp để kiểm tra trước khi vào trung tâm.";
     const annotations = [makeAnnotation("ann-knowledge", content, "Bãi đỗ chính thức Huế", "source", "knowledge-1", "source")];
     const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
-    await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "user", content: "Bãi đỗ ở Huế?" });
-    await testDb.insert(messages).values({
+    const [userMessage] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "user", content: "Bãi đỗ ở Huế?" }).returning({ id: messages.id });
+    const [assistantMessage] = await testDb.insert(messages).values({
       conversationId: conversation.id,
       userId: "user-1",
       role: "assistant",
       content,
       answerAnnotations: annotations,
+    }).returning({ id: messages.id });
+    await testDb.insert(assistantResponseProvenance).values({
+      id: "knowledge-1",
+      userId: "user-1",
+      conversationId: conversation.id,
+      userMessageId: userMessage.id,
+      assistantMessageId: assistantMessage.id,
+      sourceCategory: "knowledge",
+      rank: 1,
+      verificationStatus: "verified",
+      usedInPrompt: true,
+      citedInAnswer: false,
+      sourceSnapshot: { title: "Bãi đỗ chính thức Huế" },
     });
 
     const html = await renderAuthenticatedAiAskShell({ conversationId: conversation.id });
