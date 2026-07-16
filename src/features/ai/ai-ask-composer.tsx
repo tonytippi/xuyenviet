@@ -69,6 +69,16 @@ const emptyMessages: DisplayMessage[] = [];
 const emptySessions: ChatSessionSummary[] = [];
 const emptyTripProjects: TripProjectSummary[] = [];
 
+function buildCanonicalAiAskUrl(conversationId?: string, tripProjectId?: string) {
+  const searchParams = new URLSearchParams();
+
+  if (conversationId) searchParams.set("conversationId", conversationId);
+  if (tripProjectId) searchParams.set("tripProjectId", tripProjectId);
+
+  const query = searchParams.toString();
+  return query ? `/ai-ask?${query}` : "/ai-ask";
+}
+
 const starterCards = [
   {
     title: "Lên route",
@@ -575,6 +585,16 @@ export function AiAskComposer({
   const desktopAnswerDetailPanelId = "ai-ask-selected-answer-detail-desktop";
   const answerDetailPanelIds = `${mobileAnswerDetailPanelId} ${desktopAnswerDetailPanelId}`;
   const selectedAnswerEntityId = selectedAnswerEntity?.provenanceIds?.[0];
+  const activeWorkspaceTitle = selectedTripProject
+    ? formatTripProjectLabel(selectedTripProject)
+    : conversationId
+      ? sessions.find((session) => session.id === conversationId)?.preview ?? "Trò chuyện thường"
+      : "Trò chuyện mới";
+
+  function reconcileSelection(nextConversationId?: string, nextTripProjectId?: string) {
+    router.replace(buildCanonicalAiAskUrl(nextConversationId, nextTripProjectId));
+    router.refresh();
+  }
 
   useEffect(() => {
     const desktopQuery = window.matchMedia("(min-width: 1024px)");
@@ -867,9 +887,7 @@ export function AiAskComposer({
           } else {
             setSessions((currentSessions) => moveSessionToTop(currentSessions, newConversationId));
           }
-          const searchParams = new URLSearchParams({ conversationId: newConversationId });
-          if (activeTripProjectId) searchParams.set("tripProjectId", activeTripProjectId);
-          router.replace(`/ai-ask?${searchParams.toString()}`);
+          reconcileSelection(newConversationId, activeTripProjectId);
         }
         setStatus(`${result.errorMessage} Chưa có câu trả lời trợ lý nào được lưu cho lượt này.`);
         return;
@@ -889,9 +907,7 @@ export function AiAskComposer({
       } else {
         setSessions((currentSessions) => moveSessionToTop(currentSessions, result.conversationId));
       }
-      const searchParams = new URLSearchParams({ conversationId: result.conversationId });
-      if (activeTripProjectId) searchParams.set("tripProjectId", activeTripProjectId);
-      router.replace(`/ai-ask?${searchParams.toString()}`);
+      reconcileSelection(result.conversationId, activeTripProjectId);
     } catch (error) {
       if (activeRequestIdRef.current === requestId && !(error instanceof DOMException && error.name === "AbortError")) {
         setStatus("Không thể gửi câu hỏi lúc này. Hãy kiểm tra đăng nhập và thử lại. Nội dung vẫn còn trong ô nhập.");
@@ -954,7 +970,7 @@ export function AiAskComposer({
     if (imageInputRef.current) {
       imageInputRef.current.value = "";
     }
-    router.push(activeTripProjectId ? `/ai-ask?tripProjectId=${encodeURIComponent(activeTripProjectId)}` : "/ai-ask");
+    router.push(buildCanonicalAiAskUrl(undefined, activeTripProjectId));
   }
 
   function handleSelectSession(id: string) {
@@ -977,9 +993,7 @@ export function AiAskComposer({
       sessionSheetPreviousFocusRef.current = textareaRef.current;
       setSessionSheetOpen(false);
     }
-    const searchParams = new URLSearchParams({ conversationId: id });
-    if (activeTripProjectId) searchParams.set("tripProjectId", activeTripProjectId);
-    router.push(`/ai-ask?${searchParams.toString()}`);
+    router.push(buildCanonicalAiAskUrl(id, activeTripProjectId));
   }
 
   async function handleDeleteSession(id: string) {
@@ -1006,6 +1020,7 @@ export function AiAskComposer({
             setSessionSheetOpen(false);
             clearActiveConversation();
           }
+          router.refresh();
         }
         setStatus(result.error ?? "Không thể xoá cuộc trò chuyện lúc này. Vui lòng thử lại.");
         return;
@@ -1019,6 +1034,7 @@ export function AiAskComposer({
       }
 
       setStatus("Đã xoá cuộc trò chuyện và các chi tiết đã ghi nhớ từ cuộc trò chuyện này.");
+      router.refresh();
     } catch {
       setStatus("Không thể xoá cuộc trò chuyện lúc này. Vui lòng thử lại.");
     } finally {
@@ -1087,7 +1103,7 @@ export function AiAskComposer({
     if (imageInputRef.current) {
       imageInputRef.current.value = "";
     }
-    router.push(activeTripProjectId ? `/ai-ask?tripProjectId=${encodeURIComponent(activeTripProjectId)}` : "/ai-ask");
+    router.push(buildCanonicalAiAskUrl(undefined, activeTripProjectId));
   }
 
   function handleSelectAnswerEntity(entity: AnswerEntityDescriptor, trigger: HTMLElement) {
@@ -1124,7 +1140,7 @@ export function AiAskComposer({
       setSessionSheetOpen(false);
     }
 
-    router.push(projectId ? `/ai-ask?tripProjectId=${encodeURIComponent(projectId)}` : "/ai-ask");
+    router.push(buildCanonicalAiAskUrl(undefined, projectId));
   }
 
   async function handleDeleteTripProject() {
@@ -1170,7 +1186,7 @@ export function AiAskComposer({
           if (imageInputRef.current) {
             imageInputRef.current.value = "";
           }
-          router.push("/ai-ask");
+          reconcileSelection();
         }
         setStatus(result.error ?? "Không thể xoá dự án chuyến đi lúc này. Vui lòng thử lại.");
         return;
@@ -1189,7 +1205,7 @@ export function AiAskComposer({
       if (imageInputRef.current) {
         imageInputRef.current.value = "";
       }
-      router.push("/ai-ask");
+      reconcileSelection();
       setStatus("Đã xoá dự án chuyến đi và các cuộc trò chuyện liên kết.");
     } catch {
       setStatus("Không thể xoá dự án chuyến đi lúc này. Vui lòng thử lại.");
@@ -1314,7 +1330,7 @@ export function AiAskComposer({
         {accountPrivacyLinks}
       </nav>
 
-      <div className="flex min-h-screen min-w-0 flex-1 flex-col justify-between gap-5 bg-white p-4 sm:p-6 lg:max-w-[calc(100%-276px)]">
+      <div className="flex min-h-screen min-w-0 flex-1 flex-col justify-between gap-5 bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:p-6 lg:max-w-[calc(100%-276px)]">
         <div className="flex items-center justify-between gap-3 lg:hidden">
           <button
             ref={sessionSheetTriggerRef}
@@ -1329,6 +1345,16 @@ export function AiAskComposer({
           >
             Danh sách trò chuyện
           </button>
+          <h2 className="min-w-0 flex-1 truncate text-center text-sm font-semibold text-[#17342c]" aria-label={`Không gian đang mở: ${activeWorkspaceTitle}`}>
+            {activeWorkspaceTitle}
+          </h2>
+          <Link
+            aria-label="Tài khoản và quyền riêng tư"
+            className="grid min-h-11 min-w-11 place-items-center rounded-2xl border border-[#d8c9ad] bg-white/75 text-[#17342c] transition hover:bg-white focus:outline-none focus:ring-4 focus:ring-[#e5bd82]"
+            href="/#quyen-rieng-tu"
+          >
+            <AccountIcon />
+          </Link>
         </div>
 
         {showEmptyState ? (
@@ -1412,7 +1438,7 @@ export function AiAskComposer({
             </section>
           ) : null}
 
-          <form className="mx-auto max-w-[760px] rounded-[1.75rem] border border-[#d8c9ad] bg-white/90 p-3 shadow-[0_20px_60px_rgba(41,33,18,0.14)]" onSubmit={handleSubmit} ref={formRef}>
+          <form className="mx-auto max-w-[760px] rounded-[1.75rem] border border-[#d8c9ad] bg-white/90 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_20px_60px_rgba(41,33,18,0.14)]" onSubmit={handleSubmit} ref={formRef}>
             <label className="sr-only" htmlFor="ai-ask-question">
               Câu hỏi của bạn
             </label>

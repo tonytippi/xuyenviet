@@ -26,9 +26,39 @@ function getFirstParam(value: string | string[] | undefined) {
   return value;
 }
 
+function buildCanonicalAiAskUrl({
+  conversationId,
+  tripProjectId,
+  referralCode,
+  draft,
+}: {
+  conversationId?: string;
+  tripProjectId?: string;
+  referralCode?: string;
+  draft?: string;
+}) {
+  const searchParams = new URLSearchParams();
+
+  if (conversationId) searchParams.set("conversationId", conversationId);
+  if (tripProjectId) searchParams.set("tripProjectId", tripProjectId);
+  if (referralCode) searchParams.set("ref", referralCode);
+  if (draft) searchParams.set("draft", draft);
+
+  const query = searchParams.toString();
+  return query ? `/ai-ask?${query}` : "/ai-ask";
+}
+
+function hasCanonicalParam(value: string | string[] | undefined, expected: string | undefined) {
+  if (!expected) {
+    return value === undefined;
+  }
+
+  return typeof value === "string" && value === expected;
+}
+
 export default async function AiAskPage({ searchParams }: AiAskPageProps) {
   const params = await searchParams;
-  const referralCode = getFirstParam(params?.ref);
+  const referralCode = getFirstParam(params?.ref)?.trim() || undefined;
   const publicDraft = normalizePublicAskDraft(getFirstParam(params?.draft));
   const requestedConversationId = getFirstParam(params?.conversationId)?.trim();
   const requestedTripProjectId = getFirstParam(params?.tripProjectId)?.trim();
@@ -79,6 +109,22 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
         updatedAt: selectedTripProject.updatedAt,
       }
     : null;
+  const canonicalUrl = buildCanonicalAiAskUrl({
+    conversationId: loadedConversation?.id,
+    tripProjectId: selectedTripProject?.id,
+    referralCode,
+    draft: publicDraft,
+  });
+
+  if (
+    Object.keys(params ?? {}).some((key) => !["conversationId", "tripProjectId", "ref", "draft"].includes(key)) ||
+    !hasCanonicalParam(params?.conversationId, loadedConversation?.id) ||
+    !hasCanonicalParam(params?.tripProjectId, selectedTripProject?.id) ||
+    !hasCanonicalParam(params?.ref, referralCode) ||
+    !hasCanonicalParam(params?.draft, publicDraft)
+  ) {
+    redirect(canonicalUrl);
+  }
 
   return (
     <main className="min-h-screen bg-white text-[#17342c]">

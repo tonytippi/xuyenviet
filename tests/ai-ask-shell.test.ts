@@ -73,6 +73,24 @@ async function renderAuthenticatedAiAskShell(searchParams: Record<string, string
   return renderToStaticMarkup(element);
 }
 
+async function getAuthenticatedAiAskRedirect(searchParams: Record<string, string | string[]> = {}) {
+  const redirect = vi.fn((url: string) => {
+    throw new Error(`redirect:${url}`);
+  });
+  vi.doMock("next/navigation", () => ({ redirect }));
+  vi.doMock("@/server/auth", () => ({
+    getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
+    getAuthenticatedSessionWithRoles: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com", roles: [] }),
+    hasAdminAccess: vi.fn().mockReturnValue(false),
+  }));
+  vi.doMock("@/features/auth/actions", () => ({ signOutCurrentUser: vi.fn() }));
+
+  const { default: AiAskPage } = await import("@/app/ai-ask/page");
+
+  await expect(AiAskPage({ searchParams: Promise.resolve(searchParams) })).rejects.toThrow(/^redirect:/);
+  return redirect.mock.calls[0]?.[0];
+}
+
 function getGatewayRequestMessages(fetchMock: ReturnType<typeof vi.fn>, callIndex = 0) {
   const request = fetchMock.mock.calls[callIndex][1] as RequestInit;
   const body = JSON.parse(String(request.body)) as { messages: { role: string; content: string }[] };
@@ -589,10 +607,7 @@ describe("AI Ask authenticated shell", () => {
       content: "Tin nhắn riêng của user-2",
     });
 
-    const html = await renderAuthenticatedAiAskShell({ conversationId: conversation.id });
-
-    expect(html).not.toContain("Tin nhắn riêng của user-2");
-    expect(html).toContain("Mình sẽ đi đâu?");
+    await expect(getAuthenticatedAiAskRedirect({ conversationId: conversation.id })).resolves.toBe("/ai-ask");
   });
 
   test("renders only owned trip projects and selected project scope on the AI Ask page", async () => {
@@ -619,42 +634,67 @@ describe("AI Ask authenticated shell", () => {
     expect(html).toContain("các cuộc trò chuyện liên kết và thông tin ngữ cảnh đã lưu sẽ bị xoá");
   });
 
-  test("falls back to ordinary chat when opening another user's trip project", async () => {
+  test("redirects to ordinary chat when opening another user's trip project", async () => {
     await createTestUser("user-1");
     await createTestUser("user-2");
     const [otherProject] = await testDb.insert(tripProjects).values({ userId: "user-2", title: "Dự án riêng user-2" }).returning({ id: tripProjects.id });
 
-    const html = await renderAuthenticatedAiAskShell({ tripProjectId: otherProject.id });
-
-    expect(html).toContain("Trò chuyện thường");
-    expect(html).not.toContain("Dự án riêng user-2");
+    await expect(getAuthenticatedAiAskRedirect({ tripProjectId: otherProject.id })).resolves.toBe("/ai-ask");
   });
 
-  test("infers project scope when opening a linked project conversation", async () => {
+  test("redirects an owned linked project conversation to its project scope", async () => {
     await createTestUser("user-1");
     const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế", origin: "Hà Nội", destination: "Huế" }).returning({ id: tripProjects.id });
     const [conversation] = await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id }).returning({ id: conversations.id });
-    await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "user", content: "Tin trong dự án Huế" });
-
-    const html = await renderAuthenticatedAiAskShell({ conversationId: conversation.id });
-
-    expect(html).toContain("Dự án: Huế (Hà Nội → Huế)");
-    expect(html).toContain("Tin trong dự án Huế");
+    await expect(getAuthenticatedAiAskRedirect({ conversationId: conversation.id })).resolves.toBe(`/ai-ask?conversationId=${conversation.id}&tripProjectId=${project.id}`);
   });
 
-  test("does not render a conversation under a mismatched selected project", async () => {
+  test("redirects a direct owned project conversation to its canonical project scope while preserving ref and normalized draft", async () => {
+    await createTestUser("user-1");
+    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế" }).returning({ id: tripProjects.id });
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id }).returning({ id: conversations.id });
+
+    const redirectUrl = await getAuthenticatedAiAskRedirect({ conversationId: conversation.id, ref: "ROAD-7", draft: "  Đi Huế  " });
+
+    expect(redirectUrl).toBe(`/ai-ask?conversationId=${conversation.id}&tripProjectId=${project.id}&ref=ROAD-7&draft=%C4%90i+Hu%E1%BA%BF`);
+  });
+
+  test("redirects stale or unauthorized selection to the safe owned fallback", async () => {
+    await createTestUser("user-1");
+    await createTestUser("user-2");
+    const [ownedProject] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế" }).returning({ id: tripProjects.id });
+    const [otherConversation] = await testDb.insert(conversations).values({ userId: "user-2" }).returning({ id: conversations.id });
+
+    await expect(getAuthenticatedAiAskRedirect({ conversationId: otherConversation.id, tripProjectId: ownedProject.id })).resolves.toBe(`/ai-ask?tripProjectId=${ownedProject.id}`);
+    vi.resetModules();
+    await expect(getAuthenticatedAiAskRedirect({ conversationId: "stale-conversation", tripProjectId: "stale-project" })).resolves.toBe("/ai-ask");
+  });
+
+  test("removes unsupported and empty selection parameters from the canonical URL", async () => {
+    await expect(getAuthenticatedAiAskRedirect({ ref: "   ", legacy: "ignored" } as Record<string, string>)).resolves.toBe("/ai-ask");
+  });
+
+  test("redirects a mismatched owned conversation and project to the resolved project only", async () => {
     await createTestUser("user-1");
     const [projectA] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế" }).returning({ id: tripProjects.id });
     const [projectB] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Đà Lạt" }).returning({ id: tripProjects.id });
     const [conversation] = await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: projectA.id }).returning({ id: conversations.id });
-    await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "user", content: "Tin chỉ thuộc dự án Huế" });
 
-    const html = await renderAuthenticatedAiAskShell({ conversationId: conversation.id, tripProjectId: projectB.id });
-
-    expect(html).toContain("Dự án: Đà Lạt");
-    expect(html).not.toContain("Tin chỉ thuộc dự án Huế");
-    expect(html).toContain("Mình sẽ đi đâu?");
+    await expect(getAuthenticatedAiAskRedirect({ conversationId: conversation.id, tripProjectId: projectB.id })).resolves.toBe(`/ai-ask?tripProjectId=${projectB.id}`);
   });
+
+  test("composer source exposes the active mobile workspace, direct account access, and safe-area composer", () => {
+    const source = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
+
+    expect(source).toContain("const activeWorkspaceTitle");
+    expect(source).toContain("Không gian đang mở:");
+    expect(source).toContain('aria-label="Tài khoản và quyền riêng tư"');
+    expect(source).toContain('href="/#quyen-rieng-tu"');
+    expect(source).toContain("env(safe-area-inset-bottom)");
+    expect(source).toContain("function reconcileSelection");
+    expect(source).toContain("router.refresh()");
+  });
+
 });
 
 describe("AI Ask structured answer rendering", () => {
@@ -779,7 +819,7 @@ describe("AI Ask structured answer rendering", () => {
     expect(source).toContain("function clearActiveConversation()");
     expect(source).toContain("setSessions((currentSessions) => currentSessions.filter((session) => session.id !== id))");
     expect(source).toContain("if (id === conversationId)");
-    expect(source).toContain("router.push(activeTripProjectId ? `/ai-ask?tripProjectId=${encodeURIComponent(activeTripProjectId)}` : \"/ai-ask\")");
+    expect(source).toContain("router.push(buildCanonicalAiAskUrl(undefined, activeTripProjectId))");
   });
 
   test("composer source keeps delete trip project pending, failure, and active-project cleanup contracts", () => {
@@ -798,7 +838,7 @@ describe("AI Ask structured answer rendering", () => {
     expect(source).toContain("setMessages([])");
     expect(source).toContain("setConversationId(undefined)");
     expect(source).toContain("setSessionSheetOpen(false)");
-    expect(source).toContain("router.push(\"/ai-ask\")");
+    expect(source).toContain("reconcileSelection();");
   });
 
   test("conversation deletion source locks before counting cascade audit rows", () => {
