@@ -1575,30 +1575,32 @@ So that the public MVP has enough curated examples before evaluation.
 **Then** the system reports the seed set as incomplete
 **And** it shows how many more approved items are needed.
 
-### Story 4.10: Capture YouTube Video Sources For Knowledge Extraction
+### Story 4.10: Analyze YouTube Video Sources With Gemini For Knowledge Extraction
 
 As an operator,
-I want to capture usable public text from a submitted YouTube video,
-So that the existing AI extraction and human-approval workflow can prepare travel knowledge cards from the video.
+I want the server-only `youtube:capture` operations script to analyze a submitted public YouTube video with a Gemini video-capable model,
+So that the existing human-reviewed workflow can prepare travel knowledge cards from bounded video evidence without scraping YouTube or storing a full transcript.
 
 **Acceptance Criteria:**
 
 **Given** an operator submits a canonical YouTube video URL, including `youtube.com/watch`, `youtu.be`, `youtube.com/shorts`, or `youtube.com/live`
 **When** the source is saved
 **Then** it is classified as a queued YouTube video source with normalized safe URL metadata
-**And** it remains unverified and is not AI-readable until the capture step stores usable operator-only raw text.
+**And** it remains unverified and is not AI-readable until server-side video analysis stores usable operator-only evidence.
 
-**Given** a queued public YouTube video has an available permitted transcript or captions
-**When** the operator-run YouTube capture adapter runs
-**Then** it stores a bounded transcript or captions as `raw_source_material.raw_text` together with safe metadata such as canonical video URL, title, channel name, published date when available, capture timestamp, and capture method
-**And** it does not persist account credentials, cookies, OAuth tokens, full page HTML, hidden provider payloads, or video/audio binary content.
+**Given** a queued public YouTube video is accessible to the configured Gemini video-capable model and `GEMINI_API_KEY` is available only to the server-run `youtube:capture` script
+**When** the operator-run YouTube analysis adapter runs
+**Then** it sends only the canonical video URL and a versioned bounded-evidence extraction prompt to Gemini
+**And** it stores only bounded, operator-only evidence items in `raw_source_material.raw_text` with safe metadata such as canonical video URL, title, channel name, published date when available, capture timestamp, model, prompt version, and capture method `gemini_youtube_url`
+**And** each evidence item includes a Vietnamese claim, category, timestamp range when available, evidence type, confidence, freshness sensitivity, a bounded evidence excerpt, and uncertainty or conditions when applicable
+**And** it does not request or persist a full transcript, account credentials, cookies, OAuth tokens, full page HTML, hidden provider payloads, or video/audio binary content.
 
-**Given** a queued YouTube video lacks a usable transcript or captions, is private, is age/region restricted, is unavailable, or cannot be read through the approved adapter
-**When** capture runs
-**Then** the source remains unextracted and the operator receives a safe failure reason such as `no_transcript_available`
-**And** no raw text, knowledge draft, or knowledge card is fabricated.
+**Given** a queued public YouTube video is private, age/region restricted, unavailable, unsupported by the configured model, blocked by provider safety policy, exceeds configured analysis limits, or cannot be analyzed by the approved adapter
+**When** analysis runs
+**Then** the source remains unextracted and the operator receives a safe failure reason such as `youtube_analysis_unavailable`
+**And** no evidence, knowledge draft, knowledge card, transcript, or video fact is fabricated.
 
-**Given** capture stores usable YouTube video text
+**Given** analysis stores usable YouTube evidence
 **When** the operator invokes the existing knowledge extraction workflow
 **Then** the system can create draft, review-needed knowledge cards linked to the YouTube source
 **And** the existing human review and approval lifecycle remains required before retrieval.
@@ -1606,24 +1608,24 @@ So that the existing AI extraction and human-approval workflow can prepare trave
 **Given** extracted video content includes changing travel facts such as price, schedules, road conditions, opening hours, service availability, or promotions
 **When** drafts are prepared
 **Then** those facts remain unverified by default and can be marked freshness-sensitive
-**And** traveler-facing provenance retains the video URL, channel/title metadata when safe, and capture or publication date when available without exposing the transcript.
+**And** traveler-facing provenance retains the video URL, channel/title metadata when safe, and capture or publication date when available without exposing operator-only evidence or a transcript.
 
 **Given** an operator submits a YouTube channel URL, including `/@handle`, `/channel/<id>`, `/c/<name>`, or `/user/<name>`
-**When** intake or capture evaluates the source
+**When** intake or analysis evaluates the source
 **Then** it is identified as a channel, not as a video
-**And** the system does not automatically enumerate, scrape, or capture the channel's videos in this story.
+**And** the system does not automatically enumerate, scrape, or analyze the channel's videos in this story.
 
 **Given** a submitted YouTube URL is ambiguous, malformed, or resolves from a short URL to a channel rather than a video
-**When** the capture adapter resolves it
+**When** the analysis adapter resolves it
 **Then** it records a safe `youtube_channel_not_supported` or validation outcome
 **And** the operator can submit a specific video URL or use a future explicit channel-ingestion workflow.
 
-**Given** YouTube capture writes source material or changes capture state
+**Given** YouTube analysis writes source material or changes capture state
 **When** the mutation succeeds or fails
 **Then** the operation is auditable with actor, source ID, capture method, timestamp, and safe outcome summary
-**And** no raw transcript text, provider payload, or credential data appears in audit summaries.
+**And** no operator-only evidence text, transcript, provider payload, or credential data appears in audit summaries.
 
-_Dependencies: Story 4.1 source/raw boundary, Story 4.2 draft extraction, Story 4.3 review/edit, Story 4.6 approval, and Story 4.7 provenance. Requires a product/legal and technical decision on the permitted YouTube metadata/transcript provider before implementation._
+_Dependencies: Story 4.1 source/raw boundary, Story 4.2 draft extraction, Story 4.3 review/edit, Story 4.6 approval, and Story 4.7 provenance. Requires a Gemini video-URL capability spike in the server-only `youtube:capture` script, including current provider data-use terms, model limits, price, Vietnamese-road-trip evidence quality, and failure behavior before implementation. The script uses `GEMINI_API_KEY` from server environment configuration only; it is not an AI Gateway credential and must never reach browser code, request responses, audit summaries, or logs. Playwright, direct browser scraping, and undocumented YouTube APIs are out of scope._
 
 ## Epic 5: Grounded Retrieval, Web Search, Provenance, And Usage
 

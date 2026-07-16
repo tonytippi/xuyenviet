@@ -36,6 +36,7 @@ Traveler question
 - Fit the final set to a strict prompt budget. A narrow question may need 3 cards; a broad planning question may need 5-8.
 - Include warnings and freshness-sensitive facts when directly relevant, even if they are not the highest lexical match.
 - Do not retrieve or pass raw source material, provider payloads, or operator-only data to traveler-facing AI Ask prompts.
+- Gemini-derived YouTube evidence is operator-only raw source material, not a traveler-facing transcript or direct retrieval input. Only human-approved, source-linked knowledge cards may enter the evidence bundle.
 
 ### Search Evolution
 
