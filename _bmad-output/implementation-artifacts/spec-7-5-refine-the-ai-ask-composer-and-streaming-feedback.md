@@ -2,8 +2,9 @@
 title: 'Refine the AI Ask Composer and Streaming Feedback'
 type: 'feature'
 created: '2026-07-16'
-status: 'in-review'
+status: 'done'
 baseline_revision: '6cd7be3'
+final_revision: 'e75bdfb'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
