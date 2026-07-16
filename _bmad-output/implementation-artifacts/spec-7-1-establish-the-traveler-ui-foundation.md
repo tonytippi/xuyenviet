@@ -2,8 +2,9 @@
 title: 'Establish the Traveler UI Foundation'
 type: 'feature'
 created: '2026-07-16'
-status: 'in-review'
+status: 'done'
 baseline_revision: '6352cf3'
+final_revision: 'be10c31'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
