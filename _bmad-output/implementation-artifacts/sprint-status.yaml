@@ -1,5 +1,5 @@
 # generated: 2026-07-05
-# last_updated: 2026-07-15
+# last_updated: 2026-07-16
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -41,7 +41,7 @@
 # - Retrospective appends its action items to action_items; sprint-status surfaces open ones
 
 generated: 2026-07-05
-last_updated: 2026-07-15
+last_updated: 2026-07-16
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -125,6 +125,15 @@ development_status:
   6-5-run-public-mvp-answer-evaluation-prompt-set: done
   6-6-public-mvp-quality-dashboard: done
   epic-6-retrospective: optional
+  epic-7: backlog
+  7-1-establish-the-traveler-ui-foundation: backlog
+  7-2-deliver-the-focused-public-entry: backlog
+  7-3-deliver-the-authenticated-desktop-shell: backlog
+  7-4-keep-workspace-selection-canonical-across-devices: backlog
+  7-5-refine-the-ai-ask-composer-and-streaming-feedback: backlog
+  7-6-present-scannable-answer-content: backlog
+  7-7-inspect-persisted-answer-details-responsively: backlog
+  epic-7-retrospective: optional
   epic-ops: in-progress
   ops-1-async-knowledge-extraction-worker: done
 

@@ -262,7 +262,7 @@ UX-DR13: The logged-in empty state must provide a centered Vietnamese greeting, 
 
 UX-DR14: Active answers must remain scannable through hierarchy and relevant plan/options, rationale, tips, warnings, sources, uncertainty, and next-step sections. Compact horizontally-scrollable section chips must navigate relevant sections without altering stored conversation data.
 
-UX-DR15: The UI may render only persisted best-effort annotation descriptors of types `source`, `warning`, `trip_fact`, and `action`; it must not infer place, hotel, route, or cost entities from Vietnamese answer prose.
+UX-DR15: The UI may render only persisted best-effort annotation descriptors of types `source`, `warning`, `trip_fact`, `action`, `place`, `hotel_area`, `route_segment`, and `cost`; it must not infer entities from Vietnamese answer prose.
 
 UX-DR16: Selecting/focusing a persisted descriptor must open one contextual detail presentation with category icon, title, summary, supported actions, quick facts, related details, and safe provenance chips. The inspector is not a second chat or map-first surface.
 
@@ -2200,10 +2200,25 @@ So that I can make better trip decisions while understanding source confidence a
 
 **Acceptance Criteria:**
 
-**Given** a persisted answer annotation descriptor of type `source`, `warning`, `trip_fact`, or `action` is present
+**Given** a persisted answer annotation descriptor of type `source`, `warning`, `trip_fact`, `action`, `place`, `hotel_area`, `route_segment`, or `cost` is present
 **When** a traveler clicks, taps, or keyboard-focuses it
 **Then** the selected descriptor opens a contextual inspector with semantic icon, Vietnamese title/summary, safe quick facts, related details, provenance chips, and only actions backed by owning server command modules
 **And** the UI never parses Vietnamese answer prose to invent place, hotel, route, cost, source, or detail claims.
+
+**Given** post-answer enrichment proposes a `place`, `hotel_area`, `route_segment`, or `cost` descriptor
+**When** the server validates it before persistence in the assistant message annotations
+**Then** the descriptor has a `{ start, end, text }` range using zero-based UTF-16 offsets with exclusive end and exact `content.slice(start, end)` text from the final persisted assistant message, at least one valid provenance row owned by the same assistant message, conversation, and user, and a label/summary anchored to that range
+**And** descriptors with unknown/cross-owner provenance, unmatched text, raw source material, operator-only fields, provider payloads, or inferred source claims are rejected.
+
+**Given** any descriptor carries provenance IDs
+**When** its persisted annotation is loaded or backfilled
+**Then** every referenced provenance row is validated against the same assistant message, conversation, and user before provenance-derived detail or actions resolve
+**And** descriptors without provenance IDs cannot resolve provenance-derived detail/actions; duplicate or cross-owner provenance references are rejected.
+
+**Given** an entity descriptor exposes quick facts or an action
+**When** the server persists and the traveler UI renders it
+**Then** quick facts are limited to at most six `{ label, value }` values from the AD-20 safe-provenance allowlist, with both strings capped at 160 characters and arbitrary snapshot JSON excluded
+**And** an action is rendered only when its registered owning-feature server read model derives a descriptor-bound executable capability for the current user; execution rechecks the binding, typed input, authorization, and ownership, while unknown commands, label-only actions, client-derived routing, and arbitrary persisted target IDs are rejected.
 
 **Given** a selected descriptor is displayed on desktop
 **When** the active workspace uses the three-panel layout

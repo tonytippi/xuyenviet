@@ -336,17 +336,27 @@ Rule: The detail panel may expose actions such as `Dùng trong kế hoạch`, `X
 
 Rule: The detail panel is not map-first. Google Maps or map-like spatial integration remains deferred and must not be introduced as an implicit dependency of this redesign.
 
-### AD-20: Selectable Answer Annotations Use Persisted Descriptors, Not Free-Text Parsing
+### AD-20: Selectable Answer Annotations Use Persisted, Provenance-Bound Entity Descriptors
 
-Binds: current inline source, warning, trip-fact, and action annotations to a stable persisted render contract.
+Binds: inline source, warning, trip-fact, action, place, hotel-area, route-segment, and cost annotations to a stable persisted render contract.
 
 Prevents: UI teams independently parsing Vietnamese answer prose to create links, detail panels, or provenance claims.
 
 Rule: Selectable answer annotations are best-effort post-answer enrichment. Their descriptors are validated against persisted assistant-message text and stored provenance/retrieval/source-bundle snapshots before storage and rendering.
 
-Rule: A descriptor may include current type `source | warning | trip_fact | action`, display label, answer text range or section, source category, owning provenance-row reference when available, and safe snapshot metadata. It must not include raw source material, operator-only fields, provider payloads, or inferred source claims not present in provenance.
+Rule: A descriptor type is `source | warning | trip_fact | action | place | hotel_area | route_segment | cost`. It includes a display label, answer text range or section, source category, one or more owning provenance-row references where applicable, and bounded traveler-safe display metadata.
 
-Rule: Source/confidence UI remains governed by AD-11: render from stored provenance, not by re-parsing answer text.
+Rule: Every annotated range uses `{ start, end, text }`, where `start` and `end` are zero-based UTF-16 code-unit offsets into the final persisted assistant-message content, `end` is exclusive, and `text` exactly equals `content.slice(start, end)`. Ranges require integer bounds `0 <= start < end <= content.length`; the validator rejects overlapping ranges and any mismatch after persistence/backfill. The client renders persisted offsets only and never normalizes, re-searches, or re-matches Vietnamese prose to recover an entity.
+
+Rule: Every descriptor that carries provenance IDs validates every referenced provenance row belongs to the same assistant message, conversation, and user as the annotation. A descriptor with no provenance IDs may not resolve provenance-derived detail or actions. Cross-message, cross-conversation, cross-user, unknown, or duplicate provenance references are rejected for every descriptor type.
+
+Rule: `place`, `hotel_area`, `route_segment`, and `cost` descriptors require at least one persisted provenance-row reference owned by the same assistant message, conversation, and user as the descriptor. Their label and summary must be the validated annotated answer range. A descriptor with unknown, cross-message, cross-conversation, or cross-user provenance; unmatched text; raw source material; operator-only fields; provider payloads; or an inferred source claim is rejected.
+
+Rule: Entity descriptor quick facts use only the server-projected safe provenance view: `title`, `type`, `locationName`, `routeSegment`, `confidence`, `freshnessSensitive`, `sourceType`, `verificationStatus`, `checkedAt`, and safe HTTP `url`. Each quick fact is `{ label, value }`, both trimmed strings of at most 160 characters, with at most six facts per descriptor. URLs remain in the source/provenance view, not arbitrary quick-fact values. No arbitrary `source_snapshot` JSON is passed to annotation generation, persistence, or the traveler UI.
+
+Rule: Entity descriptor actions are optional. A persisted action is `{ command, label, arguments }`, where `command` is a registered owning-feature server command identifier and `label` is an answer-anchored or safe-projection string. The persisted arguments are descriptive only: the owning server read model derives or mints the executable, descriptor-bound argument/capability set for the current user. The command validates that binding as well as typed input, authorization, and ownership at execution. Unknown commands, arbitrary client routing, label-only actions, and arbitrary persisted target IDs are rejected.
+
+Rule: Source/confidence UI remains governed by AD-11: render from stored provenance, not by re-parsing answer text. Entity selection does not create a new mutable place, hotel, route, or cost aggregate; actions remain server-side commands owned by their existing feature module.
 
 ### AD-21: Sidebar Read Models Are Chat/Trips-Owned And Server-Gated
 
@@ -410,17 +420,19 @@ Frontend shell state contract:
 
 Selectable answer entity descriptor minimum fields:
 
-- `type`: current MVP `source | warning | trip_fact | action`; future entity types require a persisted owner/reference contract
+- `type`: `source | warning | trip_fact | action | place | hotel_area | route_segment | cost`
 - `label`: Vietnamese display label
+- `range`: `{ start, end, text }` using AD-20 zero-based UTF-16, exclusive-end semantics against the final persisted assistant message
 - `section`: answer section identifier when available
 - `sourceCategory`: `trip_context | chat_context | knowledge | web | general` when applicable
-- `owner`: safe reference to the owning row or snapshot when available
-- `detail`: traveler-safe summary fields for the right panel
-- `provenance`: stored provenance row IDs or safe source snapshot references when applicable
+- `owner`: safe reference to the owning provenance row/snapshot; entity descriptors require one or more provenance-row references
+- `detail`: bounded traveler-safe summary and at most six `{ label, value }` quick facts from the AD-20 safe-provenance allowlist, with each field anchored to the answer text or linked safe projection
+- `provenance`: stored provenance row IDs and safe source snapshot references; entity descriptors require non-empty provenance IDs
+- `action`: optional registered `{ command, label, arguments }` object resolved and authorized by its owning server module; never a client-derived route or label-only behavior
 
 Detail panel payloads are read models. They are not persisted as separate product state.
 
-Current MVP annotation descriptors are best-effort post-answer enrichment from a separate gateway completion and may be empty. The UI must not infer future place, hotel, route, or cost descriptors from free-form answer prose.
+Current MVP annotation descriptors are best-effort post-answer enrichment from a separate gateway completion and may be empty. The UI renders only descriptors persisted after range, provenance, and safe-detail validation; it must not infer additional selectable entities from free-form answer prose at render time.
 
 UI foundation contract:
 
