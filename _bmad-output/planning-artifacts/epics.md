@@ -1,10 +1,8 @@
 ---
 stepsCompleted:
-  - step-01-document-discovery
   - step-01-requirements-extraction
   - step-02-epic-design
   - step-03-story-generation
-  - step-04-final-validation
 inputDocuments:
   - _bmad-output/planning-artifacts/prds/prd-xuyenviet-2026-07-04/prd.md
   - _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md
@@ -236,67 +234,53 @@ NFR-8: Browser automation for Facebook capture shall run as an operator-controll
 
 ### UX Design Requirements
 
-UX-DR1: Public logged-out homepage at `/` must show Vietnamese value proposition, Google sign-in CTA, starter chips, and sign-in-gated ask box with no authenticated sidebar.
+UX-DR1: Public `/` must be a centered Vietnamese entry surface with the warm hero treatment, Google sign-in CTA, sign-in-gated compact ask box, icon-led starters, and no authenticated sidebar or user data.
 
-UX-DR2: Logged-in empty state must show left sidebar, centered Vietnamese greeting, centered composer, starter cards, and no right detail panel.
+UX-DR2: Authenticated AI Ask must implement three canonical shell states: logged-in empty state with a flat sidebar and centered greeting/composer, active edge-to-edge planning workspace, and a contextual detail inspector only after an answer descriptor is selected.
 
-UX-DR3: Active chat must show left sidebar, center answer surface, and right contextual detail panel only when an answer entity is selected or useful.
+UX-DR3: The authenticated desktop shell must use a persistent pale-stone sidebar (276px), a readable central answer column capped at 760px, and a conditional right inspector around 380px; it must not be a floating rounded app card or a persistent graph-paper/map surface.
 
-UX-DR4: Visible traveler UI copy must be Vietnamese-first with diacritics and `html lang="vi"` where applicable.
+UX-DR4: Tablet may reduce the sidebar to a 74px rail and move details below or into a sheet. Mobile must use a top bar, navigation sheet, single-column chat, bottom-safe reachable composer, and detail/source sheets without alternate data loaders or state owners.
 
-UX-DR5: Left sidebar must include `Cuộc trò chuyện mới`, recent conversations, trip projects, account/privacy, and admin entry only when server-authorized.
+UX-DR5: Global UI foundations must use Inter for all display and functional text, semantic white/stone/green/amber/teal/source-color tokens, consistent radii/spacing, global focus treatment, and reduced-motion behavior. Vietnamese copy must preserve diacritic legibility at 200% zoom and common mobile widths.
 
-UX-DR6: Conversation and trip project rows must be user-owned, keyboard-accessible, show active state, and avoid hover-only actions.
+UX-DR6: App-wide font loading, semantic tokens, base page surfaces, and reduced-motion styling must be root-owned; reusable presentational primitives must be data-free and cannot import feature data, server actions, or route state.
 
-UX-DR7: Trip project selection must make active planning context visible in the sidebar and main chat header/composer.
+UX-DR7: Product icons must use one typed local SVG boundary. A migrated shell surface must not mix feature-local SVGs, emoji, text glyphs, or multiple icon systems.
 
-UX-DR8: Public ask box must require authentication before creating conversation, retrieval, usage event, or provider call.
+UX-DR8: Icon-only controls for attachment, send, close, menu, delete, and collapse must have accessible names, visible focus treatment, hover/focus tooltips, and at least 44px touch targets on mobile. Destructive confirmations retain explicit text.
 
-UX-DR9: Chat composer must support Vietnamese text and accepted image attachments, with invalid/empty submission blocked client-side and server-side.
+UX-DR9: The sidebar must contain brand, `Trò chuyện mới`, grouped user-owned conversation history, grouped user-owned trip projects, account/privacy access, and server-authorized admin entry only. Rows must be keyboard/touch usable, visibly active, and expose actions without hover-only behavior.
 
-UX-DR10: Image attachment UI must show thumbnail/file row, size/status text, remove action, and not look like an approved source chip.
+UX-DR10: Selecting a trip project must visibly scope the main chat through a header/composer context indicator; users must be able to distinguish ordinary chat from project-scoped chat.
 
-UX-DR11: Assistant answers must use scannable sections: plan/options, rationale, practical tips, warnings, sources, uncertainty, and next steps.
+UX-DR11: The idle chat composer must contain only prompt input, icon-only attachment trigger when supported, and icon-only send trigger. Attachment instructions, labels, keyboard guidance, validation details, and preview appear only contextually after focus, validation failure, pending work, or file selection.
 
-UX-DR12: Section chips must support answer navigation such as `Ăn gì?`, `Đi đâu?`, `Ở đâu?`, `Về chuyến đi`, `Cần biết`, and `Chi phí và mẹo`.
+UX-DR12: Attached images must render a compact thumbnail/file row with label, size/status, and icon-only accessible remove action, and must not resemble approved source chips.
 
-UX-DR13: Selectable answer entities must include places, hotel areas, route segments, source chips, warnings, costs, and trip facts.
+UX-DR13: The logged-in empty state must provide a centered Vietnamese greeting, composer, four icon-led starter cards, and no blank inspector.
 
-UX-DR14: Right detail panel must show selected title, summary, actions, quick facts, related details, and provenance chips.
+UX-DR14: Active answers must remain scannable through hierarchy and relevant plan/options, rationale, tips, warnings, sources, uncertainty, and next-step sections. Compact horizontally-scrollable section chips must navigate relevant sections without altering stored conversation data.
 
-UX-DR15: Right detail panel actions such as `Dùng trong kế hoạch`, `Xem tuyến đường`, and `Lưu` must call owning server command modules when implemented.
+UX-DR15: The UI may render only persisted best-effort annotation descriptors of types `source`, `warning`, `trip_fact`, and `action`; it must not infer place, hotel, route, or cost entities from Vietnamese answer prose.
 
-UX-DR16: Right detail panel must not be map-first; Google Maps remains deferred.
+UX-DR16: Selecting/focusing a persisted descriptor must open one contextual detail presentation with category icon, title, summary, supported actions, quick facts, related details, and safe provenance chips. The inspector is not a second chat or map-first surface.
 
-UX-DR17: Source detail must show source title/label, type, URL when available, collected/checked date, confidence, and freshness-sensitive warning.
+UX-DR17: Desktop inspector and mobile sheet are controlled views of the same transient selected-detail state. Exactly one is interactive at a time; inactive duplicates must be inert and excluded from assistive technology. Closing restores focus to the selection trigger.
 
-UX-DR18: Source/confidence UI must be label-based, not color-only, and must not expose raw operator-only material.
+UX-DR18: Source/confidence details must use stored provenance and traveler-safe snapshots, show labels rather than color alone, reveal title/type/URL/date/confidence/freshness when available, and never expose raw operator-only material.
 
-UX-DR19: Streaming answer state must show pending/progressive text only after source/context preparation and reconcile to persisted final content.
+UX-DR19: Streaming UI must begin only after context/source preparation, render subtle readable pending text, announce completion through `aria-live`, reconcile to persisted final content, and show recoverable failure without presenting partial content as saved.
 
-UX-DR20: Streaming failure must show recoverable retry/failure state and avoid implying a partial answer is saved as final.
+UX-DR20: The storage notice must be a low-friction inline callout near first AI Ask use; delete confirmations must name the chat/project and explain normal UI/retrieval removal.
 
-UX-DR21: Storage notice must explain chat/trip details may be stored for session/project support without blocking first ask unless policy later requires it.
+UX-DR21: Shell data and selection must be server-loaded and URL-owned for conversation/project selection. Client state is limited to draft, attachment preview, streaming, sheet visibility, and selected descriptor; terminal create/select/delete/project-switch/stream states must reconcile the canonical URL while retaining active trip context.
 
-UX-DR22: Delete confirmations must name the object and explain normal UI/retrieval removal.
+UX-DR22: Public, traveler, and admin surfaces must target WCAG 2.2 AA: keyboard reachability, logical focus order, `aria-current`, polite live announcements, color-independent status labels, focus-restoring sheets, one-level modal stacks, and mobile-safe interactions.
 
-UX-DR23: Mobile layout must use top bar/navigation sheet, single-column chat, reachable composer, and detail/source sheets.
+UX-DR23: Admin knowledge workflows remain visually and navigationally separate from traveler chat, use structured review/edit forms and explicit approval, and may defer dense bulk operations to desktop.
 
-UX-DR24: Desktop active chat must preserve readable center column width around 760px and right detail panel width around 380px.
-
-UX-DR25: Visual design must use route green, guide amber, map paper, road ink, confidence source colors, sidebar surface, and detail-panel surface from `DESIGN.md`.
-
-UX-DR26: Typography should use Inter for functional UI and Vietnamese body text, with Fraunces only for sparse display moments.
-
-UX-DR27: Accessibility floor is WCAG 2.2 AA target, keyboard reachability, visible focus, `aria-current`, `aria-live`, 44px mobile touch targets, and reduced-motion support.
-
-UX-DR28: Admin surfaces must remain separate from traveler chat and use structured forms/review queues for knowledge cards.
-
-UX-DR29: Feedback/usefulness rating must be lightweight, optional, and never block chat.
-
-UX-DR30: Referral link UX must preserve attribution silently without reward, credit, ranking, payout, or points UI.
-
-UX-DR31: Mockup evidence confirms the canonical visible states: logged-out public homepage, logged-in empty chat, and active three-panel chat with contextual detail panel.
+UX-DR24: Referral attribution must remain silent through sign-in; no reward, credit, ranking, payout, or points UI may be introduced.
 
 ### FR Coverage Map
 
@@ -447,6 +431,16 @@ Traveler answers use the required context priority pipeline, retrieve approved k
 When children are part of a trip, answers adapt recommendations for family travel, and the product captures usefulness feedback and evaluation data to measure whether XuyenViet is more useful than generic ChatGPT.
 
 **FRs covered:** FR-38, FR-39, FR-40, FR-41, FR-46
+
+### Epic 7: Traveler Workspace UX Convergence
+
+Travelers can enter and use a calm, trustworthy, responsive AI planning workspace: a focused public entry, a centered logged-in empty state, and an active white/stone conversation workspace with history/projects, compact icon-first composition, readable answers, and a contextual inspector. The shell preserves existing authenticated ownership, URL selection, streaming, provenance, and deletion behavior while making those capabilities understandable across desktop and mobile.
+
+**FRs supported:** FR-1, FR-6A, FR-6B, FR-7, FR-8, FR-9, FR-12, FR-14, FR-15, FR-32, FR-33, FR-42, FR-43, FR-46, FR-48
+
+**UX-DRs covered:** UX-DR1 through UX-DR24
+
+**Implementation notes:** This is a brownfield convergence epic. It depends on the feature behavior in Epics 1–5, but consolidates the cross-cutting traveler-shell redesign because its stories deliberately share `src/app/layout.tsx`, `src/app/globals.css`, `/`, `/ai-ask`, and AI Ask feature surfaces. It does not introduce map integration, free-text entity parsing, alternate persistence/data loaders, or new backend aggregates.
 
 ## Epic 1: Public Sign-In And App Foundation
 
@@ -2031,3 +2025,207 @@ So that I know whether the product is ready to improve or expand.
 **When** the dashboard calculates readiness
 **Then** it can report progress against the PRD thresholds
 **And** it identifies missing signals instead of claiming success without enough data.
+
+## Epic 7: Traveler Workspace UX Convergence
+
+Travelers can enter and use a calm, trustworthy, responsive AI planning workspace: a focused public entry, a centered logged-in empty state, and an active white/stone conversation workspace with history/projects, compact icon-first composition, readable answers, and a contextual inspector. The shell preserves existing authenticated ownership, URL selection, streaming, provenance, and deletion behavior while making those capabilities understandable across desktop and mobile.
+
+### Story 7.1: Establish the Traveler UI Foundation
+
+As a traveler,
+I want XuyenViet to present a consistent, readable visual foundation,
+So that every public and authenticated planning surface feels like one trustworthy product.
+
+**Acceptance Criteria:**
+
+**Given** the application root renders a public or authenticated route
+**When** global UI styling is applied
+**Then** `src/app/layout.tsx` loads Inter and sets Vietnamese document language
+**And** `src/app/globals.css` owns semantic white/stone/green/amber/teal/source CSS tokens, base surfaces, visible focus treatment, and reduced-motion behavior.
+
+**Given** a feature needs reusable presentational UI
+**When** it uses shared primitives
+**Then** those data-free primitives are placed under `src/components/ui`
+**And** they do not import feature modules, database access, server actions, or route state.
+
+**Given** a migrated traveler shell surface needs an icon
+**When** it renders a product icon
+**Then** it imports a named typed SVG icon from one local `src/components/ui` icon boundary
+**And** the migrated surface does not mix feature-local SVG paths, emoji, text glyphs, or another icon library.
+
+**Given** an icon-only control is rendered
+**When** a keyboard or touch user reaches it
+**Then** it has an accessible name, visible focus state, hover/focus tooltip, and a 44px minimum mobile target
+**And** destructive decisions continue to use explicit text confirmation.
+
+**Given** text is rendered at common mobile widths or 200% zoom
+**When** it contains Vietnamese diacritics
+**Then** it remains readable without clipped controls or color-only status meaning
+**And** non-essential reveal, sheet, and toast motion respects reduced-motion preference.
+
+### Story 7.2: Deliver the Focused Public Entry
+
+As a public traveler,
+I want a clear, calm landing experience before I sign in,
+So that I understand XuyenViet and can begin my planning journey without seeing private workspace controls.
+
+**Acceptance Criteria:**
+
+**Given** a visitor is not authenticated
+**When** they open `/`
+**Then** they see a centered Vietnamese-first public hero with restrained warm paper treatment, XuyenViet brand mark, Google sign-in CTA, icon-led starter prompts, a compact sign-in-gated ask box, and a non-interactive compact detail-inspector preview
+**And** the route does not render authenticated sidebar data, conversation history, trip projects, account controls, or admin navigation.
+
+**Given** a public visitor interacts with the ask box
+**When** they submit an ask or choose a starter prompt
+**Then** the product directs them to the existing sign-in flow before any conversation, retrieval, usage event, persistence, or provider call is created
+**And** valid referral attribution continues through the flow silently without rewards, credits, rankings, payouts, or points UI.
+
+**Given** a visitor uses keyboard navigation or a small screen
+**When** they move through the public entry
+**Then** CTA, composer controls, and starter prompts are reachable with visible focus and readable Vietnamese copy
+**And** the layout remains centered and usable without an authenticated sidebar.
+
+### Story 7.3: Deliver the Authenticated Desktop Shell
+
+As an authenticated traveler,
+I want a familiar desktop workspace for starting, revisiting, and scoping my planning chats,
+So that I can understand my current conversation and trip context without navigating a cluttered interface.
+
+**Acceptance Criteria:**
+
+**Given** an authenticated user opens `/ai-ask` without an active answer
+**When** the server-loaded shell renders
+**Then** it shows a flat pale-stone sidebar with brand, `Trò chuyện mới`, grouped user-owned conversations, grouped user-owned trip projects, account/privacy access, and server-authorized admin entry only
+**And** the main area shows the centered Vietnamese greeting, centered composer, and four icon-led starter cards without a blank detail inspector.
+
+**Given** an authenticated user has an active conversation
+**When** the workspace renders on desktop
+**Then** it is an edge-to-edge viewport-height shell with a 276px sidebar, central answer reading width capped near 760px, and no floating rounded application card
+**And** conversation/project rows have visible active state, keyboard/touch-accessible actions, and no hover-only controls.
+
+**Given** a trip project scopes the active chat
+**When** the shell renders
+**Then** the project is visibly identified in the sidebar and chat header or composer context indicator
+**And** ordinary chat remains distinguishable from project-scoped chat.
+
+**Given** a traveler first uses AI Ask or chooses to delete an owned chat or trip project
+**When** the applicable UI is shown
+**Then** a low-friction, non-blocking storage notice states: `Để hỗ trợ cuộc trò chuyện và kế hoạch chuyến đi, XuyenViet có thể lưu nội dung bạn cung cấp và gửi yêu cầu đến dịch vụ AI đã cấu hình để tạo câu trả lời. Bạn có thể xóa cuộc trò chuyện hoặc dự án chuyến đi bất cứ lúc nào.` and includes the link `Tìm hiểu thêm về quyền riêng tư`
+**And** destructive confirmation explicitly names the chat/project and explains its removal from normal UI and retrieval use; trip-project confirmation states: `Dự án này, các cuộc trò chuyện liên kết và thông tin ngữ cảnh đã lưu sẽ bị xóa khỏi giao diện thông thường và không còn được dùng để gợi ý trong tương lai. Hành động này không thể hoàn tác.`
+
+### Story 7.4: Keep Workspace Selection Canonical Across Devices
+
+As an authenticated traveler,
+I want my selected conversation and trip context to remain correct as I navigate or change devices,
+So that the workspace always reflects the chat and project I intend to continue.
+
+**Acceptance Criteria:**
+
+**Given** the user selects a conversation, starts a new chat, selects/switches a trip project, or deletes a selected resource
+**When** the terminal mutation completes
+**Then** the URL canonically represents the active owned `conversationId` and/or `tripProjectId`
+**And** stale, deleted, or unauthorized selection clears through the server-safe shell without exposing private existence details.
+
+**Given** `/ai-ask` is rendered across desktop, tablet, and mobile
+**When** the server-loaded shell and client workspace initialize
+**Then** all breakpoints use the same user-scoped Chat/Trips shell read model and URL-owned selection
+**And** client-only state is limited to draft, attachment preview, streaming, sheet visibility, and selected detail descriptor.
+
+**Given** the viewport is tablet or mobile
+**When** the authenticated shell adapts
+**Then** tablet may use a 74px sidebar rail and mobile uses a focus-managed navigation sheet rather than a second data loader
+**And** selecting a conversation/project from the mobile sheet closes it and moves focus to the chat heading or composer.
+
+**Given** an authenticated traveler uses the workspace on mobile
+**When** the shell renders an empty or active conversation
+**Then** a top bar provides menu, active workspace title, and account access; chat is single-column; and the composer remains bottom-safe and reachable without covering the latest answer
+**And** selected detail and source content open in the shared focus-managed sheet presentation.
+
+**Given** an active conversation or trip project is rendered in sidebar, rail, or mobile navigation
+**When** a keyboard or screen-reader user navigates the workspace
+**Then** the active row exposes `aria-current` and visible focus in addition to its visual active state
+**And** navigation, detail, source, and confirmation surfaces never create a dialog or sheet stack deeper than one level.
+
+### Story 7.5: Refine the AI Ask Composer and Streaming Feedback
+
+As an authenticated traveler,
+I want a compact, accessible way to ask and refine travel questions,
+So that the composer stays focused while still giving clear attachment, validation, and response feedback.
+
+**Acceptance Criteria:**
+
+**Given** the AI Ask composer is idle
+**When** it renders in the empty or active workspace
+**Then** it contains the prompt input, icon-only attachment trigger when image input is supported, and icon-only send trigger
+**And** it does not reserve space for persistent attachment labels, file constraints, keyboard cheat sheets, verbose helper copy, or a large text send button.
+
+**Given** an authenticated user selects an image or receives a validation failure
+**When** the contextual state is shown
+**Then** the composer reveals a compact thumbnail/file row with label, size/status, and accessible icon-only remove action, or a specific recovery message beside the error
+**And** invalid image submission preserves the text draft and creates no provider call.
+
+**Given** the user sends valid text or image-supported content
+**When** the request is pending or streaming
+**Then** duplicate submission is guarded, streaming uses subtle readable pending treatment, and progress copy does not imply completion
+**And** completion is announced through a polite live region and reconciles to persisted message content and canonical URL state.
+
+**Given** streaming finalization fails or persists a failed terminal answer state
+**When** the user remains in the workspace
+**Then** the UI presents recoverable retry guidance without claiming partial text is a completed saved answer
+**And** the URL retains the created/selected conversation and active trip project context where one exists.
+
+### Story 7.6: Present Scannable Answer Content
+
+As a traveler reviewing an AI answer,
+I want to navigate practical sections without scanning a dense wall of chat text,
+So that I can quickly understand options, warnings, and next steps.
+
+**Acceptance Criteria:**
+
+**Given** an active assistant answer has relevant structured sections
+**When** it is rendered
+**Then** plan/options, rationale, tips, warnings, sources, uncertainty, and next steps are scannable through hierarchy and restrained surfaces
+**And** a compact horizontally-scrollable row of relevant section chips navigates within the answer without altering persisted conversation data.
+
+**Given** answer sources, warning states, or feedback controls are rendered
+**When** a traveler uses color, keyboard, or screen reader navigation
+**Then** labels accompany color, focus order follows reading order, feedback remains lightweight and optional, and no interaction relies on hover alone.
+
+### Story 7.7: Inspect Persisted Answer Details Responsively
+
+As a traveler reviewing an AI answer,
+I want to inspect supported details without losing my conversation,
+So that I can make better trip decisions while understanding source confidence and uncertainty.
+
+**Acceptance Criteria:**
+
+**Given** a persisted answer annotation descriptor of type `source`, `warning`, `trip_fact`, or `action` is present
+**When** a traveler clicks, taps, or keyboard-focuses it
+**Then** the selected descriptor opens a contextual inspector with semantic icon, Vietnamese title/summary, safe quick facts, related details, provenance chips, and only actions backed by owning server command modules
+**And** the UI never parses Vietnamese answer prose to invent place, hotel, route, cost, source, or detail claims.
+
+**Given** a selected descriptor is displayed on desktop
+**When** the active workspace uses the three-panel layout
+**Then** the inspector is a conditional right column around 380px wide beside the capped central answer column
+**And** the inspector remains text/card-based and does not introduce Google Maps or a map-first dependency.
+
+**Given** no descriptor is selected or an active answer has no descriptors
+**When** the workspace renders
+**Then** no blank right inspector is forced
+**And** unavailable descriptor detail shows a compact recovery state without changing original answer text.
+
+**Given** a descriptor is selected on desktop, tablet, or mobile
+**When** responsive presentation changes
+**Then** desktop inspector, tablet placement, and mobile sheet use the same transient selected-detail state and preserve the selection across breakpoint changes
+**And** exactly one detail presentation is interactive while inactive duplicates are inert and excluded from assistive technology.
+
+**Given** the traveler closes the inspector or detail sheet with close control or `Esc`
+**When** it closes
+**Then** focus returns to the descriptor/control that opened it
+**And** source detail exposes only stored traveler-safe provenance fields such as label/title, type, URL/date when available, confidence, and freshness warning, never raw operator-only material.
+
+**Given** answer sources, warning states, or feedback controls are rendered
+**When** a traveler uses color, keyboard, or screen reader navigation
+**Then** source detail exposes only stored traveler-safe provenance fields such as label/title, type, URL/date when available, confidence, and freshness warning
+**And** it never exposes raw operator-only material.

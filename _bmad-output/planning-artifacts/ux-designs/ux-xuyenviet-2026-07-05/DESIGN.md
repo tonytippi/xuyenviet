@@ -1,10 +1,10 @@
 ---
 name: XuyenViet
 description: Responsive web UX for an AI-first Vietnam road-trip planning companion. shadcn/ui on Next.js + Tailwind assumed; this DESIGN.md owns the brand-layer visual contract.
-status: draft
+status: final
 project: xuyenviet
 created: 2026-07-05
-updated: 2026-07-10
+updated: 2026-07-16
 sources:
   - ../../prds/prd-xuyenviet-2026-07-04/prd.md
   - ../../architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md
@@ -26,38 +26,40 @@ colors:
   source-official: '#047857'
   freshness: '#B45309'
   warning: '#B91C1C'
+  page: '#FFFFFF'
+  hero-paper: '#FFFDF8'
   map-paper: '#F8F5EE'
   road-ink: '#1F2937'
-  shell-sidebar: '#F6F4EF'
+  shell-sidebar: '#F7F7F3'
   shell-sidebar-active: '#E8F3EC'
-  shell-border: '#E5E0D6'
+  shell-border: '#E5E7EB'
   detail-panel: '#FBFAF7'
   detail-panel-card: '#FFFFFF'
 typography:
   display:
-    fontFamily: 'Fraunces'
+    fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif'
     fontSize: 40px
-    fontWeight: '600'
-    lineHeight: '1.1'
-    letterSpacing: -0.02em
+    fontWeight: '800'
+    lineHeight: '0.98'
+    letterSpacing: -0.075em
   display-sm:
-    fontFamily: 'Fraunces'
+    fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif'
     fontSize: 28px
-    fontWeight: '600'
-    lineHeight: '1.15'
-    letterSpacing: -0.01em
+    fontWeight: '800'
+    lineHeight: '1.05'
+    letterSpacing: -0.05em
   body:
-    fontFamily: 'Inter'
+    fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif'
     fontSize: 16px
     fontWeight: '400'
     lineHeight: '1.65'
   label:
-    fontFamily: 'Inter'
+    fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif'
     fontSize: 13px
     fontWeight: '600'
     lineHeight: '1.3'
   caption:
-    fontFamily: 'Inter'
+    fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif'
     fontSize: 13px
     fontWeight: '400'
     lineHeight: '1.45'
@@ -80,8 +82,8 @@ spacing:
   page-tablet: 24px
   page-desktop: 40px
   answer-gap: 20px
-  sidebar-width: 288px
-  sidebar-rail: 56px
+  sidebar-width: 276px
+  sidebar-rail: 74px
   chat-width: 760px
   detail-width: 380px
 components:
@@ -89,6 +91,10 @@ components:
     background: '{colors.primary}'
     foreground: '{colors.primary-foreground}'
     radius: '{rounded.md}'
+  brand-mark:
+    background: 'linear-gradient(135deg, {colors.primary}, {colors.route})'
+    foreground: '{colors.primary-foreground}'
+    radius: '12px'
   route-card:
     background: '{colors.map-paper}'
     foreground: '{colors.road-ink}'
@@ -121,7 +127,7 @@ components:
   app-shell-sidebar:
     background: '{colors.shell-sidebar}'
     foreground: '{colors.road-ink}'
-    border: '1px solid {colors.shell-border}'
+    border-right: '1px solid {colors.shell-border}'
   app-shell-active-row:
     background: '{colors.shell-sidebar-active}'
     foreground: '{colors.primary}'
@@ -130,7 +136,25 @@ components:
     background: '#FFFFFF'
     foreground: '{colors.road-ink}'
     radius: '{rounded.lg}'
-    border: '1px solid shadcn-border'
+    border: '1px solid {colors.shell-border}'
+  composer-icon-action:
+    background: 'transparent'
+    foreground: '{colors.road-ink}'
+    radius: '{rounded.md}'
+  composer-send-action:
+    background: '{colors.primary}'
+    foreground: '{colors.primary-foreground}'
+    radius: '{rounded.md}'
+  starter-card:
+    background: '#FFFFFF'
+    foreground: '{colors.road-ink}'
+    radius: '{rounded.lg}'
+    border: '1px solid {colors.shell-border}'
+  section-chip:
+    background: '#FFFFFF'
+    foreground: '{colors.road-ink}'
+    radius: '{rounded.full}'
+    border: '1px solid {colors.shell-border}'
   detail-panel:
     background: '{colors.detail-panel}'
     foreground: '{colors.road-ink}'
@@ -146,9 +170,9 @@ components:
 
 ## Brand & Style
 
-XuyenViet should feel like a practical road companion for Vietnam: calm enough for planning a family trip, precise enough to earn trust, and familiar enough that users instantly understand the chat workspace. The final visual posture is **Vietnamese ChatGPT/Gemini-style planning plus contextual travel detail**: a simple public entry, a centered logged-in empty chat, and an active three-panel workspace with left history/projects, middle answer, and right detail panel for selected places, hotels, route impacts, and sources.
+XuyenViet should feel like a practical road companion for Vietnam: calm enough for planning a family trip, precise enough to earn trust, and immediately legible as a chat workspace. The final visual posture is a quiet, Vietnamese-first planning tool: a simple public entry, a centered logged-in empty chat, and an active three-panel workspace with history/projects on the left, the answer in the middle, and selected-item detail on the right.
 
-[ASSUMPTION] The web app inherits shadcn/ui defaults on Next.js + Tailwind. This DESIGN.md specifies the brand-layer delta: color meaning, display typography, answer/source component treatments, and road-trip surface rules. shadcn defaults remain the base for dialogs, sheets, tabs, buttons, forms, dropdowns, toast, skeleton, card, badge, separator, and focus rings unless overridden here.
+[ASSUMPTION] The web app inherits shadcn/ui defaults on Next.js + Tailwind. This DESIGN.md specifies the brand-layer delta: the mockup-aligned shell, color meaning, icon treatment, answer/source hierarchy, and road-trip surface rules. shadcn defaults remain the base for dialogs, sheets, tabs, buttons, forms, dropdowns, toast, skeleton, card, badge, separator, and focus rings unless overridden here. The three files in [`mockups/`](./mockups/) illustrate the intended direction; these spines win if a mockup conflicts with a behavior or token below.
 
 The product differentiator is not visual spectacle. It is trustworthy AI guidance with visible provenance and a familiar conversation model. The UI should stay quiet until the user asks; after an answer exists, it can reveal richer contextual detail without making every answer feel like a compliance report.
 
@@ -157,24 +181,24 @@ The product differentiator is not visual spectacle. It is trustworthy AI guidanc
 - **Route Green (`{colors.primary}`)** is the primary action and brand color. It represents forward motion, planned route, and safe go-ahead. Use for primary buttons, active navigation, selected trip project, and verified route actions.
 - **Guide Amber (`{colors.accent}`)** marks AI guidance that needs attention: suggested next question, active itinerary option, and recommended follow-up. Do not use amber for warnings.
 - **Route Teal (`{colors.route}`)** is for route segments, travel legs, and map-adjacent metadata when no actual map is present.
-- **Map Paper (`{colors.map-paper}`)** gives planning cards a warmer surface than pure white. Use for trip plans, day-by-day summaries, and knowledge cards.
+- **Page (`{colors.page}`)** is the default application canvas. The traveler workspace is predominantly white, separated by borders and quiet tonal surfaces rather than an always-visible paper grid.
+- **Hero Paper (`{colors.hero-paper}`)** is the warm public-entry surface behind the restrained green and purple radial washes. It is not used as a global app background.
+- **Map Paper (`{colors.map-paper}`)** gives travel-plan cards and operator knowledge cards a warmer surface than pure white. Do not use it as the entire authenticated workspace.
 - **Road Ink (`{colors.road-ink}`)** is the main readable text color when custom cards sit on map paper.
 - **Source colors** map to confidence labels: curated, community, unverified, partner, official. These labels appear as chips or compact metadata, never as decorative color blocks.
 - **Freshness Amber (`{colors.freshness}`)** marks facts that may change: prices, opening hours, roads, weather, availability, promotions, and schedules.
 - **Warning Red (`{colors.warning}`)** is reserved for safety, access denial, destructive delete confirmation, and unsupported/failure states.
-- **Shell Sidebar (`{colors.shell-sidebar}`)** is the left app shell surface for conversation history and trip projects. It should feel quiet and tool-like, not like a marketing panel.
+- **Shell Sidebar (`{colors.shell-sidebar}`)** is the flat, pale-stone left app shell surface for conversation history and trip projects. It should feel quiet and tool-like, not like a floating card or marketing panel.
 - **Shell Active Row (`{colors.shell-sidebar-active}`)** marks the active conversation or trip project without overusing saturated green.
 - **Shell Border (`{colors.shell-border}`)** separates navigation from chat and supports nested grouping without heavy shadows.
 - **Detail Panel (`{colors.detail-panel}`)** is the right contextual surface after an answer has selectable entities. It should feel like a focused inspector, not a second chat or map.
 - **Detail Card (`{colors.detail-panel-card}`)** holds quick facts, related details, actions, and source chips for the selected entity.
 
-Avoid: saturated travel gradients, generic sky-blue tourism palettes, decorative map pins everywhere, and using green to imply a fact is guaranteed.
+Avoid: saturated travel gradients, graph-paper backgrounds across the application, generic sky-blue tourism palettes, decorative map pins everywhere, and using green to imply a fact is guaranteed.
 
 ## Typography
 
-`Inter` owns the functional UI and long Vietnamese text. It is chosen for readable diacritics, dense chat answers, and form-heavy admin flows.
-
-`Fraunces` owns sparse display moments only: public entry headline, empty-state headline, and major trip-project title. It gives XuyenViet a warmer editorial identity without compromising the app-tool feel.
+`Inter` owns both display and functional UI. Use its heavy, tight display setting for the public hero and the logged-in empty greeting; use its normal reading setting for long Vietnamese answers and forms. This keeps all three canonical states visually coherent and preserves Vietnamese diacritic readability at dense UI sizes.
 
 Vietnamese copy must be tested with diacritics at all text sizes. Avoid all-caps Vietnamese labels except very short metadata, because all-caps reduces diacritic readability.
 
@@ -182,9 +206,9 @@ Vietnamese copy must be tested with diacritics at all text sizes. Avoid all-caps
 
 Use a responsive AI planning shell.
 
-- Logged-out desktop: centered public hero with sign-in CTA and sign-in-gated ask box; no app shell sidebar.
+- Logged-out desktop: centered public hero with sign-in CTA and sign-in-gated ask box; no app shell sidebar. It uses the controlled warm hero wash shown in [`home-logged-out.html`](./mockups/home-logged-out.html).
 - Logged-in empty desktop: left sidebar visible, center column contains large greeting and centered composer; no right detail panel before the first answer.
-- Active desktop: persistent left sidebar using `{spacing.sidebar-width}`, central answer column capped at `{spacing.chat-width}`, right contextual detail panel using `{spacing.detail-width}`.
+- Active desktop: persistent left sidebar using `{spacing.sidebar-width}`, central answer column capped at `{spacing.chat-width}`, right contextual detail panel using `{spacing.detail-width}`. The shell is edge-to-edge and viewport-height, not a rounded page card. See [`three-panel-chat-map.html`](./mockups/three-panel-chat-map.html).
 - Tablet: sidebar may collapse to `{spacing.sidebar-rail}`; right detail panel can stack below or open as sheet depending on available width.
 - Mobile: no persistent sidebar; use top/menu sheet for history/projects, single-column chat, bottom-safe composer, and selected detail as a drawer/sheet.
 
@@ -192,14 +216,14 @@ Chat answers use `{spacing.answer-gap}` between major sections. A single answer 
 
 Maximum reading width for chat answer content: 760px. Admin review tables may use wider layouts, but editing and approval should happen in focused panels or detail views rather than spreadsheet-like walls.
 
-The left sidebar should borrow the learnability of ChatGPT/Gemini without becoming a clone: top action, grouped lists, compact row menus, active row state, and a quiet hierarchy between conversations and trip projects. The right detail panel appears only when it has a selected entity to explain; empty chat should not show a blank inspector.
+The left sidebar should borrow the learnability of ChatGPT/Gemini without becoming a clone: brand mark, compact top action, grouped lists, compact rows, active state, and a quiet hierarchy between conversations and trip projects. The right detail panel appears only when it has a selected entity to explain; empty chat should not show a blank inspector. The centered empty state is illustrated by [`home-logged-in-empty.html`](./mockups/home-logged-in-empty.html).
 
 ## Elevation & Depth
 
 Depth is functional, not decorative.
 
-- Base surfaces inherit shadcn.
-- The app shell sidebar is flat and persistent; use border and active row color before shadows.
+- Base workspace surfaces are white and inherit shadcn.
+- The app shell sidebar is flat and persistent; use its boundary and active row color before shadows.
 - Trip plan cards and knowledge review cards use tonal separation on `{colors.map-paper}` with a subtle border.
 - Sheets and dialogs inherit shadcn elevation.
 - Avoid stacked shadows inside chat answers; use headings, spacing, and borders instead.
@@ -209,26 +233,29 @@ Depth is functional, not decorative.
 Shape language is soft but not playful.
 
 - `{rounded.sm}` for inputs and small controls.
-- `{rounded.md}` for buttons, chips, compact source rows, and warning callouts.
-- `{rounded.lg}` for trip plan cards, answer section cards, knowledge review cards, and admin shells.
-- `{rounded.xl}` only for hero/empty-state containers.
+- `{rounded.md}` for buttons, sidebar rows, chips, compact source rows, and warning callouts.
+- `{rounded.lg}` for composer surfaces, starter cards, plan cards, detail cards, and answer sections when a card is genuinely needed.
+- `{rounded.xl}` for the public ask box and sparse large display surfaces only; do not wrap the full application shell in this radius.
 - `{rounded.full}` only for compact metadata chips.
 
 ## Components
 
 - **Primary button** uses `{components.button-primary}`. Label with action verbs: `Đăng nhập bằng Google`, `Hỏi AI`, `Lưu bản nháp`, `Phê duyệt`.
-- **App shell sidebar** uses `{components.app-shell-sidebar}`. It contains the `Cuộc trò chuyện mới` action, grouped conversation history, trip projects, account/privacy entry, and admin entry only for authorized users.
+- **Brand mark** uses `{components.brand-mark}`: a compact `XV` monogram in a green-to-route-teal rounded square. It appears at the public header and sidebar brand position; it is not a replacement for semantic icons.
+- **Icon system** uses one consistent outline or lightly colored icon family for route, stay, stop, source, project, chat, menu, send, attachment, close, and account actions. Replace an unambiguous compact control label with its icon. Icons retain accessible names and expose a tooltip on hover/focus; do not mix emoji, arbitrary bullets, text glyphs, and multiple icon styles in the same shell.
+- **App shell sidebar** uses `{components.app-shell-sidebar}`. It contains the brand row, `Trò chuyện mới` action, grouped conversation history, grouped trip projects, and a compact account/privacy footer with an admin entry only for authorized users. It has no outer card radius or elevation.
 - **Sidebar active row** uses `{components.app-shell-active-row}`. Exactly one primary workspace row is active: the selected conversation, selected trip project, or new-chat empty state. Row actions are compact and must not appear only on hover.
 - **Trip project row** behaves like a project/workspace item, with title, optional route/date hint, and active context indicator when the main chat is scoped to that trip.
 - **Conversation row** uses one-line title plus optional short preview/date. It should feel like chat history, not a document library.
-- **Chat composer** uses `{components.chat-composer}` and remains visually anchored to the main chat column. It can support text plus accepted image attachments without widening the reading column.
+- **Chat composer** uses `{components.chat-composer}` and remains visually anchored to the main chat column. It is a low-chrome surface: prompt text, an icon-only `{components.composer-icon-action}` attachment trigger when supported, and an icon-only `{components.composer-send-action}` send trigger. A visible label, keyboard cheat sheet, file-type/size explanation, or secondary bordered attachment region must not occupy the idle composer. Show that information contextually after focus, an attachment, validation failure, or an explicit help request. The composer expands only as needed for multiline text or an attachment preview without widening the reading column.
 - **Logged-out ask box** visually resembles the chat composer but is sign-in-gated. It may accept visible draft text later, but submitting requires Google sign-in before AI calls or persistence.
-- **Logged-in empty start** uses a centered greeting, centered composer, and starter cards. It must not render the right detail panel before an answer exists.
-- **Right detail panel** uses `{components.detail-panel}` and appears in active conversations when the user selects, hovers/focuses, or the assistant highlights a place, hotel, route segment, source, cost, warning, or trip fact. It is an inspector, not a map-first surface.
+- **Logged-in empty start** uses a centered greeting, centered composer, and four icon-led `{components.starter-card}` controls. It must not render the right detail panel before an answer exists.
+- **Answer section chip** uses `{components.section-chip}` and sits in a compact, horizontally scrollable row at the top of an active answer. It navigates relevant answer sections such as `Ăn gì?`, `Đi đâu?`, `Ở đâu?`, and `Cần biết`; it is not a second navigation system or a filter that changes stored conversation data.
+- **Right detail panel** uses `{components.detail-panel}` and appears in active conversations when the user selects, hovers/focuses, or the assistant highlights a place, hotel, route segment, source, cost, warning, or trip fact. Its header, icon, title, short summary, action row, quick facts, related notes, and provenance chips make it an inspector, not a map-first surface or second chat.
 - **Detail card** uses `{components.detail-card}` for selected item title, summary, quick facts, related route/hotel/driving notes, action chips, and source/provenance chips.
 - **Route card** uses `{components.route-card}` for day plans, route segments, hotel-area suggestions, and practical stop lists. Route cards should support a short title, distance/time if known, confidence/source summary, and a clear next step.
 - **Answer source chips** use confidence label colors. They summarize source category in the answer body: `Curated`, `Community`, `Official`, `Unverified`, `Partner`. Detailed URLs appear in expandable source detail rows.
-- **Image attachment row** uses shadcn input/card primitives with compact thumbnail, filename or generic image label, size/status text, and a clear remove action. It must not look like an approved source chip.
+- **Image attachment row** appears only after a file is selected. It uses a compact thumbnail, filename or generic image label, size/status text, and an icon-only remove action with an accessible name. It must not look like an approved source chip.
 - **Streaming answer state** uses subtle pending treatment and normal answer typography; avoid flashy typewriter effects that reduce readability or conflict with reduced-motion settings.
 - **Freshness warning** uses `{components.freshness-warning}`. It must be compact and specific: `Giá/giờ mở cửa có thể thay đổi. Kiểm tra lại trước khi đi.`
 - **Storage notice** is a low-friction inline callout near first AI Ask use. It should not look like an error. Use muted shadcn surface with one link to privacy/details.
@@ -250,3 +277,6 @@ Shape language is soft but not playful.
 | Use familiar ChatGPT/Gemini navigation patterns selectively | Copy another product's visual identity or remove XuyenViet's travel trust cues |
 | Keep logged-in empty state centered and calm | Show an empty right detail panel before the user has asked anything |
 | Use the right panel to explain selected answer entities | Make the right panel a map-first surface or a second chat thread |
+| Use a white/stone edge-to-edge app shell with restrained borders | Place the full workspace inside a floating rounded card or persistent graph-paper canvas |
+| Use one labeled semantic icon family | Mix emoji, text arrows, bullets, and unrelated icon styles as the product icon system |
+| Prefer icon-only controls for unambiguous, frequent chat actions | Fill the idle composer with a native file picker, persistent helper copy, keyboard instructions, or large text action buttons |

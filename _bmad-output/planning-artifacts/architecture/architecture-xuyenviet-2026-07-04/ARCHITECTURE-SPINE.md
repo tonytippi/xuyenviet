@@ -2,9 +2,10 @@
 title: XuyenViet AI Travel Information MVP Architecture Spine
 status: final
 created: 2026-07-04
-updated: 2026-07-10
+updated: 2026-07-16
 altitude: project MVP
 source_prd: ../../prds/prd-xuyenviet-2026-07-04/prd.md
+source_ux: ../../ux-designs/ux-xuyenviet-2026-07-05/EXPERIENCE.md
 ---
 
 # XuyenViet AI Travel Information MVP Architecture Spine
@@ -253,7 +254,7 @@ Prevents: heavy support workflows and makes data control match familiar chat-pro
 
 Rule: A user can delete a chat session they own; deletion removes or disables that conversation's messages, extracted chat context, derived embeddings, and normal retrieval access.
 
-Rule: A user can delete a trip project they own; deletion removes or disables project context, linked project conversations where product behavior requires it, derived embeddings, and normal retrieval access.
+Rule: A user can delete a trip project they own; deletion removes or disables project context, all linked project conversations and their messages/chat context, derived embeddings, and normal retrieval access.
 
 Rule: Deletion may retain minimal non-content audit metadata for operational integrity, but deleted chat/project content must not appear in normal user UI or retrieval context.
 
@@ -275,7 +276,9 @@ Prevents: relying on unmanaged local infrastructure for public MVP traffic.
 
 Rule: Provider-specific features must stay behind config/adapters until deployment and database provider are confirmed.
 
-Seed: Vercel-compatible Next.js deployment plus hosted Postgres such as Neon/Supabase/Railway with pgvector. [ASSUMPTION]
+Rule: Production deployment includes a separately supervised Node worker runtime for knowledge extraction and knowledge-search indexing. Worker processes use PostgreSQL job/index state, expose operational logs and health/restart supervision, and are not run inside request-serving serverless executions.
+
+Seed: Vercel-compatible Next.js request deployment plus hosted Postgres and a compatible worker process host. Final providers remain deferred. [ASSUMPTION]
 
 ### AD-16: Streaming Starts After Context Assembly
 
@@ -291,19 +294,19 @@ Rule: If streaming fails before finalization, the app shows a recoverable failur
 
 Seed latency target: first visible answer within 5 seconds without web search and within 10 seconds with web search. [ASSUMPTION]
 
-### AD-17: Epic 5 Retrieval Starts With Metadata-Filtered Approved Cards
+### AD-17: Traveler Retrieval Uses Indexed Lexical Candidates And Fail-Closed Eligibility
 
-Binds: Story 5.1 retrieval behavior, approved-card eligibility, source-bundle inputs, and later hybrid retrieval upgrades.
+Binds: approved-card candidate search, current eligibility checks, source-bundle inputs, indexing work, and later hybrid retrieval upgrades.
 
-Prevents: Story 5.1 depending on full-text ranking, embedding generation, vector indexes, or provider-specific ranking before the product has proven safe retrieval eligibility and auditable provenance.
+Prevents: stale or unsafe knowledge entering traveler source bundles, or an index/ranking implementation bypassing current owner-row eligibility and provenance.
 
-Rule: The Epic 5 MVP retrieval path uses deterministic PostgreSQL metadata filters over current `knowledge_cards`, linked `sources`, and reviewed card summaries. It does not use Postgres full-text search or pgvector ranking for traveler AI Ask retrieval in Story 5.1.
+Rule: The MVP retrieval path searches active `knowledge_card_search_documents` lexically, then loads and validates current approved cards and traveler-safe linked sources before a candidate can enter a source bundle. The indexing worker owns active, stale, and disabled search-document transitions.
 
 Rule: Traveler retrieval is fail-closed. A card is retrievable only when the current card status is `approved`, linked source metadata is traveler-safe, the card is not archived/rejected/draft, and all required retrieval metadata is present. Unknown, missing, stale, disabled, or operator-only state excludes the item.
 
-Rule: Retrieval filtering must support at least card type, route segment/location, tags, freshness-sensitive flag, confidence/verification labels, and source type. Simple reviewed-title/summary containment checks may narrow candidates only after metadata eligibility filters; they must not become the primary ranking or recall mechanism.
+Rule: Retrieval eligibility must support current card status, source-safe linkage, card type, route segment/location, tags, freshness-sensitive flag, displayed confidence, verification status, and source type. Lexical score may rank eligible candidates but must not override owner-row eligibility.
 
-Rule: Hybrid retrieval is introduced later behind the Retrieval module only after metadata-filtered retrieval, source-bundle snapshots, provenance persistence, and fail-closed tests are stable. Full-text/vector scores may add ranking signals later, but they must not bypass current owner-row eligibility filters.
+Rule: Hybrid retrieval is introduced later behind the Retrieval module only after indexed lexical retrieval, source-bundle snapshots, provenance persistence, and fail-closed tests are stable. Full-text/vector scores may add ranking signals later, but they must not bypass current owner-row eligibility filters.
 
 Rule: Indexing/backfill work for later search or embeddings must define activation, stale/disabled transitions, and rebuild behavior before those rows influence traveler answers.
 
@@ -333,15 +336,15 @@ Rule: The detail panel may expose actions such as `Dùng trong kế hoạch`, `X
 
 Rule: The detail panel is not map-first. Google Maps or map-like spatial integration remains deferred and must not be introduced as an implicit dependency of this redesign.
 
-### AD-20: Selectable Answer Entities Use Render Descriptors, Not Free-Text Parsing
+### AD-20: Selectable Answer Annotations Use Persisted Descriptors, Not Free-Text Parsing
 
-Binds: inline answer places, hotels, route segments, source chips, warnings, costs, and trip facts to a stable render contract.
+Binds: current inline source, warning, trip-fact, and action annotations to a stable persisted render contract.
 
 Prevents: UI teams independently parsing Vietnamese answer prose to create links, detail panels, or provenance claims.
 
-Rule: Selectable answer entities are render descriptors derived at answer-render time from assistant message structure plus stored provenance/retrieval/source-bundle snapshots.
+Rule: Selectable answer annotations are best-effort post-answer enrichment. Their descriptors are validated against persisted assistant-message text and stored provenance/retrieval/source-bundle snapshots before storage and rendering.
 
-Rule: A descriptor may include entity type, display label, answer text range or section, source category, owning row references when available, and safe snapshot metadata. It must not include raw source material, operator-only fields, provider payloads, or inferred source claims not present in provenance.
+Rule: A descriptor may include current type `source | warning | trip_fact | action`, display label, answer text range or section, source category, owning provenance-row reference when available, and safe snapshot metadata. It must not include raw source material, operator-only fields, provider payloads, or inferred source claims not present in provenance.
 
 Rule: Source/confidence UI remains governed by AD-11: render from stored provenance, not by re-parsing answer text.
 
@@ -357,6 +360,46 @@ Rule: Admin/operator navigation entries are included only after server-side role
 
 Rule: The sidebar may collapse to an icon rail or mobile sheet, but data ownership and authorization rules do not change across breakpoints.
 
+### AD-22: Global UI Foundation Is Root-Owned; Reusable Primitives Are Data-Free
+
+Binds: app-wide font loading, CSS design tokens, base surface behavior, reduced-motion behavior, and reusable presentational primitives.
+
+Prevents: route and feature components independently redefining theme colors, typography, focus treatment, or shell variants during the traveler-shell redesign.
+
+Rule: `src/app/layout.tsx` and `src/app/globals.css` own application-wide fonts, semantic CSS tokens, base surfaces, and global accessibility-related visual behavior. Feature modules must consume those definitions rather than recreate global theme rules.
+
+Rule: Data-free reusable UI primitives live under `src/components/ui`. Feature components retain domain behavior, server-action wiring, and feature-specific data contracts; primitives do not import feature modules or call server entrypoints.
+
+Seed: The existing Tailwind CSS 4 setup remains the styling runtime. This architecture does not require adopting a component-library package.
+
+### AD-23: Product Icons Use One Local Typed SVG Boundary
+
+Binds: brand-adjacent product icons and icon-only controls across the public entry, authenticated shell, composer, sidebar, and detail inspector.
+
+Prevents: multiple icon libraries, copied inline SVGs, emoji, text glyphs, and inconsistent accessibility behavior accumulating independently in feature components.
+
+Rule: Product icons are exported from one local typed SVG module under `src/components/ui`. It exports named React icon components with a common SVG-prop-compatible API; it owns product-icon names, paths, and third-party SVG normalization if ever adopted. A feature may compose or style an icon, but it does not define a competing icon set, feature-local SVG paths, or icon-library adapter without an architecture update.
+
+Rule: This is a migration boundary, not a claim about current code. Existing feature-local product SVGs move to the canonical module as their owning shell surface is redesigned; after a surface is migrated, it imports all product icons from that module.
+
+Rule: Every icon-only control has an accessible name, visible keyboard focus treatment, and a hover/focus tooltip. Destructive confirmations retain explicit text; icon-only controls do not remove required user confirmation or error recovery copy.
+
+### AD-24: AI Ask Has One Server-Loaded Shell Model And One Client Workspace State Model
+
+Binds: the authenticated planning-shell route, selected conversation/project URL state, transient workspace state, and desktop/tablet/mobile presentations.
+
+Prevents: separate breakpoint-specific data loaders, multiple owners of selected detail state, or client state that can diverge from the active Chat/Trips route.
+
+Rule: `src/app/ai-ask/page.tsx` remains the server-authenticated route composer and loads user-scoped shell data through owning feature read functions. Chat/Trips owns conversation and trip-project selection represented in the URL.
+
+Rule: `AiAskComposer` owns transient client workspace state: draft input, selected attachment preview, request/streaming state, mobile sheet state, and selected answer-detail descriptor. The descriptor remains derived UI state under AD-19 and AD-20.
+
+Rule: Desktop, tablet, and mobile render the same server-loaded shell data and client workspace state. CSS layout and sheets/drawers change presentation only; they do not create alternate loaders, persistence, or state owners.
+
+Rule: After create, select, delete, project switch, or stream completion, URL-selected conversation/project state is canonical. `AiAskComposer` may update messages and summary lists optimistically while work is pending, but terminal mutation state reconciles through router navigation or refresh. A stale, deleted, or unauthorized URL resource clears local selection and uses the server-safe shell.
+
+Rule: A selected persisted descriptor has exactly one interactive detail surface. Desktop column and mobile sheet are controlled views of the same selection; inactive duplicate views are inert and excluded from assistive technology. Breakpoint changes preserve selection and route state and transfer focus predictably rather than creating independent panel state.
+
 ## Shared Data Contracts
 
 Frontend shell state contract:
@@ -367,15 +410,33 @@ Frontend shell state contract:
 
 Selectable answer entity descriptor minimum fields:
 
-- `type`: `place | hotel_area | route_segment | source | warning | cost | trip_fact | action`
+- `type`: current MVP `source | warning | trip_fact | action`; future entity types require a persisted owner/reference contract
 - `label`: Vietnamese display label
 - `section`: answer section identifier when available
-- `sourceCategory`: `chat_trip_context | knowledge | web | general` when applicable
+- `sourceCategory`: `trip_context | chat_context | knowledge | web | general` when applicable
 - `owner`: safe reference to the owning row or snapshot when available
 - `detail`: traveler-safe summary fields for the right panel
 - `provenance`: stored provenance row IDs or safe source snapshot references when applicable
 
 Detail panel payloads are read models. They are not persisted as separate product state.
+
+Current MVP annotation descriptors are best-effort post-answer enrichment from a separate gateway completion and may be empty. The UI must not infer future place, hotel, route, or cost descriptors from free-form answer prose.
+
+UI foundation contract:
+
+- `src/app/layout.tsx` and `src/app/globals.css` own application-wide font loading, semantic CSS variables, base page surfaces, and reduced-motion behavior.
+- `src/components/ui` contains data-free presentational primitives and the canonical typed SVG icon module.
+- Feature modules own feature components and may consume UI primitives, but UI primitives do not import feature modules, database access, server actions, or route state.
+- The idle AI Ask composer contains only prompt input, optional icon-only attachment trigger, and icon-only send trigger. Attachment guidance, validation details, and attachment preview are contextual UI state, not persistent shell content.
+- Icon-only controls expose accessible labels, visible focus, and hover/focus tooltips. Text remains required for destructive confirmation and non-obvious or high-risk actions.
+
+AI Ask workspace state contract:
+
+- Server-loaded shell state: authenticated user, role-gated navigation, user-owned conversation summary list, user-owned trip-project summary list, active URL-selected conversation/project, and persisted messages/provenance.
+- URL-owned state: active conversation and trip-project selection.
+- Transient client-owned state: prompt draft, selected image preview, request/streaming status, mobile navigation/detail sheet visibility, and selected answer-detail descriptor.
+- Responsive presentation may move sidebar/detail surfaces between columns, rail, and sheets but reuses this state model and server-loaded data. A selected persisted descriptor has exactly one interactive detail presentation; inactive duplicate views are inert and excluded from assistive technology.
+- Client copies of messages and summary lists are optimistic only while a request or mutation is pending. Terminal create/select/delete/project-switch/stream states reconcile to the URL-selected server shell; deleted, stale, or unauthorized resources clear client selection.
 
 Core persisted entities:
 
@@ -396,7 +457,7 @@ Referral attribution minimum fields: referred user ID, referral code, referrer u
 
 Confidence labels are fixed for MVP: `unverified`, `community`, `curated`, `partner`, `official`.
 
-Persisted confidence uses two underlying fields: `source_type` as `community | partner | official | unknown`, and `verification_status` as `unverified | operator_curated`. Displayed MVP labels are derived from those fields. Web search results always have `verification_status = unverified`, even when `source_type = official`.
+Persisted knowledge-source fields are `source_type` as `curated | community` and `verification_status` as `unverified | verified`; `official` and `partner` are boolean source metadata. Displayed MVP confidence labels are derived from source metadata and card confidence. Web search results always have `verification_status = unverified`, even when their web-result source type is official/provider.
 
 Canonical source linkage:
 
@@ -424,7 +485,7 @@ Retrieval returns a normalized source bundle:
 
 Traveler AI Ask source bundles contain traveler-safe snapshots only. They may include selected trip context, current chat context, approved knowledge-card summaries, linked source metadata, web snippets, and the general-reasoning marker. They must not include `raw_source_material.raw_text`, copied post bodies, image OCR/vision notes, operator-only fields, or admin-only metadata.
 
-Epic 5 Story 5.1 retrieval is metadata-filtered approved-card retrieval. Candidate selection filters current card rows by approved status, traveler-safe source linkage, card type, route/location, tags, freshness-sensitive flag, confidence/verification labels, and source type. Broad semantic ranking, Postgres full-text ranking, and pgvector ranking are later hybrid-search enhancements, not Story 5.1 requirements.
+MVP retrieval searches active knowledge-card search documents lexically, then validates current approved-card status and traveler-safe linked sources before selecting source-bundle items. Candidate selection filters current card rows by approved status, traveler-safe source linkage, card type, route/location, tags, freshness-sensitive flag, confidence/verification labels, and source type. Broad semantic ranking, Postgres full-text ranking, and pgvector ranking are later hybrid-search enhancements, not MVP requirements.
 
 If retrieval eligibility cannot be proven for a candidate, retrieval excludes it and records the exclusion as an implementation-visible reason where practical. Tests for Story 5.1 must prove draft, archived, rejected, stale, disabled, source-missing, and operator-only/raw-source-backed records do not enter traveler source bundles.
 
@@ -443,6 +504,7 @@ The five PRD beta prompts are the initial required prompt set: magic-moment fami
 Production must have:
 
 - Separate production database and secrets.
+- Separately supervised Node worker processes for extraction and knowledge-search indexing, with restart/health monitoring and logs distinct from request-serving Next.js runtime.
 - Server-side auth and role enforcement for protected personalization/admin capabilities.
 - Audit trail for operator/admin mutations.
 - Logging for model provider, search provider, latency, failures, and answer provenance IDs.
@@ -453,7 +515,6 @@ Production must have:
 ## Deferred
 
 - Final deployment provider and hosted PostgreSQL provider.
-- Final privacy-policy wording after provider setting verification.
 - Facebook content reuse policy beyond provenance and non-official labeling.
 - Whether Facebook capture needs explicit per-source retention/deletion controls before broader operator use.
 - Dedicated self-service privacy dashboard beyond chat/trip deletion.
@@ -464,4 +525,4 @@ Production must have:
 - Public submissions, credit wallets, payment deposits, reward balances, referral reward calculations, ranking multipliers, reward-to-credit conversion, booking transactions, affiliate automation, and partner transaction flows.
 - Mobile app channel.
 - Service decomposition.
-- Postgres full-text ranking and pgvector/hybrid retrieval for AI Ask, until metadata-filtered retrieval and provenance behavior are stable enough to upgrade behind the Retrieval module.
+- Postgres full-text ranking and pgvector/hybrid retrieval for AI Ask, until indexed lexical retrieval and provenance behavior are stable enough to upgrade behind the Retrieval module.

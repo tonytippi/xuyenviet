@@ -859,6 +859,9 @@ export function AiAskComposer({
           } else {
             setSessions((currentSessions) => moveSessionToTop(currentSessions, newConversationId));
           }
+          const searchParams = new URLSearchParams({ conversationId: newConversationId });
+          if (activeTripProjectId) searchParams.set("tripProjectId", activeTripProjectId);
+          router.replace(`/ai-ask?${searchParams.toString()}`);
         }
         setStatus(`${result.errorMessage} Chưa có câu trả lời trợ lý nào được lưu cho lượt này.`);
         return;
@@ -878,6 +881,9 @@ export function AiAskComposer({
       } else {
         setSessions((currentSessions) => moveSessionToTop(currentSessions, result.conversationId));
       }
+      const searchParams = new URLSearchParams({ conversationId: result.conversationId });
+      if (activeTripProjectId) searchParams.set("tripProjectId", activeTripProjectId);
+      router.replace(`/ai-ask?${searchParams.toString()}`);
     } catch (error) {
       if (activeRequestIdRef.current === requestId && !(error instanceof DOMException && error.name === "AbortError")) {
         setStatus("Không thể gửi câu hỏi lúc này. Hãy kiểm tra đăng nhập và thử lại. Nội dung vẫn còn trong ô nhập.");
@@ -1386,14 +1392,14 @@ export function AiAskComposer({
             </section>
           ) : null}
 
-          <form className="mx-auto max-w-[760px] rounded-[1.75rem] border border-[#d8c9ad] bg-white/90 p-4 shadow-[0_20px_60px_rgba(41,33,18,0.14)]" onSubmit={handleSubmit} ref={formRef}>
-            <label className="text-sm font-semibold text-[#17342c]" htmlFor="ai-ask-question">
+          <form className="mx-auto max-w-[760px] rounded-[1.75rem] border border-[#d8c9ad] bg-white/90 p-3 shadow-[0_20px_60px_rgba(41,33,18,0.14)]" onSubmit={handleSubmit} ref={formRef}>
+            <label className="sr-only" htmlFor="ai-ask-question">
               Câu hỏi của bạn
             </label>
             <textarea
-              className="mt-3 min-h-32 w-full resize-y rounded-2xl border border-[#d8c9ad] bg-[#fffdf8] px-4 py-3 text-base leading-7 text-[#17342c] outline-none transition placeholder:text-[#7b8b84] focus:border-[#1f5f46] focus:ring-4 focus:ring-[#8fb59f]/45"
+              className="min-h-28 w-full resize-y rounded-2xl border-0 bg-transparent px-3 py-2 text-base leading-7 text-[#17342c] outline-none placeholder:text-[#7b8b84] focus:ring-4 focus:ring-[#8fb59f]/45"
               disabled={askFormDisabled}
-              aria-describedby="ai-ask-status ai-ask-shortcuts"
+              aria-describedby="ai-ask-status"
               id="ai-ask-question"
               maxLength={maxQuestionLength + 1}
               onChange={(event) => setQuestion(event.target.value)}
@@ -1402,50 +1408,54 @@ export function AiAskComposer({
               ref={textareaRef}
               value={question}
             />
-            <div className="mt-3 rounded-2xl border border-dashed border-[#d8c9ad] bg-[#fffdf8] p-3">
-              <label className="text-sm font-semibold text-[#17342c]" htmlFor="ai-ask-image">
-                Ảnh tham khảo tuỳ chọn
-              </label>
+            <div className="mt-2 flex items-center justify-between gap-3 border-t border-[#eadfc8] pt-2">
+              <div className="flex items-center gap-2">
+                <label
+                  aria-label="Đính kèm ảnh tham khảo"
+                  className={`grid h-10 w-10 cursor-pointer place-items-center rounded-xl text-[#4f625a] transition hover:bg-[#edf7f0] hover:text-[#14532d] focus-within:outline-none focus-within:ring-4 focus-within:ring-[#8fb59f]/45 ${askFormDisabled ? "cursor-not-allowed opacity-50" : ""}`}
+                  title="Đính kèm ảnh"
+                  htmlFor="ai-ask-image"
+                >
+                  <PaperclipIcon />
+                  <span className="sr-only">Đính kèm ảnh tham khảo</span>
+                </label>
               <input
                 accept="image/jpeg,image/png,image/webp"
-                className="mt-2 block w-full text-sm text-[#4f625a] file:mr-3 file:min-h-11 file:rounded-xl file:border-0 file:bg-[#e5bd82] file:px-4 file:py-2 file:font-semibold file:text-[#17342c]"
+                className="sr-only"
                 disabled={askFormDisabled}
                 id="ai-ask-image"
                 onChange={handleImageChange}
                 ref={imageInputRef}
                 type="file"
               />
-              <p className="mt-2 text-xs leading-5 text-[#6b7c75]">Hỗ trợ JPEG, PNG hoặc WebP tối đa 5MB. Ảnh chỉ được gửi qua AI Gateway khi model đã bật khả năng nhận ảnh.</p>
-              {selectedImage ? (
-                <div className="mt-3 flex flex-col gap-2 rounded-xl bg-white/80 p-3 text-sm leading-6 text-[#4f625a] sm:flex-row sm:items-center sm:justify-between">
-                  <div className="flex items-center gap-3">
-                    {imageUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img alt={selectedImage.name || "ảnh đính kèm"} className="h-12 w-12 rounded-lg border border-[#d8c9ad] object-cover" src={imageUrl} />
-                    ) : null}
-                    <span className="min-w-0 break-words">
-                      Đã chọn: {selectedImage.name || "ảnh đính kèm"} ({selectedImage.type}, {formatImageSize(selectedImage.size)})
-                    </span>
-                  </div>
-                  <button className="min-h-11 rounded-xl border border-[#d8c9ad] px-3 py-2 font-semibold text-[#17342c]" disabled={askFormDisabled} onClick={clearSelectedImage} type="button">
-                    Bỏ ảnh
-                  </button>
-                </div>
-              ) : null}
-            </div>
-            <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <p aria-live="polite" className="text-sm leading-6 text-[#4f625a]" id="ai-ask-status">
-                {status}
-              </p>
+              </div>
               <button
-                className="min-h-12 rounded-2xl bg-[#1f5f46] px-5 py-3 text-base font-semibold text-white shadow-[0_12px_30px_rgba(31,95,70,0.24)] transition hover:bg-[#194d39] focus:outline-none focus:ring-4 focus:ring-[#8fb59f] disabled:cursor-not-allowed disabled:bg-[#8aa89b]"
+                aria-label={isPending ? "Đang gửi câu hỏi" : deletingTripProjectId ? "Đang xoá dự án chuyến đi" : "Gửi câu hỏi"}
+                className="grid h-11 w-11 place-items-center rounded-2xl bg-[#1f5f46] text-white shadow-[0_12px_30px_rgba(31,95,70,0.24)] transition hover:bg-[#194d39] focus:outline-none focus:ring-4 focus:ring-[#8fb59f] disabled:cursor-not-allowed disabled:bg-[#8aa89b]"
                 disabled={askFormDisabled}
+                title="Gửi câu hỏi"
                 type="submit"
               >
-                {isPending ? "Đang gửi, vui lòng chờ" : deletingTripProjectId ? "Đang xoá dự án, vui lòng chờ" : "Gửi câu hỏi"}
+                {isPending ? <LoadingIcon /> : <SendIcon />}
               </button>
             </div>
-            <p className="mt-2 text-xs leading-5 text-[#6b7c75]" id="ai-ask-shortcuts">Enter để gửi, Shift+Enter để xuống dòng, nhấn / để focus ô nhập.</p>
+            {selectedImage ? (
+              <div className="mt-3 flex items-center justify-between gap-3 rounded-xl bg-[#fffdf8] px-3 py-2 text-sm text-[#4f625a]">
+                <div className="flex min-w-0 items-center gap-3">
+                  {imageUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img alt={selectedImage.name || "ảnh đính kèm"} className="h-9 w-9 shrink-0 rounded-lg border border-[#d8c9ad] object-cover" src={imageUrl} />
+                  ) : null}
+                  <span className="truncate">{selectedImage.name || "Ảnh đính kèm"} ({formatImageSize(selectedImage.size)})</span>
+                </div>
+                <button aria-label="Bỏ ảnh đính kèm" className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-[#4f625a] transition hover:bg-[#fff1ed] hover:text-[#8c2f1d] focus:outline-none focus:ring-4 focus:ring-[#f0c8a0]" disabled={askFormDisabled} onClick={clearSelectedImage} title="Bỏ ảnh" type="button">
+                  <CloseIcon />
+                </button>
+              </div>
+            ) : null}
+            <p aria-live="polite" className="sr-only" id="ai-ask-status">
+              {status}
+            </p>
           </form>
 
           {showEmptyState ? (
@@ -1799,6 +1809,39 @@ function formatImageSize(bytes: number) {
   }
 
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function PaperclipIcon() {
+  return (
+    <svg aria-hidden="true" className="h-5 w-5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24">
+      <path d="m21.4 11.6-8.5 8.5a6 6 0 0 1-8.5-8.5l8.1-8.1a4 4 0 1 1 5.7 5.7l-8.1 8.1a2 2 0 0 1-2.8-2.8l7.7-7.7" />
+    </svg>
+  );
+}
+
+function SendIcon() {
+  return (
+    <svg aria-hidden="true" className="h-5 w-5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24">
+      <path d="m22 2-7 20-4-9-9-4Z" />
+      <path d="M22 2 11 13" />
+    </svg>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg aria-hidden="true" className="h-5 w-5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24">
+      <path d="m18 6-12 12M6 6l12 12" />
+    </svg>
+  );
+}
+
+function LoadingIcon() {
+  return (
+    <svg aria-hidden="true" className="h-5 w-5 animate-spin" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="2" viewBox="0 0 24 24">
+      <path d="M12 3a9 9 0 1 1-9 9" />
+    </svg>
+  );
 }
 
 function summarizeSession(id: string, question: string): ChatSessionSummary {

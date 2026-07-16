@@ -1,9 +1,9 @@
 ---
 name: XuyenViet
-status: draft
+status: final
 project: xuyenviet
 created: 2026-07-05
-updated: 2026-07-10
+updated: 2026-07-16
 sources:
   - ../../prds/prd-xuyenviet-2026-07-04/prd.md
   - ../../architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md
@@ -21,7 +21,7 @@ sources:
 
 Responsive web app for consumer MVP. Primary runtime assumption: Next.js App Router, React, shadcn/ui, Tailwind, and PostgreSQL-backed auth/session data as defined by architecture. `DESIGN.md` is the visual identity reference; this document owns information architecture, behavior, states, flows, accessibility, and interaction contracts.
 
-The traveler experience uses three canonical states: a logged-out public homepage with a sign-in-gated ask box, a logged-in empty state with left sidebar plus centered greeting/composer, and an active three-panel planning workspace with left history/projects, center answer, and right contextual detail panel. The shell is familiar by design, but XuyenViet-specific trust, Vietnamese road-trip planning, and provenance patterns remain visible in the answer and detail panel.
+The traveler experience uses three canonical states: a logged-out public homepage with a sign-in-gated ask box, a logged-in empty state with a left sidebar plus centered greeting/composer, and an active three-panel planning workspace with left history/projects, center answer, and right contextual detail panel. Their visual references are [`home-logged-out.html`](./mockups/home-logged-out.html), [`home-logged-in-empty.html`](./mockups/home-logged-in-empty.html), and [`three-panel-chat-map.html`](./mockups/three-panel-chat-map.html). `DESIGN.md` and this experience spine win on conflict with the static mockups.
 
 Primary audience: Vietnamese road-trip travelers planning by car, initially focused on Hanoi-to-HCMC corridor use cases. Secondary audience: owner/admin/operator managing travel knowledge.
 
@@ -35,11 +35,11 @@ Primary audience: Vietnamese road-trip travelers planning by car, initially focu
 |---|---|---|
 | Public logged-out homepage | Root route, referral link | Explain value, show Google sign-in path, preserve referral parameter silently, and show sign-in-gated ask box |
 | Sign-in / auth callback states | Public entry, protected-route redirect | Google sign-in, safe error handling, post-auth continuation |
-| AI planning shell | Primary app route after auth | Persistent workspace containing sidebar, main AI Ask chat, account/admin entry, and responsive sheets |
+| AI planning shell | Primary app route after auth | Edge-to-edge, viewport-height workspace containing sidebar, main AI Ask chat, conditional contextual detail panel, account/admin entry, and responsive sheets |
 | Logged-in empty chat | AI planning shell with no selected/created conversation content | ChatGPT/Gemini-like centered greeting, centered composer, starter cards, left sidebar, and no right detail panel |
 | Active AI Ask chat | Main shell workspace after question/answer exists | Vietnamese road-trip conversation with structured AI answers and selectable answer entities |
-| Conversation history | Left sidebar on desktop, navigation sheet on mobile | Create, search/scan, revisit, continue, and delete user-owned conversations |
-| Trip projects | Left sidebar project group plus selected chat context | Focus planning around a durable trip and reuse trip context like a project/workspace |
+| Conversation history | Left sidebar on desktop, navigation sheet on mobile | Create, scan, revisit, continue, and delete user-owned conversations from the `Trò chuyện` group |
+| Trip projects | Left sidebar project group plus selected chat context | Focus planning around a durable trip and reuse trip context like a project/workspace from the distinct `Chuyến đi` group |
 | Right contextual detail panel | Selected answer entity in active chat | Show selected place, hotel, route segment, source, cost/warning, or trip fact with quick facts, related details, actions, and provenance chips |
 | Trip project detail/context panel | Trip project row / selected context | Show trip context, linked chats, correction/delete affordances, usually as right detail panel or mobile sheet |
 | Source detail | Answer source chip / detail panel | Show source title, type, URL when available, collected/checked date, confidence, freshness |
@@ -55,7 +55,7 @@ Responsive navigation:
 
 | Breakpoint | Behavior |
 |---|---|
-| Desktop `lg+` | Logged-out homepage has no app sidebar. Logged-in empty state shows left sidebar + centered composer only. Active chat shows left sidebar + center answer + right contextual detail panel. |
+| Desktop `lg+` | Logged-out homepage has no app sidebar. Logged-in empty state shows a flat left sidebar + centered composer only. Active chat shows an edge-to-edge left sidebar + center answer + right contextual detail panel only after selection. |
 | Tablet `md` | Sidebar may collapse to a rail. Active detail panel may remain right-side if space allows or move below/sheet. |
 | Mobile `< md` | Top bar + full-height navigation sheet. Chat is single-column. Composer remains reachable. Selected detail opens as sheet/drawer. |
 
@@ -65,9 +65,10 @@ Sidebar hierarchy:
 
 | Zone | Required behavior |
 |---|---|
-| Top action | `Cuộc trò chuyện mới` starts an unscoped chat unless the user is currently inside a trip project and explicitly chooses to keep that project context. |
-| Conversation history | Shows recent user-owned conversations with active row, short title/preview/date, delete menu, and empty state. It must never show another user's conversations. |
-| Trip projects | Shows user-owned trip projects as project/workspace rows. Selecting a trip project makes that trip the active planning context and shows or starts project-scoped chat. |
+| Brand row | Shows the XuyenViet mark/name and a collapse or menu control where the viewport supports it. |
+| Top action | `Trò chuyện mới` starts an unscoped chat unless the user is currently inside a trip project and explicitly chooses to keep that project context. |
+| Conversation history | Shows recent user-owned conversations under `Trò chuyện`, with a compact active row, short title/preview/date, delete action, and empty state. It must never show another user's conversations. |
+| Trip projects | Shows user-owned trip projects under `Chuyến đi` as compact project/workspace rows. Selecting a trip project makes that trip the active planning context and shows or starts project-scoped chat. |
 | Context indicator | The main chat must clearly show whether it is ordinary chat or scoped to a selected trip project. |
 | Account/admin | Account/privacy always reachable. Admin entry appears only to authorized operator/admin roles and remains visually separate from traveler planning. |
 
@@ -75,9 +76,9 @@ Right detail panel hierarchy:
 
 | Zone | Required behavior |
 |---|---|
-| Selected entity header | Names what the user selected from the answer, such as `Asia Park`, a hotel area, a route segment, or a source. |
+| Selected entity header | Names what the user selected from the answer, such as `Asia Park`, a hotel area, a route segment, or a source, and identifies its category with a semantic icon. |
 | Summary | Gives a short, useful explanation in Vietnamese without duplicating the whole answer. |
-| Actions | Provides contextual actions such as `Dùng trong kế hoạch`, `Xem tuyến đường`, or `Lưu` when supported. |
+| Actions | Provides contextual actions such as `Dùng trong kế hoạch`, `Xem tuyến đường`, or `Lưu` only when the associated behavior is supported. Unsupported mockup actions must not render as inert controls. |
 | Quick facts | Shows compact facts like family fit, best time, verify status, confidence/source type, or route impact. |
 | Related details | Shows related route/hotel/driving/source notes. |
 | Provenance | Shows source/confidence/freshness chips without exposing raw operator-only source material. |
@@ -109,18 +110,18 @@ Behavioral patterns. Visual specs live in `DESIGN.md.Components`.
 
 | Component | Use | Behavioral rules |
 |---|---|---|
-| Public logged-out homepage | Root route | Explains AI road-trip assistant value in one screen. Primary CTA is Google sign-in. Shows a sign-in-gated ask box and starter chips. If `ref` exists, preserve it silently through auth. |
+| Public logged-out homepage | Root route | Explains AI road-trip assistant value in one centered screen. Primary CTA is Google sign-in. Shows a sign-in-gated ask box, icon-led starter chips, and a compact detail-panel preview. If `ref` exists, preserve it silently through auth. |
 | Sign-in-gated ask box | Public homepage | Looks like the chat composer but submitting requires authentication before conversation, retrieval, usage event, or provider call is created. |
 | Google sign-in button | Public entry, protected-route gate | Opens OAuth flow. Failure returns safe message without exposing provider details or secrets. |
 | Protected-route gate | AI Ask/admin | If unauthenticated, redirect or block before loading chat/trip/admin data. No AI call or conversation is created. |
-| Chat composer | AI Ask | Accepts Vietnamese free text and supported image attachments. Empty/invalid submission blocked client-side and server-side. Unsupported image type/size is rejected before provider calls. Submit disabled while sending unless retrying failed draft. |
-| App shell sidebar | AI planning shell | Persistent on desktop, sheet on mobile. Contains new chat, conversation history, trip projects, account/privacy, and authorized admin entry. It must be usable by keyboard and touch; row actions cannot be hover-only. |
+| Chat composer | AI Ask | Accepts Vietnamese free text and supported image attachments. Its idle state contains the prompt, icon-only attachment trigger, and icon-only send trigger; each has an accessible name and hover/focus tooltip. Empty/invalid submission is blocked client-side and server-side. Unsupported image type/size is rejected before provider calls. Submit is disabled while sending unless retrying a failed draft. |
+| App shell sidebar | AI planning shell | Flat and persistent on desktop, sheet on mobile. Contains brand row, new chat, grouped conversation history, grouped trip projects, account/privacy, and authorized admin entry. It must be usable by keyboard and touch; row actions cannot be hover-only. |
 | New chat action | Sidebar/top bar | Starts a new conversation. If a trip project is active, the UI must make scope clear: ordinary new chat vs new chat inside current trip project. |
-| Logged-in empty start | AI planning shell before first prompt | Shows left sidebar, centered Vietnamese greeting, centered composer, starter cards, and no right detail panel. |
+| Logged-in empty start | AI planning shell before first prompt | Shows left sidebar, compact top bar, centered Vietnamese greeting, centered composer with send icon, four icon-led starter cards, and no right detail panel. |
 | Conversation history row | Sidebar/sheet | Opens an owned conversation. Active row reflects the current route/conversation. Row menu supports delete and future rename. Delete requires confirmation. |
 | Trip project row | Sidebar/sheet | Opens a trip project workspace/context. Active project state is visible in sidebar and main chat header. Row menu supports delete/settings when implemented. |
-| Assistant answer | Chat | Structured sections: suggested plan/options, rationale, practical tips, warnings, sources, uncertainty, next steps. Sections appear only when relevant. |
-| Section chips | Active assistant answer | Allows jumping across answer sections such as `Ăn gì?`, `Đi đâu?`, `Ở đâu?`, `Về chuyến đi`, `Cần biết`, and `Chi phí và mẹo`. |
+| Assistant answer | Chat | Structured sections: suggested plan/options, rationale, practical tips, warnings, sources, uncertainty, next steps. Sections appear only when relevant and use hierarchy before adding card boundaries. |
+| Section chips | Active assistant answer | A compact scrollable row at the top of the answer that jumps to relevant sections such as `Ăn gì?`, `Đi đâu?`, `Ở đâu?`, `Về chuyến đi`, `Cần biết`, and `Chi phí và mẹo`. |
 | Selectable answer entity | Active assistant answer | Places, hotels, route segments, source chips, warnings, costs, and trip facts can be selected/focused to open the right detail panel. |
 | Right contextual detail panel | Active AI Ask chat | Opens only when a selected entity exists. Shows title, summary, actions, quick facts, related details, and provenance. It must not appear on the logged-in empty state. |
 | Streaming assistant answer | AI Ask | Shows incremental assistant text after context/source preparation starts generation. Partial text is visually pending and reconciles to the persisted final assistant message when complete. If streaming fails, show retry/recovery and do not imply the partial answer is saved as final. |
@@ -144,17 +145,17 @@ Behavioral patterns. Visual specs live in `DESIGN.md.Components`.
 | Referral link present | Public entry/sign-in | No reward UI. Preserve attribution through sign-in. If invalid, continue normally. |
 | Unauthenticated protected route | AI Ask/admin | Redirect to sign-in or show gate. State: `Đăng nhập để hỏi AI.` |
 | Auth failure | Sign-in | Safe message, retry button. No secret/provider diagnostic. |
-| First AI Ask empty | Logged-in empty chat | Left sidebar visible, center greeting/composer visible, starter cards visible, no right detail panel. |
+| First AI Ask empty | Logged-in empty chat | Left sidebar visible, compact top bar and center greeting/composer visible, icon-led starter cards visible, no right detail panel. |
 | Sending message | AI Ask | Pending state in chat, composer disabled or guarded against duplicate submit. |
 | Streaming AI response | AI Ask | Answer text may appear progressively after source/context preparation. Keep composer guarded, expose stop/retry only if implementation supports safe cancellation, and announce completion through `aria-live`. |
 | Long AI response | AI Ask | Progress copy after delay: `Mình đang kiểm tra ngữ cảnh và nguồn phù hợp...` Do not imply completion. |
-| Image attached to prompt | AI Ask | Show thumbnail/file row with remove action, type/size validation, and accessible label. Do not upload or submit unsupported images to the provider. |
-| Image input rejected | AI Ask | Explain allowed file types/size and keep the user's text draft intact. No provider call is made. |
+| Image attached to prompt | AI Ask | Reveal a compact thumbnail/file row with an icon-only remove action, type/size validation, and accessible label. Do not upload or submit unsupported images to the provider. |
+| Image input rejected | AI Ask | Reveal the allowed file types/size beside the validation error and keep the user's text draft intact. No provider call is made. Do not reserve idle composer space for this explanation. |
 | AI provider failure | AI Ask | Keep user draft. Show retry. Do not create misleading assistant message. |
 | No curated knowledge | Assistant answer | Say curated XuyenViet knowledge was not found and whether web/general reasoning was used. |
 | Freshness-sensitive answer | Assistant answer | Show freshness warning near relevant section and in source details. |
 | Conflicting sources | Assistant answer | State conflict plainly and ask user to verify; prefer official/provider sources when available. |
-| No selected answer entity | Active AI Ask chat | Do not force an empty detail panel if no item is selected; either keep the right panel hidden/collapsed or show the latest useful selected entity according to architecture decision. |
+| No selected answer entity | Active AI Ask chat | Do not force an empty detail panel. Keep the right column absent/collapsed until the user selects a supported entity. |
 | Selected place/hotel/route/source | Right detail panel | Replace panel contents with the selected entity's summary, quick facts, related details, action chips, and provenance. |
 | Empty chat history | Chat sessions | Message + action to start first chat. |
 | Empty trip projects | Sidebar/sheet | Short explanation plus create-project entry when available. Do not block ordinary chat. |
@@ -173,7 +174,9 @@ Behavioral patterns. Visual specs live in `DESIGN.md.Components`.
 - `Enter` submits composer when focus is in single-line prompt mode; `Shift+Enter` inserts newline when multiline is enabled.
 - `Esc` closes the topmost sheet, drawer, popover, or dialog.
 - `/` may focus chat composer on desktop when no input is active.
-- Source chips and warning callouts must be keyboard-focusable if they open details.
+- Use icon-only controls for common, unambiguous actions such as attach, send, close, menu, delete, and collapse. Each icon-only control has an accessible name, a visible focus state, and a tooltip on hover/focus; destructive actions still use explicit text confirmation.
+- Keep the idle chat composer free of persistent input labels, attachment instructions, keyboard cheat sheets, and verbose status copy. Reveal guidance only when focus, an error, pending work, or a selected attachment makes it useful.
+- Source chips, section chips, warning callouts, and selectable entities must be keyboard-focusable when they open details or navigate within the answer.
 - Selectable answer entities are keyboard-focusable and expose the selected state when their detail panel is open.
 - Right detail panel can be closed with `Esc` and returns focus to the selected entity or the control that opened it.
 - Sidebar rows are keyboard-focusable, expose active state, and support row actions without requiring hover.
@@ -214,9 +217,9 @@ Rules:
 - Deletion copy must say normal UI and retrieval use are removed/disabled; audit metadata may remain only if architecture requires it.
 - Sensitive-data exclusions are not a UX afterthought: when the assistant appears to extract disallowed sensitive data, do not show it as remembered trip context.
 
-[OPEN QUESTION] Exact privacy-policy wording for AI Gateway-backed memory/chat processing still needs legal/product approval before public onboarding.
+[DECIDED] MVP storage notice copy: `Để hỗ trợ cuộc trò chuyện và kế hoạch chuyến đi, XuyenViet có thể lưu nội dung bạn cung cấp và gửi yêu cầu đến dịch vụ AI đã cấu hình để tạo câu trả lời. Bạn có thể xóa cuộc trò chuyện hoặc dự án chuyến đi bất cứ lúc nào.` The notice includes the link label `Tìm hiểu thêm về quyền riêng tư`, remains informational rather than blocking consent, and must be reviewed if provider processing terms change.
 
-[OPEN QUESTION] Story 3.7 leaves linked project chat delete-vs-detach behavior open. Story creation should decide the user-facing deletion copy before implementation.
+[DECIDED] Deleting a trip project also deletes its linked project chats. The confirmation must name the project and state that linked chats, stored trip context, and normal retrieval use will be removed.
 
 ## Responsive & Platform
 
@@ -225,8 +228,8 @@ XuyenViet is responsive web, not native mobile app for MVP. Mobile web must supp
 Desktop behavior:
 
 - Logged-out homepage is centered and does not show the app sidebar.
-- Logged-in empty state shows left sidebar plus centered greeting/composer and no right detail panel.
-- Active chat shows persistent left sidebar, readable center answer column, and right contextual detail panel when an answer entity is selected.
+- Logged-in empty state shows a flat left sidebar plus centered greeting/composer and no right detail panel.
+- Active chat uses an edge-to-edge workspace with persistent left sidebar, readable center answer column, and right contextual detail panel only when an answer entity is selected.
 - Long conversation/project lists scroll within the sidebar without moving the main chat composer.
 
 Mobile behavior:
@@ -243,14 +246,14 @@ Lifted patterns:
 
 - ChatGPT/Gemini-style AI shell for familiar conversation management: new chat action, left history, project/workspace grouping, active row, and centered chat workspace.
 - ChatGPT/Gemini-style empty state: centered greeting and centered composer before the first prompt.
-- Travel-agent answer pattern from the reference direction: section chips and inline selectable answer entities that drive a right-side contextual detail panel.
+- Travel-agent answer pattern from the reference direction: compact section chips and inline selectable answer entities that drive a right-side contextual detail panel.
 - Travel itinerary cards for scannable day/route summaries.
 - Source/provenance drawers from research tools, adapted for consumer readability.
 - shadcn/ui component discipline for fast, accessible MVP implementation.
 
 Rejected patterns:
 
-- Map-first UX before Google Maps integration exists.
+- Map-first UX before Google Maps integration exists. The active mockup's filename is historical; its right region is an inspector, not a map requirement.
 - Booking marketplace UI, partner ranking, credit wallet, rewards, referral payout, or affiliate emphasis in MVP.
 - Overloaded AI answer footers with every source detail expanded by default.
 - Gamified trip planning or streak-like usage nudges.
@@ -372,7 +375,6 @@ Failure: Detail data is unavailable. The panel shows a compact unavailable state
 | Question | Impact | Owner / Next Step |
 |---|---|---|
 | Exact privacy-policy wording for AI Gateway-backed memory/chat processing | Public onboarding and storage notice copy | Product/legal before public launch |
-| Trip project deletion behavior for linked chats: delete or detach | Story 3.7 UX copy and implementation | Decide during `bmad-create-story` validation |
 | Whether admin review is required to be fully mobile-optimized in MVP | Admin layout scope | Sprint planning/story scoping |
 | Final UI system choice if not shadcn/ui | Component implementation contract | Confirm during app foundation story |
 | Whether sidebar trip project selection opens a dedicated project route or filters the existing AI Ask route | Routing, active state, and implementation scope | Resolve in architecture/story before frontend implementation |
