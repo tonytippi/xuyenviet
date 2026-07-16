@@ -4,6 +4,7 @@ type: 'feature'
 created: '2026-07-16'
 status: 'done'
 baseline_revision: 'ede631d'
+final_revision: 'ecf4800'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
