@@ -7,6 +7,8 @@ import { getOwnedConversation, listOwnedConversations } from "@/features/chat-tr
 import { createTripProjectFromForm, deleteConversationAction, deleteTripProjectAction } from "@/features/chat-trips/actions";
 import { getOwnedTripProjectSummary, listOwnedTripProjects } from "@/features/chat-trips/trip-projects";
 import { saveAnswerUsefulnessFeedbackAction } from "@/features/feedback/actions";
+import { selectActiveAiGatewayModel } from "@/features/ai/models";
+import { aiAskInitialAnswerPurpose } from "@/features/ai/prompts";
 import { getAuthenticatedSessionWithRoles, hasAdminAccess } from "@/server/auth";
 
 type AiAskPageProps = {
@@ -100,6 +102,10 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
     updatedAt: project.updatedAt,
   }));
   const initialSessions = selectedTripProject ? selectedTripProject.relatedChats : (await listOwnedConversations()) ?? [];
+  const imageInputModel = await selectActiveAiGatewayModel({
+    purpose: aiAskInitialAnswerPurpose,
+    requiredCapabilities: { textInput: true, streaming: true, imageInput: true },
+  });
   const selectedTripProjectForComposer = selectedTripProject
     ? {
         id: selectedTripProject.id,
@@ -150,6 +156,7 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
             initialSessions={initialSessions}
             initialTripProjects={initialTripProjects}
             selectedTripProject={selectedTripProjectForComposer}
+            supportsImageInput={Boolean(imageInputModel)}
             userEmail={session.email}
             canAccessAdmin={hasAdminAccess(session.roles)}
             createTripProjectAction={createTripProjectFromForm}

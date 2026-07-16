@@ -20,6 +20,7 @@ const maxMultipartBodySize = 6 * 1024 * 1024;
 const acceptedImageTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 type StreamEvent =
+  | { type: "preparing" }
   | { type: "delta"; content: string }
   | { type: "done"; conversationId: string; userMessage: { id: string; content: string }; assistantMessage: { id: string; content: string; provenance?: AssistantMessageProvenanceItem[]; annotations?: AnswerAnnotation[] } }
   | { type: "error"; conversationId?: string; userMessage?: { id: string; content: string }; errorMessage: string };
@@ -187,6 +188,8 @@ async function streamAnswer({
 
       return { conversationId: conversation.id, history, userMessage: { id: message.id, content: question } };
     });
+
+    sendEvent(controller, encoder, { type: "preparing" });
 
     const pricingSnapshot = getAiGatewayPricingSnapshot(selectedModel);
     const sourceBundle = await assembleContextPrioritySourceBundle({

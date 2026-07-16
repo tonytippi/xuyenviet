@@ -14,7 +14,6 @@ import { AccountIcon, AttachmentIcon, ChatIcon, CloseIcon, LoadingIcon, NewChatI
 
 const maxQuestionLength = 2_000;
 const maxImageByteSize = 5 * 1024 * 1024;
-const progressDelayMs = 4_000;
 const previewMaxLength = 60;
 
 type DisplayMessage = {
@@ -109,6 +108,7 @@ type AiAskComposerProps = {
   initialSessions?: ChatSessionSummary[];
   initialTripProjects?: TripProjectSummary[];
   selectedTripProject?: TripProjectSummary | null;
+  supportsImageInput?: boolean;
   userEmail?: string;
   canAccessAdmin?: boolean;
   createTripProjectAction?: CreateTripProjectAction;
@@ -525,6 +525,7 @@ export function AiAskComposer({
   initialSessions = emptySessions,
   initialTripProjects = emptyTripProjects,
   selectedTripProject = null,
+  supportsImageInput = false,
   userEmail,
   canAccessAdmin = false,
   createTripProjectAction,
@@ -538,7 +539,8 @@ export function AiAskComposer({
   const [question, setQuestion] = useState(initialQuestion);
   const [status, setStatus] = useState(initialMessages.length > 0 ? "Đã tải hội thoại. Bạn có thể tiếp tục kế hoạch." : selectedTripProject ? `Bạn đang lập kế hoạch trong dự án “${selectedTripProject.title}”.` : "Nhập câu hỏi về chuyến đi đường bộ của bạn.");
   const [isPending, setIsPending] = useState(false);
-  const [showProgress, setShowProgress] = useState(false);
+  const [isPreparing, setIsPreparing] = useState(false);
+  const [recoveryMessage, setRecoveryMessage] = useState<string | null>(null);
   const [pendingQuestion, setPendingQuestion] = useState("");
   const [streamingContent, setStreamingContent] = useState("");
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
@@ -735,20 +737,6 @@ export function AiAskComposer({
   }, []);
 
   useEffect(() => {
-    if (!isPending) {
-      setShowProgress(false);
-      return;
-    }
-
-    const timeout = window.setTimeout(() => {
-      setShowProgress(true);
-      setStatus("Trợ lý vẫn đang xử lý câu hỏi. Bạn cứ giữ nguyên màn hình này, mình sẽ cập nhật khi có kết quả.");
-    }, progressDelayMs);
-
-    return () => window.clearTimeout(timeout);
-  }, [isPending]);
-
-  useEffect(() => {
     if (!selectedImage) {
       setImageUrl(null);
       return;
@@ -841,6 +829,7 @@ export function AiAskComposer({
     }
 
     if (imageError) {
+      setRecoveryMessage(imageError);
       setStatus(imageError);
       imageInputRef.current?.focus();
       return;
@@ -850,7 +839,8 @@ export function AiAskComposer({
     const requestId = activeRequestIdRef.current + 1;
     activeRequestIdRef.current = requestId;
     setIsPending(true);
-    setShowProgress(false);
+    setIsPreparing(false);
+    setRecoveryMessage(null);
     setPendingQuestion(trimmedQuestion);
     setStreamingContent("");
     setStatus(selectedImage ? "Đang kiểm tra ảnh và chuẩn bị luồng trả lời..." : "Đang gửi câu hỏi và chuẩn bị luồng trả lời...");
@@ -859,11 +849,17 @@ export function AiAskComposer({
       const hadConversation = Boolean(conversationId || messages.length > 0);
       const controller = new AbortController();
       abortControllerRef.current = controller;
-      const result = await submitAiAskStream({ question: trimmedQuestion, conversationId, tripProjectId: activeTripProjectId, image: selectedImage, signal: controller.signal, onDelta: (content) => {
+      const result = await submitAiAskStream({ question: trimmedQuestion, conversationId, tripProjectId: activeTripProjectId, image: selectedImage, signal: controller.signal, onPreparing: () => {
+        if (activeRequestIdRef.current === requestId) {
+          setIsPreparing(true);
+          setStatus("Trợ lý đang chuẩn bị ngữ cảnh cho câu hỏi của bạn.");
+        }
+      }, onDelta: (content) => {
         if (activeRequestIdRef.current !== requestId) {
           return;
         }
 
+        setIsPreparing(true);
         setStreamingContent((currentContent) => currentContent + content);
       } });
 
@@ -889,7 +885,13 @@ export function AiAskComposer({
           }
           reconcileSelection(newConversationId, activeTripProjectId);
         }
-        setStatus(`${result.errorMessage} Chưa có câu trả lời trợ lý nào được lưu cho lượt này.`);
+        if (result.conversationId && failedUserMessage) {
+          setStatus(`${result.errorMessage} Chưa có câu trả lời trợ lý nào được lưu cho lượt này.`);
+          setRecoveryMessage("Tin nhắn đã được lưu nhưng chưa có câu trả lời. Bạn có thể chỉnh câu hỏi rồi gửi lại.");
+        } else {
+          setStatus(`${result.errorMessage} Nội dung vẫn còn trong ô nhập để bạn thử lại.`);
+          setRecoveryMessage("Không thể gửi yêu cầu. Nội dung của bạn vẫn còn trong ô nhập để thử lại.");
+        }
         return;
       }
 
@@ -911,11 +913,13 @@ export function AiAskComposer({
     } catch (error) {
       if (activeRequestIdRef.current === requestId && !(error instanceof DOMException && error.name === "AbortError")) {
         setStatus("Không thể gửi câu hỏi lúc này. Hãy kiểm tra đăng nhập và thử lại. Nội dung vẫn còn trong ô nhập.");
+        setRecoveryMessage("Không thể gửi yêu cầu. Nội dung của bạn vẫn còn trong ô nhập để thử lại.");
       }
     } finally {
       if (activeRequestIdRef.current === requestId) {
         isSubmittingRef.current = false;
         setIsPending(false);
+        setIsPreparing(false);
         setPendingQuestion("");
         setStreamingContent("");
         abortControllerRef.current = null;
@@ -936,16 +940,19 @@ export function AiAskComposer({
     if (imageError) {
       setSelectedImage(null);
       event.target.value = "";
+      setRecoveryMessage(imageError);
       setStatus(imageError);
       return;
     }
 
+    setRecoveryMessage(null);
     setSelectedImage(file);
     setStatus(`Đã chọn ảnh “${file.name || "ảnh đính kèm"}”. Ảnh sẽ được kiểm tra quyền sở hữu trước khi gọi AI.`);
   }
 
   function clearSelectedImage() {
     setSelectedImage(null);
+    setRecoveryMessage(null);
 
     if (imageInputRef.current) {
       imageInputRef.current.value = "";
@@ -1419,14 +1426,12 @@ export function AiAskComposer({
             </section>
           ) : null}
 
-          {isPending ? (
+          {isPreparing ? (
             <section aria-live="polite" className="mx-auto max-w-[760px] rounded-[1.5rem] border border-dashed border-[#d8c9ad] bg-[#fffdf8] p-4 text-[#17342c] shadow-[0_12px_30px_rgba(41,33,18,0.06)]">
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#1f5f46]">Đang xử lý</p>
               <p className="mt-2 text-base font-semibold">Trợ lý đang chuẩn bị câu trả lời cho câu hỏi của bạn.</p>
               <p className="mt-2 text-sm leading-6 text-[#4f625a]">
-                {showProgress
-                  ? "Quá trình đang lâu hơn bình thường một chút. Mình vẫn đang chờ kết quả từ hệ thống AI và chưa tạo nội dung trợ lý tạm thời."
-                  : "Mình đã nhận câu hỏi và đang gửi đến hệ thống AI. Vui lòng không gửi lặp lại trong lúc chờ."}
+                Mình đang chuẩn bị ngữ cảnh và nguồn liên quan. Nội dung đang nhận chỉ là tạm thời cho đến khi được lưu hoàn chỉnh.
               </p>
               {pendingQuestion ? <p className="mt-3 rounded-2xl bg-white/80 p-3 text-sm leading-6 text-[#4f625a]">“{pendingQuestion}”</p> : null}
               {streamingContent ? (
@@ -1443,7 +1448,7 @@ export function AiAskComposer({
               Câu hỏi của bạn
             </label>
             <textarea
-              className="min-h-28 w-full resize-y rounded-2xl border-0 bg-transparent px-3 py-2 text-base leading-7 text-[#17342c] outline-none placeholder:text-[#7b8b84] focus:ring-4 focus:ring-[#8fb59f]/45"
+              className="min-h-24 w-full resize-y rounded-2xl border-0 bg-transparent px-3 py-2 text-base leading-7 text-[#17342c] outline-none placeholder:text-[#7b8b84] focus:ring-4 focus:ring-[#8fb59f]/45"
               disabled={askFormDisabled}
               aria-describedby="ai-ask-status"
               id="ai-ask-question"
@@ -1455,26 +1460,28 @@ export function AiAskComposer({
               value={question}
             />
             <div className="mt-2 flex items-center justify-between gap-3 border-t border-[#eadfc8] pt-2">
-              <div className="flex items-center gap-2">
-                <label
-                  aria-label="Đính kèm ảnh tham khảo"
-                  className={`grid h-10 w-10 cursor-pointer place-items-center rounded-xl text-[#4f625a] transition hover:bg-[#edf7f0] hover:text-[#14532d] focus-within:outline-none focus-within:ring-4 focus-within:ring-[#8fb59f]/45 ${askFormDisabled ? "cursor-not-allowed opacity-50" : ""}`}
-                  title="Đính kèm ảnh"
-                  htmlFor="ai-ask-image"
-                >
-                  <AttachmentIcon />
-                  <span className="sr-only">Đính kèm ảnh tham khảo tuỳ chọn</span>
-                </label>
-              <input
-                accept="image/jpeg,image/png,image/webp"
-                className="sr-only"
-                disabled={askFormDisabled}
-                id="ai-ask-image"
-                onChange={handleImageChange}
-                ref={imageInputRef}
-                type="file"
-              />
-              </div>
+              {supportsImageInput ? (
+                <div className="flex items-center gap-2">
+                  <label
+                    aria-label="Đính kèm ảnh tham khảo"
+                    className={`grid h-11 w-11 cursor-pointer place-items-center rounded-xl text-[#4f625a] transition hover:bg-[#edf7f0] hover:text-[#14532d] focus-within:outline-none focus-within:ring-4 focus-within:ring-[#8fb59f]/45 ${askFormDisabled ? "cursor-not-allowed opacity-50" : ""}`}
+                    htmlFor="ai-ask-image"
+                    title="Đính kèm ảnh"
+                  >
+                    <AttachmentIcon />
+                    <span className="sr-only">Đính kèm ảnh tham khảo tuỳ chọn</span>
+                  </label>
+                  <input
+                    accept="image/jpeg,image/png,image/webp"
+                    className="sr-only"
+                    disabled={askFormDisabled}
+                    id="ai-ask-image"
+                    onChange={handleImageChange}
+                    ref={imageInputRef}
+                    type="file"
+                  />
+                </div>
+              ) : null}
               <button
                 aria-label={isPending ? "Đang gửi câu hỏi" : deletingTripProjectId ? "Đang xoá dự án chuyến đi" : "Gửi câu hỏi"}
                 className="grid h-11 w-11 place-items-center rounded-2xl bg-[#1f5f46] text-white shadow-[0_12px_30px_rgba(31,95,70,0.24)] transition hover:bg-[#194d39] focus:outline-none focus:ring-4 focus:ring-[#8fb59f] disabled:cursor-not-allowed disabled:bg-[#8aa89b]"
@@ -1494,11 +1501,12 @@ export function AiAskComposer({
                   ) : null}
                   <span className="truncate">{selectedImage.name || "Ảnh đính kèm"} ({formatImageSize(selectedImage.size)})</span>
                 </div>
-                <button aria-label="Bỏ ảnh đính kèm" className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-[#4f625a] transition hover:bg-[#fff1ed] hover:text-[#8c2f1d] focus:outline-none focus:ring-4 focus:ring-[#f0c8a0]" disabled={askFormDisabled} onClick={clearSelectedImage} title="Bỏ ảnh" type="button">
+                <button aria-label="Bỏ ảnh đính kèm" className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-[#4f625a] transition hover:bg-[#fff1ed] hover:text-[#8c2f1d] focus:outline-none focus:ring-4 focus:ring-[#f0c8a0]" disabled={askFormDisabled} onClick={clearSelectedImage} title="Bỏ ảnh" type="button">
                   <CloseIcon />
                 </button>
               </div>
             ) : null}
+            {recoveryMessage ? <p className="mt-3 rounded-xl border border-[#f0c8a0] bg-[#fff7ed] px-3 py-2 text-sm leading-6 text-[#6f3f12]" role="status">{recoveryMessage}</p> : null}
             <p aria-live="polite" className="sr-only" id="ai-ask-status">
               {isPending ? "Đang gửi, vui lòng chờ" : status}
             </p>
@@ -1631,6 +1639,7 @@ async function submitAiAskStream({
   tripProjectId,
   image,
   signal,
+  onPreparing,
   onDelta,
 }: {
   question: string;
@@ -1638,6 +1647,7 @@ async function submitAiAskStream({
   tripProjectId?: string;
   image: File | null;
   signal?: AbortSignal;
+  onPreparing: () => void;
   onDelta: (content: string) => void;
 }): Promise<StreamResult> {
   const formData = new FormData();
@@ -1675,6 +1685,10 @@ async function submitAiAskStream({
       if (!event) {
         terminalResult ??= { status: "answer-failed", errorMessage: "Luồng trả lời bị gián đoạn trước khi hoàn tất." };
         continue;
+      }
+
+      if (event.type === "preparing") {
+        onPreparing();
       }
 
       if (event.type === "delta" && event.content) {

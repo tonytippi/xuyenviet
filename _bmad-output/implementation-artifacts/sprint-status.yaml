@@ -130,7 +130,7 @@ development_status:
   7-2-deliver-the-focused-public-entry: done
   7-3-deliver-the-authenticated-desktop-shell: done
   7-4-keep-workspace-selection-canonical-across-devices: done
-  7-5-refine-the-ai-ask-composer-and-streaming-feedback: backlog
+  7-5-refine-the-ai-ask-composer-and-streaming-feedback: done
   7-6-present-scannable-answer-content: backlog
   7-7-inspect-persisted-answer-details-responsively: backlog
   epic-7-retrospective: optional

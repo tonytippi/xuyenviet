@@ -84,6 +84,7 @@ async function getAuthenticatedAiAskRedirect(searchParams: Record<string, string
     hasAdminAccess: vi.fn().mockReturnValue(false),
   }));
   vi.doMock("@/features/auth/actions", () => ({ signOutCurrentUser: vi.fn() }));
+  vi.resetModules();
 
   const { default: AiAskPage } = await import("@/app/ai-ask/page");
 
@@ -701,14 +702,14 @@ describe("AI Ask structured answer rendering", () => {
   test("composer source includes explicit pending and long-running progress contracts", () => {
     const source = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
 
-    expect(source).toContain("const progressDelayMs = 4_000");
+    expect(source).toContain("const [isPreparing, setIsPreparing] = useState(false)");
+    expect(source).toContain('if (event.type === "preparing")');
     expect(source).toContain("Đang gửi câu hỏi và chuẩn bị luồng trả lời");
-    expect(source).toContain("Trợ lý vẫn đang xử lý câu hỏi");
-    expect(source).toContain("Quá trình đang lâu hơn bình thường một chút");
-    expect(source).toContain("chưa tạo nội dung trợ lý tạm thời");
-    expect(source).toContain("Vui lòng không gửi lặp lại trong lúc chờ");
+    expect(source).toContain("Trợ lý đang chuẩn bị ngữ cảnh cho câu hỏi của bạn.");
+    expect(source).toContain("Nội dung đang nhận chỉ là tạm thời cho đến khi được lưu hoàn chỉnh.");
     expect(source).toContain("Đang nhận từng phần");
     expect(source).toContain("aria-live=\"polite\"");
+    expect(source).toContain("setIsPreparing(true);\n        setStreamingContent");
   });
 
   test("composer source accepts removable validated traveler images", () => {
@@ -719,6 +720,12 @@ describe("AI Ask structured answer rendering", () => {
     expect(source).toContain("maxImageByteSize = 5 * 1024 * 1024");
     expect(source).toContain("Bỏ ảnh");
     expect(source).toContain("AttachmentIcon");
+    expect(source).toContain("{supportsImageInput ? (");
+    expect(source).toContain("supportsImageInput?: boolean");
+    expect(source).toContain("setRecoveryMessage");
+    expect(source).toContain("setRecoveryMessage(null);\n    setSelectedImage(file);");
+    expect(source).toContain("function clearSelectedImage() {\n    setSelectedImage(null);\n    setRecoveryMessage(null);");
+    expect(readFileSync("src/app/ai-ask/page.tsx", "utf8")).toContain("supportsImageInput={Boolean(imageInputModel)}");
   });
 
   test("composer source keeps duplicate-send controls guarded while pending", () => {
@@ -991,6 +998,7 @@ describe("AI Ask streaming route", () => {
     const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
 
     expect(response.status).toBe(400);
+    expect(await response.text()).not.toContain('"type":"preparing"');
     expect(fetchMock).not.toHaveBeenCalled();
     expect(await countConversations()).toBe(0);
     expect(await countMessages()).toBe(0);
@@ -1152,11 +1160,13 @@ describe("AI Ask streaming route", () => {
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
     const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
-    await response.text();
+    const body = await response.text();
     const savedMessages = await testDb.select().from(messages).where(eq(messages.conversationId, conversation.id)).orderBy(asc(messages.createdAt), asc(messages.id));
     const gatewayMessages = getGatewayRequestMessages(fetchMock, 0);
 
     expect(response.status).toBe(200);
+    expect(body.indexOf('{"type":"preparing"')).toBeGreaterThan(-1);
+    expect(body.indexOf('{"type":"preparing"')).toBeLessThan(body.indexOf('{"type":"delta"'));
     expect(savedMessages.map((message) => ({ role: message.role, content: message.content }))).toEqual([
       { role: "user", content: "Hà Nội đi Huế 5 ngày?" },
       { role: "assistant", content: "Kế hoạch gợi ý:\nNên chia chặng." },
