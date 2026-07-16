@@ -748,21 +748,42 @@ describe("AI Ask structured answer rendering", () => {
     expect(source).not.toContain("optimisticAssistant");
   });
 
-  test("renders recognized assistant headings as scannable sections without source chips", async () => {
+  test("renders answer-scoped navigation and uncertainty sections without source chips", async () => {
     const { AssistantMessageContent } = await import("@/features/ai/ai-ask-composer");
-    const assistantContent = ["## Kế hoạch gợi ý:", "- Ngày 1: đi nhẹ và nghỉ sớm.", "", "**Nguồn và độ tin cậy:**", "Đây là gợi ý tổng quát, chưa dùng nguồn tuyển chọn.", "", "1. Câu hỏi tiếp theo:", "Bạn đi cùng trẻ nhỏ không?"].join("\n");
+    const assistantContent = ["## Kế hoạch gợi ý:", "- Ngày 1: đi nhẹ và nghỉ sớm.", "", "**Điều chưa chắc chắn:**", "Cần xác minh giờ mở cửa.", "", "**Nguồn và độ tin cậy:**", "Đây là gợi ý tổng quát, chưa dùng nguồn tuyển chọn.", "", "1. Câu hỏi tiếp theo:", "Bạn đi cùng trẻ nhỏ không?"].join("\n");
     const html = renderToStaticMarkup(
       AssistantMessageContent({
+        messageId: "assistant-1",
         content: assistantContent,
       }),
     );
 
+    expect(html).toContain('aria-label="Các mục trong câu trả lời"');
+    expect(html).toContain('href="#answer-assistant-1-section-0"');
+    expect(html).toContain('href="#answer-assistant-1-section-1"');
+    expect(html).toContain('id="answer-assistant-1-section-0"');
+    expect(html).toContain('id="answer-assistant-1-section-1"');
     expect(html).toContain("## Kế hoạch gợi ý:");
+    expect(html).toContain("**Điều chưa chắc chắn:**");
     expect(html).toContain("**Nguồn và độ tin cậy:**");
     expect(html).toContain("1. Câu hỏi tiếp theo:");
     expect(html).toContain("Đây là gợi ý tổng quát, chưa dùng nguồn tuyển chọn.");
     expect(html).not.toContain("source-chip");
     expect(html).not.toContain("[1]");
+  });
+
+  test("omits answer navigation for unstructured content and namespaces repeated headings", async () => {
+    const { AssistantMessageContent } = await import("@/features/ai/ai-ask-composer");
+    const unstructuredHtml = renderToStaticMarkup(createElement(AssistantMessageContent, { messageId: "assistant-1", content: "Một câu trả lời không có tiêu đề được nhận diện." }));
+    const firstAnswerHtml = renderToStaticMarkup(createElement(AssistantMessageContent, { messageId: "assistant-1", content: "Kế hoạch gợi ý:\nĐi nhẹ." }));
+    const secondAnswerHtml = renderToStaticMarkup(createElement(AssistantMessageContent, { messageId: "assistant-2", content: "Kế hoạch gợi ý:\nĐi sớm." }));
+
+    expect(unstructuredHtml).not.toContain("Các mục trong câu trả lời");
+    expect(unstructuredHtml).not.toContain("answer-assistant-1-section");
+    expect(firstAnswerHtml).toContain('href="#answer-assistant-1-section-0"');
+    expect(firstAnswerHtml).toContain('id="answer-assistant-1-section-0"');
+    expect(secondAnswerHtml).toContain('href="#answer-assistant-2-section-0"');
+    expect(secondAnswerHtml).toContain('id="answer-assistant-2-section-0"');
   });
 
   test("renders persisted failed user-only turns so refreshed history matches storage", async () => {

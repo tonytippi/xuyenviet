@@ -216,6 +216,7 @@ const assistantSectionHeadings = new Set([
   "Lưu ý thực tế",
   "Cảnh báo cần kiểm tra",
   "Nguồn và độ tin cậy",
+  "Điều chưa chắc chắn",
   "Bước tiếp theo",
   "Câu hỏi tiếp theo",
 ]);
@@ -270,8 +271,9 @@ function splitAssistantContent(content: string) {
   }).filter((section) => section.heading || section.body);
 }
 
-export function AssistantMessageContent({ content, annotations, selectedEntityId, detailPanelIds, onSelectEntity }: { content: string; annotations?: AnswerAnnotation[]; selectedEntityId?: string; detailPanelIds?: string; onSelectEntity?: (entity: AnswerEntityDescriptor, trigger: HTMLElement) => void }) {
+export function AssistantMessageContent({ messageId, content, annotations, selectedEntityId, detailPanelIds, onSelectEntity }: { messageId?: string; content: string; annotations?: AnswerAnnotation[]; selectedEntityId?: string; detailPanelIds?: string; onSelectEntity?: (entity: AnswerEntityDescriptor, trigger: HTMLElement) => void }) {
   const sections = splitAssistantContent(content);
+  const navigableSections = messageId ? sections.filter((section) => section.heading) : [];
 
   if (sections.length <= 1 && !sections[0]?.heading) {
     return <p className="whitespace-pre-wrap text-base leading-7"><AnnotatedAnswerText content={content} annotations={annotations} selectedEntityId={selectedEntityId} detailPanelIds={detailPanelIds} onSelectEntity={onSelectEntity} /></p>;
@@ -279,12 +281,25 @@ export function AssistantMessageContent({ content, annotations, selectedEntityId
 
   return (
     <div className="space-y-4">
+      {navigableSections.length > 0 ? (
+        <nav aria-label="Các mục trong câu trả lời" className="-mx-1 overflow-x-auto pb-1">
+          <ul className="flex w-max min-w-full gap-2 px-1">
+            {navigableSections.map((section, index) => (
+              <li key={`${section.heading}-${index}`}>
+                <a className="block whitespace-nowrap rounded-full border border-[#8fb59f] bg-[#edf7f0] px-3 py-2 text-sm font-semibold text-[#14532d] transition hover:bg-white focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45" href={`#answer-${messageId}-section-${index}`}>
+                  {normalizeAssistantHeading(section.heading!)}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </nav>
+      ) : null}
       {sections.map((section, index) => {
         const headingAnnotations = section.heading && section.headingStart !== undefined && section.headingEnd !== undefined ? annotations?.filter((annotation) => annotation.start >= section.headingStart! && annotation.end <= section.headingEnd!).map((annotation) => ({ ...annotation, start: annotation.start - section.headingStart!, end: annotation.end - section.headingStart! })) : [];
         const sectionAnnotations = section.bodyStart >= 0 && section.bodyEnd >= 0 ? annotations?.filter((annotation) => annotation.start >= section.bodyStart && annotation.end <= section.bodyEnd).map((annotation) => ({ ...annotation, start: annotation.start - section.bodyStart, end: annotation.end - section.bodyStart })) : [];
 
         return (
-          <section className="rounded-2xl border border-[#eadfc8] bg-white/70 p-4" key={`${section.heading || "intro"}-${index}`}>
+          <section className="rounded-2xl border border-[#eadfc8] bg-white/70 p-4" id={section.heading && messageId ? `answer-${messageId}-section-${navigableSections.indexOf(section)}` : undefined} key={`${section.heading || "intro"}-${index}`}>
             {section.heading ? <h3 className="text-sm font-bold uppercase tracking-[0.12em] text-[#1f5f46]"><AnnotatedAnswerText content={section.heading} annotations={headingAnnotations} selectedEntityId={selectedEntityId} detailPanelIds={detailPanelIds} onSelectEntity={onSelectEntity} /></h3> : null}
             {section.body ? <p className="mt-2 whitespace-pre-wrap text-base leading-7"><AnnotatedAnswerText content={section.body} annotations={sectionAnnotations} selectedEntityId={selectedEntityId} detailPanelIds={detailPanelIds} onSelectEntity={onSelectEntity} /></p> : null}
           </section>
@@ -1399,7 +1414,7 @@ export function AiAskComposer({
                   </p>
                   {message.role === "assistant" ? (
                     <>
-                      <AssistantMessageContent content={message.content} annotations={message.annotations} selectedEntityId={selectedAnswerEntityId} detailPanelIds={answerDetailPanelIds} onSelectEntity={handleSelectAnswerEntity} />
+                      <AssistantMessageContent messageId={message.id} content={message.content} annotations={message.annotations} selectedEntityId={selectedAnswerEntityId} detailPanelIds={answerDetailPanelIds} onSelectEntity={handleSelectAnswerEntity} />
                       <AssistantProvenanceBlock provenance={message.provenance} selectedEntityId={selectedAnswerEntityId} detailPanelIds={answerDetailPanelIds} onSelectEntity={handleSelectAnswerEntity} />
                       {saveAnswerUsefulnessFeedbackAction ? (
                         <AnswerUsefulnessFeedbackControl
