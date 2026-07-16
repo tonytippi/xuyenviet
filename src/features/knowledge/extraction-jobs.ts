@@ -108,14 +108,14 @@ export async function getActiveKnowledgeExtractionJobForSource(db: Pick<Extracti
 }
 
 export async function processNextKnowledgeExtractionJob(options: { workerId?: string; now?: Date } = {}, db = getDb()) {
-  await recoverStaleKnowledgeExtractionJobs({ now: options.now }, db);
+  const recovery = await recoverStaleKnowledgeExtractionJobs({ now: options.now }, db);
   const job = await claimNextKnowledgeExtractionJob(options, db);
 
   if (!job) {
-    return { status: "no_job" as const };
+    return { status: "no_job" as const, recoveredFailures: recovery.failures };
   }
 
-  return processKnowledgeExtractionJob(job.id, db);
+  return { ...(await processKnowledgeExtractionJob(job.id, db)), recoveredFailures: recovery.failures };
 }
 
 export async function runKnowledgeExtractionWorkerLoop(options: { once?: boolean; workerId?: string; pollIntervalMs?: number; signal?: AbortSignal } = {}) {
@@ -123,6 +123,14 @@ export async function runKnowledgeExtractionWorkerLoop(options: { once?: boolean
 
   while (!options.signal?.aborted) {
     const result = await processNextKnowledgeExtractionJob({ workerId: options.workerId });
+
+    for (const failure of result.recoveredFailures) {
+      console.warn("Knowledge extraction job failed", failure);
+    }
+
+    if (result.status === "failed") {
+      console.warn("Knowledge extraction job failed", result.failure);
+    }
 
     if (options.once) {
       return result;
@@ -197,8 +205,8 @@ export async function processKnowledgeExtractionJob(jobId: string, db = getDb())
 
     return { status: "processed" as const, jobId: job.id };
   } catch (error) {
-    await handleJobFailure(job, error, db);
-    return { status: "failed" as const, jobId: job.id, error };
+    const failure = await handleJobFailure(job, error, db);
+    return failure ? { status: "failed" as const, jobId: job.id, failure } : { status: "not_processable" as const };
   }
 }
 
@@ -272,21 +280,28 @@ async function handleJobFailure(job: typeof knowledgeExtractionJobs.$inferSelect
   const safe = toSafeJobError(error);
 
   if (retryable && attemptsRemain) {
-    await db
-        .update(knowledgeExtractionJobs)
-        .set({ status: "queued", nextRunAt: new Date(now.getTime() + getRetryDelayMs(job.attemptCount)), lockedAt: null, lockedBy: null, lastErrorCode: safe.code, lastErrorMessage: safe.message, updatedAt: now })
-      .where(and(eq(knowledgeExtractionJobs.id, job.id), eq(knowledgeExtractionJobs.status, "running"), eq(knowledgeExtractionJobs.lockedBy, job.lockedBy ?? "")));
-    return;
+    const [updated] = await db
+      .update(knowledgeExtractionJobs)
+      .set({ status: "queued", nextRunAt: new Date(now.getTime() + getRetryDelayMs(job.attemptCount)), lockedAt: null, lockedBy: null, lastErrorCode: safe.code, lastErrorMessage: safe.message, updatedAt: now })
+      .where(and(eq(knowledgeExtractionJobs.id, job.id), eq(knowledgeExtractionJobs.status, "running"), eq(knowledgeExtractionJobs.lockedBy, job.lockedBy ?? "")))
+      .returning({ id: knowledgeExtractionJobs.id });
+    if (!updated) return null;
+    return toJobFailureLog(job, safe, true, "queued");
   }
 
-  await db
+  const [updated] = await db
     .update(knowledgeExtractionJobs)
     .set({ status: "failed", finishedAt: now, lockedAt: null, lockedBy: null, lastErrorCode: safe.code, lastErrorMessage: safe.message, updatedAt: now })
-    .where(and(eq(knowledgeExtractionJobs.id, job.id), eq(knowledgeExtractionJobs.status, "running"), eq(knowledgeExtractionJobs.lockedBy, job.lockedBy ?? "")));
+    .where(and(eq(knowledgeExtractionJobs.id, job.id), eq(knowledgeExtractionJobs.status, "running"), eq(knowledgeExtractionJobs.lockedBy, job.lockedBy ?? "")))
+    .returning({ id: knowledgeExtractionJobs.id });
+
+  if (!updated) return null;
 
   if (job.facebookCaptureReviewId) {
     await markFacebookCaptureReviewStatus(db, { reviewId: job.facebookCaptureReviewId, status: "extraction_failed", actor: { userId: job.createdByUserId, email: job.createdByEmail }, extractionError: `Extraction failed: ${safe.code}` }).catch(() => undefined);
   }
+
+  return toJobFailureLog(job, safe, false, "failed");
 }
 
 export async function recoverStaleKnowledgeExtractionJobs(options: { now?: Date; staleMs?: number } = {}, db = getDb()) {
@@ -297,7 +312,7 @@ export async function recoverStaleKnowledgeExtractionJobs(options: { now?: Date;
     .update(knowledgeExtractionJobs)
     .set({ status: "failed", finishedAt: now, lockedAt: null, lockedBy: null, lastErrorCode: "stale_max_attempts", lastErrorMessage: "Extraction failed: stale_max_attempts", updatedAt: now })
     .where(and(eq(knowledgeExtractionJobs.status, "running"), isNotNull(knowledgeExtractionJobs.lockedAt), lte(knowledgeExtractionJobs.lockedAt, staleBefore), sql`${knowledgeExtractionJobs.attemptCount} >= ${knowledgeExtractionJobs.maxAttempts}`))
-    .returning({ id: knowledgeExtractionJobs.id, facebookCaptureReviewId: knowledgeExtractionJobs.facebookCaptureReviewId, createdByUserId: knowledgeExtractionJobs.createdByUserId, createdByEmail: knowledgeExtractionJobs.createdByEmail });
+    .returning({ id: knowledgeExtractionJobs.id, sourceId: knowledgeExtractionJobs.sourceId, facebookCaptureReviewId: knowledgeExtractionJobs.facebookCaptureReviewId, mode: knowledgeExtractionJobs.mode, attemptCount: knowledgeExtractionJobs.attemptCount, maxAttempts: knowledgeExtractionJobs.maxAttempts, createdByUserId: knowledgeExtractionJobs.createdByUserId, createdByEmail: knowledgeExtractionJobs.createdByEmail });
 
   for (const row of failedRows) {
     if (row.facebookCaptureReviewId) {
@@ -311,7 +326,12 @@ export async function recoverStaleKnowledgeExtractionJobs(options: { now?: Date;
     .where(and(eq(knowledgeExtractionJobs.status, "running"), isNotNull(knowledgeExtractionJobs.lockedAt), lte(knowledgeExtractionJobs.lockedAt, staleBefore), sql`${knowledgeExtractionJobs.attemptCount} < ${knowledgeExtractionJobs.maxAttempts}`))
     .returning({ id: knowledgeExtractionJobs.id });
 
-  return { recoveredCount: rows.length, failedCount: failedRows.length, jobIds: rows.map((row) => row.id) };
+  return {
+    recoveredCount: rows.length,
+    failedCount: failedRows.length,
+    jobIds: rows.map((row) => row.id),
+    failures: failedRows.map((row) => toJobFailureLog(row, { code: "stale_max_attempts", detail: undefined, message: "Extraction failed: stale_max_attempts" }, false, "failed")),
+  };
 }
 
 async function lockSourceJobEnqueue(db: { execute: (query: ReturnType<typeof sql>) => Promise<unknown> }, sourceId: string) {
@@ -342,15 +362,34 @@ function isRetryableJobError(error: unknown) {
 
 function toSafeJobError(error: unknown) {
   if (isKnowledgeExtractionError(error) && error instanceof KnowledgeExtractionError) {
-    return { code: error.code, message: `Extraction failed: ${error.code}` };
+    const detail = normalizeSafeDetail(error.safeDetail);
+    return { code: error.code, detail, message: `Extraction failed: ${error.code}${detail ? ` (${detail})` : ""}` };
   }
 
-  if (error instanceof Error) {
-    const code = error.message.replace(/[^a-z0-9_:-]/gi, "_").slice(0, 80) || "unknown";
-    return { code, message: "Extraction failed: worker_error" };
+  return { code: "worker_error", detail: undefined, message: "Extraction failed: worker_error" };
+}
+
+function normalizeSafeDetail(value: string | undefined) {
+  if (!value || !/^[a-z0-9_:-]{1,120}$/.test(value)) {
+    return undefined;
   }
 
-  return { code: "unknown", message: "Extraction failed: unknown" };
+  return value;
+}
+
+function toJobFailureLog(job: Pick<typeof knowledgeExtractionJobs.$inferSelect, "id" | "sourceId" | "facebookCaptureReviewId" | "mode" | "attemptCount" | "maxAttempts">, safe: ReturnType<typeof toSafeJobError>, retryable: boolean, outcome: "queued" | "failed") {
+  return {
+    jobId: job.id,
+    sourceId: job.sourceId,
+    facebookCaptureReviewId: job.facebookCaptureReviewId,
+    mode: job.mode,
+    attemptCount: job.attemptCount,
+    maxAttempts: job.maxAttempts,
+    code: safe.code,
+    detail: safe.detail,
+    retryable,
+    outcome,
+  };
 }
 
 function getRetryDelayMs(attemptCount: number) {

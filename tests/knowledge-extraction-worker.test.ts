@@ -118,6 +118,19 @@ describe("knowledge extraction worker jobs", () => {
     await expect(testDb.select().from(facebookCaptureReviews).where(eq(facebookCaptureReviews.id, review.id))).resolves.toMatchObject([{ status: "extraction_failed" }]);
   });
 
+  test("logs stale terminal recovery with safe job metadata", async () => {
+    const review = await createCapturedFacebookReview("stale-log-job");
+    const [job] = await testDb.insert(knowledgeExtractionJobs).values({ sourceId: review.sourceId, facebookCaptureReviewId: review.id, mode: "extract_only", status: "running", attemptCount: 3, maxAttempts: 3, lockedAt: new Date(Date.now() - 20 * 60_000), lockedBy: "dead-worker", startedAt: new Date(Date.now() - 20 * 60_000), createdByUserId: "operator-user", createdByEmail: "operator-user@example.com" }).returning();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    await expect(runKnowledgeExtractionWorkerLoop({ once: true, workerId: "test-worker" })).resolves.toMatchObject({
+      status: "no_job",
+      recoveredFailures: [{ jobId: job.id, sourceId: review.sourceId, code: "stale_max_attempts", retryable: false, outcome: "failed" }],
+    });
+
+    expect(warn).toHaveBeenCalledWith("Knowledge extraction job failed", expect.objectContaining({ jobId: job.id, sourceId: review.sourceId, facebookCaptureReviewId: review.id, mode: "extract_only", attemptCount: 3, maxAttempts: 3, code: "stale_max_attempts", retryable: false, outcome: "failed" }));
+  });
+
   test("source intake list exposes active async extraction job state", async () => {
     authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
     await createUrlSource("url-active-job");
@@ -130,6 +143,74 @@ describe("knowledge extraction worker jobs", () => {
 
   test("one-shot worker exits when no jobs are available", async () => {
     await expect(runKnowledgeExtractionWorkerLoop({ once: true, workerId: "test-worker" })).resolves.toMatchObject({ status: "no_job" });
+  });
+
+  test("logs and persists only safe malformed-output diagnostics", async () => {
+    await createExtractionModel();
+    const review = await createCapturedFacebookReview("malformed-output-job");
+    const rawMarker = "RAW_SOURCE_MARKER_DO_NOT_LOG";
+    const modelMarker = "RAW_MODEL_MARKER_DO_NOT_LOG";
+    await testDb.update(rawSourceMaterial).set({ rawText: rawMarker }).where(eq(rawSourceMaterial.sourceId, review.sourceId));
+    const actor = { userId: "operator-user", email: "operator-user@example.com" };
+    const queued = await enqueueKnowledgeExtractionJob({ sourceId: review.sourceId, facebookCaptureReviewId: review.id, mode: "extract_only", actor }, testDb);
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ drafts: [{ type: "general_travel_tip", title: modelMarker, summary: "Bản nháp thiếu vị trí hoặc cung đường." , confidence: "community", freshness_sensitive: false }] }) } }], model: "cx/extract" }), { status: 200 }));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    await expect(runKnowledgeExtractionWorkerLoop({ once: true, workerId: "test-worker" })).resolves.toMatchObject({
+      status: "failed",
+      jobId: queued.job.id,
+      failure: { jobId: queued.job.id, sourceId: review.sourceId, facebookCaptureReviewId: review.id, mode: "extract_only", attemptCount: 1, maxAttempts: 3, code: "invalid_model_output", detail: "missing_location_or_route", retryable: false, outcome: "failed" },
+    });
+
+    const [failedJob] = await testDb.select().from(knowledgeExtractionJobs).where(eq(knowledgeExtractionJobs.id, queued.job.id));
+    expect(failedJob).toMatchObject({ status: "failed", lastErrorCode: "invalid_model_output", lastErrorMessage: "Extraction failed: invalid_model_output (missing_location_or_route)" });
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith("Knowledge extraction job failed", expect.objectContaining({ jobId: queued.job.id, sourceId: review.sourceId, facebookCaptureReviewId: review.id, mode: "extract_only", attemptCount: 1, maxAttempts: 3, code: "invalid_model_output", detail: "missing_location_or_route", retryable: false, outcome: "failed" }));
+    expect(JSON.stringify(failedJob)).not.toContain(rawMarker);
+    expect(JSON.stringify(failedJob)).not.toContain(modelMarker);
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(rawMarker);
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(modelMarker);
+  });
+
+  test("logs a safe queued outcome for a retryable provider failure", async () => {
+    await createExtractionModel();
+    const review = await createCapturedFacebookReview("retryable-provider-job");
+    const actor = { userId: "operator-user", email: "operator-user@example.com" };
+    const queued = await enqueueKnowledgeExtractionJob({ sourceId: review.sourceId, facebookCaptureReviewId: review.id, mode: "extract_only", actor }, testDb);
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(null, { status: 503 }));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    await expect(runKnowledgeExtractionWorkerLoop({ once: true, workerId: "test-worker" })).resolves.toMatchObject({
+      status: "failed",
+      jobId: queued.job.id,
+      failure: { jobId: queued.job.id, code: "provider_failed", retryable: true, outcome: "queued" },
+    });
+
+    await expect(testDb.select().from(knowledgeExtractionJobs).where(eq(knowledgeExtractionJobs.id, queued.job.id))).resolves.toMatchObject([
+      { status: "queued", lastErrorCode: "provider_failed", lastErrorMessage: "Extraction failed: provider_failed" },
+    ]);
+    const workerWarnings = warn.mock.calls.filter(([message]) => message === "Knowledge extraction job failed");
+    expect(workerWarnings).toHaveLength(1);
+    expect(workerWarnings[0]).toEqual(["Knowledge extraction job failed", expect.objectContaining({ jobId: queued.job.id, sourceId: review.sourceId, facebookCaptureReviewId: review.id, mode: "extract_only", attemptCount: 1, maxAttempts: 3, code: "provider_failed", detail: undefined, retryable: true, outcome: "queued" })]);
+  });
+
+  test("does not persist or log an unexpected error message", async () => {
+    const review = await createCapturedFacebookReview("unexpected-worker-error");
+    const rawMarker = "RAW_SOURCE_MARKER_DO_NOT_LOG";
+    await testDb.update(rawSourceMaterial).set({ rawText: rawMarker }).where(eq(rawSourceMaterial.sourceId, review.sourceId));
+    const [job] = await testDb.insert(knowledgeExtractionJobs).values({ sourceId: review.sourceId, facebookCaptureReviewId: review.id, mode: "extract_only", status: "queued", resultDraftIds: ["missing-draft"], resultDraftCount: 1, createdByUserId: "operator-user", createdByEmail: "operator-user@example.com" }).returning();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    await expect(runKnowledgeExtractionWorkerLoop({ once: true, workerId: "test-worker" })).resolves.toMatchObject({
+      status: "failed",
+      jobId: job.id,
+      failure: { jobId: job.id, code: "worker_error", detail: undefined, retryable: false, outcome: "failed" },
+    });
+
+    const [failedJob] = await testDb.select().from(knowledgeExtractionJobs).where(eq(knowledgeExtractionJobs.id, job.id));
+    expect(failedJob).toMatchObject({ status: "failed", lastErrorCode: "worker_error", lastErrorMessage: "Extraction failed: worker_error" });
+    expect(JSON.stringify(failedJob)).not.toContain(rawMarker);
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(rawMarker);
   });
 
   test("approve-all retry resumes job-owned draft IDs without calling provider again", async () => {

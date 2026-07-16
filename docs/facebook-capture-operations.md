@@ -121,4 +121,6 @@ If Facebook shows login, blocked, or empty content, refresh the local Playwright
 
 If captured text is incomplete or corrupted, use the admin review detail page `Recapture` action. This clears `raw_source_material.raw_text` and capture metadata, resets the review to `needs_review`, and queues the source for another `pnpm facebook:capture --source-id <source-id>` run. Recapture is blocked once extraction cards already exist for that capture version.
 
+If an extraction job fails, correlate its `knowledge_extraction_jobs` row with the worker warning by job ID, source ID, and Facebook review ID. The row and warning contain only safe error code/detail and attempt metadata; investigate the source only in the operator review workflow, never from worker logs.
+
 Capture metadata includes diagnostics that identify the selected text path. Useful fields are `selectedTextSource`, `selectedCaptureTextSource`, `selectedInnerTextLength`, `selectedTextContentLength`, `selectedHtmlTextLength`, `graphqlResponseCount`, and `graphqlCandidateLength`. Current extraction order tries direct DOM text, serialized HTML text, CSS-rendered text, text content, and finally a matching GraphQL post-message candidate when available.
