@@ -40,7 +40,8 @@ export function artifactHash(payload: Record<string, unknown>) {
 }
 
 export function isArtifactContentValid(payload: unknown, contentHash: string) {
-  return Boolean(payload && typeof payload === "object" && !Array.isArray(payload) && artifactHash(payload as Record<string, unknown>) === contentHash);
+  const parsedPayload = parseJsonObject(payload);
+  return Boolean(parsedPayload && artifactHash(parsedPayload) === contentHash);
 }
 
 export async function assertCaptureCacheReady(sql: CacheSql) {
@@ -131,7 +132,22 @@ export async function findForceLiveArtifact(sql: CacheSql, sourceId: string, for
 }
 
 function rowToArtifact(row: Record<string, unknown>): CaptureArtifact {
-  return { id: String(row.id), provider: row.provider as CaptureArtifact["provider"], reuseKey: String(row.reuse_key), resourceIdentity: String(row.resource_identity), captureMethodVersion: String(row.capture_method_version), payloadSchemaVersion: String(row.payload_schema_version), promptVersion: row.prompt_version ? String(row.prompt_version) : null, model: row.model ? String(row.model) : null, payload: row.payload as Record<string, unknown>, metadata: row.metadata as Record<string, unknown>, contentHash: String(row.content_hash), capturedAt: new Date(String(row.captured_at)).toISOString() };
+  const payload = parseJsonObject(row.payload);
+  const metadata = parseJsonObject(row.metadata);
+  if (!payload || !metadata) throw new Error("capture_artifact_invalid_json");
+  return { id: String(row.id), provider: row.provider as CaptureArtifact["provider"], reuseKey: String(row.reuse_key), resourceIdentity: String(row.resource_identity), captureMethodVersion: String(row.capture_method_version), payloadSchemaVersion: String(row.payload_schema_version), promptVersion: row.prompt_version ? String(row.prompt_version) : null, model: row.model ? String(row.model) : null, payload, metadata, contentHash: String(row.content_hash), capturedAt: new Date(String(row.captured_at)).toISOString() };
+}
+
+function parseJsonObject(value: unknown): Record<string, unknown> | null {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
+  if (typeof value !== "string") return null;
+
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
 }
 
 function stableJson(value: unknown): string {

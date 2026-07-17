@@ -51,6 +51,7 @@ describe("capture archive identities", () => {
     expect(sanitizeCacheValue({ nested: { nested: { nested: { nested: { nested: { nested: { nested: { nested: { nested: "too deep" } } } } } } } } })).toEqual({ nested: { nested: { nested: { nested: { nested: { nested: { nested: { nested: {} } } } } } } } });
     const payload = { rawText: "trusted" };
     expect(isArtifactContentValid(payload, artifactHash(payload))).toBe(true);
+    expect(isArtifactContentValid(JSON.stringify(payload), artifactHash(payload))).toBe(true);
     expect(isArtifactContentValid({ rawText: "tampered" }, artifactHash(payload))).toBe(false);
     expect(artifactHash({ b: 2, a: 1 })).toBe(artifactHash({ a: 1, b: 2 }));
   });

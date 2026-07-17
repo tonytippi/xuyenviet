@@ -6,7 +6,7 @@ https://web.facebook.com/share/p/1ExJpcQEic/
 https://web.facebook.com/share/p/1BPCbfxVdx/
 # KNXV: Hoi An
 https://web.facebook.com/share/p/1QGQbv6JQb/
-KNXV: Làng Bích Họa Tam Thanh & Huyện Đảo Lý Sơn
+# KNXV: Làng Bích Họa Tam Thanh & Huyện Đảo Lý Sơn
 https://web.facebook.com/share/p/16eYit2seR/
 #KNXV: Quy Nhon
 https://web.facebook.com/share/p/1CWYr55n5V/
@@ -14,7 +14,7 @@ https://web.facebook.com/share/p/1CWYr55n5V/
 https://web.facebook.com/share/p/1BaXNWkVRS/
 # KNXV: Lich Trinh Ha Noi - Phu Yen
 https://www.facebook.com/share/p/1EMmxokZev/
-KNXV: Homestay tại làng chài Phước Đồng
+# KNXV: Homestay tại làng chài Phước Đồng
 https://web.facebook.com/share/p/1CFyNqJSHo/
 # KNXV: Cù Lao Mái Nhà – Phú Yên
 https://www.facebook.com/share/p/1Cax2YTZsM/
@@ -33,5 +33,3 @@ https://www.facebook.com/share/p/1Be8dPAWMk/
 https://www.facebook.com/share/p/1DUNz36aLG/
 # Ven bien Phu Yen - HCM
 https://www.facebook.com/share/p/1DQN8oCT3p/
-# Lang Chai Ninh Van
-https://www.facebook.com/share/r/1ERdm8Acjh/
