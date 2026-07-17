@@ -6,8 +6,11 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 
 import { schema, users } from "../src/db/schema";
-import { listQueuedYoutubeSources, parseYoutubeEvidence, recordYoutubeCaptureFailure, saveYoutubeEvidence, type YoutubeCaptureActor } from "../src/features/knowledge/youtube-capture";
-import { getDatabaseUrl, getEnvValue } from "./db-env";
+import { admitArtifact, assertCaptureCacheReady, findReusableArtifact, finishImport, prepareImport } from "../src/features/knowledge/capture-cache";
+import { flushCachedArtifact } from "../src/features/knowledge/capture-orchestration";
+import { CAPTURE_PAYLOAD_SCHEMA_VERSION, YOUTUBE_CAPTURE_METHOD_VERSION, captureReuseKey, youtubeResourceIdentity } from "../src/features/knowledge/capture-identity";
+import { findYoutubeCaptureImportByCorrelationToken, listQueuedYoutubeSources, parseYoutubeEvidence, recordYoutubeCaptureFailure, sanitizeYoutubeMetadata, saveYoutubeEvidence, type YoutubeCaptureActor } from "../src/features/knowledge/youtube-capture";
+import { assertDistinctCaptureDatabases, getCaptureCacheDatabaseUrl, getDatabaseUrl, getEnvValue } from "./db-env";
 
 type Options = { sourceId?: string; limit?: number; yes: boolean; actorUserId?: string; actorEmail?: string };
 const defaultActor = { userId: "system-youtube-capture", email: "system-youtube-capture@xuyenviet.internal" };
@@ -36,6 +39,12 @@ export async function requestYoutubeEvidence(url: string, apiKey: string, model:
   } finally {
     clearTimeout(timeout);
   }
+}
+
+export function parseCachedYoutubePayload(payload: unknown) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("cache_invalid_youtube_payload");
+  const value = payload as Record<string, unknown>;
+  return { evidence: parseYoutubeEvidence({ evidence: value.evidence }), metadata: sanitizeYoutubeMetadata((value.metadata && typeof value.metadata === "object" && !Array.isArray(value.metadata) ? value.metadata : {}) as Record<string, unknown>) };
 }
 
 function parseArgs(argv: string[]): Options {
@@ -71,12 +80,12 @@ async function confirm(sourceId: string, count: number) {
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
-  const apiKey = getEnvValue("GEMINI_API_KEY");
-  if (!apiKey) throw new Error("GEMINI_API_KEY is required for youtube:capture.");
-  const model = getEnvValue("GEMINI_YOUTUBE_MODEL") ?? "gemini-3.5-flash";
   const client = postgres(getDatabaseUrl(), { max: 1 });
+  const cacheClient = postgres(getCaptureCacheDatabaseUrl(), { max: 1 });
   const db = drizzle(client, { schema });
   try {
+    await assertDistinctCaptureDatabases(client, cacheClient);
+    await assertCaptureCacheReady(cacheClient);
     const actor = await resolveActor(db, options);
     const queued = await listQueuedYoutubeSources(db, options);
     if (!queued.length) { console.log("No queued YouTube sources need evidence."); return; }
@@ -84,18 +93,33 @@ async function main() {
       const url = source.canonicalUrl ?? source.url;
       if (!url || !/^https:\/\/www\.youtube\.com\/watch\?v=[A-Za-z0-9_-]{6,20}$/.test(url)) { await recordYoutubeCaptureFailure(db, { sourceId: source.sourceId, reason: "youtube_video_url_required", actor }); console.log(`${source.sourceId}: youtube_video_url_required`); continue; }
       try {
+        const resourceIdentity = youtubeResourceIdentity(url);
+        if (!resourceIdentity) throw new Error("youtube_video_url_required");
+        const model = getEnvValue("GEMINI_YOUTUBE_MODEL") ?? "gemini-3.5-flash";
+        const reuseKey = captureReuseKey({ provider: "youtube", resourceIdentity, captureMethodVersion: YOUTUBE_CAPTURE_METHOD_VERSION, payloadSchemaVersion: CAPTURE_PAYLOAD_SCHEMA_VERSION, promptVersion: youtubeEvidencePromptVersion, model });
+        const cached = await findReusableArtifact(cacheClient, reuseKey);
+        if (cached) {
+          const payload = parseCachedYoutubePayload(cached.payload);
+          const result = await flushCachedArtifact({ artifact: cached, sourceId: source.sourceId, prepareImport: () => prepareImport(cacheClient, cached.id, source.sourceId), importCommitted: (correlationToken) => findYoutubeCaptureImportByCorrelationToken(db, { sourceId: source.sourceId, correlationToken }), flush: (correlationToken) => saveYoutubeEvidence(db, { sourceId: source.sourceId, evidence: parseYoutubeEvidence({ evidence: payload.evidence }), metadata: { ...payload.metadata, captureMethod: "gemini_youtube_url", capturedAt: cached.capturedAt, sourceUrl: url, model, promptVersion: youtubeEvidencePromptVersion, evidenceCount: Array.isArray(payload.evidence) ? payload.evidence.length : 0, captureOrigin: "cache", captureArtifactId: cached.id, importedAt: new Date().toISOString(), importCorrelationToken: correlationToken, payloadSchemaVersion: CAPTURE_PAYLOAD_SCHEMA_VERSION, importActorId: actor.userId }, actor }).then((value) => value.status), finishImport: (correlationToken, leaseOwner, outcome) => finishImport(cacheClient, cached.id, source.sourceId, correlationToken, leaseOwner, outcome) });
+          console.log(`${source.sourceId}: ${result}`);
+          continue;
+        }
+        const apiKey = getEnvValue("GEMINI_API_KEY");
+        if (!apiKey) throw new Error("GEMINI_API_KEY is required for youtube:capture cache misses.");
         const result = await requestYoutubeEvidence(url, apiKey, model);
         if (!result.evidence.length) { await recordYoutubeCaptureFailure(db, { sourceId: source.sourceId, reason: "no_travel_evidence", actor }); console.log(`${source.sourceId}: no_travel_evidence`); continue; }
         if (!options.yes && !(await confirm(source.sourceId, result.evidence.length))) { console.log(`${source.sourceId}: skipped`); continue; }
-        const saved = await saveYoutubeEvidence(db, { sourceId: source.sourceId, evidence: result.evidence, metadata: { captureMethod: "gemini_youtube_url", capturedAt: new Date().toISOString(), sourceUrl: url, model, promptVersion: youtubeEvidencePromptVersion, evidenceCount: result.evidence.length, latencyMs: result.latencyMs, promptTokens: result.usage?.promptTokenCount, outputTokens: result.usage?.candidatesTokenCount, totalTokens: result.usage?.totalTokenCount }, actor });
-        console.log(`${source.sourceId}: ${saved.status}`);
+        const capturedAt = new Date().toISOString();
+        const artifact = await admitArtifact(cacheClient, { provider: "youtube", reuseKey, resourceIdentity, captureMethodVersion: YOUTUBE_CAPTURE_METHOD_VERSION, payloadSchemaVersion: CAPTURE_PAYLOAD_SCHEMA_VERSION, promptVersion: youtubeEvidencePromptVersion, model, payload: { evidence: result.evidence, metadata: sanitizeYoutubeMetadata({ captureMethod: "gemini_youtube_url", capturedAt, sourceUrl: url, model, promptVersion: youtubeEvidencePromptVersion, evidenceCount: result.evidence.length, latencyMs: result.latencyMs, promptTokens: result.usage?.promptTokenCount, outputTokens: result.usage?.candidatesTokenCount, totalTokens: result.usage?.totalTokenCount }) }, metadata: { captureOrigin: "live" }, capturedAt });
+        const saved = await flushCachedArtifact({ artifact, sourceId: source.sourceId, prepareImport: () => prepareImport(cacheClient, artifact.id, source.sourceId), importCommitted: (correlationToken) => findYoutubeCaptureImportByCorrelationToken(db, { sourceId: source.sourceId, correlationToken }), flush: (correlationToken) => saveYoutubeEvidence(db, { sourceId: source.sourceId, evidence: result.evidence, metadata: { captureMethod: "gemini_youtube_url", capturedAt, sourceUrl: url, model, promptVersion: youtubeEvidencePromptVersion, evidenceCount: result.evidence.length, latencyMs: result.latencyMs, promptTokens: result.usage?.promptTokenCount, outputTokens: result.usage?.candidatesTokenCount, totalTokens: result.usage?.totalTokenCount, captureOrigin: "live", captureArtifactId: artifact.id, importedAt: new Date().toISOString(), importCorrelationToken: correlationToken, payloadSchemaVersion: CAPTURE_PAYLOAD_SCHEMA_VERSION, importActorId: actor.userId }, actor }).then((value) => value.status), finishImport: (correlationToken, leaseOwner, outcome) => finishImport(cacheClient, artifact.id, source.sourceId, correlationToken, leaseOwner, outcome) });
+        console.log(`${source.sourceId}: ${saved}`);
       } catch (error) {
         const reason = error instanceof Error ? error.message : "gemini_unknown_error";
         await recordYoutubeCaptureFailure(db, { sourceId: source.sourceId, reason, actor });
         console.log(`${source.sourceId}: ${reason.replace(/[^a-z0-9_.:-]+/gi, "_").slice(0, 120)}`);
       }
     }
-  } finally { await client.end(); }
+  } finally { await client.end(); await cacheClient.end(); }
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) main().catch((error) => { console.error(error); process.exit(1); });

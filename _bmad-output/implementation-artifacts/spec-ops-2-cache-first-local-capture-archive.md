@@ -2,7 +2,10 @@
 title: 'Story OPS-2: Cache-First Local Capture Archive For Production Sources'
 type: 'operations-feature'
 created: '2026-07-17'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: '561505c'
+final_revision: 'NO_COMMIT'
+followup_review_recommended: false
 context:
   - '{project-root}/_bmad-output/project-context.md'
   - '{project-root}/_bmad-output/planning-artifacts/epics.md'
@@ -15,7 +18,7 @@ warnings:
 
 # Story OPS-2: Cache-First Local Capture Archive For Production Sources
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -66,53 +69,53 @@ This story implements the agreed transitional two-database model:
 
 ## Tasks / Subtasks
 
-- [ ] Define the script-safe local capture-cache persistence contract (AC: 1, 4, 5, 7, 8)
-  - [ ] Add a dedicated cache schema/migration path that targets only `CAPTURE_CACHE_DATABASE_URL`; it must not reuse application Drizzle migrations or make `db:migrate` operate on the cache database.
-  - [ ] Store immutable provider-resource artifacts with artifact ID, normalized reuse key fields, payload/schema version, safe artifact payload, safe metadata, content hash, original capture timestamp, default/superseded state, and created/updated timestamps.
-  - [ ] Store target-scoped import attempts separately from immutable artifacts: production target identity, source ID, correlation token, import actor/time, observed outcome, retry eligibility, and attempt timestamps. Do not use a global artifact `flushed` or `terminal` state.
-  - [ ] Use unique constraints/upserts so a retry is idempotent and cannot create duplicate artifacts for the same identity/version/content.
-  - [ ] Provide script-safe cache functions with injected DB clients. Do not import `server-only`, `src/db/client.ts`, authentication, actions, or request-route code.
-  - [ ] Validate and sanitize data before it crosses either database boundary. Reuse the current Facebook metadata sanitizer/canonicalizer and YouTube evidence parser/serializer rather than duplicating weaker validation.
+- [x] Define the script-safe local capture-cache persistence contract (AC: 1, 4, 5, 7, 8)
+  - [x] Add a dedicated cache schema/migration path that targets only `CAPTURE_CACHE_DATABASE_URL`; it must not reuse application Drizzle migrations or make `db:migrate` operate on the cache database.
+  - [x] Store immutable provider-resource artifacts with artifact ID, normalized reuse key fields, payload/schema version, safe artifact payload, safe metadata, content hash, original capture timestamp, default/superseded state, and created/updated timestamps.
+  - [x] Store target-scoped import attempts separately from immutable artifacts: production target identity, source ID, correlation token, import actor/time, observed outcome, retry eligibility, and attempt timestamps. Do not use a global artifact `flushed` or `terminal` state.
+  - [x] Use unique constraints/upserts so a retry is idempotent and cannot create duplicate artifacts for the same identity/version/content.
+  - [x] Provide script-safe cache functions with injected DB clients. Do not import `server-only`, `src/db/client.ts`, authentication, actions, or request-route code.
+  - [x] Validate and sanitize data before it crosses either database boundary. Reuse the current Facebook metadata sanitizer/canonicalizer and YouTube evidence parser/serializer rather than duplicating weaker validation.
 
-- [ ] Add explicit two-database configuration and connection handling (AC: 1, 9)
-  - [ ] Keep `DATABASE_URL` as the production application DB for capture scripts and add `CAPTURE_CACHE_DATABASE_URL` for the persistent local PostgreSQL cache.
-  - [ ] Add script-safe env helpers that reject absent or malformed URLs without printing credentials. After both connections open, compare safe runtime database identities and a cache-specific marker; fail closed if the databases cannot be distinguished or are the same target. Do not compare raw connection strings.
-  - [ ] Open and always close independent app and cache clients. Do not use a cross-database transaction or two-phase commit.
-  - [ ] Ensure `db:reset` remains local-app-only and cannot target the cache by accident.
-  - [ ] Document that production DB access must remain tunnel/private-network based and use a least-privilege capture role where practical.
+- [x] Add explicit two-database configuration and connection handling (AC: 1, 9)
+  - [x] Keep `DATABASE_URL` as the production application DB for capture scripts and add `CAPTURE_CACHE_DATABASE_URL` for the persistent local PostgreSQL cache.
+  - [x] Add script-safe env helpers that reject absent or malformed URLs without printing credentials. After both connections open, compare safe runtime database identities and a cache-specific marker; fail closed if the databases cannot be distinguished or are the same target. Do not compare raw connection strings.
+  - [x] Open and always close independent app and cache clients. Do not use a cross-database transaction or two-phase commit.
+  - [x] Ensure `db:reset` remains local-app-only and cannot target the cache by accident.
+  - [x] Document that production DB access must remain tunnel/private-network based and use a least-privilege capture role where practical.
 
-- [ ] Refactor Facebook capture to be cache-first (AC: 2-8)
-  - [ ] Keep existing CLI flags, headed local Playwright profile, pacing, stop conditions, preview confirmation, visible-DOM extraction logic, and local profile safety rules.
-  - [ ] Remove GraphQL/network response collection and candidate selection. Do not cache or persist network payload text, even when it appears more complete than visible DOM text.
-  - [ ] Select queued sources from the production app DB through `listQueuedFacebookSources`.
-  - [ ] Extract a shared pure, versioned provider-identity module for canonicalization and post-ID precedence. Use it consistently for script lookup, cache persistence, production duplicate detection, and tests.
-  - [ ] Derive canonical submitted/final URL and Facebook post identity using that shared contract; look up the newest compatible non-superseded cache artifact before launching a page navigation.
-  - [ ] On cache hit, flush through `updateQueuedFacebookSourceRawText`, never by directly writing `raw_source_material` or review rows.
-  - [ ] On live success, cache the validated text, allowed metadata, and first-generation discovered URLs before calling `updateQueuedFacebookSourceRawText`.
-  - [ ] Preserve existing advisory locking, duplicate detection, review creation, audit writes, and discovered-post queueing inside the production helper transaction.
-  - [ ] Add allowlisted operator-only provenance to Facebook metadata and audit flow: `captureOrigin`, immutable artifact ID, original capture time, import time, import correlation token, capture/payload version, and capture/import actor identities where available. Do not expose these values to traveler-facing code.
-  - [ ] Add a review-owned `force_live_capture` field and migration to `facebook_capture_reviews`. Set it atomically in the existing recapture action, include it in queued-source selection, and clear it atomically only after a successful live capture. Force a live capture instead of replaying the default cache artifact while it is set; on success, supersede the old default artifact.
+- [x] Refactor Facebook capture to be cache-first (AC: 2-8)
+  - [x] Keep existing CLI flags, headed local Playwright profile, pacing, stop conditions, preview confirmation, visible-DOM extraction logic, and local profile safety rules.
+  - [x] Remove GraphQL/network response collection and candidate selection. Do not cache or persist network payload text, even when it appears more complete than visible DOM text.
+  - [x] Select queued sources from the production app DB through `listQueuedFacebookSources`.
+  - [x] Extract a shared pure, versioned provider-identity module for canonicalization and post-ID precedence. Use it consistently for script lookup, cache persistence, production duplicate detection, and tests.
+  - [x] Derive canonical submitted/final URL and Facebook post identity using that shared contract; look up the newest compatible non-superseded cache artifact before launching a page navigation.
+  - [x] On cache hit, flush through `updateQueuedFacebookSourceRawText`, never by directly writing `raw_source_material` or review rows.
+  - [x] On live success, cache the validated text, allowed metadata, and first-generation discovered URLs before calling `updateQueuedFacebookSourceRawText`.
+  - [x] Preserve existing advisory locking, duplicate detection, review creation, audit writes, and discovered-post queueing inside the production helper transaction.
+  - [x] Add allowlisted operator-only provenance to Facebook metadata and audit flow: `captureOrigin`, immutable artifact ID, original capture time, import time, import correlation token, capture/payload version, and capture/import actor identities where available. Do not expose these values to traveler-facing code.
+  - [x] Add a review-owned `force_live_capture` field and migration to `facebook_capture_reviews`. Set it atomically in the existing recapture action, include it in queued-source selection, and clear it atomically only after a successful live capture. Force a live capture instead of replaying the default cache artifact while it is set; on success, supersede the old default artifact.
 
-- [ ] Refactor YouTube capture to be cache-first (AC: 2-8)
-  - [ ] Select queued sources from the production app DB through `listQueuedYoutubeSources`.
-  - [ ] Look up a compatible cache artifact before requiring or using `GEMINI_API_KEY` and before `requestYoutubeEvidence`.
-  - [ ] On cache hit, flush validated evidence through `saveYoutubeEvidence` with original safe metadata plus allowlisted cache-origin and import provenance.
-  - [ ] On cache miss, retain the current strict provider-result validation; persist only validated bounded evidence and safe metadata to the cache before production flush.
-  - [ ] Treat empty evidence and provider/validation failures as non-cacheable failures that leave production raw material unchanged.
+- [x] Refactor YouTube capture to be cache-first (AC: 2-8)
+  - [x] Select queued sources from the production app DB through `listQueuedYoutubeSources`.
+  - [x] Look up a compatible cache artifact before requiring or using `GEMINI_API_KEY` and before `requestYoutubeEvidence`.
+  - [x] On cache hit, flush validated evidence through `saveYoutubeEvidence` with original safe metadata plus allowlisted cache-origin and import provenance.
+  - [x] On cache miss, retain the current strict provider-result validation; persist only validated bounded evidence and safe metadata to the cache before production flush.
+  - [x] Treat empty evidence and provider/validation failures as non-cacheable failures that leave production raw material unchanged.
 
-- [ ] Add focused tests and operations documentation (AC: all)
-  - [ ] Test configuration rejection for missing/malformed/equivalent runtime DB targets without exposing credentials.
-  - [ ] Test cache reuse-key compatibility separately from post-capture artifact hashing for Facebook aliases/final URLs/post IDs and YouTube video identity, model, and prompt version.
-  - [ ] Test a cache hit causes no Playwright navigation or Gemini request and produces the expected production raw material, audit-safe summary, and Facebook review side effects.
-  - [ ] Test cache-first live capture ordering: cache failure means no production write; production failure leaves a retryable target import; an ambiguous production failure is resolved by correlation-token lookup; retry flushes without a second provider call.
-  - [ ] Test race/no-overwrite and terminal outcomes by reusing existing Facebook and YouTube guarded-write cases.
-  - [ ] Test cache sanitization rejects or omits cookies, tokens, passwords, local storage, HTML, profile paths, raw prompts/responses, and error bodies.
-  - [ ] Test that Facebook capture neither reads GraphQL response bodies nor caches network-derived text.
-  - [ ] Test review-initiated Facebook recapture bypasses a matching cache artifact and supersedes the previous default only after a valid live capture.
-  - [ ] Test production target reset/recreation permits reimport of an existing immutable artifact, while a terminal outcome on an earlier target import does not block it.
-  - [ ] Test cross-source replay is allowed only for strict matching provider-resource identity and creates source-specific review/audit/discovery effects without copying source rows.
-  - [ ] Update `README.md`, `.env.example`, `docs/facebook-capture-operations.md`, and `docs/youtube-capture-operations.md` with setup, recovery, backup, and retention guidance.
-  - [ ] Update this story's task state, Dev Agent Record, completion notes, file list, and `sprint-status.yaml` throughout implementation.
+- [x] Add focused tests and operations documentation (AC: all)
+  - [x] Test configuration rejection for missing/malformed/equivalent runtime DB targets without exposing credentials.
+  - [x] Test cache reuse-key compatibility separately from post-capture artifact hashing for Facebook aliases/final URLs/post IDs and YouTube video identity, model, and prompt version.
+  - [x] Test a cache hit causes no Playwright navigation or Gemini request and produces the expected production raw material, audit-safe summary, and Facebook review side effects.
+  - [x] Test cache-first live capture ordering: cache failure means no production write; production failure leaves a retryable target import; an ambiguous production failure is resolved by correlation-token lookup; retry flushes without a second provider call.
+  - [x] Test race/no-overwrite and terminal outcomes by reusing existing Facebook and YouTube guarded-write cases.
+  - [x] Test cache sanitization rejects or omits cookies, tokens, passwords, local storage, HTML, profile paths, raw prompts/responses, and error bodies.
+  - [x] Test that Facebook capture neither reads GraphQL response bodies nor caches network-derived text.
+  - [x] Test review-initiated Facebook recapture bypasses a matching cache artifact and supersedes the previous default only after a valid live capture.
+  - [x] Test production target reset/recreation permits reimport of an existing immutable artifact, while a terminal outcome on an earlier target import does not block it.
+  - [x] Test cross-source replay is allowed only for strict matching provider-resource identity and creates source-specific review/audit/discovery effects without copying source rows.
+  - [x] Update `README.md`, `.env.example`, `docs/facebook-capture-operations.md`, and `docs/youtube-capture-operations.md` with setup, recovery, backup, and retention guidance.
+  - [x] Update this story's task state, Dev Agent Record, completion notes, file list, and `sprint-status.yaml` throughout implementation.
 
 ## Dev Notes
 
@@ -194,7 +197,56 @@ Do not delete an artifact after flush in this story. Retaining it is the point o
 ### Completion Notes List
 
 - Ultimate context engine analysis completed. This story is ready for implementation.
+- Implemented a dedicated local capture archive with independently migrated cache tables, immutable provider artifacts, validated aliases, target-scoped import attempts, correlation-token recovery, and lease ownership.
+- Refactored Facebook and YouTube operator commands to check the archive before browser/Gemini use, persist validated live artifacts before production flushes, and retain retryable artifacts after ambiguous writes.
+- Added force-live Facebook recapture generations, cache-side generation linkage, guarded production flushes, and deterministic advisory-lock ordering to prevent stale replay, overwrite, and capture/review races.
+- Preserved strict visible-DOM-only Facebook capture. Cache payloads are bounded, sanitized, hash-verified, and revalidated with the provider-specific production contracts before replay.
+- Verification passed: `pnpm lint`; `pnpm typecheck`; `pnpm build`; `git diff --check`; focused Facebook, YouTube, cache archive, and orchestration suites (102 tests passed in the final combined focused run).
+- `pnpm test:run` remains non-green due unrelated existing suites. The latest full run reported cascading failures after a non-OPS-2 shared-test deadlock; earlier serial runs isolated pre-existing failures in AI usage prompt-version expectations and batch source intake behavior. OPS-2 focused suites pass.
+
+### File List
+
+- `.env.example`
+- `README.md`
+- `docs/facebook-capture-operations.md`
+- `docs/youtube-capture-operations.md`
+- `drizzle/migrations/0035_ops_2_capture_archive.sql`
+- `drizzle/migrations/0036_ops_2_force_live_generation.sql`
+- `drizzle/migrations/meta/_journal.json`
+- `package.json`
+- `scripts/capture-cache-migrate.ts`
+- `scripts/db-env.ts`
+- `scripts/facebook-capture.ts`
+- `scripts/youtube-capture.ts`
+- `src/db/schema.ts`
+- `src/features/knowledge/capture-cache.ts`
+- `src/features/knowledge/capture-identity.ts`
+- `src/features/knowledge/capture-orchestration.ts`
+- `src/features/knowledge/facebook-capture-locks.ts`
+- `src/features/knowledge/facebook-capture-review.ts`
+- `src/features/knowledge/facebook-capture.ts`
+- `src/features/knowledge/youtube-capture.ts`
+- `tests/capture-archive.test.ts`
+- `tests/capture-orchestration.test.ts`
+- `tests/facebook-capture-review.test.ts`
+- `tests/facebook-capture-script.test.ts`
+- `tests/facebook-capture.test.ts`
+- `vitest.config.ts`
 
 ## Change Log
 
 - 2026-07-17: Created as the transitional direct-two-database operational story. It deliberately defers production APIs and managed cache infrastructure while retaining cache-first, retry-safe behavior.
+- 2026-07-17: Implemented and independently reviewed. Archive/cache, force-live recapture, concurrency guards, migration isolation, operations documentation, and focused verification completed.
+
+## Review Triage Log
+
+### 2026-07-17 - Review passes
+- intent_gap: 0
+- bad_spec: 0
+- patch: 13 (high 8, medium 5)
+- defer: 0
+- reject: 0
+- addressed_findings:
+  - [high] [patch] Added force-live generations and generation-bound cache linkage so forced recapture never replays an older artifact and supersedes only after a confirmed import.
+  - [high] [patch] Added version-compatible Facebook aliases, cache integrity/payload validation, cache migration database isolation, import leases, and deterministic advisory locking.
+  - [medium] [patch] Preserved YouTube prompt-version provenance, validated application URLs, bounded cache artifacts, and fixed review timestamp precision.

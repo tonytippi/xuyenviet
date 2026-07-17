@@ -17,6 +17,7 @@
     "db:promote-admin": "tsx scripts/db-promote-admin.ts",
     "facebook:capture": "tsx scripts/facebook-capture.ts",
     "youtube:capture": "tsx scripts/youtube-capture.ts",
+    "capture-cache:migrate": "tsx scripts/capture-cache-migrate.ts",
     "knowledge:extraction-worker": "node --conditions react-server --import tsx scripts/knowledge-extraction-worker.ts",
     "knowledge:indexing-worker": "node --conditions react-server --import tsx scripts/knowledge-indexing-worker.ts"
   },

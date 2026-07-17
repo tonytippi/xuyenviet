@@ -38,6 +38,12 @@ export type SafeYoutubeCaptureMetadata = {
   promptTokens?: number;
   outputTokens?: number;
   totalTokens?: number;
+  captureOrigin?: "live" | "cache";
+  captureArtifactId?: string;
+  importedAt?: string;
+  importCorrelationToken?: string;
+  payloadSchemaVersion?: string;
+  importActorId?: string;
 };
 
 const categories = new Set<YoutubeEvidence["category"]>(["road_condition", "route", "toll", "fuel", "charging", "rest_stop", "parking", "accommodation", "food", "attraction", "safety", "weather", "cost"]);
@@ -88,7 +94,7 @@ export async function saveYoutubeEvidence(db: YoutubeCaptureDb, input: { sourceI
       .for("update");
     if (!queued) return { status: "not_queued" as const };
 
-    const updated = await transaction.update(rawSourceMaterial).set({ rawText, rawMetadata: input.metadata }).where(and(eq(rawSourceMaterial.id, queued.rawMaterialId), queuedCondition())).returning({ id: rawSourceMaterial.id });
+    const updated = await transaction.update(rawSourceMaterial).set({ rawText, rawMetadata: sanitizeYoutubeMetadata(input.metadata) }).where(and(eq(rawSourceMaterial.id, queued.rawMaterialId), queuedCondition())).returning({ id: rawSourceMaterial.id });
     if (updated.length === 0) return { status: "no_longer_queued" as const };
 
     await transaction.insert(auditEvents).values({
@@ -103,6 +109,11 @@ export async function saveYoutubeEvidence(db: YoutubeCaptureDb, input: { sourceI
     });
     return { status: "updated" as const, rawMaterialId: updated[0].id };
   });
+}
+
+export async function findYoutubeCaptureImportByCorrelationToken(db: YoutubeCaptureDb, input: { sourceId: string; correlationToken: string }) {
+  const [row] = await db.select({ id: rawSourceMaterial.id }).from(rawSourceMaterial).where(and(eq(rawSourceMaterial.sourceId, input.sourceId), sql`${rawSourceMaterial.rawMetadata}->>'importCorrelationToken' = ${input.correlationToken}`)).limit(1);
+  return Boolean(row);
 }
 
 export async function recordYoutubeCaptureFailure(db: YoutubeCaptureDb, input: { sourceId: string; reason: string; actor: YoutubeCaptureActor; now?: Date }) {
@@ -149,6 +160,11 @@ function timestamp(value: unknown) {
 
 function safeFailureReason(reason: string) {
   return reason.replace(/[^a-z0-9_.:-]+/gi, "_").slice(0, 120) || "unknown";
+}
+
+export function sanitizeYoutubeMetadata(metadata: Record<string, unknown>) {
+  const allowed = new Set<keyof SafeYoutubeCaptureMetadata>(["captureMethod", "capturedAt", "sourceUrl", "model", "promptVersion", "evidenceCount", "latencyMs", "promptTokens", "outputTokens", "totalTokens", "captureOrigin", "captureArtifactId", "importedAt", "importCorrelationToken", "payloadSchemaVersion", "importActorId"]);
+  return Object.fromEntries(Object.entries(metadata).filter(([key, value]) => allowed.has(key as keyof SafeYoutubeCaptureMetadata) && value !== undefined)) as SafeYoutubeCaptureMetadata;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

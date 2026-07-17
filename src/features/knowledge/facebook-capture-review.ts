@@ -3,9 +3,11 @@ import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
 import { sourceKnowledgeDraftExtractionPromptVersion } from "../ai/prompts";
 import { auditEvents, facebookCaptureReviews, knowledgeCards, knowledgeCardSources, rawSourceMaterial, schema, sources, type FacebookCaptureReviewStatus } from "../../db/schema";
+import { lockFacebookCaptureResources } from "./facebook-capture-locks";
 
-export type FacebookCaptureReviewDb = Pick<PostgresJsDatabase<typeof schema>, "select" | "insert" | "update">;
+export type FacebookCaptureReviewDb = Pick<PostgresJsDatabase<typeof schema>, "select" | "insert" | "update" | "execute">;
 type FacebookCaptureReviewTransitionDb = FacebookCaptureReviewDb & Pick<PostgresJsDatabase<typeof schema>, "transaction">;
+type FacebookCaptureReviewLockDb = Pick<PostgresJsDatabase<typeof schema>, "execute">;
 
 export type FacebookCaptureReviewActor = {
   userId: string;
@@ -64,6 +66,7 @@ async function loadReviewById(db: FacebookCaptureReviewDb, reviewId: string) {
       reviewedAt: facebookCaptureReviews.reviewedAt,
       rejectionReason: facebookCaptureReviews.rejectionReason,
       extractionError: facebookCaptureReviews.extractionError,
+      forceLiveCapture: facebookCaptureReviews.forceLiveCapture,
       createdAt: facebookCaptureReviews.createdAt,
       updatedAt: facebookCaptureReviews.updatedAt,
       rawText: rawSourceMaterial.rawText,
@@ -222,78 +225,84 @@ export async function markFacebookCaptureReviewStatusInTransaction(
     now?: Date;
   },
 ) {
-    if (!Object.hasOwn(allowedTransitionSourceStatuses, input.status)) {
-      throw new Error("Unsupported Facebook capture review transition status.");
-    }
+  if (!Object.hasOwn(allowedTransitionSourceStatuses, input.status)) {
+    throw new Error("Unsupported Facebook capture review transition status.");
+  }
 
-    const review = await loadReviewById(db, input.reviewId);
+  const review = await loadReviewById(db, input.reviewId);
 
-    if (!review) {
-      return { status: "not_found" as const };
-    }
+  if (!review) {
+    return { status: "not_found" as const };
+  }
 
-    const existingCards = await getExistingCardsForCaptureSource(db, review.sourceId);
-    const existingExtractionCards = existingCards.filter((card) => card.aiPromptVersion === sourceKnowledgeDraftExtractionPromptVersion);
+  await lockFacebookCaptureSource(db, review.sourceId);
+  const lockedReview = await loadReviewById(db, input.reviewId);
 
-    if (input.status === "extracted" && existingExtractionCards.length === 0) {
-      return { status: "missing_extracted_cards" as const };
-    }
+  if (!lockedReview) {
+    return { status: "not_found" as const };
+  }
 
-    if (input.status === "extracted_approved" && existingExtractionCards.length === 0) {
-      return { status: "missing_extracted_cards" as const };
-    }
+  const existingCards = await getExistingCardsForCaptureSource(db, lockedReview.sourceId);
+  const existingExtractionCards = existingCards.filter((card) => card.aiPromptVersion === sourceKnowledgeDraftExtractionPromptVersion);
 
-    if (!allowedTransitionSourceStatuses[input.status].includes(review.status)) {
-      return { status: "invalid_transition" as const, currentStatus: review.status };
-    }
+  if (input.status === "extracted" && existingExtractionCards.length === 0) {
+    return { status: "missing_extracted_cards" as const };
+  }
 
-    const rejectionReason = normalizeSafeSummary(input.rejectionReason, "rejectionReason", review.rawText);
-    const extractionError = normalizeSafeSummary(input.extractionError, "extractionError", review.rawText);
+  if (input.status === "extracted_approved" && existingExtractionCards.length === 0) {
+    return { status: "missing_extracted_cards" as const };
+  }
 
-    if (input.status === "rejected" && !rejectionReason) {
-      throw new Error("rejectionReason is required when rejecting a capture.");
-    }
+  if (!allowedTransitionSourceStatuses[input.status].includes(lockedReview.status)) {
+    return { status: "invalid_transition" as const, currentStatus: lockedReview.status };
+  }
 
-    if (input.status === "rejected" && !review.rawText?.trim()) {
-      return { status: "missing_raw_text" as const };
-    }
+  const rejectionReason = normalizeSafeSummary(input.rejectionReason, "rejectionReason", lockedReview.rawText);
+  const extractionError = normalizeSafeSummary(input.extractionError, "extractionError", lockedReview.rawText);
 
-    if (input.status === "extraction_failed" && !extractionError) {
-      throw new Error("extractionError is required when marking extraction failure.");
-    }
+  if (input.status === "rejected" && !rejectionReason) {
+    throw new Error("rejectionReason is required when rejecting a capture.");
+  }
 
-    const now = input.now ? getMutationTimestamp(input.now, review.createdAt) : null;
-    const mutationTimestamp = now ?? sql<Date>`greatest(now(), ${facebookCaptureReviews.createdAt})`;
+  if (input.status === "rejected" && !lockedReview.rawText?.trim()) {
+    return { status: "missing_raw_text" as const };
+  }
 
-    const [updated] = await db
-      .update(facebookCaptureReviews)
-      .set({
-        status: input.status,
-        reviewerUserId: input.actor.userId,
-        reviewedAt: mutationTimestamp,
-        rejectionReason: input.status === "rejected" ? rejectionReason : null,
-        extractionError: input.status === "extraction_failed" ? extractionError : null,
-        updatedAt: mutationTimestamp,
-      })
-      .where(and(eq(facebookCaptureReviews.id, input.reviewId), eq(facebookCaptureReviews.status, review.status)))
-      .returning();
+  if (input.status === "extraction_failed" && !extractionError) {
+    throw new Error("extractionError is required when marking extraction failure.");
+  }
 
-    if (!updated) {
-      return { status: "stale_review" as const };
-    }
+  const mutationTimestamp = getMutationTimestamp(input.now);
 
-    await db.insert(auditEvents).values({
-      actorUserId: input.actor.userId,
-      actorEmail: input.actor.email,
-      operation: "update",
-      targetType: "facebook_capture_review",
-      targetId: review.id,
-      beforeSummary: `Facebook capture review ${review.id}: status=${review.status}; sourceId=${review.sourceId}.`,
-      afterSummary: `Facebook capture review ${review.id}: ${review.status} -> ${input.status}; sourceId=${review.sourceId}; reason=${rejectionReason ?? extractionError ?? "none"}.`,
-      createdAt: updated.updatedAt,
-    });
+  const [updated] = await db
+    .update(facebookCaptureReviews)
+    .set({
+      status: input.status,
+      reviewerUserId: input.actor.userId,
+      reviewedAt: mutationTimestamp,
+      rejectionReason: input.status === "rejected" ? rejectionReason : null,
+      extractionError: input.status === "extraction_failed" ? extractionError : null,
+      updatedAt: mutationTimestamp,
+    })
+    .where(and(eq(facebookCaptureReviews.id, input.reviewId), eq(facebookCaptureReviews.status, lockedReview.status)))
+    .returning();
 
-    return { status: "updated" as const, review: updated };
+  if (!updated) {
+    return { status: "stale_review" as const };
+  }
+
+  await db.insert(auditEvents).values({
+    actorUserId: input.actor.userId,
+    actorEmail: input.actor.email,
+    operation: "update",
+    targetType: "facebook_capture_review",
+    targetId: lockedReview.id,
+    beforeSummary: `Facebook capture review ${lockedReview.id}: status=${lockedReview.status}; sourceId=${lockedReview.sourceId}.`,
+    afterSummary: `Facebook capture review ${lockedReview.id}: ${lockedReview.status} -> ${input.status}; sourceId=${lockedReview.sourceId}; reason=${rejectionReason ?? extractionError ?? "none"}.`,
+    createdAt: updated.updatedAt,
+  });
+
+  return { status: "updated" as const, review: updated };
 }
 
 export async function reopenFacebookCaptureForRecapture(
@@ -312,18 +321,24 @@ export async function reopenFacebookCaptureForRecapture(
       return { status: "not_found" as const };
     }
 
-    if (review.status !== "rejected") {
-      return { status: "invalid_transition" as const, currentStatus: review.status };
+    await lockFacebookCaptureSource(transaction, review.sourceId);
+    const lockedReview = await loadReviewById(transaction, input.reviewId);
+
+    if (!lockedReview) {
+      return { status: "not_found" as const };
     }
 
-    const reopenReason = normalizeSafeSummary(input.reason, "reopenReason", review.rawText);
+    if (lockedReview.status !== "rejected") {
+      return { status: "invalid_transition" as const, currentStatus: lockedReview.status };
+    }
+
+    const reopenReason = normalizeSafeSummary(input.reason, "reopenReason", lockedReview.rawText);
 
     if (!reopenReason) {
       throw new Error("reopenReason is required when reopening a capture for recapture.");
     }
 
-    const now = input.now ? getMutationTimestamp(input.now, review.createdAt) : null;
-    const mutationTimestamp = now ?? sql<Date>`greatest(now(), ${facebookCaptureReviews.createdAt})`;
+    const mutationTimestamp = getMutationTimestamp(input.now);
 
     const [updatedReview] = await transaction
       .update(facebookCaptureReviews)
@@ -333,6 +348,8 @@ export async function reopenFacebookCaptureForRecapture(
         reviewedAt: null,
         rejectionReason: null,
         extractionError: null,
+        forceLiveCapture: true,
+        forceLiveCaptureGeneration: sql`${facebookCaptureReviews.forceLiveCaptureGeneration} + 1`,
         updatedAt: mutationTimestamp,
       })
       .where(and(eq(facebookCaptureReviews.id, input.reviewId), eq(facebookCaptureReviews.status, "rejected")))
@@ -342,16 +359,16 @@ export async function reopenFacebookCaptureForRecapture(
       return { status: "stale_review" as const };
     }
 
-    await transaction.update(rawSourceMaterial).set({ rawText: null, rawMetadata: null }).where(eq(rawSourceMaterial.id, review.rawSourceMaterialId));
+    await transaction.update(rawSourceMaterial).set({ rawText: null, rawMetadata: null }).where(eq(rawSourceMaterial.id, lockedReview.rawSourceMaterialId));
 
     await transaction.insert(auditEvents).values({
       actorUserId: input.actor.userId,
       actorEmail: input.actor.email,
       operation: "update",
       targetType: "facebook_capture_review",
-      targetId: review.id,
-      beforeSummary: `Facebook capture review ${review.id}: status=rejected; sourceId=${review.sourceId}; rawTextPresent=${Boolean(review.rawText?.trim())}.`,
-      afterSummary: `Facebook capture review ${review.id}: rejected -> recapture-ready; sourceId=${review.sourceId}; rawSourceMaterialId=${review.rawSourceMaterialId}; reason=${reopenReason}.`,
+      targetId: lockedReview.id,
+      beforeSummary: `Facebook capture review ${lockedReview.id}: status=rejected; sourceId=${lockedReview.sourceId}; rawTextPresent=${Boolean(lockedReview.rawText?.trim())}.`,
+      afterSummary: `Facebook capture review ${lockedReview.id}: rejected -> recapture-ready; sourceId=${lockedReview.sourceId}; rawSourceMaterialId=${lockedReview.rawSourceMaterialId}; reason=${reopenReason}.`,
       createdAt: updatedReview.updatedAt,
     });
 
@@ -375,25 +392,31 @@ export async function requestFacebookCaptureRecapture(
       return { status: "not_found" as const };
     }
 
-    if (review.status !== "needs_review" && review.status !== "extraction_failed" && review.status !== "rejected") {
-      return { status: "invalid_transition" as const, currentStatus: review.status };
+    await lockFacebookCaptureSource(transaction, review.sourceId);
+    const lockedReview = await loadReviewById(transaction, input.reviewId);
+
+    if (!lockedReview) {
+      return { status: "not_found" as const };
     }
 
-    const existingCards = await getExistingCardsForCaptureSource(transaction, review.sourceId);
+    if (lockedReview.status !== "needs_review" && lockedReview.status !== "extraction_failed" && lockedReview.status !== "rejected") {
+      return { status: "invalid_transition" as const, currentStatus: lockedReview.status };
+    }
+
+    const existingCards = await getExistingCardsForCaptureSource(transaction, lockedReview.sourceId);
     const existingExtractionCards = existingCards.filter((card) => card.aiPromptVersion === sourceKnowledgeDraftExtractionPromptVersion);
 
     if (existingExtractionCards.length > 0) {
       return { status: "already_extracted" as const, existingCards: existingExtractionCards.length };
     }
 
-    const recaptureReason = normalizeSafeSummary(input.reason ?? "Recapture requested by operator", "recaptureReason", review.rawText);
+    const recaptureReason = normalizeSafeSummary(input.reason ?? "Recapture requested by operator", "recaptureReason", lockedReview.rawText);
 
     if (!recaptureReason) {
       throw new Error("recaptureReason must be a short safe summary.");
     }
 
-    const now = input.now ? getMutationTimestamp(input.now, review.createdAt) : null;
-    const mutationTimestamp = now ?? sql<Date>`greatest(now(), ${facebookCaptureReviews.createdAt})`;
+    const mutationTimestamp = getMutationTimestamp(input.now);
 
     const [updatedReview] = await transaction
       .update(facebookCaptureReviews)
@@ -403,25 +426,27 @@ export async function requestFacebookCaptureRecapture(
         reviewedAt: null,
         rejectionReason: null,
         extractionError: null,
+        forceLiveCapture: true,
+        forceLiveCaptureGeneration: sql`${facebookCaptureReviews.forceLiveCaptureGeneration} + 1`,
         updatedAt: mutationTimestamp,
       })
-      .where(and(eq(facebookCaptureReviews.id, input.reviewId), eq(facebookCaptureReviews.status, review.status)))
+      .where(and(eq(facebookCaptureReviews.id, input.reviewId), eq(facebookCaptureReviews.status, lockedReview.status)))
       .returning();
 
     if (!updatedReview) {
       return { status: "stale_review" as const };
     }
 
-    await transaction.update(rawSourceMaterial).set({ rawText: null, rawMetadata: null }).where(eq(rawSourceMaterial.id, review.rawSourceMaterialId));
+    await transaction.update(rawSourceMaterial).set({ rawText: null, rawMetadata: null }).where(eq(rawSourceMaterial.id, lockedReview.rawSourceMaterialId));
 
     await transaction.insert(auditEvents).values({
       actorUserId: input.actor.userId,
       actorEmail: input.actor.email,
       operation: "update",
       targetType: "facebook_capture_review",
-      targetId: review.id,
-      beforeSummary: `Facebook capture review ${review.id}: status=${review.status}; sourceId=${review.sourceId}; rawTextPresent=${Boolean(review.rawText?.trim())}.`,
-      afterSummary: `Facebook capture review ${review.id}: ${review.status} -> recapture-ready; sourceId=${review.sourceId}; rawSourceMaterialId=${review.rawSourceMaterialId}; reason=${recaptureReason}.`,
+      targetId: lockedReview.id,
+      beforeSummary: `Facebook capture review ${lockedReview.id}: status=${lockedReview.status}; sourceId=${lockedReview.sourceId}; rawTextPresent=${Boolean(lockedReview.rawText?.trim())}.`,
+      afterSummary: `Facebook capture review ${lockedReview.id}: ${lockedReview.status} -> recapture-ready; sourceId=${lockedReview.sourceId}; rawSourceMaterialId=${lockedReview.rawSourceMaterialId}; reason=${recaptureReason}.`,
       createdAt: updatedReview.updatedAt,
     });
 
@@ -429,7 +454,13 @@ export async function requestFacebookCaptureRecapture(
   });
 }
 
-function getMutationTimestamp(requested: Date | undefined, createdAt: Date) {
-  const now = requested ?? new Date();
-  return now >= createdAt ? now : createdAt;
+async function lockFacebookCaptureSource(db: FacebookCaptureReviewLockDb, sourceId: string) {
+  await lockFacebookCaptureResources(db, { sourceId });
+}
+
+function getMutationTimestamp(requested: Date | undefined) {
+  // Let Postgres retain created_at microseconds instead of round-tripping it through JS Date.
+  return requested
+    ? sql<Date>`greatest(${requested.toISOString()}::timestamp, ${facebookCaptureReviews.createdAt})`
+    : sql<Date>`greatest(now(), ${facebookCaptureReviews.createdAt})`;
 }

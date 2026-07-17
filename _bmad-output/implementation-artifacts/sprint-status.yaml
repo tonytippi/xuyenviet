@@ -136,7 +136,7 @@ development_status:
   epic-7-retrospective: optional
   epic-ops: in-progress
   ops-1-async-knowledge-extraction-worker: done
-  ops-2-cache-first-local-capture-archive: ready-for-dev
+  ops-2-cache-first-local-capture-archive: done
 
 action_items:
   - epic: 3

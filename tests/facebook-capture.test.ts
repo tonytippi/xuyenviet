@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, test } from "vitest";
 
 import { auditEvents, knowledgeCards, knowledgeCardSources, rawSourceMaterial, sources, users } from "@/db/schema";
 import { listQueuedFacebookSources, normalizeDiscoveredFacebookPosts, queueDiscoveredFacebookPosts, recordFacebookCaptureFailure, updateQueuedFacebookSourceRawText } from "@/features/knowledge/facebook-capture";
+import { facebookCaptureLockIds } from "@/features/knowledge/facebook-capture-locks";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
 
@@ -266,6 +267,29 @@ describe("Facebook capture queue", () => {
       { url: "https://facebook.com/share/p/child", canonicalUrl: "https://facebook.com/share/p/child" },
       { url: "https://facebook.com/groups/xuyenviet/posts/123", canonicalUrl: "https://facebook.com/groups/xuyenviet/posts/123" },
     ]);
+  });
+
+  test("deduplicates and orders actual namespaced advisory lock IDs", () => {
+    const first = facebookCaptureLockIds({
+      sourceId: "summary",
+      canonicalUrls: [
+        "https://facebook.com/share/p/b",
+        "https://facebook.com/share/p/a",
+        "https://facebook.com/share/p/b",
+      ],
+    });
+    const second = facebookCaptureLockIds({
+      sourceId: "summary",
+      canonicalUrls: [
+        "https://facebook.com/share/p/a",
+        "https://facebook.com/share/p/b",
+      ],
+    });
+
+    expect(first).toEqual(second);
+    expect(first).toHaveLength(3);
+    expect(new Set(first.map((lock) => lock.namespace))).toEqual(new Set([1_179_990_092]));
+    expect(first.map((lock) => lock.resourceId)).toEqual([...first.map((lock) => lock.resourceId)].sort((left, right) => left - right));
   });
 
   test("strips encoded browser artifacts after a shared post ID before queueing", () => {

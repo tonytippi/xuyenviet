@@ -1,6 +1,14 @@
 # Facebook Capture Operations
 
-The Facebook capture script is an operator-controlled operations tool. It reads queued Facebook source links from PostgreSQL, opens a Playwright Chromium browser, captures visible post text, and writes that text to `raw_source_material` for later extraction, review, and approval.
+The Facebook capture script is an operator-controlled operations tool. It reads the production queue from `DATABASE_URL`, checks a separate persistent local archive first, and only opens Playwright on a cache miss or review-requested recapture. It captures visible-DOM post text only, archives validated material, then writes through the guarded production helper for later extraction, review, and approval.
+
+## Two Database Archive
+
+- `DATABASE_URL` is the protected-tunnel/private-network production application database. Use a least-privilege capture role where practical.
+- `CAPTURE_CACHE_DATABASE_URL` is a separate local PostgreSQL archive. It must never point to the application database.
+- Initialize it explicitly: `pnpm capture-cache:migrate`. Capture commands never create or migrate it automatically.
+- Archive artifacts retain bounded text, safe metadata, identity/version fields, and per-source import state. They never retain cookies, profile data, HTML, network bodies, tokens, prompts, provider responses, or error bodies.
+- Back up the local archive on encrypted storage, retain encrypted backups with named key custody and restore authority, and periodically verify restore/replay. Follow local retention/deletion and operator offboarding procedures. Do not back up `.playwright/facebook-profile` as archive data.
 
 ## Install
 
@@ -85,7 +93,7 @@ Production scheduling should decide explicitly where this browser profile lives 
 
 1. Operator submits Facebook links through admin intake or batch intake.
 2. Scheduled capture runs `pnpm facebook:capture --limit 25 --yes` with the service audit actor.
-3. Captured text is stored in `raw_source_material` with safe capture metadata.
+3. A cache hit replays its original captured time and safe provenance without opening Facebook. A cache miss captures visible DOM, commits the artifact to the local archive first, then flushes it to production.
 4. Capture queues up to 20 unique linked Facebook post/share URLs from the captured post for a later run. Links that already match a stored canonical source URL are skipped; capture does not recursively open them in the same run.
 5. Capture creates or confirms a `facebook_capture_reviews` row with `needs_review` status for the captured source.
 6. Operator uses the admin Facebook capture review queue at `/admin/knowledge/facebook-captures` to inspect the captured material before AI extraction.
@@ -119,8 +127,10 @@ If the script reports an audit actor error, create the service user row or set `
 
 If Facebook shows login, blocked, or empty content, refresh the local Playwright profile manually and rerun the command.
 
-If captured text is incomplete or corrupted, use the admin review detail page `Recapture` action. This clears `raw_source_material.raw_text` and capture metadata, resets the review to `needs_review`, and queues the source for another `pnpm facebook:capture --source-id <source-id>` run. Recapture is blocked once extraction cards already exist for that capture version.
+If captured text is incomplete or corrupted, use the admin review detail page `Recapture` action. This clears `raw_source_material.raw_text`, sets a review-owned force-live flag, and queues the source for another `pnpm facebook:capture --source-id <source-id>` run. It bypasses the default artifact, captures visible DOM again, archives the new artifact, and supersedes the old default only after a valid live result. Recapture is blocked once extraction cards already exist for that capture version.
+
+If production flush fails after archive admission, rerun the same command. It reuses the archived artifact rather than opening Facebook again. Do not delete the artifact while recovering; inspect the safe source/import outcome and restore the production database through the normal process if required.
 
 If an extraction job fails, correlate its `knowledge_extraction_jobs` row with the worker warning by job ID, source ID, and Facebook review ID. The row and warning contain only safe error code/detail and attempt metadata; investigate the source only in the operator review workflow, never from worker logs.
 
-Capture metadata includes diagnostics that identify the selected text path. Useful fields are `selectedTextSource`, `selectedCaptureTextSource`, `selectedInnerTextLength`, `selectedTextContentLength`, `selectedHtmlTextLength`, `graphqlResponseCount`, and `graphqlCandidateLength`. Current extraction order tries direct DOM text, serialized HTML text, CSS-rendered text, text content, and finally a matching GraphQL post-message candidate when available.
+Capture metadata includes diagnostics that identify the selected visible-DOM text path. It never reads, selects, stores, or caches GraphQL/network response bodies.

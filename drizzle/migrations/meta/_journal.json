@@ -246,6 +246,20 @@
       "when": 1784246242156,
       "tag": "0034_cooing_cloak",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1784247000000,
+      "tag": "0035_ops_2_capture_archive",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1784248000000,
+      "tag": "0036_ops_2_force_live_generation",
+      "breakpoints": true
     }
   ]
 }
