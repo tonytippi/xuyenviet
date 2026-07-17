@@ -21,20 +21,28 @@ afterEach(() => {
 });
 
 describe("Facebook seed URL loader", () => {
-  test("ignores blank lines and creates URL-stable source IDs", () => {
+  test("uses preceding comment lines as labels and creates URL-stable source IDs", () => {
     const first = "https://web.facebook.com/share/p/first/";
     const second = "https://web.facebook.com/share/p/second/";
-    const urls = loadFacebookSeedUrls(createUrlFile(`\r\n ${first}\r\n\r\n${second}\r\n`));
+    const urls = loadFacebookSeedUrls(createUrlFile(`\r\n# First source\r\n ${first}\r\n\r\n  # Second source\r\n${second}\r\n`));
     const reorderedUrls = loadFacebookSeedUrls(createUrlFile(`${second}\n${first}\n`));
 
     expect(urls).toEqual(expect.arrayContaining([
-      expect.objectContaining({ url: first, label: "Facebook post first" }),
-      expect.objectContaining({ url: second, label: "Facebook post second" }),
+      expect.objectContaining({ url: first, label: "First source" }),
+      expect.objectContaining({ url: second, label: "Second source" }),
     ]));
     expect(urls.find((url) => url.url === first)?.id).toBe(reorderedUrls.find((url) => url.url === first)?.id);
     expect(urls.find((url) => url.url === first)?.id.replace("source", "raw")).toBe(
       reorderedUrls.find((url) => url.url === first)?.id.replace("source", "raw"),
     );
+  });
+
+  test("uses the generated label when a URL has no preceding comment", () => {
+    const url = "https://web.facebook.com/share/p/first/";
+
+    expect(loadFacebookSeedUrls(createUrlFile(url))).toEqual([
+      expect.objectContaining({ url, label: "Facebook post first" }),
+    ]);
   });
 
   test.each([
