@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { beforeEach, describe, expect, test } from "vitest";
 
 import { auditEvents, facebookCaptureReviews, knowledgeCards, knowledgeCardSources, rawSourceMaterial, sources, users } from "@/db/schema";
@@ -8,10 +8,12 @@ import {
   getExistingCardsForCaptureSource,
   listFacebookCaptureReviews,
   markFacebookCaptureReviewStatus,
+  markFacebookCaptureReviewStatusInTransaction,
   reopenFacebookCaptureForRecapture,
   requestFacebookCaptureRecapture,
 } from "@/features/knowledge/facebook-capture-review";
 import { listQueuedFacebookSources, updateQueuedFacebookSourceRawText } from "@/features/knowledge/facebook-capture";
+import { lockFacebookCaptureResources } from "@/features/knowledge/facebook-capture-locks";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
 
@@ -150,6 +152,30 @@ describe("Facebook capture review state", () => {
     ]);
   });
 
+  test("status transitions retain created_at microseconds when an explicit clock is earlier", async () => {
+    await createSource({ id: "microsecond-created-review", rawText: "Captured text for timestamp precision." });
+    const ensured = await ensureFacebookCaptureReviewForCapturedSource(testDb, { sourceId: "microsecond-created-review", rawSourceMaterialId: "raw-microsecond-created-review" });
+    if (ensured.status !== "created") throw new Error("test setup failed");
+    await testDb.execute(sql`update ${facebookCaptureReviews} set created_at = '2026-07-13 09:41:36.669321', updated_at = '2026-07-13 09:41:36.669321' where ${facebookCaptureReviews.id} = ${ensured.review.id}`);
+
+    await expect(markFacebookCaptureReviewStatus(testDb, {
+      reviewId: ensured.review.id,
+      status: "extraction_failed",
+      actor: { userId: "operator-user", email: "operator-user@example.com" },
+      extractionError: "Extraction failed: invalid_model_output",
+      now: new Date("2026-07-13T09:41:36.669Z"),
+    })).resolves.toMatchObject({
+      status: "updated",
+      review: { reviewedAt: new Date("2026-07-13T09:41:36.669Z"), updatedAt: new Date("2026-07-13T09:41:36.669Z") },
+    });
+    await expect(testDb.select({
+      updatedAt: sql<string>`to_char(${facebookCaptureReviews.updatedAt}, 'YYYY-MM-DD HH24:MI:SS.US')`,
+      reviewedAt: sql<string>`to_char(${facebookCaptureReviews.reviewedAt}, 'YYYY-MM-DD HH24:MI:SS.US')`,
+    }).from(facebookCaptureReviews).where(eq(facebookCaptureReviews.id, ensured.review.id))).resolves.toEqual([
+      { updatedAt: "2026-07-13 09:41:36.669321", reviewedAt: "2026-07-13 09:41:36.669321" },
+    ]);
+  });
+
   test("status transitions store safe reviewer metadata and audit without raw captured text", async () => {
     await createSource({ id: "transition-facebook", rawText: "Raw Facebook text that must not be copied into audit." });
     const ensured = await ensureFacebookCaptureReviewForCapturedSource(testDb, { sourceId: "transition-facebook", rawSourceMaterialId: "raw-transition-facebook", now: new Date("2026-07-13T00:00:00.000Z") });
@@ -180,6 +206,22 @@ describe("Facebook capture review state", () => {
         extractionError: "Follow-up failure",
       }),
     ).resolves.toMatchObject({ status: "invalid_transition", currentStatus: "rejected" });
+  });
+
+  test("status transitions reenter an already-held source advisory lock", async () => {
+    await createSource({ id: "reentrant-status-lock", rawText: "Captured Facebook text for status transition." });
+    const ensured = await ensureFacebookCaptureReviewForCapturedSource(testDb, { sourceId: "reentrant-status-lock", rawSourceMaterialId: "raw-reentrant-status-lock" });
+    if (ensured.status !== "created") throw new Error("test setup failed");
+
+    await expect(testDb.transaction(async (transaction) => {
+      await lockFacebookCaptureResources(transaction, { sourceId: "reentrant-status-lock" });
+      return markFacebookCaptureReviewStatusInTransaction(transaction, {
+        reviewId: ensured.review.id,
+        status: "rejected",
+        actor: { userId: "operator-user", email: "operator-user@example.com" },
+        rejectionReason: "Wrong visible post content",
+      });
+    })).resolves.toMatchObject({ status: "updated", review: { status: "rejected" } });
   });
 
   test("transition summaries reject captured raw text overlap", async () => {
@@ -321,6 +363,36 @@ describe("Facebook capture review state", () => {
     const audits = await testDb.select().from(auditEvents).where(eq(auditEvents.targetId, ensured.review.id));
     expect(audits.some((audit) => audit.afterSummary?.includes("needs_review -> recapture-ready"))).toBe(true);
     expect(JSON.stringify(audits)).not.toContain("Captured text with missing visible characters");
+  });
+
+  test("rejects a normal capture flush that became stale after an operator requests recapture", async () => {
+    await createSource({ id: "stale-normal-flush", rawText: null });
+
+    const [queued] = await listQueuedFacebookSources(testDb, { sourceId: "stale-normal-flush" });
+    expect(queued).toMatchObject({ forceLiveCapture: false, forceLiveCaptureGeneration: 0 });
+    const [review] = await testDb.select().from(facebookCaptureReviews).where(eq(facebookCaptureReviews.sourceId, queued.sourceId));
+
+    await expect(requestFacebookCaptureRecapture(testDb, {
+      reviewId: review.id,
+      actor: { userId: "operator-user", email: "operator-user@example.com" },
+      reason: "Capture must be refreshed live",
+    })).resolves.toMatchObject({ status: "updated", review: { forceLiveCapture: true, forceLiveCaptureGeneration: 1 } });
+
+    await expect(updateQueuedFacebookSourceRawText(testDb, {
+      sourceId: queued.sourceId,
+      rawText: "Stale normal cache payload must not be written.",
+      captureMetadata: {
+        captureMethod: "playwright_operator_browser",
+        capturedAt: "2026-07-17T00:00:00.000Z",
+        sourceUrl: "https://facebook.com/groups/xuyenviet/posts/stale-normal-flush",
+        finalUrl: "https://facebook.com/groups/xuyenviet/posts/stale-normal-flush",
+      },
+      expectedForceLiveCapture: queued.forceLiveCapture,
+      expectedForceLiveCaptureGeneration: queued.forceLiveCaptureGeneration,
+    })).resolves.toEqual({ status: "no_longer_queued" });
+
+    await expect(testDb.select({ rawText: rawSourceMaterial.rawText }).from(rawSourceMaterial).where(eq(rawSourceMaterial.sourceId, queued.sourceId))).resolves.toEqual([{ rawText: null }]);
+    await expect(testDb.select({ forceLiveCapture: facebookCaptureReviews.forceLiveCapture, forceLiveCaptureGeneration: facebookCaptureReviews.forceLiveCaptureGeneration }).from(facebookCaptureReviews).where(eq(facebookCaptureReviews.sourceId, queued.sourceId))).resolves.toEqual([{ forceLiveCapture: true, forceLiveCaptureGeneration: 1 }]);
   });
 
   test("direct recapture blocks already extracted captures", async () => {

@@ -1,7 +1,9 @@
 import { and, asc, eq, isNull, or, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
-import { auditEvents, rawSourceMaterial, schema, sources } from "../../db/schema";
+import { auditEvents, facebookCaptureReviews, rawSourceMaterial, schema, sources } from "../../db/schema";
+import { canonicalizeFacebookUrl } from "./capture-identity";
+import { lockFacebookCaptureResources } from "./facebook-capture-locks";
 import { ensureFacebookCaptureReviewForCapturedSource } from "./facebook-capture-review";
 
 export type FacebookCaptureDb = PostgresJsDatabase<typeof schema>;
@@ -13,6 +15,8 @@ export type QueuedFacebookSource = {
   label: string;
   rawMaterialId: string;
   rawMetadata: Record<string, unknown> | null;
+  forceLiveCapture: boolean;
+  forceLiveCaptureGeneration: number;
 };
 
 export type SafeFacebookCaptureMetadata = {
@@ -25,6 +29,14 @@ export type SafeFacebookCaptureMetadata = {
   timestampText?: string;
   postCreatedAt?: string;
   diagnostics?: Record<string, string | number | boolean | null>;
+  captureOrigin?: "live" | "cache";
+  captureArtifactId?: string;
+  importedAt?: string;
+  importCorrelationToken?: string;
+  captureMethodVersion?: string;
+  payloadSchemaVersion?: string;
+  captureActorId?: string;
+  importActorId?: string;
 };
 
 export type FacebookCaptureActor = {
@@ -51,7 +63,7 @@ const safeMetadataKeys = new Set<keyof SafeFacebookCaptureMetadata>([
   "groupName",
   "timestampText",
   "postCreatedAt",
-  "diagnostics",
+  "diagnostics", "captureOrigin", "captureArtifactId", "importedAt", "importCorrelationToken", "captureMethodVersion", "payloadSchemaVersion", "captureActorId", "importActorId",
 ]);
 
 function queuedRawTextCondition() {
@@ -143,6 +155,22 @@ function normalizeRawText(rawText: string) {
 }
 
 export async function listQueuedFacebookSources(db: FacebookCaptureDb, input: { sourceId?: string; limit?: number } = {}): Promise<QueuedFacebookSource[]> {
+  const queuedSourceRows = await db
+    .select({ sourceId: sources.id, rawMaterialId: rawSourceMaterial.id })
+    .from(sources)
+    .innerJoin(rawSourceMaterial, eq(rawSourceMaterial.sourceId, sources.id))
+    .where(and(eq(sources.kind, "facebook"), queuedRawTextCondition(), input.sourceId ? eq(sources.id, input.sourceId) : undefined))
+    .orderBy(asc(sources.createdAt))
+    .limit(input.sourceId ? 1 : normalizeLimit(input.limit));
+
+  // A review row carries the capture generation token, including for normal cache-first work.
+  if (queuedSourceRows.length > 0) {
+    await db
+      .insert(facebookCaptureReviews)
+      .values(queuedSourceRows.map((source) => ({ sourceId: source.sourceId, rawSourceMaterialId: source.rawMaterialId })))
+      .onConflictDoNothing({ target: facebookCaptureReviews.sourceId });
+  }
+
   const rows = await db
     .select({
       sourceId: sources.id,
@@ -151,9 +179,12 @@ export async function listQueuedFacebookSources(db: FacebookCaptureDb, input: { 
       label: sources.label,
       rawMaterialId: rawSourceMaterial.id,
       rawMetadata: rawSourceMaterial.rawMetadata,
+      forceLiveCapture: sql<boolean>`coalesce(${facebookCaptureReviews.forceLiveCapture}, false)`,
+      forceLiveCaptureGeneration: sql<number>`coalesce(${facebookCaptureReviews.forceLiveCaptureGeneration}, 0)`,
     })
     .from(sources)
     .innerJoin(rawSourceMaterial, eq(rawSourceMaterial.sourceId, sources.id))
+    .leftJoin(facebookCaptureReviews, eq(facebookCaptureReviews.sourceId, sources.id))
     .where(and(eq(sources.kind, "facebook"), queuedRawTextCondition(), input.sourceId ? eq(sources.id, input.sourceId) : undefined))
     .orderBy(asc(sources.createdAt))
     .limit(input.sourceId ? 1 : normalizeLimit(input.limit));
@@ -171,15 +202,22 @@ export async function updateQueuedFacebookSourceRawText(
     now?: Date;
     discoveredUrls?: string[];
     sourceUrl?: string;
+    expectedForceLiveCapture?: boolean;
+    expectedForceLiveCaptureGeneration?: number;
   },
 ) {
   const rawText = normalizeRawText(input.rawText);
   const canonicalFinalUrl = canonicalizeFacebookUrl(input.captureMetadata.finalUrl);
+  const discoveredPosts = input.actor && input.sourceUrl
+    ? normalizeDiscoveredFacebookPosts(input.discoveredUrls ?? [], input.sourceUrl)
+    : [];
 
   return db.transaction(async (transaction) => {
-    if (canonicalFinalUrl) {
-      await transaction.execute(sql`select pg_advisory_xact_lock(hashtext(${canonicalFinalUrl}))`);
-    }
+    // Acquire every identity this completion can mutate in a global order before row writes.
+    await lockFacebookCaptureResources(transaction, {
+      sourceId: input.sourceId,
+      canonicalUrls: [canonicalFinalUrl, ...discoveredPosts.map((post) => post.canonicalUrl)],
+    });
 
     const [queued] = await transaction
       .select({
@@ -195,6 +233,21 @@ export async function updateQueuedFacebookSourceRawText(
 
     if (!queued) {
       return { status: "not_queued" as const };
+    }
+    if (input.expectedForceLiveCapture !== undefined && input.expectedForceLiveCaptureGeneration !== undefined) {
+      const [review] = await transaction
+        .select({ forceLiveCapture: facebookCaptureReviews.forceLiveCapture, forceLiveCaptureGeneration: facebookCaptureReviews.forceLiveCaptureGeneration })
+        .from(facebookCaptureReviews)
+        .where(eq(facebookCaptureReviews.sourceId, queued.sourceId))
+        .limit(1)
+        .for("update");
+      if (
+        !review
+        || review.forceLiveCapture !== input.expectedForceLiveCapture
+        || review.forceLiveCaptureGeneration !== input.expectedForceLiveCaptureGeneration
+      ) {
+        return { status: "no_longer_queued" as const };
+      }
     }
 
     if (canonicalFinalUrl) {
@@ -267,6 +320,16 @@ export async function updateQueuedFacebookSourceRawText(
     if (review.status === "not_reviewable") {
       throw new Error("Captured Facebook source could not enter review state.");
     }
+    if (input.expectedForceLiveCapture && input.expectedForceLiveCaptureGeneration !== undefined) {
+      await transaction
+        .update(facebookCaptureReviews)
+        .set({ forceLiveCapture: false })
+        .where(and(
+          eq(facebookCaptureReviews.sourceId, queued.sourceId),
+          eq(facebookCaptureReviews.forceLiveCapture, true),
+          eq(facebookCaptureReviews.forceLiveCaptureGeneration, input.expectedForceLiveCaptureGeneration),
+        ));
+    }
 
     if (input.actor) {
       await transaction.insert(auditEvents).values({
@@ -282,16 +345,21 @@ export async function updateQueuedFacebookSourceRawText(
     }
 
     const discovered = input.actor && input.sourceUrl && !queued.rawMetadata?.discoveredFromSourceId
-      ? await queueDiscoveredFacebookPostsInTransaction(transaction, {
+        ? await queueDiscoveredFacebookPostsInTransaction(transaction, {
           sourceId: queued.sourceId,
           sourceUrl: input.sourceUrl,
           urls: input.discoveredUrls ?? [],
           actor: input.actor,
-        })
+        }, discoveredPosts, true)
       : { queuedCount: 0, duplicateCount: 0 };
 
     return { status: "updated" as const, rawMaterialId: updated[0].id, reviewId: review.review.id, discovered };
   });
+}
+
+export async function findFacebookCaptureImportByCorrelationToken(db: FacebookCaptureDb, input: { sourceId: string; correlationToken: string }) {
+  const [row] = await db.select({ id: rawSourceMaterial.id }).from(rawSourceMaterial).where(and(eq(rawSourceMaterial.sourceId, input.sourceId), sql`${rawSourceMaterial.rawMetadata}->>'importCorrelationToken' = ${input.correlationToken}`)).limit(1);
+  return Boolean(row);
 }
 
 export async function queueDiscoveredFacebookPosts(
@@ -318,13 +386,14 @@ async function queueDiscoveredFacebookPostsInTransaction(
   transaction: Parameters<Parameters<FacebookCaptureDb["transaction"]>[0]>[0],
   input: { sourceId: string; sourceUrl: string; urls: string[]; actor: FacebookCaptureActor },
   discoveredPosts = normalizeDiscoveredFacebookPosts(input.urls, input.sourceUrl),
+  locksHeld = false,
 ) {
   if (discoveredPosts.length === 0) {
     return { queuedCount: 0, duplicateCount: 0 };
   }
 
-  for (const post of discoveredPosts) {
-    await transaction.execute(sql`select pg_advisory_xact_lock(hashtext(${post.canonicalUrl}))`);
+  if (!locksHeld) {
+    await lockFacebookCaptureResources(transaction, { canonicalUrls: discoveredPosts.map((post) => post.canonicalUrl) });
   }
 
   const existing = await transaction
@@ -388,37 +457,6 @@ export function normalizeDiscoveredFacebookPosts(urls: string[], sourceUrl: stri
   }
 
   return Array.from(posts.values());
-}
-
-function canonicalizeFacebookUrl(value: string) {
-  try {
-    const url = new URL(value);
-    const hostname = url.hostname.toLowerCase();
-    const isFacebookHost = hostname === "facebook.com" || hostname.endsWith(".facebook.com") || hostname === "fb.com" || hostname === "fb.watch";
-    const isPostUrl = /\/share\/|\/posts\/|\/permalink\//.test(url.pathname) || url.searchParams.has("story_fbid");
-
-    if ((url.protocol !== "http:" && url.protocol !== "https:") || !isFacebookHost || !isPostUrl) {
-      return null;
-    }
-
-    url.hash = "";
-    url.protocol = "https:";
-    url.hostname = "facebook.com";
-    const shareMatch = url.pathname.match(/^(\/share\/[^/]+\/[^/]+)/i);
-    if (shareMatch) {
-      url.pathname = shareMatch[1];
-    }
-    url.pathname = url.pathname.replace(/\/+$/, "") || "/";
-    for (const key of Array.from(url.searchParams.keys())) {
-      if (key.toLowerCase() === "fbclid" || key.toLowerCase() === "rdid" || key.toLowerCase().startsWith("utm_") || key.startsWith("__")) {
-        url.searchParams.delete(key);
-      }
-    }
-    url.searchParams.sort();
-    return url.toString();
-  } catch {
-    return null;
-  }
 }
 
 export function recordFacebookCaptureFailure(sourceId: string, reason: string) {

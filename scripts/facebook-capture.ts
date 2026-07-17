@@ -4,11 +4,14 @@ import { stdin as input, stdout as output } from "node:process";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
-import { chromium, type Page, type Response } from "playwright";
+import { chromium, type Page } from "playwright";
 
 import { schema, users } from "../src/db/schema";
-import { listQueuedFacebookSources, recordFacebookCaptureFailure, updateQueuedFacebookSourceRawText, type SafeFacebookCaptureMetadata } from "../src/features/knowledge/facebook-capture";
-import { getDatabaseUrl, getEnvValue } from "./db-env";
+import { findFacebookCaptureImportByCorrelationToken, listQueuedFacebookSources, normalizeDiscoveredFacebookPosts, recordFacebookCaptureFailure, updateQueuedFacebookSourceRawText, type SafeFacebookCaptureMetadata } from "../src/features/knowledge/facebook-capture";
+import { admitArtifact, admitArtifactAlias, assertCaptureCacheReady, findArtifactByAlias, findForceLiveArtifact, findReusableArtifact, finishImport, linkForceLiveArtifact, prepareImport, supersedeDefaultArtifacts } from "../src/features/knowledge/capture-cache";
+import { flushCachedArtifact } from "../src/features/knowledge/capture-orchestration";
+import { CAPTURE_PAYLOAD_SCHEMA_VERSION, FACEBOOK_CAPTURE_METHOD_VERSION, canonicalizeFacebookUrl, captureReuseKey, facebookResourceIdentity } from "../src/features/knowledge/capture-identity";
+import { assertDistinctCaptureDatabases, getCaptureCacheDatabaseUrl, getDatabaseUrl, getEnvValue } from "./db-env";
 
 type CliOptions = {
   sourceId?: string;
@@ -33,15 +36,6 @@ type ExtractedFacebookText = {
   timestampText?: string;
   postCreatedAt?: string;
   diagnostics: Record<string, string | number | boolean | null>;
-};
-
-type CaptureTextSource = "dom" | "graphql";
-
-type GraphqlTextCandidate = {
-  text: string | null;
-  postId: string | null;
-  authorText: string | null;
-  postCreatedAt: string | null;
 };
 
 export function chooseFacebookCaptureText(input: { innerText?: string | null; textContent?: string | null; renderedText?: string | null; htmlText?: string | null }) {
@@ -97,252 +91,6 @@ function isSubsequence(needle: string, haystack: string) {
   }
 
   return needle.length === 0;
-}
-
-export function extractFacebookGraphqlText(rawTexts: string[], input: { finalUrl?: string | null } = {}) {
-  const targetPostId = extractFacebookPostId(input.finalUrl ?? "");
-  const candidates: GraphqlTextCandidate[] = [];
-
-  for (const rawText of rawTexts) {
-    for (const payload of parseJsonPayloads(rawText)) {
-      walkJson(payload, (node) => {
-        if (!isRecord(node)) return;
-
-        const postId = extractGraphqlPostId(node);
-        if (!postId) return;
-
-        candidates.push({
-          text: extractMessageText(node),
-          postId,
-          authorText: extractAuthorText(node),
-          postCreatedAt: extractPostCreatedAt(node),
-        });
-      });
-    }
-  }
-
-  const matchingCandidates = targetPostId ? candidates.filter((candidate) => candidate.postId === targetPostId) : [];
-  const matchingTextCandidates = matchingCandidates.filter((candidate) => candidate.text);
-  const textCandidates = (matchingTextCandidates.length > 0 ? matchingTextCandidates : candidates.filter((candidate) => candidate.text))
-    .sort((left, right) => (right.text?.length ?? 0) - (left.text?.length ?? 0));
-  const best = textCandidates[0] ?? matchingCandidates[0] ?? candidates[0];
-
-  if (!best) return null;
-
-  const exactMetadataCandidate = matchingCandidates.find((candidate) => candidate.authorText || candidate.postCreatedAt);
-
-  // Exact provenance must belong to the post opened after Facebook redirects a share link.
-  return {
-    ...best,
-    text: best.text ?? "",
-    authorText: exactMetadataCandidate?.authorText ?? null,
-    postCreatedAt: exactMetadataCandidate?.postCreatedAt ?? null,
-  };
-}
-
-function extractGraphqlPostId(node: Record<string, unknown>) {
-  const urlPostId = extractPostIdFromGraphqlUrl(node);
-  if (urlPostId) return urlPostId;
-
-  for (const key of ["post_id", "postID", "story_fbid", "legacy_fbid", "fbid", "ft_ent_identifier", "id"]) {
-    const postId = extractPostIdValue(node[key]);
-    if (postId) return postId;
-  }
-
-  return null;
-}
-
-function extractPostIdFromGraphqlUrl(node: Record<string, unknown>) {
-  for (const key of ["permalink_url", "permalinkUrl", "post_url", "postUrl", "shareable_url", "shareableUrl", "url"]) {
-    const value = node[key];
-    if (typeof value !== "string") continue;
-
-    const postId = extractFacebookPostId(value);
-    if (postId) return postId;
-  }
-
-  return null;
-}
-
-function extractPostIdValue(value: unknown) {
-  if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) return String(value);
-  if (typeof value !== "string") return null;
-  if (/^\d+$/.test(value)) return value;
-
-  const directStoryId = value.match(/Story:(\d+)/)?.[1];
-  if (directStoryId) return directStoryId;
-
-  try {
-    return Buffer.from(value, "base64").toString("utf8").match(/(?:Story|feedback):(\d+)/)?.[1] ?? null;
-  } catch {
-    return null;
-  }
-}
-
-export function chooseBestFacebookCaptureText(input: { domText: string; graphqlText?: string | null }) {
-  return chooseBestFacebookCaptureTextCandidate({ domText: input.domText, candidates: [{ source: "graphql", text: input.graphqlText }] });
-}
-
-export function chooseBestFacebookCaptureTextCandidate(input: { domText: string; candidates: Array<{ source: Exclude<CaptureTextSource, "dom">; text?: string | null }> }) {
-  const domText = input.domText.trim();
-  let best: { text: string; source: CaptureTextSource } = { text: domText, source: "dom" };
-
-  for (const candidate of input.candidates) {
-    const text = candidate.text?.trim() ?? "";
-    if (!text) continue;
-
-    if (!best.text || isPlausibleSameCaptureText({ currentText: best.text, candidateText: text })) {
-      best = { text, source: candidate.source };
-    }
-  }
-
-  return best;
-}
-
-function isPlausibleSameCaptureText(input: { currentText: string; candidateText: string }) {
-  const currentText = input.currentText.trim();
-  const candidateText = input.candidateText.trim();
-
-  if (!currentText) return Boolean(candidateText);
-  if (!candidateText) return false;
-
-  const compactCurrentText = currentText.replace(/\s+/g, "");
-  const compactCandidateText = candidateText.replace(/\s+/g, "");
-  const lengthRatio = candidateText.length / Math.max(currentText.length, 1);
-  const plausibleSamePost = lengthRatio >= 0.75 && lengthRatio <= 1.35;
-
-  return plausibleSamePost && (isSubsequence(compactCurrentText, compactCandidateText) || candidateText.length >= currentText.length);
-}
-
-function parseJsonPayloads(rawText: string) {
-  const payloads: unknown[] = [];
-  const trimmed = rawText.trim();
-
-  if (!trimmed) return payloads;
-
-  try {
-    payloads.push(JSON.parse(stripFacebookJsonPrefix(trimmed)) as unknown);
-    return payloads;
-  } catch {
-    // GraphQL responses may be newline-delimited JSON.
-  }
-
-  for (const line of trimmed.split("\n")) {
-    const item = stripFacebookJsonPrefix(line.trim());
-    if (!item) continue;
-
-    try {
-      payloads.push(JSON.parse(item) as unknown);
-    } catch {
-      // Ignore non-JSON diagnostics in mixed responses.
-    }
-  }
-
-  return payloads;
-}
-
-function stripFacebookJsonPrefix(value: string) {
-  return value.replace(/^(?:for\s*\(;;\);|while\s*\(1\);)\s*/, "");
-}
-
-function walkJson(value: unknown, visit: (node: unknown) => void, depth = 0) {
-  if (!value || typeof value !== "object" || depth > 40) return;
-
-  visit(value);
-
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      walkJson(item, visit, depth + 1);
-    }
-    return;
-  }
-
-  for (const item of Object.values(value)) {
-    walkJson(item, visit, depth + 1);
-  }
-}
-
-function extractMessageText(node: Record<string, unknown>) {
-  const directText = getNestedString(node, ["comet_sections", "content", "story", "message", "text"]) ?? getNestedString(node, ["message", "text"]) ?? getNestedString(node, ["story", "message", "text"]);
-
-  if (directText) {
-    return directText.replace(/\s+/g, " ").trim();
-  }
-
-  return null;
-}
-
-function extractAuthorText(node: Record<string, unknown>) {
-  const actors = getNestedValue(node, ["comet_sections", "content", "story", "actors"]) ?? node.actors;
-
-  const directName = extractActorName(actors);
-  if (directName) return directName;
-
-  return findNestedAuthorText(node);
-}
-
-function extractActorName(value: unknown) {
-  if (!Array.isArray(value) || !isRecord(value[0])) return null;
-
-  const name = value[0].name;
-  return typeof name === "string" && name.trim() ? name.trim() : null;
-}
-
-function findNestedAuthorText(value: unknown, depth = 0): string | null {
-  if (!isRecord(value) || depth > 12) return null;
-
-  const actorName = extractActorName(value.actors);
-  if (actorName) return actorName;
-
-  for (const child of Object.values(value)) {
-    if (Array.isArray(child)) continue;
-    const authorText = findNestedAuthorText(child, depth + 1);
-    if (authorText) return authorText;
-  }
-
-  return null;
-}
-
-function extractPostCreatedAt(node: Record<string, unknown>) {
-  const value = findNestedCreationTime(node);
-
-  if (value === null || !Number.isInteger(value) || value <= 0 || value > 9_999_999_999) return null;
-
-  const date = new Date(value * 1_000);
-  return Number.isNaN(date.getTime()) ? null : date.toISOString();
-}
-
-function findNestedCreationTime(value: unknown, depth = 0): number | null {
-  if (!isRecord(value) || depth > 12) return null;
-  if (typeof value.creation_time === "number") return value.creation_time;
-
-  for (const child of Object.values(value)) {
-    if (Array.isArray(child)) continue;
-    const creationTime = findNestedCreationTime(child, depth + 1);
-    if (creationTime !== null) return creationTime;
-  }
-
-  return null;
-}
-
-function getNestedString(value: unknown, path: string[]) {
-  const nested = getNestedValue(value, path);
-  return typeof nested === "string" && nested.trim() ? nested.trim() : null;
-}
-
-function getNestedValue(value: unknown, path: string[]) {
-  let current = value;
-
-  for (const key of path) {
-    if (!isRecord(current)) return null;
-    current = current[key];
-  }
-
-  return current;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
 }
 
 function extractFacebookPostId(url: string) {
@@ -418,6 +166,23 @@ export function getFacebookCapturePacing(): FacebookCapturePacing {
 
 export function getFacebookCaptureDelayMs(pacing: Pick<FacebookCapturePacing, "delayMinMs" | "delayMaxMs">, random = Math.random) {
   return pacing.delayMinMs + Math.floor(random() * (pacing.delayMaxMs - pacing.delayMinMs + 1));
+}
+
+export function parseCachedFacebookPayload(payload: unknown, sourceUrl: string) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("cache_invalid_facebook_payload");
+  const value = payload as Record<string, unknown>;
+  if (typeof value.rawText !== "string" || !value.rawText.trim() || !value.metadata || typeof value.metadata !== "object" || Array.isArray(value.metadata)) throw new Error("cache_invalid_facebook_payload");
+  if (value.rawText.trim().length > 20_000) throw new Error("cache_invalid_facebook_payload");
+  const metadata = value.metadata as Record<string, unknown>;
+  if (metadata.captureMethod !== "playwright_operator_browser" || typeof metadata.capturedAt !== "string" || Number.isNaN(Date.parse(metadata.capturedAt)) || typeof metadata.sourceUrl !== "string" || typeof metadata.finalUrl !== "string" || !canonicalizeFacebookUrl(metadata.sourceUrl) || !canonicalizeFacebookUrl(metadata.finalUrl)) throw new Error("cache_invalid_facebook_payload");
+  const discoveredUrls = Array.isArray(value.discoveredUrls) ? value.discoveredUrls.filter((url): url is string => typeof url === "string") : [];
+  const cachedSourceUrl = typeof value.sourceUrl === "string" ? value.sourceUrl : sourceUrl;
+  if (!canonicalizeFacebookUrl(cachedSourceUrl)) throw new Error("cache_invalid_facebook_payload");
+  return { rawText: value.rawText.trim(), metadata: metadata as SafeFacebookCaptureMetadata, discoveredUrls: normalizeDiscoveredFacebookUrls(discoveredUrls, cachedSourceUrl), sourceUrl: cachedSourceUrl };
+}
+
+function normalizeDiscoveredFacebookUrls(urls: string[], sourceUrl: string) {
+  return normalizeDiscoveredFacebookPosts(urls, sourceUrl).map((post) => post.url);
 }
 
 export function detectFacebookCaptureStopReason(input: { url: string; bodyText: string }) {
@@ -828,13 +593,15 @@ export async function extractVisibleFacebookText(page: Page, finalUrl: string): 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const client = postgres(getDatabaseUrl(), { max: 1 });
+  const cacheClient = postgres(getCaptureCacheDatabaseUrl(), { max: 1 });
   const db = drizzle(client, { schema });
   let context: Awaited<ReturnType<typeof chromium.launchPersistentContext>> | null = null;
 
   try {
+    await assertDistinctCaptureDatabases(client, cacheClient);
+    await assertCaptureCacheReady(cacheClient);
     const actor = await resolveCaptureActor(db, options);
     const pacing = getFacebookCapturePacing();
-    context = await chromium.launchPersistentContext(".playwright/facebook-profile", { headless: false });
     const queued = await listQueuedFacebookSources(db, { sourceId: options.sourceId, limit: options.limit });
 
     if (queued.length === 0) {
@@ -842,18 +609,18 @@ async function main() {
       return;
     }
 
-    let page = await context.newPage();
+    let page: Page | null = null;
 
     for (const [index, source] of queued.entries()) {
       if (index > 0) {
         if (index % pacing.batchSize === 0 && pacing.batchCooldownMs > 0) {
           console.log(`Facebook capture cooldown: waiting ${pacing.batchCooldownMs}ms after ${index} attempts.`);
-          await page.waitForTimeout(pacing.batchCooldownMs);
+          await new Promise((resolve) => setTimeout(resolve, pacing.batchCooldownMs));
         } else {
           const delayMs = getFacebookCaptureDelayMs(pacing);
           if (delayMs > 0) {
             console.log(`Facebook capture pacing: waiting ${delayMs}ms before the next attempt.`);
-            await page.waitForTimeout(delayMs);
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
           }
         }
       }
@@ -866,19 +633,23 @@ async function main() {
       }
 
       try {
-        const graphqlTexts: string[] = [];
-        const onResponse = async (response: Response) => {
-          if (!/\/graphql/i.test(response.url())) return;
-
-          try {
-            const text = await response.text();
-            if (text) graphqlTexts.push(text);
-          } catch {
-            // Some responses may be consumed by the browser or unavailable.
-          }
-        };
-
-        page.on("response", onResponse);
+        const identity = facebookResourceIdentity({ submittedUrl: sourceUrl });
+        if (!identity) throw new Error("invalid_facebook_resource_identity");
+        const reuseKey = captureReuseKey({ provider: "facebook", resourceIdentity: identity, captureMethodVersion: FACEBOOK_CAPTURE_METHOD_VERSION, payloadSchemaVersion: CAPTURE_PAYLOAD_SCHEMA_VERSION });
+        const submittedAlias = canonicalizeFacebookUrl(sourceUrl);
+        const reusableArtifact = await findReusableArtifact(cacheClient, reuseKey) ?? (submittedAlias ? await findArtifactByAlias(cacheClient, { provider: "facebook", aliasUrl: submittedAlias, resourceIdentity: identity, captureMethodVersion: FACEBOOK_CAPTURE_METHOD_VERSION, payloadSchemaVersion: CAPTURE_PAYLOAD_SCHEMA_VERSION, allowValidatedAlias: identity.startsWith("submitted:") }) : null);
+        let artifact = source.forceLiveCapture
+          ? await findForceLiveArtifact(cacheClient, source.sourceId, source.forceLiveCaptureGeneration)
+          : reusableArtifact;
+        if (artifact) {
+          const cachedArtifact = artifact;
+          const payload = parseCachedFacebookPayload(cachedArtifact.payload, sourceUrl);
+          const result = await flushCachedArtifact({ artifact: cachedArtifact, sourceId: source.sourceId, prepareImport: () => prepareImport(cacheClient, cachedArtifact.id, source.sourceId), importCommitted: (correlationToken) => findFacebookCaptureImportByCorrelationToken(db, { sourceId: source.sourceId, correlationToken }), flush: (correlationToken) => updateQueuedFacebookSourceRawText(db, { sourceId: source.sourceId, rawText: payload.rawText, captureMetadata: { ...payload.metadata, captureOrigin: source.forceLiveCapture ? "live" : "cache", captureArtifactId: cachedArtifact.id, importedAt: new Date().toISOString(), importCorrelationToken: correlationToken, captureMethodVersion: FACEBOOK_CAPTURE_METHOD_VERSION, payloadSchemaVersion: CAPTURE_PAYLOAD_SCHEMA_VERSION, importActorId: actor.userId }, actor, discoveredUrls: payload.discoveredUrls, sourceUrl: payload.sourceUrl, expectedForceLiveCapture: source.forceLiveCapture, expectedForceLiveCaptureGeneration: source.forceLiveCaptureGeneration }).then((value) => value.status), finishImport: (correlationToken, leaseOwner, outcome) => finishImport(cacheClient, cachedArtifact.id, source.sourceId, correlationToken, leaseOwner, outcome) });
+          console.log(`Capture cache replay for ${source.sourceId}: ${result}`);
+          continue;
+        }
+        if (!context) { context = await chromium.launchPersistentContext(".playwright/facebook-profile", { headless: false }); page = await context.newPage(); }
+        if (!page) throw new Error("facebook_browser_unavailable");
         await page.goto(sourceUrl, { waitUntil: "domcontentloaded", timeout: 45_000 });
         await page.waitForTimeout(2_000);
 
@@ -887,71 +658,69 @@ async function main() {
           bodyText: await page.locator("body").innerText().catch(() => ""),
         });
         if (stopReason) {
-          page.off("response", onResponse);
           console.log(`Stopping Facebook capture: ${stopReason}. No further queued sources will be opened.`);
           break;
         }
 
         const finalUrl = normalizeFacebookCaptureUrl(page.url());
         const extracted = await extractVisibleFacebookText(page, finalUrl);
-        page.off("response", onResponse);
 
         if (!extracted.text.trim()) {
           console.log(recordFacebookCaptureFailure(source.sourceId, extracted.diagnostics.usedArticleRole ? "no_visible_post_text" : "facebook_article_not_found"));
           continue;
         }
 
-        const graphqlCandidate = extractFacebookGraphqlText(graphqlTexts, { finalUrl });
-        const selectedText = chooseBestFacebookCaptureTextCandidate({
-          domText: extracted.text,
-          candidates: [{ source: "graphql", text: graphqlCandidate?.text }],
-        });
         const metadata: SafeFacebookCaptureMetadata = {
           captureMethod: "playwright_operator_browser",
           capturedAt: new Date().toISOString(),
           sourceUrl,
           finalUrl,
-          authorText: graphqlCandidate?.authorText ?? extracted.authorText,
+          authorText: extracted.authorText,
           groupName: extracted.groupName,
           timestampText: extracted.timestampText,
-          postCreatedAt: graphqlCandidate?.postCreatedAt ?? extracted.postCreatedAt,
+          postCreatedAt: extracted.postCreatedAt,
           diagnostics: {
             ...extracted.diagnostics,
-            graphqlResponseCount: graphqlTexts.length,
-            graphqlCandidateLength: graphqlCandidate?.text.length ?? 0,
-            graphqlTargetPostId: extractFacebookPostId(finalUrl) ?? "none",
-            graphqlCandidatePostId: graphqlCandidate?.postId ?? "none",
-            graphqlPostMatched: Boolean(graphqlCandidate?.postId && graphqlCandidate.postId === extractFacebookPostId(finalUrl)),
-            graphqlMetadataMatched: Boolean(graphqlCandidate?.postCreatedAt || graphqlCandidate?.authorText),
-            selectedCaptureTextSource: selectedText.source,
+            selectedCaptureTextSource: "dom",
           },
         };
 
-        const shouldSave = options.yes || (await confirmSave(source.sourceId, selectedText.text));
+        const shouldSave = options.yes || (await confirmSave(source.sourceId, extracted.text));
 
         if (!shouldSave) {
           console.log(`Skipped ${source.sourceId}; database unchanged.`);
           continue;
         }
 
-        const result = await updateQueuedFacebookSourceRawText(db, {
-          sourceId: source.sourceId,
-          rawText: selectedText.text,
-          captureMetadata: metadata,
-          actor,
-          discoveredUrls: extracted.linkedPostUrls,
-          sourceUrl,
-        });
-
-        console.log(`Capture result for ${source.sourceId}: ${result.status}`);
-        if (result.status === "updated") {
-          console.log(`Discovered Facebook posts for ${source.sourceId}: queued=${result.discovered.queuedCount}; existing=${result.discovered.duplicateCount}.`);
+        const liveIdentity = facebookResourceIdentity({ finalUrl, submittedUrl: sourceUrl });
+        if (!liveIdentity) throw new Error("invalid_facebook_resource_identity");
+        const liveReuseKey = captureReuseKey({ provider: "facebook", resourceIdentity: liveIdentity, captureMethodVersion: FACEBOOK_CAPTURE_METHOD_VERSION, payloadSchemaVersion: CAPTURE_PAYLOAD_SCHEMA_VERSION });
+        const discoveredUrls = normalizeDiscoveredFacebookUrls(extracted.linkedPostUrls, sourceUrl);
+        artifact = await admitArtifact(cacheClient, { provider: "facebook", reuseKey: liveReuseKey, resourceIdentity: liveIdentity, captureMethodVersion: FACEBOOK_CAPTURE_METHOD_VERSION, payloadSchemaVersion: CAPTURE_PAYLOAD_SCHEMA_VERSION, promptVersion: null, model: null, payload: { rawText: extracted.text, metadata, discoveredUrls, sourceUrl }, metadata: { captureOrigin: "live" }, capturedAt: metadata.capturedAt });
+        if (source.forceLiveCapture) {
+          const linkedArtifactId = await linkForceLiveArtifact(cacheClient, source.sourceId, source.forceLiveCaptureGeneration, artifact.id);
+          if (linkedArtifactId !== artifact.id) {
+            const linkedArtifact = await findForceLiveArtifact(cacheClient, source.sourceId, source.forceLiveCaptureGeneration);
+            if (!linkedArtifact) throw new Error("capture_force_live_artifact_missing");
+            artifact = linkedArtifact;
+          }
         }
+        const finalAlias = canonicalizeFacebookUrl(finalUrl);
+        const submittedPostId = submittedAlias ? extractFacebookPostId(submittedAlias) : null;
+        if (submittedAlias && finalAlias && (!submittedPostId || liveIdentity === `post:${submittedPostId}`)) {
+          await admitArtifactAlias(cacheClient, { artifactId: artifact.id, provider: "facebook", aliasUrl: submittedAlias, resourceIdentity: liveIdentity });
+        }
+        const liveArtifact = artifact;
+        const livePayload = parseCachedFacebookPayload(liveArtifact.payload, sourceUrl);
+        const result = await flushCachedArtifact({ artifact: liveArtifact, sourceId: source.sourceId, prepareImport: () => prepareImport(cacheClient, liveArtifact.id, source.sourceId), importCommitted: (correlationToken) => findFacebookCaptureImportByCorrelationToken(db, { sourceId: source.sourceId, correlationToken }), flush: (correlationToken) => updateQueuedFacebookSourceRawText(db, { sourceId: source.sourceId, rawText: livePayload.rawText, captureMetadata: { ...livePayload.metadata, captureOrigin: "live", captureArtifactId: liveArtifact.id, importedAt: new Date().toISOString(), importCorrelationToken: correlationToken, captureMethodVersion: FACEBOOK_CAPTURE_METHOD_VERSION, payloadSchemaVersion: CAPTURE_PAYLOAD_SCHEMA_VERSION, captureActorId: actor.userId, importActorId: actor.userId }, actor, discoveredUrls: livePayload.discoveredUrls, sourceUrl: livePayload.sourceUrl, expectedForceLiveCapture: source.forceLiveCapture, expectedForceLiveCaptureGeneration: source.forceLiveCaptureGeneration }).then((value) => value.status), finishImport: (correlationToken, leaseOwner, outcome) => finishImport(cacheClient, liveArtifact.id, source.sourceId, correlationToken, leaseOwner, outcome) });
+        if (source.forceLiveCapture && (result === "updated" || result === "imported")) await supersedeDefaultArtifacts(cacheClient, artifact);
+
+        console.log(`Capture result for ${source.sourceId}: ${result}`);
       } catch (error) {
         const reason = error instanceof Error ? error.message.slice(0, 300) : "unknown_capture_error";
         console.log(recordFacebookCaptureFailure(source.sourceId, reason));
 
-        if (page.isClosed()) {
+        if (page?.isClosed() && context) {
           page = await context.newPage();
         }
       }
@@ -962,6 +731,7 @@ async function main() {
       await context?.close();
     } finally {
       await client.end();
+      await cacheClient.end();
     }
   }
 }

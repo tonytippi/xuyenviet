@@ -27,7 +27,30 @@ export function getDatabaseUrl() {
     throw new Error("DATABASE_URL is required. Set it in the environment or .env.local.");
   }
 
-  return databaseUrl;
+  return assertPostgresUrl(databaseUrl, "DATABASE_URL");
+}
+
+export function getCaptureCacheDatabaseUrl() {
+  const databaseUrl = getEnvValue("CAPTURE_CACHE_DATABASE_URL");
+  if (!databaseUrl) throw new Error("CAPTURE_CACHE_DATABASE_URL is required for capture archive operations.");
+  return assertPostgresUrl(databaseUrl, "CAPTURE_CACHE_DATABASE_URL");
+}
+
+export function assertPostgresUrl(value: string, name: string) {
+  try {
+    const url = new URL(value);
+    if (!['postgres:', 'postgresql:'].includes(url.protocol) || !url.hostname || !url.pathname || url.pathname === "/") throw new Error();
+    return value;
+  } catch {
+    throw new Error(`${name} must be a valid PostgreSQL URL.`);
+  }
+}
+
+export async function assertDistinctCaptureDatabases(appSql: { unsafe: (query: string) => Promise<Array<{ identity: string }>> }, cacheSql: { unsafe: (query: string) => Promise<Array<{ identity: string }>> }) {
+  const query = "select current_database() || ':' || inet_server_addr()::text || ':' || inet_server_port()::text as identity";
+  const [app] = await appSql.unsafe(query);
+  const [cache] = await cacheSql.unsafe(query);
+  if (!app?.identity || !cache?.identity || app.identity === cache.identity) throw new Error("DATABASE_URL and CAPTURE_CACHE_DATABASE_URL must resolve to separate databases.");
 }
 
 export function assertLocalDatabaseUrl(databaseUrl: string) {

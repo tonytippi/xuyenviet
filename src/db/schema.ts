@@ -306,6 +306,8 @@ export const facebookCaptureReviews = pgTable(
     reviewedAt: timestamp("reviewed_at", { mode: "date" }),
     rejectionReason: text("rejection_reason"),
     extractionError: text("extraction_error"),
+    forceLiveCapture: boolean("force_live_capture").default(false).notNull(),
+    forceLiveCaptureGeneration: integer("force_live_capture_generation").default(0).notNull(),
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
   },
