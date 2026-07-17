@@ -118,7 +118,7 @@ export async function submitKnowledgeSeedUrlBatch(input: BatchSeedUrlIntakeInput
           collectedDate: input.collectedDate,
           rawMetadata: { seedBatchId: batch.id, seedBatchLineNumber: line.lineNumber },
         });
-        canonicalUrl = normalized.source.canonicalUrl ?? "";
+        canonicalUrl = normalized.source.url ?? "";
 
         if (!canonicalUrl) {
           throw new KnowledgeBatchIntakeError("URL nguồn không hợp lệ.", "invalid_input");

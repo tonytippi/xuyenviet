@@ -70,6 +70,22 @@ describe("knowledge batch source intake", () => {
     expect(items[1].errorSummary).toContain("URL trùng trong cùng batch");
   });
 
+  test("batch intake accepts and canonicalizes individual YouTube videos", async () => {
+    await createUser("youtube-operator", ["operator"]);
+    authMock.mockResolvedValue({ user: { id: "youtube-operator", email: "youtube-operator@example.com" } });
+    const { submitKnowledgeSeedUrlBatch } = await import("@/features/knowledge/actions");
+
+    const result = await submitKnowledgeSeedUrlBatch({ urls: "https://youtu.be/abcDEF12345?si=tracking" });
+
+    expect(result).toMatchObject({ totalItems: 1, pendingCount: 1, failedCount: 0, duplicateCount: 0 });
+    await expect(testDb.select().from(sources)).resolves.toMatchObject([
+      { kind: "youtube", url: "https://www.youtube.com/watch?v=abcDEF12345", sourceType: "community" },
+    ]);
+    await expect(testDb.select().from(knowledgeSeedBatchItems)).resolves.toMatchObject([
+      { canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", status: "pending" },
+    ]);
+  });
+
   test("recent batch listing derives later statuses from linked cards and suggestion traces", async () => {
     await createUser("status-operator", ["operator"]);
     authMock.mockResolvedValue({ user: { id: "status-operator", email: "status-operator@example.com" } });
