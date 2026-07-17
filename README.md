@@ -72,6 +72,25 @@ CREATE DATABASE xuyenviet_test;
 
 Set `DATABASE_URL_TEST` in `.env` or `.env.local` so it points to that test database. The Vitest global setup runs Drizzle migrations against the test database automatically. Tests use fake OAuth, AI Gateway, and Tavily values and must not require real provider credentials.
 
+## Server deployment
+
+Docker Compose runs the web application plus the long-running knowledge extraction and indexing workers. PostgreSQL remains external and must be reachable through the `DATABASE_URL` set in the deployment environment file.
+
+1. Create a production environment file, for example `production.env`, from `.env.example`. Set `APP_ENV="production"`, a TLS-enabled non-localhost `DATABASE_URL` required by the selected Postgres provider, `AUTH_URL` to the public HTTPS Cloudflare Tunnel hostname, and real provider/authentication secrets.
+2. Run migrations once for each release that includes database changes:
+
+   ```bash
+   ENV_FILE=production.env docker compose --profile migrate run --rm migrate
+   ```
+
+3. Build and start the application:
+
+   ```bash
+   ENV_FILE=production.env docker compose up -d --build
+   ```
+
+The application binds to `127.0.0.1:3000` only. Configure the Cloudflare Tunnel origin as `http://localhost:3000`; no public inbound port needs to be exposed by the server. The container readiness check at `/api/health` validates its production environment and external database connection. The `knowledge-extractor` and `knowledge-indexing` services run continuously and restart independently. Use the same `ENV_FILE` value with `docker compose logs -f app`, `docker compose logs -f knowledge-extractor`, and `docker compose down`.
+
 Database scripts:
 
 ```bash
