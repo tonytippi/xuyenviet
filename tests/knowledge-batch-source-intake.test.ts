@@ -147,6 +147,21 @@ describe("knowledge batch source intake", () => {
     expect(persistedItems.map((item) => item.status)).toEqual(["needs_review", "approved", "duplicate"]);
   });
 
+  test("recent batch listing marks captured YouTube evidence as reading", async () => {
+    await createUser("youtube-status-operator", ["operator"]);
+    authMock.mockResolvedValue({ user: { id: "youtube-status-operator", email: "youtube-status-operator@example.com" } });
+    const { listRecentKnowledgeSeedBatches, submitKnowledgeSeedUrlBatch } = await import("@/features/knowledge/batch-intake");
+
+    await submitKnowledgeSeedUrlBatch({ urls: "https://www.youtube.com/watch?v=abcDEF12345" });
+    const [item] = await testDb.select().from(knowledgeSeedBatchItems);
+    await testDb.update(rawSourceMaterial).set({ rawText: '{"evidence":[]}' }).where(eq(rawSourceMaterial.sourceId, item!.sourceId!));
+
+    const [batch] = await listRecentKnowledgeSeedBatches();
+
+    expect(batch.items).toMatchObject([{ sourceId: item!.sourceId, status: "reading" }]);
+    await expect(testDb.select().from(knowledgeSeedBatchItems)).resolves.toMatchObject([{ id: item!.id, status: "reading" }]);
+  });
+
   test("batch intake handles carriage-return lines and oversized URLs as item failures", async () => {
     await createUser("edge-operator", ["operator"]);
     authMock.mockResolvedValue({ user: { id: "edge-operator", email: "edge-operator@example.com" } });

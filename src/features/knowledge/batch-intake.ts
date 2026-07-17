@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, desc, eq, inArray, or } from "drizzle-orm";
+import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
 import { knowledgeCards, knowledgeCardSources, knowledgeCardTypeValues, knowledgeSeedBatchItems, knowledgeSeedBatches, knowledgeSourceSuggestions, rawSourceMaterial, sources, type KnowledgeCardType, type KnowledgeSeedBatchItemStatus } from "@/db/schema";
@@ -333,6 +333,16 @@ async function deriveStatusesForSourceItems(db: Pick<BatchDb, "select">, items: 
     const current = derived.get(row.sourceId);
     const next = mapCardStatus(row.status, row.needsReview);
     derived.set(row.sourceId, pickHigherStatus(current, next));
+  }
+
+  const capturedYoutubeRows = await db
+    .select({ sourceId: sources.id })
+    .from(sources)
+    .innerJoin(rawSourceMaterial, eq(rawSourceMaterial.sourceId, sources.id))
+    .where(and(inArray(sources.id, sourceIds), eq(sources.kind, "youtube"), sql`length(btrim(${rawSourceMaterial.rawText})) > 0`));
+
+  for (const row of capturedYoutubeRows) {
+    derived.set(row.sourceId, pickHigherStatus(derived.get(row.sourceId), "reading"));
   }
 
   const suggestionRows = await db
