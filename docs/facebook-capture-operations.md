@@ -106,7 +106,7 @@ Capture does not currently run extraction automatically. The Playwright script i
 
 Capture opens each queued permalink directly rather than attempting in-page click traversal. This keeps the queue deterministic and auditable.
 
-Default pacing is a randomized 12-25 second delay between attempts and a one-minute cooldown after every 10 attempts. Configure it per environment with non-negative integer millisecond values:
+Default pacing is a randomized 12-25 second delay between live Facebook attempts and a one-minute cooldown after every 10 live attempts. Cache replays do not wait because they do not open Facebook. Configure it per environment with non-negative integer millisecond values:
 
 ```bash
 FACEBOOK_CAPTURE_DELAY_MIN_MS=12000

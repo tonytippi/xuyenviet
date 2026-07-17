@@ -610,21 +610,9 @@ async function main() {
     }
 
     let page: Page | null = null;
+    let liveAttemptCount = 0;
 
-    for (const [index, source] of queued.entries()) {
-      if (index > 0) {
-        if (index % pacing.batchSize === 0 && pacing.batchCooldownMs > 0) {
-          console.log(`Facebook capture cooldown: waiting ${pacing.batchCooldownMs}ms after ${index} attempts.`);
-          await new Promise((resolve) => setTimeout(resolve, pacing.batchCooldownMs));
-        } else {
-          const delayMs = getFacebookCaptureDelayMs(pacing);
-          if (delayMs > 0) {
-            console.log(`Facebook capture pacing: waiting ${delayMs}ms before the next attempt.`);
-            await new Promise((resolve) => setTimeout(resolve, delayMs));
-          }
-        }
-      }
-
+    for (const source of queued) {
       const sourceUrl = source.canonicalUrl?.trim() || source.url?.trim();
 
       if (!sourceUrl) {
@@ -648,6 +636,21 @@ async function main() {
           console.log(`Capture cache replay for ${source.sourceId}: ${result}`);
           continue;
         }
+
+        if (liveAttemptCount > 0) {
+          if (liveAttemptCount % pacing.batchSize === 0 && pacing.batchCooldownMs > 0) {
+            console.log(`Facebook capture cooldown: waiting ${pacing.batchCooldownMs}ms after ${liveAttemptCount} live attempts.`);
+            await new Promise((resolve) => setTimeout(resolve, pacing.batchCooldownMs));
+          } else {
+            const delayMs = getFacebookCaptureDelayMs(pacing);
+            if (delayMs > 0) {
+              console.log(`Facebook capture pacing: waiting ${delayMs}ms before the next live attempt.`);
+              await new Promise((resolve) => setTimeout(resolve, delayMs));
+            }
+          }
+        }
+        liveAttemptCount += 1;
+
         if (!context) { context = await chromium.launchPersistentContext(".playwright/facebook-profile", { headless: false }); page = await context.newPage(); }
         if (!page) throw new Error("facebook_browser_unavailable");
         await page.goto(sourceUrl, { waitUntil: "domcontentloaded", timeout: 45_000 });
@@ -724,7 +727,6 @@ async function main() {
           page = await context.newPage();
         }
       }
-
     }
   } finally {
     try {
