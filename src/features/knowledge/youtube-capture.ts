@@ -76,6 +76,17 @@ export function parseYoutubeEvidence(value: unknown): YoutubeEvidence[] {
   return value.evidence.map((item) => normalizeEvidence(item));
 }
 
+export function parseStoredYoutubeEvidence(rawText: string | null): YoutubeEvidence[] | null {
+  if (!rawText?.trim()) return null;
+
+  try {
+    const evidence = parseYoutubeEvidence(JSON.parse(rawText));
+    return evidence.length > 0 ? evidence : null;
+  } catch {
+    return null;
+  }
+}
+
 export function serializeYoutubeEvidence(evidence: YoutubeEvidence[]) {
   const rawText = JSON.stringify({ evidence });
   if (rawText.length > maxRawTextLength) throw new Error("gemini_evidence_too_large");

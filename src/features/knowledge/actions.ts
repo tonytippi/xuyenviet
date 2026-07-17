@@ -15,6 +15,7 @@ import {
   type KnowledgeDraftExtractionPreProviderGuard,
 } from "./extraction";
 import { getAdminFacebookCaptureReviewExtractionTarget } from "./facebook-capture-review-admin";
+import { getAdminYoutubeCaptureExtractionTarget } from "./youtube-capture-review-admin";
 import { enqueueKnowledgeExtractionJob } from "./extraction-jobs";
 import { markFacebookCaptureReviewStatus, markFacebookCaptureReviewStatusInTransaction, reopenFacebookCaptureForRecapture, requestFacebookCaptureRecapture, type FacebookCaptureReviewActor } from "./facebook-capture-review";
 import {
@@ -298,6 +299,35 @@ export async function extractKnowledgeDraftsFromFacebookCaptureForm(formData: Fo
       }
 
       redirectPath = getFacebookCaptureRedirectPath(target?.id ?? reviewId, { extractError: "Không thể trích xuất capture này.", failureStatus });
+    }
+  }
+
+  redirect(redirectPath);
+}
+
+export async function extractKnowledgeDraftsFromYoutubeCaptureForm(formData: FormData) {
+  await requireAdminSession();
+  const sourceId = getOptionalFormString(formData, "sourceId") ?? "";
+  let redirectPath = getYoutubeCaptureRedirectPath(sourceId, { extractError: "Không thể trích xuất video này." });
+
+  try {
+    const target = await getAdminYoutubeCaptureExtractionTarget(sourceId);
+
+    if (!target) {
+      redirectPath = getYoutubeCaptureRedirectPath(sourceId, { extractError: "Không tìm thấy video YouTube đã capture hợp lệ." });
+    } else if (target.existingCards.some((card) => card.aiPromptVersion === sourceKnowledgeDraftExtractionPromptVersion)) {
+      redirectPath = getYoutubeCaptureRedirectPath(target.sourceId, { alreadyExtracted: "1", existingCards: String(target.existingCards.length) });
+    } else {
+      const queued = await enqueueKnowledgeExtractionJob({ sourceId: target.sourceId, mode: "extract_only", actor: target.actor });
+      redirectPath = getYoutubeCaptureRedirectPath(target.sourceId, queued.status === "already_active" ? { extractQueued: "1", jobId: queued.job.id, activeJob: "1" } : { extractQueued: "1", jobId: queued.job.id });
+    }
+  } catch (error) {
+    if (error instanceof AdminAuthorizationError || (error instanceof Error && error.name === "AdminAuthorizationError")) {
+      throw error;
+    }
+
+    if (isKnowledgeExtractionError(error) && error instanceof Error && "code" in error && error.code === "already_extracted") {
+      redirectPath = getYoutubeCaptureRedirectPath(sourceId, { alreadyExtracted: "1" });
     }
   }
 
@@ -607,6 +637,18 @@ function getFacebookCaptureRedirectPath(reviewId: string, params: Record<string,
 
   const query = searchParams.toString();
   return `/admin/knowledge/facebook-captures/${pathReviewId}${query ? `?${query}` : ""}`;
+}
+
+function getYoutubeCaptureRedirectPath(sourceId: string, params: Record<string, string | undefined>) {
+  const pathSourceId = encodeURIComponent(sourceId || "unknown");
+  const searchParams = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value) searchParams.set(key, value);
+  }
+
+  const query = searchParams.toString();
+  return `/admin/knowledge/youtube-captures/${pathSourceId}${query ? `?${query}` : ""}`;
 }
 
 function getFacebookCaptureQueueRedirectPath(detailPath: string) {
