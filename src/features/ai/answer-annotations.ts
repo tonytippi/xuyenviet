@@ -338,7 +338,7 @@ function formatAnnotationSourceType(item: AssistantMessageProvenanceItem) {
 }
 
 function sanitizeDetailDescriptor(value: unknown, annotationType: AnswerAnnotationType, text: string, provenanceById: Map<string, AssistantMessageProvenanceItem>): AnswerAnnotationDetailDescriptor | null {
-  if (!isRecord(value) || !isCompatibleStoredDetailType(value.type, annotationType) || typeof value.label !== "string" || Object.keys(value).some((key) => !detailDescriptorKeys.has(key)) || !hasSafeStoredDisplayFields(value)) {
+  if (!isRecord(value) || !isCompatibleStoredDetailType(value.type, annotationType) || typeof value.label !== "string" || Object.keys(value).some((key) => !detailDescriptorKeys.has(key)) || (!hasSafeStoredDisplayFields(value) && !isLegacyActionDescriptor(value, annotationType))) {
     return null;
   }
 
@@ -396,6 +396,21 @@ function isCompatibleStoredDetailType(value: unknown, annotationType: AnswerAnno
 function hasSafeStoredDisplayFields(value: Record<string, unknown>) {
   return (value.detail === undefined || hasSafeLegacyDetail(value.detail))
     && (value.quickFacts === undefined || hasSafeQuickFacts(value.quickFacts));
+}
+
+function isLegacyActionDescriptor(value: Record<string, unknown>, annotationType: AnswerAnnotationType) {
+  if (annotationType !== "action" || value.owner !== undefined || value.provenanceIds !== undefined || value.quickFacts !== undefined || value.summary !== undefined || value.section !== "Gợi ý hành động") {
+    return false;
+  }
+
+  if (Object.keys(value).some((key) => key !== "type" && key !== "label" && key !== "section" && key !== "detail")) {
+    return false;
+  }
+
+  return isRecord(value.detail)
+    && Object.keys(value.detail).length === 2
+    && value.detail["Nhãn"] === "Hành động gợi ý"
+    && value.detail["Giải thích"] === "Gợi ý thao tác tiếp theo từ câu trả lời, không phải nguồn đã xác minh.";
 }
 
 function hasSafeLegacyDetail(value: unknown) {

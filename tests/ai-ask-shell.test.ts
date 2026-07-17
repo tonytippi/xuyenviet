@@ -501,6 +501,41 @@ describe("AI Ask authenticated shell", () => {
     expect(html).toContain("aria-controls=\"ai-ask-selected-answer-detail-mobile ai-ask-selected-answer-detail-desktop\"");
   });
 
+  test("renders a legacy action alongside current persisted annotations when reopening history", async () => {
+    await createTestUser("user-1");
+    const content = "Kế hoạch gợi ý:\nBãi đỗ chính thức Huế phù hợp. Kiểm tra chỗ đỗ trước khi đi.";
+    const actionText = "Kiểm tra chỗ đỗ";
+    const annotations = [
+      makeAnnotation("ann-knowledge", content, "Bãi đỗ chính thức Huế", "source", "knowledge-1", "source"),
+      {
+        id: "legacy-action",
+        start: content.indexOf(actionText),
+        end: content.indexOf(actionText) + actionText.length,
+        text: actionText,
+        type: "action",
+        detail: {
+          type: "action",
+          label: actionText,
+          section: "Gợi ý hành động",
+          detail: {
+            "Nhãn": "Hành động gợi ý",
+            "Giải thích": "Gợi ý thao tác tiếp theo từ câu trả lời, không phải nguồn đã xác minh.",
+          },
+        },
+      },
+    ];
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
+    const [userMessage] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "user", content: "Bãi đỗ ở Huế?" }).returning({ id: messages.id });
+    const [assistantMessage] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "assistant", content, answerAnnotations: annotations }).returning({ id: messages.id });
+    await testDb.insert(assistantResponseProvenance).values({ id: "knowledge-1", userId: "user-1", conversationId: conversation.id, userMessageId: userMessage.id, assistantMessageId: assistantMessage.id, sourceCategory: "knowledge", rank: 1, verificationStatus: "verified", usedInPrompt: true, citedInAnswer: false, sourceSnapshot: { title: "Bãi đỗ chính thức Huế" } });
+
+    const html = await renderAuthenticatedAiAskShell({ conversationId: conversation.id });
+
+    expect(html).toContain("Mở chi tiết annotation: Bãi đỗ chính thức Huế");
+    expect(html).toContain("Mở chi tiết annotation: Kiểm tra chỗ đỗ");
+    expect(html).not.toContain("Giải thích");
+  });
+
   test("renders annotation ranges in headings and does not mark provenance-less actions selected by default", async () => {
     const { AssistantMessageContent } = await import("@/features/ai/ai-ask-composer");
     const content = "Nguồn và độ tin cậy\nBước tiếp theo";

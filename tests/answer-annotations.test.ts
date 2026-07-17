@@ -197,6 +197,33 @@ describe("answer annotation validation", () => {
     expect(sanitizeStoredAnswerAnnotations({ answerText, annotations: [legacy], provenance: [provenance[1]] })).toEqual([expect.objectContaining({ id: "legacy-warning" })]);
     expect(buildAnswerAnnotationDetail({ type: "source", text: "Huế", provenance: [longProvenance] })?.quickFacts?.every((fact) => fact.label.length <= 160 && fact.value.length <= 160)).toBe(true);
   });
+
+  test("rebuilds the established provenance-free legacy action descriptor without trusting its display data", () => {
+    const answerText = "Kiểm tra chỗ đỗ trước khi đi.";
+    const actionText = "Kiểm tra chỗ đỗ";
+    const legacy = {
+      id: "legacy-action",
+      start: 0,
+      end: actionText.length,
+      text: actionText,
+      type: "action",
+      detail: {
+        type: "action",
+        label: actionText,
+        section: "Gợi ý hành động",
+        detail: {
+          "Nhãn": "Hành động gợi ý",
+          "Giải thích": "Gợi ý thao tác tiếp theo từ câu trả lời, không phải nguồn đã xác minh.",
+        },
+      },
+    };
+
+    const annotations = sanitizeStoredAnswerAnnotations({ answerText, annotations: [legacy], provenance: [] });
+
+    expect(annotations).toEqual([expect.objectContaining({ id: "legacy-action", detail: expect.objectContaining({ summary: "Đây là gợi ý trong câu trả lời, không phải thao tác có thể thực hiện.", quickFacts: [{ label: "Trạng thái", value: "Chưa có thao tác được xác minh" }] }) })]);
+    expect(JSON.stringify(annotations)).not.toContain("Giải thích");
+    expect(sanitizeStoredAnswerAnnotations({ answerText, annotations: [{ ...legacy, detail: { ...legacy.detail, provenanceIds: ["prov-knowledge"] } }], provenance })).toEqual([]);
+  });
 });
 
 function makeProposal(id: string, answerText: string, quote: string, type: AnswerAnnotationProposal["type"], provenanceIds: string[]): AnswerAnnotationProposal {
