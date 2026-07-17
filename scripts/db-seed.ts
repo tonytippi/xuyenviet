@@ -53,6 +53,11 @@ async function main() {
       name: "System Facebook Capture",
       email: "system-facebook-capture@xuyenviet.internal",
     },
+    {
+      id: "system-youtube-capture",
+      name: "System YouTube Capture",
+      email: "system-youtube-capture@xuyenviet.internal",
+    },
   ]).onConflictDoNothing();
 
   await db.insert(userRoles).values([

@@ -16,7 +16,7 @@ export type AiUsageStatus = (typeof aiUsageStatusValues)[number];
 export const aiGatewayModelPurposeValues = ["ai_ask_initial_answer", "extraction", "embeddings", "evaluation"] as const;
 export type AiGatewayModelPurpose = (typeof aiGatewayModelPurposeValues)[number];
 
-export const sourceKindValues = ["url", "facebook", "copied_post", "pasted_text", "screenshot"] as const;
+export const sourceKindValues = ["url", "facebook", "youtube", "copied_post", "pasted_text", "screenshot"] as const;
 export type SourceKind = (typeof sourceKindValues)[number];
 
 export const sourceTypeValues = ["curated", "community"] as const;
@@ -248,15 +248,16 @@ export const sources = pgTable(
     index("sources_kind_created_at_idx").on(source.kind, source.createdAt),
     index("sources_canonical_url_idx").on(source.canonicalUrl),
     index("sources_submitted_by_user_id_idx").on(source.submittedByUserId),
-    check("sources_kind_check", sql`${source.kind} in ('url', 'facebook', 'copied_post', 'pasted_text', 'screenshot')`),
+    check("sources_kind_check", sql`${source.kind} in ('url', 'facebook', 'youtube', 'copied_post', 'pasted_text', 'screenshot')`),
     check("sources_source_type_check", sql`${source.sourceType} in ('curated', 'community')`),
     check("sources_verification_status_check", sql`${source.verificationStatus} in ('unverified', 'verified')`),
     check("sources_label_safe_metadata_check", sql`length(btrim(${source.label})) between 1 and 200 and position(chr(10) in ${source.label}) = 0 and position(chr(13) in ${source.label}) = 0`),
     check("sources_publisher_safe_metadata_check", sql`${source.publisher} is null or (length(btrim(${source.publisher})) between 1 and 160 and position(chr(10) in ${source.publisher}) = 0 and position(chr(13) in ${source.publisher}) = 0)`),
     check("sources_collected_date_valid_check", sql`${source.collectedDate} is null or (${source.collectedDate} ~ '^\\d{4}-\\d{2}-\\d{2}$' and to_char(to_date(${source.collectedDate}, 'YYYY-MM-DD'), 'YYYY-MM-DD') = ${source.collectedDate})`),
-    check("sources_url_kind_check", sql`${source.kind} not in ('url', 'facebook') or ${source.url} is not null`),
+    check("sources_url_kind_check", sql`${source.kind} not in ('url', 'facebook', 'youtube') or ${source.url} is not null`),
     check("sources_no_url_for_textual_kind_check", sql`${source.kind} not in ('copied_post', 'pasted_text', 'screenshot') or ${source.url} is null`),
     check("sources_community_defaults_check", sql`${source.sourceType} <> 'community' or (${source.verificationStatus} = 'unverified' and ${source.official} = false and ${source.partner} = false)`),
+    check("sources_youtube_defaults_check", sql`${source.kind} <> 'youtube' or (${source.sourceType} = 'community' and ${source.verificationStatus} = 'unverified' and ${source.official} = false and ${source.partner} = false)`),
   ],
 );
 

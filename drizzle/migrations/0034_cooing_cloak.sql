@@ -1,0 +1,1 @@
+ALTER TABLE "sources" ADD CONSTRAINT "sources_youtube_defaults_check" CHECK ("sources"."kind" <> 'youtube' or ("sources"."source_type" = 'community' and "sources"."verification_status" = 'unverified' and "sources"."official" = false and "sources"."partner" = false));

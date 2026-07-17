@@ -232,6 +232,20 @@
       "when": 1784035339445,
       "tag": "0032_good_machine_man",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1784245790427,
+      "tag": "0033_orange_killraven",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1784246242156,
+      "tag": "0034_cooing_cloak",
+      "breakpoints": true
     }
   ]
 }

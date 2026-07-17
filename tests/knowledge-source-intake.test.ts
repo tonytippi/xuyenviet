@@ -66,6 +66,7 @@ describe("knowledge source intake", () => {
     const facebook = await submitTravelSourceForAiReading({ url: "https://web.facebook.com/groups/xuyenviet/posts/123?fbclid=abc" });
     const facebookShortLink = await submitTravelSourceForAiReading({ url: "https://fb.watch/example-video?fbclid=abc" });
     const copied = await submitTravelSourceForAiReading({ rawText: "Quán này có bãi đậu xe rộng.", copiedCommunityContent: true });
+    const youtube = await submitTravelSourceForAiReading({ url: "https://youtu.be/abcDEF12345?si=tracking" });
 
     expect(facebook).toMatchObject({
       kind: "facebook",
@@ -78,6 +79,7 @@ describe("knowledge source intake", () => {
     });
     expect(facebookShortLink).toMatchObject({ kind: "facebook", canonicalUrl: null, sourceType: "community" });
     expect(copied).toMatchObject({ kind: "copied_post", sourceType: "community", verificationStatus: "unverified", official: false, partner: false });
+    expect(youtube).toMatchObject({ kind: "youtube", url: "https://www.youtube.com/watch?v=abcDEF12345", sourceType: "community", verificationStatus: "unverified" });
   });
 
   test("pasted text intake keeps raw text out of the action response", async () => {

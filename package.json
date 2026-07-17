@@ -16,6 +16,7 @@
     "db:reset": "tsx scripts/db-reset.ts",
     "db:promote-admin": "tsx scripts/db-promote-admin.ts",
     "facebook:capture": "tsx scripts/facebook-capture.ts",
+    "youtube:capture": "tsx scripts/youtube-capture.ts",
     "knowledge:extraction-worker": "node --conditions react-server --import tsx scripts/knowledge-extraction-worker.ts",
     "knowledge:indexing-worker": "node --conditions react-server --import tsx scripts/knowledge-indexing-worker.ts"
   },

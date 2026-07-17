@@ -78,8 +78,9 @@ export function normalizeTravelSourceInput(input: TravelSourceInput): Normalized
 
   const parsedUrl = url ? parseUrl(url) : null;
   const isFacebook = parsedUrl ? isFacebookUrl(parsedUrl) : false;
-  const kind = getSourceKind({ url: parsedUrl, rawText, screenshot, copiedCommunityContent, isFacebook });
-  const sourceType: SourceType = isFacebook || copiedCommunityContent ? "community" : "curated";
+  const isYoutube = parsedUrl ? isYoutubeUrl(parsedUrl) : false;
+  const kind = getSourceKind({ url: parsedUrl, rawText, screenshot, copiedCommunityContent, isFacebook, isYoutube });
+  const sourceType: SourceType = isFacebook || isYoutube || copiedCommunityContent ? "community" : "curated";
   const label = normalizeSafeMetadataString(input.label, "Nhãn nguồn", maxLabelLength) ?? deriveLabel({ parsedUrl, rawText, screenshot, kind });
 
   return {
@@ -121,7 +122,7 @@ export async function listKnowledgeUrlSources(): Promise<KnowledgeUrlSourceListI
       createdAt: sources.createdAt,
     })
     .from(sources)
-    .where(inArray(sources.kind, ["url", "facebook"]))
+    .where(inArray(sources.kind, ["url", "facebook", "youtube"]))
     .orderBy(desc(sources.createdAt), desc(sources.id));
 
   if (rows.length === 0) {
@@ -227,14 +228,17 @@ function getSourceKind({
   screenshot,
   copiedCommunityContent,
   isFacebook,
+  isYoutube,
 }: {
   url: URL | null;
   rawText: string | null;
   screenshot: ScreenshotMetadata | null;
   copiedCommunityContent: boolean;
   isFacebook: boolean;
+  isYoutube: boolean;
 }): SourceKind {
   if (isFacebook) return "facebook";
+  if (isYoutube) return "youtube";
   if (url) return "url";
   if (screenshot) return "screenshot";
   if (copiedCommunityContent && rawText) return "copied_post";
@@ -255,6 +259,12 @@ function parseUrl(value: string) {
 
 function canonicalizeUrl(url: URL) {
   const canonical = new URL(url.toString());
+
+  const youtubeVideoId = extractYoutubeVideoId(canonical);
+  if (youtubeVideoId) {
+    return `https://www.youtube.com/watch?v=${youtubeVideoId}`;
+  }
+
   canonical.hash = "";
 
   for (const key of Array.from(canonical.searchParams.keys())) {
@@ -270,6 +280,17 @@ function canonicalizeUrl(url: URL) {
 function isFacebookUrl(url: URL) {
   const host = url.hostname.toLowerCase().replace(/^www\./, "");
   return host === "facebook.com" || host.endsWith(".facebook.com") || host === "fb.com" || host === "fb.watch";
+}
+
+function isYoutubeUrl(url: URL) {
+  const host = url.hostname.toLowerCase().replace(/^www\./, "");
+  return host === "youtube.com" || host.endsWith(".youtube.com") || host === "youtu.be";
+}
+
+function extractYoutubeVideoId(url: URL) {
+  const host = url.hostname.toLowerCase().replace(/^www\./, "");
+  const videoId = host === "youtu.be" ? url.pathname.split("/").filter(Boolean)[0] : url.pathname.startsWith("/watch") ? url.searchParams.get("v") : url.pathname.match(/^\/(?:shorts|live)\/([^/]+)/)?.[1] ?? null;
+  return videoId && /^[A-Za-z0-9_-]{6,20}$/.test(videoId) ? videoId : null;
 }
 
 function normalizeScreenshot(screenshot: TravelSourceInput["screenshot"]) {
