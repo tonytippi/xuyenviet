@@ -82,7 +82,7 @@ export function serializeYoutubeEvidence(evidence: YoutubeEvidence[]) {
   return rawText;
 }
 
-export async function saveYoutubeEvidence(db: YoutubeCaptureDb, input: { sourceId: string; evidence: YoutubeEvidence[]; metadata: SafeYoutubeCaptureMetadata; actor: YoutubeCaptureActor; now?: Date }) {
+export async function saveYoutubeEvidence(db: YoutubeCaptureDb, input: { sourceId: string; evidence: YoutubeEvidence[]; metadata: SafeYoutubeCaptureMetadata; actor: YoutubeCaptureActor; title?: string | null; now?: Date }) {
   const rawText = serializeYoutubeEvidence(input.evidence);
   return db.transaction(async (transaction) => {
     const [queued] = await transaction
@@ -96,6 +96,10 @@ export async function saveYoutubeEvidence(db: YoutubeCaptureDb, input: { sourceI
 
     const updated = await transaction.update(rawSourceMaterial).set({ rawText, rawMetadata: sanitizeYoutubeMetadata(input.metadata) }).where(and(eq(rawSourceMaterial.id, queued.rawMaterialId), queuedCondition())).returning({ id: rawSourceMaterial.id });
     if (updated.length === 0) return { status: "no_longer_queued" as const };
+
+    if (input.title) {
+      await transaction.update(sources).set({ label: input.title }).where(eq(sources.id, input.sourceId));
+    }
 
     await transaction.insert(auditEvents).values({
       actorUserId: input.actor.userId,

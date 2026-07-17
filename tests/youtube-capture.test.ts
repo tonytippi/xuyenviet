@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, test } from "vitest";
 
 import { auditEvents, rawSourceMaterial, sources, users } from "@/db/schema";
 import { listQueuedYoutubeSources, parseYoutubeEvidence, saveYoutubeEvidence } from "@/features/knowledge/youtube-capture";
-import { requestYoutubeEvidence } from "../scripts/youtube-capture";
+import { requestYoutubeEvidence, requestYoutubeTitle } from "../scripts/youtube-capture";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
 
@@ -26,9 +26,10 @@ describe("YouTube capture", () => {
 
   test("persists bounded evidence and a content-free audit summary", async () => {
     await createSource("queued");
-    await expect(saveYoutubeEvidence(testDb, { sourceId: "queued", evidence: parseYoutubeEvidence({ evidence }), metadata: { captureMethod: "gemini_youtube_url", capturedAt: "2026-07-17T00:00:00.000Z", sourceUrl: "https://www.youtube.com/watch?v=abcDEF12345", model: "gemini-3.5-flash", promptVersion: "youtube-evidence-v1", evidenceCount: 1, latencyMs: 2000, promptTokens: 150000, outputTokens: 7500, totalTokens: 157500 }, actor })).resolves.toMatchObject({ status: "updated" });
+    await expect(saveYoutubeEvidence(testDb, { sourceId: "queued", evidence: parseYoutubeEvidence({ evidence }), metadata: { captureMethod: "gemini_youtube_url", capturedAt: "2026-07-17T00:00:00.000Z", sourceUrl: "https://www.youtube.com/watch?v=abcDEF12345", model: "gemini-3.5-flash", promptVersion: "youtube-evidence-v1", evidenceCount: 1, latencyMs: 2000, promptTokens: 150000, outputTokens: 7500, totalTokens: 157500 }, actor, title: "Hành trình qua Phan Thiết" })).resolves.toMatchObject({ status: "updated" });
     const [raw] = await testDb.select().from(rawSourceMaterial).where(eq(rawSourceMaterial.sourceId, "queued"));
     expect(raw.rawText).toContain("NovaWorld Phan Thiết");
+    await expect(testDb.select({ label: sources.label }).from(sources).where(eq(sources.id, "queued"))).resolves.toEqual([{ label: "Hành trình qua Phan Thiết" }]);
     const [audit] = await testDb.select().from(auditEvents).where(eq(auditEvents.targetType, "raw_source_material"));
     expect(audit.afterSummary).not.toContain("NovaWorld");
     expect(audit.afterSummary).toContain("evidenceCount: 1");
@@ -53,5 +54,11 @@ describe("YouTube capture", () => {
     };
 
     await expect(requestYoutubeEvidence("https://www.youtube.com/watch?v=abcDEF12345", "secret-key", "gemini-3.5-flash", fetchMock)).resolves.toMatchObject({ evidence: parseYoutubeEvidence({ evidence }) });
+  });
+
+  test("returns a safe YouTube oEmbed title without blocking on lookup failure", async () => {
+    const fetchMock = async () => new Response(JSON.stringify({ title: "  Đường ven biển\nPhan Thiết  " }), { status: 200 });
+    await expect(requestYoutubeTitle("https://www.youtube.com/watch?v=abcDEF12345", fetchMock)).resolves.toBe("Đường ven biển Phan Thiết");
+    await expect(requestYoutubeTitle("https://www.youtube.com/watch?v=abcDEF12345", async () => new Response(null, { status: 404 }))).resolves.toBeNull();
   });
 });
