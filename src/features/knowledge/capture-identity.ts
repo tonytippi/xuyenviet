@@ -1,6 +1,7 @@
 export const FACEBOOK_CAPTURE_METHOD_VERSION = "facebook-visible-dom-v2";
-export const YOUTUBE_CAPTURE_METHOD_VERSION = "youtube-gemini-v1";
+export const YOUTUBE_CAPTURE_METHOD_VERSION = "youtube-gemini-windowed-v3";
 export const CAPTURE_PAYLOAD_SCHEMA_VERSION = "1";
+export const YOUTUBE_CAPTURE_PAYLOAD_SCHEMA_VERSION = "2";
 
 function canonicalUrl(value: string) {
   try {
@@ -62,6 +63,16 @@ export function youtubeResourceIdentity(value: string) {
   return videoId ? `video:${videoId}` : null;
 }
 
-export function captureReuseKey(input: { provider: "facebook" | "youtube"; resourceIdentity: string; captureMethodVersion: string; payloadSchemaVersion: string; promptVersion?: string; model?: string }) {
-  return [input.provider, input.resourceIdentity, input.captureMethodVersion, input.payloadSchemaVersion, input.promptVersion ?? "", input.model ?? ""].join("|");
+export function youtubeCaptureMethodVersion(mediaResolution: "MEDIA_RESOLUTION_LOW" | "MEDIA_RESOLUTION_MEDIUM" | "MEDIA_RESOLUTION_HIGH", artifactType: "segment" | "aggregate" = "aggregate") {
+  return `${YOUTUBE_CAPTURE_METHOD_VERSION}-${artifactType}-${mediaResolution.replace("MEDIA_RESOLUTION_", "").toLowerCase()}`;
+}
+
+export function youtubeWindowResourceIdentity(videoResourceIdentity: string, startOffsetSeconds: number, endOffsetSeconds: number) {
+  return `${videoResourceIdentity}|window:${startOffsetSeconds}-${endOffsetSeconds}`;
+}
+
+export function captureReuseKey(input: { provider: "facebook" | "youtube"; resourceIdentity: string; captureMethodVersion: string; payloadSchemaVersion: string; promptVersion?: string; model?: string; mediaResolution?: string }) {
+  const key = [input.provider, input.resourceIdentity, input.captureMethodVersion, input.payloadSchemaVersion, input.promptVersion ?? "", input.model ?? ""];
+  if (input.mediaResolution) key.push(input.mediaResolution);
+  return key.join("|");
 }

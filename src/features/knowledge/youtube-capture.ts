@@ -32,6 +32,7 @@ export type SafeYoutubeCaptureMetadata = {
   capturedAt: string;
   sourceUrl: string;
   model: string;
+  mediaResolution: "MEDIA_RESOLUTION_LOW" | "MEDIA_RESOLUTION_MEDIUM" | "MEDIA_RESOLUTION_HIGH";
   promptVersion: string;
   evidenceCount: number;
   latencyMs: number;
@@ -44,6 +45,10 @@ export type SafeYoutubeCaptureMetadata = {
   importCorrelationToken?: string;
   payloadSchemaVersion?: string;
   importActorId?: string;
+  videoDurationSeconds?: number;
+  windowStartSeconds?: number;
+  windowEndSeconds?: number;
+  windowCount?: number;
 };
 
 const categories = new Set<YoutubeEvidence["category"]>(["road_condition", "route", "toll", "fuel", "charging", "rest_stop", "parking", "accommodation", "food", "attraction", "safety", "weather", "cost"]);
@@ -73,7 +78,7 @@ export async function listQueuedYoutubeSources(db: YoutubeCaptureDb, input: { so
 export function parseYoutubeEvidence(value: unknown): YoutubeEvidence[] {
   if (!isRecord(value) || !Array.isArray(value.evidence)) throw new Error("gemini_invalid_json");
   if (value.evidence.length > maxEvidenceItems) throw new Error("gemini_evidence_limit_exceeded");
-  return value.evidence.map((item) => normalizeEvidence(item));
+  return value.evidence.map((item, index) => normalizeEvidence(item, index));
 }
 
 export function parseStoredYoutubeEvidence(rawText: string | null): YoutubeEvidence[] | null {
@@ -143,8 +148,8 @@ export async function recordYoutubeCaptureFailure(db: YoutubeCaptureDb, input: {
   });
 }
 
-function normalizeEvidence(value: unknown): YoutubeEvidence {
-  if (!isRecord(value)) throw new Error("gemini_invalid_evidence_item");
+function normalizeEvidence(value: unknown, index: number): YoutubeEvidence {
+  if (!isRecord(value)) throw invalidEvidence(index, "object");
   const category = enumValue(value.category, categories);
   const evidenceType = enumValue(value.evidence_type, evidenceTypes);
   const confidence = enumValue(value.confidence, confidences);
@@ -153,8 +158,20 @@ function normalizeEvidence(value: unknown): YoutubeEvidence {
   const start = timestamp(value.timestamp_start_seconds);
   const end = timestamp(value.timestamp_end_seconds);
   const condition = nullableBoundedString(value.uncertainty_or_condition, maxConditionLength);
-  if (!category || !evidenceType || !confidence || !claim || !excerpt || start === null || end === null || end < start || typeof value.freshness_sensitive !== "boolean") throw new Error("gemini_invalid_evidence_item");
+  if (!category) throw invalidEvidence(index, "category");
+  if (!evidenceType) throw invalidEvidence(index, "evidence_type");
+  if (!confidence) throw invalidEvidence(index, "confidence");
+  if (!claim) throw invalidEvidence(index, "claim_vi");
+  if (!excerpt) throw invalidEvidence(index, "evidence_excerpt");
+  if (start === null) throw invalidEvidence(index, "timestamp_start_seconds");
+  if (end === null || end < start) throw invalidEvidence(index, "timestamp_end_seconds");
+  if (typeof value.freshness_sensitive !== "boolean") throw invalidEvidence(index, "freshness_sensitive");
+  if (value.uncertainty_or_condition !== null && !condition) throw invalidEvidence(index, "uncertainty_or_condition");
   return { category, claim_vi: claim, evidence_type: evidenceType, timestamp_start_seconds: start, timestamp_end_seconds: end, confidence, freshness_sensitive: value.freshness_sensitive, evidence_excerpt: excerpt, uncertainty_or_condition: condition };
+}
+
+function invalidEvidence(index: number, field: string) {
+  return new Error(`gemini_invalid_evidence_item_${index + 1}_${field}`);
 }
 
 function enumValue<T extends string>(value: unknown, allowed: Set<T>): T | null {
@@ -178,7 +195,7 @@ function safeFailureReason(reason: string) {
 }
 
 export function sanitizeYoutubeMetadata(metadata: Record<string, unknown>) {
-  const allowed = new Set<keyof SafeYoutubeCaptureMetadata>(["captureMethod", "capturedAt", "sourceUrl", "model", "promptVersion", "evidenceCount", "latencyMs", "promptTokens", "outputTokens", "totalTokens", "captureOrigin", "captureArtifactId", "importedAt", "importCorrelationToken", "payloadSchemaVersion", "importActorId"]);
+  const allowed = new Set<keyof SafeYoutubeCaptureMetadata>(["captureMethod", "capturedAt", "sourceUrl", "model", "mediaResolution", "promptVersion", "evidenceCount", "latencyMs", "promptTokens", "outputTokens", "totalTokens", "captureOrigin", "captureArtifactId", "importedAt", "importCorrelationToken", "payloadSchemaVersion", "importActorId", "videoDurationSeconds", "windowStartSeconds", "windowEndSeconds", "windowCount"]);
   return Object.fromEntries(Object.entries(metadata).filter(([key, value]) => allowed.has(key as keyof SafeYoutubeCaptureMetadata) && value !== undefined)) as SafeYoutubeCaptureMetadata;
 }
 

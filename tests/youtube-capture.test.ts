@@ -2,8 +2,8 @@ import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test } from "vitest";
 
 import { auditEvents, rawSourceMaterial, sources, users } from "@/db/schema";
-import { listQueuedYoutubeSources, parseYoutubeEvidence, saveYoutubeEvidence } from "@/features/knowledge/youtube-capture";
-import { requestYoutubeEvidence, requestYoutubeTitle } from "../scripts/youtube-capture";
+import { listQueuedYoutubeSources, parseYoutubeEvidence, recordYoutubeCaptureFailure, saveYoutubeEvidence } from "@/features/knowledge/youtube-capture";
+import { getYoutubeMediaResolution, mergeYoutubeWindowEvidence, normalizeYoutubeWindowTimestamps, parseCachedYoutubePayload, parseCachedYoutubeSegmentPayload, parseYoutubeDuration, requestYoutubeEvidence, requestYoutubeTitle, youtubeWindows } from "../scripts/youtube-capture";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
 
@@ -26,7 +26,7 @@ describe("YouTube capture", () => {
 
   test("persists bounded evidence and a content-free audit summary", async () => {
     await createSource("queued");
-    await expect(saveYoutubeEvidence(testDb, { sourceId: "queued", evidence: parseYoutubeEvidence({ evidence }), metadata: { captureMethod: "gemini_youtube_url", capturedAt: "2026-07-17T00:00:00.000Z", sourceUrl: "https://www.youtube.com/watch?v=abcDEF12345", model: "gemini-3.5-flash", promptVersion: "youtube-evidence-v1", evidenceCount: 1, latencyMs: 2000, promptTokens: 150000, outputTokens: 7500, totalTokens: 157500 }, actor, title: "Hành trình qua Phan Thiết" })).resolves.toMatchObject({ status: "updated" });
+    await expect(saveYoutubeEvidence(testDb, { sourceId: "queued", evidence: parseYoutubeEvidence({ evidence }), metadata: { captureMethod: "gemini_youtube_url", capturedAt: "2026-07-17T00:00:00.000Z", sourceUrl: "https://www.youtube.com/watch?v=abcDEF12345", model: "gemini-3.5-flash", mediaResolution: "MEDIA_RESOLUTION_LOW", promptVersion: "youtube-evidence-v1", evidenceCount: 1, latencyMs: 2000, promptTokens: 150000, outputTokens: 7500, totalTokens: 157500 }, actor, title: "Hành trình qua Phan Thiết" })).resolves.toMatchObject({ status: "updated" });
     const [raw] = await testDb.select().from(rawSourceMaterial).where(eq(rawSourceMaterial.sourceId, "queued"));
     expect(raw.rawText).toContain("NovaWorld Phan Thiết");
     await expect(testDb.select({ label: sources.label }).from(sources).where(eq(sources.id, "queued"))).resolves.toEqual([{ label: "Hành trình qua Phan Thiết" }]);
@@ -35,30 +35,100 @@ describe("YouTube capture", () => {
     expect(audit.afterSummary).toContain("evidenceCount: 1");
   });
 
+  test("records a safe audit outcome when Gemini capture fails", async () => {
+    await createSource("failed");
+    await recordYoutubeCaptureFailure(testDb, { sourceId: "failed", reason: "gemini_http_400", actor });
+
+    const [audit] = await testDb.select().from(auditEvents).where(eq(auditEvents.targetType, "youtube_capture"));
+    expect(audit).toMatchObject({ targetId: "failed", afterSummary: "YouTube capture failed: gemini_http_400." });
+    await expect(testDb.select({ rawText: rawSourceMaterial.rawText }).from(rawSourceMaterial).where(eq(rawSourceMaterial.sourceId, "failed"))).resolves.toEqual([{ rawText: null }]);
+  });
+
+  test("keeps a failed window number in the safe audit code", async () => {
+    await createSource("segment-failed");
+    await recordYoutubeCaptureFailure(testDb, { sourceId: "segment-failed", reason: "youtube_segment_2_gemini_http_429", actor });
+
+    const [audit] = await testDb.select().from(auditEvents).where(eq(auditEvents.targetId, "segment-failed"));
+    expect(audit.afterSummary).toBe("YouTube capture failed: youtube_segment_2_gemini_http_429.");
+  });
+
   test("rejects malformed, unbounded, and transcript-like provider output", () => {
-    expect(() => parseYoutubeEvidence({ evidence: [{}] })).toThrow("gemini_invalid_evidence_item");
+    expect(() => parseYoutubeEvidence({ evidence: [{}] })).toThrow("gemini_invalid_evidence_item_1_category");
     expect(() => parseYoutubeEvidence({ evidence: Array.from({ length: 21 }, () => evidence[0]) })).toThrow("gemini_evidence_limit_exceeded");
-    expect(() => parseYoutubeEvidence({ evidence: [{ ...evidence[0], evidence_excerpt: "x".repeat(241) }] })).toThrow("gemini_invalid_evidence_item");
+    expect(() => parseYoutubeEvidence({ evidence: [{ ...evidence[0], evidence_excerpt: "x".repeat(241) }] })).toThrow("gemini_invalid_evidence_item_1_evidence_excerpt");
+    expect(() => parseYoutubeEvidence({ evidence: [{ ...evidence[0], freshness_sensitive: "yes" }] })).toThrow("gemini_invalid_evidence_item_1_freshness_sensitive");
   });
 
   test("does not overwrite evidence after another worker captures it", async () => {
     await createSource("race", "Captured elsewhere");
-    await expect(saveYoutubeEvidence(testDb, { sourceId: "race", evidence: parseYoutubeEvidence({ evidence }), metadata: { captureMethod: "gemini_youtube_url", capturedAt: "2026-07-17T00:00:00.000Z", sourceUrl: "https://www.youtube.com/watch?v=abcDEF12345", model: "gemini-3.5-flash", promptVersion: "youtube-evidence-v1", evidenceCount: 1, latencyMs: 1 }, actor })).resolves.toEqual({ status: "not_queued" });
+    await expect(saveYoutubeEvidence(testDb, { sourceId: "race", evidence: parseYoutubeEvidence({ evidence }), metadata: { captureMethod: "gemini_youtube_url", capturedAt: "2026-07-17T00:00:00.000Z", sourceUrl: "https://www.youtube.com/watch?v=abcDEF12345", model: "gemini-3.5-flash", mediaResolution: "MEDIA_RESOLUTION_LOW", promptVersion: "youtube-evidence-v1", evidenceCount: 1, latencyMs: 1 }, actor })).resolves.toEqual({ status: "not_queued" });
   });
 
   test("sends the Gemini key in a header rather than the request URL", async () => {
     const fetchMock = async (url: string | URL | Request, init?: RequestInit) => {
       expect(String(url)).not.toContain("secret-key");
       expect(new Headers(init?.headers).get("x-goog-api-key")).toBe("secret-key");
-      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify({ evidence }) }] } }] }), { status: 200 });
+      expect(JSON.parse(String(init?.body)).generationConfig.mediaResolution).toBe("MEDIA_RESOLUTION_LOW");
+      expect(JSON.parse(String(init?.body)).contents[0].parts[0].video_metadata).toEqual({ start_offset: "1800s", end_offset: "3600s" });
+      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify({ evidence: [{ ...evidence[0], timestamp_start_seconds: 3390, timestamp_end_seconds: 3415 }] }) }] } }] }), { status: 200 });
     };
 
-    await expect(requestYoutubeEvidence("https://www.youtube.com/watch?v=abcDEF12345", "secret-key", "gemini-3.5-flash", fetchMock)).resolves.toMatchObject({ evidence: parseYoutubeEvidence({ evidence }) });
+    await expect(requestYoutubeEvidence("https://www.youtube.com/watch?v=abcDEF12345", "secret-key", "gemini-3.5-flash", { startOffsetSeconds: 1800, endOffsetSeconds: 3600 }, undefined, fetchMock)).resolves.toMatchObject({ evidence: parseYoutubeEvidence({ evidence }) });
+  });
+
+  test("reports only the Gemini error status without changing the failure code", async () => {
+    const fetchMock = async () => new Response(JSON.stringify({ error: { status: "INVALID_ARGUMENT", message: "Invalid file URI; api_key=provider-secret; Authorization: Bearer provider-token" } }), { status: 400 });
+
+    await expect(requestYoutubeEvidence("https://www.youtube.com/watch?v=abcDEF12345", "secret-key", "gemini-3.5-flash", { startOffsetSeconds: 0, endOffsetSeconds: 30 }, undefined, fetchMock)).rejects.toMatchObject({ message: "gemini_http_400", diagnostic: "INVALID_ARGUMENT" });
+  });
+
+  test("normalizes Gemini absolute timestamps to their requested window", () => {
+    const window = { startOffsetSeconds: 7200, endOffsetSeconds: 9000 };
+    const item = parseYoutubeEvidence({ evidence })[0];
+    expect(normalizeYoutubeWindowTimestamps([{ ...item, timestamp_start_seconds: 7260, timestamp_end_seconds: 7290 }], window)).toMatchObject([{ timestamp_start_seconds: 60, timestamp_end_seconds: 90 }]);
+    expect(() => normalizeYoutubeWindowTimestamps([{ ...item, timestamp_start_seconds: 60, timestamp_end_seconds: 90 }], window)).toThrow("gemini_window_timestamp_out_of_range");
+    expect(() => normalizeYoutubeWindowTimestamps([{ ...item, timestamp_start_seconds: 1790, timestamp_end_seconds: 1800 }], window)).toThrow("gemini_window_timestamp_out_of_range");
+  });
+
+  test("uses only supported configured media resolutions", () => {
+    expect(getYoutubeMediaResolution()).toBe("MEDIA_RESOLUTION_LOW");
+    expect(getYoutubeMediaResolution("MEDIA_RESOLUTION_MEDIUM")).toBe("MEDIA_RESOLUTION_MEDIUM");
+    expect(() => getYoutubeMediaResolution("low")).toThrow("GEMINI_YOUTUBE_MEDIA_RESOLUTION must be");
   });
 
   test("returns a safe YouTube oEmbed title without blocking on lookup failure", async () => {
     const fetchMock = async () => new Response(JSON.stringify({ title: "  Đường ven biển\nPhan Thiết  " }), { status: 200 });
     await expect(requestYoutubeTitle("https://www.youtube.com/watch?v=abcDEF12345", fetchMock)).resolves.toBe("Đường ven biển Phan Thiết");
     await expect(requestYoutubeTitle("https://www.youtube.com/watch?v=abcDEF12345", async () => new Response(null, { status: 404 }))).resolves.toBeNull();
+  });
+
+  test("safely parses YouTube ISO 8601 durations and creates bounded windows", () => {
+    expect(parseYoutubeDuration("PT1H2M3S")).toBe(3723);
+    expect(parseYoutubeDuration("PT30M")).toBe(1800);
+    expect(parseYoutubeDuration("PT0S")).toBeNull();
+    expect(parseYoutubeDuration("P1D")).toBeNull();
+    expect(parseYoutubeDuration("PT999999999999999999999S")).toBeNull();
+    expect(youtubeWindows(3723)).toEqual([{ startOffsetSeconds: 0, endOffsetSeconds: 1800 }, { startOffsetSeconds: 1800, endOffsetSeconds: 3600 }, { startOffsetSeconds: 3600, endOffsetSeconds: 3723 }]);
+  });
+
+  test("offsets, deterministically deduplicates, and caps aggregate window evidence", () => {
+    const duplicate = { ...parseYoutubeEvidence({ evidence })[0], timestamp_start_seconds: 0, timestamp_end_seconds: 5 };
+    const items = Array.from({ length: 22 }, (_, index) => ({ ...duplicate, claim_vi: `Điểm dừng ${index}`, timestamp_start_seconds: index + 10, timestamp_end_seconds: index + 11 }));
+    const merged = mergeYoutubeWindowEvidence([{ window: { startOffsetSeconds: 1800, endOffsetSeconds: 3600 }, evidence: [duplicate, duplicate] }, { window: { startOffsetSeconds: 0, endOffsetSeconds: 1800 }, evidence: items }]);
+    expect(merged).toHaveLength(20);
+    expect(merged[0]).toMatchObject({ claim_vi: "Điểm dừng 0", timestamp_start_seconds: 10 });
+    expect(merged.some((item) => item.timestamp_start_seconds === 1800 && item.timestamp_end_seconds === 1805)).toBe(false);
+  });
+
+  test("accepts empty evidence only in a segment cache payload", () => {
+    expect(parseCachedYoutubeSegmentPayload({ evidence: [], window: { startOffsetSeconds: 0, endOffsetSeconds: 30 }, metadata: {} })).toMatchObject({ evidence: [] });
+  });
+
+  test("rejects cached segment evidence outside its stored window", () => {
+    expect(() => parseCachedYoutubeSegmentPayload({ evidence: [{ ...evidence[0], timestamp_start_seconds: 29, timestamp_end_seconds: 31 }], window: { startOffsetSeconds: 0, endOffsetSeconds: 30 }, metadata: {} })).toThrow("cache_invalid_youtube_segment_payload");
+  });
+
+  test("rejects cached aggregate evidence outside its stored duration", () => {
+    expect(() => parseCachedYoutubePayload({ evidence: [{ ...evidence[0], timestamp_start_seconds: 29, timestamp_end_seconds: 31 }], metadata: { videoDurationSeconds: 30 } })).toThrow("cache_invalid_youtube_payload");
   });
 });

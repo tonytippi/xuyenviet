@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import { sanitizeCacheValue, artifactHash, isAliasCompatible, isArtifactContentValid } from "@/features/knowledge/capture-cache";
-import { CAPTURE_PAYLOAD_SCHEMA_VERSION, FACEBOOK_CAPTURE_METHOD_VERSION, YOUTUBE_CAPTURE_METHOD_VERSION, captureReuseKey, facebookResourceIdentity, youtubeResourceIdentity } from "@/features/knowledge/capture-identity";
+import { CAPTURE_PAYLOAD_SCHEMA_VERSION, FACEBOOK_CAPTURE_METHOD_VERSION, YOUTUBE_CAPTURE_METHOD_VERSION, YOUTUBE_CAPTURE_PAYLOAD_SCHEMA_VERSION, captureReuseKey, facebookResourceIdentity, youtubeCaptureMethodVersion, youtubeResourceIdentity, youtubeWindowResourceIdentity } from "@/features/knowledge/capture-identity";
 import { assertPostgresUrl, getDatabaseUrl } from "../scripts/db-env";
 import { sanitizeYoutubeMetadata } from "@/features/knowledge/youtube-capture";
 import { parseCachedYoutubePayload } from "../scripts/youtube-capture";
@@ -22,9 +22,16 @@ describe("capture archive identities", () => {
 
   test("versions provider reuse keys independently of post-capture content hashes", () => {
     const facebook = captureReuseKey({ provider: "facebook", resourceIdentity: "post:123", captureMethodVersion: FACEBOOK_CAPTURE_METHOD_VERSION, payloadSchemaVersion: CAPTURE_PAYLOAD_SCHEMA_VERSION });
-    const youtube = captureReuseKey({ provider: "youtube", resourceIdentity: "video:abcDEF12345", captureMethodVersion: YOUTUBE_CAPTURE_METHOD_VERSION, payloadSchemaVersion: CAPTURE_PAYLOAD_SCHEMA_VERSION, promptVersion: "v1", model: "model-a" });
+    const youtube = captureReuseKey({ provider: "youtube", resourceIdentity: "video:abcDEF12345", captureMethodVersion: YOUTUBE_CAPTURE_METHOD_VERSION, payloadSchemaVersion: YOUTUBE_CAPTURE_PAYLOAD_SCHEMA_VERSION, promptVersion: "v1", model: "model-a" });
+    const lowResolutionYoutube = captureReuseKey({ provider: "youtube", resourceIdentity: "video:abcDEF12345", captureMethodVersion: youtubeCaptureMethodVersion("MEDIA_RESOLUTION_LOW"), payloadSchemaVersion: YOUTUBE_CAPTURE_PAYLOAD_SCHEMA_VERSION, promptVersion: "v1", model: "model-a", mediaResolution: "MEDIA_RESOLUTION_LOW" });
+    const mediumResolutionYoutube = captureReuseKey({ provider: "youtube", resourceIdentity: "video:abcDEF12345", captureMethodVersion: youtubeCaptureMethodVersion("MEDIA_RESOLUTION_MEDIUM"), payloadSchemaVersion: YOUTUBE_CAPTURE_PAYLOAD_SCHEMA_VERSION, promptVersion: "v1", model: "model-a", mediaResolution: "MEDIA_RESOLUTION_MEDIUM" });
+    expect(facebook).toBe(`facebook|post:123|${FACEBOOK_CAPTURE_METHOD_VERSION}|${CAPTURE_PAYLOAD_SCHEMA_VERSION}||`);
     expect(facebook).not.toBe(youtube);
-    expect(youtube).not.toBe(captureReuseKey({ provider: "youtube", resourceIdentity: "video:abcDEF12345", captureMethodVersion: YOUTUBE_CAPTURE_METHOD_VERSION, payloadSchemaVersion: CAPTURE_PAYLOAD_SCHEMA_VERSION, promptVersion: "v2", model: "model-a" }));
+    expect(youtube).not.toBe(captureReuseKey({ provider: "youtube", resourceIdentity: "video:abcDEF12345", captureMethodVersion: YOUTUBE_CAPTURE_METHOD_VERSION, payloadSchemaVersion: YOUTUBE_CAPTURE_PAYLOAD_SCHEMA_VERSION, promptVersion: "v2", model: "model-a" }));
+    expect(lowResolutionYoutube).not.toBe(mediumResolutionYoutube);
+    const segment = captureReuseKey({ provider: "youtube", resourceIdentity: youtubeWindowResourceIdentity("video:abcDEF12345", 0, 1800), captureMethodVersion: youtubeCaptureMethodVersion("MEDIA_RESOLUTION_LOW", "segment"), payloadSchemaVersion: CAPTURE_PAYLOAD_SCHEMA_VERSION, promptVersion: "v1", model: "model-a", mediaResolution: "MEDIA_RESOLUTION_LOW" });
+    expect(segment).not.toBe(lowResolutionYoutube);
+    expect(segment).not.toContain("youtube-gemini-v2");
     expect(artifactHash({ rawText: "same" })).toBe(artifactHash({ rawText: "same" }));
   });
 
@@ -57,7 +64,7 @@ describe("capture archive identities", () => {
   });
 
   test("uses an explicit YouTube metadata allowlist while retaining prompt version", () => {
-    expect(sanitizeYoutubeMetadata({ captureMethod: "gemini_youtube_url", capturedAt: "2026-01-01T00:00:00.000Z", sourceUrl: "https://www.youtube.com/watch?v=abcDEF12345", model: "model", promptVersion: "v1", evidenceCount: 1, latencyMs: 2, rawPrompt: "secret", providerResponse: "secret", errorBody: "secret" })).toEqual({ captureMethod: "gemini_youtube_url", capturedAt: "2026-01-01T00:00:00.000Z", sourceUrl: "https://www.youtube.com/watch?v=abcDEF12345", model: "model", promptVersion: "v1", evidenceCount: 1, latencyMs: 2 });
+    expect(sanitizeYoutubeMetadata({ captureMethod: "gemini_youtube_url", capturedAt: "2026-01-01T00:00:00.000Z", sourceUrl: "https://www.youtube.com/watch?v=abcDEF12345", model: "model", mediaResolution: "MEDIA_RESOLUTION_LOW", promptVersion: "v1", evidenceCount: 1, latencyMs: 2, rawPrompt: "secret", providerResponse: "secret", errorBody: "secret" })).toEqual({ captureMethod: "gemini_youtube_url", capturedAt: "2026-01-01T00:00:00.000Z", sourceUrl: "https://www.youtube.com/watch?v=abcDEF12345", model: "model", mediaResolution: "MEDIA_RESOLUTION_LOW", promptVersion: "v1", evidenceCount: 1, latencyMs: 2 });
   });
 
   test("rejects malformed provider payloads before a cache replay can write production", () => {
