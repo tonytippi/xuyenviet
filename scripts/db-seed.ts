@@ -16,6 +16,7 @@ import {
 } from "../src/db/schema";
 import { getDatabaseUrl } from "./db-env";
 import { loadFacebookSeedUrls } from "./facebook-seed-urls";
+import { loadYoutubeSeedUrls } from "./youtube-seed-urls";
 
 const databaseUrl = getDatabaseUrl();
 const client = postgres(databaseUrl, { max: 1 });
@@ -33,6 +34,21 @@ const facebookSources = loadFacebookSeedUrls().map((source) => ({
   partner: false,
   submittedByUserId: "seed-fixture-operator-user",
 }));
+const youtubeSources = loadYoutubeSeedUrls().map((source) => ({
+  id: source.id,
+  kind: "youtube" as const,
+  url: source.url,
+  canonicalUrl: source.url,
+  label: source.label,
+  publisher: "YouTube",
+  collectedDate: "2026-07-01",
+  sourceType: "community" as const,
+  verificationStatus: "unverified" as const,
+  official: false,
+  partner: false,
+  submittedByUserId: "seed-fixture-operator-user",
+}));
+const seedSources = [...facebookSources, ...youtubeSources];
 
 async function main() {
   const now = new Date("2026-07-01T00:00:00.000Z");
@@ -188,9 +204,9 @@ async function main() {
     },
   ]).onConflictDoNothing();
 
-  await db.insert(sources).values(facebookSources).onConflictDoNothing();
+  await db.insert(sources).values(seedSources).onConflictDoNothing();
 
-  await db.insert(rawSourceMaterial).values(facebookSources.map((source) => ({
+  await db.insert(rawSourceMaterial).values(seedSources.map((source) => ({
     id: source.id.replace("source", "raw"),
     sourceId: source.id,
     rawMetadata: { sourceUrl: source.url },
