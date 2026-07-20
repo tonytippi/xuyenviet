@@ -217,6 +217,33 @@ describe("knowledge draft extraction", () => {
     await expect(testDb.select().from(knowledgeCards)).resolves.toMatchObject([{ type: "route_note", practicalDetails: { ordered_stops: orderedStops }, confidence: "community" }]);
   });
 
+  test("normalizes common source list numbering from ordered stops", async () => {
+    await createUser("numbered-route-operator", ["operator"]);
+    authMock.mockResolvedValue({ user: { id: "numbered-route-operator", email: "numbered-route-operator@example.com" } });
+    await createExtractionModel();
+    const source = await createTextSource("numbered-route-operator", "33. Bãi Môn 34. Mũi Điện (34) là các điểm ghim ven biển.");
+    mockGatewayJson(
+      JSON.stringify({
+        drafts: [
+          {
+            type: "route_note",
+            title: "Tuyến ven biển Phú Yên",
+            route_segment: "Tuy Hòa - Vũng Rô",
+            summary: "Lộ trình cộng đồng cần được operator kiểm tra trước khi dùng.",
+            practical_details: { ordered_stops: ["33. Bãi Môn", "Mũi Điện (34)", "3.14 Cafe"] },
+            tags: ["ven-bien"],
+            confidence: "community",
+            freshness_sensitive: false,
+          },
+        ],
+      }),
+    );
+    const { extractKnowledgeDraftsFromSource } = await import("@/features/knowledge/actions");
+
+    await expect(extractKnowledgeDraftsFromSource(source.id)).resolves.toMatchObject({ draftCount: 1 });
+    await expect(testDb.select().from(knowledgeCards)).resolves.toMatchObject([{ practicalDetails: { ordered_stops: ["Bãi Môn", "Mũi Điện", "3.14 Cafe"] } }]);
+  });
+
   test("rejects a route note with more than 40 ordered stops without persistence", async () => {
     await createUser("long-route-operator", ["operator"]);
     authMock.mockResolvedValue({ user: { id: "long-route-operator", email: "long-route-operator@example.com" } });

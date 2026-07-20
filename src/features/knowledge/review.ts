@@ -1014,9 +1014,14 @@ function normalizeDetailValue(key: string, value: unknown): string | string[] {
 }
 
 function normalizeOrderedStop(value: unknown) {
-  const normalized = normalizeBoundedString(value, maxLocationLength);
+  if (typeof value !== "string") {
+    return null;
+  }
 
-  if (!normalized || normalized.split(/\s+/).length > 12 || /[\r\n\[\]{}.,;:!?]/.test(normalized) || /^\d+\s*[.)-]/.test(normalized) || /(rẽ|đi tiếp|chạy tiếp|băng qua|vượt|lướt qua|theo đường)/i.test(normalized)) {
+  const normalized = normalizeBoundedString(value.replace(/^\s*\d{1,3}\s*[.)]\s+/, "").replace(/\s*\(\s*\d{1,3}\s*\)\s*$/, ""), maxLocationLength);
+  const withoutDecimalNotation = normalized?.replace(/\d+\.\d+/g, "") ?? "";
+
+  if (!normalized || normalized.split(/\s+/).length > 12 || /[\r\n\[\]{}.,;:!?]/.test(withoutDecimalNotation) || /^\d{1,3}\s*[.)]\s+/.test(normalized) || /(rẽ|đi tiếp|chạy tiếp|băng qua|vượt|lướt qua|theo đường)/i.test(normalized)) {
     return null;
   }
 

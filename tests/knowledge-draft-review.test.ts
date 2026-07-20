@@ -225,6 +225,26 @@ describe("knowledge draft review", () => {
     await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, draft.id))).resolves.toMatchObject([{ status: "approved", practicalDetails: { ordered_stops: orderedStops } }]);
   });
 
+  test("review normalizes common source list numbering from ordered stops", async () => {
+    await createUser("numbered-route-review-operator", ["operator"]);
+    authMock.mockResolvedValue({ user: { id: "numbered-route-review-operator", email: "numbered-route-review-operator@example.com" } });
+    const { draft } = await createDraft("numbered-route-review-operator", { type: "route_note" });
+    const { updateKnowledgeDraft } = await import("@/features/knowledge/review");
+
+    await updateKnowledgeDraft(draft.id, {
+      type: "route_note",
+      title: "Tuyến ven biển Phú Yên",
+      routeSegment: "Tuy Hòa - Vũng Rô",
+      summary: "Lộ trình cộng đồng cần được operator kiểm tra trước khi dùng.",
+      practicalDetails: { ordered_stops: ["33. Bãi Môn", "Mũi Điện (34)", "3.14 Cafe"] },
+      tags: ["ven-bien"],
+      confidence: "community",
+      freshnessSensitive: false,
+    });
+
+    await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, draft.id))).resolves.toMatchObject([{ practicalDetails: { ordered_stops: ["Bãi Môn", "Mũi Điện", "3.14 Cafe"] } }]);
+  });
+
   test("review rejects a 41-item ordered stop edit without mutation", async () => {
     await createUser("long-route-review-operator", ["operator"]);
     authMock.mockResolvedValue({ user: { id: "long-route-review-operator", email: "long-route-review-operator@example.com" } });
