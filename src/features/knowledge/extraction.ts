@@ -163,7 +163,14 @@ export async function extractKnowledgeDraftsFromSourceAsActor(sourceId: string, 
       cacheWritePromptTokens: gatewayResult.usage.cacheWritePromptTokens,
     };
 
-    const drafts = parseDrafts(gatewayResult.content, sourceBundle.source, rawText);
+    let drafts: DraftInsert[];
+
+    try {
+      drafts = parseDrafts(gatewayResult.content, sourceBundle.source, rawText);
+    } catch (error) {
+      logRejectedModelOutput(sourceBundle.source.id, gatewayResult.content, error);
+      throw error;
+    }
 
     if (drafts.length === 0) {
       throw new KnowledgeExtractionError("AI không tìm thấy tri thức du lịch đủ rõ để tạo bản nháp.", "invalid_model_output");
@@ -467,7 +474,7 @@ function normalizeOrderedStop(value: unknown) {
     return null;
   }
 
-  const normalized = normalizeBoundedString(value.replace(/^\s*\d{1,3}\s*[.)]\s+/, "").replace(/\s*\(\s*\d{1,3}\s*\)\s*$/, ""), maxLocationLength);
+  const normalized = normalizeBoundedString(stripOrderedStopFormatting(value), maxLocationLength);
   const withoutDecimalNotation = normalized?.replace(/\d+\.\d+/g, "") ?? "";
 
   if (!normalized || normalized.split(/\s+/).length > 12 || /[\r\n\[\]{}.,;:!?]/.test(withoutDecimalNotation) || /^\d{1,3}\s*[.)]\s+/.test(normalized) || /(rẽ|đi tiếp|chạy tiếp|băng qua|vượt|lướt qua|theo đường)/i.test(normalized)) {
@@ -475,6 +482,17 @@ function normalizeOrderedStop(value: unknown) {
   }
 
   return normalized;
+}
+
+function stripOrderedStopFormatting(value: string) {
+  const withoutListNumber = value.replace(/^\s*\d{1,3}\s*[.)]\s+/, "").trim();
+  const trailingAnnotation = withoutListNumber.match(/\s*\(([^()]*)\)\s*$/);
+
+  if (trailingAnnotation && (/^\s*\d{1,3}\s*$/.test(trailingAnnotation[1]) || /(rẽ|đường|lối|tránh|đoạn)/i.test(trailingAnnotation[1]))) {
+    return withoutListNumber.slice(0, trailingAnnotation.index).trim();
+  }
+
+  return withoutListNumber;
 }
 
 function normalizeTags(value: unknown) {
@@ -545,4 +563,16 @@ function normalizeForOverlap(value: string) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function logRejectedModelOutput(sourceId: string, content: string, error: unknown) {
+  if (process.env.APP_ENV !== "local" || process.env.AI_DEBUG_RAW_EXTRACTION_OUTPUT !== "true") {
+    return;
+  }
+
+  console.warn("Knowledge extraction rejected model output", {
+    sourceId,
+    reason: error instanceof KnowledgeExtractionError ? error.safeDetail ?? error.code : "unknown",
+    modelOutput: content,
+  });
 }

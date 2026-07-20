@@ -1018,7 +1018,7 @@ function normalizeOrderedStop(value: unknown) {
     return null;
   }
 
-  const normalized = normalizeBoundedString(value.replace(/^\s*\d{1,3}\s*[.)]\s+/, "").replace(/\s*\(\s*\d{1,3}\s*\)\s*$/, ""), maxLocationLength);
+  const normalized = normalizeBoundedString(stripOrderedStopFormatting(value), maxLocationLength);
   const withoutDecimalNotation = normalized?.replace(/\d+\.\d+/g, "") ?? "";
 
   if (!normalized || normalized.split(/\s+/).length > 12 || /[\r\n\[\]{}.,;:!?]/.test(withoutDecimalNotation) || /^\d{1,3}\s*[.)]\s+/.test(normalized) || /(rẽ|đi tiếp|chạy tiếp|băng qua|vượt|lướt qua|theo đường)/i.test(normalized)) {
@@ -1026,6 +1026,17 @@ function normalizeOrderedStop(value: unknown) {
   }
 
   return normalized;
+}
+
+function stripOrderedStopFormatting(value: string) {
+  const withoutListNumber = value.replace(/^\s*\d{1,3}\s*[.)]\s+/, "").trim();
+  const trailingAnnotation = withoutListNumber.match(/\s*\(([^()]*)\)\s*$/);
+
+  if (trailingAnnotation && (/^\s*\d{1,3}\s*$/.test(trailingAnnotation[1]) || /(rẽ|đường|lối|tránh|đoạn)/i.test(trailingAnnotation[1]))) {
+    return withoutListNumber.slice(0, trailingAnnotation.index).trim();
+  }
+
+  return withoutListNumber;
 }
 
 function normalizeTags(value: unknown) {

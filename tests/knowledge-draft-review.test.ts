@@ -236,13 +236,13 @@ describe("knowledge draft review", () => {
       title: "Tuyến ven biển Phú Yên",
       routeSegment: "Tuy Hòa - Vũng Rô",
       summary: "Lộ trình cộng đồng cần được operator kiểm tra trước khi dùng.",
-      practicalDetails: { ordered_stops: ["33. Bãi Môn", "Mũi Điện (34)", "3.14 Cafe"] },
+      practicalDetails: { ordered_stops: ["33. Bãi Môn", "Mũi Điện (34)", "Trạm Y Tế xã Mỹ An (rẽ đường này để tránh đường xấu)", "3.14 Cafe"] },
       tags: ["ven-bien"],
       confidence: "community",
       freshnessSensitive: false,
     });
 
-    await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, draft.id))).resolves.toMatchObject([{ practicalDetails: { ordered_stops: ["Bãi Môn", "Mũi Điện", "3.14 Cafe"] } }]);
+    await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, draft.id))).resolves.toMatchObject([{ practicalDetails: { ordered_stops: ["Bãi Môn", "Mũi Điện", "Trạm Y Tế xã Mỹ An", "3.14 Cafe"] } }]);
   });
 
   test("review rejects a 41-item ordered stop edit without mutation", async () => {

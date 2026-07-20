@@ -230,7 +230,7 @@ describe("knowledge draft extraction", () => {
             title: "Tuyến ven biển Phú Yên",
             route_segment: "Tuy Hòa - Vũng Rô",
             summary: "Lộ trình cộng đồng cần được operator kiểm tra trước khi dùng.",
-            practical_details: { ordered_stops: ["33. Bãi Môn", "Mũi Điện (34)", "3.14 Cafe"] },
+            practical_details: { ordered_stops: ["33. Bãi Môn", "Mũi Điện (34)", "Trạm Y Tế xã Mỹ An (rẽ đường này để tránh đường xấu)", "3.14 Cafe"] },
             tags: ["ven-bien"],
             confidence: "community",
             freshness_sensitive: false,
@@ -241,7 +241,7 @@ describe("knowledge draft extraction", () => {
     const { extractKnowledgeDraftsFromSource } = await import("@/features/knowledge/actions");
 
     await expect(extractKnowledgeDraftsFromSource(source.id)).resolves.toMatchObject({ draftCount: 1 });
-    await expect(testDb.select().from(knowledgeCards)).resolves.toMatchObject([{ practicalDetails: { ordered_stops: ["Bãi Môn", "Mũi Điện", "3.14 Cafe"] } }]);
+    await expect(testDb.select().from(knowledgeCards)).resolves.toMatchObject([{ practicalDetails: { ordered_stops: ["Bãi Môn", "Mũi Điện", "Trạm Y Tế xã Mỹ An", "3.14 Cafe"] } }]);
   });
 
   test("rejects a route note with more than 40 ordered stops without persistence", async () => {
@@ -412,6 +412,57 @@ describe("knowledge draft extraction", () => {
     await expect(testDb.select().from(knowledgeCards)).resolves.toHaveLength(0);
     await expect(testDb.select().from(knowledgeCardSources)).resolves.toHaveLength(0);
     await expect(testDb.select().from(auditEvents)).resolves.toHaveLength(0);
+  });
+
+  test("logs rejected model output only when explicitly enabled for local diagnostics", async () => {
+    await createUser("debug-output-operator", ["operator"]);
+    authMock.mockResolvedValue({ user: { id: "debug-output-operator", email: "debug-output-operator@example.com" } });
+    await createExtractionModel();
+    const source = await createTextSource("debug-output-operator");
+    const rawOutput = JSON.stringify({ drafts: [{ type: "route_note", title: "Thiếu thông tin" }] });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const originalAppEnv = process.env.APP_ENV;
+    const originalDebugFlag = process.env.AI_DEBUG_RAW_EXTRACTION_OUTPUT;
+    process.env.APP_ENV = "local";
+    process.env.AI_DEBUG_RAW_EXTRACTION_OUTPUT = "true";
+    mockGatewayJson(rawOutput);
+    const { extractKnowledgeDraftsFromSource } = await import("@/features/knowledge/actions");
+
+    try {
+      await expect(extractKnowledgeDraftsFromSource(source.id)).rejects.toMatchObject({ code: "invalid_model_output" });
+      expect(warn).toHaveBeenCalledWith("Knowledge extraction rejected model output", expect.objectContaining({ sourceId: source.id, reason: "missing_or_invalid_required_field", modelOutput: rawOutput }));
+    } finally {
+      if (originalAppEnv === undefined) delete process.env.APP_ENV;
+      else process.env.APP_ENV = originalAppEnv;
+      if (originalDebugFlag === undefined) delete process.env.AI_DEBUG_RAW_EXTRACTION_OUTPUT;
+      else process.env.AI_DEBUG_RAW_EXTRACTION_OUTPUT = originalDebugFlag;
+      warn.mockRestore();
+    }
+  });
+
+  test("does not log rejected model output outside explicit local diagnostics", async () => {
+    await createUser("no-debug-output-operator", ["operator"]);
+    authMock.mockResolvedValue({ user: { id: "no-debug-output-operator", email: "no-debug-output-operator@example.com" } });
+    await createExtractionModel();
+    const source = await createTextSource("no-debug-output-operator");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const originalAppEnv = process.env.APP_ENV;
+    const originalDebugFlag = process.env.AI_DEBUG_RAW_EXTRACTION_OUTPUT;
+    process.env.APP_ENV = "local";
+    process.env.AI_DEBUG_RAW_EXTRACTION_OUTPUT = "false";
+    mockGatewayJson(JSON.stringify({ drafts: [{ type: "route_note", title: "Thiếu thông tin" }] }));
+    const { extractKnowledgeDraftsFromSource } = await import("@/features/knowledge/actions");
+
+    try {
+      await expect(extractKnowledgeDraftsFromSource(source.id)).rejects.toMatchObject({ code: "invalid_model_output" });
+      expect(warn).not.toHaveBeenCalledWith("Knowledge extraction rejected model output", expect.anything());
+    } finally {
+      if (originalAppEnv === undefined) delete process.env.APP_ENV;
+      else process.env.APP_ENV = originalAppEnv;
+      if (originalDebugFlag === undefined) delete process.env.AI_DEBUG_RAW_EXTRACTION_OUTPUT;
+      else process.env.AI_DEBUG_RAW_EXTRACTION_OUTPUT = originalDebugFlag;
+      warn.mockRestore();
+    }
   });
 
   test("unverified curated source cannot be upgraded to curated confidence by model output", async () => {
