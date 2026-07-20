@@ -155,21 +155,33 @@ describe("knowledge extraction worker jobs", () => {
     const queued = await enqueueKnowledgeExtractionJob({ sourceId: review.sourceId, facebookCaptureReviewId: review.id, mode: "extract_only", actor }, testDb);
     vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ drafts: [{ type: "general_travel_tip", title: modelMarker, summary: "Bản nháp thiếu vị trí hoặc cung đường." , confidence: "community", freshness_sensitive: false }] }) } }], model: "cx/extract" }), { status: 200 }));
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const originalAppEnv = process.env.APP_ENV;
+    const originalDebugFlag = process.env.AI_DEBUG_RAW_EXTRACTION_OUTPUT;
+    process.env.APP_ENV = "local";
+    process.env.AI_DEBUG_RAW_EXTRACTION_OUTPUT = "false";
 
-    await expect(runKnowledgeExtractionWorkerLoop({ once: true, workerId: "test-worker" })).resolves.toMatchObject({
-      status: "failed",
-      jobId: queued.job.id,
-      failure: { jobId: queued.job.id, sourceId: review.sourceId, facebookCaptureReviewId: review.id, mode: "extract_only", attemptCount: 1, maxAttempts: 3, code: "invalid_model_output", detail: "missing_location_or_route", retryable: false, outcome: "failed" },
-    });
+    try {
+      await expect(runKnowledgeExtractionWorkerLoop({ once: true, workerId: "test-worker" })).resolves.toMatchObject({
+        status: "failed",
+        jobId: queued.job.id,
+        failure: { jobId: queued.job.id, sourceId: review.sourceId, facebookCaptureReviewId: review.id, mode: "extract_only", attemptCount: 1, maxAttempts: 3, code: "invalid_model_output", detail: "missing_location_or_route", retryable: false, outcome: "failed" },
+      });
 
-    const [failedJob] = await testDb.select().from(knowledgeExtractionJobs).where(eq(knowledgeExtractionJobs.id, queued.job.id));
-    expect(failedJob).toMatchObject({ status: "failed", lastErrorCode: "invalid_model_output", lastErrorMessage: "Extraction failed: invalid_model_output (missing_location_or_route)" });
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(warn).toHaveBeenCalledWith("Knowledge extraction job failed", expect.objectContaining({ jobId: queued.job.id, sourceId: review.sourceId, facebookCaptureReviewId: review.id, mode: "extract_only", attemptCount: 1, maxAttempts: 3, code: "invalid_model_output", detail: "missing_location_or_route", retryable: false, outcome: "failed" }));
-    expect(JSON.stringify(failedJob)).not.toContain(rawMarker);
-    expect(JSON.stringify(failedJob)).not.toContain(modelMarker);
-    expect(JSON.stringify(warn.mock.calls)).not.toContain(rawMarker);
-    expect(JSON.stringify(warn.mock.calls)).not.toContain(modelMarker);
+      const [failedJob] = await testDb.select().from(knowledgeExtractionJobs).where(eq(knowledgeExtractionJobs.id, queued.job.id));
+      expect(failedJob).toMatchObject({ status: "failed", lastErrorCode: "invalid_model_output", lastErrorMessage: "Extraction failed: invalid_model_output (missing_location_or_route)" });
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith("Knowledge extraction job failed", expect.objectContaining({ jobId: queued.job.id, sourceId: review.sourceId, facebookCaptureReviewId: review.id, mode: "extract_only", attemptCount: 1, maxAttempts: 3, code: "invalid_model_output", detail: "missing_location_or_route", retryable: false, outcome: "failed" }));
+      expect(JSON.stringify(failedJob)).not.toContain(rawMarker);
+      expect(JSON.stringify(failedJob)).not.toContain(modelMarker);
+      expect(JSON.stringify(warn.mock.calls)).not.toContain(rawMarker);
+      expect(JSON.stringify(warn.mock.calls)).not.toContain(modelMarker);
+    } finally {
+      if (originalAppEnv === undefined) delete process.env.APP_ENV;
+      else process.env.APP_ENV = originalAppEnv;
+      if (originalDebugFlag === undefined) delete process.env.AI_DEBUG_RAW_EXTRACTION_OUTPUT;
+      else process.env.AI_DEBUG_RAW_EXTRACTION_OUTPUT = originalDebugFlag;
+      warn.mockRestore();
+    }
   });
 
   test("logs a safe queued outcome for a retryable provider failure", async () => {
