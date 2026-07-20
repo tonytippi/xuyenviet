@@ -92,7 +92,8 @@ function formatPracticalDetails(details: Record<string, unknown>) {
     .slice(0, 6)
     .flatMap(([key, value]) => {
       const values = typeof value === "string" ? [value] : Array.isArray(value) ? value.filter((item): item is string => typeof item === "string").slice(0, 4) : [];
-      return values.length > 0 ? [`${formatPromptValue(key, 60)}=${formatPromptValue(values.join("; "))}`] : [];
+      const renderedValues = key === "ordered_stops" && Array.isArray(value) ? value.filter((item): item is string => typeof item === "string").slice(0, 40) : values;
+      return renderedValues.length > 0 ? [`${formatPromptValue(key, 60)}=${formatPromptValue(renderedValues.join("; "), key === "ordered_stops" ? 1_200 : maxFieldLength)}`] : [];
     });
 
   return entries.join("; ");

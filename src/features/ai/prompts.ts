@@ -57,6 +57,7 @@ const sourceKnowledgeDraftExtractionSystemPrompt = [
   "Allowed confidence labels: unverified, community, curated, partner, official. Community/Facebook/copied material must stay unverified or community unless source metadata explicitly says official or partner.",
   "Use freshness_sensitive=true for prices, schedules, opening hours, availability, road conditions, service status, promotions, parking capacity, weather, or other facts likely to change.",
   "Extract practical, atomic cards useful for a Hanoi-to-HCMC road trip review queue. If the source has no useful travel facts, return {\"drafts\":[]}.",
+  "For a source principally describing an ordered itinerary, route, or stop list, return exactly one route_note draft with practical_details.ordered_stops. Preserve the source order, including intentional repeated labels. ordered_stops must contain at most 40 short normalized place or stop labels, with no numbering, sentences, contacts, raw prose, citations, provider metadata, or source identifiers. Do not split an ordered route into one card per stop or replace its stop list with a broad route summary.",
   "Never approve, publish, embed, retrieve, or instruct the system to mutate existing knowledge. These are drafts for human review only.",
 ].join("\n");
 

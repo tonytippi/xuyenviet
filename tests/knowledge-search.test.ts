@@ -236,6 +236,43 @@ describe("approved knowledge search documents", () => {
     await expect(searchApprovedKnowledge("bảo vệ qua đêm")).resolves.toMatchObject([{ id: card.id, practicalDetails: { parking_notes: ["Có chỗ đỗ xe qua đêm có bảo vệ"] } }]);
   });
 
+  test("indexes and retrieves an approved ordered stop after position 10 without raw source leakage", async () => {
+    await createUser("route-search-operator", ["operator"]);
+    const source = await createSource("route-search-operator", { id: "route-search-source" });
+    const orderedStops = Array.from({ length: 32 }, (_, index) => `Điểm dừng ${index + 1}`);
+    const card = await createCard("route-search-operator", {
+      id: "route-search-card",
+      type: "route_note",
+      title: "Tuyến ven biển đã duyệt",
+      routeSegment: "Đà Nẵng - Phú Yên",
+      practicalDetails: { ordered_stops: orderedStops },
+    });
+    await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: card.id, sourceId: source.id, supportLevel: "primary" });
+    const { indexApprovedKnowledgeCard, searchApprovedKnowledge } = await import("@/features/knowledge/search");
+
+    await indexApprovedKnowledgeCard(card.id);
+
+    const [document] = await testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, card.id));
+    expect(document?.searchableText).toContain("Điểm dừng 32");
+    expect(document?.searchableText).not.toContain("0901234567");
+    await expect(searchApprovedKnowledge("Điểm dừng 32")).resolves.toMatchObject([{ id: card.id, practicalDetails: { ordered_stops: orderedStops } }]);
+  });
+
+  test("indexes ordered stops even when legacy detail key order places them after the first 20 entries", async () => {
+    await createUser("legacy-route-search-operator", ["operator"]);
+    const source = await createSource("legacy-route-search-operator", { id: "legacy-route-search-source" });
+    const card = await createCard("legacy-route-search-operator", {
+      id: "legacy-route-search-card",
+      practicalDetails: { ...Object.fromEntries(Array.from({ length: 20 }, (_, index) => [`note_${index}`, "Ghi chú ngắn"])), ordered_stops: ["Điểm dừng cuối tuyến"] },
+    });
+    await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: card.id, sourceId: source.id, supportLevel: "primary" });
+    const { indexApprovedKnowledgeCard, searchApprovedKnowledge } = await import("@/features/knowledge/search");
+
+    await indexApprovedKnowledgeCard(card.id);
+
+    await expect(searchApprovedKnowledge("Điểm dừng cuối tuyến")).resolves.toMatchObject([{ id: card.id }]);
+  });
+
   test("bounds malformed practical detail values before indexing", async () => {
     await createUser("bounded-details-operator", ["operator"]);
     const source = await createSource("bounded-details-operator", { id: "bounded-details-source" });

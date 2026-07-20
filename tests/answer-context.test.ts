@@ -1209,6 +1209,18 @@ describe("answer context assembly", () => {
     expect(section).not.toContain("Không được đưa vào prompt");
   });
 
+  test("approved knowledge prompt keeps all bounded ordered route stops", async () => {
+    const { buildApprovedKnowledgePromptSection } = await import("@/features/retrieval/approved-knowledge");
+    const orderedStops = Array.from({ length: 32 }, (_, index) => `Điểm dừng ${index + 1}`);
+
+    const section = buildApprovedKnowledgePromptSection([
+      makeKnowledgeResult("route-card", "Tuyến ven biển", { practicalDetails: { ordered_stops: orderedStops } }),
+    ]);
+
+    expect(section).toContain('"ordered_stops"');
+    expect(section).toContain("Điểm dừng 32");
+  });
+
   test("approved knowledge prompt stays bounded when compact fallback receives pathological values", async () => {
     const { buildApprovedKnowledgePromptSection } = await import("@/features/retrieval/approved-knowledge");
 

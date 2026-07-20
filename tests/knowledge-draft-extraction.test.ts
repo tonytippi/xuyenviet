@@ -105,6 +105,8 @@ function mockGatewayJson(content: string, usage = { prompt_tokens: 120, completi
   );
 }
 
+const orderedStops = Array.from({ length: 32 }, (_, index) => `Điểm dừng ${index + 1}`);
+
 describe("knowledge draft extraction", () => {
   beforeEach(() => {
     authMock.mockReset();
@@ -176,11 +178,97 @@ describe("knowledge draft extraction", () => {
     expect(systemMessage).toContain("Keep JSON keys and enum values exactly as specified in English");
     expect(systemMessage).toContain("Paraphrase aggressively");
     expect(systemMessage).toContain("do not copy any phrase");
+    expect(systemMessage).toContain("exactly one route_note draft");
+    expect(systemMessage).toContain("practical_details.ordered_stops");
+    expect(systemMessage).toContain("at most 40 short normalized place or stop labels");
     expect(userMessage).toContain("Tiêu đề ngắn an toàn");
     expect(userMessage).toContain("Tóm tắt sự kiện cần duyệt");
     expect(userMessage).toContain("the_ngan");
+    expect(userMessage).toContain('"type":"place"');
+    expect(userMessage).not.toContain('"ordered_stops"');
     expect(userMessage).not.toContain("Short safe title");
     expect(userMessage).not.toContain("Reviewable fact summary");
+  });
+
+  test("persists all 32 ordered route stops in one community route note", async () => {
+    await createUser("route-operator", ["operator"]);
+    authMock.mockResolvedValue({ user: { id: "route-operator", email: "route-operator@example.com" } });
+    await createExtractionModel();
+    const source = await createTextSource("route-operator", "Danh sách điểm dừng ven biển từ Đà Nẵng đến Phú Yên.");
+    mockGatewayJson(
+      JSON.stringify({
+        drafts: [
+          {
+            type: "route_note",
+            title: "Tuyến ven biển Đà Nẵng - Phú Yên",
+            route_segment: "Đà Nẵng - Phú Yên",
+            summary: "Lộ trình cộng đồng cần được operator kiểm tra trước khi dùng.",
+            practical_details: { ordered_stops: orderedStops },
+            tags: ["ven-bien"],
+            confidence: "community",
+            freshness_sensitive: false,
+          },
+        ],
+      }),
+    );
+    const { extractKnowledgeDraftsFromSource } = await import("@/features/knowledge/actions");
+
+    await expect(extractKnowledgeDraftsFromSource(source.id)).resolves.toMatchObject({ draftCount: 1 });
+    await expect(testDb.select().from(knowledgeCards)).resolves.toMatchObject([{ type: "route_note", practicalDetails: { ordered_stops: orderedStops }, confidence: "community" }]);
+  });
+
+  test("rejects a route note with more than 40 ordered stops without persistence", async () => {
+    await createUser("long-route-operator", ["operator"]);
+    authMock.mockResolvedValue({ user: { id: "long-route-operator", email: "long-route-operator@example.com" } });
+    await createExtractionModel();
+    const source = await createTextSource("long-route-operator");
+    mockGatewayJson(
+      JSON.stringify({
+        drafts: [
+          {
+            type: "route_note",
+            title: "Tuyến quá dài",
+            route_segment: "Đà Nẵng - Phú Yên",
+            summary: "Lộ trình vượt giới hạn cần bị từ chối an toàn.",
+            practical_details: { ordered_stops: Array.from({ length: 41 }, (_, index) => `Điểm ${index + 1}`) },
+            tags: ["ven-bien"],
+            confidence: "community",
+            freshness_sensitive: false,
+          },
+        ],
+      }),
+    );
+    const { extractKnowledgeDraftsFromSource } = await import("@/features/knowledge/actions");
+
+    await expect(extractKnowledgeDraftsFromSource(source.id)).rejects.toMatchObject({ code: "invalid_model_output", safeDetail: "invalid_practical_details" });
+    await expect(testDb.select().from(knowledgeCards)).resolves.toHaveLength(0);
+  });
+
+  test("rejects numbered or sentence-like ordered stop labels without persistence", async () => {
+    await createUser("unsafe-route-operator", ["operator"]);
+    authMock.mockResolvedValue({ user: { id: "unsafe-route-operator", email: "unsafe-route-operator@example.com" } });
+    await createExtractionModel();
+    const source = await createTextSource("unsafe-route-operator");
+    mockGatewayJson(
+      JSON.stringify({
+        drafts: [
+          {
+            type: "route_note",
+            title: "Tuyến không an toàn",
+            route_segment: "Đà Nẵng - Phú Yên",
+            summary: "Lộ trình cần bị từ chối khi danh sách điểm dừng không phải nhãn ngắn.",
+            practical_details: { ordered_stops: ["Rẽ trái tại cầu rồi đi tiếp 5 km"] },
+            tags: ["ven-bien"],
+            confidence: "community",
+            freshness_sensitive: false,
+          },
+        ],
+      }),
+    );
+    const { extractKnowledgeDraftsFromSource } = await import("@/features/knowledge/actions");
+
+    await expect(extractKnowledgeDraftsFromSource(source.id)).rejects.toMatchObject({ code: "invalid_model_output", safeDetail: "invalid_practical_details" });
+    await expect(testDb.select().from(knowledgeCards)).resolves.toHaveLength(0);
   });
 
   test("source suggestion prompt asks for Vietnamese suggestion and draft content by default", () => {

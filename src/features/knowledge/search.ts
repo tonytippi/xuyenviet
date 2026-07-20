@@ -14,6 +14,7 @@ const maxSearchCandidateDocuments = 200;
 const maxPracticalDetailEntries = 20;
 const maxPracticalDetailKeyLength = 60;
 const maxPracticalDetailValuesPerEntry = 10;
+const maxOrderedStops = 40;
 const maxPracticalDetailValueLength = 500;
 
 type KnowledgeSearchDb = ReturnType<typeof getDb>;
@@ -310,12 +311,21 @@ function buildSearchableText(card: Omit<KnowledgeSearchResult, "score">) {
 }
 
 function getPracticalDetailSearchValues(details: Record<string, unknown>) {
-  return Object.entries(details)
-    .slice(0, maxPracticalDetailEntries)
+  const entries = Object.entries(details);
+  const orderedStops = entries.find(([key]) => key === "ordered_stops");
+  const boundedEntries = entries.slice(0, maxPracticalDetailEntries);
+
+  if (orderedStops && !boundedEntries.some(([key]) => key === "ordered_stops")) {
+    boundedEntries[boundedEntries.length - 1] = orderedStops;
+  }
+
+  return boundedEntries
     .flatMap(([key, value]) => {
       const safeKey = normalizePracticalDetailValue(key, maxPracticalDetailKeyLength);
       const rawValues = typeof value === "string" ? [value] : Array.isArray(value) ? value : [];
-      const safeValues = rawValues.slice(0, maxPracticalDetailValuesPerEntry).map((item) => normalizePracticalDetailValue(item, maxPracticalDetailValueLength)).filter((item): item is string => Boolean(item));
+      const maxValues = key === "ordered_stops" ? maxOrderedStops : maxPracticalDetailValuesPerEntry;
+      const maxValueLength = key === "ordered_stops" ? 160 : maxPracticalDetailValueLength;
+      const safeValues = rawValues.slice(0, maxValues).map((item) => normalizePracticalDetailValue(item, maxValueLength)).filter((item): item is string => Boolean(item));
 
       return safeKey ? [safeKey, ...safeValues] : safeValues;
     });

@@ -30,6 +30,8 @@ const maxLocationLength = 160;
 const maxRouteSegmentLength = 160;
 const maxSummaryLength = 1200;
 const maxDetailStringLength = 500;
+const maxDetailArrayItems = 10;
+const maxOrderedStops = 40;
 const maxTags = 12;
 const maxTagLength = 40;
 
@@ -347,6 +349,10 @@ function normalizeDraft(value: unknown, source: typeof sources.$inferSelect, raw
   const practicalDetails = normalizePracticalDetails(value.practical_details);
   const tags = normalizeTags(value.tags);
 
+  if (!practicalDetails) {
+    return { result: null, reason: "invalid_practical_details" };
+  }
+
   if (containsUnsafeDraftFields({ title, locationName, routeSegment, summary, practicalDetails, tags }, rawText)) {
     return { result: null, reason: "unsafe_raw_overlap_or_sensitive_value" };
   }
@@ -412,36 +418,58 @@ function normalizeBoundedString(value: unknown, maxLength: number) {
   return normalized && normalized.length <= maxLength ? normalized : null;
 }
 
-function normalizePracticalDetails(value: unknown): Record<string, unknown> {
+function normalizePracticalDetails(value: unknown): Record<string, unknown> | null {
   if (!isRecord(value)) {
     return {};
   }
 
   const details: Record<string, unknown> = {};
 
-  for (const [key, detailValue] of Object.entries(value).slice(0, 20)) {
-    const safeKey = normalizeBoundedString(key, 60);
-    const safeValue = normalizeDetailValue(detailValue);
+  const entries = Object.entries(value);
 
-    if (safeKey && safeValue !== null) {
-      details[safeKey] = safeValue;
+  if (entries.length > 20) {
+    return null;
+  }
+
+  for (const [key, detailValue] of entries) {
+    const safeKey = normalizeBoundedString(key, 60);
+    const safeValue = normalizeDetailValue(safeKey, detailValue);
+
+    if (!safeKey || safeValue === null) {
+      return null;
     }
+
+    details[safeKey] = safeValue;
   }
 
   return details;
 }
 
-function normalizeDetailValue(value: unknown): string | string[] | null {
+function normalizeDetailValue(key: string | null, value: unknown): string | string[] | null {
   if (typeof value === "string") {
     return normalizeBoundedString(value, maxDetailStringLength);
   }
 
   if (Array.isArray(value)) {
-    const values = value.map((item) => normalizeBoundedString(item, maxDetailStringLength)).filter((item): item is string => item !== null).slice(0, 10);
-    return values.length > 0 ? values : null;
+    if (value.length > (key === "ordered_stops" ? maxOrderedStops : maxDetailArrayItems)) {
+      return null;
+    }
+
+    const values = value.map((item) => key === "ordered_stops" ? normalizeOrderedStop(item) : normalizeBoundedString(item, maxDetailStringLength));
+    return values.length > 0 && values.every((item): item is string => item !== null) ? values : null;
   }
 
   return null;
+}
+
+function normalizeOrderedStop(value: unknown) {
+  const normalized = normalizeBoundedString(value, maxLocationLength);
+
+  if (!normalized || normalized.split(/\s+/).length > 12 || /[\r\n\[\]{}.,;:!?]/.test(normalized) || /^\d+\s*[.)-]/.test(normalized) || /(rẽ|đi tiếp|chạy tiếp|băng qua|vượt|lướt qua|theo đường)/i.test(normalized)) {
+    return null;
+  }
+
+  return normalized;
 }
 
 function normalizeTags(value: unknown) {

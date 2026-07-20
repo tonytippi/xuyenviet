@@ -27,6 +27,7 @@ const maxDetailKeyLength = 60;
 const maxDetailStringLength = 500;
 const maxDetailEntries = 20;
 const maxDetailArrayItems = 10;
+const maxOrderedStops = 40;
 const maxPracticalDetailsJsonLength = 10_000;
 const maxTags = 12;
 const maxTagLength = 40;
@@ -954,7 +955,7 @@ function normalizePracticalDetails(value: unknown): Record<string, unknown> {
       throw new KnowledgeDraftReviewError("Khóa chi tiết thực tế không hợp lệ.", "invalid_input");
     }
 
-    const safeValue = normalizeDetailValue(detailValue);
+    const safeValue = normalizeDetailValue(safeKey, detailValue);
 
     details[safeKey] = safeValue;
   }
@@ -980,7 +981,7 @@ function parseDetailsJson(value: string) {
   }
 }
 
-function normalizeDetailValue(value: unknown): string | string[] {
+function normalizeDetailValue(key: string, value: unknown): string | string[] {
   if (typeof value === "string") {
     const normalized = normalizeBoundedString(value, maxDetailStringLength);
 
@@ -992,12 +993,12 @@ function normalizeDetailValue(value: unknown): string | string[] {
   }
 
   if (Array.isArray(value)) {
-    if (value.length > maxDetailArrayItems) {
-      throw new KnowledgeDraftReviewError("Mỗi chi tiết thực tế chỉ được có tối đa 10 dòng.", "invalid_input");
+    if (value.length > (key === "ordered_stops" ? maxOrderedStops : maxDetailArrayItems)) {
+      throw new KnowledgeDraftReviewError("Mỗi chi tiết thực tế chỉ được có tối đa 10 dòng, riêng ordered_stops tối đa 40 điểm.", "invalid_input");
     }
 
     const values = value.map((item) => {
-      const normalized = normalizeBoundedString(item, maxDetailStringLength);
+      const normalized = key === "ordered_stops" ? normalizeOrderedStop(item) : normalizeBoundedString(item, maxDetailStringLength);
 
       if (!normalized) {
         throw new KnowledgeDraftReviewError("Danh sách chi tiết thực tế chứa giá trị không hợp lệ.", "invalid_input");
@@ -1010,6 +1011,16 @@ function normalizeDetailValue(value: unknown): string | string[] {
   }
 
   throw new KnowledgeDraftReviewError("Giá trị chi tiết thực tế không hợp lệ.", "invalid_input");
+}
+
+function normalizeOrderedStop(value: unknown) {
+  const normalized = normalizeBoundedString(value, maxLocationLength);
+
+  if (!normalized || normalized.split(/\s+/).length > 12 || /[\r\n\[\]{}.,;:!?]/.test(normalized) || /^\d+\s*[.)-]/.test(normalized) || /(rẽ|đi tiếp|chạy tiếp|băng qua|vượt|lướt qua|theo đường)/i.test(normalized)) {
+    return null;
+  }
+
+  return normalized;
 }
 
 function normalizeTags(value: unknown) {

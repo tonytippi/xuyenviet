@@ -6,6 +6,7 @@ import { auditEvents, knowledgeCards, knowledgeCardSources, rawSourceMaterial, s
 import { testDb } from "./helpers/db";
 
 const authMock = vi.fn();
+const orderedStops = Array.from({ length: 32 }, (_, index) => `Điểm dừng ${index + 1}`);
 
 vi.mock("@/auth", () => ({
   auth: authMock,
@@ -201,6 +202,69 @@ describe("knowledge draft review", () => {
     expect(audits[0]?.afterSummary).toContain("Embeddings were not created");
     expect(JSON.stringify(audits)).not.toContain("0901234567");
     expect(JSON.stringify(audits)).not.toContain("hidden-provider-data");
+  });
+
+  test("review accepts and approves 32 ordered stops without changing their order", async () => {
+    await createUser("route-review-operator", ["operator"]);
+    authMock.mockResolvedValue({ user: { id: "route-review-operator", email: "route-review-operator@example.com" } });
+    const { draft } = await createDraft("route-review-operator", { type: "route_note", practicalDetails: { ordered_stops: orderedStops } });
+    const { approveKnowledgeDraft, updateKnowledgeDraft } = await import("@/features/knowledge/review");
+
+    await updateKnowledgeDraft(draft.id, {
+      type: "route_note",
+      title: "Tuyến ven biển đã duyệt",
+      routeSegment: "Đà Nẵng - Phú Yên",
+      summary: "Lộ trình cộng đồng đã được operator kiểm tra trước khi cho phép truy xuất.",
+      practicalDetails: { ordered_stops: orderedStops },
+      tags: ["ven-bien"],
+      confidence: "community",
+      freshnessSensitive: false,
+    });
+    await approveKnowledgeDraft(draft.id);
+
+    await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, draft.id))).resolves.toMatchObject([{ status: "approved", practicalDetails: { ordered_stops: orderedStops } }]);
+  });
+
+  test("review rejects a 41-item ordered stop edit without mutation", async () => {
+    await createUser("long-route-review-operator", ["operator"]);
+    authMock.mockResolvedValue({ user: { id: "long-route-review-operator", email: "long-route-review-operator@example.com" } });
+    const { draft } = await createDraft("long-route-review-operator", { type: "route_note" });
+    const { updateKnowledgeDraft } = await import("@/features/knowledge/review");
+
+    await expect(
+      updateKnowledgeDraft(draft.id, {
+        type: "route_note",
+        title: "Tuyến quá dài",
+        routeSegment: "Đà Nẵng - Phú Yên",
+        summary: "Lộ trình vượt giới hạn phải được từ chối trước khi lưu.",
+        practicalDetails: { ordered_stops: Array.from({ length: 41 }, (_, index) => `Điểm ${index + 1}`) },
+        tags: ["ven-bien"],
+        confidence: "community",
+        freshnessSensitive: false,
+      }),
+    ).rejects.toMatchObject({ code: "invalid_input" });
+    await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, draft.id))).resolves.toMatchObject([{ practicalDetails: draft.practicalDetails }]);
+  });
+
+  test("review rejects numbered ordered stop labels without mutation", async () => {
+    await createUser("unsafe-route-review-operator", ["operator"]);
+    authMock.mockResolvedValue({ user: { id: "unsafe-route-review-operator", email: "unsafe-route-review-operator@example.com" } });
+    const { draft } = await createDraft("unsafe-route-review-operator", { type: "route_note" });
+    const { updateKnowledgeDraft } = await import("@/features/knowledge/review");
+
+    await expect(
+      updateKnowledgeDraft(draft.id, {
+        type: "route_note",
+        title: "Tuyến không an toàn",
+        routeSegment: "Đà Nẵng - Phú Yên",
+        summary: "Lộ trình cần từ chối nếu nhãn điểm dừng là câu đánh số dài.",
+        practicalDetails: { ordered_stops: ["Rẽ trái tại cầu rồi đi tiếp 5 km"] },
+        tags: ["ven-bien"],
+        confidence: "community",
+        freshnessSensitive: false,
+      }),
+    ).rejects.toMatchObject({ code: "invalid_input" });
+    await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, draft.id))).resolves.toMatchObject([{ practicalDetails: draft.practicalDetails }]);
   });
 
   test("approve rejects invalid lifecycle and orphan drafts without mutation or audit", async () => {
