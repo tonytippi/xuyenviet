@@ -102,6 +102,8 @@ async function loadApprovedCardsNeedingSearchDocuments(db: Pick<KnowledgeIndexin
       ),
     )
     .orderBy(asc(knowledgeCards.updatedAt), asc(knowledgeCards.id))
+    // Bound each poll at the database boundary; eligibility remains fail-closed below.
+    .limit(options.batchSize)
     .then((cards) => cards.filter((card) => {
       const eligible = isKnowledgeCardTravelerEligible(card);
       const needsRefresh =
@@ -112,7 +114,7 @@ async function loadApprovedCardsNeedingSearchDocuments(db: Pick<KnowledgeIndexin
         (card.documentUpdatedAt !== null && card.documentUpdatedAt < card.updatedAt);
 
       return (card.documentStatus === "active" && !eligible) || (eligible && needsRefresh);
-    }).slice(0, options.batchSize));
+    }));
 }
 
 function getWorkerPollIntervalMs() {
