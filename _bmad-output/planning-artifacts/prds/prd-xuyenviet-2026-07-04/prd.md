@@ -2,7 +2,7 @@
 title: XuyenViet AI Travel Information MVP PRD
 status: final
 created: 2026-07-04
-updated: 2026-07-10
+updated: 2026-07-21
 ---
 
 # XuyenViet AI Travel Information MVP PRD
@@ -18,7 +18,7 @@ The MVP is not a complete travel marketplace, booking product, Google Maps repla
 - Help Vietnamese travelers get useful Vietnam road-trip answers in Vietnamese.
 - Reduce the time users spend searching across websites, Facebook posts, service listings, and generic search results.
 - Prove that AI Chat with memory and personalization is the right initial product surface.
-- Build an operator-controlled knowledge collection workflow that turns raw travel information into approved knowledge cards.
+- Build an AI-first knowledge collection workflow that turns raw travel information into evidence-grounded provisional knowledge, while routing only risky or uncertain claims to operators.
 - Make AI answers source-aware, confidence-aware, and explicit when information may be outdated or incomplete.
 
 ## 3. Non-Goals
@@ -45,12 +45,12 @@ Initial magic-moment example:
 
 ### 4.2 Operator
 
-Internal owner or future small operations team member who collects travel information from raw sources, reviews AI extraction, edits knowledge cards, and approves them for AI retrieval.
+Internal owner or future small operations team member who collects travel information from raw sources, reviews AI-flagged claims, edits knowledge cards, and can approve, suppress, or verify knowledge after it is active.
 
 ## 5. Product Principles
 
 - Chat and trip context first: answers should prioritize what the user has told XuyenViet inside the current chat session or selected trip project.
-- Curated knowledge second: answers should use approved XuyenViet knowledge cards when relevant.
+- XuyenViet knowledge second: answers should use active evidence-grounded knowledge cards when relevant, and communicate each card's source, state, and uncertainty.
 - Fresh search third: answers may use web search fallback when curated data is missing, sparse, or likely outdated.
 - Never fake certainty: collected web/Facebook information may be incomplete or wrong, so answers must expose uncertainty and recommend verification for changing details.
 - Practical over generic: useful local tips matter more than polished itinerary prose.
@@ -65,8 +65,8 @@ Internal owner or future small operations team member who collects travel inform
 - Google Login required before a user can ask AI.
 - Chat sessions and trip projects tied to the logged-in user.
 - Chat-level and trip-level context extraction.
-- Operator knowledge-card creation and approval flow.
-- Retrieval from approved knowledge cards.
+- Operator knowledge-card creation, AI-recommended review, and knowledge lifecycle controls.
+- Retrieval from active knowledge cards, including AI-extracted provisional community knowledge that passes publication guardrails.
 - Web search fallback for missing or freshness-sensitive information.
 - Source and confidence display in AI answers.
 - Initial content focus on Hanoi-to-HCMC road-trip planning.
@@ -107,16 +107,16 @@ Internal owner or future small operations team member who collects travel inform
 8. AI returns a structured Vietnamese answer with plan options, child-aware tips, warnings, sources, confidence notes, and next steps.
 9. User continues refining the plan in chat.
 
-### UJ-2: Operator Adds Travel Knowledge
+### UJ-2: AI Ingests Community Travel Knowledge
 
 1. Operator opens the admin knowledge area.
 2. Operator pastes a source URL, raw text, copied post content, or image/screenshot.
 3. If the source is a Facebook URL without readable text, the source remains queued for operator-assisted capture.
 4. Operator runs the controlled capture tool against queued Facebook URLs and confirms the extracted visible text before it is stored as operator-only raw source material.
-5. AI proposes one or more structured knowledge cards from readable raw material.
-6. Operator reviews, edits, tags, and sets confidence/freshness flags.
-7. Operator approves the cards.
-8. Approved cards become available for AI retrieval.
+5. AI triages the source, extracts evidence-grounded claims, and evaluates claim quality, freshness, risk, duplicates, and conflicts.
+6. Claims that meet the active-publication policy become available for AI retrieval as provisional community knowledge with conditions and uncertainty wording.
+7. AI creates a prioritized review recommendation only for claims that are risky, weakly evidenced, freshness-sensitive, duplicated, or conflicting.
+8. Operator may review, revise, suppress, archive, or request verification for recommended claims; review is not required for every active claim.
 
 ## 8. Functional Requirements
 
@@ -149,33 +149,45 @@ Internal owner or future small operations team member who collects travel inform
 
 - FR-17: The system shall support operator-created knowledge cards.
 - FR-18: Each knowledge card shall include title, type, location or route segment, summary, source, collected date, confidence level, tags, and freshness-sensitive flag.
+- FR-18A: Each AI-extracted community claim shall preserve a short evidence quote, validated source-text span, source link when available, capture date, observed date when known, and identified conditions before it can be active for retrieval.
+- FR-18B: The system shall not retain or expose personally identifying or sensitive content in traveler-visible facts or evidence quotes.
 - FR-19: Knowledge card types shall include place, food, hotel area, activity, service, route note, warning, cost note, parking, EV charging, kid-friendly tip, discount/promotion, and general travel tip.
 - FR-20: Operators shall be able to create, edit, approve, and archive knowledge cards.
-- FR-21: Only approved knowledge cards shall be used for normal AI retrieval.
+- FR-21: Knowledge cards with an `active` publication state shall be used for normal AI retrieval. Operator approval is optional and must not be a prerequisite when an AI-extracted community claim meets the active-publication policy.
 - FR-22: Knowledge cards shall preserve source provenance enough for users or operators to inspect where the information came from.
+- FR-22A: The system shall track a knowledge state for active cards: `confirmed`, `community_pattern`, `conditional`, `uncertain`, `conflicted`, or `superseded`.
+- FR-22B: The system shall track review state separately from publication state, including no review requested, AI-recommended review, in review, and reviewed.
+- FR-22C: The system shall exclude suppressed, archived, and superseded knowledge from normal retrieval.
 
 ### 8.4 Knowledge Collection
 
 - FR-23: Operators shall be able to submit raw source material as URL, raw text, copied post content, or image/screenshot.
 - FR-23A: The system shall support queued Facebook URLs whose visible post content can be captured later by an operator-run browser automation tool.
 - FR-23B: Facebook capture automation shall populate operator-only raw source material only after operator-visible content is extracted and confirmed; it shall not store browser credentials, cookies, tokens, local storage, full HTML dumps, or hidden page data.
-- FR-24: The system shall use AI to propose structured knowledge cards from submitted source material.
-- FR-25: The system shall require human approval before extracted cards become searchable by AI.
+- FR-24: The system shall use AI to triage submitted source material, extract structured claims, and validate each claim against a source-text evidence span.
+- FR-24A: The system shall classify AI-triaged sources as rejected, context-only, candidate, or verify-first, and shall retain decision reasons for audit and quality evaluation.
+- FR-24B: The system shall use an independent AI evaluation step to decide whether an extracted claim should become active, be suppressed, or receive a review recommendation; the extractor shall not be the sole publication decision-maker.
+- FR-25: The system shall make a claim searchable without human approval only when it has validated evidence, sufficient travel specificity and actionability, no sensitive content, no high commercial/spam risk, and no unresolved high-risk conflict.
+- FR-25A: The system shall create a risk-prioritized operator review recommendation, not a mandatory approval gate, for claims with safety impact, changing operational facts, weak evidence, unresolved conflict, material duplicate risk, or missing context.
+- FR-25B: The system shall support random quality sampling of active, unreviewed claims so operators can measure false-positive publication without delaying the normal ingestion flow. The initial sampling rate shall be 15% for the first four weeks and 100% for `verify_first` claims.
 - FR-26: The system shall support confidence labels such as unverified, community, curated, partner, or official. [ASSUMPTION: exact label names can be refined during UX/architecture.]
 - FR-27: The system shall allow operators to mark facts as freshness-sensitive when they involve price, schedule, availability, road condition, opening hours, weather, or service status.
-- FR-28: The system shall support a minimum public-MVP seed set of 100 approved knowledge cards across the Hanoi-to-HCMC corridor. [ASSUMPTION: 100 is enough to test retrieval quality while remaining feasible for initial public launch.]
+- FR-28: The system shall support a minimum public-MVP seed set of 100 active knowledge cards across the Hanoi-to-HCMC corridor. [ASSUMPTION: 100 is enough to test retrieval quality while remaining feasible for initial public launch.]
 
 ### 8.5 Retrieval, Web Search, And Answer Grounding
 
-- FR-29: The system shall retrieve relevant approved knowledge cards for user questions.
-- FR-30: The system shall prioritize answer context in this order: selected trip project context, current chat session context, approved XuyenViet knowledge, web search fallback, and general AI knowledge.
-- FR-31: The system shall use web search fallback when approved knowledge is missing, sparse, or freshness-sensitive.
+- FR-29: The system shall retrieve relevant active knowledge cards for user questions according to publication and knowledge-state guardrails.
+- FR-30: The system shall prioritize answer context in this order: selected trip project context, current chat session context, active XuyenViet knowledge, web search fallback, and general AI knowledge.
+- FR-31: The system shall use web search fallback when active knowledge is missing, sparse, freshness-sensitive, uncertain, or conflicted.
 - FR-32: The system shall identify when information came from chat/trip context, XuyenViet knowledge cards, web search, or general AI reasoning.
 - FR-33: The system shall warn users to verify changing details before acting or booking.
 - FR-34: The system shall avoid presenting unverified collected information as guaranteed fact.
-- FR-35: Web search results used in answers shall be shown as external/unverified unless reviewed into approved knowledge cards.
+- FR-35: Web search results used in answers shall be shown as external/unverified unless ingested into an active knowledge card that meets the applicable publication policy.
 - FR-36: The system shall prefer official/provider pages over reposted or unattributed sources when using web search fallback.
 - FR-37: Facebook-derived information shall not be treated as official unless it comes from an identifiable official/provider page. [ASSUMPTION: operators may use Facebook content as leads or community tips, but provenance must be retained.]
+- FR-37A: The system shall present a community observation, pattern, or conditional claim with its appropriate uncertainty wording and shall not represent it as an official fact.
+- FR-37B: The system shall only describe a claim as a community pattern when multiple independent supporting evidence records exist.
+- FR-37C: The system shall not use `conflicted` knowledge as a factual premise for itinerary recommendations; it may use it to surface uncertainty, ask a clarifying question, recommend verification, or choose a safer alternative.
 
 ### 8.6 Family-Aware Planning
 
@@ -206,6 +218,7 @@ Internal owner or future small operations team member who collects travel inform
 - NFR-6: The MVP shall tolerate sparse internal knowledge by using web search fallback and clearly labeling uncertainty.
 - NFR-7: The system shall be designed so Google Maps integration, public submissions, and booking/partner flows can be added later without becoming MVP dependencies.
 - NFR-8: Browser automation for Facebook capture shall run as an operator-controlled operations tool, not as public request-path app logic or unattended mass crawling.
+- NFR-9: Active AI-extracted claims shall remain auditable through their publication decision, evidence, source, state, and review history.
 
 ## 10. MVP Product Contracts
 
@@ -225,19 +238,31 @@ Internal owner or future small operations team member who collects travel inform
 - MVP source display shall show source title or label, source type, direct URL when available, collected or checked date when available, confidence label, and freshness-sensitive warning when applicable.
 - Confidence applies to the source/card, not to every individual claim in MVP.
 - Initial confidence labels are fixed for MVP: `unverified`, `community`, `curated`, `partner`, and `official`.
-- Web search facts are labeled `unverified` unless later approved into a knowledge card.
+- Web search facts are labeled `unverified` unless later ingested into an active knowledge card that meets the applicable publication policy.
 - Source details may appear at the end of the answer; inline citation is not required for MVP.
 
-### 10.3 Web Search Fallback Contract
+### 10.3 Community Knowledge Publication And Conflict Contract
+
+- Community sources are observations with time, conditions, and personal bias; active publication means a claim is evidence-grounded and safe to express within its state, not that it is operator-verified or permanently true.
+- A claim may be active immediately only if an independent AI judge validates the evidence span, travel relevance, specificity, actionability, safety/PII policy, and absence of unresolved high-risk conflict.
+- Initial active-publication thresholds shall require travel relevance >= 0.75, extractability >= 0.70, evidence grounding >= 0.90, specificity >= 0.65, actionability >= 0.65, first-hand likelihood >= 0.55, and spam/commercial risk <= 0.25, in addition to the hard gates. The numeric scores inform the decision but shall not override failed code validation of the evidence span or privacy policy.
+- `community_pattern` may be used when multiple independent community evidence records support a materially consistent observation. `conditional` may be used only when the answer includes its material condition. `uncertain` may be used only as a caveat. `conflicted` may not support a factual recommendation. `superseded` may not be retrieved.
+- Claims about road closures or conditions, safety, EV charging status, prices, opening hours, availability, booking policy, and promotions are freshness-sensitive. They require AI-recommended review or verification and may be used only as conditional caveats until corroborated; they may not be expressed as confirmed facts without corroboration appropriate to the claim.
+- A high-risk conflict shall immediately de-index the claim or downgrade it to `uncertain` until resolved; this transition shall not wait for operator review.
+- A source quote and direct link are evidence for operator audit by default. Facebook-derived evidence shall default to `operator_only`; traveler-visible display is permitted only when the source is accessible, the quote is short and relevant, and it contains no personally identifying or sensitive material.
+- Raw captured Facebook text shall be operator-only. A source with no active or reviewable claim shall be deleted after 180 days; a source supporting an active claim shall be re-evaluated and its traveler-visible evidence removed if the source is withdrawn, inaccessible, or subject to a removal request.
+- Operators may review any claim, but the normal ingestion path shall not block on operator review. The system shall prioritize review recommendations by likely traveler impact and evidence/risk signals.
+
+### 10.4 Web Search Fallback Contract
 
 - Provider selection is an architecture decision, but the provider/mechanism must return URL, title, snippet or summary, and enough metadata to show source provenance.
 - The selected mechanism must support Vietnamese queries and Vietnamese sources.
 - The selected mechanism must allow official/provider-source preference in ranking or post-filtering.
-- Web search is triggered when no relevant approved cards are retrieved, fewer than three relevant approved cards are retrieved for a broad planning question, the user asks about freshness-sensitive facts, or retrieved cards conflict.
+- Web search is triggered when no relevant active cards are retrieved, fewer than three relevant active cards are retrieved for a broad planning question, the user asks about freshness-sensitive facts, or retrieved cards are uncertain or conflict.
 - If web search fails or confidence is low, AI shall say it cannot verify updated information and recommend user confirmation rather than inventing facts.
-- Search-derived information may be used in answers but remains external/unverified until an operator approves it into knowledge cards.
+- Search-derived information may be used in answers but remains external/unverified until it is ingested as a knowledge claim that meets the applicable publication policy.
 
-### 10.4 AI Answer Quality Rubric
+### 10.5 AI Answer Quality Rubric
 
 Public MVP answer evaluation uses a 1-10 score across these dimensions:
 
@@ -250,9 +275,9 @@ Public MVP answer evaluation uses a 1-10 score across these dimensions:
 
 The first public-MVP evaluation prompt set shall include: the magic-moment family trip question, a sparse-data question, a freshness-sensitive question, a service/activity question, and a route logistics question.
 
-Counter-metrics: track hallucinated unsupported claims, missing uncertainty labels on freshness-sensitive facts, and answers that users rate as no better than generic ChatGPT.
+Counter-metrics: track hallucinated unsupported claims, claims whose evidence span does not support their wording, missing uncertainty labels on community/freshness-sensitive facts, unsafe use of conflicted claims, and answers that users rate as no better than generic ChatGPT.
 
-### 10.5 Usage And Referral Readiness Contract
+### 10.6 Usage And Referral Readiness Contract
 
 - AI usage tracking is for cost visibility, abuse investigation, and future pricing design; MVP shall not show or enforce credit balances.
 - Usage events shall not become the source of truth for chat content or answer provenance.
@@ -278,16 +303,17 @@ The public MVP should focus on the Hanoi-to-HCMC road-trip corridor. Initial kno
 - costs or discount notes
 - travel services and activities such as diving where relevant to destinations
 
-[ASSUMPTION: The first public MVP does not need complete coverage for every province along the route, but it should have enough curated examples to prove the retrieval and answer-quality loop.]
+[ASSUMPTION: The first public MVP does not need complete coverage for every province along the route, but it should have enough active, evidence-grounded examples to prove the retrieval and answer-quality loop.]
 
 ## 12. Success Criteria
 
 - SC-1: At least 7 of 10 sampled public MVP users or test users rate the magic-moment answer as useful, with a score of 7/10 or higher.
 - SC-2: At least 7 of 10 test answers include user-context references, practical local tips, and source/confidence notes.
 - SC-3: The magic-moment answer includes at least one child-aware planning recommendation, one practical route/logistics tip, one uncertainty or freshness warning, and one suggested next step.
-- SC-4: An operator can create or approve at least 100 knowledge cards for the Hanoi-to-HCMC corridor before first public-MVP evaluation.
-- SC-5: Approved knowledge cards influence AI answers and are visible in the response provenance.
+- SC-4: The AI-first ingestion workflow can create at least 100 active, evidence-grounded knowledge cards for the Hanoi-to-HCMC corridor before first public-MVP evaluation.
+- SC-5: Active knowledge cards influence AI answers and are visible in the response provenance with appropriate source and uncertainty wording.
 - SC-6: No more than 2 of 10 test users say the answer feels no better than generic ChatGPT.
+- SC-7: In representative quality samples, every active AI-extracted claim has a validated evidence span and no high-severity publication-policy failure.
 
 ## 13. MVP Acceptance Criteria
 
@@ -299,9 +325,11 @@ The public MVP should focus on the Hanoi-to-HCMC road-trip corridor. Initial kno
 - AC-6: The answer incorporates family-aware recommendations when children are mentioned.
 - AC-7: The system stores and reuses non-sensitive context within chat sessions and trip projects owned by the authenticated user.
 - AC-8: The user can correct trip details through chat and delete chat sessions or trip projects they own.
-- AC-9: An operator can submit raw source material, review AI-extracted card drafts, approve cards, and make approved cards retrievable by AI.
-- AC-9A: An operator can queue Facebook URLs, run operator-assisted capture to add readable raw text, and then use the existing AI extraction and review flow without changing Facebook-derived trust defaults.
-- AC-10: At least 100 approved knowledge cards exist for the Hanoi-to-HCMC corridor before first public-MVP evaluation.
+- AC-9: The system can triage raw source material, extract claims with validated evidence spans, and make qualifying claims active for AI retrieval without operator approval.
+- AC-9A: An operator can queue Facebook URLs, run operator-assisted capture to add readable raw text, and then use the AI-first triage, claim extraction, and publication workflow without changing Facebook-derived trust defaults.
+- AC-9B: The system routes risky, weakly evidenced, freshness-sensitive, duplicate, or conflicting claims to an AI-recommended, impact-prioritized operator review queue without blocking qualifying low-risk claims.
+- AC-9C: AI Ask excludes suppressed and superseded claims; applies conditional and community wording to active community claims; and does not make factual itinerary recommendations from conflicted claims.
+- AC-10: At least 100 active, evidence-grounded knowledge cards exist for the Hanoi-to-HCMC corridor before first public-MVP evaluation.
 - AC-11: Web search fallback is used only when curated knowledge is missing, sparse, or freshness-sensitive, and search-derived facts are labeled as external/unverified.
 - AC-12: Public MVP answer feedback is captured for usefulness evaluation.
 - AC-13: Source display shows source label/title, source type, URL when available, date when available, confidence label, and freshness warning when applicable.
@@ -321,6 +349,7 @@ The public MVP should focus on the Hanoi-to-HCMC road-trip corridor. Initial kno
 - R-5: Chat/project data retention may create user expectations that need clear product wording.
 - R-6: Vietnamese language quality and local nuance may be insufficient if prompts, data, or evaluation are weak.
 - R-7: Facebook browser automation may be fragile because page structure, login state, access permissions, and third-party terms can change.
+- R-8: AI-first publication can amplify poor extraction or evaluation decisions if retrieval guardrails, quality sampling, and suppression workflows are weak.
 
 ## 15. Open Questions
 
@@ -329,3 +358,4 @@ The public MVP should focus on the Hanoi-to-HCMC road-trip corridor. Initial kno
 - OQ-3: What exact privacy-policy wording is required for AI Gateway-backed chat and trip-project processing?
 - OQ-4: What detailed Facebook content reuse policy should govern captured post text retention, operator review, quoting, and deletion beyond provenance and non-official labeling?
 - OQ-5: Should AI-generated image output become an MVP workflow, or remain deferred until after text/image-input planning is validated?
+- OQ-6: What legal/content-reuse policy permits retention and traveler-visible display of short Facebook-derived evidence quotes and source links?
