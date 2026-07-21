@@ -2,8 +2,8 @@ import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test } from "vitest";
 
 import { auditEvents, rawSourceMaterial, sources, users } from "@/db/schema";
-import { listQueuedYoutubeSources, parseYoutubeEvidence, recordYoutubeCaptureFailure, saveYoutubeEvidence } from "@/features/knowledge/youtube-capture";
-import { getYoutubeMediaResolution, mergeYoutubeWindowEvidence, normalizeYoutubeWindowTimestamps, parseCachedYoutubePayload, parseCachedYoutubeSegmentPayload, parseYoutubeDuration, requestYoutubeEvidence, requestYoutubeTitle, youtubeWindows } from "../scripts/youtube-capture";
+import { listQueuedYoutubeSources, maxYoutubeEvidenceItemsPerVideo, maxYoutubeEvidenceItemsPerWindow, parseYoutubeEvidence, recordYoutubeCaptureFailure, saveYoutubeEvidence, serializeYoutubeEvidence } from "@/features/knowledge/youtube-capture";
+import { getYoutubeMediaResolution, mergeYoutubeWindowEvidence, normalizeYoutubeWindowTimestamps, parseCachedYoutubePayload, parseCachedYoutubeSegmentPayload, parseYoutubeDuration, requestYoutubeEvidence, requestYoutubeTitle, retainedYoutubeEvidenceItemsPerWindow, youtubeWindows } from "../scripts/youtube-capture";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
 
@@ -54,7 +54,7 @@ describe("YouTube capture", () => {
 
   test("rejects malformed, unbounded, and transcript-like provider output", () => {
     expect(() => parseYoutubeEvidence({ evidence: [{}] })).toThrow("gemini_invalid_evidence_item_1_category");
-    expect(() => parseYoutubeEvidence({ evidence: Array.from({ length: 21 }, () => evidence[0]) })).toThrow("gemini_evidence_limit_exceeded");
+    expect(() => parseYoutubeEvidence({ evidence: Array.from({ length: maxYoutubeEvidenceItemsPerVideo + 1 }, () => evidence[0]) })).toThrow("gemini_evidence_limit_exceeded");
     expect(() => parseYoutubeEvidence({ evidence: [{ ...evidence[0], evidence_excerpt: "x".repeat(241) }] })).toThrow("gemini_invalid_evidence_item_1_evidence_excerpt");
     expect(() => parseYoutubeEvidence({ evidence: [{ ...evidence[0], freshness_sensitive: "yes" }] })).toThrow("gemini_invalid_evidence_item_1_freshness_sensitive");
   });
@@ -111,13 +111,31 @@ describe("YouTube capture", () => {
     expect(youtubeWindows(3723)).toEqual([{ startOffsetSeconds: 0, endOffsetSeconds: 1800 }, { startOffsetSeconds: 1800, endOffsetSeconds: 3600 }, { startOffsetSeconds: 3600, endOffsetSeconds: 3723 }]);
   });
 
-  test("offsets, deterministically deduplicates, and caps aggregate window evidence", () => {
+  test("retains evidence from every window while enforcing each window and video cap", () => {
     const duplicate = { ...parseYoutubeEvidence({ evidence })[0], timestamp_start_seconds: 0, timestamp_end_seconds: 5 };
-    const items = Array.from({ length: 22 }, (_, index) => ({ ...duplicate, claim_vi: `Điểm dừng ${index}`, timestamp_start_seconds: index + 10, timestamp_end_seconds: index + 11 }));
-    const merged = mergeYoutubeWindowEvidence([{ window: { startOffsetSeconds: 1800, endOffsetSeconds: 3600 }, evidence: [duplicate, duplicate] }, { window: { startOffsetSeconds: 0, endOffsetSeconds: 1800 }, evidence: items }]);
-    expect(merged).toHaveLength(20);
-    expect(merged[0]).toMatchObject({ claim_vi: "Điểm dừng 0", timestamp_start_seconds: 10 });
-    expect(merged.some((item) => item.timestamp_start_seconds === 1800 && item.timestamp_end_seconds === 1805)).toBe(false);
+    const items = Array.from({ length: maxYoutubeEvidenceItemsPerWindow }, (_, index) => ({ ...duplicate, claim_vi: `Điểm dừng ${index}`, timestamp_start_seconds: index + 10, timestamp_end_seconds: index + 11 }));
+    const merged = mergeYoutubeWindowEvidence(Array.from({ length: 9 }, (_, windowIndex) => ({ window: { startOffsetSeconds: windowIndex * 1800, endOffsetSeconds: (windowIndex + 1) * 1800 }, evidence: items })));
+    expect(merged).toHaveLength(maxYoutubeEvidenceItemsPerVideo);
+    expect(merged.filter((item) => item.timestamp_start_seconds < 1800)).toHaveLength(9);
+    expect(merged.filter((item) => item.timestamp_start_seconds >= 1800 && item.timestamp_start_seconds < 3600)).toHaveLength(9);
+    expect(merged.filter((item) => item.timestamp_start_seconds >= 14_400)).toHaveLength(8);
+    expect(retainedYoutubeEvidenceItemsPerWindow).toBe(10);
+  });
+
+  test("samples time-spanning windows when a video has more non-empty windows than the video cap", () => {
+    const item = parseYoutubeEvidence({ evidence })[0];
+    const merged = mergeYoutubeWindowEvidence(Array.from({ length: maxYoutubeEvidenceItemsPerVideo + 1 }, (_, windowIndex) => ({ window: { startOffsetSeconds: windowIndex * 1800, endOffsetSeconds: (windowIndex + 1) * 1800 }, evidence: [{ ...item, timestamp_start_seconds: 0, timestamp_end_seconds: 5 }] })));
+
+    expect(merged).toHaveLength(maxYoutubeEvidenceItemsPerVideo);
+    expect(merged[0].timestamp_start_seconds).toBe(0);
+    expect(merged.at(-1)?.timestamp_start_seconds).toBe(maxYoutubeEvidenceItemsPerVideo * 1800);
+  });
+
+  test("serializes the full bounded video evidence bundle", () => {
+    const item = parseYoutubeEvidence({ evidence })[0];
+    const bundle = Array.from({ length: maxYoutubeEvidenceItemsPerVideo }, (_, index) => ({ ...item, claim_vi: "x".repeat(500), evidence_excerpt: "y".repeat(240), uncertainty_or_condition: "z".repeat(400), timestamp_start_seconds: index, timestamp_end_seconds: index + 1 }));
+
+    expect(serializeYoutubeEvidence(bundle).length).toBeLessThanOrEqual(120_000);
   });
 
   test("accepts empty evidence only in a segment cache payload", () => {
@@ -126,6 +144,10 @@ describe("YouTube capture", () => {
 
   test("rejects cached segment evidence outside its stored window", () => {
     expect(() => parseCachedYoutubeSegmentPayload({ evidence: [{ ...evidence[0], timestamp_start_seconds: 29, timestamp_end_seconds: 31 }], window: { startOffsetSeconds: 0, endOffsetSeconds: 30 }, metadata: {} })).toThrow("cache_invalid_youtube_segment_payload");
+  });
+
+  test("keeps the provider's per-window evidence limit when reading cached segments", () => {
+    expect(() => parseCachedYoutubeSegmentPayload({ evidence: Array.from({ length: maxYoutubeEvidenceItemsPerWindow + 1 }, () => evidence[0]), window: { startOffsetSeconds: 0, endOffsetSeconds: 1800 }, metadata: {} })).toThrow("gemini_evidence_limit_exceeded");
   });
 
   test("rejects cached aggregate evidence outside its stored duration", () => {

@@ -280,7 +280,7 @@ export const rawSourceMaterial = pgTable(
   },
   (material) => [
     uniqueIndex("raw_source_material_source_id_idx").on(material.sourceId),
-    check("raw_source_material_text_length_check", sql`${material.rawText} is null or (length(btrim(${material.rawText})) > 0 and char_length(${material.rawText}) <= 20000)`),
+    check("raw_source_material_text_length_check", sql`${material.rawText} is null or (length(btrim(${material.rawText})) > 0 and char_length(${material.rawText}) <= 120000)`),
     check("raw_source_material_file_name_check", sql`${material.fileName} is null or length(btrim(${material.fileName})) > 0`),
     check("raw_source_material_mime_type_check", sql`${material.mimeType} is null or ${material.mimeType} in ('image/jpeg', 'image/png', 'image/webp')`),
     check("raw_source_material_byte_size_check", sql`${material.byteSize} is null or (${material.byteSize} > 0 and ${material.byteSize} <= 5242880)`),

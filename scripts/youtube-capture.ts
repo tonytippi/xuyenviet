@@ -9,14 +9,15 @@ import { schema, users } from "../src/db/schema";
 import { admitArtifact, assertCaptureCacheReady, findReusableArtifact, finishImport, prepareImport } from "../src/features/knowledge/capture-cache";
 import { flushCachedArtifact } from "../src/features/knowledge/capture-orchestration";
 import { YOUTUBE_CAPTURE_PAYLOAD_SCHEMA_VERSION, captureReuseKey, youtubeCaptureMethodVersion, youtubeResourceIdentity, youtubeVideoId, youtubeWindowResourceIdentity } from "../src/features/knowledge/capture-identity";
-import { findYoutubeCaptureImportByCorrelationToken, listQueuedYoutubeSources, parseYoutubeEvidence, recordYoutubeCaptureFailure, sanitizeYoutubeMetadata, saveYoutubeEvidence, type YoutubeCaptureActor, type YoutubeEvidence } from "../src/features/knowledge/youtube-capture";
+import { findYoutubeCaptureImportByCorrelationToken, listQueuedYoutubeSources, maxYoutubeEvidenceItemsPerVideo, maxYoutubeEvidenceItemsPerWindow, parseYoutubeEvidence, recordYoutubeCaptureFailure, sanitizeYoutubeMetadata, saveYoutubeEvidence, type YoutubeCaptureActor, type YoutubeEvidence } from "../src/features/knowledge/youtube-capture";
 import { assertDistinctCaptureDatabases, getCaptureCacheDatabaseUrl, getDatabaseUrl, getEnvValue } from "./db-env";
 
 type Options = { sourceId?: string; limit?: number; yes: boolean; actorUserId?: string; actorEmail?: string };
 const defaultActor = { userId: "system-youtube-capture", email: "system-youtube-capture@xuyenviet.internal" };
 export const youtubeEvidencePromptVersion = "youtube-evidence-v1";
 export const youtubeWindowSeconds = 30 * 60;
-const prompt = `Analyze this public YouTube video window as a Vietnam road-trip research source. Return JSON only: {"evidence":[{"category":"road_condition|route|toll|fuel|charging|rest_stop|parking|accommodation|food|attraction|safety|weather|cost","claim_vi":"Vietnamese factual claim (non-empty, max 500 chars)","evidence_type":"spoken|on_screen|both","timestamp_start_seconds":0,"timestamp_end_seconds":0,"confidence":"high|medium|low","freshness_sensitive":true,"evidence_excerpt":"non-empty excerpt, max 240 chars","uncertainty_or_condition":null}]}. Every evidence item must include every key exactly as shown. Use only the listed enum values. Timestamps must be non-negative integer seconds relative to the full video, not the requested window, and must fall within the requested window. End must not precede start. uncertainty_or_condition must be null or a non-empty string under 400 characters. Extract at most 20 items. Include only explicitly spoken or clearly shown facts. Do not infer missing facts or return a transcript. Return {"evidence":[]} if no reliable travel evidence exists.`;
+export const retainedYoutubeEvidenceItemsPerWindow = 10;
+const prompt = `Analyze this public YouTube video window as a Vietnam road-trip research source. Return JSON only: {"evidence":[{"category":"road_condition|route|toll|fuel|charging|rest_stop|parking|accommodation|food|attraction|safety|weather|cost","claim_vi":"Vietnamese factual claim (non-empty, max 500 chars)","evidence_type":"spoken|on_screen|both","timestamp_start_seconds":0,"timestamp_end_seconds":0,"confidence":"high|medium|low","freshness_sensitive":true,"evidence_excerpt":"non-empty excerpt, max 240 chars","uncertainty_or_condition":null}]}. Every evidence item must include every key exactly as shown. Use only the listed enum values. Timestamps must be non-negative integer seconds relative to the full video, not the requested window, and must fall within the requested window. End must not precede start. uncertainty_or_condition must be null or a non-empty string under 400 characters. Extract at most ${maxYoutubeEvidenceItemsPerWindow} items. Include only explicitly spoken or clearly shown facts. Do not infer missing facts or return a transcript. Return {"evidence":[]} if no reliable travel evidence exists.`;
 type GeminiMediaResolution = "MEDIA_RESOLUTION_LOW" | "MEDIA_RESOLUTION_MEDIUM" | "MEDIA_RESOLUTION_HIGH";
 const defaultMediaResolution: GeminiMediaResolution = "MEDIA_RESOLUTION_LOW";
 
@@ -55,7 +56,7 @@ export async function requestYoutubeEvidence(url: string, apiKey: string, model:
     const payload = await response.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>; usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number } };
     const text = payload.candidates?.[0]?.content?.parts?.find((part) => typeof part.text === "string")?.text;
     if (!text) throw new Error("gemini_empty_response");
-    const evidence = normalizeYoutubeWindowTimestamps(parseYoutubeEvidence(JSON.parse(text) as unknown), window);
+    const evidence = normalizeYoutubeWindowTimestamps(parseYoutubeEvidence(JSON.parse(text) as unknown, maxYoutubeEvidenceItemsPerWindow), window);
     return { evidence, latencyMs: Date.now() - startedAt, usage: payload.usageMetadata };
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") throw new Error("gemini_timeout");
@@ -92,15 +93,30 @@ export function youtubeWindows(durationSeconds: number): YoutubeWindow[] {
 
 export function mergeYoutubeWindowEvidence(windows: Array<{ window: YoutubeWindow; evidence: YoutubeEvidence[] }>) {
   const seen = new Set<string>();
-  return windows.flatMap(({ window, evidence }) => evidence.map((item) => ({ ...item, timestamp_start_seconds: item.timestamp_start_seconds + window.startOffsetSeconds, timestamp_end_seconds: item.timestamp_end_seconds + window.startOffsetSeconds })))
-    .sort((left, right) => evidenceSortKey(left).localeCompare(evidenceSortKey(right)))
-    .filter((item) => {
-      const key = JSON.stringify([item.category, item.claim_vi, item.evidence_type, item.timestamp_start_seconds, item.timestamp_end_seconds, item.confidence, item.freshness_sensitive, item.evidence_excerpt, item.uncertainty_or_condition]);
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    })
-    .slice(0, 20);
+  const windowEvidence = [...windows]
+    .sort((left, right) => left.window.startOffsetSeconds - right.window.startOffsetSeconds)
+    .map(({ window, evidence }) => evidence
+      .map((item) => ({ ...item, timestamp_start_seconds: item.timestamp_start_seconds + window.startOffsetSeconds, timestamp_end_seconds: item.timestamp_end_seconds + window.startOffsetSeconds }))
+      .sort((left, right) => evidenceSortKey(left).localeCompare(evidenceSortKey(right)))
+      .filter((item) => {
+        const key = JSON.stringify([item.category, item.claim_vi, item.evidence_type, item.timestamp_start_seconds, item.timestamp_end_seconds, item.confidence, item.freshness_sensitive, item.evidence_excerpt, item.uncertainty_or_condition]);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .slice(0, retainedYoutubeEvidenceItemsPerWindow),
+    )
+    .filter((evidence) => evidence.length > 0);
+  if (!windowEvidence.length) return [];
+  if (windowEvidence.length > maxYoutubeEvidenceItemsPerVideo) {
+    return Array.from({ length: maxYoutubeEvidenceItemsPerVideo }, (_, index) => windowEvidence[Math.round(index * (windowEvidence.length - 1) / (maxYoutubeEvidenceItemsPerVideo - 1))][0])
+      .sort((left, right) => evidenceSortKey(left).localeCompare(evidenceSortKey(right)));
+  }
+  const baseQuota = Math.floor(maxYoutubeEvidenceItemsPerVideo / windowEvidence.length);
+  const remainder = maxYoutubeEvidenceItemsPerVideo % windowEvidence.length;
+  return windowEvidence
+    .flatMap((evidence, index) => evidence.slice(0, Math.min(retainedYoutubeEvidenceItemsPerWindow, baseQuota + (index < remainder ? 1 : 0))))
+    .sort((left, right) => evidenceSortKey(left).localeCompare(evidenceSortKey(right)));
 }
 
 async function requestYoutubeDuration(videoId: string, apiKey: string, fetchImpl = fetch) {
@@ -145,7 +161,7 @@ export function parseCachedYoutubeSegmentPayload(payload: unknown) {
   const endOffsetSeconds = (window as Record<string, unknown>).endOffsetSeconds;
   if (typeof startOffsetSeconds !== "number" || typeof endOffsetSeconds !== "number" || !Number.isSafeInteger(startOffsetSeconds) || !Number.isSafeInteger(endOffsetSeconds) || startOffsetSeconds < 0 || endOffsetSeconds <= startOffsetSeconds) throw new Error("cache_invalid_youtube_segment_payload");
   const metadata = sanitizeYoutubeMetadata((value.metadata && typeof value.metadata === "object" && !Array.isArray(value.metadata) ? value.metadata : {}) as Record<string, unknown>);
-  const evidence = parseYoutubeEvidence({ evidence: value.evidence });
+  const evidence = parseYoutubeEvidence({ evidence: value.evidence }, maxYoutubeEvidenceItemsPerWindow);
   if (evidence.some((item) => item.timestamp_end_seconds > endOffsetSeconds - startOffsetSeconds)) throw new Error("cache_invalid_youtube_segment_payload");
   return { evidence, window: { startOffsetSeconds, endOffsetSeconds }, latencyMs: typeof metadata.latencyMs === "number" ? metadata.latencyMs : 0 };
 }

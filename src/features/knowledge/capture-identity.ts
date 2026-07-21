@@ -1,5 +1,6 @@
 export const FACEBOOK_CAPTURE_METHOD_VERSION = "facebook-visible-dom-v2";
-export const YOUTUBE_CAPTURE_METHOD_VERSION = "youtube-gemini-windowed-v3";
+export const YOUTUBE_CAPTURE_METHOD_VERSION = "youtube-gemini-windowed-v4";
+const YOUTUBE_SEGMENT_CAPTURE_METHOD_VERSION = "youtube-gemini-windowed-v3";
 export const CAPTURE_PAYLOAD_SCHEMA_VERSION = "1";
 export const YOUTUBE_CAPTURE_PAYLOAD_SCHEMA_VERSION = "2";
 
@@ -64,7 +65,8 @@ export function youtubeResourceIdentity(value: string) {
 }
 
 export function youtubeCaptureMethodVersion(mediaResolution: "MEDIA_RESOLUTION_LOW" | "MEDIA_RESOLUTION_MEDIUM" | "MEDIA_RESOLUTION_HIGH", artifactType: "segment" | "aggregate" = "aggregate") {
-  return `${YOUTUBE_CAPTURE_METHOD_VERSION}-${artifactType}-${mediaResolution.replace("MEDIA_RESOLUTION_", "").toLowerCase()}`;
+  const version = artifactType === "segment" ? YOUTUBE_SEGMENT_CAPTURE_METHOD_VERSION : YOUTUBE_CAPTURE_METHOD_VERSION;
+  return `${version}-${artifactType}-${mediaResolution.replace("MEDIA_RESOLUTION_", "").toLowerCase()}`;
 }
 
 export function youtubeWindowResourceIdentity(videoResourceIdentity: string, startOffsetSeconds: number, endOffsetSeconds: number) {

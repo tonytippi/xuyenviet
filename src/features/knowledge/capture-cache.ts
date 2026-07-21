@@ -22,7 +22,7 @@ const MAX_CACHE_DEPTH = 8;
 const MAX_CACHE_OBJECT_KEYS = 100;
 const MAX_CACHE_ARRAY_ITEMS = 100;
 const MAX_CACHE_STRING_LENGTH = 20_000;
-const MAX_CACHE_PAYLOAD_BYTES = 200_000;
+const MAX_CACHE_PAYLOAD_BYTES = 500_000;
 
 export function sanitizeCacheValue(value: unknown, depth = 0): unknown {
   if (depth > MAX_CACHE_DEPTH) return undefined;
