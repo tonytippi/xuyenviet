@@ -46,9 +46,9 @@ Primary audience: Vietnamese road-trip travelers planning by car, initially focu
 | Account/privacy | Avatar menu / storage notice | Explain stored chat/trip details, deletion entry points, sign out |
 | Admin shell | Role-protected nav | Separate operator/admin workspace |
 | Knowledge intake | Admin shell | Submit URL, text, copied post, screenshot metadata for AI extraction |
-| Draft review queue | Admin shell / intake success | Review AI-prepared knowledge drafts |
-| Knowledge card detail | Draft queue / approved list | Edit, approve, archive, inspect source provenance |
-| Seed progress | Admin shell | Track 100 approved Hanoi-to-HCMC corridor knowledge items |
+| Review recommendations | Admin shell / intake success | Prioritize AI-recommended review, verification, conflicts, and quality samples without blocking low-risk active publication |
+| Knowledge card detail | Recommendation queue / active-card list | Inspect current fact, evidence, states, and provenance; revise, suppress, restore, or record verification through explicit actions |
+| Seed progress | Admin shell | Track 100 active evidence-grounded Hanoi-to-HCMC corridor knowledge cards |
 | Feedback / quality signal | Assistant answer footer | Capture usefulness rating and quality flags without interrupting planning |
 
 Responsive navigation:
@@ -132,9 +132,9 @@ Behavioral patterns. Visual specs live in `DESIGN.md.Components`.
 | Trip context indicator | AI Ask header/composer | Shows whether user is in ordinary chat or selected trip project. Switching project changes context priority visibly. |
 | Context correction hint | AI Ask / trip detail | If extracted context changes, show small confirmation-style note when useful: `Mình đã cập nhật: con 8 tuổi.` |
 | Delete confirmation | Chat/trip project | Names what will be removed or disabled from normal UI/retrieval. Requires explicit destructive click. |
-| Admin card form | Knowledge card detail | Structured edit form. Save draft, approve, archive are distinct actions. Approval cannot be accidental. |
-| Intake submitter | Knowledge intake | Supports URL, raw text, copied post content, and screenshot/file metadata. Failed extraction is recoverable and creates no approved card. |
-| Draft review queue | Admin | Filter by source, type, route/location, status, confidence, freshness. Operators can edit, reject, keep draft, approve. |
+| Admin card form | Knowledge card detail | Structured edit form. Evidence-validated edit, suppress, restore, request/record verification, and relation/conflict resolution are distinct actions. Active low-risk cards must not be presented as awaiting approval. |
+| Intake submitter | Knowledge intake | Supports URL, raw text, copied post content, and screenshot/file metadata. Failed extraction is recoverable and creates no active knowledge card. |
+| Review recommendation queue | Admin | Filter by source, type, route/location, publication/knowledge/review/verification state, confidence, and freshness. Operators resolve prioritized recommendations; qualifying low-risk claims may already be active. |
 | Usefulness rating | Assistant answer footer | Lightweight positive/negative or rating action after answer. Optional comment only after rating; never blocks chat. |
 
 ## State Patterns
@@ -164,9 +164,9 @@ Behavioral patterns. Visual specs live in `DESIGN.md.Components`.
 | Deleted chat/project | Chat/trips | Remove from normal UI and retrieval. Show brief success toast. |
 | Unauthorized data access | Any owned resource | Deny server-side. Show generic not-found/permission message without exposing existence details. |
 | Admin no role | Admin | Deny route server-side; no admin navigation shown to normal travelers. |
-| Draft extraction pending | Admin intake/review | Status row: pending, reading, extracted, needs review, failed, duplicate, rejected, approved. |
-| Extraction failed | Admin intake | Error reason safe for operator. Retry or edit source. No approved knowledge created. |
-| 100-card seed incomplete | Seed progress | Count approved corridor items and remaining gap. Show distribution gaps by type/route. |
+| AI-first ingestion pending | Admin intake/review | Status row: queued, triaging, extracting, judging, relating, published, suppressed, review recommended, verify first, or failed. |
+| Extraction failed | Admin intake | Error reason safe for operator. Retry or edit source. No active knowledge card is created. |
+| 100-card seed incomplete | Seed progress | Count active evidence-grounded corridor cards and remaining gap. Show distribution gaps by type/route plus review and verification signals. |
 
 ## Interaction Primitives
 
@@ -210,7 +210,7 @@ This product carries unusual trust load: AI guidance, remembered trip details, u
 Rules:
 
 - Never expose operator-only raw source material to travelers.
-- Label web-search information as external/unverified unless reviewed into approved knowledge.
+- Label web-search information as external/unverified unless ingested into an active knowledge card that passes the publication policy.
 - Prefer official/provider labels when the source supports it, but still avoid guarantee language.
 - Store/display answer provenance from structured source records, not parsed answer text. Persisted entity descriptor labels/summaries may use validated answer ranges, but entity provenance and quick facts must remain bound to stored provenance/safe snapshots.
 - The storage notice explains chat/trip detail use before or at first meaningful AI Ask.
@@ -238,7 +238,7 @@ Mobile behavior:
 - Composer remains reachable without covering the latest answer.
 - Long source lists collapse by default.
 - The mobile top bar shows menu, active workspace title, and account access without duplicating the full sidebar.
-- Admin batch review can defer dense bulk operations to desktop, but core approve/reject/edit should remain functional if feasible.
+- Admin batch review can defer dense bulk operations to desktop, but core review, suppress/restore, verification, and evidence-validated edit actions should remain functional if feasible.
 
 ## Inspiration & Anti-patterns
 
@@ -314,17 +314,17 @@ Failure: The correction is ambiguous. Assistant asks a concise clarification and
 
 Failure: Server deletion fails. Project remains visible; error explains retry path without claiming deletion happened.
 
-### Flow 5 — Operator approves extracted knowledge (Mai, owner/operator seeding corridor data)
+### Flow 5 — Operator resolves a knowledge recommendation (Mai, owner/operator seeding corridor data)
 
 1. Mai opens the role-protected admin shell on desktop.
 2. She submits a source URL about a route stop.
-3. Intake item moves through reading/extracted/needs review.
-4. Draft review shows proposed knowledge cards with title, type, route/location, summary, source, collected date, confidence, and freshness flag.
-5. Mai edits one draft, rejects a duplicate, and approves a useful card.
-6. Approved card becomes eligible for traveler retrieval; seed progress count updates.
-7. **Climax:** XuyenViet's answer quality improves through human-approved local knowledge, without raw source material leaking to travelers.
+3. Intake item moves through triaging, extraction, independent judging, and relation handling.
+4. A qualifying low-risk card becomes active; risky, weak, conflicting, freshness-sensitive, duplicate, or sampled cards receive a prioritized recommendation.
+5. Mai opens a recommendation with the current fact, bounded evidence, conditions, states, and reasons. She makes an evidence-validated edit, suppresses a duplicate, or records verification as appropriate.
+6. The card state and search eligibility update atomically; seed progress counts only active evidence-grounded cards.
+7. **Climax:** XuyenViet's answer quality improves through evidence-grounded local knowledge and targeted operator intervention, without raw source material leaking to travelers.
 
-Failure: Extraction fails. Mai sees recoverable failure and can retry or paste text; no approved card is created automatically.
+Failure: Extraction fails. Mai sees recoverable failure and can retry or paste text; no active card is created automatically.
 
 ### Flow 6 — Referral link sign-in without reward UI (Nam, invited by a friend)
 
@@ -377,5 +377,5 @@ Failure: Detail data is unavailable. The panel shows a compact unavailable state
 | Exact privacy-policy wording for AI Gateway-backed memory/chat processing | Public onboarding and storage notice copy | Product/legal before public launch |
 | Whether admin review is required to be fully mobile-optimized in MVP | Admin layout scope | Sprint planning/story scoping |
 | Final UI system choice if not shadcn/ui | Component implementation contract | Confirm during app foundation story |
-| Whether sidebar trip project selection opens a dedicated project route or filters the existing AI Ask route | Routing, active state, and implementation scope | Resolve in architecture/story before frontend implementation |
-| Whether selected detail panel state is URL-addressable or transient UI state | Shareability, browser back behavior, and implementation complexity | Resolve in architecture before implementation |
+| Sidebar trip project selection behavior | Resolved: the AI Ask route owns URL-selected conversation/project state and server-loaded shell data | Architecture AD-24 |
+| Selected detail-panel state | Resolved: descriptor selection is transient derived UI state; desktop panel and mobile sheet share it | Architecture AD-19, AD-20, AD-24 |
