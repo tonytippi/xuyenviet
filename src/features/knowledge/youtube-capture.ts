@@ -54,8 +54,9 @@ export type SafeYoutubeCaptureMetadata = {
 const categories = new Set<YoutubeEvidence["category"]>(["road_condition", "route", "toll", "fuel", "charging", "rest_stop", "parking", "accommodation", "food", "attraction", "safety", "weather", "cost"]);
 const evidenceTypes = new Set<YoutubeEvidence["evidence_type"]>(["spoken", "on_screen", "both"]);
 const confidences = new Set<YoutubeEvidence["confidence"]>(["high", "medium", "low"]);
-const maxEvidenceItems = 20;
-const maxRawTextLength = 20_000;
+export const maxYoutubeEvidenceItemsPerWindow = 20;
+export const maxYoutubeEvidenceItemsPerVideo = 80;
+const maxRawTextLength = 120_000;
 const maxClaimLength = 500;
 const maxExcerptLength = 240;
 const maxConditionLength = 400;
@@ -75,9 +76,9 @@ export async function listQueuedYoutubeSources(db: YoutubeCaptureDb, input: { so
     .limit(limit);
 }
 
-export function parseYoutubeEvidence(value: unknown): YoutubeEvidence[] {
+export function parseYoutubeEvidence(value: unknown, maximum = maxYoutubeEvidenceItemsPerVideo): YoutubeEvidence[] {
   if (!isRecord(value) || !Array.isArray(value.evidence)) throw new Error("gemini_invalid_json");
-  if (value.evidence.length > maxEvidenceItems) throw new Error("gemini_evidence_limit_exceeded");
+  if (value.evidence.length > maximum) throw new Error("gemini_evidence_limit_exceeded");
   return value.evidence.map((item, index) => normalizeEvidence(item, index));
 }
 
@@ -93,6 +94,7 @@ export function parseStoredYoutubeEvidence(rawText: string | null): YoutubeEvide
 }
 
 export function serializeYoutubeEvidence(evidence: YoutubeEvidence[]) {
+  if (evidence.length > maxYoutubeEvidenceItemsPerVideo) throw new Error("gemini_evidence_limit_exceeded");
   const rawText = JSON.stringify({ evidence });
   if (rawText.length > maxRawTextLength) throw new Error("gemini_evidence_too_large");
   return rawText;

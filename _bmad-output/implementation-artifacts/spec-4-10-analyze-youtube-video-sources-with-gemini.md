@@ -14,7 +14,7 @@ Add an operator-run `pnpm youtube:capture` command that consumes queued individu
 - Add `youtube` as a URL-bearing, community/unverified source kind. Intake accepts watch, short, live, and `youtu.be` URLs and normalizes individual videos to a canonical watch URL. Channel URLs are retained as YouTube sources but capture fails safely without provider use.
 - Do not use the AI Gateway, Playwright, browser scraping, a client-side key, a transcript request, media download, or a full Gemini response store.
 - Use native Gemini REST with `GEMINI_API_KEY`, a configured `GEMINI_YOUTUBE_MODEL` default, JSON-only response mode, a bounded evidence prompt, timeout, and safe status-derived errors.
-- Validate response JSON strictly: at most 20 evidence items; allowed categories/evidence types/confidence; bounded Vietnamese claim and excerpt; finite non-negative timestamp range; boolean freshness flag. Empty evidence is a non-error no-op with no raw material write.
+- Validate response JSON strictly: at most 20 evidence items per 30-minute provider window and at most 80 retained items per video; retain at most 10 deduplicated items from each window so long videos keep time-spanning coverage. Enforce allowed categories/evidence types/confidence; bounded Vietnamese claim and excerpt; finite non-negative timestamp range; boolean freshness flag. Empty evidence is a non-error no-op with no raw material write.
 - Persist a bounded normalized evidence document in `raw_source_material.raw_text` plus allowlisted capture metadata only. Audit summaries state method/outcome/timestamp and never include evidence, response text, API keys, provider payloads, or provider error bodies.
 
 ## Files
