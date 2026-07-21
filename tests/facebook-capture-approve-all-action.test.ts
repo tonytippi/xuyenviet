@@ -7,6 +7,7 @@ import { sourceKnowledgeDraftExtractionPromptVersion } from "@/features/ai/promp
 import { ensureFacebookCaptureReviewForCapturedSource, markFacebookCaptureReviewStatus } from "@/features/knowledge/facebook-capture-review";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
+import { seedSourceCaptureVersion } from "./helpers/source-captures";
 
 const authMock = vi.fn();
 
@@ -62,7 +63,8 @@ async function createCapturedFacebookReview(input: { id: string; rawText: string
     partner: input.partner ?? false,
     submittedByUserId: "operator-user",
   });
-  await testDb.insert(rawSourceMaterial).values({ id: `raw-${input.id}`, sourceId: input.id, rawText: input.rawText });
+  await testDb.insert(rawSourceMaterial).values({ id: `raw-${input.id}`, sourceId: input.id });
+  await seedSourceCaptureVersion({ sourceId: input.id, rawText: input.rawText });
   const ensured = await ensureFacebookCaptureReviewForCapturedSource(testDb, { sourceId: input.id, rawSourceMaterialId: `raw-${input.id}`, now: new Date("2026-07-13T00:00:00.000Z") });
   if (ensured.status !== "created") {
     throw new Error("test setup failed");

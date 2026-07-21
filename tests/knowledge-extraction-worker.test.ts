@@ -1,11 +1,12 @@
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { aiGatewayModels, facebookCaptureReviews, knowledgeCards, knowledgeCardSources, knowledgeExtractionJobs, rawSourceMaterial, sources, userRoles, users, type UserRole } from "@/db/schema";
+import { aiGatewayModels, facebookCaptureReviews, knowledgeCards, knowledgeCardSources, knowledgeExtractionJobs, rawSourceMaterial, sourceCaptureVersions, sources, userRoles, users, type UserRole } from "@/db/schema";
 import { ensureFacebookCaptureReviewForCapturedSource } from "@/features/knowledge/facebook-capture-review";
 import { enqueueKnowledgeExtractionJob, processKnowledgeExtractionJob, recoverStaleKnowledgeExtractionJobs, runKnowledgeExtractionWorkerLoop } from "@/features/knowledge/extraction-jobs";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
+import { seedSourceCaptureVersion } from "./helpers/source-captures";
 
 const authMock = vi.hoisted(() => vi.fn());
 
@@ -50,7 +51,8 @@ async function createCapturedFacebookReview(id: string) {
     partner: false,
     submittedByUserId: "operator-user",
   });
-  await testDb.insert(rawSourceMaterial).values({ id: `raw-${id}`, sourceId: id, rawText: "Đèo Hải Vân có điểm dừng ngắm cảnh cần kiểm tra trước khi đi." });
+  await testDb.insert(rawSourceMaterial).values({ id: `raw-${id}`, sourceId: id });
+  await seedSourceCaptureVersion({ sourceId: id, rawText: "Đèo Hải Vân có điểm dừng ngắm cảnh cần kiểm tra trước khi đi." });
   const ensured = await ensureFacebookCaptureReviewForCapturedSource(testDb, { sourceId: id, rawSourceMaterialId: `raw-${id}` });
   if (ensured.status !== "created") throw new Error("setup failed");
   return ensured.review;
@@ -69,7 +71,8 @@ async function createUrlSource(id: string) {
     partner: false,
     submittedByUserId: "operator-user",
   });
-  await testDb.insert(rawSourceMaterial).values({ id: `raw-${id}`, sourceId: id, rawText: "Nguồn URL có nội dung đọc được để AI trích xuất." });
+  await testDb.insert(rawSourceMaterial).values({ id: `raw-${id}`, sourceId: id });
+  await seedSourceCaptureVersion({ sourceId: id, rawText: "Nguồn URL có nội dung đọc được để AI trích xuất.", captureKind: "url" });
 }
 
 describe("knowledge extraction worker jobs", () => {
@@ -150,7 +153,8 @@ describe("knowledge extraction worker jobs", () => {
     const review = await createCapturedFacebookReview("malformed-output-job");
     const rawMarker = "RAW_SOURCE_MARKER_DO_NOT_LOG";
     const modelMarker = "RAW_MODEL_MARKER_DO_NOT_LOG";
-    await testDb.update(rawSourceMaterial).set({ rawText: rawMarker }).where(eq(rawSourceMaterial.sourceId, review.sourceId));
+    if (!review.captureVersionId) throw new Error("Expected capture version");
+    await testDb.update(sourceCaptureVersions).set({ rawText: rawMarker }).where(eq(sourceCaptureVersions.id, review.captureVersionId));
     const actor = { userId: "operator-user", email: "operator-user@example.com" };
     const queued = await enqueueKnowledgeExtractionJob({ sourceId: review.sourceId, facebookCaptureReviewId: review.id, mode: "extract_only", actor }, testDb);
     vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ drafts: [{ type: "general_travel_tip", title: modelMarker, summary: "Bản nháp thiếu vị trí hoặc cung đường." , confidence: "community", freshness_sensitive: false }] }) } }], model: "cx/extract" }), { status: 200 }));
@@ -209,7 +213,8 @@ describe("knowledge extraction worker jobs", () => {
   test("does not persist or log an unexpected error message", async () => {
     const review = await createCapturedFacebookReview("unexpected-worker-error");
     const rawMarker = "RAW_SOURCE_MARKER_DO_NOT_LOG";
-    await testDb.update(rawSourceMaterial).set({ rawText: rawMarker }).where(eq(rawSourceMaterial.sourceId, review.sourceId));
+    if (!review.captureVersionId) throw new Error("Expected capture version");
+    await testDb.update(sourceCaptureVersions).set({ rawText: rawMarker }).where(eq(sourceCaptureVersions.id, review.captureVersionId));
     const [job] = await testDb.insert(knowledgeExtractionJobs).values({ sourceId: review.sourceId, facebookCaptureReviewId: review.id, mode: "extract_only", status: "queued", resultDraftIds: ["missing-draft"], resultDraftCount: 1, createdByUserId: "operator-user", createdByEmail: "operator-user@example.com" }).returning();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 

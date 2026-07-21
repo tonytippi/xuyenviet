@@ -9,7 +9,7 @@ import {
   knowledgeCardTypeValues,
   knowledgeConfidenceValues,
   knowledgeSourceSuggestions,
-  rawSourceMaterial,
+   sourceCaptureVersions,
   sources,
   type AiUsageStatus,
   type KnowledgeConfidence,
@@ -248,7 +248,9 @@ export async function listKnowledgeSourceSuggestionTraces(sourceId: string) {
 async function loadSourceBundle(db: SuggestionDb, sourceId: string) {
   const [source] = await db.select().from(sources).where(eq(sources.id, sourceId)).limit(1);
   if (!source) return null;
-  const [raw] = await db.select().from(rawSourceMaterial).where(eq(rawSourceMaterial.sourceId, source.id)).limit(1);
+  const [raw] = source.currentCaptureVersionId
+    ? await db.select().from(sourceCaptureVersions).where(and(eq(sourceCaptureVersions.id, source.currentCaptureVersionId), eq(sourceCaptureVersions.sourceId, source.id))).limit(1)
+    : [];
   return raw ? { source, raw } : null;
 }
 

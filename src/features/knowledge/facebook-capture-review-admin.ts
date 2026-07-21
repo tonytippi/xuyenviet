@@ -3,7 +3,7 @@ import "server-only";
 import { eq, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { facebookCaptureReviews, facebookCaptureReviewStatusValues, rawSourceMaterial, sources, type FacebookCaptureReviewStatus } from "@/db/schema";
+import { facebookCaptureReviews, facebookCaptureReviewStatusValues, sourceCaptureVersions, sources, type FacebookCaptureReviewStatus } from "@/db/schema";
 import { countFacebookCaptureReviewsByStatus, getExistingCardsForCaptureSource, listFacebookCaptureReviews } from "@/features/knowledge/facebook-capture-review";
 import { getActiveKnowledgeExtractionJobForSource } from "@/features/knowledge/extraction-jobs";
 import { requireAdminSession } from "@/server/auth";
@@ -70,18 +70,18 @@ export async function getAdminFacebookCaptureReviewDetail(reviewId: string) {
       verificationStatus: sources.verificationStatus,
       official: sources.official,
       partner: sources.partner,
-      rawText: rawSourceMaterial.rawText,
-      captureMethod: sql<string | null>`${rawSourceMaterial.rawMetadata}->>'captureMethod'`,
-      capturedAt: sql<string | null>`${rawSourceMaterial.rawMetadata}->>'capturedAt'`,
-       finalUrl: sql<string | null>`${rawSourceMaterial.rawMetadata}->>'finalUrl'`,
-       authorText: sql<string | null>`${rawSourceMaterial.rawMetadata}->>'authorText'`,
-       groupName: sql<string | null>`${rawSourceMaterial.rawMetadata}->>'groupName'`,
-       timestampText: sql<string | null>`${rawSourceMaterial.rawMetadata}->>'timestampText'`,
-       postCreatedAt: sql<string | null>`${rawSourceMaterial.rawMetadata}->>'postCreatedAt'`,
+       rawText: sourceCaptureVersions.rawText,
+       captureMethod: sql<string | null>`${sourceCaptureVersions.rawMetadata}->>'captureMethod'`,
+       capturedAt: sql<string | null>`${sourceCaptureVersions.rawMetadata}->>'capturedAt'`,
+        finalUrl: sql<string | null>`${sourceCaptureVersions.rawMetadata}->>'finalUrl'`,
+        authorText: sql<string | null>`${sourceCaptureVersions.rawMetadata}->>'authorText'`,
+        groupName: sql<string | null>`${sourceCaptureVersions.rawMetadata}->>'groupName'`,
+        timestampText: sql<string | null>`${sourceCaptureVersions.rawMetadata}->>'timestampText'`,
+        postCreatedAt: sql<string | null>`${sourceCaptureVersions.rawMetadata}->>'postCreatedAt'`,
     })
     .from(facebookCaptureReviews)
     .innerJoin(sources, eq(sources.id, facebookCaptureReviews.sourceId))
-    .innerJoin(rawSourceMaterial, eq(rawSourceMaterial.id, facebookCaptureReviews.rawSourceMaterialId))
+     .innerJoin(sourceCaptureVersions, eq(sourceCaptureVersions.id, facebookCaptureReviews.captureVersionId))
     .where(eq(facebookCaptureReviews.id, normalizedReviewId))
     .limit(1);
 
@@ -115,11 +115,11 @@ export async function getAdminFacebookCaptureReviewExtractionTarget(reviewId: st
       verificationStatus: sources.verificationStatus,
       official: sources.official,
       partner: sources.partner,
-      rawText: rawSourceMaterial.rawText,
+       rawText: sourceCaptureVersions.rawText,
     })
     .from(facebookCaptureReviews)
     .innerJoin(sources, eq(sources.id, facebookCaptureReviews.sourceId))
-    .innerJoin(rawSourceMaterial, eq(rawSourceMaterial.id, facebookCaptureReviews.rawSourceMaterialId))
+     .innerJoin(sourceCaptureVersions, eq(sourceCaptureVersions.id, facebookCaptureReviews.captureVersionId))
     .where(eq(facebookCaptureReviews.id, normalizedReviewId))
     .limit(1);
 

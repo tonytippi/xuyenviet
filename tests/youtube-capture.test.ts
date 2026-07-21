@@ -1,18 +1,20 @@
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test } from "vitest";
 
-import { auditEvents, rawSourceMaterial, sources, users } from "@/db/schema";
+import { auditEvents, rawSourceMaterial, sourceCaptureVersions, sources, users } from "@/db/schema";
 import { listQueuedYoutubeSources, maxYoutubeEvidenceItemsPerVideo, maxYoutubeEvidenceItemsPerWindow, parseYoutubeEvidence, recordYoutubeCaptureFailure, saveYoutubeEvidence, serializeYoutubeEvidence } from "@/features/knowledge/youtube-capture";
 import { getYoutubeMediaResolution, mergeYoutubeWindowEvidence, normalizeYoutubeWindowTimestamps, parseCachedYoutubePayload, parseCachedYoutubeSegmentPayload, parseYoutubeDuration, requestYoutubeEvidence, requestYoutubeTitle, retainedYoutubeEvidenceItemsPerWindow, youtubeWindows } from "../scripts/youtube-capture";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
+import { seedSourceCaptureVersion } from "./helpers/source-captures";
 
 const actor = { userId: "youtube-operator", email: "youtube-operator@example.com" };
 const evidence = [{ category: "attraction", claim_vi: "NovaWorld Phan Thiết có công viên nước phù hợp cho gia đình có trẻ nhỏ.", evidence_type: "both", timestamp_start_seconds: 1590, timestamp_end_seconds: 1615, confidence: "high", freshness_sensitive: true, evidence_excerpt: "NovaWorld Phan Thiết đưa các bé đến đây chơi.", uncertainty_or_condition: null }];
 
 async function createSource(id: string, rawText: string | null = null) {
   await testDb.insert(sources).values({ id, kind: "youtube", url: "https://www.youtube.com/watch?v=abcDEF12345", canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", label: "YouTube video", sourceType: "community", verificationStatus: "unverified", official: false, partner: false, submittedByUserId: actor.userId });
-  await testDb.insert(rawSourceMaterial).values({ id: `raw-${id}`, sourceId: id, rawText });
+  await testDb.insert(rawSourceMaterial).values({ id: `raw-${id}`, sourceId: id });
+  if (rawText) await seedSourceCaptureVersion({ sourceId: id, captureKind: "youtube", rawText, rawMetadata: { kind: "youtube", captureMethod: "gemini_youtube_url" } });
 }
 
 describe("YouTube capture", () => {
@@ -27,10 +29,10 @@ describe("YouTube capture", () => {
   test("persists bounded evidence and a content-free audit summary", async () => {
     await createSource("queued");
     await expect(saveYoutubeEvidence(testDb, { sourceId: "queued", evidence: parseYoutubeEvidence({ evidence }), metadata: { captureMethod: "gemini_youtube_url", capturedAt: "2026-07-17T00:00:00.000Z", sourceUrl: "https://www.youtube.com/watch?v=abcDEF12345", model: "gemini-3.5-flash", mediaResolution: "MEDIA_RESOLUTION_LOW", promptVersion: "youtube-evidence-v1", evidenceCount: 1, latencyMs: 2000, promptTokens: 150000, outputTokens: 7500, totalTokens: 157500 }, actor, title: "Hành trình qua Phan Thiết" })).resolves.toMatchObject({ status: "updated" });
-    const [raw] = await testDb.select().from(rawSourceMaterial).where(eq(rawSourceMaterial.sourceId, "queued"));
+    const [raw] = await testDb.select().from(sourceCaptureVersions).where(eq(sourceCaptureVersions.sourceId, "queued"));
     expect(raw.rawText).toContain("NovaWorld Phan Thiết");
     await expect(testDb.select({ label: sources.label }).from(sources).where(eq(sources.id, "queued"))).resolves.toEqual([{ label: "Hành trình qua Phan Thiết" }]);
-    const [audit] = await testDb.select().from(auditEvents).where(eq(auditEvents.targetType, "raw_source_material"));
+    const [audit] = await testDb.select().from(auditEvents).where(eq(auditEvents.targetType, "source_capture_version"));
     expect(audit.afterSummary).not.toContain("NovaWorld");
     expect(audit.afterSummary).toContain("evidenceCount: 1");
   });

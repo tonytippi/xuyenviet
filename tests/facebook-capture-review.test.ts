@@ -1,7 +1,7 @@
 import { eq, sql } from "drizzle-orm";
 import { beforeEach, describe, expect, test } from "vitest";
 
-import { auditEvents, facebookCaptureReviews, knowledgeCards, knowledgeCardSources, rawSourceMaterial, sources, users } from "@/db/schema";
+import { auditEvents, facebookCaptureReviews, knowledgeCards, knowledgeCardSources, rawSourceMaterial, sourceCaptureVersions, sources, users } from "@/db/schema";
 import { sourceKnowledgeDraftExtractionPromptVersion } from "@/features/ai/prompts";
 import {
   ensureFacebookCaptureReviewForCapturedSource,
@@ -16,6 +16,7 @@ import { listQueuedFacebookSources, updateQueuedFacebookSourceRawText } from "@/
 import { lockFacebookCaptureResources } from "@/features/knowledge/facebook-capture-locks";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
+import { seedSourceCaptureVersion } from "./helpers/source-captures";
 
 async function createOperator(id = "operator-user") {
   await testDb.insert(users).values({ id, email: `${id}@example.com` });
@@ -40,9 +41,17 @@ async function createSource(input: { id: string; kind?: "facebook" | "url" | "pa
   await testDb.insert(rawSourceMaterial).values({
     id: `raw-${input.id}`,
     sourceId: input.id,
-    rawText: input.rawText ?? null,
+    rawText: null,
     rawMetadata: input.rawMetadata,
   });
+  if (input.rawText) {
+    await seedSourceCaptureVersion({
+      sourceId: input.id,
+      rawText: input.rawText,
+      rawMetadata: input.rawMetadata,
+      captureKind: kind,
+    });
+  }
 }
 
 describe("Facebook capture review state", () => {
@@ -67,11 +76,12 @@ describe("Facebook capture review state", () => {
       now: new Date("2026-07-13T00:00:00.000Z"),
     });
 
-    expect(result).toMatchObject({ status: "updated", rawMaterialId: "raw-captured-facebook" });
+    expect(result).toMatchObject({ status: "updated", rawMaterialId: "raw-captured-facebook", captureVersionId: expect.any(String) });
     await expect(testDb.select().from(facebookCaptureReviews)).resolves.toMatchObject([
       {
         sourceId: "captured-facebook",
         rawSourceMaterialId: "raw-captured-facebook",
+        captureVersionId: result.captureVersionId,
         status: "needs_review",
         reviewerUserId: null,
         reviewedAt: null,
@@ -239,7 +249,7 @@ describe("Facebook capture review state", () => {
     ).rejects.toThrow("rejectionReason must be a short safe summary.");
   });
 
-  test("reopen clears rejected raw text, preserves provenance, audits safely, and allows controlled recapture", async () => {
+  test("reopen preserves rejected capture versions, audits safely, and allows controlled recapture", async () => {
     await createSource({
       id: "recapture-facebook",
       rawText: "Rejected raw Facebook text that must not survive recapture reopen.",
@@ -268,11 +278,10 @@ describe("Facebook capture review state", () => {
       }),
     ).resolves.toMatchObject({ status: "updated", review: { status: "needs_review", sourceId: "recapture-facebook", rawSourceMaterialId: "raw-recapture-facebook" } });
 
-    await expect(testDb.select().from(rawSourceMaterial).where(eq(rawSourceMaterial.id, "raw-recapture-facebook"))).resolves.toMatchObject([
+    await expect(testDb.select().from(sourceCaptureVersions).where(eq(sourceCaptureVersions.sourceId, "recapture-facebook"))).resolves.toMatchObject([
       {
-        id: "raw-recapture-facebook",
         sourceId: "recapture-facebook",
-        rawText: null,
+        rawText: "Rejected raw Facebook text that must not survive recapture reopen.",
       },
     ]);
     await expect(listQueuedFacebookSources(testDb, { sourceId: "recapture-facebook" })).resolves.toMatchObject([{ sourceId: "recapture-facebook", rawMaterialId: "raw-recapture-facebook" }]);
@@ -356,7 +365,7 @@ describe("Facebook capture review state", () => {
       }),
     ).resolves.toMatchObject({ status: "updated", review: { status: "needs_review", sourceId: "direct-recapture-facebook" } });
 
-    await expect(testDb.select().from(rawSourceMaterial).where(eq(rawSourceMaterial.id, "raw-direct-recapture-facebook"))).resolves.toMatchObject([{ rawText: null, rawMetadata: null }]);
+    await expect(testDb.select().from(sourceCaptureVersions).where(eq(sourceCaptureVersions.sourceId, "direct-recapture-facebook"))).resolves.toMatchObject([{ rawText: "Captured text with missing visible characters should be replaced." }]);
     await expect(listQueuedFacebookSources(testDb, { sourceId: "direct-recapture-facebook" })).resolves.toMatchObject([{ sourceId: "direct-recapture-facebook", rawMaterialId: "raw-direct-recapture-facebook" }]);
     await expect(listFacebookCaptureReviews(testDb, { status: "needs_review" })).resolves.toEqual([]);
 
@@ -391,7 +400,7 @@ describe("Facebook capture review state", () => {
       expectedForceLiveCaptureGeneration: queued.forceLiveCaptureGeneration,
     })).resolves.toEqual({ status: "no_longer_queued" });
 
-    await expect(testDb.select({ rawText: rawSourceMaterial.rawText }).from(rawSourceMaterial).where(eq(rawSourceMaterial.sourceId, queued.sourceId))).resolves.toEqual([{ rawText: null }]);
+    await expect(testDb.select({ rawText: sourceCaptureVersions.rawText }).from(sourceCaptureVersions).where(eq(sourceCaptureVersions.sourceId, queued.sourceId))).resolves.toEqual([]);
     await expect(testDb.select({ forceLiveCapture: facebookCaptureReviews.forceLiveCapture, forceLiveCaptureGeneration: facebookCaptureReviews.forceLiveCaptureGeneration }).from(facebookCaptureReviews).where(eq(facebookCaptureReviews.sourceId, queued.sourceId))).resolves.toEqual([{ forceLiveCapture: true, forceLiveCaptureGeneration: 1 }]);
   });
 
@@ -410,7 +419,7 @@ describe("Facebook capture review state", () => {
       }),
     ).resolves.toMatchObject({ status: "already_extracted", existingCards: 1 });
 
-    await expect(testDb.select().from(rawSourceMaterial).where(eq(rawSourceMaterial.id, "raw-direct-recapture-extracted"))).resolves.toMatchObject([{ rawText: "Captured text already has extraction cards." }]);
+    await expect(testDb.select().from(sourceCaptureVersions).where(eq(sourceCaptureVersions.sourceId, "direct-recapture-extracted"))).resolves.toMatchObject([{ rawText: "Captured text already has extraction cards." }]);
   });
 
   test("extraction transitions require extracted cards and ignore unrelated linked cards", async () => {

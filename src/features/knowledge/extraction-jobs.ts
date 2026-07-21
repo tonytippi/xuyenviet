@@ -5,7 +5,7 @@ import {
   knowledgeCards,
   knowledgeCardSources,
   knowledgeExtractionJobs,
-  rawSourceMaterial,
+  sourceCaptureVersions,
   sources,
   type KnowledgeExtractionJobMode,
 } from "@/db/schema";
@@ -42,13 +42,15 @@ export async function enqueueKnowledgeExtractionJob(input: EnqueueKnowledgeExtra
   return db.transaction(async (transaction) => {
     await lockSourceJobEnqueue(transaction, sourceId);
 
-    const [source] = await transaction.select({ id: sources.id }).from(sources).where(eq(sources.id, sourceId)).limit(1);
+    const [source] = await transaction.select({ id: sources.id, currentCaptureVersionId: sources.currentCaptureVersionId }).from(sources).where(eq(sources.id, sourceId)).limit(1);
 
     if (!source) {
       throw new KnowledgeExtractionError("Không tìm thấy nguồn cần trích xuất.", "invalid_source");
     }
 
-    const [raw] = await transaction.select({ rawText: rawSourceMaterial.rawText }).from(rawSourceMaterial).where(eq(rawSourceMaterial.sourceId, sourceId)).limit(1);
+    const [raw] = source.currentCaptureVersionId
+      ? await transaction.select({ rawText: sourceCaptureVersions.rawText }).from(sourceCaptureVersions).where(and(eq(sourceCaptureVersions.id, source.currentCaptureVersionId), eq(sourceCaptureVersions.sourceId, sourceId))).limit(1)
+      : [];
 
     if (!raw?.rawText?.trim()) {
       throw new KnowledgeExtractionError("Nguồn này chưa có văn bản đọc được để AI trích xuất.", "unsupported_material");
@@ -72,6 +74,7 @@ export async function enqueueKnowledgeExtractionJob(input: EnqueueKnowledgeExtra
       .insert(knowledgeExtractionJobs)
       .values({
         sourceId,
+        captureVersionId: source.currentCaptureVersionId,
         facebookCaptureReviewId: input.facebookCaptureReviewId ?? null,
         mode: input.mode,
         status: "queued",
@@ -194,7 +197,8 @@ export async function processKnowledgeExtractionJob(jobId: string, db = getDb())
     if (job.resultDraftIds && job.resultDraftIds.length > 0) {
       await finalizeExistingDrafts(job, actor, db);
     } else {
-      const result = await extractKnowledgeDraftsFromSourceAsActor(job.sourceId, actor, {
+        const result = await extractKnowledgeDraftsFromSourceAsActor(job.sourceId, actor, {
+          captureVersionId: job.captureVersionId,
         resultJobId: job.id,
         preProviderGuard: job.facebookCaptureReviewId ? ({ db: guardDb, sourceId }) => assertFacebookCaptureStillNeedsReview(guardDb, { reviewId: job.facebookCaptureReviewId as string, sourceId }) : undefined,
       });

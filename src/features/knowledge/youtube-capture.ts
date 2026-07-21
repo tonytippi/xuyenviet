@@ -1,7 +1,8 @@
-import { and, asc, eq, isNull, or, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
-import { auditEvents, rawSourceMaterial, schema, sources } from "../../db/schema";
+import { auditEvents, rawSourceMaterial, schema, sourceCaptureVersions, sources } from "../../db/schema";
+import { appendSourceCaptureVersion, type YoutubeCaptureMetadata } from "./source-captures";
 
 export type YoutubeCaptureDb = PostgresJsDatabase<typeof schema>;
 
@@ -62,7 +63,7 @@ const maxExcerptLength = 240;
 const maxConditionLength = 400;
 
 function queuedCondition() {
-  return and(or(isNull(rawSourceMaterial.rawText), sql`length(btrim(${rawSourceMaterial.rawText})) = 0`), sql`${rawSourceMaterial.rawMetadata}->>'duplicateSourceId' is null`);
+  return and(isNull(sources.currentCaptureVersionId), sql`${rawSourceMaterial.rawMetadata}->>'duplicateSourceId' is null`);
 }
 
 export async function listQueuedYoutubeSources(db: YoutubeCaptureDb, input: { sourceId?: string; limit?: number } = {}): Promise<QueuedYoutubeSource[]> {
@@ -112,8 +113,13 @@ export async function saveYoutubeEvidence(db: YoutubeCaptureDb, input: { sourceI
       .for("update");
     if (!queued) return { status: "not_queued" as const };
 
-    const updated = await transaction.update(rawSourceMaterial).set({ rawText, rawMetadata: sanitizeYoutubeMetadata(input.metadata) }).where(and(eq(rawSourceMaterial.id, queued.rawMaterialId), queuedCondition())).returning({ id: rawSourceMaterial.id });
-    if (updated.length === 0) return { status: "no_longer_queued" as const };
+    const version = await appendSourceCaptureVersion(transaction, {
+      sourceId: input.sourceId,
+      captureKind: "youtube",
+      rawText,
+      metadata: { ...sanitizeYoutubeMetadata(input.metadata), kind: "youtube" } as YoutubeCaptureMetadata,
+      capturedAt: new Date(input.metadata.capturedAt),
+    });
 
     if (input.title) {
       await transaction.update(sources).set({ label: input.title }).where(eq(sources.id, input.sourceId));
@@ -123,18 +129,18 @@ export async function saveYoutubeEvidence(db: YoutubeCaptureDb, input: { sourceI
       actorUserId: input.actor.userId,
       actorEmail: input.actor.email,
       operation: "update",
-      targetType: "raw_source_material",
-      targetId: queued.rawMaterialId,
-      beforeSummary: "YouTube evidence present: false.",
-      afterSummary: `YouTube evidence present: true; method: gemini_youtube_url; evidenceCount: ${input.evidence.length}; capturedAt: ${input.metadata.capturedAt}.`,
+      targetType: "source_capture_version",
+      targetId: version.id,
+      beforeSummary: "YouTube capture version appended.",
+      afterSummary: `YouTube evidence capture version appended; method: gemini_youtube_url; evidenceCount: ${input.evidence.length}; capturedAt: ${input.metadata.capturedAt}.`,
       createdAt: input.now,
     });
-    return { status: "updated" as const, rawMaterialId: updated[0].id };
+    return { status: "updated" as const, rawMaterialId: queued.rawMaterialId, captureVersionId: version.id };
   });
 }
 
 export async function findYoutubeCaptureImportByCorrelationToken(db: YoutubeCaptureDb, input: { sourceId: string; correlationToken: string }) {
-  const [row] = await db.select({ id: rawSourceMaterial.id }).from(rawSourceMaterial).where(and(eq(rawSourceMaterial.sourceId, input.sourceId), sql`${rawSourceMaterial.rawMetadata}->>'importCorrelationToken' = ${input.correlationToken}`)).limit(1);
+  const [row] = await db.select({ id: sourceCaptureVersions.id }).from(sourceCaptureVersions).where(and(eq(sourceCaptureVersions.sourceId, input.sourceId), sql`${sourceCaptureVersions.rawMetadata}->>'importCorrelationToken' = ${input.correlationToken}`)).limit(1);
   return Boolean(row);
 }
 

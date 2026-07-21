@@ -1,9 +1,10 @@
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { auditEvents, knowledgeCards, knowledgeCardSources, rawSourceMaterial, sources, userRoles, users, type KnowledgeConfidence, type UserRole } from "@/db/schema";
+import { auditEvents, knowledgeCards, knowledgeCardSources, sources, userRoles, users, type KnowledgeConfidence, type UserRole } from "@/db/schema";
 
 import { testDb } from "./helpers/db";
+import { seedSourceCaptureVersion } from "./helpers/source-captures";
 
 const authMock = vi.fn();
 const orderedStops = Array.from({ length: 32 }, (_, index) => `Điểm dừng ${index + 1}`);
@@ -41,8 +42,9 @@ async function createSource(userId: string, values: Partial<typeof sources.$infe
     })
     .returning();
 
-  await testDb.insert(rawSourceMaterial).values({
+  await seedSourceCaptureVersion({
     sourceId: source.id,
+    captureKind: source.kind,
     rawText: "Số điện thoại riêng 0901234567 và ghi chú thô không được xuất hiện trong review UI.",
     rawMetadata: { provider_payload: "hidden-provider-data" },
   });

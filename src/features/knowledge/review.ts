@@ -11,7 +11,7 @@ import {
   knowledgeSourceSuggestions,
   knowledgeCardTypeValues,
   knowledgeConfidenceValues,
-  rawSourceMaterial,
+  sourceCaptureVersions,
   sources,
   type KnowledgeConfidence,
   type KnowledgeSourceSupport,
@@ -604,13 +604,14 @@ async function loadRawLeakCorpusForSources(db: Pick<ReviewDb, "select">, sourceI
 
   const rows = await db
     .select({
-      rawText: rawSourceMaterial.rawText,
-      fileName: rawSourceMaterial.fileName,
-      storageKey: rawSourceMaterial.storageKey,
-      rawMetadata: rawSourceMaterial.rawMetadata,
+       rawText: sourceCaptureVersions.rawText,
+       fileName: sourceCaptureVersions.fileName,
+       storageKey: sourceCaptureVersions.storageKey,
+       rawMetadata: sourceCaptureVersions.rawMetadata,
     })
-    .from(rawSourceMaterial)
-    .where(inArray(rawSourceMaterial.sourceId, sourceIds));
+     .from(sources)
+     .innerJoin(sourceCaptureVersions, eq(sourceCaptureVersions.id, sources.currentCaptureVersionId))
+     .where(inArray(sources.id, sourceIds));
 
   return rows.flatMap((row) => [row.rawText, row.fileName, row.storageKey, ...flattenMetadataStrings(row.rawMetadata)]).filter((value): value is string => Boolean(value));
 }

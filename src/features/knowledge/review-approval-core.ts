@@ -2,7 +2,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
 import { getDb } from "@/db/client";
-import { auditEvents, knowledgeCards, knowledgeCardSources, knowledgeSourceSuggestions, rawSourceMaterial, sources } from "@/db/schema";
+import { auditEvents, knowledgeCards, knowledgeCardSources, knowledgeSourceSuggestions, sourceCaptureVersions, sources } from "@/db/schema";
 import type { AuthenticatedSession } from "@/server/auth";
 
 type ReviewDb = ReturnType<typeof getDb>;
@@ -119,9 +119,10 @@ async function loadRawLeakCorpusForSources(db: Pick<ReviewDb, "select">, sourceI
   }
 
   const rows = await db
-    .select({ rawText: rawSourceMaterial.rawText, fileName: rawSourceMaterial.fileName, storageKey: rawSourceMaterial.storageKey, rawMetadata: rawSourceMaterial.rawMetadata })
-    .from(rawSourceMaterial)
-    .where(inArray(rawSourceMaterial.sourceId, sourceIds));
+     .select({ rawText: sourceCaptureVersions.rawText, fileName: sourceCaptureVersions.fileName, storageKey: sourceCaptureVersions.storageKey, rawMetadata: sourceCaptureVersions.rawMetadata })
+     .from(sources)
+     .innerJoin(sourceCaptureVersions, eq(sourceCaptureVersions.id, sources.currentCaptureVersionId))
+     .where(inArray(sources.id, sourceIds));
 
   return rows.flatMap((row) => [row.rawText, row.fileName, row.storageKey, ...flattenMetadataStrings(row.rawMetadata)]).filter((value): value is string => Boolean(value));
 }

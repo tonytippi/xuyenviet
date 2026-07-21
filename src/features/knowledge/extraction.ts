@@ -8,7 +8,7 @@ import {
   knowledgeExtractionJobs,
   knowledgeCardTypeValues,
   knowledgeConfidenceValues,
-  rawSourceMaterial,
+  sourceCaptureVersions,
   sources,
   type KnowledgeConfidence,
   type AiUsageStatus,
@@ -82,7 +82,7 @@ export async function extractKnowledgeDraftsFromSource(sourceId: string, options
   return extractKnowledgeDraftsFromSourceAsActor(sourceId, session, options);
 }
 
-export async function extractKnowledgeDraftsFromSourceAsActor(sourceId: string, actor: AuthenticatedSession, options: { preProviderGuard?: KnowledgeDraftExtractionPreProviderGuard; resultJobId?: string } = {}): Promise<KnowledgeDraftExtractionResult> {
+export async function extractKnowledgeDraftsFromSourceAsActor(sourceId: string, actor: AuthenticatedSession, options: { preProviderGuard?: KnowledgeDraftExtractionPreProviderGuard; resultJobId?: string; captureVersionId?: string | null } = {}): Promise<KnowledgeDraftExtractionResult> {
   const normalizedSourceId = sourceId.trim();
   let providerUsage: Parameters<typeof writeUsageForProviderCall>[3] | null = null;
 
@@ -91,7 +91,7 @@ export async function extractKnowledgeDraftsFromSourceAsActor(sourceId: string, 
   }
 
   const db = getDb();
-  const sourceBundle = await loadSourceBundle(db, normalizedSourceId);
+  const sourceBundle = await loadSourceBundle(db, normalizedSourceId, options.captureVersionId);
 
   if (!sourceBundle) {
     throw new KnowledgeExtractionError("Không tìm thấy nguồn cần trích xuất.", "invalid_source");
@@ -241,14 +241,15 @@ export async function assertFacebookCaptureStillNeedsReview(db: ExtractionQueryD
   }
 }
 
-async function loadSourceBundle(db: ExtractionDb, sourceId: string) {
+async function loadSourceBundle(db: ExtractionDb, sourceId: string, captureVersionId?: string | null) {
   const [source] = await db.select().from(sources).where(eq(sources.id, sourceId)).limit(1);
 
   if (!source) {
     return null;
   }
 
-  const [raw] = await db.select().from(rawSourceMaterial).where(eq(rawSourceMaterial.sourceId, source.id)).limit(1);
+  const id = captureVersionId ?? source.currentCaptureVersionId;
+  const [raw] = id ? await db.select().from(sourceCaptureVersions).where(and(eq(sourceCaptureVersions.id, id), eq(sourceCaptureVersions.sourceId, source.id))).limit(1) : [];
 
   return raw ? { source, raw } : null;
 }

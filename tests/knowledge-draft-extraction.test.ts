@@ -1,10 +1,11 @@
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { aiGatewayModels, aiUsageEvents, auditEvents, knowledgeCards, knowledgeCardSources, rawSourceMaterial, sources, userRoles, users, type UserRole } from "@/db/schema";
+import { aiGatewayModels, aiUsageEvents, auditEvents, knowledgeCards, knowledgeCardSources, sources, userRoles, users, type UserRole } from "@/db/schema";
 import { buildSourceKnowledgeDraftExtractionMessages, buildSourceKnowledgeSuggestionMessages } from "@/features/ai/prompts";
 
 import { testDb } from "./helpers/db";
+import { seedSourceCaptureVersion } from "./helpers/source-captures";
 
 const authMock = vi.fn();
 
@@ -66,7 +67,7 @@ async function createTextSource(userId: string, rawText = "Quán ăn gia đình 
       submittedByUserId: userId,
     })
     .returning();
-  await testDb.insert(rawSourceMaterial).values({ sourceId: source.id, rawText });
+  await seedSourceCaptureVersion({ sourceId: source.id, captureKind: "copied_post", rawText });
 
   return source;
 }
@@ -87,7 +88,7 @@ async function createCuratedTextSource(userId: string, rawText = "Điểm dừng
       submittedByUserId: userId,
     })
     .returning();
-  await testDb.insert(rawSourceMaterial).values({ sourceId: source.id, rawText });
+  await seedSourceCaptureVersion({ sourceId: source.id, captureKind: "url", rawText });
 
   return source;
 }
@@ -379,7 +380,7 @@ describe("knowledge draft extraction", () => {
       .insert(sources)
       .values({ kind: "screenshot", label: "Ảnh chụp nguồn du lịch", sourceType: "curated", verificationStatus: "unverified", submittedByUserId: "image-operator" })
       .returning();
-    await testDb.insert(rawSourceMaterial).values({ sourceId: source.id, fileName: "source.png", mimeType: "image/png", byteSize: 1000 });
+    await seedSourceCaptureVersion({ sourceId: source.id, captureKind: "screenshot", rawText: null, rawMetadata: { kind: "submitted", fileName: "source.png", mimeType: "image/png", byteSize: 1000 } });
     const { extractKnowledgeDraftsFromSource } = await import("@/features/knowledge/actions");
 
     await expect(extractKnowledgeDraftsFromSource(source.id)).rejects.toMatchObject({ code: "unsupported_material" });

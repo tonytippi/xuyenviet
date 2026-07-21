@@ -1,7 +1,7 @@
 import { eq, sql } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { auditEvents, rawSourceMaterial, sources, userRoles, users, type UserRole } from "@/db/schema";
+import { auditEvents, sourceCaptureVersions, sources, userRoles, users, type UserRole } from "@/db/schema";
 
 import { testDb } from "./helpers/db";
 
@@ -26,7 +26,7 @@ describe("knowledge source intake", () => {
     authMock.mockReset();
   });
 
-  test("operator URL intake stores safe source metadata and separate raw material", async () => {
+  test("operator URL intake stores safe source metadata without creating readable legacy material", async () => {
     await createUser("operator-user", ["operator"]);
     authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
     const { submitTravelSourceForAiReading } = await import("@/features/knowledge/actions");
@@ -52,9 +52,7 @@ describe("knowledge source intake", () => {
       partner: false,
     });
 
-    await expect(testDb.select().from(rawSourceMaterial).where(eq(rawSourceMaterial.sourceId, result.id))).resolves.toMatchObject([
-      { rawText: null, rawMetadata: { submittedFrom: "test" } },
-    ]);
+    await expect(testDb.select().from(sourceCaptureVersions).where(eq(sourceCaptureVersions.sourceId, result.id))).resolves.toEqual([]);
     await expect(testDb.select().from(auditEvents).where(eq(auditEvents.targetType, "knowledge_source"))).resolves.toHaveLength(1);
   });
 
@@ -91,7 +89,7 @@ describe("knowledge source intake", () => {
 
     expect(result).toMatchObject({ kind: "pasted_text", label: "Văn bản đã dán", url: null, canonicalUrl: null });
     expect(result).not.toHaveProperty("rawText");
-    await expect(testDb.select().from(rawSourceMaterial).where(eq(rawSourceMaterial.sourceId, result.id))).resolves.toMatchObject([
+    await expect(testDb.select().from(sourceCaptureVersions).where(eq(sourceCaptureVersions.sourceId, result.id))).resolves.toMatchObject([
       { rawText: "Đèo Hải Vân có nhiều điểm dừng ngắm cảnh." },
     ]);
   });
@@ -106,9 +104,7 @@ describe("knowledge source intake", () => {
     });
 
     expect(result).toMatchObject({ kind: "screenshot", label: "Ảnh chụp nguồn du lịch" });
-    await expect(testDb.select().from(rawSourceMaterial).where(eq(rawSourceMaterial.sourceId, result.id))).resolves.toMatchObject([
-      { fileName: "bien-bao.png", mimeType: "image/png", byteSize: 1024, storageKey: "operator/bien-bao.png" },
-    ]);
+    await expect(testDb.select().from(sourceCaptureVersions).where(eq(sourceCaptureVersions.sourceId, result.id))).resolves.toEqual([]);
   });
 
   test("validation failures create no source, raw material, or audit side effects", async () => {
@@ -124,7 +120,7 @@ describe("knowledge source intake", () => {
     await expect(submitTravelSourceForAiReading({ screenshot: { fileName: "bad.gif", mimeType: "image/gif", byteSize: 100 } })).rejects.toThrow("Ảnh chụp chỉ hỗ trợ");
 
     await expect(testDb.select().from(sources)).resolves.toHaveLength(0);
-    await expect(testDb.select().from(rawSourceMaterial)).resolves.toHaveLength(0);
+    await expect(testDb.select().from(sourceCaptureVersions)).resolves.toHaveLength(0);
     await expect(testDb.select().from(auditEvents)).resolves.toHaveLength(0);
   });
 
@@ -135,7 +131,7 @@ describe("knowledge source intake", () => {
 
     await expect(submitTravelSourceForAiReading({ url: "https://example.com" })).rejects.toMatchObject({ name: "AdminAuthorizationError" });
     await expect(testDb.select().from(sources)).resolves.toHaveLength(0);
-    await expect(testDb.select().from(rawSourceMaterial)).resolves.toHaveLength(0);
+    await expect(testDb.select().from(sourceCaptureVersions)).resolves.toHaveLength(0);
     await expect(testDb.select().from(auditEvents)).resolves.toHaveLength(0);
   });
 
@@ -146,7 +142,7 @@ describe("knowledge source intake", () => {
 
     await expect(submitTravelSourceForAiReading({ rawText: "" })).rejects.toMatchObject({ name: "AdminAuthorizationError" });
     await expect(testDb.select().from(sources)).resolves.toHaveLength(0);
-    await expect(testDb.select().from(rawSourceMaterial)).resolves.toHaveLength(0);
+    await expect(testDb.select().from(sourceCaptureVersions)).resolves.toHaveLength(0);
     await expect(testDb.select().from(auditEvents)).resolves.toHaveLength(0);
   });
 

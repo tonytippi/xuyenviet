@@ -3,12 +3,13 @@ import "server-only";
 import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { knowledgeCards, knowledgeCardSources, knowledgeCardTypeValues, knowledgeSeedBatchItems, knowledgeSeedBatches, knowledgeSourceSuggestions, rawSourceMaterial, sources, type KnowledgeCardType, type KnowledgeSeedBatchItemStatus } from "@/db/schema";
+import { knowledgeCards, knowledgeCardSources, knowledgeCardTypeValues, knowledgeSeedBatchItems, knowledgeSeedBatches, knowledgeSourceSuggestions, sourceCaptureVersions, sources, type KnowledgeCardType, type KnowledgeSeedBatchItemStatus } from "@/db/schema";
 import { isKnowledgeCardTravelerEligible } from "@/features/knowledge/state";
 import { recordAuditEvent } from "@/features/audit/events";
 import { requireAdminSession } from "@/server/auth";
 
 import { isSourceValidationError, normalizeTravelSourceInput } from "./sources";
+import { appendSourceCaptureVersion } from "./source-captures";
 
 const maxBatchUrls = 50;
 const maxBatchLabelLength = 160;
@@ -146,7 +147,9 @@ export async function submitKnowledgeSeedUrlBatch(input: BatchSeedUrlIntakeInput
         .values({ ...normalized.source, submittedByUserId: session.userId })
         .returning({ id: sources.id });
 
-      await transaction.insert(rawSourceMaterial).values({ ...normalized.rawMaterial, sourceId: source.id });
+       if (normalized.capture.rawText) {
+         await appendSourceCaptureVersion(transaction, { sourceId: source.id, captureKind: normalized.source.kind, rawText: normalized.capture.rawText, metadata: normalized.capture.metadata, file: normalized.capture.file ?? undefined });
+       }
       await transaction.insert(knowledgeSeedBatchItems).values({
         batchId: batch.id,
         lineNumber: line.lineNumber,
@@ -347,8 +350,8 @@ async function deriveStatusesForSourceItems(db: Pick<BatchDb, "select">, items: 
   const capturedYoutubeRows = await db
     .select({ sourceId: sources.id })
     .from(sources)
-    .innerJoin(rawSourceMaterial, eq(rawSourceMaterial.sourceId, sources.id))
-    .where(and(inArray(sources.id, sourceIds), eq(sources.kind, "youtube"), sql`length(btrim(${rawSourceMaterial.rawText})) > 0`));
+     .innerJoin(sourceCaptureVersions, eq(sourceCaptureVersions.id, sources.currentCaptureVersionId))
+     .where(and(inArray(sources.id, sourceIds), eq(sources.kind, "youtube"), sql`length(btrim(${sourceCaptureVersions.rawText})) > 0`));
 
   for (const row of capturedYoutubeRows) {
     derived.set(row.sourceId, pickHigherStatus(derived.get(row.sourceId), "reading"));

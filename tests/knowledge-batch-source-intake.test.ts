@@ -1,9 +1,10 @@
 import { eq, sql } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { auditEvents, knowledgeCardSources, knowledgeCards, knowledgeSeedBatchItems, knowledgeSeedBatches, knowledgeSourceSuggestions, rawSourceMaterial, sources, userRoles, users, type KnowledgeCardType, type UserRole } from "@/db/schema";
+import { auditEvents, knowledgeCardSources, knowledgeCards, knowledgeSeedBatchItems, knowledgeSeedBatches, knowledgeSourceSuggestions, sourceCaptureVersions, sources, userRoles, users, type KnowledgeCardType, type UserRole } from "@/db/schema";
 
 import { testDb } from "./helpers/db";
+import { seedSourceCaptureVersion } from "./helpers/source-captures";
 
 const authMock = vi.fn();
 
@@ -41,7 +42,8 @@ describe("knowledge batch source intake", () => {
     expect(result).toMatchObject({ totalItems: 3, pendingCount: 2, failedCount: 1, duplicateCount: 0 });
     await expect(testDb.select().from(knowledgeSeedBatches).where(eq(knowledgeSeedBatches.id, result.batchId))).resolves.toMatchObject([{ label: "Seed miền Trung" }]);
     await expect(testDb.select().from(sources)).resolves.toHaveLength(2);
-    await expect(testDb.select().from(rawSourceMaterial)).resolves.toHaveLength(2);
+    await expect(testDb.select().from(sourceCaptureVersions)).resolves.toHaveLength(0);
+    await expect(testDb.select({ currentCaptureVersionId: sources.currentCaptureVersionId }).from(sources)).resolves.toEqual([{ currentCaptureVersionId: null }, { currentCaptureVersionId: null }]);
 
     const items = await testDb.select().from(knowledgeSeedBatchItems).orderBy(knowledgeSeedBatchItems.lineNumber);
     expect(items).toMatchObject([
@@ -154,7 +156,7 @@ describe("knowledge batch source intake", () => {
 
     await submitKnowledgeSeedUrlBatch({ urls: "https://www.youtube.com/watch?v=abcDEF12345" });
     const [item] = await testDb.select().from(knowledgeSeedBatchItems);
-    await testDb.update(rawSourceMaterial).set({ rawText: '{"evidence":[]}' }).where(eq(rawSourceMaterial.sourceId, item!.sourceId!));
+    await seedSourceCaptureVersion({ sourceId: item!.sourceId!, captureKind: "youtube", rawText: '{"evidence":[]}', rawMetadata: { kind: "youtube", captureMethod: "gemini_youtube_url" } });
 
     const [batch] = await listRecentKnowledgeSeedBatches();
 
@@ -189,7 +191,7 @@ describe("knowledge batch source intake", () => {
     await expect(testDb.select().from(knowledgeSeedBatches)).resolves.toHaveLength(0);
     await expect(testDb.select().from(knowledgeSeedBatchItems)).resolves.toHaveLength(0);
     await expect(testDb.select().from(sources)).resolves.toHaveLength(0);
-    await expect(testDb.select().from(rawSourceMaterial)).resolves.toHaveLength(0);
+    await expect(testDb.select().from(sourceCaptureVersions)).resolves.toHaveLength(0);
     await expect(testDb.select().from(auditEvents)).resolves.toHaveLength(0);
   });
 

@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 
 import { getDb } from "@/db/client";
-import { rawSourceMaterial, sources, type FacebookCaptureReviewStatus } from "@/db/schema";
+import { sources, type FacebookCaptureReviewStatus } from "@/db/schema";
 import { sourceKnowledgeDraftExtractionPromptVersion } from "@/features/ai/prompts";
 import { AdminAuthorizationError, requireAdminSession } from "@/server/auth";
 import { runAuditedAdminMutation } from "@/server/mutations";
@@ -27,6 +27,7 @@ import {
   updateKnowledgeDraft as updateKnowledgeDraftService,
 } from "./review";
 import { isSourceValidationError, normalizeTravelSourceInput, type TravelSourceInput } from "./sources";
+import { appendSourceCaptureVersion } from "./source-captures";
 import { isKnowledgeSuggestionError, suggestKnowledgeFromSourceUrl as suggestKnowledgeFromSourceUrlService } from "./suggestions";
 
 export type SafeSourceResult = Pick<
@@ -61,7 +62,15 @@ export async function submitTravelSourceForAiReading(input: TravelSourceInput): 
           createdAt: sources.createdAt,
         });
 
-      await transaction.insert(rawSourceMaterial).values({ ...values.rawMaterial, sourceId: source.id });
+      if (values.capture.rawText) {
+        await appendSourceCaptureVersion(transaction, {
+          sourceId: source.id,
+          captureKind: source.kind,
+          rawText: values.capture.rawText,
+          metadata: values.capture.metadata,
+          file: values.capture.file ?? undefined,
+        });
+      }
 
       return source;
     },

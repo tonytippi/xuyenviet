@@ -3,7 +3,7 @@ import "server-only";
 import { desc, eq, inArray } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { facebookCaptureReviews, knowledgeCards, knowledgeCardSources, knowledgeExtractionJobs, rawSourceMaterial, sources, type FacebookCaptureReviewStatus, type KnowledgeExtractionJobMode, type KnowledgeExtractionJobStatus, type SourceKind, type SourceType } from "@/db/schema";
+import { facebookCaptureReviews, knowledgeCards, knowledgeCardSources, knowledgeExtractionJobs, sourceCaptureVersions, sources, type FacebookCaptureReviewStatus, type KnowledgeExtractionJobMode, type KnowledgeExtractionJobStatus, type SourceKind, type SourceType } from "@/db/schema";
 import { requireAdminSession } from "@/server/auth";
 
 const maxRawTextLength = 20_000;
@@ -40,7 +40,7 @@ export type TravelSourceInput = {
 
 export type NormalizedTravelSource = {
   source: Omit<typeof sources.$inferInsert, "id" | "submittedByUserId" | "createdAt">;
-  rawMaterial: Omit<typeof rawSourceMaterial.$inferInsert, "id" | "sourceId" | "createdAt">;
+  capture: { rawText: string | null; metadata: import("./source-captures").GenericCaptureMetadata; file: ScreenshotMetadata | null };
 };
 
 export type KnowledgeUrlSourceListItem = Pick<typeof sources.$inferSelect, "id" | "kind" | "url" | "canonicalUrl" | "label" | "publisher" | "createdAt"> & {
@@ -96,13 +96,10 @@ export function normalizeTravelSourceInput(input: TravelSourceInput): Normalized
       official: false,
       partner: false,
     },
-    rawMaterial: {
+    capture: {
       rawText,
-      fileName: screenshot?.fileName ?? null,
-      mimeType: screenshot?.mimeType ?? null,
-      byteSize: screenshot?.byteSize ?? null,
-      storageKey: screenshot?.storageKey ?? null,
-      rawMetadata: input.rawMetadata ?? null,
+      metadata: { kind: "submitted", ...(screenshot ? { fileName: screenshot.fileName, mimeType: screenshot.mimeType as "image/jpeg" | "image/png" | "image/webp", byteSize: screenshot.byteSize, storageKey: screenshot.storageKey ?? undefined } : {}) },
+      file: screenshot,
     },
   };
 }
@@ -135,11 +132,11 @@ export async function listKnowledgeUrlSources(): Promise<KnowledgeUrlSourceListI
       id: facebookCaptureReviews.id,
       sourceId: facebookCaptureReviews.sourceId,
       status: facebookCaptureReviews.status,
-      rawMetadata: rawSourceMaterial.rawMetadata,
-      rawText: rawSourceMaterial.rawText,
+       rawMetadata: sourceCaptureVersions.rawMetadata,
+       rawText: sourceCaptureVersions.rawText,
     })
     .from(facebookCaptureReviews)
-    .innerJoin(rawSourceMaterial, eq(rawSourceMaterial.id, facebookCaptureReviews.rawSourceMaterialId))
+     .innerJoin(sourceCaptureVersions, eq(sourceCaptureVersions.id, facebookCaptureReviews.captureVersionId))
     .where(inArray(facebookCaptureReviews.sourceId, sourceIds));
   const cardRows = await db
     .select({ sourceId: knowledgeCardSources.sourceId, knowledgeCardId: knowledgeCards.id, title: knowledgeCards.title })

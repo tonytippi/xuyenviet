@@ -2,7 +2,7 @@ import { and, count, desc, eq, isNotNull, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
 import { sourceKnowledgeDraftExtractionPromptVersion } from "../ai/prompts";
-import { auditEvents, facebookCaptureReviews, knowledgeCards, knowledgeCardSources, rawSourceMaterial, schema, sources, type FacebookCaptureReviewStatus } from "../../db/schema";
+import { auditEvents, facebookCaptureReviews, knowledgeCards, knowledgeCardSources, rawSourceMaterial, schema, sourceCaptureVersions, sources, type FacebookCaptureReviewStatus } from "../../db/schema";
 import { lockFacebookCaptureResources } from "./facebook-capture-locks";
 
 export type FacebookCaptureReviewDb = Pick<PostgresJsDatabase<typeof schema>, "select" | "insert" | "update" | "execute">;
@@ -24,7 +24,7 @@ const allowedTransitionSourceStatuses: Record<Exclude<FacebookCaptureReviewStatu
 };
 
 function capturedRawTextCondition() {
-  return and(isNotNull(rawSourceMaterial.rawText), sql`length(btrim(${rawSourceMaterial.rawText})) > 0`);
+  return and(isNotNull(sourceCaptureVersions.rawText), sql`length(btrim(${sourceCaptureVersions.rawText})) > 0`);
 }
 
 function normalizeForOverlap(value: string) {
@@ -69,10 +69,10 @@ async function loadReviewById(db: FacebookCaptureReviewDb, reviewId: string) {
       forceLiveCapture: facebookCaptureReviews.forceLiveCapture,
       createdAt: facebookCaptureReviews.createdAt,
       updatedAt: facebookCaptureReviews.updatedAt,
-      rawText: rawSourceMaterial.rawText,
+       rawText: sourceCaptureVersions.rawText,
     })
     .from(facebookCaptureReviews)
-    .innerJoin(rawSourceMaterial, eq(rawSourceMaterial.id, facebookCaptureReviews.rawSourceMaterialId))
+      .leftJoin(sourceCaptureVersions, eq(sourceCaptureVersions.id, facebookCaptureReviews.captureVersionId))
     .where(eq(facebookCaptureReviews.id, reviewId))
     .limit(1);
   return review ?? null;
@@ -80,19 +80,21 @@ async function loadReviewById(db: FacebookCaptureReviewDb, reviewId: string) {
 
 export async function ensureFacebookCaptureReviewForCapturedSource(
   db: FacebookCaptureReviewDb,
-  input: { sourceId: string; rawSourceMaterialId: string; now?: Date },
+  input: { sourceId: string; rawSourceMaterialId: string; captureVersionId?: string; now?: Date },
 ) {
   const [existing] = await db.select().from(facebookCaptureReviews).where(eq(facebookCaptureReviews.sourceId, input.sourceId)).limit(1);
 
   if (existing) {
-    return { status: "exists" as const, review: existing };
+    const [review] = await db.update(facebookCaptureReviews).set({ ...(input.captureVersionId ? { captureVersionId: input.captureVersionId } : {}), status: "needs_review", reviewerUserId: null, reviewedAt: null, rejectionReason: null, extractionError: null, updatedAt: input.now }).where(eq(facebookCaptureReviews.id, existing.id)).returning();
+    return { status: "exists" as const, review };
   }
 
   const [reviewable] = await db
-    .select({ sourceId: sources.id, rawSourceMaterialId: rawSourceMaterial.id })
+    .select({ sourceId: sources.id, rawSourceMaterialId: rawSourceMaterial.id, captureVersionId: sourceCaptureVersions.id })
     .from(sources)
     .innerJoin(rawSourceMaterial, eq(rawSourceMaterial.sourceId, sources.id))
-    .where(and(eq(sources.id, input.sourceId), eq(sources.kind, "facebook"), eq(rawSourceMaterial.id, input.rawSourceMaterialId), capturedRawTextCondition()))
+    .innerJoin(sourceCaptureVersions, eq(sourceCaptureVersions.id, input.captureVersionId ?? sources.currentCaptureVersionId))
+    .where(and(eq(sources.id, input.sourceId), eq(sources.kind, "facebook"), eq(rawSourceMaterial.id, input.rawSourceMaterialId), eq(sourceCaptureVersions.sourceId, sources.id), capturedRawTextCondition()))
     .limit(1);
 
   if (!reviewable) {
@@ -104,6 +106,7 @@ export async function ensureFacebookCaptureReviewForCapturedSource(
     .values({
       sourceId: reviewable.sourceId,
       rawSourceMaterialId: reviewable.rawSourceMaterialId,
+      captureVersionId: reviewable.captureVersionId,
       status: "needs_review",
       createdAt: input.now,
       updatedAt: input.now,
@@ -146,18 +149,18 @@ export async function listFacebookCaptureReviews(db: FacebookCaptureReviewDb, in
       verificationStatus: sources.verificationStatus,
       official: sources.official,
       partner: sources.partner,
-      rawText: rawSourceMaterial.rawText,
-      captureMethod: sql<string | null>`${rawSourceMaterial.rawMetadata}->>'captureMethod'`,
-      capturedAt: sql<string | null>`${rawSourceMaterial.rawMetadata}->>'capturedAt'`,
-       finalUrl: sql<string | null>`${rawSourceMaterial.rawMetadata}->>'finalUrl'`,
-       authorText: sql<string | null>`${rawSourceMaterial.rawMetadata}->>'authorText'`,
-       groupName: sql<string | null>`${rawSourceMaterial.rawMetadata}->>'groupName'`,
-       timestampText: sql<string | null>`${rawSourceMaterial.rawMetadata}->>'timestampText'`,
-       postCreatedAt: sql<string | null>`${rawSourceMaterial.rawMetadata}->>'postCreatedAt'`,
+      rawText: sourceCaptureVersions.rawText,
+      captureMethod: sql<string | null>`${sourceCaptureVersions.rawMetadata}->>'captureMethod'`,
+      capturedAt: sql<string | null>`${sourceCaptureVersions.rawMetadata}->>'capturedAt'`,
+       finalUrl: sql<string | null>`${sourceCaptureVersions.rawMetadata}->>'finalUrl'`,
+       authorText: sql<string | null>`${sourceCaptureVersions.rawMetadata}->>'authorText'`,
+       groupName: sql<string | null>`${sourceCaptureVersions.rawMetadata}->>'groupName'`,
+       timestampText: sql<string | null>`${sourceCaptureVersions.rawMetadata}->>'timestampText'`,
+       postCreatedAt: sql<string | null>`${sourceCaptureVersions.rawMetadata}->>'postCreatedAt'`,
     })
     .from(facebookCaptureReviews)
     .innerJoin(sources, eq(sources.id, facebookCaptureReviews.sourceId))
-    .innerJoin(rawSourceMaterial, eq(rawSourceMaterial.id, facebookCaptureReviews.rawSourceMaterialId))
+    .innerJoin(sourceCaptureVersions, eq(sourceCaptureVersions.id, facebookCaptureReviews.captureVersionId))
     .where(and(statusCondition, rawTextCondition))
     .orderBy(desc(facebookCaptureReviews.updatedAt))
     .limit(limit)
@@ -175,7 +178,7 @@ export async function countFacebookCaptureReviewsByStatus(db: FacebookCaptureRev
   const rows = await db
     .select({ status: facebookCaptureReviews.status, count: count() })
     .from(facebookCaptureReviews)
-    .innerJoin(rawSourceMaterial, eq(rawSourceMaterial.id, facebookCaptureReviews.rawSourceMaterialId))
+    .innerJoin(sourceCaptureVersions, eq(sourceCaptureVersions.id, facebookCaptureReviews.captureVersionId))
     .where(capturedRawTextCondition())
     .groupBy(facebookCaptureReviews.status);
 
@@ -348,6 +351,7 @@ export async function reopenFacebookCaptureForRecapture(
         reviewedAt: null,
         rejectionReason: null,
         extractionError: null,
+        captureVersionId: null,
         forceLiveCapture: true,
         forceLiveCaptureGeneration: sql`${facebookCaptureReviews.forceLiveCaptureGeneration} + 1`,
         updatedAt: mutationTimestamp,
@@ -359,7 +363,7 @@ export async function reopenFacebookCaptureForRecapture(
       return { status: "stale_review" as const };
     }
 
-    await transaction.update(rawSourceMaterial).set({ rawText: null, rawMetadata: null }).where(eq(rawSourceMaterial.id, lockedReview.rawSourceMaterialId));
+    await transaction.update(sources).set({ currentCaptureVersionId: null }).where(eq(sources.id, lockedReview.sourceId));
 
     await transaction.insert(auditEvents).values({
       actorUserId: input.actor.userId,
@@ -426,6 +430,7 @@ export async function requestFacebookCaptureRecapture(
         reviewedAt: null,
         rejectionReason: null,
         extractionError: null,
+        captureVersionId: null,
         forceLiveCapture: true,
         forceLiveCaptureGeneration: sql`${facebookCaptureReviews.forceLiveCaptureGeneration} + 1`,
         updatedAt: mutationTimestamp,
@@ -437,7 +442,7 @@ export async function requestFacebookCaptureRecapture(
       return { status: "stale_review" as const };
     }
 
-    await transaction.update(rawSourceMaterial).set({ rawText: null, rawMetadata: null }).where(eq(rawSourceMaterial.id, lockedReview.rawSourceMaterialId));
+    await transaction.update(sources).set({ currentCaptureVersionId: null }).where(eq(sources.id, lockedReview.sourceId));
 
     await transaction.insert(auditEvents).values({
       actorUserId: input.actor.userId,

@@ -3,7 +3,7 @@ import "server-only";
 import { and, desc, eq, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { rawSourceMaterial, sources } from "@/db/schema";
+import { sourceCaptureVersions, sources } from "@/db/schema";
 import { getActiveKnowledgeExtractionJobForSource } from "@/features/knowledge/extraction-jobs";
 import { getExistingCardsForCaptureSource } from "@/features/knowledge/facebook-capture-review";
 import { parseStoredYoutubeEvidence } from "@/features/knowledge/youtube-capture";
@@ -36,7 +36,7 @@ export async function listAdminYoutubeCaptureReviews(input: { limit?: number; of
   const rows = await db
     .select(youtubeCaptureSelection)
     .from(sources)
-    .innerJoin(rawSourceMaterial, eq(rawSourceMaterial.sourceId, sources.id))
+     .innerJoin(sourceCaptureVersions, eq(sourceCaptureVersions.id, sources.currentCaptureVersionId))
     .where(eq(sources.kind, "youtube"))
     .orderBy(desc(sources.createdAt));
 
@@ -51,7 +51,7 @@ export async function countAdminYoutubeCaptureReviews() {
   const rows = await db
     .select(youtubeCaptureSelection)
     .from(sources)
-    .innerJoin(rawSourceMaterial, eq(rawSourceMaterial.sourceId, sources.id))
+     .innerJoin(sourceCaptureVersions, eq(sourceCaptureVersions.id, sources.currentCaptureVersionId))
     .where(eq(sources.kind, "youtube"));
 
   return (await hydrateCapturedRows(db, rows)).length;
@@ -66,7 +66,7 @@ export async function getAdminYoutubeCaptureReviewDetail(sourceId: string) {
   const [row] = await db
     .select(youtubeCaptureSelection)
     .from(sources)
-    .innerJoin(rawSourceMaterial, eq(rawSourceMaterial.sourceId, sources.id))
+     .innerJoin(sourceCaptureVersions, eq(sourceCaptureVersions.id, sources.currentCaptureVersionId))
     .where(and(eq(sources.id, normalizedSourceId), eq(sources.kind, "youtube")))
     .limit(1);
 
@@ -95,12 +95,12 @@ const youtubeCaptureSelection = {
   official: sources.official,
   partner: sources.partner,
   createdAt: sources.createdAt,
-  rawText: rawSourceMaterial.rawText,
-  captureMethod: sql<string | null>`${rawSourceMaterial.rawMetadata}->>'captureMethod'`,
-  capturedAt: sql<string | null>`${rawSourceMaterial.rawMetadata}->>'capturedAt'`,
-  model: sql<string | null>`${rawSourceMaterial.rawMetadata}->>'model'`,
-  promptVersion: sql<string | null>`${rawSourceMaterial.rawMetadata}->>'promptVersion'`,
-  evidenceCount: sql<string | null>`${rawSourceMaterial.rawMetadata}->>'evidenceCount'`,
+   rawText: sourceCaptureVersions.rawText,
+   captureMethod: sql<string | null>`${sourceCaptureVersions.rawMetadata}->>'captureMethod'`,
+   capturedAt: sql<string | null>`${sourceCaptureVersions.rawMetadata}->>'capturedAt'`,
+   model: sql<string | null>`${sourceCaptureVersions.rawMetadata}->>'model'`,
+   promptVersion: sql<string | null>`${sourceCaptureVersions.rawMetadata}->>'promptVersion'`,
+   evidenceCount: sql<string | null>`${sourceCaptureVersions.rawMetadata}->>'evidenceCount'`,
 };
 
 async function hydrateCapturedRows(db: ReturnType<typeof getDb>, rows: YoutubeCaptureRow[]) {

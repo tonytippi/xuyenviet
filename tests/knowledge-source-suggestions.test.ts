@@ -1,9 +1,10 @@
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { aiGatewayModels, aiUsageEvents, auditEvents, knowledgeCards, knowledgeCardSources, knowledgeSourceSuggestions, rawSourceMaterial, sources, userRoles, users, type UserRole } from "@/db/schema";
+import { aiGatewayModels, aiUsageEvents, auditEvents, knowledgeCards, knowledgeCardSources, knowledgeSourceSuggestions, sources, userRoles, users, type UserRole } from "@/db/schema";
 
 import { testDb } from "./helpers/db";
+import { seedSourceCaptureVersion } from "./helpers/source-captures";
 
 const authMock = vi.fn();
 
@@ -64,7 +65,7 @@ async function createUrlSource(userId: string, rawText = "Nguồn URL mô tả �
       submittedByUserId: userId,
     })
     .returning();
-  await testDb.insert(rawSourceMaterial).values({ sourceId: source.id, rawText, rawMetadata: { provider_payload: "hidden-provider" } });
+  await seedSourceCaptureVersion({ sourceId: source.id, captureKind: "url", rawText, rawMetadata: { kind: "submitted", provider_payload: "hidden-provider" } });
   return source;
 }
 
@@ -208,7 +209,7 @@ describe("knowledge source suggestions", () => {
     await createUser("failure-operator", ["operator"]);
     authMock.mockResolvedValue({ user: { id: "failure-operator", email: "failure-operator@example.com" } });
     const [textSource] = await testDb.insert(sources).values({ kind: "copied_post", label: "Copied", sourceType: "community", submittedByUserId: "failure-operator" }).returning();
-    await testDb.insert(rawSourceMaterial).values({ sourceId: textSource.id, rawText: "raw" });
+    await seedSourceCaptureVersion({ sourceId: textSource.id, captureKind: "copied_post", rawText: "raw" });
     const { suggestKnowledgeFromSourceUrl } = await import("@/features/knowledge/actions");
 
     await expect(suggestKnowledgeFromSourceUrl(textSource.id)).rejects.toMatchObject({ code: "unsupported_material" });

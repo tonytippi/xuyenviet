@@ -254,12 +254,15 @@ export const sources = pgTable(
     submittedByUserId: text("submitted_by_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),
+    currentCaptureVersionId: text("current_capture_version_id"),
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
   },
   (source) => [
     index("sources_kind_created_at_idx").on(source.kind, source.createdAt),
     index("sources_canonical_url_idx").on(source.canonicalUrl),
     index("sources_submitted_by_user_id_idx").on(source.submittedByUserId),
+    index("sources_current_capture_version_id_idx").on(source.currentCaptureVersionId),
+    uniqueIndex("sources_id_current_capture_version_id_idx").on(source.id, source.currentCaptureVersionId),
     check("sources_kind_check", sql`${source.kind} in ('url', 'facebook', 'youtube', 'copied_post', 'pasted_text', 'screenshot')`),
     check("sources_source_type_check", sql`${source.sourceType} in ('curated', 'community')`),
     check("sources_verification_status_check", sql`${source.verificationStatus} in ('unverified', 'verified')`),
@@ -270,6 +273,41 @@ export const sources = pgTable(
     check("sources_no_url_for_textual_kind_check", sql`${source.kind} not in ('copied_post', 'pasted_text', 'screenshot') or ${source.url} is null`),
     check("sources_community_defaults_check", sql`${source.sourceType} <> 'community' or (${source.verificationStatus} = 'unverified' and ${source.official} = false and ${source.partner} = false)`),
     check("sources_youtube_defaults_check", sql`${source.kind} <> 'youtube' or (${source.sourceType} = 'community' and ${source.verificationStatus} = 'unverified' and ${source.official} = false and ${source.partner} = false)`),
+  ],
+);
+
+export const sourceCaptureVersions = pgTable(
+  "source_capture_versions",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    sourceId: text("source_id")
+      .notNull()
+      .references(() => sources.id, { onDelete: "restrict" }),
+    versionSequence: integer("version_sequence").notNull(),
+    captureKind: text("capture_kind").$type<SourceKind>().notNull(),
+    rawText: text("raw_text"),
+    fileName: text("file_name"),
+    mimeType: text("mime_type"),
+    byteSize: integer("byte_size"),
+    storageKey: text("storage_key"),
+    rawMetadata: jsonb("raw_metadata").$type<Record<string, unknown>>(),
+    contentHash: text("content_hash").notNull(),
+    capturedAt: timestamp("captured_at", { mode: "date" }).notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+    payloadDeletedAt: timestamp("payload_deleted_at", { mode: "date" }),
+  },
+  (version) => [
+    uniqueIndex("source_capture_versions_id_source_id_idx").on(version.id, version.sourceId),
+    uniqueIndex("source_capture_versions_source_sequence_idx").on(version.sourceId, version.versionSequence),
+    index("source_capture_versions_source_captured_at_idx").on(version.sourceId, version.capturedAt),
+    index("source_capture_versions_retention_idx").on(version.captureKind, version.capturedAt).where(sql`${version.payloadDeletedAt} is null`),
+    check("source_capture_versions_sequence_check", sql`${version.versionSequence} >= 1`),
+    check("source_capture_versions_hash_check", sql`${version.contentHash} ~ '^[a-f0-9]{64}$'`),
+    check("source_capture_versions_kind_check", sql`${version.captureKind} in ('url', 'facebook', 'youtube', 'copied_post', 'pasted_text', 'screenshot')`),
+    check("source_capture_versions_text_length_check", sql`${version.rawText} is null or (length(btrim(${version.rawText})) > 0 and char_length(${version.rawText}) <= 120000)`),
+    check("source_capture_versions_tombstone_shape_check", sql`${version.payloadDeletedAt} is null or (${version.rawText} is null and ${version.fileName} is null and ${version.mimeType} is null and ${version.byteSize} is null and ${version.storageKey} is null and ${version.rawMetadata} is null)`),
   ],
 );
 
@@ -313,6 +351,7 @@ export const facebookCaptureReviews = pgTable(
       .notNull()
       .references(() => sources.id, { onDelete: "restrict" }),
     rawSourceMaterialId: text("raw_source_material_id").notNull(),
+    captureVersionId: text("capture_version_id"),
     status: text("status").$type<FacebookCaptureReviewStatus>().default("needs_review").notNull(),
     reviewerUserId: text("reviewer_user_id").references(() => users.id, { onDelete: "restrict" }),
     reviewedAt: timestamp("reviewed_at", { mode: "date" }),
@@ -326,11 +365,17 @@ export const facebookCaptureReviews = pgTable(
   (review) => [
     uniqueIndex("facebook_capture_reviews_source_id_idx").on(review.sourceId),
     index("facebook_capture_reviews_raw_material_id_idx").on(review.rawSourceMaterialId),
+    index("facebook_capture_reviews_capture_version_id_idx").on(review.captureVersionId),
     index("facebook_capture_reviews_status_updated_at_idx").on(review.status, review.updatedAt),
     foreignKey({
       columns: [review.rawSourceMaterialId],
       foreignColumns: [rawSourceMaterial.id],
       name: "facebook_capture_reviews_raw_material_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [review.captureVersionId, review.sourceId],
+      foreignColumns: [sourceCaptureVersions.id, sourceCaptureVersions.sourceId],
+      name: "facebook_capture_reviews_capture_version_source_fk",
     }).onDelete("restrict"),
     check("facebook_capture_reviews_status_check", sql`${review.status} in ('needs_review', 'rejected', 'extracted', 'extracted_approved', 'extraction_failed')`),
     check("facebook_capture_reviews_rejection_reason_check", sql`${review.rejectionReason} is null or (${review.status} = 'rejected' and length(btrim(${review.rejectionReason})) between 1 and 500 and position(chr(10) in ${review.rejectionReason}) = 0 and position(chr(13) in ${review.rejectionReason}) = 0)`),
@@ -350,6 +395,7 @@ export const knowledgeExtractionJobs = pgTable(
       .notNull()
       .references(() => sources.id, { onDelete: "restrict" }),
     facebookCaptureReviewId: text("facebook_capture_review_id").references(() => facebookCaptureReviews.id, { onDelete: "set null" }),
+    captureVersionId: text("capture_version_id"),
     mode: text("mode").$type<KnowledgeExtractionJobMode>().notNull(),
     status: text("status").$type<KnowledgeExtractionJobStatus>().default("queued").notNull(),
     attemptCount: integer("attempt_count").default(0).notNull(),
@@ -374,7 +420,13 @@ export const knowledgeExtractionJobs = pgTable(
     index("knowledge_extraction_jobs_queue_idx").on(job.status, job.nextRunAt, job.createdAt),
     index("knowledge_extraction_jobs_source_status_idx").on(job.sourceId, job.status),
     index("knowledge_extraction_jobs_review_status_idx").on(job.facebookCaptureReviewId, job.status),
+    index("knowledge_extraction_jobs_capture_version_id_idx").on(job.captureVersionId),
     index("knowledge_extraction_jobs_stale_running_idx").on(job.status, job.lockedAt),
+    foreignKey({
+      columns: [job.captureVersionId, job.sourceId],
+      foreignColumns: [sourceCaptureVersions.id, sourceCaptureVersions.sourceId],
+      name: "knowledge_extraction_jobs_capture_version_source_fk",
+    }).onDelete("restrict"),
     check("knowledge_extraction_jobs_mode_check", sql`${job.mode} in ('extract_only', 'extract_and_approve_all')`),
     check("knowledge_extraction_jobs_status_check", sql`${job.status} in ('queued', 'running', 'succeeded', 'failed', 'cancelled')`),
     check("knowledge_extraction_jobs_attempt_count_check", sql`${job.attemptCount} >= 0 and ${job.attemptCount} <= ${job.maxAttempts}`),
@@ -1288,6 +1340,7 @@ export const schema = {
   userRoles,
   auditEvents,
   sources,
+  sourceCaptureVersions,
   rawSourceMaterial,
   facebookCaptureReviews,
   knowledgeExtractionJobs,

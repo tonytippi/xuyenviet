@@ -1,10 +1,11 @@
-import { and, asc, eq, isNull, or, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
-import { auditEvents, facebookCaptureReviews, rawSourceMaterial, schema, sources } from "../../db/schema";
+import { auditEvents, facebookCaptureReviews, rawSourceMaterial, schema, sourceCaptureVersions, sources } from "../../db/schema";
 import { canonicalizeFacebookUrl } from "./capture-identity";
 import { lockFacebookCaptureResources } from "./facebook-capture-locks";
 import { ensureFacebookCaptureReviewForCapturedSource } from "./facebook-capture-review";
+import { appendSourceCaptureVersion, type FacebookCaptureMetadata } from "./source-captures";
 
 export type FacebookCaptureDb = PostgresJsDatabase<typeof schema>;
 
@@ -50,7 +51,6 @@ export type DiscoveredFacebookPost = {
 };
 
 const DEFAULT_QUEUE_LIMIT = 5;
-const MAX_RAW_TEXT_LENGTH = 20_000;
 const MAX_METADATA_STRING_LENGTH = 500;
 const MAX_DISCOVERED_POSTS_PER_CAPTURE = 20;
 const unsafeMetadataKeyPattern = /cookie|token|password|localstorage|local_storage|html|profile|storage|secret/i;
@@ -63,12 +63,12 @@ const safeMetadataKeys = new Set<keyof SafeFacebookCaptureMetadata>([
   "groupName",
   "timestampText",
   "postCreatedAt",
-  "diagnostics", "captureOrigin", "captureArtifactId", "importedAt", "importCorrelationToken", "captureMethodVersion", "payloadSchemaVersion", "captureActorId", "importActorId",
+  "captureOrigin", "captureArtifactId", "importCorrelationToken", "captureMethodVersion", "payloadSchemaVersion", "captureActorId", "importActorId",
 ]);
 
 function queuedRawTextCondition() {
   return and(
-    or(isNull(rawSourceMaterial.rawText), sql`length(btrim(${rawSourceMaterial.rawText})) = 0`),
+    isNull(sources.currentCaptureVersionId),
     sql`${rawSourceMaterial.rawMetadata}->>'duplicateSourceId' is null`,
   );
 }
@@ -140,20 +140,6 @@ function sanitizeCaptureMetadata(metadata: SafeFacebookCaptureMetadata & Record<
   return sanitized as SafeFacebookCaptureMetadata;
 }
 
-function normalizeRawText(rawText: string) {
-  const text = rawText.trim();
-
-  if (!text) {
-    throw new Error("Captured Facebook text is empty.");
-  }
-
-  if (text.length > MAX_RAW_TEXT_LENGTH) {
-    return text.slice(0, MAX_RAW_TEXT_LENGTH).trimEnd();
-  }
-
-  return text;
-}
-
 export async function listQueuedFacebookSources(db: FacebookCaptureDb, input: { sourceId?: string; limit?: number } = {}): Promise<QueuedFacebookSource[]> {
   const queuedSourceRows = await db
     .select({ sourceId: sources.id, rawMaterialId: rawSourceMaterial.id })
@@ -206,7 +192,6 @@ export async function updateQueuedFacebookSourceRawText(
     expectedForceLiveCaptureGeneration?: number;
   },
 ) {
-  const rawText = normalizeRawText(input.rawText);
   const canonicalFinalUrl = canonicalizeFacebookUrl(input.captureMetadata.finalUrl);
   const discoveredPosts = input.actor && input.sourceUrl
     ? normalizeDiscoveredFacebookPosts(input.discoveredUrls ?? [], input.sourceUrl)
@@ -289,20 +274,14 @@ export async function updateQueuedFacebookSourceRawText(
       }
     }
 
-    const rawMetadata = {
-      ...sanitizeExistingRawMetadata(queued.rawMetadata),
-      ...sanitizeCaptureMetadata(input.captureMetadata),
-    };
-
-    const updated = await transaction
-      .update(rawSourceMaterial)
-      .set({ rawText, rawMetadata })
-      .where(and(eq(rawSourceMaterial.id, queued.rawMaterialId), queuedRawTextCondition()))
-      .returning({ id: rawSourceMaterial.id });
-
-    if (updated.length === 0) {
-      return { status: "no_longer_queued" as const };
-    }
+    const rawMetadata = sanitizeCaptureMetadata(input.captureMetadata);
+    const version = await appendSourceCaptureVersion(transaction, {
+      sourceId: queued.sourceId,
+      captureKind: "facebook",
+      rawText: input.rawText,
+      metadata: { ...rawMetadata, kind: "facebook_operator" } as FacebookCaptureMetadata,
+      capturedAt: new Date(input.captureMetadata.capturedAt),
+    });
 
     if (canonicalFinalUrl) {
       await transaction
@@ -314,6 +293,7 @@ export async function updateQueuedFacebookSourceRawText(
     const review = await ensureFacebookCaptureReviewForCapturedSource(transaction, {
       sourceId: queued.sourceId,
       rawSourceMaterialId: queued.rawMaterialId,
+      captureVersionId: version.id,
       now: input.now,
     });
 
@@ -336,10 +316,10 @@ export async function updateQueuedFacebookSourceRawText(
         actorUserId: input.actor.userId,
         actorEmail: input.actor.email,
         operation: "update",
-        targetType: "raw_source_material",
-        targetId: queued.rawMaterialId,
-        beforeSummary: `Facebook capture raw text present: false; method: ${rawMetadata.captureMethod}`,
-        afterSummary: `Facebook capture raw text present: true; method: ${rawMetadata.captureMethod}; capturedAt: ${rawMetadata.capturedAt}`,
+        targetType: "source_capture_version",
+        targetId: version.id,
+        beforeSummary: `Facebook capture version appended; method: ${rawMetadata.captureMethod}`,
+        afterSummary: `Facebook capture version appended; capturedAt: ${rawMetadata.capturedAt}`,
         createdAt: input.now,
       });
     }
@@ -353,12 +333,12 @@ export async function updateQueuedFacebookSourceRawText(
         }, discoveredPosts, true)
       : { queuedCount: 0, duplicateCount: 0 };
 
-    return { status: "updated" as const, rawMaterialId: updated[0].id, reviewId: review.review.id, discovered };
+    return { status: "updated" as const, rawMaterialId: queued.rawMaterialId, captureVersionId: version.id, reviewId: review.review.id, discovered };
   });
 }
 
 export async function findFacebookCaptureImportByCorrelationToken(db: FacebookCaptureDb, input: { sourceId: string; correlationToken: string }) {
-  const [row] = await db.select({ id: rawSourceMaterial.id }).from(rawSourceMaterial).where(and(eq(rawSourceMaterial.sourceId, input.sourceId), sql`${rawSourceMaterial.rawMetadata}->>'importCorrelationToken' = ${input.correlationToken}`)).limit(1);
+  const [row] = await db.select({ id: sourceCaptureVersions.id }).from(sourceCaptureVersions).where(and(eq(sourceCaptureVersions.sourceId, input.sourceId), sql`${sourceCaptureVersions.rawMetadata}->>'importCorrelationToken' = ${input.correlationToken}`)).limit(1);
   return Boolean(row);
 }
 

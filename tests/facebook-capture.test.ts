@@ -1,11 +1,12 @@
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test } from "vitest";
 
-import { auditEvents, knowledgeCards, knowledgeCardSources, rawSourceMaterial, sources, users } from "@/db/schema";
+import { auditEvents, knowledgeCards, knowledgeCardSources, rawSourceMaterial, sourceCaptureVersions, sources, users } from "@/db/schema";
 import { listQueuedFacebookSources, normalizeDiscoveredFacebookPosts, queueDiscoveredFacebookPosts, recordFacebookCaptureFailure, updateQueuedFacebookSourceRawText } from "@/features/knowledge/facebook-capture";
 import { facebookCaptureLockIds } from "@/features/knowledge/facebook-capture-locks";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
+import { seedSourceCaptureVersion } from "./helpers/source-captures";
 
 async function createOperator() {
   await testDb.insert(users).values({ id: "operator-user", email: "operator@example.com" });
@@ -37,9 +38,10 @@ async function createSource(input: {
   await testDb.insert(rawSourceMaterial).values({
     id: `raw-${input.id}`,
     sourceId: input.id,
-    rawText: input.rawText ?? null,
+    rawText: null,
     rawMetadata: input.rawMetadata,
   });
+  if (input.rawText) await seedSourceCaptureVersion({ sourceId: input.id, rawText: input.rawText, rawMetadata: input.rawMetadata, captureKind: input.kind });
 }
 
 describe("Facebook capture queue", () => {
@@ -48,7 +50,7 @@ describe("Facebook capture queue", () => {
     await createOperator();
   });
 
-  test("lists only queued Facebook sources with null raw text", async () => {
+  test("lists only queued Facebook sources without a current capture version", async () => {
     await createSource({ id: "queued-null", kind: "facebook", rawText: null });
     await createSource({ id: "already-captured", kind: "facebook", rawText: "Existing post text" });
     await createSource({ id: "regular-url", kind: "url", rawText: null });
@@ -68,7 +70,7 @@ describe("Facebook capture queue", () => {
     await expect(listQueuedFacebookSources(testDb, { sourceId: "done-facebook" })).resolves.toEqual([]);
   });
 
-  test("updates the existing raw material row with safe metadata and audit summary", async () => {
+  test("appends a capture version with safe metadata and audit summary", async () => {
     await createSource({ id: "queued-facebook", kind: "facebook", rawText: null, rawMetadata: { submittedFrom: "intake" } });
 
     const result = await updateQueuedFacebookSourceRawText(testDb, {
@@ -92,11 +94,12 @@ describe("Facebook capture queue", () => {
     });
 
     expect(result.status).toBe("updated");
+    expect(result.captureVersionId).toBeDefined();
 
-    const [raw] = await testDb.select().from(rawSourceMaterial).where(eq(rawSourceMaterial.sourceId, "queued-facebook"));
+    const [raw] = await testDb.select().from(sourceCaptureVersions).where(eq(sourceCaptureVersions.id, result.captureVersionId!));
     expect(raw.rawText).toBe("Nội dung bài viết Facebook về điểm dừng chân.");
     expect(raw.rawMetadata).toMatchObject({
-      submittedFrom: "intake",
+      kind: "facebook_operator",
       captureMethod: "playwright_operator_browser",
       capturedAt: "2026-07-10T00:00:00.000Z",
       sourceUrl: "https://facebook.com/groups/xuyenviet/posts/queued-facebook",
@@ -113,8 +116,8 @@ describe("Facebook capture queue", () => {
     const [source] = await testDb.select().from(sources).where(eq(sources.id, "queued-facebook"));
     expect(source).toMatchObject({ sourceType: "community", verificationStatus: "unverified", official: false, partner: false });
 
-    const [audit] = await testDb.select().from(auditEvents).where(eq(auditEvents.targetType, "raw_source_material"));
-    expect(audit).toMatchObject({ operation: "update", targetId: "raw-queued-facebook" });
+    const [audit] = await testDb.select().from(auditEvents).where(eq(auditEvents.targetType, "source_capture_version"));
+    expect(audit).toMatchObject({ operation: "update", targetId: result.captureVersionId });
     expect(audit.beforeSummary).not.toContain("Nội dung bài viết");
     expect(audit.afterSummary).not.toContain("Nội dung bài viết");
   });
@@ -198,16 +201,16 @@ describe("Facebook capture queue", () => {
       actor: { userId: "operator-user", email: "operator@example.com" },
     });
 
-    const [raw] = await testDb.select().from(rawSourceMaterial).where(eq(rawSourceMaterial.sourceId, "metadata-facebook"));
+    const [raw] = await testDb.select().from(sourceCaptureVersions).where(eq(sourceCaptureVersions.sourceId, "metadata-facebook"));
 
-    expect(raw.rawMetadata).toMatchObject({ submittedFrom: "intake", diagnostics: { textLength: 26 } });
+    expect(raw.rawMetadata).toMatchObject({ kind: "facebook_operator" });
     expect(raw.rawMetadata).not.toHaveProperty("cookies");
   });
 
   test("does not overwrite raw text if the row is no longer queued", async () => {
     await createSource({ id: "race-facebook", kind: "facebook", rawText: null });
 
-    await testDb.update(rawSourceMaterial).set({ rawText: "Captured by another process" }).where(eq(rawSourceMaterial.sourceId, "race-facebook"));
+    await seedSourceCaptureVersion({ sourceId: "race-facebook", rawText: "Captured by another process" });
 
     const result = await updateQueuedFacebookSourceRawText(testDb, {
       sourceId: "race-facebook",
@@ -216,7 +219,7 @@ describe("Facebook capture queue", () => {
     });
 
     expect(result).toEqual({ status: "not_queued" });
-    await expect(testDb.select().from(rawSourceMaterial).where(eq(rawSourceMaterial.sourceId, "race-facebook"))).resolves.toMatchObject([
+    await expect(testDb.select().from(sourceCaptureVersions).where(eq(sourceCaptureVersions.sourceId, "race-facebook"))).resolves.toMatchObject([
       { rawText: "Captured by another process" },
     ]);
     await expect(testDb.select().from(auditEvents)).resolves.toHaveLength(0);
@@ -226,7 +229,7 @@ describe("Facebook capture queue", () => {
     await createSource({ id: "blocked-facebook", kind: "facebook", rawText: null });
 
     expect(recordFacebookCaptureFailure("blocked-facebook", "login_required")).toEqual({ sourceId: "blocked-facebook", status: "failed", reason: "login_required" });
-    await expect(testDb.select().from(rawSourceMaterial).where(eq(rawSourceMaterial.sourceId, "blocked-facebook"))).resolves.toMatchObject([{ rawText: null }]);
+    await expect(testDb.select().from(sourceCaptureVersions).where(eq(sourceCaptureVersions.sourceId, "blocked-facebook"))).resolves.toEqual([]);
   });
 
   test("queues shared Facebook post links and skips sources already present", async () => {
@@ -359,7 +362,7 @@ describe("Facebook capture queue", () => {
       actor: { userId: "operator-user", email: "operator@example.com" },
     });
 
-    const [raw] = await testDb.select().from(rawSourceMaterial).where(eq(rawSourceMaterial.sourceId, "handoff-facebook"));
+    const [raw] = await testDb.select().from(sourceCaptureVersions).where(eq(sourceCaptureVersions.sourceId, "handoff-facebook"));
     expect(raw.rawText?.trim()).toBe("Bài viết nói rằng đoạn nghỉ Đồng Hới phù hợp cho gia đình tự lái.");
 
     await testDb.insert(knowledgeCards).values({

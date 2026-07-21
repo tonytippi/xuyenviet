@@ -1,11 +1,12 @@
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { aiUsageEvents, auditEvents, facebookCaptureReviews, knowledgeCards, rawSourceMaterial, sources, userRoles, users, type UserRole } from "@/db/schema";
+import { aiUsageEvents, auditEvents, facebookCaptureReviews, knowledgeCards, rawSourceMaterial, sourceCaptureVersions, sources, userRoles, users, type UserRole } from "@/db/schema";
 import { ensureFacebookCaptureReviewForCapturedSource, listFacebookCaptureReviews, markFacebookCaptureReviewStatus } from "@/features/knowledge/facebook-capture-review";
 import { listQueuedFacebookSources } from "@/features/knowledge/facebook-capture";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
+import { seedSourceCaptureVersion } from "./helpers/source-captures";
 
 const authMock = vi.fn();
 
@@ -36,7 +37,8 @@ async function createCapturedFacebookReview(input: { id: string; rawText: string
     partner: false,
     submittedByUserId: "operator-user",
   });
-  await testDb.insert(rawSourceMaterial).values({ id: `raw-${input.id}`, sourceId: input.id, rawText: input.rawText });
+  await testDb.insert(rawSourceMaterial).values({ id: `raw-${input.id}`, sourceId: input.id });
+  await seedSourceCaptureVersion({ sourceId: input.id, rawText: input.rawText });
   const ensured = await ensureFacebookCaptureReviewForCapturedSource(testDb, { sourceId: input.id, rawSourceMaterialId: `raw-${input.id}`, now: new Date("2026-07-13T00:00:00.000Z") });
   if (ensured.status !== "created") {
     throw new Error("test setup failed");
@@ -104,7 +106,8 @@ describe("Facebook capture reject and reopen actions", () => {
 
     await expect(requestFacebookCaptureRecaptureForm(formData({ reviewId: review.id, recaptureReason: "Capture script selected incomplete text" }))).rejects.toThrow(/NEXT_REDIRECT:.*recaptureRequested=1/);
 
-    await expect(testDb.select().from(rawSourceMaterial).where(eq(rawSourceMaterial.id, review.rawSourceMaterialId))).resolves.toMatchObject([{ rawText: null }]);
+    if (!review.captureVersionId) throw new Error("Expected capture version");
+    await expect(testDb.select().from(sourceCaptureVersions).where(eq(sourceCaptureVersions.id, review.captureVersionId))).resolves.toMatchObject([{ rawText: "Raw text selected from the wrong Facebook post." }]);
     await expect(testDb.select().from(facebookCaptureReviews).where(eq(facebookCaptureReviews.id, review.id))).resolves.toMatchObject([{ status: "needs_review", rejectionReason: null }]);
     await expect(listQueuedFacebookSources(testDb, { sourceId: review.sourceId })).resolves.toMatchObject([{ sourceId: review.sourceId, rawMaterialId: review.rawSourceMaterialId }]);
     await expect(listFacebookCaptureReviews(testDb, { status: "needs_review" })).resolves.toEqual([]);

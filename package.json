@@ -19,7 +19,8 @@
     "youtube:capture": "tsx scripts/youtube-capture.ts",
     "capture-cache:migrate": "tsx scripts/capture-cache-migrate.ts",
     "knowledge:extraction-worker": "node --conditions react-server --import tsx scripts/knowledge-extraction-worker.ts",
-    "knowledge:indexing-worker": "node --conditions react-server --import tsx scripts/knowledge-indexing-worker.ts"
+    "knowledge:indexing-worker": "node --conditions react-server --import tsx scripts/knowledge-indexing-worker.ts",
+    "knowledge:source-retention": "node --conditions react-server --import tsx scripts/knowledge-source-retention.ts"
   },
   "dependencies": {
     "@auth/drizzle-adapter": "^1.11.2",

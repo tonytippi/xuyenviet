@@ -2,10 +2,11 @@ import { eq } from "drizzle-orm";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { facebookCaptureReviews, knowledgeCards, knowledgeCardSources, knowledgeExtractionJobs, rawSourceMaterial, sources, userRoles, users, type UserRole } from "@/db/schema";
+import { facebookCaptureReviews, knowledgeCards, knowledgeCardSources, knowledgeExtractionJobs, rawSourceMaterial, sourceCaptureVersions, sources, userRoles, users, type UserRole } from "@/db/schema";
 import { ensureFacebookCaptureReviewForCapturedSource, markFacebookCaptureReviewStatus } from "@/features/knowledge/facebook-capture-review";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
+import { seedSourceCaptureVersion } from "./helpers/source-captures";
 
 const authMock = vi.fn();
 
@@ -39,9 +40,10 @@ async function createCapturedFacebookSource(input: { id: string; rawText: string
   await testDb.insert(rawSourceMaterial).values({
     id: `raw-${input.id}`,
     sourceId: input.id,
-    rawText: input.rawText,
+    rawText: null,
     rawMetadata: input.rawMetadata,
   });
+  await seedSourceCaptureVersion({ sourceId: input.id, rawText: input.rawText, rawMetadata: input.rawMetadata });
   const ensured = await ensureFacebookCaptureReviewForCapturedSource(testDb, { sourceId: input.id, rawSourceMaterialId: `raw-${input.id}`, now: new Date("2026-07-13T00:00:00.000Z") });
   if (ensured.status !== "created") {
     throw new Error("test setup failed");
@@ -334,18 +336,22 @@ describe("admin Facebook capture review helpers", () => {
     await testDb.insert(rawSourceMaterial).values({
       id: "raw-newer-facebook-source",
       sourceId: "newer-facebook-source",
-      rawText: "Captured Facebook text for intake status.",
-      rawMetadata: { authorText: "Tác giả cộng đồng", timestampText: "Hôm qua" },
     });
     await testDb.insert(rawSourceMaterial).values({
       id: "raw-captured-only-facebook-source",
       sourceId: "captured-only-facebook-source",
-      rawText: "Captured-only Facebook text for intake title.",
     });
+    await seedSourceCaptureVersion({
+      sourceId: "newer-facebook-source",
+      rawText: "Captured Facebook text for intake status.",
+      rawMetadata: { authorText: "Tác giả cộng đồng", timestampText: "Hôm qua" },
+    });
+    await seedSourceCaptureVersion({ sourceId: "captured-only-facebook-source", rawText: "Captured-only Facebook text for intake title." });
     await testDb.insert(facebookCaptureReviews).values({
       id: "review-newer-facebook-source",
       sourceId: "newer-facebook-source",
       rawSourceMaterialId: "raw-newer-facebook-source",
+      captureVersionId: (await testDb.select({ id: sourceCaptureVersions.id }).from(sourceCaptureVersions).where(eq(sourceCaptureVersions.sourceId, "newer-facebook-source")))[0].id,
       status: "extracted",
       reviewerUserId: "operator-user",
       reviewedAt: new Date("2026-07-13T03:00:00.000Z"),
@@ -356,6 +362,7 @@ describe("admin Facebook capture review helpers", () => {
       id: "review-captured-only-facebook-source",
       sourceId: "captured-only-facebook-source",
       rawSourceMaterialId: "raw-captured-only-facebook-source",
+      captureVersionId: (await testDb.select({ id: sourceCaptureVersions.id }).from(sourceCaptureVersions).where(eq(sourceCaptureVersions.sourceId, "captured-only-facebook-source")))[0].id,
       status: "needs_review",
       createdAt: new Date("2026-07-13T01:45:00.000Z"),
       updatedAt: new Date("2026-07-13T01:45:00.000Z"),
