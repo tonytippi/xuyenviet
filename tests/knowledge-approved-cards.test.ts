@@ -179,7 +179,7 @@ describe("approved knowledge cards", () => {
     expect(serialized).not.toContain("aiGatewayModelId");
   });
 
-  test("approved reads exclude non-approved and source-orphaned cards", async () => {
+  test("approved reads partition evidence-less legacy cards instead of presenting them as indexable", async () => {
     await createUser("lifecycle-operator", ["operator"]);
     authMock.mockResolvedValue({ user: { id: "lifecycle-operator", email: "lifecycle-operator@example.com" } });
     const source = await createSource("lifecycle-operator");
@@ -196,12 +196,17 @@ describe("approved knowledge cards", () => {
     ]);
     const { getApprovedKnowledgeCard, listApprovedKnowledgeCards } = await import("@/features/knowledge/review");
 
-    await expect(listApprovedKnowledgeCards()).resolves.toMatchObject([{ id: approved.id }]);
+    const { getApprovedKnowledgeIndexStatuses, listApprovedKnowledgeCardsWithIndexStatus } = await import("@/features/knowledge/review");
+
+    await expect(listApprovedKnowledgeCards()).resolves.toEqual(expect.arrayContaining([expect.objectContaining({ id: approved.id }), expect.objectContaining({ id: orphaned.id })]));
     await expect(getApprovedKnowledgeCard(approved.id)).resolves.toMatchObject({ id: approved.id, status: "approved" });
     await expect(getApprovedKnowledgeCard(archived.id)).resolves.toBeNull();
     await expect(getApprovedKnowledgeCard(rejected.id)).resolves.toBeNull();
-    await expect(getApprovedKnowledgeCard(orphaned.id)).resolves.toBeNull();
+    await expect(getApprovedKnowledgeCard(orphaned.id)).resolves.toMatchObject({ id: orphaned.id, sources: [] });
     await expect(getApprovedKnowledgeCard(inconsistent.id)).resolves.toBeNull();
+    const cards = await listApprovedKnowledgeCardsWithIndexStatus();
+    expect(cards.find((card) => card.id === orphaned.id)?.indexStatus).toMatchObject({ state: "evidence_pending", documentStatus: null });
+    await expect(getApprovedKnowledgeIndexStatuses([orphaned.id])).resolves.toEqual(new Map([[orphaned.id, expect.objectContaining({ state: "evidence_pending" })]]));
   });
 
   test("approved list reports worker-owned index status", async () => {
@@ -222,12 +227,12 @@ describe("approved knowledge cards", () => {
     const cards = await listApprovedKnowledgeCardsWithIndexStatus();
     const statuses = new Map(cards.map((card) => [card.id, card.indexStatus.state]));
 
-    expect(statuses.get(indexed.id)).toBe("indexed");
-    expect(statuses.get(missing.id)).toBe("needs_indexing");
-    expect(statuses.get(stale.id)).toBe("stale_index");
+    expect(statuses.get(indexed.id)).toBe("evidence_pending");
+    expect(statuses.get(missing.id)).toBe("evidence_pending");
+    expect(statuses.get(stale.id)).toBe("evidence_pending");
     const selectedStatuses = await getApprovedKnowledgeIndexStatuses([indexed.id, missing.id]);
-    expect(selectedStatuses.get(indexed.id)).toMatchObject({ state: "indexed", documentStatus: "active" });
-    expect(selectedStatuses.get(missing.id)).toMatchObject({ state: "needs_indexing", documentStatus: null });
+    expect(selectedStatuses.get(indexed.id)).toMatchObject({ state: "evidence_pending", documentStatus: null });
+    expect(selectedStatuses.get(missing.id)).toMatchObject({ state: "evidence_pending", documentStatus: null });
   });
 
   test("approved reads authorize before lookup and do not leak existence", async () => {

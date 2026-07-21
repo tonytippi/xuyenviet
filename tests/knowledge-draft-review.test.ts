@@ -172,7 +172,7 @@ describe("knowledge draft review", () => {
     await expect(testDb.select().from(auditEvents)).resolves.toMatchObject([{ operation: "update", targetType: "knowledge_draft", targetId: draft.id }]);
   });
 
-  test("approve sets retrieval-eligible approved lifecycle, removes draft from queue, preserves source link, and audits safely", async () => {
+  test("approve synchronizes legacy and state-model lifecycle while retrieval remains evidence-gated", async () => {
     await createUser("approve-operator", ["operator"]);
     authMock.mockResolvedValue({ user: { id: "approve-operator", email: "approve-operator@example.com" } });
     const { draft, source } = await createDraft("approve-operator", {
@@ -191,6 +191,11 @@ describe("knowledge draft review", () => {
         confidence: "community",
         freshnessSensitive: true,
         needsReview: false,
+        publicationState: "active",
+        knowledgeState: "uncertain",
+        reviewState: "reviewed",
+        verificationState: "not_required",
+        contentVersion: 2,
       },
     ]);
     await expect(listKnowledgeDraftsForReview()).resolves.toHaveLength(0);
@@ -199,7 +204,7 @@ describe("knowledge draft review", () => {
     const audits = await testDb.select().from(auditEvents);
     expect(audits).toMatchObject([{ operation: "approve", targetType: "knowledge_draft", targetId: draft.id }]);
     expect(audits[0]?.afterSummary).toContain("status=approved");
-    expect(audits[0]?.afterSummary).toContain("Embeddings were not created");
+    expect(audits[0]?.afterSummary).toContain("retrieval remains blocked until bounded evidence exists");
     expect(JSON.stringify(audits)).not.toContain("0901234567");
     expect(JSON.stringify(audits)).not.toContain("hidden-provider-data");
   });

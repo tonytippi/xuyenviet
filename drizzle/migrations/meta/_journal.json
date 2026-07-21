@@ -267,6 +267,13 @@
       "when": 1784505600000,
       "tag": "0037_youtube_evidence_bundle_limit",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1784592000000,
+      "tag": "0038_ai_first_knowledge_card_state_model",
+      "breakpoints": true
     }
   ]
 }

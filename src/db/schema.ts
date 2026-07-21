@@ -28,6 +28,18 @@ export type SourceVerificationStatus = (typeof sourceVerificationStatusValues)[n
 export const knowledgeCardStatusValues = ["draft", "approved", "archived", "rejected", "duplicate", "no_action"] as const;
 export type KnowledgeCardStatus = (typeof knowledgeCardStatusValues)[number];
 
+export const knowledgePublicationStateValues = ["active", "suppressed", "archived"] as const;
+export type KnowledgePublicationState = (typeof knowledgePublicationStateValues)[number];
+
+export const knowledgeStateValues = ["community_observation", "community_pattern", "conditional", "uncertain", "conflicted", "confirmed", "superseded"] as const;
+export type KnowledgeState = (typeof knowledgeStateValues)[number];
+
+export const knowledgeReviewStateValues = ["none", "ai_recommended", "in_review", "reviewed"] as const;
+export type KnowledgeReviewState = (typeof knowledgeReviewStateValues)[number];
+
+export const knowledgeVerificationStateValues = ["not_required", "required", "corroborated", "failed"] as const;
+export type KnowledgeVerificationState = (typeof knowledgeVerificationStateValues)[number];
+
 export const knowledgeCardTypeValues = [
   "place",
   "food",
@@ -683,6 +695,14 @@ export const knowledgeCards = pgTable(
       .primaryKey()
       .$defaultFn(() => crypto.randomUUID()),
     status: text("status").$type<KnowledgeCardStatus>().default("draft").notNull(),
+    publicationState: text("publication_state").$type<KnowledgePublicationState>().default("suppressed").notNull(),
+    knowledgeState: text("knowledge_state").$type<KnowledgeState>().default("uncertain").notNull(),
+    reviewState: text("review_state").$type<KnowledgeReviewState>().default("ai_recommended").notNull(),
+    verificationState: text("verification_state").$type<KnowledgeVerificationState>().default("not_required").notNull(),
+    contentVersion: integer("content_version").default(1).notNull(),
+    evidenceSetRevision: integer("evidence_set_revision").default(1).notNull(),
+    conditions: jsonb("conditions").$type<string[]>().default([]).notNull(),
+    currentJudgeSummary: text("current_judge_summary").default("Current judgment has not been completed.").notNull(),
     type: text("type").$type<KnowledgeCardType>().notNull(),
     title: text("title").notNull(),
     locationName: text("location_name"),
@@ -703,10 +723,19 @@ export const knowledgeCards = pgTable(
   },
   (card) => [
     index("knowledge_cards_status_created_at_idx").on(card.status, card.createdAt),
+    index("knowledge_cards_publication_state_idx").on(card.publicationState, card.updatedAt),
     index("knowledge_cards_type_status_idx").on(card.type, card.status),
     index("knowledge_cards_confidence_idx").on(card.confidence),
     index("knowledge_cards_created_by_user_id_idx").on(card.createdByUserId),
     check("knowledge_cards_status_check", sql`${card.status} in ('draft', 'approved', 'archived', 'rejected', 'duplicate', 'no_action')`),
+    check("knowledge_cards_publication_state_check", sql`${card.publicationState} in ('active', 'suppressed', 'archived')`),
+    check("knowledge_cards_knowledge_state_check", sql`${card.knowledgeState} in ('community_observation', 'community_pattern', 'conditional', 'uncertain', 'conflicted', 'confirmed', 'superseded')`),
+    check("knowledge_cards_review_state_check", sql`${card.reviewState} in ('none', 'ai_recommended', 'in_review', 'reviewed')`),
+    check("knowledge_cards_verification_state_check", sql`${card.verificationState} in ('not_required', 'required', 'corroborated', 'failed')`),
+    check("knowledge_cards_content_version_check", sql`${card.contentVersion} >= 1`),
+    check("knowledge_cards_evidence_set_revision_check", sql`${card.evidenceSetRevision} >= 1`),
+    check("knowledge_cards_conditions_array_check", sql`jsonb_typeof(${card.conditions}) = 'array'`),
+    check("knowledge_cards_judge_summary_check", sql`length(btrim(${card.currentJudgeSummary})) between 1 and 1000`),
     check(
       "knowledge_cards_type_check",
       sql`${card.type} in ('place', 'food', 'hotel_area', 'activity', 'service', 'route_note', 'warning', 'cost_note', 'parking', 'ev_charging', 'kid_friendly_tip', 'discount_promotion', 'general_travel_tip')`,
@@ -719,6 +748,23 @@ export const knowledgeCards = pgTable(
     check("knowledge_cards_details_object_check", sql`jsonb_typeof(${card.practicalDetails}) = 'object'`),
     check("knowledge_cards_tags_array_check", sql`jsonb_typeof(${card.tags}) = 'array'`),
     check("knowledge_cards_draft_review_check", sql`${card.status} <> 'draft' or ${card.needsReview} = true`),
+  ],
+);
+
+export const knowledgeCardStateMigrationReports = pgTable(
+  "knowledge_card_state_migration_reports",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    reason: text("reason").notNull(),
+    cardCount: integer("card_count").notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (report) => [
+    uniqueIndex("knowledge_card_state_migration_reports_reason_idx").on(report.reason),
+    check("knowledge_card_state_migration_reports_reason_check", sql`length(btrim(${report.reason})) between 1 and 160`),
+    check("knowledge_card_state_migration_reports_count_check", sql`${report.cardCount} >= 0`),
   ],
 );
 

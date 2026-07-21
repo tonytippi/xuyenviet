@@ -4,6 +4,7 @@ import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
 import { knowledgeCards, knowledgeCardSources, knowledgeCardTypeValues, knowledgeSeedBatchItems, knowledgeSeedBatches, knowledgeSourceSuggestions, rawSourceMaterial, sources, type KnowledgeCardType, type KnowledgeSeedBatchItemStatus } from "@/db/schema";
+import { isKnowledgeCardTravelerEligible } from "@/features/knowledge/state";
 import { recordAuditEvent } from "@/features/audit/events";
 import { requireAdminSession } from "@/server/auth";
 
@@ -227,14 +228,14 @@ export async function getApprovedCorridorSeedProgress(): Promise<ApprovedCorrido
   await persistDerivedStatuses(db, staleStatusUpdates);
 
   const cardRows = await db
-    .select({ id: knowledgeCards.id, type: knowledgeCards.type, locationName: knowledgeCards.locationName, routeSegment: knowledgeCards.routeSegment })
+    .select({ id: knowledgeCards.id, type: knowledgeCards.type, locationName: knowledgeCards.locationName, routeSegment: knowledgeCards.routeSegment, publicationState: knowledgeCards.publicationState, knowledgeState: knowledgeCards.knowledgeState, reviewState: knowledgeCards.reviewState, verificationState: knowledgeCards.verificationState })
     .from(knowledgeCards)
     .innerJoin(knowledgeCardSources, eq(knowledgeCardSources.knowledgeCardId, knowledgeCards.id))
-    .where(and(eq(knowledgeCards.status, "approved"), eq(knowledgeCards.needsReview, false)));
+    .where(eq(knowledgeCards.publicationState, "active"));
 
   const uniqueEligibleCards = new Map<string, { type: KnowledgeCardType; locationName: string | null; routeSegment: string | null }>();
   for (const row of cardRows) {
-    if (!uniqueEligibleCards.has(row.id) && hasCorridorSignal(row.routeSegment, row.locationName)) {
+    if (isKnowledgeCardTravelerEligible(row) && !uniqueEligibleCards.has(row.id) && hasCorridorSignal(row.routeSegment, row.locationName)) {
       uniqueEligibleCards.set(row.id, { type: row.type, locationName: row.locationName, routeSegment: row.routeSegment });
     }
   }
@@ -324,14 +325,22 @@ async function deriveStatusesForSourceItems(db: Pick<BatchDb, "select">, items: 
   }
 
   const cardRows = await db
-    .select({ sourceId: knowledgeCardSources.sourceId, status: knowledgeCards.status, needsReview: knowledgeCards.needsReview })
+    .select({
+      sourceId: knowledgeCardSources.sourceId,
+      status: knowledgeCards.status,
+      needsReview: knowledgeCards.needsReview,
+      publicationState: knowledgeCards.publicationState,
+      knowledgeState: knowledgeCards.knowledgeState,
+      reviewState: knowledgeCards.reviewState,
+      verificationState: knowledgeCards.verificationState,
+    })
     .from(knowledgeCardSources)
     .innerJoin(knowledgeCards, eq(knowledgeCards.id, knowledgeCardSources.knowledgeCardId))
     .where(inArray(knowledgeCardSources.sourceId, sourceIds));
 
   for (const row of cardRows) {
     const current = derived.get(row.sourceId);
-    const next = mapCardStatus(row.status, row.needsReview);
+    const next = mapCardStatus(row);
     derived.set(row.sourceId, pickHigherStatus(current, next));
   }
 
@@ -357,9 +366,10 @@ async function deriveStatusesForSourceItems(db: Pick<BatchDb, "select">, items: 
   return derived;
 }
 
-function mapCardStatus(status: typeof knowledgeCards.$inferSelect.status, needsReview: boolean): KnowledgeSeedBatchItemStatus {
+function mapCardStatus(card: Pick<typeof knowledgeCards.$inferSelect, "status" | "needsReview" | "publicationState" | "knowledgeState" | "reviewState" | "verificationState">): KnowledgeSeedBatchItemStatus {
+  const { status, needsReview } = card;
   if (status === "approved" && needsReview) return "needs_review";
-  if (status === "approved") return "approved";
+  if (status === "approved") return isKnowledgeCardTravelerEligible(card) ? "approved" : "needs_review";
   if (status === "archived") return "rejected";
   if (status === "rejected") return "rejected";
   if (status === "duplicate" || status === "no_action") return "duplicate";

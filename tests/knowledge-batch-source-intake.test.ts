@@ -139,12 +139,12 @@ describe("knowledge batch source intake", () => {
     });
 
     const [batch] = await listRecentKnowledgeSeedBatches();
-    expect(batch.items.map((item) => item.status)).toEqual(["needs_review", "approved", "duplicate"]);
-    expect(batch.counts).toMatchObject({ needs_review: 1, approved: 1, duplicate: 1, pending: 0, reading: 0 });
+    expect(batch.items.map((item) => item.status)).toEqual(["needs_review", "needs_review", "duplicate"]);
+    expect(batch.counts).toMatchObject({ needs_review: 2, approved: 0, duplicate: 1, pending: 0, reading: 0 });
     expect(batch.items[0]).not.toHaveProperty("rawText");
 
     const persistedItems = await testDb.select().from(knowledgeSeedBatchItems).orderBy(knowledgeSeedBatchItems.lineNumber);
-    expect(persistedItems.map((item) => item.status)).toEqual(["needs_review", "approved", "duplicate"]);
+    expect(persistedItems.map((item) => item.status)).toEqual(["needs_review", "needs_review", "duplicate"]);
   });
 
   test("recent batch listing marks captured YouTube evidence as reading", async () => {
@@ -193,7 +193,7 @@ describe("knowledge batch source intake", () => {
     await expect(testDb.select().from(auditEvents)).resolves.toHaveLength(0);
   });
 
-  test("operator progress counts only approved reviewed source-linked corridor cards and persists derived seed statuses", async () => {
+  test("operator progress excludes active legacy cards until bounded evidence is available and persists derived seed statuses", async () => {
     await createUser("progress-operator", ["operator"]);
     authMock.mockResolvedValue({ user: { id: "progress-operator", email: "progress-operator@example.com" } });
     const { getApprovedCorridorSeedProgress, submitKnowledgeSeedUrlBatch } = await import("@/features/knowledge/batch-intake");
@@ -218,16 +218,16 @@ describe("knowledge batch source intake", () => {
 
     const progress = await getApprovedCorridorSeedProgress();
 
-    expect(progress).toMatchObject({ targetApprovedItems: 100, approvedCorridorItems: 1, remainingApprovedItems: 99, isComplete: false });
-    expect(progress.byType.find((item) => item.type === "food")).toEqual({ type: "food", count: 1 });
+    expect(progress).toMatchObject({ targetApprovedItems: 100, approvedCorridorItems: 0, remainingApprovedItems: 100, isComplete: false });
+    expect(progress.byType.find((item) => item.type === "food")).toEqual({ type: "food", count: 0 });
     expect(progress.byType.find((item) => item.type === "place")).toEqual({ type: "place", count: 0 });
-    expect(progress.byRouteOrLocation.find((item) => item.routeOrLocation === "Huế")).toEqual({ routeOrLocation: "Huế", count: 1 });
+    expect(progress.byRouteOrLocation.find((item) => item.routeOrLocation === "Huế")).toEqual({ routeOrLocation: "Huế", count: 0 });
     expect(progress.byRouteOrLocation.find((item) => item.routeOrLocation === "Hà Nội")).toEqual({ routeOrLocation: "Hà Nội", count: 0 });
     expect(progress.byRouteOrLocation.find((item) => item.routeOrLocation === "Nha Trang / Khánh Hòa")).toEqual({ routeOrLocation: "Nha Trang / Khánh Hòa", count: 0 });
-    expect(progress.seedItemStatusCounts).toMatchObject({ approved: 2, duplicate: 1, pending: 0, needs_review: 1 });
+    expect(progress.seedItemStatusCounts).toMatchObject({ approved: 0, duplicate: 1, pending: 0, needs_review: 3 });
 
     const persistedItems = await testDb.select().from(knowledgeSeedBatchItems).orderBy(knowledgeSeedBatchItems.lineNumber);
-    expect(persistedItems.map((item) => item.status)).toEqual(["approved", "needs_review", "approved", "duplicate"]);
+    expect(persistedItems.map((item) => item.status)).toEqual(["needs_review", "needs_review", "needs_review", "duplicate"]);
     expect(JSON.stringify(progress)).not.toContain("raw");
     expect(JSON.stringify(progress)).not.toContain("submittedUrl");
   });

@@ -6,6 +6,7 @@ import { and, desc, eq, ilike, or } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
 import { knowledgeCards, knowledgeCardSearchDocuments, knowledgeCardSources, sources, type KnowledgeSourceSupport } from "@/db/schema";
+import { isKnowledgeCardTravelerEligible } from "@/features/knowledge/state";
 
 const defaultSearchLimit = 5;
 const maxSearchLimit = 10;
@@ -141,8 +142,7 @@ async function searchApprovedKnowledgeInternal(query: string | null | undefined,
       .where(
         and(
           eq(knowledgeCardSearchDocuments.status, "active"),
-          eq(knowledgeCards.status, "approved"),
-          eq(knowledgeCards.needsReview, false),
+          eq(knowledgeCards.publicationState, "active"),
           or(...terms.map((term) => ilike(knowledgeCardSearchDocuments.searchableText, `%${escapeLikePattern(term)}%`))),
         ),
       )
@@ -201,7 +201,10 @@ async function loadEligibleApprovedCard(db: Pick<KnowledgeSearchDb, "select">, c
     .select({
       card: {
         id: knowledgeCards.id,
-        status: knowledgeCards.status,
+        publicationState: knowledgeCards.publicationState,
+        knowledgeState: knowledgeCards.knowledgeState,
+        reviewState: knowledgeCards.reviewState,
+        verificationState: knowledgeCards.verificationState,
         type: knowledgeCards.type,
         title: knowledgeCards.title,
         locationName: knowledgeCards.locationName,
@@ -233,15 +236,16 @@ async function loadEligibleApprovedCard(db: Pick<KnowledgeSearchDb, "select">, c
     .from(knowledgeCards)
     .leftJoin(knowledgeCardSources, eq(knowledgeCardSources.knowledgeCardId, knowledgeCards.id))
     .leftJoin(sources, eq(sources.id, knowledgeCardSources.sourceId))
-    .where(and(eq(knowledgeCards.id, cardId), eq(knowledgeCards.status, "approved"), eq(knowledgeCards.needsReview, false)));
+    .where(eq(knowledgeCards.id, cardId));
 
   const grouped = groupSearchRows(rows)[0];
-  return grouped && grouped.sources.length > 0 ? grouped : null;
+  const card = rows[0]?.card;
+  return grouped && card && isKnowledgeCardTravelerEligible(card) && grouped.sources.length > 0 ? grouped : null;
 }
 
 function groupSearchRows(
   rows: Array<{
-    card: Omit<KnowledgeSearchResult, "score" | "sources"> & { status: typeof knowledgeCards.$inferSelect.status; needsReview: boolean };
+    card: Omit<KnowledgeSearchResult, "score" | "sources"> & KnowledgeCardStateForSearch;
     source: JoinedKnowledgeSearchSource | null;
   }>,
 ) {
@@ -261,6 +265,8 @@ function groupSearchRows(
 
   return Array.from(cards.values());
 }
+
+type KnowledgeCardStateForSearch = Pick<typeof knowledgeCards.$inferSelect, "publicationState" | "knowledgeState" | "reviewState" | "verificationState">;
 
 function toSearchResult(card: Omit<KnowledgeSearchResult, "score" | "sources">): KnowledgeSearchResult {
   return {

@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
 import { getDb } from "@/db/client";
@@ -17,6 +17,7 @@ import {
   type KnowledgeSourceSupport,
 } from "@/db/schema";
 import { recordAuditEvent } from "@/features/audit/events";
+import { isKnowledgeCardTravelerEligible } from "@/features/knowledge/state";
 import { requireAdminSession, type AuthenticatedSessionWithRoles } from "@/server/auth";
 
 const maxTitleLength = 160;
@@ -88,7 +89,7 @@ export type ApprovedKnowledgeCard = Pick<
 };
 
 export type ApprovedKnowledgeIndexStatus = {
-  state: "indexed" | "needs_indexing" | "stale_index" | "inactive_index";
+  state: "evidence_pending" | "indexed" | "needs_indexing" | "stale_index" | "inactive_index";
   label: string;
   documentStatus: string | null;
   indexedAt: Date | null;
@@ -250,7 +251,7 @@ export async function listApprovedKnowledgeCards(): Promise<ApprovedKnowledgeCar
     .where(and(eq(knowledgeCards.status, "approved"), eq(knowledgeCards.needsReview, false)))
     .orderBy(desc(knowledgeCards.updatedAt));
 
-  return groupApprovedRows(rows).filter((card) => card.sources.length > 0);
+  return groupApprovedRows(rows);
 }
 
 export async function listApprovedKnowledgeCardsWithIndexStatus(): Promise<ApprovedKnowledgeCardWithIndexStatus[]> {
@@ -310,7 +311,7 @@ export async function getApprovedKnowledgeCard(cardId: string): Promise<Approved
     .where(and(eq(knowledgeCards.id, normalizedCardId), eq(knowledgeCards.status, "approved"), eq(knowledgeCards.needsReview, false)));
 
   const card = groupApprovedRows(rows)[0];
-  return card && card.sources.length > 0 ? card : null;
+  return card ?? null;
 }
 
 export async function updateKnowledgeDraft(draftId: string, input: KnowledgeDraftUpdateInput): Promise<KnowledgeDraftReviewResult> {
@@ -340,7 +341,12 @@ export async function updateKnowledgeDraft(draftId: string, input: KnowledgeDraf
         confidence: values.confidence,
         freshnessSensitive: values.freshnessSensitive,
         status: "draft",
+        publicationState: "suppressed",
+        knowledgeState: "uncertain",
+        reviewState: "ai_recommended",
+        verificationState: "not_required",
         needsReview: true,
+        contentVersion: sql`${knowledgeCards.contentVersion} + 1`,
         updatedAt: new Date(),
       })
       .where(and(eq(knowledgeCards.id, normalizedDraftId), eq(knowledgeCards.status, "draft"), eq(knowledgeCards.needsReview, true)))
@@ -382,7 +388,12 @@ export async function rejectKnowledgeDraft(draftId: string): Promise<KnowledgeDr
       .update(knowledgeCards)
       .set({
         status: "rejected",
+        publicationState: "suppressed",
+        knowledgeState: "uncertain",
+        reviewState: "reviewed",
+        verificationState: "not_required",
         needsReview: false,
+        contentVersion: sql`${knowledgeCards.contentVersion} + 1`,
         updatedAt: new Date(),
       })
       .where(and(eq(knowledgeCards.id, normalizedDraftId), eq(knowledgeCards.status, "draft"), eq(knowledgeCards.needsReview, true)))
@@ -466,8 +477,13 @@ async function approveKnowledgeDraftInTransaction(
   const [updatedDraft] = await transaction
     .update(knowledgeCards)
     .set({
-      status: "approved",
-      needsReview: false,
+        status: "approved",
+        publicationState: "active",
+        knowledgeState: "uncertain",
+        reviewState: "reviewed",
+        verificationState: "not_required",
+        needsReview: false,
+        contentVersion: sql`${knowledgeCards.contentVersion} + 1`,
       updatedAt: new Date(),
     })
     .where(
@@ -497,7 +513,7 @@ async function approveKnowledgeDraftInTransaction(
       targetType: "knowledge_draft",
       targetId: normalizedDraftId,
       beforeSummary: summarizeDraft(draft.card),
-      afterSummary: `Operator approved draft for retrieval eligibility: status=approved; needsReview=false; linkedSources=${draft.sources.length}. Embeddings were not created.`,
+        afterSummary: `Operator approved legacy draft state: status=approved; publicationState=active; knowledgeState=uncertain; retrieval remains blocked until bounded evidence exists; linkedSources=${draft.sources.length}.`,
     },
     transaction,
   );
@@ -701,7 +717,7 @@ function groupApprovedRows(
 
 async function attachIndexStatus(cards: ApprovedKnowledgeCard[]): Promise<ApprovedKnowledgeCardWithIndexStatus[]> {
   const statuses = await loadApprovedKnowledgeIndexStatuses(cards.map((card) => card.id));
-  return cards.map((card) => ({ ...card, indexStatus: statuses.get(card.id) ?? toMissingIndexStatus() }));
+  return cards.map((card) => ({ ...card, indexStatus: statuses.get(card.id) ?? toEvidencePendingIndexStatus() }));
 }
 
 async function loadApprovedKnowledgeIndexStatuses(cardIds: string[]) {
@@ -716,6 +732,10 @@ async function loadApprovedKnowledgeIndexStatuses(cardIds: string[]) {
     .select({
       cardId: knowledgeCards.id,
       cardUpdatedAt: knowledgeCards.updatedAt,
+      publicationState: knowledgeCards.publicationState,
+      knowledgeState: knowledgeCards.knowledgeState,
+      reviewState: knowledgeCards.reviewState,
+      verificationState: knowledgeCards.verificationState,
       documentStatus: knowledgeCardSearchDocuments.status,
       documentUpdatedAt: knowledgeCardSearchDocuments.updatedAt,
     })
@@ -724,7 +744,7 @@ async function loadApprovedKnowledgeIndexStatuses(cardIds: string[]) {
     .where(and(inArray(knowledgeCards.id, uniqueCardIds), eq(knowledgeCards.status, "approved"), eq(knowledgeCards.needsReview, false)));
 
   for (const row of rows) {
-    statuses.set(row.cardId, toIndexStatus(row.documentStatus, row.documentUpdatedAt, row.cardUpdatedAt));
+    statuses.set(row.cardId, isKnowledgeCardTravelerEligible(row) ? toIndexStatus(row.documentStatus, row.documentUpdatedAt, row.cardUpdatedAt) : toEvidencePendingIndexStatus());
   }
 
   return statuses;
@@ -734,6 +754,15 @@ function toMissingIndexStatus(): ApprovedKnowledgeIndexStatus {
   return {
     state: "needs_indexing",
     label: "Chưa index",
+    documentStatus: null,
+    indexedAt: null,
+  };
+}
+
+function toEvidencePendingIndexStatus(): ApprovedKnowledgeIndexStatus {
+  return {
+    state: "evidence_pending",
+    label: "Chờ evidence; chưa thể index",
     documentStatus: null,
     indexedAt: null,
   };

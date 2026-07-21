@@ -3,6 +3,7 @@ import { and, asc, eq, exists, isNull, lt, ne, or } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { knowledgeCards, knowledgeCardSearchDocuments, knowledgeCardSources } from "@/db/schema";
 import { indexApprovedKnowledgeCard } from "@/features/knowledge/search";
+import { isKnowledgeCardTravelerEligible } from "@/features/knowledge/state";
 
 type KnowledgeIndexingDb = ReturnType<typeof getDb>;
 
@@ -60,30 +61,58 @@ export async function runApprovedKnowledgeIndexingWorkerLoop(options: { once?: b
 
 async function loadApprovedCardsNeedingSearchDocuments(db: Pick<KnowledgeIndexingDb, "select">, options: { batchSize: number; now: Date }) {
   return db
-    .select({ id: knowledgeCards.id })
+    .select({
+      id: knowledgeCards.id,
+      publicationState: knowledgeCards.publicationState,
+      knowledgeState: knowledgeCards.knowledgeState,
+      reviewState: knowledgeCards.reviewState,
+      verificationState: knowledgeCards.verificationState,
+      confidence: knowledgeCards.confidence,
+      freshnessSensitive: knowledgeCards.freshnessSensitive,
+      updatedAt: knowledgeCards.updatedAt,
+      documentStatus: knowledgeCardSearchDocuments.status,
+      documentConfidence: knowledgeCardSearchDocuments.confidence,
+      documentFreshnessSensitive: knowledgeCardSearchDocuments.freshnessSensitive,
+      documentUpdatedAt: knowledgeCardSearchDocuments.updatedAt,
+    })
     .from(knowledgeCards)
     .leftJoin(knowledgeCardSearchDocuments, eq(knowledgeCardSearchDocuments.knowledgeCardId, knowledgeCards.id))
     .where(
       and(
-        eq(knowledgeCards.status, "approved"),
-        eq(knowledgeCards.needsReview, false),
-        exists(
-          db
-            .select({ id: knowledgeCardSources.knowledgeCardId })
-            .from(knowledgeCardSources)
-            .where(eq(knowledgeCardSources.knowledgeCardId, knowledgeCards.id)),
-        ),
-        or(
-          isNull(knowledgeCardSearchDocuments.id),
-          ne(knowledgeCardSearchDocuments.status, "active"),
-          ne(knowledgeCardSearchDocuments.confidence, knowledgeCards.confidence),
-          ne(knowledgeCardSearchDocuments.freshnessSensitive, knowledgeCards.freshnessSensitive),
-          lt(knowledgeCardSearchDocuments.updatedAt, knowledgeCards.updatedAt),
+          or(
+            // Recheck every active projection against the current owner row.
+            eq(knowledgeCardSearchDocuments.status, "active"),
+          and(
+            eq(knowledgeCards.publicationState, "active"),
+            exists(
+              db
+                .select({ id: knowledgeCardSources.knowledgeCardId })
+                .from(knowledgeCardSources)
+                .where(eq(knowledgeCardSources.knowledgeCardId, knowledgeCards.id)),
+            ),
+            or(
+              isNull(knowledgeCardSearchDocuments.id),
+              ne(knowledgeCardSearchDocuments.status, "active"),
+              ne(knowledgeCardSearchDocuments.confidence, knowledgeCards.confidence),
+              ne(knowledgeCardSearchDocuments.freshnessSensitive, knowledgeCards.freshnessSensitive),
+              lt(knowledgeCardSearchDocuments.updatedAt, knowledgeCards.updatedAt),
+            ),
+          ),
         ),
       ),
     )
     .orderBy(asc(knowledgeCards.updatedAt), asc(knowledgeCards.id))
-    .limit(options.batchSize);
+    .then((cards) => cards.filter((card) => {
+      const eligible = isKnowledgeCardTravelerEligible(card);
+      const needsRefresh =
+        card.documentStatus === null ||
+        card.documentStatus !== "active" ||
+        card.documentConfidence !== card.confidence ||
+        card.documentFreshnessSensitive !== card.freshnessSensitive ||
+        (card.documentUpdatedAt !== null && card.documentUpdatedAt < card.updatedAt);
+
+      return (card.documentStatus === "active" && !eligible) || (eligible && needsRefresh);
+    }).slice(0, options.batchSize));
 }
 
 function getWorkerPollIntervalMs() {

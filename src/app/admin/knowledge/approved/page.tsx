@@ -25,7 +25,7 @@ export default async function ApprovedKnowledgePage({ searchParams }: ApprovedKn
       <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[#8c4f13]">Tri thức đã phê duyệt</p>
       <h1 className="mt-4 max-w-3xl text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">Nguồn và confidence sau phê duyệt.</h1>
       <p className="mt-5 max-w-2xl text-lg leading-8 text-[#4f625a]">
-        Chỉ hiển thị thẻ approved, metadata nguồn an toàn và search document đã index. Màn hình này không đọc raw source material.
+          Hiển thị thẻ approved, metadata nguồn an toàn và trạng thái index. Thẻ chưa có evidence được đánh dấu chờ evidence và không thể index hay dùng cho traveler. Màn hình này không đọc raw source material.
       </p>
 
       <form className="mt-8 rounded-[1.5rem] border border-[#d8c9ad] bg-white/75 p-4 shadow-[0_12px_30px_rgba(41,33,18,0.08)] sm:p-5" action="/admin/knowledge/approved">
@@ -79,8 +79,8 @@ export default async function ApprovedKnowledgePage({ searchParams }: ApprovedKn
           </>
         ) : cards.length === 0 ? (
           <div className="rounded-[1.5rem] border border-[#d8c9ad] bg-white/70 p-5">
-            <h2 className="text-2xl font-semibold tracking-[-0.03em] text-[#17342c]">Chưa có thẻ approved</h2>
-            <p className="mt-3 leading-7 text-[#4f625a]">Phê duyệt bản nháp đã kiểm tra để thẻ xuất hiện ở đây.</p>
+              <h2 className="text-2xl font-semibold tracking-[-0.03em] text-[#17342c]">Chưa có thẻ approved</h2>
+              <p className="mt-3 leading-7 text-[#4f625a]">Phê duyệt bản nháp đã kiểm tra để thẻ xuất hiện ở đây.</p>
           </div>
         ) : (
           cards.map((card) => <ApprovedKnowledgeCardArticle card={card} key={card.id} />)
@@ -152,7 +152,7 @@ function ApprovedKnowledgeCardArticle({ card, score }: ApprovedKnowledgeCardArti
         </div>
         {card.indexStatus ? (
           <div className="rounded-2xl bg-[#fbf7ed] p-3">
-            <dt className="font-semibold text-[#17342c]">Index</dt>
+            <dt className="font-semibold text-[#17342c]">Index / eligibility</dt>
             <dd className="mt-1 text-[#4f625a]">
               {card.indexStatus.label}
               {card.indexStatus.indexedAt ? ` · ${card.indexStatus.indexedAt.toISOString()}` : ""}

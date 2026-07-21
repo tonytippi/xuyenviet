@@ -97,3 +97,6 @@
 - source_spec: `spec-6-6-public-mvp-quality-dashboard.md`
   summary: Add PII-aware redaction or classification for admin-visible usefulness feedback comments.
   evidence: Story 6.6 truncates and restricts comments to admin/operator dashboard access, but user-entered comments can still contain traveler PII or child details. A future privacy hardening pass should classify or redact sensitive patterns before comments appear in quality reporting.
+- source_spec: `spec-3-1-ai-first-knowledge-card-state-model.md`
+  summary: Update AI Ask knowledge/provenance integration fixtures when Story 3.3 defines bounded evidence and traveler-eligibility metadata.
+  evidence: Story 3.1 correctly fails closed for every evidence-less legacy card, so three assertions in `tests/answer-context.test.ts` that expect legacy approved cards in source bundles, annotations, and provenance now fail until a Story 3.3-compliant eligible fixture exists.

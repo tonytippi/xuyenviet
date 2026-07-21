@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
 import { getDb } from "@/db/client";
@@ -43,7 +43,16 @@ async function approveKnowledgeDraftForActorInTransaction(transaction: ReviewMut
 
   const [updatedDraft] = await transaction
     .update(knowledgeCards)
-    .set({ status: "approved", needsReview: false, updatedAt: new Date() })
+    .set({
+      status: "approved",
+      publicationState: "active",
+      knowledgeState: "uncertain",
+      reviewState: "reviewed",
+      verificationState: "not_required",
+      needsReview: false,
+      contentVersion: sql`${knowledgeCards.contentVersion} + 1`,
+      updatedAt: new Date(),
+    })
     .where(and(eq(knowledgeCards.id, draftId), eq(knowledgeCards.status, "draft"), eq(knowledgeCards.needsReview, true)))
     .returning({ id: knowledgeCards.id });
 
@@ -58,7 +67,7 @@ async function approveKnowledgeDraftForActorInTransaction(transaction: ReviewMut
     targetType: "knowledge_draft",
     targetId: draftId,
     beforeSummary: `Draft before mutation: status=${draft.card.status}; type=${draft.card.type}; confidence=${draft.card.confidence}; needsReview=${draft.card.needsReview}; freshnessSensitive=${draft.card.freshnessSensitive}.`,
-    afterSummary: `Operator approved draft for retrieval eligibility: status=approved; needsReview=false; linkedSources=${draft.sources.length}. Embeddings were not created.`,
+    afterSummary: `Operator approved legacy draft state: status=approved; publicationState=active; knowledgeState=uncertain; retrieval remains blocked until bounded evidence exists; linkedSources=${draft.sources.length}.`,
   });
 
   return { draftId };
