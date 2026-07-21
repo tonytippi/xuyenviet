@@ -1,5 +1,5 @@
-# generated: 2026-07-05
-# last_updated: 2026-07-17
+# generated: 2026-07-21
+# last_updated: 2026-07-21
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -12,131 +12,71 @@
 #   - in-progress: Epic actively being worked on
 #   - done: All stories in epic completed
 #
-# Epic Status Transitions:
-#   - backlog -> in-progress: Automatically when first story is created (via create-story)
-#   - in-progress -> done: Manually when all stories reach 'done' status
-#
 # Story Status:
 #   - backlog: Story only exists in epic file
-#   - ready-for-dev: Story file created in stories folder
+#   - ready-for-dev: Story file created in implementation artifacts
 #   - in-progress: Developer actively working on implementation
-#   - review: Ready for code review (via Dev's code-review workflow)
+#   - review: Ready for code review
 #   - done: Story completed
 #
 # Retrospective Status:
 #   - optional: Can be completed but not required
-#   - done: Retrospective has been completed
+#   - done: Finished
 #
 # Action Item Status:
-#   - open: Committed during a retrospective, not yet addressed
+#   - open: Committed work not yet addressed
 #   - in-progress: Actively being worked on
 #   - done: Completed
-#
-# WORKFLOW NOTES:
-# ===============
-# - Epic transitions to 'in-progress' automatically when first story is created
-# - Stories can be worked in parallel if team capacity allows
-# - Developer typically creates next story after previous one is 'done' to incorporate learnings
-# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
-# - Retrospective appends its action items to action_items; sprint-status surfaces open ones
 
-generated: 2026-07-05
-last_updated: 2026-07-17
+generated: 2026-07-21
+last_updated: 2026-07-21
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
 story_location: /home/sonnh/projects/xuyenviet/_bmad-output/implementation-artifacts
 
 development_status:
+  # Completed baselines; their historical story records intentionally remain outside this
+  # AI-first sprint inventory to avoid colliding with the revised Epic 3-6 story IDs.
   epic-1: done
-  1-1-initialize-public-mvp-web-app-foundation: done
-  1-2-public-sign-in-entry-and-ai-ask-gate: done
-  1-3-google-login-with-auth-js: done
-  1-4-roles-and-separate-admin-area: done
-  1-5-audit-trail-for-protected-mutations: done
-  1-6-environment-and-public-launch-safety-baseline: done
-  1-7-capture-referral-attribution-at-sign-up: done
   epic-1-retrospective: done
   epic-2: done
-  2-0-introduce-test-framework-and-retroactive-epic-1-coverage: done
-  2-1-authenticated-ai-ask-chat-shell: done
-  2-2-create-conversation-and-send-first-message: done
-  2-3-generate-vietnamese-initial-ai-answer: done
-  2-4-structured-road-trip-answer-format: done
-  2-5-continue-conversation-with-context: done
-  2-6-basic-chat-responsiveness-and-failure-states: done
-  2-7-stream-ai-ask-responses-and-accept-traveler-image-input: done
-  # Covers completed Stories 2.0-2.7; Story 2.7 completed as the post-epic streaming/image follow-up.
   epic-2-retrospective: done
-  epic-3: done
-  3-1-manage-chat-sessions: done
-  3-2-create-trip-projects: done
-  3-3-extract-chat-and-trip-context: done
-  3-4-use-chat-or-trip-context-in-answers: done
-  3-5-correct-trip-details-through-chat: done
-  3-6-delete-chat-sessions: done
-  3-7-delete-trip-projects: done
-  epic-3-retrospective: done
-  epic-4: in-progress
-  4-1-submit-travel-source-for-ai-reading: done
-  4-1a-capture-queued-facebook-source-text-with-operator-browser-automation: done
-  4-1b-create-facebook-capture-review-state: done
-  4-1c-review-captured-facebook-sources-in-admin-queue: done
-  4-1d-extract-draft-knowledge-from-reviewed-facebook-capture: done
-  4-1e-extract-and-approve-all-captured-facebook-drafts-with-guardrails: done
-  4-1f-reject-captured-facebook-source-material: done
-  4-1g-integrate-facebook-capture-review-into-admin-knowledge-workflow: done
-  4-2-ai-extracts-knowledge-drafts-from-source: done
-  4-3-review-and-edit-ai-prepared-drafts: done
-  4-4-ai-suggests-create-or-update-from-source-url: done
-  4-5-batch-seed-source-url-intake: done
-  4-6-approve-knowledge-for-retrieval: done
-  4-7-preserve-source-and-confidence-in-approved-knowledge: done
-  4-8-make-approved-knowledge-searchable-by-ai: done
-  4-9-track-100-approved-corridor-items: done
-  4-10-capture-youtube-video-sources-for-knowledge-extraction: backlog
-  epic-4-retrospective: done
-  epic-5: done
-  5-0-manage-ai-gateway-models-and-pricing: done
-  5-1-retrieve-approved-knowledge-for-ai-ask: done
-  5-2-assemble-context-priority-source-bundle: done
-  5-3-web-search-fallback-trigger: done
-  5-4-web-search-adapter-and-source-capture: done
-  5-5-persist-retrieval-decision-and-answer-provenance: done
-  5-6-render-source-and-confidence-section: done
-  5-7-uncertainty-and-freshness-warnings: done
-  5-8-validate-web-search-fallback-quality: done
-  5-9-record-ai-usage-events: done
-  5-10-generate-and-validate-answer-annotations: done
-  epic-5-retrospective: done
-  epic-ui: in-progress
-  ui-1-public-logged-out-homepage-redesign: done
-  ui-2-authenticated-empty-ai-ask-shell-redesign: done
-  ui-3-active-three-panel-ai-ask-shell: done
-  ui-4-selectable-answer-entities-and-detail-panel: done
-  ui-5-mobile-sidebar-and-detail-drawers: done
-  ui-6-render-clickable-answer-annotations: done
-  epic-ui-retrospective: optional
-  epic-6: in-progress
-  6-1-detect-children-and-family-travel-needs: done
-  6-2-family-aware-driving-and-stop-recommendations: done
-  6-3-family-aware-activities-and-suitability-notes: done
-  6-4-capture-answer-usefulness-feedback: done
-  6-5-run-public-mvp-answer-evaluation-prompt-set: done
-  6-6-public-mvp-quality-dashboard: done
+
+  epic-3: backlog
+  3-1-add-the-ai-first-knowledge-card-state-model: backlog
+  3-2-create-immutable-source-capture-versions-and-retention-boundaries: backlog
+  3-3-backfill-bounded-evidence-and-verify-legacy-retrieval-safety: backlog
+  3-4-establish-source-version-ingestion-job-claiming: backlog
+  3-5-run-the-source-version-ai-ingestion-pipeline: backlog
+  3-6-recover-ingestion-jobs-without-stale-publication: backlog
+  3-7-validate-evidence-and-independently-judge-publication: backlog
+  3-8-relate-evidence-preserve-conditions-and-handle-conflicts: backlog
+  3-9-operate-the-ai-recommended-review-and-sampling-queue: backlog
+  3-10-propagate-source-removal-and-state-changes-to-search-eligibility: backlog
+  3-11-report-active-evidence-grounded-seed-coverage: backlog
+  epic-3-retrospective: optional
+
+  epic-4: backlog
+  4-1-migrate-retrieval-to-state-aware-active-knowledge: backlog
+  4-2-index-current-ai-first-knowledge-versions: backlog
+  4-3-assemble-state-aware-knowledge-source-bundles: backlog
+  4-4-enforce-community-conditional-and-conflict-answer-policy: backlog
+  4-5-update-search-fallback-and-provenance-for-ai-first-states: backlog
+  4-6-render-state-aware-traveler-trust-details: backlog
+  4-7-verify-ai-first-retrieval-and-answer-safety: backlog
+  epic-4-retrospective: optional
+
+  epic-5: backlog
+  5-1-evaluate-ai-first-community-knowledge-safety: backlog
+  5-2-surface-ai-first-policy-quality-signals: backlog
+  5-3-close-the-active-evidence-grounded-card-readiness-gate: backlog
+  epic-5-retrospective: optional
+
+  epic-6: backlog
+  6-1-validate-knowledge-pipeline-operations-before-public-evaluation: backlog
+  6-2-run-public-mvp-ai-first-readiness-review: backlog
   epic-6-retrospective: optional
-  epic-7: in-progress
-  7-1-establish-the-traveler-ui-foundation: done
-  7-2-deliver-the-focused-public-entry: done
-  7-3-deliver-the-authenticated-desktop-shell: done
-  7-4-keep-workspace-selection-canonical-across-devices: done
-  7-5-refine-the-ai-ask-composer-and-streaming-feedback: done
-  7-6-present-scannable-answer-content: done
-  7-7-inspect-persisted-answer-details-responsively: done
-  epic-7-retrospective: optional
-  epic-ops: in-progress
-  ops-1-async-knowledge-extraction-worker: done
-  ops-2-cache-first-local-capture-archive: done
 
 action_items:
   - epic: 3
