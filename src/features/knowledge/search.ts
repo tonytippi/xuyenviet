@@ -2,10 +2,10 @@ import "server-only";
 
 import { createHash } from "node:crypto";
 
-import { and, desc, eq, ilike, or } from "drizzle-orm";
+import { and, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { knowledgeCards, knowledgeCardSearchDocuments, knowledgeCardSources, sources, type KnowledgeSourceSupport } from "@/db/schema";
+import { knowledgeCardEvidence, knowledgeCards, knowledgeCardSearchDocuments, knowledgeCardSources, sourceCaptureVersions, sources, type KnowledgeSourceSupport } from "@/db/schema";
 import { isKnowledgeCardTravelerEligible } from "@/features/knowledge/state";
 
 const defaultSearchLimit = 5;
@@ -214,6 +214,7 @@ async function loadEligibleApprovedCard(db: Pick<KnowledgeSearchDb, "select">, c
         tags: knowledgeCards.tags,
         confidence: knowledgeCards.confidence,
         freshnessSensitive: knowledgeCards.freshnessSensitive,
+        status: knowledgeCards.status,
         needsReview: knowledgeCards.needsReview,
         updatedAt: knowledgeCards.updatedAt,
         createdAt: knowledgeCards.createdAt,
@@ -240,7 +241,44 @@ async function loadEligibleApprovedCard(db: Pick<KnowledgeSearchDb, "select">, c
 
   const grouped = groupSearchRows(rows)[0];
   const card = rows[0]?.card;
-  return grouped && card && isKnowledgeCardTravelerEligible(card) && grouped.sources.length > 0 ? grouped : null;
+  const evidence = await loadActiveSupportingEvidence(db, cardId);
+  const validatedSourceIds = new Set(evidence?.rows.map((row) => row.sourceId));
+  const validatedSources = grouped?.sources.filter((source) => validatedSourceIds.has(source.id)) ?? [];
+  if (!grouped || !card || !evidence || !isKnowledgeCardTravelerEligible({ ...card, ...evidence }) || validatedSources.length === 0) {
+    return null;
+  }
+
+  return {
+    ...grouped,
+    sources: redactOperatorOnlySourceUrls(validatedSources, evidence.rows),
+  };
+}
+
+async function loadActiveSupportingEvidence(db: Pick<KnowledgeSearchDb, "select">, cardId: string) {
+  const evidenceRows = await db
+    .select({
+      displayPolicy: knowledgeCardEvidence.displayPolicy,
+      sourceId: knowledgeCardEvidence.sourceId,
+      capturePayloadAvailable: sql<boolean>`true`,
+    })
+    .from(knowledgeCardEvidence)
+    .innerJoin(knowledgeCardSources, and(eq(knowledgeCardSources.knowledgeCardId, knowledgeCardEvidence.knowledgeCardId), eq(knowledgeCardSources.sourceId, knowledgeCardEvidence.sourceId)))
+    .innerJoin(sourceCaptureVersions, and(eq(sourceCaptureVersions.id, knowledgeCardEvidence.captureVersionId), eq(sourceCaptureVersions.sourceId, knowledgeCardEvidence.sourceId)))
+    .where(and(
+      eq(knowledgeCardEvidence.knowledgeCardId, cardId),
+      eq(knowledgeCardEvidence.state, "active"),
+      or(eq(knowledgeCardEvidence.supportLevel, "primary"), eq(knowledgeCardEvidence.supportLevel, "supporting")),
+      isNull(sourceCaptureVersions.payloadDeletedAt),
+      sql`substring(${sourceCaptureVersions.rawText} from ${knowledgeCardEvidence.spanStart} + 1 for ${knowledgeCardEvidence.spanEnd} - ${knowledgeCardEvidence.spanStart}) = ${knowledgeCardEvidence.quoteText}`,
+    ));
+
+  return evidenceRows.length > 0 ? { activeSupportingEvidenceCount: evidenceRows.length, capturePayloadAvailable: true, rows: evidenceRows } : null;
+}
+
+function redactOperatorOnlySourceUrls(sources: KnowledgeSearchSource[], evidence: Array<{ sourceId: string; displayPolicy: string }>) {
+  const operatorOnlySourceIds = new Set(evidence.filter((row) => row.displayPolicy === "operator_only").map((row) => row.sourceId));
+
+  return sources.map((source) => operatorOnlySourceIds.has(source.id) ? { ...source, url: null, canonicalUrl: null } : source);
 }
 
 function groupSearchRows(
@@ -372,8 +410,9 @@ function normalizeJoinedSource(source: JoinedKnowledgeSearchSource | null): Know
   return {
     id: source.id,
     kind: source.kind,
-    url: source.url,
-    canonicalUrl: source.canonicalUrl,
+    // Facebook links are always operator-only; evidence policy can restrict other sources too.
+    url: source.kind === "facebook" ? null : source.url,
+    canonicalUrl: source.kind === "facebook" ? null : source.canonicalUrl,
     label: source.label,
     publisher: source.publisher,
     collectedDate: source.collectedDate,

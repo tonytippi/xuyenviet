@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { auditEvents, knowledgeCards, knowledgeCardSearchDocuments, knowledgeCardSources, rawSourceMaterial, sources, userRoles, users, type UserRole } from "@/db/schema";
 
 import { testDb } from "./helpers/db";
+import { seedKnowledgeCardEvidence, seedSourceCaptureVersion } from "./helpers/source-captures";
 
 const authMock = vi.fn();
 
@@ -69,6 +70,10 @@ async function createCard(userId: string, values: Partial<typeof knowledgeCards.
       confidence: values.confidence ?? "community",
       freshnessSensitive: values.freshnessSensitive ?? true,
       needsReview: values.needsReview ?? true,
+      publicationState: values.publicationState,
+      knowledgeState: values.knowledgeState,
+      reviewState: values.reviewState,
+      verificationState: values.verificationState,
       aiPromptVersion: values.aiPromptVersion ?? "source_knowledge_draft_extraction_v1",
       createdByUserId: userId,
     })
@@ -213,10 +218,15 @@ describe("approved knowledge cards", () => {
     await createUser("index-status-operator", ["operator"]);
     authMock.mockResolvedValue({ user: { id: "index-status-operator", email: "index-status-operator@example.com" } });
     const source = await createSource("index-status-operator", { id: "index-status-source" });
-    const indexed = await createCard("index-status-operator", { id: "index-status-indexed", status: "approved", needsReview: false, title: "Đã có index" });
-    const missing = await createCard("index-status-operator", { id: "index-status-missing", status: "approved", needsReview: false, title: "Chưa có index" });
-    const stale = await createCard("index-status-operator", { id: "index-status-stale", status: "approved", needsReview: false, title: "Index cũ" });
+    const eligibleState = { status: "approved" as const, needsReview: false, publicationState: "active" as const, knowledgeState: "uncertain" as const, reviewState: "reviewed" as const, verificationState: "not_required" as const };
+    const indexed = await createCard("index-status-operator", { id: "index-status-indexed", title: "Đã có index", ...eligibleState });
+    const missing = await createCard("index-status-operator", { id: "index-status-missing", title: "Chưa có index", ...eligibleState });
+    const stale = await createCard("index-status-operator", { id: "index-status-stale", title: "Index cũ", ...eligibleState });
     await testDb.insert(knowledgeCardSources).values([indexed, missing, stale].map((card) => ({ knowledgeCardId: card.id, sourceId: source.id, supportLevel: "primary" as const })));
+    const capture = await seedSourceCaptureVersion({ sourceId: source.id, captureKind: "url", rawText: "Evidence an toàn cho trạng thái index." });
+    for (const card of [indexed, missing, stale]) {
+      await seedKnowledgeCardEvidence({ cardId: card.id, sourceId: source.id, captureVersionId: capture.id, quoteText: "Evidence an toàn cho trạng thái index.", independenceKey: `${card.id}:${capture.id}` });
+    }
     const { indexApprovedKnowledgeCard } = await import("@/features/knowledge/search");
     await indexApprovedKnowledgeCard(indexed.id);
     await indexApprovedKnowledgeCard(stale.id);
@@ -227,12 +237,12 @@ describe("approved knowledge cards", () => {
     const cards = await listApprovedKnowledgeCardsWithIndexStatus();
     const statuses = new Map(cards.map((card) => [card.id, card.indexStatus.state]));
 
-    expect(statuses.get(indexed.id)).toBe("evidence_pending");
-    expect(statuses.get(missing.id)).toBe("evidence_pending");
-    expect(statuses.get(stale.id)).toBe("evidence_pending");
+    expect(statuses.get(indexed.id)).toBe("indexed");
+    expect(statuses.get(missing.id)).toBe("needs_indexing");
+    expect(statuses.get(stale.id)).toBe("stale_index");
     const selectedStatuses = await getApprovedKnowledgeIndexStatuses([indexed.id, missing.id]);
-    expect(selectedStatuses.get(indexed.id)).toMatchObject({ state: "evidence_pending", documentStatus: null });
-    expect(selectedStatuses.get(missing.id)).toMatchObject({ state: "evidence_pending", documentStatus: null });
+    expect(selectedStatuses.get(indexed.id)).toMatchObject({ state: "indexed", documentStatus: "active" });
+    expect(selectedStatuses.get(missing.id)).toMatchObject({ state: "needs_indexing", documentStatus: null });
   });
 
   test("approved reads authorize before lookup and do not leak existence", async () => {

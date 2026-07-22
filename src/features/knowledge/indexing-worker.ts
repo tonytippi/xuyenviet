@@ -1,9 +1,8 @@
-import { and, asc, eq, exists, isNull, lt, ne, or } from "drizzle-orm";
+import { and, asc, eq, exists, isNull, lt, ne, notExists, or, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { knowledgeCards, knowledgeCardSearchDocuments, knowledgeCardSources } from "@/db/schema";
+import { knowledgeCardEvidence, knowledgeCards, knowledgeCardSearchDocuments, knowledgeCardSources, sourceCaptureVersions } from "@/db/schema";
 import { indexApprovedKnowledgeCard } from "@/features/knowledge/search";
-import { isKnowledgeCardTravelerEligible } from "@/features/knowledge/state";
 
 type KnowledgeIndexingDb = ReturnType<typeof getDb>;
 
@@ -60,6 +59,31 @@ export async function runApprovedKnowledgeIndexingWorkerLoop(options: { once?: b
 }
 
 async function loadApprovedCardsNeedingSearchDocuments(db: Pick<KnowledgeIndexingDb, "select">, options: { batchSize: number; now: Date }) {
+  const validEvidence = exists(
+    db
+      .select({ id: knowledgeCardEvidence.id })
+      .from(knowledgeCardEvidence)
+      .innerJoin(knowledgeCardSources, and(eq(knowledgeCardSources.knowledgeCardId, knowledgeCardEvidence.knowledgeCardId), eq(knowledgeCardSources.sourceId, knowledgeCardEvidence.sourceId)))
+      .innerJoin(sourceCaptureVersions, and(eq(sourceCaptureVersions.id, knowledgeCardEvidence.captureVersionId), eq(sourceCaptureVersions.sourceId, knowledgeCardEvidence.sourceId)))
+      .where(and(eq(knowledgeCardEvidence.knowledgeCardId, knowledgeCards.id), eq(knowledgeCardEvidence.state, "active"), or(eq(knowledgeCardEvidence.supportLevel, "primary"), eq(knowledgeCardEvidence.supportLevel, "supporting")), isNull(sourceCaptureVersions.payloadDeletedAt), sql`substring(${sourceCaptureVersions.rawText} from ${knowledgeCardEvidence.spanStart} + 1 for ${knowledgeCardEvidence.spanEnd} - ${knowledgeCardEvidence.spanStart}) = ${knowledgeCardEvidence.quoteText}`)),
+  );
+  const cardStateIsEligible = and(
+    eq(knowledgeCards.status, "approved"),
+    eq(knowledgeCards.needsReview, false),
+    eq(knowledgeCards.publicationState, "active"),
+    ne(knowledgeCards.knowledgeState, "conflicted"),
+    ne(knowledgeCards.knowledgeState, "superseded"),
+    ne(knowledgeCards.verificationState, "failed"),
+    sql`coalesce(nullif(btrim(${knowledgeCards.locationName}), ''), nullif(btrim(${knowledgeCards.routeSegment}), '')) is not null`,
+  );
+  const documentNeedsRefresh = or(
+    isNull(knowledgeCardSearchDocuments.id),
+    ne(knowledgeCardSearchDocuments.status, "active"),
+    ne(knowledgeCardSearchDocuments.confidence, knowledgeCards.confidence),
+    ne(knowledgeCardSearchDocuments.freshnessSensitive, knowledgeCards.freshnessSensitive),
+    lt(knowledgeCardSearchDocuments.updatedAt, knowledgeCards.updatedAt),
+  );
+
   return db
     .select({
       id: knowledgeCards.id,
@@ -80,41 +104,39 @@ async function loadApprovedCardsNeedingSearchDocuments(db: Pick<KnowledgeIndexin
     .where(
       and(
           or(
-            // Recheck every active projection against the current owner row.
-            eq(knowledgeCardSearchDocuments.status, "active"),
+            // Recheck active projections only when state/evidence is invalid or the projection is stale.
+            and(
+              eq(knowledgeCardSearchDocuments.status, "active"),
+              or(
+                ne(knowledgeCards.status, "approved"),
+                eq(knowledgeCards.needsReview, true),
+                ne(knowledgeCards.publicationState, "active"),
+                eq(knowledgeCards.knowledgeState, "conflicted"),
+                eq(knowledgeCards.knowledgeState, "superseded"),
+                eq(knowledgeCards.verificationState, "failed"),
+                sql`coalesce(nullif(btrim(${knowledgeCards.locationName}), ''), nullif(btrim(${knowledgeCards.routeSegment}), '')) is null`,
+                notExists(
+                db
+                  .select({ id: knowledgeCardEvidence.id })
+                  .from(knowledgeCardEvidence)
+                  .innerJoin(knowledgeCardSources, and(eq(knowledgeCardSources.knowledgeCardId, knowledgeCardEvidence.knowledgeCardId), eq(knowledgeCardSources.sourceId, knowledgeCardEvidence.sourceId)))
+                  .innerJoin(sourceCaptureVersions, and(eq(sourceCaptureVersions.id, knowledgeCardEvidence.captureVersionId), eq(sourceCaptureVersions.sourceId, knowledgeCardEvidence.sourceId)))
+                  .where(and(eq(knowledgeCardEvidence.knowledgeCardId, knowledgeCards.id), eq(knowledgeCardEvidence.state, "active"), or(eq(knowledgeCardEvidence.supportLevel, "primary"), eq(knowledgeCardEvidence.supportLevel, "supporting")), isNull(sourceCaptureVersions.payloadDeletedAt), sql`substring(${sourceCaptureVersions.rawText} from ${knowledgeCardEvidence.spanStart} + 1 for ${knowledgeCardEvidence.spanEnd} - ${knowledgeCardEvidence.spanStart}) = ${knowledgeCardEvidence.quoteText}`)),
+                ),
+                documentNeedsRefresh!,
+              ),
+            ),
           and(
-            eq(knowledgeCards.publicationState, "active"),
-            exists(
-              db
-                .select({ id: knowledgeCardSources.knowledgeCardId })
-                .from(knowledgeCardSources)
-                .where(eq(knowledgeCardSources.knowledgeCardId, knowledgeCards.id)),
-            ),
-            or(
-              isNull(knowledgeCardSearchDocuments.id),
-              ne(knowledgeCardSearchDocuments.status, "active"),
-              ne(knowledgeCardSearchDocuments.confidence, knowledgeCards.confidence),
-              ne(knowledgeCardSearchDocuments.freshnessSensitive, knowledgeCards.freshnessSensitive),
-              lt(knowledgeCardSearchDocuments.updatedAt, knowledgeCards.updatedAt),
-            ),
+            cardStateIsEligible,
+            validEvidence,
+            documentNeedsRefresh,
           ),
         ),
       ),
     )
     .orderBy(asc(knowledgeCards.updatedAt), asc(knowledgeCards.id))
-    // Bound each poll at the database boundary; eligibility remains fail-closed below.
-    .limit(options.batchSize)
-    .then((cards) => cards.filter((card) => {
-      const eligible = isKnowledgeCardTravelerEligible(card);
-      const needsRefresh =
-        card.documentStatus === null ||
-        card.documentStatus !== "active" ||
-        card.documentConfidence !== card.confidence ||
-        card.documentFreshnessSensitive !== card.freshnessSensitive ||
-        (card.documentUpdatedAt !== null && card.documentUpdatedAt < card.updatedAt);
-
-      return (card.documentStatus === "active" && !eligible) || (eligible && needsRefresh);
-    }));
+    // Bound each poll at the database boundary; the authoritative recheck happens in indexing.
+    .limit(options.batchSize);
 }
 
 function getWorkerPollIntervalMs() {

@@ -100,3 +100,6 @@
 - source_spec: `spec-3-1-ai-first-knowledge-card-state-model.md`
   summary: Update AI Ask knowledge/provenance integration fixtures when Story 3.3 defines bounded evidence and traveler-eligibility metadata.
   evidence: Story 3.1 correctly fails closed for every evidence-less legacy card, so three assertions in `tests/answer-context.test.ts` that expect legacy approved cards in source bundles, annotations, and provenance now fail until a Story 3.3-compliant eligible fixture exists.
+- source_spec: `spec-3-3-backfill-bounded-evidence-and-verify-legacy-retrieval-safety.md`
+  summary: Atomically write an index dirty marker when evidence state or display policy changes.
+  evidence: Story 3.3 safely validates and filters evidence at search time, but Story 3.10 owns the mutation/dirty-marker contract needed to rebuild an already-indexed lexical document after evidence policy changes.

@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { auditEvents, knowledgeCardSources, knowledgeCards, knowledgeSeedBatchItems, knowledgeSeedBatches, knowledgeSourceSuggestions, sourceCaptureVersions, sources, userRoles, users, type KnowledgeCardType, type UserRole } from "@/db/schema";
 
 import { testDb } from "./helpers/db";
-import { seedSourceCaptureVersion } from "./helpers/source-captures";
+import { seedKnowledgeCardEvidence, seedSourceCaptureVersion } from "./helpers/source-captures";
 
 const authMock = vi.fn();
 
@@ -217,19 +217,21 @@ describe("knowledge batch source intake", () => {
       aiPromptVersion: "test",
       createdByUserId: "progress-operator",
     });
+    const eligibleCapture = await seedSourceCaptureVersion({ sourceId: eligibleItem!.sourceId!, captureKind: "url", rawText: "Evidence Huế đã xác minh." });
+    await seedKnowledgeCardEvidence({ cardId: "eligible-hue-food", sourceId: eligibleItem!.sourceId!, captureVersionId: eligibleCapture.id, quoteText: "Evidence Huế đã xác minh." });
 
     const progress = await getApprovedCorridorSeedProgress();
 
-    expect(progress).toMatchObject({ targetApprovedItems: 100, approvedCorridorItems: 0, remainingApprovedItems: 100, isComplete: false });
-    expect(progress.byType.find((item) => item.type === "food")).toEqual({ type: "food", count: 0 });
+    expect(progress).toMatchObject({ targetApprovedItems: 100, approvedCorridorItems: 1, remainingApprovedItems: 99, isComplete: false });
+    expect(progress.byType.find((item) => item.type === "food")).toEqual({ type: "food", count: 1 });
     expect(progress.byType.find((item) => item.type === "place")).toEqual({ type: "place", count: 0 });
-    expect(progress.byRouteOrLocation.find((item) => item.routeOrLocation === "Huế")).toEqual({ routeOrLocation: "Huế", count: 0 });
+    expect(progress.byRouteOrLocation.find((item) => item.routeOrLocation === "Huế")).toEqual({ routeOrLocation: "Huế", count: 1 });
     expect(progress.byRouteOrLocation.find((item) => item.routeOrLocation === "Hà Nội")).toEqual({ routeOrLocation: "Hà Nội", count: 0 });
     expect(progress.byRouteOrLocation.find((item) => item.routeOrLocation === "Nha Trang / Khánh Hòa")).toEqual({ routeOrLocation: "Nha Trang / Khánh Hòa", count: 0 });
-    expect(progress.seedItemStatusCounts).toMatchObject({ approved: 0, duplicate: 1, pending: 0, needs_review: 3 });
+    expect(progress.seedItemStatusCounts).toMatchObject({ approved: 1, duplicate: 1, pending: 0, needs_review: 2 });
 
     const persistedItems = await testDb.select().from(knowledgeSeedBatchItems).orderBy(knowledgeSeedBatchItems.lineNumber);
-    expect(persistedItems.map((item) => item.status)).toEqual(["needs_review", "needs_review", "needs_review", "duplicate"]);
+    expect(persistedItems.map((item) => item.status)).toEqual(["approved", "needs_review", "needs_review", "duplicate"]);
     expect(JSON.stringify(progress)).not.toContain("raw");
     expect(JSON.stringify(progress)).not.toContain("submittedUrl");
   });
@@ -293,6 +295,10 @@ async function insertCardWithOptionalSource(input: {
     id: input.id,
     status: input.status,
     needsReview: input.needsReview,
+    publicationState: input.status === "approved" ? "active" : undefined,
+    knowledgeState: input.status === "approved" ? "uncertain" : undefined,
+    reviewState: input.status === "approved" ? "reviewed" : undefined,
+    verificationState: input.status === "approved" ? "not_required" : undefined,
     type: input.type,
     title: input.id,
     locationName: input.locationName ?? null,

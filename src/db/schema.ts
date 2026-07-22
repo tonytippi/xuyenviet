@@ -63,6 +63,12 @@ export type KnowledgeConfidence = (typeof knowledgeConfidenceValues)[number];
 export const knowledgeSourceSupportValues = ["primary", "supporting", "conflicting"] as const;
 export type KnowledgeSourceSupport = (typeof knowledgeSourceSupportValues)[number];
 
+export const knowledgeEvidenceDisplayPolicyValues = ["fact_only", "traveler_visible", "operator_only"] as const;
+export type KnowledgeEvidenceDisplayPolicy = (typeof knowledgeEvidenceDisplayPolicyValues)[number];
+
+export const knowledgeEvidenceStateValues = ["active", "removed"] as const;
+export type KnowledgeEvidenceState = (typeof knowledgeEvidenceStateValues)[number];
+
 export const knowledgeSearchDocumentStatusValues = ["active", "disabled", "stale"] as const;
 export type KnowledgeSearchDocumentStatus = (typeof knowledgeSearchDocumentStatusValues)[number];
 
@@ -836,6 +842,72 @@ export const knowledgeCardSources = pgTable(
     primaryKey({ columns: [link.knowledgeCardId, link.sourceId] }),
     index("knowledge_card_sources_source_id_idx").on(link.sourceId),
     check("knowledge_card_sources_support_level_check", sql`${link.supportLevel} in ('primary', 'supporting', 'conflicting')`),
+  ],
+);
+
+export const knowledgeCardEvidence = pgTable(
+  "knowledge_card_evidence",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    knowledgeCardId: text("knowledge_card_id")
+      .notNull()
+      .references(() => knowledgeCards.id, { onDelete: "cascade" }),
+    sourceId: text("source_id")
+      .notNull()
+      .references(() => sources.id, { onDelete: "restrict" }),
+    captureVersionId: text("capture_version_id").notNull(),
+    quoteText: text("quote_text").notNull(),
+    spanStart: integer("span_start").notNull(),
+    spanEnd: integer("span_end").notNull(),
+    observedAt: timestamp("observed_at", { mode: "date" }).notNull(),
+    capturedAt: timestamp("captured_at", { mode: "date" }).notNull(),
+    conditions: jsonb("conditions").$type<string[]>().default([]).notNull(),
+    supportLevel: text("support_level").$type<KnowledgeSourceSupport>().default("supporting").notNull(),
+    displayPolicy: text("display_policy").$type<KnowledgeEvidenceDisplayPolicy>().default("fact_only").notNull(),
+    state: text("state").$type<KnowledgeEvidenceState>().default("active").notNull(),
+    independenceKey: text("independence_key").notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (evidence) => [
+    index("knowledge_card_evidence_active_card_idx").on(evidence.knowledgeCardId, evidence.supportLevel).where(sql`${evidence.state} = 'active'`),
+    index("knowledge_card_evidence_source_version_idx").on(evidence.sourceId, evidence.captureVersionId),
+    uniqueIndex("knowledge_card_evidence_card_independence_idx").on(evidence.knowledgeCardId, evidence.independenceKey),
+    foreignKey({
+      columns: [evidence.captureVersionId, evidence.sourceId],
+      foreignColumns: [sourceCaptureVersions.id, sourceCaptureVersions.sourceId],
+      name: "knowledge_card_evidence_capture_version_source_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [evidence.knowledgeCardId, evidence.sourceId],
+      foreignColumns: [knowledgeCardSources.knowledgeCardId, knowledgeCardSources.sourceId],
+      name: "knowledge_card_evidence_card_source_fk",
+    }).onDelete("cascade"),
+    check("knowledge_card_evidence_quote_check", sql`length(btrim(${evidence.quoteText})) between 1 and 2000`),
+    check("knowledge_card_evidence_span_check", sql`${evidence.spanStart} >= 0 and ${evidence.spanEnd} > ${evidence.spanStart} and ${evidence.spanEnd} - ${evidence.spanStart} = char_length(${evidence.quoteText})`),
+    check("knowledge_card_evidence_conditions_array_check", sql`jsonb_typeof(${evidence.conditions}) = 'array'`),
+    check("knowledge_card_evidence_support_check", sql`${evidence.supportLevel} in ('primary', 'supporting', 'conflicting')`),
+    check("knowledge_card_evidence_display_policy_check", sql`${evidence.displayPolicy} in ('fact_only', 'traveler_visible', 'operator_only')`),
+    check("knowledge_card_evidence_state_check", sql`${evidence.state} in ('active', 'removed')`),
+    check("knowledge_card_evidence_independence_key_check", sql`length(btrim(${evidence.independenceKey})) between 1 and 160`),
+  ],
+);
+
+export const knowledgeEvidenceBackfillReports = pgTable(
+  "knowledge_evidence_backfill_reports",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    reason: text("reason").notNull(),
+    cardCount: integer("card_count").notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (report) => [
+    uniqueIndex("knowledge_evidence_backfill_reports_reason_idx").on(report.reason),
+    check("knowledge_evidence_backfill_reports_reason_check", sql`length(btrim(${report.reason})) between 1 and 160`),
+    check("knowledge_evidence_backfill_reports_count_check", sql`${report.cardCount} >= 0`),
   ],
 );
 

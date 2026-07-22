@@ -46,7 +46,7 @@ development_status:
   epic-3: in-progress
   3-1-add-the-ai-first-knowledge-card-state-model: done
   3-2-create-immutable-source-capture-versions-and-retention-boundaries: done
-  3-3-backfill-bounded-evidence-and-verify-legacy-retrieval-safety: backlog
+  3-3-backfill-bounded-evidence-and-verify-legacy-retrieval-safety: done
   3-4-establish-source-version-ingestion-job-claiming: backlog
   3-5-run-the-source-version-ai-ingestion-pipeline: backlog
   3-6-recover-ingestion-jobs-without-stale-publication: backlog

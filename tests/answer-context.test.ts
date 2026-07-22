@@ -6,6 +6,7 @@ import type { KnowledgeSearchResult } from "@/features/knowledge/search";
 import type { ContextPrioritySourceBundle } from "@/features/retrieval/source-bundle";
 
 import { testDb } from "./helpers/db";
+import { seedKnowledgeCardEvidence, seedSourceCaptureVersion } from "./helpers/source-captures";
 
 async function createTestUser(userId: string) {
   await testDb.insert(users).values({ id: userId, email: `${userId}@example.com` });
@@ -75,7 +76,11 @@ async function seedApprovedKnowledge(userId: string) {
     .insert(knowledgeCards)
     .values({
       id: "ai-ask-safe-card",
-      status: "approved",
+        status: "approved",
+        publicationState: "active",
+        knowledgeState: "community_observation",
+        reviewState: "reviewed",
+        verificationState: "not_required",
       type: "parking",
       title: longTitle,
       locationName: "Huế",
@@ -92,6 +97,9 @@ async function seedApprovedKnowledge(userId: string) {
     .returning();
 
   await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: card.id, sourceId: source.id, supportLevel: "primary" });
+  const captureText = "Có bãi đỗ rộng, phù hợp dừng nghỉ khi đi gia đình.";
+  const capture = await seedSourceCaptureVersion({ sourceId: source.id, captureKind: "url", rawText: captureText });
+  await seedKnowledgeCardEvidence({ cardId: card.id, sourceId: source.id, captureVersionId: capture.id, quoteText: captureText });
   const { indexApprovedKnowledgeCard } = await import("@/features/knowledge/search");
   await indexApprovedKnowledgeCard(card.id);
 }

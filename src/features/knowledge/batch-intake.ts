@@ -3,7 +3,7 @@ import "server-only";
 import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { knowledgeCards, knowledgeCardSources, knowledgeCardTypeValues, knowledgeSeedBatchItems, knowledgeSeedBatches, knowledgeSourceSuggestions, sourceCaptureVersions, sources, type KnowledgeCardType, type KnowledgeSeedBatchItemStatus } from "@/db/schema";
+import { knowledgeCardEvidence, knowledgeCards, knowledgeCardSources, knowledgeCardTypeValues, knowledgeSeedBatchItems, knowledgeSeedBatches, knowledgeSourceSuggestions, sourceCaptureVersions, sources, type KnowledgeCardType, type KnowledgeSeedBatchItemStatus } from "@/db/schema";
 import { isKnowledgeCardTravelerEligible } from "@/features/knowledge/state";
 import { recordAuditEvent } from "@/features/audit/events";
 import { requireAdminSession } from "@/server/auth";
@@ -231,7 +231,7 @@ export async function getApprovedCorridorSeedProgress(): Promise<ApprovedCorrido
   await persistDerivedStatuses(db, staleStatusUpdates);
 
   const cardRows = await db
-    .select({ id: knowledgeCards.id, type: knowledgeCards.type, locationName: knowledgeCards.locationName, routeSegment: knowledgeCards.routeSegment, publicationState: knowledgeCards.publicationState, knowledgeState: knowledgeCards.knowledgeState, reviewState: knowledgeCards.reviewState, verificationState: knowledgeCards.verificationState })
+    .select({ id: knowledgeCards.id, type: knowledgeCards.type, status: knowledgeCards.status, needsReview: knowledgeCards.needsReview, locationName: knowledgeCards.locationName, routeSegment: knowledgeCards.routeSegment, publicationState: knowledgeCards.publicationState, knowledgeState: knowledgeCards.knowledgeState, reviewState: knowledgeCards.reviewState, verificationState: knowledgeCards.verificationState, activeSupportingEvidenceCount: sql<number>`case when exists (select 1 from ${knowledgeCardEvidence} evidence join ${knowledgeCardSources} link on link.knowledge_card_id = evidence.knowledge_card_id and link.source_id = evidence.source_id join ${sourceCaptureVersions} capture on capture.id = evidence.capture_version_id and capture.source_id = evidence.source_id where evidence.knowledge_card_id = ${knowledgeCards.id} and evidence.state = 'active' and evidence.support_level in ('primary', 'supporting') and capture.payload_deleted_at is null and substring(capture.raw_text from evidence.span_start + 1 for evidence.span_end - evidence.span_start) = evidence.quote_text) then 1 else 0 end`, capturePayloadAvailable: sql<boolean>`true` })
     .from(knowledgeCards)
     .innerJoin(knowledgeCardSources, eq(knowledgeCardSources.knowledgeCardId, knowledgeCards.id))
     .where(eq(knowledgeCards.publicationState, "active"));
@@ -336,6 +336,10 @@ async function deriveStatusesForSourceItems(db: Pick<BatchDb, "select">, items: 
       knowledgeState: knowledgeCards.knowledgeState,
       reviewState: knowledgeCards.reviewState,
       verificationState: knowledgeCards.verificationState,
+      locationName: knowledgeCards.locationName,
+      routeSegment: knowledgeCards.routeSegment,
+      activeSupportingEvidenceCount: sql<number>`case when exists (select 1 from ${knowledgeCardEvidence} evidence join ${knowledgeCardSources} link on link.knowledge_card_id = evidence.knowledge_card_id and link.source_id = evidence.source_id join ${sourceCaptureVersions} capture on capture.id = evidence.capture_version_id and capture.source_id = evidence.source_id where evidence.knowledge_card_id = ${knowledgeCards.id} and evidence.state = 'active' and evidence.support_level in ('primary', 'supporting') and capture.payload_deleted_at is null and substring(capture.raw_text from evidence.span_start + 1 for evidence.span_end - evidence.span_start) = evidence.quote_text) then 1 else 0 end`,
+      capturePayloadAvailable: sql<boolean>`true`,
     })
     .from(knowledgeCardSources)
     .innerJoin(knowledgeCards, eq(knowledgeCards.id, knowledgeCardSources.knowledgeCardId))
@@ -369,7 +373,7 @@ async function deriveStatusesForSourceItems(db: Pick<BatchDb, "select">, items: 
   return derived;
 }
 
-function mapCardStatus(card: Pick<typeof knowledgeCards.$inferSelect, "status" | "needsReview" | "publicationState" | "knowledgeState" | "reviewState" | "verificationState">): KnowledgeSeedBatchItemStatus {
+function mapCardStatus(card: Pick<typeof knowledgeCards.$inferSelect, "status" | "needsReview" | "publicationState" | "knowledgeState" | "reviewState" | "verificationState"> & { activeSupportingEvidenceCount?: number; capturePayloadAvailable?: boolean }): KnowledgeSeedBatchItemStatus {
   const { status, needsReview } = card;
   if (status === "approved" && needsReview) return "needs_review";
   if (status === "approved") return isKnowledgeCardTravelerEligible(card) ? "approved" : "needs_review";

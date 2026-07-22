@@ -6,6 +6,7 @@ import { alias } from "drizzle-orm/pg-core";
 import { getDb } from "@/db/client";
 import {
   knowledgeCards,
+  knowledgeCardEvidence,
   knowledgeCardSearchDocuments,
   knowledgeCardSources,
   knowledgeSourceSuggestions,
@@ -732,10 +733,16 @@ async function loadApprovedKnowledgeIndexStatuses(cardIds: string[]) {
     .select({
       cardId: knowledgeCards.id,
       cardUpdatedAt: knowledgeCards.updatedAt,
+      status: knowledgeCards.status,
+      needsReview: knowledgeCards.needsReview,
       publicationState: knowledgeCards.publicationState,
       knowledgeState: knowledgeCards.knowledgeState,
       reviewState: knowledgeCards.reviewState,
       verificationState: knowledgeCards.verificationState,
+      locationName: knowledgeCards.locationName,
+      routeSegment: knowledgeCards.routeSegment,
+      activeSupportingEvidenceCount: sql<number>`case when exists (select 1 from ${knowledgeCardEvidence} evidence join ${knowledgeCardSources} link on link.knowledge_card_id = evidence.knowledge_card_id and link.source_id = evidence.source_id join ${sourceCaptureVersions} capture on capture.id = evidence.capture_version_id and capture.source_id = evidence.source_id where evidence.knowledge_card_id = ${knowledgeCards.id} and evidence.state = 'active' and evidence.support_level in ('primary', 'supporting') and capture.payload_deleted_at is null and substring(capture.raw_text from evidence.span_start + 1 for evidence.span_end - evidence.span_start) = evidence.quote_text) then 1 else 0 end`,
+      capturePayloadAvailable: sql<boolean>`true`,
       documentStatus: knowledgeCardSearchDocuments.status,
       documentUpdatedAt: knowledgeCardSearchDocuments.updatedAt,
     })
