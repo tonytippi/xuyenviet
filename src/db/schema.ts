@@ -470,6 +470,7 @@ export const knowledgeIngestionJobs = pgTable(
     nextRunAt: timestamp("next_run_at", { mode: "date" }).defaultNow().notNull(),
     lastErrorCode: text("last_error_code"),
     requeueReasonCode: text("requeue_reason_code"),
+    checkpoint: jsonb("checkpoint").$type<Record<string, unknown>>(),
     claimedBy: text("claimed_by"),
     claimedAt: timestamp("claimed_at", { mode: "date" }),
     leaseExpiresAt: timestamp("lease_expires_at", { mode: "date" }),
@@ -494,8 +495,10 @@ export const knowledgeIngestionJobs = pgTable(
     check("knowledge_ingestion_jobs_submitter_email_check", sql`length(btrim(${job.submittedByEmail})) between 1 and 320`),
     check("knowledge_ingestion_jobs_error_code_check", sql`${job.lastErrorCode} is null or ${job.lastErrorCode} ~ '^[a-z0-9_:-]{1,120}$'`),
     check("knowledge_ingestion_jobs_requeue_reason_code_check", sql`${job.requeueReasonCode} is null or ${job.requeueReasonCode} ~ '^[a-z0-9_:-]{1,120}$'`),
+    check("knowledge_ingestion_jobs_checkpoint_shape_check", sql`${job.checkpoint} is null or (jsonb_typeof(${job.checkpoint}) = 'object' and octet_length(${job.checkpoint}::text) <= 8192)`),
     check("knowledge_ingestion_jobs_claim_shape_check", sql`(${job.claimedBy} is null and ${job.claimedAt} is null and ${job.leaseExpiresAt} is null and ${job.fencingToken} is null) or (${job.claimedBy} is not null and length(btrim(${job.claimedBy})) between 1 and 160 and ${job.claimedAt} is not null and ${job.leaseExpiresAt} > ${job.claimedAt} and ${job.fencingToken} ~ '^[a-f0-9]{64}$')`),
     check("knowledge_ingestion_jobs_terminal_claim_check", sql`${job.stage} not in ('published', 'suppressed', 'review_recommended', 'verify_first', 'failed') or (${job.claimedBy} is null and ${job.claimedAt} is null and ${job.leaseExpiresAt} is null and ${job.fencingToken} is null)`),
+    check("knowledge_ingestion_jobs_terminal_checkpoint_check", sql`${job.stage} not in ('published', 'suppressed', 'review_recommended', 'verify_first', 'failed') or ${job.checkpoint} is null`),
   ],
 );
 

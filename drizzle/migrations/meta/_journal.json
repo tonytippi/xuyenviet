@@ -316,6 +316,13 @@
       "when": 1784901000000,
       "tag": "0044_system_knowledge_pipeline_actor",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1784902000000,
+      "tag": "0045_recover_knowledge_ingestion_jobs",
+      "breakpoints": true
     }
   ]
 }

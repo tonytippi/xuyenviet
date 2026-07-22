@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 import { beforeEach, describe, expect, test } from "vitest";
 
 import { knowledgeIngestionJobs, sourceCaptureVersions, sources, users } from "@/db/schema";
-import { claimNextKnowledgeIngestionJob, ensureIngestionJobForCaptureVersion, listKnowledgeIngestionJobStatuses } from "@/features/knowledge/ingestion-jobs";
+import { claimNextKnowledgeIngestionJob, commitKnowledgeIngestionStage, ensureIngestionJobForCaptureVersion, listKnowledgeIngestionJobStatuses, recoverKnowledgeIngestionJobs } from "@/features/knowledge/ingestion-jobs";
 import { appendSourceCaptureVersion, hashCaptureText } from "@/features/knowledge/source-captures";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
@@ -181,5 +181,29 @@ describe("canonical knowledge ingestion jobs", () => {
     const status = await listKnowledgeIngestionJobStatuses(testDb);
     expect(JSON.stringify(status)).not.toContain("RAW_CAPTURE_MARKER");
     expect(JSON.stringify(status)).not.toContain(claim?.fencingToken ?? "");
+  });
+
+  test("recovers an expired fenced stage without permitting its old fence to commit", async () => {
+    await createSource("recovery");
+    await appendReadableCapture("recovery");
+    const claimedAt = new Date(Date.now() + 1_000);
+    const first = await claimNextKnowledgeIngestionJob({ workerId: "old-worker", now: claimedAt }, testDb);
+    if (!first) throw new Error("expected claim");
+    await commitKnowledgeIngestionStage({ jobId: first.jobId, expectedStage: "queued", expectedStageVersion: first.stageVersion, fencingToken: first.fencingToken, nextStage: "triaging", checkpoint: { version: 1, completedStage: "triaging", passed: true }, now: claimedAt }, testDb);
+    const expiredAt = new Date(first.leaseExpiresAt.getTime() + 1);
+    await expect(recoverKnowledgeIngestionJobs(testDb, expiredAt)).resolves.toMatchObject({ recovered: 1 });
+    const second = await claimNextKnowledgeIngestionJob({ workerId: "new-worker", now: expiredAt }, testDb);
+    expect(second).toMatchObject({ stage: "triaging", checkpoint: { completedStage: "triaging" } });
+    await expect(commitKnowledgeIngestionStage({ jobId: first.jobId, expectedStage: "triaging", expectedStageVersion: 2, fencingToken: first.fencingToken, nextStage: "extracting", checkpoint: { version: 1, completedStage: "extracting", candidate: { type: "place", title: "Title", summary: "Summary", locationName: "Place", routeSegment: null, conditions: [], freshnessSensitive: false, spanStart: 0, spanEnd: 1, modelId: "extract", promptVersion: "v1" } }, now: expiredAt }, testDb)).resolves.toBeNull();
+  });
+
+  test("clears checkpoints for terminal and exhausted jobs without exposing them in status", async () => {
+    await createSource("checkpoint");
+    const capture = await appendReadableCapture("checkpoint", "Checkpoint RAW_CAPTURE_MARKER");
+    const claim = await claimNextKnowledgeIngestionJob({ workerId: "worker", now: new Date(Date.now() + 1_000) }, testDb);
+    if (!claim) throw new Error("expected claim");
+    await commitKnowledgeIngestionStage({ jobId: claim.jobId, expectedStage: "queued", expectedStageVersion: 1, fencingToken: claim.fencingToken, nextStage: "suppressed", now: new Date(Date.now() + 2_000) }, testDb);
+    await expect(testDb.select({ checkpoint: knowledgeIngestionJobs.checkpoint }).from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.captureVersionId, capture.id))).resolves.toEqual([{ checkpoint: null }]);
+    expect(JSON.stringify(await listKnowledgeIngestionJobStatuses(testDb))).not.toContain("RAW_CAPTURE_MARKER");
   });
 });

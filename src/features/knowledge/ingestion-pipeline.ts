@@ -7,7 +7,7 @@ import { auditEvents, knowledgeCardEvidence, knowledgeCards, knowledgeCardSource
 import { completeEvaluation, completeExtraction } from "@/features/ai/gateway";
 import { getAiGatewayPricingSnapshot, selectActiveAiGatewayModel, type SelectedAiGatewayModel } from "@/features/ai/models";
 import { buildKnowledgePipelineExtractionMessages, buildKnowledgePipelineJudgmentMessages, buildKnowledgePipelineRelationJudgmentMessages, knowledgePipelineExtractionPromptVersion, knowledgePipelineExtractionPurpose, knowledgePipelineJudgmentPromptVersion, knowledgePipelineJudgmentPurpose } from "@/features/ai/prompts";
-import { commitKnowledgeIngestionStage, type KnowledgeIngestionClaim } from "@/features/knowledge/ingestion-jobs";
+import { commitKnowledgeIngestionStage, retryKnowledgeIngestionStage, type KnowledgeIngestionCheckpoint, type KnowledgeIngestionClaim } from "@/features/knowledge/ingestion-jobs";
 import { writeAiUsageEvent } from "@/features/usage/events";
 
 const systemActorId = "system-knowledge-pipeline";
@@ -20,42 +20,68 @@ export type KnowledgeIngestionPipelineResult = { jobId: string; sourceId: string
 
 export async function runKnowledgeIngestionPipeline(claim: KnowledgeIngestionClaim, db: PipelineDb = getDb()): Promise<KnowledgeIngestionPipelineResult | null> {
   let stage = claim.stage; let stageVersion = claim.stageVersion;
-  const advance = async (nextStage: typeof knowledgeIngestionJobs.$inferSelect.stage, errorCode?: string) => {
-    const committed = await commitKnowledgeIngestionStage({ jobId: claim.jobId, expectedStage: stage, expectedStageVersion: stageVersion, fencingToken: claim.fencingToken, nextStage, lastErrorCode: errorCode }, db);
+  const advance = async (nextStage: typeof knowledgeIngestionJobs.$inferSelect.stage, checkpoint: KnowledgeIngestionCheckpoint) => {
+    const committed = await commitKnowledgeIngestionStage({ jobId: claim.jobId, expectedStage: stage, expectedStageVersion: stageVersion, fencingToken: claim.fencingToken, nextStage, checkpoint }, db);
     if (!committed) return false; stage = nextStage as typeof stage; stageVersion = committed.stageVersion; return true;
   };
-  if (!await advance("triaging")) return null;
   const bundle = await loadBundle(db, claim); const rawText = bundle?.rawText;
   if (!bundle || !rawText?.trim() || containsSensitiveText(rawText)) return finish(claim, stage, stageVersion, "suppressed", "unsafe_or_unreadable_capture", db);
-  if (isCommercial(rawText) || isQuestionOnly(rawText) || isOpinionOnly(rawText) || !hasTravelContext(rawText)) return finish(claim, stage, stageVersion, "suppressed", "insufficient_travel_context", db);
-  if (isHighRiskText(rawText)) return finish(claim, stage, stageVersion, "verify_first", "high_risk_capture", db);
-  if (!await advance("extracting")) return null;
-  const extractionModel = await selectActiveAiGatewayModel({ purpose: knowledgePipelineExtractionPurpose, requiredCapabilities: { textInput: true, extraction: true }, db });
-  if (!extractionModel) return finish(claim, stage, stageVersion, "failed", "model_unavailable", db);
-  const extracted = await completeExtraction({ model: extractionModel.gatewayModelName, messages: buildKnowledgePipelineExtractionMessages({ source: bundle.source, rawText }) });
-  await recordUsage(db, extractionModel, knowledgePipelineExtractionPurpose, knowledgePipelineExtractionPromptVersion, extracted);
-  if (!extracted.ok) return finish(claim, stage, stageVersion, "failed", "provider_failed", db);
-  const candidate = parseCandidate(extracted.content, rawText);
-  if (!candidate) return finish(claim, stage, stageVersion, "suppressed", "invalid_candidate", db);
-  if (!await advance("judging")) return null;
-  const judgmentModel = await selectActiveAiGatewayModel({ purpose: knowledgePipelineJudgmentPurpose, requiredCapabilities: { textInput: true, evaluation: true }, db });
-  if (!judgmentModel) return finish(claim, stage, stageVersion, "failed", "judge_model_unavailable", db);
-  if (judgmentModel.id === extractionModel.id || judgmentModel.gatewayModelName === extractionModel.gatewayModelName) return finish(claim, stage, stageVersion, "review_recommended", "judge_model_not_independent", db);
-  const judged = await completeEvaluation({ model: judgmentModel.gatewayModelName, messages: buildKnowledgePipelineJudgmentMessages({ candidate: candidate as unknown as Record<string, unknown>, evidence: candidate.evidence }) });
-  await recordUsage(db, judgmentModel, knowledgePipelineJudgmentPurpose, knowledgePipelineJudgmentPromptVersion, judged);
-  if (!judged.ok) return finish(claim, stage, stageVersion, "failed", "judge_provider_failed", db);
-  const judgment = parseJudgment(judged.content);
-  if (!judgment) return finish(claim, stage, stageVersion, "suppressed", "invalid_judgment", db);
-  if (!await advance("relating")) return null;
+  let checkpoint = claim.checkpoint;
+  if (stage === "queued") {
+    if (isCommercial(rawText) || isQuestionOnly(rawText) || isOpinionOnly(rawText) || !hasTravelContext(rawText)) return finish(claim, stage, stageVersion, "suppressed", "insufficient_travel_context", db);
+    if (isHighRiskText(rawText)) return finish(claim, stage, stageVersion, "verify_first", "high_risk_capture", db);
+    checkpoint = { version: 1, completedStage: "triaging", passed: true };
+    if (!await advance("triaging", checkpoint)) return null;
+  }
+  if (!checkpoint || (stage !== "triaging" && stage !== "extracting" && stage !== "judging" && stage !== "relating")) return finish(claim, stage, stageVersion, "failed", "invalid_checkpoint", db);
+  let candidate: Candidate | null = checkpoint.completedStage !== "triaging" ? candidateFromCheckpoint(checkpoint, rawText) : null;
+  let extractionModel: SelectedAiGatewayModel | null = null;
+  if (stage === "triaging") {
+    extractionModel = await selectActiveAiGatewayModel({ purpose: knowledgePipelineExtractionPurpose, requiredCapabilities: { textInput: true, extraction: true }, db });
+    if (!extractionModel) return finish(claim, stage, stageVersion, "failed", "model_unavailable", db);
+    const extracted = await completeExtraction({ model: extractionModel.gatewayModelName, messages: buildKnowledgePipelineExtractionMessages({ source: bundle.source, rawText }) });
+    await recordUsage(db, extractionModel, knowledgePipelineExtractionPurpose, knowledgePipelineExtractionPromptVersion, extracted);
+    if (!extracted.ok) return retryOrFail(claim, stage, stageVersion, "provider_failed", db);
+    candidate = parseCandidate(extracted.content, rawText);
+    if (!candidate) return finish(claim, stage, stageVersion, "suppressed", "invalid_candidate", db);
+    checkpoint = checkpointForCandidate(candidate, extractionModel);
+    if (!await advance("extracting", checkpoint)) return null;
+  }
+  if (!candidate) return finish(claim, stage, stageVersion, "failed", "invalid_checkpoint", db);
+  const judgmentModel = stage === "extracting" || stage === "judging"
+    ? await selectActiveAiGatewayModel({ purpose: knowledgePipelineJudgmentPurpose, requiredCapabilities: { textInput: true, evaluation: true }, db })
+    : null;
+  if ((stage === "extracting" || stage === "judging") && !judgmentModel) return finish(claim, stage, stageVersion, "failed", "judge_model_unavailable", db);
+  let judgment: Judgment | null = checkpoint.completedStage === "judging" || checkpoint.completedStage === "relating" ? checkpoint.judgment : null;
+  if (stage === "extracting") {
+    const extractionModelId = extractionModel?.id ?? (checkpoint.completedStage === "extracting" ? checkpoint.candidate.modelId : null);
+    if (extractionModelId === judgmentModel!.id || (extractionModel && extractionModel.gatewayModelName === judgmentModel!.gatewayModelName)) return finish(claim, stage, stageVersion, "review_recommended", "judge_model_not_independent", db);
+    const judged = await completeEvaluation({ model: judgmentModel!.gatewayModelName, messages: buildKnowledgePipelineJudgmentMessages({ candidate: candidate as unknown as Record<string, unknown>, evidence: candidate.evidence }) });
+    await recordUsage(db, judgmentModel!, knowledgePipelineJudgmentPurpose, knowledgePipelineJudgmentPromptVersion, judged);
+    if (!judged.ok) return retryOrFail(claim, stage, stageVersion, "judge_provider_failed", db);
+    judgment = parseJudgment(judged.content);
+    if (!judgment) return finish(claim, stage, stageVersion, "suppressed", "invalid_judgment", db);
+    checkpoint = { version: 1, completedStage: "judging", candidate: checkpoint.completedStage === "extracting" ? checkpoint.candidate : checkpointForCandidate(candidate, extractionModel!).candidate, judgment };
+    if (!await advance("judging", checkpoint)) return null;
+  }
+  if (!judgment) return finish(claim, stage, stageVersion, "failed", "invalid_checkpoint", db);
   const outcome = decideOutcome(candidate, judgment);
   if (outcome !== "published") return finish(claim, stage, stageVersion, outcome, "policy_outcome", db);
-  const related = await loadRelatedCandidates(db, candidate);
-  const relatedResult = await completeEvaluation({ model: judgmentModel.gatewayModelName, messages: buildKnowledgePipelineRelationJudgmentMessages({ candidate: candidate as unknown as Record<string, unknown>, candidates: related }) });
-  await recordUsage(db, judgmentModel, knowledgePipelineJudgmentPurpose, knowledgePipelineJudgmentPromptVersion, relatedResult);
-  if (!relatedResult.ok) return finish(claim, stage, stageVersion, "review_recommended", "relation_judge_provider_failed", db);
-  const relation = parseRelation(relatedResult.content, new Set(related.map((card) => card.id)));
-  if (!relation || relation.action === "ambiguous") return finish(claim, stage, stageVersion, "review_recommended", "relation_ambiguous", db);
-  return publish(claim, stageVersion, candidate, judgment, bundle, extractionModel, relation, db);
+  let relation: Relation | null = checkpoint.completedStage === "relating" ? checkpoint.relation : null;
+  if (stage === "judging") {
+    const related = await loadRelatedCandidates(db, candidate);
+    const relatedResult = await completeEvaluation({ model: judgmentModel!.gatewayModelName, messages: buildKnowledgePipelineRelationJudgmentMessages({ candidate: candidate as unknown as Record<string, unknown>, candidates: related }) });
+    await recordUsage(db, judgmentModel!, knowledgePipelineJudgmentPurpose, knowledgePipelineJudgmentPromptVersion, relatedResult);
+    if (!relatedResult.ok) return retryOrFail(claim, stage, stageVersion, "relation_judge_provider_failed", db);
+    relation = parseRelation(relatedResult.content, new Set(related.map((card) => card.id)));
+    if (!relation || relation.action === "ambiguous") return finish(claim, stage, stageVersion, "review_recommended", "relation_ambiguous", db);
+    const relationCheckpoint: Extract<KnowledgeIngestionCheckpoint, { completedStage: "relating" }> = { version: 1, completedStage: "relating", candidate: checkpoint.completedStage === "judging" ? checkpoint.candidate : checkpointForCandidate(candidate, extractionModel!).candidate, judgment, relation: { action: relation.action as "attach" | "create" | "conflict", targetCardId: relation.targetCardId, summary: relation.summary } };
+    checkpoint = relationCheckpoint;
+    if (!await advance("relating", relationCheckpoint)) return null;
+  }
+  if (!relation) return finish(claim, stage, stageVersion, "failed", "invalid_checkpoint", db);
+  if (checkpoint.completedStage === "triaging") return finish(claim, stage, stageVersion, "failed", "invalid_checkpoint", db);
+  return publish(claim, stageVersion, candidate, judgment, bundle, checkpoint.candidate.modelId, relation, db);
 }
 
 async function loadBundle(db: PipelineDb, claim: KnowledgeIngestionClaim) {
@@ -66,6 +92,13 @@ async function finish(claim: KnowledgeIngestionClaim, stage: typeof knowledgeIng
   const committed = await commitKnowledgeIngestionStage({ jobId: claim.jobId, expectedStage: stage as "queued" | "triaging" | "extracting" | "judging" | "relating", expectedStageVersion: version, fencingToken: claim.fencingToken, nextStage: outcome, lastErrorCode: code }, db);
   return committed ? { jobId: claim.jobId, sourceId: claim.sourceId, outcome } : null;
 }
+async function retryOrFail(claim: KnowledgeIngestionClaim, stage: typeof knowledgeIngestionJobs.$inferSelect.stage, version: number, code: string, db: PipelineDb) {
+  const retried = await retryKnowledgeIngestionStage({ jobId: claim.jobId, expectedStage: stage as "queued" | "triaging" | "extracting" | "judging" | "relating", expectedStageVersion: version, fencingToken: claim.fencingToken, errorCode: code }, db);
+  if (retried) return null;
+  return finish(claim, stage, version, "failed", code, db);
+}
+function checkpointForCandidate(candidate: Candidate, model: SelectedAiGatewayModel): Extract<KnowledgeIngestionCheckpoint, { completedStage: "extracting" }> { return { version: 1, completedStage: "extracting", candidate: { type: candidate.type, title: candidate.title, summary: candidate.summary, locationName: candidate.locationName, routeSegment: candidate.routeSegment, conditions: candidate.conditions, freshnessSensitive: candidate.freshnessSensitive, spanStart: candidate.evidence.spanStart, spanEnd: candidate.evidence.spanEnd, modelId: model.id, promptVersion: knowledgePipelineExtractionPromptVersion } }; }
+function candidateFromCheckpoint(checkpoint: Exclude<KnowledgeIngestionCheckpoint, { completedStage: "triaging" }>, rawText: string): Candidate | null { const candidate = checkpoint.candidate; const quoteText = slice(rawText, candidate.spanStart, candidate.spanEnd); if (!quoteText || containsSensitiveText(quoteText)) return null; const persisted = [candidate.title, candidate.summary, ...[candidate.locationName, candidate.routeSegment].filter((value): value is string => value !== null), ...candidate.conditions, quoteText]; const text = persisted.join("\n"); if (persisted.some(containsSensitiveText) || isCommercial(text) || isQuestionOnly(text) || isOpinionOnly(text) || !hasTravelContext(text)) return null; return { type: candidate.type, title: candidate.title, summary: candidate.summary, locationName: candidate.locationName, routeSegment: candidate.routeSegment, conditions: candidate.conditions, freshnessSensitive: candidate.freshnessSensitive, evidence: { quoteText, spanStart: candidate.spanStart, spanEnd: candidate.spanEnd } }; }
 async function loadRelatedCandidates(db: PipelineDb, candidate: Candidate) {
   const scope = normalize(candidate.locationName ?? candidate.routeSegment ?? "");
   const scopeColumn = candidate.locationName ? knowledgeCards.locationName : knowledgeCards.routeSegment;
@@ -75,7 +108,7 @@ async function loadRelatedCandidates(db: PipelineDb, candidate: Candidate) {
     .orderBy(desc(knowledgeCards.updatedAt))
     .limit(200);
 }
-async function publish(claim: KnowledgeIngestionClaim, version: number, candidate: Candidate, judgment: Judgment, bundle: NonNullable<Awaited<ReturnType<typeof loadBundle>>>, extractionModel: SelectedAiGatewayModel, relation: Relation, db: PipelineDb): Promise<KnowledgeIngestionPipelineResult | null> {
+async function publish(claim: KnowledgeIngestionClaim, version: number, candidate: Candidate, judgment: Judgment, bundle: NonNullable<Awaited<ReturnType<typeof loadBundle>>>, extractionModelId: string, relation: Relation, db: PipelineDb): Promise<KnowledgeIngestionPipelineResult | null> {
   return db.transaction(async (tx) => {
     // Matches appendSourceCaptureVersion so current-capture validation and publish are atomic.
     await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${claim.sourceId}, 44))`);
@@ -107,7 +140,7 @@ async function publish(claim: KnowledgeIngestionClaim, version: number, candidat
     }
     if (relation.action !== "create") return terminal(claim, version, "review_recommended", "invalid_relation_action", tx);
     if (!await fence(claim, version, "published", undefined, tx)) return null;
-    const [card] = await tx.insert(knowledgeCards).values({ type: candidate.type, title: candidate.title, summary: candidate.summary, locationName: candidate.locationName, routeSegment: candidate.routeSegment, conditions: candidate.conditions, freshnessSensitive: candidate.freshnessSensitive, confidence: bundle.source.sourceType === "community" ? "community" : "unverified", status: "approved", publicationState: "active", knowledgeState: "community_observation", reviewState: "reviewed", verificationState: "not_required", needsReview: false, currentJudgeSummary: judgment.summary, aiPromptVersion: knowledgePipelineExtractionPromptVersion, aiGatewayModelId: extractionModel.id, createdByUserId: systemActorId }).returning({ id: knowledgeCards.id });
+    const [card] = await tx.insert(knowledgeCards).values({ type: candidate.type, title: candidate.title, summary: candidate.summary, locationName: candidate.locationName, routeSegment: candidate.routeSegment, conditions: candidate.conditions, freshnessSensitive: candidate.freshnessSensitive, confidence: bundle.source.sourceType === "community" ? "community" : "unverified", status: "approved", publicationState: "active", knowledgeState: "community_observation", reviewState: "reviewed", verificationState: "not_required", needsReview: false, currentJudgeSummary: judgment.summary, aiPromptVersion: knowledgePipelineExtractionPromptVersion, aiGatewayModelId: extractionModelId, createdByUserId: systemActorId }).returning({ id: knowledgeCards.id });
     await tx.insert(knowledgeCardSources).values({ knowledgeCardId: card.id, sourceId: claim.sourceId, supportLevel: "primary" }); await attachEvidence(tx, card.id, claim, candidate, bundle, "supporting");
     await tx.insert(auditEvents).values({ actorUserId: systemActorId, actorEmail: systemActorEmail, operation: "create", targetType: "knowledge_ingestion_publication", targetId: card.id, afterSummary: "System pipeline published an evidence-grounded knowledge card." });
     return { jobId: claim.jobId, sourceId: claim.sourceId, outcome: "published", cardId: card.id };
@@ -130,7 +163,7 @@ async function attachEvidence(tx: Parameters<Parameters<PipelineDb["transaction"
 }
 async function incrementEvidenceSetRevision(tx: Parameters<Parameters<PipelineDb["transaction"]>[0]>[0], cardId: string) { await tx.update(knowledgeCards).set({ evidenceSetRevision: sql`${knowledgeCards.evidenceSetRevision} + 1` }).where(eq(knowledgeCards.id, cardId)); }
 async function promote(tx: Parameters<Parameters<PipelineDb["transaction"]>[0]>[0], cardId: string) { const evidence = await tx.select({ key: knowledgeCardEvidence.independenceKey }).from(knowledgeCardEvidence).where(and(eq(knowledgeCardEvidence.knowledgeCardId, cardId), eq(knowledgeCardEvidence.supportLevel, "supporting"), eq(knowledgeCardEvidence.state, "active"))); if (new Set(evidence.map((item) => item.key)).size >= 2) await tx.update(knowledgeCards).set({ knowledgeState: "community_pattern" }).where(eq(knowledgeCards.id, cardId)); }
-async function fence(claim: KnowledgeIngestionClaim, version: number, stage: "published" | "suppressed" | "review_recommended", code: string | undefined, tx: Parameters<Parameters<PipelineDb["transaction"]>[0]>[0]) { const [row] = await tx.execute(sql`update knowledge_ingestion_jobs set stage = ${stage}, stage_version = ${version + 1}, last_error_code = ${code ?? null}, claimed_by = null, claimed_at = null, lease_expires_at = null, fencing_token = null, updated_at = timezone('UTC', now()) where id = ${claim.jobId} and stage = 'relating' and stage_version = ${version} and fencing_token = ${claim.fencingToken} and lease_expires_at > timezone('UTC', now()) returning id`) as Array<{ id: string }>; return row ?? null; }
+async function fence(claim: KnowledgeIngestionClaim, version: number, stage: "published" | "suppressed" | "review_recommended", code: string | undefined, tx: Parameters<Parameters<PipelineDb["transaction"]>[0]>[0]) { const [row] = await tx.execute(sql`update knowledge_ingestion_jobs set stage = ${stage}, stage_version = ${version + 1}, checkpoint = null, last_error_code = ${code ?? null}, claimed_by = null, claimed_at = null, lease_expires_at = null, fencing_token = null, updated_at = timezone('UTC', now()) where id = ${claim.jobId} and stage = 'relating' and stage_version = ${version} and fencing_token = ${claim.fencingToken} and lease_expires_at > timezone('UTC', now()) returning id`) as Array<{ id: string }>; return row ?? null; }
 async function terminal(claim: KnowledgeIngestionClaim, version: number, stage: "suppressed" | "review_recommended", code: string, tx: Parameters<Parameters<PipelineDb["transaction"]>[0]>[0]) { const committed = await fence(claim, version, stage, code, tx); return committed ? { jobId: claim.jobId, sourceId: claim.sourceId, outcome: stage } : null; }
 function decideOutcome(candidate: Candidate, judgment: Judgment): KnowledgeIngestionPipelineResult["outcome"] { if (!passes(judgment)) return "suppressed"; if (candidate.freshnessSensitive || isHighRisk(candidate) || judgment.decision === "verify_first") return "verify_first"; return judgment.decision === "publish" ? "published" : judgment.decision === "suppress" ? "suppressed" : "review_recommended"; }
 function parseCandidate(content: string, rawText: string): Candidate | null { const value = parseObject(content)?.candidate; if (!isRecord(value) || !knowledgeCardTypeValues.includes(value.type as Candidate["type"])) return null; const title = bounded(value.title, 160); const summary = bounded(value.summary, 1200); const locationName = optionalBounded(value.location_name, 160); const routeSegment = optionalBounded(value.route_segment, 160); const evidence = isRecord(value.evidence) ? value.evidence : null; const quoteText = evidence ? bounded(evidence.quote_text, 2000) : null; const start = evidence?.span_start; const end = evidence?.span_end; const conditions = Array.isArray(value.conditions) ? [...new Set(value.conditions.map((item) => bounded(item, 160)).filter((item): item is string => Boolean(item)).map(normalize))].slice(0, 12) : []; if (!title || !summary || (!locationName && !routeSegment) || typeof value.freshness_sensitive !== "boolean" || !quoteText || !Number.isInteger(start) || !Number.isInteger(end)) return null; const spanStart = start as number; const spanEnd = end as number; const persisted = [title, summary, ...[locationName, routeSegment].filter((value): value is string => value !== null), ...conditions, quoteText]; if (persisted.some(containsSensitiveText)) return null; const text = persisted.join("\n"); if (spanStart < 0 || spanEnd <= spanStart || slice(rawText, spanStart, spanEnd) !== quoteText || isCommercial(text) || isQuestionOnly(text) || isOpinionOnly(text) || !hasTravelContext(text)) return null; return { type: value.type as Candidate["type"], title, summary, locationName, routeSegment, conditions, freshnessSensitive: value.freshness_sensitive, evidence: { quoteText, spanStart, spanEnd } }; }

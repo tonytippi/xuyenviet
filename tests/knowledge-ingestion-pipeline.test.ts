@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { aiGatewayModels, aiUsageEvents, auditEvents, knowledgeCardEvidence, knowledgeCards, knowledgeCardSources, knowledgeIngestionJobs, sourceCaptureVersions, sources, users } from "@/db/schema";
-import { claimNextKnowledgeIngestionJob, commitKnowledgeIngestionStage } from "@/features/knowledge/ingestion-jobs";
+import { claimNextKnowledgeIngestionJob, commitKnowledgeIngestionStage, recoverKnowledgeIngestionJobs } from "@/features/knowledge/ingestion-jobs";
 import { runKnowledgeIngestionPipeline } from "@/features/knowledge/ingestion-pipeline";
 import { appendSourceCaptureVersion } from "@/features/knowledge/source-captures";
 
@@ -352,5 +352,22 @@ describe("knowledge ingestion pipeline", () => {
     vi.mocked(fetch).mockResolvedValueOnce(extractionResponse(candidate("Đèo Hải Vân có điểm dừng ngắm cảnh an toàn.")));
     await expect(runKnowledgeIngestionPipeline(claim, testDb)).resolves.toMatchObject({ outcome: "review_recommended" });
     await expect(testDb.select().from(knowledgeCards)).resolves.toHaveLength(0);
+  });
+
+  test("resumes from an extraction checkpoint without repeating extraction", async () => {
+    const rawText = "Đèo Hải Vân có điểm dừng ngắm cảnh an toàn vào ban ngày.";
+    const { claim } = await claimFor(rawText);
+    const triaged = await commitKnowledgeIngestionStage({ jobId: claim.jobId, expectedStage: "queued", expectedStageVersion: 1, fencingToken: claim.fencingToken, nextStage: "triaging", checkpoint: { version: 1, completedStage: "triaging", passed: true } }, testDb);
+    if (!triaged) throw new Error("expected triage commit");
+    const checkpoint = { version: 1 as const, completedStage: "extracting" as const, candidate: { type: "place" as const, title: "Điểm ngắm cảnh đèo Hải Vân", summary: "Có điểm dừng ngắm cảnh phù hợp ban ngày.", locationName: "Đèo Hải Vân", routeSegment: null, conditions: ["ban ngày"], freshnessSensitive: false, spanStart: 0, spanEnd: Array.from(rawText).length, modelId: "extract", promptVersion: "knowledge_pipeline_extraction_v1" } };
+    const extracted = await commitKnowledgeIngestionStage({ jobId: claim.jobId, expectedStage: "triaging", expectedStageVersion: triaged.stageVersion, fencingToken: claim.fencingToken, nextStage: "extracting", checkpoint }, testDb);
+    if (!extracted) throw new Error("expected extraction commit");
+    const recoveredAt = new Date((await testDb.select({ lease: knowledgeIngestionJobs.leaseExpiresAt }).from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, claim.jobId)))[0].lease!.getTime() + 1);
+    await recoverKnowledgeIngestionJobs(testDb, recoveredAt);
+    const resumed = await claimNextKnowledgeIngestionJob({ workerId: "resumed-worker", now: recoveredAt }, testDb);
+    if (!resumed) throw new Error("expected resumed claim");
+    vi.mocked(fetch).mockResolvedValueOnce(judgmentResponse()).mockResolvedValueOnce(new Response(JSON.stringify({ model: "judge-model", choices: [{ message: { content: JSON.stringify({ action: "create", target_card_id: null, summary: "Khác biệt." }) } }] }), { status: 200 }));
+    await expect(runKnowledgeIngestionPipeline(resumed, testDb)).resolves.toMatchObject({ outcome: "published" });
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
 });
