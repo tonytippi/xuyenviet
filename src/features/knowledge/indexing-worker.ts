@@ -73,7 +73,8 @@ async function loadApprovedCardsNeedingSearchDocuments(db: Pick<KnowledgeIndexin
     eq(knowledgeCards.publicationState, "active"),
     ne(knowledgeCards.knowledgeState, "conflicted"),
     ne(knowledgeCards.knowledgeState, "superseded"),
-    ne(knowledgeCards.verificationState, "failed"),
+    eq(knowledgeCards.reviewState, "reviewed"),
+    or(eq(knowledgeCards.verificationState, "not_required"), eq(knowledgeCards.verificationState, "corroborated")),
     sql`coalesce(nullif(btrim(${knowledgeCards.locationName}), ''), nullif(btrim(${knowledgeCards.routeSegment}), '')) is not null`,
   );
   const documentNeedsRefresh = or(
@@ -113,7 +114,8 @@ async function loadApprovedCardsNeedingSearchDocuments(db: Pick<KnowledgeIndexin
                 ne(knowledgeCards.publicationState, "active"),
                 eq(knowledgeCards.knowledgeState, "conflicted"),
                 eq(knowledgeCards.knowledgeState, "superseded"),
-                eq(knowledgeCards.verificationState, "failed"),
+                ne(knowledgeCards.reviewState, "reviewed"),
+                and(ne(knowledgeCards.verificationState, "not_required"), ne(knowledgeCards.verificationState, "corroborated")),
                 sql`coalesce(nullif(btrim(${knowledgeCards.locationName}), ''), nullif(btrim(${knowledgeCards.routeSegment}), '')) is null`,
                 notExists(
                 db

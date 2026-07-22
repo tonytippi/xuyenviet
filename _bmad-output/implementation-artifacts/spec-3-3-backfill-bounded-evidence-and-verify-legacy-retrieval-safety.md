@@ -67,6 +67,13 @@ warnings: []
 - Given a legacy card has safely representable source support, when the evidence backfill runs, then it creates bounded `knowledge_card_evidence` linked to the exact source/capture version with timestamp, conditions, support/display/evidence states, and deterministic independence key; traveler reads remain free of raw/operator-only/provider data.
 - Given a legacy card lacks valid active evidence or required retrieval metadata, when backfill or later indexing/search runs, then it stays ineligible, any stale active projection is disabled, and a concise reason is reported without promotion of draft, rejected, or ambiguous material.
 
+### Review Findings
+
+- [x] [Review][Patch] Fail closed for required verification and unreviewed cards [src/features/knowledge/state.ts:18]
+- [x] [Review][Patch] Refresh active projections when evidence or source privacy changes [src/features/knowledge/indexing-worker.ts:79]
+- [x] [Review][Patch] Bound AI Ask candidate-count scans and memory accumulation [src/features/knowledge/search.ts:131]
+- [x] [Review][Patch] Use PostgreSQL-compatible character offsets for evidence spans [tests/helpers/source-captures.ts:47]
+
 ## Spec Change Log
 
 ## Review Triage Log
@@ -80,7 +87,13 @@ warnings: []
 - addressed_findings:
   - `[high] [patch]` Bound evidence to its card/source link, retain only evidence-backed traveler citations, and fail closed for conflicted or failed-verification cards.
   - `[medium] [patch]` Repair evidence fields in seed/index status, prevent current-document reindex starvation, redact every operator-only source URL, and exclude private/unvalidated URLs from lexical documents.
-  - `[medium] [defer]` Evidence/state mutation dirty markers belong to Story 3.10's atomic projection contract.
+   - `[medium] [defer]` Evidence/state mutation dirty markers belong to Story 3.10's atomic projection contract.
+
+### 2026-07-22 — Follow-up code review fixes
+- Made traveler eligibility fail closed unless the card is reviewed and verification is either not required or corroborated.
+- Added forward-only evidence/source/capture dirty-marker triggers so active search projections reindex after privacy-relevant mutations; `0042_fix_source_touch_trigger.sql` corrects the trigger function for databases that applied the initial migration.
+- Capped candidate-count search scans at `maxSearchCandidateDocuments` for AI Ask.
+- Derived fixture evidence spans with Unicode character counts, matching PostgreSQL `char_length` and `substring` semantics.
 
 ## Design Notes
 
@@ -113,6 +126,8 @@ Backfill is intentionally conservative: a matching source link alone is not evid
 - `pnpm lint` -- passed.
 - `pnpm typecheck` -- passed.
 - `pnpm build` -- passed.
+- Follow-up code review verification: `pnpm test:run tests/knowledge-state-migration.test.ts tests/knowledge-search.test.ts tests/knowledge-approved-cards.test.ts tests/knowledge-batch-source-intake.test.ts tests/answer-context.test.ts` -- passed, 94 tests.
+- Follow-up code review verification: `pnpm lint`, `pnpm typecheck`, `pnpm build`, and `git diff --check` -- passed.
 
 ### File List
 

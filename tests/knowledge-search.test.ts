@@ -84,10 +84,13 @@ describe("knowledge card state-model retrieval safety", () => {
   test.each([
     { description: "conflicted knowledge", update: { knowledgeState: "conflicted" as const } },
     { description: "superseded knowledge", update: { knowledgeState: "superseded" as const } },
+    { description: "unreviewed knowledge", update: { reviewState: "in_review" as const } },
+    { description: "required verification", update: { verificationState: "required" as const } },
     { description: "failed verification", update: { verificationState: "failed" as const } },
-  ])("fails closed for $description despite valid evidence", async ({ update }) => {
-    await createUser(`ineligible-${update.knowledgeState ?? update.verificationState}`, ["operator"]);
-    const card = await createApprovedCardWithSource(`ineligible-${update.knowledgeState ?? update.verificationState}`, `ineligible-${update.knowledgeState ?? update.verificationState}-card`);
+  ])("fails closed for $description despite valid evidence", async ({ description, update }) => {
+    const id = description.replaceAll(" ", "-");
+    await createUser(`ineligible-${id}`, ["operator"]);
+    const card = await createApprovedCardWithSource(`ineligible-${id}`, `ineligible-${id}-card`);
     const sourceId = `${card.id}-source`;
     const capture = await seedSourceCaptureVersion({ sourceId, captureKind: "url", rawText: "Bằng chứng hợp lệ nhưng trạng thái không đủ điều kiện." });
     await seedKnowledgeCardEvidence({ cardId: card.id, sourceId, captureVersionId: capture.id, quoteText: "Bằng chứng hợp lệ nhưng trạng thái không đủ điều kiện." });
@@ -177,6 +180,36 @@ describe("knowledge card state-model retrieval safety", () => {
     expect(document?.searchableText).not.toContain("lexical-secret-token");
     expect(document?.searchableText).not.toContain("lexical-canonical-secret-token");
     await expect(searchApprovedKnowledge("lexical-secret-token")).resolves.toEqual([]);
+  });
+
+  test("refreshes an active projection after evidence becomes operator-only", async () => {
+    await createUser("policy-refresh-operator", ["operator"]);
+    const card = await createApprovedCardWithSource("policy-refresh-operator", "policy-refresh-card");
+    await testDb.update(sources).set({ url: "https://private.example/refresh-secret-token", canonicalUrl: "https://private.example/refresh-canonical-secret-token" }).where(eq(sources.id, "policy-refresh-card-source"));
+    const capture = await seedSourceCaptureVersion({ sourceId: "policy-refresh-card-source", captureKind: "url", rawText: "Bằng chứng thay đổi chính sách hiển thị." });
+    const evidence = await seedKnowledgeCardEvidence({ cardId: card.id, sourceId: "policy-refresh-card-source", captureVersionId: capture.id, quoteText: "Bằng chứng thay đổi chính sách hiển thị." });
+    const { indexApprovedKnowledgeCard, searchApprovedKnowledge } = await import("@/features/knowledge/search");
+    const { processNextApprovedKnowledgeIndexingBatch } = await import("@/features/knowledge/indexing-worker");
+
+    await indexApprovedKnowledgeCard(card.id);
+    await expect(searchApprovedKnowledge("refresh-secret-token")).resolves.toHaveLength(1);
+    await testDb.update(knowledgeCardEvidence).set({ displayPolicy: "operator_only" }).where(eq(knowledgeCardEvidence.id, evidence.id));
+
+    await expect(processNextApprovedKnowledgeIndexingBatch()).resolves.toMatchObject({ cardIds: [card.id], indexedCount: 1 });
+    const [document] = await testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, card.id));
+    expect(document?.searchableText).not.toContain("refresh-secret-token");
+    expect(document?.searchableText).not.toContain("refresh-canonical-secret-token");
+    await expect(searchApprovedKnowledge("refresh-secret-token")).resolves.toEqual([]);
+  });
+
+  test("uses PostgreSQL character offsets for Unicode evidence spans", async () => {
+    await createUser("unicode-evidence-operator", ["operator"]);
+    const card = await createApprovedCardWithSource("unicode-evidence-operator", "unicode-evidence-card");
+    const capture = await seedSourceCaptureVersion({ sourceId: "unicode-evidence-card-source", captureKind: "url", rawText: "🚗 Bãi đỗ xe có mái che." });
+    await expect(seedKnowledgeCardEvidence({ cardId: card.id, sourceId: "unicode-evidence-card-source", captureVersionId: capture.id, quoteText: "🚗 Bãi đỗ xe có mái che." })).resolves.toMatchObject({ spanEnd: 23 });
+    const { indexApprovedKnowledgeCard } = await import("@/features/knowledge/search");
+
+    await expect(indexApprovedKnowledgeCard(card.id)).resolves.toMatchObject({ indexed: true });
   });
 
   test("indexes when a valid evidence row exists after an invalid active row", async () => {

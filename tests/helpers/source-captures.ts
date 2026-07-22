@@ -53,7 +53,7 @@ export async function seedKnowledgeCardEvidence(input: {
       captureVersionId: input.captureVersionId,
       quoteText: input.quoteText,
       spanStart,
-      spanEnd: spanStart + input.quoteText.length,
+      spanEnd: spanStart + Array.from(input.quoteText).length,
       observedAt: input.observedAt ?? new Date("2026-07-13T00:00:00.000Z"),
       capturedAt: new Date("2026-07-13T00:00:00.000Z"),
       supportLevel: input.supportLevel ?? "supporting",

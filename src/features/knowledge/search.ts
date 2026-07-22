@@ -128,8 +128,8 @@ async function searchApprovedKnowledgeInternal(query: string | null | undefined,
   let candidateCount = 0;
   const scoredDocuments: Array<{ knowledgeCardId: string; searchableText: string; updatedAt: Date; score: number }> = [];
 
-  while (countAllCandidates || offset < maxSearchCandidateDocuments) {
-    const currentBatchSize = countAllCandidates ? batchSize : Math.min(batchSize, maxSearchCandidateDocuments - offset);
+  while (offset < maxSearchCandidateDocuments) {
+    const currentBatchSize = Math.min(batchSize, maxSearchCandidateDocuments - offset);
 
     if (currentBatchSize <= 0) {
       break;

@@ -288,6 +288,20 @@
       "when": 1784702038006,
       "tag": "0040_medical_hercules",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1784817600000,
+      "tag": "0041_cardinal_observer",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1784817600001,
+      "tag": "0042_fix_source_touch_trigger",
+      "breakpoints": true
     }
   ]
 }

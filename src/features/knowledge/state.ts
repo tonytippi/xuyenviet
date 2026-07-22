@@ -22,7 +22,8 @@ export function isKnowledgeCardTravelerEligible(card: KnowledgeCardStateForEligi
     || card.publicationState !== "active"
     || card.knowledgeState === "conflicted"
     || card.knowledgeState === "superseded"
-    || card.verificationState === "failed"
+    || card.reviewState !== "reviewed"
+    || (card.verificationState !== "not_required" && card.verificationState !== "corroborated")
   ) {
     return false;
   }
