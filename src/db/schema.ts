@@ -117,6 +117,21 @@ export type KnowledgeExtractionJobStatus = (typeof knowledgeExtractionJobStatusV
 export const knowledgeIngestionStageValues = ["queued", "triaging", "extracting", "judging", "relating", "published", "suppressed", "review_recommended", "verify_first", "failed"] as const;
 export type KnowledgeIngestionStage = (typeof knowledgeIngestionStageValues)[number];
 
+export const knowledgeRecommendationStatusValues = ["open", "in_review", "resolved", "superseded"] as const;
+export type KnowledgeRecommendationStatus = (typeof knowledgeRecommendationStatusValues)[number];
+
+export const knowledgeRecommendationReasonValues = ["risk", "weak_evidence", "freshness", "conflict", "duplicate_risk", "missing_context", "verification", "relation", "sampling"] as const;
+export type KnowledgeRecommendationReason = (typeof knowledgeRecommendationReasonValues)[number];
+
+export const knowledgeRecommendationActionValues = ["accept_wording", "edit", "suppress", "restore", "verify", "resolve_relation", "sampling_pass", "sampling_fail"] as const;
+export type KnowledgeRecommendationAction = (typeof knowledgeRecommendationActionValues)[number];
+
+export const knowledgeRecommendationResolutionValues = ["accepted", "edited", "suppressed", "restored", "verified", "relation_resolved", "sampling_passed", "sampling_failed"] as const;
+export type KnowledgeRecommendationResolution = (typeof knowledgeRecommendationResolutionValues)[number];
+
+export const knowledgeSamplingDispositionReasonValues = ["confirmed", "minor_issue", "insufficient_evidence", "stale_or_changed", "material_error", "safety_risk"] as const;
+export type KnowledgeSamplingDispositionReason = (typeof knowledgeSamplingDispositionReasonValues)[number];
+
 export const chatContextFieldValues = [
   "origin",
   "destination",
@@ -1000,6 +1015,99 @@ export const knowledgeCardSearchDocuments = pgTable(
   ],
 );
 
+export const knowledgeSamplingPolicies = pgTable(
+  "knowledge_sampling_policies",
+  {
+    id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    windowStartsAt: timestamp("window_starts_at", { mode: "date" }).notNull(),
+    windowEndsAt: timestamp("window_ends_at", { mode: "date" }).notNull(),
+    samplingPercent: integer("sampling_percent").default(15).notNull(),
+    cohortKey: text("cohort_key").notNull(),
+    escalatedAt: timestamp("escalated_at", { mode: "date" }),
+    suppressedAt: timestamp("suppressed_at", { mode: "date" }),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (policy) => [
+    uniqueIndex("knowledge_sampling_policies_cohort_key_idx").on(policy.cohortKey),
+    index("knowledge_sampling_policies_window_idx").on(policy.windowStartsAt, policy.windowEndsAt),
+    check("knowledge_sampling_policies_window_check", sql`${policy.windowEndsAt} > ${policy.windowStartsAt}`),
+    check("knowledge_sampling_policies_percent_check", sql`${policy.samplingPercent} between 1 and 100`),
+    check("knowledge_sampling_policies_cohort_key_check", sql`length(btrim(${policy.cohortKey})) between 1 and 160`),
+  ],
+);
+
+export const knowledgeSamplingCohortMembers = pgTable(
+  "knowledge_sampling_cohort_members",
+  {
+    id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    policyId: text("policy_id").notNull().references(() => knowledgeSamplingPolicies.id, { onDelete: "cascade" }),
+    knowledgeCardId: text("knowledge_card_id").notNull().references(() => knowledgeCards.id, { onDelete: "cascade" }),
+    contentVersion: integer("content_version").notNull(),
+    evidenceSetRevision: integer("evidence_set_revision").notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (member) => [
+    uniqueIndex("knowledge_sampling_cohort_members_policy_version_idx").on(member.policyId, member.knowledgeCardId, member.contentVersion, member.evidenceSetRevision),
+    index("knowledge_sampling_cohort_members_policy_idx").on(member.policyId),
+    check("knowledge_sampling_cohort_members_versions_check", sql`${member.contentVersion} >= 1 and ${member.evidenceSetRevision} >= 1`),
+  ],
+);
+
+export const knowledgeRecommendations = pgTable(
+  "knowledge_recommendations",
+  {
+    id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    knowledgeCardId: text("knowledge_card_id").notNull().references(() => knowledgeCards.id, { onDelete: "cascade" }),
+    contentVersion: integer("content_version").notNull(),
+    evidenceSetRevision: integer("evidence_set_revision").notNull(),
+    status: text("status").$type<KnowledgeRecommendationStatus>().default("open").notNull(),
+    reason: text("reason").$type<KnowledgeRecommendationReason>().notNull(),
+    priority: integer("priority").notNull(),
+    policyId: text("policy_id").references(() => knowledgeSamplingPolicies.id, { onDelete: "restrict" }),
+    policySnapshot: jsonb("policy_snapshot").$type<Record<string, unknown>>().default({}).notNull(),
+    resolution: text("resolution").$type<KnowledgeRecommendationResolution>(),
+    samplingDispositionReason: text("sampling_disposition_reason").$type<KnowledgeSamplingDispositionReason>(),
+    samplingRationale: text("sampling_rationale"),
+    resolvedByUserId: text("resolved_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+    resolvedAt: timestamp("resolved_at", { mode: "date" }),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (recommendation) => [
+    uniqueIndex("knowledge_recommendations_open_version_reason_idx").on(recommendation.knowledgeCardId, recommendation.contentVersion, recommendation.evidenceSetRevision, recommendation.reason).where(sql`${recommendation.status} in ('open', 'in_review')`),
+    index("knowledge_recommendations_open_queue_idx").on(recommendation.status, recommendation.priority, recommendation.createdAt).where(sql`${recommendation.status} in ('open', 'in_review')`),
+    index("knowledge_recommendations_card_version_idx").on(recommendation.knowledgeCardId, recommendation.contentVersion, recommendation.evidenceSetRevision),
+    check("knowledge_recommendations_versions_check", sql`${recommendation.contentVersion} >= 1 and ${recommendation.evidenceSetRevision} >= 1`),
+    check("knowledge_recommendations_status_check", sql`${recommendation.status} in ('open', 'in_review', 'resolved', 'superseded')`),
+    check("knowledge_recommendations_reason_check", sql`${recommendation.reason} in ('risk', 'weak_evidence', 'freshness', 'conflict', 'duplicate_risk', 'missing_context', 'verification', 'relation', 'sampling')`),
+    check("knowledge_recommendations_priority_check", sql`${recommendation.priority} between 1 and 100`),
+    check("knowledge_recommendations_policy_snapshot_check", sql`jsonb_typeof(${recommendation.policySnapshot}) = 'object' and octet_length(${recommendation.policySnapshot}::text) <= 1024`),
+    check("knowledge_recommendations_resolution_check", sql`${recommendation.resolution} is null or ${recommendation.resolution} in ('accepted', 'edited', 'suppressed', 'restored', 'verified', 'relation_resolved', 'sampling_passed', 'sampling_failed')`),
+    check("knowledge_recommendations_sampling_reason_check", sql`${recommendation.samplingDispositionReason} is null or ${recommendation.samplingDispositionReason} in ('confirmed', 'minor_issue', 'insufficient_evidence', 'stale_or_changed', 'material_error', 'safety_risk')`),
+    check("knowledge_recommendations_sampling_rationale_check", sql`${recommendation.samplingRationale} is null or length(btrim(${recommendation.samplingRationale})) between 1 and 500`),
+    check("knowledge_recommendations_sampling_disposition_shape_check", sql`(${recommendation.resolution} in ('sampling_passed', 'sampling_failed') and ${recommendation.samplingDispositionReason} is not null) or (${recommendation.resolution} is null or ${recommendation.resolution} not in ('sampling_passed', 'sampling_failed')) and ${recommendation.samplingDispositionReason} is null and ${recommendation.samplingRationale} is null`),
+    check("knowledge_recommendations_resolved_shape_check", sql`(${recommendation.status} in ('open', 'in_review') and ${recommendation.resolution} is null and ${recommendation.resolvedByUserId} is null and ${recommendation.resolvedAt} is null) or (${recommendation.status} in ('resolved', 'superseded') and ${recommendation.resolution} is not null and ${recommendation.resolvedByUserId} is not null and ${recommendation.resolvedAt} is not null)`),
+  ],
+);
+
+export const knowledgeIndexDirtyMarkers = pgTable(
+  "knowledge_index_dirty_markers",
+  {
+    id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    knowledgeCardId: text("knowledge_card_id").notNull().references(() => knowledgeCards.id, { onDelete: "cascade" }),
+    contentVersion: integer("content_version").notNull(),
+    evidenceSetRevision: integer("evidence_set_revision").notNull(),
+    reason: text("reason").notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (marker) => [
+    uniqueIndex("knowledge_index_dirty_markers_version_reason_idx").on(marker.knowledgeCardId, marker.contentVersion, marker.evidenceSetRevision, marker.reason),
+    index("knowledge_index_dirty_markers_created_at_idx").on(marker.createdAt),
+    check("knowledge_index_dirty_markers_versions_check", sql`${marker.contentVersion} >= 1 and ${marker.evidenceSetRevision} >= 1`),
+    check("knowledge_index_dirty_markers_reason_check", sql`length(btrim(${marker.reason})) between 1 and 120`),
+  ],
+);
+
 export const knowledgeSourceSuggestions = pgTable(
   "knowledge_source_suggestions",
   {
@@ -1475,7 +1583,12 @@ export const schema = {
   knowledgeIngestionJobs,
   knowledgeCards,
   knowledgeCardSources,
+  knowledgeCardEvidence,
   knowledgeCardSearchDocuments,
+  knowledgeSamplingPolicies,
+  knowledgeSamplingCohortMembers,
+  knowledgeRecommendations,
+  knowledgeIndexDirtyMarkers,
   knowledgeSourceSuggestions,
   knowledgeSeedBatches,
   knowledgeSeedBatchItems,

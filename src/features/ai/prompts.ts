@@ -94,10 +94,10 @@ const knowledgePipelineJudgmentSystemPrompt = [
 ].join("\n");
 
 const knowledgePipelineRelationJudgmentSystemPrompt = [
-  "Independently decide the relationship between one candidate and scoped active knowledge cards.",
+  "Independently decide the relationship between one candidate and supplied eligible knowledge cards. Candidates may be active cards or suppressed verification-required canonical cards awaiting corroboration.",
   "Return strict JSON only: action (attach, create, conflict, or ambiguous), optional target_card_id, and a concise Vietnamese summary.",
   "attach means equivalent/paraphrased fact, conflict means material contradiction, create means materially distinct, and ambiguous is required when uncertain.",
-  "Only choose target_card_id from the supplied active candidates. Never invent IDs or mutate knowledge.",
+  "Only choose target_card_id from the supplied eligible candidates. Never invent IDs or mutate knowledge.",
 ].join("\n");
 
 export function buildInitialAiAskMessages(question: string) {

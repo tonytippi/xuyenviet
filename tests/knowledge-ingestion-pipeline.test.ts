@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { aiGatewayModels, aiUsageEvents, auditEvents, knowledgeCardEvidence, knowledgeCards, knowledgeCardSources, knowledgeIngestionJobs, sourceCaptureVersions, sources, users } from "@/db/schema";
+import { aiGatewayModels, aiUsageEvents, auditEvents, knowledgeCardEvidence, knowledgeCardSearchDocuments, knowledgeCards, knowledgeCardSources, knowledgeIndexDirtyMarkers, knowledgeIngestionJobs, knowledgeRecommendations, knowledgeSamplingCohortMembers, sourceCaptureVersions, sources, users } from "@/db/schema";
 import { claimNextKnowledgeIngestionJob, commitKnowledgeIngestionStage, recoverKnowledgeIngestionJobs } from "@/features/knowledge/ingestion-jobs";
 import { runKnowledgeIngestionPipeline } from "@/features/knowledge/ingestion-pipeline";
 import { appendSourceCaptureVersion } from "@/features/knowledge/source-captures";
@@ -132,13 +132,80 @@ describe("knowledge ingestion pipeline", () => {
     await expect(testDb.select().from(knowledgeCards)).resolves.toHaveLength(0);
   });
 
-  test("keeps high-risk facts fail-closed before any active card mutation", async () => {
+  test("retains high-risk facts as suppressed canonical cards with a version-bound verification recommendation", async () => {
     const rawText = "Trạm sạc tại Đà Nẵng đang hoạt động.";
     const { claim } = await claimFor(rawText);
     vi.mocked(fetch).mockResolvedValueOnce(extractionResponse(candidate(rawText, { type: "ev_charging", title: "Trạm sạc Đà Nẵng", summary: "Trạm sạc đang hoạt động.", location_name: "Đà Nẵng" }))).mockResolvedValueOnce(judgmentResponse("publish"));
 
     await expect(runKnowledgeIngestionPipeline(claim, testDb)).resolves.toMatchObject({ outcome: "verify_first" });
-    await expect(testDb.select().from(knowledgeCards)).resolves.toHaveLength(0);
+    await expect(testDb.select().from(knowledgeCards)).resolves.toMatchObject([{ publicationState: "suppressed", verificationState: "required", reviewState: "ai_recommended", evidenceSetRevision: 2 }]);
+    await expect(testDb.select().from(knowledgeRecommendations)).resolves.toMatchObject([{ reason: "verification", status: "open", contentVersion: 1, evidenceSetRevision: 2 }]);
+    await expect(testDb.select().from(knowledgeIndexDirtyMarkers)).resolves.toMatchObject([{ reason: "ingestion_verify_first", contentVersion: 1, evidenceSetRevision: 2 }]);
+  });
+
+  test("attaches a later equivalent high-risk capture to a suppressed verify-first card without publishing it", async () => {
+    const firstText = "Trạm sạc tại Đà Nẵng đang hoạt động.";
+    const { claim: firstClaim } = await claimFor(firstText);
+    vi.mocked(fetch).mockResolvedValueOnce(extractionResponse(candidate(firstText, { type: "ev_charging", title: "Trạm sạc Đà Nẵng", summary: "Trạm sạc đang hoạt động.", location_name: "Đà Nẵng" }))).mockResolvedValueOnce(judgmentResponse());
+    const first = await runKnowledgeIngestionPipeline(firstClaim, testDb);
+    if (!first?.cardId) throw new Error("expected verify-first card");
+    await testDb.insert(sources).values({ id: "source-2", kind: "pasted_text", label: "Second safe source", sourceType: "community", verificationStatus: "unverified", official: false, partner: false, submittedByUserId: "operator" });
+    const { claim } = await claimFor(firstText, "source-2");
+    vi.mocked(fetch).mockResolvedValueOnce(extractionResponse(candidate(firstText, { type: "ev_charging", title: "Trạm sạc Đà Nẵng", summary: "Trạm sạc đang hoạt động.", location_name: "Đà Nẵng" }))).mockResolvedValueOnce(judgmentResponse()).mockResolvedValueOnce(new Response(JSON.stringify({ model: "judge-model", choices: [{ message: { content: JSON.stringify({ action: "attach", target_card_id: first.cardId, summary: "Tương đương." }) } }] }), { status: 200 }));
+
+    await expect(runKnowledgeIngestionPipeline(claim, testDb)).resolves.toMatchObject({ outcome: "verify_first", cardId: first.cardId });
+    await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, first.cardId))).resolves.toMatchObject([{ publicationState: "suppressed", knowledgeState: "community_pattern", verificationState: "required", reviewState: "ai_recommended", needsReview: true, contentVersion: 2, evidenceSetRevision: 3 }]);
+    await expect(testDb.select().from(knowledgeCardEvidence).where(eq(knowledgeCardEvidence.knowledgeCardId, first.cardId))).resolves.toHaveLength(2);
+    await expect(testDb.select().from(knowledgeIndexDirtyMarkers).where(eq(knowledgeIndexDirtyMarkers.knowledgeCardId, first.cardId))).resolves.toEqual(expect.arrayContaining([expect.objectContaining({ reason: "ingestion_attach", contentVersion: 2, evidenceSetRevision: 3 }), expect.objectContaining({ reason: "ingestion_promotion", contentVersion: 2, evidenceSetRevision: 3 })]));
+  });
+
+  test("excludes suppressed conflicted cards from verification-canonical relation candidates", async () => {
+    await testDb.insert(knowledgeCards).values({ id: "conflicted", status: "approved", publicationState: "suppressed", knowledgeState: "conflicted", reviewState: "ai_recommended", verificationState: "required", type: "ev_charging", title: "Trạm sạc Đà Nẵng", summary: "Thông tin đang mâu thuẫn.", locationName: "Đà Nẵng", conditions: [], confidence: "community", freshnessSensitive: true, needsReview: true, aiPromptVersion: "test", createdByUserId: "operator" });
+    const rawText = "Trạm sạc tại Đà Nẵng đang hoạt động.";
+    const { claim } = await claimFor(rawText);
+    vi.mocked(fetch).mockResolvedValueOnce(extractionResponse(candidate(rawText, { type: "ev_charging", title: "Trạm sạc Đà Nẵng", summary: "Trạm sạc đang hoạt động.", location_name: "Đà Nẵng" }))).mockResolvedValueOnce(judgmentResponse());
+
+    await expect(runKnowledgeIngestionPipeline(claim, testDb)).resolves.toMatchObject({ outcome: "verify_first", cardId: expect.not.stringMatching(/^conflicted$/) });
+    await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, "conflicted"))).resolves.toMatchObject([{ publicationState: "suppressed", knowledgeState: "conflicted", evidenceSetRevision: 1 }]);
+    await expect(testDb.select().from(knowledgeCards)).resolves.toHaveLength(2);
+  });
+
+  test("uses the relation checkpoint to suppress an active conflicting card for a high-risk candidate", async () => {
+    await testDb.insert(knowledgeCards).values({ id: "existing-high-risk", status: "approved", publicationState: "active", knowledgeState: "community_observation", reviewState: "reviewed", verificationState: "not_required", type: "ev_charging", title: "Trạm sạc Đà Nẵng", summary: "Trạm sạc đang hoạt động.", locationName: "Đà Nẵng", conditions: [], confidence: "community", freshnessSensitive: false, needsReview: false, aiPromptVersion: "test", createdByUserId: "operator" });
+    await testDb.insert(knowledgeCardSearchDocuments).values({ knowledgeCardId: "existing-high-risk", searchableText: "Trạm sạc đang hoạt động.", textHash: "a".repeat(64), sourceCount: 1, confidence: "community", freshnessSensitive: false });
+    await testDb.insert(sources).values({ id: "source-2", kind: "pasted_text", label: "Second safe source", sourceType: "community", verificationStatus: "unverified", official: false, partner: false, submittedByUserId: "operator" });
+    const highRiskText = "Đà Nẵng không có trạm sạc đang hoạt động.";
+    const { claim } = await claimFor(highRiskText, "source-2");
+    vi.mocked(fetch).mockResolvedValueOnce(extractionResponse(candidate(highRiskText, { type: "ev_charging", title: "Trạm sạc Đà Nẵng", summary: "Không có trạm sạc đang hoạt động.", location_name: "Đà Nẵng", conditions: [] }))).mockResolvedValueOnce(judgmentResponse()).mockResolvedValueOnce(new Response(JSON.stringify({ model: "judge-model", choices: [{ message: { content: JSON.stringify({ action: "conflict", target_card_id: "existing-high-risk", summary: "Mâu thuẫn." }) } }] }), { status: 200 }));
+
+    await expect(runKnowledgeIngestionPipeline(claim, testDb)).resolves.toMatchObject({ outcome: "review_recommended" });
+    await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, "existing-high-risk"))).resolves.toMatchObject([{ publicationState: "suppressed", knowledgeState: "conflicted", reviewState: "ai_recommended", verificationState: "required", needsReview: true }]);
+    await expect(testDb.select().from(knowledgeRecommendations).where(eq(knowledgeRecommendations.knowledgeCardId, "existing-high-risk"))).resolves.toMatchObject([{ reason: "conflict", status: "open" }]);
+    await expect(testDb.select().from(knowledgeIndexDirtyMarkers).where(eq(knowledgeIndexDirtyMarkers.knowledgeCardId, "existing-high-risk"))).resolves.toMatchObject([{ reason: "ingestion_conflict" }]);
+    await expect(testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, "existing-high-risk"))).resolves.toMatchObject([{ status: "disabled", disabledAt: expect.any(Date) }]);
+  });
+
+  test("fences a stale verify-first capture into the same safe terminal result", async () => {
+    const rawText = "Trạm sạc tại Đà Nẵng đang hoạt động.";
+    const { claim } = await claimFor(rawText);
+    let releaseJudge!: () => void;
+    const judging = new Promise<void>((resolve) => {
+      vi.mocked(fetch)
+        .mockResolvedValueOnce(extractionResponse(candidate(rawText, { type: "ev_charging", title: "Trạm sạc Đà Nẵng", summary: "Trạm sạc đang hoạt động.", location_name: "Đà Nẵng" })))
+        .mockImplementationOnce(async () => {
+          resolve();
+          await new Promise<void>((release) => { releaseJudge = release; });
+          return judgmentResponse("publish");
+        });
+    });
+    const pipeline = runKnowledgeIngestionPipeline(claim, testDb);
+    await judging;
+    await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText: "Phiên bản mới hơn của trạm sạc.", metadata: { kind: "submitted" }, capturedAt: new Date("2026-07-23T00:00:00.000Z") });
+    releaseJudge();
+
+    await expect(pipeline).resolves.toMatchObject({ outcome: "suppressed" });
+    await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, claim.jobId))).resolves.toMatchObject([{ stage: "suppressed", lastErrorCode: "stale_or_deleted_capture", claimedBy: null, fencingToken: null }]);
+    await expect(testDb.select().from(knowledgeCards)).resolves.toEqual([]);
   });
 
   test("attaches equivalent independent evidence and promotes a community pattern", async () => {
@@ -155,19 +222,26 @@ describe("knowledge ingestion pipeline", () => {
     await expect(runKnowledgeIngestionPipeline(claim, testDb)).resolves.toMatchObject({ outcome: "published", cardId: "existing" });
     await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, "existing"))).resolves.toMatchObject([{ knowledgeState: "community_pattern", evidenceSetRevision: 2 }]);
     await expect(testDb.select().from(knowledgeCardEvidence).where(eq(knowledgeCardEvidence.knowledgeCardId, "existing"))).resolves.toHaveLength(2);
+    await expect(testDb.select().from(knowledgeIndexDirtyMarkers).where(eq(knowledgeIndexDirtyMarkers.knowledgeCardId, "existing"))).resolves.toEqual(expect.arrayContaining([expect.objectContaining({ reason: "ingestion_attach", contentVersion: 2, evidenceSetRevision: 2 }), expect.objectContaining({ reason: "ingestion_promotion", contentVersion: 2, evidenceSetRevision: 2 })]));
+    await expect(testDb.select().from(knowledgeSamplingCohortMembers).where(eq(knowledgeSamplingCohortMembers.knowledgeCardId, "existing"))).resolves.toMatchObject([{ contentVersion: 2, evidenceSetRevision: 2 }]);
+    await expect(testDb.select().from(knowledgeRecommendations).where(eq(knowledgeRecommendations.knowledgeCardId, "existing"))).resolves.toMatchObject([{ reason: "sampling", contentVersion: 2, evidenceSetRevision: 2 }]);
   });
 
-  test("routes an attach with different conditions to review without mutating the target", async () => {
+  test("retains a freshness-sensitive attach condition mismatch as verification-required without mutating the target", async () => {
     const firstText = "Đèo Hải Vân có điểm dừng ngắm cảnh an toàn vào ban ngày.";
     const { claim: firstClaim } = await claimFor(firstText);
     vi.mocked(fetch).mockResolvedValueOnce(extractionResponse(candidate(firstText))).mockResolvedValueOnce(judgmentResponse());
     const first = await runKnowledgeIngestionPipeline(firstClaim, testDb);
     await testDb.insert(sources).values({ id: "source-2", kind: "pasted_text", label: "Second", sourceType: "community", verificationStatus: "unverified", official: false, partner: false, submittedByUserId: "operator" });
-    const { claim } = await claimFor("Đèo Hải Vân có điểm dừng ngắm cảnh an toàn vào sáng sớm.", "source-2");
-    vi.mocked(fetch).mockResolvedValueOnce(extractionResponse(candidate("Đèo Hải Vân có điểm dừng ngắm cảnh an toàn vào sáng sớm.", { conditions: ["sáng sớm"] }))).mockResolvedValueOnce(judgmentResponse()).mockResolvedValueOnce(new Response(JSON.stringify({ model: "judge-model", choices: [{ message: { content: JSON.stringify({ action: "attach", target_card_id: first?.cardId, summary: "Tương đương." }) } }] }), { status: 200 }));
+    const { capture, claim } = await claimFor("Đèo Hải Vân có điểm dừng ngắm cảnh an toàn vào sáng sớm.", "source-2");
+    vi.mocked(fetch).mockResolvedValueOnce(extractionResponse(candidate("Đèo Hải Vân có điểm dừng ngắm cảnh an toàn vào sáng sớm.", { conditions: ["sáng sớm"], freshness_sensitive: true }))).mockResolvedValueOnce(judgmentResponse()).mockResolvedValueOnce(new Response(JSON.stringify({ model: "judge-model", choices: [{ message: { content: JSON.stringify({ action: "attach", target_card_id: first?.cardId, summary: "Tương đương." }) } }] }), { status: 200 }));
 
-    await expect(runKnowledgeIngestionPipeline(claim, testDb)).resolves.toMatchObject({ outcome: "review_recommended" });
+    await expect(runKnowledgeIngestionPipeline(claim, testDb)).resolves.toMatchObject({ outcome: "review_recommended", cardId: expect.any(String) });
     await expect(testDb.select().from(knowledgeCardEvidence).where(eq(knowledgeCardEvidence.knowledgeCardId, first?.cardId ?? ""))).resolves.toHaveLength(1);
+    await expect(testDb.select().from(knowledgeCards)).resolves.toMatchObject(expect.arrayContaining([expect.objectContaining({ publicationState: "suppressed", knowledgeState: "uncertain", reviewState: "ai_recommended", verificationState: "required", needsReview: true, conditions: ["sáng sớm"] })]));
+    await expect(testDb.select().from(knowledgeCardEvidence).where(eq(knowledgeCardEvidence.captureVersionId, capture.id))).resolves.toMatchObject([{ quoteText: "Đèo Hải Vân có điểm dừng ngắm cảnh an toàn vào sáng sớm.", supportLevel: "supporting" }]);
+    await expect(testDb.select().from(knowledgeRecommendations).where(eq(knowledgeRecommendations.reason, "missing_context"))).resolves.toMatchObject([{ status: "open", contentVersion: 1, evidenceSetRevision: 2 }]);
+    await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, claim.jobId))).resolves.toMatchObject([{ stage: "review_recommended", checkpoint: null }]);
   });
 
   test("does not publish an old capture when a recapture wins before publication", async () => {
@@ -250,6 +324,8 @@ describe("knowledge ingestion pipeline", () => {
     const { claim: firstClaim } = await claimFor(firstText);
     vi.mocked(fetch).mockResolvedValueOnce(extractionResponse(candidate(firstText))).mockResolvedValueOnce(judgmentResponse());
     const firstResult = await runKnowledgeIngestionPipeline(firstClaim, testDb);
+    if (!firstResult?.cardId) throw new Error("expected initial card");
+    await testDb.insert(knowledgeCardSearchDocuments).values({ knowledgeCardId: firstResult.cardId, searchableText: "Có điểm dừng ngắm cảnh phù hợp ban ngày.", textHash: "b".repeat(64), sourceCount: 1, confidence: "community", freshnessSensitive: false });
     await testDb.insert(sources).values({ id: "source-2", kind: "pasted_text", label: "Second safe source", sourceType: "community", verificationStatus: "unverified", official: false, partner: false, submittedByUserId: "operator" });
     const secondText = "Đèo Hải Vân không có điểm dừng ngắm cảnh an toàn vào ban ngày.";
     const { claim } = await claimFor(secondText, "source-2");
@@ -258,6 +334,8 @@ describe("knowledge ingestion pipeline", () => {
     await expect(runKnowledgeIngestionPipeline(claim, testDb)).resolves.toMatchObject({ outcome: "review_recommended" });
     await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, firstResult?.cardId ?? ""))).resolves.toMatchObject([{ publicationState: "suppressed", knowledgeState: "conflicted", reviewState: "ai_recommended", needsReview: true, contentVersion: 2, evidenceSetRevision: 3 }]);
     await expect(testDb.select().from(knowledgeCardEvidence).where(eq(knowledgeCardEvidence.supportLevel, "conflicting"))).resolves.toHaveLength(1);
+    await expect(testDb.select().from(knowledgeIndexDirtyMarkers).where(eq(knowledgeIndexDirtyMarkers.knowledgeCardId, firstResult.cardId))).resolves.toEqual(expect.arrayContaining([expect.objectContaining({ reason: "ingestion_conflict", contentVersion: 2, evidenceSetRevision: 3 })]));
+    await expect(testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, firstResult.cardId))).resolves.toMatchObject([{ status: "disabled", disabledAt: expect.any(Date) }]);
     await expect(testDb.select().from(auditEvents).where(eq(auditEvents.targetType, "knowledge_ingestion_conflict"))).resolves.toMatchObject([{ actorUserId: "system-knowledge-pipeline", actorEmail: "system-knowledge-pipeline@xuyenviet.invalid" }]);
   });
 
@@ -276,19 +354,21 @@ describe("knowledge ingestion pipeline", () => {
     await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, first?.cardId ?? ""))).resolves.toMatchObject([{ publicationState: "suppressed", knowledgeState: "conflicted" }]);
   });
 
-  test("routes a conflict with different conditions to review without mutating the target", async () => {
+  test("retains a conflict condition mismatch for missing-context review without mutating the target", async () => {
     const firstText = "Đèo Hải Vân có điểm dừng ngắm cảnh an toàn vào ban ngày.";
     const { claim: firstClaim } = await claimFor(firstText);
     vi.mocked(fetch).mockResolvedValueOnce(extractionResponse(candidate(firstText))).mockResolvedValueOnce(judgmentResponse());
     const first = await runKnowledgeIngestionPipeline(firstClaim, testDb);
     await testDb.insert(sources).values({ id: "source-2", kind: "pasted_text", label: "Second safe source", sourceType: "community", verificationStatus: "unverified", official: false, partner: false, submittedByUserId: "operator" });
     const secondText = "Đèo Hải Vân không có điểm dừng ngắm cảnh an toàn vào sáng sớm.";
-    const { claim } = await claimFor(secondText, "source-2");
+    const { capture, claim } = await claimFor(secondText, "source-2");
     vi.mocked(fetch).mockResolvedValueOnce(extractionResponse(candidate(secondText, { conditions: ["sáng sớm"], summary: "Không có điểm dừng ngắm cảnh phù hợp sáng sớm." }))).mockResolvedValueOnce(judgmentResponse()).mockResolvedValueOnce(new Response(JSON.stringify({ model: "judge-model", choices: [{ message: { content: JSON.stringify({ action: "conflict", target_card_id: first?.cardId, summary: "Mâu thuẫn." }) } }] }), { status: 200 }));
 
-    await expect(runKnowledgeIngestionPipeline(claim, testDb)).resolves.toMatchObject({ outcome: "review_recommended" });
+    await expect(runKnowledgeIngestionPipeline(claim, testDb)).resolves.toMatchObject({ outcome: "review_recommended", cardId: expect.any(String) });
     await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, first?.cardId ?? ""))).resolves.toMatchObject([{ publicationState: "active", knowledgeState: "community_observation", evidenceSetRevision: 2 }]);
     await expect(testDb.select().from(knowledgeCardEvidence).where(eq(knowledgeCardEvidence.knowledgeCardId, first?.cardId ?? ""))).resolves.toHaveLength(1);
+    await expect(testDb.select().from(knowledgeCardEvidence).where(eq(knowledgeCardEvidence.captureVersionId, capture.id))).resolves.toMatchObject([{ quoteText: secondText, supportLevel: "supporting" }]);
+    await expect(testDb.select().from(knowledgeRecommendations).where(eq(knowledgeRecommendations.reason, "missing_context"))).resolves.toHaveLength(1);
   });
 
   test("keeps recaptures from creating a second independent supporting evidence record", async () => {
@@ -324,26 +404,31 @@ describe("knowledge ingestion pipeline", () => {
 
     await expect(runKnowledgeIngestionPipeline(claim, testDb)).resolves.toMatchObject({ outcome: "published", cardId: "existing" });
     await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, "existing"))).resolves.toMatchObject([{ evidenceSetRevision: 2 }]);
-    await expect(testDb.select().from(knowledgeCardEvidence).where(eq(knowledgeCardEvidence.knowledgeCardId, "existing"))).resolves.toMatchObject([
-      { state: "removed", sourceId: "source" },
-      { state: "active", sourceId: "source-2" },
-      { state: "active", sourceId: "source-3" },
-      { state: "active", sourceId: "source-4" },
-    ]);
+    await expect(testDb.select().from(knowledgeCardEvidence).where(eq(knowledgeCardEvidence.knowledgeCardId, "existing"))).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ state: "removed", sourceId: "source" }),
+      expect.objectContaining({ state: "active", sourceId: "source-2" }),
+      expect.objectContaining({ state: "active", sourceId: "source-3" }),
+      expect.objectContaining({ state: "active", sourceId: "source-4" }),
+    ]));
   });
 
-  test("routes an ambiguous normalized-location relation to review without mutation", async () => {
+  test("retains an ambiguous high-risk normalized-location relation as verification-required without mutation", async () => {
     const firstText = "Đèo Hải Vân có điểm dừng ngắm cảnh an toàn vào ban ngày.";
     const { claim: firstClaim } = await claimFor(firstText);
     vi.mocked(fetch).mockResolvedValueOnce(extractionResponse(candidate(firstText))).mockResolvedValueOnce(judgmentResponse());
     const first = await runKnowledgeIngestionPipeline(firstClaim, testDb);
     await testDb.insert(sources).values({ id: "source-2", kind: "pasted_text", label: "Second", sourceType: "community", verificationStatus: "unverified", official: false, partner: false, submittedByUserId: "operator" });
-    const { claim } = await claimFor(firstText, "source-2");
-    vi.mocked(fetch).mockResolvedValueOnce(extractionResponse(candidate(firstText, { location_name: "  Đèo\u00a0Hải Vân  " }))).mockResolvedValueOnce(judgmentResponse()).mockResolvedValueOnce(new Response(JSON.stringify({ model: "judge-model", choices: [{ message: { content: JSON.stringify({ action: "ambiguous", target_card_id: null, summary: "Chưa đủ rõ." }) } }] }), { status: 200 }));
+    const highRiskText = "Trạm sạc tại Đèo Hải Vân đang hoạt động.";
+    const { capture, claim } = await claimFor(highRiskText, "source-2");
+    vi.mocked(fetch).mockResolvedValueOnce(extractionResponse(candidate(highRiskText, { type: "ev_charging", title: "Trạm sạc đèo Hải Vân", summary: "Trạm sạc đang hoạt động.", location_name: "  Đèo\u00a0Hải Vân  " }))).mockResolvedValueOnce(judgmentResponse()).mockResolvedValueOnce(new Response(JSON.stringify({ model: "judge-model", choices: [{ message: { content: JSON.stringify({ action: "ambiguous", target_card_id: null, summary: "Chưa đủ rõ." }) } }] }), { status: 200 }));
 
-    await expect(runKnowledgeIngestionPipeline(claim, testDb)).resolves.toMatchObject({ outcome: "review_recommended" });
-    await expect(testDb.select().from(knowledgeCards)).resolves.toHaveLength(1);
+    await expect(runKnowledgeIngestionPipeline(claim, testDb)).resolves.toMatchObject({ outcome: "review_recommended", cardId: expect.any(String) });
+    await expect(testDb.select().from(knowledgeCards)).resolves.toHaveLength(2);
     await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, first?.cardId ?? ""))).resolves.toMatchObject([{ publicationState: "active" }]);
+    await expect(testDb.select().from(knowledgeCards)).resolves.toMatchObject(expect.arrayContaining([expect.objectContaining({ publicationState: "suppressed", knowledgeState: "uncertain", reviewState: "ai_recommended", verificationState: "required", needsReview: true })]));
+    await expect(testDb.select().from(knowledgeCardEvidence).where(eq(knowledgeCardEvidence.captureVersionId, capture.id))).resolves.toMatchObject([{ quoteText: highRiskText, supportLevel: "supporting" }]);
+    await expect(testDb.select().from(knowledgeRecommendations).where(eq(knowledgeRecommendations.reason, "relation"))).resolves.toMatchObject([{ status: "open", contentVersion: 1, evidenceSetRevision: 2 }]);
+    await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, claim.jobId))).resolves.toMatchObject([{ stage: "review_recommended", checkpoint: null }]);
   });
 
   test("fails safe when extraction and judgment select the same model", async () => {

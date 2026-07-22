@@ -29,6 +29,7 @@ import {
 import { isSourceValidationError, normalizeTravelSourceInput, type TravelSourceInput } from "./sources";
 import { appendSourceCaptureVersion } from "./source-captures";
 import { isKnowledgeSuggestionError, suggestKnowledgeFromSourceUrl as suggestKnowledgeFromSourceUrlService } from "./suggestions";
+import { resolveKnowledgeRecommendation } from "./recommendations";
 
 export type SafeSourceResult = Pick<
   typeof sources.$inferSelect,
@@ -627,6 +628,27 @@ export async function submitKnowledgeSeedUrlBatchForm(formData: FormData) {
   redirect(
     `/admin/knowledge/intake?batchId=${encodeURIComponent(result.batchId)}&batchTotal=${result.totalItems}&batchPending=${result.pendingCount}&batchFailed=${result.failedCount}&batchDuplicate=${result.duplicateCount}`,
   );
+}
+
+export async function resolveKnowledgeRecommendationForm(formData: FormData) {
+  const session = await requireAdminSession();
+  const recommendationId = getOptionalFormString(formData, "recommendationId") ?? "";
+  const action = getOptionalFormString(formData, "action");
+  const contentVersion = Number(getOptionalFormString(formData, "contentVersion"));
+  const evidenceSetRevision = Number(getOptionalFormString(formData, "evidenceSetRevision"));
+  let result: Awaited<ReturnType<typeof resolveKnowledgeRecommendation>> | null = null;
+  let error = "";
+
+  try {
+    if (!action || !Number.isInteger(contentVersion) || !Number.isInteger(evidenceSetRevision)) throw new Error("invalid_resolution");
+    result = await resolveKnowledgeRecommendation({ recommendationId, expectedContentVersion: contentVersion, expectedEvidenceSetRevision: evidenceSetRevision, action: action as Parameters<typeof resolveKnowledgeRecommendation>[0]["action"], actor: { userId: session.userId, email: session.email }, editSummary: getOptionalFormString(formData, "editSummary") ?? undefined, samplingDispositionReason: getOptionalFormString(formData, "samplingDispositionReason") ?? undefined, samplingRationale: getOptionalFormString(formData, "samplingRationale") ?? undefined, highSeverity: formData.get("highSeverity") === "on" });
+    if (result.status !== "resolved") error = result.status;
+  } catch (caught) {
+    if (caught instanceof AdminAuthorizationError || (caught instanceof Error && caught.name === "AdminAuthorizationError")) throw caught;
+    error = "not_resolved";
+  }
+
+  redirect(`/admin/knowledge/recommendations/${encodeURIComponent(recommendationId)}?${error ? `error=${encodeURIComponent(error)}` : "resolved=1"}`);
 }
 
 function getOptionalFormString(formData: FormData, key: string) {

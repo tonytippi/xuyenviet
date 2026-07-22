@@ -323,6 +323,13 @@
       "when": 1784902000000,
       "tag": "0045_recover_knowledge_ingestion_jobs",
       "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1784903000000,
+      "tag": "0046_slim_the_leader",
+      "breakpoints": true
     }
   ]
 }

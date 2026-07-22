@@ -14,6 +14,7 @@ const adminNavItems = [
   { href: "/admin/knowledge/facebook-captures", label: "Capture Facebook", eyebrow: "Queue" },
   { href: "/admin/knowledge/youtube-captures", label: "Capture YouTube", eyebrow: "Queue" },
   { href: "/admin/knowledge/drafts", label: "Duyệt nháp", eyebrow: "Review" },
+  { href: "/admin/knowledge/recommendations", label: "Khuyến nghị AI", eyebrow: "Ops queue" },
   { href: "/admin/knowledge/approved", label: "Tri thức duyệt", eyebrow: "Library" },
   { href: "/admin/knowledge/progress", label: "Seed 100 mục", eyebrow: "Progress" },
   { href: "/admin/quality", label: "Chất lượng MVP", eyebrow: "Signals" },
