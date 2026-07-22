@@ -43,7 +43,7 @@ export type NormalizedTravelSource = {
   capture: { rawText: string | null; metadata: import("./source-captures").GenericCaptureMetadata; file: ScreenshotMetadata | null };
 };
 
-export type KnowledgeUrlSourceListItem = Pick<typeof sources.$inferSelect, "id" | "kind" | "url" | "canonicalUrl" | "label" | "publisher" | "createdAt"> & {
+export type KnowledgeUrlSourceListItem = Pick<typeof sources.$inferSelect, "id" | "kind" | "url" | "canonicalUrl" | "label" | "publisher" | "createdAt" | "eligibility" | "removalReason"> & {
   displayTitle: string;
   facebookCaptureReviewId: string | null;
   facebookCaptureStatus: FacebookCaptureReviewStatus | null;
@@ -116,6 +116,8 @@ export async function listKnowledgeUrlSources(): Promise<KnowledgeUrlSourceListI
       canonicalUrl: sources.canonicalUrl,
       label: sources.label,
       publisher: sources.publisher,
+      eligibility: sources.eligibility,
+      removalReason: sources.removalReason,
       createdAt: sources.createdAt,
     })
     .from(sources)

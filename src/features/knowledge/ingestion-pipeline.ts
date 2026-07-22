@@ -90,7 +90,7 @@ export async function runKnowledgeIngestionPipeline(claim: KnowledgeIngestionCla
 }
 
 async function loadBundle(db: PipelineDb, claim: KnowledgeIngestionClaim) {
-  const [bundle] = await db.select({ rawText: sourceCaptureVersions.rawText, capturedAt: sourceCaptureVersions.capturedAt, source: { id: sources.id, kind: sources.kind, label: sources.label, sourceType: sources.sourceType, verificationStatus: sources.verificationStatus, official: sources.official, partner: sources.partner } }).from(sourceCaptureVersions).innerJoin(sources, eq(sources.id, sourceCaptureVersions.sourceId)).where(and(eq(sourceCaptureVersions.id, claim.captureVersionId), eq(sourceCaptureVersions.sourceId, claim.sourceId), isNull(sourceCaptureVersions.payloadDeletedAt))).limit(1);
+  const [bundle] = await db.select({ rawText: sourceCaptureVersions.rawText, capturedAt: sourceCaptureVersions.capturedAt, source: { id: sources.id, kind: sources.kind, label: sources.label, sourceType: sources.sourceType, verificationStatus: sources.verificationStatus, official: sources.official, partner: sources.partner } }).from(sourceCaptureVersions).innerJoin(sources, eq(sources.id, sourceCaptureVersions.sourceId)).where(and(eq(sourceCaptureVersions.id, claim.captureVersionId), eq(sourceCaptureVersions.sourceId, claim.sourceId), eq(sources.eligibility, "eligible"), isNull(sourceCaptureVersions.payloadDeletedAt))).limit(1);
   return bundle ?? null;
 }
 async function finish(claim: KnowledgeIngestionClaim, stage: typeof knowledgeIngestionJobs.$inferSelect.stage, version: number, outcome: Exclude<KnowledgeIngestionPipelineResult["outcome"], "published">, code: string, db: PipelineDb) {
@@ -131,7 +131,7 @@ async function publish(claim: KnowledgeIngestionClaim, version: number, candidat
     // Matches appendSourceCaptureVersion so current-capture validation and publish are atomic.
     await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${claim.sourceId}, 44))`);
     await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${identity(candidate)}, 45))`);
-    const [current] = await tx.select({ id: sourceCaptureVersions.id }).from(sourceCaptureVersions).innerJoin(sources, eq(sources.id, sourceCaptureVersions.sourceId)).where(and(eq(sourceCaptureVersions.id, claim.captureVersionId), eq(sources.currentCaptureVersionId, claim.captureVersionId), isNull(sourceCaptureVersions.payloadDeletedAt))).limit(1).for("update");
+    const [current] = await tx.select({ id: sourceCaptureVersions.id }).from(sourceCaptureVersions).innerJoin(sources, eq(sources.id, sourceCaptureVersions.sourceId)).where(and(eq(sourceCaptureVersions.id, claim.captureVersionId), eq(sources.currentCaptureVersionId, claim.captureVersionId), eq(sources.eligibility, "eligible"), isNull(sourceCaptureVersions.payloadDeletedAt))).limit(1).for("update");
     if (!current) return terminal(claim, version, "suppressed", "stale_or_deleted_capture", tx);
     if ((relation.action === "attach" || relation.action === "conflict") && !relation.targetCardId) return terminal(claim, version, "review_recommended", "invalid_relation_target", tx);
     let target: { id: string; conditions: string[]; verificationState: typeof knowledgeCards.$inferSelect.verificationState } | null = null;
@@ -186,7 +186,7 @@ async function publishVerifyFirst(claim: KnowledgeIngestionClaim, version: numbe
     await lockSamplingPolicyBoundary(tx);
     await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${claim.sourceId}, 44))`);
     await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${identity(candidate)}, 45))`);
-    const [current] = await tx.select({ id: sourceCaptureVersions.id }).from(sourceCaptureVersions).innerJoin(sources, eq(sources.id, sourceCaptureVersions.sourceId)).where(and(eq(sourceCaptureVersions.id, claim.captureVersionId), eq(sources.currentCaptureVersionId, claim.captureVersionId), isNull(sourceCaptureVersions.payloadDeletedAt))).limit(1).for("update");
+    const [current] = await tx.select({ id: sourceCaptureVersions.id }).from(sourceCaptureVersions).innerJoin(sources, eq(sources.id, sourceCaptureVersions.sourceId)).where(and(eq(sourceCaptureVersions.id, claim.captureVersionId), eq(sources.currentCaptureVersionId, claim.captureVersionId), eq(sources.eligibility, "eligible"), isNull(sourceCaptureVersions.payloadDeletedAt))).limit(1).for("update");
     if (!current) return terminalVerifyFirst(claim, version, tx);
     if ((relation.action === "attach" || relation.action === "conflict") && !relation.targetCardId) return terminal(claim, version, "review_recommended", "invalid_relation_target", tx);
     if (relation.action === "attach" && relation.targetCardId) {
@@ -239,7 +239,7 @@ async function retainCandidateForReview(claim: KnowledgeIngestionClaim, version:
     await lockSamplingPolicyBoundary(tx);
     await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${claim.sourceId}, 44))`);
     await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${identity(candidate)}, 45))`);
-    const [current] = await tx.select({ id: sourceCaptureVersions.id }).from(sourceCaptureVersions).innerJoin(sources, eq(sources.id, sourceCaptureVersions.sourceId)).where(and(eq(sourceCaptureVersions.id, claim.captureVersionId), eq(sources.currentCaptureVersionId, claim.captureVersionId), isNull(sourceCaptureVersions.payloadDeletedAt))).limit(1).for("update");
+    const [current] = await tx.select({ id: sourceCaptureVersions.id }).from(sourceCaptureVersions).innerJoin(sources, eq(sources.id, sourceCaptureVersions.sourceId)).where(and(eq(sourceCaptureVersions.id, claim.captureVersionId), eq(sources.currentCaptureVersionId, claim.captureVersionId), eq(sources.eligibility, "eligible"), isNull(sourceCaptureVersions.payloadDeletedAt))).limit(1).for("update");
     if (!current) {
       const committed = await fence(claim, version, "suppressed", "stale_or_deleted_capture", tx, "judging");
       return committed ? { jobId: claim.jobId, sourceId: claim.sourceId, outcome: "suppressed" } : null;

@@ -236,7 +236,7 @@ async function loadEligibleApprovedCard(db: Pick<KnowledgeSearchDb, "select">, c
     })
     .from(knowledgeCards)
     .leftJoin(knowledgeCardSources, eq(knowledgeCardSources.knowledgeCardId, knowledgeCards.id))
-    .leftJoin(sources, eq(sources.id, knowledgeCardSources.sourceId))
+    .leftJoin(sources, and(eq(sources.id, knowledgeCardSources.sourceId), eq(sources.eligibility, "eligible")))
     .where(eq(knowledgeCards.id, cardId));
 
   const grouped = groupSearchRows(rows)[0];
@@ -263,6 +263,7 @@ async function loadActiveSupportingEvidence(db: Pick<KnowledgeSearchDb, "select"
     })
     .from(knowledgeCardEvidence)
     .innerJoin(knowledgeCardSources, and(eq(knowledgeCardSources.knowledgeCardId, knowledgeCardEvidence.knowledgeCardId), eq(knowledgeCardSources.sourceId, knowledgeCardEvidence.sourceId)))
+    .innerJoin(sources, and(eq(sources.id, knowledgeCardEvidence.sourceId), eq(sources.eligibility, "eligible")))
     .innerJoin(sourceCaptureVersions, and(eq(sourceCaptureVersions.id, knowledgeCardEvidence.captureVersionId), eq(sourceCaptureVersions.sourceId, knowledgeCardEvidence.sourceId)))
     .where(and(
       eq(knowledgeCardEvidence.knowledgeCardId, cardId),

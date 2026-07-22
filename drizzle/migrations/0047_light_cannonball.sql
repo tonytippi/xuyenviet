@@ -1,0 +1,11 @@
+ALTER TABLE "knowledge_recommendations" DROP CONSTRAINT "knowledge_recommendations_sampling_disposition_shape_check";--> statement-breakpoint
+ALTER TABLE "sources" ADD COLUMN "eligibility" text DEFAULT 'eligible' NOT NULL;--> statement-breakpoint
+ALTER TABLE "sources" ADD COLUMN "removal_reason" text;--> statement-breakpoint
+ALTER TABLE "sources" ADD COLUMN "removed_by_user_id" text;--> statement-breakpoint
+ALTER TABLE "sources" ADD COLUMN "removal_completed_at" timestamp;--> statement-breakpoint
+ALTER TABLE "sources" ADD CONSTRAINT "sources_removed_by_user_id_users_id_fk" FOREIGN KEY ("removed_by_user_id") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "sources_eligibility_idx" ON "sources" USING btree ("eligibility","removal_completed_at");--> statement-breakpoint
+ALTER TABLE "knowledge_recommendations" ADD CONSTRAINT "knowledge_recommendations_sampling_disposition_shape_check" CHECK (("knowledge_recommendations"."resolution" in ('sampling_passed', 'sampling_failed') and "knowledge_recommendations"."sampling_disposition_reason" is not null) or ("knowledge_recommendations"."resolution" is null or "knowledge_recommendations"."resolution" not in ('sampling_passed', 'sampling_failed')) and "knowledge_recommendations"."sampling_disposition_reason" is null and "knowledge_recommendations"."sampling_rationale" is null);--> statement-breakpoint
+ALTER TABLE "sources" ADD CONSTRAINT "sources_eligibility_check" CHECK ("sources"."eligibility" in ('eligible', 'withdrawn'));--> statement-breakpoint
+ALTER TABLE "sources" ADD CONSTRAINT "sources_removal_reason_check" CHECK ("sources"."removal_reason" is null or "sources"."removal_reason" in ('withdrawn', 'inaccessible', 'removed'));--> statement-breakpoint
+ALTER TABLE "sources" ADD CONSTRAINT "sources_removal_shape_check" CHECK (("sources"."eligibility" = 'eligible' and "sources"."removal_reason" is null and "sources"."removed_by_user_id" is null and "sources"."removal_completed_at" is null) or ("sources"."eligibility" = 'withdrawn' and "sources"."removal_reason" is not null and "sources"."removed_by_user_id" is not null and "sources"."removal_completed_at" is not null));

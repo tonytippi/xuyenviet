@@ -25,6 +25,12 @@ export type SourceType = (typeof sourceTypeValues)[number];
 export const sourceVerificationStatusValues = ["unverified", "verified"] as const;
 export type SourceVerificationStatus = (typeof sourceVerificationStatusValues)[number];
 
+export const sourceEligibilityValues = ["eligible", "withdrawn"] as const;
+export type SourceEligibility = (typeof sourceEligibilityValues)[number];
+
+export const sourceRemovalReasonValues = ["withdrawn", "inaccessible", "removed"] as const;
+export type SourceRemovalReason = (typeof sourceRemovalReasonValues)[number];
+
 export const knowledgeCardStatusValues = ["draft", "approved", "archived", "rejected", "duplicate", "no_action"] as const;
 export type KnowledgeCardStatus = (typeof knowledgeCardStatusValues)[number];
 
@@ -275,6 +281,10 @@ export const sources = pgTable(
     verificationStatus: text("verification_status").$type<SourceVerificationStatus>().default("unverified").notNull(),
     official: boolean("official").default(false).notNull(),
     partner: boolean("partner").default(false).notNull(),
+    eligibility: text("eligibility").$type<SourceEligibility>().default("eligible").notNull(),
+    removalReason: text("removal_reason").$type<SourceRemovalReason>(),
+    removedByUserId: text("removed_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+    removalCompletedAt: timestamp("removal_completed_at", { mode: "date" }),
     submittedByUserId: text("submitted_by_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),
@@ -286,10 +296,14 @@ export const sources = pgTable(
     index("sources_canonical_url_idx").on(source.canonicalUrl),
     index("sources_submitted_by_user_id_idx").on(source.submittedByUserId),
     index("sources_current_capture_version_id_idx").on(source.currentCaptureVersionId),
+    index("sources_eligibility_idx").on(source.eligibility, source.removalCompletedAt),
     uniqueIndex("sources_id_current_capture_version_id_idx").on(source.id, source.currentCaptureVersionId),
     check("sources_kind_check", sql`${source.kind} in ('url', 'facebook', 'youtube', 'copied_post', 'pasted_text', 'screenshot')`),
     check("sources_source_type_check", sql`${source.sourceType} in ('curated', 'community')`),
     check("sources_verification_status_check", sql`${source.verificationStatus} in ('unverified', 'verified')`),
+    check("sources_eligibility_check", sql`${source.eligibility} in ('eligible', 'withdrawn')`),
+    check("sources_removal_reason_check", sql`${source.removalReason} is null or ${source.removalReason} in ('withdrawn', 'inaccessible', 'removed')`),
+    check("sources_removal_shape_check", sql`(${source.eligibility} = 'eligible' and ${source.removalReason} is null and ${source.removedByUserId} is null and ${source.removalCompletedAt} is null) or (${source.eligibility} = 'withdrawn' and ${source.removalReason} is not null and ${source.removedByUserId} is not null and ${source.removalCompletedAt} is not null)`),
     check("sources_label_safe_metadata_check", sql`length(btrim(${source.label})) between 1 and 200 and position(chr(10) in ${source.label}) = 0 and position(chr(13) in ${source.label}) = 0`),
     check("sources_publisher_safe_metadata_check", sql`${source.publisher} is null or (length(btrim(${source.publisher})) between 1 and 160 and position(chr(10) in ${source.publisher}) = 0 and position(chr(13) in ${source.publisher}) = 0)`),
     check("sources_collected_date_valid_check", sql`${source.collectedDate} is null or (${source.collectedDate} ~ '^\\d{4}-\\d{2}-\\d{2}$' and to_char(to_date(${source.collectedDate}, 'YYYY-MM-DD'), 'YYYY-MM-DD') = ${source.collectedDate})`),

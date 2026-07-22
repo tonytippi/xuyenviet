@@ -113,31 +113,31 @@ export async function extractKnowledgeDraftsFromSourceAsActor(sourceId: string, 
   }
 
   try {
-    await db.transaction(async (transaction) => {
+    const gatewayResult = await db.transaction(async (transaction) => {
       await lockSourceExtraction(transaction, sourceBundle.source.id);
+      await assertEligibleSourceCapture(transaction, sourceBundle.source.id, options.captureVersionId ?? sourceBundle.source.currentCaptureVersionId);
 
       if (await sourceAlreadyHasExtraction(transaction, sourceBundle.source.id)) {
         throw new KnowledgeExtractionError("Nguồn này đã được AI trích xuất trước đó. Vui lòng duyệt, sửa hoặc xử lý các thẻ đã tạo thay vì trích xuất lại.", "already_extracted");
       }
 
       await options.preProviderGuard?.({ db: transaction, sourceId: sourceBundle.source.id, captureVersionId: options.captureVersionId ?? sourceBundle.source.currentCaptureVersionId });
-    });
-
-    const gatewayResult = await completeExtraction({
-      model: model.gatewayModelName,
-      messages: buildSourceKnowledgeDraftExtractionMessages({
-        source: {
-          kind: sourceBundle.source.kind,
-          label: sourceBundle.source.label,
-          publisher: sourceBundle.source.publisher,
-          collectedDate: sourceBundle.source.collectedDate,
-          sourceType: sourceBundle.source.sourceType,
-          verificationStatus: sourceBundle.source.verificationStatus,
-          official: sourceBundle.source.official,
-          partner: sourceBundle.source.partner,
-        },
-        rawText,
-      }),
+      return completeExtraction({
+        model: model.gatewayModelName,
+        messages: buildSourceKnowledgeDraftExtractionMessages({
+          source: {
+            kind: sourceBundle.source.kind,
+            label: sourceBundle.source.label,
+            publisher: sourceBundle.source.publisher,
+            collectedDate: sourceBundle.source.collectedDate,
+            sourceType: sourceBundle.source.sourceType,
+            verificationStatus: sourceBundle.source.verificationStatus,
+            official: sourceBundle.source.official,
+            partner: sourceBundle.source.partner,
+          },
+          rawText,
+        }),
+      });
     });
 
     if (!gatewayResult.ok) {
@@ -178,6 +178,7 @@ export async function extractKnowledgeDraftsFromSourceAsActor(sourceId: string, 
 
     const extraction = await db.transaction(async (transaction) => {
       await lockSourceExtraction(transaction, sourceBundle.source.id);
+      await assertEligibleSourceCapture(transaction, sourceBundle.source.id, options.captureVersionId ?? sourceBundle.source.currentCaptureVersionId);
 
       if (await sourceAlreadyHasExtraction(transaction, sourceBundle.source.id)) {
         throw new KnowledgeExtractionError("Nguồn này đã được AI trích xuất trước đó. Vui lòng duyệt, sửa hoặc xử lý các thẻ đã tạo thay vì trích xuất lại.", "already_extracted");
@@ -242,7 +243,7 @@ export async function assertFacebookCaptureStillNeedsReview(db: ExtractionQueryD
 }
 
 async function loadSourceBundle(db: ExtractionDb, sourceId: string, captureVersionId?: string | null) {
-  const [source] = await db.select().from(sources).where(eq(sources.id, sourceId)).limit(1);
+  const [source] = await db.select().from(sources).where(and(eq(sources.id, sourceId), eq(sources.eligibility, "eligible"))).limit(1);
 
   if (!source) {
     return null;
@@ -265,7 +266,12 @@ async function sourceAlreadyHasExtraction(db: ExtractionQueryDb, sourceId: strin
 }
 
 async function lockSourceExtraction(db: ExtractionLockDb, sourceId: string) {
-  await db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${sourceId}, 42))`);
+  await db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${sourceId}, 44))`);
+}
+
+async function assertEligibleSourceCapture(db: ExtractionQueryDb, sourceId: string, captureVersionId: string | null) {
+  const [capture] = captureVersionId ? await db.select({ id: sourceCaptureVersions.id }).from(sourceCaptureVersions).innerJoin(sources, eq(sources.id, sourceCaptureVersions.sourceId)).where(and(eq(sourceCaptureVersions.id, captureVersionId), eq(sourceCaptureVersions.sourceId, sourceId), eq(sources.eligibility, "eligible"), sql`${sourceCaptureVersions.payloadDeletedAt} is null`)).limit(1) : [];
+  if (!capture) throw new KnowledgeExtractionError("Nguồn này không còn đủ điều kiện trích xuất.", "capture_not_actionable");
 }
 
 async function writeUsageForProviderCall(

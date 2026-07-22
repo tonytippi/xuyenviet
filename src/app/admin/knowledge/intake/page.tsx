@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 import { listRecentKnowledgeSeedBatches } from "@/features/knowledge/batch-intake";
-import { extractKnowledgeDraftsFromSourceForm } from "@/features/knowledge/actions";
+import { extractKnowledgeDraftsFromSourceForm, removeKnowledgeSourceForm } from "@/features/knowledge/actions";
 import { listKnowledgeUrlSources } from "@/features/knowledge/sources";
 
 import { IntakeUrlModal } from "./intake-url-modal";
@@ -20,6 +20,8 @@ type KnowledgeIntakePageProps = {
     extractError?: string;
     extractQueued?: string;
     jobId?: string;
+    removeError?: string;
+    sourceRemoved?: string;
   }>;
 };
 
@@ -52,6 +54,8 @@ export default async function KnowledgeIntakePage({ searchParams }: KnowledgeInt
           Yêu cầu trích xuất đã được đưa vào hàng đợi. Bạn có thể quay lại sau để xem bản nháp.{params.jobId ? ` Job: ${params.jobId}.` : null}
         </p>
       ) : null}
+      {params.removeError ? <p className="mt-6 rounded-2xl border border-[#d99a93] bg-[#fff0ee] px-4 py-3 font-semibold text-[#9b2f29]" role="alert">{params.removeError}</p> : null}
+      {params.sourceRemoved ? <p className="mt-6 rounded-2xl border border-[#8fb59f] bg-[#edf7ef] px-4 py-3 font-semibold text-[#1f5f46]" role="status">{params.sourceRemoved === "already" ? "Nguồn này đã được gỡ trước đó." : "Đã gỡ nguồn và cập nhật an toàn các tri thức liên quan."}</p> : null}
       {params.batchId ? (
         <div className="mt-6 rounded-2xl border border-[#8fb59f] bg-[#edf7ef] px-4 py-3 font-semibold text-[#1f5f46]" role="status">
           <p>
@@ -83,6 +87,7 @@ export default async function KnowledgeIntakePage({ searchParams }: KnowledgeInt
                   <th className="px-3 py-2 font-semibold">Loại</th>
                   <th className="px-3 py-2 font-semibold">Capture</th>
                   <th className="px-3 py-2 font-semibold">Extract</th>
+                  <th className="px-3 py-2 font-semibold">Trạng thái</th>
                   <th className="px-3 py-2 font-semibold">Ngày thêm</th>
                 </tr>
               </thead>
@@ -90,7 +95,7 @@ export default async function KnowledgeIntakePage({ searchParams }: KnowledgeInt
                 {sources.map((source) => (
                   <tr key={source.id} className="rounded-2xl bg-white/80 text-[#17342c]">
                     <td className="max-w-[42rem] break-all rounded-l-2xl px-3 py-3 font-semibold">
-                      {getExternalUrl(source.canonicalUrl ?? source.url) ? (
+                      {source.eligibility === "eligible" && getExternalUrl(source.canonicalUrl ?? source.url) ? (
                         <a className="text-[#1f5f46] underline underline-offset-4" href={getExternalUrl(source.canonicalUrl ?? source.url) ?? undefined} rel="noreferrer" target="_blank">
                           {formatDisplayUrl(source.canonicalUrl ?? source.url)}
                         </a>
@@ -125,6 +130,15 @@ export default async function KnowledgeIntakePage({ searchParams }: KnowledgeInt
                       ) : (
                         getExtractionLabel(source.linkedKnowledgeCardCount, source.facebookCaptureStatus)
                       )}
+                    </td>
+                    <td className="px-3 py-3 text-[#4f625a]">
+                      {source.eligibility === "eligible" ? (
+                        <form action={removeKnowledgeSourceForm}>
+                          <input name="sourceId" type="hidden" value={source.id} />
+                          <input name="reason" type="hidden" value="withdrawn" />
+                          <button className="rounded-xl border border-[#d99a93] px-3 py-2 text-sm font-semibold text-[#9b2f29] transition hover:bg-[#fff0ee] focus:outline-none focus:ring-4 focus:ring-[#d99a93]" type="submit">Gỡ nguồn</button>
+                        </form>
+                      ) : <span className="font-semibold text-[#9b2f29]">Đã gỡ ({source.removalReason})</span>}
                     </td>
                     <td className="rounded-r-2xl px-3 py-3 text-[#4f625a]">{formatDate(source.createdAt)}</td>
                   </tr>

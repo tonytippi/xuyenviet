@@ -109,6 +109,7 @@ export async function suggestKnowledgeFromSourceUrl(sourceId: string): Promise<K
   try {
     const result = await db.transaction(async (transaction) => {
       await lockSourceSuggestion(transaction, sourceBundle.source.id);
+      await assertEligibleSourceCapture(transaction, sourceBundle.source.id, sourceBundle.source.currentCaptureVersionId);
 
       if (await sourceAlreadyHasSuggestions(transaction, sourceBundle.source.id)) {
         throw new KnowledgeSuggestionError("Nguồn này đã có gợi ý cần xử lý. Vui lòng duyệt kết quả hiện có trước khi chạy lại.", "already_suggested");
@@ -246,10 +247,10 @@ export async function listKnowledgeSourceSuggestionTraces(sourceId: string) {
 }
 
 async function loadSourceBundle(db: SuggestionDb, sourceId: string) {
-  const [source] = await db.select().from(sources).where(eq(sources.id, sourceId)).limit(1);
+    const [source] = await db.select().from(sources).where(and(eq(sources.id, sourceId), eq(sources.eligibility, "eligible"))).limit(1);
   if (!source) return null;
-  const [raw] = source.currentCaptureVersionId
-    ? await db.select().from(sourceCaptureVersions).where(and(eq(sourceCaptureVersions.id, source.currentCaptureVersionId), eq(sourceCaptureVersions.sourceId, source.id))).limit(1)
+    const [raw] = source.currentCaptureVersionId
+    ? await db.select().from(sourceCaptureVersions).where(and(eq(sourceCaptureVersions.id, source.currentCaptureVersionId), eq(sourceCaptureVersions.sourceId, source.id), sql`${sourceCaptureVersions.payloadDeletedAt} is null`)).limit(1)
     : [];
   return raw ? { source, raw } : null;
 }
@@ -283,7 +284,12 @@ async function sourceAlreadyHasSuggestions(db: Pick<SuggestionDb, "select">, sou
 }
 
 async function lockSourceSuggestion(db: { execute: (query: ReturnType<typeof sql>) => Promise<unknown> }, sourceId: string) {
-  await db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${sourceId}, 42))`);
+  await db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${sourceId}, 44))`);
+}
+
+async function assertEligibleSourceCapture(db: Pick<SuggestionDb, "select">, sourceId: string, captureVersionId: string | null) {
+  const [capture] = captureVersionId ? await db.select({ id: sourceCaptureVersions.id }).from(sourceCaptureVersions).innerJoin(sources, eq(sources.id, sourceCaptureVersions.sourceId)).where(and(eq(sourceCaptureVersions.id, captureVersionId), eq(sourceCaptureVersions.sourceId, sourceId), eq(sources.eligibility, "eligible"), sql`${sourceCaptureVersions.payloadDeletedAt} is null`)).limit(1) : [];
+  if (!capture) throw new KnowledgeSuggestionError("Nguồn URL này không còn đủ điều kiện phân tích.", "unsupported_material");
 }
 
 async function assertCurrentTargetCard(db: Pick<SuggestionDb, "select">, targetCardId: string) {

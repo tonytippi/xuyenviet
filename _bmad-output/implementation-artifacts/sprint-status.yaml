@@ -53,7 +53,7 @@ development_status:
   3-7-validate-evidence-and-independently-judge-publication: superseded-by-3-5
   3-8-relate-evidence-preserve-conditions-and-handle-conflicts: superseded-by-3-5
   3-9-operate-the-ai-recommended-review-and-sampling-queue: done
-  3-10-propagate-source-removal-and-state-changes-to-search-eligibility: backlog
+  3-10-propagate-source-removal-and-state-changes-to-search-eligibility: done
   3-11-report-active-evidence-grounded-seed-coverage: backlog
   epic-3-retrospective: optional
 

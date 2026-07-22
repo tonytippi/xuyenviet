@@ -113,8 +113,9 @@ export async function appendSourceCaptureVersion(
   return transactionalDb.transaction(async (tx) => {
     // This lock spans sequence allocation, the pointer update, and job creation.
     await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${input.sourceId}, 44))`);
-    const [source] = await tx.select({ id: sources.id }).from(sources).where(eq(sources.id, input.sourceId)).limit(1);
+    const [source] = await tx.select({ id: sources.id, eligibility: sources.eligibility }).from(sources).where(eq(sources.id, input.sourceId)).limit(1);
     if (!source) throw new SourceCaptureValidationError("Source does not exist.");
+    if (source.eligibility !== "eligible") throw new SourceCaptureValidationError("Source is no longer eligible for capture.");
     const [latest] = await tx.select({ versionSequence: sourceCaptureVersions.versionSequence }).from(sourceCaptureVersions).where(eq(sourceCaptureVersions.sourceId, input.sourceId)).orderBy(desc(sourceCaptureVersions.versionSequence)).limit(1);
     const [version] = await tx.insert(sourceCaptureVersions).values({
       sourceId: input.sourceId,

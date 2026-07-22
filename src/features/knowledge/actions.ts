@@ -30,6 +30,7 @@ import { isSourceValidationError, normalizeTravelSourceInput, type TravelSourceI
 import { appendSourceCaptureVersion } from "./source-captures";
 import { isKnowledgeSuggestionError, suggestKnowledgeFromSourceUrl as suggestKnowledgeFromSourceUrlService } from "./suggestions";
 import { resolveKnowledgeRecommendation } from "./recommendations";
+import { removeKnowledgeSource, SourceRemovalError } from "./source-removal";
 
 export type SafeSourceResult = Pick<
   typeof sources.$inferSelect,
@@ -80,6 +81,25 @@ export async function submitTravelSourceForAiReading(input: TravelSourceInput): 
 
 export async function extractKnowledgeDraftsFromSource(sourceId: string, options: { preProviderGuard?: KnowledgeDraftExtractionPreProviderGuard } = {}) {
   return extractKnowledgeDraftsFromSourceService(sourceId, options);
+}
+
+export async function removeKnowledgeSourceForm(formData: FormData) {
+  const session = await requireAdminSession();
+  const sourceId = getOptionalFormString(formData, "sourceId") ?? "";
+  const reason = getOptionalFormString(formData, "reason");
+  let result: Awaited<ReturnType<typeof removeKnowledgeSource>> | null = null;
+  let error: string | null = null;
+
+  try {
+    if (reason !== "withdrawn" && reason !== "inaccessible" && reason !== "removed") throw new SourceRemovalError("Lý do gỡ nguồn không hợp lệ.");
+    result = await removeKnowledgeSource({ sourceId, reason, actor: { userId: session.userId, email: session.email } });
+  } catch (cause) {
+    if (cause instanceof AdminAuthorizationError || (cause instanceof Error && cause.name === "AdminAuthorizationError")) throw cause;
+    error = cause instanceof SourceRemovalError ? "Không thể gỡ nguồn này." : "Không thể hoàn tất thao tác gỡ nguồn.";
+  }
+
+  if (error) redirect(`/admin/knowledge/intake?removeError=${encodeURIComponent(error)}`);
+  redirect(`/admin/knowledge/intake?sourceRemoved=${encodeURIComponent(result?.status === "already_completed" ? "already" : "completed")}`);
 }
 
 async function markFacebookCaptureExtractionFailed(input: { reviewId: string; actor: FacebookCaptureReviewActor; extractionError: string }) {

@@ -6,7 +6,7 @@ import { auditEvents, knowledgeCards, knowledgeCardSources, knowledgeSourceSugge
 import type { AuthenticatedSession } from "@/server/auth";
 
 type ReviewDb = ReturnType<typeof getDb>;
-type ReviewMutationDb = Pick<ReviewDb, "select" | "update" | "insert">;
+type ReviewMutationDb = Pick<ReviewDb, "select" | "update" | "insert" | "execute">;
 
 const emailLikePattern = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
 const phoneLikePattern = /(?:\+?84|0)(?:[\s.-]?\d){8,10}/;
@@ -37,6 +37,10 @@ export async function approveKnowledgeDraftBatchForActorInTransaction(transactio
 
 async function approveKnowledgeDraftForActorInTransaction(transaction: ReviewMutationDb, actor: AuthenticatedSession, draftId: string) {
   const draft = await loadReviewableDraft(transaction, draftId);
+  for (const source of draft.sources.sort((left, right) => left.id.localeCompare(right.id))) {
+    await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${source.id}, 44))`);
+  }
+  await assertEligibleDraftSources(transaction, draft.sources.map((source) => source.id));
   assertApprovalReady(draft.card);
   const rawLeakCorpus = await loadRawLeakCorpusForSources(transaction, draft.sources.map((source) => source.id));
   rejectUnsafeCardFields({ title: draft.card.title, locationName: draft.card.locationName, routeSegment: draft.card.routeSegment, summary: draft.card.summary, tags: draft.card.tags, practicalDetails: draft.card.practicalDetails }, rawLeakCorpus);
@@ -71,6 +75,11 @@ async function approveKnowledgeDraftForActorInTransaction(transaction: ReviewMut
   });
 
   return { draftId };
+}
+
+async function assertEligibleDraftSources(db: Pick<ReviewDb, "select">, sourceIds: string[]) {
+  const [eligible] = await db.select({ id: sources.id }).from(sources).innerJoin(sourceCaptureVersions, and(eq(sourceCaptureVersions.sourceId, sources.id), isNull(sourceCaptureVersions.payloadDeletedAt))).where(and(inArray(sources.id, sourceIds), eq(sources.eligibility, "eligible"))).limit(1);
+  if (!eligible) throw new KnowledgeDraftApprovalCoreError("Bản nháp không còn nguồn đủ điều kiện để phê duyệt.", "not_reviewable");
 }
 
 async function loadReviewableDraft(db: Pick<ReviewDb, "select">, draftId: string) {

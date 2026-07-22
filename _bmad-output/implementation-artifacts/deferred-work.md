@@ -103,3 +103,6 @@
 - source_spec: `spec-3-3-backfill-bounded-evidence-and-verify-legacy-retrieval-safety.md`
   summary: Atomically write an index dirty marker when evidence state or display policy changes.
   evidence: Story 3.3 safely validates and filters evidence at search time, but Story 3.10 owns the mutation/dirty-marker contract needed to rebuild an already-indexed lexical document after evidence policy changes.
+- source_spec: `spec-3-10-propagate-source-removal-and-state-changes-to-search-eligibility.md`
+  summary: Coordinate source removal with ingestion provider dispatch without holding the source transaction lock across long-running provider calls.
+  evidence: Holding lock 44 across provider calls deadlocks the existing recapture/fencing tests; current commit-time eligibility and fencing prevent persistence or retrieval reactivation, but do not prevent a provider receiving already-loaded capture material during a removal race.
