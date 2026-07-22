@@ -5,7 +5,8 @@ import { createHash } from "node:crypto";
 import { and, desc, eq, inArray, isNull, lte, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { auditEvents, facebookCaptureReviews, knowledgeCards, knowledgeCardSources, knowledgeExtractionJobs, sourceCaptureVersions, sources, userRoles, users, type SourceKind } from "@/db/schema";
+import { auditEvents, facebookCaptureReviews, knowledgeCards, knowledgeCardSources, knowledgeExtractionJobs, knowledgeIngestionJobs, sourceCaptureVersions, sources, userRoles, users, type SourceKind } from "@/db/schema";
+import { ensureIngestionJobForCaptureVersion } from "@/features/knowledge/ingestion-jobs";
 
 const submittedKinds = new Set<SourceKind>(["url", "copied_post", "pasted_text", "screenshot"]);
 const unsafeMetadataKey = /cookie|token|password|local_?storage|html|hidden|profile|provider|secret/i;
@@ -126,6 +127,7 @@ export async function appendSourceCaptureVersion(
     storageKey: input.file?.storageKey ?? null,
   }).returning();
   await db.update(sources).set({ currentCaptureVersionId: version.id }).where(eq(sources.id, input.sourceId));
+  await ensureIngestionJobForCaptureVersion(db, { sourceId: input.sourceId, captureVersionId: version.id });
   return version;
 }
 
@@ -194,6 +196,8 @@ async function hasRetentionBlocker(db: Pick<ReturnType<typeof getDb>, "select">,
   if (review) return true;
   const [job] = await db.select({ id: knowledgeExtractionJobs.id }).from(knowledgeExtractionJobs).where(and(eq(knowledgeExtractionJobs.captureVersionId, versionId), inArray(knowledgeExtractionJobs.status, ["queued", "running"]))).limit(1);
   if (job) return true;
+  const [ingestionJob] = await db.select({ id: knowledgeIngestionJobs.id }).from(knowledgeIngestionJobs).where(and(eq(knowledgeIngestionJobs.captureVersionId, versionId), inArray(knowledgeIngestionJobs.stage, ["queued", "triaging", "extracting", "judging", "relating"]))).limit(1);
+  if (ingestionJob) return true;
   const [unknownJob] = await db.select({ id: knowledgeExtractionJobs.id }).from(knowledgeExtractionJobs).where(and(eq(knowledgeExtractionJobs.sourceId, sourceId), isNull(knowledgeExtractionJobs.captureVersionId), inArray(knowledgeExtractionJobs.status, ["queued", "running"]))).limit(1);
   if (unknownJob) return true;
   const [unknown] = await db.select({ id: facebookCaptureReviews.id }).from(facebookCaptureReviews).where(and(eq(facebookCaptureReviews.sourceId, sourceId), isNull(facebookCaptureReviews.captureVersionId))).limit(1);

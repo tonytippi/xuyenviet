@@ -1,7 +1,7 @@
 import { eq, sql } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { auditEvents, sourceCaptureVersions, sources, userRoles, users, type UserRole } from "@/db/schema";
+import { auditEvents, knowledgeIngestionJobs, sourceCaptureVersions, sources, userRoles, users, type UserRole } from "@/db/schema";
 
 import { testDb } from "./helpers/db";
 
@@ -91,6 +91,9 @@ describe("knowledge source intake", () => {
     expect(result).not.toHaveProperty("rawText");
     await expect(testDb.select().from(sourceCaptureVersions).where(eq(sourceCaptureVersions.sourceId, result.id))).resolves.toMatchObject([
       { rawText: "Đèo Hải Vân có nhiều điểm dừng ngắm cảnh." },
+    ]);
+    await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.sourceId, result.id))).resolves.toMatchObject([
+      { stage: "queued", stageVersion: 1 },
     ]);
   });
 

@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test } from "vitest";
 
-import { auditEvents, knowledgeExtractionJobs, sourceCaptureVersions, sources, userRoles, users } from "@/db/schema";
+import { auditEvents, knowledgeExtractionJobs, knowledgeIngestionJobs, sourceCaptureVersions, sources, userRoles, users } from "@/db/schema";
 import { hashCaptureText, retainExpiredFacebookCaptureVersions, validateSafeCaptureMetadata } from "@/features/knowledge/source-captures";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
@@ -56,6 +56,20 @@ describe("source capture retention", () => {
     await expect(retainExpiredFacebookCaptureVersions({ actorUserId: "traveler", actorEmail: "traveler@example.com", dryRun: false, now }, testDb)).rejects.toThrow("matching existing user");
     await expect(retainExpiredFacebookCaptureVersions({ actorUserId: "operator", actorEmail: "operator@example.com", dryRun: false, now }, testDb)).resolves.toMatchObject({ blockedVersionIds: ["version-blocked"] });
     await expect(testDb.select({ rawText: sourceCaptureVersions.rawText }).from(sourceCaptureVersions).where(eq(sourceCaptureVersions.id, "version-blocked"))).resolves.toEqual([{ rawText: "Operator-only capture" }]);
+  });
+
+  test("blocks canonical queued, claimed, and expired-unrecovered jobs but permits terminal jobs", async () => {
+    const now = new Date("2026-07-21T00:00:00.000Z");
+    await createCandidate("queued", new Date("2026-01-22T00:00:00.000Z"));
+    await createCandidate("claimed", new Date("2026-01-22T00:00:00.000Z"));
+    await createCandidate("terminal", new Date("2026-01-22T00:00:00.000Z"));
+    await testDb.insert(knowledgeIngestionJobs).values([
+      { sourceId: "queued", captureVersionId: "version-queued", submittedByUserId: "operator", submittedByEmail: "operator@example.com" },
+      { sourceId: "claimed", captureVersionId: "version-claimed", submittedByUserId: "operator", submittedByEmail: "operator@example.com", claimedBy: "dead-worker", claimedAt: new Date("2026-01-01T00:00:00.000Z"), leaseExpiresAt: new Date("2026-01-01T00:15:00.000Z"), fencingToken: "b".repeat(64) },
+      { sourceId: "terminal", captureVersionId: "version-terminal", submittedByUserId: "operator", submittedByEmail: "operator@example.com", stage: "published" },
+    ]);
+
+    await expect(retainExpiredFacebookCaptureVersions({ actorUserId: "operator", actorEmail: "operator@example.com", dryRun: false, now }, testDb)).resolves.toMatchObject({ blockedVersionIds: expect.arrayContaining(["version-queued", "version-claimed"]), tombstonedVersionIds: ["version-terminal"] });
   });
 
   test("rejects unknown metadata kinds and nested metadata values", () => {

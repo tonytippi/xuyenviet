@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test } from "vitest";
 
-import { auditEvents, rawSourceMaterial, sourceCaptureVersions, sources, users } from "@/db/schema";
+import { auditEvents, knowledgeIngestionJobs, rawSourceMaterial, sourceCaptureVersions, sources, users } from "@/db/schema";
 import { listQueuedYoutubeSources, maxYoutubeEvidenceItemsPerVideo, maxYoutubeEvidenceItemsPerWindow, parseYoutubeEvidence, recordYoutubeCaptureFailure, saveYoutubeEvidence, serializeYoutubeEvidence } from "@/features/knowledge/youtube-capture";
 import { getYoutubeMediaResolution, mergeYoutubeWindowEvidence, normalizeYoutubeWindowTimestamps, parseCachedYoutubePayload, parseCachedYoutubeSegmentPayload, parseYoutubeDuration, requestYoutubeEvidence, requestYoutubeTitle, retainedYoutubeEvidenceItemsPerWindow, youtubeWindows } from "../scripts/youtube-capture";
 
@@ -31,6 +31,7 @@ describe("YouTube capture", () => {
     await expect(saveYoutubeEvidence(testDb, { sourceId: "queued", evidence: parseYoutubeEvidence({ evidence }), metadata: { captureMethod: "gemini_youtube_url", capturedAt: "2026-07-17T00:00:00.000Z", sourceUrl: "https://www.youtube.com/watch?v=abcDEF12345", model: "gemini-3.5-flash", mediaResolution: "MEDIA_RESOLUTION_LOW", promptVersion: "youtube-evidence-v1", evidenceCount: 1, latencyMs: 2000, promptTokens: 150000, outputTokens: 7500, totalTokens: 157500 }, actor, title: "Hành trình qua Phan Thiết" })).resolves.toMatchObject({ status: "updated" });
     const [raw] = await testDb.select().from(sourceCaptureVersions).where(eq(sourceCaptureVersions.sourceId, "queued"));
     expect(raw.rawText).toContain("NovaWorld Phan Thiết");
+    await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.captureVersionId, raw.id))).resolves.toMatchObject([{ stage: "queued" }]);
     await expect(testDb.select({ label: sources.label }).from(sources).where(eq(sources.id, "queued"))).resolves.toEqual([{ label: "Hành trình qua Phan Thiết" }]);
     const [audit] = await testDb.select().from(auditEvents).where(eq(auditEvents.targetType, "source_capture_version"));
     expect(audit.afterSummary).not.toContain("NovaWorld");

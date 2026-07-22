@@ -114,6 +114,9 @@ export type KnowledgeExtractionJobMode = (typeof knowledgeExtractionJobModeValue
 export const knowledgeExtractionJobStatusValues = ["queued", "running", "succeeded", "failed", "cancelled"] as const;
 export type KnowledgeExtractionJobStatus = (typeof knowledgeExtractionJobStatusValues)[number];
 
+export const knowledgeIngestionStageValues = ["queued", "triaging", "extracting", "judging", "relating", "published", "suppressed", "review_recommended", "verify_first", "failed"] as const;
+export type KnowledgeIngestionStage = (typeof knowledgeIngestionStageValues)[number];
+
 export const chatContextFieldValues = [
   "origin",
   "destination",
@@ -443,6 +446,56 @@ export const knowledgeExtractionJobs = pgTable(
     check("knowledge_extraction_jobs_result_draft_ids_check", sql`${job.resultDraftIds} is null or jsonb_typeof(${job.resultDraftIds}) = 'array'`),
     check("knowledge_extraction_jobs_result_draft_count_check", sql`${job.resultDraftCount} is null or ${job.resultDraftCount} >= 0`),
     check("knowledge_extraction_jobs_created_by_email_check", sql`length(btrim(${job.createdByEmail})) > 0 and char_length(${job.createdByEmail}) <= 320`),
+  ],
+);
+
+export const knowledgeIngestionJobs = pgTable(
+  "knowledge_ingestion_jobs",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    sourceId: text("source_id")
+      .notNull()
+      .references(() => sources.id, { onDelete: "restrict" }),
+    captureVersionId: text("capture_version_id").notNull(),
+    submittedByUserId: text("submitted_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    submittedByEmail: text("submitted_by_email").notNull(),
+    stage: text("stage").$type<KnowledgeIngestionStage>().default("queued").notNull(),
+    stageVersion: integer("stage_version").default(1).notNull(),
+    attemptCount: integer("attempt_count").default(0).notNull(),
+    maxAttempts: integer("max_attempts").default(3).notNull(),
+    nextRunAt: timestamp("next_run_at", { mode: "date" }).defaultNow().notNull(),
+    lastErrorCode: text("last_error_code"),
+    requeueReasonCode: text("requeue_reason_code"),
+    claimedBy: text("claimed_by"),
+    claimedAt: timestamp("claimed_at", { mode: "date" }),
+    leaseExpiresAt: timestamp("lease_expires_at", { mode: "date" }),
+    fencingToken: text("fencing_token"),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (job) => [
+    uniqueIndex("knowledge_ingestion_jobs_capture_version_id_idx").on(job.captureVersionId),
+    index("knowledge_ingestion_jobs_claim_queue_idx").on(job.stage, job.nextRunAt, job.createdAt),
+    index("knowledge_ingestion_jobs_lease_expiry_idx").on(job.leaseExpiresAt).where(sql`${job.leaseExpiresAt} is not null`),
+    index("knowledge_ingestion_jobs_source_id_idx").on(job.sourceId),
+    foreignKey({
+      columns: [job.captureVersionId, job.sourceId],
+      foreignColumns: [sourceCaptureVersions.id, sourceCaptureVersions.sourceId],
+      name: "knowledge_ingestion_jobs_capture_version_source_fk",
+    }).onDelete("restrict"),
+    check("knowledge_ingestion_jobs_stage_check", sql`${job.stage} in ('queued', 'triaging', 'extracting', 'judging', 'relating', 'published', 'suppressed', 'review_recommended', 'verify_first', 'failed')`),
+    check("knowledge_ingestion_jobs_stage_version_check", sql`${job.stageVersion} >= 1`),
+    check("knowledge_ingestion_jobs_attempt_count_check", sql`${job.attemptCount} >= 0 and ${job.attemptCount} <= ${job.maxAttempts}`),
+    check("knowledge_ingestion_jobs_max_attempts_check", sql`${job.maxAttempts} between 1 and 10`),
+    check("knowledge_ingestion_jobs_submitter_email_check", sql`length(btrim(${job.submittedByEmail})) between 1 and 320`),
+    check("knowledge_ingestion_jobs_error_code_check", sql`${job.lastErrorCode} is null or ${job.lastErrorCode} ~ '^[a-z0-9_:-]{1,120}$'`),
+    check("knowledge_ingestion_jobs_requeue_reason_code_check", sql`${job.requeueReasonCode} is null or ${job.requeueReasonCode} ~ '^[a-z0-9_:-]{1,120}$'`),
+    check("knowledge_ingestion_jobs_claim_shape_check", sql`(${job.claimedBy} is null and ${job.claimedAt} is null and ${job.leaseExpiresAt} is null and ${job.fencingToken} is null) or (${job.claimedBy} is not null and length(btrim(${job.claimedBy})) between 1 and 160 and ${job.claimedAt} is not null and ${job.leaseExpiresAt} > ${job.claimedAt} and ${job.fencingToken} ~ '^[a-f0-9]{64}$')`),
+    check("knowledge_ingestion_jobs_terminal_claim_check", sql`${job.stage} not in ('published', 'suppressed', 'review_recommended', 'verify_first', 'failed') or (${job.claimedBy} is null and ${job.claimedAt} is null and ${job.leaseExpiresAt} is null and ${job.fencingToken} is null)`),
   ],
 );
 
@@ -1416,6 +1469,7 @@ export const schema = {
   rawSourceMaterial,
   facebookCaptureReviews,
   knowledgeExtractionJobs,
+  knowledgeIngestionJobs,
   knowledgeCards,
   knowledgeCardSources,
   knowledgeCardSearchDocuments,
