@@ -190,6 +190,37 @@ describe("knowledge ingestion pipeline", () => {
     await expect(testDb.select().from(knowledgeCards)).resolves.toHaveLength(0);
   });
 
+  test.each(["attach", "conflict"] as const)("does not %s evidence from an old capture when a recapture wins before mutation", async (action) => {
+    const text = "Đèo Hải Vân có điểm dừng ngắm cảnh an toàn vào ban ngày.";
+    const { claim: firstClaim } = await claimFor(text);
+    vi.mocked(fetch).mockResolvedValueOnce(extractionResponse(candidate(text))).mockResolvedValueOnce(judgmentResponse());
+    const first = await runKnowledgeIngestionPipeline(firstClaim, testDb);
+    if (!first?.cardId) throw new Error("expected initial card");
+
+    await testDb.insert(sources).values({ id: "source-2", kind: "pasted_text", label: "Second safe source", sourceType: "community", verificationStatus: "unverified", official: false, partner: false, submittedByUserId: "operator" });
+    const { claim } = await claimFor(text, "source-2");
+    let releaseRelation!: () => void;
+    const relationStarted = new Promise<void>((resolve) => {
+      vi.mocked(fetch)
+        .mockResolvedValueOnce(extractionResponse(candidate(text)))
+        .mockResolvedValueOnce(judgmentResponse())
+        .mockImplementationOnce(async () => {
+          resolve();
+          await new Promise<void>((release) => { releaseRelation = release; });
+          return new Response(JSON.stringify({ model: "judge-model", choices: [{ message: { content: JSON.stringify({ action, target_card_id: first.cardId, summary: "Quan hệ rõ ràng." }) } }] }), { status: 200 });
+        });
+    });
+
+    const pipeline = runKnowledgeIngestionPipeline(claim, testDb);
+    await relationStarted;
+    await appendSourceCaptureVersion(testDb, { sourceId: "source-2", captureKind: "pasted_text", rawText: "Phiên bản thu thập mới hơn có ngữ cảnh hành trình.", metadata: { kind: "submitted" }, capturedAt: new Date("2026-07-23T00:00:00.000Z") });
+    releaseRelation();
+
+    await expect(pipeline).resolves.toMatchObject({ outcome: "suppressed" });
+    await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, first.cardId))).resolves.toMatchObject([{ publicationState: "active", knowledgeState: "community_observation", evidenceSetRevision: 2 }]);
+    await expect(testDb.select().from(knowledgeCardEvidence).where(eq(knowledgeCardEvidence.knowledgeCardId, first.cardId))).resolves.toHaveLength(1);
+  });
+
   test("selects same-scope relation candidates even when unrelated cards fill the old first-50 window", async () => {
     const rawText = "Đèo Hải Vân có điểm dừng ngắm cảnh an toàn vào ban ngày.";
     await testDb.insert(knowledgeCards).values(Array.from({ length: 55 }, (_, index) => ({ id: `unrelated-${index}`, status: "approved" as const, publicationState: "active" as const, knowledgeState: "community_observation" as const, reviewState: "reviewed" as const, verificationState: "not_required" as const, type: "place" as const, title: `Điểm ${index}`, summary: "Điểm dừng có thông tin cụ thể.", locationName: `Địa điểm ${index}`, conditions: ["ban ngày"], confidence: "community" as const, freshnessSensitive: false, needsReview: false, aiPromptVersion: "test", createdByUserId: "operator" })));
