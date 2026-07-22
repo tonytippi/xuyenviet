@@ -39,7 +39,7 @@ type ExtractionDb = ReturnType<typeof getDb>;
 type ExtractionQueryDb = Pick<ExtractionDb, "select">;
 type ExtractionLockDb = { execute: (query: ReturnType<typeof sql>) => Promise<unknown> };
 
-export type KnowledgeDraftExtractionPreProviderGuard = (input: { db: ExtractionQueryDb; sourceId: string }) => Promise<void>;
+export type KnowledgeDraftExtractionPreProviderGuard = (input: { db: ExtractionQueryDb; sourceId: string; captureVersionId: string | null }) => Promise<void>;
 
 type DraftInsert = Pick<
   typeof knowledgeCards.$inferInsert,
@@ -120,7 +120,7 @@ export async function extractKnowledgeDraftsFromSourceAsActor(sourceId: string, 
         throw new KnowledgeExtractionError("Nguồn này đã được AI trích xuất trước đó. Vui lòng duyệt, sửa hoặc xử lý các thẻ đã tạo thay vì trích xuất lại.", "already_extracted");
       }
 
-      await options.preProviderGuard?.({ db: transaction, sourceId: sourceBundle.source.id });
+      await options.preProviderGuard?.({ db: transaction, sourceId: sourceBundle.source.id, captureVersionId: options.captureVersionId ?? sourceBundle.source.currentCaptureVersionId });
     });
 
     const gatewayResult = await completeExtraction({
@@ -183,7 +183,7 @@ export async function extractKnowledgeDraftsFromSourceAsActor(sourceId: string, 
         throw new KnowledgeExtractionError("Nguồn này đã được AI trích xuất trước đó. Vui lòng duyệt, sửa hoặc xử lý các thẻ đã tạo thay vì trích xuất lại.", "already_extracted");
       }
 
-      await options.preProviderGuard?.({ db: transaction, sourceId: sourceBundle.source.id });
+      await options.preProviderGuard?.({ db: transaction, sourceId: sourceBundle.source.id, captureVersionId: options.captureVersionId ?? sourceBundle.source.currentCaptureVersionId });
 
       const inserted = await transaction.insert(knowledgeCards).values(drafts.map((draft) => ({ ...draft, createdByUserId: actor.userId, aiGatewayModelId: model.id }))).returning({ id: knowledgeCards.id });
 
@@ -229,14 +229,14 @@ export async function extractKnowledgeDraftsFromSourceAsActor(sourceId: string, 
   }
 }
 
-export async function assertFacebookCaptureStillNeedsReview(db: ExtractionQueryDb, input: { reviewId: string; sourceId: string }) {
+export async function assertFacebookCaptureStillNeedsReview(db: ExtractionQueryDb, input: { reviewId: string; sourceId: string; captureVersionId: string | null }) {
   const [review] = await db
-    .select({ status: facebookCaptureReviews.status })
+    .select({ status: facebookCaptureReviews.status, captureVersionId: facebookCaptureReviews.captureVersionId })
     .from(facebookCaptureReviews)
     .where(and(eq(facebookCaptureReviews.id, input.reviewId), eq(facebookCaptureReviews.sourceId, input.sourceId)))
     .limit(1);
 
-  if (!review || (review.status !== "needs_review" && review.status !== "extraction_failed")) {
+  if (!review || review.captureVersionId !== input.captureVersionId || (review.status !== "needs_review" && review.status !== "extraction_failed")) {
     throw new KnowledgeExtractionError("Capture này không còn ở trạng thái có thể trích xuất.", "capture_not_actionable");
   }
 }

@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
 import { getDb } from "@/db/client";
@@ -120,9 +120,8 @@ async function loadRawLeakCorpusForSources(db: Pick<ReviewDb, "select">, sourceI
 
   const rows = await db
      .select({ rawText: sourceCaptureVersions.rawText, fileName: sourceCaptureVersions.fileName, storageKey: sourceCaptureVersions.storageKey, rawMetadata: sourceCaptureVersions.rawMetadata })
-     .from(sources)
-     .innerJoin(sourceCaptureVersions, eq(sourceCaptureVersions.id, sources.currentCaptureVersionId))
-     .where(inArray(sources.id, sourceIds));
+      .from(sourceCaptureVersions)
+      .where(and(inArray(sourceCaptureVersions.sourceId, sourceIds), isNull(sourceCaptureVersions.payloadDeletedAt)));
 
   return rows.flatMap((row) => [row.rawText, row.fileName, row.storageKey, ...flattenMetadataStrings(row.rawMetadata)]).filter((value): value is string => Boolean(value));
 }

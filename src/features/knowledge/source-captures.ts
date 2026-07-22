@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { and, desc, eq, inArray, isNull, lte, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { auditEvents, facebookCaptureReviews, knowledgeCards, knowledgeCardSources, knowledgeExtractionJobs, sourceCaptureVersions, sources, users, type SourceKind } from "@/db/schema";
+import { auditEvents, facebookCaptureReviews, knowledgeCards, knowledgeCardSources, knowledgeExtractionJobs, sourceCaptureVersions, sources, userRoles, users, type SourceKind } from "@/db/schema";
 
 const submittedKinds = new Set<SourceKind>(["url", "copied_post", "pasted_text", "screenshot"]);
 const unsafeMetadataKey = /cookie|token|password|local_?storage|html|hidden|profile|provider|secret/i;
@@ -38,26 +38,65 @@ export function hashCaptureText(value: string) {
 }
 
 export function validateSafeCaptureMetadata(captureKind: SourceKind, value: SafeCaptureMetadata): Record<string, unknown> {
-  const metadata = value as Record<string, unknown>;
-  const allowed = value.kind === "submitted"
-    ? new Set(["kind", "fileName", "mimeType", "byteSize", "storageKey"])
-    : value.kind === "facebook_operator"
-      ? new Set(["kind", "captureMethod", "capturedAt", "sourceUrl", "finalUrl", "authorText", "groupName", "timestampText", "postCreatedAt", "captureOrigin", "captureArtifactId", "importCorrelationToken", "captureMethodVersion", "payloadSchemaVersion", "captureActorId", "importActorId"])
-      : new Set(["kind", "captureMethod", "capturedAt", "sourceUrl", "model", "mediaResolution", "promptVersion", "evidenceCount", "latencyMs", "videoDurationSeconds", "windowStartSeconds", "windowEndSeconds", "windowCount", "captureOrigin", "captureArtifactId", "importedAt", "importCorrelationToken", "payloadSchemaVersion", "importActorId", "promptTokens", "outputTokens", "totalTokens"]);
+  if (!isRecord(value) || !isSafeCaptureMetadataKind(value.kind)) {
+    throw new SourceCaptureValidationError("Capture metadata kind is invalid.");
+  }
 
+  const metadata = value;
+  const allowed = allowedMetadataKeys(metadata.kind);
   if (Object.keys(metadata).length > maxMetadataEntries || Object.keys(metadata).some((key) => !allowed.has(key) || key.length > maxMetadataKeyLength)) {
     throw new SourceCaptureValidationError("Capture metadata contains unsupported or unsafe fields.");
   }
-  if ((value.kind === "facebook_operator" && captureKind !== "facebook") || (value.kind === "youtube" && captureKind !== "youtube") || (value.kind === "submitted" && !submittedKinds.has(captureKind))) {
+  if ((metadata.kind === "facebook_operator" && captureKind !== "facebook") || (metadata.kind === "youtube" && captureKind !== "youtube") || (metadata.kind === "submitted" && !submittedKinds.has(captureKind))) {
     throw new SourceCaptureValidationError("Capture metadata does not match the source kind.");
   }
   for (const [key, item] of Object.entries(metadata)) {
     if (typeof item === "string" && (!item.trim() || item.length > maxMetadataValueLength || unsafeMetadataKey.test(item))) {
       throw new SourceCaptureValidationError(`Capture metadata field ${key} is unsafe.`);
     }
-    if (typeof item === "number" && (!Number.isFinite(item) || item < 0)) throw new SourceCaptureValidationError(`Capture metadata field ${key} is invalid.`);
+    if (typeof item === "number" && (!Number.isFinite(item) || item < 0 || !Number.isInteger(item))) throw new SourceCaptureValidationError(`Capture metadata field ${key} is invalid.`);
+    if (key !== "kind" && typeof item !== "string" && typeof item !== "number") throw new SourceCaptureValidationError(`Capture metadata field ${key} is invalid.`);
+  }
+
+  if (metadata.kind === "facebook_operator") {
+    if (metadata.captureMethod !== "playwright_operator_browser" || !isIsoInstant(metadata.capturedAt) || !isHttpUrl(metadata.sourceUrl) || !isHttpUrl(metadata.finalUrl)) {
+      throw new SourceCaptureValidationError("Facebook capture metadata is incomplete or invalid.");
+    }
+  }
+  if (metadata.kind === "youtube") {
+    if (metadata.captureMethod !== "gemini_youtube_url" || !isIsoInstant(metadata.capturedAt) || !isHttpUrl(metadata.sourceUrl) || !metadata.model || !metadata.promptVersion || !["MEDIA_RESOLUTION_LOW", "MEDIA_RESOLUTION_MEDIUM", "MEDIA_RESOLUTION_HIGH"].includes(metadata.mediaResolution) || typeof metadata.evidenceCount !== "number" || typeof metadata.latencyMs !== "number") {
+      throw new SourceCaptureValidationError("YouTube capture metadata is incomplete or invalid.");
+    }
   }
   return metadata;
+}
+
+function allowedMetadataKeys(kind: SafeCaptureMetadata["kind"]) {
+  if (kind === "submitted") return new Set(["kind", "fileName", "mimeType", "byteSize", "storageKey"]);
+  if (kind === "facebook_operator") return new Set(["kind", "captureMethod", "capturedAt", "sourceUrl", "finalUrl", "authorText", "groupName", "timestampText", "postCreatedAt", "captureOrigin", "captureArtifactId", "importCorrelationToken", "captureMethodVersion", "payloadSchemaVersion", "captureActorId", "importActorId"]);
+  return new Set(["kind", "captureMethod", "capturedAt", "sourceUrl", "model", "mediaResolution", "promptVersion", "evidenceCount", "latencyMs", "videoDurationSeconds", "windowStartSeconds", "windowEndSeconds", "windowCount", "captureOrigin", "captureArtifactId", "importedAt", "importCorrelationToken", "payloadSchemaVersion", "importActorId", "promptTokens", "outputTokens", "totalTokens"]);
+}
+
+function isSafeCaptureMetadataKind(value: unknown): value is SafeCaptureMetadata["kind"] {
+  return value === "submitted" || value === "facebook_operator" || value === "youtube";
+}
+
+function isIsoInstant(value: unknown) {
+  return typeof value === "string" && !Number.isNaN(Date.parse(value));
+}
+
+function isHttpUrl(value: unknown) {
+  if (typeof value !== "string") return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 export async function appendSourceCaptureVersion(
@@ -103,7 +142,12 @@ export async function retainExpiredFacebookCaptureVersions(
   const actorUserId = input.actorUserId.trim();
   const actorEmail = input.actorEmail.trim().toLowerCase();
   if (!actorUserId || !actorEmail) throw new SourceCaptureValidationError("Retention requires an authenticated actor ID and email.");
-  const [actor] = await db.select({ id: users.id }).from(users).where(and(eq(users.id, actorUserId), eq(users.email, actorEmail))).limit(1);
+  const [actor] = await db
+    .select({ id: users.id })
+    .from(users)
+    .innerJoin(userRoles, eq(userRoles.userId, users.id))
+    .where(and(eq(users.id, actorUserId), eq(users.email, actorEmail), inArray(userRoles.role, ["operator", "admin"])))
+    .limit(1);
   if (!actor) throw new SourceCaptureValidationError("Retention actor is not a matching existing user.");
 
   const cutoff = new Date(now.getTime() - retentionDays * 24 * 60 * 60 * 1000);
@@ -150,6 +194,8 @@ async function hasRetentionBlocker(db: Pick<ReturnType<typeof getDb>, "select">,
   if (review) return true;
   const [job] = await db.select({ id: knowledgeExtractionJobs.id }).from(knowledgeExtractionJobs).where(and(eq(knowledgeExtractionJobs.captureVersionId, versionId), inArray(knowledgeExtractionJobs.status, ["queued", "running"]))).limit(1);
   if (job) return true;
+  const [unknownJob] = await db.select({ id: knowledgeExtractionJobs.id }).from(knowledgeExtractionJobs).where(and(eq(knowledgeExtractionJobs.sourceId, sourceId), isNull(knowledgeExtractionJobs.captureVersionId), inArray(knowledgeExtractionJobs.status, ["queued", "running"]))).limit(1);
+  if (unknownJob) return true;
   const [unknown] = await db.select({ id: facebookCaptureReviews.id }).from(facebookCaptureReviews).where(and(eq(facebookCaptureReviews.sourceId, sourceId), isNull(facebookCaptureReviews.captureVersionId))).limit(1);
   return Boolean(unknown);
 }

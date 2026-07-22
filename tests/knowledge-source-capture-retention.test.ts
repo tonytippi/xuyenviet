@@ -1,8 +1,8 @@
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test } from "vitest";
 
-import { auditEvents, sourceCaptureVersions, sources, userRoles, users } from "@/db/schema";
-import { hashCaptureText, retainExpiredFacebookCaptureVersions } from "@/features/knowledge/source-captures";
+import { auditEvents, knowledgeExtractionJobs, sourceCaptureVersions, sources, userRoles, users } from "@/db/schema";
+import { hashCaptureText, retainExpiredFacebookCaptureVersions, validateSafeCaptureMetadata } from "@/features/knowledge/source-captures";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
 
@@ -38,5 +38,39 @@ describe("source capture retention", () => {
     await expect(retainExpiredFacebookCaptureVersions({ actorUserId: "operator", actorEmail: "wrong@example.com", dryRun: false, now }, testDb)).rejects.toThrow("matching existing user");
     await retainExpiredFacebookCaptureVersions({ actorUserId: "operator", actorEmail: "operator@example.com", dryRun: false, now }, testDb);
     await expect(retainExpiredFacebookCaptureVersions({ actorUserId: "operator", actorEmail: "operator@example.com", dryRun: false, now }, testDb)).resolves.toMatchObject({ tombstonedVersionIds: [] });
+  });
+
+  test("rejects traveler actors and blocks unbackfilled active jobs", async () => {
+    const now = new Date("2026-07-21T00:00:00.000Z");
+    await testDb.insert(users).values({ id: "traveler", email: "traveler@example.com" });
+    await testDb.insert(userRoles).values({ userId: "traveler", role: "traveler" });
+    await createCandidate("blocked", new Date("2026-01-22T00:00:00.000Z"));
+    await testDb.insert(knowledgeExtractionJobs).values({
+      sourceId: "blocked",
+      mode: "extract_only",
+      status: "queued",
+      createdByUserId: "operator",
+      createdByEmail: "operator@example.com",
+    });
+
+    await expect(retainExpiredFacebookCaptureVersions({ actorUserId: "traveler", actorEmail: "traveler@example.com", dryRun: false, now }, testDb)).rejects.toThrow("matching existing user");
+    await expect(retainExpiredFacebookCaptureVersions({ actorUserId: "operator", actorEmail: "operator@example.com", dryRun: false, now }, testDb)).resolves.toMatchObject({ blockedVersionIds: ["version-blocked"] });
+    await expect(testDb.select({ rawText: sourceCaptureVersions.rawText }).from(sourceCaptureVersions).where(eq(sourceCaptureVersions.id, "version-blocked"))).resolves.toEqual([{ rawText: "Operator-only capture" }]);
+  });
+
+  test("rejects unknown metadata kinds and nested metadata values", () => {
+    expect(() => validateSafeCaptureMetadata("youtube", { kind: "unknown" } as never)).toThrow("kind is invalid");
+    expect(() => validateSafeCaptureMetadata("youtube", {
+      kind: "youtube",
+      captureMethod: "gemini_youtube_url",
+      capturedAt: "2026-07-21T00:00:00.000Z",
+      sourceUrl: "https://youtube.com/watch?v=abc",
+      model: "gemini",
+      mediaResolution: "MEDIA_RESOLUTION_LOW",
+      promptVersion: "v1",
+      evidenceCount: 1,
+      latencyMs: 10,
+      captureArtifactId: { providerPayload: "secret" },
+    } as never)).toThrow("invalid");
   });
 });

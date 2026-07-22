@@ -114,7 +114,7 @@ describe("knowledge extraction worker jobs", () => {
 
   test("fails stale running jobs that have no attempts remaining", async () => {
     const review = await createCapturedFacebookReview("stale-max-attempt-job");
-    const [job] = await testDb.insert(knowledgeExtractionJobs).values({ sourceId: review.sourceId, facebookCaptureReviewId: review.id, mode: "extract_only", status: "running", attemptCount: 3, maxAttempts: 3, lockedAt: new Date("2026-07-14T00:00:00.000Z"), lockedBy: "dead-worker", startedAt: new Date("2026-07-14T00:00:00.000Z"), createdByUserId: "operator-user", createdByEmail: "operator-user@example.com" }).returning();
+    const [job] = await testDb.insert(knowledgeExtractionJobs).values({ sourceId: review.sourceId, facebookCaptureReviewId: review.id, captureVersionId: review.captureVersionId, mode: "extract_only", status: "running", attemptCount: 3, maxAttempts: 3, lockedAt: new Date("2026-07-14T00:00:00.000Z"), lockedBy: "dead-worker", startedAt: new Date("2026-07-14T00:00:00.000Z"), createdByUserId: "operator-user", createdByEmail: "operator-user@example.com" }).returning();
 
     await expect(recoverStaleKnowledgeExtractionJobs({ now: new Date("2026-07-14T00:20:00.000Z"), staleMs: 15 * 60_000 }, testDb)).resolves.toMatchObject({ recoveredCount: 0, failedCount: 1 });
     await expect(testDb.select().from(knowledgeExtractionJobs).where(eq(knowledgeExtractionJobs.id, job.id))).resolves.toMatchObject([{ status: "failed", lastErrorCode: "stale_max_attempts" }]);
@@ -235,7 +235,7 @@ describe("knowledge extraction worker jobs", () => {
     const review = await createCapturedFacebookReview("approve-retry-owned-drafts");
     const [draft] = await testDb.insert(knowledgeCards).values({ type: "route_note", title: "Owned draft", routeSegment: "Huế - Đà Nẵng", summary: "Thông tin cộng đồng cần duyệt trước khi dùng.", confidence: "community", freshnessSensitive: false, aiPromptVersion: "source_knowledge_draft_extraction_v1", createdByUserId: "operator-user" }).returning();
     await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: draft.id, sourceId: review.sourceId, supportLevel: "primary" });
-    const [job] = await testDb.insert(knowledgeExtractionJobs).values({ sourceId: review.sourceId, facebookCaptureReviewId: review.id, mode: "extract_and_approve_all", status: "running", attemptCount: 2, lockedAt: new Date(), lockedBy: "retry-worker", startedAt: new Date(), resultDraftIds: [draft.id], resultDraftCount: 1, createdByUserId: "operator-user", createdByEmail: "operator-user@example.com" }).returning();
+    const [job] = await testDb.insert(knowledgeExtractionJobs).values({ sourceId: review.sourceId, facebookCaptureReviewId: review.id, captureVersionId: review.captureVersionId, mode: "extract_and_approve_all", status: "running", attemptCount: 2, lockedAt: new Date(), lockedBy: "retry-worker", startedAt: new Date(), resultDraftIds: [draft.id], resultDraftCount: 1, createdByUserId: "operator-user", createdByEmail: "operator-user@example.com" }).returning();
 
     await expect(processKnowledgeExtractionJob(job.id, testDb)).resolves.toMatchObject({ status: "processed" });
     expect(fetch).not.toHaveBeenCalled();

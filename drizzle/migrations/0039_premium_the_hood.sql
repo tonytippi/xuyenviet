@@ -40,23 +40,41 @@ CREATE INDEX "facebook_capture_reviews_capture_version_id_idx" ON "facebook_capt
 --> statement-breakpoint
 CREATE INDEX "knowledge_extraction_jobs_capture_version_id_idx" ON "knowledge_extraction_jobs" ("capture_version_id");
 --> statement-breakpoint
--- Normalize exactly as the application does before calculating the immutable provenance hash.
+-- Normalize legacy text before hashing. Legacy metadata is deliberately omitted unless a
+-- future migration can map it through the same typed allowlist used for new captures.
 INSERT INTO "source_capture_versions" ("id", "source_id", "version_sequence", "capture_kind", "raw_text", "file_name", "mime_type", "byte_size", "storage_key", "raw_metadata", "content_hash", "captured_at", "created_at")
 SELECT
   md5('source-capture-version:' || material."id"),
   material."source_id",
   1,
   source."kind",
-  btrim(normalize(replace(replace(material."raw_text", E'\r\n', E'\n'), E'\r', E'\n'), NFC)),
+  regexp_replace(normalize(replace(replace(material."raw_text", E'\r\n', E'\n'), E'\r', E'\n'), NFC), '^[[:space:]]+|[[:space:]]+$', '', 'g'),
   material."file_name", material."mime_type", material."byte_size", material."storage_key",
-  CASE WHEN material."raw_metadata" IS NULL OR jsonb_typeof(material."raw_metadata") <> 'object' THEN NULL ELSE material."raw_metadata" END,
-  encode(digest(btrim(normalize(replace(replace(material."raw_text", E'\r\n', E'\n'), E'\r', E'\n'), NFC)), 'sha256'), 'hex'),
+  NULL,
+  encode(digest(regexp_replace(normalize(replace(replace(material."raw_text", E'\r\n', E'\n'), E'\r', E'\n'), NFC), '^[[:space:]]+|[[:space:]]+$', '', 'g'), 'sha256'), 'hex'),
   material."created_at", material."created_at"
 FROM "raw_source_material" material
 JOIN "sources" source ON source."id" = material."source_id"
 WHERE material."raw_text" IS NOT NULL
-  AND length(btrim(material."raw_text")) > 0
-  AND char_length(btrim(normalize(replace(replace(material."raw_text", E'\r\n', E'\n'), E'\r', E'\n'), NFC))) <= CASE WHEN source."kind" = 'youtube' THEN 120000 ELSE 20000 END;
+  AND length(regexp_replace(normalize(replace(replace(material."raw_text", E'\r\n', E'\n'), E'\r', E'\n'), NFC), '^[[:space:]]+|[[:space:]]+$', '', 'g')) > 0
+  AND char_length(regexp_replace(normalize(replace(replace(material."raw_text", E'\r\n', E'\n'), E'\r', E'\n'), NFC), '^[[:space:]]+|[[:space:]]+$', '', 'g')) <= CASE WHEN source."kind" = 'youtube' THEN 120000 ELSE 20000 END;
+--> statement-breakpoint
+DO $$
+DECLARE
+  skipped_count integer;
+BEGIN
+  SELECT count(*) INTO skipped_count
+  FROM "raw_source_material" material
+  JOIN "sources" source ON source."id" = material."source_id"
+  WHERE material."raw_text" IS NOT NULL
+    AND (
+      length(regexp_replace(normalize(replace(replace(material."raw_text", E'\r\n', E'\n'), E'\r', E'\n'), NFC), '^[[:space:]]+|[[:space:]]+$', '', 'g')) = 0
+      OR char_length(regexp_replace(normalize(replace(replace(material."raw_text", E'\r\n', E'\n'), E'\r', E'\n'), NFC), '^[[:space:]]+|[[:space:]]+$', '', 'g')) > CASE WHEN source."kind" = 'youtube' THEN 120000 ELSE 20000 END
+    );
+  IF skipped_count > 0 THEN
+    RAISE NOTICE 'source-capture migration skipped % unreadable or oversized legacy payload(s); affected sources have no current capture version.', skipped_count;
+  END IF;
+END $$;
 --> statement-breakpoint
 UPDATE "sources" source
 SET "current_capture_version_id" = version."id"

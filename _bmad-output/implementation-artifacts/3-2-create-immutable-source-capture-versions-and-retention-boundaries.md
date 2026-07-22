@@ -20,7 +20,7 @@ warnings:
 
 # Story 3.2: Create Immutable Source Capture Versions and Retention Boundaries
 
-Status: in-progress
+Status: done
 
 ## Story
 
@@ -124,6 +124,17 @@ so that AI decisions and evidence always point to exactly what was captured.
   - [x] Add focused retention tests for time boundary, dependency blockers, raw-content deletion, audit safety, dry run, and idempotency.
   - [x] Keep the existing tests that prove Story 3.1 search/indexing remains fail-closed.
   - [x] Add CRLF/NFC normalization, per-kind payload-limit, oversized legacy migration, same-source-FK, and terminal-review/job tombstone coverage.
+
+### Review Findings
+
+- [x] [Review][Patch] Sanitize legacy capture metadata during migration [drizzle/migrations/0039_premium_the_hood.sql:52]
+- [x] [Review][Patch] Enforce the discriminated safe-metadata schema at runtime [src/features/knowledge/source-captures.ts:40]
+- [x] [Review][Patch] Require an authorized operator or service actor for retention [src/features/knowledge/source-captures.ts:106]
+- [x] [Review][Patch] Block retention for unbackfilled active extraction jobs [src/features/knowledge/source-captures.ts:151]
+- [x] [Review][Patch] Fence Facebook extraction work to its exact capture version [src/features/knowledge/extraction-jobs.ts:200]
+- [x] [Review][Patch] Validate older drafts against the capture version that produced them [src/features/knowledge/review.ts:600]
+- [x] [Review][Patch] Make legacy text normalization match the capture contract [drizzle/migrations/0039_premium_the_hood.sql:50]
+- [x] [Review][Patch] Report and block oversized legacy payloads rather than silently skipping them [drizzle/migrations/0039_premium_the_hood.sql:57]
 
 ### Raw-material consumer inventory
 
@@ -307,3 +318,4 @@ gpu4ai/gpt-5.6-terra
 ### Change Log
 
 - 2026-07-21: Implemented immutable source capture versions, safe migration/backfill, exact-version compatibility reads, and server-only retention. Story remains in progress pending unrelated full-suite AI Ask failures.
+- 2026-07-22: Code review patches hardened metadata migration and validation, retention authorization/dependency checks, exact-version extraction fencing, legacy normalization/reporting, and recapture-safe raw leak detection.

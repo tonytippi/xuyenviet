@@ -200,7 +200,7 @@ export async function processKnowledgeExtractionJob(jobId: string, db = getDb())
         const result = await extractKnowledgeDraftsFromSourceAsActor(job.sourceId, actor, {
           captureVersionId: job.captureVersionId,
         resultJobId: job.id,
-        preProviderGuard: job.facebookCaptureReviewId ? ({ db: guardDb, sourceId }) => assertFacebookCaptureStillNeedsReview(guardDb, { reviewId: job.facebookCaptureReviewId as string, sourceId }) : undefined,
+        preProviderGuard: job.facebookCaptureReviewId ? ({ db: guardDb, sourceId, captureVersionId }) => assertFacebookCaptureStillNeedsReview(guardDb, { reviewId: job.facebookCaptureReviewId as string, sourceId, captureVersionId }) : undefined,
       });
 
       await db.update(knowledgeExtractionJobs).set({ resultDraftIds: result.draftIds, resultDraftCount: result.draftCount, updatedAt: new Date() }).where(eq(knowledgeExtractionJobs.id, job.id));
@@ -229,6 +229,10 @@ async function finalizeJobSuccess(
 ) {
   await db.transaction(async (transaction) => {
     await assertJobDraftIdsBelongToSource(transaction, job.sourceId, result.draftIds, result.draftCount);
+
+    if (job.facebookCaptureReviewId) {
+      await assertFacebookCaptureStillNeedsReview(transaction, { reviewId: job.facebookCaptureReviewId, sourceId: job.sourceId, captureVersionId: job.captureVersionId });
+    }
 
     if (job.mode === "extract_and_approve_all") {
       await approveKnowledgeDraftBatchForActorInTransaction(transaction, actor, result.draftIds);
@@ -301,8 +305,10 @@ async function handleJobFailure(job: typeof knowledgeExtractionJobs.$inferSelect
 
   if (!updated) return null;
 
-  if (job.facebookCaptureReviewId) {
-    await markFacebookCaptureReviewStatus(db, { reviewId: job.facebookCaptureReviewId, status: "extraction_failed", actor: { userId: job.createdByUserId, email: job.createdByEmail }, extractionError: `Extraction failed: ${safe.code}` }).catch(() => undefined);
+  if (job.facebookCaptureReviewId && job.captureVersionId) {
+    await assertFacebookCaptureStillNeedsReview(db, { reviewId: job.facebookCaptureReviewId, sourceId: job.sourceId, captureVersionId: job.captureVersionId })
+      .then(() => markFacebookCaptureReviewStatus(db, { reviewId: job.facebookCaptureReviewId as string, status: "extraction_failed", actor: { userId: job.createdByUserId, email: job.createdByEmail }, extractionError: `Extraction failed: ${safe.code}` }))
+      .catch(() => undefined);
   }
 
   return toJobFailureLog(job, safe, false, "failed");
@@ -316,11 +322,13 @@ export async function recoverStaleKnowledgeExtractionJobs(options: { now?: Date;
     .update(knowledgeExtractionJobs)
     .set({ status: "failed", finishedAt: now, lockedAt: null, lockedBy: null, lastErrorCode: "stale_max_attempts", lastErrorMessage: "Extraction failed: stale_max_attempts", updatedAt: now })
     .where(and(eq(knowledgeExtractionJobs.status, "running"), isNotNull(knowledgeExtractionJobs.lockedAt), lte(knowledgeExtractionJobs.lockedAt, staleBefore), sql`${knowledgeExtractionJobs.attemptCount} >= ${knowledgeExtractionJobs.maxAttempts}`))
-    .returning({ id: knowledgeExtractionJobs.id, sourceId: knowledgeExtractionJobs.sourceId, facebookCaptureReviewId: knowledgeExtractionJobs.facebookCaptureReviewId, mode: knowledgeExtractionJobs.mode, attemptCount: knowledgeExtractionJobs.attemptCount, maxAttempts: knowledgeExtractionJobs.maxAttempts, createdByUserId: knowledgeExtractionJobs.createdByUserId, createdByEmail: knowledgeExtractionJobs.createdByEmail });
+    .returning({ id: knowledgeExtractionJobs.id, sourceId: knowledgeExtractionJobs.sourceId, facebookCaptureReviewId: knowledgeExtractionJobs.facebookCaptureReviewId, captureVersionId: knowledgeExtractionJobs.captureVersionId, mode: knowledgeExtractionJobs.mode, attemptCount: knowledgeExtractionJobs.attemptCount, maxAttempts: knowledgeExtractionJobs.maxAttempts, createdByUserId: knowledgeExtractionJobs.createdByUserId, createdByEmail: knowledgeExtractionJobs.createdByEmail });
 
   for (const row of failedRows) {
-    if (row.facebookCaptureReviewId) {
-      await markFacebookCaptureReviewStatus(db, { reviewId: row.facebookCaptureReviewId, status: "extraction_failed", actor: { userId: row.createdByUserId, email: row.createdByEmail }, extractionError: "Extraction failed: stale_max_attempts" }).catch(() => undefined);
+    if (row.facebookCaptureReviewId && row.captureVersionId) {
+      await assertFacebookCaptureStillNeedsReview(db, { reviewId: row.facebookCaptureReviewId, sourceId: row.sourceId, captureVersionId: row.captureVersionId })
+        .then(() => markFacebookCaptureReviewStatus(db, { reviewId: row.facebookCaptureReviewId as string, status: "extraction_failed", actor: { userId: row.createdByUserId, email: row.createdByEmail }, extractionError: "Extraction failed: stale_max_attempts" }))
+        .catch(() => undefined);
     }
   }
 

@@ -193,7 +193,7 @@ describe("Facebook capture extraction action", () => {
 
     await expect(
       extractKnowledgeDraftsFromSource(review.sourceId, {
-        preProviderGuard: ({ db, sourceId }) => assertFacebookCaptureStillNeedsReview(db, { reviewId: review.id, sourceId }),
+        preProviderGuard: ({ db, sourceId, captureVersionId }) => assertFacebookCaptureStillNeedsReview(db, { reviewId: review.id, sourceId, captureVersionId }),
       }),
     ).rejects.toMatchObject({ name: "KnowledgeExtractionError", code: "capture_not_actionable" });
 
