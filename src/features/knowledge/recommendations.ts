@@ -51,11 +51,11 @@ export function shouldSampleKnowledgeCard(cardId: string, contentVersion: number
   return (hash >>> 0) % 100 < percent;
 }
 
-export async function scheduleKnowledgeRecommendation(input: { cardId: string; contentVersion: number; evidenceSetRevision: number; reason: KnowledgeRecommendationReason; priority?: number; policy?: "sample" | "verify_first"; now?: Date }, db: RecommendationDb | Transaction = getDb()) {
+export async function scheduleKnowledgeRecommendation(input: { cardId: string; contentVersion: number; evidenceSetRevision: number; reason: KnowledgeRecommendationReason; priority?: number; policy?: "sample" | "verify_first"; now?: Date; supersedeStaleBy?: RecommendationActor }, db: RecommendationDb | Transaction = getDb()) {
   return db.transaction((tx) => scheduleKnowledgeRecommendationInTransaction(input, tx));
 }
 
-async function scheduleKnowledgeRecommendationInTransaction(input: { cardId: string; contentVersion: number; evidenceSetRevision: number; reason: KnowledgeRecommendationReason; priority?: number; policy?: "sample" | "verify_first"; now?: Date }, db: Transaction) {
+async function scheduleKnowledgeRecommendationInTransaction(input: { cardId: string; contentVersion: number; evidenceSetRevision: number; reason: KnowledgeRecommendationReason; priority?: number; policy?: "sample" | "verify_first"; now?: Date; supersedeStaleBy?: RecommendationActor }, db: Transaction) {
   const now = input.now ?? new Date();
   let policyId: string | null = null;
   let policySnapshot: Record<string, unknown> = {};
@@ -82,6 +82,13 @@ async function scheduleKnowledgeRecommendationInTransaction(input: { cardId: str
     }
   }
   const priority = input.priority ?? priorityFor(input.reason);
+  if (input.supersedeStaleBy) {
+    await db.update(knowledgeRecommendations).set({ status: "superseded", resolution: "accepted", resolvedByUserId: input.supersedeStaleBy.userId, resolvedAt: now, updatedAt: now }).where(and(
+      eq(knowledgeRecommendations.knowledgeCardId, input.cardId),
+      sql`${knowledgeRecommendations.status} in ('open', 'in_review')`,
+      sql`(${knowledgeRecommendations.contentVersion}, ${knowledgeRecommendations.evidenceSetRevision}) <> (${input.contentVersion}, ${input.evidenceSetRevision})`,
+    ));
+  }
   if (input.policy === "sample") {
     const [policy] = await db.select({ windowStartsAt: knowledgeSamplingPolicies.windowStartsAt, samplingPercent: knowledgeSamplingPolicies.samplingPercent }).from(knowledgeSamplingPolicies).where(eq(knowledgeSamplingPolicies.id, policyId!)).limit(1);
     const [card] = await db.select({ id: knowledgeCards.id }).from(knowledgeCards).where(and(eq(knowledgeCards.id, input.cardId), eq(knowledgeCards.contentVersion, input.contentVersion), eq(knowledgeCards.evidenceSetRevision, input.evidenceSetRevision), eq(knowledgeCards.publicationState, "active"))).limit(1).for("update");
@@ -182,7 +189,7 @@ async function escalateSamplingCohort(tx: Transaction, policyId: string, actor: 
   await tx.insert(auditEvents).values({ actorUserId: actor.userId, actorEmail: actor.email, operation: "update", targetType: "knowledge_sampling_cohort", targetId: policy.id, afterSummary: "High-severity sampling failure suppressed only the affected cohort." });
 }
 
-async function lockSamplingPolicyBoundary(db: Transaction) {
+export async function lockSamplingPolicyBoundary(db: Transaction) {
   await db.execute(sql`select pg_advisory_xact_lock(hashtextextended('knowledge-sampling-policy-boundary', 47))`);
 }
 

@@ -82,6 +82,13 @@ Recommendations are operational history and queue state, not another knowledge a
 - `pnpm typecheck` -- expected: success.
 - `pnpm build` -- expected: success.
 
+### Review Findings
+
+- [x] [Review][Patch] Preserve judge-issued review recommendations [src/features/knowledge/ingestion-pipeline.ts:70]
+- [x] [Review][Patch] Supersede obsolete open recommendations after a card-version mutation [src/features/knowledge/recommendations.ts:94]
+- [x] [Review][Patch] Use one sampling-policy/card lock order [src/features/knowledge/recommendations.ts:113]
+- [x] [Review][Patch] Render every card state and usable queue pagination [src/app/admin/knowledge/recommendations/page.tsx:28]
+
 ## Review Triage Log
 
 ### 2026-07-22 - Review passes

@@ -44,6 +44,18 @@ describe("knowledge recommendation queue", () => {
     await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, "card"))).resolves.toMatchObject([{ contentVersion: 2, publicationState: "active" }]);
   });
 
+  test("supersedes earlier open work when scheduling a recommendation for a new version", async () => {
+    await scheduleKnowledgeRecommendation({ cardId: "card", contentVersion: 1, evidenceSetRevision: 1, reason: "weak_evidence" }, testDb);
+    await testDb.update(knowledgeCards).set({ contentVersion: 2 }).where(eq(knowledgeCards.id, "card"));
+
+    await scheduleKnowledgeRecommendation({ cardId: "card", contentVersion: 2, evidenceSetRevision: 1, reason: "sampling", supersedeStaleBy: { userId: "author", email: "author@example.com" } }, testDb);
+
+    await expect(testDb.select().from(knowledgeRecommendations).orderBy(knowledgeRecommendations.contentVersion)).resolves.toMatchObject([
+      { contentVersion: 1, status: "superseded", resolvedByUserId: "author" },
+      { contentVersion: 2, status: "open" },
+    ]);
+  });
+
   test("suppression resolves atomically, marks dirty, and disables the active projection", async () => {
     await scheduleKnowledgeRecommendation({ cardId: "card", contentVersion: 1, evidenceSetRevision: 1, reason: "risk" }, testDb);
     const [recommendation] = await testDb.select().from(knowledgeRecommendations);

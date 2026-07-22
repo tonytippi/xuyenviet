@@ -8,11 +8,12 @@ import { completeEvaluation, completeExtraction } from "@/features/ai/gateway";
 import { getAiGatewayPricingSnapshot, selectActiveAiGatewayModel, type SelectedAiGatewayModel } from "@/features/ai/models";
 import { buildKnowledgePipelineExtractionMessages, buildKnowledgePipelineJudgmentMessages, buildKnowledgePipelineRelationJudgmentMessages, knowledgePipelineExtractionPromptVersion, knowledgePipelineExtractionPurpose, knowledgePipelineJudgmentPromptVersion, knowledgePipelineJudgmentPurpose } from "@/features/ai/prompts";
 import { commitKnowledgeIngestionStage, retryKnowledgeIngestionStage, type KnowledgeIngestionCheckpoint, type KnowledgeIngestionClaim } from "@/features/knowledge/ingestion-jobs";
-import { scheduleKnowledgeRecommendation } from "@/features/knowledge/recommendations";
+import { lockSamplingPolicyBoundary, scheduleKnowledgeRecommendation } from "@/features/knowledge/recommendations";
 import { writeAiUsageEvent } from "@/features/usage/events";
 
 const systemActorId = "system-knowledge-pipeline";
 const systemActorEmail = "system-knowledge-pipeline@xuyenviet.invalid";
+const systemRecommendationActor = { userId: systemActorId, email: systemActorEmail };
 type PipelineDb = ReturnType<typeof getDb>;
 type Candidate = { type: (typeof knowledgeCardTypeValues)[number]; title: string; summary: string; locationName: string | null; routeSegment: string | null; conditions: string[]; freshnessSensitive: boolean; evidence: { quoteText: string; spanStart: number; spanEnd: number } };
 type Judgment = { decision: "publish" | "review_recommended" | "verify_first" | "suppress"; summary: string; relevance: number; extractability: number; evidenceGrounding: number; specificity: number; actionability: number; firstHandLikelihood: number; spamCommercialRisk: number };
@@ -67,6 +68,7 @@ export async function runKnowledgeIngestionPipeline(claim: KnowledgeIngestionCla
   }
   if (!judgment) return finish(claim, stage, stageVersion, "failed", "invalid_checkpoint", db);
   const outcome = decideOutcome(candidate, judgment);
+  if (outcome === "review_recommended") return retainCandidateForReview(claim, stageVersion, candidate, judgment, bundle, checkpoint.completedStage === "judging" ? checkpoint.candidate.modelId : checkpointForCandidate(candidate, extractionModel!).candidate.modelId, "weak_evidence", "judge_review_recommended", db);
   if (outcome !== "published" && outcome !== "verify_first") return finish(claim, stage, stageVersion, outcome, "policy_outcome", db);
   let relation: Relation | null = checkpoint.completedStage === "relating" ? checkpoint.relation : null;
   if (stage === "judging") {
@@ -125,6 +127,7 @@ async function loadRelatedCandidates(db: PipelineDb, candidate: Candidate) {
 }
 async function publish(claim: KnowledgeIngestionClaim, version: number, candidate: Candidate, judgment: Judgment, bundle: NonNullable<Awaited<ReturnType<typeof loadBundle>>>, extractionModelId: string, relation: Relation, db: PipelineDb): Promise<KnowledgeIngestionPipelineResult | null> {
   return db.transaction(async (tx) => {
+    await lockSamplingPolicyBoundary(tx);
     // Matches appendSourceCaptureVersion so current-capture validation and publish are atomic.
     await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${claim.sourceId}, 44))`);
     await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${identity(candidate)}, 45))`);
@@ -147,7 +150,7 @@ async function publish(claim: KnowledgeIngestionClaim, version: number, candidat
         if (attachedVersion) {
           await markIndexDirty(tx, target.id, attachedVersion, "ingestion_attach");
           if (promoted) await markIndexDirty(tx, target.id, attachedVersion, "ingestion_promotion");
-          await scheduleKnowledgeRecommendation({ cardId: target.id, contentVersion: attachedVersion.contentVersion, evidenceSetRevision: attachedVersion.evidenceSetRevision, reason: "sampling", policy: "sample" }, tx);
+           await scheduleKnowledgeRecommendation({ cardId: target.id, contentVersion: attachedVersion.contentVersion, evidenceSetRevision: attachedVersion.evidenceSetRevision, reason: "sampling", policy: "sample", supersedeStaleBy: systemRecommendationActor }, tx);
         }
        await tx.insert(auditEvents).values({ actorUserId: systemActorId, actorEmail: systemActorEmail, operation: "update", targetType: "knowledge_ingestion_evidence", targetId: target.id, afterSummary: "System pipeline attached independent supporting evidence." });
       return { jobId: claim.jobId, sourceId: claim.sourceId, outcome: "published", cardId: target.id };
@@ -159,7 +162,7 @@ async function publish(claim: KnowledgeIngestionClaim, version: number, candidat
         await tx.update(knowledgeCards).set({ publicationState: "suppressed", knowledgeState: "conflicted", reviewState: "ai_recommended", verificationState: isHighRisk(candidate) ? "required" : target.verificationState, needsReview: true, contentVersion: sql`${knowledgeCards.contentVersion} + 1`, updatedAt: new Date() }).where(eq(knowledgeCards.id, target.id));
         const [updated] = await tx.select({ contentVersion: knowledgeCards.contentVersion, evidenceSetRevision: knowledgeCards.evidenceSetRevision }).from(knowledgeCards).where(eq(knowledgeCards.id, target.id)).limit(1);
         if (updated) {
-          await scheduleKnowledgeRecommendation({ cardId: target.id, contentVersion: updated.contentVersion, evidenceSetRevision: updated.evidenceSetRevision, reason: "conflict" }, tx);
+          await scheduleKnowledgeRecommendation({ cardId: target.id, contentVersion: updated.contentVersion, evidenceSetRevision: updated.evidenceSetRevision, reason: "conflict", supersedeStaleBy: systemRecommendationActor }, tx);
           await invalidateConflictedProjection(tx, target.id, updated);
         }
       await tx.insert(auditEvents).values({ actorUserId: systemActorId, actorEmail: systemActorEmail, operation: "update", targetType: "knowledge_ingestion_conflict", targetId: target.id, afterSummary: "System pipeline suppressed a conflicted card for review." });
@@ -173,13 +176,14 @@ async function publish(claim: KnowledgeIngestionClaim, version: number, candidat
      const [cardVersion] = await tx.select({ contentVersion: knowledgeCards.contentVersion, evidenceSetRevision: knowledgeCards.evidenceSetRevision }).from(knowledgeCards).where(eq(knowledgeCards.id, card.id)).limit(1);
       if (cardVersion) {
         await markIndexDirty(tx, card.id, cardVersion, "ingestion_publication");
-        await scheduleKnowledgeRecommendation({ cardId: card.id, contentVersion: cardVersion.contentVersion, evidenceSetRevision: cardVersion.evidenceSetRevision, reason: "sampling", policy: "sample" }, tx);
+        await scheduleKnowledgeRecommendation({ cardId: card.id, contentVersion: cardVersion.contentVersion, evidenceSetRevision: cardVersion.evidenceSetRevision, reason: "sampling", policy: "sample", supersedeStaleBy: systemRecommendationActor }, tx);
       }
      return { jobId: claim.jobId, sourceId: claim.sourceId, outcome: "published", cardId: card.id };
   });
 }
 async function publishVerifyFirst(claim: KnowledgeIngestionClaim, version: number, candidate: Candidate, judgment: Judgment, bundle: NonNullable<Awaited<ReturnType<typeof loadBundle>>>, extractionModelId: string, relation: Relation, db: PipelineDb): Promise<KnowledgeIngestionPipelineResult | null> {
   return db.transaction(async (tx) => {
+    await lockSamplingPolicyBoundary(tx);
     await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${claim.sourceId}, 44))`);
     await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${identity(candidate)}, 45))`);
     const [current] = await tx.select({ id: sourceCaptureVersions.id }).from(sourceCaptureVersions).innerJoin(sources, eq(sources.id, sourceCaptureVersions.sourceId)).where(and(eq(sourceCaptureVersions.id, claim.captureVersionId), eq(sources.currentCaptureVersionId, claim.captureVersionId), isNull(sourceCaptureVersions.payloadDeletedAt))).limit(1).for("update");
@@ -198,7 +202,7 @@ async function publishVerifyFirst(claim: KnowledgeIngestionClaim, version: numbe
       if (!attachedVersion) return null;
       await markIndexDirty(tx, target.id, attachedVersion, "ingestion_attach");
       if (promoted) await markIndexDirty(tx, target.id, attachedVersion, "ingestion_promotion");
-      await scheduleKnowledgeRecommendation({ cardId: target.id, contentVersion: attachedVersion.contentVersion, evidenceSetRevision: attachedVersion.evidenceSetRevision, reason: "verification", policy: "verify_first", priority: 2 }, tx);
+      await scheduleKnowledgeRecommendation({ cardId: target.id, contentVersion: attachedVersion.contentVersion, evidenceSetRevision: attachedVersion.evidenceSetRevision, reason: "verification", policy: "verify_first", priority: 2, supersedeStaleBy: systemRecommendationActor }, tx);
       await tx.insert(auditEvents).values({ actorUserId: systemActorId, actorEmail: systemActorEmail, operation: "update", targetType: "knowledge_ingestion_verify_first_evidence", targetId: target.id, afterSummary: "System pipeline attached corroborating evidence to a suppressed verification-required card." });
       return { jobId: claim.jobId, sourceId: claim.sourceId, outcome: "verify_first", cardId: target.id };
     }
@@ -212,7 +216,7 @@ async function publishVerifyFirst(claim: KnowledgeIngestionClaim, version: numbe
       await tx.update(knowledgeCards).set({ publicationState: "suppressed", knowledgeState: "conflicted", reviewState: "ai_recommended", verificationState: "required", needsReview: true, contentVersion: sql`${knowledgeCards.contentVersion} + 1`, updatedAt: new Date() }).where(eq(knowledgeCards.id, target.id));
       const [updated] = await tx.select({ contentVersion: knowledgeCards.contentVersion, evidenceSetRevision: knowledgeCards.evidenceSetRevision }).from(knowledgeCards).where(eq(knowledgeCards.id, target.id)).limit(1);
       if (!updated) return null;
-      await scheduleKnowledgeRecommendation({ cardId: target.id, contentVersion: updated.contentVersion, evidenceSetRevision: updated.evidenceSetRevision, reason: "conflict" }, tx);
+      await scheduleKnowledgeRecommendation({ cardId: target.id, contentVersion: updated.contentVersion, evidenceSetRevision: updated.evidenceSetRevision, reason: "conflict", supersedeStaleBy: systemRecommendationActor }, tx);
       await invalidateConflictedProjection(tx, target.id, updated);
       await tx.insert(auditEvents).values({ actorUserId: systemActorId, actorEmail: systemActorEmail, operation: "update", targetType: "knowledge_ingestion_conflict", targetId: target.id, afterSummary: "System pipeline suppressed a conflicted high-risk card for required verification." });
       return { jobId: claim.jobId, sourceId: claim.sourceId, outcome: "review_recommended" };
@@ -225,13 +229,14 @@ async function publishVerifyFirst(claim: KnowledgeIngestionClaim, version: numbe
     const [versioned] = await tx.select({ contentVersion: knowledgeCards.contentVersion, evidenceSetRevision: knowledgeCards.evidenceSetRevision }).from(knowledgeCards).where(eq(knowledgeCards.id, card.id)).limit(1);
     if (!versioned) return null;
     await markIndexDirty(tx, card.id, versioned, "ingestion_verify_first");
-    await scheduleKnowledgeRecommendation({ cardId: card.id, contentVersion: versioned.contentVersion, evidenceSetRevision: versioned.evidenceSetRevision, reason: "verification", policy: "verify_first", priority: 2 }, tx);
+    await scheduleKnowledgeRecommendation({ cardId: card.id, contentVersion: versioned.contentVersion, evidenceSetRevision: versioned.evidenceSetRevision, reason: "verification", policy: "verify_first", priority: 2, supersedeStaleBy: systemRecommendationActor }, tx);
     await tx.insert(auditEvents).values({ actorUserId: systemActorId, actorEmail: systemActorEmail, operation: "create", targetType: "knowledge_ingestion_verify_first", targetId: card.id, afterSummary: "System pipeline retained a suppressed canonical card for required verification." });
     return { jobId: claim.jobId, sourceId: claim.sourceId, outcome: "verify_first", cardId: card.id };
   });
 }
-async function retainCandidateForReview(claim: KnowledgeIngestionClaim, version: number, candidate: Candidate, judgment: Judgment, bundle: NonNullable<Awaited<ReturnType<typeof loadBundle>>>, extractionModelId: string, reason: "relation" | "missing_context", code: string, db: PipelineDb): Promise<KnowledgeIngestionPipelineResult | null> {
+async function retainCandidateForReview(claim: KnowledgeIngestionClaim, version: number, candidate: Candidate, judgment: Judgment, bundle: NonNullable<Awaited<ReturnType<typeof loadBundle>>>, extractionModelId: string, reason: "relation" | "missing_context" | "weak_evidence", code: string, db: PipelineDb): Promise<KnowledgeIngestionPipelineResult | null> {
   return db.transaction(async (tx) => {
+    await lockSamplingPolicyBoundary(tx);
     await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${claim.sourceId}, 44))`);
     await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${identity(candidate)}, 45))`);
     const [current] = await tx.select({ id: sourceCaptureVersions.id }).from(sourceCaptureVersions).innerJoin(sources, eq(sources.id, sourceCaptureVersions.sourceId)).where(and(eq(sourceCaptureVersions.id, claim.captureVersionId), eq(sources.currentCaptureVersionId, claim.captureVersionId), isNull(sourceCaptureVersions.payloadDeletedAt))).limit(1).for("update");
@@ -242,7 +247,7 @@ async function retainCandidateForReview(claim: KnowledgeIngestionClaim, version:
     return persistCandidateForReview(claim, version, candidate, judgment, bundle, extractionModelId, reason, code, tx, "judging");
   });
 }
-async function persistCandidateForReview(claim: KnowledgeIngestionClaim, version: number, candidate: Candidate, judgment: Judgment, bundle: NonNullable<Awaited<ReturnType<typeof loadBundle>>>, extractionModelId: string, reason: "relation" | "missing_context", code: string, tx: Parameters<Parameters<PipelineDb["transaction"]>[0]>[0], expectedStage: "judging" | "relating" = "relating"): Promise<KnowledgeIngestionPipelineResult | null> {
+async function persistCandidateForReview(claim: KnowledgeIngestionClaim, version: number, candidate: Candidate, judgment: Judgment, bundle: NonNullable<Awaited<ReturnType<typeof loadBundle>>>, extractionModelId: string, reason: "relation" | "missing_context" | "weak_evidence", code: string, tx: Parameters<Parameters<PipelineDb["transaction"]>[0]>[0], expectedStage: "judging" | "relating" = "relating"): Promise<KnowledgeIngestionPipelineResult | null> {
   if (!await fence(claim, version, "review_recommended", code, tx, expectedStage)) return null;
   const verificationRequired = judgment.decision === "verify_first" || candidate.freshnessSensitive || isHighRisk(candidate);
   const [card] = await tx.insert(knowledgeCards).values({ type: candidate.type, title: candidate.title, summary: candidate.summary, locationName: candidate.locationName, routeSegment: candidate.routeSegment, conditions: candidate.conditions, freshnessSensitive: candidate.freshnessSensitive, confidence: bundle.source.sourceType === "community" ? "community" : "unverified", status: "approved", publicationState: "suppressed", knowledgeState: "uncertain", reviewState: "ai_recommended", verificationState: verificationRequired ? "required" : "not_required", needsReview: true, currentJudgeSummary: judgment.summary, aiPromptVersion: knowledgePipelineExtractionPromptVersion, aiGatewayModelId: extractionModelId, createdByUserId: systemActorId }).returning({ id: knowledgeCards.id });
@@ -251,8 +256,8 @@ async function persistCandidateForReview(claim: KnowledgeIngestionClaim, version
   const [versioned] = await tx.select({ contentVersion: knowledgeCards.contentVersion, evidenceSetRevision: knowledgeCards.evidenceSetRevision }).from(knowledgeCards).where(eq(knowledgeCards.id, card.id)).limit(1);
   if (!versioned) return null;
   await markIndexDirty(tx, card.id, versioned, "ingestion_relation_review");
-  await scheduleKnowledgeRecommendation({ cardId: card.id, contentVersion: versioned.contentVersion, evidenceSetRevision: versioned.evidenceSetRevision, reason }, tx);
-  await tx.insert(auditEvents).values({ actorUserId: systemActorId, actorEmail: systemActorEmail, operation: "create", targetType: "knowledge_ingestion_relation_review", targetId: card.id, afterSummary: `System pipeline retained a suppressed canonical card for ${verificationRequired ? "required verification and " : ""}${reason === "relation" ? "relation" : "missing-context"} review.` });
+  await scheduleKnowledgeRecommendation({ cardId: card.id, contentVersion: versioned.contentVersion, evidenceSetRevision: versioned.evidenceSetRevision, reason, supersedeStaleBy: systemRecommendationActor }, tx);
+  await tx.insert(auditEvents).values({ actorUserId: systemActorId, actorEmail: systemActorEmail, operation: "create", targetType: "knowledge_ingestion_relation_review", targetId: card.id, afterSummary: `System pipeline retained a suppressed canonical card for ${verificationRequired ? "required verification and " : ""}${reason === "relation" ? "relation" : reason === "weak_evidence" ? "weak-evidence" : "missing-context"} review.` });
   return { jobId: claim.jobId, sourceId: claim.sourceId, outcome: "review_recommended", cardId: card.id };
 }
 async function invalidateConflictedProjection(tx: Parameters<Parameters<PipelineDb["transaction"]>[0]>[0], cardId: string, version: { contentVersion: number; evidenceSetRevision: number }) {

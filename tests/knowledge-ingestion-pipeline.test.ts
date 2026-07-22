@@ -132,6 +132,16 @@ describe("knowledge ingestion pipeline", () => {
     await expect(testDb.select().from(knowledgeCards)).resolves.toHaveLength(0);
   });
 
+  test("retains a judge-requested review as a version-bound weak-evidence recommendation", async () => {
+    const rawText = "Đèo Hải Vân có điểm dừng ngắm cảnh an toàn vào ban ngày.";
+    const { claim } = await claimFor(rawText);
+    vi.mocked(fetch).mockResolvedValueOnce(extractionResponse(candidate(rawText))).mockResolvedValueOnce(judgmentResponse("review_recommended"));
+
+    await expect(runKnowledgeIngestionPipeline(claim, testDb)).resolves.toMatchObject({ outcome: "review_recommended", cardId: expect.any(String) });
+    await expect(testDb.select().from(knowledgeCards)).resolves.toMatchObject([{ publicationState: "suppressed", reviewState: "ai_recommended", needsReview: true }]);
+    await expect(testDb.select().from(knowledgeRecommendations)).resolves.toMatchObject([{ reason: "weak_evidence", status: "open", contentVersion: 1, evidenceSetRevision: 2 }]);
+  });
+
   test("retains high-risk facts as suppressed canonical cards with a version-bound verification recommendation", async () => {
     const rawText = "Trạm sạc tại Đà Nẵng đang hoạt động.";
     const { claim } = await claimFor(rawText);
