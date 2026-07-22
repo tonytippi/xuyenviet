@@ -39,6 +39,19 @@ describe("knowledge source removal", () => {
     await expect(removeKnowledgeSource({ sourceId: "removed-source", reason: "withdrawn", actor: { userId: "operator", email: "operator@example.com" } }, testDb)).resolves.toMatchObject({ status: "already_completed" });
   });
 
+  test("does not reactivate the disabled projection when indexing runs after source removal", async () => {
+    await source("reindexed-removed-source"); await card("reindexed-removed-card");
+    await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: "reindexed-removed-card", sourceId: "reindexed-removed-source", supportLevel: "primary" });
+    const capture = await seedSourceCaptureVersion({ sourceId: "reindexed-removed-source", captureKind: "url", rawText: "Bằng chứng cần được xóa khỏi index." });
+    await seedKnowledgeCardEvidence({ cardId: "reindexed-removed-card", sourceId: "reindexed-removed-source", captureVersionId: capture.id, quoteText: "Bằng chứng cần được xóa khỏi index." });
+    const { indexApprovedKnowledgeCard } = await import("@/features/knowledge/search");
+
+    await expect(indexApprovedKnowledgeCard("reindexed-removed-card")).resolves.toMatchObject({ indexed: true });
+    await removeKnowledgeSource({ sourceId: "reindexed-removed-source", reason: "removed", actor: { userId: "operator", email: "operator@example.com" } }, testDb);
+    await expect(indexApprovedKnowledgeCard("reindexed-removed-card")).resolves.toEqual({ cardId: "reindexed-removed-card", indexed: false });
+    await expect(testDb.select({ status: knowledgeCardSearchDocuments.status }).from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, "reindexed-removed-card"))).resolves.toEqual([{ status: "disabled" }]);
+  });
+
   test("keeps a card active when an eligible independent source still supports it", async () => {
     await source("removed-source"); await source("remaining-source"); await card("supported-card");
     await testDb.insert(knowledgeCardSources).values([{ knowledgeCardId: "supported-card", sourceId: "removed-source", supportLevel: "primary" }, { knowledgeCardId: "supported-card", sourceId: "remaining-source", supportLevel: "supporting" }]);

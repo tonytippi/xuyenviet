@@ -44,7 +44,14 @@ export async function indexApprovedKnowledgeCard(cardId: string) {
 
   const db = getDb();
   return db.transaction(async (transaction) => {
-    const eligibleCard = await loadEligibleApprovedCard(transaction, normalizedCardId);
+    let eligibleCard = await loadEligibleApprovedCard(transaction, normalizedCardId);
+
+    if (eligibleCard) {
+      for (const source of eligibleCard.sources.sort((left, right) => left.id.localeCompare(right.id))) {
+        await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${source.id}, 44))`);
+      }
+      eligibleCard = await loadEligibleApprovedCard(transaction, normalizedCardId);
+    }
 
     if (!eligibleCard) {
       await disableKnowledgeSearchDocument(normalizedCardId, "disabled", transaction);

@@ -107,54 +107,63 @@ export async function suggestKnowledgeFromSourceUrl(sourceId: string): Promise<K
   const candidates = await loadSafeCandidates(db);
 
   try {
-    const result = await db.transaction(async (transaction) => {
+    await db.transaction(async (transaction) => {
       await lockSourceSuggestion(transaction, sourceBundle.source.id);
       await assertEligibleSourceCapture(transaction, sourceBundle.source.id, sourceBundle.source.currentCaptureVersionId);
 
       if (await sourceAlreadyHasSuggestions(transaction, sourceBundle.source.id)) {
         throw new KnowledgeSuggestionError("Nguồn này đã có gợi ý cần xử lý. Vui lòng duyệt kết quả hiện có trước khi chạy lại.", "already_suggested");
       }
+    });
 
-      const gatewayResult = await completeExtraction({
-        model: model.gatewayModelName,
-        messages: buildSourceKnowledgeSuggestionMessages({
-          source: {
-            kind: sourceBundle.source.kind,
-            label: sourceBundle.source.label,
-            publisher: sourceBundle.source.publisher,
-            collectedDate: sourceBundle.source.collectedDate,
-            sourceType: sourceBundle.source.sourceType,
-            verificationStatus: sourceBundle.source.verificationStatus,
-            official: sourceBundle.source.official,
-            partner: sourceBundle.source.partner,
-            canonicalUrl: sourceBundle.source.canonicalUrl,
-          },
-          rawText,
-          candidates,
-        }),
-      });
+    const gatewayResult = await completeExtraction({
+      model: model.gatewayModelName,
+      messages: buildSourceKnowledgeSuggestionMessages({
+        source: {
+          kind: sourceBundle.source.kind,
+          label: sourceBundle.source.label,
+          publisher: sourceBundle.source.publisher,
+          collectedDate: sourceBundle.source.collectedDate,
+          sourceType: sourceBundle.source.sourceType,
+          verificationStatus: sourceBundle.source.verificationStatus,
+          official: sourceBundle.source.official,
+          partner: sourceBundle.source.partner,
+          canonicalUrl: sourceBundle.source.canonicalUrl,
+        },
+        rawText,
+        candidates,
+      }),
+    });
 
-      if (!gatewayResult.ok) {
-        providerUsage = { status: "failure" as const, provider: gatewayResult.provider ?? "unknown", model: gatewayResult.model ?? model.gatewayModelName, latencyMs: gatewayResult.latencyMs, errorCode: gatewayResult.errorCode };
-        throw new KnowledgeSuggestionError("AI chưa tạo được gợi ý từ URL này. Vui lòng thử lại sau.", "provider_failed");
-      }
+    if (!gatewayResult.ok) {
+      providerUsage = { status: "failure" as const, provider: gatewayResult.provider ?? "unknown", model: gatewayResult.model ?? model.gatewayModelName, latencyMs: gatewayResult.latencyMs, errorCode: gatewayResult.errorCode };
+      throw new KnowledgeSuggestionError("AI chưa tạo được gợi ý từ URL này. Vui lòng thử lại sau.", "provider_failed");
+    }
 
-      providerUsage = {
-        status: "success",
-        provider: gatewayResult.provider,
-        model: gatewayResult.model,
-        latencyMs: gatewayResult.latencyMs,
-        promptTokens: gatewayResult.usage.promptTokens,
-        completionTokens: gatewayResult.usage.completionTokens,
-        totalTokens: gatewayResult.usage.totalTokens,
-        cachedPromptTokens: gatewayResult.usage.cachedPromptTokens,
-        cacheWritePromptTokens: gatewayResult.usage.cacheWritePromptTokens,
-      };
+    providerUsage = {
+      status: "success",
+      provider: gatewayResult.provider,
+      model: gatewayResult.model,
+      latencyMs: gatewayResult.latencyMs,
+      promptTokens: gatewayResult.usage.promptTokens,
+      completionTokens: gatewayResult.usage.completionTokens,
+      totalTokens: gatewayResult.usage.totalTokens,
+      cachedPromptTokens: gatewayResult.usage.cachedPromptTokens,
+      cacheWritePromptTokens: gatewayResult.usage.cacheWritePromptTokens,
+    };
 
-      const suggestions = parseSuggestions(gatewayResult.content, sourceBundle.source, rawLeakCorpus, candidates.map((candidate) => candidate.id));
+    const suggestions = parseSuggestions(gatewayResult.content, sourceBundle.source, rawLeakCorpus, candidates.map((candidate) => candidate.id));
 
-      if (suggestions.length === 0) {
-        throw new KnowledgeSuggestionError("AI không trả về gợi ý hợp lệ cho nguồn URL này.", "invalid_model_output");
+    if (suggestions.length === 0) {
+      throw new KnowledgeSuggestionError("AI không trả về gợi ý hợp lệ cho nguồn URL này.", "invalid_model_output");
+    }
+
+    const result = await db.transaction(async (transaction) => {
+      await lockSourceSuggestion(transaction, sourceBundle.source.id);
+      await assertEligibleSourceCapture(transaction, sourceBundle.source.id, sourceBundle.source.currentCaptureVersionId);
+
+      if (await sourceAlreadyHasSuggestions(transaction, sourceBundle.source.id)) {
+        throw new KnowledgeSuggestionError("Nguồn này đã có gợi ý cần xử lý. Vui lòng duyệt kết quả hiện có trước khi chạy lại.", "already_suggested");
       }
 
       const draftIds: string[] = [];

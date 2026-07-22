@@ -113,7 +113,7 @@ export async function extractKnowledgeDraftsFromSourceAsActor(sourceId: string, 
   }
 
   try {
-    const gatewayResult = await db.transaction(async (transaction) => {
+    await db.transaction(async (transaction) => {
       await lockSourceExtraction(transaction, sourceBundle.source.id);
       await assertEligibleSourceCapture(transaction, sourceBundle.source.id, options.captureVersionId ?? sourceBundle.source.currentCaptureVersionId);
 
@@ -122,22 +122,23 @@ export async function extractKnowledgeDraftsFromSourceAsActor(sourceId: string, 
       }
 
       await options.preProviderGuard?.({ db: transaction, sourceId: sourceBundle.source.id, captureVersionId: options.captureVersionId ?? sourceBundle.source.currentCaptureVersionId });
-      return completeExtraction({
-        model: model.gatewayModelName,
-        messages: buildSourceKnowledgeDraftExtractionMessages({
-          source: {
-            kind: sourceBundle.source.kind,
-            label: sourceBundle.source.label,
-            publisher: sourceBundle.source.publisher,
-            collectedDate: sourceBundle.source.collectedDate,
-            sourceType: sourceBundle.source.sourceType,
-            verificationStatus: sourceBundle.source.verificationStatus,
-            official: sourceBundle.source.official,
-            partner: sourceBundle.source.partner,
-          },
-          rawText,
-        }),
-      });
+    });
+
+    const gatewayResult = await completeExtraction({
+      model: model.gatewayModelName,
+      messages: buildSourceKnowledgeDraftExtractionMessages({
+        source: {
+          kind: sourceBundle.source.kind,
+          label: sourceBundle.source.label,
+          publisher: sourceBundle.source.publisher,
+          collectedDate: sourceBundle.source.collectedDate,
+          sourceType: sourceBundle.source.sourceType,
+          verificationStatus: sourceBundle.source.verificationStatus,
+          official: sourceBundle.source.official,
+          partner: sourceBundle.source.partner,
+        },
+        rawText,
+      }),
     });
 
     if (!gatewayResult.ok) {

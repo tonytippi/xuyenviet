@@ -1,7 +1,8 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { auditEvents, knowledgeCards, knowledgeCardSources, sources, userRoles, users, type KnowledgeConfidence, type UserRole } from "@/db/schema";
+import { removeKnowledgeSource } from "@/features/knowledge/source-removal";
 
 import { testDb } from "./helpers/db";
 import { seedSourceCaptureVersion } from "./helpers/source-captures";
@@ -209,6 +210,18 @@ describe("knowledge draft review", () => {
     expect(audits[0]?.afterSummary).toContain("retrieval remains blocked until bounded evidence exists");
     expect(JSON.stringify(audits)).not.toContain("0901234567");
     expect(JSON.stringify(audits)).not.toContain("hidden-provider-data");
+  });
+
+  test("approve rejects a draft after its linked source becomes ineligible", async () => {
+    await createUser("removed-source-approve-operator", ["operator"]);
+    authMock.mockResolvedValue({ user: { id: "removed-source-approve-operator", email: "removed-source-approve-operator@example.com" } });
+    const { draft, source } = await createDraft("removed-source-approve-operator");
+    await removeKnowledgeSource({ sourceId: source.id, reason: "withdrawn", actor: { userId: "removed-source-approve-operator", email: "removed-source-approve-operator@example.com" } }, testDb);
+    const { approveKnowledgeDraft } = await import("@/features/knowledge/review");
+
+    await expect(approveKnowledgeDraft(draft.id)).rejects.toMatchObject({ code: "not_reviewable" });
+    await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, draft.id))).resolves.toMatchObject([{ status: "draft", needsReview: true }]);
+    await expect(testDb.select().from(auditEvents).where(and(eq(auditEvents.targetId, draft.id), eq(auditEvents.operation, "approve")))).resolves.toHaveLength(0);
   });
 
   test("review accepts and approves 32 ordered stops without changing their order", async () => {

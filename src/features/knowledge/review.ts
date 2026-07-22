@@ -39,7 +39,7 @@ const sensitiveTokenPattern = /(provider[_-]?payload|storage[_-]?key|raw[_-]?met
 const targetKnowledgeCards = alias(knowledgeCards, "target_card");
 
 type ReviewDb = ReturnType<typeof getDb>;
-type ReviewMutationDb = Pick<ReviewDb, "select" | "update" | "insert">;
+type ReviewMutationDb = Pick<ReviewDb, "select" | "update" | "insert" | "execute">;
 
 export type KnowledgeDraftReviewSource = Pick<
   typeof sources.$inferSelect,
@@ -470,6 +470,10 @@ async function approveKnowledgeDraftInTransaction(
   expectedUpdatedAt?: string | null,
 ): Promise<KnowledgeDraftReviewResult> {
   const draft = await loadReviewableDraft(transaction, normalizedDraftId);
+  for (const source of draft.sources.sort((left, right) => left.id.localeCompare(right.id))) {
+    await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${source.id}, 44))`);
+  }
+  await assertEligibleDraftSources(transaction, draft.sources.map((source) => source.id));
   assertApprovalVersionCurrent(draft.card, expectedUpdatedAt);
   assertApprovalReady(draft.card);
   const rawLeakCorpus = await loadRawLeakCorpusForSources(transaction, draft.sources.map((source) => source.id));
@@ -520,6 +524,19 @@ async function approveKnowledgeDraftInTransaction(
   );
 
   return { draftId: normalizedDraftId };
+}
+
+async function assertEligibleDraftSources(db: Pick<ReviewDb, "select">, sourceIds: string[]) {
+  const [eligible] = await db
+    .select({ id: sources.id })
+    .from(sources)
+    .innerJoin(sourceCaptureVersions, and(eq(sourceCaptureVersions.sourceId, sources.id), isNull(sourceCaptureVersions.payloadDeletedAt)))
+    .where(and(inArray(sources.id, sourceIds), eq(sources.eligibility, "eligible")))
+    .limit(1);
+
+  if (!eligible) {
+    throw new KnowledgeDraftReviewError("Bản nháp không còn nguồn đủ điều kiện để phê duyệt.", "not_reviewable");
+  }
 }
 
 function assertApprovalVersionCurrent(card: Pick<KnowledgeDraftReviewCard, "updatedAt">, expectedUpdatedAt?: string | null) {

@@ -61,6 +61,12 @@ warnings: [oversized]
 - [x] `src/features/knowledge/actions.ts` and `src/app/admin/knowledge/*` -- add protected, Vietnamese-first source removal controls and safe completed/already-completed feedback.
 - [x] `tests/knowledge-source-removal.test.ts` and related knowledge tests -- prove source reasons, one/multi-source support, downgrade/suppression, idempotency, concurrent publication/resolution safety, retention, privacy, and immediate retrieval exclusion.
 
+### Review Findings
+
+- [x] [Review][Patch] Do not hold the source-removal lock over external provider calls [src/features/knowledge/extraction.ts:116; src/features/knowledge/suggestions.ts:110]
+- [x] [Review][Patch] Revalidate source eligibility in the standard draft-approval flow [src/features/knowledge/review.ts:466]
+- [x] [Review][Patch] Prevent a concurrent indexer from reactivating a stale projection after source removal [src/features/knowledge/search.ts:46]
+
 **Acceptance Criteria:**
 - Given Knowledge changes publication, knowledge, review, verification, evidence, or source eligibility, when its owning command commits, then it atomically updates the card state, applicable version, safe audit, and dirty marker; suppression, archival, superseding, high-risk conflict, and source withdrawal disable active projection in that transaction.
 - Given a source is withdrawn, inaccessible, or removed, when its retryable command runs, then it locks dependent evidence/cards, removes traveler evidence, re-evaluates remaining support, downgrades or suppresses cards before hiding payloads, and resumes harmlessly after retry.
@@ -92,6 +98,12 @@ The source is retained as a provenance tombstone rather than deleted because cap
   - `[medium]` `[patch]` Included linked cards without active evidence, downgraded under-supported community patterns, and serialized stale recommendation supersession during removal.
   - `[medium]` `[patch]` Bound legacy extraction, suggestion, and draft-approval mutations to source eligibility and capture availability, preventing removed-source drafts from being persisted or reactivated.
   - `[medium]` `[defer]` Provider dispatch can still receive a capture already loaded before concurrent removal; durable final publication/attachment/retrieval remains fail-closed. A lease-based coordination design is recorded in `deferred-work.md` because holding the transaction advisory lock across provider calls deadlocks established recapture/fencing paths.
+
+### 2026-07-23 - Follow-up review fixes
+- Moved legacy extraction and suggestion provider calls outside source-locked transactions while retaining preflight and final persisted eligibility checks.
+- Bound the standard legacy draft-approval path to the same source lock and eligible retained-capture check as batch approval.
+- Serialized indexing with source removal by locking eligible sources in deterministic order and reloading card eligibility before activating a projection.
+- Verification passed: focused serialized Knowledge suite (107 tests), `pnpm typecheck`, `pnpm lint`, `pnpm build`, and `git diff --check`.
 
 ## Auto Run Result
 
