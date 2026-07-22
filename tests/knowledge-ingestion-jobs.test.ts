@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 import { beforeEach, describe, expect, test } from "vitest";
 
 import { knowledgeIngestionJobs, sourceCaptureVersions, sources, users } from "@/db/schema";
-import { claimNextKnowledgeIngestionJob, commitKnowledgeIngestionStage, ensureIngestionJobForCaptureVersion, listKnowledgeIngestionJobStatuses, recoverKnowledgeIngestionJobs } from "@/features/knowledge/ingestion-jobs";
+import { claimNextKnowledgeIngestionJob, commitKnowledgeIngestionStage, ensureIngestionJobForCaptureVersion, listKnowledgeIngestionJobStatuses, recoverKnowledgeIngestionJobs, retryKnowledgeIngestionStage } from "@/features/knowledge/ingestion-jobs";
 import { appendSourceCaptureVersion, hashCaptureText } from "@/features/knowledge/source-captures";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
@@ -194,7 +194,7 @@ describe("canonical knowledge ingestion jobs", () => {
     await expect(recoverKnowledgeIngestionJobs(testDb, expiredAt)).resolves.toMatchObject({ recovered: 1 });
     const second = await claimNextKnowledgeIngestionJob({ workerId: "new-worker", now: expiredAt }, testDb);
     expect(second).toMatchObject({ stage: "triaging", checkpoint: { completedStage: "triaging" } });
-    await expect(commitKnowledgeIngestionStage({ jobId: first.jobId, expectedStage: "triaging", expectedStageVersion: 2, fencingToken: first.fencingToken, nextStage: "extracting", checkpoint: { version: 1, completedStage: "extracting", candidate: { type: "place", title: "Title", summary: "Summary", locationName: "Place", routeSegment: null, conditions: [], freshnessSensitive: false, spanStart: 0, spanEnd: 1, modelId: "extract", promptVersion: "v1" } }, now: expiredAt }, testDb)).resolves.toBeNull();
+    await expect(commitKnowledgeIngestionStage({ jobId: first.jobId, expectedStage: "triaging", expectedStageVersion: 2, fencingToken: first.fencingToken, nextStage: "extracting", checkpoint: { version: 1, completedStage: "extracting", candidate: { type: "place", title: "Title", summary: "Summary", locationName: "Place", routeSegment: null, conditions: [], freshnessSensitive: false, spanStart: 0, spanEnd: 1, modelId: "extract", modelGatewayName: "extract-model", promptVersion: "v1" } }, now: expiredAt }, testDb)).resolves.toBeNull();
   });
 
   test("clears checkpoints for terminal and exhausted jobs without exposing them in status", async () => {
@@ -205,5 +205,39 @@ describe("canonical knowledge ingestion jobs", () => {
     await commitKnowledgeIngestionStage({ jobId: claim.jobId, expectedStage: "queued", expectedStageVersion: 1, fencingToken: claim.fencingToken, nextStage: "suppressed", now: new Date(Date.now() + 2_000) }, testDb);
     await expect(testDb.select({ checkpoint: knowledgeIngestionJobs.checkpoint }).from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.captureVersionId, capture.id))).resolves.toEqual([{ checkpoint: null }]);
     expect(JSON.stringify(await listKnowledgeIngestionJobStatuses(testDb))).not.toContain("RAW_CAPTURE_MARKER");
+  });
+
+  test("rejects protected or unknown checkpoint fields and terminalizes an exhausted retry with a new version", async () => {
+    await createSource("checkpoint-validation");
+    await appendReadableCapture("checkpoint-validation");
+    const claim = await claimNextKnowledgeIngestionJob({ workerId: "worker", now: new Date(Date.now() + 1_000) }, testDb);
+    if (!claim) throw new Error("expected claim");
+    const candidate = { type: "place" as const, title: "Title", summary: "Summary", locationName: "Place", routeSegment: null, conditions: [], freshnessSensitive: false, spanStart: 0, spanEnd: 1, modelId: "extract", modelGatewayName: "extract-model", promptVersion: "v1", providerPayload: "secret" };
+    await expect(commitKnowledgeIngestionStage({ jobId: claim.jobId, expectedStage: "queued", expectedStageVersion: 1, fencingToken: claim.fencingToken, nextStage: "triaging", checkpoint: { version: 1, completedStage: "triaging", passed: true, candidate } as never }, testDb)).rejects.toThrow("Checkpoint is invalid");
+    await testDb.update(knowledgeIngestionJobs).set({ attemptCount: 3 }).where(eq(knowledgeIngestionJobs.id, claim.jobId));
+    await expect(retryKnowledgeIngestionStage({ jobId: claim.jobId, expectedStage: "queued", expectedStageVersion: 1, fencingToken: claim.fencingToken, errorCode: "provider_failed" }, testDb)).resolves.toMatchObject({ stage: "failed", stageVersion: 2, checkpoint: null, lastErrorCode: "retry_exhausted" });
+  });
+
+  test("rejects PII in durable judgment and relation checkpoint summaries", async () => {
+    await createSource("checkpoint-pii");
+    await appendReadableCapture("checkpoint-pii");
+    const claim = await claimNextKnowledgeIngestionJob({ workerId: "worker", now: new Date(Date.now() + 1_000) }, testDb);
+    if (!claim) throw new Error("expected claim");
+    const candidate = { type: "place" as const, title: "Title", summary: "Summary", locationName: "Place", routeSegment: null, conditions: [], freshnessSensitive: false, spanStart: 0, spanEnd: 1, modelId: "extract", modelGatewayName: "extract-model", promptVersion: "v1" };
+    const checkpoint = { version: 1 as const, completedStage: "judging" as const, candidate, judgment: { decision: "publish" as const, summary: "Liên hệ person@example.com", relevance: .9, extractability: .9, evidenceGrounding: .9, specificity: .9, actionability: .9, firstHandLikelihood: .9, spamCommercialRisk: .1 } };
+    await expect(commitKnowledgeIngestionStage({ jobId: claim.jobId, expectedStage: "queued", expectedStageVersion: 1, fencingToken: claim.fencingToken, nextStage: "suppressed", checkpoint }, testDb)).rejects.toThrow("Checkpoint is invalid");
+  });
+
+  test("migration 0045 clears unrecoverable staged jobs while preserving queued jobs", async () => {
+    const migration = readFileSync(resolve(process.cwd(), "drizzle/migrations/0045_recover_knowledge_ingestion_jobs.sql"), "utf8");
+    const schemaName = `migration_0045_${randomUUID().replaceAll("-", "")}`;
+    await testDb.transaction(async (transaction) => {
+      await transaction.execute(sql.raw(`create schema "${schemaName}"`));
+      await transaction.execute(sql.raw(`create table "${schemaName}"."knowledge_ingestion_jobs" (id text primary key, stage text not null, stage_version integer not null, last_error_code text, requeue_reason_code text, claimed_by text, claimed_at timestamp, lease_expires_at timestamp, fencing_token text, updated_at timestamp)`));
+      await transaction.execute(sql.raw(`insert into "${schemaName}"."knowledge_ingestion_jobs" (id, stage, stage_version, claimed_by, claimed_at, lease_expires_at, fencing_token) values ('staged', 'extracting', 2, 'worker', now(), now() + interval '1 minute', '${"a".repeat(64)}'), ('queued', 'queued', 1, null, null, null, null)`));
+      await transaction.execute(sql.raw(`set local search_path to "${schemaName}"`));
+      for (const statement of migration.split("--> statement-breakpoint").map((part) => part.trim()).filter(Boolean)) await transaction.execute(sql.raw(statement));
+      await expect(transaction.execute(sql.raw(`select id, stage, stage_version, checkpoint, claimed_by from "${schemaName}"."knowledge_ingestion_jobs" order by id`))).resolves.toEqual([{ id: "queued", stage: "queued", stage_version: 1, checkpoint: null, claimed_by: null }, { id: "staged", stage: "failed", stage_version: 3, checkpoint: null, claimed_by: null }]);
+    });
   });
 });

@@ -56,6 +56,14 @@ warnings: []
 - [x] `src/features/knowledge/ingestion-worker.ts` and `scripts/knowledge-ingestion-worker.ts` -- recover expired canonical claims before selecting one due nonterminal job and process its actual stage/version -- worker output remains safe and does not serialize checkpoints.
 - [x] `tests/knowledge-ingestion-jobs.test.ts`, `tests/knowledge-ingestion-pipeline.test.ts`, and `tests/knowledge-source-capture-retention.test.ts` -- cover recovery fencing, retry exhaustion, terminal immutability, no-repeat stage/provider behavior, terminal checkpoint deletion, checkpoint privacy/validation, migration behavior, and capture retention -- prove recovery cannot create stale publication.
 
+### Review Findings
+
+- [x] [Review][Patch] Resumed extraction checkpoints can use the same gateway model for judgment [src/features/knowledge/ingestion-pipeline.ts:57]
+- [x] [Review][Patch] Checkpoint validation persists unknown nested fields [src/features/knowledge/ingestion-jobs.ts:81]
+- [x] [Review][Patch] Judgment and relation summaries can retain PII in checkpoints [src/features/knowledge/ingestion-jobs.ts:109]
+- [x] [Review][Patch] Retry exhaustion does not increment stage version [src/features/knowledge/ingestion-jobs.ts:89]
+- [x] [Review][Patch] Recovery contract lacks required focused tests [tests/knowledge-ingestion-jobs.test.ts:186]
+
 **Acceptance Criteria:**
 - Given a stage succeeds and advances a nonterminal job, when its fenced transition commits, then it atomically stores only the corresponding bounded, schema-validated checkpoint and increments stage version.
 - Given a worker lease expires or a retryable stage failure is scheduled, when recovery runs, then the job remains at its failed executable stage with valid prior checkpoints, gets a new fence when claimed, and never re-executes a completed provider stage.
@@ -98,3 +106,10 @@ Verification passed: focused ingestion and retention tests (46 tests), `pnpm lin
   - `[medium]` `[patch]` Made the final retry attempt transition to `failed` atomically instead of waiting for a later recovery run.
   - `[medium]` `[patch]` Preserved the extraction checkpoint's model identity when a resumed judgment stage succeeds.
   - `[high]` `[patch]` Skipped evaluation-model selection when resuming an already checkpointed relation stage directly to publication.
+
+### 2026-07-22 - Follow-up review fixes
+- Preserved the extraction gateway model name in bounded checkpoints and enforce same-gateway rejection after recovery.
+- Persisted only normalized, allowlisted checkpoint values and reject PII-bearing judgment or relation summaries.
+- Incremented the stage version when retry exhaustion terminalizes a job.
+- Added focused retry exhaustion, checkpoint privacy/validation, resumed-model-independence, and `0045` migration coverage.
+- Verification passed: focused ingestion and retention tests (50 tests), `pnpm lint`, `pnpm typecheck`, and `pnpm build`.
