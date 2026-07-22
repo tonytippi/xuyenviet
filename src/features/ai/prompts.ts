@@ -8,6 +8,10 @@ export const sourceKnowledgeDraftExtractionPurpose = aiUsagePurposes.extraction;
 export const sourceKnowledgeDraftExtractionPromptVersion = aiUsagePromptVersions.sourceKnowledgeDraftExtraction;
 export const sourceKnowledgeSuggestionPurpose = aiUsagePurposes.extraction;
 export const sourceKnowledgeSuggestionPromptVersion = aiUsagePromptVersions.sourceKnowledgeSuggestion;
+export const knowledgePipelineExtractionPurpose = aiUsagePurposes.extraction;
+export const knowledgePipelineExtractionPromptVersion = aiUsagePromptVersions.knowledgePipelineExtraction;
+export const knowledgePipelineJudgmentPurpose = aiUsagePurposes.evaluation;
+export const knowledgePipelineJudgmentPromptVersion = aiUsagePromptVersions.knowledgePipelineJudgment;
 
 type PromptHistoryMessage = {
   role: "user" | "assistant";
@@ -74,6 +78,26 @@ const sourceKnowledgeSuggestionSystemPrompt = [
   "Allowed confidence labels: unverified, community, curated, partner, official. Community/unverified sources must not be upgraded beyond their source metadata.",
   "Use duplicate when the source adds no meaningful new facts to an existing card. Use no_action when it has no useful road-trip knowledge.",
   "Never approve, publish, embed, retrieve, or instruct the system to mutate existing knowledge. These are review suggestions only.",
+].join("\n");
+
+const knowledgePipelineExtractionSystemPrompt = [
+  "Extract at most one atomic Vietnam road-trip fact from an immutable source capture.",
+  "Return strict JSON only. Never return personal data, contacts, or a fact that is only an opinion, question, advertisement, or unsupported claim.",
+  "Return {candidate:null} when no safe fact exists. Otherwise candidate must include type, title, summary, location_name or route_segment, conditions, freshness_sensitive, and evidence {quote_text, span_start, span_end}.",
+  "quote_text must be an exact contiguous substring of source_text and the offsets are zero-based PostgreSQL character offsets (Unicode code points, not UTF-16 code units). Paraphrase every non-evidence field.",
+].join("\n");
+
+const knowledgePipelineJudgmentSystemPrompt = [
+  "Independently judge one evidence-grounded road-trip candidate. Return strict JSON only.",
+  "Return relevance, extractability, evidence_grounding, specificity, actionability, first_hand_likelihood, spam_commercial_risk as numbers from 0 to 1, plus decision of publish, review_recommended, verify_first, or suppress and a concise Vietnamese summary.",
+  "High-risk road, safety, EV, price, hours, availability, booking, or promotion facts must be verify_first. Never upgrade evidence or invent facts.",
+].join("\n");
+
+const knowledgePipelineRelationJudgmentSystemPrompt = [
+  "Independently decide the relationship between one candidate and scoped active knowledge cards.",
+  "Return strict JSON only: action (attach, create, conflict, or ambiguous), optional target_card_id, and a concise Vietnamese summary.",
+  "attach means equivalent/paraphrased fact, conflict means material contradiction, create means materially distinct, and ambiguous is required when uncertain.",
+  "Only choose target_card_id from the supplied active candidates. Never invent IDs or mutate knowledge.",
 ].join("\n");
 
 export function buildInitialAiAskMessages(question: string) {
@@ -264,6 +288,18 @@ export function buildSourceKnowledgeSuggestionMessages({
       }),
     },
   ];
+}
+
+export function buildKnowledgePipelineExtractionMessages(input: { source: Record<string, unknown>; rawText: string }) {
+  return [{ role: "system" as const, content: knowledgePipelineExtractionSystemPrompt }, { role: "user" as const, content: JSON.stringify({ source_metadata: input.source, source_text: input.rawText }) }];
+}
+
+export function buildKnowledgePipelineJudgmentMessages(input: { candidate: Record<string, unknown>; evidence: { quoteText: string; spanStart: number; spanEnd: number } }) {
+  return [{ role: "system" as const, content: knowledgePipelineJudgmentSystemPrompt }, { role: "user" as const, content: JSON.stringify({ candidate: input.candidate, evidence: input.evidence }) }];
+}
+
+export function buildKnowledgePipelineRelationJudgmentMessages(input: { candidate: Record<string, unknown>; candidates: Array<Record<string, unknown>> }) {
+  return [{ role: "system" as const, content: knowledgePipelineRelationJudgmentSystemPrompt }, { role: "user" as const, content: JSON.stringify(input) }];
 }
 
 function selectRecentPromptHistory(history: PromptHistoryMessage[]) {

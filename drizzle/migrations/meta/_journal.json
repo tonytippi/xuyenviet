@@ -309,6 +309,13 @@
       "when": 1784900000000,
       "tag": "0043_wealthy_glorian",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1784901000000,
+      "tag": "0044_system_knowledge_pipeline_actor",
+      "breakpoints": true
     }
   ]
 }

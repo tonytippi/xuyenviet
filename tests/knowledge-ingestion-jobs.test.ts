@@ -68,6 +68,20 @@ describe("canonical knowledge ingestion jobs", () => {
     expect(jobs.map((job) => job.submittedByEmail).sort()).toEqual(["changed@example.com", "operator@example.com"]);
   });
 
+  test("serializes concurrent capture appends so the current pointer is the last committed version", async () => {
+    await createSource("concurrent-captures");
+    const [first, second] = await Promise.all([
+      appendReadableCapture("concurrent-captures", "Phiên bản đồng thời một."),
+      appendReadableCapture("concurrent-captures", "Phiên bản đồng thời hai."),
+    ]);
+
+    const captures = await testDb.select().from(sourceCaptureVersions).where(eq(sourceCaptureVersions.sourceId, "concurrent-captures")).orderBy(sourceCaptureVersions.versionSequence);
+    const [source] = await testDb.select().from(sources).where(eq(sources.id, "concurrent-captures"));
+    expect(captures.map((capture) => capture.versionSequence)).toEqual([1, 2]);
+    expect(source?.currentCaptureVersionId).toBe(captures[1]?.id);
+    expect([first.id, second.id]).toContain(source?.currentCaptureVersionId);
+  });
+
   test("claims a due queued job once with a bounded opaque fence and does not advance its stage", async () => {
     await createSource("claimable");
     await appendReadableCapture("claimable");

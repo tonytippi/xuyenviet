@@ -109,26 +109,30 @@ export async function appendSourceCaptureVersion(
   if (!rawText) throw new SourceCaptureValidationError("Captured readable material cannot be empty.");
   if (rawText.length > limit) throw new SourceCaptureValidationError(`Captured readable material exceeds the ${limit}-character limit.`);
   const rawMetadata = validateSafeCaptureMetadata(input.captureKind, input.metadata);
-  await db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${input.sourceId}, 44))`);
-  const [source] = await db.select({ id: sources.id }).from(sources).where(eq(sources.id, input.sourceId)).limit(1);
-  if (!source) throw new SourceCaptureValidationError("Source does not exist.");
-  const [latest] = await db.select({ versionSequence: sourceCaptureVersions.versionSequence }).from(sourceCaptureVersions).where(eq(sourceCaptureVersions.sourceId, input.sourceId)).orderBy(desc(sourceCaptureVersions.versionSequence)).limit(1);
-  const [version] = await db.insert(sourceCaptureVersions).values({
-    sourceId: input.sourceId,
-    versionSequence: (latest?.versionSequence ?? 0) + 1,
-    captureKind: input.captureKind,
-    rawText,
-    contentHash: hashCaptureText(rawText),
-    rawMetadata,
-    capturedAt: input.capturedAt ?? new Date(),
-    fileName: input.file?.fileName ?? null,
-    mimeType: input.file?.mimeType ?? null,
-    byteSize: input.file?.byteSize ?? null,
-    storageKey: input.file?.storageKey ?? null,
-  }).returning();
-  await db.update(sources).set({ currentCaptureVersionId: version.id }).where(eq(sources.id, input.sourceId));
-  await ensureIngestionJobForCaptureVersion(db, { sourceId: input.sourceId, captureVersionId: version.id });
-  return version;
+  const transactionalDb = db as ReturnType<typeof getDb>;
+  return transactionalDb.transaction(async (tx) => {
+    // This lock spans sequence allocation, the pointer update, and job creation.
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${input.sourceId}, 44))`);
+    const [source] = await tx.select({ id: sources.id }).from(sources).where(eq(sources.id, input.sourceId)).limit(1);
+    if (!source) throw new SourceCaptureValidationError("Source does not exist.");
+    const [latest] = await tx.select({ versionSequence: sourceCaptureVersions.versionSequence }).from(sourceCaptureVersions).where(eq(sourceCaptureVersions.sourceId, input.sourceId)).orderBy(desc(sourceCaptureVersions.versionSequence)).limit(1);
+    const [version] = await tx.insert(sourceCaptureVersions).values({
+      sourceId: input.sourceId,
+      versionSequence: (latest?.versionSequence ?? 0) + 1,
+      captureKind: input.captureKind,
+      rawText,
+      contentHash: hashCaptureText(rawText),
+      rawMetadata,
+      capturedAt: input.capturedAt ?? new Date(),
+      fileName: input.file?.fileName ?? null,
+      mimeType: input.file?.mimeType ?? null,
+      byteSize: input.file?.byteSize ?? null,
+      storageKey: input.file?.storageKey ?? null,
+    }).returning();
+    await tx.update(sources).set({ currentCaptureVersionId: version.id }).where(eq(sources.id, input.sourceId));
+    await ensureIngestionJobForCaptureVersion(tx, { sourceId: input.sourceId, captureVersionId: version.id });
+    return version;
+  });
 }
 
 export async function getCaptureVersion(db: Pick<CaptureDb, "select">, captureVersionId: string) {
@@ -154,7 +158,7 @@ export async function retainExpiredFacebookCaptureVersions(
 
   const cutoff = new Date(now.getTime() - retentionDays * 24 * 60 * 60 * 1000);
   const candidates = await db
-    .select({ id: sourceCaptureVersions.id })
+    .select({ id: sourceCaptureVersions.id, sourceId: sourceCaptureVersions.sourceId })
     .from(sourceCaptureVersions)
     .where(and(eq(sourceCaptureVersions.captureKind, "facebook"), isNull(sourceCaptureVersions.payloadDeletedAt), lte(sourceCaptureVersions.capturedAt, cutoff)))
     .orderBy(sourceCaptureVersions.capturedAt)
@@ -164,6 +168,8 @@ export async function retainExpiredFacebookCaptureVersions(
 
   for (const candidate of candidates) {
     const outcome = await db.transaction(async (transaction) => {
+      // Publish and capture retention acquire locks in this order to prevent circular waits.
+      await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${candidate.sourceId}, 44))`);
       const [version] = await transaction
         .select({ id: sourceCaptureVersions.id, sourceId: sourceCaptureVersions.sourceId, capturedAt: sourceCaptureVersions.capturedAt, payloadDeletedAt: sourceCaptureVersions.payloadDeletedAt })
         .from(sourceCaptureVersions)
@@ -171,7 +177,6 @@ export async function retainExpiredFacebookCaptureVersions(
         .limit(1)
         .for("update");
       if (!version || version.payloadDeletedAt || version.capturedAt > cutoff) return "skip" as const;
-      await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${version.sourceId}, 44))`);
 
       const [current] = await transaction.select({ currentCaptureVersionId: sources.currentCaptureVersionId }).from(sources).where(eq(sources.id, version.sourceId)).limit(1).for("update");
       if (!current || await hasRetentionBlocker(transaction, version.sourceId, version.id)) return "blocked" as const;

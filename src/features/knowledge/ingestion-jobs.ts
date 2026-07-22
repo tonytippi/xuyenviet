@@ -2,7 +2,7 @@ import "server-only";
 
 import { randomBytes, randomUUID } from "node:crypto";
 
-import { and, asc, eq, isNull, lte, sql } from "drizzle-orm";
+import { and, asc, eq, gt, isNull, lte, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
 import { knowledgeIngestionJobs, sourceCaptureVersions, sources, users } from "@/db/schema";
@@ -11,7 +11,9 @@ type IngestionJobDb = Pick<ReturnType<typeof getDb>, "select" | "insert" | "upda
 
 const defaultMaxAttempts = 3;
 const defaultLeaseMs = 15 * 60_000;
-const minLeaseMs = 60_000;
+// The pipeline makes at most three bounded gateway calls (each capped at 180 seconds).
+// Keep the lease bounded, but long enough that a configured gateway timeout cannot strand a claim.
+const minLeaseMs = 10 * 60_000;
 const maxLeaseMs = 60 * 60_000;
 
 export class KnowledgeIngestionJobError extends Error {
@@ -49,6 +51,16 @@ export type KnowledgeIngestionClaim = {
   attemptCount: number;
   leaseExpiresAt: Date;
   fencingToken: string;
+};
+
+export type KnowledgeIngestionStageCommit = {
+  jobId: string;
+  expectedStage: Exclude<typeof knowledgeIngestionJobs.$inferSelect.stage, "published" | "suppressed" | "review_recommended" | "verify_first" | "failed">;
+  expectedStageVersion: number;
+  fencingToken: string;
+  nextStage: typeof knowledgeIngestionJobs.$inferSelect.stage;
+  lastErrorCode?: string | null;
+  now?: Date;
 };
 
 export async function ensureIngestionJobForCaptureVersion(
@@ -140,6 +152,43 @@ export async function claimNextKnowledgeIngestionJob(
   });
 }
 
+/** Commits a stage only while the original lease and fence remain current. */
+export async function commitKnowledgeIngestionStage(
+  input: KnowledgeIngestionStageCommit,
+  db = getDb(),
+) {
+  const now = input.now ?? new Date();
+  if (!Number.isInteger(input.expectedStageVersion) || input.expectedStageVersion < 1) {
+    throw new KnowledgeIngestionJobError("Expected stage version is invalid.");
+  }
+  if (!/^[a-f0-9]{64}$/.test(input.fencingToken)) {
+    throw new KnowledgeIngestionJobError("Fencing token is invalid.");
+  }
+  if (!isAllowedStageTransition(input.expectedStage, input.nextStage)) {
+    throw new KnowledgeIngestionJobError("Ingestion stage transition is invalid.");
+  }
+
+  const terminal = isTerminalStage(input.nextStage);
+  const [committed] = await db
+    .update(knowledgeIngestionJobs)
+    .set({
+      stage: input.nextStage,
+      stageVersion: input.expectedStageVersion + 1,
+      lastErrorCode: input.lastErrorCode ?? null,
+      ...(terminal ? { claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null } : {}),
+      updatedAt: now,
+    })
+    .where(and(
+      eq(knowledgeIngestionJobs.id, input.jobId),
+      eq(knowledgeIngestionJobs.stage, input.expectedStage),
+      eq(knowledgeIngestionJobs.stageVersion, input.expectedStageVersion),
+      eq(knowledgeIngestionJobs.fencingToken, input.fencingToken),
+      gt(knowledgeIngestionJobs.leaseExpiresAt, now),
+    ))
+    .returning();
+  return committed ?? null;
+}
+
 export async function listKnowledgeIngestionJobStatuses(db: Pick<IngestionJobDb, "select">, now = new Date()): Promise<KnowledgeIngestionJobStatus[]> {
   const rows = await db
     .select({ id: knowledgeIngestionJobs.id, sourceId: knowledgeIngestionJobs.sourceId, captureVersionId: knowledgeIngestionJobs.captureVersionId, stage: knowledgeIngestionJobs.stage, stageVersion: knowledgeIngestionJobs.stageVersion, attemptCount: knowledgeIngestionJobs.attemptCount, maxAttempts: knowledgeIngestionJobs.maxAttempts, nextRunAt: knowledgeIngestionJobs.nextRunAt, lastErrorCode: knowledgeIngestionJobs.lastErrorCode, requeueReasonCode: knowledgeIngestionJobs.requeueReasonCode, claimedBy: knowledgeIngestionJobs.claimedBy, claimedAt: knowledgeIngestionJobs.claimedAt, leaseExpiresAt: knowledgeIngestionJobs.leaseExpiresAt, createdAt: knowledgeIngestionJobs.createdAt, updatedAt: knowledgeIngestionJobs.updatedAt })
@@ -156,4 +205,17 @@ function normalizeLeaseMs(value: string | undefined) {
   if (!value) return defaultLeaseMs;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.min(Math.max(Math.trunc(parsed), minLeaseMs), maxLeaseMs) : defaultLeaseMs;
+}
+
+function isTerminalStage(stage: typeof knowledgeIngestionJobs.$inferSelect.stage) {
+  return stage === "published" || stage === "suppressed" || stage === "review_recommended" || stage === "verify_first" || stage === "failed";
+}
+
+function isAllowedStageTransition(from: KnowledgeIngestionStageCommit["expectedStage"], to: typeof knowledgeIngestionJobs.$inferSelect.stage) {
+  if (to === "failed" || to === "suppressed" || to === "review_recommended" || to === "verify_first") return true;
+  return (from === "queued" && to === "triaging")
+    || (from === "triaging" && to === "extracting")
+    || (from === "extracting" && to === "judging")
+    || (from === "judging" && to === "relating")
+    || (from === "relating" && to === "published");
 }

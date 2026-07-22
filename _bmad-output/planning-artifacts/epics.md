@@ -387,6 +387,8 @@ So that a readable source can reach one safe, auditable terminal outcome.
 **Then** it compares the expected stage/version and lease token before committing
 **And** a duplicate worker cannot overwrite completed work or publish a different outcome.
 
+**Scope decision (2026-07-22):** Story 3.5 also owns the deterministic validation gates, independent judge, bounded evidence creation, canonical card mutation, relation matching, condition preservation, and conflict policy originally decomposed into Stories 3.7 and 3.8. This makes the first canonical source-version pipeline vertically safe: it must not publish a card without exact evidence, validation, independent judgment, and scoped relation handling. The automated actor is `system-knowledge-pipeline`; source and job submitter provenance remains immutable. Story 3.6 remains recovery-only and Story 3.9 remains recommendation/sampling-only.
+
 ### Story 3.6: Recover Ingestion Jobs Without Stale Publication
 
 As a product owner,
@@ -406,6 +408,8 @@ So that retry behavior cannot repeat completed stages or restore outdated public
 **And** the operational record retains a safe failure reason.
 
 ### Story 3.7: Validate Evidence and Independently Judge Publication
+
+**Status:** Superseded by Story 3.5 scope decision on 2026-07-22. Its acceptance contract is implemented and tested as part of Story 3.5; do not create a duplicate implementation story.
 
 As a traveler,
 I want community facts to become available only when their evidence and safety policy justify it,
@@ -429,6 +433,8 @@ So that timely advice does not require blanket manual approval or imply false ce
 **And** road, safety, EV, price, hours, availability, booking, and promotion claims set verification required and AI-recommended review, remaining caveat-only until corroborated.
 
 ### Story 3.8: Relate Evidence, Preserve Conditions, and Handle Conflicts
+
+**Status:** Superseded by Story 3.5 scope decision on 2026-07-22. Its acceptance contract is implemented and tested as part of Story 3.5; do not create a duplicate implementation story.
 
 As a traveler,
 I want community observations to preserve their conditions and disagreements,
