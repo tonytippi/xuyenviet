@@ -14,8 +14,7 @@ includedDocuments:
     - _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md
   epicsStories:
     - _bmad-output/planning-artifacts/epics.md
-  changeContext:
-    - _bmad-output/planning-artifacts/sprint-change-proposal-2026-07-05-ai-usage-referral.md
+  changeContext: []
   ux: []
 ---
 
@@ -53,8 +52,7 @@ No UX design document found.
 
 ### Change Control Files Found
 
-**Context Documents:**
-- `_bmad-output/planning-artifacts/sprint-change-proposal-2026-07-05-ai-usage-referral.md`
+The referral-attribution change context was incorporated into the authoritative planning artifacts and its standalone proposal was removed during artifact cleanup.
 
 ### Discovery Notes
 

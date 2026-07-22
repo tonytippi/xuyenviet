@@ -8,9 +8,7 @@ sources:
   - ../../prds/prd-xuyenviet-2026-07-04/prd.md
   - ../../architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md
   - ../../epics.md
-  - ../../implementation-readiness-report-2026-07-05.md
-  - ../../sprint-change-proposal-2026-07-05-ai-usage-referral.md
-  - ../../sprint-change-proposal-2026-07-07-ai-gateway-models-streaming-multimodal.md
+  - ../../implementation-readiness-report-2026-07-21.md
 ---
 
 # XuyenViet — Experience Spine
