@@ -4,7 +4,7 @@ baseline_commit: ee80c40ed72f8db67234312876eea12deca51b57
 
 # Story 4.3: Assemble State-Aware Knowledge Source Bundles
 
-Status: review
+Status: done
 
 ## Story
 
@@ -53,6 +53,11 @@ so that its answer can use local observations without overstating certainty.
 - [x] [Review][Patch] Block Facebook alias URLs from traveler-visible evidence [src/features/retrieval/approved-knowledge.ts:158] — `isFacebookUrl` permits aliases such as `www.fb.com`, `m.fb.com`, and `www.fb.watch`. A legacy or misclassified Facebook source with one of those URLs can retain its quote and link in the prompt and provenance snapshot, violating the raw Facebook exclusion.
 - [x] [Review][Patch] Redact spaced provider-payload markers from traveler-visible evidence [src/features/retrieval/approved-knowledge.ts:168] — The sensitive-text guard matches `provider_payload` and `provider-payload`, but not `provider payload`. A traveler-visible quote with the spaced marker can reach the prompt and provenance snapshot.
 - [x] [Review][Patch] Derive knowledge provenance verification from projected evidence [src/features/retrieval/provenance.ts:138] — Provenance marks every knowledge card whose `verificationState` is not `required` as `verified`, even if all selected evidence has `verificationStatus: "unverified"`. The traveler-facing provenance row can therefore overstate an unverified community source.
+- [ ] [Review][Patch] Reject credential-bearing traveler-visible evidence URLs [src/features/knowledge/search.ts:375] — `safeHttpUrl` accepts an HTTP(S) URL with `username` or `password`, and both retrieval and the final bundle preserve `url.href`. A normally ingestible source such as `https://api-user:api-token@example.com/notice` can therefore reach the prompt and persisted provenance snapshot, violating AC 2's safe-URL and privacy boundary.
+- [ ] [Review][Patch] Block Facebook short-link aliases from evidence projection [src/features/retrieval/approved-knowledge.ts:158] — The new alias guard covers `facebook.com`, `fb.com`, and `fb.watch`, but not `fb.me`. Ingestion classifies an `fb.me` URL as an ordinary `url`, and a `traveler_visible` quote/link therefore survives both retrieval and bundle projection despite the raw Facebook-material exclusion in AC 2.
+- [ ] [Review][Patch] Remove contact data from allowlisted practical details [src/features/retrieval/approved-knowledge.ts:125] — `projectPracticalDetails` clips and serializes every string in an allowlisted field without the evidence privacy guard. `parking_notes: "Gọi 0901234567"` or an email/provider-payload value reaches both prompt and provenance, contrary to the explicit requirement to omit contacts, raw/provider, and private data from practical-detail serialization.
+- [ ] [Review][Patch] Sanitize sensitive evidence source labels [src/features/retrieval/approved-knowledge.ts:58] — Source labels are copied into the prompt and provenance projection even for `fact_only` evidence. Existing source validation permits a label containing an email, phone number, or provider-payload marker, so sensitive source metadata bypasses the quote-only guard and violates AC 2.
+- [ ] [Review][Patch] Preserve source priority in the over-budget minimal fallback [src/features/retrieval/source-bundle.ts:469] — When the compacted bundle remains above 5,000 characters, the minimal fallback discards all selected trip/chat facts and active knowledge but retains one web result. This elevates unverified web material after higher-priority sources were removed, violating AC 3 and AC 4's requirement to omit excess without re-prioritizing it.
 
 ## Dev Notes
 
@@ -118,3 +123,4 @@ gpu4ai/gpt-5.6-terra-review
 - 2026-07-23: Implemented state-aware knowledge source bundle assembly and marked ready for review.
 - 2026-07-23: Addressed all five actionable review findings and retained review status.
 - 2026-07-23: Addressed three final High review findings, added focused regressions, and retained review status.
+- 2026-07-23: Marked done by explicit user direction with five final review findings accepted for follow-up.
