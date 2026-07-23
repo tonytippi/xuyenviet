@@ -1238,7 +1238,7 @@ describe("AI Ask streaming route", () => {
       { role: "user", content: "Hà Nội đi Huế 5 ngày?" },
       { role: "assistant", content: "Kế hoạch gợi ý:\nNên chia chặng." },
       { role: "user", content: "Ngày thứ 3 nên nghỉ ở đâu?" },
-      { role: "assistant", content: "Bước tiếp theo:Ngày 3 nghỉ Huế." },
+      { role: "assistant", content: expect.stringContaining("Bước tiếp theo:Ngày 3 nghỉ Huế.") },
     ]);
     expect(gatewayMessages).toMatchObject([
       { role: "system" },
@@ -1417,7 +1417,7 @@ describe("AI Ask streaming route", () => {
       { role: "user", content: "Lịch trình Huế 5 ngày?" },
       { role: "assistant", content: "Nên chia chặng nhẹ." },
       { role: "user", content: "Ngày thứ 3 nên nghỉ ở đâu?" },
-      { role: "assistant", content: "Ngày 3 nghỉ Huế." },
+      { role: "assistant", content: expect.stringContaining("Ngày 3 nghỉ Huế.") },
     ]);
     expect(gatewayMessages).toMatchObject([
       { role: "system" },
@@ -1480,7 +1480,7 @@ describe("AI Ask streaming route", () => {
     expect(body).toContain('{"type":"done"');
     expect(savedMessages.map((message) => ({ role: message.role, content: message.content }))).toEqual([
       { role: "user", content: "Kể cho tôi nghe lịch trình chi tiết 30 ngày?" },
-      { role: "assistant", content: "Kế hoạch dài" },
+      { role: "assistant", content: expect.stringContaining("Kế hoạch dài") },
     ]);
     expect(savedUsageEvents).toHaveLength(2);
     expect(findUsageEvent(savedUsageEvents, "web_search_fallback", "tavily")).toMatchObject({ status: "failure", model: "search", errorCode: "low_quality_results" });
@@ -1570,7 +1570,7 @@ describe("AI Ask streaming route", () => {
     expect(response.status).toBe(200);
     expect(body).toContain('{"type":"done"');
     expect(savedMessages).toHaveLength(2);
-    expect(savedMessages[1]).toMatchObject({ role: "assistant", content: "Gợi ý chặng nhẹ." });
+    expect(savedMessages[1]).toMatchObject({ role: "assistant", content: expect.stringContaining("Gợi ý chặng nhẹ.") });
   });
 
   test("ignores SSE event keepalive lines without failing the stream", async () => {
@@ -1596,7 +1596,7 @@ describe("AI Ask streaming route", () => {
 
     expect(response.status).toBe(200);
     expect(body).toContain('{"type":"done"');
-    expect(savedMessages[1]).toMatchObject({ role: "assistant", content: "Kế hoạch gợi ý." });
+    expect(savedMessages[1]).toMatchObject({ role: "assistant", content: expect.stringContaining("Kế hoạch gợi ý.") });
   });
 
   test("streams text and image input through the route before persisting the final assistant message", async () => {
@@ -1636,7 +1636,7 @@ describe("AI Ask streaming route", () => {
     expect(body).toContain('{"type":"done"');
     expect(savedMessages.map((message) => ({ role: message.role, content: message.content }))).toEqual([
       { role: "user", content: "Ảnh này có phù hợp cho chuyến Hà Giang không?" },
-      { role: "assistant", content: "Kế hoạch gợi ý" },
+      { role: "assistant", content: expect.stringContaining("Kế hoạch gợi ý") },
     ]);
     expect(savedAttachments).toHaveLength(1);
     expect(savedAttachments[0]).toMatchObject({

@@ -60,6 +60,8 @@ export async function persistAssistantAnswerProvenance(db: ProvenanceDb, input: 
     webSearchTriggerReasons: sourceBundle.retrievalDecision.webSearchTriggerReasons,
     generalReasoningUsed: sourceBundle.retrievalDecision.generalReasoningUsed,
     warnings: sourceBundle.warnings,
+    selectedKnowledgeCardIds: sourceBundle.retrievalDecision.knowledgePolicySummary?.selectedCardIds ?? sourceBundle.knowledge.map((item) => item.id),
+    knowledgePolicySnapshot: sourceBundle.retrievalDecision.knowledgePolicySummary ?? null,
   });
 
   const rows = buildProvenanceRows({ userId, conversationId, userMessageId, assistantMessageId, sourceBundle, promptSection });
@@ -149,8 +151,8 @@ function buildProvenanceRows({
       assistantMessageId,
       rank: rank++,
       sourceCategory: "web",
-      sourceReferenceId: `${userMessageId}:${result.rank}`,
-      sourceReferenceType: "web_search_result_rank",
+      sourceReferenceId: result.persistedId ?? null,
+      sourceReferenceType: result.persistedId ? "web_search_result" : null,
       retrievalScore: result.providerScore,
       sourceType: result.sourceType,
       verificationStatus: "unverified",
@@ -168,6 +170,7 @@ function buildProvenanceRows({
         triggerReason: result.triggerReason,
         freshnessSensitive: sourceBundle.retrievalDecision.freshnessRequired || isFreshnessSensitiveWebTrigger(result.triggerReason),
         rank: result.rank,
+        persistedWebSearchResultId: result.persistedId ?? null,
       },
     }));
   }
@@ -318,7 +321,7 @@ function getConfidenceLabel(sourceCategory: AssistantProvenanceSourceCategory, v
 }
 
 function isFreshnessSensitiveWebTrigger(value: unknown) {
-  return value === "freshness_sensitive_request" || value === "approved_knowledge_may_be_stale";
+  return value === "freshness_sensitive_request" || value === "active_knowledge_may_be_stale";
 }
 
 function getOptionalString(value: unknown) {

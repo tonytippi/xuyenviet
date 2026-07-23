@@ -71,6 +71,7 @@ export async function writeAiUsageEvent(db: UsageEventDb, input: WriteAiUsageEve
     pricingUnitTokens: cost.pricingUnitTokens,
     pricingVersion: cost.pricingVersion,
     pricingEffectiveAt: cost.pricingEffectiveAt,
+    costStatus: cost.estimatedTotalCostMicros !== null ? "estimated" : input.pricingSnapshot ? "missing_usage" : "missing_pricing",
     errorCode: input.errorCode ?? null,
   });
 

@@ -358,6 +358,20 @@
       "when": 1784904000003,
       "tag": "0050_moaning_stellaris",
       "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1784904000004,
+      "tag": "0051_state_aware_search_provenance",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1784904000005,
+      "tag": "0052_accept_legacy_web_trigger_rows",
+      "breakpoints": true
     }
   ]
 }

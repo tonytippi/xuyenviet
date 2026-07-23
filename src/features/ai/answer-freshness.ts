@@ -7,6 +7,8 @@ export function ensureAiAskFreshnessWarning(content: string, sourceBundle: Await
   const caveatOnlyKnowledge = sourceBundle.knowledge.filter((item) => item.policy === "caveat_only" || item.knowledgeState === "uncertain" || item.verificationState === "required");
   const conditionalKnowledge = sourceBundle.knowledge.filter((item) => item.policy === "contextual_use" && item.knowledgeState === "conditional" && item.conditions.length > 0);
   const caveatWarningRequired = caveatOnlyKnowledge.length > 0;
+  const externalVerificationRequired = sourceBundle.retrievalDecision.webSearchTriggered
+    && (sourceBundle.warnings.includes("web_search_load_failed") || sourceBundle.warnings.includes("web_search_low_quality"));
 
   if (caveatWarningRequired) {
     const fallback = `Cảnh báo cần kiểm tra\nMình chưa thể dùng thông tin cần xác minh để chốt lịch trình. ${formatCaveatVerificationInstruction(caveatOnlyKnowledge)}`;
@@ -18,7 +20,7 @@ export function ensureAiAskFreshnessWarning(content: string, sourceBundle: Await
     return { content: fallback, appendedWarning: fallback, replacedUnsafeContent: true };
   }
 
-  if (!freshnessWarningRequired && !caveatWarningRequired) {
+  if (!freshnessWarningRequired && !caveatWarningRequired && !externalVerificationRequired) {
     return { content, appendedWarning: "", replacedUnsafeContent: false };
   }
 
@@ -30,7 +32,7 @@ export function ensureAiAskFreshnessWarning(content: string, sourceBundle: Await
     && /không dùng.{0,80}(?:chốt lịch trình|quyết định lịch trình|khuyến nghị đã được xác nhận)/i.test(warningBody)
     && caveatOnlyKnowledge.every((item) => warningBody.includes(getVerificationTarget(item)));
 
-  if ((!freshnessWarningRequired || hasFreshnessWarning) && (!caveatWarningRequired || hasCaveatWarning)) {
+  if ((!freshnessWarningRequired || hasFreshnessWarning) && (!caveatWarningRequired || hasCaveatWarning) && !externalVerificationRequired) {
     return { content, appendedWarning: "", replacedUnsafeContent: false };
   }
 
@@ -40,6 +42,9 @@ export function ensureAiAskFreshnessWarning(content: string, sourceBundle: Await
   }
   if (caveatWarningRequired && !hasCaveatWarning) {
     warnings.push(`Không dùng thông tin này để chốt lịch trình. ${formatCaveatVerificationInstruction(caveatOnlyKnowledge)}`);
+  }
+  if (externalVerificationRequired) {
+    warnings.push("Mình chưa thể xác minh thông tin hiện tại từ nguồn bên ngoài. Hãy xác nhận trực tiếp với nguồn chính thức hoặc nhà cung cấp trước khi đi, hành động hoặc đặt dịch vụ.");
   }
   const appendedWarning = `\n\nCảnh báo cần kiểm tra\n${warnings.join(" ")}`;
   return { content: `${content.trimEnd()}${appendedWarning}`, appendedWarning, replacedUnsafeContent: false };
@@ -75,5 +80,5 @@ function normalizeMaterialCondition(value: string) {
 }
 
 function isFreshnessSensitiveWebTrigger(reason: string) {
-  return reason === "freshness_sensitive_request" || reason === "approved_knowledge_may_be_stale";
+  return reason === "freshness_sensitive_request" || reason === "active_knowledge_may_be_stale";
 }

@@ -71,6 +71,7 @@ describe("AI usage events", () => {
       estimatedTotalCostMicros: 3_750,
       pricingCurrency: "USD",
       pricingVersion: "v1",
+      costStatus: "estimated",
     });
   });
 
@@ -213,5 +214,27 @@ describe("AI usage events", () => {
       estimatedTotalCostMicros: null,
     });
     expect(Object.keys(rows[0])).not.toEqual(expect.arrayContaining(["query", "results", "prompt", "answer", "content", "snippet", "rawProviderPayload"]));
+  });
+
+  test("records missing-pricing metadata without blocking a safe answer usage event", async () => {
+    const { db, rows } = createUsageDb();
+
+    await writeAiUsageEvent(db, {
+      userId: "user-1",
+      conversationId: "conversation-1",
+      userMessageId: "message-1",
+      purpose: aiUsagePurposes.aiAskInitialAnswer,
+      provider: "ai_gateway",
+      model: "cx/unpriced",
+      aiGatewayModelId: "model-unpriced",
+      promptVersion: aiUsagePromptVersions.aiAskInitialAnswer,
+      status: "success",
+      latencyMs: 42,
+      promptTokens: 100,
+      completionTokens: 20,
+      pricingSnapshot: null,
+    });
+
+    expect(rows[0]).toMatchObject({ aiGatewayModelId: "model-unpriced", costStatus: "missing_pricing", estimatedTotalCostMicros: null });
   });
 });

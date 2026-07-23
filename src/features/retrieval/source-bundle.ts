@@ -17,12 +17,21 @@ const maxWebResultsInPrompt = 5;
 export type SourceBundleWarning = "answer_context_load_failed" | "approved_knowledge_load_failed" | "web_search_load_failed" | "web_search_low_quality";
 
 export type WebSearchTriggerReason =
-  | "no_approved_knowledge"
-  | "insufficient_approved_knowledge"
+  | "no_active_knowledge"
+  | "insufficient_active_knowledge"
   | "freshness_sensitive_request"
-  | "approved_knowledge_may_be_stale"
+  | "active_knowledge_may_be_stale"
   | "source_conflict"
-  | "approved_knowledge_unavailable";
+  | "excluded_conflict_candidate"
+  | "excluded_verification_required_candidate"
+  | "active_knowledge_unavailable";
+
+export type SafeKnowledgePolicySummary = {
+  selectedCardIds: string[];
+  selectedPolicyCounts: { contextualUse: number; caveatOnly: number };
+  excludedPolicyCounts: { conflict: number; verificationRequired: number; other: number };
+  excludedReasonCodes: string[];
+};
 
 export type RetrievalDecision = {
   approvedKnowledgeCandidateCount: number;
@@ -35,6 +44,7 @@ export type RetrievalDecision = {
   webSearchTriggered: boolean;
   webSearchTriggerReasons: WebSearchTriggerReason[];
   generalReasoningUsed: true;
+  knowledgePolicySummary?: SafeKnowledgePolicySummary;
 };
 
 export type ContextPrioritySourceBundle = {
@@ -187,7 +197,9 @@ async function loadTriggeredWebSearch({
       return [];
     }
 
-    await captureWebSearchResults({ db: getDb(), userId, conversationId, userMessageId, results: searchResult.results });
+    const captured = await captureWebSearchResults({ db: getDb(), userId, conversationId, userMessageId, results: searchResult.results });
+    const idsByRank = new Map((captured ?? []).map((row) => [row.rank, row.id]));
+    return searchResult.results.map((result) => ({ ...result, persistedId: idsByRank.get(result.rank) }));
   } catch (error) {
     warnings.push("web_search_load_failed");
     console.warn("Web search result capture skipped after failure", {
@@ -198,7 +210,6 @@ async function loadTriggeredWebSearch({
     return [];
   }
 
-  return searchResult.results;
 }
 
 async function recordWebSearchUsage({
@@ -236,24 +247,36 @@ export function decideWebSearchFallback({
   approvedKnowledgeCandidateCount = knowledge.length,
   chatTripContext,
   warnings,
+  policySummary,
 }: {
   question: string;
   knowledge: KnowledgeSearchResult[];
   approvedKnowledgeCandidateCount?: number;
   chatTripContext: ContextPrioritySourceBundle["chatTripContext"];
   warnings: SourceBundleWarning[];
+  policySummary?: Partial<SafeKnowledgePolicySummary>;
 }): RetrievalDecision {
   const broadPlanningQuestion = isBroadPlanningQuestion(question);
   const freshnessRequired = isFreshnessSensitiveQuestion(question) || knowledge.some((result) => result.freshnessSensitive);
   const conflictDetected = chatTripContext.conflicts.length > 0 || hasApprovedKnowledgeConflict(knowledge);
   const reasons: WebSearchTriggerReason[] = [];
+  const knowledgePolicySummary: SafeKnowledgePolicySummary = {
+    selectedCardIds: knowledge.map((result) => result.id),
+    selectedPolicyCounts: {
+      contextualUse: knowledge.filter((result) => result.policy === "contextual_use").length,
+      caveatOnly: knowledge.filter((result) => result.policy === "caveat_only").length,
+    },
+    excludedPolicyCounts: { conflict: 0, verificationRequired: 0, other: 0 },
+    excludedReasonCodes: [],
+    ...policySummary,
+  };
 
   if (warnings.includes("approved_knowledge_load_failed")) {
-    reasons.push("approved_knowledge_unavailable");
+    reasons.push("active_knowledge_unavailable");
   } else if (knowledge.length === 0) {
-    reasons.push("no_approved_knowledge");
+    reasons.push("no_active_knowledge");
   } else if (broadPlanningQuestion && knowledge.length < approvedKnowledgeTargetCount) {
-    reasons.push("insufficient_approved_knowledge");
+    reasons.push("insufficient_active_knowledge");
   }
 
   if (isFreshnessSensitiveQuestion(question)) {
@@ -261,12 +284,15 @@ export function decideWebSearchFallback({
   }
 
   if (knowledge.some((result) => result.freshnessSensitive)) {
-    reasons.push("approved_knowledge_may_be_stale");
+    reasons.push("active_knowledge_may_be_stale");
   }
 
   if (conflictDetected) {
     reasons.push("source_conflict");
   }
+
+  if (knowledgePolicySummary.excludedPolicyCounts.conflict > 0) reasons.push("excluded_conflict_candidate");
+  if (knowledgePolicySummary.excludedPolicyCounts.verificationRequired > 0) reasons.push("excluded_verification_required_candidate");
 
   return {
     approvedKnowledgeCandidateCount,
@@ -279,6 +305,7 @@ export function decideWebSearchFallback({
     webSearchTriggered: reasons.length > 0,
     webSearchTriggerReasons: reasons,
     generalReasoningUsed: true,
+    knowledgePolicySummary,
   };
 }
 
@@ -514,8 +541,12 @@ function appendRetrievalDecisionSection(lines: string[], decision: RetrievalDeci
   const triggered = decision.webSearchTriggered || decision.webSearchTriggerReasons.length > 0;
 
   lines.push("Quyết định truy xuất trước khi trả lời");
-  lines.push(`- Số mục kiến thức đã duyệt: ${decision.approvedKnowledgeSelectedCount}/${decision.approvedKnowledgeTargetCount}`);
-  lines.push(`- Ứng viên kiến thức đã duyệt: ${decision.approvedKnowledgeCandidateCount}; ngưỡng liên quan: ${decision.approvedKnowledgeRelevanceThreshold}`);
+  lines.push(`- Số mục kiến thức đang hiệu lực: ${decision.approvedKnowledgeSelectedCount}/${decision.approvedKnowledgeTargetCount}`);
+  lines.push(`- Ứng viên kiến thức đang hiệu lực: ${decision.approvedKnowledgeCandidateCount}; ngưỡng liên quan: ${decision.approvedKnowledgeRelevanceThreshold}`);
+  const policy = decision.knowledgePolicySummary;
+  if (policy) {
+    lines.push(`- Chính sách đã chọn: contextual_use=${policy.selectedPolicyCounts.contextualUse}, caveat_only=${policy.selectedPolicyCounts.caveatOnly}; mục bị loại an toàn=${policy.excludedPolicyCounts.conflict + policy.excludedPolicyCounts.verificationRequired + policy.excludedPolicyCounts.other}.`);
+  }
   lines.push(`- Câu hỏi lập kế hoạch rộng: ${decision.broadPlanningQuestion ? "có" : "không"}`);
   lines.push(`- Cần kiểm tra thông tin mới: ${decision.freshnessRequired ? "có" : "không"}`);
   lines.push(`- Có mâu thuẫn nguồn/ngữ cảnh: ${decision.conflictDetected ? "có" : "không"}`);

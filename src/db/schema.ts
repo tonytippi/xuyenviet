@@ -1287,6 +1287,7 @@ export const aiUsageEvents = pgTable(
     pricingUnitTokens: integer("pricing_unit_tokens"),
     pricingVersion: text("pricing_version"),
     pricingEffectiveAt: timestamp("pricing_effective_at", { mode: "date" }),
+    costStatus: text("cost_status").notNull().default("missing_pricing"),
     errorCode: text("error_code"),
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
   },
@@ -1315,6 +1316,7 @@ export const aiUsageEvents = pgTable(
     check("ai_usage_events_output_price_non_negative_check", sql`${aiUsageEvent.outputTokenPriceMicros} is null or ${aiUsageEvent.outputTokenPriceMicros} >= 0`),
     check("ai_usage_events_cache_read_price_non_negative_check", sql`${aiUsageEvent.cacheReadTokenPriceMicros} is null or ${aiUsageEvent.cacheReadTokenPriceMicros} >= 0`),
     check("ai_usage_events_cache_write_price_non_negative_check", sql`${aiUsageEvent.cacheWriteTokenPriceMicros} is null or ${aiUsageEvent.cacheWriteTokenPriceMicros} >= 0`),
+    check("ai_usage_events_cost_status_check", sql`${aiUsageEvent.costStatus} in ('estimated', 'missing_pricing', 'missing_usage')`),
   ],
 );
 
@@ -1366,7 +1368,7 @@ export const webSearchResults = pgTable(
     check("web_search_results_score_check", sql`${result.providerScore} is null or (${result.providerScore} >= 0 and ${result.providerScore} <= 1)`),
     check("web_search_results_source_type_check", sql`${result.sourceType} in ('official', 'provider', 'community', 'general')`),
     check("web_search_results_confidence_check", sql`${result.confidence} = 'unverified'`),
-    check("web_search_results_trigger_reason_check", sql`${result.triggerReason} in ('no_approved_knowledge', 'insufficient_approved_knowledge', 'freshness_sensitive_request', 'approved_knowledge_may_be_stale', 'source_conflict', 'approved_knowledge_unavailable')`),
+    check("web_search_results_trigger_reason_check", sql`${result.triggerReason} in ('no_active_knowledge', 'insufficient_active_knowledge', 'freshness_sensitive_request', 'active_knowledge_may_be_stale', 'source_conflict', 'excluded_conflict_candidate', 'excluded_verification_required_candidate', 'active_knowledge_unavailable', 'no_approved_knowledge', 'insufficient_approved_knowledge', 'approved_knowledge_may_be_stale', 'approved_knowledge_unavailable')`),
     check("web_search_results_rank_check", sql`${result.rank} > 0`),
   ],
 );
@@ -1394,6 +1396,8 @@ export const assistantRetrievalDecisions = pgTable(
     webSearchTriggerReasons: jsonb("web_search_trigger_reasons").$type<string[]>().default([]).notNull(),
     generalReasoningUsed: boolean("general_reasoning_used").notNull(),
     warnings: jsonb("warnings").$type<string[]>().default([]).notNull(),
+    selectedKnowledgeCardIds: jsonb("selected_knowledge_card_ids").$type<string[]>().default([]).notNull(),
+    knowledgePolicySnapshot: jsonb("knowledge_policy_snapshot").$type<Record<string, unknown>>(),
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
   },
   (decision) => [
@@ -1421,6 +1425,7 @@ export const assistantRetrievalDecisions = pgTable(
     check("assistant_retrieval_decisions_relevance_threshold_check", sql`${decision.approvedKnowledgeRelevanceThreshold} > 0`),
     check("assistant_retrieval_decisions_reasons_array_check", sql`jsonb_typeof(${decision.webSearchTriggerReasons}) = 'array'`),
     check("assistant_retrieval_decisions_warnings_array_check", sql`jsonb_typeof(${decision.warnings}) = 'array'`),
+    check("assistant_retrieval_decisions_selected_card_ids_array_check", sql`jsonb_typeof(${decision.selectedKnowledgeCardIds}) = 'array'`),
   ],
 );
 

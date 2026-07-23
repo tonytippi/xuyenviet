@@ -39,6 +39,7 @@ export type NormalizedWebSearchResult = {
   confidence: WebSearchResultConfidence;
   triggerReason: WebSearchTriggerReason;
   rank: number;
+  persistedId?: string;
 };
 
 export type WebSearchResult =
@@ -128,7 +129,7 @@ export async function searchWebForSourceBundle({
       return webSearchFailure("invalid_provider_response", startedAt);
     }
 
-    const results = normalizeTavilyResults({ payload, query: providerQuery, triggerReason: triggerReasons[0] ?? "no_approved_knowledge", checkedAt: now() });
+    const results = normalizeTavilyResults({ payload, query: providerQuery, triggerReason: triggerReasons[0] ?? "no_active_knowledge", checkedAt: now() });
 
     if (results.length === 0) {
       return webSearchFailure("low_quality_results", startedAt);
@@ -191,9 +192,9 @@ export async function captureWebSearchResults({
   conversationId: string;
   userMessageId: string;
   results: NormalizedWebSearchResult[];
-}) {
+}): Promise<Array<{ id: string; rank: number }>> {
   if (results.length === 0) {
-    return;
+    return [];
   }
 
   await assertUserMessageRole({ db, userId, conversationId, userMessageId });
@@ -204,7 +205,7 @@ export async function captureWebSearchResults({
     inArray(webSearchResults.provider, [...new Set(results.map((result) => result.provider))]),
   ));
 
-  await db.insert(webSearchResults).values(results.map((result) => ({
+  return db.insert(webSearchResults).values(results.map((result) => ({
     userId,
     conversationId,
     userMessageId,
@@ -220,7 +221,7 @@ export async function captureWebSearchResults({
     confidence: "unverified" as const,
     triggerReason: result.triggerReason,
     rank: result.rank,
-  })));
+  }))).returning({ id: webSearchResults.id, rank: webSearchResults.rank });
 }
 
 export function minimizeWebSearchQuery(query: string) {

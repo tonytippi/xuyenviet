@@ -1,6 +1,10 @@
 # Story 4.5: Update Search Fallback and Provenance for AI-First States
 
-Status: ready-for-dev
+---
+baseline_commit: 06d0bc8935d44347124b59f7a77d9f76b0222bce
+---
+
+Status: review
 
 ## Story
 
@@ -17,20 +21,20 @@ so that changing road-trip details are handled honestly.
 
 ## Tasks / Subtasks
 
-- [ ] Update state-aware fallback decisions and web adapter inputs (AC: 1, 3)
-   - [ ] Refactor `decideWebSearchFallback` reasons and tests away from approved-only terminology.
-   - [ ] Carry safe evaluated-candidate policy counts and reason codes into the retrieval decision, including excluded conflict and verification-risk outcomes, without carrying excluded facts or unsafe source fields.
-   - [ ] Trigger from policy outcomes and current-state risk, not merely raw result count. An excluded conflict or verification-required candidate must trigger fallback without entering the traveler knowledge bundle. Preserve query minimization, provider timeouts, bounded normalization, official/provider preference, and unverified labels.
-  - [ ] Add a deterministic safe verification notice for failed/low-confidence external results, analogous to the existing freshness postprocessor.
-- [ ] Migrate persisted decision and provenance contracts (AC: 2)
-  - [ ] Update Drizzle schema through a forward-only migration so decisions/provenance retain policy, state/verification/version snapshots, selected card identifiers, fallback reason, and stable persisted `web_search_results` identifiers.
-  - [ ] Update `persistAssistantAnswerProvenance` and stream finalization to use the state-aware source-bundle snapshot; do not reconstruct policy from current rows after generation.
-   - [ ] Preserve atomic final persistence of assistant message, retrieval decision, row-per-source provenance, and answer usage. Record web capture linkage safely without raw provider content in usage/audit rows.
-   - [ ] Use the selected managed AI Gateway model pricing and provider usage metadata to estimate input, output, cache-read, cache-write, and total costs where pricing is available; preserve missing-cost metadata otherwise. Do not store raw prompts, responses, or provider payloads in usage events.
-- [ ] Add fallback, persistence, and usage-cost tests (AC: 1-4)
-   - [ ] Cover absent, sparse broad-question, freshness, uncertain, conflicted, caveat-only, successful, failed, and low-confidence search paths, including excluded-conflict and excluded-verification-required candidates that trigger fallback without exposing their facts.
-   - [ ] Prove stored records identify selected policy/state/version and persisted web IDs, and no raw source/provider data leaks into snapshots or usage events.
-   - [ ] Prove authenticated answer usage records the required model/context/status metadata and correctly derives configured pricing costs; prove absent pricing produces safe missing-cost metadata without failing answer finalization.
+- [x] Update state-aware fallback decisions and web adapter inputs (AC: 1, 3)
+   - [x] Refactor `decideWebSearchFallback` reasons and tests away from approved-only terminology.
+   - [x] Carry safe evaluated-candidate policy counts and reason codes into the retrieval decision, including excluded conflict and verification-risk outcomes, without carrying excluded facts or unsafe source fields.
+   - [x] Trigger from policy outcomes and current-state risk, not merely raw result count. An excluded conflict or verification-required candidate must trigger fallback without entering the traveler knowledge bundle. Preserve query minimization, provider timeouts, bounded normalization, official/provider preference, and unverified labels.
+   - [x] Add a deterministic safe verification notice for failed/low-confidence external results, analogous to the existing freshness postprocessor.
+- [x] Migrate persisted decision and provenance contracts (AC: 2)
+   - [x] Update Drizzle schema through a forward-only migration so decisions/provenance retain policy, state/verification/version snapshots, selected card identifiers, fallback reason, and stable persisted `web_search_results` identifiers.
+   - [x] Update `persistAssistantAnswerProvenance` and stream finalization to use the state-aware source-bundle snapshot; do not reconstruct policy from current rows after generation.
+    - [x] Preserve atomic final persistence of assistant message, retrieval decision, row-per-source provenance, and answer usage. Record web capture linkage safely without raw provider content in usage/audit rows.
+    - [x] Use the selected managed AI Gateway model pricing and provider usage metadata to estimate input, output, cache-read, cache-write, and total costs where pricing is available; preserve missing-cost metadata otherwise. Do not store raw prompts, responses, or provider payloads in usage events.
+- [x] Add fallback, persistence, and usage-cost tests (AC: 1-4)
+    - [x] Cover absent, sparse broad-question, freshness, uncertain, conflicted, caveat-only, successful, failed, and low-confidence search paths, including excluded-conflict and excluded-verification-required candidates that trigger fallback without exposing their facts.
+    - [x] Prove stored records identify selected policy/state/version and persisted web IDs, and no raw source/provider data leaks into snapshots or usage events.
+    - [x] Prove authenticated answer usage records the required model/context/status metadata and correctly derives configured pricing costs; prove absent pricing produces safe missing-cost metadata without failing answer finalization.
 
 ## Dev Notes
 
@@ -67,5 +71,29 @@ gpu4ai/gpt-5.6-terra-review
 ### Completion Notes List
 
 - Ultimate context engine analysis completed - comprehensive developer guide created.
+- Replaced approved-only fallback reason codes with active-knowledge reasons and persisted a safe state/policy snapshot, including selected card IDs and excluded policy counts.
+- Captured stable `web_search_results` IDs before finalization and persisted those IDs in row-per-source web provenance without provider payload data.
+- Added deterministic Vietnamese verification guidance for failed or low-quality web fallback and explicit missing-pricing usage metadata.
+- Verified with `pnpm test:run` (684/684), `pnpm typecheck`, `pnpm lint` (3 pre-existing warnings only), and `pnpm build`.
 
 ### File List
+
+- drizzle/migrations/0051_state_aware_search_provenance.sql
+- drizzle/migrations/0052_accept_legacy_web_trigger_rows.sql
+- drizzle/migrations/meta/_journal.json
+- src/db/schema.ts
+- src/features/ai/answer-freshness.ts
+- src/features/retrieval/provenance.ts
+- src/features/retrieval/source-bundle.ts
+- src/features/retrieval/web-search.ts
+- src/features/usage/events.ts
+- tests/ai-ask-shell.test.ts
+- tests/ai-usage-events.test.ts
+- tests/answer-context.test.ts
+- tests/web-search-adapter.test.ts
+- _bmad-output/implementation-artifacts/4-5-update-search-fallback-and-provenance-for-ai-first-states.md
+- _bmad-output/implementation-artifacts/sprint-status.yaml
+
+### Change Log
+
+- 2026-07-23: Implemented state-aware web fallback, persisted provenance/usage contract updates, migrations, and regression coverage; marked ready for review.

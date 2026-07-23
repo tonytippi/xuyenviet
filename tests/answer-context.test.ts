@@ -954,7 +954,7 @@ describe("answer context assembly", () => {
     });
 
     expect(decision.webSearchTriggered).toBe(true);
-    expect(decision.webSearchTriggerReasons).toContain("no_approved_knowledge");
+    expect(decision.webSearchTriggerReasons).toContain("no_active_knowledge");
     expect(decision.broadPlanningQuestion).toBe(true);
   });
 
@@ -969,7 +969,7 @@ describe("answer context assembly", () => {
     });
 
     expect(decision.webSearchTriggered).toBe(true);
-    expect(decision.webSearchTriggerReasons).toContain("insufficient_approved_knowledge");
+    expect(decision.webSearchTriggerReasons).toContain("insufficient_active_knowledge");
     expect(decision.approvedKnowledgeSelectedCount).toBe(2);
   });
 
@@ -985,7 +985,7 @@ describe("answer context assembly", () => {
 
     expect(decision.webSearchTriggered).toBe(true);
     expect(decision.freshnessRequired).toBe(true);
-    expect(decision.webSearchTriggerReasons).toEqual(expect.arrayContaining(["freshness_sensitive_request", "approved_knowledge_may_be_stale"]));
+    expect(decision.webSearchTriggerReasons).toEqual(expect.arrayContaining(["freshness_sensitive_request", "active_knowledge_may_be_stale"]));
   });
 
   test("freshness matching supports unaccented terms without treating du lich as schedule", async () => {
@@ -1055,8 +1055,8 @@ describe("answer context assembly", () => {
 
     expect(decision.webSearchTriggered).toBe(true);
     expect(decision.conflictDetected).toBe(true);
-    expect(decision.webSearchTriggerReasons).toEqual(expect.arrayContaining(["approved_knowledge_unavailable", "source_conflict"]));
-    expect(decision.webSearchTriggerReasons).not.toContain("no_approved_knowledge");
+    expect(decision.webSearchTriggerReasons).toEqual(expect.arrayContaining(["active_knowledge_unavailable", "source_conflict"]));
+    expect(decision.webSearchTriggerReasons).not.toContain("no_active_knowledge");
   });
 
   test("web search fallback detects conflicting approved cards for the same entity", async () => {
@@ -1093,6 +1093,26 @@ describe("answer context assembly", () => {
     expect(decision.webSearchTriggerReasons).toContain("source_conflict");
   });
 
+  test("web search fallback records excluded conflict and verification-risk policies without exposing facts", async () => {
+    const { decideWebSearchFallback, buildSourceBundlePromptSection } = await import("@/features/retrieval/source-bundle");
+    const decision = decideWebSearchFallback({
+      question: "Có nên dừng ở Huế không?",
+      knowledge: [],
+      chatTripContext: { tripProjectFacts: [], chatFacts: [], conflicts: [] },
+      warnings: [],
+      policySummary: {
+        excludedPolicyCounts: { conflict: 1, verificationRequired: 1, other: 0 },
+        excludedReasonCodes: ["verification_failed", "missing_traveler_safe_evidence"],
+      },
+    });
+
+    expect(decision.webSearchTriggerReasons).toEqual(expect.arrayContaining(["no_active_knowledge", "excluded_conflict_candidate", "excluded_verification_required_candidate"]));
+    const section = buildSourceBundlePromptSection(createSourceBundle({ retrievalDecision: decision }));
+    expect(section).toContain("mục bị loại an toàn=2");
+    expect(section).not.toContain("verification_failed");
+    expect(section).not.toContain("missing_traveler_safe_evidence");
+  });
+
   test("source bundle prompt renders web fallback decision without claiming web search ran", async () => {
     const { buildSourceBundlePromptSection } = await import("@/features/retrieval/source-bundle");
 
@@ -1106,13 +1126,13 @@ describe("answer context assembly", () => {
         freshnessRequired: true,
         conflictDetected: false,
         webSearchTriggered: true,
-        webSearchTriggerReasons: ["no_approved_knowledge", "freshness_sensitive_request"],
+        webSearchTriggerReasons: ["no_active_knowledge", "freshness_sensitive_request"],
         generalReasoningUsed: true,
       },
     }));
 
     expect(section).toContain("Quyết định truy xuất trước khi trả lời");
-    expect(section).toContain("Kích hoạt tìm web: có (no_approved_knowledge, freshness_sensitive_request)");
+    expect(section).toContain("Kích hoạt tìm web: có (no_active_knowledge, freshness_sensitive_request)");
     expect(section).toContain("Nếu không có dữ liệu web");
     expect(section).toContain("không nói đã tra cứu web");
     expect(section).toContain("Cảnh báo cần kiểm tra");
@@ -1733,7 +1753,7 @@ describe("answer context assembly", () => {
         checkedAt,
         sourceType: "official",
         confidence: "unverified",
-        triggerReason: "no_approved_knowledge",
+        triggerReason: "no_active_knowledge",
         rank: 1,
       }],
     });
@@ -1778,7 +1798,7 @@ describe("answer context assembly", () => {
         checkedAt,
         sourceType: "community",
         confidence: "unverified",
-        triggerReason: "no_approved_knowledge",
+        triggerReason: "no_active_knowledge",
         rank: 1,
       }],
     });
@@ -1814,7 +1834,7 @@ describe("answer context assembly", () => {
 
     mockStreamingGateway(() => undefined);
     mockRouteAuth();
-    mockWebSearch({
+    const webMocks = mockWebSearch({
       ok: true,
       results: [{
         query: "Giá vé hiện tại ở Huế?",
@@ -1830,6 +1850,7 @@ describe("answer context assembly", () => {
         rank: 1,
       }],
     });
+    webMocks.captureWebSearchResults.mockResolvedValue([{ rank: 1, id: "persisted-web-result-1" }]);
 
     const formData = new FormData();
     formData.set("question", "Giá vé hiện tại ở Huế?");
@@ -1869,13 +1890,15 @@ describe("answer context assembly", () => {
       freshnessRequired: true,
       webSearchTriggered: true,
       generalReasoningUsed: true,
+      selectedKnowledgeCardIds: ["ai-ask-safe-card"],
+      knowledgePolicySnapshot: expect.objectContaining({ selectedCardIds: ["ai-ask-safe-card"] }),
     });
-    expect(decisions[0].webSearchTriggerReasons).toEqual(expect.arrayContaining(["freshness_sensitive_request", "approved_knowledge_may_be_stale"]));
+    expect(decisions[0].webSearchTriggerReasons).toEqual(expect.arrayContaining(["freshness_sensitive_request", "active_knowledge_may_be_stale"]));
     expect(provenance.map((row) => row.sourceCategory)).toEqual(["trip_context", "chat_context", "knowledge", "web", "general"]);
     expect(provenance.every((row) => row.usedInPrompt)).toBe(true);
     expect(provenance.every((row) => row.citedInAnswer === false)).toBe(true);
     expect(provenance.find((row) => row.sourceCategory === "knowledge")).toMatchObject({ sourceReferenceId: "ai-ask-safe-card", sourceReferenceType: "knowledge_card", verificationStatus: "verified" });
-    expect(provenance.find((row) => row.sourceCategory === "web")).toMatchObject({ sourceReferenceType: "web_search_result_rank", verificationStatus: "unverified", sourceType: "official" });
+    expect(provenance.find((row) => row.sourceCategory === "web")).toMatchObject({ sourceReferenceId: "persisted-web-result-1", sourceReferenceType: "web_search_result", verificationStatus: "unverified", sourceType: "official" });
   });
 
   test("web provenance is freshness-sensitive when retrieval decision requires freshness", async () => {
@@ -1913,7 +1936,7 @@ describe("answer context assembly", () => {
           checkedAt: new Date("2026-07-09T10:00:00.000Z"),
           sourceType: "provider",
           confidence: "unverified",
-          triggerReason: "no_approved_knowledge",
+          triggerReason: "no_active_knowledge",
           rank: 1,
         }],
       }),
@@ -1922,6 +1945,21 @@ describe("answer context assembly", () => {
     expect(inserted).toEqual(expect.arrayContaining([
       expect.objectContaining({ sourceCategory: "web", confidenceLabel: "chưa xác minh", verificationStatus: "unverified", freshnessSensitive: true }),
     ]));
+  });
+
+  test("failed or low-confidence web fallback forces a deterministic verification notice", async () => {
+    const { ensureAiAskFreshnessWarning } = await import("@/features/ai/answer-freshness");
+    const result = ensureAiAskFreshnessWarning("Đây là gợi ý tổng quát.", createSourceBundle({
+      retrievalDecision: {
+        ...createSourceBundle().retrievalDecision,
+        webSearchTriggered: true,
+        webSearchTriggerReasons: ["no_active_knowledge"],
+      },
+      warnings: ["web_search_low_quality"],
+    }));
+
+    expect(result.content).toContain("chưa thể xác minh thông tin hiện tại từ nguồn bên ngoài");
+    expect(result.content).toContain("nguồn chính thức hoặc nhà cung cấp");
   });
 
   test("source bundle does not call web search or create web rows when fallback is false", async () => {
@@ -2008,7 +2046,7 @@ describe("answer context assembly", () => {
     expect(responseText).toContain('"type":"done"');
     expect(answerRequestBody).not.toContain("Kiến thức Xuyên Việt đã duyệt");
     expect(answerRequestBody).toContain("Gói nguồn ưu tiên cho AI Ask");
-    expect(answerRequestBody).toContain("approved_knowledge_unavailable");
+    expect(answerRequestBody).toContain("active_knowledge_unavailable");
     expect(answerRequestBody).toContain("tìm web chưa tải được");
   });
 

@@ -70,44 +70,44 @@ describe("web search adapter", () => {
 
     const providerFailure = await searchWebForSourceBundle({
       query: "Huế",
-      triggerReasons: ["no_approved_knowledge"],
+      triggerReasons: ["no_active_knowledge"],
       fetcher: vi.fn(async () => new Response("nope", { status: 503 })),
     });
     const invalidResponse = await searchWebForSourceBundle({
       query: "Huế",
-      triggerReasons: ["no_approved_knowledge"],
+      triggerReasons: ["no_active_knowledge"],
       fetcher: vi.fn(async () => new Response(JSON.stringify({ answer: "not results" }), { status: 200 })),
     });
     const invalidJson = await searchWebForSourceBundle({
       query: "Huế",
-      triggerReasons: ["no_approved_knowledge"],
+      triggerReasons: ["no_active_knowledge"],
       fetcher: vi.fn(async () => new Response("not-json", { status: 200 })),
     });
     const lowQuality = await searchWebForSourceBundle({
       query: "Huế",
-      triggerReasons: ["no_approved_knowledge"],
+      triggerReasons: ["no_active_knowledge"],
       fetcher: vi.fn(async () => new Response(JSON.stringify({ results: [{ title: "Low", url: "https://example.com", content: "x", score: 0.1 }] }), { status: 200 })),
     });
     const timeout = await searchWebForSourceBundle({
       query: "Huế",
-      triggerReasons: ["no_approved_knowledge"],
+      triggerReasons: ["no_active_knowledge"],
       fetcher: vi.fn((_input, init) => new Promise<Response>((_resolve, reject) => {
         init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
       })),
     });
     const emptyQuery = await searchWebForSourceBundle({
       query: "Tên tôi là Nguyễn Văn A, email a@example.com, số 0912 345 678, con 6 tuổi.",
-      triggerReasons: ["no_approved_knowledge"],
+      triggerReasons: ["no_active_knowledge"],
       fetcher: vi.fn(),
     });
     const oversizedResponse = await searchWebForSourceBundle({
       query: "Huế",
-      triggerReasons: ["no_approved_knowledge"],
+      triggerReasons: ["no_active_knowledge"],
       fetcher: vi.fn(async () => new Response(JSON.stringify({ results: [{ title: "Huge", url: "https://example.com", content: "x".repeat(600_000), score: 0.8 }] }), { status: 200 })),
     });
 
     delete process.env.TAVILY_API_KEY;
-    const missingKey = await searchWebForSourceBundle({ query: "Huế", triggerReasons: ["no_approved_knowledge"] });
+    const missingKey = await searchWebForSourceBundle({ query: "Huế", triggerReasons: ["no_active_knowledge"] });
     if (previousKey) {
       process.env.TAVILY_API_KEY = previousKey;
     } else {
@@ -197,7 +197,7 @@ describe("web search adapter", () => {
     const results = normalizeTavilyResults({
       payload: { results: [{ title: "Long URL", url: `https://example.com/${"a".repeat(2_100)}`, content: "Có nội dung", score: 0.8 }] },
       query: "Huế",
-      triggerReason: "no_approved_knowledge",
+      triggerReason: "no_active_knowledge",
       checkedAt: new Date("2026-07-09T10:00:00.000Z"),
     });
 
