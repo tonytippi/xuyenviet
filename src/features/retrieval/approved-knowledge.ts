@@ -159,12 +159,12 @@ function isFacebookUrl(value: string | null) {
   if (!value) return false;
   try {
     const hostname = new URL(value).hostname.toLowerCase();
-    return hostname === "facebook.com" || hostname.endsWith(".facebook.com") || hostname === "fb.com" || hostname === "fb.watch";
+    return hostname === "facebook.com" || hostname.endsWith(".facebook.com") || hostname === "fb.com" || hostname.endsWith(".fb.com") || hostname === "fb.watch" || hostname.endsWith(".fb.watch");
   } catch {
     return false;
   }
 }
 
 function isTravelerSafeEvidenceText(value: string) {
-  return !/(?:[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}|(?:\+?84|0)(?:[\s.-]?\d){8,10}|provider[_-]?payload|storage[_-]?key|raw[_-]?metadata|raw[_-]?source)/i.test(value);
+  return !/(?:[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}|(?:\+?84|0)(?:[\s.-]?\d){8,10}|provider[\s_-]*payload|storage[\s_-]*key|raw[\s_-]*metadata|raw[\s_-]*source)/i.test(value);
 }

@@ -135,7 +135,7 @@ function buildProvenanceRows({
       sourceReferenceType: "knowledge_card",
       retrievalScore: result.score,
       sourceType: result.type,
-       verificationStatus: result.verificationState === "required" ? "unverified" : "verified",
+        verificationStatus: result.verificationState === "required" || result.evidence.some((evidence) => evidence.verificationStatus === "unverified") ? "unverified" : "verified",
       usedInPrompt: promptSection.includes(`cardId=${formatPromptValue(result.cardId)}`),
       sourceSnapshot: buildStateAwareKnowledgeSnapshot(result),
     }));

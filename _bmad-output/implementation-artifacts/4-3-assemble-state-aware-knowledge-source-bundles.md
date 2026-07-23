@@ -50,6 +50,9 @@ so that its answer can use local observations without overstating certainty.
 - [x] [Review][Patch] Make retrieval-effective evidence selection deterministic [src/features/knowledge/search.ts:320] — The active evidence query has no stable ordering before the bundle takes its first three records. PostgreSQL can return a different subset on equivalent requests, making prompt/provenance snapshots nondeterministic and omitting higher-priority evidence.
 - [x] [Review][Patch] Use state-aware terminology in every prompt priority contract [src/features/retrieval/source-bundle.ts:421] — The full, compacted, and minimal priority instructions still describe active knowledge as `kiến thức Xuyên Việt đã duyệt`, contradicting the state-aware knowledge section and the required prompt-facing terminology rename.
 - [x] [Review][Patch] Preserve the knowledge verification state in the provenance row [src/features/retrieval/provenance.ts:138] — Every knowledge provenance row is marked `verified` even when its bundle item and evidence are unverified. Downstream provenance consumers can present community observations as verified despite the stored snapshot state.
+- [x] [Review][Patch] Block Facebook alias URLs from traveler-visible evidence [src/features/retrieval/approved-knowledge.ts:158] — `isFacebookUrl` permits aliases such as `www.fb.com`, `m.fb.com`, and `www.fb.watch`. A legacy or misclassified Facebook source with one of those URLs can retain its quote and link in the prompt and provenance snapshot, violating the raw Facebook exclusion.
+- [x] [Review][Patch] Redact spaced provider-payload markers from traveler-visible evidence [src/features/retrieval/approved-knowledge.ts:168] — The sensitive-text guard matches `provider_payload` and `provider-payload`, but not `provider payload`. A traveler-visible quote with the spaced marker can reach the prompt and provenance snapshot.
+- [x] [Review][Patch] Derive knowledge provenance verification from projected evidence [src/features/retrieval/provenance.ts:138] — Provenance marks every knowledge card whose `verificationState` is not `required` as `verified`, even if all selected evidence has `verificationStatus: "unverified"`. The traveler-facing provenance row can therefore overstate an unverified community source.
 
 ## Dev Notes
 
@@ -96,6 +99,10 @@ gpu4ai/gpt-5.6-terra-review
 - Verified: `pnpm test:run` (49 files, 660 tests), `pnpm typecheck`, `pnpm lint` (passes with 3 pre-existing unused-variable warnings in `tests/knowledge-search.test.ts`), and `pnpm build`.
 - Resolved all five actionable review findings: traveler-visible Facebook/sensitive evidence is redacted, combined conditions are capped at 280 characters, evidence order is deterministic, prompt priority wording is state-aware, and provenance reflects unverified required verification state.
 - Verified review fixes: `pnpm test:run` (49 files, 663 tests), `pnpm typecheck`, `pnpm lint` (passes with 3 pre-existing unused-variable warnings in `tests/knowledge-search.test.ts`), and `pnpm build`.
+- Resolved High review finding: traveler-visible evidence now rejects Facebook aliases including `www.fb.com`, `m.fb.com`, and `www.fb.watch`; focused prompt regressions cover each alias.
+- Resolved High review finding: sensitive evidence markers accept whitespace, underscores, and hyphens, preventing `provider payload` text from reaching prompt or provenance snapshots.
+- Resolved High review finding: knowledge provenance is unverified when the card requires verification or any projected evidence is unverified; a focused persisted-row regression covers a not-required card with unverified evidence.
+- Verified final repair attempt 2: `pnpm test:run tests/answer-context.test.ts` (63 tests) and `pnpm typecheck`.
 
 ### File List
 
@@ -110,3 +117,4 @@ gpu4ai/gpt-5.6-terra-review
 
 - 2026-07-23: Implemented state-aware knowledge source bundle assembly and marked ready for review.
 - 2026-07-23: Addressed all five actionable review findings and retained review status.
+- 2026-07-23: Addressed three final High review findings, added focused regressions, and retained review status.

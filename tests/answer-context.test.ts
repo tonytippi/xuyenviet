@@ -1316,6 +1316,55 @@ describe("answer context assembly", () => {
     expect(JSON.stringify(row?.sourceSnapshot)).not.toContain("traveler@example.com");
   });
 
+  test.each(["https://www.fb.com/private-post", "https://m.fb.com/private-post", "https://www.fb.watch/private-video"])("state-aware knowledge bundle redacts traveler-visible Facebook alias evidence: %s", async (url) => {
+    const { buildApprovedKnowledgePromptSection } = await import("@/features/retrieval/approved-knowledge");
+    const section = buildApprovedKnowledgePromptSection([
+      makeKnowledgeResult("facebook-alias-card", "Điểm dừng từ Facebook", {
+        evidence: [{ evidenceId: "facebook-alias", sourceId: "facebook-source", supportLevel: "primary", displayPolicy: "traveler_visible", sourceLabel: "Facebook", sourceType: "community", verificationStatus: "unverified", official: false, partner: false, collectedDate: null, observedAt: "2026-07-10T00:00:00.000Z", url, quote: "Nội dung Facebook không được hiển thị" }],
+      }),
+    ]);
+
+    expect(section).not.toContain(url);
+    expect(section).not.toContain("Nội dung Facebook không được hiển thị");
+  });
+
+  test("state-aware knowledge bundle redacts spaced provider payload markers from traveler-visible evidence", async () => {
+    const { buildApprovedKnowledgePromptSection } = await import("@/features/retrieval/approved-knowledge");
+    const section = buildApprovedKnowledgePromptSection([
+      makeKnowledgeResult("spaced-provider-payload-card", "Điểm dừng an toàn", {
+        evidence: [{ evidenceId: "spaced-provider-payload", sourceId: "public-source", supportLevel: "primary", displayPolicy: "traveler_visible", sourceLabel: "Nguồn công khai", sourceType: "curated", verificationStatus: "verified", official: true, partner: false, collectedDate: null, observedAt: "2026-07-10T00:00:00.000Z", url: "https://example.com/provider-payload", quote: "Không hiển thị provider payload trong bằng chứng." }],
+      }),
+    ]);
+
+    expect(section).not.toContain("https://example.com/provider-payload");
+    expect(section).not.toContain("provider payload");
+  });
+
+  test("knowledge provenance is unverified when projected evidence is unverified", async () => {
+    await createTestUser("user-1");
+    const { conversation, message } = await createConversationWithUserMessage({ userId: "user-1" });
+    const [assistantMessage] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "assistant", content: "Gợi ý cần kiểm tra." }).returning({ id: messages.id });
+    const { buildApprovedKnowledgePromptSection } = await import("@/features/retrieval/approved-knowledge");
+    const { persistAssistantAnswerProvenance } = await import("@/features/retrieval/provenance");
+    const knowledge = makeKnowledgeResult("unverified-evidence-card", "Quan sát cộng đồng", {
+      verificationState: "not_required",
+      evidence: [{ evidenceId: "unverified-evidence", sourceId: "community-source", supportLevel: "primary", displayPolicy: "fact_only", sourceLabel: "Nguồn cộng đồng", sourceType: "community", verificationStatus: "unverified", official: false, partner: false, collectedDate: null, observedAt: "2026-07-10T00:00:00.000Z", url: null, quote: null }],
+    });
+    const section = buildApprovedKnowledgePromptSection([knowledge]);
+
+    await persistAssistantAnswerProvenance(testDb, {
+      userId: "user-1",
+      conversationId: conversation.id,
+      userMessageId: message.id,
+      assistantMessageId: assistantMessage.id,
+      promptSection: section,
+      sourceBundle: createSourceBundle({ knowledge: [knowledge] }),
+    });
+    const [row] = await testDb.select().from(assistantResponseProvenance).where(eq(assistantResponseProvenance.sourceReferenceId, knowledge.id));
+
+    expect(row?.verificationStatus).toBe("unverified");
+  });
+
   test("source bundle priority contract names active state-aware knowledge", async () => {
     vi.doUnmock("@/features/retrieval/approved-knowledge");
     vi.resetModules();
