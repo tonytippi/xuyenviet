@@ -164,6 +164,23 @@ describe("knowledge batch source intake", () => {
     await expect(testDb.select().from(knowledgeSeedBatchItems)).resolves.toMatchObject([{ id: item!.id, status: "reading" }]);
   });
 
+  test("recent batch listing derives approval from current state and evidence, not legacy fields", async () => {
+    await createUser("state-aware-status-operator", ["operator"]);
+    authMock.mockResolvedValue({ user: { id: "state-aware-status-operator", email: "state-aware-status-operator@example.com" } });
+    const { listRecentKnowledgeSeedBatches, submitKnowledgeSeedUrlBatch } = await import("@/features/knowledge/batch-intake");
+
+    await submitKnowledgeSeedUrlBatch({ urls: "https://example.com/state-aware" });
+    const [item] = await testDb.select().from(knowledgeSeedBatchItems);
+    await testDb.update(sources).set({ eligibility: "eligible", removalReason: null, removedByUserId: null, removalCompletedAt: null }).where(eq(sources.id, item!.sourceId!));
+    await testDb.insert(knowledgeCards).values({ id: "state-aware-status-card", status: "draft", needsReview: true, publicationState: "active", knowledgeState: "community_observation", reviewState: "reviewed", verificationState: "not_required", type: "place", title: "Điểm dừng state-aware", locationName: "Huế", summary: "Thẻ hợp lệ theo trạng thái hiện hành.", confidence: "curated", aiPromptVersion: "test", createdByUserId: "state-aware-status-operator" });
+    await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: "state-aware-status-card", sourceId: item!.sourceId!, supportLevel: "primary" });
+    const capture = await seedSourceCaptureVersion({ sourceId: item!.sourceId!, captureKind: "url", rawText: "Bằng chứng state-aware hợp lệ." });
+    await seedKnowledgeCardEvidence({ cardId: "state-aware-status-card", sourceId: item!.sourceId!, captureVersionId: capture.id, quoteText: "Bằng chứng state-aware hợp lệ." });
+
+    const [batch] = await listRecentKnowledgeSeedBatches();
+    expect(batch.items).toMatchObject([{ sourceId: item!.sourceId, status: "approved" }]);
+  });
+
   test("batch intake handles carriage-return lines and oversized URLs as item failures", async () => {
     await createUser("edge-operator", ["operator"]);
     authMock.mockResolvedValue({ user: { id: "edge-operator", email: "edge-operator@example.com" } });

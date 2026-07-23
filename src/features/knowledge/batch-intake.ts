@@ -4,7 +4,7 @@ import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
 import { knowledgeCardEvidence, knowledgeCards, knowledgeCardSources, knowledgeCardTypeValues, knowledgeRecommendations, knowledgeSeedBatchItems, knowledgeSeedBatches, knowledgeSourceSuggestions, sourceCaptureVersions, sources, type KnowledgeCardType, type KnowledgeRecommendationReason, type KnowledgeSeedBatchItemStatus, type KnowledgeSuggestionAction } from "@/db/schema";
-import { isKnowledgeCardTravelerEligible } from "@/features/knowledge/state";
+import { evaluateKnowledgeTravelerPolicy } from "@/features/knowledge/state";
 import { recordAuditEvent } from "@/features/audit/events";
 import { requireAdminSession } from "@/server/auth";
 
@@ -237,6 +237,9 @@ export async function getActiveEvidenceGroundedSeedCoverage(): Promise<ActiveEvi
       knowledgeState: knowledgeCards.knowledgeState,
       reviewState: knowledgeCards.reviewState,
       verificationState: knowledgeCards.verificationState,
+      title: knowledgeCards.title,
+      summary: knowledgeCards.summary,
+      conditions: knowledgeCards.conditions,
       contentVersion: knowledgeCards.contentVersion,
       evidenceSetRevision: knowledgeCards.evidenceSetRevision,
     })
@@ -251,7 +254,9 @@ export async function getActiveEvidenceGroundedSeedCoverage(): Promise<ActiveEvi
     .where(and(
       eq(knowledgeCardEvidence.state, "active"),
       sql`${knowledgeCardEvidence.supportLevel} in ('primary', 'supporting')`,
+      sql`${knowledgeCardEvidence.displayPolicy} in ('fact_only', 'traveler_visible')`,
       eq(sources.eligibility, "eligible"),
+      sql`${sources.kind} = ${sourceCaptureVersions.captureKind} and ${sources.kind} in ('url', 'facebook', 'youtube')`,
       sql`${sourceCaptureVersions.payloadDeletedAt} is null`,
       sql`${sourceCaptureVersions.rawText} is not null`,
       sql`substring(${sourceCaptureVersions.rawText} from ${knowledgeCardEvidence.spanStart} + 1 for ${knowledgeCardEvidence.spanEnd} - ${knowledgeCardEvidence.spanStart}) = ${knowledgeCardEvidence.quoteText}`,
@@ -273,18 +278,17 @@ export async function getActiveEvidenceGroundedSeedCoverage(): Promise<ActiveEvi
 
   for (const row of cardRows) {
     if (!hasCorridorSignal(row.routeSegment, row.locationName)) continue;
-    const activeSupportingEvidenceCount = evidenceKeysByCardId.get(row.id)?.size ?? 0;
-    const hasCurrentEvidence = activeSupportingEvidenceCount > 0;
+    const activeTravelerSafeEvidenceCount = evidenceKeysByCardId.get(row.id)?.size ?? 0;
+    const hasCurrentEvidence = activeTravelerSafeEvidenceCount > 0;
     if (hasCurrentEvidence && (row.knowledgeState === "uncertain" || row.verificationState === "required")) caveatOnlyHighRiskCards += 1;
     if (row.needsReview || row.reviewState === "ai_recommended" || row.reviewState === "in_review") pendingReviewCards += 1;
     if (row.verificationState === "required") pendingVerificationCards += 1;
-    const eligibleForCoverage = isKnowledgeCardTravelerEligible({
+    const policy = evaluateKnowledgeTravelerPolicy({
       ...row,
-      activeSupportingEvidenceCount,
-      capturePayloadAvailable: hasCurrentEvidence,
+      activeTravelerSafeEvidenceCount,
+      activeTravelerSafeIndependenceKeyCount: activeTravelerSafeEvidenceCount,
     });
-    const hasRequiredPatternSupport = row.knowledgeState !== "community_pattern" || activeSupportingEvidenceCount >= 2;
-    if (eligibleForCoverage && hasRequiredPatternSupport && row.knowledgeState !== "uncertain" && !uniqueEligibleCards.has(row.id)) {
+    if (policy.policy === "contextual_use" && !uniqueEligibleCards.has(row.id)) {
       uniqueEligibleCards.set(row.id, { type: row.type, locationName: row.locationName, routeSegment: row.routeSegment });
       if (row.knowledgeState === "community_observation") activeCommunityObservations += 1;
       if (row.knowledgeState === "community_pattern") activeCommunityPatterns += 1;
@@ -431,10 +435,13 @@ async function deriveStatusesForSourceItems(db: Pick<BatchDb, "select">, items: 
       knowledgeState: knowledgeCards.knowledgeState,
       reviewState: knowledgeCards.reviewState,
       verificationState: knowledgeCards.verificationState,
+      title: knowledgeCards.title,
+      summary: knowledgeCards.summary,
+      conditions: knowledgeCards.conditions,
       locationName: knowledgeCards.locationName,
       routeSegment: knowledgeCards.routeSegment,
-      activeSupportingEvidenceCount: sql<number>`case when exists (select 1 from ${knowledgeCardEvidence} evidence join ${knowledgeCardSources} link on link.knowledge_card_id = evidence.knowledge_card_id and link.source_id = evidence.source_id join ${sourceCaptureVersions} capture on capture.id = evidence.capture_version_id and capture.source_id = evidence.source_id where evidence.knowledge_card_id = ${knowledgeCards.id} and evidence.state = 'active' and evidence.support_level in ('primary', 'supporting') and capture.payload_deleted_at is null and substring(capture.raw_text from evidence.span_start + 1 for evidence.span_end - evidence.span_start) = evidence.quote_text) then 1 else 0 end`,
-      capturePayloadAvailable: sql<boolean>`true`,
+      activeTravelerSafeEvidenceCount: sql<number>`(select count(*)::int from ${knowledgeCardEvidence} evidence join ${knowledgeCardSources} link on link.knowledge_card_id = evidence.knowledge_card_id and link.source_id = evidence.source_id join ${sources} evidence_source on evidence_source.id = evidence.source_id and evidence_source.eligibility = 'eligible' join ${sourceCaptureVersions} capture on capture.id = evidence.capture_version_id and capture.source_id = evidence.source_id where evidence.knowledge_card_id = ${knowledgeCards.id} and evidence.state = 'active' and evidence.support_level in ('primary', 'supporting') and evidence.display_policy in ('fact_only', 'traveler_visible') and evidence_source.kind = capture.capture_kind and evidence_source.kind in ('url', 'facebook', 'youtube') and capture.payload_deleted_at is null and substring(capture.raw_text from evidence.span_start + 1 for evidence.span_end - evidence.span_start) = evidence.quote_text)`,
+      activeTravelerSafeIndependenceKeyCount: sql<number>`(select count(distinct evidence.independence_key)::int from ${knowledgeCardEvidence} evidence join ${knowledgeCardSources} link on link.knowledge_card_id = evidence.knowledge_card_id and link.source_id = evidence.source_id join ${sources} evidence_source on evidence_source.id = evidence.source_id and evidence_source.eligibility = 'eligible' join ${sourceCaptureVersions} capture on capture.id = evidence.capture_version_id and capture.source_id = evidence.source_id where evidence.knowledge_card_id = ${knowledgeCards.id} and evidence.state = 'active' and evidence.support_level in ('primary', 'supporting') and evidence.display_policy in ('fact_only', 'traveler_visible') and evidence_source.kind = capture.capture_kind and evidence_source.kind in ('url', 'facebook', 'youtube') and capture.payload_deleted_at is null and substring(capture.raw_text from evidence.span_start + 1 for evidence.span_end - evidence.span_start) = evidence.quote_text)`,
     })
     .from(knowledgeCardSources)
     .innerJoin(knowledgeCards, eq(knowledgeCards.id, knowledgeCardSources.knowledgeCardId))
@@ -468,15 +475,8 @@ async function deriveStatusesForSourceItems(db: Pick<BatchDb, "select">, items: 
   return derived;
 }
 
-function mapCardStatus(card: Pick<typeof knowledgeCards.$inferSelect, "status" | "needsReview" | "publicationState" | "knowledgeState" | "reviewState" | "verificationState"> & { activeSupportingEvidenceCount?: number; capturePayloadAvailable?: boolean }): KnowledgeSeedBatchItemStatus {
-  const { status, needsReview } = card;
-  if (status === "approved" && needsReview) return "needs_review";
-  if (status === "approved") return isKnowledgeCardTravelerEligible(card) ? "approved" : "needs_review";
-  if (status === "archived") return "rejected";
-  if (status === "rejected") return "rejected";
-  if (status === "duplicate" || status === "no_action") return "duplicate";
-  if (status === "draft" && needsReview) return "needs_review";
-  return "extracted";
+function mapCardStatus(card: Pick<typeof knowledgeCards.$inferSelect, "publicationState" | "knowledgeState" | "reviewState" | "verificationState" | "title" | "summary" | "locationName" | "routeSegment" | "conditions"> & { activeTravelerSafeEvidenceCount?: number; activeTravelerSafeIndependenceKeyCount?: number }): KnowledgeSeedBatchItemStatus {
+  return evaluateKnowledgeTravelerPolicy(card).policy !== "exclude" ? "approved" : "needs_review";
 }
 
 function pickHigherStatus(current: KnowledgeSeedBatchItemStatus | undefined, next: KnowledgeSeedBatchItemStatus) {

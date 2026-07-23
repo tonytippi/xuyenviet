@@ -18,7 +18,7 @@ import {
   type KnowledgeSourceSupport,
 } from "@/db/schema";
 import { recordAuditEvent } from "@/features/audit/events";
-import { isKnowledgeCardTravelerEligible } from "@/features/knowledge/state";
+import { evaluateKnowledgeTravelerPolicy } from "@/features/knowledge/state";
 import { requireAdminSession, type AuthenticatedSessionWithRoles } from "@/server/auth";
 
 const maxTitleLength = 160;
@@ -750,25 +750,26 @@ async function loadApprovedKnowledgeIndexStatuses(cardIds: string[]) {
     .select({
       cardId: knowledgeCards.id,
       cardUpdatedAt: knowledgeCards.updatedAt,
-      status: knowledgeCards.status,
-      needsReview: knowledgeCards.needsReview,
       publicationState: knowledgeCards.publicationState,
       knowledgeState: knowledgeCards.knowledgeState,
       reviewState: knowledgeCards.reviewState,
       verificationState: knowledgeCards.verificationState,
+      title: knowledgeCards.title,
+      summary: knowledgeCards.summary,
+      conditions: knowledgeCards.conditions,
       locationName: knowledgeCards.locationName,
       routeSegment: knowledgeCards.routeSegment,
-      activeSupportingEvidenceCount: sql<number>`case when exists (select 1 from ${knowledgeCardEvidence} evidence join ${knowledgeCardSources} link on link.knowledge_card_id = evidence.knowledge_card_id and link.source_id = evidence.source_id join ${sourceCaptureVersions} capture on capture.id = evidence.capture_version_id and capture.source_id = evidence.source_id where evidence.knowledge_card_id = ${knowledgeCards.id} and evidence.state = 'active' and evidence.support_level in ('primary', 'supporting') and capture.payload_deleted_at is null and substring(capture.raw_text from evidence.span_start + 1 for evidence.span_end - evidence.span_start) = evidence.quote_text) then 1 else 0 end`,
-      capturePayloadAvailable: sql<boolean>`true`,
+      activeTravelerSafeEvidenceCount: sql<number>`(select count(*)::int from ${knowledgeCardEvidence} evidence join ${knowledgeCardSources} link on link.knowledge_card_id = evidence.knowledge_card_id and link.source_id = evidence.source_id join ${sources} evidence_source on evidence_source.id = evidence.source_id and evidence_source.eligibility = 'eligible' join ${sourceCaptureVersions} capture on capture.id = evidence.capture_version_id and capture.source_id = evidence.source_id where evidence.knowledge_card_id = ${knowledgeCards.id} and evidence.state = 'active' and evidence.support_level in ('primary', 'supporting') and evidence.display_policy in ('fact_only', 'traveler_visible') and evidence_source.kind = capture.capture_kind and evidence_source.kind in ('url', 'facebook', 'youtube') and capture.payload_deleted_at is null and substring(capture.raw_text from evidence.span_start + 1 for evidence.span_end - evidence.span_start) = evidence.quote_text)`,
+      activeTravelerSafeIndependenceKeyCount: sql<number>`(select count(distinct evidence.independence_key)::int from ${knowledgeCardEvidence} evidence join ${knowledgeCardSources} link on link.knowledge_card_id = evidence.knowledge_card_id and link.source_id = evidence.source_id join ${sources} evidence_source on evidence_source.id = evidence.source_id and evidence_source.eligibility = 'eligible' join ${sourceCaptureVersions} capture on capture.id = evidence.capture_version_id and capture.source_id = evidence.source_id where evidence.knowledge_card_id = ${knowledgeCards.id} and evidence.state = 'active' and evidence.support_level in ('primary', 'supporting') and evidence.display_policy in ('fact_only', 'traveler_visible') and evidence_source.kind = capture.capture_kind and evidence_source.kind in ('url', 'facebook', 'youtube') and capture.payload_deleted_at is null and substring(capture.raw_text from evidence.span_start + 1 for evidence.span_end - evidence.span_start) = evidence.quote_text)`,
       documentStatus: knowledgeCardSearchDocuments.status,
       documentUpdatedAt: knowledgeCardSearchDocuments.updatedAt,
     })
     .from(knowledgeCards)
     .leftJoin(knowledgeCardSearchDocuments, eq(knowledgeCardSearchDocuments.knowledgeCardId, knowledgeCards.id))
-    .where(and(inArray(knowledgeCards.id, uniqueCardIds), eq(knowledgeCards.status, "approved"), eq(knowledgeCards.needsReview, false)));
+    .where(inArray(knowledgeCards.id, uniqueCardIds));
 
   for (const row of rows) {
-    statuses.set(row.cardId, isKnowledgeCardTravelerEligible(row) ? toIndexStatus(row.documentStatus, row.documentUpdatedAt, row.cardUpdatedAt) : toEvidencePendingIndexStatus());
+    statuses.set(row.cardId, evaluateKnowledgeTravelerPolicy(row).policy !== "exclude" ? toIndexStatus(row.documentStatus, row.documentUpdatedAt, row.cardUpdatedAt) : toEvidencePendingIndexStatus());
   }
 
   return statuses;

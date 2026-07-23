@@ -37,6 +37,7 @@ async function createSource(userId: string, values: Partial<typeof sources.$infe
       verificationStatus: values.verificationStatus ?? "unverified",
       official: values.official ?? false,
       partner: values.partner ?? false,
+      eligibility: values.eligibility ?? "eligible",
       submittedByUserId: userId,
     })
     .returning();
@@ -121,6 +122,7 @@ describe("approved knowledge cards", () => {
       { knowledgeCardId: card.id, sourceId: supporting.id, supportLevel: "supporting" },
       { knowledgeCardId: card.id, sourceId: conflicting.id, supportLevel: "conflicting" },
     ]);
+    await seedSourceCaptureVersion({ sourceId: primary.id, captureKind: "copied_post", rawText: "Nội dung nguồn đã giữ lại để duyệt thẻ." });
     const { approveKnowledgeDraft, getApprovedKnowledgeCard, listApprovedKnowledgeCards } = await import("@/features/knowledge/review");
 
     await approveKnowledgeDraft(card.id);
@@ -217,7 +219,7 @@ describe("approved knowledge cards", () => {
   test("approved list reports worker-owned index status", async () => {
     await createUser("index-status-operator", ["operator"]);
     authMock.mockResolvedValue({ user: { id: "index-status-operator", email: "index-status-operator@example.com" } });
-    const source = await createSource("index-status-operator", { id: "index-status-source" });
+    const source = await createSource("index-status-operator", { id: "index-status-source", kind: "url", url: "https://example.com/index-status" });
     const eligibleState = { status: "approved" as const, needsReview: false, publicationState: "active" as const, knowledgeState: "uncertain" as const, reviewState: "reviewed" as const, verificationState: "not_required" as const };
     const indexed = await createCard("index-status-operator", { id: "index-status-indexed", title: "Đã có index", ...eligibleState });
     const missing = await createCard("index-status-operator", { id: "index-status-missing", title: "Chưa có index", ...eligibleState });
@@ -243,6 +245,19 @@ describe("approved knowledge cards", () => {
     const selectedStatuses = await getApprovedKnowledgeIndexStatuses([indexed.id, missing.id]);
     expect(selectedStatuses.get(indexed.id)).toMatchObject({ state: "indexed", documentStatus: "active" });
     expect(selectedStatuses.get(missing.id)).toMatchObject({ state: "needs_indexing", documentStatus: null });
+  });
+
+  test("index status lookup evaluates canonical state without legacy approval filters", async () => {
+    await createUser("state-aware-index-operator", ["operator"]);
+    authMock.mockResolvedValue({ user: { id: "state-aware-index-operator", email: "state-aware-index-operator@example.com" } });
+    const source = await createSource("state-aware-index-operator", { id: "state-aware-index-source", kind: "url", url: "https://example.com/state-aware-index" });
+    const card = await createCard("state-aware-index-operator", { id: "state-aware-index-card", status: "draft", needsReview: true, publicationState: "active", knowledgeState: "community_observation", reviewState: "reviewed", verificationState: "not_required" });
+    await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: card.id, sourceId: source.id, supportLevel: "primary" });
+    const capture = await seedSourceCaptureVersion({ sourceId: source.id, captureKind: "url", rawText: "Evidence an toàn cho trạng thái canonical." });
+    await seedKnowledgeCardEvidence({ cardId: card.id, sourceId: source.id, captureVersionId: capture.id, quoteText: "Evidence an toàn cho trạng thái canonical." });
+    const { getApprovedKnowledgeIndexStatuses } = await import("@/features/knowledge/review");
+
+    await expect(getApprovedKnowledgeIndexStatuses([card.id])).resolves.toEqual(new Map([[card.id, expect.objectContaining({ state: "needs_indexing", documentStatus: null })]]));
   });
 
   test("approved reads authorize before lookup and do not leak existence", async () => {

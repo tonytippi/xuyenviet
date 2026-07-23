@@ -1,59 +1,52 @@
-# Epic 4 Context: AI-Assisted Knowledge Intake And Approval
+# Epic 4 Context: Source-Grounded AI Answers And Trust Signals
 
 <!-- Generated from planning artifacts. Regenerate with compile-epic-context if planning docs change. -->
 
 ## Goal
 
-Epic 4 builds the operator-controlled knowledge workflow that turns travel URLs, copied content, Facebook/community material, raw text, and screenshots into structured knowledge cards. Its purpose is to let AI accelerate intake while preserving human review, source provenance, confidence labeling, freshness handling, and approved-only retrieval eligibility, so XuyenViet can seed enough trustworthy Hanoi-to-HCMC corridor knowledge to improve traveler answers without leaking raw or unreviewed material.
+Make AI Ask answers trustworthy and inspectable by combining the selected trip and current-chat context with only currently eligible community knowledge, using external search only when internal knowledge cannot safely answer the question. Responses must be Vietnamese, responsive, explicit about uncertainty and verification, and backed by persisted provenance so travelers can understand the origin and limits of advice without operator-only material leaking into the experience.
 
 ## Stories
 
-- Story 4.1: Submit Travel Source For AI Reading
-- Story 4.2: AI Extracts Knowledge Drafts From Source
-- Story 4.3: Review And Edit AI-Prepared Drafts
-- Story 4.4: AI Suggests Create Or Update From Source URL
-- Story 4.5: Batch Seed Source URL Intake
-- Story 4.6: Approve Knowledge For Retrieval
-- Story 4.7: Preserve Source And Confidence In Approved Knowledge
-- Story 4.8: Make Approved Knowledge Searchable By AI
-- Story 4.9: Track 100 Approved Corridor Items
+- Story 4.1: Migrate Retrieval to State-Aware Active Knowledge
+- Story 4.2: Index Current AI-First Knowledge Versions
+- Story 4.3: Assemble State-Aware Knowledge Source Bundles
+- Story 4.4: Enforce Community, Conditional, and Conflict Answer Policy
+- Story 4.5: Update Search Fallback and Provenance for AI-First States
+- Story 4.6: Render State-Aware Traveler Trust Details
+- Story 4.7: Verify AI-First Retrieval and Answer Safety
 
 ## Requirements & Constraints
 
-The knowledge workflow is operator/admin-only. Normal travelers must never see admin controls, raw submitted text, screenshot-derived notes, provider-specific raw metadata, or operator-only fields. Source submission must support URL, Facebook post link, copied post content, pasted raw text, and image/screenshot inputs, while storing normalized safe source metadata separately from operator-only raw source material.
-
-Knowledge cards must include title, type, location or route segment, summary, source linkage, collected or checked date when available, confidence label, tags, freshness-sensitive flag, and lifecycle status. Fixed MVP card types are place, food, hotel area, activity, service, route note, warning, cost note, parking, EV charging, kid-friendly tip, discount/promotion, and general travel tip. Fixed MVP displayed confidence labels are `unverified`, `community`, `curated`, `partner`, and `official`.
-
-AI extraction may propose one or more drafts, create/update/no-action decisions, duplicates, conflicts, or low-value markers, but it must never approve cards automatically or mutate an existing approved card without operator approval. Uncertain or incomplete facts remain unverified or needing review. Facebook and copied community content defaults to community/unverified and cannot be treated as official unless an operator marks it as an identifiable official/provider source.
-
-Freshness-sensitive facts include price, schedule, availability, road condition, opening hours, weather, service status, promotions, and similar changing information. Operators must be able to mark drafts/cards as freshness-sensitive, and source dates must remain visible where available.
-
-Only approved knowledge cards are eligible for normal traveler retrieval. Draft, rejected, duplicate/no-action, and archived items must be excluded. The public-MVP seed target is at least 100 approved Hanoi-to-HCMC corridor items; progress counts only approved corridor items and should expose gaps by type and route/location.
+- Preserve answer-context priority: selected trip project, current chat, active XuyenViet knowledge, web fallback, then general reasoning.
+- Retrieve only cards whose current publication, knowledge, review, verification, evidence, source-safety, and required metadata permit traveler use. Historical approval fields and index status alone cannot authorize a card.
+- Every selected knowledge item receives exactly one policy: `contextual_use`, `caveat_only`, or `exclude`. Unknown, incomplete, stale, disabled, suppressed, archived, superseded, verification-failed, source-missing, raw, private, and operator-only records fail closed.
+- Use community observations as community-reported information, call a pattern a pattern only when independently supported, and retain all material conditions for conditional information. Uncertain or verification-required information is caveat-only; conflicted knowledge must never become a factual itinerary premise.
+- Treat road, safety, EV, price, hours, availability, booking, and promotion information as changing details requiring explicit verification guidance. Never express collected or unverified information as guaranteed fact.
+- Trigger provider-adapted web fallback when relevant active knowledge is absent, sparse for a broad question, freshness-sensitive, uncertain, or conflicted. Prefer official/provider pages; all external results remain unverified unless later published through the knowledge workflow. Search failure or low confidence must produce explicit confirmation guidance rather than unsupported current facts.
+- Stream only after chat/trip context, source bundle, and provenance inputs are prepared. Partial stream content is transient; a failed stream must not imply a saved completed response.
+- Persist final assistant content, retrieval decision, row-per-source provenance, and usage data atomically. Usage captures authenticated context where applicable, purpose, provider/model, timestamp, available provider metadata, and configured cost estimate without introducing billing or credits.
+- Answer trust UI must reveal safe source label/title, type, URL when available, date, confidence, freshness, community/conditional state, and verification caveats. Labels, not color alone, convey source meaning.
 
 ## Technical Decisions
 
-The app remains a Next.js App Router modular monolith with server-side feature boundaries. Knowledge owns cards, card-source linkage, raw source material, and card embeddings. Admin UI must call Knowledge/Admin server entrypoints rather than mutating tables directly. Protected knowledge mutations require authenticated session plus operator/admin role checks and should record audit context with actor, target, operation, timestamp, and relevant before/after summary where appropriate.
-
-PostgreSQL is the source of truth for sources, raw source material, knowledge cards, card-source linkage, embeddings, audit events, and related status. Drizzle owns schema and migrations. All persistent tables and indexes must be introduced through migrations.
-
-Normalized source linkage is required. `sources` hold safe source metadata such as source kind, URL or canonical URL, label, publisher, collected/checked date, source type, verification status, and official/partner flags. `raw_source_material` holds raw text or file metadata, raw metadata JSON, and operator-only material. Approved cards must link to at least one source through `knowledge_card_sources` with support level such as primary, supporting, or conflicting. Traveler-facing provenance later reads from linked source rows, not free-text card fields.
-
-Knowledge lifecycle is `draft -> approved -> archived`, with rejected/duplicate/no-action intake outcomes as non-retrievable workflow states where needed. Retrieval must join embeddings back to current owner rows and filter current owner status. Draft or archived cards must have no active retrievable embeddings. When retrievable text changes, previous embeddings become stale or disabled in the same transaction before new active embeddings are available.
-
-AI calls for extraction, image/screenshot reading, and embeddings go through the OpenAI-compatible AI Gateway adapter, not direct OpenAI calls. Every model call declares purpose, model, prompt version, input source bundle, and output schema expectation where applicable. Image/screenshot extraction requires an active Gateway model with image-input and extraction capability; if none is configured, extraction fails safely. Provider usage metadata should be emitted when available for Usage persistence without turning usage events into billing or credit behavior.
+- Keep the MVP as a Next.js TypeScript modular monolith with PostgreSQL as the source of truth. Feature ownership remains explicit: Retrieval reads eligible Knowledge projections, Search owns web results, AI Orchestration owns response provenance, and Usage owns append-only usage events.
+- Search lexical `knowledge_card_search_documents` for candidates, then load current owner rows and current evidence before source-bundle inclusion. Ranking score may order eligible results but cannot override eligibility.
+- Index documents are rebuildable projections. Knowledge state mutations atomically update the card, audit record, and dirty marker; ineligible transitions disable the projection immediately. The indexing worker is idempotent by `(knowledge_card_id, content_version)`, and retrieval rechecks current state to prevent index lag from restoring unsafe content.
+- Knowledge source-bundle entries contain card identity, fact, type, location/route, conditions, confidence, freshness, knowledge and verification states, use policy, and bounded traveler-safe source/evidence metadata. Never include raw source text, copied post bodies, OCR/media notes, private data, operator-only evidence, provider payloads, or audit metadata.
+- Use a provider adapter for web search and the OpenAI-compatible AI Gateway. Each model call declares its purpose, managed model record, prompt version, source bundle, and applicable output schema. Model records supply active capabilities and versioned input/output/cache pricing; unavailable pricing must not block safe generation.
+- Store provenance row-per-source-item with category, one applicable source reference, rank/score, source and verification metadata, prompt/citation flags, and a safe snapshot. Renderers, evaluations, and audits consume stored provenance rather than parsing answer text.
+- Persist answer annotation descriptors only after validating their ranges against final message content and binding their safe detail to provenance rows belonging to the same message, conversation, and user. Never infer annotations, citations, or source state from free-form Vietnamese response text at render time.
 
 ## UX & Interaction Patterns
 
-Admin knowledge work lives in a role-protected admin shell separated from traveler chat. The main surfaces are knowledge intake, draft review queue, knowledge card detail, approved list where applicable, and seed progress. Admin mobile usability is desirable, but dense batch review may be optimized for tablet/desktop as long as core edit/reject/approve remains functional where feasible.
-
-The intake submitter supports URL, raw text, copied post content, and screenshot/file metadata. Failed extraction is recoverable, shows a safe operator-facing error, and creates no approved card. Batch intake tracks each URL independently with statuses such as pending, reading, extracted, needs review, approved, failed, duplicate, or rejected.
-
-Draft review should show structured fields: title, type, route/location, summary, source, collected date, confidence label, freshness-sensitive flag, tags, status, and extraction/create-update/conflict status where relevant. Operators edit through forms, not unstructured AI prose. Save draft, reject, approve, and archive are distinct actions; approval must not be accidental.
-
-Seed progress shows the count of approved Hanoi-to-HCMC corridor items, remaining gap to 100, and distribution by type and route/location. Source/confidence labels must always include text, not color alone. Use compact source/confidence chips and freshness warnings consistent with the design spine, while keeping raw source details inside operator-only views.
+- Keep answers scannable with relevant plan, rationale, tips, warnings, sources, uncertainty, and next-step sections. Use compact source and confidence summaries with progressive disclosure rather than long inline provenance blocks.
+- A selected persisted source, warning, place, route, cost, or trip-fact descriptor opens one contextual detail view: desktop inspector or mobile sheet. It shows a Vietnamese summary, safe quick facts, supported actions, and provenance chips; an unselected or unavailable item must not create a blank inspector.
+- Source details and selectable entities must be keyboard accessible. The active detail view closes with `Esc` and restores focus to its trigger. Streaming and completion use polite live announcements, offer recoverable failure, and respect reduced-motion preferences.
+- Keep traveler trust details separate from operator workflows. Facebook-derived raw posts, quotes, and links remain hidden unless explicit traveler display policy permits the specific bounded evidence.
 
 ## Cross-Story Dependencies
 
-Stories 4.1 and 4.2 establish source/raw-material storage and AI extraction foundations needed by later review, update, batch, approval, and indexing stories. Stories 4.3 through 4.7 depend on normalized source metadata and card-source linkage being available before approval can produce retrieval-ready, provenance-ready cards. Story 4.8 depends on approved card lifecycle and retrievable text being stable enough to create, stale, disable, or refresh embeddings safely. Story 4.9 depends on approved cards carrying corridor route/location and type metadata.
-
-Epic 4 depends on Epic 1 admin role protection and audited protected mutations. It feeds Epic 5 retrieval and provenance: approved cards, source metadata, confidence labels, freshness flags, and embeddings become the curated knowledge input for traveler answer grounding.
+- Builds on Epic 2's authenticated, owner-scoped conversation, trip context, streaming, image, and deletion behavior; change the generation and retrieval contract without recreating those capabilities.
+- Requires Epic 3's canonical card state model, current bounded evidence, source-safe links, transactional dirty markers, source-removal propagation, and supervised indexing/ingestion foundations.
+- Implement retrieval eligibility and index versioning before depending on their source bundles; source bundles and answer policy precede final fallback/provenance integration and traveler trust details. Safety tests cover all completed paths, including concurrent or stale index work.

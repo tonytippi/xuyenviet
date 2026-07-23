@@ -58,7 +58,7 @@ development_status:
   epic-3-retrospective: optional
 
   epic-4: in-progress
-  4-1-migrate-retrieval-to-state-aware-active-knowledge: ready-for-dev
+  4-1-migrate-retrieval-to-state-aware-active-knowledge: done
   4-2-index-current-ai-first-knowledge-versions: ready-for-dev
   4-3-assemble-state-aware-knowledge-source-bundles: ready-for-dev
   4-4-enforce-community-conditional-and-conflict-answer-policy: ready-for-dev

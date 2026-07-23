@@ -135,9 +135,18 @@ function makeKnowledgeResult(id: string, title: string, overrides: Partial<Knowl
     tags: [],
     confidence: "curated",
     freshnessSensitive: false,
+    publicationState: "active",
+    knowledgeState: "community_observation",
+    reviewState: "reviewed",
+    verificationState: "not_required",
+    conditions: [],
+    contentVersion: 1,
+    evidenceSetRevision: 1,
     updatedAt: new Date("2026-07-09T00:00:00.000Z"),
     createdAt: new Date("2026-07-09T00:00:00.000Z"),
     score: 3,
+    policy: "contextual_use",
+    policyReasons: [],
     sources: [],
     ...overrides,
   };
@@ -1186,9 +1195,18 @@ describe("answer context assembly", () => {
         tags: [],
         confidence: "community",
         freshnessSensitive: false,
+        publicationState: "active",
+        knowledgeState: "community_observation",
+        reviewState: "reviewed",
+        verificationState: "not_required",
+        conditions: [],
+        contentVersion: 1,
+        evidenceSetRevision: 1,
         updatedAt: new Date("2026-07-09T00:00:00.000Z"),
         createdAt: new Date("2026-07-09T00:00:00.000Z"),
         score: 3,
+        policy: "contextual_use",
+        policyReasons: [],
         sources: [],
       },
     ]);
@@ -1244,14 +1262,36 @@ describe("answer context assembly", () => {
         tags: [],
         confidence: "community".repeat(1_200) as "community",
         freshnessSensitive: false,
+        publicationState: "active",
+        knowledgeState: "community_observation",
+        reviewState: "reviewed",
+        verificationState: "not_required",
+        conditions: [],
+        contentVersion: 1,
+        evidenceSetRevision: 1,
         updatedAt: new Date("2026-07-09T00:00:00.000Z"),
         createdAt: new Date("2026-07-09T00:00:00.000Z"),
         score: 3,
+        policy: "contextual_use",
+        policyReasons: [],
         sources: [],
       },
     ]);
 
     expect(section).toBe("");
+  });
+
+  test("compact approved knowledge output preserves bounded conditions for contextual-use community observations", async () => {
+    const { buildApprovedKnowledgePromptSection } = await import("@/features/retrieval/approved-knowledge");
+    const section = buildApprovedKnowledgePromptSection([
+      makeKnowledgeResult("community-observation-card", "Điểm dừng cộng đồng", {
+        conditions: ["Chỉ nên dừng vào ban ngày khi thời tiết khô ráo"],
+        practicalDetails: { notes: "chi tiết ".repeat(400) },
+      }),
+    ]);
+
+    expect(section).toContain("Điều kiện: \"Chỉ nên dừng vào ban ngày khi thời tiết khô ráo\"");
+    expect(section.length).toBeLessThanOrEqual(2_400);
   });
 
   test("stream route omits approved knowledge section when retrieval has no matches", async () => {

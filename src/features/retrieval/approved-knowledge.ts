@@ -48,13 +48,17 @@ function formatKnowledgeResult(index: number, result: KnowledgeSearchResult) {
   const lines = [
     `${index}. title=${formatPromptValue(result.title)}; type=${formatPromptValue(result.type)}`,
     `summary=${formatPromptValue(result.summary)}`,
-    `Độ tin cậy: ${result.confidence}; cần kiểm tra mới: ${result.freshnessSensitive ? "có" : "không"}; điểm khớp: ${result.score}`,
+    `Độ tin cậy: ${result.confidence}; chính sách=${result.policy}; trạng thái=${result.knowledgeState}; cần kiểm tra mới: ${result.freshnessSensitive ? "có" : "không"}; điểm khớp: ${result.score}`,
   ];
 
   const location = [result.locationName ? `địa điểm=${formatPromptValue(result.locationName)}` : null, result.routeSegment ? `cung đường=${formatPromptValue(result.routeSegment)}` : null].filter(Boolean).join("; ");
 
   if (location) {
     lines.push(`Vị trí/cung đường: ${location}`);
+  }
+
+  if (result.conditions.length > 0) {
+    lines.push(`Điều kiện: ${result.conditions.map((condition) => formatPromptValue(condition, 160)).join(", ")}`);
   }
 
   const practicalDetails = formatPracticalDetails(result.practicalDetails);
@@ -80,11 +84,17 @@ function formatKnowledgeResult(index: number, result: KnowledgeSearchResult) {
 }
 
 function formatCompactKnowledgeResult(index: number, result: KnowledgeSearchResult) {
-  return [
+  const lines = [
     `${index}. title=${formatPromptValue(result.title)}; type=${formatPromptValue(result.type)}`,
     `summary=${formatPromptValue(result.summary, 160)}`,
-    `Độ tin cậy: ${result.confidence}; cần kiểm tra mới: ${result.freshnessSensitive ? "có" : "không"}; điểm khớp: ${result.score}`,
+    `Độ tin cậy: ${result.confidence}; chính sách=${result.policy}; trạng thái=${result.knowledgeState}; cần kiểm tra mới: ${result.freshnessSensitive ? "có" : "không"}; điểm khớp: ${result.score}`,
   ];
+
+  if (result.conditions.length > 0) {
+    lines.push(`Điều kiện: ${result.conditions.slice(0, 12).map((condition) => formatPromptValue(condition, 160)).join(", ")}`);
+  }
+
+  return lines;
 }
 
 function formatPracticalDetails(details: Record<string, unknown>) {

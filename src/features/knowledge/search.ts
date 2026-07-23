@@ -6,7 +6,7 @@ import { and, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
 import { knowledgeCardEvidence, knowledgeCards, knowledgeCardSearchDocuments, knowledgeCardSources, sourceCaptureVersions, sources, type KnowledgeSourceSupport } from "@/db/schema";
-import { isKnowledgeCardTravelerEligible } from "@/features/knowledge/state";
+import { evaluateKnowledgeTravelerPolicy, type KnowledgeTravelerPolicy, type KnowledgeTravelerPolicyReason } from "@/features/knowledge/state";
 
 const defaultSearchLimit = 5;
 const maxSearchLimit = 10;
@@ -29,11 +29,15 @@ export type KnowledgeSearchSource = Pick<
 
 export type KnowledgeSearchResult = Pick<
   typeof knowledgeCards.$inferSelect,
-  "id" | "type" | "title" | "locationName" | "routeSegment" | "summary" | "practicalDetails" | "tags" | "confidence" | "freshnessSensitive" | "updatedAt" | "createdAt"
+  "id" | "type" | "title" | "locationName" | "routeSegment" | "summary" | "practicalDetails" | "tags" | "confidence" | "freshnessSensitive" | "publicationState" | "knowledgeState" | "reviewState" | "verificationState" | "conditions" | "contentVersion" | "evidenceSetRevision" | "updatedAt" | "createdAt"
 > & {
   score: number;
+  policy: Exclude<KnowledgeTravelerPolicy, "exclude">;
+  policyReasons: KnowledgeTravelerPolicyReason[];
   sources: KnowledgeSearchSource[];
 };
+
+type KnowledgeSearchCardSnapshot = Omit<KnowledgeSearchResult, "score" | "policy" | "policyReasons" | "sources">;
 
 export async function indexApprovedKnowledgeCard(cardId: string) {
   const normalizedCardId = cardId.trim();
@@ -221,8 +225,9 @@ async function loadEligibleApprovedCard(db: Pick<KnowledgeSearchDb, "select">, c
         tags: knowledgeCards.tags,
         confidence: knowledgeCards.confidence,
         freshnessSensitive: knowledgeCards.freshnessSensitive,
-        status: knowledgeCards.status,
-        needsReview: knowledgeCards.needsReview,
+        conditions: knowledgeCards.conditions,
+        contentVersion: knowledgeCards.contentVersion,
+        evidenceSetRevision: knowledgeCards.evidenceSetRevision,
         updatedAt: knowledgeCards.updatedAt,
         createdAt: knowledgeCards.createdAt,
       },
@@ -251,13 +256,18 @@ async function loadEligibleApprovedCard(db: Pick<KnowledgeSearchDb, "select">, c
   const evidence = await loadActiveSupportingEvidence(db, cardId);
   const validatedSourceIds = new Set(evidence?.rows.map((row) => row.sourceId));
   const validatedSources = grouped?.sources.filter((source) => validatedSourceIds.has(source.id)) ?? [];
-  if (!grouped || !card || !evidence || !isKnowledgeCardTravelerEligible({ ...card, ...evidence }) || validatedSources.length === 0) {
+  const evaluation = card && evidence
+    ? evaluateKnowledgeTravelerPolicy({ ...card, ...evidence })
+    : { policy: "exclude" as const, reasons: ["missing_traveler_safe_evidence" as const] };
+  if (!grouped || !card || !evidence || evaluation.policy === "exclude" || validatedSources.length === 0) {
     return null;
   }
 
   return {
     ...grouped,
-    sources: redactOperatorOnlySourceUrls(validatedSources, evidence.rows),
+    policy: evaluation.policy,
+    policyReasons: evaluation.reasons,
+    sources: validatedSources,
   };
 }
 
@@ -266,36 +276,38 @@ async function loadActiveSupportingEvidence(db: Pick<KnowledgeSearchDb, "select"
     .select({
       displayPolicy: knowledgeCardEvidence.displayPolicy,
       sourceId: knowledgeCardEvidence.sourceId,
-      capturePayloadAvailable: sql<boolean>`true`,
+      independenceKey: knowledgeCardEvidence.independenceKey,
     })
     .from(knowledgeCardEvidence)
-    .innerJoin(knowledgeCardSources, and(eq(knowledgeCardSources.knowledgeCardId, knowledgeCardEvidence.knowledgeCardId), eq(knowledgeCardSources.sourceId, knowledgeCardEvidence.sourceId)))
-    .innerJoin(sources, and(eq(sources.id, knowledgeCardEvidence.sourceId), eq(sources.eligibility, "eligible")))
-    .innerJoin(sourceCaptureVersions, and(eq(sourceCaptureVersions.id, knowledgeCardEvidence.captureVersionId), eq(sourceCaptureVersions.sourceId, knowledgeCardEvidence.sourceId)))
-    .where(and(
+     .innerJoin(knowledgeCardSources, and(eq(knowledgeCardSources.knowledgeCardId, knowledgeCardEvidence.knowledgeCardId), eq(knowledgeCardSources.sourceId, knowledgeCardEvidence.sourceId)))
+     .innerJoin(sources, and(eq(sources.id, knowledgeCardEvidence.sourceId), eq(sources.eligibility, "eligible")))
+     .innerJoin(sourceCaptureVersions, and(eq(sourceCaptureVersions.id, knowledgeCardEvidence.captureVersionId), eq(sourceCaptureVersions.sourceId, knowledgeCardEvidence.sourceId)))
+     .where(and(
       eq(knowledgeCardEvidence.knowledgeCardId, cardId),
-      eq(knowledgeCardEvidence.state, "active"),
-      or(eq(knowledgeCardEvidence.supportLevel, "primary"), eq(knowledgeCardEvidence.supportLevel, "supporting")),
-      isNull(sourceCaptureVersions.payloadDeletedAt),
+       eq(knowledgeCardEvidence.state, "active"),
+       or(eq(knowledgeCardEvidence.supportLevel, "primary"), eq(knowledgeCardEvidence.supportLevel, "supporting")),
+       or(eq(knowledgeCardEvidence.displayPolicy, "fact_only"), eq(knowledgeCardEvidence.displayPolicy, "traveler_visible")),
+       sql`${sources.kind} = ${sourceCaptureVersions.captureKind} and ${sources.kind} in ('url', 'facebook', 'youtube')`,
+       isNull(sourceCaptureVersions.payloadDeletedAt),
       sql`substring(${sourceCaptureVersions.rawText} from ${knowledgeCardEvidence.spanStart} + 1 for ${knowledgeCardEvidence.spanEnd} - ${knowledgeCardEvidence.spanStart}) = ${knowledgeCardEvidence.quoteText}`,
     ));
 
-  return evidenceRows.length > 0 ? { activeSupportingEvidenceCount: evidenceRows.length, capturePayloadAvailable: true, rows: evidenceRows } : null;
-}
-
-function redactOperatorOnlySourceUrls(sources: KnowledgeSearchSource[], evidence: Array<{ sourceId: string; displayPolicy: string }>) {
-  const operatorOnlySourceIds = new Set(evidence.filter((row) => row.displayPolicy === "operator_only").map((row) => row.sourceId));
-
-  return sources.map((source) => operatorOnlySourceIds.has(source.id) ? { ...source, url: null, canonicalUrl: null } : source);
+  return evidenceRows.length > 0
+    ? {
+      activeTravelerSafeEvidenceCount: evidenceRows.length,
+      activeTravelerSafeIndependenceKeyCount: new Set(evidenceRows.map((row) => row.independenceKey)).size,
+      rows: evidenceRows,
+    }
+    : null;
 }
 
 function groupSearchRows(
   rows: Array<{
-    card: Omit<KnowledgeSearchResult, "score" | "sources"> & KnowledgeCardStateForSearch;
+    card: KnowledgeSearchCardSnapshot & KnowledgeCardStateForSearch;
     source: JoinedKnowledgeSearchSource | null;
   }>,
 ) {
-  const cards = new Map<string, Omit<KnowledgeSearchResult, "score">>();
+  const cards = new Map<string, Omit<KnowledgeSearchResult, "score" | "policy" | "policyReasons">>();
 
   for (const row of rows) {
     const existing = cards.get(row.card.id);
@@ -312,9 +324,9 @@ function groupSearchRows(
   return Array.from(cards.values());
 }
 
-type KnowledgeCardStateForSearch = Pick<typeof knowledgeCards.$inferSelect, "publicationState" | "knowledgeState" | "reviewState" | "verificationState">;
+type KnowledgeCardStateForSearch = Pick<typeof knowledgeCards.$inferSelect, "publicationState" | "knowledgeState" | "reviewState" | "verificationState" | "conditions" | "contentVersion" | "evidenceSetRevision">;
 
-function toSearchResult(card: Omit<KnowledgeSearchResult, "score" | "sources">): KnowledgeSearchResult {
+function toSearchResult(card: KnowledgeSearchCardSnapshot): Omit<KnowledgeSearchResult, "score" | "policy" | "policyReasons"> {
   return {
     id: card.id,
     type: card.type,
@@ -326,9 +338,15 @@ function toSearchResult(card: Omit<KnowledgeSearchResult, "score" | "sources">):
     tags: card.tags,
     confidence: card.confidence,
     freshnessSensitive: card.freshnessSensitive,
+    publicationState: card.publicationState,
+    knowledgeState: card.knowledgeState,
+    reviewState: card.reviewState,
+    verificationState: card.verificationState,
+    conditions: card.conditions,
+    contentVersion: card.contentVersion,
+    evidenceSetRevision: card.evidenceSetRevision,
     updatedAt: card.updatedAt,
     createdAt: card.createdAt,
-    score: 0,
     sources: [],
   };
 }

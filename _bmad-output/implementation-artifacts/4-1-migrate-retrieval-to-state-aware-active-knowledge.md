@@ -1,6 +1,6 @@
 # Story 4.1: Migrate Retrieval to State-Aware Active Knowledge
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -17,20 +17,20 @@ so that old approval flags cannot make unsafe or withdrawn facts appear in answe
 
 ## Tasks / Subtasks
 
-- [ ] Define the state-aware retrieval policy in the Knowledge-owned server boundary (AC: 1, 2, 4)
-  - [ ] Replace the boolean-only consumer contract in `src/features/knowledge/state.ts` with a typed policy evaluator and safe reason codes.
-  - [ ] Preserve all current card/evidence/source/capture integrity checks; do not use a projection, `status`, or `needsReview` as authority.
-   - [ ] Map active `community_observation`, `community_pattern`, and `conditional` cards with valid support to `contextual_use`; map `uncertain` or `verificationState = required` to `caveat_only`; map unsupported or incomplete knowledge states, conflicted, superseded, non-active, failed verification, or incomplete records to `exclude`.
-   - [ ] Treat `community_pattern` as valid only with at least two active supporting evidence records whose `independence_key` values differ. A withdrawn or removed record, or duplicate independence keys, must downshift the card from pattern eligibility.
-- [ ] Refactor lexical retrieval to return policy-evaluated, traveler-safe results (AC: 1-4)
-  - [ ] Update `src/features/knowledge/search.ts` result types and current-row join/recheck to expose card states, conditions, content/evidence revisions, policy, and only safe source/evidence fields needed by later stories.
-  - [ ] Keep exact capture-version quote/span validation, active supporting-evidence limits, source eligibility checks, and operator-only/Facebook URL redaction.
-  - [ ] Disable a stale projection only as safe cleanup; Retrieval must not mutate card state or repair Knowledge-owned aggregates.
-- [ ] Add focused state-policy and regression coverage (AC: 1-4)
-   - [ ] Cover each policy outcome and every fail-closed condition, including unsupported knowledge states, source withdrawal, removed evidence, tombstoned capture, stale projection, and operator-only evidence.
-   - [ ] Cover community-pattern eligibility with one supporting record, duplicate independence keys, and a pattern downshift after supporting-evidence withdrawal.
-  - [ ] Prove modifying only legacy `status`/`needsReview` cannot promote an otherwise ineligible card or demote an otherwise valid state-aware candidate.
-  - [ ] Preserve existing search and source-removal tests.
+- [x] Define the state-aware retrieval policy in the Knowledge-owned server boundary (AC: 1, 2, 4)
+  - [x] Replace the boolean-only consumer contract in `src/features/knowledge/state.ts` with a typed policy evaluator and safe reason codes.
+  - [x] Preserve all current card/evidence/source/capture integrity checks; do not use a projection, `status`, or `needsReview` as authority.
+  - [x] Map active `community_observation`, `community_pattern`, and `conditional` cards with valid support to `contextual_use`; map `uncertain` or `verificationState = required` to `caveat_only`; map unsupported or incomplete knowledge states, conflicted, superseded, non-active, failed verification, or incomplete records to `exclude`.
+  - [x] Treat `community_pattern` as valid only with at least two active supporting evidence records whose `independence_key` values differ. A withdrawn or removed record, or duplicate independence keys, must downshift the card from pattern eligibility.
+- [x] Refactor lexical retrieval to return policy-evaluated, traveler-safe results (AC: 1-4)
+  - [x] Update `src/features/knowledge/search.ts` result types and current-row join/recheck to expose card states, conditions, content/evidence revisions, policy, and only safe source/evidence fields needed by later stories.
+  - [x] Keep exact capture-version quote/span validation, active supporting-evidence limits, source eligibility checks, and operator-only/Facebook URL redaction.
+  - [x] Disable a stale projection only as safe cleanup; Retrieval must not mutate card state or repair Knowledge-owned aggregates.
+- [x] Add focused state-policy and regression coverage (AC: 1-4)
+  - [x] Cover each policy outcome and every fail-closed condition, including unsupported knowledge states, source withdrawal, removed evidence, tombstoned capture, stale projection, and operator-only evidence.
+  - [x] Cover community-pattern eligibility with one supporting record, duplicate independence keys, and a pattern downshift after supporting-evidence withdrawal.
+  - [x] Prove modifying only legacy `status`/`needsReview` cannot promote an otherwise ineligible card or demote an otherwise valid state-aware candidate.
+  - [x] Preserve existing search and source-removal tests.
 
 ## Dev Notes
 
@@ -65,6 +65,22 @@ gpu4ai/gpt-5.6-terra-review
 
 ### Completion Notes List
 
-- Ultimate context engine analysis completed - comprehensive developer guide created.
+- Implemented typed state-aware traveler policy with contextual, caveat-only, and fail-closed outcomes.
+- Retrieval now rechecks current canonical state and traveler-safe source/capture/evidence integrity; raw, operator-only, and mismatched source/capture dependencies cannot qualify.
+- Added policy, stale projection, pattern-independence, legacy-field, conditions, and prompt-boundary regression coverage.
+- Review repairs covered non-legacy consumer paths, pattern projection cleanup, bounded conditions, compact prompt conditions, exhaustive exclusion reasons, and raw-source safety.
+- Verification passed: 112 focused tests, `pnpm typecheck`, `pnpm lint`, `pnpm build`, and `git diff --check`.
 
 ### File List
+
+- `src/features/knowledge/state.ts`
+- `src/features/knowledge/search.ts`
+- `src/features/knowledge/indexing-worker.ts`
+- `src/features/knowledge/batch-intake.ts`
+- `src/features/knowledge/review.ts`
+- `src/features/retrieval/approved-knowledge.ts`
+- `tests/knowledge-state.test.ts`
+- `tests/knowledge-search.test.ts`
+- `tests/knowledge-batch-source-intake.test.ts`
+- `tests/knowledge-approved-cards.test.ts`
+- `tests/answer-context.test.ts`

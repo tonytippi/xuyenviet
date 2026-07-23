@@ -66,17 +66,17 @@ async function loadApprovedCardsNeedingSearchDocuments(db: Pick<KnowledgeIndexin
        .innerJoin(knowledgeCardSources, and(eq(knowledgeCardSources.knowledgeCardId, knowledgeCardEvidence.knowledgeCardId), eq(knowledgeCardSources.sourceId, knowledgeCardEvidence.sourceId)))
        .innerJoin(sources, and(eq(sources.id, knowledgeCardEvidence.sourceId), eq(sources.eligibility, "eligible")))
       .innerJoin(sourceCaptureVersions, and(eq(sourceCaptureVersions.id, knowledgeCardEvidence.captureVersionId), eq(sourceCaptureVersions.sourceId, knowledgeCardEvidence.sourceId)))
-      .where(and(eq(knowledgeCardEvidence.knowledgeCardId, knowledgeCards.id), eq(knowledgeCardEvidence.state, "active"), or(eq(knowledgeCardEvidence.supportLevel, "primary"), eq(knowledgeCardEvidence.supportLevel, "supporting")), isNull(sourceCaptureVersions.payloadDeletedAt), sql`substring(${sourceCaptureVersions.rawText} from ${knowledgeCardEvidence.spanStart} + 1 for ${knowledgeCardEvidence.spanEnd} - ${knowledgeCardEvidence.spanStart}) = ${knowledgeCardEvidence.quoteText}`)),
+       .where(and(eq(knowledgeCardEvidence.knowledgeCardId, knowledgeCards.id), eq(knowledgeCardEvidence.state, "active"), or(eq(knowledgeCardEvidence.supportLevel, "primary"), eq(knowledgeCardEvidence.supportLevel, "supporting")), or(eq(knowledgeCardEvidence.displayPolicy, "fact_only"), eq(knowledgeCardEvidence.displayPolicy, "traveler_visible")), sql`${sources.kind} = ${sourceCaptureVersions.captureKind} and ${sources.kind} in ('url', 'facebook', 'youtube')`, isNull(sourceCaptureVersions.payloadDeletedAt), sql`substring(${sourceCaptureVersions.rawText} from ${knowledgeCardEvidence.spanStart} + 1 for ${knowledgeCardEvidence.spanEnd} - ${knowledgeCardEvidence.spanStart}) = ${knowledgeCardEvidence.quoteText}`)),
   );
   const cardStateIsEligible = and(
-    eq(knowledgeCards.status, "approved"),
-    eq(knowledgeCards.needsReview, false),
     eq(knowledgeCards.publicationState, "active"),
-    ne(knowledgeCards.knowledgeState, "conflicted"),
-    ne(knowledgeCards.knowledgeState, "superseded"),
-    eq(knowledgeCards.reviewState, "reviewed"),
-    or(eq(knowledgeCards.verificationState, "not_required"), eq(knowledgeCards.verificationState, "corroborated")),
+    or(eq(knowledgeCards.knowledgeState, "community_observation"), eq(knowledgeCards.knowledgeState, "community_pattern"), eq(knowledgeCards.knowledgeState, "conditional"), eq(knowledgeCards.knowledgeState, "uncertain")),
+    ne(knowledgeCards.verificationState, "failed"),
     sql`coalesce(nullif(btrim(${knowledgeCards.locationName}), ''), nullif(btrim(${knowledgeCards.routeSegment}), '')) is not null`,
+  );
+  const hasInsufficientIndependentPatternSupport = and(
+    eq(knowledgeCards.knowledgeState, "community_pattern"),
+    sql`(select count(distinct evidence.independence_key) from ${knowledgeCardEvidence} evidence join ${knowledgeCardSources} link on link.knowledge_card_id = evidence.knowledge_card_id and link.source_id = evidence.source_id join ${sources} evidence_source on evidence_source.id = evidence.source_id and evidence_source.eligibility = 'eligible' join ${sourceCaptureVersions} capture on capture.id = evidence.capture_version_id and capture.source_id = evidence.source_id where evidence.knowledge_card_id = ${knowledgeCards.id} and evidence.state = 'active' and evidence.support_level in ('primary', 'supporting') and evidence.display_policy in ('fact_only', 'traveler_visible') and evidence_source.kind = capture.capture_kind and evidence_source.kind in ('url', 'facebook', 'youtube') and capture.payload_deleted_at is null and substring(capture.raw_text from evidence.span_start + 1 for evidence.span_end - evidence.span_start) = evidence.quote_text) < 2`,
   );
   const documentNeedsRefresh = or(
     isNull(knowledgeCardSearchDocuments.id),
@@ -110,13 +110,12 @@ async function loadApprovedCardsNeedingSearchDocuments(db: Pick<KnowledgeIndexin
             and(
               eq(knowledgeCardSearchDocuments.status, "active"),
               or(
-                ne(knowledgeCards.status, "approved"),
-                eq(knowledgeCards.needsReview, true),
                 ne(knowledgeCards.publicationState, "active"),
                 eq(knowledgeCards.knowledgeState, "conflicted"),
                 eq(knowledgeCards.knowledgeState, "superseded"),
-                ne(knowledgeCards.reviewState, "reviewed"),
-                and(ne(knowledgeCards.verificationState, "not_required"), ne(knowledgeCards.verificationState, "corroborated")),
+                eq(knowledgeCards.knowledgeState, "confirmed"),
+                eq(knowledgeCards.verificationState, "failed"),
+                hasInsufficientIndependentPatternSupport,
                 sql`coalesce(nullif(btrim(${knowledgeCards.locationName}), ''), nullif(btrim(${knowledgeCards.routeSegment}), '')) is null`,
                 notExists(
                 db
@@ -125,7 +124,7 @@ async function loadApprovedCardsNeedingSearchDocuments(db: Pick<KnowledgeIndexin
                    .innerJoin(knowledgeCardSources, and(eq(knowledgeCardSources.knowledgeCardId, knowledgeCardEvidence.knowledgeCardId), eq(knowledgeCardSources.sourceId, knowledgeCardEvidence.sourceId)))
                    .innerJoin(sources, and(eq(sources.id, knowledgeCardEvidence.sourceId), eq(sources.eligibility, "eligible")))
                   .innerJoin(sourceCaptureVersions, and(eq(sourceCaptureVersions.id, knowledgeCardEvidence.captureVersionId), eq(sourceCaptureVersions.sourceId, knowledgeCardEvidence.sourceId)))
-                  .where(and(eq(knowledgeCardEvidence.knowledgeCardId, knowledgeCards.id), eq(knowledgeCardEvidence.state, "active"), or(eq(knowledgeCardEvidence.supportLevel, "primary"), eq(knowledgeCardEvidence.supportLevel, "supporting")), isNull(sourceCaptureVersions.payloadDeletedAt), sql`substring(${sourceCaptureVersions.rawText} from ${knowledgeCardEvidence.spanStart} + 1 for ${knowledgeCardEvidence.spanEnd} - ${knowledgeCardEvidence.spanStart}) = ${knowledgeCardEvidence.quoteText}`)),
+                    .where(and(eq(knowledgeCardEvidence.knowledgeCardId, knowledgeCards.id), eq(knowledgeCardEvidence.state, "active"), or(eq(knowledgeCardEvidence.supportLevel, "primary"), eq(knowledgeCardEvidence.supportLevel, "supporting")), or(eq(knowledgeCardEvidence.displayPolicy, "fact_only"), eq(knowledgeCardEvidence.displayPolicy, "traveler_visible")), sql`${sources.kind} = ${sourceCaptureVersions.captureKind} and ${sources.kind} in ('url', 'facebook', 'youtube')`, isNull(sourceCaptureVersions.payloadDeletedAt), sql`substring(${sourceCaptureVersions.rawText} from ${knowledgeCardEvidence.spanStart} + 1 for ${knowledgeCardEvidence.spanEnd} - ${knowledgeCardEvidence.spanStart}) = ${knowledgeCardEvidence.quoteText}`)),
                 ),
                 documentNeedsRefresh!,
               ),
