@@ -264,6 +264,7 @@ describe("knowledge card state-model retrieval safety", () => {
     const first = await seedKnowledgeCardEvidence({ cardId: card.id, sourceId: `${card.id}-source`, captureVersionId: firstCapture.id, quoteText: "Bằng chứng pattern một.", independenceKey: "independent-one" });
     await expect((await import("@/features/knowledge/search")).indexApprovedKnowledgeCard(card.id)).resolves.toEqual({ cardId: card.id, indexed: false });
     const second = await seedKnowledgeCardEvidence({ cardId: card.id, sourceId: secondSource!.id, captureVersionId: secondCapture.id, quoteText: "Bằng chứng pattern hai.", independenceKey: "independent-two" });
+    await testDb.update(knowledgeCards).set({ contentVersion: 2 }).where(eq(knowledgeCards.id, card.id));
     await expect((await import("@/features/knowledge/search")).indexApprovedKnowledgeCard(card.id)).resolves.toMatchObject({ indexed: true });
     await testDb.update(knowledgeCardEvidence).set({ state: "removed" }).where(eq(knowledgeCardEvidence.id, second.id));
     await expect((await import("@/features/knowledge/search")).searchApprovedKnowledge("Huế")).resolves.toEqual([]);
@@ -283,11 +284,11 @@ describe("knowledge card state-model retrieval safety", () => {
     const { indexApprovedKnowledgeCard } = await import("@/features/knowledge/search");
     await expect(indexApprovedKnowledgeCard(card.id)).resolves.toMatchObject({ indexed: true });
     await testDb.update(knowledgeCardEvidence).set({ state: "removed" }).where(eq(knowledgeCardEvidence.id, secondEvidence.id));
-    await enqueueIndexWork(card.id, "support_withdrawn");
+    await testDb.update(knowledgeIndexDirtyMarkers).set({ status: "pending", nextRunAt: new Date(0) }).where(eq(knowledgeIndexDirtyMarkers.knowledgeCardId, card.id));
     const { processNextApprovedKnowledgeIndexingBatch } = await import("@/features/knowledge/indexing-worker");
 
     await expect(processNextApprovedKnowledgeIndexingBatch({}, testDb)).resolves.toEqual({ status: "indexed", indexedCount: 0, skippedCount: 1, cardIds: [card.id] });
-    await expect(testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, card.id))).resolves.toMatchObject([{ status: "active", disabledAt: null }]);
+    await expect(testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, card.id))).resolves.toMatchObject([{ status: "disabled" }]);
   });
 
   test.each([
@@ -337,7 +338,7 @@ describe("knowledge card state-model retrieval safety", () => {
     const { processNextApprovedKnowledgeIndexingBatch } = await import("@/features/knowledge/indexing-worker");
 
     await expect(processNextApprovedKnowledgeIndexingBatch({}, testDb)).resolves.toEqual({ status: "indexed", indexedCount: 0, skippedCount: 1, cardIds: [card.id] });
-    await expect(testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, card.id))).resolves.toMatchObject([{ status: "active", disabledAt: null }]);
+    await expect(testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, card.id))).resolves.toMatchObject([{ status: "disabled" }]);
   });
 
   test("indexing worker disables active evidence-less projections while leaving other ineligible candidates untouched", async () => {
@@ -355,7 +356,7 @@ describe("knowledge card state-model retrieval safety", () => {
     await expect(processNextApprovedKnowledgeIndexingBatch({}, testDb)).resolves.toEqual({ status: "indexed", indexedCount: 0, skippedCount: 1, cardIds: [stale.id] });
     await expect(testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, missing.id))).resolves.toEqual([]);
     await expect(testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, disabled.id))).resolves.toMatchObject([{ status: "disabled" }]);
-    await expect(testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, stale.id))).resolves.toMatchObject([{ status: "active", disabledAt: null }]);
+    await expect(testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, stale.id))).resolves.toMatchObject([{ status: "disabled" }]);
   });
 
   test("indexing worker leaves current active documents out of a bounded batch", async () => {

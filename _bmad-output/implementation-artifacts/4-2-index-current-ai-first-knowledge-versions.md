@@ -21,6 +21,16 @@ so that the lexical index is a safe projection rather than a source of truth.
 
 ## Tasks / Subtasks
 
+### Review Findings
+
+- [x] [Review][Patch] Use a fresh lease timestamp for every claimed-work projection completion and retry [src/features/knowledge/indexing-worker.ts:44] — A batch reuses its start time when committing later claims, so a worker can commit after that claim's real lease expiry and deny the new fence required by AC 4.
+- [x] [Review][Patch] Backfill existing documents into current-version work during migration or worker orchestration [drizzle/migrations/0048_deep_red_shift.sql:3] — Existing documents are stamped `content_version = 1`, while retrieval now requires equality with the card; no production path invokes the new backfill, making legacy cards at later versions invisible indefinitely.
+- [x] [Review][Patch] Make backfill prove eligibility and disable current-version ineligible projections atomically [src/features/knowledge/indexing-worker.ts:83] — It queues every card and disables only version-mismatched active documents, contrary to the required eligible-only and immediate-disable backfill behavior.
+- [x] [Review][Patch] Remove or fence the legacy direct indexing API [src/features/knowledge/search.ts:69] — `indexApprovedKnowledgeCard` remains an exported unfenced upsert without an expected content version or marker claim, bypassing the forward-only projection protocol.
+- [x] [Review][Patch] Version and enqueue cards when indexed source metadata changes [src/features/knowledge/youtube-capture.ts:124] — Updating a source label used in `searchable_text` does not increment linked cards' `content_version`, disable their prior projection, or enqueue current work.
+- [x] [Review][Patch] Use a consistent source/card lock order for projection and source removal [src/features/knowledge/search.ts:50] — Projection locks its card then source locks, while source removal locks source then cards, permitting a circular database lock wait.
+- [x] [Review][Patch] Use one clock authority when selecting and claiming due work [src/features/knowledge/indexing-worker.ts:32] — Due selection uses PostgreSQL `now()` but the guarded claim uses application time, so clock skew can select a marker then repeatedly fail its update guard.
+
 - [x] Define forward-only versioned projection and work-claim persistence (AC: 1-3)
   - [x] Update Drizzle schema and generate the next migration/snapshot/journal entry; never edit historical migrations.
   - [x] Keep one search-document row per card, but add non-null `content_version` and an accepted claim fence (or equivalent monotonic projection fence) to `knowledge_card_search_documents`. Every activation, disablement, and completion must be conditional on the claimed card/version/fence; a document whose version differs from `knowledge_cards.content_version` is not a retrieval candidate.
@@ -82,6 +92,7 @@ gpu4ai/gpt-5.6-terra-review
 - Implement after Story 4.1. Existing dirty markers are authoritative work signals; do not duplicate them with a new unrelated queue.
 - 2026-07-23: Added versioned search-document and dirty-marker queue schema, generated forward-only migration 0048, moved indexing work to marker claim/lease/fence handling, and updated evidence/source/review producers to enqueue current-version work.
 - 2026-07-23: Updated affected pipeline expectations for evidence-driven content versions and coalesced marker work; reconciled the prompt-version assertion and clock-relative ingestion-job claim fixture. Full regression now passes.
+- 2026-07-23: Resolved all actionable Story 4.2 review findings: database-clock marker claims, fresh completion/retry timing, worker-orchestrated policy-safe backfill, fenced compatibility indexing, source-label invalidation, and card-before-source lock ordering.
 
 ### Completion Notes List
 
@@ -89,6 +100,8 @@ gpu4ai/gpt-5.6-terra-review
 - Implemented versioned, fenced index work and current-version search projection. `content_version` advances on projection-affecting evidence/source/review mutations while `evidence_set_revision` remains recommendation/audit state.
 - Verified marker claim/recovery and old-fence rejection, stale projection exclusion, policy-safe searchable text, worker batches, source removal, and review/ingestion producer coverage.
 - Validation passed: `pnpm test:run` (49 files, 654 tests), `pnpm lint`, `pnpm typecheck`, and `pnpm build`.
+- Resolved review findings: PostgreSQL is the sole claim/completion/retry clock; the supervised worker runs resumable policy-aware backfill; ineligible current documents are disabled atomically; the compatibility API queues and claims work before projecting; source-title changes invalidate linked cards; and source removal follows card-before-source locks.
+- Validation passed: `pnpm test:run` (49 files, 657 tests), `pnpm lint`, `pnpm typecheck`, and `pnpm build`.
 
 ### File List
 
@@ -101,6 +114,7 @@ gpu4ai/gpt-5.6-terra-review
 - src/features/knowledge/search.ts
 - src/features/knowledge/ingestion-pipeline.ts
 - src/features/knowledge/source-removal.ts
+- src/features/knowledge/youtube-capture.ts
 - src/features/knowledge/recommendations.ts
 - src/features/knowledge/review.ts
 - src/features/knowledge/review-approval-core.ts
@@ -109,7 +123,10 @@ gpu4ai/gpt-5.6-terra-review
 - tests/knowledge-ingestion-pipeline.test.ts
 - tests/knowledge-ingestion-jobs.test.ts
 - tests/ai-usage-events.test.ts
+- tests/youtube-capture.test.ts
+- scripts/knowledge-indexing-worker.ts
 
 ## Change Log
 
 - 2026-07-23: Implemented versioned, fenced knowledge indexing queue, projection worker, backfill path, producer mutation boundaries, migration, and regression coverage; marked ready for review.
+- 2026-07-23: Addressed all seven actionable review findings; added worker/backfill and YouTube source-label invalidation coverage; marked review.

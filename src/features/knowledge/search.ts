@@ -7,6 +7,7 @@ import { and, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { knowledgeCardEvidence, knowledgeCards, knowledgeCardSearchDocuments, knowledgeCardSources, sourceCaptureVersions, sources, type KnowledgeSourceSupport } from "@/db/schema";
 import { evaluateKnowledgeTravelerPolicy, type KnowledgeTravelerPolicy, type KnowledgeTravelerPolicyReason } from "@/features/knowledge/state";
+import { enqueueKnowledgeIndexWork } from "@/features/knowledge/indexing-queue";
 
 const defaultSearchLimit = 5;
 const maxSearchLimit = 10;
@@ -44,8 +45,6 @@ type KnowledgeSearchCardSnapshot = Omit<KnowledgeSearchResult, "score" | "policy
  * claimed marker identity and fence so an obsolete version cannot win a race.
  */
 export async function projectClaimedKnowledgeIndexWork(input: { markerId: string; cardId: string; contentVersion: number; fencingToken: string; now?: Date }, db = getDb()) {
-  const now = input.now ?? new Date();
-  const nowSql = now.toISOString();
   return db.transaction(async (transaction) => {
     const [version] = await transaction.select({ contentVersion: knowledgeCards.contentVersion }).from(knowledgeCards).where(eq(knowledgeCards.id, input.cardId)).limit(1).for("update");
     if (!version || version.contentVersion !== input.contentVersion) return { cardId: input.cardId, indexed: false as const, outcome: "superseded" as const };
@@ -54,75 +53,43 @@ export async function projectClaimedKnowledgeIndexWork(input: { markerId: string
       for (const source of eligibleCard.sources.sort((left, right) => left.id.localeCompare(right.id))) await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${source.id}, 44))`);
       eligibleCard = await loadEligibleApprovedCard(transaction, input.cardId);
     }
-    const claimIsCurrent = sql`exists (select 1 from knowledge_index_dirty_markers marker where marker.id = ${input.markerId} and marker.knowledge_card_id = ${input.cardId} and marker.content_version = ${input.contentVersion} and marker.status = 'claimed' and marker.fencing_token = ${input.fencingToken} and marker.lease_expires_at > ${nowSql}::timestamp)`;
+    const claimIsCurrent = sql`exists (select 1 from knowledge_index_dirty_markers marker where marker.id = ${input.markerId} and marker.knowledge_card_id = ${input.cardId} and marker.content_version = ${input.contentVersion} and marker.status = 'claimed' and marker.fencing_token = ${input.fencingToken} and marker.lease_expires_at > now())`;
     if (!eligibleCard) {
-      await transaction.execute(sql`update knowledge_card_search_documents document set status = 'disabled', disabled_at = ${now}, updated_at = ${now}, content_version = ${input.contentVersion}, accepted_fence = ${input.fencingToken} where document.knowledge_card_id = ${input.cardId} and document.content_version <= ${input.contentVersion} and ${claimIsCurrent}`);
+      await transaction.execute(sql`update knowledge_card_search_documents document set status = 'disabled', disabled_at = now(), updated_at = now(), content_version = ${input.contentVersion}, accepted_fence = ${input.fencingToken} where document.knowledge_card_id = ${input.cardId} and document.content_version <= ${input.contentVersion} and ${claimIsCurrent}`);
       return { cardId: input.cardId, indexed: false as const, outcome: "disabled" as const };
     }
     const searchableText = buildSearchableText(eligibleCard);
     const textHash = hashSearchableText(searchableText);
-    const [document] = await transaction.insert(knowledgeCardSearchDocuments).values({ knowledgeCardId: eligibleCard.id, contentVersion: input.contentVersion, acceptedFence: input.fencingToken, status: "active", searchableText, textHash, sourceCount: eligibleCard.sources.length, confidence: eligibleCard.confidence, freshnessSensitive: eligibleCard.freshnessSensitive, updatedAt: now, disabledAt: null }).onConflictDoUpdate({ target: knowledgeCardSearchDocuments.knowledgeCardId, set: { contentVersion: input.contentVersion, acceptedFence: input.fencingToken, status: "active", searchableText, textHash, sourceCount: eligibleCard.sources.length, confidence: eligibleCard.confidence, freshnessSensitive: eligibleCard.freshnessSensitive, updatedAt: now, disabledAt: null }, where: sql`${knowledgeCardSearchDocuments.contentVersion} <= ${input.contentVersion} and ${claimIsCurrent}` }).returning();
+    const [document] = await transaction.insert(knowledgeCardSearchDocuments).values({ knowledgeCardId: eligibleCard.id, contentVersion: input.contentVersion, acceptedFence: input.fencingToken, status: "active", searchableText, textHash, sourceCount: eligibleCard.sources.length, confidence: eligibleCard.confidence, freshnessSensitive: eligibleCard.freshnessSensitive, updatedAt: sql`now()`, disabledAt: null }).onConflictDoUpdate({ target: knowledgeCardSearchDocuments.knowledgeCardId, set: { contentVersion: input.contentVersion, acceptedFence: input.fencingToken, status: "active", searchableText, textHash, sourceCount: eligibleCard.sources.length, confidence: eligibleCard.confidence, freshnessSensitive: eligibleCard.freshnessSensitive, updatedAt: sql`now()`, disabledAt: null }, where: sql`${knowledgeCardSearchDocuments.contentVersion} <= ${input.contentVersion} and ${claimIsCurrent}` }).returning();
     return document ? { cardId: eligibleCard.id, indexed: true as const, outcome: "indexed" as const } : { cardId: input.cardId, indexed: false as const, outcome: "lost_claim" as const };
   });
 }
 
-export async function indexApprovedKnowledgeCard(cardId: string) {
+/**
+ * Legacy compatibility entry point. It submits durable work and projects only
+ * after claiming its own marker with the ordinary fence protocol.
+ */
+export async function indexApprovedKnowledgeCard(cardId: string, claim?: { markerId: string; contentVersion: number; fencingToken: string }) {
   const normalizedCardId = cardId.trim();
 
   if (!normalizedCardId) {
     throw new KnowledgeSearchError("Knowledge card ID is required.", "invalid_card");
   }
 
+  if (claim) {
+    if (claim.contentVersion < 1 || !claim.markerId || !claim.fencingToken) throw new KnowledgeSearchError("A fenced indexing claim is required.", "invalid_card");
+    return projectClaimedKnowledgeIndexWork({ ...claim, cardId: normalizedCardId });
+  }
   const db = getDb();
-  return db.transaction(async (transaction) => {
-    let eligibleCard = await loadEligibleApprovedCard(transaction, normalizedCardId);
-
-    if (eligibleCard) {
-      for (const source of eligibleCard.sources.sort((left, right) => left.id.localeCompare(right.id))) {
-        await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${source.id}, 44))`);
-      }
-      eligibleCard = await loadEligibleApprovedCard(transaction, normalizedCardId);
-    }
-
-    if (!eligibleCard) {
-      await disableKnowledgeSearchDocument(normalizedCardId, "disabled", transaction);
-      return { cardId: normalizedCardId, indexed: false as const };
-    }
-
-    const searchableText = buildSearchableText(eligibleCard);
-    const textHash = hashSearchableText(searchableText);
-    const now = getSearchDocumentUpdatedAt(eligibleCard.updatedAt);
-
-    const [document] = await transaction
-      .insert(knowledgeCardSearchDocuments)
-      .values({
-        knowledgeCardId: eligibleCard.id,
-        status: "active",
-        searchableText,
-        textHash,
-        sourceCount: eligibleCard.sources.length,
-        confidence: eligibleCard.confidence,
-        freshnessSensitive: eligibleCard.freshnessSensitive,
-        updatedAt: now,
-        disabledAt: null,
-      })
-      .onConflictDoUpdate({
-        target: knowledgeCardSearchDocuments.knowledgeCardId,
-        set: {
-          status: "active",
-          searchableText,
-          textHash,
-          sourceCount: eligibleCard.sources.length,
-          confidence: eligibleCard.confidence,
-          freshnessSensitive: eligibleCard.freshnessSensitive,
-          updatedAt: now,
-          disabledAt: null,
-        },
-      })
-      .returning();
-
-    return { cardId: eligibleCard.id, indexed: true as const, document };
-  });
+  const [card] = await db.select({ contentVersion: knowledgeCards.contentVersion, evidenceSetRevision: knowledgeCards.evidenceSetRevision }).from(knowledgeCards).where(eq(knowledgeCards.id, normalizedCardId)).limit(1);
+  if (!card) throw new KnowledgeSearchError("Knowledge card ID is required.", "invalid_card");
+  await db.transaction((tx) => enqueueKnowledgeIndexWork(tx, { cardId: normalizedCardId, contentVersion: card.contentVersion, evidenceSetRevision: card.evidenceSetRevision, reason: "compatibility" }));
+  const { claimNextKnowledgeIndexWork, completeKnowledgeIndexWork } = await import("@/features/knowledge/indexing-worker");
+  const compatibilityClaim = await claimNextKnowledgeIndexWork({ workerId: "knowledge-index-compatibility" }, db);
+  if (!compatibilityClaim || compatibilityClaim.cardId !== normalizedCardId || compatibilityClaim.contentVersion !== card.contentVersion) return { cardId: normalizedCardId, indexed: false as const };
+  const result = await projectClaimedKnowledgeIndexWork(compatibilityClaim, db);
+  await completeKnowledgeIndexWork(compatibilityClaim, result.outcome, db);
+  return { cardId: normalizedCardId, indexed: result.indexed };
 }
 
 export async function disableKnowledgeSearchDocument(cardId: string, status: "disabled" | "stale" = "disabled", db: Pick<KnowledgeSearchDb, "update"> = getDb()) {
@@ -231,6 +198,10 @@ export class KnowledgeSearchError extends Error {
     super(message);
     this.name = "KnowledgeSearchError";
   }
+}
+
+export async function isKnowledgeCardEligibleForProjection(db: Pick<KnowledgeSearchDb, "select">, cardId: string) {
+  return Boolean(await loadEligibleApprovedCard(db, cardId));
 }
 
 async function loadEligibleApprovedCard(db: Pick<KnowledgeSearchDb, "select">, cardId: string) {
@@ -431,10 +402,6 @@ function normalizePracticalDetailValue(value: unknown, maxLength: number) {
 
 function hashSearchableText(searchableText: string) {
   return createHash("sha256").update(searchableText).digest("hex");
-}
-
-function getSearchDocumentUpdatedAt(cardUpdatedAt: Date) {
-  return new Date(Math.max(Date.now(), cardUpdatedAt.getTime() + 1));
 }
 
 type JoinedKnowledgeSearchSource = {

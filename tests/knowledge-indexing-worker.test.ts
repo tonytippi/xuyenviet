@@ -1,8 +1,8 @@
 import { eq } from "drizzle-orm";
 import { describe, expect, test } from "vitest";
 
-import { knowledgeCards, knowledgeIndexDirtyMarkers, users } from "@/db/schema";
-import { claimNextKnowledgeIndexWork, completeKnowledgeIndexWork, recoverExpiredKnowledgeIndexWork } from "@/features/knowledge/indexing-worker";
+import { knowledgeCardSearchDocuments, knowledgeCards, knowledgeIndexDirtyMarkers, users } from "@/db/schema";
+import { backfillKnowledgeIndexWork, claimNextKnowledgeIndexWork, completeKnowledgeIndexWork, processNextApprovedKnowledgeIndexingBatch, recoverExpiredKnowledgeIndexWork } from "@/features/knowledge/indexing-worker";
 import { testDb } from "./helpers/db";
 
 async function createMarker(id: string) {
@@ -25,5 +25,21 @@ describe("versioned knowledge indexing work", () => {
     expect(await completeKnowledgeIndexWork(first, "indexed", testDb, expiredAt)).toBe(false);
     const [marker] = await testDb.select().from(knowledgeIndexDirtyMarkers).where(eq(knowledgeIndexDirtyMarkers.id, second?.markerId ?? ""));
     expect(marker).toMatchObject({ status: "claimed", claimedBy: "new-worker" });
+  });
+
+  test("uses a fresh database clock when completing a later batch claim", async () => {
+    await createMarker("fresh-completion");
+    const claim = await claimNextKnowledgeIndexWork({ workerId: "worker" }, testDb);
+    if (!claim) throw new Error("Expected claim");
+    await expect(completeKnowledgeIndexWork(claim, "disabled", testDb)).resolves.toBe(true);
+  });
+
+  test("backfill queues only policy-eligible cards and disables an ineligible current projection", async () => {
+    await createMarker("backfill-ineligible");
+    await testDb.insert(knowledgeCardSearchDocuments).values({ knowledgeCardId: "backfill-ineligible", contentVersion: 1, acceptedFence: "legacy", status: "active", searchableText: "safe", textHash: "a".repeat(64), sourceCount: 1, confidence: "curated", freshnessSensitive: false });
+    await backfillKnowledgeIndexWork({}, testDb);
+    await expect(testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, "backfill-ineligible"))).resolves.toMatchObject([{ status: "disabled" }]);
+    await expect(testDb.select().from(knowledgeIndexDirtyMarkers).where(eq(knowledgeIndexDirtyMarkers.knowledgeCardId, "backfill-ineligible"))).resolves.toMatchObject([{ status: "pending" }]);
+    await expect(processNextApprovedKnowledgeIndexingBatch({}, testDb)).resolves.toMatchObject({ status: "indexed" });
   });
 });

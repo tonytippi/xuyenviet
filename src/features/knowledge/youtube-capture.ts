@@ -1,8 +1,9 @@
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
-import { auditEvents, rawSourceMaterial, schema, sourceCaptureVersions, sources } from "../../db/schema";
+import { auditEvents, knowledgeCardSources, knowledgeCards, rawSourceMaterial, schema, sourceCaptureVersions, sources } from "../../db/schema";
 import { appendSourceCaptureVersion, type YoutubeCaptureMetadata } from "./source-captures";
+import { disableStaleKnowledgeSearchProjection, enqueueKnowledgeIndexWork } from "./indexing-queue";
 
 export type YoutubeCaptureDb = PostgresJsDatabase<typeof schema>;
 
@@ -104,6 +105,11 @@ export function serializeYoutubeEvidence(evidence: YoutubeEvidence[]) {
 export async function saveYoutubeEvidence(db: YoutubeCaptureDb, input: { sourceId: string; evidence: YoutubeEvidence[]; metadata: SafeYoutubeCaptureMetadata; actor: YoutubeCaptureActor; title?: string | null; now?: Date }) {
   const rawText = serializeYoutubeEvidence(input.evidence);
   return db.transaction(async (transaction) => {
+    const linkedCards = await transaction.select({ id: knowledgeCards.id }).from(knowledgeCardSources).innerJoin(knowledgeCards, eq(knowledgeCards.id, knowledgeCardSources.knowledgeCardId)).where(eq(knowledgeCardSources.sourceId, input.sourceId)).orderBy(asc(knowledgeCards.id));
+    for (const card of linkedCards) {
+      await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${card.id}, 46))`);
+      await transaction.select({ id: knowledgeCards.id }).from(knowledgeCards).where(eq(knowledgeCards.id, card.id)).limit(1).for("update");
+    }
     const [queued] = await transaction
       .select({ rawMaterialId: rawSourceMaterial.id })
       .from(sources)
@@ -123,6 +129,12 @@ export async function saveYoutubeEvidence(db: YoutubeCaptureDb, input: { sourceI
 
     if (input.title) {
       await transaction.update(sources).set({ label: input.title }).where(eq(sources.id, input.sourceId));
+      for (const card of linkedCards) {
+        const [updated] = await transaction.update(knowledgeCards).set({ contentVersion: sql`${knowledgeCards.contentVersion} + 1`, updatedAt: input.now ?? new Date() }).where(eq(knowledgeCards.id, card.id)).returning({ contentVersion: knowledgeCards.contentVersion, evidenceSetRevision: knowledgeCards.evidenceSetRevision });
+        if (!updated) continue;
+        await enqueueKnowledgeIndexWork(transaction, { cardId: card.id, contentVersion: updated.contentVersion, evidenceSetRevision: updated.evidenceSetRevision, reason: "source_label" });
+        await disableStaleKnowledgeSearchProjection(transaction, card.id, updated.contentVersion, input.now ?? new Date());
+      }
     }
 
     await transaction.insert(auditEvents).values({

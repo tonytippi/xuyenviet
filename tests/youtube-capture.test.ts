@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test } from "vitest";
 
-import { auditEvents, knowledgeIngestionJobs, rawSourceMaterial, sourceCaptureVersions, sources, users } from "@/db/schema";
+import { auditEvents, knowledgeCardSearchDocuments, knowledgeCardSources, knowledgeCards, knowledgeIndexDirtyMarkers, knowledgeIngestionJobs, rawSourceMaterial, sourceCaptureVersions, sources, users } from "@/db/schema";
 import { listQueuedYoutubeSources, maxYoutubeEvidenceItemsPerVideo, maxYoutubeEvidenceItemsPerWindow, parseYoutubeEvidence, recordYoutubeCaptureFailure, saveYoutubeEvidence, serializeYoutubeEvidence } from "@/features/knowledge/youtube-capture";
 import { getYoutubeMediaResolution, mergeYoutubeWindowEvidence, normalizeYoutubeWindowTimestamps, parseCachedYoutubePayload, parseCachedYoutubeSegmentPayload, parseYoutubeDuration, requestYoutubeEvidence, requestYoutubeTitle, retainedYoutubeEvidenceItemsPerWindow, youtubeWindows } from "../scripts/youtube-capture";
 
@@ -36,6 +36,17 @@ describe("YouTube capture", () => {
     const [audit] = await testDb.select().from(auditEvents).where(eq(auditEvents.targetType, "source_capture_version"));
     expect(audit.afterSummary).not.toContain("NovaWorld");
     expect(audit.afterSummary).toContain("evidenceCount: 1");
+  });
+
+  test("invalidates linked search projections when a YouTube title changes", async () => {
+    await createSource("linked");
+    await testDb.insert(knowledgeCards).values({ id: "linked-card", type: "place", title: "Điểm dừng", locationName: "Huế", summary: "Tóm tắt", aiPromptVersion: "test", createdByUserId: actor.userId });
+    await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: "linked-card", sourceId: "linked", supportLevel: "primary" });
+    await testDb.insert(knowledgeCardSearchDocuments).values({ knowledgeCardId: "linked-card", contentVersion: 1, acceptedFence: "legacy", status: "active", searchableText: "YouTube video", textHash: "b".repeat(64), sourceCount: 1, confidence: "community", freshnessSensitive: false });
+    await saveYoutubeEvidence(testDb, { sourceId: "linked", evidence: parseYoutubeEvidence({ evidence }), metadata: { captureMethod: "gemini_youtube_url", capturedAt: "2026-07-17T00:00:00.000Z", sourceUrl: "https://www.youtube.com/watch?v=abcDEF12345", model: "gemini-3.5-flash", mediaResolution: "MEDIA_RESOLUTION_LOW", promptVersion: "youtube-evidence-v1", evidenceCount: 1, latencyMs: 1 }, actor, title: "Tiêu đề mới" });
+    await expect(testDb.select({ contentVersion: knowledgeCards.contentVersion }).from(knowledgeCards).where(eq(knowledgeCards.id, "linked-card"))).resolves.toEqual([{ contentVersion: 2 }]);
+    await expect(testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, "linked-card"))).resolves.toMatchObject([{ status: "disabled" }]);
+    await expect(testDb.select().from(knowledgeIndexDirtyMarkers).where(eq(knowledgeIndexDirtyMarkers.knowledgeCardId, "linked-card"))).resolves.toMatchObject([{ contentVersion: 2, status: "pending" }]);
   });
 
   test("records a safe audit outcome when Gemini capture fails", async () => {
