@@ -352,15 +352,23 @@ function getSafeTravelerUrl(value: string | null) {
 }
 
 function isFacebookHost(hostname: string) {
-  const normalized = hostname.toLowerCase();
+  const normalized = hostname.toLowerCase().replace(/\.+$/, "");
   return normalized === "facebook.com" || normalized.endsWith(".facebook.com") || normalized === "fb.com" || normalized.endsWith(".fb.com") || normalized === "fb.me" || normalized.endsWith(".fb.me") || normalized === "fb.watch" || normalized.endsWith(".fb.watch");
 }
 
 function getKnowledgeState(value: unknown): AssistantMessageProvenanceItem["knowledgeState"] {
+  if (value === "verified_fact") {
+    return "confirmed";
+  }
+
   return value === "community_observation" || value === "community_pattern" || value === "conditional" || value === "uncertain" || value === "conflicted" || value === "confirmed" || value === "superseded" ? value : null;
 }
 
 function getVerificationState(value: unknown): AssistantMessageProvenanceItem["verificationState"] {
+  if (value === "verified") {
+    return "corroborated";
+  }
+
   return value === "not_required" || value === "required" || value === "corroborated" || value === "failed" ? value : null;
 }
 

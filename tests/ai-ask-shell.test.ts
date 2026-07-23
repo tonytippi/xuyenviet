@@ -453,6 +453,35 @@ describe("AI Ask authenticated shell", () => {
     expect(html).not.toContain("Số điện thoại riêng 0901");
   });
 
+  test("renders terminal persisted provenance states as warnings instead of verified sources", async () => {
+    await createTestUser("user-1");
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
+    const [userMessage] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "user", content: "Thông tin này còn dùng được không?" }).returning({ id: messages.id });
+    const [assistantMessage] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "assistant", content: "Cần kiểm tra lại thông tin cũ." }).returning({ id: messages.id });
+    await testDb.insert(assistantResponseProvenance).values([
+      {
+        userId: "user-1", conversationId: conversation.id, userMessageId: userMessage.id, assistantMessageId: assistantMessage.id, sourceCategory: "knowledge", rank: 1, sourceType: "curated", verificationStatus: "verified", usedInPrompt: true, citedInAnswer: false,
+        sourceSnapshot: { title: "Nguồn xác minh thất bại", verificationState: "failed" },
+      },
+      {
+        userId: "user-1", conversationId: conversation.id, userMessageId: userMessage.id, assistantMessageId: assistantMessage.id, sourceCategory: "knowledge", rank: 2, sourceType: "curated", verificationStatus: "verified", usedInPrompt: true, citedInAnswer: false,
+        sourceSnapshot: { title: "Nguồn mâu thuẫn", knowledgeState: "conflicted" },
+      },
+      {
+        userId: "user-1", conversationId: conversation.id, userMessageId: userMessage.id, assistantMessageId: assistantMessage.id, sourceCategory: "knowledge", rank: 3, sourceType: "curated", verificationStatus: "verified", usedInPrompt: true, citedInAnswer: false,
+        sourceSnapshot: { title: "Nguồn đã thay thế", knowledgeState: "superseded" },
+      },
+    ]);
+
+    const html = await renderAuthenticatedAiAskShell({ conversationId: conversation.id });
+
+    expect(html).toContain("Không dùng để hành động; cần kiểm tra nguồn hiện hành");
+    expect(html).toContain("Xem chi tiết cảnh báo: Nguồn xác minh thất bại");
+    expect(html).toContain("Xem chi tiết cảnh báo: Nguồn mâu thuẫn");
+    expect(html).toContain("Xem chi tiết cảnh báo: Nguồn đã thay thế");
+    expect(html).not.toContain("Xem chi tiết nguồn: Nguồn xác minh thất bại");
+  });
+
   test("renders backend annotations as inline accessible highlights while preserving section cards", async () => {
     const { AssistantMessageContent } = await import("@/features/ai/ai-ask-composer");
     const content = "Kế hoạch gợi ý:\nNên dừng ở Bãi đỗ chính thức Huế.\nCảnh báo cần kiểm tra:\nGiá xem Nguồn web cập nhật.";

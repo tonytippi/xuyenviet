@@ -1467,10 +1467,10 @@ describe("answer context assembly", () => {
     expect(JSON.stringify(item)).not.toContain("Không hiển thị");
   });
 
-  test("keeps persisted state vocabulary and rejects Facebook aliases and unsafe legacy evidence", async () => {
+  test("keeps persisted and historical state vocabulary and rejects Facebook aliases and unsafe legacy evidence", async () => {
     const { formatAssistantMessageProvenance } = await import("@/features/retrieval/provenance");
 
-    const [item, confirmedItem] = formatAssistantMessageProvenance([{
+    const [item, confirmedItem, historicalItem] = formatAssistantMessageProvenance([{
       id: "legacy-state-aware-provenance",
       sourceCategory: "knowledge",
       rank: 1,
@@ -1500,13 +1500,35 @@ describe("answer context assembly", () => {
       usedInPrompt: true,
       citedInAnswer: false,
       sourceSnapshot: { title: "Thông tin đã xác nhận", knowledgeState: "confirmed", verificationState: "corroborated" },
+    }, {
+      id: "historical-verified-provenance",
+      sourceCategory: "knowledge",
+      rank: 3,
+      retrievalScore: null,
+      sourceType: "curated",
+      verificationStatus: "verified",
+      usedInPrompt: true,
+      citedInAnswer: false,
+      sourceSnapshot: {
+        title: "Thông tin lịch sử đã xác minh",
+        knowledgeState: "verified_fact",
+        verificationState: "verified",
+        evidence: [
+          { sourceLabel: "Facebook đuôi chấm", sourceType: "community", displayPolicy: "traveler_visible", url: "https://facebook.com./private", quote: "Không hiển thị" },
+          { sourceLabel: "FB rút gọn đuôi chấm", sourceType: "community", displayPolicy: "traveler_visible", url: "https://fb.me./private", quote: "Không hiển thị" },
+          { sourceLabel: "Facebook video đuôi chấm", sourceType: "community", displayPolicy: "traveler_visible", url: "https://fb.watch./private", quote: "Không hiển thị" },
+        ],
+      },
     }]);
 
     expect(item).toMatchObject({ knowledgeState: "conditional", verificationState: "corroborated" });
     expect(confirmedItem).toMatchObject({ knowledgeState: "confirmed", verificationState: "corroborated" });
     expect(item?.evidence).toEqual([{ sourceLabel: "Nguồn an toàn", sourceType: "curated", url: "https://example.com/public", quote: "Trích dẫn an toàn" }]);
+    expect(historicalItem).toMatchObject({ knowledgeState: "confirmed", verificationState: "corroborated", evidence: [] });
     expect(JSON.stringify(item)).not.toContain("fb.me");
     expect(JSON.stringify(item)).not.toContain("0901234567");
+    expect(JSON.stringify(historicalItem)).not.toContain("facebook.com.");
+    expect(JSON.stringify(historicalItem)).not.toContain("fb.watch.");
   });
 
   test("source bundle priority contract names active state-aware knowledge", async () => {

@@ -33,6 +33,12 @@ so that I can decide what to verify before acting.
   - [x] Cover caveat-only and external-unverified messaging plus operator-only/Facebook hidden-source behavior.
   - [x] Verify accessible labels, focus behavior, readable Vietnamese copy, and mobile-safe presentation for any new icon-only controls.
 
+### Review Findings
+
+- [x] [Review][Patch] Normalize trailing-dot Facebook hosts before trust-detail filtering [src/features/retrieval/provenance.ts:354] — `facebook.com.`, `fb.me.`, and `fb.watch.` do not match the current host checks. A legacy `traveler_visible` evidence snapshot can therefore expose a Facebook quote and link, violating AC 3's raw Facebook exclusion.
+- [x] [Review][Patch] Preserve historical provenance state vocabulary [src/features/retrieval/provenance.ts:359] — persisted answers created with the earlier `verified_fact` and `verified` snapshot vocabulary now format both values as `null`. This discards historical state/verification context instead of rendering the stored snapshot, violating AC 1 and AC 2.
+- [x] [Review][Patch] Render terminal provenance states as warnings [src/features/ai/ai-ask-composer.tsx:1796] — snapshots with `verificationState: "failed"` or `knowledgeState: "conflicted"`/`"superseded"` can still show `đã xác minh` from their row-level status and have no warning label. A traveler can be misled by historical trust details, violating AC 1.
+
 ## Dev Notes
 
 - Source/confidence UI is strictly provenance-driven. No answer-prose regex, text matching, inferred state, or client-side database policy may create a source claim.
@@ -73,6 +79,8 @@ gpu4ai/gpt-5.6-terra-review
 - Tests passed: `pnpm test:run` (49 files, 693 tests), `pnpm typecheck`, `pnpm lint` (3 pre-existing warnings), and `pnpm build`.
 - 2026-07-23 repair: persisted evidence snapshots now retain `displayPolicy`; legacy rendering rejects `fb.me` aliases and unsafe quote material before URLs are sanitized; state allowlists match stored `conditional`/`confirmed` and `corroborated` values; caveat-only use policy is retained in bounded detail quick facts.
 - Repair verification passed: `pnpm vitest run tests/answer-context.test.ts tests/ai-ask-shell.test.ts` (160 tests), `pnpm typecheck`, and `pnpm lint` (3 pre-existing warnings in `tests/knowledge-search.test.ts`).
+- 2026-07-23 second-review repair: trailing-dot Facebook host aliases are rejected; historical `verified_fact` and `verified` snapshots preserve their current semantic states; failed, conflicted, and superseded snapshots render explicit action-blocking warnings rather than verified source labels.
+- Second-review repair verification passed: `pnpm vitest run tests/answer-context.test.ts tests/ai-ask-shell.test.ts` (161 tests), `pnpm typecheck`, `pnpm lint` (3 pre-existing warnings in `tests/knowledge-search.test.ts`), and `git diff --check`.
 
 ### File List
 
@@ -87,3 +95,5 @@ gpu4ai/gpt-5.6-terra-review
 
 - 2026-07-23: Rendered state-aware traveler trust details from persisted provenance and added privacy/render coverage.
 - 2026-07-23: Repaired persisted evidence policy/state rendering and legacy traveler-evidence privacy filtering.
+- 2026-07-23: Second bounded review found three unresolved action items; story returned to in-progress.
+- 2026-07-23: Resolved the second-review findings and returned the story to review.

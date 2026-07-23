@@ -420,7 +420,8 @@ export function AssistantProvenanceBlock({ provenance, selectedEntityId, detailP
       <ul className="mt-3 space-y-3">
         {visibleItems.map((item) => {
           const isSelected = selectedEntityId === item.id;
-          const detailActionLabel = item.sourceCategory === "general" ? "Xem chi tiết suy luận AI" : item.freshnessSensitive ? "Xem chi tiết cảnh báo" : "Xem chi tiết nguồn";
+          const hasTerminalProvenanceState = item.verificationState === "failed" || item.knowledgeState === "conflicted" || item.knowledgeState === "superseded";
+          const detailActionLabel = item.sourceCategory === "general" ? "Xem chi tiết suy luận AI" : hasTerminalProvenanceState || item.freshnessSensitive ? "Xem chi tiết cảnh báo" : "Xem chi tiết nguồn";
 
           return (
           <li className="rounded-xl border border-[#eadfc8] bg-white/80 p-3 text-sm leading-6 text-[#17342c]" key={item.id}>
@@ -1789,11 +1790,12 @@ function formatProvenanceCategory(item: AssistantMessageProvenanceItem) {
 }
 
 function createProvenanceAnswerEntityDescriptor(item: AssistantMessageProvenanceItem): AnswerEntityDescriptor {
+  const hasTerminalProvenanceState = item.verificationState === "failed" || item.knowledgeState === "conflicted" || item.knowledgeState === "superseded";
   const detail: Record<string, string> = {
     "Loại": formatProvenanceCategory(item),
     "Độ tin cậy": item.confidenceLabel,
     "Nhãn nguồn": formatProvenanceSourceType(item),
-    "Trạng thái": item.verificationStatus === "verified" && item.sourceCategory !== "web" && item.sourceCategory !== "general" ? "đã xác minh" : "chưa xác minh",
+    "Trạng thái": hasTerminalProvenanceState ? "Không dùng để hành động; cần kiểm tra nguồn hiện hành." : item.verificationStatus === "verified" && item.sourceCategory !== "web" && item.sourceCategory !== "general" ? "đã xác minh" : "chưa xác minh",
   };
 
   // Keep the action constraint in bounded quick facts even when URLs and freshness add detail.
@@ -1820,7 +1822,7 @@ function createProvenanceAnswerEntityDescriptor(item: AssistantMessageProvenance
   }
 
   return {
-    type: item.sourceCategory === "general" ? "action" : item.freshnessSensitive ? "warning" : "source",
+    type: item.sourceCategory === "general" ? "action" : hasTerminalProvenanceState || item.freshnessSensitive ? "warning" : "source",
     label: item.title,
     section: "Nguồn và độ tin cậy",
     summary: item.sourceCategory === "general" ? "Đây là suy luận tổng quát của AI, chưa được xác minh như một nguồn." : undefined,
@@ -1839,6 +1841,7 @@ function getTrustLabels(item: AssistantMessageProvenanceItem) {
   if (item.knowledgeState === "community_pattern") labels.push("Mẫu hình cộng đồng");
   if (item.usePolicy === "caveat_only" || (item.conditions?.length ?? 0) > 0) labels.push("Thông tin có điều kiện");
   if (item.verificationState === "required" || item.verificationStatus === "unverified") labels.push("Cần xác minh trước khi hành động");
+  if (item.verificationState === "failed" || item.knowledgeState === "conflicted" || item.knowledgeState === "superseded") labels.push("Không dùng để hành động; cần kiểm tra nguồn hiện hành");
   if (item.sourceCategory === "web") labels.push("Nguồn bên ngoài chưa xác minh");
   if (item.freshnessSensitive) labels.push("Có thể đã thay đổi");
 
