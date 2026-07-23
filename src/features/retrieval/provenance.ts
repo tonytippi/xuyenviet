@@ -3,6 +3,7 @@ import "server-only";
 import { assistantResponseProvenance, assistantRetrievalDecisions } from "@/db/schema";
 import type { AssistantProvenanceSourceCategory } from "@/db/schema";
 import type { ContextPrioritySourceBundle } from "@/features/retrieval/source-bundle";
+import { toStateAwareKnowledgeBundleItem, type StateAwareKnowledgeBundleItem } from "@/features/retrieval/approved-knowledge";
 
 const maxSnapshotStringLength = 500;
 const maxSnapshotArrayItems = 5;
@@ -121,7 +122,8 @@ function buildProvenanceRows({
     rows.push(createRow({ userId, conversationId, userMessageId, assistantMessageId, rank: rank++, sourceCategory: "chat_context", verificationStatus: "verified", sourceType: fact.field, usedInPrompt: promptSection.includes(`${fact.field}: ${formatPromptValue(fact.value)}`), sourceSnapshot: { field: fact.field, source: fact.source } }));
   }
 
-  for (const result of sourceBundle.knowledge) {
+  for (const knowledge of sourceBundle.knowledge) {
+    const result = toStateAwareKnowledgeBundleItem(knowledge);
     rows.push(createRow({
       userId,
       conversationId,
@@ -129,22 +131,13 @@ function buildProvenanceRows({
       assistantMessageId,
       rank: rank++,
       sourceCategory: "knowledge",
-      sourceReferenceId: result.id,
+      sourceReferenceId: result.cardId,
       sourceReferenceType: "knowledge_card",
       retrievalScore: result.score,
       sourceType: result.type,
       verificationStatus: "verified",
-      usedInPrompt: promptSection.includes(`title=${formatPromptValue(result.title)}`),
-      sourceSnapshot: {
-        id: result.id,
-        title: result.title,
-        type: result.type,
-        locationName: result.locationName,
-        routeSegment: result.routeSegment,
-        confidence: result.confidence,
-        freshnessSensitive: result.freshnessSensitive,
-        sources: result.sources.map((source) => ({ id: source.id, label: source.label, publisher: source.publisher, url: source.url, canonicalUrl: source.canonicalUrl, collectedDate: source.collectedDate, sourceType: source.sourceType, verificationStatus: source.verificationStatus, supportLevel: source.supportLevel })),
-      },
+      usedInPrompt: promptSection.includes(`cardId=${formatPromptValue(result.cardId)}`),
+      sourceSnapshot: buildStateAwareKnowledgeSnapshot(result),
     }));
   }
 
@@ -195,6 +188,37 @@ function buildProvenanceRows({
   }
 
   return rows;
+}
+
+function buildStateAwareKnowledgeSnapshot(result: StateAwareKnowledgeBundleItem) {
+  return {
+    knowledgeCardId: result.cardId,
+    contentVersion: result.contentVersion,
+    title: result.fact,
+    summary: result.summary,
+    type: result.type,
+    locationName: result.locationName,
+    routeSegment: result.routeSegment,
+    conditions: result.conditions,
+    confidence: result.confidence,
+    freshnessSensitive: result.freshnessSensitive,
+    knowledgeState: result.knowledgeState,
+    verificationState: result.verificationState,
+    usePolicy: result.usePolicy,
+    evidence: result.evidence.map((evidence) => ({
+      evidenceId: evidence.evidenceId,
+      sourceId: evidence.sourceId,
+      supportLevel: evidence.supportLevel,
+      sourceLabel: evidence.sourceLabel,
+      sourceType: evidence.sourceType,
+      verificationStatus: evidence.verificationStatus,
+      official: evidence.official,
+      partner: evidence.partner,
+      collectedDate: evidence.collectedDate,
+      observedAt: evidence.observedAt,
+      ...(evidence.displayPolicy === "traveler_visible" && evidence.url ? { url: evidence.url, ...(evidence.quote ? { quote: evidence.quote } : {}) } : {}),
+    })),
+  };
 }
 
 function createRow(input: {

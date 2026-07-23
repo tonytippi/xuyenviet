@@ -423,10 +423,11 @@ export function buildSourceBundlePromptSection(bundle: ContextPrioritySourceBund
     "Nguồn web luôn là nguồn ngoài/chưa xác minh cho đến khi được duyệt thành kiến thức Xuyên Việt; nguồn community/Facebook không được coi là chính thức nếu metadata không nói official/partner qua nguồn đã duyệt.",
   ];
 
-  appendFactSection(lines, "1. Ngữ cảnh dự án chuyến đi đã chọn", bundle.chatTripContext.tripProjectFacts);
-  appendFactSection(lines, "2. Ngữ cảnh phiên chat hiện tại", bundle.chatTripContext.chatFacts);
-  appendFamilyGuidance(lines, bundle.chatTripContext);
-  appendConflictSection(lines, bundle.chatTripContext.conflicts);
+  const context = selectAllowlistedContext(bundle.chatTripContext);
+  appendFactSection(lines, "1. Ngữ cảnh dự án chuyến đi đã chọn", context.tripProjectFacts);
+  appendFactSection(lines, "2. Ngữ cảnh phiên chat hiện tại", context.chatFacts);
+  appendFamilyGuidance(lines, context);
+  appendConflictSection(lines, context.conflicts);
   appendKnowledgeSection(lines, bundle.knowledge);
   appendRetrievalDecisionSection(lines, bundle.retrievalDecision);
   appendWarningSection(lines, bundle.warnings);
@@ -453,10 +454,11 @@ function buildCompactedSourceBundlePromptSection(bundle: ContextPrioritySourceBu
     "Nguồn web luôn là nguồn ngoài/chưa xác minh cho đến khi được duyệt thành kiến thức Xuyên Việt; nguồn community/Facebook không được coi là chính thức nếu metadata không nói official/partner qua nguồn đã duyệt.",
   ];
 
-  appendFactSection(lines, "1. Ngữ cảnh dự án chuyến đi đã chọn", bundle.chatTripContext.tripProjectFacts.slice(0, 10));
-  appendFactSection(lines, "2. Ngữ cảnh phiên chat hiện tại", bundle.chatTripContext.chatFacts.slice(0, 10));
-  appendFamilyGuidance(lines, bundle.chatTripContext);
-  appendConflictSection(lines, bundle.chatTripContext.conflicts.slice(0, 10));
+  const context = selectAllowlistedContext(bundle.chatTripContext);
+  appendFactSection(lines, "1. Ngữ cảnh dự án chuyến đi đã chọn", context.tripProjectFacts.slice(0, 10));
+  appendFactSection(lines, "2. Ngữ cảnh phiên chat hiện tại", context.chatFacts.slice(0, 10));
+  appendFamilyGuidance(lines, context);
+  appendConflictSection(lines, context.conflicts.slice(0, 10));
   appendKnowledgeSection(lines, bundle.knowledge.slice(0, 1));
   appendRetrievalDecisionSection(lines, bundle.retrievalDecision);
   appendWarningSection(lines, bundle.warnings);
@@ -491,7 +493,7 @@ function buildMinimalSourceBundlePromptSection(
 
   appendWarningSection(lines, warnings);
   if (chatTripContext) {
-    appendFamilyGuidance(lines, chatTripContext, 3);
+    appendFamilyGuidance(lines, chatTripContext);
   }
   appendWebSection(lines, web, warnings);
   lines.push("5. Suy luận tổng quát: chỉ dùng sau các nguồn trên; phải nói rõ khi câu trả lời chỉ là gợi ý tổng quát.");
@@ -585,13 +587,9 @@ function appendConflictSection(lines: string[], conflicts: AnswerContextDigest["
   }
 
   lines.push("Mâu thuẫn giữa chat và dự án: ưu tiên giá trị dự án; chỉ hỏi làm rõ ngắn gọn nếu mâu thuẫn thay đổi đáng kể kế hoạch.");
-
-  for (const conflict of conflicts.slice(0, maxContextFacts)) {
-    lines.push(`- ${conflict.field}: dự án=${formatPromptValue(conflict.projectValue)} | chat=${formatPromptValue(conflict.conversationValue)}`);
-  }
 }
 
-function appendFamilyGuidance(lines: string[], chatTripContext: ContextPrioritySourceBundle["chatTripContext"], maxFamilyFacts = maxContextFacts) {
+function appendFamilyGuidance(lines: string[], chatTripContext: ContextPrioritySourceBundle["chatTripContext"]) {
   const facts = [...chatTripContext.tripProjectFacts, ...chatTripContext.chatFacts];
   const hasNoChildrenFact = facts.some(isNoChildrenFact);
   const familyFacts = facts.filter((fact) => isPositiveFamilyFact(fact, hasNoChildrenFact));
@@ -601,9 +599,6 @@ function appendFamilyGuidance(lines: string[], chatTripContext: ContextPriorityS
   }
 
   lines.push("Ngữ cảnh gia đình/trẻ em cần giữ khi trả lời");
-  for (const fact of familyFacts.slice(0, maxFamilyFacts)) {
-    lines.push(`- ${fact.field}: ${formatPromptValue(fact.value)}`);
-  }
   lines.push("Hướng dẫn gia đình: vì ngữ cảnh có trẻ em, hãy điều chỉnh kế hoạch bằng Tiếng Việt với chặng lái ngắn hơn, nhịp đi thực tế, điểm nghỉ chân, nghỉ vệ sinh và ăn uống hợp lý, cảnh báo các đoạn đường dài/mệt hoặc dễ quá sức, hoạt động thân thiện với trẻ, ghi chú độ phù hợp theo tuổi/sở thích, cảnh báo hoạt động có thể nhàm chán, khó, mệt, rủi ro hoặc chưa hợp độ tuổi, cân bằng mục tiêu của phụ huynh với sức trẻ, gợi ý phương án ngắn hơn và phương án dự phòng. Chỉ hỏi 1-3 câu tiếp theo ngắn khi còn thiếu tuổi, sở thích, sức chịu lái xe hoặc khả năng vận động quan trọng. Nếu nhắc giảm giá trẻ em, giá vé, khuyến mãi, lịch hoạt động, giờ mở cửa hoặc tình trạng dịch vụ, phải dùng nguồn/độ tin cậy trong gói nguồn và thêm cảnh báo kiểm tra lại, không khẳng định chắc chắn khi chưa xác minh.");
 }
 
@@ -658,8 +653,24 @@ function appendKnowledgeSection(lines: string[], knowledge: KnowledgeSearchResul
     return;
   }
 
-  lines.push("3. Kiến thức Xuyên Việt đã duyệt");
+  lines.push("3. Kiến thức Xuyên Việt đang hiệu lực theo trạng thái");
   lines.push(section);
+}
+
+const allowedContextFields = new Set<AnswerContextFact["field"]>([
+  "origin", "destination", "adults", "children", "children_ages", "budget", "hotel_style", "driving_tolerance", "vehicle_needs", "food_preferences", "activity_preferences", "itinerary_constraints", "avoid_places", "prior_trips", "start_date", "end_date", "duration", "notes",
+]);
+
+function selectAllowlistedContext(context: ContextPrioritySourceBundle["chatTripContext"]) {
+  const selectedTrip = context.tripProjectFacts.filter((fact) => allowedContextFields.has(fact.field));
+  const remaining = Math.max(0, maxContextFacts - selectedTrip.length);
+  const selectedChat = context.chatFacts.filter((fact) => allowedContextFields.has(fact.field)).slice(0, remaining);
+  const selectedValues = new Set([...selectedTrip, ...selectedChat].map((fact) => `${fact.field}\u0000${fact.value}`));
+  return {
+    tripProjectFacts: selectedTrip,
+    chatFacts: selectedChat,
+    conflicts: context.conflicts.filter((conflict) => allowedContextFields.has(conflict.field) && selectedValues.has(`${conflict.field}\u0000${conflict.projectValue}`) && selectedValues.has(`${conflict.field}\u0000${conflict.conversationValue}`)),
+  };
 }
 
 function appendWarningSection(lines: string[], warnings: SourceBundleWarning[]) {

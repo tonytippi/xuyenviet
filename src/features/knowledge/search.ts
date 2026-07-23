@@ -28,6 +28,22 @@ export type KnowledgeSearchSource = Pick<
   supportLevel: KnowledgeSourceSupport;
 };
 
+export type KnowledgeSearchEvidence = {
+  evidenceId: string;
+  sourceId: string;
+  supportLevel: KnowledgeSourceSupport;
+  displayPolicy: "traveler_visible" | "fact_only";
+  sourceLabel: string;
+  sourceType: "curated" | "community";
+  verificationStatus: "verified" | "unverified";
+  official: boolean;
+  partner: boolean;
+  collectedDate: string | null;
+  observedAt: string;
+  url: string | null;
+  quote: string | null;
+};
+
 export type KnowledgeSearchResult = Pick<
   typeof knowledgeCards.$inferSelect,
   "id" | "type" | "title" | "locationName" | "routeSegment" | "summary" | "practicalDetails" | "tags" | "confidence" | "freshnessSensitive" | "publicationState" | "knowledgeState" | "reviewState" | "verificationState" | "conditions" | "contentVersion" | "evidenceSetRevision" | "updatedAt" | "createdAt"
@@ -36,9 +52,29 @@ export type KnowledgeSearchResult = Pick<
   policy: Exclude<KnowledgeTravelerPolicy, "exclude">;
   policyReasons: KnowledgeTravelerPolicyReason[];
   sources: KnowledgeSearchSource[];
+  /** Retrieval-owned, policy-evaluated evidence. Consumers must not re-read evidence. */
+  evidence?: KnowledgeSearchEvidence[];
 };
 
 type KnowledgeSearchCardSnapshot = Omit<KnowledgeSearchResult, "score" | "policy" | "policyReasons" | "sources">;
+
+type ActiveSupportingEvidenceRow = {
+  displayPolicy: "traveler_visible" | "fact_only" | "operator_only";
+  evidenceId: string;
+  sourceId: string;
+  independenceKey: string;
+  supportLevel: KnowledgeSourceSupport;
+  quoteText: string;
+  observedAt: Date;
+  sourceLabel: string | null;
+  sourceType: "curated" | "community" | null;
+  verificationStatus: "verified" | "unverified" | null;
+  official: boolean | null;
+  partner: boolean | null;
+  collectedDate: string | null;
+  sourceUrl: string | null;
+  canonicalUrl: string | null;
+};
 
 /**
  * Compatibility-only projection entrypoint. Production workers must provide the
@@ -258,6 +294,7 @@ async function loadEligibleApprovedCard(db: Pick<KnowledgeSearchDb, "select">, c
     policy: evaluation.policy,
     policyReasons: evaluation.reasons,
     sources: validatedSources,
+    evidence: evidence.rows.map(toKnowledgeSearchEvidence),
   };
 }
 
@@ -265,8 +302,20 @@ async function loadActiveSupportingEvidence(db: Pick<KnowledgeSearchDb, "select"
   const evidenceRows = await db
     .select({
       displayPolicy: knowledgeCardEvidence.displayPolicy,
+      evidenceId: knowledgeCardEvidence.id,
       sourceId: knowledgeCardEvidence.sourceId,
       independenceKey: knowledgeCardEvidence.independenceKey,
+      supportLevel: knowledgeCardEvidence.supportLevel,
+      quoteText: knowledgeCardEvidence.quoteText,
+      observedAt: knowledgeCardEvidence.observedAt,
+      sourceLabel: sources.label,
+      sourceType: sources.sourceType,
+      verificationStatus: sources.verificationStatus,
+      official: sources.official,
+      partner: sources.partner,
+      collectedDate: sources.collectedDate,
+      sourceUrl: sources.url,
+      canonicalUrl: sources.canonicalUrl,
     })
     .from(knowledgeCardEvidence)
      .innerJoin(knowledgeCardSources, and(eq(knowledgeCardSources.knowledgeCardId, knowledgeCardEvidence.knowledgeCardId), eq(knowledgeCardSources.sourceId, knowledgeCardEvidence.sourceId)))
@@ -289,6 +338,37 @@ async function loadActiveSupportingEvidence(db: Pick<KnowledgeSearchDb, "select"
       rows: evidenceRows,
     }
     : null;
+}
+
+function toKnowledgeSearchEvidence(row: ActiveSupportingEvidenceRow): KnowledgeSearchEvidence {
+  const sourceUrl = safeHttpUrl(row.sourceUrl) ?? safeHttpUrl(row.canonicalUrl);
+  const travelerVisible = row.displayPolicy === "traveler_visible" && Boolean(sourceUrl) && row.sourceLabel && row.sourceType && row.verificationStatus && row.official !== null && row.partner !== null;
+
+  return {
+    evidenceId: row.evidenceId,
+    sourceId: row.sourceId,
+    supportLevel: row.supportLevel,
+    displayPolicy: travelerVisible ? "traveler_visible" : "fact_only",
+    sourceLabel: row.sourceLabel ?? "",
+    sourceType: row.sourceType ?? "community",
+    verificationStatus: row.verificationStatus ?? "unverified",
+    official: row.official ?? false,
+    partner: row.partner ?? false,
+    collectedDate: row.collectedDate,
+    observedAt: row.observedAt.toISOString(),
+    url: travelerVisible ? sourceUrl : null,
+    quote: travelerVisible ? row.quoteText : null,
+  };
+}
+
+function safeHttpUrl(value: string | null) {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.href : null;
+  } catch {
+    return null;
+  }
 }
 
 function groupSearchRows(
