@@ -1,0 +1,1 @@
+ALTER TABLE "knowledge_index_backfill_state" ADD COLUMN "completed_at" timestamp;

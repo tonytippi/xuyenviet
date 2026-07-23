@@ -475,6 +475,7 @@ async function approveKnowledgeDraftInTransaction(
   expectedUpdatedAt?: string | null,
 ): Promise<KnowledgeDraftReviewResult> {
   const draft = await loadReviewableDraft(transaction, normalizedDraftId);
+  await transaction.select({ id: knowledgeCards.id }).from(knowledgeCards).where(eq(knowledgeCards.id, normalizedDraftId)).limit(1).for("update");
   for (const source of draft.sources.sort((left, right) => left.id.localeCompare(right.id))) {
     await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${source.id}, 44))`);
   }

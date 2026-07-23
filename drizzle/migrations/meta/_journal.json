@@ -341,8 +341,22 @@
     {
       "idx": 48,
       "version": "7",
-       "when": 1784904000001,
+      "when": 1784904000001,
       "tag": "0048_deep_red_shift",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1784904000002,
+      "tag": "0049_fearless_toad_men",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1784904000003,
+      "tag": "0050_moaning_stellaris",
       "breakpoints": true
     }
   ]

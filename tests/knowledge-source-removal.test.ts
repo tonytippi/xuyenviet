@@ -45,10 +45,13 @@ describe("knowledge source removal", () => {
     const capture = await seedSourceCaptureVersion({ sourceId: "reindexed-removed-source", captureKind: "url", rawText: "Bằng chứng cần được xóa khỏi index." });
     await seedKnowledgeCardEvidence({ cardId: "reindexed-removed-card", sourceId: "reindexed-removed-source", captureVersionId: capture.id, quoteText: "Bằng chứng cần được xóa khỏi index." });
     const { indexApprovedKnowledgeCard } = await import("@/features/knowledge/search");
+    const { processNextApprovedKnowledgeIndexingBatch } = await import("@/features/knowledge/indexing-worker");
 
-    await expect(indexApprovedKnowledgeCard("reindexed-removed-card")).resolves.toMatchObject({ indexed: true });
+    await indexApprovedKnowledgeCard("reindexed-removed-card");
+    await expect(processNextApprovedKnowledgeIndexingBatch({}, testDb)).resolves.toMatchObject({ indexedCount: 1 });
     await removeKnowledgeSource({ sourceId: "reindexed-removed-source", reason: "removed", actor: { userId: "operator", email: "operator@example.com" } }, testDb);
-    await expect(indexApprovedKnowledgeCard("reindexed-removed-card")).resolves.toEqual({ cardId: "reindexed-removed-card", indexed: false });
+    await indexApprovedKnowledgeCard("reindexed-removed-card");
+    await expect(processNextApprovedKnowledgeIndexingBatch({}, testDb)).resolves.toMatchObject({ indexedCount: 0 });
     await expect(testDb.select({ status: knowledgeCardSearchDocuments.status }).from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, "reindexed-removed-card"))).resolves.toEqual([{ status: "disabled" }]);
   });
 

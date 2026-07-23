@@ -46,6 +46,9 @@ type KnowledgeSearchCardSnapshot = Omit<KnowledgeSearchResult, "score" | "policy
  */
 export async function projectClaimedKnowledgeIndexWork(input: { markerId: string; cardId: string; contentVersion: number; fencingToken: string; now?: Date }, db = getDb()) {
   return db.transaction(async (transaction) => {
+    // Lock and validate the claim before any projection write, including a first insert.
+    const [claim] = await transaction.execute(sql`select id from knowledge_index_dirty_markers where id = ${input.markerId} and knowledge_card_id = ${input.cardId} and content_version = ${input.contentVersion} and status = 'claimed' and fencing_token = ${input.fencingToken} and lease_expires_at > now() for update`) as Array<{ id: string }>;
+    if (!claim) return { cardId: input.cardId, indexed: false as const, outcome: "lost_claim" as const };
     const [version] = await transaction.select({ contentVersion: knowledgeCards.contentVersion }).from(knowledgeCards).where(eq(knowledgeCards.id, input.cardId)).limit(1).for("update");
     if (!version || version.contentVersion !== input.contentVersion) return { cardId: input.cardId, indexed: false as const, outcome: "superseded" as const };
     let eligibleCard = await loadEligibleApprovedCard(transaction, input.cardId);
@@ -65,31 +68,19 @@ export async function projectClaimedKnowledgeIndexWork(input: { markerId: string
   });
 }
 
-/**
- * Legacy compatibility entry point. It submits durable work and projects only
- * after claiming its own marker with the ordinary fence protocol.
- */
-export async function indexApprovedKnowledgeCard(cardId: string, claim?: { markerId: string; contentVersion: number; fencingToken: string }) {
+/** Compatibility entry point: request paths may enqueue work but never project it. */
+export async function indexApprovedKnowledgeCard(cardId: string) {
   const normalizedCardId = cardId.trim();
 
   if (!normalizedCardId) {
     throw new KnowledgeSearchError("Knowledge card ID is required.", "invalid_card");
   }
 
-  if (claim) {
-    if (claim.contentVersion < 1 || !claim.markerId || !claim.fencingToken) throw new KnowledgeSearchError("A fenced indexing claim is required.", "invalid_card");
-    return projectClaimedKnowledgeIndexWork({ ...claim, cardId: normalizedCardId });
-  }
   const db = getDb();
   const [card] = await db.select({ contentVersion: knowledgeCards.contentVersion, evidenceSetRevision: knowledgeCards.evidenceSetRevision }).from(knowledgeCards).where(eq(knowledgeCards.id, normalizedCardId)).limit(1);
   if (!card) throw new KnowledgeSearchError("Knowledge card ID is required.", "invalid_card");
   await db.transaction((tx) => enqueueKnowledgeIndexWork(tx, { cardId: normalizedCardId, contentVersion: card.contentVersion, evidenceSetRevision: card.evidenceSetRevision, reason: "compatibility" }));
-  const { claimNextKnowledgeIndexWork, completeKnowledgeIndexWork } = await import("@/features/knowledge/indexing-worker");
-  const compatibilityClaim = await claimNextKnowledgeIndexWork({ workerId: "knowledge-index-compatibility" }, db);
-  if (!compatibilityClaim || compatibilityClaim.cardId !== normalizedCardId || compatibilityClaim.contentVersion !== card.contentVersion) return { cardId: normalizedCardId, indexed: false as const };
-  const result = await projectClaimedKnowledgeIndexWork(compatibilityClaim, db);
-  await completeKnowledgeIndexWork(compatibilityClaim, result.outcome, db);
-  return { cardId: normalizedCardId, indexed: result.indexed };
+  return { cardId: normalizedCardId, indexed: false as const };
 }
 
 export async function disableKnowledgeSearchDocument(cardId: string, status: "disabled" | "stale" = "disabled", db: Pick<KnowledgeSearchDb, "update"> = getDb()) {

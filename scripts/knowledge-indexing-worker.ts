@@ -1,4 +1,4 @@
-import { runApprovedKnowledgeIndexingWorkerLoop, runKnowledgeIndexBackfill } from "../src/features/knowledge/indexing-worker";
+import { runApprovedKnowledgeIndexingWorkerLoop } from "../src/features/knowledge/indexing-worker";
 import { getEnvValue } from "./db-env";
 
 type WorkerOptions = {
@@ -20,7 +20,6 @@ function parseOptions(argv: string[]): WorkerOptions {
 async function main() {
   loadWorkerEnv();
   const options = parseOptions(process.argv.slice(2));
-  await runKnowledgeIndexBackfill();
   const controller = new AbortController();
   const stop = () => controller.abort();
 

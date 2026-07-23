@@ -2,10 +2,10 @@ import "server-only";
 
 import { randomBytes } from "node:crypto";
 
-import { and, asc, eq, gt, lte, sql } from "drizzle-orm";
+import { and, asc, eq, lte, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { knowledgeCardSearchDocuments, knowledgeCards, knowledgeIndexDirtyMarkers } from "@/db/schema";
+import { knowledgeCardSearchDocuments, knowledgeCards, knowledgeIndexBackfillState, knowledgeIndexDirtyMarkers } from "@/db/schema";
 import { enqueueKnowledgeIndexWork } from "@/features/knowledge/indexing-queue";
 import { projectClaimedKnowledgeIndexWork } from "@/features/knowledge/search";
 
@@ -65,15 +65,14 @@ export async function processNextApprovedKnowledgeIndexingBatch(options: { batch
   return { status: "indexed", indexedCount, skippedCount, cardIds: claims.map((claim) => claim.cardId) };
 }
 
-export async function completeKnowledgeIndexWork(claim: KnowledgeIndexingClaim, outcome: "indexed" | "disabled" | "superseded" | "lost_claim", db: Pick<KnowledgeIndexingDb, "update"> = getDb(), now = new Date()) {
+export async function completeKnowledgeIndexWork(claim: KnowledgeIndexingClaim, outcome: "indexed" | "disabled" | "superseded" | "lost_claim", db: Pick<KnowledgeIndexingDb, "update"> = getDb()) {
   const status = outcome === "superseded" ? "superseded" : "completed";
-  const [completed] = await db.update(knowledgeIndexDirtyMarkers).set({ status, completedAt: now, completionReason: outcome, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, updatedAt: now }).where(and(eq(knowledgeIndexDirtyMarkers.id, claim.markerId), eq(knowledgeIndexDirtyMarkers.knowledgeCardId, claim.cardId), eq(knowledgeIndexDirtyMarkers.contentVersion, claim.contentVersion), eq(knowledgeIndexDirtyMarkers.status, "claimed"), eq(knowledgeIndexDirtyMarkers.fencingToken, claim.fencingToken), gt(knowledgeIndexDirtyMarkers.leaseExpiresAt, now))).returning({ id: knowledgeIndexDirtyMarkers.id });
+  const [completed] = await db.update(knowledgeIndexDirtyMarkers).set({ status, completedAt: sql`now()`, completionReason: outcome, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, updatedAt: sql`now()` }).where(and(eq(knowledgeIndexDirtyMarkers.id, claim.markerId), eq(knowledgeIndexDirtyMarkers.knowledgeCardId, claim.cardId), eq(knowledgeIndexDirtyMarkers.contentVersion, claim.contentVersion), eq(knowledgeIndexDirtyMarkers.status, "claimed"), eq(knowledgeIndexDirtyMarkers.fencingToken, claim.fencingToken), sql`${knowledgeIndexDirtyMarkers.leaseExpiresAt} > now()`)).returning({ id: knowledgeIndexDirtyMarkers.id });
   return Boolean(completed);
 }
 
-export async function retryKnowledgeIndexWork(claim: KnowledgeIndexingClaim, failureCode: string, db: Pick<KnowledgeIndexingDb, "update"> = getDb(), now = new Date()) {
-  const retryAt = new Date(now.getTime() + Math.min(60_000 * 2 ** 2, 15 * 60_000));
-  const [retried] = await db.update(knowledgeIndexDirtyMarkers).set({ status: sql`case when ${knowledgeIndexDirtyMarkers.attemptCount} >= ${knowledgeIndexDirtyMarkers.maxAttempts} then 'failed' else 'pending' end`, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, nextRunAt: retryAt, failureCode, failureReason: "Projection worker failed; retry is scheduled.", updatedAt: now }).where(and(eq(knowledgeIndexDirtyMarkers.id, claim.markerId), eq(knowledgeIndexDirtyMarkers.status, "claimed"), eq(knowledgeIndexDirtyMarkers.fencingToken, claim.fencingToken), gt(knowledgeIndexDirtyMarkers.leaseExpiresAt, now))).returning({ id: knowledgeIndexDirtyMarkers.id });
+export async function retryKnowledgeIndexWork(claim: KnowledgeIndexingClaim, failureCode: string, db: Pick<KnowledgeIndexingDb, "update"> = getDb()) {
+  const [retried] = await db.update(knowledgeIndexDirtyMarkers).set({ status: sql`case when ${knowledgeIndexDirtyMarkers.attemptCount} >= ${knowledgeIndexDirtyMarkers.maxAttempts} then 'failed' else 'pending' end`, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, nextRunAt: sql`now() + interval '4 minutes'`, failureCode, failureReason: "Projection worker failed; retry is scheduled.", updatedAt: sql`now()` }).where(and(eq(knowledgeIndexDirtyMarkers.id, claim.markerId), eq(knowledgeIndexDirtyMarkers.status, "claimed"), eq(knowledgeIndexDirtyMarkers.fencingToken, claim.fencingToken), sql`${knowledgeIndexDirtyMarkers.leaseExpiresAt} > now()`)).returning({ id: knowledgeIndexDirtyMarkers.id });
   return Boolean(retried);
 }
 
@@ -96,17 +95,18 @@ export async function backfillKnowledgeIndexWork(input: { cursor?: string; batch
 }
 
 export async function runKnowledgeIndexBackfill(db: KnowledgeIndexingDb = getDb()) {
-  let cursor: string | undefined;
-  do {
-    const result = await backfillKnowledgeIndexWork({ cursor }, db);
-    cursor = result.cursor ?? undefined;
-    if (!cursor) return;
-  } while (true);
+  await db.insert(knowledgeIndexBackfillState).values({ id: "knowledge-index" }).onConflictDoNothing();
+  const [state] = await db.select().from(knowledgeIndexBackfillState).where(eq(knowledgeIndexBackfillState.id, "knowledge-index")).limit(1);
+  if (state?.completedAt) return { cursor: null, processed: 0 };
+  const result = await backfillKnowledgeIndexWork({ cursor: state?.cursor ?? undefined }, db);
+  await db.update(knowledgeIndexBackfillState).set({ cursor: result.cursor, completedAt: result.cursor ? null : sql`now()`, updatedAt: sql`now()` }).where(and(eq(knowledgeIndexBackfillState.id, "knowledge-index"), state?.cursor ? eq(knowledgeIndexBackfillState.cursor, state.cursor) : sql`${knowledgeIndexBackfillState.cursor} is null`));
+  return result;
 }
 
 export async function runApprovedKnowledgeIndexingWorkerLoop(options: { once?: boolean; batchSize?: number; pollIntervalMs?: number; signal?: AbortSignal; workerId?: string } = {}) {
   const pollIntervalMs = options.pollIntervalMs ?? getWorkerPollIntervalMs();
   while (!options.signal?.aborted) {
+    await runKnowledgeIndexBackfill();
     const result = await processNextApprovedKnowledgeIndexingBatch({ batchSize: options.batchSize, workerId: options.workerId });
     if (options.once) return result;
     if (result.status === "no_job") await sleep(pollIntervalMs, options.signal);

@@ -230,8 +230,11 @@ describe("approved knowledge cards", () => {
       await seedKnowledgeCardEvidence({ cardId: card.id, sourceId: source.id, captureVersionId: capture.id, quoteText: "Evidence an toàn cho trạng thái index.", independenceKey: `${card.id}:${capture.id}` });
     }
     const { indexApprovedKnowledgeCard } = await import("@/features/knowledge/search");
+    const { processNextApprovedKnowledgeIndexingBatch } = await import("@/features/knowledge/indexing-worker");
     await indexApprovedKnowledgeCard(indexed.id);
+    await processNextApprovedKnowledgeIndexingBatch({}, testDb);
     await indexApprovedKnowledgeCard(stale.id);
+    await processNextApprovedKnowledgeIndexingBatch({}, testDb);
     const [staleDocument] = await testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, stale.id));
     await testDb.update(knowledgeCards).set({ updatedAt: new Date((staleDocument?.updatedAt.getTime() ?? Date.now()) + 10_000) }).where(eq(knowledgeCards.id, stale.id));
     const { getApprovedKnowledgeIndexStatuses, listApprovedKnowledgeCardsWithIndexStatus } = await import("@/features/knowledge/review");

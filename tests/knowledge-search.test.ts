@@ -35,6 +35,13 @@ async function enqueueIndexWork(cardId: string, reason = "test") {
   await testDb.insert(knowledgeIndexDirtyMarkers).values({ knowledgeCardId: cardId, contentVersion: card.contentVersion, evidenceSetRevision: card.evidenceSetRevision, reason, nextRunAt: new Date(0) });
 }
 
+async function enqueueAndProcessIndexWork(cardId: string) {
+  const { indexApprovedKnowledgeCard } = await import("@/features/knowledge/search");
+  const { processNextApprovedKnowledgeIndexingBatch } = await import("@/features/knowledge/indexing-worker");
+  await indexApprovedKnowledgeCard(cardId);
+  return processNextApprovedKnowledgeIndexingBatch({}, testDb);
+}
+
 describe("knowledge card state-model retrieval safety", () => {
   beforeEach(() => authMock.mockReset());
 
@@ -56,7 +63,7 @@ describe("knowledge card state-model retrieval safety", () => {
     await seedKnowledgeCardEvidence({ cardId: card.id, sourceId: source!.id, captureVersionId: capture.id, quoteText: "Bãi đỗ xe có mái che tại Huế." });
     const { indexApprovedKnowledgeCard, searchApprovedKnowledge } = await import("@/features/knowledge/search");
 
-    await expect(indexApprovedKnowledgeCard(card.id)).resolves.toMatchObject({ cardId: card.id, indexed: true });
+    await expect(enqueueAndProcessIndexWork(card.id)).resolves.toMatchObject({ indexedCount: 1 });
     const results = await searchApprovedKnowledge("Huế");
     expect(results).toHaveLength(1);
     expect(JSON.stringify(results)).not.toContain("Bãi đỗ xe có mái che");
@@ -96,7 +103,7 @@ describe("knowledge card state-model retrieval safety", () => {
       const sourceId = `${card.id}-source`;
       const capture = await seedSourceCaptureVersion({ sourceId, captureKind: "url", rawText: "Bằng chứng hợp lệ nhưng lifecycle không hợp lệ." });
       await seedKnowledgeCardEvidence({ cardId: card.id, sourceId, captureVersionId: capture.id, quoteText: "Bằng chứng hợp lệ nhưng lifecycle không hợp lệ." });
-      await expect((await import("@/features/knowledge/search")).indexApprovedKnowledgeCard(card.id)).resolves.toMatchObject({ indexed: true });
+      await expect(enqueueAndProcessIndexWork(card.id)).resolves.toMatchObject({ indexedCount: 1 });
     }
     await expect((await import("@/features/knowledge/search")).searchApprovedKnowledge("Huế")).resolves.toHaveLength(3);
   });
@@ -141,7 +148,7 @@ describe("knowledge card state-model retrieval safety", () => {
     await seedKnowledgeCardEvidence({ cardId: card.id, sourceId: operatorSource!.id, captureVersionId: operatorCapture.id, quoteText: "Bằng chứng nội bộ.", displayPolicy: "operator_only" });
     const { indexApprovedKnowledgeCard, searchApprovedKnowledge } = await import("@/features/knowledge/search");
 
-    await indexApprovedKnowledgeCard(card.id);
+    await enqueueAndProcessIndexWork(card.id);
     const [result] = await searchApprovedKnowledge("Huế");
     expect(result?.sources).toEqual([expect.objectContaining({ id: "multi-policy-card-source", url: "https://example.com/card", canonicalUrl: "https://example.com/card" })]);
     expect(JSON.stringify(result)).not.toContain("operator-token");
@@ -154,9 +161,9 @@ describe("knowledge card state-model retrieval safety", () => {
     await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: card.id, sourceId: unvalidatedSource!.id, supportLevel: "supporting" });
     const capture = await seedSourceCaptureVersion({ sourceId: "validated-source-card-source", captureKind: "url", rawText: "Bằng chứng fact-only hợp lệ." });
     await seedKnowledgeCardEvidence({ cardId: card.id, sourceId: "validated-source-card-source", captureVersionId: capture.id, quoteText: "Bằng chứng fact-only hợp lệ.", displayPolicy: "fact_only" });
-    const { indexApprovedKnowledgeCard, searchApprovedKnowledge } = await import("@/features/knowledge/search");
+    const { searchApprovedKnowledge } = await import("@/features/knowledge/search");
 
-    await expect(indexApprovedKnowledgeCard(card.id)).resolves.toMatchObject({ indexed: true });
+    await expect(enqueueAndProcessIndexWork(card.id)).resolves.toMatchObject({ indexedCount: 1 });
     const [document] = await testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, card.id));
     expect(document?.sourceCount).toBe(1);
     expect(document?.searchableText).not.toContain("unvalidated-citation-token");
@@ -174,9 +181,9 @@ describe("knowledge card state-model retrieval safety", () => {
     const originalCapture = await seedSourceCaptureVersion({ sourceId: "historical-capture-card-source", captureKind: "facebook", rawText: "Bằng chứng từ capture lịch sử." });
     await seedKnowledgeCardEvidence({ cardId: card.id, sourceId: "historical-capture-card-source", captureVersionId: originalCapture.id, quoteText: "Bằng chứng từ capture lịch sử.", displayPolicy: "fact_only" });
     await seedSourceCaptureVersion({ sourceId: "historical-capture-card-source", captureKind: "facebook", rawText: "Capture mới không làm mất provenance cũ.", id: "historical-recapture", versionSequence: 2 });
-    const { indexApprovedKnowledgeCard, searchApprovedKnowledge } = await import("@/features/knowledge/search");
+    const { searchApprovedKnowledge } = await import("@/features/knowledge/search");
 
-    await expect(indexApprovedKnowledgeCard(card.id)).resolves.toMatchObject({ indexed: true });
+    await expect(enqueueAndProcessIndexWork(card.id)).resolves.toMatchObject({ indexedCount: 1 });
     const [result] = await searchApprovedKnowledge("Huế");
     expect(result?.sources).toEqual([expect.objectContaining({ id: "historical-capture-card-source", url: null, canonicalUrl: null })]);
   });
@@ -203,7 +210,7 @@ describe("knowledge card state-model retrieval safety", () => {
     const evidence = await seedKnowledgeCardEvidence({ cardId: card.id, sourceId: "policy-refresh-card-source", captureVersionId: capture.id, quoteText: "Bằng chứng thay đổi chính sách hiển thị." });
     const { indexApprovedKnowledgeCard, searchApprovedKnowledge } = await import("@/features/knowledge/search");
 
-    await indexApprovedKnowledgeCard(card.id);
+    await enqueueAndProcessIndexWork(card.id);
     await expect(searchApprovedKnowledge("refresh-secret-token")).resolves.toEqual([]);
     await testDb.update(knowledgeCardEvidence).set({ displayPolicy: "operator_only" }).where(eq(knowledgeCardEvidence.id, evidence.id));
 
@@ -218,9 +225,8 @@ describe("knowledge card state-model retrieval safety", () => {
     const card = await createApprovedCardWithSource("unicode-evidence-operator", "unicode-evidence-card");
     const capture = await seedSourceCaptureVersion({ sourceId: "unicode-evidence-card-source", captureKind: "url", rawText: "🚗 Bãi đỗ xe có mái che." });
     await expect(seedKnowledgeCardEvidence({ cardId: card.id, sourceId: "unicode-evidence-card-source", captureVersionId: capture.id, quoteText: "🚗 Bãi đỗ xe có mái che." })).resolves.toMatchObject({ spanEnd: 23 });
-    const { indexApprovedKnowledgeCard } = await import("@/features/knowledge/search");
 
-    await expect(indexApprovedKnowledgeCard(card.id)).resolves.toMatchObject({ indexed: true });
+    await expect(enqueueAndProcessIndexWork(card.id)).resolves.toMatchObject({ indexedCount: 1 });
   });
 
   test("indexes when a valid evidence row exists after an invalid active row", async () => {
@@ -229,9 +235,9 @@ describe("knowledge card state-model retrieval safety", () => {
     const capture = await seedSourceCaptureVersion({ sourceId: "mixed-evidence-card-source", captureKind: "url", rawText: "Bằng chứng hợp lệ sau cùng." });
     await seedKnowledgeCardEvidence({ cardId: card.id, sourceId: "mixed-evidence-card-source", captureVersionId: capture.id, quoteText: "Bằng chứng không khớp.", independenceKey: "invalid-evidence" });
     await seedKnowledgeCardEvidence({ cardId: card.id, sourceId: "mixed-evidence-card-source", captureVersionId: capture.id, quoteText: "Bằng chứng hợp lệ sau cùng.", independenceKey: "valid-evidence" });
-    const { indexApprovedKnowledgeCard, searchApprovedKnowledge } = await import("@/features/knowledge/search");
+    const { searchApprovedKnowledge } = await import("@/features/knowledge/search");
 
-    await expect(indexApprovedKnowledgeCard(card.id)).resolves.toMatchObject({ indexed: true });
+    await expect(enqueueAndProcessIndexWork(card.id)).resolves.toMatchObject({ indexedCount: 1 });
     await expect(searchApprovedKnowledge("Huế")).resolves.toHaveLength(1);
   });
 
@@ -243,7 +249,7 @@ describe("knowledge card state-model retrieval safety", () => {
     for (const card of [uncertain, required]) {
       const capture = await seedSourceCaptureVersion({ sourceId: `${card.id}-source`, captureKind: "url", rawText: "Bằng chứng an toàn có điều kiện." });
       await seedKnowledgeCardEvidence({ cardId: card.id, sourceId: `${card.id}-source`, captureVersionId: capture.id, quoteText: "Bằng chứng an toàn có điều kiện." });
-      await (await import("@/features/knowledge/search")).indexApprovedKnowledgeCard(card.id);
+      await enqueueAndProcessIndexWork(card.id);
     }
 
     const results = await (await import("@/features/knowledge/search")).searchApprovedKnowledge("Huế");
@@ -265,7 +271,7 @@ describe("knowledge card state-model retrieval safety", () => {
     await expect((await import("@/features/knowledge/search")).indexApprovedKnowledgeCard(card.id)).resolves.toEqual({ cardId: card.id, indexed: false });
     const second = await seedKnowledgeCardEvidence({ cardId: card.id, sourceId: secondSource!.id, captureVersionId: secondCapture.id, quoteText: "Bằng chứng pattern hai.", independenceKey: "independent-two" });
     await testDb.update(knowledgeCards).set({ contentVersion: 2 }).where(eq(knowledgeCards.id, card.id));
-    await expect((await import("@/features/knowledge/search")).indexApprovedKnowledgeCard(card.id)).resolves.toMatchObject({ indexed: true });
+    await expect(enqueueAndProcessIndexWork(card.id)).resolves.toMatchObject({ indexedCount: 1 });
     await testDb.update(knowledgeCardEvidence).set({ state: "removed" }).where(eq(knowledgeCardEvidence.id, second.id));
     await expect((await import("@/features/knowledge/search")).searchApprovedKnowledge("Huế")).resolves.toEqual([]);
     expect(first.id).toBeTruthy();
@@ -281,8 +287,7 @@ describe("knowledge card state-model retrieval safety", () => {
     const secondCapture = await seedSourceCaptureVersion({ sourceId: secondSource!.id, captureKind: "url", rawText: "Bằng chứng pattern worker hai." });
     await seedKnowledgeCardEvidence({ cardId: card.id, sourceId: "worker-pattern-card-source", captureVersionId: firstCapture.id, quoteText: "Bằng chứng pattern worker một.", independenceKey: "worker-independent-one" });
     const secondEvidence = await seedKnowledgeCardEvidence({ cardId: card.id, sourceId: secondSource!.id, captureVersionId: secondCapture.id, quoteText: "Bằng chứng pattern worker hai.", independenceKey: "worker-independent-two" });
-    const { indexApprovedKnowledgeCard } = await import("@/features/knowledge/search");
-    await expect(indexApprovedKnowledgeCard(card.id)).resolves.toMatchObject({ indexed: true });
+    await expect(enqueueAndProcessIndexWork(card.id)).resolves.toMatchObject({ indexedCount: 1 });
     await testDb.update(knowledgeCardEvidence).set({ state: "removed" }).where(eq(knowledgeCardEvidence.id, secondEvidence.id));
     await testDb.update(knowledgeIndexDirtyMarkers).set({ status: "pending", nextRunAt: new Date(0) }).where(eq(knowledgeIndexDirtyMarkers.knowledgeCardId, card.id));
     const { processNextApprovedKnowledgeIndexingBatch } = await import("@/features/knowledge/indexing-worker");
@@ -310,8 +315,8 @@ describe("knowledge card state-model retrieval safety", () => {
     const card = await createApprovedCardWithSource("invalid-evidence-operator", "invalid-evidence-card");
     const capture = await seedSourceCaptureVersion({ sourceId: "invalid-evidence-card-source", captureKind: "url", rawText: "Dữ liệu xác minh chính xác." });
     const evidence = await seedKnowledgeCardEvidence({ cardId: card.id, sourceId: "invalid-evidence-card-source", captureVersionId: capture.id, quoteText: "Dữ liệu xác minh chính xác." });
-    const { indexApprovedKnowledgeCard, searchApprovedKnowledge } = await import("@/features/knowledge/search");
-    await indexApprovedKnowledgeCard(card.id);
+    const { searchApprovedKnowledge } = await import("@/features/knowledge/search");
+    await enqueueAndProcessIndexWork(card.id);
     await testDb.update(knowledgeCardEvidence).set({ state: "removed" }).where(eq(knowledgeCardEvidence.id, evidence.id));
 
     await expect(searchApprovedKnowledge("Huế")).resolves.toEqual([]);
@@ -368,8 +373,7 @@ describe("knowledge card state-model retrieval safety", () => {
       const capture = await seedSourceCaptureVersion({ sourceId, captureKind: "url", rawText: "Evidence đầy đủ cho worker." });
       await seedKnowledgeCardEvidence({ cardId: card.id, sourceId, captureVersionId: capture.id, quoteText: "Evidence đầy đủ cho worker." });
     }
-    const { indexApprovedKnowledgeCard } = await import("@/features/knowledge/search");
-    await indexApprovedKnowledgeCard(current.id);
+    await enqueueAndProcessIndexWork(current.id);
     await enqueueIndexWork(pending.id, "pending");
     const { processNextApprovedKnowledgeIndexingBatch } = await import("@/features/knowledge/indexing-worker");
 

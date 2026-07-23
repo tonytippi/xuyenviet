@@ -101,7 +101,9 @@ async function seedApprovedKnowledge(userId: string) {
   const capture = await seedSourceCaptureVersion({ sourceId: source.id, captureKind: "url", rawText: captureText });
   await seedKnowledgeCardEvidence({ cardId: card.id, sourceId: source.id, captureVersionId: capture.id, quoteText: captureText });
   const { indexApprovedKnowledgeCard } = await import("@/features/knowledge/search");
+  const { processNextApprovedKnowledgeIndexingBatch } = await import("@/features/knowledge/indexing-worker");
   await indexApprovedKnowledgeCard(card.id);
+  await processNextApprovedKnowledgeIndexingBatch({}, testDb);
 }
 
 async function seedAnswerModel(id = "answer-model-only") {

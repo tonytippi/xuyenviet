@@ -1149,6 +1149,17 @@ export const knowledgeIndexDirtyMarkers = pgTable(
   ],
 );
 
+/** Durable cursor for the bounded, supervised knowledge projection backfill. */
+export const knowledgeIndexBackfillState = pgTable(
+  "knowledge_index_backfill_state",
+  {
+    id: text("id").primaryKey(),
+    cursor: text("cursor"),
+    completedAt: timestamp("completed_at", { mode: "date" }),
+    updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
+  },
+);
+
 export const knowledgeSourceSuggestions = pgTable(
   "knowledge_source_suggestions",
   {
@@ -1630,6 +1641,7 @@ export const schema = {
   knowledgeSamplingCohortMembers,
   knowledgeRecommendations,
   knowledgeIndexDirtyMarkers,
+  knowledgeIndexBackfillState,
   knowledgeSourceSuggestions,
   knowledgeSeedBatches,
   knowledgeSeedBatchItems,
