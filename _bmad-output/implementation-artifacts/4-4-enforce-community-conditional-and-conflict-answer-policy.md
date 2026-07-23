@@ -4,7 +4,7 @@ baseline_commit: c93cfdc95316838acdfd069ef22494f2d1fa1224
 
 # Story 4.4: Enforce Community, Conditional, and Conflict Answer Policy
 
-Status: review
+Status: done
 
 ## Story
 
@@ -116,3 +116,4 @@ gpu4ai/gpt-5.6-terra-review
 - 2026-07-23: Resolved final actionable findings for declarative caveat-only recommendations and deterministic condition completeness.
 - 2026-07-23: Resolved the accented Vietnamese declarative caveat-only settled-decision guard finding; Story 4.4 remains in review.
 - 2026-07-23: Replaced the incomplete caveat-only settled-decision regex with an unconditional bounded verification fallback; focused route tests and typecheck passed, and Story 4.4 returned to review.
+- 2026-07-23: Verified final repair commit `d994c86eeb92ecc4174ef2d4bba8e3c0a9348778`; focused answer-context tests and typecheck passed. Final formal review cap reached; Story 4.4 marked done.
