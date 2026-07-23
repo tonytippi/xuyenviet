@@ -42,7 +42,9 @@ is complete only when its sprint status is `done` and every associated story is
   test, validation failure, or unexpected status transition is a stop
   condition. Read the worker output, report the blocker, and do not continue
   the loop automatically. Actionable review findings enter the bounded repair
-  loops described below.
+  loops described below. Status Finalization is not a review: a potential
+  defect noticed by that worker is outside its authority and is not a stop
+  condition. Only its objective finalization checks may block it.
 - Do not close panes, tabs, workspaces, or agents created by another person or
   another run. Close only pane IDs recorded by this run.
 - Retain no more than two child panes from this run at any time: the current
@@ -275,22 +277,51 @@ changed files in SUMMARY.
 After the repair report and sprint-status synchronization are verified, run the
 Commit stage and then repeat Story Review once.
 
-If the second review still contains actionable findings, create one final fresh
-development pane and give it the same repair prompt. Require it to synchronize
-the story to `review`, then run the Commit stage. After the commit gate confirms
-a clean worktree and the final repair commit, run the Status Finalization stage.
-Do not run a third story review. A blocked final-fix, commit, or status-only
-worker remains a stop condition.
+If the second review still contains actionable findings, classify whether it
+exposes substantial new risk. Substantial new risk means a high-severity
+finding, or a new systemic acceptance-criteria, security, data-integrity, or
+cross-feature failure that materially changes confidence in the repair. Ordinary
+remaining findings do not qualify. Record that classification in the review
+SUMMARY.
+
+If the second review does not expose substantial new risk, create one final
+fresh development pane and give it the same repair prompt. Require it to
+synchronize the story to `review`, then run the Commit stage and Status
+Finalization stage. Do not run a third story review.
+
+If the second review exposes substantial new risk, create a fresh development
+pane using the same repair prompt, require it to synchronize the story to
+`review`, and run the Commit stage. Then run one third and final Story Review
+using the normal review prompt. If that final review is approved, synchronize
+the story to `done` as usual. If it has actionable findings, create one final
+fresh development pane using the same repair prompt, run the Commit stage, and
+then run Status Finalization. Do not run a fourth story review. A blocked
+final-fix, commit, review, or status-only worker remains a stop condition.
 
 ### 6. Status Finalization
+
+This stage executes the bounded story-review policy after a final repair
+commit: either after a second review that did not expose substantial new risk,
+or after repairing findings from the permitted third review. It is
+administrative finalization, not an additional review or an opportunity to
+reopen the repair loop. Its only blocking conditions are an unverifiable
+supplied commit, a non-clean worktree, a missing story record, or an inability
+to synchronize the required records.
 
 Create a fresh pane and prompt:
 
 ```text
 Finalize completed story <absolute-story-path> after its final repair commit.
-Do not edit implementation code, run a code review, or create a commit. Verify
-the supplied final repair commit and clean worktree, update the story record to
-done, and synchronize sprint-status.yaml to mark this story done. End with the
+This is a status-only operation, not an additional code review. Do not inspect source
+code or diffs for correctness, evaluate acceptance criteria, discover or report
+new findings, run tests, edit implementation code, run a code review, or create
+a commit. Verify only that the supplied final repair commit exists and the
+worktree is clean, then update the story record to done and synchronize
+sprint-status.yaml to mark this story done. Do not leave the story in review or
+in-progress because of a potential issue noticed while performing these limited
+checks; the bounded repair loop is complete. Return BLOCKED only if the supplied
+commit cannot be verified, the worktree is not clean, the story record is
+missing, or the required done status cannot be synchronized. End with the
 required machine-checkable report including the verified commit SHA and final
 status in SUMMARY.
 ```
