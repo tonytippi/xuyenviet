@@ -41,8 +41,8 @@ is complete only when its sprint status is `done` and every associated story is
 - A `blocked`, `unknown`, timeout, failed command, missing artifact, failed
   test, validation failure, or unexpected status transition is a stop
   condition. Read the worker output, report the blocker, and do not continue
-  the loop automatically. An actionable story-review finding instead enters
-  the bounded repair loop described below; an epic-review finding stops.
+  the loop automatically. Actionable review findings enter the bounded repair
+  loops described below.
 - Do not close panes, tabs, workspaces, or agents created by another person or
   another run. Close only pane IDs recorded by this run.
 - Retain no more than two child panes from this run at any time: the current
@@ -94,7 +94,7 @@ Its job is to verify the prior action and select the next safe action. It must
 return `blocked <reason>` when the worker output does not explicitly confirm
 the expected final status or conflicts with `sprint-status.yaml`; it must never
 repeat an action merely because the file was not synchronized. An accepted
-story-review result with actionable findings is not eligible for coordinator
+review result with actionable findings is not eligible for coordinator
 selection: run its bounded repair loop first.
 
 Give the coordinator the complete final report block, not the result of
@@ -249,7 +249,7 @@ Use bmad-code-review to review committed story <absolute-story-path> and its
 implementation. Follow the skill completely. Compare the current commit and
 story acceptance criteria. Do not edit code, commit, or start another story.
 On approval, synchronize sprint-status.yaml to mark the story done. If there is
-an actionable finding, leave its status at review and synchronize it. A
+an actionable finding, set its status to in-progress and synchronize it. A
 completed review returns `RESULT: SUCCESS` whether it is APPROVED or has
 findings; reserve `RESULT: BLOCKED` for a review that cannot finish. Include
 the review outcome and every finding with severity in SUMMARY.
@@ -260,16 +260,47 @@ If the review is approved, re-read sprint status and require the target to be
 the next pane creation will evict the oldest pane if needed. Restart the
 coordinator loop in a new pane.
 
-If the review contains actionable findings, do not advance. Create a new fresh
-development pane, prompt it to use `bmad-dev-story` on the same story and fix
-only those findings, synchronize `sprint-status.yaml` to keep the story in
-review, and end with the required machine-checkable report. Then repeat the
-commit and story-review stages. Cap this repair loop at two attempts; after the
-second non-approval, stop with the full review evidence for human triage.
+If the first review contains actionable findings, do not advance. Create a new
+fresh development pane and prompt it:
+
+```text
+Use bmad-agent-dev to fix only the supplied actionable findings for
+<absolute-story-path>. Do not begin another story or perform a code review.
+Run the relevant tests, update the story record, and synchronize
+sprint-status.yaml to set this story to review. Do not commit. End with the
+required machine-checkable report, including the findings fixed, tests run, and
+changed files in SUMMARY.
+```
+
+After the repair report and sprint-status synchronization are verified, run the
+Commit stage and then repeat Story Review once.
+
+If the second review still contains actionable findings, create one final fresh
+development pane and give it the same repair prompt. Require it to synchronize
+the story to `review`, then run the Commit stage. After the commit gate confirms
+a clean worktree and the final repair commit, run the Status Finalization stage.
+Do not run a third story review. A blocked final-fix, commit, or status-only
+worker remains a stop condition.
+
+### 6. Status Finalization
+
+Create a fresh pane and prompt:
+
+```text
+Finalize completed story <absolute-story-path> after its final repair commit.
+Do not edit implementation code, run a code review, or create a commit. Verify
+the supplied final repair commit and clean worktree, update the story record to
+done, and synchronize sprint-status.yaml to mark this story done. End with the
+required machine-checkable report including the verified commit SHA and final
+status in SUMMARY.
+```
+
+Continue only when the report is successful and both the story record and
+`sprint-status.yaml` independently show `done`.
 
 ## Epic Completion Review
 
-After every approved story, inspect its epic. When every story whose key begins
+After every completed story, inspect its epic. When every story whose key begins
 with `<epic-number>-` is `done`, and `epic-<epic-number>` is `done`, create one
 fresh pane and prompt:
 
@@ -277,23 +308,29 @@ fresh pane and prompt:
 Use bmad-code-review for the completed Epic <epic-number>. Review the aggregate
 of all stories in the epic, their acceptance criteria, cross-story integration,
 and the commits that implement them. Do not edit code or commit. Report either
-APPROVED with no actionable epic-level findings, or BLOCKED with the findings
-and affected story keys. Synchronize sprint-status.yaml before finishing:
-preserve `epic-<epic-number>` as done on approval, or preserve its current
-status on a blocked review. End with the required machine-checkable report.
+APPROVED with no actionable epic-level findings, or actionable findings with
+affected story keys. Synchronize sprint-status.yaml before finishing: preserve
+`epic-<epic-number>` as done. End with the required machine-checkable report.
 ```
 
-Proceed to the next backlog story only after this epic review is approved. On
-approval, retain the pane only through the rolling audit policy. If it finds an
-issue, stop for human triage rather than changing a completed epic without an
-explicit corrective plan; the review pane and at most one preceding audit pane
-remain open.
+If the first epic review has actionable findings, create a fresh development
+pane for each affected story in numeric order. Prompt it to use `bmad-agent-dev`
+to fix only the assigned epic-review findings, run relevant tests, update the
+story record, and leave the story in `review` without committing. Run the Commit
+stage and Status Finalization stage for each repaired story. Once every affected
+story is again `done`, repeat the epic review once.
+
+If the second epic review still has actionable findings, repeat that repair,
+commit, and status finalization sequence for its affected stories, then preserve
+the epic and all stories as `done`. Do not run a third epic review. Any blocked
+worker, failed verification, or incomplete status finalization remains a stop
+condition.
 
 ## Completion
 
 When the coordinator reports `complete`, independently verify that no story is
 in `backlog`, `ready-for-dev`, `in-progress`, or `review`, and that every epic
-is `done`. Report the list of committed story SHAs and approved epic reviews.
+is `done`. Report the list of committed story SHAs and completed epic reviews.
 After that verification, close every remaining pane in `audit_panes`, one at a
 time. Successful runs leave no child pane open; stopped or blocked runs leave
 at most two as the execution record.
