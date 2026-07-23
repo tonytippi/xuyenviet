@@ -46,7 +46,15 @@ export function ensureAiAskFreshnessWarning(content: string, sourceBundle: Await
 }
 
 function hasSettledItineraryRecommendation(content: string) {
-  return /\b(?:nên|hãy|cần)\s+(?:đi|chọn|chốt|đặt|ưu tiên|theo)\b|\b(?:tôi|mình)\s+(?:đề xuất|khuyên|khuyến nghị)\b|\b(?:bạn|gia đình)\s+có thể\s+(?:đi|chọn|chốt|đặt|ưu tiên|theo)\b|\b(?:khuyến nghị|lựa chọn phù hợp|phương án phù hợp|phương án tối ưu)\b|(?:lịch trình|kế hoạch).{0,60}(?:đã chốt|nên chốt|chắc chắn|phù hợp|tối ưu)/i.test(content.normalize("NFC"));
+  const normalizedContent = content.normalize("NFC").toLocaleLowerCase("vi");
+  return [
+    /(?:^|[^\p{L}\p{N}_])(?:nên|hãy|cần)\s+(?:đi|chọn|chốt|đặt|ưu tiên|theo)(?:$|[^\p{L}\p{N}_])/u,
+    /(?:^|[^\p{L}\p{N}_])(?:tôi|mình)\s+(?:đề xuất|khuyên|khuyến nghị)(?:$|[^\p{L}\p{N}_])/u,
+    /(?:^|[^\p{L}\p{N}_])(?:bạn|gia đình)\s+có thể\s+(?:đi|chọn|chốt|đặt|ưu tiên|theo)(?:$|[^\p{L}\p{N}_])/u,
+    /(?:^|[^\p{L}\p{N}_])(?:khuyến nghị|lựa chọn phù hợp|phương án phù hợp|phương án tối ưu)(?:$|[^\p{L}\p{N}_])/u,
+    /(?:lịch trình|kế hoạch).{0,60}(?:đã chốt|nên chốt|chắc chắn|phù hợp|tối ưu)/u,
+    /(?:là|sẽ là)\s+(?:một\s+)?(?:lựa chọn|phương án)\s+(?:tốt nhất|phù hợp nhất|tối ưu|nên chọn)/u,
+  ].some((pattern) => pattern.test(normalizedContent));
 }
 
 function formatCaveatVerificationInstruction(items: Awaited<ReturnType<typeof assembleContextPrioritySourceBundle>>["knowledge"]) {

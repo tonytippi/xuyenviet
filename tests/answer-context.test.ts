@@ -1527,6 +1527,21 @@ describe("answer context assembly", () => {
     expect(result.content).toContain('tình trạng hiện tại của "Khách sạn cần xác minh"');
   });
 
+  test("answer safeguard replaces accented declarative caveat-only route recommendations", async () => {
+    const { ensureAiAskFreshnessWarning } = await import("@/features/ai/answer-freshness");
+    const sourceBundle = createSourceBundle({
+      knowledge: [makeKnowledgeResult("required", "Tuyến đường cần xác minh", { verificationState: "required", policy: "caveat_only" })],
+    });
+    const routeResult = ensureAiAskFreshnessWarning("Tuyến này là lựa chọn tốt nhất.", sourceBundle);
+    const genericResult = ensureAiAskFreshnessWarning("Đây là lựa chọn tốt nhất.", sourceBundle);
+
+    expect(routeResult.replacedUnsafeContent).toBe(true);
+    expect(routeResult.content).not.toContain("Tuyến này là lựa chọn tốt nhất.");
+    expect(routeResult.content).toContain('tình trạng hiện tại của "Tuyến đường cần xác minh"');
+    expect(genericResult.replacedUnsafeContent).toBe(true);
+    expect(genericResult.content).not.toContain("Đây là lựa chọn tốt nhất.");
+  });
+
   test("answer safeguard replaces contextual conditional answers that omit any material condition", async () => {
     const { ensureAiAskFreshnessWarning } = await import("@/features/ai/answer-freshness");
     const sourceBundle = createSourceBundle({

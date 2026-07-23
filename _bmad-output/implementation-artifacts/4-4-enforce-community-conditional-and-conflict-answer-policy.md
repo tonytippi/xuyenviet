@@ -43,6 +43,7 @@ so that community reports guide planning without becoming false guarantees.
 - [x] [Review][Patch] Caveat-only settled-decision guard misses ordinary recommendation wording [src/features/ai/answer-freshness.ts:47] — Broadened deterministic detection to cover declarative recommendations and explicit traveler action, replacing unsafe content before streaming or persistence.
 - [x] [Review][Patch] Caveat-only fallback omits later material conditions [src/features/ai/answer-freshness.ts:55] — Verification fallback now lists every normalized material condition for each selected card.
 - [x] [Review][Patch] Contextual conditional answers lack a deterministic condition-completeness safeguard [src/features/ai/answer-freshness.ts:14] — Final-answer validation replaces incomplete conditional output with a bounded fallback containing every material condition; the route buffers policy-constrained deltas until this guard completes.
+- [x] [Review][Patch] Caveat-only settled-decision guard misses accented declarative Vietnamese wording [src/features/ai/answer-freshness.ts:48] — Normalized Unicode-aware matching now fails closed for declarative settled choices such as `Tuyến này là lựa chọn tốt nhất` before streaming or persistence.
 
 ## Dev Notes
 
@@ -88,6 +89,8 @@ gpu4ai/gpt-5.6-terra-review
 - Verification after fixes: `pnpm vitest run tests/answer-context.test.ts` (70 tests), `pnpm typecheck`, and `pnpm build` passed. `pnpm lint` completed with the three pre-existing unused-variable warnings in `tests/knowledge-search.test.ts`.
 - Resolved final actionable findings: declarative caveat-only recommendations are fail-closed, caveat-only verification names every material condition, and contextual conditional answers are final-validated for every material condition before stream/persistence.
 - Verification after final fixes: `pnpm vitest run tests/answer-context.test.ts` (74 tests) and `pnpm typecheck` passed. `pnpm lint` completed with the same three pre-existing unused-variable warnings in `tests/knowledge-search.test.ts`.
+- Resolved the remaining actionable caveat-only guard finding: accented declarative Vietnamese settled-decision wording now replaces unsafe output rather than receiving an appended warning.
+- Verification after the remaining finding fix: `pnpm vitest run tests/answer-context.test.ts` (75 tests) and `pnpm typecheck` passed.
 
 ### File List
 
@@ -105,3 +108,4 @@ gpu4ai/gpt-5.6-terra-review
 - 2026-07-23: Enforced state-aware community, conditional, caveat-only, and conflict answer policy; added safeguards and policy-specific tests.
 - 2026-07-23: Resolved three actionable review findings for conditional completeness and caveat-only answer safety.
 - 2026-07-23: Resolved final actionable findings for declarative caveat-only recommendations and deterministic condition completeness.
+- 2026-07-23: Resolved the accented Vietnamese declarative caveat-only settled-decision guard finding; Story 4.4 remains in review.
