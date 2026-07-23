@@ -1,5 +1,11 @@
 _bmad/
 .agents/
+!.agents/
+.agents/*
+!.agents/skills/
+.agents/skills/*
+!.agents/skills/chief-of-staff/
+!.agents/skills/chief-of-staff/SKILL.md
 .opencode/
 opencode.jsonc
 
