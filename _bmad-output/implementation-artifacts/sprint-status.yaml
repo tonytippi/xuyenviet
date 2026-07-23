@@ -61,7 +61,7 @@ development_status:
   4-1-migrate-retrieval-to-state-aware-active-knowledge: done
   4-2-index-current-ai-first-knowledge-versions: done
   4-3-assemble-state-aware-knowledge-source-bundles: done
-  # Synchronized 2026-07-23 after the remaining actionable policy finding fix.
+  # Synchronized 2026-07-23 after the final caveat-only answer-policy repair.
   4-4-enforce-community-conditional-and-conflict-answer-policy: review
   4-5-update-search-fallback-and-provenance-for-ai-first-states: ready-for-dev
   4-6-render-state-aware-traveler-trust-details: ready-for-dev

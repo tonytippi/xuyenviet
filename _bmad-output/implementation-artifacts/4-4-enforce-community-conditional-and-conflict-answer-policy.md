@@ -45,6 +45,10 @@ so that community reports guide planning without becoming false guarantees.
 - [x] [Review][Patch] Contextual conditional answers lack a deterministic condition-completeness safeguard [src/features/ai/answer-freshness.ts:14] — Final-answer validation replaces incomplete conditional output with a bounded fallback containing every material condition; the route buffers policy-constrained deltas until this guard completes.
 - [x] [Review][Patch] Caveat-only settled-decision guard misses accented declarative Vietnamese wording [src/features/ai/answer-freshness.ts:48] — Normalized Unicode-aware matching now fails closed for declarative settled choices such as `Tuyến này là lựa chọn tốt nhất` before streaming or persistence.
 
+### Review Findings (Final Review 2026-07-23)
+
+- [x] [Review][Patch] Caveat-only settled-decision guard remains an incomplete phrase list [src/features/ai/answer-freshness.ts:48] — Removed regex classification. Without a structured server-validated non-reliance contract, every caveat-only bundle now replaces generated content with the bounded verification fallback before stream or persistence; route coverage verifies declarative, imperative, comparative, accented, unaccented, and inflected variants.
+
 ## Dev Notes
 
 - Story 4.1 controls selection policy and Story 4.3 controls structured source-bundle content. Do not implement a competing policy in the prompt layer.
@@ -91,6 +95,8 @@ gpu4ai/gpt-5.6-terra-review
 - Verification after final fixes: `pnpm vitest run tests/answer-context.test.ts` (74 tests) and `pnpm typecheck` passed. `pnpm lint` completed with the same three pre-existing unused-variable warnings in `tests/knowledge-search.test.ts`.
 - Resolved the remaining actionable caveat-only guard finding: accented declarative Vietnamese settled-decision wording now replaces unsafe output rather than receiving an appended warning.
 - Verification after the remaining finding fix: `pnpm vitest run tests/answer-context.test.ts` (75 tests) and `pnpm typecheck` passed.
+- Final repair: caveat-only bundles fail closed unconditionally because no structured server-validated contract proves an itinerary decision does not rely on caveat-only evidence. Route-level variants are discarded before streaming and persistence.
+- Final repair verification: `pnpm vitest run tests/answer-context.test.ts` (76 tests) and `pnpm typecheck` passed.
 
 ### File List
 
@@ -109,3 +115,4 @@ gpu4ai/gpt-5.6-terra-review
 - 2026-07-23: Resolved three actionable review findings for conditional completeness and caveat-only answer safety.
 - 2026-07-23: Resolved final actionable findings for declarative caveat-only recommendations and deterministic condition completeness.
 - 2026-07-23: Resolved the accented Vietnamese declarative caveat-only settled-decision guard finding; Story 4.4 remains in review.
+- 2026-07-23: Replaced the incomplete caveat-only settled-decision regex with an unconditional bounded verification fallback; focused route tests and typecheck passed, and Story 4.4 returned to review.

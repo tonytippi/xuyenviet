@@ -8,7 +8,7 @@ export function ensureAiAskFreshnessWarning(content: string, sourceBundle: Await
   const conditionalKnowledge = sourceBundle.knowledge.filter((item) => item.policy === "contextual_use" && item.knowledgeState === "conditional" && item.conditions.length > 0);
   const caveatWarningRequired = caveatOnlyKnowledge.length > 0;
 
-  if (caveatWarningRequired && hasSettledItineraryRecommendation(content)) {
+  if (caveatWarningRequired) {
     const fallback = `Cảnh báo cần kiểm tra\nMình chưa thể dùng thông tin cần xác minh để chốt lịch trình. ${formatCaveatVerificationInstruction(caveatOnlyKnowledge)}`;
     return { content: fallback, appendedWarning: fallback, replacedUnsafeContent: true };
   }
@@ -43,18 +43,6 @@ export function ensureAiAskFreshnessWarning(content: string, sourceBundle: Await
   }
   const appendedWarning = `\n\nCảnh báo cần kiểm tra\n${warnings.join(" ")}`;
   return { content: `${content.trimEnd()}${appendedWarning}`, appendedWarning, replacedUnsafeContent: false };
-}
-
-function hasSettledItineraryRecommendation(content: string) {
-  const normalizedContent = content.normalize("NFC").toLocaleLowerCase("vi");
-  return [
-    /(?:^|[^\p{L}\p{N}_])(?:nên|hãy|cần)\s+(?:đi|chọn|chốt|đặt|ưu tiên|theo)(?:$|[^\p{L}\p{N}_])/u,
-    /(?:^|[^\p{L}\p{N}_])(?:tôi|mình)\s+(?:đề xuất|khuyên|khuyến nghị)(?:$|[^\p{L}\p{N}_])/u,
-    /(?:^|[^\p{L}\p{N}_])(?:bạn|gia đình)\s+có thể\s+(?:đi|chọn|chốt|đặt|ưu tiên|theo)(?:$|[^\p{L}\p{N}_])/u,
-    /(?:^|[^\p{L}\p{N}_])(?:khuyến nghị|lựa chọn phù hợp|phương án phù hợp|phương án tối ưu)(?:$|[^\p{L}\p{N}_])/u,
-    /(?:lịch trình|kế hoạch).{0,60}(?:đã chốt|nên chốt|chắc chắn|phù hợp|tối ưu)/u,
-    /(?:là|sẽ là)\s+(?:một\s+)?(?:lựa chọn|phương án)\s+(?:tốt nhất|phù hợp nhất|tối ưu|nên chọn)/u,
-  ].some((pattern) => pattern.test(normalizedContent));
 }
 
 function formatCaveatVerificationInstruction(items: Awaited<ReturnType<typeof assembleContextPrioritySourceBundle>>["knowledge"]) {

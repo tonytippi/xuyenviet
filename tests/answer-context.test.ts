@@ -182,7 +182,7 @@ function createSourceBundle(overrides: Partial<ContextPrioritySourceBundle> = {}
   return { ...bundle, ...overrides, chatTripContext: { ...bundle.chatTripContext, ...overrides.chatTripContext } };
 }
 
-function mockStreamingGateway(captureBody: (body: string) => void) {
+function mockStreamingGateway(captureBody: (body: string) => void, answerContent = "Nên đi 5 ngày.") {
   const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body)) as { stream?: boolean };
 
@@ -192,7 +192,7 @@ function mockStreamingGateway(captureBody: (body: string) => void) {
 
     captureBody(String(init?.body));
     return new Response([
-      'data: {"model":"cx/answer","choices":[{"delta":{"content":"Nên đi 5 ngày."}}]}\n\n',
+      `data: {"model":"cx/answer","choices":[{"delta":{"content":${JSON.stringify(answerContent)}}}]}\n\n`,
       'data: {"choices":[{"finish_reason":"stop"}]}\n\n',
       "data: [DONE]\n\n",
     ].join(""), { status: 200, headers: { "content-type": "text/event-stream" } });
@@ -1605,6 +1605,49 @@ describe("answer context assembly", () => {
     expect(deltas).not.toContain("Nên đi 5 ngày.");
     expect(deltas).toContain('tình trạng hiện tại của "Điểm dừng cần xác minh"');
     expect(doneEvent?.assistantMessage?.content).not.toContain("Nên đi 5 ngày.");
+  });
+
+  test("stream route fails closed for caveat-only Vietnamese itinerary recommendations", async () => {
+    await createTestUser("user-1");
+    await seedAnswerModel();
+    const sourceBundle = createSourceBundle({
+      knowledge: [makeKnowledgeResult("required", "Điểm dừng cần xác minh", { verificationState: "required", policy: "caveat_only" })],
+    });
+    vi.doMock("@/features/retrieval/source-bundle", () => ({
+      assembleContextPrioritySourceBundle: vi.fn().mockResolvedValue(sourceBundle),
+      buildSourceBundlePromptSection: vi.fn().mockReturnValue("Gói nguồn kiểm tra"),
+    }));
+    mockRouteAuth();
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+    vi.doUnmock("@/features/retrieval/source-bundle");
+
+    for (const answerContent of [
+      "Nên ghé điểm này.",
+      "Nen dung o day.",
+      "Cung nay phu hop nhat cho gia dinh.",
+      "Đường này an toàn để đi ngay.",
+      "Tuyến này đáng đi nhất.",
+      "Đây là phương án nên chọn.",
+      "Chốt tuyến này là hợp lý.",
+    ]) {
+      const { conversation } = await createConversationWithUserMessage({ userId: "user-1" });
+      mockStreamingGateway(() => undefined, answerContent);
+      const formData = new FormData();
+      formData.set("question", "Có nên đi không?");
+      formData.set("conversationId", conversation.id);
+
+      const events = (await (await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never)).text())
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as { type: string; content?: string; assistantMessage?: { content?: string } });
+      const deltas = events.filter((event) => event.type === "delta").map((event) => event.content).join("");
+      const doneEvent = events.find((event) => event.type === "done");
+
+      expect(deltas).not.toContain(answerContent);
+      expect(deltas).toContain('tình trạng hiện tại của "Điểm dừng cần xác minh"');
+      expect(doneEvent?.assistantMessage?.content).not.toContain(answerContent);
+      expect(doneEvent?.assistantMessage?.content).toContain('tình trạng hiện tại của "Điểm dừng cần xác minh"');
+    }
   });
 
   test("stream route withholds contextual conditional answers until every material condition is present", async () => {
