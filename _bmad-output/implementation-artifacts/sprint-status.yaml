@@ -57,14 +57,14 @@ development_status:
   3-11-report-active-evidence-grounded-seed-coverage: done
   epic-3-retrospective: optional
 
-  epic-4: backlog
-  4-1-migrate-retrieval-to-state-aware-active-knowledge: backlog
-  4-2-index-current-ai-first-knowledge-versions: backlog
-  4-3-assemble-state-aware-knowledge-source-bundles: backlog
-  4-4-enforce-community-conditional-and-conflict-answer-policy: backlog
-  4-5-update-search-fallback-and-provenance-for-ai-first-states: backlog
-  4-6-render-state-aware-traveler-trust-details: backlog
-  4-7-verify-ai-first-retrieval-and-answer-safety: backlog
+  epic-4: in-progress
+  4-1-migrate-retrieval-to-state-aware-active-knowledge: ready-for-dev
+  4-2-index-current-ai-first-knowledge-versions: ready-for-dev
+  4-3-assemble-state-aware-knowledge-source-bundles: ready-for-dev
+  4-4-enforce-community-conditional-and-conflict-answer-policy: ready-for-dev
+  4-5-update-search-fallback-and-provenance-for-ai-first-states: ready-for-dev
+  4-6-render-state-aware-traveler-trust-details: ready-for-dev
+  4-7-verify-ai-first-retrieval-and-answer-safety: ready-for-dev
   epic-4-retrospective: optional
 
   epic-5: backlog

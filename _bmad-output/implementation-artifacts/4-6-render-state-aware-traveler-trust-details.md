@@ -1,0 +1,67 @@
+# Story 4.6: Render State-Aware Traveler Trust Details
+
+Status: ready-for-dev
+
+## Story
+
+As a traveler,
+I want sources and warnings to explain the state of information,
+so that I can decide what to verify before acting.
+
+## Acceptance Criteria
+
+1. Given an answer uses active community knowledge, caveat-only knowledge, or web fallback, when source/confidence UI renders from persisted provenance, it shows appropriate community, conditional, freshness, and verification caveats with safe label, type, date, confidence, and URL metadata. Color is never the only signal.
+2. Given a traveler opens a persisted annotation or detail panel, when source details resolve, its safe summary and quick facts reflect stored source/provenance snapshots and use policy without parsing answer prose.
+3. Given Facebook-derived evidence is operator-only or lacks traveler display permission, when trust details render, raw post, quote, and link remain hidden. Traveler-visible quote/link appears only when explicit safe display policy permits it.
+
+## Tasks / Subtasks
+
+- [ ] Extend persisted provenance DTOs and conversation read models (AC: 1-3)
+  - [ ] Surface Story 4.5 snapshots for policy, state, verification, conditions, freshness, safe source details, and permitted evidence display metadata.
+  - [ ] Maintain same-user/conversation ownership checks and only safe HTTP URLs.
+  - [ ] Do not live-query cards to reinterpret historical answer provenance or pass arbitrary source snapshot JSON to the client.
+- [ ] Update the existing source and detail UI (AC: 1-3)
+  - [ ] Extend `AssistantProvenanceBlock` and `AnswerDetailPanel` in `ai-ask-composer.tsx`; do not build a parallel citation system.
+  - [ ] Use concise Vietnamese text chips/callouts for community observation/pattern, conditional facts, verification-needed, freshness, and external unverified material. Preserve text labels alongside color.
+  - [ ] Keep the responsive detail-panel/sheet selection model, keyboard behavior, and persisted descriptor validation unchanged.
+- [ ] Add traveler-facing render and privacy coverage (AC: 1-3)
+  - [ ] Assert UI renders only persisted policy/state snapshots and never invents citations from answer text.
+  - [ ] Cover caveat-only and external-unverified messaging plus operator-only/Facebook hidden-source behavior.
+  - [ ] Verify accessible labels, focus behavior, readable Vietnamese copy, and mobile-safe presentation for any new icon-only controls.
+
+## Dev Notes
+
+- Source/confidence UI is strictly provenance-driven. No answer-prose regex, text matching, inferred state, or client-side database policy may create a source claim.
+- Use existing confidence chips and freshness warning visual patterns from the design spine. Green remains an action color, never evidence that a community fact is guaranteed.
+- Entity descriptors use persisted offsets and provenance-row references. Preserve their validation and safe quick-fact allowlist; this story changes the read model/rendering data, not descriptor ownership.
+- Facebook raw text/link stays hidden even if a legacy source row contains a URL. Do not expose operator-only evidence as a “more details” path.
+
+### Project Structure Notes
+
+- Provenance formatting/read models: `src/features/retrieval/provenance.ts`, `src/features/chat-trips/conversations.ts`.
+- Traveler UI: `src/features/ai/ai-ask-composer.tsx`, with annotations only through `src/features/ai/answer-annotations.ts` as needed.
+- Preserve root tokens/primitives and existing responsive shell ownership; no new component library or alternate data loader.
+- Add focused UI/read-model tests through `tests/ai-ask-shell.test.ts` and `tests/answer-context.test.ts`.
+
+### References
+
+- [Source: _bmad-output/planning-artifacts/epics.md#Story 4.6]
+- [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md#AD-11, AD-19, AD-20]
+- [Source: _bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-2026-07-05/DESIGN.md#Components]
+- [Source: src/features/ai/ai-ask-composer.tsx]
+
+## Dev Agent Record
+
+### Agent Model Used
+
+gpu4ai/gpt-5.6-terra-review
+
+### Debug Log References
+
+- Implement only after Story 4.5 persists the complete state-aware provenance snapshot.
+
+### Completion Notes List
+
+- Ultimate context engine analysis completed - comprehensive developer guide created.
+
+### File List
