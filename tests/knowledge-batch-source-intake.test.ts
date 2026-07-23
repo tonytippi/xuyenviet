@@ -1,7 +1,7 @@
 import { eq, sql } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { auditEvents, knowledgeCardSources, knowledgeCards, knowledgeSeedBatchItems, knowledgeSeedBatches, knowledgeSourceSuggestions, sourceCaptureVersions, sources, userRoles, users, type KnowledgeCardType, type UserRole } from "@/db/schema";
+import { auditEvents, knowledgeCardSources, knowledgeCards, knowledgeRecommendations, knowledgeSeedBatchItems, knowledgeSeedBatches, knowledgeSourceSuggestions, sourceCaptureVersions, sources, userRoles, users, type KnowledgeCardType, type UserRole } from "@/db/schema";
 
 import { testDb } from "./helpers/db";
 import { seedKnowledgeCardEvidence, seedSourceCaptureVersion } from "./helpers/source-captures";
@@ -195,17 +195,17 @@ describe("knowledge batch source intake", () => {
     await expect(testDb.select().from(auditEvents)).resolves.toHaveLength(0);
   });
 
-  test("operator progress excludes active legacy cards until bounded evidence is available and persists derived seed statuses", async () => {
+  test("operator coverage counts only active current evidence and separately reports caveats and version-current work", async () => {
     await createUser("progress-operator", ["operator"]);
     authMock.mockResolvedValue({ user: { id: "progress-operator", email: "progress-operator@example.com" } });
-    const { getApprovedCorridorSeedProgress, submitKnowledgeSeedUrlBatch } = await import("@/features/knowledge/batch-intake");
+    const { getActiveEvidenceGroundedSeedCoverage, submitKnowledgeSeedUrlBatch } = await import("@/features/knowledge/batch-intake");
 
     await submitKnowledgeSeedUrlBatch({ urls: "https://example.com/hue-food\nhttps://example.com/needs-review\nhttps://example.com/dalat\nhttps://example.com/duplicate" });
     const items = await testDb.select().from(knowledgeSeedBatchItems).orderBy(knowledgeSeedBatchItems.lineNumber);
     const [eligibleItem, needsReviewItem, nonCorridorItem, duplicateItem] = items;
 
-    await insertCardWithOptionalSource({ id: "eligible-hue-food", sourceId: eligibleItem!.sourceId, status: "approved", needsReview: false, type: "food", locationName: "Huế", routeSegment: "Hà Nội - TP.HCM" });
-    await insertCardWithOptionalSource({ id: "ineligible-needs-review", sourceId: needsReviewItem!.sourceId, status: "approved", needsReview: true, type: "place", locationName: "Đà Nẵng" });
+    await insertCardWithOptionalSource({ id: "eligible-hue-food", sourceId: eligibleItem!.sourceId, status: "approved", needsReview: false, type: "food", locationName: "Huế", routeSegment: "Hà Nội - TP.HCM", knowledgeState: "community_observation" });
+    await insertCardWithOptionalSource({ id: "ineligible-needs-review", sourceId: needsReviewItem!.sourceId, status: "approved", needsReview: true, type: "place", locationName: "Đà Nẵng", knowledgeState: "uncertain", reviewState: "ai_recommended", verificationState: "required" });
     await insertCardWithOptionalSource({ id: "ineligible-non-corridor", sourceId: nonCorridorItem!.sourceId, status: "approved", needsReview: false, type: "place", locationName: "Vinhomes Central Park" });
     await insertCardWithOptionalSource({ id: "source-orphan-hanoi", sourceId: null, status: "approved", needsReview: false, type: "warning", locationName: "Hà Nội" });
     await insertCardWithOptionalSource({ id: "archived-danang", sourceId: null, status: "archived", needsReview: false, type: "route_note", locationName: "Đà Nẵng" });
@@ -219,35 +219,60 @@ describe("knowledge batch source intake", () => {
     });
     const eligibleCapture = await seedSourceCaptureVersion({ sourceId: eligibleItem!.sourceId!, captureKind: "url", rawText: "Evidence Huế đã xác minh." });
     await seedKnowledgeCardEvidence({ cardId: "eligible-hue-food", sourceId: eligibleItem!.sourceId!, captureVersionId: eligibleCapture.id, quoteText: "Evidence Huế đã xác minh." });
+    const caveatCapture = await seedSourceCaptureVersion({ sourceId: needsReviewItem!.sourceId!, captureKind: "url", rawText: "Cần kiểm tra tình trạng trước khi đi." });
+    await seedKnowledgeCardEvidence({ cardId: "ineligible-needs-review", sourceId: needsReviewItem!.sourceId!, captureVersionId: caveatCapture.id, quoteText: "Cần kiểm tra tình trạng trước khi đi." });
+    await testDb.insert(knowledgeRecommendations).values([
+      { knowledgeCardId: "eligible-hue-food", contentVersion: 1, evidenceSetRevision: 1, reason: "freshness", priority: 5 },
+      { knowledgeCardId: "eligible-hue-food", contentVersion: 2, evidenceSetRevision: 1, reason: "risk", priority: 1 },
+    ]);
 
-    const progress = await getApprovedCorridorSeedProgress();
+    const progress = await getActiveEvidenceGroundedSeedCoverage();
 
-    expect(progress).toMatchObject({ targetApprovedItems: 100, approvedCorridorItems: 1, remainingApprovedItems: 99, isComplete: false });
+    expect(progress).toMatchObject({ targetActiveCards: 100, activeEvidenceGroundedCards: 1, remainingActiveCards: 99, isComplete: false, activeCommunityObservations: 1, activeCommunityPatterns: 0, caveatOnlyHighRiskCards: 1, pendingReviewCards: 1, pendingVerificationCards: 1 });
+    expect(progress.actionableWork).toEqual([{ reason: "freshness", priority: 5, count: 1 }]);
     expect(progress.byType.find((item) => item.type === "food")).toEqual({ type: "food", count: 1 });
     expect(progress.byType.find((item) => item.type === "place")).toEqual({ type: "place", count: 0 });
     expect(progress.byRouteOrLocation.find((item) => item.routeOrLocation === "Huế")).toEqual({ routeOrLocation: "Huế", count: 1 });
     expect(progress.byRouteOrLocation.find((item) => item.routeOrLocation === "Hà Nội")).toEqual({ routeOrLocation: "Hà Nội", count: 0 });
     expect(progress.byRouteOrLocation.find((item) => item.routeOrLocation === "Nha Trang / Khánh Hòa")).toEqual({ routeOrLocation: "Nha Trang / Khánh Hòa", count: 0 });
-    expect(progress.seedItemStatusCounts).toMatchObject({ approved: 1, duplicate: 1, pending: 0, needs_review: 2 });
-
-    const persistedItems = await testDb.select().from(knowledgeSeedBatchItems).orderBy(knowledgeSeedBatchItems.lineNumber);
-    expect(persistedItems.map((item) => item.status)).toEqual(["approved", "needs_review", "needs_review", "duplicate"]);
     expect(JSON.stringify(progress)).not.toContain("raw");
     expect(JSON.stringify(progress)).not.toContain("submittedUrl");
+    expect(JSON.stringify(progress)).not.toContain("quoteText");
   });
 
-  test("traveler cannot read approved corridor seed progress or trigger status derivation", async () => {
+  test("coverage excludes withdrawn sources, tombstoned captures, removed evidence, and incomplete current cards", async () => {
+    await createUser("coverage-operator", ["operator"]);
+    authMock.mockResolvedValue({ user: { id: "coverage-operator", email: "coverage-operator@example.com" } });
+    const { getActiveEvidenceGroundedSeedCoverage, submitKnowledgeSeedUrlBatch } = await import("@/features/knowledge/batch-intake");
+
+    await submitKnowledgeSeedUrlBatch({ urls: "https://example.com/withdrawn\nhttps://example.com/tombstone\nhttps://example.com/removed\nhttps://example.com/incomplete" });
+    const items = await testDb.select().from(knowledgeSeedBatchItems).orderBy(knowledgeSeedBatchItems.lineNumber);
+    for (const [index, item] of items.entries()) {
+      const id = ["withdrawn", "tombstone", "removed", "incomplete"][index]!;
+      await insertCardWithOptionalSource({ id, sourceId: item!.sourceId, status: "approved", needsReview: false, type: "place", locationName: "Đà Nẵng", knowledgeState: "community_observation", createdByUserId: "coverage-operator" });
+      if (id !== "incomplete") {
+        const capture = await seedSourceCaptureVersion({ sourceId: item!.sourceId!, captureKind: "url", rawText: `Evidence ${id}.` });
+        await seedKnowledgeCardEvidence({ cardId: id, sourceId: item!.sourceId!, captureVersionId: capture.id, quoteText: `Evidence ${id}.`, state: id === "removed" ? "removed" : "active" });
+        if (id === "tombstone") await testDb.update(sourceCaptureVersions).set({ rawText: null, rawMetadata: null, payloadDeletedAt: new Date() }).where(eq(sourceCaptureVersions.id, capture.id));
+      }
+    }
+    await testDb.update(sources).set({ eligibility: "withdrawn", removalReason: "removed", removedByUserId: "coverage-operator", removalCompletedAt: new Date() }).where(eq(sources.id, items[0]!.sourceId!));
+
+    await expect(getActiveEvidenceGroundedSeedCoverage()).resolves.toMatchObject({ activeEvidenceGroundedCards: 0 });
+  });
+
+  test("traveler cannot read active evidence-grounded seed coverage", async () => {
     await createUser("progress-operator-denied", ["operator"]);
     await createUser("progress-traveler", ["traveler"]);
     authMock.mockResolvedValueOnce({ user: { id: "progress-operator-denied", email: "progress-operator-denied@example.com" } });
-    const { getApprovedCorridorSeedProgress, submitKnowledgeSeedUrlBatch } = await import("@/features/knowledge/batch-intake");
+    const { getActiveEvidenceGroundedSeedCoverage, submitKnowledgeSeedUrlBatch } = await import("@/features/knowledge/batch-intake");
 
     await submitKnowledgeSeedUrlBatch({ urls: "https://example.com/hanoi" });
     const [item] = await testDb.select().from(knowledgeSeedBatchItems);
     await insertCardWithOptionalSource({ id: "denied-approved-card", sourceId: item!.sourceId, status: "approved", needsReview: false, type: "place", locationName: "Hà Nội", createdByUserId: "progress-operator-denied" });
     authMock.mockResolvedValue({ user: { id: "progress-traveler", email: "progress-traveler@example.com" } });
 
-    await expect(getApprovedCorridorSeedProgress()).rejects.toMatchObject({ name: "AdminAuthorizationError" });
+    await expect(getActiveEvidenceGroundedSeedCoverage()).rejects.toMatchObject({ name: "AdminAuthorizationError" });
     await expect(testDb.select().from(knowledgeSeedBatchItems)).resolves.toMatchObject([{ status: "pending" }]);
   });
 
@@ -290,15 +315,18 @@ async function insertCardWithOptionalSource(input: {
   locationName?: string | null;
   routeSegment?: string | null;
   createdByUserId?: string;
+  knowledgeState?: "community_observation" | "community_pattern" | "conditional" | "uncertain" | "conflicted" | "confirmed" | "superseded";
+  reviewState?: "none" | "ai_recommended" | "in_review" | "reviewed";
+  verificationState?: "not_required" | "required" | "corroborated" | "failed";
 }) {
   await testDb.insert(knowledgeCards).values({
     id: input.id,
     status: input.status,
     needsReview: input.needsReview,
     publicationState: input.status === "approved" ? "active" : undefined,
-    knowledgeState: input.status === "approved" ? "uncertain" : undefined,
-    reviewState: input.status === "approved" ? "reviewed" : undefined,
-    verificationState: input.status === "approved" ? "not_required" : undefined,
+    knowledgeState: input.status === "approved" ? input.knowledgeState ?? "uncertain" : undefined,
+    reviewState: input.status === "approved" ? input.reviewState ?? "reviewed" : undefined,
+    verificationState: input.status === "approved" ? input.verificationState ?? "not_required" : undefined,
     type: input.type,
     title: input.id,
     locationName: input.locationName ?? null,
