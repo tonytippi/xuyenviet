@@ -428,7 +428,7 @@ export function buildSourceBundlePromptSection(bundle: ContextPrioritySourceBund
   appendFactSection(lines, "2. Ngữ cảnh phiên chat hiện tại", context.chatFacts);
   appendFamilyGuidance(lines, context);
   appendConflictSection(lines, context.conflicts);
-  appendKnowledgeSection(lines, bundle.knowledge);
+  appendKnowledgeSection(lines, bundle.knowledge.filter(isFactualItineraryPremise));
   appendRetrievalDecisionSection(lines, bundle.retrievalDecision);
   appendWarningSection(lines, bundle.warnings);
   appendWebSection(lines, bundle.web, bundle.warnings);
@@ -459,7 +459,7 @@ function buildCompactedSourceBundlePromptSection(bundle: ContextPrioritySourceBu
   appendFactSection(lines, "2. Ngữ cảnh phiên chat hiện tại", context.chatFacts.slice(0, 10));
   appendFamilyGuidance(lines, context);
   appendConflictSection(lines, context.conflicts.slice(0, 10));
-  appendKnowledgeSection(lines, bundle.knowledge.slice(0, 1));
+  appendKnowledgeSection(lines, bundle.knowledge.filter(isFactualItineraryPremise).slice(0, 1));
   appendRetrievalDecisionSection(lines, bundle.retrievalDecision);
   appendWarningSection(lines, bundle.warnings);
   appendWebSection(lines, bundle.web.slice(0, 2), bundle.warnings);
@@ -655,6 +655,13 @@ function appendKnowledgeSection(lines: string[], knowledge: KnowledgeSearchResul
 
   lines.push("3. Kiến thức Xuyên Việt đang hiệu lực theo trạng thái");
   lines.push(section);
+}
+
+function isFactualItineraryPremise(item: KnowledgeSearchResult) {
+  return item.publicationState === "active"
+    && item.knowledgeState !== "conflicted"
+    && item.knowledgeState !== "superseded"
+    && item.verificationState !== "failed";
 }
 
 const allowedContextFields = new Set<AnswerContextFact["field"]>([

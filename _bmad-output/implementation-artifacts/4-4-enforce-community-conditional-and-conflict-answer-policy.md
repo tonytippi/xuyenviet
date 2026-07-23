@@ -1,6 +1,10 @@
+---
+baseline_commit: c93cfdc95316838acdfd069ef22494f2d1fa1224
+---
+
 # Story 4.4: Enforce Community, Conditional, and Conflict Answer Policy
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -16,17 +20,17 @@ so that community reports guide planning without becoming false guarantees.
 
 ## Tasks / Subtasks
 
-- [ ] Encode state-policy instructions in the source-bundle prompt contract (AC: 1-3)
-  - [ ] Update `src/features/ai/prompts.ts` and bundle formatting to give explicit per-item instructions derived from the server policy, never from source text.
-  - [ ] Require Vietnamese wording for observation, independent pattern, conditions, caveat-only verification, and conflict exclusion.
-  - [ ] Preserve the no-fake-citations rule and prohibit source text from changing prompt policy.
-- [ ] Add deterministic answer safeguards where model compliance alone is insufficient (AC: 1-3)
-  - [ ] Extend the existing freshness warning pattern to ensure selected caveat-only/freshness-sensitive facts receive a concrete verify-before-action instruction.
-  - [ ] Do not parse answer prose to create provenance, but it is acceptable to validate final policy-required warning presence and append a bounded safe warning.
-  - [ ] Ensure `exclude` data never reaches answer-generation context as factual evidence.
-- [ ] Add policy-specific answer tests and evaluations (AC: 1-3)
-  - [ ] Cover observation, independent pattern, conditional material conditions, uncertainty, verification-required, conflict, superseded, and failed verification cases.
-  - [ ] Prove caveat-only material cannot become a settled itinerary recommendation and excluded material cannot become a factual premise.
+- [x] Encode state-policy instructions in the source-bundle prompt contract (AC: 1-3)
+  - [x] Update `src/features/ai/prompts.ts` and bundle formatting to give explicit per-item instructions derived from the server policy, never from source text.
+  - [x] Require Vietnamese wording for observation, independent pattern, conditions, caveat-only verification, and conflict exclusion.
+  - [x] Preserve the no-fake-citations rule and prohibit source text from changing prompt policy.
+- [x] Add deterministic answer safeguards where model compliance alone is insufficient (AC: 1-3)
+  - [x] Extend the existing freshness warning pattern to ensure selected caveat-only/freshness-sensitive facts receive a concrete verify-before-action instruction.
+  - [x] Do not parse answer prose to create provenance, but it is acceptable to validate final policy-required warning presence and append a bounded safe warning.
+  - [x] Ensure `exclude` data never reaches answer-generation context as factual evidence.
+- [x] Add policy-specific answer tests and evaluations (AC: 1-3)
+  - [x] Cover observation, independent pattern, conditional material conditions, uncertainty, verification-required, conflict, superseded, and failed verification cases.
+  - [x] Prove caveat-only material cannot become a settled itinerary recommendation and excluded material cannot become a factual premise.
 
 ## Dev Notes
 
@@ -58,9 +62,27 @@ gpu4ai/gpt-5.6-terra-review
 ### Debug Log References
 
 - Implement after source-bundle state/policy fields are authoritative. Avoid model-only enforcement for safety-critical caveats.
+- Red-green verification: `pnpm vitest run tests/answer-context.test.ts` initially failed for the missing policy instructions, exclusion filter, and caveat-only warning; all 68 tests passed after implementation.
+- Final verification: `pnpm test:run` (49 files, 673 tests), `pnpm typecheck`, and `pnpm build` passed. `pnpm lint` passed with three pre-existing unused-variable warnings in `tests/knowledge-search.test.ts`.
 
 ### Completion Notes List
 
 - Ultimate context engine analysis completed - comprehensive developer guide created.
+- Added server-controlled Vietnamese `policyInstruction` records for contextual community observations, independently supported community patterns, condition-preserving use, and caveat-only material; source text cannot override the policy.
+- Added defense-in-depth filtering so conflicted, superseded, verification-failed, and non-active cards cannot enter answer-generation knowledge context as factual premises.
+- Extended bounded final-answer warnings to require a concrete verify-before-action instruction when caveat-only material is selected, without deriving provenance from answer prose.
+- Added answer-context coverage for all story policy states and safeguards.
 
 ### File List
+
+- `src/features/ai/prompts.ts`
+- `src/features/ai/answer-freshness.ts`
+- `src/features/retrieval/approved-knowledge.ts`
+- `src/features/retrieval/source-bundle.ts`
+- `tests/answer-context.test.ts`
+- `_bmad-output/implementation-artifacts/4-4-enforce-community-conditional-and-conflict-answer-policy.md`
+- `_bmad-output/implementation-artifacts/sprint-status.yaml`
+
+### Change Log
+
+- 2026-07-23: Enforced state-aware community, conditional, caveat-only, and conflict answer policy; added safeguards and policy-specific tests.
