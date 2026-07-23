@@ -1796,6 +1796,11 @@ function createProvenanceAnswerEntityDescriptor(item: AssistantMessageProvenance
     "Trạng thái": item.verificationStatus === "verified" && item.sourceCategory !== "web" && item.sourceCategory !== "general" ? "đã xác minh" : "chưa xác minh",
   };
 
+  // Keep the action constraint in bounded quick facts even when URLs and freshness add detail.
+  if (item.usePolicy === "caveat_only") {
+    detail["Cách dùng"] = "Chỉ dùng như thông tin có điều kiện; cần kiểm tra trước khi hành động.";
+  }
+
   if (item.url) {
     detail["URL"] = item.url;
   }
@@ -1812,10 +1817,6 @@ function createProvenanceAnswerEntityDescriptor(item: AssistantMessageProvenance
 
   if ((item.conditions?.length ?? 0) > 0) {
     detail["Điều kiện"] = item.conditions!.join("; ");
-  }
-
-  if (item.usePolicy === "caveat_only") {
-    detail["Cách dùng"] = "Chỉ dùng như thông tin có điều kiện; cần kiểm tra trước khi hành động.";
   }
 
   return {

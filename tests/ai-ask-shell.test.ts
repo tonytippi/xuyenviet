@@ -662,6 +662,17 @@ describe("AI Ask authenticated shell", () => {
     expect(html).not.toContain("operator");
   });
 
+  test("keeps caveat-only policy in bounded provenance detail quick facts", () => {
+    const source = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
+    const policyStart = source.indexOf('if (item.usePolicy === "caveat_only")');
+    const urlStart = source.indexOf("if (item.url)", policyStart);
+    const quickFactsStart = source.indexOf("quickFacts: Object.entries(detail).slice(0, 6)", policyStart);
+
+    expect(policyStart).toBeGreaterThan(-1);
+    expect(policyStart).toBeLessThan(urlStart);
+    expect(urlStart).toBeLessThan(quickFactsStart);
+  });
+
   test("labels selected general reasoning as unverified without a fake source URL", async () => {
     const { AnswerDetailPanel } = await import("@/features/ai/ai-ask-composer");
     const selectedEntity: AnswerEntityDescriptor = {

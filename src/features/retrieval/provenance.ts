@@ -32,8 +32,8 @@ export type AssistantMessageProvenanceItem = {
   citedInAnswer: boolean;
   retrievalScore: number | null;
   freshnessSensitive: boolean;
-  knowledgeState?: "community_observation" | "community_pattern" | "uncertain" | "verified_fact" | null;
-  verificationState?: "not_required" | "required" | "verified" | null;
+  knowledgeState?: "community_observation" | "community_pattern" | "conditional" | "uncertain" | "conflicted" | "confirmed" | "superseded" | null;
+  verificationState?: "not_required" | "required" | "corroborated" | "failed" | null;
   usePolicy?: "contextual_use" | "caveat_only" | "do_not_use" | null;
   conditions?: string[];
   evidence?: Array<{
@@ -221,6 +221,7 @@ function buildStateAwareKnowledgeSnapshot(result: StateAwareKnowledgeBundleItem)
       evidenceId: evidence.evidenceId,
       sourceId: evidence.sourceId,
       supportLevel: evidence.supportLevel,
+      displayPolicy: evidence.displayPolicy,
       sourceLabel: evidence.sourceLabel,
       sourceType: evidence.sourceType,
       verificationStatus: evidence.verificationStatus,
@@ -352,15 +353,15 @@ function getSafeTravelerUrl(value: string | null) {
 
 function isFacebookHost(hostname: string) {
   const normalized = hostname.toLowerCase();
-  return normalized === "facebook.com" || normalized.endsWith(".facebook.com") || normalized === "fb.com" || normalized.endsWith(".fb.com") || normalized === "fb.watch" || normalized.endsWith(".fb.watch");
+  return normalized === "facebook.com" || normalized.endsWith(".facebook.com") || normalized === "fb.com" || normalized.endsWith(".fb.com") || normalized === "fb.me" || normalized.endsWith(".fb.me") || normalized === "fb.watch" || normalized.endsWith(".fb.watch");
 }
 
 function getKnowledgeState(value: unknown): AssistantMessageProvenanceItem["knowledgeState"] {
-  return value === "community_observation" || value === "community_pattern" || value === "uncertain" || value === "verified_fact" ? value : null;
+  return value === "community_observation" || value === "community_pattern" || value === "conditional" || value === "uncertain" || value === "conflicted" || value === "confirmed" || value === "superseded" ? value : null;
 }
 
 function getVerificationState(value: unknown): AssistantMessageProvenanceItem["verificationState"] {
-  return value === "not_required" || value === "required" || value === "verified" ? value : null;
+  return value === "not_required" || value === "required" || value === "corroborated" || value === "failed" ? value : null;
 }
 
 function getUsePolicy(value: unknown): AssistantMessageProvenanceItem["usePolicy"] {
@@ -383,18 +384,31 @@ function getTravelerEvidence(value: unknown): AssistantMessageProvenanceItem["ev
 
     const sourceLabel = getOptionalString(item.sourceLabel);
     const sourceType = getOptionalString(item.sourceType);
-    const url = getSafeTravelerUrl(getOptionalString(item.url));
+    const rawUrl = getOptionalString(item.url);
+    const quote = getOptionalString(item.quote);
 
-    if (!sourceLabel || sourceType === "facebook" || isFacebookSource(sourceLabel, url)) {
+    if (!sourceLabel || sourceType === "facebook" || isFacebookSource(sourceLabel, rawUrl) || !isTravelerSafeEvidenceText(quote ?? "")) {
       return [];
     }
 
-    return [{ sourceLabel, sourceType, url, quote: getOptionalString(item.quote)?.slice(0, maxSnapshotStringLength) ?? null }];
+    return [{ sourceLabel, sourceType, url: getSafeTravelerUrl(rawUrl), quote: quote?.slice(0, maxSnapshotStringLength) ?? null }];
   }).slice(0, maxSnapshotArrayItems);
 }
 
 function isFacebookSource(sourceLabel: string, url: string | null) {
-  return sourceLabel.trim().toLowerCase().includes("facebook") || Boolean(url && isFacebookHost(new URL(url).hostname));
+  if (sourceLabel.trim().toLowerCase().includes("facebook") || !url) {
+    return sourceLabel.trim().toLowerCase().includes("facebook");
+  }
+
+  try {
+    return isFacebookHost(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+}
+
+function isTravelerSafeEvidenceText(value: string) {
+  return !/(?:[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}|(?:\+?84|0)(?:[\s.-]?\d){8,10}|provider[\s_-]*payload|storage[\s_-]*key|raw[\s_-]*metadata|raw[\s_-]*source)/i.test(value);
 }
 
 function getKnowledgeSourceString(snapshot: Record<string, unknown>, key: "canonicalUrl" | "url" | "collectedDate") {

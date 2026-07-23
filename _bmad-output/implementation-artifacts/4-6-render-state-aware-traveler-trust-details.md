@@ -71,6 +71,8 @@ gpu4ai/gpt-5.6-terra-review
 - Added Vietnamese state labels and persisted quick facts to the existing source block/detail panel without changing descriptor ownership, focus, or responsive sheet behavior.
 - Rejected Facebook host aliases and non-permitted evidence at provenance formatting, including legacy snapshots, so raw post links and quotes cannot reach traveler UI.
 - Tests passed: `pnpm test:run` (49 files, 693 tests), `pnpm typecheck`, `pnpm lint` (3 pre-existing warnings), and `pnpm build`.
+- 2026-07-23 repair: persisted evidence snapshots now retain `displayPolicy`; legacy rendering rejects `fb.me` aliases and unsafe quote material before URLs are sanitized; state allowlists match stored `conditional`/`confirmed` and `corroborated` values; caveat-only use policy is retained in bounded detail quick facts.
+- Repair verification passed: `pnpm vitest run tests/answer-context.test.ts tests/ai-ask-shell.test.ts` (160 tests), `pnpm typecheck`, and `pnpm lint` (3 pre-existing warnings in `tests/knowledge-search.test.ts`).
 
 ### File List
 
@@ -84,3 +86,4 @@ gpu4ai/gpt-5.6-terra-review
 ### Change Log
 
 - 2026-07-23: Rendered state-aware traveler trust details from persisted provenance and added privacy/render coverage.
+- 2026-07-23: Repaired persisted evidence policy/state rendering and legacy traveler-evidence privacy filtering.
