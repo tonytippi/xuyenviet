@@ -43,6 +43,10 @@ so that changing road-trip details are handled honestly.
 - [x] [Review][Patch] Treat missing provider scores as low-confidence external results [src/features/retrieval/web-search.ts:177] — unscored provider results are rejected as low quality.
 - [x] [Review][Patch] Trigger external fallback for selected uncertain or caveat-only knowledge [src/features/retrieval/source-bundle.ts:266] — added the safe `selected_knowledge_requires_verification` reason for selected caveat-only, uncertain, or verification-required cards; added schema/migration allowance and narrow-query regression coverage without exposing facts.
 - [x] [Review][Patch] Classify incomplete selected-model pricing as missing pricing [src/features/usage/events.ts:74] — pricing completeness now checks the selected model's effective prices independently of valid provider usage; incomplete pricing is persisted as `missing_pricing`.
+- [x] [Review][Patch] Replace unsupported current-fact answers after failed or low-quality web fallback [src/features/ai/answer-freshness.ts:13] — external-fallback failure now replaces model output before it can be streamed or persisted, and finalization is required for these paths.
+- [x] [Review][Patch] Include the explicit external-verification failure notice in caveat-only fallback answers [src/features/ai/answer-freshness.ts:13] — the replacement includes the AC 3 external-verification failure notice and each caveat-only verification target.
+- [x] [Review][Patch] Persist available AI Gateway request metadata for AI Ask usage events [src/features/ai/gateway.ts:361] — only bounded request identifiers from allowlisted headers or completion IDs are retained in `ai_usage_events`; raw payloads remain excluded.
+- [x] [Review][Patch] Fail closed on unrepresentable computed usage costs [src/features/ai/models.ts:151] — arithmetic and aggregate costs outside PostgreSQL integer or JavaScript-safe bounds persist as nullable costs with `missing_cost`, without aborting assistant/provenance persistence.
 
 ## Dev Notes
 
@@ -85,12 +89,14 @@ gpu4ai/gpt-5.6-terra-review
 - Verified with `pnpm test:run` (684/684), `pnpm typecheck`, `pnpm lint` (3 pre-existing warnings only), and `pnpm build`.
 - 2026-07-23: Repaired review findings: production retrieval now propagates only safe exclusion aggregates into fallback decisions, web provenance snapshots retain only stable linkage and safe metadata, and unscored provider results fail as low quality. Verified with `pnpm test:run tests/web-search-adapter.test.ts tests/answer-context.test.ts` (88/88) and `pnpm typecheck`.
 - 2026-07-23: Repaired final permitted findings: selected caveat-only, uncertain, and verification-required knowledge now forces safe web fallback; incomplete selected-model pricing is classified as `missing_pricing`. Verified with `pnpm test:run tests/answer-context.test.ts tests/ai-usage-events.test.ts tests/web-search-adapter.test.ts` (96/96), `pnpm typecheck`, and `git diff --check`.
+- 2026-07-23: Repaired the final AC 3/4 findings: failed or low-quality web fallback now replaces unsupported model claims before streaming/persistence, including caveat-only verification targets; AI Ask usage safely retains allowlisted provider request IDs; unrepresentable cost calculations persist as `missing_cost`. Verified with `pnpm test:run tests/answer-context.test.ts tests/ai-ask-shell.test.ts tests/ai-usage-events.test.ts tests/ai-models.test.ts tests/web-search-adapter.test.ts` (189/189), `pnpm typecheck`, and `git diff --check`.
 
 ### File List
 
 - drizzle/migrations/0051_state_aware_search_provenance.sql
 - drizzle/migrations/0052_accept_legacy_web_trigger_rows.sql
 - drizzle/migrations/0053_selected_knowledge_verification_fallback.sql
+- drizzle/migrations/0054_ai_usage_provider_request_metadata.sql
 - drizzle/migrations/meta/_journal.json
 - src/db/schema.ts
 - src/features/ai/answer-freshness.ts
@@ -111,3 +117,5 @@ gpu4ai/gpt-5.6-terra-review
 - 2026-07-23: Fixed the three actionable Story 4.5 review findings; status synchronized to review.
 - 2026-07-23: Second repair review found two remaining actionable findings; status synchronized to in-progress.
 - 2026-07-23: Fixed the final permitted Story 4.5 findings; status synchronized to review.
+- 2026-07-23: Final permitted review found four actionable AC 3/4 safety and usage-persistence findings; status synchronized to in-progress for coordinator repair.
+- 2026-07-23: Fixed the four final Story 4.5 findings; status synchronized to review.

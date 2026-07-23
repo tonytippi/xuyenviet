@@ -379,6 +379,13 @@
       "when": 1784904000006,
       "tag": "0053_selected_knowledge_verification_fallback",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1784904000007,
+      "tag": "0054_ai_usage_provider_request_metadata",
+      "breakpoints": true
     }
   ]
 }

@@ -1238,7 +1238,7 @@ describe("AI Ask streaming route", () => {
       { role: "user", content: "Hà Nội đi Huế 5 ngày?" },
       { role: "assistant", content: "Kế hoạch gợi ý:\nNên chia chặng." },
       { role: "user", content: "Ngày thứ 3 nên nghỉ ở đâu?" },
-      { role: "assistant", content: expect.stringContaining("Bước tiếp theo:Ngày 3 nghỉ Huế.") },
+      { role: "assistant", content: expect.stringContaining("chưa thể xác minh thông tin hiện tại từ nguồn bên ngoài") },
     ]);
     expect(gatewayMessages).toMatchObject([
       { role: "system" },
@@ -1417,7 +1417,7 @@ describe("AI Ask streaming route", () => {
       { role: "user", content: "Lịch trình Huế 5 ngày?" },
       { role: "assistant", content: "Nên chia chặng nhẹ." },
       { role: "user", content: "Ngày thứ 3 nên nghỉ ở đâu?" },
-      { role: "assistant", content: expect.stringContaining("Ngày 3 nghỉ Huế.") },
+      { role: "assistant", content: expect.stringContaining("chưa thể xác minh thông tin hiện tại từ nguồn bên ngoài") },
     ]);
     expect(gatewayMessages).toMatchObject([
       { role: "system" },
@@ -1480,7 +1480,7 @@ describe("AI Ask streaming route", () => {
     expect(body).toContain('{"type":"done"');
     expect(savedMessages.map((message) => ({ role: message.role, content: message.content }))).toEqual([
       { role: "user", content: "Kể cho tôi nghe lịch trình chi tiết 30 ngày?" },
-      { role: "assistant", content: expect.stringContaining("Kế hoạch dài") },
+      { role: "assistant", content: expect.stringContaining("chưa thể xác minh thông tin hiện tại từ nguồn bên ngoài") },
     ]);
     expect(savedUsageEvents).toHaveLength(2);
     expect(findUsageEvent(savedUsageEvents, "web_search_fallback", "tavily")).toMatchObject({ status: "failure", model: "search", errorCode: "low_quality_results" });
@@ -1570,7 +1570,7 @@ describe("AI Ask streaming route", () => {
     expect(response.status).toBe(200);
     expect(body).toContain('{"type":"done"');
     expect(savedMessages).toHaveLength(2);
-    expect(savedMessages[1]).toMatchObject({ role: "assistant", content: expect.stringContaining("Gợi ý chặng nhẹ.") });
+    expect(savedMessages[1]).toMatchObject({ role: "assistant", content: expect.stringContaining("chưa thể xác minh thông tin hiện tại từ nguồn bên ngoài") });
   });
 
   test("ignores SSE event keepalive lines without failing the stream", async () => {
@@ -1596,7 +1596,7 @@ describe("AI Ask streaming route", () => {
 
     expect(response.status).toBe(200);
     expect(body).toContain('{"type":"done"');
-    expect(savedMessages[1]).toMatchObject({ role: "assistant", content: expect.stringContaining("Kế hoạch gợi ý.") });
+    expect(savedMessages[1]).toMatchObject({ role: "assistant", content: expect.stringContaining("chưa thể xác minh thông tin hiện tại từ nguồn bên ngoài") });
   });
 
   test("streams text and image input through the route before persisting the final assistant message", async () => {
@@ -1632,11 +1632,12 @@ describe("AI Ask streaming route", () => {
     const finalUserContent = requestBody.messages.at(-1)?.content;
 
     expect(response.status).toBe(200);
-    expect(body).toContain('{"type":"delta","content":"Kế hoạch "}');
+    expect(body).not.toContain('{"type":"delta","content":"Kế hoạch "}');
+    expect(body).toContain("chưa thể xác minh thông tin hiện tại từ nguồn bên ngoài");
     expect(body).toContain('{"type":"done"');
     expect(savedMessages.map((message) => ({ role: message.role, content: message.content }))).toEqual([
       { role: "user", content: "Ảnh này có phù hợp cho chuyến Hà Giang không?" },
-      { role: "assistant", content: expect.stringContaining("Kế hoạch gợi ý") },
+      { role: "assistant", content: expect.stringContaining("chưa thể xác minh thông tin hiện tại từ nguồn bên ngoài") },
     ]);
     expect(savedAttachments).toHaveLength(1);
     expect(savedAttachments[0]).toMatchObject({
@@ -1686,7 +1687,7 @@ describe("AI Ask streaming route", () => {
     const savedUsageEvents = await testDb.select().from(aiUsageEvents);
 
     expect(response.status).toBe(200);
-    expect(body).toContain('{"type":"delta","content":"Một phần"}');
+    expect(body).not.toContain('{"type":"delta","content":"Một phần"}');
     expect(body).toContain('{"type":"error"');
     expect(savedMessages.map((message) => message.role)).toEqual(["user"]);
     expect(savedUsageEvents).toHaveLength(2);

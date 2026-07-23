@@ -10,6 +10,11 @@ export function ensureAiAskFreshnessWarning(content: string, sourceBundle: Await
   const externalVerificationRequired = sourceBundle.retrievalDecision.webSearchTriggered
     && (sourceBundle.warnings.includes("web_search_load_failed") || sourceBundle.warnings.includes("web_search_low_quality"));
 
+  if (externalVerificationRequired) {
+    const fallback = `Cảnh báo cần kiểm tra\nMình chưa thể xác minh thông tin hiện tại từ nguồn bên ngoài. Hãy xác nhận trực tiếp với nguồn chính thức hoặc nhà cung cấp trước khi đi, hành động hoặc đặt dịch vụ.${caveatWarningRequired ? ` ${formatCaveatVerificationInstruction(caveatOnlyKnowledge)}` : ""}`;
+    return { content: fallback, appendedWarning: fallback, replacedUnsafeContent: true };
+  }
+
   if (caveatWarningRequired) {
     const fallback = `Cảnh báo cần kiểm tra\nMình chưa thể dùng thông tin cần xác minh để chốt lịch trình. ${formatCaveatVerificationInstruction(caveatOnlyKnowledge)}`;
     return { content: fallback, appendedWarning: fallback, replacedUnsafeContent: true };
@@ -63,7 +68,9 @@ function getVerificationTarget(item: Awaited<ReturnType<typeof assembleContextPr
 }
 
 export function requiresAiAskAnswerFinalization(sourceBundle: Awaited<ReturnType<typeof assembleContextPrioritySourceBundle>>) {
-  return sourceBundle.knowledge.some((item) => item.policy === "caveat_only" || item.knowledgeState === "uncertain" || item.verificationState === "required" || (item.policy === "contextual_use" && item.knowledgeState === "conditional" && item.conditions.length > 0));
+  return sourceBundle.warnings.includes("web_search_load_failed")
+    || sourceBundle.warnings.includes("web_search_low_quality")
+    || sourceBundle.knowledge.some((item) => item.policy === "caveat_only" || item.knowledgeState === "uncertain" || item.verificationState === "required" || (item.policy === "contextual_use" && item.knowledgeState === "conditional" && item.conditions.length > 0));
 }
 
 function hasEveryMaterialCondition(content: string, conditions: string[]) {

@@ -243,6 +243,7 @@ async function streamAnswer({
         latencyMs: gatewayResult.latencyMs,
         pricingSnapshot,
         errorCode: gatewayResult.errorCode,
+        providerRequestId: gatewayResult.requestMetadata.providerRequestId,
       });
 
       sendEvent(controller, encoder, {
@@ -273,6 +274,7 @@ async function streamAnswer({
         cacheWritePromptTokens: gatewayResult.usage.cacheWritePromptTokens,
         pricingSnapshot,
         errorCode: "client_stream_aborted",
+        providerRequestId: gatewayResult.requestMetadata.providerRequestId,
       });
       return;
     }
@@ -326,6 +328,7 @@ async function streamAnswer({
           cachedPromptTokens: gatewayResult.usage.cachedPromptTokens,
           cacheWritePromptTokens: gatewayResult.usage.cacheWritePromptTokens,
           pricingSnapshot,
+          providerRequestId: gatewayResult.requestMetadata.providerRequestId,
         });
 
         return { id: assistantMessage.id, content: assistantContent.content, provenance, annotations: [] };
@@ -368,6 +371,7 @@ async function streamAnswer({
             cachedPromptTokens: gatewayResult.usage.cachedPromptTokens,
             cacheWritePromptTokens: gatewayResult.usage.cacheWritePromptTokens,
             pricingSnapshot,
+            providerRequestId: gatewayResult.requestMetadata.providerRequestId,
           });
 
           return { id: assistantMessage.id, content: assistantContent.content, provenance, annotations: [] };

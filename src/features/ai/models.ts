@@ -48,6 +48,7 @@ export type EstimatedAiUsageCost = {
   pricingUnitTokens: number | null;
   pricingVersion: string | null;
   pricingEffectiveAt: Date | null;
+  costCalculationFailed: boolean;
 };
 
 type AiModelDb = Pick<ReturnType<typeof getDb>, "select">;
@@ -119,8 +120,15 @@ export function estimateAiUsageCost(
     { tokens: cacheWritePromptTokens, cost: estimatedCacheWriteCostMicros },
   ];
   const estimatedTotalCostMicros = costInputs.some((input) => input.tokens !== null) && costInputs.every((input) => input.tokens === null || input.cost !== null)
-    ? costInputs.reduce<number>((total, input) => total + (input.cost ?? 0), 0)
+    ? safeCostSum(costInputs.map((input) => input.cost ?? 0))
     : null;
+  const costCalculationFailed = [
+    [billableInputTokens, pricing.inputTokenPriceMicros],
+    [completionTokens, pricing.outputTokenPriceMicros],
+    [cachedPromptTokens, pricing.cacheReadTokenPriceMicros],
+    [cacheWritePromptTokens, pricing.cacheWriteTokenPriceMicros],
+  ].some(([tokens, price]) => isCostUnrepresentable(tokens as number | null, price as number | null, pricing.pricingUnitTokens))
+    || (costInputs.some((input) => input.tokens !== null) && costInputs.every((input) => input.tokens === null || input.cost !== null) && estimatedTotalCostMicros === null);
 
   return {
     estimatedInputCostMicros,
@@ -136,6 +144,7 @@ export function estimateAiUsageCost(
     pricingUnitTokens: pricing.pricingUnitTokens,
     pricingVersion: pricing.pricingVersion,
     pricingEffectiveAt: pricing.pricingEffectiveAt,
+    costCalculationFailed,
   };
 }
 
@@ -144,7 +153,16 @@ function calculateTokenCost(tokens: number | null | undefined, priceMicros: numb
     return null;
   }
 
-  return Math.ceil((tokens * priceMicros) / unitTokens);
+  if (!Number.isSafeInteger(tokens) || !Number.isSafeInteger(priceMicros) || !Number.isSafeInteger(unitTokens) || unitTokens <= 0) {
+    return null;
+  }
+
+  if (tokens > Number.MAX_SAFE_INTEGER / priceMicros) {
+    return null;
+  }
+
+  const cost = Math.ceil((tokens * priceMicros) / unitTokens);
+  return Number.isSafeInteger(cost) && cost <= 2_147_483_647 ? cost : null;
 }
 
 function normalizeTokenCount(tokens: number | null | undefined) {
@@ -176,5 +194,19 @@ function emptyCostEstimate(): EstimatedAiUsageCost {
     pricingUnitTokens: null,
     pricingVersion: null,
     pricingEffectiveAt: null,
+    costCalculationFailed: false,
   };
+}
+
+function safeCostSum(costs: number[]) {
+  const total = costs.reduce((sum, cost) => sum + cost, 0);
+  return Number.isSafeInteger(total) && total <= 2_147_483_647 ? total : null;
+}
+
+function isCostUnrepresentable(tokens: number | null, priceMicros: number | null, unitTokens: number) {
+  if (tokens === null || priceMicros === null || !Number.isSafeInteger(tokens) || !Number.isSafeInteger(priceMicros) || !Number.isSafeInteger(unitTokens) || unitTokens <= 0) {
+    return false;
+  }
+
+  return tokens > Number.MAX_SAFE_INTEGER / priceMicros || Math.ceil((tokens * priceMicros) / unitTokens) > 2_147_483_647;
 }

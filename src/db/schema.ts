@@ -1289,6 +1289,7 @@ export const aiUsageEvents = pgTable(
     pricingEffectiveAt: timestamp("pricing_effective_at", { mode: "date" }),
     costStatus: text("cost_status").notNull().default("missing_pricing"),
     errorCode: text("error_code"),
+    providerRequestId: text("provider_request_id"),
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
   },
   (aiUsageEvent) => [
@@ -1316,7 +1317,8 @@ export const aiUsageEvents = pgTable(
     check("ai_usage_events_output_price_non_negative_check", sql`${aiUsageEvent.outputTokenPriceMicros} is null or ${aiUsageEvent.outputTokenPriceMicros} >= 0`),
     check("ai_usage_events_cache_read_price_non_negative_check", sql`${aiUsageEvent.cacheReadTokenPriceMicros} is null or ${aiUsageEvent.cacheReadTokenPriceMicros} >= 0`),
     check("ai_usage_events_cache_write_price_non_negative_check", sql`${aiUsageEvent.cacheWriteTokenPriceMicros} is null or ${aiUsageEvent.cacheWriteTokenPriceMicros} >= 0`),
-    check("ai_usage_events_cost_status_check", sql`${aiUsageEvent.costStatus} in ('estimated', 'missing_pricing', 'missing_usage')`),
+    check("ai_usage_events_cost_status_check", sql`${aiUsageEvent.costStatus} in ('estimated', 'missing_pricing', 'missing_usage', 'missing_cost')`),
+    check("ai_usage_events_provider_request_id_check", sql`${aiUsageEvent.providerRequestId} is null or length(btrim(${aiUsageEvent.providerRequestId})) between 1 and 200`),
   ],
 );
 

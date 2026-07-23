@@ -72,6 +72,7 @@ describe("AI usage events", () => {
       pricingCurrency: "USD",
       pricingVersion: "v1",
       costStatus: "estimated",
+      providerRequestId: null,
     });
   });
 
@@ -271,5 +272,52 @@ describe("AI usage events", () => {
       estimatedTotalCostMicros: null,
       costStatus: "missing_pricing",
     });
+  });
+
+  test("persists only bounded provider request identifiers without provider payload fields", async () => {
+    const { db, rows } = createUsageDb();
+
+    await writeAiUsageEvent(db, {
+      userId: "user-1",
+      purpose: aiUsagePurposes.aiAskInitialAnswer,
+      provider: "ai_gateway",
+      model: "cx/request-metadata",
+      promptVersion: aiUsagePromptVersions.aiAskInitialAnswer,
+      status: "success",
+      latencyMs: 42,
+      providerRequestId: "req_safe_123",
+    });
+
+    expect(rows[0]).toMatchObject({ providerRequestId: "req_safe_123" });
+    expect(Object.keys(rows[0])).not.toEqual(expect.arrayContaining(["prompt", "response", "providerPayload", "rawProviderPayload"]));
+  });
+
+  test("records missing-cost metadata for database-unrepresentable cost estimates", async () => {
+    const { db, rows } = createUsageDb();
+
+    await writeAiUsageEvent(db, {
+      userId: "user-1",
+      purpose: aiUsagePurposes.aiAskInitialAnswer,
+      provider: "ai_gateway",
+      model: "cx/overflow",
+      promptVersion: aiUsagePromptVersions.aiAskInitialAnswer,
+      status: "success",
+      latencyMs: 42,
+      promptTokens: 2_147_483_647,
+      completionTokens: 1,
+      pricingSnapshot: {
+        aiGatewayModelId: "model-overflow",
+        pricingCurrency: "USD",
+        inputTokenPriceMicros: 2_147_483_647,
+        outputTokenPriceMicros: 1,
+        cacheReadTokenPriceMicros: null,
+        cacheWriteTokenPriceMicros: null,
+        pricingUnitTokens: 1,
+        pricingVersion: "v1",
+        pricingEffectiveAt: new Date("2026-07-09T00:00:00.000Z"),
+      },
+    });
+
+    expect(rows[0]).toMatchObject({ estimatedInputCostMicros: null, estimatedTotalCostMicros: null, costStatus: "missing_cost" });
   });
 });

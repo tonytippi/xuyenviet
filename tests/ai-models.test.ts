@@ -160,6 +160,17 @@ describe("AI Gateway model catalog", () => {
     });
   });
 
+  test("keeps database-unrepresentable calculated costs nullable", async () => {
+    const model = await createModel({ id: "overflow", inputTokenPriceMicros: 2_147_483_647, outputTokenPriceMicros: 1, pricingUnitTokens: 1 });
+    const { estimateAiUsageCost, getAiGatewayPricingSnapshot } = await import("@/features/ai/models");
+
+    expect(estimateAiUsageCost(getAiGatewayPricingSnapshot(model), { promptTokens: 2_147_483_647, completionTokens: 1 })).toMatchObject({
+      estimatedInputCostMicros: null,
+      estimatedTotalCostMicros: null,
+      costCalculationFailed: true,
+    });
+  });
+
   test("database rejects invalid model catalog constraints", async () => {
     await expect(
       testDb.execute(sql`insert into ai_gateway_models (id, gateway_model_name, display_label, purpose, pricing_unit_tokens) values ('bad', 'cx/bad', 'Bad', 'ai_ask_initial_answer', 0)`),

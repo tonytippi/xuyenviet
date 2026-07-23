@@ -28,6 +28,7 @@ export type WriteAiUsageEventInput = {
   cacheWritePromptTokens?: number | null;
   pricingSnapshot?: AiGatewayPricingSnapshot | null;
   errorCode?: string | null;
+  providerRequestId?: string | null;
 };
 
 export async function writeAiUsageEvent(db: UsageEventDb, input: WriteAiUsageEventInput) {
@@ -71,8 +72,9 @@ export async function writeAiUsageEvent(db: UsageEventDb, input: WriteAiUsageEve
     pricingUnitTokens: cost.pricingUnitTokens,
     pricingVersion: cost.pricingVersion,
     pricingEffectiveAt: cost.pricingEffectiveAt,
-    costStatus: cost.estimatedTotalCostMicros !== null ? "estimated" : hasCompleteEffectivePricing(input.pricingSnapshot, tokens) ? "missing_usage" : "missing_pricing",
+    costStatus: cost.estimatedTotalCostMicros !== null ? "estimated" : cost.costCalculationFailed ? "missing_cost" : hasCompleteEffectivePricing(input.pricingSnapshot, tokens) ? "missing_usage" : "missing_pricing",
     errorCode: input.errorCode ?? null,
+    providerRequestId: normalizeProviderRequestId(input.providerRequestId),
   });
 
   return id;
@@ -116,4 +118,9 @@ function hasCompleteEffectivePricing(pricing: AiGatewayPricingSnapshot | null | 
 
 function isValidPrice(value: number | null) {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+function normalizeProviderRequestId(value: string | null | undefined) {
+  const normalized = value?.trim() ?? "";
+  return normalized.length > 0 && normalized.length <= 200 ? normalized : null;
 }

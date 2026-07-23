@@ -543,9 +543,9 @@ describe("answer context assembly", () => {
     expect(events).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: "delta", content: expect.stringContaining("Cảnh báo cần kiểm tra") }),
     ]));
-    expect(doneEvent?.assistantMessage?.content).toContain("Nên đi 5 ngày.");
+    expect(doneEvent?.assistantMessage?.content).not.toContain("Nên đi 5 ngày.");
     expect(doneEvent?.assistantMessage?.content).toContain("Cảnh báo cần kiểm tra");
-    expect(doneEvent?.assistantMessage?.content).toContain("kiểm tra lại với nguồn chính thức hoặc nhà cung cấp");
+    expect(doneEvent?.assistantMessage?.content).toContain("chưa thể xác minh thông tin hiện tại từ nguồn bên ngoài");
   });
 
   test("stream route appends freshness warning when model only emits warning heading", async () => {
@@ -581,8 +581,9 @@ describe("answer context assembly", () => {
     const warningDeltas = events.filter((event) => event.type === "delta" && event.content?.includes("Cảnh báo cần kiểm tra"));
     const doneEvent = events.find((event) => event.type === "done");
 
-    expect(warningDeltas).toHaveLength(2);
-    expect(doneEvent?.assistantMessage?.content).toContain("kiểm tra lại với nguồn chính thức hoặc nhà cung cấp");
+    expect(warningDeltas).toHaveLength(1);
+    expect(doneEvent?.assistantMessage?.content).not.toContain("Nên đi 5 ngày.");
+    expect(doneEvent?.assistantMessage?.content).toContain("chưa thể xác minh thông tin hiện tại từ nguồn bên ngoài");
   });
 
   test("stream route assembles source bundle in priority order in the gateway answer request", async () => {
@@ -688,7 +689,7 @@ describe("answer context assembly", () => {
       .map((line) => JSON.parse(line) as { type: string; assistantMessage?: { annotations?: Array<{ id: string; text: string }> } })
       .find((event) => event.type === "done");
 
-    expect(doneEvent?.assistantMessage?.annotations).toEqual([expect.objectContaining({ id: "valid", text: "Bãi đỗ xe an toàn ở Huế" })]);
+    expect(doneEvent?.assistantMessage?.annotations).toEqual([]);
   });
 
   test("source bundle renderer keeps instruction-like context values delimited as data", async () => {
@@ -2012,6 +2013,24 @@ describe("answer context assembly", () => {
 
     expect(result.content).toContain("chưa thể xác minh thông tin hiện tại từ nguồn bên ngoài");
     expect(result.content).toContain("nguồn chính thức hoặc nhà cung cấp");
+    expect(result.replacedUnsafeContent).toBe(true);
+    expect(result.content).not.toContain("Đây là gợi ý tổng quát.");
+  });
+
+  test("failed external fallback replaces caveat-only answers with both required notices", async () => {
+    const { ensureAiAskFreshnessWarning, requiresAiAskAnswerFinalization } = await import("@/features/ai/answer-freshness");
+    const sourceBundle = createSourceBundle({
+      knowledge: [makeKnowledgeResult("required", "Điểm dừng cần xác minh", { verificationState: "required", policy: "caveat_only" })],
+      retrievalDecision: { ...createSourceBundle().retrievalDecision, webSearchTriggered: true, webSearchTriggerReasons: ["selected_knowledge_requires_verification"] },
+      warnings: ["web_search_load_failed"],
+    });
+    const result = ensureAiAskFreshnessWarning("Điểm dừng này hiện đang mở cửa.", sourceBundle);
+
+    expect(requiresAiAskAnswerFinalization(sourceBundle)).toBe(true);
+    expect(result.replacedUnsafeContent).toBe(true);
+    expect(result.content).toContain("chưa thể xác minh thông tin hiện tại từ nguồn bên ngoài");
+    expect(result.content).toContain('tình trạng hiện tại của "Điểm dừng cần xác minh"');
+    expect(result.content).not.toContain("hiện đang mở cửa");
   });
 
   test("source bundle does not call web search or create web rows when fallback is false", async () => {
