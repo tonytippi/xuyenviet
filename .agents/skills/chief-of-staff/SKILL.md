@@ -104,9 +104,15 @@ Give the coordinator the complete final report block, not the result of
 block by its field labels, accepting wrapped `SUMMARY` and `BLOCKER` values.
 If that block is absent or malformed in the initial 160-line read, re-read the
 same worker once with `herdr agent read <name> --source recent-unwrapped --lines 300`.
-Only after that retry may a missing or malformed report become a stop
-condition. Never synthesize report fields from a commit, `git status`, or the
-sprint file.
+If that retry is still absent or malformed, send the same worker one bounded,
+non-mutating recovery prompt: `Do not inspect, edit, test, commit, or
+synchronize anything. Reprint only your final complete
+--- CHIEF-OF-STAFF-REPORT --- block now.` Wait for it, then re-read the worker
+once with `herdr agent read <name> --source recent-unwrapped --lines 160`.
+Treat the recovery response only as a report transport retry, not a new stage
+or worker result. Only after this final retry may a missing or malformed report
+become a stop condition. Never synthesize report fields from a commit, `git
+status`, or the sprint file.
 
 ## Herdr Worker Procedure
 
@@ -151,6 +157,21 @@ stage-appropriate final status independently observed in `sprint-status.yaml`.
 Save that complete block as `last_worker_result` before creating another pane.
 A worker that cannot synchronize the expected status must return `BLOCKED`; do
 not repair or guess its status in the coordinator.
+
+The Story Review and Epic Review stages have one narrow report-correction
+exception to the `RESULT: SUCCESS` rule. Apply it only when the final report
+says `RESULT: BLOCKED` but explicitly confirms the review completed, lists
+actionable findings, and reports the required synchronized repair status
+(`in-progress` for a story; the required preserved status for an epic).
+Independently confirm that status in `sprint-status.yaml`. This is a malformed
+review outcome, not a blocked review: send the same worker one non-mutating
+recovery prompt requiring it to reprint its final report with `RESULT: SUCCESS`,
+the same target, status, findings, and risk classification. It must not inspect,
+review, edit, test, commit, or synchronize anything during that retry. Read the
+corrected report using the standard 160-line and 300-line procedure, then
+continue the applicable bounded repair loop. If any condition is absent, the
+correction fails, or the status cannot be independently confirmed, it remains a
+stop condition.
 
 Maintain an in-memory rolling `audit_panes` ledger, ordered oldest to newest.
 It contains only child pane IDs created by this run, including coordinator
@@ -250,6 +271,11 @@ Create a new pane and prompt:
 Use bmad-code-review to review committed story <absolute-story-path> and its
 implementation. Follow the skill completely. Compare the current commit and
 story acceptance criteria. Do not edit code, commit, or start another story.
+The Chief of Staff has already selected this exact target and authorizes the
+mandatory pre-review checkpoint: answer `Y` and proceed with the adversarial
+review layers. Do not stop to request the same target confirmation from the
+human. This authorization applies only to this read-only review, not to editing,
+committing, status synchronization, or any other workflow stage.
 On approval, synchronize sprint-status.yaml to mark the story done. If there is
 an actionable finding, set its status to in-progress and synchronize it. A
 completed review returns `RESULT: SUCCESS` whether it is APPROVED or has
@@ -340,7 +366,12 @@ Use bmad-code-review for the completed Epic <epic-number>. Review the aggregate
 of all stories in the epic, their acceptance criteria, cross-story integration,
 and the commits that implement them. Do not edit code or commit. Report either
 APPROVED with no actionable epic-level findings, or actionable findings with
-affected story keys. Synchronize sprint-status.yaml before finishing: preserve
+affected story keys. The Chief of Staff has already selected this exact epic and
+authorizes the mandatory pre-review checkpoint: answer `Y` and proceed with the
+adversarial review layers. Do not stop to request the same target confirmation
+from the human. This authorization applies only to this read-only epic review,
+not to editing, committing, status synchronization, or any other workflow stage.
+Synchronize sprint-status.yaml before finishing: preserve
 `epic-<epic-number>` as done. End with the required machine-checkable report.
 ```
 
