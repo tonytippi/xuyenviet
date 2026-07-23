@@ -225,11 +225,38 @@ describe("knowledge batch source intake", () => {
       { knowledgeCardId: "eligible-hue-food", contentVersion: 1, evidenceSetRevision: 1, reason: "freshness", priority: 5 },
       { knowledgeCardId: "eligible-hue-food", contentVersion: 2, evidenceSetRevision: 1, reason: "risk", priority: 1 },
     ]);
+    const duplicateCapture = await seedSourceCaptureVersion({ sourceId: duplicateItem!.sourceId!, captureKind: "url", rawText: "Nguồn đang chờ nạp." });
+    await insertCardWithOptionalSource({ id: "source-intake-draft", sourceId: duplicateItem!.sourceId, status: "draft", needsReview: true, type: "food", locationName: "Huế" });
+    await testDb.insert(knowledgeSourceSuggestions).values({
+      sourceId: duplicateItem!.sourceId!,
+      suggestedCardId: "source-intake-draft",
+      action: "update",
+      targetCardId: "eligible-hue-food",
+      beforeSummary: "Thông tin cũ.",
+      afterSummary: "Thông tin cần cập nhật.",
+      rationale: "Cần xử lý nguồn mới.",
+      aiPromptVersion: "test",
+      createdByUserId: "progress-operator",
+    });
+    await insertCardWithOptionalSource({ id: "source-intake-create", sourceId: duplicateItem!.sourceId, status: "draft", needsReview: true, type: "place", locationName: "Đà Nẵng" });
+    await testDb.insert(knowledgeSourceSuggestions).values({
+      sourceId: duplicateItem!.sourceId!,
+      suggestedCardId: "source-intake-create",
+      action: "create",
+      rationale: "Cần tạo thẻ từ nguồn mới.",
+      aiPromptVersion: "test",
+      createdByUserId: "progress-operator",
+    });
 
     const progress = await getActiveEvidenceGroundedSeedCoverage();
 
     expect(progress).toMatchObject({ targetActiveCards: 100, activeEvidenceGroundedCards: 1, remainingActiveCards: 99, isComplete: false, activeCommunityObservations: 1, activeCommunityPatterns: 0, caveatOnlyHighRiskCards: 1, pendingReviewCards: 1, pendingVerificationCards: 1 });
-    expect(progress.actionableWork).toEqual([{ reason: "freshness", priority: 5, count: 1 }]);
+    expect(duplicateCapture.id).toBeTruthy();
+    expect(progress.actionableWork).toEqual([
+      { kind: "recommendation", reason: "freshness", priority: 5, count: 1 },
+      { kind: "source_intake", reason: "create", priority: null, count: 1 },
+      { kind: "source_intake", reason: "update", priority: null, count: 1 },
+    ]);
     expect(progress.byType.find((item) => item.type === "food")).toEqual({ type: "food", count: 1 });
     expect(progress.byType.find((item) => item.type === "place")).toEqual({ type: "place", count: 0 });
     expect(progress.byRouteOrLocation.find((item) => item.routeOrLocation === "Huế")).toEqual({ routeOrLocation: "Huế", count: 1 });
@@ -259,6 +286,27 @@ describe("knowledge batch source intake", () => {
     await testDb.update(sources).set({ eligibility: "withdrawn", removalReason: "removed", removedByUserId: "coverage-operator", removalCompletedAt: new Date() }).where(eq(sources.id, items[0]!.sourceId!));
 
     await expect(getActiveEvidenceGroundedSeedCoverage()).resolves.toMatchObject({ activeEvidenceGroundedCards: 0 });
+  });
+
+  test("coverage requires independent pattern support and reports incomplete review work", async () => {
+    await createUser("coverage-policy-operator", ["operator"]);
+    authMock.mockResolvedValue({ user: { id: "coverage-policy-operator", email: "coverage-policy-operator@example.com" } });
+    const { getActiveEvidenceGroundedSeedCoverage, submitKnowledgeSeedUrlBatch } = await import("@/features/knowledge/batch-intake");
+
+    await submitKnowledgeSeedUrlBatch({ urls: "https://example.com/pattern-one\nhttps://example.com/pattern-two\nhttps://example.com/incomplete-review" });
+    const [firstItem, secondItem, incompleteItem] = await testDb.select().from(knowledgeSeedBatchItems).orderBy(knowledgeSeedBatchItems.lineNumber);
+    await insertCardWithOptionalSource({ id: "single-support-pattern", sourceId: firstItem!.sourceId, status: "approved", needsReview: false, type: "place", locationName: "Huế", knowledgeState: "community_pattern", createdByUserId: "coverage-policy-operator" });
+    const firstCapture = await seedSourceCaptureVersion({ sourceId: firstItem!.sourceId!, captureKind: "url", rawText: "Bằng chứng độc lập thứ nhất." });
+    await seedKnowledgeCardEvidence({ cardId: "single-support-pattern", sourceId: firstItem!.sourceId!, captureVersionId: firstCapture.id, quoteText: "Bằng chứng độc lập thứ nhất.", independenceKey: "pattern-source-one" });
+    await insertCardWithOptionalSource({ id: "incomplete-review", sourceId: incompleteItem!.sourceId, status: "approved", needsReview: true, type: "warning", locationName: "Đà Nẵng", knowledgeState: "uncertain", reviewState: "in_review", verificationState: "required", createdByUserId: "coverage-policy-operator" });
+
+    await expect(getActiveEvidenceGroundedSeedCoverage()).resolves.toMatchObject({ activeEvidenceGroundedCards: 0, activeCommunityPatterns: 0, pendingReviewCards: 1, pendingVerificationCards: 1 });
+
+    const secondCapture = await seedSourceCaptureVersion({ sourceId: secondItem!.sourceId!, captureKind: "url", rawText: "Bằng chứng độc lập thứ hai." });
+    await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: "single-support-pattern", sourceId: secondItem!.sourceId!, supportLevel: "supporting" });
+    await seedKnowledgeCardEvidence({ cardId: "single-support-pattern", sourceId: secondItem!.sourceId!, captureVersionId: secondCapture.id, quoteText: "Bằng chứng độc lập thứ hai.", independenceKey: "pattern-source-two" });
+
+    await expect(getActiveEvidenceGroundedSeedCoverage()).resolves.toMatchObject({ activeEvidenceGroundedCards: 1, activeCommunityPatterns: 1, pendingReviewCards: 1, pendingVerificationCards: 1 });
   });
 
   test("traveler cannot read active evidence-grounded seed coverage", async () => {

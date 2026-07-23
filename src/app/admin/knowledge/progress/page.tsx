@@ -43,10 +43,10 @@ export default async function KnowledgeProgressPage() {
 
       <section className="mt-8 rounded-[1.5rem] border border-[#d8c9ad] bg-white/70 p-5 sm:p-6">
         <h2 className="text-2xl font-semibold tracking-[-0.03em] text-[#17342c]">Công việc hiện hành để thu hẹp khoảng trống</h2>
-        <p className="mt-2 leading-7 text-[#4f625a]">Chỉ gồm khuyến nghị mở hoặc đang xử lý có phiên bản nội dung và evidence trùng với thẻ hiện tại.</p>
-        {progress.actionableWork.length === 0 ? <p className="mt-4 text-[#4f625a]">Chưa có khuyến nghị hiện hành cho corridor.</p> : (
+        <p className="mt-2 leading-7 text-[#4f625a]">Gồm khuyến nghị mở/đang xử lý có phiên bản trùng với thẻ hiện tại và source intake còn đủ điều kiện liên quan đến thẻ corridor hiện hành.</p>
+        {progress.actionableWork.length === 0 ? <p className="mt-4 text-[#4f625a]">Chưa có công việc hiện hành cho corridor.</p> : (
           <ul className="mt-4 grid gap-3">
-            {progress.actionableWork.map((item) => <li className="flex items-center justify-between gap-4 rounded-2xl border border-[#e2d3ba] bg-[#fbf7ed] p-4" key={`${item.priority}:${item.reason}`}><span className="font-semibold text-[#17342c]">P{item.priority} · {item.reason}</span><span className="rounded-full bg-white/80 px-3 py-1 text-sm font-semibold text-[#4f625a]">{item.count}</span></li>)}
+            {progress.actionableWork.map((item) => <li className="flex items-center justify-between gap-4 rounded-2xl border border-[#e2d3ba] bg-[#fbf7ed] p-4" key={`${item.kind}:${item.priority ?? "intake"}:${item.reason}`}><span className="font-semibold text-[#17342c]">{item.priority === null ? "Nạp nguồn" : `P${item.priority}`} · {item.reason}</span><span className="rounded-full bg-white/80 px-3 py-1 text-sm font-semibold text-[#4f625a]">{item.count}</span></li>)}
           </ul>
         )}
         <div className="mt-5 flex flex-wrap gap-4">

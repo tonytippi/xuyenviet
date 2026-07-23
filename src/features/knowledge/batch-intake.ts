@@ -1,9 +1,9 @@
 import "server-only";
 
-import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { knowledgeCardEvidence, knowledgeCards, knowledgeCardSources, knowledgeCardTypeValues, knowledgeRecommendations, knowledgeSeedBatchItems, knowledgeSeedBatches, knowledgeSourceSuggestions, sourceCaptureVersions, sources, type KnowledgeCardType, type KnowledgeRecommendationReason, type KnowledgeSeedBatchItemStatus } from "@/db/schema";
+import { knowledgeCardEvidence, knowledgeCards, knowledgeCardSources, knowledgeCardTypeValues, knowledgeRecommendations, knowledgeSeedBatchItems, knowledgeSeedBatches, knowledgeSourceSuggestions, sourceCaptureVersions, sources, type KnowledgeCardType, type KnowledgeRecommendationReason, type KnowledgeSeedBatchItemStatus, type KnowledgeSuggestionAction } from "@/db/schema";
 import { isKnowledgeCardTravelerEligible } from "@/features/knowledge/state";
 import { recordAuditEvent } from "@/features/audit/events";
 import { requireAdminSession } from "@/server/auth";
@@ -74,7 +74,10 @@ export type ActiveEvidenceGroundedSeedCoverage = {
   caveatOnlyHighRiskCards: number;
   pendingReviewCards: number;
   pendingVerificationCards: number;
-  actionableWork: Array<{ reason: KnowledgeRecommendationReason; priority: number; count: number }>;
+  actionableWork: Array<
+    | { kind: "recommendation"; reason: KnowledgeRecommendationReason; priority: number; count: number }
+    | { kind: "source_intake"; reason: Extract<KnowledgeSuggestionAction, "create" | "update" | "conflict">; priority: null; count: number }
+  >;
   byType: Array<{ type: KnowledgeCardType; count: number }>;
   byRouteOrLocation: Array<{ routeOrLocation: string; count: number }>;
 };
@@ -240,7 +243,7 @@ export async function getActiveEvidenceGroundedSeedCoverage(): Promise<ActiveEvi
     .from(knowledgeCards)
     .where(eq(knowledgeCards.publicationState, "active"));
   const evidenceRows = await db
-    .select({ cardId: knowledgeCardEvidence.knowledgeCardId })
+    .select({ cardId: knowledgeCardEvidence.knowledgeCardId, independenceKey: knowledgeCardEvidence.independenceKey })
     .from(knowledgeCardEvidence)
     .innerJoin(knowledgeCards, and(eq(knowledgeCards.id, knowledgeCardEvidence.knowledgeCardId), eq(knowledgeCards.publicationState, "active")))
     .innerJoin(sources, eq(sources.id, knowledgeCardEvidence.sourceId))
@@ -253,7 +256,12 @@ export async function getActiveEvidenceGroundedSeedCoverage(): Promise<ActiveEvi
       sql`${sourceCaptureVersions.rawText} is not null`,
       sql`substring(${sourceCaptureVersions.rawText} from ${knowledgeCardEvidence.spanStart} + 1 for ${knowledgeCardEvidence.spanEnd} - ${knowledgeCardEvidence.spanStart}) = ${knowledgeCardEvidence.quoteText}`,
     ));
-  const cardIdsWithCurrentEvidence = new Set(evidenceRows.map((row) => row.cardId));
+  const evidenceKeysByCardId = new Map<string, Set<string>>();
+  for (const row of evidenceRows) {
+    const keys = evidenceKeysByCardId.get(row.cardId) ?? new Set<string>();
+    keys.add(row.independenceKey);
+    evidenceKeysByCardId.set(row.cardId, keys);
+  }
 
   const uniqueEligibleCards = new Map<string, { type: KnowledgeCardType; locationName: string | null; routeSegment: string | null }>();
   const corridorCards = cardRows.filter((card) => hasCorridorSignal(card.routeSegment, card.locationName));
@@ -265,16 +273,18 @@ export async function getActiveEvidenceGroundedSeedCoverage(): Promise<ActiveEvi
 
   for (const row of cardRows) {
     if (!hasCorridorSignal(row.routeSegment, row.locationName)) continue;
-    const hasCurrentEvidence = cardIdsWithCurrentEvidence.has(row.id);
+    const activeSupportingEvidenceCount = evidenceKeysByCardId.get(row.id)?.size ?? 0;
+    const hasCurrentEvidence = activeSupportingEvidenceCount > 0;
     if (hasCurrentEvidence && (row.knowledgeState === "uncertain" || row.verificationState === "required")) caveatOnlyHighRiskCards += 1;
-    if (hasCurrentEvidence && (row.needsReview || row.reviewState === "ai_recommended" || row.reviewState === "in_review")) pendingReviewCards += 1;
-    if (hasCurrentEvidence && row.verificationState === "required") pendingVerificationCards += 1;
+    if (row.needsReview || row.reviewState === "ai_recommended" || row.reviewState === "in_review") pendingReviewCards += 1;
+    if (row.verificationState === "required") pendingVerificationCards += 1;
     const eligibleForCoverage = isKnowledgeCardTravelerEligible({
       ...row,
-      activeSupportingEvidenceCount: hasCurrentEvidence ? 1 : 0,
+      activeSupportingEvidenceCount,
       capturePayloadAvailable: hasCurrentEvidence,
     });
-    if (eligibleForCoverage && row.knowledgeState !== "uncertain" && !uniqueEligibleCards.has(row.id)) {
+    const hasRequiredPatternSupport = row.knowledgeState !== "community_pattern" || activeSupportingEvidenceCount >= 2;
+    if (eligibleForCoverage && hasRequiredPatternSupport && row.knowledgeState !== "uncertain" && !uniqueEligibleCards.has(row.id)) {
       uniqueEligibleCards.set(row.id, { type: row.type, locationName: row.locationName, routeSegment: row.routeSegment });
       if (row.knowledgeState === "community_observation") activeCommunityObservations += 1;
       if (row.knowledgeState === "community_pattern") activeCommunityPatterns += 1;
@@ -291,12 +301,36 @@ export async function getActiveEvidenceGroundedSeedCoverage(): Promise<ActiveEvi
       eq(knowledgeRecommendations.evidenceSetRevision, knowledgeCards.evidenceSetRevision),
     ));
   const corridorCardIds = new Set(corridorCards.map((card) => card.id));
-  const actionableWorkCounts = new Map<string, { reason: KnowledgeRecommendationReason; priority: number; count: number }>();
+  const actionableWorkCounts = new Map<string, ActiveEvidenceGroundedSeedCoverage["actionableWork"][number]>();
   for (const row of recommendationRows) {
     if (!corridorCardIds.has(row.cardId)) continue;
     const key = `${row.priority}:${row.reason}`;
     const current = actionableWorkCounts.get(key);
-    actionableWorkCounts.set(key, current ? { ...current, count: current.count + 1 } : { reason: row.reason, priority: row.priority, count: 1 });
+    actionableWorkCounts.set(key, current ? { ...current, count: current.count + 1 } : { kind: "recommendation", reason: row.reason, priority: row.priority, count: 1 });
+  }
+  const sourceSuggestionRows = await db
+    .select({ action: knowledgeSourceSuggestions.action, suggestedCardId: knowledgeSourceSuggestions.suggestedCardId, targetCardId: knowledgeSourceSuggestions.targetCardId })
+    .from(knowledgeSourceSuggestions)
+    .innerJoin(sources, and(eq(sources.id, knowledgeSourceSuggestions.sourceId), eq(sources.eligibility, "eligible")))
+    .innerJoin(sourceCaptureVersions, and(eq(sourceCaptureVersions.id, sources.currentCaptureVersionId), isNull(sourceCaptureVersions.payloadDeletedAt)))
+    .where(or(eq(knowledgeSourceSuggestions.action, "create"), eq(knowledgeSourceSuggestions.action, "update"), eq(knowledgeSourceSuggestions.action, "conflict")));
+  const sourceSuggestionCardIds = Array.from(new Set(sourceSuggestionRows.flatMap((row) => [row.targetCardId, row.suggestedCardId]).filter((cardId): cardId is string => Boolean(cardId))));
+  const sourceSuggestionCorridorCardIds = new Set(
+    sourceSuggestionCardIds.length === 0
+      ? []
+      : (await db
+        .select({ id: knowledgeCards.id, locationName: knowledgeCards.locationName, routeSegment: knowledgeCards.routeSegment })
+        .from(knowledgeCards)
+        .where(inArray(knowledgeCards.id, sourceSuggestionCardIds)))
+        .filter((card) => hasCorridorSignal(card.routeSegment, card.locationName))
+        .map((card) => card.id),
+  );
+  for (const row of sourceSuggestionRows) {
+    const relatedCardId = row.targetCardId ?? row.suggestedCardId;
+    if (!relatedCardId || !sourceSuggestionCorridorCardIds.has(relatedCardId) || (row.action !== "create" && row.action !== "update" && row.action !== "conflict")) continue;
+    const key = `source_intake:${row.action}`;
+    const current = actionableWorkCounts.get(key);
+    actionableWorkCounts.set(key, current ? { ...current, count: current.count + 1 } : { kind: "source_intake", reason: row.action, priority: null, count: 1 });
   }
 
   const activeEvidenceGroundedCards = uniqueEligibleCards.size;
@@ -310,7 +344,7 @@ export async function getActiveEvidenceGroundedSeedCoverage(): Promise<ActiveEvi
     caveatOnlyHighRiskCards,
     pendingReviewCards,
     pendingVerificationCards,
-    actionableWork: Array.from(actionableWorkCounts.values()).sort((a, b) => a.priority - b.priority || a.reason.localeCompare(b.reason)),
+    actionableWork: Array.from(actionableWorkCounts.values()).sort((a, b) => (a.priority ?? Number.MAX_SAFE_INTEGER) - (b.priority ?? Number.MAX_SAFE_INTEGER) || a.reason.localeCompare(b.reason)),
     byType: countByType(Array.from(uniqueEligibleCards.values())),
     byRouteOrLocation: countByRouteOrLocation(Array.from(uniqueEligibleCards.values())),
   };

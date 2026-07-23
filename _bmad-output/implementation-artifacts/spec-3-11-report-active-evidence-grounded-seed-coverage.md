@@ -56,6 +56,12 @@ warnings: []
 - [x] `src/app/admin/knowledge/progress/page.tsx` -- render Vietnamese-first active-evidence readiness language, remaining gap, zero-count taxonomy/location gaps, policy signals, and safe links to intake/recommendation workflows; explicitly state that historical approval is not readiness.
 - [x] `tests/knowledge-batch-source-intake.test.ts` -- update legacy progress assertions and cover current source/evidence/capture eligibility, excluded unsafe states, community versus caveat-only separation, version-current operator work signals, authorization, and aggregate-only output.
 
+### Review Findings
+
+- [x] [Review][Patch] Require two distinct valid evidence independence keys before counting an active `community_pattern` [src/features/knowledge/batch-intake.ts:256]
+- [x] [Review][Patch] Count active corridor cards requiring review or verification even when their evidence is incomplete or invalid [src/features/knowledge/batch-intake.ts:268]
+- [x] [Review][Patch] Include eligible current source-intake suggestions in actionable-work aggregates [src/features/knowledge/batch-intake.ts:284]
+
 **Acceptance Criteria:**
 - Given AI-first cards exist, when an operator views seed progress, then the report counts only active Hanoi-to-HCMC cards with current active evidence and complete retrieval metadata toward the 100-card target, excluding suppressed, archived, superseded, evidence-invalid, incomplete, or otherwise ineligible cards.
 - Given counted cards have type, route/location, review, and verification state, when progress is displayed, then taxonomy and route/location gaps plus pending review/verification signals are shown, and active community observations/patterns are distinct from caveat-only high-risk material.
