@@ -32,13 +32,21 @@ is complete only when its sprint status is `done` and every associated story is
 - Submit work only with `herdr agent prompt <name> "..." --wait`. Before
   treating a wait result as success, read the worker's final output with
   `herdr agent read <name> --source recent-unwrapped --lines 160`.
+- Every mutating worker must read, synchronize, and report the target entry in
+  `sprint-status.yaml` before it finishes. The coordinator is read-only, but
+  must use the most recent worker output as well as the file to select the next
+  action. Never make a decision from the sprint file alone.
 - A `blocked`, `unknown`, timeout, failed command, missing artifact, failed
-  test, validation failure, review finding, or unexpected status transition is
-  a stop condition. Read the worker output, report the blocker, and do not
-  continue the loop automatically.
+  test, validation failure, or unexpected status transition is a stop
+  condition. Read the worker output, report the blocker, and do not continue
+  the loop automatically. An actionable story-review finding instead enters
+  the bounded repair loop described below; an epic-review finding stops.
 - Do not close panes, tabs, workspaces, or agents created by another person or
-  another run. Close only pane IDs recorded by this run after the applicable
-  story or epic review has been independently verified as approved.
+  another run. Close only pane IDs recorded by this run.
+- Retain no more than two child panes from this run at any time: the current
+  worker and, when useful, its immediately preceding completed worker for
+  audit. A completed pane is not a future workflow dependency and must not be
+  retained until a story or epic finishes.
 - Use no parallel workers against this checkout. The workflow is strictly
   sequential because each stage changes shared files and sprint state.
 - Do not use `bmad-dev-auto` here. It is intentionally one-story scoped and
@@ -66,15 +74,26 @@ Interpret the sprint map using the installed `bmad-sprint-status` rules:
 - Sort stories by numeric epic then numeric story. Do not use lexicographic
   sorting (`10-1` must follow `9-9`).
 
+Retain the most recent completed worker's final output in an in-memory
+`last_worker_result` record, together with its target story or epic and expected
+final status. On the first iteration, this record is absent. After that, a
+missing, malformed, blocked, or contradictory result is a stop condition.
+
 At the beginning of every loop iteration, start a new coordinator pane and
-agent. Ask it to use `bmad-sprint-status` in data mode, inspect the full sprint
-file, and return exactly one of:
+agent. Give it `last_worker_result`, then ask it to use `bmad-sprint-status` in
+data mode, inspect the full sprint file, compare both sources, and return
+exactly one of:
 
 `create <story-key>`, `develop <story-path>`, `review <story-path>`,
 `epic-review <epic-number>`, `complete`, or `blocked <reason>`.
 
 Do not let this coordinator modify code, story documents, or sprint status.
-Its job is to select the next safe action and verify the prior action's state.
+Its job is to verify the prior action and select the next safe action. It must
+return `blocked <reason>` when the worker output does not explicitly confirm
+the expected final status or conflicts with `sprint-status.yaml`; it must never
+repeat an action merely because the file was not synchronized. An accepted
+story-review result with actionable findings is not eligible for coordinator
+selection: run its bounded repair loop first.
 
 ## Herdr Worker Procedure
 
@@ -93,18 +112,39 @@ Take `<returned-pane-id>` only from the JSON returned by `herdr pane split`.
 If the new worker reports `blocked` or the prompt wait fails, inspect it with
 `herdr agent get <unique-name>` and the read command above, then stop.
 
-Immediately record every returned pane ID in an in-memory run ledger:
+Every mutating worker prompt must require this final, machine-checkable report:
 
-- `story_panes[story-key]`: coordinator, create, validate, develop, commit,
-  review, and any repair panes for that story.
-- `epic_review_panes[epic-number]`: only the epic-review pane for that epic.
+```text
+RESULT: SUCCESS or BLOCKED
+TARGET: <story-key, absolute story path, or epic number>
+SPRINT STATUS: <target entry> = <final status>
+SPRINT STATUS SYNCHRONIZED: yes or no
+SUMMARY: <concise stage evidence, including tests, commit, or review outcome>
+BLOCKER: <none or reason>
+```
 
-Never put the caller pane in either ledger. On a stop condition, leave all
-recorded panes open for diagnosis. On a successful cleanup, run
-`herdr pane close <pane-id>` for each recorded ID, one at a time. If a close
-fails because the pane was already closed, record that fact and continue; for
-any other close failure, stop and report it without attempting to close an
-unverified pane.
+After reading a mutating worker's final output, reject it and stop unless it has
+`RESULT: SUCCESS`, `SPRINT STATUS SYNCHRONIZED: yes`, and the exact
+stage-appropriate final status independently observed in `sprint-status.yaml`.
+Save the accepted output as `last_worker_result` before creating another pane.
+A worker that cannot synchronize the expected status must return `BLOCKED`; do
+not repair or guess its status in the coordinator.
+
+Maintain an in-memory rolling `audit_panes` ledger, ordered oldest to newest.
+It contains only child pane IDs created by this run, including coordinator
+panes. Never put the caller pane in this ledger.
+
+- Before splitting a new pane, if `audit_panes` already contains two pane IDs,
+  close and remove its oldest ID. This guarantees the new pane cannot raise the
+  retained child-pane count above two.
+- Add the returned pane ID to `audit_panes` immediately after the split. Once
+  its result has been independently verified, it is merely the newest audit
+  record; do not retain it because it belongs to a particular story or epic.
+- A stop condition leaves at most the blocking pane and its immediately
+  preceding audit pane open. All older panes must already have been closed.
+- Run `herdr pane close <pane-id>` one at a time. If a close fails because the
+  pane was already closed, remove it from the ledger and continue. For any
+  other close failure, stop and report it; do not create another pane.
 
 ## Story Lifecycle
 
@@ -119,9 +159,9 @@ For `create <story-key>`, create a fresh pane and prompt:
 Use the bmad-create-story skill to create story <story-key>. Follow its workflow
 fully and non-interactively where the installed workflow permits. Work only on
 this target story. Do not develop code, commit, or begin another story. Finish
-only after the story file exists and sprint-status.yaml marks this story
-ready-for-dev. Report the absolute story-file path, the final story status, and
-any blocker.
+only after the story file exists and you have synchronized sprint-status.yaml to
+mark this story ready-for-dev. End with the required machine-checkable report,
+including the absolute story-file path in SUMMARY.
 ```
 
 After completion, independently re-read the full sprint file. Continue only
@@ -136,8 +176,8 @@ Use bmad-create-story with its validate action for story <absolute-story-path>.
 Follow the validation workflow fully. Do not implement code, commit, or select
 another story. If validation identifies a repairable story-document issue,
 repair it and rerun validation in this same worker until it passes. Finish only
-when the target remains ready-for-dev and validation is successful. Report the
-validation outcome and any blocker.
+when validation is successful and you have synchronized sprint-status.yaml to
+keep the target ready-for-dev. End with the required machine-checkable report.
 ```
 
 Continue only on an explicit successful validation and a `ready-for-dev`
@@ -151,8 +191,9 @@ Create a new pane and prompt:
 Use bmad-dev-story to implement <absolute-story-path>. Follow the skill exactly,
 including all required tests and updates to the story record and sprint status.
 Do not commit. Do not start a different story. Finish only when all acceptance
-criteria and tasks are complete and the target story has reached the review
-state. Report tests run, changed files, the final sprint status, and any blocker.
+criteria and tasks are complete and you have synchronized sprint-status.yaml to
+place the target story in review. End with the required machine-checkable report
+and include tests run and changed files in SUMMARY.
 ```
 
 Re-read sprint status and require the target to be `review`. If it remains
@@ -170,7 +211,10 @@ needed, then create one conventional, descriptive git commit for this story.
 Never amend, force, reset, stash, discard, or include unrelated changes. If the
 tree is already clean, verify whether the story's implementation is already
 committed and report the exact commit; otherwise stop as blocked. Report the
-commit SHA, subject, files committed, and any blocker.
+commit SHA, subject, files committed, and any blocker. Before finishing,
+synchronize sprint-status.yaml and preserve this story in review; do not advance
+it to done. End with the required machine-checkable report and include the
+commit SHA in SUMMARY.
 ```
 
 Require a clean `git status --short` and a non-empty commit SHA. If either check
@@ -184,20 +228,24 @@ Create a new pane and prompt:
 Use bmad-code-review to review committed story <absolute-story-path> and its
 implementation. Follow the skill completely. Compare the current commit and
 story acceptance criteria. Do not edit code, commit, or start another story.
-Report either APPROVED with no actionable findings, or BLOCKED with every
-actionable finding and its severity.
+On approval, synchronize sprint-status.yaml to mark the story done. If there is
+an actionable finding, leave its status at review and synchronize it. A
+completed review returns `RESULT: SUCCESS` whether it is APPROVED or has
+findings; reserve `RESULT: BLOCKED` for a review that cannot finish. Include
+the review outcome and every finding with severity in SUMMARY.
 ```
 
 If the review is approved, re-read sprint status and require the target to be
-`done`. Then close every pane in `story_panes[story-key]`, including this
-approved review pane. Do not close a pane until the status check succeeds.
-Restart the coordinator loop in a new pane.
+`done`. Keep the approved review pane only as the newest rolling audit pane;
+the next pane creation will evict the oldest pane if needed. Restart the
+coordinator loop in a new pane.
 
 If the review contains actionable findings, do not advance. Create a new fresh
 development pane, prompt it to use `bmad-dev-story` on the same story and fix
-only those findings, then repeat the commit and story-review stages. Cap this
-repair loop at two attempts; after the second non-approval, stop with the full
-review evidence for human triage.
+only those findings, synchronize `sprint-status.yaml` to keep the story in
+review, and end with the required machine-checkable report. Then repeat the
+commit and story-review stages. Cap this repair loop at two attempts; after the
+second non-approval, stop with the full review evidence for human triage.
 
 ## Epic Completion Review
 
@@ -210,19 +258,22 @@ Use bmad-code-review for the completed Epic <epic-number>. Review the aggregate
 of all stories in the epic, their acceptance criteria, cross-story integration,
 and the commits that implement them. Do not edit code or commit. Report either
 APPROVED with no actionable epic-level findings, or BLOCKED with the findings
-and affected story keys.
+and affected story keys. Synchronize sprint-status.yaml before finishing:
+preserve `epic-<epic-number>` as done on approval, or preserve its current
+status on a blocked review. End with the required machine-checkable report.
 ```
 
 Proceed to the next backlog story only after this epic review is approved. On
-approval, close the pane in `epic_review_panes[epic-number]`. If it finds an
+approval, retain the pane only through the rolling audit policy. If it finds an
 issue, stop for human triage rather than changing a completed epic without an
-explicit corrective plan, and leave the review pane open.
+explicit corrective plan; the review pane and at most one preceding audit pane
+remain open.
 
 ## Completion
 
 When the coordinator reports `complete`, independently verify that no story is
 in `backlog`, `ready-for-dev`, `in-progress`, or `review`, and that every epic
 is `done`. Report the list of committed story SHAs and approved epic reviews.
-Close the final coordinator pane after that verification. All successful story
-and epic worker panes will already have been closed; leave only panes associated
-with a stopped or blocked run open as the execution record.
+After that verification, close every remaining pane in `audit_panes`, one at a
+time. Successful runs leave no child pane open; stopped or blocked runs leave
+at most two as the execution record.
