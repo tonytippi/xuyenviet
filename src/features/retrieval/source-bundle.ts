@@ -24,6 +24,7 @@ export type WebSearchTriggerReason =
   | "source_conflict"
   | "excluded_conflict_candidate"
   | "excluded_verification_required_candidate"
+  | "selected_knowledge_requires_verification"
   | "active_knowledge_unavailable";
 
 export type SafeKnowledgePolicySummary = {
@@ -300,6 +301,9 @@ export function decideWebSearchFallback({
 
   if (knowledgePolicySummary.excludedPolicyCounts.conflict > 0) reasons.push("excluded_conflict_candidate");
   if (knowledgePolicySummary.excludedPolicyCounts.verificationRequired > 0) reasons.push("excluded_verification_required_candidate");
+  if (knowledge.some((result) => result.policy === "caveat_only" || result.knowledgeState === "uncertain" || result.verificationState === "required")) {
+    reasons.push("selected_knowledge_requires_verification");
+  }
 
   return {
     approvedKnowledgeCandidateCount,

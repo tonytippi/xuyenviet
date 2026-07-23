@@ -372,6 +372,13 @@
       "when": 1784904000005,
       "tag": "0052_accept_legacy_web_trigger_rows",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1784904000006,
+      "tag": "0053_selected_knowledge_verification_fallback",
+      "breakpoints": true
     }
   ]
 }

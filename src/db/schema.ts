@@ -1368,7 +1368,7 @@ export const webSearchResults = pgTable(
     check("web_search_results_score_check", sql`${result.providerScore} is null or (${result.providerScore} >= 0 and ${result.providerScore} <= 1)`),
     check("web_search_results_source_type_check", sql`${result.sourceType} in ('official', 'provider', 'community', 'general')`),
     check("web_search_results_confidence_check", sql`${result.confidence} = 'unverified'`),
-    check("web_search_results_trigger_reason_check", sql`${result.triggerReason} in ('no_active_knowledge', 'insufficient_active_knowledge', 'freshness_sensitive_request', 'active_knowledge_may_be_stale', 'source_conflict', 'excluded_conflict_candidate', 'excluded_verification_required_candidate', 'active_knowledge_unavailable', 'no_approved_knowledge', 'insufficient_approved_knowledge', 'approved_knowledge_may_be_stale', 'approved_knowledge_unavailable')`),
+    check("web_search_results_trigger_reason_check", sql`${result.triggerReason} in ('no_active_knowledge', 'insufficient_active_knowledge', 'freshness_sensitive_request', 'active_knowledge_may_be_stale', 'source_conflict', 'excluded_conflict_candidate', 'excluded_verification_required_candidate', 'selected_knowledge_requires_verification', 'active_knowledge_unavailable', 'no_approved_knowledge', 'insufficient_approved_knowledge', 'approved_knowledge_may_be_stale', 'approved_knowledge_unavailable')`),
     check("web_search_results_rank_check", sql`${result.rank} > 0`),
   ],
 );

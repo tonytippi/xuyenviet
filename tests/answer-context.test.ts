@@ -988,6 +988,27 @@ describe("answer context assembly", () => {
     expect(decision.webSearchTriggerReasons).toEqual(expect.arrayContaining(["freshness_sensitive_request", "active_knowledge_may_be_stale"]));
   });
 
+  test("web search fallback triggers for selected knowledge that remains uncertain or needs verification", async () => {
+    const { decideWebSearchFallback } = await import("@/features/retrieval/source-bundle");
+
+    for (const knowledge of [
+      makeKnowledgeResult("caveat", "Điểm dừng cần kiểm tra", { policy: "caveat_only" }),
+      makeKnowledgeResult("uncertain", "Điểm dừng chưa chắc chắn", { knowledgeState: "uncertain" }),
+      makeKnowledgeResult("required", "Dịch vụ cần xác minh", { verificationState: "required" }),
+    ]) {
+      const decision = decideWebSearchFallback({
+        question: "Điểm dừng này phù hợp không?",
+        knowledge: [knowledge],
+        chatTripContext: { tripProjectFacts: [], chatFacts: [], conflicts: [] },
+        warnings: [],
+      });
+
+      expect(decision.webSearchTriggered).toBe(true);
+      expect(decision.webSearchTriggerReasons).toContain("selected_knowledge_requires_verification");
+      expect(decision.knowledgePolicySummary?.selectedCardIds).toEqual([knowledge.id]);
+    }
+  });
+
   test("freshness matching supports unaccented terms without treating du lich as schedule", async () => {
     const { decideWebSearchFallback } = await import("@/features/retrieval/source-bundle");
 

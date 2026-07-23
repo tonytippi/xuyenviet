@@ -41,6 +41,8 @@ so that changing road-trip details are handled honestly.
 - [x] [Review][Patch] Propagate excluded candidate policy outcomes into production fallback [src/features/retrieval/source-bundle.ts:119] — retrieval returns safe aggregate exclusion counts/reason codes and the production bundle passes them to `decideWebSearchFallback`.
 - [x] [Review][Patch] Remove raw external content from provenance snapshots [src/features/retrieval/provenance.ts:160] — web provenance now persists only stable linkage and safe decision metadata.
 - [x] [Review][Patch] Treat missing provider scores as low-confidence external results [src/features/retrieval/web-search.ts:177] — unscored provider results are rejected as low quality.
+- [x] [Review][Patch] Trigger external fallback for selected uncertain or caveat-only knowledge [src/features/retrieval/source-bundle.ts:266] — added the safe `selected_knowledge_requires_verification` reason for selected caveat-only, uncertain, or verification-required cards; added schema/migration allowance and narrow-query regression coverage without exposing facts.
+- [x] [Review][Patch] Classify incomplete selected-model pricing as missing pricing [src/features/usage/events.ts:74] — pricing completeness now checks the selected model's effective prices independently of valid provider usage; incomplete pricing is persisted as `missing_pricing`.
 
 ## Dev Notes
 
@@ -82,11 +84,13 @@ gpu4ai/gpt-5.6-terra-review
 - Added deterministic Vietnamese verification guidance for failed or low-quality web fallback and explicit missing-pricing usage metadata.
 - Verified with `pnpm test:run` (684/684), `pnpm typecheck`, `pnpm lint` (3 pre-existing warnings only), and `pnpm build`.
 - 2026-07-23: Repaired review findings: production retrieval now propagates only safe exclusion aggregates into fallback decisions, web provenance snapshots retain only stable linkage and safe metadata, and unscored provider results fail as low quality. Verified with `pnpm test:run tests/web-search-adapter.test.ts tests/answer-context.test.ts` (88/88) and `pnpm typecheck`.
+- 2026-07-23: Repaired final permitted findings: selected caveat-only, uncertain, and verification-required knowledge now forces safe web fallback; incomplete selected-model pricing is classified as `missing_pricing`. Verified with `pnpm test:run tests/answer-context.test.ts tests/ai-usage-events.test.ts tests/web-search-adapter.test.ts` (96/96), `pnpm typecheck`, and `git diff --check`.
 
 ### File List
 
 - drizzle/migrations/0051_state_aware_search_provenance.sql
 - drizzle/migrations/0052_accept_legacy_web_trigger_rows.sql
+- drizzle/migrations/0053_selected_knowledge_verification_fallback.sql
 - drizzle/migrations/meta/_journal.json
 - src/db/schema.ts
 - src/features/ai/answer-freshness.ts
@@ -105,3 +109,5 @@ gpu4ai/gpt-5.6-terra-review
 
 - 2026-07-23: Implemented state-aware web fallback, persisted provenance/usage contract updates, migrations, and regression coverage; marked ready for review.
 - 2026-07-23: Fixed the three actionable Story 4.5 review findings; status synchronized to review.
+- 2026-07-23: Second repair review found two remaining actionable findings; status synchronized to in-progress.
+- 2026-07-23: Fixed the final permitted Story 4.5 findings; status synchronized to review.

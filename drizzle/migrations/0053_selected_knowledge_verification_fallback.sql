@@ -1,0 +1,3 @@
+ALTER TABLE "web_search_results" DROP CONSTRAINT "web_search_results_trigger_reason_check";
+--> statement-breakpoint
+ALTER TABLE "web_search_results" ADD CONSTRAINT "web_search_results_trigger_reason_check" CHECK ("web_search_results"."trigger_reason" in ('no_active_knowledge', 'insufficient_active_knowledge', 'freshness_sensitive_request', 'active_knowledge_may_be_stale', 'source_conflict', 'excluded_conflict_candidate', 'excluded_verification_required_candidate', 'selected_knowledge_requires_verification', 'active_knowledge_unavailable', 'no_approved_knowledge', 'insufficient_approved_knowledge', 'approved_knowledge_may_be_stale', 'approved_knowledge_unavailable'));

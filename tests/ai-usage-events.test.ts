@@ -237,4 +237,39 @@ describe("AI usage events", () => {
 
     expect(rows[0]).toMatchObject({ aiGatewayModelId: "model-unpriced", costStatus: "missing_pricing", estimatedTotalCostMicros: null });
   });
+
+  test("records incomplete selected-model pricing as missing pricing when provider token usage is valid", async () => {
+    const { db, rows } = createUsageDb();
+
+    await writeAiUsageEvent(db, {
+      userId: "user-1",
+      purpose: aiUsagePurposes.aiAskInitialAnswer,
+      provider: "ai_gateway",
+      model: "cx/incomplete-pricing",
+      aiGatewayModelId: "model-incomplete-pricing",
+      promptVersion: aiUsagePromptVersions.aiAskInitialAnswer,
+      status: "success",
+      latencyMs: 42,
+      promptTokens: 100,
+      completionTokens: 20,
+      pricingSnapshot: {
+        aiGatewayModelId: "model-incomplete-pricing",
+        pricingCurrency: "USD",
+        inputTokenPriceMicros: 1_000_000,
+        outputTokenPriceMicros: null,
+        cacheReadTokenPriceMicros: null,
+        cacheWriteTokenPriceMicros: null,
+        pricingUnitTokens: 1_000_000,
+        pricingVersion: "v1",
+        pricingEffectiveAt: new Date("2026-07-09T00:00:00.000Z"),
+      },
+    });
+
+    expect(rows[0]).toMatchObject({
+      promptTokens: 100,
+      completionTokens: 20,
+      estimatedTotalCostMicros: null,
+      costStatus: "missing_pricing",
+    });
+  });
 });

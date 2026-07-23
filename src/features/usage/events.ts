@@ -71,7 +71,7 @@ export async function writeAiUsageEvent(db: UsageEventDb, input: WriteAiUsageEve
     pricingUnitTokens: cost.pricingUnitTokens,
     pricingVersion: cost.pricingVersion,
     pricingEffectiveAt: cost.pricingEffectiveAt,
-    costStatus: cost.estimatedTotalCostMicros !== null ? "estimated" : input.pricingSnapshot ? "missing_usage" : "missing_pricing",
+    costStatus: cost.estimatedTotalCostMicros !== null ? "estimated" : hasCompleteEffectivePricing(input.pricingSnapshot, tokens) ? "missing_usage" : "missing_pricing",
     errorCode: input.errorCode ?? null,
   });
 
@@ -103,4 +103,17 @@ function normalizeCacheTokenMetadata(value: number | null | undefined, upperBoun
   }
 
   return upperBound === null || normalized <= upperBound ? normalized : null;
+}
+
+function hasCompleteEffectivePricing(pricing: AiGatewayPricingSnapshot | null | undefined, tokens: ReturnType<typeof normalizeUsageTokens>) {
+  if (!pricing || !pricing.pricingCurrency?.trim() || !isValidPrice(pricing.inputTokenPriceMicros) || !isValidPrice(pricing.outputTokenPriceMicros) || !Number.isSafeInteger(pricing.pricingUnitTokens) || pricing.pricingUnitTokens <= 0) {
+    return false;
+  }
+
+  return (tokens.cachedPromptTokens === null || isValidPrice(pricing.cacheReadTokenPriceMicros))
+    && (tokens.cacheWritePromptTokens === null || isValidPrice(pricing.cacheWriteTokenPriceMicros));
+}
+
+function isValidPrice(value: number | null) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
