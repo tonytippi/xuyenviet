@@ -47,23 +47,25 @@ type KnowledgeSearchCardSnapshot = Omit<KnowledgeSearchResult, "score" | "policy
 export async function projectClaimedKnowledgeIndexWork(input: { markerId: string; cardId: string; contentVersion: number; fencingToken: string; now?: Date }, db = getDb()) {
   return db.transaction(async (transaction) => {
     // Lock and validate the claim before any projection write, including a first insert.
-    const [claim] = await transaction.execute(sql`select id from knowledge_index_dirty_markers where id = ${input.markerId} and knowledge_card_id = ${input.cardId} and content_version = ${input.contentVersion} and status = 'claimed' and fencing_token = ${input.fencingToken} and lease_expires_at > now() for update`) as Array<{ id: string }>;
+    const [claim] = await transaction.execute(sql`select id from knowledge_index_dirty_markers where id = ${input.markerId} and knowledge_card_id = ${input.cardId} and content_version = ${input.contentVersion} and status = 'claimed' and fencing_token = ${input.fencingToken} and lease_expires_at > clock_timestamp() for update`) as Array<{ id: string }>;
     if (!claim) return { cardId: input.cardId, indexed: false as const, outcome: "lost_claim" as const };
-    const [version] = await transaction.select({ contentVersion: knowledgeCards.contentVersion }).from(knowledgeCards).where(eq(knowledgeCards.id, input.cardId)).limit(1).for("update");
+    const [version] = await transaction.select({ contentVersion: knowledgeCards.contentVersion }).from(knowledgeCards).where(eq(knowledgeCards.id, input.cardId)).limit(1);
     if (!version || version.contentVersion !== input.contentVersion) return { cardId: input.cardId, indexed: false as const, outcome: "superseded" as const };
     let eligibleCard = await loadEligibleApprovedCard(transaction, input.cardId);
     if (eligibleCard) {
       for (const source of eligibleCard.sources.sort((left, right) => left.id.localeCompare(right.id))) await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${source.id}, 44))`);
-      eligibleCard = await loadEligibleApprovedCard(transaction, input.cardId);
     }
-    const claimIsCurrent = sql`exists (select 1 from knowledge_index_dirty_markers marker where marker.id = ${input.markerId} and marker.knowledge_card_id = ${input.cardId} and marker.content_version = ${input.contentVersion} and marker.status = 'claimed' and marker.fencing_token = ${input.fencingToken} and marker.lease_expires_at > now())`;
+    const [lockedVersion] = await transaction.select({ contentVersion: knowledgeCards.contentVersion }).from(knowledgeCards).where(eq(knowledgeCards.id, input.cardId)).limit(1).for("update");
+    if (!lockedVersion || lockedVersion.contentVersion !== input.contentVersion) return { cardId: input.cardId, indexed: false as const, outcome: "superseded" as const };
+    eligibleCard = await loadEligibleApprovedCard(transaction, input.cardId);
+    const claimIsCurrent = sql`exists (select 1 from knowledge_index_dirty_markers marker where marker.id = ${input.markerId} and marker.knowledge_card_id = ${input.cardId} and marker.content_version = ${input.contentVersion} and marker.status = 'claimed' and marker.fencing_token = ${input.fencingToken} and marker.lease_expires_at > clock_timestamp())`;
     if (!eligibleCard) {
-      await transaction.execute(sql`update knowledge_card_search_documents document set status = 'disabled', disabled_at = now(), updated_at = now(), content_version = ${input.contentVersion}, accepted_fence = ${input.fencingToken} where document.knowledge_card_id = ${input.cardId} and document.content_version <= ${input.contentVersion} and ${claimIsCurrent}`);
+      await transaction.execute(sql`update knowledge_card_search_documents document set status = 'disabled', disabled_at = clock_timestamp(), updated_at = clock_timestamp(), content_version = ${input.contentVersion}, accepted_fence = ${input.fencingToken} where document.knowledge_card_id = ${input.cardId} and document.content_version <= ${input.contentVersion} and ${claimIsCurrent}`);
       return { cardId: input.cardId, indexed: false as const, outcome: "disabled" as const };
     }
     const searchableText = buildSearchableText(eligibleCard);
     const textHash = hashSearchableText(searchableText);
-    const [document] = await transaction.insert(knowledgeCardSearchDocuments).values({ knowledgeCardId: eligibleCard.id, contentVersion: input.contentVersion, acceptedFence: input.fencingToken, status: "active", searchableText, textHash, sourceCount: eligibleCard.sources.length, confidence: eligibleCard.confidence, freshnessSensitive: eligibleCard.freshnessSensitive, updatedAt: sql`now()`, disabledAt: null }).onConflictDoUpdate({ target: knowledgeCardSearchDocuments.knowledgeCardId, set: { contentVersion: input.contentVersion, acceptedFence: input.fencingToken, status: "active", searchableText, textHash, sourceCount: eligibleCard.sources.length, confidence: eligibleCard.confidence, freshnessSensitive: eligibleCard.freshnessSensitive, updatedAt: sql`now()`, disabledAt: null }, where: sql`${knowledgeCardSearchDocuments.contentVersion} <= ${input.contentVersion} and ${claimIsCurrent}` }).returning();
+    const [document] = await transaction.insert(knowledgeCardSearchDocuments).values({ knowledgeCardId: eligibleCard.id, contentVersion: input.contentVersion, acceptedFence: input.fencingToken, status: "active", searchableText, textHash, sourceCount: eligibleCard.sources.length, confidence: eligibleCard.confidence, freshnessSensitive: eligibleCard.freshnessSensitive, updatedAt: sql`clock_timestamp()`, disabledAt: null }).onConflictDoUpdate({ target: knowledgeCardSearchDocuments.knowledgeCardId, set: { contentVersion: input.contentVersion, acceptedFence: input.fencingToken, status: "active", searchableText, textHash, sourceCount: eligibleCard.sources.length, confidence: eligibleCard.confidence, freshnessSensitive: eligibleCard.freshnessSensitive, updatedAt: sql`clock_timestamp()`, disabledAt: null }, where: sql`${knowledgeCardSearchDocuments.contentVersion} <= ${input.contentVersion} and ${claimIsCurrent}` }).returning();
     return document ? { cardId: eligibleCard.id, indexed: true as const, outcome: "indexed" as const } : { cardId: input.cardId, indexed: false as const, outcome: "lost_claim" as const };
   });
 }

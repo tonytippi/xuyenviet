@@ -28,9 +28,9 @@ describe("versioned knowledge indexing work", () => {
     const first = await claimNextKnowledgeIndexWork({ workerId: "old-worker" }, testDb);
     expect(first?.fencingToken).toMatch(/^[a-f0-9]{64}$/);
     if (!first) throw new Error("Expected first claim");
-    const expiredAt = new Date(first.leaseExpiresAt.getTime() + 1);
-    await recoverExpiredKnowledgeIndexWork(testDb, expiredAt);
-    const second = await claimNextKnowledgeIndexWork({ workerId: "new-worker", now: expiredAt }, testDb);
+    await testDb.update(knowledgeIndexDirtyMarkers).set({ leaseExpiresAt: new Date(0) }).where(eq(knowledgeIndexDirtyMarkers.id, first.markerId));
+    await recoverExpiredKnowledgeIndexWork(testDb);
+    const second = await claimNextKnowledgeIndexWork({ workerId: "new-worker" }, testDb);
     expect(second?.fencingToken).toMatch(/^[a-f0-9]{64}$/);
     expect(second?.fencingToken).not.toBe(first.fencingToken);
     expect(await completeKnowledgeIndexWork(first, "indexed", testDb)).toBe(false);
@@ -42,7 +42,8 @@ describe("versioned knowledge indexing work", () => {
     await makeMarkerProjectable("stale-first-insert");
     const first = await claimNextKnowledgeIndexWork({ workerId: "old-worker" }, testDb);
     if (!first) throw new Error("Expected first claim");
-    await recoverExpiredKnowledgeIndexWork(testDb, new Date(first.leaseExpiresAt.getTime() + 1));
+    await testDb.update(knowledgeIndexDirtyMarkers).set({ leaseExpiresAt: new Date(0) }).where(eq(knowledgeIndexDirtyMarkers.id, first.markerId));
+    await recoverExpiredKnowledgeIndexWork(testDb);
     const second = await claimNextKnowledgeIndexWork({ workerId: "new-worker" }, testDb);
     if (!second) throw new Error("Expected reclaimed claim");
 

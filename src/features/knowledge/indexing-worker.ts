@@ -21,30 +21,29 @@ export type KnowledgeIndexingWorkerResult =
   | { status: "no_job"; indexedCount: 0; skippedCount: 0; cardIds: [] }
   | { status: "stopped" };
 
-export async function claimNextKnowledgeIndexWork(input: { workerId: string; now?: Date }, db: KnowledgeIndexingDb = getDb()): Promise<KnowledgeIndexingClaim | null> {
+export async function claimNextKnowledgeIndexWork(input: { workerId: string }, db: KnowledgeIndexingDb = getDb()): Promise<KnowledgeIndexingClaim | null> {
   const workerId = input.workerId.trim();
   if (!/^[a-zA-Z0-9_.:-]{1,160}$/.test(workerId)) throw new Error("Knowledge indexing worker ID is invalid.");
   const fencingToken = randomBytes(32).toString("hex");
   return db.transaction(async (tx) => {
-    // Selection, recovery, and the claim guard share PostgreSQL's transaction clock.
-    await recoverExpiredKnowledgeIndexWork(tx, input.now);
-    const rows = await tx.execute(sql`select id from knowledge_index_dirty_markers where status = 'pending' and next_run_at <= now() and attempt_count < max_attempts order by next_run_at asc, created_at asc for update skip locked limit 1`) as Array<{ id: string }>;
+    // PostgreSQL is the sole authority for recovery, selection, and lease expiry.
+    await recoverExpiredKnowledgeIndexWork(tx);
+    const rows = await tx.execute(sql`select id from knowledge_index_dirty_markers where status = 'pending' and next_run_at <= clock_timestamp() and attempt_count < max_attempts order by next_run_at asc, created_at asc for update skip locked limit 1`) as Array<{ id: string }>;
     if (!rows[0]) return null;
-    const [claimed] = await tx.update(knowledgeIndexDirtyMarkers).set({ status: "claimed", claimedBy: workerId, claimedAt: sql`now()`, leaseExpiresAt: sql`now() + ${getKnowledgeIndexLeaseMs()} * interval '1 millisecond'`, fencingToken, attemptCount: sql`${knowledgeIndexDirtyMarkers.attemptCount} + 1`, updatedAt: sql`now()`, failureCode: null, failureReason: null }).where(and(eq(knowledgeIndexDirtyMarkers.id, rows[0].id), eq(knowledgeIndexDirtyMarkers.status, "pending"), sql`${knowledgeIndexDirtyMarkers.nextRunAt} <= now()`)).returning();
+    const [claimed] = await tx.update(knowledgeIndexDirtyMarkers).set({ status: "claimed", claimedBy: workerId, claimedAt: sql`clock_timestamp()`, leaseExpiresAt: sql`clock_timestamp() + ${getKnowledgeIndexLeaseMs()} * interval '1 millisecond'`, fencingToken, attemptCount: sql`${knowledgeIndexDirtyMarkers.attemptCount} + 1`, updatedAt: sql`clock_timestamp()`, failureCode: null, failureReason: null }).where(and(eq(knowledgeIndexDirtyMarkers.id, rows[0].id), eq(knowledgeIndexDirtyMarkers.status, "pending"), sql`${knowledgeIndexDirtyMarkers.nextRunAt} <= clock_timestamp()`)).returning();
     return claimed ? { markerId: claimed.id, cardId: claimed.knowledgeCardId, contentVersion: claimed.contentVersion, fencingToken, leaseExpiresAt: claimed.leaseExpiresAt! } : null;
   });
 }
 
-export async function recoverExpiredKnowledgeIndexWork(db: Pick<KnowledgeIndexingDb, "update"> = getDb(), now?: Date) {
-  const clock = now ?? sql`now()`;
-  await db.update(knowledgeIndexDirtyMarkers).set({ status: sql`case when ${knowledgeIndexDirtyMarkers.attemptCount} >= ${knowledgeIndexDirtyMarkers.maxAttempts} then 'failed' else 'pending' end`, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, nextRunAt: sql`now()`, failureCode: sql`case when ${knowledgeIndexDirtyMarkers.attemptCount} >= ${knowledgeIndexDirtyMarkers.maxAttempts} then 'retry_exhausted' else null end`, failureReason: sql`case when ${knowledgeIndexDirtyMarkers.attemptCount} >= ${knowledgeIndexDirtyMarkers.maxAttempts} then 'Retry limit reached.' else null end`, updatedAt: sql`now()` }).where(and(eq(knowledgeIndexDirtyMarkers.status, "claimed"), lte(knowledgeIndexDirtyMarkers.leaseExpiresAt, clock)));
+export async function recoverExpiredKnowledgeIndexWork(db: Pick<KnowledgeIndexingDb, "update"> = getDb()) {
+  await db.update(knowledgeIndexDirtyMarkers).set({ status: sql`case when ${knowledgeIndexDirtyMarkers.attemptCount} >= ${knowledgeIndexDirtyMarkers.maxAttempts} then 'failed' else 'pending' end`, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, nextRunAt: sql`clock_timestamp()`, failureCode: sql`case when ${knowledgeIndexDirtyMarkers.attemptCount} >= ${knowledgeIndexDirtyMarkers.maxAttempts} then 'retry_exhausted' else null end`, failureReason: sql`case when ${knowledgeIndexDirtyMarkers.attemptCount} >= ${knowledgeIndexDirtyMarkers.maxAttempts} then 'Retry limit reached.' else null end`, updatedAt: sql`clock_timestamp()` }).where(and(eq(knowledgeIndexDirtyMarkers.status, "claimed"), lte(knowledgeIndexDirtyMarkers.leaseExpiresAt, sql`clock_timestamp()`)));
 }
 
-export async function processNextApprovedKnowledgeIndexingBatch(options: { batchSize?: number; now?: Date; workerId?: string } = {}, db: KnowledgeIndexingDb = getDb()): Promise<KnowledgeIndexingWorkerResult> {
+export async function processNextApprovedKnowledgeIndexingBatch(options: { batchSize?: number; workerId?: string } = {}, db: KnowledgeIndexingDb = getDb()): Promise<KnowledgeIndexingWorkerResult> {
   const workerId = options.workerId ?? `knowledge-indexer-${process.pid}`;
   const claims: KnowledgeIndexingClaim[] = [];
   for (let index = 0; index < normalizeBatchSize(options.batchSize); index += 1) {
-    const claim = await claimNextKnowledgeIndexWork({ workerId, now: options.now }, db);
+    const claim = await claimNextKnowledgeIndexWork({ workerId }, db);
     if (!claim) break;
     claims.push(claim);
   }
@@ -67,12 +66,12 @@ export async function processNextApprovedKnowledgeIndexingBatch(options: { batch
 
 export async function completeKnowledgeIndexWork(claim: KnowledgeIndexingClaim, outcome: "indexed" | "disabled" | "superseded" | "lost_claim", db: Pick<KnowledgeIndexingDb, "update"> = getDb()) {
   const status = outcome === "superseded" ? "superseded" : "completed";
-  const [completed] = await db.update(knowledgeIndexDirtyMarkers).set({ status, completedAt: sql`now()`, completionReason: outcome, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, updatedAt: sql`now()` }).where(and(eq(knowledgeIndexDirtyMarkers.id, claim.markerId), eq(knowledgeIndexDirtyMarkers.knowledgeCardId, claim.cardId), eq(knowledgeIndexDirtyMarkers.contentVersion, claim.contentVersion), eq(knowledgeIndexDirtyMarkers.status, "claimed"), eq(knowledgeIndexDirtyMarkers.fencingToken, claim.fencingToken), sql`${knowledgeIndexDirtyMarkers.leaseExpiresAt} > now()`)).returning({ id: knowledgeIndexDirtyMarkers.id });
+  const [completed] = await db.update(knowledgeIndexDirtyMarkers).set({ status, completedAt: sql`clock_timestamp()`, completionReason: outcome, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, updatedAt: sql`clock_timestamp()` }).where(and(eq(knowledgeIndexDirtyMarkers.id, claim.markerId), eq(knowledgeIndexDirtyMarkers.knowledgeCardId, claim.cardId), eq(knowledgeIndexDirtyMarkers.contentVersion, claim.contentVersion), eq(knowledgeIndexDirtyMarkers.status, "claimed"), eq(knowledgeIndexDirtyMarkers.fencingToken, claim.fencingToken), sql`${knowledgeIndexDirtyMarkers.leaseExpiresAt} > clock_timestamp()`)).returning({ id: knowledgeIndexDirtyMarkers.id });
   return Boolean(completed);
 }
 
 export async function retryKnowledgeIndexWork(claim: KnowledgeIndexingClaim, failureCode: string, db: Pick<KnowledgeIndexingDb, "update"> = getDb()) {
-  const [retried] = await db.update(knowledgeIndexDirtyMarkers).set({ status: sql`case when ${knowledgeIndexDirtyMarkers.attemptCount} >= ${knowledgeIndexDirtyMarkers.maxAttempts} then 'failed' else 'pending' end`, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, nextRunAt: sql`now() + interval '4 minutes'`, failureCode, failureReason: "Projection worker failed; retry is scheduled.", updatedAt: sql`now()` }).where(and(eq(knowledgeIndexDirtyMarkers.id, claim.markerId), eq(knowledgeIndexDirtyMarkers.status, "claimed"), eq(knowledgeIndexDirtyMarkers.fencingToken, claim.fencingToken), sql`${knowledgeIndexDirtyMarkers.leaseExpiresAt} > now()`)).returning({ id: knowledgeIndexDirtyMarkers.id });
+  const [retried] = await db.update(knowledgeIndexDirtyMarkers).set({ status: sql`case when ${knowledgeIndexDirtyMarkers.attemptCount} >= ${knowledgeIndexDirtyMarkers.maxAttempts} then 'failed' else 'pending' end`, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, nextRunAt: sql`clock_timestamp() + interval '4 minutes'`, failureCode, failureReason: "Projection worker failed; retry is scheduled.", updatedAt: sql`clock_timestamp()` }).where(and(eq(knowledgeIndexDirtyMarkers.id, claim.markerId), eq(knowledgeIndexDirtyMarkers.status, "claimed"), eq(knowledgeIndexDirtyMarkers.fencingToken, claim.fencingToken), sql`${knowledgeIndexDirtyMarkers.leaseExpiresAt} > clock_timestamp()`)).returning({ id: knowledgeIndexDirtyMarkers.id });
   return Boolean(retried);
 }
 

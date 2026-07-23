@@ -37,11 +37,12 @@ export async function approveKnowledgeDraftBatchForActorInTransaction(transactio
 }
 
 async function approveKnowledgeDraftForActorInTransaction(transaction: ReviewMutationDb, actor: AuthenticatedSession, draftId: string) {
-  const draft = await loadReviewableDraft(transaction, draftId);
-  await transaction.select({ id: knowledgeCards.id }).from(knowledgeCards).where(eq(knowledgeCards.id, draftId)).limit(1).for("update");
-  for (const source of draft.sources.sort((left, right) => left.id.localeCompare(right.id))) {
+  const sourceSnapshot = await loadReviewableDraft(transaction, draftId);
+  for (const source of sourceSnapshot.sources.sort((left, right) => left.id.localeCompare(right.id))) {
     await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${source.id}, 44))`);
   }
+  await transaction.select({ id: knowledgeCards.id }).from(knowledgeCards).where(eq(knowledgeCards.id, draftId)).limit(1).for("update");
+  const draft = await loadReviewableDraft(transaction, draftId);
   await assertEligibleDraftSources(transaction, draft.sources.map((source) => source.id));
   assertApprovalReady(draft.card);
   const rawLeakCorpus = await loadRawLeakCorpusForSources(transaction, draft.sources.map((source) => source.id));

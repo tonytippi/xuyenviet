@@ -25,6 +25,12 @@ export async function removeKnowledgeSource(
   }
 
   return db.transaction(async (tx) => {
+    // Ingestion holds source before card locks; serialize with it before reading affected cards.
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${sourceId}, 44))`);
+    const [source] = await tx.select({ id: sources.id, eligibility: sources.eligibility }).from(sources).where(eq(sources.id, sourceId)).limit(1).for("update");
+    if (!source) throw new SourceRemovalError("Source does not exist.");
+    if (source.eligibility === "withdrawn") return { status: "already_completed" as const, sourceId, changedCardIds: [] };
+
     const evidence = await tx.select({ knowledgeCardId: knowledgeCardEvidence.knowledgeCardId }).from(knowledgeCardEvidence).where(and(eq(knowledgeCardEvidence.sourceId, sourceId), eq(knowledgeCardEvidence.state, "active"))).orderBy(knowledgeCardEvidence.knowledgeCardId);
     const links = await tx.select({ knowledgeCardId: knowledgeCardSources.knowledgeCardId }).from(knowledgeCardSources).where(eq(knowledgeCardSources.sourceId, sourceId)).orderBy(knowledgeCardSources.knowledgeCardId);
     const cardIds = [...new Set([...evidence.map((item) => item.knowledgeCardId), ...links.map((item) => item.knowledgeCardId)])].sort();
@@ -32,12 +38,6 @@ export async function removeKnowledgeSource(
       await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${cardId}, 46))`);
       await tx.select({ id: knowledgeCards.id }).from(knowledgeCards).where(eq(knowledgeCards.id, cardId)).limit(1).for("update");
     }
-    // Projection paths acquire card locks before source locks; removal follows it.
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${sourceId}, 44))`);
-    const [source] = await tx.select({ id: sources.id, eligibility: sources.eligibility }).from(sources).where(eq(sources.id, sourceId)).limit(1).for("update");
-    if (!source) throw new SourceRemovalError("Source does not exist.");
-    if (source.eligibility === "withdrawn") return { status: "already_completed" as const, sourceId, changedCardIds: [] };
-
     const now = new Date();
     for (const cardId of cardIds) {
       await tx.select({ id: knowledgeRecommendations.id }).from(knowledgeRecommendations).where(and(eq(knowledgeRecommendations.knowledgeCardId, cardId), inArray(knowledgeRecommendations.status, ["open", "in_review"]))).orderBy(knowledgeRecommendations.id).for("update");
