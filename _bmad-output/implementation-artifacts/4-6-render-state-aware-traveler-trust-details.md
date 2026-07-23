@@ -35,6 +35,8 @@ so that I can decide what to verify before acting.
 
 ### Review Findings
 
+- [x] [Review][Patch] Fail closed for all Facebook-derived legacy evidence [src/features/retrieval/provenance.ts:398] — normalized `sourceType` before comparison and reject traveler-visible evidence with a non-empty URL that cannot be parsed safely. Case variants and malformed Facebook URLs cannot expose their raw quote, satisfying AC 3.
+- [x] [Review][Patch] Render `do_not_use` as an action-blocking trust state [src/features/ai/ai-ask-composer.tsx:1793] — persisted `usePolicy: "do_not_use"` is terminal in source cards and detail descriptors, with an explicit no-action warning instead of a verified label, satisfying AC 1 and AC 2.
 - [x] [Review][Patch] Normalize trailing-dot Facebook hosts before trust-detail filtering [src/features/retrieval/provenance.ts:354] — `facebook.com.`, `fb.me.`, and `fb.watch.` do not match the current host checks. A legacy `traveler_visible` evidence snapshot can therefore expose a Facebook quote and link, violating AC 3's raw Facebook exclusion.
 - [x] [Review][Patch] Preserve historical provenance state vocabulary [src/features/retrieval/provenance.ts:359] — persisted answers created with the earlier `verified_fact` and `verified` snapshot vocabulary now format both values as `null`. This discards historical state/verification context instead of rendering the stored snapshot, violating AC 1 and AC 2.
 - [x] [Review][Patch] Render terminal provenance states as warnings [src/features/ai/ai-ask-composer.tsx:1796] — snapshots with `verificationState: "failed"` or `knowledgeState: "conflicted"`/`"superseded"` can still show `đã xác minh` from their row-level status and have no warning label. A traveler can be misled by historical trust details, violating AC 1.
@@ -81,6 +83,8 @@ gpu4ai/gpt-5.6-terra-review
 - Repair verification passed: `pnpm vitest run tests/answer-context.test.ts tests/ai-ask-shell.test.ts` (160 tests), `pnpm typecheck`, and `pnpm lint` (3 pre-existing warnings in `tests/knowledge-search.test.ts`).
 - 2026-07-23 second-review repair: trailing-dot Facebook host aliases are rejected; historical `verified_fact` and `verified` snapshots preserve their current semantic states; failed, conflicted, and superseded snapshots render explicit action-blocking warnings rather than verified source labels.
 - Second-review repair verification passed: `pnpm vitest run tests/answer-context.test.ts tests/ai-ask-shell.test.ts` (161 tests), `pnpm typecheck`, `pnpm lint` (3 pre-existing warnings in `tests/knowledge-search.test.ts`), and `git diff --check`.
+- 2026-07-23 final-review repair: traveler evidence now fails closed for case-variant Facebook source types and malformed non-empty URLs; persisted `do_not_use` policy renders as an action-blocking warning in cards and detail descriptors.
+- Final-review repair verification passed: `pnpm vitest run tests/answer-context.test.ts tests/ai-ask-shell.test.ts` (161 tests) and `pnpm typecheck`.
 
 ### File List
 
@@ -97,3 +101,4 @@ gpu4ai/gpt-5.6-terra-review
 - 2026-07-23: Repaired persisted evidence policy/state rendering and legacy traveler-evidence privacy filtering.
 - 2026-07-23: Second bounded review found three unresolved action items; story returned to in-progress.
 - 2026-07-23: Resolved the second-review findings and returned the story to review.
+- 2026-07-23: Resolved final-review findings and returned the story to review.

@@ -65,7 +65,7 @@ development_status:
   4-4-enforce-community-conditional-and-conflict-answer-policy: done
   # Synchronized 2026-07-23 after verification of final repair commit 05060b32338eec88918e4a05a05c91df97657749.
   4-5-update-search-fallback-and-provenance-for-ai-first-states: done
-  # Synchronized 2026-07-23 after second-review repair verification.
+  # Synchronized 2026-07-23 after final-review privacy and trust-state repair verification.
   4-6-render-state-aware-traveler-trust-details: review
   4-7-verify-ai-first-retrieval-and-answer-safety: ready-for-dev
   epic-4-retrospective: optional

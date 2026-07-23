@@ -1517,6 +1517,8 @@ describe("answer context assembly", () => {
           { sourceLabel: "Facebook đuôi chấm", sourceType: "community", displayPolicy: "traveler_visible", url: "https://facebook.com./private", quote: "Không hiển thị" },
           { sourceLabel: "FB rút gọn đuôi chấm", sourceType: "community", displayPolicy: "traveler_visible", url: "https://fb.me./private", quote: "Không hiển thị" },
           { sourceLabel: "Facebook video đuôi chấm", sourceType: "community", displayPolicy: "traveler_visible", url: "https://fb.watch./private", quote: "Không hiển thị" },
+          { sourceLabel: "Nguồn biến thể", sourceType: "FACEBOOK", displayPolicy: "traveler_visible", url: "https://example.com/private", quote: "Không hiển thị từ Facebook" },
+          { sourceLabel: "Nguồn URL lỗi", sourceType: "curated", displayPolicy: "traveler_visible", url: "https://facebook.com:bad/private", quote: "Không hiển thị từ URL lỗi" },
         ],
       },
     }]);
@@ -1529,6 +1531,8 @@ describe("answer context assembly", () => {
     expect(JSON.stringify(item)).not.toContain("0901234567");
     expect(JSON.stringify(historicalItem)).not.toContain("facebook.com.");
     expect(JSON.stringify(historicalItem)).not.toContain("fb.watch.");
+    expect(JSON.stringify(historicalItem)).not.toContain("Không hiển thị từ Facebook");
+    expect(JSON.stringify(historicalItem)).not.toContain("Không hiển thị từ URL lỗi");
   });
 
   test("source bundle priority contract names active state-aware knowledge", async () => {

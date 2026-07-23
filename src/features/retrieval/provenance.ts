@@ -395,7 +395,7 @@ function getTravelerEvidence(value: unknown): AssistantMessageProvenanceItem["ev
     const rawUrl = getOptionalString(item.url);
     const quote = getOptionalString(item.quote);
 
-    if (!sourceLabel || sourceType === "facebook" || isFacebookSource(sourceLabel, rawUrl) || !isTravelerSafeEvidenceText(quote ?? "")) {
+    if (!sourceLabel || sourceType?.toLowerCase() === "facebook" || isFacebookSource(sourceLabel, rawUrl) || (rawUrl && !getSafeTravelerUrl(rawUrl)) || !isTravelerSafeEvidenceText(quote ?? "")) {
       return [];
     }
 

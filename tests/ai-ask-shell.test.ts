@@ -471,6 +471,10 @@ describe("AI Ask authenticated shell", () => {
         userId: "user-1", conversationId: conversation.id, userMessageId: userMessage.id, assistantMessageId: assistantMessage.id, sourceCategory: "knowledge", rank: 3, sourceType: "curated", verificationStatus: "verified", usedInPrompt: true, citedInAnswer: false,
         sourceSnapshot: { title: "Nguồn đã thay thế", knowledgeState: "superseded" },
       },
+      {
+        userId: "user-1", conversationId: conversation.id, userMessageId: userMessage.id, assistantMessageId: assistantMessage.id, sourceCategory: "knowledge", rank: 4, sourceType: "curated", verificationStatus: "verified", usedInPrompt: true, citedInAnswer: false,
+        sourceSnapshot: { title: "Nguồn cấm sử dụng", usePolicy: "do_not_use" },
+      },
     ]);
 
     const html = await renderAuthenticatedAiAskShell({ conversationId: conversation.id });
@@ -479,7 +483,9 @@ describe("AI Ask authenticated shell", () => {
     expect(html).toContain("Xem chi tiết cảnh báo: Nguồn xác minh thất bại");
     expect(html).toContain("Xem chi tiết cảnh báo: Nguồn mâu thuẫn");
     expect(html).toContain("Xem chi tiết cảnh báo: Nguồn đã thay thế");
+    expect(html).toContain("Xem chi tiết cảnh báo: Nguồn cấm sử dụng");
     expect(html).not.toContain("Xem chi tiết nguồn: Nguồn xác minh thất bại");
+    expect(html).not.toContain("Xem chi tiết nguồn: Nguồn cấm sử dụng");
   });
 
   test("renders backend annotations as inline accessible highlights while preserving section cards", async () => {
