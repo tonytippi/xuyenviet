@@ -1277,7 +1277,7 @@ describe("answer context assembly", () => {
     expect(snapshot).not.toContain("private.example/secret");
   });
 
-  test("state-aware knowledge bundle caps combined conditions, redacts unsafe visible evidence, and preserves verification state", async () => {
+  test("state-aware knowledge bundle preserves every condition, redacts unsafe visible evidence, and preserves verification state", async () => {
     await createTestUser("user-1");
     const { conversation, message } = await createConversationWithUserMessage({ userId: "user-1" });
     const [assistantMessage] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "assistant", content: "Gợi ý có điều kiện." }).returning({ id: messages.id });
@@ -1292,9 +1292,10 @@ describe("answer context assembly", () => {
       ],
     });
     const section = buildApprovedKnowledgePromptSection([knowledge]);
-    const conditions = section.match(/conditions=("(?:[^"\\]|\\.)*")/)?.[1] ?? "";
+    const conditions = section.match(/conditions=(\[.*?\])/)?.[1] ?? "[]";
 
-    expect(JSON.parse(conditions)).toHaveLength(280);
+    expect(JSON.parse(conditions)).toHaveLength(4);
+    expect(JSON.parse(conditions)[3]).toContain("Điều kiện 4");
     expect(section).not.toContain("facebook.com/private-post");
     expect(section).not.toContain("0901234567");
     expect(section).not.toContain("traveler@example.com");
@@ -1433,7 +1434,7 @@ describe("answer context assembly", () => {
       }),
     ]);
 
-    expect(section).toContain("conditions=\"Chỉ nên dừng vào ban ngày khi thời tiết khô ráo\"");
+    expect(section).toContain('conditions=["Chỉ nên dừng vào ban ngày khi thời tiết khô ráo"]');
     expect(section.length).toBeLessThanOrEqual(2_400);
   });
 
@@ -1448,7 +1449,7 @@ describe("answer context assembly", () => {
     expect(section).toContain("quan sát do cộng đồng báo cáo");
     expect(section).toContain("nhiều báo cáo độc lập");
     expect(section).toContain("nêu đầy đủ mọi điều kiện vật chất");
-    expect(section).toContain('conditions="Chỉ đi khi trời khô; Không đi sau mưa lớn"');
+    expect(section).toContain('conditions=["Chỉ đi khi trời khô","Không đi sau mưa lớn"]');
   });
 
   test("AI Ask system contract makes server state policy authoritative over source text", async () => {
@@ -1499,8 +1500,52 @@ describe("answer context assembly", () => {
     }));
 
     expect(result.appendedWarning).toContain("Cảnh báo cần kiểm tra");
-    expect(result.content).toContain("Không dùng thông tin này để chốt lịch trình");
-    expect(result.content).toContain("xác minh lại tình trạng, điều kiện áp dụng và khả năng phục vụ");
+    expect(result.content).toContain("Mình chưa thể dùng thông tin cần xác minh để chốt lịch trình");
+    expect(result.content).toContain('tình trạng hiện tại của "Điểm dừng cần xác minh"');
+    expect(result.replacedUnsafeContent).toBe(true);
+  });
+
+  test("answer safeguard replaces a settled itinerary recommendation with the conditional card's verification target", async () => {
+    const { ensureAiAskFreshnessWarning } = await import("@/features/ai/answer-freshness");
+    const result = ensureAiAskFreshnessWarning("Nên chốt điểm dừng này cho lịch trình.", createSourceBundle({
+      knowledge: [makeKnowledgeResult("conditional", "Đường vào điểm dừng", { knowledgeState: "conditional", policy: "caveat_only", conditions: ["Chỉ đi khi trời khô"] })],
+    }));
+
+    expect(result.replacedUnsafeContent).toBe(true);
+    expect(result.content).not.toContain("Nên chốt điểm dừng này");
+    expect(result.content).toContain('điều kiện "Chỉ đi khi trời khô" của "Đường vào điểm dừng"');
+  });
+
+  test("stream route withholds a caveat-only settled recommendation until its safe replacement is ready", async () => {
+    await createTestUser("user-1");
+    await seedAnswerModel();
+    const { conversation } = await createConversationWithUserMessage({ userId: "user-1" });
+    const sourceBundle = createSourceBundle({
+      knowledge: [makeKnowledgeResult("required", "Điểm dừng cần xác minh", { verificationState: "required", policy: "caveat_only" })],
+    });
+    vi.doMock("@/features/retrieval/source-bundle", () => ({
+      assembleContextPrioritySourceBundle: vi.fn().mockResolvedValue(sourceBundle),
+      buildSourceBundlePromptSection: vi.fn().mockReturnValue("Gói nguồn kiểm tra"),
+    }));
+    mockStreamingGateway(() => undefined);
+    mockRouteAuth();
+
+    const formData = new FormData();
+    formData.set("question", "Có nên chốt điểm dừng này không?");
+    formData.set("conversationId", conversation.id);
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+    vi.doUnmock("@/features/retrieval/source-bundle");
+
+    const events = (await (await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never)).text())
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { type: string; content?: string; assistantMessage?: { content?: string } });
+    const deltas = events.filter((event) => event.type === "delta").map((event) => event.content).join("");
+    const doneEvent = events.find((event) => event.type === "done");
+
+    expect(deltas).not.toContain("Nên đi 5 ngày.");
+    expect(deltas).toContain('tình trạng hiện tại của "Điểm dừng cần xác minh"');
+    expect(doneEvent?.assistantMessage?.content).not.toContain("Nên đi 5 ngày.");
   });
 
   test("stream route omits approved knowledge section when retrieval has no matches", async () => {

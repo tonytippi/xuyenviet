@@ -5,6 +5,7 @@ import { searchApprovedKnowledgeWithCandidateCount, type KnowledgeSearchEvidence
 const activeKnowledgeResultLimit = 3;
 const maxKnowledgeSectionLength = 2_400;
 const maxFieldLength = 280;
+const maxConditionLength = 160;
 const maxEvidencePerCard = 3;
 const maxVisibleQuoteLength = 280;
 const practicalDetailKeys = ["tips", "warnings", "cost_notes", "parking_notes", "kid_notes", "ordered_stops"] as const;
@@ -33,7 +34,9 @@ export async function loadApprovedKnowledgeForAiAsk(question: string) {
 }
 
 export function toStateAwareKnowledgeBundleItem(result: KnowledgeSearchResult): StateAwareKnowledgeBundleItem {
-  const conditions = clip(result.conditions.map((condition) => clip(condition)).filter(Boolean).join("; "));
+  // Conditions are independently validated at ingestion. Keep each valid condition
+  // intact so a later condition cannot be silently lost in a combined field cap.
+  const conditions = result.conditions.map((condition) => clip(condition, maxConditionLength)).filter(Boolean);
 
   return {
     cardId: result.id,
@@ -43,7 +46,7 @@ export function toStateAwareKnowledgeBundleItem(result: KnowledgeSearchResult): 
     type: clip(result.type),
     locationName: result.locationName ? clip(result.locationName) : null,
     routeSegment: result.routeSegment ? clip(result.routeSegment) : null,
-    conditions: conditions ? [conditions] : [],
+    conditions,
     confidence: clip(result.confidence),
     freshnessSensitive: result.freshnessSensitive,
     knowledgeState: result.knowledgeState,
@@ -101,7 +104,7 @@ function formatKnowledgeItem(index: number, item: StateAwareKnowledgeBundleItem)
   lines.push(`policyInstruction=${formatPromptValue(getPolicyInstruction(item))}`);
   const location = [item.locationName ? `location=${formatPromptValue(item.locationName)}` : null, item.routeSegment ? `route=${formatPromptValue(item.routeSegment)}` : null].filter(Boolean).join("; ");
   if (location) lines.push(location);
-  if (item.conditions.length > 0) lines.push(`conditions=${formatPromptValue(item.conditions.join("; "))}`);
+  if (item.conditions.length > 0) lines.push(`conditions=${JSON.stringify(item.conditions)}`);
   const practicalDetails = formatPracticalDetails(item.practicalDetails);
   if (practicalDetails) lines.push(`practicalDetails=${practicalDetails}`);
   for (const evidence of item.evidence) lines.push(formatEvidence(evidence));

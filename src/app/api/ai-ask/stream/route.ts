@@ -204,6 +204,7 @@ async function streamAnswer({
     const contextSection = buildSourceBundlePromptSection(sourceBundle);
     const gatewayMessages = buildAiAskMessages({ question, history: saved.history, contextSection });
     const finalGatewayMessages = imageDataUrl ? attachImageToFinalUserMessage(gatewayMessages, imageDataUrl) : gatewayMessages;
+    const caveatOnlyKnowledgeSelected = sourceBundle.knowledge.some((item) => item.policy === "caveat_only" || item.knowledgeState === "uncertain" || item.verificationState === "required");
     const extractionInput = saved;
     after(() => extractChatTripContext({
       session,
@@ -223,7 +224,8 @@ async function streamAnswer({
       messages: finalGatewayMessages,
       abortSignal,
       onDelta: (content) => {
-        sendEvent(controller, encoder, { type: "delta", content });
+        // A caveat-only answer must pass the settled-decision guard before any text reaches the traveler.
+        if (!caveatOnlyKnowledgeSelected) sendEvent(controller, encoder, { type: "delta", content });
       },
     });
 
@@ -281,7 +283,9 @@ async function streamAnswer({
 
     const savedTurn = saved;
     const assistantContent = ensureAiAskFreshnessWarning(gatewayResult.content, sourceBundle);
-    if (assistantContent.appendedWarning) {
+    if (caveatOnlyKnowledgeSelected) {
+      sendEvent(controller, encoder, { type: "delta", content: assistantContent.content });
+    } else if (assistantContent.appendedWarning) {
       sendEvent(controller, encoder, { type: "delta", content: assistantContent.appendedWarning });
     }
     let completed: { id: string; content: string; provenance: AssistantMessageProvenanceItem[]; annotations: AnswerAnnotation[] } | null = null;
