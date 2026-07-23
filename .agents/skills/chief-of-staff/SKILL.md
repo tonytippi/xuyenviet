@@ -284,9 +284,10 @@ the review outcome and every finding with severity in SUMMARY.
 ```
 
 If the review is approved, re-read sprint status and require the target to be
-`done`. Keep the approved review pane only as the newest rolling audit pane;
-the next pane creation will evict the oldest pane if needed. Restart the
-coordinator loop in a new pane.
+`done`, then run the Status Commit stage. Keep the approved review pane only as
+the newest rolling audit pane; the next pane creation will evict the oldest pane
+if needed. Restart the coordinator loop in a new pane only after the status
+commit leaves a clean worktree.
 
 If the first review contains actionable findings, do not advance. Create a new
 fresh development pane and prompt it:
@@ -313,16 +314,18 @@ SUMMARY.
 If the second review does not expose substantial new risk, create one final
 fresh development pane and give it the same repair prompt. Require it to
 synchronize the story to `review`, then run the Commit stage and Status
-Finalization stage. Do not run a third story review.
+Finalization stage, followed by the Status Commit stage. Do not run a third
+story review.
 
 If the second review exposes substantial new risk, create a fresh development
 pane using the same repair prompt, require it to synchronize the story to
 `review`, and run the Commit stage. Then run one third and final Story Review
 using the normal review prompt. If that final review is approved, synchronize
-the story to `done` as usual. If it has actionable findings, create one final
-fresh development pane using the same repair prompt, run the Commit stage, and
-then run Status Finalization. Do not run a fourth story review. A blocked
-final-fix, commit, review, or status-only worker remains a stop condition.
+the story to `done` as usual and run the Status Commit stage. If it has
+actionable findings, create one final fresh development pane using the same
+repair prompt, run the Commit stage, then run Status Finalization and the Status
+Commit stage. Do not run a fourth story review. A blocked final-fix, commit,
+review, status-only, or status-commit worker remains a stop condition.
 
 ### 6. Status Finalization
 
@@ -355,6 +358,33 @@ status in SUMMARY.
 Continue only when the report is successful and both the story record and
 `sprint-status.yaml` independently show `done`.
 
+### 7. Status Commit
+
+Every transition of a story to `done` changes the story record and
+`sprint-status.yaml`. This stage commits those administrative artifacts before
+the coordinator may select another story or epic action. It runs after an
+approved Story Review and after Status Finalization; it does not run while the
+story remains `review` or `in-progress`.
+
+Create a fresh pane and prompt:
+
+```text
+Act as the status commit gate for completed story <story-key>. Inspect git
+status and verify that the only tracked changes are this story's record and
+sprint-status.yaml transition to done. Do not edit implementation code, run a
+review, alter acceptance decisions, or include unrelated changes. Create one
+conventional documentation/status commit for those changes. Never amend, force,
+reset, stash, discard, or include unrelated changes. If the tree is already
+clean, verify that this story's done transition is already committed and report
+the exact commit; otherwise stop as blocked. Require the story record and
+sprint-status.yaml to remain done, then end with the required machine-checkable
+report including the commit SHA and files committed in SUMMARY.
+```
+
+Require a clean `git status --short`, a non-empty status commit SHA, and both
+the story record and `sprint-status.yaml` independently showing `done` before
+the coordinator continues.
+
 ## Epic Completion Review
 
 After every completed story, inspect its epic. When every story whose key begins
@@ -379,14 +409,14 @@ If the first epic review has actionable findings, create a fresh development
 pane for each affected story in numeric order. Prompt it to use `bmad-agent-dev`
 to fix only the assigned epic-review findings, run relevant tests, update the
 story record, and leave the story in `review` without committing. Run the Commit
-stage and Status Finalization stage for each repaired story. Once every affected
-story is again `done`, repeat the epic review once.
+stage, Status Finalization stage, and Status Commit stage for each repaired
+story. Once every affected story is again `done`, repeat the epic review once.
 
 If the second epic review still has actionable findings, repeat that repair,
-commit, and status finalization sequence for its affected stories, then preserve
-the epic and all stories as `done`. Do not run a third epic review. Any blocked
-worker, failed verification, or incomplete status finalization remains a stop
-condition.
+commit, status finalization, and status commit sequence for its affected stories,
+then preserve the epic and all stories as `done`. Do not run a third epic review.
+Any blocked worker, failed verification, incomplete status finalization, or
+status commit remains a stop condition.
 
 ## Completion
 
