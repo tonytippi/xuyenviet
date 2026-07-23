@@ -43,7 +43,7 @@ development_status:
   epic-2: done
   epic-2-retrospective: done
 
-  epic-3: in-progress
+  epic-3: done
   3-1-add-the-ai-first-knowledge-card-state-model: done
   3-2-create-immutable-source-capture-versions-and-retention-boundaries: done
   3-3-backfill-bounded-evidence-and-verify-legacy-retrieval-safety: done
@@ -54,7 +54,7 @@ development_status:
   3-8-relate-evidence-preserve-conditions-and-handle-conflicts: superseded-by-3-5
   3-9-operate-the-ai-recommended-review-and-sampling-queue: done
   3-10-propagate-source-removal-and-state-changes-to-search-eligibility: done
-  3-11-report-active-evidence-grounded-seed-coverage: backlog
+  3-11-report-active-evidence-grounded-seed-coverage: done
   epic-3-retrospective: optional
 
   epic-4: backlog
