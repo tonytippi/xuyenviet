@@ -1,6 +1,10 @@
+---
+baseline_commit: 404fd804088b23368517eb6ccc84ee5d90e7fd44
+---
+
 # Story 4.7: Verify AI-First Retrieval and Answer Safety
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -16,19 +20,19 @@ so that publication automation does not introduce silent traveler-safety regress
 
 ## Tasks / Subtasks
 
-- [ ] Build a consolidated policy fixture matrix and retrieval/source-bundle assertions (AC: 1)
-  - [ ] Reuse existing Knowledge fixture builders and state/source-removal suites; do not create a fake in-memory eligibility path.
-  - [ ] Assert exact `contextual_use`, `caveat_only`, and `exclude` outcomes and raw/privacy absence in search, bundle, snapshots, and traveler DTOs.
-- [ ] Add answer and web-fallback contract tests (AC: 2)
-  - [ ] Exercise server prompt/bundle instructions and deterministic warning guards for community, pattern, conditions, required verification, conflict, failure, and low-confidence web outcomes.
-  - [ ] Assert persisted retrieval decision/provenance includes the selected state-policy snapshot and stable web identifiers.
-- [ ] Verify versioned worker concurrency and operational safety (AC: 3)
-  - [ ] Simulate claimed stale/outdated dirty work after source withdrawal, suppression, and a newer card version.
-  - [ ] Assert it cannot reactivate a projection and that retry/failure records remain safe and bounded.
-  - [ ] Document the required DB-backed test sequencing where focused suites share migration/reset state.
-- [ ] Run the focused Epic 4 regression set and baseline checks (AC: 1-3)
-  - [ ] Run relevant sequential DB-backed tests, then `pnpm lint`, `pnpm typecheck`, and `pnpm build`.
-  - [ ] Record exact commands and blockers in the completion notes if environment services prevent verification.
+- [x] Build a consolidated policy fixture matrix and retrieval/source-bundle assertions (AC: 1)
+  - [x] Reuse existing Knowledge fixture builders and state/source-removal suites; do not create a fake in-memory eligibility path.
+  - [x] Assert exact `contextual_use`, `caveat_only`, and `exclude` outcomes and raw/privacy absence in search, bundle, snapshots, and traveler DTOs.
+- [x] Add answer and web-fallback contract tests (AC: 2)
+  - [x] Exercise server prompt/bundle instructions and deterministic warning guards for community, pattern, conditions, required verification, conflict, failure, and low-confidence web outcomes.
+  - [x] Assert persisted retrieval decision/provenance includes the selected state-policy snapshot and stable web identifiers.
+- [x] Verify versioned worker concurrency and operational safety (AC: 3)
+  - [x] Simulate claimed stale/outdated dirty work after source withdrawal, suppression, and a newer card version.
+  - [x] Assert it cannot reactivate a projection and that retry/failure records remain safe and bounded.
+  - [x] Document the required DB-backed test sequencing where focused suites share migration/reset state.
+- [x] Run the focused Epic 4 regression set and baseline checks (AC: 1-3)
+  - [x] Run relevant sequential DB-backed tests, then `pnpm lint`, `pnpm typecheck`, and `pnpm build`.
+  - [x] Record exact commands and blockers in the completion notes if environment services prevent verification.
 
 ## Dev Notes
 
@@ -61,9 +65,26 @@ gpu4ai/gpt-5.6-terra-review
 ### Debug Log References
 
 - Final Epic 4 safety gate. Fixtures should be established alongside earlier stories and consolidated here after contracts settle.
+- `pnpm test:run -- tests/knowledge-search.test.ts tests/answer-context.test.ts` (all 49 test files / 705 tests passed; Vitest uses one worker and shared DB reset sequencing).
+- `pnpm lint` (passed with three pre-existing unused-variable warnings in `tests/knowledge-search.test.ts`), `pnpm typecheck` (passed), `pnpm build` (passed).
 
 ### Completion Notes List
 
 - Ultimate context engine analysis completed - comprehensive developer guide created.
+- Added a consolidated state/source eligibility matrix covering contextual, caveat-only, and excluded active/archive/conflict/supersession cases without raw material leakage.
+- Persisted selected card state-policy snapshots in retrieval decisions and strengthened stable persisted web identifier/provenance assertions.
+- Added claimed stale-version/source-withdrawal and safe bounded retry-record regressions. Documented serial `DATABASE_URL_TEST` execution in the canonical README testing guidance.
+- Verification completed with no blockers. `pnpm lint` has only the three existing unused-variable warnings listed above.
 
 ### File List
+
+- README.md
+- src/features/retrieval/source-bundle.ts
+- tests/answer-context.test.ts
+- tests/knowledge-search.test.ts
+- _bmad-output/implementation-artifacts/4-7-verify-ai-first-retrieval-and-answer-safety.md
+- _bmad-output/implementation-artifacts/sprint-status.yaml
+
+### Change Log
+
+- 2026-07-24: Added AI-first retrieval, answer-policy, provenance, and versioned worker safety regression coverage; documented serial DB-backed test sequencing and moved the story to review.

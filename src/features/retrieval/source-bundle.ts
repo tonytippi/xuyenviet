@@ -29,6 +29,7 @@ export type WebSearchTriggerReason =
 
 export type SafeKnowledgePolicySummary = {
   selectedCardIds: string[];
+  selectedPolicies?: Array<{ cardId: string; contentVersion: number; knowledgeState: string; verificationState: string; usePolicy: KnowledgeSearchResult["policy"] }>;
   selectedPolicyCounts: { contextualUse: number; caveatOnly: number };
   excludedPolicyCounts: { conflict: number; verificationRequired: number; other: number };
   excludedReasonCodes: string[];
@@ -270,6 +271,13 @@ export function decideWebSearchFallback({
   const reasons: WebSearchTriggerReason[] = [];
   const knowledgePolicySummary: SafeKnowledgePolicySummary = {
     selectedCardIds: knowledge.map((result) => result.id),
+    selectedPolicies: knowledge.map((result) => ({
+      cardId: result.id,
+      contentVersion: result.contentVersion,
+      knowledgeState: result.knowledgeState,
+      verificationState: result.verificationState,
+      usePolicy: result.policy,
+    })),
     selectedPolicyCounts: {
       contextualUse: knowledge.filter((result) => result.policy === "contextual_use").length,
       caveatOnly: knowledge.filter((result) => result.policy === "caveat_only").length,

@@ -2043,6 +2043,10 @@ describe("answer context assembly", () => {
       knowledgePolicySnapshot: expect.objectContaining({ selectedCardIds: ["ai-ask-safe-card"] }),
     });
     expect(decisions[0].webSearchTriggerReasons).toEqual(expect.arrayContaining(["freshness_sensitive_request", "active_knowledge_may_be_stale"]));
+    expect(decisions[0].knowledgePolicySnapshot).toMatchObject({
+      selectedCardIds: ["ai-ask-safe-card"],
+      selectedPolicies: expect.arrayContaining([expect.objectContaining({ cardId: "ai-ask-safe-card", usePolicy: "contextual_use", knowledgeState: "community_observation" })]),
+    });
     expect(provenance.map((row) => row.sourceCategory)).toEqual(["trip_context", "chat_context", "knowledge", "web", "general"]);
     expect(provenance.every((row) => row.usedInPrompt)).toBe(true);
     expect(provenance.every((row) => row.citedInAnswer === false)).toBe(true);
@@ -2103,6 +2107,7 @@ describe("answer context assembly", () => {
     expect(snapshot).not.toContain("Tham khảo.");
     expect(snapshot).not.toContain("tavily");
     expect(snapshot).not.toContain("providerScore");
+    expect(snapshot).toContain("persistedWebSearchResultId");
   });
 
   test("failed or low-confidence web fallback forces a deterministic verification notice", async () => {

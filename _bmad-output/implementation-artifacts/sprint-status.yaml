@@ -67,7 +67,7 @@ development_status:
   4-5-update-search-fallback-and-provenance-for-ai-first-states: done
   # Synchronized 2026-07-23 after final-review privacy and trust-state repair verification.
   4-6-render-state-aware-traveler-trust-details: review
-  4-7-verify-ai-first-retrieval-and-answer-safety: ready-for-dev
+  4-7-verify-ai-first-retrieval-and-answer-safety: review
   epic-4-retrospective: optional
 
   epic-5: backlog

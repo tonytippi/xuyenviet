@@ -406,4 +406,68 @@ describe("knowledge card state-model retrieval safety", () => {
 
     await expect(processNextApprovedKnowledgeIndexingBatch({ batchSize: 1 }, testDb)).resolves.toMatchObject({ cardIds: [pending.id], indexedCount: 1 });
   });
+
+  test.each([
+    { id: "active-confirmed", update: { knowledgeState: "community_observation" as const }, expectedPolicy: "contextual_use" },
+    { id: "active-conditional", update: { knowledgeState: "conditional" as const, conditions: ["Chỉ đi khi trời khô"] }, expectedPolicy: "contextual_use" },
+    { id: "active-uncertain", update: { knowledgeState: "uncertain" as const }, expectedPolicy: "caveat_only" },
+    { id: "verification-required", update: { knowledgeState: "community_observation" as const, verificationState: "required" as const }, expectedPolicy: "caveat_only" },
+    { id: "conflicted", update: { knowledgeState: "conflicted" as const }, expectedPolicy: null },
+    { id: "superseded", update: { knowledgeState: "superseded" as const }, expectedPolicy: null },
+    { id: "archived", update: { knowledgeState: "confirmed" as const, publicationState: "archived" as const }, expectedPolicy: null },
+  ])("applies the traveler policy matrix for $id without exposing raw source material", async ({ id, update, expectedPolicy }) => {
+    await createUser(`${id}-operator`, ["operator"]);
+    const card = await createApprovedCardWithSource(`${id}-operator`, `${id}-card`);
+    const capture = await seedSourceCaptureVersion({ sourceId: `${card.id}-source`, captureKind: "url", rawText: `Raw material for ${id} must not reach travelers.` });
+    await seedKnowledgeCardEvidence({ cardId: card.id, sourceId: `${card.id}-source`, captureVersionId: capture.id, quoteText: `Raw material for ${id} must not reach travelers.` });
+    await testDb.update(knowledgeCards).set(update).where(eq(knowledgeCards.id, card.id));
+
+    await enqueueAndProcessIndexWork(card.id);
+    const results = await (await import("@/features/knowledge/search")).searchApprovedKnowledge("Huế");
+    const result = results.find((item) => item.id === card.id);
+
+    if (expectedPolicy) {
+      expect(result).toMatchObject({ policy: expectedPolicy });
+      expect(JSON.stringify(result)).not.toContain("Raw material for");
+    } else {
+      expect(result).toBeUndefined();
+    }
+  });
+
+  test("a claimed old version cannot reactivate a projection after source withdrawal", async () => {
+    await createUser("withdrawal-race-operator", ["operator"]);
+    const card = await createApprovedCardWithSource("withdrawal-race-operator", "withdrawal-race-card");
+    const capture = await seedSourceCaptureVersion({ sourceId: `${card.id}-source`, captureKind: "url", rawText: "Evidence that will be withdrawn." });
+    await seedKnowledgeCardEvidence({ cardId: card.id, sourceId: `${card.id}-source`, captureVersionId: capture.id, quoteText: "Evidence that will be withdrawn." });
+    await enqueueAndProcessIndexWork(card.id);
+    await testDb.update(knowledgeCards).set({ contentVersion: 2 }).where(eq(knowledgeCards.id, card.id));
+    await enqueueIndexWork(card.id, "race-before-withdrawal");
+    const { claimNextKnowledgeIndexWork, completeKnowledgeIndexWork } = await import("@/features/knowledge/indexing-worker");
+    const claim = await claimNextKnowledgeIndexWork({ workerId: "withdrawal-race-worker" }, testDb);
+    if (!claim) throw new Error("Expected indexing claim");
+    const { removeKnowledgeSource } = await import("@/features/knowledge/source-removal");
+
+    await removeKnowledgeSource({ sourceId: `${card.id}-source`, reason: "withdrawn", actor: { userId: "withdrawal-race-operator", email: "withdrawal-race-operator@example.com" } }, testDb);
+    const result = await (await import("@/features/knowledge/search")).projectClaimedKnowledgeIndexWork(claim, testDb);
+
+    expect(result).toMatchObject({ indexed: false, outcome: "superseded" });
+    await completeKnowledgeIndexWork(claim, result.outcome, testDb);
+    await expect(testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, card.id))).resolves.toMatchObject([{ status: "disabled" }]);
+  });
+
+  test("index worker retry records keep failure details safe and bounded", async () => {
+    await createUser("safe-retry-operator", ["operator"]);
+    const card = await createApprovedCardWithSource("safe-retry-operator", "safe-retry-card");
+    await enqueueIndexWork(card.id, "safe-retry");
+    const { claimNextKnowledgeIndexWork, retryKnowledgeIndexWork } = await import("@/features/knowledge/indexing-worker");
+    const claim = await claimNextKnowledgeIndexWork({ workerId: "safe-retry-worker" }, testDb);
+    if (!claim) throw new Error("Expected indexing claim");
+
+    await expect(retryKnowledgeIndexWork(claim, "projection_failed", testDb)).resolves.toBe(true);
+    const [marker] = await testDb.select().from(knowledgeIndexDirtyMarkers).where(eq(knowledgeIndexDirtyMarkers.id, claim.markerId));
+
+    expect(marker).toMatchObject({ status: "pending", failureCode: "projection_failed", failureReason: "Projection worker failed; retry is scheduled.", claimedBy: null, fencingToken: null });
+    expect(marker?.failureReason).not.toContain(card.id);
+    expect(marker?.failureReason?.length).toBeLessThanOrEqual(200);
+  });
 });

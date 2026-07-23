@@ -72,6 +72,20 @@ CREATE DATABASE xuyenviet_test;
 
 Set `DATABASE_URL_TEST` in `.env` or `.env.local` so it points to that test database. The Vitest global setup runs Drizzle migrations against the test database automatically. Tests use fake OAuth, AI Gateway, and Tavily values and must not require real provider credentials.
 
+DB-backed tests share this database and reset its tables between tests. Run focused suites sequentially, never in parallel with another Vitest command, and run the baseline checks in this order after tests:
+
+```bash
+DATABASE_URL_TEST='postgres://...' pnpm test:run -- tests/knowledge-search.test.ts
+DATABASE_URL_TEST='postgres://...' pnpm test:run -- tests/knowledge-source-removal.test.ts
+DATABASE_URL_TEST='postgres://...' pnpm test:run -- tests/knowledge-ingestion-pipeline.test.ts
+DATABASE_URL_TEST='postgres://...' pnpm test:run -- tests/answer-context.test.ts tests/web-search-adapter.test.ts tests/ai-ask-shell.test.ts
+pnpm lint
+pnpm typecheck
+pnpm build
+```
+
+Do not use `pnpm db:reset` for test verification: Vitest owns only `DATABASE_URL_TEST`, while database scripts use `DATABASE_URL`.
+
 ## Server deployment
 
 Docker Compose runs the web application plus the long-running knowledge extraction and indexing workers. PostgreSQL remains external and must be reachable through the `DATABASE_URL` set in the deployment environment file.
