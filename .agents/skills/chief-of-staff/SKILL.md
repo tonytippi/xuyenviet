@@ -29,9 +29,11 @@ is complete only when its sprint status is `done` and every associated story is
   `--no-focus`. Never target the human's focused pane implicitly.
 - Start each worker with `herdr agent start <name> --kind opencode --pane
   <pane-id>`. Worker names must be unique and match Herdr's naming rules.
-- Submit work only with `herdr agent prompt <name> "..." --wait`. Before
-  treating a wait result as success, read the worker's final output with
-  `herdr agent read <name> --source recent-unwrapped --lines 160`.
+- Submit work only with `herdr agent prompt <name> "..." --wait`. The
+  `prompt --wait` response is only a lifecycle signal, never a worker report
+  source. Before treating a wait result as success, read and retain the
+  worker's terminal output with `herdr agent read <name> --source
+  recent-unwrapped --lines 160`.
 - Every mutating worker must read, synchronize, and report the target entry in
   `sprint-status.yaml` before it finishes. The coordinator is read-only, but
   must use the most recent worker output as well as the file to select the next
@@ -95,6 +97,15 @@ repeat an action merely because the file was not synchronized. An accepted
 story-review result with actionable findings is not eligible for coordinator
 selection: run its bounded repair loop first.
 
+Give the coordinator the complete final report block, not the result of
+`herdr agent prompt --wait` or a paraphrase. It must parse the final delimited
+block by its field labels, accepting wrapped `SUMMARY` and `BLOCKER` values.
+If that block is absent or malformed in the initial 160-line read, re-read the
+same worker once with `herdr agent read <name> --source recent-unwrapped --lines 300`.
+Only after that retry may a missing or malformed report become a stop
+condition. Never synthesize report fields from a commit, `git status`, or the
+sprint file.
+
 ## Herdr Worker Procedure
 
 For every stage below, create a brand-new sibling pane. Pick `right` for a
@@ -109,24 +120,33 @@ herdr agent read <unique-name> --source recent-unwrapped --lines 160
 ```
 
 Take `<returned-pane-id>` only from the JSON returned by `herdr pane split`.
-If the new worker reports `blocked` or the prompt wait fails, inspect it with
-`herdr agent get <unique-name>` and the read command above, then stop.
+If the prompt wait fails, inspect the worker with `herdr agent get
+<unique-name>` and read its terminal output before deciding whether it
+completed or is blocked. A failed wait is a stop condition only when the final
+terminal report cannot be read and independently verified. If the worker
+reports `BLOCKED`, stop after reading its final report.
 
 Every mutating worker prompt must require this final, machine-checkable report:
 
 ```text
+--- CHIEF-OF-STAFF-REPORT ---
 RESULT: SUCCESS or BLOCKED
 TARGET: <story-key, absolute story path, or epic number>
 SPRINT STATUS: <target entry> = <final status>
 SPRINT STATUS SYNCHRONIZED: yes or no
 SUMMARY: <concise stage evidence, including tests, commit, or review outcome>
 BLOCKER: <none or reason>
+--- END-CHIEF-OF-STAFF-REPORT ---
 ```
 
-After reading a mutating worker's final output, reject it and stop unless it has
+The report must be the worker's last substantive terminal output. Each label
+must begin a line and appear exactly once within the final delimited block;
+`SUMMARY` and `BLOCKER` values may continue on following wrapped lines until
+the next label or the end delimiter. After reading a mutating worker's final
+output, parse the final complete delimited block and reject it unless it has
 `RESULT: SUCCESS`, `SPRINT STATUS SYNCHRONIZED: yes`, and the exact
 stage-appropriate final status independently observed in `sprint-status.yaml`.
-Save the accepted output as `last_worker_result` before creating another pane.
+Save that complete block as `last_worker_result` before creating another pane.
 A worker that cannot synchronize the expected status must return `BLOCKED`; do
 not repair or guess its status in the coordinator.
 
