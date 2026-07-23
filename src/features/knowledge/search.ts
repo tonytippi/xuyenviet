@@ -2,7 +2,7 @@ import "server-only";
 
 import { createHash } from "node:crypto";
 
-import { and, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
 import { knowledgeCardEvidence, knowledgeCards, knowledgeCardSearchDocuments, knowledgeCardSources, sourceCaptureVersions, sources, type KnowledgeSourceSupport } from "@/db/schema";
@@ -62,6 +62,7 @@ type ActiveSupportingEvidenceRow = {
   displayPolicy: "traveler_visible" | "fact_only" | "operator_only";
   evidenceId: string;
   sourceId: string;
+  sourceKind: "url" | "facebook" | "youtube" | "copied_post" | "pasted_text" | "screenshot";
   independenceKey: string;
   supportLevel: KnowledgeSourceSupport;
   quoteText: string;
@@ -304,6 +305,7 @@ async function loadActiveSupportingEvidence(db: Pick<KnowledgeSearchDb, "select"
       displayPolicy: knowledgeCardEvidence.displayPolicy,
       evidenceId: knowledgeCardEvidence.id,
       sourceId: knowledgeCardEvidence.sourceId,
+      sourceKind: sources.kind,
       independenceKey: knowledgeCardEvidence.independenceKey,
       supportLevel: knowledgeCardEvidence.supportLevel,
       quoteText: knowledgeCardEvidence.quoteText,
@@ -321,15 +323,20 @@ async function loadActiveSupportingEvidence(db: Pick<KnowledgeSearchDb, "select"
      .innerJoin(knowledgeCardSources, and(eq(knowledgeCardSources.knowledgeCardId, knowledgeCardEvidence.knowledgeCardId), eq(knowledgeCardSources.sourceId, knowledgeCardEvidence.sourceId)))
      .innerJoin(sources, and(eq(sources.id, knowledgeCardEvidence.sourceId), eq(sources.eligibility, "eligible")))
      .innerJoin(sourceCaptureVersions, and(eq(sourceCaptureVersions.id, knowledgeCardEvidence.captureVersionId), eq(sourceCaptureVersions.sourceId, knowledgeCardEvidence.sourceId)))
-     .where(and(
+    .where(and(
       eq(knowledgeCardEvidence.knowledgeCardId, cardId),
        eq(knowledgeCardEvidence.state, "active"),
        or(eq(knowledgeCardEvidence.supportLevel, "primary"), eq(knowledgeCardEvidence.supportLevel, "supporting")),
        or(eq(knowledgeCardEvidence.displayPolicy, "fact_only"), eq(knowledgeCardEvidence.displayPolicy, "traveler_visible")),
        sql`${sources.kind} = ${sourceCaptureVersions.captureKind} and ${sources.kind} in ('url', 'facebook', 'youtube')`,
        isNull(sourceCaptureVersions.payloadDeletedAt),
-      sql`substring(${sourceCaptureVersions.rawText} from ${knowledgeCardEvidence.spanStart} + 1 for ${knowledgeCardEvidence.spanEnd} - ${knowledgeCardEvidence.spanStart}) = ${knowledgeCardEvidence.quoteText}`,
-    ));
+       sql`substring(${sourceCaptureVersions.rawText} from ${knowledgeCardEvidence.spanStart} + 1 for ${knowledgeCardEvidence.spanEnd} - ${knowledgeCardEvidence.spanStart}) = ${knowledgeCardEvidence.quoteText}`,
+    ))
+    .orderBy(
+      asc(sql`case ${knowledgeCardEvidence.supportLevel} when 'primary' then 0 else 1 end`),
+      desc(knowledgeCardEvidence.observedAt),
+      asc(knowledgeCardEvidence.id),
+    );
 
   return evidenceRows.length > 0
     ? {
@@ -342,7 +349,7 @@ async function loadActiveSupportingEvidence(db: Pick<KnowledgeSearchDb, "select"
 
 function toKnowledgeSearchEvidence(row: ActiveSupportingEvidenceRow): KnowledgeSearchEvidence {
   const sourceUrl = safeHttpUrl(row.sourceUrl) ?? safeHttpUrl(row.canonicalUrl);
-  const travelerVisible = row.displayPolicy === "traveler_visible" && Boolean(sourceUrl) && row.sourceLabel && row.sourceType && row.verificationStatus && row.official !== null && row.partner !== null;
+  const travelerVisible = row.displayPolicy === "traveler_visible" && row.sourceKind !== "facebook" && Boolean(sourceUrl) && row.sourceLabel && row.sourceType && row.verificationStatus && row.official !== null && row.partner !== null && isTravelerSafeEvidenceText(row.quoteText);
 
   return {
     evidenceId: row.evidenceId,
@@ -359,6 +366,10 @@ function toKnowledgeSearchEvidence(row: ActiveSupportingEvidenceRow): KnowledgeS
     url: travelerVisible ? sourceUrl : null,
     quote: travelerVisible ? row.quoteText : null,
   };
+}
+
+function isTravelerSafeEvidenceText(value: string) {
+  return !/(?:[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}|(?:\+?84|0)(?:[\s.-]?\d){8,10}|provider[_-]?payload|storage[_-]?key|raw[_-]?metadata|raw[_-]?source)/i.test(value);
 }
 
 function safeHttpUrl(value: string | null) {

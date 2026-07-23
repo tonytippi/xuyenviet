@@ -41,7 +41,15 @@ so that its answer can use local observations without overstating certainty.
    - [x] Prove every disallowed raw/private field is absent from prompt sections and source-bundle snapshots.
     - [x] Prove conditions, states, verification, and policy survive into the structured prompt input without being model instructions.
     - [x] Prove `traveler_visible`, `fact_only`, and `operator_only` evidence behavior in prompt sections and persisted provenance snapshots, including that a Facebook link is present only when the explicit traveler-visible policy and safe-URL requirements permit it.
-    - [x] Prove over-budget context is deterministically compacted within the combined fact, per-field, web-result, and total-section limits; it preserves trip/chat/knowledge/web/general priority and cannot introduce unallowlisted or raw/private fields.
+     - [x] Prove over-budget context is deterministically compacted within the combined fact, per-field, web-result, and total-section limits; it preserves trip/chat/knowledge/web/general priority and cannot introduce unallowlisted or raw/private fields.
+
+### Review Findings
+
+- [x] [Review][Patch] Block Facebook and sensitive traveler-visible evidence from bundle projection [src/features/knowledge/search.ts:303] — The retrieval query accepts Facebook sources and `toKnowledgeSearchEvidence` copies any traveler-visible HTTP(S) URL and quote without checking source kind, quote safety, or the story's explicit Facebook restriction. A legacy/misclassified Facebook row or sensitive quote can reach the prompt and provenance snapshot, violating AC 2.
+- [x] [Review][Patch] Bound the serialized combined conditions field [src/features/retrieval/approved-knowledge.ts:44] — Conditions are capped individually but joined without a 280-character cap. A valid item can exceed the 2,400-character knowledge section and be omitted entirely instead of deterministically compacted, violating AC 4.
+- [x] [Review][Patch] Make retrieval-effective evidence selection deterministic [src/features/knowledge/search.ts:320] — The active evidence query has no stable ordering before the bundle takes its first three records. PostgreSQL can return a different subset on equivalent requests, making prompt/provenance snapshots nondeterministic and omitting higher-priority evidence.
+- [x] [Review][Patch] Use state-aware terminology in every prompt priority contract [src/features/retrieval/source-bundle.ts:421] — The full, compacted, and minimal priority instructions still describe active knowledge as `kiến thức Xuyên Việt đã duyệt`, contradicting the state-aware knowledge section and the required prompt-facing terminology rename.
+- [x] [Review][Patch] Preserve the knowledge verification state in the provenance row [src/features/retrieval/provenance.ts:138] — Every knowledge provenance row is marked `verified` even when its bundle item and evidence are unverified. Downstream provenance consumers can present community observations as verified despite the stored snapshot state.
 
 ## Dev Notes
 
@@ -86,6 +94,8 @@ gpu4ai/gpt-5.6-terra-review
 - Enforced bounded prompt serialization: active-knowledge terminology, safe evidence display policy, practical-detail allowlist, shared 30-fact trip-before-chat budget, five-result web cap, 280-character knowledge fields, and 5,000-character total section cap.
 - Added prompt and persisted-provenance coverage for state/version/policy survival and traveler-visible versus fact-only evidence redaction.
 - Verified: `pnpm test:run` (49 files, 660 tests), `pnpm typecheck`, `pnpm lint` (passes with 3 pre-existing unused-variable warnings in `tests/knowledge-search.test.ts`), and `pnpm build`.
+- Resolved all five actionable review findings: traveler-visible Facebook/sensitive evidence is redacted, combined conditions are capped at 280 characters, evidence order is deterministic, prompt priority wording is state-aware, and provenance reflects unverified required verification state.
+- Verified review fixes: `pnpm test:run` (49 files, 663 tests), `pnpm typecheck`, `pnpm lint` (passes with 3 pre-existing unused-variable warnings in `tests/knowledge-search.test.ts`), and `pnpm build`.
 
 ### File List
 
@@ -94,7 +104,9 @@ gpu4ai/gpt-5.6-terra-review
 - `src/features/retrieval/source-bundle.ts`
 - `src/features/retrieval/provenance.ts`
 - `tests/answer-context.test.ts`
+- `tests/knowledge-search.test.ts`
 
 ## Change Log
 
 - 2026-07-23: Implemented state-aware knowledge source bundle assembly and marked ready for review.
+- 2026-07-23: Addressed all five actionable review findings and retained review status.

@@ -188,6 +188,33 @@ describe("knowledge card state-model retrieval safety", () => {
     expect(result?.sources).toEqual([expect.objectContaining({ id: "historical-capture-card-source", url: null, canonicalUrl: null })]);
   });
 
+  test("selects evidence deterministically and never projects Facebook or sensitive traveler-visible content", async () => {
+    await createUser("deterministic-evidence-operator", ["operator"]);
+    const card = await createApprovedCardWithSource("deterministic-evidence-operator", "deterministic-evidence-card");
+    const [facebookSource] = await testDb.insert(sources).values({ id: "deterministic-facebook-source", kind: "facebook", url: "https://facebook.com/deterministic-private", canonicalUrl: "https://facebook.com/deterministic-private", label: "Facebook", sourceType: "community", verificationStatus: "unverified", submittedByUserId: "deterministic-evidence-operator" }).returning();
+    const [laterPrimarySource] = await testDb.insert(sources).values({ id: "deterministic-later-primary-source", kind: "url", url: "https://example.com/later-primary", canonicalUrl: "https://example.com/later-primary", label: "Nguồn chính muộn", sourceType: "curated", verificationStatus: "verified", submittedByUserId: "deterministic-evidence-operator" }).returning();
+    const [supportingSource] = await testDb.insert(sources).values({ id: "deterministic-supporting-source", kind: "url", url: "https://example.com/supporting", canonicalUrl: "https://example.com/supporting", label: "Nguồn hỗ trợ", sourceType: "curated", verificationStatus: "verified", submittedByUserId: "deterministic-evidence-operator" }).returning();
+    await testDb.insert(knowledgeCardSources).values([{ knowledgeCardId: card.id, sourceId: facebookSource!.id, supportLevel: "primary" }, { knowledgeCardId: card.id, sourceId: laterPrimarySource!.id, supportLevel: "primary" }, { knowledgeCardId: card.id, sourceId: supportingSource!.id, supportLevel: "supporting" }]);
+    const baseCapture = await seedSourceCaptureVersion({ sourceId: `${card.id}-source`, captureKind: "url", rawText: "Nguồn chính sớm." });
+    const facebookCapture = await seedSourceCaptureVersion({ sourceId: facebookSource!.id, captureKind: "facebook", rawText: "Liên hệ 0901234567 qua Facebook." });
+    const laterPrimaryCapture = await seedSourceCaptureVersion({ sourceId: laterPrimarySource!.id, captureKind: "url", rawText: "Nguồn chính muộn." });
+    const supportingCapture = await seedSourceCaptureVersion({ sourceId: supportingSource!.id, captureKind: "url", rawText: "Nguồn hỗ trợ." });
+    await seedKnowledgeCardEvidence({ cardId: card.id, sourceId: `${card.id}-source`, captureVersionId: baseCapture.id, quoteText: "Nguồn chính sớm.", displayPolicy: "traveler_visible", supportLevel: "primary", observedAt: new Date("2026-07-01T00:00:00.000Z") });
+    await seedKnowledgeCardEvidence({ cardId: card.id, sourceId: facebookSource!.id, captureVersionId: facebookCapture.id, quoteText: "Liên hệ 0901234567 qua Facebook.", displayPolicy: "traveler_visible", supportLevel: "primary", observedAt: new Date("2026-07-03T00:00:00.000Z") });
+    await seedKnowledgeCardEvidence({ cardId: card.id, sourceId: laterPrimarySource!.id, captureVersionId: laterPrimaryCapture.id, quoteText: "Nguồn chính muộn.", displayPolicy: "traveler_visible", supportLevel: "primary", observedAt: new Date("2026-07-02T00:00:00.000Z") });
+    await seedKnowledgeCardEvidence({ cardId: card.id, sourceId: supportingSource!.id, captureVersionId: supportingCapture.id, quoteText: "Nguồn hỗ trợ.", displayPolicy: "traveler_visible", supportLevel: "supporting", observedAt: new Date("2026-07-04T00:00:00.000Z") });
+    const { searchApprovedKnowledge } = await import("@/features/knowledge/search");
+
+    await enqueueAndProcessIndexWork(card.id);
+    const [first] = await searchApprovedKnowledge("Huế");
+    const [second] = await searchApprovedKnowledge("Huế");
+
+    expect(first?.evidence?.map((evidence) => evidence.sourceId)).toEqual([facebookSource!.id, laterPrimarySource!.id, `${card.id}-source`, supportingSource!.id]);
+    expect(second?.evidence).toEqual(first?.evidence);
+    expect(JSON.stringify(first?.evidence)).not.toContain("facebook.com/deterministic-private");
+    expect(JSON.stringify(first?.evidence)).not.toContain("0901234567");
+  });
+
   test("does not add operator-only source URLs to the lexical search projection", async () => {
     await createUser("lexical-policy-operator", ["operator"]);
     const card = await createApprovedCardWithSource("lexical-policy-operator", "lexical-policy-card");

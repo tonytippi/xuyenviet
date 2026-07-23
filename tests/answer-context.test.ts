@@ -1277,6 +1277,56 @@ describe("answer context assembly", () => {
     expect(snapshot).not.toContain("private.example/secret");
   });
 
+  test("state-aware knowledge bundle caps combined conditions, redacts unsafe visible evidence, and preserves verification state", async () => {
+    await createTestUser("user-1");
+    const { conversation, message } = await createConversationWithUserMessage({ userId: "user-1" });
+    const [assistantMessage] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "assistant", content: "Gợi ý có điều kiện." }).returning({ id: messages.id });
+    const { buildApprovedKnowledgePromptSection } = await import("@/features/retrieval/approved-knowledge");
+    const { persistAssistantAnswerProvenance } = await import("@/features/retrieval/provenance");
+    const knowledge = makeKnowledgeResult("unverified-state-aware-card", "Điểm dừng cần xác minh", {
+      verificationState: "required",
+      conditions: Array.from({ length: 4 }, (_, index) => `Điều kiện ${index + 1}: ${"chi tiết ".repeat(50)}`),
+      evidence: [
+        { evidenceId: "facebook-visible", sourceId: "facebook-source", supportLevel: "primary", displayPolicy: "traveler_visible", sourceLabel: "Facebook", sourceType: "community", verificationStatus: "unverified", official: false, partner: false, collectedDate: null, observedAt: "2026-07-10T00:00:00.000Z", url: "https://facebook.com/private-post", quote: "Liên hệ 0901234567 để biết thêm." },
+        { evidenceId: "sensitive-visible", sourceId: "sensitive-source", supportLevel: "supporting", displayPolicy: "traveler_visible", sourceLabel: "Nguồn công khai", sourceType: "curated", verificationStatus: "verified", official: true, partner: false, collectedDate: null, observedAt: "2026-07-09T00:00:00.000Z", url: "https://example.com/sensitive", quote: "Gửi email traveler@example.com để nhận provider_payload." },
+      ],
+    });
+    const section = buildApprovedKnowledgePromptSection([knowledge]);
+    const conditions = section.match(/conditions=("(?:[^"\\]|\\.)*")/)?.[1] ?? "";
+
+    expect(JSON.parse(conditions)).toHaveLength(280);
+    expect(section).not.toContain("facebook.com/private-post");
+    expect(section).not.toContain("0901234567");
+    expect(section).not.toContain("traveler@example.com");
+    expect(section).not.toContain("provider_payload");
+
+    await persistAssistantAnswerProvenance(testDb, {
+      userId: "user-1",
+      conversationId: conversation.id,
+      userMessageId: message.id,
+      assistantMessageId: assistantMessage.id,
+      promptSection: section,
+      sourceBundle: createSourceBundle({ knowledge: [knowledge] }),
+    });
+    const [row] = await testDb.select().from(assistantResponseProvenance).where(eq(assistantResponseProvenance.sourceReferenceId, knowledge.id));
+
+    expect(row?.verificationStatus).toBe("unverified");
+    expect(row?.sourceSnapshot).toMatchObject({ verificationState: "required" });
+    expect(JSON.stringify(row?.sourceSnapshot)).not.toContain("facebook.com/private-post");
+    expect(JSON.stringify(row?.sourceSnapshot)).not.toContain("traveler@example.com");
+  });
+
+  test("source bundle priority contract names active state-aware knowledge", async () => {
+    vi.doUnmock("@/features/retrieval/approved-knowledge");
+    vi.resetModules();
+    const { buildSourceBundlePromptSection } = await import("@/features/retrieval/source-bundle");
+
+    const section = buildSourceBundlePromptSection(createSourceBundle());
+
+    expect(section).toContain("kiến thức Xuyên Việt đang hiệu lực theo trạng thái > nguồn web chưa xác minh");
+    expect(section).not.toContain("kiến thức Xuyên Việt đã duyệt >");
+  });
+
   test("approved knowledge prompt keeps all bounded ordered route stops", async () => {
     const { buildApprovedKnowledgePromptSection } = await import("@/features/retrieval/approved-knowledge");
     const orderedStops = Array.from({ length: 32 }, (_, index) => `Điểm dừng ${index + 1}`);

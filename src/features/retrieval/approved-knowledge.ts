@@ -33,6 +33,8 @@ export async function loadApprovedKnowledgeForAiAsk(question: string) {
 }
 
 export function toStateAwareKnowledgeBundleItem(result: KnowledgeSearchResult): StateAwareKnowledgeBundleItem {
+  const conditions = clip(result.conditions.map((condition) => clip(condition)).filter(Boolean).join("; "));
+
   return {
     cardId: result.id,
     contentVersion: result.contentVersion,
@@ -41,21 +43,25 @@ export function toStateAwareKnowledgeBundleItem(result: KnowledgeSearchResult): 
     type: clip(result.type),
     locationName: result.locationName ? clip(result.locationName) : null,
     routeSegment: result.routeSegment ? clip(result.routeSegment) : null,
-    conditions: result.conditions.map((condition) => clip(condition)).filter(Boolean),
+    conditions: conditions ? [conditions] : [],
     confidence: clip(result.confidence),
     freshnessSensitive: result.freshnessSensitive,
     knowledgeState: result.knowledgeState,
     verificationState: result.verificationState,
     usePolicy: result.policy,
     practicalDetails: projectPracticalDetails(result.practicalDetails),
-    evidence: (result.evidence ?? []).slice(0, maxEvidencePerCard).map((evidence) => ({
-      ...evidence,
-      sourceLabel: clip(evidence.sourceLabel),
-      collectedDate: evidence.collectedDate ? clip(evidence.collectedDate) : null,
-      observedAt: clip(evidence.observedAt),
-      url: evidence.displayPolicy === "traveler_visible" ? safeHttpUrl(evidence.url) : null,
-      quote: evidence.displayPolicy === "traveler_visible" && safeHttpUrl(evidence.url) ? clip(evidence.quote ?? "", maxVisibleQuoteLength) || null : null,
-    })),
+    evidence: (result.evidence ?? []).slice(0, maxEvidencePerCard).map((evidence) => {
+      const visible = evidence.displayPolicy === "traveler_visible" && !isFacebookUrl(evidence.url) && isTravelerSafeEvidenceText(evidence.quote ?? "") && Boolean(safeHttpUrl(evidence.url));
+      return {
+        ...evidence,
+        displayPolicy: visible ? "traveler_visible" : "fact_only",
+        sourceLabel: clip(evidence.sourceLabel),
+        collectedDate: evidence.collectedDate ? clip(evidence.collectedDate) : null,
+        observedAt: clip(evidence.observedAt),
+        url: visible ? safeHttpUrl(evidence.url) : null,
+        quote: visible ? clip(evidence.quote ?? "", maxVisibleQuoteLength) || null : null,
+      };
+    }),
     score: result.score,
   };
 }
@@ -147,4 +153,18 @@ function safeHttpUrl(value: string | null) {
   } catch {
     return null;
   }
+}
+
+function isFacebookUrl(value: string | null) {
+  if (!value) return false;
+  try {
+    const hostname = new URL(value).hostname.toLowerCase();
+    return hostname === "facebook.com" || hostname.endsWith(".facebook.com") || hostname === "fb.com" || hostname === "fb.watch";
+  } catch {
+    return false;
+  }
+}
+
+function isTravelerSafeEvidenceText(value: string) {
+  return !/(?:[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}|(?:\+?84|0)(?:[\s.-]?\d){8,10}|provider[_-]?payload|storage[_-]?key|raw[_-]?metadata|raw[_-]?source)/i.test(value);
 }
