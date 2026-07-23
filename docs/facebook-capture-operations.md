@@ -1,6 +1,8 @@
 # Facebook Capture Operations
 
-The Facebook capture script is an operator-controlled operations tool. It reads the production queue from `DATABASE_URL`, checks a separate persistent local archive first, and only opens Playwright on a cache miss or review-requested recapture. It captures visible-DOM post text only, archives validated material, then writes through the guarded production helper for later extraction, review, and approval.
+**Status:** Current operator runbook. Capture is implemented; the canonical AI-first ingestion lifecycle applies after readable material is captured.
+
+The Facebook capture script is an operator-controlled operations tool. It reads the production queue from `DATABASE_URL`, checks a separate persistent local archive first, and only opens Playwright on a cache miss or review-requested recapture. It derives bounded readable text from rendered/DOM content, archives validated material, then appends an immutable operator-only capture version. It never persists HTML or network payloads.
 
 ## Two Database Archive
 
@@ -24,10 +26,12 @@ pnpm exec tsx scripts/facebook-login.ts
 A source is queued when all conditions are true:
 
 - `sources.kind = 'facebook'`
-- `raw_source_material.source_id = sources.id`
-- `raw_source_material.raw_text` is null or blank
+- `sources.current_capture_version_id` is null
+- `raw_source_material.raw_metadata.duplicateSourceId` is absent
 
-The script does not approve knowledge cards. Human review and approval remain separate audited operator actions.
+`raw_source_material` remains a legacy intake/queue record. Captured content is stored in immutable `source_capture_versions`; a readable capture atomically creates one canonical ingestion job for that version.
+
+The capture script never approves knowledge cards. The canonical Knowledge pipeline independently extracts, judges, relates, and publishes captured material. Operator review is risk- and sampling-driven, not a general publication prerequisite.
 
 ## Service Audit Actor
 
@@ -93,14 +97,14 @@ Production scheduling should decide explicitly where this browser profile lives 
 
 1. Operator submits Facebook links through admin intake or batch intake.
 2. Scheduled capture runs `pnpm facebook:capture --limit 25 --yes` with the service audit actor.
-3. A cache hit replays its original captured time and safe provenance without opening Facebook. A cache miss captures visible DOM, commits the artifact to the local archive first, then flushes it to production.
+3. A cache hit replays its original captured time and safe provenance without opening Facebook. A cache miss derives bounded text from rendered/DOM content, commits the artifact to the local archive first, then flushes it to production.
 4. Capture queues up to 20 unique linked Facebook post/share URLs from the captured post for a later run. Links that already match a stored canonical source URL are skipped; capture does not recursively open them in the same run.
-5. Capture creates or confirms a `facebook_capture_reviews` row with `needs_review` status for the captured source.
-6. Operator uses the admin Facebook capture review queue at `/admin/knowledge/facebook-captures` to inspect the captured material before AI extraction.
-7. Operator reviews, edits, approves, or rejects drafts after extraction.
-8. Approved cards become eligible for traveler retrieval according to the knowledge workflow.
+5. Capture appends an immutable capture version, atomically creates its canonical ingestion job, and creates or updates the Facebook review record used for legacy/manual inspection and recapture controls.
+6. The separately supervised canonical ingestion worker processes readable capture versions through triage, extraction, independent judgment, and relation/conflict handling. The capture script itself does not call the ingestion model inline.
+7. Operators use risk/sampling-driven recommendations to inspect or resolve weak evidence, high-risk claims, conflicts, verification needs, or quality samples. The Facebook capture review queue remains an operator-only inspection/recapture surface; raw material is not traveler-ready merely because it was captured.
+8. Only policy-eligible active knowledge cards with valid current evidence can enter traveler retrieval. High-risk material remains caveat-only until corroborated; conflicted claims cannot support factual itinerary premises.
 
-Capture does not currently run extraction automatically. The Playwright script is an operations process with a service audit actor, while AI extraction runs through the authenticated admin workflow so the resulting drafts have an accountable admin/operator actor and remain human-reviewed before approval.
+The canonical ingestion worker is not the Playwright capture process. Deploy and supervise `knowledge:ingestion-worker` separately before relying on automatic ingestion; the current Compose configuration still runs the legacy extraction worker and indexing worker only.
 
 ## Pacing And Safety Stops
 
@@ -121,16 +125,16 @@ The web review queue is an admin/operator-only surface. Operators should not tre
 
 ## Failure Modes
 
-If the script reports no queued sources, no matching Facebook source rows need raw text.
+If the script reports no queued sources, no matching eligible Facebook source lacks a current capture version.
 
 If the script reports an audit actor error, create the service user row or set `FACEBOOK_CAPTURE_ACTOR_USER_ID` and `FACEBOOK_CAPTURE_ACTOR_EMAIL` to an existing user row.
 
 If Facebook shows login, blocked, or empty content, refresh the local Playwright profile manually and rerun the command.
 
-If captured text is incomplete or corrupted, use the admin review detail page `Recapture` action. This clears `raw_source_material.raw_text`, sets a review-owned force-live flag, and queues the source for another `pnpm facebook:capture --source-id <source-id>` run. It bypasses the default artifact, captures visible DOM again, archives the new artifact, and supersedes the old default only after a valid live result. Recapture is blocked once extraction cards already exist for that capture version.
+If captured text is incomplete or corrupted, use the admin review detail page `Recapture` action. This sets a review-owned force-live generation and queues the source for another `pnpm facebook:capture --source-id <source-id>` run. It bypasses the default artifact, captures rendered/DOM text again, archives the new artifact, and appends a new immutable capture version only after a valid live result. Recapture is blocked once extraction cards already exist for that capture version.
 
 If production flush fails after archive admission, rerun the same command. It reuses the archived artifact rather than opening Facebook again. Do not delete the artifact while recovering; inspect the safe source/import outcome and restore the production database through the normal process if required.
 
-If an extraction job fails, correlate its `knowledge_extraction_jobs` row with the worker warning by job ID, source ID, and Facebook review ID. The row and warning contain only safe error code/detail and attempt metadata; investigate the source only in the operator review workflow, never from worker logs.
+If canonical ingestion fails, correlate its `knowledge_ingestion_jobs` row with the worker warning by job ID, source ID, and capture-version ID. Legacy Facebook review/extraction failures may still use `knowledge_extraction_jobs` and a Facebook review ID. These records contain only safe error code/detail and attempt metadata; investigate the source only in the operator review workflow, never from worker logs.
 
-Capture metadata includes diagnostics that identify the selected visible-DOM text path. It never reads, selects, stores, or caches GraphQL/network response bodies.
+Capture metadata includes diagnostics that identify the selected rendered/DOM text path. It never stores or caches HTML, GraphQL, or other network response bodies.
