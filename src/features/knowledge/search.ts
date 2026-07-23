@@ -56,6 +56,11 @@ export type KnowledgeSearchResult = Pick<
   evidence?: KnowledgeSearchEvidence[];
 };
 
+export type KnowledgeSearchPolicySummary = {
+  excludedPolicyCounts: { conflict: number; verificationRequired: number; other: number };
+  excludedReasonCodes: KnowledgeTravelerPolicyReason[];
+};
+
 type KnowledgeSearchCardSnapshot = Omit<KnowledgeSearchResult, "score" | "policy" | "policyReasons" | "sources">;
 
 type ActiveSupportingEvidenceRow = {
@@ -143,15 +148,15 @@ export async function searchApprovedKnowledge(query: string | null | undefined, 
   return results;
 }
 
-export async function searchApprovedKnowledgeWithCandidateCount(query: string | null | undefined, options: { limit?: number } = {}): Promise<{ results: KnowledgeSearchResult[]; candidateCount: number }> {
+export async function searchApprovedKnowledgeWithCandidateCount(query: string | null | undefined, options: { limit?: number } = {}): Promise<{ results: KnowledgeSearchResult[]; candidateCount: number; policySummary: KnowledgeSearchPolicySummary }> {
   return searchApprovedKnowledgeInternal(query, options, true);
 }
 
-async function searchApprovedKnowledgeInternal(query: string | null | undefined, options: { limit?: number }, countAllCandidates: boolean): Promise<{ results: KnowledgeSearchResult[]; candidateCount: number }> {
+async function searchApprovedKnowledgeInternal(query: string | null | undefined, options: { limit?: number }, countAllCandidates: boolean): Promise<{ results: KnowledgeSearchResult[]; candidateCount: number; policySummary: KnowledgeSearchPolicySummary }> {
   const normalizedQuery = normalizeSearchQuery(query);
 
   if (!normalizedQuery) {
-    return { results: [], candidateCount: 0 };
+    return { results: [], candidateCount: 0, policySummary: emptyKnowledgeSearchPolicySummary() };
   }
 
   const limit = normalizeSearchLimit(options.limit);
@@ -161,6 +166,7 @@ async function searchApprovedKnowledgeInternal(query: string | null | undefined,
   const db = getDb();
   const results: KnowledgeSearchResult[] = [];
   let candidateCount = 0;
+  const policySummary = emptyKnowledgeSearchPolicySummary();
   const scoredDocuments: Array<{ knowledgeCardId: string; contentVersion: number; searchableText: string; updatedAt: Date; score: number }> = [];
 
   while (offset < maxSearchCandidateDocuments) {
@@ -206,18 +212,21 @@ async function searchApprovedKnowledgeInternal(query: string | null | undefined,
       break;
     }
 
-    const card = await loadEligibleApprovedCard(db, document.knowledgeCardId);
+    const candidate = await loadApprovedKnowledgeCandidate(db, document.knowledgeCardId);
+    const card = candidate.card;
 
-      if (card && document.contentVersion === card.contentVersion) {
+    if (card && document.contentVersion === card.contentVersion) {
       candidateCount += 1;
 
       if (results.length < limit) {
         results.push({ ...card, score: document.score });
       }
-      }
+    } else if (candidate.exclusion && document.contentVersion === candidate.contentVersion) {
+      recordExcludedCandidatePolicy(policySummary, candidate.exclusion);
+    }
   }
 
-  return { results, candidateCount: countAllCandidates ? candidateCount : results.length };
+  return { results, candidateCount: countAllCandidates ? candidateCount : results.length, policySummary };
 }
 
 export class KnowledgeSearchError extends Error {
@@ -235,6 +244,14 @@ export async function isKnowledgeCardEligibleForProjection(db: Pick<KnowledgeSea
 }
 
 async function loadEligibleApprovedCard(db: Pick<KnowledgeSearchDb, "select">, cardId: string) {
+  return (await loadApprovedKnowledgeCandidate(db, cardId)).card;
+}
+
+async function loadApprovedKnowledgeCandidate(db: Pick<KnowledgeSearchDb, "select">, cardId: string): Promise<{
+  card: Omit<KnowledgeSearchResult, "score"> | null;
+  contentVersion: number | null;
+  exclusion: { knowledgeState: string; verificationState: string; reasons: KnowledgeTravelerPolicyReason[] } | null;
+}> {
   const rows = await db
     .select({
       card: {
@@ -287,16 +304,44 @@ async function loadEligibleApprovedCard(db: Pick<KnowledgeSearchDb, "select">, c
     ? evaluateKnowledgeTravelerPolicy({ ...card, ...evidence })
     : { policy: "exclude" as const, reasons: ["missing_traveler_safe_evidence" as const] };
   if (!grouped || !card || !evidence || evaluation.policy === "exclude" || validatedSources.length === 0) {
-    return null;
+    return {
+      card: null,
+      contentVersion: card?.contentVersion ?? null,
+      exclusion: card ? { knowledgeState: card.knowledgeState, verificationState: card.verificationState, reasons: evaluation.reasons } : null,
+    };
   }
 
   return {
-    ...grouped,
-    policy: evaluation.policy,
-    policyReasons: evaluation.reasons,
-    sources: validatedSources,
-    evidence: evidence.rows.map(toKnowledgeSearchEvidence),
+    card: {
+      ...grouped,
+      policy: evaluation.policy,
+      policyReasons: evaluation.reasons,
+      sources: validatedSources,
+      evidence: evidence.rows.map(toKnowledgeSearchEvidence),
+    },
+    contentVersion: card.contentVersion,
+    exclusion: null,
   };
+}
+
+function emptyKnowledgeSearchPolicySummary(): KnowledgeSearchPolicySummary {
+  return { excludedPolicyCounts: { conflict: 0, verificationRequired: 0, other: 0 }, excludedReasonCodes: [] };
+}
+
+function recordExcludedCandidatePolicy(summary: KnowledgeSearchPolicySummary, exclusion: { knowledgeState: string; verificationState: string; reasons: KnowledgeTravelerPolicyReason[] }) {
+  if (exclusion.knowledgeState === "conflicted") {
+    summary.excludedPolicyCounts.conflict += 1;
+  } else if (exclusion.verificationState === "required" || exclusion.verificationState === "failed") {
+    summary.excludedPolicyCounts.verificationRequired += 1;
+  } else {
+    summary.excludedPolicyCounts.other += 1;
+  }
+
+  for (const reason of exclusion.reasons) {
+    if (!summary.excludedReasonCodes.includes(reason)) {
+      summary.excludedReasonCodes.push(reason);
+    }
+  }
 }
 
 async function loadActiveSupportingEvidence(db: Pick<KnowledgeSearchDb, "select">, cardId: string) {

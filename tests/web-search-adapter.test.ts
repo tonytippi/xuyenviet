@@ -26,6 +26,7 @@ describe("web search adapter", () => {
         { title: "Official Hue Ticket", url: "https://hue.gov.vn/ticket", content: "Giá vé chính thức", score: 0.8 },
         { title: "Hotel Provider", url: "https://hotel.example/rooms", content: "Còn phòng", score: 0.7 },
         { title: "Low quality official", url: "https://official.example/low", content: "Không đủ điểm", score: 0.1 },
+        { title: "Unscored result", url: "https://example.com/unscored", content: "Không có tín hiệu xếp hạng" },
         { title: "Missing URL", content: "Không dùng được", score: 0.9 },
       ],
     }), { status: 200 }));
@@ -88,6 +89,11 @@ describe("web search adapter", () => {
       triggerReasons: ["no_active_knowledge"],
       fetcher: vi.fn(async () => new Response(JSON.stringify({ results: [{ title: "Low", url: "https://example.com", content: "x", score: 0.1 }] }), { status: 200 })),
     });
+    const unscoredLowQuality = await searchWebForSourceBundle({
+      query: "Huế",
+      triggerReasons: ["no_active_knowledge"],
+      fetcher: vi.fn(async () => new Response(JSON.stringify({ results: [{ title: "Unscored", url: "https://example.com", content: "x" }] }), { status: 200 })),
+    });
     const timeout = await searchWebForSourceBundle({
       query: "Huế",
       triggerReasons: ["no_active_knowledge"],
@@ -118,6 +124,7 @@ describe("web search adapter", () => {
     expect(invalidResponse).toMatchObject({ ok: false, code: "invalid_provider_response", attempt: { provider: "tavily", mechanism: "search", status: "failure", errorCode: "invalid_provider_response" } });
     expect(invalidJson).toMatchObject({ ok: false, code: "invalid_provider_response", attempt: { provider: "tavily", mechanism: "search", status: "failure", errorCode: "invalid_provider_response" } });
     expect(lowQuality).toMatchObject({ ok: false, code: "low_quality_results", attempt: { provider: "tavily", mechanism: "search", status: "failure", errorCode: "low_quality_results" } });
+    expect(unscoredLowQuality).toMatchObject({ ok: false, code: "low_quality_results", attempt: { provider: "tavily", mechanism: "search", status: "failure", errorCode: "low_quality_results" } });
     expect(timeout).toMatchObject({ ok: false, code: "provider_timeout", attempt: { provider: "tavily", mechanism: "search", status: "failure", errorCode: "provider_timeout" } });
     expect(emptyQuery).toMatchObject({ ok: false, code: "empty_query", attempt: { provider: "tavily", mechanism: "search", status: "failure", errorCode: "empty_query" } });
     expect(oversizedResponse).toMatchObject({ ok: false, code: "invalid_provider_response", attempt: { provider: "tavily", mechanism: "search", status: "failure", errorCode: "invalid_provider_response" } });

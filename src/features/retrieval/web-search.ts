@@ -174,7 +174,7 @@ export function normalizeTavilyResults({
   return payload.results
     .map((result) => normalizeTavilyResult(result, query, triggerReason, checkedAt))
     .filter((result): result is Omit<NormalizedWebSearchResult, "rank"> => Boolean(result))
-    .filter((result) => result.providerScore === undefined || result.providerScore >= minProviderScore)
+    .filter((result) => result.providerScore !== undefined && result.providerScore >= minProviderScore)
     .sort(compareWebResults)
     .slice(0, maxResults)
     .map((result, index) => ({ ...result, rank: index + 1 }));

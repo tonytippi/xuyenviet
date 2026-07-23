@@ -116,7 +116,14 @@ export async function assembleContextPrioritySourceBundle({
     conflicts: answerContext.conflicts,
   };
 
-  const retrievalDecision = decideWebSearchFallback({ question, knowledge, approvedKnowledgeCandidateCount, chatTripContext, warnings });
+  const retrievalDecision = decideWebSearchFallback({
+    question,
+    knowledge,
+    approvedKnowledgeCandidateCount,
+    chatTripContext,
+    warnings,
+    policySummary: knowledgeResult.status === "fulfilled" ? knowledgeResult.value.policySummary : undefined,
+  });
   const web = await loadTriggeredWebSearch({ userId, conversationId, userMessageId, webSearchUsageContext, question, retrievalDecision, warnings, abortSignal });
 
   return {

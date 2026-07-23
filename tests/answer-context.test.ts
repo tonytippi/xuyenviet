@@ -1113,6 +1113,28 @@ describe("answer context assembly", () => {
     expect(section).not.toContain("missing_traveler_safe_evidence");
   });
 
+  test("source bundle propagates retrieval exclusion policy into production fallback decisions", async () => {
+    await createTestUser("user-1");
+    const { conversation, message } = await createConversationWithUserMessage({ userId: "user-1" });
+    const searchWebForSourceBundle = vi.fn().mockResolvedValue({ ok: false, code: "low_quality_results", attempt: { provider: "tavily", mechanism: "search", latencyMs: 1, status: "failure", errorCode: "low_quality_results" } });
+    vi.doMock("@/features/retrieval/approved-knowledge", () => ({
+      loadApprovedKnowledgeForAiAsk: vi.fn().mockResolvedValue({ results: [], candidateCount: 0, policySummary: { excludedPolicyCounts: { conflict: 1, verificationRequired: 1, other: 0 }, excludedReasonCodes: ["verification_failed"] } }),
+      buildApprovedKnowledgePromptSection: vi.fn().mockReturnValue(""),
+    }));
+    vi.doMock("@/features/retrieval/web-search", () => ({ searchWebForSourceBundle, captureWebSearchResults: vi.fn() }));
+    const { assembleContextPrioritySourceBundle, buildSourceBundlePromptSection } = await import("@/features/retrieval/source-bundle");
+
+    const bundle = await assembleContextPrioritySourceBundle({ userId: "user-1", conversationId: conversation.id, userMessageId: message.id, question: "Có nên dừng ở Huế không?" });
+
+    expect(bundle.retrievalDecision.webSearchTriggerReasons).toEqual(expect.arrayContaining(["excluded_conflict_candidate", "excluded_verification_required_candidate"]));
+    expect(bundle.retrievalDecision.knowledgePolicySummary).toMatchObject({ excludedPolicyCounts: { conflict: 1, verificationRequired: 1 } });
+    expect(buildSourceBundlePromptSection(bundle)).not.toContain("verification_failed");
+    expect(searchWebForSourceBundle).toHaveBeenCalled();
+    vi.doUnmock("@/features/retrieval/approved-knowledge");
+    vi.doUnmock("@/features/retrieval/web-search");
+    vi.resetModules();
+  });
+
   test("source bundle prompt renders web fallback decision without claiming web search ran", async () => {
     const { buildSourceBundlePromptSection } = await import("@/features/retrieval/source-bundle");
 
@@ -1874,7 +1896,7 @@ describe("answer context assembly", () => {
     expect(doneEvent?.assistantMessage?.provenance?.map((item) => item.sourceCategory)).toEqual(["trip_context", "chat_context", "knowledge", "web", "general"]);
     expect(doneEvent?.assistantMessage?.provenance).toEqual(expect.arrayContaining([
       expect.objectContaining({ sourceCategory: "knowledge", title: expect.stringContaining("Bãi đỗ xe an toàn ở Huế"), confidenceLabel: "official", verificationStatus: "verified" }),
-      expect.objectContaining({ sourceCategory: "web", title: expect.stringContaining("Cổng thông tin Huế"), confidenceLabel: "chưa xác minh", verificationStatus: "unverified", url: "https://hue.gov.vn/ticket", freshnessSensitive: true }),
+      expect.objectContaining({ sourceCategory: "web", title: "Nguồn web chưa xác minh", confidenceLabel: "chưa xác minh", verificationStatus: "unverified", url: null, freshnessSensitive: true }),
       expect.objectContaining({ sourceCategory: "general", title: "Suy luận tổng quát của AI", confidenceLabel: "suy luận chưa xác minh" }),
     ]));
     expect(assistantMessage).toBeDefined();
@@ -1945,6 +1967,15 @@ describe("answer context assembly", () => {
     expect(inserted).toEqual(expect.arrayContaining([
       expect.objectContaining({ sourceCategory: "web", confidenceLabel: "chưa xác minh", verificationStatus: "unverified", freshnessSensitive: true }),
     ]));
+    const [webRow] = await testDb.select().from(assistantResponseProvenance).where(eq(assistantResponseProvenance.sourceCategory, "web"));
+    const snapshot = JSON.stringify(webRow?.sourceSnapshot);
+    expect(snapshot).toContain("persistedWebSearchResultId");
+    expect(snapshot).not.toContain("Giá hiện tại?");
+    expect(snapshot).not.toContain("Bảng giá");
+    expect(snapshot).not.toContain("example.com/price");
+    expect(snapshot).not.toContain("Tham khảo.");
+    expect(snapshot).not.toContain("tavily");
+    expect(snapshot).not.toContain("providerScore");
   });
 
   test("failed or low-confidence web fallback forces a deterministic verification notice", async () => {

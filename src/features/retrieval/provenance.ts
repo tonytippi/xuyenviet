@@ -158,12 +158,6 @@ function buildProvenanceRows({
       verificationStatus: "unverified",
       usedInPrompt: promptSection.includes(`url=${formatPromptValue(result.url, 300)}`) || promptSection.includes(`title=${formatPromptValue(result.title, 180)}`),
       sourceSnapshot: {
-        query: result.query,
-        title: result.title,
-        url: result.url,
-        snippet: result.snippet,
-        provider: result.provider,
-        providerScore: result.providerScore,
         checkedAt: formatDateSnapshot(result.checkedAt),
         sourceType: result.sourceType,
         confidence: result.confidence,

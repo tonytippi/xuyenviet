@@ -32,9 +32,15 @@ so that changing road-trip details are handled honestly.
     - [x] Preserve atomic final persistence of assistant message, retrieval decision, row-per-source provenance, and answer usage. Record web capture linkage safely without raw provider content in usage/audit rows.
     - [x] Use the selected managed AI Gateway model pricing and provider usage metadata to estimate input, output, cache-read, cache-write, and total costs where pricing is available; preserve missing-cost metadata otherwise. Do not store raw prompts, responses, or provider payloads in usage events.
 - [x] Add fallback, persistence, and usage-cost tests (AC: 1-4)
-    - [x] Cover absent, sparse broad-question, freshness, uncertain, conflicted, caveat-only, successful, failed, and low-confidence search paths, including excluded-conflict and excluded-verification-required candidates that trigger fallback without exposing their facts.
-    - [x] Prove stored records identify selected policy/state/version and persisted web IDs, and no raw source/provider data leaks into snapshots or usage events.
-    - [x] Prove authenticated answer usage records the required model/context/status metadata and correctly derives configured pricing costs; prove absent pricing produces safe missing-cost metadata without failing answer finalization.
+     - [x] Cover absent, sparse broad-question, freshness, uncertain, conflicted, caveat-only, successful, failed, and low-confidence search paths, including excluded-conflict and excluded-verification-required candidates that trigger fallback without exposing their facts.
+     - [x] Prove stored records identify selected policy/state/version and persisted web IDs, and no raw source/provider data leaks into snapshots or usage events.
+     - [x] Prove authenticated answer usage records the required model/context/status metadata and correctly derives configured pricing costs; prove absent pricing produces safe missing-cost metadata without failing answer finalization.
+
+### Review Findings
+
+- [x] [Review][Patch] Propagate excluded candidate policy outcomes into production fallback [src/features/retrieval/source-bundle.ts:119] — retrieval returns safe aggregate exclusion counts/reason codes and the production bundle passes them to `decideWebSearchFallback`.
+- [x] [Review][Patch] Remove raw external content from provenance snapshots [src/features/retrieval/provenance.ts:160] — web provenance now persists only stable linkage and safe decision metadata.
+- [x] [Review][Patch] Treat missing provider scores as low-confidence external results [src/features/retrieval/web-search.ts:177] — unscored provider results are rejected as low quality.
 
 ## Dev Notes
 
@@ -75,6 +81,7 @@ gpu4ai/gpt-5.6-terra-review
 - Captured stable `web_search_results` IDs before finalization and persisted those IDs in row-per-source web provenance without provider payload data.
 - Added deterministic Vietnamese verification guidance for failed or low-quality web fallback and explicit missing-pricing usage metadata.
 - Verified with `pnpm test:run` (684/684), `pnpm typecheck`, `pnpm lint` (3 pre-existing warnings only), and `pnpm build`.
+- 2026-07-23: Repaired review findings: production retrieval now propagates only safe exclusion aggregates into fallback decisions, web provenance snapshots retain only stable linkage and safe metadata, and unscored provider results fail as low quality. Verified with `pnpm test:run tests/web-search-adapter.test.ts tests/answer-context.test.ts` (88/88) and `pnpm typecheck`.
 
 ### File List
 
@@ -97,3 +104,4 @@ gpu4ai/gpt-5.6-terra-review
 ### Change Log
 
 - 2026-07-23: Implemented state-aware web fallback, persisted provenance/usage contract updates, migrations, and regression coverage; marked ready for review.
+- 2026-07-23: Fixed the three actionable Story 4.5 review findings; status synchronized to review.
