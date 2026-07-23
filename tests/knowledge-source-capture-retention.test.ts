@@ -1,14 +1,14 @@
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test } from "vitest";
 
-import { auditEvents, knowledgeExtractionJobs, knowledgeIngestionJobs, sourceCaptureVersions, sources, userRoles, users } from "@/db/schema";
+import { auditEvents, knowledgeCardEvidence, knowledgeCardSources, knowledgeCards, knowledgeExtractionJobs, knowledgeIngestionJobs, rawSourceMaterial, sourceCaptureVersions, sources, userRoles, users } from "@/db/schema";
 import { hashCaptureText, retainExpiredFacebookCaptureVersions, validateSafeCaptureMetadata } from "@/features/knowledge/source-captures";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
 
-async function createCandidate(id: string, capturedAt: Date) {
-  await testDb.insert(sources).values({ id, kind: "facebook", url: `https://facebook.com/${id}`, label: id, sourceType: "community", verificationStatus: "unverified", official: false, partner: false, submittedByUserId: "operator" });
-  await testDb.insert(sourceCaptureVersions).values({ id: `version-${id}`, sourceId: id, versionSequence: 1, captureKind: "facebook", rawText: "Operator-only capture", rawMetadata: { kind: "facebook_operator", captureMethod: "playwright_operator_browser", capturedAt: capturedAt.toISOString(), sourceUrl: `https://facebook.com/${id}`, finalUrl: `https://facebook.com/${id}` }, contentHash: hashCaptureText("Operator-only capture"), capturedAt });
+async function createCandidate(id: string, capturedAt: Date, kind: "facebook" | "pasted_text" = "facebook") {
+  await testDb.insert(sources).values({ id, kind, ...(kind === "facebook" ? { url: `https://facebook.com/${id}` } : {}), label: id, sourceType: "community", verificationStatus: "unverified", official: false, partner: false, submittedByUserId: "operator" });
+  await testDb.insert(sourceCaptureVersions).values({ id: `version-${id}`, sourceId: id, versionSequence: 1, captureKind: kind, rawText: "Operator-only capture", rawMetadata: kind === "facebook" ? { kind: "facebook_operator", captureMethod: "playwright_operator_browser", capturedAt: capturedAt.toISOString(), sourceUrl: `https://facebook.com/${id}`, finalUrl: `https://facebook.com/${id}` } : { kind: "submitted" }, contentHash: hashCaptureText("Operator-only capture"), capturedAt });
   await testDb.update(sources).set({ currentCaptureVersionId: `version-${id}` }).where(eq(sources.id, id));
 }
 
@@ -38,6 +38,28 @@ describe("source capture retention", () => {
     await expect(retainExpiredFacebookCaptureVersions({ actorUserId: "operator", actorEmail: "wrong@example.com", dryRun: false, now }, testDb)).rejects.toThrow("matching existing user");
     await retainExpiredFacebookCaptureVersions({ actorUserId: "operator", actorEmail: "operator@example.com", dryRun: false, now }, testDb);
     await expect(retainExpiredFacebookCaptureVersions({ actorUserId: "operator", actorEmail: "operator@example.com", dryRun: false, now }, testDb)).resolves.toMatchObject({ tombstonedVersionIds: [] });
+  });
+
+  test("tombstones inactive non-Facebook captures and their migrated legacy payload", async () => {
+    const now = new Date("2026-07-21T00:00:00.000Z");
+    await createCandidate("legacy", new Date("2026-01-22T00:00:00.000Z"), "pasted_text");
+    await testDb.insert(rawSourceMaterial).values({ sourceId: "legacy", rawText: "Operator-only capture" });
+
+    await expect(retainExpiredFacebookCaptureVersions({ actorUserId: "operator", actorEmail: "operator@example.com", dryRun: false, now }, testDb)).resolves.toMatchObject({ tombstonedVersionIds: ["version-legacy"] });
+    await expect(testDb.select({ rawText: sourceCaptureVersions.rawText }).from(sourceCaptureVersions).where(eq(sourceCaptureVersions.id, "version-legacy"))).resolves.toEqual([{ rawText: null }]);
+    await expect(testDb.select({ rawText: rawSourceMaterial.rawText }).from(rawSourceMaterial).where(eq(rawSourceMaterial.sourceId, "legacy"))).resolves.toEqual([{ rawText: null }]);
+  });
+
+  test("does not retain an expired capture only because a newer version supports a card", async () => {
+    const now = new Date("2026-07-21T00:00:00.000Z");
+    await createCandidate("recaptured", new Date("2026-01-22T00:00:00.000Z"));
+    await testDb.insert(sourceCaptureVersions).values({ id: "version-recaptured-new", sourceId: "recaptured", versionSequence: 2, captureKind: "facebook", rawText: "New capture", rawMetadata: { kind: "facebook_operator", captureMethod: "playwright_operator_browser", capturedAt: now.toISOString(), sourceUrl: "https://facebook.com/recaptured", finalUrl: "https://facebook.com/recaptured" }, contentHash: hashCaptureText("New capture"), capturedAt: now });
+    await testDb.update(sources).set({ currentCaptureVersionId: "version-recaptured-new" }).where(eq(sources.id, "recaptured"));
+    await testDb.insert(knowledgeCards).values({ id: "active-card", status: "approved", publicationState: "active", knowledgeState: "community_observation", reviewState: "reviewed", verificationState: "not_required", type: "place", title: "Điểm dừng", summary: "Điểm dừng hợp lệ.", locationName: "Huế", confidence: "community", needsReview: false, aiPromptVersion: "test", createdByUserId: "operator" });
+    await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: "active-card", sourceId: "recaptured", supportLevel: "primary" });
+    await testDb.insert(knowledgeCardEvidence).values({ knowledgeCardId: "active-card", sourceId: "recaptured", captureVersionId: "version-recaptured-new", quoteText: "New capture", spanStart: 0, spanEnd: 11, observedAt: now, capturedAt: now, independenceKey: "recaptured" });
+
+    await expect(retainExpiredFacebookCaptureVersions({ actorUserId: "operator", actorEmail: "operator@example.com", dryRun: false, now }, testDb)).resolves.toMatchObject({ tombstonedVersionIds: ["version-recaptured"] });
   });
 
   test("rejects traveler actors and blocks unbackfilled active jobs", async () => {

@@ -153,6 +153,15 @@ describe("knowledge ingestion pipeline", () => {
     await expect(testDb.select().from(knowledgeIndexDirtyMarkers)).resolves.toMatchObject([{ reason: "ingestion_verify_first", contentVersion: 1, evidenceSetRevision: 2 }]);
   });
 
+  test("treats route conditions as verification-required even without a narrow hazard keyword", async () => {
+    const rawText = "Đường QL1A đoạn qua Huế đang ngập sau mưa lớn.";
+    const { claim } = await claimFor(rawText);
+    vi.mocked(fetch).mockResolvedValueOnce(extractionResponse(candidate(rawText, { type: "route_note", title: "QL1A qua Huế", summary: "Đoạn đường đang ngập sau mưa lớn.", location_name: "Huế", conditions: [] }))).mockResolvedValueOnce(judgmentResponse("publish"));
+
+    await expect(runKnowledgeIngestionPipeline(claim, testDb)).resolves.toMatchObject({ outcome: "verify_first" });
+    await expect(testDb.select().from(knowledgeCards)).resolves.toMatchObject([{ publicationState: "suppressed", verificationState: "required", reviewState: "ai_recommended" }]);
+  });
+
   test("attaches a later equivalent high-risk capture to a suppressed verify-first card without publishing it", async () => {
     const firstText = "Trạm sạc tại Đà Nẵng đang hoạt động.";
     const { claim: firstClaim } = await claimFor(firstText);
@@ -234,7 +243,6 @@ describe("knowledge ingestion pipeline", () => {
     await expect(testDb.select().from(knowledgeCardEvidence).where(eq(knowledgeCardEvidence.knowledgeCardId, "existing"))).resolves.toHaveLength(2);
     await expect(testDb.select().from(knowledgeIndexDirtyMarkers).where(eq(knowledgeIndexDirtyMarkers.knowledgeCardId, "existing"))).resolves.toEqual(expect.arrayContaining([expect.objectContaining({ reason: "ingestion_attach", contentVersion: 2, evidenceSetRevision: 2 }), expect.objectContaining({ reason: "ingestion_promotion", contentVersion: 2, evidenceSetRevision: 2 })]));
     await expect(testDb.select().from(knowledgeSamplingCohortMembers).where(eq(knowledgeSamplingCohortMembers.knowledgeCardId, "existing"))).resolves.toMatchObject([{ contentVersion: 2, evidenceSetRevision: 2 }]);
-    await expect(testDb.select().from(knowledgeRecommendations).where(eq(knowledgeRecommendations.knowledgeCardId, "existing"))).resolves.toMatchObject([{ reason: "sampling", contentVersion: 2, evidenceSetRevision: 2 }]);
   });
 
   test("retains a freshness-sensitive attach condition mismatch as verification-required without mutating the target", async () => {

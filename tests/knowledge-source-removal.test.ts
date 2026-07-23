@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test } from "vitest";
 
-import { auditEvents, knowledgeCardEvidence, knowledgeCardSearchDocuments, knowledgeCards, knowledgeIndexDirtyMarkers, knowledgeCardSources, sourceCaptureVersions, sources, users } from "@/db/schema";
+import { auditEvents, knowledgeCardEvidence, knowledgeCardSearchDocuments, knowledgeCards, knowledgeIndexDirtyMarkers, knowledgeCardSources, knowledgeSourceSuggestions, sourceCaptureVersions, sources, users } from "@/db/schema";
 import { removeKnowledgeSource } from "@/features/knowledge/source-removal";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
@@ -75,5 +75,13 @@ describe("knowledge source removal", () => {
 
     await removeKnowledgeSource({ sourceId: "removed-source", reason: "withdrawn", actor: { userId: "operator", email: "operator@example.com" } }, testDb);
     await expect(testDb.select({ knowledgeState: knowledgeCards.knowledgeState, contentVersion: knowledgeCards.contentVersion }).from(knowledgeCards).where(eq(knowledgeCards.id, "pattern-card"))).resolves.toEqual([{ knowledgeState: "community_observation", contentVersion: 2 }]);
+  });
+
+  test("removes operational source suggestions with the withdrawn source", async () => {
+    await source("removed-source");
+    await testDb.insert(knowledgeSourceSuggestions).values({ sourceId: "removed-source", action: "no_action", aiPromptVersion: "test", createdByUserId: "operator" });
+
+    await removeKnowledgeSource({ sourceId: "removed-source", reason: "withdrawn", actor: { userId: "operator", email: "operator@example.com" } }, testDb);
+    await expect(testDb.select().from(knowledgeSourceSuggestions).where(eq(knowledgeSourceSuggestions.sourceId, "removed-source"))).resolves.toEqual([]);
   });
 });

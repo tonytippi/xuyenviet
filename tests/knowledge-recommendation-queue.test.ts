@@ -56,6 +56,19 @@ describe("knowledge recommendation queue", () => {
     ]);
   });
 
+  test("supersedes in-review work when a material resolution changes the card version", async () => {
+    await scheduleKnowledgeRecommendation({ cardId: "card", contentVersion: 1, evidenceSetRevision: 1, reason: "risk" }, testDb);
+    await scheduleKnowledgeRecommendation({ cardId: "card", contentVersion: 1, evidenceSetRevision: 1, reason: "weak_evidence" }, testDb);
+    const recommendations = await testDb.select().from(knowledgeRecommendations).orderBy(knowledgeRecommendations.priority);
+    const current = recommendations[0];
+    const stale = recommendations[1];
+    if (!current || !stale) throw new Error("expected recommendations");
+    await testDb.update(knowledgeRecommendations).set({ status: "in_review" }).where(eq(knowledgeRecommendations.id, stale.id));
+
+    await expect(resolveKnowledgeRecommendation({ recommendationId: current.id, expectedContentVersion: 1, expectedEvidenceSetRevision: 1, action: "suppress", actor: { userId: "operator", email: "operator@example.com" } }, testDb)).resolves.toMatchObject({ status: "resolved" });
+    await expect(testDb.select({ status: knowledgeRecommendations.status }).from(knowledgeRecommendations).where(eq(knowledgeRecommendations.id, stale.id))).resolves.toEqual([{ status: "superseded" }]);
+  });
+
   test("suppression resolves atomically, marks dirty, and disables the active projection", async () => {
     await scheduleKnowledgeRecommendation({ cardId: "card", contentVersion: 1, evidenceSetRevision: 1, reason: "risk" }, testDb);
     const [recommendation] = await testDb.select().from(knowledgeRecommendations);

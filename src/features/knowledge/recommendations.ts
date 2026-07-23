@@ -103,6 +103,10 @@ async function scheduleKnowledgeRecommendationInTransaction(input: { cardId: str
 
 export async function resolveKnowledgeRecommendation(input: { recommendationId: string; expectedContentVersion: number; expectedEvidenceSetRevision: number; action: KnowledgeRecommendationAction; actor: RecommendationActor; editSummary?: string; samplingDispositionReason?: string; samplingRationale?: string; highSeverity?: boolean }, db: RecommendationDb = getDb()) {
   return db.transaction(async (tx) => {
+    const [reference] = await tx.select({ knowledgeCardId: knowledgeRecommendations.knowledgeCardId }).from(knowledgeRecommendations).where(eq(knowledgeRecommendations.id, input.recommendationId)).limit(1);
+    if (!reference) return { status: "unavailable" as const };
+    // Source removal and pipeline mutations take the card lock before recommendation rows.
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${reference.knowledgeCardId}, 46))`);
     const [recommendation] = await tx.select().from(knowledgeRecommendations).where(eq(knowledgeRecommendations.id, input.recommendationId)).limit(1).for("update");
     if (!recommendation || !["open", "in_review"].includes(recommendation.status)) return { status: "unavailable" as const };
     if (!isCompatibleResolution(recommendation.reason, input.action)) return { status: "invalid_action" as const };
@@ -154,7 +158,7 @@ export async function resolveKnowledgeRecommendation(input: { recommendationId: 
     };
     await tx.update(knowledgeCards).set(next).where(eq(knowledgeCards.id, card.id));
     await tx.update(knowledgeRecommendations).set({ status: "resolved", resolution, samplingDispositionReason: samplingDisposition?.reason ?? null, samplingRationale: samplingDisposition?.rationale ?? null, resolvedByUserId: input.actor.userId, resolvedAt: new Date(), updatedAt: new Date() }).where(eq(knowledgeRecommendations.id, recommendation.id));
-    if (material) await tx.update(knowledgeRecommendations).set({ status: "superseded", resolution: "accepted", resolvedByUserId: input.actor.userId, resolvedAt: new Date(), updatedAt: new Date() }).where(and(eq(knowledgeRecommendations.knowledgeCardId, card.id), eq(knowledgeRecommendations.status, "open"), sql`${knowledgeRecommendations.id} <> ${recommendation.id}`));
+    if (material) await tx.update(knowledgeRecommendations).set({ status: "superseded", resolution: "accepted", resolvedByUserId: input.actor.userId, resolvedAt: new Date(), updatedAt: new Date() }).where(and(eq(knowledgeRecommendations.knowledgeCardId, card.id), sql`${knowledgeRecommendations.status} in ('open', 'in_review')`, sql`${knowledgeRecommendations.id} <> ${recommendation.id}`));
     const auditSummary = input.action === "resolve_relation"
       ? `Resolved ${recommendation.reason} recommendation with resolve_relation${hasRemainingSupport ? "" : " without reactivation because supporting evidence is insufficient"}. Final card contentVersion=${next.contentVersion}, evidenceSetRevision=${next.evidenceSetRevision}, publicationState=${next.publicationState}.`
       : input.action === "sampling_pass" || input.action === "sampling_fail"

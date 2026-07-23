@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { and, desc, eq, inArray, isNull, lte, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { auditEvents, facebookCaptureReviews, knowledgeCards, knowledgeCardSources, knowledgeExtractionJobs, knowledgeIngestionJobs, sourceCaptureVersions, sources, userRoles, users, type SourceKind } from "@/db/schema";
+import { auditEvents, facebookCaptureReviews, knowledgeCardEvidence, knowledgeCards, knowledgeExtractionJobs, knowledgeIngestionJobs, rawSourceMaterial, sourceCaptureVersions, sources, userRoles, users, type SourceKind } from "@/db/schema";
 import { ensureIngestionJobForCaptureVersion } from "@/features/knowledge/ingestion-jobs";
 
 const submittedKinds = new Set<SourceKind>(["url", "copied_post", "pasted_text", "screenshot"]);
@@ -161,7 +161,7 @@ export async function retainExpiredFacebookCaptureVersions(
   const candidates = await db
     .select({ id: sourceCaptureVersions.id, sourceId: sourceCaptureVersions.sourceId })
     .from(sourceCaptureVersions)
-    .where(and(eq(sourceCaptureVersions.captureKind, "facebook"), isNull(sourceCaptureVersions.payloadDeletedAt), lte(sourceCaptureVersions.capturedAt, cutoff)))
+    .where(and(isNull(sourceCaptureVersions.payloadDeletedAt), lte(sourceCaptureVersions.capturedAt, cutoff)))
     .orderBy(sourceCaptureVersions.capturedAt)
     .limit(Math.min(Math.max(input.limit ?? retentionCandidateLimit, 1), retentionCandidateLimit));
   const tombstoned: string[] = [];
@@ -172,7 +172,7 @@ export async function retainExpiredFacebookCaptureVersions(
       // Publish and capture retention acquire locks in this order to prevent circular waits.
       await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${candidate.sourceId}, 44))`);
       const [version] = await transaction
-        .select({ id: sourceCaptureVersions.id, sourceId: sourceCaptureVersions.sourceId, capturedAt: sourceCaptureVersions.capturedAt, payloadDeletedAt: sourceCaptureVersions.payloadDeletedAt })
+        .select({ id: sourceCaptureVersions.id, sourceId: sourceCaptureVersions.sourceId, versionSequence: sourceCaptureVersions.versionSequence, capturedAt: sourceCaptureVersions.capturedAt, payloadDeletedAt: sourceCaptureVersions.payloadDeletedAt })
         .from(sourceCaptureVersions)
         .where(eq(sourceCaptureVersions.id, candidate.id))
         .limit(1)
@@ -183,10 +183,14 @@ export async function retainExpiredFacebookCaptureVersions(
       if (!current || await hasRetentionBlocker(transaction, version.sourceId, version.id)) return "blocked" as const;
       if (input.dryRun) return "would_tombstone" as const;
 
-      const [updated] = await transaction.update(sourceCaptureVersions).set({ rawText: null, fileName: null, mimeType: null, byteSize: null, storageKey: null, rawMetadata: null, payloadDeletedAt: now }).where(and(eq(sourceCaptureVersions.id, version.id), isNull(sourceCaptureVersions.payloadDeletedAt))).returning({ id: sourceCaptureVersions.id });
-      if (!updated) return "skip" as const;
-      if (current.currentCaptureVersionId === version.id) await transaction.update(sources).set({ currentCaptureVersionId: null }).where(and(eq(sources.id, version.sourceId), eq(sources.currentCaptureVersionId, version.id)));
-      await transaction.insert(auditEvents).values({ actorUserId, actorEmail, operation: "delete", targetType: "source_capture_version_retention", targetId: version.id, afterSummary: `Retention tombstoned Facebook capture version; sourceId=${version.sourceId}; basis=captured_at_180_days.` , createdAt: now });
+       const [updated] = await transaction.update(sourceCaptureVersions).set({ rawText: null, fileName: null, mimeType: null, byteSize: null, storageKey: null, rawMetadata: null, payloadDeletedAt: now }).where(and(eq(sourceCaptureVersions.id, version.id), isNull(sourceCaptureVersions.payloadDeletedAt))).returning({ id: sourceCaptureVersions.id });
+       if (!updated) return "skip" as const;
+       // Legacy material was copied into the first immutable capture version.
+       if (version.versionSequence === 1) {
+         await transaction.update(rawSourceMaterial).set({ rawText: null, fileName: null, mimeType: null, byteSize: null, storageKey: null, rawMetadata: null }).where(eq(rawSourceMaterial.sourceId, version.sourceId));
+       }
+       if (current.currentCaptureVersionId === version.id) await transaction.update(sources).set({ currentCaptureVersionId: null }).where(and(eq(sources.id, version.sourceId), eq(sources.currentCaptureVersionId, version.id)));
+       await transaction.insert(auditEvents).values({ actorUserId, actorEmail, operation: "delete", targetType: "source_capture_version_retention", targetId: version.id, afterSummary: `Retention tombstoned capture version; sourceId=${version.sourceId}; basis=captured_at_180_days.` , createdAt: now });
       return "tombstoned" as const;
     });
     if (outcome === "tombstoned" || outcome === "would_tombstone") tombstoned.push(candidate.id);
@@ -196,7 +200,7 @@ export async function retainExpiredFacebookCaptureVersions(
 }
 
 async function hasRetentionBlocker(db: Pick<ReturnType<typeof getDb>, "select">, sourceId: string, versionId: string) {
-  const [card] = await db.select({ id: knowledgeCards.id }).from(knowledgeCardSources).innerJoin(knowledgeCards, eq(knowledgeCards.id, knowledgeCardSources.knowledgeCardId)).where(and(eq(knowledgeCardSources.sourceId, sourceId), sql`(${knowledgeCards.publicationState} = 'active' or ${knowledgeCards.reviewState} in ('ai_recommended', 'in_review'))`)).limit(1);
+  const [card] = await db.select({ id: knowledgeCards.id }).from(knowledgeCardEvidence).innerJoin(knowledgeCards, eq(knowledgeCards.id, knowledgeCardEvidence.knowledgeCardId)).where(and(eq(knowledgeCardEvidence.sourceId, sourceId), eq(knowledgeCardEvidence.captureVersionId, versionId), eq(knowledgeCardEvidence.state, "active"), sql`(${knowledgeCards.publicationState} = 'active' or ${knowledgeCards.reviewState} in ('ai_recommended', 'in_review'))`)).limit(1);
   if (card) return true;
   const [review] = await db.select({ id: facebookCaptureReviews.id }).from(facebookCaptureReviews).where(and(eq(facebookCaptureReviews.captureVersionId, versionId), inArray(facebookCaptureReviews.status, ["needs_review", "extraction_failed"]))).limit(1);
   if (review) return true;
