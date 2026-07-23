@@ -4,7 +4,7 @@ baseline_commit: 1be68130079ae2903d457ea0231ecb7a144445ab
 
 # Story 4.2: Index Current AI-First Knowledge Versions
 
-Status: review
+Status: done
 
 ## Story
 
@@ -130,3 +130,4 @@ gpu4ai/gpt-5.6-terra-review
 
 - 2026-07-23: Implemented versioned, fenced knowledge indexing queue, projection worker, backfill path, producer mutation boundaries, migration, and regression coverage; marked ready for review.
 - 2026-07-23: Addressed all seven actionable review findings; added worker/backfill and YouTube source-label invalidation coverage; marked review.
+- 2026-07-23: Review accepted after the indexing review-fix commits; marked done.
