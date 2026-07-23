@@ -88,8 +88,25 @@ async function getAuthenticatedAiAskRedirect(searchParams: Record<string, string
 
   const { default: AiAskPage } = await import("@/app/ai-ask/page");
 
-  await expect(AiAskPage({ searchParams: Promise.resolve(searchParams) })).rejects.toThrow(/^redirect:/);
-  return redirect.mock.calls[0]?.[0];
+  try {
+    await AiAskPage({ searchParams: Promise.resolve(searchParams) });
+  } catch (error) {
+    const mockedRedirectUrl = redirect.mock.calls[0]?.[0];
+
+    if (mockedRedirectUrl) {
+      return mockedRedirectUrl;
+    }
+
+    const nextRedirectUrl = error instanceof Error ? error.message.match(/^NEXT_REDIRECT:(.+)$/)?.[1] : undefined;
+
+    if (nextRedirectUrl) {
+      return nextRedirectUrl;
+    }
+
+    throw error;
+  }
+
+  throw new Error("Expected AI Ask page to redirect.");
 }
 
 function getGatewayRequestMessages(fetchMock: ReturnType<typeof vi.fn>, callIndex = 0) {
@@ -378,12 +395,62 @@ describe("AI Ask authenticated shell", () => {
     expect(html).toContain("chưa xác minh");
     expect(html).toContain("Nguồn web tự ghi official, vẫn chưa được XuyenViet duyệt");
     expect(html).toContain("Nguồn cộng đồng bên ngoài, chưa xác minh");
+    expect(html).toContain("Nguồn bên ngoài chưa xác minh");
     expect(html).toContain("Fake Parking Blog");
     expect(html).not.toContain("official</span><span>Loại: official");
     expect(html).not.toContain("Loại: community");
     expect(html).not.toContain("javascript:alert");
     expect(html).not.toContain("source-chip");
     expect(html).not.toContain("[1]");
+  });
+
+  test("renders persisted state-aware trust details and hides Facebook evidence from legacy snapshots", async () => {
+    await createTestUser("user-1");
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
+    const [userMessage] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "user", content: "Điểm dừng này thế nào?" }).returning({ id: messages.id });
+    const [assistantMessage] = await testDb.insert(messages).values({
+      conversationId: conversation.id,
+      userId: "user-1",
+      role: "assistant",
+      content: "Kế hoạch gợi ý:\nĐây chỉ là nội dung trả lời, không phải nguồn để giao diện tự suy diễn.",
+    }).returning({ id: messages.id });
+    await testDb.insert(assistantResponseProvenance).values({
+      userId: "user-1",
+      conversationId: conversation.id,
+      userMessageId: userMessage.id,
+      assistantMessageId: assistantMessage.id,
+      sourceCategory: "knowledge",
+      rank: 1,
+      sourceType: "community",
+      verificationStatus: "unverified",
+      usedInPrompt: true,
+      citedInAnswer: false,
+      sourceSnapshot: {
+        title: "Quan sát điểm dừng ven đường",
+        confidence: "community",
+        knowledgeState: "community_observation",
+        verificationState: "required",
+        usePolicy: "caveat_only",
+        conditions: ["Chỉ phù hợp khi đi ban ngày"],
+        freshnessSensitive: true,
+        evidence: [
+          { sourceLabel: "Facebook nhóm kín", sourceType: "community", displayPolicy: "traveler_visible", url: "https://facebook.com/private-post", quote: "Số điện thoại riêng 0901" },
+          { sourceLabel: "Nguồn đã cho phép", sourceType: "curated", displayPolicy: "traveler_visible", url: "https://example.com/public", quote: "Trích dẫn an toàn" },
+        ],
+      },
+    });
+
+    const html = await renderAuthenticatedAiAskShell({ conversationId: conversation.id });
+
+    expect(html).toContain("Quan sát cộng đồng");
+    expect(html).toContain("Thông tin có điều kiện");
+    expect(html).toContain("Cần xác minh trước khi hành động");
+    expect(html).toContain("Chỉ phù hợp khi đi ban ngày");
+    expect(html).toContain("Trích dẫn an toàn");
+    expect(html).toContain("example.com/public");
+    expect(html).not.toContain("Facebook nhóm kín");
+    expect(html).not.toContain("facebook.com/private-post");
+    expect(html).not.toContain("Số điện thoại riêng 0901");
   });
 
   test("renders backend annotations as inline accessible highlights while preserving section cards", async () => {

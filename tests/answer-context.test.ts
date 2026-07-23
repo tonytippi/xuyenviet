@@ -1430,6 +1430,42 @@ describe("answer context assembly", () => {
     expect(row?.verificationStatus).toBe("unverified");
   });
 
+  test("formats stored state-aware provenance into a bounded traveler trust snapshot", async () => {
+    const { formatAssistantMessageProvenance } = await import("@/features/retrieval/provenance");
+
+    const [item] = formatAssistantMessageProvenance([{
+      id: "state-aware-provenance",
+      sourceCategory: "knowledge",
+      rank: 1,
+      retrievalScore: null,
+      sourceType: "community",
+      verificationStatus: "unverified",
+      usedInPrompt: true,
+      citedInAnswer: false,
+      sourceSnapshot: {
+        title: "Quan sát cộng đồng",
+        knowledgeState: "community_observation",
+        verificationState: "required",
+        usePolicy: "caveat_only",
+        conditions: ["Ban ngày", 123, "Không mưa"],
+        evidence: [
+          { sourceLabel: "Facebook", sourceType: "community", displayPolicy: "traveler_visible", url: "https://facebook.com/private", quote: "Không hiển thị" },
+          { sourceLabel: "Nguồn công khai", sourceType: "curated", displayPolicy: "traveler_visible", url: "https://example.com/public", quote: "Trích dẫn an toàn" },
+        ],
+      },
+    }]);
+
+    expect(item).toMatchObject({
+      knowledgeState: "community_observation",
+      verificationState: "required",
+      usePolicy: "caveat_only",
+      conditions: ["Ban ngày", "Không mưa"],
+      evidence: [{ sourceLabel: "Nguồn công khai", url: "https://example.com/public", quote: "Trích dẫn an toàn" }],
+    });
+    expect(JSON.stringify(item)).not.toContain("facebook.com");
+    expect(JSON.stringify(item)).not.toContain("Không hiển thị");
+  });
+
   test("source bundle priority contract names active state-aware knowledge", async () => {
     vi.doUnmock("@/features/retrieval/approved-knowledge");
     vi.resetModules();

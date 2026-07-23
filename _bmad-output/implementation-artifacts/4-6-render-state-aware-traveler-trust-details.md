@@ -1,6 +1,10 @@
+---
+baseline_commit: 28baba2902e42b3f9a11fda07120855231dc2bdf
+---
+
 # Story 4.6: Render State-Aware Traveler Trust Details
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -16,18 +20,18 @@ so that I can decide what to verify before acting.
 
 ## Tasks / Subtasks
 
-- [ ] Extend persisted provenance DTOs and conversation read models (AC: 1-3)
-  - [ ] Surface Story 4.5 snapshots for policy, state, verification, conditions, freshness, safe source details, and permitted evidence display metadata.
-  - [ ] Maintain same-user/conversation ownership checks and only safe HTTP URLs.
-  - [ ] Do not live-query cards to reinterpret historical answer provenance or pass arbitrary source snapshot JSON to the client.
-- [ ] Update the existing source and detail UI (AC: 1-3)
-  - [ ] Extend `AssistantProvenanceBlock` and `AnswerDetailPanel` in `ai-ask-composer.tsx`; do not build a parallel citation system.
-  - [ ] Use concise Vietnamese text chips/callouts for community observation/pattern, conditional facts, verification-needed, freshness, and external unverified material. Preserve text labels alongside color.
-  - [ ] Keep the responsive detail-panel/sheet selection model, keyboard behavior, and persisted descriptor validation unchanged.
-- [ ] Add traveler-facing render and privacy coverage (AC: 1-3)
-  - [ ] Assert UI renders only persisted policy/state snapshots and never invents citations from answer text.
-  - [ ] Cover caveat-only and external-unverified messaging plus operator-only/Facebook hidden-source behavior.
-  - [ ] Verify accessible labels, focus behavior, readable Vietnamese copy, and mobile-safe presentation for any new icon-only controls.
+- [x] Extend persisted provenance DTOs and conversation read models (AC: 1-3)
+  - [x] Surface Story 4.5 snapshots for policy, state, verification, conditions, freshness, safe source details, and permitted evidence display metadata.
+  - [x] Maintain same-user/conversation ownership checks and only safe HTTP URLs.
+  - [x] Do not live-query cards to reinterpret historical answer provenance or pass arbitrary source snapshot JSON to the client.
+- [x] Update the existing source and detail UI (AC: 1-3)
+  - [x] Extend `AssistantProvenanceBlock` and `AnswerDetailPanel` in `ai-ask-composer.tsx`; do not build a parallel citation system.
+  - [x] Use concise Vietnamese text chips/callouts for community observation/pattern, conditional facts, verification-needed, freshness, and external unverified material. Preserve text labels alongside color.
+  - [x] Keep the responsive detail-panel/sheet selection model, keyboard behavior, and persisted descriptor validation unchanged.
+- [x] Add traveler-facing render and privacy coverage (AC: 1-3)
+  - [x] Assert UI renders only persisted policy/state snapshots and never invents citations from answer text.
+  - [x] Cover caveat-only and external-unverified messaging plus operator-only/Facebook hidden-source behavior.
+  - [x] Verify accessible labels, focus behavior, readable Vietnamese copy, and mobile-safe presentation for any new icon-only controls.
 
 ## Dev Notes
 
@@ -63,5 +67,20 @@ gpu4ai/gpt-5.6-terra-review
 ### Completion Notes List
 
 - Ultimate context engine analysis completed - comprehensive developer guide created.
+- Projected only bounded state-aware fields from persisted provenance snapshots: knowledge state, verification/use policy, conditions, and explicitly traveler-visible evidence.
+- Added Vietnamese state labels and persisted quick facts to the existing source block/detail panel without changing descriptor ownership, focus, or responsive sheet behavior.
+- Rejected Facebook host aliases and non-permitted evidence at provenance formatting, including legacy snapshots, so raw post links and quotes cannot reach traveler UI.
+- Tests passed: `pnpm test:run` (49 files, 693 tests), `pnpm typecheck`, `pnpm lint` (3 pre-existing warnings), and `pnpm build`.
 
 ### File List
+
+- `src/features/retrieval/provenance.ts`
+- `src/features/ai/ai-ask-composer.tsx`
+- `tests/answer-context.test.ts`
+- `tests/ai-ask-shell.test.ts`
+- `_bmad-output/implementation-artifacts/4-6-render-state-aware-traveler-trust-details.md`
+- `_bmad-output/implementation-artifacts/sprint-status.yaml`
+
+### Change Log
+
+- 2026-07-23: Rendered state-aware traveler trust details from persisted provenance and added privacy/render coverage.

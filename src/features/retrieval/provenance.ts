@@ -32,6 +32,16 @@ export type AssistantMessageProvenanceItem = {
   citedInAnswer: boolean;
   retrievalScore: number | null;
   freshnessSensitive: boolean;
+  knowledgeState?: "community_observation" | "community_pattern" | "uncertain" | "verified_fact" | null;
+  verificationState?: "not_required" | "required" | "verified" | null;
+  usePolicy?: "contextual_use" | "caveat_only" | "do_not_use" | null;
+  conditions?: string[];
+  evidence?: Array<{
+    sourceLabel: string;
+    sourceType: string | null;
+    url: string | null;
+    quote: string | null;
+  }>;
 };
 
 export async function persistAssistantAnswerProvenance(db: ProvenanceDb, input: {
@@ -86,7 +96,7 @@ export function formatAssistantMessageProvenance(rows: AssistantProvenanceRow[])
         sourceCategory: row.sourceCategory,
         title: getSourceTitle(row.sourceCategory, snapshot),
         sourceType: getOptionalString(snapshot.sourceType) ?? row.sourceType,
-        url: getSafeHttpUrl(getOptionalString(snapshot.url) ?? getKnowledgeSourceString(snapshot, "canonicalUrl") ?? getKnowledgeSourceString(snapshot, "url")),
+        url: getSafeTravelerUrl(getOptionalString(snapshot.url) ?? getKnowledgeSourceString(snapshot, "canonicalUrl") ?? getKnowledgeSourceString(snapshot, "url")),
         checkedAt: getOptionalString(snapshot.checkedAt) ?? getKnowledgeSourceString(snapshot, "collectedDate"),
         confidenceLabel: getConfidenceLabel(row.sourceCategory, row.verificationStatus, snapshot),
         verificationStatus: row.verificationStatus,
@@ -94,6 +104,11 @@ export function formatAssistantMessageProvenance(rows: AssistantProvenanceRow[])
         citedInAnswer: row.citedInAnswer,
         retrievalScore: row.retrievalScore,
         freshnessSensitive: snapshot.freshnessSensitive === true || isFreshnessSensitiveWebTrigger(snapshot.triggerReason),
+        knowledgeState: getKnowledgeState(snapshot.knowledgeState),
+        verificationState: getVerificationState(snapshot.verificationState),
+        usePolicy: getUsePolicy(snapshot.usePolicy),
+        conditions: getBoundedStrings(snapshot.conditions),
+        evidence: getTravelerEvidence(snapshot.evidence),
       };
     });
 }
@@ -322,17 +337,64 @@ function getOptionalString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-function getSafeHttpUrl(value: string | null) {
+function getSafeTravelerUrl(value: string | null) {
   if (!value) {
     return null;
   }
 
   try {
     const url = new URL(value);
-    return url.protocol === "http:" || url.protocol === "https:" ? url.href : null;
+    return (url.protocol === "http:" || url.protocol === "https:") && !isFacebookHost(url.hostname) ? url.href : null;
   } catch {
     return null;
   }
+}
+
+function isFacebookHost(hostname: string) {
+  const normalized = hostname.toLowerCase();
+  return normalized === "facebook.com" || normalized.endsWith(".facebook.com") || normalized === "fb.com" || normalized.endsWith(".fb.com") || normalized === "fb.watch" || normalized.endsWith(".fb.watch");
+}
+
+function getKnowledgeState(value: unknown): AssistantMessageProvenanceItem["knowledgeState"] {
+  return value === "community_observation" || value === "community_pattern" || value === "uncertain" || value === "verified_fact" ? value : null;
+}
+
+function getVerificationState(value: unknown): AssistantMessageProvenanceItem["verificationState"] {
+  return value === "not_required" || value === "required" || value === "verified" ? value : null;
+}
+
+function getUsePolicy(value: unknown): AssistantMessageProvenanceItem["usePolicy"] {
+  return value === "contextual_use" || value === "caveat_only" || value === "do_not_use" ? value : null;
+}
+
+function getBoundedStrings(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0).slice(0, maxSnapshotArrayItems).map((item) => item.slice(0, maxSnapshotStringLength)) : [];
+}
+
+function getTravelerEvidence(value: unknown): AssistantMessageProvenanceItem["evidence"] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((item) => {
+    if (!isRecord(item) || item.displayPolicy !== "traveler_visible") {
+      return [];
+    }
+
+    const sourceLabel = getOptionalString(item.sourceLabel);
+    const sourceType = getOptionalString(item.sourceType);
+    const url = getSafeTravelerUrl(getOptionalString(item.url));
+
+    if (!sourceLabel || sourceType === "facebook" || isFacebookSource(sourceLabel, url)) {
+      return [];
+    }
+
+    return [{ sourceLabel, sourceType, url, quote: getOptionalString(item.quote)?.slice(0, maxSnapshotStringLength) ?? null }];
+  }).slice(0, maxSnapshotArrayItems);
+}
+
+function isFacebookSource(sourceLabel: string, url: string | null) {
+  return sourceLabel.trim().toLowerCase().includes("facebook") || Boolean(url && isFacebookHost(new URL(url).hostname));
 }
 
 function getKnowledgeSourceString(snapshot: Record<string, unknown>, key: "canonicalUrl" | "url" | "collectedDate") {
