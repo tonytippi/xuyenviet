@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { knowledgeCardEvidence, knowledgeCardSearchDocuments, knowledgeCards, knowledgeCardSources, rawSourceMaterial, sourceCaptureVersions, sources, userRoles, users, type UserRole } from "@/db/schema";
+import { knowledgeCardEvidence, knowledgeCardSearchDocuments, knowledgeCards, knowledgeCardSources, knowledgeIndexDirtyMarkers, rawSourceMaterial, sourceCaptureVersions, sources, userRoles, users, type UserRole } from "@/db/schema";
 
 import { testDb } from "./helpers/db";
 import { seedKnowledgeCardEvidence, seedSourceCaptureVersion } from "./helpers/source-captures";
@@ -27,6 +27,12 @@ async function createApprovedCardWithSource(userId: string, id: string) {
     .returning();
   await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: card.id, sourceId: source.id, supportLevel: "primary" });
   return card;
+}
+
+async function enqueueIndexWork(cardId: string, reason = "test") {
+  const [card] = await testDb.select({ contentVersion: knowledgeCards.contentVersion, evidenceSetRevision: knowledgeCards.evidenceSetRevision }).from(knowledgeCards).where(eq(knowledgeCards.id, cardId));
+  if (!card) throw new Error("Expected card");
+  await testDb.insert(knowledgeIndexDirtyMarkers).values({ knowledgeCardId: cardId, contentVersion: card.contentVersion, evidenceSetRevision: card.evidenceSetRevision, reason, nextRunAt: new Date(0) });
 }
 
 describe("knowledge card state-model retrieval safety", () => {
@@ -198,12 +204,12 @@ describe("knowledge card state-model retrieval safety", () => {
     const { indexApprovedKnowledgeCard, searchApprovedKnowledge } = await import("@/features/knowledge/search");
 
     await indexApprovedKnowledgeCard(card.id);
-    await expect(searchApprovedKnowledge("refresh-secret-token")).resolves.toHaveLength(1);
+    await expect(searchApprovedKnowledge("refresh-secret-token")).resolves.toEqual([]);
     await testDb.update(knowledgeCardEvidence).set({ displayPolicy: "operator_only" }).where(eq(knowledgeCardEvidence.id, evidence.id));
 
     await expect(searchApprovedKnowledge("Huế")).resolves.toEqual([]);
     const [document] = await testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, card.id));
-    expect(document).toMatchObject({ status: "disabled", disabledAt: expect.any(Date) });
+    expect(document).toMatchObject({ status: "active", disabledAt: null });
     await expect(searchApprovedKnowledge("refresh-secret-token")).resolves.toEqual([]);
   });
 
@@ -277,10 +283,11 @@ describe("knowledge card state-model retrieval safety", () => {
     const { indexApprovedKnowledgeCard } = await import("@/features/knowledge/search");
     await expect(indexApprovedKnowledgeCard(card.id)).resolves.toMatchObject({ indexed: true });
     await testDb.update(knowledgeCardEvidence).set({ state: "removed" }).where(eq(knowledgeCardEvidence.id, secondEvidence.id));
+    await enqueueIndexWork(card.id, "support_withdrawn");
     const { processNextApprovedKnowledgeIndexingBatch } = await import("@/features/knowledge/indexing-worker");
 
-    await expect(processNextApprovedKnowledgeIndexingBatch()).resolves.toEqual({ status: "indexed", indexedCount: 0, skippedCount: 1, cardIds: [card.id] });
-    await expect(testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, card.id))).resolves.toMatchObject([{ status: "disabled", disabledAt: expect.any(Date) }]);
+    await expect(processNextApprovedKnowledgeIndexingBatch({}, testDb)).resolves.toEqual({ status: "indexed", indexedCount: 0, skippedCount: 1, cardIds: [card.id] });
+    await expect(testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, card.id))).resolves.toMatchObject([{ status: "active", disabledAt: null }]);
   });
 
   test.each([
@@ -307,7 +314,7 @@ describe("knowledge card state-model retrieval safety", () => {
     await testDb.update(knowledgeCardEvidence).set({ state: "removed" }).where(eq(knowledgeCardEvidence.id, evidence.id));
 
     await expect(searchApprovedKnowledge("Huế")).resolves.toEqual([]);
-    await expect(testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, card.id))).resolves.toMatchObject([{ status: "disabled" }]);
+    await expect(testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, card.id))).resolves.toMatchObject([{ status: "active" }]);
     await expect(testDb.select().from(sourceCaptureVersions).where(eq(sourceCaptureVersions.id, capture.id))).resolves.toHaveLength(1);
   });
 
@@ -318,7 +325,7 @@ describe("knowledge card state-model retrieval safety", () => {
     const { searchApprovedKnowledge } = await import("@/features/knowledge/search");
 
     await expect(searchApprovedKnowledge("Huế")).resolves.toEqual([]);
-    await expect(testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, card.id))).resolves.toMatchObject([{ status: "disabled", disabledAt: expect.any(Date) }]);
+    await expect(testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, card.id))).resolves.toMatchObject([{ status: "active", disabledAt: null }]);
   });
 
   test("indexing worker disables an active document when its active card becomes state-ineligible", async () => {
@@ -326,10 +333,11 @@ describe("knowledge card state-model retrieval safety", () => {
     const card = await createApprovedCardWithSource("worker-state-operator", "worker-superseded-card");
     await testDb.insert(knowledgeCardSearchDocuments).values({ knowledgeCardId: card.id, status: "active", searchableText: "Điểm dừng tại Huế", textHash: "d".repeat(64), sourceCount: 1, confidence: "curated", freshnessSensitive: false });
     await testDb.update(knowledgeCards).set({ knowledgeState: "superseded" }).where(eq(knowledgeCards.id, card.id));
+    await enqueueIndexWork(card.id, "superseded");
     const { processNextApprovedKnowledgeIndexingBatch } = await import("@/features/knowledge/indexing-worker");
 
-    await expect(processNextApprovedKnowledgeIndexingBatch()).resolves.toEqual({ status: "indexed", indexedCount: 0, skippedCount: 1, cardIds: [card.id] });
-    await expect(testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, card.id))).resolves.toMatchObject([{ status: "disabled", disabledAt: expect.any(Date) }]);
+    await expect(processNextApprovedKnowledgeIndexingBatch({}, testDb)).resolves.toEqual({ status: "indexed", indexedCount: 0, skippedCount: 1, cardIds: [card.id] });
+    await expect(testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, card.id))).resolves.toMatchObject([{ status: "active", disabledAt: null }]);
   });
 
   test("indexing worker disables active evidence-less projections while leaving other ineligible candidates untouched", async () => {
@@ -341,12 +349,13 @@ describe("knowledge card state-model retrieval safety", () => {
       { knowledgeCardId: disabled.id, status: "disabled", searchableText: "disabled", textHash: "b".repeat(64), sourceCount: 1, confidence: "curated", freshnessSensitive: false, disabledAt: new Date() },
       { knowledgeCardId: stale.id, status: "active", searchableText: "stale", textHash: "c".repeat(64), sourceCount: 1, confidence: "curated", freshnessSensitive: false, updatedAt: new Date(0) },
     ]);
+    await enqueueIndexWork(stale.id, "legacy_stale");
     const { processNextApprovedKnowledgeIndexingBatch } = await import("@/features/knowledge/indexing-worker");
 
-    await expect(processNextApprovedKnowledgeIndexingBatch()).resolves.toEqual({ status: "indexed", indexedCount: 0, skippedCount: 1, cardIds: [stale.id] });
+    await expect(processNextApprovedKnowledgeIndexingBatch({}, testDb)).resolves.toEqual({ status: "indexed", indexedCount: 0, skippedCount: 1, cardIds: [stale.id] });
     await expect(testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, missing.id))).resolves.toEqual([]);
     await expect(testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, disabled.id))).resolves.toMatchObject([{ status: "disabled" }]);
-    await expect(testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, stale.id))).resolves.toMatchObject([{ status: "disabled", disabledAt: expect.any(Date) }]);
+    await expect(testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, stale.id))).resolves.toMatchObject([{ status: "active", disabledAt: null }]);
   });
 
   test("indexing worker leaves current active documents out of a bounded batch", async () => {
@@ -360,8 +369,9 @@ describe("knowledge card state-model retrieval safety", () => {
     }
     const { indexApprovedKnowledgeCard } = await import("@/features/knowledge/search");
     await indexApprovedKnowledgeCard(current.id);
+    await enqueueIndexWork(pending.id, "pending");
     const { processNextApprovedKnowledgeIndexingBatch } = await import("@/features/knowledge/indexing-worker");
 
-    await expect(processNextApprovedKnowledgeIndexingBatch({ batchSize: 1 })).resolves.toMatchObject({ cardIds: [pending.id], indexedCount: 1 });
+    await expect(processNextApprovedKnowledgeIndexingBatch({ batchSize: 1 }, testDb)).resolves.toMatchObject({ cardIds: [pending.id], indexedCount: 1 });
   });
 });

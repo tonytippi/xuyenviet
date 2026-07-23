@@ -85,7 +85,7 @@ describe("canonical knowledge ingestion jobs", () => {
   test("claims a due queued job once with a bounded opaque fence and does not advance its stage", async () => {
     await createSource("claimable");
     await appendReadableCapture("claimable");
-    const now = new Date("2026-07-22T23:00:00.000Z");
+    const now = new Date(Date.now() + 1_000);
 
     const claims = await Promise.all([
       claimNextKnowledgeIngestionJob({ workerId: "worker-a", expectedStageVersion: 1, now }, testDb),

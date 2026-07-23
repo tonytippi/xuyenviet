@@ -1,172 +1,108 @@
-import { and, asc, eq, exists, isNull, lt, ne, notExists, or, sql } from "drizzle-orm";
+import "server-only";
+
+import { randomBytes } from "node:crypto";
+
+import { and, asc, eq, gt, lte, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { knowledgeCardEvidence, knowledgeCards, knowledgeCardSearchDocuments, knowledgeCardSources, sourceCaptureVersions, sources } from "@/db/schema";
-import { indexApprovedKnowledgeCard } from "@/features/knowledge/search";
+import { knowledgeCardSearchDocuments, knowledgeCards, knowledgeIndexDirtyMarkers } from "@/db/schema";
+import { enqueueKnowledgeIndexWork } from "@/features/knowledge/indexing-queue";
+import { projectClaimedKnowledgeIndexWork } from "@/features/knowledge/search";
 
 type KnowledgeIndexingDb = ReturnType<typeof getDb>;
-
 const defaultPollIntervalMs = 5_000;
 const defaultBatchSize = 10;
 const maxBatchSize = 50;
+const defaultLeaseMs = 5 * 60_000;
 
+export type KnowledgeIndexingClaim = { markerId: string; cardId: string; contentVersion: number; fencingToken: string; leaseExpiresAt: Date };
 export type KnowledgeIndexingWorkerResult =
   | { status: "indexed"; indexedCount: number; skippedCount: number; cardIds: string[] }
   | { status: "no_job"; indexedCount: 0; skippedCount: 0; cardIds: [] }
   | { status: "stopped" };
 
-export async function processNextApprovedKnowledgeIndexingBatch(options: { batchSize?: number; now?: Date } = {}, db = getDb()): Promise<KnowledgeIndexingWorkerResult> {
-  const cards = await loadApprovedCardsNeedingSearchDocuments(db, { batchSize: normalizeBatchSize(options.batchSize), now: options.now ?? new Date() });
+export async function claimNextKnowledgeIndexWork(input: { workerId: string; now?: Date }, db: KnowledgeIndexingDb = getDb()): Promise<KnowledgeIndexingClaim | null> {
+  const workerId = input.workerId.trim();
+  if (!/^[a-zA-Z0-9_.:-]{1,160}$/.test(workerId)) throw new Error("Knowledge indexing worker ID is invalid.");
+  const now = input.now ?? new Date();
+  const leaseExpiresAt = new Date(now.getTime() + getKnowledgeIndexLeaseMs());
+  const fencingToken = randomBytes(32).toString("hex");
+  return db.transaction(async (tx) => {
+    await recoverExpiredKnowledgeIndexWork(tx, now);
+    const rows = await tx.execute(sql`select id from knowledge_index_dirty_markers where status = 'pending' and next_run_at <= now() and attempt_count < max_attempts order by next_run_at asc, created_at asc for update skip locked limit 1`) as Array<{ id: string }>;
+    if (!rows[0]) return null;
+    const [claimed] = await tx.update(knowledgeIndexDirtyMarkers).set({ status: "claimed", claimedBy: workerId, claimedAt: now, leaseExpiresAt, fencingToken, attemptCount: sql`${knowledgeIndexDirtyMarkers.attemptCount} + 1`, updatedAt: now, failureCode: null, failureReason: null }).where(and(eq(knowledgeIndexDirtyMarkers.id, rows[0].id), eq(knowledgeIndexDirtyMarkers.status, "pending"), lte(knowledgeIndexDirtyMarkers.nextRunAt, now))).returning();
+    return claimed ? { markerId: claimed.id, cardId: claimed.knowledgeCardId, contentVersion: claimed.contentVersion, fencingToken, leaseExpiresAt } : null;
+  });
+}
 
-  if (cards.length === 0) {
-    return { status: "no_job", indexedCount: 0, skippedCount: 0, cardIds: [] };
+export async function recoverExpiredKnowledgeIndexWork(db: Pick<KnowledgeIndexingDb, "update"> = getDb(), now = new Date()) {
+  await db.update(knowledgeIndexDirtyMarkers).set({ status: sql`case when ${knowledgeIndexDirtyMarkers.attemptCount} >= ${knowledgeIndexDirtyMarkers.maxAttempts} then 'failed' else 'pending' end`, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, nextRunAt: now, failureCode: sql`case when ${knowledgeIndexDirtyMarkers.attemptCount} >= ${knowledgeIndexDirtyMarkers.maxAttempts} then 'retry_exhausted' else null end`, failureReason: sql`case when ${knowledgeIndexDirtyMarkers.attemptCount} >= ${knowledgeIndexDirtyMarkers.maxAttempts} then 'Retry limit reached.' else null end`, updatedAt: now }).where(and(eq(knowledgeIndexDirtyMarkers.status, "claimed"), lte(knowledgeIndexDirtyMarkers.leaseExpiresAt, now)));
+}
+
+export async function processNextApprovedKnowledgeIndexingBatch(options: { batchSize?: number; now?: Date; workerId?: string } = {}, db: KnowledgeIndexingDb = getDb()): Promise<KnowledgeIndexingWorkerResult> {
+  const now = options.now ?? new Date();
+  const workerId = options.workerId ?? `knowledge-indexer-${process.pid}`;
+  const claims: KnowledgeIndexingClaim[] = [];
+  for (let index = 0; index < normalizeBatchSize(options.batchSize); index += 1) {
+    const claim = await claimNextKnowledgeIndexWork({ workerId, now }, db);
+    if (!claim) break;
+    claims.push(claim);
   }
-
-  const cardIds: string[] = [];
+  if (!claims.length) return { status: "no_job", indexedCount: 0, skippedCount: 0, cardIds: [] };
   let indexedCount = 0;
   let skippedCount = 0;
-
-  for (const card of cards) {
-    const result = await indexApprovedKnowledgeCard(card.id);
-    cardIds.push(result.cardId);
-
-    if (result.indexed) {
-      indexedCount += 1;
-    } else {
+  for (const claim of claims) {
+    try {
+      const result = await projectClaimedKnowledgeIndexWork(claim, db);
+      const completed = await completeKnowledgeIndexWork(claim, result.outcome, db, now);
+      if (completed && result.indexed) indexedCount += 1;
+      else skippedCount += 1;
+    } catch {
+      await retryKnowledgeIndexWork(claim, "projection_failed", db, now);
       skippedCount += 1;
     }
   }
-
-  return { status: "indexed", indexedCount, skippedCount, cardIds };
+  return { status: "indexed", indexedCount, skippedCount, cardIds: claims.map((claim) => claim.cardId) };
 }
 
-export async function runApprovedKnowledgeIndexingWorkerLoop(options: { once?: boolean; batchSize?: number; pollIntervalMs?: number; signal?: AbortSignal } = {}) {
-  const pollIntervalMs = options.pollIntervalMs ?? getWorkerPollIntervalMs();
+export async function completeKnowledgeIndexWork(claim: KnowledgeIndexingClaim, outcome: "indexed" | "disabled" | "superseded" | "lost_claim", db: Pick<KnowledgeIndexingDb, "update"> = getDb(), now = new Date()) {
+  const status = outcome === "superseded" ? "superseded" : "completed";
+  const [completed] = await db.update(knowledgeIndexDirtyMarkers).set({ status, completedAt: now, completionReason: outcome, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, updatedAt: now }).where(and(eq(knowledgeIndexDirtyMarkers.id, claim.markerId), eq(knowledgeIndexDirtyMarkers.knowledgeCardId, claim.cardId), eq(knowledgeIndexDirtyMarkers.contentVersion, claim.contentVersion), eq(knowledgeIndexDirtyMarkers.status, "claimed"), eq(knowledgeIndexDirtyMarkers.fencingToken, claim.fencingToken), gt(knowledgeIndexDirtyMarkers.leaseExpiresAt, now))).returning({ id: knowledgeIndexDirtyMarkers.id });
+  return Boolean(completed);
+}
 
-  while (!options.signal?.aborted) {
-    const result = await processNextApprovedKnowledgeIndexingBatch({ batchSize: options.batchSize });
+export async function retryKnowledgeIndexWork(claim: KnowledgeIndexingClaim, failureCode: string, db: Pick<KnowledgeIndexingDb, "update"> = getDb(), now = new Date()) {
+  const retryAt = new Date(now.getTime() + Math.min(60_000 * 2 ** 2, 15 * 60_000));
+  const [retried] = await db.update(knowledgeIndexDirtyMarkers).set({ status: sql`case when ${knowledgeIndexDirtyMarkers.attemptCount} >= ${knowledgeIndexDirtyMarkers.maxAttempts} then 'failed' else 'pending' end`, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, nextRunAt: retryAt, failureCode, failureReason: "Projection worker failed; retry is scheduled.", updatedAt: now }).where(and(eq(knowledgeIndexDirtyMarkers.id, claim.markerId), eq(knowledgeIndexDirtyMarkers.status, "claimed"), eq(knowledgeIndexDirtyMarkers.fencingToken, claim.fencingToken), gt(knowledgeIndexDirtyMarkers.leaseExpiresAt, now))).returning({ id: knowledgeIndexDirtyMarkers.id });
+  return Boolean(retried);
+}
 
-    if (options.once) {
-      return result;
-    }
-
-    if (result.status === "no_job") {
-      await sleep(pollIntervalMs, options.signal);
-    }
+export async function backfillKnowledgeIndexWork(input: { cursor?: string; batchSize?: number; now?: Date } = {}, db: KnowledgeIndexingDb = getDb()) {
+  const now = input.now ?? new Date();
+  const cards = await db.select({ id: knowledgeCards.id, contentVersion: knowledgeCards.contentVersion, evidenceSetRevision: knowledgeCards.evidenceSetRevision }).from(knowledgeCards).where(input.cursor ? sql`${knowledgeCards.id} > ${input.cursor}` : undefined).orderBy(asc(knowledgeCards.id)).limit(normalizeBatchSize(input.batchSize));
+  for (const card of cards) {
+    await db.transaction(async (tx) => {
+      // The worker performs the authoritative policy proof. Backfill merely queues current work.
+      await enqueueKnowledgeIndexWork(tx, { cardId: card.id, contentVersion: card.contentVersion, evidenceSetRevision: card.evidenceSetRevision, reason: "backfill" });
+      await tx.update(knowledgeCardSearchDocuments).set({ status: "disabled", disabledAt: now, updatedAt: now }).where(and(eq(knowledgeCardSearchDocuments.knowledgeCardId, card.id), sql`${knowledgeCardSearchDocuments.contentVersion} <> ${card.contentVersion}`, eq(knowledgeCardSearchDocuments.status, "active")));
+    });
   }
+  return { cursor: cards.at(-1)?.id ?? null, processed: cards.length };
+}
 
+export async function runApprovedKnowledgeIndexingWorkerLoop(options: { once?: boolean; batchSize?: number; pollIntervalMs?: number; signal?: AbortSignal; workerId?: string } = {}) {
+  const pollIntervalMs = options.pollIntervalMs ?? getWorkerPollIntervalMs();
+  while (!options.signal?.aborted) {
+    const result = await processNextApprovedKnowledgeIndexingBatch({ batchSize: options.batchSize, workerId: options.workerId });
+    if (options.once) return result;
+    if (result.status === "no_job") await sleep(pollIntervalMs, options.signal);
+  }
   return { status: "stopped" as const };
 }
 
-async function loadApprovedCardsNeedingSearchDocuments(db: Pick<KnowledgeIndexingDb, "select">, options: { batchSize: number; now: Date }) {
-  const validEvidence = exists(
-    db
-      .select({ id: knowledgeCardEvidence.id })
-      .from(knowledgeCardEvidence)
-       .innerJoin(knowledgeCardSources, and(eq(knowledgeCardSources.knowledgeCardId, knowledgeCardEvidence.knowledgeCardId), eq(knowledgeCardSources.sourceId, knowledgeCardEvidence.sourceId)))
-       .innerJoin(sources, and(eq(sources.id, knowledgeCardEvidence.sourceId), eq(sources.eligibility, "eligible")))
-      .innerJoin(sourceCaptureVersions, and(eq(sourceCaptureVersions.id, knowledgeCardEvidence.captureVersionId), eq(sourceCaptureVersions.sourceId, knowledgeCardEvidence.sourceId)))
-       .where(and(eq(knowledgeCardEvidence.knowledgeCardId, knowledgeCards.id), eq(knowledgeCardEvidence.state, "active"), or(eq(knowledgeCardEvidence.supportLevel, "primary"), eq(knowledgeCardEvidence.supportLevel, "supporting")), or(eq(knowledgeCardEvidence.displayPolicy, "fact_only"), eq(knowledgeCardEvidence.displayPolicy, "traveler_visible")), sql`${sources.kind} = ${sourceCaptureVersions.captureKind} and ${sources.kind} in ('url', 'facebook', 'youtube')`, isNull(sourceCaptureVersions.payloadDeletedAt), sql`substring(${sourceCaptureVersions.rawText} from ${knowledgeCardEvidence.spanStart} + 1 for ${knowledgeCardEvidence.spanEnd} - ${knowledgeCardEvidence.spanStart}) = ${knowledgeCardEvidence.quoteText}`)),
-  );
-  const cardStateIsEligible = and(
-    eq(knowledgeCards.publicationState, "active"),
-    or(eq(knowledgeCards.knowledgeState, "community_observation"), eq(knowledgeCards.knowledgeState, "community_pattern"), eq(knowledgeCards.knowledgeState, "conditional"), eq(knowledgeCards.knowledgeState, "uncertain")),
-    ne(knowledgeCards.verificationState, "failed"),
-    sql`coalesce(nullif(btrim(${knowledgeCards.locationName}), ''), nullif(btrim(${knowledgeCards.routeSegment}), '')) is not null`,
-  );
-  const hasInsufficientIndependentPatternSupport = and(
-    eq(knowledgeCards.knowledgeState, "community_pattern"),
-    sql`(select count(distinct evidence.independence_key) from ${knowledgeCardEvidence} evidence join ${knowledgeCardSources} link on link.knowledge_card_id = evidence.knowledge_card_id and link.source_id = evidence.source_id join ${sources} evidence_source on evidence_source.id = evidence.source_id and evidence_source.eligibility = 'eligible' join ${sourceCaptureVersions} capture on capture.id = evidence.capture_version_id and capture.source_id = evidence.source_id where evidence.knowledge_card_id = ${knowledgeCards.id} and evidence.state = 'active' and evidence.support_level in ('primary', 'supporting') and evidence.display_policy in ('fact_only', 'traveler_visible') and evidence_source.kind = capture.capture_kind and evidence_source.kind in ('url', 'facebook', 'youtube') and capture.payload_deleted_at is null and substring(capture.raw_text from evidence.span_start + 1 for evidence.span_end - evidence.span_start) = evidence.quote_text) < 2`,
-  );
-  const documentNeedsRefresh = or(
-    isNull(knowledgeCardSearchDocuments.id),
-    ne(knowledgeCardSearchDocuments.status, "active"),
-    ne(knowledgeCardSearchDocuments.confidence, knowledgeCards.confidence),
-    ne(knowledgeCardSearchDocuments.freshnessSensitive, knowledgeCards.freshnessSensitive),
-    lt(knowledgeCardSearchDocuments.updatedAt, knowledgeCards.updatedAt),
-  );
-
-  return db
-    .select({
-      id: knowledgeCards.id,
-      publicationState: knowledgeCards.publicationState,
-      knowledgeState: knowledgeCards.knowledgeState,
-      reviewState: knowledgeCards.reviewState,
-      verificationState: knowledgeCards.verificationState,
-      confidence: knowledgeCards.confidence,
-      freshnessSensitive: knowledgeCards.freshnessSensitive,
-      updatedAt: knowledgeCards.updatedAt,
-      documentStatus: knowledgeCardSearchDocuments.status,
-      documentConfidence: knowledgeCardSearchDocuments.confidence,
-      documentFreshnessSensitive: knowledgeCardSearchDocuments.freshnessSensitive,
-      documentUpdatedAt: knowledgeCardSearchDocuments.updatedAt,
-    })
-    .from(knowledgeCards)
-    .leftJoin(knowledgeCardSearchDocuments, eq(knowledgeCardSearchDocuments.knowledgeCardId, knowledgeCards.id))
-    .where(
-      and(
-          or(
-            // Recheck active projections only when state/evidence is invalid or the projection is stale.
-            and(
-              eq(knowledgeCardSearchDocuments.status, "active"),
-              or(
-                ne(knowledgeCards.publicationState, "active"),
-                eq(knowledgeCards.knowledgeState, "conflicted"),
-                eq(knowledgeCards.knowledgeState, "superseded"),
-                eq(knowledgeCards.knowledgeState, "confirmed"),
-                eq(knowledgeCards.verificationState, "failed"),
-                hasInsufficientIndependentPatternSupport,
-                sql`coalesce(nullif(btrim(${knowledgeCards.locationName}), ''), nullif(btrim(${knowledgeCards.routeSegment}), '')) is null`,
-                notExists(
-                db
-                  .select({ id: knowledgeCardEvidence.id })
-                  .from(knowledgeCardEvidence)
-                   .innerJoin(knowledgeCardSources, and(eq(knowledgeCardSources.knowledgeCardId, knowledgeCardEvidence.knowledgeCardId), eq(knowledgeCardSources.sourceId, knowledgeCardEvidence.sourceId)))
-                   .innerJoin(sources, and(eq(sources.id, knowledgeCardEvidence.sourceId), eq(sources.eligibility, "eligible")))
-                  .innerJoin(sourceCaptureVersions, and(eq(sourceCaptureVersions.id, knowledgeCardEvidence.captureVersionId), eq(sourceCaptureVersions.sourceId, knowledgeCardEvidence.sourceId)))
-                    .where(and(eq(knowledgeCardEvidence.knowledgeCardId, knowledgeCards.id), eq(knowledgeCardEvidence.state, "active"), or(eq(knowledgeCardEvidence.supportLevel, "primary"), eq(knowledgeCardEvidence.supportLevel, "supporting")), or(eq(knowledgeCardEvidence.displayPolicy, "fact_only"), eq(knowledgeCardEvidence.displayPolicy, "traveler_visible")), sql`${sources.kind} = ${sourceCaptureVersions.captureKind} and ${sources.kind} in ('url', 'facebook', 'youtube')`, isNull(sourceCaptureVersions.payloadDeletedAt), sql`substring(${sourceCaptureVersions.rawText} from ${knowledgeCardEvidence.spanStart} + 1 for ${knowledgeCardEvidence.spanEnd} - ${knowledgeCardEvidence.spanStart}) = ${knowledgeCardEvidence.quoteText}`)),
-                ),
-                documentNeedsRefresh!,
-              ),
-            ),
-          and(
-            cardStateIsEligible,
-            validEvidence,
-            documentNeedsRefresh,
-          ),
-        ),
-      ),
-    )
-    .orderBy(asc(knowledgeCards.updatedAt), asc(knowledgeCards.id))
-    // Bound each poll at the database boundary; the authoritative recheck happens in indexing.
-    .limit(options.batchSize);
-}
-
-function getWorkerPollIntervalMs() {
-  return normalizeEnvNumber(process.env.KNOWLEDGE_INDEXING_WORKER_POLL_MS, defaultPollIntervalMs, 1_000, 60_000);
-}
-
-function normalizeBatchSize(value: number | undefined) {
-  return normalizeEnvNumber(value === undefined ? process.env.KNOWLEDGE_INDEXING_WORKER_BATCH_SIZE : String(value), defaultBatchSize, 1, maxBatchSize);
-}
-
-function normalizeEnvNumber(value: string | undefined, fallback: number, min: number, max: number) {
-  if (!value) return fallback;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? Math.min(Math.max(Math.trunc(parsed), min), max) : fallback;
-}
-
-function sleep(ms: number, signal?: AbortSignal) {
-  return new Promise<void>((resolve) => {
-    if (signal?.aborted) {
-      resolve();
-      return;
-    }
-
-    const timeout = setTimeout(resolve, ms);
-    signal?.addEventListener("abort", () => {
-      clearTimeout(timeout);
-      resolve();
-    }, { once: true });
-  });
-}
+export function getKnowledgeIndexLeaseMs() { return normalizeEnvNumber(process.env.KNOWLEDGE_INDEXING_CLAIM_LEASE_MS, defaultLeaseMs, 60_000, 60 * 60_000); }
+function getWorkerPollIntervalMs() { return normalizeEnvNumber(process.env.KNOWLEDGE_INDEXING_WORKER_POLL_MS, defaultPollIntervalMs, 1_000, 60_000); }
+function normalizeBatchSize(value: number | undefined) { return normalizeEnvNumber(value === undefined ? process.env.KNOWLEDGE_INDEXING_WORKER_BATCH_SIZE : String(value), defaultBatchSize, 1, maxBatchSize); }
+function normalizeEnvNumber(value: string | number | undefined, fallback: number, min: number, max: number) { if (value === undefined || value === "") return fallback; const parsed = Number(value); return Number.isFinite(parsed) ? Math.min(Math.max(Math.trunc(parsed), min), max) : fallback; }
+function sleep(ms: number, signal?: AbortSignal) { return new Promise<void>((resolve) => { if (signal?.aborted) return resolve(); const timeout = setTimeout(resolve, ms); signal?.addEventListener("abort", () => { clearTimeout(timeout); resolve(); }, { once: true }); }); }

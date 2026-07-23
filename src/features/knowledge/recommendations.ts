@@ -3,7 +3,8 @@ import "server-only";
 import { and, asc, eq, gt, lte, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { auditEvents, knowledgeCardEvidence, knowledgeCardSearchDocuments, knowledgeCards, knowledgeIndexDirtyMarkers, knowledgeRecommendations, knowledgeSamplingCohortMembers, knowledgeSamplingDispositionReasonValues, knowledgeSamplingPolicies, type KnowledgeRecommendationAction, type KnowledgeRecommendationReason, type KnowledgeSamplingDispositionReason } from "@/db/schema";
+import { disableStaleKnowledgeSearchProjection, enqueueKnowledgeIndexWork } from "@/features/knowledge/indexing-queue";
+import { auditEvents, knowledgeCardEvidence, knowledgeCards, knowledgeRecommendations, knowledgeSamplingCohortMembers, knowledgeSamplingDispositionReasonValues, knowledgeSamplingPolicies, type KnowledgeRecommendationAction, type KnowledgeRecommendationReason, type KnowledgeSamplingDispositionReason } from "@/db/schema";
 
 type RecommendationDb = ReturnType<typeof getDb>;
 type Transaction = Parameters<Parameters<RecommendationDb["transaction"]>[0]>[0];
@@ -165,8 +166,8 @@ export async function resolveKnowledgeRecommendation(input: { recommendationId: 
         ? `Resolved sampling recommendation with ${input.action}; disposition=${samplingDisposition!.reason}${input.highSeverity ? "; high_severity=true" : ""}.`
         : `Resolved ${recommendation.reason} recommendation with ${input.action}.`;
     await tx.insert(auditEvents).values({ actorUserId: input.actor.userId, actorEmail: input.actor.email, operation: "update", targetType: "knowledge_recommendation", targetId: recommendation.id, afterSummary: auditSummary });
-    await tx.insert(knowledgeIndexDirtyMarkers).values({ knowledgeCardId: card.id, contentVersion: next.contentVersion, evidenceSetRevision: next.evidenceSetRevision, reason: `recommendation:${input.action}` }).onConflictDoNothing();
-    if (next.publicationState !== "active" || next.verificationState === "failed") await tx.update(knowledgeCardSearchDocuments).set({ status: "disabled", disabledAt: new Date(), updatedAt: new Date() }).where(and(eq(knowledgeCardSearchDocuments.knowledgeCardId, card.id), eq(knowledgeCardSearchDocuments.status, "active")));
+    await enqueueKnowledgeIndexWork(tx, { cardId: card.id, contentVersion: next.contentVersion, evidenceSetRevision: next.evidenceSetRevision, reason: `recommendation:${input.action}` });
+    if (next.publicationState !== "active" || next.verificationState === "failed") await disableStaleKnowledgeSearchProjection(tx, card.id, next.contentVersion);
     if (input.action === "sampling_fail" && input.highSeverity && recommendation.policyId) await escalateSamplingCohort(tx, recommendation.policyId, input.actor);
     if (material && (input.action === "resolve_relation" && !hasRemainingSupport || preservesRequiredVerification || input.action === "edit" && recommendation.reason === "verification" || input.action !== "resolve_relation" && input.action !== "verify")) {
       const reason = input.action === "resolve_relation" && !hasRemainingSupport ? "weak_evidence" : input.action === "sampling_fail" ? "risk" : recommendation.reason;
@@ -186,8 +187,8 @@ async function escalateSamplingCohort(tx: Transaction, policyId: string, actor: 
   for (const item of cohort) {
     const [updated] = await tx.update(knowledgeCards).set({ publicationState: "suppressed", contentVersion: sql`${knowledgeCards.contentVersion} + 1`, updatedAt: new Date() }).where(and(eq(knowledgeCards.id, item.cardId), eq(knowledgeCards.contentVersion, item.contentVersion), eq(knowledgeCards.evidenceSetRevision, item.evidenceSetRevision), eq(knowledgeCards.publicationState, "active"))).returning({ contentVersion: knowledgeCards.contentVersion, evidenceSetRevision: knowledgeCards.evidenceSetRevision });
     if (!updated) continue;
-    await tx.update(knowledgeCardSearchDocuments).set({ status: "disabled", disabledAt: new Date(), updatedAt: new Date() }).where(and(eq(knowledgeCardSearchDocuments.knowledgeCardId, item.cardId), eq(knowledgeCardSearchDocuments.status, "active")));
-    await tx.insert(knowledgeIndexDirtyMarkers).values({ knowledgeCardId: item.cardId, contentVersion: updated.contentVersion, evidenceSetRevision: updated.evidenceSetRevision, reason: "sampling_high_severity" }).onConflictDoNothing();
+    await disableStaleKnowledgeSearchProjection(tx, item.cardId, updated.contentVersion);
+    await enqueueKnowledgeIndexWork(tx, { cardId: item.cardId, contentVersion: updated.contentVersion, evidenceSetRevision: updated.evidenceSetRevision, reason: "sampling_high_severity" });
     await tx.insert(auditEvents).values({ actorUserId: actor.userId, actorEmail: actor.email, operation: "update", targetType: "knowledge_sampling_card", targetId: item.cardId, afterSummary: "High-severity sampling failure suppressed this cohort card." });
   }
   await tx.insert(auditEvents).values({ actorUserId: actor.userId, actorEmail: actor.email, operation: "update", targetType: "knowledge_sampling_cohort", targetId: policy.id, afterSummary: "High-severity sampling failure suppressed only the affected cohort." });

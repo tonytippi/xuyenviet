@@ -3,7 +3,8 @@ import "server-only";
 import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { auditEvents, knowledgeCardEvidence, knowledgeCardSearchDocuments, knowledgeCardSources, knowledgeCards, knowledgeIndexDirtyMarkers, knowledgeRecommendations, knowledgeSourceSuggestions, rawSourceMaterial, sourceCaptureVersions, sources, type SourceRemovalReason } from "@/db/schema";
+import { disableStaleKnowledgeSearchProjection, enqueueKnowledgeIndexWork } from "@/features/knowledge/indexing-queue";
+import { auditEvents, knowledgeCardEvidence, knowledgeCardSources, knowledgeCards, knowledgeRecommendations, knowledgeSourceSuggestions, rawSourceMaterial, sourceCaptureVersions, sources, type SourceRemovalReason } from "@/db/schema";
 
 export class SourceRemovalError extends Error {
   constructor(message: string) {
@@ -56,18 +57,17 @@ export async function removeKnowledgeSource(
       const supportCount = new Set(remaining.map((item) => item.independenceKey)).size;
       const ineligible = supportCount === 0 || card.knowledgeState === "conflicted" || card.knowledgeState === "superseded" || card.verificationState === "failed";
       const downgradePattern = card.knowledgeState === "community_pattern" && supportCount < 2;
-      const material = ineligible && card.publicationState === "active" || downgradePattern;
-      const [updated] = await tx.update(knowledgeCards).set({
+       const [updated] = await tx.update(knowledgeCards).set({
         evidenceSetRevision: sql`${knowledgeCards.evidenceSetRevision} + 1`,
-        ...(material ? { contentVersion: sql`${knowledgeCards.contentVersion} + 1`, updatedAt: now } : {}),
+        contentVersion: sql`${knowledgeCards.contentVersion} + 1`, updatedAt: now,
         ...(ineligible && card.publicationState === "active" ? { publicationState: "suppressed" as const } : {}),
         ...(downgradePattern ? { knowledgeState: "community_observation" as const } : {}),
       }).where(eq(knowledgeCards.id, cardId)).returning({ contentVersion: knowledgeCards.contentVersion, evidenceSetRevision: knowledgeCards.evidenceSetRevision });
       if (!updated) continue;
       await tx.update(knowledgeRecommendations).set({ status: "superseded", resolution: "accepted", resolvedByUserId: input.actor.userId, resolvedAt: now, updatedAt: now }).where(and(eq(knowledgeRecommendations.knowledgeCardId, cardId), inArray(knowledgeRecommendations.status, ["open", "in_review"])));
-      await tx.insert(knowledgeIndexDirtyMarkers).values({ knowledgeCardId: cardId, contentVersion: updated.contentVersion, evidenceSetRevision: updated.evidenceSetRevision, reason: "source_removal" }).onConflictDoNothing();
+       await enqueueKnowledgeIndexWork(tx, { cardId, contentVersion: updated.contentVersion, evidenceSetRevision: updated.evidenceSetRevision, reason: "source_removal" });
       // Reindex from remaining evidence before a projection can become active again.
-      await tx.update(knowledgeCardSearchDocuments).set({ status: "disabled", disabledAt: now, updatedAt: now }).where(and(eq(knowledgeCardSearchDocuments.knowledgeCardId, cardId), eq(knowledgeCardSearchDocuments.status, "active")));
+       await disableStaleKnowledgeSearchProjection(tx, cardId, updated.contentVersion, now);
       await tx.insert(auditEvents).values({ actorUserId: input.actor.userId, actorEmail: input.actor.email.trim().toLowerCase(), operation: "archive", targetType: "knowledge_source_removal_card", targetId: cardId, afterSummary: `Source removal changed evidence eligibility; sourceId=${sourceId}; card remains traveler-eligible=${!ineligible}.` });
     }
 

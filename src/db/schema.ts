@@ -78,6 +78,9 @@ export type KnowledgeEvidenceState = (typeof knowledgeEvidenceStateValues)[numbe
 export const knowledgeSearchDocumentStatusValues = ["active", "disabled", "stale"] as const;
 export type KnowledgeSearchDocumentStatus = (typeof knowledgeSearchDocumentStatusValues)[number];
 
+export const knowledgeIndexDirtyMarkerStatusValues = ["pending", "claimed", "completed", "failed", "superseded"] as const;
+export type KnowledgeIndexDirtyMarkerStatus = (typeof knowledgeIndexDirtyMarkerStatusValues)[number];
+
 export const webSearchResultSourceTypeValues = ["official", "provider", "community", "general"] as const;
 export type WebSearchResultSourceType = (typeof webSearchResultSourceTypeValues)[number];
 
@@ -1005,6 +1008,8 @@ export const knowledgeCardSearchDocuments = pgTable(
     knowledgeCardId: text("knowledge_card_id")
       .notNull()
       .references(() => knowledgeCards.id, { onDelete: "cascade" }),
+    contentVersion: integer("content_version").default(1).notNull(),
+    acceptedFence: text("accepted_fence").default("legacy").notNull(),
     status: text("status").$type<KnowledgeSearchDocumentStatus>().default("active").notNull(),
     searchableText: text("searchable_text").notNull(),
     textHash: text("text_hash").notNull(),
@@ -1019,12 +1024,15 @@ export const knowledgeCardSearchDocuments = pgTable(
     uniqueIndex("knowledge_card_search_documents_card_idx").on(document.knowledgeCardId),
     uniqueIndex("knowledge_card_search_documents_active_card_idx").on(document.knowledgeCardId).where(sql`${document.status} = 'active'`),
     index("knowledge_card_search_documents_status_updated_idx").on(document.status, document.updatedAt),
+    index("knowledge_card_search_documents_card_version_idx").on(document.knowledgeCardId, document.contentVersion),
     index("knowledge_card_search_documents_confidence_idx").on(document.confidence),
     check("knowledge_card_search_documents_status_check", sql`${document.status} in ('active', 'disabled', 'stale')`),
     check("knowledge_card_search_documents_confidence_check", sql`${document.confidence} in ('unverified', 'community', 'curated', 'partner', 'official')`),
     check("knowledge_card_search_documents_text_not_empty_check", sql`length(btrim(${document.searchableText})) > 0`),
     check("knowledge_card_search_documents_hash_check", sql`${document.textHash} ~ '^[a-f0-9]{64}$'`),
     check("knowledge_card_search_documents_source_count_check", sql`${document.sourceCount} > 0`),
+    check("knowledge_card_search_documents_content_version_check", sql`${document.contentVersion} >= 1`),
+    check("knowledge_card_search_documents_accepted_fence_check", sql`length(btrim(${document.acceptedFence})) between 1 and 128`),
     check("knowledge_card_search_documents_disabled_at_check", sql`(${document.status} = 'active' and ${document.disabledAt} is null) or (${document.status} <> 'active' and ${document.disabledAt} is not null)`),
   ],
 );
@@ -1112,13 +1120,32 @@ export const knowledgeIndexDirtyMarkers = pgTable(
     contentVersion: integer("content_version").notNull(),
     evidenceSetRevision: integer("evidence_set_revision").notNull(),
     reason: text("reason").notNull(),
+    status: text("status").$type<KnowledgeIndexDirtyMarkerStatus>().default("pending").notNull(),
+    claimedBy: text("claimed_by"),
+    claimedAt: timestamp("claimed_at", { mode: "date" }),
+    leaseExpiresAt: timestamp("lease_expires_at", { mode: "date" }),
+    fencingToken: text("fencing_token"),
+    attemptCount: integer("attempt_count").default(0).notNull(),
+    maxAttempts: integer("max_attempts").default(3).notNull(),
+    nextRunAt: timestamp("next_run_at", { mode: "date" }).defaultNow().notNull(),
+    completedAt: timestamp("completed_at", { mode: "date" }),
+    completionReason: text("completion_reason"),
+    failureCode: text("failure_code"),
+    failureReason: text("failure_reason"),
+    updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
   },
   (marker) => [
-    uniqueIndex("knowledge_index_dirty_markers_version_reason_idx").on(marker.knowledgeCardId, marker.contentVersion, marker.evidenceSetRevision, marker.reason),
+    uniqueIndex("knowledge_index_dirty_markers_card_version_idx").on(marker.knowledgeCardId, marker.contentVersion),
     index("knowledge_index_dirty_markers_created_at_idx").on(marker.createdAt),
+    index("knowledge_index_dirty_markers_due_work_idx").on(marker.nextRunAt, marker.createdAt).where(sql`${marker.status} in ('pending', 'claimed')`),
     check("knowledge_index_dirty_markers_versions_check", sql`${marker.contentVersion} >= 1 and ${marker.evidenceSetRevision} >= 1`),
     check("knowledge_index_dirty_markers_reason_check", sql`length(btrim(${marker.reason})) between 1 and 120`),
+    check("knowledge_index_dirty_markers_status_check", sql`${marker.status} in ('pending', 'claimed', 'completed', 'failed', 'superseded')`),
+    check("knowledge_index_dirty_markers_attempts_check", sql`${marker.attemptCount} >= 0 and ${marker.maxAttempts} between 1 and 10 and ${marker.attemptCount} <= ${marker.maxAttempts}`),
+    check("knowledge_index_dirty_markers_fence_check", sql`${marker.fencingToken} is null or ${marker.fencingToken} ~ '^[a-f0-9]{64}$'`),
+    check("knowledge_index_dirty_markers_failure_code_check", sql`${marker.failureCode} is null or length(btrim(${marker.failureCode})) between 1 and 80`),
+    check("knowledge_index_dirty_markers_failure_reason_check", sql`${marker.failureReason} is null or length(btrim(${marker.failureReason})) between 1 and 240`),
   ],
 );
 

@@ -19,6 +19,7 @@ import {
 } from "@/db/schema";
 import { recordAuditEvent } from "@/features/audit/events";
 import { evaluateKnowledgeTravelerPolicy } from "@/features/knowledge/state";
+import { disableStaleKnowledgeSearchProjection, enqueueKnowledgeIndexWork } from "@/features/knowledge/indexing-queue";
 import { requireAdminSession, type AuthenticatedSessionWithRoles } from "@/server/auth";
 
 const maxTitleLength = 160;
@@ -351,11 +352,13 @@ export async function updateKnowledgeDraft(draftId: string, input: KnowledgeDraf
         updatedAt: new Date(),
       })
       .where(and(eq(knowledgeCards.id, normalizedDraftId), eq(knowledgeCards.status, "draft"), eq(knowledgeCards.needsReview, true)))
-      .returning({ id: knowledgeCards.id });
+      .returning({ id: knowledgeCards.id, contentVersion: knowledgeCards.contentVersion, evidenceSetRevision: knowledgeCards.evidenceSetRevision });
 
     if (!updatedDraft) {
       throw new KnowledgeDraftReviewError("Bản nháp này không còn trong trạng thái cần duyệt.", "not_reviewable");
     }
+    await enqueueKnowledgeIndexWork(transaction, { cardId: normalizedDraftId, contentVersion: updatedDraft.contentVersion, evidenceSetRevision: updatedDraft.evidenceSetRevision, reason: "draft_update" });
+    await disableStaleKnowledgeSearchProjection(transaction, normalizedDraftId, updatedDraft.contentVersion);
 
     await recordAuditEvent(
       {
@@ -398,11 +401,13 @@ export async function rejectKnowledgeDraft(draftId: string): Promise<KnowledgeDr
         updatedAt: new Date(),
       })
       .where(and(eq(knowledgeCards.id, normalizedDraftId), eq(knowledgeCards.status, "draft"), eq(knowledgeCards.needsReview, true)))
-      .returning({ id: knowledgeCards.id });
+      .returning({ id: knowledgeCards.id, contentVersion: knowledgeCards.contentVersion, evidenceSetRevision: knowledgeCards.evidenceSetRevision });
 
     if (!updatedDraft) {
       throw new KnowledgeDraftReviewError("Bản nháp này không còn trong trạng thái cần duyệt.", "not_reviewable");
     }
+    await enqueueKnowledgeIndexWork(transaction, { cardId: normalizedDraftId, contentVersion: updatedDraft.contentVersion, evidenceSetRevision: updatedDraft.evidenceSetRevision, reason: "draft_rejection" });
+    await disableStaleKnowledgeSearchProjection(transaction, normalizedDraftId, updatedDraft.contentVersion);
 
     await recordAuditEvent(
       {
@@ -499,11 +504,12 @@ async function approveKnowledgeDraftInTransaction(
         ...(expectedUpdatedAt ? [eq(knowledgeCards.updatedAt, new Date(expectedUpdatedAt))] : []),
       ),
     )
-    .returning({ id: knowledgeCards.id });
+    .returning({ id: knowledgeCards.id, contentVersion: knowledgeCards.contentVersion, evidenceSetRevision: knowledgeCards.evidenceSetRevision });
 
   if (!updatedDraft) {
     throw new KnowledgeDraftReviewError("Bản nháp này không còn trong trạng thái cần duyệt.", "not_reviewable");
   }
+  await enqueueKnowledgeIndexWork(transaction, { cardId: normalizedDraftId, contentVersion: updatedDraft.contentVersion, evidenceSetRevision: updatedDraft.evidenceSetRevision, reason: "draft_approval" });
 
   const approvedCard = await getKnowledgeDraftForReviewFromDb(transaction, normalizedDraftId);
 

@@ -3,11 +3,12 @@ import "server-only";
 import { and, desc, eq, isNull, or, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { auditEvents, knowledgeCardEvidence, knowledgeCardSearchDocuments, knowledgeCards, knowledgeCardSources, knowledgeCardTypeValues, knowledgeIndexDirtyMarkers, knowledgeIngestionJobs, sourceCaptureVersions, sources } from "@/db/schema";
+import { auditEvents, knowledgeCardEvidence, knowledgeCardSearchDocuments, knowledgeCards, knowledgeCardSources, knowledgeCardTypeValues, knowledgeIngestionJobs, sourceCaptureVersions, sources } from "@/db/schema";
 import { completeEvaluation, completeExtraction } from "@/features/ai/gateway";
 import { getAiGatewayPricingSnapshot, selectActiveAiGatewayModel, type SelectedAiGatewayModel } from "@/features/ai/models";
 import { buildKnowledgePipelineExtractionMessages, buildKnowledgePipelineJudgmentMessages, buildKnowledgePipelineRelationJudgmentMessages, knowledgePipelineExtractionPromptVersion, knowledgePipelineExtractionPurpose, knowledgePipelineJudgmentPromptVersion, knowledgePipelineJudgmentPurpose } from "@/features/ai/prompts";
 import { commitKnowledgeIngestionStage, retryKnowledgeIngestionStage, type KnowledgeIngestionCheckpoint, type KnowledgeIngestionClaim } from "@/features/knowledge/ingestion-jobs";
+import { disableStaleKnowledgeSearchProjection, enqueueKnowledgeIndexWork } from "@/features/knowledge/indexing-queue";
 import { lockSamplingPolicyBoundary, scheduleKnowledgeRecommendation } from "@/features/knowledge/recommendations";
 import { writeAiUsageEvent } from "@/features/usage/events";
 
@@ -279,9 +280,15 @@ async function attachEvidence(tx: Parameters<Parameters<PipelineDb["transaction"
   await tx.insert(knowledgeCardEvidence).values({ knowledgeCardId: cardId, ...values });
   await incrementEvidenceSetRevision(tx, cardId);
 }
-async function incrementEvidenceSetRevision(tx: Parameters<Parameters<PipelineDb["transaction"]>[0]>[0], cardId: string) { await tx.update(knowledgeCards).set({ evidenceSetRevision: sql`${knowledgeCards.evidenceSetRevision} + 1` }).where(eq(knowledgeCards.id, cardId)); }
+async function incrementEvidenceSetRevision(tx: Parameters<Parameters<PipelineDb["transaction"]>[0]>[0], cardId: string) {
+  const [updated] = await tx.update(knowledgeCards).set({ evidenceSetRevision: sql`${knowledgeCards.evidenceSetRevision} + 1`, contentVersion: sql`${knowledgeCards.contentVersion} + 1`, updatedAt: new Date() }).where(eq(knowledgeCards.id, cardId)).returning({ contentVersion: knowledgeCards.contentVersion, evidenceSetRevision: knowledgeCards.evidenceSetRevision });
+  if (updated) {
+    await enqueueKnowledgeIndexWork(tx, { cardId, ...updated, reason: "evidence_change" });
+    await disableStaleKnowledgeSearchProjection(tx, cardId, updated.contentVersion);
+  }
+}
 async function promote(tx: Parameters<Parameters<PipelineDb["transaction"]>[0]>[0], cardId: string) { const evidence = await tx.select({ key: knowledgeCardEvidence.independenceKey }).from(knowledgeCardEvidence).where(and(eq(knowledgeCardEvidence.knowledgeCardId, cardId), eq(knowledgeCardEvidence.supportLevel, "supporting"), eq(knowledgeCardEvidence.state, "active"))); if (new Set(evidence.map((item) => item.key)).size < 2) return false; const [updated] = await tx.update(knowledgeCards).set({ knowledgeState: "community_pattern", contentVersion: sql`${knowledgeCards.contentVersion} + 1`, updatedAt: new Date() }).where(and(eq(knowledgeCards.id, cardId), sql`${knowledgeCards.knowledgeState} <> 'community_pattern'`)).returning({ id: knowledgeCards.id }); return Boolean(updated); }
-async function markIndexDirty(tx: Parameters<Parameters<PipelineDb["transaction"]>[0]>[0], cardId: string, version: { contentVersion: number; evidenceSetRevision: number }, reason: string) { await tx.insert(knowledgeIndexDirtyMarkers).values({ knowledgeCardId: cardId, contentVersion: version.contentVersion, evidenceSetRevision: version.evidenceSetRevision, reason }).onConflictDoNothing(); }
+async function markIndexDirty(tx: Parameters<Parameters<PipelineDb["transaction"]>[0]>[0], cardId: string, version: { contentVersion: number; evidenceSetRevision: number }, reason: string) { await enqueueKnowledgeIndexWork(tx, { cardId, ...version, reason }); }
 async function fence(claim: KnowledgeIngestionClaim, version: number, stage: "published" | "suppressed" | "review_recommended" | "verify_first", code: string | undefined, tx: Parameters<Parameters<PipelineDb["transaction"]>[0]>[0], expectedStage: "judging" | "relating" = "relating") { const [row] = await tx.execute(sql`update knowledge_ingestion_jobs set stage = ${stage}, stage_version = ${version + 1}, checkpoint = null, last_error_code = ${code ?? null}, claimed_by = null, claimed_at = null, lease_expires_at = null, fencing_token = null, updated_at = timezone('UTC', now()) where id = ${claim.jobId} and stage = ${expectedStage} and stage_version = ${version} and fencing_token = ${claim.fencingToken} and lease_expires_at > timezone('UTC', now()) returning id`) as Array<{ id: string }>; return row ?? null; }
 async function terminal(claim: KnowledgeIngestionClaim, version: number, stage: "suppressed" | "review_recommended", code: string, tx: Parameters<Parameters<PipelineDb["transaction"]>[0]>[0]) { const committed = await fence(claim, version, stage, code, tx); return committed ? { jobId: claim.jobId, sourceId: claim.sourceId, outcome: stage } : null; }
 async function terminalVerifyFirst(claim: KnowledgeIngestionClaim, version: number, tx: Parameters<Parameters<PipelineDb["transaction"]>[0]>[0]) { const [row] = await tx.execute(sql`update knowledge_ingestion_jobs set stage = 'suppressed', stage_version = ${version + 1}, checkpoint = null, last_error_code = 'stale_or_deleted_capture', claimed_by = null, claimed_at = null, lease_expires_at = null, fencing_token = null, updated_at = timezone('UTC', now()) where id = ${claim.jobId} and stage = 'relating' and stage_version = ${version} and fencing_token = ${claim.fencingToken} and lease_expires_at > timezone('UTC', now()) returning id`) as Array<{ id: string }>; return row ? { jobId: claim.jobId, sourceId: claim.sourceId, outcome: "suppressed" as const } : null; }

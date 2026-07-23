@@ -139,7 +139,7 @@ describe("knowledge ingestion pipeline", () => {
 
     await expect(runKnowledgeIngestionPipeline(claim, testDb)).resolves.toMatchObject({ outcome: "review_recommended", cardId: expect.any(String) });
     await expect(testDb.select().from(knowledgeCards)).resolves.toMatchObject([{ publicationState: "suppressed", reviewState: "ai_recommended", needsReview: true }]);
-    await expect(testDb.select().from(knowledgeRecommendations)).resolves.toMatchObject([{ reason: "weak_evidence", status: "open", contentVersion: 1, evidenceSetRevision: 2 }]);
+    await expect(testDb.select().from(knowledgeRecommendations)).resolves.toMatchObject([{ reason: "weak_evidence", status: "open", contentVersion: 2, evidenceSetRevision: 2 }]);
   });
 
   test("retains high-risk facts as suppressed canonical cards with a version-bound verification recommendation", async () => {
@@ -149,8 +149,8 @@ describe("knowledge ingestion pipeline", () => {
 
     await expect(runKnowledgeIngestionPipeline(claim, testDb)).resolves.toMatchObject({ outcome: "verify_first" });
     await expect(testDb.select().from(knowledgeCards)).resolves.toMatchObject([{ publicationState: "suppressed", verificationState: "required", reviewState: "ai_recommended", evidenceSetRevision: 2 }]);
-    await expect(testDb.select().from(knowledgeRecommendations)).resolves.toMatchObject([{ reason: "verification", status: "open", contentVersion: 1, evidenceSetRevision: 2 }]);
-    await expect(testDb.select().from(knowledgeIndexDirtyMarkers)).resolves.toMatchObject([{ reason: "ingestion_verify_first", contentVersion: 1, evidenceSetRevision: 2 }]);
+    await expect(testDb.select().from(knowledgeRecommendations)).resolves.toMatchObject([{ reason: "verification", status: "open", contentVersion: 2, evidenceSetRevision: 2 }]);
+    await expect(testDb.select().from(knowledgeIndexDirtyMarkers)).resolves.toMatchObject([{ contentVersion: 2, evidenceSetRevision: 2, status: "pending" }]);
   });
 
   test("treats route conditions as verification-required even without a narrow hazard keyword", async () => {
@@ -173,9 +173,9 @@ describe("knowledge ingestion pipeline", () => {
     vi.mocked(fetch).mockResolvedValueOnce(extractionResponse(candidate(firstText, { type: "ev_charging", title: "Trạm sạc Đà Nẵng", summary: "Trạm sạc đang hoạt động.", location_name: "Đà Nẵng" }))).mockResolvedValueOnce(judgmentResponse()).mockResolvedValueOnce(new Response(JSON.stringify({ model: "judge-model", choices: [{ message: { content: JSON.stringify({ action: "attach", target_card_id: first.cardId, summary: "Tương đương." }) } }] }), { status: 200 }));
 
     await expect(runKnowledgeIngestionPipeline(claim, testDb)).resolves.toMatchObject({ outcome: "verify_first", cardId: first.cardId });
-    await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, first.cardId))).resolves.toMatchObject([{ publicationState: "suppressed", knowledgeState: "community_pattern", verificationState: "required", reviewState: "ai_recommended", needsReview: true, contentVersion: 2, evidenceSetRevision: 3 }]);
+    await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, first.cardId))).resolves.toMatchObject([{ publicationState: "suppressed", knowledgeState: "community_pattern", verificationState: "required", reviewState: "ai_recommended", needsReview: true, contentVersion: 4, evidenceSetRevision: 3 }]);
     await expect(testDb.select().from(knowledgeCardEvidence).where(eq(knowledgeCardEvidence.knowledgeCardId, first.cardId))).resolves.toHaveLength(2);
-    await expect(testDb.select().from(knowledgeIndexDirtyMarkers).where(eq(knowledgeIndexDirtyMarkers.knowledgeCardId, first.cardId))).resolves.toEqual(expect.arrayContaining([expect.objectContaining({ reason: "ingestion_attach", contentVersion: 2, evidenceSetRevision: 3 }), expect.objectContaining({ reason: "ingestion_promotion", contentVersion: 2, evidenceSetRevision: 3 })]));
+    await expect(testDb.select().from(knowledgeIndexDirtyMarkers).where(eq(knowledgeIndexDirtyMarkers.knowledgeCardId, first.cardId))).resolves.toEqual(expect.arrayContaining([expect.objectContaining({ contentVersion: 3, evidenceSetRevision: 3 }), expect.objectContaining({ contentVersion: 4, evidenceSetRevision: 3 })]));
   });
 
   test("excludes suppressed conflicted cards from verification-canonical relation candidates", async () => {
@@ -200,7 +200,7 @@ describe("knowledge ingestion pipeline", () => {
     await expect(runKnowledgeIngestionPipeline(claim, testDb)).resolves.toMatchObject({ outcome: "review_recommended" });
     await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, "existing-high-risk"))).resolves.toMatchObject([{ publicationState: "suppressed", knowledgeState: "conflicted", reviewState: "ai_recommended", verificationState: "required", needsReview: true }]);
     await expect(testDb.select().from(knowledgeRecommendations).where(eq(knowledgeRecommendations.knowledgeCardId, "existing-high-risk"))).resolves.toMatchObject([{ reason: "conflict", status: "open" }]);
-    await expect(testDb.select().from(knowledgeIndexDirtyMarkers).where(eq(knowledgeIndexDirtyMarkers.knowledgeCardId, "existing-high-risk"))).resolves.toMatchObject([{ reason: "ingestion_conflict" }]);
+    await expect(testDb.select().from(knowledgeIndexDirtyMarkers).where(eq(knowledgeIndexDirtyMarkers.knowledgeCardId, "existing-high-risk"))).resolves.toEqual(expect.arrayContaining([expect.objectContaining({ reason: "ingestion_conflict" })]));
     await expect(testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, "existing-high-risk"))).resolves.toMatchObject([{ status: "disabled", disabledAt: expect.any(Date) }]);
   });
 
@@ -241,8 +241,8 @@ describe("knowledge ingestion pipeline", () => {
     await expect(runKnowledgeIngestionPipeline(claim, testDb)).resolves.toMatchObject({ outcome: "published", cardId: "existing" });
     await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, "existing"))).resolves.toMatchObject([{ knowledgeState: "community_pattern", evidenceSetRevision: 2 }]);
     await expect(testDb.select().from(knowledgeCardEvidence).where(eq(knowledgeCardEvidence.knowledgeCardId, "existing"))).resolves.toHaveLength(2);
-    await expect(testDb.select().from(knowledgeIndexDirtyMarkers).where(eq(knowledgeIndexDirtyMarkers.knowledgeCardId, "existing"))).resolves.toEqual(expect.arrayContaining([expect.objectContaining({ reason: "ingestion_attach", contentVersion: 2, evidenceSetRevision: 2 }), expect.objectContaining({ reason: "ingestion_promotion", contentVersion: 2, evidenceSetRevision: 2 })]));
-    await expect(testDb.select().from(knowledgeSamplingCohortMembers).where(eq(knowledgeSamplingCohortMembers.knowledgeCardId, "existing"))).resolves.toMatchObject([{ contentVersion: 2, evidenceSetRevision: 2 }]);
+    await expect(testDb.select().from(knowledgeIndexDirtyMarkers).where(eq(knowledgeIndexDirtyMarkers.knowledgeCardId, "existing"))).resolves.toEqual(expect.arrayContaining([expect.objectContaining({ contentVersion: 2, evidenceSetRevision: 2 }), expect.objectContaining({ contentVersion: 3, evidenceSetRevision: 2 })]));
+    await expect(testDb.select().from(knowledgeSamplingCohortMembers).where(eq(knowledgeSamplingCohortMembers.knowledgeCardId, "existing"))).resolves.toMatchObject([{ contentVersion: 3, evidenceSetRevision: 2 }]);
   });
 
   test("retains a freshness-sensitive attach condition mismatch as verification-required without mutating the target", async () => {
@@ -258,7 +258,7 @@ describe("knowledge ingestion pipeline", () => {
     await expect(testDb.select().from(knowledgeCardEvidence).where(eq(knowledgeCardEvidence.knowledgeCardId, first?.cardId ?? ""))).resolves.toHaveLength(1);
     await expect(testDb.select().from(knowledgeCards)).resolves.toMatchObject(expect.arrayContaining([expect.objectContaining({ publicationState: "suppressed", knowledgeState: "uncertain", reviewState: "ai_recommended", verificationState: "required", needsReview: true, conditions: ["sáng sớm"] })]));
     await expect(testDb.select().from(knowledgeCardEvidence).where(eq(knowledgeCardEvidence.captureVersionId, capture.id))).resolves.toMatchObject([{ quoteText: "Đèo Hải Vân có điểm dừng ngắm cảnh an toàn vào sáng sớm.", supportLevel: "supporting" }]);
-    await expect(testDb.select().from(knowledgeRecommendations).where(eq(knowledgeRecommendations.reason, "missing_context"))).resolves.toMatchObject([{ status: "open", contentVersion: 1, evidenceSetRevision: 2 }]);
+    await expect(testDb.select().from(knowledgeRecommendations).where(eq(knowledgeRecommendations.reason, "missing_context"))).resolves.toMatchObject([{ status: "open", contentVersion: 2, evidenceSetRevision: 2 }]);
     await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, claim.jobId))).resolves.toMatchObject([{ stage: "review_recommended", checkpoint: null }]);
   });
 
@@ -350,9 +350,9 @@ describe("knowledge ingestion pipeline", () => {
     vi.mocked(fetch).mockResolvedValueOnce(extractionResponse(candidate(secondText, { summary: "Không có điểm dừng ngắm cảnh phù hợp ban ngày." }))).mockResolvedValueOnce(judgmentResponse()).mockResolvedValueOnce(new Response(JSON.stringify({ model: "judge-model", choices: [{ message: { content: JSON.stringify({ action: "conflict", target_card_id: firstResult?.cardId, summary: "Mâu thuẫn." }) } }] }), { status: 200 }));
 
     await expect(runKnowledgeIngestionPipeline(claim, testDb)).resolves.toMatchObject({ outcome: "review_recommended" });
-    await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, firstResult?.cardId ?? ""))).resolves.toMatchObject([{ publicationState: "suppressed", knowledgeState: "conflicted", reviewState: "ai_recommended", needsReview: true, contentVersion: 2, evidenceSetRevision: 3 }]);
+    await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, firstResult?.cardId ?? ""))).resolves.toMatchObject([{ publicationState: "suppressed", knowledgeState: "conflicted", reviewState: "ai_recommended", needsReview: true, contentVersion: 4, evidenceSetRevision: 3 }]);
     await expect(testDb.select().from(knowledgeCardEvidence).where(eq(knowledgeCardEvidence.supportLevel, "conflicting"))).resolves.toHaveLength(1);
-    await expect(testDb.select().from(knowledgeIndexDirtyMarkers).where(eq(knowledgeIndexDirtyMarkers.knowledgeCardId, firstResult.cardId))).resolves.toEqual(expect.arrayContaining([expect.objectContaining({ reason: "ingestion_conflict", contentVersion: 2, evidenceSetRevision: 3 })]));
+    await expect(testDb.select().from(knowledgeIndexDirtyMarkers).where(eq(knowledgeIndexDirtyMarkers.knowledgeCardId, firstResult.cardId))).resolves.toEqual(expect.arrayContaining([expect.objectContaining({ reason: "ingestion_conflict", contentVersion: 4, evidenceSetRevision: 3 })]));
     await expect(testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, firstResult.cardId))).resolves.toMatchObject([{ status: "disabled", disabledAt: expect.any(Date) }]);
     await expect(testDb.select().from(auditEvents).where(eq(auditEvents.targetType, "knowledge_ingestion_conflict"))).resolves.toMatchObject([{ actorUserId: "system-knowledge-pipeline", actorEmail: "system-knowledge-pipeline@xuyenviet.invalid" }]);
   });
@@ -445,7 +445,7 @@ describe("knowledge ingestion pipeline", () => {
     await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, first?.cardId ?? ""))).resolves.toMatchObject([{ publicationState: "active" }]);
     await expect(testDb.select().from(knowledgeCards)).resolves.toMatchObject(expect.arrayContaining([expect.objectContaining({ publicationState: "suppressed", knowledgeState: "uncertain", reviewState: "ai_recommended", verificationState: "required", needsReview: true })]));
     await expect(testDb.select().from(knowledgeCardEvidence).where(eq(knowledgeCardEvidence.captureVersionId, capture.id))).resolves.toMatchObject([{ quoteText: highRiskText, supportLevel: "supporting" }]);
-    await expect(testDb.select().from(knowledgeRecommendations).where(eq(knowledgeRecommendations.reason, "relation"))).resolves.toMatchObject([{ status: "open", contentVersion: 1, evidenceSetRevision: 2 }]);
+    await expect(testDb.select().from(knowledgeRecommendations).where(eq(knowledgeRecommendations.reason, "relation"))).resolves.toMatchObject([{ status: "open", contentVersion: 2, evidenceSetRevision: 2 }]);
     await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, claim.jobId))).resolves.toMatchObject([{ stage: "review_recommended", checkpoint: null }]);
   });
 

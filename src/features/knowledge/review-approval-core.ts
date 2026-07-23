@@ -3,6 +3,7 @@ import { alias } from "drizzle-orm/pg-core";
 
 import { getDb } from "@/db/client";
 import { auditEvents, knowledgeCards, knowledgeCardSources, knowledgeSourceSuggestions, sourceCaptureVersions, sources } from "@/db/schema";
+import { enqueueKnowledgeIndexWork } from "@/features/knowledge/indexing-queue";
 import type { AuthenticatedSession } from "@/server/auth";
 
 type ReviewDb = ReturnType<typeof getDb>;
@@ -58,11 +59,12 @@ async function approveKnowledgeDraftForActorInTransaction(transaction: ReviewMut
       updatedAt: new Date(),
     })
     .where(and(eq(knowledgeCards.id, draftId), eq(knowledgeCards.status, "draft"), eq(knowledgeCards.needsReview, true)))
-    .returning({ id: knowledgeCards.id });
+    .returning({ id: knowledgeCards.id, contentVersion: knowledgeCards.contentVersion, evidenceSetRevision: knowledgeCards.evidenceSetRevision });
 
   if (!updatedDraft) {
     throw new KnowledgeDraftApprovalCoreError("Bản nháp này không còn trong trạng thái cần duyệt.", "not_reviewable");
   }
+  await enqueueKnowledgeIndexWork(transaction, { cardId: draftId, contentVersion: updatedDraft.contentVersion, evidenceSetRevision: updatedDraft.evidenceSetRevision, reason: "draft_approval" });
 
   await transaction.insert(auditEvents).values({
     actorUserId: actor.userId,

@@ -39,6 +39,33 @@ export type KnowledgeSearchResult = Pick<
 
 type KnowledgeSearchCardSnapshot = Omit<KnowledgeSearchResult, "score" | "policy" | "policyReasons" | "sources">;
 
+/**
+ * Compatibility-only projection entrypoint. Production workers must provide the
+ * claimed marker identity and fence so an obsolete version cannot win a race.
+ */
+export async function projectClaimedKnowledgeIndexWork(input: { markerId: string; cardId: string; contentVersion: number; fencingToken: string; now?: Date }, db = getDb()) {
+  const now = input.now ?? new Date();
+  const nowSql = now.toISOString();
+  return db.transaction(async (transaction) => {
+    const [version] = await transaction.select({ contentVersion: knowledgeCards.contentVersion }).from(knowledgeCards).where(eq(knowledgeCards.id, input.cardId)).limit(1).for("update");
+    if (!version || version.contentVersion !== input.contentVersion) return { cardId: input.cardId, indexed: false as const, outcome: "superseded" as const };
+    let eligibleCard = await loadEligibleApprovedCard(transaction, input.cardId);
+    if (eligibleCard) {
+      for (const source of eligibleCard.sources.sort((left, right) => left.id.localeCompare(right.id))) await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${source.id}, 44))`);
+      eligibleCard = await loadEligibleApprovedCard(transaction, input.cardId);
+    }
+    const claimIsCurrent = sql`exists (select 1 from knowledge_index_dirty_markers marker where marker.id = ${input.markerId} and marker.knowledge_card_id = ${input.cardId} and marker.content_version = ${input.contentVersion} and marker.status = 'claimed' and marker.fencing_token = ${input.fencingToken} and marker.lease_expires_at > ${nowSql}::timestamp)`;
+    if (!eligibleCard) {
+      await transaction.execute(sql`update knowledge_card_search_documents document set status = 'disabled', disabled_at = ${now}, updated_at = ${now}, content_version = ${input.contentVersion}, accepted_fence = ${input.fencingToken} where document.knowledge_card_id = ${input.cardId} and document.content_version <= ${input.contentVersion} and ${claimIsCurrent}`);
+      return { cardId: input.cardId, indexed: false as const, outcome: "disabled" as const };
+    }
+    const searchableText = buildSearchableText(eligibleCard);
+    const textHash = hashSearchableText(searchableText);
+    const [document] = await transaction.insert(knowledgeCardSearchDocuments).values({ knowledgeCardId: eligibleCard.id, contentVersion: input.contentVersion, acceptedFence: input.fencingToken, status: "active", searchableText, textHash, sourceCount: eligibleCard.sources.length, confidence: eligibleCard.confidence, freshnessSensitive: eligibleCard.freshnessSensitive, updatedAt: now, disabledAt: null }).onConflictDoUpdate({ target: knowledgeCardSearchDocuments.knowledgeCardId, set: { contentVersion: input.contentVersion, acceptedFence: input.fencingToken, status: "active", searchableText, textHash, sourceCount: eligibleCard.sources.length, confidence: eligibleCard.confidence, freshnessSensitive: eligibleCard.freshnessSensitive, updatedAt: now, disabledAt: null }, where: sql`${knowledgeCardSearchDocuments.contentVersion} <= ${input.contentVersion} and ${claimIsCurrent}` }).returning();
+    return document ? { cardId: eligibleCard.id, indexed: true as const, outcome: "indexed" as const } : { cardId: input.cardId, indexed: false as const, outcome: "lost_claim" as const };
+  });
+}
+
 export async function indexApprovedKnowledgeCard(cardId: string) {
   const normalizedCardId = cardId.trim();
 
@@ -137,7 +164,7 @@ async function searchApprovedKnowledgeInternal(query: string | null | undefined,
   const db = getDb();
   const results: KnowledgeSearchResult[] = [];
   let candidateCount = 0;
-  const scoredDocuments: Array<{ knowledgeCardId: string; searchableText: string; updatedAt: Date; score: number }> = [];
+  const scoredDocuments: Array<{ knowledgeCardId: string; contentVersion: number; searchableText: string; updatedAt: Date; score: number }> = [];
 
   while (offset < maxSearchCandidateDocuments) {
     const currentBatchSize = Math.min(batchSize, maxSearchCandidateDocuments - offset);
@@ -147,13 +174,14 @@ async function searchApprovedKnowledgeInternal(query: string | null | undefined,
     }
 
     const matchingDocuments = await db
-      .select({ knowledgeCardId: knowledgeCardSearchDocuments.knowledgeCardId, searchableText: knowledgeCardSearchDocuments.searchableText, updatedAt: knowledgeCardSearchDocuments.updatedAt })
+      .select({ knowledgeCardId: knowledgeCardSearchDocuments.knowledgeCardId, contentVersion: knowledgeCardSearchDocuments.contentVersion, searchableText: knowledgeCardSearchDocuments.searchableText, updatedAt: knowledgeCardSearchDocuments.updatedAt })
       .from(knowledgeCardSearchDocuments)
       .innerJoin(knowledgeCards, eq(knowledgeCards.id, knowledgeCardSearchDocuments.knowledgeCardId))
       .where(
         and(
           eq(knowledgeCardSearchDocuments.status, "active"),
           eq(knowledgeCards.publicationState, "active"),
+          eq(knowledgeCardSearchDocuments.contentVersion, knowledgeCards.contentVersion),
           or(...terms.map((term) => ilike(knowledgeCardSearchDocuments.searchableText, `%${escapeLikePattern(term)}%`))),
         ),
       )
@@ -183,15 +211,13 @@ async function searchApprovedKnowledgeInternal(query: string | null | undefined,
 
     const card = await loadEligibleApprovedCard(db, document.knowledgeCardId);
 
-    if (card) {
+      if (card && document.contentVersion === card.contentVersion) {
       candidateCount += 1;
 
       if (results.length < limit) {
         results.push({ ...card, score: document.score });
       }
-    } else {
-      await disableKnowledgeSearchDocument(document.knowledgeCardId, "disabled", db);
-    }
+      }
   }
 
   return { results, candidateCount: countAllCandidates ? candidateCount : results.length };
@@ -372,8 +398,6 @@ function buildSearchableText(card: Omit<KnowledgeSearchResult, "score">) {
       source.official ? "official" : null,
       source.partner ? "partner" : null,
       source.supportLevel,
-      source.canonicalUrl,
-      source.url,
     ]),
   ];
 
