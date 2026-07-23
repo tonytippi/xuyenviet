@@ -1516,6 +1516,50 @@ describe("answer context assembly", () => {
     expect(result.content).toContain('điều kiện "Chỉ đi khi trời khô" của "Đường vào điểm dừng"');
   });
 
+  test("answer safeguard replaces declarative caveat-only itinerary recommendations", async () => {
+    const { ensureAiAskFreshnessWarning } = await import("@/features/ai/answer-freshness");
+    const result = ensureAiAskFreshnessWarning("Tôi đề xuất lịch trình 5 ngày này và bạn có thể đặt phòng tại đây.", createSourceBundle({
+      knowledge: [makeKnowledgeResult("required", "Khách sạn cần xác minh", { verificationState: "required", policy: "caveat_only" })],
+    }));
+
+    expect(result.replacedUnsafeContent).toBe(true);
+    expect(result.content).not.toContain("Tôi đề xuất lịch trình");
+    expect(result.content).toContain('tình trạng hiện tại của "Khách sạn cần xác minh"');
+  });
+
+  test("answer safeguard replaces contextual conditional answers that omit any material condition", async () => {
+    const { ensureAiAskFreshnessWarning } = await import("@/features/ai/answer-freshness");
+    const sourceBundle = createSourceBundle({
+      knowledge: [makeKnowledgeResult("conditional", "Đường vào điểm dừng", {
+        knowledgeState: "conditional",
+        conditions: ["Chỉ đi khi trời khô", "Không đi sau mưa lớn"],
+      })],
+    });
+
+    const incomplete = ensureAiAskFreshnessWarning("Bạn có thể đi đường vào điểm dừng khi trời khô.", sourceBundle);
+    const complete = ensureAiAskFreshnessWarning("Bạn có thể đi đường vào điểm dừng. Chỉ đi khi trời khô. Không đi sau mưa lớn.", sourceBundle);
+
+    expect(incomplete.replacedUnsafeContent).toBe(true);
+    expect(incomplete.content).toContain('"Chỉ đi khi trời khô"');
+    expect(incomplete.content).toContain('"Không đi sau mưa lớn"');
+    expect(complete.replacedUnsafeContent).toBe(false);
+  });
+
+  test("answer safeguard verifies every material condition for caveat-only fallback", async () => {
+    const { ensureAiAskFreshnessWarning } = await import("@/features/ai/answer-freshness");
+    const result = ensureAiAskFreshnessWarning("Bạn có thể đặt dịch vụ này.", createSourceBundle({
+      knowledge: [makeKnowledgeResult("conditional", "Đường vào điểm dừng", {
+        knowledgeState: "conditional",
+        policy: "caveat_only",
+        conditions: ["Chỉ đi khi trời khô", "Không đi sau mưa lớn"],
+      })],
+    }));
+
+    expect(result.replacedUnsafeContent).toBe(true);
+    expect(result.content).toContain('"Chỉ đi khi trời khô"');
+    expect(result.content).toContain('"Không đi sau mưa lớn"');
+  });
+
   test("stream route withholds a caveat-only settled recommendation until its safe replacement is ready", async () => {
     await createTestUser("user-1");
     await seedAnswerModel();
@@ -1545,6 +1589,42 @@ describe("answer context assembly", () => {
 
     expect(deltas).not.toContain("Nên đi 5 ngày.");
     expect(deltas).toContain('tình trạng hiện tại của "Điểm dừng cần xác minh"');
+    expect(doneEvent?.assistantMessage?.content).not.toContain("Nên đi 5 ngày.");
+  });
+
+  test("stream route withholds contextual conditional answers until every material condition is present", async () => {
+    await createTestUser("user-1");
+    await seedAnswerModel();
+    const { conversation } = await createConversationWithUserMessage({ userId: "user-1" });
+    const sourceBundle = createSourceBundle({
+      knowledge: [makeKnowledgeResult("conditional", "Đường vào điểm dừng", {
+        knowledgeState: "conditional",
+        conditions: ["Chỉ đi khi trời khô", "Không đi sau mưa lớn"],
+      })],
+    });
+    vi.doMock("@/features/retrieval/source-bundle", () => ({
+      assembleContextPrioritySourceBundle: vi.fn().mockResolvedValue(sourceBundle),
+      buildSourceBundlePromptSection: vi.fn().mockReturnValue("Gói nguồn kiểm tra"),
+    }));
+    mockStreamingGateway(() => undefined);
+    mockRouteAuth();
+
+    const formData = new FormData();
+    formData.set("question", "Có thể đi đường này không?");
+    formData.set("conversationId", conversation.id);
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+    vi.doUnmock("@/features/retrieval/source-bundle");
+
+    const events = (await (await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never)).text())
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { type: string; content?: string; assistantMessage?: { content?: string } });
+    const deltas = events.filter((event) => event.type === "delta").map((event) => event.content).join("");
+    const doneEvent = events.find((event) => event.type === "done");
+
+    expect(deltas).not.toContain("Nên đi 5 ngày.");
+    expect(deltas).toContain('"Chỉ đi khi trời khô"');
+    expect(deltas).toContain('"Không đi sau mưa lớn"');
     expect(doneEvent?.assistantMessage?.content).not.toContain("Nên đi 5 ngày.");
   });
 

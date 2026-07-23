@@ -4,7 +4,7 @@ import { after } from "next/server";
 import { getDb } from "@/db/client";
 import { conversations, messageImageAttachments, messages, tripProjects } from "@/db/schema";
 import { buildValidatedAnswerAnnotations, sanitizeStoredAnswerAnnotations, type AnswerAnnotation } from "@/features/ai/answer-annotations";
-import { ensureAiAskFreshnessWarning } from "@/features/ai/answer-freshness";
+import { ensureAiAskFreshnessWarning, requiresAiAskAnswerFinalization } from "@/features/ai/answer-freshness";
 import { streamInitialAiAskAnswer } from "@/features/ai/gateway";
 import { getAiGatewayPricingSnapshot, selectActiveAiGatewayModel } from "@/features/ai/models";
 import { aiAskInitialAnswerPromptVersion, aiAskInitialAnswerPurpose, buildAiAskMessages } from "@/features/ai/prompts";
@@ -204,7 +204,7 @@ async function streamAnswer({
     const contextSection = buildSourceBundlePromptSection(sourceBundle);
     const gatewayMessages = buildAiAskMessages({ question, history: saved.history, contextSection });
     const finalGatewayMessages = imageDataUrl ? attachImageToFinalUserMessage(gatewayMessages, imageDataUrl) : gatewayMessages;
-    const caveatOnlyKnowledgeSelected = sourceBundle.knowledge.some((item) => item.policy === "caveat_only" || item.knowledgeState === "uncertain" || item.verificationState === "required");
+    const finalPolicyValidationRequired = requiresAiAskAnswerFinalization(sourceBundle);
     const extractionInput = saved;
     after(() => extractChatTripContext({
       session,
@@ -224,8 +224,8 @@ async function streamAnswer({
       messages: finalGatewayMessages,
       abortSignal,
       onDelta: (content) => {
-        // A caveat-only answer must pass the settled-decision guard before any text reaches the traveler.
-        if (!caveatOnlyKnowledgeSelected) sendEvent(controller, encoder, { type: "delta", content });
+        // Policy-constrained material must pass final answer guards before it reaches the traveler.
+        if (!finalPolicyValidationRequired) sendEvent(controller, encoder, { type: "delta", content });
       },
     });
 
@@ -283,7 +283,7 @@ async function streamAnswer({
 
     const savedTurn = saved;
     const assistantContent = ensureAiAskFreshnessWarning(gatewayResult.content, sourceBundle);
-    if (caveatOnlyKnowledgeSelected) {
+    if (finalPolicyValidationRequired) {
       sendEvent(controller, encoder, { type: "delta", content: assistantContent.content });
     } else if (assistantContent.appendedWarning) {
       sendEvent(controller, encoder, { type: "delta", content: assistantContent.appendedWarning });

@@ -5,10 +5,16 @@ import type { assembleContextPrioritySourceBundle } from "@/features/retrieval/s
 export function ensureAiAskFreshnessWarning(content: string, sourceBundle: Awaited<ReturnType<typeof assembleContextPrioritySourceBundle>>) {
   const freshnessWarningRequired = sourceBundle.retrievalDecision.freshnessRequired || sourceBundle.web.some((source) => isFreshnessSensitiveWebTrigger(source.triggerReason));
   const caveatOnlyKnowledge = sourceBundle.knowledge.filter((item) => item.policy === "caveat_only" || item.knowledgeState === "uncertain" || item.verificationState === "required");
+  const conditionalKnowledge = sourceBundle.knowledge.filter((item) => item.policy === "contextual_use" && item.knowledgeState === "conditional" && item.conditions.length > 0);
   const caveatWarningRequired = caveatOnlyKnowledge.length > 0;
 
   if (caveatWarningRequired && hasSettledItineraryRecommendation(content)) {
     const fallback = `Cảnh báo cần kiểm tra\nMình chưa thể dùng thông tin cần xác minh để chốt lịch trình. ${formatCaveatVerificationInstruction(caveatOnlyKnowledge)}`;
+    return { content: fallback, appendedWarning: fallback, replacedUnsafeContent: true };
+  }
+
+  if (conditionalKnowledge.some((item) => !hasEveryMaterialCondition(content, item.conditions))) {
+    const fallback = `Điều kiện cần giữ\nMình chưa thể dùng thông tin có điều kiện để khuyến nghị hoặc chốt lịch trình khi thiếu điều kiện vật chất. ${formatConditionalUseInstruction(conditionalKnowledge)}`;
     return { content: fallback, appendedWarning: fallback, replacedUnsafeContent: true };
   }
 
@@ -40,7 +46,7 @@ export function ensureAiAskFreshnessWarning(content: string, sourceBundle: Await
 }
 
 function hasSettledItineraryRecommendation(content: string) {
-  return /\b(?:nên|hãy|cần)\s+(?:đi|chọn|chốt|đặt|ưu tiên|theo)\b|(?:lịch trình|kế hoạch).{0,60}(?:đã chốt|nên chốt|chắc chắn)/i.test(content.normalize("NFC"));
+  return /\b(?:nên|hãy|cần)\s+(?:đi|chọn|chốt|đặt|ưu tiên|theo)\b|\b(?:tôi|mình)\s+(?:đề xuất|khuyên|khuyến nghị)\b|\b(?:bạn|gia đình)\s+có thể\s+(?:đi|chọn|chốt|đặt|ưu tiên|theo)\b|\b(?:khuyến nghị|lựa chọn phù hợp|phương án phù hợp|phương án tối ưu)\b|(?:lịch trình|kế hoạch).{0,60}(?:đã chốt|nên chốt|chắc chắn|phù hợp|tối ưu)/i.test(content.normalize("NFC"));
 }
 
 function formatCaveatVerificationInstruction(items: Awaited<ReturnType<typeof assembleContextPrioritySourceBundle>>["knowledge"]) {
@@ -49,8 +55,27 @@ function formatCaveatVerificationInstruction(items: Awaited<ReturnType<typeof as
 
 function getVerificationTarget(item: Awaited<ReturnType<typeof assembleContextPrioritySourceBundle>>["knowledge"][number]) {
   const title = item.title.replace(/\s+/g, " ").trim();
-  const condition = item.conditions[0]?.replace(/\s+/g, " ").trim();
-  return condition ? `điều kiện "${condition}" của "${title}"` : `tình trạng hiện tại của "${title}"`;
+  const conditions = item.conditions.map(normalizeMaterialCondition).filter(Boolean);
+  if (conditions.length === 1) return `điều kiện "${conditions[0]}" của "${title}"`;
+  if (conditions.length > 1) return `mọi điều kiện ${conditions.map((condition) => `"${condition}"`).join(", ")} của "${title}"`;
+  return `tình trạng hiện tại của "${title}"`;
+}
+
+export function requiresAiAskAnswerFinalization(sourceBundle: Awaited<ReturnType<typeof assembleContextPrioritySourceBundle>>) {
+  return sourceBundle.knowledge.some((item) => item.policy === "caveat_only" || item.knowledgeState === "uncertain" || item.verificationState === "required" || (item.policy === "contextual_use" && item.knowledgeState === "conditional" && item.conditions.length > 0));
+}
+
+function hasEveryMaterialCondition(content: string, conditions: string[]) {
+  const normalizedContent = normalizeMaterialCondition(content).toLocaleLowerCase("vi");
+  return conditions.map(normalizeMaterialCondition).filter(Boolean).every((condition) => normalizedContent.includes(condition.toLocaleLowerCase("vi")));
+}
+
+function formatConditionalUseInstruction(items: Awaited<ReturnType<typeof assembleContextPrioritySourceBundle>>["knowledge"]) {
+  return `Chỉ cân nhắc ${items.map((item) => `"${item.title.replace(/\s+/g, " ").trim()}" khi nêu đầy đủ ${item.conditions.map(normalizeMaterialCondition).filter(Boolean).map((condition) => `"${condition}"`).join(", ")}`).join("; ")}.`;
+}
+
+function normalizeMaterialCondition(value: string) {
+  return value.normalize("NFC").replace(/\s+/g, " ").trim();
 }
 
 function isFreshnessSensitiveWebTrigger(reason: string) {

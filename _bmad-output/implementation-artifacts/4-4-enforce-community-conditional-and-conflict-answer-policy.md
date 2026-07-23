@@ -38,6 +38,12 @@ so that community reports guide planning without becoming false guarantees.
 - [x] [Review][Patch] Caveat-only evidence can still drive a settled itinerary recommendation [src/features/ai/answer-freshness.ts:29] — Replaced settled-decision responses with a fail-closed caveat-only fallback and buffered caveat-only stream deltas until the guard completes.
 - [x] [Review][Patch] Caveat-only fallback lacks a card-specific verification target [src/features/ai/answer-freshness.ts:30] — Fallback now names each selected card and its first material condition when present, otherwise its current status, as the detail to confirm.
 
+### Review Findings (Re-review 2026-07-23)
+
+- [x] [Review][Patch] Caveat-only settled-decision guard misses ordinary recommendation wording [src/features/ai/answer-freshness.ts:47] — Broadened deterministic detection to cover declarative recommendations and explicit traveler action, replacing unsafe content before streaming or persistence.
+- [x] [Review][Patch] Caveat-only fallback omits later material conditions [src/features/ai/answer-freshness.ts:55] — Verification fallback now lists every normalized material condition for each selected card.
+- [x] [Review][Patch] Contextual conditional answers lack a deterministic condition-completeness safeguard [src/features/ai/answer-freshness.ts:14] — Final-answer validation replaces incomplete conditional output with a bounded fallback containing every material condition; the route buffers policy-constrained deltas until this guard completes.
+
 ## Dev Notes
 
 - Story 4.1 controls selection policy and Story 4.3 controls structured source-bundle content. Do not implement a competing policy in the prompt layer.
@@ -80,6 +86,8 @@ gpu4ai/gpt-5.6-terra-review
 - Added answer-context coverage for all story policy states and safeguards.
 - Resolved post-review policy findings: complete conditional arrays reach the prompt; caveat-only settled decisions are replaced before stream/persistence; verification fallbacks name the selected card-specific target.
 - Verification after fixes: `pnpm vitest run tests/answer-context.test.ts` (70 tests), `pnpm typecheck`, and `pnpm build` passed. `pnpm lint` completed with the three pre-existing unused-variable warnings in `tests/knowledge-search.test.ts`.
+- Resolved final actionable findings: declarative caveat-only recommendations are fail-closed, caveat-only verification names every material condition, and contextual conditional answers are final-validated for every material condition before stream/persistence.
+- Verification after final fixes: `pnpm vitest run tests/answer-context.test.ts` (74 tests) and `pnpm typecheck` passed. `pnpm lint` completed with the same three pre-existing unused-variable warnings in `tests/knowledge-search.test.ts`.
 
 ### File List
 
@@ -96,3 +104,4 @@ gpu4ai/gpt-5.6-terra-review
 
 - 2026-07-23: Enforced state-aware community, conditional, caveat-only, and conflict answer policy; added safeguards and policy-specific tests.
 - 2026-07-23: Resolved three actionable review findings for conditional completeness and caveat-only answer safety.
+- 2026-07-23: Resolved final actionable findings for declarative caveat-only recommendations and deterministic condition completeness.
