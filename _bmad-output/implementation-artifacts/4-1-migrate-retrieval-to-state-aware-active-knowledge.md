@@ -84,3 +84,7 @@ gpu4ai/gpt-5.6-terra-review
 - `tests/knowledge-batch-source-intake.test.ts`
 - `tests/knowledge-approved-cards.test.ts`
 - `tests/answer-context.test.ts`
+
+### Review Findings
+
+- [x] [Review][Defer] Guard the index upsert against concurrent card state changes [src/features/knowledge/search.ts:50] — deferred, pre-existing. `indexApprovedKnowledgeCard` rechecks eligibility before its unconditional projection upsert but does not lock the card or predicate the upsert on its current version/state. A concurrent transition can therefore make a card ineligible after the final recheck and before the upsert recreates an active projection. Current search-time revalidation still prevents its use; durable versioned projection ownership is deferred to Story 4.2.
