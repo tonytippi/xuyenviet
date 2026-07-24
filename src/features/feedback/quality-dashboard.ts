@@ -7,6 +7,11 @@ import {
   answerUsefulnessFeedback,
   assistantResponseProvenance,
   assistantRetrievalDecisions,
+  knowledgeCards,
+  knowledgeRecommendations,
+  knowledgeSamplingCohortMembers,
+  knowledgeSamplingPolicies,
+  publicMvpEvaluationResultPolicySnapshots,
   publicMvpEvaluationResultScores,
   publicMvpEvaluationResults,
   publicMvpEvaluationRuns,
@@ -58,6 +63,7 @@ export type PublicMvpQualityDashboard = {
     missingSignals: string[];
   };
   recentResults: QualityDashboardRecentResult[];
+  policySignals: QualityDashboardPolicySignals;
 };
 
 export type PublicMvpQualityDashboardResult = PublicMvpQualityDashboard | { success: false; reason: "unauthorized" };
@@ -101,6 +107,48 @@ export type QualityDashboardRecentResult = {
   likelyIssues: string[];
 };
 
+export type QualityDashboardPolicySignals = {
+  evaluation: {
+    scope: "filtered_evaluations";
+    totalResults: number;
+    evidenceGroundingFailures: number;
+    caveatViolations: number;
+    verificationFailures: number;
+    missingSignal: boolean;
+    diagnostics: Array<{
+      promptType: PublicMvpEvaluationPromptType;
+      modelVersion: string;
+      category: string;
+      severity: "unavailable";
+      recommendedSafeAction: "suppress_or_escalate" | "verify_before_use";
+    }>;
+  };
+  sampling: {
+    scope: "all_sampling_policies";
+    cohortMembers: number;
+    sampledPassed: number;
+    sampledFailed: number;
+    unselectedMembers: number;
+    verificationRequiredCurrentCards: number;
+    escalatedCohorts: number;
+    suppressedCohorts: number;
+    missingSignal: boolean;
+    members: Array<{
+      knowledgeCardId: string;
+      category: string;
+      samplingOutcome: "passed" | "failed" | "unselected";
+      recommendedSafeAction: "suppress_or_escalate" | "verify_before_use" | "stricter_sampling";
+    }>;
+  };
+  cohorts: Array<{
+    cohortKey: string;
+    category: string;
+    state: "active" | "escalated" | "suppressed";
+    samplingPercent: number;
+    recommendedSafeAction: "suppress_or_escalate" | "stricter_sampling";
+  }>;
+};
+
 const scoreDimensions = ["user_context_use", "practical_specificity", "source_grounding", "uncertainty_handling", "family_awareness", "vietnamese_clarity"] as const satisfies readonly PublicMvpEvaluationScoreDimension[];
 const provenanceCategories = ["trip_context", "chat_context", "knowledge", "web", "general"] as const satisfies readonly AssistantProvenanceSourceCategory[];
 
@@ -137,6 +185,7 @@ export async function getPublicMvpQualityDashboard(input: PublicMvpQualityDashbo
         noBetterThanGenericFlag: publicMvpEvaluationResults.noBetterThanGenericFlag,
         scenarioId: publicMvpEvaluationResults.scenarioId,
         scenarioVersion: publicMvpEvaluationResults.scenarioVersion,
+        modelVersion: publicMvpEvaluationResults.modelVersion,
         unsupportedCommunityWordingFlag: publicMvpEvaluationResults.unsupportedCommunityWordingFlag,
         requiredCaveatOmittedFlag: publicMvpEvaluationResults.requiredCaveatOmittedFlag,
         conflictedKnowledgeExcludedFlag: publicMvpEvaluationResults.conflictedKnowledgeExcludedFlag,
@@ -166,9 +215,102 @@ export async function getPublicMvpQualityDashboard(input: PublicMvpQualityDashbo
   const feedback = summarizeFeedback(feedbackRows);
   const evaluation = summarizeEvaluation(resultRows, scoreRows);
   const recentResults = await buildRecentResults({ db, resultRows: resultRows.slice(0, 10), scoreRows });
+  const policySignals = await buildPolicySignals({ db, resultRows });
   const readiness = buildReadiness({ magicMomentFeedback: summarizeFeedback(filterFeedbackRowsForMagicMoment(feedbackRows, resultRows)), resultRows, scoreRows });
 
-  return { success: true, filters, feedback, evaluation, readiness, recentResults };
+  return { success: true, filters, feedback, evaluation, readiness, recentResults, policySignals };
+}
+
+async function buildPolicySignals({
+  db,
+  resultRows,
+}: {
+  db: ReturnType<typeof getDb>;
+  resultRows: Array<{
+    id: string;
+    promptType: PublicMvpEvaluationPromptType;
+    scenarioId: string;
+    modelVersion: string;
+    unsupportedClaimFlag: boolean;
+    unsupportedCommunityWordingFlag: boolean;
+    requiredCaveatOmittedFlag: boolean;
+    conflictedKnowledgeExcludedFlag: boolean;
+    staleWithdrawnSourceExposureFlag: boolean;
+    rawEvidenceLeakageFlag: boolean;
+    fallbackVerificationGuidanceMetFlag: boolean;
+  }>;
+}): Promise<QualityDashboardPolicySignals> {
+  const resultIds = resultRows.map((row) => row.id);
+  const [snapshots, policies, members, recommendations, cards] = await Promise.all([
+    resultIds.length > 0
+      ? db
+          .select({ resultId: publicMvpEvaluationResultPolicySnapshots.resultId, excludedReasonCodes: publicMvpEvaluationResultPolicySnapshots.excludedReasonCodes, finalizationOutcome: publicMvpEvaluationResultPolicySnapshots.finalizationOutcome })
+          .from(publicMvpEvaluationResultPolicySnapshots)
+          .where(inArray(publicMvpEvaluationResultPolicySnapshots.resultId, resultIds))
+      : Promise.resolve([]),
+    db.select({ id: knowledgeSamplingPolicies.id, cohortKey: knowledgeSamplingPolicies.cohortKey, samplingPercent: knowledgeSamplingPolicies.samplingPercent, escalatedAt: knowledgeSamplingPolicies.escalatedAt, suppressedAt: knowledgeSamplingPolicies.suppressedAt }).from(knowledgeSamplingPolicies),
+    db.select({ policyId: knowledgeSamplingCohortMembers.policyId, knowledgeCardId: knowledgeSamplingCohortMembers.knowledgeCardId, contentVersion: knowledgeSamplingCohortMembers.contentVersion, evidenceSetRevision: knowledgeSamplingCohortMembers.evidenceSetRevision }).from(knowledgeSamplingCohortMembers),
+    db.select({ policyId: knowledgeRecommendations.policyId, knowledgeCardId: knowledgeRecommendations.knowledgeCardId, contentVersion: knowledgeRecommendations.contentVersion, evidenceSetRevision: knowledgeRecommendations.evidenceSetRevision, reason: knowledgeRecommendations.reason, resolution: knowledgeRecommendations.resolution }).from(knowledgeRecommendations).where(eq(knowledgeRecommendations.reason, "sampling")),
+    db.select({ id: knowledgeCards.id, type: knowledgeCards.type, verificationState: knowledgeCards.verificationState }).from(knowledgeCards),
+  ]);
+  const cardsById = new Map(cards.map((card) => [card.id, card]));
+  const policyById = new Map(policies.map((policy) => [policy.id, policy]));
+  const snapshotByResultId = new Map(snapshots.map((snapshot) => [snapshot.resultId, snapshot]));
+  const evidenceGroundingFailures = resultRows.filter((row) => row.unsupportedClaimFlag || row.unsupportedCommunityWordingFlag).length;
+  const caveatViolations = resultRows.filter((row) => row.requiredCaveatOmittedFlag).length;
+  const verificationFailures = resultRows.filter((row) => !row.fallbackVerificationGuidanceMetFlag || !row.conflictedKnowledgeExcludedFlag).length;
+  const evaluationDiagnostics = resultRows
+    .filter((row) => row.unsupportedClaimFlag || row.unsupportedCommunityWordingFlag || row.requiredCaveatOmittedFlag || !row.conflictedKnowledgeExcludedFlag || row.staleWithdrawnSourceExposureFlag || row.rawEvidenceLeakageFlag || !row.fallbackVerificationGuidanceMetFlag)
+    .slice(0, 10)
+    .map((row) => ({
+      promptType: row.promptType,
+      modelVersion: row.modelVersion,
+      category: row.scenarioId || snapshotByResultId.get(row.id)?.finalizationOutcome || "missing_category",
+      severity: "unavailable" as const,
+      recommendedSafeAction: evaluationAction(row),
+    }));
+  const memberOutcomes = members.map((member) => {
+    const recommendation = recommendations.find((candidate) => candidate.policyId === member.policyId && candidate.knowledgeCardId === member.knowledgeCardId && candidate.contentVersion === member.contentVersion && candidate.evidenceSetRevision === member.evidenceSetRevision);
+    const policy = policyById.get(member.policyId);
+    const outcome: "passed" | "failed" | "unselected" = recommendation?.resolution === "sampling_passed" ? "passed" : recommendation?.resolution === "sampling_failed" ? "failed" : "unselected";
+    const card = cardsById.get(member.knowledgeCardId);
+    return { member, policy, outcome, category: card?.type ?? "missing_category" };
+  });
+  const cohorts = policies
+    .filter((policy) => members.some((member) => member.policyId === policy.id))
+    .slice(0, 10)
+    .map((policy) => {
+      const firstMember = memberOutcomes.find((member) => member.member.policyId === policy.id);
+      const state: "suppressed" | "escalated" | "active" = policy.suppressedAt ? "suppressed" : policy.escalatedAt ? "escalated" : "active";
+      return { cohortKey: policy.cohortKey, category: firstMember?.category ?? "missing_category", state, samplingPercent: policy.samplingPercent, recommendedSafeAction: state === "suppressed" ? "suppress_or_escalate" as const : "stricter_sampling" as const };
+    });
+  const samplingMembers = memberOutcomes.slice(0, 10).map(({ member, policy, outcome, category }) => ({
+    knowledgeCardId: member.knowledgeCardId,
+    category,
+    samplingOutcome: outcome,
+    recommendedSafeAction: policy?.suppressedAt || outcome === "failed" ? "suppress_or_escalate" as const : policy?.escalatedAt ? "stricter_sampling" as const : "verify_before_use" as const,
+  }));
+
+  return {
+    evaluation: { scope: "filtered_evaluations", totalResults: resultRows.length, evidenceGroundingFailures, caveatViolations, verificationFailures, missingSignal: resultRows.length === 0, diagnostics: evaluationDiagnostics },
+    sampling: {
+      scope: "all_sampling_policies",
+      cohortMembers: members.length,
+      sampledPassed: memberOutcomes.filter((member) => member.outcome === "passed").length,
+      sampledFailed: memberOutcomes.filter((member) => member.outcome === "failed").length,
+      unselectedMembers: memberOutcomes.filter((member) => member.outcome === "unselected").length,
+      verificationRequiredCurrentCards: cards.filter((card) => card.verificationState === "required" || card.verificationState === "failed").length,
+      escalatedCohorts: policies.filter((policy) => policy.escalatedAt).length,
+      suppressedCohorts: policies.filter((policy) => policy.suppressedAt).length,
+      missingSignal: members.length === 0,
+      members: samplingMembers,
+    },
+    cohorts,
+  };
+}
+
+function evaluationAction(row: { rawEvidenceLeakageFlag: boolean; staleWithdrawnSourceExposureFlag: boolean; conflictedKnowledgeExcludedFlag: boolean; unsupportedClaimFlag: boolean; unsupportedCommunityWordingFlag: boolean; requiredCaveatOmittedFlag: boolean; fallbackVerificationGuidanceMetFlag: boolean }) {
+  return row.rawEvidenceLeakageFlag || row.staleWithdrawnSourceExposureFlag || !row.conflictedKnowledgeExcludedFlag ? "suppress_or_escalate" as const : row.unsupportedClaimFlag || row.unsupportedCommunityWordingFlag || row.requiredCaveatOmittedFlag || !row.fallbackVerificationGuidanceMetFlag ? "verify_before_use" as const : "verify_before_use" as const;
 }
 
 function filterFeedbackRowsForPrompt({

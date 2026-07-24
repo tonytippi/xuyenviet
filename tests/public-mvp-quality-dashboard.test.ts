@@ -7,9 +7,14 @@ import {
   conversations,
   messages,
   publicMvpEvaluationPromptSets,
+  publicMvpEvaluationResultPolicySnapshots,
   publicMvpEvaluationResultScores,
   publicMvpEvaluationResults,
   publicMvpEvaluationRuns,
+  knowledgeCards,
+  knowledgeRecommendations,
+  knowledgeSamplingCohortMembers,
+  knowledgeSamplingPolicies,
   userRoles,
   users,
   type PublicMvpEvaluationPromptType,
@@ -61,7 +66,17 @@ async function seedEvaluationResult({
   promptType: PublicMvpEvaluationPromptType;
   score?: number;
   createdAt?: Date;
-  flags?: Partial<{ unsupportedClaim: boolean; missingUncertainty: boolean; noBetterThanGeneric: boolean }>;
+  flags?: Partial<{
+    unsupportedClaim: boolean;
+    missingUncertainty: boolean;
+    noBetterThanGeneric: boolean;
+    unsupportedCommunityWording: boolean;
+    requiredCaveatOmitted: boolean;
+    conflictedKnowledgeExcluded: boolean;
+    staleWithdrawnSourceExposure: boolean;
+    rawEvidenceLeakage: boolean;
+    fallbackVerificationGuidanceMet: boolean;
+  }>;
   withRetrieval?: boolean;
   provenanceUsed?: boolean;
 }) {
@@ -121,6 +136,12 @@ async function seedEvaluationResult({
       unsupportedClaimFlag: Boolean(flags.unsupportedClaim),
       missingUncertaintyFlag: Boolean(flags.missingUncertainty),
       noBetterThanGenericFlag: Boolean(flags.noBetterThanGeneric),
+      unsupportedCommunityWordingFlag: Boolean(flags.unsupportedCommunityWording),
+      requiredCaveatOmittedFlag: Boolean(flags.requiredCaveatOmitted),
+      conflictedKnowledgeExcludedFlag: flags.conflictedKnowledgeExcluded ?? true,
+      staleWithdrawnSourceExposureFlag: Boolean(flags.staleWithdrawnSourceExposure),
+      rawEvidenceLeakageFlag: Boolean(flags.rawEvidenceLeakage),
+      fallbackVerificationGuidanceMetFlag: flags.fallbackVerificationGuidanceMet ?? true,
       assistantMessageId: answer.assistantMessage.id,
       retrievalDecisionId: decision?.id ?? null,
       provenanceId: knowledgeProvenance.id,
@@ -131,6 +152,21 @@ async function seedEvaluationResult({
   await testDb.insert(publicMvpEvaluationResultScores).values(scoreDimensions.map((dimension) => ({ resultId: result.id, dimension, score })));
 
   return { ...result, conversationId: answer.conversation.id };
+}
+
+async function seedPolicySnapshot(resultId: string) {
+  await testDb.insert(publicMvpEvaluationResultPolicySnapshots).values({
+    resultId,
+    scenarioId: "conditional_high_risk_claim",
+    scenarioVersion: "v1",
+    selectedKnowledge: [{ cardId: "safe-card", contentVersion: 1, knowledgeState: "conditional", verificationState: "required", usePolicy: "caveat_only", conditions: ["Xác minh trước khi dùng"] }],
+    excludedCandidateCounts: { conflict: 0, verificationRequired: 1, other: 0 },
+    excludedReasonCodes: ["verification_required"],
+    targetCandidateExcluded: true,
+    sourceOrEvidenceOutcome: "withdrawn_or_ineligible",
+    webFallback: { triggered: true, guidanceMet: false },
+    finalizationOutcome: "verification_guidance_missing",
+  });
 }
 
 async function seedFeedback(userId: string, count: number, usefulCount: number, createdAt = new Date()) {
@@ -310,5 +346,66 @@ describe("public MVP quality dashboard", () => {
     expect(dashboard.recentResults[0].provenance.chat_context).toBe(false);
     expect(dashboard.recentResults[0].likelyIssues).toContain("unsupported_without_source_signal");
     expect(dashboard.recentResults[0].likelyIssues).toContain("provenance_unavailable");
+  });
+
+  test("projects bounded policy failures and version-fenced sampling cohorts without raw content", async () => {
+    await createUser("admin", ["admin"]);
+    await createUser("author");
+    await mockSession("admin", ["admin"]);
+    const result = await seedEvaluationResult({
+      userId: "admin",
+      promptType: "freshness_sensitive",
+      flags: {
+        unsupportedClaim: true,
+        unsupportedCommunityWording: true,
+        requiredCaveatOmitted: true,
+        conflictedKnowledgeExcluded: false,
+        staleWithdrawnSourceExposure: true,
+        rawEvidenceLeakage: true,
+        fallbackVerificationGuidanceMet: false,
+      },
+    });
+    await seedPolicySnapshot(result.id);
+    await testDb.insert(knowledgeCards).values([
+      { id: "sampled", status: "approved", publicationState: "suppressed", knowledgeState: "uncertain", reviewState: "reviewed", verificationState: "required", type: "warning", title: "Safe sampled card", summary: "Safe summary", confidence: "community", needsReview: true, aiPromptVersion: "test", createdByUserId: "author", contentVersion: 2, evidenceSetRevision: 2 },
+      { id: "unselected", status: "approved", publicationState: "active", knowledgeState: "community_observation", reviewState: "reviewed", verificationState: "not_required", type: "place", title: "Safe unselected card", summary: "Safe summary", confidence: "community", needsReview: false, aiPromptVersion: "test", createdByUserId: "author" },
+      { id: "verify-first", status: "approved", publicationState: "suppressed", knowledgeState: "uncertain", reviewState: "reviewed", verificationState: "required", type: "service", title: "Safe verify card", summary: "Safe summary", confidence: "community", needsReview: true, aiPromptVersion: "test", createdByUserId: "author" },
+    ]);
+    const [policy] = await testDb.insert(knowledgeSamplingPolicies).values({ cohortKey: "initial:2026-07-24", windowStartsAt: new Date("2026-07-24T00:00:00.000Z"), windowEndsAt: new Date("2026-08-21T00:00:00.000Z"), samplingPercent: 15, escalatedAt: new Date(), suppressedAt: new Date() }).returning();
+    await testDb.insert(knowledgeSamplingCohortMembers).values([
+      { policyId: policy.id, knowledgeCardId: "sampled", contentVersion: 1, evidenceSetRevision: 1 },
+      { policyId: policy.id, knowledgeCardId: "unselected", contentVersion: 1, evidenceSetRevision: 1 },
+    ]);
+    await testDb.insert(knowledgeRecommendations).values([
+      { knowledgeCardId: "sampled", contentVersion: 1, evidenceSetRevision: 1, status: "resolved", reason: "sampling", priority: 50, policyId: policy.id, resolution: "sampling_failed", samplingDispositionReason: "safety_risk", resolvedByUserId: "admin", resolvedAt: new Date(), samplingRationale: "SAMPLING_RATIONALE_MUST_NOT_LEAK" },
+      { knowledgeCardId: "sampled", contentVersion: 2, evidenceSetRevision: 2, status: "resolved", reason: "sampling", priority: 50, policyId: policy.id, resolution: "sampling_passed", samplingDispositionReason: "confirmed", resolvedByUserId: "admin", resolvedAt: new Date() },
+      { knowledgeCardId: "verify-first", contentVersion: 1, evidenceSetRevision: 1, status: "open", reason: "verification", priority: 50, policyId: policy.id },
+    ]);
+    const { getPublicMvpQualityDashboard } = await import("@/features/feedback/quality-dashboard");
+
+    const dashboard = await getPublicMvpQualityDashboard({ db: testDb, promptType: "route_logistics", range: "all" });
+
+    expect(dashboard.success).toBe(true);
+    if (!dashboard.success) return;
+    expect(dashboard.policySignals.evaluation.scope).toBe("filtered_evaluations");
+    expect(dashboard.policySignals.evaluation.totalResults).toBe(0);
+    expect(dashboard.policySignals.sampling.scope).toBe("all_sampling_policies");
+    expect(dashboard.policySignals.sampling).toMatchObject({ cohortMembers: 2, sampledFailed: 1, sampledPassed: 0, unselectedMembers: 1, verificationRequiredCurrentCards: 2, escalatedCohorts: 1, suppressedCohorts: 1 });
+    expect(dashboard.policySignals.cohorts).toMatchObject([{ cohortKey: "initial:2026-07-24", state: "suppressed", category: "warning", recommendedSafeAction: "suppress_or_escalate" }]);
+    expect(dashboard.policySignals.sampling.members).toMatchObject([
+      { knowledgeCardId: "sampled", samplingOutcome: "failed", category: "warning", recommendedSafeAction: "suppress_or_escalate" },
+      { knowledgeCardId: "unselected", samplingOutcome: "unselected", category: "place", recommendedSafeAction: "suppress_or_escalate" },
+    ]);
+    const evaluationDashboard = await getPublicMvpQualityDashboard({ db: testDb, range: "all" });
+    expect(evaluationDashboard.success).toBe(true);
+    if (!evaluationDashboard.success) return;
+    expect(evaluationDashboard.policySignals.evaluation).toMatchObject({
+      totalResults: 1,
+      evidenceGroundingFailures: 1,
+      caveatViolations: 1,
+      verificationFailures: 1,
+      diagnostics: [{ promptType: "freshness_sensitive", modelVersion: "cx/ai-ask", category: "community_observation", severity: "unavailable", recommendedSafeAction: "suppress_or_escalate" }],
+    });
+    expect(JSON.stringify(dashboard)).not.toMatch(/Safe stored answer text|SAMPLING_RATIONALE_MUST_NOT_LEAK|safe-card|sourceSnapshot|providerPayload|raw_source_material/);
   });
 });

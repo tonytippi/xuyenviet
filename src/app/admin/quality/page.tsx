@@ -116,6 +116,25 @@ export default async function QualityDashboardPage({ searchParams }: QualityPage
       </section>
 
       <section className="mt-8 rounded-[1.5rem] border border-[#d8c9ad] bg-white/75 p-5 sm:p-6">
+        <h2 className="text-2xl font-semibold tracking-[-0.03em] text-[#17342c]">Tín hiệu chính sách AI-first</h2>
+        <p className="mt-2 max-w-3xl leading-7 text-[#4f625a]">
+          Eval tuân theo bộ lọc hiện tại. Sampling là trạng thái cohort toàn cục theo phiên bản card, không được suy diễn là cùng prompt hoặc cùng thời gian với eval.
+        </p>
+        <dl className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <MiniMetric label="Evidence-grounding lỗi" value={dashboard.policySignals.evaluation.evidenceGroundingFailures} />
+          <MiniMetric label="Vi phạm caveat" value={dashboard.policySignals.evaluation.caveatViolations} />
+          <MiniMetric label="Sampling pass / fail" value={dashboard.policySignals.sampling.sampledPassed + dashboard.policySignals.sampling.sampledFailed} />
+          <MiniMetric label="Cohort chưa được chọn" value={dashboard.policySignals.sampling.unselectedMembers} />
+        </dl>
+        {dashboard.policySignals.evaluation.missingSignal ? <p className="mt-5 rounded-2xl bg-[#fff3df] p-4 font-semibold text-[#8c4f13]">Thiếu tín hiệu policy từ eval trong bộ lọc hiện tại. Dashboard không thay đổi trạng thái readiness.</p> : null}
+        {dashboard.policySignals.sampling.missingSignal ? <p className="mt-3 rounded-2xl bg-[#fff3df] p-4 font-semibold text-[#8c4f13]">Thiếu cohort sampling đủ dữ liệu. Dashboard không suy diễn kết quả pass/fail.</p> : null}
+        <div className="mt-5 grid gap-4 xl:grid-cols-2">
+          <PolicyList title="Cohort sampling" emptyLabel="Chưa có cohort sampling đủ dữ liệu." items={dashboard.policySignals.cohorts.map((cohort) => `${cohort.cohortKey} · ${cohort.category} · ${cohort.state} · ${cohort.recommendedSafeAction}`)} />
+          <PolicyList title="Eval policy failures" emptyLabel="Không có policy failure trong phạm vi eval hiện tại." items={dashboard.policySignals.evaluation.diagnostics.map((diagnostic) => `${promptLabels[diagnostic.promptType]} · ${diagnostic.category} · severity ${diagnostic.severity} · ${diagnostic.recommendedSafeAction}`)} />
+        </div>
+      </section>
+
+      <section className="mt-8 rounded-[1.5rem] border border-[#d8c9ad] bg-white/75 p-5 sm:p-6">
         <h2 className="text-2xl font-semibold tracking-[-0.03em] text-[#17342c]">Recent diagnostics</h2>
         {dashboard.recentResults.length === 0 ? (
           <p className="mt-4 leading-7 text-[#4f625a]">Chưa có kết quả eval phù hợp bộ lọc. Dashboard giữ trạng thái thiếu tín hiệu thay vì kết luận sẵn sàng.</p>
@@ -148,6 +167,15 @@ function MiniMetric({ label, value }: { label: string; value: number }) {
     <div className="flex items-center justify-between gap-4 rounded-2xl bg-[#fbf7ed] p-4">
       <dt className="font-semibold text-[#17342c]">{label}</dt>
       <dd className="rounded-full bg-white px-3 py-1 text-sm font-semibold text-[#4f625a]">{value}</dd>
+    </div>
+  );
+}
+
+function PolicyList({ title, emptyLabel, items }: { title: string; emptyLabel: string; items: string[] }) {
+  return (
+    <div className="rounded-2xl border border-[#e2d3ba] bg-[#fbf7ed] p-4">
+      <h3 className="font-semibold text-[#17342c]">{title}</h3>
+      {items.length === 0 ? <p className="mt-3 text-sm leading-6 text-[#4f625a]">{emptyLabel}</p> : <ul className="mt-3 grid gap-2 text-sm leading-6 text-[#4f625a]">{items.map((item) => <li key={item} className="rounded-xl bg-white p-3">{item}</li>)}</ul>}
     </div>
   );
 }
