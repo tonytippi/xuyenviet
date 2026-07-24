@@ -73,8 +73,8 @@ development_status:
   epic-4-retrospective: optional
 
   epic-5: in-progress
-  # Synchronized 2026-07-24 after final Story 5.1 review-finding repairs and serial DB-backed verification.
-  5-1-evaluate-ai-first-community-knowledge-safety: review
+  # Synchronized 2026-07-24 after verification of supplied final repair commit 8efea424c4c18f56aa1e4915000fcb85f7139a59.
+  5-1-evaluate-ai-first-community-knowledge-safety: done
   5-2-surface-ai-first-policy-quality-signals: backlog
   5-3-close-the-active-evidence-grounded-card-readiness-gate: backlog
   epic-5-retrospective: optional

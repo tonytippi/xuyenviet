@@ -4,7 +4,7 @@ baseline_commit: 75f6a5b000bd8f396bb62c750928ec8c2096669b
 
 # Story 5.1: Evaluate AI-First Community Knowledge Safety
 
-Status: review
+Status: done
 
 ## Story
 
@@ -220,3 +220,4 @@ gpu4ai/gpt-5.6-terra-review
 - 2026-07-24: Resolved the final bounded recovery findings for fixture isolation and conditional high-risk persisted-output validation; synchronized Story 5.1 to `review` after serial DB-backed suites and static verification.
 - 2026-07-24: Final permitted Story 5.1 review found unresolved high-severity scenario determinism, final-answer leakage-counter, and failed-contract snapshot-retention defects. Status moved to `in-progress` with no code changes.
 - 2026-07-24: Resolved the final three authorized review findings and synchronized Story 5.1 to `review` after serial DB-backed verification and baseline checks.
+- 2026-07-24: Finalized Story 5.1 as `done` after verifying supplied final repair commit `8efea424c4c18f56aa1e4915000fcb85f7139a59` exists and the pre-update worktree was clean; synchronized sprint status.
