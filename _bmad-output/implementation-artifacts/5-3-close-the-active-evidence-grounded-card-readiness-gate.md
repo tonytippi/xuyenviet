@@ -4,7 +4,7 @@ baseline_commit: edbf1db496a4d32107fc663e3bb029ee9a5ca050
 
 # Story 5.3: Close the Active Evidence-Grounded Card Readiness Gate
 
-Status: done
+Status: review
 
 ## Story
 
@@ -194,6 +194,8 @@ gpu4ai/gpt-5.6-terra-review
 - [x] [Review][Patch] Non-high evaluation gaps are now remediation diagnostics only; the undocumented zero-tolerance readiness check was removed [src/features/feedback/quality-dashboard.ts].
 - [x] [Review][Patch] Zero-applicable sampling policies can certify readiness without applicable corridor proof [src/features/knowledge/recommendations.ts:128-153]
 - [x] [Review][Patch] Sampling policy deletion cascades immutable auto-active enrollment records [src/db/schema.ts:1073,1135]
+- [x] [Review][Patch] Canonical evaluation readiness now accepts the coherent persisted AI Ask answer-model evidence set when it differs from the run's evaluator model, while rejecting mixed result model sets [src/features/feedback/quality-dashboard.ts].
+- [x] [Review][Patch] Generated `0059` Drizzle snapshot metadata records the policy-ledger `ON DELETE restrict` foreign-key state so future schema generation starts from the applied migration state [drizzle/migrations/meta/0059_snapshot.json].
 
 ### File List
 
@@ -203,6 +205,7 @@ gpu4ai/gpt-5.6-terra-review
 - drizzle/migrations/0058_preserve_sampling_readiness_ledgers.sql
 - drizzle/migrations/0059_restrict_sampling_policy_ledger_deletion.sql
 - drizzle/migrations/meta/0058_snapshot.json
+- drizzle/migrations/meta/0059_snapshot.json
 - drizzle/migrations/meta/_journal.json
 - src/app/admin/quality/page.tsx
 - src/db/schema.ts
@@ -231,3 +234,4 @@ gpu4ai/gpt-5.6-terra-review
 - 2026-07-24: Final adversarial review centered on repair `268e208` found two unresolved high-severity readiness-integrity defects: an all-zero-applicable policy set can pass the sampling gate without corridor proof, and cascading policy foreign keys can erase auto-active immutable enrollment records before card deletion. Findings were persisted as action items. No application code, tests, dependencies, commits, or new stories were created by this review; story and sprint status set to `in-progress`.
 - 2026-07-24: Resolved the two scoped final-review findings. The sampling gate requires at least one corridor-applicable policy and validates sealed proof diagnostics for all policies. Forward migration `0059_restrict_sampling_policy_ledger_deletion` changes immutable auto-active membership and candidate-ledger policy foreign keys from cascade to restrict. Corrected non-corridor proof normalization so persisted `outsideCorridor = true` members retain the canonical empty bucket. Migration application and all required serial suites passed: dashboard (20), batch intake (14), recommendation queue (23), evaluation (15), and search (42). Lint passed with three pre-existing warnings; typecheck and build passed. Status returned to `review`; no commit created.
 - 2026-07-24: Status-only finalization after supplied repair commit `2351a0e762ff39302dd84dc9bf1bec7e6545d35d` was verified to exist and the worktree was verified clean. No source, diff, correctness, test, implementation, review, or commit inspection was performed. Story marked `done` and sprint status synchronized.
+- 2026-07-24: Resolved the two scoped Epic 5 review findings without a commit. Canonical readiness now treats the persisted run as one coherent AI Ask answer-model evidence set rather than requiring its result model to equal the evaluator model; mixed answer-model result sets still fail closed. Generated the missing `0059` Drizzle snapshot metadata for the policy-ledger `ON DELETE restrict` state. Required serial suites passed: dashboard (21), batch intake (14), recommendation queue (23), evaluation (17), and search (42). Lint passed with three pre-existing warnings; typecheck and build passed. Story returned to `review`; Epic 5 remains `done`.

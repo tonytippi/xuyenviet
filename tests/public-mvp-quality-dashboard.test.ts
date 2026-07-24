@@ -177,7 +177,7 @@ async function seedPolicySnapshot(resultId: string) {
   });
 }
 
-async function seedCanonicalEvaluationRun(input: { userId: string; completedAt: Date; omitScenario?: string; missingScoreScenario?: string; highSeverity?: boolean; qualityGap?: boolean }) {
+async function seedCanonicalEvaluationRun(input: { userId: string; completedAt: Date; omitScenario?: string; missingScoreScenario?: string; highSeverity?: boolean; qualityGap?: boolean; answerModelVersion?: string }) {
   const { publicMvpEvaluationPromptSetVersion, publicMvpEvaluationScenarios } = await import("@/features/feedback/evaluation");
   const [promptSet] = await testDb.insert(publicMvpEvaluationPromptSets).values({ version: publicMvpEvaluationPromptSetVersion, rubricVersion: "epic_6_quality_rubric_ai_first_v2" }).onConflictDoNothing().returning();
   const persistedPromptSet = promptSet ?? (await testDb.select().from(publicMvpEvaluationPromptSets).where(eq(publicMvpEvaluationPromptSets.version, publicMvpEvaluationPromptSetVersion)))[0];
@@ -185,7 +185,7 @@ async function seedCanonicalEvaluationRun(input: { userId: string; completedAt: 
   const [run] = await testDb.insert(publicMvpEvaluationRuns).values({ promptSetId: persistedPromptSet.id, promptSetVersion: persistedPromptSet.version, actorUserId: input.userId, modelVersion: "cx/evaluator", status: "completed", startedAt: input.completedAt, completedAt: input.completedAt }).returning();
   const scenarios = publicMvpEvaluationScenarios.filter((scenario) => scenario.id !== input.omitScenario);
   for (const scenario of scenarios) {
-    const [result] = await testDb.insert(publicMvpEvaluationResults).values({ runId: run.id, promptSetId: persistedPromptSet.id, promptSetVersion: persistedPromptSet.version, promptType: scenario.prompt.type, promptVersion: scenario.prompt.version, scenarioId: scenario.id, scenarioVersion: scenario.version, modelVersion: "cx/evaluator", status: "scored", answerText: "Canonical evaluation answer.", staleWithdrawnSourceExposureFlag: input.highSeverity === true && scenario.id === "source_withdrawal", unsupportedClaimFlag: input.qualityGap === true && scenario.id === "community_observation" }).returning();
+    const [result] = await testDb.insert(publicMvpEvaluationResults).values({ runId: run.id, promptSetId: persistedPromptSet.id, promptSetVersion: persistedPromptSet.version, promptType: scenario.prompt.type, promptVersion: scenario.prompt.version, scenarioId: scenario.id, scenarioVersion: scenario.version, modelVersion: input.answerModelVersion ?? "cx/ai-ask", status: "scored", answerText: "Canonical evaluation answer.", staleWithdrawnSourceExposureFlag: input.highSeverity === true && scenario.id === "source_withdrawal", unsupportedClaimFlag: input.qualityGap === true && scenario.id === "community_observation" }).returning();
     await testDb.insert(publicMvpEvaluationResultPolicySnapshots).values({ resultId: result.id, scenarioId: scenario.id, scenarioVersion: scenario.version, selectedKnowledge: [], excludedCandidateCounts: {}, excludedReasonCodes: [], targetCandidateExcluded: false, sourceOrEvidenceOutcome: "eligible", webFallback: {}, finalizationOutcome: "complete" });
     await testDb.insert(publicMvpEvaluationResultScores).values(scoreDimensions.filter((dimension) => input.missingScoreScenario !== scenario.id || dimension !== "user_context_use").map((dimension) => ({ resultId: result.id, dimension, score: 8 })));
   }
@@ -589,6 +589,18 @@ describe("public MVP quality dashboard", () => {
     const high = await seedCanonicalEvaluationRun({ userId: "selector-admin", completedAt: new Date("2026-01-05"), highSeverity: true });
     await expect(getCurrentReadinessEvaluationEvidence(testDb)).resolves.toMatchObject({ complete: true, runId: high.id, highSeverity: 1, qualityGaps: 0 });
     expect([incomplete.id, incompleteScores.id]).not.toContain(older.id);
+  });
+
+  test("accepts a coherent AI Ask model distinct from the evaluator and rejects mixed answer models", async () => {
+    await createUser("model-fence-admin", ["admin"]);
+    const { getCurrentReadinessEvaluationEvidence } = await import("@/features/feedback/quality-dashboard");
+    const run = await seedCanonicalEvaluationRun({ userId: "model-fence-admin", completedAt: new Date("2026-01-11"), answerModelVersion: "cx/ai-ask" });
+
+    await expect(getCurrentReadinessEvaluationEvidence(testDb)).resolves.toMatchObject({ complete: true, runId: run.id });
+    const [result] = await testDb.select({ id: publicMvpEvaluationResults.id }).from(publicMvpEvaluationResults).where(eq(publicMvpEvaluationResults.runId, run.id)).limit(1);
+    await testDb.update(publicMvpEvaluationResults).set({ modelVersion: "cx/other-ai-ask" }).where(eq(publicMvpEvaluationResults.id, result!.id));
+
+    await expect(getCurrentReadinessEvaluationEvidence(testDb)).resolves.toMatchObject({ complete: false, runId: null });
   });
 
   test("fails closed when a canonical run contains a result from another prompt set", async () => {
