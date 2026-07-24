@@ -4,7 +4,7 @@ baseline_commit: edbf1db496a4d32107fc663e3bb029ee9a5ca050
 
 # Story 5.3: Close the Active Evidence-Grounded Card Readiness Gate
 
-Status: review
+Status: done
 
 ## Story
 
@@ -235,3 +235,4 @@ gpu4ai/gpt-5.6-terra-review
 - 2026-07-24: Resolved the two scoped final-review findings. The sampling gate requires at least one corridor-applicable policy and validates sealed proof diagnostics for all policies. Forward migration `0059_restrict_sampling_policy_ledger_deletion` changes immutable auto-active membership and candidate-ledger policy foreign keys from cascade to restrict. Corrected non-corridor proof normalization so persisted `outsideCorridor = true` members retain the canonical empty bucket. Migration application and all required serial suites passed: dashboard (20), batch intake (14), recommendation queue (23), evaluation (15), and search (42). Lint passed with three pre-existing warnings; typecheck and build passed. Status returned to `review`; no commit created.
 - 2026-07-24: Status-only finalization after supplied repair commit `2351a0e762ff39302dd84dc9bf1bec7e6545d35d` was verified to exist and the worktree was verified clean. No source, diff, correctness, test, implementation, review, or commit inspection was performed. Story marked `done` and sprint status synchronized.
 - 2026-07-24: Resolved the two scoped Epic 5 review findings without a commit. Canonical readiness now treats the persisted run as one coherent AI Ask answer-model evidence set rather than requiring its result model to equal the evaluator model; mixed answer-model result sets still fail closed. Generated the missing `0059` Drizzle snapshot metadata for the policy-ledger `ON DELETE restrict` state. Required serial suites passed: dashboard (21), batch intake (14), recommendation queue (23), evaluation (17), and search (42). Lint passed with three pre-existing warnings; typecheck and build passed. Story returned to `review`; Epic 5 remains `done`.
+- 2026-07-24: Status-only finalization after accepted Epic-review repair commit `0eb477a9556263725e226d58fab03d0a482e9b65` was verified present on `main` and the pre-update worktree was verified clean. Story marked `done`; Epic 5 remains `done`.
