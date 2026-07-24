@@ -86,6 +86,7 @@ gpu4ai/gpt-5.6-terra-review
 - 2026-07-23 final-review repair: traveler evidence now fails closed for case-variant Facebook source types and malformed non-empty URLs; persisted `do_not_use` policy renders as an action-blocking warning in cards and detail descriptors.
 - Final-review repair verification passed: `pnpm vitest run tests/answer-context.test.ts tests/ai-ask-shell.test.ts` (161 tests) and `pnpm typecheck`.
 - 2026-07-24 shared provenance repair: commit `956357d5122b4756ce72c509f4b48545b9e3c0cb` preserves bounded safe web titles and validated non-Facebook HTTP(S) URLs in persisted web provenance snapshots. This resolves the shared finding affecting Stories 4.5, 4.6, and 4.7; Story 4.6 is returned to review.
+- 2026-07-24 final Epic repair: commit `616faf235716af98000b6929e72b2b70da671467` rejects credential-bearing URLs through the shared provenance path and gives deterministic verification guidance for web fallback. This resolves the final shared review findings affecting Stories 4.5, 4.6, and 4.7; Story 4.6 is returned to review.
 
 ### File List
 
@@ -105,3 +106,4 @@ gpu4ai/gpt-5.6-terra-review
 - 2026-07-23: Resolved final-review findings and returned the story to review.
 - 2026-07-23: Finalized as done after verification of repair commit 404fd804088b23368517eb6ccc84ee5d90e7fd44 and a clean worktree.
 - 2026-07-24: Documented shared provenance repair commit 956357d5122b4756ce72c509f4b48545b9e3c0cb and returned Story 4.6 to review.
+- 2026-07-24: Documented final shared repair commit 616faf235716af98000b6929e72b2b70da671467 and returned Story 4.6 to review.
