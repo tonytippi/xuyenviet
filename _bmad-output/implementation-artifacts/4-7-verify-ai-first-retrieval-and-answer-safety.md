@@ -75,6 +75,7 @@ gpu4ai/gpt-5.6-terra-review
 - Persisted selected card state-policy snapshots in retrieval decisions and strengthened stable persisted web identifier/provenance assertions.
 - Added claimed stale-version/source-withdrawal and safe bounded retry-record regressions. Documented serial `DATABASE_URL_TEST` execution in the canonical README testing guidance.
 - Verification completed with no blockers. `pnpm lint` has only the three existing unused-variable warnings listed above.
+- 2026-07-24 shared provenance repair verified: commit `956357d5122b4756ce72c509f4b48545b9e3c0cb` preserves a safe bounded title and a validated non-Facebook HTTP(S) URL in persisted web provenance. This resolves the shared Stories 4.5/4.6/4.7 finding and returns Story 4.7 to review.
 
 ### File List
 
@@ -88,3 +89,4 @@ gpu4ai/gpt-5.6-terra-review
 ### Change Log
 
 - 2026-07-24: Added AI-first retrieval, answer-policy, provenance, and versioned worker safety regression coverage; documented serial DB-backed test sequencing and moved the story to review.
+- 2026-07-24: Documented the shared provenance repair in commit 956357d5122b4756ce72c509f4b48545b9e3c0cb and returned Story 4.7 to review.
