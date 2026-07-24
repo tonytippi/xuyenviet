@@ -73,7 +73,7 @@ development_status:
   epic-4-retrospective: optional
 
   epic-5: in-progress
-  # Synchronized 2026-07-24 after scoped answer-time provenance and policy-outcome repair.
+  # Synchronized 2026-07-24 after resolving the four authorized review findings.
   5-1-evaluate-ai-first-community-knowledge-safety: review
   5-2-surface-ai-first-policy-quality-signals: backlog
   5-3-close-the-active-evidence-grounded-card-readiness-gate: backlog

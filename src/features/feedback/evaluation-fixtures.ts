@@ -11,7 +11,7 @@ import { hashCaptureText, normalizeCaptureText } from "@/features/knowledge/sour
 type FixtureDb = NonNullable<Parameters<typeof processNextApprovedKnowledgeIndexingBatch>[1]>;
 
 export async function prepareEvaluationScenarioFixture(db: FixtureDb, actorUserId: string, scenario: PublicMvpEvaluationScenarioDefinition) {
-  if (scenario.id === "web_fallback_unavailable") return;
+  if (scenario.id === "web_fallback_unavailable") return { cardIds: [] };
 
   const cardId = `evaluation-${scenario.id}-${crypto.randomUUID()}`;
   const sourceId = `${cardId}-source`;
@@ -85,4 +85,13 @@ export async function prepareEvaluationScenarioFixture(db: FixtureDb, actorUserI
 
   if (scenario.id === "conflict_exclusion") await db.update(knowledgeCards).set({ knowledgeState: "conflicted" }).where(eq(knowledgeCards.id, cardId));
   if (scenario.id === "source_withdrawal") await db.update(sources).set({ eligibility: "withdrawn", removalReason: "withdrawn", removedByUserId: actorUserId, removalCompletedAt: new Date() }).where(eq(sources.id, sourceId));
+
+  return { cardIds: [cardId] };
+}
+
+export async function cleanupEvaluationScenarioFixture(db: FixtureDb, cardIds: string[]) {
+  if (cardIds.length === 0) return;
+
+  // Evaluation fixtures must never remain eligible for traveler retrieval after a run.
+  await db.update(knowledgeCards).set({ publicationState: "suppressed", updatedAt: new Date() }).where(eq(knowledgeCards.id, cardIds[0]!));
 }

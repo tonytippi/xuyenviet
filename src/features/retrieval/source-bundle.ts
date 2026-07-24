@@ -70,6 +70,7 @@ export async function assembleContextPrioritySourceBundle({
   userMessageId,
   webSearchUsageContext,
   abortSignal,
+  knowledgeCardIds,
 }: {
   userId: string;
   conversationId: string;
@@ -78,6 +79,7 @@ export async function assembleContextPrioritySourceBundle({
   userMessageId?: string;
   webSearchUsageContext?: WebSearchUsageContext;
   abortSignal?: AbortSignal;
+  knowledgeCardIds?: string[];
 }): Promise<ContextPrioritySourceBundle> {
   const warnings: SourceBundleWarning[] = [];
   let answerContext: AnswerContextDigest = { hasProjectScope: Boolean(tripProjectId), facts: [], conflicts: [] };
@@ -86,7 +88,7 @@ export async function assembleContextPrioritySourceBundle({
 
   const [answerContextResult, knowledgeResult] = await Promise.allSettled([
     withTimeout(loadAnswerContext({ userId, conversationId, tripProjectId }), answerContextLoadTimeoutMs, "Answer context load timed out."),
-    withTimeout(loadApprovedKnowledgeForAiAsk(question), approvedKnowledgeRetrievalTimeoutMs, "Approved knowledge retrieval timed out."),
+    withTimeout(loadApprovedKnowledgeForAiAsk(question, { cardIds: knowledgeCardIds }), approvedKnowledgeRetrievalTimeoutMs, "Approved knowledge retrieval timed out."),
   ]);
 
   if (answerContextResult.status === "fulfilled") {

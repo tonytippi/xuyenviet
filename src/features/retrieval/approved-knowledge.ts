@@ -29,8 +29,8 @@ export type StateAwareKnowledgeBundleItem = {
   score: number;
 };
 
-export async function loadApprovedKnowledgeForAiAsk(question: string) {
-  return searchApprovedKnowledgeWithCandidateCount(question, { limit: activeKnowledgeResultLimit });
+export async function loadApprovedKnowledgeForAiAsk(question: string, options: { cardIds?: string[] } = {}) {
+  return searchApprovedKnowledgeWithCandidateCount(question, { limit: activeKnowledgeResultLimit, ...options });
 }
 
 export function toStateAwareKnowledgeBundleItem(result: KnowledgeSearchResult): StateAwareKnowledgeBundleItem {

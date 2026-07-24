@@ -2,7 +2,7 @@ import "server-only";
 
 import { createHash } from "node:crypto";
 
-import { and, asc, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
 import { knowledgeCardEvidence, knowledgeCards, knowledgeCardSearchDocuments, knowledgeCardSources, sourceCaptureVersions, sources, type KnowledgeSourceSupport } from "@/db/schema";
@@ -148,14 +148,19 @@ export async function searchApprovedKnowledge(query: string | null | undefined, 
   return results;
 }
 
-export async function searchApprovedKnowledgeWithCandidateCount(query: string | null | undefined, options: { limit?: number } = {}): Promise<{ results: KnowledgeSearchResult[]; candidateCount: number; policySummary: KnowledgeSearchPolicySummary }> {
+export async function searchApprovedKnowledgeWithCandidateCount(query: string | null | undefined, options: { limit?: number; cardIds?: string[] } = {}): Promise<{ results: KnowledgeSearchResult[]; candidateCount: number; policySummary: KnowledgeSearchPolicySummary }> {
   return searchApprovedKnowledgeInternal(query, options, true);
 }
 
-async function searchApprovedKnowledgeInternal(query: string | null | undefined, options: { limit?: number }, countAllCandidates: boolean): Promise<{ results: KnowledgeSearchResult[]; candidateCount: number; policySummary: KnowledgeSearchPolicySummary }> {
+async function searchApprovedKnowledgeInternal(query: string | null | undefined, options: { limit?: number; cardIds?: string[] }, countAllCandidates: boolean): Promise<{ results: KnowledgeSearchResult[]; candidateCount: number; policySummary: KnowledgeSearchPolicySummary }> {
   const normalizedQuery = normalizeSearchQuery(query);
 
   if (!normalizedQuery) {
+    return { results: [], candidateCount: 0, policySummary: emptyKnowledgeSearchPolicySummary() };
+  }
+
+  const cardIds = options.cardIds?.filter(Boolean);
+  if (cardIds?.length === 0) {
     return { results: [], candidateCount: 0, policySummary: emptyKnowledgeSearchPolicySummary() };
   }
 
@@ -185,6 +190,7 @@ async function searchApprovedKnowledgeInternal(query: string | null | undefined,
           eq(knowledgeCardSearchDocuments.status, "active"),
           eq(knowledgeCards.publicationState, "active"),
           eq(knowledgeCardSearchDocuments.contentVersion, knowledgeCards.contentVersion),
+          ...(cardIds ? [inArray(knowledgeCardSearchDocuments.knowledgeCardId, cardIds)] : []),
           or(...terms.map((term) => ilike(knowledgeCardSearchDocuments.searchableText, `%${escapeLikePattern(term)}%`))),
         ),
       )

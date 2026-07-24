@@ -14,7 +14,7 @@ import {
   type PublicMvpEvaluationScenarioId,
 } from "@/db/schema";
 import { generateEvaluationAiAskAnswer, type EvaluationAiAskAnswer } from "@/features/ai/evaluation-answer";
-import { prepareEvaluationScenarioFixture } from "@/features/feedback/evaluation-fixtures";
+import { cleanupEvaluationScenarioFixture, prepareEvaluationScenarioFixture } from "@/features/feedback/evaluation-fixtures";
 import { completeEvaluation, type AiGatewayExtractionResult } from "@/features/ai/gateway";
 import { getAiGatewayPricingSnapshot, selectActiveAiGatewayModel, type SelectedAiGatewayModel } from "@/features/ai/models";
 import { aiUsagePromptVersions, aiUsagePurposes, writeAiUsageEvent } from "@/features/usage/events";
@@ -150,7 +150,7 @@ export type PublicMvpEvaluationResultSummary = {
 type EvaluationDependencies = {
   db?: ReturnType<typeof getDb>;
   selectModel?: typeof selectActiveAiGatewayModel;
-  answerGenerator?: (input: { db: ReturnType<typeof getDb>; prompt: PublicMvpEvaluationPromptDefinition; scenario: PublicMvpEvaluationScenarioDefinition; model: SelectedAiGatewayModel; actorUserId: string }) => Promise<{ ok: true; answer: EvaluationAiAskAnswer } | { ok: false; usageEventId: string | null }>;
+  answerGenerator?: (input: { db: ReturnType<typeof getDb>; prompt: PublicMvpEvaluationPromptDefinition; scenario: PublicMvpEvaluationScenarioDefinition; model: SelectedAiGatewayModel; actorUserId: string; knowledgeCardIds: string[]; abortSignal?: AbortSignal }) => Promise<{ ok: true; answer: EvaluationAiAskAnswer } | { ok: false; usageEventId: string | null }>;
   scorer?: (input: { db: ReturnType<typeof getDb>; prompt: PublicMvpEvaluationPromptDefinition; scenario: PublicMvpEvaluationScenarioDefinition; model: SelectedAiGatewayModel; actorUserId: string; answer: EvaluationAiAskAnswer }) => Promise<EvaluationScorerOutput>;
 };
 
@@ -191,7 +191,7 @@ export async function runPublicMvpAnswerEvaluationPromptSet(dependencies: Evalua
     })
     .returning();
   const scorer = dependencies.scorer ?? scoreWithEvaluationModel;
-  const answerGenerator = dependencies.answerGenerator ?? ((input) => generateEvaluationAiAskAnswer({ db: input.db, userId: input.actorUserId, question: input.prompt.prompt, model: input.model }));
+  const answerGenerator = dependencies.answerGenerator ?? ((input) => generateEvaluationAiAskAnswer({ db: input.db, userId: input.actorUserId, question: input.prompt.prompt, model: input.model, knowledgeCardIds: input.knowledgeCardIds, abortSignal: input.abortSignal }));
   const results: PublicMvpEvaluationResultSummary[] = [];
 
   try {
@@ -264,16 +264,20 @@ async function runSinglePrompt({
   actorUserId: string;
 }): Promise<PublicMvpEvaluationResultSummary> {
   const prompt = scenario.prompt;
+  let fixture: { cardIds: string[] } | null = null;
   try {
-    await prepareEvaluationScenarioFixture(db, actorUserId, scenario);
-    const generatedAnswer = await answerGenerator({ db, prompt, scenario, model: aiAskModel, actorUserId });
+    fixture = await prepareEvaluationScenarioFixture(db, actorUserId, scenario);
+    const webFallbackAbort = scenario.id === "web_fallback_unavailable" ? new AbortController() : null;
+    webFallbackAbort?.abort();
+    const generatedAnswer = await answerGenerator({ db, prompt, scenario, model: aiAskModel, actorUserId, knowledgeCardIds: fixture.cardIds, abortSignal: webFallbackAbort?.signal });
 
     if (!generatedAnswer.ok) {
       return insertFailedResult({ db, runId, promptSet, scenario, model, safeErrorCode: "evaluator_failed", usageEventId: generatedAnswer.usageEventId });
     }
 
     const decision = decisionSnapshot(generatedAnswer.answer);
-    if (!matchesScenarioFixture(generatedAnswer.answer, decision, scenario.fixture)) {
+    const policySnapshot = buildPolicySnapshot("evaluation", generatedAnswer.answer, scenario);
+    if (!matchesScenarioFixture(generatedAnswer.answer, decision, scenario.fixture) || !matchesScenarioContract(policySnapshot, scenario.expected)) {
       return insertFailedResult({ db, runId, promptSet, scenario, model, safeErrorCode: "evaluator_failed", usageEventId: generatedAnswer.answer.usageEventId });
     }
 
@@ -329,6 +333,8 @@ async function runSinglePrompt({
     return summarizeResult(result.id, scenario, "scored", null, output.scores, { ...output.flags, ...deterministicPolicyFlags(generatedAnswer.answer) });
   } catch (error) {
     return insertFailedResult({ db, runId, promptSet, scenario, model, safeErrorCode: isInvalidScorePayloadError(error) ? "invalid_score_payload" : "evaluator_failed", usageEventId: getUsageEventId(error) });
+  } finally {
+    if (fixture) await cleanupEvaluationScenarioFixture(db, fixture.cardIds);
   }
 }
 
@@ -523,7 +529,11 @@ function deterministicPolicyFlags(answer: EvaluationAiAskAnswer) {
   const hasConflict = retrievalSnapshot.some((snapshot) => snapshot.knowledgeState === "conflicted");
   const hasUnsafeData = /raw_source_material|providerpayload|operatoronly|copied_post|raw evidence/i.test(serializedProvenance);
   const decision = decisionSnapshot(answer);
-  const fallbackRequired = decision.webSearchTriggered && (decision.warnings.includes("web_search_load_failed") || decision.warnings.includes("web_search_low_quality"));
+  const fallbackRequired = decision.webSearchTriggered && (
+    decision.warnings.includes("web_search_load_failed")
+    || decision.warnings.includes("web_search_low_quality")
+    || selectedKnowledge.some((row) => row.sourceSnapshot.usePolicy === "caveat_only")
+  );
   const guidance = /không thể xác minh|cần kiểm tra|hãy kiểm tra|xác nhận/i.test(answerText);
   return {
     conflictedKnowledgeExcluded: !hasConflict && (decision.excludedPolicyCounts.conflict === 0 || decision.excludedReasonCodes.length > 0),
@@ -587,6 +597,16 @@ function matchesScenarioFixture(answer: EvaluationAiAskAnswer, decision: AnswerD
   return fixture.selectedKnowledgeStates.every((state) => selectedStates.includes(state))
     && fixture.excludedReasonCodes.every((reason) => decision.excludedReasonCodes.includes(reason))
     && (fixture.webFallbackWarnings.length === 0 || fixture.webFallbackWarnings.some((warning) => decision.warnings.includes(warning)));
+}
+
+function matchesScenarioContract(
+  snapshot: ReturnType<typeof buildPolicySnapshot>,
+  expected: PublicMvpEvaluationScenarioDefinition["expected"],
+) {
+  return snapshot.targetCandidateExcluded === expected.targetCandidateExcluded
+    && snapshot.sourceOrEvidenceOutcome === expected.sourceOrEvidenceOutcome
+    && snapshot.webFallback.triggered === expected.fallbackRequired
+    && (!expected.fallbackRequired || snapshot.finalizationOutcome === "verification_guidance_present");
 }
 
 function sourceOrEvidenceOutcome(decision: AnswerDecisionSnapshot, selectedKnowledge: Array<Record<string, unknown>>) {

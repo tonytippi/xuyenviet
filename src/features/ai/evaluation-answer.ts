@@ -42,11 +42,15 @@ export async function generateEvaluationAiAskAnswer({
   userId,
   question,
   model,
+  knowledgeCardIds,
+  abortSignal,
 }: {
   db?: EvaluationAiAskDb;
   userId: string;
   question: string;
   model?: SelectedAiGatewayModel;
+  knowledgeCardIds?: string[];
+  abortSignal?: AbortSignal;
 }): Promise<GenerateEvaluationAiAskAnswerResult> {
   const aiAskModel = model ?? await selectActiveAiGatewayModel({ purpose: aiAskInitialAnswerPurpose, requiredCapabilities: { textInput: true }, db });
 
@@ -66,6 +70,8 @@ export async function generateEvaluationAiAskAnswer({
     question,
     userMessageId: saved.userMessageId,
     webSearchUsageContext: { userId, conversationId: saved.conversationId, userMessageId: saved.userMessageId },
+    knowledgeCardIds,
+    abortSignal,
   });
   const contextSection = buildSourceBundlePromptSection(sourceBundle);
   const gatewayResult = await completeInitialAiAskAnswer({ model: aiAskModel.gatewayModelName, messages: buildAiAskMessages({ question, history: [], contextSection }) });

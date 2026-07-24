@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import {
   aiGatewayModels,
+  aiUsageEvents,
   assistantRetrievalDecisions,
   assistantResponseProvenance,
   publicMvpEvaluationPromptSets,
@@ -11,6 +12,7 @@ import {
   publicMvpEvaluationResults,
   publicMvpEvaluationRuns,
   conversations,
+  knowledgeCards,
   messages,
   userRoles,
   users,
@@ -95,7 +97,7 @@ function validScores(score = 8) {
 async function createPersistedEvaluationAnswer(userId: string, promptType: string, scenarioId: string) {
   const conflict = scenarioId === "conflict_exclusion";
   const withdrawn = scenarioId === "source_withdrawal";
-  const fallback = conflict || withdrawn || scenarioId === "web_fallback_unavailable";
+  const fallback = conflict || withdrawn || scenarioId === "web_fallback_unavailable" || scenarioId === "conditional_high_risk_claim";
   const selectedState = scenarioId === "community_observation" ? "community_observation" : scenarioId === "independent_community_pattern" ? "community_pattern" : scenarioId === "conditional_high_risk_claim" ? "conditional" : null;
   const [conversation] = await testDb.insert(conversations).values({ userId }).returning({ id: conversations.id });
   const [userMessage] = await testDb.insert(messages).values({ conversationId: conversation.id, userId, role: "user", content: `Prompt ${promptType}` }).returning({ id: messages.id });
@@ -209,6 +211,43 @@ describe("public MVP answer evaluation", () => {
     await expect(testDb.select().from(publicMvpEvaluationRuns)).resolves.toHaveLength(0);
   });
 
+  test("fails safely when no active AI Ask model exists before evaluation-owned writes or gateway calls", async () => {
+    await createUser("operator", ["operator"]);
+    await testDb.insert(aiGatewayModels).values({
+      id: "evaluation-model-only",
+      gatewayModelName: "cx/evaluator",
+      displayLabel: "Evaluator",
+      purpose: "evaluation",
+      active: true,
+      defaultForPurpose: true,
+      supportsTextInput: true,
+      supportsEvaluation: true,
+      pricingCurrency: "USD",
+      inputTokenPriceMicros: 1,
+      outputTokenPriceMicros: 2,
+      pricingVersion: "test-v1",
+      pricingEffectiveAt: new Date("2026-07-11T00:00:00.000Z"),
+    });
+    await mockSession("operator", ["operator"]);
+    const answerGenerator = vi.fn();
+    const scorer = vi.fn();
+    const { runPublicMvpAnswerEvaluationPromptSet } = await import("@/features/feedback/evaluation");
+
+    await expect(runPublicMvpAnswerEvaluationPromptSet({ db: testDb, answerGenerator, scorer })).resolves.toEqual({ success: false, reason: "missing_ai_ask_model" });
+
+    await expect(testDb.select().from(publicMvpEvaluationPromptSets)).resolves.toHaveLength(0);
+    await expect(testDb.select().from(publicMvpEvaluationRuns)).resolves.toHaveLength(0);
+    await expect(testDb.select().from(publicMvpEvaluationResults)).resolves.toHaveLength(0);
+    await expect(testDb.select().from(publicMvpEvaluationResultScores)).resolves.toHaveLength(0);
+    await expect(testDb.select().from(conversations)).resolves.toHaveLength(0);
+    await expect(testDb.select().from(messages)).resolves.toHaveLength(0);
+    await expect(testDb.select().from(assistantRetrievalDecisions)).resolves.toHaveLength(0);
+    await expect(testDb.select().from(assistantResponseProvenance)).resolves.toHaveLength(0);
+    await expect(testDb.select().from(aiUsageEvents)).resolves.toHaveLength(0);
+    expect(answerGenerator).not.toHaveBeenCalled();
+    expect(scorer).not.toHaveBeenCalled();
+  });
+
   test("stores one scored result and six bounded rubric scores for each standard prompt", async () => {
     await createUser("admin", ["admin"]);
     await createEvaluationModel();
@@ -268,6 +307,9 @@ describe("public MVP answer evaluation", () => {
     expect(rows.find((row) => row.promptType === "service_activity")?.unsupportedClaimFlag).toBe(true);
     expect(rows.find((row) => row.promptType === "freshness_sensitive")?.missingUncertaintyFlag).toBe(true);
     expect(rows.find((row) => row.promptType === "sparse_data")?.noBetterThanGenericFlag).toBe(true);
+    const fixtureCards = await testDb.select().from(knowledgeCards).where(eq(knowledgeCards.aiPromptVersion, "public_mvp_evaluation_fixture_v1"));
+    expect(fixtureCards).toHaveLength(5);
+    expect(fixtureCards.every((card) => card.publicationState === "suppressed")).toBe(true);
     expect(JSON.stringify(rows)).not.toMatch(/rawProviderPayload|raw_source_material|providerPayload|operatorOnlyNotes/);
   });
 
@@ -346,5 +388,27 @@ describe("public MVP answer evaluation", () => {
 
     expect(rows).toHaveLength(6);
     expect(rows.every((row) => row.status === "failed" && row.safeErrorCode === "invalid_score_payload")).toBe(true);
+  });
+
+  test("fails a result when its persisted answer-time policy contract does not match the scenario", async () => {
+    await createUser("admin", ["admin"]);
+    await createEvaluationModel();
+    await mockSession("admin", ["admin"]);
+    const { runPublicMvpAnswerEvaluationPromptSet } = await import("@/features/feedback/evaluation");
+
+    await runPublicMvpAnswerEvaluationPromptSet({
+      db: testDb,
+      answerGenerator: async ({ prompt, scenario }) => {
+        const answer = await createPersistedEvaluationAnswer("admin", prompt.type, scenario.id);
+        if (scenario.id === "conflict_exclusion") {
+          answer.retrievalDecision = { ...answer.retrievalDecision!, knowledgePolicySnapshot: { excludedPolicyCounts: { conflict: 0, verificationRequired: 0, other: 0 }, excludedReasonCodes: [] } };
+        }
+        return { ok: true, answer };
+      },
+      scorer: async () => ({ answerText: "Câu trả lời an toàn", scores: validScores(), flags: { unsupportedClaim: false, missingUncertainty: false, noBetterThanGeneric: false, unsupportedCommunityWording: false, requiredCaveatOmitted: false } }),
+    });
+    const [conflictResult] = await testDb.select().from(publicMvpEvaluationResults).where(eq(publicMvpEvaluationResults.scenarioId, "conflict_exclusion"));
+
+    expect(conflictResult).toMatchObject({ status: "failed", safeErrorCode: "evaluator_failed" });
   });
 });

@@ -55,6 +55,13 @@ so that answer quality metrics catch unsafe publication or wording regressions.
   - [ ] Extend `tests/public-mvp-quality-dashboard.test.ts` only to prove new stored fields remain safely projected/queryable as needed; defer Story 5.2 presentation and signal UX.
   - [ ] Run DB-backed focused suites sequentially with `DATABASE_URL_TEST`, then `pnpm lint`, `pnpm typecheck`, and `pnpm build`. Do not run database test commands concurrently or use `pnpm db:reset` for test verification.
 
+### Review Findings
+
+- [x] [Review][Patch] Evaluation fixtures permanently publish synthetic active knowledge [src/features/feedback/evaluation-fixtures.ts:42] — Scoped evaluation retrieval now permits only the current fixture IDs, and cleanup suppresses the fixture card after each scenario so synthetic data cannot affect traveler retrieval or future runs.
+- [x] [Review][Patch] Web fallback scenario does not establish its required unavailable fallback state [src/features/feedback/evaluation-fixtures.ts:13] — The scenario uses an empty fixture scope and an already-aborted retrieval signal, which deterministically records `web_search_load_failed` without calling the live web provider.
+- [x] [Review][Patch] Scenario policy contracts are declared but not validated [src/features/feedback/evaluation.ts:582] — The coordinator now compares persisted answer-time snapshot outcomes to each scenario's target-exclusion, source/evidence, and fallback/finalization requirements before scoring.
+- [x] [Review][Patch] Missing AI Ask model preflight lacks the required atomicity regression [tests/public-mvp-evaluation.test.ts:203] — DB-backed coverage verifies `missing_ai_ask_model` writes no prompt set, run, result, score, conversation, message, retrieval decision, provenance, usage event, or Gateway call.
+
 ## Dev Notes
 
 ### Scope And Business Context
@@ -176,6 +183,7 @@ gpu4ai/gpt-5.6-terra-review
 - Implementation is blocked before completion: static validation passed with `pnpm typecheck`, `pnpm lint`, and `pnpm build`; `pnpm lint` reports three pre-existing warnings in `tests/knowledge-search.test.ts` and no errors. DB-backed focused suites, migration validation, and the required six scenario fixtures remain unverified because `DATABASE_URL_TEST` is unavailable.
 - 2026-07-24: Recovered the six-scenario assertion contract. `tests/public-mvp-evaluation.test.ts` now asserts six persisted scenario rows while verifying their prompt types cover the five canonical prompts; malformed scorer coverage likewise expects six failed scenario rows. The repository `.env` test setup supplied `DATABASE_URL_TEST`. Sequential focused DB-backed verification passed: `pnpm test:run tests/public-mvp-evaluation.test.ts` (7), `pnpm test:run tests/answer-context.test.ts` (92), `pnpm test:run tests/knowledge-search.test.ts` (42), `pnpm test:run tests/knowledge-source-removal.test.ts` (5), `pnpm test:run tests/web-search-adapter.test.ts` (10), and `pnpm test:run tests/public-mvp-quality-dashboard.test.ts` (7). `pnpm lint` passed with the three documented pre-existing warnings in `tests/knowledge-search.test.ts`; `pnpm typecheck` and `pnpm build` passed. Status moved to `review`.
 - 2026-07-24: Repaired actionable Story 5.1 findings without starting another story. `generateEvaluationAiAskAnswer()` now loads and returns the bounded, persisted retrieval-decision and row-per-source provenance snapshots instead of replacing them with `{}`. Evaluation policy snapshots and deterministic flags derive from those answer-time records, including selected knowledge state, excluded policy counts/reasons, web fallback triggers/warnings, and final verification guidance; scenario expectations are no longer persisted as fabricated outcomes. The six scenario definitions now carry required fixture-state assertions, and the DB regression asserts persisted conflict, withdrawal, and low-confidence fallback outcomes. Repository `.env` supplied `DATABASE_URL_TEST`; serial DB suites passed: `public-mvp-evaluation` (7), `answer-context` (92), `knowledge-search` (42), `knowledge-source-removal` (5), `web-search-adapter` (10), and `public-mvp-quality-dashboard` (7). `pnpm typecheck` and `pnpm build` passed. `pnpm lint` completed with the three pre-existing warnings in `tests/knowledge-search.test.ts` and no errors.
+- 2026-07-24: Repaired only the four authorized review findings. Evaluation retrieval is scoped to the current fixture IDs and fixture cards are suppressed after each scenario; the unavailable-web case uses an empty scope plus an aborted retrieval signal for a deterministic failed-web fallback. Persisted answer-time snapshots must now satisfy every declared scenario policy/fallback contract before scoring. Added the missing AI Ask model atomicity regression. Repository `.env` supplied `DATABASE_URL_TEST`; serial DB suites passed: `public-mvp-evaluation` (9), `answer-context` (92), `knowledge-search` (42), `knowledge-source-removal` (5), `web-search-adapter` (10), and `public-mvp-quality-dashboard` (7). `pnpm typecheck` and `pnpm build` passed. `pnpm lint` completed with the three pre-existing warnings in `tests/knowledge-search.test.ts` and no errors.
 
 ### File List
 
@@ -187,6 +195,9 @@ gpu4ai/gpt-5.6-terra-review
 - src/features/ai/evaluation-answer.ts
 - src/features/feedback/evaluation.ts
 - src/features/feedback/evaluation-fixtures.ts
+- src/features/knowledge/search.ts
+- src/features/retrieval/approved-knowledge.ts
+- src/features/retrieval/source-bundle.ts
 - src/features/feedback/quality-dashboard.ts
 - tests/public-mvp-evaluation.test.ts
 - tests/public-mvp-quality-dashboard.test.ts
@@ -198,3 +209,4 @@ gpu4ai/gpt-5.6-terra-review
 - 2026-07-24: Started Story 5.1 and recorded blocked DB-backed verification; sprint status remains `in-progress`.
 - 2026-07-24: Recovered stale five-row evaluation assertions for the six-scenario/five-canonical-prompt contract; all required verification passed and status moved to `review`.
 - 2026-07-24: Repaired answer-time provenance retention and evaluation policy-outcome derivation; retained Story 5.1 at `review` after serial DB-backed verification.
+- 2026-07-24: Resolved the four authorized review findings and retained Story 5.1 at `review` after serial DB-backed verification and baseline checks.
