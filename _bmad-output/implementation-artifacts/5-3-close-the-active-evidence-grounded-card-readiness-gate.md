@@ -192,6 +192,8 @@ gpu4ai/gpt-5.6-terra-review
 - [x] [Review][Patch] Fully non-corridor policies are retained as explicit `zeroApplicablePolicies` diagnostics instead of being silently removed [src/features/knowledge/recommendations.ts].
 - [x] [Review][Patch] `/admin/quality` renders corpus-wide zero-count type/route buckets and canonical non-high quality-gap diagnostics [src/app/admin/quality/page.tsx].
 - [x] [Review][Patch] Non-high evaluation gaps are now remediation diagnostics only; the undocumented zero-tolerance readiness check was removed [src/features/feedback/quality-dashboard.ts].
+- [x] [Review][Patch] Zero-applicable sampling policies can certify readiness without applicable corridor proof [src/features/knowledge/recommendations.ts:128-153]
+- [x] [Review][Patch] Sampling policy deletion cascades immutable auto-active enrollment records [src/db/schema.ts:1073,1135]
 
 ### File List
 
@@ -199,6 +201,7 @@ gpu4ai/gpt-5.6-terra-review
 - _bmad-output/implementation-artifacts/sprint-status.yaml
 - drizzle/migrations/0057_active_evidence_readiness_enrollment.sql
 - drizzle/migrations/0058_preserve_sampling_readiness_ledgers.sql
+- drizzle/migrations/0059_restrict_sampling_policy_ledger_deletion.sql
 - drizzle/migrations/meta/0058_snapshot.json
 - drizzle/migrations/meta/_journal.json
 - src/app/admin/quality/page.tsx
@@ -225,3 +228,5 @@ gpu4ai/gpt-5.6-terra-review
 - 2026-07-24: Marked `in-progress` during second-review recovery. The five claimed second-review findings and their severities are absent from the permitted story record, so they cannot be accurately recorded without the original review payload.
 - 2026-07-24: Completed a fresh adversarial Story 5.3 review of `cb83ccc`, `cea0a736`, and the present documentation worktree. Recorded eight actionable findings (four high and four medium), all classified as substantial risk. Story remains `in-progress`; no application code, tests, dependencies, or commits were modified by this review.
 - 2026-07-24: Resolved only the eight fresh-review findings. Readiness now has one read-only repeatable-read snapshot; immutable auto-active and verify-first rows block card deletion; canonical evaluation evidence fences result prompt-set identity and supplies all baseline checks; zero-applicable non-corridor policies and corpus-wide remediation diagnostics are explicit; non-high evaluation gaps remain baseline-governed diagnostics. Added DB regressions for mixed prompt sets, canonical baseline replacement, zero-applicable policy diagnostics, and immutable row retention. Required serial suites passed: dashboard (19), batch intake (14), recommendation queue (23), evaluation (15), search (42); lint passed with three pre-existing warnings; typecheck and build passed. Status returned to `review`; no commit created.
+- 2026-07-24: Final adversarial review centered on repair `268e208` found two unresolved high-severity readiness-integrity defects: an all-zero-applicable policy set can pass the sampling gate without corridor proof, and cascading policy foreign keys can erase auto-active immutable enrollment records before card deletion. Findings were persisted as action items. No application code, tests, dependencies, commits, or new stories were created by this review; story and sprint status set to `in-progress`.
+- 2026-07-24: Resolved the two scoped final-review findings. The sampling gate requires at least one corridor-applicable policy and validates sealed proof diagnostics for all policies. Forward migration `0059_restrict_sampling_policy_ledger_deletion` changes immutable auto-active membership and candidate-ledger policy foreign keys from cascade to restrict. Corrected non-corridor proof normalization so persisted `outsideCorridor = true` members retain the canonical empty bucket. Migration application and all required serial suites passed: dashboard (20), batch intake (14), recommendation queue (23), evaluation (15), and search (42). Lint passed with three pre-existing warnings; typecheck and build passed. Status returned to `review`; no commit created.

@@ -564,14 +564,16 @@ describe("public MVP quality dashboard", () => {
     expect(all.success && filtered.success ? filtered.readiness : null).toEqual(all.success ? all.readiness : null);
   });
 
-  test("excludes a fully non-corridor policy from the corridor sampling gate", async () => {
+  test("keeps a fully non-corridor policy diagnostic but never treats it as corridor readiness proof", async () => {
     await createUser("outside-admin", ["admin"]);
     const outside = await seedSamplingFence({ id: "outside-fence", userId: "outside-admin" });
     const { enrollmentDigest, getPublicMvpSamplingReadinessEvidence } = await import("@/features/knowledge/recommendations");
     const [policy] = await testDb.insert(knowledgeSamplingPolicies).values({ cohortKey: "outside-policy", windowStartsAt: new Date("2026-01-01"), windowEndsAt: new Date("2026-01-29"), samplingPercent: 15, suppressedAt: new Date(), enrollmentCandidateCount: 1, enrollmentSelectedCount: 1, enrollmentDigest: enrollmentDigest(["outside-fence:1:1::true:true"]), enrollmentSealedAt: new Date() }).returning();
     await testDb.insert(knowledgeSamplingCandidateLedger).values({ terminalIngestionJobId: outside.jobId, policyId: policy.id, knowledgeCardId: "outside-fence", contentVersion: 1, evidenceSetRevision: 1, corridorBucket: "", outsideCorridor: true, selectedForSampling: true });
     await testDb.insert(knowledgeSamplingCohortMembers).values({ policyId: policy.id, knowledgeCardId: "outside-fence", contentVersion: 1, evidenceSetRevision: 1, corridorBucket: null, outsideCorridor: true, selectedForSampling: true });
-    await expect(getPublicMvpSamplingReadinessEvidence(testDb)).resolves.toMatchObject({ complete: true, policies: 0, zeroApplicablePolicies: 1, highSeverity: 0 });
+    await expect(getPublicMvpSamplingReadinessEvidence(testDb)).resolves.toMatchObject({ complete: false, policies: 0, zeroApplicablePolicies: 1, incompletePolicies: 0, highSeverity: 0 });
+    await testDb.update(knowledgeSamplingPolicies).set({ enrollmentSealedAt: null, enrollmentCandidateCount: null, enrollmentSelectedCount: null, enrollmentDigest: null }).where(eq(knowledgeSamplingPolicies.id, policy.id));
+    await expect(getPublicMvpSamplingReadinessEvidence(testDb)).resolves.toMatchObject({ complete: false, policies: 0, zeroApplicablePolicies: 1, incompletePolicies: 1 });
   });
 
   test("selects only the newest complete canonical evaluation run and distinguishes high from non-high gaps", async () => {
@@ -630,6 +632,18 @@ describe("public MVP quality dashboard", () => {
 
     await expect(testDb.delete(knowledgeCards).where(eq(knowledgeCards.id, "retained-auto-active"))).rejects.toThrow();
     await expect(testDb.delete(knowledgeCards).where(eq(knowledgeCards.id, "retained-verify-first"))).rejects.toThrow();
+  });
+
+  test("prevents policy deletion from erasing immutable auto-active enrollment evidence", async () => {
+    await createUser("policy-retention-admin", ["admin"]);
+    const autoActive = await seedSamplingFence({ id: "policy-retained-auto-active", userId: "policy-retention-admin" });
+    const [policy] = await testDb.insert(knowledgeSamplingPolicies).values({ cohortKey: "policy-retention", windowStartsAt: new Date("2026-01-01"), windowEndsAt: new Date("2026-01-29"), samplingPercent: 15 }).returning();
+    await testDb.insert(knowledgeSamplingCandidateLedger).values({ terminalIngestionJobId: autoActive.jobId, policyId: policy.id, knowledgeCardId: "policy-retained-auto-active", contentVersion: 1, evidenceSetRevision: 1, corridorBucket: "Huế", outsideCorridor: false, selectedForSampling: true });
+    await testDb.insert(knowledgeSamplingCohortMembers).values({ policyId: policy.id, knowledgeCardId: "policy-retained-auto-active", contentVersion: 1, evidenceSetRevision: 1, corridorBucket: "Huế", outsideCorridor: false, selectedForSampling: true });
+
+    await expect(testDb.delete(knowledgeSamplingPolicies).where(eq(knowledgeSamplingPolicies.id, policy.id))).rejects.toThrow();
+    await expect(testDb.select().from(knowledgeSamplingCandidateLedger).where(eq(knowledgeSamplingCandidateLedger.policyId, policy.id))).resolves.toHaveLength(1);
+    await expect(testDb.select().from(knowledgeSamplingCohortMembers).where(eq(knowledgeSamplingCohortMembers.policyId, policy.id))).resolves.toHaveLength(1);
   });
 
   test("requires current valid evidence and one unambiguous disposition for selected and verify-first fences", async () => {

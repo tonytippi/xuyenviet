@@ -98,7 +98,7 @@ export async function sealClosedKnowledgeSamplingPolicy(policyId: string, now = 
       tx.select().from(knowledgeSamplingCohortMembers).where(eq(knowledgeSamplingCohortMembers.policyId, policyId)).orderBy(asc(knowledgeSamplingCohortMembers.knowledgeCardId), asc(knowledgeSamplingCohortMembers.contentVersion), asc(knowledgeSamplingCohortMembers.evidenceSetRevision)),
     ]);
     const ledgerKeys = ledger.map((row) => `${row.knowledgeCardId}:${row.contentVersion}:${row.evidenceSetRevision}:${row.corridorBucket}:${row.outsideCorridor}:${row.selectedForSampling}`);
-    const memberKeys = members.map((row) => `${row.knowledgeCardId}:${row.contentVersion}:${row.evidenceSetRevision}:${row.corridorBucket ?? "unknown"}:${row.outsideCorridor ?? "unknown"}:${row.selectedForSampling ?? "unknown"}`);
+    const memberKeys = members.map((row) => `${row.knowledgeCardId}:${row.contentVersion}:${row.evidenceSetRevision}:${row.corridorBucket ?? (row.outsideCorridor === true ? "" : "unknown")}:${row.outsideCorridor ?? "unknown"}:${row.selectedForSampling ?? "unknown"}`);
     if (ledger.length !== members.length || ledgerKeys.some((key, index) => key !== memberKeys[index])) return { status: "incomplete" as const };
     const digest = enrollmentDigest(ledgerKeys);
     await tx.update(knowledgeSamplingPolicies).set({ enrollmentCandidateCount: ledger.length, enrollmentSelectedCount: ledger.filter((row) => row.selectedForSampling).length, enrollmentDigest: digest, enrollmentSealedAt: now }).where(eq(knowledgeSamplingPolicies.id, policyId));
@@ -124,10 +124,10 @@ export async function getPublicMvpSamplingReadinessEvidence(db: SamplingReadines
     const policyMembers = members.filter((row) => row.policyId === policy.id);
     const allPolicyObligations = obligations.filter((obligation) => obligation.policyId === policy.id);
     const candidateKeys = policyCandidates.map((row) => `${row.knowledgeCardId}:${row.contentVersion}:${row.evidenceSetRevision}:${row.corridorBucket}:${row.outsideCorridor}:${row.selectedForSampling}`);
-    const memberKeys = policyMembers.map((row) => `${row.knowledgeCardId}:${row.contentVersion}:${row.evidenceSetRevision}:${row.corridorBucket ?? "unknown"}:${row.outsideCorridor ?? "unknown"}:${row.selectedForSampling ?? "unknown"}`);
+    const memberKeys = policyMembers.map((row) => `${row.knowledgeCardId}:${row.contentVersion}:${row.evidenceSetRevision}:${row.corridorBucket ?? (row.outsideCorridor === true ? "" : "unknown")}:${row.outsideCorridor ?? "unknown"}:${row.selectedForSampling ?? "unknown"}`);
     const proofMatches = policy.enrollmentSealedAt !== null && policy.enrollmentCandidateCount === policyCandidates.length && policy.enrollmentSelectedCount === policyCandidates.filter((row) => row.selectedForSampling).length && policy.enrollmentDigest === enrollmentDigest(candidateKeys) && candidateKeys.length === memberKeys.length && candidateKeys.every((key, index) => key === memberKeys[index]);
     const corridorRelevant = [...policyCandidates, ...policyMembers, ...allPolicyObligations].some((entry) => entry.outsideCorridor !== true);
-    if (!corridorRelevant) return { zeroApplicable: true, proofMatches: true, corridorMemberCount: 0, pendingMembers: 0, failedMembers: 0, obligations: 0, pendingObligations: 0, failedObligations: 0, highSeverity: false, unknownMembers: 0 };
+    if (!corridorRelevant) return { zeroApplicable: true, proofMatches, corridorMemberCount: 0, pendingMembers: 0, failedMembers: 0, obligations: 0, pendingObligations: 0, failedObligations: 0, highSeverity: false, unknownMembers: [...policyCandidates, ...policyMembers, ...allPolicyObligations].filter((entry) => entry.outsideCorridor === null || ("selectedForSampling" in entry && entry.selectedForSampling === null)).length };
     const corridorMembers = policyMembers.filter((member) => member.outsideCorridor === false);
     const selectedMembers = corridorMembers.filter((member) => member.selectedForSampling === true);
     const memberOutcomes = selectedMembers.map((member) => {
@@ -150,10 +150,10 @@ export async function getPublicMvpSamplingReadinessEvidence(db: SamplingReadines
   });
   const applicablePolicyEvidence = policyEvidence.filter((policy) => !policy.zeroApplicable);
   return {
-    complete: policies.length > 0 && applicablePolicyEvidence.every((policy) => policy.proofMatches && policy.unknownMembers === 0 && policy.pendingMembers === 0 && policy.failedMembers === 0 && policy.pendingObligations === 0 && policy.failedObligations === 0 && !policy.highSeverity),
+    complete: policies.length > 0 && applicablePolicyEvidence.length > 0 && policyEvidence.every((policy) => policy.proofMatches && policy.unknownMembers === 0 && policy.pendingMembers === 0 && policy.failedMembers === 0 && policy.pendingObligations === 0 && policy.failedObligations === 0 && !policy.highSeverity),
     policies: applicablePolicyEvidence.length,
     zeroApplicablePolicies: policyEvidence.filter((policy) => policy.zeroApplicable).length,
-    incompletePolicies: applicablePolicyEvidence.filter((policy) => !policy.proofMatches || policy.unknownMembers > 0).length,
+    incompletePolicies: policyEvidence.filter((policy) => !policy.proofMatches || policy.unknownMembers > 0).length,
     pending: applicablePolicyEvidence.reduce((total, policy) => total + policy.pendingMembers + policy.pendingObligations, 0),
     failed: applicablePolicyEvidence.reduce((total, policy) => total + policy.failedMembers + policy.failedObligations, 0),
     highSeverity: applicablePolicyEvidence.filter((policy) => policy.highSeverity).length,

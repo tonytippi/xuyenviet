@@ -414,6 +414,13 @@
       "when": 1784904000010,
       "tag": "0058_preserve_sampling_readiness_ledgers",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1784904000011,
+      "tag": "0059_restrict_sampling_policy_ledger_deletion",
+      "breakpoints": true
     }
   ]
 }

@@ -1070,7 +1070,7 @@ export const knowledgeSamplingCohortMembers = pgTable(
   "knowledge_sampling_cohort_members",
   {
     id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
-    policyId: text("policy_id").notNull().references(() => knowledgeSamplingPolicies.id, { onDelete: "cascade" }),
+    policyId: text("policy_id").notNull().references(() => knowledgeSamplingPolicies.id, { onDelete: "restrict" }),
     knowledgeCardId: text("knowledge_card_id").notNull().references(() => knowledgeCards.id, { onDelete: "restrict" }),
     contentVersion: integer("content_version").notNull(),
     evidenceSetRevision: integer("evidence_set_revision").notNull(),
@@ -1132,7 +1132,7 @@ export const knowledgeSamplingCandidateLedger = pgTable(
   {
     id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
     terminalIngestionJobId: text("terminal_ingestion_job_id").notNull().references(() => knowledgeIngestionJobs.id, { onDelete: "restrict" }),
-    policyId: text("policy_id").notNull().references(() => knowledgeSamplingPolicies.id, { onDelete: "cascade" }),
+    policyId: text("policy_id").notNull().references(() => knowledgeSamplingPolicies.id, { onDelete: "restrict" }),
     knowledgeCardId: text("knowledge_card_id").notNull().references(() => knowledgeCards.id, { onDelete: "restrict" }),
     contentVersion: integer("content_version").notNull(),
     evidenceSetRevision: integer("evidence_set_revision").notNull(),
