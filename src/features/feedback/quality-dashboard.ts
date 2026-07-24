@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, asc, desc, eq, gte, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, or, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
 import {
@@ -262,28 +262,63 @@ async function buildPolicySignals({
   ]);
   const policies = policyRows.slice(0, policyDiagnosticLimit);
   const policyIds = policies.map((policy) => policy.id);
-  const members =
-    policyIds.length > 0
-      ? await db
-          .select({ policyId: knowledgeSamplingCohortMembers.policyId, knowledgeCardId: knowledgeSamplingCohortMembers.knowledgeCardId, contentVersion: knowledgeSamplingCohortMembers.contentVersion, evidenceSetRevision: knowledgeSamplingCohortMembers.evidenceSetRevision })
-          .from(knowledgeSamplingCohortMembers)
-          .where(inArray(knowledgeSamplingCohortMembers.policyId, policyIds))
-          .orderBy(asc(knowledgeSamplingCohortMembers.policyId), asc(knowledgeSamplingCohortMembers.knowledgeCardId), asc(knowledgeSamplingCohortMembers.contentVersion), asc(knowledgeSamplingCohortMembers.evidenceSetRevision))
-          .limit(cohortMemberReadLimit + 1)
-      : [];
-  const boundedMembers = members.slice(0, cohortMemberReadLimit);
+  const membersByPolicy = await Promise.all(
+    policies.map(async (policy) => {
+      const members = await db
+        .select({ policyId: knowledgeSamplingCohortMembers.policyId, knowledgeCardId: knowledgeSamplingCohortMembers.knowledgeCardId, contentVersion: knowledgeSamplingCohortMembers.contentVersion, evidenceSetRevision: knowledgeSamplingCohortMembers.evidenceSetRevision })
+        .from(knowledgeSamplingCohortMembers)
+        .where(eq(knowledgeSamplingCohortMembers.policyId, policy.id))
+        .orderBy(asc(knowledgeSamplingCohortMembers.knowledgeCardId), asc(knowledgeSamplingCohortMembers.contentVersion), asc(knowledgeSamplingCohortMembers.evidenceSetRevision))
+        .limit(cohortMemberReadLimit + 1);
+
+      return { policyId: policy.id, members };
+    }),
+  );
+  const boundedMembers = membersByPolicy.flatMap(({ members }) => members.slice(0, cohortMemberReadLimit));
   const memberCardIds = boundedMembers.map((member) => member.knowledgeCardId);
-  const recommendations =
+  const samplingRecommendationsByPolicy = await Promise.all(
+    membersByPolicy.map(async ({ policyId, members: policyMembers }) => {
+      const boundedPolicyMembers = policyMembers.slice(0, cohortMemberReadLimit);
+      const memberFences = boundedPolicyMembers.map((member) => and(eq(knowledgeRecommendations.knowledgeCardId, member.knowledgeCardId), eq(knowledgeRecommendations.contentVersion, member.contentVersion), eq(knowledgeRecommendations.evidenceSetRevision, member.evidenceSetRevision)));
+
+      if (memberFences.length === 0) {
+        return { resolved: [], selected: [] };
+      }
+
+      const fenceCondition = or(...memberFences);
+      const baseConditions = and(eq(knowledgeRecommendations.policyId, policyId), eq(knowledgeRecommendations.reason, "sampling"), fenceCondition);
+      const fields = { policyId: knowledgeRecommendations.policyId, knowledgeCardId: knowledgeRecommendations.knowledgeCardId, contentVersion: knowledgeRecommendations.contentVersion, evidenceSetRevision: knowledgeRecommendations.evidenceSetRevision, status: knowledgeRecommendations.status, resolution: knowledgeRecommendations.resolution, resolvedAt: knowledgeRecommendations.resolvedAt, updatedAt: knowledgeRecommendations.updatedAt, id: knowledgeRecommendations.id };
+      const [resolved, selected] = await Promise.all([
+        db
+          .selectDistinctOn([knowledgeRecommendations.knowledgeCardId, knowledgeRecommendations.contentVersion, knowledgeRecommendations.evidenceSetRevision], fields)
+          .from(knowledgeRecommendations)
+          .where(and(baseConditions, eq(knowledgeRecommendations.status, "resolved"), inArray(knowledgeRecommendations.resolution, ["sampling_passed", "sampling_failed"])))
+          .orderBy(asc(knowledgeRecommendations.knowledgeCardId), asc(knowledgeRecommendations.contentVersion), asc(knowledgeRecommendations.evidenceSetRevision), desc(knowledgeRecommendations.resolvedAt), desc(knowledgeRecommendations.updatedAt), desc(knowledgeRecommendations.id))
+          .limit(cohortMemberReadLimit + 1),
+        db
+          .selectDistinctOn([knowledgeRecommendations.knowledgeCardId, knowledgeRecommendations.contentVersion, knowledgeRecommendations.evidenceSetRevision], fields)
+          .from(knowledgeRecommendations)
+          .where(baseConditions)
+          .orderBy(asc(knowledgeRecommendations.knowledgeCardId), asc(knowledgeRecommendations.contentVersion), asc(knowledgeRecommendations.evidenceSetRevision), desc(knowledgeRecommendations.updatedAt), desc(knowledgeRecommendations.id))
+          .limit(cohortMemberReadLimit + 1),
+      ]);
+
+      return { resolved, selected };
+    }),
+  );
+  const resolvedSamplingRecommendations = samplingRecommendationsByPolicy.flatMap(({ resolved }) => resolved);
+  const selectedSamplingRecommendations = samplingRecommendationsByPolicy.flatMap(({ selected }) => selected);
+  const verificationRecommendations =
     policyIds.length > 0
       ? await db
-          .select({ policyId: knowledgeRecommendations.policyId, knowledgeCardId: knowledgeRecommendations.knowledgeCardId, contentVersion: knowledgeRecommendations.contentVersion, evidenceSetRevision: knowledgeRecommendations.evidenceSetRevision, status: knowledgeRecommendations.status, resolution: knowledgeRecommendations.resolution, resolvedAt: knowledgeRecommendations.resolvedAt, updatedAt: knowledgeRecommendations.updatedAt, id: knowledgeRecommendations.id })
+          .select({ knowledgeCardId: knowledgeRecommendations.knowledgeCardId })
           .from(knowledgeRecommendations)
-          .where(and(inArray(knowledgeRecommendations.reason, ["sampling", "verification"]), inArray(knowledgeRecommendations.policyId, policyIds)))
-          .orderBy(asc(knowledgeRecommendations.policyId), asc(knowledgeRecommendations.knowledgeCardId), asc(knowledgeRecommendations.contentVersion), asc(knowledgeRecommendations.evidenceSetRevision), asc(knowledgeRecommendations.reason), desc(knowledgeRecommendations.resolvedAt), desc(knowledgeRecommendations.updatedAt), desc(knowledgeRecommendations.id))
+          .where(and(eq(knowledgeRecommendations.reason, "verification"), inArray(knowledgeRecommendations.policyId, policyIds)))
+          .orderBy(asc(knowledgeRecommendations.policyId), asc(knowledgeRecommendations.knowledgeCardId), desc(knowledgeRecommendations.updatedAt), desc(knowledgeRecommendations.id))
           .limit(cohortRecommendationReadLimit + 1)
       : [];
-  const boundedRecommendations = recommendations.slice(0, cohortRecommendationReadLimit);
-  const policyCardIds = [...new Set([...memberCardIds, ...boundedRecommendations.map((recommendation) => recommendation.knowledgeCardId)])];
+  const boundedVerificationRecommendations = verificationRecommendations.slice(0, cohortRecommendationReadLimit);
+  const policyCardIds = [...new Set([...memberCardIds, ...boundedVerificationRecommendations.map((recommendation) => recommendation.knowledgeCardId)])];
   const cards =
     policyCardIds.length > 0
       ? await db
@@ -309,16 +344,12 @@ async function buildPolicySignals({
       severity: "unavailable" as const,
       recommendedSafeAction: evaluationAction(row),
     }));
-  const recommendationsByFence = new Map<string, typeof boundedRecommendations>();
-  for (const recommendation of boundedRecommendations) {
-    const key = samplingFenceKey(recommendation);
-    recommendationsByFence.set(key, [...(recommendationsByFence.get(key) ?? []), recommendation]);
-  }
+  const resolvedSamplingByFence = new Map(resolvedSamplingRecommendations.map((recommendation) => [samplingFenceKey(recommendation), recommendation]));
+  const selectedSamplingFences = new Set(selectedSamplingRecommendations.map(samplingFenceKey));
   const memberOutcomes = boundedMembers.map((member) => {
-    const candidates = recommendationsByFence.get(samplingFenceKey(member)) ?? [];
-    const recommendation = candidates.find((candidate) => candidate.status === "resolved" && (candidate.resolution === "sampling_passed" || candidate.resolution === "sampling_failed"));
+    const recommendation = resolvedSamplingByFence.get(samplingFenceKey(member));
     const policy = policyById.get(member.policyId);
-    const outcome: "passed" | "failed" | "pending" | "unselected" = recommendation?.resolution === "sampling_passed" ? "passed" : recommendation?.resolution === "sampling_failed" ? "failed" : candidates.length > 0 ? "pending" : "unselected";
+    const outcome: "passed" | "failed" | "pending" | "unselected" = recommendation?.resolution === "sampling_passed" ? "passed" : recommendation?.resolution === "sampling_failed" ? "failed" : selectedSamplingFences.has(samplingFenceKey(member)) ? "pending" : "unselected";
     const card = cardsById.get(member.knowledgeCardId);
     return { member, policy, outcome, category: card ? `current_${card.type}` : "missing_category" };
   });
@@ -351,7 +382,7 @@ async function buildPolicySignals({
       }).length,
       escalatedCohorts: policies.filter((policy) => policy.escalatedAt).length,
       suppressedCohorts: policies.filter((policy) => policy.suppressedAt).length,
-      missingSignal: boundedMembers.length === 0 || memberOutcomes.every((member) => member.outcome !== "passed" && member.outcome !== "failed") || memberOutcomes.some((member) => member.outcome === "pending") || policyRows.length > policyDiagnosticLimit || members.length > cohortMemberReadLimit || recommendations.length > cohortRecommendationReadLimit || cards.length > cohortCardReadLimit,
+      missingSignal: boundedMembers.length === 0 || memberOutcomes.every((member) => member.outcome !== "passed" && member.outcome !== "failed") || memberOutcomes.some((member) => member.outcome === "pending") || policyRows.length > policyDiagnosticLimit || membersByPolicy.some(({ members: policyMembers }) => policyMembers.length > cohortMemberReadLimit) || samplingRecommendationsByPolicy.some(({ resolved, selected }) => resolved.length > cohortMemberReadLimit || selected.length > cohortMemberReadLimit) || verificationRecommendations.length > cohortRecommendationReadLimit || cards.length > cohortCardReadLimit,
       members: samplingMembers,
     },
     cohorts,

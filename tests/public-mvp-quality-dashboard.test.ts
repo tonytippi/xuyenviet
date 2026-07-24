@@ -441,4 +441,49 @@ describe("public MVP quality dashboard", () => {
       { knowledgeCardId: "pending", samplingOutcome: "pending", category: "current_warning" },
     ]);
   });
+
+  test("reserves bounded diagnostics for actionable cohorts and excludes verification recommendations from sampling outcomes", async () => {
+    await createUser("admin", ["admin"]);
+    await createUser("author");
+    await mockSession("admin", ["admin"]);
+    const activeCards = Array.from({ length: 51 }, (_, index) => ({
+      id: `active-${String(index).padStart(2, "0")}`,
+      status: "approved" as const,
+      publicationState: "active" as const,
+      knowledgeState: "community_observation" as const,
+      reviewState: "reviewed" as const,
+      verificationState: "not_required" as const,
+      type: "place" as const,
+      title: `Active ${index}`,
+      summary: "Safe summary",
+      confidence: "community" as const,
+      needsReview: false,
+      aiPromptVersion: "test",
+      createdByUserId: "author",
+    }));
+    await testDb.insert(knowledgeCards).values([
+      ...activeCards,
+      { id: "actionable", status: "approved", publicationState: "suppressed", knowledgeState: "uncertain", reviewState: "reviewed", verificationState: "required", type: "warning", title: "Actionable", summary: "Safe summary", confidence: "community", needsReview: true, aiPromptVersion: "test", createdByUserId: "author" },
+    ]);
+    await testDb.insert(knowledgeSamplingPolicies).values([
+      { id: "a-active", cohortKey: "active:2026-07-26", windowStartsAt: new Date("2026-07-26T00:00:00.000Z"), windowEndsAt: new Date("2026-08-23T00:00:00.000Z"), samplingPercent: 15 },
+      { id: "z-suppressed", cohortKey: "suppressed:2026-07-26", windowStartsAt: new Date("2026-07-26T00:00:00.000Z"), windowEndsAt: new Date("2026-08-23T00:00:00.000Z"), samplingPercent: 15, escalatedAt: new Date(), suppressedAt: new Date() },
+    ]);
+    await testDb.insert(knowledgeSamplingCohortMembers).values([
+      ...activeCards.map((card) => ({ policyId: "a-active", knowledgeCardId: card.id, contentVersion: 1, evidenceSetRevision: 1 })),
+      { policyId: "z-suppressed", knowledgeCardId: "actionable", contentVersion: 1, evidenceSetRevision: 1 },
+    ]);
+    await testDb.insert(knowledgeRecommendations).values({ knowledgeCardId: "actionable", contentVersion: 1, evidenceSetRevision: 1, status: "open", reason: "verification", priority: 50, policyId: "z-suppressed" });
+    const { getPublicMvpQualityDashboard } = await import("@/features/feedback/quality-dashboard");
+
+    const dashboard = await getPublicMvpQualityDashboard({ db: testDb, range: "all" });
+
+    expect(dashboard.success).toBe(true);
+    if (!dashboard.success) return;
+    expect(dashboard.policySignals.cohorts).toMatchObject([
+      { cohortKey: "suppressed:2026-07-26", state: "suppressed", recommendedSafeAction: "suppress_or_escalate" },
+      { cohortKey: "active:2026-07-26", state: "active", recommendedSafeAction: "stricter_sampling" },
+    ]);
+    expect(dashboard.policySignals.sampling.members).toContainEqual(expect.objectContaining({ knowledgeCardId: "actionable", samplingOutcome: "unselected", recommendedSafeAction: "suppress_or_escalate" }));
+  });
 });

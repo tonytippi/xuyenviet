@@ -393,6 +393,13 @@
       "when": 1784904000008,
       "tag": "0055_ai_first_evaluation_scenarios",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1784874714677,
+      "tag": "0056_chief_vampiro",
+      "breakpoints": true
     }
   ]
 }

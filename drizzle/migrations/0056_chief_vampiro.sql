@@ -1,0 +1,1 @@
+CREATE INDEX "knowledge_recommendations_policy_sampling_diagnostics_idx" ON "knowledge_recommendations" USING btree ("policy_id","reason","knowledge_card_id","content_version","evidence_set_revision","resolved_at" DESC NULLS LAST,"updated_at" DESC NULLS LAST,"id" DESC NULLS LAST);--> statement-breakpoint

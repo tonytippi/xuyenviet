@@ -1102,6 +1102,7 @@ export const knowledgeRecommendations = pgTable(
     uniqueIndex("knowledge_recommendations_open_version_reason_idx").on(recommendation.knowledgeCardId, recommendation.contentVersion, recommendation.evidenceSetRevision, recommendation.reason).where(sql`${recommendation.status} in ('open', 'in_review')`),
     index("knowledge_recommendations_open_queue_idx").on(recommendation.status, recommendation.priority, recommendation.createdAt).where(sql`${recommendation.status} in ('open', 'in_review')`),
     index("knowledge_recommendations_card_version_idx").on(recommendation.knowledgeCardId, recommendation.contentVersion, recommendation.evidenceSetRevision),
+    index("knowledge_recommendations_policy_sampling_diagnostics_idx").on(recommendation.policyId, recommendation.reason, recommendation.knowledgeCardId, recommendation.contentVersion, recommendation.evidenceSetRevision, recommendation.resolvedAt.desc(), recommendation.updatedAt.desc(), recommendation.id.desc()),
     check("knowledge_recommendations_versions_check", sql`${recommendation.contentVersion} >= 1 and ${recommendation.evidenceSetRevision} >= 1`),
     check("knowledge_recommendations_status_check", sql`${recommendation.status} in ('open', 'in_review', 'resolved', 'superseded')`),
     check("knowledge_recommendations_reason_check", sql`${recommendation.reason} in ('risk', 'weak_evidence', 'freshness', 'conflict', 'duplicate_risk', 'missing_context', 'verification', 'relation', 'sampling')`),
