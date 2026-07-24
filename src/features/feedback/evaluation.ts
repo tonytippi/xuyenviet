@@ -100,8 +100,8 @@ export const publicMvpEvaluationScenarios: readonly PublicMvpEvaluationScenarioD
   { id: "community_observation", version: "v1", prompt: prompt("magic_moment_family_trip"), expected: { targetCandidateExcluded: false, sourceOrEvidenceOutcome: "eligible", fallbackRequired: false }, fixture: { selectedKnowledgeStates: ["community_observation"], excludedReasonCodes: [], webFallbackWarnings: [] } },
   { id: "independent_community_pattern", version: "v1", prompt: prompt("route_logistics"), expected: { targetCandidateExcluded: false, sourceOrEvidenceOutcome: "eligible", fallbackRequired: false }, fixture: { selectedKnowledgeStates: ["community_pattern"], excludedReasonCodes: [], webFallbackWarnings: [] } },
   { id: "conditional_high_risk_claim", version: "v1", prompt: prompt("freshness_sensitive"), expected: { targetCandidateExcluded: false, sourceOrEvidenceOutcome: "eligible", fallbackRequired: true, conditionalHighRisk: { conditions: ["Cần xác minh trước khi khởi hành"] } }, fixture: { selectedKnowledgeStates: ["conditional"], excludedReasonCodes: [], webFallbackWarnings: [] } },
-  { id: "conflict_exclusion", version: "v1", prompt: prompt("freshness_sensitive"), expected: { targetCandidateExcluded: true, sourceOrEvidenceOutcome: "excluded_conflict", fallbackRequired: true }, fixture: { selectedKnowledgeStates: [], excludedReasonCodes: ["unsupported_knowledge_state"], webFallbackWarnings: ["web_search_load_failed", "web_search_low_quality"] } },
-  { id: "source_withdrawal", version: "v1", prompt: prompt("service_activity"), expected: { targetCandidateExcluded: true, sourceOrEvidenceOutcome: "withdrawn_or_ineligible", fallbackRequired: true }, fixture: { selectedKnowledgeStates: [], excludedReasonCodes: ["missing_traveler_safe_evidence"], webFallbackWarnings: ["web_search_load_failed", "web_search_low_quality"] } },
+  { id: "conflict_exclusion", version: "v1", prompt: prompt("freshness_sensitive"), expected: { targetCandidateExcluded: true, sourceOrEvidenceOutcome: "excluded_conflict", fallbackRequired: false }, fixture: { selectedKnowledgeStates: [], excludedReasonCodes: ["unsupported_knowledge_state"], webFallbackWarnings: [] } },
+  { id: "source_withdrawal", version: "v1", prompt: prompt("service_activity"), expected: { targetCandidateExcluded: true, sourceOrEvidenceOutcome: "withdrawn_or_ineligible", fallbackRequired: false }, fixture: { selectedKnowledgeStates: [], excludedReasonCodes: ["missing_traveler_safe_evidence"], webFallbackWarnings: [] } },
   { id: "web_fallback_unavailable", version: "v1", prompt: prompt("sparse_data"), expected: { targetCandidateExcluded: false, sourceOrEvidenceOutcome: "no_eligible_knowledge", fallbackRequired: true }, fixture: { selectedKnowledgeStates: [], excludedReasonCodes: [], webFallbackWarnings: ["web_search_load_failed", "web_search_low_quality"] } },
 ];
 
@@ -279,7 +279,7 @@ async function runSinglePrompt({
     const decision = decisionSnapshot(generatedAnswer.answer);
     const policySnapshot = buildPolicySnapshot("evaluation", generatedAnswer.answer, scenario);
     if (!matchesScenarioFixture(generatedAnswer.answer, decision, scenario.fixture) || !matchesScenarioContract(policySnapshot, generatedAnswer.answer.answerText, scenario.expected)) {
-      return insertFailedResult({ db, runId, promptSet, scenario, model, safeErrorCode: "evaluator_failed", usageEventId: generatedAnswer.answer.usageEventId });
+      return insertFailedResult({ db, runId, promptSet, scenario, model, safeErrorCode: "evaluator_failed", usageEventId: generatedAnswer.answer.usageEventId, policySnapshot });
     }
 
     const output = await scorer({ db, prompt, scenario, model, actorUserId, answer: generatedAnswer.answer });
@@ -347,6 +347,7 @@ async function insertFailedResult({
   model,
   safeErrorCode,
   usageEventId,
+  policySnapshot,
 }: {
   db: ReturnType<typeof getDb>;
   runId: string;
@@ -355,24 +356,33 @@ async function insertFailedResult({
   model: SelectedAiGatewayModel;
   safeErrorCode: "evaluator_failed" | "invalid_score_payload";
   usageEventId?: string | null;
+  policySnapshot?: ReturnType<typeof buildPolicySnapshot>;
 }) {
   const prompt = scenario.prompt;
-  const [result] = await db
-    .insert(publicMvpEvaluationResults)
-    .values({
-      runId,
-      promptSetId: promptSet.id,
-      promptSetVersion: promptSet.version,
-      promptType: prompt.type,
-      promptVersion: prompt.version,
-      scenarioId: scenario.id,
-      scenarioVersion: scenario.version,
-      modelVersion: model.gatewayModelName,
-      status: "failed",
-      safeErrorCode,
-      usageEventId: usageEventId ?? null,
-    })
-    .returning();
+  const result = await db.transaction(async (tx) => {
+    const [createdResult] = await tx
+      .insert(publicMvpEvaluationResults)
+      .values({
+        runId,
+        promptSetId: promptSet.id,
+        promptSetVersion: promptSet.version,
+        promptType: prompt.type,
+        promptVersion: prompt.version,
+        scenarioId: scenario.id,
+        scenarioVersion: scenario.version,
+        modelVersion: model.gatewayModelName,
+        status: "failed",
+        safeErrorCode,
+        usageEventId: usageEventId ?? null,
+      })
+      .returning();
+
+    if (policySnapshot) {
+      await tx.insert(publicMvpEvaluationResultPolicySnapshots).values({ ...policySnapshot, resultId: createdResult.id });
+    }
+
+    return createdResult;
+  });
 
   return summarizeResult(result.id, scenario, "failed", safeErrorCode, {}, { unsupportedClaim: false, missingUncertainty: false, noBetterThanGeneric: false, unsupportedCommunityWording: false, requiredCaveatOmitted: false, conflictedKnowledgeExcluded: false, staleWithdrawnSourceExposure: false, rawEvidenceLeakage: false, fallbackVerificationGuidanceMet: false });
 }
@@ -524,11 +534,10 @@ function summarizeResult(
 
 function deterministicPolicyFlags(answer: EvaluationAiAskAnswer) {
   const answerText = answer.answerText.toLowerCase();
-  const serializedProvenance = JSON.stringify(answer.provenance ?? []);
   const selectedKnowledge = (answer.provenance ?? []).filter((row) => row.sourceCategory === "knowledge" && row.usedInPrompt);
   const retrievalSnapshot = selectedKnowledge.map((row) => row.sourceSnapshot);
   const hasConflict = retrievalSnapshot.some((snapshot) => snapshot.knowledgeState === "conflicted");
-  const hasUnsafeData = /raw_source_material|providerpayload|operatoronly|copied_post|raw evidence/i.test(serializedProvenance);
+  const rawEvidenceLeakage = /raw_source_material|providerpayload|operatoronly|copied_post|raw evidence/i.test(answerText);
   const decision = decisionSnapshot(answer);
   const fallbackRequired = decision.webSearchTriggered && (
     decision.warnings.includes("web_search_load_failed")
@@ -538,8 +547,8 @@ function deterministicPolicyFlags(answer: EvaluationAiAskAnswer) {
   const guidance = /không thể xác minh|cần kiểm tra|hãy kiểm tra|xác nhận/i.test(answerText);
   return {
     conflictedKnowledgeExcluded: !hasConflict && (decision.excludedPolicyCounts.conflict === 0 || decision.excludedReasonCodes.length > 0),
-    staleWithdrawnSourceExposure: /withdrawn|removed|raw_source_material/i.test(serializedProvenance),
-    rawEvidenceLeakage: hasUnsafeData,
+    staleWithdrawnSourceExposure: /withdrawn|removed|stale source/i.test(answerText),
+    rawEvidenceLeakage,
     fallbackVerificationGuidanceMet: !fallbackRequired || guidance,
   };
 }
@@ -607,8 +616,7 @@ function matchesScenarioContract(
 ) {
   return snapshot.targetCandidateExcluded === expected.targetCandidateExcluded
     && snapshot.sourceOrEvidenceOutcome === expected.sourceOrEvidenceOutcome
-    && snapshot.webFallback.triggered === expected.fallbackRequired
-    && (!expected.fallbackRequired || snapshot.finalizationOutcome === "verification_guidance_present")
+    && (!expected.fallbackRequired || (snapshot.webFallback.triggered && snapshot.finalizationOutcome === "verification_guidance_present"))
     && (!expected.conditionalHighRisk || matchesConditionalHighRiskContract(snapshot, finalAnswer, expected.conditionalHighRisk));
 }
 

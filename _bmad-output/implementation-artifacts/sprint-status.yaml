@@ -73,7 +73,7 @@ development_status:
   epic-4-retrospective: optional
 
   epic-5: in-progress
-  # Synchronized 2026-07-24 after bounded final recovery verified fixture isolation and conditional high-risk output contracts.
+  # Synchronized 2026-07-24 after final Story 5.1 review-finding repairs and serial DB-backed verification.
   5-1-evaluate-ai-first-community-knowledge-safety: review
   5-2-surface-ai-first-policy-quality-signals: backlog
   5-3-close-the-active-evidence-grounded-card-readiness-gate: backlog

@@ -95,7 +95,7 @@ function validScores(score = 8) {
   } satisfies Record<PublicMvpEvaluationScoreDimension, number>;
 }
 
-async function createPersistedEvaluationAnswer(userId: string, promptType: string, scenarioId: string, options: { conditionalPolicy?: "caveat_only" | "contextual_use"; conditionalVerification?: "required" | "not_required"; conditionalConditions?: string[]; answerText?: string } = {}) {
+async function createPersistedEvaluationAnswer(userId: string, promptType: string, scenarioId: string, options: { conditionalPolicy?: "caveat_only" | "contextual_use"; conditionalVerification?: "required" | "not_required"; conditionalConditions?: string[]; answerText?: string; fallbackWarnings?: string[] } = {}) {
   const conflict = scenarioId === "conflict_exclusion";
   const withdrawn = scenarioId === "source_withdrawal";
   const fallback = conflict || withdrawn || scenarioId === "web_fallback_unavailable" || scenarioId === "conditional_high_risk_claim";
@@ -122,7 +122,7 @@ async function createPersistedEvaluationAnswer(userId: string, promptType: strin
       generalReasoningUsed: true,
       webSearchTriggered: fallback,
       webSearchTriggerReasons: fallback ? [conflict ? "excluded_conflict_candidate" : "no_active_knowledge"] : [],
-      warnings: fallback ? ["web_search_low_quality"] : [],
+      warnings: fallback ? (options.fallbackWarnings ?? ["web_search_low_quality"]) : [],
       knowledgePolicySnapshot: {
         excludedPolicyCounts: { conflict: conflict ? 1 : 0, verificationRequired: 0, other: withdrawn ? 1 : 0 },
         excludedReasonCodes: conflict ? ["unsupported_knowledge_state"] : withdrawn ? ["missing_traveler_safe_evidence"] : [],
@@ -160,7 +160,7 @@ async function createPersistedEvaluationAnswer(userId: string, promptType: strin
       },
       webSearchTriggered: fallback,
       webSearchTriggerReasons: fallback ? [conflict ? "excluded_conflict_candidate" : "no_active_knowledge"] : [],
-      warnings: fallback ? ["web_search_low_quality"] : [],
+      warnings: fallback ? (options.fallbackWarnings ?? ["web_search_low_quality"]) : [],
     },
     usageEventId: null,
     modelVersion: "cx/ai-ask",
@@ -435,8 +435,52 @@ describe("public MVP answer evaluation", () => {
       scorer: async () => ({ answerText: "Câu trả lời an toàn", scores: validScores(), flags: { unsupportedClaim: false, missingUncertainty: false, noBetterThanGeneric: false, unsupportedCommunityWording: false, requiredCaveatOmitted: false } }),
     });
     const [conflictResult] = await testDb.select().from(publicMvpEvaluationResults).where(eq(publicMvpEvaluationResults.scenarioId, "conflict_exclusion"));
+    const [conflictSnapshot] = await testDb.select().from(publicMvpEvaluationResultPolicySnapshots).where(eq(publicMvpEvaluationResultPolicySnapshots.resultId, conflictResult.id));
 
     expect(conflictResult).toMatchObject({ status: "failed", safeErrorCode: "evaluator_failed" });
+    expect(conflictSnapshot).toMatchObject({
+      scenarioId: "conflict_exclusion",
+      excludedCandidateCounts: { conflict: 0, verificationRequired: 0, other: 0 },
+      sourceOrEvidenceOutcome: "no_eligible_knowledge",
+    });
+  });
+
+  test("does not fail conflict or withdrawal scenarios when live web fallback succeeds", async () => {
+    await createUser("admin", ["admin"]);
+    await createEvaluationModel();
+    await mockSession("admin", ["admin"]);
+    const { runPublicMvpAnswerEvaluationPromptSet } = await import("@/features/feedback/evaluation");
+
+    const result = await runPublicMvpAnswerEvaluationPromptSet({
+      db: testDb,
+      answerGenerator: async ({ prompt, scenario }) => ({
+        ok: true,
+        answer: await createPersistedEvaluationAnswer("admin", prompt.type, scenario.id, (scenario.id === "conflict_exclusion" || scenario.id === "source_withdrawal") ? { fallbackWarnings: [] } : {}),
+      }),
+      scorer: async () => ({ answerText: "Câu trả lời an toàn", scores: validScores(), flags: { unsupportedClaim: false, missingUncertainty: false, noBetterThanGeneric: false, unsupportedCommunityWording: false, requiredCaveatOmitted: false } }),
+    });
+
+    expect(result.success ? result.run.status : null).toBe("completed");
+    expect(result.success ? result.run.results.filter((row) => row.scenarioId === "conflict_exclusion" || row.scenarioId === "source_withdrawal").every((row) => row.status === "scored") : false).toBe(true);
+  });
+
+  test("flags withdrawn-source and raw-evidence markers exposed by the final persisted answer", async () => {
+    await createUser("admin", ["admin"]);
+    await createEvaluationModel();
+    await mockSession("admin", ["admin"]);
+    const { runPublicMvpAnswerEvaluationPromptSet } = await import("@/features/feedback/evaluation");
+
+    await runPublicMvpAnswerEvaluationPromptSet({
+      db: testDb,
+      answerGenerator: async ({ prompt, scenario }) => ({
+        ok: true,
+        answer: await createPersistedEvaluationAnswer("admin", prompt.type, scenario.id, scenario.id === "source_withdrawal" ? { answerText: "Không thể xác minh, hãy kiểm tra lại. withdrawn source raw evidence" } : {}),
+      }),
+      scorer: async () => ({ answerText: "Câu trả lời an toàn", scores: validScores(), flags: { unsupportedClaim: false, missingUncertainty: false, noBetterThanGeneric: false, unsupportedCommunityWording: false, requiredCaveatOmitted: false } }),
+    });
+    const [withdrawalResult] = await testDb.select().from(publicMvpEvaluationResults).where(eq(publicMvpEvaluationResults.scenarioId, "source_withdrawal"));
+
+    expect(withdrawalResult).toMatchObject({ staleWithdrawnSourceExposureFlag: true, rawEvidenceLeakageFlag: true });
   });
 
   test.each([
