@@ -13,8 +13,12 @@ import {
   publicMvpEvaluationRuns,
   conversations,
   knowledgeCardSearchDocuments,
+  knowledgeCardEvidence,
+  knowledgeCardSources,
   knowledgeCards,
   messages,
+  sourceCaptureVersions,
+  sources,
   userRoles,
   users,
   type PublicMvpEvaluationScoreDimension,
@@ -321,33 +325,45 @@ describe("public MVP answer evaluation", () => {
     expect(rows.find((row) => row.promptType === "service_activity")?.unsupportedClaimFlag).toBe(true);
     expect(rows.find((row) => row.promptType === "freshness_sensitive")?.missingUncertaintyFlag).toBe(true);
     expect(rows.find((row) => row.promptType === "sparse_data")?.noBetterThanGenericFlag).toBe(true);
-    const fixtureCards = await testDb.select().from(knowledgeCards).where(eq(knowledgeCards.aiPromptVersion, "public_mvp_evaluation_fixture_v1"));
-    expect(fixtureCards).toHaveLength(5);
-    expect(fixtureCards.every((card) => card.publicationState === "suppressed")).toBe(true);
+    await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.aiPromptVersion, "public_mvp_evaluation_fixture_v1"))).resolves.toEqual([]);
+    await expect(testDb.select().from(knowledgeCardSources)).resolves.toEqual([]);
+    await expect(testDb.select().from(knowledgeCardEvidence)).resolves.toEqual([]);
+    await expect(testDb.select().from(sourceCaptureVersions)).resolves.toEqual([]);
+    await expect(testDb.select().from(sources)).resolves.toEqual([]);
     expect(JSON.stringify(rows)).not.toMatch(/rawProviderPayload|raw_source_material|providerPayload|operatorOnlyNotes/);
   });
 
-  test("keeps synthetic fixtures suppressed and absent from ordinary traveler retrieval throughout evaluation", async () => {
+  test("deletes each fixture graph after persistence while retaining safe result and provenance snapshots", async () => {
     await createUser("admin", ["admin"]);
     await createEvaluationModel();
     await mockSession("admin", ["admin"]);
     const { runPublicMvpAnswerEvaluationPromptSet } = await import("@/features/feedback/evaluation");
     const { searchApprovedKnowledge } = await import("@/features/knowledge/search");
 
-    await runPublicMvpAnswerEvaluationPromptSet({
+    const dependencies = {
       db: testDb,
-      answerGenerator: async ({ prompt, scenario }) => {
+      answerGenerator: async ({ prompt, scenario }: { prompt: { type: string; prompt: string }; scenario: { id: string } }) => {
         const travelerResults = await searchApprovedKnowledge(prompt.prompt);
         expect(travelerResults.filter((result) => result.id.startsWith("evaluation-"))).toEqual([]);
         await expect(testDb.select().from(knowledgeCardSearchDocuments)).resolves.toEqual([]);
-        return { ok: true, answer: await createPersistedEvaluationAnswer("admin", prompt.type, scenario.id) };
+        return { ok: true as const, answer: await createPersistedEvaluationAnswer("admin", prompt.type, scenario.id) };
       },
       scorer: async () => ({ answerText: "Câu trả lời an toàn", scores: validScores(), flags: { unsupportedClaim: false, missingUncertainty: false, noBetterThanGeneric: false, unsupportedCommunityWording: false, requiredCaveatOmitted: false } }),
-    });
+    };
+    const firstRun = await runPublicMvpAnswerEvaluationPromptSet(dependencies);
+    const secondRun = await runPublicMvpAnswerEvaluationPromptSet(dependencies);
 
-    const fixtures = await testDb.select().from(knowledgeCards).where(eq(knowledgeCards.aiPromptVersion, "public_mvp_evaluation_fixture_v1"));
-    expect(fixtures).toHaveLength(5);
-    expect(fixtures.every((card) => card.publicationState === "suppressed")).toBe(true);
+    expect(firstRun.success ? firstRun.run.status : null).toBe("completed");
+    expect(secondRun.success ? secondRun.run.status : null).toBe("completed");
+    await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.aiPromptVersion, "public_mvp_evaluation_fixture_v1"))).resolves.toEqual([]);
+    await expect(testDb.select().from(knowledgeCardSources)).resolves.toEqual([]);
+    await expect(testDb.select().from(knowledgeCardEvidence)).resolves.toEqual([]);
+    await expect(testDb.select().from(sourceCaptureVersions)).resolves.toEqual([]);
+    await expect(testDb.select().from(sources)).resolves.toEqual([]);
+    await expect(testDb.select().from(publicMvpEvaluationResults)).resolves.toHaveLength(12);
+    await expect(testDb.select().from(publicMvpEvaluationResultPolicySnapshots)).resolves.toHaveLength(12);
+    await expect(testDb.select().from(assistantRetrievalDecisions)).resolves.toHaveLength(12);
+    await expect(testDb.select().from(assistantResponseProvenance)).resolves.toHaveLength(12);
     await expect(searchApprovedKnowledge("Dữ liệu đánh giá")).resolves.toEqual([]);
   });
 

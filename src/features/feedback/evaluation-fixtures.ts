@@ -1,6 +1,6 @@
 import "server-only";
 
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
 import { knowledgeCardEvidence, knowledgeCardSources, knowledgeCards, sourceCaptureVersions, sources } from "@/db/schema";
@@ -90,6 +90,20 @@ export async function prepareEvaluationScenarioFixture(db: FixtureDb, actorUserI
 export async function cleanupEvaluationScenarioFixture(db: FixtureDb, cardIds: string[]) {
   if (cardIds.length === 0) return;
 
-  // Fixture setup keeps cards suppressed; cleanup makes that invariant explicit after failures too.
-  await db.update(knowledgeCards).set({ publicationState: "suppressed", updatedAt: new Date() }).where(eq(knowledgeCards.id, cardIds[0]!));
+  await db.transaction(async (tx) => {
+    const fixtureSources = await tx
+      .select({ sourceId: knowledgeCardSources.sourceId })
+      .from(knowledgeCardSources)
+      .where(inArray(knowledgeCardSources.knowledgeCardId, cardIds));
+    const sourceIds = fixtureSources.map(({ sourceId }) => sourceId);
+
+    // Result policy snapshots are self-contained; no synthetic knowledge graph is retained.
+    await tx.delete(knowledgeCards).where(inArray(knowledgeCards.id, cardIds));
+
+    if (sourceIds.length === 0) return;
+
+    await tx.update(sources).set({ currentCaptureVersionId: null }).where(inArray(sources.id, sourceIds));
+    await tx.delete(sourceCaptureVersions).where(inArray(sourceCaptureVersions.sourceId, sourceIds));
+    await tx.delete(sources).where(inArray(sources.id, sourceIds));
+  });
 }
