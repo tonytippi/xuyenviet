@@ -4,7 +4,7 @@ baseline_commit: d28ce2c
 
 # Story 6.2: Run Public MVP AI-First Readiness Review
 
-Status: review
+Status: done
 
 ## Story
 
