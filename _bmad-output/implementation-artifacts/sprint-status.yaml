@@ -81,7 +81,7 @@ development_status:
   5-3-close-the-active-evidence-grounded-card-readiness-gate: done
   epic-5-retrospective: optional
 
-  epic-6: in-progress
+  epic-6: done
   # Synchronized 2026-07-24 after status-only verification of supplied final repair commit 265d5d4635cb04d2b28a0a8cb3dc38addf8d7003 and a clean pre-update worktree.
   6-1-validate-knowledge-pipeline-operations-before-public-evaluation: done
   # Synchronized 2026-07-24 after final Story 6.2 review findings: PR-07 documented test sequencing is complete; OP-01 through OP-09 remain blocked verbatim from Story 6.1; report remains no-go.
