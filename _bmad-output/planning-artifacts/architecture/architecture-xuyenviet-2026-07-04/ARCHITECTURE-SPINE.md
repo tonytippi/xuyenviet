@@ -2,7 +2,7 @@
 title: XuyenViet AI Travel Information MVP Architecture Spine
 status: final
 created: 2026-07-04
-updated: 2026-07-21
+updated: 2026-07-24
 altitude: project MVP
 source_prd: ../../prds/prd-xuyenviet-2026-07-04/prd.md
 source_ux: ../../ux-designs/ux-xuyenviet-2026-07-05/EXPERIENCE.md
@@ -33,6 +33,7 @@ flowchart LR
   Orchestrator --> AIGateway[OpenAI-Compatible AI Gateway Adapter]
   Knowledge --> AIGateway
   ChatContext --> DB[(PostgreSQL + pgvector)]
+  TripPlan[Trip Planning Aggregate] --> DB
   Retrieval --> DB
   Knowledge --> DB
   Capture[Operator Facebook Capture Tool] --> Knowledge
@@ -230,7 +231,7 @@ Rule: Direct OpenAI API calls are not used. AI calls go through the OpenAI-compa
 
 Rule: YouTube video knowledge analysis, when enabled, runs only in the server-side `youtube:capture` operations script and calls a configured Gemini video-capable model using `GEMINI_API_KEY`. The key is not an AI Gateway credential and the script is its only allowed consumer; it is never exposed to browser code, request-serving routes, audit summaries, or logs. The script accepts an operator-submitted canonical individual-video URL and a versioned prompt, then persists only bounded operator-only evidence, safe metadata, usage, and audit outcomes. It must not request or persist a full transcript, media, YouTube credentials, cookies, HTML, hidden provider payloads, or raw model prompt/response logs.
 
-Rule: Gemini video analysis is evidence generation, not source verification. Every resulting knowledge card remains unverified until the existing human review and approval lifecycle completes. The adapter must fail closed for inaccessible, unsupported, restricted, blocked, or over-limit videos and must never fabricate a transcript or a knowledge card. Playwright/direct browser scraping and undocumented YouTube APIs are excluded from this integration.
+Rule: Gemini video analysis is evidence generation, not source verification. Every resulting knowledge card follows AD-7's canonical AI-first publication, review, verification, conflict, and retrieval policy; community/unverified labeling and high-risk verification gates remain intact. The adapter must fail closed for inaccessible, unsupported, restricted, blocked, or over-limit videos and must never fabricate a transcript or a knowledge card. Playwright/direct browser scraping and undocumented YouTube APIs are excluded from this integration.
 
 ### AD-11: Answer Provenance Is Persisted, Not UI-Derived
 
@@ -470,6 +471,38 @@ Rule: Quality sampling creates card-version-bound review recommendations for 15%
 
 Rule: Retention commands delete Facebook source/capture artifacts and dependent operational artifacts after 180 days when they support no active or reviewable card. Inactive evidence and safe failed-stage artifacts expire on the same 180-day schedule unless a shorter operational policy applies; deletion preserves only the concise state/action audit required by AD-28.
 
+### AD-29: Trip Planning Is A Chat/Trips-Owned Structured Aggregate
+
+Binds: Trip Project anchors, legs, activities, constraints, states, primary conversation, Trip Home read model, proposals, and change history.
+
+Prevents: confirmed itinerary state being left only in chat transcripts, duplicated as mutable `chat_context`, or introduced as a cross-feature Places/Maps aggregate before those capabilities are approved.
+
+Rule: Chat/Trips owns one single-owner Trip Project aggregate. Its structured planning rows are owner-scoped and reference the owning `trip_project`; non-owning modules receive only exported read models or invoke Chat/Trips commands.
+
+Rule: The aggregate distinguishes stable plan state from conversational context. Anchors, dated legs, activities, manually confirmed accommodations, alternatives, and item state are structured Trip Planning records. `chat_context` remains extracted conversational/trip facts and never becomes an alternative itinerary writer or source of truth.
+
+Rule: A plan item has exactly one kind: `anchor | leg | activity`. An anchor may represent origin, destination, region, required stop, or manually supplied accommodation. A leg or activity has exactly one type: `transport | visit | food | rest | accommodation`. Every item has exactly one state: `idea | planned | confirmed | backup`; an `idea` item is valid open planning state, not an error.
+
+Rule: A mutable plan item carries a monotonic version. Commands that reorder, update, remove, or change a plan item state lock the owning Trip Project and validate the current item version before commit. The first tranche stores no dynamic weather, route, availability, provider, booking, exact-location, budget, checklist, vault, or collaboration state in this aggregate.
+
+Rule: The Trip Home read model is derived from current structured plan state and pending proposal state. Its deterministic priority is: actionable unresolved proposal or confirmed-item gap, then next planned/confirmed leg, then preparation focus. It never treats an open `idea` item as a failure by itself and does not infer live conditions from unavailable providers.
+
+### AD-30: Primary Conversation And Change Proposals Are Explicit Commands
+
+Binds: primary-conversation migration, AI-drafted persistent changes, user confirmation, expiry, conflict handling, and plan history.
+
+Prevents: an AI response directly mutating a Trip Project, concurrent/manual changes being overwritten by stale suggestions, or legacy conversation history disappearing during the one-primary-conversation transition.
+
+Rule: `trip_projects.primary_conversation_id` is nullable only during a forward, idempotent migration. The migration is owner-scoped, selects or creates exactly one linked primary conversation per project, and preserves all existing linked conversations. It never reassigns conversations across projects/users or converts transcript content into structured plan records.
+
+Rule: A Trip Change Proposal is an immutable, typed draft owned by one Trip Project and generated by the AI Orchestration path or an owner command. It records proposal status `pending | applied | dismissed | expired`, a bounded rationale, explicitly identified operations, the expected version of every affected item, and an optional expiry. It is not a plan item and does not change retrieval context merely by existing.
+
+Rule: Only `applyApprovedTripChange(...)` in Chat/Trips may apply a proposal. In one transaction it authenticates the owner, locks the Trip Project, verifies proposal ownership/status/expiry and all expected item versions, applies all operations or none, records actor-correct audit/change-history rows, marks the proposal `applied`, and advances affected item/project versions. A conflict, expired proposal, missing item, or unauthorized request applies nothing and returns a safe refresh-required result.
+
+Rule: Dismissing or expiring a proposal never mutates plan state. Change history records only safe operation summaries, actor, timestamp, proposal ID, and affected structured-item references; it does not persist raw model prompts/responses or turn free-form answer text into authoritative state.
+
+Rule: AI Orchestration may read the Trip Planning aggregate and emit a schema-validated proposal draft, but it may not call direct table writes or bypass the Chat/Trips proposal command. Provider output, answer annotations, and detail-panel actions remain untrusted inputs until the owner-confirmed command validates them.
+
 ## Shared Data Contracts
 
 Frontend shell state contract:
@@ -515,6 +548,7 @@ Core persisted entities:
 - `users`, `accounts`, `sessions`, `roles`
 - `referral_codes`, `referral_attributions`
 - `trip_projects`, `conversations`, `messages`, `chat_context`, `assistant_response_provenance`
+- `trip_plan_items`, `trip_change_proposals`, `trip_plan_change_history`
 - `context_embeddings`
 - `sources`, `raw_source_material`, `knowledge_ingestion_jobs`, `knowledge_cards`, `knowledge_card_evidence`, `knowledge_card_relations`, `knowledge_review_recommendations`, `knowledge_card_search_documents`
 - `ai_gateway_models`, `web_search_results`, `ai_usage_events`, `feedback`, `eval_runs`, `audit_events`
@@ -548,6 +582,15 @@ Knowledge card types are fixed from the PRD unless changed through PRD update: p
 Multimodal input rule: User-submitted AI Ask images are owned by the conversation/chat session or selected trip project context that accepted them. Operator-submitted knowledge images are owned by source/raw-source records. New image-bearing tables must define deletion behavior before migration approval.
 
 Multimodal provider rule: Image inputs passed to the Gateway must be validated for allowed MIME type, size, ownership, and surface before provider calls. Raw provider payloads and image-derived notes must not be exposed outside their owning traveler/admin surface.
+
+Trip Planning minimum persisted contract:
+
+- `trip_projects`: owner ID, current aggregate version, nullable migration-only `primary_conversation_id`, and existing project metadata.
+- `trip_plan_items`: Trip Project ID, owner ID, parent item when an activity belongs to a leg, kind/type, `idea | planned | confirmed | backup` state, ordinal, bounded user-confirmed label/notes, optional planned date/time, monotonic version, and created/updated timestamps. It contains no provider snapshot, booking credential/reference, exact GPS history, or dynamic weather/route result.
+- `trip_change_proposals`: Trip Project ID, owner ID, creator class, `pending | applied | dismissed | expired` status, bounded rationale, typed operation list, expected item-version fence, optional expiry, and terminal timestamp. Proposal operations identify only the target item and permitted structured-field changes; they do not embed executable SQL, arbitrary routes, or provider/model payloads.
+- `trip_plan_change_history`: Trip Project ID, owner ID, proposal ID when applicable, actor, operation class, affected item references, safe before/after summary, and timestamp. It is audit/history, not a second mutable plan projection.
+
+Trip Planning deletion rule: deleting an owned Trip Project cascades or transactionally removes its plan items, proposals, and change history from normal use with the existing project conversation/context data. Any retained minimal audit metadata is non-content and cannot reconstitute deleted plan state. Deleting a primary conversation requires an owner-scoped replacement selection or an explicit project-level delete; it must not leave a live Trip Project pointing at a deleted conversation.
 
 ## Retrieval Contract
 

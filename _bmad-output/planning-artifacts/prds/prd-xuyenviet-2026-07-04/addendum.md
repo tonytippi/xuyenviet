@@ -21,6 +21,7 @@
 - Operator approval is a signal of review, not a mandatory retrieval gate. Active claims must preserve validated source evidence and use state-aware uncertainty wording.
 - Initial active-publication thresholds are relevance >= 0.75, extractability >= 0.70, evidence grounding >= 0.90, specificity >= 0.65, actionability >= 0.65, first-hand likelihood >= 0.55, and spam/commercial risk <= 0.25, subject to hard evidence/privacy/safety gates.
 - Initial quality monitoring samples 15% of auto-active claims for the first four weeks and 100% of `verify_first` claims.
+- Trip Planning Foundation is the next approved scope tranche: single-owner structured itinerary, trip constraints, one primary conversation, basic Trip Home, and user-confirmed change proposals with history.
 
 ## Provisional Assumptions For Architecture
 
@@ -34,6 +35,8 @@
 - Memory correction can be chat-based in MVP.
 - Memory deletion must support user-owned chat session and trip project deletion for MVP, with deletion propagation defined by architecture before implementation.
 - Conversation transcript retention must follow the final PRD and privacy notice; do not treat earlier debugging-retention assumptions as active requirements unless a later privacy decision reinstates them.
+- Architecture must define the Trip Project aggregate boundary, primary-conversation migration, owner-scoped plan/proposal commands, proposal expiry/conflict handling, audit history, and deletion propagation for all derived Trip Planning data.
+- Weather, location, Google Maps/Places/Routes, booking/OTA data, dynamic provider snapshots, budget, checklists, travel vault, collaboration, and notifications remain deferred from the Trip Planning Foundation tranche.
 
 ## Market Context Digest
 
@@ -52,3 +55,5 @@
 - Whether source URLs are always visible by default or hidden behind expandable details.
 - Detailed Facebook content reuse policy beyond provenance and non-official labeling.
 - Legal/content-reuse policy and UI behavior for traveler-visible short Facebook-derived quotes and links.
+- Minimum field completeness and deterministic rule set for selecting a Trip Home focus.
+- Proposal conflict behavior when an owner changes the same item after the proposal was created.

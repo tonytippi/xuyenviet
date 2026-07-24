@@ -2,7 +2,7 @@
 title: XuyenViet AI Travel Information MVP PRD
 status: final
 created: 2026-07-04
-updated: 2026-07-21
+updated: 2026-07-24
 ---
 
 # XuyenViet AI Travel Information MVP PRD
@@ -18,6 +18,7 @@ The MVP is not a complete travel marketplace, booking product, Google Maps repla
 - Help Vietnamese travelers get useful Vietnam road-trip answers in Vietnamese.
 - Reduce the time users spend searching across websites, Facebook posts, service listings, and generic search results.
 - Prove that AI Chat with memory and personalization is the right initial product surface.
+- Turn an approved trip direction into a user-controlled, structured road-trip plan rather than leaving important decisions only in chat history.
 - Build an AI-first knowledge collection workflow that turns raw travel information into evidence-grounded provisional knowledge, while routing only risky or uncertain claims to operators.
 - Make AI answers source-aware, confidence-aware, and explicit when information may be outdated or incomplete.
 
@@ -32,6 +33,7 @@ The MVP is not a complete travel marketplace, booking product, Google Maps repla
 - Public user submissions as a dependency for first release.
 - Complete nationwide coverage.
 - Polished standalone UIs for every information category.
+- Weather, current-location sharing, Google Maps/Places/Routes, booking, OTA enrichment, budget tracking, packing/checklists, travel vault, and collaboration in the Trip Planning Foundation tranche.
 
 ## 4. Target Users
 
@@ -55,6 +57,7 @@ Internal owner or future small operations team member who collects travel inform
 - Never fake certainty: collected web/Facebook information may be incomplete or wrong, so answers must expose uncertainty and recommend verification for changing details.
 - Practical over generic: useful local tips matter more than polished itinerary prose.
 - Family-aware by default when children are part of the trip.
+- Chat is the command surface; a Trip Project is the confirmed state surface. AI may suggest persistent changes but never applies them without user confirmation.
 
 ## 6. MVP Scope
 
@@ -74,6 +77,10 @@ Internal owner or future small operations team member who collects travel inform
 - AI Gateway model management for MVP model records, including gateway model name, supported capabilities, and input/output/cache pricing metadata used for usage cost estimation.
 - Basic data controls: users can delete a chat session or trip project, which removes the associated messages and trip context from normal use.
 - AI usage tracking for authenticated AI requests, so future credit-based pricing can be introduced without changing the AI orchestration flow.
+- Trip Planning Foundation: structured trip anchors, dated legs and activities, traveler constraints, and item states `idea`, `planned`, `confirmed`, or `backup`.
+- One primary conversation per Trip Project after a safe migration from existing linked conversations.
+- A basic Trip Home that presents the next planning focus and primary conversation without hiding prior chat history.
+- Structured, expiring Trip Change Proposals that a user can apply, dismiss, or leave pending; every applied change has actor and timestamp history.
 
 ### 6.2 Should Have
 
@@ -87,7 +94,6 @@ Internal owner or future small operations team member who collects travel inform
 
 ### 6.3 Could Have
 
-- Saved trip threads or named trip plans.
 - Shareable AI answer or itinerary summary.
 - Basic feedback buttons on answer usefulness.
 - Destination/route summary page generated from knowledge cards.
@@ -118,6 +124,15 @@ Internal owner or future small operations team member who collects travel inform
 7. AI creates a prioritized review recommendation only for claims that are risky, weakly evidenced, freshness-sensitive, duplicated, or conflicting.
 8. Operator may review, revise, suppress, archive, or request verification for recommended claims; review is not required for every active claim.
 
+### UJ-3: Traveler Turns A Direction Into A Confirmed Trip Plan
+
+1. A signed-in traveler creates or opens an owned Trip Project and sees its Trip Home.
+2. The traveler describes a route, dates, family/vehicle constraints, and desired stops in the primary conversation.
+3. AI returns useful guidance and, when a persistent plan change is appropriate, a structured proposal rather than silently modifying the trip.
+4. The traveler reviews the proposal's changed items, rationale, and impact, then applies it, dismisses it, or leaves it pending.
+5. The confirmed Trip Project displays anchors, legs, activities, constraints, and alternatives with clear `idea`, `planned`, `confirmed`, or `backup` states.
+6. The traveler can reopen chat history and change history to understand why the current plan has its state.
+
 ## 8. Functional Requirements
 
 ### 8.1 AI Ask
@@ -144,6 +159,15 @@ Internal owner or future small operations team member who collects travel inform
 - FR-14: The system shall show users a clear notice that chat and trip details may be stored to support the current session or trip project.
 - FR-15: The system shall allow users to delete a chat session or trip project they own.
 - FR-16: The system shall not store sensitive personal data beyond what is needed for trip personalization. [ASSUMPTION: child data is limited to travel-relevant facts such as age range, comfort needs, and preferences; no full names required.]
+- FR-16A: The system shall allow an owner to maintain structured Trip Project anchors, including origin, destination, regions, required stops, and accommodations when manually supplied or confirmed.
+- FR-16B: The system shall allow an owner to maintain dated trip legs and activities of type `transport`, `visit`, `food`, `rest`, or `accommodation`.
+- FR-16C: The system shall give each structured trip item an explicit state of `idea`, `planned`, `confirmed`, or `backup`; an open or `idea` item shall not be treated as an error solely because it is unconfirmed.
+- FR-16D: The system shall allow an owner to record travel-relevant trip constraints, including travelers, children, vehicle/EV needs, driving tolerance, budget range, preferences, and places or activities to avoid.
+- FR-16E: The system shall establish one primary conversation for each Trip Project while preserving owner access to currently linked historic conversations during migration.
+- FR-16F: The system shall show an owned Trip Project a basic Trip Home that prioritizes an unresolved planning decision when one exists, otherwise the next planned leg or preparation focus, and presents the primary conversation as the central action.
+- FR-16G: The system shall let AI create a typed Trip Change Proposal containing rationale, affected trip items, alternatives when available, and expiry when its supporting information is time-sensitive.
+- FR-16H: The system shall require the Trip Project owner to explicitly apply a Trip Change Proposal before it changes persistent trip state; AI, provider output, and ordinary answer generation shall not directly mutate itinerary, constraints, or item state.
+- FR-16I: The system shall preserve an owner-visible history for applied, dismissed, and expired Trip Change Proposals with actor and timestamp.
 
 ### 8.3 Knowledge Cards
 
@@ -219,6 +243,8 @@ Internal owner or future small operations team member who collects travel inform
 - NFR-7: The system shall be designed so Google Maps integration, public submissions, and booking/partner flows can be added later without becoming MVP dependencies.
 - NFR-8: Browser automation for Facebook capture shall run as an operator-controlled operations tool, not as public request-path app logic or unattended mass crawling.
 - NFR-9: Active AI-extracted claims shall remain auditable through their publication decision, evidence, source, state, and review history.
+- NFR-10: Trip Project reads and mutations, including primary-conversation access, structured plan data, proposals, and history, shall remain owner-scoped until a separately approved collaboration model exists.
+- NFR-11: Applying a Trip Change Proposal shall validate the proposal belongs to the selected Trip Project, is still applicable, and is authorized for the owner before writing an auditable change.
 
 ## 10. MVP Product Contracts
 
@@ -287,6 +313,16 @@ Counter-metrics: track hallucinated unsupported claims, claims whose evidence sp
 - Referral attribution capture stores who referred a new user and the referral code or campaign used when available.
 - MVP referral attribution does not create reward liability, payout entitlement, ranking status, or credit conversion.
 
+### 10.7 Trip Planning Foundation Contract
+
+- A Trip Project owns its structured plan: anchors, legs, activities, constraints, item states, confirmed alternatives, proposals, and change history. Chat transcripts remain conversation records and do not become the sole source of truth for confirmed trip state.
+- The first tranche is single-owner. All reads and mutations are scoped to the authenticated owner; no collaboration, shared editing, public sharing, or location sharing is implied.
+- A migration may choose one linked conversation as the primary conversation for an existing Trip Project, but must preserve access to prior owner-linked conversations and must not discard their history.
+- AI can draft plans and create structured change proposals. Only a user-confirmed server command may apply a proposal to persistent state after checking ownership, trip membership, proposal validity/expiry, and the affected-item version or equivalent conflict guard.
+- A proposal may create, update, remove, reorder, or change the state of explicitly identified structured trip items. It must show the user its intended effect before confirmation and must not create hidden side effects.
+- Trip Home is a focused state surface, not a widget dashboard. It prioritizes unresolved planning decisions, then the next planned leg or preparation focus; historic chat and change history remain available on demand.
+- Weather, dynamic route/ETA, current location, Maps/Places, provider snapshots, booking/availability, budget, checklist, travel vault, notifications, and collaboration are excluded from this tranche. A proposal must not imply that any of those unavailable data sources were checked.
+
 ## 11. Initial Data Scope
 
 The public MVP should focus on the Hanoi-to-HCMC road-trip corridor. Initial knowledge should prioritize information that makes AI answers practically useful:
@@ -339,6 +375,11 @@ The public MVP should focus on the Hanoi-to-HCMC road-trip corridor. Initial kno
 - AC-17: AI Ask can stream an assistant response after context/provenance preparation without treating partial streamed text as final persisted answer content.
 - AC-18: An authenticated user can submit a supported image input with an AI Ask message, and unsupported or invalid images are rejected before provider calls.
 - AC-19: Active AI Gateway models can be configured with model name, capability flags, and input/output/cache pricing metadata used by usage tracking.
+- AC-20: An authenticated owner can create and maintain a structured Trip Project with anchors, dated legs/activities, travel constraints, and explicit item states without relying on a chat transcript as the confirmed plan.
+- AC-21: Existing linked conversations remain available after a Trip Project gains exactly one primary conversation.
+- AC-22: When AI suggests a persistent trip change, the owner sees a structured proposal and no persistent plan mutation occurs until that owner explicitly applies it.
+- AC-23: Applying, dismissing, or expiring a proposal produces an owner-visible, actor/timestamped history and cannot affect another owner's trip.
+- AC-24: Trip Home shows an unresolved planning decision first when present; otherwise it shows the next planned leg or preparation focus and provides access to the primary conversation.
 
 ## 14. Risks
 
@@ -350,6 +391,8 @@ The public MVP should focus on the Hanoi-to-HCMC road-trip corridor. Initial kno
 - R-6: Vietnamese language quality and local nuance may be insufficient if prompts, data, or evaluation are weak.
 - R-7: Facebook browser automation may be fragile because page structure, login state, access permissions, and third-party terms can change.
 - R-8: AI-first publication can amplify poor extraction or evaluation decisions if retrieval guardrails, quality sampling, and suppression workflows are weak.
+- R-9: AI-generated itinerary changes could create false commitments or erase user intent if proposal confirmation, ownership, and version/conflict checks are incomplete.
+- R-10: Migrating existing linked conversations to one primary conversation could hide or detach historic context if migration and fallback access are not verified.
 
 ## 15. Open Questions
 
@@ -359,3 +402,5 @@ The public MVP should focus on the Hanoi-to-HCMC road-trip corridor. Initial kno
 - OQ-4: What detailed Facebook content reuse policy should govern captured post text retention, operator review, quoting, and deletion beyond provenance and non-official labeling?
 - OQ-5: Should AI-generated image output become an MVP workflow, or remain deferred until after text/image-input planning is validated?
 - OQ-6: What legal/content-reuse policy permits retention and traveler-visible display of short Facebook-derived evidence quotes and source links?
+- OQ-7: What minimum structured planning fields should be required before a Trip Home can identify an actionable next planning focus without treating open choices as errors?
+- OQ-8: What conflict/version policy should apply when an owner applies a proposal after manually changing the same trip item?

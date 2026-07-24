@@ -4,7 +4,7 @@ description: Responsive web UX for an AI-first Vietnam road-trip planning compan
 status: final
 project: xuyenviet
 created: 2026-07-05
-updated: 2026-07-16
+updated: 2026-07-24
 sources:
   - ../../prds/prd-xuyenviet-2026-07-04/prd.md
   - ../../architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md
@@ -162,23 +162,44 @@ components:
     foreground: '{colors.road-ink}'
     radius: '{rounded.lg}'
     border: '1px solid {colors.shell-border}'
+  trip-home-focus:
+    background: '{colors.map-paper}'
+    foreground: '{colors.road-ink}'
+    radius: '{rounded.lg}'
+    border: '1px solid {colors.shell-border}'
+  plan-item-confirmed:
+    background: '{colors.shell-sidebar-active}'
+    foreground: '{colors.primary}'
+    radius: '{rounded.full}'
+  plan-item-backup:
+    background: '#FEF3C7'
+    foreground: '{colors.freshness}'
+    radius: '{rounded.full}'
+  change-proposal:
+    background: '#FFFFFF'
+    foreground: '{colors.road-ink}'
+    radius: '{rounded.lg}'
+    border: '1px solid {colors.accent}'
 ---
 
 # XuyenViet — Design Spine
 
 ## Brand & Style
 
-XuyenViet should feel like a practical road companion for Vietnam: calm enough for planning a family trip, precise enough to earn trust, and immediately legible as a chat workspace. The final visual posture is a quiet, Vietnamese-first planning tool: a simple public entry, a centered logged-in empty chat, and an active three-panel workspace with history/projects on the left, the answer in the middle, and selected-item detail on the right.
+XuyenViet should feel like a practical road companion for Vietnam: calm enough for planning a family trip, precise enough to earn trust, and immediately legible as a chat workspace. The final visual posture is a quiet, Vietnamese-first planning tool: a simple public entry, a centered logged-in empty chat, an active three-panel workspace, and a focused Trip Project workspace where confirmed plan state stays visually distinct from AI suggestions.
 
 [ASSUMPTION] The web app inherits shadcn/ui defaults on Next.js + Tailwind. This DESIGN.md specifies the brand-layer delta: the mockup-aligned shell, color meaning, icon treatment, answer/source hierarchy, and road-trip surface rules. shadcn defaults remain the base for dialogs, sheets, tabs, buttons, forms, dropdowns, toast, skeleton, card, badge, separator, and focus rings unless overridden here. The three files in [`mockups/`](./mockups/) illustrate the intended direction; these spines win if a mockup conflicts with a behavior or token below.
 
-The product differentiator is not visual spectacle. It is trustworthy AI guidance with visible provenance and a familiar conversation model. The UI should stay quiet until the user asks; after an answer exists, it can reveal richer contextual detail without making every answer feel like a compliance report.
+The product differentiator is not visual spectacle. It is trustworthy AI guidance with visible provenance and a familiar conversation model. The UI should stay quiet until the user asks; after an answer exists, it can reveal richer contextual detail without making every answer feel like a compliance report. [`trip-project-workspace.html`](./mockups/trip-project-workspace.html) is the visual reference for the Trip Home, plan timeline, primary composer, and proposal inspector; these spines win on conflict.
 
 ## Colors
 
 - **Route Green (`{colors.primary}`)** is the primary action and brand color. It represents forward motion, planned route, and safe go-ahead. Use for primary buttons, active navigation, selected trip project, and verified route actions.
 - **Guide Amber (`{colors.accent}`)** marks AI guidance that needs attention: suggested next question, active itinerary option, and recommended follow-up. Do not use amber for warnings.
 - **Route Teal (`{colors.route}`)** is for route segments, travel legs, and map-adjacent metadata when no actual map is present.
+- **Trip Home Focus** uses `{components.trip-home-focus}` to make one next decision or next leg legible without turning the project into a dashboard of competing widgets.
+- **Plan State** is expressed with a text label and icon in addition to color: `Ý tưởng`, `Dự kiến`, `Đã chốt`, and `Phương án B`. `{components.plan-item-confirmed}` and `{components.plan-item-backup}` add compact semantic emphasis; they never imply booking or live provider confirmation.
+- **Change Proposal** uses `{components.change-proposal}` with amber border/guide semantics. It is visibly separate from a confirmed plan item so an AI recommendation cannot be mistaken for saved state.
 - **Page (`{colors.page}`)** is the default application canvas. The traveler workspace is predominantly white, separated by borders and quiet tonal surfaces rather than an always-visible paper grid.
 - **Hero Paper (`{colors.hero-paper}`)** is the warm public-entry surface behind the restrained green and purple radial washes. It is not used as a global app background.
 - **Map Paper (`{colors.map-paper}`)** gives travel-plan cards and operator knowledge cards a warmer surface than pure white. Do not use it as the entire authenticated workspace.
@@ -207,6 +228,7 @@ Use a responsive AI planning shell.
 - Logged-out desktop: centered public hero with sign-in CTA and sign-in-gated ask box; no app shell sidebar. It uses the controlled warm hero wash shown in [`home-logged-out.html`](./mockups/home-logged-out.html).
 - Logged-in empty desktop: left sidebar visible, center column contains large greeting and centered composer; no right detail panel before the first answer.
 - Active desktop: persistent left sidebar using `{spacing.sidebar-width}`, central answer column capped at `{spacing.chat-width}`, right contextual detail panel using `{spacing.detail-width}`. The shell is edge-to-edge and viewport-height, not a rounded page card. See [`three-panel-chat-map.html`](./mockups/three-panel-chat-map.html).
+- Trip Project desktop: uses the same left sidebar and center reading width for the primary conversation. The persistent right Trip Workspace starts with a compact project header, Trip Home focus card, and saved date/leg timeline. It expands to plan/proposal detail only after an explicit selection; it is a state surface, not a second chat or dashboard rail.
 - Tablet: sidebar may collapse to `{spacing.sidebar-rail}`; right detail panel can stack below or open as sheet depending on available width.
 - Mobile: no persistent sidebar; use top/menu sheet for history/projects, single-column chat, bottom-safe composer, and selected detail as a drawer/sheet.
 
@@ -223,6 +245,7 @@ Depth is functional, not decorative.
 - Base workspace surfaces are white and inherit shadcn.
 - The app shell sidebar is flat and persistent; use its boundary and active row color before shadows.
 - Trip plan cards and knowledge review cards use tonal separation on `{colors.map-paper}` with a subtle border.
+- The Trip Home focus card and plan timeline use tonal separation and borders; proposal cards use a restrained amber boundary. Do not use shadow, animation, or saturated color to pressure a user to apply a change.
 - Sheets and dialogs inherit shadcn elevation.
 - Avoid stacked shadows inside chat answers; use headings, spacing, and borders instead.
 
@@ -244,6 +267,11 @@ Shape language is soft but not playful.
 - **App shell sidebar** uses `{components.app-shell-sidebar}`. It contains the brand row, `Trò chuyện mới` action, grouped conversation history, grouped trip projects, and a compact account/privacy footer with an admin entry only for authorized users. It has no outer card radius or elevation.
 - **Sidebar active row** uses `{components.app-shell-active-row}`. Exactly one primary workspace row is active: the selected conversation, selected trip project, or new-chat empty state. Row actions are compact and must not appear only on hover.
 - **Trip project row** behaves like a project/workspace item, with title, optional route/date hint, and active context indicator when the main chat is scoped to that trip.
+- **Trip Project header** keeps project title, compact route/date/traveler context, and an explicit `Kế hoạch chuyến đi` label. It does not present weather, maps, budget, or booking widgets in this tranche.
+- **Trip Home focus card** uses `{components.trip-home-focus}` and contains one focus label, short reason, the next action, and a link to the affected timeline item or proposal. It should feel like a calm briefing card, not an alert feed.
+- **Plan timeline** uses date dividers and a thin route-teal progression line. Anchors, legs, and activities use semantic icons and a visible state label. `Ý tưởng` is neutral/outlined, `Dự kiến` uses guide amber sparingly, `Đã chốt` uses `{components.plan-item-confirmed}`, and `Phương án B` uses `{components.plan-item-backup}`.
+- **Change proposal card** uses `{components.change-proposal}` and contains `Đề xuất`, rationale, before/after impact, and a bounded action row. `Áp dụng` uses the primary button, `Giữ kế hoạch` is secondary/destructive-neutral dismissal, and `Xem phương án khác` appears only when provided. Pending proposals must never look identical to confirmed timeline items.
+- **Plan history row** is visually compact and subdued: status icon/label, safe summary, actor, and timestamp. It is secondary to current plan state and does not show raw AI prose.
 - **Conversation row** uses one-line title plus optional short preview/date. It should feel like chat history, not a document library.
 - **Chat composer** uses `{components.chat-composer}` and remains visually anchored to the main chat column. It is a low-chrome surface: prompt text, an icon-only `{components.composer-icon-action}` attachment trigger when supported, and an icon-only `{components.composer-send-action}` send trigger. A visible label, keyboard cheat sheet, file-type/size explanation, or secondary bordered attachment region must not occupy the idle composer. Show that information contextually after focus, an attachment, validation failure, or an explicit help request. The composer expands only as needed for multiline text or an attachment preview without widening the reading column.
 - **Logged-out ask box** visually resembles the chat composer but is sign-in-gated. It may accept visible draft text later, but submitting requires Google sign-in before AI calls or persistence.
@@ -275,6 +303,8 @@ Shape language is soft but not playful.
 | Use familiar ChatGPT/Gemini navigation patterns selectively | Copy another product's visual identity or remove XuyenViet's travel trust cues |
 | Keep logged-in empty state centered and calm | Show an empty right detail panel before the user has asked anything |
 | Use the right panel to explain selected answer entities | Make the right panel a map-first surface or a second chat thread |
+| Make saved plan state and AI proposals visually distinct | Let a suggested card resemble a confirmed itinerary item |
+| Use one Trip Home focus card before the timeline | Turn Trip Home into a dashboard grid of weather, budget, map, booking, and checklist widgets |
 | Use a white/stone edge-to-edge app shell with restrained borders | Place the full workspace inside a floating rounded card or persistent graph-paper canvas |
 | Use one labeled semantic icon family | Mix emoji, text arrows, bullets, and unrelated icon styles as the product icon system |
 | Prefer icon-only controls for unambiguous, frequent chat actions | Fill the idle composer with a native file picker, persistent helper copy, keyboard instructions, or large text action buttons |
