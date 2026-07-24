@@ -81,8 +81,9 @@ development_status:
   5-3-close-the-active-evidence-grounded-card-readiness-gate: done
   epic-5-retrospective: optional
 
-  epic-6: backlog
-  6-1-validate-knowledge-pipeline-operations-before-public-evaluation: backlog
+  epic-6: in-progress
+  # Synchronized 2026-07-24 after Story 6.1 fail-closed operational validation; pipeline remains not ready pending blocked evidence.
+  6-1-validate-knowledge-pipeline-operations-before-public-evaluation: review
   6-2-run-public-mvp-ai-first-readiness-review: backlog
   epic-6-retrospective: optional
 
