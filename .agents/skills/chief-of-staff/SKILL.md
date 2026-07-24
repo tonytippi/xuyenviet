@@ -54,6 +54,14 @@ is complete only when its sprint status is `done` and every associated story is
   worker and, when useful, its immediately preceding completed worker for
   audit. A completed pane is not a future workflow dependency and must not be
   retained until a story or epic finishes.
+- After each story's Status Commit succeeds, compact the coordinator's own
+  context before selecting the next story or epic action. First retain the
+  completed story key, its implementation and status commit SHAs, the verified
+  `done` status, the current epic, and any active recovery or review state in a
+  concise handoff record. Then invoke the environment's context-compaction
+  command (for OpenCode, `/compact`) exactly once. Never compact before the
+  status commit has left the worktree clean, and never ask a worker to compact:
+  workers are already fresh per stage.
 - Use no parallel workers against this checkout. The workflow is strictly
   sequential because each stage changes shared files and sprint state.
 - Do not use `bmad-dev-auto` here. It is intentionally one-story scoped and
@@ -341,10 +349,11 @@ the review outcome and every finding with severity in SUMMARY.
 ```
 
 If the review is approved, re-read sprint status and require the target to be
-`done`, then run the Status Commit stage. Keep the approved review pane only as
-the newest rolling audit pane; the next pane creation will evict the oldest pane
-if needed. Restart the coordinator loop in a new pane only after the status
-commit leaves a clean worktree.
+`done`, then run the Status Commit stage and Coordinator Context Compaction.
+Keep the approved review pane only as the newest rolling audit pane; the next
+pane creation will evict the oldest pane if needed. Restart the coordinator loop
+in a new pane only after the status commit leaves a clean worktree and the
+coordinator context has been compacted.
 
 If the first review contains actionable findings, do not advance. Create a new
 fresh development pane and prompt it:
@@ -371,18 +380,20 @@ SUMMARY.
 If the second review does not expose substantial new risk, create one final
 fresh development pane and give it the same repair prompt. Require it to
 synchronize the story to `review`, then run the Commit stage and Status
-Finalization stage, followed by the Status Commit stage. Do not run a third
-story review.
+Finalization stage, followed by the Status Commit stage and Coordinator Context
+Compaction. Do not run a third story review.
 
 If the second review exposes substantial new risk, create a fresh development
 pane using the same repair prompt, require it to synchronize the story to
 `review`, and run the Commit stage. Then run one third and final Story Review
 using the normal review prompt. If that final review is approved, synchronize
-the story to `done` as usual and run the Status Commit stage. If it has
+the story to `done` as usual and run the Status Commit stage and Coordinator
+Context Compaction. If it has
 actionable findings, create one final fresh development pane using the same
 repair prompt, run the Commit stage, then run Status Finalization and the Status
-Commit stage. Do not run a fourth story review. A blocked final-fix, commit,
-review, status-only, or status-commit worker remains a stop condition.
+Commit stage and Coordinator Context Compaction. Do not run a fourth story
+review. A blocked final-fix, commit, review, status-only, or status-commit worker
+remains a stop condition.
 
 ### 6. Status Finalization
 
@@ -442,6 +453,27 @@ Require a clean `git status --short`, a non-empty status commit SHA, and both
 the story record and `sprint-status.yaml` independently showing `done` before
 the coordinator continues.
 
+### 8. Coordinator Context Compaction
+
+Run this coordinator-only step immediately after every successful Status Commit
+and before creating the next coordinator pane. It is not a worker stage and
+does not modify the checkout.
+
+Create a concise in-memory handoff record containing only:
+
+- completed story key;
+- implementation and status commit SHAs;
+- independently verified `done` status;
+- current epic number and whether it is eligible for epic review; and
+- any active bounded recovery or review-loop state.
+
+After the handoff record exists and `git status --short` is clean, invoke
+`/compact` in the coordinator's current OpenCode context exactly once. Resume
+by reading the retained handoff record, the most recent worker report, and the
+authoritative sprint status before selecting the next action. Do not compact
+during a story's create, development, commit, review, repair, finalization, or
+status-commit sequence, and do not compact when a stage is blocked.
+
 ## Epic Completion Review
 
 After every completed story, inspect its epic. When every story whose key begins
@@ -466,12 +498,14 @@ If the first epic review has actionable findings, create a fresh development
 pane for each affected story in numeric order. Prompt it to use `bmad-agent-dev`
 to fix only the assigned epic-review findings, run relevant tests, update the
 story record, and leave the story in `review` without committing. Run the Commit
-stage, Status Finalization stage, and Status Commit stage for each repaired
-story. Once every affected story is again `done`, repeat the epic review once.
+stage, Status Finalization stage, Status Commit stage, and Coordinator Context
+Compaction for each repaired story. Once every affected story is again `done`,
+repeat the epic review once.
 
 If the second epic review still has actionable findings, repeat that repair,
 commit, status finalization, and status commit sequence for its affected stories,
-then preserve the epic and all stories as `done`. Do not run a third epic review.
+then run Coordinator Context Compaction after each repaired story and preserve
+the epic and all stories as `done`. Do not run a third epic review.
 Any blocked worker, failed verification, incomplete status finalization, or
 status commit remains a stop condition.
 
