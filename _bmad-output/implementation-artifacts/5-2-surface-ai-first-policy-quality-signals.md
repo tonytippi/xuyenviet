@@ -4,7 +4,7 @@ baseline_commit: e48723a5ff2fd109303df2e187510b84f7533d42
 
 # Story 5.2: Surface AI-First Policy Quality Signals
 
-Status: review
+Status: done
 
 ## Story
 
@@ -204,6 +204,7 @@ gpu4ai/gpt-5.6-terra-review
 - 2026-07-24: Resolved first-review actionable findings only; status remains `review` and sprint status is synchronized.
 - 2026-07-24: Resolved all three recorded second-review findings; status returned to `review` and sprint status is synchronized.
 - 2026-07-24: Resolved both final review findings; status remains `review` and sprint status is synchronized.
+- 2026-07-24: Finalized as `done` after verification of supplied final repair commit `c82e1b43f66eef917afee480592bf8c45cf5d82f` and a clean worktree; sprint status is synchronized.
 
 ### Verification
 
