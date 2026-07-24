@@ -30,7 +30,7 @@ so that launch readiness is explicit about completed proof, accepted risk, and b
   - [x] Define decision precedence before the ledger: a safety-blocking condition, failed safety regression, missing mandatory safety proof, or any `blocked` OP-01 through OP-09 row requires `no-go` and cannot be overridden. `conditional-go` is permitted only when no safety-blocking condition exists, every `mandatory_safety` and `mandatory_non_safety` row is `complete`, and every `exceptionable_non_safety` row is `complete` or `accepted_risk` with named authority, bounded scope, expiry/review date, remediation, and a revocation condition. `go` requires every mandatory and non-safety prerequisite row to be `complete`.
 
 - [x] Aggregate the current corpus, quality, retrieval, and provenance gate without recomputing it (AC: 1, 3)
-  - [x] Record the current read-only `/admin/quality` result from `getPublicMvpQualityDashboard()` as the authoritative combined corpus/quality input; preserve its unfiltered, `REPEATABLE READ` semantics.
+  - [x] Assess the current read-only `/admin/quality` result from `getPublicMvpQualityDashboard()` as the authoritative combined corpus/quality input; preserve its unfiltered, `REPEATABLE READ` semantics, and fail closed when no current aggregate is supplied.
   - [x] Require at least 100 Hanoi-to-HCMC cards that are active, have code-valid current traveler-safe evidence, complete retrieval metadata, and `contextual_use`. Do not count legacy `approved` state, caveat-only high-risk cards, failed verification, uncertain/conflicted/superseded cards, invalid/removed/withdrawn evidence, tombstoned captures, stale projections, or incomplete metadata.
   - [x] Require current sealed sampling proof for the 15% auto-active policy window and complete 100% version-fenced `verify_first` sampling proof. A missing, stale, duplicate, pending, unselected-required, truncated, or mismatched proof blocks readiness.
   - [x] Require the newest coherent completed evaluation run for the current prompt-set version with all six stored scenario/version pairs covering the PRD's five canonical prompt types, stored policy snapshots, and exactly six rubric scores per result. Treat stale/withdrawn exposure, raw/evidence leakage, and unsafe conflicted-knowledge use as high-severity blockers; keep non-high quality gaps visible under their existing baseline thresholds.
@@ -64,6 +64,11 @@ so that launch readiness is explicit about completed proof, accepted risk, and b
   - [x] Keep the review and all linked excerpts free of raw source/capture text, evidence quote/span, URLs/snippets, provider payloads/errors, credentials, browser-profile data, traveler identity/context, chat/trip content, answer text, full provenance snapshots, and secret-bearing configuration.
   - [x] Record the review baseline commit and validate every cited repository-behavior evidence reference against it. Run focused suites sequentially with `DATABASE_URL_TEST` when the cited result is not from the review baseline: `tests/public-mvp-quality-dashboard.test.ts`, `tests/knowledge-search.test.ts`, `tests/answer-context.test.ts`, `tests/ai-ask-shell.test.ts`, `tests/web-search-quality.test.ts`, and `tests/web-search-adapter.test.ts`. If a command cannot run, is inapplicable, or is from a different baseline without a documented unchanged-proof rationale, classify the affected row `blocked`.
   - [x] If code or tests are changed solely to correct the report's evidence collection, run the relevant serial `DATABASE_URL_TEST` suite(s), then `pnpm lint`, `pnpm typecheck`, and `pnpm build`. Do not introduce code changes to make a missing operational proof pass under this story.
+
+### Review Findings
+
+- [x] [Review][Patch] Final review timestamp predates cited operational evidence [_bmad-output/implementation-artifacts/6-2-public-mvp-ai-first-readiness-review-report.md:3] — Resolved by separating the initial repository-evidence observation from the final evidence aggregation and finalizing at `2026-07-24T18:30:00Z`, after E7 was issued at `2026-07-24T18:29:00Z`; no future evidence is treated as fresh.
+- [x] [Review][Patch] Completed task contradicts unavailable quality-dashboard evidence [_bmad-output/implementation-artifacts/6-2-run-public-mvp-ai-first-readiness-review.md:34] — Resolved by recording the task as a fail-closed assessment: no current `/admin/quality` aggregate was supplied, so QG-01 through QG-05 remain `blocked`.
 
 ## Dev Notes
 
@@ -157,6 +162,7 @@ gpu4ai/gpt-5.6-terra-review
 - Validated non-interactively against the create-story checklist. The guide has exact acceptance criteria, a complete evidence/disposition matrix, all eight prerequisite rows, explicit go/no-go rules, ownership boundaries, fail-closed safety and privacy rules, predecessor intelligence, and no-scope-creep guardrails.
 - 2026-07-24: Completed the evidence-based readiness review. The final report contains a complete 34-row criterion registry and ledger, preserves the Story 6.1 blocked operational conclusion, and returns `no-go` because mandatory proof is missing and OP-07 is a safety blocker. No application code, tests, provider settings, or operational state changed.
 - Verification: focused serial suites passed (21 + 42 + 92 + 79 + 10 + 10); full suite passed (50 files, 746 tests); lint had 0 errors and 3 pre-existing warnings; build and post-build typecheck passed. Initial typecheck overlapped the build and failed only on regenerated `.next/types`; the post-build rerun passed.
+- 2026-07-24: Resolved the two actionable review-record findings only: separated initial repository observation from final evidence aggregation after E7, and corrected the quality-dashboard task to reflect the fail-closed unavailable-aggregate assessment. The `no-go` decision is unchanged.
 
 ### File List
 
@@ -168,3 +174,4 @@ gpu4ai/gpt-5.6-terra-review
 
 - 2026-07-24: Created and self-validated the Story 6.2 public-MVP AI-first readiness-review guide; status is `ready-for-dev`.
 - 2026-07-24: Created the final fail-closed readiness report, completed all Story 6.2 tasks, and marked the story ready for review. The report decision is `no-go`; no commit created.
+- 2026-07-24: Corrected actionable review records and synchronized the story back to `review`; the `no-go` decision remains unchanged.

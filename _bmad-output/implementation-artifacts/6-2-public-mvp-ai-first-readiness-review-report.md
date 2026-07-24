@@ -1,6 +1,7 @@
 # Public MVP AI-First Readiness Review
 
-**Review observed at (UTC):** 2026-07-24T12:21:50Z  
+**Repository evidence observed at (UTC):** 2026-07-24T12:21:50Z
+**Final evidence aggregation and decision finalized at (UTC):** 2026-07-24T18:30:00Z
 **Review baseline commit:** `d28ce2cc5ba0bb2bcbd416dc0fd86e7a1d0812a5`  
 **Decision:** `no-go`  
 **Authorized scope:** No public evaluation or public launch is authorized.  
@@ -10,7 +11,7 @@
 
 - This review uses safe identifiers, revisions, aggregate test results, safe artifact paths, owners, and dispositions only. It contains no source/capture material, URLs, provider payloads/errors, credentials, traveler data, chat/trip content, answer text, or full provenance snapshots.
 - Repository regressions establish only repository behavior at the review baseline. They do not establish current corpus state, deployment/runtime behavior, external provider configuration, privacy settings, or live monitoring.
-- External, deployment, provider/privacy, monitoring, and manual-smoke proof must identify its current environment/configuration/revision and issuance/observation time. The approved freshness window for this review is **none**; evidence without a current review observation is `blocked`.
+- External, deployment, provider/privacy, monitoring, and manual-smoke proof must identify its current environment/configuration/revision and issuance/observation time. No approved lookback freshness window applies: evidence must have been issued or observed no later than this review's final evidence aggregation, and unavailable, unattributable, or stale evidence is `blocked`.
 - A safety blocker, failed safety regression, missing mandatory-safety proof, or any blocked OP-01 through OP-09 requires `no-go` and cannot be overridden.
 - `conditional-go` is allowed only with no safety blocker; every mandatory row complete; and every exceptionable row complete or `accepted_risk` with named authority, bounded scope, expiry/review date, remediation, and revocation condition. `go` requires every row complete.
 - The ledger has one and only one disposition for each registry ID. Dispositions are limited to `complete`, `accepted_risk`, and `blocked`; absent, stale, partial, unrepeatable, unavailable, or repository-only evidence for a live requirement is `blocked`.
