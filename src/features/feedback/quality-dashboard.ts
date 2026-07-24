@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, desc, eq, gte, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
 import {
@@ -128,6 +128,7 @@ export type QualityDashboardPolicySignals = {
     cohortMembers: number;
     sampledPassed: number;
     sampledFailed: number;
+    pendingMembers: number;
     unselectedMembers: number;
     verificationRequiredCurrentCards: number;
     escalatedCohorts: number;
@@ -136,7 +137,7 @@ export type QualityDashboardPolicySignals = {
     members: Array<{
       knowledgeCardId: string;
       category: string;
-      samplingOutcome: "passed" | "failed" | "unselected";
+      samplingOutcome: "passed" | "failed" | "pending" | "unselected";
       recommendedSafeAction: "suppress_or_escalate" | "verify_before_use" | "stricter_sampling";
     }>;
   };
@@ -151,6 +152,11 @@ export type QualityDashboardPolicySignals = {
 
 const scoreDimensions = ["user_context_use", "practical_specificity", "source_grounding", "uncertainty_handling", "family_awareness", "vietnamese_clarity"] as const satisfies readonly PublicMvpEvaluationScoreDimension[];
 const provenanceCategories = ["trip_context", "chat_context", "knowledge", "web", "general"] as const satisfies readonly AssistantProvenanceSourceCategory[];
+const policyDiagnosticLimit = 10;
+const policyReadLimit = policyDiagnosticLimit + 1;
+const cohortMemberReadLimit = 50;
+const cohortRecommendationReadLimit = 100;
+const cohortCardReadLimit = 100;
 
 export async function getPublicMvpQualityDashboard(input: PublicMvpQualityDashboardInput = {}): Promise<PublicMvpQualityDashboardResult> {
   const session = await getAuthenticatedSessionWithRoles();
@@ -240,19 +246,53 @@ async function buildPolicySignals({
     fallbackVerificationGuidanceMetFlag: boolean;
   }>;
 }): Promise<QualityDashboardPolicySignals> {
-  const resultIds = resultRows.map((row) => row.id);
-  const [snapshots, policies, members, recommendations, cards] = await Promise.all([
+  const resultIds = resultRows.slice(0, policyReadLimit).map((row) => row.id);
+  const [snapshots, policyRows] = await Promise.all([
     resultIds.length > 0
       ? db
           .select({ resultId: publicMvpEvaluationResultPolicySnapshots.resultId, excludedReasonCodes: publicMvpEvaluationResultPolicySnapshots.excludedReasonCodes, finalizationOutcome: publicMvpEvaluationResultPolicySnapshots.finalizationOutcome })
           .from(publicMvpEvaluationResultPolicySnapshots)
           .where(inArray(publicMvpEvaluationResultPolicySnapshots.resultId, resultIds))
       : Promise.resolve([]),
-    db.select({ id: knowledgeSamplingPolicies.id, cohortKey: knowledgeSamplingPolicies.cohortKey, samplingPercent: knowledgeSamplingPolicies.samplingPercent, escalatedAt: knowledgeSamplingPolicies.escalatedAt, suppressedAt: knowledgeSamplingPolicies.suppressedAt }).from(knowledgeSamplingPolicies),
-    db.select({ policyId: knowledgeSamplingCohortMembers.policyId, knowledgeCardId: knowledgeSamplingCohortMembers.knowledgeCardId, contentVersion: knowledgeSamplingCohortMembers.contentVersion, evidenceSetRevision: knowledgeSamplingCohortMembers.evidenceSetRevision }).from(knowledgeSamplingCohortMembers),
-    db.select({ policyId: knowledgeRecommendations.policyId, knowledgeCardId: knowledgeRecommendations.knowledgeCardId, contentVersion: knowledgeRecommendations.contentVersion, evidenceSetRevision: knowledgeRecommendations.evidenceSetRevision, reason: knowledgeRecommendations.reason, resolution: knowledgeRecommendations.resolution }).from(knowledgeRecommendations).where(eq(knowledgeRecommendations.reason, "sampling")),
-    db.select({ id: knowledgeCards.id, type: knowledgeCards.type, verificationState: knowledgeCards.verificationState }).from(knowledgeCards),
+    db
+      .select({ id: knowledgeSamplingPolicies.id, cohortKey: knowledgeSamplingPolicies.cohortKey, samplingPercent: knowledgeSamplingPolicies.samplingPercent, escalatedAt: knowledgeSamplingPolicies.escalatedAt, suppressedAt: knowledgeSamplingPolicies.suppressedAt, createdAt: knowledgeSamplingPolicies.createdAt })
+      .from(knowledgeSamplingPolicies)
+      .orderBy(sql`${knowledgeSamplingPolicies.suppressedAt} desc nulls last`, sql`${knowledgeSamplingPolicies.escalatedAt} desc nulls last`, desc(knowledgeSamplingPolicies.createdAt), asc(knowledgeSamplingPolicies.cohortKey))
+      .limit(policyReadLimit),
   ]);
+  const policies = policyRows.slice(0, policyDiagnosticLimit);
+  const policyIds = policies.map((policy) => policy.id);
+  const members =
+    policyIds.length > 0
+      ? await db
+          .select({ policyId: knowledgeSamplingCohortMembers.policyId, knowledgeCardId: knowledgeSamplingCohortMembers.knowledgeCardId, contentVersion: knowledgeSamplingCohortMembers.contentVersion, evidenceSetRevision: knowledgeSamplingCohortMembers.evidenceSetRevision })
+          .from(knowledgeSamplingCohortMembers)
+          .where(inArray(knowledgeSamplingCohortMembers.policyId, policyIds))
+          .orderBy(asc(knowledgeSamplingCohortMembers.policyId), asc(knowledgeSamplingCohortMembers.knowledgeCardId), asc(knowledgeSamplingCohortMembers.contentVersion), asc(knowledgeSamplingCohortMembers.evidenceSetRevision))
+          .limit(cohortMemberReadLimit + 1)
+      : [];
+  const boundedMembers = members.slice(0, cohortMemberReadLimit);
+  const memberCardIds = boundedMembers.map((member) => member.knowledgeCardId);
+  const recommendations =
+    policyIds.length > 0
+      ? await db
+          .select({ policyId: knowledgeRecommendations.policyId, knowledgeCardId: knowledgeRecommendations.knowledgeCardId, contentVersion: knowledgeRecommendations.contentVersion, evidenceSetRevision: knowledgeRecommendations.evidenceSetRevision, status: knowledgeRecommendations.status, resolution: knowledgeRecommendations.resolution, resolvedAt: knowledgeRecommendations.resolvedAt, updatedAt: knowledgeRecommendations.updatedAt, id: knowledgeRecommendations.id })
+          .from(knowledgeRecommendations)
+          .where(and(inArray(knowledgeRecommendations.reason, ["sampling", "verification"]), inArray(knowledgeRecommendations.policyId, policyIds)))
+          .orderBy(asc(knowledgeRecommendations.policyId), asc(knowledgeRecommendations.knowledgeCardId), asc(knowledgeRecommendations.contentVersion), asc(knowledgeRecommendations.evidenceSetRevision), asc(knowledgeRecommendations.reason), desc(knowledgeRecommendations.resolvedAt), desc(knowledgeRecommendations.updatedAt), desc(knowledgeRecommendations.id))
+          .limit(cohortRecommendationReadLimit + 1)
+      : [];
+  const boundedRecommendations = recommendations.slice(0, cohortRecommendationReadLimit);
+  const policyCardIds = [...new Set([...memberCardIds, ...boundedRecommendations.map((recommendation) => recommendation.knowledgeCardId)])];
+  const cards =
+    policyCardIds.length > 0
+      ? await db
+          .select({ id: knowledgeCards.id, type: knowledgeCards.type, verificationState: knowledgeCards.verificationState })
+          .from(knowledgeCards)
+          .where(inArray(knowledgeCards.id, policyCardIds))
+          .orderBy(asc(knowledgeCards.id))
+          .limit(cohortCardReadLimit + 1)
+      : [];
   const cardsById = new Map(cards.map((card) => [card.id, card]));
   const policyById = new Map(policies.map((policy) => [policy.id, policy]));
   const snapshotByResultId = new Map(snapshots.map((snapshot) => [snapshot.resultId, snapshot]));
@@ -261,7 +301,7 @@ async function buildPolicySignals({
   const verificationFailures = resultRows.filter((row) => !row.fallbackVerificationGuidanceMetFlag || !row.conflictedKnowledgeExcludedFlag).length;
   const evaluationDiagnostics = resultRows
     .filter((row) => row.unsupportedClaimFlag || row.unsupportedCommunityWordingFlag || row.requiredCaveatOmittedFlag || !row.conflictedKnowledgeExcludedFlag || row.staleWithdrawnSourceExposureFlag || row.rawEvidenceLeakageFlag || !row.fallbackVerificationGuidanceMetFlag)
-    .slice(0, 10)
+    .slice(0, policyDiagnosticLimit)
     .map((row) => ({
       promptType: row.promptType,
       modelVersion: row.modelVersion,
@@ -269,22 +309,27 @@ async function buildPolicySignals({
       severity: "unavailable" as const,
       recommendedSafeAction: evaluationAction(row),
     }));
-  const memberOutcomes = members.map((member) => {
-    const recommendation = recommendations.find((candidate) => candidate.policyId === member.policyId && candidate.knowledgeCardId === member.knowledgeCardId && candidate.contentVersion === member.contentVersion && candidate.evidenceSetRevision === member.evidenceSetRevision);
+  const recommendationsByFence = new Map<string, typeof boundedRecommendations>();
+  for (const recommendation of boundedRecommendations) {
+    const key = samplingFenceKey(recommendation);
+    recommendationsByFence.set(key, [...(recommendationsByFence.get(key) ?? []), recommendation]);
+  }
+  const memberOutcomes = boundedMembers.map((member) => {
+    const candidates = recommendationsByFence.get(samplingFenceKey(member)) ?? [];
+    const recommendation = candidates.find((candidate) => candidate.status === "resolved" && (candidate.resolution === "sampling_passed" || candidate.resolution === "sampling_failed"));
     const policy = policyById.get(member.policyId);
-    const outcome: "passed" | "failed" | "unselected" = recommendation?.resolution === "sampling_passed" ? "passed" : recommendation?.resolution === "sampling_failed" ? "failed" : "unselected";
+    const outcome: "passed" | "failed" | "pending" | "unselected" = recommendation?.resolution === "sampling_passed" ? "passed" : recommendation?.resolution === "sampling_failed" ? "failed" : candidates.length > 0 ? "pending" : "unselected";
     const card = cardsById.get(member.knowledgeCardId);
-    return { member, policy, outcome, category: card?.type ?? "missing_category" };
+    return { member, policy, outcome, category: card ? `current_${card.type}` : "missing_category" };
   });
   const cohorts = policies
-    .filter((policy) => members.some((member) => member.policyId === policy.id))
-    .slice(0, 10)
+    .filter((policy) => memberOutcomes.some((member) => member.member.policyId === policy.id))
     .map((policy) => {
-      const firstMember = memberOutcomes.find((member) => member.member.policyId === policy.id);
+      const categories = [...new Set(memberOutcomes.filter((member) => member.member.policyId === policy.id).map((member) => member.category))].sort();
       const state: "suppressed" | "escalated" | "active" = policy.suppressedAt ? "suppressed" : policy.escalatedAt ? "escalated" : "active";
-      return { cohortKey: policy.cohortKey, category: firstMember?.category ?? "missing_category", state, samplingPercent: policy.samplingPercent, recommendedSafeAction: state === "suppressed" ? "suppress_or_escalate" as const : "stricter_sampling" as const };
+      return { cohortKey: policy.cohortKey, category: categories.length === 1 ? categories[0] : categories.length > 1 ? "mixed_current_categories" : "missing_category", state, samplingPercent: policy.samplingPercent, recommendedSafeAction: state === "suppressed" ? "suppress_or_escalate" as const : "stricter_sampling" as const };
     });
-  const samplingMembers = memberOutcomes.slice(0, 10).map(({ member, policy, outcome, category }) => ({
+  const samplingMembers = [...memberOutcomes].sort((left, right) => samplingOutcomePriority(left.outcome) - samplingOutcomePriority(right.outcome) || left.member.knowledgeCardId.localeCompare(right.member.knowledgeCardId)).slice(0, policyDiagnosticLimit).map(({ member, policy, outcome, category }) => ({
     knowledgeCardId: member.knowledgeCardId,
     category,
     samplingOutcome: outcome,
@@ -292,21 +337,33 @@ async function buildPolicySignals({
   }));
 
   return {
-    evaluation: { scope: "filtered_evaluations", totalResults: resultRows.length, evidenceGroundingFailures, caveatViolations, verificationFailures, missingSignal: resultRows.length === 0, diagnostics: evaluationDiagnostics },
+    evaluation: { scope: "filtered_evaluations", totalResults: resultRows.length, evidenceGroundingFailures, caveatViolations, verificationFailures, missingSignal: resultRows.length === 0 || resultRows.length > policyDiagnosticLimit || snapshots.length !== resultIds.length, diagnostics: evaluationDiagnostics },
     sampling: {
       scope: "all_sampling_policies",
-      cohortMembers: members.length,
+      cohortMembers: boundedMembers.length,
       sampledPassed: memberOutcomes.filter((member) => member.outcome === "passed").length,
       sampledFailed: memberOutcomes.filter((member) => member.outcome === "failed").length,
+      pendingMembers: memberOutcomes.filter((member) => member.outcome === "pending").length,
       unselectedMembers: memberOutcomes.filter((member) => member.outcome === "unselected").length,
-      verificationRequiredCurrentCards: cards.filter((card) => card.verificationState === "required" || card.verificationState === "failed").length,
+      verificationRequiredCurrentCards: policyCardIds.filter((cardId) => {
+        const verificationState = cardsById.get(cardId)?.verificationState;
+        return verificationState === "required" || verificationState === "failed";
+      }).length,
       escalatedCohorts: policies.filter((policy) => policy.escalatedAt).length,
       suppressedCohorts: policies.filter((policy) => policy.suppressedAt).length,
-      missingSignal: members.length === 0,
+      missingSignal: boundedMembers.length === 0 || memberOutcomes.every((member) => member.outcome !== "passed" && member.outcome !== "failed") || memberOutcomes.some((member) => member.outcome === "pending") || policyRows.length > policyDiagnosticLimit || members.length > cohortMemberReadLimit || recommendations.length > cohortRecommendationReadLimit || cards.length > cohortCardReadLimit,
       members: samplingMembers,
     },
     cohorts,
   };
+}
+
+function samplingFenceKey(value: { policyId: string | null; knowledgeCardId: string; contentVersion: number; evidenceSetRevision: number }) {
+  return `${value.policyId}:${value.knowledgeCardId}:${value.contentVersion}:${value.evidenceSetRevision}`;
+}
+
+function samplingOutcomePriority(outcome: "passed" | "failed" | "pending" | "unselected") {
+  return outcome === "failed" ? 0 : outcome === "pending" ? 1 : outcome === "unselected" ? 2 : 3;
 }
 
 function evaluationAction(row: { rawEvidenceLeakageFlag: boolean; staleWithdrawnSourceExposureFlag: boolean; conflictedKnowledgeExcludedFlag: boolean; unsupportedClaimFlag: boolean; unsupportedCommunityWordingFlag: boolean; requiredCaveatOmittedFlag: boolean; fallbackVerificationGuidanceMetFlag: boolean }) {

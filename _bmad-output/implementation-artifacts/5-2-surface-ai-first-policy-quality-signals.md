@@ -48,8 +48,16 @@ so that I can prioritize suppression, verification, or stricter sampling before 
   - [x] Proved a later card version does not contaminate historical cohort results and the existing missing-signal/readiness regression remains intact.
   - [x] Preserved usefulness, generic-answer, retrieval/provenance, and filter behavior while exposing sampling as unfiltered scope.
   - [x] Extended serialization-leak assertions for answer text, sampling rationale, provenance snapshot, provider, and raw-source markers.
-  - [x] Reused `tests/public-mvp-evaluation.test.ts` and `tests/knowledge-recommendation-queue.test.ts` as ownership regressions.
-  - [x] Ran DB-backed focused suites serially using normal repository commands, then lint, typecheck, and build; no `db:reset` was used.
+   - [x] Reused `tests/public-mvp-evaluation.test.ts` and `tests/knowledge-recommendation-queue.test.ts` as ownership regressions.
+   - [x] Ran DB-backed focused suites serially using normal repository commands, then lint, typecheck, and build; no `db:reset` was used.
+
+### Review Findings
+
+- [x] [Review][Patch] Render the required individual sampling and verification signals [src/app/admin/quality/page.tsx:123] — AC 1 requires operators to inspect active-card sampling pass/fail and verification-required state, but the page combines passes and failures into one number and never renders `verificationRequiredCurrentCards` or bounded member outcomes. AC 2 also requires a failure's prompt/model/category tuple, while the rendered evaluation diagnostic omits `modelVersion`.
+- [x] [Review][Patch] Fail closed when policy evaluation or sampling outcomes are unavailable [src/features/feedback/quality-dashboard.ts:244] — `evaluation.missingSignal` is false for any filtered result even without a persisted policy snapshot, and `sampling.missingSignal` is false whenever cohort members exist even if none has a resolved pass/fail outcome. Unresolved selected recommendations are also classified as `unselected`. This can report zero failures or readiness-adjacent signals from insufficient data, violating AC 3.
+- [x] [Review][Patch] Make version-fenced sampling dispositions deterministic [src/features/feedback/quality-dashboard.ts:273] — multiple resolved historical sampling recommendations may share the same policy/card/version/revision fence, but `Array.find()` selects an unordered row. A failed sampled card can therefore be shown as passed. Select the authoritative disposition deterministically and distinguish no recommendation from selected-but-pending work.
+- [x] [Review][Patch] Bound policy-signal reads and prioritize actionable cohorts [src/features/feedback/quality-dashboard.ts:251] — every dashboard request loads all policies, cohort members, sampling recommendations, and cards, then scans recommendations per member. The response is capped only after unbounded in-memory work; the arbitrary first ten cohorts may omit suppressed/escalated cohorts. Use bounded, ordered query/aggregate paths and prioritize actionable cohort diagnostics.
+- [x] [Review][Patch] Avoid misleading cohort categories [src/features/feedback/quality-dashboard.ts:283] — cohort category is derived from the first mutable current card. Mixed cohorts are mislabeled and historical category can drift after a card update. Aggregate categories deterministically or label the value as current/mixed.
 
 ## Dev Notes
 
@@ -155,8 +163,17 @@ gpu4ai/gpt-5.6-terra-review
 - 2026-07-24: Revalidated the target story against the current dashboard, evaluation, sampling, schema, test, PRD, architecture, and UX contracts. Repaired the target-only guidance for cohort membership versus recommendation selection, `verify_first` policy references, durable severity limits, category provenance, and deterministic safe-action mappings. Final validation passed; Story 5.2 remains `ready-for-dev`.
 - 2026-07-24: Blocked before implementation verification because `DATABASE_URL_TEST` is unavailable in this execution environment. Story remains `in-progress`; no task or subtask was marked complete and sprint status was not advanced to `review`.
 - 2026-07-24: Completed the bounded recovery using normal repository test commands without environment overrides. Added the safe, read-only policy-signal projection and Vietnamese operator rendering; all focused DB-backed suites, typecheck, and build passed. Lint completed with three existing unused-variable warnings in `tests/knowledge-search.test.ts` and no errors.
+- 2026-07-24: Addressed only the five first-review actionable findings. The policy projection now uses ordered bounded reads, prioritizes suppressed/escalated cohorts, fails closed for missing/truncated policy data and pending sampling work, deterministically selects the newest resolved version-fenced sampling disposition, and identifies categories as current/mixed. The operator page renders individual pass/fail, verification-required, pending, member-outcome, and model-version signals.
 
 ### File List
+
+- _bmad-output/implementation-artifacts/5-2-surface-ai-first-policy-quality-signals.md
+- _bmad-output/implementation-artifacts/sprint-status.yaml
+- tests/public-mvp-quality-dashboard.test.ts
+- src/features/feedback/quality-dashboard.ts
+- src/app/admin/quality/page.tsx
+
+### Review Follow-up File List
 
 - _bmad-output/implementation-artifacts/5-2-surface-ai-first-policy-quality-signals.md
 - _bmad-output/implementation-artifacts/sprint-status.yaml
@@ -170,10 +187,17 @@ gpu4ai/gpt-5.6-terra-review
 - 2026-07-24: Repaired target-only validation gaps and reconfirmed `ready-for-dev`; sprint status remains synchronized.
 - 2026-07-24: Began Story 5.2 and added an initial regression fixture; halted because the required `DATABASE_URL_TEST` configuration is missing.
 - 2026-07-24: Completed Story 5.2 implementation and verification; status moved to `review`.
+- 2026-07-24: Resolved first-review actionable findings only; status remains `review` and sprint status is synchronized.
 
 ### Verification
 
 - `pnpm test:run tests/public-mvp-quality-dashboard.test.ts` - passed (8 tests).
+- `pnpm test:run tests/public-mvp-evaluation.test.ts` - passed (15 tests).
+- `pnpm test:run tests/knowledge-recommendation-queue.test.ts` - passed (23 tests).
+- `pnpm lint` - passed with 3 pre-existing warnings in `tests/knowledge-search.test.ts`.
+- `pnpm typecheck` - passed.
+- `pnpm build` - passed.
+- `pnpm test:run tests/public-mvp-quality-dashboard.test.ts` - passed (9 tests) after first-review fixes.
 - `pnpm test:run tests/public-mvp-evaluation.test.ts` - passed (15 tests).
 - `pnpm test:run tests/knowledge-recommendation-queue.test.ts` - passed (23 tests).
 - `pnpm lint` - passed with 3 pre-existing warnings in `tests/knowledge-search.test.ts`.

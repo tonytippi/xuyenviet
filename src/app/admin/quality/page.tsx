@@ -123,14 +123,18 @@ export default async function QualityDashboardPage({ searchParams }: QualityPage
         <dl className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <MiniMetric label="Evidence-grounding lỗi" value={dashboard.policySignals.evaluation.evidenceGroundingFailures} />
           <MiniMetric label="Vi phạm caveat" value={dashboard.policySignals.evaluation.caveatViolations} />
-          <MiniMetric label="Sampling pass / fail" value={dashboard.policySignals.sampling.sampledPassed + dashboard.policySignals.sampling.sampledFailed} />
+          <MiniMetric label="Sampling pass" value={dashboard.policySignals.sampling.sampledPassed} />
+          <MiniMetric label="Sampling fail" value={dashboard.policySignals.sampling.sampledFailed} />
+          <MiniMetric label="Cần xác minh hiện tại" value={dashboard.policySignals.sampling.verificationRequiredCurrentCards} />
+          <MiniMetric label="Sampling đang chờ" value={dashboard.policySignals.sampling.pendingMembers} />
           <MiniMetric label="Cohort chưa được chọn" value={dashboard.policySignals.sampling.unselectedMembers} />
         </dl>
         {dashboard.policySignals.evaluation.missingSignal ? <p className="mt-5 rounded-2xl bg-[#fff3df] p-4 font-semibold text-[#8c4f13]">Thiếu tín hiệu policy từ eval trong bộ lọc hiện tại. Dashboard không thay đổi trạng thái readiness.</p> : null}
         {dashboard.policySignals.sampling.missingSignal ? <p className="mt-3 rounded-2xl bg-[#fff3df] p-4 font-semibold text-[#8c4f13]">Thiếu cohort sampling đủ dữ liệu. Dashboard không suy diễn kết quả pass/fail.</p> : null}
         <div className="mt-5 grid gap-4 xl:grid-cols-2">
           <PolicyList title="Cohort sampling" emptyLabel="Chưa có cohort sampling đủ dữ liệu." items={dashboard.policySignals.cohorts.map((cohort) => `${cohort.cohortKey} · ${cohort.category} · ${cohort.state} · ${cohort.recommendedSafeAction}`)} />
-          <PolicyList title="Eval policy failures" emptyLabel="Không có policy failure trong phạm vi eval hiện tại." items={dashboard.policySignals.evaluation.diagnostics.map((diagnostic) => `${promptLabels[diagnostic.promptType]} · ${diagnostic.category} · severity ${diagnostic.severity} · ${diagnostic.recommendedSafeAction}`)} />
+          <PolicyList title="Sampling card outcomes" emptyLabel="Chưa có member sampling trong phạm vi đọc an toàn." items={dashboard.policySignals.sampling.members.map((member) => `${member.knowledgeCardId} · ${member.category} · ${member.samplingOutcome} · ${member.recommendedSafeAction}`)} />
+          <PolicyList title="Eval policy failures" emptyLabel="Không có policy failure trong phạm vi eval hiện tại." items={dashboard.policySignals.evaluation.diagnostics.map((diagnostic) => `${promptLabels[diagnostic.promptType]} · model ${diagnostic.modelVersion} · ${diagnostic.category} · severity ${diagnostic.severity} · ${diagnostic.recommendedSafeAction}`)} />
         </div>
       </section>
 
