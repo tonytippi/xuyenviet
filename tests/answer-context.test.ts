@@ -2059,7 +2059,7 @@ describe("answer context assembly", () => {
     expect(doneEvent?.assistantMessage?.provenance?.map((item) => item.sourceCategory)).toEqual(["trip_context", "chat_context", "knowledge", "web", "general"]);
     expect(doneEvent?.assistantMessage?.provenance).toEqual(expect.arrayContaining([
       expect.objectContaining({ sourceCategory: "knowledge", title: expect.stringContaining("Bãi đỗ xe an toàn ở Huế"), confidenceLabel: "official", verificationStatus: "verified" }),
-      expect.objectContaining({ sourceCategory: "web", title: "Nguồn web chưa xác minh", confidenceLabel: "chưa xác minh", verificationStatus: "unverified", url: null, freshnessSensitive: true }),
+      expect.objectContaining({ sourceCategory: "web", title: `Cổng thông tin Huế ${"giá vé".repeat(30)}`, confidenceLabel: "chưa xác minh", verificationStatus: "unverified", url: "https://hue.gov.vn/ticket", freshnessSensitive: true }),
       expect.objectContaining({ sourceCategory: "general", title: "Suy luận tổng quát của AI", confidenceLabel: "suy luận chưa xác minh" }),
     ]));
     expect(assistantMessage).toBeDefined();
@@ -2132,14 +2132,14 @@ describe("answer context assembly", () => {
     });
 
     expect(inserted).toEqual(expect.arrayContaining([
-      expect.objectContaining({ sourceCategory: "web", confidenceLabel: "chưa xác minh", verificationStatus: "unverified", freshnessSensitive: true }),
+      expect.objectContaining({ sourceCategory: "web", title: "Bảng giá", url: "https://example.com/price", confidenceLabel: "chưa xác minh", verificationStatus: "unverified", freshnessSensitive: true }),
     ]));
     const [webRow] = await testDb.select().from(assistantResponseProvenance).where(eq(assistantResponseProvenance.sourceCategory, "web"));
     const snapshot = JSON.stringify(webRow?.sourceSnapshot);
     expect(snapshot).toContain("persistedWebSearchResultId");
     expect(snapshot).not.toContain("Giá hiện tại?");
-    expect(snapshot).not.toContain("Bảng giá");
-    expect(snapshot).not.toContain("example.com/price");
+    expect(snapshot).toContain("Bảng giá");
+    expect(snapshot).toContain("https://example.com/price");
     expect(snapshot).not.toContain("Tham khảo.");
     expect(snapshot).not.toContain("tavily");
     expect(snapshot).not.toContain("providerScore");

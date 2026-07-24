@@ -173,6 +173,8 @@ function buildProvenanceRows({
       verificationStatus: "unverified",
       usedInPrompt: promptSection.includes(`url=${formatPromptValue(result.url, 300)}`) || promptSection.includes(`title=${formatPromptValue(result.title, 180)}`),
       sourceSnapshot: {
+        title: getSafeWebTitle(result.title),
+        url: getSafeTravelerUrl(result.url),
         checkedAt: formatDateSnapshot(result.checkedAt),
         sourceType: result.sourceType,
         confidence: result.confidence,
@@ -349,6 +351,11 @@ function getSafeTravelerUrl(value: string | null) {
   } catch {
     return null;
   }
+}
+
+function getSafeWebTitle(value: string) {
+  const title = getOptionalString(value);
+  return title && isTravelerSafeEvidenceText(title) ? title : null;
 }
 
 function isFacebookHost(hostname: string) {
