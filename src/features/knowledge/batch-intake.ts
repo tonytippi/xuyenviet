@@ -5,6 +5,7 @@ import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { knowledgeCardEvidence, knowledgeCards, knowledgeCardSources, knowledgeCardTypeValues, knowledgeRecommendations, knowledgeSeedBatchItems, knowledgeSeedBatches, knowledgeSourceSuggestions, sourceCaptureVersions, sources, type KnowledgeCardType, type KnowledgeRecommendationReason, type KnowledgeSeedBatchItemStatus, type KnowledgeSuggestionAction } from "@/db/schema";
 import { evaluateKnowledgeTravelerPolicy } from "@/features/knowledge/state";
+import { getCorridorBucketLabel, getCorridorBuckets } from "@/features/knowledge/corridor";
 import { recordAuditEvent } from "@/features/audit/events";
 import { requireAdminSession } from "@/server/auth";
 
@@ -17,26 +18,6 @@ const maxRecentBatches = 5;
 const maxSubmittedUrlLength = 2048;
 const maxSafeErrorLength = 500;
 const activeCorridorSeedTarget = 100;
-const corridorBuckets = [
-  { label: "Hà Nội", aliases: ["ha noi", "hanoi"] },
-  { label: "Ninh Bình", aliases: ["ninh binh"] },
-  { label: "Thanh Hóa", aliases: ["thanh hoa"] },
-  { label: "Nghệ An / Vinh", aliases: ["nghe an", "vinh"] },
-  { label: "Hà Tĩnh", aliases: ["ha tinh"] },
-  { label: "Quảng Bình / Đồng Hới", aliases: ["quang binh", "dong hoi"] },
-  { label: "Quảng Trị", aliases: ["quang tri"] },
-  { label: "Huế", aliases: ["hue"] },
-  { label: "Đà Nẵng", aliases: ["da nang"] },
-  { label: "Hội An / Quảng Nam", aliases: ["hoi an", "quang nam"] },
-  { label: "Quảng Ngãi", aliases: ["quang ngai"] },
-  { label: "Quy Nhơn / Bình Định", aliases: ["quy nhon", "binh dinh"] },
-  { label: "Phú Yên / Tuy Hòa", aliases: ["phu yen", "tuy hoa"] },
-  { label: "Nha Trang / Khánh Hòa", aliases: ["nha trang", "khanh hoa"] },
-  { label: "Phan Rang / Ninh Thuận", aliases: ["phan rang", "ninh thuan"] },
-  { label: "Phan Thiết / Bình Thuận", aliases: ["phan thiet", "binh thuan"] },
-  { label: "Đồng Nai", aliases: ["dong nai"] },
-  { label: "TP.HCM / Sài Gòn", aliases: ["tp hcm", "tphcm", "ho chi minh", "sai gon", "hcmc"] },
-];
 
 type BatchDb = ReturnType<typeof getDb>;
 
@@ -222,9 +203,12 @@ export async function listRecentKnowledgeSeedBatches(limit = maxRecentBatches): 
   });
 }
 
-export async function getActiveEvidenceGroundedSeedCoverage(): Promise<ActiveEvidenceGroundedSeedCoverage> {
+export async function getActiveEvidenceGroundedSeedCoverage(dbOverride?: BatchDb): Promise<ActiveEvidenceGroundedSeedCoverage> {
   await requireAdminSession();
-  const db = getDb();
+  return getActiveEvidenceGroundedSeedCoverageForReadiness(dbOverride ?? getDb());
+}
+
+export async function getActiveEvidenceGroundedSeedCoverageForReadiness(db: BatchDb): Promise<ActiveEvidenceGroundedSeedCoverage> {
   const cardRows = await db
     .select({
       id: knowledgeCards.id,
@@ -352,6 +336,31 @@ export async function getActiveEvidenceGroundedSeedCoverage(): Promise<ActiveEvi
     byType: countByType(Array.from(uniqueEligibleCards.values())),
     byRouteOrLocation: countByRouteOrLocation(Array.from(uniqueEligibleCards.values())),
   };
+}
+
+/** Internal aggregate for readiness consumers that must validate persisted fences without exposing card material. */
+export async function getCurrentValidEvidenceFencesForReadiness(db: BatchDb) {
+  const rows = await db
+    .select({
+      knowledgeCardId: knowledgeCards.id,
+      contentVersion: knowledgeCards.contentVersion,
+      evidenceSetRevision: knowledgeCards.evidenceSetRevision,
+      publicationState: knowledgeCards.publicationState,
+    })
+    .from(knowledgeCards)
+    .innerJoin(knowledgeCardEvidence, and(eq(knowledgeCardEvidence.knowledgeCardId, knowledgeCards.id), eq(knowledgeCardEvidence.state, "active")))
+    .innerJoin(sources, and(eq(sources.id, knowledgeCardEvidence.sourceId), eq(sources.eligibility, "eligible")))
+    .innerJoin(sourceCaptureVersions, and(eq(sourceCaptureVersions.id, knowledgeCardEvidence.captureVersionId), eq(sourceCaptureVersions.sourceId, knowledgeCardEvidence.sourceId)))
+    .where(and(
+      sql`${knowledgeCardEvidence.supportLevel} in ('primary', 'supporting')`,
+      sql`${knowledgeCardEvidence.displayPolicy} in ('fact_only', 'traveler_visible')`,
+      sql`${sources.kind} = ${sourceCaptureVersions.captureKind} and ${sources.kind} in ('url', 'facebook', 'youtube')`,
+      sql`${sourceCaptureVersions.payloadDeletedAt} is null`,
+      sql`${sourceCaptureVersions.rawText} is not null`,
+      sql`substring(${sourceCaptureVersions.rawText} from ${knowledgeCardEvidence.spanStart} + 1 for ${knowledgeCardEvidence.spanEnd} - ${knowledgeCardEvidence.spanStart}) = ${knowledgeCardEvidence.quoteText}`,
+    ));
+
+  return new Map(rows.map((row) => [`${row.knowledgeCardId}:${row.contentVersion}:${row.evidenceSetRevision}`, row.publicationState]));
 }
 
 function parseSubmittedUrlLines(input: string) {
@@ -517,18 +526,6 @@ function hasCorridorSignal(routeSegment: string | null, locationName: string | n
   return getCorridorBucketLabel(routeSegment, locationName) !== null;
 }
 
-function normalizeSearchText(value: string) {
-  return value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/đ/g, "d")
-    .replace(/Đ/g, "d")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim()
-    .replace(/\s+/g, " ");
-}
-
 function countByType(cards: Array<{ type: KnowledgeCardType }>) {
   const counts = new Map<KnowledgeCardType, number>(knowledgeCardTypeValues.map((type) => [type, 0]));
   for (const card of cards) {
@@ -540,7 +537,7 @@ function countByType(cards: Array<{ type: KnowledgeCardType }>) {
 }
 
 function countByRouteOrLocation(cards: Array<{ locationName: string | null; routeSegment: string | null }>) {
-  const counts = new Map<string, number>(corridorBuckets.map((bucket) => [bucket.label, 0]));
+  const counts = new Map<string, number>(getCorridorBuckets().map((bucket) => [bucket.label, 0]));
   for (const card of cards) {
     const key = getCorridorBucketLabel(null, card.locationName) ?? getCorridorBucketLabel(card.routeSegment, null);
     if (key) {
@@ -550,14 +547,4 @@ function countByRouteOrLocation(cards: Array<{ locationName: string | null; rout
   return Array.from(counts.entries())
     .map(([routeOrLocation, count]) => ({ routeOrLocation, count }))
     .sort((a, b) => b.count - a.count || a.routeOrLocation.localeCompare(b.routeOrLocation));
-}
-
-function getCorridorBucketLabel(routeSegment: string | null, locationName: string | null) {
-  const normalizedValue = ` ${normalizeSearchText([routeSegment, locationName].filter(Boolean).join(" "))} `;
-  for (const bucket of corridorBuckets) {
-    if (bucket.aliases.some((alias) => normalizedValue.includes(` ${normalizeSearchText(alias)} `))) {
-      return bucket.label;
-    }
-  }
-  return null;
 }

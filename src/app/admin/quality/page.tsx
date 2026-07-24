@@ -76,7 +76,7 @@ export default async function QualityDashboardPage({ searchParams }: QualityPage
         <MetricCard label="Feedback useful" value={`${dashboard.feedback.useful}/${dashboard.feedback.total}`} detail={dashboard.feedback.usefulRate === null ? "Chưa có feedback" : `${Math.round(dashboard.feedback.usefulRate * 100)}% useful`} />
         <MetricCard label="Eval scored" value={`${dashboard.evaluation.scoredResults}/${dashboard.evaluation.totalResults}`} detail={`Failed: ${dashboard.evaluation.failedResults}`} />
         <MetricCard label="Điểm trung bình" value={dashboard.evaluation.averageScore === null ? "N/A" : `${dashboard.evaluation.averageScore}/10`} detail="Trung bình mọi rubric score" />
-        <MetricCard label="Readiness" value={dashboard.readiness.status === "ready" ? "Ready" : "Chưa đủ"} detail={dashboard.readiness.missingSignals.length === 0 ? "Đủ tín hiệu" : `${dashboard.readiness.missingSignals.length} tín hiệu thiếu`} />
+        <MetricCard label="Readiness" value={dashboard.readiness.status === "ready" ? "Ready" : "Chưa đủ"} detail={dashboard.readiness.missingSignals.length === 0 ? "Đủ bằng chứng hiện hành" : `${dashboard.readiness.missingSignals.length} khoảng trống cần xử lý`} />
       </dl>
 
       <section className="mt-8 grid gap-6 xl:grid-cols-[1fr_1fr]">
@@ -95,6 +95,14 @@ export default async function QualityDashboardPage({ searchParams }: QualityPage
               </li>
             ))}
           </ul>
+          <p className="mt-5 leading-7 text-[#4f625a]">
+            Readiness chỉ dùng corpus hiện hành và evidence an toàn toàn cục, không dùng số thẻ approved lịch sử hoặc kết quả bị che bởi bộ lọc.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-4 text-sm font-semibold text-[#1f5f46] underline underline-offset-4">
+            <Link href="/admin/knowledge/progress">Theo dõi coverage</Link>
+            <Link href="/admin/knowledge/recommendations">Xử lý khuyến nghị</Link>
+            <Link href="/admin/knowledge/intake">Nạp nguồn an toàn</Link>
+          </div>
         </div>
 
         <div className="rounded-[1.5rem] border border-[#d8c9ad] bg-white/75 p-5 sm:p-6">
@@ -118,7 +126,7 @@ export default async function QualityDashboardPage({ searchParams }: QualityPage
       <section className="mt-8 rounded-[1.5rem] border border-[#d8c9ad] bg-white/75 p-5 sm:p-6">
         <h2 className="text-2xl font-semibold tracking-[-0.03em] text-[#17342c]">Tín hiệu chính sách AI-first</h2>
         <p className="mt-2 max-w-3xl leading-7 text-[#4f625a]">
-          Eval tuân theo bộ lọc hiện tại. Sampling là trạng thái cohort toàn cục theo phiên bản card, không được suy diễn là cùng prompt hoặc cùng thời gian với eval.
+          Eval hiển thị tuân theo bộ lọc hiện tại. Readiness vẫn dùng corpus-wide safety evidence: thiếu proof sampling, cohort bị suppress/escalate, xác minh pending, hoặc lỗi eval severity cao đều chặn tuyên bố sẵn sàng.
         </p>
         <dl className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <MiniMetric label="Evidence-grounding lỗi" value={dashboard.policySignals.evaluation.evidenceGroundingFailures} />
@@ -129,8 +137,8 @@ export default async function QualityDashboardPage({ searchParams }: QualityPage
           <MiniMetric label="Sampling đang chờ" value={dashboard.policySignals.sampling.pendingMembers} />
           <MiniMetric label="Cohort chưa được chọn" value={dashboard.policySignals.sampling.unselectedMembers} />
         </dl>
-        {dashboard.policySignals.evaluation.missingSignal ? <p className="mt-5 rounded-2xl bg-[#fff3df] p-4 font-semibold text-[#8c4f13]">Thiếu tín hiệu policy từ eval trong bộ lọc hiện tại. Dashboard không thay đổi trạng thái readiness.</p> : null}
-        {dashboard.policySignals.sampling.missingSignal ? <p className="mt-3 rounded-2xl bg-[#fff3df] p-4 font-semibold text-[#8c4f13]">Thiếu cohort sampling đủ dữ liệu. Dashboard không suy diễn kết quả pass/fail.</p> : null}
+        {dashboard.policySignals.evaluation.missingSignal ? <p className="mt-5 rounded-2xl bg-[#fff3df] p-4 font-semibold text-[#8c4f13]">Thiếu tín hiệu policy trong eval đã lọc. Readiness vẫn fail closed nếu evidence eval corpus-wide chưa hoàn chỉnh.</p> : null}
+        {dashboard.policySignals.sampling.missingSignal ? <p className="mt-3 rounded-2xl bg-[#fff3df] p-4 font-semibold text-[#8c4f13]">Thiếu cohort sampling đủ dữ liệu. Readiness không suy diễn pass/fail từ dữ liệu bị giới hạn.</p> : null}
         <div className="mt-5 grid gap-4 xl:grid-cols-2">
           <PolicyList title="Cohort sampling" emptyLabel="Chưa có cohort sampling đủ dữ liệu." items={dashboard.policySignals.cohorts.map((cohort) => `${cohort.cohortKey} · ${cohort.category} · ${cohort.state} · ${cohort.recommendedSafeAction}`)} />
           <PolicyList title="Sampling card outcomes" emptyLabel="Chưa có member sampling trong phạm vi đọc an toàn." items={dashboard.policySignals.sampling.members.map((member) => `${member.category} · ${member.samplingOutcome} · ${member.recommendedSafeAction}`)} />

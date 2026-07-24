@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import { eq } from "drizzle-orm";
 
 import {
   answerUsefulnessFeedback,
@@ -12,9 +13,16 @@ import {
   publicMvpEvaluationResults,
   publicMvpEvaluationRuns,
   knowledgeCards,
+  knowledgeCardEvidence,
+  knowledgeCardSources,
+  knowledgeIngestionJobs,
   knowledgeRecommendations,
+  knowledgeSamplingCandidateLedger,
   knowledgeSamplingCohortMembers,
   knowledgeSamplingPolicies,
+  knowledgeVerifyFirstSamplingObligations,
+  sourceCaptureVersions,
+  sources,
   userRoles,
   users,
   type PublicMvpEvaluationPromptType,
@@ -23,6 +31,7 @@ import {
 } from "@/db/schema";
 
 import { testDb } from "./helpers/db";
+import { seedKnowledgeCardEvidence, seedSourceCaptureVersion } from "./helpers/source-captures";
 
 const sessionWithRolesMock = vi.fn();
 
@@ -210,6 +219,23 @@ async function seedFeedbackForAssistantMessages(userId: string, results: Array<{
   }
 }
 
+async function seedSamplingFence(input: { id: string; userId: string; publicationState?: "active" | "suppressed"; contentVersion?: number; evidenceSetRevision?: number; validEvidence?: boolean }) {
+  const contentVersion = input.contentVersion ?? 1;
+  const evidenceSetRevision = input.evidenceSetRevision ?? 1;
+  const rawText = `Evidence ${input.id}.`;
+  await testDb.insert(sources).values({ id: `source-${input.id}`, kind: "url", url: `https://example.com/${input.id}`, label: `Source ${input.id}`, sourceType: "community", submittedByUserId: input.userId });
+  const capture = await seedSourceCaptureVersion({ id: `capture-${input.id}`, sourceId: `source-${input.id}`, captureKind: "url", rawText });
+  await testDb.insert(knowledgeCards).values({ id: input.id, status: "approved", publicationState: input.publicationState ?? "active", knowledgeState: input.publicationState === "suppressed" ? "uncertain" : "community_observation", reviewState: input.publicationState === "suppressed" ? "ai_recommended" : "reviewed", verificationState: input.publicationState === "suppressed" ? "required" : "not_required", type: "place", title: `Card ${input.id}`, summary: "Safe summary", locationName: "Huế", confidence: "community", needsReview: false, aiPromptVersion: "test", createdByUserId: input.userId, contentVersion, evidenceSetRevision });
+  await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: input.id, sourceId: `source-${input.id}`, supportLevel: "primary" });
+  await seedKnowledgeCardEvidence({ cardId: input.id, sourceId: `source-${input.id}`, captureVersionId: capture.id, quoteText: rawText, state: input.validEvidence === false ? "removed" : "active" });
+  await testDb.insert(knowledgeIngestionJobs).values({ id: `job-${input.id}`, sourceId: `source-${input.id}`, captureVersionId: capture.id, submittedByUserId: input.userId, submittedByEmail: `${input.userId}@example.com`, stage: "published" });
+  return { contentVersion, evidenceSetRevision, jobId: `job-${input.id}` };
+}
+
+function enrollmentEntry(id: string, contentVersion = 1, evidenceSetRevision = 1, selectedForSampling = true) {
+  return `${id}:${contentVersion}:${evidenceSetRevision}:Huế:false:${selectedForSampling}`;
+}
+
 describe("public MVP quality dashboard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -328,7 +354,8 @@ describe("public MVP quality dashboard", () => {
 
     expect(withoutLinkedFeedback.success ? withoutLinkedFeedback.readiness.status : null).toBe("not_ready");
     expect(withoutLinkedFeedback.success ? withoutLinkedFeedback.readiness.missingSignals : []).toContain("Cần thêm 10 phản hồi usefulness cho magic-moment.");
-    expect(withLinkedFeedback.success ? withLinkedFeedback.readiness.status : null).toBe("ready");
+    expect(withLinkedFeedback.success ? withLinkedFeedback.readiness.status : null).toBe("not_ready");
+    expect(withLinkedFeedback.success ? withLinkedFeedback.readiness.missingSignals : []).toContain("Còn thiếu 100 thẻ hiện hành có evidence hợp lệ; phê duyệt lịch sử không được tính.");
   });
 
   test("does not report provenance categories that were stored but not used or cited", async () => {
@@ -488,5 +515,77 @@ describe("public MVP quality dashboard", () => {
     expect(dashboard.policySignals.sampling.missingSignal).toBe(true);
     expect(dashboard.policySignals.sampling.members).toContainEqual(expect.objectContaining({ samplingOutcome: "unselected", recommendedSafeAction: "suppress_or_escalate" }));
     expect(JSON.stringify(dashboard.policySignals.sampling.members)).not.toMatch(/actionable|active-00/);
+  });
+
+  test("fails readiness for 99 active cards and accepts the 100-card corpus threshold", async () => {
+    await createUser("threshold-admin", ["admin"]);
+    await mockSession("threshold-admin", ["admin"]);
+    const { getActiveEvidenceGroundedSeedCoverageForReadiness } = await import("@/features/knowledge/batch-intake");
+    for (let index = 0; index < 100; index += 1) {
+      await seedSamplingFence({ id: `threshold-${index}`, userId: "threshold-admin" });
+    }
+    await testDb.update(knowledgeCards).set({ publicationState: "suppressed" }).where(eq(knowledgeCards.id, "threshold-99"));
+    await expect(getActiveEvidenceGroundedSeedCoverageForReadiness(testDb)).resolves.toMatchObject({ activeEvidenceGroundedCards: 99, remainingActiveCards: 1, isComplete: false });
+    await testDb.update(knowledgeCards).set({ publicationState: "active" }).where(eq(knowledgeCards.id, "threshold-99"));
+    await expect(getActiveEvidenceGroundedSeedCoverageForReadiness(testDb)).resolves.toMatchObject({ activeEvidenceGroundedCards: 100, remainingActiveCards: 0, isComplete: true });
+  });
+
+  test("requires current valid evidence and one unambiguous disposition for selected and verify-first fences", async () => {
+    await createUser("fence-admin", ["admin"]);
+    const selected = await seedSamplingFence({ id: "selected-fence", userId: "fence-admin" });
+    const verifyFirst = await seedSamplingFence({ id: "verify-fence", userId: "fence-admin", publicationState: "suppressed" });
+    const { enrollmentDigest, getPublicMvpSamplingReadinessEvidence } = await import("@/features/knowledge/recommendations");
+    const [policy] = await testDb.insert(knowledgeSamplingPolicies).values({ cohortKey: "fence-policy", windowStartsAt: new Date("2026-01-01"), windowEndsAt: new Date("2026-01-29"), samplingPercent: 15, enrollmentCandidateCount: 1, enrollmentSelectedCount: 1, enrollmentDigest: enrollmentDigest([enrollmentEntry("selected-fence")]), enrollmentSealedAt: new Date() }).returning();
+    await testDb.insert(knowledgeSamplingCandidateLedger).values({ terminalIngestionJobId: selected.jobId, policyId: policy.id, knowledgeCardId: "selected-fence", contentVersion: selected.contentVersion, evidenceSetRevision: selected.evidenceSetRevision, corridorBucket: "Huế", outsideCorridor: false, selectedForSampling: true });
+    await testDb.insert(knowledgeSamplingCohortMembers).values({ policyId: policy.id, knowledgeCardId: "selected-fence", contentVersion: selected.contentVersion, evidenceSetRevision: selected.evidenceSetRevision, corridorBucket: "Huế", outsideCorridor: false, selectedForSampling: true });
+    await testDb.insert(knowledgeVerifyFirstSamplingObligations).values({ terminalIngestionJobId: verifyFirst.jobId, policyId: policy.id, knowledgeCardId: "verify-fence", contentVersion: verifyFirst.contentVersion, evidenceSetRevision: verifyFirst.evidenceSetRevision, corridorBucket: "Huế", outsideCorridor: false });
+    await testDb.insert(knowledgeRecommendations).values([
+      { knowledgeCardId: "selected-fence", contentVersion: 1, evidenceSetRevision: 1, policyId: policy.id, reason: "sampling", priority: 9, status: "resolved", resolution: "sampling_passed", samplingDispositionReason: "confirmed", resolvedByUserId: "fence-admin", resolvedAt: new Date() },
+      { knowledgeCardId: "verify-fence", contentVersion: 1, evidenceSetRevision: 1, policyId: policy.id, reason: "sampling", priority: 9, requiredForSampling: true, status: "resolved", resolution: "sampling_passed", samplingDispositionReason: "confirmed", resolvedByUserId: "fence-admin", resolvedAt: new Date() },
+    ]);
+    await expect(getPublicMvpSamplingReadinessEvidence(testDb)).resolves.toMatchObject({ complete: true, pending: 0, failed: 0 });
+
+    await testDb.update(knowledgeCards).set({ contentVersion: 2 }).where(eq(knowledgeCards.id, "selected-fence"));
+    await expect(getPublicMvpSamplingReadinessEvidence(testDb)).resolves.toMatchObject({ complete: false, pending: 1 });
+    await testDb.update(knowledgeCards).set({ contentVersion: 1 }).where(eq(knowledgeCards.id, "selected-fence"));
+    await testDb.update(knowledgeCards).set({ evidenceSetRevision: 2 }).where(eq(knowledgeCards.id, "selected-fence"));
+    await expect(getPublicMvpSamplingReadinessEvidence(testDb)).resolves.toMatchObject({ complete: false, pending: 1 });
+    await testDb.update(knowledgeCards).set({ evidenceSetRevision: 1 }).where(eq(knowledgeCards.id, "selected-fence"));
+    await testDb.update(knowledgeCards).set({ contentVersion: 2 }).where(eq(knowledgeCards.id, "verify-fence"));
+    await expect(getPublicMvpSamplingReadinessEvidence(testDb)).resolves.toMatchObject({ complete: false, pending: 1 });
+    await testDb.update(knowledgeCards).set({ contentVersion: 1, evidenceSetRevision: 2 }).where(eq(knowledgeCards.id, "verify-fence"));
+    await expect(getPublicMvpSamplingReadinessEvidence(testDb)).resolves.toMatchObject({ complete: false, pending: 1 });
+    await testDb.update(knowledgeCards).set({ evidenceSetRevision: 1 }).where(eq(knowledgeCards.id, "verify-fence"));
+    await testDb.update(knowledgeCardEvidence).set({ state: "removed" }).where(eq(knowledgeCardEvidence.knowledgeCardId, "verify-fence"));
+    await expect(getPublicMvpSamplingReadinessEvidence(testDb)).resolves.toMatchObject({ complete: false, pending: 1 });
+  });
+
+  test("fails closed for sealed count, selection, and digest mismatches plus duplicate sampling dispositions", async () => {
+    await createUser("proof-admin", ["admin"]);
+    const selected = await seedSamplingFence({ id: "proof-selected", userId: "proof-admin" });
+    const verifyFirst = await seedSamplingFence({ id: "proof-verify", userId: "proof-admin", publicationState: "suppressed" });
+    const { enrollmentDigest, getPublicMvpSamplingReadinessEvidence } = await import("@/features/knowledge/recommendations");
+    const [policy] = await testDb.insert(knowledgeSamplingPolicies).values({ cohortKey: "proof-policy", windowStartsAt: new Date("2026-02-01"), windowEndsAt: new Date("2026-03-01"), samplingPercent: 15, enrollmentCandidateCount: 1, enrollmentSelectedCount: 1, enrollmentDigest: enrollmentDigest([enrollmentEntry("proof-selected")]), enrollmentSealedAt: new Date() }).returning();
+    await testDb.insert(knowledgeSamplingCandidateLedger).values({ terminalIngestionJobId: selected.jobId, policyId: policy.id, knowledgeCardId: "proof-selected", contentVersion: 1, evidenceSetRevision: 1, corridorBucket: "Huế", outsideCorridor: false, selectedForSampling: true });
+    await testDb.insert(knowledgeSamplingCohortMembers).values({ policyId: policy.id, knowledgeCardId: "proof-selected", contentVersion: 1, evidenceSetRevision: 1, corridorBucket: "Huế", outsideCorridor: false, selectedForSampling: true });
+    await testDb.insert(knowledgeVerifyFirstSamplingObligations).values({ terminalIngestionJobId: verifyFirst.jobId, policyId: policy.id, knowledgeCardId: "proof-verify", contentVersion: 1, evidenceSetRevision: 1, corridorBucket: "Huế", outsideCorridor: false });
+    const recommendation = { knowledgeCardId: "proof-verify", contentVersion: 1, evidenceSetRevision: 1, policyId: policy.id, reason: "sampling" as const, priority: 9, requiredForSampling: true, status: "resolved" as const, resolution: "sampling_passed" as const, samplingDispositionReason: "confirmed" as const, resolvedByUserId: "proof-admin", resolvedAt: new Date() };
+    await testDb.insert(knowledgeRecommendations).values([{ knowledgeCardId: "proof-selected", contentVersion: 1, evidenceSetRevision: 1, policyId: policy.id, reason: "sampling", priority: 9, status: "resolved", resolution: "sampling_passed", samplingDispositionReason: "confirmed", resolvedByUserId: "proof-admin", resolvedAt: new Date() }, recommendation]);
+    await expect(getPublicMvpSamplingReadinessEvidence(testDb)).resolves.toMatchObject({ complete: true });
+    await testDb.update(knowledgeSamplingPolicies).set({ enrollmentCandidateCount: 2 }).where(eq(knowledgeSamplingPolicies.id, policy.id));
+    await expect(getPublicMvpSamplingReadinessEvidence(testDb)).resolves.toMatchObject({ complete: false, incompletePolicies: 1 });
+    await testDb.update(knowledgeSamplingPolicies).set({ enrollmentCandidateCount: 1, enrollmentSelectedCount: 0 }).where(eq(knowledgeSamplingPolicies.id, policy.id));
+    await expect(getPublicMvpSamplingReadinessEvidence(testDb)).resolves.toMatchObject({ complete: false, incompletePolicies: 1 });
+    await testDb.update(knowledgeSamplingPolicies).set({ enrollmentSelectedCount: 1, enrollmentDigest: "a".repeat(64) }).where(eq(knowledgeSamplingPolicies.id, policy.id));
+    await expect(getPublicMvpSamplingReadinessEvidence(testDb)).resolves.toMatchObject({ complete: false, incompletePolicies: 1 });
+    await testDb.update(knowledgeSamplingPolicies).set({ enrollmentDigest: enrollmentDigest([enrollmentEntry("proof-selected")]) }).where(eq(knowledgeSamplingPolicies.id, policy.id));
+    await testDb.update(knowledgeSamplingPolicies).set({ enrollmentCandidateCount: null, enrollmentSelectedCount: null, enrollmentDigest: null, enrollmentSealedAt: null }).where(eq(knowledgeSamplingPolicies.id, policy.id));
+    await expect(getPublicMvpSamplingReadinessEvidence(testDb)).resolves.toMatchObject({ complete: false, incompletePolicies: 1 });
+    await testDb.update(knowledgeSamplingPolicies).set({ enrollmentCandidateCount: 1, enrollmentSelectedCount: 1, enrollmentDigest: enrollmentDigest([enrollmentEntry("proof-selected")]), enrollmentSealedAt: new Date() }).where(eq(knowledgeSamplingPolicies.id, policy.id));
+    await testDb.insert(knowledgeRecommendations).values({ ...recommendation, id: "duplicate-required-disposition" });
+    await expect(getPublicMvpSamplingReadinessEvidence(testDb)).resolves.toMatchObject({ complete: false, pending: 1 });
+    await testDb.delete(knowledgeRecommendations).where(eq(knowledgeRecommendations.id, "duplicate-required-disposition"));
+    await testDb.insert(knowledgeRecommendations).values({ knowledgeCardId: "proof-selected", contentVersion: 1, evidenceSetRevision: 1, policyId: policy.id, reason: "sampling", priority: 9, status: "resolved", resolution: "sampling_failed", samplingDispositionReason: "safety_risk", resolvedByUserId: "proof-admin", resolvedAt: new Date() });
+    await expect(getPublicMvpSamplingReadinessEvidence(testDb)).resolves.toMatchObject({ complete: false, pending: 1 });
   });
 });

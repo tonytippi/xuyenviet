@@ -149,7 +149,10 @@ describe("knowledge ingestion pipeline", () => {
 
     await expect(runKnowledgeIngestionPipeline(claim, testDb)).resolves.toMatchObject({ outcome: "verify_first" });
     await expect(testDb.select().from(knowledgeCards)).resolves.toMatchObject([{ publicationState: "suppressed", verificationState: "required", reviewState: "ai_recommended", evidenceSetRevision: 2 }]);
-    await expect(testDb.select().from(knowledgeRecommendations)).resolves.toMatchObject([{ reason: "verification", status: "open", contentVersion: 2, evidenceSetRevision: 2 }]);
+    await expect(testDb.select().from(knowledgeRecommendations)).resolves.toMatchObject([
+      { reason: "verification", status: "open", contentVersion: 2, evidenceSetRevision: 2 },
+      { reason: "sampling", requiredForSampling: true, status: "open", contentVersion: 2, evidenceSetRevision: 2 },
+    ]);
     await expect(testDb.select().from(knowledgeIndexDirtyMarkers)).resolves.toMatchObject([{ contentVersion: 2, evidenceSetRevision: 2, status: "pending" }]);
   });
 

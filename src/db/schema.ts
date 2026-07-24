@@ -1050,6 +1050,10 @@ export const knowledgeSamplingPolicies = pgTable(
     cohortKey: text("cohort_key").notNull(),
     escalatedAt: timestamp("escalated_at", { mode: "date" }),
     suppressedAt: timestamp("suppressed_at", { mode: "date" }),
+    enrollmentCandidateCount: integer("enrollment_candidate_count"),
+    enrollmentSelectedCount: integer("enrollment_selected_count"),
+    enrollmentDigest: text("enrollment_digest"),
+    enrollmentSealedAt: timestamp("enrollment_sealed_at", { mode: "date" }),
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
   },
   (policy) => [
@@ -1058,6 +1062,7 @@ export const knowledgeSamplingPolicies = pgTable(
     check("knowledge_sampling_policies_window_check", sql`${policy.windowEndsAt} > ${policy.windowStartsAt}`),
     check("knowledge_sampling_policies_percent_check", sql`${policy.samplingPercent} between 1 and 100`),
     check("knowledge_sampling_policies_cohort_key_check", sql`length(btrim(${policy.cohortKey})) between 1 and 160`),
+    check("knowledge_sampling_policies_enrollment_counts_check", sql`(${policy.enrollmentCandidateCount} is null and ${policy.enrollmentSelectedCount} is null and ${policy.enrollmentDigest} is null and ${policy.enrollmentSealedAt} is null) or (${policy.enrollmentCandidateCount} >= 0 and ${policy.enrollmentSelectedCount} >= 0 and ${policy.enrollmentSelectedCount} <= ${policy.enrollmentCandidateCount} and ${policy.enrollmentDigest} ~ '^[a-f0-9]{64}$' and ${policy.enrollmentSealedAt} is not null)`),
   ],
 );
 
@@ -1069,12 +1074,16 @@ export const knowledgeSamplingCohortMembers = pgTable(
     knowledgeCardId: text("knowledge_card_id").notNull().references(() => knowledgeCards.id, { onDelete: "cascade" }),
     contentVersion: integer("content_version").notNull(),
     evidenceSetRevision: integer("evidence_set_revision").notNull(),
+    corridorBucket: text("corridor_bucket"),
+    outsideCorridor: boolean("outside_corridor"),
+    selectedForSampling: boolean("selected_for_sampling"),
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
   },
   (member) => [
     uniqueIndex("knowledge_sampling_cohort_members_policy_version_idx").on(member.policyId, member.knowledgeCardId, member.contentVersion, member.evidenceSetRevision),
     index("knowledge_sampling_cohort_members_policy_idx").on(member.policyId),
     check("knowledge_sampling_cohort_members_versions_check", sql`${member.contentVersion} >= 1 and ${member.evidenceSetRevision} >= 1`),
+    check("knowledge_sampling_cohort_members_corridor_shape_check", sql`(${member.corridorBucket} is null and ${member.outsideCorridor} is null) or (${member.corridorBucket} is not null and ${member.outsideCorridor} = false) or (${member.corridorBucket} is null and ${member.outsideCorridor} = true)`),
   ],
 );
 
@@ -1090,6 +1099,7 @@ export const knowledgeRecommendations = pgTable(
     priority: integer("priority").notNull(),
     policyId: text("policy_id").references(() => knowledgeSamplingPolicies.id, { onDelete: "restrict" }),
     policySnapshot: jsonb("policy_snapshot").$type<Record<string, unknown>>().default({}).notNull(),
+    requiredForSampling: boolean("required_for_sampling").default(false).notNull(),
     resolution: text("resolution").$type<KnowledgeRecommendationResolution>(),
     samplingDispositionReason: text("sampling_disposition_reason").$type<KnowledgeSamplingDispositionReason>(),
     samplingRationale: text("sampling_rationale"),
@@ -1108,11 +1118,57 @@ export const knowledgeRecommendations = pgTable(
     check("knowledge_recommendations_reason_check", sql`${recommendation.reason} in ('risk', 'weak_evidence', 'freshness', 'conflict', 'duplicate_risk', 'missing_context', 'verification', 'relation', 'sampling')`),
     check("knowledge_recommendations_priority_check", sql`${recommendation.priority} between 1 and 100`),
     check("knowledge_recommendations_policy_snapshot_check", sql`jsonb_typeof(${recommendation.policySnapshot}) = 'object' and octet_length(${recommendation.policySnapshot}::text) <= 1024`),
+    check("knowledge_recommendations_required_sampling_check", sql`${recommendation.requiredForSampling} = false or ${recommendation.reason} = 'sampling'`),
     check("knowledge_recommendations_resolution_check", sql`${recommendation.resolution} is null or ${recommendation.resolution} in ('accepted', 'edited', 'suppressed', 'restored', 'verified', 'relation_resolved', 'sampling_passed', 'sampling_failed')`),
     check("knowledge_recommendations_sampling_reason_check", sql`${recommendation.samplingDispositionReason} is null or ${recommendation.samplingDispositionReason} in ('confirmed', 'minor_issue', 'insufficient_evidence', 'stale_or_changed', 'material_error', 'safety_risk')`),
     check("knowledge_recommendations_sampling_rationale_check", sql`${recommendation.samplingRationale} is null or length(btrim(${recommendation.samplingRationale})) between 1 and 500`),
     check("knowledge_recommendations_sampling_disposition_shape_check", sql`(${recommendation.resolution} in ('sampling_passed', 'sampling_failed') and ${recommendation.samplingDispositionReason} is not null) or (${recommendation.resolution} is null or ${recommendation.resolution} not in ('sampling_passed', 'sampling_failed')) and ${recommendation.samplingDispositionReason} is null and ${recommendation.samplingRationale} is null`),
     check("knowledge_recommendations_resolved_shape_check", sql`(${recommendation.status} in ('open', 'in_review') and ${recommendation.resolution} is null and ${recommendation.resolvedByUserId} is null and ${recommendation.resolvedAt} is null) or (${recommendation.status} in ('resolved', 'superseded') and ${recommendation.resolution} is not null and ${recommendation.resolvedByUserId} is not null and ${recommendation.resolvedAt} is not null)`),
+  ],
+);
+
+export const knowledgeSamplingCandidateLedger = pgTable(
+  "knowledge_sampling_candidate_ledger",
+  {
+    id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    terminalIngestionJobId: text("terminal_ingestion_job_id").notNull().references(() => knowledgeIngestionJobs.id, { onDelete: "restrict" }),
+    policyId: text("policy_id").notNull().references(() => knowledgeSamplingPolicies.id, { onDelete: "cascade" }),
+    knowledgeCardId: text("knowledge_card_id").notNull().references(() => knowledgeCards.id, { onDelete: "cascade" }),
+    contentVersion: integer("content_version").notNull(),
+    evidenceSetRevision: integer("evidence_set_revision").notNull(),
+    corridorBucket: text("corridor_bucket").notNull(),
+    outsideCorridor: boolean("outside_corridor").notNull(),
+    selectedForSampling: boolean("selected_for_sampling").notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (entry) => [
+    uniqueIndex("knowledge_sampling_candidate_ledger_terminal_fence_idx").on(entry.terminalIngestionJobId, entry.knowledgeCardId, entry.contentVersion, entry.evidenceSetRevision),
+    uniqueIndex("knowledge_sampling_candidate_ledger_policy_fence_idx").on(entry.policyId, entry.knowledgeCardId, entry.contentVersion, entry.evidenceSetRevision),
+    index("knowledge_sampling_candidate_ledger_policy_idx").on(entry.policyId),
+    check("knowledge_sampling_candidate_ledger_versions_check", sql`${entry.contentVersion} >= 1 and ${entry.evidenceSetRevision} >= 1`),
+    check("knowledge_sampling_candidate_ledger_corridor_shape_check", sql`(${entry.corridorBucket} <> '' and ${entry.outsideCorridor} = false) or (${entry.corridorBucket} = '' and ${entry.outsideCorridor} = true)`),
+  ],
+);
+
+export const knowledgeVerifyFirstSamplingObligations = pgTable(
+  "knowledge_verify_first_sampling_obligations",
+  {
+    id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    terminalIngestionJobId: text("terminal_ingestion_job_id").notNull().references(() => knowledgeIngestionJobs.id, { onDelete: "restrict" }),
+    policyId: text("policy_id").notNull().references(() => knowledgeSamplingPolicies.id, { onDelete: "restrict" }),
+    knowledgeCardId: text("knowledge_card_id").notNull().references(() => knowledgeCards.id, { onDelete: "cascade" }),
+    contentVersion: integer("content_version").notNull(),
+    evidenceSetRevision: integer("evidence_set_revision").notNull(),
+    corridorBucket: text("corridor_bucket").notNull(),
+    outsideCorridor: boolean("outside_corridor").notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (obligation) => [
+    uniqueIndex("knowledge_verify_first_sampling_obligations_terminal_fence_idx").on(obligation.terminalIngestionJobId, obligation.knowledgeCardId, obligation.contentVersion, obligation.evidenceSetRevision),
+    uniqueIndex("knowledge_verify_first_sampling_obligations_policy_fence_idx").on(obligation.policyId, obligation.knowledgeCardId, obligation.contentVersion, obligation.evidenceSetRevision),
+    index("knowledge_verify_first_sampling_obligations_policy_idx").on(obligation.policyId),
+    check("knowledge_verify_first_sampling_obligations_versions_check", sql`${obligation.contentVersion} >= 1 and ${obligation.evidenceSetRevision} >= 1`),
+    check("knowledge_verify_first_sampling_obligations_corridor_shape_check", sql`(${obligation.corridorBucket} <> '' and ${obligation.outsideCorridor} = false) or (${obligation.corridorBucket} = '' and ${obligation.outsideCorridor} = true)`),
   ],
 );
 
@@ -1690,6 +1746,8 @@ export const schema = {
   knowledgeCardSearchDocuments,
   knowledgeSamplingPolicies,
   knowledgeSamplingCohortMembers,
+  knowledgeSamplingCandidateLedger,
+  knowledgeVerifyFirstSamplingObligations,
   knowledgeRecommendations,
   knowledgeIndexDirtyMarkers,
   knowledgeIndexBackfillState,

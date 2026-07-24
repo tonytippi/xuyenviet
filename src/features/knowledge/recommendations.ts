@@ -1,10 +1,13 @@
 import "server-only";
 
-import { and, asc, eq, gt, lte, sql } from "drizzle-orm";
+import { createHash } from "node:crypto";
+import { and, asc, desc, eq, gt, lte, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
 import { disableStaleKnowledgeSearchProjection, enqueueKnowledgeIndexWork } from "@/features/knowledge/indexing-queue";
-import { auditEvents, knowledgeCardEvidence, knowledgeCards, knowledgeRecommendations, knowledgeSamplingCohortMembers, knowledgeSamplingDispositionReasonValues, knowledgeSamplingPolicies, type KnowledgeRecommendationAction, type KnowledgeRecommendationReason, type KnowledgeSamplingDispositionReason } from "@/db/schema";
+import { getCurrentValidEvidenceFencesForReadiness } from "@/features/knowledge/batch-intake";
+import { auditEvents, knowledgeCardEvidence, knowledgeCards, knowledgeRecommendations, knowledgeSamplingCandidateLedger, knowledgeSamplingCohortMembers, knowledgeSamplingDispositionReasonValues, knowledgeSamplingPolicies, knowledgeVerifyFirstSamplingObligations, type KnowledgeRecommendationAction, type KnowledgeRecommendationReason, type KnowledgeSamplingDispositionReason } from "@/db/schema";
+import { getCorridorBucketLabel } from "@/features/knowledge/corridor";
 
 type RecommendationDb = ReturnType<typeof getDb>;
 type Transaction = Parameters<Parameters<RecommendationDb["transaction"]>[0]>[0];
@@ -56,6 +59,106 @@ export async function scheduleKnowledgeRecommendation(input: { cardId: string; c
   return db.transaction((tx) => scheduleKnowledgeRecommendationInTransaction(input, tx));
 }
 
+export async function enrollAutoActiveSampling(input: { terminalIngestionJobId: string; cardId: string; contentVersion: number; evidenceSetRevision: number; routeSegment: string | null; locationName: string | null; now?: Date }, db: Transaction) {
+  const now = input.now ?? new Date();
+  await scheduleKnowledgeRecommendation({ cardId: input.cardId, contentVersion: input.contentVersion, evidenceSetRevision: input.evidenceSetRevision, reason: "sampling", policy: "sample", now, supersedeStaleBy: systemActor }, db);
+  const [member] = await db
+    .select({ policyId: knowledgeSamplingCohortMembers.policyId, selectedForSampling: knowledgeSamplingCohortMembers.selectedForSampling })
+    .from(knowledgeSamplingCohortMembers)
+    .where(and(eq(knowledgeSamplingCohortMembers.knowledgeCardId, input.cardId), eq(knowledgeSamplingCohortMembers.contentVersion, input.contentVersion), eq(knowledgeSamplingCohortMembers.evidenceSetRevision, input.evidenceSetRevision)))
+    .orderBy(desc(knowledgeSamplingCohortMembers.createdAt))
+    .limit(1);
+  if (!member || member.selectedForSampling === null) return;
+  const corridorBucket = getCorridorBucketLabel(input.routeSegment, input.locationName);
+  const facts = { policyId: member.policyId, knowledgeCardId: input.cardId, contentVersion: input.contentVersion, evidenceSetRevision: input.evidenceSetRevision, corridorBucket: corridorBucket ?? "", outsideCorridor: corridorBucket === null, selectedForSampling: member.selectedForSampling };
+  await db.insert(knowledgeSamplingCandidateLedger).values({ terminalIngestionJobId: input.terminalIngestionJobId, ...facts }).onConflictDoNothing();
+}
+
+export async function enrollVerifyFirstSampling(input: { terminalIngestionJobId: string; cardId: string; contentVersion: number; evidenceSetRevision: number; routeSegment: string | null; locationName: string | null; now?: Date }, db: Transaction) {
+  const now = input.now ?? new Date();
+  await scheduleKnowledgeRecommendation({ cardId: input.cardId, contentVersion: input.contentVersion, evidenceSetRevision: input.evidenceSetRevision, reason: "verification", policy: "verify_first", priority: 2, now, supersedeStaleBy: systemActor }, db);
+  const [verification] = await db.select({ policyId: knowledgeRecommendations.policyId }).from(knowledgeRecommendations).where(and(eq(knowledgeRecommendations.knowledgeCardId, input.cardId), eq(knowledgeRecommendations.contentVersion, input.contentVersion), eq(knowledgeRecommendations.evidenceSetRevision, input.evidenceSetRevision), eq(knowledgeRecommendations.reason, "verification"))).orderBy(desc(knowledgeRecommendations.createdAt)).limit(1);
+  if (!verification?.policyId) return;
+  const corridorBucket = getCorridorBucketLabel(input.routeSegment, input.locationName);
+  const facts = { policyId: verification.policyId, knowledgeCardId: input.cardId, contentVersion: input.contentVersion, evidenceSetRevision: input.evidenceSetRevision, corridorBucket: corridorBucket ?? "", outsideCorridor: corridorBucket === null };
+  await db.insert(knowledgeVerifyFirstSamplingObligations).values({ terminalIngestionJobId: input.terminalIngestionJobId, ...facts }).onConflictDoNothing();
+  await db.insert(knowledgeRecommendations).values({ policyId: facts.policyId, knowledgeCardId: facts.knowledgeCardId, contentVersion: facts.contentVersion, evidenceSetRevision: facts.evidenceSetRevision, reason: "sampling", priority: priorityFor("sampling"), requiredForSampling: true, policySnapshot: { selection: "required" } }).onConflictDoNothing();
+}
+
+const systemActor = { userId: "system-knowledge-pipeline", email: "system-knowledge-pipeline@xuyenviet.invalid" };
+
+export async function sealClosedKnowledgeSamplingPolicy(policyId: string, now = new Date(), db: RecommendationDb = getDb()) {
+  return db.transaction(async (tx) => {
+    await lockSamplingPolicyBoundary(tx);
+    const [policy] = await tx.select().from(knowledgeSamplingPolicies).where(eq(knowledgeSamplingPolicies.id, policyId)).limit(1).for("update");
+    if (!policy || policy.windowEndsAt > now) return { status: "unavailable" as const };
+    const [ledger, members] = await Promise.all([
+      tx.select().from(knowledgeSamplingCandidateLedger).where(eq(knowledgeSamplingCandidateLedger.policyId, policyId)).orderBy(asc(knowledgeSamplingCandidateLedger.knowledgeCardId), asc(knowledgeSamplingCandidateLedger.contentVersion), asc(knowledgeSamplingCandidateLedger.evidenceSetRevision)),
+      tx.select().from(knowledgeSamplingCohortMembers).where(eq(knowledgeSamplingCohortMembers.policyId, policyId)).orderBy(asc(knowledgeSamplingCohortMembers.knowledgeCardId), asc(knowledgeSamplingCohortMembers.contentVersion), asc(knowledgeSamplingCohortMembers.evidenceSetRevision)),
+    ]);
+    const ledgerKeys = ledger.map((row) => `${row.knowledgeCardId}:${row.contentVersion}:${row.evidenceSetRevision}:${row.corridorBucket}:${row.outsideCorridor}:${row.selectedForSampling}`);
+    const memberKeys = members.map((row) => `${row.knowledgeCardId}:${row.contentVersion}:${row.evidenceSetRevision}:${row.corridorBucket ?? "unknown"}:${row.outsideCorridor ?? "unknown"}:${row.selectedForSampling ?? "unknown"}`);
+    if (ledger.length !== members.length || ledgerKeys.some((key, index) => key !== memberKeys[index])) return { status: "incomplete" as const };
+    const digest = enrollmentDigest(ledgerKeys);
+    await tx.update(knowledgeSamplingPolicies).set({ enrollmentCandidateCount: ledger.length, enrollmentSelectedCount: ledger.filter((row) => row.selectedForSampling).length, enrollmentDigest: digest, enrollmentSealedAt: now }).where(eq(knowledgeSamplingPolicies.id, policyId));
+    return { status: "sealed" as const, candidateCount: ledger.length, selectedCount: ledger.filter((row) => row.selectedForSampling).length };
+  });
+}
+
+export function enrollmentDigest(entries: string[]) {
+  return createHash("sha256").update([...entries].sort().join("\n")).digest("hex");
+}
+
+export async function getPublicMvpSamplingReadinessEvidence(db: RecommendationDb = getDb()) {
+  const [policies, members, candidates, obligations, recommendations, validEvidenceFences] = await Promise.all([
+    db.select().from(knowledgeSamplingPolicies).orderBy(asc(knowledgeSamplingPolicies.windowStartsAt), asc(knowledgeSamplingPolicies.id)),
+    db.select().from(knowledgeSamplingCohortMembers).orderBy(asc(knowledgeSamplingCohortMembers.policyId), asc(knowledgeSamplingCohortMembers.knowledgeCardId), asc(knowledgeSamplingCohortMembers.contentVersion), asc(knowledgeSamplingCohortMembers.evidenceSetRevision)),
+    db.select().from(knowledgeSamplingCandidateLedger).orderBy(asc(knowledgeSamplingCandidateLedger.policyId), asc(knowledgeSamplingCandidateLedger.knowledgeCardId), asc(knowledgeSamplingCandidateLedger.contentVersion), asc(knowledgeSamplingCandidateLedger.evidenceSetRevision)),
+    db.select().from(knowledgeVerifyFirstSamplingObligations).orderBy(asc(knowledgeVerifyFirstSamplingObligations.policyId), asc(knowledgeVerifyFirstSamplingObligations.knowledgeCardId), asc(knowledgeVerifyFirstSamplingObligations.contentVersion), asc(knowledgeVerifyFirstSamplingObligations.evidenceSetRevision)),
+    db.select().from(knowledgeRecommendations).where(eq(knowledgeRecommendations.reason, "sampling")).orderBy(desc(knowledgeRecommendations.resolvedAt), desc(knowledgeRecommendations.updatedAt), desc(knowledgeRecommendations.id)),
+    getCurrentValidEvidenceFencesForReadiness(db),
+  ]);
+  const policyEvidence = policies.map((policy) => {
+    const policyCandidates = candidates.filter((row) => row.policyId === policy.id);
+    const policyMembers = members.filter((row) => row.policyId === policy.id);
+    const candidateKeys = policyCandidates.map((row) => `${row.knowledgeCardId}:${row.contentVersion}:${row.evidenceSetRevision}:${row.corridorBucket}:${row.outsideCorridor}:${row.selectedForSampling}`);
+    const memberKeys = policyMembers.map((row) => `${row.knowledgeCardId}:${row.contentVersion}:${row.evidenceSetRevision}:${row.corridorBucket ?? "unknown"}:${row.outsideCorridor ?? "unknown"}:${row.selectedForSampling ?? "unknown"}`);
+    const proofMatches = policy.enrollmentSealedAt !== null && policy.enrollmentCandidateCount === policyCandidates.length && policy.enrollmentSelectedCount === policyCandidates.filter((row) => row.selectedForSampling).length && policy.enrollmentDigest === enrollmentDigest(candidateKeys) && candidateKeys.length === memberKeys.length && candidateKeys.every((key, index) => key === memberKeys[index]);
+    const corridorMembers = policyMembers.filter((member) => member.outsideCorridor === false);
+    const selectedMembers = corridorMembers.filter((member) => member.selectedForSampling === true);
+    const memberOutcomes = selectedMembers.map((member) => {
+      const matches = recommendations.filter((recommendation) => recommendation.policyId === policy.id && recommendation.knowledgeCardId === member.knowledgeCardId && recommendation.contentVersion === member.contentVersion && recommendation.evidenceSetRevision === member.evidenceSetRevision);
+      const [disposition] = matches;
+      const evidenceState = validEvidenceFences.get(fenceKey(member));
+      if (matches.length !== 1 || disposition?.status !== "resolved" || (disposition.resolution !== "sampling_passed" && disposition.resolution !== "sampling_failed")) return "pending";
+      if (disposition.resolution === "sampling_failed") return "sampling_failed";
+      return evidenceState === "active" ? "sampling_passed" : "pending";
+    });
+    const policyObligations = obligations.filter((obligation) => obligation.policyId === policy.id && obligation.outsideCorridor === false);
+    const obligationOutcomes = policyObligations.map((obligation) => {
+      const matches = recommendations.filter((recommendation) => recommendation.policyId === policy.id && recommendation.knowledgeCardId === obligation.knowledgeCardId && recommendation.contentVersion === obligation.contentVersion && recommendation.evidenceSetRevision === obligation.evidenceSetRevision && recommendation.requiredForSampling);
+      const [disposition] = matches;
+      if (matches.length !== 1 || disposition?.status !== "resolved" || (disposition.resolution !== "sampling_passed" && disposition.resolution !== "sampling_failed")) return "pending";
+      if (disposition.resolution === "sampling_failed") return "sampling_failed";
+      return validEvidenceFences.has(fenceKey(obligation)) ? "sampling_passed" : "pending";
+    });
+    return { proofMatches, corridorMemberCount: corridorMembers.length, pendingMembers: memberOutcomes.filter((outcome) => outcome === "pending").length, failedMembers: memberOutcomes.filter((outcome) => outcome === "sampling_failed").length, obligations: policyObligations.length, pendingObligations: obligationOutcomes.filter((outcome) => outcome === "pending").length, failedObligations: obligationOutcomes.filter((outcome) => outcome === "sampling_failed").length, highSeverity: Boolean(policy.escalatedAt || policy.suppressedAt) && corridorMembers.length > 0, unknownMembers: policyMembers.filter((member) => member.outsideCorridor === null || member.selectedForSampling === null).length };
+  });
+  return {
+    complete: policyEvidence.length > 0 && policyEvidence.every((policy) => policy.proofMatches && policy.unknownMembers === 0 && policy.pendingMembers === 0 && policy.failedMembers === 0 && policy.pendingObligations === 0 && policy.failedObligations === 0 && !policy.highSeverity),
+    policies: policyEvidence.length,
+    incompletePolicies: policyEvidence.filter((policy) => !policy.proofMatches || policy.unknownMembers > 0).length,
+    pending: policyEvidence.reduce((total, policy) => total + policy.pendingMembers + policy.pendingObligations, 0),
+    failed: policyEvidence.reduce((total, policy) => total + policy.failedMembers + policy.failedObligations, 0),
+    highSeverity: policyEvidence.filter((policy) => policy.highSeverity).length,
+    obligations: policyEvidence.reduce((total, policy) => total + policy.obligations, 0),
+  };
+}
+
+function fenceKey(value: { knowledgeCardId: string; contentVersion: number; evidenceSetRevision: number }) {
+  return `${value.knowledgeCardId}:${value.contentVersion}:${value.evidenceSetRevision}`;
+}
+
 async function scheduleKnowledgeRecommendationInTransaction(input: { cardId: string; contentVersion: number; evidenceSetRevision: number; reason: KnowledgeRecommendationReason; priority?: number; policy?: "sample" | "verify_first"; now?: Date; supersedeStaleBy?: RecommendationActor }, db: Transaction) {
   const now = input.now ?? new Date();
   let policyId: string | null = null;
@@ -96,8 +199,11 @@ async function scheduleKnowledgeRecommendationInTransaction(input: { cardId: str
     if (!policy || !card) return;
     const [activePolicy] = await db.select({ id: knowledgeSamplingPolicies.id }).from(knowledgeSamplingPolicies).where(and(eq(knowledgeSamplingPolicies.id, policyId!), sql`${knowledgeSamplingPolicies.suppressedAt} is null`)).limit(1).for("update");
     if (!activePolicy) return;
-    await db.insert(knowledgeSamplingCohortMembers).values({ policyId: activePolicy.id, knowledgeCardId: input.cardId, contentVersion: input.contentVersion, evidenceSetRevision: input.evidenceSetRevision }).onConflictDoNothing();
-    if (!shouldSampleKnowledgeCard(input.cardId, input.contentVersion, policy.windowStartsAt, policy.samplingPercent)) return;
+    const [cardForEnrollment] = await db.select({ routeSegment: knowledgeCards.routeSegment, locationName: knowledgeCards.locationName }).from(knowledgeCards).where(eq(knowledgeCards.id, input.cardId)).limit(1);
+    const corridorBucket = cardForEnrollment ? getCorridorBucketLabel(cardForEnrollment.routeSegment, cardForEnrollment.locationName) : null;
+    const selectedForSampling = shouldSampleKnowledgeCard(input.cardId, input.contentVersion, policy.windowStartsAt, policy.samplingPercent);
+    await db.insert(knowledgeSamplingCohortMembers).values({ policyId: activePolicy.id, knowledgeCardId: input.cardId, contentVersion: input.contentVersion, evidenceSetRevision: input.evidenceSetRevision, corridorBucket, outsideCorridor: corridorBucket === null, selectedForSampling }).onConflictDoNothing();
+    if (!selectedForSampling) return;
   }
   await db.insert(knowledgeRecommendations).values({ knowledgeCardId: input.cardId, contentVersion: input.contentVersion, evidenceSetRevision: input.evidenceSetRevision, reason: input.reason, priority, policyId, policySnapshot }).onConflictDoNothing();
 }
