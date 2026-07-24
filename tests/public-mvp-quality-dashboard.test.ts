@@ -113,6 +113,8 @@ async function seedEvaluationResult({
       promptSetVersion: promptSet.version,
       promptType,
       promptVersion: `${promptType}_v1`,
+      scenarioId: "community_observation",
+      scenarioVersion: "v1",
       modelVersion: "cx/ai-ask",
       status: "scored",
       answerText: "Safe stored answer text that must not be exposed by dashboard tests.",

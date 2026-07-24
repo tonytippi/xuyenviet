@@ -3,7 +3,7 @@ import "server-only";
 import { eq } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { assistantRetrievalDecisions, conversations, messages } from "@/db/schema";
+import { assistantResponseProvenance, assistantRetrievalDecisions, conversations, messages } from "@/db/schema";
 import { ensureAiAskFreshnessWarning } from "@/features/ai/answer-freshness";
 import { completeInitialAiAskAnswer, type AiGatewayExtractionResult } from "@/features/ai/gateway";
 import { getAiGatewayPricingSnapshot, selectActiveAiGatewayModel, type SelectedAiGatewayModel } from "@/features/ai/models";
@@ -19,6 +19,14 @@ export type EvaluationAiAskAnswer = {
   assistantMessageId: string;
   retrievalDecisionId: string | null;
   provenanceId: string | null;
+  provenance: Array<{ id: string; sourceCategory: string; usedInPrompt: boolean; sourceSnapshot: Record<string, unknown> }>;
+  retrievalDecision: {
+    selectedKnowledgeCardIds: string[];
+    knowledgePolicySnapshot: Record<string, unknown> | null;
+    webSearchTriggered: boolean;
+    webSearchTriggerReasons: string[];
+    warnings: string[];
+  } | null;
   usageEventId: string | null;
   modelVersion: string;
 };
@@ -101,10 +109,26 @@ export async function generateEvaluationAiAskAnswer({
       promptSection: contextSection,
     });
     const [retrievalDecision] = await transaction
-      .select({ id: assistantRetrievalDecisions.id })
+      .select({
+        id: assistantRetrievalDecisions.id,
+        selectedKnowledgeCardIds: assistantRetrievalDecisions.selectedKnowledgeCardIds,
+        knowledgePolicySnapshot: assistantRetrievalDecisions.knowledgePolicySnapshot,
+        webSearchTriggered: assistantRetrievalDecisions.webSearchTriggered,
+        webSearchTriggerReasons: assistantRetrievalDecisions.webSearchTriggerReasons,
+        warnings: assistantRetrievalDecisions.warnings,
+      })
       .from(assistantRetrievalDecisions)
       .where(eq(assistantRetrievalDecisions.assistantMessageId, assistantMessage.id))
       .limit(1);
+    const persistedProvenance = await transaction
+      .select({
+        id: assistantResponseProvenance.id,
+        sourceCategory: assistantResponseProvenance.sourceCategory,
+        usedInPrompt: assistantResponseProvenance.usedInPrompt,
+        sourceSnapshot: assistantResponseProvenance.sourceSnapshot,
+      })
+      .from(assistantResponseProvenance)
+      .where(eq(assistantResponseProvenance.assistantMessageId, assistantMessage.id));
     const usageEventId = await writeAiUsageEvent(transaction, {
       userId,
       conversationId: saved.conversationId,
@@ -134,6 +158,17 @@ export async function generateEvaluationAiAskAnswer({
         assistantMessageId: assistantMessage.id,
         retrievalDecisionId: retrievalDecision?.id ?? null,
         provenanceId: provenance[0]?.id ?? null,
+        // Evaluation must use the bounded snapshots written with this answer, not mutable cards.
+        provenance: persistedProvenance,
+        retrievalDecision: retrievalDecision
+          ? {
+              selectedKnowledgeCardIds: retrievalDecision.selectedKnowledgeCardIds,
+              knowledgePolicySnapshot: retrievalDecision.knowledgePolicySnapshot,
+              webSearchTriggered: retrievalDecision.webSearchTriggered,
+              webSearchTriggerReasons: retrievalDecision.webSearchTriggerReasons,
+              warnings: retrievalDecision.warnings,
+            }
+          : null,
         usageEventId,
         modelVersion: aiAskModel.gatewayModelName,
       },

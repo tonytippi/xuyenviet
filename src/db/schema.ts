@@ -108,6 +108,9 @@ export type PublicMvpEvaluationResultStatus = (typeof publicMvpEvaluationResultS
 export const publicMvpEvaluationScoreDimensionValues = ["user_context_use", "practical_specificity", "source_grounding", "uncertainty_handling", "family_awareness", "vietnamese_clarity"] as const;
 export type PublicMvpEvaluationScoreDimension = (typeof publicMvpEvaluationScoreDimensionValues)[number];
 
+export const publicMvpEvaluationScenarioIdValues = ["community_observation", "independent_community_pattern", "conditional_high_risk_claim", "conflict_exclusion", "source_withdrawal", "web_fallback_unavailable"] as const;
+export type PublicMvpEvaluationScenarioId = (typeof publicMvpEvaluationScenarioIdValues)[number];
+
 export const knowledgeSuggestionActionValues = ["create", "update", "conflict", "duplicate", "no_action"] as const;
 export type KnowledgeSuggestionAction = (typeof knowledgeSuggestionActionValues)[number];
 
@@ -1582,6 +1585,8 @@ export const publicMvpEvaluationResults = pgTable(
     promptSetVersion: text("prompt_set_version").notNull(),
     promptType: text("prompt_type").$type<PublicMvpEvaluationPromptType>().notNull(),
     promptVersion: text("prompt_version").notNull(),
+    scenarioId: text("scenario_id").$type<PublicMvpEvaluationScenarioId>().notNull(),
+    scenarioVersion: text("scenario_version").notNull(),
     modelVersion: text("model_version").notNull(),
     status: text("status").$type<PublicMvpEvaluationResultStatus>().notNull(),
     answerText: text("answer_text"),
@@ -1589,6 +1594,12 @@ export const publicMvpEvaluationResults = pgTable(
     unsupportedClaimFlag: boolean("unsupported_claim_flag").default(false).notNull(),
     missingUncertaintyFlag: boolean("missing_uncertainty_flag").default(false).notNull(),
     noBetterThanGenericFlag: boolean("no_better_than_generic_flag").default(false).notNull(),
+    unsupportedCommunityWordingFlag: boolean("unsupported_community_wording_flag").default(false).notNull(),
+    requiredCaveatOmittedFlag: boolean("required_caveat_omitted_flag").default(false).notNull(),
+    conflictedKnowledgeExcludedFlag: boolean("conflicted_knowledge_excluded_flag").default(true).notNull(),
+    staleWithdrawnSourceExposureFlag: boolean("stale_withdrawn_source_exposure_flag").default(false).notNull(),
+    rawEvidenceLeakageFlag: boolean("raw_evidence_leakage_flag").default(false).notNull(),
+    fallbackVerificationGuidanceMetFlag: boolean("fallback_verification_guidance_met_flag").default(true).notNull(),
     assistantMessageId: text("assistant_message_id").references(() => messages.id, { onDelete: "set null" }),
     retrievalDecisionId: text("retrieval_decision_id").references(() => assistantRetrievalDecisions.id, { onDelete: "set null" }),
     provenanceId: text("provenance_id").references(() => assistantResponseProvenance.id, { onDelete: "set null" }),
@@ -1596,17 +1607,49 @@ export const publicMvpEvaluationResults = pgTable(
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
   },
   (result) => [
-    uniqueIndex("public_mvp_evaluation_results_run_prompt_idx").on(result.runId, result.promptType),
+    uniqueIndex("public_mvp_evaluation_results_run_prompt_scenario_idx").on(result.runId, result.promptType, result.scenarioId),
     index("public_mvp_evaluation_results_prompt_type_idx").on(result.promptType, result.createdAt),
     index("public_mvp_evaluation_results_status_idx").on(result.status),
     check("public_mvp_evaluation_results_prompt_type_check", sql`${result.promptType} in ('magic_moment_family_trip', 'sparse_data', 'freshness_sensitive', 'service_activity', 'route_logistics')`),
     check("public_mvp_evaluation_results_status_check", sql`${result.status} in ('scored', 'failed', 'unscored')`),
     check("public_mvp_evaluation_results_prompt_set_version_check", sql`length(btrim(${result.promptSetVersion})) between 1 and 80`),
     check("public_mvp_evaluation_results_prompt_version_check", sql`length(btrim(${result.promptVersion})) between 1 and 80`),
+    check("public_mvp_evaluation_results_scenario_id_check", sql`${result.scenarioId} in ('community_observation', 'independent_community_pattern', 'conditional_high_risk_claim', 'conflict_exclusion', 'source_withdrawal', 'web_fallback_unavailable')`),
+    check("public_mvp_evaluation_results_scenario_version_check", sql`length(btrim(${result.scenarioVersion})) between 1 and 80`),
     check("public_mvp_evaluation_results_model_version_check", sql`length(btrim(${result.modelVersion})) between 1 and 160`),
     check("public_mvp_evaluation_results_answer_length_check", sql`${result.answerText} is null or length(btrim(${result.answerText})) between 1 and 12000`),
     check("public_mvp_evaluation_results_safe_error_check", sql`${result.safeErrorCode} is null or ${result.safeErrorCode} in ('evaluator_failed', 'invalid_score_payload')`),
     check("public_mvp_evaluation_results_status_shape_check", sql`(${result.status} = 'scored' and ${result.answerText} is not null and ${result.safeErrorCode} is null) or (${result.status} <> 'scored' and ${result.safeErrorCode} is not null)`),
+  ],
+);
+
+export const publicMvpEvaluationResultPolicySnapshots = pgTable(
+  "public_mvp_evaluation_result_policy_snapshots",
+  {
+    resultId: text("result_id")
+      .primaryKey()
+      .references(() => publicMvpEvaluationResults.id, { onDelete: "cascade" }),
+    scenarioId: text("scenario_id").$type<PublicMvpEvaluationScenarioId>().notNull(),
+    scenarioVersion: text("scenario_version").notNull(),
+    selectedKnowledge: jsonb("selected_knowledge").$type<Array<Record<string, unknown>>>().default([]).notNull(),
+    excludedCandidateCounts: jsonb("excluded_candidate_counts").$type<Record<string, number>>().default({}).notNull(),
+    excludedReasonCodes: jsonb("excluded_reason_codes").$type<string[]>().default([]).notNull(),
+    targetCandidateExcluded: boolean("target_candidate_excluded").default(false).notNull(),
+    sourceOrEvidenceOutcome: text("source_or_evidence_outcome").notNull(),
+    webFallback: jsonb("web_fallback").$type<Record<string, unknown>>().default({}).notNull(),
+    finalizationOutcome: text("finalization_outcome").notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (snapshot) => [
+    index("public_mvp_evaluation_policy_snapshots_scenario_idx").on(snapshot.scenarioId, snapshot.createdAt),
+    check("public_mvp_evaluation_policy_snapshots_scenario_id_check", sql`${snapshot.scenarioId} in ('community_observation', 'independent_community_pattern', 'conditional_high_risk_claim', 'conflict_exclusion', 'source_withdrawal', 'web_fallback_unavailable')`),
+    check("public_mvp_evaluation_policy_snapshots_scenario_version_check", sql`length(btrim(${snapshot.scenarioVersion})) between 1 and 80`),
+    check("public_mvp_evaluation_policy_snapshots_selected_knowledge_array_check", sql`jsonb_typeof(${snapshot.selectedKnowledge}) = 'array' and jsonb_array_length(${snapshot.selectedKnowledge}) <= 5`),
+    check("public_mvp_evaluation_policy_snapshots_counts_object_check", sql`jsonb_typeof(${snapshot.excludedCandidateCounts}) = 'object' and octet_length(${snapshot.excludedCandidateCounts}::text) <= 1024`),
+    check("public_mvp_evaluation_policy_snapshots_reasons_array_check", sql`jsonb_typeof(${snapshot.excludedReasonCodes}) = 'array' and jsonb_array_length(${snapshot.excludedReasonCodes}) <= 10`),
+    check("public_mvp_evaluation_policy_snapshots_web_fallback_object_check", sql`jsonb_typeof(${snapshot.webFallback}) = 'object' and octet_length(${snapshot.webFallback}::text) <= 2048`),
+    check("public_mvp_evaluation_policy_snapshots_source_outcome_check", sql`length(btrim(${snapshot.sourceOrEvidenceOutcome})) between 1 and 120`),
+    check("public_mvp_evaluation_policy_snapshots_finalization_outcome_check", sql`length(btrim(${snapshot.finalizationOutcome})) between 1 and 120`),
   ],
 );
 
@@ -1668,5 +1711,6 @@ export const schema = {
   publicMvpEvaluationPromptSets,
   publicMvpEvaluationRuns,
   publicMvpEvaluationResults,
+  publicMvpEvaluationResultPolicySnapshots,
   publicMvpEvaluationResultScores,
 };

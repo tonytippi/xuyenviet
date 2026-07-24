@@ -66,6 +66,8 @@ export type QualityDashboardRecentResult = {
   id: string;
   runId: string;
   promptType: PublicMvpEvaluationPromptType;
+  scenarioId: string;
+  scenarioVersion: string;
   status: string;
   createdAt: Date;
   averageScore: number | null;
@@ -73,6 +75,12 @@ export type QualityDashboardRecentResult = {
     unsupportedClaim: boolean;
     missingUncertainty: boolean;
     noBetterThanGeneric: boolean;
+    unsupportedCommunityWording: boolean;
+    requiredCaveatOmitted: boolean;
+    conflictedKnowledgeExcluded: boolean;
+    staleWithdrawnSourceExposure: boolean;
+    rawEvidenceLeakage: boolean;
+    fallbackVerificationGuidanceMet: boolean;
   };
   safeLinks: {
     assistantMessageId: string | null;
@@ -127,6 +135,14 @@ export async function getPublicMvpQualityDashboard(input: PublicMvpQualityDashbo
         unsupportedClaimFlag: publicMvpEvaluationResults.unsupportedClaimFlag,
         missingUncertaintyFlag: publicMvpEvaluationResults.missingUncertaintyFlag,
         noBetterThanGenericFlag: publicMvpEvaluationResults.noBetterThanGenericFlag,
+        scenarioId: publicMvpEvaluationResults.scenarioId,
+        scenarioVersion: publicMvpEvaluationResults.scenarioVersion,
+        unsupportedCommunityWordingFlag: publicMvpEvaluationResults.unsupportedCommunityWordingFlag,
+        requiredCaveatOmittedFlag: publicMvpEvaluationResults.requiredCaveatOmittedFlag,
+        conflictedKnowledgeExcludedFlag: publicMvpEvaluationResults.conflictedKnowledgeExcludedFlag,
+        staleWithdrawnSourceExposureFlag: publicMvpEvaluationResults.staleWithdrawnSourceExposureFlag,
+        rawEvidenceLeakageFlag: publicMvpEvaluationResults.rawEvidenceLeakageFlag,
+        fallbackVerificationGuidanceMetFlag: publicMvpEvaluationResults.fallbackVerificationGuidanceMetFlag,
         assistantMessageId: publicMvpEvaluationResults.assistantMessageId,
         retrievalDecisionId: publicMvpEvaluationResults.retrievalDecisionId,
         provenanceId: publicMvpEvaluationResults.provenanceId,
@@ -251,10 +267,18 @@ async function buildRecentResults({
     id: string;
     runId: string;
     promptType: PublicMvpEvaluationPromptType;
+    scenarioId: string;
+    scenarioVersion: string;
     status: string;
     unsupportedClaimFlag: boolean;
     missingUncertaintyFlag: boolean;
     noBetterThanGenericFlag: boolean;
+    unsupportedCommunityWordingFlag: boolean;
+    requiredCaveatOmittedFlag: boolean;
+    conflictedKnowledgeExcludedFlag: boolean;
+    staleWithdrawnSourceExposureFlag: boolean;
+    rawEvidenceLeakageFlag: boolean;
+    fallbackVerificationGuidanceMetFlag: boolean;
     assistantMessageId: string | null;
     retrievalDecisionId: string | null;
     provenanceId: string | null;
@@ -298,6 +322,8 @@ async function buildRecentResults({
       id: row.id,
       runId: row.runId,
       promptType: row.promptType,
+      scenarioId: row.scenarioId,
+      scenarioVersion: row.scenarioVersion,
       status: row.status,
       createdAt: row.createdAt,
       averageScore: average(scoreRows.filter((score) => score.resultId === row.id).map((score) => score.score)),
@@ -305,6 +331,12 @@ async function buildRecentResults({
         unsupportedClaim: row.unsupportedClaimFlag,
         missingUncertainty: row.missingUncertaintyFlag,
         noBetterThanGeneric: row.noBetterThanGenericFlag,
+        unsupportedCommunityWording: row.unsupportedCommunityWordingFlag,
+        requiredCaveatOmitted: row.requiredCaveatOmittedFlag,
+        conflictedKnowledgeExcluded: row.conflictedKnowledgeExcludedFlag,
+        staleWithdrawnSourceExposure: row.staleWithdrawnSourceExposureFlag,
+        rawEvidenceLeakage: row.rawEvidenceLeakageFlag,
+        fallbackVerificationGuidanceMet: row.fallbackVerificationGuidanceMetFlag,
       },
       safeLinks: {
         assistantMessageId: row.assistantMessageId,

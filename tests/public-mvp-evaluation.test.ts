@@ -7,6 +7,7 @@ import {
   assistantResponseProvenance,
   publicMvpEvaluationPromptSets,
   publicMvpEvaluationResultScores,
+  publicMvpEvaluationResultPolicySnapshots,
   publicMvpEvaluationResults,
   publicMvpEvaluationRuns,
   conversations,
@@ -54,7 +55,26 @@ async function createEvaluationModel() {
     })
     .returning();
 
+  await createAiAskModel();
+
   return model;
+}
+
+async function createAiAskModel() {
+  await testDb.insert(aiGatewayModels).values({
+    id: "ai-ask-model",
+    gatewayModelName: "cx/ai-ask",
+    displayLabel: "AI Ask",
+    purpose: "ai_ask_initial_answer",
+    active: true,
+    defaultForPurpose: true,
+    supportsTextInput: true,
+    pricingCurrency: "USD",
+    inputTokenPriceMicros: 1,
+    outputTokenPriceMicros: 2,
+    pricingVersion: "test-v1",
+    pricingEffectiveAt: new Date("2026-07-11T00:00:00.000Z"),
+  });
 }
 
 async function mockSession(userId: string | null, roles: UserRole[] = []) {
@@ -72,7 +92,11 @@ function validScores(score = 8) {
   } satisfies Record<PublicMvpEvaluationScoreDimension, number>;
 }
 
-async function createPersistedEvaluationAnswer(userId: string, promptType: string) {
+async function createPersistedEvaluationAnswer(userId: string, promptType: string, scenarioId: string) {
+  const conflict = scenarioId === "conflict_exclusion";
+  const withdrawn = scenarioId === "source_withdrawal";
+  const fallback = conflict || withdrawn || scenarioId === "web_fallback_unavailable";
+  const selectedState = scenarioId === "community_observation" ? "community_observation" : scenarioId === "independent_community_pattern" ? "community_pattern" : scenarioId === "conditional_high_risk_claim" ? "conditional" : null;
   const [conversation] = await testDb.insert(conversations).values({ userId }).returning({ id: conversations.id });
   const [userMessage] = await testDb.insert(messages).values({ conversationId: conversation.id, userId, role: "user", content: `Prompt ${promptType}` }).returning({ id: messages.id });
   const [assistantMessage] = await testDb.insert(messages).values({ conversationId: conversation.id, userId, role: "assistant", content: `Câu trả lời AI Ask cho ${promptType}` }).returning({ id: messages.id });
@@ -90,10 +114,14 @@ async function createPersistedEvaluationAnswer(userId: string, promptType: strin
       broadPlanningQuestion: true,
       freshnessRequired: false,
       conflictDetected: false,
-      webSearchTriggered: false,
-      webSearchTriggerReasons: [],
       generalReasoningUsed: true,
-      warnings: [],
+      webSearchTriggered: fallback,
+      webSearchTriggerReasons: fallback ? [conflict ? "excluded_conflict_candidate" : "no_active_knowledge"] : [],
+      warnings: fallback ? ["web_search_low_quality"] : [],
+      knowledgePolicySnapshot: {
+        excludedPolicyCounts: { conflict: conflict ? 1 : 0, verificationRequired: 0, other: withdrawn ? 1 : 0 },
+        excludedReasonCodes: conflict ? ["unsupported_knowledge_state"] : withdrawn ? ["missing_traveler_safe_evidence"] : [],
+      },
     })
     .returning({ id: assistantRetrievalDecisions.id });
   const [provenance] = await testDb
@@ -103,28 +131,39 @@ async function createPersistedEvaluationAnswer(userId: string, promptType: strin
       conversationId: conversation.id,
       userMessageId: userMessage.id,
       assistantMessageId: assistantMessage.id,
-      sourceCategory: "general",
+       sourceCategory: selectedState ? "knowledge" : "general",
       rank: 1,
       sourceType: "general_reasoning",
       verificationStatus: "unverified",
-      sourceSnapshot: { available: true },
+       sourceSnapshot: selectedState ? { knowledgeCardId: `${scenarioId}-card`, contentVersion: 1, knowledgeState: selectedState, verificationState: selectedState === "conditional" ? "required" : "not_required", usePolicy: selectedState === "conditional" ? "caveat_only" : "contextual_use" } : { available: true },
     })
     .returning({ id: assistantResponseProvenance.id });
 
   return {
-    answerText: `Câu trả lời AI Ask cho ${promptType}`,
+    answerText: `${fallback ? "Không thể xác minh, hãy kiểm tra lại. " : ""}Câu trả lời AI Ask cho ${promptType}`,
     conversationId: conversation.id,
     userMessageId: userMessage.id,
     assistantMessageId: assistantMessage.id,
     retrievalDecisionId: decision.id,
     provenanceId: provenance.id,
+    provenance: [{ id: provenance.id, sourceCategory: selectedState ? "knowledge" : "general", usedInPrompt: true, sourceSnapshot: selectedState ? { knowledgeCardId: `${scenarioId}-card`, contentVersion: 1, knowledgeState: selectedState, verificationState: selectedState === "conditional" ? "required" : "not_required", usePolicy: selectedState === "conditional" ? "caveat_only" : "contextual_use" } : { available: true } }],
+    retrievalDecision: {
+      selectedKnowledgeCardIds: [],
+      knowledgePolicySnapshot: {
+        excludedPolicyCounts: { conflict: conflict ? 1 : 0, verificationRequired: 0, other: withdrawn ? 1 : 0 },
+        excludedReasonCodes: conflict ? ["unsupported_knowledge_state"] : withdrawn ? ["missing_traveler_safe_evidence"] : [],
+      },
+      webSearchTriggered: fallback,
+      webSearchTriggerReasons: fallback ? [conflict ? "excluded_conflict_candidate" : "no_active_knowledge"] : [],
+      warnings: fallback ? ["web_search_low_quality"] : [],
+    },
     usageEventId: null,
     modelVersion: "cx/ai-ask",
   };
 }
 
 function answerGenerator(userId = "admin") {
-  return async ({ prompt }: { prompt: { type: string } }) => ({ ok: true as const, answer: await createPersistedEvaluationAnswer(userId, prompt.type) });
+  return async ({ prompt, scenario }: { prompt: { type: string }; scenario: { id: string } }) => ({ ok: true as const, answer: await createPersistedEvaluationAnswer(userId, prompt.type, scenario.id) });
 }
 
 describe("public MVP answer evaluation", () => {
@@ -186,24 +225,45 @@ describe("public MVP answer evaluation", () => {
           unsupportedClaim: prompt.type === "service_activity",
           missingUncertainty: prompt.type === "freshness_sensitive",
           noBetterThanGeneric: prompt.type === "sparse_data",
+          unsupportedCommunityWording: false,
+          requiredCaveatOmitted: false,
         },
       }),
     });
     const runs = await testDb.select().from(publicMvpEvaluationRuns);
     const rows = await testDb.select().from(publicMvpEvaluationResults);
     const scores = await testDb.select().from(publicMvpEvaluationResultScores);
+    const policySnapshots = await testDb.select().from(publicMvpEvaluationResultPolicySnapshots);
     const promptSets = await testDb.select().from(publicMvpEvaluationPromptSets);
 
     expect(result.success).toBe(true);
-    expect(result.success ? result.run : null).toMatchObject({ actorUserId: "admin", modelVersion: "cx/evaluator", status: "completed", resultCount: 5, scoredCount: 5, failedCount: 0 });
-    expect(promptSets).toMatchObject([{ version: "public_mvp_v1", rubricVersion: "epic_6_quality_rubric_v1" }]);
+    expect(result.success ? result.run : null).toMatchObject({ actorUserId: "admin", modelVersion: "cx/evaluator", status: "completed", resultCount: 6, scoredCount: 6, failedCount: 0 });
+    expect(promptSets).toMatchObject([{ version: "public_mvp_ai_first_v2", rubricVersion: "epic_6_quality_rubric_ai_first_v2" }]);
     expect(runs).toHaveLength(1);
-    expect(rows.map((row) => row.promptType).sort()).toEqual([...publicMvpEvaluationPrompts.map((prompt) => prompt.type)].sort());
-    expect(rows).toHaveLength(5);
-    expect(rows.every((row) => row.answerText?.startsWith("Câu trả lời AI Ask cho"))).toBe(true);
+    expect(new Set(rows.map((row) => row.promptType))).toEqual(new Set(publicMvpEvaluationPrompts.map((prompt) => prompt.type)));
+    expect(rows).toHaveLength(6);
+    expect(rows.every((row) => row.answerText?.includes("Câu trả lời AI Ask cho"))).toBe(true);
     expect(rows.every((row) => row.modelVersion === "cx/ai-ask")).toBe(true);
     expect(rows.every((row) => row.assistantMessageId && row.retrievalDecisionId && row.provenanceId)).toBe(true);
-    expect(scores).toHaveLength(30);
+    expect(scores).toHaveLength(36);
+    expect(policySnapshots).toHaveLength(6);
+    expect(policySnapshots.find((snapshot) => snapshot.scenarioId === "conflict_exclusion")).toMatchObject({
+      excludedCandidateCounts: { conflict: 1, verificationRequired: 0, other: 0 },
+      excludedReasonCodes: ["unsupported_knowledge_state"],
+      targetCandidateExcluded: true,
+      sourceOrEvidenceOutcome: "excluded_conflict",
+    });
+    expect(policySnapshots.find((snapshot) => snapshot.scenarioId === "source_withdrawal")).toMatchObject({
+      excludedCandidateCounts: { conflict: 0, verificationRequired: 0, other: 1 },
+      excludedReasonCodes: ["missing_traveler_safe_evidence"],
+      targetCandidateExcluded: true,
+      sourceOrEvidenceOutcome: "withdrawn_or_ineligible",
+    });
+    expect(policySnapshots.find((snapshot) => snapshot.scenarioId === "web_fallback_unavailable")?.webFallback).toMatchObject({
+      triggered: true,
+      warnings: ["web_search_low_quality"],
+      guidanceMet: true,
+    });
     expect(scores.every((score) => Number.isInteger(score.score) && score.score >= 1 && score.score <= 10)).toBe(true);
     expect(rows.find((row) => row.promptType === "service_activity")?.unsupportedClaimFlag).toBe(true);
     expect(rows.find((row) => row.promptType === "freshness_sensitive")?.missingUncertaintyFlag).toBe(true);
@@ -223,7 +283,7 @@ describe("public MVP answer evaluation", () => {
       scorer: async ({ prompt }) => ({
         answerText: `Answer for ${prompt.type}`,
         scores: prompt.type === "magic_moment_family_trip" ? { ...validScores(), source_grounding: 11 } : validScores(),
-        flags: { unsupportedClaim: false, missingUncertainty: false, noBetterThanGeneric: false },
+        flags: { unsupportedClaim: false, missingUncertainty: false, noBetterThanGeneric: false, unsupportedCommunityWording: false, requiredCaveatOmitted: false },
       }),
     });
     const rows = await testDb.select().from(publicMvpEvaluationResults);
@@ -247,7 +307,7 @@ describe("public MVP answer evaluation", () => {
       scorer: async ({ prompt }) => ({
         answerText: `Answer for ${prompt.type}`,
         scores: validScores(),
-        flags: { unsupportedClaim: false, missingUncertainty: false, noBetterThanGeneric: false },
+        flags: { unsupportedClaim: false, missingUncertainty: false, noBetterThanGeneric: false, unsupportedCommunityWording: false, requiredCaveatOmitted: false },
       }),
     });
     const [storedResult] = await testDb.select().from(publicMvpEvaluationResults).where(eq(publicMvpEvaluationResults.promptType, "route_logistics"));
@@ -262,6 +322,8 @@ describe("public MVP answer evaluation", () => {
         promptSetVersion: storedResult.promptSetVersion,
         promptType: "route_logistics",
         promptVersion: "duplicate_v1",
+        scenarioId: "independent_community_pattern",
+        scenarioVersion: "v1",
         modelVersion: storedResult.modelVersion,
         status: "scored",
         answerText: "Duplicate",
@@ -282,7 +344,7 @@ describe("public MVP answer evaluation", () => {
     });
     const rows = await testDb.select().from(publicMvpEvaluationResults);
 
-    expect(rows).toHaveLength(5);
+    expect(rows).toHaveLength(6);
     expect(rows.every((row) => row.status === "failed" && row.safeErrorCode === "invalid_score_payload")).toBe(true);
   });
 });

@@ -72,8 +72,9 @@ development_status:
   4-7-verify-ai-first-retrieval-and-answer-safety: done
   epic-4-retrospective: optional
 
-  epic-5: backlog
-  5-1-evaluate-ai-first-community-knowledge-safety: backlog
+  epic-5: in-progress
+  # Synchronized 2026-07-24 after scoped answer-time provenance and policy-outcome repair.
+  5-1-evaluate-ai-first-community-knowledge-safety: review
   5-2-surface-ai-first-policy-quality-signals: backlog
   5-3-close-the-active-evidence-grounded-card-readiness-gate: backlog
   epic-5-retrospective: optional
