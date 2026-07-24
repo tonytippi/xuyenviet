@@ -4,7 +4,7 @@ baseline_commit: dce526a
 
 # Story 6.1: Validate Knowledge Pipeline Operations Before Public Evaluation
 
-Status: review
+Status: done
 
 ## Story
 
@@ -199,3 +199,4 @@ gpu4ai/gpt-5.6-terra-review
 - 2026-07-24: Completed fail-closed operational validation evidence, added protected removal entrypoint regression, and moved Story 6.1 to `review`; pipeline remains operationally `not ready` pending named external evidence and capture-role hardening.
 - 2026-07-24: Corrected the owner-reviewed validation task to incomplete because owner review remains pending; Story 6.1 remains in `review` for the outstanding review-state work.
 - 2026-07-24: Corrected blocked operational task states and named the accountable owner for each OP-01 through OP-09 ledger blocker; Story 6.1 remains in `review`.
+- 2026-07-24: Status-only completion synchronized after verification of supplied final repair commit `265d5d4635cb04d2b28a0a8cb3dc38addf8d7003` and a clean worktree; Story 6.1 is `done`.

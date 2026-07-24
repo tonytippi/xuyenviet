@@ -82,8 +82,8 @@ development_status:
   epic-5-retrospective: optional
 
   epic-6: in-progress
-  # Synchronized 2026-07-24 after correcting blocked operational task states and assigning concrete accountable owners for OP-01 through OP-09; no controlled/deployed evidence or owner approval was recorded.
-  6-1-validate-knowledge-pipeline-operations-before-public-evaluation: review
+  # Synchronized 2026-07-24 after status-only verification of supplied final repair commit 265d5d4635cb04d2b28a0a8cb3dc38addf8d7003 and a clean pre-update worktree.
+  6-1-validate-knowledge-pipeline-operations-before-public-evaluation: done
   6-2-run-public-mvp-ai-first-readiness-review: backlog
   epic-6-retrospective: optional
 
