@@ -4,7 +4,7 @@ baseline_commit: edbf1db496a4d32107fc663e3bb029ee9a5ca050
 
 # Story 5.3: Close the Active Evidence-Grounded Card Readiness Gate
 
-Status: review
+Status: done
 
 ## Story
 
@@ -230,3 +230,4 @@ gpu4ai/gpt-5.6-terra-review
 - 2026-07-24: Resolved only the eight fresh-review findings. Readiness now has one read-only repeatable-read snapshot; immutable auto-active and verify-first rows block card deletion; canonical evaluation evidence fences result prompt-set identity and supplies all baseline checks; zero-applicable non-corridor policies and corpus-wide remediation diagnostics are explicit; non-high evaluation gaps remain baseline-governed diagnostics. Added DB regressions for mixed prompt sets, canonical baseline replacement, zero-applicable policy diagnostics, and immutable row retention. Required serial suites passed: dashboard (19), batch intake (14), recommendation queue (23), evaluation (15), search (42); lint passed with three pre-existing warnings; typecheck and build passed. Status returned to `review`; no commit created.
 - 2026-07-24: Final adversarial review centered on repair `268e208` found two unresolved high-severity readiness-integrity defects: an all-zero-applicable policy set can pass the sampling gate without corridor proof, and cascading policy foreign keys can erase auto-active immutable enrollment records before card deletion. Findings were persisted as action items. No application code, tests, dependencies, commits, or new stories were created by this review; story and sprint status set to `in-progress`.
 - 2026-07-24: Resolved the two scoped final-review findings. The sampling gate requires at least one corridor-applicable policy and validates sealed proof diagnostics for all policies. Forward migration `0059_restrict_sampling_policy_ledger_deletion` changes immutable auto-active membership and candidate-ledger policy foreign keys from cascade to restrict. Corrected non-corridor proof normalization so persisted `outsideCorridor = true` members retain the canonical empty bucket. Migration application and all required serial suites passed: dashboard (20), batch intake (14), recommendation queue (23), evaluation (15), and search (42). Lint passed with three pre-existing warnings; typecheck and build passed. Status returned to `review`; no commit created.
+- 2026-07-24: Status-only finalization after supplied repair commit `2351a0e762ff39302dd84dc9bf1bec7e6545d35d` was verified to exist and the worktree was verified clean. No source, diff, correctness, test, implementation, review, or commit inspection was performed. Story marked `done` and sprint status synchronized.
