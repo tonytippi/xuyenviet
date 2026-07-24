@@ -244,6 +244,20 @@ describe("knowledge card state-model retrieval safety", () => {
     expect(JSON.stringify(result?.evidence)).not.toContain("api-token");
   });
 
+  test.each(["https://facebook.com./legacy-post", "https://fb.me./legacy-post", "https://fb.watch./legacy-video"])("downgrades misclassified trailing-dot Facebook evidence: %s", async (url) => {
+    await createUser("trailing-dot-facebook-operator", ["operator"]);
+    const card = await createApprovedCardWithSource("trailing-dot-facebook-operator", "trailing-dot-facebook-card");
+    await testDb.update(sources).set({ url, canonicalUrl: url }).where(eq(sources.id, "trailing-dot-facebook-card-source"));
+    const capture = await seedSourceCaptureVersion({ sourceId: "trailing-dot-facebook-card-source", captureKind: "url", rawText: "Bằng chứng Facebook cũ không được hiển thị." });
+    await seedKnowledgeCardEvidence({ cardId: card.id, sourceId: "trailing-dot-facebook-card-source", captureVersionId: capture.id, quoteText: "Bằng chứng Facebook cũ không được hiển thị.", displayPolicy: "traveler_visible" });
+
+    await enqueueAndProcessIndexWork(card.id);
+    const [result] = await (await import("@/features/knowledge/search")).searchApprovedKnowledge("Huế");
+
+    expect(result?.evidence).toEqual([expect.objectContaining({ displayPolicy: "fact_only", url: null, quote: null })]);
+    expect(JSON.stringify(result?.evidence)).not.toContain(url);
+  });
+
   test("refreshes an active projection after evidence becomes operator-only", async () => {
     await createUser("policy-refresh-operator", ["operator"]);
     const card = await createApprovedCardWithSource("policy-refresh-operator", "policy-refresh-card");

@@ -60,8 +60,9 @@ development_status:
   epic-4: in-progress
   4-1-migrate-retrieval-to-state-aware-active-knowledge: done
   4-2-index-current-ai-first-knowledge-versions: done
-  4-3-assemble-state-aware-knowledge-source-bundles: done
+  # Synchronized 2026-07-24 after repairing trailing-dot Facebook evidence filtering.
   # Synchronized 2026-07-23 after verification of final repair commit d994c86.
+  4-3-assemble-state-aware-knowledge-source-bundles: review
   4-4-enforce-community-conditional-and-conflict-answer-policy: done
   # Synchronized 2026-07-24 after Epic 4 provenance repair verification.
   4-5-update-search-fallback-and-provenance-for-ai-first-states: review

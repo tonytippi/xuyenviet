@@ -1394,6 +1394,36 @@ describe("answer context assembly", () => {
     expect(section).not.toContain("Nội dung Facebook không được hiển thị");
   });
 
+  test("state-aware knowledge bundle excludes trailing-dot Facebook evidence from prompt and provenance", async () => {
+    await createTestUser("user-1");
+    const { conversation, message } = await createConversationWithUserMessage({ userId: "user-1" });
+    const [assistantMessage] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "assistant", content: "Gợi ý an toàn." }).returning({ id: messages.id });
+    const { buildApprovedKnowledgePromptSection } = await import("@/features/retrieval/approved-knowledge");
+    const { persistAssistantAnswerProvenance } = await import("@/features/retrieval/provenance");
+    const urls = ["https://facebook.com./legacy-post", "https://fb.me./legacy-post", "https://fb.watch./legacy-video"];
+    const knowledge = makeKnowledgeResult("trailing-dot-facebook-card", "Điểm dừng từ nguồn cũ", {
+      evidence: urls.map((url, index) => ({ evidenceId: `trailing-dot-facebook-${index}`, sourceId: `facebook-source-${index}`, supportLevel: "primary" as const, displayPolicy: "traveler_visible" as const, sourceLabel: "Facebook", sourceType: "community", verificationStatus: "unverified" as const, official: false, partner: false, collectedDate: null, observedAt: "2026-07-10T00:00:00.000Z", url, quote: "Nội dung Facebook không được hiển thị" })),
+    });
+    const section = buildApprovedKnowledgePromptSection([knowledge]);
+
+    expect(section).not.toContain("Nội dung Facebook không được hiển thị");
+    for (const url of urls) expect(section).not.toContain(url);
+
+    await persistAssistantAnswerProvenance(testDb, {
+      userId: "user-1",
+      conversationId: conversation.id,
+      userMessageId: message.id,
+      assistantMessageId: assistantMessage.id,
+      promptSection: section,
+      sourceBundle: createSourceBundle({ knowledge: [knowledge] }),
+    });
+    const [row] = await testDb.select().from(assistantResponseProvenance).where(eq(assistantResponseProvenance.sourceReferenceId, knowledge.id));
+    const snapshot = JSON.stringify(row?.sourceSnapshot);
+
+    expect(snapshot).not.toContain("Nội dung Facebook không được hiển thị");
+    for (const url of urls) expect(snapshot).not.toContain(url);
+  });
+
   test("state-aware knowledge bundle redacts spaced provider payload markers from traveler-visible evidence", async () => {
     const { buildApprovedKnowledgePromptSection } = await import("@/features/retrieval/approved-knowledge");
     const section = buildApprovedKnowledgePromptSection([

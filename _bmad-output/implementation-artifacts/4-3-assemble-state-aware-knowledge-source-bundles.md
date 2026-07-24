@@ -58,6 +58,7 @@ so that its answer can use local observations without overstating certainty.
 - [x] [Review][Patch] Remove contact data from allowlisted practical details [src/features/retrieval/approved-knowledge.ts:125] — Practical-detail values now use the traveler-safe privacy filter before serialization, excluding phone numbers, email addresses, and raw/provider markers.
 - [x] [Review][Patch] Sanitize sensitive evidence source labels [src/features/retrieval/approved-knowledge.ts:58] — Source labels now use the traveler-safe privacy filter before prompt and provenance projection, including `fact_only` evidence.
 - [x] [Review][Patch] Preserve source priority in the over-budget minimal fallback [src/features/retrieval/source-bundle.ts:469] — Minimal compaction retains selected trip, chat, and active knowledge context before adding web content only when it still fits the total budget.
+- [x] [Review][High] Block trailing-dot Facebook URLs from legacy or misclassified URL evidence [src/features/knowledge/search.ts:395; src/features/retrieval/approved-knowledge.ts:56,187] — Normalize terminal DNS dots before Facebook host matching so `facebook.com.`, `fb.me.`, and `fb.watch.` are downgraded before retrieval output and cannot reach prompts or provenance snapshots.
 
 ## Dev Notes
 
@@ -110,6 +111,9 @@ gpu4ai/gpt-5.6-terra-review
 - Verified final repair attempt 2: `pnpm test:run tests/answer-context.test.ts` (63 tests) and `pnpm typecheck`.
 - Resolved the remaining five assigned Epic 4 review findings: credential-bearing evidence URLs are rejected; `fb.me` is excluded; practical-detail values and evidence labels are privacy-filtered; and minimal compaction preserves trip/chat/active knowledge priority before web results.
 - Verified review remediation: `pnpm test:run tests/answer-context.test.ts tests/knowledge-search.test.ts` (125 tests), `pnpm typecheck`, and `pnpm lint` (passes with 3 pre-existing unused-variable warnings in `tests/knowledge-search.test.ts`).
+- Finalized after verifying epic-review repair commit `72c16897c2284813d9689754e1a03b38079bb7cd` (`fix(ai): repair state-aware source bundle safety`). No source inspection, testing, or code review was performed in this status-only finalization.
+- Resolved the assigned High finding: trailing-dot Facebook aliases are rejected at both the retrieval projection and state-aware bundle projection seams. Added focused retrieval, prompt, and persisted-provenance regressions for `facebook.com.`, `fb.me.`, and `fb.watch.`.
+- Verified repair: `pnpm test:run tests/knowledge-search.test.ts tests/answer-context.test.ts` (129 tests) and `pnpm typecheck`.
 
 ### File List
 
@@ -127,3 +131,5 @@ gpu4ai/gpt-5.6-terra-review
 - 2026-07-23: Addressed three final High review findings, added focused regressions, and retained review status.
 - 2026-07-23: Marked done by explicit user direction with five final review findings accepted for follow-up.
 - 2026-07-24: Resolved the five assigned final review findings and returned Story 4.3 to review.
+- 2026-07-24: Verified supplied epic-review repair commit `72c1689` and finalized the story as done (status-only).
+- 2026-07-24: Repaired trailing-dot Facebook evidence filtering, added focused regressions, and returned Story 4.3 to review.
