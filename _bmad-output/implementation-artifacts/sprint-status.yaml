@@ -64,7 +64,7 @@ development_status:
   # Synchronized 2026-07-23 after verification of final repair commit d994c86.
   4-3-assemble-state-aware-knowledge-source-bundles: review
   4-4-enforce-community-conditional-and-conflict-answer-policy: done
-  # Synchronized 2026-07-24 after Epic 4 provenance repair verification.
+  # Synchronized 2026-07-24 after final Epic 4 repair verification; ready for review.
   4-5-update-search-fallback-and-provenance-for-ai-first-states: review
   # Synchronized 2026-07-24 after verification of supplied repair commit 956357d5122b4756ce72c509f4b48545b9e3c0cb.
   4-6-render-state-aware-traveler-trust-details: review

@@ -422,6 +422,7 @@ export function AssistantProvenanceBlock({ provenance, selectedEntityId, detailP
           const isSelected = selectedEntityId === item.id;
           const hasActionBlockedProvenance = isActionBlockedProvenance(item);
           const detailActionLabel = item.sourceCategory === "general" ? "Xem chi tiết suy luận AI" : hasActionBlockedProvenance || item.freshnessSensitive ? "Xem chi tiết cảnh báo" : "Xem chi tiết nguồn";
+          const travelerUrl = getSafeTravelerUrl(item.url);
 
           return (
           <li className="rounded-xl border border-[#eadfc8] bg-white/80 p-3 text-sm leading-6 text-[#17342c]" key={item.id}>
@@ -447,9 +448,9 @@ export function AssistantProvenanceBlock({ provenance, selectedEntityId, detailP
             <div className="mt-2 flex flex-wrap gap-2 text-xs font-semibold text-[#6f3f12]">
               {getTrustLabels(item).map((label) => <span className="rounded-full border border-[#e5bd82] bg-[#fff8ec] px-2 py-1" key={label}>{label}</span>)}
             </div>
-            {item.url ? (
-              <a className="mt-2 block break-words text-sm font-semibold text-[#1f5f46] underline decoration-[#8fb59f] underline-offset-4 focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45" href={item.url} rel="noreferrer" target="_blank">
-                Mở nguồn tham khảo: {formatProvenanceUrl(item.url)}
+            {travelerUrl ? (
+              <a className="mt-2 block break-words text-sm font-semibold text-[#1f5f46] underline decoration-[#8fb59f] underline-offset-4 focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45" href={travelerUrl} rel="noreferrer" target="_blank">
+                Mở nguồn tham khảo: {formatProvenanceUrl(travelerUrl)}
               </a>
             ) : null}
             {item.sourceCategory === "general" ? (
@@ -461,11 +462,12 @@ export function AssistantProvenanceBlock({ provenance, selectedEntityId, detailP
             {(item.conditions?.length ?? 0) > 0 ? (
               <p className="mt-2 text-sm leading-6 text-[#4f625a]">Điều kiện: {item.conditions!.join("; ")}</p>
             ) : null}
-            {item.evidence?.map((evidence, index) => (
-              <p className="mt-2 text-sm leading-6 text-[#4f625a]" key={`${evidence.sourceLabel}-${index}`}>
-                <span className="font-semibold">{evidence.sourceLabel}</span>{evidence.quote ? `: ${evidence.quote}` : ""}{evidence.url ? <>. <a className="font-semibold text-[#1f5f46] underline decoration-[#8fb59f] underline-offset-4 focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45" href={evidence.url} rel="noreferrer" target="_blank">Mở nguồn</a></> : null}
-              </p>
-            ))}
+            {item.evidence?.map((evidence, index) => {
+              const evidenceUrl = getSafeTravelerUrl(evidence.url);
+              return <p className="mt-2 text-sm leading-6 text-[#4f625a]" key={`${evidence.sourceLabel}-${index}`}>
+                <span className="font-semibold">{evidence.sourceLabel}</span>{evidence.quote ? `: ${evidence.quote}` : ""}{evidenceUrl ? <>. <a className="font-semibold text-[#1f5f46] underline decoration-[#8fb59f] underline-offset-4 focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45" href={evidenceUrl} rel="noreferrer" target="_blank">Mở nguồn</a></> : null}
+              </p>;
+            })}
           </li>
           );
         })}
@@ -1935,6 +1937,17 @@ function formatProvenanceUrl(value: string) {
     return `${url.hostname}${url.pathname === "/" ? "" : url.pathname}`;
   } catch {
     return value;
+  }
+}
+
+function getSafeTravelerUrl(value: string | null | undefined) {
+  if (!value) return null;
+
+  try {
+    const url = new URL(value);
+    return (url.protocol === "http:" || url.protocol === "https:") && !url.username && !url.password ? url.href : null;
+  } catch {
+    return null;
   }
 }
 

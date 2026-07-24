@@ -406,7 +406,7 @@ function cleanUrl(value: unknown) {
   try {
     const url = new URL(value.trim());
     const href = url.toString();
-    return (url.protocol === "http:" || url.protocol === "https:") && href.length <= 2_048 ? href : "";
+    return (url.protocol === "http:" || url.protocol === "https:") && !url.username && !url.password && href.length <= 2_048 ? href : "";
   } catch {
     return "";
   }

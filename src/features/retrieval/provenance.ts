@@ -347,7 +347,7 @@ function getSafeTravelerUrl(value: string | null) {
 
   try {
     const url = new URL(value);
-    return (url.protocol === "http:" || url.protocol === "https:") && !isFacebookHost(url.hostname) ? url.href : null;
+    return (url.protocol === "http:" || url.protocol === "https:") && !url.username && !url.password && !isFacebookHost(url.hostname) ? url.href : null;
   } catch {
     return null;
   }

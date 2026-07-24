@@ -1533,6 +1533,24 @@ describe("answer context assembly", () => {
     expect(JSON.stringify(item)).not.toContain("Không hiển thị");
   });
 
+  test("does not project credential-bearing persisted URLs into traveler provenance", async () => {
+    const { formatAssistantMessageProvenance } = await import("@/features/retrieval/provenance");
+
+    const [item] = formatAssistantMessageProvenance([{
+      id: "credential-provenance",
+      sourceCategory: "web",
+      rank: 1,
+      retrievalScore: null,
+      sourceType: "official",
+      verificationStatus: "unverified",
+      usedInPrompt: true,
+      citedInAnswer: false,
+      sourceSnapshot: { title: "Nguồn web", url: "https://traveler:secret@example.com/private" },
+    }]);
+
+    expect(item?.url).toBeNull();
+  });
+
   test("keeps persisted and historical state vocabulary and rejects Facebook aliases and unsafe legacy evidence", async () => {
     const { formatAssistantMessageProvenance } = await import("@/features/retrieval/provenance");
 
@@ -1993,7 +2011,7 @@ describe("answer context assembly", () => {
     expect(systemPrompt.indexOf("4. Nguồn web chưa xác minh")).toBeLessThan(systemPrompt.indexOf("5. Suy luận tổng quát"));
   });
 
-  test("stream route does not append freshness warning for non-freshness web fallback", async () => {
+  test("stream route finalizes successful absent-knowledge web fallback with verification guidance", async () => {
     await createTestUser("user-1");
     await seedAnswerModel();
     const { conversation } = await createConversationWithUserMessage({ userId: "user-1" });
@@ -2030,11 +2048,11 @@ describe("answer context assembly", () => {
       .map((line) => JSON.parse(line) as { type: string; content?: string; assistantMessage?: { content?: string } });
     const doneEvent = events.find((event) => event.type === "done");
 
-    expect(events).not.toEqual(expect.arrayContaining([
-      expect.objectContaining({ type: "delta", content: expect.stringContaining("Cảnh báo cần kiểm tra") }),
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "delta", content: expect.stringContaining("Nguồn web bên ngoài này chưa được XuyenViet xác minh") }),
     ]));
     expect(doneEvent?.assistantMessage?.content).toContain("Nên đi 5 ngày.");
-    expect(doneEvent?.assistantMessage?.content).not.toContain("Cảnh báo cần kiểm tra");
+    expect(doneEvent?.assistantMessage?.content).toContain("Nguồn web bên ngoài này chưa được XuyenViet xác minh");
   });
 
   test("stream route persists retrieval decision and answer provenance for assistant answers", async () => {
@@ -2191,6 +2209,19 @@ describe("answer context assembly", () => {
     expect(result.content).toContain("nguồn chính thức hoặc nhà cung cấp");
     expect(result.replacedUnsafeContent).toBe(true);
     expect(result.content).not.toContain("Đây là gợi ý tổng quát.");
+  });
+
+  test.each(["no_active_knowledge", "insufficient_active_knowledge", "excluded_conflict_candidate", "excluded_verification_required_candidate"] as const)("successful %s web fallback is finalized with verification guidance", async (reason) => {
+    const { ensureAiAskFreshnessWarning, requiresAiAskAnswerFinalization } = await import("@/features/ai/answer-freshness");
+    const sourceBundle = createSourceBundle({
+      retrievalDecision: { ...createSourceBundle().retrievalDecision, webSearchTriggered: true, webSearchTriggerReasons: [reason] },
+      web: [{ query: "Huế", title: "Nguồn web", url: "https://example.com/source", snippet: "Tham khảo", provider: "tavily", providerScore: 0.8, checkedAt: new Date("2026-07-09T10:00:00.000Z"), sourceType: "official", confidence: "unverified", triggerReason: reason, rank: 1 }],
+    });
+    const result = ensureAiAskFreshnessWarning("Đây là gợi ý tổng quát.", sourceBundle);
+
+    expect(requiresAiAskAnswerFinalization(sourceBundle)).toBe(true);
+    expect(result.content).toContain("Nguồn web bên ngoài này chưa được XuyenViet xác minh");
+    expect(result.content).toContain("nguồn chính thức hoặc nhà cung cấp");
   });
 
   test("failed external fallback replaces caveat-only answers with both required notices", async () => {
