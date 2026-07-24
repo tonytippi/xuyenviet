@@ -34,6 +34,8 @@ export type PublicMvpQualityDashboardInput = {
   db?: ReturnType<typeof getDb>;
 };
 
+type QualityDashboardDb = Pick<ReturnType<typeof getDb>, "select" | "selectDistinctOn">;
+
 export type PublicMvpQualityDashboard = {
   success: true;
   filters: {
@@ -64,6 +66,7 @@ export type PublicMvpQualityDashboard = {
     status: "ready" | "not_ready";
     checks: Array<{ key: string; label: string; passed: boolean; current: number; target: number; missing: number; message: string }>;
     missingSignals: string[];
+    diagnostics: { zeroCountTypes: string[]; zeroCountRoutes: string[]; evaluationQualityGaps: number };
   };
   recentResults: QualityDashboardRecentResult[];
   policySignals: QualityDashboardPolicySignals;
@@ -166,7 +169,8 @@ export async function getPublicMvpQualityDashboard(input: PublicMvpQualityDashbo
     return { success: false, reason: "unauthorized" };
   }
 
-  const db = input.db ?? getDb();
+  const database = input.db ?? getDb();
+  return database.transaction(async (db) => {
   const filters = normalizeFilters(input);
   const evaluationConditions = filters.since ? [gte(publicMvpEvaluationResults.createdAt, filters.since)] : [];
   const feedbackConditions = filters.since ? [gte(answerUsefulnessFeedback.createdAt, filters.since)] : [];
@@ -175,7 +179,7 @@ export async function getPublicMvpQualityDashboard(input: PublicMvpQualityDashbo
     evaluationConditions.push(eq(publicMvpEvaluationResults.promptType, filters.promptType));
   }
 
-  const [allFeedbackRows, resultRows, readinessResultRows, readinessFeedbackRows] = await Promise.all([
+  const [allFeedbackRows, resultRows, readinessFeedbackRows] = await Promise.all([
     db
       .select({ assistantMessageId: answerUsefulnessFeedback.assistantMessageId, rating: answerUsefulnessFeedback.rating, comment: answerUsefulnessFeedback.comment, createdAt: answerUsefulnessFeedback.createdAt })
       .from(answerUsefulnessFeedback)
@@ -209,16 +213,6 @@ export async function getPublicMvpQualityDashboard(input: PublicMvpQualityDashbo
       .where(evaluationConditions.length > 0 ? and(...evaluationConditions) : undefined)
       .orderBy(desc(publicMvpEvaluationResults.createdAt)),
     db
-      .select({
-        id: publicMvpEvaluationResults.id,
-        promptType: publicMvpEvaluationResults.promptType,
-        status: publicMvpEvaluationResults.status,
-        noBetterThanGenericFlag: publicMvpEvaluationResults.noBetterThanGenericFlag,
-        assistantMessageId: publicMvpEvaluationResults.assistantMessageId,
-      })
-      .from(publicMvpEvaluationResults)
-      .orderBy(desc(publicMvpEvaluationResults.createdAt)),
-    db
       .select({ assistantMessageId: answerUsefulnessFeedback.assistantMessageId, rating: answerUsefulnessFeedback.rating, comment: answerUsefulnessFeedback.comment })
       .from(answerUsefulnessFeedback),
   ]);
@@ -241,20 +235,17 @@ export async function getPublicMvpQualityDashboard(input: PublicMvpQualityDashbo
     getPublicMvpSamplingReadinessEvidence(db),
     getCurrentReadinessEvaluationEvidence(db),
   ]);
-  const readinessResultIds = readinessResultRows.filter((row) => row.status === "scored").map((row) => row.id);
-  const readinessScoreRows = readinessResultIds.length > 0
-    ? await db.select({ resultId: publicMvpEvaluationResultScores.resultId, dimension: publicMvpEvaluationResultScores.dimension, score: publicMvpEvaluationResultScores.score }).from(publicMvpEvaluationResultScores).where(inArray(publicMvpEvaluationResultScores.resultId, readinessResultIds))
-    : [];
-  const readiness = buildReadiness({ magicMomentFeedback: summarizeFeedback(filterFeedbackRowsForMagicMoment(readinessFeedbackRows, readinessResultRows)), resultRows: readinessResultRows, scoreRows: readinessScoreRows, coverage, samplingEvidence, readinessEvaluation });
+  const readiness = buildReadiness({ magicMomentFeedback: summarizeFeedback(filterFeedbackRowsForMagicMoment(readinessFeedbackRows, readinessEvaluation.resultRows)), coverage, samplingEvidence, readinessEvaluation });
 
   return { success: true, filters, feedback, evaluation, readiness, recentResults, policySignals };
+  }, { isolationLevel: "repeatable read", accessMode: "read only" });
 }
 
 async function buildPolicySignals({
   db,
   resultRows,
 }: {
-  db: ReturnType<typeof getDb>;
+  db: QualityDashboardDb;
   resultRows: Array<{
     id: string;
     promptType: PublicMvpEvaluationPromptType;
@@ -512,7 +503,7 @@ async function buildRecentResults({
   resultRows,
   scoreRows,
 }: {
-  db: ReturnType<typeof getDb>;
+  db: QualityDashboardDb;
   resultRows: Array<{
     id: string;
     runId: string;
@@ -641,19 +632,16 @@ function buildLikelyIssues({
 
 function buildReadiness({
   magicMomentFeedback,
-  resultRows,
-  scoreRows,
   coverage,
   samplingEvidence,
   readinessEvaluation,
 }: {
   magicMomentFeedback: PublicMvpQualityDashboard["feedback"];
-  resultRows: Array<{ id: string; promptType: PublicMvpEvaluationPromptType; status: string; noBetterThanGenericFlag: boolean }>;
-  scoreRows: Array<{ resultId: string; dimension: PublicMvpEvaluationScoreDimension; score: number }>;
   coverage: Awaited<ReturnType<typeof getActiveEvidenceGroundedSeedCoverageForReadiness>>;
   samplingEvidence: Awaited<ReturnType<typeof getPublicMvpSamplingReadinessEvidence>>;
-  readinessEvaluation: { complete: boolean; highSeverity: number; qualityGaps: number; message: string };
+  readinessEvaluation: Awaited<ReturnType<typeof getCurrentReadinessEvaluationEvidence>>;
 }): PublicMvpQualityDashboard["readiness"] {
+  const { resultRows, scoreRows } = readinessEvaluation;
   const scoresByResultId = new Map<string, Set<PublicMvpEvaluationScoreDimension>>();
 
   for (const score of scoreRows) {
@@ -691,7 +679,7 @@ function buildReadiness({
       current: samplingEvidence.failed + samplingEvidence.pending + samplingEvidence.incompletePolicies + samplingEvidence.highSeverity,
       target: 0,
       missing: samplingEvidence.failed + samplingEvidence.pending + samplingEvidence.incompletePolicies + samplingEvidence.highSeverity,
-      message: samplingEvidence.complete ? "Sampling cohort và nghĩa vụ verify-first có proof đầy đủ." : `Sampling bị chặn: ${samplingEvidence.incompletePolicies} cohort thiếu proof, ${samplingEvidence.pending} pending, ${samplingEvidence.failed} failed, ${samplingEvidence.highSeverity} cohort rủi ro cao.`,
+      message: samplingEvidence.complete ? `Sampling cohort và nghĩa vụ verify-first có proof đầy đủ.${samplingEvidence.zeroApplicablePolicies > 0 ? ` ${samplingEvidence.zeroApplicablePolicies} policy ngoài hành lang có zero-applicable, không dùng làm bằng chứng pass cho corpus.` : ""}` : `Sampling bị chặn: ${samplingEvidence.incompletePolicies} cohort thiếu proof, ${samplingEvidence.pending} pending, ${samplingEvidence.failed} failed, ${samplingEvidence.highSeverity} cohort rủi ro cao.${samplingEvidence.zeroApplicablePolicies > 0 ? ` ${samplingEvidence.zeroApplicablePolicies} policy ngoài hành lang là zero-applicable.` : ""}`,
     },
     {
       key: "current_evaluation_evidence",
@@ -701,15 +689,6 @@ function buildReadiness({
       target: 0,
       missing: readinessEvaluation.complete ? readinessEvaluation.highSeverity : 1,
       message: readinessEvaluation.message,
-    },
-    {
-      key: "evaluation_quality_gaps",
-      label: "Không có quality gap eval chưa giải quyết",
-      passed: readinessEvaluation.complete && readinessEvaluation.qualityGaps === 0,
-      current: readinessEvaluation.qualityGaps,
-      target: 0,
-      missing: readinessEvaluation.complete ? readinessEvaluation.qualityGaps : 1,
-      message: readinessEvaluation.qualityGaps === 0 && readinessEvaluation.complete ? "Không có quality gap eval hiện hành." : "Eval còn quality gap hoặc evidence chưa hoàn chỉnh.",
     },
     {
       key: "usefulness_feedback_sample",
@@ -747,27 +726,36 @@ function buildReadiness({
   ];
   const missingSignals = checks.filter((check) => !check.passed).map((check) => check.message);
 
-  return { status: checks.every((check) => check.passed) ? "ready" : "not_ready", checks, missingSignals };
+  return {
+    status: checks.every((check) => check.passed) ? "ready" : "not_ready",
+    checks,
+    missingSignals,
+    diagnostics: {
+      zeroCountTypes: coverage.byType.filter((bucket) => bucket.count === 0).map((bucket) => bucket.type),
+      zeroCountRoutes: coverage.byRouteOrLocation.filter((bucket) => bucket.count === 0).map((bucket) => bucket.routeOrLocation),
+      evaluationQualityGaps: readinessEvaluation.qualityGaps,
+    },
+  };
 }
 
-export async function getCurrentReadinessEvaluationEvidence(db: ReturnType<typeof getDb>) {
+export async function getCurrentReadinessEvaluationEvidence(db: QualityDashboardDb) {
   const required = publicMvpEvaluationScenarios.map((scenario) => ({ scenarioId: scenario.id, scenarioVersion: scenario.version, promptType: scenario.prompt.type, promptVersion: scenario.prompt.version }));
-  const runs = await db.select({ id: publicMvpEvaluationRuns.id, modelVersion: publicMvpEvaluationRuns.modelVersion }).from(publicMvpEvaluationRuns).where(and(eq(publicMvpEvaluationRuns.status, "completed"), eq(publicMvpEvaluationRuns.promptSetVersion, publicMvpEvaluationPromptSetVersion))).orderBy(desc(publicMvpEvaluationRuns.completedAt), desc(publicMvpEvaluationRuns.id));
+  const runs = await db.select({ id: publicMvpEvaluationRuns.id, promptSetId: publicMvpEvaluationRuns.promptSetId, promptSetVersion: publicMvpEvaluationRuns.promptSetVersion, modelVersion: publicMvpEvaluationRuns.modelVersion }).from(publicMvpEvaluationRuns).where(and(eq(publicMvpEvaluationRuns.status, "completed"), eq(publicMvpEvaluationRuns.promptSetVersion, publicMvpEvaluationPromptSetVersion))).orderBy(desc(publicMvpEvaluationRuns.completedAt), desc(publicMvpEvaluationRuns.id));
   for (const run of runs) {
     const results = await db.select().from(publicMvpEvaluationResults).where(eq(publicMvpEvaluationResults.runId, run.id));
-    if (results.length !== required.length || !required.every((expected) => results.some((result) => result.status === "scored" && result.modelVersion === run.modelVersion && result.scenarioId === expected.scenarioId && result.scenarioVersion === expected.scenarioVersion && result.promptType === expected.promptType && result.promptVersion === expected.promptVersion))) continue;
+    if (results.length !== required.length || !results.every((result) => result.promptSetId === run.promptSetId && result.promptSetVersion === run.promptSetVersion) || !required.every((expected) => results.some((result) => result.status === "scored" && result.modelVersion === run.modelVersion && result.scenarioId === expected.scenarioId && result.scenarioVersion === expected.scenarioVersion && result.promptType === expected.promptType && result.promptVersion === expected.promptVersion))) continue;
     const resultIds = results.map((result) => result.id);
     const [snapshots, scores] = await Promise.all([
       db.select({ resultId: publicMvpEvaluationResultPolicySnapshots.resultId, scenarioId: publicMvpEvaluationResultPolicySnapshots.scenarioId, scenarioVersion: publicMvpEvaluationResultPolicySnapshots.scenarioVersion }).from(publicMvpEvaluationResultPolicySnapshots).where(inArray(publicMvpEvaluationResultPolicySnapshots.resultId, resultIds)),
-      db.select({ resultId: publicMvpEvaluationResultScores.resultId, dimension: publicMvpEvaluationResultScores.dimension }).from(publicMvpEvaluationResultScores).where(inArray(publicMvpEvaluationResultScores.resultId, resultIds)),
+      db.select({ resultId: publicMvpEvaluationResultScores.resultId, dimension: publicMvpEvaluationResultScores.dimension, score: publicMvpEvaluationResultScores.score }).from(publicMvpEvaluationResultScores).where(inArray(publicMvpEvaluationResultScores.resultId, resultIds)),
     ]);
     const complete = results.every((result) => snapshots.some((snapshot) => snapshot.resultId === result.id && snapshot.scenarioId === result.scenarioId && snapshot.scenarioVersion === result.scenarioVersion) && scoreDimensions.every((dimension) => scores.filter((score) => score.resultId === result.id && score.dimension === dimension).length === 1));
     if (!complete) continue;
     const highSeverity = results.filter((result) => result.staleWithdrawnSourceExposureFlag || result.rawEvidenceLeakageFlag || !result.conflictedKnowledgeExcludedFlag).length;
     const qualityGaps = results.filter((result) => result.unsupportedCommunityWordingFlag || result.requiredCaveatOmittedFlag || result.unsupportedClaimFlag || !result.fallbackVerificationGuidanceMetFlag).length;
-    return { complete: true, runId: run.id, highSeverity, qualityGaps, message: highSeverity ? `${highSeverity} lỗi publication-policy severity cao trong run eval hiện hành.` : qualityGaps ? `${qualityGaps} quality gap eval hiện hành cần khắc phục.` : "Run eval hiện hành đủ evidence và không có lỗi severity cao." };
+    return { complete: true, runId: run.id, highSeverity, qualityGaps, resultRows: results, scoreRows: scores, message: highSeverity ? `${highSeverity} lỗi publication-policy severity cao trong run eval hiện hành.` : qualityGaps ? `${qualityGaps} quality gap eval hiện hành cần khắc phục theo baseline.` : "Run eval hiện hành đủ evidence và không có lỗi severity cao." };
   }
-  return { complete: false, runId: null, highSeverity: 0, qualityGaps: 0, message: "Chưa có một run eval hiện hành đầy đủ sáu scenario, snapshot và rubric score; readiness bị chặn." };
+  return { complete: false, runId: null, highSeverity: 0, qualityGaps: 0, resultRows: [], scoreRows: [], message: "Chưa có một run eval hiện hành đầy đủ sáu scenario, snapshot và rubric score; readiness bị chặn." };
 }
 
 function average(values: number[]) {

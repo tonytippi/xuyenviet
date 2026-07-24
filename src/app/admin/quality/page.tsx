@@ -98,6 +98,11 @@ export default async function QualityDashboardPage({ searchParams }: QualityPage
           <p className="mt-5 leading-7 text-[#4f625a]">
             Readiness chỉ dùng corpus hiện hành và evidence an toàn toàn cục, không dùng số thẻ approved lịch sử hoặc kết quả bị che bởi bộ lọc.
           </p>
+          <div className="mt-4 grid gap-3 text-sm leading-6 text-[#4f625a]">
+            <p>Chẩn đoán coverage không đặt ngưỡng theo bucket: thiếu loại thẻ: {dashboard.readiness.diagnostics.zeroCountTypes.join(", ") || "không có"}.</p>
+            <p>Bucket tuyến/địa điểm có số lượng 0: {dashboard.readiness.diagnostics.zeroCountRoutes.join(", ") || "không có"}.</p>
+            <p>Quality gap không severity cao trong canonical eval run: {dashboard.readiness.diagnostics.evaluationQualityGaps}. Các gap này vẫn được đánh giá bởi baseline, không phải zero-tolerance gate riêng.</p>
+          </div>
           <div className="mt-4 flex flex-wrap gap-4 text-sm font-semibold text-[#1f5f46] underline underline-offset-4">
             <Link href="/admin/knowledge/progress">Theo dõi coverage</Link>
             <Link href="/admin/knowledge/recommendations">Xử lý khuyến nghị</Link>

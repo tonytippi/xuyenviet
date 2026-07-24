@@ -77,7 +77,7 @@ development_status:
   5-1-evaluate-ai-first-community-knowledge-safety: done
   # Synchronized 2026-07-24 after verification of supplied final repair commit c82e1b43f66eef917afee480592bf8c45cf5d82f.
   5-2-surface-ai-first-policy-quality-signals: done
-  # Synchronized 2026-07-24 after remediation of the six authorized first-review findings and required serial verification.
+  # Synchronized 2026-07-24 after resolving all eight fresh-review findings and passing required serial verification.
   5-3-close-the-active-evidence-grounded-card-readiness-gate: review
   epic-5-retrospective: optional
 

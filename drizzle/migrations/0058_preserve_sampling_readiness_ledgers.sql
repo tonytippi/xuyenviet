@@ -1,0 +1,6 @@
+ALTER TABLE "knowledge_sampling_cohort_members" DROP CONSTRAINT "knowledge_sampling_cohort_members_knowledge_card_id_knowledge_c";--> statement-breakpoint
+ALTER TABLE "knowledge_sampling_cohort_members" ADD CONSTRAINT "knowledge_sampling_cohort_members_knowledge_card_id_knowledge_cards_id_fk" FOREIGN KEY ("knowledge_card_id") REFERENCES "knowledge_cards"("id") ON DELETE restrict;--> statement-breakpoint
+ALTER TABLE "knowledge_sampling_candidate_ledger" DROP CONSTRAINT "knowledge_sampling_candidate_ledger_knowledge_card_id_fkey";--> statement-breakpoint
+ALTER TABLE "knowledge_sampling_candidate_ledger" ADD CONSTRAINT "knowledge_sampling_candidate_ledger_knowledge_card_id_knowledge_cards_id_fk" FOREIGN KEY ("knowledge_card_id") REFERENCES "knowledge_cards"("id") ON DELETE restrict;--> statement-breakpoint
+ALTER TABLE "knowledge_verify_first_sampling_obligations" DROP CONSTRAINT "knowledge_verify_first_sampling_obligati_knowledge_card_id_fkey";--> statement-breakpoint
+ALTER TABLE "knowledge_verify_first_sampling_obligations" ADD CONSTRAINT "knowledge_verify_first_sampling_obligations_knowledge_card_id_knowledge_cards_id_fk" FOREIGN KEY ("knowledge_card_id") REFERENCES "knowledge_cards"("id") ON DELETE restrict;

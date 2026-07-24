@@ -407,6 +407,13 @@
       "when": 1784904000009,
       "tag": "0057_active_evidence_readiness_enrollment",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1784904000010,
+      "tag": "0058_preserve_sampling_readiness_ledgers",
+      "breakpoints": true
     }
   ]
 }

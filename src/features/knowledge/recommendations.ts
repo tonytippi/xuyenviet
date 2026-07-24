@@ -11,6 +11,7 @@ import { getCorridorBucketLabel } from "@/features/knowledge/corridor";
 
 type RecommendationDb = ReturnType<typeof getDb>;
 type Transaction = Parameters<Parameters<RecommendationDb["transaction"]>[0]>[0];
+type SamplingReadinessDb = Pick<RecommendationDb, "select">;
 
 const samplingWindowDays = 28;
 const samplingPercent = 15;
@@ -109,7 +110,7 @@ export function enrollmentDigest(entries: string[]) {
   return createHash("sha256").update([...entries].sort().join("\n")).digest("hex");
 }
 
-export async function getPublicMvpSamplingReadinessEvidence(db: RecommendationDb = getDb()) {
+export async function getPublicMvpSamplingReadinessEvidence(db: SamplingReadinessDb = getDb()) {
   const [policies, members, candidates, obligations, recommendations, validEvidenceFences] = await Promise.all([
     db.select().from(knowledgeSamplingPolicies).orderBy(asc(knowledgeSamplingPolicies.windowStartsAt), asc(knowledgeSamplingPolicies.id)),
     db.select().from(knowledgeSamplingCohortMembers).orderBy(asc(knowledgeSamplingCohortMembers.policyId), asc(knowledgeSamplingCohortMembers.knowledgeCardId), asc(knowledgeSamplingCohortMembers.contentVersion), asc(knowledgeSamplingCohortMembers.evidenceSetRevision)),
@@ -126,7 +127,7 @@ export async function getPublicMvpSamplingReadinessEvidence(db: RecommendationDb
     const memberKeys = policyMembers.map((row) => `${row.knowledgeCardId}:${row.contentVersion}:${row.evidenceSetRevision}:${row.corridorBucket ?? "unknown"}:${row.outsideCorridor ?? "unknown"}:${row.selectedForSampling ?? "unknown"}`);
     const proofMatches = policy.enrollmentSealedAt !== null && policy.enrollmentCandidateCount === policyCandidates.length && policy.enrollmentSelectedCount === policyCandidates.filter((row) => row.selectedForSampling).length && policy.enrollmentDigest === enrollmentDigest(candidateKeys) && candidateKeys.length === memberKeys.length && candidateKeys.every((key, index) => key === memberKeys[index]);
     const corridorRelevant = [...policyCandidates, ...policyMembers, ...allPolicyObligations].some((entry) => entry.outsideCorridor !== true);
-    if (!corridorRelevant) return null;
+    if (!corridorRelevant) return { zeroApplicable: true, proofMatches: true, corridorMemberCount: 0, pendingMembers: 0, failedMembers: 0, obligations: 0, pendingObligations: 0, failedObligations: 0, highSeverity: false, unknownMembers: 0 };
     const corridorMembers = policyMembers.filter((member) => member.outsideCorridor === false);
     const selectedMembers = corridorMembers.filter((member) => member.selectedForSampling === true);
     const memberOutcomes = selectedMembers.map((member) => {
@@ -145,16 +146,18 @@ export async function getPublicMvpSamplingReadinessEvidence(db: RecommendationDb
       if (disposition.resolution === "sampling_failed") return "sampling_failed";
       return validEvidenceFences.has(fenceKey(obligation)) ? "sampling_passed" : "pending";
     });
-    return { proofMatches, corridorMemberCount: corridorMembers.length, pendingMembers: memberOutcomes.filter((outcome) => outcome === "pending").length, failedMembers: memberOutcomes.filter((outcome) => outcome === "sampling_failed").length, obligations: policyObligations.length, pendingObligations: obligationOutcomes.filter((outcome) => outcome === "pending").length, failedObligations: obligationOutcomes.filter((outcome) => outcome === "sampling_failed").length, highSeverity: Boolean(policy.escalatedAt || policy.suppressedAt) && corridorMembers.length > 0, unknownMembers: [...policyCandidates, ...policyMembers, ...allPolicyObligations].filter((entry) => entry.outsideCorridor === null || ("selectedForSampling" in entry && entry.selectedForSampling === null)).length };
-  }).filter((policy): policy is NonNullable<typeof policy> => policy !== null);
+    return { zeroApplicable: false, proofMatches, corridorMemberCount: corridorMembers.length, pendingMembers: memberOutcomes.filter((outcome) => outcome === "pending").length, failedMembers: memberOutcomes.filter((outcome) => outcome === "sampling_failed").length, obligations: policyObligations.length, pendingObligations: obligationOutcomes.filter((outcome) => outcome === "pending").length, failedObligations: obligationOutcomes.filter((outcome) => outcome === "sampling_failed").length, highSeverity: Boolean(policy.escalatedAt || policy.suppressedAt) && corridorMembers.length > 0, unknownMembers: [...policyCandidates, ...policyMembers, ...allPolicyObligations].filter((entry) => entry.outsideCorridor === null || ("selectedForSampling" in entry && entry.selectedForSampling === null)).length };
+  });
+  const applicablePolicyEvidence = policyEvidence.filter((policy) => !policy.zeroApplicable);
   return {
-    complete: policies.length > 0 && policyEvidence.every((policy) => policy.proofMatches && policy.unknownMembers === 0 && policy.pendingMembers === 0 && policy.failedMembers === 0 && policy.pendingObligations === 0 && policy.failedObligations === 0 && !policy.highSeverity),
-    policies: policyEvidence.length,
-    incompletePolicies: policyEvidence.filter((policy) => !policy.proofMatches || policy.unknownMembers > 0).length,
-    pending: policyEvidence.reduce((total, policy) => total + policy.pendingMembers + policy.pendingObligations, 0),
-    failed: policyEvidence.reduce((total, policy) => total + policy.failedMembers + policy.failedObligations, 0),
-    highSeverity: policyEvidence.filter((policy) => policy.highSeverity).length,
-    obligations: policyEvidence.reduce((total, policy) => total + policy.obligations, 0),
+    complete: policies.length > 0 && applicablePolicyEvidence.every((policy) => policy.proofMatches && policy.unknownMembers === 0 && policy.pendingMembers === 0 && policy.failedMembers === 0 && policy.pendingObligations === 0 && policy.failedObligations === 0 && !policy.highSeverity),
+    policies: applicablePolicyEvidence.length,
+    zeroApplicablePolicies: policyEvidence.filter((policy) => policy.zeroApplicable).length,
+    incompletePolicies: applicablePolicyEvidence.filter((policy) => !policy.proofMatches || policy.unknownMembers > 0).length,
+    pending: applicablePolicyEvidence.reduce((total, policy) => total + policy.pendingMembers + policy.pendingObligations, 0),
+    failed: applicablePolicyEvidence.reduce((total, policy) => total + policy.failedMembers + policy.failedObligations, 0),
+    highSeverity: applicablePolicyEvidence.filter((policy) => policy.highSeverity).length,
+    obligations: applicablePolicyEvidence.reduce((total, policy) => total + policy.obligations, 0),
   };
 }
 

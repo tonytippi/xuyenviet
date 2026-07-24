@@ -286,7 +286,7 @@ describe("public MVP quality dashboard", () => {
     expect(dashboard.evaluation.counterMetrics).toEqual({ unsupportedClaims: 1, missingUncertainty: 1, noBetterThanGeneric: 1 });
     expect(dashboard.readiness.status).toBe("not_ready");
     expect(dashboard.readiness.missingSignals).toContain("Cần thêm 10 phản hồi usefulness cho magic-moment.");
-    expect(dashboard.readiness.missingSignals).toContain("Cần thêm 7 kết quả eval được chấm điểm đầy đủ.");
+    expect(dashboard.readiness.missingSignals).toContain("Chưa có một run eval hiện hành đầy đủ sáu scenario, snapshot và rubric score; readiness bị chặn.");
     expect(dashboard.recentResults[0].retrieval.available).toBe(true);
     expect(dashboard.recentResults[0].provenance.knowledge).toBe(true);
     expect(dashboard.recentResults[0].provenance.web).toBe(true);
@@ -571,7 +571,7 @@ describe("public MVP quality dashboard", () => {
     const [policy] = await testDb.insert(knowledgeSamplingPolicies).values({ cohortKey: "outside-policy", windowStartsAt: new Date("2026-01-01"), windowEndsAt: new Date("2026-01-29"), samplingPercent: 15, suppressedAt: new Date(), enrollmentCandidateCount: 1, enrollmentSelectedCount: 1, enrollmentDigest: enrollmentDigest(["outside-fence:1:1::true:true"]), enrollmentSealedAt: new Date() }).returning();
     await testDb.insert(knowledgeSamplingCandidateLedger).values({ terminalIngestionJobId: outside.jobId, policyId: policy.id, knowledgeCardId: "outside-fence", contentVersion: 1, evidenceSetRevision: 1, corridorBucket: "", outsideCorridor: true, selectedForSampling: true });
     await testDb.insert(knowledgeSamplingCohortMembers).values({ policyId: policy.id, knowledgeCardId: "outside-fence", contentVersion: 1, evidenceSetRevision: 1, corridorBucket: null, outsideCorridor: true, selectedForSampling: true });
-    await expect(getPublicMvpSamplingReadinessEvidence(testDb)).resolves.toMatchObject({ complete: true, policies: 0, highSeverity: 0 });
+    await expect(getPublicMvpSamplingReadinessEvidence(testDb)).resolves.toMatchObject({ complete: true, policies: 0, zeroApplicablePolicies: 1, highSeverity: 0 });
   });
 
   test("selects only the newest complete canonical evaluation run and distinguishes high from non-high gaps", async () => {
@@ -587,6 +587,49 @@ describe("public MVP quality dashboard", () => {
     const high = await seedCanonicalEvaluationRun({ userId: "selector-admin", completedAt: new Date("2026-01-05"), highSeverity: true });
     await expect(getCurrentReadinessEvaluationEvidence(testDb)).resolves.toMatchObject({ complete: true, runId: high.id, highSeverity: 1, qualityGaps: 0 });
     expect([incomplete.id, incompleteScores.id]).not.toContain(older.id);
+  });
+
+  test("fails closed when a canonical run contains a result from another prompt set", async () => {
+    await createUser("mixed-prompt-set-admin", ["admin"]);
+    const { publicMvpEvaluationPromptSetVersion } = await import("@/features/feedback/evaluation");
+    const { getCurrentReadinessEvaluationEvidence } = await import("@/features/feedback/quality-dashboard");
+    const run = await seedCanonicalEvaluationRun({ userId: "mixed-prompt-set-admin", completedAt: new Date("2026-01-10") });
+    const [otherPromptSet] = await testDb.insert(publicMvpEvaluationPromptSets).values({ version: `${publicMvpEvaluationPromptSetVersion}-other`, rubricVersion: "test" }).returning();
+    await testDb.update(publicMvpEvaluationResults).set({ promptSetId: otherPromptSet!.id, promptSetVersion: otherPromptSet!.version }).where(eq(publicMvpEvaluationResults.runId, run.id));
+
+    await expect(getCurrentReadinessEvaluationEvidence(testDb)).resolves.toMatchObject({ complete: false, runId: null });
+  });
+
+  test("uses only the newest canonical run for baseline checks and keeps non-high gaps diagnostic", async () => {
+    await createUser("baseline-admin", ["admin"]);
+    await mockSession("baseline-admin", ["admin"]);
+    const older = await seedCanonicalEvaluationRun({ userId: "baseline-admin", completedAt: new Date("2026-01-01") });
+    const newer = await seedCanonicalEvaluationRun({ userId: "baseline-admin", completedAt: new Date("2026-01-02"), qualityGap: true });
+    await testDb.update(publicMvpEvaluationResults).set({ noBetterThanGenericFlag: true }).where(eq(publicMvpEvaluationResults.runId, older.id));
+    const { getPublicMvpQualityDashboard } = await import("@/features/feedback/quality-dashboard");
+
+    const dashboard = await getPublicMvpQualityDashboard({ db: testDb, range: "all" });
+
+    expect(dashboard.success).toBe(true);
+    if (!dashboard.success) return;
+    expect(dashboard.readiness.checks.find((check) => check.key === "generic_comparison_sample")).toMatchObject({ current: 0 });
+    expect(dashboard.readiness.checks.find((check) => check.key === "evaluation_quality_gaps")).toBeUndefined();
+    expect(dashboard.readiness.diagnostics.evaluationQualityGaps).toBe(1);
+    expect(dashboard.readiness.checks.find((check) => check.key === "current_evaluation_evidence")).toMatchObject({ passed: true });
+    expect(newer.id).toBeDefined();
+  });
+
+  test("prevents deletion of cards retained by immutable sampling ledgers and obligations", async () => {
+    await createUser("retention-admin", ["admin"]);
+    const autoActive = await seedSamplingFence({ id: "retained-auto-active", userId: "retention-admin" });
+    const verifyFirst = await seedSamplingFence({ id: "retained-verify-first", userId: "retention-admin", publicationState: "suppressed" });
+    const [policy] = await testDb.insert(knowledgeSamplingPolicies).values({ cohortKey: "retention-policy", windowStartsAt: new Date("2026-01-01"), windowEndsAt: new Date("2026-01-29"), samplingPercent: 15 }).returning();
+    await testDb.insert(knowledgeSamplingCandidateLedger).values({ terminalIngestionJobId: autoActive.jobId, policyId: policy.id, knowledgeCardId: "retained-auto-active", contentVersion: 1, evidenceSetRevision: 1, corridorBucket: "Huế", outsideCorridor: false, selectedForSampling: true });
+    await testDb.insert(knowledgeSamplingCohortMembers).values({ policyId: policy.id, knowledgeCardId: "retained-auto-active", contentVersion: 1, evidenceSetRevision: 1, corridorBucket: "Huế", outsideCorridor: false, selectedForSampling: true });
+    await testDb.insert(knowledgeVerifyFirstSamplingObligations).values({ terminalIngestionJobId: verifyFirst.jobId, policyId: policy.id, knowledgeCardId: "retained-verify-first", contentVersion: 1, evidenceSetRevision: 1, corridorBucket: "Huế", outsideCorridor: false });
+
+    await expect(testDb.delete(knowledgeCards).where(eq(knowledgeCards.id, "retained-auto-active"))).rejects.toThrow();
+    await expect(testDb.delete(knowledgeCards).where(eq(knowledgeCards.id, "retained-verify-first"))).rejects.toThrow();
   });
 
   test("requires current valid evidence and one unambiguous disposition for selected and verify-first fences", async () => {

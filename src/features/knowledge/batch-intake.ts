@@ -20,6 +20,7 @@ const maxSafeErrorLength = 500;
 const activeCorridorSeedTarget = 100;
 
 type BatchDb = ReturnType<typeof getDb>;
+type CoverageDb = Pick<BatchDb, "select">;
 
 export type BatchSeedUrlIntakeInput = {
   urls: string;
@@ -208,7 +209,7 @@ export async function getActiveEvidenceGroundedSeedCoverage(dbOverride?: BatchDb
   return getActiveEvidenceGroundedSeedCoverageForReadiness(dbOverride ?? getDb());
 }
 
-export async function getActiveEvidenceGroundedSeedCoverageForReadiness(db: BatchDb): Promise<ActiveEvidenceGroundedSeedCoverage> {
+export async function getActiveEvidenceGroundedSeedCoverageForReadiness(db: CoverageDb): Promise<ActiveEvidenceGroundedSeedCoverage> {
   const cardRows = await db
     .select({
       id: knowledgeCards.id,
@@ -339,7 +340,7 @@ export async function getActiveEvidenceGroundedSeedCoverageForReadiness(db: Batc
 }
 
 /** Internal aggregate for readiness consumers that must validate persisted fences without exposing card material. */
-export async function getCurrentValidEvidenceFencesForReadiness(db: BatchDb) {
+export async function getCurrentValidEvidenceFencesForReadiness(db: CoverageDb) {
   const rows = await db
     .select({
       knowledgeCardId: knowledgeCards.id,

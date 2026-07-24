@@ -182,11 +182,24 @@ gpu4ai/gpt-5.6-terra-review
 - 2026-07-24: Applied the scoped pnpm patch for `next-auth@5.0.0-beta.31`, changing only its ESM imports to existing `.js` Next server entrypoints. Existing package constraints and resolved `next@15.5.20` remain unchanged. All required serial suites passed: public-MVP quality dashboard (13), batch source intake (14), recommendation queue (23), public-MVP evaluation (15), and knowledge search (42). `pnpm lint` passed with four pre-existing unused-variable warnings; `pnpm typecheck` and `pnpm build` passed. Story advanced to `review`.
 - 2026-07-24: Resolved only the six authorized first-review findings. Readiness is now corpus-wide regardless of dashboard filters; current evidence is fenced to `sources.currentCaptureVersionId`; fully non-corridor policies are excluded from the corridor gate; suppressed corridor cards with unresolved review/verification remain remediation diagnostics; and the Knowledge progress surface is an admin-only operational caller for sealing closed sampling windows. Added canonical evaluation-run selector coverage for six scenario/version pairs, missing evidence, newest qualifying replacement, and high versus non-high flags. Required serial verification passed; status returned to `review`.
 
+### Review Findings
+
+- [x] [Review][Patch] Readiness now executes all dashboard, corpus, sampling, and canonical-evaluation reads in one read-only `REPEATABLE READ` transaction [src/features/feedback/quality-dashboard.ts].
+- [x] [Review][Patch] Auto-active cohort membership and ledger card foreign keys are deletion-restricted; a forward migration preserves the immutable denominator [src/db/schema.ts, drizzle/migrations/0058_preserve_sampling_readiness_ledgers.sql].
+- [x] [Review][Patch] Verify-first obligations retain the same deletion-restricted fence, preserving their required sampling proof [src/db/schema.ts, drizzle/migrations/0058_preserve_sampling_readiness_ledgers.sql].
+- [x] [Review][Patch] Magic-moment and generic baseline checks now use only the newest canonical evaluation run selected for readiness [src/features/feedback/quality-dashboard.ts].
+- [x] [Review][Patch] The canonical selector requires every result's prompt-set ID and version to match its completed current run, failing closed on mixed evidence [src/features/feedback/quality-dashboard.ts].
+- [x] [Review][Patch] Fully non-corridor policies are retained as explicit `zeroApplicablePolicies` diagnostics instead of being silently removed [src/features/knowledge/recommendations.ts].
+- [x] [Review][Patch] `/admin/quality` renders corpus-wide zero-count type/route buckets and canonical non-high quality-gap diagnostics [src/app/admin/quality/page.tsx].
+- [x] [Review][Patch] Non-high evaluation gaps are now remediation diagnostics only; the undocumented zero-tolerance readiness check was removed [src/features/feedback/quality-dashboard.ts].
+
 ### File List
 
 - _bmad-output/implementation-artifacts/5-3-close-the-active-evidence-grounded-card-readiness-gate.md
 - _bmad-output/implementation-artifacts/sprint-status.yaml
 - drizzle/migrations/0057_active_evidence_readiness_enrollment.sql
+- drizzle/migrations/0058_preserve_sampling_readiness_ledgers.sql
+- drizzle/migrations/meta/0058_snapshot.json
 - drizzle/migrations/meta/_journal.json
 - src/app/admin/quality/page.tsx
 - src/db/schema.ts
@@ -199,6 +212,7 @@ gpu4ai/gpt-5.6-terra-review
 - tests/knowledge-ingestion-pipeline.test.ts
 - tests/public-mvp-quality-dashboard.test.ts
 - tests/knowledge-batch-source-intake.test.ts
+- tests/knowledge-recommendation-queue.test.ts
 
 ### Change Log
 
@@ -208,3 +222,6 @@ gpu4ai/gpt-5.6-terra-review
 - 2026-07-24: Completed bounded aggregate and regression recovery; retained `in-progress` because the required serial queue ownership suite cannot collect under the installed Next/next-auth dependency resolution.
 - 2026-07-24: Added the scoped `next-auth` ESM-entrypoint compatibility patch, completed required sequential verification, marked all tasks complete, and synchronized sprint status to `review`.
 - 2026-07-24: Repaired only the six authorized first-review findings; required serial suites, lint, typecheck, and build passed. Returned to `review`.
+- 2026-07-24: Marked `in-progress` during second-review recovery. The five claimed second-review findings and their severities are absent from the permitted story record, so they cannot be accurately recorded without the original review payload.
+- 2026-07-24: Completed a fresh adversarial Story 5.3 review of `cb83ccc`, `cea0a736`, and the present documentation worktree. Recorded eight actionable findings (four high and four medium), all classified as substantial risk. Story remains `in-progress`; no application code, tests, dependencies, or commits were modified by this review.
+- 2026-07-24: Resolved only the eight fresh-review findings. Readiness now has one read-only repeatable-read snapshot; immutable auto-active and verify-first rows block card deletion; canonical evaluation evidence fences result prompt-set identity and supplies all baseline checks; zero-applicable non-corridor policies and corpus-wide remediation diagnostics are explicit; non-high evaluation gaps remain baseline-governed diagnostics. Added DB regressions for mixed prompt sets, canonical baseline replacement, zero-applicable policy diagnostics, and immutable row retention. Required serial suites passed: dashboard (19), batch intake (14), recommendation queue (23), evaluation (15), search (42); lint passed with three pre-existing warnings; typecheck and build passed. Status returned to `review`; no commit created.
