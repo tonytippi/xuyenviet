@@ -1,5 +1,5 @@
 # generated: 2026-07-21
-# last_updated: 2026-07-23
+# last_updated: 2026-07-24
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -29,7 +29,7 @@
 #   - done: Completed
 
 generated: 2026-07-21
-last_updated: 2026-07-23
+last_updated: 2026-07-24
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -57,19 +57,19 @@ development_status:
   3-11-report-active-evidence-grounded-seed-coverage: done
   epic-3-retrospective: optional
 
-  epic-4: in-progress
+  epic-4: done
   4-1-migrate-retrieval-to-state-aware-active-knowledge: done
   4-2-index-current-ai-first-knowledge-versions: done
-  # Synchronized 2026-07-24 after repairing trailing-dot Facebook evidence filtering.
+  # Synchronized 2026-07-24 after verification of supplied repair commit 27da21fd3d21ca972ed78630a121a4be14ba2fad.
+  4-3-assemble-state-aware-knowledge-source-bundles: done
   # Synchronized 2026-07-23 after verification of final repair commit d994c86.
-  4-3-assemble-state-aware-knowledge-source-bundles: review
   4-4-enforce-community-conditional-and-conflict-answer-policy: done
-  # Synchronized 2026-07-24 after final Epic 4 repair verification; ready for review.
-  4-5-update-search-fallback-and-provenance-for-ai-first-states: review
-  # Synchronized 2026-07-24 after final shared repair commit 616faf235716af98000b6929e72b2b70da671467; target status is review.
-  4-6-render-state-aware-traveler-trust-details: review
-  # Synchronized 2026-07-24 after verification of final shared repair commit 616faf235716af98000b6929e72b2b70da671467.
-  4-7-verify-ai-first-retrieval-and-answer-safety: review
+  # Synchronized 2026-07-24 after verification of supplied final repair commit 616faf235716af98000b6929e72b2b70da671467.
+  4-5-update-search-fallback-and-provenance-for-ai-first-states: done
+  # Synchronized 2026-07-24 after verification of record commit 0905862cb1bab57582a7352901d195706105fbb2 and code repair 616faf235716af98000b6929e72b2b70da671467.
+  4-6-render-state-aware-traveler-trust-details: done
+  # Synchronized 2026-07-24 after verification of record commit b3606c375fabdb98229783013c8e64ac0679281c and shared repair 616faf235716af98000b6929e72b2b70da671467.
+  4-7-verify-ai-first-retrieval-and-answer-safety: done
   epic-4-retrospective: optional
 
   epic-5: backlog

@@ -4,7 +4,7 @@ baseline_commit: ee80c40ed72f8db67234312876eea12deca51b57
 
 # Story 4.3: Assemble State-Aware Knowledge Source Bundles
 
-Status: review
+Status: done
 
 ## Story
 
@@ -114,6 +114,7 @@ gpu4ai/gpt-5.6-terra-review
 - Finalized after verifying epic-review repair commit `72c16897c2284813d9689754e1a03b38079bb7cd` (`fix(ai): repair state-aware source bundle safety`). No source inspection, testing, or code review was performed in this status-only finalization.
 - Resolved the assigned High finding: trailing-dot Facebook aliases are rejected at both the retrieval projection and state-aware bundle projection seams. Added focused retrieval, prompt, and persisted-provenance regressions for `facebook.com.`, `fb.me.`, and `fb.watch.`.
 - Verified repair: `pnpm test:run tests/knowledge-search.test.ts tests/answer-context.test.ts` (129 tests) and `pnpm typecheck`.
+- Finalized after verifying supplied repair commit `27da21fd3d21ca972ed78630a121a4be14ba2fad` (`fix(ai): block trailing-dot Facebook evidence`). No source inspection, testing, code review, or code changes were performed in this status-only finalization.
 
 ### File List
 
@@ -133,3 +134,4 @@ gpu4ai/gpt-5.6-terra-review
 - 2026-07-24: Resolved the five assigned final review findings and returned Story 4.3 to review.
 - 2026-07-24: Verified supplied epic-review repair commit `72c1689` and finalized the story as done (status-only).
 - 2026-07-24: Repaired trailing-dot Facebook evidence filtering, added focused regressions, and returned Story 4.3 to review.
+- 2026-07-24: Verified supplied repair commit `27da21f` and finalized the story as done (status-only).

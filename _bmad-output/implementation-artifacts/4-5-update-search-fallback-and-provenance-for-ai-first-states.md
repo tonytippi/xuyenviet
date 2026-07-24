@@ -4,7 +4,7 @@
 baseline_commit: 06d0bc8935d44347124b59f7a77d9f76b0222bce
 ---
 
-Status: review
+Status: done
 
 ## Story
 
@@ -127,3 +127,4 @@ gpu4ai/gpt-5.6-terra-review
 - 2026-07-24: Fixed the Epic 4 web provenance snapshot finding; status synchronized to review.
 - 2026-07-24: Supplied repair commit 956357d5122b4756ce72c509f4b48545b9e3c0cb verified; status synchronized to done.
 - 2026-07-24: Final Epic 4 repair pass fixed the credential-bearing URL and successful-fallback verification-guidance findings; status synchronized to review.
+- 2026-07-24: Supplied final repair commit 616faf235716af98000b6929e72b2b70da671467 verified; status synchronized to done.

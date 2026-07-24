@@ -4,7 +4,7 @@ baseline_commit: 28baba2902e42b3f9a11fda07120855231dc2bdf
 
 # Story 4.6: Render State-Aware Traveler Trust Details
 
-Status: review
+Status: done
 
 ## Story
 
@@ -107,3 +107,4 @@ gpu4ai/gpt-5.6-terra-review
 - 2026-07-23: Finalized as done after verification of repair commit 404fd804088b23368517eb6ccc84ee5d90e7fd44 and a clean worktree.
 - 2026-07-24: Documented shared provenance repair commit 956357d5122b4756ce72c509f4b48545b9e3c0cb and returned Story 4.6 to review.
 - 2026-07-24: Documented final shared repair commit 616faf235716af98000b6929e72b2b70da671467 and returned Story 4.6 to review.
+- 2026-07-24: Finalized as done after verification of record commit 0905862cb1bab57582a7352901d195706105fbb2 and code repair 616faf235716af98000b6929e72b2b70da671467.

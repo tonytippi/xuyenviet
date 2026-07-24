@@ -4,7 +4,7 @@ baseline_commit: 404fd804088b23368517eb6ccc84ee5d90e7fd44
 
 # Story 4.7: Verify AI-First Retrieval and Answer Safety
 
-Status: review
+Status: done
 
 ## Story
 
@@ -75,7 +75,7 @@ gpu4ai/gpt-5.6-terra-review
 - Persisted selected card state-policy snapshots in retrieval decisions and strengthened stable persisted web identifier/provenance assertions.
 - Added claimed stale-version/source-withdrawal and safe bounded retry-record regressions. Documented serial `DATABASE_URL_TEST` execution in the canonical README testing guidance.
 - Verification completed with no blockers. `pnpm lint` has only the three existing unused-variable warnings listed above.
-- 2026-07-24 shared code repair `616faf235716af98000b6929e72b2b70da671467` rejects credential-bearing URLs and adds deterministic web-fallback verification guidance. It resolves the final shared Stories 4.5/4.6/4.7 finding; Story 4.7 is synchronized to review.
+- 2026-07-24 shared code repair `616faf235716af98000b6929e72b2b70da671467` rejects credential-bearing URLs and adds deterministic web-fallback verification guidance. It resolves the final shared Stories 4.5/4.6/4.7 finding; Story 4.7 is synchronized to done after record commit `b3606c375fabdb98229783013c8e64ac0679281c`.
 
 ### File List
 
@@ -91,4 +91,4 @@ gpu4ai/gpt-5.6-terra-review
 - 2026-07-24: Added AI-first retrieval, answer-policy, provenance, and versioned worker safety regression coverage; documented serial DB-backed test sequencing and moved the story to review.
 - 2026-07-24: Documented the shared provenance repair in commit 956357d5122b4756ce72c509f4b48545b9e3c0cb and returned Story 4.7 to review.
 - 2026-07-24: Verified record repair commit e3ad2f982a4818c787ceea780acaf7a87a653fdd follows shared code repair 956357d5122b4756ce72c509f4b48545b9e3c0cb; marked Story 4.7 done.
-- 2026-07-24: Documented final shared repair `616faf235716af98000b6929e72b2b70da671467`, which rejects credential URLs and provides deterministic web-fallback verification guidance; synchronized only Story 4.7 to review.
+- 2026-07-24: Verified record commit `b3606c375fabdb98229783013c8e64ac0679281c` and shared repair `616faf235716af98000b6929e72b2b70da671467`; synchronized only Story 4.7 to done.
