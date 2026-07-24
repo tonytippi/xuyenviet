@@ -38,13 +38,15 @@ is complete only when its sprint status is `done` and every associated story is
   `sprint-status.yaml` before it finishes. The coordinator is read-only, but
   must use the most recent worker output as well as the file to select the next
   action. Never make a decision from the sprint file alone.
-- A `blocked`, `unknown`, timeout, failed command, missing artifact, failed
-  test, validation failure, or unexpected status transition is a stop
-  condition. Read the worker output, report the blocker, and do not continue
-  the loop automatically. Actionable review findings enter the bounded repair
-  loops described below. Status Finalization is not a review: a potential
-  defect noticed by that worker is outside its authority and is not a stop
-  condition. Only its objective finalization checks may block it.
+- Operate autonomously by default. A `blocked`, `unknown`, timeout, failed
+  command, missing artifact, failed test, validation failure, or unexpected
+  status transition is a recovery signal first, not an automatic stop. Read the
+  worker output, inspect the relevant artifacts and current state, and use the
+  bounded Autonomous Recovery procedure below before asking the user. Actionable
+  review findings enter the bounded repair loops described below. Status
+  Finalization is not a review: a potential defect noticed by that worker is
+  outside its authority and is not a stop condition. Only its objective
+  finalization checks may block it.
 - Do not close panes, tabs, workspaces, or agents created by another person or
   another run. Close only pane IDs recorded by this run.
 - Retain no more than two child panes from this run at any time: the current
@@ -56,6 +58,35 @@ is complete only when its sprint status is `done` and every associated story is
 - Do not use `bmad-dev-auto` here. It is intentionally one-story scoped and
   has its own loop; this orchestrator must own the backlog-level lifecycle and
   pane boundaries.
+
+## Autonomous Recovery And Escalation
+
+The coordinator must solve routine workflow failures before escalating. It may
+inspect worker output, the target story, sprint status, git state, logs, and
+relevant code; start one fresh, narrowly scoped recovery worker; rerun a failed
+read-only command or verification; repair an in-scope story-document or code
+defect; and retry the current stage when the prior worker did not complete it.
+It must preserve the existing story target, respect all stage boundaries, and
+independently verify the recovery result before continuing.
+
+For each failed stage, make at most one autonomous recovery attempt beyond the
+explicit report-reprint, report-correction, and review-repair loops defined in
+this skill. The recovery worker must receive the exact failure evidence and a
+prompt to fix only that failure. It must not begin another story, widen scope,
+fabricate a report, infer missing approval, alter unrelated work, or bypass a
+required verification. If the retry succeeds, continue normally. If it fails,
+is contradictory, or reveals a different issue, reassess it once; escalate only
+when no further safe, bounded action remains.
+
+Ask the user and stop only when an important decision or information is truly
+required: approval for an irreversible or destructive operation; credentials,
+access, or an external dependency the coordinator cannot obtain; a product,
+security, or acceptance-criteria ambiguity requiring an owner decision;
+conflicting authoritative artifacts; unrelated pre-existing work that cannot be
+cleanly separated; or an exhausted bounded recovery. State the evidence, the
+safe options, the recommended option, and the exact decision or information
+needed. Do not stop merely to report a routine failure that can be diagnosed or
+repaired safely.
 
 ## Inputs And Statuses
 
@@ -131,8 +162,10 @@ Take `<returned-pane-id>` only from the JSON returned by `herdr pane split`.
 If the prompt wait fails, inspect the worker with `herdr agent get
 <unique-name>` and read its terminal output before deciding whether it
 completed or is blocked. A failed wait is a stop condition only when the final
-terminal report cannot be read and independently verified. If the worker
-reports `BLOCKED`, stop after reading its final report.
+terminal report cannot be read and independently verified after the report
+retries and one applicable Autonomous Recovery attempt. If the worker reports
+`BLOCKED`, read its final report, diagnose the stated failure, and apply the
+Autonomous Recovery procedure before escalating.
 
 Every mutating worker prompt must require this final, machine-checkable report:
 
@@ -147,16 +180,32 @@ BLOCKER: <none or reason>
 --- END-CHIEF-OF-STAFF-REPORT ---
 ```
 
-The report must be the worker's last substantive terminal output. Each label
-must begin a line and appear exactly once within the final delimited block;
-`SUMMARY` and `BLOCKER` values may continue on following wrapped lines until
-the next label or the end delimiter. After reading a mutating worker's final
-output, parse the final complete delimited block and reject it unless it has
-`RESULT: SUCCESS`, `SPRINT STATUS SYNCHRONIZED: yes`, and the exact
-stage-appropriate final status independently observed in `sprint-status.yaml`.
-Save that complete block as `last_worker_result` before creating another pane.
+The report must be the worker's last substantive terminal output. Parse it
+semantically, not by exact presentation. Prefer the canonical delimiter block,
+but accept an understandable self-contained final report when its delimiters,
+hyphenation, whitespace, capitalization, line wrapping, or Markdown decoration
+vary. Locate labeled fields case-insensitively and normalize harmless spacing or
+punctuation around the labels. `SUMMARY` and `BLOCKER` values may continue on
+following wrapped lines until the next recognized label or the report end.
+
+Accept the report only when it unambiguously contains exactly one semantic value
+for each required field: `RESULT`, `TARGET`, `SPRINT STATUS`, `SPRINT STATUS
+SYNCHRONIZED`, `SUMMARY`, and `BLOCKER`. Treat synonymous boolean wording such
+as `true`, `yes`, or `synchronized` as affirmative only for `SPRINT STATUS
+SYNCHRONIZED`; normalize known status spelling variants before comparison. Do
+not infer a required field from surrounding terminal output, a commit, git
+state, or the sprint file. Reject a report only when its meaning is ambiguous,
+a required semantic field is absent or contradictory, or its result and
+independently verified sprint status do not meet the stage requirements. After
+reading a mutating worker's final output, accept it only when `RESULT` is
+`SUCCESS`, `SPRINT STATUS SYNCHRONIZED` is affirmative, and the exact
+stage-appropriate final status is independently observed in `sprint-status.yaml`.
+Save the normalized complete report as `last_worker_result` before creating
+another pane.
 A worker that cannot synchronize the expected status must return `BLOCKED`; do
-not repair or guess its status in the coordinator.
+not repair or guess its status in the coordinator. Diagnose and recover through
+a properly scoped worker where possible; escalate only if that bounded recovery
+cannot synchronize an independently verified status.
 
 The Story Review and Epic Review stages have one narrow report-correction
 exception to the `RESULT: SUCCESS` rule. Apply it only when the final report
