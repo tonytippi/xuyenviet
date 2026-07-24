@@ -2,7 +2,7 @@
 
 ## Status
 
-Agreed direction recorded on 2026-07-16 and aligned to the AI-first knowledge policy on 2026-07-23. This is a future implementation roadmap, not an approved build plan.
+Agreed direction recorded on 2026-07-16 and aligned to the AI-first knowledge policy on 2026-07-23. This is a future implementation roadmap, not an approved build plan. The active PRD approves state-aware retrieval and chat/trip context only; full-text search, embeddings, hybrid ranking, topic briefs, and memory consolidation require future PRD and architecture work.
 
 **Implementation baseline (2026-07-23):** State-aware lexical retrieval is implemented through Epic 4 Story 4.1. Versioned indexing, source-bundle assembly, community/conflict answer policy, search fallback/provenance, traveler trust details, and retrieval safety verification are ready for development. Full-text search, embeddings, hybrid retrieval, RRF, reranking, topic briefs, and profile-memory consolidation remain proposed.
 

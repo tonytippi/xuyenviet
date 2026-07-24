@@ -1,19 +1,43 @@
 # Documentation Index
 
-`docs/` contains two kinds of documents:
+`docs/` is project knowledge. Its directories distinguish whether a document describes a runnable capability or future direction.
 
-- **Current runbooks:** describe implemented operations and must match code.
-- **Proposals:** record agreed-but-unimplemented product or engineering direction. They are input to a future PRD, architecture, UX, epic, and readiness workflow; they do not authorize implementation by themselves.
+## Source Of Truth
 
-The active PRD, architecture, epics, stories, and sprint status under `_bmad-output/` remain the source of truth when they conflict with a proposal here.
+The active MVP requirements source is the [PRD](../_bmad-output/planning-artifacts/prds/prd-xuyenviet-2026-07-04/prd.md). Its approved scope is implemented through the linked architecture, epics, stories, and [sprint status](../_bmad-output/implementation-artifacts/sprint-status.yaml) under `_bmad-output/`.
 
-| Document | Type | Status | Use |
-|---|---|---|---|
-| [Facebook Capture Operations](./facebook-capture-operations.md) | Current runbook | Capture implemented; canonical ingestion requires separately supervised worker execution | Operate and recover Facebook capture safely. |
-| [YouTube Capture Operations](./youtube-capture-operations.md) | Current runbook + planned contract | Manual Gemini capture implemented; AI-first discovery is proposed | Operate current capture; follow its linked proposal before extending it. |
-| [AI-First YouTube Discovery Proposal](./ai-first-youtube-discovery-proposal.md) | Proposal | Not implemented; architecture and Facebook-policy alignment required before an epic | Input for a PRD/architecture/UX update covering discovery, auto-capture, and control tower. |
-| [Trip Project Product Direction](./trip-project-product-direction.md) | Proposal | Not implemented beyond the documented single-owner basic Trip Project baseline | Input for a future Trip Project PRD/architecture/UX update. |
-| [Place Intelligence and Accommodation Enrichment Proposal](./place-intelligence-and-accommodation-enrichment-proposal.md) | Proposal | Not implemented; provider terms, PRD, architecture, and UX alignment required | Input for a future place identity, accommodation shortlist, Maps/OTA, and community-knowledge update. |
-| [Knowledge Retrieval and Traveler Memory Roadmap](./knowledge-retrieval-and-memory-roadmap.md) | Roadmap proposal | State-aware retrieval baseline partly implemented; later retrieval/memory work remains proposed | Input for post-Epic-4 retrieval and memory planning. |
+When documents disagree, use this order:
 
-Before promoting a proposal to implementation, update the relevant BMad artifacts in this order: PRD, architecture, UX when applicable, epics/stories, implementation-readiness report, then sprint plan.
+1. Active PRD for product scope and requirements.
+2. Active architecture and epics/stories for technical and delivery decisions.
+3. Code and runbooks for implemented behavior and operations.
+4. Proposals and roadmaps only as future planning input.
+
+## Current Runbooks
+
+Runbooks document implemented commands and their operational limits. They must match code and must not describe planned behavior as executable.
+
+| Document | Status | Use |
+|---|---|---|
+| [Facebook Capture Operations](./runbooks/facebook-capture.md) | Capture implemented; production scheduling remains blocked by documented readiness gaps | Run or recover controlled Facebook capture. |
+| [YouTube Capture Operations](./runbooks/youtube-capture.md) | Submitted-video Gemini capture implemented; discovery is not implemented | Run or recover individual queued-video capture. |
+
+## Proposals
+
+Proposals record direction outside the approved MVP scope. They do not authorize implementation and must first be promoted through the BMad workflow.
+
+| Document | Status | Planning use |
+|---|---|---|
+| [AI-First YouTube Discovery](./proposals/ai-first-youtube-discovery.md) | Proposed; blocked on architecture-policy reconciliation | Future discovery, auto-capture, and control-tower planning. |
+| [Trip Project Product Direction](./proposals/trip-project-product-direction.md) | Proposed beyond the implemented basic single-owner project | Future structured trip planning. |
+| [Place Intelligence And Accommodation Enrichment](./proposals/place-intelligence-and-accommodation-enrichment.md) | Proposed; Maps, OTA, booking, and provider enrichment are MVP non-goals | Future place identity and accommodation-shortlist planning. |
+
+## Roadmaps
+
+Roadmaps sequence possible future investments; they are not committed scope or a build specification.
+
+| Document | Status | Planning use |
+|---|---|---|
+| [Knowledge Retrieval And Traveler Memory](./roadmaps/knowledge-retrieval-and-traveler-memory.md) | State-aware lexical baseline implemented; later search and memory work proposed | Post-MVP retrieval and memory decisions. |
+
+Before promoting a proposal or roadmap item, update the relevant BMad artifacts in this order: PRD, architecture, UX when applicable, epics/stories, implementation-readiness report, then sprint plan. Replace or remove the superseded proposal once those artifacts become the authoritative plan.

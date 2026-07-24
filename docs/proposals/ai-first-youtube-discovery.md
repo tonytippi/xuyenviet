@@ -1,6 +1,6 @@
 # AI-First YouTube Discovery Proposal
 
-**Status:** Proposed. Align this proposal with the active architecture and Facebook capture contracts before creating an epic.
+**Status:** Proposed and outside the active MVP scope. The active PRD excludes fully automated scraping at scale and contains no YouTube-discovery requirement. Align this proposal with the active architecture and Facebook capture contracts before creating an epic.
 
 ## Purpose
 
@@ -25,7 +25,7 @@ The proposal does not introduce a second knowledge lifecycle. It must reuse the 
 
 ## Existing Baseline
 
-The current `pnpm youtube:capture` flow accepts a queued canonical individual-video URL. It gets duration through YouTube Data API v3 and asks Gemini to analyze sequential 30-minute windows. It returns bounded, timestamped travel evidence and never requests or stores a transcript, downloaded media, HTML, browser data, provider payloads, or raw prompts/responses. See [YouTube Capture Operations](./youtube-capture-operations.md).
+The current `pnpm youtube:capture` flow accepts a queued canonical individual-video URL. It gets duration through YouTube Data API v3 and asks Gemini to analyze sequential 30-minute windows. It returns bounded, timestamped travel evidence and never requests or stores a transcript, downloaded media, HTML, browser data, provider payloads, or raw prompts/responses. See [YouTube Capture Operations](../runbooks/youtube-capture.md).
 
 The current Knowledge pipeline owns the canonical lifecycle for readable captures:
 
@@ -38,7 +38,7 @@ immutable capture version
 
 Only policy-eligible active cards can enter traveler retrieval. High-risk road, safety, EV, price, availability, booking, promotion, and opening-hours claims require verification and remain caveat-only until corroborated. Conflicted claims cannot become factual itinerary premises. These are established in `_bmad-output/implementation-artifacts/epic-3-context.md`.
 
-Facebook capture established useful operational boundaries that this proposal preserves: separate capture archive, safe audit actor, idempotent replay after a production write failure, bounded operator-only source material, and no raw source content in operational logs. See [Facebook Capture Operations](./facebook-capture-operations.md).
+Facebook capture established useful operational boundaries that this proposal preserves: separate capture archive, safe audit actor, idempotent replay after a production write failure, bounded operator-only source material, and no raw source content in operational logs. See [Facebook Capture Operations](../runbooks/facebook-capture.md).
 
 ## Scope And Non-Goals
 
@@ -219,8 +219,8 @@ Switching either off must stop new work safely. It must not alter completed capt
 The proposal deliberately follows the current AI-first Knowledge policy, but existing source documents conflict in places. Resolve these before creating an epic or story.
 
 1. **Replace YouTube's mandatory human-approval wording.** `ARCHITECTURE-SPINE.md` AD-10 currently says every YouTube-derived card remains unverified until human review and approval. This conflicts with the active AI-first policy, where qualifying low-risk, evidence-grounded claims may become active and operator review is risk/sampling driven. Update AD-10 to adopt the canonical publication policy while preserving unverified/community source labeling and high-risk verification gates.
-2. **Keep the YouTube runbook aligned.** `docs/youtube-capture-operations.md` now defers traveler eligibility to the canonical Knowledge policy and records the planned AI-first discovery contract. Update it alongside architecture and implementation changes so it continues to distinguish the current manual command from planned automation.
-3. **Reconcile Facebook documentation with canonical policy.** `docs/facebook-capture-operations.md` describes a historical operator review/extraction flow. The canonical Epic 3 policy makes review a prioritized recommendation, not a general publication prerequisite. Decide which Facebook-specific controls remain required, then update the document so it does not misrepresent the active lifecycle.
+2. **Keep the YouTube runbook aligned.** `docs/runbooks/youtube-capture.md` documents only the current manual command. Update it after implementation changes so it continues to distinguish current capture from planned automation.
+3. **Reconcile Facebook documentation with canonical policy.** `docs/runbooks/facebook-capture.md` must preserve the canonical policy that review is a prioritized recommendation, not a general publication prerequisite. Decide which Facebook-specific controls remain required before implementing source discovery.
 4. **Ratify source-neutral capture semantics.** A readable YouTube capture must append an immutable capture version and atomically create exactly one canonical ingestion job, exactly like readable Facebook and generic captures. Discovery candidates before Gemini capture are not readable captures and must not create ingestion jobs.
 5. **Define safe operational persistence.** Specify candidate, query proposal, run, priority, defer/retry, budget, kill-switch, and control-tower read models. They must exclude raw comments, raw model prompts/responses, provider payloads, video media, credentials, cookies, and evidence quote/span from normal observability output.
 6. **Set initial policy values through configuration.** Define reviewable configuration for score thresholds, daily/run quotas, maximum backlog age, retry/backoff limits, maximum targeted windows, escalation conditions, and budget caps. Do not hard-code values into scattered scripts.
@@ -268,8 +268,8 @@ The following is sequencing guidance, not yet an epic/story commitment.
 
 ## Source References
 
-- `docs/youtube-capture-operations.md`
-- `docs/facebook-capture-operations.md`
+- `docs/runbooks/youtube-capture.md`
+- `docs/runbooks/facebook-capture.md`
 - `_bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md` (AD-10)
 - `_bmad-output/implementation-artifacts/epic-3-context.md`
 - `_bmad-output/implementation-artifacts/3-4-establish-source-version-ingestion-job-claiming.md`

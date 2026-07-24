@@ -161,7 +161,7 @@ so that workers can identify and safely claim the current pipeline work.
 - Story 3.3 requires valid bounded active evidence plus all state/retrieval gates before traveler eligibility. A job is operational metadata only and cannot relax this predicate. [Source: `_bmad-output/implementation-artifacts/spec-3-3-backfill-bounded-evidence-and-verify-legacy-retrieval-safety.md:24-30`; `src/features/knowledge/state.ts`]
 - Raw capture text, raw metadata, provider payloads, audit details, and operator-only evidence never enter traveler source bundles or UI. [Source: `ARCHITECTURE-SPINE.md:146-150`; `ARCHITECTURE-SPINE.md:552-565`]
 - Knowledge owns capture/job/card/evidence mutations; use server-only, typed feature entrypoints and Drizzle-owned migrations. Do not export generic cross-module upserts/deletes. [Source: `_bmad-output/project-context.md:42-48`; `ARCHITECTURE-SPINE.md:116-130`]
-- Facebook capture remains an operator-controlled visible-browser operation, never a traveler action, request-path scraper, or unattended crawler. [Source: `ARCHITECTURE-SPINE.md:152-166`; `docs/facebook-capture-operations.md`]
+- Facebook capture remains an operator-controlled visible-browser operation, never a traveler action, request-path scraper, or unattended crawler. [Source: `ARCHITECTURE-SPINE.md:152-166`; `docs/runbooks/facebook-capture.md`]
 
 ### Likely files
 

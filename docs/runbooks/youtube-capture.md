@@ -2,13 +2,13 @@
 
 `pnpm youtube:capture` is the server-side Gemini evidence-capture operation for canonical individual YouTube videos. It reads queued sources from the production database, checks a separate local archive before requiring Gemini credentials, and sends only cache misses to Gemini. Validated bounded evidence is archived before it is flushed into operator-only source material and the canonical Knowledge ingestion pipeline.
 
-## Status And Direction
+## Status
 
-The current command captures videos that have already been submitted and queued. It does not yet discover videos, enrich metadata/comments, score candidates, schedule itself, or select targeted windows.
+The current command captures individual videos that have already been submitted and queued. It does not discover videos, enrich metadata or comments, score candidates, schedule itself, or select targeted windows.
 
-The approved direction is AI-first periodic YouTube discovery: the system will generate and run gap-driven queries, triage enriched candidates, and automatically capture eligible videos within policy and budget. The operator will supervise health, cost, coverage, and genuine exceptions rather than approve ordinary candidates. This must be implemented only after the architecture, Facebook capture policy, and control-tower design are aligned as described in [AI-First YouTube Discovery Proposal](./ai-first-youtube-discovery-proposal.md).
+AI-first periodic discovery and automatic capture are proposed only. See [AI-First YouTube Discovery](../proposals/ai-first-youtube-discovery.md); that proposal is outside the active MVP scope and does not authorize operation or implementation.
 
-The discovery proposal does not create a separate knowledge lifecycle. Any readable YouTube evidence must continue through the existing immutable capture-version, ingestion, independent-judgment, freshness, verification, relation/conflict, publication, and retrieval policy. Capture already creates the immutable capture version and its canonical ingestion job; processing that job requires the separately scheduled/supervised ingestion worker.
+Readable capture creates an immutable capture version and one canonical ingestion job. Its processing requires a separately scheduled and supervised ingestion worker; capture itself does not publish traveler-ready knowledge.
 
 ## Setup
 
@@ -43,28 +43,6 @@ WHERE target_type = 'youtube_capture'
   AND target_id = '<source-id>'
 ORDER BY created_at DESC;
 ```
-
-## AI-First Discovery Contract
-
-This section is the required operating contract for the planned discovery capability. It is not a statement that these controls are already implemented.
-
-```text
-knowledge gaps, freshness, conflicts, demand + operator queries
-  -> scheduled YouTube search and safe enrichment
-  -> AI triage + deterministic admission policy
-  -> skip | defer | targeted capture | full capture
-  -> existing Gemini evidence capture and Knowledge pipeline
-```
-
-- Query proposals are generated from coverage gaps, freshness-sensitive knowledge, unresolved conflicts, demand signals, and operator-managed queries. Operators can inspect and manage proposals.
-- Video and channel metadata may inform triage, including title, bounded description, publish date, duration, views, likes, comment count, channel subscriber count when available, and XuyenViet's own historical source-quality signals.
-- Comments are only untrusted scoring signals. Use bounded, sanitized aggregate signals or samples to identify recency, stale/changed discussion, practical demand, creator responsiveness, commercial risk, or contradictions. Comments never become evidence, raw capture material, knowledge cards, source bundles, or traveler UI content.
-- AI triage ranks relevance, expected value, freshness fit, first-hand likelihood, visual-evidence likelihood, commercial risk, duplicate risk, and suggested windows. It cannot establish facts, verification, evidence, or publication eligibility.
-- Deterministic policy must enforce canonical URL/identity, dedupe, duration/window validity, configured budget, provider quota, and retry limits. Scores never override a hard gate.
-- `defer` preserves priority and retries in a later scheduled run when quota, budget, or transient provider conditions prevent work. It is not an individual operator incident. Persistent provider failures, aging high-priority backlog, or cost anomalies become action-required signals.
-- Targeted capture may analyze selected valid video-relative windows first and escalate at most once to full sequential capture under bounded policy. Full capture remains the complete-analysis path.
-- Discovery and auto-capture require independent audited, role-protected kill switches. Disabling discovery stops new query/search/enrichment work. Disabling auto-capture allows triage/backlog creation but prevents new Gemini calls. Neither switch mutates completed captures, evidence, cards, or ingestion jobs.
-- An operator control tower must expose both Knowledge Mission (coverage, freshness, conflicts, outcomes) and Automation Health (switches, run state, backlog, quota, cost, provider failures), with only actionable exceptions promoted above normal deferred work.
 
 ## Transcript Constraint
 

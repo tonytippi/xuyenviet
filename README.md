@@ -126,7 +126,7 @@ pnpm knowledge:indexing-worker
 pnpm knowledge:indexing-worker --once
 ```
 
-`facebook:capture` reads queued Facebook source links from PostgreSQL and saves visible captured text for later operator review. Scheduled runs use a configured service audit actor; see `docs/facebook-capture-operations.md`.
+`facebook:capture` reads queued Facebook source links from PostgreSQL and saves visible captured text for later operator review. See `docs/runbooks/facebook-capture.md` for its current production-scheduling blockers and recovery procedure.
 
 Capture commands use two databases: `DATABASE_URL` is the application database reached through the protected operator tunnel, while `CAPTURE_CACHE_DATABASE_URL` is a separate local PostgreSQL archive. Run `pnpm capture-cache:migrate` once before capture. The commands fail closed if either URL is invalid, the targets are the same, or the archive schema is absent. Back up the local archive with encrypted, tested restores; it contains durable validated capture artifacts and is required to replay after an application database reset. Never commit either URL, Gemini keys, browser profiles, or backups.
 

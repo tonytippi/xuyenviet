@@ -2,7 +2,7 @@
 
 ## Trạng Thái
 
-Định hướng đã thống nhất ngày 2026-07-22. Đây là tài liệu ghi nhận ý tưởng để dùng khi cập nhật PRD, kiến trúc, epic và UX sau này. Đây không phải kế hoạch triển khai được phê duyệt và không mở rộng phạm vi MVP hiện tại.
+Định hướng đã thống nhất ngày 2026-07-22. Đây là tài liệu ghi nhận ý tưởng để dùng khi cập nhật PRD, kiến trúc, epic và UX sau này. Đây không phải kế hoạch triển khai được phê duyệt và không mở rộng phạm vi MVP hiện tại. PRD hiện hành chỉ phê duyệt Trip Project single-owner cơ bản, chat/trip context, correction và deletion.
 
 **Implementation baseline (2026-07-23):** Hiện tại chỉ có Trip Project single-owner cơ bản với title, origin/destination, dates, travelers, notes và nhiều conversation có thể liên kết với cùng một project. Itinerary có cấu trúc, Trip Home, một conversation chính bắt buộc, weather, location, budget, checklist, vault, collaboration và các change proposal trong tài liệu này đều là đề xuất chưa triển khai.
 

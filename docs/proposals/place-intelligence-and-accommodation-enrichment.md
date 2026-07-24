@@ -2,7 +2,7 @@
 
 ## Trạng Thái
 
-Định hướng được ghi nhận ngày 2026-07-24 để xem xét khi cập nhật PRD, kiến trúc, UX, epic và story. Đây không phải kế hoạch triển khai được phê duyệt và không thay đổi phạm vi MVP hiện tại.
+Định hướng được ghi nhận ngày 2026-07-24 để xem xét khi cập nhật PRD, kiến trúc, UX, epic và story. Đây không phải kế hoạch triển khai được phê duyệt và không thay đổi phạm vi MVP hiện tại. Google Maps, OTA/booking và partner flows đều là MVP non-goals trong PRD hiện hành.
 
 ## Vấn Đề
 
@@ -227,6 +227,6 @@ Mỗi shortlist card nên có lý do phù hợp, dữ liệu cần xác nhận, 
 ## Tài Liệu Liên Quan
 
 - [Trip Project Product Direction](./trip-project-product-direction.md)
-- [Knowledge Retrieval and Traveler Memory Roadmap](./knowledge-retrieval-and-memory-roadmap.md)
-- [AI-First YouTube Discovery Proposal](./ai-first-youtube-discovery-proposal.md)
-- [Facebook Capture Operations](./facebook-capture-operations.md)
+- [Knowledge Retrieval and Traveler Memory Roadmap](../roadmaps/knowledge-retrieval-and-traveler-memory.md)
+- [AI-First YouTube Discovery Proposal](./ai-first-youtube-discovery.md)
+- [Facebook Capture Operations](../runbooks/facebook-capture.md)

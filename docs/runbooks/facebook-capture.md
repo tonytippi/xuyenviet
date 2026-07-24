@@ -1,6 +1,6 @@
 # Facebook Capture Operations
 
-**Status:** Current operator runbook. Capture is implemented; the canonical AI-first ingestion lifecycle applies after readable material is captured.
+**Status:** Current operator runbook. Capture is implemented; the canonical AI-first ingestion lifecycle applies after readable material is captured. Production scheduled capture is not ready to enable until the blocking conditions in [Operational Status](#operational-status) are resolved.
 
 The Facebook capture script is an operator-controlled operations tool. It reads the production queue from `DATABASE_URL`, checks a separate persistent local archive first, and only opens Playwright on a cache miss or review-requested recapture. It derives bounded readable text from rendered/DOM content, archives validated material, then appends an immutable operator-only capture version. It never persists HTML or network payloads.
 
@@ -59,6 +59,15 @@ Community posts may identify small homestays or accommodation experiences absent
 - A phone number may be retained only as a community-provided contact candidate when the post clearly associates it with a business or accommodation, not a private individual. It requires provenance, observed time, a "confirm directly" warning, and a correction/removal path before any traveler display.
 - Marketing-only content, referral codes, booking calls to action, repeated contact details, copied posts, and other commercial/seeding signals must increase commercial risk. Reposts do not count as independent corroboration.
 - Multiple independent sources may increase confidence. Contradictory reports must remain state-aware community information or be excluded; they must not become an unsupported factual itinerary premise.
+
+## Operational Status
+
+The current public-MVP readiness report is **no-go** for production scheduled Facebook capture:
+
+- The canonical `knowledge:ingestion-worker` has no evidenced continuously supervised deployment. The Compose `knowledge-extractor` service is a legacy worker and is not proof that canonical ingestion is running.
+- `facebook:capture --yes` verifies that the configured service actor ID and email match a user record, but it does not yet enforce that the user has an `admin` or `operator` role.
+
+Do not enable unattended production scheduling or rely on automatic ingestion until both gaps have a completed hardening/deployment record. Manual controlled capture remains available to authorized operators, subject to the existing role and audit controls.
 
 ## Service Audit Actor
 
@@ -123,7 +132,7 @@ Production scheduling should decide explicitly where this browser profile lives 
 ## Workflow
 
 1. Operator submits Facebook links through admin intake or batch intake.
-2. Scheduled capture runs `pnpm facebook:capture --limit 25 --yes` with the service audit actor.
+2. An authorized operator runs capture manually. Do not schedule `pnpm facebook:capture --limit 25 --yes` in production while the [Operational Status](#operational-status) blockers remain open.
 3. A cache hit replays its original captured time and safe provenance without opening Facebook. A cache miss derives bounded text from rendered/DOM content, commits the artifact to the local archive first, then flushes it to production.
 4. Capture may queue up to 20 unique linked Facebook post/share URLs from the captured post as bounded candidates for a later run. Links that already match a stored canonical source URL are skipped. Candidate links must still pass queue/admission policy before capture; this does not browse feeds, recursively crawl Facebook, or open linked posts in the same run.
 5. Capture appends an immutable capture version, atomically creates its canonical ingestion job, and creates or updates the Facebook review record used for legacy/manual inspection and recapture controls.
