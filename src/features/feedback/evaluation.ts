@@ -533,24 +533,52 @@ function summarizeResult(
 }
 
 function deterministicPolicyFlags(answer: EvaluationAiAskAnswer) {
-  const answerText = answer.answerText.toLowerCase();
   const selectedKnowledge = (answer.provenance ?? []).filter((row) => row.sourceCategory === "knowledge" && row.usedInPrompt);
   const retrievalSnapshot = selectedKnowledge.map((row) => row.sourceSnapshot);
   const hasConflict = retrievalSnapshot.some((snapshot) => snapshot.knowledgeState === "conflicted");
-  const rawEvidenceLeakage = /raw_source_material|providerpayload|operatoronly|copied_post|raw evidence/i.test(answerText);
   const decision = decisionSnapshot(answer);
   const fallbackRequired = decision.webSearchTriggered && (
     decision.warnings.includes("web_search_load_failed")
     || decision.warnings.includes("web_search_low_quality")
     || selectedKnowledge.some((row) => row.sourceSnapshot.usePolicy === "caveat_only")
   );
-  const guidance = /không thể xác minh|cần kiểm tra|hãy kiểm tra|xác nhận/i.test(answerText);
+  const guidance = hasVerificationGuidance(answer.answerText);
   return {
     conflictedKnowledgeExcluded: !hasConflict && (decision.excludedPolicyCounts.conflict === 0 || decision.excludedReasonCodes.length > 0),
-    staleWithdrawnSourceExposure: /withdrawn|removed|stale source/i.test(answerText),
-    rawEvidenceLeakage,
+    // Only a persisted source that was actually used can establish unsafe exposure.
+    staleWithdrawnSourceExposure: selectedKnowledge.some((row) => hasIneligibleEvidenceState(row.sourceSnapshot)),
+    rawEvidenceLeakage: hasSensitiveOrWithheldEvidenceDisclosure(answer.answerText, selectedKnowledge),
     fallbackVerificationGuidanceMet: !fallbackRequired || guidance,
   };
+}
+
+function hasIneligibleEvidenceState(snapshot: Record<string, unknown>) {
+  return snapshot.knowledgeState === "superseded"
+    || snapshot.knowledgeState === "conflicted"
+    || hasStateValue(snapshot.sourceEligibility)
+    || hasStateValue(snapshot.evidenceState)
+    || hasStateValue(snapshot.indexState)
+    || (Array.isArray(snapshot.evidence) && snapshot.evidence.some((evidence) => isRecord(evidence) && (hasStateValue(evidence.state) || hasStateValue(evidence.eligibility))));
+}
+
+function hasStateValue(value: unknown) {
+  return value === "withdrawn" || value === "removed" || value === "stale" || value === "ineligible" || value === "missing";
+}
+
+function hasSensitiveOrWithheldEvidenceDisclosure(answerText: string, selectedKnowledge: Array<{ sourceSnapshot: Record<string, unknown> }>) {
+  if (/(?:[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}|(?:\+?84|0)(?:[\s.-]?\d){8,10}|https?:\/\/[^\s/:]+:[^\s@]+@)/i.test(answerText)) {
+    return true;
+  }
+
+  const withheldIdentifiers = selectedKnowledge.flatMap(({ sourceSnapshot }) => {
+    if (!Array.isArray(sourceSnapshot.evidence)) return [];
+    return sourceSnapshot.evidence.flatMap((evidence) => {
+      if (!isRecord(evidence) || evidence.displayPolicy === "traveler_visible") return [];
+      return [safeString(evidence.sourceLabel), safeString(evidence.evidenceId)].filter((value): value is string => value !== null && value.length >= 4);
+    });
+  });
+
+  return withheldIdentifiers.some((identifier) => answerIncludes(answerText, identifier));
 }
 
 function buildPolicySnapshot(resultId: string, answer: EvaluationAiAskAnswer, scenario: PublicMvpEvaluationScenarioDefinition) {

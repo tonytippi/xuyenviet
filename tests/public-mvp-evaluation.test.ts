@@ -95,7 +95,7 @@ function validScores(score = 8) {
   } satisfies Record<PublicMvpEvaluationScoreDimension, number>;
 }
 
-async function createPersistedEvaluationAnswer(userId: string, promptType: string, scenarioId: string, options: { conditionalPolicy?: "caveat_only" | "contextual_use"; conditionalVerification?: "required" | "not_required"; conditionalConditions?: string[]; answerText?: string; fallbackWarnings?: string[] } = {}) {
+async function createPersistedEvaluationAnswer(userId: string, promptType: string, scenarioId: string, options: { conditionalPolicy?: "caveat_only" | "contextual_use"; conditionalVerification?: "required" | "not_required"; conditionalConditions?: string[]; answerText?: string; fallbackWarnings?: string[]; selectedKnowledgeSnapshot?: Record<string, unknown> } = {}) {
   const conflict = scenarioId === "conflict_exclusion";
   const withdrawn = scenarioId === "source_withdrawal";
   const fallback = conflict || withdrawn || scenarioId === "web_fallback_unavailable" || scenarioId === "conditional_high_risk_claim";
@@ -129,6 +129,17 @@ async function createPersistedEvaluationAnswer(userId: string, promptType: strin
       },
     })
     .returning({ id: assistantRetrievalDecisions.id });
+  const selectedKnowledgeSnapshot = selectedState
+    ? {
+        knowledgeCardId: `${scenarioId}-card`,
+        contentVersion: 1,
+        knowledgeState: selectedState,
+        verificationState: selectedState === "conditional" ? (options.conditionalVerification ?? "required") : "not_required",
+        usePolicy: selectedState === "conditional" ? (options.conditionalPolicy ?? "caveat_only") : "contextual_use",
+        ...(selectedState === "conditional" ? { conditions: conditionalConditions } : {}),
+        ...options.selectedKnowledgeSnapshot,
+      }
+    : { available: true };
   const [provenance] = await testDb
     .insert(assistantResponseProvenance)
     .values({
@@ -140,7 +151,7 @@ async function createPersistedEvaluationAnswer(userId: string, promptType: strin
       rank: 1,
       sourceType: "general_reasoning",
       verificationStatus: "unverified",
-        sourceSnapshot: selectedState ? { knowledgeCardId: `${scenarioId}-card`, contentVersion: 1, knowledgeState: selectedState, verificationState: selectedState === "conditional" ? (options.conditionalVerification ?? "required") : "not_required", usePolicy: selectedState === "conditional" ? (options.conditionalPolicy ?? "caveat_only") : "contextual_use", ...(selectedState === "conditional" ? { conditions: conditionalConditions } : {}) } : { available: true },
+        sourceSnapshot: selectedKnowledgeSnapshot,
     })
     .returning({ id: assistantResponseProvenance.id });
 
@@ -151,7 +162,7 @@ async function createPersistedEvaluationAnswer(userId: string, promptType: strin
     assistantMessageId: assistantMessage.id,
     retrievalDecisionId: decision.id,
     provenanceId: provenance.id,
-    provenance: [{ id: provenance.id, sourceCategory: selectedState ? "knowledge" : "general", usedInPrompt: true, sourceSnapshot: selectedState ? { knowledgeCardId: `${scenarioId}-card`, contentVersion: 1, knowledgeState: selectedState, verificationState: selectedState === "conditional" ? (options.conditionalVerification ?? "required") : "not_required", usePolicy: selectedState === "conditional" ? (options.conditionalPolicy ?? "caveat_only") : "contextual_use", ...(selectedState === "conditional" ? { conditions: conditionalConditions } : {}) } : { available: true } }],
+    provenance: [{ id: provenance.id, sourceCategory: selectedState ? "knowledge" : "general", usedInPrompt: true, sourceSnapshot: selectedKnowledgeSnapshot }],
     retrievalDecision: {
       selectedKnowledgeCardIds: [],
       knowledgePolicySnapshot: {
@@ -464,7 +475,7 @@ describe("public MVP answer evaluation", () => {
     expect(result.success ? result.run.results.filter((row) => row.scenarioId === "conflict_exclusion" || row.scenarioId === "source_withdrawal").every((row) => row.status === "scored") : false).toBe(true);
   });
 
-  test("flags withdrawn-source and raw-evidence markers exposed by the final persisted answer", async () => {
+  test("flags ineligible provenance and withheld evidence disclosure without relying on sentinel strings", async () => {
     await createUser("admin", ["admin"]);
     await createEvaluationModel();
     await mockSession("admin", ["admin"]);
@@ -474,13 +485,58 @@ describe("public MVP answer evaluation", () => {
       db: testDb,
       answerGenerator: async ({ prompt, scenario }) => ({
         ok: true,
-        answer: await createPersistedEvaluationAnswer("admin", prompt.type, scenario.id, scenario.id === "source_withdrawal" ? { answerText: "Không thể xác minh, hãy kiểm tra lại. withdrawn source raw evidence" } : {}),
+        answer: await createPersistedEvaluationAnswer("admin", prompt.type, scenario.id, scenario.id === "community_observation" ? {
+          answerText: "Chi tiết trong Hồ sơ nội bộ không được công bố cho khách du lịch.",
+          selectedKnowledgeSnapshot: {
+            sourceEligibility: "withdrawn",
+            evidence: [{ evidenceId: "withheld-evidence-01", sourceLabel: "Hồ sơ nội bộ", displayPolicy: "fact_only", state: "active" }],
+          },
+        } : {}),
+      }),
+      scorer: async () => ({ answerText: "Câu trả lời an toàn", scores: validScores(), flags: { unsupportedClaim: false, missingUncertainty: false, noBetterThanGeneric: false, unsupportedCommunityWording: false, requiredCaveatOmitted: false } }),
+    });
+    const [observationResult] = await testDb.select().from(publicMvpEvaluationResults).where(eq(publicMvpEvaluationResults.scenarioId, "community_observation"));
+
+    expect(observationResult).toMatchObject({ staleWithdrawnSourceExposureFlag: true, rawEvidenceLeakageFlag: true });
+  });
+
+  test("flags sensitive evidence disclosure from the final answer without persisting the sensitive value", async () => {
+    await createUser("admin", ["admin"]);
+    await createEvaluationModel();
+    await mockSession("admin", ["admin"]);
+    const { runPublicMvpAnswerEvaluationPromptSet } = await import("@/features/feedback/evaluation");
+
+    await runPublicMvpAnswerEvaluationPromptSet({
+      db: testDb,
+      answerGenerator: async ({ prompt, scenario }) => ({
+        ok: true,
+        answer: await createPersistedEvaluationAnswer("admin", prompt.type, scenario.id, scenario.id === "community_observation" ? { answerText: "Liên hệ 0901234567 để nhận chi tiết." } : {}),
+      }),
+      scorer: async () => ({ answerText: "Câu trả lời an toàn", scores: validScores(), flags: { unsupportedClaim: false, missingUncertainty: false, noBetterThanGeneric: false, unsupportedCommunityWording: false, requiredCaveatOmitted: false } }),
+    });
+    const [observationResult] = await testDb.select().from(publicMvpEvaluationResults).where(eq(publicMvpEvaluationResults.scenarioId, "community_observation"));
+
+    expect(observationResult).toMatchObject({ staleWithdrawnSourceExposureFlag: false, rawEvidenceLeakageFlag: true });
+    expect(JSON.stringify(await testDb.select().from(publicMvpEvaluationResultPolicySnapshots))).not.toContain("0901234567");
+  });
+
+  test("does not flag Vietnamese verification guidance when withdrawal is only an excluded answer-time candidate", async () => {
+    await createUser("admin", ["admin"]);
+    await createEvaluationModel();
+    await mockSession("admin", ["admin"]);
+    const { runPublicMvpAnswerEvaluationPromptSet } = await import("@/features/feedback/evaluation");
+
+    await runPublicMvpAnswerEvaluationPromptSet({
+      db: testDb,
+      answerGenerator: async ({ prompt, scenario }) => ({
+        ok: true,
+        answer: await createPersistedEvaluationAnswer("admin", prompt.type, scenario.id, scenario.id === "source_withdrawal" ? { answerText: "Không thể xác minh thông tin này; hãy kiểm tra trực tiếp với đơn vị cung cấp trước khi đi." } : {}),
       }),
       scorer: async () => ({ answerText: "Câu trả lời an toàn", scores: validScores(), flags: { unsupportedClaim: false, missingUncertainty: false, noBetterThanGeneric: false, unsupportedCommunityWording: false, requiredCaveatOmitted: false } }),
     });
     const [withdrawalResult] = await testDb.select().from(publicMvpEvaluationResults).where(eq(publicMvpEvaluationResults.scenarioId, "source_withdrawal"));
 
-    expect(withdrawalResult).toMatchObject({ staleWithdrawnSourceExposureFlag: true, rawEvidenceLeakageFlag: true });
+    expect(withdrawalResult).toMatchObject({ status: "scored", staleWithdrawnSourceExposureFlag: false, rawEvidenceLeakageFlag: false, fallbackVerificationGuidanceMetFlag: true });
   });
 
   test.each([
