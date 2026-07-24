@@ -82,7 +82,7 @@ development_status:
   epic-5-retrospective: optional
 
   epic-6: in-progress
-  # Synchronized 2026-07-24 after Story 6.1 fail-closed operational validation; pipeline remains not ready pending blocked evidence.
+  # Synchronized 2026-07-24: owner review remains pending, so the owner-reviewed validation task is incomplete; story remains in review.
   6-1-validate-knowledge-pipeline-operations-before-public-evaluation: review
   6-2-run-public-mvp-ai-first-readiness-review: backlog
   epic-6-retrospective: optional

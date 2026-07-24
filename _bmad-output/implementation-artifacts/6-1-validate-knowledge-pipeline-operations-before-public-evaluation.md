@@ -20,7 +20,7 @@ so that public evaluation does not rely on untested workers, retention, removal,
 
 ## Tasks / Subtasks
 
-- [x] Create an owner-reviewed operational validation report and evidence ledger (AC: 1-3)
+- [ ] Create an owner-reviewed operational validation report and evidence ledger (AC: 1-3)
   - [x] Add the report in `_bmad-output/implementation-artifacts/` using safe identifiers, timestamps, environment name, check result, evidence location, owner, disposition (`complete`, `accepted_risk`, or `blocked`), exact blocker, and safe remediation for every check. An `accepted_risk` remains operationally not ready for Story 6.1 unless its named authority, scope, expiry/review date, and remediation are recorded; it cannot override a safety-blocking condition and must be handed to Story 6.2 for final go/no-go aggregation.
   - [x] Treat missing, unavailable, partial, stale, or unrepeatable proof as `blocked`; do not infer readiness from implementation tests, historical approval counts, dashboard/UI completion, or a healthy web container.
   - [x] Keep report samples and linked logs free of raw source/capture text, evidence quotes, URLs/snippets, provider payloads, credentials, traveler identities, chat/trip content, and browser-profile data.
@@ -54,6 +54,10 @@ so that public evaluation does not rely on untested workers, retention, removal,
 - [x] Record validation disposition and handoff evidence (AC: 1-3)
   - [x] Link only safe report artifacts and command outputs. Separate repository regression proof from deployment, provider, privacy, and restore evidence.
   - [x] Leave the pipeline operationally `not ready` if any mandatory check lacks complete evidence. Do not start Story 6.2 or claim public-MVP go/no-go; Story 6.2 combines this evidence with corpus, quality, retrieval, provider-readiness, and launch-prerequisite dispositions.
+
+### Review Findings
+
+- [x] [Review][Patch] Complete the required owner review before representing the validation ledger task as complete [_bmad-output/implementation-artifacts/6-1-validate-knowledge-pipeline-operations-before-public-evaluation.md:23] — the completed task requires an owner-reviewed operational validation report, but the committed report explicitly states `Owner review: pending`. Record the designated owner review or leave the task incomplete; do not use this ledger as a completed operational-validation artifact until then.
 
 ## Dev Notes
 
@@ -176,6 +180,7 @@ gpu4ai/gpt-5.6-terra-review
 - 2026-07-24: Created the safe Story 6.1 operational evidence ledger with nine checks. All unavailable deployment, recovery, provider/privacy, and controlled-fixture proof is `blocked`; overall pipeline status is operationally not ready and is handed to Story 6.2 without a go/no-go claim.
 - 2026-07-24: Repository regressions passed sequentially: ingestion jobs (14), ingestion pipeline (37), indexing worker (5), source removal (5), capture retention (7), knowledge search (42), answer context (92), removal entrypoint (2), AI Ask shell (79), and Facebook capture script (3). Full suite passed: 50 files, 746 tests.
 - 2026-07-24: `pnpm lint` passed with three existing unused-variable warnings in `tests/knowledge-search.test.ts`; sequential `pnpm typecheck` and `pnpm build` passed. An initial typecheck run overlapped with build regeneration of `.next/types` and failed only on transient missing generated files; the post-build sequential rerun passed.
+- 2026-07-24: Corrected the owner-review task state after review: the report remains `Owner review: pending`, so the owner-reviewed validation task remains incomplete. No owner approval was recorded or inferred.
 
 ### File List
 
@@ -189,3 +194,4 @@ gpu4ai/gpt-5.6-terra-review
 - 2026-07-24: Created and self-validated the Story 6.1 operational-validation guide; status is `ready-for-dev`.
 - 2026-07-24: Final validation passed; status remains `ready-for-dev`.
 - 2026-07-24: Completed fail-closed operational validation evidence, added protected removal entrypoint regression, and moved Story 6.1 to `review`; pipeline remains operationally `not ready` pending named external evidence and capture-role hardening.
+- 2026-07-24: Corrected the owner-reviewed validation task to incomplete because owner review remains pending; Story 6.1 remains in `review` for the outstanding review-state work.
