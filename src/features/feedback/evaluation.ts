@@ -47,6 +47,7 @@ export type PublicMvpEvaluationScenarioDefinition = {
     targetCandidateExcluded: boolean;
     sourceOrEvidenceOutcome: "eligible" | "excluded_conflict" | "withdrawn_or_ineligible" | "no_eligible_knowledge";
     fallbackRequired: boolean;
+    conditionalHighRisk?: { conditions: string[] };
   };
   fixture: {
     selectedKnowledgeStates: string[];
@@ -98,7 +99,7 @@ function prompt(type: PublicMvpEvaluationPromptType) {
 export const publicMvpEvaluationScenarios: readonly PublicMvpEvaluationScenarioDefinition[] = [
   { id: "community_observation", version: "v1", prompt: prompt("magic_moment_family_trip"), expected: { targetCandidateExcluded: false, sourceOrEvidenceOutcome: "eligible", fallbackRequired: false }, fixture: { selectedKnowledgeStates: ["community_observation"], excludedReasonCodes: [], webFallbackWarnings: [] } },
   { id: "independent_community_pattern", version: "v1", prompt: prompt("route_logistics"), expected: { targetCandidateExcluded: false, sourceOrEvidenceOutcome: "eligible", fallbackRequired: false }, fixture: { selectedKnowledgeStates: ["community_pattern"], excludedReasonCodes: [], webFallbackWarnings: [] } },
-  { id: "conditional_high_risk_claim", version: "v1", prompt: prompt("freshness_sensitive"), expected: { targetCandidateExcluded: false, sourceOrEvidenceOutcome: "eligible", fallbackRequired: true }, fixture: { selectedKnowledgeStates: ["conditional"], excludedReasonCodes: [], webFallbackWarnings: [] } },
+  { id: "conditional_high_risk_claim", version: "v1", prompt: prompt("freshness_sensitive"), expected: { targetCandidateExcluded: false, sourceOrEvidenceOutcome: "eligible", fallbackRequired: true, conditionalHighRisk: { conditions: ["Cần xác minh trước khi khởi hành"] } }, fixture: { selectedKnowledgeStates: ["conditional"], excludedReasonCodes: [], webFallbackWarnings: [] } },
   { id: "conflict_exclusion", version: "v1", prompt: prompt("freshness_sensitive"), expected: { targetCandidateExcluded: true, sourceOrEvidenceOutcome: "excluded_conflict", fallbackRequired: true }, fixture: { selectedKnowledgeStates: [], excludedReasonCodes: ["unsupported_knowledge_state"], webFallbackWarnings: ["web_search_load_failed", "web_search_low_quality"] } },
   { id: "source_withdrawal", version: "v1", prompt: prompt("service_activity"), expected: { targetCandidateExcluded: true, sourceOrEvidenceOutcome: "withdrawn_or_ineligible", fallbackRequired: true }, fixture: { selectedKnowledgeStates: [], excludedReasonCodes: ["missing_traveler_safe_evidence"], webFallbackWarnings: ["web_search_load_failed", "web_search_low_quality"] } },
   { id: "web_fallback_unavailable", version: "v1", prompt: prompt("sparse_data"), expected: { targetCandidateExcluded: false, sourceOrEvidenceOutcome: "no_eligible_knowledge", fallbackRequired: true }, fixture: { selectedKnowledgeStates: [], excludedReasonCodes: [], webFallbackWarnings: ["web_search_load_failed", "web_search_low_quality"] } },
@@ -277,7 +278,7 @@ async function runSinglePrompt({
 
     const decision = decisionSnapshot(generatedAnswer.answer);
     const policySnapshot = buildPolicySnapshot("evaluation", generatedAnswer.answer, scenario);
-    if (!matchesScenarioFixture(generatedAnswer.answer, decision, scenario.fixture) || !matchesScenarioContract(policySnapshot, scenario.expected)) {
+    if (!matchesScenarioFixture(generatedAnswer.answer, decision, scenario.fixture) || !matchesScenarioContract(policySnapshot, generatedAnswer.answer.answerText, scenario.expected)) {
       return insertFailedResult({ db, runId, promptSet, scenario, model, safeErrorCode: "evaluator_failed", usageEventId: generatedAnswer.answer.usageEventId });
     }
 
@@ -547,7 +548,7 @@ function buildPolicySnapshot(resultId: string, answer: EvaluationAiAskAnswer, sc
   const selectedKnowledge = (answer.provenance ?? [])
     .filter((row) => row.sourceCategory === "knowledge" && row.usedInPrompt)
     .slice(0, 5)
-    .map((row) => ({ cardId: safeString(row.sourceSnapshot.knowledgeCardId), contentVersion: safeNumber(row.sourceSnapshot.contentVersion), knowledgeState: safeString(row.sourceSnapshot.knowledgeState), verificationState: safeString(row.sourceSnapshot.verificationState), usePolicy: safeString(row.sourceSnapshot.usePolicy) }));
+    .map((row) => ({ cardId: safeString(row.sourceSnapshot.knowledgeCardId), contentVersion: safeNumber(row.sourceSnapshot.contentVersion), knowledgeState: safeString(row.sourceSnapshot.knowledgeState), verificationState: safeString(row.sourceSnapshot.verificationState), usePolicy: safeString(row.sourceSnapshot.usePolicy), conditions: boundedStrings(row.sourceSnapshot.conditions) }));
   const decision = decisionSnapshot(answer);
   const flags = deterministicPolicyFlags(answer);
   return {
@@ -601,12 +602,32 @@ function matchesScenarioFixture(answer: EvaluationAiAskAnswer, decision: AnswerD
 
 function matchesScenarioContract(
   snapshot: ReturnType<typeof buildPolicySnapshot>,
+  finalAnswer: string,
   expected: PublicMvpEvaluationScenarioDefinition["expected"],
 ) {
   return snapshot.targetCandidateExcluded === expected.targetCandidateExcluded
     && snapshot.sourceOrEvidenceOutcome === expected.sourceOrEvidenceOutcome
     && snapshot.webFallback.triggered === expected.fallbackRequired
-    && (!expected.fallbackRequired || snapshot.finalizationOutcome === "verification_guidance_present");
+    && (!expected.fallbackRequired || snapshot.finalizationOutcome === "verification_guidance_present")
+    && (!expected.conditionalHighRisk || matchesConditionalHighRiskContract(snapshot, finalAnswer, expected.conditionalHighRisk));
+}
+
+function matchesConditionalHighRiskContract(snapshot: ReturnType<typeof buildPolicySnapshot>, finalAnswer: string, expected: { conditions: string[] }) {
+  const selected = snapshot.selectedKnowledge.find((item) => item.knowledgeState === "conditional");
+  return selected?.verificationState === "required"
+    && selected.usePolicy === "caveat_only"
+    && expected.conditions.length > 0
+    && expected.conditions.every((condition) => selected.conditions.includes(condition))
+    && expected.conditions.every((condition) => answerIncludes(finalAnswer, condition))
+    && hasVerificationGuidance(finalAnswer);
+}
+
+function answerIncludes(answer: string, expected: string) {
+  return answer.toLocaleLowerCase("vi-VN").includes(expected.toLocaleLowerCase("vi-VN"));
+}
+
+function hasVerificationGuidance(answer: string) {
+  return /không thể xác minh|cần kiểm tra|hãy kiểm tra|xác nhận/i.test(answer);
 }
 
 function sourceOrEvidenceOutcome(decision: AnswerDecisionSnapshot, selectedKnowledge: Array<Record<string, unknown>>) {

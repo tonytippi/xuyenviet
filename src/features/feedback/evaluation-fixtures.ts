@@ -2,13 +2,12 @@ import "server-only";
 
 import { eq } from "drizzle-orm";
 
+import { getDb } from "@/db/client";
 import { knowledgeCardEvidence, knowledgeCardSources, knowledgeCards, sourceCaptureVersions, sources } from "@/db/schema";
 import type { PublicMvpEvaluationScenarioDefinition } from "@/features/feedback/evaluation";
-import { enqueueKnowledgeIndexWork } from "@/features/knowledge/indexing-queue";
-import { processNextApprovedKnowledgeIndexingBatch } from "@/features/knowledge/indexing-worker";
 import { hashCaptureText, normalizeCaptureText } from "@/features/knowledge/source-captures";
 
-type FixtureDb = NonNullable<Parameters<typeof processNextApprovedKnowledgeIndexingBatch>[1]>;
+type FixtureDb = ReturnType<typeof getDb>;
 
 export async function prepareEvaluationScenarioFixture(db: FixtureDb, actorUserId: string, scenario: PublicMvpEvaluationScenarioDefinition) {
   if (scenario.id === "web_fallback_unavailable") return { cardIds: [] };
@@ -42,7 +41,9 @@ export async function prepareEvaluationScenarioFixture(db: FixtureDb, actorUserI
   await db.insert(knowledgeCards).values({
     id: cardId,
     status: "approved",
-    publicationState: "active",
+    // These cards are readable only through the evaluator's explicit fixture scope.
+    // They must never be eligible for ordinary traveler retrieval or indexing.
+    publicationState: "suppressed",
     knowledgeState: excluded ? "community_observation" : (selected ?? "community_observation") as "community_observation" | "community_pattern" | "conditional",
     reviewState: "reviewed",
     verificationState: selected === "conditional" ? "required" : "not_required",
@@ -80,9 +81,6 @@ export async function prepareEvaluationScenarioFixture(db: FixtureDb, actorUserI
     await db.insert(knowledgeCardEvidence).values({ knowledgeCardId: cardId, sourceId: supportingSourceId, captureVersionId: supportingCapture.id, quoteText: rawText, spanStart: 0, spanEnd: Array.from(rawText).length, observedAt: new Date(), capturedAt: new Date(), supportLevel: "supporting", displayPolicy: "fact_only", independenceKey: `${supportingSourceId}:supporting` });
   }
 
-  await db.transaction((tx) => enqueueKnowledgeIndexWork(tx, { cardId, contentVersion: 1, evidenceSetRevision: 1, reason: "evaluation_fixture" }));
-  await processNextApprovedKnowledgeIndexingBatch({ workerId: `evaluation-${scenario.id}` }, db);
-
   if (scenario.id === "conflict_exclusion") await db.update(knowledgeCards).set({ knowledgeState: "conflicted" }).where(eq(knowledgeCards.id, cardId));
   if (scenario.id === "source_withdrawal") await db.update(sources).set({ eligibility: "withdrawn", removalReason: "withdrawn", removedByUserId: actorUserId, removalCompletedAt: new Date() }).where(eq(sources.id, sourceId));
 
@@ -92,6 +90,6 @@ export async function prepareEvaluationScenarioFixture(db: FixtureDb, actorUserI
 export async function cleanupEvaluationScenarioFixture(db: FixtureDb, cardIds: string[]) {
   if (cardIds.length === 0) return;
 
-  // Evaluation fixtures must never remain eligible for traveler retrieval after a run.
+  // Fixture setup keeps cards suppressed; cleanup makes that invariant explicit after failures too.
   await db.update(knowledgeCards).set({ publicationState: "suppressed", updatedAt: new Date() }).where(eq(knowledgeCards.id, cardIds[0]!));
 }

@@ -70,7 +70,7 @@ export async function generateEvaluationAiAskAnswer({
     question,
     userMessageId: saved.userMessageId,
     webSearchUsageContext: { userId, conversationId: saved.conversationId, userMessageId: saved.userMessageId },
-    knowledgeCardIds,
+    evaluationFixtureCardIds: knowledgeCardIds,
     abortSignal,
   });
   const contextSection = buildSourceBundlePromptSection(sourceBundle);

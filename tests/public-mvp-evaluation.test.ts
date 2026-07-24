@@ -12,6 +12,7 @@ import {
   publicMvpEvaluationResults,
   publicMvpEvaluationRuns,
   conversations,
+  knowledgeCardSearchDocuments,
   knowledgeCards,
   messages,
   userRoles,
@@ -94,14 +95,16 @@ function validScores(score = 8) {
   } satisfies Record<PublicMvpEvaluationScoreDimension, number>;
 }
 
-async function createPersistedEvaluationAnswer(userId: string, promptType: string, scenarioId: string) {
+async function createPersistedEvaluationAnswer(userId: string, promptType: string, scenarioId: string, options: { conditionalPolicy?: "caveat_only" | "contextual_use"; conditionalVerification?: "required" | "not_required"; conditionalConditions?: string[]; answerText?: string } = {}) {
   const conflict = scenarioId === "conflict_exclusion";
   const withdrawn = scenarioId === "source_withdrawal";
   const fallback = conflict || withdrawn || scenarioId === "web_fallback_unavailable" || scenarioId === "conditional_high_risk_claim";
   const selectedState = scenarioId === "community_observation" ? "community_observation" : scenarioId === "independent_community_pattern" ? "community_pattern" : scenarioId === "conditional_high_risk_claim" ? "conditional" : null;
   const [conversation] = await testDb.insert(conversations).values({ userId }).returning({ id: conversations.id });
   const [userMessage] = await testDb.insert(messages).values({ conversationId: conversation.id, userId, role: "user", content: `Prompt ${promptType}` }).returning({ id: messages.id });
-  const [assistantMessage] = await testDb.insert(messages).values({ conversationId: conversation.id, userId, role: "assistant", content: `Câu trả lời AI Ask cho ${promptType}` }).returning({ id: messages.id });
+  const conditionalConditions = options.conditionalConditions ?? ["Cần xác minh trước khi khởi hành"];
+  const answerText = options.answerText ?? `${fallback ? "Không thể xác minh, hãy kiểm tra lại. " : ""}${selectedState === "conditional" ? `${conditionalConditions.join(". ")}. ` : ""}Câu trả lời AI Ask cho ${promptType}`;
+  const [assistantMessage] = await testDb.insert(messages).values({ conversationId: conversation.id, userId, role: "assistant", content: answerText }).returning({ id: messages.id });
   const [decision] = await testDb
     .insert(assistantRetrievalDecisions)
     .values({
@@ -137,18 +140,18 @@ async function createPersistedEvaluationAnswer(userId: string, promptType: strin
       rank: 1,
       sourceType: "general_reasoning",
       verificationStatus: "unverified",
-       sourceSnapshot: selectedState ? { knowledgeCardId: `${scenarioId}-card`, contentVersion: 1, knowledgeState: selectedState, verificationState: selectedState === "conditional" ? "required" : "not_required", usePolicy: selectedState === "conditional" ? "caveat_only" : "contextual_use" } : { available: true },
+        sourceSnapshot: selectedState ? { knowledgeCardId: `${scenarioId}-card`, contentVersion: 1, knowledgeState: selectedState, verificationState: selectedState === "conditional" ? (options.conditionalVerification ?? "required") : "not_required", usePolicy: selectedState === "conditional" ? (options.conditionalPolicy ?? "caveat_only") : "contextual_use", ...(selectedState === "conditional" ? { conditions: conditionalConditions } : {}) } : { available: true },
     })
     .returning({ id: assistantResponseProvenance.id });
 
   return {
-    answerText: `${fallback ? "Không thể xác minh, hãy kiểm tra lại. " : ""}Câu trả lời AI Ask cho ${promptType}`,
+    answerText,
     conversationId: conversation.id,
     userMessageId: userMessage.id,
     assistantMessageId: assistantMessage.id,
     retrievalDecisionId: decision.id,
     provenanceId: provenance.id,
-    provenance: [{ id: provenance.id, sourceCategory: selectedState ? "knowledge" : "general", usedInPrompt: true, sourceSnapshot: selectedState ? { knowledgeCardId: `${scenarioId}-card`, contentVersion: 1, knowledgeState: selectedState, verificationState: selectedState === "conditional" ? "required" : "not_required", usePolicy: selectedState === "conditional" ? "caveat_only" : "contextual_use" } : { available: true } }],
+    provenance: [{ id: provenance.id, sourceCategory: selectedState ? "knowledge" : "general", usedInPrompt: true, sourceSnapshot: selectedState ? { knowledgeCardId: `${scenarioId}-card`, contentVersion: 1, knowledgeState: selectedState, verificationState: selectedState === "conditional" ? (options.conditionalVerification ?? "required") : "not_required", usePolicy: selectedState === "conditional" ? (options.conditionalPolicy ?? "caveat_only") : "contextual_use", ...(selectedState === "conditional" ? { conditions: conditionalConditions } : {}) } : { available: true } }],
     retrievalDecision: {
       selectedKnowledgeCardIds: [],
       knowledgePolicySnapshot: {
@@ -313,6 +316,30 @@ describe("public MVP answer evaluation", () => {
     expect(JSON.stringify(rows)).not.toMatch(/rawProviderPayload|raw_source_material|providerPayload|operatorOnlyNotes/);
   });
 
+  test("keeps synthetic fixtures suppressed and absent from ordinary traveler retrieval throughout evaluation", async () => {
+    await createUser("admin", ["admin"]);
+    await createEvaluationModel();
+    await mockSession("admin", ["admin"]);
+    const { runPublicMvpAnswerEvaluationPromptSet } = await import("@/features/feedback/evaluation");
+    const { searchApprovedKnowledge } = await import("@/features/knowledge/search");
+
+    await runPublicMvpAnswerEvaluationPromptSet({
+      db: testDb,
+      answerGenerator: async ({ prompt, scenario }) => {
+        const travelerResults = await searchApprovedKnowledge(prompt.prompt);
+        expect(travelerResults.filter((result) => result.id.startsWith("evaluation-"))).toEqual([]);
+        await expect(testDb.select().from(knowledgeCardSearchDocuments)).resolves.toEqual([]);
+        return { ok: true, answer: await createPersistedEvaluationAnswer("admin", prompt.type, scenario.id) };
+      },
+      scorer: async () => ({ answerText: "Câu trả lời an toàn", scores: validScores(), flags: { unsupportedClaim: false, missingUncertainty: false, noBetterThanGeneric: false, unsupportedCommunityWording: false, requiredCaveatOmitted: false } }),
+    });
+
+    const fixtures = await testDb.select().from(knowledgeCards).where(eq(knowledgeCards.aiPromptVersion, "public_mvp_evaluation_fixture_v1"));
+    expect(fixtures).toHaveLength(5);
+    expect(fixtures.every((card) => card.publicationState === "suppressed")).toBe(true);
+    await expect(searchApprovedKnowledge("Dữ liệu đánh giá")).resolves.toEqual([]);
+  });
+
   test("stores malformed scorer output as failed without malformed scores", async () => {
     await createUser("operator", ["operator"]);
     await createEvaluationModel();
@@ -410,5 +437,25 @@ describe("public MVP answer evaluation", () => {
     const [conflictResult] = await testDb.select().from(publicMvpEvaluationResults).where(eq(publicMvpEvaluationResults.scenarioId, "conflict_exclusion"));
 
     expect(conflictResult).toMatchObject({ status: "failed", safeErrorCode: "evaluator_failed" });
+  });
+
+  test.each([
+    { description: "changes caveat-only policy", options: { conditionalPolicy: "contextual_use" as const } },
+    { description: "drops required verification", options: { conditionalVerification: "not_required" as const } },
+    { description: "drops a material condition from final output", options: { answerText: "Không thể xác minh, hãy kiểm tra lại. Câu trả lời AI Ask" } },
+  ])("fails the conditional high-risk result when persisted output $description", async ({ options }) => {
+    await createUser("admin", ["admin"]);
+    await createEvaluationModel();
+    await mockSession("admin", ["admin"]);
+    const { runPublicMvpAnswerEvaluationPromptSet } = await import("@/features/feedback/evaluation");
+
+    await runPublicMvpAnswerEvaluationPromptSet({
+      db: testDb,
+      answerGenerator: async ({ prompt, scenario }) => ({ ok: true, answer: await createPersistedEvaluationAnswer("admin", prompt.type, scenario.id, scenario.id === "conditional_high_risk_claim" ? options : {}) }),
+      scorer: async () => ({ answerText: "Câu trả lời an toàn", scores: validScores(), flags: { unsupportedClaim: false, missingUncertainty: false, noBetterThanGeneric: false, unsupportedCommunityWording: false, requiredCaveatOmitted: false } }),
+    });
+    const [conditionalResult] = await testDb.select().from(publicMvpEvaluationResults).where(eq(publicMvpEvaluationResults.scenarioId, "conditional_high_risk_claim"));
+
+    expect(conditionalResult).toMatchObject({ status: "failed", safeErrorCode: "evaluator_failed" });
   });
 });

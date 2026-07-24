@@ -29,7 +29,7 @@ export type StateAwareKnowledgeBundleItem = {
   score: number;
 };
 
-export async function loadApprovedKnowledgeForAiAsk(question: string, options: { cardIds?: string[] } = {}) {
+export async function loadApprovedKnowledgeForAiAsk(question: string, options: { cardIds?: string[]; evaluationFixtureCardIds?: string[] } = {}) {
   return searchApprovedKnowledgeWithCandidateCount(question, { limit: activeKnowledgeResultLimit, ...options });
 }
 

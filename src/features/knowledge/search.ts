@@ -148,11 +148,11 @@ export async function searchApprovedKnowledge(query: string | null | undefined, 
   return results;
 }
 
-export async function searchApprovedKnowledgeWithCandidateCount(query: string | null | undefined, options: { limit?: number; cardIds?: string[] } = {}): Promise<{ results: KnowledgeSearchResult[]; candidateCount: number; policySummary: KnowledgeSearchPolicySummary }> {
+export async function searchApprovedKnowledgeWithCandidateCount(query: string | null | undefined, options: { limit?: number; cardIds?: string[]; evaluationFixtureCardIds?: string[] } = {}): Promise<{ results: KnowledgeSearchResult[]; candidateCount: number; policySummary: KnowledgeSearchPolicySummary }> {
   return searchApprovedKnowledgeInternal(query, options, true);
 }
 
-async function searchApprovedKnowledgeInternal(query: string | null | undefined, options: { limit?: number; cardIds?: string[] }, countAllCandidates: boolean): Promise<{ results: KnowledgeSearchResult[]; candidateCount: number; policySummary: KnowledgeSearchPolicySummary }> {
+async function searchApprovedKnowledgeInternal(query: string | null | undefined, options: { limit?: number; cardIds?: string[]; evaluationFixtureCardIds?: string[] }, countAllCandidates: boolean): Promise<{ results: KnowledgeSearchResult[]; candidateCount: number; policySummary: KnowledgeSearchPolicySummary }> {
   const normalizedQuery = normalizeSearchQuery(query);
 
   if (!normalizedQuery) {
@@ -160,6 +160,7 @@ async function searchApprovedKnowledgeInternal(query: string | null | undefined,
   }
 
   const cardIds = options.cardIds?.filter(Boolean);
+  const evaluationFixtureCardIds = options.evaluationFixtureCardIds?.filter(Boolean);
   if (cardIds?.length === 0) {
     return { results: [], candidateCount: 0, policySummary: emptyKnowledgeSearchPolicySummary() };
   }
@@ -173,6 +174,22 @@ async function searchApprovedKnowledgeInternal(query: string | null | undefined,
   let candidateCount = 0;
   const policySummary = emptyKnowledgeSearchPolicySummary();
   const scoredDocuments: Array<{ knowledgeCardId: string; contentVersion: number; searchableText: string; updatedAt: Date; score: number }> = [];
+
+  // Evaluation fixtures remain suppressed and unindexed. This narrow capability is
+  // only useful when the caller supplies exact fixture IDs; ordinary search stays
+  // active-card/index-only and can never discover these cards.
+  if (evaluationFixtureCardIds?.length) {
+    for (const cardId of evaluationFixtureCardIds) {
+      const candidate = await loadApprovedKnowledgeCandidate(db, cardId, true);
+      if (candidate.card) {
+        candidateCount += 1;
+        if (results.length < limit) results.push({ ...candidate.card, score: 1 });
+      } else if (candidate.exclusion) {
+        recordExcludedCandidatePolicy(policySummary, candidate.exclusion);
+      }
+    }
+    return { results, candidateCount: countAllCandidates ? candidateCount : results.length, policySummary };
+  }
 
   while (offset < maxSearchCandidateDocuments) {
     const currentBatchSize = Math.min(batchSize, maxSearchCandidateDocuments - offset);
@@ -253,7 +270,7 @@ async function loadEligibleApprovedCard(db: Pick<KnowledgeSearchDb, "select">, c
   return (await loadApprovedKnowledgeCandidate(db, cardId)).card;
 }
 
-async function loadApprovedKnowledgeCandidate(db: Pick<KnowledgeSearchDb, "select">, cardId: string): Promise<{
+async function loadApprovedKnowledgeCandidate(db: Pick<KnowledgeSearchDb, "select">, cardId: string, allowEvaluationFixture = false): Promise<{
   card: Omit<KnowledgeSearchResult, "score"> | null;
   contentVersion: number | null;
   exclusion: { knowledgeState: string; verificationState: string; reasons: KnowledgeTravelerPolicyReason[] } | null;
@@ -278,6 +295,7 @@ async function loadApprovedKnowledgeCandidate(db: Pick<KnowledgeSearchDb, "selec
         conditions: knowledgeCards.conditions,
         contentVersion: knowledgeCards.contentVersion,
         evidenceSetRevision: knowledgeCards.evidenceSetRevision,
+        aiPromptVersion: knowledgeCards.aiPromptVersion,
         updatedAt: knowledgeCards.updatedAt,
         createdAt: knowledgeCards.createdAt,
       },
@@ -306,8 +324,10 @@ async function loadApprovedKnowledgeCandidate(db: Pick<KnowledgeSearchDb, "selec
   const evidence = await loadActiveSupportingEvidence(db, cardId);
   const validatedSourceIds = new Set(evidence?.rows.map((row) => row.sourceId));
   const validatedSources = grouped?.sources.filter((source) => validatedSourceIds.has(source.id)) ?? [];
-  const evaluation = card && evidence
-    ? evaluateKnowledgeTravelerPolicy({ ...card, ...evidence })
+  const evaluationFixture = allowEvaluationFixture && card?.publicationState === "suppressed" && card.aiPromptVersion === "public_mvp_evaluation_fixture_v1";
+  const policyCard = evaluationFixture ? { ...card!, publicationState: "active" as const } : card;
+  const evaluation = policyCard && evidence
+    ? evaluateKnowledgeTravelerPolicy({ ...policyCard, ...evidence })
     : { policy: "exclude" as const, reasons: ["missing_traveler_safe_evidence" as const] };
   if (!grouped || !card || !evidence || evaluation.policy === "exclude" || validatedSources.length === 0) {
     return {
@@ -320,6 +340,7 @@ async function loadApprovedKnowledgeCandidate(db: Pick<KnowledgeSearchDb, "selec
   return {
     card: {
       ...grouped,
+      ...(evaluationFixture ? { publicationState: "active" as const } : {}),
       policy: evaluation.policy,
       policyReasons: evaluation.reasons,
       sources: validatedSources,
