@@ -67,7 +67,8 @@ so that launch readiness is explicit about completed proof, accepted risk, and b
 
 ### Review Findings
 
-- [x] [Review][Patch] Final review timestamp predates cited operational evidence [_bmad-output/implementation-artifacts/6-2-public-mvp-ai-first-readiness-review-report.md:3] — Resolved by separating the initial repository-evidence observation from the final evidence aggregation and finalizing at `2026-07-24T18:30:00Z`, after E7 was issued at `2026-07-24T18:29:00Z`; no future evidence is treated as fresh.
+- [x] [Review][Patch][High] Do not claim a final aggregation timestamp unsupported by an immutable audit record [_bmad-output/implementation-artifacts/6-2-public-mvp-ai-first-readiness-review-report.md:4] — Resolved by removing the asserted final aggregation time. E7's document-declared validation timestamp is explicitly not treated as immutable issuance, review observation, or fresh external proof; the `no-go` remains supported by blocked mandatory rows.
+- [x] [Review][Patch][High] Restore/enforce mutable external-evidence freshness [_bmad-output/implementation-artifacts/6-2-public-mvp-ai-first-readiness-review-report.md:110] — Resolved by recording review observation and approved freshness-window status for every mutable external-evidence group. No per-row window is approved; stale, unavailable, and tracker-only proof remains `blocked`.
 - [x] [Review][Patch] Completed task contradicts unavailable quality-dashboard evidence [_bmad-output/implementation-artifacts/6-2-run-public-mvp-ai-first-readiness-review.md:34] — Resolved by recording the task as a fail-closed assessment: no current `/admin/quality` aggregate was supplied, so QG-01 through QG-05 remain `blocked`.
 
 ## Dev Notes
@@ -162,7 +163,7 @@ gpu4ai/gpt-5.6-terra-review
 - Validated non-interactively against the create-story checklist. The guide has exact acceptance criteria, a complete evidence/disposition matrix, all eight prerequisite rows, explicit go/no-go rules, ownership boundaries, fail-closed safety and privacy rules, predecessor intelligence, and no-scope-creep guardrails.
 - 2026-07-24: Completed the evidence-based readiness review. The final report contains a complete 34-row criterion registry and ledger, preserves the Story 6.1 blocked operational conclusion, and returns `no-go` because mandatory proof is missing and OP-07 is a safety blocker. No application code, tests, provider settings, or operational state changed.
 - Verification: focused serial suites passed (21 + 42 + 92 + 79 + 10 + 10); full suite passed (50 files, 746 tests); lint had 0 errors and 3 pre-existing warnings; build and post-build typecheck passed. Initial typecheck overlapped the build and failed only on regenerated `.next/types`; the post-build rerun passed.
-- 2026-07-24: Resolved the two actionable review-record findings only: separated initial repository observation from final evidence aggregation after E7, and corrected the quality-dashboard task to reflect the fail-closed unavailable-aggregate assessment. The `no-go` decision is unchanged.
+- 2026-07-24: Resolved the two actionable review-record findings only: removed the unsupported final aggregation timestamp and added per-row mutable external-evidence freshness handling. E7 issuance/review observation is unverifiable, no freshness window is approved, and the `no-go` decision is unchanged.
 
 ### File List
 
@@ -174,4 +175,4 @@ gpu4ai/gpt-5.6-terra-review
 
 - 2026-07-24: Created and self-validated the Story 6.2 public-MVP AI-first readiness-review guide; status is `ready-for-dev`.
 - 2026-07-24: Created the final fail-closed readiness report, completed all Story 6.2 tasks, and marked the story ready for review. The report decision is `no-go`; no commit created.
-- 2026-07-24: Corrected actionable review records and synchronized the story back to `review`; the `no-go` decision remains unchanged.
+- 2026-07-24: Corrected the two High review findings, persisted the review findings, and synchronized the story as `review`; the `no-go` decision remains unchanged.

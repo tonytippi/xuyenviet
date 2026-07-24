@@ -1,7 +1,7 @@
 # Public MVP AI-First Readiness Review
 
 **Repository evidence observed at (UTC):** 2026-07-24T12:21:50Z
-**Final evidence aggregation and decision finalized at (UTC):** 2026-07-24T18:30:00Z
+**Final aggregation timestamp:** Not asserted. No immutable audit record attributes a final aggregation time.
 **Review baseline commit:** `d28ce2cc5ba0bb2bcbd416dc0fd86e7a1d0812a5`  
 **Decision:** `no-go`  
 **Authorized scope:** No public evaluation or public launch is authorized.  
@@ -11,7 +11,7 @@
 
 - This review uses safe identifiers, revisions, aggregate test results, safe artifact paths, owners, and dispositions only. It contains no source/capture material, URLs, provider payloads/errors, credentials, traveler data, chat/trip content, answer text, or full provenance snapshots.
 - Repository regressions establish only repository behavior at the review baseline. They do not establish current corpus state, deployment/runtime behavior, external provider configuration, privacy settings, or live monitoring.
-- External, deployment, provider/privacy, monitoring, and manual-smoke proof must identify its current environment/configuration/revision and issuance/observation time. No approved lookback freshness window applies: evidence must have been issued or observed no later than this review's final evidence aggregation, and unavailable, unattributable, or stale evidence is `blocked`.
+- External, deployment, provider/privacy, monitoring, and manual-smoke proof must identify its current environment/configuration/revision and be observed during this review or have an explicitly approved, recorded per-row freshness window. No approved lookback freshness window applies to this review. Missing, unattributable, stale, or unobserved proof is `blocked`.
 - A safety blocker, failed safety regression, missing mandatory-safety proof, or any blocked OP-01 through OP-09 requires `no-go` and cannot be overridden.
 - `conditional-go` is allowed only with no safety blocker; every mandatory row complete; and every exceptionable row complete or `accepted_risk` with named authority, bounded scope, expiry/review date, remediation, and revocation condition. `go` requires every row complete.
 - The ledger has one and only one disposition for each registry ID. Dispositions are limited to `complete`, `accepted_risk`, and `blocked`; absent, stale, partial, unrepeatable, unavailable, or repository-only evidence for a live requirement is `blocked`.
@@ -63,7 +63,7 @@
 - **E4:** `tests/answer-context.test.ts`, baseline `d28ce2c`, 2026-07-24T12:21Z, 92 passed.
 - **E5:** `tests/ai-ask-shell.test.ts`, baseline `d28ce2c`, 2026-07-24T12:21Z, 79 passed.
 - **E6:** `tests/web-search-quality.test.ts` and `tests/web-search-adapter.test.ts`, baseline `d28ce2c`, 2026-07-24T12:21Z, 10 + 10 passed; fixture-only, no live provider call.
-- **E7:** `6-1-knowledge-pipeline-operational-validation-report.md`, issued 2026-07-24T18:29:00Z; all OP rows blocked and OP-07 safety blocker.
+- **E7:** `6-1-knowledge-pipeline-operational-validation-report.md`, document-declared validation timestamp `2026-07-24T18:29:00Z`; immutable issuance/audit record and Story 6.2 review observation are unavailable. Its blocked conclusions are carried forward as unverified current proof, not as fresh external evidence.
 - **E8:** `web-search-fallback-quality-report.md`, issued 2026-07-09; deterministic-fixture seam report, not live monitoring.
 - **E9:** `sprint-status.yaml`, baseline worktree review; open action items are tracking only, not proof.
 - **E10:** `pnpm test:run`, baseline `d28ce2c`, 2026-07-24T12:21Z, 50 files / 746 tests passed.
@@ -87,15 +87,15 @@
 | RT-01 | Repository retrieval behavior | 2026-07-24T12:20Z | E3 | 42 regressions passed for current-owner eligibility behavior. | Amelia | complete | None within repository-behavior scope. | Revalidate after retrieval changes. | Does not cure live/operational blockers. |
 | RT-02 | Repository provenance display behavior | 2026-07-24T12:21Z | E4, E5 | 171 regressions passed; stored safe provenance is used, not parsed prose. | Amelia | complete | None within repository-behavior scope. | Revalidate after answer/provenance changes. | Does not cure live/operational blockers. |
 | WF-01 | Repository fallback behavior | 2026-07-24T12:21Z | E6 | 20 fixture/adapter regressions passed; external fallback remains unverified and failure/low-confidence guidance is required. | Amelia | complete | Fixture proof is not monitoring proof. | Retain E6 and separately complete PR-03. | Does not authorize scale. |
-| OP-01 | Deployment runtime | 2026-07-24T18:29Z | E7; evidence_issued_at_utc 2026-07-24T18:29:00Z | Canonical ingestion not evidenced as supervised/deployed. | Tony | blocked | Runtime proof missing. | Complete E7 remediation. | No-go. |
-| OP-02 | Controlled runtime | 2026-07-24T18:29Z | E7; evidence_issued_at_utc 2026-07-24T18:29:00Z | Repository recovery tests only. | Amelia | blocked | Controlled exercise missing. | Complete E7 remediation. | No-go. |
-| OP-03 | Controlled runtime | 2026-07-24T18:29Z | E7; evidence_issued_at_utc 2026-07-24T18:29:00Z | Repository indexing/retrieval tests only. | Amelia | blocked | Operational fixture proof missing. | Complete E7 remediation. | No-go. |
-| OP-04 | Controlled runtime | 2026-07-24T18:29Z | E7; evidence_issued_at_utc 2026-07-24T18:29:00Z | Deployment audit/access proof missing. | Amelia | blocked | Required protected-operation proof missing. | Complete E7 remediation. | No-go. |
-| OP-05 | Deployment/provider | 2026-07-24T18:29Z | E7; evidence_issued_at_utc unavailable | No environment separation/restore attestation. | Tony | blocked | Mandatory proof missing. | Complete E7 remediation. | No-go. |
-| OP-06 | Provider/privacy | 2026-07-24T18:29Z | E7; evidence_issued_at_utc unavailable | No current provider/privacy attestation. | Tony | blocked | Mandatory proof missing. | Complete E7 remediation. | No-go. |
-| OP-07 | Capture authorization | 2026-07-24T18:29Z | E7 | Scheduled `--yes` lacks persisted admin/operator enforcement. | Amelia | blocked | Safety-blocking defect. | Separate hardening story and controlled evidence. | No-go; cannot be overridden. |
-| OP-08 | Controlled retention/removal | 2026-07-24T18:29Z | E7; evidence_issued_at_utc 2026-07-24T18:29:00Z | Repository tests only; restore prerequisite blocked. | Amelia | blocked | Operational proof missing. | Complete E7 remediation after OP-05. | No-go. |
-| OP-09 | Controlled traveler surface | 2026-07-24T18:29Z | E7; evidence_issued_at_utc 2026-07-24T18:29:00Z | Repository tests only. | Amelia | blocked | Before/after controlled proof missing. | Complete E7 remediation. | No-go. |
+| OP-01 | Deployment runtime | unavailable | E7; evidence_issued_at_utc unavailable; document-declared validation timestamp only | Canonical ingestion not evidenced as supervised/deployed. | Tony | blocked | Runtime proof missing; E7 was not observed during this review and has no approved freshness window. | Complete E7 remediation. | No-go. |
+| OP-02 | Controlled runtime | unavailable | E7; evidence_issued_at_utc unavailable; document-declared validation timestamp only | Repository recovery tests only. | Amelia | blocked | Controlled exercise missing; E7 was not observed during this review and has no approved freshness window. | Complete E7 remediation. | No-go. |
+| OP-03 | Controlled runtime | unavailable | E7; evidence_issued_at_utc unavailable; document-declared validation timestamp only | Repository indexing/retrieval tests only. | Amelia | blocked | Operational fixture proof missing; E7 was not observed during this review and has no approved freshness window. | Complete E7 remediation. | No-go. |
+| OP-04 | Controlled runtime | unavailable | E7; evidence_issued_at_utc unavailable; document-declared validation timestamp only | Deployment audit/access proof missing. | Amelia | blocked | Required protected-operation proof missing; E7 was not observed during this review and has no approved freshness window. | Complete E7 remediation. | No-go. |
+| OP-05 | Deployment/provider | unavailable | E7; evidence_issued_at_utc unavailable; document-declared validation timestamp only | No environment separation/restore attestation. | Tony | blocked | Mandatory proof missing; E7 was not observed during this review and has no approved freshness window. | Complete E7 remediation. | No-go. |
+| OP-06 | Provider/privacy | unavailable | E7; evidence_issued_at_utc unavailable; document-declared validation timestamp only | No current provider/privacy attestation. | Tony | blocked | Mandatory proof missing; E7 was not observed during this review and has no approved freshness window. | Complete E7 remediation. | No-go. |
+| OP-07 | Capture authorization | unavailable | E7; evidence_issued_at_utc unavailable; document-declared validation timestamp only | Scheduled `--yes` lacks persisted admin/operator enforcement. | Amelia | blocked | Safety-blocking defect; E7 was not observed during this review and has no approved freshness window. | Separate hardening story and controlled evidence. | No-go; cannot be overridden. |
+| OP-08 | Controlled retention/removal | unavailable | E7; evidence_issued_at_utc unavailable; document-declared validation timestamp only | Repository tests only; restore prerequisite blocked. | Amelia | blocked | Operational proof missing; E7 was not observed during this review and has no approved freshness window. | Complete E7 remediation after OP-05. | No-go. |
+| OP-09 | Controlled traveler surface | unavailable | E7; evidence_issued_at_utc unavailable; document-declared validation timestamp only | Repository tests only. | Amelia | blocked | Before/after controlled proof missing; E7 was not observed during this review and has no approved freshness window. | Complete E7 remediation. | No-go. |
 | PR-01a | Manual OAuth smoke | 2026-07-24T12:21:50Z | E9; evidence_issued_at_utc unavailable | Action item open; no smoke result or obsolescence decision. | Tony | blocked | Independent disposition absent. | Run smoke or record authority/timestamp/rationale/scope/replacement. | No evaluation. |
 | PR-01b | Operator/admin smoke | 2026-07-24T12:21:50Z | E9; evidence_issued_at_utc unavailable | Action item open; no smoke result or obsolescence decision. | Tony | blocked | Independent disposition absent. | Run smoke or record authority/timestamp/rationale/scope/replacement. | No evaluation. |
 | PR-01c | Referral smoke | 2026-07-24T12:21:50Z | E9; evidence_issued_at_utc unavailable | Action item open; no smoke result or obsolescence decision. | Tony | blocked | Independent disposition absent. | Run smoke or record authority/timestamp/rationale/scope/replacement. | No evaluation. |
@@ -106,6 +106,20 @@
 | PR-06 | Conversation concurrency | 2026-07-24T12:21:50Z | E9; evidence_issued_at_utc unavailable | Hardening action item open. | Tony, Winston, and Amelia | blocked | Resolution/explicit deferral absent. | Decide, defer with controls, or harden. | No evaluation. |
 | PR-07 | DB test sequencing | 2026-07-24T12:21:50Z | E10, E9 | Tests ran serially, but required migration/integration sequencing is not documented. | Dana | blocked | Mandatory documented sequence absent. | Publish DB-backed sequencing guidance. | No evaluation. |
 | PR-08 | Provider/privacy | 2026-07-24T12:21:50Z | E7; evidence_issued_at_utc unavailable | Current provider settings/privacy notice proof unavailable. | Tony | blocked | Mandatory safety proof missing. | Obtain current approved attestations and notice evidence. | No-go; safety blocker. |
+
+## Mutable External-Evidence Freshness Register
+
+No per-row freshness window has been approved or recorded. A row listed as `observed during review` below was observed only as a mutable tracker or repository artifact; it does not convert absent external proof into completion. E7's document-declared validation timestamp is not an immutable issuance record and cannot establish review observation or freshness.
+
+| Ledger rows | Mutable evidence | Observed during this review | Approved per-row freshness window | Freshness result | Required disposition |
+| --- | --- | --- | --- | --- | --- |
+| OP-01 through OP-09 | E7 operational validation ledger | No attributable observation recorded; document-declared validation timestamp only | None | Unverifiable | blocked |
+| PR-01a through PR-01c | E9 action-item tracker | Yes, 2026-07-24T12:21:50Z; tracker only | None | No external smoke or obsolescence proof supplied | blocked |
+| PR-02 | E9 action-item tracker | Yes, 2026-07-24T12:21:50Z; tracker only | None | No provider pricing proof supplied | blocked |
+| PR-03 | E8 fixture report and E9 action-item tracker | E9 only, 2026-07-24T12:21:50Z; E8 review observation unavailable | None | E8 is stale for live monitoring and E9 is not monitoring proof | blocked |
+| PR-04 through PR-06 | E9 action-item tracker | Yes, 2026-07-24T12:21:50Z; tracker only | None | No recorded decision, deferral, or accepted-risk authority supplied | blocked |
+| PR-07 | E10 test result and E9 action-item tracker | Yes, 2026-07-24T12:21:50Z; repository/tracker evidence only | None | No documented migration/integration sequence supplied | blocked |
+| PR-08 | E7 provider/privacy reference | No attributable observation recorded; document-declared validation timestamp only | None | No current provider attestation or public privacy-notice proof supplied | blocked |
 
 ## Final Assessment
 
