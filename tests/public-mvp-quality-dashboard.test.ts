@@ -21,7 +21,6 @@ import {
   knowledgeSamplingCohortMembers,
   knowledgeSamplingPolicies,
   knowledgeVerifyFirstSamplingObligations,
-  sourceCaptureVersions,
   sources,
   userRoles,
   users,
@@ -178,6 +177,21 @@ async function seedPolicySnapshot(resultId: string) {
   });
 }
 
+async function seedCanonicalEvaluationRun(input: { userId: string; completedAt: Date; omitScenario?: string; missingScoreScenario?: string; highSeverity?: boolean; qualityGap?: boolean }) {
+  const { publicMvpEvaluationPromptSetVersion, publicMvpEvaluationScenarios } = await import("@/features/feedback/evaluation");
+  const [promptSet] = await testDb.insert(publicMvpEvaluationPromptSets).values({ version: publicMvpEvaluationPromptSetVersion, rubricVersion: "epic_6_quality_rubric_ai_first_v2" }).onConflictDoNothing().returning();
+  const persistedPromptSet = promptSet ?? (await testDb.select().from(publicMvpEvaluationPromptSets).where(eq(publicMvpEvaluationPromptSets.version, publicMvpEvaluationPromptSetVersion)))[0];
+  if (!persistedPromptSet) throw new Error("expected prompt set");
+  const [run] = await testDb.insert(publicMvpEvaluationRuns).values({ promptSetId: persistedPromptSet.id, promptSetVersion: persistedPromptSet.version, actorUserId: input.userId, modelVersion: "cx/evaluator", status: "completed", startedAt: input.completedAt, completedAt: input.completedAt }).returning();
+  const scenarios = publicMvpEvaluationScenarios.filter((scenario) => scenario.id !== input.omitScenario);
+  for (const scenario of scenarios) {
+    const [result] = await testDb.insert(publicMvpEvaluationResults).values({ runId: run.id, promptSetId: persistedPromptSet.id, promptSetVersion: persistedPromptSet.version, promptType: scenario.prompt.type, promptVersion: scenario.prompt.version, scenarioId: scenario.id, scenarioVersion: scenario.version, modelVersion: "cx/evaluator", status: "scored", answerText: "Canonical evaluation answer.", staleWithdrawnSourceExposureFlag: input.highSeverity === true && scenario.id === "source_withdrawal", unsupportedClaimFlag: input.qualityGap === true && scenario.id === "community_observation" }).returning();
+    await testDb.insert(publicMvpEvaluationResultPolicySnapshots).values({ resultId: result.id, scenarioId: scenario.id, scenarioVersion: scenario.version, selectedKnowledge: [], excludedCandidateCounts: {}, excludedReasonCodes: [], targetCandidateExcluded: false, sourceOrEvidenceOutcome: "eligible", webFallback: {}, finalizationOutcome: "complete" });
+    await testDb.insert(publicMvpEvaluationResultScores).values(scoreDimensions.filter((dimension) => input.missingScoreScenario !== scenario.id || dimension !== "user_context_use").map((dimension) => ({ resultId: result.id, dimension, score: 8 })));
+  }
+  return run;
+}
+
 async function seedFeedback(userId: string, count: number, usefulCount: number, createdAt = new Date()) {
   for (let index = 0; index < count; index += 1) {
     const answer = await seedAssistantAnswer(userId);
@@ -316,7 +330,8 @@ describe("public MVP quality dashboard", () => {
     expect(dashboard.evaluation).toMatchObject({ totalResults: 1, scoredResults: 1 });
     expect(dashboard.recentResults).toHaveLength(1);
     expect(dashboard.recentResults[0].promptType).toBe("route_logistics");
-    expect(dashboard.readiness.missingSignals).toContain("Chưa có kết quả magic-moment được chấm điểm.");
+    const allRange = await getPublicMvpQualityDashboard({ db: testDb, range: "all" });
+    expect(dashboard.readiness).toEqual(allRange.success ? allRange.readiness : null);
   });
 
   test("reports missing signals and unavailable retrieval/provenance links explicitly", async () => {
@@ -353,7 +368,7 @@ describe("public MVP quality dashboard", () => {
     const withLinkedFeedback = await getPublicMvpQualityDashboard({ db: testDb, range: "all" });
 
     expect(withoutLinkedFeedback.success ? withoutLinkedFeedback.readiness.status : null).toBe("not_ready");
-    expect(withoutLinkedFeedback.success ? withoutLinkedFeedback.readiness.missingSignals : []).toContain("Cần thêm 10 phản hồi usefulness cho magic-moment.");
+    expect(withoutLinkedFeedback.success ? withoutLinkedFeedback.readiness : null).toEqual(withLinkedFeedback.success ? withLinkedFeedback.readiness : null);
     expect(withLinkedFeedback.success ? withLinkedFeedback.readiness.status : null).toBe("not_ready");
     expect(withLinkedFeedback.success ? withLinkedFeedback.readiness.missingSignals : []).toContain("Còn thiếu 100 thẻ hiện hành có evidence hợp lệ; phê duyệt lịch sử không được tính.");
   });
@@ -528,6 +543,50 @@ describe("public MVP quality dashboard", () => {
     await expect(getActiveEvidenceGroundedSeedCoverageForReadiness(testDb)).resolves.toMatchObject({ activeEvidenceGroundedCards: 99, remainingActiveCards: 1, isComplete: false });
     await testDb.update(knowledgeCards).set({ publicationState: "active" }).where(eq(knowledgeCards.id, "threshold-99"));
     await expect(getActiveEvidenceGroundedSeedCoverageForReadiness(testDb)).resolves.toMatchObject({ activeEvidenceGroundedCards: 100, remainingActiveCards: 0, isComplete: true });
+    const capture = await seedSourceCaptureVersion({ id: "replacement-capture", sourceId: "source-threshold-0", captureKind: "url", rawText: "Replacement evidence." , versionSequence: 2 });
+    await expect(getActiveEvidenceGroundedSeedCoverageForReadiness(testDb)).resolves.toMatchObject({ activeEvidenceGroundedCards: 99, remainingActiveCards: 1, isComplete: false });
+    await testDb.update(knowledgeCardEvidence).set({ captureVersionId: capture.id, quoteText: "Replacement evidence.", spanEnd: "Replacement evidence.".length }).where(eq(knowledgeCardEvidence.knowledgeCardId, "threshold-0"));
+    await expect(getActiveEvidenceGroundedSeedCoverageForReadiness(testDb)).resolves.toMatchObject({ activeEvidenceGroundedCards: 100, isComplete: true });
+  });
+
+  test("keeps readiness corpus-wide across dashboard filters and includes suppressed unresolved work", async () => {
+    await createUser("diagnostic-admin", ["admin"]);
+    await mockSession("diagnostic-admin", ["admin"]);
+    await seedSamplingFence({ id: "suppressed-remediation", userId: "diagnostic-admin", publicationState: "suppressed" });
+    const { getActiveEvidenceGroundedSeedCoverageForReadiness } = await import("@/features/knowledge/batch-intake");
+    const { getPublicMvpQualityDashboard } = await import("@/features/feedback/quality-dashboard");
+
+    await expect(getActiveEvidenceGroundedSeedCoverageForReadiness(testDb)).resolves.toMatchObject({ pendingReviewCards: 1, pendingVerificationCards: 1 });
+    const [all, filtered] = await Promise.all([
+      getPublicMvpQualityDashboard({ db: testDb, range: "all" }),
+      getPublicMvpQualityDashboard({ db: testDb, promptType: "route_logistics", range: "7d" }),
+    ]);
+    expect(all.success && filtered.success ? filtered.readiness : null).toEqual(all.success ? all.readiness : null);
+  });
+
+  test("excludes a fully non-corridor policy from the corridor sampling gate", async () => {
+    await createUser("outside-admin", ["admin"]);
+    const outside = await seedSamplingFence({ id: "outside-fence", userId: "outside-admin" });
+    const { enrollmentDigest, getPublicMvpSamplingReadinessEvidence } = await import("@/features/knowledge/recommendations");
+    const [policy] = await testDb.insert(knowledgeSamplingPolicies).values({ cohortKey: "outside-policy", windowStartsAt: new Date("2026-01-01"), windowEndsAt: new Date("2026-01-29"), samplingPercent: 15, suppressedAt: new Date(), enrollmentCandidateCount: 1, enrollmentSelectedCount: 1, enrollmentDigest: enrollmentDigest(["outside-fence:1:1::true:true"]), enrollmentSealedAt: new Date() }).returning();
+    await testDb.insert(knowledgeSamplingCandidateLedger).values({ terminalIngestionJobId: outside.jobId, policyId: policy.id, knowledgeCardId: "outside-fence", contentVersion: 1, evidenceSetRevision: 1, corridorBucket: "", outsideCorridor: true, selectedForSampling: true });
+    await testDb.insert(knowledgeSamplingCohortMembers).values({ policyId: policy.id, knowledgeCardId: "outside-fence", contentVersion: 1, evidenceSetRevision: 1, corridorBucket: null, outsideCorridor: true, selectedForSampling: true });
+    await expect(getPublicMvpSamplingReadinessEvidence(testDb)).resolves.toMatchObject({ complete: true, policies: 0, highSeverity: 0 });
+  });
+
+  test("selects only the newest complete canonical evaluation run and distinguishes high from non-high gaps", async () => {
+    await createUser("selector-admin", ["admin"]);
+    const { getCurrentReadinessEvaluationEvidence } = await import("@/features/feedback/quality-dashboard");
+    const older = await seedCanonicalEvaluationRun({ userId: "selector-admin", completedAt: new Date("2026-01-01") });
+    const incomplete = await seedCanonicalEvaluationRun({ userId: "selector-admin", completedAt: new Date("2026-01-02"), omitScenario: "web_fallback_unavailable" });
+    const incompleteScores = await seedCanonicalEvaluationRun({ userId: "selector-admin", completedAt: new Date("2026-01-03"), missingScoreScenario: "community_observation" });
+    const newer = await seedCanonicalEvaluationRun({ userId: "selector-admin", completedAt: new Date("2026-01-04"), qualityGap: true });
+    await expect(getCurrentReadinessEvaluationEvidence(testDb)).resolves.toMatchObject({ complete: true, runId: newer.id, highSeverity: 0, qualityGaps: 1 });
+    await testDb.update(publicMvpEvaluationRuns).set({ status: "failed" }).where(eq(publicMvpEvaluationRuns.id, newer.id));
+    await expect(getCurrentReadinessEvaluationEvidence(testDb)).resolves.toMatchObject({ complete: true, runId: older.id, highSeverity: 0, qualityGaps: 0 });
+    const high = await seedCanonicalEvaluationRun({ userId: "selector-admin", completedAt: new Date("2026-01-05"), highSeverity: true });
+    await expect(getCurrentReadinessEvaluationEvidence(testDb)).resolves.toMatchObject({ complete: true, runId: high.id, highSeverity: 1, qualityGaps: 0 });
+    expect([incomplete.id, incompleteScores.id]).not.toContain(older.id);
   });
 
   test("requires current valid evidence and one unambiguous disposition for selected and verify-first fences", async () => {

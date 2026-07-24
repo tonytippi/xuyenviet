@@ -267,7 +267,7 @@ describe("knowledge batch source intake", () => {
 
     const progress = await getActiveEvidenceGroundedSeedCoverage();
 
-    expect(progress).toMatchObject({ targetActiveCards: 100, activeEvidenceGroundedCards: 1, remainingActiveCards: 99, isComplete: false, activeCommunityObservations: 1, activeCommunityPatterns: 0, caveatOnlyHighRiskCards: 1, pendingReviewCards: 1, pendingVerificationCards: 1 });
+    expect(progress).toMatchObject({ targetActiveCards: 100, activeEvidenceGroundedCards: 1, remainingActiveCards: 99, isComplete: false, activeCommunityObservations: 1, activeCommunityPatterns: 0, caveatOnlyHighRiskCards: 1, pendingReviewCards: 4, pendingVerificationCards: 1 });
     expect(duplicateCapture.id).toBeTruthy();
     expect(progress.actionableWork).toEqual([
       { kind: "recommendation", reason: "freshness", priority: 5, count: 1 },

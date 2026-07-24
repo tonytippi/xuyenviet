@@ -180,6 +180,7 @@ gpu4ai/gpt-5.6-terra-review
 - 2026-07-24: Implemented an initial forward-only enrollment schema, current-corpus dashboard gate, canonical evaluation-run selector, and read-only Vietnamese remediation UI. DB-backed dashboard, coverage, queue, ingestion, evaluation, and search suites passed when run sequentially; lint, typecheck, and build passed. Definition-of-done remains blocked: the sampling readiness aggregate does not yet prove current valid evidence for every selected/verify-first fence, has not implemented complete aggregate duplicate/disposition validation, and the required Story 5.3 regression matrix (99/100 corpus, sealed proof mismatches, and all version-fence cases) is incomplete. Story remains `in-progress`.
 - 2026-07-24: Completed the bounded readiness recovery implementation. The sampling aggregate now requires current code-valid evidence at every selected auto-active fence, current active state for selected members, current valid evidence for every verify-first obligation, exact required verify-first sampling recommendation cardinality, and a resolved sampling disposition. Added DB regressions for the 99/100 corpus threshold, selected and verify-first content/evidence version drift, invalid evidence, count/selection/digest/unsealed proof mismatches, and duplicate required dispositions. `tests/public-mvp-quality-dashboard.test.ts` (13 tests), `tests/knowledge-batch-source-intake.test.ts` (14 tests), and `pnpm typecheck` passed. Required serial verification is blocked at `pnpm test:run tests/knowledge-recommendation-queue.test.ts` before collection: installed `next-auth@5.0.0-beta.31` imports a missing `next/server` module from the resolved `next@15.5.20` tree. No dependency change was made; Story remains `in-progress`.
 - 2026-07-24: Applied the scoped pnpm patch for `next-auth@5.0.0-beta.31`, changing only its ESM imports to existing `.js` Next server entrypoints. Existing package constraints and resolved `next@15.5.20` remain unchanged. All required serial suites passed: public-MVP quality dashboard (13), batch source intake (14), recommendation queue (23), public-MVP evaluation (15), and knowledge search (42). `pnpm lint` passed with four pre-existing unused-variable warnings; `pnpm typecheck` and `pnpm build` passed. Story advanced to `review`.
+- 2026-07-24: Resolved only the six authorized first-review findings. Readiness is now corpus-wide regardless of dashboard filters; current evidence is fenced to `sources.currentCaptureVersionId`; fully non-corridor policies are excluded from the corridor gate; suppressed corridor cards with unresolved review/verification remain remediation diagnostics; and the Knowledge progress surface is an admin-only operational caller for sealing closed sampling windows. Added canonical evaluation-run selector coverage for six scenario/version pairs, missing evidence, newest qualifying replacement, and high versus non-high flags. Required serial verification passed; status returned to `review`.
 
 ### File List
 
@@ -197,6 +198,7 @@ gpu4ai/gpt-5.6-terra-review
 - src/features/knowledge/sampling-maintenance.ts
 - tests/knowledge-ingestion-pipeline.test.ts
 - tests/public-mvp-quality-dashboard.test.ts
+- tests/knowledge-batch-source-intake.test.ts
 
 ### Change Log
 
@@ -205,3 +207,4 @@ gpu4ai/gpt-5.6-terra-review
 - 2026-07-24: Started implementation; added partial enrollment/readiness infrastructure and recorded remaining Definition-of-Done blockers.
 - 2026-07-24: Completed bounded aggregate and regression recovery; retained `in-progress` because the required serial queue ownership suite cannot collect under the installed Next/next-auth dependency resolution.
 - 2026-07-24: Added the scoped `next-auth` ESM-entrypoint compatibility patch, completed required sequential verification, marked all tasks complete, and synchronized sprint status to `review`.
+- 2026-07-24: Repaired only the six authorized first-review findings; required serial suites, lint, typecheck, and build passed. Returned to `review`.

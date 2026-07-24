@@ -228,13 +228,13 @@ export async function getActiveEvidenceGroundedSeedCoverageForReadiness(db: Batc
       evidenceSetRevision: knowledgeCards.evidenceSetRevision,
     })
     .from(knowledgeCards)
-    .where(eq(knowledgeCards.publicationState, "active"));
+    .where(inArray(knowledgeCards.publicationState, ["active", "suppressed"]));
   const evidenceRows = await db
     .select({ cardId: knowledgeCardEvidence.knowledgeCardId, independenceKey: knowledgeCardEvidence.independenceKey })
     .from(knowledgeCardEvidence)
-    .innerJoin(knowledgeCards, and(eq(knowledgeCards.id, knowledgeCardEvidence.knowledgeCardId), eq(knowledgeCards.publicationState, "active")))
+    .innerJoin(knowledgeCards, eq(knowledgeCards.id, knowledgeCardEvidence.knowledgeCardId))
     .innerJoin(sources, eq(sources.id, knowledgeCardEvidence.sourceId))
-    .innerJoin(sourceCaptureVersions, and(eq(sourceCaptureVersions.id, knowledgeCardEvidence.captureVersionId), eq(sourceCaptureVersions.sourceId, knowledgeCardEvidence.sourceId)))
+    .innerJoin(sourceCaptureVersions, and(eq(sourceCaptureVersions.id, knowledgeCardEvidence.captureVersionId), eq(sourceCaptureVersions.sourceId, knowledgeCardEvidence.sourceId), eq(sources.currentCaptureVersionId, knowledgeCardEvidence.captureVersionId)))
     .where(and(
       eq(knowledgeCardEvidence.state, "active"),
       sql`${knowledgeCardEvidence.supportLevel} in ('primary', 'supporting')`,
@@ -350,7 +350,7 @@ export async function getCurrentValidEvidenceFencesForReadiness(db: BatchDb) {
     .from(knowledgeCards)
     .innerJoin(knowledgeCardEvidence, and(eq(knowledgeCardEvidence.knowledgeCardId, knowledgeCards.id), eq(knowledgeCardEvidence.state, "active")))
     .innerJoin(sources, and(eq(sources.id, knowledgeCardEvidence.sourceId), eq(sources.eligibility, "eligible")))
-    .innerJoin(sourceCaptureVersions, and(eq(sourceCaptureVersions.id, knowledgeCardEvidence.captureVersionId), eq(sourceCaptureVersions.sourceId, knowledgeCardEvidence.sourceId)))
+    .innerJoin(sourceCaptureVersions, and(eq(sourceCaptureVersions.id, knowledgeCardEvidence.captureVersionId), eq(sourceCaptureVersions.sourceId, knowledgeCardEvidence.sourceId), eq(sources.currentCaptureVersionId, knowledgeCardEvidence.captureVersionId)))
     .where(and(
       sql`${knowledgeCardEvidence.supportLevel} in ('primary', 'supporting')`,
       sql`${knowledgeCardEvidence.displayPolicy} in ('fact_only', 'traveler_visible')`,

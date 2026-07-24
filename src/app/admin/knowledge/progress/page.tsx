@@ -1,11 +1,13 @@
 import Link from "next/link";
 
 import { getActiveEvidenceGroundedSeedCoverage } from "@/features/knowledge/batch-intake";
+import { sealClosedKnowledgeSamplingPolicyForm } from "@/features/knowledge/actions";
+import { listClosedKnowledgeSamplingPoliciesForAdmin } from "@/features/knowledge/sampling-maintenance";
 
 export const dynamic = "force-dynamic";
 
 export default async function KnowledgeProgressPage() {
-  const progress = await getActiveEvidenceGroundedSeedCoverage();
+  const [progress, closedSamplingPolicies] = await Promise.all([getActiveEvidenceGroundedSeedCoverage(), listClosedKnowledgeSamplingPoliciesForAdmin()]);
   const percent = Math.min(100, Math.round((progress.activeEvidenceGroundedCards / progress.targetActiveCards) * 100));
 
   return (
@@ -32,6 +34,22 @@ export default async function KnowledgeProgressPage() {
           <div className="h-full rounded-full bg-[#1f5f46]" style={{ width: `${percent}%` }} />
         </div>
       </section>
+
+      {closedSamplingPolicies.some((policy) => !policy.enrollmentSealedAt) ? (
+        <section className="mt-8 rounded-[1.5rem] border border-[#d8c9ad] bg-white/70 p-5 sm:p-6">
+          <h2 className="text-2xl font-semibold tracking-[-0.03em] text-[#17342c]">Niêm phong sampling window đã đóng</h2>
+          <p className="mt-2 leading-7 text-[#4f625a]">Thao tác vận hành này chỉ kiểm tra ledger/membership bất biến và ghi proof cho window đã đóng; không thay đổi thẻ hoặc khuyến nghị.</p>
+          <div className="mt-4 grid gap-3">
+            {closedSamplingPolicies.filter((policy) => !policy.enrollmentSealedAt).map((policy) => (
+              <form action={sealClosedKnowledgeSamplingPolicyForm} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#e2d3ba] bg-[#fbf7ed] p-4" key={policy.id}>
+                <input name="policyId" type="hidden" value={policy.id} />
+                <span className="font-semibold text-[#17342c]">{policy.cohortKey}</span>
+                <button className="min-h-11 rounded-xl bg-[#1f5f46] px-4 font-semibold text-white" type="submit">Niêm phong window</button>
+              </form>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <dl className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <ProgressSignal label="Quan sát cộng đồng đang tính" count={progress.activeCommunityObservations} />

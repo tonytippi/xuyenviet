@@ -175,7 +175,7 @@ export async function getPublicMvpQualityDashboard(input: PublicMvpQualityDashbo
     evaluationConditions.push(eq(publicMvpEvaluationResults.promptType, filters.promptType));
   }
 
-  const [allFeedbackRows, resultRows] = await Promise.all([
+  const [allFeedbackRows, resultRows, readinessResultRows, readinessFeedbackRows] = await Promise.all([
     db
       .select({ assistantMessageId: answerUsefulnessFeedback.assistantMessageId, rating: answerUsefulnessFeedback.rating, comment: answerUsefulnessFeedback.comment, createdAt: answerUsefulnessFeedback.createdAt })
       .from(answerUsefulnessFeedback)
@@ -208,6 +208,19 @@ export async function getPublicMvpQualityDashboard(input: PublicMvpQualityDashbo
       .innerJoin(publicMvpEvaluationRuns, eq(publicMvpEvaluationRuns.id, publicMvpEvaluationResults.runId))
       .where(evaluationConditions.length > 0 ? and(...evaluationConditions) : undefined)
       .orderBy(desc(publicMvpEvaluationResults.createdAt)),
+    db
+      .select({
+        id: publicMvpEvaluationResults.id,
+        promptType: publicMvpEvaluationResults.promptType,
+        status: publicMvpEvaluationResults.status,
+        noBetterThanGenericFlag: publicMvpEvaluationResults.noBetterThanGenericFlag,
+        assistantMessageId: publicMvpEvaluationResults.assistantMessageId,
+      })
+      .from(publicMvpEvaluationResults)
+      .orderBy(desc(publicMvpEvaluationResults.createdAt)),
+    db
+      .select({ assistantMessageId: answerUsefulnessFeedback.assistantMessageId, rating: answerUsefulnessFeedback.rating, comment: answerUsefulnessFeedback.comment })
+      .from(answerUsefulnessFeedback),
   ]);
 
   const filteredResultIds = resultRows.filter((row) => row.status === "scored").map((row) => row.id);
@@ -226,9 +239,13 @@ export async function getPublicMvpQualityDashboard(input: PublicMvpQualityDashbo
   const [coverage, samplingEvidence, readinessEvaluation] = await Promise.all([
     getActiveEvidenceGroundedSeedCoverageForReadiness(db),
     getPublicMvpSamplingReadinessEvidence(db),
-    loadCurrentReadinessEvaluationEvidence(db),
+    getCurrentReadinessEvaluationEvidence(db),
   ]);
-  const readiness = buildReadiness({ magicMomentFeedback: summarizeFeedback(filterFeedbackRowsForMagicMoment(feedbackRows, resultRows)), resultRows, scoreRows, coverage, samplingEvidence, readinessEvaluation });
+  const readinessResultIds = readinessResultRows.filter((row) => row.status === "scored").map((row) => row.id);
+  const readinessScoreRows = readinessResultIds.length > 0
+    ? await db.select({ resultId: publicMvpEvaluationResultScores.resultId, dimension: publicMvpEvaluationResultScores.dimension, score: publicMvpEvaluationResultScores.score }).from(publicMvpEvaluationResultScores).where(inArray(publicMvpEvaluationResultScores.resultId, readinessResultIds))
+    : [];
+  const readiness = buildReadiness({ magicMomentFeedback: summarizeFeedback(filterFeedbackRowsForMagicMoment(readinessFeedbackRows, readinessResultRows)), resultRows: readinessResultRows, scoreRows: readinessScoreRows, coverage, samplingEvidence, readinessEvaluation });
 
   return { success: true, filters, feedback, evaluation, readiness, recentResults, policySignals };
 }
@@ -733,7 +750,7 @@ function buildReadiness({
   return { status: checks.every((check) => check.passed) ? "ready" : "not_ready", checks, missingSignals };
 }
 
-async function loadCurrentReadinessEvaluationEvidence(db: ReturnType<typeof getDb>) {
+export async function getCurrentReadinessEvaluationEvidence(db: ReturnType<typeof getDb>) {
   const required = publicMvpEvaluationScenarios.map((scenario) => ({ scenarioId: scenario.id, scenarioVersion: scenario.version, promptType: scenario.prompt.type, promptVersion: scenario.prompt.version }));
   const runs = await db.select({ id: publicMvpEvaluationRuns.id, modelVersion: publicMvpEvaluationRuns.modelVersion }).from(publicMvpEvaluationRuns).where(and(eq(publicMvpEvaluationRuns.status, "completed"), eq(publicMvpEvaluationRuns.promptSetVersion, publicMvpEvaluationPromptSetVersion))).orderBy(desc(publicMvpEvaluationRuns.completedAt), desc(publicMvpEvaluationRuns.id));
   for (const run of runs) {
@@ -748,9 +765,9 @@ async function loadCurrentReadinessEvaluationEvidence(db: ReturnType<typeof getD
     if (!complete) continue;
     const highSeverity = results.filter((result) => result.staleWithdrawnSourceExposureFlag || result.rawEvidenceLeakageFlag || !result.conflictedKnowledgeExcludedFlag).length;
     const qualityGaps = results.filter((result) => result.unsupportedCommunityWordingFlag || result.requiredCaveatOmittedFlag || result.unsupportedClaimFlag || !result.fallbackVerificationGuidanceMetFlag).length;
-    return { complete: true, highSeverity, qualityGaps, message: highSeverity ? `${highSeverity} lỗi publication-policy severity cao trong run eval hiện hành.` : qualityGaps ? `${qualityGaps} quality gap eval hiện hành cần khắc phục.` : "Run eval hiện hành đủ evidence và không có lỗi severity cao." };
+    return { complete: true, runId: run.id, highSeverity, qualityGaps, message: highSeverity ? `${highSeverity} lỗi publication-policy severity cao trong run eval hiện hành.` : qualityGaps ? `${qualityGaps} quality gap eval hiện hành cần khắc phục.` : "Run eval hiện hành đủ evidence và không có lỗi severity cao." };
   }
-  return { complete: false, highSeverity: 0, qualityGaps: 0, message: "Chưa có một run eval hiện hành đầy đủ sáu scenario, snapshot và rubric score; readiness bị chặn." };
+  return { complete: false, runId: null, highSeverity: 0, qualityGaps: 0, message: "Chưa có một run eval hiện hành đầy đủ sáu scenario, snapshot và rubric score; readiness bị chặn." };
 }
 
 function average(values: number[]) {

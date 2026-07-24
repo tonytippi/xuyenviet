@@ -30,6 +30,7 @@ import { isSourceValidationError, normalizeTravelSourceInput, type TravelSourceI
 import { appendSourceCaptureVersion } from "./source-captures";
 import { isKnowledgeSuggestionError, suggestKnowledgeFromSourceUrl as suggestKnowledgeFromSourceUrlService } from "./suggestions";
 import { resolveKnowledgeRecommendation } from "./recommendations";
+import { sealClosedKnowledgeSamplingPolicyForAdmin } from "./sampling-maintenance";
 import { removeKnowledgeSource, SourceRemovalError } from "./source-removal";
 
 export type SafeSourceResult = Pick<
@@ -100,6 +101,12 @@ export async function removeKnowledgeSourceForm(formData: FormData) {
 
   if (error) redirect(`/admin/knowledge/intake?removeError=${encodeURIComponent(error)}`);
   redirect(`/admin/knowledge/intake?sourceRemoved=${encodeURIComponent(result?.status === "already_completed" ? "already" : "completed")}`);
+}
+
+export async function sealClosedKnowledgeSamplingPolicyForm(formData: FormData) {
+  const policyId = getOptionalFormString(formData, "policyId");
+  if (policyId) await sealClosedKnowledgeSamplingPolicyForAdmin(policyId);
+  redirect("/admin/knowledge/progress");
 }
 
 async function markFacebookCaptureExtractionFailed(input: { reviewId: string; actor: FacebookCaptureReviewActor; extractionError: string }) {
