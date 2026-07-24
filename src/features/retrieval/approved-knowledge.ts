@@ -58,7 +58,7 @@ export function toStateAwareKnowledgeBundleItem(result: KnowledgeSearchResult): 
       return {
         ...evidence,
         displayPolicy: visible ? "traveler_visible" : "fact_only",
-        sourceLabel: clip(evidence.sourceLabel),
+        sourceLabel: isTravelerSafeEvidenceText(evidence.sourceLabel) ? clip(evidence.sourceLabel) : "",
         collectedDate: evidence.collectedDate ? clip(evidence.collectedDate) : null,
         observedAt: clip(evidence.observedAt),
         url: visible ? safeHttpUrl(evidence.url) : null,
@@ -155,7 +155,7 @@ function projectPracticalDetails(details: Record<string, unknown>) {
   return Object.fromEntries(practicalDetailKeys.flatMap((key) => {
     const value = details[key];
     const values = typeof value === "string" ? [value] : Array.isArray(value) && value.every((item): item is string => typeof item === "string") ? value : [];
-    const bounded = values.map((item) => clip(item, key === "ordered_stops" ? 80 : maxFieldLength)).filter(Boolean).slice(0, key === "ordered_stops" ? 40 : 10);
+    const bounded = values.filter(isTravelerSafeEvidenceText).map((item) => clip(item, key === "ordered_stops" ? 80 : maxFieldLength)).filter(Boolean).slice(0, key === "ordered_stops" ? 40 : 10);
     if (bounded.length === 0) return [];
     return [[key, typeof value === "string" ? bounded[0]! : bounded]];
   }));
@@ -178,7 +178,7 @@ function safeHttpUrl(value: string | null) {
   if (!value) return null;
   try {
     const url = new URL(value);
-    return url.protocol === "http:" || url.protocol === "https:" ? url.href : null;
+    return (url.protocol === "http:" || url.protocol === "https:") && !url.username && !url.password ? url.href : null;
   } catch {
     return null;
   }
@@ -188,7 +188,7 @@ function isFacebookUrl(value: string | null) {
   if (!value) return false;
   try {
     const hostname = new URL(value).hostname.toLowerCase();
-    return hostname === "facebook.com" || hostname.endsWith(".facebook.com") || hostname === "fb.com" || hostname.endsWith(".fb.com") || hostname === "fb.watch" || hostname.endsWith(".fb.watch");
+    return hostname === "facebook.com" || hostname.endsWith(".facebook.com") || hostname === "fb.com" || hostname.endsWith(".fb.com") || hostname === "fb.me" || hostname.endsWith(".fb.me") || hostname === "fb.watch" || hostname.endsWith(".fb.watch");
   } catch {
     return false;
   }

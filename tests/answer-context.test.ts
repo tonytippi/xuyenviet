@@ -1382,7 +1382,7 @@ describe("answer context assembly", () => {
     expect(JSON.stringify(row?.sourceSnapshot)).not.toContain("traveler@example.com");
   });
 
-  test.each(["https://www.fb.com/private-post", "https://m.fb.com/private-post", "https://www.fb.watch/private-video"])("state-aware knowledge bundle redacts traveler-visible Facebook alias evidence: %s", async (url) => {
+  test.each(["https://www.fb.com/private-post", "https://m.fb.com/private-post", "https://fb.me/private-post", "https://www.fb.watch/private-video"])("state-aware knowledge bundle redacts traveler-visible Facebook alias evidence: %s", async (url) => {
     const { buildApprovedKnowledgePromptSection } = await import("@/features/retrieval/approved-knowledge");
     const section = buildApprovedKnowledgePromptSection([
       makeKnowledgeResult("facebook-alias-card", "Điểm dừng từ Facebook", {
@@ -1404,6 +1404,42 @@ describe("answer context assembly", () => {
 
     expect(section).not.toContain("https://example.com/provider-payload");
     expect(section).not.toContain("provider payload");
+  });
+
+  test("state-aware knowledge bundle removes sensitive practical details and source labels", async () => {
+    const { buildApprovedKnowledgePromptSection } = await import("@/features/retrieval/approved-knowledge");
+    const section = buildApprovedKnowledgePromptSection([
+      makeKnowledgeResult("sensitive-metadata-card", "Điểm dừng an toàn", {
+        practicalDetails: { parking_notes: "Gọi 0901234567", kid_notes: "email family@example.com", tips: "Kiểm tra giờ mở cửa" },
+        evidence: [{ evidenceId: "sensitive-label", sourceId: "source", supportLevel: "primary", displayPolicy: "fact_only", sourceLabel: "provider payload family@example.com", sourceType: "community", verificationStatus: "unverified", official: false, partner: false, collectedDate: null, observedAt: "2026-07-10T00:00:00.000Z", url: null, quote: null }],
+      }),
+    ]);
+
+    expect(section).toContain("Kiểm tra giờ mở cửa");
+    expect(section).not.toContain("0901234567");
+    expect(section).not.toContain("family@example.com");
+    expect(section).not.toContain("provider payload");
+  });
+
+  test("minimal source bundle retains selected trip, chat, and knowledge ahead of web results", async () => {
+    const { buildSourceBundlePromptSection } = await import("@/features/retrieval/source-bundle");
+    const section = buildSourceBundlePromptSection(createSourceBundle({
+      chatTripContext: {
+        tripProjectFacts: [{ field: "destination", value: "Huế", source: "trip_project" }],
+        chatFacts: [{ field: "budget", value: "10 triệu", source: "conversation" }, ...Array.from({ length: 29 }, (_, index) => ({ field: "notes" as const, value: `Chat ${index} ${"chi tiết ".repeat(40)}`, source: "conversation" as const }))],
+        conflicts: [],
+      },
+      knowledge: [makeKnowledgeResult("priority-card", "Kiến thức ưu tiên")],
+      web: [{ query: "Huế", title: "Web fallback", url: "https://example.com/web", snippet: "chi tiết ".repeat(1_000), provider: "tavily", providerScore: 0.8, checkedAt: new Date("2026-07-10T00:00:00.000Z"), sourceType: "official", confidence: "unverified", triggerReason: "no_active_knowledge", rank: 1 }],
+    }));
+
+    expect(section.length).toBeLessThanOrEqual(5_000);
+    expect(section).toContain('destination: "Huế"');
+    expect(section).toContain('budget: "10 triệu"');
+    expect(section).toContain("Kiến thức ưu tiên");
+    expect(section.indexOf('destination: "Huế"')).toBeLessThan(section.indexOf("Web fallback"));
+    expect(section.indexOf('budget: "10 triệu"')).toBeLessThan(section.indexOf("Web fallback"));
+    expect(section.indexOf("Kiến thức ưu tiên")).toBeLessThan(section.indexOf("Web fallback"));
   });
 
   test("knowledge provenance is unverified when projected evidence is unverified", async () => {

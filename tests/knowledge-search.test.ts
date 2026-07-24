@@ -229,6 +229,21 @@ describe("knowledge card state-model retrieval safety", () => {
     await expect(searchApprovedKnowledge("lexical-secret-token")).resolves.toEqual([]);
   });
 
+  test("does not project credential-bearing traveler-visible evidence URLs", async () => {
+    await createUser("credential-url-operator", ["operator"]);
+    const card = await createApprovedCardWithSource("credential-url-operator", "credential-url-card");
+    await testDb.update(sources).set({ url: "https://api-user:api-token@example.com/notice", canonicalUrl: "https://api-user:api-token@example.com/notice" }).where(eq(sources.id, "credential-url-card-source"));
+    const capture = await seedSourceCaptureVersion({ sourceId: "credential-url-card-source", captureKind: "url", rawText: "Bằng chứng công khai không được lộ thông tin đăng nhập." });
+    await seedKnowledgeCardEvidence({ cardId: card.id, sourceId: "credential-url-card-source", captureVersionId: capture.id, quoteText: "Bằng chứng công khai không được lộ thông tin đăng nhập.", displayPolicy: "traveler_visible" });
+
+    await enqueueAndProcessIndexWork(card.id);
+    const [result] = await (await import("@/features/knowledge/search")).searchApprovedKnowledge("Huế");
+
+    expect(result?.evidence).toEqual([expect.objectContaining({ displayPolicy: "fact_only", url: null, quote: null })]);
+    expect(JSON.stringify(result?.evidence)).not.toContain("api-user");
+    expect(JSON.stringify(result?.evidence)).not.toContain("api-token");
+  });
+
   test("refreshes an active projection after evidence becomes operator-only", async () => {
     await createUser("policy-refresh-operator", ["operator"]);
     const card = await createApprovedCardWithSource("policy-refresh-operator", "policy-refresh-card");
