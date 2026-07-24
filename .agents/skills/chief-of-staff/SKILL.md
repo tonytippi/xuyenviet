@@ -29,11 +29,12 @@ is complete only when its sprint status is `done` and every associated story is
   `--no-focus`. Never target the human's focused pane implicitly.
 - Start each worker with `herdr agent start <name> --kind opencode --pane
   <pane-id>`. Worker names must be unique and match Herdr's naming rules.
-- Submit work only with `herdr agent prompt <name> "..." --wait`. The
-  `prompt --wait` response is only a lifecycle signal, never a worker report
-  source. Before treating a wait result as success, read and retain the
-  worker's terminal output with `herdr agent read <name> --source
-  recent-unwrapped --lines 160`.
+- Submit work with `herdr agent prompt <name> "..."`, then wait explicitly for
+  `idle`, `done`, `blocked`, or `unknown`. A worker that has printed its final
+  report may become `idle` rather than `done`. The wait result is only a
+  lifecycle signal, never a worker report source. Before treating any wait
+  result as success, read and retain the worker's terminal output with `herdr
+  agent read <name> --source recent-unwrapped --lines 160`.
 - Every mutating worker must read, synchronize, and report the target entry in
   `sprint-status.yaml` before it finishes. The coordinator is read-only, but
   must use the most recent worker output as well as the file to select the next
@@ -154,18 +155,21 @@ wide caller pane and `down` for a narrow/tall caller pane, based on
 ```bash
 herdr pane split --current --direction right --cwd "$PWD" --no-focus
 herdr agent start <unique-name> --kind opencode --pane <returned-pane-id>
-herdr agent prompt <unique-name> "<stage prompt>" --wait --timeout 1800000
+herdr agent prompt <unique-name> "<stage prompt>"
+herdr agent wait <unique-name> --until idle --until done --until blocked --until unknown --timeout 1800000
 herdr agent read <unique-name> --source recent-unwrapped --lines 160
 ```
 
 Take `<returned-pane-id>` only from the JSON returned by `herdr pane split`.
-If the prompt wait fails, inspect the worker with `herdr agent get
-<unique-name>` and read its terminal output before deciding whether it
-completed or is blocked. A failed wait is a stop condition only when the final
-terminal report cannot be read and independently verified after the report
-retries and one applicable Autonomous Recovery attempt. If the worker reports
-`BLOCKED`, read its final report, diagnose the stated failure, and apply the
-Autonomous Recovery procedure before escalating.
+If the explicit wait reaches `idle` or `done`, immediately read and parse the
+worker's final terminal report. If it reaches `blocked` or `unknown`, or times
+out, inspect the worker with `herdr agent get <unique-name>` and read its
+terminal output before deciding whether it completed or needs recovery. A failed
+wait is a stop condition only when the final terminal report cannot be read and
+independently verified after the report retries and one applicable Autonomous
+Recovery attempt. If the worker reports `BLOCKED`, read its final report,
+diagnose the stated failure, and apply the Autonomous Recovery procedure before
+escalating.
 
 Every mutating worker prompt must require this final, machine-checkable report:
 
@@ -192,14 +196,18 @@ Accept the report only when it unambiguously contains exactly one semantic value
 for each required field: `RESULT`, `TARGET`, `SPRINT STATUS`, `SPRINT STATUS
 SYNCHRONIZED`, `SUMMARY`, and `BLOCKER`. Treat synonymous boolean wording such
 as `true`, `yes`, or `synchronized` as affirmative only for `SPRINT STATUS
-SYNCHRONIZED`; normalize known status spelling variants before comparison. Do
-not infer a required field from surrounding terminal output, a commit, git
-state, or the sprint file. Reject a report only when its meaning is ambiguous,
-a required semantic field is absent or contradictory, or its result and
-independently verified sprint status do not meet the stage requirements. After
-reading a mutating worker's final output, accept it only when `RESULT` is
-`SUCCESS`, `SPRINT STATUS SYNCHRONIZED` is affirmative, and the exact
-stage-appropriate final status is independently observed in `sprint-status.yaml`.
+SYNCHRONIZED`; normalize known status spelling variants before comparison. For
+`RESULT`, accept `SUCCESS` or an unambiguous affirmative completion statement,
+such as `Committed final Story 5.2 repair successfully.` Normalize either form
+to semantic success only when it contains no failure, block, error, incomplete,
+pending, cannot, or unresolved qualification. Do not infer a required field
+from surrounding terminal output, a commit, git state, or the sprint file.
+Reject a report only when its meaning is ambiguous, a required semantic field is
+absent or contradictory, or its result and independently verified sprint status
+do not meet the stage requirements. After reading a mutating worker's final
+output, accept it only when `RESULT` is semantically successful, `SPRINT STATUS
+SYNCHRONIZED` is affirmative, and the exact stage-appropriate final status is
+independently observed in `sprint-status.yaml`.
 Save the normalized complete report as `last_worker_result` before creating
 another pane.
 A worker that cannot synchronize the expected status must return `BLOCKED`; do
