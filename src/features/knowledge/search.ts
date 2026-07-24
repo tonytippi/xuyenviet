@@ -394,7 +394,7 @@ async function loadActiveSupportingEvidence(db: Pick<KnowledgeSearchDb, "select"
 
 function toKnowledgeSearchEvidence(row: ActiveSupportingEvidenceRow): KnowledgeSearchEvidence {
   const sourceUrl = safeHttpUrl(row.sourceUrl) ?? safeHttpUrl(row.canonicalUrl);
-  const travelerVisible = row.displayPolicy === "traveler_visible" && row.sourceKind !== "facebook" && Boolean(sourceUrl) && row.sourceLabel && row.sourceType && row.verificationStatus && row.official !== null && row.partner !== null && isTravelerSafeEvidenceText(row.quoteText);
+  const travelerVisible = row.displayPolicy === "traveler_visible" && row.sourceKind !== "facebook" && !isFacebookUrl(sourceUrl) && Boolean(sourceUrl) && row.sourceLabel && row.sourceType && row.verificationStatus && row.official !== null && row.partner !== null && isTravelerSafeEvidenceText(row.quoteText);
 
   return {
     evidenceId: row.evidenceId,
@@ -421,9 +421,19 @@ function safeHttpUrl(value: string | null) {
   if (!value) return null;
   try {
     const url = new URL(value);
-    return url.protocol === "http:" || url.protocol === "https:" ? url.href : null;
+    return (url.protocol === "http:" || url.protocol === "https:") && !url.username && !url.password ? url.href : null;
   } catch {
     return null;
+  }
+}
+
+function isFacebookUrl(value: string | null) {
+  if (!value) return false;
+  try {
+    const hostname = new URL(value).hostname.toLowerCase().replace(/\.+$/, "");
+    return hostname === "facebook.com" || hostname.endsWith(".facebook.com") || hostname === "fb.com" || hostname.endsWith(".fb.com") || hostname === "fb.me" || hostname.endsWith(".fb.me") || hostname === "fb.watch" || hostname.endsWith(".fb.watch");
+  } catch {
+    return false;
   }
 }
 

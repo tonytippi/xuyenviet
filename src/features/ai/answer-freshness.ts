@@ -9,6 +9,8 @@ export function ensureAiAskFreshnessWarning(content: string, sourceBundle: Await
   const caveatWarningRequired = caveatOnlyKnowledge.length > 0;
   const externalVerificationRequired = sourceBundle.retrievalDecision.webSearchTriggered
     && (sourceBundle.warnings.includes("web_search_load_failed") || sourceBundle.warnings.includes("web_search_low_quality"));
+  const successfulWebFallbackVerificationRequired = sourceBundle.web.length > 0
+    && sourceBundle.retrievalDecision.webSearchTriggerReasons.some(requiresWebFallbackVerificationGuidance);
 
   if (externalVerificationRequired) {
     const fallback = `Cảnh báo cần kiểm tra\nMình chưa thể xác minh thông tin hiện tại từ nguồn bên ngoài. Hãy xác nhận trực tiếp với nguồn chính thức hoặc nhà cung cấp trước khi đi, hành động hoặc đặt dịch vụ.${caveatWarningRequired ? ` ${formatCaveatVerificationInstruction(caveatOnlyKnowledge)}` : ""}`;
@@ -25,7 +27,7 @@ export function ensureAiAskFreshnessWarning(content: string, sourceBundle: Await
     return { content: fallback, appendedWarning: fallback, replacedUnsafeContent: true };
   }
 
-  if (!freshnessWarningRequired && !caveatWarningRequired && !externalVerificationRequired) {
+  if (!freshnessWarningRequired && !caveatWarningRequired && !externalVerificationRequired && !successfulWebFallbackVerificationRequired) {
     return { content, appendedWarning: "", replacedUnsafeContent: false };
   }
 
@@ -36,8 +38,10 @@ export function ensureAiAskFreshnessWarning(content: string, sourceBundle: Await
   const hasCaveatWarning = Boolean(warningHeading)
     && /không dùng.{0,80}(?:chốt lịch trình|quyết định lịch trình|khuyến nghị đã được xác nhận)/i.test(warningBody)
     && caveatOnlyKnowledge.every((item) => warningBody.includes(getVerificationTarget(item)));
+  const hasSuccessfulWebFallbackVerificationGuidance = /nguồn web bên ngoài này chưa được xuyenviet xác minh/i.test(normalizedContent)
+    && /nguồn chính thức hoặc nhà cung cấp/i.test(normalizedContent);
 
-  if ((!freshnessWarningRequired || hasFreshnessWarning) && (!caveatWarningRequired || hasCaveatWarning) && !externalVerificationRequired) {
+  if ((!freshnessWarningRequired || hasFreshnessWarning) && (!caveatWarningRequired || hasCaveatWarning) && (!successfulWebFallbackVerificationRequired || hasSuccessfulWebFallbackVerificationGuidance) && !externalVerificationRequired) {
     return { content, appendedWarning: "", replacedUnsafeContent: false };
   }
 
@@ -47,6 +51,9 @@ export function ensureAiAskFreshnessWarning(content: string, sourceBundle: Await
   }
   if (caveatWarningRequired && !hasCaveatWarning) {
     warnings.push(`Không dùng thông tin này để chốt lịch trình. ${formatCaveatVerificationInstruction(caveatOnlyKnowledge)}`);
+  }
+  if (successfulWebFallbackVerificationRequired && !hasSuccessfulWebFallbackVerificationGuidance) {
+    warnings.push("Nguồn web bên ngoài này chưa được XuyenViet xác minh. Hãy xác nhận trực tiếp với nguồn chính thức hoặc nhà cung cấp trước khi đi, hành động hoặc đặt dịch vụ.");
   }
   if (externalVerificationRequired) {
     warnings.push("Mình chưa thể xác minh thông tin hiện tại từ nguồn bên ngoài. Hãy xác nhận trực tiếp với nguồn chính thức hoặc nhà cung cấp trước khi đi, hành động hoặc đặt dịch vụ.");
@@ -70,7 +77,16 @@ function getVerificationTarget(item: Awaited<ReturnType<typeof assembleContextPr
 export function requiresAiAskAnswerFinalization(sourceBundle: Awaited<ReturnType<typeof assembleContextPrioritySourceBundle>>) {
   return sourceBundle.warnings.includes("web_search_load_failed")
     || sourceBundle.warnings.includes("web_search_low_quality")
+    || (sourceBundle.web.length > 0 && sourceBundle.retrievalDecision.webSearchTriggerReasons.some(requiresWebFallbackVerificationGuidance))
     || sourceBundle.knowledge.some((item) => item.policy === "caveat_only" || item.knowledgeState === "uncertain" || item.verificationState === "required" || (item.policy === "contextual_use" && item.knowledgeState === "conditional" && item.conditions.length > 0));
+}
+
+function requiresWebFallbackVerificationGuidance(reason: string) {
+  return reason === "no_active_knowledge"
+    || reason === "active_knowledge_unavailable"
+    || reason === "insufficient_active_knowledge"
+    || reason === "excluded_conflict_candidate"
+    || reason === "excluded_verification_required_candidate";
 }
 
 function hasEveryMaterialCondition(content: string, conditions: string[]) {

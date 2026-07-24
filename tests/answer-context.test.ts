@@ -1382,7 +1382,7 @@ describe("answer context assembly", () => {
     expect(JSON.stringify(row?.sourceSnapshot)).not.toContain("traveler@example.com");
   });
 
-  test.each(["https://www.fb.com/private-post", "https://m.fb.com/private-post", "https://www.fb.watch/private-video"])("state-aware knowledge bundle redacts traveler-visible Facebook alias evidence: %s", async (url) => {
+  test.each(["https://www.fb.com/private-post", "https://m.fb.com/private-post", "https://fb.me/private-post", "https://www.fb.watch/private-video"])("state-aware knowledge bundle redacts traveler-visible Facebook alias evidence: %s", async (url) => {
     const { buildApprovedKnowledgePromptSection } = await import("@/features/retrieval/approved-knowledge");
     const section = buildApprovedKnowledgePromptSection([
       makeKnowledgeResult("facebook-alias-card", "Điểm dừng từ Facebook", {
@@ -1392,6 +1392,36 @@ describe("answer context assembly", () => {
 
     expect(section).not.toContain(url);
     expect(section).not.toContain("Nội dung Facebook không được hiển thị");
+  });
+
+  test("state-aware knowledge bundle excludes trailing-dot Facebook evidence from prompt and provenance", async () => {
+    await createTestUser("user-1");
+    const { conversation, message } = await createConversationWithUserMessage({ userId: "user-1" });
+    const [assistantMessage] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "assistant", content: "Gợi ý an toàn." }).returning({ id: messages.id });
+    const { buildApprovedKnowledgePromptSection } = await import("@/features/retrieval/approved-knowledge");
+    const { persistAssistantAnswerProvenance } = await import("@/features/retrieval/provenance");
+    const urls = ["https://facebook.com./legacy-post", "https://fb.me./legacy-post", "https://fb.watch./legacy-video"];
+    const knowledge = makeKnowledgeResult("trailing-dot-facebook-card", "Điểm dừng từ nguồn cũ", {
+      evidence: urls.map((url, index) => ({ evidenceId: `trailing-dot-facebook-${index}`, sourceId: `facebook-source-${index}`, supportLevel: "primary" as const, displayPolicy: "traveler_visible" as const, sourceLabel: "Facebook", sourceType: "community", verificationStatus: "unverified" as const, official: false, partner: false, collectedDate: null, observedAt: "2026-07-10T00:00:00.000Z", url, quote: "Nội dung Facebook không được hiển thị" })),
+    });
+    const section = buildApprovedKnowledgePromptSection([knowledge]);
+
+    expect(section).not.toContain("Nội dung Facebook không được hiển thị");
+    for (const url of urls) expect(section).not.toContain(url);
+
+    await persistAssistantAnswerProvenance(testDb, {
+      userId: "user-1",
+      conversationId: conversation.id,
+      userMessageId: message.id,
+      assistantMessageId: assistantMessage.id,
+      promptSection: section,
+      sourceBundle: createSourceBundle({ knowledge: [knowledge] }),
+    });
+    const [row] = await testDb.select().from(assistantResponseProvenance).where(eq(assistantResponseProvenance.sourceReferenceId, knowledge.id));
+    const snapshot = JSON.stringify(row?.sourceSnapshot);
+
+    expect(snapshot).not.toContain("Nội dung Facebook không được hiển thị");
+    for (const url of urls) expect(snapshot).not.toContain(url);
   });
 
   test("state-aware knowledge bundle redacts spaced provider payload markers from traveler-visible evidence", async () => {
@@ -1404,6 +1434,42 @@ describe("answer context assembly", () => {
 
     expect(section).not.toContain("https://example.com/provider-payload");
     expect(section).not.toContain("provider payload");
+  });
+
+  test("state-aware knowledge bundle removes sensitive practical details and source labels", async () => {
+    const { buildApprovedKnowledgePromptSection } = await import("@/features/retrieval/approved-knowledge");
+    const section = buildApprovedKnowledgePromptSection([
+      makeKnowledgeResult("sensitive-metadata-card", "Điểm dừng an toàn", {
+        practicalDetails: { parking_notes: "Gọi 0901234567", kid_notes: "email family@example.com", tips: "Kiểm tra giờ mở cửa" },
+        evidence: [{ evidenceId: "sensitive-label", sourceId: "source", supportLevel: "primary", displayPolicy: "fact_only", sourceLabel: "provider payload family@example.com", sourceType: "community", verificationStatus: "unverified", official: false, partner: false, collectedDate: null, observedAt: "2026-07-10T00:00:00.000Z", url: null, quote: null }],
+      }),
+    ]);
+
+    expect(section).toContain("Kiểm tra giờ mở cửa");
+    expect(section).not.toContain("0901234567");
+    expect(section).not.toContain("family@example.com");
+    expect(section).not.toContain("provider payload");
+  });
+
+  test("minimal source bundle retains selected trip, chat, and knowledge ahead of web results", async () => {
+    const { buildSourceBundlePromptSection } = await import("@/features/retrieval/source-bundle");
+    const section = buildSourceBundlePromptSection(createSourceBundle({
+      chatTripContext: {
+        tripProjectFacts: [{ field: "destination", value: "Huế", source: "trip_project" }],
+        chatFacts: [{ field: "budget", value: "10 triệu", source: "conversation" }, ...Array.from({ length: 29 }, (_, index) => ({ field: "notes" as const, value: `Chat ${index} ${"chi tiết ".repeat(40)}`, source: "conversation" as const }))],
+        conflicts: [],
+      },
+      knowledge: [makeKnowledgeResult("priority-card", "Kiến thức ưu tiên")],
+      web: [{ query: "Huế", title: "Web fallback", url: "https://example.com/web", snippet: "chi tiết ".repeat(1_000), provider: "tavily", providerScore: 0.8, checkedAt: new Date("2026-07-10T00:00:00.000Z"), sourceType: "official", confidence: "unverified", triggerReason: "no_active_knowledge", rank: 1 }],
+    }));
+
+    expect(section.length).toBeLessThanOrEqual(5_000);
+    expect(section).toContain('destination: "Huế"');
+    expect(section).toContain('budget: "10 triệu"');
+    expect(section).toContain("Kiến thức ưu tiên");
+    expect(section.indexOf('destination: "Huế"')).toBeLessThan(section.indexOf("Web fallback"));
+    expect(section.indexOf('budget: "10 triệu"')).toBeLessThan(section.indexOf("Web fallback"));
+    expect(section.indexOf("Kiến thức ưu tiên")).toBeLessThan(section.indexOf("Web fallback"));
   });
 
   test("knowledge provenance is unverified when projected evidence is unverified", async () => {
@@ -1465,6 +1531,24 @@ describe("answer context assembly", () => {
     });
     expect(JSON.stringify(item)).not.toContain("facebook.com");
     expect(JSON.stringify(item)).not.toContain("Không hiển thị");
+  });
+
+  test("does not project credential-bearing persisted URLs into traveler provenance", async () => {
+    const { formatAssistantMessageProvenance } = await import("@/features/retrieval/provenance");
+
+    const [item] = formatAssistantMessageProvenance([{
+      id: "credential-provenance",
+      sourceCategory: "web",
+      rank: 1,
+      retrievalScore: null,
+      sourceType: "official",
+      verificationStatus: "unverified",
+      usedInPrompt: true,
+      citedInAnswer: false,
+      sourceSnapshot: { title: "Nguồn web", url: "https://traveler:secret@example.com/private" },
+    }]);
+
+    expect(item?.url).toBeNull();
   });
 
   test("keeps persisted and historical state vocabulary and rejects Facebook aliases and unsafe legacy evidence", async () => {
@@ -1927,7 +2011,7 @@ describe("answer context assembly", () => {
     expect(systemPrompt.indexOf("4. Nguồn web chưa xác minh")).toBeLessThan(systemPrompt.indexOf("5. Suy luận tổng quát"));
   });
 
-  test("stream route does not append freshness warning for non-freshness web fallback", async () => {
+  test("stream route finalizes successful absent-knowledge web fallback with verification guidance", async () => {
     await createTestUser("user-1");
     await seedAnswerModel();
     const { conversation } = await createConversationWithUserMessage({ userId: "user-1" });
@@ -1964,11 +2048,11 @@ describe("answer context assembly", () => {
       .map((line) => JSON.parse(line) as { type: string; content?: string; assistantMessage?: { content?: string } });
     const doneEvent = events.find((event) => event.type === "done");
 
-    expect(events).not.toEqual(expect.arrayContaining([
-      expect.objectContaining({ type: "delta", content: expect.stringContaining("Cảnh báo cần kiểm tra") }),
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "delta", content: expect.stringContaining("Nguồn web bên ngoài này chưa được XuyenViet xác minh") }),
     ]));
     expect(doneEvent?.assistantMessage?.content).toContain("Nên đi 5 ngày.");
-    expect(doneEvent?.assistantMessage?.content).not.toContain("Cảnh báo cần kiểm tra");
+    expect(doneEvent?.assistantMessage?.content).toContain("Nguồn web bên ngoài này chưa được XuyenViet xác minh");
   });
 
   test("stream route persists retrieval decision and answer provenance for assistant answers", async () => {
@@ -2023,7 +2107,7 @@ describe("answer context assembly", () => {
     expect(doneEvent?.assistantMessage?.provenance?.map((item) => item.sourceCategory)).toEqual(["trip_context", "chat_context", "knowledge", "web", "general"]);
     expect(doneEvent?.assistantMessage?.provenance).toEqual(expect.arrayContaining([
       expect.objectContaining({ sourceCategory: "knowledge", title: expect.stringContaining("Bãi đỗ xe an toàn ở Huế"), confidenceLabel: "official", verificationStatus: "verified" }),
-      expect.objectContaining({ sourceCategory: "web", title: "Nguồn web chưa xác minh", confidenceLabel: "chưa xác minh", verificationStatus: "unverified", url: null, freshnessSensitive: true }),
+      expect.objectContaining({ sourceCategory: "web", title: `Cổng thông tin Huế ${"giá vé".repeat(30)}`, confidenceLabel: "chưa xác minh", verificationStatus: "unverified", url: "https://hue.gov.vn/ticket", freshnessSensitive: true }),
       expect.objectContaining({ sourceCategory: "general", title: "Suy luận tổng quát của AI", confidenceLabel: "suy luận chưa xác minh" }),
     ]));
     expect(assistantMessage).toBeDefined();
@@ -2043,6 +2127,10 @@ describe("answer context assembly", () => {
       knowledgePolicySnapshot: expect.objectContaining({ selectedCardIds: ["ai-ask-safe-card"] }),
     });
     expect(decisions[0].webSearchTriggerReasons).toEqual(expect.arrayContaining(["freshness_sensitive_request", "active_knowledge_may_be_stale"]));
+    expect(decisions[0].knowledgePolicySnapshot).toMatchObject({
+      selectedCardIds: ["ai-ask-safe-card"],
+      selectedPolicies: expect.arrayContaining([expect.objectContaining({ cardId: "ai-ask-safe-card", usePolicy: "contextual_use", knowledgeState: "community_observation" })]),
+    });
     expect(provenance.map((row) => row.sourceCategory)).toEqual(["trip_context", "chat_context", "knowledge", "web", "general"]);
     expect(provenance.every((row) => row.usedInPrompt)).toBe(true);
     expect(provenance.every((row) => row.citedInAnswer === false)).toBe(true);
@@ -2092,17 +2180,18 @@ describe("answer context assembly", () => {
     });
 
     expect(inserted).toEqual(expect.arrayContaining([
-      expect.objectContaining({ sourceCategory: "web", confidenceLabel: "chưa xác minh", verificationStatus: "unverified", freshnessSensitive: true }),
+      expect.objectContaining({ sourceCategory: "web", title: "Bảng giá", url: "https://example.com/price", confidenceLabel: "chưa xác minh", verificationStatus: "unverified", freshnessSensitive: true }),
     ]));
     const [webRow] = await testDb.select().from(assistantResponseProvenance).where(eq(assistantResponseProvenance.sourceCategory, "web"));
     const snapshot = JSON.stringify(webRow?.sourceSnapshot);
     expect(snapshot).toContain("persistedWebSearchResultId");
     expect(snapshot).not.toContain("Giá hiện tại?");
-    expect(snapshot).not.toContain("Bảng giá");
-    expect(snapshot).not.toContain("example.com/price");
+    expect(snapshot).toContain("Bảng giá");
+    expect(snapshot).toContain("https://example.com/price");
     expect(snapshot).not.toContain("Tham khảo.");
     expect(snapshot).not.toContain("tavily");
     expect(snapshot).not.toContain("providerScore");
+    expect(snapshot).toContain("persistedWebSearchResultId");
   });
 
   test("failed or low-confidence web fallback forces a deterministic verification notice", async () => {
@@ -2120,6 +2209,19 @@ describe("answer context assembly", () => {
     expect(result.content).toContain("nguồn chính thức hoặc nhà cung cấp");
     expect(result.replacedUnsafeContent).toBe(true);
     expect(result.content).not.toContain("Đây là gợi ý tổng quát.");
+  });
+
+  test.each(["no_active_knowledge", "insufficient_active_knowledge", "excluded_conflict_candidate", "excluded_verification_required_candidate"] as const)("successful %s web fallback is finalized with verification guidance", async (reason) => {
+    const { ensureAiAskFreshnessWarning, requiresAiAskAnswerFinalization } = await import("@/features/ai/answer-freshness");
+    const sourceBundle = createSourceBundle({
+      retrievalDecision: { ...createSourceBundle().retrievalDecision, webSearchTriggered: true, webSearchTriggerReasons: [reason] },
+      web: [{ query: "Huế", title: "Nguồn web", url: "https://example.com/source", snippet: "Tham khảo", provider: "tavily", providerScore: 0.8, checkedAt: new Date("2026-07-09T10:00:00.000Z"), sourceType: "official", confidence: "unverified", triggerReason: reason, rank: 1 }],
+    });
+    const result = ensureAiAskFreshnessWarning("Đây là gợi ý tổng quát.", sourceBundle);
+
+    expect(requiresAiAskAnswerFinalization(sourceBundle)).toBe(true);
+    expect(result.content).toContain("Nguồn web bên ngoài này chưa được XuyenViet xác minh");
+    expect(result.content).toContain("nguồn chính thức hoặc nhà cung cấp");
   });
 
   test("failed external fallback replaces caveat-only answers with both required notices", async () => {

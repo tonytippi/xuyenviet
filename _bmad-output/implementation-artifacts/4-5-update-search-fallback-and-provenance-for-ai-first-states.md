@@ -4,7 +4,7 @@
 baseline_commit: 06d0bc8935d44347124b59f7a77d9f76b0222bce
 ---
 
-Status: done
+Status: review
 
 ## Story
 
@@ -47,6 +47,7 @@ so that changing road-trip details are handled honestly.
 - [x] [Review][Patch] Include the explicit external-verification failure notice in caveat-only fallback answers [src/features/ai/answer-freshness.ts:13] — the replacement includes the AC 3 external-verification failure notice and each caveat-only verification target.
 - [x] [Review][Patch] Persist available AI Gateway request metadata for AI Ask usage events [src/features/ai/gateway.ts:361] — only bounded request identifiers from allowlisted headers or completion IDs are retained in `ai_usage_events`; raw payloads remain excluded.
 - [x] [Review][Patch] Fail closed on unrepresentable computed usage costs [src/features/ai/models.ts:151] — arithmetic and aggregate costs outside PostgreSQL integer or JavaScript-safe bounds persist as nullable costs with `missing_cost`, without aborting assistant/provenance persistence.
+- [x] [Review][Patch] Persist safe web source title and URL in provenance snapshots [src/features/retrieval/provenance.ts:161] — persisted web provenance now retains bounded non-sensitive titles and safe HTTP(S), non-Facebook URLs so traveler trust UI can render the captured source without reloading provider data.
 
 ## Dev Notes
 
@@ -90,6 +91,8 @@ gpu4ai/gpt-5.6-terra-review
 - 2026-07-23: Repaired review findings: production retrieval now propagates only safe exclusion aggregates into fallback decisions, web provenance snapshots retain only stable linkage and safe metadata, and unscored provider results fail as low quality. Verified with `pnpm test:run tests/web-search-adapter.test.ts tests/answer-context.test.ts` (88/88) and `pnpm typecheck`.
 - 2026-07-23: Repaired final permitted findings: selected caveat-only, uncertain, and verification-required knowledge now forces safe web fallback; incomplete selected-model pricing is classified as `missing_pricing`. Verified with `pnpm test:run tests/answer-context.test.ts tests/ai-usage-events.test.ts tests/web-search-adapter.test.ts` (96/96), `pnpm typecheck`, and `git diff --check`.
 - 2026-07-23: Repaired the final AC 3/4 findings: failed or low-quality web fallback now replaces unsupported model claims before streaming/persistence, including caveat-only verification targets; AI Ask usage safely retains allowlisted provider request IDs; unrepresentable cost calculations persist as `missing_cost`. Verified with `pnpm test:run tests/answer-context.test.ts tests/ai-ask-shell.test.ts tests/ai-usage-events.test.ts tests/ai-models.test.ts tests/web-search-adapter.test.ts` (189/189), `pnpm typecheck`, and `git diff --check`.
+- 2026-07-24: Repaired Epic 4 review finding: newly persisted web provenance snapshots retain only safe title and URL details alongside stable linkage, allowing traveler trust UI to show the captured web source without retaining query, snippets, raw content, provider identity, or score. Verified with `pnpm test:run tests/answer-context.test.ts` (86/86), `pnpm typecheck`, and `git diff --check`.
+- 2026-07-24: Repaired final Epic 4 findings assigned to Story 4.5: credential-bearing web URLs are rejected during provider normalization, persisted-provenance projection, and traveler UI rendering; successful fallback for absent, sparse, or excluded active knowledge now receives deterministic external-verification guidance before streaming and persistence. Verified with `pnpm test:run tests/web-search-adapter.test.ts tests/answer-context.test.ts tests/ai-ask-shell.test.ts` (181/181), `pnpm typecheck`, `pnpm lint` (3 pre-existing warnings), and `git diff --check`.
 
 ### File List
 
@@ -107,6 +110,7 @@ gpu4ai/gpt-5.6-terra-review
 - tests/ai-ask-shell.test.ts
 - tests/ai-usage-events.test.ts
 - tests/answer-context.test.ts
+- tests/ai-ask-shell.test.ts
 - tests/web-search-adapter.test.ts
 - _bmad-output/implementation-artifacts/4-5-update-search-fallback-and-provenance-for-ai-first-states.md
 - _bmad-output/implementation-artifacts/sprint-status.yaml
@@ -120,3 +124,6 @@ gpu4ai/gpt-5.6-terra-review
 - 2026-07-23: Final permitted review found four actionable AC 3/4 safety and usage-persistence findings; status synchronized to in-progress for coordinator repair.
 - 2026-07-23: Fixed the four final Story 4.5 findings; status synchronized to review.
 - 2026-07-23: Final repair commit 05060b32338eec88918e4a05a05c91df97657749 verified; status synchronized to done.
+- 2026-07-24: Fixed the Epic 4 web provenance snapshot finding; status synchronized to review.
+- 2026-07-24: Supplied repair commit 956357d5122b4756ce72c509f4b48545b9e3c0cb verified; status synchronized to done.
+- 2026-07-24: Final Epic 4 repair pass fixed the credential-bearing URL and successful-fallback verification-guidance findings; status synchronized to review.

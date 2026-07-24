@@ -29,6 +29,7 @@ export type WebSearchTriggerReason =
 
 export type SafeKnowledgePolicySummary = {
   selectedCardIds: string[];
+  selectedPolicies?: Array<{ cardId: string; contentVersion: number; knowledgeState: string; verificationState: string; usePolicy: KnowledgeSearchResult["policy"] }>;
   selectedPolicyCounts: { contextualUse: number; caveatOnly: number };
   excludedPolicyCounts: { conflict: number; verificationRequired: number; other: number };
   excludedReasonCodes: string[];
@@ -270,6 +271,13 @@ export function decideWebSearchFallback({
   const reasons: WebSearchTriggerReason[] = [];
   const knowledgePolicySummary: SafeKnowledgePolicySummary = {
     selectedCardIds: knowledge.map((result) => result.id),
+    selectedPolicies: knowledge.map((result) => ({
+      cardId: result.id,
+      contentVersion: result.contentVersion,
+      knowledgeState: result.knowledgeState,
+      verificationState: result.verificationState,
+      usePolicy: result.policy,
+    })),
     selectedPolicyCounts: {
       contextualUse: knowledge.filter((result) => result.policy === "contextual_use").length,
       caveatOnly: knowledge.filter((result) => result.policy === "caveat_only").length,
@@ -507,15 +515,10 @@ function buildCompactedSourceBundlePromptSection(bundle: ContextPrioritySourceBu
   const section = lines.join("\n");
   return section.length <= maxSourceBundleSectionLength
     ? section
-    : buildMinimalSourceBundlePromptSection(bundle.warnings, bundle.retrievalDecision, bundle.web.slice(0, 1), bundle.chatTripContext);
+    : buildMinimalSourceBundlePromptSection(bundle);
 }
 
-function buildMinimalSourceBundlePromptSection(
-  warnings: SourceBundleWarning[],
-  decision?: RetrievalDecision,
-  web: NormalizedWebSearchResult[] = [],
-  chatTripContext?: ContextPrioritySourceBundle["chatTripContext"],
-) {
+function buildMinimalSourceBundlePromptSection(bundle: ContextPrioritySourceBundle) {
   const lines = [
     "Gói nguồn ưu tiên cho AI Ask",
     "BEGIN_CONTEXT_PRIORITY_SOURCE_BUNDLE",
@@ -525,15 +528,21 @@ function buildMinimalSourceBundlePromptSection(
     "Nguồn web luôn là nguồn ngoài/chưa xác minh cho đến khi được duyệt thành kiến thức Xuyên Việt; nguồn community/Facebook không được coi là chính thức nếu metadata không nói official/partner qua nguồn đã duyệt.",
   ];
 
-  if (decision) {
-    appendRetrievalDecisionSection(lines, decision);
-  }
+  const context = selectAllowlistedContext(bundle.chatTripContext);
+  appendFactSection(lines, "1. Ngữ cảnh dự án chuyến đi đã chọn", context.tripProjectFacts.slice(0, 1));
+  appendFactSection(lines, "2. Ngữ cảnh phiên chat hiện tại", context.chatFacts.slice(0, 1));
+  appendFamilyGuidance(lines, context);
+  appendConflictSection(lines, context.conflicts.slice(0, 1));
+  appendKnowledgeSection(lines, bundle.knowledge.filter(isFactualItineraryPremise).slice(0, 1));
+  appendRetrievalDecisionSection(lines, bundle.retrievalDecision);
+  appendWarningSection(lines, bundle.warnings);
 
-  appendWarningSection(lines, warnings);
-  if (chatTripContext) {
-    appendFamilyGuidance(lines, chatTripContext);
+  const footer = "\n5. Suy luận tổng quát: chỉ dùng sau các nguồn trên; phải nói rõ khi câu trả lời chỉ là gợi ý tổng quát.\nEND_CONTEXT_PRIORITY_SOURCE_BUNDLE";
+  const withWeb = [...lines];
+  appendWebSection(withWeb, bundle.web.slice(0, 1), bundle.warnings);
+  if (`${withWeb.join("\n")}${footer}`.length <= maxSourceBundleSectionLength) {
+    lines.push(...withWeb.slice(lines.length));
   }
-  appendWebSection(lines, web, warnings);
   lines.push("5. Suy luận tổng quát: chỉ dùng sau các nguồn trên; phải nói rõ khi câu trả lời chỉ là gợi ý tổng quát.");
   lines.push("END_CONTEXT_PRIORITY_SOURCE_BUNDLE");
 
@@ -542,7 +551,6 @@ function buildMinimalSourceBundlePromptSection(
     return section;
   }
 
-  const footer = "\n5. Suy luận tổng quát: chỉ dùng sau các nguồn trên; phải nói rõ khi câu trả lời chỉ là gợi ý tổng quát.\nEND_CONTEXT_PRIORITY_SOURCE_BUNDLE";
   const body = section.endsWith(footer) ? section.slice(0, -footer.length) : section;
   section = `${clip(body, maxSourceBundleSectionLength - footer.length)}${footer}`;
   return section.length <= maxSourceBundleSectionLength ? section : section.slice(0, maxSourceBundleSectionLength);

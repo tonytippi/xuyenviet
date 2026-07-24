@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { aiGatewayModels, aiUsageEvents, answerUsefulnessFeedback, assistantResponseProvenance, assistantRetrievalDecisions, conversations, messageImageAttachments, messages, tripProjects, users } from "@/db/schema";
 import type { AnswerAnnotation } from "@/features/ai/answer-annotations";
 import type { AnswerEntityDescriptor } from "@/features/ai/ai-ask-composer";
+import type { AssistantMessageProvenanceItem } from "@/features/retrieval/provenance";
 
 import { testDb } from "./helpers/db";
 
@@ -929,6 +930,32 @@ describe("AI Ask structured answer rendering", () => {
     expect(html).toContain("Đây là gợi ý tổng quát, chưa dùng nguồn tuyển chọn.");
     expect(html).not.toContain("source-chip");
     expect(html).not.toContain("[1]");
+  });
+
+  test("does not render credential-bearing provenance links", async () => {
+    const { AssistantProvenanceBlock } = await import("@/features/ai/ai-ask-composer");
+    const provenance: AssistantMessageProvenanceItem[] = [{
+      id: "credential-url",
+      rank: 1,
+      sourceCategory: "web",
+      title: "Nguồn web",
+      sourceType: "official",
+      url: "https://traveler:secret@example.com/private",
+      checkedAt: null,
+      confidenceLabel: "chưa xác minh",
+      verificationStatus: "unverified",
+      usedInPrompt: true,
+      citedInAnswer: false,
+      retrievalScore: null,
+      freshnessSensitive: false,
+      evidence: [{ sourceLabel: "Bằng chứng", sourceType: "official", url: "https://traveler:secret@example.com/evidence", quote: null }],
+    }];
+
+    const html = renderToStaticMarkup(createElement(AssistantProvenanceBlock, { provenance }));
+
+    expect(html).not.toContain("traveler:secret@");
+    expect(html).not.toContain("Mở nguồn tham khảo");
+    expect(html).not.toContain("Mở nguồn");
   });
 
   test("omits answer navigation for unstructured content and namespaces repeated headings", async () => {

@@ -211,6 +211,19 @@ describe("web search adapter", () => {
     expect(results).toEqual([]);
   });
 
+  test("rejects credential-bearing provider URLs before capture", async () => {
+    const { normalizeTavilyResults } = await import("@/features/retrieval/web-search");
+
+    const results = normalizeTavilyResults({
+      payload: { results: [{ title: "Credential URL", url: "https://traveler:secret@example.com/private", content: "Có nội dung", score: 0.8 }] },
+      query: "Huế",
+      triggerReason: "no_active_knowledge",
+      checkedAt: new Date("2026-07-09T10:00:00.000Z"),
+    });
+
+    expect(results).toEqual([]);
+  });
+
   test("captures normalized result rows idempotently linked to the traveler turn without raw provider payloads", async () => {
     const { conversationId, userMessageId } = await seedTurn();
     const { captureWebSearchResults, normalizeTavilyResults } = await import("@/features/retrieval/web-search");
