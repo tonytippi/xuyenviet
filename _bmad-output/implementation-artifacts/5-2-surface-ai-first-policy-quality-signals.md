@@ -61,6 +61,8 @@ so that I can prioritize suppression, verification, or stricter sampling before 
 - [x] [Review][Patch] Keep verification recommendations out of sampling disposition lookup [src/features/feedback/quality-dashboard.ts:279] — The dashboard loads `sampling` and `verification` recommendations into one version-fenced candidate set. A `verify_first` recommendation for the same policy/card/version can therefore turn a cohort member with no sampling recommendation into `pending`; it can also consume the global 100-row limit ahead of actual sampling dispositions. This violates the required distinction between unselected and selected-pending sampling work and can misstate an operator's sampling signal. Query/associate only `reason = "sampling"` for sampling outcomes; read verification recommendations separately only if required for current verification signals. [high; substantial risk]
 - [x] [Review][Patch] Preserve diagnostics for every prioritized actionable cohort [src/features/feedback/quality-dashboard.ts:271] — Policies are prioritized suppressed/escalated-first, but the globally capped member query is ordered by opaque `policyId`. An earlier active policy with 51 members can consume the entire read and cause a later suppressed/escalated policy to be omitted from `cohorts`, even though it is within the selected policy set. The missing-data warning does not identify the affected high-severity cohort as AC 2 requires. Apply the same actionable priority to members or reserve a bounded quota per selected policy. [high; substantial risk]
 - [x] [Review][Patch] Index the policy-scoped recommendation diagnostics query [src/features/feedback/quality-dashboard.ts:279] — The new request-path query filters recommendations by `policyId` and `reason`, then sorts by policy/card/version/reason/resolution timestamps. `knowledge_recommendations` has no supporting index beginning with `policy_id`; PostgreSQL does not automatically index foreign keys. As recommendation history grows, each operator dashboard load can scan and sort the table before applying its 101-row limit. Add a forward-only index tailored to this bounded query. [medium; non-substantial risk]
+- [x] [Review][Patch] Aggregate policy verification counters without materializing recommendation rows [src/features/feedback/quality-dashboard.ts:310] — Replaced the policy-scoped verification recommendation row read with a PostgreSQL `count(distinct ...)` over only current required/failed cards. Sampling-member verification counts remain bounded by the existing member/card limits, and their truncation continues to set `missingSignal`.
+- [x] [Review][Patch] Remove raw knowledge card IDs from the policy dashboard contract and render [src/features/feedback/quality-dashboard.ts:137] — Sampling diagnostics retain category, outcome, and recommended safe action, but no longer return or render `knowledgeCardId`.
 
 ## Dev Notes
 
@@ -168,6 +170,7 @@ gpu4ai/gpt-5.6-terra-review
 - 2026-07-24: Completed the bounded recovery using normal repository test commands without environment overrides. Added the safe, read-only policy-signal projection and Vietnamese operator rendering; all focused DB-backed suites, typecheck, and build passed. Lint completed with three existing unused-variable warnings in `tests/knowledge-search.test.ts` and no errors.
 - 2026-07-24: Addressed only the five first-review actionable findings. The policy projection now uses ordered bounded reads, prioritizes suppressed/escalated cohorts, fails closed for missing/truncated policy data and pending sampling work, deterministically selects the newest resolved version-fenced sampling disposition, and identifies categories as current/mixed. The operator page renders individual pass/fail, verification-required, pending, member-outcome, and model-version signals.
 - 2026-07-24: Resolved only the three recorded second-review findings. Sampling outcomes now query only `reason = "sampling"` and use complete version fences; current verification cards remain a separate bounded read. Each selected policy receives an independent bounded member/recommendation diagnostic quota, preserving suppressed/escalated cohort visibility. Added the forward-only `knowledge_recommendations_policy_sampling_diagnostics_idx` migration and DB-backed regression for an earlier active cohort with 51 members plus a same-fence verification recommendation.
+- 2026-07-24: Resolved the final two review findings only. Policy verification-required cards now use a PostgreSQL aggregate instead of materializing recommendation rows, while bounded member diagnostics retain explicit truncation `missingSignal` behavior. Removed `knowledgeCardId` from the policy dashboard contract and page render without changing category, cohort, or outcome behavior.
 
 ### File List
 
@@ -200,6 +203,7 @@ gpu4ai/gpt-5.6-terra-review
 - 2026-07-24: Completed Story 5.2 implementation and verification; status moved to `review`.
 - 2026-07-24: Resolved first-review actionable findings only; status remains `review` and sprint status is synchronized.
 - 2026-07-24: Resolved all three recorded second-review findings; status returned to `review` and sprint status is synchronized.
+- 2026-07-24: Resolved both final review findings; status remains `review` and sprint status is synchronized.
 
 ### Verification
 
@@ -208,6 +212,12 @@ gpu4ai/gpt-5.6-terra-review
 - `pnpm test:run tests/knowledge-recommendation-queue.test.ts` - passed (23 tests).
 - `pnpm lint` - passed with 3 pre-existing warnings in `tests/knowledge-search.test.ts`.
 - `pnpm typecheck` - passed.
+- `pnpm build` - passed.
+- `pnpm test:run tests/public-mvp-quality-dashboard.test.ts` - passed (10 tests), including aggregate verification-count, explicit truncation `missingSignal`, and no-card-ID projection assertions.
+- `pnpm test:run tests/public-mvp-evaluation.test.ts` - passed (15 tests), run serially.
+- `pnpm test:run tests/knowledge-recommendation-queue.test.ts` - passed (23 tests), run serially.
+- `pnpm typecheck` - passed.
+- `pnpm lint` - passed with 3 pre-existing unused-variable warnings in `tests/knowledge-search.test.ts`; no new warnings.
 - `pnpm build` - passed.
 - `pnpm db:generate` - generated `0056_chief_vampiro`; migration was reduced to its required forward-only policy recommendation index because the generated diff included already-migrated historical Story 5.1 DDL.
 - `pnpm test:run tests/public-mvp-quality-dashboard.test.ts` - passed (10 tests), run serially after the second-review regression.

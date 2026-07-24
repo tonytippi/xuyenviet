@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, asc, desc, eq, gte, inArray, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, notInArray, or, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
 import {
@@ -135,7 +135,6 @@ export type QualityDashboardPolicySignals = {
     suppressedCohorts: number;
     missingSignal: boolean;
     members: Array<{
-      knowledgeCardId: string;
       category: string;
       samplingOutcome: "passed" | "failed" | "pending" | "unselected";
       recommendedSafeAction: "suppress_or_escalate" | "verify_before_use" | "stricter_sampling";
@@ -155,7 +154,6 @@ const provenanceCategories = ["trip_context", "chat_context", "knowledge", "web"
 const policyDiagnosticLimit = 10;
 const policyReadLimit = policyDiagnosticLimit + 1;
 const cohortMemberReadLimit = 50;
-const cohortRecommendationReadLimit = 100;
 const cohortCardReadLimit = 100;
 
 export async function getPublicMvpQualityDashboard(input: PublicMvpQualityDashboardInput = {}): Promise<PublicMvpQualityDashboardResult> {
@@ -308,17 +306,15 @@ async function buildPolicySignals({
   );
   const resolvedSamplingRecommendations = samplingRecommendationsByPolicy.flatMap(({ resolved }) => resolved);
   const selectedSamplingRecommendations = samplingRecommendationsByPolicy.flatMap(({ selected }) => selected);
-  const verificationRecommendations =
+  const [verificationRequiredCards] =
     policyIds.length > 0
       ? await db
-          .select({ knowledgeCardId: knowledgeRecommendations.knowledgeCardId })
+          .select({ count: sql<number>`count(distinct ${knowledgeRecommendations.knowledgeCardId})` })
           .from(knowledgeRecommendations)
-          .where(and(eq(knowledgeRecommendations.reason, "verification"), inArray(knowledgeRecommendations.policyId, policyIds)))
-          .orderBy(asc(knowledgeRecommendations.policyId), asc(knowledgeRecommendations.knowledgeCardId), desc(knowledgeRecommendations.updatedAt), desc(knowledgeRecommendations.id))
-          .limit(cohortRecommendationReadLimit + 1)
-      : [];
-  const boundedVerificationRecommendations = verificationRecommendations.slice(0, cohortRecommendationReadLimit);
-  const policyCardIds = [...new Set([...memberCardIds, ...boundedVerificationRecommendations.map((recommendation) => recommendation.knowledgeCardId)])];
+          .innerJoin(knowledgeCards, eq(knowledgeCards.id, knowledgeRecommendations.knowledgeCardId))
+          .where(and(eq(knowledgeRecommendations.reason, "verification"), inArray(knowledgeRecommendations.policyId, policyIds), inArray(knowledgeCards.verificationState, ["required", "failed"]), ...(memberCardIds.length > 0 ? [notInArray(knowledgeRecommendations.knowledgeCardId, memberCardIds)] : [])))
+      : [{ count: 0 }];
+  const policyCardIds = [...new Set(memberCardIds)];
   const cards =
     policyCardIds.length > 0
       ? await db
@@ -360,8 +356,7 @@ async function buildPolicySignals({
       const state: "suppressed" | "escalated" | "active" = policy.suppressedAt ? "suppressed" : policy.escalatedAt ? "escalated" : "active";
       return { cohortKey: policy.cohortKey, category: categories.length === 1 ? categories[0] : categories.length > 1 ? "mixed_current_categories" : "missing_category", state, samplingPercent: policy.samplingPercent, recommendedSafeAction: state === "suppressed" ? "suppress_or_escalate" as const : "stricter_sampling" as const };
     });
-  const samplingMembers = [...memberOutcomes].sort((left, right) => samplingOutcomePriority(left.outcome) - samplingOutcomePriority(right.outcome) || left.member.knowledgeCardId.localeCompare(right.member.knowledgeCardId)).slice(0, policyDiagnosticLimit).map(({ member, policy, outcome, category }) => ({
-    knowledgeCardId: member.knowledgeCardId,
+  const samplingMembers = [...memberOutcomes].sort((left, right) => samplingOutcomePriority(left.outcome) - samplingOutcomePriority(right.outcome) || left.member.knowledgeCardId.localeCompare(right.member.knowledgeCardId)).slice(0, policyDiagnosticLimit).map(({ policy, outcome, category }) => ({
     category,
     samplingOutcome: outcome,
     recommendedSafeAction: policy?.suppressedAt || outcome === "failed" ? "suppress_or_escalate" as const : policy?.escalatedAt ? "stricter_sampling" as const : "verify_before_use" as const,
@@ -376,13 +371,13 @@ async function buildPolicySignals({
       sampledFailed: memberOutcomes.filter((member) => member.outcome === "failed").length,
       pendingMembers: memberOutcomes.filter((member) => member.outcome === "pending").length,
       unselectedMembers: memberOutcomes.filter((member) => member.outcome === "unselected").length,
-      verificationRequiredCurrentCards: policyCardIds.filter((cardId) => {
+      verificationRequiredCurrentCards: Number(verificationRequiredCards.count) + policyCardIds.filter((cardId) => {
         const verificationState = cardsById.get(cardId)?.verificationState;
         return verificationState === "required" || verificationState === "failed";
       }).length,
       escalatedCohorts: policies.filter((policy) => policy.escalatedAt).length,
       suppressedCohorts: policies.filter((policy) => policy.suppressedAt).length,
-      missingSignal: boundedMembers.length === 0 || memberOutcomes.every((member) => member.outcome !== "passed" && member.outcome !== "failed") || memberOutcomes.some((member) => member.outcome === "pending") || policyRows.length > policyDiagnosticLimit || membersByPolicy.some(({ members: policyMembers }) => policyMembers.length > cohortMemberReadLimit) || samplingRecommendationsByPolicy.some(({ resolved, selected }) => resolved.length > cohortMemberReadLimit || selected.length > cohortMemberReadLimit) || verificationRecommendations.length > cohortRecommendationReadLimit || cards.length > cohortCardReadLimit,
+      missingSignal: boundedMembers.length === 0 || memberOutcomes.every((member) => member.outcome !== "passed" && member.outcome !== "failed") || memberOutcomes.some((member) => member.outcome === "pending") || policyRows.length > policyDiagnosticLimit || membersByPolicy.some(({ members: policyMembers }) => policyMembers.length > cohortMemberReadLimit) || samplingRecommendationsByPolicy.some(({ resolved, selected }) => resolved.length > cohortMemberReadLimit || selected.length > cohortMemberReadLimit) || cards.length > cohortCardReadLimit,
       members: samplingMembers,
     },
     cohorts,

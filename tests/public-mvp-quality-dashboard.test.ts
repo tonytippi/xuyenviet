@@ -393,8 +393,8 @@ describe("public MVP quality dashboard", () => {
     expect(dashboard.policySignals.sampling).toMatchObject({ cohortMembers: 2, sampledFailed: 1, sampledPassed: 0, pendingMembers: 0, unselectedMembers: 1, verificationRequiredCurrentCards: 2, escalatedCohorts: 1, suppressedCohorts: 1 });
     expect(dashboard.policySignals.cohorts).toMatchObject([{ cohortKey: "initial:2026-07-24", state: "suppressed", category: "mixed_current_categories", recommendedSafeAction: "suppress_or_escalate" }]);
     expect(dashboard.policySignals.sampling.members).toMatchObject([
-      { knowledgeCardId: "sampled", samplingOutcome: "failed", category: "current_warning", recommendedSafeAction: "suppress_or_escalate" },
-      { knowledgeCardId: "unselected", samplingOutcome: "unselected", category: "current_place", recommendedSafeAction: "suppress_or_escalate" },
+      { samplingOutcome: "failed", category: "current_warning", recommendedSafeAction: "suppress_or_escalate" },
+      { samplingOutcome: "unselected", category: "current_place", recommendedSafeAction: "suppress_or_escalate" },
     ]);
     const evaluationDashboard = await getPublicMvpQualityDashboard({ db: testDb, range: "all" });
     expect(evaluationDashboard.success).toBe(true);
@@ -407,6 +407,7 @@ describe("public MVP quality dashboard", () => {
       diagnostics: [{ promptType: "freshness_sensitive", modelVersion: "cx/ai-ask", category: "community_observation", severity: "unavailable", recommendedSafeAction: "suppress_or_escalate" }],
     });
     expect(JSON.stringify(dashboard)).not.toMatch(/Safe stored answer text|SAMPLING_RATIONALE_MUST_NOT_LEAK|safe-card|sourceSnapshot|providerPayload|raw_source_material/);
+    expect(dashboard.policySignals.sampling.members.every((member) => !("knowledgeCardId" in member))).toBe(true);
   });
 
   test("fails closed for missing snapshots and pending sampling while selecting the latest fenced disposition deterministically", async () => {
@@ -437,8 +438,8 @@ describe("public MVP quality dashboard", () => {
     expect(dashboard.policySignals.evaluation.missingSignal).toBe(true);
     expect(dashboard.policySignals.sampling).toMatchObject({ sampledPassed: 0, sampledFailed: 1, pendingMembers: 1, unselectedMembers: 0, verificationRequiredCurrentCards: 1, missingSignal: true });
     expect(dashboard.policySignals.sampling.members).toMatchObject([
-      { knowledgeCardId: "deterministic", samplingOutcome: "failed", category: "current_service" },
-      { knowledgeCardId: "pending", samplingOutcome: "pending", category: "current_warning" },
+      { samplingOutcome: "failed", category: "current_service" },
+      { samplingOutcome: "pending", category: "current_warning" },
     ]);
   });
 
@@ -484,6 +485,8 @@ describe("public MVP quality dashboard", () => {
       { cohortKey: "suppressed:2026-07-26", state: "suppressed", recommendedSafeAction: "suppress_or_escalate" },
       { cohortKey: "active:2026-07-26", state: "active", recommendedSafeAction: "stricter_sampling" },
     ]);
-    expect(dashboard.policySignals.sampling.members).toContainEqual(expect.objectContaining({ knowledgeCardId: "actionable", samplingOutcome: "unselected", recommendedSafeAction: "suppress_or_escalate" }));
+    expect(dashboard.policySignals.sampling.missingSignal).toBe(true);
+    expect(dashboard.policySignals.sampling.members).toContainEqual(expect.objectContaining({ samplingOutcome: "unselected", recommendedSafeAction: "suppress_or_escalate" }));
+    expect(JSON.stringify(dashboard.policySignals.sampling.members)).not.toMatch(/actionable|active-00/);
   });
 });
