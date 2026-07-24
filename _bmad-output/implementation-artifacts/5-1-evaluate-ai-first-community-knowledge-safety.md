@@ -4,7 +4,7 @@ baseline_commit: 75f6a5b000bd8f396bb62c750928ec8c2096669b
 
 # Story 5.1: Evaluate AI-First Community Knowledge Safety
 
-Status: review
+Status: done
 
 ## Story
 
@@ -224,3 +224,4 @@ gpu4ai/gpt-5.6-terra-review
 - 2026-07-24: Finalized Story 5.1 as `done` after verifying supplied final repair commit `8efea424c4c18f56aa1e4915000fcb85f7139a59` exists and the pre-update worktree was clean; synchronized sprint status.
 - 2026-07-24: Reopened only for two Epic 5 review findings affecting deterministic exposure detection. Replaced English sentinel checks with persisted answer-time provenance-state assertions and safe withheld-evidence/sensitive-disclosure comparisons; Vietnamese verification guidance remains safe when withdrawal is only an excluded candidate. Serial DB verification recorded below; Story returned to `review` without a commit.
 - 2026-07-24: Completed the two targeted review-finding repairs; Story 5.1 remains `review` and Epic 5 remains `done`.
+- 2026-07-24: Finalized Story 5.1 as `done` after status-only verification that repair commit `59a0ec8e604b60019c1cac4e57f564f753e7f37a` exists and the pre-update worktree was clean. Epic 5 remains `done`; no implementation, test, correctness, review, or commit inspection was performed.
