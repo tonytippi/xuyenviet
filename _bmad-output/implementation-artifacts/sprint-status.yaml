@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-07-26 (Epic 7 completion review repair: all 6 epic-level findings E7R-1 through E7R-6 fixed across stories 7.4 and 7.5. E7R-1 plannedAt dropped in apply path; E7R-2 expiry worker once:true infinite loop; E7R-3 orderingPreconditions prompt/validator key mismatch; E7R-4 create-item ordinal collision misclassified as transient; E7R-5 plan-history sheet missing focus management; E7R-6 AI proposal expires_at never parsed/persisted. 1000 tests pass, lint/typecheck/build/db:generate clean. Stories 7.4 and 7.5 set to review.)
+# last_updated: 2026-07-26 (Finalized Stories 7.4 and 7.5 to done after status-only verification of epic-review repair commit aa4c5d12dff6b649f65c1e014637998fb296ab3f and a clean pre-update worktree. No source code inspected, no acceptance-criteria evaluation, no findings discovery, no tests run, no code review performed, no implementation code edited, and no commit created per status-only finalization instructions.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-07-26 (Epic 7 completion review repair: all 6 epic-level findings E7R-1 through E7R-6 fixed across stories 7.4 and 7.5. E7R-1 plannedAt dropped in apply path; E7R-2 expiry worker once:true infinite loop; E7R-3 orderingPreconditions prompt/validator key mismatch; E7R-4 create-item ordinal collision misclassified as transient; E7R-5 plan-history sheet missing focus management; E7R-6 AI proposal expires_at never parsed/persisted. 1000 tests pass, lint/typecheck/build/db:generate clean. Stories 7.4 and 7.5 set to review.)
+last_updated: 2026-07-26 (Finalized Stories 7.4 and 7.5 to done after status-only verification of epic-review repair commit aa4c5d12dff6b649f65c1e014637998fb296ab3f and a clean pre-update worktree. No source code inspected, no acceptance-criteria evaluation, no findings discovery, no tests run, no code review performed, no implementation code edited, and no commit created per status-only finalization instructions.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -100,13 +100,15 @@ development_status:
   # Synchronized 2026-07-25 after status-only verification of supplied final repair commit 267a12264793c3b71eca6fe56531908e502801fe and a clean pre-update worktree.
   7-3-present-trip-home-and-the-owners-plan-workspace: done
   # Epic 7 completion review repair 2026-07-26: all 6 epic-level findings E7R-1 through E7R-6 fixed (E7R-1 plannedAt dropped in apply path; E7R-3 orderingPreconditions prompt/validator key mismatch; E7R-6 AI proposal expires_at never parsed/persisted). 1000 tests pass, lint/typecheck/build/db:generate clean; status set to review.
-  7-4-generate-reviewable-ai-trip-change-proposals: review
+  # Finalized 2026-07-26 after status-only verification of epic-review repair commit aa4c5d12dff6b649f65c1e014637998fb296ab3f and a clean pre-update worktree; status synchronized to done.
+  7-4-generate-reviewable-ai-trip-change-proposals: done
   # Synchronized 2026-07-25 after repair of all 18 review findings (P1–P18: 3 HIGH, 7 MEDIUM, 8 LOW) for commit feeb7e5; 925 tests pass, lint/typecheck/build/db:generate clean; status set to review.
   # Second bounded review 2026-07-25 of commits feeb7e5 + e40a906: P1–P18 verified repaired; 5 new findings (Q1–Q5: 3 MEDIUM, 2 LOW) — Q1–Q3 incomplete P10/P11 re-throw repair (callers not updated), Q4–Q5 minor UX edge cases. No HIGH; no security/data-integrity/AC/cross-feature systemic failure; all 4 ACs satisfied.
   # Second-review repair 2026-07-25: all 5 findings Q1–Q5 repaired — Q1 expire-on-read try/catch, Q2 worker loop per-batch try/catch, Q3 server action transient reason + retryable client outcome, Q4 useRef dedup, Q5 history-sheet handlers; 934 tests pass, lint/typecheck/build/db:generate clean; status set to review.
   # Finalized 2026-07-25 after status-only verification of supplied final repair commit 3f2794269749673ffa2fbb4c035882f0803143bb and a clean pre-update worktree; status synchronized to done. Epic 7 remains in-progress pending Story 7.6.
   # Epic 7 completion review repair 2026-07-26: all 6 epic-level findings E7R-1 through E7R-6 fixed (E7R-2 expiry worker once:true infinite loop; E7R-4 create-item ordinal collision misclassified as transient; E7R-5 plan-history sheet missing focus management). 1000 tests pass, lint/typecheck/build/db:generate clean; status set to review.
-  7-5-apply-dismiss-and-expire-proposals-safely: review
+  # Finalized 2026-07-26 after status-only verification of epic-review repair commit aa4c5d12dff6b649f65c1e014637998fb296ab3f and a clean pre-update worktree; status synchronized to done.
+  7-5-apply-dismiss-and-expire-proposals-safely: done
   # Synchronized 2026-07-25 after bmad-create-story wrote the Story 7.6 verification story file (adversarial owner-scoped trip planning safety: ownership, conflicts, state transitions, Trip Home focus, workspace accessibility); dev-story complete: 45 new tests, 979 total pass, lint/typecheck/build/db:generate clean; status set to review.
   # Finalized 2026-07-26 after status-only verification of supplied final repair commit bece883f3e49989560a04e84987e6b438233ba08 and a clean pre-update worktree; status synchronized to done. Epic 7 remains in-progress (retrospective optional/separate).
   7-6-verify-owner-scoped-trip-planning-safety: done
