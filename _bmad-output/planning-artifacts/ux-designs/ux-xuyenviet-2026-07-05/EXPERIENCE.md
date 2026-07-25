@@ -40,7 +40,7 @@ Primary audience: Vietnamese road-trip travelers planning by car, initially focu
 | Trip projects | Left sidebar project group plus selected chat context | Focus planning around a durable trip and reuse trip context like a project/workspace from the distinct `Chuyến đi` group |
 | Trip Project workspace | Selected Trip Project | Show Trip Home, confirmed structured plan, primary conversation, pending changes, and history without converting the project into a widget dashboard |
 | Trip Home | Trip Project workspace | Put the next decision or next planned leg in focus before the plan timeline and conversation |
-| Structured plan | Trip Project workspace | Review and manually maintain anchors, legs, activities, constraints, and `idea` / `planned` / `confirmed` / `backup` states |
+| Structured plan | Trip Project workspace | Review anchors, legs, activities, constraints, and `idea` / `planned` / `confirmed` / `backup` states; request all plan changes through the primary conversation |
 | Change proposal review | Assistant answer or Trip Home | Let the owner inspect, apply, dismiss, or refresh a typed AI proposal before any persistent plan state changes |
 | Right contextual detail panel | Selected answer entity in active chat | Show selected place, hotel, route segment, source, cost/warning, or trip fact with quick facts, related details, actions, and provenance chips |
 | Trip project detail/context panel | Trip project row / selected context | Show trip context, linked chats, correction/delete affordances, usually as right detail panel or mobile sheet |
@@ -124,7 +124,7 @@ Behavioral patterns. Visual specs live in `DESIGN.md.Components`.
 | Trip project row | Sidebar/sheet | Opens a trip project workspace/context. Active project state is visible in sidebar and main chat header. Row menu supports delete/settings when implemented. |
 | Trip Project workspace | Selected project | Uses the primary conversation as the desktop center column. A persistent right Trip Workspace shows Trip Home, the confirmed structured plan, and history entry points. Historic linked chats remain available but do not compete with the primary conversation. |
 | Trip Home focus card | Trip Project workspace | Shows one highest-priority item: pending unexpired proposal with expiry, another pending unexpired proposal, a defined confirmed-item gap, the next dated planned/confirmed leg, then preparation. A gap is only confirmed transport without date/time or route context, or confirmed accommodation without date/time or place/area; incomplete `idea` or `planned` items are not gaps. A pending proposal remains visible here with its principal impact and a `Xem đề xuất và tác động` entry point even when the desktop panel is closed or becomes a mobile sheet. |
-| Structured plan timeline | Trip Project workspace | Groups anchors, legs, and activities by date/leg. Each item shows semantic type, state label, concise time/place detail when known, and an explicit edit/status action. Manual edits are owner actions, never direct edits of AI answer prose. |
+| Structured plan timeline | Trip Project workspace | Groups anchors, legs, and activities by date/leg. Each item shows semantic type, state label, and concise time/place detail when known. It is read-oriented; the primary conversation is the sole plan-authoring surface, and its typed proposals are the only path to persistent changes. |
 | Primary conversation composer | Trip Project workspace | Is anchored at the end of the center conversation column. It writes to the one primary conversation and shows the active project context. Historic linked chats open from `Lịch sử trao đổi`, not as parallel composers. |
 | Trip Change Proposal | Chat answer / Trip Home / plan timeline | Renders a bounded before/after summary, rationale, affected plan items, expiry when applicable, and explicit actions. `Áp dụng` is a confirmed mutation, `Giữ kế hoạch` dismisses, and `Xem phương án khác` appears only when alternatives exist. |
 | Plan history | Trip Project workspace | Opens on demand and lists applied, dismissed, and expired proposals with safe summaries, actor, and timestamp. It never displays raw model prompts/responses. |
@@ -174,7 +174,7 @@ Behavioral patterns. Visual specs live in `DESIGN.md.Components`.
 | Open plan item | Structured plan | Render an `Ý tưởng` state as intentionally open; offer status/edit controls but no error treatment. `Đã chốt` means the owner confirmed the choice or supplied a real constraint, not that a booking or live provider check exists. |
 | Pending proposal | Trip Home / chat / timeline | The AI answer contains a concise proposal card and Trip Home owns the persistent entry point, each showing the principal impact and `Xem đề xuất và tác động`. The Trip Workspace panel or mobile sheet owns the complete before/after review and apply/dismiss actions. Do not silently merge it into the timeline. |
 | Applying proposal | Proposal review | Disable duplicate actions, announce pending save, and keep the prior plan visible until the server result reconciles. |
-| Proposal conflict or stale version | Proposal review | Preserve the proposal summary, state that the plan changed, and offer `Làm mới đề xuất` or return to the current plan. Do not overwrite manual edits. |
+| Proposal conflict or stale version | Proposal review | Preserve the proposal summary, state that the plan changed, and offer `Làm mới đề xuất` in the primary conversation or return to the current plan. Do not overwrite newer confirmed changes. |
 | Proposal expired | Proposal review/history | Mark as expired, remove apply action, retain safe history, and invite a fresh question when useful. |
 | Applied/dismissed proposal | Timeline/history | Reconcile the plan timeline to persisted state and announce the outcome. Applied records show actor/time; dismissed records do not alter plan state. |
 | Unauthorized data access | Any owned resource | Deny server-side. Show generic not-found/permission message without exposing existence details. |
@@ -202,7 +202,7 @@ Behavioral patterns. Visual specs live in `DESIGN.md.Components`.
 - Generated AI answer text is not editable by the traveler; the user corrects facts by sending another message.
 - `Áp dụng thay đổi` is always an explicit owner action. It uses a confirmable primary button and never appears as an automatic effect of sending a chat message.
 - Proposal review reveals a concise before/after impact before the owner applies it. Keyboard focus moves to the proposal heading when opened, and a terminal result returns focus to the originating answer card or Trip Home focus card.
-- Plan timeline reorder/edit/status actions are explicit, owner-scoped controls. Drag-only reordering is not required; keyboard and touch users have an equivalent ordered action.
+- Plan mutations are requested in the primary conversation and proposed as typed, owner-scoped changes. The timeline has no reorder/edit/status controls; proposal review provides the explicit apply or dismiss action with keyboard and touch access.
 - Admin operators edit knowledge drafts/cards through forms, not by editing raw AI prose in-place without field structure.
 
 ## Accessibility Floor
@@ -250,7 +250,7 @@ Desktop behavior:
 - Logged-out homepage is centered and does not show the app sidebar.
 - Logged-in empty state shows a flat left sidebar plus centered greeting/composer and no right detail panel.
 - Active chat uses an edge-to-edge workspace with persistent left sidebar, readable center answer column, and right contextual detail panel only when an answer entity is selected.
-- A selected Trip Project uses the same shell with its primary conversation in the center column and a persistent right Trip Workspace for Trip Home and saved plan state. The right workspace switches or expands to selected plan-item/proposal review only on request; the center conversation remains the command surface.
+- A selected Trip Project uses the same shell with its primary conversation in the center column and a persistent right Trip Workspace for Trip Home and saved plan state. The right workspace expands to proposal review only on request; the center conversation is the exclusive plan-authoring and command surface.
 - Long conversation/project lists scroll within the sidebar without moving the main chat composer.
 
 Mobile behavior:
@@ -402,7 +402,7 @@ Failure: Detail data is unavailable. The panel shows a compact unavailable state
 7. The timeline updates only after successful save; Trip Home changes to the next relevant focus and plan history records the applied proposal.
 8. **Climax:** Linh can use AI to shape a real plan while retaining clear control over every persistent change.
 
-Failure: Linh manually changed the same leg in another tab before applying. The proposal reports that the plan changed, applies nothing, and offers to refresh the suggestion against the current plan.
+Failure: Linh applied a newer proposal in another tab before applying an earlier one. The earlier proposal reports that the plan changed, applies nothing, and offers to refresh the suggestion against the current plan through the primary conversation.
 
 ## Open Questions
 

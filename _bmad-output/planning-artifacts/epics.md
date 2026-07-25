@@ -47,10 +47,10 @@ FR-13: Let users correct trip details through chat.
 FR-14: Display a clear notice that chat/trip details may be stored for the session or project.
 FR-15: Let users delete a chat session or trip project they own.
 FR-16: Exclude sensitive personal data beyond travel-personalization needs.
-FR-16A: Allow an owner to maintain structured Trip Project anchors: origin, destination, regions, required stops, and accommodations, when manually supplied or confirmed.
-FR-16B: Allow an owner to maintain dated trip legs and activities of type `transport`, `visit`, `food`, `rest`, or `accommodation`.
+FR-16A: Let an owner request structured Trip Project anchor changes through the primary conversation; accepted changes require explicit Trip Change Proposal confirmation.
+FR-16B: Let an owner request dated trip legs and activities through the primary conversation; accepted changes require explicit Trip Change Proposal confirmation.
 FR-16C: Give each structured trip item an explicit `idea`, `planned`, `confirmed`, or `backup` state; an open or `idea` item is not erroneous solely because it is unconfirmed.
-FR-16D: Allow an owner to record travel-relevant constraints: travelers, children, vehicle/EV needs, driving tolerance, budget range, preferences, and places or activities to avoid.
+FR-16D: Let an owner request travel-relevant constraint changes through the primary conversation; accepted changes require explicit Trip Change Proposal confirmation.
 FR-16E: Establish one primary conversation for each Trip Project while preserving owner access to currently linked historic conversations during migration.
 FR-16F: Show an owned Trip Project a basic Trip Home that prioritizes an unresolved planning decision, otherwise the next planned leg or preparation focus, and presents the primary conversation as the central action.
 FR-16G: Let AI create a typed Trip Change Proposal containing rationale, affected trip items, alternatives when available, and expiry when its supporting information is time-sensitive.
@@ -184,10 +184,10 @@ FR-13: Epic 2 - Chat-based context correction.
 FR-14: Epic 1 - First-use storage notice.
 FR-15: Epic 2 - Owned chat/project deletion.
 FR-16: Epic 2 - Sensitive context exclusion.
-FR-16A: Epic 7 - Structured Trip Project anchors.
-FR-16B: Epic 7 - Dated legs and activities.
+FR-16A: Epic 7 - Chat-requested structured Trip Project anchors.
+FR-16B: Epic 7 - Chat-requested dated legs and activities.
 FR-16C: Epic 7 - Explicit plan-item states and scoped backups.
-FR-16D: Epic 7 - Owner-maintained trip constraints.
+FR-16D: Epic 7 - Chat-requested trip constraints.
 FR-16E: Epic 7 - Primary conversation migration and historic conversation preservation.
 FR-16F: Epic 7 - Deterministic Trip Home and primary conversation access.
 FR-16G: Epic 7 - Typed, expiring AI Trip Change Proposals.
@@ -294,7 +294,7 @@ The product team can validate that the Hanoi-to-HCMC knowledge corpus and travel
 
 ### Epic 7: Controlled Trip Project Planning
 
-Travelers can convert AI guidance into a structured, owner-controlled road-trip plan: maintain anchors, constraints, dated legs, activities, and alternatives; use one primary Trip Project conversation; review AI proposals; and understand the next planning action without confusing suggestions with confirmed state.
+Travelers can convert AI guidance into a structured, owner-controlled road-trip plan: request anchor, constraint, leg, activity, and alternative changes through the primary conversation; review AI proposals; and understand the next planning action without confusing suggestions with confirmed state.
 
 **FRs covered:** FR-16A, FR-16B, FR-16C, FR-16D, FR-16E, FR-16F, FR-16G, FR-16H, FR-16I.
 
@@ -893,35 +893,7 @@ So that confirmed trip state is durable, explicit, and separate from chat transc
 **Then** its structured plan, constraints, and any future plan-derived retrievable state are removed or disabled from normal use with the rest of the owner-scoped project data
 **And** only permitted minimal non-content audit metadata remains.
 
-### Story 7.2: Let Owners Maintain Their Structured Plan
-
-As a Trip Project owner,
-I want to add and maintain anchors, dated legs, activities, states, alternatives, and constraints,
-So that I can make the trip plan explicit without relying on chat history.
-
-**Acceptance Criteria:**
-
-**Given** an authenticated owner opens an owned Trip Project
-**When** they create or edit anchors, legs, activities, or constraints through Chat/Trips commands
-**Then** only their project records are read or mutated
-**And** anchors support origin, destination, regions, required stops, and accommodations while dated legs/activities support the defined types.
-
-**Given** a plan item is assigned a state or reordered
-**When** the command is submitted
-**Then** it validates owner and project membership, item and project versions, parent relationship, and the affected ordering scope before committing
-**And** it atomically renumbers unique ordinals within `(trip_project_id, parent_item_id)`.
-
-**Given** an activity is placed under a leg or an item is marked `backup`
-**When** the command validates the relationship
-**Then** only an activity may parent to a leg, cycles are rejected, and a backup references exactly one substitute item in the same Trip Project
-**And** an `idea` or incomplete `planned` item remains a valid open planning state rather than an error.
-
-**Given** a user attempts to mutate another owner's plan or supply unavailable dynamic facts
-**When** the server command runs
-**Then** it returns a safe authorization or validation result without exposing resource existence
-**And** it does not store weather, live route/ETA, booking, availability, exact-location, expenses, checklist, vault, or collaboration data.
-
-### Story 7.3: Establish the Primary Project Conversation Without Losing History
+### Story 7.2: Establish the Primary Project Conversation Without Losing History
 
 As a Trip Project owner,
 I want one primary conversation for my trip while retaining historic linked chats,
@@ -944,7 +916,7 @@ So that I have a clear planning command surface without losing prior discussion.
 **Then** new messages are written to the one primary conversation with the project context visibly active
 **And** historic chats remain available from an explicit history entry rather than competing as parallel project composers.
 
-### Story 7.4: Present Trip Home and the Owner's Plan Workspace
+### Story 7.3: Present Trip Home and the Owner's Plan Workspace
 
 As a Trip Project owner,
 I want a focused Trip Home and readable plan timeline,
@@ -972,7 +944,7 @@ So that I know the most useful next planning action and can inspect my saved pla
 **Then** it includes a semantic icon and visible Vietnamese label for `Ý tưởng`, `Dự kiến`, `Đã chốt`, or `Phương án B`
 **And** `Đã chốt` is not represented as booking, availability, provider, weather, or live-route confirmation.
 
-### Story 7.5: Generate Reviewable AI Trip Change Proposals
+### Story 7.4: Generate Reviewable AI Trip Change Proposals
 
 As a Trip Project owner,
 I want AI recommendations to appear as bounded change proposals,
@@ -985,6 +957,11 @@ So that I can understand the intended plan impact before any persistent state ch
 **Then** it uses a schema-validated typed operation set with bounded rationale, identified affected items, expected project/item versions, ordering/parent preconditions, alternatives when available, and optional expiry
 **And** the orchestration path cannot directly write plan items, constraints, or item states.
 
+**Given** the owner asks to create, edit, remove, reorder, or change the state of anchors, legs, activities, alternatives, or constraints
+**When** the proposal draft is validated
+**Then** it permits only the defined plan-item kinds, roles, types, states, same-project parent/backup relationships, travel-relevant constraints, and available data boundaries
+**And** the saved-plan timeline remains read-oriented with no separate plan-item, state, reorder, or constraint editor.
+
 **Given** provider output proposes an unknown operation, cross-project item, invalid type/state, or unbounded content
 **When** the draft is validated
 **Then** it is rejected or safely omitted before persistence
@@ -995,11 +972,11 @@ So that I can understand the intended plan impact before any persistent state ch
 **Then** the UI distinguishes it from saved plan items and shows a bounded before/after impact, rationale, expiry when applicable, and only supported actions
 **And** no apply action is offered for an expired proposal.
 
-### Story 7.6: Apply, Dismiss, and Expire Proposals Safely
+### Story 7.5: Apply, Dismiss, and Expire Proposals Safely
 
 As a Trip Project owner,
 I want explicit, safe controls for a proposed plan change,
-So that AI cannot overwrite my plan or manual edits.
+So that AI cannot overwrite my confirmed plan or newer confirmed changes.
 
 **Acceptance Criteria:**
 
@@ -1008,7 +985,7 @@ So that AI cannot overwrite my plan or manual edits.
 **Then** it authenticates the owner, locks the Trip Project, verifies ownership, status, expiry, expected aggregate/item versions, and ordering/parent preconditions
 **And** it applies every typed operation or none in one transaction.
 
-**Given** a proposal is stale, expired, unauthorized, references a missing item, or conflicts with a manual edit
+**Given** a proposal is stale, expired, unauthorized, references a missing item, or conflicts with a newer confirmed proposal
 **When** application is attempted
 **Then** no plan state is changed and the response safely requests refresh
 **And** the proposal summary remains available without overwriting current owner data.
@@ -1023,11 +1000,11 @@ So that AI cannot overwrite my plan or manual edits.
 **Then** it shows the status, safe operation summary, actor, timestamp, proposal ID, and affected item references
 **And** it never exposes raw model prompts or responses.
 
-### Story 7.7: Verify Owner-Scoped Trip Planning Safety
+### Story 7.6: Verify Owner-Scoped Trip Planning Safety
 
 As a product owner,
 I want automated verification of Trip Project ownership, conflicts, and state transitions,
-So that structured planning remains safe as AI and manual changes interact.
+So that structured planning remains safe as chat-driven proposals and confirmed changes interact.
 
 **Acceptance Criteria:**
 

@@ -228,13 +228,13 @@ Use a responsive AI planning shell.
 - Logged-out desktop: centered public hero with sign-in CTA and sign-in-gated ask box; no app shell sidebar. It uses the controlled warm hero wash shown in [`home-logged-out.html`](./mockups/home-logged-out.html).
 - Logged-in empty desktop: left sidebar visible, center column contains large greeting and centered composer; no right detail panel before the first answer.
 - Active desktop: persistent left sidebar using `{spacing.sidebar-width}`, central answer column capped at `{spacing.chat-width}`, right contextual detail panel using `{spacing.detail-width}`. The shell is edge-to-edge and viewport-height, not a rounded page card. See [`three-panel-chat-map.html`](./mockups/three-panel-chat-map.html).
-- Trip Project desktop: uses the same left sidebar and center reading width for the primary conversation. The persistent right Trip Workspace starts with a compact project header, Trip Home focus card, and saved date/leg timeline. It expands to plan/proposal detail only after an explicit selection; it is a state surface, not a second chat or dashboard rail.
+- Trip Project desktop: uses the same left sidebar and center reading width for the primary conversation. The persistent right Trip Workspace starts with a compact project header, Trip Home focus card, and saved date/leg timeline. It expands to proposal detail only after an explicit selection; it is a state surface, not a plan editor, second chat, or dashboard rail.
 - Tablet: sidebar may collapse to `{spacing.sidebar-rail}`; right detail panel can stack below or open as sheet depending on available width.
 - Mobile: no persistent sidebar; use top/menu sheet for history/projects, single-column chat, bottom-safe composer, and selected detail as a drawer/sheet.
 
 Chat answers use `{spacing.answer-gap}` between major sections. A single answer should read as a stack of scannable blocks: plan/options, rationale, practical tips, warnings, sources, uncertainty, and next steps. Do not present every section as equal weight; warnings and next steps should be easier to find than raw source metadata.
 
-Maximum reading width for chat answer content: 760px. Admin review tables may use wider layouts, but editing and approval should happen in focused panels or detail views rather than spreadsheet-like walls.
+Maximum reading width for chat answer content: 760px. Admin review tables may use wider layouts, but Trip Project authoring happens through the primary conversation and owner confirmation of typed proposals rather than spreadsheet-like editors.
 
 The left sidebar should borrow the learnability of ChatGPT/Gemini without becoming a clone: brand mark, compact top action, grouped lists, compact rows, active state, and a quiet hierarchy between conversations and trip projects. The right detail panel appears only when it has a selected entity to explain; empty chat should not show a blank inspector. The centered empty state is illustrated by [`home-logged-in-empty.html`](./mockups/home-logged-in-empty.html).
 
