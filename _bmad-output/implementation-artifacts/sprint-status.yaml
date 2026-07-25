@@ -1,5 +1,5 @@
-# generated: 2026-07-21
-# last_updated: 2026-07-24
+# generated: 2026-07-25
+# last_updated: 2026-07-25
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -12,11 +12,15 @@
 #   - in-progress: Epic actively being worked on
 #   - done: All stories in epic completed
 #
+# Epic Status Transitions:
+#   - backlog -> in-progress: Automatically when first story is created
+#   - in-progress -> done: Manually when all stories reach 'done' status
+#
 # Story Status:
 #   - backlog: Story only exists in epic file
 #   - ready-for-dev: Story file created in implementation artifacts
 #   - in-progress: Developer actively working on implementation
-#   - review: Ready for code review
+#   - review: Ready for code review (via Dev's code-review workflow)
 #   - done: Story completed
 #
 # Retrospective Status:
@@ -24,20 +28,19 @@
 #   - done: Finished
 #
 # Action Item Status:
-#   - open: Committed work not yet addressed
+#   - open: Committed during a retrospective, not yet addressed
 #   - in-progress: Actively being worked on
 #   - done: Completed
 
-generated: 2026-07-21
-last_updated: 2026-07-24
+generated: 2026-07-25
+last_updated: 2026-07-25
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
 story_location: /home/sonnh/projects/xuyenviet/_bmad-output/implementation-artifacts
 
 development_status:
-  # Completed baselines; their historical story records intentionally remain outside this
-  # AI-first sprint inventory to avoid colliding with the revised Epic 3-6 story IDs.
+  # Completed baselines have no active implementation stories in the current epic inventory.
   epic-1: done
   epic-1-retrospective: done
   epic-2: done
@@ -87,6 +90,15 @@ development_status:
   # Synchronized 2026-07-24 after final Story 6.2 review findings: PR-07 documented test sequencing is complete; OP-01 through OP-09 remain blocked verbatim from Story 6.1; report remains no-go.
   6-2-run-public-mvp-ai-first-readiness-review: done
   epic-6-retrospective: optional
+
+  epic-7: backlog
+  7-1-establish-the-versioned-structured-trip-project-aggregate: backlog
+  7-2-establish-the-primary-project-conversation-without-losing-history: backlog
+  7-3-present-trip-home-and-the-owners-plan-workspace: backlog
+  7-4-generate-reviewable-ai-trip-change-proposals: backlog
+  7-5-apply-dismiss-and-expire-proposals-safely: backlog
+  7-6-verify-owner-scoped-trip-planning-safety: backlog
+  epic-7-retrospective: optional
 
 action_items:
   - epic: 3
