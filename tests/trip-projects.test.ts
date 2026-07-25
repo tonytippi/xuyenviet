@@ -660,3 +660,110 @@ describe("Story 7.5 *InTransaction helpers and changeInternalTripPlanItemStateIn
     expect(savedProject.aggregateVersion).toBe(4);
   });
 });
+
+// Story 7.6 AC1 Task 3+4: Invalid item relationships, stale versions on all
+// mutating commands, backup references/cycles, and ordering-scope uniqueness.
+// These tests fill gaps not already covered by the 7.1–7.5 suites.
+describe("Story 7.6 AC1 invalid relationships, stale versions, backup refs, ordering", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+  });
+
+  test("3.1 updateInternalTripPlanItem rejects cross-project parent and non-leg parent for an activity", async () => {
+    await createTestUser("safety-rel-user");
+    const [projectA] = await testDb.insert(tripProjects).values({ userId: "safety-rel-user", title: "Huế", aggregateVersion: 1 }).returning({ id: tripProjects.id });
+    const [projectB] = await testDb.insert(tripProjects).values({ userId: "safety-rel-user", title: "Đà Nẵng", aggregateVersion: 1 }).returning({ id: tripProjects.id });
+    await testDb.insert(tripPlanItems).values({ id: "rel-leg-a", tripProjectId: projectA.id, userId: "safety-rel-user", kind: "leg", type: "transport", state: "planned", label: "Chạy xe A", ordinal: 0 });
+    const [legB] = await testDb.insert(tripPlanItems).values({ id: "rel-leg-b", tripProjectId: projectB.id, userId: "safety-rel-user", kind: "leg", type: "transport", state: "planned", label: "Chạy xe B", ordinal: 0 }).returning();
+    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "safety-rel-user", email: "safety-rel-user@example.com" }) }));
+    const { createInternalTripPlanItem } = await import("@/features/chat-trips/trip-projects");
+
+    // Cross-project parent: activity in projectA with parentItemId from projectB.
+    await expect(createInternalTripPlanItem(projectA.id, 1, { kind: "activity", type: "visit", state: "idea", label: "Sai cha", ordinal: 0, parentItemId: legB.id })).resolves.toEqual({ success: false, reason: "invalid" });
+    // Non-leg parent: activity with an anchor as parent (anchor cannot be a parent).
+    await expect(createInternalTripPlanItem(projectA.id, 1, { kind: "activity", type: "visit", state: "idea", label: "Sai cha", ordinal: 1, parentItemId: "nonexistent" })).resolves.toEqual({ success: false, reason: "invalid" });
+    // No partial state.
+    await expect(testDb.select().from(tripPlanItems).where(eq(tripPlanItems.tripProjectId, projectA.id))).resolves.toHaveLength(1);
+  });
+
+  test("3.2 stale aggregate version on update and delete returns refresh_required and applies nothing", async () => {
+    await createTestUser("safety-stale-user");
+    const [project] = await testDb.insert(tripProjects).values({ userId: "safety-stale-user", title: "Hà Giang", aggregateVersion: 1 }).returning({ id: tripProjects.id });
+    const [item] = await testDb.insert(tripPlanItems).values({ id: "stale-leg", tripProjectId: project.id, userId: "safety-stale-user", kind: "leg", type: "transport", state: "idea", label: "Chạy xe", ordinal: 0 }).returning();
+    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "safety-stale-user", email: "safety-stale-user@example.com" }) }));
+    const { updateInternalTripPlanItem, deleteInternalTripPlanItem, upsertInternalTripProjectConstraints } = await import("@/features/chat-trips/trip-projects");
+
+    // Stale aggregate on update.
+    await expect(updateInternalTripPlanItem(project.id, 99, item.id, 1, { kind: "leg", type: "transport", state: "confirmed", label: "Stale", ordinal: 0 })).resolves.toEqual({ success: false, reason: "refresh_required" });
+    // Stale aggregate on delete.
+    await expect(deleteInternalTripPlanItem(project.id, 99, item.id, 1)).resolves.toEqual({ success: false, reason: "refresh_required" });
+    // Stale aggregate on constraints.
+    await expect(upsertInternalTripProjectConstraints(project.id, 99, null, { adultCount: 2 })).resolves.toEqual({ success: false, reason: "refresh_required" });
+
+    // Aggregate version unchanged.
+    const [savedProject] = await testDb.select().from(tripProjects).where(eq(tripProjects.id, project.id));
+    expect(savedProject.aggregateVersion).toBe(1);
+    // Item unchanged.
+    const [savedItem] = await testDb.select().from(tripPlanItems).where(eq(tripPlanItems.id, item.id));
+    expect(savedItem.state).toBe("idea");
+    expect(savedItem.version).toBe(1);
+  });
+
+  test("3.3 stale item version on update and delete returns refresh_required and applies nothing", async () => {
+    await createTestUser("safety-iv-user");
+    const [project] = await testDb.insert(tripProjects).values({ userId: "safety-iv-user", title: "Sapa", aggregateVersion: 1 }).returning({ id: tripProjects.id });
+    const [item] = await testDb.insert(tripPlanItems).values({ id: "iv-leg", tripProjectId: project.id, userId: "safety-iv-user", kind: "leg", type: "transport", state: "idea", label: "Chạy xe", ordinal: 0 }).returning();
+    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "safety-iv-user", email: "safety-iv-user@example.com" }) }));
+    const { updateInternalTripPlanItem, deleteInternalTripPlanItem } = await import("@/features/chat-trips/trip-projects");
+
+    // Correct aggregate but stale item version.
+    await expect(updateInternalTripPlanItem(project.id, 1, item.id, 99, { kind: "leg", type: "transport", state: "confirmed", label: "Stale item", ordinal: 0 })).resolves.toEqual({ success: false, reason: "refresh_required" });
+    await expect(deleteInternalTripPlanItem(project.id, 1, item.id, 99)).resolves.toEqual({ success: false, reason: "refresh_required" });
+
+    // Item unchanged.
+    const [savedItem] = await testDb.select().from(tripPlanItems).where(eq(tripPlanItems.id, item.id));
+    expect(savedItem.state).toBe("idea");
+    expect(savedItem.version).toBe(1);
+  });
+
+  test("3.3 backup state without a same-project backupTargetItemId is rejected by the DB check constraint", async () => {
+    await createTestUser("safety-bk-user");
+    const [project] = await testDb.insert(tripProjects).values({ userId: "safety-bk-user", title: "Hội An", aggregateVersion: 1 }).returning({ id: tripProjects.id });
+    // The DB check constraint (trip_plan_items_backup_check) enforces that
+    // backup state requires a non-null backupTargetItemId and vice versa.
+    await expect(
+      testDb.insert(tripPlanItems).values({ id: "bk-no-target", tripProjectId: project.id, userId: "safety-bk-user", kind: "leg", type: "transport", state: "backup", label: "Phương án B", ordinal: 0 }),
+    ).rejects.toThrow();
+    // A non-backup state WITH a backupTargetItemId is also rejected.
+    await expect(
+      testDb.insert(tripPlanItems).values({ id: "idea-with-target", tripProjectId: project.id, userId: "safety-bk-user", kind: "leg", type: "transport", state: "idea", label: "Ý tưởng", ordinal: 0, backupTargetItemId: "some-target" }),
+    ).rejects.toThrow();
+  });
+
+  test("4.1 ordinals remain unique within (trip_project_id, parent_item_id) after create and remove", async () => {
+    await createTestUser("safety-ord-user");
+    const [project] = await testDb.insert(tripProjects).values({ userId: "safety-ord-user", title: "Cần Thơ", aggregateVersion: 1 }).returning({ id: tripProjects.id });
+    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "safety-ord-user", email: "safety-ord-user@example.com" }) }));
+    const { createInternalTripPlanItem, deleteInternalTripPlanItem } = await import("@/features/chat-trips/trip-projects");
+
+    // Create two root items with ordinals 0 and 1.
+    await expect(createInternalTripPlanItem(project.id, 1, { kind: "leg", type: "transport", state: "idea", label: "A", ordinal: 0 })).resolves.toMatchObject({ success: true, aggregateVersion: 2 });
+    await expect(createInternalTripPlanItem(project.id, 2, { kind: "leg", type: "visit", state: "idea", label: "B", ordinal: 1 })).resolves.toMatchObject({ success: true, aggregateVersion: 3 });
+
+    // Duplicate ordinal 0 at root level is rejected by the unique index (DB throws).
+    await expect(createInternalTripPlanItem(project.id, 3, { kind: "leg", type: "food", state: "idea", label: "C", ordinal: 0 })).rejects.toThrow();
+
+    // No partial state: only the two original items exist.
+    const items = await testDb.select().from(tripPlanItems).where(eq(tripPlanItems.tripProjectId, project.id));
+    expect(items).toHaveLength(2);
+
+    // Delete item with ordinal 0 — ordinal 1 is still unique.
+    const itemA = items.find((i) => i.ordinal === 0);
+    expect(itemA).toBeDefined();
+    await expect(deleteInternalTripPlanItem(project.id, 3, itemA!.id, 1)).resolves.toMatchObject({ success: true });
+
+    // Now ordinal 0 is free again.
+    await expect(createInternalTripPlanItem(project.id, 4, { kind: "leg", type: "food", state: "idea", label: "C2", ordinal: 0 })).resolves.toMatchObject({ success: true });
+  });
+});

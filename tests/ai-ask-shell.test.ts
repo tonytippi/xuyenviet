@@ -9,6 +9,7 @@ import type { AnswerAnnotation } from "@/features/ai/answer-annotations";
 import type { AnswerEntityDescriptor } from "@/features/ai/ai-ask-composer";
 import { TripProposalReviewCard } from "@/features/ai/trip-proposal-review-card";
 import type { PendingProposalFocusInput } from "@/features/chat-trips/trip-home";
+import { tripChangeProposalLabels } from "@/features/chat-trips/trip-home-labels";
 import type { AssistantMessageProvenanceItem } from "@/features/retrieval/provenance";
 
 import { testDb } from "./helpers/db";
@@ -2622,5 +2623,210 @@ describe("AI Ask streaming route", () => {
       expect(historySheetSlice).toContain('onRefreshProposal=');
       expect(historySheetSlice).toContain('proposalPending={proposalPending}');
       expect(historySheetSlice).toContain('proposalTerminalOutcome={proposalTerminalOutcome}');
+    });
+  });
+
+  // Story 7.6 AC3: Workspace accessibility and recovery verification.
+  // Source-inspection and DOM assertions for keyboard reachability, focus
+  // management, aria-live, 44px touch targets, reduced-motion, single
+  // aria-modal coordination, explicit owner-confirmed apply, no
+  // auto-regeneration, and recovery-path invariants.
+  describe("Story 7.6 AC3 workspace accessibility and recovery", () => {
+    test("7.1 plan and proposal action controls are keyboard-reachable with visible focus and explicit Vietnamese labels", () => {
+      const cardSource = readFileSync("src/features/ai/trip-proposal-review-card.tsx", "utf8");
+      const panelSource = readFileSync("src/features/ai/trip-workspace-panel.tsx", "utf8");
+      const labelsSource = readFileSync("src/features/chat-trips/trip-home-labels.ts", "utf8");
+
+      // Apply/dismiss buttons are type="button" (keyboard-reachable, not form-submit).
+      expect(cardSource).toContain('type="button"');
+      // Apply button references the explicit Vietnamese label constant.
+      expect(cardSource).toContain("tripChangeProposalLabels.apply");
+      // Dismiss button references the explicit Vietnamese label constant.
+      expect(cardSource).toContain("tripChangeProposalLabels.keepPlan");
+      // Refresh button references the explicit Vietnamese label constant.
+      expect(cardSource).toContain("tripChangeProposalLabels.refresh");
+      // The labels file defines the Vietnamese strings.
+      expect(labelsSource).toContain('apply: "Áp dụng"');
+      expect(labelsSource).toContain('keepPlan: "Giữ kế hoạch"');
+      expect(labelsSource).toContain('refresh: "Làm mới đề xuất"');
+      // All interactive buttons have focus ring classes (focus:ring-4).
+      expect(cardSource).toContain("focus:ring-4");
+      // No hover-only actions — all actions are on buttons with type="button".
+      expect(cardSource).not.toContain("onMouseEnter");
+      expect(cardSource).not.toContain("onMouseLeave");
+      // Plan history summary (desktop) is keyboard-reachable via <details>/<summary>.
+      expect(panelSource).toContain("<details");
+      expect(panelSource).toContain("<summary");
+      // Summary has focus ring.
+      expect(panelSource).toContain("focus:ring-4");
+    });
+
+    test("7.2 mobile touch targets for plan/proposal actions are at least 44px (min-h-11)", () => {
+      const cardSource = readFileSync("src/features/ai/trip-proposal-review-card.tsx", "utf8");
+      const panelSource = readFileSync("src/features/ai/trip-workspace-panel.tsx", "utf8");
+      const composerSource = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
+
+      // min-h-11 = 44px in Tailwind. All action buttons must use it.
+      expect(cardSource).toContain("min-h-11");
+      expect(panelSource).toContain("min-h-11");
+      // The composer send button and other interactive controls use min-h-11.
+      expect(composerSource).toContain("min-h-11");
+      // No action button uses a smaller min-height.
+      expect(cardSource).not.toContain("min-h-9");
+      expect(cardSource).not.toContain("min-h-8");
+    });
+
+    test("7.2 reduced-motion: non-essential transitions are disabled via Tailwind transition + no forced animation", () => {
+      const cardSource = readFileSync("src/features/ai/trip-proposal-review-card.tsx", "utf8");
+      const panelSource = readFileSync("src/features/ai/trip-workspace-panel.tsx", "utf8");
+
+      // Transitions are CSS-based (Tailwind "transition" class), which respect
+      // prefers-reduced-motion at the browser level. No JS-driven animations.
+      expect(cardSource).not.toContain("useEffect");
+      expect(cardSource).not.toContain("useState");
+      expect(cardSource).not.toContain("requestAnimationFrame");
+      expect(cardSource).not.toContain("animationDuration");
+      expect(panelSource).not.toContain("requestAnimationFrame");
+      expect(panelSource).not.toContain("animationDuration");
+    });
+
+    test("7.3 pending/terminal apply/dismiss states announce via polite aria-live", () => {
+      const cardSource = readFileSync("src/features/ai/trip-proposal-review-card.tsx", "utf8");
+      const panelSource = readFileSync("src/features/ai/trip-workspace-panel.tsx", "utf8");
+
+      // The proposal card root has aria-live="polite".
+      expect(cardSource).toContain('aria-live="polite"');
+      // The workspace panel has an sr-only aria-live region for focus changes.
+      expect(panelSource).toContain('aria-live="polite"');
+      // The plan history list has aria-live="polite".
+      expect(panelSource).toContain('aria-live="polite"');
+    });
+
+    test("7.3 terminal focus returns to the originating answer card or Trip Home focus card", () => {
+      const composerSource = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
+
+      // focusOriginAfterTerminal is defined and used by apply/dismiss handlers.
+      expect(composerSource).toContain("focusOriginAfterTerminal");
+      // It queries for a tabindex=-1 heading on the origin element.
+      expect(composerSource).toContain("tabindex='-1'");
+      // Fallback: queries the Trip Home focus card by aria-label.
+      expect(composerSource).toContain('aria-label="Tiêu điểm Trip Home"');
+    });
+
+    test("7.3 only one aria-modal=true dialog is open at a time (plan-history sheet coordinates with answer-detail and workspace sheets)", () => {
+      const composerSource = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
+
+      // The composer coordinates sheets so only one aria-modal dialog opens.
+      // The history sheet is opened via onOpenPlanHistory (a callback), not by
+      // rendering a second independent dialog.
+      expect(composerSource).toContain("onOpenPlanHistory");
+      // The workspace panel's plan-history sheet-trigger variant delegates to
+      // the composer via callback, not by rendering its own dialog.
+      const panelSource = readFileSync("src/features/ai/trip-workspace-panel.tsx", "utf8");
+      expect(panelSource).toContain("onOpenPlanHistory");
+      expect(panelSource).not.toContain('aria-modal="true"');
+    });
+
+    test("7.4 proposal application is an unmistakable owner-confirmed action — Áp dụng is explicit, never invoked by chat or stream done", () => {
+      const cardSource = readFileSync("src/features/ai/trip-proposal-review-card.tsx", "utf8");
+      const composerSource = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
+
+      // The apply button references the explicit Vietnamese label constant.
+      expect(cardSource).toContain("tripChangeProposalLabels.apply");
+      // Apply is only on a button with onClick={onApply}, not on a form or chat submit.
+      expect(cardSource).toContain("onClick={onApply}");
+      // The composer's handleApplyProposal is a dedicated handler, not wired to
+      // the chat submit or stream done event.
+      expect(composerSource).toContain("handleApplyProposal");
+      // The apply handler is defined as a standalone function.
+      const applyHandlerIndex = composerSource.indexOf("function handleApplyProposal");
+      expect(applyHandlerIndex).toBeGreaterThan(-1);
+      // The stream done handler must NOT call handleApplyProposal.
+      const doneIndex = composerSource.indexOf('"done"');
+      if (doneIndex > -1) {
+        // Get the context around the done handler to verify it doesn't call apply.
+        const doneSlice = composerSource.slice(doneIndex, doneIndex + 1000);
+        expect(doneSlice).not.toContain("handleApplyProposal(");
+      }
+    });
+
+    test("7.4 the timeline has no reorder/edit/status controls — timeline entries are read-only display", () => {
+      const panelSource = readFileSync("src/features/ai/trip-workspace-panel.tsx", "utf8");
+
+      // Timeline entries are <li> elements with no buttons or inputs.
+      const timelineStart = panelSource.indexOf('aria-label="Dòng thời gian kế hoạch"');
+      expect(timelineStart).toBeGreaterThan(-1);
+      const timelineSlice = panelSource.slice(timelineStart, timelineStart + 2000);
+      // No buttons in timeline entries.
+      expect(timelineSlice).not.toContain("<button");
+      // No input fields in timeline entries.
+      expect(timelineSlice).not.toContain("<input");
+      // No select elements in timeline entries.
+      expect(timelineSlice).not.toContain("<select");
+      // No textarea in timeline entries.
+      expect(timelineSlice).not.toContain("<textarea");
+    });
+
+    test("7.4 refresh (Làm mới đề xuất) focuses the composer and does NOT auto-regenerate or call the AI gateway", () => {
+      const composerSource = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
+
+      // The comment block before handleRefreshProposal states it does NOT auto-regenerate.
+      const refreshCommentStart = composerSource.indexOf("Làm mới đề xuất is an owner action");
+      expect(refreshCommentStart).toBeGreaterThan(-1);
+      const refreshCommentSlice = composerSource.slice(refreshCommentStart, refreshCommentStart + 400);
+
+      // It does NOT auto-regenerate.
+      expect(refreshCommentSlice).toContain("does NOT auto-regenerate");
+      // It does NOT call the AI gateway.
+      expect(refreshCommentSlice).toContain("does NOT call the AI gateway");
+
+      // The function body focuses the textarea.
+      const refreshFnStart = composerSource.indexOf("function handleRefreshProposal");
+      expect(refreshFnStart).toBeGreaterThan(-1);
+      const refreshFnSlice = composerSource.slice(refreshFnStart, refreshFnStart + 200);
+
+      // It focuses the composer textarea.
+      expect(refreshFnSlice).toContain("textareaRef.current?.focus()");
+      // It does NOT call the AI gateway or any streaming function.
+      expect(refreshFnSlice).not.toContain("aiGateway");
+      expect(refreshFnSlice).not.toContain("stream");
+      expect(refreshFnSlice).not.toContain("generateProposal");
+      expect(refreshFnSlice).not.toContain("persistAiTripChangeProposalDraft");
+    });
+
+    test("7.5 recovery: refresh_required/expired outcomes show Làm mới đề xuất/Đã hết hạn with action row hidden (P4 invariant)", () => {
+      const cardSource = readFileSync("src/features/ai/trip-proposal-review-card.tsx", "utf8");
+
+      // isRefreshRequired hides the action row (showActionRow = !isTerminal && !isRefreshRequired).
+      expect(cardSource).toContain("isRefreshRequired");
+      expect(cardSource).toContain("showActionRow");
+      // The refresh-required outcome shows the refresh hint label constant.
+      expect(cardSource).toContain("refreshHint");
+      // The refresh button references the label constant.
+      expect(cardSource).toContain("tripChangeProposalLabels.refresh");
+      // The expired badge references the label constant.
+      expect(cardSource).toContain("tripChangeProposalLabels.expired");
+      // The action row is hidden when terminal or refresh-required.
+      expect(cardSource).toContain("!isTerminal && !isRefreshRequired");
+    });
+
+    test("7.5 recovery: transient errors keep the action row visible for retry (Q3 invariant)", () => {
+      const cardSource = readFileSync("src/features/ai/trip-proposal-review-card.tsx", "utf8");
+
+      // transient-error is excluded from isTerminal so the action row stays visible.
+      expect(cardSource).toContain('terminalOutcome !== "transient-error"');
+      // The transient-error variant is declared.
+      expect(cardSource).toContain('"transient-error"');
+    });
+
+    test("7.4 proposal cards must never look identical to confirmed timeline items — amber border and suggestion note preserved", () => {
+      const cardSource = readFileSync("src/features/ai/trip-proposal-review-card.tsx", "utf8");
+
+      // Amber border (#D97706) distinguishes proposal cards from confirmed items.
+      expect(cardSource).toContain("#D97706");
+      // The suggestion note is always rendered via the label constant.
+      expect(cardSource).toContain("suggestionNote");
+      // The badge label constant is always shown.
+      expect(cardSource).toContain("tripChangeProposalLabels.badge");
     });
   });

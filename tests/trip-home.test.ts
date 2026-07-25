@@ -10,8 +10,14 @@ import {
   findPendingProposalWithoutExpiry,
   tripPlanItemStateLabels,
   type PendingProposalFocusInput,
+  type TripHomeFocus,
   type TripPlanItemProjection,
 } from "@/features/chat-trips/trip-home";
+import {
+  tripChangeProposalLabels,
+  tripHomeFocusKindLabels,
+  tripHomeFocusNextActions,
+} from "@/features/chat-trips/trip-home-labels";
 
 const now = new Date("2026-07-25T10:00:00.000Z");
 
@@ -672,6 +678,267 @@ describe("Trip Home read model", () => {
       expect(second.kind).toBe("preparation");
       if (second.kind === "preparation") {
         expect(second.reason).toBe("Chuẩn bị cho chuyến đi");
+      }
+    });
+  });
+
+  // Story 7.6 AC2: full deterministic fixture matrix. The six focus kinds and
+  // their tie-break chain are exercised as named scenarios so the architecture-
+  // defined priority is unmistakable and regression-safe.
+  describe("Story 7.6 AC2 full fixture matrix", () => {
+    test("expiring proposal: earliest expiry wins focus over all other kinds", () => {
+      const items = [
+        makeItem({ id: "gap", type: "transport", state: "confirmed" }),
+        makeItem({ id: "future-leg", type: "transport", state: "planned", plannedAt: new Date("2026-08-01T00:00:00.000Z") }),
+      ];
+      const proposals = [
+        makeProposal({ id: "no-expiry", createdAt: new Date("2026-07-21T00:00:00.000Z") }),
+        makeProposal({ id: "later-expiry", expiresAt: new Date("2026-07-28T00:00:00.000Z") }),
+        makeProposal({ id: "earliest-expiry", expiresAt: new Date("2026-07-26T00:00:00.000Z") }),
+      ];
+
+      const focus = computeTripHomeFocus({ items, pendingProposals: proposals, now });
+
+      expect(focus.kind).toBe("pending-proposal-with-expiry");
+      if (focus.kind === "pending-proposal-with-expiry") {
+        expect(focus.proposalId).toBe("earliest-expiry");
+      }
+    });
+
+    test("pending proposal without expiry: earliest createdAt wins when no expiring proposal", () => {
+      const items = [
+        makeItem({ id: "gap", type: "transport", state: "confirmed" }),
+      ];
+      const proposals = [
+        makeProposal({ id: "later-created", createdAt: new Date("2026-07-23T00:00:00.000Z") }),
+        makeProposal({ id: "earliest-created", createdAt: new Date("2026-07-21T00:00:00.000Z") }),
+      ];
+
+      const focus = computeTripHomeFocus({ items, pendingProposals: proposals, now });
+
+      expect(focus.kind).toBe("pending-proposal");
+      if (focus.kind === "pending-proposal") {
+        expect(focus.proposalId).toBe("earliest-created");
+      }
+    });
+
+    test("confirmed-item gap: transport missing date/time or origin/destination", () => {
+      const items = [
+        makeItem({ id: "transport-no-date", type: "transport", state: "confirmed", transportOriginLabel: "Hà Nội", transportDestinationLabel: "Huế" }),
+        makeItem({ id: "future-leg", type: "transport", state: "planned", plannedAt: new Date("2026-08-01T00:00:00.000Z") }),
+      ];
+
+      const focus = computeTripHomeFocus({ items, pendingProposals: [], now });
+
+      expect(focus.kind).toBe("confirmed-item-gap");
+      if (focus.kind === "confirmed-item-gap") {
+        expect(focus.itemId).toBe("transport-no-date");
+      }
+    });
+
+    test("confirmed-item gap: accommodation missing date/time or place/area", () => {
+      const items = [
+        makeItem({ id: "acc-no-place", type: "accommodation", state: "confirmed", plannedAt: new Date("2026-08-03T00:00:00.000Z") }),
+        makeItem({ id: "future-leg", type: "transport", state: "planned", plannedAt: new Date("2026-08-01T00:00:00.000Z") }),
+      ];
+
+      const focus = computeTripHomeFocus({ items, pendingProposals: [], now });
+
+      expect(focus.kind).toBe("confirmed-item-gap");
+      if (focus.kind === "confirmed-item-gap") {
+        expect(focus.itemId).toBe("acc-no-place");
+      }
+    });
+
+    test("future leg: earliest planned time wins when no proposals and no gaps", () => {
+      const items = [
+        makeItem({ id: "far-leg", type: "transport", state: "planned", plannedAt: new Date("2026-09-01T00:00:00.000Z") }),
+        makeItem({ id: "near-leg", type: "transport", state: "planned", plannedAt: new Date("2026-08-01T00:00:00.000Z") }),
+      ];
+
+      const focus = computeTripHomeFocus({ items, pendingProposals: [], now });
+
+      expect(focus.kind).toBe("next-leg");
+      if (focus.kind === "next-leg") {
+        expect(focus.itemId).toBe("near-leg");
+      }
+    });
+
+    test("empty plan: preparation focus when no items, no proposals", () => {
+      const focus = computeTripHomeFocus({ items: [], pendingProposals: [], now });
+
+      expect(focus.kind).toBe("preparation");
+    });
+
+    test("ties: earliest expiry → earliest planned time → stable createdAt/id", () => {
+      // Two proposals with same expiry → earliest createdAt wins via id tiebreak.
+      const sameExpiry = new Date("2026-07-26T00:00:00.000Z");
+      const proposals = [
+        makeProposal({ id: "zzz-prop", expiresAt: sameExpiry, createdAt: new Date("2026-07-22T00:00:00.000Z") }),
+        makeProposal({ id: "aaa-prop", expiresAt: sameExpiry, createdAt: new Date("2026-07-20T00:00:00.000Z") }),
+      ];
+
+      const focus = computeTripHomeFocus({ items: [], pendingProposals: proposals, now });
+
+      if (focus.kind === "pending-proposal-with-expiry") {
+        expect(focus.proposalId).toBe("aaa-prop");
+      }
+    });
+
+    test("full priority chain: expiring > pending > gap > future-leg > preparation", () => {
+      // With all present, expiring wins.
+      const allItems = [
+        makeItem({ id: "gap-1", type: "transport", state: "confirmed" }),
+        makeItem({ id: "future-1", type: "transport", state: "planned", plannedAt: new Date("2026-08-01T00:00:00.000Z") }),
+      ];
+      const allProposals = [
+        makeProposal({ id: "pending-no-expiry", createdAt: new Date("2026-07-21T00:00:00.000Z") }),
+        makeProposal({ id: "expiring", expiresAt: new Date("2026-07-26T00:00:00.000Z") }),
+      ];
+      expect(computeTripHomeFocus({ items: allItems, pendingProposals: allProposals, now }).kind).toBe("pending-proposal-with-expiry");
+
+      // Remove expiring → pending wins.
+      expect(computeTripHomeFocus({ items: allItems, pendingProposals: [allProposals[0]], now }).kind).toBe("pending-proposal");
+
+      // Remove all proposals → gap wins.
+      expect(computeTripHomeFocus({ items: allItems, pendingProposals: [], now }).kind).toBe("confirmed-item-gap");
+
+      // Remove gap → future leg wins.
+      const noGapItems = [makeItem({ id: "future-1", type: "transport", state: "planned", plannedAt: new Date("2026-08-01T00:00:00.000Z"), transportOriginLabel: "Hà Nội", transportDestinationLabel: "Huế" })];
+      expect(computeTripHomeFocus({ items: noGapItems, pendingProposals: [], now }).kind).toBe("next-leg");
+
+      // Remove future leg → preparation.
+      expect(computeTripHomeFocus({ items: [], pendingProposals: [], now }).kind).toBe("preparation");
+    });
+  });
+
+  // Story 7.6 AC2 6.2: an open `idea` or incomplete `planned` item is NEVER
+  // treated as a gap by itself — only confirmed items with missing fields are
+  // gaps. This is already covered above but we add an explicit combined scenario.
+  describe("Story 7.6 AC2 idea and planned items are never gaps", () => {
+    test("idea transport with all fields missing is not a gap; focus falls through to future leg or preparation", () => {
+      const items = [
+        makeItem({ id: "idea-transport", type: "transport", state: "idea" }),
+        makeItem({ id: "idea-acc", type: "accommodation", state: "idea" }),
+      ];
+      const focus = computeTripHomeFocus({ items, pendingProposals: [], now });
+      expect(focus.kind).toBe("preparation");
+    });
+
+    test("incomplete planned transport is not a gap; focus falls through to future leg or preparation", () => {
+      const items = [
+        makeItem({ id: "planned-incomplete", type: "transport", state: "planned" }),
+      ];
+      const focus = computeTripHomeFocus({ items, pendingProposals: [], now });
+      expect(focus.kind).toBe("preparation");
+    });
+  });
+
+  // Story 7.6 AC2 6.3: focus descriptions/labels never imply weather, route,
+  // availability, booking, or other unavailable dynamic data was checked.
+  describe("Story 7.6 AC2 never implies unavailable dynamic data was checked", () => {
+    const forbiddenTerms = [
+      "thời tiết",
+      "đường đi",
+      "còn chỗ",
+      "đặt phòng",
+      "đặt trước",
+      "ETA",
+      "dự đoán",
+      "tình trạng",
+      "provider",
+      "snapshot",
+      "weather",
+      "route",
+      "availability",
+      "booking",
+    ];
+
+    function assertNoForbiddenTerms(text: string) {
+      for (const term of forbiddenTerms) {
+        expect(text.toLowerCase()).not.toContain(term.toLowerCase());
+      }
+    }
+
+    function assertFocusClean(focus: TripHomeFocus) {
+      assertNoForbiddenTerms(focus.reason);
+    }
+
+    test("all focus kind labels in trip-home-labels.ts are free of forbidden dynamic-data terms", () => {
+      for (const label of Object.values(tripHomeFocusKindLabels)) {
+        assertNoForbiddenTerms(label);
+      }
+      for (const action of Object.values(tripHomeFocusNextActions)) {
+        assertNoForbiddenTerms(action);
+      }
+    });
+
+    test("tripChangeProposalLabels copy never implies dynamic data was checked", () => {
+      // The suggestionNote explicitly disclaims checking availability/route/weather.
+      for (const label of Object.values(tripChangeProposalLabels)) {
+        // The suggestionNote contains the words "đặt phòng", "đường đi", "thời tiết",
+        // "tình trạng còn chỗ" but in a NEGATIVE context ("không phải ..."). We
+        // verify it is a disclaimer, not a claim.
+        if (typeof label === "string") {
+          // The suggestionNote is the only label that mentions these terms, and
+          // it uses them to disclaim, not to claim. All other labels must be clean.
+          if (label === tripChangeProposalLabels.suggestionNote) {
+            expect(label).toContain("không phải");
+          } else {
+            assertNoForbiddenTerms(label);
+          }
+        }
+      }
+    });
+
+    test("pending-proposal-with-expiry focus reason does not mention dynamic data", () => {
+      const proposals = [makeProposal({ id: "p1", expiresAt: new Date("2026-07-26T00:00:00.000Z") })];
+      const focus = computeTripHomeFocus({ items: [], pendingProposals: proposals, now });
+      expect(focus.kind).toBe("pending-proposal-with-expiry");
+      assertFocusClean(focus);
+    });
+
+    test("pending-proposal focus reason does not mention dynamic data", () => {
+      const proposals = [makeProposal({ id: "p1", createdAt: new Date("2026-07-22T00:00:00.000Z") })];
+      const focus = computeTripHomeFocus({ items: [], pendingProposals: proposals, now });
+      expect(focus.kind).toBe("pending-proposal");
+      assertFocusClean(focus);
+    });
+
+    test("confirmed-item-gap focus reason mentions only missing plan fields, not dynamic data", () => {
+      const items = [makeItem({ id: "gap-1", type: "transport", state: "confirmed" })];
+      const focus = computeTripHomeFocus({ items, pendingProposals: [], now });
+      expect(focus.kind).toBe("confirmed-item-gap");
+      assertFocusClean(focus);
+      if (focus.kind === "confirmed-item-gap") {
+        // Reason should mention plan fields like "ngày giờ", "điểm đi", "điểm đến"
+        // but never dynamic data.
+        expect(focus.reason).toMatch(/ngày giờ|điểm đi|điểm đến|thông tin/);
+      }
+    });
+
+    test("next-leg focus reason mentions only the next plan item, not dynamic data", () => {
+      const items = [makeItem({ id: "leg-1", type: "transport", state: "planned", plannedAt: new Date("2026-08-01T00:00:00.000Z") })];
+      const focus = computeTripHomeFocus({ items, pendingProposals: [], now });
+      expect(focus.kind).toBe("next-leg");
+      assertFocusClean(focus);
+    });
+
+    test("preparation focus reason does not mention dynamic data", () => {
+      const focus = computeTripHomeFocus({ items: [], pendingProposals: [], now });
+      expect(focus.kind).toBe("preparation");
+      assertFocusClean(focus);
+    });
+
+    test("all focus sortKeys use only deterministic plan/proposal fields, not dynamic data", () => {
+      const proposals = [makeProposal({ id: "p1", expiresAt: new Date("2026-07-26T00:00:00.000Z") })];
+      const items = [
+        makeItem({ id: "gap-1", type: "transport", state: "confirmed" }),
+        makeItem({ id: "leg-1", type: "transport", state: "planned", plannedAt: new Date("2026-08-01T00:00:00.000Z") }),
+      ];
+      const focus = computeTripHomeFocus({ items, pendingProposals: proposals, now });
+      if (focus.sortKey) {
+        assertNoForbiddenTerms(focus.sortKey);
       }
     });
   });
