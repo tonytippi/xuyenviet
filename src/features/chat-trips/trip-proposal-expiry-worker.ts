@@ -84,7 +84,12 @@ export type RunTripChangeProposalExpiryWorkerLoopInput = {
 };
 
 export type RunTripChangeProposalExpiryWorkerLoopResult = {
-  status: "processed" | "stopped" | "no_work";
+  // E7R2-F5: distinguish a transient/persistent DB error from a genuine
+  // no-work poll. The prior type conflated both into `no_work`, so a caller
+  // could not decide whether to retry, alert, or treat the batch as clean.
+  // `error` is returned only when a batch transaction threw; `no_work` is
+  // returned only when a batch completed with zero rows processed.
+  status: "processed" | "stopped" | "no_work" | "error";
   processed?: number;
 };
 
@@ -111,8 +116,11 @@ export async function runTripChangeProposalExpiryWorkerLoop(
         workerId: input.workerId,
         error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
       });
+      // E7R2-F5: with once: true, surface the error to the caller instead of
+      // masquerading as no_work. A caller can now distinguish "nothing to do"
+      // (no_work) from "the batch failed and should be retried/alerted" (error).
       if (input.once) {
-        return { status: "no_work" };
+        return { status: "error" };
       }
       await sleep(pollIntervalMs, input.signal);
       continue;

@@ -779,6 +779,16 @@ export async function persistAiTripChangeProposalDraft(
     return { success: false, reason: "invalid" };
   }
 
+  // E7R2-F4: a past-date (or present) expires_at would be dead-on-arrival —
+  // expire-on-read on first view flips the proposal to expired before the
+  // owner ever sees it as pending. Reject any non-null expires_at that is not
+  // strictly in the future. Invalid date objects (NaN) are also rejected.
+  if (input.expiresAt !== null && input.expiresAt !== undefined) {
+    if (!(input.expiresAt instanceof Date) || Number.isNaN(input.expiresAt.getTime()) || input.expiresAt.getTime() <= Date.now()) {
+      return { success: false, reason: "invalid" };
+    }
+  }
+
   try {
     return await getDb().transaction(async (transaction) => {
       const [project] = await transaction
@@ -1681,6 +1691,12 @@ async function executeProposalOperationInTransaction(
     // passes the version fence instead of failing with a misleading
     // refresh_required.
     const nextVersion = expectedItemVersion + 1;
+    // E7R2-F1: propagate plannedAt (and every normalized field) into the
+    // in-memory aggregate so a subsequent update-item on the same item sees
+    // the date change instead of silently reverting it. The prior aggregate
+    // omitted plannedAt, so a second update-item without a plannedAt in its
+    // changes re-wrote the stale current.plannedAt back over the first op's
+    // value — a multi-op silent revert inside one committed transaction.
     itemById.set(itemId, {
       ...current,
       kind: values.kind,
@@ -1689,6 +1705,7 @@ async function executeProposalOperationInTransaction(
       state: values.state,
       label: values.label,
       notes: values.notes,
+      plannedAt: values.plannedAt,
       ordinal: values.ordinal,
       parentItemId: values.parentItemId,
       backupTargetItemId: values.backupTargetItemId,

@@ -316,11 +316,20 @@ function parseDraftPayload(content: string): ParsedDraft | null {
   // orderingPreconditions is optional (AC1: "ordering/parent preconditions when
   // applicable"). When the model omits it or emits null/invalid shape, default to
   // null so the column is nullable and 7.5 apply can still run.
-  const orderingPreconditionsRaw = parsed.orderingPreconditions;
+  // E7R2-F2: the system prompt and expected_output example emit the snake_case
+  // key `ordering_preconditions` (see prompts.ts buildTripChangeProposalDraftMessages).
+  // The prior parser read only camelCase `orderingPreconditions`, so the model's
+  // snake_case output was never read and the column was always null for AI drafts.
+  // Read snake_case first (the documented prompt contract) and fall back to
+  // camelCase for robustness/legacy callers so both shapes are parsed and persisted.
+  const orderingPreconditionsRaw = parsed.ordering_preconditions ?? parsed.orderingPreconditions;
   const orderingPreconditions = isRecord(orderingPreconditionsRaw) || Array.isArray(orderingPreconditionsRaw) ? orderingPreconditionsRaw : null;
   // expires_at is optional (AC1: "optional expiry"). When the model omits it or
   // emits an invalid value, default to null so the column is nullable.
-  const expiresAtRaw = parsed.expires_at;
+  // E7R2-F3: the prompt expected_output contract emits `expires_at` (snake_case);
+  // accept the snake_case key the model is instructed to emit. A camelCase
+  // `expiresAt` fallback is kept for robustness/legacy callers.
+  const expiresAtRaw = parsed.expires_at ?? parsed.expiresAt;
   const expiresAt = typeof expiresAtRaw === "string" && expiresAtRaw.trim() && !Number.isNaN(Date.parse(expiresAtRaw.trim())) ? expiresAtRaw.trim() : null;
   return { rationale: parsed.rationale, operations: parsed.operations, alternatives, orderingPreconditions, expiresAt };
 }

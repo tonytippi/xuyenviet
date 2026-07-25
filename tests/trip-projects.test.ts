@@ -539,7 +539,7 @@ describe("Trip project helpers", () => {
     const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế" }).returning({ id: tripProjects.id });
     await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id });
     await testDb.insert(tripPlanItems).values({ id: "leg-1", tripProjectId: project.id, userId: "user-1", kind: "leg", type: "transport", state: "idea", label: "Chạy xe", ordinal: 0, version: 1 });
-    const expiresAt = new Date("2026-08-01T00:00:00.000Z");
+    const expiresAt = new Date(Date.now() + 86_400_000); // tomorrow — strictly future (E7R2-F4)
     await testDb.insert(tripChangeProposals).values({
       tripProjectId: project.id,
       userId: "user-1",

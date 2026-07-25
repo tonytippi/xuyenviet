@@ -549,6 +549,21 @@ async function draftAndPersistProposal({
 
     await recordTripChangeProposalDraftUsage({ session, tripProjectId, draft });
 
+    // E7R2-F4: a past-date expires_at is dead-on-arrival (expire-on-read would
+    // flip it to expired on first view). Normalize and fail fast: drop the
+    // expiry (null) when the model omits it or emits an unparseable value, and
+    // drop the whole proposal when the model emits a past/present timestamp.
+    // persistAiTripChangeProposalDraft re-validates as the canonical seam, but
+    // failing here avoids the persist round-trip and keeps the route's
+    // never-break-the-answer contract intact (the answer still sends `done`).
+    const draftExpiresAt = draft.expiresAt ? new Date(draft.expiresAt) : null;
+    const expiresAtValid = draftExpiresAt instanceof Date
+      && !Number.isNaN(draftExpiresAt.getTime())
+      && draftExpiresAt.getTime() > Date.now();
+    if (draft.expiresAt && !expiresAtValid) {
+      return undefined;
+    }
+
     const persistResult = await persistAiTripChangeProposalDraft({
       tripProjectId,
       expectedAggregateVersion: draft.expectedAggregateVersion,
@@ -557,7 +572,7 @@ async function draftAndPersistProposal({
       rationale: draft.rationale,
       alternatives: draft.alternatives,
       orderingPreconditions: draft.orderingPreconditions,
-      expiresAt: draft.expiresAt ? new Date(draft.expiresAt) : null,
+      expiresAt: expiresAtValid ? draftExpiresAt : null,
       sourceAssistantMessageId: assistantMessageId,
     });
 

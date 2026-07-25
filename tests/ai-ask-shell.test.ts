@@ -1123,6 +1123,66 @@ describe("AI Ask prompt construction", () => {
     expect(gatewayMessages.slice(1, -1).reduce((total, message) => total + message.content.length, 0)).toBeLessThanOrEqual(12_000);
     expect(gatewayMessages.at(-1)).toMatchObject({ role: "user", content: "Câu hỏi mới" });
   });
+
+  // E7R2-F3: the AI proposal-draft prompt must instruct the model to emit
+  // expires_at so the parser can persist it. Before the fix the system prompt
+  // and expected_output example never mentioned expires_at, so the model never
+  // emitted it and E7R-6's parse/persist wiring was a no-op in practice.
+  test("(E7R2-F3) trip-change-proposal draft prompt instructs the model to emit expires_at", async () => {
+    const { buildTripChangeProposalDraftMessages } = await import("@/features/ai/prompts");
+    const messages = buildTripChangeProposalDraftMessages({
+      question: "Đổi lịch khởi hành",
+      currentAggregateSummary: {
+        aggregateVersion: 1,
+        items: [{ id: "leg-1", kind: "leg", anchorRole: null, type: "transport", state: "planned", label: "Chạy xe", ordinal: 0, parentItemId: null, backupTargetItemId: null, transportOriginLabel: "Hà Nội", transportDestinationLabel: "Huế", accommodationPlaceAreaLabel: null }],
+        constraints: null,
+      },
+    });
+
+    // The system prompt must mention expires_at (and require a future date).
+    const systemMessage = messages.find((m) => m.role === "system");
+    expect(systemMessage).toBeDefined();
+    expect(systemMessage?.content).toContain("expires_at");
+    expect(systemMessage?.content).toContain("future");
+
+    // The expected_output example must include an expires_at slot so the model
+    // is shown the field it should emit.
+    const userMessage = messages.find((m) => m.role === "user");
+    expect(userMessage).toBeDefined();
+    const parsed = JSON.parse(userMessage?.content ?? "{}");
+    expect(parsed.expected_output).toBeDefined();
+    expect(parsed.expected_output.expires_at).toBeDefined();
+  });
+
+  // E7R2-F2: the prompt emits ordering_preconditions (snake_case) and the
+  // parser must read the same snake_case key. Before the fix the parser read
+  // only camelCase `orderingPreconditions` while the prompt emitted
+  // snake_case `ordering_preconditions`, so the field was always null for
+  // AI-drafted proposals and 7.5 apply had no structural preconditions.
+  test("(E7R2-F2) trip-change-proposal draft prompt emits ordering_preconditions in snake_case matching the parser", async () => {
+    const { buildTripChangeProposalDraftMessages } = await import("@/features/ai/prompts");
+    const messages = buildTripChangeProposalDraftMessages({
+      question: "Sắp lại thứ tự",
+      currentAggregateSummary: {
+        aggregateVersion: 1,
+        items: [{ id: "leg-1", kind: "leg", anchorRole: null, type: "transport", state: "planned", label: "Chạy xe", ordinal: 0, parentItemId: null, backupTargetItemId: null, transportOriginLabel: "Hà Nội", transportDestinationLabel: "Huế", accommodationPlaceAreaLabel: null }],
+        constraints: null,
+      },
+    });
+
+    const userMessage = messages.find((m) => m.role === "user");
+    expect(userMessage).toBeDefined();
+    const parsed = JSON.parse(userMessage?.content ?? "{}");
+    // The prompt expected_output must use the snake_case key.
+    expect(parsed.expected_output.ordering_preconditions).toBeDefined();
+
+    // Invariant: the parser in trip-proposal-draft.ts must read the same
+    // snake_case key the prompt emits. Source-scan the parser to guarantee
+    // alignment (parseDraftPayload is not exported; this matches the repo's
+    // established source-scanning contract pattern).
+    const draftSource = readFileSync("src/features/ai/trip-proposal-draft.ts", "utf8");
+    expect(draftSource).toContain("parsed.ordering_preconditions");
+  });
 });
 
 describe("AI Ask conversation data layer", () => {
@@ -2825,6 +2885,31 @@ describe("AI Ask streaming route", () => {
       const panelSource = readFileSync("src/features/ai/trip-workspace-panel.tsx", "utf8");
       expect(panelSource).toContain("onOpenPlanHistory");
       expect(panelSource).not.toContain('aria-modal="true"');
+    });
+
+    // E7R2-F6: the mobile plan-history sheet's useEffect (scroll-lock + keydown
+    // listener) must re-run when selectedTripProject or tripWorkspace changes.
+    // The sheet renders only when both are truthy; if the project is deleted
+    // while the sheet is open, the panel unmounts but the prior useEffect
+    // cleanup never re-ran (deps omitted the two vars), leaving the scroll-lock
+    // and keydown listener attached until Escape. The fix adds both to the dep
+    // array so the cleanup fires on unmount.
+    test("(E7R2-F6) plan-history sheet useEffect deps include selectedTripProject and tripWorkspace so cleanup fires on project delete", () => {
+      const composerSource = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
+
+      // Locate the plan-history sheet useEffect (the one referencing
+      // planHistorySheetPanelRef) and assert its dep array includes both
+      // selectedTripProject and tripWorkspace alongside the original
+      // isDesktopViewport / isPlanHistorySheetOpen deps.
+      const useEffectIndex = composerSource.indexOf("planHistorySheetPanelRef.current?.focus()");
+      expect(useEffectIndex).toBeGreaterThan(-1);
+      // Scan forward from the focus call to the next closing dep array.
+      const afterFocusSlice = composerSource.slice(useEffectIndex);
+      const depArrayIndex = afterFocusSlice.indexOf("}, [isDesktopViewport, isPlanHistorySheetOpen");
+      expect(depArrayIndex).toBeGreaterThan(-1);
+      const depArraySlice = afterFocusSlice.slice(depArrayIndex, depArrayIndex + 120);
+      expect(depArraySlice).toContain("selectedTripProject");
+      expect(depArraySlice).toContain("tripWorkspace");
     });
 
     test("7.4 proposal application is an unmistakable owner-confirmed action — Áp dụng is explicit, never invoked by chat or stream done", () => {

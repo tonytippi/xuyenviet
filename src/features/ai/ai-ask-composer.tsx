@@ -1085,7 +1085,7 @@ export function AiAskComposer({
         previousFocus.focus();
       }
     };
-  }, [isDesktopViewport, isPlanHistorySheetOpen]);
+  }, [isDesktopViewport, isPlanHistorySheetOpen, selectedTripProject, tripWorkspace]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

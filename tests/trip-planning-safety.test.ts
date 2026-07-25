@@ -588,9 +588,14 @@ describe("Story 7.6 AC1 cross-cutting trip planning safety", () => {
         expectedItemVersions: { "safety-exp-leg": 1 },
         operations: [{ kind: "change-item-state", itemId: "safety-exp-leg", state: "confirmed" }],
         rationale: "Xác nhận",
-        expiresAt: new Date("2026-01-01T00:00:00.000Z"),
+        // E7R2-F4: persist rejects a past-date expiry. Persist a near-future
+        // expiry (1 ms ahead) that elapses before apply runs, modeling a
+        // proposal that aged past expiry.
+        expiresAt: new Date(Date.now() + 1),
       });
       if (!persisted.success) throw new Error("persist failed");
+      // Yield so the near-future expiry elapses before apply reads it.
+      await new Promise((resolve) => setTimeout(resolve, 5));
 
       const { applyApprovedTripChange } = await loadModuleAs(
         "safety-exp-user",
@@ -1289,7 +1294,10 @@ describe("Story 7.6 AC1 cross-cutting trip planning safety", () => {
         ordinal: 0,
         version: 1,
       });
-      // Seed an elapsed pending proposal (expires in the past).
+      // Seed an elapsed pending proposal. E7R2-F4: persist rejects a past-date
+      // expiry, so persist a near-future expiry (1 ms ahead) that has elapsed
+      // by the time the worker/read runs, modeling a proposal that aged past
+      // expiry.
       const { persistAiTripChangeProposalDraft } = await loadModuleAsMultiConn(
         "safety-wr-user",
         "safety-wr-user@example.com",
@@ -1300,10 +1308,12 @@ describe("Story 7.6 AC1 cross-cutting trip planning safety", () => {
         expectedItemVersions: { "safety-wr-leg": 1 },
         operations: [{ kind: "change-item-state", itemId: "safety-wr-leg", state: "confirmed" }],
         rationale: "Hết hạn",
-        expiresAt: new Date("2026-01-01T00:00:00.000Z"),
+        expiresAt: new Date(Date.now() + 1),
       });
       if (!persisted.success) throw new Error("persist failed");
       const proposalId = persisted.proposal.id;
+      // Yield so the near-future expiry elapses before the worker/read runs.
+      await new Promise((resolve) => setTimeout(resolve, 5));
 
       // Run the worker and the read concurrently. Both run on the explicit
       // multi-connection pool via the mocked getDb (the worker calls getDb()

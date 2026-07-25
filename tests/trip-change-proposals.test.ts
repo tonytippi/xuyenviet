@@ -341,7 +341,7 @@ describe("persistAiTripChangeProposalDraft DB-backed tests", () => {
     await setupProject("user-1", "project-1");
     const { persistAiTripChangeProposalDraft } = await loadModule();
 
-    const expiresAt = new Date("2026-08-01T00:00:00.000Z");
+    const expiresAt = new Date(Date.now() + 86_400_000); // tomorrow — strictly future (E7R2-F4)
     const result = await persistAiTripChangeProposalDraft({
       tripProjectId: "project-1",
       expectedAggregateVersion: 1,
@@ -408,6 +408,66 @@ describe("persistAiTripChangeProposalDraft DB-backed tests", () => {
     await expect(testDb.select().from(tripChangeProposals)).resolves.toHaveLength(1);
 
     await testDb.delete(tripProjects).where(eq(tripProjects.id, "project-1"));
+    await expect(testDb.select().from(tripChangeProposals)).resolves.toHaveLength(0);
+  });
+
+  // E7R2-F4: a past-date expires_at is dead-on-arrival — expire-on-read would
+  // flip the proposal to expired on first view before the owner ever sees it as
+  // pending. persistAiTripChangeProposalDraft must reject a past/present
+  // expires_at with `invalid` and write no row. A future expiry is still
+  // accepted (covered by the "persists a pending proposal" test above).
+  test("(E7R2-F4) rejects a past-date expiresAt with invalid and writes no row", async () => {
+    await createTestUser("user-1");
+    await setupProject("user-1", "project-1");
+    const { persistAiTripChangeProposalDraft } = await loadModule();
+
+    const result = await persistAiTripChangeProposalDraft({
+      tripProjectId: "project-1",
+      expectedAggregateVersion: 1,
+      expectedItemVersions: { "leg-1": 1 },
+      operations: validOperations(),
+      rationale: "Hết hạn ngay.",
+      expiresAt: new Date(Date.now() - 60_000), // 1 minute in the past
+    });
+
+    expect(result).toEqual({ success: false, reason: "invalid" });
+    await expect(testDb.select().from(tripChangeProposals)).resolves.toHaveLength(0);
+  });
+
+  test("(E7R2-F4) rejects a present-date (now) expiresAt with invalid and writes no row", async () => {
+    await createTestUser("user-1");
+    await setupProject("user-1", "project-1");
+    const { persistAiTripChangeProposalDraft } = await loadModule();
+
+    const result = await persistAiTripChangeProposalDraft({
+      tripProjectId: "project-1",
+      expectedAggregateVersion: 1,
+      expectedItemVersions: { "leg-1": 1 },
+      operations: validOperations(),
+      rationale: "Hết hạn ngay.",
+      expiresAt: new Date(), // exactly now — not strictly future
+    });
+
+    expect(result).toEqual({ success: false, reason: "invalid" });
+    await expect(testDb.select().from(tripChangeProposals)).resolves.toHaveLength(0);
+  });
+
+  test("(E7R2-F4) rejects an invalid (NaN) expiresAt Date with invalid and writes no row", async () => {
+    await createTestUser("user-1");
+    await setupProject("user-1", "project-1");
+    const { persistAiTripChangeProposalDraft } = await loadModule();
+
+    const invalidDate = new Date("not-a-date");
+    const result = await persistAiTripChangeProposalDraft({
+      tripProjectId: "project-1",
+      expectedAggregateVersion: 1,
+      expectedItemVersions: { "leg-1": 1 },
+      operations: validOperations(),
+      rationale: "Ngày sai.",
+      expiresAt: invalidDate,
+    });
+
+    expect(result).toEqual({ success: false, reason: "invalid" });
     await expect(testDb.select().from(tripChangeProposals)).resolves.toHaveLength(0);
   });
 });
@@ -592,15 +652,21 @@ describe("Story 7.5 applyApprovedTripChange DB-backed tests", () => {
     await createTestUser("apply-user-4");
     await setupProjectWithItem("apply-user-4", "apply-project-4");
     const { persistAiTripChangeProposalDraft } = await loadModuleAs("apply-user-4", "apply-user-4@example.com");
+    // E7R2-F4: persist rejects a past-date expiry, so persist a near-future
+    // expiry (1 ms ahead) that is already elapsed by the time apply runs
+    // (real clock advances past it). This models a proposal that aged past
+    // expiry — the realistic path to an expired pending row.
     const persisted = await persistAiTripChangeProposalDraft({
       tripProjectId: "apply-project-4",
       expectedAggregateVersion: 1,
       expectedItemVersions: { "leg-1": 1 },
       operations: [{ kind: "change-item-state", itemId: "leg-1", state: "confirmed" }],
       rationale: "Đã hết hạn.",
-      expiresAt: new Date("2026-01-01T00:00:00.000Z"),
+      expiresAt: new Date(Date.now() + 1),
     });
     if (!persisted.success) throw new Error("persist failed");
+    // Yield so the near-future expiry elapses before apply reads it.
+    await new Promise((resolve) => setTimeout(resolve, 5));
     const { applyApprovedTripChange } = await loadModuleAs("apply-user-4", "apply-user-4@example.com");
 
     const result = await applyApprovedTripChange({ tripProjectId: "apply-project-4", proposalId: persisted.proposal.id });
@@ -755,16 +821,20 @@ describe("Story 7.5 expireTripChangeProposal DB-backed tests", () => {
     vi.resetModules();
     vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "expire-user-1", email: "expire-user-1@example.com" }) }));
     const { persistAiTripChangeProposalDraft, expireTripChangeProposal } = await import("@/features/chat-trips/trip-change-proposals");
+    // E7R2-F4: persist rejects a past-date expiry. Persist a near-future
+    // expiry (1 ms ahead) that has elapsed by the time expire runs, then
+    // expire with an explicit now past the persisted expiry.
+    const futureExpiry = new Date(Date.now() + 1);
     const persisted = await persistAiTripChangeProposalDraft({
       tripProjectId: "expire-project-1",
       expectedAggregateVersion: 1,
       operations: [{ kind: "change-item-state", itemId: "expire-leg-1", state: "confirmed" }],
       rationale: "Hết hạn.",
-      expiresAt: new Date("2026-01-01T00:00:00.000Z"),
+      expiresAt: futureExpiry,
     });
     if (!persisted.success) throw new Error("persist failed");
 
-    const result = await expireTripChangeProposal({ tripProjectId: "expire-project-1", proposalId: persisted.proposal.id, now: new Date("2026-07-25T00:00:00.000Z") });
+    const result = await expireTripChangeProposal({ tripProjectId: "expire-project-1", proposalId: persisted.proposal.id, now: new Date(futureExpiry.getTime() + 60_000) });
     expect(result.success).toBe(true);
     if (!result.success) return;
     expect(result.proposal.status).toBe("expired");
@@ -793,14 +863,19 @@ describe("Story 7.5 expireTripChangeProposal DB-backed tests", () => {
     vi.resetModules();
     vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "expire-user-2", email: "expire-user-2@example.com" }) }));
     const { persistAiTripChangeProposalDraft, expireTripChangeProposal } = await import("@/features/chat-trips/trip-change-proposals");
+    // E7R2-F4: persist rejects a past-date expiry. Persist a near-future
+    // expiry (1 ms ahead) that has elapsed by the time the idempotent expire
+    // calls run (default now = real clock, past the persisted expiry).
     const persisted = await persistAiTripChangeProposalDraft({
       tripProjectId: "expire-project-2",
       expectedAggregateVersion: 1,
       operations: [{ kind: "change-item-state", itemId: "expire-leg-2", state: "confirmed" }],
       rationale: "Hết hạn.",
-      expiresAt: new Date("2026-01-01T00:00:00.000Z"),
+      expiresAt: new Date(Date.now() + 1),
     });
     if (!persisted.success) throw new Error("persist failed");
+    // Yield so the near-future expiry elapses before expire reads it.
+    await new Promise((resolve) => setTimeout(resolve, 5));
 
     await expireTripChangeProposal({ tripProjectId: "expire-project-2", proposalId: persisted.proposal.id });
     await expireTripChangeProposal({ tripProjectId: "expire-project-2", proposalId: persisted.proposal.id });
@@ -841,14 +916,19 @@ describe("Story 7.5 expire-on-read and plan history read", () => {
     vi.resetModules();
     vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "expire-read-user-1", email: "expire-read-user-1@example.com" }) }));
     const { persistAiTripChangeProposalDraft, listPendingProposalsForTripProject, listPlanHistoryForTripProject } = await import("@/features/chat-trips/trip-change-proposals");
+    // E7R2-F4: persist rejects a past-date expiry. Persist a near-future
+    // expiry (1 ms ahead) that has elapsed by the time the read runs, so
+    // expire-on-read flips it to expired before the pending list returns.
     const persisted = await persistAiTripChangeProposalDraft({
       tripProjectId: "expire-read-project-1",
       expectedAggregateVersion: 1,
       operations: [{ kind: "change-item-state", itemId: "expire-read-leg-1", state: "confirmed" }],
       rationale: "Hết hạn trên read.",
-      expiresAt: new Date("2026-01-01T00:00:00.000Z"),
+      expiresAt: new Date(Date.now() + 1),
     });
     if (!persisted.success) throw new Error("persist failed");
+    // Yield so the near-future expiry elapses before the read expires it.
+    await new Promise((resolve) => setTimeout(resolve, 5));
 
     const pending = await listPendingProposalsForTripProject("expire-read-project-1");
     expect(pending).toHaveLength(0);
@@ -1240,6 +1320,44 @@ describe("Story 7.5 applyApprovedTripChange pure unit tests (mocked helpers)", (
 
     const result = await applyApprovedTripChange({ tripProjectId: "project-1", proposalId: "prop-1" });
     expect(result).toEqual({ success: false, reason: "refresh_required" });
+  });
+
+  // E7R2-F1: a multi-op sequence with two update-item ops on the same item must
+  // propagate plannedAt through the in-memory aggregate. The first op sets a
+  // new plannedAt; the second op changes only label (no plannedAt in changes).
+  // Before the fix, the second op's in-memory aggregate omitted plannedAt, so
+  // mergeChangesToInternalInput fell back to the stale current.plannedAt (null)
+  // and the second helper call wrote plannedAt=null back — silently reverting
+  // the first op's date change inside one committed transaction. The fix
+  // propagates values.plannedAt into the aggregate so the second op sees and
+  // preserves the first op's date.
+  test("(E7R2-F1) multi-op update-item: second update-item without plannedAt preserves the first op's plannedAt (no silent revert)", async () => {
+    const helpers = makeHelperMocks();
+    helpers.updateTripPlanItemInTransaction
+      .mockResolvedValueOnce({ success: true, aggregateVersion: 2 })
+      .mockResolvedValueOnce({ success: true, aggregateVersion: 3 });
+    const newPlannedAt = "2026-08-15T08:00:00.000Z";
+    const ops = [
+      { kind: "update-item", itemId: "leg-1", changes: { plannedAt: newPlannedAt } },
+      { kind: "update-item", itemId: "leg-1", changes: { label: "Chạy xe cập nhật" } },
+    ];
+    const { applyApprovedTripChange } = await setupApplyMocks({
+      project: { ...baseProject, aggregateVersion: 1 },
+      proposal: { id: "prop-1", status: "pending", rationale: "Test", operations: ops, alternatives: [], expiresAt: null, createdAt: new Date(), expectedAggregateVersion: 1, expectedItemVersions: { "leg-1": 1 }, orderingPreconditions: null },
+      items: [{ ...baseItem, version: 1, plannedAt: null }],
+      constraintsVersion: null,
+    }, helpers);
+
+    const result = await applyApprovedTripChange({ tripProjectId: "project-1", proposalId: "prop-1" });
+    expect(result.success).toBe(true);
+
+    // The second update-item helper must have been called with values.plannedAt
+    // equal to the first op's new plannedAt (propagated through the in-memory
+    // aggregate), NOT reverted to null (the stale pre-apply value).
+    expect(helpers.updateTripPlanItemInTransaction).toHaveBeenCalledTimes(2);
+    const secondCallArgs = helpers.updateTripPlanItemInTransaction.mock.calls[1];
+    const secondValues = secondCallArgs[6]; // values (7th positional arg)
+    expect(secondValues.plannedAt).toEqual(new Date(newPlannedAt));
   });
 });
 

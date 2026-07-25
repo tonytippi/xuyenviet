@@ -130,9 +130,12 @@ describe("Story 7.5 Q2 worker loop survives transient DB errors", () => {
   });
 
   test("runTripChangeProposalExpiryWorkerLoop with once: true exits immediately on a transient batch error instead of retrying infinitely", async () => {
-    // E7R-2: with once: true, a transient DB error must NOT sleep+continue
+    // E7R-2 / E7R2-F5: with once: true, a transient DB error must NOT sleep+continue
     // (infinite loop on persistent error). The catch must check the once flag
     // and return immediately so the caller can decide to retry.
+    // E7R2-F5: the returned status must be `error` (not `no_work`) so a caller
+    // can distinguish a failed batch from a genuinely empty poll. A caller
+    // treating `no_work` as "clean idle" would silently swallow DB errors.
     let transactionCallCount = 0;
     vi.doMock("@/db/client", () => ({
       getDb: () => ({
@@ -146,7 +149,7 @@ describe("Story 7.5 Q2 worker loop survives transient DB errors", () => {
     const { runTripChangeProposalExpiryWorkerLoop } = await import("@/features/chat-trips/trip-proposal-expiry-worker");
     const result = await runTripChangeProposalExpiryWorkerLoop({ once: true, pollIntervalMs: 1 });
 
-    expect(result.status).toBe("no_work");
+    expect(result.status).toBe("error");
     expect(transactionCallCount).toBe(1);
   });
 
