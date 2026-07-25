@@ -91,7 +91,7 @@ development_status:
   6-2-run-public-mvp-ai-first-readiness-review: done
   epic-6-retrospective: optional
 
-  epic-7: in-progress
+  epic-7: done
   # Synchronized 2026-07-25 after status-only verification of supplied final repair commit a76ce4ccdb5e0b5f4ba92a660efc7d095279e88c and a clean pre-update worktree.
   7-1-establish-the-versioned-structured-trip-project-aggregate: done
   # Synchronized 2026-07-25 after code review of commit 5123e27: approved with no high/medium findings; one low cosmetic naming item dismissed.
