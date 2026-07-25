@@ -4,7 +4,6 @@ import { and, asc, desc, eq, isNotNull, lte } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
 import {
-  auditEvents,
   tripChangeProposals,
   tripPlanChangeHistory,
   tripPlanItems,
@@ -59,6 +58,31 @@ const maxNotesLength = 1_000;
 const maxAlternativeSummaryLength = 280;
 const maxOperations = 20;
 const maxAlternatives = 5;
+// P2: the DB check constraint bounds octet_length(safeBeforeAfterSummary::text)
+// at 8192 bytes. deriveBeforeAfter caps at maxOperations entries but does not
+// bound bytes (notes before/after can be up to 1000 chars each). This limit
+// leaves headroom for jsonb::text representation differences.
+const maxSafeSummaryBytes = 8000;
+const validAffectedItemChanges: readonly TripChangeProposalAffectedItemRef["change"][] = [
+  "create",
+  "update",
+  "remove",
+  "reorder",
+  "change-state",
+  "upsert-constraints",
+];
+// P6: recognized ordering-precondition keys. Any other key → fail closed.
+const recognizedOrderingPreconditionKeys = new Set(["parentItemId", "ordinal", "expectedChangedItemVersions"]);
+
+// P18: thrown inside the apply transaction when an operation fails-by-return so
+// Drizzle rolls back the entire transaction (a returned value commits). The
+// outer catch maps this to its specific reason; other errors propagate.
+class ProposalOperationFailure extends Error {
+  constructor(readonly reason: "refresh_required" | "not_found" | "expired") {
+    super(`Proposal operation failed: ${reason}`);
+    this.name = "ProposalOperationFailure";
+  }
+}
 
 const validKinds: readonly TripPlanItemKind[] = ["anchor", "leg", "activity"];
 const validAnchorRoles: readonly TripPlanAnchorRole[] = ["origin", "destination", "region", "required_stop", "accommodation"];
@@ -1199,6 +1223,20 @@ function deriveBeforeAfter(operations: unknown[], knownById: Map<string, KnownPl
   return summaries.slice(0, maxOperations);
 }
 
+// P2: bound the jsonb byte length of { entries: [...] } to satisfy the
+// trip_plan_change_history_safe_summary_check (octet_length <= 8192). Trim
+// entries from the end (preserving the most important earlier operations)
+// until the serialized payload fits within the safe limit.
+function boundBeforeAfterSummary(entries: TripChangeProposalBeforeAfterSummary[]): Record<string, unknown> {
+  for (let count = entries.length; count > 0; count--) {
+    const payload = { entries: entries.slice(0, count) };
+    if (Buffer.byteLength(JSON.stringify(payload), "utf8") <= maxSafeSummaryBytes) {
+      return payload;
+    }
+  }
+  return { entries: [] };
+}
+
 // ===========================================================================
 // Story 7.5: Terminal proposal commands (apply / dismiss / expire) and the
 // owner-scoped plan history read. These are the only paths that mutate a
@@ -1347,10 +1385,15 @@ export async function applyApprovedTripChange(
       // Execute every operation through the matching *InTransaction helper,
       // threading the SAME transaction and the running aggregate version. Each
       // helper advances the aggregate version inside the shared transaction.
+      // P1: update itemById and expectedItemVersions as each op executes so a
+      // subsequent op touching the same item sees the post-op version.
+      // P18: on op failure, THROW inside the transaction so Drizzle rolls back
+      // every prior mutation (returning from the callback commits). The outer
+      // catch maps ProposalOperationFailure to its specific reason.
       let runningAggregateVersion = project.aggregateVersion;
       for (const op of operations) {
         const result = await executeProposalOperationInTransaction(transaction, session, input.tripProjectId, runningAggregateVersion, op, itemById, constraintsRow?.version ?? null, expectedItemVersions);
-        if (!result.success) return result as { success: false; reason: "refresh_required" | "not_found" | "expired" };
+        if (!result.success) throw new ProposalOperationFailure(result.reason);
         runningAggregateVersion = result.aggregateVersion;
       }
 
@@ -1395,7 +1438,7 @@ export async function applyApprovedTripChange(
         actorSystem: null,
         operationClass: "apply",
         affectedItemReferences: affectedItems as unknown as Record<string, unknown>,
-        safeBeforeAfterSummary: { entries: beforeAfter } as unknown as Record<string, unknown>,
+        safeBeforeAfterSummary: boundBeforeAfterSummary(beforeAfter),
       });
 
       // Record the apply audit row (actorClass = 'user').
@@ -1430,17 +1473,26 @@ export async function applyApprovedTripChange(
       return { success: true, aggregateVersion: runningAggregateVersion, proposal: summary } as const;
     });
   } catch (error) {
-    // A thrown error inside the transaction rolls back every mutation. Map
-    // known fence/invalid errors to refresh_required; otherwise log and return
-    // refresh_required so the owner is safely prompted to refresh (never a
-    // partial write).
+    // P18/P10: ProposalOperationFailure carries the specific op-failure reason
+    // (the transaction was rolled back by the throw). Structural validation
+    // errors ("Invalid trip plan"/"Invalid trip constraints") map to
+    // refresh_required. Transient DB errors (connection, deadlock, serialization)
+    // are re-thrown so the caller can distinguish retryable failures from real
+    // version conflicts — the server action and client catch handle them with
+    // a "try again" message rather than a misleading "refresh".
+    if (error instanceof ProposalOperationFailure) {
+      return { success: false, reason: error.reason };
+    }
+    if (error instanceof Error && (error.message.startsWith("Invalid trip plan") || error.message.startsWith("Invalid trip constraints"))) {
+      return { success: false, reason: "refresh_required" };
+    }
     console.error("Failed to apply approved trip change proposal.", {
       tripProjectId: input.tripProjectId,
       proposalId: input.proposalId,
       userId: session.userId,
       error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
     });
-    return { success: false, reason: "refresh_required" };
+    throw error;
   }
 }
 
@@ -1474,10 +1526,13 @@ function validateOperationFences(
 
   // Re-validate ordering preconditions when present. Treat the precondition as
   // opaque structured data and re-check the fields the validator recognizes
-  // (expectedChangedItemVersions). If a precondition field is unrecognizable,
-  // fail closed → refresh_required.
+  // (parentItemId, ordinal, expectedChangedItemVersions). P6: if a precondition
+  // field is unrecognizable, fail closed → refresh_required.
   if (orderingPreconditionsRaw !== null && orderingPreconditionsRaw !== undefined) {
     if (!isRecord(orderingPreconditionsRaw)) return "refresh_required";
+    for (const key of Object.keys(orderingPreconditionsRaw)) {
+      if (!recognizedOrderingPreconditionKeys.has(key)) return "refresh_required";
+    }
     const captured = orderingPreconditionsRaw.expectedChangedItemVersions;
     if (captured !== undefined && captured !== null) {
       if (!isRecord(captured)) return "refresh_required";
@@ -1556,6 +1611,27 @@ async function executeProposalOperationInTransaction(
     const values = normalizePlanItem(input);
     const result = await createTripPlanItemInTransaction(transaction, session, tripProjectId, runningAggregateVersion, values);
     if (!result.success) return { success: false, reason: mapHelperFailure(result.reason) };
+    // P1: add the newly created item to itemById so subsequent ops (e.g.
+    // reorder in the same scope) see it in the in-memory aggregate.
+    if (result.itemId) {
+      itemById.set(result.itemId, {
+        id: result.itemId,
+        kind: values.kind,
+        anchorRole: values.anchorRole,
+        type: values.type,
+        state: values.state,
+        label: values.label,
+        notes: values.notes,
+        plannedAt: values.plannedAt,
+        ordinal: values.ordinal,
+        parentItemId: values.parentItemId,
+        backupTargetItemId: values.backupTargetItemId,
+        transportOriginLabel: values.transportOriginLabel,
+        transportDestinationLabel: values.transportDestinationLabel,
+        accommodationPlaceAreaLabel: values.accommodationPlaceAreaLabel,
+        version: 1,
+      });
+    }
     return { success: true, aggregateVersion: result.aggregateVersion };
   }
 
@@ -1573,6 +1649,27 @@ async function executeProposalOperationInTransaction(
     if (expectedItemVersion === undefined) return { success: false, reason: "refresh_required" };
     const result = await updateTripPlanItemInTransaction(transaction, session, tripProjectId, runningAggregateVersion, itemId, expectedItemVersion, values);
     if (!result.success) return { success: false, reason: mapHelperFailure(result.reason) };
+    // P1: advance the in-memory version so a subsequent op on the same item
+    // passes the version fence instead of failing with a misleading
+    // refresh_required.
+    const nextVersion = expectedItemVersion + 1;
+    itemById.set(itemId, {
+      ...current,
+      kind: values.kind,
+      anchorRole: values.anchorRole,
+      type: values.type,
+      state: values.state,
+      label: values.label,
+      notes: values.notes,
+      ordinal: values.ordinal,
+      parentItemId: values.parentItemId,
+      backupTargetItemId: values.backupTargetItemId,
+      transportOriginLabel: values.transportOriginLabel,
+      transportDestinationLabel: values.transportDestinationLabel,
+      accommodationPlaceAreaLabel: values.accommodationPlaceAreaLabel,
+      version: nextVersion,
+    });
+    if (expectedItemVersions) expectedItemVersions[itemId] = nextVersion;
     return { success: true, aggregateVersion: result.aggregateVersion };
   }
 
@@ -1583,6 +1680,10 @@ async function executeProposalOperationInTransaction(
     if (expectedItemVersion === undefined) return { success: false, reason: "refresh_required" };
     const result = await deleteTripPlanItemInTransaction(transaction, session, tripProjectId, runningAggregateVersion, itemId, expectedItemVersion);
     if (!result.success) return { success: false, reason: mapHelperFailure(result.reason) };
+    // P1: remove from in-memory state so subsequent ops see a consistent
+    // aggregate (a deleted item cannot be referenced again).
+    itemById.delete(itemId);
+    if (expectedItemVersions) delete expectedItemVersions[itemId];
     return { success: true, aggregateVersion: result.aggregateVersion };
   }
 
@@ -1599,6 +1700,21 @@ async function executeProposalOperationInTransaction(
     const reorderInput: InternalReorderInput = { itemId, expectedItemVersion, parentItemId, ordinal, expectedChangedItemVersions };
     const result = await reorderTripPlanItemInTransaction(transaction, session, tripProjectId, runningAggregateVersion, reorderInput);
     if (!result.success) return { success: false, reason: mapHelperFailure(result.reason) };
+    // P1: every changed item's version advances by 1 inside the helper. Update
+    // the in-memory state so a subsequent op touching any of these items
+    // passes the version fence.
+    for (const changedId of Object.keys(expectedChangedItemVersions)) {
+      const changedItem = itemById.get(changedId);
+      if (changedItem) {
+        const nextVer = changedItem.version + 1;
+        itemById.set(changedId, {
+          ...changedItem,
+          ...(changedId === itemId ? { parentItemId, ordinal } : {}),
+          version: nextVer,
+        });
+        if (expectedItemVersions) expectedItemVersions[changedId] = nextVer;
+      }
+    }
     return { success: true, aggregateVersion: result.aggregateVersion };
   }
 
@@ -1613,6 +1729,14 @@ async function executeProposalOperationInTransaction(
     if (expectedItemVersion === undefined) return { success: false, reason: "refresh_required" };
     const result = await changeInternalTripPlanItemStateInTransaction(transaction, session, tripProjectId, runningAggregateVersion, itemId, expectedItemVersion, nextState, backupTarget);
     if (!result.success) return { success: false, reason: mapHelperFailure(result.reason) };
+    // P1: advance the in-memory version so a subsequent change-item-state on
+    // the same item passes the version fence.
+    const nextVersion = expectedItemVersion + 1;
+    const current = itemById.get(itemId);
+    if (current) {
+      itemById.set(itemId, { ...current, state: nextState, backupTargetItemId: backupTarget, version: nextVersion });
+    }
+    if (expectedItemVersions) expectedItemVersions[itemId] = nextVersion;
     return { success: true, aggregateVersion: result.aggregateVersion };
   }
 
@@ -1793,7 +1917,7 @@ export async function dismissTripChangeProposal(
         actorSystem: null,
         operationClass: "dismiss",
         affectedItemReferences: affectedItems as unknown as Record<string, unknown>,
-        safeBeforeAfterSummary: { entries: beforeAfter } as unknown as Record<string, unknown>,
+        safeBeforeAfterSummary: boundBeforeAfterSummary(beforeAfter),
       });
 
       await recordAuditEvent(
@@ -1811,13 +1935,19 @@ export async function dismissTripChangeProposal(
       return { success: true, proposal: toOwnedSummary({ ...row, status: "dismissed", terminalTimestamp }, input.tripProjectId, row.operations, knownItems) } as const;
     });
   } catch (error) {
+    // P11: do not map transient DB errors to not_found (misleading "proposal
+    // gone" when it is still pending). Only structural errors are safe to map;
+    // everything else is re-thrown so the caller can retry.
+    if (error instanceof Error && (error.message.startsWith("Invalid trip plan") || error.message.startsWith("Invalid trip constraints"))) {
+      return { success: false, reason: "not_found" };
+    }
     console.error("Failed to dismiss trip change proposal.", {
       tripProjectId: input.tripProjectId,
       proposalId: input.proposalId,
       userId: session.userId,
       error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
     });
-    return { success: false, reason: "not_found" };
+    throw error;
   }
 }
 
@@ -1827,92 +1957,108 @@ export async function dismissTripChangeProposal(
 // without an authenticated session (the worker path): owner scope is enforced
 // via the (tripProjectId, userId) predicate using the proposal row's userId
 // column (loaded inside the transaction), so the worker does not need a session.
+// P5: the core body is extracted as expireTripChangeProposalInTransaction so
+// the expiry worker can share its outer transaction (FOR UPDATE SKIP LOCKED
+// lock held while expire runs, preventing concurrent workers from claiming the
+// same rows).
 export async function expireTripChangeProposal(
   input: ExpireTripChangeProposalInput,
 ): Promise<ExpireTripChangeProposalResult> {
-  const now = input.now ?? new Date();
   try {
-    return await getDb().transaction(async (transaction) => {
-      const [row] = await transaction
-        .select({
-          id: tripChangeProposals.id,
-          tripProjectId: tripChangeProposals.tripProjectId,
-          userId: tripChangeProposals.userId,
-          status: tripChangeProposals.status,
-          rationale: tripChangeProposals.rationale,
-          operations: tripChangeProposals.operations,
-          alternatives: tripChangeProposals.alternatives,
-          expiresAt: tripChangeProposals.expiresAt,
-          createdAt: tripChangeProposals.createdAt,
-          terminalTimestamp: tripChangeProposals.terminalTimestamp,
-        })
-        .from(tripChangeProposals)
-        .where(and(
-          eq(tripChangeProposals.id, input.proposalId),
-          eq(tripChangeProposals.tripProjectId, input.tripProjectId),
-        ))
-        .limit(1)
-        .for("update");
-      // Cross-owner / missing: return not_found without leaking existence.
-      if (!row) return { success: false, reason: "not_found" } as const;
-
-      // Idempotent: already-terminal proposals return the current summary
-      // WITHOUT writing a second history row.
-      if (row.status !== "pending") {
-        const knownItems = await loadKnownItemsForSummary(row.tripProjectId, row.userId);
-        return { success: true, proposal: toOwnedSummary(row, row.tripProjectId, row.operations, knownItems) } as const;
-      }
-
-      const terminalTimestamp = now;
-      await transaction
-        .update(tripChangeProposals)
-        .set({ status: "expired", terminalTimestamp, updatedAt: terminalTimestamp })
-        .where(eq(tripChangeProposals.id, input.proposalId));
-
-      const knownItems = await loadKnownItemsForSummary(row.tripProjectId, row.userId);
-      const knownById = new Map<string, KnownPlanItem>();
-      for (const item of knownItems) knownById.set(item.id, item);
-      const operations = Array.isArray(row.operations) ? row.operations : [];
-      const affectedItems = deriveAffectedItems(operations, knownById);
-      const beforeAfter = deriveBeforeAfter(operations, knownById);
-
-      await transaction.insert(tripPlanChangeHistory).values({
-        tripProjectId: row.tripProjectId,
-        userId: row.userId,
-        proposalId: input.proposalId,
-        actorUserId: null,
-        actorClass: "system",
-        actorSystem: systemTripPlanningActorSystem,
-        operationClass: "expire",
-        affectedItemReferences: affectedItems as unknown as Record<string, unknown>,
-        safeBeforeAfterSummary: { entries: beforeAfter } as unknown as Record<string, unknown>,
-      });
-
-      // Record the expire audit row with the system-trip-planning actor
-      // (mirrors the system-knowledge-pipeline pattern verbatim). The audit
-      // actor requires an AuthenticatedSession-shaped object; the reserved
-      // system-trip-planning user row (migration 0064) satisfies the FK.
-      await transaction.insert(auditEvents).values({
-        actorUserId: systemTripPlanningActorId,
-        actorEmail: systemTripPlanningActorEmail,
-        operation: "expire",
-        targetType: "trip_change_proposal",
-        targetId: input.proposalId,
-        afterSummary: JSON.stringify({ tripProjectId: row.tripProjectId, proposalId: input.proposalId }),
-        actorClass: "system",
-        actorSystem: systemTripPlanningActorSystem,
-      });
-
-      return { success: true, proposal: toOwnedSummary({ ...row, status: "expired", terminalTimestamp }, row.tripProjectId, row.operations, knownItems) } as const;
-    });
+    return await getDb().transaction(async (transaction) => expireTripChangeProposalInTransaction(transaction, input));
   } catch (error) {
+    // P11: do not map transient DB errors to not_found. Re-throw so the worker
+    // and reads can retry; only structural errors are safe to map.
+    if (error instanceof Error && (error.message.startsWith("Invalid trip plan") || error.message.startsWith("Invalid trip constraints"))) {
+      return { success: false, reason: "not_found" };
+    }
     console.error("Failed to expire trip change proposal.", {
       tripProjectId: input.tripProjectId,
       proposalId: input.proposalId,
       error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
     });
-    return { success: false, reason: "not_found" };
+    throw error;
   }
+}
+
+export async function expireTripChangeProposalInTransaction(
+  transaction: Transaction,
+  input: ExpireTripChangeProposalInput,
+): Promise<ExpireTripChangeProposalResult> {
+  const now = input.now ?? new Date();
+  const [row] = await transaction
+    .select({
+      id: tripChangeProposals.id,
+      tripProjectId: tripChangeProposals.tripProjectId,
+      userId: tripChangeProposals.userId,
+      status: tripChangeProposals.status,
+      rationale: tripChangeProposals.rationale,
+      operations: tripChangeProposals.operations,
+      alternatives: tripChangeProposals.alternatives,
+      expiresAt: tripChangeProposals.expiresAt,
+      createdAt: tripChangeProposals.createdAt,
+      terminalTimestamp: tripChangeProposals.terminalTimestamp,
+    })
+    .from(tripChangeProposals)
+    .where(and(
+      eq(tripChangeProposals.id, input.proposalId),
+      eq(tripChangeProposals.tripProjectId, input.tripProjectId),
+    ))
+    .limit(1)
+    .for("update");
+  // Cross-owner / missing: return not_found without leaking existence.
+  if (!row) return { success: false, reason: "not_found" } as const;
+
+  // Idempotent: already-terminal proposals return the current summary
+  // WITHOUT writing a second history row.
+  if (row.status !== "pending") {
+    const knownItems = await loadKnownItemsForSummary(row.tripProjectId, row.userId);
+    return { success: true, proposal: toOwnedSummary(row, row.tripProjectId, row.operations, knownItems) } as const;
+  }
+
+  const terminalTimestamp = now;
+  await transaction
+    .update(tripChangeProposals)
+    .set({ status: "expired", terminalTimestamp, updatedAt: terminalTimestamp })
+    .where(eq(tripChangeProposals.id, input.proposalId));
+
+  const knownItems = await loadKnownItemsForSummary(row.tripProjectId, row.userId);
+  const knownById = new Map<string, KnownPlanItem>();
+  for (const item of knownItems) knownById.set(item.id, item);
+  const operations = Array.isArray(row.operations) ? row.operations : [];
+  const affectedItems = deriveAffectedItems(operations, knownById);
+  const beforeAfter = deriveBeforeAfter(operations, knownById);
+
+  await transaction.insert(tripPlanChangeHistory).values({
+    tripProjectId: row.tripProjectId,
+    userId: row.userId,
+    proposalId: input.proposalId,
+    actorUserId: null,
+    actorClass: "system",
+    actorSystem: systemTripPlanningActorSystem,
+    operationClass: "expire",
+    affectedItemReferences: affectedItems as unknown as Record<string, unknown>,
+    safeBeforeAfterSummary: boundBeforeAfterSummary(beforeAfter),
+  });
+
+  // P12: record the expire audit row via recordAuditEvent (spec line 190: reuse
+  // it for apply/dismiss/expire) so normalizeAuditSummary's 2000-char cap
+  // applies consistently. The system-trip-planning actor mirrors the
+  // system-knowledge-pipeline pattern verbatim.
+  await recordAuditEvent(
+    {
+      actor: systemTripPlanningActor,
+      operation: "expire",
+      targetType: "trip_change_proposal",
+      targetId: input.proposalId,
+      afterSummary: JSON.stringify({ tripProjectId: row.tripProjectId, proposalId: input.proposalId }),
+      actorClass: "system",
+      actorSystem: systemTripPlanningActorSystem,
+    },
+    transaction,
+  );
+
+  return { success: true, proposal: toOwnedSummary({ ...row, status: "expired", terminalTimestamp }, row.tripProjectId, row.operations, knownItems) } as const;
 }
 
 // Story 7.5 (AC4): the owner-scoped plan history read. Returns
@@ -1926,6 +2072,16 @@ export async function listPlanHistoryForTripProject(
 ): Promise<TripPlanChangeHistoryRow[] | null> {
   const session = await getAuthenticatedSession();
   if (!session) return null;
+
+  // P16: cross-owner reads return null (no existence leak), matching spec line
+  // 57/150. Check ownership via the composite (id, userId) predicate before
+  // querying history. A non-owner gets null even if the project exists.
+  const [owned] = await getDb()
+    .select({ id: tripProjects.id })
+    .from(tripProjects)
+    .where(and(eq(tripProjects.id, tripProjectId), eq(tripProjects.userId, session.userId)))
+    .limit(1);
+  if (!owned) return null;
 
   const rows = await getDb()
     .select({
@@ -1966,6 +2122,10 @@ function mapAffectedReferences(raw: unknown): TripChangeProposalAffectedItemRef[
       const change = entry.change;
       if (typeof entry.itemId !== "string" || typeof kind !== "string" || typeof change !== "string") return null;
       if (!validKinds.includes(kind as TripPlanItemKind)) return null;
+      // P15: validate change against the allowed set so a corrupted value
+      // does not render an undefined label (blank change prefix) in the
+      // history panel.
+      if (!validAffectedItemChanges.includes(change as TripChangeProposalAffectedItemRef["change"])) return null;
       return {
         itemId: entry.itemId,
         kind: kind as TripPlanItemKind,

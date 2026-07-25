@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { useActionState, useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
+import { useActionState, useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
 
 import { ConversationList, type ChatSessionSummary } from "@/features/chat-trips/conversation-list";
 import { formatTripProjectLabel } from "@/features/chat-trips/labels";
@@ -11,6 +11,7 @@ import type { AnswerUsefulnessRating } from "@/db/schema";
 import type { AnswerAnnotation } from "@/features/ai/answer-annotations";
 import type { AssistantMessageProvenanceItem } from "@/features/retrieval/provenance";
 import type { TripWorkspaceReadModel } from "@/features/chat-trips/trip-home";
+import { tripChangeProposalLabels } from "@/features/chat-trips/trip-home-labels";
 import { TripWorkspacePanel } from "@/features/ai/trip-workspace-panel";
 import { TripProposalReviewCard } from "@/features/ai/trip-proposal-review-card";
 import { AccountIcon, AttachmentIcon, ChatIcon, CloseIcon, CostIcon, HotelAreaIcon, LoadingIcon, NewChatIcon, PlaceIcon, ProjectIcon, RouteSegmentIcon, SendIcon, SourceIcon } from "@/components/ui/icons";
@@ -590,7 +591,8 @@ function AnswerProposalCard({
   isPending?: boolean;
   pendingAction?: "apply" | "dismiss";
   terminalOutcome?: "applied" | "dismissed" | "expired" | "refresh-required" | null;
-  registerOrigin?: (element: HTMLDivElement | null) => void;
+  // P13: accept proposalId so the parent can pass a stable useCallback.
+  registerOrigin?: (proposalId: string, element: HTMLDivElement | null) => void;
 }) {
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -604,11 +606,11 @@ function AnswerProposalCard({
   }, [proposal.proposalId]);
 
   useEffect(() => {
-    if (registerOrigin) registerOrigin(wrapperRef.current);
+    if (registerOrigin) registerOrigin(proposal.proposalId, wrapperRef.current);
     return () => {
-      if (registerOrigin) registerOrigin(null);
+      if (registerOrigin) registerOrigin(proposal.proposalId, null);
     };
-  }, [registerOrigin]);
+  }, [registerOrigin, proposal.proposalId]);
 
   const expiresAt = proposal.expiresAt instanceof Date ? proposal.expiresAt : proposal.expiresAt ? new Date(proposal.expiresAt) : null;
   const alternatives = Array.isArray(proposal.alternatives) ? proposal.alternatives : [];
@@ -700,11 +702,20 @@ export function AiAskComposer({
   const [selectedAnswerEntity, setSelectedAnswerEntity] = useState<AnswerEntityDescriptor | null>(null);
   const [isDesktopViewport, setIsDesktopViewport] = useState(false);
   const [isWorkspaceSheetOpen, setWorkspaceSheetOpen] = useState(false);
+  // P9: plan history sheet state for mobile. Coordinates with the workspace
+  // sheet so only one aria-modal dialog is open at a time.
+  const [isPlanHistorySheetOpen, setPlanHistorySheetOpen] = useState(false);
+  const planHistorySheetPanelRef = useRef<HTMLDivElement>(null);
   // Story 7.5: per-proposal pending action and terminal outcome state for the
   // workspace panel + answer-surface proposal cards. Keyed by proposal id.
   const [proposalPending, setProposalPending] = useState<Record<string, { action: "apply" | "dismiss" } | undefined>>({});
   const [proposalTerminalOutcome, setProposalTerminalOutcome] = useState<Record<string, "applied" | "dismissed" | "expired" | "refresh-required" | null>>({});
   const proposalApplyOriginRef = useRef<Record<string, HTMLElement | null>>({});
+  // P13: stable callback identity so the AnswerProposalCard effect does not
+  // re-run every render (which could clear and reset the origin ref).
+  const registerProposalOrigin = useCallback((proposalId: string, element: HTMLDivElement | null) => {
+    proposalApplyOriginRef.current[proposalId] = element;
+  }, []);
   const [createProjectState, createProjectFormAction, isCreatingProject] = useActionState<CreateTripProjectFormState | undefined, FormData>(
     createTripProjectAction ?? noOpCreateTripProjectAction,
     undefined,
@@ -805,7 +816,7 @@ export function AiAskComposer({
       const target = event.target as HTMLElement | null;
       const isTyping = target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.tagName === "SELECT" || target?.isContentEditable;
 
-      if (event.defaultPrevented || isSessionSheetOpen || isWorkspaceSheetOpen || isTyping || event.key !== "Escape") {
+      if (event.defaultPrevented || isSessionSheetOpen || isWorkspaceSheetOpen || isPlanHistorySheetOpen || isTyping || event.key !== "Escape") {
         return;
       }
 
@@ -815,13 +826,13 @@ export function AiAskComposer({
 
     window.addEventListener("keydown", handleDetailPanelShortcut);
     return () => window.removeEventListener("keydown", handleDetailPanelShortcut);
-  }, [isSessionSheetOpen, isWorkspaceSheetOpen, selectedAnswerEntity]);
+  }, [isSessionSheetOpen, isWorkspaceSheetOpen, isPlanHistorySheetOpen, selectedAnswerEntity]);
 
   useEffect(() => {
     const activeDialog = mobileAnswerDetailDialogRef.current;
     const composer = textareaRef.current;
 
-    if (!selectedAnswerEntity || isSessionSheetOpen || isWorkspaceSheetOpen || !activeDialog || isDesktopViewport) {
+    if (!selectedAnswerEntity || isSessionSheetOpen || isWorkspaceSheetOpen || isPlanHistorySheetOpen || !activeDialog || isDesktopViewport) {
       return;
     }
 
@@ -873,7 +884,7 @@ export function AiAskComposer({
         }
       }
     };
-  }, [isDesktopViewport, isSessionSheetOpen, isWorkspaceSheetOpen, selectedAnswerEntity]);
+  }, [isDesktopViewport, isSessionSheetOpen, isWorkspaceSheetOpen, isPlanHistorySheetOpen, selectedAnswerEntity]);
 
   useEffect(() => {
     function handleShortcut(event: globalThis.KeyboardEvent) {
@@ -1466,7 +1477,13 @@ export function AiAskComposer({
         // surface) or the Trip Home focus card heading (workspace panel).
         focusOriginAfterTerminal(origin);
       } else {
-        setProposalTerminalOutcome((current) => ({ ...current, [proposalId]: "refresh-required" }));
+        // P3: map expired to the expired terminal variant, not refresh-required.
+        // An expired-on-apply proposal should show "Đã hết hạn" not "Làm mới đề xuất".
+        if (result.reason === "expired") {
+          setProposalTerminalOutcome((current) => ({ ...current, [proposalId]: "expired" }));
+        } else {
+          setProposalTerminalOutcome((current) => ({ ...current, [proposalId]: "refresh-required" }));
+        }
         setStatus(result.error ?? "Kế hoạch đã thay đổi — vui lòng làm mới đề xuất.");
       }
     } catch {
@@ -1520,12 +1537,11 @@ export function AiAskComposer({
   // Story 7.5: Làm mới đề xuất is an owner action that focuses the primary
   // conversation composer for a fresh question. It does NOT auto-regenerate,
   // does NOT call the AI gateway, and does NOT mutate plan state.
+  // P4: do NOT clear proposalTerminalOutcome — keeping "refresh-required"
+  // ensures the action row stays hidden so the user cannot click apply again
+  // and loop on the same refresh_required. Just focus the composer.
   function handleRefreshProposal(proposalId: string) {
-    setProposalTerminalOutcome((current) => {
-      const next = { ...current };
-      delete next[proposalId];
-      return next;
-    });
+    void proposalId;
     setStatus("Hãy đặt câu hỏi mới để nhận đề xuất phù hợp với kế hoạch hiện tại.");
     textareaRef.current?.focus();
   }
@@ -1686,6 +1702,7 @@ export function AiAskComposer({
                 setSelectedAnswerEntity(null);
                 answerEntityTriggerRef.current = null;
                 setSessionSheetOpen(false);
+                setPlanHistorySheetOpen(false);
                 setWorkspaceSheetOpen(true);
               }}
               aria-label="Mở không gian dự án chuyến đi"
@@ -1758,9 +1775,7 @@ export function AiAskComposer({
                           isPending={Boolean(proposalPending[message.proposal.proposalId])}
                           pendingAction={proposalPending[message.proposal.proposalId]?.action}
                           terminalOutcome={proposalTerminalOutcome[message.proposal.proposalId] ?? null}
-                          registerOrigin={(element) => {
-                            proposalApplyOriginRef.current[message.proposal!.proposalId] = element;
-                          }}
+                          registerOrigin={registerProposalOrigin}
                         />
                       ) : null}
                       {saveAnswerUsefulnessFeedbackAction ? (
@@ -1999,6 +2014,45 @@ export function AiAskComposer({
                 onRefreshProposal={handleRefreshProposal}
                 proposalPending={proposalPending}
                 proposalTerminalOutcome={proposalTerminalOutcome}
+                planHistoryVariant={isDesktopViewport ? "inline" : "sheet-trigger"}
+                onOpenPlanHistory={() => {
+                  setWorkspaceSheetOpen(false);
+                  setPlanHistorySheetOpen(true);
+                }}
+              />
+            </div>
+          </div>
+        ) : null}
+
+        {isPlanHistorySheetOpen && selectedTripProject && tripWorkspace ? (
+          <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true" aria-label={tripChangeProposalLabels.planHistory}>
+            <button
+              type="button"
+              aria-label={`Đóng ${tripChangeProposalLabels.planHistory}`}
+              onClick={() => setPlanHistorySheetOpen(false)}
+              className="absolute inset-0 bg-[#17342c]/40"
+            />
+            <div ref={planHistorySheetPanelRef} tabIndex={-1} className="absolute bottom-0 left-0 right-0 max-h-[82vh] overflow-y-auto rounded-t-[1.5rem] border border-[#d8c9ad] bg-[linear-gradient(180deg,#fffdf8_0%,#ffffff_42%,#f7fbf8_100%)] p-4 text-[#17342c] shadow-[0_-24px_80px_rgba(41,33,18,0.24)]">
+              <button
+                type="button"
+                aria-label={`Đóng ${tripChangeProposalLabels.planHistory}`}
+                onClick={() => setPlanHistorySheetOpen(false)}
+                className="mb-3 min-h-11 w-full rounded-2xl border border-[#d8c9ad] bg-white/80 px-4 py-3 text-sm font-semibold text-[#17342c] transition hover:bg-white focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45"
+              >
+                Đóng lịch sử kế hoạch
+              </button>
+              <TripWorkspacePanel
+                idPrefix="history-sheet-"
+                header={{
+                  title: selectedTripProject.title,
+                  origin: selectedTripProject.origin,
+                  destination: selectedTripProject.destination,
+                  startDate: selectedTripProject.startDate ?? null,
+                  endDate: selectedTripProject.endDate ?? null,
+                  travelers: selectedTripProject.travelers ?? null,
+                }}
+                workspace={tripWorkspace}
+                planHistoryVariant="inline"
               />
             </div>
           </div>
@@ -2019,7 +2073,7 @@ export function AiAskComposer({
       ) : null}
 
       {selectedTripProject && tripWorkspace ? (
-        <aside aria-label="Không gian dự án chuyến đi" aria-hidden={isWorkspaceSheetOpen && !isDesktopViewport ? "true" : undefined} className="hidden min-h-0 w-[24rem] shrink-0 overflow-y-auto rounded-[1.5rem] border border-[#d8c9ad] bg-[linear-gradient(180deg,#fffdf8_0%,#ffffff_42%,#f7fbf8_100%)] p-4 text-[#17342c] shadow-[0_16px_40px_rgba(41,33,18,0.08)] lg:block">
+        <aside aria-label="Không gian dự án chuyến đi" aria-hidden={(isWorkspaceSheetOpen || isPlanHistorySheetOpen) && !isDesktopViewport ? "true" : undefined} className="hidden min-h-0 w-[24rem] shrink-0 overflow-y-auto rounded-[1.5rem] border border-[#d8c9ad] bg-[linear-gradient(180deg,#fffdf8_0%,#ffffff_42%,#f7fbf8_100%)] p-4 text-[#17342c] shadow-[0_16px_40px_rgba(41,33,18,0.08)] lg:block">
           <TripWorkspacePanel
             idPrefix="desktop-"
             header={{
@@ -2036,6 +2090,7 @@ export function AiAskComposer({
             onRefreshProposal={handleRefreshProposal}
             proposalPending={proposalPending}
             proposalTerminalOutcome={proposalTerminalOutcome}
+            planHistoryVariant="inline"
           />
         </aside>
       ) : null}

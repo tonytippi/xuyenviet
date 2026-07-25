@@ -708,7 +708,10 @@ describe("Story 7.5 dismissTripChangeProposal DB-backed tests", () => {
     if (!persisted.success) throw new Error("persist failed");
 
     await dismissTripChangeProposal({ tripProjectId: "dismiss-project-2", proposalId: persisted.proposal.id });
-    await dismissTripChangeProposal({ tripProjectId: "dismiss-project-2", proposalId: persisted.proposal.id });
+    // P17: assert the second call returns { success: true, proposal } (the
+    // no-op success contract), not just that no second history row was written.
+    const secondResult = await dismissTripChangeProposal({ tripProjectId: "dismiss-project-2", proposalId: persisted.proposal.id });
+    expect(secondResult.success).toBe(true);
 
     const historyRows = await testDb.select().from(tripPlanChangeHistory).where(eq(tripPlanChangeHistory.proposalId, persisted.proposal.id));
     expect(historyRows).toHaveLength(1);
@@ -887,7 +890,7 @@ describe("Story 7.5 expire-on-read and plan history read", () => {
     vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "history-attacker", email: "history-attacker@example.com" }) }));
     const { listPlanHistoryForTripProject: crossOwnerRead } = await import("@/features/chat-trips/trip-change-proposals");
     const leaked = await crossOwnerRead("history-project-1");
-    expect(leaked).toEqual([]);
+    expect(leaked).toBeNull();
   });
 
   test("formatPlanHistoryRow produces Vietnamese operation/actor/timestamp labels", async () => {
@@ -922,5 +925,320 @@ describe("Story 7.5 expire-on-read and plan history read", () => {
     });
     expect(systemView.operationLabel).toBe("Đã hết hạn");
     expect(systemView.actorLabel).toBe("Hệ thống");
+  });
+});
+
+// P7: Pure unit tests for the apply orchestrator (mocked *InTransaction helpers
+// via vi.doMock, no DB). Covers operation→helper routing, first-failed-op-
+// aborts-subsequent, version-fence failures, expired, cross-owner, missing
+// item, and the cross-operation backup-cycle case (P8).
+describe("Story 7.5 applyApprovedTripChange pure unit tests (mocked helpers)", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+  });
+
+  type MockTransaction = {
+    select: ReturnType<typeof vi.fn>;
+    update: ReturnType<typeof vi.fn>;
+    insert: ReturnType<typeof vi.fn>;
+  };
+
+  function buildMockTransaction(scenario: {
+    project?: { id: string; aggregateVersion: number; userId: string } | null;
+    proposal?: {
+      id: string;
+      status: string;
+      rationale: string;
+      operations: unknown[];
+      alternatives: unknown;
+      expiresAt: Date | null;
+      createdAt: Date;
+      expectedAggregateVersion: number;
+      expectedItemVersions: Record<string, number> | null;
+      orderingPreconditions: unknown;
+    } | null;
+    items?: Array<Record<string, unknown>>;
+    constraintsVersion?: number | null;
+  }): MockTransaction {
+    const selectMock = vi.fn();
+    const updateMock = vi.fn(() => ({ set: vi.fn(() => ({ where: vi.fn(() => Promise.resolve()) })) }));
+    const insertMock = vi.fn(() => ({ values: vi.fn(() => Promise.resolve()) }));
+
+    selectMock.mockImplementation((selection?: Record<string, unknown>) => {
+      const isProjectQuery = Boolean(selection && "aggregateVersion" in selection);
+      const isProposalQuery = Boolean(selection && "status" in selection && "operations" in selection);
+      const isConstraintsQuery = Boolean(selection && "version" in selection && !("aggregateVersion" in selection) && !("status" in selection));
+
+      const resolveResult = () =>
+        isProjectQuery ? (scenario.project ? [scenario.project] : []) :
+        isProposalQuery ? (scenario.proposal ? [scenario.proposal] : []) :
+        isConstraintsQuery ? (scenario.constraintsVersion !== null && scenario.constraintsVersion !== undefined ? [{ version: scenario.constraintsVersion }] : []) :
+        (scenario.items ?? []);
+
+      // Items query (select * — no limit/for, ends at where)
+      if (!isProjectQuery && !isProposalQuery && !isConstraintsQuery) {
+        return {
+          from: vi.fn(() => ({
+            where: vi.fn(() => Promise.resolve(scenario.items ?? [])),
+          })),
+        };
+      }
+      // Project/proposal/constraints queries chain .limit(1)[.for("update")]
+      // Make limit return a Promise that also has a .for method so both
+      // `await ....limit(1)` (constraints) and `await ....limit(1).for("update")`
+      // (project/proposal) resolve to the array.
+      return {
+        from: vi.fn(() => ({
+          where: vi.fn(() => {
+            const promise = Promise.resolve(resolveResult()) as Promise<unknown> & { for: ReturnType<typeof vi.fn> };
+            promise.for = vi.fn(() => promise);
+            return { limit: vi.fn(() => promise) };
+          }),
+        })),
+      };
+    });
+
+    return { select: selectMock, update: updateMock, insert: insertMock };
+  }
+
+  async function setupApplyMocks(scenario: Parameters<typeof buildMockTransaction>[0], helperMocks: Record<string, ReturnType<typeof vi.fn>>) {
+    vi.resetModules();
+    vi.clearAllMocks();
+    const tx = buildMockTransaction(scenario);
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }),
+    }));
+    vi.doMock("@/db/client", () => ({
+      getDb: () => ({
+        transaction: async (callback: (t: MockTransaction) => Promise<unknown>) => callback(tx),
+      }),
+    }));
+    vi.doMock("@/features/chat-trips/trip-projects", () => helperMocks);
+    vi.doMock("@/features/audit/events", () => ({
+      recordAuditEvent: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock("@/features/chat-trips/trip-home-labels", () => ({
+      tripPlanItemStateLabels: { idea: "Ý tưởng", planned: "Đã lên kế hoạch", confirmed: "Đã chốt", backup: "Dự phòng" },
+      tripChangeProposalLabels: {
+        badge: "Đề xuất", apply: "Áp dụng", keepPlan: "Giữ kế hoạch", expired: "Đã hết hạn",
+        refresh: "Làm mới đề xuất", refreshHint: "Làm mới", suggestionNote: "", beforeAfter: "",
+        rationale: "", affectedItems: "", alternatives: "", viewAlternatives: "", planHistory: "",
+        applied: "Đã áp dụng", dismissed: "Đã giữ kế hoạch", applying: "Đang áp dụng...", keepingPlan: "Đang giữ...",
+      },
+    }));
+    return await import("@/features/chat-trips/trip-change-proposals");
+  }
+
+  function makeHelperMocks() {
+    return {
+      createTripPlanItemInTransaction: vi.fn().mockResolvedValue({ success: true, aggregateVersion: 2, itemId: "new-item" }),
+      updateTripPlanItemInTransaction: vi.fn().mockResolvedValue({ success: true, aggregateVersion: 2 }),
+      deleteTripPlanItemInTransaction: vi.fn().mockResolvedValue({ success: true, aggregateVersion: 2 }),
+      reorderTripPlanItemInTransaction: vi.fn().mockResolvedValue({ success: true, aggregateVersion: 2 }),
+      changeInternalTripPlanItemStateInTransaction: vi.fn().mockResolvedValue({ success: true, aggregateVersion: 2 }),
+      upsertInternalTripProjectConstraintsInTransaction: vi.fn().mockResolvedValue({ success: true, aggregateVersion: 2 }),
+      normalizePlanItem: vi.fn((input: Record<string, unknown>) => ({ ...input, anchorRole: input.anchorRole ?? null, type: input.type ?? null, parentItemId: input.parentItemId ?? null, backupTargetItemId: input.backupTargetItemId ?? null, plannedAt: input.plannedAt ?? null })),
+      normalizeConstraints: vi.fn((input: Record<string, unknown>) => input),
+    };
+  }
+
+  const baseProject = { id: "project-1", aggregateVersion: 1, userId: "user-1" };
+  const baseItem = { id: "leg-1", version: 1, kind: "leg", state: "planned", label: "Chạy xe", notes: null, ordinal: 0, parentItemId: null, backupTargetItemId: null, type: "transport", anchorRole: null, plannedAt: null, transportOriginLabel: null, transportDestinationLabel: null, accommodationPlaceAreaLabel: null };
+
+  test("(a) every operation kind routes to the correct helper", async () => {
+    const helpers = makeHelperMocks();
+    const ops = [
+      { kind: "create-item", item: { kind: "leg", type: "transport", state: "idea", label: "New", ordinal: 0 }, ordinal: 0 },
+      { kind: "update-item", itemId: "leg-1", changes: { label: "Updated" } },
+      { kind: "remove-item", itemId: "leg-1" },
+      { kind: "reorder-item", itemId: "leg-1", ordinal: 1 },
+      { kind: "change-item-state", itemId: "leg-1", state: "confirmed" },
+      { kind: "upsert-constraints", constraints: { adultCount: 2 } },
+    ];
+    // Initial setup call to warm the mocks; the loop below re-imports per op.
+    await setupApplyMocks({
+      project: baseProject,
+      proposal: { id: "prop-1", status: "pending", rationale: "Test", operations: ops, alternatives: [], expiresAt: null, createdAt: new Date(), expectedAggregateVersion: 1, expectedItemVersions: { "leg-1": 1 }, orderingPreconditions: null },
+      items: [baseItem],
+      constraintsVersion: 1,
+    }, helpers);
+
+    // remove-item deletes leg-1; subsequent ops referencing leg-1 would fail
+    // the fence. So test each op independently instead.
+    for (const op of ops) {
+      const helpersSingle = makeHelperMocks();
+      const { applyApprovedTripChange: apply } = await setupApplyMocks({
+        project: baseProject,
+        proposal: { id: "prop-1", status: "pending", rationale: "Test", operations: [op], alternatives: [], expiresAt: null, createdAt: new Date(), expectedAggregateVersion: 1, expectedItemVersions: { "leg-1": 1 }, orderingPreconditions: null },
+        items: [baseItem],
+        constraintsVersion: 1,
+      }, helpersSingle);
+      await apply({ tripProjectId: "project-1", proposalId: "prop-1" });
+      if (op.kind === "create-item") expect(helpersSingle.createTripPlanItemInTransaction).toHaveBeenCalled();
+      if (op.kind === "update-item") expect(helpersSingle.updateTripPlanItemInTransaction).toHaveBeenCalled();
+      if (op.kind === "remove-item") expect(helpersSingle.deleteTripPlanItemInTransaction).toHaveBeenCalled();
+      if (op.kind === "reorder-item") expect(helpersSingle.reorderTripPlanItemInTransaction).toHaveBeenCalled();
+      if (op.kind === "change-item-state") expect(helpersSingle.changeInternalTripPlanItemStateInTransaction).toHaveBeenCalled();
+      if (op.kind === "upsert-constraints") expect(helpersSingle.upsertInternalTripProjectConstraintsInTransaction).toHaveBeenCalled();
+    }
+  });
+
+  test("(b) first failed operation aborts all subsequent ones", async () => {
+    const helpers = makeHelperMocks();
+    helpers.updateTripPlanItemInTransaction.mockResolvedValueOnce({ success: false, reason: "invalid" });
+    const ops = [
+      { kind: "update-item", itemId: "leg-1", changes: { label: "Updated" } },
+      { kind: "change-item-state", itemId: "leg-1", state: "confirmed" },
+    ];
+    const { applyApprovedTripChange } = await setupApplyMocks({
+      project: { ...baseProject, aggregateVersion: 1 },
+      proposal: { id: "prop-1", status: "pending", rationale: "Test", operations: ops, alternatives: [], expiresAt: null, createdAt: new Date(), expectedAggregateVersion: 1, expectedItemVersions: { "leg-1": 1 }, orderingPreconditions: null },
+      items: [{ ...baseItem, version: 1 }],
+      constraintsVersion: null,
+    }, helpers);
+
+    const result = await applyApprovedTripChange({ tripProjectId: "project-1", proposalId: "prop-1" });
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.reason).toBe("refresh_required");
+    // Second op's helper was never called (P1: the orchestrator throws on
+    // first failure, aborting the transaction).
+    expect(helpers.changeInternalTripPlanItemStateInTransaction).not.toHaveBeenCalled();
+  });
+
+  test("(c) version-fence mismatch on aggregate returns refresh_required", async () => {
+    const helpers = makeHelperMocks();
+    const { applyApprovedTripChange } = await setupApplyMocks({
+      project: { ...baseProject, aggregateVersion: 2 },
+      proposal: { id: "prop-1", status: "pending", rationale: "Test", operations: [], alternatives: [], expiresAt: null, createdAt: new Date(), expectedAggregateVersion: 1, expectedItemVersions: null, orderingPreconditions: null },
+      items: [],
+      constraintsVersion: null,
+    }, helpers);
+
+    const result = await applyApprovedTripChange({ tripProjectId: "project-1", proposalId: "prop-1" });
+    expect(result).toEqual({ success: false, reason: "refresh_required" });
+  });
+
+  test("(d) expired proposal returns expired", async () => {
+    const helpers = makeHelperMocks();
+    const past = new Date(Date.now() - 60_000);
+    const { applyApprovedTripChange } = await setupApplyMocks({
+      project: baseProject,
+      proposal: { id: "prop-1", status: "pending", rationale: "Test", operations: [], alternatives: [], expiresAt: past, createdAt: new Date(), expectedAggregateVersion: 1, expectedItemVersions: null, orderingPreconditions: null },
+      items: [],
+      constraintsVersion: null,
+    }, helpers);
+
+    const result = await applyApprovedTripChange({ tripProjectId: "project-1", proposalId: "prop-1" });
+    expect(result).toEqual({ success: false, reason: "expired" });
+  });
+
+  test("(e) cross-owner (missing project) returns not_found", async () => {
+    const helpers = makeHelperMocks();
+    const { applyApprovedTripChange } = await setupApplyMocks({
+      project: null,
+      proposal: null,
+      items: [],
+      constraintsVersion: null,
+    }, helpers);
+
+    const result = await applyApprovedTripChange({ tripProjectId: "project-1", proposalId: "prop-1" });
+    expect(result).toEqual({ success: false, reason: "not_found" });
+  });
+
+  test("(f) missing item returns refresh_required", async () => {
+    const helpers = makeHelperMocks();
+    const { applyApprovedTripChange } = await setupApplyMocks({
+      project: baseProject,
+      proposal: { id: "prop-1", status: "pending", rationale: "Test", operations: [{ kind: "update-item", itemId: "missing-item", changes: { label: "X" } }], alternatives: [], expiresAt: null, createdAt: new Date(), expectedAggregateVersion: 1, expectedItemVersions: { "missing-item": 1 }, orderingPreconditions: null },
+      items: [],
+      constraintsVersion: null,
+    }, helpers);
+
+    const result = await applyApprovedTripChange({ tripProjectId: "project-1", proposalId: "prop-1" });
+    expect(result).toEqual({ success: false, reason: "refresh_required" });
+  });
+
+  // P8: cross-operation backup-cycle test (A→backup B, B→backup A)
+  test("(g) cross-operation backup cycle returns refresh_required", async () => {
+    const helpers = makeHelperMocks();
+    const itemA = { ...baseItem, id: "item-a", version: 1, state: "planned", label: "A", backupTargetItemId: null };
+    const itemB = { ...baseItem, id: "item-b", version: 1, state: "planned", label: "B", backupTargetItemId: null };
+    const ops = [
+      { kind: "change-item-state", itemId: "item-a", state: "backup", backupTargetItemId: "item-b" },
+      { kind: "change-item-state", itemId: "item-b", state: "backup", backupTargetItemId: "item-a" },
+    ];
+    const { applyApprovedTripChange } = await setupApplyMocks({
+      project: baseProject,
+      proposal: { id: "prop-1", status: "pending", rationale: "Test", operations: ops, alternatives: [], expiresAt: null, createdAt: new Date(), expectedAggregateVersion: 1, expectedItemVersions: { "item-a": 1, "item-b": 1 }, orderingPreconditions: null },
+      items: [itemA, itemB],
+      constraintsVersion: null,
+    }, helpers);
+
+    const result = await applyApprovedTripChange({ tripProjectId: "project-1", proposalId: "prop-1" });
+    expect(result).toEqual({ success: false, reason: "refresh_required" });
+    // No helper should be called — the cycle is detected pre-mutation.
+    expect(helpers.changeInternalTripPlanItemStateInTransaction).not.toHaveBeenCalled();
+  });
+
+  test("(i) idempotent re-apply on already-applied proposal returns not_found", async () => {
+    const helpers = makeHelperMocks();
+    const { applyApprovedTripChange } = await setupApplyMocks({
+      project: baseProject,
+      proposal: { id: "prop-1", status: "applied", rationale: "Test", operations: [], alternatives: [], expiresAt: null, createdAt: new Date(), expectedAggregateVersion: 1, expectedItemVersions: null, orderingPreconditions: null },
+      items: [],
+      constraintsVersion: null,
+    }, helpers);
+
+    const result = await applyApprovedTripChange({ tripProjectId: "project-1", proposalId: "prop-1" });
+    expect(result).toEqual({ success: false, reason: "not_found" });
+    expect(helpers.createTripPlanItemInTransaction).not.toHaveBeenCalled();
+  });
+
+  test("(P1) multi-op touching same item: second op sees updated version and succeeds", async () => {
+    const helpers = makeHelperMocks();
+    helpers.updateTripPlanItemInTransaction
+      .mockResolvedValueOnce({ success: true, aggregateVersion: 2 })
+      .mockResolvedValueOnce({ success: true, aggregateVersion: 3 });
+    helpers.changeInternalTripPlanItemStateInTransaction
+      .mockResolvedValueOnce({ success: true, aggregateVersion: 4 });
+    const ops = [
+      { kind: "update-item", itemId: "leg-1", changes: { label: "Updated" } },
+      { kind: "change-item-state", itemId: "leg-1", state: "confirmed" },
+    ];
+    const { applyApprovedTripChange } = await setupApplyMocks({
+      project: { ...baseProject, aggregateVersion: 1 },
+      proposal: { id: "prop-1", status: "pending", rationale: "Test", operations: ops, alternatives: [], expiresAt: null, createdAt: new Date(), expectedAggregateVersion: 1, expectedItemVersions: { "leg-1": 1 }, orderingPreconditions: null },
+      items: [{ ...baseItem, version: 1 }],
+      constraintsVersion: null,
+    }, helpers);
+
+    const result = await applyApprovedTripChange({ tripProjectId: "project-1", proposalId: "prop-1" });
+    expect(result.success).toBe(true);
+    // The second op's helper should have been called with expectedItemVersion=2
+    // (the version after op 1's update), not 1 (the pre-apply version).
+    expect(helpers.changeInternalTripPlanItemStateInTransaction).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      "project-1",
+      2, // runningAggregateVersion after op 1
+      "leg-1",
+      2, // expectedItemVersion = updated version (P1 fix)
+      "confirmed",
+      null,
+    );
+  });
+
+  test("(P6) unrecognized ordering-precondition key fails closed with refresh_required", async () => {
+    const helpers = makeHelperMocks();
+    const { applyApprovedTripChange } = await setupApplyMocks({
+      project: baseProject,
+      proposal: { id: "prop-1", status: "pending", rationale: "Test", operations: [{ kind: "change-item-state", itemId: "leg-1", state: "confirmed" }], alternatives: [], expiresAt: null, createdAt: new Date(), expectedAggregateVersion: 1, expectedItemVersions: { "leg-1": 1 }, orderingPreconditions: { unknownField: "bad" } },
+      items: [baseItem],
+      constraintsVersion: null,
+    }, helpers);
+
+    const result = await applyApprovedTripChange({ tripProjectId: "project-1", proposalId: "prop-1" });
+    expect(result).toEqual({ success: false, reason: "refresh_required" });
   });
 });

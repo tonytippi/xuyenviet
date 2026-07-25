@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-07-25 (Story 7.5 implementation complete and synchronized to review; apply/dismiss/expire terminal proposal commands, expiry worker, plan history, and 7.4 action-button wiring implemented and verified. Epic 7 remains in-progress.)
+# last_updated: 2026-07-25 (Story 7.5 all 18 review findings P1–P18 repaired — 3 HIGH, 7 MEDIUM, 8 LOW; 925 tests pass, lint/typecheck/build/db:generate clean; status synchronized to review. P1+P18 stale itemById + partial-write atomicity; P2 safeBeforeAfterSummary byte cap; P5 worker transaction wrapping; P7+P8 pure unit tests + backup-cycle test; P9 plan history mobile sheet. Epic 7 remains in-progress.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-07-25 (Story 7.5 implementation complete and synchronized to review; apply/dismiss/expire terminal proposal commands, expiry worker, plan history, and 7.4 action-button wiring implemented and verified. Epic 7 remains in-progress.)
+last_updated: 2026-07-25 (Story 7.5 code review of commit feeb7e5 found 2 HIGH + 9 MEDIUM + 8 LOW actionable findings; status synchronized to in-progress. P1 stale itemById/expectedItemVersions in apply orchestrator; P2 safeBeforeAfterSummary 8192-byte overflow stuck-pending. Epic 7 remains in-progress.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -99,7 +99,7 @@ development_status:
   # Synchronized 2026-07-25 after status-only verification of supplied final repair commit 267a12264793c3b71eca6fe56531908e502801fe and a clean pre-update worktree.
   7-3-present-trip-home-and-the-owners-plan-workspace: done
   7-4-generate-reviewable-ai-trip-change-proposals: done
-  # Synchronized 2026-07-25 after status-only verification of supplied final repair commit 262f9fa5de9ce9f65c2f416e1035b1b5f2dfb3dd and a clean pre-update worktree; no code review performed.
+  # Synchronized 2026-07-25 after repair of all 18 review findings (P1–P18: 3 HIGH, 7 MEDIUM, 8 LOW) for commit feeb7e5; 925 tests pass, lint/typecheck/build/db:generate clean; status set to review.
   7-5-apply-dismiss-and-expire-proposals-safely: review
   7-6-verify-owner-scoped-trip-planning-safety: backlog
   epic-7-retrospective: optional

@@ -60,9 +60,14 @@ export type TripWorkspacePanelProps = {
   onRefreshProposal?: (proposalId: string) => void;
   proposalPending?: Record<string, { action: "apply" | "dismiss" } | undefined>;
   proposalTerminalOutcome?: Record<string, TripProposalTerminalOutcome | null>;
+  // P9: plan history display variant. "inline" renders a collapsible <details>
+  // section (desktop). "sheet-trigger" renders a button that opens a sheet
+  // (mobile). The composer chooses the variant based on viewport.
+  planHistoryVariant?: "inline" | "sheet-trigger";
+  onOpenPlanHistory?: () => void;
 };
 
-export function TripWorkspacePanel({ idPrefix, header, workspace, onApplyProposal, onDismissProposal, onRefreshProposal, proposalPending, proposalTerminalOutcome }: TripWorkspacePanelProps) {
+export function TripWorkspacePanel({ idPrefix, header, workspace, onApplyProposal, onDismissProposal, onRefreshProposal, proposalPending, proposalTerminalOutcome, planHistoryVariant = "inline", onOpenPlanHistory }: TripWorkspacePanelProps) {
   if (!workspace) return null;
 
   const { focus, timelineGroups, constraints, pendingProposals, planHistory } = workspace;
@@ -122,37 +127,53 @@ export function TripWorkspacePanel({ idPrefix, header, workspace, onApplyProposa
       ) : null}
 
       {historyEntries.length > 0 ? (
-        <details className="rounded-2xl border border-[#d8c9ad] bg-white/70 p-4" aria-label={tripChangeProposalLabels.planHistory}>
-          <summary className="min-h-11 cursor-pointer list-none text-sm font-semibold text-[#17342c] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45">
-            <span className="text-xs font-bold uppercase tracking-[0.16em] text-[#1f5f46]">{tripChangeProposalLabels.planHistory}</span>
-          </summary>
-          <ul aria-live="polite" className="mt-3 space-y-3">
-            {historyEntries.map((entry, index) => (
-              <li key={`${entry.proposalId ?? "history"}-${index}`} className="rounded-xl border border-[#eadfc8] bg-[#fffdf8] p-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="rounded-full border border-[#8fb59f] bg-[#edf7f0] px-2 py-0.5 text-xs font-semibold text-[#14532d]">{entry.operationLabel}</span>
-                  <span className="text-xs font-semibold text-[#6b7c75]">{entry.actorLabel}</span>
-                  <span className="text-xs text-[#6b7c75]">{entry.timestampLabel}</span>
-                </div>
-                {entry.affectedItemLabels.length > 0 ? (
-                  <p className="mt-2 text-sm leading-6 text-[#4f625a]">{entry.affectedItemLabels.join(", ")}</p>
-                ) : null}
-                {entry.beforeAfter.length > 0 ? (
-                  <ul className="mt-2 space-y-1">
-                    {entry.beforeAfter.map((impact, impactIndex) => (
-                      <li key={impactIndex} className="text-xs leading-5 text-[#4f625a]">
-                        <span className="font-semibold text-[#17342c]">{impact.operation}</span>
-                        {impact.before || impact.after ? (
-                          <span className="text-[#6b7c75]"> {impact.before ?? "—"} → {impact.after ?? "—"}</span>
-                        ) : null}
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        </details>
+        planHistoryVariant === "sheet-trigger" ? (
+          // P9: mobile renders a button that opens the plan history sheet
+          // (managed by the composer). The sheet coordinates with the existing
+          // workspace sheet so only one aria-modal dialog is open at a time.
+          <div className="rounded-2xl border border-[#d8c9ad] bg-white/70 p-4">
+            <button
+              type="button"
+              onClick={onOpenPlanHistory}
+              className="min-h-11 w-full rounded-2xl border border-[#1f5f46] bg-[#1f5f46] px-4 py-2 text-sm font-semibold text-white focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45"
+            >
+              <span className="text-xs font-bold uppercase tracking-[0.16em]">{tripChangeProposalLabels.planHistory}</span>
+            </button>
+          </div>
+        ) : (
+          // P9: desktop renders an inline collapsible section.
+          <details className="rounded-2xl border border-[#d8c9ad] bg-white/70 p-4" aria-label={tripChangeProposalLabels.planHistory}>
+            <summary className="min-h-11 cursor-pointer list-none text-sm font-semibold text-[#17342c] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45">
+              <span className="text-xs font-bold uppercase tracking-[0.16em] text-[#1f5f46]">{tripChangeProposalLabels.planHistory}</span>
+            </summary>
+            <ul aria-live="polite" className="mt-3 space-y-3">
+              {historyEntries.map((entry, index) => (
+                <li key={`${entry.proposalId ?? "history"}-${index}`} className="rounded-xl border border-[#eadfc8] bg-[#fffdf8] p-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-full border border-[#8fb59f] bg-[#edf7f0] px-2 py-0.5 text-xs font-semibold text-[#14532d]">{entry.operationLabel}</span>
+                    <span className="text-xs font-semibold text-[#6b7c75]">{entry.actorLabel}</span>
+                    <span className="text-xs text-[#6b7c75]">{entry.timestampLabel}</span>
+                  </div>
+                  {entry.affectedItemLabels.length > 0 ? (
+                    <p className="mt-2 text-sm leading-6 text-[#4f625a]">{entry.affectedItemLabels.join(", ")}</p>
+                  ) : null}
+                  {entry.beforeAfter.length > 0 ? (
+                    <ul className="mt-2 space-y-1">
+                      {entry.beforeAfter.map((impact, impactIndex) => (
+                        <li key={impactIndex} className="text-xs leading-5 text-[#4f625a]">
+                          <span className="font-semibold text-[#17342c]">{impact.operation}</span>
+                          {impact.before || impact.after ? (
+                            <span className="text-[#6b7c75]"> {impact.before ?? "—"} → {impact.after ?? "—"}</span>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </details>
+        )
       ) : null}
 
       <div className="rounded-2xl border border-[#d8c9ad] bg-white/70 p-4" aria-label="Dòng thời gian kế hoạch">
