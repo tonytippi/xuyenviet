@@ -898,9 +898,15 @@ describe("Story 7.6 AC1 cross-cutting trip planning safety", () => {
       const proposalId = persisted.proposal.id;
 
       // Hold apply's first lock (project) and dismiss's first lock (proposal)
-      // on two independent raw connections.
+      // on two independent raw connections. The project lock is acquired first
+      // (outside try) and its release guard set up before the try block; the
+      // proposal lock is acquired INSIDE the try block so that if
+      // holdProposalLock throws (connection error, proposal not found), the
+      // finally still releases the project lock — otherwise the uncommitted
+      // FOR UPDATE transaction would hold a row lock on trip_projects and hang
+      // the next test's TRUNCATE (third-review fix for the acquisition-phase
+      // leak risk).
       const releaseProjectLock = await holdProjectLock("safety-dl-p");
-      const releaseProposalLock = await holdProposalLock(proposalId);
       // Idempotent release guards so the finally cannot double-commit (which
       // would error on an already-released connection) and cannot leak a lock
       // if an assertion throws before both locks were released.
@@ -912,13 +918,15 @@ describe("Story 7.6 AC1 cross-cutting trip planning safety", () => {
           await releaseProjectLock();
         }
       };
+      let releaseProposalLock: (() => Promise<void>) | null = null;
       const safeReleaseProposal = async () => {
-        if (!proposalReleased) {
+        if (!proposalReleased && releaseProposalLock) {
           proposalReleased = true;
           await releaseProposalLock();
         }
       };
       try {
+        releaseProposalLock = await holdProposalLock(proposalId);
         // Start both transactions; each blocks on its first lock.
         const applyPromise = applyApprovedTripChange({ tripProjectId: "safety-dl-p", proposalId });
         const dismissPromise = dismissTripChangeProposal({ tripProjectId: "safety-dl-p", proposalId });

@@ -2687,7 +2687,7 @@ describe("AI Ask streaming route", () => {
       }
     });
 
-    test("7.2 reduced-motion: the plan-history sheet close button guards its transition; the proposal reveal has no non-essential transitions", () => {
+    test("7.2 reduced-motion: all three aria-modal sheet close buttons guard their transition; the proposal reveal has no non-essential transitions", () => {
       // AC3 7.2: "reduced-motion disables non-essential transitions in the
       // plan-history sheet and proposal reveal."
       // The plan-history sheet (the mobile aria-modal dialog) is rendered by
@@ -2699,6 +2699,11 @@ describe("AI Ask streaming route", () => {
       // query on its own). The proposal reveal (trip-proposal-review-card.tsx)
       // and the workspace panel contain no non-essential transitions, so no
       // guard is needed there.
+      //
+      // Third-review fix: the session-sheet and workspace-sheet close buttons
+      // carry the identical unguarded `transition hover:bg-white` pattern as
+      // the plan-history close button (same defect class, same component). All
+      // three aria-modal sheet close buttons now carry the motion-reduce guard.
       const cardSource = readFileSync("src/features/ai/trip-proposal-review-card.tsx", "utf8");
       const panelSource = readFileSync("src/features/ai/trip-workspace-panel.tsx", "utf8");
       const composerSource = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
@@ -2719,16 +2724,27 @@ describe("AI Ask streaming route", () => {
       expect(panelSource).not.toContain("requestAnimationFrame");
       expect(panelSource).not.toContain("animationDuration");
 
-      // Plan-history sheet close button: it DOES use `transition`, so it MUST
-      // carry a `motion-reduce:transition-none` guard. Locate the close button
-      // by its unique Vietnamese label text and capture its opening tag.
-      const closeBtnTextIndex = composerSource.indexOf("Đóng lịch sử kế hoạch");
-      expect(closeBtnTextIndex).toBeGreaterThan(-1);
-      const btnStart = composerSource.lastIndexOf("<button", closeBtnTextIndex);
-      expect(btnStart).toBeGreaterThan(-1);
-      const closeBtnSlice = composerSource.slice(btnStart, closeBtnTextIndex);
-      expect(closeBtnSlice).toContain("transition");
-      expect(closeBtnSlice).toContain("motion-reduce:transition-none");
+      // Helper: locate a close button by its unique Vietnamese label text. Use
+      // lastIndexOf to find the button TEXT CONTENT (which appears after the
+      // aria-labels on the backdrop and close buttons), so lastIndexOf("<button",
+      // textIndex) resolves to the close button, not the backdrop overlay button
+      // (which has no `transition` class).
+      const assertCloseButtonGuarded = (label: string) => {
+        const textIndex = composerSource.lastIndexOf(label);
+        expect(textIndex).toBeGreaterThan(-1);
+        const btnStart = composerSource.lastIndexOf("<button", textIndex);
+        expect(btnStart).toBeGreaterThan(-1);
+        const btnSlice = composerSource.slice(btnStart, textIndex);
+        expect(btnSlice).toContain("transition");
+        expect(btnSlice).toContain("motion-reduce:transition-none");
+      };
+
+      // Plan-history sheet close button.
+      assertCloseButtonGuarded("Đóng lịch sử kế hoạch");
+      // Session sheet close button (third-review fix: same defect class).
+      assertCloseButtonGuarded("Đóng danh sách");
+      // Workspace sheet close button (third-review fix: same defect class).
+      assertCloseButtonGuarded("Đóng không gian dự án");
     });
 
     test("7.3 pending/terminal apply/dismiss states announce via polite aria-live", () => {
@@ -2770,31 +2786,39 @@ describe("AI Ask streaming route", () => {
 
       // AC3 7.3: "only one aria-modal=true dialog is open at a time." Verify
       // the coordination BEHAVIOR, not just callback wiring: each sheet-opening
-      // handler must close the OTHER aria-modal sheets. The three mobile
-      // aria-modal sheets are the session sheet, the workspace sheet, and the
-      // plan-history sheet. (The answer-detail dialog is gated by
-      // `!isSessionSheetOpen && !isWorkspaceSheetOpen` plus nulling
-      // selectedAnswerEntity in every trigger, so it cannot co-open.)
+      // handler must close the OTHER aria-modal sheets AND null
+      // selectedAnswerEntity. The three mobile aria-modal sheets are the session
+      // sheet, the workspace sheet, and the plan-history sheet. (The
+      // answer-detail dialog is gated by `!isSessionSheetOpen &&
+      // !isWorkspaceSheetOpen` plus nulling selectedAnswerEntity in every
+      // trigger, so it cannot co-open.)
       //
-      // Session-sheet trigger closes workspace AND plan-history.
+      // Session-sheet trigger closes workspace AND plan-history AND nulls answer.
       const sessionTriggerIndex = composerSource.indexOf("setSessionSheetOpen(true)");
       expect(sessionTriggerIndex).toBeGreaterThan(-1);
       const sessionHandlerSlice = composerSource.slice(sessionTriggerIndex - 220, sessionTriggerIndex + 60);
       expect(sessionHandlerSlice).toContain("setWorkspaceSheetOpen(false)");
       expect(sessionHandlerSlice).toContain("setPlanHistorySheetOpen(false)");
+      expect(sessionHandlerSlice).toContain("setSelectedAnswerEntity(null)");
 
-      // Workspace-sheet trigger closes session AND plan-history.
+      // Workspace-sheet trigger closes session AND plan-history AND nulls answer.
       const workspaceTriggerIndex = composerSource.indexOf("setWorkspaceSheetOpen(true)");
       expect(workspaceTriggerIndex).toBeGreaterThan(-1);
       const workspaceHandlerSlice = composerSource.slice(workspaceTriggerIndex - 220, workspaceTriggerIndex + 60);
       expect(workspaceHandlerSlice).toContain("setSessionSheetOpen(false)");
       expect(workspaceHandlerSlice).toContain("setPlanHistorySheetOpen(false)");
+      expect(workspaceHandlerSlice).toContain("setSelectedAnswerEntity(null)");
 
-      // Plan-history sheet trigger (onOpenPlanHistory) closes workspace.
+      // Plan-history sheet trigger (onOpenPlanHistory) closes session AND
+      // workspace AND nulls answer — structurally symmetric with the other two
+      // triggers (third-review fix: the prior handler only closed workspace,
+      // relying on transitive safety; it now closes all siblings explicitly).
       const planHistoryTriggerIndex = composerSource.indexOf("setPlanHistorySheetOpen(true)");
       expect(planHistoryTriggerIndex).toBeGreaterThan(-1);
-      const planHistoryHandlerSlice = composerSource.slice(planHistoryTriggerIndex - 220, planHistoryTriggerIndex + 60);
+      const planHistoryHandlerSlice = composerSource.slice(planHistoryTriggerIndex - 300, planHistoryTriggerIndex + 60);
       expect(planHistoryHandlerSlice).toContain("setWorkspaceSheetOpen(false)");
+      expect(planHistoryHandlerSlice).toContain("setSessionSheetOpen(false)");
+      expect(planHistoryHandlerSlice).toContain("setSelectedAnswerEntity(null)");
 
       // The workspace panel delegates plan-history opening to the composer via
       // callback; it does not render its own aria-modal dialog.

@@ -849,13 +849,36 @@ describe("Story 7.6 AC1 invalid relationships, stale versions, backup refs, orde
     const [project] = await testDb.insert(tripProjects).values({ userId: "safety-bk-user", title: "Hội An", aggregateVersion: 1 }).returning({ id: tripProjects.id });
     // The DB check constraint (trip_plan_items_backup_check) enforces that
     // backup state requires a non-null backupTargetItemId and vice versa.
-    await expect(
-      testDb.insert(tripPlanItems).values({ id: "bk-no-target", tripProjectId: project.id, userId: "safety-bk-user", kind: "leg", type: "transport", state: "backup", label: "Phương án B", ordinal: 0 }),
-    ).rejects.toThrow();
-    // A non-backup state WITH a backupTargetItemId is also rejected.
-    await expect(
-      testDb.insert(tripPlanItems).values({ id: "idea-with-target", tripProjectId: project.id, userId: "safety-bk-user", kind: "leg", type: "transport", state: "idea", label: "Ý tưởng", ordinal: 0, backupTargetItemId: "some-target" }),
-    ).rejects.toThrow();
+    // Third-review fix: assert the specific check-violation SQLSTATE 23514 and
+    // constraint name on BOTH cases (matching F17's precision for the
+    // duplicate-ordinal test). The second case now uses a REAL existing item as
+    // the target so the FK constraint does not fire — only the check constraint
+    // catches "non-backup state WITH a backupTargetItemId" (the prior test used
+    // a nonexistent target, so the FK 23503 caught it regardless of the check).
+    await testDb.insert(tripPlanItems).values({ id: "bk-real-leg", tripProjectId: project.id, userId: "safety-bk-user", kind: "leg", type: "transport", state: "planned", label: "Chặng thực", ordinal: 0, version: 1 });
+
+    // Case 1: backup state WITHOUT a backupTargetItemId → null target means no
+    // FK can fire, so only the check constraint catches it (non-vacuous).
+    try {
+      await testDb.insert(tripPlanItems).values({ id: "bk-no-target", tripProjectId: project.id, userId: "safety-bk-user", kind: "leg", type: "transport", state: "backup", label: "Phương án B", ordinal: 1 });
+      throw new Error("expected backup-without-target insert to be rejected");
+    } catch (error) {
+      const cause = (error as { cause?: { code?: string; constraint_name?: string } }).cause;
+      expect(cause?.code).toBe("23514");
+      expect(cause?.constraint_name).toBe("trip_plan_items_backup_check");
+    }
+
+    // Case 2: non-backup state (idea) WITH a backupTargetItemId pointing to a
+    // REAL existing item → the FK does NOT fire (target exists), so only the
+    // check constraint catches "non-backup state with non-null target."
+    try {
+      await testDb.insert(tripPlanItems).values({ id: "idea-with-target", tripProjectId: project.id, userId: "safety-bk-user", kind: "leg", type: "transport", state: "idea", label: "Ý tưởng", ordinal: 2, backupTargetItemId: "bk-real-leg" });
+      throw new Error("expected idea-with-target insert to be rejected");
+    } catch (error) {
+      const cause = (error as { cause?: { code?: string; constraint_name?: string } }).cause;
+      expect(cause?.code).toBe("23514");
+      expect(cause?.constraint_name).toBe("trip_plan_items_backup_check");
+    }
   });
 
   test("4.1 ordinals remain unique within (trip_project_id, parent_item_id) after create and remove", async () => {

@@ -1979,7 +1979,7 @@ export function AiAskComposer({
                   type="button"
                   aria-label="Đóng danh sách trò chuyện"
                   onClick={() => setSessionSheetOpen(false)}
-                  className="mb-3 min-h-11 w-full rounded-2xl border border-[#d8c9ad] bg-white/80 px-4 py-3 text-sm font-semibold text-[#17342c] transition hover:bg-white focus:outline-none focus:ring-4 focus:ring-[#e5bd82]"
+                  className="mb-3 min-h-11 w-full rounded-2xl border border-[#d8c9ad] bg-white/80 px-4 py-3 text-sm font-semibold text-[#17342c] transition hover:bg-white motion-reduce:transition-none focus:outline-none focus:ring-4 focus:ring-[#e5bd82]"
                 >
                   Đóng danh sách
                 </button>
@@ -2028,7 +2028,7 @@ export function AiAskComposer({
                 type="button"
                 aria-label="Đóng không gian dự án chuyến đi"
                 onClick={() => setWorkspaceSheetOpen(false)}
-                className="mb-3 min-h-11 w-full rounded-2xl border border-[#d8c9ad] bg-white/80 px-4 py-3 text-sm font-semibold text-[#17342c] transition hover:bg-white focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45"
+                className="mb-3 min-h-11 w-full rounded-2xl border border-[#d8c9ad] bg-white/80 px-4 py-3 text-sm font-semibold text-[#17342c] transition hover:bg-white motion-reduce:transition-none focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45"
               >
                 Đóng không gian dự án
               </button>
@@ -2050,6 +2050,9 @@ export function AiAskComposer({
                 proposalTerminalOutcome={proposalTerminalOutcome}
                 planHistoryVariant={isDesktopViewport ? "inline" : "sheet-trigger"}
                 onOpenPlanHistory={() => {
+                  setSelectedAnswerEntity(null);
+                  answerEntityTriggerRef.current = null;
+                  setSessionSheetOpen(false);
                   setWorkspaceSheetOpen(false);
                   setPlanHistorySheetOpen(true);
                 }}
