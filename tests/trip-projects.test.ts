@@ -250,6 +250,32 @@ describe("Trip project helpers", () => {
     await expect(testDb.select().from(tripProjectConstraints)).resolves.toHaveLength(0);
   });
 
+  test("rejects malformed or sensitive constraints before creating rows, audits, or partial updates", async () => {
+    await createTestUser("user-1");
+    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Quy Nhơn" }).returning({ id: tripProjects.id });
+    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }) }));
+    const { upsertInternalTripProjectConstraints } = await import("@/features/chat-trips/trip-projects");
+
+    await expect(upsertInternalTripProjectConstraints(project.id, 1, null, { adultCount: 2, children: false } as never)).resolves.toEqual({ success: false, reason: "invalid" });
+    await expect(upsertInternalTripProjectConstraints(project.id, 1, null, { adultCount: 2, children: [{ ageMin: 4, ageMax: 6, comfortTags: [], preferenceTags: [], fullName: "Sensitive child" }] } as never)).resolves.toEqual({ success: false, reason: "invalid" });
+    await expect(testDb.select().from(tripProjectConstraints)).resolves.toHaveLength(0);
+    await expect(testDb.select().from(auditEvents).where(eq(auditEvents.targetType, "trip_project_constraints"))).resolves.toHaveLength(0);
+
+    await expect(upsertInternalTripProjectConstraints(project.id, 1, null, { adultCount: 2, preferenceTags: ["nature"] })).resolves.toMatchObject({ success: true, aggregateVersion: 2 });
+    const [before] = await testDb.select().from(tripProjectConstraints);
+    const [beforeProject] = await testDb.select().from(tripProjects).where(eq(tripProjects.id, project.id));
+    const auditsBefore = await testDb.select().from(auditEvents).where(eq(auditEvents.targetType, "trip_project_constraints"));
+
+    await expect(upsertInternalTripProjectConstraints(project.id, 2, 1, { adultCount: 3, vehicleType: "truck" } as never)).resolves.toEqual({ success: false, reason: "invalid" });
+    const [after] = await testDb.select().from(tripProjectConstraints);
+    const [afterProject] = await testDb.select().from(tripProjects).where(eq(tripProjects.id, project.id));
+    const auditsAfter = await testDb.select().from(auditEvents).where(eq(auditEvents.targetType, "trip_project_constraints"));
+
+    expect(after).toMatchObject({ tripProjectId: before.tripProjectId, userId: before.userId, version: 1, adultCount: 2, preferenceTags: ["nature"] });
+    expect(afterProject.aggregateVersion).toBe(beforeProject.aggregateVersion);
+    expect(auditsAfter).toHaveLength(auditsBefore.length);
+  });
+
   test("enforces aggregate database checks, owner FKs, and null-inclusive ordinal uniqueness", async () => {
     await createTestUser("user-1");
     await createTestUser("user-2");

@@ -214,6 +214,7 @@ OpenCode gpt-5.6-terra-review
 - Implemented the versioned, owner-scoped structured Trip Project aggregate with DB-enforced discriminator, version, ordinal, content-bound, and deletion constraints. Internal Chat/Trips-only primitives fence aggregate and row versions, reject unsafe inputs/references, atomically reorder scopes, and write content-free audit metadata.
 - Generated and inspected `0060_damp_carlie_cooper` with matching journal/snapshot metadata. The generated SQL was applied successfully to a clean Story 7.1 test baseline; `pnpm db:migrate` against the configured non-test database remains blocked because that database has not applied pre-existing migration history through Story 7.1.
 - Verification passed: `pnpm vitest run tests/trip-projects.test.ts` (14 tests), `pnpm test:run` (50 files, 751 tests), `pnpm lint` (0 errors; 3 pre-existing warnings in `tests/knowledge-search.test.ts`), `pnpm typecheck`, `pnpm db:generate`, and `git diff --check`.
+- Recovery repair: reproduced the `7741622613bf8b35ed0f84405ef42c2597b8d09b` constraint-boundary defect where falsy malformed JSON reached the database. The validator now rejects malformed/sensitive constraint shapes and invalid scalar enums before the transaction; focused regression coverage proves rejected creates write no constraint row or audit and rejected updates preserve the existing row, aggregate version, and audit count.
 
 ### File List
 
@@ -221,6 +222,7 @@ OpenCode gpt-5.6-terra-review
 - src/db/schema.ts
 - src/features/chat-trips/trip-projects.ts
 - tests/trip-projects.test.ts
+- _bmad-output/implementation-artifacts/sprint-status.yaml
 - drizzle/migrations/0060_damp_carlie_cooper.sql
 - drizzle/migrations/meta/0060_snapshot.json
 - drizzle/migrations/meta/_journal.json
@@ -228,3 +230,4 @@ OpenCode gpt-5.6-terra-review
 ### Change Log
 
 - 2026-07-25: Implemented the versioned structured Trip Project aggregate, generated its Drizzle migration, added database-backed regression coverage, and moved the story to review.
+- 2026-07-25: Repaired the AC 3 constraint validation/persistence boundary; malformed or sensitive input now returns `invalid` before persistence, and focused tests prove no rejected-write audit or partial update.
