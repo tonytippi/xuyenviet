@@ -4,7 +4,7 @@ baseline_commit: 4e3442888ee71baf742fe35426685fe060af0a63
 
 # Story 7.1: Establish the Versioned Structured Trip Project Aggregate
 
-Status: review
+Status: done
 
 ## Story
 
@@ -236,3 +236,4 @@ OpenCode gpt-5.6-terra-review
 - 2026-07-25: Implemented the versioned structured Trip Project aggregate, generated its Drizzle migration, added database-backed regression coverage, and moved the story to review.
 - 2026-07-25: Repaired the AC 3 constraint validation/persistence boundary; malformed or sensitive input now returns `invalid` before persistence, and focused tests prove no rejected-write audit or partial update.
 - 2026-07-25: Repaired deferred self-reference enforcement for `trip_plan_items`; both parent and backup target foreign keys now defer to transaction commit with database-backed regression coverage.
+- 2026-07-25: Status synchronized to done after status-only verification of supplied final repair commit `a76ce4ccdb5e0b5f4ba92a660efc7d095279e88c` and a clean pre-update worktree.
