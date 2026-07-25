@@ -1,5 +1,5 @@
 import { getDb } from "@/db/client";
-import { auditEvents, type AuditOperation } from "@/db/schema";
+import { auditEvents, type AuditActorClass, type AuditOperation } from "@/db/schema";
 import type { AuthenticatedSession } from "@/server/auth";
 
 type AuditEventWriter = Pick<ReturnType<typeof getDb>, "insert">;
@@ -13,6 +13,8 @@ export type AuditEventInput = {
   targetId?: string;
   beforeSummary?: string;
   afterSummary?: string;
+  actorClass?: AuditActorClass;
+  actorSystem?: string;
 };
 
 function normalizeAuditSummary(summary: string | undefined) {
@@ -30,6 +32,8 @@ export async function recordAuditEvent({
   targetId,
   beforeSummary,
   afterSummary,
+  actorClass,
+  actorSystem,
 }: AuditEventInput, database: AuditEventWriter = getDb()) {
   await database.insert(auditEvents).values({
     actorUserId: actor.userId,
@@ -39,5 +43,7 @@ export async function recordAuditEvent({
     targetId,
     beforeSummary: normalizeAuditSummary(beforeSummary),
     afterSummary: normalizeAuditSummary(afterSummary),
+    actorClass: actorClass ?? "user",
+    actorSystem: actorSystem ?? null,
   });
 }

@@ -3,6 +3,7 @@ export const aiUsagePurposes = {
   extraction: "extraction",
   evaluation: "evaluation",
   webSearchFallback: "web_search_fallback",
+  tripChangeProposalDraft: "trip_proposal_draft",
 } as const;
 
 export const aiUsagePromptVersions = {
@@ -14,6 +15,7 @@ export const aiUsagePromptVersions = {
   knowledgePipelineJudgment: "knowledge_pipeline_judgment_v1",
   publicMvpAnswerEvaluation: "public_mvp_answer_evaluation_v1",
   webSearchFallback: "web_search_fallback_v1",
+  tripChangeProposalDraft: "trip_change_proposal_draft_v1",
 } as const;
 
 export const aiUsageProviders = {

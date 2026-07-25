@@ -50,3 +50,17 @@ export const tripHomeFocusNextActions: Record<TripHomeFocusKind, string> = {
   "next-leg": "Xem chi tiết chặng trong dòng thời gian",
   preparation: "Bắt đầu thêm ý tưởng hoặc chặng trong cuộc trò chuyện",
 };
+
+export const tripChangeProposalLabels = {
+  badge: "Đề xuất",
+  apply: "Áp dụng",
+  keepPlan: "Giữ kế hoạch",
+  viewAlternatives: "Xem phương án khác",
+  expired: "Đã hết hạn",
+  suggestionNote: "Đây là đề xuất, không phải đặt phòng, kiểm tra đường đi, thời tiết hay tình trạng còn chỗ.",
+  beforeAfter: "Tác động kế hoạch",
+  rationale: "Lý do",
+  affectedItems: "Mục bị tác động",
+  alternatives: "Phương án khác",
+  refreshHint: "Kế hoạch đã thay đổi — làm mới đề xuất",
+} as const;

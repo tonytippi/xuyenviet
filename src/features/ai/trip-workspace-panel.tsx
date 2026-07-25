@@ -1,6 +1,7 @@
 import type { TripWorkspaceReadModel } from "@/features/chat-trips/trip-home";
 import { formatTripProjectLabel } from "@/features/chat-trips/labels";
 import { tripHomeFocusKindLabels, tripHomeFocusNextActions, tripPlanAnchorRoleLabels } from "@/features/chat-trips/trip-home-labels";
+import { TripProposalReviewCard } from "@/features/ai/trip-proposal-review-card";
 import {
   AccommodationIcon,
   AnchorIcon,
@@ -56,7 +57,7 @@ export type TripWorkspacePanelProps = {
 export function TripWorkspacePanel({ idPrefix, header, workspace }: TripWorkspacePanelProps) {
   if (!workspace) return null;
 
-  const { focus, timelineGroups, constraints } = workspace;
+  const { focus, timelineGroups, constraints, pendingProposals } = workspace;
   const projectLabel = formatTripProjectLabel(header);
   const datesText = formatTripDates(header.startDate, header.endDate);
   const travelersText = header.travelers;
@@ -64,6 +65,7 @@ export function TripWorkspacePanel({ idPrefix, header, workspace }: TripWorkspac
   const subtitle = subtitleParts.length > 0 ? subtitleParts.join(" · ") : null;
   const focusLabel = tripHomeFocusKindLabels[focus.kind];
   const focusNextAction = tripHomeFocusNextActions[focus.kind];
+  const now = new Date();
 
   return (
     <section aria-label="Không gian dự án chuyến đi" className="flex flex-col gap-4">
@@ -86,6 +88,14 @@ export function TripWorkspacePanel({ idPrefix, header, workspace }: TripWorkspac
           <a className="mt-2 inline-block text-sm font-semibold text-[#1f5f46] underline decoration-[#8fb59f] underline-offset-4" href={`#${idPrefix}plan-item-${focus.itemId}`}>Xem trong dòng thời gian</a>
         ) : null}
       </div>
+
+      {pendingProposals.length > 0 ? (
+        <div aria-label="Đề xuất thay đổi kế hoạch" className="flex flex-col gap-3">
+          {pendingProposals.map((proposal) => (
+            <TripProposalReviewCard key={proposal.id} idPrefix={idPrefix} proposal={proposal} now={now} />
+          ))}
+        </div>
+      ) : null}
 
       <div className="rounded-2xl border border-[#d8c9ad] bg-white/70 p-4" aria-label="Dòng thời gian kế hoạch">
         <div className="flex items-start justify-between gap-3">

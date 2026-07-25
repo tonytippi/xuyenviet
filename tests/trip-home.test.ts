@@ -138,6 +138,41 @@ describe("Trip Home read model", () => {
       expect(focus.kind).toBe("preparation");
     });
 
+    test("expired pending proposal does not win focus even when no other focus exists", () => {
+      const proposals = [
+        makeProposal({ id: "expired-1", expiresAt: new Date("2026-07-23T00:00:00.000Z") }),
+        makeProposal({ id: "expired-2", expiresAt: new Date("2026-07-24T00:00:00.000Z") }),
+      ];
+
+      const focus = computeTripHomeFocus({ items: [], pendingProposals: proposals, now });
+      expect(focus.kind).toBe("preparation");
+    });
+
+    test("unexpired proposal with expiry and rich fields still wins focus", () => {
+      const proposals = [
+        makeProposal({
+          id: "rich-proposal",
+          expiresAt: new Date("2026-07-27T00:00:00.000Z"),
+          rationale: "Đề xuất đổi chặng xe",
+          status: "pending",
+          affectedItems: [{ itemId: "leg-1", kind: "leg", label: "Chạy xe", change: "change-state" }],
+          beforeAfter: [{ operation: "Đổi trạng thái", before: null, after: "confirmed" }],
+          hasAlternatives: true,
+        }),
+      ];
+
+      const focus = computeTripHomeFocus({ items: [], pendingProposals: proposals, now });
+      expect(focus.kind).toBe("pending-proposal-with-expiry");
+    });
+
+    test("proposal without expiry wins focus over a confirmed-item gap", () => {
+      const items = [makeItem({ id: "gap-1", type: "transport", state: "confirmed" })];
+      const proposals = [makeProposal({ id: "no-expiry", createdAt: new Date("2026-07-22T00:00:00.000Z") })];
+
+      const focus = computeTripHomeFocus({ items, pendingProposals: proposals, now });
+      expect(focus.kind).toBe("pending-proposal");
+    });
+
     test("earliest expiresAt wins among pending-with-expiry proposals", () => {
       const proposals = [
         makeProposal({ id: "later", expiresAt: new Date("2026-07-28T00:00:00.000Z") }),

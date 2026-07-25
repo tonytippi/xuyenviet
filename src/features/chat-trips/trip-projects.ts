@@ -3,9 +3,10 @@ import "server-only";
 import { and, asc, count, desc, eq, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { chatContext, conversations, messages, tripPlanItems, tripProjectConstraints, tripProjects, type TripPlanAnchorRole, type TripPlanItemKind, type TripPlanItemState, type TripPlanItemType } from "@/db/schema";
+import { chatContext, conversations, messages, tripChangeProposals, tripPlanItems, tripProjectConstraints, tripProjects, type TripPlanAnchorRole, type TripPlanItemKind, type TripPlanItemState, type TripPlanItemType } from "@/db/schema";
 import { recordAuditEvent } from "@/features/audit/events";
-import { buildTripWorkspaceReadModelWithConstraints, type ConstraintsProjection, type TimelineGroup, type TripHomeFocus, type TripPlanItemProjection } from "@/features/chat-trips/trip-home";
+import { buildTripWorkspaceReadModelWithConstraints, type ConstraintsProjection, type PendingProposalFocusInput, type TimelineGroup, type TripHomeFocus, type TripPlanItemProjection } from "@/features/chat-trips/trip-home";
+import { listPendingProposalsForTripProject, type OwnedTripChangeProposalSummary } from "@/features/chat-trips/trip-change-proposals";
 import { getAuthenticatedSession } from "@/server/auth";
 
 import { formatTripProjectLabel } from "./labels";
@@ -49,6 +50,7 @@ export type OwnedTripProjectWorkspaceSummary = OwnedTripProjectSummary & {
   timelineGroups: TimelineGroup[];
   constraints: ConstraintsProjection | null;
   tripHome: TripHomeFocus;
+  pendingProposals: OwnedTripChangeProposalSummary[];
 };
 
 export type DeleteOwnedTripProjectResult = {
@@ -228,7 +230,19 @@ export async function getOwnedTripProjectSummary(tripProjectId: string) {
     .limit(1);
 
   const now = new Date();
-  const workspaceReadModel = buildTripWorkspaceReadModelWithConstraints({ items: planItems, pendingProposals: [], now }, constraintsRow);
+  const pendingProposals = (await listPendingProposalsForTripProject(tripProjectId)) ?? [];
+  const pendingProposalFocusInputs: PendingProposalFocusInput[] = pendingProposals.map((proposal) => ({
+    id: proposal.id,
+    expiresAt: proposal.expiresAt,
+    createdAt: proposal.createdAt,
+    rationale: proposal.rationale,
+    status: proposal.status,
+    affectedItems: proposal.affectedItems,
+    beforeAfter: proposal.beforeAfter,
+    alternatives: proposal.alternatives,
+    hasAlternatives: proposal.hasAlternatives,
+  }));
+  const workspaceReadModel = buildTripWorkspaceReadModelWithConstraints({ items: planItems, pendingProposals: pendingProposalFocusInputs, now }, constraintsRow);
 
   return {
     ...project,
@@ -238,6 +252,7 @@ export async function getOwnedTripProjectSummary(tripProjectId: string) {
     timelineGroups: workspaceReadModel.timelineGroups,
     constraints: workspaceReadModel.constraints,
     tripHome: workspaceReadModel.focus,
+    pendingProposals,
   } satisfies OwnedTripProjectWorkspaceSummary;
 }
 
@@ -308,6 +323,7 @@ export async function deleteOwnedTripProject(tripProjectId: string): Promise<Del
       const [projectContextCount] = await transaction.select({ count: count() }).from(chatContext).where(and(eq(chatContext.tripProjectId, project.id), eq(chatContext.userId, session.userId)));
       const [planItemCount] = await transaction.select({ count: count() }).from(tripPlanItems).where(and(eq(tripPlanItems.tripProjectId, project.id), eq(tripPlanItems.userId, session.userId)));
       const [constraintCount] = await transaction.select({ count: count() }).from(tripProjectConstraints).where(and(eq(tripProjectConstraints.tripProjectId, project.id), eq(tripProjectConstraints.userId, session.userId)));
+      const [proposalCount] = await transaction.select({ count: count() }).from(tripChangeProposals).where(and(eq(tripChangeProposals.tripProjectId, project.id), eq(tripChangeProposals.userId, session.userId)));
 
       // The project deletion promise includes every linked conversation. Their owned dependent
       // records cascade through the conversation foreign-key graph before the project is removed.
@@ -335,6 +351,7 @@ export async function deleteOwnedTripProject(tripProjectId: string): Promise<Del
           chatContextCount: projectContextCount?.count ?? 0,
           planItemCount: planItemCount?.count ?? 0,
           constraintCount: constraintCount?.count ?? 0,
+          proposalCount: proposalCount?.count ?? 0,
         }),
         afterSummary: JSON.stringify({ deleted: true, linkedConversationsDeleted: true }),
       }, transaction);

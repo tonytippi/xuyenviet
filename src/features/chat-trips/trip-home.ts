@@ -43,10 +43,33 @@ export type TripPlanItemProjection = {
   createdAt: Date;
 };
 
+export type PendingProposalAffectedItemRef = {
+  itemId: string;
+  kind: TripPlanItemKind;
+  label: string;
+  change: "create" | "update" | "remove" | "reorder" | "change-state" | "upsert-constraints";
+};
+
+export type PendingProposalBeforeAfterSummary = {
+  operation: string;
+  before: string | null;
+  after: string | null;
+};
+
+export type PendingProposalAlternativeSummary = {
+  summary: string;
+};
+
 export type PendingProposalFocusInput = {
   id: string;
   expiresAt?: Date | null;
   createdAt: Date;
+  rationale?: string | null;
+  status?: "pending" | "applied" | "dismissed" | "expired";
+  affectedItems?: PendingProposalAffectedItemRef[];
+  beforeAfter?: PendingProposalBeforeAfterSummary[];
+  alternatives?: PendingProposalAlternativeSummary[];
+  hasAlternatives?: boolean;
 };
 
 export type TripHomeFocus =
@@ -525,6 +548,7 @@ export type TripWorkspaceReadModel = {
   focus: TripHomeFocus;
   timelineGroups: TimelineGroup[];
   constraints: ConstraintsProjection | null;
+  pendingProposals: PendingProposalFocusInput[];
 };
 
 export function buildTripWorkspaceReadModelWithConstraints(
@@ -536,5 +560,6 @@ export function buildTripWorkspaceReadModelWithConstraints(
     focus: computeTripHomeFocus(input),
     timelineGroups: buildTimelineGroups(items),
     constraints: buildConstraintsSummary(constraintsRow),
+    pendingProposals: input.pendingProposals ?? [],
   };
 }

@@ -138,6 +138,7 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
         focus: selectedTripProject.tripHome,
         timelineGroups: selectedTripProject.timelineGroups,
         constraints: selectedTripProject.constraints,
+        pendingProposals: selectedTripProject.pendingProposals,
       }
     : null;
   const canonicalUrl = buildCanonicalAiAskUrl({

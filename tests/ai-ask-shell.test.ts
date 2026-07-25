@@ -4,9 +4,11 @@ import { readFileSync } from "node:fs";
 import { asc, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { aiGatewayModels, aiUsageEvents, answerUsefulnessFeedback, assistantResponseProvenance, assistantRetrievalDecisions, conversations, messageImageAttachments, messages, tripPlanItems, tripProjectConstraints, tripProjects, users } from "@/db/schema";
+import { aiGatewayModels, aiUsageEvents, answerUsefulnessFeedback, assistantResponseProvenance, assistantRetrievalDecisions, conversations, messageImageAttachments, messages, tripChangeProposals, tripPlanItems, tripProjectConstraints, tripProjects, users } from "@/db/schema";
 import type { AnswerAnnotation } from "@/features/ai/answer-annotations";
 import type { AnswerEntityDescriptor } from "@/features/ai/ai-ask-composer";
+import { TripProposalReviewCard } from "@/features/ai/trip-proposal-review-card";
+import type { PendingProposalFocusInput } from "@/features/chat-trips/trip-home";
 import type { AssistantMessageProvenanceItem } from "@/features/retrieval/provenance";
 
 import { testDb } from "./helpers/db";
@@ -2178,5 +2180,193 @@ describe("AI Ask streaming route", () => {
     expect(panelSource).not.toContain("fetch(");
     expect(panelSource).not.toContain("useEffect");
     expect(panelSource).not.toContain("useState");
+  });
+
+  describe("TripProposalReviewCard rendering", () => {
+    const fixedNow = new Date("2026-07-25T10:00:00.000Z");
+
+    function makeProposal(overrides: Partial<PendingProposalFocusInput> & { id: string }): PendingProposalFocusInput {
+      return {
+        createdAt: new Date("2026-07-22T00:00:00.000Z"),
+        rationale: "Nên chốt chặng xe sớm.",
+        status: "pending",
+        affectedItems: [{ itemId: "leg-1", kind: "leg", label: "Chạy xe Hà Nội - Huế", change: "change-state" }],
+        beforeAfter: [{ operation: "Đổi trạng thái", before: null, after: "confirmed" }],
+        hasAlternatives: false,
+        ...overrides,
+      };
+    }
+
+    function renderCard(proposal: PendingProposalFocusInput) {
+      return renderToStaticMarkup(createElement(TripProposalReviewCard, { idPrefix: "test-", proposal, now: fixedNow }));
+    }
+
+    test("renders the proposal badge, rationale, before/after, and trust copy", () => {
+      const html = renderCard(makeProposal({ id: "p1" }));
+
+      expect(html).toContain("Đề xuất");
+      expect(html).toContain("Nên chốt chặng xe sớm.");
+      expect(html).toContain("Tác động kế hoạch");
+      expect(html).toContain("Đổi trạng thái");
+      expect(html).toContain("đề xuất");
+      expect(html).toContain("không phải đặt phòng");
+    });
+
+    test("renders the amber border distinct from confirmed timeline items and uses no shadow or saturated color", () => {
+      const html = renderCard(makeProposal({ id: "p1" }));
+
+      expect(html).toContain("#D97706");
+      expect(html).not.toContain("shadow-");
+      expect(html).not.toContain("animate-");
+    });
+
+    test("omits Áp dụng and shows expired marker for an expired proposal", () => {
+      const html = renderCard(makeProposal({ id: "p1", expiresAt: new Date("2026-07-24T00:00:00.000Z") }));
+
+      expect(html).toContain("Đã hết hạn");
+      expect(html).not.toContain(">Áp dụng<");
+    });
+
+    test("shows Áp dụng, Giữ kế hoạch for a pending unexpired proposal and wires 7.5 hooks with aria-disabled", () => {
+      const html = renderCard(makeProposal({ id: "p1", expiresAt: new Date("2026-07-27T00:00:00.000Z") }));
+
+      expect(html).toContain("Áp dụng");
+      expect(html).toContain("Giữ kế hoạch");
+      expect(html).toContain('aria-disabled="true"');
+      expect(html).toContain('data-story="7.5"');
+    });
+
+    test("shows Xem phương án khác only when alternatives are supplied", () => {
+      const without = renderCard(makeProposal({ id: "p1", hasAlternatives: false, alternatives: [] }));
+      expect(without).not.toContain("Xem phương án khác");
+
+      const withAlts = renderCard(makeProposal({ id: "p2", hasAlternatives: true, alternatives: [{ summary: "Đợi thêm thông tin" }] }));
+      expect(withAlts).toContain("Xem phương án khác");
+      expect(withAlts).toContain("Đợi thêm thông tin");
+    });
+
+    test("is presentational and data-free with no localStorage, fetch, useEffect, or useState", () => {
+      const source = readFileSync("src/features/ai/trip-proposal-review-card.tsx", "utf8");
+      expect(source).not.toContain("localStorage");
+      expect(source).not.toContain("sessionStorage");
+      expect(source).not.toContain("fetch(");
+      expect(source).not.toContain("useEffect");
+      expect(source).not.toContain("useState");
+    });
+
+    test("exposes a keyboard-focusable proposal heading with aria-live for state changes", () => {
+      const html = renderCard(makeProposal({ id: "p1" }));
+      expect(html).toContain('aria-live="polite"');
+      expect(html).toContain('tabindex="-1"');
+    });
+  });
+
+  describe("proposal done payload reconciliation and shell integration", () => {
+    test("composer source accepts the proposal summary from the done event and renders an answer-surface proposal card", () => {
+      const composerSource = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
+
+      expect(composerSource).toContain("proposal?: ProposalDoneSummary");
+      expect(composerSource).toContain("event.proposal");
+      expect(composerSource).toContain("AnswerProposalCard");
+      expect(composerSource).toContain("TripProposalReviewCard");
+    });
+
+    test("stream route wires proposal drafting before done and records trip_proposal_draft usage", () => {
+      const routeSource = readFileSync("src/app/api/ai-ask/stream/route.ts", "utf8");
+
+      expect(routeSource).toContain("draftTripChangeProposal");
+      expect(routeSource).toContain("persistAiTripChangeProposalDraft");
+      expect(routeSource).toContain("recordTripChangeProposalDraftUsage");
+      expect(routeSource).toContain("proposal: proposalSummary");
+      // The trip_proposal_draft purpose label lives in usage constants and is applied
+      // inside recordTripChangeProposalDraftUsage; verify the constants module exports it.
+      const constantsSource = readFileSync("src/features/usage/constants.ts", "utf8");
+      expect(constantsSource).toContain("trip_proposal_draft");
+    });
+
+    test("stream route sends done without a proposal on drafting failure and never breaks the answer", () => {
+      const routeSource = readFileSync("src/app/api/ai-ask/stream/route.ts", "utf8");
+      // The draftAndPersistProposal helper returns undefined on any failure path,
+      // and the done event is sent with proposal: undefined (omitted) in that case.
+      expect(routeSource).toContain("return undefined");
+      expect(routeSource).toMatch(/proposal: proposalSummary/);
+    });
+  });
+
+  describe("proposal card rendered in the workspace shell for a project with pending proposals", () => {
+    test("renders the proposal card in the workspace panel when a pending proposal exists", async () => {
+      await createTestUser("user-1");
+      const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế", origin: "Hà Nội", destination: "Huế" }).returning({ id: tripProjects.id });
+      const [conversation] = await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id }).returning({ id: conversations.id });
+      await testDb.update(tripProjects).set({ primaryConversationId: conversation.id }).where(eq(tripProjects.id, project.id));
+      await testDb.insert(tripPlanItems).values({ id: "leg-1", tripProjectId: project.id, userId: "user-1", kind: "leg", type: "transport", state: "idea", label: "Chạy xe", ordinal: 0, version: 1 });
+      await testDb.insert(tripChangeProposals).values({
+        tripProjectId: project.id,
+        userId: "user-1",
+        creatorClass: "ai_orchestration",
+        status: "pending",
+        rationale: "Nên chốt chặng xe sớm.",
+        operations: [{ kind: "change-item-state", itemId: "leg-1", state: "confirmed" }],
+        expectedAggregateVersion: 1,
+      });
+
+      const canonicalUrl = await getAuthenticatedAiAskRedirect({ tripProjectId: project.id });
+      const canonicalParams = Object.fromEntries(new URL(canonicalUrl, "http://localhost").searchParams.entries());
+      vi.resetModules();
+      const html = await renderAuthenticatedAiAskShell(canonicalParams);
+
+      expect(html).toContain("Đề xuất");
+      expect(html).toContain("Nên chốt chặng xe sớm.");
+      expect(html).toContain("#D97706");
+      // Visual distinction: the proposal card uses the amber border, not the green focus-card border.
+      expect(html).toContain("Áp dụng");
+      expect(html).toContain("Giữ kế hoạch");
+    });
+
+    test("does not render the proposal card for a project with no pending proposals", async () => {
+      await createTestUser("user-1");
+      const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế" }).returning({ id: tripProjects.id });
+      const [conversation] = await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id }).returning({ id: conversations.id });
+      await testDb.update(tripProjects).set({ primaryConversationId: conversation.id }).where(eq(tripProjects.id, project.id));
+
+      const canonicalUrl = await getAuthenticatedAiAskRedirect({ tripProjectId: project.id });
+      const canonicalParams = Object.fromEntries(new URL(canonicalUrl, "http://localhost").searchParams.entries());
+      vi.resetModules();
+      const html = await renderAuthenticatedAiAskShell(canonicalParams);
+
+      expect(html).not.toContain("Đề xuất thay đổi kế hoạch");
+    });
+
+    test("workspace read path adds no provider call, no AI usage event, and no persistence write for proposals", async () => {
+      await createTestUser("user-1");
+      const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế" }).returning({ id: tripProjects.id });
+      const [conversation] = await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id }).returning({ id: conversations.id });
+      await testDb.update(tripProjects).set({ primaryConversationId: conversation.id }).where(eq(tripProjects.id, project.id));
+      await testDb.insert(tripPlanItems).values({ id: "leg-1", tripProjectId: project.id, userId: "user-1", kind: "leg", type: "transport", state: "idea", label: "Chạy xe", ordinal: 0, version: 1 });
+      await testDb.insert(tripChangeProposals).values({
+        tripProjectId: project.id,
+        userId: "user-1",
+        creatorClass: "ai_orchestration",
+        status: "pending",
+        rationale: "Đề xuất chỉ đọc.",
+        operations: [{ kind: "change-item-state", itemId: "leg-1", state: "confirmed" }],
+        expectedAggregateVersion: 1,
+      });
+
+      const usageBefore = await countUsageEvents();
+      const proposalsBefore = await testDb.select().from(tripChangeProposals);
+
+      const canonicalUrl = await getAuthenticatedAiAskRedirect({ tripProjectId: project.id });
+      const canonicalParams = Object.fromEntries(new URL(canonicalUrl, "http://localhost").searchParams.entries());
+      vi.resetModules();
+      const fetchMock = vi.fn(async () => { throw new Error("Unexpected fetch"); });
+      vi.stubGlobal("fetch", fetchMock);
+      await renderAuthenticatedAiAskShell(canonicalParams);
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(await countUsageEvents()).toBe(usageBefore);
+      const proposalsAfter = await testDb.select().from(tripChangeProposals);
+      expect(proposalsAfter).toHaveLength(proposalsBefore.length);
+    });
   });
 });

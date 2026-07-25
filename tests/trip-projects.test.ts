@@ -2,7 +2,7 @@ import { asc, eq, sql } from "drizzle-orm";
 import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { aiUsageEvents, answerUsefulnessFeedback, assistantResponseProvenance, assistantRetrievalDecisions, auditEvents, chatContext, conversations, messageImageAttachments, messages, tripPlanItems, tripProjectConstraints, tripProjects, users, webSearchResults } from "@/db/schema";
+import { aiUsageEvents, answerUsefulnessFeedback, assistantResponseProvenance, assistantRetrievalDecisions, auditEvents, chatContext, conversations, messageImageAttachments, messages, tripChangeProposals, tripPlanItems, tripProjectConstraints, tripProjects, users, webSearchResults } from "@/db/schema";
 
 import { testDb } from "./helpers/db";
 
@@ -532,5 +532,55 @@ describe("Trip project helpers", () => {
 
     expect(auditsAfter).toHaveLength(auditsBefore.length);
     expect(savedProject.aggregateVersion).toBe(1);
+  });
+
+  test("getOwnedTripProjectSummary feeds real pending proposals into the workspace read model", async () => {
+    await createTestUser("user-1");
+    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế" }).returning({ id: tripProjects.id });
+    await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id });
+    await testDb.insert(tripPlanItems).values({ id: "leg-1", tripProjectId: project.id, userId: "user-1", kind: "leg", type: "transport", state: "idea", label: "Chạy xe", ordinal: 0, version: 1 });
+    const expiresAt = new Date("2026-08-01T00:00:00.000Z");
+    await testDb.insert(tripChangeProposals).values({
+      tripProjectId: project.id,
+      userId: "user-1",
+      creatorClass: "ai_orchestration",
+      status: "pending",
+      rationale: "Nên chốt chặng xe sớm.",
+      operations: [{ kind: "change-item-state", itemId: "leg-1", state: "confirmed" }],
+      expectedAggregateVersion: 1,
+      expectedItemVersions: { "leg-1": 1 },
+      expiresAt,
+    });
+    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }) }));
+    const { getOwnedTripProjectSummary } = await import("@/features/chat-trips/trip-projects");
+
+    const summary = await getOwnedTripProjectSummary(project.id);
+
+    expect(summary?.pendingProposals).toHaveLength(1);
+    expect(summary?.pendingProposals[0]).toMatchObject({ status: "pending", rationale: "Nên chốt chặng xe sớm.", expiresAt });
+    expect(summary?.tripHome.kind).toBe("pending-proposal-with-expiry");
+  });
+
+  test("deleting a trip project cascades to its proposals and the audit beforeSummary reports the proposal count", async () => {
+    await createTestUser("user-1");
+    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế" }).returning({ id: tripProjects.id });
+    await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id });
+    await testDb.insert(tripPlanItems).values({ id: "leg-1", tripProjectId: project.id, userId: "user-1", kind: "leg", type: "transport", state: "idea", label: "Chạy xe", ordinal: 0, version: 1 });
+    await testDb.insert(tripChangeProposals).values({
+      tripProjectId: project.id,
+      userId: "user-1",
+      creatorClass: "ai_orchestration",
+      status: "pending",
+      rationale: "Đề xuất sẽ xoá theo dự án.",
+      operations: [{ kind: "change-item-state", itemId: "leg-1", state: "confirmed" }],
+      expectedAggregateVersion: 1,
+    });
+    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }) }));
+    const { deleteOwnedTripProject } = await import("@/features/chat-trips/trip-projects");
+
+    await expect(deleteOwnedTripProject(project.id)).resolves.toEqual({ success: true });
+    await expect(testDb.select().from(tripChangeProposals)).resolves.toHaveLength(0);
+    const [audit] = await testDb.select().from(auditEvents).where(eq(auditEvents.targetType, "trip_project"));
+    expect(audit.beforeSummary).toContain('"proposalCount":1');
   });
 });

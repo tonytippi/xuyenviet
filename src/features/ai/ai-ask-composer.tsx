@@ -12,11 +12,21 @@ import type { AnswerAnnotation } from "@/features/ai/answer-annotations";
 import type { AssistantMessageProvenanceItem } from "@/features/retrieval/provenance";
 import type { TripWorkspaceReadModel } from "@/features/chat-trips/trip-home";
 import { TripWorkspacePanel } from "@/features/ai/trip-workspace-panel";
+import { TripProposalReviewCard } from "@/features/ai/trip-proposal-review-card";
 import { AccountIcon, AttachmentIcon, ChatIcon, CloseIcon, CostIcon, HotelAreaIcon, LoadingIcon, NewChatIcon, PlaceIcon, ProjectIcon, RouteSegmentIcon, SendIcon, SourceIcon } from "@/components/ui/icons";
 
 const maxQuestionLength = 2_000;
 const maxImageByteSize = 5 * 1024 * 1024;
 const previewMaxLength = 60;
+
+type ProposalDoneSummary = {
+  proposalId: string;
+  rationale: string;
+  affectedItems: Array<{ itemId: string; kind: string; label: string; change: string }>;
+  beforeAfter: Array<{ operation: string; before: string | null; after: string | null }>;
+  expiresAt: Date | string | null;
+  status: string;
+};
 
 type DisplayMessage = {
   id: string;
@@ -31,6 +41,7 @@ type DisplayMessage = {
   provenance?: AssistantMessageProvenanceItem[];
   annotations?: AnswerAnnotation[];
   feedback?: AnswerUsefulnessFeedbackSummary | null;
+  proposal?: ProposalDoneSummary;
 };
 
 export type AnswerEntityDescriptor = {
@@ -555,8 +566,43 @@ export function AnswerDetailPanel({ selectedEntity, panelId, panelRef, onClose }
   );
 }
 
-function getFocusableElements(container: HTMLElement) {
-  return Array.from(
+function AnswerProposalCard({ proposal }: { proposal: ProposalDoneSummary }) {
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    // Story 7.4 (EXPERIENCE.md interaction primitives): move focus to the
+    // proposal heading when a proposal card appears in the answer surface so
+    // screen-reader and keyboard users land on the review affordance. The
+    // terminal-result focus return to the originating answer card is wired in
+    // 7.5 alongside the apply/dismiss command handlers.
+    const heading = wrapperRef.current?.querySelector<HTMLHeadingElement>("[tabindex='-1']");
+    heading?.focus();
+  }, [proposal.proposalId]);
+
+  const expiresAt = proposal.expiresAt instanceof Date ? proposal.expiresAt : proposal.expiresAt ? new Date(proposal.expiresAt) : null;
+  const focusInput = {
+    id: proposal.proposalId,
+    expiresAt: expiresAt && !Number.isNaN(expiresAt.getTime()) ? expiresAt : null,
+    createdAt: new Date(),
+    rationale: proposal.rationale,
+    status: proposal.status as "pending" | "applied" | "dismissed" | "expired",
+    affectedItems: proposal.affectedItems.map((item) => ({
+      itemId: item.itemId,
+      kind: item.kind as "anchor" | "leg" | "activity",
+      label: item.label,
+      change: item.change as "create" | "update" | "remove" | "reorder" | "change-state" | "upsert-constraints",
+    })),
+    beforeAfter: proposal.beforeAfter,
+    hasAlternatives: false,
+  };
+
+  return (
+    <div ref={wrapperRef} className="mt-4" data-story="7.4">
+      <TripProposalReviewCard idPrefix="answer-" proposal={focusInput} now={new Date()} />
+    </div>
+  );
+}
+
+function getFocusableElements(container: HTMLElement) {  return Array.from(
     container.querySelectorAll<HTMLElement>(
       'button:not(:disabled), [href], input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])',
     ),
@@ -1008,7 +1054,7 @@ export function AiAskComposer({
       setMessages((currentMessages) => [
         ...currentMessages,
         { id: result.userMessage.id, role: "user", content: result.userMessage.content },
-        { id: result.assistantMessage.id, role: "assistant", content: result.assistantMessage.content, provenance: result.assistantMessage.provenance, annotations: result.assistantMessage.annotations },
+        { id: result.assistantMessage.id, role: "assistant", content: result.assistantMessage.content, provenance: result.assistantMessage.provenance, annotations: result.assistantMessage.annotations, proposal: result.proposal },
       ]);
       setQuestion("");
       setSelectedImage(null);
@@ -1541,6 +1587,9 @@ export function AiAskComposer({
                     <>
                       <AssistantMessageContent messageId={message.id} content={message.content} annotations={message.annotations} selectedEntityId={selectedAnswerEntityId} detailPanelIds={answerDetailPanelIds} onSelectEntity={handleSelectAnswerEntity} />
                       <AssistantProvenanceBlock provenance={message.provenance} selectedEntityId={selectedAnswerEntityId} detailPanelIds={answerDetailPanelIds} onSelectEntity={handleSelectAnswerEntity} />
+                      {message.proposal ? (
+                        <AnswerProposalCard proposal={message.proposal} />
+                      ) : null}
                       {saveAnswerUsefulnessFeedbackAction ? (
                         <AnswerUsefulnessFeedbackControl
                           feedback={message.feedback}
@@ -1816,6 +1865,7 @@ type StreamResult = {
   conversationId: string;
   userMessage: DisplayMessage;
   assistantMessage: DisplayMessage;
+  proposal?: ProposalDoneSummary;
 } | {
   status: "answer-failed";
   conversationId?: string;
@@ -1886,7 +1936,7 @@ async function submitAiAskStream({
       }
 
       if (event.type === "done" && event.conversationId && event.userMessage && event.assistantMessage) {
-        terminalResult = { status: "answer-created", conversationId: event.conversationId, userMessage: event.userMessage, assistantMessage: event.assistantMessage };
+        terminalResult = { status: "answer-created", conversationId: event.conversationId, userMessage: event.userMessage, assistantMessage: event.assistantMessage, proposal: event.proposal };
       }
 
       if (event.type === "error" && terminalResult?.status !== "answer-created") {
@@ -1902,7 +1952,7 @@ async function submitAiAskStream({
 
 function parseStreamEvent(line: string) {
   try {
-    return JSON.parse(line) as { type: string; content?: string; conversationId?: string; userMessage?: DisplayMessage; assistantMessage?: DisplayMessage; errorMessage?: string };
+    return JSON.parse(line) as { type: string; content?: string; conversationId?: string; userMessage?: DisplayMessage; assistantMessage?: DisplayMessage; errorMessage?: string; proposal?: ProposalDoneSummary };
   } catch {
     return null;
   }

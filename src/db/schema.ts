@@ -4,8 +4,23 @@ import { type AnyPgColumn, boolean, check, foreignKey, index, integer, jsonb, pg
 export const userRoleValues = ["traveler", "operator", "admin"] as const;
 export type UserRole = (typeof userRoleValues)[number];
 
-export const auditOperationValues = ["access_check", "create", "update", "delete", "archive", "approve"] as const;
+export const auditOperationValues = ["access_check", "create", "update", "delete", "archive", "approve", "apply", "dismiss", "expire"] as const;
 export type AuditOperation = (typeof auditOperationValues)[number];
+
+export const auditActorClassValues = ["user", "system"] as const;
+export type AuditActorClass = (typeof auditActorClassValues)[number];
+
+export const tripChangeProposalCreatorClassValues = ["ai_orchestration", "owner_command"] as const;
+export type TripChangeProposalCreatorClass = (typeof tripChangeProposalCreatorClassValues)[number];
+
+export const tripChangeProposalStatusValues = ["pending", "applied", "dismissed", "expired"] as const;
+export type TripChangeProposalStatus = (typeof tripChangeProposalStatusValues)[number];
+
+export const tripPlanChangeHistoryActorClassValues = ["user", "system"] as const;
+export type TripPlanChangeHistoryActorClass = (typeof tripPlanChangeHistoryActorClassValues)[number];
+
+export const tripPlanChangeHistoryOperationClassValues = ["apply", "dismiss", "expire"] as const;
+export type TripPlanChangeHistoryOperationClass = (typeof tripPlanChangeHistoryOperationClassValues)[number];
 
 export const messageRoleValues = ["user", "assistant"] as const;
 export type MessageRole = (typeof messageRoleValues)[number];
@@ -270,6 +285,8 @@ export const auditEvents = pgTable(
     targetId: text("target_id"),
     beforeSummary: text("before_summary"),
     afterSummary: text("after_summary"),
+    actorClass: text("actor_class").$type<AuditActorClass>().default("user").notNull(),
+    actorSystem: text("actor_system"),
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
   },
   (auditEvent) => [
@@ -278,8 +295,9 @@ export const auditEvents = pgTable(
     index("audit_events_created_at_idx").on(auditEvent.createdAt),
     check(
       "audit_events_operation_check",
-      sql`${auditEvent.operation} in ('access_check', 'create', 'update', 'delete', 'archive', 'approve')`,
+      sql`${auditEvent.operation} in ('access_check', 'create', 'update', 'delete', 'archive', 'approve', 'apply', 'dismiss', 'expire')`,
     ),
+    check("audit_events_actor_class_check", sql`${auditEvent.actorClass} in ('user', 'system')`),
   ],
 );
 
@@ -636,10 +654,89 @@ export const tripPlanItems = pgTable("trip_plan_items", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()), tripProjectId: text("trip_project_id").notNull(), userId: text("user_id").notNull(), kind: text("kind").$type<TripPlanItemKind>().notNull(), anchorRole: text("anchor_role").$type<TripPlanAnchorRole>(), type: text("type").$type<TripPlanItemType>(), state: text("state").$type<TripPlanItemState>().notNull(), label: text("label").notNull(), notes: text("notes"), plannedAt: timestamp("planned_at", { mode: "date" }), ordinal: integer("ordinal").notNull(), version: integer("version").default(1).notNull(), parentItemId: text("parent_item_id").references((): AnyPgColumn => tripPlanItems.id, { onDelete: "restrict" }), backupTargetItemId: text("backup_target_item_id").references((): AnyPgColumn => tripPlanItems.id, { onDelete: "restrict" }), transportOriginLabel: text("transport_origin_label"), transportDestinationLabel: text("transport_destination_label"), accommodationPlaceAreaLabel: text("accommodation_place_area_label"), createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(), updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
 }, (row) => [foreignKey({ columns: [row.tripProjectId, row.userId], foreignColumns: [tripProjects.id, tripProjects.userId], name: "trip_plan_items_owner_fk" }).onDelete("cascade"), index("trip_plan_items_owner_project_order_idx").on(row.userId, row.tripProjectId, row.parentItemId, row.ordinal), uniqueIndex("trip_plan_items_root_ordinal_idx").on(row.tripProjectId, row.ordinal).where(sql`${row.parentItemId} is null`), uniqueIndex("trip_plan_items_child_ordinal_idx").on(row.tripProjectId, row.parentItemId, row.ordinal).where(sql`${row.parentItemId} is not null`), check("trip_plan_items_shape_check", sql`(${row.kind} = 'anchor' and ${row.anchorRole} in ('origin','destination','region','required_stop','accommodation') and ${row.type} is null) or (${row.kind} in ('leg','activity') and ${row.anchorRole} is null and ${row.type} in ('transport','visit','food','rest','accommodation'))`), check("trip_plan_items_state_check", sql`${row.state} in ('idea','planned','confirmed','backup')`), check("trip_plan_items_version_check", sql`${row.version} >= 1`), check("trip_plan_items_ordinal_check", sql`${row.ordinal} >= 0`), check("trip_plan_items_backup_check", sql`(${row.state} = 'backup' and ${row.backupTargetItemId} is not null) or (${row.state} <> 'backup' and ${row.backupTargetItemId} is null)`), check("trip_plan_items_label_check", sql`length(btrim(${row.label})) between 1 and 160 and position(chr(10) in ${row.label}) = 0 and position(chr(13) in ${row.label}) = 0`), check("trip_plan_items_notes_check", sql`${row.notes} is null or (length(btrim(${row.notes})) between 1 and 1000 and position(chr(10) in ${row.notes}) = 0 and position(chr(13) in ${row.notes}) = 0)`), check("trip_plan_items_location_check", sql`(${row.type} = 'transport' or (${row.transportOriginLabel} is null and ${row.transportDestinationLabel} is null)) and (${row.type} = 'accommodation' or ${row.accommodationPlaceAreaLabel} is null) and (${row.transportOriginLabel} is null or (length(btrim(${row.transportOriginLabel})) between 1 and 160 and position(chr(10) in ${row.transportOriginLabel}) = 0 and position(chr(13) in ${row.transportOriginLabel}) = 0)) and (${row.transportDestinationLabel} is null or (length(btrim(${row.transportDestinationLabel})) between 1 and 160 and position(chr(10) in ${row.transportDestinationLabel}) = 0 and position(chr(13) in ${row.transportDestinationLabel}) = 0)) and (${row.accommodationPlaceAreaLabel} is null or (length(btrim(${row.accommodationPlaceAreaLabel})) between 1 and 160 and position(chr(10) in ${row.accommodationPlaceAreaLabel}) = 0 and position(chr(13) in ${row.accommodationPlaceAreaLabel}) = 0))`)]);
 
-export const conversations = pgTable(
-  "conversations",
+// Story 7.4: Chat/Trips-owned Trip Change Proposals. Persisted AI-drafted plan
+// adjustments that the owner reviews before any structured plan state changes.
+// The AI Orchestration path writes nothing here directly; persistence goes
+// through persistAiTripChangeProposalDraft.
+export const tripChangeProposals = pgTable(
+  "trip_change_proposals",
   {
     id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    tripProjectId: text("trip_project_id").notNull(),
+    userId: text("user_id").notNull(),
+    creatorClass: text("creator_class").$type<TripChangeProposalCreatorClass>().notNull(),
+    status: text("status").$type<TripChangeProposalStatus>().default("pending").notNull(),
+    rationale: text("rationale").notNull(),
+    operations: jsonb("operations").$type<unknown>().notNull(),
+    expectedAggregateVersion: integer("expected_aggregate_version").notNull(),
+    expectedItemVersions: jsonb("expected_item_versions").$type<Record<string, number>>(),
+    orderingPreconditions: jsonb("ordering_preconditions").$type<unknown>(),
+    alternatives: jsonb("alternatives").$type<unknown>(),
+    expiresAt: timestamp("expires_at", { mode: "date" }),
+    terminalTimestamp: timestamp("terminal_timestamp", { mode: "date" }),
+    sourceAssistantMessageId: text("source_assistant_message_id"),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (row) => [
+    foreignKey({
+      columns: [row.tripProjectId, row.userId],
+      foreignColumns: [tripProjects.id, tripProjects.userId],
+      name: "trip_change_proposals_owner_fk",
+    }).onDelete("cascade"),
+    index("trip_change_proposals_owner_status_created_idx").on(row.userId, row.tripProjectId, row.status, row.createdAt),
+    check("trip_change_proposals_creator_class_check", sql`${row.creatorClass} in ('ai_orchestration', 'owner_command')`),
+    check("trip_change_proposals_status_check", sql`${row.status} in ('pending', 'applied', 'dismissed', 'expired')`),
+    check("trip_change_proposals_expected_aggregate_version_check", sql`${row.expectedAggregateVersion} >= 1`),
+    check("trip_change_proposals_rationale_check", sql`length(btrim(${row.rationale})) between 1 and 500 and position(chr(10) in ${row.rationale}) = 0 and position(chr(13) in ${row.rationale}) = 0`),
+    check("trip_change_proposals_operations_array_check", sql`jsonb_typeof(${row.operations}) = 'array' and jsonb_array_length(${row.operations}) between 1 and 20`),
+    check("trip_change_proposals_expected_item_versions_check", sql`${row.expectedItemVersions} is null or jsonb_typeof(${row.expectedItemVersions}) = 'object'`),
+    check("trip_change_proposals_alternatives_check", sql`${row.alternatives} is null or (jsonb_typeof(${row.alternatives}) = 'array' and jsonb_array_length(${row.alternatives}) <= 5)`),
+    check(
+      "trip_change_proposals_status_terminal_shape_check",
+      sql`(${row.status} = 'pending' and ${row.terminalTimestamp} is null) or (${row.status} in ('applied', 'dismissed', 'expired') and ${row.terminalTimestamp} is not null)`,
+    ),
+  ],
+);
+
+// Story 7.4 reserves the schema for Story 7.5's terminal-action history. No rows
+// are written in 7.4; defining the table now means 7.5 needs no second migration.
+export const tripPlanChangeHistory = pgTable(
+  "trip_plan_change_history",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    tripProjectId: text("trip_project_id").notNull(),
+    userId: text("user_id").notNull(),
+    proposalId: text("proposal_id"),
+    actorUserId: text("actor_user_id").references(() => users.id, { onDelete: "restrict" }),
+    actorClass: text("actor_class").$type<TripPlanChangeHistoryActorClass>().default("user").notNull(),
+    actorSystem: text("actor_system"),
+    operationClass: text("operation_class").$type<TripPlanChangeHistoryOperationClass>().notNull(),
+    affectedItemReferences: jsonb("affected_item_references").$type<unknown>().notNull(),
+    safeBeforeAfterSummary: jsonb("safe_before_after_summary").$type<unknown>().notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (row) => [
+    foreignKey({
+      columns: [row.tripProjectId, row.userId],
+      foreignColumns: [tripProjects.id, tripProjects.userId],
+      name: "trip_plan_change_history_owner_fk",
+    }).onDelete("cascade"),
+    index("trip_plan_change_history_owner_created_idx").on(row.userId, row.tripProjectId, row.createdAt),
+    check("trip_plan_change_history_actor_class_check", sql`${row.actorClass} in ('user', 'system')`),
+    check("trip_plan_change_history_operation_class_check", sql`${row.operationClass} in ('apply', 'dismiss', 'expire')`),
+    check("trip_plan_change_history_affected_references_check", sql`jsonb_typeof(${row.affectedItemReferences}) = 'array'`),
+    check("trip_plan_change_history_safe_summary_check", sql`jsonb_typeof(${row.safeBeforeAfterSummary}) = 'object' and octet_length(${row.safeBeforeAfterSummary}::text) <= 8192`),
+  ],
+);
+
+export const conversations = pgTable(
+  "conversations",
+  {    id: text("id")
       .primaryKey()
       .$defaultFn(() => crypto.randomUUID()),
     userId: text("user_id")
@@ -1786,6 +1883,8 @@ export const schema = {
   tripProjects,
   tripProjectConstraints,
   tripPlanItems,
+  tripChangeProposals,
+  tripPlanChangeHistory,
   conversations,
   messages,
   messageImageAttachments,
