@@ -1,4 +1,4 @@
-import { asc, eq } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { aiUsageEvents, answerUsefulnessFeedback, assistantResponseProvenance, assistantRetrievalDecisions, auditEvents, chatContext, conversations, messageImageAttachments, messages, tripPlanItems, tripProjectConstraints, tripProjects, users, webSearchResults } from "@/db/schema";
@@ -290,6 +290,36 @@ describe("Trip project helpers", () => {
     await expect(testDb.insert(tripPlanItems).values({ tripProjectId: project.id, userId: "user-1", kind: "leg", type: "visit", state: "idea", label: "Sai vị trí", ordinal: 1, accommodationPlaceAreaLabel: "Huế" })).rejects.toThrow();
     await expect(testDb.insert(tripProjectConstraints).values({ tripProjectId: project.id, userId: "user-1", adultCount: 1, vehicleType: "car", evChargingNeed: "required" })).rejects.toThrow();
     await expect(testDb.insert(tripProjectConstraints).values({ tripProjectId: project.id, userId: "user-1", adultCount: 1, budgetCurrency: "VND", budgetMinVnd: 2, budgetMaxVnd: 1 })).rejects.toThrow();
+  });
+
+  test("defers plan-item self references to commit while retaining foreign-key integrity", async () => {
+    await createTestUser("user-1");
+    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Phú Yên" }).returning({ id: tripProjects.id });
+    const constraints = await testDb.execute(sql`
+      select conname, condeferrable, condeferred
+      from pg_constraint
+      where conname in (
+        'trip_plan_items_parent_item_id_trip_plan_items_id_fk',
+        'trip_plan_items_backup_target_item_id_trip_plan_items_id_fk'
+      )
+      order by conname
+    `);
+
+    expect(constraints).toEqual([
+      { conname: "trip_plan_items_backup_target_item_id_trip_plan_items_id_fk", condeferrable: true, condeferred: true },
+      { conname: "trip_plan_items_parent_item_id_trip_plan_items_id_fk", condeferrable: true, condeferred: true },
+    ]);
+
+    await testDb.transaction(async (transaction) => {
+      await transaction.insert(tripPlanItems).values({ id: "deferred-activity", tripProjectId: project.id, userId: "user-1", kind: "activity", type: "visit", state: "idea", label: "Gành Đá Đĩa", parentItemId: "deferred-leg", ordinal: 0 });
+      await transaction.insert(tripPlanItems).values({ id: "deferred-backup", tripProjectId: project.id, userId: "user-1", kind: "leg", type: "visit", state: "backup", label: "Phương án dự phòng", backupTargetItemId: "deferred-leg", ordinal: 0 });
+      await transaction.insert(tripPlanItems).values({ id: "deferred-leg", tripProjectId: project.id, userId: "user-1", kind: "leg", type: "transport", state: "planned", label: "Tuyến chính", ordinal: 1 });
+    });
+
+    await expect(testDb.transaction(async (transaction) => {
+      await transaction.insert(tripPlanItems).values({ id: "unresolved-activity", tripProjectId: project.id, userId: "user-1", kind: "activity", type: "visit", state: "idea", label: "Không hợp lệ", parentItemId: "missing-leg", ordinal: 1 });
+    })).rejects.toThrow();
+    await expect(testDb.select().from(tripPlanItems).where(eq(tripPlanItems.id, "unresolved-activity"))).resolves.toHaveLength(0);
   });
 
   test("updates, reorders, and deletes plan items with row and aggregate version fences", async () => {

@@ -68,7 +68,8 @@ so that confirmed trip state is durable, explicit, and separate from chat transc
    - [x] Add exported unions/constants and `tripPlanItems` with owner/project composite ownership, kind discriminator, state, bounded label/notes, optional planned time, ordinal, item version, timestamps, parent reference, and backup target reference. Persist only the canonical location columns defined under **Plan-Item Location Contract**. Do not add exact GPS, provider, booking, route, or dynamic-data fields.
    - [x] Add database-enforceable checks: valid discriminator shape, valid item state, positive versions, scoped ordinal uniqueness, required backup target only for `backup`, and forbidden backup target otherwise. Root ordinal uniqueness must treat `parent_item_id = NULL` rows as the same root scope: use a reviewed PostgreSQL-safe `NULLS NOT DISTINCT` unique index if supported by the deployed PostgreSQL version, otherwise use equivalent separate root/child partial unique indexes.
    - [x] Add owner/project read and ordered-item indexes. Use the established composite owner/project foreign-key convention rather than only an unscoped project ID reference.
-   - [x] Generate, inspect, and retain the next Drizzle migration, journal update, and schema snapshot. Do not hand-author SQL-only schema drift.
+    - [x] Generate, inspect, and retain the next Drizzle migration, journal update, and schema snapshot. Do not hand-author SQL-only schema drift.
+   - [x] Review and defer both `trip_plan_items` self-reference foreign keys so transactional parent/backup ordering can commit without weakening foreign-key integrity.
 
  - [x] Implement the minimum Chat/Trips aggregate command boundary (AC: 2, 3)
   - [x] Keep aggregate writes in `src/features/chat-trips`; server-authenticate and owner-scope every command.
@@ -215,6 +216,7 @@ OpenCode gpt-5.6-terra-review
 - Generated and inspected `0060_damp_carlie_cooper` with matching journal/snapshot metadata. The generated SQL was applied successfully to a clean Story 7.1 test baseline; `pnpm db:migrate` against the configured non-test database remains blocked because that database has not applied pre-existing migration history through Story 7.1.
 - Verification passed: `pnpm vitest run tests/trip-projects.test.ts` (14 tests), `pnpm test:run` (50 files, 751 tests), `pnpm lint` (0 errors; 3 pre-existing warnings in `tests/knowledge-search.test.ts`), `pnpm typecheck`, `pnpm db:generate`, and `git diff --check`.
 - Recovery repair: reproduced the `7741622613bf8b35ed0f84405ef42c2597b8d09b` constraint-boundary defect where falsy malformed JSON reached the database. The validator now rejects malformed/sensitive constraint shapes and invalid scalar enums before the transaction; focused regression coverage proves rejected creates write no constraint row or audit and rejected updates preserve the existing row, aggregate version, and audit count.
+- Final recovery repair: generated migration `0061_story_7_1_deferred_trip_plan_item_fks` to make both named `trip_plan_items` self-reference foreign keys `DEFERRABLE INITIALLY DEFERRED`. Drizzle 0.44.5 has no schema-level deferrability API, so `schema.ts` documents the migration-owned action while retaining its foreign-key declarations. Focused database coverage verifies catalog flags, valid child/backup-before-target commit ordering, and commit-time rejection of unresolved references.
 
 ### File List
 
@@ -226,8 +228,11 @@ OpenCode gpt-5.6-terra-review
 - drizzle/migrations/0060_damp_carlie_cooper.sql
 - drizzle/migrations/meta/0060_snapshot.json
 - drizzle/migrations/meta/_journal.json
+- drizzle/migrations/0061_story_7_1_deferred_trip_plan_item_fks.sql
+- drizzle/migrations/meta/0061_snapshot.json
 
 ### Change Log
 
 - 2026-07-25: Implemented the versioned structured Trip Project aggregate, generated its Drizzle migration, added database-backed regression coverage, and moved the story to review.
 - 2026-07-25: Repaired the AC 3 constraint validation/persistence boundary; malformed or sensitive input now returns `invalid` before persistence, and focused tests prove no rejected-write audit or partial update.
+- 2026-07-25: Repaired deferred self-reference enforcement for `trip_plan_items`; both parent and backup target foreign keys now defer to transaction commit with database-backed regression coverage.
