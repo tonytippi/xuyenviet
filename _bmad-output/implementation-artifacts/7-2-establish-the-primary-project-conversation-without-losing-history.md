@@ -4,7 +4,7 @@ baseline_commit: 5f7e482
 
 # Story 7.2: Establish the Primary Project Conversation Without Losing History
 
-Status: review
+Status: done
 
 ## Story
 

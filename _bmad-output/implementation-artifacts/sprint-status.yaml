@@ -94,8 +94,8 @@ development_status:
   epic-7: in-progress
   # Synchronized 2026-07-25 after status-only verification of supplied final repair commit a76ce4ccdb5e0b5f4ba92a660efc7d095279e88c and a clean pre-update worktree.
   7-1-establish-the-versioned-structured-trip-project-aggregate: done
-  # Synchronized 2026-07-25 after migration/backfill, concurrency, shell, stream, and full serial regression verification.
-  7-2-establish-the-primary-project-conversation-without-losing-history: review
+  # Synchronized 2026-07-25 after code review of commit 5123e27: approved with no high/medium findings; one low cosmetic naming item dismissed.
+  7-2-establish-the-primary-project-conversation-without-losing-history: done
   7-3-present-trip-home-and-the-owners-plan-workspace: backlog
   7-4-generate-reviewable-ai-trip-change-proposals: backlog
   7-5-apply-dismiss-and-expire-proposals-safely: backlog
