@@ -4,7 +4,7 @@ baseline_commit: 2af7ecd10ded08e8ab50efad87fb7f51b6fb2cb7
 
 # Story 7.4: Generate Reviewable AI Trip Change Proposals
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 

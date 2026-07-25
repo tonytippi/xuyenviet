@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-07-25 (Story 7.4 second-review LOW patch finding repaired: ordering_preconditions added to AI proposal-draft prompt expected_output so the column is populated through the AI path; status set to review)
+# last_updated: 2026-07-25 (Story 7.4 marked done after status-only verification of final repair commit 262f9fa5de9ce9f65c2f416e1035b1b5f2dfb3dd and a clean worktree; no code review performed.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-07-25 (Story 7.4 second-review LOW patch finding repaired: ordering_preconditions added to AI proposal-draft prompt expected_output so the column is populated through the AI path; status set to review)
+last_updated: 2026-07-25 (Story 7.4 marked done after status-only verification of final repair commit 262f9fa5de9ce9f65c2f416e1035b1b5f2dfb3dd and a clean worktree; no code review performed.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -98,7 +98,8 @@ development_status:
   7-2-establish-the-primary-project-conversation-without-losing-history: done
   # Synchronized 2026-07-25 after status-only verification of supplied final repair commit 267a12264793c3b71eca6fe56531908e502801fe and a clean pre-update worktree.
   7-3-present-trip-home-and-the-owners-plan-workspace: done
-  7-4-generate-reviewable-ai-trip-change-proposals: review
+  7-4-generate-reviewable-ai-trip-change-proposals: done
+  # Synchronized 2026-07-25 after status-only verification of supplied final repair commit 262f9fa5de9ce9f65c2f416e1035b1b5f2dfb3dd and a clean pre-update worktree; no code review performed.
   7-5-apply-dismiss-and-expire-proposals-safely: backlog
   7-6-verify-owner-scoped-trip-planning-safety: backlog
   epic-7-retrospective: optional
