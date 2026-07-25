@@ -94,7 +94,26 @@ export async function runTripChangeProposalExpiryWorkerLoop(
   const pollIntervalMs = input.pollIntervalMs ?? defaultPollIntervalMs;
 
   while (!input.signal?.aborted) {
-    const result = await processNextExpiredTripChangeProposal({ workerId: input.workerId });
+    // Q2: a transient DB error (connection blip, deadlock, serialization
+    // failure) inside the batch transaction rolls back the whole batch
+    // atomically (no partial writes — consistent with expire idempotency) and
+    // re-throws out of processNextExpiredTripChangeProposal. Without this
+    // catch the loop would die and stay down until externally restarted. Log
+    // and keep polling so the next iteration re-claims and retries the same
+    // rows. (Per-row catch inside the single P5 transaction is ineffective —
+    // once Postgres aborts the transaction every subsequent statement fails
+    // until ROLLBACK — so the batch-level catch is the correct seam.)
+    let result: ProcessNextExpiredTripChangeProposalResult;
+    try {
+      result = await processNextExpiredTripChangeProposal({ workerId: input.workerId });
+    } catch (error) {
+      console.error("Transient error in trip proposal expiry worker batch; will retry on next poll.", {
+        workerId: input.workerId,
+        error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
+      });
+      await sleep(pollIntervalMs, input.signal);
+      continue;
+    }
 
     if (input.once) {
       return result.processed > 0

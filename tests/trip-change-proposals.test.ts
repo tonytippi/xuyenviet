@@ -1242,3 +1242,85 @@ describe("Story 7.5 applyApprovedTripChange pure unit tests (mocked helpers)", (
     expect(result).toEqual({ success: false, reason: "refresh_required" });
   });
 });
+
+// Q1: expire-on-read is a best-effort side effect; a transient DB error during
+// expire must NOT fail the user's pending-proposals read. P11 made
+// expireTripChangeProposal re-throw transient errors; expireElapsedPendingProposals
+// wraps each per-row call in try/catch so the read always succeeds.
+describe("Story 7.5 Q1 expire-on-read survives transient DB errors", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+  });
+
+  test("listPendingProposalsForTripProject returns successfully when expireTripChangeProposal throws a transient error", async () => {
+    // Mock the db so the expire lookup SELECT returns one elapsed row, the
+    // pending read SELECT returns no rows, and the expire transaction throws a
+    // simulated transient connection error. The read must not propagate the
+    // throw — the per-row catch in expireElapsedPendingProposals swallows it.
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "q1-user", email: "q1-user@example.com" }),
+    }));
+    vi.doMock("@/db/client", () => ({
+      getDb: () => ({
+        select: (selection: Record<string, unknown>) => ({
+          from: () => ({
+            where: () => {
+              // The expire lookup selects only { id }; the pending read selects
+              // many fields. Return one elapsed row for the lookup, [] for the
+              // pending read so the read returns early with [].
+              const isExpiryLookup = Object.keys(selection ?? {}).length === 1;
+              const rows = isExpiryLookup ? [{ id: "q1-proposal-1" }] : [];
+              const promise = Promise.resolve(rows) as Promise<typeof rows> & { orderBy: () => Promise<typeof rows> };
+              promise.orderBy = () => promise;
+              return promise;
+            },
+          }),
+        }),
+        transaction: async () => {
+          throw new Error("simulated transient connection error");
+        },
+      }),
+    }));
+
+    const { listPendingProposalsForTripProject } = await import("@/features/chat-trips/trip-change-proposals");
+    const result = await listPendingProposalsForTripProject("q1-project");
+    // The read succeeds (no throw) and returns an empty pending list.
+    expect(result).toEqual([]);
+  });
+
+  test("getProposalForOwnerReview returns successfully when expireTripChangeProposal throws a transient error", async () => {
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "q1-user", email: "q1-user@example.com" }),
+    }));
+    vi.doMock("@/db/client", () => ({
+      getDb: () => ({
+        select: (selection: Record<string, unknown>) => ({
+          from: () => ({
+            where: () => {
+              const isExpiryLookup = Object.keys(selection ?? {}).length === 1;
+              const rows = isExpiryLookup ? [{ id: "q1-proposal-2" }] : [];
+              const promise = Promise.resolve(rows) as Promise<typeof rows> & {
+                orderBy: () => Promise<typeof rows>;
+                limit: () => Promise<typeof rows>;
+                for: () => Promise<typeof rows>;
+              };
+              promise.orderBy = () => promise;
+              promise.limit = () => promise;
+              promise.for = () => promise;
+              return promise;
+            },
+          }),
+        }),
+        transaction: async () => {
+          throw new Error("simulated transient connection error");
+        },
+      }),
+    }));
+
+    const { getProposalForOwnerReview } = await import("@/features/chat-trips/trip-change-proposals");
+    // The read succeeds (no throw) even though expire threw for the elapsed row.
+    const result = await getProposalForOwnerReview("q1-project", "q1-proposal-2");
+    expect(result).toBeNull();
+  });
+});

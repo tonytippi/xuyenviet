@@ -16,9 +16,13 @@ export type DeleteTripProjectActionState = { success: boolean; error?: string; r
 // Story 7.5: typed result states for the apply/dismiss server actions. The
 // expire command is NOT a user action — it is invoked only by reads and the
 // scheduled worker.
+// Q3: `transient` distinguishes a retryable DB/transport failure from a real
+// refresh_required/not_found/expired outcome. The client maps `transient` to a
+// retryable state that keeps the apply/dismiss buttons enabled, instead of the
+// permanent refresh-required outcome that hides them.
 export type ApplyTripChangeProposalActionState = {
   success: boolean;
-  reason?: "refresh_required" | "not_found" | "expired";
+  reason?: "refresh_required" | "not_found" | "expired" | "transient";
   aggregateVersion?: number;
   proposalStatus?: "applied";
   error?: string;
@@ -26,7 +30,7 @@ export type ApplyTripChangeProposalActionState = {
 
 export type DismissTripChangeProposalActionState = {
   success: boolean;
-  reason?: "not_found";
+  reason?: "not_found" | "transient";
   proposalStatus?: "dismissed";
   error?: string;
 };
@@ -104,10 +108,26 @@ export async function deleteTripProjectAction(tripProjectId: string): Promise<De
 // deleteTripProjectAction shape (typed result state, redirect to sign-in on
 // unauthenticated). Does NOT redirect on refresh_required / expired /
 // not_found — the client must reconcile the proposal card in place.
+// Q3: P10 made applyApprovedTripChange re-throw transient DB errors so they are
+// distinguishable from real version conflicts. Catch them here and return a
+// typed `transient` result so the client can offer retry instead of collapsing
+// the throw into the permanent refresh-required outcome. The redirect() call is
+// kept OUTSIDE the try so Next.js' redirect throw is not swallowed as a
+// transient error.
 export async function applyTripChangeProposalAction(
   input: { tripProjectId: string; proposalId: string },
 ): Promise<ApplyTripChangeProposalActionState> {
-  const result = await applyApprovedTripChange(input);
+  let result: Awaited<ReturnType<typeof applyApprovedTripChange>>;
+  try {
+    result = await applyApprovedTripChange(input);
+  } catch (error) {
+    console.error("Transient error applying trip change proposal.", {
+      tripProjectId: input.tripProjectId,
+      proposalId: input.proposalId,
+      error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
+    });
+    return { success: false, reason: "transient", error: "Lỗi tạm thời — vui lòng thử lại." };
+  }
 
   if (!result.success && result.reason === "unauthenticated") {
     redirect("/sign-in?next=/ai-ask");
@@ -127,10 +147,23 @@ export async function applyTripChangeProposalAction(
 
 // Story 7.5: owner-confirmed dismiss server action. Mirrors the apply action's
 // shape. Does NOT redirect on not_found — the client reconciles in place.
+// Q3: P11 made dismissTripChangeProposal re-throw transient DB errors. Catch
+// them and return a typed `transient` result so the client can retry instead of
+// the permanent refresh-required outcome.
 export async function dismissTripChangeProposalAction(
   input: { tripProjectId: string; proposalId: string },
 ): Promise<DismissTripChangeProposalActionState> {
-  const result = await dismissTripChangeProposal(input);
+  let result: Awaited<ReturnType<typeof dismissTripChangeProposal>>;
+  try {
+    result = await dismissTripChangeProposal(input);
+  } catch (error) {
+    console.error("Transient error dismissing trip change proposal.", {
+      tripProjectId: input.tripProjectId,
+      proposalId: input.proposalId,
+      error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
+    });
+    return { success: false, reason: "transient", error: "Lỗi tạm thời — vui lòng thử lại." };
+  }
 
   if (!result.success && result.reason === "unauthenticated") {
     redirect("/sign-in?next=/ai-ask");

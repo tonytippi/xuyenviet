@@ -984,7 +984,22 @@ async function expireElapsedPendingProposals(tripProjectId: string, userId: stri
       ...(proposalId ? [eq(tripChangeProposals.id, proposalId)] : []),
     ));
   for (const row of rows) {
-    await expireTripChangeProposal({ tripProjectId, proposalId: row.id, now });
+    // Q1: expire-on-read is a best-effort side effect. P11 made
+    // expireTripChangeProposal re-throw transient DB errors so the worker can
+    // retry; the read path must NOT inherit that throw — a momentary DB blip
+    // during expire would fail the user's entire pending-proposals/proposal-
+    // review read (Trip Home / workspace panel error). Wrap each call so a
+    // transient expire error is logged and skipped; the next read retries
+    // expire, and the pending filter below still drops any row that did expire.
+    try {
+      await expireTripChangeProposal({ tripProjectId, proposalId: row.id, now });
+    } catch (error) {
+      console.error("Transient error expiring elapsed pending proposal on read; skipping.", {
+        tripProjectId,
+        proposalId: row.id,
+        error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
+      });
+    }
   }
 }
 

@@ -4,7 +4,6 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { tripChangeProposals, tripPlanChangeHistory, tripPlanItems, tripProjects, users } from "@/db/schema";
 
 import { testDb } from "./helpers/db";
-
 async function createTestUser(userId: string) {
   await testDb.insert(users).values({ id: userId, email: `${userId}@example.com` });
 }
@@ -117,5 +116,73 @@ describe("Story 7.5 trip-proposal-expiry-worker", () => {
       const historyForRow = await testDb.select().from(tripPlanChangeHistory).where(eq(tripPlanChangeHistory.proposalId, seededId));
       expect(historyForRow).toHaveLength(1);
     }
+  });
+});
+
+// Q2: the worker loop must survive a transient DB error (connection blip,
+// deadlock, serialization failure) without dying. A transient error rolls back
+// the whole batch atomically (no partial writes); the loop catch logs and keeps
+// polling so the next iteration re-claims and retries the same rows.
+describe("Story 7.5 Q2 worker loop survives transient DB errors", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+  });
+
+  test("runTripChangeProposalExpiryWorkerLoop retries after a transient batch error and exits normally with once: true", async () => {
+    // Mock getDb so the FIRST transaction throws a transient error and the
+    // SECOND succeeds with no rows (processed: 0). With once: true, the loop
+    // must survive the first throw, retry, then exit with { status: "no_work" }
+    // rather than propagating the error and dying.
+    let transactionCallCount = 0;
+    vi.doMock("@/db/client", () => ({
+      getDb: () => ({
+        transaction: async (callback: (tx: { execute: ReturnType<typeof vi.fn> }) => Promise<unknown>) => {
+          transactionCallCount += 1;
+          if (transactionCallCount === 1) {
+            throw new Error("simulated transient connection error");
+          }
+          // Second call: the callback runs the SKIP LOCKED SELECT via tx.execute.
+          // Return no rows so processed = 0 and once: true exits with no_work.
+          const tx = { execute: vi.fn().mockResolvedValue([]) };
+          return callback(tx);
+        },
+      }),
+    }));
+
+    const { runTripChangeProposalExpiryWorkerLoop } = await import("@/features/chat-trips/trip-proposal-expiry-worker");
+    const result = await runTripChangeProposalExpiryWorkerLoop({ once: true, pollIntervalMs: 1 });
+
+    // The loop survived the transient error and exited normally.
+    expect(result.status).toBe("no_work");
+    // It retried after the first failure (two transaction calls).
+    expect(transactionCallCount).toBe(2);
+  });
+
+  test("runTripChangeProposalExpiryWorkerLoop keeps polling after a persistent transient error until the signal aborts", async () => {
+    // Mock getDb so EVERY transaction throws. Without the loop catch the loop
+    // would die on the first iteration. With the catch it logs, sleeps, and
+    // keeps polling until the abort signal stops it.
+    let transactionCallCount = 0;
+    vi.doMock("@/db/client", () => ({
+      getDb: () => ({
+        transaction: async () => {
+          transactionCallCount += 1;
+          throw new Error("simulated persistent connection error");
+        },
+      }),
+    }));
+
+    const controller = new AbortController();
+    // Abort after the first sleep so the loop does not run indefinitely.
+    setTimeout(() => controller.abort(), 30);
+
+    const { runTripChangeProposalExpiryWorkerLoop } = await import("@/features/chat-trips/trip-proposal-expiry-worker");
+    const result = await runTripChangeProposalExpiryWorkerLoop({ once: false, pollIntervalMs: 5, signal: controller.signal });
+
+    // The loop survived multiple transient errors and stopped cleanly via the
+    // abort signal (it did not throw/die).
+    expect(result.status).toBe("stopped");
+    expect(transactionCallCount).toBeGreaterThanOrEqual(1);
   });
 });

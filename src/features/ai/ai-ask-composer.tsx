@@ -13,7 +13,7 @@ import type { AssistantMessageProvenanceItem } from "@/features/retrieval/proven
 import type { TripWorkspaceReadModel } from "@/features/chat-trips/trip-home";
 import { tripChangeProposalLabels } from "@/features/chat-trips/trip-home-labels";
 import { TripWorkspacePanel } from "@/features/ai/trip-workspace-panel";
-import { TripProposalReviewCard } from "@/features/ai/trip-proposal-review-card";
+import { TripProposalReviewCard, type TripProposalTerminalOutcome } from "@/features/ai/trip-proposal-review-card";
 import { AccountIcon, AttachmentIcon, ChatIcon, CloseIcon, CostIcon, HotelAreaIcon, LoadingIcon, NewChatIcon, PlaceIcon, ProjectIcon, RouteSegmentIcon, SendIcon, SourceIcon } from "@/components/ui/icons";
 
 const maxQuestionLength = 2_000;
@@ -83,8 +83,11 @@ type CreateTripProjectAction = (
 type DeleteConversationAction = (conversationId: string) => Promise<{ success: boolean; error?: string; reason?: "not_found" }>;
 type DeleteTripProjectAction = (tripProjectId: string) => Promise<{ success: boolean; error?: string; reason?: "not_found" }>;
 // Story 7.5: typed server actions for owner-confirmed apply/dismiss.
-type ApplyTripChangeProposalAction = (input: { tripProjectId: string; proposalId: string }) => Promise<{ success: boolean; reason?: "refresh_required" | "not_found" | "expired"; aggregateVersion?: number; proposalStatus?: "applied"; error?: string }>;
-type DismissTripChangeProposalAction = (input: { tripProjectId: string; proposalId: string }) => Promise<{ success: boolean; reason?: "not_found"; proposalStatus?: "dismissed"; error?: string }>;
+// Q3: `transient` is a retryable DB/transport failure — the client maps it to a
+// retryable "transient-error" outcome that keeps the action buttons enabled,
+// distinct from the permanent refresh-required outcome that hides them.
+type ApplyTripChangeProposalAction = (input: { tripProjectId: string; proposalId: string }) => Promise<{ success: boolean; reason?: "refresh_required" | "not_found" | "expired" | "transient"; aggregateVersion?: number; proposalStatus?: "applied"; error?: string }>;
+type DismissTripChangeProposalAction = (input: { tripProjectId: string; proposalId: string }) => Promise<{ success: boolean; reason?: "not_found" | "transient"; proposalStatus?: "dismissed"; error?: string }>;
 type SaveAnswerUsefulnessFeedbackAction = (input: { assistantMessageId: string; rating: AnswerUsefulnessRating; comment?: string | null }) => Promise<{ success: boolean; feedback?: AnswerUsefulnessFeedbackSummary; reason?: "unauthenticated" | "not_found" | "invalid_target" | "invalid_input" | "invalid_rating" | "comment_too_long" | "failed" }>;
 type SignOutAction = () => Promise<void>;
 
@@ -590,7 +593,7 @@ function AnswerProposalCard({
   onRefresh?: () => void;
   isPending?: boolean;
   pendingAction?: "apply" | "dismiss";
-  terminalOutcome?: "applied" | "dismissed" | "expired" | "refresh-required" | null;
+  terminalOutcome?: TripProposalTerminalOutcome | null;
   // P13: accept proposalId so the parent can pass a stable useCallback.
   registerOrigin?: (proposalId: string, element: HTMLDivElement | null) => void;
 }) {
@@ -709,8 +712,13 @@ export function AiAskComposer({
   // Story 7.5: per-proposal pending action and terminal outcome state for the
   // workspace panel + answer-surface proposal cards. Keyed by proposal id.
   const [proposalPending, setProposalPending] = useState<Record<string, { action: "apply" | "dismiss" } | undefined>>({});
-  const [proposalTerminalOutcome, setProposalTerminalOutcome] = useState<Record<string, "applied" | "dismissed" | "expired" | "refresh-required" | null>>({});
+  const [proposalTerminalOutcome, setProposalTerminalOutcome] = useState<Record<string, "applied" | "dismissed" | "expired" | "refresh-required" | "transient-error" | null>>({});
   const proposalApplyOriginRef = useRef<Record<string, HTMLElement | null>>({});
+  // Q4: synchronous in-flight dedup set. proposalPending is React state, so two
+  // clicks in the same render cycle both pass the state guard. This ref is
+  // checked and mutated synchronously before any await so the second click is
+  // blocked immediately.
+  const proposalInFlightRef = useRef<Set<string>>(new Set());
   // P13: stable callback identity so the AnswerProposalCard effect does not
   // re-run every render (which could clear and reset the origin ref).
   const registerProposalOrigin = useCallback((proposalId: string, element: HTMLDivElement | null) => {
@@ -1456,7 +1464,13 @@ export function AiAskComposer({
   // offer Làm mới đề xuất which focuses the primary conversation composer.
   async function handleApplyProposal(proposalId: string) {
     if (!activeTripProjectId || !applyTripChangeProposalAction) return;
-    if (proposalPending[proposalId]) return;
+    // Q4: proposalPending is React state, so two clicks within the same render
+    // cycle both pass the guard and both call the action; the second call's
+    // not_found (proposal now terminal) overwrites the first's applied outcome.
+    // Use a ref Set for synchronous dedup so the second click is blocked before
+    // any await.
+    if (proposalInFlightRef.current.has(proposalId)) return;
+    proposalInFlightRef.current.add(proposalId);
     const origin = proposalApplyOriginRef.current[proposalId] ?? null;
     setProposalPending((current) => ({ ...current, [proposalId]: { action: "apply" } }));
     setStatus("Đang áp dụng đề xuất...");
@@ -1476,6 +1490,12 @@ export function AiAskComposer({
         // Move focus back to the originating answer card heading (answer
         // surface) or the Trip Home focus card heading (workspace panel).
         focusOriginAfterTerminal(origin);
+      } else if (result.reason === "transient") {
+        // Q3: retryable transient failure — keep the action buttons enabled so
+        // the owner can try again. Do NOT use the permanent refresh-required
+        // outcome (P4 keeps that permanent and hides the buttons).
+        setProposalTerminalOutcome((current) => ({ ...current, [proposalId]: "transient-error" }));
+        setStatus(result.error ?? "Không thể áp dụng đề xuất lúc này. Vui lòng thử lại.");
       } else {
         // P3: map expired to the expired terminal variant, not refresh-required.
         // An expired-on-apply proposal should show "Đã hết hạn" not "Làm mới đề xuất".
@@ -1487,9 +1507,13 @@ export function AiAskComposer({
         setStatus(result.error ?? "Kế hoạch đã thay đổi — vui lòng làm mới đề xuất.");
       }
     } catch {
-      setProposalTerminalOutcome((current) => ({ ...current, [proposalId]: "refresh-required" }));
+      // Q3: a transport/network throw is also retryable — keep the buttons
+      // enabled with a "try again" message, not the permanent refresh-required
+      // outcome.
+      setProposalTerminalOutcome((current) => ({ ...current, [proposalId]: "transient-error" }));
       setStatus("Không thể áp dụng đề xuất lúc này. Vui lòng thử lại.");
     } finally {
+      proposalInFlightRef.current.delete(proposalId);
       setProposalPending((current) => {
         const next = { ...current };
         delete next[proposalId];
@@ -1502,7 +1526,10 @@ export function AiAskComposer({
   // dismiss action and terminal outcome.
   async function handleDismissProposal(proposalId: string) {
     if (!activeTripProjectId || !dismissTripChangeProposalAction) return;
-    if (proposalPending[proposalId]) return;
+    // Q4: synchronous ref dedup so two clicks in the same render cycle cannot
+    // both call the dismiss action.
+    if (proposalInFlightRef.current.has(proposalId)) return;
+    proposalInFlightRef.current.add(proposalId);
     const origin = proposalApplyOriginRef.current[proposalId] ?? null;
     setProposalPending((current) => ({ ...current, [proposalId]: { action: "dismiss" } }));
     setStatus("Đang giữ kế hoạch...");
@@ -1518,14 +1545,20 @@ export function AiAskComposer({
         setStatus("Đã giữ kế hoạch. Đang làm mới.");
         router.refresh();
         focusOriginAfterTerminal(origin);
+      } else if (result.reason === "transient") {
+        // Q3: retryable transient failure — keep the action buttons enabled.
+        setProposalTerminalOutcome((current) => ({ ...current, [proposalId]: "transient-error" }));
+        setStatus(result.error ?? "Không thể giữ kế hoạch lúc này. Vui lòng thử lại.");
       } else {
         setProposalTerminalOutcome((current) => ({ ...current, [proposalId]: "refresh-required" }));
         setStatus(result.error ?? "Đề xuất không còn khả dụng.");
       }
     } catch {
-      setProposalTerminalOutcome((current) => ({ ...current, [proposalId]: "refresh-required" }));
+      // Q3: transport/network throw is retryable — keep the buttons enabled.
+      setProposalTerminalOutcome((current) => ({ ...current, [proposalId]: "transient-error" }));
       setStatus("Không thể giữ kế hoạch lúc này. Vui lòng thử lại.");
     } finally {
+      proposalInFlightRef.current.delete(proposalId);
       setProposalPending((current) => {
         const next = { ...current };
         delete next[proposalId];
@@ -2052,6 +2085,15 @@ export function AiAskComposer({
                   travelers: selectedTripProject.travelers ?? null,
                 }}
                 workspace={tripWorkspace}
+                // Q5: the history sheet renders the full workspace including
+                // pendingProposals; pass the action callbacks + pending/terminal
+                // state so the Apply/Dismiss buttons are live (consistent with
+                // the primary workspace sheet and desktop panel), not dead.
+                onApplyProposal={applyTripChangeProposalAction ? handleApplyProposal : undefined}
+                onDismissProposal={dismissTripChangeProposalAction ? handleDismissProposal : undefined}
+                onRefreshProposal={handleRefreshProposal}
+                proposalPending={proposalPending}
+                proposalTerminalOutcome={proposalTerminalOutcome}
                 planHistoryVariant="inline"
               />
             </div>

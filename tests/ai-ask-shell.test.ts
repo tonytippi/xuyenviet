@@ -2554,4 +2554,73 @@ describe("AI Ask streaming route", () => {
       const historyAfter = await testDb.select().from(tripPlanChangeHistory);
       expect(historyAfter).toHaveLength(historyBefore.length);
     });
+
+    // Q3: server actions catch transient DB errors (re-thrown by P10/P11) and
+    // return a typed `transient` reason so the client can offer retry instead of
+    // the permanent refresh-required outcome that hides the action buttons.
+    test("applyTripChangeProposalAction and dismissTripChangeProposalAction catch transient errors and return a typed transient reason", () => {
+      const actionsSource = readFileSync("src/features/chat-trips/actions.ts", "utf8");
+
+      // The typed result states include the transient reason.
+      expect(actionsSource).toContain('"refresh_required" | "not_found" | "expired" | "transient"');
+      expect(actionsSource).toContain('"not_found" | "transient"');
+      // Both actions wrap the library call in try/catch and return transient.
+      expect(actionsSource).toContain("try {\n    result = await applyApprovedTripChange(input);");
+      expect(actionsSource).toContain('return { success: false, reason: "transient"');
+      expect(actionsSource).toContain("try {\n    result = await dismissTripChangeProposal(input);");
+      // Safe Vietnamese retry copy.
+      expect(actionsSource).toContain("Lỗi tạm thời — vui lòng thử lại.");
+    });
+
+    test("composer maps the transient reason and transport throws to a retryable transient-error outcome, not the permanent refresh-required outcome", () => {
+      const composerSource = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
+
+      // The composer action types include the transient reason.
+      expect(composerSource).toContain('"refresh_required" | "not_found" | "expired" | "transient"');
+      expect(composerSource).toContain('"not_found" | "transient"');
+      // The transient reason maps to the retryable transient-error outcome.
+      expect(composerSource).toContain('result.reason === "transient"');
+      expect(composerSource).toContain('"transient-error"');
+      // The apply/dismiss catch blocks map transport throws to transient-error
+      // (retryable), NOT refresh-required (which P4 makes permanent).
+      expect(composerSource).toContain('setProposalTerminalOutcome((current) => ({ ...current, [proposalId]: "transient-error" }))');
+    });
+
+    test("trip-proposal-review-card treats transient-error as a non-terminal retryable state so the action row stays visible", () => {
+      const cardSource = readFileSync("src/features/ai/trip-proposal-review-card.tsx", "utf8");
+
+      // The transient-error variant is declared.
+      expect(cardSource).toContain('"transient-error"');
+      // isTerminal excludes transient-error so the action row is not hidden.
+      expect(cardSource).toContain('terminalOutcome !== "transient-error"');
+    });
+
+    // Q4: a useRef<Set> dedup blocks the second click synchronously before any
+    // await, so two clicks in the same render cycle cannot both call the action.
+    test("composer uses a synchronous ref Set to dedup double-clicks on apply/dismiss", () => {
+      const composerSource = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
+
+      expect(composerSource).toContain("proposalInFlightRef");
+      expect(composerSource).toContain("useRef<Set<string>>");
+      // Both handlers check and mutate the ref synchronously around the await.
+      expect(composerSource).toContain("proposalInFlightRef.current.has(proposalId)");
+      expect(composerSource).toContain("proposalInFlightRef.current.add(proposalId)");
+      expect(composerSource).toContain("proposalInFlightRef.current.delete(proposalId)");
+    });
+
+    // Q5: the mobile plan-history sheet TripWorkspacePanel must receive the
+    // action callbacks + pending/terminal state so its pending-proposal cards
+    // have live Apply/Dismiss buttons, not dead ones.
+    test("mobile plan-history sheet panel receives the apply/dismiss/refresh callbacks and pending/terminal state", () => {
+      const composerSource = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
+      const historySheetStart = composerSource.indexOf('idPrefix="history-sheet-"');
+      expect(historySheetStart).toBeGreaterThan(-1);
+      const historySheetSlice = composerSource.slice(historySheetStart, historySheetStart + 1600);
+
+      expect(historySheetSlice).toContain('onApplyProposal=');
+      expect(historySheetSlice).toContain('onDismissProposal=');
+      expect(historySheetSlice).toContain('onRefreshProposal=');
+      expect(historySheetSlice).toContain('proposalPending={proposalPending}');
+      expect(historySheetSlice).toContain('proposalTerminalOutcome={proposalTerminalOutcome}');
+    });
   });

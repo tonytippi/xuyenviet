@@ -5,7 +5,10 @@ import { tripChangeProposalLabels } from "@/features/chat-trips/trip-home-labels
 // the server-action calls, pending state, and reconciliation. The card only
 // invokes the optional onApply/onDismiss/onRefresh callbacks and renders the
 // pending/terminal/refresh affordances from props.
-export type TripProposalTerminalOutcome = "applied" | "dismissed" | "expired" | "refresh-required";
+// Q3: "transient-error" is a retryable outcome (transient DB/transport failure).
+// Unlike the terminal outcomes and refresh-required, it does NOT hide the
+// action row — the owner can tap Apply/Dismiss again to retry.
+export type TripProposalTerminalOutcome = "applied" | "dismissed" | "expired" | "refresh-required" | "transient-error";
 
 export type TripProposalReviewCardProps = {
   idPrefix: string;
@@ -58,7 +61,10 @@ export function TripProposalReviewCard({ idPrefix, proposal, now, onApply, onDis
   const expiryText = formatExpiry(proposal.expiresAt);
   const hasAlternatives = Boolean(proposal.hasAlternatives || (proposal.alternatives && proposal.alternatives.length > 0));
   const headingId = `${idPrefix}proposal-${proposal.id}-heading`;
-  const isTerminal = Boolean(terminalOutcome);
+  // Q3: "transient-error" is a retryable state, not a terminal one — the action
+  // row must stay visible so the owner can retry. Only the true terminal
+  // outcomes (applied/dismissed/expired) hide the action row.
+  const isTerminal = Boolean(terminalOutcome) && terminalOutcome !== "transient-error";
   const isRefreshRequired = terminalOutcome === "refresh-required";
   // When a terminal outcome is set, the action row is hidden and the outcome
   // label is announced. The refresh-required outcome is NOT terminal in the
