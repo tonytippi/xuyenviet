@@ -1717,6 +1717,7 @@ export function AiAskComposer({
               setSelectedAnswerEntity(null);
               answerEntityTriggerRef.current = null;
               setWorkspaceSheetOpen(false);
+              setPlanHistorySheetOpen(false);
               setSessionSheetOpen(true);
             }}
             aria-label="Mở danh sách trò chuyện, dự án chuyến đi và tài khoản"
@@ -2070,7 +2071,7 @@ export function AiAskComposer({
                 type="button"
                 aria-label={`Đóng ${tripChangeProposalLabels.planHistory}`}
                 onClick={() => setPlanHistorySheetOpen(false)}
-                className="mb-3 min-h-11 w-full rounded-2xl border border-[#d8c9ad] bg-white/80 px-4 py-3 text-sm font-semibold text-[#17342c] transition hover:bg-white focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45"
+                className="mb-3 min-h-11 w-full rounded-2xl border border-[#d8c9ad] bg-white/80 px-4 py-3 text-sm font-semibold text-[#17342c] transition hover:bg-white motion-reduce:transition-none focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45"
               >
                 Đóng lịch sử kế hoạch
               </button>

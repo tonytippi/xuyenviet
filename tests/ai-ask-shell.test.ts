@@ -2671,43 +2671,64 @@ describe("AI Ask streaming route", () => {
       expect(panelSource).toContain("min-h-11");
       // The composer send button and other interactive controls use min-h-11.
       expect(composerSource).toContain("min-h-11");
-      // No action button uses a smaller min-height.
-      expect(cardSource).not.toContain("min-h-9");
-      expect(cardSource).not.toContain("min-h-8");
+      // No ACTION button (card + panel) uses a sub-44px height class. Check a
+      // broad set of sub-44px min-height AND fixed-height classes — a button
+      // using h-10 (40px) or min-h-10 would slip past the old min-h-9/min-h-8
+      // check. (The composer itself uses small h-* on icons/logos/thumbnails
+      // and min-h-10 on non-action nav/detail buttons, so it is excluded; the
+      // AC3 7.2 touch-target floor applies to plan/proposal ACTION controls.)
+      const sub44MinH = ["min-h-9", "min-h-8", "min-h-7", "min-h-6", "min-h-10"];
+      const sub44H = ["h-10", "h-9", "h-8", "h-7"];
+      for (const cls of [...sub44MinH, ...sub44H]) {
+        expect(cardSource).not.toContain(cls);
+      }
+      for (const cls of sub44MinH) {
+        expect(panelSource).not.toContain(cls);
+      }
     });
 
-    test("7.2 reduced-motion: the plan-history sheet and proposal reveal have no non-essential transitions to disable", () => {
-      // F1: AC3 7.2 says "reduced-motion disables non-essential transitions in
-      // the plan-history sheet and proposal reveal." The two named components
-      // (trip-workspace-panel.tsx = plan-history sheet; trip-proposal-review-card.tsx
-      // = proposal reveal) contain NO Tailwind transition/animation classes and
-      // NO JS-driven animation APIs, so there are no non-essential transitions
-      // that would need a motion-reduce/prefers-reduced-motion guard. The
-      // previous test asserted only absence of JS animation APIs and relied on
-      // the false claim that "CSS transitions respect prefers-reduced-motion at
-      // the browser level" — Tailwind `transition` does NOT add such a media
-      // query. The correct invariant here is: no non-essential transitions exist
-      // in these components, so reduced-motion is satisfied (nothing animates).
-      // (The broader chat composer may use hover/focus color transitions, but
-      // those are outside the plan-history sheet and proposal reveal AC3 7.2
-      // names, and color transitions do not move content.)
+    test("7.2 reduced-motion: the plan-history sheet close button guards its transition; the proposal reveal has no non-essential transitions", () => {
+      // AC3 7.2: "reduced-motion disables non-essential transitions in the
+      // plan-history sheet and proposal reveal."
+      // The plan-history sheet (the mobile aria-modal dialog) is rendered by
+      // ai-ask-composer.tsx (NOT trip-workspace-panel.tsx, which only renders
+      // the sheet-TRIGGER button / inline <details>). Its close button carries
+      // a Tailwind `transition hover:bg-white` color transition, which must be
+      // disabled under prefers-reduced-motion via a `motion-reduce:` guard
+      // (Tailwind `transition` does NOT add a prefers-reduced-motion media
+      // query on its own). The proposal reveal (trip-proposal-review-card.tsx)
+      // and the workspace panel contain no non-essential transitions, so no
+      // guard is needed there.
       const cardSource = readFileSync("src/features/ai/trip-proposal-review-card.tsx", "utf8");
       const panelSource = readFileSync("src/features/ai/trip-workspace-panel.tsx", "utf8");
+      const composerSource = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
 
-      // No Tailwind transition/animation/duration classes in the named components.
+      // Proposal reveal + workspace panel: no Tailwind transition/animation/
+      // duration classes and no JS animation APIs → reduced-motion satisfied
+      // vacuously (nothing animates). (The React-hook ban from the prior test
+      // was an over-approximation: a legitimate useState/useEffect for a
+      // non-animation purpose would have broken it falsely — dropped.)
       expect(cardSource).not.toContain("transition");
       expect(cardSource).not.toContain("animate-");
       expect(cardSource).not.toContain("duration-");
       expect(panelSource).not.toContain("transition");
       expect(panelSource).not.toContain("animate-");
       expect(panelSource).not.toContain("duration-");
-      // No JS-driven animation APIs in the named components.
-      expect(cardSource).not.toContain("useEffect");
-      expect(cardSource).not.toContain("useState");
       expect(cardSource).not.toContain("requestAnimationFrame");
       expect(cardSource).not.toContain("animationDuration");
       expect(panelSource).not.toContain("requestAnimationFrame");
       expect(panelSource).not.toContain("animationDuration");
+
+      // Plan-history sheet close button: it DOES use `transition`, so it MUST
+      // carry a `motion-reduce:transition-none` guard. Locate the close button
+      // by its unique Vietnamese label text and capture its opening tag.
+      const closeBtnTextIndex = composerSource.indexOf("Đóng lịch sử kế hoạch");
+      expect(closeBtnTextIndex).toBeGreaterThan(-1);
+      const btnStart = composerSource.lastIndexOf("<button", closeBtnTextIndex);
+      expect(btnStart).toBeGreaterThan(-1);
+      const closeBtnSlice = composerSource.slice(btnStart, closeBtnTextIndex);
+      expect(closeBtnSlice).toContain("transition");
+      expect(closeBtnSlice).toContain("motion-reduce:transition-none");
     });
 
     test("7.3 pending/terminal apply/dismiss states announce via polite aria-live", () => {
@@ -2719,11 +2740,14 @@ describe("AI Ask streaming route", () => {
       // The workspace panel has an sr-only aria-live region for focus changes.
       expect(panelSource).toContain('aria-live="polite"');
       // F20: the plan-history LIST specifically announces via polite aria-live.
-      // Locate the plan-history <ul> (it carries aria-live="polite") and assert
-      // the aria-live is on that list, not just anywhere in the panel source.
-      const historyListIndex = panelSource.indexOf("planHistory");
-      expect(historyListIndex).toBeGreaterThan(-1);
-      const historySlice = panelSource.slice(historyListIndex);
+      // Locate the plan-history <ul> by its specific container marker — the
+      // inline <details> section whose aria-label is the plan-history label
+      // constant (NOT the first `planHistory` substring, which coincidentally
+      // matched the `planHistoryVariant` prop type). The first <ul> after that
+      // marker is the plan-history list and must carry aria-live="polite".
+      const historySectionIndex = panelSource.indexOf("aria-label={tripChangeProposalLabels.planHistory}");
+      expect(historySectionIndex).toBeGreaterThan(-1);
+      const historySlice = panelSource.slice(historySectionIndex);
       const ulIndex = historySlice.indexOf("<ul");
       expect(ulIndex).toBeGreaterThan(-1);
       const ulSlice = historySlice.slice(ulIndex, ulIndex + 80);
@@ -2744,12 +2768,36 @@ describe("AI Ask streaming route", () => {
     test("7.3 only one aria-modal=true dialog is open at a time (plan-history sheet coordinates with answer-detail and workspace sheets)", () => {
       const composerSource = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
 
-      // The composer coordinates sheets so only one aria-modal dialog opens.
-      // The history sheet is opened via onOpenPlanHistory (a callback), not by
-      // rendering a second independent dialog.
-      expect(composerSource).toContain("onOpenPlanHistory");
-      // The workspace panel's plan-history sheet-trigger variant delegates to
-      // the composer via callback, not by rendering its own dialog.
+      // AC3 7.3: "only one aria-modal=true dialog is open at a time." Verify
+      // the coordination BEHAVIOR, not just callback wiring: each sheet-opening
+      // handler must close the OTHER aria-modal sheets. The three mobile
+      // aria-modal sheets are the session sheet, the workspace sheet, and the
+      // plan-history sheet. (The answer-detail dialog is gated by
+      // `!isSessionSheetOpen && !isWorkspaceSheetOpen` plus nulling
+      // selectedAnswerEntity in every trigger, so it cannot co-open.)
+      //
+      // Session-sheet trigger closes workspace AND plan-history.
+      const sessionTriggerIndex = composerSource.indexOf("setSessionSheetOpen(true)");
+      expect(sessionTriggerIndex).toBeGreaterThan(-1);
+      const sessionHandlerSlice = composerSource.slice(sessionTriggerIndex - 220, sessionTriggerIndex + 60);
+      expect(sessionHandlerSlice).toContain("setWorkspaceSheetOpen(false)");
+      expect(sessionHandlerSlice).toContain("setPlanHistorySheetOpen(false)");
+
+      // Workspace-sheet trigger closes session AND plan-history.
+      const workspaceTriggerIndex = composerSource.indexOf("setWorkspaceSheetOpen(true)");
+      expect(workspaceTriggerIndex).toBeGreaterThan(-1);
+      const workspaceHandlerSlice = composerSource.slice(workspaceTriggerIndex - 220, workspaceTriggerIndex + 60);
+      expect(workspaceHandlerSlice).toContain("setSessionSheetOpen(false)");
+      expect(workspaceHandlerSlice).toContain("setPlanHistorySheetOpen(false)");
+
+      // Plan-history sheet trigger (onOpenPlanHistory) closes workspace.
+      const planHistoryTriggerIndex = composerSource.indexOf("setPlanHistorySheetOpen(true)");
+      expect(planHistoryTriggerIndex).toBeGreaterThan(-1);
+      const planHistoryHandlerSlice = composerSource.slice(planHistoryTriggerIndex - 220, planHistoryTriggerIndex + 60);
+      expect(planHistoryHandlerSlice).toContain("setWorkspaceSheetOpen(false)");
+
+      // The workspace panel delegates plan-history opening to the composer via
+      // callback; it does not render its own aria-modal dialog.
       const panelSource = readFileSync("src/features/ai/trip-workspace-panel.tsx", "utf8");
       expect(panelSource).toContain("onOpenPlanHistory");
       expect(panelSource).not.toContain('aria-modal="true"');
@@ -2780,6 +2828,24 @@ describe("AI Ask streaming route", () => {
       expect(doneSlice).not.toContain("handleApplyProposal(");
     });
 
+    test("7.4 Áp dụng is never invoked by sending a chat message — the submit handler excludes handleApplyProposal", () => {
+      // AC3 7.4: "never invoked by sending a chat message or by the stream done
+      // event." The stream-done path is covered above; this verifies the OTHER
+      // named path — the chat submit handler handleSubmit. Extract its full body
+      // (from `function handleSubmit` to the next top-level function definition
+      // at the same indentation) and assert it never calls handleApplyProposal.
+      const composerSource = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
+      const submitStart = composerSource.indexOf("function handleSubmit");
+      expect(submitStart).toBeGreaterThan(-1);
+      const afterSubmit = composerSource.slice(submitStart);
+      const nextFnMatch = afterSubmit.match(/\n  (?:async )?function \w+\(/);
+      const submitBody = nextFnMatch ? afterSubmit.slice(0, nextFnMatch.index) : afterSubmit;
+      // Sanity: the body is non-trivial and contains the stream call.
+      expect(submitBody).toContain("submitAiAskStream");
+      // The apply handler is never wired into the chat submit path.
+      expect(submitBody).not.toContain("handleApplyProposal(");
+    });
+
     test("7.4 the timeline has no reorder/edit/status controls — timeline entries are read-only display", () => {
       const panelSource = readFileSync("src/features/ai/trip-workspace-panel.tsx", "utf8");
 
@@ -2803,10 +2869,16 @@ describe("AI Ask streaming route", () => {
       // F22: drop comment-text assertions (they only verify a comment was
       // written, not the behavior). Rely on the function-body behavior checks.
 
-      // The function body focuses the textarea.
+      // The function body focuses the textarea. Extract the full body (from
+      // `function handleRefreshProposal` to its closing brace) instead of a
+      // fixed character window, so a deeper aiGateway/stream call past 200 chars
+      // would still be caught.
       const refreshFnStart = composerSource.indexOf("function handleRefreshProposal");
       expect(refreshFnStart).toBeGreaterThan(-1);
-      const refreshFnSlice = composerSource.slice(refreshFnStart, refreshFnStart + 200);
+      const afterRefresh = composerSource.slice(refreshFnStart);
+      const closingBrace = afterRefresh.indexOf("\n  }");
+      expect(closingBrace).toBeGreaterThan(-1);
+      const refreshFnSlice = afterRefresh.slice(0, closingBrace);
 
       // It focuses the composer textarea.
       expect(refreshFnSlice).toContain("textareaRef.current?.focus()");

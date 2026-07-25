@@ -790,6 +790,60 @@ describe("Story 7.6 AC1 invalid relationships, stale versions, backup refs, orde
     expect(savedItem.version).toBe(1);
   });
 
+  test("3.2 stale item version on reorder returns refresh_required and applies nothing (moved-item fence)", async () => {
+    // Second review: AC 3.2 says "stale aggregate OR ITEM VERSION on every
+    // mutating command." reorder has TWO distinct item-version fences:
+    // item.version !== input.expectedItemVersion (the moved item, :636) and the
+    // expectedChangedItemVersions mismatch (:646). The aggregate test above
+    // passes a CORRECT item version, so only the aggregate fence fires. This
+    // test exercises the moved-item fence with a correct aggregate + correct
+    // changed-item-versions but a STALE expectedItemVersion, so the :636 fence
+    // fires and :646 is not reached.
+    await createTestUser("safety-stale-iv-reorder-user");
+    const [project] = await testDb.insert(tripProjects).values({ userId: "safety-stale-iv-reorder-user", title: "Hà Giang", aggregateVersion: 1 }).returning({ id: tripProjects.id });
+    await testDb.insert(tripPlanItems).values({ id: "stale-iv-a", tripProjectId: project.id, userId: "safety-stale-iv-reorder-user", kind: "leg", type: "transport", state: "idea", label: "A", ordinal: 0, version: 1 });
+    await testDb.insert(tripPlanItems).values({ id: "stale-iv-b", tripProjectId: project.id, userId: "safety-stale-iv-reorder-user", kind: "leg", type: "visit", state: "idea", label: "B", ordinal: 1, version: 1 });
+    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "safety-stale-iv-reorder-user", email: "safety-stale-iv-reorder-user@example.com" }) }));
+    const { reorderInternalTripPlanItem } = await import("@/features/chat-trips/trip-projects");
+
+    // Correct aggregate + correct changed-item-versions, STALE moved-item version (99 vs 1).
+    await expect(reorderInternalTripPlanItem(project.id, 1, { itemId: "stale-iv-a", expectedItemVersion: 99, ordinal: 1, expectedChangedItemVersions: { "stale-iv-a": 1, "stale-iv-b": 1 } })).resolves.toEqual({ success: false, reason: "refresh_required" });
+
+    // No renumber, versions unchanged, aggregate unchanged.
+    const items = await testDb.select({ id: tripPlanItems.id, ordinal: tripPlanItems.ordinal, version: tripPlanItems.version }).from(tripPlanItems).where(eq(tripPlanItems.tripProjectId, project.id));
+    expect(items.sort((a, b) => a.ordinal - b.ordinal)).toEqual([
+      { id: "stale-iv-a", ordinal: 0, version: 1 },
+      { id: "stale-iv-b", ordinal: 1, version: 1 },
+    ]);
+    const [savedProject] = await testDb.select().from(tripProjects).where(eq(tripProjects.id, project.id));
+    expect(savedProject.aggregateVersion).toBe(1);
+  });
+
+  test("3.2 stale changed-item-versions on reorder returns refresh_required and applies nothing (changed-item-versions fence)", async () => {
+    // Exercise the SECOND reorder item-version fence: the moved-item fence
+    // passes (expectedItemVersion matches) but expectedChangedItemVersions
+    // carries a wrong version for a sibling in the affected scope, so the
+    // fence at trip-projects.ts:646 fires. A regression deleting that fence
+    // would not be caught by the aggregate or moved-item tests.
+    await createTestUser("safety-stale-civ-reorder-user");
+    const [project] = await testDb.insert(tripProjects).values({ userId: "safety-stale-civ-reorder-user", title: "Đà Lạt", aggregateVersion: 1 }).returning({ id: tripProjects.id });
+    await testDb.insert(tripPlanItems).values({ id: "stale-civ-a", tripProjectId: project.id, userId: "safety-stale-civ-reorder-user", kind: "leg", type: "transport", state: "idea", label: "A", ordinal: 0, version: 1 });
+    await testDb.insert(tripPlanItems).values({ id: "stale-civ-b", tripProjectId: project.id, userId: "safety-stale-civ-reorder-user", kind: "leg", type: "visit", state: "idea", label: "B", ordinal: 1, version: 1 });
+    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "safety-stale-civ-reorder-user", email: "safety-stale-civ-reorder-user@example.com" }) }));
+    const { reorderInternalTripPlanItem } = await import("@/features/chat-trips/trip-projects");
+
+    // Correct aggregate + correct moved-item version, STALE changed-item-versions (a: 99 vs 1).
+    await expect(reorderInternalTripPlanItem(project.id, 1, { itemId: "stale-civ-a", expectedItemVersion: 1, ordinal: 1, expectedChangedItemVersions: { "stale-civ-a": 99, "stale-civ-b": 1 } })).resolves.toEqual({ success: false, reason: "refresh_required" });
+
+    const items = await testDb.select({ id: tripPlanItems.id, ordinal: tripPlanItems.ordinal, version: tripPlanItems.version }).from(tripPlanItems).where(eq(tripPlanItems.tripProjectId, project.id));
+    expect(items.sort((a, b) => a.ordinal - b.ordinal)).toEqual([
+      { id: "stale-civ-a", ordinal: 0, version: 1 },
+      { id: "stale-civ-b", ordinal: 1, version: 1 },
+    ]);
+    const [savedProject] = await testDb.select().from(tripProjects).where(eq(tripProjects.id, project.id));
+    expect(savedProject.aggregateVersion).toBe(1);
+  });
+
   test("3.3 backup state without a same-project backupTargetItemId is rejected by the DB check constraint", async () => {
     await createTestUser("safety-bk-user");
     const [project] = await testDb.insert(tripProjects).values({ userId: "safety-bk-user", title: "Hội An", aggregateVersion: 1 }).returning({ id: tripProjects.id });

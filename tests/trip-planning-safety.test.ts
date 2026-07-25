@@ -70,6 +70,11 @@ let concDb: PostgresJsDatabase<typeof schema> | null = null;
 // contention-proof tests (independent of concDb so the lock and the contending
 // transaction run on different connections).
 let lockSql: ReturnType<typeof postgres> | null = null;
+// A second independent raw connection for the deterministic deadlock test
+// (5.3d), which must hold TWO first-lock rows (project + proposal) at once on
+// separate connections so both contending transactions can block on their
+// respective first locks simultaneously.
+let lockSql2: ReturnType<typeof postgres> | null = null;
 
 beforeAll(async () => {
   // setup.ts already routes process.env.DATABASE_URL at the test database, so
@@ -81,11 +86,13 @@ beforeAll(async () => {
   concSql = postgres(url, { max: 4 });
   concDb = drizzle(concSql, { schema });
   lockSql = postgres(url, { max: 1 });
+  lockSql2 = postgres(url, { max: 1 });
 });
 
 afterAll(async () => {
   if (concSql) await concSql.end();
   if (lockSql) await lockSql.end();
+  if (lockSql2) await lockSql2.end();
 });
 
 function getConcurrencyDb(): PostgresJsDatabase<typeof schema> {
@@ -134,6 +141,20 @@ async function holdProjectLock(projectId: string): Promise<() => Promise<void>> 
   const conn = await lockSql.reserve();
   await conn.unsafe("begin");
   await conn.unsafe(`select id from trip_projects where id = $1 for update`, [projectId]);
+  return async () => {
+    await conn.unsafe("commit");
+    await conn.release();
+  };
+}
+
+// 5.3d: hold a FOR UPDATE lock on a trip_change_proposals row from a second
+// independent raw connection. Used together with holdProjectLock to force the
+// apply/dismiss lock-order inversion into a deterministic deadlock.
+async function holdProposalLock(proposalId: string): Promise<() => Promise<void>> {
+  if (!lockSql2) throw new Error("proposal lock connection not initialized");
+  const conn = await lockSql2.reserve();
+  await conn.unsafe("begin");
+  await conn.unsafe(`select id from trip_change_proposals where id = $1 for update`, [proposalId]);
   return async () => {
     await conn.unsafe("commit");
     await conn.release();
@@ -712,16 +733,24 @@ describe("Story 7.6 AC1 cross-cutting trip planning safety", () => {
       const releaseLock = await holdProjectLock("safety-lock-p");
 
       // Issue apply on the multi-connection pool; it must block on FOR UPDATE.
+      // Start the contending promise before the try so it stays in scope after
+      // the finally releases the lock. The lock MUST release in finally so a
+      // failed assertion (e.g. apply resolving within 250ms on a fast machine)
+      // cannot leave an uncommitted FOR UPDATE holding the row — which would
+      // block the next test's resetTestDatabase() TRUNCATE forever.
       const applyPromise = applyApprovedTripChange({ tripProjectId: "safety-lock-p", proposalId });
-      const outcome = await Promise.race([
-        applyPromise.then(() => "resolved" as const),
-        delay(250).then(() => "blocked" as const),
-      ]);
-      // While the lock is held, apply must NOT resolve (it is contending).
-      expect(outcome).toBe("blocked");
+      try {
+        const outcome = await Promise.race([
+          applyPromise.then(() => "resolved" as const),
+          delay(250).then(() => "blocked" as const),
+        ]);
+        // While the lock is held, apply must NOT resolve (it is contending).
+        expect(outcome).toBe("blocked");
+      } finally {
+        await releaseLock();
+      }
 
-      // Release the lock; the blocked apply now proceeds and resolves.
-      await releaseLock();
+      // The lock is released; the blocked apply now proceeds and resolves.
       const result = await applyPromise;
       expect(result.success).toBe(true);
 
@@ -819,9 +848,124 @@ describe("Story 7.6 AC1 cross-cutting trip planning safety", () => {
           reason: { cause?: { code?: string } };
         };
         const cause = rejected.reason?.cause;
-        expect(["40P01", "40001", "40P02"]).toContain(cause?.code);
+        expect(["40P01", "40001"]).toContain(cause?.code);
         const winnerValue = (fulfilled[0] as { status: string; value: { success: boolean } }).value;
         expect(winnerValue.success).toBe(true);
+      }
+    });
+
+    test("5.3d forced lock-order inversion between apply and dismiss deadlocks safely (deterministic)", async () => {
+      // The non-deterministic 5.3 test above may serialize cleanly on fast CI
+      // and never exercise the deadlock branch, leaving the SQLSTATE 40P01
+      // check + winner verification as dead code. This test FORCES the
+      // lock-order inversion: apply locks project(FOR UPDATE)→proposal
+      // (FOR UPDATE); dismiss locks proposal(FOR UPDATE)→project(KEY SHARE via
+      // the trip_plan_change_history FK insert). Hold both first-lock rows from
+      // independent connections, start both transactions (each blocks on its
+      // first lock), release the proposal lock so dismiss proceeds to wait on
+      // the project KEY SHARE while still holding the proposal, then release
+      // the project lock so apply proceeds to wait on the proposal — a closed
+      // wait-for cycle Postgres detects and aborts (SQLSTATE 40P01).
+      await createTestUser("safety-dl-user");
+      await testDb.insert(tripProjects).values({
+        id: "safety-dl-p",
+        userId: "safety-dl-user",
+        title: "Phú Quốc",
+        aggregateVersion: 1,
+      });
+      await testDb.insert(tripPlanItems).values({
+        id: "safety-dl-leg",
+        tripProjectId: "safety-dl-p",
+        userId: "safety-dl-user",
+        kind: "leg",
+        type: "transport",
+        state: "planned",
+        label: "Chạy xe",
+        ordinal: 0,
+        version: 1,
+      });
+
+      const { persistAiTripChangeProposalDraft, applyApprovedTripChange, dismissTripChangeProposal } =
+        await loadModuleAsMultiConn("safety-dl-user", "safety-dl-user@example.com");
+      const persisted = await persistAiTripChangeProposalDraft({
+        tripProjectId: "safety-dl-p",
+        expectedAggregateVersion: 1,
+        expectedItemVersions: { "safety-dl-leg": 1 },
+        operations: [{ kind: "change-item-state", itemId: "safety-dl-leg", state: "confirmed" }],
+        rationale: "Xác nhận",
+      });
+      if (!persisted.success) throw new Error("persist failed");
+      const proposalId = persisted.proposal.id;
+
+      // Hold apply's first lock (project) and dismiss's first lock (proposal)
+      // on two independent raw connections.
+      const releaseProjectLock = await holdProjectLock("safety-dl-p");
+      const releaseProposalLock = await holdProposalLock(proposalId);
+      // Idempotent release guards so the finally cannot double-commit (which
+      // would error on an already-released connection) and cannot leak a lock
+      // if an assertion throws before both locks were released.
+      let projectReleased = false;
+      let proposalReleased = false;
+      const safeReleaseProject = async () => {
+        if (!projectReleased) {
+          projectReleased = true;
+          await releaseProjectLock();
+        }
+      };
+      const safeReleaseProposal = async () => {
+        if (!proposalReleased) {
+          proposalReleased = true;
+          await releaseProposalLock();
+        }
+      };
+      try {
+        // Start both transactions; each blocks on its first lock.
+        const applyPromise = applyApprovedTripChange({ tripProjectId: "safety-dl-p", proposalId });
+        const dismissPromise = dismissTripChangeProposal({ tripProjectId: "safety-dl-p", proposalId });
+        await delay(100);
+
+        // Release the proposal lock: dismiss acquires it and proceeds to insert
+        // the history row, which takes a KEY SHARE on the project — still
+        // blocked by our held project lock. dismiss now holds the proposal and
+        // waits on the project.
+        await safeReleaseProposal();
+        await delay(150);
+
+        // Release the project lock: apply acquires it (first waiter) and
+        // proceeds to lock the proposal FOR UPDATE — blocked by dismiss. apply
+        // holds the project and waits on the proposal. Closed cycle → Postgres
+        // detects the deadlock and aborts one transaction.
+        await safeReleaseProject();
+
+        const outcomes = await Promise.allSettled([applyPromise, dismissPromise]);
+
+        // Exactly one transaction is the deadlock victim (rejected); the other
+        // wins (fulfilled). Both cannot succeed (that would mean no cycle).
+        const rejected = outcomes.filter((o) => o.status === "rejected");
+        const fulfilled = outcomes.filter((o) => o.status === "fulfilled");
+        expect(rejected).toHaveLength(1);
+        expect(fulfilled).toHaveLength(1);
+        const victim = rejected[0] as { status: string; reason: { cause?: { code?: string } } };
+        expect(["40P01", "40001"]).toContain(victim.reason?.cause?.code);
+        const winner = (fulfilled[0] as { status: string; value: { success: boolean } }).value;
+        expect(winner.success).toBe(true);
+
+        // Safety invariants: exactly one history row and a terminal proposal,
+        // no partial writes (the aborted transaction wrote nothing).
+        const historyRows = await testDb
+          .select()
+          .from(tripPlanChangeHistory)
+          .where(eq(tripPlanChangeHistory.proposalId, proposalId));
+        expect(historyRows).toHaveLength(1);
+        expect(["apply", "dismiss"]).toContain(historyRows[0].operationClass);
+        const [proposal] = await testDb
+          .select({ status: tripChangeProposals.status })
+          .from(tripChangeProposals)
+          .where(eq(tripChangeProposals.id, proposalId));
+        expect(["applied", "dismissed"]).toContain(proposal.status);
+      } finally {
+        await safeReleaseProposal();
+        await safeReleaseProject();
       }
     });
 
@@ -1006,14 +1150,30 @@ describe("Story 7.6 AC1 cross-cutting trip planning safety", () => {
         testDb.select().from(tripProjects).where(eq(tripProjects.id, "safety-casc-p")),
       ).resolves.toHaveLength(0);
       // No deleted plan state is reconstitutable from retained audit metadata.
-      // Audit events may remain (minimal non-content metadata) but cannot
-      // reconstruct the plan.
-      const audits = await testDb
-        .select()
-        .from(auditEvents)
-        .where(eq(auditEvents.targetType, "trip_project"));
-      // Audit summaries must not contain plan item content.
-      for (const audit of audits) {
+      // Audit events survive the cascade (audit rows are NOT cascade-deleted)
+      // for EVERY target type touched during the test: trip_project,
+      // trip_plan_item, trip_project_constraints, and trip_change_proposal.
+      // The prior check inspected only trip_project audits; a regression that
+      // added item labels to the item/proposal/constraints summaries would
+      // reconstitute deleted plan content from retained audit metadata and
+      // still pass. Assert across ALL retained target types.
+      const allAudits = await testDb.select().from(auditEvents);
+      expect(allAudits.length).toBeGreaterThan(0);
+      // Non-vacuous: the cascade-deleted target types have surviving audit
+      // rows (so the content check below actually inspects them).
+      // trip_change_proposal audits are created by persist + apply;
+      // trip_plan_item audits are created by the apply op's
+      // changeInternalTripPlanItemStateInTransaction. (trip_project_constraints
+      // audits would only exist if constraints were upserted via the command —
+      // this test seeds them directly to verify cascade deletion, so no
+      // constraints audit is created; the universal content check below still
+      // covers it if a future change adds one.)
+      const auditTargetTypes = new Set(allAudits.map((a) => a.targetType));
+      expect(auditTargetTypes).toContain("trip_plan_item");
+      expect(auditTargetTypes).toContain("trip_change_proposal");
+      // Every retained audit summary must be minimal non-content metadata —
+      // it must not contain the deleted plan item label (or any plan content).
+      for (const audit of allAudits) {
         if (audit.beforeSummary) {
           expect(audit.beforeSummary).not.toContain("Chạy xe");
         }
@@ -1285,14 +1445,19 @@ describe("Story 7.6 AC1 cross-cutting trip planning safety", () => {
         ordinal: 1,
         expectedChangedItemVersions: { "safety-reord-lock-a": 1, "safety-reord-lock-b": 1 },
       });
-      const outcome = await Promise.race([
-        reorderPromise.then(() => "resolved" as const),
-        delay(250).then(() => "blocked" as const),
-      ]);
-      // The reorder must block on the aggregate FOR UPDATE lock.
-      expect(outcome).toBe("blocked");
+      // The lock MUST release in finally so a failed contention assertion
+      // cannot leave the FOR UPDATE held (which would hang the next TRUNCATE).
+      try {
+        const outcome = await Promise.race([
+          reorderPromise.then(() => "resolved" as const),
+          delay(250).then(() => "blocked" as const),
+        ]);
+        // The reorder must block on the aggregate FOR UPDATE lock.
+        expect(outcome).toBe("blocked");
+      } finally {
+        await releaseLock();
+      }
 
-      await releaseLock();
       const result = await reorderPromise;
       expect(result.success).toBe(true);
 
