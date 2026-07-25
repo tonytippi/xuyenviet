@@ -28,6 +28,8 @@ type ProposalDoneSummary = {
   rationale: string;
   affectedItems: Array<{ itemId: string; kind: string; label: string; change: string }>;
   beforeAfter: Array<{ operation: string; before: string | null; after: string | null }>;
+  alternatives: Array<{ summary: string }>;
+  hasAlternatives: boolean;
   expiresAt: Date | null;
   status: string;
 };
@@ -554,6 +556,7 @@ async function draftAndPersistProposal({
       operations: draft.operations,
       rationale: draft.rationale,
       alternatives: draft.alternatives,
+      orderingPreconditions: draft.orderingPreconditions,
       sourceAssistantMessageId: assistantMessageId,
     });
 
@@ -567,9 +570,23 @@ async function draftAndPersistProposal({
       rationale: proposal.rationale,
       affectedItems: proposal.affectedItems,
       beforeAfter: proposal.beforeAfter,
+      alternatives: proposal.alternatives,
+      hasAlternatives: proposal.hasAlternatives,
       expiresAt: proposal.expiresAt,
       status: proposal.status,
     };
+  } catch (error) {
+    // Open Decision 1 / AC1+AC3: never let proposal drafting break the answer.
+    // An unexpected throw from recordTripChangeProposalDraftUsage (getDb() outside
+    // its inner try/catch) or persistAiTripChangeProposalDraft must not propagate
+    // to the route's outer catch, which would send an error StreamEvent after the
+    // answer text was already streamed and the assistant message persisted.
+    console.warn("Trip change proposal drafting failed unexpectedly", {
+      tripProjectId,
+      assistantMessageId,
+      error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
+    });
+    return undefined;
   } finally {
     clearTimeout(timeout);
     abortSignal.removeEventListener("abort", onExternalAbort);

@@ -82,12 +82,12 @@ describe("validateProposalOperations pure unit tests", () => {
     expect(result.valid).toHaveLength(1);
   });
 
-  test("rejects create-item activity without a parentItemId", async () => {
+  test("accepts a valid create-item activity without a parentItemId (optional per system prompt)", async () => {
     const result = await validate([
       { kind: "create-item", item: { kind: "activity", type: "visit", anchorRole: null, state: "idea", label: "Đại Nội" }, ordinal: 0 },
     ]);
-    expect(result.valid).toHaveLength(0);
-    expect(result.rejected).toHaveLength(1);
+    expect(result.rejected).toHaveLength(0);
+    expect(result.valid).toHaveLength(1);
   });
 
   test("rejects create-item activity whose parent is not a leg", async () => {

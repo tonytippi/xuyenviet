@@ -24,6 +24,8 @@ type ProposalDoneSummary = {
   rationale: string;
   affectedItems: Array<{ itemId: string; kind: string; label: string; change: string }>;
   beforeAfter: Array<{ operation: string; before: string | null; after: string | null }>;
+  alternatives: Array<{ summary: string }>;
+  hasAlternatives: boolean;
   expiresAt: Date | string | null;
   status: string;
 };
@@ -579,6 +581,7 @@ function AnswerProposalCard({ proposal }: { proposal: ProposalDoneSummary }) {
   }, [proposal.proposalId]);
 
   const expiresAt = proposal.expiresAt instanceof Date ? proposal.expiresAt : proposal.expiresAt ? new Date(proposal.expiresAt) : null;
+  const alternatives = Array.isArray(proposal.alternatives) ? proposal.alternatives : [];
   const focusInput = {
     id: proposal.proposalId,
     expiresAt: expiresAt && !Number.isNaN(expiresAt.getTime()) ? expiresAt : null,
@@ -592,7 +595,12 @@ function AnswerProposalCard({ proposal }: { proposal: ProposalDoneSummary }) {
       change: item.change as "create" | "update" | "remove" | "reorder" | "change-state" | "upsert-constraints",
     })),
     beforeAfter: proposal.beforeAfter,
-    hasAlternatives: false,
+    alternatives,
+    // Story 7.4 review finding 4: the answer-surface card must offer "Xem phương
+    // án khác" when alternatives are supplied, consistent with the workspace
+    // panel. Prefer the explicit hasAlternatives flag from the done payload, fall
+    // back to deriving from the alternatives array.
+    hasAlternatives: Boolean(proposal.hasAlternatives ?? alternatives.length > 0),
   };
 
   return (

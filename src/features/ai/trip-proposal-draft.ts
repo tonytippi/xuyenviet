@@ -1,21 +1,21 @@
 import "server-only";
 
-import { and, eq } from "drizzle-orm";
-
-import { getDb } from "@/db/client";
-import { tripPlanItems, tripProjectConstraints, tripProjects } from "@/db/schema";
 import { completeTripChangeProposalDraft } from "@/features/ai/gateway";
 import { getAiGatewayPricingSnapshot, selectActiveAiGatewayModel } from "@/features/ai/models";
 import { buildTripChangeProposalDraftMessages, tripChangeProposalDraftPromptVersion } from "@/features/ai/prompts";
+import { readOwnedTripProjectAggregateForProposalDraft } from "@/features/chat-trips/trip-projects";
 import { aiUsagePurposes } from "@/features/usage/constants";
 import { writeAiUsageEvent } from "@/features/usage/events";
 import type { AuthenticatedSession } from "@/server/auth";
+import { getDb } from "@/db/client";
 
 // Story 7.4: AI Orchestration proposal-draft module. Reads the current Trip
-// Planning aggregate via Chat/Trips-owned tables (read-only), builds the prompt,
-// calls the AI Gateway with a schema-validated JSON contract, parses the result,
-// and returns an UNTRUSTED typed draft. This module persists nothing and writes
-// no tables; persistence is delegated to persistAiTripChangeProposalDraft.
+// Planning aggregate via the Chat/Trips-owned query helper
+// (readOwnedTripProjectAggregateForProposalDraft), builds the prompt, calls the
+// AI Gateway with a schema-validated JSON contract, parses the result, and
+// returns an UNTRUSTED typed draft. This module persists nothing and writes no
+// tables; persistence is delegated to persistAiTripChangeProposalDraft. It does
+// not import Chat/Trips-owned tables directly (AD-29/AD-30 ownership boundary).
 
 const tripChangeProposalDraftPurpose = aiUsagePurposes.tripChangeProposalDraft;
 
@@ -24,6 +24,7 @@ export type UntrustedTripChangeProposalDraft = {
   rationale: string;
   operations: unknown;
   alternatives: unknown;
+  orderingPreconditions: unknown;
   expectedAggregateVersion: number;
   expectedItemVersions: Record<string, number>;
   usage: {
@@ -68,54 +69,11 @@ export async function draftTripChangeProposal({
   question: string;
   abortSignal?: AbortSignal;
 }): Promise<UntrustedTripChangeProposalDraft> {
-  const db = getDb();
+  const aggregate = await readOwnedTripProjectAggregateForProposalDraft(tripProjectId, session);
 
-  const [project] = await db
-    .select({ id: tripProjects.id, aggregateVersion: tripProjects.aggregateVersion })
-    .from(tripProjects)
-    .where(and(eq(tripProjects.id, tripProjectId), eq(tripProjects.userId, session.userId)))
-    .limit(1);
-
-  if (!project) {
+  if (!aggregate) {
     return { ok: false, reason: "no_project" };
   }
-
-  const itemRows = await db
-    .select({
-      id: tripPlanItems.id,
-      kind: tripPlanItems.kind,
-      anchorRole: tripPlanItems.anchorRole,
-      type: tripPlanItems.type,
-      state: tripPlanItems.state,
-      label: tripPlanItems.label,
-      ordinal: tripPlanItems.ordinal,
-      parentItemId: tripPlanItems.parentItemId,
-      backupTargetItemId: tripPlanItems.backupTargetItemId,
-      transportOriginLabel: tripPlanItems.transportOriginLabel,
-      transportDestinationLabel: tripPlanItems.transportDestinationLabel,
-      accommodationPlaceAreaLabel: tripPlanItems.accommodationPlaceAreaLabel,
-      version: tripPlanItems.version,
-    })
-    .from(tripPlanItems)
-    .where(and(eq(tripPlanItems.tripProjectId, tripProjectId), eq(tripPlanItems.userId, session.userId)));
-
-  const [constraintsRow] = await db
-    .select({
-      adultCount: tripProjectConstraints.adultCount,
-      childCount: tripProjectConstraints.childCount,
-      children: tripProjectConstraints.children,
-      vehicleType: tripProjectConstraints.vehicleType,
-      evChargingNeed: tripProjectConstraints.evChargingNeed,
-      drivingToleranceHours: tripProjectConstraints.drivingToleranceHours,
-      budgetCurrency: tripProjectConstraints.budgetCurrency,
-      budgetMinVnd: tripProjectConstraints.budgetMinVnd,
-      budgetMaxVnd: tripProjectConstraints.budgetMaxVnd,
-      preferenceTags: tripProjectConstraints.preferenceTags,
-      avoidItems: tripProjectConstraints.avoidItems,
-    })
-    .from(tripProjectConstraints)
-    .where(and(eq(tripProjectConstraints.tripProjectId, tripProjectId), eq(tripProjectConstraints.userId, session.userId)))
-    .limit(1);
 
   const selectedModel = await selectActiveAiGatewayModel({
     purpose: "extraction",
@@ -129,8 +87,8 @@ export async function draftTripChangeProposal({
   const pricingSnapshot = getAiGatewayPricingSnapshot(selectedModel);
 
   const currentAggregateSummary = {
-    aggregateVersion: project.aggregateVersion,
-    items: itemRows.map((row) => ({
+    aggregateVersion: aggregate.aggregateVersion,
+    items: aggregate.items.map((row) => ({
       id: row.id,
       kind: row.kind,
       anchorRole: row.anchorRole,
@@ -144,11 +102,13 @@ export async function draftTripChangeProposal({
       transportDestinationLabel: row.transportDestinationLabel,
       accommodationPlaceAreaLabel: row.accommodationPlaceAreaLabel,
     })),
-    constraints: constraintsRow ?? null,
+    constraints: aggregate.constraints ?? null,
   };
 
   const messages = buildTripChangeProposalDraftMessages({ question, currentAggregateSummary });
   const result = await completeTripChangeProposalDraft({ model: selectedModel.gatewayModelName, messages, abortSignal });
+
+  const db = getDb();
 
   if (!result.ok) {
     await recordDraftUsage(db, {
@@ -228,7 +188,7 @@ export async function draftTripChangeProposal({
   }
 
   const expectedItemVersions: Record<string, number> = {};
-  for (const row of itemRows) {
+  for (const row of aggregate.items) {
     expectedItemVersions[row.id] = row.version;
   }
 
@@ -237,7 +197,8 @@ export async function draftTripChangeProposal({
     rationale: parsed.rationale,
     operations: parsed.operations,
     alternatives: parsed.alternatives,
-    expectedAggregateVersion: project.aggregateVersion,
+    orderingPreconditions: parsed.orderingPreconditions,
+    expectedAggregateVersion: aggregate.aggregateVersion,
     expectedItemVersions,
     usage: {
       provider: result.provider,
@@ -334,6 +295,7 @@ type ParsedDraft = {
   rationale: string;
   operations: unknown;
   alternatives: unknown;
+  orderingPreconditions: unknown;
 };
 
 function parseDraftPayload(content: string): ParsedDraft | null {
@@ -348,7 +310,12 @@ function parseDraftPayload(content: string): ParsedDraft | null {
   if (typeof parsed.rationale !== "string" || !parsed.rationale.trim()) return null;
   if (!Array.isArray(parsed.operations) || parsed.operations.length === 0) return null;
   const alternatives = Array.isArray(parsed.alternatives) ? parsed.alternatives : null;
-  return { rationale: parsed.rationale, operations: parsed.operations, alternatives };
+  // orderingPreconditions is optional (AC1: "ordering/parent preconditions when
+  // applicable"). When the model omits it or emits null/invalid shape, default to
+  // null so the column is nullable and 7.5 apply can still run.
+  const orderingPreconditionsRaw = parsed.orderingPreconditions;
+  const orderingPreconditions = isRecord(orderingPreconditionsRaw) || Array.isArray(orderingPreconditionsRaw) ? orderingPreconditionsRaw : null;
+  return { rationale: parsed.rationale, operations: parsed.operations, alternatives, orderingPreconditions };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

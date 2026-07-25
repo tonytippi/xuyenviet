@@ -14,6 +14,8 @@ import {
   type TripPlanItemType,
 } from "@/db/schema";
 import { recordAuditEvent } from "@/features/audit/events";
+import { tripPlanItemStateLabels } from "@/features/chat-trips/trip-home-labels";
+import { validatePlanReferencesRules, type PlanItemReference } from "@/features/chat-trips/plan-references";
 import { getAuthenticatedSession } from "@/server/auth";
 
 // Story 7.4: Chat/Trips owns the Trip Change Proposal command/read boundary.
@@ -109,6 +111,17 @@ export type KnownPlanItem = {
   state: TripPlanItemState;
   parentItemId: string | null;
   backupTargetItemId: string | null;
+  // Optional fields used only by the affected-item / before-after derivation in
+  // the owner-facing summary. The pure validator ignores them. Loaded by the
+  // persistence and read paths so the review card can show real labels and
+  // before/after impact (Story 7.4 review findings 2 and 3).
+  label?: string;
+  ordinal?: number;
+  notes?: string | null;
+  plannedAt?: string | null;
+  transportOriginLabel?: string | null;
+  transportDestinationLabel?: string | null;
+  accommodationPlaceAreaLabel?: string | null;
 };
 
 export type TripChangeProposalAffectedItemRef = {
@@ -148,6 +161,7 @@ export type PersistAiTripChangeProposalDraftInput = {
   operations: unknown;
   rationale: string;
   alternatives?: unknown;
+  orderingPreconditions?: unknown;
   expiresAt?: Date | null;
   sourceAssistantMessageId?: string | null;
 };
@@ -175,7 +189,7 @@ export function validateProposalOperations(
   const rejected: RejectedOperation[] = [];
 
   operations.forEach((raw, index) => {
-    const parsed = parseOperation(raw, index, knownById);
+    const parsed = parseOperation(raw, index, knownById, context.tripProjectId);
     if (parsed.kind === "ok") {
       valid.push(parsed.value);
     } else {
@@ -188,22 +202,22 @@ export function validateProposalOperations(
 
 type ParseResult = { kind: "ok"; value: TripChangeProposalOperation } | { kind: "err"; reason: string };
 
-function parseOperation(raw: unknown, index: number, knownById: Map<string, KnownPlanItem>): ParseResult {
+function parseOperation(raw: unknown, index: number, knownById: Map<string, KnownPlanItem>, contextTripProjectId: string): ParseResult {
   if (!isRecord(raw)) return { kind: "err", reason: "operation must be an object" };
   const opKind = raw.kind;
   if (typeof opKind !== "string") return { kind: "err", reason: "operation kind missing" };
 
   switch (opKind) {
     case "create-item":
-      return parseCreateItem(raw, knownById);
+      return parseCreateItem(raw, knownById, contextTripProjectId);
     case "update-item":
-      return parseUpdateItem(raw, knownById);
+      return parseUpdateItem(raw, knownById, contextTripProjectId);
     case "remove-item":
       return parseRemoveItem(raw, knownById);
     case "reorder-item":
-      return parseReorderItem(raw, knownById);
+      return parseReorderItem(raw, knownById, contextTripProjectId);
     case "change-item-state":
-      return parseChangeItemState(raw, knownById);
+      return parseChangeItemState(raw, knownById, contextTripProjectId);
     case "upsert-constraints":
       return parseUpsertConstraints(raw);
     default:
@@ -211,7 +225,15 @@ function parseOperation(raw: unknown, index: number, knownById: Map<string, Know
   }
 }
 
-function parseCreateItem(raw: Record<string, unknown>, knownById: Map<string, KnownPlanItem>): ParseResult {
+function knownItemsToReferences(knownById: Map<string, KnownPlanItem>, tripProjectId: string): PlanItemReference[] {
+  const references: PlanItemReference[] = [];
+  for (const item of knownById.values()) {
+    references.push({ id: item.id, kind: item.kind, tripProjectId, backupTargetItemId: item.backupTargetItemId });
+  }
+  return references;
+}
+
+function parseCreateItem(raw: Record<string, unknown>, knownById: Map<string, KnownPlanItem>, contextTripProjectId: string): ParseResult {
   const item = raw.item;
   if (!isRecord(item)) return { kind: "err", reason: "create-item.item missing" };
   const itemDraft = parseItemDraft(item);
@@ -220,18 +242,17 @@ function parseCreateItem(raw: Record<string, unknown>, knownById: Map<string, Kn
   const parentItemId = parseOptionalStringId(raw.parentItemId);
   if (parentItemId === "invalid") return { kind: "err", reason: "create-item.parentItemId invalid" };
   const parentId = parentItemId ?? null;
-  if (parentId !== null) {
-    if (itemDraft.kind !== "activity") return { kind: "err", reason: "parentItemId only allowed for activities" };
-    const parent = knownById.get(parentId);
-    if (!parent || parent.kind !== "leg") return { kind: "err", reason: "parentItemId must reference a leg in the same project" };
-  } else if (itemDraft.kind === "activity") {
-    return { kind: "err", reason: "activities require a parentItemId referencing a leg" };
-  }
-
-  if (itemDraft.backupTargetItemId) {
-    const target = knownById.get(itemDraft.backupTargetItemId);
-    if (!target) return { kind: "err", reason: "backupTargetItemId must reference an item in the same project" };
-  }
+  // Story 7.4 review finding 7: activities may omit parentItemId. The system
+  // prompt says "activities may carry parent_item_id" (optional) and Story 7.1
+  // validatePlanReferences allows null parent for activities. Reuse the shared
+  // same-project/no-cycle rules (finding 9) for the parent/backup references.
+  const references = knownItemsToReferences(knownById, contextTripProjectId);
+  const refError = validatePlanReferencesRules(
+    contextTripProjectId,
+    { kind: itemDraft.kind, parentItemId: parentId, backupTargetItemId: itemDraft.backupTargetItemId },
+    references,
+  );
+  if (refError) return { kind: "err", reason: refError };
 
   const ordinal = parseOrdinal(raw.ordinal);
   if (typeof ordinal === "string") return { kind: "err", reason: ordinal };
@@ -239,7 +260,7 @@ function parseCreateItem(raw: Record<string, unknown>, knownById: Map<string, Kn
   return { kind: "ok", value: { kind: "create-item", item: itemDraft, parentItemId: parentId, ordinal } };
 }
 
-function parseUpdateItem(raw: Record<string, unknown>, knownById: Map<string, KnownPlanItem>): ParseResult {
+function parseUpdateItem(raw: Record<string, unknown>, knownById: Map<string, KnownPlanItem>, contextTripProjectId: string): ParseResult {
   const itemId = parseRequiredStringId(raw.itemId);
   if (itemId === "invalid") return { kind: "err", reason: "update-item.itemId missing or invalid" };
   const known = knownById.get(itemId);
@@ -250,9 +271,19 @@ function parseUpdateItem(raw: Record<string, unknown>, knownById: Map<string, Kn
   const parsedChanges = parseItemChanges(changes, known);
   if (typeof parsedChanges === "string") return { kind: "err", reason: parsedChanges };
 
-  if (parsedChanges.backupTargetItemId !== undefined && parsedChanges.backupTargetItemId !== null) {
-    const target = knownById.get(parsedChanges.backupTargetItemId);
-    if (!target) return { kind: "err", reason: "backupTargetItemId must reference an item in the same project" };
+  // Reuse the shared same-project/no-cycle rules (finding 9) for a backup target
+  // change that introduces a new target. parseItemChanges already validated the
+  // backup-state/backup-target consistency; here we ensure the new target is
+  // same-project and does not create a backup cycle.
+  if (parsedChanges.backupTargetItemId !== undefined && parsedChanges.backupTargetItemId !== null && parsedChanges.backupTargetItemId !== known.backupTargetItemId) {
+    const references = knownItemsToReferences(knownById, contextTripProjectId);
+    const refError = validatePlanReferencesRules(
+      contextTripProjectId,
+      { kind: known.kind, parentItemId: known.parentItemId, backupTargetItemId: parsedChanges.backupTargetItemId },
+      references,
+      itemId,
+    );
+    if (refError) return { kind: "err", reason: refError };
   }
 
   return { kind: "ok", value: { kind: "update-item", itemId, changes: parsedChanges } };
@@ -265,7 +296,7 @@ function parseRemoveItem(raw: Record<string, unknown>, knownById: Map<string, Kn
   return { kind: "ok", value: { kind: "remove-item", itemId } };
 }
 
-function parseReorderItem(raw: Record<string, unknown>, knownById: Map<string, KnownPlanItem>): ParseResult {
+function parseReorderItem(raw: Record<string, unknown>, knownById: Map<string, KnownPlanItem>, contextTripProjectId: string): ParseResult {
   const itemId = parseRequiredStringId(raw.itemId);
   if (itemId === "invalid") return { kind: "err", reason: "reorder-item.itemId missing or invalid" };
   const known = knownById.get(itemId);
@@ -274,10 +305,17 @@ function parseReorderItem(raw: Record<string, unknown>, knownById: Map<string, K
   const parentItemId = parseOptionalStringId(raw.parentItemId);
   if (parentItemId === "invalid") return { kind: "err", reason: "reorder-item.parentItemId invalid" };
   const parentId = parentItemId ?? null;
+  // Reuse the shared same-project parent rules (finding 9). Activities may carry
+  // a parent leg; non-activities must not carry a parent.
   if (parentId !== null) {
-    if (known.kind !== "activity") return { kind: "err", reason: "parentItemId only allowed for activities" };
-    const parent = knownById.get(parentId);
-    if (!parent || parent.kind !== "leg") return { kind: "err", reason: "parentItemId must reference a leg in the same project" };
+    const references = knownItemsToReferences(knownById, contextTripProjectId);
+    const refError = validatePlanReferencesRules(
+      contextTripProjectId,
+      { kind: known.kind, parentItemId: parentId, backupTargetItemId: known.backupTargetItemId },
+      references,
+      itemId,
+    );
+    if (refError) return { kind: "err", reason: refError };
   }
 
   const ordinal = parseOrdinal(raw.ordinal);
@@ -286,7 +324,7 @@ function parseReorderItem(raw: Record<string, unknown>, knownById: Map<string, K
   return { kind: "ok", value: { kind: "reorder-item", itemId, parentItemId: parentId, ordinal } };
 }
 
-function parseChangeItemState(raw: Record<string, unknown>, knownById: Map<string, KnownPlanItem>): ParseResult {
+function parseChangeItemState(raw: Record<string, unknown>, knownById: Map<string, KnownPlanItem>, contextTripProjectId: string): ParseResult {
   const itemId = parseRequiredStringId(raw.itemId);
   if (itemId === "invalid") return { kind: "err", reason: "change-item-state.itemId missing or invalid" };
   const known = knownById.get(itemId);
@@ -304,9 +342,17 @@ function parseChangeItemState(raw: Record<string, unknown>, knownById: Map<strin
   if ((nextState === "backup") !== (backupTargetItemId !== null)) {
     return { kind: "err", reason: "backup state requires backupTargetItemId and vice versa" };
   }
-  if (backupTargetItemId) {
-    const target = knownById.get(backupTargetItemId);
-    if (!target) return { kind: "err", reason: "backupTargetItemId must reference an item in the same project" };
+  // Reuse the shared same-project/no-cycle rules (finding 9) for a backup target
+  // that is new for this item.
+  if (backupTargetItemId !== null && backupTargetItemId !== known.backupTargetItemId) {
+    const references = knownItemsToReferences(knownById, contextTripProjectId);
+    const refError = validatePlanReferencesRules(
+      contextTripProjectId,
+      { kind: known.kind, parentItemId: known.parentItemId, backupTargetItemId },
+      references,
+      itemId,
+    );
+    if (refError) return { kind: "err", reason: refError };
   }
 
   return { kind: "ok", value: { kind: "change-item-state", itemId, state: nextState, backupTargetItemId } };
@@ -681,6 +727,9 @@ export async function persistAiTripChangeProposalDraft(
       // Validate operations against the current aggregate before persisting.
       // The dev judges omission of interdependent operations unsafe in 7.4, so
       // any rejected operation rejects the whole draft (no proposal row written).
+      // Load the full projection (label/ordinal/notes/plannedAt/transport/
+      // accommodation) so the owner-facing summary can derive real affected items
+      // and before/after impact (Story 7.4 review findings 2 and 3).
       const knownItemRows = await transaction
         .select({
           id: tripPlanItems.id,
@@ -690,6 +739,13 @@ export async function persistAiTripChangeProposalDraft(
           state: tripPlanItems.state,
           parentItemId: tripPlanItems.parentItemId,
           backupTargetItemId: tripPlanItems.backupTargetItemId,
+          label: tripPlanItems.label,
+          ordinal: tripPlanItems.ordinal,
+          notes: tripPlanItems.notes,
+          plannedAt: tripPlanItems.plannedAt,
+          transportOriginLabel: tripPlanItems.transportOriginLabel,
+          transportDestinationLabel: tripPlanItems.transportDestinationLabel,
+          accommodationPlaceAreaLabel: tripPlanItems.accommodationPlaceAreaLabel,
         })
         .from(tripPlanItems)
         .where(and(eq(tripPlanItems.tripProjectId, input.tripProjectId), eq(tripPlanItems.userId, session.userId)));
@@ -702,6 +758,13 @@ export async function persistAiTripChangeProposalDraft(
         state: row.state,
         parentItemId: row.parentItemId,
         backupTargetItemId: row.backupTargetItemId,
+        label: row.label,
+        ordinal: row.ordinal,
+        notes: row.notes,
+        plannedAt: row.plannedAt ? row.plannedAt.toISOString() : null,
+        transportOriginLabel: row.transportOriginLabel,
+        transportDestinationLabel: row.transportDestinationLabel,
+        accommodationPlaceAreaLabel: row.accommodationPlaceAreaLabel,
       }));
 
       const { valid, rejected } = validateProposalOperations(input.operations, { knownItems, tripProjectId: input.tripProjectId });
@@ -720,6 +783,7 @@ export async function persistAiTripChangeProposalDraft(
           operations: valid as unknown as Record<string, unknown>,
           expectedAggregateVersion: input.expectedAggregateVersion,
           expectedItemVersions: (input.expectedItemVersions ?? null) as Record<string, number> | null,
+          orderingPreconditions: (input.orderingPreconditions ?? null) as Record<string, unknown> | null,
           alternatives: alternatives as unknown as Record<string, unknown> | null,
           expiresAt: input.expiresAt ?? null,
           sourceAssistantMessageId: input.sourceAssistantMessageId ?? null,
@@ -751,7 +815,7 @@ export async function persistAiTripChangeProposalDraft(
         transaction,
       );
 
-      const summary = toOwnedSummary(inserted, input.tripProjectId, valid);
+      const summary = toOwnedSummary(inserted, input.tripProjectId, valid, knownItems);
       return { success: true, proposal: summary };
     });
   } catch (error) {
@@ -788,7 +852,15 @@ export async function listPendingProposalsForTripProject(
     ))
     .orderBy(asc(tripChangeProposals.createdAt), asc(tripChangeProposals.id));
 
-  return rows.map((row) => toOwnedSummary(row, tripProjectId, row.operations));
+  if (rows.length === 0) return [];
+
+  // Load the current plan items so the owner-facing summary can derive real
+  // affected-item labels and before/after impact (Story 7.4 review findings 2
+  // and 3). A proposal may reference items that no longer exist; those fall back
+  // to a safe minimal projection (finding 2 fallback).
+  const knownItems = await loadKnownItemsForSummary(tripProjectId, session.userId);
+
+  return rows.map((row) => toOwnedSummary(row, tripProjectId, row.operations, knownItems));
 }
 
 export async function getProposalForOwnerReview(
@@ -817,7 +889,46 @@ export async function getProposalForOwnerReview(
     .limit(1);
 
   if (!row) return null;
-  return toOwnedSummary(row, tripProjectId, row.operations);
+  const knownItems = await loadKnownItemsForSummary(tripProjectId, session.userId);
+  return toOwnedSummary(row, tripProjectId, row.operations, knownItems);
+}
+
+async function loadKnownItemsForSummary(tripProjectId: string, userId: string): Promise<KnownPlanItem[]> {
+  const rows = await getDb()
+    .select({
+      id: tripPlanItems.id,
+      kind: tripPlanItems.kind,
+      anchorRole: tripPlanItems.anchorRole,
+      type: tripPlanItems.type,
+      state: tripPlanItems.state,
+      parentItemId: tripPlanItems.parentItemId,
+      backupTargetItemId: tripPlanItems.backupTargetItemId,
+      label: tripPlanItems.label,
+      ordinal: tripPlanItems.ordinal,
+      notes: tripPlanItems.notes,
+      plannedAt: tripPlanItems.plannedAt,
+      transportOriginLabel: tripPlanItems.transportOriginLabel,
+      transportDestinationLabel: tripPlanItems.transportDestinationLabel,
+      accommodationPlaceAreaLabel: tripPlanItems.accommodationPlaceAreaLabel,
+    })
+    .from(tripPlanItems)
+    .where(and(eq(tripPlanItems.tripProjectId, tripProjectId), eq(tripPlanItems.userId, userId)));
+  return rows.map((row) => ({
+    id: row.id,
+    kind: row.kind,
+    anchorRole: row.anchorRole,
+    type: row.type,
+    state: row.state,
+    parentItemId: row.parentItemId,
+    backupTargetItemId: row.backupTargetItemId,
+    label: row.label,
+    ordinal: row.ordinal,
+    notes: row.notes,
+    plannedAt: row.plannedAt ? row.plannedAt.toISOString() : null,
+    transportOriginLabel: row.transportOriginLabel,
+    transportDestinationLabel: row.transportDestinationLabel,
+    accommodationPlaceAreaLabel: row.accommodationPlaceAreaLabel,
+  }));
 }
 
 function normalizeRationale(value: unknown): { ok: true; value: string } | { ok: false } {
@@ -856,10 +967,15 @@ function toOwnedSummary(
   },
   tripProjectId: string,
   operations: unknown,
+  knownItems: KnownPlanItem[] = [],
 ): OwnedTripChangeProposalSummary {
   const ops = Array.isArray(operations) ? operations : [];
-  const affectedItems = deriveAffectedItems(ops);
-  const beforeAfter = deriveBeforeAfter(ops);
+  const knownById = new Map<string, KnownPlanItem>();
+  for (const item of knownItems) {
+    if (item && typeof item.id === "string" && item.id) knownById.set(item.id, item);
+  }
+  const affectedItems = deriveAffectedItems(ops, knownById);
+  const beforeAfter = deriveBeforeAfter(ops, knownById);
   const alternativesRaw = Array.isArray(row.alternatives) ? row.alternatives : [];
   const alternatives: TripChangeProposalAlternativeSummary[] = alternativesRaw
     .map((entry) => (isRecord(entry) && typeof entry.summary === "string" ? { summary: entry.summary.slice(0, maxAlternativeSummaryLength) } : null))
@@ -879,7 +995,11 @@ function toOwnedSummary(
   };
 }
 
-function deriveAffectedItems(operations: unknown[]): TripChangeProposalAffectedItemRef[] {
+// Story 7.4 review finding 2: identify the affected item using the loaded known
+// items instead of hardcoding kind="activity" and label="". When an item has been
+// removed (no longer in the aggregate), fall back to a safe minimal projection
+// so the review card still names the change without leaking a raw UUID.
+function deriveAffectedItems(operations: unknown[], knownById: Map<string, KnownPlanItem>): TripChangeProposalAffectedItemRef[] {
   const refs: TripChangeProposalAffectedItemRef[] = [];
   for (const op of operations) {
     if (!isRecord(op)) continue;
@@ -890,13 +1010,17 @@ function deriveAffectedItems(operations: unknown[]): TripChangeProposalAffectedI
         refs.push({ itemId: "(mới)", kind: item.kind as TripPlanItemKind, label: item.label.slice(0, maxLabelLength), change: "create" });
       }
     } else if (kind === "update-item" && typeof op.itemId === "string") {
-      refs.push({ itemId: op.itemId, kind: "activity", label: "", change: "update" });
+      const known = knownById.get(op.itemId);
+      refs.push({ itemId: op.itemId, kind: known?.kind ?? "activity", label: known?.label ?? "(đã xoá)", change: "update" });
     } else if (kind === "remove-item" && typeof op.itemId === "string") {
-      refs.push({ itemId: op.itemId, kind: "activity", label: "", change: "remove" });
+      const known = knownById.get(op.itemId);
+      refs.push({ itemId: op.itemId, kind: known?.kind ?? "activity", label: known?.label ?? "(đã xoá)", change: "remove" });
     } else if (kind === "reorder-item" && typeof op.itemId === "string") {
-      refs.push({ itemId: op.itemId, kind: "activity", label: "", change: "reorder" });
+      const known = knownById.get(op.itemId);
+      refs.push({ itemId: op.itemId, kind: known?.kind ?? "activity", label: known?.label ?? "(đã xoá)", change: "reorder" });
     } else if (kind === "change-item-state" && typeof op.itemId === "string") {
-      refs.push({ itemId: op.itemId, kind: "activity", label: "", change: "change-state" });
+      const known = knownById.get(op.itemId);
+      refs.push({ itemId: op.itemId, kind: known?.kind ?? "activity", label: known?.label ?? "(đã xoá)", change: "change-state" });
     } else if (kind === "upsert-constraints") {
       refs.push({ itemId: "constraints", kind: "activity", label: "Ràng buộc", change: "upsert-constraints" });
     }
@@ -904,22 +1028,97 @@ function deriveAffectedItems(operations: unknown[]): TripChangeProposalAffectedI
   return refs.slice(0, maxOperations);
 }
 
-function deriveBeforeAfter(operations: unknown[]): TripChangeProposalBeforeAfterSummary[] {
+// Vietnamese labels for the structured fields an update-item can change, so the
+// before/after impact reads naturally in the review card (Story 7.4 review
+// finding 3) and the change-item-state row shows Vietnamese state labels instead
+// of raw English enums (finding 5).
+const changeFieldLabels: Record<string, string> = {
+  label: "Tên",
+  notes: "Ghi chú",
+  plannedAt: "Thời gian",
+  state: "Trạng thái",
+  backupTargetItemId: "Phương án B",
+  transportOriginLabel: "Điểm đi",
+  transportDestinationLabel: "Điểm đến",
+  accommodationPlaceAreaLabel: "Khu vực lưu trú",
+};
+
+function describeKnownFieldValue(known: KnownPlanItem | undefined, field: string, knownById: Map<string, KnownPlanItem>): string | null {
+  if (!known) return null;
+  switch (field) {
+    case "label":
+      return known.label ?? null;
+    case "notes":
+      return known.notes ?? null;
+    case "plannedAt":
+      return known.plannedAt ?? null;
+    case "state":
+      return tripPlanItemStateLabels[known.state] ?? known.state;
+    case "backupTargetItemId":
+      if (!known.backupTargetItemId) return null;
+      return knownById.get(known.backupTargetItemId)?.label ?? known.backupTargetItemId;
+    case "transportOriginLabel":
+      return known.transportOriginLabel ?? null;
+    case "transportDestinationLabel":
+      return known.transportDestinationLabel ?? null;
+    case "accommodationPlaceAreaLabel":
+      return known.accommodationPlaceAreaLabel ?? null;
+    default:
+      return null;
+  }
+}
+
+function describeChangeValue(field: string, value: unknown, knownById: Map<string, KnownPlanItem>): string | null {
+  if (value === null || value === undefined) return null;
+  if (field === "state" && typeof value === "string") {
+    return tripPlanItemStateLabels[value as TripPlanItemState] ?? value;
+  }
+  if (field === "backupTargetItemId" && typeof value === "string") {
+    return knownById.get(value)?.label ?? value;
+  }
+  if (typeof value === "string") return value;
+  return null;
+}
+
+// Story 7.4 review finding 3: derive a real before/after impact instead of
+// before=null and a comma-joined list of field NAMES. For update-item, emit one
+// entry per changed field so each before→after is precise. For change-item-state
+// (finding 5), show the Vietnamese state label, not the raw English enum. For
+// reorder-item, show the before/after ordinal. For remove-item, show the removed
+// label as `before` so the owner can see what is being removed.
+function deriveBeforeAfter(operations: unknown[], knownById: Map<string, KnownPlanItem>): TripChangeProposalBeforeAfterSummary[] {
   const summaries: TripChangeProposalBeforeAfterSummary[] = [];
   for (const op of operations) {
     if (!isRecord(op)) continue;
     const kind = op.kind;
     if (kind === "create-item" && isRecord(op.item) && typeof op.item.label === "string") {
       summaries.push({ operation: "Tạo mục mới", before: null, after: op.item.label.slice(0, maxLabelLength) });
-    } else if (kind === "update-item" && isRecord(op.changes)) {
-      const afterParts = Object.keys(op.changes).map((key) => key);
-      summaries.push({ operation: "Cập nhật mục", before: null, after: afterParts.join(", ").slice(0, maxLabelLength) || "thay đổi" });
-    } else if (kind === "remove-item") {
-      summaries.push({ operation: "Xoá mục", before: null, after: null });
-    } else if (kind === "reorder-item") {
-      summaries.push({ operation: "Sắp xếp lại", before: null, after: null });
-    } else if (kind === "change-item-state" && typeof op.state === "string") {
-      summaries.push({ operation: "Đổi trạng thái", before: null, after: op.state });
+    } else if (kind === "update-item" && isRecord(op.changes) && typeof op.itemId === "string") {
+      const known = knownById.get(op.itemId);
+      const knownLabel = known?.label ?? "(đã xoá)";
+      for (const [field, newValue] of Object.entries(op.changes)) {
+        if (!(field in changeFieldLabels)) continue;
+        const before = describeKnownFieldValue(known, field, knownById);
+        const after = describeChangeValue(field, newValue, knownById);
+        const fieldLabel = changeFieldLabels[field] ?? field;
+        const operation = `Cập nhật ${fieldLabel} · ${knownLabel}`;
+        summaries.push({ operation, before, after });
+      }
+    } else if (kind === "remove-item" && typeof op.itemId === "string") {
+      const known = knownById.get(op.itemId);
+      summaries.push({ operation: "Xoá mục", before: known?.label ?? "(đã xoá)", after: null });
+    } else if (kind === "reorder-item" && typeof op.itemId === "string") {
+      const known = knownById.get(op.itemId);
+      const knownLabel = known?.label ?? "(đã xoá)";
+      const beforeOrdinal = known?.ordinal !== undefined ? `vị trí ${known.ordinal}` : null;
+      const afterOrdinal = typeof op.ordinal === "number" ? `vị trí ${op.ordinal}` : null;
+      summaries.push({ operation: `Sắp xếp lại · ${knownLabel}`, before: beforeOrdinal, after: afterOrdinal });
+    } else if (kind === "change-item-state" && typeof op.itemId === "string" && typeof op.state === "string") {
+      const known = knownById.get(op.itemId);
+      const knownLabel = known?.label ?? "(đã xoá)";
+      const before = known ? (tripPlanItemStateLabels[known.state] ?? known.state) : null;
+      const after = tripPlanItemStateLabels[op.state as TripPlanItemState] ?? op.state;
+      summaries.push({ operation: `Đổi trạng thái · ${knownLabel}`, before, after });
     } else if (kind === "upsert-constraints") {
       summaries.push({ operation: "Cập nhật ràng buộc", before: null, after: null });
     }

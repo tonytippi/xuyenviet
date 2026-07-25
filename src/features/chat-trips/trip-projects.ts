@@ -7,6 +7,7 @@ import { chatContext, conversations, messages, tripChangeProposals, tripPlanItem
 import { recordAuditEvent } from "@/features/audit/events";
 import { buildTripWorkspaceReadModelWithConstraints, type ConstraintsProjection, type PendingProposalFocusInput, type TimelineGroup, type TripHomeFocus, type TripPlanItemProjection } from "@/features/chat-trips/trip-home";
 import { listPendingProposalsForTripProject, type OwnedTripChangeProposalSummary } from "@/features/chat-trips/trip-change-proposals";
+import { validatePlanReferencesRules } from "@/features/chat-trips/plan-references";
 import { getAuthenticatedSession } from "@/server/auth";
 
 import { formatTripProjectLabel } from "./labels";
@@ -254,6 +255,86 @@ export async function getOwnedTripProjectSummary(tripProjectId: string) {
     tripHome: workspaceReadModel.focus,
     pendingProposals,
   } satisfies OwnedTripProjectWorkspaceSummary;
+}
+
+// Story 7.4: Chat/Trips-owned aggregate read for AI proposal drafting. Non-owning
+// modules (AI Orchestration) read the current Trip Planning aggregate through this
+// helper instead of importing Chat/Trips-owned tables directly (ownership boundary
+// per AD-29/AD-30). Returns only the fields the draft prompt needs; writes nothing.
+export type TripProjectAggregateForDraft = {
+  aggregateVersion: number;
+  items: Array<{
+    id: string;
+    kind: TripPlanItemKind;
+    anchorRole: TripPlanAnchorRole | null;
+    type: TripPlanItemType | null;
+    state: TripPlanItemState;
+    label: string;
+    ordinal: number;
+    parentItemId: string | null;
+    backupTargetItemId: string | null;
+    transportOriginLabel: string | null;
+    transportDestinationLabel: string | null;
+    accommodationPlaceAreaLabel: string | null;
+    version: number;
+  }>;
+  constraints: Record<string, unknown> | null;
+};
+
+export async function readOwnedTripProjectAggregateForProposalDraft(
+  tripProjectId: string,
+  session: { userId: string },
+): Promise<TripProjectAggregateForDraft | null> {
+  const [project] = await getDb()
+    .select({ id: tripProjects.id, aggregateVersion: tripProjects.aggregateVersion })
+    .from(tripProjects)
+    .where(and(eq(tripProjects.id, tripProjectId), eq(tripProjects.userId, session.userId)))
+    .limit(1);
+
+  if (!project) return null;
+
+  const itemRows = await getDb()
+    .select({
+      id: tripPlanItems.id,
+      kind: tripPlanItems.kind,
+      anchorRole: tripPlanItems.anchorRole,
+      type: tripPlanItems.type,
+      state: tripPlanItems.state,
+      label: tripPlanItems.label,
+      ordinal: tripPlanItems.ordinal,
+      parentItemId: tripPlanItems.parentItemId,
+      backupTargetItemId: tripPlanItems.backupTargetItemId,
+      transportOriginLabel: tripPlanItems.transportOriginLabel,
+      transportDestinationLabel: tripPlanItems.transportDestinationLabel,
+      accommodationPlaceAreaLabel: tripPlanItems.accommodationPlaceAreaLabel,
+      version: tripPlanItems.version,
+    })
+    .from(tripPlanItems)
+    .where(and(eq(tripPlanItems.tripProjectId, tripProjectId), eq(tripPlanItems.userId, session.userId)));
+
+  const [constraintsRow] = await getDb()
+    .select({
+      adultCount: tripProjectConstraints.adultCount,
+      childCount: tripProjectConstraints.childCount,
+      children: tripProjectConstraints.children,
+      vehicleType: tripProjectConstraints.vehicleType,
+      evChargingNeed: tripProjectConstraints.evChargingNeed,
+      drivingToleranceHours: tripProjectConstraints.drivingToleranceHours,
+      budgetCurrency: tripProjectConstraints.budgetCurrency,
+      budgetMinVnd: tripProjectConstraints.budgetMinVnd,
+      budgetMaxVnd: tripProjectConstraints.budgetMaxVnd,
+      preferenceTags: tripProjectConstraints.preferenceTags,
+      avoidItems: tripProjectConstraints.avoidItems,
+    })
+    .from(tripProjectConstraints)
+    .where(and(eq(tripProjectConstraints.tripProjectId, tripProjectId), eq(tripProjectConstraints.userId, session.userId)))
+    .limit(1);
+
+  return {
+    aggregateVersion: project.aggregateVersion,
+    items: itemRows,
+    constraints: constraintsRow ?? null,
+  };
 }
 
 export async function resolveOwnedPrimaryConversation(tripProjectId: string) {
@@ -606,25 +687,17 @@ async function recordAggregateAudit(transaction: Parameters<ReturnType<typeof ge
 }
 
 async function validatePlanReferences(transaction: Parameters<ReturnType<typeof getDb>["transaction"]>[0] extends (transaction: infer T) => unknown ? T : never, tripProjectId: string, userId: string, values: ReturnType<typeof normalizePlanItem>, itemId?: string) {
-  if (values.parentItemId) {
-    if (values.kind !== "activity") throw new Error("Invalid trip plan parent.");
-    if (values.parentItemId === itemId) throw new Error("Invalid trip plan parent.");
-    const [parent] = await transaction.select({ kind: tripPlanItems.kind, tripProjectId: tripPlanItems.tripProjectId }).from(tripPlanItems).where(and(eq(tripPlanItems.id, values.parentItemId), eq(tripPlanItems.userId, userId))).limit(1);
-    if (!parent || parent.tripProjectId !== tripProjectId || parent.kind !== "leg") throw new Error("Invalid trip plan parent.");
-  }
-  if (values.backupTargetItemId) {
-    if (values.backupTargetItemId === itemId) throw new Error("Invalid trip plan backup target.");
-    const [target] = await transaction.select({ tripProjectId: tripPlanItems.tripProjectId, backupTargetItemId: tripPlanItems.backupTargetItemId }).from(tripPlanItems).where(and(eq(tripPlanItems.id, values.backupTargetItemId), eq(tripPlanItems.userId, userId))).limit(1);
-    if (!target || target.tripProjectId !== tripProjectId) throw new Error("Invalid trip plan backup target.");
-    const seen = new Set<string>(itemId ? [itemId] : []);
-    let targetId: string | null = values.backupTargetItemId;
-    while (targetId) {
-      if (seen.has(targetId)) throw new Error("Invalid trip plan backup target.");
-      seen.add(targetId);
-      const [next] = await transaction.select({ backupTargetItemId: tripPlanItems.backupTargetItemId }).from(tripPlanItems).where(and(eq(tripPlanItems.id, targetId), eq(tripPlanItems.tripProjectId, tripProjectId), eq(tripPlanItems.userId, userId))).limit(1);
-      targetId = next?.backupTargetItemId ?? null;
-    }
-  }
+  // Load every plan item in the project once and delegate the same-project
+  // parent/backup/no-cycle rules to the pure shared helper in plan-references.ts.
+  // This keeps the DB-backed command path and the proposal validator (which uses
+  // already-loaded knownItems) on the exact same rule set, avoiding divergence
+  // (Story 7.4 review finding 9).
+  const rows = await transaction
+    .select({ id: tripPlanItems.id, kind: tripPlanItems.kind, tripProjectId: tripPlanItems.tripProjectId, backupTargetItemId: tripPlanItems.backupTargetItemId })
+    .from(tripPlanItems)
+    .where(and(eq(tripPlanItems.tripProjectId, tripProjectId), eq(tripPlanItems.userId, userId)));
+  const error = validatePlanReferencesRules(tripProjectId, { kind: values.kind, parentItemId: values.parentItemId, backupTargetItemId: values.backupTargetItemId }, rows, itemId);
+  if (error) throw new Error(error);
 }
 
 function normalizeConstraints(input: unknown) {
