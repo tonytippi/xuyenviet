@@ -4,7 +4,7 @@ baseline_commit: 4f42d6924e963162ef47466323eff237555f0388
 
 # Story 7.5: Apply, Dismiss, and Expire Proposals Safely
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 

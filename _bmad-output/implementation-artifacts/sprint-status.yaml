@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-07-25 (Story 7.5 second bounded review findings Q1–Q5 repaired — 3 MEDIUM, 2 LOW; incomplete P10/P11/expire re-throw repair + minor UX edge cases; 934 tests pass, lint/typecheck/build/db:generate clean; status synchronized to review. Epic 7 remains in-progress.)
+last_updated: 2026-07-25 (Story 7.5 finalized to done after status-only verification of supplied final repair commit 3f2794269749673ffa2fbb4c035882f0803143bb and a clean pre-update worktree. Epic 7 remains in-progress pending Story 7.6.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -102,7 +102,8 @@ development_status:
   # Synchronized 2026-07-25 after repair of all 18 review findings (P1–P18: 3 HIGH, 7 MEDIUM, 8 LOW) for commit feeb7e5; 925 tests pass, lint/typecheck/build/db:generate clean; status set to review.
   # Second bounded review 2026-07-25 of commits feeb7e5 + e40a906: P1–P18 verified repaired; 5 new findings (Q1–Q5: 3 MEDIUM, 2 LOW) — Q1–Q3 incomplete P10/P11 re-throw repair (callers not updated), Q4–Q5 minor UX edge cases. No HIGH; no security/data-integrity/AC/cross-feature systemic failure; all 4 ACs satisfied.
   # Second-review repair 2026-07-25: all 5 findings Q1–Q5 repaired — Q1 expire-on-read try/catch, Q2 worker loop per-batch try/catch, Q3 server action transient reason + retryable client outcome, Q4 useRef dedup, Q5 history-sheet handlers; 934 tests pass, lint/typecheck/build/db:generate clean; status set to review.
-  7-5-apply-dismiss-and-expire-proposals-safely: review
+  # Finalized 2026-07-25 after status-only verification of supplied final repair commit 3f2794269749673ffa2fbb4c035882f0803143bb and a clean pre-update worktree; status synchronized to done. Epic 7 remains in-progress pending Story 7.6.
+  7-5-apply-dismiss-and-expire-proposals-safely: done
   7-6-verify-owner-scoped-trip-planning-safety: backlog
   epic-7-retrospective: optional
 
