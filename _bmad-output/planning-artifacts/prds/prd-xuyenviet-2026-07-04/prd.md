@@ -320,7 +320,9 @@ Counter-metrics: track hallucinated unsupported claims, claims whose evidence sp
 - A migration may choose one linked conversation as the primary conversation for an existing Trip Project, but must preserve access to prior owner-linked conversations and must not discard their history.
 - AI can draft plans and create structured change proposals. Only a user-confirmed server command may apply a proposal to persistent state after checking ownership, trip membership, proposal validity/expiry, and the affected-item version or equivalent conflict guard.
 - A proposal may create, update, remove, reorder, or change the state of explicitly identified structured trip items. It must show the user its intended effect before confirmation and must not create hidden side effects.
-- Trip Home is a focused state surface, not a widget dashboard. It prioritizes unresolved planning decisions, then the next planned leg or preparation focus; historic chat and change history remain available on demand.
+- A `confirmed` plan item means its owner has confirmed the choice or supplied a real constraint. It does not imply a booking, provider availability, live route check, weather check, or other external validation. If the owner has not confirmed a choice, it remains `planned` or `idea`.
+- Trip Home is a focused state surface, not a widget dashboard. It selects one focus deterministically: a pending unexpired proposal with an expiry, then any other pending unexpired proposal, then a confirmed-item gap, then the next future `planned` or `confirmed` leg by planned time, then preparation. Ties use earliest expiry, then earliest planned time, then stable item creation time or ID. A confirmed-item gap exists only when a confirmed `transport` item lacks planned date/time or origin/destination context, or a confirmed `accommodation` item lacks date/time or place/area; open `idea` items and incomplete `planned` items are not gaps by themselves. An empty plan or a plan without a dated future leg shows preparation with the primary composer. Historic chat and change history remain available on demand.
+- Explicit Trip Project lifecycle phases, owner phase overrides, and on-trip `today` focus are deferred from the Trip Planning Foundation. They require later approved dynamic-data and lifecycle rules.
 - Weather, dynamic route/ETA, current location, Maps/Places, provider snapshots, booking/availability, budget, checklist, travel vault, notifications, and collaboration are excluded from this tranche. A proposal must not imply that any of those unavailable data sources were checked.
 
 ## 11. Initial Data Scope
@@ -379,7 +381,7 @@ The public MVP should focus on the Hanoi-to-HCMC road-trip corridor. Initial kno
 - AC-21: Existing linked conversations remain available after a Trip Project gains exactly one primary conversation.
 - AC-22: When AI suggests a persistent trip change, the owner sees a structured proposal and no persistent plan mutation occurs until that owner explicitly applies it.
 - AC-23: Applying, dismissing, or expiring a proposal produces an owner-visible, actor/timestamped history and cannot affect another owner's trip.
-- AC-24: Trip Home shows an unresolved planning decision first when present; otherwise it shows the next planned leg or preparation focus and provides access to the primary conversation.
+- AC-24: Trip Home deterministically shows a pending unexpired proposal, then a defined confirmed-item gap, then the next dated `planned` or `confirmed` leg, or preparation when no such leg exists; it provides access to the primary conversation and never represents `confirmed` as a booking/provider validation.
 
 ## 14. Risks
 
@@ -402,5 +404,4 @@ The public MVP should focus on the Hanoi-to-HCMC road-trip corridor. Initial kno
 - OQ-4: What detailed Facebook content reuse policy should govern captured post text retention, operator review, quoting, and deletion beyond provenance and non-official labeling?
 - OQ-5: Should AI-generated image output become an MVP workflow, or remain deferred until after text/image-input planning is validated?
 - OQ-6: What legal/content-reuse policy permits retention and traveler-visible display of short Facebook-derived evidence quotes and source links?
-- OQ-7: What minimum structured planning fields should be required before a Trip Home can identify an actionable next planning focus without treating open choices as errors?
 - OQ-8: What conflict/version policy should apply when an owner applies a proposal after manually changing the same trip item?

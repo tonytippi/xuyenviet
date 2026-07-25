@@ -22,6 +22,9 @@
 - Initial active-publication thresholds are relevance >= 0.75, extractability >= 0.70, evidence grounding >= 0.90, specificity >= 0.65, actionability >= 0.65, first-hand likelihood >= 0.55, and spam/commercial risk <= 0.25, subject to hard evidence/privacy/safety gates.
 - Initial quality monitoring samples 15% of auto-active claims for the first four weeks and 100% of `verify_first` claims.
 - Trip Planning Foundation is the next approved scope tranche: single-owner structured itinerary, trip constraints, one primary conversation, basic Trip Home, and user-confirmed change proposals with history.
+- Trip Home focus policy: pending expiring proposal, pending proposal, defined confirmed-item gap, next dated planned/confirmed leg, then preparation. Explicit lifecycle phases and on-trip today focus remain deferred.
+- `confirmed` means owner confirmation or a supplied real constraint, not booking/provider validation; booking and availability remain out of scope.
+- Proposal application uses aggregate/item version fences and structural preconditions; a stale proposal applies nothing and returns a safe refresh-required result.
 
 ## Provisional Assumptions For Architecture
 
@@ -55,5 +58,3 @@
 - Whether source URLs are always visible by default or hidden behind expandable details.
 - Detailed Facebook content reuse policy beyond provenance and non-official labeling.
 - Legal/content-reuse policy and UI behavior for traveler-visible short Facebook-derived quotes and links.
-- Minimum field completeness and deterministic rule set for selecting a Trip Home focus.
-- Proposal conflict behavior when an owner changes the same item after the proposal was created.

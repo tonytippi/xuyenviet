@@ -2,9 +2,9 @@
 
 ## Trạng Thái
 
-Định hướng đã thống nhất ngày 2026-07-22. Đây là tài liệu ghi nhận ý tưởng để dùng khi cập nhật PRD, kiến trúc, epic và UX sau này. Đây không phải kế hoạch triển khai được phê duyệt và không mở rộng phạm vi MVP hiện tại. PRD hiện hành chỉ phê duyệt Trip Project single-owner cơ bản, chat/trip context, correction và deletion.
+Định hướng đã thống nhất ngày 2026-07-22. Tài liệu này là nguồn định hướng và bối cảnh lịch sử cho các cập nhật sau đó. Kể từ 2026-07-24, PRD hiện hành và Architecture Spine đã phê duyệt **Trip Planning Foundation** là tranche kế tiếp: Trip Project single-owner có itinerary cấu trúc, trip constraints, một conversation chính, basic Trip Home, và change proposal có xác nhận/lịch sử. PRD và Architecture Spine là nguồn chân lý cho phạm vi và contract triển khai; các phần roadmap chưa được đưa vào hai tài liệu đó vẫn chỉ là định hướng.
 
-**Implementation baseline (2026-07-23):** Hiện tại chỉ có Trip Project single-owner cơ bản với title, origin/destination, dates, travelers, notes và nhiều conversation có thể liên kết với cùng một project. Itinerary có cấu trúc, Trip Home, một conversation chính bắt buộc, weather, location, budget, checklist, vault, collaboration và các change proposal trong tài liệu này đều là đề xuất chưa triển khai.
+**Implementation baseline (2026-07-23):** Khi định hướng này được viết, code chỉ có Trip Project single-owner cơ bản với title, origin/destination, dates, travelers, notes và nhiều conversation có thể liên kết với cùng một project. Structured itinerary, Trip Home, một conversation chính và change proposals hiện là **scope đã được phê duyệt nhưng chưa triển khai**; hãy theo PRD/Architecture Spine cho contract hiện hành. Weather, location, budget tracking, checklist, vault, collaboration và các capability roadmap khác trong tài liệu này vẫn chưa được phê duyệt cho Trip Planning Foundation.
 
 ## Mục Tiêu
 
@@ -291,6 +291,8 @@ Các rule cứng tối thiểu:
 - Vị trí chính xác, booking reference hoặc dữ liệu nhạy cảm không được đưa vào link chia sẻ hay prompt/provider khi không cần.
 
 ## Lộ Trình Đề Xuất
+
+Các bước 1 và 2 đã được gộp thành Trip Planning Foundation được PRD phê duyệt, nhưng chưa phải bằng chứng rằng chúng đã được triển khai. Các bước còn lại vẫn là thứ tự định hướng, không phải cam kết MVP.
 
 1. **Trip planning foundation:** điểm neo, ràng buộc, ngày/chặng, activity có trạng thái ý tưởng/dự kiến/đã chốt/phương án B và một conversation chính.
 2. **Trip Home và change proposal:** ưu tiên quyết định gấp rồi hôm nay/kế tiếp; chat-first composer; AI proposal có xác nhận và history.
