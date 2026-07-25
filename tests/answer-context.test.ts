@@ -638,6 +638,57 @@ describe("answer context assembly", () => {
     expect(systemPrompt).toContain('practicalDetails="parking_notes"="Có nhân viên trực qua đêm"');
   });
 
+  test("project stream without a conversation writes both turns only to the resolved primary", async () => {
+    await createTestUser("user-1");
+    await seedAnswerModel();
+    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Primary stream" }).returning();
+    const [historic] = await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id }).returning();
+    const [primary] = await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id }).returning();
+    await testDb.update(tripProjects).set({ primaryConversationId: primary.id }).where(eq(tripProjects.id, project.id));
+    const gatewayRequests: string[] = [];
+    mockStreamingGateway((body) => gatewayRequests.push(body));
+    mockRouteAuth();
+    mockWebSearch();
+    const formData = new FormData();
+    formData.set("question", "Gửi vào hội thoại chính");
+    formData.set("tripProjectId", project.id);
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const done = (await response.text()).split("\n").map((line) => line ? JSON.parse(line) as { type: string; conversationId?: string } : null).find((event) => event?.type === "done");
+    const primaryMessages = await testDb.select().from(messages).where(eq(messages.conversationId, primary.id));
+    const historicMessages = await testDb.select().from(messages).where(eq(messages.conversationId, historic.id));
+
+    expect(done?.conversationId).toBe(primary.id);
+    expect(gatewayRequests).toHaveLength(1);
+    expect(primaryMessages.map((message) => message.role)).toEqual(["user", "assistant"]);
+    expect(historicMessages).toHaveLength(0);
+  });
+
+  test("project stream rejects a supplied historic conversation before calling the provider", async () => {
+    await createTestUser("user-1");
+    await seedAnswerModel();
+    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Reject historic send" }).returning();
+    const [primary] = await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id }).returning();
+    const [historic] = await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id }).returning();
+    await testDb.update(tripProjects).set({ primaryConversationId: primary.id }).where(eq(tripProjects.id, project.id));
+    const gatewayRequests: string[] = [];
+    mockStreamingGateway((body) => gatewayRequests.push(body));
+    mockRouteAuth();
+    mockWebSearch();
+    const formData = new FormData();
+    formData.set("question", "Không được ghi vào lịch sử");
+    formData.set("tripProjectId", project.id);
+    formData.set("conversationId", historic.id);
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+
+    expect(await response.text()).toContain('"type":"error"');
+    expect(gatewayRequests).toHaveLength(0);
+    await expect(testDb.select().from(messages)).resolves.toHaveLength(0);
+  });
+
   test("stream route validates structured annotation proposals after final answer persistence", async () => {
     await createTestUser("user-1");
     await seedAnswerModel();
@@ -2368,6 +2419,8 @@ describe("answer context assembly", () => {
 
   test("stream route still completes when context load fails", async () => {
     await createTestUser("user-1");
+    vi.doUnmock("@/db/schema");
+    vi.resetModules();
     const { aiGatewayModels } = await import("@/db/schema");
     await testDb.insert(aiGatewayModels).values({
       id: "answer-model-only",

@@ -611,6 +611,8 @@ export const tripProjects = pgTable(
     endDate: text("end_date"),
     travelers: text("travelers"),
     notes: text("notes"),
+    // The reverse composite FK is migration-owned to avoid a Drizzle declaration cycle.
+    primaryConversationId: text("primary_conversation_id"),
     aggregateVersion: integer("aggregate_version").default(1).notNull(),
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),

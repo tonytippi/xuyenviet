@@ -1,9 +1,9 @@
 import "server-only";
 
-import { and, asc, desc, eq, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { aiUsageEvents, answerUsefulnessFeedback, assistantResponseProvenance, chatContext, conversations, messageImageAttachments, messages } from "@/db/schema";
+import { aiUsageEvents, answerUsefulnessFeedback, assistantResponseProvenance, chatContext, conversations, messageImageAttachments, messages, tripProjects } from "@/db/schema";
 import { recordAuditEvent } from "@/features/audit/events";
 import { buildValidatedAnswerAnnotations, sanitizeStoredAnswerAnnotations } from "@/features/ai/answer-annotations";
 import { selectActiveAiGatewayModel } from "@/features/ai/models";
@@ -188,6 +188,25 @@ export async function deleteOwnedConversation(conversationId: string): Promise<D
 
   try {
     return await getDb().transaction(async (transaction) => {
+      const [initial] = await transaction
+        .select({ id: conversations.id, tripProjectId: conversations.tripProjectId })
+        .from(conversations)
+        .where(and(eq(conversations.id, conversationId), eq(conversations.userId, session.userId)))
+        .limit(1);
+
+      if (!initial) return { success: false, reason: "not_found" };
+
+      if (initial.tripProjectId) {
+        const [project] = await transaction.select({ id: tripProjects.id, primaryConversationId: tripProjects.primaryConversationId }).from(tripProjects).where(and(eq(tripProjects.id, initial.tripProjectId), eq(tripProjects.userId, session.userId))).limit(1).for("update");
+        if (project?.primaryConversationId === initial.id) {
+          const [replacement] = await transaction.select({ id: conversations.id, updatedAt: conversations.updatedAt }).from(conversations).where(and(eq(conversations.userId, session.userId), eq(conversations.tripProjectId, project.id), eq(conversations.id, initial.id))).limit(1).for("update");
+          if (!replacement) return { success: false, reason: "not_found" };
+          const [next] = await transaction.select({ id: conversations.id }).from(conversations).where(and(eq(conversations.userId, session.userId), eq(conversations.tripProjectId, project.id), sql`${conversations.id} <> ${initial.id}`)).orderBy(desc(conversations.updatedAt), desc(conversations.id)).limit(1);
+          const replacementPrimary = next ?? await transaction.insert(conversations).values({ userId: session.userId, tripProjectId: project.id }).returning({ id: conversations.id });
+          await transaction.update(tripProjects).set({ primaryConversationId: replacementPrimary.id }).where(eq(tripProjects.id, project.id));
+        }
+      }
+
       const [conversation] = await transaction
         .select({ id: conversations.id, tripProjectId: conversations.tripProjectId })
         .from(conversations)

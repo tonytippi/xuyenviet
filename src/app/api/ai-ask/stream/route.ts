@@ -9,6 +9,7 @@ import { streamInitialAiAskAnswer } from "@/features/ai/gateway";
 import { getAiGatewayPricingSnapshot, selectActiveAiGatewayModel } from "@/features/ai/models";
 import { aiAskInitialAnswerPromptVersion, aiAskInitialAnswerPurpose, buildAiAskMessages } from "@/features/ai/prompts";
 import { extractChatTripContext } from "@/features/chat-trips/context-extraction";
+import { resolveOwnedPrimaryConversationInTransaction } from "@/features/chat-trips/trip-projects";
 import { persistAssistantAnswerProvenance, type AssistantMessageProvenanceItem } from "@/features/retrieval/provenance";
 import { assembleContextPrioritySourceBundle, buildSourceBundlePromptSection } from "@/features/retrieval/source-bundle";
 import { writeAiUsageEvent } from "@/features/usage/events";
@@ -73,15 +74,8 @@ export async function POST(request: Request) {
   }
 
   if (tripProjectId) {
-    const [project] = await getDb()
-      .select({ id: tripProjects.id })
-      .from(tripProjects)
-      .where(and(eq(tripProjects.id, tripProjectId), eq(tripProjects.userId, session.userId)))
-      .limit(1);
-
-    if (!project) {
-      return Response.json({ error: "Không tìm thấy dự án hoặc bạn không có quyền truy cập." }, { status: 400 });
-    }
+    const [project] = await getDb().select({ id: tripProjects.id }).from(tripProjects).where(and(eq(tripProjects.id, tripProjectId), eq(tripProjects.userId, session.userId))).limit(1);
+    if (!project) return Response.json({ error: "Không tìm thấy dự án hoặc bạn không có quyền truy cập." }, { status: 400 });
   }
 
   const selectedModel = await selectActiveAiGatewayModel({
@@ -140,20 +134,24 @@ async function streamAnswer({
 
   try {
     saved = await db.transaction(async (transaction) => {
-      const [conversation] = conversationId
+      const primary = tripProjectId ? await resolveOwnedPrimaryConversationInTransaction(transaction, session.userId, tripProjectId) : null;
+      if (tripProjectId && !primary) throw new Error("Project not found or access denied.");
+      const [conversation] = primary
+        ? [primary]
+        : conversationId
         ? await transaction
-            .select({ id: conversations.id, tripProjectId: conversations.tripProjectId })
+            .select({ id: conversations.id, tripProjectId: conversations.tripProjectId, updatedAt: conversations.updatedAt })
             .from(conversations)
             .where(and(eq(conversations.id, conversationId), eq(conversations.userId, session.userId)))
             .limit(1)
             .for("update")
-        : await transaction.insert(conversations).values({ userId: session.userId, tripProjectId }).returning({ id: conversations.id, tripProjectId: conversations.tripProjectId });
+        : await transaction.insert(conversations).values({ userId: session.userId, tripProjectId }).returning({ id: conversations.id, tripProjectId: conversations.tripProjectId, updatedAt: conversations.updatedAt });
 
       if (!conversation) {
         throw new Error("Conversation not found or access denied.");
       }
 
-      if (conversationId && tripProjectId && conversation.tripProjectId !== tripProjectId) {
+      if (conversationId && tripProjectId && conversationId !== primary?.id) {
         throw new Error("Conversation does not belong to the selected trip project.");
       }
 

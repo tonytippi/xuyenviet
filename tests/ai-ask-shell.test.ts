@@ -78,7 +78,10 @@ async function getAuthenticatedAiAskRedirect(searchParams: Record<string, string
   const redirect = vi.fn((url: string) => {
     throw new Error(`redirect:${url}`);
   });
-  vi.doMock("next/navigation", () => ({ redirect }));
+  vi.doMock("next/navigation", () => ({
+    redirect,
+    useRouter: vi.fn(() => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn(), back: vi.fn(), forward: vi.fn(), prefetch: vi.fn() })),
+  }));
   vi.doMock("@/server/auth", () => ({
     getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
     getAuthenticatedSessionWithRoles: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com", roles: [] }),
@@ -777,7 +780,10 @@ describe("AI Ask authenticated shell", () => {
     const [ownProject] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Đà Nẵng gia đình", origin: "Hà Nội", destination: "Đà Nẵng" }).returning({ id: tripProjects.id });
     await testDb.insert(tripProjects).values({ userId: "user-2", title: "Dự án riêng user-2" });
 
-    const html = await renderAuthenticatedAiAskShell({ tripProjectId: ownProject.id });
+    const canonicalUrl = await getAuthenticatedAiAskRedirect({ tripProjectId: ownProject.id });
+    const canonicalParams = Object.fromEntries(new URL(canonicalUrl, "http://localhost").searchParams.entries());
+    vi.resetModules();
+    const html = await renderAuthenticatedAiAskShell(canonicalParams);
 
     expect(html).toContain("Phạm vi lập kế hoạch");
     expect(html).toContain("Dự án: Đà Nẵng gia đình (Hà Nội → Đà Nẵng)");
@@ -789,10 +795,29 @@ describe("AI Ask authenticated shell", () => {
     await createTestUser("user-1");
     const [ownProject] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Đà Nẵng gia đình", origin: "Hà Nội", destination: "Đà Nẵng" }).returning({ id: tripProjects.id });
 
-    const html = await renderAuthenticatedAiAskShell({ tripProjectId: ownProject.id });
+    const canonicalUrl = await getAuthenticatedAiAskRedirect({ tripProjectId: ownProject.id });
+    const canonicalParams = Object.fromEntries(new URL(canonicalUrl, "http://localhost").searchParams.entries());
+    vi.resetModules();
+    const html = await renderAuthenticatedAiAskShell(canonicalParams);
 
     expect(html).toContain("Xoá dự án chuyến đi");
     expect(html).toContain("các cuộc trò chuyện liên kết và thông tin ngữ cảnh đã lưu sẽ bị xoá");
+  });
+
+  test("renders linked historic project chat read-only and keeps the primary composer canonical", async () => {
+    await createTestUser("user-1");
+    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế lịch sử" }).returning();
+    const [primary] = await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id }).returning();
+    const [historic] = await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id }).returning();
+    await testDb.update(tripProjects).set({ primaryConversationId: primary.id }).where(eq(tripProjects.id, project.id));
+    await testDb.insert(messages).values({ conversationId: historic.id, userId: "user-1", role: "user", content: "Hội thoại cũ cần xem lại" });
+
+    const html = await renderAuthenticatedAiAskShell({ conversationId: primary.id, tripProjectId: project.id, historyConversationId: historic.id });
+
+    expect(html).toContain("Lịch sử trao đổi");
+    expect(html).toContain("Hội thoại cũ cần xem lại");
+    expect(html).toContain("Tiếp tục trong hội thoại chính");
+    expect(html).not.toContain('id="ai-ask-question"');
   });
 
   test("redirects to ordinary chat when opening another user's trip project", async () => {
@@ -826,7 +851,8 @@ describe("AI Ask authenticated shell", () => {
     const [ownedProject] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế" }).returning({ id: tripProjects.id });
     const [otherConversation] = await testDb.insert(conversations).values({ userId: "user-2" }).returning({ id: conversations.id });
 
-    await expect(getAuthenticatedAiAskRedirect({ conversationId: otherConversation.id, tripProjectId: ownedProject.id })).resolves.toBe(`/ai-ask?tripProjectId=${ownedProject.id}`);
+    const redirectUrl = await getAuthenticatedAiAskRedirect({ conversationId: otherConversation.id, tripProjectId: ownedProject.id });
+    expect(redirectUrl).toMatch(new RegExp(`^/ai-ask\\?conversationId=[^&]+&tripProjectId=${ownedProject.id}$`));
     vi.resetModules();
     await expect(getAuthenticatedAiAskRedirect({ conversationId: "stale-conversation", tripProjectId: "stale-project" })).resolves.toBe("/ai-ask");
   });
@@ -841,7 +867,8 @@ describe("AI Ask authenticated shell", () => {
     const [projectB] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Đà Lạt" }).returning({ id: tripProjects.id });
     const [conversation] = await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: projectA.id }).returning({ id: conversations.id });
 
-    await expect(getAuthenticatedAiAskRedirect({ conversationId: conversation.id, tripProjectId: projectB.id })).resolves.toBe(`/ai-ask?tripProjectId=${projectB.id}`);
+    const redirectUrl = await getAuthenticatedAiAskRedirect({ conversationId: conversation.id, tripProjectId: projectB.id });
+    expect(redirectUrl).toMatch(new RegExp(`^/ai-ask\\?conversationId=[^&]+&tripProjectId=${projectB.id}$`));
   });
 
   test("composer source exposes the active mobile workspace, direct account access, and safe-area composer", () => {

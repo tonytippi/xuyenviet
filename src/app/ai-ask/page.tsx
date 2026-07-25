@@ -17,6 +17,7 @@ type AiAskPageProps = {
     draft?: string | string[];
     conversationId?: string | string[];
     tripProjectId?: string | string[];
+    historyConversationId?: string | string[];
   }>;
 };
 
@@ -31,11 +32,13 @@ function getFirstParam(value: string | string[] | undefined) {
 function buildCanonicalAiAskUrl({
   conversationId,
   tripProjectId,
+  historyConversationId,
   referralCode,
   draft,
 }: {
   conversationId?: string;
   tripProjectId?: string;
+  historyConversationId?: string;
   referralCode?: string;
   draft?: string;
 }) {
@@ -43,6 +46,7 @@ function buildCanonicalAiAskUrl({
 
   if (conversationId) searchParams.set("conversationId", conversationId);
   if (tripProjectId) searchParams.set("tripProjectId", tripProjectId);
+  if (historyConversationId) searchParams.set("historyConversationId", historyConversationId);
   if (referralCode) searchParams.set("ref", referralCode);
   if (draft) searchParams.set("draft", draft);
 
@@ -64,6 +68,7 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
   const publicDraft = normalizePublicAskDraft(getFirstParam(params?.draft));
   const requestedConversationId = getFirstParam(params?.conversationId)?.trim();
   const requestedTripProjectId = getFirstParam(params?.tripProjectId)?.trim();
+  const requestedHistoryConversationId = getFirstParam(params?.historyConversationId)?.trim();
   const session = await getAuthenticatedSessionWithRoles();
 
   if (!session) {
@@ -78,6 +83,7 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
 
   let loadedConversation = requestedConversationId ? await getOwnedConversation(requestedConversationId) : null;
   let selectedTripProject = requestedTripProjectId ? await getOwnedTripProjectSummary(requestedTripProjectId) : null;
+  let historyConversation = requestedHistoryConversationId ? await getOwnedConversation(requestedHistoryConversationId) : null;
 
   // Enforce project scope alignment: reject a linked conversation whose project differs from the
   // selected project, reject an ordinary conversation shown under a selected project, and infer the
@@ -94,6 +100,15 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
     loadedConversation = null;
   }
 
+  if (selectedTripProject) {
+    loadedConversation = await getOwnedConversation(selectedTripProject.primaryConversation.id);
+    if (!historyConversation || historyConversation.tripProjectId !== selectedTripProject.id || historyConversation.id === selectedTripProject.primaryConversation.id) {
+      historyConversation = null;
+    }
+  } else {
+    historyConversation = null;
+  }
+
   const initialTripProjects = ((await listOwnedTripProjects()) ?? []).map((project) => ({
     id: project.id,
     title: project.title,
@@ -101,7 +116,7 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
     destination: project.destination,
     updatedAt: project.updatedAt,
   }));
-  const initialSessions = selectedTripProject ? selectedTripProject.relatedChats : (await listOwnedConversations()) ?? [];
+  const initialSessions = selectedTripProject ? selectedTripProject.historicChats : (await listOwnedConversations()) ?? [];
   const imageInputModel = await selectActiveAiGatewayModel({
     purpose: aiAskInitialAnswerPurpose,
     requiredCapabilities: { textInput: true, streaming: true, imageInput: true },
@@ -118,14 +133,16 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
   const canonicalUrl = buildCanonicalAiAskUrl({
     conversationId: loadedConversation?.id,
     tripProjectId: selectedTripProject?.id,
+    historyConversationId: historyConversation?.id,
     referralCode,
     draft: publicDraft,
   });
 
   if (
-    Object.keys(params ?? {}).some((key) => !["conversationId", "tripProjectId", "ref", "draft"].includes(key)) ||
+    Object.keys(params ?? {}).some((key) => !["conversationId", "tripProjectId", "historyConversationId", "ref", "draft"].includes(key)) ||
     !hasCanonicalParam(params?.conversationId, loadedConversation?.id) ||
     !hasCanonicalParam(params?.tripProjectId, selectedTripProject?.id) ||
+    !hasCanonicalParam(params?.historyConversationId, historyConversation?.id) ||
     !hasCanonicalParam(params?.ref, referralCode) ||
     !hasCanonicalParam(params?.draft, publicDraft)
   ) {
@@ -154,6 +171,18 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
               feedback: message.feedback,
             }))}
             initialSessions={initialSessions}
+            historyConversation={historyConversation ? {
+              id: historyConversation.id,
+              messages: historyConversation.messages.map((message) => ({
+                id: message.id,
+                role: message.role,
+                content: message.content,
+                imageAttachments: message.imageAttachments,
+                provenance: message.provenance,
+                annotations: message.annotations,
+                feedback: message.feedback,
+              })),
+            } : null}
             initialTripProjects={initialTripProjects}
             selectedTripProject={selectedTripProjectForComposer}
             supportsImageInput={Boolean(imageInputModel)}

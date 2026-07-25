@@ -41,6 +41,11 @@ export type OwnedTripProjectSummary = {
   updatedAt: Date;
 };
 
+export type OwnedTripProjectWorkspaceSummary = OwnedTripProjectSummary & {
+  primaryConversation: { id: string; updatedAt: Date; preview: string };
+  historicChats: Array<{ id: string; updatedAt: Date; preview: string }>;
+};
+
 export type DeleteOwnedTripProjectResult = {
   success: boolean;
   reason?: "unauthenticated" | "not_found" | "failed";
@@ -128,11 +133,10 @@ export async function getOwnedTripProjectSummary(tripProjectId: string) {
     return null;
   }
 
+  const primaryConversation = await getDb().transaction((transaction) => resolveOwnedPrimaryConversationInTransaction(transaction, session.userId, tripProjectId));
+  if (!primaryConversation) return null;
   const project = await getOwnedTripProjectForSession(session, tripProjectId);
-
-  if (!project) {
-    return null;
-  }
+  if (!project) return null;
 
   const rows = await getDb()
     .select({ id: conversations.id, updatedAt: conversations.updatedAt, messageContent: messages.content })
@@ -154,7 +158,53 @@ export async function getOwnedTripProjectSummary(tripProjectId: string) {
     relatedChats.push({ id: row.id, updatedAt: row.updatedAt, preview: formatPreview(row.messageContent) });
   }
 
-  return { ...project, relatedChats };
+  const primarySummary = relatedChats.find((chat) => chat.id === primaryConversation.id) ?? {
+    id: primaryConversation.id,
+    updatedAt: primaryConversation.updatedAt,
+    preview: "Hội thoại mới",
+  };
+  return { ...project, primaryConversation: primarySummary, historicChats: relatedChats.filter((chat) => chat.id !== primaryConversation.id) } satisfies OwnedTripProjectWorkspaceSummary;
+}
+
+export async function resolveOwnedPrimaryConversation(tripProjectId: string) {
+  const session = await getAuthenticatedSession();
+  if (!session) return null;
+  return getDb().transaction((transaction) => resolveOwnedPrimaryConversationInTransaction(transaction, session.userId, tripProjectId));
+}
+
+export async function resolveOwnedPrimaryConversationInTransaction(
+  transaction: Parameters<ReturnType<typeof getDb>["transaction"]>[0] extends (transaction: infer T) => unknown ? T : never,
+  userId: string,
+  tripProjectId: string,
+) {
+  const [project] = await transaction
+    .select({ id: tripProjects.id, userId: tripProjects.userId, primaryConversationId: tripProjects.primaryConversationId })
+    .from(tripProjects)
+    .where(and(eq(tripProjects.id, tripProjectId), eq(tripProjects.userId, userId)))
+    .limit(1)
+    .for("update");
+  if (!project) return null;
+
+  if (project.primaryConversationId) {
+    const [primary] = await transaction
+      .select({ id: conversations.id, tripProjectId: conversations.tripProjectId, updatedAt: conversations.updatedAt })
+      .from(conversations)
+      .where(and(eq(conversations.id, project.primaryConversationId), eq(conversations.userId, userId), eq(conversations.tripProjectId, tripProjectId)))
+      .limit(1);
+    if (primary) return primary;
+  }
+
+  const [existing] = await transaction
+    .select({ id: conversations.id, tripProjectId: conversations.tripProjectId, updatedAt: conversations.updatedAt })
+    .from(conversations)
+    .where(and(eq(conversations.userId, userId), eq(conversations.tripProjectId, tripProjectId)))
+    .orderBy(desc(conversations.updatedAt), desc(conversations.id))
+    .limit(1);
+  const [primary] = existing
+    ? [existing]
+    : await transaction.insert(conversations).values({ userId, tripProjectId }).returning({ id: conversations.id, tripProjectId: conversations.tripProjectId, updatedAt: conversations.updatedAt });
+  await transaction.update(tripProjects).set({ primaryConversationId: primary.id }).where(and(eq(tripProjects.id, tripProjectId), eq(tripProjects.userId, userId)));
+  return primary;
 }
 
 export async function deleteOwnedTripProject(tripProjectId: string): Promise<DeleteOwnedTripProjectResult> {
@@ -176,6 +226,8 @@ export async function deleteOwnedTripProject(tripProjectId: string): Promise<Del
       if (!project) {
         return { success: false, reason: "not_found" };
       }
+
+      await transaction.update(tripProjects).set({ primaryConversationId: null }).where(and(eq(tripProjects.id, project.id), eq(tripProjects.userId, session.userId)));
 
       const [linkedConversationCount] = await transaction.select({ count: count() }).from(conversations).where(and(eq(conversations.tripProjectId, project.id), eq(conversations.userId, session.userId)));
       const [projectContextCount] = await transaction.select({ count: count() }).from(chatContext).where(and(eq(chatContext.tripProjectId, project.id), eq(chatContext.userId, session.userId)));

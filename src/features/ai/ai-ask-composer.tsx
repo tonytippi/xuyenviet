@@ -70,11 +70,12 @@ const emptyMessages: DisplayMessage[] = [];
 const emptySessions: ChatSessionSummary[] = [];
 const emptyTripProjects: TripProjectSummary[] = [];
 
-function buildCanonicalAiAskUrl(conversationId?: string, tripProjectId?: string) {
+function buildCanonicalAiAskUrl(conversationId?: string, tripProjectId?: string, historyConversationId?: string) {
   const searchParams = new URLSearchParams();
 
   if (conversationId) searchParams.set("conversationId", conversationId);
   if (tripProjectId) searchParams.set("tripProjectId", tripProjectId);
+  if (historyConversationId) searchParams.set("historyConversationId", historyConversationId);
 
   const query = searchParams.toString();
   return query ? `/ai-ask?${query}` : "/ai-ask";
@@ -110,6 +111,7 @@ type AiAskComposerProps = {
   initialSessions?: ChatSessionSummary[];
   initialTripProjects?: TripProjectSummary[];
   selectedTripProject?: TripProjectSummary | null;
+  historyConversation?: { id: string; messages: DisplayMessage[] } | null;
   supportsImageInput?: boolean;
   userEmail?: string;
   canAccessAdmin?: boolean;
@@ -562,6 +564,7 @@ export function AiAskComposer({
   initialSessions = emptySessions,
   initialTripProjects = emptyTripProjects,
   selectedTripProject = null,
+  historyConversation = null,
   supportsImageInput = false,
   userEmail,
   canAccessAdmin = false,
@@ -601,7 +604,8 @@ export function AiAskComposer({
   const createFormDisabled = isPending || isCreatingProject || mutationInFlight;
   const sessionActionsDisabled = isPending || Boolean(deletingConversationId) || Boolean(deletingTripProjectId);
   const projectActionsDisabled = isPending || Boolean(deletingConversationId) || Boolean(deletingTripProjectId);
-  const askFormDisabled = isPending || Boolean(deletingTripProjectId);
+  const isHistoricReview = Boolean(historyConversation);
+  const askFormDisabled = isPending || Boolean(deletingTripProjectId) || isHistoricReview;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
@@ -629,6 +633,7 @@ export function AiAskComposer({
     : conversationId
       ? sessions.find((session) => session.id === conversationId)?.preview ?? "Trò chuyện thường"
       : "Trò chuyện mới";
+  const displayedMessages = historyConversation?.messages ?? messages;
 
   function reconcileSelection(nextConversationId?: string, nextTripProjectId?: string) {
     router.replace(buildCanonicalAiAskUrl(nextConversationId, nextTripProjectId));
@@ -1037,7 +1042,7 @@ export function AiAskComposer({
       sessionSheetPreviousFocusRef.current = textareaRef.current;
       setSessionSheetOpen(false);
     }
-    router.push(buildCanonicalAiAskUrl(id, activeTripProjectId));
+    router.push(activeTripProjectId ? buildCanonicalAiAskUrl(conversationId, activeTripProjectId, id) : buildCanonicalAiAskUrl(id));
   }
 
   async function handleDeleteSession(id: string) {
@@ -1136,10 +1141,14 @@ export function AiAskComposer({
       sessionSheetPreviousFocusRef.current = textareaRef.current;
       setSessionSheetOpen(false);
     }
+    if (selectedTripProject) {
+      router.push(buildCanonicalAiAskUrl(conversationId, activeTripProjectId));
+      return;
+    }
     setMessages([]);
     setConversationId(undefined);
     setQuestion("");
-    setStatus(selectedTripProject ? `Cuộc trò chuyện mới sẽ nằm trong dự án “${selectedTripProject.title}”.` : "Nhập câu hỏi về chuyến đi đường bộ của bạn.");
+    setStatus("Nhập câu hỏi về chuyến đi đường bộ của bạn.");
     setFailedQuestionIds([]);
     setSelectedImage(null);
     setSelectedAnswerEntity(null);
@@ -1269,9 +1278,10 @@ export function AiAskComposer({
           </h2>
           <p className="mt-2 text-sm leading-6 text-[#4f625a]">
             {selectedTripProject
-              ? "Tin nhắn mới sẽ được gắn với dự án chuyến đi này. Ngữ cảnh bền vững sẽ được dùng ở các story sau."
+              ? "Tin nhắn mới luôn đi vào hội thoại chính của dự án."
               : "Bạn đang hỏi trong hội thoại thường. Chọn hoặc tạo dự án nếu muốn gom kế hoạch cho một chuyến cụ thể."}
           </p>
+          {selectedTripProject ? <p className="mt-2 text-sm font-semibold text-[#1f5f46]">Lịch sử trao đổi: chọn một hội thoại bên trên để xem lại mà không tạo nhánh soạn tin mới.</p> : null}
         </div>
         <label className="flex flex-col gap-2 text-sm font-semibold text-[#17342c]">
           Chọn dự án
@@ -1401,7 +1411,16 @@ export function AiAskComposer({
           </Link>
         </div>
 
-        {showEmptyState ? (
+        {isHistoricReview ? (
+          <section className="mx-auto flex w-full max-w-[760px] flex-1 flex-col justify-center gap-4 py-8" aria-label="Lịch sử trao đổi">
+            <p className="w-fit rounded-full border border-[#d8c9ad] bg-[#fff8ec] px-4 py-2 text-sm font-semibold text-[#8c4f13]">Lịch sử trao đổi</p>
+            <h2 className="text-3xl font-semibold tracking-[-0.05em] text-[#17342c]">Đang xem hội thoại trước đây</h2>
+            <p className="text-base leading-7 text-[#4f625a]">Hội thoại này chỉ để xem lại. Tiếp tục lập kế hoạch trong hội thoại chính của dự án.</p>
+            <button className="min-h-11 w-fit rounded-2xl bg-[#1f5f46] px-4 py-2 text-sm font-semibold text-white focus:outline-none focus:ring-4 focus:ring-[#8fb59f]" onClick={() => router.push(buildCanonicalAiAskUrl(conversationId, activeTripProjectId))} type="button">Tiếp tục trong hội thoại chính</button>
+          </section>
+        ) : null}
+
+        {showEmptyState && !isHistoricReview ? (
         <div className="mx-auto flex w-full max-w-[780px] flex-1 flex-col justify-center gap-5 py-8 text-center">
           <p className="mx-auto w-fit rounded-full border border-[#c47a24]/45 bg-[#fff8ec] px-4 py-2 text-sm font-semibold text-[#8c4f13]">
             Bắt đầu bằng một câu hỏi hành trình
@@ -1420,9 +1439,9 @@ export function AiAskComposer({
         ) : null}
 
         <div className="space-y-4">
-          {messages.length > 0 ? (
+          {displayedMessages.length > 0 ? (
             <section aria-label="Lịch sử hội thoại" aria-live="polite" className="mx-auto max-w-[760px] space-y-4">
-              {messages.map((message) => (
+              {displayedMessages.map((message) => (
                 <article
                   className={
                     message.role === "assistant"
@@ -1480,7 +1499,7 @@ export function AiAskComposer({
             </section>
           ) : null}
 
-          <form className="mx-auto max-w-[760px] rounded-[1.75rem] border border-[#d8c9ad] bg-white/90 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_20px_60px_rgba(41,33,18,0.14)]" onSubmit={handleSubmit} ref={formRef}>
+          {!isHistoricReview ? <form className="mx-auto max-w-[760px] rounded-[1.75rem] border border-[#d8c9ad] bg-white/90 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_20px_60px_rgba(41,33,18,0.14)]" onSubmit={handleSubmit} ref={formRef}>
             <label className="sr-only" htmlFor="ai-ask-question">
               Câu hỏi của bạn
             </label>
@@ -1547,9 +1566,9 @@ export function AiAskComposer({
             <p aria-live="polite" className="sr-only" id="ai-ask-status">
               {isPending ? "Đang gửi, vui lòng chờ" : status}
             </p>
-          </form>
+          </form> : null}
 
-          {showEmptyState ? (
+          {showEmptyState && !isHistoricReview ? (
             <>
               <div className="mx-auto grid max-w-[760px] gap-3 sm:grid-cols-2" aria-label="Gợi ý câu hỏi bắt đầu">
                 {starterCards.map(({ Icon, ...card }) => (

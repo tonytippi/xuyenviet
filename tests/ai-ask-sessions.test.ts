@@ -199,4 +199,18 @@ describe("AI Ask owned conversation deletion", () => {
     await expect(testDb.select().from(chatContext)).resolves.toHaveLength(0);
     await expect(testDb.select().from(tripProjects).where(eq(tripProjects.id, project.id))).resolves.toHaveLength(1);
   });
+
+  test("replaces a primary project conversation before deleting it", async () => {
+    await createTestUser("user-1");
+    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế" }).returning();
+    const [primary] = await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id }).returning();
+    const [historic] = await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id }).returning();
+    await testDb.update(tripProjects).set({ primaryConversationId: primary.id }).where(eq(tripProjects.id, project.id));
+    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }) }));
+    const { deleteOwnedConversation } = await import("@/features/chat-trips/conversations");
+
+    await expect(deleteOwnedConversation(primary.id)).resolves.toEqual({ success: true });
+    const [savedProject] = await testDb.select().from(tripProjects).where(eq(tripProjects.id, project.id));
+    expect(savedProject.primaryConversationId).toBe(historic.id);
+  });
 });
