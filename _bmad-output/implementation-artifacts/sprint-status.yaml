@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-07-26 (Second and final Epic 7 completion review repair (bmad-code-review E7R2, 3 adversarial layers on diff 4e34428..aa4c5d1). All 6 epic-level findings E7R2-F1..F6 fixed (2 HIGH, 2 MEDIUM, 2 LOW) across Stories 7.4 and 7.5. 1007 tests pass, lint (0 errors, 3 pre-existing unrelated warnings)/typecheck/build/db:generate clean; both 7.4 and 7.5 set to review. No commit performed per instructions.)
+last_updated: 2026-07-26 (Status-only finalization after second epic-review repair commit b47ef29. Commit b47ef29957efcba29fb40605853e326685e201f7 verified present on main; pre-update worktree clean. Story records 7.4 and 7.5 updated to done; sprint entries 7-4-generate-reviewable-ai-trip-change-proposals and 7-5-apply-dismiss-and-expire-proposals-safely synchronized to done. epic-7 preserved as done. No source inspection, AC evaluation, tests, code review, implementation edits, or commit performed per instructions.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -103,7 +103,7 @@ development_status:
   # Epic 7 completion review repair 2026-07-26: all 6 epic-level findings E7R-1 through E7R-6 fixed (E7R-1 plannedAt dropped in apply path; E7R-3 orderingPreconditions prompt/validator key mismatch; E7R-6 AI proposal expires_at never parsed/persisted). 1000 tests pass, lint/typecheck/build/db:generate clean; status set to review.
   # Finalized 2026-07-26 after status-only verification of epic-review repair commit aa4c5d12dff6b649f65c1e014637998fb296ab3f and a clean pre-update worktree; status synchronized to done.
   # Second and final Epic 7 completion review repair 2026-07-26 (E7R2, bmad-code-review 3 adversarial layers on diff 4e34428..aa4c5d1): all 6 epic-level findings E7R2-F1..F6 fixed (F1 update-item in-memory aggregate omits plannedAt; F2 orderingPreconditions camelCase/snake_case parser mismatch; F3 expires_at not in prompt; F4 past-date expires_at accepted; F5 expiry worker no_work on error conflates statuses; F6 plan-history sheet useEffect deps omit selectedTripProject/tripWorkspace). 1007 tests pass, lint (0 errors, 3 pre-existing unrelated warnings)/typecheck/build/db:generate clean; status set to review. No commit performed per instructions.
-  7-4-generate-reviewable-ai-trip-change-proposals: review
+  7-4-generate-reviewable-ai-trip-change-proposals: done
   # Synchronized 2026-07-25 after repair of all 18 review findings (P1–P18: 3 HIGH, 7 MEDIUM, 8 LOW) for commit feeb7e5; 925 tests pass, lint/typecheck/build/db:generate clean; status set to review.
   # Second bounded review 2026-07-25 of commits feeb7e5 + e40a906: P1–P18 verified repaired; 5 new findings (Q1–Q5: 3 MEDIUM, 2 LOW) — Q1–Q3 incomplete P10/P11 re-throw repair (callers not updated), Q4–Q5 minor UX edge cases. No HIGH; no security/data-integrity/AC/cross-feature systemic failure; all 4 ACs satisfied.
   # Second-review repair 2026-07-25: all 5 findings Q1–Q5 repaired — Q1 expire-on-read try/catch, Q2 worker loop per-batch try/catch, Q3 server action transient reason + retryable client outcome, Q4 useRef dedup, Q5 history-sheet handlers; 934 tests pass, lint/typecheck/build/db:generate clean; status set to review.
@@ -111,7 +111,7 @@ development_status:
   # Epic 7 completion review repair 2026-07-26: all 6 epic-level findings E7R-1 through E7R-6 fixed (E7R-2 expiry worker once:true infinite loop; E7R-4 create-item ordinal collision misclassified as transient; E7R-5 plan-history sheet missing focus management). 1000 tests pass, lint/typecheck/build/db:generate clean; status set to review.
   # Finalized 2026-07-26 after status-only verification of epic-review repair commit aa4c5d12dff6b649f65c1e014637998fb296ab3f and a clean pre-update worktree; status synchronized to done.
   # Second and final Epic 7 completion review repair 2026-07-26 (E7R2, bmad-code-review 3 adversarial layers on diff 4e34428..aa4c5d1): all 6 epic-level findings E7R2-F1..F6 fixed (F1 update-item in-memory aggregate omits plannedAt; F2 orderingPreconditions camelCase/snake_case parser mismatch; F3 expires_at not in prompt; F4 past-date expires_at accepted; F5 expiry worker no_work on error conflates statuses; F6 plan-history sheet useEffect deps omit selectedTripProject/tripWorkspace). 1007 tests pass, lint (0 errors, 3 pre-existing unrelated warnings)/typecheck/build/db:generate clean; status set to review. No commit performed per instructions.
-  7-5-apply-dismiss-and-expire-proposals-safely: review
+  7-5-apply-dismiss-and-expire-proposals-safely: done
   # Synchronized 2026-07-25 after bmad-create-story wrote the Story 7.6 verification story file (adversarial owner-scoped trip planning safety: ownership, conflicts, state transitions, Trip Home focus, workspace accessibility); dev-story complete: 45 new tests, 979 total pass, lint/typecheck/build/db:generate clean; status set to review.
   # Finalized 2026-07-26 after status-only verification of supplied final repair commit bece883f3e49989560a04e84987e6b438233ba08 and a clean pre-update worktree; status synchronized to done. Epic 7 remains in-progress (retrospective optional/separate).
   7-6-verify-owner-scoped-trip-planning-safety: done
