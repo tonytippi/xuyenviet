@@ -63,4 +63,13 @@ export const tripChangeProposalLabels = {
   affectedItems: "Mục bị tác động",
   alternatives: "Phương án khác",
   refreshHint: "Kế hoạch đã thay đổi — làm mới đề xuất",
+  // Story 7.5: terminal outcome + applying-state + refresh + plan history labels.
+  applied: "Đã áp dụng",
+  dismissed: "Đã giữ kế hoạch",
+  refresh: "Làm mới đề xuất",
+  applying: "Đang áp dụng...",
+  keepingPlan: "Đang giữ kế hoạch...",
+  planHistory: "Lịch sử kế hoạch",
+  actorYou: "Bạn",
+  actorSystem: "Hệ thống",
 } as const;

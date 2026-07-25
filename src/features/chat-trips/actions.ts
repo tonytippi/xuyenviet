@@ -3,11 +3,33 @@
 import { redirect } from "next/navigation";
 
 import { deleteOwnedConversation } from "@/features/chat-trips/conversations";
+import {
+  applyApprovedTripChange,
+  dismissTripChangeProposal,
+} from "@/features/chat-trips/trip-change-proposals";
 import { createTripProject, deleteOwnedTripProject } from "@/features/chat-trips/trip-projects";
 
 export type CreateTripProjectFormState = { error?: string };
 export type DeleteConversationActionState = { success: boolean; error?: string; reason?: "not_found" };
 export type DeleteTripProjectActionState = { success: boolean; error?: string; reason?: "not_found" };
+
+// Story 7.5: typed result states for the apply/dismiss server actions. The
+// expire command is NOT a user action — it is invoked only by reads and the
+// scheduled worker.
+export type ApplyTripChangeProposalActionState = {
+  success: boolean;
+  reason?: "refresh_required" | "not_found" | "expired";
+  aggregateVersion?: number;
+  proposalStatus?: "applied";
+  error?: string;
+};
+
+export type DismissTripChangeProposalActionState = {
+  success: boolean;
+  reason?: "not_found";
+  proposalStatus?: "dismissed";
+  error?: string;
+};
 
 const stringFieldNames = ["title", "origin", "destination", "startDate", "endDate", "travelers", "notes"] as const;
 
@@ -76,4 +98,47 @@ export async function deleteTripProjectAction(tripProjectId: string): Promise<De
   }
 
   return { success: true };
+}
+
+// Story 7.5: owner-confirmed apply server action. Mirrors the
+// deleteTripProjectAction shape (typed result state, redirect to sign-in on
+// unauthenticated). Does NOT redirect on refresh_required / expired /
+// not_found — the client must reconcile the proposal card in place.
+export async function applyTripChangeProposalAction(
+  input: { tripProjectId: string; proposalId: string },
+): Promise<ApplyTripChangeProposalActionState> {
+  const result = await applyApprovedTripChange(input);
+
+  if (!result.success && result.reason === "unauthenticated") {
+    redirect("/sign-in?next=/ai-ask");
+  }
+
+  if (result.success) {
+    return { success: true, aggregateVersion: result.aggregateVersion, proposalStatus: "applied" };
+  }
+
+  // Map failure reasons to safe Vietnamese copy that names the failure safely.
+  if (result.reason === "refresh_required") {
+    return { success: false, reason: "refresh_required", error: "Kế hoạch đã thay đổi — vui lòng làm mới đề xuất." };
+  }
+  // not_found / expired both surface as "no longer available" safely.
+  return { success: false, reason: result.reason === "expired" ? "expired" : "not_found", error: "Đề xuất không còn khả dụng." };
+}
+
+// Story 7.5: owner-confirmed dismiss server action. Mirrors the apply action's
+// shape. Does NOT redirect on not_found — the client reconciles in place.
+export async function dismissTripChangeProposalAction(
+  input: { tripProjectId: string; proposalId: string },
+): Promise<DismissTripChangeProposalActionState> {
+  const result = await dismissTripChangeProposal(input);
+
+  if (!result.success && result.reason === "unauthenticated") {
+    redirect("/sign-in?next=/ai-ask");
+  }
+
+  if (result.success) {
+    return { success: true, proposalStatus: "dismissed" };
+  }
+
+  return { success: false, reason: "not_found", error: "Đề xuất không còn khả dụng." };
 }

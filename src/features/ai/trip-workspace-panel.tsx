@@ -1,7 +1,7 @@
 import type { TripWorkspaceReadModel } from "@/features/chat-trips/trip-home";
 import { formatTripProjectLabel } from "@/features/chat-trips/labels";
-import { tripHomeFocusKindLabels, tripHomeFocusNextActions, tripPlanAnchorRoleLabels } from "@/features/chat-trips/trip-home-labels";
-import { TripProposalReviewCard } from "@/features/ai/trip-proposal-review-card";
+import { tripChangeProposalLabels, tripHomeFocusKindLabels, tripHomeFocusNextActions, tripPlanAnchorRoleLabels } from "@/features/chat-trips/trip-home-labels";
+import { TripProposalReviewCard, type TripProposalTerminalOutcome } from "@/features/ai/trip-proposal-review-card";
 import {
   AccommodationIcon,
   AnchorIcon,
@@ -52,12 +52,20 @@ export type TripWorkspacePanelProps = {
   idPrefix: string;
   header: TripWorkspaceHeader;
   workspace: TripWorkspaceReadModel | null;
+  // Story 7.5: presentational action callbacks + per-proposal pending/terminal
+  // state. The composer owns the server-action calls; the panel only forwards
+  // these to each TripProposalReviewCard.
+  onApplyProposal?: (proposalId: string) => void;
+  onDismissProposal?: (proposalId: string) => void;
+  onRefreshProposal?: (proposalId: string) => void;
+  proposalPending?: Record<string, { action: "apply" | "dismiss" } | undefined>;
+  proposalTerminalOutcome?: Record<string, TripProposalTerminalOutcome | null>;
 };
 
-export function TripWorkspacePanel({ idPrefix, header, workspace }: TripWorkspacePanelProps) {
+export function TripWorkspacePanel({ idPrefix, header, workspace, onApplyProposal, onDismissProposal, onRefreshProposal, proposalPending, proposalTerminalOutcome }: TripWorkspacePanelProps) {
   if (!workspace) return null;
 
-  const { focus, timelineGroups, constraints, pendingProposals } = workspace;
+  const { focus, timelineGroups, constraints, pendingProposals, planHistory } = workspace;
   const projectLabel = formatTripProjectLabel(header);
   const datesText = formatTripDates(header.startDate, header.endDate);
   const travelersText = header.travelers;
@@ -66,6 +74,7 @@ export function TripWorkspacePanel({ idPrefix, header, workspace }: TripWorkspac
   const focusLabel = tripHomeFocusKindLabels[focus.kind];
   const focusNextAction = tripHomeFocusNextActions[focus.kind];
   const now = new Date();
+  const historyEntries = planHistory ?? [];
 
   return (
     <section aria-label="Không gian dự án chuyến đi" className="flex flex-col gap-4">
@@ -91,10 +100,59 @@ export function TripWorkspacePanel({ idPrefix, header, workspace }: TripWorkspac
 
       {pendingProposals.length > 0 ? (
         <div aria-label="Đề xuất thay đổi kế hoạch" className="flex flex-col gap-3">
-          {pendingProposals.map((proposal) => (
-            <TripProposalReviewCard key={proposal.id} idPrefix={idPrefix} proposal={proposal} now={now} />
-          ))}
+          {pendingProposals.map((proposal) => {
+            const pending = proposalPending?.[proposal.id];
+            const terminalOutcome = proposalTerminalOutcome?.[proposal.id] ?? null;
+            return (
+              <TripProposalReviewCard
+                key={proposal.id}
+                idPrefix={idPrefix}
+                proposal={proposal}
+                now={now}
+                onApply={onApplyProposal ? () => onApplyProposal(proposal.id) : undefined}
+                onDismiss={onDismissProposal ? () => onDismissProposal(proposal.id) : undefined}
+                onRefresh={onRefreshProposal ? () => onRefreshProposal(proposal.id) : undefined}
+                isPending={Boolean(pending)}
+                pendingAction={pending?.action}
+                terminalOutcome={terminalOutcome}
+              />
+            );
+          })}
         </div>
+      ) : null}
+
+      {historyEntries.length > 0 ? (
+        <details className="rounded-2xl border border-[#d8c9ad] bg-white/70 p-4" aria-label={tripChangeProposalLabels.planHistory}>
+          <summary className="min-h-11 cursor-pointer list-none text-sm font-semibold text-[#17342c] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45">
+            <span className="text-xs font-bold uppercase tracking-[0.16em] text-[#1f5f46]">{tripChangeProposalLabels.planHistory}</span>
+          </summary>
+          <ul aria-live="polite" className="mt-3 space-y-3">
+            {historyEntries.map((entry, index) => (
+              <li key={`${entry.proposalId ?? "history"}-${index}`} className="rounded-xl border border-[#eadfc8] bg-[#fffdf8] p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-full border border-[#8fb59f] bg-[#edf7f0] px-2 py-0.5 text-xs font-semibold text-[#14532d]">{entry.operationLabel}</span>
+                  <span className="text-xs font-semibold text-[#6b7c75]">{entry.actorLabel}</span>
+                  <span className="text-xs text-[#6b7c75]">{entry.timestampLabel}</span>
+                </div>
+                {entry.affectedItemLabels.length > 0 ? (
+                  <p className="mt-2 text-sm leading-6 text-[#4f625a]">{entry.affectedItemLabels.join(", ")}</p>
+                ) : null}
+                {entry.beforeAfter.length > 0 ? (
+                  <ul className="mt-2 space-y-1">
+                    {entry.beforeAfter.map((impact, impactIndex) => (
+                      <li key={impactIndex} className="text-xs leading-5 text-[#4f625a]">
+                        <span className="font-semibold text-[#17342c]">{impact.operation}</span>
+                        {impact.before || impact.after ? (
+                          <span className="text-[#6b7c75]"> {impact.before ?? "—"} → {impact.after ?? "—"}</span>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </details>
       ) : null}
 
       <div className="rounded-2xl border border-[#d8c9ad] bg-white/70 p-4" aria-label="Dòng thời gian kế hoạch">

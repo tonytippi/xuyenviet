@@ -1,10 +1,22 @@
 import type { PendingProposalAffectedItemRef, PendingProposalFocusInput } from "@/features/chat-trips/trip-home";
 import { tripChangeProposalLabels } from "@/features/chat-trips/trip-home-labels";
 
+// Story 7.5: the card stays presentational and data-free. The composer owns
+// the server-action calls, pending state, and reconciliation. The card only
+// invokes the optional onApply/onDismiss/onRefresh callbacks and renders the
+// pending/terminal/refresh affordances from props.
+export type TripProposalTerminalOutcome = "applied" | "dismissed" | "expired" | "refresh-required";
+
 export type TripProposalReviewCardProps = {
   idPrefix: string;
   proposal: PendingProposalFocusInput;
   now: Date;
+  onApply?: () => void;
+  onDismiss?: () => void;
+  onRefresh?: () => void;
+  isPending?: boolean;
+  pendingAction?: "apply" | "dismiss";
+  terminalOutcome?: TripProposalTerminalOutcome | null;
 };
 
 function isExpired(proposal: PendingProposalFocusInput, now: Date): boolean {
@@ -34,11 +46,28 @@ const changeLabels: Record<PendingProposalAffectedItemRef["change"], string> = {
   "upsert-constraints": "Cập nhật ràng buộc",
 };
 
-export function TripProposalReviewCard({ idPrefix, proposal, now }: TripProposalReviewCardProps) {
+function terminalOutcomeLabel(outcome: TripProposalTerminalOutcome): string {
+  if (outcome === "applied") return tripChangeProposalLabels.applied;
+  if (outcome === "dismissed") return tripChangeProposalLabels.dismissed;
+  if (outcome === "expired") return tripChangeProposalLabels.expired;
+  return tripChangeProposalLabels.refreshHint;
+}
+
+export function TripProposalReviewCard({ idPrefix, proposal, now, onApply, onDismiss, onRefresh, isPending, pendingAction, terminalOutcome }: TripProposalReviewCardProps) {
   const expired = isExpired(proposal, now);
   const expiryText = formatExpiry(proposal.expiresAt);
   const hasAlternatives = Boolean(proposal.hasAlternatives || (proposal.alternatives && proposal.alternatives.length > 0));
   const headingId = `${idPrefix}proposal-${proposal.id}-heading`;
+  const isTerminal = Boolean(terminalOutcome);
+  const isRefreshRequired = terminalOutcome === "refresh-required";
+  // When a terminal outcome is set, the action row is hidden and the outcome
+  // label is announced. The refresh-required outcome is NOT terminal in the
+  // sense of "proposal is now terminal in the DB" — it means the apply/dismiss
+  // attempt failed with refresh_required/expired/not_found and the card must
+  // offer Làm mới đề xuất while preserving the proposal summary.
+  const showActionRow = !isTerminal && !isRefreshRequired;
+  const applyPending = isPending && pendingAction === "apply";
+  const dismissPending = isPending && pendingAction === "dismiss";
 
   return (
     <section
@@ -54,9 +83,14 @@ export function TripProposalReviewCard({ idPrefix, proposal, now }: TripProposal
             {tripChangeProposalLabels.badge}
           </h3>
         </div>
-        {expired ? (
+        {expired || terminalOutcome === "expired" ? (
           <span className="rounded-full border border-[#D97706] bg-[#fff7e6] px-2 py-0.5 text-xs font-semibold text-[#92400e]">
             {tripChangeProposalLabels.expired}
+          </span>
+        ) : null}
+        {isTerminal && terminalOutcome && terminalOutcome !== "expired" ? (
+          <span className="rounded-full border border-[#1f5f46] bg-[#edf7f0] px-2 py-0.5 text-xs font-semibold text-[#14532d]">
+            {terminalOutcomeLabel(terminalOutcome)}
           </span>
         ) : null}
       </div>
@@ -117,40 +151,48 @@ export function TripProposalReviewCard({ idPrefix, proposal, now }: TripProposal
 
       <p className="mt-3 text-xs leading-5 text-[#6b7c75]">{tripChangeProposalLabels.suggestionNote}</p>
 
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        {expired ? (
-          <span className="text-xs leading-5 text-[#92400e]" data-story="7.5">{tripChangeProposalLabels.refreshHint}</span>
-        ) : (
-          <>
+      {isRefreshRequired ? (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <span className="text-xs leading-5 text-[#92400e]">{tripChangeProposalLabels.refreshHint}</span>
+          <button
+            type="button"
+            onClick={onRefresh}
+            className="min-h-11 rounded-2xl border border-[#1f5f46] bg-[#1f5f46] px-4 py-2 text-sm font-semibold text-white focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {tripChangeProposalLabels.refresh}
+          </button>
+        </div>
+      ) : null}
+
+      {showActionRow && !expired ? (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={onApply}
+            disabled={isPending}
+            className="min-h-11 rounded-2xl border border-[#1f5f46] bg-[#1f5f46] px-4 py-2 text-sm font-semibold text-white focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {applyPending ? tripChangeProposalLabels.applying : tripChangeProposalLabels.apply}
+          </button>
+          <button
+            type="button"
+            onClick={onDismiss}
+            disabled={isPending}
+            className="min-h-11 rounded-2xl border border-[#d8c9ad] bg-white px-4 py-2 text-sm font-semibold text-[#17342c] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {dismissPending ? tripChangeProposalLabels.keepingPlan : tripChangeProposalLabels.keepPlan}
+          </button>
+          {hasAlternatives ? (
             <button
               type="button"
-              aria-disabled="true"
-              data-story="7.5"
-              className="min-h-11 rounded-2xl border border-[#1f5f46] bg-[#1f5f46] px-4 py-2 text-sm font-semibold text-white focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {tripChangeProposalLabels.apply}
-            </button>
-            <button
-              type="button"
-              aria-disabled="true"
-              data-story="7.5"
               className="min-h-11 rounded-2xl border border-[#d8c9ad] bg-white px-4 py-2 text-sm font-semibold text-[#17342c] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45 disabled:cursor-not-allowed disabled:opacity-60"
+              disabled
             >
-              {tripChangeProposalLabels.keepPlan}
+              {tripChangeProposalLabels.viewAlternatives}
             </button>
-            {hasAlternatives ? (
-              <button
-                type="button"
-                aria-disabled="true"
-                data-story="7.5"
-                className="min-h-11 rounded-2xl border border-[#d8c9ad] bg-white px-4 py-2 text-sm font-semibold text-[#17342c] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {tripChangeProposalLabels.viewAlternatives}
-              </button>
-            ) : null}
-          </>
-        )}
-      </div>
+          ) : null}
+        </div>
+      ) : null}
     </section>
   );
 }

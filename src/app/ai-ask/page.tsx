@@ -4,7 +4,7 @@ import { AiAskComposer } from "@/features/ai/ai-ask-composer";
 import { signOutCurrentUser } from "@/features/auth/actions";
 import { normalizePublicAskDraft } from "@/features/auth/redirects";
 import { getOwnedConversation, listOwnedConversations } from "@/features/chat-trips/conversations";
-import { createTripProjectFromForm, deleteConversationAction, deleteTripProjectAction } from "@/features/chat-trips/actions";
+import { applyTripChangeProposalAction, createTripProjectFromForm, deleteConversationAction, deleteTripProjectAction, dismissTripChangeProposalAction } from "@/features/chat-trips/actions";
 import { getOwnedTripProjectSummary, listOwnedTripProjects } from "@/features/chat-trips/trip-projects";
 import { saveAnswerUsefulnessFeedbackAction } from "@/features/feedback/actions";
 import { selectActiveAiGatewayModel } from "@/features/ai/models";
@@ -139,6 +139,7 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
         timelineGroups: selectedTripProject.timelineGroups,
         constraints: selectedTripProject.constraints,
         pendingProposals: selectedTripProject.pendingProposals,
+        planHistory: selectedTripProject.planHistory,
       }
     : null;
   const canonicalUrl = buildCanonicalAiAskUrl({
@@ -203,6 +204,8 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
             createTripProjectAction={createTripProjectFromForm}
             deleteConversationAction={deleteConversationAction}
             deleteTripProjectAction={deleteTripProjectAction}
+            applyTripChangeProposalAction={applyTripChangeProposalAction}
+            dismissTripChangeProposalAction={dismissTripChangeProposalAction}
             saveAnswerUsefulnessFeedbackAction={saveAnswerUsefulnessFeedbackAction}
             signOutAction={signOutCurrentUser}
       />

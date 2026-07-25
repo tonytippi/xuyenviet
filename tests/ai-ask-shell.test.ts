@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { asc, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { aiGatewayModels, aiUsageEvents, answerUsefulnessFeedback, assistantResponseProvenance, assistantRetrievalDecisions, conversations, messageImageAttachments, messages, tripChangeProposals, tripPlanItems, tripProjectConstraints, tripProjects, users } from "@/db/schema";
+import { aiGatewayModels, aiUsageEvents, answerUsefulnessFeedback, assistantResponseProvenance, assistantRetrievalDecisions, conversations, messageImageAttachments, messages, tripChangeProposals, tripPlanChangeHistory, tripPlanItems, tripProjectConstraints, tripProjects, users } from "@/db/schema";
 import type { AnswerAnnotation } from "@/features/ai/answer-annotations";
 import type { AnswerEntityDescriptor } from "@/features/ai/ai-ask-composer";
 import { TripProposalReviewCard } from "@/features/ai/trip-proposal-review-card";
@@ -2227,13 +2227,85 @@ describe("AI Ask streaming route", () => {
       expect(html).not.toContain(">Áp dụng<");
     });
 
-    test("shows Áp dụng, Giữ kế hoạch for a pending unexpired proposal and wires 7.5 hooks with aria-disabled", () => {
-      const html = renderCard(makeProposal({ id: "p1", expiresAt: new Date("2026-07-27T00:00:00.000Z") }));
+    test("shows Áp dụng, Giữ kế hoạch for a pending unexpired proposal with wired onClick callbacks and no aria-disabled/data-story=7.5 hooks", () => {
+      const onApply = vi.fn();
+      const onDismiss = vi.fn();
+      const html = renderToStaticMarkup(
+        createElement(TripProposalReviewCard, {
+          idPrefix: "test-",
+          proposal: makeProposal({ id: "p1", expiresAt: new Date("2026-07-27T00:00:00.000Z") }),
+          now: fixedNow,
+          onApply,
+          onDismiss,
+        }),
+      );
 
       expect(html).toContain("Áp dụng");
       expect(html).toContain("Giữ kế hoạch");
-      expect(html).toContain('aria-disabled="true"');
-      expect(html).toContain('data-story="7.5"');
+      // Story 7.5 removed the aria-disabled and data-story="7.5" hooks; the
+      // buttons are now real wired buttons (onClick handlers attached by React
+      // at mount; renderToStaticMarkup does not emit onClick attributes, so we
+      // assert the hooks are gone and the buttons are present without
+      // aria-disabled).
+      expect(html).not.toContain('aria-disabled="true"');
+      expect(html).not.toContain('data-story="7.5"');
+      expect(html).not.toContain('disabled=""');
+    });
+
+    test("disables both action buttons and shows the applying pending label when isPending + pendingAction=apply", () => {
+      const html = renderCard(makeProposal({ id: "p1", expiresAt: new Date("2026-07-27T00:00:00.000Z") }));
+      const pendingHtml = renderToStaticMarkup(
+        createElement(TripProposalReviewCard, {
+          idPrefix: "test-",
+          proposal: makeProposal({ id: "p1", expiresAt: new Date("2026-07-27T00:00:00.000Z") }),
+          now: fixedNow,
+          isPending: true,
+          pendingAction: "apply",
+        }),
+      );
+
+      expect(html).toContain("Áp dụng");
+      expect(pendingHtml).toContain("Đang áp dụng...");
+      // Both action buttons are disabled while pending.
+      const applyButtons = pendingHtml.match(/<button[^>]*>Đang áp dụng\.\.\.<\/button>/g) ?? [];
+      expect(applyButtons.length).toBeGreaterThanOrEqual(1);
+      expect(applyButtons[0]).toContain('disabled=""');
+    });
+
+    test("renders the terminal outcome label and hides the action row for an applied proposal", () => {
+      const html = renderToStaticMarkup(
+        createElement(TripProposalReviewCard, {
+          idPrefix: "test-",
+          proposal: makeProposal({ id: "p1" }),
+          now: fixedNow,
+          terminalOutcome: "applied",
+        }),
+      );
+
+      expect(html).toContain("Đã áp dụng");
+      // The action row is hidden when a terminal outcome is set.
+      expect(html).not.toContain(">Áp dụng<");
+      expect(html).not.toContain(">Giữ kế hoạch<");
+    });
+
+    test("renders Làm mới đề xuất affordance for a refresh-required terminal outcome and preserves the summary", () => {
+      const onRefresh = vi.fn();
+      const html = renderToStaticMarkup(
+        createElement(TripProposalReviewCard, {
+          idPrefix: "test-",
+          proposal: makeProposal({ id: "p1", rationale: "Kế hoạch đã đổi." }),
+          now: fixedNow,
+          terminalOutcome: "refresh-required",
+          onRefresh,
+        }),
+      );
+
+      expect(html).toContain("Làm mới đề xuất");
+      // The proposal summary is preserved.
+      expect(html).toContain("Kế hoạch đã đổi.");
+      // The apply/dismiss action row is hidden in the refresh-required state.
+      expect(html).not.toContain(">Áp dụng<");
+      expect(html).not.toContain(">Giữ kế hoạch<");
     });
 
     test("shows Xem phương án khác only when alternatives are supplied", () => {
@@ -2370,3 +2442,116 @@ describe("AI Ask streaming route", () => {
     });
   });
 });
+
+  describe("Story 7.5 proposal terminal actions and plan history shell wiring", () => {
+    test("composer source wires handleApplyProposal/handleDismissProposal/handleRefreshProposal and threads the apply/dismiss server actions", () => {
+      const composerSource = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
+
+      expect(composerSource).toContain("handleApplyProposal");
+      expect(composerSource).toContain("handleDismissProposal");
+      expect(composerSource).toContain("handleRefreshProposal");
+      expect(composerSource).toContain("applyTripChangeProposalAction");
+      expect(composerSource).toContain("dismissTripChangeProposalAction");
+      expect(composerSource).toContain("router.refresh()");
+      // Terminal focus return to the originating answer card heading / Trip Home focus card.
+      expect(composerSource).toContain("focusOriginAfterTerminal");
+    });
+
+    test("page.tsx threads applyTripChangeProposalAction and dismissTripChangeProposalAction into the composer and passes planHistory", () => {
+      const pageSource = readFileSync("src/app/ai-ask/page.tsx", "utf8");
+
+      expect(pageSource).toContain("applyTripChangeProposalAction={applyTripChangeProposalAction}");
+      expect(pageSource).toContain("dismissTripChangeProposalAction={dismissTripChangeProposalAction}");
+      expect(pageSource).toContain("planHistory: selectedTripProject.planHistory");
+    });
+
+    test("actions module exports applyTripChangeProposalAction and dismissTripChangeProposalAction with typed result states and safe Vietnamese copy", () => {
+      const actionsSource = readFileSync("src/features/chat-trips/actions.ts", "utf8");
+
+      expect(actionsSource).toContain("export async function applyTripChangeProposalAction");
+      expect(actionsSource).toContain("export async function dismissTripChangeProposalAction");
+      expect(actionsSource).toContain("ApplyTripChangeProposalActionState");
+      expect(actionsSource).toContain("DismissTripChangeProposalActionState");
+      expect(actionsSource).toContain("Kế hoạch đã thay đổi — vui lòng làm mới đề xuất.");
+      expect(actionsSource).toContain("Đề xuất không còn khả dụng.");
+      // expire is NOT a user action.
+      expect(actionsSource).not.toContain("expireTripChangeProposalAction");
+    });
+
+    test("trip-proposal-review-card is presentational and data-free with no localStorage, fetch, useEffect, or useState", () => {
+      const source = readFileSync("src/features/ai/trip-proposal-review-card.tsx", "utf8");
+      expect(source).not.toContain("localStorage");
+      expect(source).not.toContain("sessionStorage");
+      expect(source).not.toContain("fetch(");
+      expect(source).not.toContain("useEffect");
+      expect(source).not.toContain("useState");
+      // The 7.5 hooks (aria-disabled, data-story="7.5") are removed.
+      expect(source).not.toContain('aria-disabled');
+      expect(source).not.toContain('data-story="7.5"');
+      // The card accepts the action callbacks and terminal outcome props, and
+      // references the applying/keeping/refresh label constants (the literals
+      // live in trip-home-labels.ts).
+      expect(source).toContain("onApply");
+      expect(source).toContain("onDismiss");
+      expect(source).toContain("onRefresh");
+      expect(source).toContain("terminalOutcome");
+      expect(source).toContain("tripChangeProposalLabels.applying");
+      expect(source).toContain("tripChangeProposalLabels.keepingPlan");
+      expect(source).toContain("tripChangeProposalLabels.refresh");
+    });
+
+    test("workspace panel renders the plan history section with Vietnamese operation/actor labels and no raw model content", async () => {
+      await createTestUser("user-1");
+      const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế" }).returning({ id: tripProjects.id });
+      const [conversation] = await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id }).returning({ id: conversations.id });
+      await testDb.update(tripProjects).set({ primaryConversationId: conversation.id }).where(eq(tripProjects.id, project.id));
+      await testDb.insert(tripPlanItems).values({ id: "leg-1", tripProjectId: project.id, userId: "user-1", kind: "leg", type: "transport", state: "idea", label: "Chạy xe", ordinal: 0, version: 1 });
+      // Seed an applied history row directly so the read model surfaces it.
+      await testDb.insert(tripPlanChangeHistory).values({
+        tripProjectId: project.id,
+        userId: "user-1",
+        proposalId: "proposal-history-1",
+        actorUserId: "user-1",
+        actorClass: "user",
+        operationClass: "apply",
+        affectedItemReferences: [{ itemId: "leg-1", kind: "leg", label: "Chạy xe", change: "change-state" }],
+        safeBeforeAfterSummary: { entries: [{ operation: "Đổi trạng thái · Chạy xe", before: "Ý tưởng", after: "Đã chốt" }] },
+      });
+
+      const canonicalUrl = await getAuthenticatedAiAskRedirect({ tripProjectId: project.id });
+      const canonicalParams = Object.fromEntries(new URL(canonicalUrl, "http://localhost").searchParams.entries());
+      vi.resetModules();
+      const html = await renderAuthenticatedAiAskShell(canonicalParams);
+
+      // The plan history entry is rendered with the Vietnamese operation label,
+      // actor label, and the safe before/after summary.
+      expect(html).toContain("Lịch sử kế hoạch");
+      expect(html).toContain("Áp dụng");
+      expect(html).toContain("Bạn");
+      // Never expose raw model prompts/responses in the history surface.
+      expect(html).not.toContain('"provider"');
+      expect(html).not.toContain('"prompt"');
+    });
+
+    test("workspace read path adds no provider call, no AI usage event, and no persistence write for the plan history read", async () => {
+      await createTestUser("user-1");
+      const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế" }).returning({ id: tripProjects.id });
+      const [conversation] = await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id }).returning({ id: conversations.id });
+      await testDb.update(tripProjects).set({ primaryConversationId: conversation.id }).where(eq(tripProjects.id, project.id));
+
+      const usageBefore = await countUsageEvents();
+      const historyBefore = await testDb.select().from(tripPlanChangeHistory);
+
+      const canonicalUrl = await getAuthenticatedAiAskRedirect({ tripProjectId: project.id });
+      const canonicalParams = Object.fromEntries(new URL(canonicalUrl, "http://localhost").searchParams.entries());
+      vi.resetModules();
+      const fetchMock = vi.fn(async () => { throw new Error("Unexpected fetch"); });
+      vi.stubGlobal("fetch", fetchMock);
+      await renderAuthenticatedAiAskShell(canonicalParams);
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(await countUsageEvents()).toBe(usageBefore);
+      const historyAfter = await testDb.select().from(tripPlanChangeHistory);
+      expect(historyAfter).toHaveLength(historyBefore.length);
+    });
+  });

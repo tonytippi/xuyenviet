@@ -584,3 +584,79 @@ describe("Trip project helpers", () => {
     expect(audit.beforeSummary).toContain('"proposalCount":1');
   });
 });
+
+describe("Story 7.5 *InTransaction helpers and changeInternalTripPlanItemStateInTransaction", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+  });
+
+  test("changeInternalTripPlanItemStateInTransaction advances item + aggregate version and writes only the state field", async () => {
+    await createTestUser("state-user-1");
+    const [project] = await testDb.insert(tripProjects).values({ userId: "state-user-1", title: "Huế", aggregateVersion: 1 }).returning({ id: tripProjects.id });
+    const [leg] = await testDb.insert(tripPlanItems).values({ tripProjectId: project.id, userId: "state-user-1", kind: "leg", type: "transport", state: "idea", label: "Chạy xe", ordinal: 0, transportOriginLabel: "Hà Nội", transportDestinationLabel: "Huế" }).returning();
+    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "state-user-1", email: "state-user-1@example.com" }) }));
+    const { getDb } = await import("@/db/client");
+    const { changeInternalTripPlanItemStateInTransaction } = await import("@/features/chat-trips/trip-projects");
+
+    const result = await getDb().transaction((transaction) => changeInternalTripPlanItemStateInTransaction(transaction, { userId: "state-user-1", email: "state-user-1@example.com" }, project.id, 1, leg.id, 1, "confirmed", null));
+
+    expect(result).toMatchObject({ success: true, aggregateVersion: 2 });
+    const [savedItem] = await testDb.select().from(tripPlanItems).where(eq(tripPlanItems.id, leg.id));
+    const [savedProject] = await testDb.select().from(tripProjects).where(eq(tripProjects.id, project.id));
+    expect(savedItem.state).toBe("confirmed");
+    expect(savedItem.version).toBe(2);
+    expect(savedProject.aggregateVersion).toBe(2);
+    // A state-only change must not touch label/notes/ordinal/transport fields.
+    expect(savedItem.label).toBe("Chạy xe");
+    expect(savedItem.ordinal).toBe(0);
+    expect(savedItem.transportOriginLabel).toBe("Hà Nội");
+    expect(savedItem.transportDestinationLabel).toBe("Huế");
+  });
+
+  test("changeInternalTripPlanItemStateInTransaction validates backup-state/backup-target consistency and rejects a cycle", async () => {
+    await createTestUser("state-user-2");
+    const [project] = await testDb.insert(tripProjects).values({ userId: "state-user-2", title: "Huế", aggregateVersion: 1 }).returning({ id: tripProjects.id });
+    const [legA] = await testDb.insert(tripPlanItems).values({ id: "state-leg-a", tripProjectId: project.id, userId: "state-user-2", kind: "leg", type: "transport", state: "planned", label: "A", ordinal: 0 }).returning();
+    const [legB] = await testDb.insert(tripPlanItems).values({ id: "state-leg-b", tripProjectId: project.id, userId: "state-user-2", kind: "leg", type: "transport", state: "planned", label: "B", ordinal: 1 }).returning();
+    const { getDb } = await import("@/db/client");
+    const { changeInternalTripPlanItemStateInTransaction } = await import("@/features/chat-trips/trip-projects");
+
+    // Setting state to backup requires a backup target.
+    const noTarget = await getDb().transaction((transaction) => changeInternalTripPlanItemStateInTransaction(transaction, { userId: "state-user-2", email: "state-user-2@example.com" }, project.id, 1, legA.id, 1, "backup", null));
+    expect(noTarget).toEqual({ success: false, reason: "invalid" });
+
+    // A valid backup target succeeds (aggregate is still 1 because the noTarget
+    // call returned invalid before locking/advancing).
+    const valid = await getDb().transaction((transaction) => changeInternalTripPlanItemStateInTransaction(transaction, { userId: "state-user-2", email: "state-user-2@example.com" }, project.id, 1, legA.id, 1, "backup", legB.id));
+    expect(valid).toMatchObject({ success: true, aggregateVersion: 2 });
+
+    // A backup target pointing at the item itself is rejected (no self-cycle).
+    const selfCycle = await getDb().transaction((transaction) => changeInternalTripPlanItemStateInTransaction(transaction, { userId: "state-user-2", email: "state-user-2@example.com" }, project.id, 2, legB.id, 1, "backup", legB.id));
+    expect(selfCycle).toEqual({ success: false, reason: "invalid" });
+  });
+
+  test("the public *InternalTripPlanItem wrappers still behave identically after the *InTransaction refactor", async () => {
+    await createTestUser("refactor-user-1");
+    const [project] = await testDb.insert(tripProjects).values({ userId: "refactor-user-1", title: "Ninh Bình", aggregateVersion: 1 }).returning({ id: tripProjects.id });
+    const [first] = await testDb.insert(tripPlanItems).values({ tripProjectId: project.id, userId: "refactor-user-1", kind: "leg", type: "transport", state: "idea", label: "Xe", ordinal: 0 }).returning();
+    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "refactor-user-1", email: "refactor-user-1@example.com" }) }));
+    const { createInternalTripPlanItem, updateInternalTripPlanItem, deleteInternalTripPlanItem } = await import("@/features/chat-trips/trip-projects");
+
+    // create advances the aggregate and returns the new item id.
+    const created = await createInternalTripPlanItem(project.id, 1, { kind: "leg", type: "visit", state: "idea", label: "Thăm", ordinal: 1 });
+    expect(created).toMatchObject({ success: true, aggregateVersion: 2 });
+
+    // update with the correct fence succeeds; stale fence fails.
+    const updated = await updateInternalTripPlanItem(project.id, 2, first.id, 1, { kind: "leg", type: "transport", state: "confirmed", label: "Xe mới", ordinal: 0 });
+    expect(updated).toMatchObject({ success: true, aggregateVersion: 3 });
+    const stale = await updateInternalTripPlanItem(project.id, 3, first.id, 1, { kind: "leg", type: "transport", state: "idea", label: "Stale", ordinal: 0 });
+    expect(stale).toEqual({ success: false, reason: "refresh_required" });
+
+    // delete with the correct fence succeeds.
+    const deleted = await deleteInternalTripPlanItem(project.id, 3, first.id, 2);
+    expect(deleted).toMatchObject({ success: true, aggregateVersion: 4 });
+    const [savedProject] = await testDb.select().from(tripProjects).where(eq(tripProjects.id, project.id));
+    expect(savedProject.aggregateVersion).toBe(4);
+  });
+});

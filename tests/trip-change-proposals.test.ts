@@ -1,12 +1,28 @@
-import { eq } from "drizzle-orm";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { and, eq } from "drizzle-orm";
+import { beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { auditEvents, tripChangeProposals, tripPlanItems, tripProjects, users } from "@/db/schema";
+import { auditEvents, tripChangeProposals, tripPlanChangeHistory, tripPlanItems, tripProjects, users } from "@/db/schema";
 
 import { testDb } from "./helpers/db";
 
 async function createTestUser(userId: string) {
   await testDb.insert(users).values({ id: userId, email: `${userId}@example.com` });
+}
+
+// Story 7.5: the system-trip-planning reserved user is created by migration
+// 0064, but other test files that call resetTestDatabase() truncate the users
+// table. Ensure the reserved system actor exists before expire tests run so
+// the audit_events.actorUserId FK is satisfied. Check-then-insert to avoid
+// depending on conflict-target syntax.
+async function ensureSystemTripPlanningActor() {
+  const [existing] = await testDb.select({ id: users.id }).from(users).where(eq(users.id, "system-trip-planning")).limit(1);
+  if (!existing) {
+    try {
+      await testDb.insert(users).values({ id: "system-trip-planning", email: "system-trip-planning@xuyenviet.invalid" });
+    } catch (error) {
+      console.error("ensureSystemTripPlanningActor insert failed", error instanceof Error ? error.message : String(error));
+    }
+  }
 }
 
 type KnownPlanItem = {
@@ -469,5 +485,442 @@ describe("proposal read model owner-scope and safety", () => {
     expect(serialized).not.toContain("model");
     expect(serialized).not.toContain("response");
     expect(serialized).not.toContain("provider");
+  });
+});
+
+describe("Story 7.5 applyApprovedTripChange DB-backed tests", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+  });
+
+  async function setupProjectWithItem(userId: string, projectId: string) {
+    await testDb.insert(tripProjects).values({ id: projectId, userId, title: "Huế", aggregateVersion: 1 });
+    await testDb.insert(tripPlanItems).values({ id: "leg-1", tripProjectId: projectId, userId, kind: "leg", type: "transport", state: "planned", label: "Chạy xe", ordinal: 0, version: 1 });
+  }
+
+  async function loadModuleAs(userId: string, email: string) {
+    vi.resetModules();
+    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId, email }) }));
+    return await import("@/features/chat-trips/trip-change-proposals");
+  }
+
+  async function persistProposalAs(userId: string, email: string, projectId: string, operations: unknown[], expectedItemVersions?: Record<string, number>) {
+    const { persistAiTripChangeProposalDraft } = await loadModuleAs(userId, email);
+    return persistAiTripChangeProposalDraft({
+      tripProjectId: projectId,
+      expectedAggregateVersion: 1,
+      expectedItemVersions: expectedItemVersions ?? { "leg-1": 1 },
+      operations,
+      rationale: "Áp dụng thay đổi.",
+    });
+  }
+
+  test("applies a change-item-state proposal atomically: mutates plan, advances aggregate + item version, writes one apply history + audit row", async () => {
+    await createTestUser("apply-user-1");
+    await setupProjectWithItem("apply-user-1", "apply-project-1");
+    const persisted = await persistProposalAs("apply-user-1", "apply-user-1@example.com", "apply-project-1", [
+      { kind: "change-item-state", itemId: "leg-1", state: "confirmed" },
+    ]);
+    if (!persisted.success) throw new Error("persist failed");
+    const proposalId = persisted.proposal.id;
+    const { applyApprovedTripChange } = await loadModuleAs("apply-user-1", "apply-user-1@example.com");
+
+    const result = await applyApprovedTripChange({ tripProjectId: "apply-project-1", proposalId });
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.aggregateVersion).toBe(2);
+    expect(result.proposal.status).toBe("applied");
+    expect(result.proposal.terminalTimestamp).toBeInstanceOf(Date);
+
+    const [savedProject] = await testDb.select().from(tripProjects).where(eq(tripProjects.id, "apply-project-1"));
+    const [savedItem] = await testDb.select().from(tripPlanItems).where(eq(tripPlanItems.id, "leg-1"));
+    expect(savedProject.aggregateVersion).toBe(2);
+    expect(savedItem.state).toBe("confirmed");
+    expect(savedItem.version).toBe(2);
+
+    const historyRows = await testDb.select().from(tripPlanChangeHistory).where(eq(tripPlanChangeHistory.proposalId, proposalId));
+    expect(historyRows).toHaveLength(1);
+    expect(historyRows[0]).toMatchObject({ operationClass: "apply", actorClass: "user", actorUserId: "apply-user-1" });
+
+    const applyAudits = await testDb.select().from(auditEvents).where(and(eq(auditEvents.operation, "apply"), eq(auditEvents.targetId, proposalId)));
+    expect(applyAudits).toHaveLength(1);
+    expect(applyAudits[0]).toMatchObject({ actorClass: "user", actorUserId: "apply-user-1" });
+  });
+
+  test("idempotent re-apply on an already-applied proposal is a no-op returning not_found (no second history row, no plan mutation)", async () => {
+    await createTestUser("apply-user-2");
+    await setupProjectWithItem("apply-user-2", "apply-project-2");
+    const persisted = await persistProposalAs("apply-user-2", "apply-user-2@example.com", "apply-project-2", [
+      { kind: "change-item-state", itemId: "leg-1", state: "confirmed" },
+    ]);
+    if (!persisted.success) throw new Error("persist failed");
+    const proposalId = persisted.proposal.id;
+    const { applyApprovedTripChange } = await loadModuleAs("apply-user-2", "apply-user-2@example.com");
+
+    await applyApprovedTripChange({ tripProjectId: "apply-project-2", proposalId });
+    const second = await applyApprovedTripChange({ tripProjectId: "apply-project-2", proposalId });
+
+    expect(second).toEqual({ success: false, reason: "not_found" });
+    const historyRows = await testDb.select().from(tripPlanChangeHistory).where(eq(tripPlanChangeHistory.proposalId, proposalId));
+    expect(historyRows).toHaveLength(1);
+  });
+
+  test("returns refresh_required when the aggregate version is stale and applies nothing", async () => {
+    await createTestUser("apply-user-3");
+    await setupProjectWithItem("apply-user-3", "apply-project-3");
+    // Bump the aggregate version after the proposal was drafted.
+    const persisted = await persistProposalAs("apply-user-3", "apply-user-3@example.com", "apply-project-3", [
+      { kind: "change-item-state", itemId: "leg-1", state: "confirmed" },
+    ]);
+    if (!persisted.success) throw new Error("persist failed");
+    await testDb.update(tripProjects).set({ aggregateVersion: 5 }).where(eq(tripProjects.id, "apply-project-3"));
+    const { applyApprovedTripChange } = await loadModuleAs("apply-user-3", "apply-user-3@example.com");
+
+    const result = await applyApprovedTripChange({ tripProjectId: "apply-project-3", proposalId: persisted.proposal.id });
+    expect(result).toEqual({ success: false, reason: "refresh_required" });
+
+    const [savedItem] = await testDb.select().from(tripPlanItems).where(eq(tripPlanItems.id, "leg-1"));
+    expect(savedItem.state).toBe("planned");
+    expect(savedItem.version).toBe(1);
+    const historyRows = await testDb.select().from(tripPlanChangeHistory).where(eq(tripPlanChangeHistory.proposalId, persisted.proposal.id));
+    expect(historyRows).toHaveLength(0);
+  });
+
+  test("returns expired when expiresAt <= now and applies nothing (no history row)", async () => {
+    await createTestUser("apply-user-4");
+    await setupProjectWithItem("apply-user-4", "apply-project-4");
+    const { persistAiTripChangeProposalDraft } = await loadModuleAs("apply-user-4", "apply-user-4@example.com");
+    const persisted = await persistAiTripChangeProposalDraft({
+      tripProjectId: "apply-project-4",
+      expectedAggregateVersion: 1,
+      expectedItemVersions: { "leg-1": 1 },
+      operations: [{ kind: "change-item-state", itemId: "leg-1", state: "confirmed" }],
+      rationale: "Đã hết hạn.",
+      expiresAt: new Date("2026-01-01T00:00:00.000Z"),
+    });
+    if (!persisted.success) throw new Error("persist failed");
+    const { applyApprovedTripChange } = await loadModuleAs("apply-user-4", "apply-user-4@example.com");
+
+    const result = await applyApprovedTripChange({ tripProjectId: "apply-project-4", proposalId: persisted.proposal.id });
+    expect(result).toEqual({ success: false, reason: "expired" });
+
+    const [savedItem] = await testDb.select().from(tripPlanItems).where(eq(tripPlanItems.id, "leg-1"));
+    expect(savedItem.state).toBe("planned");
+    const historyRows = await testDb.select().from(tripPlanChangeHistory).where(eq(tripPlanChangeHistory.proposalId, persisted.proposal.id));
+    expect(historyRows).toHaveLength(0);
+  });
+
+  test("cross-owner apply returns not_found without leaking existence and applies nothing", async () => {
+    await createTestUser("apply-owner");
+    await createTestUser("apply-attacker");
+    await setupProjectWithItem("apply-owner", "apply-owner-project");
+    const persisted = await persistProposalAs("apply-owner", "apply-owner@example.com", "apply-owner-project", [
+      { kind: "change-item-state", itemId: "leg-1", state: "confirmed" },
+    ]);
+    if (!persisted.success) throw new Error("persist failed");
+    const { applyApprovedTripChange } = await loadModuleAs("apply-attacker", "apply-attacker@example.com");
+
+    const result = await applyApprovedTripChange({ tripProjectId: "apply-owner-project", proposalId: persisted.proposal.id });
+    expect(result).toEqual({ success: false, reason: "not_found" });
+
+    const [savedItem] = await testDb.select().from(tripPlanItems).where(eq(tripPlanItems.id, "leg-1"));
+    expect(savedItem.state).toBe("planned");
+    expect(savedItem.version).toBe(1);
+  });
+
+  test("returns refresh_required when the affected item version is stale and applies nothing", async () => {
+    await createTestUser("apply-user-5");
+    await setupProjectWithItem("apply-user-5", "apply-project-5");
+    // Draft the proposal against item version 1, then bump the item version.
+    const persisted = await persistProposalAs("apply-user-5", "apply-user-5@example.com", "apply-project-5", [
+      { kind: "change-item-state", itemId: "leg-1", state: "confirmed" },
+    ]);
+    if (!persisted.success) throw new Error("persist failed");
+    await testDb.update(tripPlanItems).set({ version: 9 }).where(eq(tripPlanItems.id, "leg-1"));
+    const { applyApprovedTripChange } = await loadModuleAs("apply-user-5", "apply-user-5@example.com");
+
+    const result = await applyApprovedTripChange({ tripProjectId: "apply-project-5", proposalId: persisted.proposal.id });
+    expect(result).toEqual({ success: false, reason: "refresh_required" });
+  });
+});
+
+describe("Story 7.5 dismissTripChangeProposal DB-backed tests", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+  });
+
+  async function loadModuleAs(userId: string, email: string) {
+    vi.resetModules();
+    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId, email }) }));
+    return await import("@/features/chat-trips/trip-change-proposals");
+  }
+
+  test("dismisses a pending proposal: writes one dismiss history + audit row, no plan mutation, no aggregate version change", async () => {
+    await createTestUser("dismiss-user-1");
+    await testDb.insert(tripProjects).values({ id: "dismiss-project-1", userId: "dismiss-user-1", title: "Huế", aggregateVersion: 1 });
+    await testDb.insert(tripPlanItems).values({ id: "dismiss-leg-1", tripProjectId: "dismiss-project-1", userId: "dismiss-user-1", kind: "leg", type: "transport", state: "planned", label: "Chạy xe", ordinal: 0, version: 1 });
+    const { persistAiTripChangeProposalDraft } = await loadModuleAs("dismiss-user-1", "dismiss-user-1@example.com");
+    const persisted = await persistAiTripChangeProposalDraft({
+      tripProjectId: "dismiss-project-1",
+      expectedAggregateVersion: 1,
+      expectedItemVersions: { "dismiss-leg-1": 1 },
+      operations: [{ kind: "change-item-state", itemId: "dismiss-leg-1", state: "confirmed" }],
+      rationale: "Giữ kế hoạch.",
+    });
+    if (!persisted.success) throw new Error("persist failed");
+    const { dismissTripChangeProposal } = await loadModuleAs("dismiss-user-1", "dismiss-user-1@example.com");
+
+    const result = await dismissTripChangeProposal({ tripProjectId: "dismiss-project-1", proposalId: persisted.proposal.id });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.proposal.status).toBe("dismissed");
+    expect(result.proposal.terminalTimestamp).toBeInstanceOf(Date);
+
+    const [savedItem] = await testDb.select().from(tripPlanItems).where(eq(tripPlanItems.id, "dismiss-leg-1"));
+    const [savedProject] = await testDb.select().from(tripProjects).where(eq(tripProjects.id, "dismiss-project-1"));
+    expect(savedItem.state).toBe("planned");
+    expect(savedItem.version).toBe(1);
+    expect(savedProject.aggregateVersion).toBe(1);
+
+    const historyRows = await testDb.select().from(tripPlanChangeHistory).where(eq(tripPlanChangeHistory.proposalId, persisted.proposal.id));
+    expect(historyRows).toHaveLength(1);
+    expect(historyRows[0]).toMatchObject({ operationClass: "dismiss", actorClass: "user", actorUserId: "dismiss-user-1" });
+
+    const dismissAudits = await testDb.select().from(auditEvents).where(and(eq(auditEvents.operation, "dismiss"), eq(auditEvents.targetId, persisted.proposal.id)));
+    expect(dismissAudits).toHaveLength(1);
+    expect(dismissAudits[0]).toMatchObject({ actorClass: "user" });
+  });
+
+  test("idempotent dismiss on an already-dismissed proposal: no second history row", async () => {
+    await createTestUser("dismiss-user-2");
+    await testDb.insert(tripProjects).values({ id: "dismiss-project-2", userId: "dismiss-user-2", title: "Huế", aggregateVersion: 1 });
+    await testDb.insert(tripPlanItems).values({ id: "dismiss-leg-2", tripProjectId: "dismiss-project-2", userId: "dismiss-user-2", kind: "leg", type: "transport", state: "planned", label: "Chạy xe", ordinal: 0, version: 1 });
+    const { persistAiTripChangeProposalDraft, dismissTripChangeProposal } = await loadModuleAs("dismiss-user-2", "dismiss-user-2@example.com");
+    const persisted = await persistAiTripChangeProposalDraft({
+      tripProjectId: "dismiss-project-2",
+      expectedAggregateVersion: 1,
+      operations: [{ kind: "change-item-state", itemId: "dismiss-leg-2", state: "confirmed" }],
+      rationale: "Giữ kế hoạch.",
+    });
+    if (!persisted.success) throw new Error("persist failed");
+
+    await dismissTripChangeProposal({ tripProjectId: "dismiss-project-2", proposalId: persisted.proposal.id });
+    await dismissTripChangeProposal({ tripProjectId: "dismiss-project-2", proposalId: persisted.proposal.id });
+
+    const historyRows = await testDb.select().from(tripPlanChangeHistory).where(eq(tripPlanChangeHistory.proposalId, persisted.proposal.id));
+    expect(historyRows).toHaveLength(1);
+  });
+
+  test("cross-owner dismiss returns not_found without leaking existence", async () => {
+    await createTestUser("dismiss-owner");
+    await createTestUser("dismiss-attacker");
+    await testDb.insert(tripProjects).values({ id: "dismiss-owner-project", userId: "dismiss-owner", title: "Riêng", aggregateVersion: 1 });
+    await testDb.insert(tripPlanItems).values({ id: "dismiss-owner-leg", tripProjectId: "dismiss-owner-project", userId: "dismiss-owner", kind: "leg", type: "transport", state: "planned", label: "X", ordinal: 0, version: 1 });
+    const { persistAiTripChangeProposalDraft } = await loadModuleAs("dismiss-owner", "dismiss-owner@example.com");
+    const persisted = await persistAiTripChangeProposalDraft({
+      tripProjectId: "dismiss-owner-project",
+      expectedAggregateVersion: 1,
+      operations: [{ kind: "change-item-state", itemId: "dismiss-owner-leg", state: "confirmed" }],
+      rationale: "Riêng chủ.",
+    });
+    if (!persisted.success) throw new Error("persist failed");
+    const { dismissTripChangeProposal } = await loadModuleAs("dismiss-attacker", "dismiss-attacker@example.com");
+
+    const result = await dismissTripChangeProposal({ tripProjectId: "dismiss-owner-project", proposalId: persisted.proposal.id });
+    expect(result).toEqual({ success: false, reason: "not_found" });
+  });
+});
+
+describe("Story 7.5 expireTripChangeProposal DB-backed tests", () => {
+  beforeAll(async () => {
+    await ensureSystemTripPlanningActor();
+  });
+
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+  });
+
+  test("expires a pending proposal with the system-trip-planning actor: one expire history + audit row, no plan mutation", async () => {
+    await ensureSystemTripPlanningActor();
+    await createTestUser("expire-user-1");
+    await testDb.insert(tripProjects).values({ id: "expire-project-1", userId: "expire-user-1", title: "Huế", aggregateVersion: 1 });
+    await testDb.insert(tripPlanItems).values({ id: "expire-leg-1", tripProjectId: "expire-project-1", userId: "expire-user-1", kind: "leg", type: "transport", state: "planned", label: "Chạy xe", ordinal: 0, version: 1 });
+    vi.resetModules();
+    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "expire-user-1", email: "expire-user-1@example.com" }) }));
+    const { persistAiTripChangeProposalDraft, expireTripChangeProposal } = await import("@/features/chat-trips/trip-change-proposals");
+    const persisted = await persistAiTripChangeProposalDraft({
+      tripProjectId: "expire-project-1",
+      expectedAggregateVersion: 1,
+      operations: [{ kind: "change-item-state", itemId: "expire-leg-1", state: "confirmed" }],
+      rationale: "Hết hạn.",
+      expiresAt: new Date("2026-01-01T00:00:00.000Z"),
+    });
+    if (!persisted.success) throw new Error("persist failed");
+
+    const result = await expireTripChangeProposal({ tripProjectId: "expire-project-1", proposalId: persisted.proposal.id, now: new Date("2026-07-25T00:00:00.000Z") });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.proposal.status).toBe("expired");
+    expect(result.proposal.terminalTimestamp).toBeInstanceOf(Date);
+
+    const [savedItem] = await testDb.select().from(tripPlanItems).where(eq(tripPlanItems.id, "expire-leg-1"));
+    const [savedProject] = await testDb.select().from(tripProjects).where(eq(tripProjects.id, "expire-project-1"));
+    expect(savedItem.state).toBe("planned");
+    expect(savedItem.version).toBe(1);
+    expect(savedProject.aggregateVersion).toBe(1);
+
+    const historyRows = await testDb.select().from(tripPlanChangeHistory).where(eq(tripPlanChangeHistory.proposalId, persisted.proposal.id));
+    expect(historyRows).toHaveLength(1);
+    expect(historyRows[0]).toMatchObject({ operationClass: "expire", actorClass: "system", actorSystem: "system-trip-planning", actorUserId: null });
+
+    const expireAudits = await testDb.select().from(auditEvents).where(and(eq(auditEvents.operation, "expire"), eq(auditEvents.targetId, persisted.proposal.id)));
+    expect(expireAudits).toHaveLength(1);
+    expect(expireAudits[0]).toMatchObject({ actorClass: "system", actorSystem: "system-trip-planning", actorUserId: "system-trip-planning" });
+  });
+
+  test("idempotent expire on an already-expired proposal: no second history row", async () => {
+    await ensureSystemTripPlanningActor();
+    await createTestUser("expire-user-2");
+    await testDb.insert(tripProjects).values({ id: "expire-project-2", userId: "expire-user-2", title: "Huế", aggregateVersion: 1 });
+    await testDb.insert(tripPlanItems).values({ id: "expire-leg-2", tripProjectId: "expire-project-2", userId: "expire-user-2", kind: "leg", type: "transport", state: "planned", label: "Chạy xe", ordinal: 0, version: 1 });
+    vi.resetModules();
+    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "expire-user-2", email: "expire-user-2@example.com" }) }));
+    const { persistAiTripChangeProposalDraft, expireTripChangeProposal } = await import("@/features/chat-trips/trip-change-proposals");
+    const persisted = await persistAiTripChangeProposalDraft({
+      tripProjectId: "expire-project-2",
+      expectedAggregateVersion: 1,
+      operations: [{ kind: "change-item-state", itemId: "expire-leg-2", state: "confirmed" }],
+      rationale: "Hết hạn.",
+      expiresAt: new Date("2026-01-01T00:00:00.000Z"),
+    });
+    if (!persisted.success) throw new Error("persist failed");
+
+    await expireTripChangeProposal({ tripProjectId: "expire-project-2", proposalId: persisted.proposal.id });
+    await expireTripChangeProposal({ tripProjectId: "expire-project-2", proposalId: persisted.proposal.id });
+
+    const historyRows = await testDb.select().from(tripPlanChangeHistory).where(eq(tripPlanChangeHistory.proposalId, persisted.proposal.id));
+    expect(historyRows).toHaveLength(1);
+  });
+
+  test("expire returns not_found for a missing proposal without leaking existence (system command, no user auth)", async () => {
+    await ensureSystemTripPlanningActor();
+    await createTestUser("expire-attacker");
+    await testDb.insert(tripProjects).values({ id: "expire-attacker-project", userId: "expire-attacker", title: "Riêng", aggregateVersion: 1 });
+    const { expireTripChangeProposal } = await import("@/features/chat-trips/trip-change-proposals");
+
+    // expire is a system-only command (no session); a missing proposal returns
+    // not_found. It is never exposed as a user action — cross-owner protection
+    // comes from the owner-scoped read paths that invoke expire-on-read.
+    const result = await expireTripChangeProposal({ tripProjectId: "expire-attacker-project", proposalId: "nonexistent-proposal" });
+    expect(result).toEqual({ success: false, reason: "not_found" });
+  });
+});
+
+describe("Story 7.5 expire-on-read and plan history read", () => {
+  beforeAll(async () => {
+    await ensureSystemTripPlanningActor();
+  });
+
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+  });
+
+  test("listPendingProposalsForTripProject expires elapsed pending proposals before returning so they drop out of the pending list", async () => {
+    await ensureSystemTripPlanningActor();
+    await createTestUser("expire-read-user-1");
+    await testDb.insert(tripProjects).values({ id: "expire-read-project-1", userId: "expire-read-user-1", title: "Huế", aggregateVersion: 1 });
+    await testDb.insert(tripPlanItems).values({ id: "expire-read-leg-1", tripProjectId: "expire-read-project-1", userId: "expire-read-user-1", kind: "leg", type: "transport", state: "planned", label: "Chạy xe", ordinal: 0, version: 1 });
+    vi.resetModules();
+    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "expire-read-user-1", email: "expire-read-user-1@example.com" }) }));
+    const { persistAiTripChangeProposalDraft, listPendingProposalsForTripProject, listPlanHistoryForTripProject } = await import("@/features/chat-trips/trip-change-proposals");
+    const persisted = await persistAiTripChangeProposalDraft({
+      tripProjectId: "expire-read-project-1",
+      expectedAggregateVersion: 1,
+      operations: [{ kind: "change-item-state", itemId: "expire-read-leg-1", state: "confirmed" }],
+      rationale: "Hết hạn trên read.",
+      expiresAt: new Date("2026-01-01T00:00:00.000Z"),
+    });
+    if (!persisted.success) throw new Error("persist failed");
+
+    const pending = await listPendingProposalsForTripProject("expire-read-project-1");
+    expect(pending).toHaveLength(0);
+
+    const history = await listPlanHistoryForTripProject("expire-read-project-1");
+    expect(history).toHaveLength(1);
+    expect(history?.[0].operationClass).toBe("expire");
+    expect(history?.[0].actorClass).toBe("system");
+    expect(history?.[0].actorSystem).toBe("system-trip-planning");
+  });
+
+  test("listPlanHistoryForTripProject is owner-scoped and never exposes raw model prompts/responses", async () => {
+    await createTestUser("history-user-1");
+    await createTestUser("history-attacker");
+    await testDb.insert(tripProjects).values({ id: "history-project-1", userId: "history-user-1", title: "Huế", aggregateVersion: 1 });
+    await testDb.insert(tripPlanChangeHistory).values({
+      tripProjectId: "history-project-1",
+      userId: "history-user-1",
+      proposalId: "history-proposal-1",
+      actorUserId: "history-user-1",
+      actorClass: "user",
+      operationClass: "apply",
+      affectedItemReferences: [{ itemId: "leg-1", kind: "leg", label: "Chạy xe", change: "change-state" }],
+      safeBeforeAfterSummary: { entries: [{ operation: "Đổi trạng thái · Chạy xe", before: "Ý tưởng", after: "Đã chốt" }] },
+    });
+
+    vi.resetModules();
+    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "history-user-1", email: "history-user-1@example.com" }) }));
+    const { listPlanHistoryForTripProject } = await import("@/features/chat-trips/trip-change-proposals");
+    const history = await listPlanHistoryForTripProject("history-project-1");
+    expect(history).toHaveLength(1);
+    const serialized = JSON.stringify(history);
+    expect(serialized).not.toContain("prompt");
+    expect(serialized).not.toContain("model");
+    expect(serialized).not.toContain("provider");
+
+    // Cross-owner returns null (no existence leak).
+    vi.resetModules();
+    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "history-attacker", email: "history-attacker@example.com" }) }));
+    const { listPlanHistoryForTripProject: crossOwnerRead } = await import("@/features/chat-trips/trip-change-proposals");
+    const leaked = await crossOwnerRead("history-project-1");
+    expect(leaked).toEqual([]);
+  });
+
+  test("formatPlanHistoryRow produces Vietnamese operation/actor/timestamp labels", async () => {
+    const { formatPlanHistoryRow } = await import("@/features/chat-trips/trip-change-proposals");
+    const view = formatPlanHistoryRow({
+      id: "row-1",
+      proposalId: "proposal-1",
+      operationClass: "apply",
+      actorClass: "user",
+      actorSystem: null,
+      actorUserId: "user-1",
+      createdAt: new Date("2026-07-25T03:00:00.000Z"),
+      affectedItemReferences: [{ itemId: "leg-1", kind: "leg", label: "Chạy xe", change: "change-state" }],
+      safeBeforeAfterSummary: [{ operation: "Đổi trạng thái", before: null, after: "Đã chốt" }],
+    });
+    expect(view.operationLabel).toBe("Áp dụng");
+    expect(view.actorLabel).toBe("Bạn");
+    expect(view.timestampLabel).toContain("2026-07-25");
+    expect(view.timestampLabel).toContain("giờ Việt Nam");
+    expect(view.affectedItemLabels).toEqual(["Chạy xe"]);
+
+    const systemView = formatPlanHistoryRow({
+      id: "row-2",
+      proposalId: null,
+      operationClass: "expire",
+      actorClass: "system",
+      actorSystem: "system-trip-planning",
+      actorUserId: null,
+      createdAt: new Date("2026-07-25T03:00:00.000Z"),
+      affectedItemReferences: [],
+      safeBeforeAfterSummary: [],
+    });
+    expect(systemView.operationLabel).toBe("Đã hết hạn");
+    expect(systemView.actorLabel).toBe("Hệ thống");
   });
 });

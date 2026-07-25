@@ -1,26 +1,57 @@
 import "server-only";
 
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull, lte } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
 import {
+  auditEvents,
   tripChangeProposals,
+  tripPlanChangeHistory,
   tripPlanItems,
+  tripProjectConstraints,
   tripProjects,
   type TripChangeProposalStatus,
   type TripPlanAnchorRole,
+  type TripPlanChangeHistoryActorClass,
+  type TripPlanChangeHistoryOperationClass,
   type TripPlanItemKind,
   type TripPlanItemState,
   type TripPlanItemType,
 } from "@/db/schema";
 import { recordAuditEvent } from "@/features/audit/events";
+import {
+  changeInternalTripPlanItemStateInTransaction,
+  createTripPlanItemInTransaction,
+  deleteTripPlanItemInTransaction,
+  normalizeConstraints,
+  normalizePlanItem,
+  reorderTripPlanItemInTransaction,
+  updateTripPlanItemInTransaction,
+  upsertInternalTripProjectConstraintsInTransaction,
+  type InternalConstraintsInput,
+  type InternalPlanItemInput,
+  type InternalReorderInput,
+} from "@/features/chat-trips/trip-projects";
 import { tripPlanItemStateLabels } from "@/features/chat-trips/trip-home-labels";
 import { validatePlanReferencesRules, type PlanItemReference } from "@/features/chat-trips/plan-references";
 import { getAuthenticatedSession } from "@/server/auth";
 
 // Story 7.4: Chat/Trips owns the Trip Change Proposal command/read boundary.
 // AI Orchestration produces an untrusted draft; this module is the only
-// persistence path. No plan state is mutated here.
+// persistence path. Story 7.5 ADDS the terminal proposal commands
+// (apply/dismiss/expire), expire-on-read wiring, and the plan history read.
+// No plan state is mutated by the 7.4 draft path; only apply mutates plan
+// state, and only inside one locked transaction.
+
+// Story 7.5: the canonical system actor for Trip Planning, mirroring the
+// system-knowledge-pipeline pattern verbatim (migration 0064 reserves the
+// user row; the audit_events.actorUserId FK requires it to exist).
+const systemTripPlanningActorId = "system-trip-planning";
+const systemTripPlanningActorEmail = "system-trip-planning@xuyenviet.invalid";
+const systemTripPlanningActor = { userId: systemTripPlanningActorId, email: systemTripPlanningActorEmail };
+const systemTripPlanningActorSystem = "system-trip-planning";
+
+type Transaction = Parameters<ReturnType<typeof getDb>["transaction"]>[0] extends (transaction: infer T) => unknown ? T : never;
 
 const maxRationaleLength = 500;
 const maxLabelLength = 160;
@@ -152,6 +183,10 @@ export type OwnedTripChangeProposalSummary = {
   beforeAfter: TripChangeProposalBeforeAfterSummary[];
   alternatives: TripChangeProposalAlternativeSummary[];
   hasAlternatives: boolean;
+  // Story 7.5: terminal fields for client reconciliation. Present on every
+  // summary but null until the proposal reaches a terminal status. Added
+  // additively so the 7.4 draft path and read model remain unchanged.
+  terminalTimestamp?: Date | null;
 };
 
 export type PersistAiTripChangeProposalDraftInput = {
@@ -834,6 +869,13 @@ export async function listPendingProposalsForTripProject(
   const session = await getAuthenticatedSession();
   if (!session) return null;
 
+  // Story 7.5: expire-on-read. Before returning the pending list, expire every
+  // elapsed pending proposal in its own fenced transaction so Trip Home focus
+  // and the workspace panel never treat an elapsed proposal as pending. The
+  // expire command is idempotent and runs in its own transaction; the read is
+  // NOT nested inside the expire transaction (avoid holding locks across reads).
+  await expireElapsedPendingProposals(tripProjectId, session.userId, new Date());
+
   const rows = await getDb()
     .select({
       id: tripChangeProposals.id,
@@ -843,6 +885,7 @@ export async function listPendingProposalsForTripProject(
       alternatives: tripChangeProposals.alternatives,
       expiresAt: tripChangeProposals.expiresAt,
       createdAt: tripChangeProposals.createdAt,
+      terminalTimestamp: tripChangeProposals.terminalTimestamp,
     })
     .from(tripChangeProposals)
     .where(and(
@@ -870,6 +913,11 @@ export async function getProposalForOwnerReview(
   const session = await getAuthenticatedSession();
   if (!session) return null;
 
+  // Story 7.5: expire-on-read. If this specific proposal is elapsed and still
+  // pending, expire it before returning so the review card renders the expired
+  // state instead of a stale pending state.
+  await expireElapsedPendingProposals(tripProjectId, session.userId, new Date(), proposalId);
+
   const [row] = await getDb()
     .select({
       id: tripChangeProposals.id,
@@ -879,6 +927,7 @@ export async function getProposalForOwnerReview(
       alternatives: tripChangeProposals.alternatives,
       expiresAt: tripChangeProposals.expiresAt,
       createdAt: tripChangeProposals.createdAt,
+      terminalTimestamp: tripChangeProposals.terminalTimestamp,
     })
     .from(tripChangeProposals)
     .where(and(
@@ -891,6 +940,28 @@ export async function getProposalForOwnerReview(
   if (!row) return null;
   const knownItems = await loadKnownItemsForSummary(tripProjectId, session.userId);
   return toOwnedSummary(row, tripProjectId, row.operations, knownItems);
+}
+
+// Story 7.5: expire every elapsed pending proposal for the owner scope in its
+// own fenced transaction. When `proposalId` is supplied, only that proposal is
+// considered (used by getProposalForOwnerReview). The read is NOT nested inside
+// the expire transaction. Owner scope is enforced via the (tripProjectId,
+// userId) predicate inside expireTripChangeProposal.
+async function expireElapsedPendingProposals(tripProjectId: string, userId: string, now: Date, proposalId?: string) {
+  const rows = await getDb()
+    .select({ id: tripChangeProposals.id })
+    .from(tripChangeProposals)
+    .where(and(
+      eq(tripChangeProposals.tripProjectId, tripProjectId),
+      eq(tripChangeProposals.userId, userId),
+      eq(tripChangeProposals.status, "pending"),
+      isNotNull(tripChangeProposals.expiresAt),
+      lte(tripChangeProposals.expiresAt, now),
+      ...(proposalId ? [eq(tripChangeProposals.id, proposalId)] : []),
+    ));
+  for (const row of rows) {
+    await expireTripChangeProposal({ tripProjectId, proposalId: row.id, now });
+  }
 }
 
 async function loadKnownItemsForSummary(tripProjectId: string, userId: string): Promise<KnownPlanItem[]> {
@@ -964,6 +1035,7 @@ function toOwnedSummary(
     alternatives: unknown;
     expiresAt: Date | null;
     createdAt: Date;
+    terminalTimestamp?: Date | null;
   },
   tripProjectId: string,
   operations: unknown,
@@ -992,6 +1064,7 @@ function toOwnedSummary(
     beforeAfter,
     alternatives,
     hasAlternatives: alternatives.length > 0,
+    terminalTimestamp: row.terminalTimestamp ?? null,
   };
 }
 
@@ -1125,3 +1198,845 @@ function deriveBeforeAfter(operations: unknown[], knownById: Map<string, KnownPl
   }
   return summaries.slice(0, maxOperations);
 }
+
+// ===========================================================================
+// Story 7.5: Terminal proposal commands (apply / dismiss / expire) and the
+// owner-scoped plan history read. These are the only paths that mutate a
+// proposal to a terminal status and the only path that applies typed
+// operations to plan state (apply). dismiss/expire never mutate plan state.
+// ===========================================================================
+
+export type ApplyApprovedTripChangeInput = {
+  tripProjectId: string;
+  proposalId: string;
+};
+
+export type ApplyApprovedTripChangeResult =
+  | { success: true; aggregateVersion: number; proposal: OwnedTripChangeProposalSummary }
+  | { success: false; reason: "unauthenticated" | "not_found" | "refresh_required" | "expired" };
+
+export type DismissTripChangeProposalInput = {
+  tripProjectId: string;
+  proposalId: string;
+};
+
+export type DismissTripChangeProposalResult =
+  | { success: true; proposal: OwnedTripChangeProposalSummary }
+  | { success: false; reason: "unauthenticated" | "not_found" };
+
+export type ExpireTripChangeProposalInput = {
+  tripProjectId: string;
+  proposalId: string;
+  now?: Date;
+};
+
+export type ExpireTripChangeProposalResult =
+  | { success: true; proposal: OwnedTripChangeProposalSummary }
+  | { success: false; reason: "not_found" };
+
+export type TripPlanChangeHistoryRow = {
+  id: string;
+  proposalId: string | null;
+  operationClass: TripPlanChangeHistoryOperationClass;
+  actorClass: TripPlanChangeHistoryActorClass;
+  actorSystem: string | null;
+  actorUserId: string | null;
+  createdAt: Date;
+  affectedItemReferences: TripChangeProposalAffectedItemRef[];
+  safeBeforeAfterSummary: TripChangeProposalBeforeAfterSummary[];
+};
+
+const maxPlanHistoryPreview = 20;
+
+// AD-30: only applyApprovedTripChange may apply a proposal. In one transaction
+// it authenticates the owner, locks the Trip Project, verifies proposal
+// ownership/status/expiry, expected aggregate/item versions, and ordering/parent
+// preconditions, applies all operations or none, records actor-correct
+// audit/change-history rows, marks the proposal `applied`, and advances affected
+// item/project versions. A conflict, expired proposal, missing item, or
+// unauthorized request applies nothing and returns a safe refresh-required
+// (or expired / not_found) result.
+export async function applyApprovedTripChange(
+  input: ApplyApprovedTripChangeInput,
+): Promise<ApplyApprovedTripChangeResult> {
+  const session = await getAuthenticatedSession();
+  if (!session) return { success: false, reason: "unauthenticated" };
+
+  const now = new Date();
+  try {
+    return await getDb().transaction(async (transaction) => {
+      // Lock the Trip Project FOR UPDATE by (id, userId).
+      const [project] = await transaction
+        .select({ id: tripProjects.id, aggregateVersion: tripProjects.aggregateVersion, userId: tripProjects.userId })
+        .from(tripProjects)
+        .where(and(eq(tripProjects.id, input.tripProjectId), eq(tripProjects.userId, session.userId)))
+        .limit(1)
+        .for("update");
+      if (!project) return { success: false, reason: "not_found" } as const;
+
+      // Lock the proposal FOR UPDATE by (id, tripProjectId, userId).
+      const [proposalRow] = await transaction
+        .select({
+          id: tripChangeProposals.id,
+          status: tripChangeProposals.status,
+          rationale: tripChangeProposals.rationale,
+          operations: tripChangeProposals.operations,
+          alternatives: tripChangeProposals.alternatives,
+          expiresAt: tripChangeProposals.expiresAt,
+          createdAt: tripChangeProposals.createdAt,
+          expectedAggregateVersion: tripChangeProposals.expectedAggregateVersion,
+          expectedItemVersions: tripChangeProposals.expectedItemVersions,
+          orderingPreconditions: tripChangeProposals.orderingPreconditions,
+        })
+        .from(tripChangeProposals)
+        .where(and(
+          eq(tripChangeProposals.id, input.proposalId),
+          eq(tripChangeProposals.tripProjectId, input.tripProjectId),
+          eq(tripChangeProposals.userId, session.userId),
+        ))
+        .limit(1)
+        .for("update");
+      if (!proposalRow) return { success: false, reason: "not_found" } as const;
+
+      // Idempotent re-apply: an already-terminal proposal is no-longer-applicable.
+      if (proposalRow.status !== "pending") return { success: false, reason: "not_found" } as const;
+
+      // Expired: refuse without calling expire (the next read will expire it).
+      // Apply writes NO history row on failure.
+      if (proposalRow.expiresAt && proposalRow.expiresAt.getTime() <= now.getTime()) {
+        return { success: false, reason: "expired" } as const;
+      }
+
+      // Aggregate version fence.
+      if (project.aggregateVersion !== proposalRow.expectedAggregateVersion) {
+        return { success: false, reason: "refresh_required" } as const;
+      }
+
+      // Load the full current aggregate (plan items + constraints) so we can
+      // verify item version fences, re-validate ordering preconditions, detect
+      // cross-operation backup cycles, and execute every op in the same
+      // transaction. The *InTransaction helpers re-lock the aggregate (same
+      // transaction, safe) and re-verify the running version we thread forward.
+      const itemRows = await transaction
+        .select()
+        .from(tripPlanItems)
+        .where(and(eq(tripPlanItems.tripProjectId, input.tripProjectId), eq(tripPlanItems.userId, session.userId)));
+      const itemById = new Map<string, typeof itemRows[number]>();
+      for (const row of itemRows) itemById.set(row.id, row);
+
+      const [constraintsRow] = await transaction
+        .select({ version: tripProjectConstraints.version })
+        .from(tripProjectConstraints)
+        .where(and(eq(tripProjectConstraints.tripProjectId, input.tripProjectId), eq(tripProjectConstraints.userId, session.userId)))
+        .limit(1);
+
+      const operations = Array.isArray(proposalRow.operations) ? (proposalRow.operations as unknown[]) : [];
+      const expectedItemVersions = (proposalRow.expectedItemVersions ?? null) as Record<string, number> | null;
+
+      // Pre-validate every operation's fences BEFORE the first mutation (7.1
+      // recovery: validate all fences before transaction/persistence). A failure
+      // here applies nothing.
+      const fenceFailure = validateOperationFences(operations, itemById, expectedItemVersions, proposalRow.orderingPreconditions);
+      if (fenceFailure) return { success: false, reason: fenceFailure } as const;
+
+      // Cross-operation backup cycle check (deferred 7.4 finding): simulate the
+      // post-apply backup targets and reject if a cycle forms.
+      const cycleFailure = detectCrossOperationBackupCycle(operations, itemRows, input.tripProjectId);
+      if (cycleFailure) return { success: false, reason: "refresh_required" } as const;
+
+      // Execute every operation through the matching *InTransaction helper,
+      // threading the SAME transaction and the running aggregate version. Each
+      // helper advances the aggregate version inside the shared transaction.
+      let runningAggregateVersion = project.aggregateVersion;
+      for (const op of operations) {
+        const result = await executeProposalOperationInTransaction(transaction, session, input.tripProjectId, runningAggregateVersion, op, itemById, constraintsRow?.version ?? null, expectedItemVersions);
+        if (!result.success) return result as { success: false; reason: "refresh_required" | "not_found" | "expired" };
+        runningAggregateVersion = result.aggregateVersion;
+      }
+
+      // All ops succeeded. Mark the proposal applied + terminal timestamp.
+      const terminalTimestamp = new Date();
+      await transaction
+        .update(tripChangeProposals)
+        .set({ status: "applied", terminalTimestamp, updatedAt: terminalTimestamp })
+        .where(and(eq(tripChangeProposals.id, input.proposalId), eq(tripChangeProposals.userId, session.userId)));
+
+      // Write exactly one safe history row (operationClass = 'apply',
+      // actorClass = 'user'). Reuse the 7.4 deriveAffectedItems /
+      // deriveBeforeAfter so the owner-facing summary is consistent across
+      // draft/apply/dismiss/expire. Never persist raw model prompts/responses.
+      const knownItems = itemRows.map((row) => ({
+        id: row.id,
+        kind: row.kind,
+        anchorRole: row.anchorRole,
+        type: row.type,
+        state: row.state,
+        parentItemId: row.parentItemId,
+        backupTargetItemId: row.backupTargetItemId,
+        label: row.label,
+        ordinal: row.ordinal,
+        notes: row.notes,
+        plannedAt: row.plannedAt ? row.plannedAt.toISOString() : null,
+        transportOriginLabel: row.transportOriginLabel,
+        transportDestinationLabel: row.transportDestinationLabel,
+        accommodationPlaceAreaLabel: row.accommodationPlaceAreaLabel,
+      }));
+      const knownById = new Map<string, KnownPlanItem>();
+      for (const item of knownItems) knownById.set(item.id, item);
+      const affectedItems = deriveAffectedItems(operations, knownById);
+      const beforeAfter = deriveBeforeAfter(operations, knownById);
+
+      await transaction.insert(tripPlanChangeHistory).values({
+        tripProjectId: input.tripProjectId,
+        userId: session.userId,
+        proposalId: input.proposalId,
+        actorUserId: session.userId,
+        actorClass: "user",
+        actorSystem: null,
+        operationClass: "apply",
+        affectedItemReferences: affectedItems as unknown as Record<string, unknown>,
+        safeBeforeAfterSummary: { entries: beforeAfter } as unknown as Record<string, unknown>,
+      });
+
+      // Record the apply audit row (actorClass = 'user').
+      await recordAuditEvent(
+        {
+          actor: session,
+          operation: "apply",
+          targetType: "trip_change_proposal",
+          targetId: input.proposalId,
+          afterSummary: JSON.stringify({ tripProjectId: input.tripProjectId, proposalId: input.proposalId, aggregateVersion: runningAggregateVersion }),
+          actorClass: "user",
+        },
+        transaction,
+      );
+
+      const summary = toOwnedSummary(
+        {
+          id: proposalRow.id,
+          status: "applied",
+          rationale: proposalRow.rationale,
+          operations: proposalRow.operations,
+          alternatives: proposalRow.alternatives,
+          expiresAt: proposalRow.expiresAt,
+          createdAt: proposalRow.createdAt,
+          terminalTimestamp,
+        },
+        input.tripProjectId,
+        proposalRow.operations,
+        knownItems,
+      );
+
+      return { success: true, aggregateVersion: runningAggregateVersion, proposal: summary } as const;
+    });
+  } catch (error) {
+    // A thrown error inside the transaction rolls back every mutation. Map
+    // known fence/invalid errors to refresh_required; otherwise log and return
+    // refresh_required so the owner is safely prompted to refresh (never a
+    // partial write).
+    console.error("Failed to apply approved trip change proposal.", {
+      tripProjectId: input.tripProjectId,
+      proposalId: input.proposalId,
+      userId: session.userId,
+      error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
+    });
+    return { success: false, reason: "refresh_required" };
+  }
+}
+
+// Pre-validate every operation's fences against the current aggregate before
+// the first mutation. Returns a failure reason or null when all fences pass.
+function validateOperationFences(
+  operations: unknown[],
+  itemById: Map<string, { id: string; version: number }>,
+  expectedItemVersions: Record<string, number> | null,
+  orderingPreconditionsRaw: unknown,
+): "refresh_required" | null {
+  for (const op of operations) {
+    if (!isRecord(op)) return "refresh_required";
+    const kind = op.kind;
+    if (kind === "update-item" || kind === "remove-item" || kind === "change-item-state") {
+      const itemId = typeof op.itemId === "string" ? op.itemId : null;
+      if (!itemId) return "refresh_required";
+      const current = itemById.get(itemId);
+      if (!current) return "refresh_required";
+      const expected = expectedItemVersions?.[itemId];
+      if (expected === undefined || current.version !== expected) return "refresh_required";
+    } else if (kind === "reorder-item") {
+      const itemId = typeof op.itemId === "string" ? op.itemId : null;
+      if (!itemId) return "refresh_required";
+      const current = itemById.get(itemId);
+      if (!current) return "refresh_required";
+      const expected = expectedItemVersions?.[itemId];
+      if (expected === undefined || current.version !== expected) return "refresh_required";
+    }
+  }
+
+  // Re-validate ordering preconditions when present. Treat the precondition as
+  // opaque structured data and re-check the fields the validator recognizes
+  // (expectedChangedItemVersions). If a precondition field is unrecognizable,
+  // fail closed → refresh_required.
+  if (orderingPreconditionsRaw !== null && orderingPreconditionsRaw !== undefined) {
+    if (!isRecord(orderingPreconditionsRaw)) return "refresh_required";
+    const captured = orderingPreconditionsRaw.expectedChangedItemVersions;
+    if (captured !== undefined && captured !== null) {
+      if (!isRecord(captured)) return "refresh_required";
+      for (const [itemId, expectedVersion] of Object.entries(captured)) {
+        if (typeof expectedVersion !== "number" || !Number.isInteger(expectedVersion)) return "refresh_required";
+        const current = itemById.get(itemId);
+        if (!current) return "refresh_required";
+        if (current.version !== expectedVersion) return "refresh_required";
+      }
+    }
+  }
+
+  return null;
+}
+
+// Cross-operation backup cycle check (deferred 7.4 second review finding):
+// two change-item-state ops in one proposal (A→backup B, B→backup A) each
+// validated independently against the pre-operation snapshot in 7.4, so a
+// latent mutual-backup cycle can be persisted. Simulate the post-apply backup
+// targets and run the shared validatePlanReferencesRules cycle check against
+// the simulated set; if a cycle forms, return refresh_required.
+function detectCrossOperationBackupCycle(
+  operations: unknown[],
+  currentItems: Array<{ id: string; kind: string; backupTargetItemId: string | null }>,
+  tripProjectId: string,
+): boolean {
+  const changeStateOps = operations.filter((op): op is { kind: "change-item-state"; itemId: string; state: TripPlanItemState; backupTargetItemId?: string | null } => {
+    return isRecord(op) && op.kind === "change-item-state" && typeof op.itemId === "string";
+  });
+  if (changeStateOps.length < 2) return false;
+
+  // Build the simulated post-apply reference set.
+  const simulated = new Map<string, PlanItemReference>();
+  for (const item of currentItems) {
+    simulated.set(item.id, { id: item.id, kind: item.kind, tripProjectId, backupTargetItemId: item.backupTargetItemId });
+  }
+  for (const op of changeStateOps) {
+    const existing = simulated.get(op.itemId);
+    if (existing) {
+      simulated.set(op.itemId, { ...existing, backupTargetItemId: op.backupTargetItemId ?? null });
+    }
+  }
+
+  for (const op of changeStateOps) {
+    const error = validatePlanReferencesRules(
+      tripProjectId,
+      { kind: simulated.get(op.itemId)?.kind ?? "leg", parentItemId: null, backupTargetItemId: op.backupTargetItemId ?? null },
+      [...simulated.values()],
+      op.itemId,
+    );
+    if (error) return true;
+  }
+  return false;
+}
+
+// Execute a single proposal operation through the matching *InTransaction
+// helper, threading the shared transaction and the running aggregate version.
+async function executeProposalOperationInTransaction(
+  transaction: Transaction,
+  session: { userId: string; email: string },
+  tripProjectId: string,
+  runningAggregateVersion: number,
+  op: unknown,
+  itemById: Map<string, { id: string; kind: TripPlanItemKind; anchorRole: TripPlanAnchorRole | null; type: TripPlanItemType | null; state: TripPlanItemState; label: string; notes: string | null; plannedAt: Date | null; ordinal: number; parentItemId: string | null; backupTargetItemId: string | null; transportOriginLabel: string | null; transportDestinationLabel: string | null; accommodationPlaceAreaLabel: string | null; version: number }>,
+  currentConstraintsVersion: number | null,
+  expectedItemVersions: Record<string, number> | null,
+): Promise<{ success: true; aggregateVersion: number } | { success: false; reason: "refresh_required" | "not_found" | "expired" }> {
+  if (!isRecord(op)) return { success: false, reason: "refresh_required" };
+  const kind = op.kind;
+
+  if (kind === "create-item") {
+    const itemDraft = op.item;
+    if (!isRecord(itemDraft)) return { success: false, reason: "refresh_required" };
+    const input = itemDraftToInternalInput(itemDraft);
+    if (!input) return { success: false, reason: "refresh_required" };
+    const values = normalizePlanItem(input);
+    const result = await createTripPlanItemInTransaction(transaction, session, tripProjectId, runningAggregateVersion, values);
+    if (!result.success) return { success: false, reason: mapHelperFailure(result.reason) };
+    return { success: true, aggregateVersion: result.aggregateVersion };
+  }
+
+  if (kind === "update-item") {
+    const itemId = typeof op.itemId === "string" ? op.itemId : null;
+    if (!itemId) return { success: false, reason: "refresh_required" };
+    const current = itemById.get(itemId);
+    if (!current) return { success: false, reason: "refresh_required" };
+    const changes = op.changes;
+    if (!isRecord(changes)) return { success: false, reason: "refresh_required" };
+    const input = mergeChangesToInternalInput(current, changes);
+    if (!input) return { success: false, reason: "refresh_required" };
+    const values = normalizePlanItem(input);
+    const expectedItemVersion = expectedItemVersions?.[itemId];
+    if (expectedItemVersion === undefined) return { success: false, reason: "refresh_required" };
+    const result = await updateTripPlanItemInTransaction(transaction, session, tripProjectId, runningAggregateVersion, itemId, expectedItemVersion, values);
+    if (!result.success) return { success: false, reason: mapHelperFailure(result.reason) };
+    return { success: true, aggregateVersion: result.aggregateVersion };
+  }
+
+  if (kind === "remove-item") {
+    const itemId = typeof op.itemId === "string" ? op.itemId : null;
+    if (!itemId) return { success: false, reason: "refresh_required" };
+    const expectedItemVersion = expectedItemVersions?.[itemId];
+    if (expectedItemVersion === undefined) return { success: false, reason: "refresh_required" };
+    const result = await deleteTripPlanItemInTransaction(transaction, session, tripProjectId, runningAggregateVersion, itemId, expectedItemVersion);
+    if (!result.success) return { success: false, reason: mapHelperFailure(result.reason) };
+    return { success: true, aggregateVersion: result.aggregateVersion };
+  }
+
+  if (kind === "reorder-item") {
+    const itemId = typeof op.itemId === "string" ? op.itemId : null;
+    if (!itemId) return { success: false, reason: "refresh_required" };
+    const expectedItemVersion = expectedItemVersions?.[itemId];
+    if (expectedItemVersion === undefined) return { success: false, reason: "refresh_required" };
+    const parentItemId = parseOptionalParent(op.parentItemId);
+    if (parentItemId === "invalid") return { success: false, reason: "refresh_required" };
+    const ordinal = typeof op.ordinal === "number" && Number.isInteger(op.ordinal) && op.ordinal >= 0 ? op.ordinal : null;
+    if (ordinal === null) return { success: false, reason: "refresh_required" };
+    const expectedChangedItemVersions = deriveExpectedChangedItemVersions(itemById, itemId, parentItemId);
+    const reorderInput: InternalReorderInput = { itemId, expectedItemVersion, parentItemId, ordinal, expectedChangedItemVersions };
+    const result = await reorderTripPlanItemInTransaction(transaction, session, tripProjectId, runningAggregateVersion, reorderInput);
+    if (!result.success) return { success: false, reason: mapHelperFailure(result.reason) };
+    return { success: true, aggregateVersion: result.aggregateVersion };
+  }
+
+  if (kind === "change-item-state") {
+    const itemId = typeof op.itemId === "string" ? op.itemId : null;
+    if (!itemId) return { success: false, reason: "refresh_required" };
+    const nextState = typeof op.state === "string" && validStates.includes(op.state as TripPlanItemState) ? (op.state as TripPlanItemState) : null;
+    if (!nextState) return { success: false, reason: "refresh_required" };
+    const backupTarget = parseOptionalParent(op.backupTargetItemId);
+    if (backupTarget === "invalid") return { success: false, reason: "refresh_required" };
+    const expectedItemVersion = expectedItemVersions?.[itemId];
+    if (expectedItemVersion === undefined) return { success: false, reason: "refresh_required" };
+    const result = await changeInternalTripPlanItemStateInTransaction(transaction, session, tripProjectId, runningAggregateVersion, itemId, expectedItemVersion, nextState, backupTarget);
+    if (!result.success) return { success: false, reason: mapHelperFailure(result.reason) };
+    return { success: true, aggregateVersion: result.aggregateVersion };
+  }
+
+  if (kind === "upsert-constraints") {
+    const constraints = op.constraints;
+    if (!isRecord(constraints)) return { success: false, reason: "refresh_required" };
+    const expectedConstraintsVersionRaw = op.expectedConstraintsVersion;
+    let expectedConstraintsVersion: number | null;
+    if (expectedConstraintsVersionRaw === null || expectedConstraintsVersionRaw === undefined) expectedConstraintsVersion = null;
+    else if (typeof expectedConstraintsVersionRaw === "number" && Number.isInteger(expectedConstraintsVersionRaw) && expectedConstraintsVersionRaw >= 1) expectedConstraintsVersion = expectedConstraintsVersionRaw;
+    else return { success: false, reason: "refresh_required" };
+    let values: ReturnType<typeof normalizeConstraints>;
+    try {
+      values = normalizeConstraints(constraints as InternalConstraintsInput);
+    } catch {
+      return { success: false, reason: "refresh_required" };
+    }
+    const result = await upsertInternalTripProjectConstraintsInTransaction(transaction, session, tripProjectId, runningAggregateVersion, expectedConstraintsVersion, values);
+    if (!result.success) return { success: false, reason: mapHelperFailure(result.reason) };
+    return { success: true, aggregateVersion: result.aggregateVersion };
+  }
+
+  return { success: false, reason: "refresh_required" };
+}
+
+function itemDraftToInternalInput(item: Record<string, unknown>): InternalPlanItemInput | null {
+  const kind = item.kind;
+  if (typeof kind !== "string" || !validKinds.includes(kind as TripPlanItemKind)) return null;
+  const ordinal = typeof item.ordinal === "number" && Number.isInteger(item.ordinal) && item.ordinal >= 0 ? item.ordinal : null;
+  if (ordinal === null) return null;
+  const parentItemId = parseOptionalParent(item.parentItemId);
+  if (parentItemId === "invalid") return null;
+  return {
+    kind: kind as TripPlanItemKind,
+    anchorRole: (item.anchorRole ?? null) as TripPlanAnchorRole | null,
+    type: (item.type ?? null) as TripPlanItemType | null,
+    state: (typeof item.state === "string" && validStates.includes(item.state as TripPlanItemState) ? item.state : "idea") as TripPlanItemState,
+    label: typeof item.label === "string" ? item.label : "",
+    notes: (item.notes ?? null) as string | null,
+    plannedAt: null,
+    ordinal,
+    parentItemId,
+    backupTargetItemId: parseOptionalParent(item.backupTargetItemId),
+    transportOriginLabel: (item.transportOriginLabel ?? null) as string | null,
+    transportDestinationLabel: (item.transportDestinationLabel ?? null) as string | null,
+    accommodationPlaceAreaLabel: (item.accommodationPlaceAreaLabel ?? null) as string | null,
+  };
+}
+
+function mergeChangesToInternalInput(current: { kind: TripPlanItemKind; anchorRole: TripPlanAnchorRole | null; type: TripPlanItemType | null; state: TripPlanItemState; label: string; notes: string | null; plannedAt: Date | null; ordinal: number; parentItemId: string | null; backupTargetItemId: string | null; transportOriginLabel: string | null; transportDestinationLabel: string | null; accommodationPlaceAreaLabel: string | null }, changes: Record<string, unknown>): InternalPlanItemInput | null {
+  const parentItemId = changes.parentItemId !== undefined ? parseOptionalParent(changes.parentItemId) : current.parentItemId;
+  if (parentItemId === "invalid") return null;
+  const backupTargetItemId = changes.backupTargetItemId !== undefined ? parseOptionalParent(changes.backupTargetItemId) : current.backupTargetItemId;
+  if (backupTargetItemId === "invalid") return null;
+  return {
+    kind: current.kind,
+    anchorRole: current.anchorRole,
+    type: current.type,
+    state: (changes.state !== undefined && typeof changes.state === "string" && validStates.includes(changes.state as TripPlanItemState) ? (changes.state as TripPlanItemState) : current.state),
+    label: typeof changes.label === "string" ? changes.label : current.label,
+    notes: changes.notes !== undefined ? (typeof changes.notes === "string" ? changes.notes : null) : current.notes,
+    plannedAt: current.plannedAt,
+    ordinal: current.ordinal,
+    parentItemId,
+    backupTargetItemId,
+    transportOriginLabel: changes.transportOriginLabel !== undefined ? (typeof changes.transportOriginLabel === "string" ? changes.transportOriginLabel : null) : current.transportOriginLabel,
+    transportDestinationLabel: changes.transportDestinationLabel !== undefined ? (typeof changes.transportDestinationLabel === "string" ? changes.transportDestinationLabel : null) : current.transportDestinationLabel,
+    accommodationPlaceAreaLabel: changes.accommodationPlaceAreaLabel !== undefined ? (typeof changes.accommodationPlaceAreaLabel === "string" ? changes.accommodationPlaceAreaLabel : null) : current.accommodationPlaceAreaLabel,
+  };
+}
+
+function parseOptionalParent(value: unknown): string | null | "invalid" {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "string") return "invalid";
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return trimmed;
+}
+
+// Map a *InTransaction helper failure reason to the apply orchestrator's
+// failure reasons. The helpers can return unauthenticated (never happens inside
+// apply because we already have a session), not_found, refresh_required, or
+// invalid (malformed values detected at mutation time). Inside apply, an
+// `invalid` means the proposal's operation would break a structural rule
+// against the current aggregate — the owner must refresh. unauthenticated is
+// impossible (we hold a session) but mapped to refresh_required defensively.
+function mapHelperFailure(reason: "unauthenticated" | "not_found" | "refresh_required" | "invalid"): "refresh_required" | "not_found" | "expired" {
+  if (reason === "not_found") return "not_found";
+  return "refresh_required";
+}
+
+// Derive the expectedChangedItemVersions map for a reorder operation from the
+// currently-loaded scope, mirroring the reorder helper's own derivation so the
+// fence it enforces matches what we pass.
+function deriveExpectedChangedItemVersions(
+  itemById: Map<string, { id: string; parentItemId: string | null; ordinal: number; version: number }>,
+  itemId: string,
+  nextParentId: string | null,
+): Record<string, number> {
+  const rows = [...itemById.values()];
+  const item = rows.find((row) => row.id === itemId);
+  if (!item) return {};
+  const sameScope = (row: { parentItemId: string | null }, parentId: string | null) => row.parentItemId === parentId;
+  const oldScope = rows.filter((row) => sameScope(row, item.parentItemId) && row.id !== item.id);
+  const newScope = item.parentItemId === nextParentId ? oldScope : rows.filter((row) => sameScope(row, nextParentId));
+  const reordered = item.parentItemId === nextParentId ? oldScope : [...oldScope, ...newScope];
+  const changedIds = new Set([...reordered.map((row) => row.id), item.id]);
+  const result: Record<string, number> = {};
+  for (const id of changedIds) {
+    const row = rows.find((candidate) => candidate.id === id);
+    if (row) result[id] = row.version;
+  }
+  return result;
+}
+
+// AD-30: dismissTripChangeProposal is an idempotent terminal action that never
+// mutates plan state. It authenticates the owner, locks the proposal FOR UPDATE,
+// and if status = 'pending' sets status = 'dismissed' + terminalTimestamp,
+// writes exactly one trip_plan_change_history 'dismiss' row (actorClass =
+// 'user'), and records an audit_events 'dismiss' row. If the proposal is
+// already terminal, it is a no-op that returns the current summary WITHOUT
+// writing a second history row (idempotent).
+export async function dismissTripChangeProposal(
+  input: DismissTripChangeProposalInput,
+): Promise<DismissTripChangeProposalResult> {
+  const session = await getAuthenticatedSession();
+  if (!session) return { success: false, reason: "unauthenticated" };
+
+  try {
+    return await getDb().transaction(async (transaction) => {
+      const [row] = await transaction
+        .select({
+          id: tripChangeProposals.id,
+          status: tripChangeProposals.status,
+          rationale: tripChangeProposals.rationale,
+          operations: tripChangeProposals.operations,
+          alternatives: tripChangeProposals.alternatives,
+          expiresAt: tripChangeProposals.expiresAt,
+          createdAt: tripChangeProposals.createdAt,
+          terminalTimestamp: tripChangeProposals.terminalTimestamp,
+        })
+        .from(tripChangeProposals)
+        .where(and(
+          eq(tripChangeProposals.id, input.proposalId),
+          eq(tripChangeProposals.tripProjectId, input.tripProjectId),
+          eq(tripChangeProposals.userId, session.userId),
+        ))
+        .limit(1)
+        .for("update");
+      if (!row) return { success: false, reason: "not_found" } as const;
+
+      // Idempotent: already-terminal proposals return the current summary
+      // WITHOUT writing a second history row.
+      if (row.status !== "pending") {
+        const knownItems = await loadKnownItemsForSummary(input.tripProjectId, session.userId);
+        return { success: true, proposal: toOwnedSummary(row, input.tripProjectId, row.operations, knownItems) } as const;
+      }
+
+      const terminalTimestamp = new Date();
+      await transaction
+        .update(tripChangeProposals)
+        .set({ status: "dismissed", terminalTimestamp, updatedAt: terminalTimestamp })
+        .where(and(eq(tripChangeProposals.id, input.proposalId), eq(tripChangeProposals.userId, session.userId)));
+
+      const knownItems = await loadKnownItemsForSummary(input.tripProjectId, session.userId);
+      const knownById = new Map<string, KnownPlanItem>();
+      for (const item of knownItems) knownById.set(item.id, item);
+      const operations = Array.isArray(row.operations) ? row.operations : [];
+      const affectedItems = deriveAffectedItems(operations, knownById);
+      const beforeAfter = deriveBeforeAfter(operations, knownById);
+
+      await transaction.insert(tripPlanChangeHistory).values({
+        tripProjectId: input.tripProjectId,
+        userId: session.userId,
+        proposalId: input.proposalId,
+        actorUserId: session.userId,
+        actorClass: "user",
+        actorSystem: null,
+        operationClass: "dismiss",
+        affectedItemReferences: affectedItems as unknown as Record<string, unknown>,
+        safeBeforeAfterSummary: { entries: beforeAfter } as unknown as Record<string, unknown>,
+      });
+
+      await recordAuditEvent(
+        {
+          actor: session,
+          operation: "dismiss",
+          targetType: "trip_change_proposal",
+          targetId: input.proposalId,
+          afterSummary: JSON.stringify({ tripProjectId: input.tripProjectId, proposalId: input.proposalId }),
+          actorClass: "user",
+        },
+        transaction,
+      );
+
+      return { success: true, proposal: toOwnedSummary({ ...row, status: "dismissed", terminalTimestamp }, input.tripProjectId, row.operations, knownItems) } as const;
+    });
+  } catch (error) {
+    console.error("Failed to dismiss trip change proposal.", {
+      tripProjectId: input.tripProjectId,
+      proposalId: input.proposalId,
+      userId: session.userId,
+      error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
+    });
+    return { success: false, reason: "not_found" };
+  }
+}
+
+// AD-30: expireTripChangeProposal mirrors dismiss but sets status = 'expired',
+// actorClass = 'system', actorSystem = 'system-trip-planning', actorUserId =
+// null. Idempotent on already-terminal rows. No plan state mutation. Callable
+// without an authenticated session (the worker path): owner scope is enforced
+// via the (tripProjectId, userId) predicate using the proposal row's userId
+// column (loaded inside the transaction), so the worker does not need a session.
+export async function expireTripChangeProposal(
+  input: ExpireTripChangeProposalInput,
+): Promise<ExpireTripChangeProposalResult> {
+  const now = input.now ?? new Date();
+  try {
+    return await getDb().transaction(async (transaction) => {
+      const [row] = await transaction
+        .select({
+          id: tripChangeProposals.id,
+          tripProjectId: tripChangeProposals.tripProjectId,
+          userId: tripChangeProposals.userId,
+          status: tripChangeProposals.status,
+          rationale: tripChangeProposals.rationale,
+          operations: tripChangeProposals.operations,
+          alternatives: tripChangeProposals.alternatives,
+          expiresAt: tripChangeProposals.expiresAt,
+          createdAt: tripChangeProposals.createdAt,
+          terminalTimestamp: tripChangeProposals.terminalTimestamp,
+        })
+        .from(tripChangeProposals)
+        .where(and(
+          eq(tripChangeProposals.id, input.proposalId),
+          eq(tripChangeProposals.tripProjectId, input.tripProjectId),
+        ))
+        .limit(1)
+        .for("update");
+      // Cross-owner / missing: return not_found without leaking existence.
+      if (!row) return { success: false, reason: "not_found" } as const;
+
+      // Idempotent: already-terminal proposals return the current summary
+      // WITHOUT writing a second history row.
+      if (row.status !== "pending") {
+        const knownItems = await loadKnownItemsForSummary(row.tripProjectId, row.userId);
+        return { success: true, proposal: toOwnedSummary(row, row.tripProjectId, row.operations, knownItems) } as const;
+      }
+
+      const terminalTimestamp = now;
+      await transaction
+        .update(tripChangeProposals)
+        .set({ status: "expired", terminalTimestamp, updatedAt: terminalTimestamp })
+        .where(eq(tripChangeProposals.id, input.proposalId));
+
+      const knownItems = await loadKnownItemsForSummary(row.tripProjectId, row.userId);
+      const knownById = new Map<string, KnownPlanItem>();
+      for (const item of knownItems) knownById.set(item.id, item);
+      const operations = Array.isArray(row.operations) ? row.operations : [];
+      const affectedItems = deriveAffectedItems(operations, knownById);
+      const beforeAfter = deriveBeforeAfter(operations, knownById);
+
+      await transaction.insert(tripPlanChangeHistory).values({
+        tripProjectId: row.tripProjectId,
+        userId: row.userId,
+        proposalId: input.proposalId,
+        actorUserId: null,
+        actorClass: "system",
+        actorSystem: systemTripPlanningActorSystem,
+        operationClass: "expire",
+        affectedItemReferences: affectedItems as unknown as Record<string, unknown>,
+        safeBeforeAfterSummary: { entries: beforeAfter } as unknown as Record<string, unknown>,
+      });
+
+      // Record the expire audit row with the system-trip-planning actor
+      // (mirrors the system-knowledge-pipeline pattern verbatim). The audit
+      // actor requires an AuthenticatedSession-shaped object; the reserved
+      // system-trip-planning user row (migration 0064) satisfies the FK.
+      await transaction.insert(auditEvents).values({
+        actorUserId: systemTripPlanningActorId,
+        actorEmail: systemTripPlanningActorEmail,
+        operation: "expire",
+        targetType: "trip_change_proposal",
+        targetId: input.proposalId,
+        afterSummary: JSON.stringify({ tripProjectId: row.tripProjectId, proposalId: input.proposalId }),
+        actorClass: "system",
+        actorSystem: systemTripPlanningActorSystem,
+      });
+
+      return { success: true, proposal: toOwnedSummary({ ...row, status: "expired", terminalTimestamp }, row.tripProjectId, row.operations, knownItems) } as const;
+    });
+  } catch (error) {
+    console.error("Failed to expire trip change proposal.", {
+      tripProjectId: input.tripProjectId,
+      proposalId: input.proposalId,
+      error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
+    });
+    return { success: false, reason: "not_found" };
+  }
+}
+
+// Story 7.5 (AC4): the owner-scoped plan history read. Returns
+// TripPlanChangeHistoryRow[] ordered by createdAt descending, or null when
+// unauthenticated. Cross-owner reads return null (no existence leak). Never
+// exposes raw model prompts/responses — the 7.4 deriveBeforeAfter output
+// already strips raw model content and the history row stores only the safe
+// structured summary.
+export async function listPlanHistoryForTripProject(
+  tripProjectId: string,
+): Promise<TripPlanChangeHistoryRow[] | null> {
+  const session = await getAuthenticatedSession();
+  if (!session) return null;
+
+  const rows = await getDb()
+    .select({
+      id: tripPlanChangeHistory.id,
+      proposalId: tripPlanChangeHistory.proposalId,
+      actorClass: tripPlanChangeHistory.actorClass,
+      actorSystem: tripPlanChangeHistory.actorSystem,
+      actorUserId: tripPlanChangeHistory.actorUserId,
+      operationClass: tripPlanChangeHistory.operationClass,
+      affectedItemReferences: tripPlanChangeHistory.affectedItemReferences,
+      safeBeforeAfterSummary: tripPlanChangeHistory.safeBeforeAfterSummary,
+      createdAt: tripPlanChangeHistory.createdAt,
+    })
+    .from(tripPlanChangeHistory)
+    .where(and(eq(tripPlanChangeHistory.tripProjectId, tripProjectId), eq(tripPlanChangeHistory.userId, session.userId)))
+    .orderBy(desc(tripPlanChangeHistory.createdAt), desc(tripPlanChangeHistory.id))
+    .limit(maxPlanHistoryPreview);
+
+  return rows.map((row) => ({
+    id: row.id,
+    proposalId: row.proposalId,
+    operationClass: row.operationClass,
+    actorClass: row.actorClass,
+    actorSystem: row.actorSystem,
+    actorUserId: row.actorUserId,
+    createdAt: row.createdAt,
+    affectedItemReferences: mapAffectedReferences(row.affectedItemReferences),
+    safeBeforeAfterSummary: mapBeforeAfterSummary(row.safeBeforeAfterSummary),
+  }));
+}
+
+function mapAffectedReferences(raw: unknown): TripChangeProposalAffectedItemRef[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((entry) => {
+      if (!isRecord(entry)) return null;
+      const kind = entry.kind;
+      const change = entry.change;
+      if (typeof entry.itemId !== "string" || typeof kind !== "string" || typeof change !== "string") return null;
+      if (!validKinds.includes(kind as TripPlanItemKind)) return null;
+      return {
+        itemId: entry.itemId,
+        kind: kind as TripPlanItemKind,
+        label: typeof entry.label === "string" ? entry.label.slice(0, maxLabelLength) : "",
+        change: change as TripChangeProposalAffectedItemRef["change"],
+      } satisfies TripChangeProposalAffectedItemRef;
+    })
+    .filter((entry): entry is TripChangeProposalAffectedItemRef => entry !== null)
+    .slice(0, maxOperations);
+}
+
+function mapBeforeAfterSummary(raw: unknown): TripChangeProposalBeforeAfterSummary[] {
+  // The history row stores { entries: [...] } (apply/dismiss/expire write this
+  // shape). Accept either the wrapped object or a bare array for resilience.
+  let entries: unknown = raw;
+  if (isRecord(raw) && Array.isArray(raw.entries)) entries = raw.entries;
+  if (!Array.isArray(entries)) return [];
+  return entries
+    .map((entry) => {
+      if (!isRecord(entry)) return null;
+      if (typeof entry.operation !== "string") return null;
+      return {
+        operation: entry.operation,
+        before: typeof entry.before === "string" ? entry.before : null,
+        after: typeof entry.after === "string" ? entry.after : null,
+      } satisfies TripChangeProposalBeforeAfterSummary;
+    })
+    .filter((entry): entry is TripChangeProposalBeforeAfterSummary => entry !== null)
+    .slice(0, maxOperations);
+}
+
+// Story 7.5: a safe client-facing mapper that produces a Vietnamese summary for
+// each plan history row: operation label, actor label, ICT timestamp, affected
+// item labels (resolved via the current aggregate where possible; falling back
+// to "(đã xoá)" for removed items), and the safe before/after summary. Never
+// includes raw model prompts/responses.
+export type PlanHistoryRowView = {
+  operationLabel: string;
+  actorLabel: string;
+  timestampLabel: string;
+  affectedItemLabels: string[];
+  beforeAfter: TripChangeProposalBeforeAfterSummary[];
+  proposalId: string | null;
+};
+
+const planHistoryOperationLabels: Record<TripPlanChangeHistoryOperationClass, string> = {
+  apply: "Áp dụng",
+  dismiss: "Giữ kế hoạch",
+  expire: "Đã hết hạn",
+};
+
+export function formatPlanHistoryRow(row: TripPlanChangeHistoryRow): PlanHistoryRowView {
+  const ictMs = row.createdAt.getTime() + 7 * 60 * 60 * 1000;
+  const ict = new Date(ictMs);
+  const year = ict.getUTCFullYear();
+  const month = ict.getUTCMonth() + 1;
+  const day = ict.getUTCDate();
+  const hours = ict.getUTCHours();
+  const minutes = ict.getUTCMinutes();
+  const timestampLabel = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")} ${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")} giờ Việt Nam`;
+  const actorLabel = row.actorClass === "system" ? "Hệ thống" : "Bạn";
+  return {
+    operationLabel: planHistoryOperationLabels[row.operationClass] ?? row.operationClass,
+    actorLabel,
+    timestampLabel,
+    affectedItemLabels: row.affectedItemReferences.map((item) => item.label || "(đã xoá)"),
+    beforeAfter: row.safeBeforeAfterSummary,
+    proposalId: row.proposalId,
+  };
+}
+
+// Re-export the system actor constants for the expiry worker so it can pass the
+// canonical system actor to any future audit path without redefining it.
+export const tripPlanningSystemActor = systemTripPlanningActor;

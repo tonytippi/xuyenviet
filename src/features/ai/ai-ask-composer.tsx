@@ -81,6 +81,9 @@ type CreateTripProjectAction = (
 
 type DeleteConversationAction = (conversationId: string) => Promise<{ success: boolean; error?: string; reason?: "not_found" }>;
 type DeleteTripProjectAction = (tripProjectId: string) => Promise<{ success: boolean; error?: string; reason?: "not_found" }>;
+// Story 7.5: typed server actions for owner-confirmed apply/dismiss.
+type ApplyTripChangeProposalAction = (input: { tripProjectId: string; proposalId: string }) => Promise<{ success: boolean; reason?: "refresh_required" | "not_found" | "expired"; aggregateVersion?: number; proposalStatus?: "applied"; error?: string }>;
+type DismissTripChangeProposalAction = (input: { tripProjectId: string; proposalId: string }) => Promise<{ success: boolean; reason?: "not_found"; proposalStatus?: "dismissed"; error?: string }>;
 type SaveAnswerUsefulnessFeedbackAction = (input: { assistantMessageId: string; rating: AnswerUsefulnessRating; comment?: string | null }) => Promise<{ success: boolean; feedback?: AnswerUsefulnessFeedbackSummary; reason?: "unauthenticated" | "not_found" | "invalid_target" | "invalid_input" | "invalid_rating" | "comment_too_long" | "failed" }>;
 type SignOutAction = () => Promise<void>;
 
@@ -137,6 +140,8 @@ type AiAskComposerProps = {
   createTripProjectAction?: CreateTripProjectAction;
   deleteConversationAction?: DeleteConversationAction;
   deleteTripProjectAction?: DeleteTripProjectAction;
+  applyTripChangeProposalAction?: ApplyTripChangeProposalAction;
+  dismissTripChangeProposalAction?: DismissTripChangeProposalAction;
   saveAnswerUsefulnessFeedbackAction?: SaveAnswerUsefulnessFeedbackAction;
   signOutAction?: SignOutAction;
 };
@@ -568,17 +573,42 @@ export function AnswerDetailPanel({ selectedEntity, panelId, panelRef, onClose }
   );
 }
 
-function AnswerProposalCard({ proposal }: { proposal: ProposalDoneSummary }) {
+function AnswerProposalCard({
+  proposal,
+  onApply,
+  onDismiss,
+  onRefresh,
+  isPending,
+  pendingAction,
+  terminalOutcome,
+  registerOrigin,
+}: {
+  proposal: ProposalDoneSummary;
+  onApply?: () => void;
+  onDismiss?: () => void;
+  onRefresh?: () => void;
+  isPending?: boolean;
+  pendingAction?: "apply" | "dismiss";
+  terminalOutcome?: "applied" | "dismissed" | "expired" | "refresh-required" | null;
+  registerOrigin?: (element: HTMLDivElement | null) => void;
+}) {
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     // Story 7.4 (EXPERIENCE.md interaction primitives): move focus to the
     // proposal heading when a proposal card appears in the answer surface so
     // screen-reader and keyboard users land on the review affordance. The
     // terminal-result focus return to the originating answer card is wired in
-    // 7.5 alongside the apply/dismiss command handlers.
+    // 7.5 (focusOriginAfterTerminal) alongside the apply/dismiss handlers.
     const heading = wrapperRef.current?.querySelector<HTMLHeadingElement>("[tabindex='-1']");
     heading?.focus();
   }, [proposal.proposalId]);
+
+  useEffect(() => {
+    if (registerOrigin) registerOrigin(wrapperRef.current);
+    return () => {
+      if (registerOrigin) registerOrigin(null);
+    };
+  }, [registerOrigin]);
 
   const expiresAt = proposal.expiresAt instanceof Date ? proposal.expiresAt : proposal.expiresAt ? new Date(proposal.expiresAt) : null;
   const alternatives = Array.isArray(proposal.alternatives) ? proposal.alternatives : [];
@@ -605,7 +635,17 @@ function AnswerProposalCard({ proposal }: { proposal: ProposalDoneSummary }) {
 
   return (
     <div ref={wrapperRef} className="mt-4" data-story="7.4">
-      <TripProposalReviewCard idPrefix="answer-" proposal={focusInput} now={new Date()} />
+      <TripProposalReviewCard
+        idPrefix="answer-"
+        proposal={focusInput}
+        now={new Date()}
+        onApply={onApply}
+        onDismiss={onDismiss}
+        onRefresh={onRefresh}
+        isPending={isPending}
+        pendingAction={pendingAction}
+        terminalOutcome={terminalOutcome ?? null}
+      />
     </div>
   );
 }
@@ -632,6 +672,8 @@ export function AiAskComposer({
   createTripProjectAction,
   deleteConversationAction,
   deleteTripProjectAction,
+  applyTripChangeProposalAction,
+  dismissTripChangeProposalAction,
   saveAnswerUsefulnessFeedbackAction,
   signOutAction,
 }: AiAskComposerProps) {
@@ -658,6 +700,11 @@ export function AiAskComposer({
   const [selectedAnswerEntity, setSelectedAnswerEntity] = useState<AnswerEntityDescriptor | null>(null);
   const [isDesktopViewport, setIsDesktopViewport] = useState(false);
   const [isWorkspaceSheetOpen, setWorkspaceSheetOpen] = useState(false);
+  // Story 7.5: per-proposal pending action and terminal outcome state for the
+  // workspace panel + answer-surface proposal cards. Keyed by proposal id.
+  const [proposalPending, setProposalPending] = useState<Record<string, { action: "apply" | "dismiss" } | undefined>>({});
+  const [proposalTerminalOutcome, setProposalTerminalOutcome] = useState<Record<string, "applied" | "dismissed" | "expired" | "refresh-required" | null>>({});
+  const proposalApplyOriginRef = useRef<Record<string, HTMLElement | null>>({});
   const [createProjectState, createProjectFormAction, isCreatingProject] = useActionState<CreateTripProjectFormState | undefined, FormData>(
     createTripProjectAction ?? noOpCreateTripProjectAction,
     undefined,
@@ -1389,6 +1436,113 @@ export function AiAskComposer({
     }
   }
 
+  // Story 7.5: owner-confirmed apply. Calls the server action, shows the
+  // "Applying proposal" pending state (disable duplicate actions, announce via
+  // aria-live), and on success reconciles via router.refresh() so the
+  // server-loaded workspace (Trip Home focus, timeline, pending proposals,
+  // plan history) reflects the new state. On refresh_required / not_found /
+  // expired, preserve the proposal summary, show the stale/conflict copy, and
+  // offer Làm mới đề xuất which focuses the primary conversation composer.
+  async function handleApplyProposal(proposalId: string) {
+    if (!activeTripProjectId || !applyTripChangeProposalAction) return;
+    if (proposalPending[proposalId]) return;
+    const origin = proposalApplyOriginRef.current[proposalId] ?? null;
+    setProposalPending((current) => ({ ...current, [proposalId]: { action: "apply" } }));
+    setStatus("Đang áp dụng đề xuất...");
+    try {
+      const result = await applyTripChangeProposalAction({ tripProjectId: activeTripProjectId, proposalId });
+      if (result.success) {
+        // Update the in-memory proposal status so the answer-surface card
+        // re-renders as terminal immediately, then reconcile from persisted state.
+        setMessages((currentMessages) => currentMessages.map((message) => (
+          message.proposal && message.proposal.proposalId === proposalId
+            ? { ...message, proposal: { ...message.proposal, status: "applied" } }
+            : message
+        )));
+        setProposalTerminalOutcome((current) => ({ ...current, [proposalId]: "applied" }));
+        setStatus("Đã áp dụng đề xuất. Đang làm mới kế hoạch.");
+        router.refresh();
+        // Move focus back to the originating answer card heading (answer
+        // surface) or the Trip Home focus card heading (workspace panel).
+        focusOriginAfterTerminal(origin);
+      } else {
+        setProposalTerminalOutcome((current) => ({ ...current, [proposalId]: "refresh-required" }));
+        setStatus(result.error ?? "Kế hoạch đã thay đổi — vui lòng làm mới đề xuất.");
+      }
+    } catch {
+      setProposalTerminalOutcome((current) => ({ ...current, [proposalId]: "refresh-required" }));
+      setStatus("Không thể áp dụng đề xuất lúc này. Vui lòng thử lại.");
+    } finally {
+      setProposalPending((current) => {
+        const next = { ...current };
+        delete next[proposalId];
+        return next;
+      });
+    }
+  }
+
+  // Story 7.5: owner-confirmed dismiss. Mirrors handleApplyProposal with the
+  // dismiss action and terminal outcome.
+  async function handleDismissProposal(proposalId: string) {
+    if (!activeTripProjectId || !dismissTripChangeProposalAction) return;
+    if (proposalPending[proposalId]) return;
+    const origin = proposalApplyOriginRef.current[proposalId] ?? null;
+    setProposalPending((current) => ({ ...current, [proposalId]: { action: "dismiss" } }));
+    setStatus("Đang giữ kế hoạch...");
+    try {
+      const result = await dismissTripChangeProposalAction({ tripProjectId: activeTripProjectId, proposalId });
+      if (result.success) {
+        setMessages((currentMessages) => currentMessages.map((message) => (
+          message.proposal && message.proposal.proposalId === proposalId
+            ? { ...message, proposal: { ...message.proposal, status: "dismissed" } }
+            : message
+        )));
+        setProposalTerminalOutcome((current) => ({ ...current, [proposalId]: "dismissed" }));
+        setStatus("Đã giữ kế hoạch. Đang làm mới.");
+        router.refresh();
+        focusOriginAfterTerminal(origin);
+      } else {
+        setProposalTerminalOutcome((current) => ({ ...current, [proposalId]: "refresh-required" }));
+        setStatus(result.error ?? "Đề xuất không còn khả dụng.");
+      }
+    } catch {
+      setProposalTerminalOutcome((current) => ({ ...current, [proposalId]: "refresh-required" }));
+      setStatus("Không thể giữ kế hoạch lúc này. Vui lòng thử lại.");
+    } finally {
+      setProposalPending((current) => {
+        const next = { ...current };
+        delete next[proposalId];
+        return next;
+      });
+    }
+  }
+
+  // Story 7.5: Làm mới đề xuất is an owner action that focuses the primary
+  // conversation composer for a fresh question. It does NOT auto-regenerate,
+  // does NOT call the AI gateway, and does NOT mutate plan state.
+  function handleRefreshProposal(proposalId: string) {
+    setProposalTerminalOutcome((current) => {
+      const next = { ...current };
+      delete next[proposalId];
+      return next;
+    });
+    setStatus("Hãy đặt câu hỏi mới để nhận đề xuất phù hợp với kế hoạch hiện tại.");
+    textareaRef.current?.focus();
+  }
+
+  // Story 7.5: on terminal success, move focus back to the originating answer
+  // card heading (answer surface) or the Trip Home focus card heading
+  // (workspace panel) — 7.4 left this as a 7.5 hook.
+  function focusOriginAfterTerminal(origin: HTMLElement | null) {
+    if (origin?.isConnected) {
+      const heading = origin.querySelector<HTMLHeadingElement>("[tabindex='-1']") ?? (origin as HTMLElement);
+      heading?.focus?.();
+      return;
+    }
+    const focusCard = document.querySelector<HTMLHeadingElement>('[aria-label="Tiêu điểm Trip Home"] [tabindex="-1"]');
+    focusCard?.focus?.();
+  }
+
   const planningScope = (
     <section className="border-t border-[#d8c9ad] pt-4 text-left">
       <div className="flex flex-col gap-3">
@@ -1596,7 +1750,18 @@ export function AiAskComposer({
                       <AssistantMessageContent messageId={message.id} content={message.content} annotations={message.annotations} selectedEntityId={selectedAnswerEntityId} detailPanelIds={answerDetailPanelIds} onSelectEntity={handleSelectAnswerEntity} />
                       <AssistantProvenanceBlock provenance={message.provenance} selectedEntityId={selectedAnswerEntityId} detailPanelIds={answerDetailPanelIds} onSelectEntity={handleSelectAnswerEntity} />
                       {message.proposal ? (
-                        <AnswerProposalCard proposal={message.proposal} />
+                        <AnswerProposalCard
+                          proposal={message.proposal}
+                          onApply={applyTripChangeProposalAction && activeTripProjectId ? () => handleApplyProposal(message.proposal!.proposalId) : undefined}
+                          onDismiss={dismissTripChangeProposalAction && activeTripProjectId ? () => handleDismissProposal(message.proposal!.proposalId) : undefined}
+                          onRefresh={activeTripProjectId ? () => handleRefreshProposal(message.proposal!.proposalId) : undefined}
+                          isPending={Boolean(proposalPending[message.proposal.proposalId])}
+                          pendingAction={proposalPending[message.proposal.proposalId]?.action}
+                          terminalOutcome={proposalTerminalOutcome[message.proposal.proposalId] ?? null}
+                          registerOrigin={(element) => {
+                            proposalApplyOriginRef.current[message.proposal!.proposalId] = element;
+                          }}
+                        />
                       ) : null}
                       {saveAnswerUsefulnessFeedbackAction ? (
                         <AnswerUsefulnessFeedbackControl
@@ -1829,6 +1994,11 @@ export function AiAskComposer({
                   travelers: selectedTripProject.travelers ?? null,
                 }}
                 workspace={tripWorkspace}
+                onApplyProposal={applyTripChangeProposalAction ? handleApplyProposal : undefined}
+                onDismissProposal={dismissTripChangeProposalAction ? handleDismissProposal : undefined}
+                onRefreshProposal={handleRefreshProposal}
+                proposalPending={proposalPending}
+                proposalTerminalOutcome={proposalTerminalOutcome}
               />
             </div>
           </div>
@@ -1861,6 +2031,11 @@ export function AiAskComposer({
               travelers: selectedTripProject.travelers ?? null,
             }}
             workspace={tripWorkspace}
+            onApplyProposal={applyTripChangeProposalAction ? handleApplyProposal : undefined}
+            onDismissProposal={dismissTripChangeProposalAction ? handleDismissProposal : undefined}
+            onRefreshProposal={handleRefreshProposal}
+            proposalPending={proposalPending}
+            proposalTerminalOutcome={proposalTerminalOutcome}
           />
         </aside>
       ) : null}

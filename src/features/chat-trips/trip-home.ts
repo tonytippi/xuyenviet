@@ -549,6 +549,24 @@ export type TripWorkspaceReadModel = {
   timelineGroups: TimelineGroup[];
   constraints: ConstraintsProjection | null;
   pendingProposals: PendingProposalFocusInput[];
+  // Story 7.5: owner-visible plan history (safe structured summary). Optional
+  // because the pure builder does not produce it; the server-loaded workspace
+  // summary populates it from listPlanHistoryForTripProject + formatPlanHistoryRow.
+  planHistory?: PlanHistoryEntryView[];
+};
+
+// Story 7.5 (AC4): a client-safe plan history entry view. Never exposes raw
+// model prompts/responses — only the safe Vietnamese operation/actor/timestamp
+// labels, affected item labels, and the before/after summary. Kept here (not
+// in the server-only trip-change-proposals.ts) so the presentational workspace
+// panel can import the type without pulling in server-only code.
+export type PlanHistoryEntryView = {
+  proposalId: string | null;
+  operationLabel: string;
+  actorLabel: string;
+  timestampLabel: string;
+  affectedItemLabels: string[];
+  beforeAfter: PendingProposalBeforeAfterSummary[];
 };
 
 export function buildTripWorkspaceReadModelWithConstraints(
