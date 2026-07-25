@@ -84,6 +84,9 @@ function isValidItem(item: TripPlanItemProjection): boolean {
   }
   if (!Number.isInteger(item.ordinal) || item.ordinal < 0) return false;
   if (!(item.createdAt instanceof Date) || Number.isNaN(item.createdAt.getTime())) return false;
+  if (item.plannedAt !== null) {
+    if (!(item.plannedAt instanceof Date) || Number.isNaN(item.plannedAt.getTime())) return false;
+  }
   return true;
 }
 
@@ -174,6 +177,7 @@ export function findConfirmedItemGap(items: TripPlanItemProjection[]): TripPlanI
 export function findNextFutureLeg(items: TripPlanItemProjection[], now: Date): TripPlanItemProjection | null {
   const nowMs = now.getTime();
   const valid = items.filter(isValidItem).filter((item) => {
+    if (item.kind !== "leg") return false;
     if (item.state !== "planned" && item.state !== "confirmed") return false;
     if (item.plannedAt === null) return false;
     return item.plannedAt.getTime() > nowMs;
@@ -303,7 +307,7 @@ function formatTimeContext(date: Date): string {
 
 function buildPlaceContext(item: TripPlanItemProjection): string | null {
   if (item.type === "transport") {
-    const parts = [item.transportOriginLabel, item.transportDestinationLabel].filter(Boolean) as string[];
+    const parts = [item.transportOriginLabel, item.transportDestinationLabel].filter((p): p is string => Boolean(p));
     if (parts.length === 0) return null;
     return parts.join(" → ");
   }
@@ -362,14 +366,10 @@ export function buildTimelineGroups(items: TripPlanItemProjection[]): TimelineGr
   }
 
   const groups: TimelineGroup[] = [];
-  let lastDivider: string | null = null;
 
   for (const root of roots) {
     const rootDate = root.plannedAt;
     const divider = rootDate ? formatDateDivider(rootDate) : null;
-    if (divider !== lastDivider) {
-      lastDivider = divider;
-    }
     const legId = root.kind === "leg" ? root.id : null;
     const entries: TimelineEntry[] = [toTimelineEntry(root, 0)];
     const children = childrenByParent.get(root.id) ?? [];

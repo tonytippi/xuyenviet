@@ -1,4 +1,5 @@
 import type { TripWorkspaceReadModel } from "@/features/chat-trips/trip-home";
+import { formatTripProjectLabel } from "@/features/chat-trips/labels";
 import { tripHomeFocusKindLabels, tripHomeFocusNextActions, tripPlanAnchorRoleLabels } from "@/features/chat-trips/trip-home-labels";
 import {
   AccommodationIcon,
@@ -46,19 +47,8 @@ function formatTripDates(startDate: string | null, endDate: string | null): stri
   return startDate ?? endDate ?? null;
 }
 
-function formatTravelersSummary(travelers: string | null, constraints: TripWorkspaceReadModel["constraints"]): string | null {
-  if (!constraints) return travelers ?? null;
-  const parts: string[] = [];
-  const adultCount = constraints.adultCount;
-  const childCount = constraints.childCount;
-  if (adultCount !== null || childCount !== null) {
-    const segments: string[] = [];
-    if (adultCount !== null && adultCount > 0) segments.push(`${adultCount} người lớn`);
-    if (childCount !== null && childCount > 0) segments.push(`${childCount} trẻ em`);
-    if (segments.length > 0) parts.push(segments.join(", "));
-  }
-  if (travelers) parts.push(travelers);
-  return parts.length > 0 ? parts.join(" · ") : null;
+function formatTravelersSummary(travelers: string | null): string | null {
+  return travelers ?? null;
 }
 
 export type TripWorkspacePanelProps = {
@@ -70,9 +60,9 @@ export function TripWorkspacePanel({ header, workspace }: TripWorkspacePanelProp
   if (!workspace) return null;
 
   const { focus, timelineGroups, constraints } = workspace;
-  const routeText = [header.origin, header.destination].filter(Boolean).join(" → ");
+  const projectLabel = formatTripProjectLabel(header);
   const datesText = formatTripDates(header.startDate, header.endDate);
-  const travelersText = formatTravelersSummary(header.travelers, constraints);
+  const travelersText = formatTravelersSummary(header.travelers);
   const subtitleParts = [datesText, travelersText].filter(Boolean);
   const subtitle = subtitleParts.length > 0 ? subtitleParts.join(" · ") : null;
   const focusLabel = tripHomeFocusKindLabels[focus.kind];
@@ -86,8 +76,7 @@ export function TripWorkspacePanel({ header, workspace }: TripWorkspacePanelProp
 
       <div className="rounded-2xl border border-[#d8c9ad] bg-white/80 p-4">
         <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#8c4f13]">Dự án chuyến đi</p>
-        <h2 className="mt-1 text-base font-semibold text-[#17342c]">{header.title}</h2>
-        {routeText ? <p className="mt-1 text-sm leading-6 text-[#4f625a]">{routeText}</p> : null}
+        <h2 className="mt-1 text-base font-semibold text-[#17342c]">{projectLabel}</h2>
         {subtitle ? <p className="mt-1 text-sm leading-6 text-[#6b7c75]">{subtitle}</p> : null}
       </div>
 

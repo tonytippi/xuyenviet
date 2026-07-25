@@ -331,6 +331,25 @@ describe("Trip Home read model", () => {
       ];
       expect(findNextFutureLeg(items, now)?.id).toBe("a-leg");
     });
+
+    test("excludes anchors and activities even when plannedAt is in the future", () => {
+      const futureDate = new Date("2026-08-01T00:00:00.000Z");
+      const items = [
+        makeItem({ id: "anchor-future", kind: "anchor", anchorRole: "origin", type: null, state: "planned", plannedAt: futureDate }),
+        makeItem({ id: "activity-future", kind: "activity", type: "visit", state: "planned", plannedAt: futureDate, parentItemId: "leg-1" }),
+      ];
+      expect(findNextFutureLeg(items, now)).toBeNull();
+    });
+
+    test("selects a leg over a same-timestamp future anchor or activity", () => {
+      const futureDate = new Date("2026-08-01T00:00:00.000Z");
+      const items = [
+        makeItem({ id: "anchor-future", kind: "anchor", anchorRole: "origin", type: null, state: "planned", plannedAt: futureDate }),
+        makeItem({ id: "activity-future", kind: "activity", type: "visit", state: "planned", plannedAt: futureDate, parentItemId: "leg-1" }),
+        makeItem({ id: "leg-future", kind: "leg", type: "transport", state: "planned", plannedAt: futureDate }),
+      ];
+      expect(findNextFutureLeg(items, now)?.id).toBe("leg-future");
+    });
   });
 
   describe("determinism and defensive validation", () => {
@@ -374,6 +393,32 @@ describe("Trip Home read model", () => {
       const items = [makeItem({ id: "future", type: "transport", state: "planned", plannedAt: new Date("2026-08-01T00:00:00.000Z") })];
       const focus = computeTripHomeFocus({ items, pendingProposals: [], now: fixedNow });
       expect(focus.kind).toBe("next-leg");
+    });
+
+    test("defensively ignores items with invalid plannedAt (NaN date) rather than corrupting sort comparators", () => {
+      const invalidDate = new Date("invalid") as unknown as Date;
+      const items = [
+        makeItem({ id: "bad-planned", type: "transport", state: "planned", plannedAt: invalidDate }),
+        makeItem({ id: "good-future", type: "transport", state: "planned", plannedAt: new Date("2026-08-01T00:00:00.000Z") }),
+      ];
+      const focus = computeTripHomeFocus({ items, pendingProposals: [], now });
+      expect(focus.kind).toBe("next-leg");
+      if (focus.kind === "next-leg") {
+        expect(focus.itemId).toBe("good-future");
+      }
+    });
+
+    test("defensively ignores confirmed items with invalid plannedAt in gap detection", () => {
+      const invalidDate = new Date("invalid") as unknown as Date;
+      const items = [
+        makeItem({ id: "bad-confirmed", type: "transport", state: "confirmed", plannedAt: invalidDate, transportOriginLabel: "Hà Nội", transportDestinationLabel: "Huế" }),
+        makeItem({ id: "good-future", type: "transport", state: "planned", plannedAt: new Date("2026-08-01T00:00:00.000Z") }),
+      ];
+      const focus = computeTripHomeFocus({ items, pendingProposals: [], now });
+      expect(focus.kind).toBe("next-leg");
+      if (focus.kind === "next-leg") {
+        expect(focus.itemId).toBe("good-future");
+      }
     });
   });
 

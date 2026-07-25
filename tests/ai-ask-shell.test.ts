@@ -2163,7 +2163,7 @@ describe("AI Ask streaming route", () => {
 
   test("workspace has aria-live region for state changes and mobile sheet is aria-hidden inert when open on desktop", () => {
     const source = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
-    expect(source).toContain('aria-hidden={isWorkspaceSheetOpen ? "true" : undefined}');
+    expect(source).toContain('aria-hidden={isWorkspaceSheetOpen && !isDesktopViewport ? "true" : undefined}');
     expect(source).toContain("isWorkspaceSheetOpen");
     expect(source).toContain("workspaceSheetPanelRef");
     expect(source).toContain("workspaceSheetPreviousFocusRef");

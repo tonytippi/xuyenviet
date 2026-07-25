@@ -107,6 +107,12 @@
   summary: Coordinate source removal with ingestion provider dispatch without holding the source transaction lock across long-running provider calls.
   evidence: Holding lock 44 across provider calls deadlocks the existing recapture/fencing tests; current commit-time eligibility and fencing prevent persistence or retrieval reactivation, but do not prevent a provider receiving already-loaded capture material during a removal race.
 
+## Deferred from: code review of 7-3-present-trip-home-and-the-owners-plan-workspace (2026-07-25)
+
+- source_spec: `7-3-present-trip-home-and-the-owners-plan-workspace.md`
+  summary: Add explicit `motion-reduce` CSS utilities to workspace and composer buttons for reduced-motion respect.
+  evidence: The codebase has zero `motion-reduce` utilities anywhere; workspace buttons use CSS `transition` classes without `motion-reduce:transition-none`. The Trip Home focus card correctly avoids animation. This is a project-wide pattern gap, not a Story 7.3-specific regression.
+
 ## Deferred from: code review of spec-4-1-migrate-retrieval-to-state-aware-active-knowledge.md (2026-07-23)
 
 - Guard the index upsert against concurrent card state changes in `src/features/knowledge/search.ts:50`. `indexApprovedKnowledgeCard` rechecks eligibility before an unconditional projection upsert without locking the card or fencing that write by current version/state. A concurrent state transition can recreate an active stale projection; search-time revalidation prevents retrieval, while durable projection versioning belongs to Story 4.2.

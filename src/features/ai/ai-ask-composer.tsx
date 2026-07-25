@@ -859,7 +859,7 @@ export function AiAskComposer({
       return;
     }
 
-    workspaceSheetPreviousFocusRef.current = (document.activeElement as HTMLElement | null) ?? null;
+    workspaceSheetPreviousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     workspaceSheetPanelRef.current?.focus();
 
     function onKeyDown(event: KeyboardEvent) {
@@ -1786,7 +1786,7 @@ export function AiAskComposer({
       ) : null}
 
       {selectedTripProject && tripWorkspace ? (
-        <aside aria-label="Không gian dự án chuyến đi" aria-hidden={isWorkspaceSheetOpen ? "true" : undefined} className="hidden min-h-0 w-[24rem] shrink-0 overflow-y-auto rounded-[1.5rem] border border-[#d8c9ad] bg-[linear-gradient(180deg,#fffdf8_0%,#ffffff_42%,#f7fbf8_100%)] p-4 text-[#17342c] shadow-[0_16px_40px_rgba(41,33,18,0.08)] lg:block">
+        <aside aria-label="Không gian dự án chuyến đi" aria-hidden={isWorkspaceSheetOpen && !isDesktopViewport ? "true" : undefined} className="hidden min-h-0 w-[24rem] shrink-0 overflow-y-auto rounded-[1.5rem] border border-[#d8c9ad] bg-[linear-gradient(180deg,#fffdf8_0%,#ffffff_42%,#f7fbf8_100%)] p-4 text-[#17342c] shadow-[0_16px_40px_rgba(41,33,18,0.08)] lg:block">
           <TripWorkspacePanel
             header={{
               title: selectedTripProject.title,
