@@ -4,7 +4,7 @@ baseline_commit: 9405cd1d457422ec497db5d05b7bafeb44068e76
 
 # Story 7.6: Verify Owner-Scoped Trip Planning Safety
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -425,3 +425,4 @@ Third-review patch Completion Notes (2026-07-26):
 - 2026-07-26: Second-review patch complete. All 14 findings addressed. The 2 HIGH findings required production fixes (authorized by the user): added `motion-reduce:transition-none` to the plan-history sheet close button (supersedes the F1 no-defect decision) and added `setPlanHistorySheetOpen(false)` to the session-sheet trigger for single-aria-modal coordination. 4 MEDIUM + 8 LOW addressed by test/docs improvements only (deterministic 5.3d forced-deadlock test, held-lock try/finally, stale item-version reorder fences, chat-send apply-path test, broader touch-target checks, aria-live marker, full function-body refresh extraction, universal cascade audit content check, removed invalid 40P02, corrected SQLSTATE 23505). +4 tests (full suite 1000 pass), lint/typecheck/build/db:generate clean. No new migration. Status set to review.
 - 2026-07-26: Third bounded review of commits 84347ac + 9268478 + 70217e8 found 4 actionable findings (2 decision-needed, 2 patch); no HIGH, no data-integrity/AC violations. Acceptance Auditor confirmed all 3 ACs genuinely satisfied. Status set to in-progress pending patch.
 - 2026-07-26: Third-review patch complete. All 4 findings addressed. Both decision-needed findings required production fixes (authorized by the user, same defect classes as the second review): `onOpenPlanHistory` made structurally symmetric (closes session sheet + nulls selectedAnswerEntity, matching the other triggers); `motion-reduce:transition-none` added to session-sheet and workspace-sheet close buttons (same defect class as HIGH-1). 2 LOW patch findings addressed by test improvements: 5.3d lock acquisition moved inside try block; backup_check second assertion made non-vacuous with real existing target + SQLSTATE 23514 assertions. No new tests (all in-place fixes); 1000 total pass, lint/typecheck/build/db:generate clean. No new migration. Status set to review.
+- 2026-07-26: Finalized after status-only verification of supplied final repair commit bece883f3e49989560a04e84987e6b438233ba08 and a clean pre-update worktree; status synchronized to done. Epic 7 remains in-progress (retrospective optional/separate).

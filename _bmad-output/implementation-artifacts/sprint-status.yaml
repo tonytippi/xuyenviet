@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-07-26 (Story 7.6 third-review patch complete: all 4 findings addressed — 2 decision-needed production fixes [onOpenPlanHistory symmetric; sibling close buttons motion-reduce guard] + 2 patch [5.3d lock acquisition inside try; backup_check non-vacuous]. 1000 tests pass, lint/typecheck/build/db:generate clean. Status synchronized to review. Epic 7 remains in-progress.)
+# last_updated: 2026-07-26 (Story 7.6 finalized after status-only verification of supplied final repair commit bece883f3e49989560a04e84987e6b438233ba08 and a clean pre-update worktree; status synchronized to done. Epic 7 remains in-progress — retrospective optional/separate.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-07-26 (Story 7.6 third-review patch complete: all 4 findings addressed — 2 decision-needed production fixes [onOpenPlanHistory made symmetric: closes session sheet + nulls selectedAnswerEntity; sibling-sheet close buttons given motion-reduce:transition-none guard, same defect class as HIGH-1] + 2 patch [5.3d holdProposalLock acquired inside try block so acquisition failure releases project lock in finally; backup_check second assertion non-vacuous with real existing target + SQLSTATE 23514/constraint_name assertions]. 1000 tests pass, lint/typecheck/build/db:generate clean. No new migration. Status synchronized to review. Epic 7 remains in-progress.)
+last_updated: 2026-07-26 (Story 7.6 finalized after status-only verification of supplied final repair commit bece883f3e49989560a04e84987e6b438233ba08 and a clean pre-update worktree; status synchronized to done. Epic 7 remains in-progress — retrospective optional/separate.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -105,7 +105,8 @@ development_status:
   # Finalized 2026-07-25 after status-only verification of supplied final repair commit 3f2794269749673ffa2fbb4c035882f0803143bb and a clean pre-update worktree; status synchronized to done. Epic 7 remains in-progress pending Story 7.6.
   7-5-apply-dismiss-and-expire-proposals-safely: done
   # Synchronized 2026-07-25 after bmad-create-story wrote the Story 7.6 verification story file (adversarial owner-scoped trip planning safety: ownership, conflicts, state transitions, Trip Home focus, workspace accessibility); dev-story complete: 45 new tests, 979 total pass, lint/typecheck/build/db:generate clean; status set to review.
-  7-6-verify-owner-scoped-trip-planning-safety: review
+  # Finalized 2026-07-26 after status-only verification of supplied final repair commit bece883f3e49989560a04e84987e6b438233ba08 and a clean pre-update worktree; status synchronized to done. Epic 7 remains in-progress (retrospective optional/separate).
+  7-6-verify-owner-scoped-trip-planning-safety: done
   # Patched 2026-07-25 (review findings): all 24 actionable first-review findings (1 decision + 23 patch) addressed by improving test coverage/assertions only — no production code changed. +17 tests (996 total pass), lint/typecheck/build/db:generate clean. F1 reduced-motion decision resolved as no-defect (named components have no non-essential transitions). New concurrency finding recorded (concurrent apply/dismiss lock-order inversion can deadlock; Postgres resolves safely as a retryable transient, no data loss; recommended future lock-order alignment out of test-only scope). Status synchronized to review.
   # Second bounded review 2026-07-25 of commits 84347ac + 9268478: first-review F2–F24 fixes verified genuinely repaired. 14 new actionable findings — 2 HIGH (decision-needed: AC3 7.2 reduced-motion test scans wrong file, actual plan-history sheet has unguarded `transition`; AC3 7.3 single-aria-modal coordination not verified, two aria-modal dialogs can be open simultaneously), 4 MEDIUM (patch: held-lock no try/finally, 5.3 deadlock branch non-deterministic, stale item-version reorder untested, chat-send apply path unverified), 8 LOW (patch). Both HIGH findings are AC3 acceptance-criteria verification failures with real pre-existing accessibility defects behind them — substantial risk (HIGH severity + AC failure). Production defects are pre-existing, not introduced by this test-only story; require consultation per scope line 48. Status synchronized to in-progress.
   # Third bounded review 2026-07-26 of commits 84347ac + 9268478 + 70217e8: Acceptance Auditor confirmed all 3 ACs genuinely satisfied and scope respected (only 2 authorized production fixes; no new migration/dependency). No HIGH findings, no data-integrity/security defects, no AC violations. 4 new actionable findings — 2 decision-needed (AC3 7.3 onOpenPlanHistory asymmetric handler + false test comment; AC3 7.2 sibling-sheet close buttons unguarded transition out-of-AC-scope pre-existing), 2 patch (5.3d lock acquisition outside try/finally; backup_check second assertion vacuous — FK satisfies it regardless of check constraint). Status synchronized to in-progress.
