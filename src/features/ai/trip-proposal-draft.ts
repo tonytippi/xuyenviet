@@ -25,6 +25,7 @@ export type UntrustedTripChangeProposalDraft = {
   operations: unknown;
   alternatives: unknown;
   orderingPreconditions: unknown;
+  expiresAt: string | null;
   expectedAggregateVersion: number;
   expectedItemVersions: Record<string, number>;
   usage: {
@@ -198,6 +199,7 @@ export async function draftTripChangeProposal({
     operations: parsed.operations,
     alternatives: parsed.alternatives,
     orderingPreconditions: parsed.orderingPreconditions,
+    expiresAt: parsed.expiresAt,
     expectedAggregateVersion: aggregate.aggregateVersion,
     expectedItemVersions,
     usage: {
@@ -296,6 +298,7 @@ type ParsedDraft = {
   operations: unknown;
   alternatives: unknown;
   orderingPreconditions: unknown;
+  expiresAt: string | null;
 };
 
 function parseDraftPayload(content: string): ParsedDraft | null {
@@ -315,7 +318,11 @@ function parseDraftPayload(content: string): ParsedDraft | null {
   // null so the column is nullable and 7.5 apply can still run.
   const orderingPreconditionsRaw = parsed.orderingPreconditions;
   const orderingPreconditions = isRecord(orderingPreconditionsRaw) || Array.isArray(orderingPreconditionsRaw) ? orderingPreconditionsRaw : null;
-  return { rationale: parsed.rationale, operations: parsed.operations, alternatives, orderingPreconditions };
+  // expires_at is optional (AC1: "optional expiry"). When the model omits it or
+  // emits an invalid value, default to null so the column is nullable.
+  const expiresAtRaw = parsed.expires_at;
+  const expiresAt = typeof expiresAtRaw === "string" && expiresAtRaw.trim() && !Number.isNaN(Date.parse(expiresAtRaw.trim())) ? expiresAtRaw.trim() : null;
+  return { rationale: parsed.rationale, operations: parsed.operations, alternatives, orderingPreconditions, expiresAt };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

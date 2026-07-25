@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-07-26 (Story 7.6 finalized after status-only verification of supplied final repair commit bece883f3e49989560a04e84987e6b438233ba08 and a clean pre-update worktree; status synchronized to done. Epic 7 remains in-progress — retrospective optional/separate.)
+# last_updated: 2026-07-26 (Epic 7 completion review repair: all 6 epic-level findings E7R-1 through E7R-6 fixed across stories 7.4 and 7.5. E7R-1 plannedAt dropped in apply path; E7R-2 expiry worker once:true infinite loop; E7R-3 orderingPreconditions prompt/validator key mismatch; E7R-4 create-item ordinal collision misclassified as transient; E7R-5 plan-history sheet missing focus management; E7R-6 AI proposal expires_at never parsed/persisted. 1000 tests pass, lint/typecheck/build/db:generate clean. Stories 7.4 and 7.5 set to review.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-07-26 (Story 7.6 finalized after status-only verification of supplied final repair commit bece883f3e49989560a04e84987e6b438233ba08 and a clean pre-update worktree; status synchronized to done. Epic 7 remains in-progress — retrospective optional/separate.)
+last_updated: 2026-07-26 (Epic 7 completion review repair: all 6 epic-level findings E7R-1 through E7R-6 fixed across stories 7.4 and 7.5. E7R-1 plannedAt dropped in apply path; E7R-2 expiry worker once:true infinite loop; E7R-3 orderingPreconditions prompt/validator key mismatch; E7R-4 create-item ordinal collision misclassified as transient; E7R-5 plan-history sheet missing focus management; E7R-6 AI proposal expires_at never parsed/persisted. 1000 tests pass, lint/typecheck/build/db:generate clean. Stories 7.4 and 7.5 set to review.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -92,18 +92,21 @@ development_status:
   epic-6-retrospective: optional
 
   epic-7: done
+  # Epic 7 completion review 2026-07-26 (bmad-code-review, diff 4e34428..0955211, 3 adversarial layers). Acceptance Auditor: no AC violations across 7.1-7.6. Blind Hunter + Edge Case Hunter: 6 actionable epic-level findings (NOT approved at the epic level); epic-7 preserved as done per Chief-of-Staff directive — findings are follow-up blockers, not a status reversal. Findings: E7R-1 [HIGH][patch][epic-cross 7.4+7.5] plannedAt silently dropped in apply path (trip-change-proposals.ts:1794,1816 hardcodes plannedAt ignoring changes.plannedAt/item.plannedAt; owner-approved date change shown in before/after + history but never written to DB; violates 7.5 AC1 "applies every typed operation or none"). E7R-2 [HIGH][patch][7.5] expiry worker once:true infinite loop on persistent DB error (trip-proposal-expiry-worker.ts:109-116 catch does sleep+continue without checking input.once; the once-return at :118 is unreachable). E7R-3 [HIGH][patch][epic-cross 7.4+7.5] orderingPreconditions prompt/validator key mismatch (prompts.ts:374 emits parentRequirements/ordinalNotes; trip-change-proposals.ts:75,1549 recognizes only parentItemId/ordinal/expectedChangedItemVersions and fails closed -> refresh_required; AI proposals with ordering preconditions can never be applied; Làm mới đề xuất does not regenerate). E7R-4 [MEDIUM][patch][7.5] create-item ordinal collision misclassified as transient (unique violation on partial unique idx is neither ProposalOperationFailure nor "Invalid trip plan" prefix -> re-thrown -> actions.ts maps to transient -> stuck retry loop instead of refresh_required). E7R-5 [MEDIUM][patch][7.5] plan-history sheet missing focus management/Escape/Tab trap (ai-ask-composer.tsx:2065 renders role=dialog aria-modal=true but no dedicated useEffect unlike session sheet 924-975 and workspace sheet 977-1031; keyboard users cannot close via Escape, can Tab out of aria-modal, lose focus on close). E7R-6 [LOW][patch][epic-cross 7.4+7.5] AI proposal expires_at never parsed/persisted (trip-proposal-draft.ts parseDraftPayload does not parse expires_at; draftAndPersistProposal does not pass it; all AI-drafted proposals have expiresAt=null; expiry worker + expire-on-read unreachable from AI path; optional per FR-16G but half-wired).
   # Synchronized 2026-07-25 after status-only verification of supplied final repair commit a76ce4ccdb5e0b5f4ba92a660efc7d095279e88c and a clean pre-update worktree.
   7-1-establish-the-versioned-structured-trip-project-aggregate: done
   # Synchronized 2026-07-25 after code review of commit 5123e27: approved with no high/medium findings; one low cosmetic naming item dismissed.
   7-2-establish-the-primary-project-conversation-without-losing-history: done
   # Synchronized 2026-07-25 after status-only verification of supplied final repair commit 267a12264793c3b71eca6fe56531908e502801fe and a clean pre-update worktree.
   7-3-present-trip-home-and-the-owners-plan-workspace: done
-  7-4-generate-reviewable-ai-trip-change-proposals: done
+  # Epic 7 completion review repair 2026-07-26: all 6 epic-level findings E7R-1 through E7R-6 fixed (E7R-1 plannedAt dropped in apply path; E7R-3 orderingPreconditions prompt/validator key mismatch; E7R-6 AI proposal expires_at never parsed/persisted). 1000 tests pass, lint/typecheck/build/db:generate clean; status set to review.
+  7-4-generate-reviewable-ai-trip-change-proposals: review
   # Synchronized 2026-07-25 after repair of all 18 review findings (P1–P18: 3 HIGH, 7 MEDIUM, 8 LOW) for commit feeb7e5; 925 tests pass, lint/typecheck/build/db:generate clean; status set to review.
   # Second bounded review 2026-07-25 of commits feeb7e5 + e40a906: P1–P18 verified repaired; 5 new findings (Q1–Q5: 3 MEDIUM, 2 LOW) — Q1–Q3 incomplete P10/P11 re-throw repair (callers not updated), Q4–Q5 minor UX edge cases. No HIGH; no security/data-integrity/AC/cross-feature systemic failure; all 4 ACs satisfied.
   # Second-review repair 2026-07-25: all 5 findings Q1–Q5 repaired — Q1 expire-on-read try/catch, Q2 worker loop per-batch try/catch, Q3 server action transient reason + retryable client outcome, Q4 useRef dedup, Q5 history-sheet handlers; 934 tests pass, lint/typecheck/build/db:generate clean; status set to review.
   # Finalized 2026-07-25 after status-only verification of supplied final repair commit 3f2794269749673ffa2fbb4c035882f0803143bb and a clean pre-update worktree; status synchronized to done. Epic 7 remains in-progress pending Story 7.6.
-  7-5-apply-dismiss-and-expire-proposals-safely: done
+  # Epic 7 completion review repair 2026-07-26: all 6 epic-level findings E7R-1 through E7R-6 fixed (E7R-2 expiry worker once:true infinite loop; E7R-4 create-item ordinal collision misclassified as transient; E7R-5 plan-history sheet missing focus management). 1000 tests pass, lint/typecheck/build/db:generate clean; status set to review.
+  7-5-apply-dismiss-and-expire-proposals-safely: review
   # Synchronized 2026-07-25 after bmad-create-story wrote the Story 7.6 verification story file (adversarial owner-scoped trip planning safety: ownership, conflicts, state transitions, Trip Home focus, workspace accessibility); dev-story complete: 45 new tests, 979 total pass, lint/typecheck/build/db:generate clean; status set to review.
   # Finalized 2026-07-26 after status-only verification of supplied final repair commit bece883f3e49989560a04e84987e6b438233ba08 and a clean pre-update worktree; status synchronized to done. Epic 7 remains in-progress (retrospective optional/separate).
   7-6-verify-owner-scoped-trip-planning-safety: done

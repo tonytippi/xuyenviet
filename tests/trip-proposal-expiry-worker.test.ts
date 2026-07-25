@@ -129,23 +129,16 @@ describe("Story 7.5 Q2 worker loop survives transient DB errors", () => {
     vi.clearAllMocks();
   });
 
-  test("runTripChangeProposalExpiryWorkerLoop retries after a transient batch error and exits normally with once: true", async () => {
-    // Mock getDb so the FIRST transaction throws a transient error and the
-    // SECOND succeeds with no rows (processed: 0). With once: true, the loop
-    // must survive the first throw, retry, then exit with { status: "no_work" }
-    // rather than propagating the error and dying.
+  test("runTripChangeProposalExpiryWorkerLoop with once: true exits immediately on a transient batch error instead of retrying infinitely", async () => {
+    // E7R-2: with once: true, a transient DB error must NOT sleep+continue
+    // (infinite loop on persistent error). The catch must check the once flag
+    // and return immediately so the caller can decide to retry.
     let transactionCallCount = 0;
     vi.doMock("@/db/client", () => ({
       getDb: () => ({
-        transaction: async (callback: (tx: { execute: ReturnType<typeof vi.fn> }) => Promise<unknown>) => {
+        transaction: async () => {
           transactionCallCount += 1;
-          if (transactionCallCount === 1) {
-            throw new Error("simulated transient connection error");
-          }
-          // Second call: the callback runs the SKIP LOCKED SELECT via tx.execute.
-          // Return no rows so processed = 0 and once: true exits with no_work.
-          const tx = { execute: vi.fn().mockResolvedValue([]) };
-          return callback(tx);
+          throw new Error("simulated transient connection error");
         },
       }),
     }));
@@ -153,10 +146,8 @@ describe("Story 7.5 Q2 worker loop survives transient DB errors", () => {
     const { runTripChangeProposalExpiryWorkerLoop } = await import("@/features/chat-trips/trip-proposal-expiry-worker");
     const result = await runTripChangeProposalExpiryWorkerLoop({ once: true, pollIntervalMs: 1 });
 
-    // The loop survived the transient error and exited normally.
     expect(result.status).toBe("no_work");
-    // It retried after the first failure (two transaction calls).
-    expect(transactionCallCount).toBe(2);
+    expect(transactionCallCount).toBe(1);
   });
 
   test("runTripChangeProposalExpiryWorkerLoop keeps polling after a persistent transient error until the signal aborts", async () => {

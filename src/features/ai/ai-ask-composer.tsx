@@ -752,6 +752,7 @@ export function AiAskComposer({
   const workspaceSheetTriggerRef = useRef<HTMLButtonElement>(null);
   const workspaceSheetPanelRef = useRef<HTMLDivElement>(null);
   const workspaceSheetPreviousFocusRef = useRef<HTMLElement | null>(null);
+  const planHistorySheetPreviousFocusRef = useRef<HTMLElement | null>(null);
   const hasMessages = messages.length > 0;
   const showEmptyState = !hasMessages && !isPending;
   const showContextPanel = hasMessages;
@@ -1029,6 +1030,62 @@ export function AiAskComposer({
       }
     };
   }, [isDesktopViewport, isWorkspaceSheetOpen]);
+
+  useEffect(() => {
+    if (!isPlanHistorySheetOpen || isDesktopViewport) {
+      return;
+    }
+
+    planHistorySheetPreviousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    planHistorySheetPanelRef.current?.focus();
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setPlanHistorySheetOpen(false);
+        return;
+      }
+
+      if (event.key !== "Tab" || !planHistorySheetPanelRef.current) {
+        return;
+      }
+
+      const focusableElements = getFocusableElements(planHistorySheetPanelRef.current);
+
+      if (focusableElements.length === 0) {
+        event.preventDefault();
+        planHistorySheetPanelRef.current.focus();
+        return;
+      }
+
+      const firstElement = focusableElements[0];
+      const lastElement = focusableElements[focusableElements.length - 1];
+      const activeElement = document.activeElement;
+
+      if (!activeElement || !planHistorySheetPanelRef.current.contains(activeElement)) {
+        event.preventDefault();
+        (event.shiftKey ? lastElement : firstElement).focus();
+      } else if (event.shiftKey && activeElement === firstElement) {
+        event.preventDefault();
+        lastElement.focus();
+      } else if (!event.shiftKey && activeElement === lastElement) {
+        event.preventDefault();
+        firstElement.focus();
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = previousOverflow;
+      const previousFocus = planHistorySheetPreviousFocusRef.current;
+      if (previousFocus && previousFocus.offsetParent !== null) {
+        previousFocus.focus();
+      }
+    };
+  }, [isDesktopViewport, isPlanHistorySheetOpen]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

@@ -111,6 +111,9 @@ export async function runTripChangeProposalExpiryWorkerLoop(
         workerId: input.workerId,
         error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
       });
+      if (input.once) {
+        return { status: "no_work" };
+      }
       await sleep(pollIntervalMs, input.signal);
       continue;
     }

@@ -557,6 +557,7 @@ async function draftAndPersistProposal({
       rationale: draft.rationale,
       alternatives: draft.alternatives,
       orderingPreconditions: draft.orderingPreconditions,
+      expiresAt: draft.expiresAt ? new Date(draft.expiresAt) : null,
       sourceAssistantMessageId: assistantMessageId,
     });
 

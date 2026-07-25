@@ -726,6 +726,16 @@ function parseOptionalPlannedAt(value: unknown): string | null | undefined {
   return trimmed;
 }
 
+function parsePlannedAtForApply(value: unknown): Date | null | undefined {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const ms = Date.parse(trimmed);
+  if (Number.isNaN(ms)) return undefined;
+  return new Date(ms);
+}
+
 function parseOrdinal(value: unknown): number | string {
   if (typeof value !== "number" || !Number.isInteger(value) || value < 0) return "ordinal must be a non-negative integer";
   return value;
@@ -1501,6 +1511,9 @@ export async function applyApprovedTripChange(
     if (error instanceof Error && (error.message.startsWith("Invalid trip plan") || error.message.startsWith("Invalid trip constraints"))) {
       return { success: false, reason: "refresh_required" };
     }
+    if (isUniqueOrdinalViolation(error)) {
+      return { success: false, reason: "refresh_required" };
+    }
     console.error("Failed to apply approved trip change proposal.", {
       tripProjectId: input.tripProjectId,
       proposalId: input.proposalId,
@@ -1784,6 +1797,8 @@ function itemDraftToInternalInput(item: Record<string, unknown>): InternalPlanIt
   if (ordinal === null) return null;
   const parentItemId = parseOptionalParent(item.parentItemId);
   if (parentItemId === "invalid") return null;
+  const plannedAt = parsePlannedAtForApply(item.plannedAt);
+  if (plannedAt === undefined) return null;
   return {
     kind: kind as TripPlanItemKind,
     anchorRole: (item.anchorRole ?? null) as TripPlanAnchorRole | null,
@@ -1791,7 +1806,7 @@ function itemDraftToInternalInput(item: Record<string, unknown>): InternalPlanIt
     state: (typeof item.state === "string" && validStates.includes(item.state as TripPlanItemState) ? item.state : "idea") as TripPlanItemState,
     label: typeof item.label === "string" ? item.label : "",
     notes: (item.notes ?? null) as string | null,
-    plannedAt: null,
+    plannedAt,
     ordinal,
     parentItemId,
     backupTargetItemId: parseOptionalParent(item.backupTargetItemId),
@@ -1806,6 +1821,12 @@ function mergeChangesToInternalInput(current: { kind: TripPlanItemKind; anchorRo
   if (parentItemId === "invalid") return null;
   const backupTargetItemId = changes.backupTargetItemId !== undefined ? parseOptionalParent(changes.backupTargetItemId) : current.backupTargetItemId;
   if (backupTargetItemId === "invalid") return null;
+  let plannedAt = current.plannedAt;
+  if (changes.plannedAt !== undefined) {
+    const parsedPlannedAt = parsePlannedAtForApply(changes.plannedAt);
+    if (parsedPlannedAt === undefined) return null;
+    plannedAt = parsedPlannedAt;
+  }
   return {
     kind: current.kind,
     anchorRole: current.anchorRole,
@@ -1813,7 +1834,7 @@ function mergeChangesToInternalInput(current: { kind: TripPlanItemKind; anchorRo
     state: (changes.state !== undefined && typeof changes.state === "string" && validStates.includes(changes.state as TripPlanItemState) ? (changes.state as TripPlanItemState) : current.state),
     label: typeof changes.label === "string" ? changes.label : current.label,
     notes: changes.notes !== undefined ? (typeof changes.notes === "string" ? changes.notes : null) : current.notes,
-    plannedAt: current.plannedAt,
+    plannedAt,
     ordinal: current.ordinal,
     parentItemId,
     backupTargetItemId,
@@ -1841,6 +1862,18 @@ function parseOptionalParent(value: unknown): string | null | "invalid" {
 function mapHelperFailure(reason: "unauthenticated" | "not_found" | "refresh_required" | "invalid"): "refresh_required" | "not_found" | "expired" {
   if (reason === "not_found") return "not_found";
   return "refresh_required";
+}
+
+function isUniqueOrdinalViolation(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const cause = (error as { cause?: unknown }).cause;
+  if (!cause || typeof cause !== "object") return false;
+  const code = (cause as { code?: unknown }).code;
+  const constraintName = (cause as { constraint_name?: unknown }).constraint_name;
+  return (
+    code === "23505" &&
+    (constraintName === "trip_plan_items_root_ordinal_idx" || constraintName === "trip_plan_items_child_ordinal_idx")
+  );
 }
 
 // Derive the expectedChangedItemVersions map for a reorder operation from the
