@@ -113,6 +113,12 @@
   summary: Add explicit `motion-reduce` CSS utilities to workspace and composer buttons for reduced-motion respect.
   evidence: The codebase has zero `motion-reduce` utilities anywhere; workspace buttons use CSS `transition` classes without `motion-reduce:transition-none`. The Trip Home focus card correctly avoids animation. This is a project-wide pattern gap, not a Story 7.3-specific regression.
 
+## Deferred from: code review of 7-4-generate-reviewable-ai-trip-change-proposals (2026-07-25)
+
+- source_spec: `7-4-generate-reviewable-ai-trip-change-proposals.md`
+  summary: Detect cross-operation backup cycles (A↔B) within a single proposal's operation set.
+  evidence: Second bounded review (2026-07-25). `validateProposalOperations` validates each operation independently against the pre-operation `knownItems` snapshot, so two `change-item-state` ops establishing a mutual A↔B backup both pass (each target's current `backupTargetItemId` is null in the snapshot). Story 7.4 writes no plan state, so no cycle reaches `trip_plan_items`; Story 7.5 `applyApprovedTripChange` must re-validate backup cycles against post-apply state when it locks the aggregate and enforces version fences. The per-op snapshot pattern is shared with Story 7.1 `validatePlanReferences`, so this is a pre-existing pattern, not a 7.4 regression.
+
 ## Deferred from: code review of spec-4-1-migrate-retrieval-to-state-aware-active-knowledge.md (2026-07-23)
 
 - Guard the index upsert against concurrent card state changes in `src/features/knowledge/search.ts:50`. `indexApprovedKnowledgeCard` rechecks eligibility before an unconditional projection upsert without locking the card or fencing that write by current version/state. A concurrent state transition can recreate an active stale projection; search-time revalidation prevents retrieval, while durable projection versioning belongs to Story 4.2.

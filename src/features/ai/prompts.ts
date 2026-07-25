@@ -371,6 +371,7 @@ export function buildTripChangeProposalDraftMessages({
             },
           ],
           alternatives: [{ summary: "Phương án thay thế ngắn" }],
+          ordering_preconditions: { parentRequirements: [{ itemId: "existing_item_id_from_current_plan", requiresParentItemId: "existing_leg_item_id_from_current_plan" }], ordinalNotes: "giữ ordinal của activity theo leg cha" },
         },
       }),
     },
