@@ -421,6 +421,13 @@
       "when": 1784904000011,
       "tag": "0059_restrict_sampling_policy_ledger_deletion",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1784957148765,
+      "tag": "0060_damp_carlie_cooper",
+      "breakpoints": true
     }
   ]
 }

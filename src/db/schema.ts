@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { boolean, check, foreignKey, index, integer, jsonb, pgTable, primaryKey, real, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { type AnyPgColumn, boolean, check, foreignKey, index, integer, jsonb, pgTable, primaryKey, real, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 
 export const userRoleValues = ["traveler", "operator", "admin"] as const;
 export type UserRole = (typeof userRoleValues)[number];
@@ -171,6 +171,18 @@ export type ChatContextScope = (typeof chatContextScopeValues)[number];
 
 export const chatContextStatusValues = ["active", "deleted"] as const;
 export type ChatContextStatus = (typeof chatContextStatusValues)[number];
+
+export const tripPlanItemKindValues = ["anchor", "leg", "activity"] as const;
+export type TripPlanItemKind = (typeof tripPlanItemKindValues)[number];
+export const tripPlanAnchorRoleValues = ["origin", "destination", "region", "required_stop", "accommodation"] as const;
+export type TripPlanAnchorRole = (typeof tripPlanAnchorRoleValues)[number];
+export const tripPlanItemTypeValues = ["transport", "visit", "food", "rest", "accommodation"] as const;
+export type TripPlanItemType = (typeof tripPlanItemTypeValues)[number];
+export const tripPlanItemStateValues = ["idea", "planned", "confirmed", "backup"] as const;
+export type TripPlanItemState = (typeof tripPlanItemStateValues)[number];
+export const childComfortTagValues = ["car_seat", "stroller", "nap_breaks", "short_drive_blocks", "quiet_time"] as const;
+export const childPreferenceTagValues = ["animals", "beach", "culture", "food", "nature", "outdoor", "playground"] as const;
+export const tripPreferenceTagValues = ["beach", "culture", "family_friendly", "food", "nature", "quiet", "road_trip", "scenic_route"] as const;
 
 export const users = pgTable("users", {
   id: text("id")
@@ -599,6 +611,7 @@ export const tripProjects = pgTable(
     endDate: text("end_date"),
     travelers: text("travelers"),
     notes: text("notes"),
+    aggregateVersion: integer("aggregate_version").default(1).notNull(),
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
   },
@@ -606,8 +619,18 @@ export const tripProjects = pgTable(
     uniqueIndex("trip_projects_id_user_id_idx").on(tripProject.id, tripProject.userId),
     index("trip_projects_user_id_updated_at_idx").on(tripProject.userId, tripProject.updatedAt),
     check("trip_projects_title_not_empty_check", sql`length(btrim(${tripProject.title})) > 0`),
+    check("trip_projects_aggregate_version_check", sql`${tripProject.aggregateVersion} >= 1`),
   ],
 );
+
+export const tripProjectConstraints = pgTable("trip_project_constraints", {
+  tripProjectId: text("trip_project_id").primaryKey(), userId: text("user_id").notNull(), version: integer("version").default(1).notNull(),
+  adultCount: integer("adult_count"), childCount: integer("child_count"), children: jsonb("children").$type<unknown[]>(), vehicleType: text("vehicle_type"), evChargingNeed: text("ev_charging_need"), drivingToleranceHours: integer("driving_tolerance_hours"), budgetCurrency: text("budget_currency"), budgetMinVnd: integer("budget_min_vnd"), budgetMaxVnd: integer("budget_max_vnd"), preferenceTags: jsonb("preference_tags").$type<string[]>(), avoidItems: jsonb("avoid_items").$type<unknown[]>(), createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(), updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
+}, (row) => [foreignKey({ columns: [row.tripProjectId, row.userId], foreignColumns: [tripProjects.id, tripProjects.userId], name: "trip_project_constraints_owner_fk" }).onDelete("cascade"), index("trip_project_constraints_owner_project_idx").on(row.userId, row.tripProjectId), check("trip_project_constraints_version_check", sql`${row.version} >= 1`), check("trip_project_constraints_counts_check", sql`(${row.adultCount} is not null or ${row.childCount} is not null) and coalesce(${row.adultCount}, 0) + coalesce(${row.childCount}, 0) between 1 and 20 and (${row.adultCount} is null or ${row.adultCount} between 0 and 20) and (${row.childCount} is null or ${row.childCount} between 0 and 20)`), check("trip_project_constraints_children_array_check", sql`${row.children} is null or (jsonb_typeof(${row.children}) = 'array' and jsonb_array_length(${row.children}) <= 10)`), check("trip_project_constraints_vehicle_check", sql`${row.vehicleType} is null or ${row.vehicleType} in ('car', 'motorcycle', 'ev')`), check("trip_project_constraints_ev_check", sql`${row.evChargingNeed} is null or (${row.vehicleType} = 'ev' and ${row.evChargingNeed} in ('none', 'preferred', 'required'))`), check("trip_project_constraints_driving_check", sql`${row.drivingToleranceHours} is null or ${row.drivingToleranceHours} between 1 and 12`), check("trip_project_constraints_budget_check", sql`(${row.budgetCurrency} is null and ${row.budgetMinVnd} is null and ${row.budgetMaxVnd} is null) or (${row.budgetCurrency} = 'VND' and ${row.budgetMinVnd} between 0 and 1000000000 and ${row.budgetMaxVnd} between 0 and 1000000000 and ${row.budgetMinVnd} <= ${row.budgetMaxVnd})`), check("trip_project_constraints_preferences_array_check", sql`${row.preferenceTags} is null or (jsonb_typeof(${row.preferenceTags}) = 'array' and jsonb_array_length(${row.preferenceTags}) <= 20)`), check("trip_project_constraints_avoid_items_array_check", sql`${row.avoidItems} is null or (jsonb_typeof(${row.avoidItems}) = 'array' and jsonb_array_length(${row.avoidItems}) <= 20)`)]);
+
+export const tripPlanItems = pgTable("trip_plan_items", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()), tripProjectId: text("trip_project_id").notNull(), userId: text("user_id").notNull(), kind: text("kind").$type<TripPlanItemKind>().notNull(), anchorRole: text("anchor_role").$type<TripPlanAnchorRole>(), type: text("type").$type<TripPlanItemType>(), state: text("state").$type<TripPlanItemState>().notNull(), label: text("label").notNull(), notes: text("notes"), plannedAt: timestamp("planned_at", { mode: "date" }), ordinal: integer("ordinal").notNull(), version: integer("version").default(1).notNull(), parentItemId: text("parent_item_id").references((): AnyPgColumn => tripPlanItems.id, { onDelete: "restrict" }), backupTargetItemId: text("backup_target_item_id").references((): AnyPgColumn => tripPlanItems.id, { onDelete: "restrict" }), transportOriginLabel: text("transport_origin_label"), transportDestinationLabel: text("transport_destination_label"), accommodationPlaceAreaLabel: text("accommodation_place_area_label"), createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(), updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
+}, (row) => [foreignKey({ columns: [row.tripProjectId, row.userId], foreignColumns: [tripProjects.id, tripProjects.userId], name: "trip_plan_items_owner_fk" }).onDelete("cascade"), index("trip_plan_items_owner_project_order_idx").on(row.userId, row.tripProjectId, row.parentItemId, row.ordinal), uniqueIndex("trip_plan_items_root_ordinal_idx").on(row.tripProjectId, row.ordinal).where(sql`${row.parentItemId} is null`), uniqueIndex("trip_plan_items_child_ordinal_idx").on(row.tripProjectId, row.parentItemId, row.ordinal).where(sql`${row.parentItemId} is not null`), check("trip_plan_items_shape_check", sql`(${row.kind} = 'anchor' and ${row.anchorRole} in ('origin','destination','region','required_stop','accommodation') and ${row.type} is null) or (${row.kind} in ('leg','activity') and ${row.anchorRole} is null and ${row.type} in ('transport','visit','food','rest','accommodation'))`), check("trip_plan_items_state_check", sql`${row.state} in ('idea','planned','confirmed','backup')`), check("trip_plan_items_version_check", sql`${row.version} >= 1`), check("trip_plan_items_ordinal_check", sql`${row.ordinal} >= 0`), check("trip_plan_items_backup_check", sql`(${row.state} = 'backup' and ${row.backupTargetItemId} is not null) or (${row.state} <> 'backup' and ${row.backupTargetItemId} is null)`), check("trip_plan_items_label_check", sql`length(btrim(${row.label})) between 1 and 160 and position(chr(10) in ${row.label}) = 0 and position(chr(13) in ${row.label}) = 0`), check("trip_plan_items_notes_check", sql`${row.notes} is null or (length(btrim(${row.notes})) between 1 and 1000 and position(chr(10) in ${row.notes}) = 0 and position(chr(13) in ${row.notes}) = 0)`), check("trip_plan_items_location_check", sql`(${row.type} = 'transport' or (${row.transportOriginLabel} is null and ${row.transportDestinationLabel} is null)) and (${row.type} = 'accommodation' or ${row.accommodationPlaceAreaLabel} is null) and (${row.transportOriginLabel} is null or (length(btrim(${row.transportOriginLabel})) between 1 and 160 and position(chr(10) in ${row.transportOriginLabel}) = 0 and position(chr(13) in ${row.transportOriginLabel}) = 0)) and (${row.transportDestinationLabel} is null or (length(btrim(${row.transportDestinationLabel})) between 1 and 160 and position(chr(10) in ${row.transportDestinationLabel}) = 0 and position(chr(13) in ${row.transportDestinationLabel}) = 0)) and (${row.accommodationPlaceAreaLabel} is null or (length(btrim(${row.accommodationPlaceAreaLabel})) between 1 and 160 and position(chr(10) in ${row.accommodationPlaceAreaLabel}) = 0 and position(chr(13) in ${row.accommodationPlaceAreaLabel}) = 0))`)]);
 
 export const conversations = pgTable(
   "conversations",
@@ -1757,6 +1780,8 @@ export const schema = {
   referralCodes,
   referralAttributions,
   tripProjects,
+  tripProjectConstraints,
+  tripPlanItems,
   conversations,
   messages,
   messageImageAttachments,
