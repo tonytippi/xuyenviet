@@ -750,6 +750,54 @@ describe("Trip Home read model", () => {
       }
     });
 
+    // F10: AC2 6.1 names all four gap sub-cases. transport-missing-date and
+    // accommodation-missing-place are covered above; exercise the remaining
+    // transport-missing-origin, transport-missing-destination, and
+    // accommodation-missing-date/time sub-cases at the focus level (not only via
+    // the findConfirmedItemGap unit tests) so the read model deterministically
+    // surfaces each named gap.
+    test("confirmed-item gap: transport missing origin (destination present) surfaces at the focus level", () => {
+      const items = [
+        makeItem({ id: "transport-no-origin", type: "transport", state: "confirmed", plannedAt: new Date("2026-08-02T00:00:00.000Z"), transportDestinationLabel: "Huế" }),
+        makeItem({ id: "future-leg", type: "transport", state: "planned", plannedAt: new Date("2026-08-01T00:00:00.000Z") }),
+      ];
+
+      const focus = computeTripHomeFocus({ items, pendingProposals: [], now });
+
+      expect(focus.kind).toBe("confirmed-item-gap");
+      if (focus.kind === "confirmed-item-gap") {
+        expect(focus.itemId).toBe("transport-no-origin");
+      }
+    });
+
+    test("confirmed-item gap: transport missing destination (origin present) surfaces at the focus level", () => {
+      const items = [
+        makeItem({ id: "transport-no-dest", type: "transport", state: "confirmed", plannedAt: new Date("2026-08-02T00:00:00.000Z"), transportOriginLabel: "Hà Nội" }),
+        makeItem({ id: "future-leg", type: "transport", state: "planned", plannedAt: new Date("2026-08-01T00:00:00.000Z") }),
+      ];
+
+      const focus = computeTripHomeFocus({ items, pendingProposals: [], now });
+
+      expect(focus.kind).toBe("confirmed-item-gap");
+      if (focus.kind === "confirmed-item-gap") {
+        expect(focus.itemId).toBe("transport-no-dest");
+      }
+    });
+
+    test("confirmed-item gap: accommodation missing date/time (place present) surfaces at the focus level", () => {
+      const items = [
+        makeItem({ id: "acc-no-date", type: "accommodation", state: "confirmed", accommodationPlaceAreaLabel: "Phố cổ Huế" }),
+        makeItem({ id: "future-leg", type: "transport", state: "planned", plannedAt: new Date("2026-08-01T00:00:00.000Z") }),
+      ];
+
+      const focus = computeTripHomeFocus({ items, pendingProposals: [], now });
+
+      expect(focus.kind).toBe("confirmed-item-gap");
+      if (focus.kind === "confirmed-item-gap") {
+        expect(focus.itemId).toBe("acc-no-date");
+      }
+    });
+
     test("future leg: earliest planned time wins when no proposals and no gaps", () => {
       const items = [
         makeItem({ id: "far-leg", type: "transport", state: "planned", plannedAt: new Date("2026-09-01T00:00:00.000Z") }),
@@ -770,18 +818,101 @@ describe("Trip Home read model", () => {
       expect(focus.kind).toBe("preparation");
     });
 
-    test("ties: earliest expiry → earliest planned time → stable createdAt/id", () => {
-      // Two proposals with same expiry → earliest createdAt wins via id tiebreak.
+    test("ties: pending-with-expiry tie on expiry resolves by stable id (createdAt identical)", () => {
+      // F7: assert the kind first so the assertion cannot pass vacuously. With
+      // identical expiry AND identical createdAt, the only remaining tiebreak is
+      // the stable id (idKey). The earlier id wins.
       const sameExpiry = new Date("2026-07-26T00:00:00.000Z");
+      const sameCreatedAt = new Date("2026-07-20T00:00:00.000Z");
       const proposals = [
-        makeProposal({ id: "zzz-prop", expiresAt: sameExpiry, createdAt: new Date("2026-07-22T00:00:00.000Z") }),
-        makeProposal({ id: "aaa-prop", expiresAt: sameExpiry, createdAt: new Date("2026-07-20T00:00:00.000Z") }),
+        makeProposal({ id: "zzz-prop", expiresAt: sameExpiry, createdAt: sameCreatedAt }),
+        makeProposal({ id: "aaa-prop", expiresAt: sameExpiry, createdAt: sameCreatedAt }),
       ];
 
       const focus = computeTripHomeFocus({ items: [], pendingProposals: proposals, now });
 
+      expect(focus.kind).toBe("pending-proposal-with-expiry");
       if (focus.kind === "pending-proposal-with-expiry") {
         expect(focus.proposalId).toBe("aaa-prop");
+      }
+    });
+
+    test("ties: pending-without-expiry tie on createdAt resolves by stable id", () => {
+      const sameCreatedAt = new Date("2026-07-20T00:00:00.000Z");
+      const proposals = [
+        makeProposal({ id: "zzz-no-expiry", createdAt: sameCreatedAt }),
+        makeProposal({ id: "aaa-no-expiry", createdAt: sameCreatedAt }),
+      ];
+
+      const focus = computeTripHomeFocus({ items: [], pendingProposals: proposals, now });
+
+      expect(focus.kind).toBe("pending-proposal");
+      if (focus.kind === "pending-proposal") {
+        expect(focus.proposalId).toBe("aaa-no-expiry");
+      }
+    });
+
+    test("ties: confirmed-item-gap tie on plannedAt resolves by earliest createdAt", () => {
+      // Two confirmed transport gaps with the SAME plannedAt (null sorts first,
+      // but here both have a real equal plannedAt) → earliest createdAt wins.
+      const samePlanned = new Date("2026-08-05T00:00:00.000Z");
+      const items = [
+        makeItem({ id: "later-created-gap", type: "transport", state: "confirmed", plannedAt: samePlanned, createdAt: new Date("2026-07-22T00:00:00.000Z") }),
+        makeItem({ id: "earlier-created-gap", type: "transport", state: "confirmed", plannedAt: samePlanned, createdAt: new Date("2026-07-19T00:00:00.000Z") }),
+      ];
+
+      const focus = computeTripHomeFocus({ items, pendingProposals: [], now });
+
+      expect(focus.kind).toBe("confirmed-item-gap");
+      if (focus.kind === "confirmed-item-gap") {
+        expect(focus.itemId).toBe("earlier-created-gap");
+      }
+    });
+
+    test("ties: confirmed-item-gap tie on plannedAt AND createdAt resolves by stable id", () => {
+      const samePlanned = new Date("2026-08-05T00:00:00.000Z");
+      const sameCreated = new Date("2026-07-20T00:00:00.000Z");
+      const items = [
+        makeItem({ id: "zzz-gap-id", type: "accommodation", state: "confirmed", plannedAt: samePlanned, createdAt: sameCreated }),
+        makeItem({ id: "aaa-gap-id", type: "accommodation", state: "confirmed", plannedAt: samePlanned, createdAt: sameCreated }),
+      ];
+
+      const focus = computeTripHomeFocus({ items, pendingProposals: [], now });
+
+      expect(focus.kind).toBe("confirmed-item-gap");
+      if (focus.kind === "confirmed-item-gap") {
+        expect(focus.itemId).toBe("aaa-gap-id");
+      }
+    });
+
+    test("ties: next-leg tie on plannedAt resolves by earliest createdAt", () => {
+      const samePlanned = new Date("2026-08-01T00:00:00.000Z");
+      const items = [
+        makeItem({ id: "later-created-leg", type: "transport", state: "planned", plannedAt: samePlanned, createdAt: new Date("2026-07-22T00:00:00.000Z") }),
+        makeItem({ id: "earlier-created-leg", type: "transport", state: "planned", plannedAt: samePlanned, createdAt: new Date("2026-07-20T00:00:00.000Z") }),
+      ];
+
+      const focus = computeTripHomeFocus({ items, pendingProposals: [], now });
+
+      expect(focus.kind).toBe("next-leg");
+      if (focus.kind === "next-leg") {
+        expect(focus.itemId).toBe("earlier-created-leg");
+      }
+    });
+
+    test("ties: next-leg tie on plannedAt AND createdAt resolves by stable id", () => {
+      const samePlanned = new Date("2026-08-01T00:00:00.000Z");
+      const sameCreated = new Date("2026-07-20T00:00:00.000Z");
+      const items = [
+        makeItem({ id: "zzz-leg-id", type: "transport", state: "planned", plannedAt: samePlanned, createdAt: sameCreated }),
+        makeItem({ id: "aaa-leg-id", type: "transport", state: "planned", plannedAt: samePlanned, createdAt: sameCreated }),
+      ];
+
+      const focus = computeTripHomeFocus({ items, pendingProposals: [], now });
+
+      expect(focus.kind).toBe("next-leg");
+      if (focus.kind === "next-leg") {
+        expect(focus.itemId).toBe("aaa-leg-id");
       }
     });
 
@@ -876,17 +1007,30 @@ describe("Trip Home read model", () => {
     test("tripChangeProposalLabels copy never implies dynamic data was checked", () => {
       // The suggestionNote explicitly disclaims checking availability/route/weather.
       for (const label of Object.values(tripChangeProposalLabels)) {
-        // The suggestionNote contains the words "đặt phòng", "đường đi", "thời tiết",
-        // "tình trạng còn chỗ" but in a NEGATIVE context ("không phải ..."). We
-        // verify it is a disclaimer, not a claim.
-        if (typeof label === "string") {
-          // The suggestionNote is the only label that mentions these terms, and
-          // it uses them to disclaim, not to claim. All other labels must be clean.
-          if (label === tripChangeProposalLabels.suggestionNote) {
-            expect(label).toContain("không phải");
-          } else {
-            assertNoForbiddenTerms(label);
+        if (typeof label !== "string") continue;
+        // The suggestionNote is the only label that mentions these terms, and it
+        // uses them to disclaim, not to claim. All other labels must be clean.
+        if (label === tripChangeProposalLabels.suggestionNote) {
+          // F18: prove the forbidden terms appear ONLY in the negated clause
+          // (after "không phải"), never as a claim before it. Asserting only
+          // "không phải" is present would let a rewritten note flip
+          // disclaim→assert and still pass.
+          const negMarkerIndex = label.indexOf("không phải");
+          expect(negMarkerIndex).toBeGreaterThanOrEqual(0);
+          const beforeNegation = label.slice(0, negMarkerIndex);
+          const negatedClause = label.slice(negMarkerIndex);
+          // Before the negation marker, no forbidden term may appear (no claim).
+          for (const term of forbiddenTerms) {
+            expect(beforeNegation.toLowerCase()).not.toContain(term.toLowerCase());
           }
+          // The forbidden terms that DO appear are all inside the negated clause,
+          // proving the note disclaims them rather than asserting them.
+          expect(negatedClause).toContain("đặt phòng");
+          expect(negatedClause).toContain("đường đi");
+          expect(negatedClause).toContain("thời tiết");
+          expect(negatedClause).toContain("còn chỗ");
+        } else {
+          assertNoForbiddenTerms(label);
         }
       }
     });

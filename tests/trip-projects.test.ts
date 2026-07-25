@@ -670,21 +670,63 @@ describe("Story 7.6 AC1 invalid relationships, stale versions, backup refs, orde
     vi.clearAllMocks();
   });
 
-  test("3.1 updateInternalTripPlanItem rejects cross-project parent and non-leg parent for an activity", async () => {
+  test("3.1 createInternalTripPlanItem rejects cross-project parent, nonexistent parent, and a real existing non-leg parent for an activity", async () => {
     await createTestUser("safety-rel-user");
     const [projectA] = await testDb.insert(tripProjects).values({ userId: "safety-rel-user", title: "Huế", aggregateVersion: 1 }).returning({ id: tripProjects.id });
     const [projectB] = await testDb.insert(tripProjects).values({ userId: "safety-rel-user", title: "Đà Nẵng", aggregateVersion: 1 }).returning({ id: tripProjects.id });
     await testDb.insert(tripPlanItems).values({ id: "rel-leg-a", tripProjectId: projectA.id, userId: "safety-rel-user", kind: "leg", type: "transport", state: "planned", label: "Chạy xe A", ordinal: 0 });
     const [legB] = await testDb.insert(tripPlanItems).values({ id: "rel-leg-b", tripProjectId: projectB.id, userId: "safety-rel-user", kind: "leg", type: "transport", state: "planned", label: "Chạy xe B", ordinal: 0 }).returning();
+    // F3: a real existing NON-LEG parent (an anchor) in projectA. This exercises
+    // the `parent.kind !== "leg"` branch (plan-references.ts:43), not the
+    // `!parent` branch (:41) that a nonexistent id hits.
+    const [anchorA] = await testDb.insert(tripPlanItems).values({ id: "rel-anchor-a", tripProjectId: projectA.id, userId: "safety-rel-user", kind: "anchor", anchorRole: "origin", type: null, state: "idea", label: "Hà Nội", ordinal: 1 }).returning();
     vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "safety-rel-user", email: "safety-rel-user@example.com" }) }));
     const { createInternalTripPlanItem } = await import("@/features/chat-trips/trip-projects");
 
     // Cross-project parent: activity in projectA with parentItemId from projectB.
-    await expect(createInternalTripPlanItem(projectA.id, 1, { kind: "activity", type: "visit", state: "idea", label: "Sai cha", ordinal: 0, parentItemId: legB.id })).resolves.toEqual({ success: false, reason: "invalid" });
-    // Non-leg parent: activity with an anchor as parent (anchor cannot be a parent).
-    await expect(createInternalTripPlanItem(projectA.id, 1, { kind: "activity", type: "visit", state: "idea", label: "Sai cha", ordinal: 1, parentItemId: "nonexistent" })).resolves.toEqual({ success: false, reason: "invalid" });
+    await expect(createInternalTripPlanItem(projectA.id, 1, { kind: "activity", type: "visit", state: "idea", label: "Sai cha", ordinal: 2, parentItemId: legB.id })).resolves.toEqual({ success: false, reason: "invalid" });
+    // Nonexistent parent: hits the `!parent` branch (plan-references.ts:41).
+    await expect(createInternalTripPlanItem(projectA.id, 1, { kind: "activity", type: "visit", state: "idea", label: "Sai cha", ordinal: 3, parentItemId: "nonexistent" })).resolves.toEqual({ success: false, reason: "invalid" });
+    // F3: real existing non-leg parent (anchor) — hits the `parent.kind !== "leg"` branch (:43).
+    await expect(createInternalTripPlanItem(projectA.id, 1, { kind: "activity", type: "visit", state: "idea", label: "Sai cha", ordinal: 4, parentItemId: anchorA.id })).resolves.toEqual({ success: false, reason: "invalid" });
+    // No partial state: only the seeded leg and anchor exist in projectA.
+    await expect(testDb.select().from(tripPlanItems).where(eq(tripPlanItems.tripProjectId, projectA.id))).resolves.toHaveLength(2);
+  });
+
+  test("3.1 createInternalTripPlanItem rejects a backup target that is cross-project or missing (validatePlanReferencesRules :48-50)", async () => {
+    await createTestUser("safety-bkrel-user");
+    const [projectA] = await testDb.insert(tripProjects).values({ userId: "safety-bkrel-user", title: "Huế", aggregateVersion: 1 }).returning({ id: tripProjects.id });
+    const [projectB] = await testDb.insert(tripProjects).values({ userId: "safety-bkrel-user", title: "Đà Lạt", aggregateVersion: 1 }).returning({ id: tripProjects.id });
+    const [legB] = await testDb.insert(tripPlanItems).values({ id: "bkrel-leg-b", tripProjectId: projectB.id, userId: "safety-bkrel-user", kind: "leg", type: "transport", state: "planned", label: "B", ordinal: 0 }).returning();
+    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "safety-bkrel-user", email: "safety-bkrel-user@example.com" }) }));
+    const { createInternalTripPlanItem } = await import("@/features/chat-trips/trip-projects");
+
+    // F4: cross-project backup target — target exists but in projectB, so it is
+    // absent from projectA's knownItems → rejected by the same-project rule.
+    await expect(createInternalTripPlanItem(projectA.id, 1, { kind: "leg", type: "transport", state: "backup", label: "Phương án B", ordinal: 0, backupTargetItemId: legB.id })).resolves.toEqual({ success: false, reason: "invalid" });
+    // F4: missing backup target — target id does not exist in the project.
+    await expect(createInternalTripPlanItem(projectA.id, 1, { kind: "leg", type: "transport", state: "backup", label: "Phương án B", ordinal: 0, backupTargetItemId: "missing-target" })).resolves.toEqual({ success: false, reason: "invalid" });
     // No partial state.
-    await expect(testDb.select().from(tripPlanItems).where(eq(tripPlanItems.tripProjectId, projectA.id))).resolves.toHaveLength(1);
+    await expect(testDb.select().from(tripPlanItems).where(eq(tripPlanItems.tripProjectId, projectA.id))).resolves.toHaveLength(0);
+  });
+
+  test("3.1 updateInternalTripPlanItem rejects a backup cycle A→B, B→A (validatePlanReferencesRules cycle walk :51-58)", async () => {
+    await createTestUser("safety-cyc-user");
+    const [project] = await testDb.insert(tripProjects).values({ userId: "safety-cyc-user", title: "Hội An", aggregateVersion: 1 }).returning({ id: tripProjects.id });
+    const [legA] = await testDb.insert(tripPlanItems).values({ id: "cyc-leg-a", tripProjectId: project.id, userId: "safety-cyc-user", kind: "leg", type: "transport", state: "planned", label: "A", ordinal: 0 }).returning();
+    const [legB] = await testDb.insert(tripPlanItems).values({ id: "cyc-leg-b", tripProjectId: project.id, userId: "safety-cyc-user", kind: "leg", type: "transport", state: "planned", label: "B", ordinal: 1 }).returning();
+    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "safety-cyc-user", email: "safety-cyc-user@example.com" }) }));
+    const { updateInternalTripPlanItem } = await import("@/features/chat-trips/trip-projects");
+
+    // A becomes a backup targeting B (valid).
+    await expect(updateInternalTripPlanItem(project.id, 1, legA.id, 1, { kind: "leg", type: "transport", state: "backup", label: "A", ordinal: 0, backupTargetItemId: legB.id })).resolves.toMatchObject({ success: true });
+
+    // F4: B now targeting A forms a cycle A→B→A. The cycle walk (:51-58) must
+    // reject it; no partial write (B stays planned, not backup).
+    await expect(updateInternalTripPlanItem(project.id, 2, legB.id, 1, { kind: "leg", type: "transport", state: "backup", label: "B", ordinal: 1, backupTargetItemId: legA.id })).resolves.toEqual({ success: false, reason: "invalid" });
+    const [savedB] = await testDb.select().from(tripPlanItems).where(eq(tripPlanItems.id, legB.id));
+    expect(savedB.state).toBe("planned");
+    expect(savedB.backupTargetItemId).toBeNull();
   });
 
   test("3.2 stale aggregate version on update and delete returns refresh_required and applies nothing", async () => {
@@ -727,6 +769,27 @@ describe("Story 7.6 AC1 invalid relationships, stale versions, backup refs, orde
     expect(savedItem.version).toBe(1);
   });
 
+  test("3.2 stale aggregate version on reorder returns refresh_required and applies nothing (reorder has a version fence)", async () => {
+    // F5: AC 3.2 says "every mutating command." reorderInternalTripPlanItem
+    // locks the aggregate and checks expectedAggregateVersion; a stale aggregate
+    // must return refresh_required before any renumber/ordinal write.
+    await createTestUser("safety-stale-reorder-user");
+    const [project] = await testDb.insert(tripProjects).values({ userId: "safety-stale-reorder-user", title: "Hà Giang", aggregateVersion: 1 }).returning({ id: tripProjects.id });
+    const [item] = await testDb.insert(tripPlanItems).values({ id: "stale-reorder-leg", tripProjectId: project.id, userId: "safety-stale-reorder-user", kind: "leg", type: "transport", state: "idea", label: "Chạy xe", ordinal: 0 }).returning();
+    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "safety-stale-reorder-user", email: "safety-stale-reorder-user@example.com" }) }));
+    const { reorderInternalTripPlanItem } = await import("@/features/chat-trips/trip-projects");
+
+    // Stale aggregate (actual 1, expected 99) → refresh_required, no renumber.
+    await expect(reorderInternalTripPlanItem(project.id, 99, { itemId: item.id, expectedItemVersion: 1, ordinal: 0, expectedChangedItemVersions: { [item.id]: 1 } })).resolves.toEqual({ success: false, reason: "refresh_required" });
+
+    // Aggregate version unchanged, item unchanged.
+    const [savedProject] = await testDb.select().from(tripProjects).where(eq(tripProjects.id, project.id));
+    expect(savedProject.aggregateVersion).toBe(1);
+    const [savedItem] = await testDb.select().from(tripPlanItems).where(eq(tripPlanItems.id, item.id));
+    expect(savedItem.ordinal).toBe(0);
+    expect(savedItem.version).toBe(1);
+  });
+
   test("3.3 backup state without a same-project backupTargetItemId is rejected by the DB check constraint", async () => {
     await createTestUser("safety-bk-user");
     const [project] = await testDb.insert(tripProjects).values({ userId: "safety-bk-user", title: "Hội An", aggregateVersion: 1 }).returning({ id: tripProjects.id });
@@ -751,8 +814,19 @@ describe("Story 7.6 AC1 invalid relationships, stale versions, backup refs, orde
     await expect(createInternalTripPlanItem(project.id, 1, { kind: "leg", type: "transport", state: "idea", label: "A", ordinal: 0 })).resolves.toMatchObject({ success: true, aggregateVersion: 2 });
     await expect(createInternalTripPlanItem(project.id, 2, { kind: "leg", type: "visit", state: "idea", label: "B", ordinal: 1 })).resolves.toMatchObject({ success: true, aggregateVersion: 3 });
 
-    // Duplicate ordinal 0 at root level is rejected by the unique index (DB throws).
-    await expect(createInternalTripPlanItem(project.id, 3, { kind: "leg", type: "food", state: "idea", label: "C", ordinal: 0 })).rejects.toThrow();
+    // F17: duplicate root ordinal 0 is rejected specifically by the
+    // (trip_project_id, parent_item_id, ordinal) unique index, not by any DB
+    // error (NOT NULL/FK/etc.). Drizzle wraps the Postgres error in `.cause`,
+    // so assert the unique-violation SQLSTATE 23505 and the root-ordinal index
+    // name there — a different constraint regression cannot satisfy this.
+    try {
+      await createInternalTripPlanItem(project.id, 3, { kind: "leg", type: "food", state: "idea", label: "C", ordinal: 0 });
+      throw new Error("expected duplicate root ordinal insert to be rejected");
+    } catch (error) {
+      const cause = (error as { cause?: { code?: string; constraint_name?: string } }).cause;
+      expect(cause?.code).toBe("23505");
+      expect(cause?.constraint_name).toBe("trip_plan_items_root_ordinal_idx");
+    }
 
     // No partial state: only the two original items exist.
     const items = await testDb.select().from(tripPlanItems).where(eq(tripPlanItems.tripProjectId, project.id));

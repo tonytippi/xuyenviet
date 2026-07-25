@@ -2676,12 +2676,32 @@ describe("AI Ask streaming route", () => {
       expect(cardSource).not.toContain("min-h-8");
     });
 
-    test("7.2 reduced-motion: non-essential transitions are disabled via Tailwind transition + no forced animation", () => {
+    test("7.2 reduced-motion: the plan-history sheet and proposal reveal have no non-essential transitions to disable", () => {
+      // F1: AC3 7.2 says "reduced-motion disables non-essential transitions in
+      // the plan-history sheet and proposal reveal." The two named components
+      // (trip-workspace-panel.tsx = plan-history sheet; trip-proposal-review-card.tsx
+      // = proposal reveal) contain NO Tailwind transition/animation classes and
+      // NO JS-driven animation APIs, so there are no non-essential transitions
+      // that would need a motion-reduce/prefers-reduced-motion guard. The
+      // previous test asserted only absence of JS animation APIs and relied on
+      // the false claim that "CSS transitions respect prefers-reduced-motion at
+      // the browser level" — Tailwind `transition` does NOT add such a media
+      // query. The correct invariant here is: no non-essential transitions exist
+      // in these components, so reduced-motion is satisfied (nothing animates).
+      // (The broader chat composer may use hover/focus color transitions, but
+      // those are outside the plan-history sheet and proposal reveal AC3 7.2
+      // names, and color transitions do not move content.)
       const cardSource = readFileSync("src/features/ai/trip-proposal-review-card.tsx", "utf8");
       const panelSource = readFileSync("src/features/ai/trip-workspace-panel.tsx", "utf8");
 
-      // Transitions are CSS-based (Tailwind "transition" class), which respect
-      // prefers-reduced-motion at the browser level. No JS-driven animations.
+      // No Tailwind transition/animation/duration classes in the named components.
+      expect(cardSource).not.toContain("transition");
+      expect(cardSource).not.toContain("animate-");
+      expect(cardSource).not.toContain("duration-");
+      expect(panelSource).not.toContain("transition");
+      expect(panelSource).not.toContain("animate-");
+      expect(panelSource).not.toContain("duration-");
+      // No JS-driven animation APIs in the named components.
       expect(cardSource).not.toContain("useEffect");
       expect(cardSource).not.toContain("useState");
       expect(cardSource).not.toContain("requestAnimationFrame");
@@ -2698,8 +2718,16 @@ describe("AI Ask streaming route", () => {
       expect(cardSource).toContain('aria-live="polite"');
       // The workspace panel has an sr-only aria-live region for focus changes.
       expect(panelSource).toContain('aria-live="polite"');
-      // The plan history list has aria-live="polite".
-      expect(panelSource).toContain('aria-live="polite"');
+      // F20: the plan-history LIST specifically announces via polite aria-live.
+      // Locate the plan-history <ul> (it carries aria-live="polite") and assert
+      // the aria-live is on that list, not just anywhere in the panel source.
+      const historyListIndex = panelSource.indexOf("planHistory");
+      expect(historyListIndex).toBeGreaterThan(-1);
+      const historySlice = panelSource.slice(historyListIndex);
+      const ulIndex = historySlice.indexOf("<ul");
+      expect(ulIndex).toBeGreaterThan(-1);
+      const ulSlice = historySlice.slice(ulIndex, ulIndex + 80);
+      expect(ulSlice).toContain('aria-live="polite"');
     });
 
     test("7.3 terminal focus returns to the originating answer card or Trip Home focus card", () => {
@@ -2742,12 +2770,14 @@ describe("AI Ask streaming route", () => {
       const applyHandlerIndex = composerSource.indexOf("function handleApplyProposal");
       expect(applyHandlerIndex).toBeGreaterThan(-1);
       // The stream done handler must NOT call handleApplyProposal.
+      // F19: assert unconditionally. The previous test gated the behavioral
+      // check inside `if (doneIndex > -1)` where doneIndex was indexOf('"done"'),
+      // so a refactor to a constant/enum/single-quote literal would make the
+      // assertion pass vacuously. Now fail outright if no done handler is found.
       const doneIndex = composerSource.indexOf('"done"');
-      if (doneIndex > -1) {
-        // Get the context around the done handler to verify it doesn't call apply.
-        const doneSlice = composerSource.slice(doneIndex, doneIndex + 1000);
-        expect(doneSlice).not.toContain("handleApplyProposal(");
-      }
+      expect(doneIndex).toBeGreaterThan(-1);
+      const doneSlice = composerSource.slice(doneIndex, doneIndex + 1000);
+      expect(doneSlice).not.toContain("handleApplyProposal(");
     });
 
     test("7.4 the timeline has no reorder/edit/status controls — timeline entries are read-only display", () => {
@@ -2770,15 +2800,8 @@ describe("AI Ask streaming route", () => {
     test("7.4 refresh (Làm mới đề xuất) focuses the composer and does NOT auto-regenerate or call the AI gateway", () => {
       const composerSource = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
 
-      // The comment block before handleRefreshProposal states it does NOT auto-regenerate.
-      const refreshCommentStart = composerSource.indexOf("Làm mới đề xuất is an owner action");
-      expect(refreshCommentStart).toBeGreaterThan(-1);
-      const refreshCommentSlice = composerSource.slice(refreshCommentStart, refreshCommentStart + 400);
-
-      // It does NOT auto-regenerate.
-      expect(refreshCommentSlice).toContain("does NOT auto-regenerate");
-      // It does NOT call the AI gateway.
-      expect(refreshCommentSlice).toContain("does NOT call the AI gateway");
+      // F22: drop comment-text assertions (they only verify a comment was
+      // written, not the behavior). Rely on the function-body behavior checks.
 
       // The function body focuses the textarea.
       const refreshFnStart = composerSource.indexOf("function handleRefreshProposal");
@@ -2787,36 +2810,73 @@ describe("AI Ask streaming route", () => {
 
       // It focuses the composer textarea.
       expect(refreshFnSlice).toContain("textareaRef.current?.focus()");
-      // It does NOT call the AI gateway or any streaming function.
+      // It does NOT call the AI gateway or any streaming/proposal-generation function.
       expect(refreshFnSlice).not.toContain("aiGateway");
       expect(refreshFnSlice).not.toContain("stream");
       expect(refreshFnSlice).not.toContain("generateProposal");
       expect(refreshFnSlice).not.toContain("persistAiTripChangeProposalDraft");
     });
 
-    test("7.5 recovery: refresh_required/expired outcomes show Làm mới đề xuất/Đã hết hạn with action row hidden (P4 invariant)", () => {
-      const cardSource = readFileSync("src/features/ai/trip-proposal-review-card.tsx", "utf8");
+    test("7.5 recovery: refresh_required/expired/applied outcomes hide the action row; refresh shows Làm mới đề xuất (P4 invariant, behavior-level)", () => {
+      // F21: assert the P4 invariant at the DOM/behavior level instead of the
+      // exact source shape `!isTerminal && !isRefreshRequired`. Render the card
+      // with each terminal outcome and assert the apply/dismiss action row is
+      // hidden for terminal + refresh-required/expired, and the refresh hint or
+      // terminal badge is announced. Robust to any equivalent refactor.
+      const now = new Date("2026-07-25T10:00:00.000Z");
+      const proposal: PendingProposalFocusInput = {
+        id: "p4-proposal",
+        createdAt: new Date("2026-07-22T00:00:00.000Z"),
+        rationale: "Đề xuất",
+      };
 
-      // isRefreshRequired hides the action row (showActionRow = !isTerminal && !isRefreshRequired).
-      expect(cardSource).toContain("isRefreshRequired");
-      expect(cardSource).toContain("showActionRow");
-      // The refresh-required outcome shows the refresh hint label constant.
-      expect(cardSource).toContain("refreshHint");
-      // The refresh button references the label constant.
-      expect(cardSource).toContain("tripChangeProposalLabels.refresh");
-      // The expired badge references the label constant.
-      expect(cardSource).toContain("tripChangeProposalLabels.expired");
-      // The action row is hidden when terminal or refresh-required.
-      expect(cardSource).toContain("!isTerminal && !isRefreshRequired");
+      const refreshRequiredHtml = renderToStaticMarkup(
+        createElement(TripProposalReviewCard, { idPrefix: "p4-rr-", proposal, now, terminalOutcome: "refresh-required" }),
+      );
+      // Action row hidden: no Áp dụng / Giữ kế hoạch buttons.
+      expect(refreshRequiredHtml).not.toContain(tripChangeProposalLabels.apply);
+      expect(refreshRequiredHtml).not.toContain(tripChangeProposalLabels.keepPlan);
+      // Refresh hint + refresh button shown.
+      expect(refreshRequiredHtml).toContain(tripChangeProposalLabels.refreshHint);
+      expect(refreshRequiredHtml).toContain(tripChangeProposalLabels.refresh);
+
+      const expiredHtml = renderToStaticMarkup(
+        createElement(TripProposalReviewCard, { idPrefix: "p4-exp-", proposal, now, terminalOutcome: "expired" }),
+      );
+      expect(expiredHtml).not.toContain(tripChangeProposalLabels.apply);
+      expect(expiredHtml).not.toContain(tripChangeProposalLabels.keepPlan);
+      expect(expiredHtml).toContain(tripChangeProposalLabels.expired);
+
+      const appliedHtml = renderToStaticMarkup(
+        createElement(TripProposalReviewCard, { idPrefix: "p4-app-", proposal, now, terminalOutcome: "applied" }),
+      );
+      // A true terminal outcome hides the action row too.
+      expect(appliedHtml).not.toContain(tripChangeProposalLabels.apply);
+      expect(appliedHtml).not.toContain(tripChangeProposalLabels.keepPlan);
+      expect(appliedHtml).toContain(tripChangeProposalLabels.applied);
     });
 
-    test("7.5 recovery: transient errors keep the action row visible for retry (Q3 invariant)", () => {
-      const cardSource = readFileSync("src/features/ai/trip-proposal-review-card.tsx", "utf8");
-
-      // transient-error is excluded from isTerminal so the action row stays visible.
-      expect(cardSource).toContain('terminalOutcome !== "transient-error"');
-      // The transient-error variant is declared.
-      expect(cardSource).toContain('"transient-error"');
+    test("7.5 recovery: transient-error keeps the action row visible for retry (Q3 invariant, behavior-level)", () => {
+      // F21: assert the Q3 invariant at the DOM/behavior level instead of the
+      // exact source shape `terminalOutcome !== "transient-error"`. Render the
+      // card with a transient-error outcome and assert the apply/dismiss action
+      // row stays visible (retryable), unlike the terminal outcomes above.
+      const now = new Date("2026-07-25T10:00:00.000Z");
+      const proposal: PendingProposalFocusInput = {
+        id: "q3-proposal",
+        createdAt: new Date("2026-07-22T00:00:00.000Z"),
+        rationale: "Đề xuất",
+      };
+      const transientHtml = renderToStaticMarkup(
+        createElement(TripProposalReviewCard, { idPrefix: "q3-", proposal, now, terminalOutcome: "transient-error" }),
+      );
+      // The action row stays visible for retry.
+      expect(transientHtml).toContain(tripChangeProposalLabels.apply);
+      expect(transientHtml).toContain(tripChangeProposalLabels.keepPlan);
+      // No terminal/refresh-required badge hides the row.
+      expect(transientHtml).not.toContain(tripChangeProposalLabels.applied);
+      expect(transientHtml).not.toContain(tripChangeProposalLabels.dismissed);
+      expect(transientHtml).not.toContain(tripChangeProposalLabels.refreshHint);
     });
 
     test("7.4 proposal cards must never look identical to confirmed timeline items — amber border and suggestion note preserved", () => {

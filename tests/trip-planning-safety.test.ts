@@ -1,12 +1,17 @@
 import { eq } from "drizzle-orm";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
+import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 
 import {
+  aiUsageEvents,
   auditEvents,
   conversations,
+  schema,
   tripChangeProposals,
   tripPlanChangeHistory,
   tripPlanItems,
+  tripProjectConstraints,
   tripProjects,
   users,
 } from "@/db/schema";
@@ -53,6 +58,92 @@ async function loadProjectsModuleAs(userId: string, email: string) {
   return await import("@/features/chat-trips/trip-projects");
 }
 
+// F2: a dedicated multi-connection pool scoped to the concurrency tests. The
+// default testDb helper uses max:1 (serialized), and the production getDb()
+// pool size is an implicit assumption. For apply/apply, apply/dismiss, and
+// concurrent reorder we make the multi-connection pool EXPLICIT and prove real
+// FOR UPDATE contention with a held lock (see 5.2b). The pool is opened once
+// for the file and closed in afterAll so it does not leak across tests.
+let concSql: ReturnType<typeof postgres> | null = null;
+let concDb: PostgresJsDatabase<typeof schema> | null = null;
+// A separate single raw connection used only to hold a FOR UPDATE lock for the
+// contention-proof tests (independent of concDb so the lock and the contending
+// transaction run on different connections).
+let lockSql: ReturnType<typeof postgres> | null = null;
+
+beforeAll(async () => {
+  // setup.ts already routes process.env.DATABASE_URL at the test database, so
+  // re-running getTestDatabaseUrl() here would collide on the "must differ"
+  // safety check. Read DATABASE_URL_TEST directly (populated from .env by the
+  // setup phase) — it points at the same local test database testDb uses.
+  const url = process.env.DATABASE_URL_TEST;
+  if (!url) throw new Error("DATABASE_URL_TEST is required for concurrency tests");
+  concSql = postgres(url, { max: 4 });
+  concDb = drizzle(concSql, { schema });
+  lockSql = postgres(url, { max: 1 });
+});
+
+afterAll(async () => {
+  if (concSql) await concSql.end();
+  if (lockSql) await lockSql.end();
+});
+
+function getConcurrencyDb(): PostgresJsDatabase<typeof schema> {
+  if (!concDb) throw new Error("concurrency pool not initialized");
+  return concDb;
+}
+
+// Load a module with both the auth session AND @/db/client getDb mocked so the
+// apply/dismiss/reorder functions run on the explicit multi-connection pool.
+async function loadModuleAsMultiConn(userId: string, email: string) {
+  vi.resetModules();
+  const db = getConcurrencyDb();
+  vi.doMock("@/server/auth", () => ({
+    getAuthenticatedSession: vi.fn().mockResolvedValue({ userId, email }),
+  }));
+  vi.doMock("@/db/client", () => ({ getDb: () => db }));
+  return await import("@/features/chat-trips/trip-change-proposals");
+}
+
+async function loadProjectsModuleAsMultiConn(userId: string, email: string) {
+  vi.resetModules();
+  const db = getConcurrencyDb();
+  vi.doMock("@/server/auth", () => ({
+    getAuthenticatedSession: vi.fn().mockResolvedValue({ userId, email }),
+  }));
+  vi.doMock("@/db/client", () => ({ getDb: () => db }));
+  return await import("@/features/chat-trips/trip-projects");
+}
+
+// The expiry worker is sessionless and calls getDb() when no explicit db is
+// passed. Mock @/db/client so the worker runs on the multi-connection pool too
+// (avoids the duplicate-drizzle-instance type clash from passing a typed db arg).
+async function loadExpiryWorkerModuleMultiConn() {
+  vi.resetModules();
+  const db = getConcurrencyDb();
+  vi.doMock("@/db/client", () => ({ getDb: () => db }));
+  return await import("@/features/chat-trips/trip-proposal-expiry-worker");
+}
+
+// F2/F6 contention proof helper: hold a FOR UPDATE lock on a trip_project row
+// from an independent raw connection. Returns a release function that commits
+// and frees the connection. While the lock is held, any apply/reorder that
+// locks the same project row must block until release() is called.
+async function holdProjectLock(projectId: string): Promise<() => Promise<void>> {
+  if (!lockSql) throw new Error("lock connection not initialized");
+  const conn = await lockSql.reserve();
+  await conn.unsafe("begin");
+  await conn.unsafe(`select id from trip_projects where id = $1 for update`, [projectId]);
+  return async () => {
+    await conn.unsafe("commit");
+    await conn.release();
+  };
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 // Story 7.6 AC1: Cross-cutting adversarial safety suite. Scenarios that span
 // modules/owners: multi-owner existence-leakage, deleted/unlinked primary
 // conversation, concurrent terminal actions, project-deletion cascade to
@@ -90,6 +181,22 @@ describe("Story 7.6 AC1 cross-cutting trip planning safety", () => {
         ordinal: 0,
       });
 
+      // Owner A creates a pending proposal so its real id can be used for the
+      // cross-owner getProposalForOwnerReview probe below (F15).
+      const { persistAiTripChangeProposalDraft: persistAsA } = await loadModuleAs(
+        "owner-a",
+        "owner-a@example.com",
+      );
+      const persistedA = await persistAsA({
+        tripProjectId: "safety-p-a",
+        expectedAggregateVersion: 1,
+        expectedItemVersions: { "safety-item-a": 1 },
+        operations: [{ kind: "change-item-state", itemId: "safety-item-a", state: "confirmed" }],
+        rationale: "Xác nhận chặng",
+      });
+      if (!persistedA.success) throw new Error("persist failed");
+      const ownerAProposalId = persistedA.proposal.id;
+
       // Owner B tries to read owner A's project resources — all must return
       // null or empty without leaking that the resource exists.
       const { getOwnedTripProjectSummary } = await loadProjectsModuleAs("owner-b", "owner-b@example.com");
@@ -98,7 +205,11 @@ describe("Story 7.6 AC1 cross-cutting trip planning safety", () => {
       const { listPendingProposalsForTripProject, getProposalForOwnerReview, listPlanHistoryForTripProject } =
         await loadModuleAs("owner-b", "owner-b@example.com");
       await expect(listPendingProposalsForTripProject("safety-p-a")).resolves.toEqual([]);
-      await expect(getProposalForOwnerReview("safety-p-a", "nonexistent-proposal")).resolves.toBeNull();
+      // F15: probe with owner A's REAL live proposal id. A nonexistent id would
+      // hit not_found for any caller; only a real id proves cross-owner non-
+      // leakage of a live proposal. The owner-scoped predicate (userId = owner-b)
+      // must exclude owner A's proposal → null, without leaking its existence.
+      await expect(getProposalForOwnerReview("safety-p-a", ownerAProposalId)).resolves.toBeNull();
       await expect(listPlanHistoryForTripProject("safety-p-a")).resolves.toBeNull();
 
       const { resolveOwnedPrimaryConversation } = await loadProjectsModuleAs(
@@ -148,7 +259,10 @@ describe("Story 7.6 AC1 cross-cutting trip planning safety", () => {
       if (!persisted.success) throw new Error("persist failed");
       const proposalId = persisted.proposal.id;
 
-      const historyBefore = await testDb.select().from(tripPlanChangeHistory);
+      const historyBefore = await testDb
+        .select()
+        .from(tripPlanChangeHistory)
+        .where(eq(tripPlanChangeHistory.tripProjectId, "safety-apply-p"));
       const versionBefore = await testDb
         .select({ v: tripProjects.aggregateVersion })
         .from(tripProjects)
@@ -171,8 +285,14 @@ describe("Story 7.6 AC1 cross-cutting trip planning safety", () => {
       });
       expect(dismissResult).toEqual({ success: false, reason: "not_found" });
 
-      // No history row was written, no version advanced.
-      const historyAfter = await testDb.select().from(tripPlanChangeHistory);
+      // No history row was written for the cross-owner project, no version
+      // advanced. F11: scope the count to safety-apply-p (consistent with the
+      // scoped version check below) so a history row written for a different
+      // project cannot hide a leak by count coincidence.
+      const historyAfter = await testDb
+        .select()
+        .from(tripPlanChangeHistory)
+        .where(eq(tripPlanChangeHistory.tripProjectId, "safety-apply-p"));
       expect(historyAfter).toHaveLength(historyBefore.length);
       const versionAfter = await testDb
         .select({ v: tripProjects.aggregateVersion })
@@ -229,13 +349,22 @@ describe("Story 7.6 AC1 cross-cutting trip planning safety", () => {
       expect(dismissResult).toEqual({ success: false, reason: "unauthenticated" });
 
       // No history row, no audit, no version change.
-      await expect(testDb.select().from(tripPlanChangeHistory)).resolves.toHaveLength(0);
+      await expect(
+        testDb
+          .select()
+          .from(tripPlanChangeHistory)
+          .where(eq(tripPlanChangeHistory.tripProjectId, "safety-unauth-p")),
+      ).resolves.toHaveLength(0);
       await expect(
         testDb
           .select()
           .from(auditEvents)
           .where(eq(auditEvents.targetType, "trip_change_proposal")),
       ).resolves.toHaveLength(0);
+      // F8: AC 1.3 requires "no provider call, no usage event, no persistence."
+      // Assert zero aiUsageEvents rows on the unauthenticated path so a future
+      // regression that records a usage event before the auth gate is caught.
+      await expect(testDb.select().from(aiUsageEvents)).resolves.toHaveLength(0);
     });
   });
 
@@ -288,6 +417,69 @@ describe("Story 7.6 AC1 cross-cutting trip planning safety", () => {
       expect(resultA?.id).not.toBe(convB.id);
     });
 
+    test("2.1b the schema prevents an unlinked primary conversation (AD-30 unlinked invariant is DB-enforced)", async () => {
+      // F9: AC 2.1 requires the resolver to never return a "deleted or unlinked"
+      // conversation. The deleted case is covered in 2.2. For the unlinked case,
+      // the composite FK trip_projects_primary_conversation_owner_fk
+      // (primary_conversation_id, id, user_id) -> conversations(id, trip_project_id,
+      // user_id) (migration 0062) guarantees a referenced primary conversation
+      // stays linked to the project: nulling its trip_project_id while the
+      // project points at it violates the FK. Assert the schema rejects both
+      // unlinking a referenced primary and pointing a project at a conversation
+      // linked to a different project. The resolver's tripProjectId-scoped
+      // primary lookup is a defensive double-check on top of this invariant.
+      await createTestUser("owner-a");
+      await testDb.insert(tripProjects).values({ id: "safety-unlink-p", userId: "owner-a", title: "Quảng Bình" });
+      const [primary] = await testDb
+        .insert(conversations)
+        .values({ id: "safety-unlink-primary", userId: "owner-a", tripProjectId: "safety-unlink-p" })
+        .returning({ id: conversations.id });
+      await testDb
+        .update(tripProjects)
+        .set({ primaryConversationId: primary.id })
+        .where(eq(tripProjects.id, "safety-unlink-p"));
+
+      // Unlinking the referenced primary (null its tripProjectId) violates the
+      // composite FK — the unlinked invariant is enforced at the DB level.
+      try {
+        await testDb
+          .update(conversations)
+          .set({ tripProjectId: null })
+          .where(eq(conversations.id, primary.id));
+        throw new Error("expected unlinking a referenced primary conversation to be rejected");
+      } catch (error) {
+        const cause = (error as { cause?: { code?: string; constraint_name?: string } }).cause;
+        expect(cause?.code).toBe("23503");
+        expect(cause?.constraint_name).toBe("trip_projects_primary_conversation_owner_fk");
+      }
+
+      // Pointing the project at a conversation linked to a DIFFERENT project is
+      // also rejected by the same composite FK.
+      await testDb.insert(tripProjects).values({ id: "safety-unlink-p2", userId: "owner-a", title: "Quảng Trị" });
+      const [otherConv] = await testDb
+        .insert(conversations)
+        .values({ id: "safety-unlink-other", userId: "owner-a", tripProjectId: "safety-unlink-p2" })
+        .returning({ id: conversations.id });
+      try {
+        await testDb
+          .update(tripProjects)
+          .set({ primaryConversationId: otherConv.id })
+          .where(eq(tripProjects.id, "safety-unlink-p"));
+        throw new Error("expected pointing a project at a cross-project conversation to be rejected");
+      } catch (error) {
+        const cause = (error as { cause?: { code?: string; constraint_name?: string } }).cause;
+        expect(cause?.code).toBe("23503");
+        expect(cause?.constraint_name).toBe("trip_projects_primary_conversation_owner_fk");
+      }
+
+      // The project still points at the original linked primary (unchanged).
+      const [project] = await testDb
+        .select({ primaryConversationId: tripProjects.primaryConversationId })
+        .from(tripProjects)
+        .where(eq(tripProjects.id, "safety-unlink-p"));
+      expect(project.primaryConversationId).toBe(primary.id);
+    });
+
     test("2.2 after deleting the primary conversation, re-resolving selects a same-owner linked live conversation", async () => {
       await createTestUser("owner-a");
       await testDb.insert(tripProjects).values({ id: "safety-del-p", userId: "owner-a", title: "Hội An" });
@@ -316,6 +508,10 @@ describe("Story 7.6 AC1 cross-cutting trip planning safety", () => {
       const result = await resolveOwnedPrimaryConversation("safety-del-p");
       expect(result).not.toBeNull();
       if (result) {
+        // F16: the resolver must SELECT the existing linked secondary, not
+        // create a brand-new conversation. Assert the specific id so a create-
+        // instead-of-select regression cannot pass (AD-30 select-vs-create).
+        expect(result.id).toBe("safety-del-secondary");
         // Must not be the deleted conversation.
         expect(result.id).not.toBe(primary.id);
         // Must be a live conversation owned by owner-a.
@@ -421,7 +617,7 @@ describe("Story 7.6 AC1 cross-cutting trip planning safety", () => {
         version: 1,
       });
 
-      const { persistAiTripChangeProposalDraft } = await loadModuleAs(
+      const { persistAiTripChangeProposalDraft } = await loadModuleAsMultiConn(
         "safety-conc-user",
         "safety-conc-user@example.com",
       );
@@ -435,10 +631,11 @@ describe("Story 7.6 AC1 cross-cutting trip planning safety", () => {
       if (!persisted.success) throw new Error("persist failed");
       const proposalId = persisted.proposal.id;
 
-      // Two concurrent apply calls using the real PostgreSQL test database.
-      // FOR UPDATE on the project + proposal rows serializes them: the first
-      // to acquire the lock applies; the second sees status != 'pending'.
-      const { applyApprovedTripChange } = await loadModuleAs(
+      // F2: two concurrent apply calls run on the explicit multi-connection pool
+      // (max:4) so they can truly race. FOR UPDATE on the project + proposal
+      // rows serializes them: the first to acquire the lock applies; the second
+      // sees status != 'pending'. Real contention is proven separately in 5.2b.
+      const { applyApprovedTripChange } = await loadModuleAsMultiConn(
         "safety-conc-user",
         "safety-conc-user@example.com",
       );
@@ -471,7 +668,73 @@ describe("Story 7.6 AC1 cross-cutting trip planning safety", () => {
       expect(proposal.status).toBe("applied");
     });
 
-    test("5.3 concurrent apply vs dismiss — exactly one writes a history row, the other is a no-op", async () => {
+    test("5.2b a held FOR UPDATE lock blocks applyApprovedTripChange until released — real contention, not serialized", async () => {
+      // F2: prove FOR UPDATE is truly contended. Hold the project row lock from
+      // an independent raw connection; an apply call must NOT resolve while the
+      // lock is held, then resolve once the lock is released. With a single-
+      // connection (max:1) pool the apply could not run concurrently and this
+      // assertion would fail because the apply would never get scheduled behind
+      // the lock-holder on the same connection.
+      await createTestUser("safety-lock-user");
+      await testDb.insert(tripProjects).values({
+        id: "safety-lock-p",
+        userId: "safety-lock-user",
+        title: "Hà Giang",
+        aggregateVersion: 1,
+      });
+      await testDb.insert(tripPlanItems).values({
+        id: "safety-lock-leg",
+        tripProjectId: "safety-lock-p",
+        userId: "safety-lock-user",
+        kind: "leg",
+        type: "transport",
+        state: "planned",
+        label: "Chạy xe",
+        ordinal: 0,
+        version: 1,
+      });
+
+      const { persistAiTripChangeProposalDraft, applyApprovedTripChange } = await loadModuleAsMultiConn(
+        "safety-lock-user",
+        "safety-lock-user@example.com",
+      );
+      const persisted = await persistAiTripChangeProposalDraft({
+        tripProjectId: "safety-lock-p",
+        expectedAggregateVersion: 1,
+        expectedItemVersions: { "safety-lock-leg": 1 },
+        operations: [{ kind: "change-item-state", itemId: "safety-lock-leg", state: "confirmed" }],
+        rationale: "Xác nhận",
+      });
+      if (!persisted.success) throw new Error("persist failed");
+      const proposalId = persisted.proposal.id;
+
+      // Hold the project row lock from an independent connection.
+      const releaseLock = await holdProjectLock("safety-lock-p");
+
+      // Issue apply on the multi-connection pool; it must block on FOR UPDATE.
+      const applyPromise = applyApprovedTripChange({ tripProjectId: "safety-lock-p", proposalId });
+      const outcome = await Promise.race([
+        applyPromise.then(() => "resolved" as const),
+        delay(250).then(() => "blocked" as const),
+      ]);
+      // While the lock is held, apply must NOT resolve (it is contending).
+      expect(outcome).toBe("blocked");
+
+      // Release the lock; the blocked apply now proceeds and resolves.
+      await releaseLock();
+      const result = await applyPromise;
+      expect(result.success).toBe(true);
+
+      // Exactly one apply history row was written.
+      const historyRows = await testDb
+        .select()
+        .from(tripPlanChangeHistory)
+        .where(eq(tripPlanChangeHistory.proposalId, proposalId));
+      expect(historyRows).toHaveLength(1);
+      expect(historyRows[0].operationClass).toBe("apply");
+    });
+
+    test("5.3 concurrent apply vs dismiss — safe idempotent end state under real FOR UPDATE contention", async () => {
       await createTestUser("safety-ad-user");
       await testDb.insert(tripProjects).values({
         id: "safety-ad-p",
@@ -492,7 +755,7 @@ describe("Story 7.6 AC1 cross-cutting trip planning safety", () => {
       });
 
       const { persistAiTripChangeProposalDraft, applyApprovedTripChange, dismissTripChangeProposal } =
-        await loadModuleAs("safety-ad-user", "safety-ad-user@example.com");
+        await loadModuleAsMultiConn("safety-ad-user", "safety-ad-user@example.com");
       const persisted = await persistAiTripChangeProposalDraft({
         tripProjectId: "safety-ad-p",
         expectedAggregateVersion: 1,
@@ -503,36 +766,126 @@ describe("Story 7.6 AC1 cross-cutting trip planning safety", () => {
       if (!persisted.success) throw new Error("persist failed");
       const proposalId = persisted.proposal.id;
 
-      const [applyResult, dismissResult] = await Promise.all([
+      // Run apply and dismiss concurrently on the multi-connection pool. Real
+      // FOR UPDATE contention has two safe outcomes: (a) clean serialization —
+      // one wins, the other returns the documented no-op (idempotent success or
+      // not_found); (b) a lock-order inversion (apply: project→proposal; dismiss
+      // takes the proposal then a KEY SHARE on the project via the history FK
+      // insert) can deadlock, which Postgres detects and aborts safely — the
+      // victim throws a retryable concurrency error (40P01/40001), the winner
+      // completes. Both outcomes leave exactly one history row and a terminal
+      // proposal (no partial writes). The deterministic return-value contract is
+      // asserted separately in 5.3c (sequential).
+      const outcomes = await Promise.allSettled([
         applyApprovedTripChange({ tripProjectId: "safety-ad-p", proposalId }),
         dismissTripChangeProposal({ tripProjectId: "safety-ad-p", proposalId }),
       ]);
 
-      // FOR UPDATE serializes them. If apply wins, dismiss sees terminal and
-      // returns success (idempotent, no second history row). If dismiss wins,
-      // apply sees terminal and returns not_found. Either way, exactly one
-      // history row is written.
+      // Safety invariants hold regardless of which contention outcome occurred.
       const historyRows = await testDb
         .select()
         .from(tripPlanChangeHistory)
         .where(eq(tripPlanChangeHistory.proposalId, proposalId));
       expect(historyRows).toHaveLength(1);
+      expect(["apply", "dismiss"]).toContain(historyRows[0].operationClass);
 
-      // The proposal is terminal.
       const [proposal] = await testDb
         .select({ status: tripChangeProposals.status })
         .from(tripChangeProposals)
         .where(eq(tripChangeProposals.id, proposalId));
       expect(["applied", "dismissed"]).toContain(proposal.status);
 
-      // If apply won, the history row is "apply"; if dismiss won, it is "dismiss".
-      expect(["apply", "dismiss"]).toContain(historyRows[0].operationClass);
+      // Exactly one call succeeded (the winner); the other is either a clean
+      // no-op (fulfilled) or the deadlock victim (rejected with a retryable
+      // Postgres concurrency error — never a silent success or partial write).
+      const fulfilled = outcomes.filter((o) => o.status === "fulfilled");
+      expect(fulfilled.length).toBeGreaterThanOrEqual(1);
+      if (outcomes.every((o) => o.status === "fulfilled")) {
+        // Clean serialization: verify F12 losing-side return values by winner.
+        const applyResult = (outcomes[0] as { status: string; value: { success: boolean; reason?: string } }).value;
+        const dismissResult = (outcomes[1] as { status: string; value: { success: boolean; reason?: string } }).value;
+        if (historyRows[0].operationClass === "apply") {
+          expect(applyResult.success).toBe(true);
+          expect(dismissResult.success).toBe(true); // idempotent no-op
+        } else {
+          expect(dismissResult.success).toBe(true);
+          expect(applyResult).toEqual({ success: false, reason: "not_found" });
+        }
+      } else {
+        // Deadlock outcome: the rejected call is a retryable Postgres concurrency
+        // error; the fulfilled call won. The aborted transaction wrote nothing.
+        const rejected = outcomes.find((o) => o.status === "rejected") as {
+          status: string;
+          reason: { cause?: { code?: string } };
+        };
+        const cause = rejected.reason?.cause;
+        expect(["40P01", "40001", "40P02"]).toContain(cause?.code);
+        const winnerValue = (fulfilled[0] as { status: string; value: { success: boolean } }).value;
+        expect(winnerValue.success).toBe(true);
+      }
+    });
 
-      // No partial writes: exactly one terminal action wrote exactly one row.
-      // Apply writes only on success; dismiss writes only on first terminal.
-      // The no-op side wrote no history row (verified by toHaveLength(1)).
-      void applyResult;
-      void dismissResult;
+    test("5.3c sequential apply-then-dismiss and dismiss-then-apply verify the no-op return-value contract (F12)", async () => {
+      // Deterministic, no contention: prove the idempotent no-op return values
+      // the concurrent 5.3 relies on. apply-then-dismiss → dismiss returns
+      // idempotent success; dismiss-then-apply → apply returns not_found.
+      await createTestUser("safety-seq-user");
+      await testDb.insert(tripProjects).values({
+        id: "safety-seq-p",
+        userId: "safety-seq-user",
+        title: "Vũng Tàu",
+        aggregateVersion: 1,
+      });
+      await testDb.insert(tripPlanItems).values({
+        id: "safety-seq-leg",
+        tripProjectId: "safety-seq-p",
+        userId: "safety-seq-user",
+        kind: "leg",
+        type: "transport",
+        state: "planned",
+        label: "Chạy xe",
+        ordinal: 0,
+        version: 1,
+      });
+      const { persistAiTripChangeProposalDraft, applyApprovedTripChange, dismissTripChangeProposal } =
+        await loadModuleAs("safety-seq-user", "safety-seq-user@example.com");
+
+      // Case 1: apply wins first, then dismiss sees a terminal proposal.
+      const persisted1 = await persistAiTripChangeProposalDraft({
+        tripProjectId: "safety-seq-p",
+        expectedAggregateVersion: 1,
+        expectedItemVersions: { "safety-seq-leg": 1 },
+        operations: [{ kind: "change-item-state", itemId: "safety-seq-leg", state: "confirmed" }],
+        rationale: "Xác nhận 1",
+      });
+      if (!persisted1.success) throw new Error("persist failed");
+      const applyResult1 = await applyApprovedTripChange({ tripProjectId: "safety-seq-p", proposalId: persisted1.proposal.id });
+      expect(applyResult1.success).toBe(true);
+      const dismissResult1 = await dismissTripChangeProposal({ tripProjectId: "safety-seq-p", proposalId: persisted1.proposal.id });
+      // F12: the losing dismiss side returns idempotent success (no second history row).
+      expect(dismissResult1.success).toBe(true);
+      const history1 = await testDb.select().from(tripPlanChangeHistory).where(eq(tripPlanChangeHistory.proposalId, persisted1.proposal.id));
+      expect(history1).toHaveLength(1);
+      expect(history1[0].operationClass).toBe("apply");
+
+      // Case 2: dismiss wins first, then apply sees a terminal proposal.
+      // After case 1's apply, the aggregate is 2 and the item version is 2.
+      const persisted2 = await persistAiTripChangeProposalDraft({
+        tripProjectId: "safety-seq-p",
+        expectedAggregateVersion: 2,
+        expectedItemVersions: { "safety-seq-leg": 2 },
+        operations: [{ kind: "change-item-state", itemId: "safety-seq-leg", state: "confirmed" }],
+        rationale: "Xác nhận 2",
+      });
+      if (!persisted2.success) throw new Error("persist failed");
+      const dismissResult2 = await dismissTripChangeProposal({ tripProjectId: "safety-seq-p", proposalId: persisted2.proposal.id });
+      expect(dismissResult2.success).toBe(true);
+      const applyResult2 = await applyApprovedTripChange({ tripProjectId: "safety-seq-p", proposalId: persisted2.proposal.id });
+      // F12: the losing apply side returns not_found (no second history row).
+      expect(applyResult2).toEqual({ success: false, reason: "not_found" });
+      const history2 = await testDb.select().from(tripPlanChangeHistory).where(eq(tripPlanChangeHistory.proposalId, persisted2.proposal.id));
+      expect(history2).toHaveLength(1);
+      expect(history2[0].operationClass).toBe("dismiss");
     });
 
     test("5.4 deleting an owned Trip Project cascades to plan items, proposals, AND trip_plan_change_history rows", async () => {
@@ -562,6 +915,13 @@ describe("Story 7.6 AC1 cross-cutting trip planning safety", () => {
         ordinal: 0,
         version: 1,
       });
+      // F14: AC 5.4 says the cascade reaches constraints too. Seed a constraints
+      // row so its cascade deletion can be asserted alongside items/proposals/history.
+      await testDb.insert(tripProjectConstraints).values({
+        tripProjectId: "safety-casc-p",
+        userId: "safety-casc-user",
+        adultCount: 2,
+      });
 
       // Create and apply a proposal so there is a history row.
       const { persistAiTripChangeProposalDraft, applyApprovedTripChange } = await loadModuleAs(
@@ -582,12 +942,18 @@ describe("Story 7.6 AC1 cross-cutting trip planning safety", () => {
       });
       expect(applyResult.success).toBe(true);
 
-      // Verify rows exist before deletion.
+      // Verify rows exist before deletion (including the constraints row).
       await expect(
         testDb
           .select()
           .from(tripPlanItems)
           .where(eq(tripPlanItems.tripProjectId, "safety-casc-p")),
+      ).resolves.toHaveLength(1);
+      await expect(
+        testDb
+          .select()
+          .from(tripProjectConstraints)
+          .where(eq(tripProjectConstraints.tripProjectId, "safety-casc-p")),
       ).resolves.toHaveLength(1);
       await expect(
         testDb
@@ -615,6 +981,13 @@ describe("Story 7.6 AC1 cross-cutting trip planning safety", () => {
           .select()
           .from(tripPlanItems)
           .where(eq(tripPlanItems.tripProjectId, "safety-casc-p")),
+      ).resolves.toHaveLength(0);
+      // F14: constraints cascade via the composite owner FK (ON DELETE CASCADE).
+      await expect(
+        testDb
+          .select()
+          .from(tripProjectConstraints)
+          .where(eq(tripProjectConstraints.tripProjectId, "safety-casc-p")),
       ).resolves.toHaveLength(0);
       await expect(
         testDb
@@ -719,6 +1092,216 @@ describe("Story 7.6 AC1 cross-cutting trip planning safety", () => {
         .from(tripChangeProposals)
         .where(eq(tripChangeProposals.id, persisted.proposal.id));
       expect(proposal.status).toBe("pending");
+    });
+  });
+
+  // F13: AC 5.3 names "worker vs. read expire." Worker/worker FOR UPDATE SKIP
+  // LOCKED is covered by the 7.5 suite (tests/trip-proposal-expiry-worker.test.ts);
+  // this exercises the worker-vs-read pair (a worker expiring while a read does
+  // expire-on-read). Both are idempotent: first-to-lock wins, the other is a
+  // no-op, exactly one expire history row.
+  describe("Task 5.3b — worker vs. read expire idempotency", () => {
+    test("a worker expiring while a read does expire-on-read produces exactly one expire history row", async () => {
+      await createTestUser("safety-wr-user");
+      await ensureSystemTripPlanningActor();
+      await testDb.insert(tripProjects).values({
+        id: "safety-wr-p",
+        userId: "safety-wr-user",
+        title: "Phú Quốc",
+        aggregateVersion: 1,
+      });
+      await testDb.insert(tripPlanItems).values({
+        id: "safety-wr-leg",
+        tripProjectId: "safety-wr-p",
+        userId: "safety-wr-user",
+        kind: "leg",
+        type: "transport",
+        state: "planned",
+        label: "Chạy xe",
+        ordinal: 0,
+        version: 1,
+      });
+      // Seed an elapsed pending proposal (expires in the past).
+      const { persistAiTripChangeProposalDraft } = await loadModuleAsMultiConn(
+        "safety-wr-user",
+        "safety-wr-user@example.com",
+      );
+      const persisted = await persistAiTripChangeProposalDraft({
+        tripProjectId: "safety-wr-p",
+        expectedAggregateVersion: 1,
+        expectedItemVersions: { "safety-wr-leg": 1 },
+        operations: [{ kind: "change-item-state", itemId: "safety-wr-leg", state: "confirmed" }],
+        rationale: "Hết hạn",
+        expiresAt: new Date("2026-01-01T00:00:00.000Z"),
+      });
+      if (!persisted.success) throw new Error("persist failed");
+      const proposalId = persisted.proposal.id;
+
+      // Run the worker and the read concurrently. Both run on the explicit
+      // multi-connection pool via the mocked getDb (the worker calls getDb()
+      // when no explicit db is supplied; the read uses loadModuleAsMultiConn).
+      // FOR UPDATE on the proposal row serializes them: one expires, the other
+      // sees terminal.
+      const { processNextExpiredTripChangeProposal } = await loadExpiryWorkerModuleMultiConn();
+      const { listPendingProposalsForTripProject } = await loadModuleAsMultiConn(
+        "safety-wr-user",
+        "safety-wr-user@example.com",
+      );
+      const now = new Date("2026-07-25T00:00:00.000Z");
+      const [, pendingList] = await Promise.all([
+        processNextExpiredTripChangeProposal({ now }),
+        listPendingProposalsForTripProject("safety-wr-p"),
+      ]);
+
+      // The read's expire-on-read dropped the elapsed proposal → empty list.
+      expect(pendingList).toEqual([]);
+
+      // The proposal is terminal (expired), not pending.
+      const [proposal] = await testDb
+        .select({ status: tripChangeProposals.status })
+        .from(tripChangeProposals)
+        .where(eq(tripChangeProposals.id, proposalId));
+      expect(proposal.status).toBe("expired");
+
+      // Exactly one expire history row — the loser (worker or read) was an
+      // idempotent no-op and wrote no second row.
+      const expireHistory = await testDb
+        .select()
+        .from(tripPlanChangeHistory)
+        .where(eq(tripPlanChangeHistory.proposalId, proposalId));
+      expect(expireHistory).toHaveLength(1);
+      expect(expireHistory[0].operationClass).toBe("expire");
+      expect(expireHistory[0].actorClass).toBe("system");
+    });
+  });
+
+  // F6: AC 4.1 says "renumber is atomic and a concurrent reorder conflict
+  // applies nothing." Only single-threaded create/remove uniqueness was tested
+  // before. These exercises real concurrent-reorder contention on the
+  // multi-connection pool (one wins, the other refresh_required, no partial
+  // renumber) and proves FOR UPDATE contention with a held lock.
+  describe("Task 4.1b — concurrent reorder conflict and renumber atomicity", () => {
+    test("two concurrent reorders — exactly one wins, the other returns refresh_required, ordinals stay unique", async () => {
+      await createTestUser("safety-reord-user");
+      await testDb.insert(tripProjects).values({
+        id: "safety-reord-p",
+        userId: "safety-reord-user",
+        title: "Đà Lạt",
+        aggregateVersion: 1,
+      });
+      await testDb.insert(tripPlanItems).values({
+        id: "safety-reord-a",
+        tripProjectId: "safety-reord-p",
+        userId: "safety-reord-user",
+        kind: "leg",
+        type: "transport",
+        state: "idea",
+        label: "A",
+        ordinal: 0,
+        version: 1,
+      });
+      await testDb.insert(tripPlanItems).values({
+        id: "safety-reord-b",
+        tripProjectId: "safety-reord-p",
+        userId: "safety-reord-user",
+        kind: "leg",
+        type: "visit",
+        state: "idea",
+        label: "B",
+        ordinal: 1,
+        version: 1,
+      });
+
+      const { reorderInternalTripPlanItem } = await loadProjectsModuleAsMultiConn(
+        "safety-reord-user",
+        "safety-reord-user@example.com",
+      );
+      // Both reorders expect aggregate version 1. The first to lock the
+      // aggregate wins and advances it; the other sees a stale aggregate and
+      // returns refresh_required without writing any ordinal.
+      const expectedChanged = { "safety-reord-a": 1, "safety-reord-b": 1 };
+      const [r1, r2] = await Promise.all([
+        reorderInternalTripPlanItem("safety-reord-p", 1, { itemId: "safety-reord-a", expectedItemVersion: 1, ordinal: 1, expectedChangedItemVersions: expectedChanged }),
+        reorderInternalTripPlanItem("safety-reord-p", 1, { itemId: "safety-reord-b", expectedItemVersion: 1, ordinal: 1, expectedChangedItemVersions: expectedChanged }),
+      ]);
+
+      const successes = [r1, r2].filter((r) => r.success);
+      const refreshRequired = [r1, r2].filter((r) => !r.success && r.reason === "refresh_required");
+      expect(successes).toHaveLength(1);
+      expect(refreshRequired).toHaveLength(1);
+
+      // Rnumber is atomic: ordinals remain unique within the root scope (no
+      // partial/duplicate ordinal from the loser). The aggregate advanced once.
+      const items = await testDb
+        .select({ ordinal: tripPlanItems.ordinal })
+        .from(tripPlanItems)
+        .where(eq(tripPlanItems.tripProjectId, "safety-reord-p"));
+      const ordinals = items.map((i) => i.ordinal).sort((a, b) => a - b);
+      expect(ordinals).toEqual([0, 1]);
+      const [project] = await testDb.select().from(tripProjects).where(eq(tripProjects.id, "safety-reord-p"));
+      expect(project.aggregateVersion).toBe(2);
+    });
+
+    test("a held FOR UPDATE lock blocks reorderInternalTripPlanItem until released — real reorder contention", async () => {
+      await createTestUser("safety-reord-lock-user");
+      await testDb.insert(tripProjects).values({
+        id: "safety-reord-lock-p",
+        userId: "safety-reord-lock-user",
+        title: "Sapa",
+        aggregateVersion: 1,
+      });
+      await testDb.insert(tripPlanItems).values({
+        id: "safety-reord-lock-a",
+        tripProjectId: "safety-reord-lock-p",
+        userId: "safety-reord-lock-user",
+        kind: "leg",
+        type: "transport",
+        state: "idea",
+        label: "A",
+        ordinal: 0,
+        version: 1,
+      });
+      await testDb.insert(tripPlanItems).values({
+        id: "safety-reord-lock-b",
+        tripProjectId: "safety-reord-lock-p",
+        userId: "safety-reord-lock-user",
+        kind: "leg",
+        type: "visit",
+        state: "idea",
+        label: "B",
+        ordinal: 1,
+        version: 1,
+      });
+
+      const { reorderInternalTripPlanItem } = await loadProjectsModuleAsMultiConn(
+        "safety-reord-lock-user",
+        "safety-reord-lock-user@example.com",
+      );
+      const releaseLock = await holdProjectLock("safety-reord-lock-p");
+
+      const reorderPromise = reorderInternalTripPlanItem("safety-reord-lock-p", 1, {
+        itemId: "safety-reord-lock-a",
+        expectedItemVersion: 1,
+        ordinal: 1,
+        expectedChangedItemVersions: { "safety-reord-lock-a": 1, "safety-reord-lock-b": 1 },
+      });
+      const outcome = await Promise.race([
+        reorderPromise.then(() => "resolved" as const),
+        delay(250).then(() => "blocked" as const),
+      ]);
+      // The reorder must block on the aggregate FOR UPDATE lock.
+      expect(outcome).toBe("blocked");
+
+      await releaseLock();
+      const result = await reorderPromise;
+      expect(result.success).toBe(true);
+
+      // Rnumber atomic: ordinals unique.
+      const items = await testDb
+        .select({ ordinal: tripPlanItems.ordinal })
+        .from(tripPlanItems)
+        .where(eq(tripPlanItems.tripProjectId, "safety-reord-lock-p"));
+      expect(items.map((i) => i.ordinal).sort((a, b) => a - b)).toEqual([0, 1]);
     });
   });
 });
