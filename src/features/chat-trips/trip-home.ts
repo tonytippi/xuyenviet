@@ -195,20 +195,27 @@ export function findNextFutureLeg(items: TripPlanItemProjection[], now: Date): T
   return valid[0];
 }
 
+function joinVietnameseList(parts: string[]): string {
+  if (parts.length === 0) return "";
+  if (parts.length === 1) return parts[0];
+  if (parts.length === 2) return `${parts[0]} và ${parts[1]}`;
+  return `${parts.slice(0, -1).join(", ")} và ${parts[parts.length - 1]}`;
+}
+
 function formatReasonForGap(item: TripPlanItemProjection): string {
   if (item.type === "transport") {
-    if (item.plannedAt === null && item.transportOriginLabel === null && item.transportDestinationLabel === null) {
-      return "Chuyến xe đã chốt còn thiếu ngày, điểm đi và điểm đến.";
-    }
-    if (item.plannedAt === null) return "Chuyến xe đã chốt còn thiếu ngày giờ.";
-    if (item.transportOriginLabel === null) return "Chuyến xe đã chốt còn thiếu điểm đi.";
-    return "Chuyến xe đã chốt còn thiếu điểm đến.";
+    const missing: string[] = [];
+    if (item.plannedAt === null) missing.push("ngày giờ");
+    if (item.transportOriginLabel === null) missing.push("điểm đi");
+    if (item.transportDestinationLabel === null) missing.push("điểm đến");
+    if (missing.length === 0) return "Chuyến xe đã chốt còn thiếu thông tin.";
+    return `Chuyến xe đã chốt còn thiếu ${joinVietnameseList(missing)}.`;
   }
-  if (item.plannedAt === null && item.accommodationPlaceAreaLabel === null) {
-    return "Lưu trú đã chốt còn thiếu ngày và khu vực.";
-  }
-  if (item.plannedAt === null) return "Lưu trú đã chốt còn thiếu ngày giờ.";
-  return "Lưu trú đã chốt còn thiếu khu vực.";
+  const missing: string[] = [];
+  if (item.plannedAt === null) missing.push("ngày giờ");
+  if (item.accommodationPlaceAreaLabel === null) missing.push("khu vực");
+  if (missing.length === 0) return "Lưu trú đã chốt còn thiếu thông tin.";
+  return `Lưu trú đã chốt còn thiếu ${joinVietnameseList(missing)}.`;
 }
 
 function formatReasonForNextLeg(item: TripPlanItemProjection): string {
@@ -264,8 +271,8 @@ export function computeTripHomeFocus(input: TripHomeFocusInput): TripHomeFocus {
     };
   }
 
-   return preparationFocus;
- }
+   return { ...preparationFocus };
+  }
 
 export type TimelineEntry = {
   id: string;
@@ -291,18 +298,32 @@ export type TimelineGroup = {
   entries: TimelineEntry[];
 };
 
+function toIctParts(date: Date): { year: number; month: number; day: number; hours: number; minutes: number } {
+  // Vietnam is UTC+7 with no DST. Convert deterministically by shifting the UTC
+  // epoch by +7 hours and reading UTC parts off the adjusted Date. This keeps
+  // grouping/formatting locale-independent and stable across runtimes.
+  const ictMs = date.getTime() + 7 * 60 * 60 * 1000;
+  const ict = new Date(ictMs);
+  return {
+    year: ict.getUTCFullYear(),
+    month: ict.getUTCMonth() + 1,
+    day: ict.getUTCDate(),
+    hours: ict.getUTCHours(),
+    minutes: ict.getUTCMinutes(),
+  };
+}
+
 function formatDateDivider(date: Date): string {
-  // Use a stable, locale-independent YYYY-MM-DD divider so grouping is deterministic.
-  const year = date.getUTCFullYear();
-  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
-  const day = String(date.getUTCDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  // Format in Vietnam time (ICT, UTC+7) so a leg at 20:00 UTC does not land
+  // under the previous day's divider. Determinism is preserved because the
+  // input plannedAt is an explicit Date; no new Date() is constructed.
+  const { year, month, day } = toIctParts(date);
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
 function formatTimeContext(date: Date): string {
-  const hours = String(date.getUTCHours()).padStart(2, "0");
-  const minutes = String(date.getUTCMinutes()).padStart(2, "0");
-  return `${hours}:${minutes} UTC`;
+  const { hours, minutes } = toIctParts(date);
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")} giờ Việt Nam`;
 }
 
 function buildPlaceContext(item: TripPlanItemProjection): string | null {
@@ -505,15 +526,6 @@ export type TripWorkspaceReadModel = {
   timelineGroups: TimelineGroup[];
   constraints: ConstraintsProjection | null;
 };
-
-export function buildTripWorkspaceReadModel(input: TripHomeFocusInput): TripWorkspaceReadModel {
-  const items = input.items.filter(isValidItem);
-  return {
-    focus: computeTripHomeFocus(input),
-    timelineGroups: buildTimelineGroups(items),
-    constraints: null,
-  };
-}
 
 export function buildTripWorkspaceReadModelWithConstraints(
   input: TripHomeFocusInput,

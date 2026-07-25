@@ -753,7 +753,7 @@ describe("AI Ask authenticated shell", () => {
     expect(source).toContain("Bảng chi tiết đã chọn");
     expect(source).toContain("focus:ring-4 focus:ring-[#8fb59f]/45");
     expect(source).toContain("event.key !== \"Escape\"");
-    expect(source).toContain("isSessionSheetOpen || isTyping");
+    expect(source).toContain("isSessionSheetOpen || isWorkspaceSheetOpen || isTyping");
     expect(source).not.toContain("localStorage");
     expect(source).not.toContain("sessionStorage");
     expect(source).not.toContain("sourceSnapshot");

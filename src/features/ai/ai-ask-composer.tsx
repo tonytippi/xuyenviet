@@ -704,7 +704,7 @@ export function AiAskComposer({
       const target = event.target as HTMLElement | null;
       const isTyping = target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.tagName === "SELECT" || target?.isContentEditable;
 
-      if (event.defaultPrevented || isSessionSheetOpen || isTyping || event.key !== "Escape") {
+      if (event.defaultPrevented || isSessionSheetOpen || isWorkspaceSheetOpen || isTyping || event.key !== "Escape") {
         return;
       }
 
@@ -714,13 +714,13 @@ export function AiAskComposer({
 
     window.addEventListener("keydown", handleDetailPanelShortcut);
     return () => window.removeEventListener("keydown", handleDetailPanelShortcut);
-  }, [isSessionSheetOpen, selectedAnswerEntity]);
+  }, [isSessionSheetOpen, isWorkspaceSheetOpen, selectedAnswerEntity]);
 
   useEffect(() => {
     const activeDialog = mobileAnswerDetailDialogRef.current;
     const composer = textareaRef.current;
 
-    if (!selectedAnswerEntity || isSessionSheetOpen || !activeDialog || isDesktopViewport) {
+    if (!selectedAnswerEntity || isSessionSheetOpen || isWorkspaceSheetOpen || !activeDialog || isDesktopViewport) {
       return;
     }
 
@@ -772,7 +772,7 @@ export function AiAskComposer({
         }
       }
     };
-  }, [isDesktopViewport, isSessionSheetOpen, selectedAnswerEntity]);
+  }, [isDesktopViewport, isSessionSheetOpen, isWorkspaceSheetOpen, selectedAnswerEntity]);
 
   useEffect(() => {
     function handleShortcut(event: globalThis.KeyboardEvent) {
@@ -903,7 +903,10 @@ export function AiAskComposer({
     return () => {
       window.removeEventListener("keydown", onKeyDown);
       document.body.style.overflow = previousOverflow;
-      workspaceSheetPreviousFocusRef.current?.focus();
+      const previousFocus = workspaceSheetPreviousFocusRef.current;
+      if (previousFocus && previousFocus.offsetParent !== null) {
+        previousFocus.focus();
+      }
     };
   }, [isDesktopViewport, isWorkspaceSheetOpen]);
 
@@ -1472,6 +1475,8 @@ export function AiAskComposer({
               ref={workspaceSheetTriggerRef}
               type="button"
               onClick={() => {
+                setSelectedAnswerEntity(null);
+                answerEntityTriggerRef.current = null;
                 setSessionSheetOpen(false);
                 setWorkspaceSheetOpen(true);
               }}
@@ -1725,7 +1730,7 @@ export function AiAskComposer({
           </div>
         ) : null}
 
-        {showContextPanel && selectedAnswerEntity && !isSessionSheetOpen ? (
+        {showContextPanel && selectedAnswerEntity && !isSessionSheetOpen && !isWorkspaceSheetOpen ? (
           <div ref={mobileAnswerDetailDialogRef} tabIndex={-1} className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true" aria-label="Bảng chi tiết đã chọn">
             <button
               type="button"
@@ -1757,6 +1762,7 @@ export function AiAskComposer({
                 Đóng không gian dự án
               </button>
               <TripWorkspacePanel
+                idPrefix="sheet-"
                 header={{
                   title: selectedTripProject.title,
                   origin: selectedTripProject.origin,
@@ -1788,6 +1794,7 @@ export function AiAskComposer({
       {selectedTripProject && tripWorkspace ? (
         <aside aria-label="Không gian dự án chuyến đi" aria-hidden={isWorkspaceSheetOpen && !isDesktopViewport ? "true" : undefined} className="hidden min-h-0 w-[24rem] shrink-0 overflow-y-auto rounded-[1.5rem] border border-[#d8c9ad] bg-[linear-gradient(180deg,#fffdf8_0%,#ffffff_42%,#f7fbf8_100%)] p-4 text-[#17342c] shadow-[0_16px_40px_rgba(41,33,18,0.08)] lg:block">
           <TripWorkspacePanel
+            idPrefix="desktop-"
             header={{
               title: selectedTripProject.title,
               origin: selectedTripProject.origin,

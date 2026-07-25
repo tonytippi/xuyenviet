@@ -5,7 +5,7 @@ import { and, asc, count, desc, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { chatContext, conversations, messages, tripPlanItems, tripProjectConstraints, tripProjects, type TripPlanAnchorRole, type TripPlanItemKind, type TripPlanItemState, type TripPlanItemType } from "@/db/schema";
 import { recordAuditEvent } from "@/features/audit/events";
-import { buildTripWorkspaceReadModelWithConstraints, type ConstraintsProjection, type TripHomeFocus, type TripPlanItemProjection } from "@/features/chat-trips/trip-home";
+import { buildTripWorkspaceReadModelWithConstraints, type ConstraintsProjection, type TimelineGroup, type TripHomeFocus, type TripPlanItemProjection } from "@/features/chat-trips/trip-home";
 import { getAuthenticatedSession } from "@/server/auth";
 
 import { formatTripProjectLabel } from "./labels";
@@ -46,6 +46,7 @@ export type OwnedTripProjectWorkspaceSummary = OwnedTripProjectSummary & {
   primaryConversation: { id: string; updatedAt: Date; preview: string };
   historicChats: Array<{ id: string; updatedAt: Date; preview: string }>;
   planItems: TripPlanItemProjection[];
+  timelineGroups: TimelineGroup[];
   constraints: ConstraintsProjection | null;
   tripHome: TripHomeFocus;
 };
@@ -234,6 +235,7 @@ export async function getOwnedTripProjectSummary(tripProjectId: string) {
     primaryConversation: primarySummary,
     historicChats: relatedChats.filter((chat) => chat.id !== primaryConversation.id),
     planItems,
+    timelineGroups: workspaceReadModel.timelineGroups,
     constraints: workspaceReadModel.constraints,
     tripHome: workspaceReadModel.focus,
   } satisfies OwnedTripProjectWorkspaceSummary;

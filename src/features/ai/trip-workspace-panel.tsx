@@ -47,22 +47,19 @@ function formatTripDates(startDate: string | null, endDate: string | null): stri
   return startDate ?? endDate ?? null;
 }
 
-function formatTravelersSummary(travelers: string | null): string | null {
-  return travelers ?? null;
-}
-
 export type TripWorkspacePanelProps = {
+  idPrefix: string;
   header: TripWorkspaceHeader;
   workspace: TripWorkspaceReadModel | null;
 };
 
-export function TripWorkspacePanel({ header, workspace }: TripWorkspacePanelProps) {
+export function TripWorkspacePanel({ idPrefix, header, workspace }: TripWorkspacePanelProps) {
   if (!workspace) return null;
 
   const { focus, timelineGroups, constraints } = workspace;
   const projectLabel = formatTripProjectLabel(header);
   const datesText = formatTripDates(header.startDate, header.endDate);
-  const travelersText = formatTravelersSummary(header.travelers);
+  const travelersText = header.travelers;
   const subtitleParts = [datesText, travelersText].filter(Boolean);
   const subtitle = subtitleParts.length > 0 ? subtitleParts.join(" · ") : null;
   const focusLabel = tripHomeFocusKindLabels[focus.kind];
@@ -86,7 +83,7 @@ export function TripWorkspacePanel({ header, workspace }: TripWorkspacePanelProp
         <p className="mt-1 text-sm leading-6 text-[#4f625a]">{focus.reason}</p>
         <p className="mt-2 text-sm font-semibold text-[#1f5f46]">{focusNextAction}</p>
         {focus.kind === "confirmed-item-gap" || focus.kind === "next-leg" ? (
-          <a className="mt-2 inline-block text-sm font-semibold text-[#1f5f46] underline decoration-[#8fb59f] underline-offset-4" href={`#plan-item-${focus.itemId}`}>Xem trong dòng thời gian</a>
+          <a className="mt-2 inline-block text-sm font-semibold text-[#1f5f46] underline decoration-[#8fb59f] underline-offset-4" href={`#${idPrefix}plan-item-${focus.itemId}`}>Xem trong dòng thời gian</a>
         ) : null}
       </div>
 
@@ -114,7 +111,7 @@ export function TripWorkspacePanel({ header, workspace }: TripWorkspacePanelProp
                     const StateIcon = getStateIcon(entry.state);
                     const anchorLabel = entry.kind === "anchor" && entry.anchorRole ? tripPlanAnchorRoleLabels[entry.anchorRole] : null;
                     return (
-                      <li className="flex flex-col gap-1 rounded-xl border border-[#eadfc8] bg-[#fffdf8] p-3" id={`plan-item-${entry.id}`} key={entry.id}>
+                      <li className="flex flex-col gap-1 rounded-xl border border-[#eadfc8] bg-[#fffdf8] p-3" id={`${idPrefix}plan-item-${entry.id}`} key={entry.id}>
                         <div className="flex items-start gap-2">
                           <span aria-hidden="true" className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-lg bg-[#e8f3ec] text-sm text-[#14532d]"><KindIcon /></span>
                           <div className="min-w-0 flex-1">

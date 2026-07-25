@@ -118,7 +118,3 @@ export function ConfirmedIcon(props: IconProps) {
 export function BackupIcon(props: IconProps) {
   return <Icon {...props}><path d="M12 4v8M12 12l4-4M12 12l-4-4M4 16a8 8 0 0 0 16 0" /></Icon>;
 }
-
-export function ClockIcon(props: IconProps) {
-  return <Icon {...props}><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></Icon>;
-}

@@ -580,4 +580,64 @@ describe("Trip Home read model", () => {
       expect(summary?.preferenceTags).toEqual(["unknown_tag"]);
     });
   });
+
+  describe("Vietnam (ICT, UTC+7) date/time display", () => {
+    test("date divider uses Vietnam time so a 20:00 UTC leg lands on the next day", () => {
+      const items = [
+        makeItem({ id: "late-utc", kind: "leg", type: "transport", state: "planned", ordinal: 0, plannedAt: new Date("2026-08-01T20:00:00.000Z") }),
+      ];
+      const groups = buildTimelineGroups(items);
+      expect(groups[0].dateDivider).toBe("2026-08-02");
+    });
+
+    test("time context is formatted in Vietnam time and labels giờ Việt Nam, not UTC", () => {
+      const items = [
+        makeItem({ id: "late-utc", kind: "leg", type: "transport", state: "planned", ordinal: 0, plannedAt: new Date("2026-08-01T20:00:00.000Z") }),
+      ];
+      const groups = buildTimelineGroups(items);
+      expect(groups[0].entries[0].timeContext).toBe("03:00 giờ Việt Nam");
+      expect(groups[0].entries[0].timeContext).not.toContain("UTC");
+    });
+  });
+
+  describe("formatReasonForGap mentions all missing fields", () => {
+    test("transport missing both origin and destination mentions both", () => {
+      const items = [
+        makeItem({ id: "transport-two-missing", type: "transport", state: "confirmed", plannedAt: new Date("2026-08-01T00:00:00.000Z") }),
+      ];
+      const focus = computeTripHomeFocus({ items, pendingProposals: [], now });
+      expect(focus.kind).toBe("confirmed-item-gap");
+      if (focus.kind === "confirmed-item-gap") {
+        expect(focus.reason).toContain("điểm đi");
+        expect(focus.reason).toContain("điểm đến");
+      }
+    });
+
+    test("transport missing all three fields mentions ngày giờ, điểm đi and điểm đến", () => {
+      const items = [
+        makeItem({ id: "transport-all-missing", type: "transport", state: "confirmed" }),
+      ];
+      const focus = computeTripHomeFocus({ items, pendingProposals: [], now });
+      if (focus.kind === "confirmed-item-gap") {
+        expect(focus.reason).toContain("ngày giờ");
+        expect(focus.reason).toContain("điểm đi");
+        expect(focus.reason).toContain("điểm đến");
+      }
+    });
+  });
+
+  describe("preparation focus isolation", () => {
+    test("mutating a returned preparation focus does not corrupt subsequent calls", () => {
+      const first = computeTripHomeFocus({ items: [], pendingProposals: [], now });
+      expect(first.kind).toBe("preparation");
+      if (first.kind === "preparation") {
+        first.reason = "tampered";
+      }
+      const second = computeTripHomeFocus({ items: [], pendingProposals: [], now });
+      expect(second.kind).toBe("preparation");
+      if (second.kind === "preparation") {
+        expect(second.reason).toBe("Chuẩn bị cho chuyến đi");
+      }
+    });
+  });
 });

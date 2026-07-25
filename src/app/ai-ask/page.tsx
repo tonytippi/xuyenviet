@@ -6,7 +6,6 @@ import { normalizePublicAskDraft } from "@/features/auth/redirects";
 import { getOwnedConversation, listOwnedConversations } from "@/features/chat-trips/conversations";
 import { createTripProjectFromForm, deleteConversationAction, deleteTripProjectAction } from "@/features/chat-trips/actions";
 import { getOwnedTripProjectSummary, listOwnedTripProjects } from "@/features/chat-trips/trip-projects";
-import { buildTimelineGroups } from "@/features/chat-trips/trip-home";
 import { saveAnswerUsefulnessFeedbackAction } from "@/features/feedback/actions";
 import { selectActiveAiGatewayModel } from "@/features/ai/models";
 import { aiAskInitialAnswerPurpose } from "@/features/ai/prompts";
@@ -137,7 +136,7 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
   const tripWorkspaceForComposer = selectedTripProject
     ? {
         focus: selectedTripProject.tripHome,
-        timelineGroups: buildTimelineGroups(selectedTripProject.planItems),
+        timelineGroups: selectedTripProject.timelineGroups,
         constraints: selectedTripProject.constraints,
       }
     : null;
