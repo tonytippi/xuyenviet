@@ -436,4 +436,101 @@ describe("Trip project helpers", () => {
     expect(mutationAudits).toHaveLength(3);
     expect(mutationAudits.every((audit) => !audit.afterSummary?.includes("Xe mới"))).toBe(true);
   });
+
+  test("getOwnedTripProjectSummary returns the workspace read model with plan items, constraints, and Trip Home focus for the owner", async () => {
+    await createTestUser("user-1");
+    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế", origin: "Hà Nội", destination: "Huế", startDate: "2026-08-01", endDate: "2026-08-05", travelers: "2 người lớn" }).returning({ id: tripProjects.id });
+    await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id });
+    await testDb.insert(tripPlanItems).values([
+      { tripProjectId: project.id, userId: "user-1", kind: "anchor", anchorRole: "origin", state: "idea", label: "Hà Nội", ordinal: 0 },
+      { tripProjectId: project.id, userId: "user-1", kind: "leg", type: "transport", state: "confirmed", label: "Chạy xe Hà Nội - Huế", ordinal: 1, plannedAt: new Date("2026-08-01T06:00:00.000Z"), transportOriginLabel: "Hà Nội", transportDestinationLabel: "Huế" },
+      { tripProjectId: project.id, userId: "user-1", kind: "leg", type: "accommodation", state: "confirmed", label: "Khách sạn Huế", ordinal: 2, accommodationPlaceAreaLabel: null },
+    ]);
+    await testDb.insert(tripProjectConstraints).values({
+      tripProjectId: project.id,
+      userId: "user-1",
+      adultCount: 2,
+      childCount: 1,
+      vehicleType: "car",
+      drivingToleranceHours: 4,
+      budgetCurrency: "VND",
+      budgetMinVnd: 5_000_000,
+      budgetMaxVnd: 10_000_000,
+      preferenceTags: ["nature", "culture"],
+    });
+    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }) }));
+    const { getOwnedTripProjectSummary } = await import("@/features/chat-trips/trip-projects");
+
+    const summary = await getOwnedTripProjectSummary(project.id);
+    const [savedProject] = await testDb.select().from(tripProjects).where(eq(tripProjects.id, project.id));
+    const savedPlanItems = await testDb.select().from(tripPlanItems).where(eq(tripPlanItems.tripProjectId, project.id));
+    const [savedConstraints] = await testDb.select().from(tripProjectConstraints).where(eq(tripProjectConstraints.tripProjectId, project.id));
+
+    expect(summary?.planItems).toHaveLength(3);
+    expect(summary?.planItems.map((item) => item.label)).toEqual(["Hà Nội", "Chạy xe Hà Nội - Huế", "Khách sạn Huế"]);
+    expect(summary?.constraints).toMatchObject({ adultCount: 2, childCount: 1, vehicleType: "car", drivingToleranceHours: 4, budgetCurrency: "VND", budgetMinVnd: 5_000_000, budgetMaxVnd: 10_000_000, preferenceTags: ["Thiên nhiên", "Văn hoá"] });
+    expect(summary?.tripHome.kind).toBe("confirmed-item-gap");
+    // Read-only: aggregate version, item versions, and constraints version must not change.
+    expect(savedProject.aggregateVersion).toBe(1);
+    expect(savedPlanItems.every((item) => item.version === 1)).toBe(true);
+    expect(savedConstraints.version).toBe(1);
+  });
+
+  test("getOwnedTripProjectSummary returns preparation focus when no plan items exist", async () => {
+    await createTestUser("user-1");
+    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế" }).returning({ id: tripProjects.id });
+    await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id });
+    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }) }));
+    const { getOwnedTripProjectSummary } = await import("@/features/chat-trips/trip-projects");
+
+    const summary = await getOwnedTripProjectSummary(project.id);
+
+    expect(summary?.planItems).toEqual([]);
+    expect(summary?.constraints).toBeNull();
+    expect(summary?.tripHome.kind).toBe("preparation");
+  });
+
+  test("getOwnedTripProjectSummary returns preparation focus when only idea items exist", async () => {
+    await createTestUser("user-1");
+    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế" }).returning({ id: tripProjects.id });
+    await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id });
+    await testDb.insert(tripPlanItems).values({ tripProjectId: project.id, userId: "user-1", kind: "leg", type: "visit", state: "idea", label: "Đại Nội", ordinal: 0 });
+    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }) }));
+    const { getOwnedTripProjectSummary } = await import("@/features/chat-trips/trip-projects");
+
+    const summary = await getOwnedTripProjectSummary(project.id);
+
+    expect(summary?.tripHome.kind).toBe("preparation");
+  });
+
+  test("getOwnedTripProjectSummary returns null for a cross-owner project without leaking workspace data", async () => {
+    await createTestUser("user-1");
+    await createTestUser("user-2");
+    const [project] = await testDb.insert(tripProjects).values({ userId: "user-2", title: "Dự án riêng user-2" }).returning({ id: tripProjects.id });
+    await testDb.insert(conversations).values({ userId: "user-2", tripProjectId: project.id });
+    await testDb.insert(tripPlanItems).values({ tripProjectId: project.id, userId: "user-2", kind: "leg", type: "transport", state: "confirmed", label: "Chạy xe riêng", ordinal: 0, transportOriginLabel: "Hà Nội", transportDestinationLabel: "Huế" });
+    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }) }));
+    const { getOwnedTripProjectSummary } = await import("@/features/chat-trips/trip-projects");
+
+    const summary = await getOwnedTripProjectSummary(project.id);
+
+    expect(summary).toBeNull();
+  });
+
+  test("getOwnedTripProjectSummary does not write any audit event or advance any version when reading the workspace", async () => {
+    await createTestUser("user-1");
+    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế" }).returning({ id: tripProjects.id });
+    await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id });
+    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }) }));
+    const { getOwnedTripProjectSummary } = await import("@/features/chat-trips/trip-projects");
+
+    const auditsBefore = await testDb.select().from(auditEvents);
+    await getOwnedTripProjectSummary(project.id);
+    await getOwnedTripProjectSummary(project.id);
+    const auditsAfter = await testDb.select().from(auditEvents);
+    const [savedProject] = await testDb.select().from(tripProjects).where(eq(tripProjects.id, project.id));
+
+    expect(auditsAfter).toHaveLength(auditsBefore.length);
+    expect(savedProject.aggregateVersion).toBe(1);
+  });
 });

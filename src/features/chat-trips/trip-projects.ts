@@ -1,10 +1,11 @@
 import "server-only";
 
-import { and, asc, count, desc, eq } from "drizzle-orm";
+import { and, asc, count, desc, eq, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
 import { chatContext, conversations, messages, tripPlanItems, tripProjectConstraints, tripProjects, type TripPlanAnchorRole, type TripPlanItemKind, type TripPlanItemState, type TripPlanItemType } from "@/db/schema";
 import { recordAuditEvent } from "@/features/audit/events";
+import { buildTripWorkspaceReadModelWithConstraints, type ConstraintsProjection, type TripHomeFocus, type TripPlanItemProjection } from "@/features/chat-trips/trip-home";
 import { getAuthenticatedSession } from "@/server/auth";
 
 import { formatTripProjectLabel } from "./labels";
@@ -44,6 +45,9 @@ export type OwnedTripProjectSummary = {
 export type OwnedTripProjectWorkspaceSummary = OwnedTripProjectSummary & {
   primaryConversation: { id: string; updatedAt: Date; preview: string };
   historicChats: Array<{ id: string; updatedAt: Date; preview: string }>;
+  planItems: TripPlanItemProjection[];
+  constraints: ConstraintsProjection | null;
+  tripHome: TripHomeFocus;
 };
 
 export type DeleteOwnedTripProjectResult = {
@@ -163,7 +167,76 @@ export async function getOwnedTripProjectSummary(tripProjectId: string) {
     updatedAt: primaryConversation.updatedAt,
     preview: "Hội thoại mới",
   };
-  return { ...project, primaryConversation: primarySummary, historicChats: relatedChats.filter((chat) => chat.id !== primaryConversation.id) } satisfies OwnedTripProjectWorkspaceSummary;
+
+  const planItemRows = await getDb()
+    .select({
+      id: tripPlanItems.id,
+      kind: tripPlanItems.kind,
+      anchorRole: tripPlanItems.anchorRole,
+      type: tripPlanItems.type,
+      state: tripPlanItems.state,
+      label: tripPlanItems.label,
+      notes: tripPlanItems.notes,
+      plannedAt: tripPlanItems.plannedAt,
+      ordinal: tripPlanItems.ordinal,
+      parentItemId: tripPlanItems.parentItemId,
+      backupTargetItemId: tripPlanItems.backupTargetItemId,
+      transportOriginLabel: tripPlanItems.transportOriginLabel,
+      transportDestinationLabel: tripPlanItems.transportDestinationLabel,
+      accommodationPlaceAreaLabel: tripPlanItems.accommodationPlaceAreaLabel,
+      createdAt: tripPlanItems.createdAt,
+    })
+    .from(tripPlanItems)
+    .where(and(eq(tripPlanItems.tripProjectId, tripProjectId), eq(tripPlanItems.userId, session.userId)))
+    .orderBy(sql`${tripPlanItems.parentItemId} asc nulls first, ${tripPlanItems.ordinal} asc`);
+
+  const planItems: TripPlanItemProjection[] = planItemRows.map((row) => ({
+    id: row.id,
+    kind: row.kind,
+    anchorRole: row.anchorRole,
+    type: row.type,
+    state: row.state,
+    label: row.label,
+    notes: row.notes,
+    plannedAt: row.plannedAt,
+    ordinal: row.ordinal,
+    parentItemId: row.parentItemId,
+    backupTargetItemId: row.backupTargetItemId,
+    transportOriginLabel: row.transportOriginLabel,
+    transportDestinationLabel: row.transportDestinationLabel,
+    accommodationPlaceAreaLabel: row.accommodationPlaceAreaLabel,
+    createdAt: row.createdAt,
+  }));
+
+  const [constraintsRow] = await getDb()
+    .select({
+      adultCount: tripProjectConstraints.adultCount,
+      childCount: tripProjectConstraints.childCount,
+      children: tripProjectConstraints.children,
+      vehicleType: tripProjectConstraints.vehicleType,
+      evChargingNeed: tripProjectConstraints.evChargingNeed,
+      drivingToleranceHours: tripProjectConstraints.drivingToleranceHours,
+      budgetCurrency: tripProjectConstraints.budgetCurrency,
+      budgetMinVnd: tripProjectConstraints.budgetMinVnd,
+      budgetMaxVnd: tripProjectConstraints.budgetMaxVnd,
+      preferenceTags: tripProjectConstraints.preferenceTags,
+      avoidItems: tripProjectConstraints.avoidItems,
+    })
+    .from(tripProjectConstraints)
+    .where(and(eq(tripProjectConstraints.tripProjectId, tripProjectId), eq(tripProjectConstraints.userId, session.userId)))
+    .limit(1);
+
+  const now = new Date();
+  const workspaceReadModel = buildTripWorkspaceReadModelWithConstraints({ items: planItems, pendingProposals: [], now }, constraintsRow);
+
+  return {
+    ...project,
+    primaryConversation: primarySummary,
+    historicChats: relatedChats.filter((chat) => chat.id !== primaryConversation.id),
+    planItems,
+    constraints: workspaceReadModel.constraints,
+    tripHome: workspaceReadModel.focus,
+  } satisfies OwnedTripProjectWorkspaceSummary;
 }
 
 export async function resolveOwnedPrimaryConversation(tripProjectId: string) {

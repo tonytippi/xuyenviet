@@ -10,6 +10,8 @@ import { answerUsefulnessCommentMaxLength, countAnswerUsefulnessCommentCharacter
 import type { AnswerUsefulnessRating } from "@/db/schema";
 import type { AnswerAnnotation } from "@/features/ai/answer-annotations";
 import type { AssistantMessageProvenanceItem } from "@/features/retrieval/provenance";
+import type { TripWorkspaceReadModel } from "@/features/chat-trips/trip-home";
+import { TripWorkspacePanel } from "@/features/ai/trip-workspace-panel";
 import { AccountIcon, AttachmentIcon, ChatIcon, CloseIcon, CostIcon, HotelAreaIcon, LoadingIcon, NewChatIcon, PlaceIcon, ProjectIcon, RouteSegmentIcon, SendIcon, SourceIcon } from "@/components/ui/icons";
 
 const maxQuestionLength = 2_000;
@@ -51,6 +53,9 @@ type TripProjectSummary = {
   title: string;
   origin: string | null;
   destination: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
+  travelers?: string | null;
   updatedAt?: Date | string;
 };
 
@@ -112,6 +117,7 @@ type AiAskComposerProps = {
   initialTripProjects?: TripProjectSummary[];
   selectedTripProject?: TripProjectSummary | null;
   historyConversation?: { id: string; messages: DisplayMessage[] } | null;
+  tripWorkspace?: TripWorkspaceReadModel | null;
   supportsImageInput?: boolean;
   userEmail?: string;
   canAccessAdmin?: boolean;
@@ -565,6 +571,7 @@ export function AiAskComposer({
   initialTripProjects = emptyTripProjects,
   selectedTripProject = null,
   historyConversation = null,
+  tripWorkspace = null,
   supportsImageInput = false,
   userEmail,
   canAccessAdmin = false,
@@ -596,6 +603,7 @@ export function AiAskComposer({
   const [feedbackPendingMessageId, setFeedbackPendingMessageId] = useState<string | null>(null);
   const [selectedAnswerEntity, setSelectedAnswerEntity] = useState<AnswerEntityDescriptor | null>(null);
   const [isDesktopViewport, setIsDesktopViewport] = useState(false);
+  const [isWorkspaceSheetOpen, setWorkspaceSheetOpen] = useState(false);
   const [createProjectState, createProjectFormAction, isCreatingProject] = useActionState<CreateTripProjectFormState | undefined, FormData>(
     createTripProjectAction ?? noOpCreateTripProjectAction,
     undefined,
@@ -621,6 +629,9 @@ export function AiAskComposer({
   const mobileAnswerDetailPanelRef = useRef<HTMLDivElement>(null);
   const desktopAnswerDetailPanelRef = useRef<HTMLDivElement>(null);
   const answerEntityTriggerRef = useRef<HTMLElement | null>(null);
+  const workspaceSheetTriggerRef = useRef<HTMLButtonElement>(null);
+  const workspaceSheetPanelRef = useRef<HTMLDivElement>(null);
+  const workspaceSheetPreviousFocusRef = useRef<HTMLElement | null>(null);
   const hasMessages = messages.length > 0;
   const showEmptyState = !hasMessages && !isPending;
   const showContextPanel = hasMessages;
@@ -842,6 +853,59 @@ export function AiAskComposer({
       sessionSheetPreviousFocusRef.current?.focus();
     };
   }, [isDesktopViewport, isSessionSheetOpen]);
+
+  useEffect(() => {
+    if (!isWorkspaceSheetOpen || isDesktopViewport) {
+      return;
+    }
+
+    workspaceSheetPreviousFocusRef.current = (document.activeElement as HTMLElement | null) ?? null;
+    workspaceSheetPanelRef.current?.focus();
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setWorkspaceSheetOpen(false);
+        return;
+      }
+
+      if (event.key !== "Tab" || !workspaceSheetPanelRef.current) {
+        return;
+      }
+
+      const focusableElements = getFocusableElements(workspaceSheetPanelRef.current);
+
+      if (focusableElements.length === 0) {
+        event.preventDefault();
+        workspaceSheetPanelRef.current.focus();
+        return;
+      }
+
+      const firstElement = focusableElements[0];
+      const lastElement = focusableElements[focusableElements.length - 1];
+      const activeElement = document.activeElement;
+
+      if (!activeElement || !workspaceSheetPanelRef.current.contains(activeElement)) {
+        event.preventDefault();
+        (event.shiftKey ? lastElement : firstElement).focus();
+      } else if (event.shiftKey && activeElement === firstElement) {
+        event.preventDefault();
+        lastElement.focus();
+      } else if (!event.shiftKey && activeElement === lastElement) {
+        event.preventDefault();
+        firstElement.focus();
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = previousOverflow;
+      workspaceSheetPreviousFocusRef.current?.focus();
+    };
+  }, [isDesktopViewport, isWorkspaceSheetOpen]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1392,6 +1456,7 @@ export function AiAskComposer({
             onClick={() => {
               setSelectedAnswerEntity(null);
               answerEntityTriggerRef.current = null;
+              setWorkspaceSheetOpen(false);
               setSessionSheetOpen(true);
             }}
             aria-label="Mở danh sách trò chuyện, dự án chuyến đi và tài khoản"
@@ -1402,6 +1467,20 @@ export function AiAskComposer({
           <h2 className="min-w-0 flex-1 truncate text-center text-sm font-semibold text-[#17342c]" aria-label={`Không gian đang mở: ${activeWorkspaceTitle}`}>
             {activeWorkspaceTitle}
           </h2>
+          {selectedTripProject && tripWorkspace ? (
+            <button
+              ref={workspaceSheetTriggerRef}
+              type="button"
+              onClick={() => {
+                setSessionSheetOpen(false);
+                setWorkspaceSheetOpen(true);
+              }}
+              aria-label="Mở không gian dự án chuyến đi"
+              className="min-h-11 rounded-2xl border border-[#8fb59f] bg-[#edf7f0] px-4 py-2 text-sm font-semibold text-[#14532d] transition hover:bg-white focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45"
+            >
+              Kế hoạch
+            </button>
+          ) : null}
           <Link
             aria-label="Tài khoản và quyền riêng tư"
             className="grid min-h-11 min-w-11 place-items-center rounded-2xl border border-[#d8c9ad] bg-white/75 text-[#17342c] transition hover:bg-white focus:outline-none focus:ring-4 focus:ring-[#e5bd82]"
@@ -1659,6 +1738,38 @@ export function AiAskComposer({
             </section>
           </div>
         ) : null}
+
+        {isWorkspaceSheetOpen && selectedTripProject && tripWorkspace ? (
+          <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true" aria-label="Không gian dự án chuyến đi">
+            <button
+              type="button"
+              aria-label="Đóng không gian dự án chuyến đi"
+              onClick={() => setWorkspaceSheetOpen(false)}
+              className="absolute inset-0 bg-[#17342c]/40"
+            />
+            <div ref={workspaceSheetPanelRef} tabIndex={-1} className="absolute right-0 top-0 h-full w-96 max-w-[90%] overflow-y-auto rounded-l-[1.5rem] border-l border-[#d8c9ad] bg-[#fffdf8] p-4 shadow-[-24px_0_80px_rgba(41,33,18,0.24)]">
+              <button
+                type="button"
+                aria-label="Đóng không gian dự án chuyến đi"
+                onClick={() => setWorkspaceSheetOpen(false)}
+                className="mb-3 min-h-11 w-full rounded-2xl border border-[#d8c9ad] bg-white/80 px-4 py-3 text-sm font-semibold text-[#17342c] transition hover:bg-white focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45"
+              >
+                Đóng không gian dự án
+              </button>
+              <TripWorkspacePanel
+                header={{
+                  title: selectedTripProject.title,
+                  origin: selectedTripProject.origin,
+                  destination: selectedTripProject.destination,
+                  startDate: selectedTripProject.startDate ?? null,
+                  endDate: selectedTripProject.endDate ?? null,
+                  travelers: selectedTripProject.travelers ?? null,
+                }}
+                workspace={tripWorkspace}
+              />
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {showContextPanel && selectedAnswerEntity ? (
@@ -1671,6 +1782,22 @@ export function AiAskComposer({
             <span aria-hidden="true" className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-[#e8f3ec] text-sm font-black text-[#14532d]">XV</span>
           </div>
           <AnswerDetailPanel selectedEntity={selectedAnswerEntity} panelId={desktopAnswerDetailPanelId} panelRef={desktopAnswerDetailPanelRef} onClose={closeAnswerDetailPanel} />
+        </aside>
+      ) : null}
+
+      {selectedTripProject && tripWorkspace ? (
+        <aside aria-label="Không gian dự án chuyến đi" aria-hidden={isWorkspaceSheetOpen ? "true" : undefined} className="hidden min-h-0 w-[24rem] shrink-0 overflow-y-auto rounded-[1.5rem] border border-[#d8c9ad] bg-[linear-gradient(180deg,#fffdf8_0%,#ffffff_42%,#f7fbf8_100%)] p-4 text-[#17342c] shadow-[0_16px_40px_rgba(41,33,18,0.08)] lg:block">
+          <TripWorkspacePanel
+            header={{
+              title: selectedTripProject.title,
+              origin: selectedTripProject.origin,
+              destination: selectedTripProject.destination,
+              startDate: selectedTripProject.startDate ?? null,
+              endDate: selectedTripProject.endDate ?? null,
+              travelers: selectedTripProject.travelers ?? null,
+            }}
+            workspace={tripWorkspace}
+          />
         </aside>
       ) : null}
     </div>

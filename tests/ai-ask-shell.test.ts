@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { asc, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { aiGatewayModels, aiUsageEvents, answerUsefulnessFeedback, assistantResponseProvenance, assistantRetrievalDecisions, conversations, messageImageAttachments, messages, tripProjects, users } from "@/db/schema";
+import { aiGatewayModels, aiUsageEvents, answerUsefulnessFeedback, assistantResponseProvenance, assistantRetrievalDecisions, conversations, messageImageAttachments, messages, tripPlanItems, tripProjectConstraints, tripProjects, users } from "@/db/schema";
 import type { AnswerAnnotation } from "@/features/ai/answer-annotations";
 import type { AnswerEntityDescriptor } from "@/features/ai/ai-ask-composer";
 import type { AssistantMessageProvenanceItem } from "@/features/retrieval/provenance";
@@ -1996,5 +1996,187 @@ describe("AI Ask streaming route", () => {
     expect(await countConversations()).toBe(0);
     expect(await countMessages()).toBe(0);
     expect(await countUsageEvents()).toBe(0);
+  });
+
+  test("renders the Trip Home focus card, timeline, and constraints summary for a selected owned project", async () => {
+    await createTestUser("user-1");
+    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế lịch sử", origin: "Hà Nội", destination: "Huế", startDate: "2026-08-01", endDate: "2026-08-05", travelers: "2 người lớn, 1 trẻ em" }).returning({ id: tripProjects.id });
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id }).returning({ id: conversations.id });
+    await testDb.update(tripProjects).set({ primaryConversationId: conversation.id }).where(eq(tripProjects.id, project.id));
+    await testDb.insert(tripPlanItems).values([
+      { tripProjectId: project.id, userId: "user-1", kind: "anchor", anchorRole: "origin", state: "idea", label: "Hà Nội", ordinal: 0 },
+      { tripProjectId: project.id, userId: "user-1", kind: "leg", type: "transport", state: "confirmed", label: "Chạy xe Hà Nội - Huế", ordinal: 1, plannedAt: new Date("2026-08-01T06:00:00.000Z"), transportOriginLabel: "Hà Nội", transportDestinationLabel: "Huế" },
+      { tripProjectId: project.id, userId: "user-1", kind: "leg", type: "accommodation", state: "confirmed", label: "Khách sạn Huế", ordinal: 2 },
+    ]);
+    await testDb.insert(tripProjectConstraints).values({
+      tripProjectId: project.id,
+      userId: "user-1",
+      adultCount: 2,
+      childCount: 1,
+      vehicleType: "ev",
+      evChargingNeed: "required",
+      drivingToleranceHours: 4,
+      budgetCurrency: "VND",
+      budgetMinVnd: 5_000_000,
+      budgetMaxVnd: 10_000_000,
+      preferenceTags: ["nature", "culture"],
+      avoidItems: [{ category: "place", label: "Khu đông người" }],
+    });
+
+    const canonicalUrl = await getAuthenticatedAiAskRedirect({ tripProjectId: project.id });
+    const canonicalParams = Object.fromEntries(new URL(canonicalUrl, "http://localhost").searchParams.entries());
+    vi.resetModules();
+    const html = await renderAuthenticatedAiAskShell(canonicalParams);
+
+    expect(html).toContain("Không gian dự án chuyến đi");
+    expect(html).toContain("Huế lịch sử");
+    expect(html).toContain("Hà Nội → Huế");
+    expect(html).toContain("2026-08-01 → 2026-08-05");
+    expect(html).toContain("Tiêu điểm");
+    expect(html).toContain("Còn thiếu thông tin đã chốt");
+    expect(html).toContain("Bổ sung thông tin trong cuộc trò chuyện");
+    expect(html).toContain("Dòng thời gian");
+    expect(html).toContain("Yêu cầu thay đổi kế hoạch trong cuộc trò chuyện");
+    expect(html).toContain("Chạy xe Hà Nội - Huế");
+    expect(html).toContain("Khách sạn Huế");
+    expect(html).toContain("Ý tưởng");
+    expect(html).toContain("Đã chốt");
+    expect(html).toContain("Di chuyển");
+    expect(html).toContain("Lưu trú");
+    expect(html).toContain("Ràng buộc chuyến đi");
+    expect(html).toContain("2 người lớn, 1 trẻ em");
+    expect(html).toContain("Xe điện");
+    expect(html).toContain("cần sạc");
+    expect(html).toContain("5.000.000 - 10.000.000 VND");
+    expect(html).toContain("Thiên nhiên");
+    expect(html).toContain("Văn hoá");
+    expect(html).toContain("Khu đông người");
+  });
+
+  test("renders preparation focus and empty timeline copy when a project has no plan items", async () => {
+    await createTestUser("user-1");
+    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Đà Lạt", origin: "Hà Nội", destination: "Đà Lạt" }).returning({ id: tripProjects.id });
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id }).returning({ id: conversations.id });
+    await testDb.update(tripProjects).set({ primaryConversationId: conversation.id }).where(eq(tripProjects.id, project.id));
+
+    const canonicalUrl = await getAuthenticatedAiAskRedirect({ tripProjectId: project.id });
+    const canonicalParams = Object.fromEntries(new URL(canonicalUrl, "http://localhost").searchParams.entries());
+    vi.resetModules();
+    const html = await renderAuthenticatedAiAskShell(canonicalParams);
+
+    expect(html).toContain("Chuẩn bị cho chuyến đi");
+    expect(html).toContain("Chưa có mục kế hoạch");
+  });
+
+  test("renders the mobile workspace sheet button and sheet markup when a project is selected", async () => {
+    await createTestUser("user-1");
+    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế", origin: "Hà Nội", destination: "Huế" }).returning({ id: tripProjects.id });
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id }).returning({ id: conversations.id });
+    await testDb.update(tripProjects).set({ primaryConversationId: conversation.id }).where(eq(tripProjects.id, project.id));
+
+    const canonicalUrl = await getAuthenticatedAiAskRedirect({ tripProjectId: project.id });
+    const canonicalParams = Object.fromEntries(new URL(canonicalUrl, "http://localhost").searchParams.entries());
+    vi.resetModules();
+    const html = await renderAuthenticatedAiAskShell(canonicalParams);
+
+    expect(html).toContain('aria-label="Mở không gian dự án chuyến đi"');
+    expect(html).toContain("Kế hoạch");
+
+    const source = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
+    expect(source).toContain('aria-label="Không gian dự án chuyến đi"');
+    expect(source).toContain("Đóng không gian dự án");
+    expect(source).toContain("isWorkspaceSheetOpen && selectedTripProject && tripWorkspace");
+  });
+
+  test("does not render the workspace panel for an ordinary conversation without a selected project", async () => {
+    await createTestUser("user-1");
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
+    await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "user", content: "Chào trợ lý." });
+    await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "assistant", content: "Kế hoạch gợi ý:\nXin chào." });
+
+    const html = await renderAuthenticatedAiAskShell({ conversationId: conversation.id });
+
+    expect(html).not.toContain("Không gian dự án chuyến đi");
+    expect(html).not.toContain("Tiêu điểm");
+    expect(html).not.toContain("Dòng thời gian");
+    expect(html).not.toContain("Ràng buộc chuyến đi");
+  });
+
+  test("does not render the workspace panel for a cross-owner project and leaks no existence", async () => {
+    await createTestUser("user-1");
+    await createTestUser("user-2");
+    const [otherProject] = await testDb.insert(tripProjects).values({ userId: "user-2", title: "Dự án riêng user-2", origin: "Sài Gòn", destination: "Cần Thơ" }).returning({ id: tripProjects.id });
+    const [otherConversation] = await testDb.insert(conversations).values({ userId: "user-2", tripProjectId: otherProject.id }).returning({ id: conversations.id });
+    await testDb.update(tripProjects).set({ primaryConversationId: otherConversation.id }).where(eq(tripProjects.id, otherProject.id));
+    await testDb.insert(tripPlanItems).values({ tripProjectId: otherProject.id, userId: "user-2", kind: "leg", type: "transport", state: "confirmed", label: "Chạy xe riêng của user-2", ordinal: 0, transportOriginLabel: "Sài Gòn", transportDestinationLabel: "Cần Thơ" });
+
+    await expect(getAuthenticatedAiAskRedirect({ tripProjectId: otherProject.id })).resolves.toBe("/ai-ask");
+  });
+
+  test("workspace renders no editor, reorder, delete-state, map, booking, or weather controls", async () => {
+    await createTestUser("user-1");
+    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế", origin: "Hà Nội", destination: "Huế" }).returning({ id: tripProjects.id });
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id }).returning({ id: conversations.id });
+    await testDb.update(tripProjects).set({ primaryConversationId: conversation.id }).where(eq(tripProjects.id, project.id));
+    await testDb.insert(tripPlanItems).values({ tripProjectId: project.id, userId: "user-1", kind: "leg", type: "transport", state: "confirmed", label: "Chạy xe", ordinal: 0, plannedAt: new Date("2026-08-01T00:00:00.000Z"), transportOriginLabel: "Hà Nội", transportDestinationLabel: "Huế" });
+
+    const canonicalUrl = await getAuthenticatedAiAskRedirect({ tripProjectId: project.id });
+    const canonicalParams = Object.fromEntries(new URL(canonicalUrl, "http://localhost").searchParams.entries());
+    vi.resetModules();
+    const html = await renderAuthenticatedAiAskShell(canonicalParams);
+
+    expect(html).not.toContain("Chỉnh sửa");
+    expect(html).not.toContain("Sắp xếp lại");
+    expect(html).not.toContain("Kéo thả");
+    expect(html).not.toContain("Đặt phòng");
+    expect(html).not.toContain("Google Maps");
+    expect(html).not.toContain("Thời tiết");
+    expect(html).not.toContain("Đường đi thực tế");
+    expect(html).not.toContain("Đặt dịch vụ");
+    expect(html).not.toContain("provider");
+    expect(html).not.toContain("booking");
+  });
+
+  test("workspace adds no provider call, no AI usage event, no retrieval/search call, and no persistence write", async () => {
+    await createTestUser("user-1");
+    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế", origin: "Hà Nội", destination: "Huế" }).returning({ id: tripProjects.id });
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id }).returning({ id: conversations.id });
+    await testDb.update(tripProjects).set({ primaryConversationId: conversation.id }).where(eq(tripProjects.id, project.id));
+    await testDb.insert(tripPlanItems).values({ tripProjectId: project.id, userId: "user-1", kind: "leg", type: "transport", state: "planned", label: "Chạy xe", ordinal: 0, plannedAt: new Date("2026-08-01T00:00:00.000Z") });
+
+    const conversationsBefore = await countConversations();
+    const messagesBefore = await countMessages();
+    const usageBefore = await countUsageEvents();
+
+    const canonicalUrl = await getAuthenticatedAiAskRedirect({ tripProjectId: project.id });
+    const canonicalParams = Object.fromEntries(new URL(canonicalUrl, "http://localhost").searchParams.entries());
+    vi.resetModules();
+    const fetchMock = vi.fn(async () => { throw new Error("Unexpected fetch"); });
+    vi.stubGlobal("fetch", fetchMock);
+    await renderAuthenticatedAiAskShell(canonicalParams);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(await countConversations()).toBe(conversationsBefore);
+    expect(await countMessages()).toBe(messagesBefore);
+    expect(await countUsageEvents()).toBe(usageBefore);
+  });
+
+  test("workspace has aria-live region for state changes and mobile sheet is aria-hidden inert when open on desktop", () => {
+    const source = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
+    expect(source).toContain('aria-hidden={isWorkspaceSheetOpen ? "true" : undefined}');
+    expect(source).toContain("isWorkspaceSheetOpen");
+    expect(source).toContain("workspaceSheetPanelRef");
+    expect(source).toContain("workspaceSheetPreviousFocusRef");
+    expect(source).toContain("workspaceSheetTriggerRef");
+    expect(source).toContain("setWorkspaceSheetOpen(false)");
+  });
+
+  test("workspace panel is presentational and data-free with no localStorage, sessionStorage, or fetch", () => {
+    const panelSource = readFileSync("src/features/ai/trip-workspace-panel.tsx", "utf8");
+    expect(panelSource).not.toContain("localStorage");
+    expect(panelSource).not.toContain("sessionStorage");
+    expect(panelSource).not.toContain("fetch(");
+    expect(panelSource).not.toContain("useEffect");
+    expect(panelSource).not.toContain("useState");
   });
 });

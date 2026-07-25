@@ -6,6 +6,7 @@ import { normalizePublicAskDraft } from "@/features/auth/redirects";
 import { getOwnedConversation, listOwnedConversations } from "@/features/chat-trips/conversations";
 import { createTripProjectFromForm, deleteConversationAction, deleteTripProjectAction } from "@/features/chat-trips/actions";
 import { getOwnedTripProjectSummary, listOwnedTripProjects } from "@/features/chat-trips/trip-projects";
+import { buildTimelineGroups } from "@/features/chat-trips/trip-home";
 import { saveAnswerUsefulnessFeedbackAction } from "@/features/feedback/actions";
 import { selectActiveAiGatewayModel } from "@/features/ai/models";
 import { aiAskInitialAnswerPurpose } from "@/features/ai/prompts";
@@ -127,7 +128,17 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
         title: selectedTripProject.title,
         origin: selectedTripProject.origin,
         destination: selectedTripProject.destination,
+        startDate: selectedTripProject.startDate,
+        endDate: selectedTripProject.endDate,
+        travelers: selectedTripProject.travelers,
         updatedAt: selectedTripProject.updatedAt,
+      }
+    : null;
+  const tripWorkspaceForComposer = selectedTripProject
+    ? {
+        focus: selectedTripProject.tripHome,
+        timelineGroups: buildTimelineGroups(selectedTripProject.planItems),
+        constraints: selectedTripProject.constraints,
       }
     : null;
   const canonicalUrl = buildCanonicalAiAskUrl({
@@ -185,6 +196,7 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
             } : null}
             initialTripProjects={initialTripProjects}
             selectedTripProject={selectedTripProjectForComposer}
+            tripWorkspace={tripWorkspaceForComposer}
             supportsImageInput={Boolean(imageInputModel)}
             userEmail={session.email}
             canAccessAdmin={hasAdminAccess(session.roles)}
