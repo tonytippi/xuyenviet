@@ -19,6 +19,14 @@ describe("audit actor boundary", () => {
     expect(Object.isFrozen(actor)).toBe(true);
   });
 
+  test("rejects a session runtime payload mixed with system fields", () => {
+    expect(() => toUserAuditActor({
+      userId: "user-1",
+      email: "person@example.com",
+      system: "system-trip-planning",
+    } as never)).toThrow(AuditActorValidationError);
+  });
+
   test("constructs every cataloged system actor without a session", () => {
     const ids = systemAuditActorCatalog.map((entry) => entry.id);
 

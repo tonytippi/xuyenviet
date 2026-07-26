@@ -61,6 +61,10 @@ export function createUserAuditActor(input: { userId?: unknown; email?: unknown 
 }
 
 export function toUserAuditActor(session: AuthenticatedSession): UserAuditActor {
+  if (!isRecord(session) || !hasOnlyKeys(session, ["userId", "email"])) {
+    throw new AuditActorValidationError();
+  }
+
   return createUserAuditActor(session);
 }
 

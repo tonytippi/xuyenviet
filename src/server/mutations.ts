@@ -49,7 +49,7 @@ export async function runAuditedAuthenticatedMutation<TResult>({
 
   return getDb().transaction(async (transaction) => {
     const result = await action(session, transaction);
-    await recordAuditEvent({ actor: toUserAuditActor(session), ...audit }, transaction);
+    await recordAuditEvent({ ...audit, actor: toUserAuditActor({ userId: session.userId, email: session.email }) }, transaction);
 
     return result;
   });
@@ -63,7 +63,7 @@ export async function runAuditedAdminMutation<TResult>({
 
   return getDb().transaction(async (transaction) => {
     const result = await action(session, transaction);
-    await recordAuditEvent({ actor: toUserAuditActor(session), ...audit }, transaction);
+    await recordAuditEvent({ ...audit, actor: toUserAuditActor({ userId: session.userId, email: session.email }) }, transaction);
 
     return result;
   });
@@ -92,7 +92,7 @@ export async function runAuditedExactAdminMutation<TResult>({
     const auditMetadata = audit(result);
 
     if (auditMetadata) {
-      await recordAuditEvent({ actor: toUserAuditActor(session), ...auditMetadata }, transaction);
+      await recordAuditEvent({ ...auditMetadata, actor: toUserAuditActor({ userId: session.userId, email: session.email }) }, transaction);
     }
 
     return result;

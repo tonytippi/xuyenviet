@@ -6,11 +6,16 @@ import { auditEvents, userRoles, users, type UserRole } from "@/db/schema";
 import { testDb } from "./helpers/db";
 
 const authMock = vi.fn();
+const getDbMock = vi.fn();
 
 vi.mock("@/auth", () => ({
   auth: authMock,
   signIn: vi.fn(),
   signOut: vi.fn(),
+}));
+
+vi.mock("@/db/client", () => ({
+  getDb: getDbMock,
 }));
 
 async function createUser(userId: string, roles: UserRole[] = []) {
@@ -30,6 +35,8 @@ async function countRows(tableName: string) {
 describe("audited mutation transaction contract", () => {
   beforeEach(() => {
     authMock.mockReset();
+    getDbMock.mockReset();
+    getDbMock.mockReturnValue(testDb);
   });
 
   test("throws before mutation when authenticated session is missing", async () => {
@@ -62,6 +69,25 @@ describe("audited mutation transaction contract", () => {
 
     await expect(testDb.select().from(userRoles).where(eq(userRoles.userId, "target-user"))).resolves.toHaveLength(1);
     await expect(testDb.select().from(auditEvents).where(eq(auditEvents.actorUserId, "actor-user"))).resolves.toHaveLength(1);
+  });
+
+  test("uses the authenticated actor when untyped audit metadata supplies another actor", async () => {
+    await createUser("actor-user");
+    await createUser("metadata-user");
+    authMock.mockResolvedValue({ user: { id: "actor-user", email: "actor-user@example.com" } });
+    const { runAuditedAuthenticatedMutation } = await import("@/server/mutations");
+
+    await runAuditedAuthenticatedMutation({
+      action: async () => "ok",
+      audit: {
+        operation: "update",
+        targetType: "test_target",
+        actor: { kind: "user", userId: "metadata-user", email: "metadata-user@example.com" },
+      } as never,
+    });
+
+    await expect(testDb.select().from(auditEvents).where(eq(auditEvents.actorUserId, "actor-user"))).resolves.toHaveLength(1);
+    await expect(testDb.select().from(auditEvents).where(eq(auditEvents.actorUserId, "metadata-user"))).resolves.toHaveLength(0);
   });
 
   test("rolls back action and writes no audit row when the action throws", async () => {
@@ -134,16 +160,26 @@ describe("audited mutation transaction contract", () => {
     await expect(testDb.select().from(auditEvents).where(eq(auditEvents.actorUserId, "exact-admin"))).resolves.toHaveLength(1);
   });
 
-  test("runAuditedExactAdminMutation denies a non-exact admin before action or audit", async () => {
-    await createUser("revoked-admin", ["operator"]);
+  test("runAuditedExactAdminMutation denies an initially authorized admin revoked before transaction revalidation", async () => {
+    await createUser("revoked-admin", ["admin"]);
     authMock.mockResolvedValue({ user: { id: "revoked-admin", email: "revoked-admin@example.com" } });
     const { runAuditedExactAdminMutation } = await import("@/server/mutations");
     const action = vi.fn(async () => "never runs");
 
+    getDbMock
+      .mockReturnValueOnce(testDb)
+      .mockReturnValueOnce({
+        ...testDb,
+        transaction: async (callback: Parameters<typeof testDb.transaction>[0]) => {
+          await testDb.delete(userRoles).where(eq(userRoles.userId, "revoked-admin"));
+          return testDb.transaction(callback);
+        },
+      });
+
     await expect(runAuditedExactAdminMutation({
       action,
       audit: () => ({ operation: "update", targetType: "user_role" }),
-    })).rejects.toMatchObject({ name: "AdminAuthorizationError" });
+    })).rejects.toThrow("Exact administrator access is required for this server mutation.");
 
     expect(action).not.toHaveBeenCalled();
     await expect(testDb.select().from(auditEvents).where(eq(auditEvents.actorUserId, "revoked-admin"))).resolves.toHaveLength(0);

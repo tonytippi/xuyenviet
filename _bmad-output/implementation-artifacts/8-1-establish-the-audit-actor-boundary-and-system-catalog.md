@@ -61,6 +61,12 @@ so that all protected writes identify the correct kind of actor without treating
   - [x] Cover rejection of blank/missing user email and malformed/mixed user-system payloads before a database writer can run.
   - [x] Retain existing audited-mutation transaction tests: unauthenticated failure precedes action execution; action/audit commit together; either failure rolls the transaction back.
 
+### Review Findings
+
+- [x] [Review][Patch] Runtime audit metadata can override the authenticated actor [`src/server/mutations.ts:52`] Fixed all three wrappers by spreading metadata before the server-constructed actor; authenticated identity is now authoritative even for untyped/cast metadata.
+- [x] [Review][Patch] Session conversion accepts mixed user/system runtime values [`src/features/audit/actors.ts:55`] Fixed `toUserAuditActor` to require exactly the `userId` and `email` runtime keys; direct regression coverage rejects a payload with `system`.
+- [x] [Review][Patch] Exact-admin revalidation test never reaches the transaction-time check [`tests/audit-mutation.test.ts:137`] Replaced the pre-transaction-only fixture with an initially exact-admin user whose admin role is removed immediately before the transactional recheck; the test asserts no action or audit write runs.
+
 ## Dev Notes
 
 ### Story Boundary
@@ -177,6 +183,8 @@ gpt-5.6-terra
 - `pnpm test:run tests/audit-actors.test.ts tests/audit-mutation.test.ts tests/trip-change-proposals.test.ts` passed: 80 tests.
 - `pnpm lint` passed with 3 pre-existing warnings in `tests/knowledge-search.test.ts`; `pnpm typecheck` and `pnpm build` passed.
 - Full `pnpm test:run` has three unrelated pre-existing failures: two Facebook capture extraction action UI assertions and the AI model catalog exact-admin fixture. They do not involve this story's files or audit actor boundary.
+- `pnpm test:run tests/audit-actors.test.ts tests/audit-mutation.test.ts` passed: 14 tests after the three review patches.
+- `pnpm typecheck` passed after the review patches.
 
 ### Completion Notes List
 
@@ -185,6 +193,7 @@ gpt-5.6-terra
 - Implemented the immutable Audit-owned user/system actor boundary and five-entry system catalog with fail-closed runtime validation and server-owned label lookup.
 - Converted all current authenticated `recordAuditEvent` callers to `toUserAuditActor`, removed caller-controlled actor class/system event input, and retained expiry's validated legacy user-row compatibility path.
 - Added focused actor boundary, event writer side-effect, exact-admin transaction, and plan-history catalog-label coverage. No migration or persistence-shape change was made.
+- Fixed CR-8.1-01 through CR-8.1-03 only: authenticated audit actor precedence, mixed runtime session rejection, and transaction-time exact-admin revocation coverage. No later story work or code review was started.
 
 ### File List
 
@@ -208,3 +217,5 @@ gpt-5.6-terra
 ## Change Log
 
 - 2026-07-26: Implemented the Audit actor boundary, caller conversions, catalog-backed plan-history labels, and focused regression coverage; status moved to review.
+- 2026-07-26: Code review found three patch items in authenticated actor precedence, mixed runtime session conversion, and exact-admin transaction-time revalidation coverage; status moved to in-progress.
+- 2026-07-27: Fixed CR-8.1-01 through CR-8.1-03; focused audit tests and TypeScript check passed; status moved to review. No commit created.

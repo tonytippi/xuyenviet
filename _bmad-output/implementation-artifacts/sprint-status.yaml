@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-07-26 (Story 8.1 commit gate verified the scoped implementation and acceptance record; focused audit, mutation, and plan-history tests, lint, typecheck, and build passed. Story remains in review. Existing statuses and action items were preserved.)
+# last_updated: 2026-07-27 (Story 8.1 repair commit gate verified CR-8.1-01 through CR-8.1-03. Focused audit tests and TypeScript check passed; story remains in review.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-07-26 (Story 8.1 commit gate verified the scoped implementation and acceptance record; focused audit, mutation, and plan-history tests, lint, typecheck, and build passed. Story remains in review. Existing statuses and action items were preserved.)
+last_updated: 2026-07-27 (Story 8.1 repair commit gate verified CR-8.1-01 through CR-8.1-03. Focused audit tests and TypeScript check passed; story remains in review.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -123,7 +123,7 @@ development_status:
 
   # AD-31 clean-break audit and automated-execution attribution plan.
   epic-8: in-progress
-  # Synchronized 2026-07-26 by the Story 8.1 commit gate after scope and acceptance verification; focused audit, mutation, and plan-history tests passed, lint had only 3 pre-existing unrelated warnings, and typecheck/build passed. Story remains in review.
+  # Synchronized 2026-07-27 by the Story 8.1 repair commit gate: metadata cannot override the authenticated actor, mixed session/system payloads are rejected, and transaction-time exact-admin revocation is covered. Focused audit tests and TypeScript check passed; story remains in review.
   8-1-establish-the-audit-actor-boundary-and-system-catalog: review
   8-2-persist-valid-audit-history-and-usage-attribution: backlog
   8-3-attribute-knowledge-capture-and-ai-work-to-system-executors: backlog
