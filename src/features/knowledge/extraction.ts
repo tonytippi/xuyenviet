@@ -21,6 +21,7 @@ import {
   sourceKnowledgeDraftExtractionPurpose,
 } from "@/features/ai/prompts";
 import { recordAuditEvent } from "@/features/audit/events";
+import { toUserAuditActor } from "@/features/audit/actors";
 import { writeAiUsageEvent } from "@/features/usage/events";
 import type { AuthenticatedSession } from "@/server/auth";
 
@@ -206,7 +207,7 @@ export async function extractKnowledgeDraftsFromSourceAsActor(sourceId: string, 
 
       await recordAuditEvent(
         {
-          actor,
+          actor: toUserAuditActor(actor),
           operation: "create",
           targetType: "knowledge_draft_extraction",
           targetId: sourceBundle.source.id,

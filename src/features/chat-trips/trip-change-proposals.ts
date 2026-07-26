@@ -18,6 +18,7 @@ import {
   type TripPlanItemType,
 } from "@/db/schema";
 import { recordAuditEvent } from "@/features/audit/events";
+import { createSystemAuditActor, getSystemAuditActorLabel, toUserAuditActor } from "@/features/audit/actors";
 import {
   changeInternalTripPlanItemStateInTransaction,
   createTripPlanItemInTransaction,
@@ -42,12 +43,12 @@ import { getAuthenticatedSession } from "@/server/auth";
 // No plan state is mutated by the 7.4 draft path; only apply mutates plan
 // state, and only inside one locked transaction.
 
-// Story 7.5: the canonical system actor for Trip Planning, mirroring the
-// system-knowledge-pipeline pattern verbatim (migration 0064 reserves the
-// user row; the audit_events.actorUserId FK requires it to exist).
+// The legacy user row remains until Story 8.4 can atomically move expiry to
+// system persistence. The catalog actor is ready for that future path.
 const systemTripPlanningActorId = "system-trip-planning";
 const systemTripPlanningActorEmail = "system-trip-planning@xuyenviet.invalid";
-const systemTripPlanningActor = { userId: systemTripPlanningActorId, email: systemTripPlanningActorEmail };
+const legacySystemTripPlanningUserActor = toUserAuditActor({ userId: systemTripPlanningActorId, email: systemTripPlanningActorEmail });
+const systemTripPlanningActor = createSystemAuditActor(systemTripPlanningActorId);
 const systemTripPlanningActorSystem = "system-trip-planning";
 
 type Transaction = Parameters<ReturnType<typeof getDb>["transaction"]>[0] extends (transaction: infer T) => unknown ? T : never;
@@ -879,7 +880,7 @@ export async function persistAiTripChangeProposalDraft(
 
       await recordAuditEvent(
         {
-          actor: session,
+          actor: toUserAuditActor(session),
           operation: "create",
           targetType: "trip_change_proposal",
           targetId: inserted.id,
@@ -889,7 +890,6 @@ export async function persistAiTripChangeProposalDraft(
             status: inserted.status,
             expectedAggregateVersion: input.expectedAggregateVersion,
           }),
-          actorClass: "user",
         },
         transaction,
       );
@@ -1479,12 +1479,11 @@ export async function applyApprovedTripChange(
       // Record the apply audit row (actorClass = 'user').
       await recordAuditEvent(
         {
-          actor: session,
+          actor: toUserAuditActor(session),
           operation: "apply",
           targetType: "trip_change_proposal",
           targetId: input.proposalId,
           afterSummary: JSON.stringify({ tripProjectId: input.tripProjectId, proposalId: input.proposalId, aggregateVersion: runningAggregateVersion }),
-          actorClass: "user",
         },
         transaction,
       );
@@ -1987,12 +1986,11 @@ export async function dismissTripChangeProposal(
 
       await recordAuditEvent(
         {
-          actor: session,
+          actor: toUserAuditActor(session),
           operation: "dismiss",
           targetType: "trip_change_proposal",
           targetId: input.proposalId,
           afterSummary: JSON.stringify({ tripProjectId: input.tripProjectId, proposalId: input.proposalId }),
-          actorClass: "user",
         },
         transaction,
       );
@@ -2112,13 +2110,11 @@ export async function expireTripChangeProposalInTransaction(
   // system-knowledge-pipeline pattern verbatim.
   await recordAuditEvent(
     {
-      actor: systemTripPlanningActor,
+      actor: legacySystemTripPlanningUserActor,
       operation: "expire",
       targetType: "trip_change_proposal",
       targetId: input.proposalId,
       afterSummary: JSON.stringify({ tripProjectId: row.tripProjectId, proposalId: input.proposalId }),
-      actorClass: "system",
-      actorSystem: systemTripPlanningActorSystem,
     },
     transaction,
   );
@@ -2251,7 +2247,7 @@ export function formatPlanHistoryRow(row: TripPlanChangeHistoryRow): PlanHistory
   const hours = ict.getUTCHours();
   const minutes = ict.getUTCMinutes();
   const timestampLabel = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")} ${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")} giờ Việt Nam`;
-  const actorLabel = row.actorClass === "system" ? "Hệ thống" : "Bạn";
+  const actorLabel = row.actorClass === "system" ? getSystemAuditActorLabel(row.actorSystem) ?? "Hệ thống" : "Bạn";
   return {
     operationLabel: planHistoryOperationLabels[row.operationClass] ?? row.operationClass,
     actorLabel,
@@ -2262,6 +2258,5 @@ export function formatPlanHistoryRow(row: TripPlanChangeHistoryRow): PlanHistory
   };
 }
 
-// Re-export the system actor constants for the expiry worker so it can pass the
-// canonical system actor to any future audit path without redefining it.
+// Export the catalog actor for the system persistence path introduced in Story 8.4.
 export const tripPlanningSystemActor = systemTripPlanningActor;

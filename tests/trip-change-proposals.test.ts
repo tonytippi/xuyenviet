@@ -852,7 +852,7 @@ describe("Story 7.5 expireTripChangeProposal DB-backed tests", () => {
 
     const expireAudits = await testDb.select().from(auditEvents).where(and(eq(auditEvents.operation, "expire"), eq(auditEvents.targetId, persisted.proposal.id)));
     expect(expireAudits).toHaveLength(1);
-    expect(expireAudits[0]).toMatchObject({ actorClass: "system", actorSystem: "system-trip-planning", actorUserId: "system-trip-planning" });
+    expect(expireAudits[0]).toMatchObject({ actorClass: "user", actorSystem: null, actorUserId: "system-trip-planning" });
   });
 
   test("idempotent expire on an already-expired proposal: no second history row", async () => {
@@ -1004,7 +1004,19 @@ describe("Story 7.5 expire-on-read and plan history read", () => {
       safeBeforeAfterSummary: [],
     });
     expect(systemView.operationLabel).toBe("Đã hết hạn");
-    expect(systemView.actorLabel).toBe("Hệ thống");
+    expect(systemView.actorLabel).toBe("Lập kế hoạch chuyến đi");
+
+    expect(formatPlanHistoryRow({
+      id: "row-3",
+      proposalId: null,
+      operationClass: "expire",
+      actorClass: "system",
+      actorSystem: "untrusted-system",
+      actorUserId: null,
+      createdAt: new Date("2026-07-25T03:00:00.000Z"),
+      affectedItemReferences: [],
+      safeBeforeAfterSummary: [],
+    }).actorLabel).toBe("Hệ thống");
   });
 });
 

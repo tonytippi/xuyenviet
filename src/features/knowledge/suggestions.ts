@@ -19,6 +19,7 @@ import { completeExtraction } from "@/features/ai/gateway";
 import { getAiGatewayPricingSnapshot, selectActiveAiGatewayModel, type SelectedAiGatewayModel } from "@/features/ai/models";
 import { buildSourceKnowledgeSuggestionMessages, sourceKnowledgeSuggestionPromptVersion, sourceKnowledgeSuggestionPurpose } from "@/features/ai/prompts";
 import { recordAuditEvent } from "@/features/audit/events";
+import { toUserAuditActor } from "@/features/audit/actors";
 import { writeAiUsageEvent } from "@/features/usage/events";
 import { requireAdminSession } from "@/server/auth";
 
@@ -205,7 +206,7 @@ export async function suggestKnowledgeFromSourceUrl(sourceId: string): Promise<K
 
       await recordAuditEvent(
         {
-          actor: session,
+          actor: toUserAuditActor(session),
           operation: "create",
           targetType: "knowledge_source_suggestion",
           targetId: sourceBundle.source.id,

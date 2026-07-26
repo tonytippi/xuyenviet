@@ -18,6 +18,7 @@ import {
   type KnowledgeSourceSupport,
 } from "@/db/schema";
 import { recordAuditEvent } from "@/features/audit/events";
+import { toUserAuditActor } from "@/features/audit/actors";
 import { evaluateKnowledgeTravelerPolicy } from "@/features/knowledge/state";
 import { disableStaleKnowledgeSearchProjection, enqueueKnowledgeIndexWork } from "@/features/knowledge/indexing-queue";
 import { requireAdminSession, type AuthenticatedSessionWithRoles } from "@/server/auth";
@@ -362,7 +363,7 @@ export async function updateKnowledgeDraft(draftId: string, input: KnowledgeDraf
 
     await recordAuditEvent(
       {
-        actor: session,
+        actor: toUserAuditActor(session),
         operation: "update",
         targetType: "knowledge_draft",
         targetId: normalizedDraftId,
@@ -411,7 +412,7 @@ export async function rejectKnowledgeDraft(draftId: string): Promise<KnowledgeDr
 
     await recordAuditEvent(
       {
-        actor: session,
+        actor: toUserAuditActor(session),
         operation: "update",
         targetType: "knowledge_draft",
         targetId: normalizedDraftId,
@@ -521,7 +522,7 @@ async function approveKnowledgeDraftInTransaction(
 
   await recordAuditEvent(
     {
-      actor: session,
+      actor: toUserAuditActor(session),
       operation: "approve",
       targetType: "knowledge_draft",
       targetId: normalizedDraftId,

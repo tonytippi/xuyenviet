@@ -5,6 +5,7 @@ import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { aiUsageEvents, answerUsefulnessFeedback, assistantResponseProvenance, chatContext, conversations, messageImageAttachments, messages, tripProjects } from "@/db/schema";
 import { recordAuditEvent } from "@/features/audit/events";
+import { toUserAuditActor } from "@/features/audit/actors";
 import { buildValidatedAnswerAnnotations, sanitizeStoredAnswerAnnotations } from "@/features/ai/answer-annotations";
 import { selectActiveAiGatewayModel } from "@/features/ai/models";
 import { formatAssistantMessageProvenance } from "@/features/retrieval/provenance";
@@ -233,7 +234,7 @@ export async function deleteOwnedConversation(conversationId: string): Promise<D
       }
 
       await recordAuditEvent({
-        actor: session,
+        actor: toUserAuditActor(session),
         operation: "delete",
         targetType: "conversation",
         targetId: conversation.id,

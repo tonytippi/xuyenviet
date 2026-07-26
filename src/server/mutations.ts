@@ -4,6 +4,7 @@ import { and, eq, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
 import { userRoles } from "@/db/schema";
+import { toUserAuditActor } from "@/features/audit/actors";
 import { recordAuditEvent, type AuditEventInput } from "@/features/audit/events";
 
 import { getAuthenticatedSession, requireAdminSession, requireExactAdminSession, type AuthenticatedSession } from "./auth";
@@ -48,7 +49,7 @@ export async function runAuditedAuthenticatedMutation<TResult>({
 
   return getDb().transaction(async (transaction) => {
     const result = await action(session, transaction);
-    await recordAuditEvent({ actor: session, ...audit }, transaction);
+    await recordAuditEvent({ actor: toUserAuditActor(session), ...audit }, transaction);
 
     return result;
   });
@@ -62,7 +63,7 @@ export async function runAuditedAdminMutation<TResult>({
 
   return getDb().transaction(async (transaction) => {
     const result = await action(session, transaction);
-    await recordAuditEvent({ actor: session, ...audit }, transaction);
+    await recordAuditEvent({ actor: toUserAuditActor(session), ...audit }, transaction);
 
     return result;
   });
@@ -91,7 +92,7 @@ export async function runAuditedExactAdminMutation<TResult>({
     const auditMetadata = audit(result);
 
     if (auditMetadata) {
-      await recordAuditEvent({ actor: session, ...auditMetadata }, transaction);
+      await recordAuditEvent({ actor: toUserAuditActor(session), ...auditMetadata }, transaction);
     }
 
     return result;

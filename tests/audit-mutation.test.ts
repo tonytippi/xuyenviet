@@ -115,4 +115,37 @@ describe("audited mutation transaction contract", () => {
     ).rejects.toMatchObject({ name: "AdminAuthorizationError" });
     expect(action).not.toHaveBeenCalled();
   });
+
+  test("runAuditedExactAdminMutation commits the action and audit row together", async () => {
+    await createUser("exact-admin", ["admin"]);
+    await createUser("exact-admin-target");
+    authMock.mockResolvedValue({ user: { id: "exact-admin", email: "exact-admin@example.com" } });
+    const { runAuditedExactAdminMutation } = await import("@/server/mutations");
+
+    await expect(runAuditedExactAdminMutation({
+      action: async (_session, transaction) => {
+        await transaction.insert(userRoles).values({ userId: "exact-admin-target", role: "operator" });
+        return "committed";
+      },
+      audit: () => ({ operation: "update", targetType: "user_role", targetId: "exact-admin-target" }),
+    })).resolves.toBe("committed");
+
+    await expect(testDb.select().from(userRoles).where(eq(userRoles.userId, "exact-admin-target"))).resolves.toHaveLength(1);
+    await expect(testDb.select().from(auditEvents).where(eq(auditEvents.actorUserId, "exact-admin"))).resolves.toHaveLength(1);
+  });
+
+  test("runAuditedExactAdminMutation denies a non-exact admin before action or audit", async () => {
+    await createUser("revoked-admin", ["operator"]);
+    authMock.mockResolvedValue({ user: { id: "revoked-admin", email: "revoked-admin@example.com" } });
+    const { runAuditedExactAdminMutation } = await import("@/server/mutations");
+    const action = vi.fn(async () => "never runs");
+
+    await expect(runAuditedExactAdminMutation({
+      action,
+      audit: () => ({ operation: "update", targetType: "user_role" }),
+    })).rejects.toMatchObject({ name: "AdminAuthorizationError" });
+
+    expect(action).not.toHaveBeenCalled();
+    await expect(testDb.select().from(auditEvents).where(eq(auditEvents.actorUserId, "revoked-admin"))).resolves.toHaveLength(0);
+  });
 });

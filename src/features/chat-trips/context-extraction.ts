@@ -9,6 +9,7 @@ import { getAiGatewayPricingSnapshot } from "@/features/ai/models";
 import { selectActiveAiGatewayModel } from "@/features/ai/models";
 import { buildChatContextExtractionMessages, chatContextExtractionPromptVersion, chatContextExtractionPurpose } from "@/features/ai/prompts";
 import { recordAuditEvent } from "@/features/audit/events";
+import { toUserAuditActor } from "@/features/audit/actors";
 import { writeAiUsageEvent, type WriteAiUsageEventInput } from "@/features/usage/events";
 import type { AuthenticatedSession } from "@/server/auth";
 
@@ -135,7 +136,7 @@ export async function extractChatTripContext(input: ExtractChatTripContextInput)
     })));
 
     await recordAuditEvent({
-      actor: input.session,
+      actor: toUserAuditActor(input.session),
       operation: "create",
       targetType: "chat_context",
       targetId: input.userMessage.id,

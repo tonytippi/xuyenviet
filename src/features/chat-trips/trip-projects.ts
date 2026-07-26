@@ -5,6 +5,7 @@ import { and, asc, count, desc, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { chatContext, conversations, messages, tripChangeProposals, tripPlanItems, tripProjectConstraints, tripProjects, type TripPlanAnchorRole, type TripPlanItemKind, type TripPlanItemState, type TripPlanItemType } from "@/db/schema";
 import { recordAuditEvent } from "@/features/audit/events";
+import { toUserAuditActor } from "@/features/audit/actors";
 import { buildTripWorkspaceReadModelWithConstraints, type ConstraintsProjection, type PendingProposalFocusInput, type PlanHistoryEntryView, type TimelineGroup, type TripHomeFocus, type TripPlanItemProjection } from "@/features/chat-trips/trip-home";
 import { formatPlanHistoryRow, listPlanHistoryForTripProject, listPendingProposalsForTripProject, type OwnedTripChangeProposalSummary } from "@/features/chat-trips/trip-change-proposals";
 import { validatePlanReferencesRules } from "@/features/chat-trips/plan-references";
@@ -93,7 +94,7 @@ export async function createTripProject(input: TripProjectInput): Promise<OwnedT
     });
 
     await recordAuditEvent({
-      actor: session,
+      actor: toUserAuditActor(session),
       operation: "create",
       targetType: "trip_project",
       targetId: project.id,
@@ -444,7 +445,7 @@ export async function deleteOwnedTripProject(tripProjectId: string): Promise<Del
       }
 
       await recordAuditEvent({
-        actor: session,
+        actor: toUserAuditActor(session),
         operation: "delete",
         targetType: "trip_project",
         targetId: project.id,
@@ -505,7 +506,7 @@ export async function createTripPlanItemInTransaction(
   const [item] = await transaction.insert(tripPlanItems).values({ tripProjectId, userId: session.userId, ...values }).returning({ id: tripPlanItems.id });
   const nextVersion = project.version + 1;
   await transaction.update(tripProjects).set({ aggregateVersion: nextVersion, updatedAt: new Date() }).where(and(eq(tripProjects.id, tripProjectId), eq(tripProjects.userId, session.userId)));
-  await recordAuditEvent({ actor: session, operation: "create", targetType: "trip_plan_item", targetId: item.id, afterSummary: JSON.stringify({ tripProjectId, aggregateVersion: nextVersion }) }, transaction);
+  await recordAuditEvent({ actor: toUserAuditActor(session), operation: "create", targetType: "trip_plan_item", targetId: item.id, afterSummary: JSON.stringify({ tripProjectId, aggregateVersion: nextVersion }) }, transaction);
   return { success: true, aggregateVersion: nextVersion, itemId: item.id };
 }
 
@@ -540,7 +541,7 @@ export async function upsertInternalTripProjectConstraintsInTransaction(
   else await transaction.insert(tripProjectConstraints).values({ tripProjectId, userId: session.userId, ...values });
   const nextVersion = project.version + 1;
   await transaction.update(tripProjects).set({ aggregateVersion: nextVersion, updatedAt: new Date() }).where(and(eq(tripProjects.id, tripProjectId), eq(tripProjects.userId, session.userId)));
-  await recordAuditEvent({ actor: session, operation: existing ? "update" : "create", targetType: "trip_project_constraints", targetId: tripProjectId, afterSummary: JSON.stringify({ tripProjectId, aggregateVersion: nextVersion }) }, transaction);
+  await recordAuditEvent({ actor: toUserAuditActor(session), operation: existing ? "update" : "create", targetType: "trip_project_constraints", targetId: tripProjectId, afterSummary: JSON.stringify({ tripProjectId, aggregateVersion: nextVersion }) }, transaction);
   return { success: true, aggregateVersion: nextVersion };
 }
 
@@ -816,7 +817,7 @@ async function advanceAggregate(transaction: Transaction, tripProjectId: string,
 }
 
 async function recordAggregateAudit(transaction: Transaction, actor: { userId: string; email: string }, operation: "create" | "update" | "delete", targetType: string, targetId: string, tripProjectId: string, aggregateVersion: number, count?: number) {
-  await recordAuditEvent({ actor, operation, targetType, targetId, afterSummary: JSON.stringify({ tripProjectId, aggregateVersion, ...(count === undefined ? {} : { count }) }) }, transaction);
+  await recordAuditEvent({ actor: toUserAuditActor(actor), operation, targetType, targetId, afterSummary: JSON.stringify({ tripProjectId, aggregateVersion, ...(count === undefined ? {} : { count }) }) }, transaction);
 }
 
 async function validatePlanReferences(transaction: Transaction, tripProjectId: string, userId: string, values: ReturnType<typeof normalizePlanItem>, itemId?: string) {

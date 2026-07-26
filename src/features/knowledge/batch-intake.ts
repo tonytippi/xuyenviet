@@ -7,6 +7,7 @@ import { knowledgeCardEvidence, knowledgeCards, knowledgeCardSources, knowledgeC
 import { evaluateKnowledgeTravelerPolicy } from "@/features/knowledge/state";
 import { getCorridorBucketLabel, getCorridorBuckets } from "@/features/knowledge/corridor";
 import { recordAuditEvent } from "@/features/audit/events";
+import { toUserAuditActor } from "@/features/audit/actors";
 import { requireAdminSession } from "@/server/auth";
 
 import { isSourceValidationError, normalizeTravelSourceInput } from "./sources";
@@ -153,7 +154,7 @@ export async function submitKnowledgeSeedUrlBatch(input: BatchSeedUrlIntakeInput
 
     await recordAuditEvent(
       {
-        actor: session,
+        actor: toUserAuditActor(session),
         operation: "create",
         targetType: "knowledge_seed_batch",
         targetId: batch.id,

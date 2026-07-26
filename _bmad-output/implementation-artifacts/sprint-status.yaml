@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-07-26 (Sprint planning added the ready-for-development AD-31 Epic 8 backlog after readiness validation reached 100% PRD coverage. Existing epic statuses and action items were preserved.)
+# last_updated: 2026-07-26 (Story 8.1 commit gate verified the scoped implementation and acceptance record; focused audit, mutation, and plan-history tests, lint, typecheck, and build passed. Story remains in review. Existing statuses and action items were preserved.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-07-26 (Sprint planning added the ready-for-development AD-31 Epic 8 backlog after readiness validation reached 100% PRD coverage. Existing epic statuses and action items were preserved.)
+last_updated: 2026-07-26 (Story 8.1 commit gate verified the scoped implementation and acceptance record; focused audit, mutation, and plan-history tests, lint, typecheck, and build passed. Story remains in review. Existing statuses and action items were preserved.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -122,8 +122,9 @@ development_status:
   epic-7-retrospective: optional
 
   # AD-31 clean-break audit and automated-execution attribution plan.
-  epic-8: backlog
-  8-1-establish-the-audit-actor-boundary-and-system-catalog: backlog
+  epic-8: in-progress
+  # Synchronized 2026-07-26 by the Story 8.1 commit gate after scope and acceptance verification; focused audit, mutation, and plan-history tests passed, lint had only 3 pre-existing unrelated warnings, and typecheck/build passed. Story remains in review.
+  8-1-establish-the-audit-actor-boundary-and-system-catalog: review
   8-2-persist-valid-audit-history-and-usage-attribution: backlog
   8-3-attribute-knowledge-capture-and-ai-work-to-system-executors: backlog
   8-4-attribute-trip-proposal-expiry-through-the-audit-boundary: backlog
