@@ -10,6 +10,7 @@ type AdminLayoutProps = {
 
 const adminNavItems = [
   { href: "/admin", label: "Tổng quan", eyebrow: "Command" },
+  { href: "/admin/users", label: "Người dùng", eyebrow: "Access" },
   { href: "/admin/knowledge/intake", label: "Nạp nguồn", eyebrow: "Intake" },
   { href: "/admin/knowledge/facebook-captures", label: "Capture Facebook", eyebrow: "Queue" },
   { href: "/admin/knowledge/youtube-captures", label: "Capture YouTube", eyebrow: "Queue" },

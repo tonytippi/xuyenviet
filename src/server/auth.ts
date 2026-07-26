@@ -48,6 +48,10 @@ export function hasAdminAccess(roles: UserRole[]) {
   return roles.includes("admin") || roles.includes("operator");
 }
 
+export function hasExactAdminAccess(roles: UserRole[]) {
+  return roles.includes("admin");
+}
+
 export async function getAuthenticatedSessionWithRoles(): Promise<AuthenticatedSessionWithRoles | null> {
   const session = await getAuthenticatedSession();
 
@@ -65,6 +69,16 @@ export async function requireAdminSession(): Promise<AuthenticatedSessionWithRol
   const session = await getAuthenticatedSessionWithRoles();
 
   if (!session || !hasAdminAccess(session.roles)) {
+    throw new AdminAuthorizationError();
+  }
+
+  return session;
+}
+
+export async function requireExactAdminSession(): Promise<AuthenticatedSessionWithRoles> {
+  const session = await getAuthenticatedSessionWithRoles();
+
+  if (!session || !hasExactAdminAccess(session.roles)) {
     throw new AdminAuthorizationError();
   }
 
