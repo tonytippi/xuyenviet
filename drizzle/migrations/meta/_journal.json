@@ -456,6 +456,13 @@
       "when": 1784980000000,
       "tag": "0064_system_trip_planning_actor",
       "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1785047662520,
+      "tag": "0065_system_facebook_capture_actor",
+      "breakpoints": true
     }
   ]
 }

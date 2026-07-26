@@ -17,8 +17,6 @@ type CliOptions = {
   sourceId?: string;
   limit?: number;
   yes: boolean;
-  actorUserId?: string;
-  actorEmail?: string;
 };
 
 export type FacebookCapturePacing = {
@@ -127,8 +125,12 @@ function normalizeFacebookCaptureUrl(value: string) {
 }
 
 
-const DEFAULT_SYSTEM_ACTOR_USER_ID = "system-facebook-capture";
-const DEFAULT_SYSTEM_ACTOR_EMAIL = "system-facebook-capture@xuyenviet.internal";
+export const FACEBOOK_CAPTURE_SYSTEM_ACTOR = {
+  userId: "system-facebook-capture",
+  email: "system-facebook-capture@xuyenviet.invalid",
+  actorClass: "system" as const,
+  actorSystem: "system-facebook-capture",
+};
 const DEFAULT_CAPTURE_DELAY_MIN_MS = 12_000;
 const DEFAULT_CAPTURE_DELAY_MAX_MS = 25_000;
 const DEFAULT_CAPTURE_BATCH_SIZE = 10;
@@ -206,7 +208,7 @@ function getRequiredOptionValue(argv: string[], index: number, option: string) {
   return value;
 }
 
-function parseArgs(argv: string[]): CliOptions {
+export function parseFacebookCaptureArgs(argv: string[]): CliOptions {
   const options: CliOptions = { yes: false };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -241,23 +243,7 @@ function parseArgs(argv: string[]): CliOptions {
       continue;
     }
 
-    if (arg === "--actor-user-id") {
-      options.actorUserId = getRequiredOptionValue(argv, index, arg);
-      index += 1;
-      continue;
-    }
-
-    if (arg === "--actor-email") {
-      options.actorEmail = getRequiredOptionValue(argv, index, arg);
-      index += 1;
-      continue;
-    }
-
     throw new Error(`Unknown or incomplete option: ${arg}`);
-  }
-
-  if ((options.actorUserId && !options.actorEmail) || (!options.actorUserId && options.actorEmail)) {
-    throw new Error("Provide both --actor-user-id and --actor-email, or omit both to use the configured system capture actor.");
   }
 
   return options;
@@ -269,40 +255,28 @@ function printHelp() {
 Usage:
   pnpm facebook:capture --limit 5
   pnpm facebook:capture --source-id <source-id>
-  pnpm facebook:capture --source-id <source-id> --actor-user-id <id> --actor-email <email>
 
 Options:
   --source-id       Capture one queued Facebook source by ID.
   --limit           Capture up to this many queued Facebook sources. Defaults to 5.
   --yes, -y         Save captured visible text without interactive confirmation.
-  --actor-user-id   Optional operator user ID for audit_events. Omit to use FACEBOOK_CAPTURE_ACTOR_USER_ID or the default system actor.
-  --actor-email     Optional operator email for audit_events. Omit to use FACEBOOK_CAPTURE_ACTOR_EMAIL or the default system actor.
 
 First run opens a headed Chromium profile at .playwright/facebook-profile.
 Log into Facebook manually in that browser, close or leave it open, then rerun this command.
 Profile data stays local and must never be committed, copied into app secrets, or stored in PostgreSQL.
-Scheduled runs should use a service user row matching FACEBOOK_CAPTURE_ACTOR_USER_ID and FACEBOOK_CAPTURE_ACTOR_EMAIL.
+Every capture run uses the fixed system capture actor for audit attribution.
 Pacing is configured through FACEBOOK_CAPTURE_DELAY_MIN_MS, FACEBOOK_CAPTURE_DELAY_MAX_MS,
 FACEBOOK_CAPTURE_BATCH_SIZE, and FACEBOOK_CAPTURE_BATCH_COOLDOWN_MS. Defaults are a randomized
 12-25 second delay between attempts and a one-minute cooldown after every 10 attempts.
 This tool captures visible post text only. Broad Facebook content reuse, quoting, retention, and deletion policy remains an open product/legal operations question.`);
 }
 
-async function resolveCaptureActor(db: ReturnType<typeof drizzle<typeof schema>>, options: CliOptions) {
-  const actor = {
-    userId: options.actorUserId ?? getEnvValue("FACEBOOK_CAPTURE_ACTOR_USER_ID") ?? DEFAULT_SYSTEM_ACTOR_USER_ID,
-    email: options.actorEmail ?? getEnvValue("FACEBOOK_CAPTURE_ACTOR_EMAIL") ?? DEFAULT_SYSTEM_ACTOR_EMAIL,
-  };
-
-  const [user] = await db.select({ id: users.id, email: users.email }).from(users).where(eq(users.id, actor.userId)).limit(1);
-
-  if (!user || user.email !== actor.email) {
-    throw new Error(
-      `Facebook capture audit actor not found or email mismatch. Create a users row with id=${actor.userId} and email=${actor.email}, set FACEBOOK_CAPTURE_ACTOR_USER_ID/FACEBOOK_CAPTURE_ACTOR_EMAIL, or pass --actor-user-id and --actor-email.`,
-    );
+async function resolveCaptureActor(db: ReturnType<typeof drizzle<typeof schema>>) {
+  const [systemActor] = await db.select({ id: users.id, email: users.email }).from(users).where(eq(users.id, FACEBOOK_CAPTURE_SYSTEM_ACTOR.userId)).limit(1);
+  if (!systemActor || systemActor.email !== FACEBOOK_CAPTURE_SYSTEM_ACTOR.email) {
+    throw new Error("Facebook capture system actor is missing or has an unexpected identity. Apply the reserved system-actor migration before capture.");
   }
-
-  return actor;
+  return FACEBOOK_CAPTURE_SYSTEM_ACTOR;
 }
 
 function previewText(text: string) {
@@ -591,7 +565,7 @@ export async function extractVisibleFacebookText(page: Page, finalUrl: string): 
 }
 
 async function main() {
-  const options = parseArgs(process.argv.slice(2));
+  const options = parseFacebookCaptureArgs(process.argv.slice(2));
   const client = postgres(getDatabaseUrl(), { max: 1 });
   const cacheClient = postgres(getCaptureCacheDatabaseUrl(), { max: 1 });
   const db = drizzle(client, { schema });
@@ -600,7 +574,7 @@ async function main() {
   try {
     await assertDistinctCaptureDatabases(client, cacheClient);
     await assertCaptureCacheReady(cacheClient);
-    const actor = await resolveCaptureActor(db, options);
+    const actor = await resolveCaptureActor(db);
     const pacing = getFacebookCapturePacing();
     const queued = await listQueuedFacebookSources(db, { sourceId: options.sourceId, limit: options.limit });
 
