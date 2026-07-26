@@ -42,13 +42,16 @@ describe("audited mutation transaction contract", () => {
   test("throws before mutation when authenticated session is missing", async () => {
     authMock.mockResolvedValue(null);
     const { runAuditedAuthenticatedMutation } = await import("@/server/mutations");
+    const action = vi.fn(async () => "never runs");
 
     await expect(
       runAuditedAuthenticatedMutation({
-        action: async () => "never runs",
+        action,
         audit: { operation: "create", targetType: "test_target" },
       }),
     ).rejects.toThrow("Authentication required for this server mutation.");
+
+    expect(action).not.toHaveBeenCalled();
   });
 
   test("commits action and audit row together", async () => {

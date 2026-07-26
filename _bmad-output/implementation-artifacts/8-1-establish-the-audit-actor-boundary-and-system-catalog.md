@@ -68,6 +68,7 @@ so that all protected writes identify the correct kind of actor without treating
 - [x] [Review][Patch] Exact-admin revalidation test never reaches the transaction-time check [`tests/audit-mutation.test.ts:137`] Replaced the pre-transaction-only fixture with an initially exact-admin user whose admin role is removed immediately before the transactional recheck; the test asserts no action or audit write runs.
 - [x] [Review][HIGH][Patch] Strict session conversion rejected role-bearing admin sessions [`src/features/audit/actors.ts:63`] Projected every authenticated audit boundary to `{ userId, email }` before `toUserAuditActor`; added an admin mutation transaction regression proving the protected write and audit record commit together.
 - [x] [Review][MEDIUM][AC3][Patch] Public user actor constructor accepted mixed and non-record input [`src/features/audit/actors.ts:55`] Hardened `createUserAuditActor(input: unknown)` to require exactly `userId` and `email`; direct regressions cover mixed, `null`, and primitive values.
+- [x] [Review][LOW][Patch] Unauthenticated audited-mutation rejection did not explicitly prove the protected action was skipped [`tests/audit-mutation.test.ts:42`] Replaced the inline action with a Vitest spy and asserted it was never called after authentication rejection. The pre-existing `scripts/db-seed.ts` `system-youtube-capture` conflict remains explicitly deferred to Story 8.5.
 
 ## Dev Notes
 
@@ -189,6 +190,9 @@ gpt-5.6-terra
 - `pnpm typecheck` passed after the review patches.
 - `pnpm test:run tests/audit-actors.test.ts tests/audit-mutation.test.ts` passed: 19 tests after the two supplied substantial-risk repairs.
 - `pnpm typecheck` passed after the two supplied substantial-risk repairs.
+- `pnpm test:run tests/audit-mutation.test.ts` passed after the final CR-8.1 low-risk assertion repair.
+- `pnpm test:run tests/audit-actors.test.ts tests/audit-mutation.test.ts` passed: 19 tests after the final CR-8.1 repair.
+- `pnpm typecheck` passed after the final CR-8.1 repair.
 
 ### Completion Notes List
 
@@ -199,6 +203,7 @@ gpt-5.6-terra
 - Added focused actor boundary, event writer side-effect, exact-admin transaction, and plan-history catalog-label coverage. No migration or persistence-shape change was made.
 - Fixed CR-8.1-01 through CR-8.1-03 only: authenticated audit actor precedence, mixed runtime session rejection, and transaction-time exact-admin revocation coverage. No later story work or code review was started.
 - Fixed only the supplied substantial-risk findings: audit boundaries now project role-bearing admin sessions to the valid user actor shape, and the public user constructor fails closed for mixed/null/primitive input. Focused tests and TypeScript verification pass; no later story work or code review was started.
+- Fixed only final actionable finding CR-8.1: unauthenticated mutation rejection now explicitly asserts the protected action was not called. The deferred `system-youtube-capture` seed conflict remains out of scope for Story 8.5; no later story work or code review was started.
 
 ### File List
 
@@ -225,3 +230,4 @@ gpt-5.6-terra
 - 2026-07-26: Code review found three patch items in authenticated actor precedence, mixed runtime session conversion, and exact-admin transaction-time revalidation coverage; status moved to in-progress.
 - 2026-07-27: Fixed CR-8.1-01 through CR-8.1-03; focused audit tests and TypeScript check passed; status moved to review. No commit created.
 - 2026-07-27: Fixed the supplied HIGH role-bearing-admin projection regression and MEDIUM AC3 public-constructor validation regression; 19 focused audit tests and TypeScript check passed; status moved to review. No commit created.
+- 2026-07-27: Fixed final actionable CR-8.1 LOW test assertion; 19 focused audit tests and TypeScript check passed; status remains review. The `system-youtube-capture` seed conflict remains explicitly deferred to Story 8.5.

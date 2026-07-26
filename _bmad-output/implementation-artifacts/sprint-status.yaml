@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-07-27 (Final substantial-risk repair commit gate verified; Story 8.1 remains in review.)
+# last_updated: 2026-07-27 (Final actionable CR-8.1 LOW assertion repair verified; Story 8.1 is in review. The pre-existing system-youtube-capture seed/AC conflict remains explicitly deferred to Story 8.5.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-07-27 (Final substantial-risk repair commit gate verified; Story 8.1 remains in review.)
+last_updated: 2026-07-27 (Final actionable CR-8.1 LOW assertion repair verified; Story 8.1 is in review. The pre-existing system-youtube-capture seed/AC conflict remains explicitly deferred to Story 8.5.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -123,7 +123,7 @@ development_status:
 
   # AD-31 clean-break audit and automated-execution attribution plan.
   epic-8: in-progress
-  # Synchronized 2026-07-27 by the final substantial-risk repair commit gate: every authenticated audit boundary projects `{ userId, email }` before strict conversion, so role-bearing admin sessions commit protected writes and audit records atomically; public `createUserAuditActor` rejects mixed, null, and primitive input with `AuditActorValidationError`. 19 focused audit tests and typecheck pass; Story 8.1 remains in review.
+  # Final actionable CR-8.1 LOW repair 2026-07-27: the unauthenticated audited-mutation test now uses a spy and explicitly asserts its protected action was not called. Focused mutation test passes; status synchronized to review. The pre-existing `scripts/db-seed.ts` system-youtube-capture seed/AC conflict remains explicitly deferred to Story 8.5 and was not changed.
   8-1-establish-the-audit-actor-boundary-and-system-catalog: review
   8-2-persist-valid-audit-history-and-usage-attribution: backlog
   8-3-attribute-knowledge-capture-and-ai-work-to-system-executors: backlog
