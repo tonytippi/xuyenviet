@@ -44,13 +44,13 @@ export async function validateAdminActionAccess() {
 export async function createAiGatewayModel(input: AiGatewayModelMutationInput) {
   const values = normalizeAiGatewayModelInput(input);
 
-  return runAuditedAdminMutation({
-    audit: {
+  return runAuditedExactAdminMutation({
+    audit: () => ({
       operation: "create",
       targetType: "ai_gateway_model",
       targetId: `${values.purpose}:${values.gatewayModelName}`,
       afterSummary: summarizeAiGatewayModel(values),
-    },
+    }),
     action: async (_session, transaction) => {
       const active = values.active ?? true;
       const defaultForPurpose = values.defaultForPurpose ?? false;
@@ -73,13 +73,13 @@ export async function updateAiGatewayModel(modelId: string, input: Partial<AiGat
   const id = normalizeId(modelId);
   const values = normalizePartialAiGatewayModelInput(input);
 
-  return runAuditedAdminMutation({
-    audit: {
+  return runAuditedExactAdminMutation({
+    audit: () => ({
       operation: "update",
       targetType: "ai_gateway_model",
       targetId: id,
       afterSummary: summarizeAiGatewayModel(values),
-    },
+    }),
     action: async (_session, transaction) => {
       const [existing] = await transaction.select().from(aiGatewayModels).where(eq(aiGatewayModels.id, id)).limit(1);
 
@@ -116,13 +116,13 @@ export async function updateAiGatewayModel(modelId: string, input: Partial<AiGat
 export async function archiveAiGatewayModel(modelId: string) {
   const id = normalizeId(modelId);
 
-  return runAuditedAdminMutation({
-    audit: {
+  return runAuditedExactAdminMutation({
+    audit: () => ({
       operation: "archive",
       targetType: "ai_gateway_model",
       targetId: id,
       afterSummary: "Archived AI Gateway model catalog record.",
-    },
+    }),
     action: async (_session, transaction) => {
       const [model] = await transaction
         .update(aiGatewayModels)
@@ -142,13 +142,13 @@ export async function archiveAiGatewayModel(modelId: string) {
 export async function setDefaultAiGatewayModel(modelId: string) {
   const id = normalizeId(modelId);
 
-  return runAuditedAdminMutation({
-    audit: {
+  return runAuditedExactAdminMutation({
+    audit: () => ({
       operation: "update",
       targetType: "ai_gateway_model",
       targetId: id,
       afterSummary: "Set default AI Gateway model for its purpose.",
-    },
+    }),
     action: async (_session, transaction) => {
       const [existing] = await transaction.select().from(aiGatewayModels).where(eq(aiGatewayModels.id, id)).limit(1);
 
@@ -156,13 +156,17 @@ export async function setDefaultAiGatewayModel(modelId: string) {
         throw new Error("AI Gateway model not found.");
       }
 
-      validateDefaultCapabilities({ ...existing, active: true, defaultForPurpose: true });
+      if (!existing.active) {
+        throw new Error("Archived AI Gateway model cannot be made default.");
+      }
+
+      validateDefaultCapabilities({ ...existing, defaultForPurpose: true });
 
       await transaction.update(aiGatewayModels).set({ defaultForPurpose: false, updatedAt: new Date() }).where(eq(aiGatewayModels.purpose, existing.purpose));
 
       const [model] = await transaction
         .update(aiGatewayModels)
-        .set({ active: true, defaultForPurpose: true, updatedAt: new Date() })
+        .set({ defaultForPurpose: true, updatedAt: new Date() })
         .where(eq(aiGatewayModels.id, id))
         .returning();
 
@@ -383,14 +387,14 @@ function validateDefaultCapabilities(values: Partial<typeof aiGatewayModels.$inf
   if (values.purpose === "ai_ask_initial_answer" && !values.supportsTextInput) {
     throw new Error("Default AI Ask model must support text input.");
   }
-  if (values.purpose === "extraction" && !values.supportsExtraction) {
-    throw new Error("Default extraction model must support extraction.");
+  if (values.purpose === "extraction" && (!values.supportsTextInput || !values.supportsExtraction)) {
+    throw new Error("Default extraction model must support text input and extraction.");
   }
   if (values.purpose === "embeddings" && !values.supportsEmbeddings) {
     throw new Error("Default embeddings model must support embeddings.");
   }
-  if (values.purpose === "evaluation" && !values.supportsEvaluation) {
-    throw new Error("Default evaluation model must support evaluation.");
+  if (values.purpose === "evaluation" && (!values.supportsTextInput || !values.supportsEvaluation)) {
+    throw new Error("Default evaluation model must support text input and evaluation.");
   }
 }
 
