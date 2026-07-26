@@ -5,7 +5,7 @@ import { and, asc, desc, eq, gt, lte, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
 import { disableStaleKnowledgeSearchProjection, enqueueKnowledgeIndexWork } from "@/features/knowledge/indexing-queue";
-import { getCurrentValidEvidenceFencesForReadiness } from "@/features/knowledge/batch-intake";
+import { getCurrentValidEvidenceFencesForReadiness } from "@/features/knowledge/readiness-evidence";
 import { auditEvents, knowledgeCardEvidence, knowledgeCards, knowledgeRecommendations, knowledgeSamplingCandidateLedger, knowledgeSamplingCohortMembers, knowledgeSamplingDispositionReasonValues, knowledgeSamplingPolicies, knowledgeVerifyFirstSamplingObligations, type KnowledgeRecommendationAction, type KnowledgeRecommendationReason, type KnowledgeSamplingDispositionReason } from "@/db/schema";
 import { getCorridorBucketLabel } from "@/features/knowledge/corridor";
 

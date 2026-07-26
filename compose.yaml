@@ -37,6 +37,17 @@ services:
     restart: unless-stopped
     init: true
 
+  knowledge-ingestion:
+    build:
+      context: .
+      target: worker
+    command: ["node", "--conditions", "react-server", "--import", "tsx", "scripts/knowledge-ingestion-worker.ts", "--worker-id=knowledge-ingestion-compose"]
+    env_file:
+      - path: ${ENV_FILE:-.env}
+        required: true
+    restart: unless-stopped
+    init: true
+
   knowledge-indexing:
     build:
       context: .
