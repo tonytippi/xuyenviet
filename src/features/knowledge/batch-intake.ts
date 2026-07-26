@@ -154,7 +154,7 @@ export async function submitKnowledgeSeedUrlBatch(input: BatchSeedUrlIntakeInput
 
     await recordAuditEvent(
       {
-        actor: toUserAuditActor(session),
+        actor: toUserAuditActor({ userId: session.userId, email: session.email }),
         operation: "create",
         targetType: "knowledge_seed_batch",
         targetId: batch.id,

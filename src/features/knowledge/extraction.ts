@@ -207,7 +207,7 @@ export async function extractKnowledgeDraftsFromSourceAsActor(sourceId: string, 
 
       await recordAuditEvent(
         {
-          actor: toUserAuditActor(actor),
+          actor: toUserAuditActor({ userId: actor.userId, email: actor.email }),
           operation: "create",
           targetType: "knowledge_draft_extraction",
           targetId: sourceBundle.source.id,

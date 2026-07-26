@@ -66,6 +66,8 @@ so that all protected writes identify the correct kind of actor without treating
 - [x] [Review][Patch] Runtime audit metadata can override the authenticated actor [`src/server/mutations.ts:52`] Fixed all three wrappers by spreading metadata before the server-constructed actor; authenticated identity is now authoritative even for untyped/cast metadata.
 - [x] [Review][Patch] Session conversion accepts mixed user/system runtime values [`src/features/audit/actors.ts:55`] Fixed `toUserAuditActor` to require exactly the `userId` and `email` runtime keys; direct regression coverage rejects a payload with `system`.
 - [x] [Review][Patch] Exact-admin revalidation test never reaches the transaction-time check [`tests/audit-mutation.test.ts:137`] Replaced the pre-transaction-only fixture with an initially exact-admin user whose admin role is removed immediately before the transactional recheck; the test asserts no action or audit write runs.
+- [x] [Review][HIGH][Patch] Strict session conversion rejected role-bearing admin sessions [`src/features/audit/actors.ts:63`] Projected every authenticated audit boundary to `{ userId, email }` before `toUserAuditActor`; added an admin mutation transaction regression proving the protected write and audit record commit together.
+- [x] [Review][MEDIUM][AC3][Patch] Public user actor constructor accepted mixed and non-record input [`src/features/audit/actors.ts:55`] Hardened `createUserAuditActor(input: unknown)` to require exactly `userId` and `email`; direct regressions cover mixed, `null`, and primitive values.
 
 ## Dev Notes
 
@@ -185,6 +187,8 @@ gpt-5.6-terra
 - Full `pnpm test:run` has three unrelated pre-existing failures: two Facebook capture extraction action UI assertions and the AI model catalog exact-admin fixture. They do not involve this story's files or audit actor boundary.
 - `pnpm test:run tests/audit-actors.test.ts tests/audit-mutation.test.ts` passed: 14 tests after the three review patches.
 - `pnpm typecheck` passed after the review patches.
+- `pnpm test:run tests/audit-actors.test.ts tests/audit-mutation.test.ts` passed: 19 tests after the two supplied substantial-risk repairs.
+- `pnpm typecheck` passed after the two supplied substantial-risk repairs.
 
 ### Completion Notes List
 
@@ -194,6 +198,7 @@ gpt-5.6-terra
 - Converted all current authenticated `recordAuditEvent` callers to `toUserAuditActor`, removed caller-controlled actor class/system event input, and retained expiry's validated legacy user-row compatibility path.
 - Added focused actor boundary, event writer side-effect, exact-admin transaction, and plan-history catalog-label coverage. No migration or persistence-shape change was made.
 - Fixed CR-8.1-01 through CR-8.1-03 only: authenticated audit actor precedence, mixed runtime session rejection, and transaction-time exact-admin revocation coverage. No later story work or code review was started.
+- Fixed only the supplied substantial-risk findings: audit boundaries now project role-bearing admin sessions to the valid user actor shape, and the public user constructor fails closed for mixed/null/primitive input. Focused tests and TypeScript verification pass; no later story work or code review was started.
 
 ### File List
 
@@ -219,3 +224,4 @@ gpt-5.6-terra
 - 2026-07-26: Implemented the Audit actor boundary, caller conversions, catalog-backed plan-history labels, and focused regression coverage; status moved to review.
 - 2026-07-26: Code review found three patch items in authenticated actor precedence, mixed runtime session conversion, and exact-admin transaction-time revalidation coverage; status moved to in-progress.
 - 2026-07-27: Fixed CR-8.1-01 through CR-8.1-03; focused audit tests and TypeScript check passed; status moved to review. No commit created.
+- 2026-07-27: Fixed the supplied HIGH role-bearing-admin projection regression and MEDIUM AC3 public-constructor validation regression; 19 focused audit tests and TypeScript check passed; status moved to review. No commit created.

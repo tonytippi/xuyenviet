@@ -880,7 +880,7 @@ export async function persistAiTripChangeProposalDraft(
 
       await recordAuditEvent(
         {
-          actor: toUserAuditActor(session),
+          actor: toUserAuditActor({ userId: session.userId, email: session.email }),
           operation: "create",
           targetType: "trip_change_proposal",
           targetId: inserted.id,
@@ -1479,7 +1479,7 @@ export async function applyApprovedTripChange(
       // Record the apply audit row (actorClass = 'user').
       await recordAuditEvent(
         {
-          actor: toUserAuditActor(session),
+          actor: toUserAuditActor({ userId: session.userId, email: session.email }),
           operation: "apply",
           targetType: "trip_change_proposal",
           targetId: input.proposalId,
@@ -1986,7 +1986,7 @@ export async function dismissTripChangeProposal(
 
       await recordAuditEvent(
         {
-          actor: toUserAuditActor(session),
+          actor: toUserAuditActor({ userId: session.userId, email: session.email }),
           operation: "dismiss",
           targetType: "trip_change_proposal",
           targetId: input.proposalId,

@@ -234,7 +234,7 @@ export async function deleteOwnedConversation(conversationId: string): Promise<D
       }
 
       await recordAuditEvent({
-        actor: toUserAuditActor(session),
+        actor: toUserAuditActor({ userId: session.userId, email: session.email }),
         operation: "delete",
         targetType: "conversation",
         targetId: conversation.id,

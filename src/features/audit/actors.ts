@@ -52,8 +52,8 @@ export function isSystemAuditActorId(value: unknown): value is SystemAuditActorI
   return typeof value === "string" && systemAuditActorDefinitions.some((entry) => entry.id === value);
 }
 
-export function createUserAuditActor(input: { userId?: unknown; email?: unknown }): UserAuditActor {
-  if (!nonBlankString(input.userId) || !nonBlankString(input.email)) {
+export function createUserAuditActor(input: unknown): UserAuditActor {
+  if (!isRecord(input) || !hasOnlyKeys(input, ["userId", "email"]) || !nonBlankString(input.userId) || !nonBlankString(input.email)) {
     throw new AuditActorValidationError();
   }
 
@@ -82,7 +82,7 @@ export function validateAuditActor(value: unknown): AuditActor {
   }
 
   if (value.kind === "user" && hasOnlyKeys(value, ["kind", "userId", "email"])) {
-    return createUserAuditActor(value);
+    return createUserAuditActor({ userId: value.userId, email: value.email });
   }
 
   if (value.kind === "system" && hasOnlyKeys(value, ["kind", "system"])) {

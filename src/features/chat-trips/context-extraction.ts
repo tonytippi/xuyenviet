@@ -136,7 +136,7 @@ export async function extractChatTripContext(input: ExtractChatTripContextInput)
     })));
 
     await recordAuditEvent({
-      actor: toUserAuditActor(input.session),
+      actor: toUserAuditActor({ userId: input.session.userId, email: input.session.email }),
       operation: "create",
       targetType: "chat_context",
       targetId: input.userMessage.id,

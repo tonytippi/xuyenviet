@@ -142,6 +142,24 @@ describe("audited mutation transaction contract", () => {
     expect(action).not.toHaveBeenCalled();
   });
 
+  test("runAuditedAdminMutation commits an admin action and audit row together", async () => {
+    await createUser("admin-user", ["admin"]);
+    await createUser("admin-target");
+    authMock.mockResolvedValue({ user: { id: "admin-user", email: "admin-user@example.com" } });
+    const { runAuditedAdminMutation } = await import("@/server/mutations");
+
+    await expect(runAuditedAdminMutation({
+      action: async (_session, transaction) => {
+        await transaction.insert(userRoles).values({ userId: "admin-target", role: "operator" });
+        return "committed";
+      },
+      audit: { operation: "update", targetType: "user_role", targetId: "admin-target" },
+    })).resolves.toBe("committed");
+
+    await expect(testDb.select().from(userRoles).where(eq(userRoles.userId, "admin-target"))).resolves.toHaveLength(1);
+    await expect(testDb.select().from(auditEvents).where(eq(auditEvents.actorUserId, "admin-user"))).resolves.toHaveLength(1);
+  });
+
   test("runAuditedExactAdminMutation commits the action and audit row together", async () => {
     await createUser("exact-admin", ["admin"]);
     await createUser("exact-admin-target");

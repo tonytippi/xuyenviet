@@ -3,6 +3,7 @@ import { describe, expect, test, vi } from "vitest";
 import {
   AuditActorValidationError,
   createSystemAuditActor,
+  createUserAuditActor,
   getSystemAuditActorLabel,
   systemAuditActorCatalog,
   toUserAuditActor,
@@ -25,6 +26,15 @@ describe("audit actor boundary", () => {
       email: "person@example.com",
       system: "system-trip-planning",
     } as never)).toThrow(AuditActorValidationError);
+  });
+
+  test.each([
+    { userId: "user-1", email: "person@example.com", system: "system-trip-planning" },
+    null,
+    "user-1",
+    1,
+  ])("createUserAuditActor rejects invalid public input %#", (input) => {
+    expect(() => createUserAuditActor(input)).toThrow(AuditActorValidationError);
   });
 
   test("constructs every cataloged system actor without a session", () => {

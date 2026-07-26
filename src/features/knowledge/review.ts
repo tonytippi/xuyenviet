@@ -363,7 +363,7 @@ export async function updateKnowledgeDraft(draftId: string, input: KnowledgeDraf
 
     await recordAuditEvent(
       {
-        actor: toUserAuditActor(session),
+          actor: toUserAuditActor({ userId: session.userId, email: session.email }),
         operation: "update",
         targetType: "knowledge_draft",
         targetId: normalizedDraftId,
@@ -412,7 +412,7 @@ export async function rejectKnowledgeDraft(draftId: string): Promise<KnowledgeDr
 
     await recordAuditEvent(
       {
-        actor: toUserAuditActor(session),
+          actor: toUserAuditActor({ userId: session.userId, email: session.email }),
         operation: "update",
         targetType: "knowledge_draft",
         targetId: normalizedDraftId,
@@ -522,7 +522,7 @@ async function approveKnowledgeDraftInTransaction(
 
   await recordAuditEvent(
     {
-      actor: toUserAuditActor(session),
+      actor: toUserAuditActor({ userId: session.userId, email: session.email }),
       operation: "approve",
       targetType: "knowledge_draft",
       targetId: normalizedDraftId,

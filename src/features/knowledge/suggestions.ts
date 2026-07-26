@@ -206,7 +206,7 @@ export async function suggestKnowledgeFromSourceUrl(sourceId: string): Promise<K
 
       await recordAuditEvent(
         {
-          actor: toUserAuditActor(session),
+          actor: toUserAuditActor({ userId: session.userId, email: session.email }),
           operation: "create",
           targetType: "knowledge_source_suggestion",
           targetId: sourceBundle.source.id,
