@@ -2,7 +2,7 @@
 title: XuyenViet AI Travel Information MVP Architecture Spine
 status: final
 created: 2026-07-04
-updated: 2026-07-24
+updated: 2026-07-26
 altitude: project MVP
 source_prd: ../../prds/prd-xuyenviet-2026-07-04/prd.md
 source_ux: ../../ux-designs/ux-xuyenviet-2026-07-05/EXPERIENCE.md
@@ -505,6 +505,30 @@ Rule: `expireTripChangeProposal(...)` is an idempotent Chat/Trips command. Pendi
 
 Rule: AI Orchestration may read the Trip Planning aggregate and emit a schema-validated proposal draft, but it may not call direct table writes or bypass the Chat/Trips proposal command. Provider output, answer annotations, and detail-panel actions remain untrusted inputs until the owner-confirmed command validates them.
 
+### AD-31: Audit And Automated Execution Use First-Class Actors
+
+Binds: automated ingestion, indexing, capture, proposal expiry, audit persistence, history persistence, usage telemetry, worker entrypoints, and user-facing/admin actor read models.
+
+Prevents: non-human rows in `users`, workers impersonating the submitter or an authenticated session, user metrics counting autonomous work, and incompatible actor shapes across audit surfaces.
+
+Rule: `users` contains authenticated people and deliberate person fixtures only. It is never a polymorphic actor registry; system actors cannot have an OAuth account, session, user role, referral, ownership, or authorization privilege.
+
+Rule: Every actor-taking server API accepts the domain union `AuditActor`. A `user` actor has a real `users.id` and an immutable nonblank email snapshot. A `system` actor has one cataloged system ID, no user ID, and no person email. Conversion from an authenticated session occurs only at authenticated request boundaries; worker entrypoints construct a system actor directly.
+
+Rule: `audit_events` and `trip_plan_change_history` use the same user-or-system XOR persistence shape. A user row requires `actor_class = 'user'`, a non-null user FK, and email snapshot where the table retains one; it has no system ID. A system row requires `actor_class = 'system'`, a nonblank cataloged system ID, and null user/email fields. Database checks enforce both shapes; application validation rejects invalid shapes before writes.
+
+Rule: System IDs are immutable execution-class identifiers, not display labels. The initial catalog is `system-ai-orchestration`, `system-knowledge-pipeline`, `system-trip-planning`, `system-facebook-capture`, and `system-youtube-capture`; labels are server-owned catalog metadata. Canonical source-version ingestion, legacy extraction, and knowledge indexing use `system-knowledge-pipeline`; proposal expiry uses `system-trip-planning`; capture uses its corresponding Facebook or YouTube ID; synchronous authenticated model calls use `system-ai-orchestration`. `system-youtube-capture` is never created by seed data.
+
+Rule: A field denoting ownership, requester, submitter, reviewer, approver, referral, session, or conversation remains a real-user FK and rejects system actors. A field denoting autonomous execution, creation, update, resolution, capture, or model invocation persists a required system executor ID. `sources.submitted_by_user_id` is always a real person: a source discovered by Facebook/YouTube capture inherits the originating source's submitter and stores source lineage; the capture system is executor only. A background job preserves the human requester/submitting user separately from the worker executor.
+
+Rule: The executor persistence shape is `executor_system` as a nonblank cataloged ID, with an index beginning on that column. It is system-only; user execution remains represented by the existing semantically named real-user field, never a polymorphic executor. The migration applies this shape to `knowledge_cards`, `knowledge_source_suggestions`, automated `knowledge_recommendations` resolution/supersession, source/capture artifacts that record executor, and `ai_usage_events`. Existing `created_by_user_id` and `resolved_by_user_id` fields retain human-only semantics, become nullable only where historical automated rows require it, and their terminal-state checks distinguish human resolution from system resolution.
+
+Rule: `ai_usage_events` replaces `user_id` with nullable `initiated_by_user_id` and required `executor_system`; it retains nullable conversation/message references for user-initiated work and permits them to be null for worker-only work. Its writer accepts `{ initiatedByUserId?, executorSystem, ... }`, never an ambiguous `userId`. User roster and future user-billing views aggregate `initiated_by_user_id` only. Worker-only work and retries are attributed to their cataloged system executor and appear in operations reporting, never under the submitting operator.
+
+Rule: This development-stage change is a clean-break schema migration. Update or remove the reserved-user migrations, seed fixtures, test helpers, and actor APIs in the same change; reset and reseed the disposable development database rather than backfilling or preserving fake-user history. A clean database after all migrations and `db:seed` contains no non-human `users` row. If production or durable customer data is introduced before this work ships, stop and replace this rule with an expand-migrate-contract plan before applying it there.
+
+Rule: Audit owns the exported `AuditActor` union, system catalog, session conversion, validation, and write helpers. No feature directly inserts `audit_events`, `trip_plan_change_history`, or `ai_usage_events`; owning modules call the typed Audit/Usage boundary. Tests or lint enforcement reject bypassing these helpers. Tests cover permitted and rejected shapes, worker attribution, requester preservation, clean-database migration and seed output, and the inability to authenticate or role-assign a system actor.
+
 ## Shared Data Contracts
 
 Frontend shell state contract:
@@ -555,7 +579,7 @@ Core persisted entities:
 - `sources`, `raw_source_material`, `knowledge_ingestion_jobs`, `knowledge_cards`, `knowledge_card_evidence`, `knowledge_card_relations`, `knowledge_review_recommendations`, `knowledge_card_search_documents`
 - `ai_gateway_models`, `web_search_results`, `ai_usage_events`, `feedback`, `eval_runs`, `audit_events`
 
-AI usage event minimum fields: user ID when available, conversation ID when applicable, trip project ID when applicable, message ID when applicable, purpose, provider, model, prompt version when applicable, request timestamp, latency, success/failure status, provider usage metadata when available, and estimated cost fields when configured.
+AI usage event minimum fields: nullable real initiating-user ID, required execution actor, conversation ID when applicable, trip project ID when applicable, message ID when applicable, purpose, provider, model, prompt version when applicable, request timestamp, latency, success/failure status, provider usage metadata when available, and estimated cost fields when configured. User-facing/admin roster metrics aggregate the initiating-user field only; system execution metrics use the actor catalog.
 
 AI Gateway model record minimum fields: gateway model name, display label, provider/gateway identifier when available, intended purposes, capability flags, active status, pricing currency, input unit price, output unit price, cache read/write unit prices when supported, pricing unit, effective timestamp or version, created/updated timestamps, and operator/admin audit metadata where applicable.
 
@@ -591,7 +615,7 @@ Trip Planning minimum persisted contract:
 - `trip_project_constraints`: Trip Project ID, owner ID, one structured constraint record with travelers/children, vehicle or EV needs, driving tolerance, budget range, preferences, avoid-list values, monotonic version, and created/updated timestamps. It contains no actual expenses, payment data, or provider-derived state.
 - `trip_plan_items`: Trip Project ID, owner ID, kind, discriminated anchor role or leg/activity type, same-project parent only for an activity under a leg, required same-project alternative target for `backup` and null alternative target otherwise, `idea | planned | confirmed | backup` state, ordinal unique within `(trip_project_id, parent_item_id)`, bounded user-confirmed label/notes, optional planned date/time, monotonic version, and created/updated timestamps. It contains no provider snapshot, booking credential/reference, exact GPS history, or dynamic weather/route result.
 - `trip_change_proposals`: Trip Project ID, owner ID, creator class, `pending | applied | dismissed | expired` status, bounded rationale, typed operation list, expected aggregate and affected-item version fences, ordering/parent preconditions when applicable, optional expiry, and terminal timestamp. Proposal operations identify only the target item and permitted structured-field changes; they do not embed executable SQL, arbitrary routes, or provider/model payloads.
-- `trip_plan_change_history`: Trip Project ID, owner ID, proposal ID when applicable, actor, operation class, affected item references, safe before/after summary, and timestamp. It is audit/history, not a second mutable plan projection.
+- `trip_plan_change_history`: Trip Project ID, owner ID, proposal ID when applicable, AuditActor persistence shape, operation class, affected item references, safe before/after summary, and timestamp. It is audit/history, not a second mutable plan projection.
 
 Trip Planning deletion rule: deleting an owned Trip Project cascades or transactionally removes its constraints, plan items, proposals, and change history from normal use with the existing project conversation/context data. Any retained minimal audit metadata is non-content and cannot reconstitute deleted plan state. Deleting a primary conversation requires an owner-scoped replacement selection or an explicit project-level delete; it must not leave a live Trip Project pointing at a deleted conversation.
 
@@ -634,6 +658,7 @@ Production must have:
 - User-owned deletion path for chat sessions and trip projects.
 - Backup/restore path for PostgreSQL before public user onboarding.
 - Facebook capture, if enabled, must run from an operator-controlled operations environment with a separate local browser profile and no stored Facebook credentials in application secrets or the database.
+- A verified clean database migration for system actors: actor-shape validation, repository search showing no reserved-user creation path, and no non-human rows from `db:seed`.
 
 ## Deferred
 

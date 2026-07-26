@@ -1,6 +1,10 @@
 # Proposal: Eliminate Fake System Users With Audit Actors
 
-**Status:** Proposed - no implementation in this document
+**Status:** Architecture ratified - implementation not started
+
+**Development data policy:** The database is reset daily during active development. This change is a clean break: no historical fake-user rows need backfill or compatibility preservation. Reassess the rollout before applying to any environment with durable customer or operational data.
+
+**Architecture record:** `architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md` AD-31 is the authoritative implementation contract. This proposal remains the problem statement and migration rationale.
 
 **Decision requested:** Replace every non-human row in `users` that exists only to satisfy audit or automated-work foreign keys with a first-class `AuditActor` model. Keep real-user provenance where a person initiated work; represent automated execution as a system actor without a `users` record.
 
@@ -24,7 +28,7 @@ The issue is not the audit requirement. It is the overloaded meaning of a user f
 - The `users` table contains only real authenticated people and deliberately created test fixtures representing people.
 - Automated work remains fully attributable to a stable, explicit system identifier.
 - Audit records distinguish who requested work from what executed it.
-- Existing historical audit and provenance data remains queryable after migration.
+- A clean development database has correct audit and provenance semantics after reset and reseed.
 - No worker needs a NextAuth session or a fake login identity.
 - The change covers all current fake-system identities, not only the knowledge workers.
 
@@ -48,14 +52,14 @@ type UserAuditActor = {
 
 type SystemAuditActor = {
   kind: "system";
-  system: "knowledge-ingestion" | "trip-proposal-expiry" | "facebook-capture";
+  system: SystemAuditActorId;
   workerId?: string;
 };
 
 type AuditActor = UserAuditActor | SystemAuditActor;
 ```
 
-The runtime actor is an audit/execution identity, not an authentication session. `AuthenticatedSession` can be converted to a `UserAuditActor`, but must not be the only actor type accepted by audit APIs.
+The runtime actor is an audit/execution identity, not an authentication session. `AuthenticatedSession` can be converted to a `UserAuditActor`, but must not be the only actor type accepted by audit APIs. The authoritative catalog and persistence rules are Architecture Decision AD-31.
 
 ### Audit Event Persistence Contract
 
@@ -75,11 +79,11 @@ Use a stable system catalog in code, rather than arbitrary strings. Initial cata
 
 | System ID | Executor |
 | --- | --- |
-| `knowledge-ingestion` | Canonical source-version pipeline |
-| `knowledge-extraction` | Legacy queued knowledge extraction worker |
-| `knowledge-indexing` | Search projection worker, if it begins emitting audit events |
-| `trip-proposal-expiry` | Trip Change Proposal expiry worker |
-| `facebook-capture` | Unattended Facebook capture command |
+| `system-ai-orchestration` | Synchronous authenticated model calls |
+| `system-knowledge-pipeline` | Canonical ingestion, legacy extraction, and indexing workers |
+| `system-trip-planning` | Trip Change Proposal expiry worker |
+| `system-facebook-capture` | Unattended Facebook capture command |
+| `system-youtube-capture` | Approved YouTube capture command; never a seed user |
 
 System ID records an executor class, while `workerId` is optional diagnostic context. It must not be treated as a human identity, authorization subject, or login account.
 
@@ -121,25 +125,22 @@ The implementation must search for all `system-*-` constants, `@xuyenviet.invali
 
 ## Migration And Rollout Plan
 
-Use an expand-migrate-contract rollout. Do not delete a reserved user before all dependent rows and constraints are migrated.
+Use a clean-break schema rollout while the database remains disposable. Update/remove reserved-user migrations, seed fixtures, test helpers, and actor APIs together, then reset and reseed the database. If durable data exists before implementation, stop and replace this section with an expand-migrate-contract plan.
 
-1. **Inventory and freeze scope.** Produce a query-backed count of every row referencing each reserved ID and every code/test/seed dependency. Confirm whether any real deployment has unexpected user-role, session, account, or ownership data tied to these IDs. Block on unexpected data rather than silently deleting it.
-2. **Expand schema.** Add nullable actor/executor fields and check constraints in a backward-compatible state. Update relevant tables according to their semantic classification above. Add indexes supporting audit views by `(actor_class, actor_system, created_at)`.
-3. **Introduce `AuditActor`.** Update `recordAuditEvent` and all actor-taking domain APIs to accept the union. Add one conversion at authenticated request boundaries from session to `UserAuditActor`; worker entrypoints construct a `SystemAuditActor` directly.
-4. **Migrate writes.** Change ingestion, extraction, trip expiry, Facebook capture, recommendations, and AI usage to write explicit system actors. Preserve job requester/submitting-user fields as provenance only.
-5. **Backfill historical data transactionally.** For each reserved user ID, update dependent rows to the matching `actor_class = system`, `actor_system`, null user/email values, and any newly introduced system actor fields. Preserve original timestamps, targets, summaries, job ownership, and real-user provenance. Record a migration report with per-table row counts and checksums or stable IDs for verification.
-6. **Validate.** Assert no row still references a reserved ID; assert all audit records satisfy their actor shape; run targeted worker and audit tests; query historical audit views for each system executor and real user.
-7. **Remove data-seeding and reservation logic.** Remove migrations or runtime bootstrapping that create reserved user rows only where migration history permits. Do not edit historical applied migrations; add a forward migration that removes their records after all FK references are gone. Remove fake user entries from `scripts/db-seed.ts`, test setup, and fixtures. Retain real fixture users such as `seed-fixture-operator-user` and `seed-traveler-user` because they intentionally represent people.
-8. **Contract schema.** Make the new actor shape mandatory, remove obsolete fake-user-only columns or requirements, and delete the reserved `users` rows in the same release or a verified follow-up migration.
+1. **Inventory scope.** Search code, tests, seeds, and migrations for reserved IDs, invalid-domain system emails, and all user-or-system fields. Classify each field by human provenance versus automated execution.
+2. **Replace schema and APIs.** Introduce the `AuditActor` union, actor-shape checks, executor fields, and typed audit/usage writers. Remove fake-user-only FKs and requirements in the same schema change.
+3. **Migrate writes.** Change ingestion, extraction, indexing, trip expiry, Facebook/YouTube capture, recommendations, and AI usage to write explicit cataloged system actors. Preserve only real requester/submitting-user fields as provenance.
+4. **Remove reservation and seed logic.** Remove reserved-user migrations, fake fixture rows, test helpers, and runtime identity checks. Keep person fixtures such as `seed-fixture-operator-user` and `seed-traveler-user`.
+5. **Reset and validate.** Recreate the database, run `db:seed`, assert no system user exists, assert every actor shape is valid, and run targeted worker/audit tests.
 
 ## Backfill Mapping
 
 | Historical fake user | Target system actor |
 | --- | --- |
-| `system-knowledge-pipeline` | `knowledge-ingestion` |
-| `system-trip-planning` | `trip-proposal-expiry` |
-| `system-facebook-capture` | `facebook-capture` |
-| `system-youtube-capture` | Remove as seed-only fixture unless a runtime reference is discovered; if historical system records exist, use `youtube-capture` |
+| `system-knowledge-pipeline` | `system-knowledge-pipeline` |
+| `system-trip-planning` | `system-trip-planning` |
+| `system-facebook-capture` | `system-facebook-capture` |
+| `system-youtube-capture` | `system-youtube-capture` |
 
 Do not infer a human initiator from a fake system user. Where a job already stores `created_by_user_id`/`created_by_email`, preserve it as request provenance. Where no human initiator exists, leave initiator null rather than fabricating one.
 
@@ -155,7 +156,7 @@ Do not infer a human initiator from a fake system user. Where a job already stor
 
 ## Acceptance Criteria
 
-1. No row representing `system-knowledge-pipeline`, `system-trip-planning`, `system-facebook-capture`, or `system-youtube-capture` exists in `users` after the migration.
+1. No row representing `system-knowledge-pipeline`, `system-trip-planning`, `system-facebook-capture`, or `system-youtube-capture` exists in `users` after database reset and seed.
 2. No migration, startup routine, worker, or seed script creates a non-human `users` row for audit purposes.
 3. Every audit event has exactly one valid actor shape: a real user actor or a system actor.
 4. A system audit event has `actor_user_id IS NULL`, no person email snapshot, and a cataloged `actor_system` value.
@@ -163,9 +164,9 @@ Do not infer a human initiator from a fake system user. Where a job already stor
 6. Canonical ingestion-created knowledge artifacts, recommendation supersessions, and AI usage are attributed to an explicit system executor, not a `users` row.
 7. Knowledge extraction records the submitting user as requester/provenance while worker-created artifacts and status transitions identify the extraction system actor.
 8. Trip-proposal expiry and Facebook capture write system audit actors without user records.
-9. Historical audit records remain readable and retain their original timestamps, targets, summaries, and operational meaning.
+9. A newly seeded database records correct actor/provenance semantics for user and system activity.
 10. `db:seed` retains only real-person fixtures; it creates no system identities.
-11. Migration verification demonstrates zero remaining foreign-key references to every removed reserved ID before deletion.
+11. Repository verification demonstrates no remaining fake-user creation or reference path outside documented migration-history deletion, if any.
 12. Authorization tests prove a system actor cannot be used as an authenticated session or obtain user roles.
 
 ## Verification Plan
@@ -173,21 +174,19 @@ Do not infer a human initiator from a fake system user. Where a job already stor
 - Unit-test `AuditActor` validation and conversion from authenticated sessions.
 - Database-test every allowed and rejected audit actor shape.
 - Add regression tests for ingestion, extraction, recommendation, AI usage, trip expiry, and Facebook capture asserting system actor fields and absence of fake-user setup.
-- Run a migration fixture containing historical rows for all three deployed reserved identities and verify both backfill correctness and guarded deletion.
 - Run `db:seed` against an empty local database and assert that no user ID starts with `system-`.
-- Run repository search checks for reserved IDs and invalid-domain system emails, allowing only documented historical migration/backfill references until those are archived as appropriate.
+- Run repository search checks for reserved IDs and invalid-domain system emails; allow only system catalog constants and documentation, never fake `users` inserts or session-shaped worker identities.
 
 ## Risks And Decisions To Resolve During Architecture
 
 | Risk / open decision | Required resolution |
 | --- | --- |
 | Multiple tables use `*_user_id` for different meanings | Complete semantic inventory before selecting common columns; do not mechanically make all user IDs nullable |
-| Immutable historical migrations cannot be removed safely | Add forward migrations; retain historical files as history but ensure fresh databases do not end with fake users |
-| Existing deployed data could contain unexpected references | Require preflight counts and fail closed before deletion |
+| Durable data is introduced before implementation | Stop clean-break work and replace it with a forward migration/backfill design before deployment |
 | `ai_usage_events` may need both billable initiator and executor | Define reporting semantics explicitly: request initiator versus system executor |
 | Audit actor catalog evolution | Centralize catalog and label mapping; version/add entries through code review |
 | Capture commands may run under a human-operated browser session | Separate browser/session provenance from database audit executor; the database actor remains a system command unless a user explicitly approves a command action |
 
 ## Recommended Follow-Up
 
-Run `bmad-architecture` to turn this proposal into the authoritative schema and migration design, then create an implementation epic. This is cross-cutting data-model work and should not be executed as an unscoped worker-only refactor.
+Create a dedicated implementation epic from Architecture Decision AD-31. This is cross-cutting data-model work and must not be executed as an unscoped worker-only refactor.
