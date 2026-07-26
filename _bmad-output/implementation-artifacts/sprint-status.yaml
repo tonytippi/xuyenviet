@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-07-27 (Final actionable CR-8.1 LOW assertion repair verified; Story 8.1 is in review. The pre-existing system-youtube-capture seed/AC conflict remains explicitly deferred to Story 8.5.)
+# last_updated: 2026-07-27 (Story 8.1 finalized as done after status-only verification of supplied final repair commit 6687df2d8ed78b1a6f701d459a4f2cc66d24958e and a clean pre-update worktree.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-07-27 (Final actionable CR-8.1 LOW assertion repair verified; Story 8.1 is in review. The pre-existing system-youtube-capture seed/AC conflict remains explicitly deferred to Story 8.5.)
+last_updated: 2026-07-27 (Story 8.1 finalized as done after status-only verification of supplied final repair commit 6687df2d8ed78b1a6f701d459a4f2cc66d24958e and a clean pre-update worktree.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -123,8 +123,8 @@ development_status:
 
   # AD-31 clean-break audit and automated-execution attribution plan.
   epic-8: in-progress
-  # Final actionable CR-8.1 LOW repair 2026-07-27: the unauthenticated audited-mutation test now uses a spy and explicitly asserts its protected action was not called. Focused mutation test passes; status synchronized to review. The pre-existing `scripts/db-seed.ts` system-youtube-capture seed/AC conflict remains explicitly deferred to Story 8.5 and was not changed.
-  8-1-establish-the-audit-actor-boundary-and-system-catalog: review
+  # Finalized 2026-07-27 after status-only verification of supplied final repair commit 6687df2d8ed78b1a6f701d459a4f2cc66d24958e and a clean pre-update worktree; status synchronized to done. No additional code review or implementation verification was performed.
+  8-1-establish-the-audit-actor-boundary-and-system-catalog: done
   8-2-persist-valid-audit-history-and-usage-attribution: backlog
   8-3-attribute-knowledge-capture-and-ai-work-to-system-executors: backlog
   8-4-attribute-trip-proposal-expiry-through-the-audit-boundary: backlog

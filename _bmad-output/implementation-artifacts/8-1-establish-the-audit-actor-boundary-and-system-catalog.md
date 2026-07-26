@@ -4,7 +4,7 @@ baseline_commit: 555fba8a56a3d53a37c82f060fd2799b5b9ab96c
 
 # Story 8.1: Establish the Audit Actor Boundary and System Catalog
 
-Status: review
+Status: done
 
 ## Story
 
@@ -231,3 +231,4 @@ gpt-5.6-terra
 - 2026-07-27: Fixed CR-8.1-01 through CR-8.1-03; focused audit tests and TypeScript check passed; status moved to review. No commit created.
 - 2026-07-27: Fixed the supplied HIGH role-bearing-admin projection regression and MEDIUM AC3 public-constructor validation regression; 19 focused audit tests and TypeScript check passed; status moved to review. No commit created.
 - 2026-07-27: Fixed final actionable CR-8.1 LOW test assertion; 19 focused audit tests and TypeScript check passed; status remains review. The `system-youtube-capture` seed conflict remains explicitly deferred to Story 8.5.
+- 2026-07-27: Finalized after status-only verification of supplied final repair commit `6687df2d8ed78b1a6f701d459a4f2cc66d24958e` and a clean pre-update worktree; status synchronized to done. No additional code review or implementation verification was performed.
