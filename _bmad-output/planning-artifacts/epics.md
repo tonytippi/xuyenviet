@@ -8,6 +8,10 @@ stepsCompleted:
   - step-02-trip-planning-epic-design
   - step-03-trip-planning-story-generation
   - step-04-trip-planning-final-validation
+  - step-01-ad-31-requirements-extraction
+  - step-02-ad-31-epic-design
+  - step-03-ad-31-story-generation
+  - step-04-ad-31-final-validation
 inputDocuments:
   - _bmad-output/planning-artifacts/prds/prd-xuyenviet-2026-07-04/prd.md
   - _bmad-output/planning-artifacts/prds/prd-xuyenviet-2026-07-04/addendum.md
@@ -16,6 +20,7 @@ inputDocuments:
   - _bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-2026-07-05/DESIGN.md
   - _bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-2026-07-05/EXPERIENCE.md
   - _bmad-output/project-context.md
+  - _bmad-output/planning-artifacts/proposal-eliminate-fake-system-users-with-audit-actors.md
 ---
 
 # xuyenviet - Epic Breakdown
@@ -73,6 +78,9 @@ FR-23B: Capture only confirmed, operator-only visible Facebook material without 
 FR-24: AI-triage source material, extract structured claims, and validate each against a source-text evidence span.
 FR-24A: Classify triaged sources as rejected, context-only, candidate, or verify-first and retain decision reasons.
 FR-24B: Use an independent AI judge, separate from extraction, for publication/suppression/review decisions.
+FR-24C: Discover and process every independently useful atomic claim from a submitted immutable source version without an accepted-fact quota.
+FR-24D: Give each discovered candidate an independent auditable terminal outcome and complete source ingestion only after candidate work terminalizes.
+FR-24E: Prevent work for an earlier superseded capture version from mutating active knowledge while preserving intelligible historical ingestion behavior.
 FR-25: Make claims searchable without human approval only when evidence, specificity, actionability, privacy, commercial-risk, and conflict policy pass.
 FR-25A: Create risk-prioritized review recommendations, not mandatory approval gates, for risky, weak, conflicting, duplicate, or context-missing claims.
 FR-25B: Quality-sample 15% of auto-active claims for the first four weeks and 100% of verify-first claims.
@@ -99,6 +107,7 @@ FR-42: Allow public sign-in without an email allowlist while requiring Google au
 FR-43: Provide a traveler-separate operator/admin area.
 FR-44: Support at least one initial admin/operator account.
 FR-45: Permit future multi-operator expansion without workflow redesign.
+FR-45A: Show operators safe aggregate and candidate-level ingestion outcomes without raw provider output, raw captured text, unapproved quotes, or execution secrets.
 FR-46: Capture a simple usefulness rating for answers.
 FR-47: Record authenticated AI usage with user/context, purpose, model/provider, timestamp, and available usage/cost metadata.
 FR-48: Capture valid sign-in referral attribution without rewards, rankings, payouts, or credits.
@@ -135,6 +144,28 @@ NFR-11: Applying a Trip Change Proposal validates the proposal belongs to the se
 - Use Tavily behind a provider adapter provisionally; prefer official/provider sources and fail closed with a verification recommendation when search fails or is low confidence.
 - Supervise separate Node workers for knowledge ingestion/indexing; keep logs, health/restart supervision, backup/restore, and public launch privacy checks operationally ready.
 - Preserve no-credit/no-payment/no-reward MVP boundaries and defer maps, mobile, service decomposition, vector/hybrid ranking, and broad Facebook discovery pending explicit decisions.
+
+### Architecture Decision Requirements
+
+AD-31-1: `users` contains authenticated people and deliberate person fixtures only; system actors cannot authenticate, receive roles, own records, receive referrals, or gain authorization privileges.
+
+AD-31-2: Audit-taking APIs accept the `AuditActor` union. User actors contain a real user ID and nonblank email snapshot; system actors contain one cataloged system ID and no user ID or email.
+
+AD-31-3: `audit_events` and `trip_plan_change_history` persist exactly one user-or-system actor shape, enforced by application validation and database checks.
+
+AD-31-4: The system actor catalog is immutable and contains `system-ai-orchestration`, `system-knowledge-pipeline`, `system-trip-planning`, `system-facebook-capture`, and `system-youtube-capture` with server-owned labels.
+
+AD-31-5: Real-user ownership, requester, submitter, reviewer, approver, referral, session, and conversation fields remain real-user foreign keys. Automated execution fields persist cataloged system executors separately.
+
+AD-31-6: Automated knowledge artifacts, source/capture artifacts, automated recommendation resolution/supersession, and AI usage persist required `executor_system` values with indexed system execution attribution.
+
+AD-31-7: `ai_usage_events` uses nullable `initiated_by_user_id` plus required `executor_system`; user-facing metrics aggregate initiators only, while worker work appears in operations reporting under the cataloged executor.
+
+AD-31-8: Audit owns actor catalog/session conversion/validation and typed audit, history, and usage writers; feature modules cannot directly insert `audit_events`, `trip_plan_change_history`, or `ai_usage_events`.
+
+AD-31-9: The disposable development database uses a clean-break migration: remove fake-system-user migrations, seeds, helpers, and APIs; reset/reseed instead of backfilling. Stop and redesign as expand-migrate-contract if durable data exists before shipping.
+
+AD-31-10: Verify valid/rejected actor persistence shapes, worker executor attribution with requester preservation, clean migration/seed output, no remaining fake-user creation path, and inability of system actors to authenticate or receive roles.
 
 ### UX Design Requirements
 
@@ -210,6 +241,9 @@ FR-23B: Epic 3 - Operator-only Facebook capture boundary.
 FR-24: Epic 3 - AI triage, extraction, and evidence validation.
 FR-24A: Epic 3 - Triage classifications and reasons.
 FR-24B: Epic 3 - Independent publication judge.
+FR-24C: Epic 3 - Complete immutable-source candidate discovery and processing.
+FR-24D: Epic 3 - Candidate-level terminal outcomes and source completion.
+FR-24E: Epic 3 - Supersession-safe source-version claiming, processing, and recovery.
 FR-25: Epic 3 - Evidence-grounded automatic publication policy.
 FR-25A: Epic 3 - Risk-prioritized review recommendations.
 FR-25B: Epic 3 - Quality sampling.
@@ -236,6 +270,7 @@ FR-42: Epic 1 - Public sign-in without allowlist.
 FR-43: Epic 1 - Traveler-separate, role-gated admin access.
 FR-44: Epic 1 - Initial admin/operator capability.
 FR-45: Epic 1 - Extensible operator roles.
+FR-45A: Epic 3 - Safe operator ingestion outcome diagnostics.
 FR-46: Epic 5 - Answer usefulness feedback.
 FR-47: Epic 4 - Authenticated AI usage events.
 FR-48: Epic 1 - Silent referral attribution.
@@ -264,7 +299,7 @@ Authenticated travelers can start, continue, organize, and delete their own road
 
 Operators can turn source submissions and operator-assisted Facebook captures into evidence-grounded, state-aware community knowledge. Qualifying facts become active without mandatory human approval; operators focus on prioritized recommendations, quality samples, verification, conflicts, source removal, and seed coverage.
 
-**FRs covered:** FR-17, FR-18, FR-18A, FR-18B, FR-19, FR-20, FR-21, FR-22, FR-22A, FR-22B, FR-22C, FR-23, FR-23A, FR-23B, FR-24, FR-24A, FR-24B, FR-25, FR-25A, FR-25B, FR-26, FR-27, FR-28, FR-37, FR-37B
+**FRs covered:** FR-17, FR-18, FR-18A, FR-18B, FR-19, FR-20, FR-21, FR-22, FR-22A, FR-22B, FR-22C, FR-23, FR-23A, FR-23B, FR-24, FR-24A, FR-24B, FR-24C, FR-24D, FR-24E, FR-25, FR-25A, FR-25B, FR-26, FR-27, FR-28, FR-37, FR-37B, FR-45A
 
 **Implementation notes:** This is explicitly not an approval queue. It owns immutable source/capture versions; leased ingestion jobs; hard evidence/privacy gates; independent judging; state, evidence, relation, verification, review, retention, and removal commands; transactional dirty markers; operator-only raw material; and active evidence-grounded seed progress. Admin UI must show current fact, conditions, bounded evidence, reasons, card version, and evidence-set revision, then offer state-aware actions rather than a generic approve-only lifecycle.
 
@@ -299,6 +334,14 @@ Travelers can convert AI guidance into a structured, owner-controlled road-trip 
 **FRs covered:** FR-16A, FR-16B, FR-16C, FR-16D, FR-16E, FR-16F, FR-16G, FR-16H, FR-16I.
 
 **Implementation notes:** Build on the completed authenticated Chat/Trips baseline. The single-owner aggregate, ordering, parent, backup, and version checks remain Chat/Trips-owned. No maps, live route/ETA, weather, booking, availability, expense tracking, checklist, collaboration, or location-sharing behavior is introduced.
+
+### Epic 8: Trustworthy Automation And Audit Attribution
+
+Operators and travelers can trust that automated work is attributed to a first-class system executor while human ownership, requests, and audit history remain accurate and protected.
+
+**Architecture requirements covered:** AD-31-1, AD-31-2, AD-31-3, AD-31-4, AD-31-5, AD-31-6, AD-31-7, AD-31-8, AD-31-9, AD-31-10.
+
+**Implementation notes:** This is a cross-cutting clean-break development migration. Audit owns actor construction, validation, catalog metadata, and typed writes. All worker and automated paths preserve real-user requester/submitter provenance separately from their cataloged system executor. Do not add a compatibility/backfill path unless durable data exists before implementation, in which case stop and replace this epic with an expand-migrate-contract design.
 
 ## Epic 1: Trusted Entry And Planning Workspace Access
 
@@ -419,7 +462,7 @@ So that a readable source can reach one safe, auditable terminal outcome.
 **Then** it compares the expected stage/version and lease token before committing
 **And** a duplicate worker cannot overwrite completed work or publish a different outcome.
 
-**Scope decision (2026-07-22):** Story 3.5 also owns the deterministic validation gates, independent judge, bounded evidence creation, canonical card mutation, relation matching, condition preservation, and conflict policy originally decomposed into Stories 3.7 and 3.8. This makes the first canonical source-version pipeline vertically safe: it must not publish a card without exact evidence, validation, independent judgment, and scoped relation handling. The automated actor is `system-knowledge-pipeline`; source and job submitter provenance remains immutable. Story 3.6 remains recovery-only and Story 3.9 remains recommendation/sampling-only.
+**Scope decision (2026-07-22):** Story 3.5 also owns the deterministic validation gates, independent judge, bounded evidence creation, canonical card mutation, relation matching, condition preservation, conflict policy, and complete candidate traversal required by FR-24C/FR-24D. This makes the first canonical source-version pipeline vertically safe: it must process every independently useful candidate from an immutable source version, give each candidate an auditable terminal outcome, and only complete the source after candidate work terminalizes. It must not publish a card without exact evidence, validation, independent judgment, and scoped relation handling. The automated actor is `system-knowledge-pipeline`; source and job submitter provenance remains immutable. Story 3.6 remains recovery-only and owns the stale/superseded-work safety required by FR-24E; Story 3.9 remains recommendation/sampling-only.
 
 ### Story 3.6: Recover Ingestion Jobs Without Stale Publication
 
@@ -438,6 +481,11 @@ So that retry behavior cannot repeat completed stages or restore outdated public
 **When** its fencing token or expected version no longer matches
 **Then** its result is rejected without changing a card, evidence, or publication outcome
 **And** the operational record retains a safe failure reason.
+
+**Given** a newer immutable capture version supersedes an earlier version
+**When** earlier work resumes, retries, or delivers a duplicate result
+**Then** its fencing and expected-version checks prevent it from creating, attaching, conflicting with, or otherwise mutating active knowledge
+**And** its historical job/candidate outcome remains interpretable without fabricating new candidate history.
 
 ### Story 3.7: Validate Evidence and Independently Judge Publication
 
@@ -511,6 +559,11 @@ So that I focus on risky or uncertain facts while qualifying observations remain
 **When** quality sampling is scheduled
 **Then** 15% of auto-active card versions during the first four weeks and 100% of verify-first outcomes receive version-bound sampling recommendations
 **And** sampling resolution records pass/fail reason codes and can raise sampling or suppress an affected policy cohort after a high-severity failure.
+
+**Given** an operator opens a source ingestion outcome
+**When** candidate work is complete or in progress
+**Then** the admin read model shows bounded aggregate and candidate-level stage/outcome, state, reason, and safe evidence metadata sufficient for diagnosis
+**And** it never exposes raw provider output, raw captured text, unapproved quotes, execution-fencing data, or other execution secrets.
 
 ### Story 3.10: Propagate Source Removal and State Changes to Search Eligibility
 
@@ -1022,3 +1075,147 @@ So that structured planning remains safe as chat-driven proposals and confirmed 
 **When** keyboard, touch, focus, live-region, and reduced-motion behaviors are assessed
 **Then** plan and proposal actions remain reachable with explicit labels and recovery paths
 **And** proposal application remains an unmistakable owner-confirmed action.
+
+## Epic 8: Trustworthy Automation And Audit Attribution
+
+Operators and travelers can trust that automated work is attributed to a first-class system executor while human ownership, requests, and audit history remain accurate and protected.
+
+### Story 8.1: Establish the Audit Actor Boundary and System Catalog
+
+As a product operator,
+I want one validated actor boundary for human and automated actions,
+So that all protected writes identify the correct kind of actor without treating a system as a user.
+
+**Acceptance Criteria:**
+
+**Given** an authenticated request or a worker entrypoint needs to record an actor
+**When** it constructs an `AuditActor`
+**Then** an authenticated request converts only to a user actor with a real `users.id` and immutable nonblank email snapshot, while a worker constructs a system actor directly
+**And** no worker requires an authenticated session, fake login, OAuth account, or user role.
+
+**Given** a system actor is requested
+**When** its ID is validated or rendered for an audit read model
+**Then** it is exactly one server-owned catalog entry from `system-ai-orchestration`, `system-knowledge-pipeline`, `system-trip-planning`, `system-facebook-capture`, or `system-youtube-capture`
+**And** labels come from catalog metadata rather than user input, while `system-youtube-capture` is not created by seed data.
+
+**Given** an actor payload has a missing or blank email, an arbitrary system ID, or mixed user and system fields
+**When** an Audit-owned API validates it
+**Then** validation rejects the payload before any database write
+**And** feature modules consume the exported typed boundary rather than defining incompatible actor shapes.
+
+### Story 8.2: Persist Valid Audit, History, and Usage Attribution
+
+As a product operator,
+I want audit, history, and usage records to persist unambiguous actor and executor attribution,
+So that human activity, autonomous work, and reporting cannot be conflated.
+
+**Acceptance Criteria:**
+
+**Given** a user or system actor writes an audit event or trip-plan change-history record
+**When** the migration and typed writer persist it
+**Then** a user row has `actor_class = 'user'`, a non-null user FK, and its required email snapshot with no system ID, while a system row has `actor_class = 'system'`, a nonblank cataloged system ID, and null user/email fields
+**And** database checks and application validation enforce exactly one valid shape.
+
+**Given** an AI usage event is recorded
+**When** the Audit/Usage writer persists it
+**Then** it accepts `{ initiatedByUserId?, executorSystem, ... }`, stores nullable `initiated_by_user_id` and required `executor_system`, and preserves nullable conversation/message references for worker-only work
+**And** user-facing roster or billing views aggregate initiators only, while operations reporting groups autonomous work by cataloged executor.
+
+**Implementation inventory:** This story changes only `audit_events`, `trip_plan_change_history`, and `ai_usage_events`, their Audit/Usage writers, their direct-write callers, related admin usage aggregation, and their migrations/tests. Executor columns on knowledge and capture artifacts are intentionally owned by Story 8.3.
+
+### Story 8.3: Attribute Knowledge, Capture, and AI Work to System Executors
+
+As an operator,
+I want automated knowledge and AI workflows to preserve their human provenance while naming the actual executor,
+So that a worker never impersonates the person who submitted or requested work.
+
+**Acceptance Criteria:**
+
+**Given** an operator submits a source and a knowledge worker later triages, extracts, judges, relates, indexes, or recovers it
+**When** the worker records side effects, transitions, recommendations, cards, or usage
+**Then** those automated records use `system-knowledge-pipeline` as executor while source/job submitter and human requester fields retain the real person
+**And** retries and worker-only work never write new side effects as the submitting operator.
+
+**Given** a knowledge card, knowledge source suggestion, automated knowledge recommendation resolution/supersession, source/capture artifact, or indexing record needs execution attribution
+**When** Story 8.3 migrates its persistence and writer
+**Then** it stores required nonblank cataloged `executor_system` with an index beginning on that column
+**And** `created_by_user_id`, `resolved_by_user_id`, `submitted_by_user_id`, and other semantically human fields remain real-user provenance and are nullable only where an automated historical record requires it.
+
+**Given** synchronous authenticated model orchestration records usage or an automated artifact
+**When** it writes through the typed boundary
+**Then** it records `system-ai-orchestration` as executor and the authenticated person as `initiated_by_user_id` where applicable
+**And** no user metric counts autonomous retries or worker-only execution as human activity.
+
+**Given** Facebook or approved YouTube capture creates discovered source material
+**When** capture provenance is stored
+**Then** the capture uses its corresponding cataloged system executor and preserves the originating real person's `sources.submitted_by_user_id` with source lineage
+**And** capture does not create a system user, retain a session-shaped identity, or gain authorization privileges.
+
+### Story 8.4: Attribute Trip Proposal Expiry Through the Audit Boundary
+
+As a Trip Project owner,
+I want automatically expired proposals to show their actual system actor,
+So that history distinguishes autonomous expiry from actions performed by people.
+
+**Acceptance Criteria:**
+
+**Given** a pending Trip Change Proposal passes its expiry time
+**When** a Trip Home/proposal read, application attempt, or scheduled worker invokes `expireTripChangeProposal(...)`
+**Then** the idempotent fenced transaction writes exactly one safe terminal history row through the Audit-owned helper with `system-trip-planning` as the actor
+**And** expiry never mutates plan state or impersonates the project owner, requester, or authenticated session.
+
+**Given** an owner applies or dismisses a proposal
+**When** Chat/Trips records change history
+**Then** it uses the same typed AuditActor persistence boundary with the real owner actor
+**And** a direct insert into `trip_plan_change_history` from Chat/Trips is unavailable or rejected by enforcement.
+
+### Story 8.5: Remove Fake System Users in the Clean-Break Migration
+
+As a development operator,
+I want the disposable database reset and seed to contain only real people,
+So that fake system identities cannot reappear through migrations, fixtures, or startup paths.
+
+**Acceptance Criteria:**
+
+**Given** the clean-break migration is prepared while development data remains disposable
+**When** reserved-user migrations, seed fixtures, test helpers, and runtime actor APIs are updated or removed
+**Then** no code path creates `system-knowledge-pipeline`, `system-trip-planning`, `system-facebook-capture`, or `system-youtube-capture` as a `users` row
+**And** deliberate person fixtures remain valid without system-only emails, accounts, sessions, roles, referrals, or ownership records.
+
+**Given** the current development environment is evaluated before migration execution
+**When** the clean-break precondition is checked
+**Then** the local-only reset guard and daily-reset development-data policy confirm that the target database is disposable
+**And** the migration is blocked from non-local or protected databases before any reset occurs.
+
+**Given** a clean development database is reset, migrated, and seeded
+**When** seed validation completes
+**Then** it contains no non-human `users` row and no `users.id` beginning with `system-`
+**And** the resulting schema and seed data support valid user and system audit/executor attribution without backfilling fake-user history.
+
+**Given** durable production or customer data exists before this work ships
+**When** implementation readiness is reassessed
+**Then** this clean-break migration is stopped before deployment
+**And** the team creates an explicit expand-migrate-contract rollout rather than applying the development reset strategy.
+
+### Story 8.6: Verify Actor Isolation and Attribution End to End
+
+As a product owner,
+I want automated verification of the new actor model and its migrations,
+So that attribution stays correct as Audit, workers, and user-facing reporting evolve.
+
+**Acceptance Criteria:**
+
+**Given** AuditActor validation and persistence tests run
+**When** they exercise every allowed and rejected user/system shape
+**Then** valid rows satisfy database constraints and invalid/mixed/missing/catalog-invalid shapes fail before or at persistence
+**And** the tests prove a system actor cannot authenticate, obtain a user role, own a user-scoped resource, receive a referral, or become a session principal.
+
+**Given** automated knowledge, indexing, capture, recommendation resolution, AI usage, and Trip Proposal expiry flows are tested
+**When** they perform a write
+**Then** each records its required cataloged executor while preserving a real requester/submitting user only in its semantically human field
+**And** no direct feature insert into `audit_events`, `trip_plan_change_history`, or `ai_usage_events` remains permitted.
+
+**Given** a clean database migration and `db:seed` run in verification
+**When** repository and data checks inspect reserved IDs, invalid-domain system emails, and seed output
+**Then** no fake-user creation/reference path remains outside the documented system catalog and architecture/proposal documentation
+**And** verification records the clean database result without relying on legacy backfill behavior.

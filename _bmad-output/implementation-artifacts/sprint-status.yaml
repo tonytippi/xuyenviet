@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-07-26 (Second and final Epic 7 completion review repair (bmad-code-review E7R2, 3 adversarial layers on diff 4e34428..aa4c5d1). All 6 epic-level findings E7R2-F1..F6 fixed (2 HIGH, 2 MEDIUM, 2 LOW) across Stories 7.4 and 7.5. 1007 tests pass, lint (0 errors, 3 pre-existing unrelated warnings)/typecheck/build/db:generate clean; both 7.4 and 7.5 set to review. No commit performed per instructions.)
+# last_updated: 2026-07-26 (Sprint planning added the ready-for-development AD-31 Epic 8 backlog after readiness validation reached 100% PRD coverage. Existing epic statuses and action items were preserved.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-07-26 (Status-only finalization after second epic-review repair commit b47ef29. Commit b47ef29957efcba29fb40605853e326685e201f7 verified present on main; pre-update worktree clean. Story records 7.4 and 7.5 updated to done; sprint entries 7-4-generate-reviewable-ai-trip-change-proposals and 7-5-apply-dismiss-and-expire-proposals-safely synchronized to done. epic-7 preserved as done. No source inspection, AC evaluation, tests, code review, implementation edits, or commit performed per instructions.)
+last_updated: 2026-07-26 (Sprint planning added the ready-for-development AD-31 Epic 8 backlog after readiness validation reached 100% PRD coverage. Existing epic statuses and action items were preserved.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -120,6 +120,16 @@ development_status:
   # Third bounded review 2026-07-26 of commits 84347ac + 9268478 + 70217e8: Acceptance Auditor confirmed all 3 ACs genuinely satisfied and scope respected (only 2 authorized production fixes; no new migration/dependency). No HIGH findings, no data-integrity/security defects, no AC violations. 4 new actionable findings — 2 decision-needed (AC3 7.3 onOpenPlanHistory asymmetric handler + false test comment; AC3 7.2 sibling-sheet close buttons unguarded transition out-of-AC-scope pre-existing), 2 patch (5.3d lock acquisition outside try/finally; backup_check second assertion vacuous — FK satisfies it regardless of check constraint). Status synchronized to in-progress.
   # Third-review patch 2026-07-26: all 4 findings addressed. Both decision-needed findings resolved with production fixes (authorized by the user, same defect classes as second-review HIGH fixes): onOpenPlanHistory made structurally symmetric (closes session sheet + nulls selectedAnswerEntity/answerEntityTriggerRef); motion-reduce:transition-none added to session-sheet and workspace-sheet close buttons. 2 LOW patch: 5.3d holdProposalLock moved inside try block; backup_check second assertion made non-vacuous with real existing target + SQLSTATE 23514 assertions. No new tests (all in-place fixes); 1000 total pass, lint/typecheck/build/db:generate clean. Status synchronized to review.
   epic-7-retrospective: optional
+
+  # AD-31 clean-break audit and automated-execution attribution plan.
+  epic-8: backlog
+  8-1-establish-the-audit-actor-boundary-and-system-catalog: backlog
+  8-2-persist-valid-audit-history-and-usage-attribution: backlog
+  8-3-attribute-knowledge-capture-and-ai-work-to-system-executors: backlog
+  8-4-attribute-trip-proposal-expiry-through-the-audit-boundary: backlog
+  8-5-remove-fake-system-users-in-the-clean-break-migration: backlog
+  8-6-verify-actor-isolation-and-attribution-end-to-end: backlog
+  epic-8-retrospective: optional
 
 action_items:
   - epic: 3
