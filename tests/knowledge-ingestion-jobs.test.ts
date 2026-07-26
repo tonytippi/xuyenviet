@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { beforeEach, describe, expect, test } from "vitest";
 
-import { knowledgeIngestionJobs, sourceCaptureVersions, sources, users } from "@/db/schema";
+import { knowledgeIngestionCandidates, knowledgeIngestionJobs, sourceCaptureVersions, sources, users } from "@/db/schema";
 import { claimNextKnowledgeIngestionJob, commitKnowledgeIngestionStage, ensureIngestionJobForCaptureVersion, listKnowledgeIngestionJobStatuses, recoverKnowledgeIngestionJobs, retryKnowledgeIngestionStage } from "@/features/knowledge/ingestion-jobs";
 import { runKnowledgeIngestionWorkerLoop } from "@/features/knowledge/ingestion-worker";
 import { appendSourceCaptureVersion, hashCaptureText } from "@/features/knowledge/source-captures";
@@ -36,10 +36,18 @@ describe("canonical knowledge ingestion jobs", () => {
     const capture = await appendReadableCapture("source-one");
 
     await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.captureVersionId, capture.id))).resolves.toMatchObject([
-      { sourceId: "source-one", captureVersionId: capture.id, submittedByUserId: "operator", submittedByEmail: "operator@example.com", stage: "queued", stageVersion: 1, attemptCount: 0, maxAttempts: 3, claimedBy: null, fencingToken: null },
+      { sourceId: "source-one", captureVersionId: capture.id, submittedByUserId: "operator", submittedByEmail: "operator@example.com", protocolVersion: 2, stage: "queued", stageVersion: 1, attemptCount: 0, maxAttempts: 3, claimedBy: null, fencingToken: null },
     ]);
     await expect(ensureIngestionJobForCaptureVersion(testDb, { sourceId: "source-one", captureVersionId: capture.id })).resolves.toMatchObject({ captureVersionId: capture.id, submittedByEmail: "operator@example.com" });
     await expect(testDb.select().from(knowledgeIngestionJobs)).resolves.toHaveLength(1);
+  });
+
+  test("keeps an existing v1 row unchanged while new capture jobs select v2", async () => {
+    await createSource("legacy-source");
+    await testDb.insert(sourceCaptureVersions).values({ id: "legacy-capture", sourceId: "legacy-source", versionSequence: 1, captureKind: "pasted_text", rawText: "Legacy capture.", contentHash: hashCaptureText("Legacy capture."), capturedAt: new Date() });
+    await testDb.insert(knowledgeIngestionJobs).values({ id: "legacy-job", sourceId: "legacy-source", captureVersionId: "legacy-capture", submittedByUserId: "operator", submittedByEmail: "operator@example.com", protocolVersion: 1 });
+    await expect(ensureIngestionJobForCaptureVersion(testDb, { sourceId: "legacy-source", captureVersionId: "legacy-capture" })).resolves.toMatchObject({ id: "legacy-job", protocolVersion: 1 });
+    expect(await testDb.select().from(knowledgeIngestionCandidates)).toEqual([]);
   });
 
   test("keeps the canonical worker loop available for supervised execution and supports a one-shot no-work check", async () => {

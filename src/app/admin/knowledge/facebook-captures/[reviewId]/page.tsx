@@ -100,10 +100,13 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
           <>
             <p className="mt-1">{ingestionStageLabels[review.ingestionJob.stage]}. Worker tự xử lý và không cần thao tác phê duyệt/extract từ màn hình này.</p>
             <p className="mt-1 text-[#4f625a]">Job {review.ingestionJob.id} · lần thử {review.ingestionJob.attemptCount}/{review.ingestionJob.maxAttempts} · cập nhật {formatDate(review.ingestionJob.updatedAt)}</p>
+            {review.ingestionJob.protocolVersion === 2 ? <p className="mt-1 text-[#4f625a]">Đa-fact v2: {review.ingestionJob.terminalCandidateCount}/{review.ingestionJob.discoveredCandidateCount} candidate đã hoàn tất · lỗi {review.ingestionJob.failedCandidateCount}{review.ingestionJob.discoveryComplete ? " · đã khám phá xong" : " · đang khám phá"}.</p> : <p className="mt-1 text-[#4f625a]">Job legacy v1: kết quả lịch sử theo một candidate, không chuyển đổi sang v2.</p>}
             {review.ingestionJob.lastErrorCode ? <p className="mt-1 text-[#9b2f29]">Lý do: {ingestionReasonDetails[review.ingestionJob.lastErrorCode] ?? `Mã lỗi an toàn: ${review.ingestionJob.lastErrorCode}`}</p> : null}
           </>
         ) : <p className="mt-1">Chưa có canonical job cho capture version này. Kiểm tra deployment của knowledge-ingestion worker nếu trạng thái không được tạo sau capture.</p>}
       </section>
+
+      {review.ingestionJob?.protocolVersion === 2 ? <section className="mt-6 rounded-2xl border border-[#d8c9ad] bg-white/75 p-4 text-sm text-[#17342c]"><p className="font-semibold">Candidate canonical an toàn</p>{review.ingestionJob.candidateHasMore ? <p className="mt-1 text-[#4f625a]">Hiển thị {review.ingestionJob.candidates.length}/{review.ingestionJob.candidateTotalCount} candidate gần nhất theo thứ tự xử lý.</p> : null}<div className="mt-3 grid gap-2">{review.ingestionJob.candidates.map((candidate) => <div className="rounded-xl bg-[#fbf7ed] p-3" key={candidate.id}><p className="font-semibold">{candidate.title}</p><p className="mt-1 text-[#4f625a]">{candidate.type} · {candidate.locationName ?? candidate.routeSegment ?? "Không rõ phạm vi"} · {candidate.stage}{candidate.outcomeReasonCode ? ` · ${candidate.outcomeReasonCode}` : ""}</p>{candidate.knowledgeCardId ? <Link className="text-[#1f5f46] underline" href={`/admin/knowledge/approved/${encodeURIComponent(candidate.knowledgeCardId)}`}>Mở thẻ tri thức</Link> : null}</div>)}</div></section> : null}
 
       <section className="mt-8 rounded-[1.5rem] border border-[#d8c9ad] bg-[#f4ead7] p-5 sm:p-6">
         <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#8c4f13]">Nguồn Facebook/cộng đồng, chưa xác minh</p>

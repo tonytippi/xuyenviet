@@ -3,12 +3,13 @@ import "server-only";
 import { eq, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { facebookCaptureReviews, facebookCaptureReviewStatusValues, knowledgeIngestionJobs, sourceCaptureVersions, sources, type FacebookCaptureReviewStatus } from "@/db/schema";
+import { facebookCaptureReviews, facebookCaptureReviewStatusValues, knowledgeIngestionCandidates, knowledgeIngestionJobs, sourceCaptureVersions, sources, type FacebookCaptureReviewStatus } from "@/db/schema";
 import { countFacebookCaptureReviewsByStatus, getExistingCardsForCaptureSource, listFacebookCaptureReviews } from "@/features/knowledge/facebook-capture-review";
 import { requireAdminSession } from "@/server/auth";
 
 const defaultReviewStatus: FacebookCaptureReviewStatus = "needs_review";
 const safeMetadataMaxLength = 500;
+const candidateProjectionLimit = 100;
 const unsafeMetadataValuePattern = /cookie|token|local\s*storage|localStorage|provider\s*payload|providerPayload|browser\s*profile|playwright\/facebook-profile|<html|<!doctype|hidden\s*data/i;
 
 export function parseFacebookCaptureReviewStatus(value: string | undefined): FacebookCaptureReviewStatus {
@@ -102,18 +103,26 @@ async function getKnowledgeIngestionJobForCaptureVersion(db: ReturnType<typeof g
   const [job] = await db
     .select({
       id: knowledgeIngestionJobs.id,
+      protocolVersion: knowledgeIngestionJobs.protocolVersion,
       stage: knowledgeIngestionJobs.stage,
       attemptCount: knowledgeIngestionJobs.attemptCount,
       maxAttempts: knowledgeIngestionJobs.maxAttempts,
       nextRunAt: knowledgeIngestionJobs.nextRunAt,
       lastErrorCode: knowledgeIngestionJobs.lastErrorCode,
       updatedAt: knowledgeIngestionJobs.updatedAt,
+      discoveryComplete: knowledgeIngestionJobs.discoveryComplete,
+      discoveredCandidateCount: knowledgeIngestionJobs.discoveredCandidateCount,
+      terminalCandidateCount: knowledgeIngestionJobs.terminalCandidateCount,
+      failedCandidateCount: knowledgeIngestionJobs.failedCandidateCount,
     })
     .from(knowledgeIngestionJobs)
     .where(eq(knowledgeIngestionJobs.captureVersionId, captureVersionId))
     .limit(1);
 
-  return job ?? null;
+  if (!job) return null;
+  const candidates = job.protocolVersion === 2 ? await db.select({ id: knowledgeIngestionCandidates.id, type: knowledgeIngestionCandidates.type, title: knowledgeIngestionCandidates.title, locationName: knowledgeIngestionCandidates.locationName, routeSegment: knowledgeIngestionCandidates.routeSegment, stage: knowledgeIngestionCandidates.stage, outcomeReasonCode: knowledgeIngestionCandidates.outcomeReasonCode, knowledgeCardId: knowledgeIngestionCandidates.knowledgeCardId }).from(knowledgeIngestionCandidates).where(eq(knowledgeIngestionCandidates.ingestionJobId, job.id)).orderBy(knowledgeIngestionCandidates.createdAt).limit(candidateProjectionLimit) : [];
+  const [{ count }] = job.protocolVersion === 2 ? await db.select({ count: sql<number>`count(*)::integer` }).from(knowledgeIngestionCandidates).where(eq(knowledgeIngestionCandidates.ingestionJobId, job.id)) : [{ count: 0 }];
+  return { ...job, candidates, candidateTotalCount: count, candidateHasMore: count > candidates.length };
 }
 
 export async function getAdminFacebookCaptureReviewExtractionTarget(reviewId: string) {

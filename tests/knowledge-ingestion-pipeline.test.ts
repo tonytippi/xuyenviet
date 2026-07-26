@@ -1,9 +1,9 @@
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { aiGatewayModels, aiUsageEvents, auditEvents, knowledgeCardEvidence, knowledgeCardSearchDocuments, knowledgeCards, knowledgeCardSources, knowledgeIndexDirtyMarkers, knowledgeIngestionJobs, knowledgeRecommendations, knowledgeSamplingCohortMembers, sourceCaptureVersions, sources, users } from "@/db/schema";
-import { claimNextKnowledgeIngestionJob, commitKnowledgeIngestionStage, recoverKnowledgeIngestionJobs } from "@/features/knowledge/ingestion-jobs";
-import { runKnowledgeIngestionPipeline } from "@/features/knowledge/ingestion-pipeline";
+import { aiGatewayModels, aiUsageEvents, auditEvents, knowledgeCardEvidence, knowledgeCardSearchDocuments, knowledgeCards, knowledgeCardSources, knowledgeIndexDirtyMarkers, knowledgeIngestionCandidates, knowledgeIngestionJobs, knowledgeRecommendations, knowledgeSamplingCohortMembers, sourceCaptureVersions, sources, users } from "@/db/schema";
+import { claimNextKnowledgeIngestionCandidate, claimNextKnowledgeIngestionJob, commitKnowledgeIngestionStage, recoverKnowledgeIngestionJobs } from "@/features/knowledge/ingestion-jobs";
+import { runKnowledgeIngestionCandidatePipeline, runKnowledgeIngestionPipeline } from "@/features/knowledge/ingestion-pipeline";
 import { appendSourceCaptureVersion } from "@/features/knowledge/source-captures";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
@@ -38,6 +38,7 @@ describe("knowledge ingestion pipeline", () => {
 
   async function claimFor(rawText: string, sourceId = "source") {
     const capture = await appendSourceCaptureVersion(testDb, { sourceId, captureKind: "pasted_text", rawText, metadata: { kind: "submitted" }, capturedAt: new Date("2026-07-22T00:00:00.000Z") });
+    await testDb.update(knowledgeIngestionJobs).set({ protocolVersion: 1 }).where(eq(knowledgeIngestionJobs.captureVersionId, capture.id));
     const claim = await claimNextKnowledgeIngestionJob({ workerId: "pipeline-worker", expectedStageVersion: 1, now: new Date(Date.now() + 1_000) }, testDb);
     if (!claim) throw new Error("expected claim");
     return { capture, claim };
@@ -48,9 +49,53 @@ describe("knowledge ingestion pipeline", () => {
     return { type: "place", title: "Điểm ngắm cảnh đèo Hải Vân", summary: "Có điểm dừng ngắm cảnh phù hợp ban ngày.", location_name: "Đèo Hải Vân", conditions: ["ban ngày"], freshness_sensitive: false, evidence: { quote_text: quote, span_start: 0, span_end: Array.from(rawText).length }, ...overrides };
   }
 
+  test("v2 discovers all window-owned candidates and records mixed independent outcomes", async () => {
+    const rawText = "Đèo Hải Vân có điểm dừng ngắm cảnh an toàn vào ban ngày. Trạm sạc tại Đà Nẵng đang hoạt động.";
+    const capture = await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText, metadata: { kind: "submitted" }, capturedAt: new Date("2026-07-22T00:00:00.000Z") });
+    const firstQuote = "Đèo Hải Vân có điểm dừng ngắm cảnh an toàn vào ban ngày.";
+    const secondQuote = "Trạm sạc tại Đà Nẵng đang hoạt động.";
+    const secondStart = rawText.indexOf(secondQuote);
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ model: "extract-model", choices: [{ message: { content: JSON.stringify({ candidates: [candidate(rawText, { evidence: { quote_text: firstQuote, span_start: 0, span_end: Array.from(firstQuote).length } }), candidate(rawText, { type: "ev_charging", title: "Trạm sạc Đà Nẵng", summary: "Trạm sạc đang hoạt động.", location_name: "Đà Nẵng", evidence: { quote_text: secondQuote, span_start: secondStart, span_end: secondStart + Array.from(secondQuote).length } })] }) } }] }), { status: 200 }))
+      .mockResolvedValueOnce(judgmentResponse("publish"))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ model: "judge-model", choices: [{ message: { content: JSON.stringify({ action: "create", target_card_id: null, summary: "Khác biệt." }) } }] }), { status: 200 }))
+      .mockResolvedValueOnce(judgmentResponse("publish"))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ model: "judge-model", choices: [{ message: { content: JSON.stringify({ action: "create", target_card_id: null, summary: "Khác biệt." }) } }] }), { status: 200 }));
+    const discovery = await claimNextKnowledgeIngestionJob({ workerId: "v2-discovery", now: new Date(Date.now() + 1_000) }, testDb);
+    if (!discovery) throw new Error("expected discovery claim");
+    await runKnowledgeIngestionPipeline(discovery, testDb);
+    await expect(testDb.select().from(knowledgeIngestionCandidates).where(eq(knowledgeIngestionCandidates.captureVersionId, capture.id))).resolves.toHaveLength(2);
+    const queuedCandidates = await testDb.select({ id: knowledgeIngestionCandidates.id, nextRunAt: knowledgeIngestionCandidates.nextRunAt }).from(knowledgeIngestionCandidates).where(eq(knowledgeIngestionCandidates.captureVersionId, capture.id));
+    for (let index = 0; index < queuedCandidates.length; index += 1) {
+      const queuedCandidate = queuedCandidates[index];
+      if (!queuedCandidate) throw new Error("expected queued candidate");
+      const claim = await claimNextKnowledgeIngestionCandidate({ workerId: `v2-candidate-${index}`, now: new Date(queuedCandidate.nextRunAt.getTime() + 1_000) }, testDb);
+      if (!claim) throw new Error(`expected candidate claim for ${queuedCandidate.id}`);
+      await runKnowledgeIngestionCandidatePipeline(claim, testDb);
+    }
+    const [queuedJob] = await testDb.select({ nextRunAt: knowledgeIngestionJobs.nextRunAt }).from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.captureVersionId, capture.id));
+    if (!queuedJob) throw new Error("expected queued ingestion job");
+    const completion = await claimNextKnowledgeIngestionJob({ workerId: "v2-complete", now: new Date(queuedJob.nextRunAt.getTime() + 1_000) }, testDb);
+    if (!completion) throw new Error("expected completion claim");
+    await runKnowledgeIngestionPipeline(completion, testDb);
+    await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.captureVersionId, capture.id))).resolves.toMatchObject([{ protocolVersion: 2, discoveryComplete: true, discoveredCandidateCount: 2, terminalCandidateCount: 2, publishedCandidateCount: 1, verifyFirstCandidateCount: 1, stage: "published" }]);
+  });
+
+  test("v2 discovery overlap dedupe counts only inserted candidates", async () => {
+    const rawText = "Đèo Hải Vân có điểm dừng ngắm cảnh an toàn vào ban ngày.";
+    const capture = await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText, metadata: { kind: "submitted" } });
+    const payload = new Response(JSON.stringify({ model: "extract-model", choices: [{ message: { content: JSON.stringify({ candidates: [candidate(rawText), candidate(rawText)] }) } }] }), { status: 200 });
+    vi.mocked(fetch).mockResolvedValueOnce(payload);
+    const claim = await claimNextKnowledgeIngestionJob({ workerId: "v2-dedupe", now: new Date(Date.now() + 1_000) }, testDb);
+    if (!claim) throw new Error("expected discovery claim");
+    await runKnowledgeIngestionPipeline(claim, testDb);
+    await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.captureVersionId, capture.id))).resolves.toMatchObject([{ discoveredCandidateCount: 1 }]);
+  });
+
   test("publishes only after independent extraction and judgment with exact evidence", async () => {
     const rawText = "Đèo Hải Vân có điểm dừng ngắm cảnh an toàn vào ban ngày.";
     const capture = await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText, metadata: { kind: "submitted" }, capturedAt: new Date("2026-07-22T00:00:00.000Z") });
+    await testDb.update(knowledgeIngestionJobs).set({ protocolVersion: 1 }).where(eq(knowledgeIngestionJobs.captureVersionId, capture.id));
     const start = rawText.indexOf("Đèo Hải Vân");
     const quote = rawText.slice(start);
     vi.mocked(fetch)
@@ -69,6 +114,7 @@ describe("knowledge ingestion pipeline", () => {
 
   test("rejects a stale fence without changing the job", async () => {
     const capture = await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText: "Nội dung có thể đọc được.", metadata: { kind: "submitted" }, capturedAt: new Date() });
+    await testDb.update(knowledgeIngestionJobs).set({ protocolVersion: 1 }).where(eq(knowledgeIngestionJobs.captureVersionId, capture.id));
     const claim = await claimNextKnowledgeIngestionJob({ workerId: "pipeline-worker", expectedStageVersion: 1 }, testDb);
     if (!claim) throw new Error("expected claim");
     const result = await commitKnowledgeIngestionStage({ jobId: claim.jobId, expectedStage: "queued", expectedStageVersion: 1, fencingToken: "a".repeat(64), nextStage: "triaging" }, testDb);
@@ -243,6 +289,7 @@ describe("knowledge ingestion pipeline", () => {
     await testDb.insert(sources).values({ id: "source-2", kind: "pasted_text", label: "Second safe source", sourceType: "community", verificationStatus: "unverified", official: false, partner: false, submittedByUserId: "operator" });
     const firstText = "Đèo Hải Vân có điểm dừng ngắm cảnh an toàn vào ban ngày.";
     const first = await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText: firstText, metadata: { kind: "submitted" }, capturedAt: new Date("2026-07-21T00:00:00.000Z") });
+    await testDb.update(knowledgeIngestionJobs).set({ protocolVersion: 1 }).where(eq(knowledgeIngestionJobs.captureVersionId, first.id));
     await testDb.insert(knowledgeCards).values({ id: "existing", status: "approved", publicationState: "active", knowledgeState: "community_observation", reviewState: "reviewed", verificationState: "not_required", type: "place", title: "Điểm ngắm cảnh đèo Hải Vân", summary: "Có điểm dừng ngắm cảnh phù hợp ban ngày.", locationName: "Đèo Hải Vân", conditions: ["ban ngày"], confidence: "community", freshnessSensitive: false, needsReview: false, aiPromptVersion: "test", createdByUserId: "operator" });
     await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: "existing", sourceId: "source", supportLevel: "supporting" });
     await testDb.insert(knowledgeCardEvidence).values({ knowledgeCardId: "existing", sourceId: "source", captureVersionId: first.id, quoteText: firstText, spanStart: 0, spanEnd: Array.from(firstText).length, observedAt: new Date(), capturedAt: new Date(), conditions: ["ban ngày"], supportLevel: "supporting", displayPolicy: "fact_only", state: "active", independenceKey: `source:${first.id}` });

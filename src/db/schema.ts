@@ -144,6 +144,9 @@ export type KnowledgeExtractionJobStatus = (typeof knowledgeExtractionJobStatusV
 export const knowledgeIngestionStageValues = ["queued", "triaging", "extracting", "judging", "relating", "published", "suppressed", "review_recommended", "verify_first", "failed"] as const;
 export type KnowledgeIngestionStage = (typeof knowledgeIngestionStageValues)[number];
 
+export const knowledgeIngestionCandidateStageValues = ["queued", "judging", "relating", "published", "suppressed", "review_recommended", "verify_first", "failed"] as const;
+export type KnowledgeIngestionCandidateStage = (typeof knowledgeIngestionCandidateStageValues)[number];
+
 export const knowledgeRecommendationStatusValues = ["open", "in_review", "resolved", "superseded"] as const;
 export type KnowledgeRecommendationStatus = (typeof knowledgeRecommendationStatusValues)[number];
 
@@ -529,6 +532,17 @@ export const knowledgeIngestionJobs = pgTable(
       .references(() => users.id, { onDelete: "restrict" }),
     submittedByEmail: text("submitted_by_email").notNull(),
     stage: text("stage").$type<KnowledgeIngestionStage>().default("queued").notNull(),
+    protocolVersion: integer("protocol_version").default(1).notNull(),
+    discoveryCursor: integer("discovery_cursor").default(0).notNull(),
+    discoveryComplete: boolean("discovery_complete").default(false).notNull(),
+    discoveredCandidateCount: integer("discovered_candidate_count").default(0).notNull(),
+    terminalCandidateCount: integer("terminal_candidate_count").default(0).notNull(),
+    publishedCandidateCount: integer("published_candidate_count").default(0).notNull(),
+    suppressedCandidateCount: integer("suppressed_candidate_count").default(0).notNull(),
+    reviewRecommendedCandidateCount: integer("review_recommended_candidate_count").default(0).notNull(),
+    verifyFirstCandidateCount: integer("verify_first_candidate_count").default(0).notNull(),
+    failedCandidateCount: integer("failed_candidate_count").default(0).notNull(),
+    invalidCandidateCount: integer("invalid_candidate_count").default(0).notNull(),
     stageVersion: integer("stage_version").default(1).notNull(),
     attemptCount: integer("attempt_count").default(0).notNull(),
     maxAttempts: integer("max_attempts").default(3).notNull(),
@@ -545,6 +559,7 @@ export const knowledgeIngestionJobs = pgTable(
   },
   (job) => [
     uniqueIndex("knowledge_ingestion_jobs_capture_version_id_idx").on(job.captureVersionId),
+    uniqueIndex("knowledge_ingestion_jobs_id_source_capture_idx").on(job.id, job.sourceId, job.captureVersionId),
     index("knowledge_ingestion_jobs_claim_queue_idx").on(job.stage, job.nextRunAt, job.createdAt),
     index("knowledge_ingestion_jobs_lease_expiry_idx").on(job.leaseExpiresAt).where(sql`${job.leaseExpiresAt} is not null`),
     index("knowledge_ingestion_jobs_source_id_idx").on(job.sourceId),
@@ -554,6 +569,9 @@ export const knowledgeIngestionJobs = pgTable(
       name: "knowledge_ingestion_jobs_capture_version_source_fk",
     }).onDelete("restrict"),
     check("knowledge_ingestion_jobs_stage_check", sql`${job.stage} in ('queued', 'triaging', 'extracting', 'judging', 'relating', 'published', 'suppressed', 'review_recommended', 'verify_first', 'failed')`),
+    check("knowledge_ingestion_jobs_protocol_version_check", sql`${job.protocolVersion} in (1, 2)`),
+    check("knowledge_ingestion_jobs_discovery_cursor_check", sql`${job.discoveryCursor} >= 0`),
+    check("knowledge_ingestion_jobs_candidate_counts_check", sql`${job.discoveredCandidateCount} >= 0 and ${job.terminalCandidateCount} >= 0 and ${job.terminalCandidateCount} <= ${job.discoveredCandidateCount} and ${job.publishedCandidateCount} >= 0 and ${job.suppressedCandidateCount} >= 0 and ${job.reviewRecommendedCandidateCount} >= 0 and ${job.verifyFirstCandidateCount} >= 0 and ${job.failedCandidateCount} >= 0 and ${job.invalidCandidateCount} >= 0 and ${job.publishedCandidateCount} + ${job.suppressedCandidateCount} + ${job.reviewRecommendedCandidateCount} + ${job.verifyFirstCandidateCount} + ${job.failedCandidateCount} = ${job.terminalCandidateCount}`),
     check("knowledge_ingestion_jobs_stage_version_check", sql`${job.stageVersion} >= 1`),
     check("knowledge_ingestion_jobs_attempt_count_check", sql`${job.attemptCount} >= 0 and ${job.attemptCount} <= ${job.maxAttempts}`),
     check("knowledge_ingestion_jobs_max_attempts_check", sql`${job.maxAttempts} between 1 and 10`),
@@ -564,6 +582,58 @@ export const knowledgeIngestionJobs = pgTable(
     check("knowledge_ingestion_jobs_claim_shape_check", sql`(${job.claimedBy} is null and ${job.claimedAt} is null and ${job.leaseExpiresAt} is null and ${job.fencingToken} is null) or (${job.claimedBy} is not null and length(btrim(${job.claimedBy})) between 1 and 160 and ${job.claimedAt} is not null and ${job.leaseExpiresAt} > ${job.claimedAt} and ${job.fencingToken} ~ '^[a-f0-9]{64}$')`),
     check("knowledge_ingestion_jobs_terminal_claim_check", sql`${job.stage} not in ('published', 'suppressed', 'review_recommended', 'verify_first', 'failed') or (${job.claimedBy} is null and ${job.claimedAt} is null and ${job.leaseExpiresAt} is null and ${job.fencingToken} is null)`),
     check("knowledge_ingestion_jobs_terminal_checkpoint_check", sql`${job.stage} not in ('published', 'suppressed', 'review_recommended', 'verify_first', 'failed') or ${job.checkpoint} is null`),
+  ],
+);
+
+// Operational rows only: knowledge_cards remains the sole canonical fact aggregate.
+export const knowledgeIngestionCandidates = pgTable(
+  "knowledge_ingestion_candidates",
+  {
+    id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    ingestionJobId: text("ingestion_job_id").notNull().references(() => knowledgeIngestionJobs.id, { onDelete: "cascade" }),
+    sourceId: text("source_id").notNull().references(() => sources.id, { onDelete: "restrict" }),
+    captureVersionId: text("capture_version_id").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    type: text("type").$type<KnowledgeCardType>().notNull(),
+    title: text("title").notNull(),
+    summary: text("summary").notNull(),
+    locationName: text("location_name"),
+    routeSegment: text("route_segment"),
+    conditions: jsonb("conditions").$type<string[]>().default([]).notNull(),
+    freshnessSensitive: boolean("freshness_sensitive").default(false).notNull(),
+    spanStart: integer("span_start").notNull(),
+    spanEnd: integer("span_end").notNull(),
+    extractionModelId: text("extraction_model_id").references(() => aiGatewayModels.id, { onDelete: "set null" }),
+    extractionPromptVersion: text("extraction_prompt_version").notNull(),
+    stage: text("stage").$type<KnowledgeIngestionCandidateStage>().default("queued").notNull(),
+    stageVersion: integer("stage_version").default(1).notNull(),
+    attemptCount: integer("attempt_count").default(0).notNull(),
+    maxAttempts: integer("max_attempts").default(3).notNull(),
+    nextRunAt: timestamp("next_run_at", { mode: "date" }).defaultNow().notNull(),
+    claimedBy: text("claimed_by"),
+    claimedAt: timestamp("claimed_at", { mode: "date" }),
+    leaseExpiresAt: timestamp("lease_expires_at", { mode: "date" }),
+    fencingToken: text("fencing_token"),
+    outcomeReasonCode: text("outcome_reason_code"),
+    judgmentSummary: text("judgment_summary"),
+    scores: jsonb("scores").$type<Record<string, number>>(),
+    knowledgeCardId: text("knowledge_card_id").references(() => knowledgeCards.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (candidate) => [
+    uniqueIndex("knowledge_ingestion_candidates_job_fingerprint_idx").on(candidate.ingestionJobId, candidate.fingerprint),
+    index("knowledge_ingestion_candidates_claim_queue_idx").on(candidate.stage, candidate.nextRunAt, candidate.createdAt),
+    index("knowledge_ingestion_candidates_parent_stage_idx").on(candidate.ingestionJobId, candidate.stage),
+    index("knowledge_ingestion_candidates_capture_span_idx").on(candidate.captureVersionId, candidate.spanStart),
+    foreignKey({ columns: [candidate.ingestionJobId, candidate.sourceId, candidate.captureVersionId], foreignColumns: [knowledgeIngestionJobs.id, knowledgeIngestionJobs.sourceId, knowledgeIngestionJobs.captureVersionId], name: "knowledge_ingestion_candidates_parent_capture_fk" }).onDelete("cascade"),
+    check("knowledge_ingestion_candidates_stage_check", sql`${candidate.stage} in ('queued', 'judging', 'relating', 'published', 'suppressed', 'review_recommended', 'verify_first', 'failed')`),
+    check("knowledge_ingestion_candidates_span_check", sql`${candidate.spanStart} >= 0 and ${candidate.spanEnd} > ${candidate.spanStart}`),
+    check("knowledge_ingestion_candidates_safe_text_check", sql`length(btrim(${candidate.title})) between 1 and 160 and length(btrim(${candidate.summary})) between 1 and 1200 and length(btrim(${candidate.extractionPromptVersion})) between 1 and 160`),
+    check("knowledge_ingestion_candidates_conditions_check", sql`jsonb_typeof(${candidate.conditions}) = 'array'`),
+    check("knowledge_ingestion_candidates_attempt_check", sql`${candidate.attemptCount} >= 0 and ${candidate.attemptCount} <= ${candidate.maxAttempts} and ${candidate.maxAttempts} between 1 and 10`),
+    check("knowledge_ingestion_candidates_claim_shape_check", sql`(${candidate.claimedBy} is null and ${candidate.claimedAt} is null and ${candidate.leaseExpiresAt} is null and ${candidate.fencingToken} is null) or (${candidate.claimedBy} is not null and ${candidate.claimedAt} is not null and ${candidate.leaseExpiresAt} > ${candidate.claimedAt} and ${candidate.fencingToken} ~ '^[a-f0-9]{64}$')`),
+    check("knowledge_ingestion_candidates_outcome_reason_code_check", sql`${candidate.outcomeReasonCode} is null or ${candidate.outcomeReasonCode} in ('candidate_terminalized', 'stale_or_deleted_capture', 'judge_model_unavailable', 'judge_model_not_independent', 'judge_provider_failed', 'relation_provider_failed', 'relation_ambiguous', 'relation_invalid', 'stale_relation_target', 'attach_condition_mismatch', 'conflict_condition_mismatch', 'retry_exhausted')`),
   ],
 );
 

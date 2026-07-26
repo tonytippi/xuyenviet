@@ -10,6 +10,7 @@ export const sourceKnowledgeSuggestionPurpose = aiUsagePurposes.extraction;
 export const sourceKnowledgeSuggestionPromptVersion = aiUsagePromptVersions.sourceKnowledgeSuggestion;
 export const knowledgePipelineExtractionPurpose = aiUsagePurposes.extraction;
 export const knowledgePipelineExtractionPromptVersion = aiUsagePromptVersions.knowledgePipelineExtraction;
+export const knowledgePipelineMultiFactExtractionPromptVersion = "knowledge_pipeline_multi_fact_extraction_v2";
 export const knowledgePipelineJudgmentPurpose = aiUsagePurposes.evaluation;
 export const knowledgePipelineJudgmentPromptVersion = aiUsagePromptVersions.knowledgePipelineJudgment;
 export const tripChangeProposalDraftPurpose = aiUsagePurposes.tripChangeProposalDraft;
@@ -89,6 +90,14 @@ const knowledgePipelineExtractionSystemPrompt = [
   "Return strict JSON only. Never return personal data, contacts, or a fact that is only an opinion, question, advertisement, or unsupported claim.",
   "Return {candidate:null} when no safe fact exists. Otherwise candidate must include type, title, summary, location_name or route_segment, conditions, freshness_sensitive, and evidence {quote_text, span_start, span_end}.",
   "quote_text must be an exact contiguous substring of source_text and the offsets are zero-based PostgreSQL character offsets (Unicode code points, not UTF-16 code units). Paraphrase every non-evidence field.",
+].join("\n");
+
+const knowledgePipelineMultiFactExtractionSystemPrompt = [
+  "Extract every independently useful, atomic Vietnam road-trip fact whose exact evidence begins inside the supplied core range.",
+  "Return strict JSON only: {candidates:[...]}. Return an empty candidates array when none qualify; never select a representative fact or impose a fact quota.",
+  "Each candidate requires type, title, summary, location_name or route_segment, conditions, freshness_sensitive, and evidence {quote_text, span_start, span_end}.",
+  "Offsets are absolute zero-based Unicode code-point offsets in the complete source_text. quote_text must exactly equal that contiguous source substring.",
+  "Paraphrase title, summary, and conditions. Do not return contacts, personal data, opinions, questions, advertisements, raw provider data, or claims without independent actionable travel value.",
 ].join("\n");
 
 const knowledgePipelineJudgmentSystemPrompt = [
@@ -310,6 +319,10 @@ export function buildSourceKnowledgeSuggestionMessages({
 
 export function buildKnowledgePipelineExtractionMessages(input: { source: Record<string, unknown>; rawText: string }) {
   return [{ role: "system" as const, content: knowledgePipelineExtractionSystemPrompt }, { role: "user" as const, content: JSON.stringify({ source_metadata: input.source, source_text: input.rawText }) }];
+}
+
+export function buildKnowledgePipelineMultiFactExtractionMessages(input: { source: Record<string, unknown>; rawText: string; sourceOffset: number; coreStart: number; coreEnd: number }) {
+  return [{ role: "system" as const, content: knowledgePipelineMultiFactExtractionSystemPrompt }, { role: "user" as const, content: JSON.stringify({ source_metadata: input.source, source_text: input.rawText, source_offset: input.sourceOffset, core_range: { start: input.coreStart, end: input.coreEnd }, expected_output: { candidates: [] } }) }];
 }
 
 export function buildKnowledgePipelineJudgmentMessages(input: { candidate: Record<string, unknown>; evidence: { quoteText: string; spanStart: number; spanEnd: number } }) {

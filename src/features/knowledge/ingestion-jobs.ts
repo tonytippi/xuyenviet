@@ -5,7 +5,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { and, asc, eq, gt, isNull, lte, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { knowledgeIngestionJobs, knowledgeCardTypeValues, sourceCaptureVersions, sources, users } from "@/db/schema";
+import { knowledgeIngestionCandidates, knowledgeIngestionJobs, knowledgeCardTypeValues, sourceCaptureVersions, sources, users } from "@/db/schema";
 
 type IngestionJobDb = Pick<ReturnType<typeof getDb>, "select" | "insert" | "update" | "execute" | "transaction">;
 type Stage = typeof knowledgeIngestionJobs.$inferSelect.stage;
@@ -23,8 +23,9 @@ const terminalStages = ["published", "suppressed", "review_recommended", "verify
 
 export class KnowledgeIngestionJobError extends Error { constructor(message: string) { super(message); this.name = "KnowledgeIngestionJobError"; } }
 export type KnowledgeIngestionJobStatus = { id: string; sourceId: string; captureVersionId: string; stage: Stage; stageVersion: number; attemptCount: number; maxAttempts: number; nextRunAt: Date; lastErrorCode: string | null; requeueReasonCode: string | null; claimedBy: string | null; claimedAt: Date | null; leaseExpiresAt: Date | null; expired: boolean; createdAt: Date; updatedAt: Date };
-export type KnowledgeIngestionClaim = { jobId: string; sourceId: string; captureVersionId: string; stage: NonterminalIngestionStage; stageVersion: number; attemptCount: number; leaseExpiresAt: Date; fencingToken: string; checkpoint: KnowledgeIngestionCheckpoint | null };
+export type KnowledgeIngestionClaim = { jobId: string; sourceId: string; captureVersionId: string; protocolVersion: 1 | 2; stage: NonterminalIngestionStage; stageVersion: number; attemptCount: number; leaseExpiresAt: Date; fencingToken: string; checkpoint: KnowledgeIngestionCheckpoint | null };
 export type KnowledgeIngestionStageCommit = { jobId: string; expectedStage: NonterminalIngestionStage; expectedStageVersion: number; fencingToken: string; nextStage: Stage; checkpoint?: KnowledgeIngestionCheckpoint; lastErrorCode?: string | null; now?: Date };
+export type KnowledgeIngestionCandidateClaim = { candidateId: string; jobId: string; sourceId: string; captureVersionId: string; stage: "queued" | "judging" | "relating"; stageVersion: number; fencingToken: string; leaseExpiresAt: Date };
 
 export async function ensureIngestionJobForCaptureVersion(db: IngestionJobDb, input: { sourceId: string; captureVersionId: string }) {
   const sourceId = input.sourceId.trim(); const captureVersionId = input.captureVersionId.trim();
@@ -34,8 +35,8 @@ export async function ensureIngestionJobForCaptureVersion(db: IngestionJobDb, in
   const [source] = await db.select({ submittedByEmail: users.email }).from(sources).innerJoin(users, eq(users.id, sources.submittedByUserId)).where(eq(sources.id, sourceId)).limit(1);
   if (!source?.submittedByEmail) throw new KnowledgeIngestionJobError("The source submitter provenance is unavailable.");
   const created = await db.execute(sql`
-    insert into knowledge_ingestion_jobs (id, source_id, capture_version_id, submitted_by_user_id, submitted_by_email, stage, stage_version, attempt_count, max_attempts, next_run_at)
-    select ${randomUUID()}, capture.source_id, capture.id, source.submitted_by_user_id, submitter.email, 'queued', 1, 0, ${defaultMaxAttempts}, timezone('UTC', now())
+    insert into knowledge_ingestion_jobs (id, source_id, capture_version_id, submitted_by_user_id, submitted_by_email, stage, protocol_version, stage_version, attempt_count, max_attempts, next_run_at)
+    select ${randomUUID()}, capture.source_id, capture.id, source.submitted_by_user_id, submitter.email, 'queued', 2, 1, 0, ${defaultMaxAttempts}, timezone('UTC', now())
     from source_capture_versions capture join sources source on source.id = capture.source_id join users submitter on submitter.id = source.submitted_by_user_id
     where capture.id = ${captureVersionId} and capture.source_id = ${sourceId} and capture.payload_deleted_at is null and length(btrim(capture.raw_text)) > 0 and length(btrim(submitter.email)) between 1 and 320
     for key share of capture on conflict (capture_version_id) do nothing returning *
@@ -46,13 +47,60 @@ export async function ensureIngestionJobForCaptureVersion(db: IngestionJobDb, in
   return existing;
 }
 
+export async function claimNextKnowledgeIngestionCandidate(input: { workerId: string; now?: Date }, db: IngestionJobDb = getDb()): Promise<KnowledgeIngestionCandidateClaim | null> {
+  const workerId = input.workerId.trim();
+  if (!/^[a-zA-Z0-9_.:-]{1,160}$/.test(workerId)) throw new KnowledgeIngestionJobError("Worker ID is invalid.");
+  const now = input.now ?? new Date(); const leaseExpiresAt = new Date(now.getTime() + getClaimLeaseMs()); const fencingToken = randomBytes(32).toString("hex");
+  return db.transaction(async (tx) => {
+    const rows = await tx.execute(sql`select c.id from knowledge_ingestion_candidates c join knowledge_ingestion_jobs j on j.id = c.ingestion_job_id and j.source_id = c.source_id and j.capture_version_id = c.capture_version_id where j.protocol_version = 2 and c.stage in ('queued', 'judging', 'relating') and c.claimed_by is null and c.next_run_at <= timezone('UTC', ${now.toISOString()}::timestamptz) and c.attempt_count < c.max_attempts order by c.next_run_at asc, c.created_at asc for update skip locked limit 1`) as Array<{ id: string }>;
+    if (!rows[0]) return null;
+    const [row] = await tx.update(knowledgeIngestionCandidates).set({ claimedBy: workerId, claimedAt: now, leaseExpiresAt, fencingToken, attemptCount: sql`${knowledgeIngestionCandidates.attemptCount} + 1`, updatedAt: now }).where(and(eq(knowledgeIngestionCandidates.id, rows[0].id), isNull(knowledgeIngestionCandidates.claimedBy), sql`exists (select 1 from knowledge_ingestion_jobs j where j.id = ${knowledgeIngestionCandidates.ingestionJobId} and j.source_id = ${knowledgeIngestionCandidates.sourceId} and j.capture_version_id = ${knowledgeIngestionCandidates.captureVersionId} and j.protocol_version = 2)`)).returning();
+    if (!row || !["queued", "judging", "relating"].includes(row.stage)) return null;
+    return { candidateId: row.id, jobId: row.ingestionJobId, sourceId: row.sourceId, captureVersionId: row.captureVersionId, stage: row.stage as KnowledgeIngestionCandidateClaim["stage"], stageVersion: row.stageVersion, fencingToken, leaseExpiresAt: row.leaseExpiresAt as Date };
+  });
+}
+
+export async function terminalizeKnowledgeIngestionCandidate(input: { candidateId: string; expectedStage: KnowledgeIngestionCandidateClaim["stage"]; expectedStageVersion: number; fencingToken: string; outcome: "published" | "suppressed" | "review_recommended" | "verify_first" | "failed"; reasonCode: string; cardId?: string; judgmentSummary?: string; scores?: Record<string, number>; now?: Date }, db: IngestionJobDb = getDb()) {
+  const now = input.now ?? new Date();
+  return db.transaction(async (tx) => {
+    const [candidate] = await tx.update(knowledgeIngestionCandidates).set({ stage: input.outcome, stageVersion: input.expectedStageVersion + 1, outcomeReasonCode: input.reasonCode, knowledgeCardId: input.cardId ?? null, judgmentSummary: input.judgmentSummary ?? null, scores: input.scores ?? null, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, updatedAt: now }).where(and(eq(knowledgeIngestionCandidates.id, input.candidateId), eq(knowledgeIngestionCandidates.stage, input.expectedStage), eq(knowledgeIngestionCandidates.stageVersion, input.expectedStageVersion), eq(knowledgeIngestionCandidates.fencingToken, input.fencingToken), gt(knowledgeIngestionCandidates.leaseExpiresAt, now), sql`exists (select 1 from knowledge_ingestion_jobs j where j.id = ${knowledgeIngestionCandidates.ingestionJobId} and j.source_id = ${knowledgeIngestionCandidates.sourceId} and j.capture_version_id = ${knowledgeIngestionCandidates.captureVersionId})`)).returning({ ingestionJobId: knowledgeIngestionCandidates.ingestionJobId });
+    if (!candidate) return null;
+    const counters = input.outcome === "published" ? { publishedCandidateCount: sql`${knowledgeIngestionJobs.publishedCandidateCount} + 1` } : input.outcome === "verify_first" ? { verifyFirstCandidateCount: sql`${knowledgeIngestionJobs.verifyFirstCandidateCount} + 1` } : input.outcome === "review_recommended" ? { reviewRecommendedCandidateCount: sql`${knowledgeIngestionJobs.reviewRecommendedCandidateCount} + 1` } : input.outcome === "failed" ? { failedCandidateCount: sql`${knowledgeIngestionJobs.failedCandidateCount} + 1` } : { suppressedCandidateCount: sql`${knowledgeIngestionJobs.suppressedCandidateCount} + 1` };
+    await tx.update(knowledgeIngestionJobs).set({ terminalCandidateCount: sql`${knowledgeIngestionJobs.terminalCandidateCount} + 1`, ...counters, updatedAt: now }).where(eq(knowledgeIngestionJobs.id, candidate.ingestionJobId));
+    await finalizeV2Parent(tx, candidate.ingestionJobId, now);
+    return candidate;
+  });
+}
+
+export async function finalizeV2Parent(db: Pick<IngestionJobDb, "update" | "execute">, jobId: string, now = new Date()) {
+  await db.execute(sql`update knowledge_ingestion_jobs set stage = case when failed_candidate_count > 0 then 'failed' when published_candidate_count > 0 then 'published' when verify_first_candidate_count > 0 then 'verify_first' when review_recommended_candidate_count > 0 then 'review_recommended' else 'suppressed' end, stage_version = stage_version + 1, claimed_by = null, claimed_at = null, lease_expires_at = null, fencing_token = null, updated_at = ${now.toISOString()}::timestamptz where id = ${jobId} and protocol_version = 2 and discovery_complete = true and terminal_candidate_count = discovered_candidate_count and stage = 'queued'`);
+}
+
 /** Invalidates expired fences before a recovered stage can be claimed. */
 export async function recoverKnowledgeIngestionJobs(db: IngestionJobDb = getDb(), now = new Date()) {
   return db.transaction(async (tx) => {
     const unrecoverable = await tx.update(knowledgeIngestionJobs).set({ stage: "failed", stageVersion: sql`${knowledgeIngestionJobs.stageVersion} + 1`, checkpoint: null, lastErrorCode: "checkpoint_unavailable", requeueReasonCode: "checkpoint_unavailable", claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, updatedAt: now }).where(and(sql`${knowledgeIngestionJobs.stage} in ('triaging', 'extracting', 'judging', 'relating')`, isNull(knowledgeIngestionJobs.checkpoint))).returning({ id: knowledgeIngestionJobs.id });
     const exhausted = await tx.update(knowledgeIngestionJobs).set({ stage: "failed", stageVersion: sql`${knowledgeIngestionJobs.stageVersion} + 1`, checkpoint: null, lastErrorCode: "retry_exhausted", requeueReasonCode: "retry_exhausted", claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, updatedAt: now }).where(and(sql`${knowledgeIngestionJobs.stage} not in ('published', 'suppressed', 'review_recommended', 'verify_first', 'failed')`, lte(knowledgeIngestionJobs.attemptCount, knowledgeIngestionJobs.maxAttempts), sql`${knowledgeIngestionJobs.attemptCount} >= ${knowledgeIngestionJobs.maxAttempts}`, sql`(${knowledgeIngestionJobs.claimedBy} is null or ${knowledgeIngestionJobs.leaseExpiresAt} <= ${now.toISOString()}::timestamp)`)).returning({ id: knowledgeIngestionJobs.id });
     const recovered = await tx.update(knowledgeIngestionJobs).set({ claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, nextRunAt: now, requeueReasonCode: "lease_expired", updatedAt: now }).where(and(sql`${knowledgeIngestionJobs.stage} not in ('published', 'suppressed', 'review_recommended', 'verify_first', 'failed')`, sql`${knowledgeIngestionJobs.leaseExpiresAt} <= ${now.toISOString()}::timestamp`, sql`${knowledgeIngestionJobs.attemptCount} < ${knowledgeIngestionJobs.maxAttempts}`)).returning({ id: knowledgeIngestionJobs.id });
-    return { recovered: recovered.length, exhausted: exhausted.length + unrecoverable.length };
+    const candidateExhausted = await tx.update(knowledgeIngestionCandidates).set({ stage: "failed", stageVersion: sql`${knowledgeIngestionCandidates.stageVersion} + 1`, outcomeReasonCode: "retry_exhausted", claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, updatedAt: now }).where(and(sql`${knowledgeIngestionCandidates.stage} in ('queued', 'judging', 'relating')`, sql`${knowledgeIngestionCandidates.attemptCount} >= ${knowledgeIngestionCandidates.maxAttempts}`, sql`(${knowledgeIngestionCandidates.claimedBy} is null or ${knowledgeIngestionCandidates.leaseExpiresAt} <= ${now.toISOString()}::timestamp)`)).returning({ ingestionJobId: knowledgeIngestionCandidates.ingestionJobId });
+    for (const candidate of candidateExhausted) {
+      await tx.update(knowledgeIngestionJobs).set({ terminalCandidateCount: sql`${knowledgeIngestionJobs.terminalCandidateCount} + 1`, failedCandidateCount: sql`${knowledgeIngestionJobs.failedCandidateCount} + 1`, updatedAt: now }).where(eq(knowledgeIngestionJobs.id, candidate.ingestionJobId));
+      await finalizeV2Parent(tx, candidate.ingestionJobId, now);
+    }
+    const candidateRecovered = await tx.update(knowledgeIngestionCandidates).set({ claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, nextRunAt: now, updatedAt: now }).where(and(sql`${knowledgeIngestionCandidates.stage} in ('queued', 'judging', 'relating')`, sql`${knowledgeIngestionCandidates.leaseExpiresAt} <= ${now.toISOString()}::timestamp`, sql`${knowledgeIngestionCandidates.attemptCount} < ${knowledgeIngestionCandidates.maxAttempts}`)).returning({ id: knowledgeIngestionCandidates.id });
+    return { recovered: recovered.length + candidateRecovered.length, exhausted: exhausted.length + unrecoverable.length + candidateExhausted.length };
+  });
+}
+
+export async function retryKnowledgeIngestionCandidate(input: { candidateId: string; expectedStage: KnowledgeIngestionCandidateClaim["stage"]; expectedStageVersion: number; fencingToken: string; errorCode: string; now?: Date }, db: IngestionJobDb = getDb()) {
+  const now = input.now ?? new Date();
+  return db.transaction(async (tx) => {
+    const [candidate] = await tx.update(knowledgeIngestionCandidates).set({ stage: sql`case when ${knowledgeIngestionCandidates.attemptCount} >= ${knowledgeIngestionCandidates.maxAttempts} then 'failed' else ${knowledgeIngestionCandidates.stage} end`, stageVersion: sql`case when ${knowledgeIngestionCandidates.attemptCount} >= ${knowledgeIngestionCandidates.maxAttempts} then ${knowledgeIngestionCandidates.stageVersion} + 1 else ${knowledgeIngestionCandidates.stageVersion} end`, outcomeReasonCode: sql`case when ${knowledgeIngestionCandidates.attemptCount} >= ${knowledgeIngestionCandidates.maxAttempts} then 'retry_exhausted' else ${input.errorCode} end`, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, nextRunAt: sql`case when ${knowledgeIngestionCandidates.attemptCount} >= ${knowledgeIngestionCandidates.maxAttempts} then ${knowledgeIngestionCandidates.nextRunAt} else ${now} + interval '1 minute' end`, updatedAt: now }).where(and(eq(knowledgeIngestionCandidates.id, input.candidateId), eq(knowledgeIngestionCandidates.stage, input.expectedStage), eq(knowledgeIngestionCandidates.stageVersion, input.expectedStageVersion), eq(knowledgeIngestionCandidates.fencingToken, input.fencingToken), gt(knowledgeIngestionCandidates.leaseExpiresAt, now))).returning({ ingestionJobId: knowledgeIngestionCandidates.ingestionJobId, stage: knowledgeIngestionCandidates.stage });
+    if (candidate?.stage === "failed") {
+      await tx.update(knowledgeIngestionJobs).set({ terminalCandidateCount: sql`${knowledgeIngestionJobs.terminalCandidateCount} + 1`, failedCandidateCount: sql`${knowledgeIngestionJobs.failedCandidateCount} + 1`, updatedAt: now }).where(eq(knowledgeIngestionJobs.id, candidate.ingestionJobId));
+      await finalizeV2Parent(tx, candidate.ingestionJobId, now);
+    }
+    return candidate ?? null;
   });
 }
 
@@ -67,7 +115,7 @@ export async function claimNextKnowledgeIngestionJob(input: { workerId: string; 
     const [claimed] = await tx.update(knowledgeIngestionJobs).set({ claimedBy: workerId, claimedAt: now, leaseExpiresAt, fencingToken, attemptCount: sql`${knowledgeIngestionJobs.attemptCount} + 1`, requeueReasonCode: null, updatedAt: now }).where(and(eq(knowledgeIngestionJobs.id, rows[0].id), isNull(knowledgeIngestionJobs.claimedBy), lte(knowledgeIngestionJobs.nextRunAt, now), sql`${knowledgeIngestionJobs.attemptCount} < ${knowledgeIngestionJobs.maxAttempts}`)).returning();
     if (!claimed || isTerminalStage(claimed.stage)) return null;
     const checkpoint = parseCheckpoint(claimed.checkpoint);
-    return { jobId: claimed.id, sourceId: claimed.sourceId, captureVersionId: claimed.captureVersionId, stage: claimed.stage, stageVersion: claimed.stageVersion, attemptCount: claimed.attemptCount, leaseExpiresAt: claimed.leaseExpiresAt as Date, fencingToken, checkpoint };
+    return { jobId: claimed.id, sourceId: claimed.sourceId, captureVersionId: claimed.captureVersionId, protocolVersion: claimed.protocolVersion as 1 | 2, stage: claimed.stage, stageVersion: claimed.stageVersion, attemptCount: claimed.attemptCount, leaseExpiresAt: claimed.leaseExpiresAt as Date, fencingToken, checkpoint };
   });
 }
 

@@ -1,12 +1,14 @@
 import "server-only";
 
-import { claimNextKnowledgeIngestionJob, recoverKnowledgeIngestionJobs } from "@/features/knowledge/ingestion-jobs";
-import { runKnowledgeIngestionPipeline } from "@/features/knowledge/ingestion-pipeline";
+import { claimNextKnowledgeIngestionCandidate, claimNextKnowledgeIngestionJob, recoverKnowledgeIngestionJobs } from "@/features/knowledge/ingestion-jobs";
+import { runKnowledgeIngestionCandidatePipeline, runKnowledgeIngestionPipeline } from "@/features/knowledge/ingestion-pipeline";
 
 const defaultPollIntervalMs = 5_000;
 
 export async function processNextKnowledgeIngestionJob(workerId: string) {
   await recoverKnowledgeIngestionJobs();
+  const candidate = await claimNextKnowledgeIngestionCandidate({ workerId });
+  if (candidate) return runKnowledgeIngestionCandidatePipeline(candidate);
   const claim = await claimNextKnowledgeIngestionJob({ workerId });
   return claim ? runKnowledgeIngestionPipeline(claim) : null;
 }
