@@ -2,7 +2,7 @@
 title: 'Multi-Fact Source Ingestion'
 type: 'feature'
 created: '2026-07-26'
-status: 'in-review'
+status: 'done'
 baseline_commit: '92a3d9f0ee874c8df7fa91ae11c21a9454e9b0e1'
 review_loop_iteration: 0
 context:
@@ -62,6 +62,16 @@ context:
 - [x] `src/features/knowledge/source-captures.ts` -- new captures select v2 through the existing job-creation entry point.
 - [x] `src/features/knowledge/facebook-capture-review-admin.ts` and `src/app/admin/knowledge/facebook-captures/[reviewId]/page.tsx` -- added bounded safe aggregate/candidate visibility and explicit v1 historical treatment.
 - [x] `tests/knowledge-ingestion-jobs.test.ts`, `tests/knowledge-ingestion-pipeline.test.ts`, and focused new tests -- covered v1 compatibility, multi-candidate discovery/deduplication, mixed outcomes, and job lifecycle safety.
+
+### Review Findings
+
+- [x] [Review][Patch] Successful discovery windows exhaust the parent retry budget [src/features/knowledge/ingestion-jobs.ts:113]
+- [x] [Review][Patch] V2 discovery sends sensitive capture text to the extraction provider [src/features/knowledge/ingestion-pipeline.ts:99]
+- [x] [Review][Patch] Expired discovery fences can still insert candidates and advance counters [src/features/knowledge/ingestion-pipeline.ts:121]
+- [x] [Review][Patch] Oversized discovery responses are retried unchanged instead of subdivided [src/features/knowledge/ingestion-pipeline.ts:117]
+- [x] [Review][Patch] Recaptured parents terminalize before existing candidates reach safe terminal outcomes [src/features/knowledge/ingestion-pipeline.ts:101]
+- [x] [Review][Patch] Invalid extracted entries have no independent safe candidate outcome [src/features/knowledge/ingestion-pipeline.ts:437]
+- [x] [Review][Patch] Model title variations bypass candidate and canonical-fact deduplication [src/features/knowledge/ingestion-pipeline.ts:466]
 
 **Acceptance Criteria:**
 - Given a long eligible capture, when source windows are processed, then every candidate that passes structural and quality gates is independently processed regardless of how many sibling candidates qualify.

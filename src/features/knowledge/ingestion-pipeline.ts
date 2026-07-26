@@ -93,12 +93,14 @@ export async function runKnowledgeIngestionPipeline(claim: KnowledgeIngestionCla
   return publish(claim, stageVersion, candidate, judgment, bundle, checkpoint.candidate.modelId, relation, db);
 }
 
-const windowCoreSize = 8_000;
+const maxWindowCoreSize = 8_000;
+const minWindowCoreSize = 500;
 const windowOverlap = 1_000;
 
 async function runV2Discovery(claim: KnowledgeIngestionClaim, db: PipelineDb): Promise<KnowledgeIngestionPipelineResult | null> {
-  const [bundle] = await db.select({ rawText: sourceCaptureVersions.rawText, source: { id: sources.id, kind: sources.kind, label: sources.label, sourceType: sources.sourceType, verificationStatus: sources.verificationStatus, official: sources.official, partner: sources.partner }, cursor: knowledgeIngestionJobs.discoveryCursor }).from(knowledgeIngestionJobs).innerJoin(sourceCaptureVersions, eq(sourceCaptureVersions.id, knowledgeIngestionJobs.captureVersionId)).innerJoin(sources, eq(sources.id, knowledgeIngestionJobs.sourceId)).where(and(eq(knowledgeIngestionJobs.id, claim.jobId), eq(knowledgeIngestionJobs.fencingToken, claim.fencingToken), eq(sources.currentCaptureVersionId, claim.captureVersionId), eq(sources.eligibility, "eligible"), isNull(sourceCaptureVersions.payloadDeletedAt))).limit(1);
-  if (!bundle?.rawText) return finish(claim, claim.stage, claim.stageVersion, "suppressed", "stale_or_deleted_capture", db);
+  const [bundle] = await db.select({ rawText: sourceCaptureVersions.rawText, source: { id: sources.id, kind: sources.kind, label: sources.label, sourceType: sources.sourceType, verificationStatus: sources.verificationStatus, official: sources.official, partner: sources.partner }, cursor: knowledgeIngestionJobs.discoveryCursor, windowSize: knowledgeIngestionJobs.discoveryWindowSize }).from(knowledgeIngestionJobs).innerJoin(sourceCaptureVersions, eq(sourceCaptureVersions.id, knowledgeIngestionJobs.captureVersionId)).innerJoin(sources, eq(sources.id, knowledgeIngestionJobs.sourceId)).where(and(eq(knowledgeIngestionJobs.id, claim.jobId), eq(knowledgeIngestionJobs.fencingToken, claim.fencingToken), eq(sources.currentCaptureVersionId, claim.captureVersionId), eq(sources.eligibility, "eligible"), isNull(sourceCaptureVersions.payloadDeletedAt))).limit(1);
+  if (!bundle?.rawText) return terminalizeStaleV2Discovery(claim, db);
+  if (containsSensitiveText(bundle.rawText)) return finish(claim, claim.stage, claim.stageVersion, "suppressed", "unsafe_or_unreadable_capture", db);
   const total = Array.from(bundle.rawText).length;
   const coreStart = bundle.cursor;
   if (coreStart >= total) {
@@ -107,7 +109,7 @@ async function runV2Discovery(claim: KnowledgeIngestionClaim, db: PipelineDb): P
     await finalizeV2Parent(db, claim.jobId);
     return { jobId: claim.jobId, sourceId: claim.sourceId, outcome: "suppressed" };
   }
-  const coreEnd = Math.min(coreStart + windowCoreSize, total);
+  const coreEnd = Math.min(coreStart + bundle.windowSize, total);
   const requestEnd = Math.min(coreEnd + windowOverlap, total);
   const model = await selectActiveAiGatewayModel({ purpose: knowledgePipelineExtractionPurpose, requiredCapabilities: { textInput: true, extraction: true }, db });
   if (!model) return finish(claim, claim.stage, claim.stageVersion, "failed", "model_unavailable", db);
@@ -116,18 +118,40 @@ async function runV2Discovery(claim: KnowledgeIngestionClaim, db: PipelineDb): P
   await recordUsage(db, model, knowledgePipelineExtractionPurpose, knowledgePipelineMultiFactExtractionPromptVersion, extracted);
   if (!extracted.ok) return retryOrFail(claim, claim.stage, claim.stageVersion, "provider_failed", db);
   const parsed = parseCandidates(extracted.content, bundle.rawText, coreStart, coreEnd);
-  if (!parsed) return retryOrFail(claim, claim.stage, claim.stageVersion, "invalid_discovery_response", db);
+  if (!parsed) return retryV2Discovery(claim, bundle.windowSize, db);
   const candidates = parsed.candidates;
   return db.transaction(async (tx) => {
-    const [current] = await tx.select({ id: knowledgeIngestionJobs.id }).from(knowledgeIngestionJobs).innerJoin(sources, eq(sources.id, knowledgeIngestionJobs.sourceId)).where(and(eq(knowledgeIngestionJobs.id, claim.jobId), eq(knowledgeIngestionJobs.sourceId, claim.sourceId), eq(knowledgeIngestionJobs.captureVersionId, claim.captureVersionId), eq(knowledgeIngestionJobs.fencingToken, claim.fencingToken), eq(knowledgeIngestionJobs.stageVersion, claim.stageVersion), eq(sources.currentCaptureVersionId, claim.captureVersionId))).limit(1).for("update");
+    const [current] = await tx.select({ id: knowledgeIngestionJobs.id }).from(knowledgeIngestionJobs).innerJoin(sources, eq(sources.id, knowledgeIngestionJobs.sourceId)).where(and(eq(knowledgeIngestionJobs.id, claim.jobId), eq(knowledgeIngestionJobs.sourceId, claim.sourceId), eq(knowledgeIngestionJobs.captureVersionId, claim.captureVersionId), eq(knowledgeIngestionJobs.fencingToken, claim.fencingToken), eq(knowledgeIngestionJobs.stageVersion, claim.stageVersion), sql`${knowledgeIngestionJobs.leaseExpiresAt} > timezone('UTC', now())`, eq(sources.currentCaptureVersionId, claim.captureVersionId), eq(sources.eligibility, "eligible"))).limit(1).for("update");
     if (!current) return null;
     let inserted = 0;
+    let invalidInserted = 0;
     for (const candidate of candidates) {
       const rows = await tx.insert(knowledgeIngestionCandidates).values({ ingestionJobId: claim.jobId, sourceId: claim.sourceId, captureVersionId: claim.captureVersionId, fingerprint: fingerprint(candidate), type: candidate.type, title: candidate.title, summary: candidate.summary, locationName: candidate.locationName, routeSegment: candidate.routeSegment, conditions: candidate.conditions, freshnessSensitive: candidate.freshnessSensitive, spanStart: candidate.evidence.spanStart, spanEnd: candidate.evidence.spanEnd, extractionModelId: model.id, extractionPromptVersion: knowledgePipelineMultiFactExtractionPromptVersion }).onConflictDoNothing().returning({ id: knowledgeIngestionCandidates.id });
       inserted += rows.length;
     }
-    const [advanced] = await tx.update(knowledgeIngestionJobs).set({ discoveryCursor: coreEnd, discoveredCandidateCount: sql`${knowledgeIngestionJobs.discoveredCandidateCount} + ${inserted}`, invalidCandidateCount: sql`${knowledgeIngestionJobs.invalidCandidateCount} + ${parsed.invalidCount}`, lastErrorCode: parsed.invalidCount > 0 ? "invalid_discovery_candidate" : null, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, nextRunAt: new Date(), updatedAt: new Date() }).where(and(eq(knowledgeIngestionJobs.id, claim.jobId), eq(knowledgeIngestionJobs.sourceId, claim.sourceId), eq(knowledgeIngestionJobs.captureVersionId, claim.captureVersionId), eq(knowledgeIngestionJobs.fencingToken, claim.fencingToken), eq(knowledgeIngestionJobs.stageVersion, claim.stageVersion))).returning();
+    for (let index = 0; index < parsed.invalidCount; index += 1) {
+      const rows = await tx.insert(knowledgeIngestionCandidates).values({ ingestionJobId: claim.jobId, sourceId: claim.sourceId, captureVersionId: claim.captureVersionId, fingerprint: invalidFingerprint(coreStart, index), type: "general_travel_tip", title: "Candidate extraction rejected", summary: "Rejected during structural or safety validation.", conditions: [], freshnessSensitive: false, spanStart: coreStart, spanEnd: Math.min(coreStart + 1, total), extractionModelId: model.id, extractionPromptVersion: knowledgePipelineMultiFactExtractionPromptVersion, stage: "suppressed", stageVersion: 2, outcomeReasonCode: "invalid_discovery_candidate" }).onConflictDoNothing().returning({ id: knowledgeIngestionCandidates.id });
+      inserted += rows.length;
+      invalidInserted += rows.length;
+    }
+    const [advanced] = await tx.update(knowledgeIngestionJobs).set({ discoveryCursor: coreEnd, discoveryWindowSize: maxWindowCoreSize, discoveredCandidateCount: sql`${knowledgeIngestionJobs.discoveredCandidateCount} + ${inserted}`, terminalCandidateCount: sql`${knowledgeIngestionJobs.terminalCandidateCount} + ${invalidInserted}`, suppressedCandidateCount: sql`${knowledgeIngestionJobs.suppressedCandidateCount} + ${invalidInserted}`, invalidCandidateCount: sql`${knowledgeIngestionJobs.invalidCandidateCount} + ${invalidInserted}`, lastErrorCode: invalidInserted > 0 ? "invalid_discovery_candidate" : null, attemptCount: 0, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, nextRunAt: new Date(), updatedAt: new Date() }).where(and(eq(knowledgeIngestionJobs.id, claim.jobId), eq(knowledgeIngestionJobs.sourceId, claim.sourceId), eq(knowledgeIngestionJobs.captureVersionId, claim.captureVersionId), eq(knowledgeIngestionJobs.fencingToken, claim.fencingToken), eq(knowledgeIngestionJobs.stageVersion, claim.stageVersion), sql`${knowledgeIngestionJobs.leaseExpiresAt} > timezone('UTC', now())`)).returning();
     return advanced ? { jobId: claim.jobId, sourceId: claim.sourceId, outcome: "suppressed" as const } : null;
+  });
+}
+
+async function retryV2Discovery(claim: KnowledgeIngestionClaim, windowSize: number, db: PipelineDb) {
+  if (windowSize > minWindowCoreSize) {
+    const [retried] = await db.update(knowledgeIngestionJobs).set({ discoveryWindowSize: Math.max(minWindowCoreSize, Math.floor(windowSize / 2)), attemptCount: 0, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, nextRunAt: new Date(), lastErrorCode: "discovery_window_subdivided", updatedAt: new Date() }).where(and(eq(knowledgeIngestionJobs.id, claim.jobId), eq(knowledgeIngestionJobs.stage, claim.stage), eq(knowledgeIngestionJobs.stageVersion, claim.stageVersion), eq(knowledgeIngestionJobs.fencingToken, claim.fencingToken), sql`${knowledgeIngestionJobs.leaseExpiresAt} > timezone('UTC', now())`)).returning({ id: knowledgeIngestionJobs.id });
+    return retried ? null : finish(claim, claim.stage, claim.stageVersion, "failed", "invalid_discovery_response", db);
+  }
+  return retryOrFail(claim, claim.stage, claim.stageVersion, "invalid_discovery_response", db);
+}
+
+async function terminalizeStaleV2Discovery(claim: KnowledgeIngestionClaim, db: PipelineDb) {
+  return db.transaction(async (tx) => {
+    const rows = await tx.update(knowledgeIngestionCandidates).set({ stage: "suppressed", stageVersion: sql`${knowledgeIngestionCandidates.stageVersion} + 1`, outcomeReasonCode: "stale_or_deleted_capture", claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, updatedAt: new Date() }).where(and(eq(knowledgeIngestionCandidates.ingestionJobId, claim.jobId), sql`${knowledgeIngestionCandidates.stage} in ('queued', 'judging', 'relating')`)).returning({ id: knowledgeIngestionCandidates.id });
+    const [terminalized] = await tx.update(knowledgeIngestionJobs).set({ stage: "suppressed", stageVersion: claim.stageVersion + 1, terminalCandidateCount: sql`${knowledgeIngestionJobs.terminalCandidateCount} + ${rows.length}`, suppressedCandidateCount: sql`${knowledgeIngestionJobs.suppressedCandidateCount} + ${rows.length}`, lastErrorCode: "stale_or_deleted_capture", claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, updatedAt: new Date() }).where(and(eq(knowledgeIngestionJobs.id, claim.jobId), eq(knowledgeIngestionJobs.stage, claim.stage), eq(knowledgeIngestionJobs.stageVersion, claim.stageVersion), eq(knowledgeIngestionJobs.fencingToken, claim.fencingToken), sql`${knowledgeIngestionJobs.leaseExpiresAt} > timezone('UTC', now())`)).returning({ id: knowledgeIngestionJobs.id });
+    return terminalized ? { jobId: claim.jobId, sourceId: claim.sourceId, outcome: "suppressed" as const } : null;
   });
 }
 
@@ -462,8 +486,9 @@ function slice(value: string, start: number, end: number) { return Array.from(va
 function normalize(value: string) { return value.normalize("NFKC").trim().toLocaleLowerCase("vi").replace(/\s+/g, " "); }
 function sameScope(card: { locationName: string | null; routeSegment: string | null }, candidate: Candidate) { return candidate.locationName ? normalize(card.locationName ?? "") === normalize(candidate.locationName) : normalize(card.routeSegment ?? "") === normalize(candidate.routeSegment ?? ""); }
 function sameConditions(left: string[], right: string[]) { const normalizedLeft = [...new Set(left.map(normalize))].sort(); const normalizedRight = [...new Set(right.map(normalize))].sort(); return normalizedLeft.length === normalizedRight.length && normalizedLeft.every((condition, index) => condition === normalizedRight[index]); }
-function identity(candidate: Candidate) { return `${candidate.type}:${normalize(candidate.locationName ?? candidate.routeSegment ?? "")}:${normalize(candidate.title)}`; }
-function fingerprint(candidate: Candidate) { return createHash("sha256").update(`${candidate.type}\u0000${candidate.evidence.spanStart}\u0000${candidate.evidence.spanEnd}\u0000${normalize(candidate.title)}`, "utf8").digest("hex"); }
+function identity(candidate: Candidate) { return `${candidate.type}:${normalize(candidate.locationName ?? candidate.routeSegment ?? "")}:${[...new Set(candidate.conditions.map(normalize))].sort().join("|")}:${createHash("sha256").update(candidate.evidence.quoteText, "utf8").digest("hex")}`; }
+function fingerprint(candidate: Candidate) { return createHash("sha256").update(`${candidate.type}\u0000${candidate.evidence.spanStart}\u0000${candidate.evidence.spanEnd}\u0000${normalize(candidate.locationName ?? candidate.routeSegment ?? "")}\u0000${[...new Set(candidate.conditions.map(normalize))].sort().join("|")}`, "utf8").digest("hex"); }
+function invalidFingerprint(coreStart: number, index: number) { return createHash("sha256").update(`invalid\u0000${coreStart}\u0000${index}`, "utf8").digest("hex"); }
 function scoresFor(judgment: Judgment) { return { relevance: judgment.relevance, extractability: judgment.extractability, evidenceGrounding: judgment.evidenceGrounding, specificity: judgment.specificity, actionability: judgment.actionability, firstHandLikelihood: judgment.firstHandLikelihood, spamCommercialRisk: judgment.spamCommercialRisk }; }
 function parseObject(content: string): Record<string, unknown> | null { try { const value: unknown = JSON.parse(content); return isRecord(value) ? value : null; } catch { return null; } }
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }

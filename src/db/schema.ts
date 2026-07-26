@@ -534,6 +534,7 @@ export const knowledgeIngestionJobs = pgTable(
     stage: text("stage").$type<KnowledgeIngestionStage>().default("queued").notNull(),
     protocolVersion: integer("protocol_version").default(1).notNull(),
     discoveryCursor: integer("discovery_cursor").default(0).notNull(),
+    discoveryWindowSize: integer("discovery_window_size").default(8_000).notNull(),
     discoveryComplete: boolean("discovery_complete").default(false).notNull(),
     discoveredCandidateCount: integer("discovered_candidate_count").default(0).notNull(),
     terminalCandidateCount: integer("terminal_candidate_count").default(0).notNull(),
@@ -571,6 +572,7 @@ export const knowledgeIngestionJobs = pgTable(
     check("knowledge_ingestion_jobs_stage_check", sql`${job.stage} in ('queued', 'triaging', 'extracting', 'judging', 'relating', 'published', 'suppressed', 'review_recommended', 'verify_first', 'failed')`),
     check("knowledge_ingestion_jobs_protocol_version_check", sql`${job.protocolVersion} in (1, 2)`),
     check("knowledge_ingestion_jobs_discovery_cursor_check", sql`${job.discoveryCursor} >= 0`),
+    check("knowledge_ingestion_jobs_discovery_window_size_check", sql`${job.discoveryWindowSize} between 500 and 8000`),
     check("knowledge_ingestion_jobs_candidate_counts_check", sql`${job.discoveredCandidateCount} >= 0 and ${job.terminalCandidateCount} >= 0 and ${job.terminalCandidateCount} <= ${job.discoveredCandidateCount} and ${job.publishedCandidateCount} >= 0 and ${job.suppressedCandidateCount} >= 0 and ${job.reviewRecommendedCandidateCount} >= 0 and ${job.verifyFirstCandidateCount} >= 0 and ${job.failedCandidateCount} >= 0 and ${job.invalidCandidateCount} >= 0 and ${job.publishedCandidateCount} + ${job.suppressedCandidateCount} + ${job.reviewRecommendedCandidateCount} + ${job.verifyFirstCandidateCount} + ${job.failedCandidateCount} = ${job.terminalCandidateCount}`),
     check("knowledge_ingestion_jobs_stage_version_check", sql`${job.stageVersion} >= 1`),
     check("knowledge_ingestion_jobs_attempt_count_check", sql`${job.attemptCount} >= 0 and ${job.attemptCount} <= ${job.maxAttempts}`),
@@ -633,7 +635,7 @@ export const knowledgeIngestionCandidates = pgTable(
     check("knowledge_ingestion_candidates_conditions_check", sql`jsonb_typeof(${candidate.conditions}) = 'array'`),
     check("knowledge_ingestion_candidates_attempt_check", sql`${candidate.attemptCount} >= 0 and ${candidate.attemptCount} <= ${candidate.maxAttempts} and ${candidate.maxAttempts} between 1 and 10`),
     check("knowledge_ingestion_candidates_claim_shape_check", sql`(${candidate.claimedBy} is null and ${candidate.claimedAt} is null and ${candidate.leaseExpiresAt} is null and ${candidate.fencingToken} is null) or (${candidate.claimedBy} is not null and ${candidate.claimedAt} is not null and ${candidate.leaseExpiresAt} > ${candidate.claimedAt} and ${candidate.fencingToken} ~ '^[a-f0-9]{64}$')`),
-    check("knowledge_ingestion_candidates_outcome_reason_code_check", sql`${candidate.outcomeReasonCode} is null or ${candidate.outcomeReasonCode} in ('candidate_terminalized', 'stale_or_deleted_capture', 'judge_model_unavailable', 'judge_model_not_independent', 'judge_provider_failed', 'relation_provider_failed', 'relation_ambiguous', 'relation_invalid', 'stale_relation_target', 'attach_condition_mismatch', 'conflict_condition_mismatch', 'retry_exhausted')`),
+    check("knowledge_ingestion_candidates_outcome_reason_code_check", sql`${candidate.outcomeReasonCode} is null or ${candidate.outcomeReasonCode} in ('candidate_terminalized', 'invalid_discovery_candidate', 'stale_or_deleted_capture', 'judge_model_unavailable', 'judge_model_not_independent', 'judge_provider_failed', 'relation_provider_failed', 'relation_ambiguous', 'relation_invalid', 'stale_relation_target', 'attach_condition_mismatch', 'conflict_condition_mismatch', 'retry_exhausted')`),
   ],
 );
 
