@@ -276,6 +276,21 @@ Người dùng có thể trả lời bằng ngôn ngữ tự nhiên, chẳng h�
 - Gemini grounding with Google Maps có capability, citation và terms đủ rõ để dùng như discovery fallback không?
 - UX nào cho phép người dùng xác nhận dữ kiện thiếu hoặc chuyển candidate thành `planned`/`confirmed` mà không biến AI thành booking agent?
 
+## Điều Kiện Trước Khi Đăng Ký Agoda
+
+XuyenViet chưa nên đăng ký Online Affiliate/MSE chỉ để bắt đầu development. Hoàn thiện trải nghiệm Trip Project và bề mặt sản phẩm công khai trước để có một website, user journey và traffic case đáng tin cậy khi Agoda thực hiện feasibility study.
+
+Trước khi liên hệ Agoda Account Manager, cần có tối thiểu:
+
+- Trang XuyenViet public và authenticated flow hoạt động ổn định, có URL/domain chính thức, privacy policy và terms phù hợp để review.
+- Trip Project đủ hoàn chỉnh để minh họa user journey: owner tạo/open trip, chat là command surface, và user-confirmed accommodation decision đi qua proposal/apply/history.
+- Mockup hoặc prototype decision card thể hiện rõ Agoda attribution, provider-issued click-out, Google attribution tách biệt, review/phone disclosure và việc XuyenViet không xử lý payment/booking.
+- Data-flow, security và privacy note cho thấy chỉ server gọi provider API; không dùng user Agoda credentials, cookie/session, coupon/account data, raw provider payload hoặc payment data.
+- Ước lượng traffic/search volume, thị trường Việt Nam, locale `vi-vn`, currency `VND`, expected peak request rate, domain và egress IP để Agoda đánh giá commercial/technical feasibility và whitelist khi cần.
+- Xác nhận nội bộ rằng initial scope là Online Affiliate/MSE Search/Content + `landingUrl`, không phải Book API, payment, customer service hay booking fulfillment.
+
+Sau khi các điều kiện này đạt, gửi inquiry nêu rõ XuyenViet là Vietnamese AI-first road-trip planning assistant: dùng Agoda để hỗ trợ shortlist theo Trip Project, để người dùng click-out và tự quyết định, rồi chỉ lưu lựa chọn do owner xác nhận vào Trip Project.
+
 ## Thứ Tự Đề Xuất
 
 1. Xác nhận PRD contract cho place identity, source classes, snapshot/provenance, user-confirmed trip state và uncertainty.
