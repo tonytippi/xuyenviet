@@ -1,9 +1,9 @@
 import "server-only";
 
-import { asc, count, ilike, inArray, or } from "drizzle-orm";
+import { asc, count, ilike, inArray, or, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { userRoles, users, type UserRole } from "@/db/schema";
+import { aiUsageEvents, userRoles, users, type UserRole } from "@/db/schema";
 import { requireExactAdminSession } from "@/server/auth";
 
 const rosterPageSize = 25;
@@ -17,6 +17,9 @@ export type AdminUserRosterItem = {
   image: string | null;
   emailVerified: Date | null;
   roles: UserRole[];
+  aiRequestCount: string;
+  inputTokens: string;
+  outputTokens: string;
 };
 
 export type AdminUserRoster = {
@@ -52,7 +55,20 @@ export async function listAdminUsers(input: { page?: number | string; search?: s
   const roleRows = userIds.length === 0
     ? []
     : await db.select({ userId: userRoles.userId, role: userRoles.role }).from(userRoles).where(inArray(userRoles.userId, userIds)).orderBy(asc(userRoles.role));
+  const usageRows = userIds.length === 0
+    ? []
+    : await db
+        .select({
+          userId: aiUsageEvents.userId,
+          aiRequestCount: sql<string>`count(${aiUsageEvents.id})::text`,
+          inputTokens: sql<string>`coalesce(sum(${aiUsageEvents.promptTokens}), 0)::text`,
+          outputTokens: sql<string>`coalesce(sum(${aiUsageEvents.completionTokens}), 0)::text`,
+        })
+        .from(aiUsageEvents)
+        .where(inArray(aiUsageEvents.userId, userIds))
+        .groupBy(aiUsageEvents.userId);
   const rolesByUserId = new Map<string, UserRole[]>();
+  const usageByUserId = new Map(usageRows.map(({ userId, ...usage }) => [userId, usage]));
 
   for (const roleRow of roleRows) {
     const roles = rolesByUserId.get(roleRow.userId) ?? [];
@@ -61,7 +77,11 @@ export async function listAdminUsers(input: { page?: number | string; search?: s
   }
 
   return {
-    items: rows.map((row) => ({ ...row, roles: rolesByUserId.get(row.id) ?? [] })),
+    items: rows.map((row) => ({
+      ...row,
+      roles: rolesByUserId.get(row.id) ?? [],
+      ...(usageByUserId.get(row.id) ?? { aiRequestCount: "0", inputTokens: "0", outputTokens: "0" }),
+    })),
     page: currentPage,
     pageSize: rosterPageSize,
     total,

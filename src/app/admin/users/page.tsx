@@ -51,6 +51,11 @@ export default async function AdminUsersPage({ searchParams }: AdminUsersPagePro
                     <span className={`rounded-full px-3 py-1 ${user.emailVerified ? "bg-[#dce9df] text-[#1f5f46]" : "bg-[#f3e6cf] text-[#8c4f13]"}`}>{user.emailVerified ? "Email đã xác thực" : "Email chưa xác thực"}</span>
                     {user.roles.length === 0 ? <span className="rounded-full bg-[#eee9df] px-3 py-1 text-[#4f625a]">Traveler</span> : user.roles.map((role) => <span className="rounded-full bg-[#17342c] px-3 py-1 text-white" key={role}>{role}</span>)}
                   </div>
+                  <dl className="mt-4 grid max-w-xl grid-cols-1 gap-2 text-sm sm:grid-cols-3">
+                    <UsageMetric label="Yêu cầu AI" value={user.aiRequestCount} />
+                    <UsageMetric label="Token đầu vào" value={user.inputTokens} />
+                    <UsageMetric label="Token đầu ra" value={user.outputTokens} />
+                  </dl>
                 </div>
                 <div className="grid gap-2 sm:grid-cols-2 lg:w-[18rem]">
                   {roles.map((role) => user.roles.includes(role) ? (
@@ -69,6 +74,15 @@ export default async function AdminUsersPage({ searchParams }: AdminUsersPagePro
         {roster.page > 1 ? <Link className="min-h-11 rounded-xl border border-[#cdbb99] px-4 py-3 font-semibold text-[#17342c]" href={previousHref}>Trang trước</Link> : <span />}
         {roster.page < roster.totalPages ? <Link className="min-h-11 rounded-xl bg-[#1f5f46] px-4 py-3 font-semibold text-white" href={nextHref}>Trang sau</Link> : null}
       </nav>
+    </div>
+  );
+}
+
+function UsageMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl bg-[#edf2eb] px-3 py-2">
+      <dt className="text-xs font-medium text-[#4f625a]">{label}</dt>
+      <dd className="mt-1 break-words font-semibold tabular-nums text-[#17342c]">{BigInt(value).toLocaleString("vi-VN")}</dd>
     </div>
   );
 }

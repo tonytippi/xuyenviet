@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { accounts, auditEvents, sessions, userRoles, users, type UserRole } from "@/db/schema";
+import { accounts, aiUsageEvents, auditEvents, sessions, userRoles, users, type UserRole } from "@/db/schema";
 
 import { testDb } from "./helpers/db";
 
@@ -55,22 +55,39 @@ describe("admin user management", () => {
     await expect(testDb.select().from(auditEvents)).resolves.toHaveLength(0);
   });
 
-  test("returns a paginated safe roster with case-insensitive search and no auth tables", async () => {
+  test("returns a paginated safe roster with lifetime usage totals, case-insensitive search, and no auth tables", async () => {
     await createUser("admin", ["admin"]);
     await createUser("first", ["operator"], { name: "An Nguyen", emailVerified: new Date("2026-01-01T00:00:00.000Z"), image: "https://example.com/an.jpg" });
     await createUser("second", ["admin"], { name: "Binh Tran" });
     await testDb.insert(accounts).values({ userId: "first", type: "oauth", provider: "google", providerAccountId: "private-account", access_token: "secret" });
     await testDb.insert(sessions).values({ sessionToken: "private-session", userId: "first", expires: new Date("2027-01-01T00:00:00.000Z") });
+    await testDb.insert(aiUsageEvents).values([
+      { userId: "first", purpose: "ai_ask_initial_answer", provider: "ai_gateway", model: "test", promptVersion: "test", status: "success", promptTokens: 120, completionTokens: 80 },
+      { userId: "first", purpose: "extraction", provider: "ai_gateway", model: "test", promptVersion: "test", status: "failure", promptTokens: 30, completionTokens: 20 },
+      { userId: "first", purpose: "web_search_fallback", provider: "tavily", model: "search", promptVersion: "test", status: "failure" },
+      { userId: "second", purpose: "ai_ask_initial_answer", provider: "ai_gateway", model: "test", promptVersion: "test", status: "success", promptTokens: 999, completionTokens: 999 },
+    ]);
     authenticate("admin");
     const { listAdminUsers } = await import("@/features/admin/users");
 
     await expect(listAdminUsers({ search: "NGUYEN", page: "invalid" })).resolves.toEqual({
-      items: [{ id: "first", name: "An Nguyen", email: "first@example.com", image: "https://example.com/an.jpg", emailVerified: new Date("2026-01-01T00:00:00.000Z"), roles: ["operator"] }],
+      items: [{ id: "first", name: "An Nguyen", email: "first@example.com", image: "https://example.com/an.jpg", emailVerified: new Date("2026-01-01T00:00:00.000Z"), roles: ["operator"], aiRequestCount: "3", inputTokens: "150", outputTokens: "100" }],
       page: 1,
       pageSize: 25,
       total: 1,
       totalPages: 1,
       search: "NGUYEN",
+    });
+  });
+
+  test("defaults lifetime usage metrics to zero for users without usage events", async () => {
+    await createUser("admin", ["admin"]);
+    await createUser("target");
+    authenticate("admin");
+    const { listAdminUsers } = await import("@/features/admin/users");
+
+    await expect(listAdminUsers({ search: "target" })).resolves.toMatchObject({
+      items: [{ id: "target", aiRequestCount: "0", inputTokens: "0", outputTokens: "0" }],
     });
   });
 
