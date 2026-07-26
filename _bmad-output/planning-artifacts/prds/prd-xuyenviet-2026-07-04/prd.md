@@ -2,7 +2,7 @@
 title: XuyenViet AI Travel Information MVP PRD
 status: final
 created: 2026-07-04
-updated: 2026-07-24
+updated: 2026-07-26
 ---
 
 # XuyenViet AI Travel Information MVP PRD
@@ -84,7 +84,7 @@ Internal owner or future small operations team member who collects travel inform
 
 ### 6.2 Should Have
 
-- AI-assisted extraction from pasted URLs, text, copied Facebook post content, or images/screenshots.
+- AI-assisted extraction of every independently useful, evidence-grounded claim from pasted URLs, text, copied Facebook post content, or images/screenshots.
 - Operator-assisted Facebook capture automation for queued Facebook URLs, using a controlled browser session to populate operator-only raw source text before AI extraction.
 - Family-aware planning rules for travelers with children.
 - Answer quality checks that push responses toward practical tips, risks, and next steps.
@@ -119,10 +119,11 @@ Internal owner or future small operations team member who collects travel inform
 2. Operator pastes a source URL, raw text, copied post content, or image/screenshot.
 3. If the source is a Facebook URL without readable text, the source remains queued for operator-assisted capture.
 4. Operator runs the controlled capture tool against queued Facebook URLs and confirms the extracted visible text before it is stored as operator-only raw source material.
-5. AI triages the source, extracts evidence-grounded claims, and evaluates claim quality, freshness, risk, duplicates, and conflicts.
-6. Claims that meet the active-publication policy become available for AI retrieval as provisional community knowledge with conditions and uncertainty wording.
-7. AI creates a prioritized review recommendation only for claims that are risky, weakly evidenced, freshness-sensitive, duplicated, or conflicting.
-8. Operator may review, revise, suppress, archive, or request verification for recommended claims; review is not required for every active claim.
+5. AI triages the source and discovers every independently useful, evidence-grounded atomic claim without treating the number of accepted claims as a quota.
+6. Each candidate claim is independently validated, evaluated for quality, freshness, risk, duplicates, and conflicts, then receives its own publication, review, verification, or suppression outcome.
+7. Claims that meet the active-publication policy become available for AI retrieval as provisional community knowledge with conditions and uncertainty wording.
+8. AI creates a prioritized review recommendation only for claims that are risky, weakly evidenced, freshness-sensitive, duplicated, or conflicting.
+9. Operator may review, revise, suppress, archive, or request verification for recommended claims; review is not required for every active claim.
 
 ### UJ-3: Traveler Turns A Direction Into A Confirmed Trip Plan
 
@@ -191,6 +192,9 @@ Internal owner or future small operations team member who collects travel inform
 - FR-24: The system shall use AI to triage submitted source material, extract structured claims, and validate each claim against a source-text evidence span.
 - FR-24A: The system shall classify AI-triaged sources as rejected, context-only, candidate, or verify-first, and shall retain decision reasons for audit and quality evaluation.
 - FR-24B: The system shall use an independent AI evaluation step to decide whether an extracted claim should become active, be suppressed, or receive a review recommendation; the extractor shall not be the sole publication decision-maker.
+- FR-24C: The system shall discover and process every independently useful atomic claim supported by a submitted immutable source version; it shall not discard otherwise qualifying claims merely because a source contains many claims or a prior sibling claim was accepted.
+- FR-24D: The system shall give each discovered candidate an independent, auditable terminal outcome and shall complete a source ingestion only after discovery and its candidate work have terminalized. A source may complete successfully when no candidate is published.
+- FR-24E: When a newer source capture supersedes an earlier immutable version, work from the earlier version shall not create, attach, conflict with, or otherwise mutate active knowledge. Historical ingestion behavior shall remain intelligible when newer ingestion capabilities are introduced.
 - FR-25: The system shall make a claim searchable without human approval only when it has validated evidence, sufficient travel specificity and actionability, no sensitive content, no high commercial/spam risk, and no unresolved high-risk conflict.
 - FR-25A: The system shall create a risk-prioritized operator review recommendation, not a mandatory approval gate, for claims with safety impact, changing operational facts, weak evidence, unresolved conflict, material duplicate risk, or missing context.
 - FR-25B: The system shall support random quality sampling of active, unreviewed claims so operators can measure false-positive publication without delaying the normal ingestion flow. The initial sampling rate shall be 15% for the first four weeks and 100% for `verify_first` claims.
@@ -226,6 +230,7 @@ Internal owner or future small operations team member who collects travel inform
 - FR-43: The system shall provide an operator/admin area separate from traveler chat.
 - FR-44: The system shall support at least one admin/operator account for initial knowledge management.
 - FR-45: The system shall allow future expansion to multiple operators without redesigning the knowledge workflow.
+- FR-45A: The operator capture-review surface shall show safe aggregate and candidate-level ingestion outcomes sufficient to diagnose a source without exposing raw provider output, raw captured text, quotes outside approved evidence storage, or internal execution secrets.
 - FR-46: The system shall capture a simple usefulness rating for AI answers during the public MVP.
 - FR-47: The system shall record AI usage events for authenticated AI requests, including user, conversation or trip context when applicable, AI purpose, provider/model, timestamp, and available usage/cost metadata.
 - FR-48: The system shall capture referral attribution when a new user signs in or registers through a valid referral link, without calculating rewards, ranking, payout, or credit conversion in MVP.
@@ -243,6 +248,7 @@ Internal owner or future small operations team member who collects travel inform
 - NFR-7: The system shall be designed so Google Maps integration, public submissions, and booking/partner flows can be added later without becoming MVP dependencies.
 - NFR-8: Browser automation for Facebook capture shall run as an operator-controlled operations tool, not as public request-path app logic or unattended mass crawling.
 - NFR-9: Active AI-extracted claims shall remain auditable through their publication decision, evidence, source, state, and review history.
+- NFR-9A: Source ingestion shall make bounded progress through large source material without imposing a maximum accepted-fact quota. Retry, interruption, duplicate delivery, and supersession shall not duplicate candidates or permit obsolete work to change canonical knowledge.
 - NFR-10: Trip Project reads and mutations, including primary-conversation access, structured plan data, proposals, and history, shall remain owner-scoped until a separately approved collaboration model exists.
 - NFR-11: Applying a Trip Change Proposal shall validate the proposal belongs to the selected Trip Project, is still applicable, and is authorized for the owner before writing an auditable change.
 
@@ -278,6 +284,10 @@ Internal owner or future small operations team member who collects travel inform
 - A source quote and direct link are evidence for operator audit by default. Facebook-derived evidence shall default to `operator_only`; traveler-visible display is permitted only when the source is accessible, the quote is short and relevant, and it contains no personally identifying or sensitive material.
 - Raw captured Facebook text shall be operator-only. A source with no active or reviewable claim shall be deleted after 180 days; a source supporting an active claim shall be re-evaluated and its traveler-visible evidence removed if the source is withdrawn, inaccessible, or subject to a removal request.
 - Operators may review any claim, but the normal ingestion path shall not block on operator review. The system shall prioritize review recommendations by likely traveler impact and evidence/risk signals.
+- A source ingestion is a source-level traversal, not a single-claim decision: it must cover the source through bounded deterministic portions and seek every independently useful claim whose supporting evidence belongs to that portion. Request-size limits protect operations only; they do not limit the number of qualifying claims.
+- Each candidate from the same source has its own evidence validation, independent judgment, relation decision, publication/review/verification/suppression outcome, and safe audit summary. The parent source reports aggregate outcomes and may succeed even when all candidates are suppressed or invalid.
+- A newer immutable capture version invalidates older in-flight work before it can change canonical facts or evidence. Existing historical ingestion records remain interpretable when the ingestion protocol evolves; the system shall not fabricate candidate-level history or reinterpret legacy outcomes.
+- The operator review surface may expose bounded aggregate and candidate-level safe outcomes for diagnosis. It shall never expose raw provider payloads, captured raw text, unapproved quotes, checkpoint internals, or execution-fencing data.
 
 ### 10.4 Web Search Fallback Contract
 
@@ -367,6 +377,8 @@ The public MVP should focus on the Hanoi-to-HCMC road-trip corridor. Initial kno
 - AC-9A: An operator can queue Facebook URLs, run operator-assisted capture to add readable raw text, and then use the AI-first triage, claim extraction, and publication workflow without changing Facebook-derived trust defaults.
 - AC-9B: The system routes risky, weakly evidenced, freshness-sensitive, duplicate, or conflicting claims to an AI-recommended, impact-prioritized operator review queue without blocking qualifying low-risk claims.
 - AC-9C: AI Ask excludes suppressed and superseded claims; applies conditional and community wording to active community claims; and does not make factual itinerary recommendations from conflicted claims.
+- AC-9D: For a long eligible source containing multiple useful claims, the system independently processes every structurally valid, quality-gated claim across the complete source without an accepted-fact quota; mixed candidate outcomes are accurately reflected in the source aggregate.
+- AC-9E: Retries, interrupted work, duplicate delivery, or a newer capture cannot duplicate candidate work or let obsolete source work mutate a knowledge card or its evidence; the operator can inspect bounded, safe aggregate and candidate outcomes for a newer-protocol capture.
 - AC-10: At least 100 active, evidence-grounded knowledge cards exist for the Hanoi-to-HCMC corridor before first public-MVP evaluation.
 - AC-11: Web search fallback is used only when curated knowledge is missing, sparse, or freshness-sensitive, and search-derived facts are labeled as external/unverified.
 - AC-12: Public MVP answer feedback is captured for usefulness evaluation.
