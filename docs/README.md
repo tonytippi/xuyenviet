@@ -30,7 +30,7 @@ Proposals record direction outside the approved MVP scope. They do not authorize
 |---|---|---|
 | [AI-First YouTube Discovery](./proposals/ai-first-youtube-discovery.md) | Proposed; blocked on architecture-policy reconciliation | Future discovery, auto-capture, and control-tower planning. |
 | [Trip Project Product Direction](./proposals/trip-project-product-direction.md) | Proposed beyond the implemented basic single-owner project | Future structured trip planning. |
-| [Place Intelligence And Accommodation Enrichment](./proposals/place-intelligence-and-accommodation-enrichment.md) | Proposed; Maps, OTA, booking, and provider enrichment are MVP non-goals | Future place identity and accommodation-shortlist planning. |
+| [Place Intelligence And Accommodation Enrichment](./proposals/place-intelligence-and-accommodation-enrichment.md) | Proposed; Maps, OTA, booking, and provider enrichment are MVP non-goals | Future opt-in, chat-first accommodation-decision assistance and place identity planning. |
 
 ## Roadmaps
 
