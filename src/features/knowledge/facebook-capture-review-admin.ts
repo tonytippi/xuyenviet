@@ -3,9 +3,8 @@ import "server-only";
 import { eq, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { facebookCaptureReviews, facebookCaptureReviewStatusValues, sourceCaptureVersions, sources, type FacebookCaptureReviewStatus } from "@/db/schema";
+import { facebookCaptureReviews, facebookCaptureReviewStatusValues, knowledgeIngestionJobs, sourceCaptureVersions, sources, type FacebookCaptureReviewStatus } from "@/db/schema";
 import { countFacebookCaptureReviewsByStatus, getExistingCardsForCaptureSource, listFacebookCaptureReviews } from "@/features/knowledge/facebook-capture-review";
-import { getActiveKnowledgeExtractionJobForSource } from "@/features/knowledge/extraction-jobs";
 import { requireAdminSession } from "@/server/auth";
 
 const defaultReviewStatus: FacebookCaptureReviewStatus = "needs_review";
@@ -29,7 +28,7 @@ export async function listAdminFacebookCaptureReviews(input: { status?: Facebook
   return Promise.all(
     reviews.map(async (review) => ({
       ...sanitizeReviewMetadata(review),
-      activeExtractionJob: await getActiveKnowledgeExtractionJobForSource(db, review.sourceId),
+      ingestionJob: await getKnowledgeIngestionJobForCaptureVersion(db, review.captureVersionId),
     })),
   );
 }
@@ -56,6 +55,7 @@ export async function getAdminFacebookCaptureReviewDetail(reviewId: string) {
       id: facebookCaptureReviews.id,
       sourceId: facebookCaptureReviews.sourceId,
       rawSourceMaterialId: facebookCaptureReviews.rawSourceMaterialId,
+      captureVersionId: facebookCaptureReviews.captureVersionId,
       status: facebookCaptureReviews.status,
       reviewerUserId: facebookCaptureReviews.reviewerUserId,
       reviewedAt: facebookCaptureReviews.reviewedAt,
@@ -92,8 +92,28 @@ export async function getAdminFacebookCaptureReviewDetail(reviewId: string) {
   return {
     ...sanitizeReviewMetadata(review),
     existingCards: await getExistingCardsForCaptureSource(db, review.sourceId),
-    activeExtractionJob: await getActiveKnowledgeExtractionJobForSource(db, review.sourceId),
+    ingestionJob: await getKnowledgeIngestionJobForCaptureVersion(db, review.captureVersionId),
   };
+}
+
+async function getKnowledgeIngestionJobForCaptureVersion(db: ReturnType<typeof getDb>, captureVersionId: string | null) {
+  if (!captureVersionId) return null;
+
+  const [job] = await db
+    .select({
+      id: knowledgeIngestionJobs.id,
+      stage: knowledgeIngestionJobs.stage,
+      attemptCount: knowledgeIngestionJobs.attemptCount,
+      maxAttempts: knowledgeIngestionJobs.maxAttempts,
+      nextRunAt: knowledgeIngestionJobs.nextRunAt,
+      lastErrorCode: knowledgeIngestionJobs.lastErrorCode,
+      updatedAt: knowledgeIngestionJobs.updatedAt,
+    })
+    .from(knowledgeIngestionJobs)
+    .where(eq(knowledgeIngestionJobs.captureVersionId, captureVersionId))
+    .limit(1);
+
+  return job ?? null;
 }
 
 export async function getAdminFacebookCaptureReviewExtractionTarget(reviewId: string) {

@@ -1,16 +1,10 @@
 import Link from "next/link";
 
 import { facebookCaptureReviewStatusValues, type FacebookCaptureReviewStatus } from "@/db/schema";
-import { sourceKnowledgeDraftExtractionPromptVersion } from "@/features/ai/prompts";
-import { extractAndApproveFacebookCaptureDraftsForm } from "@/features/knowledge/actions";
 import { listAdminFacebookCaptureReviewStatusCounts, listAdminFacebookCaptureReviews, parseFacebookCaptureReviewStatus } from "@/features/knowledge/facebook-capture-review-admin";
-
-import { ApproveAllSubmitStatus } from "./[reviewId]/approve-all-submit-status";
 
 type FacebookCaptureReviewQueuePageProps = {
   searchParams: Promise<{
-    approveAllQueued?: string;
-    jobId?: string;
     page?: string;
     status?: string;
   }>;
@@ -51,12 +45,25 @@ const emptyStateCopy: Record<FacebookCaptureReviewStatus, { title: string; body:
 };
 
 const nextActionCopy: Record<FacebookCaptureReviewStatus, string> = {
-  needs_review: "Kiểm tra raw text trong chi tiết rồi trích xuất bản nháp hoặc từ chối.",
+  needs_review: "Mở chi tiết để theo dõi pipeline ingestion và kiểm tra raw text khi cần recapture.",
   rejected: "Đã loại khỏi hàng đợi xử lý; chỉ mở lại nếu cần capture lại.",
   extracted: "Mở thẻ nháp đã liên kết để duyệt tiếp trước khi dùng cho traveler.",
   extracted_approved: "Đã tạo thẻ approved; kiểm tra thư viện nếu cần rà soát provenance.",
-  extraction_failed: "Kiểm tra lỗi an toàn trong chi tiết, thử lại hoặc từ chối capture.",
+  extraction_failed: "Mở chi tiết để kiểm tra raw text và trạng thái ingestion hiện tại.",
 };
+
+const ingestionStageLabels = {
+  queued: "Đang chờ xử lý",
+  triaging: "Đang sàng lọc",
+  extracting: "Đang trích xuất evidence",
+  judging: "Đang đánh giá evidence",
+  relating: "Đang đối chiếu thẻ liên quan",
+  published: "Đã xuất bản canonical",
+  suppressed: "Đã giữ lại, không xuất bản",
+  review_recommended: "Cần vận hành kiểm tra",
+  verify_first: "Cần xác minh trước",
+  failed: "Xử lý thất bại",
+} as const;
 
 function formatDate(value: Date | string | null) {
   if (!value) {
@@ -101,22 +108,14 @@ export default async function FacebookCaptureReviewQueuePage({ searchParams }: F
   const totalCount = statusCounts[status];
   const hasPreviousPage = currentPage > 1;
   const hasNextPage = offset + reviews.length < totalCount;
-  const approveAllQueued = params.approveAllQueued === "1";
-  const queuedJobId = params.jobId?.trim();
 
   return (
     <div>
       <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[#8c4f13]">Nguồn Facebook/cộng đồng</p>
       <h1 className="mt-4 max-w-3xl text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">Hàng đợi duyệt capture Facebook.</h1>
       <p className="mt-5 max-w-2xl text-lg leading-8 text-[#4f625a]">
-        Nguồn Facebook/cộng đồng, chưa xác minh. Hàng đợi mặc định ưu tiên capture còn cần vận hành xử lý; danh sách chỉ hiển thị tóm tắt, mở chi tiết để đọc toàn bộ raw text trước khi trích xuất.
+        Nguồn Facebook/cộng đồng, chưa xác minh. Sau khi capture được lưu, canonical ingestion tự xử lý; danh sách chỉ hiển thị tóm tắt, mở chi tiết để xem trạng thái pipeline và raw text.
       </p>
-
-      {approveAllQueued ? (
-        <p className="mt-6 rounded-2xl border border-[#8fb59f] bg-[#edf7ef] p-4 text-sm font-semibold leading-6 text-[#1f5f46]">
-          Yêu cầu trích xuất và phê duyệt tất cả đã được đưa vào hàng đợi. Không cần bấm lại; hệ thống sẽ cập nhật khi hoàn tất.{queuedJobId ? ` Job: ${queuedJobId}.` : null}
-        </p>
-      ) : null}
 
       <section className="mt-6 rounded-[1.5rem] border border-[#d8c9ad] bg-white/70 p-4">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
@@ -156,10 +155,15 @@ export default async function FacebookCaptureReviewQueuePage({ searchParams }: F
                 </Link>
               </div>
 
-              <div className="mt-5 rounded-2xl border border-[#8fb59f] bg-[#edf7ef] p-3 text-sm leading-6 text-[#1f5f46]">
+               <div className="mt-5 rounded-2xl border border-[#8fb59f] bg-[#edf7ef] p-3 text-sm leading-6 text-[#1f5f46]">
                 <span className="font-semibold">Bước tiếp theo: </span>
                 {nextActionCopy[review.status]}
-              </div>
+               </div>
+
+               <div className="mt-4 rounded-2xl border border-[#d8c9ad] bg-[#fbf7ed] p-3 text-sm leading-6 text-[#4f625a]">
+                 <span className="font-semibold text-[#17342c]">Canonical ingestion: </span>
+                 {review.ingestionJob ? `${ingestionStageLabels[review.ingestionJob.stage]} · lần thử ${review.ingestionJob.attemptCount}/${review.ingestionJob.maxAttempts}` : "Chưa có job cho capture version này."}
+               </div>
 
               <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
                 <div className="rounded-2xl bg-[#fbf7ed] p-3">
@@ -195,20 +199,6 @@ export default async function FacebookCaptureReviewQueuePage({ searchParams }: F
                   <dd className="mt-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#8c4f13]">Mở chi tiết để đọc toàn bộ raw text</dd>
                 </div>
                </dl>
-                {canExtractAndApproveAllFromQueue(review) ? (
-                  <form action={extractAndApproveFacebookCaptureDraftsForm} className="mt-5 rounded-2xl border border-[#d99a93] bg-[#fff7f2] p-4">
-                    <input name="reviewId" type="hidden" value={review.id} />
-                    <input name="returnTo" type="hidden" value="facebook_capture_queue" />
-                    <p className="text-sm font-semibold leading-6 text-[#9b2f29]">AI sẽ tạo và phê duyệt ngay tất cả thẻ từ capture này. Chỉ dùng sau khi đã kiểm tra nội dung, trust/confidence và freshness.</p>
-                    <label className="mt-3 flex gap-3 rounded-2xl border border-[#d8c9ad] bg-white/80 p-3 text-sm font-semibold leading-6 text-[#17342c]">
-                      <input className="mt-1 size-4 accent-[#1f5f46]" name="approveAllConfirmed" type="checkbox" />
-                      <span>Tôi xác nhận capture này có thể được trích xuất và phê duyệt tất cả.</span>
-                    </label>
-                    <div className="mt-4">
-                      <ApproveAllSubmitStatus />
-                    </div>
-                  </form>
-                ) : null}
               </article>
           ))
         )}
@@ -235,12 +225,4 @@ export default async function FacebookCaptureReviewQueuePage({ searchParams }: F
       )}
     </div>
   );
-}
-
-function canExtractAndApproveAllFromQueue(review: Awaited<ReturnType<typeof listAdminFacebookCaptureReviews>>[number]) {
-  return (review.status === "needs_review" || review.status === "extraction_failed")
-    && Boolean(review.rawText?.trim())
-    && review.sourceType === "community"
-    && !review.activeExtractionJob
-    && !review.existingCards.some((card) => card.aiPromptVersion === sourceKnowledgeDraftExtractionPromptVersion);
 }

@@ -122,6 +122,15 @@ describe("knowledge ingestion pipeline", () => {
     await expect(testDb.select().from(knowledgeCards)).resolves.toHaveLength(0);
   });
 
+  test("records an actionable reason when extraction omits required candidate fields", async () => {
+    const rawText = "Đèo Hải Vân có điểm dừng ngắm cảnh an toàn vào ban ngày.";
+    const { claim } = await claimFor(rawText);
+    vi.mocked(fetch).mockResolvedValueOnce(extractionResponse({ type: "place" }));
+
+    await expect(runKnowledgeIngestionPipeline(claim, testDb)).resolves.toMatchObject({ outcome: "suppressed" });
+    await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, claim.jobId))).resolves.toMatchObject([{ stage: "suppressed", lastErrorCode: "candidate_missing_required_fields" }]);
+  });
+
   test("suppresses a candidate when an independent judge misses a threshold", async () => {
     const rawText = "Đèo Hải Vân có điểm dừng ngắm cảnh an toàn vào ban ngày.";
     const { claim } = await claimFor(rawText);

@@ -229,7 +229,7 @@ describe("Facebook capture extract and approve all action", () => {
     ]);
   });
 
-  test("detail page renders safe approve-all extraction error diagnostics", async () => {
+  test("detail page does not render legacy approve-all extraction diagnostics", async () => {
     authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
     const review = await createCapturedFacebookReview({ id: "error-diagnostics", rawText: "Readable captured Facebook text." });
     const { default: FacebookCaptureReviewDetailPage } = await import("@/app/admin/knowledge/facebook-captures/[reviewId]/page");
@@ -240,10 +240,10 @@ describe("Facebook capture extract and approve all action", () => {
     });
 
     const html = renderToStaticMarkup(element);
-    expect(html).toContain("Mã lỗi an toàn: invalid_model_output");
-    expect(html).toContain("Chi tiết an toàn: missing_location_or_route");
-    expect(html).toContain("Cập nhật trạng thái lỗi: status_update_failed");
-    expect(html).toContain("Lý do cập nhật trạng thái: 23514:facebook_capture_reviews_reviewer_shape_check");
+    expect(html).toContain("Trạng thái canonical ingestion");
+    expect(html).not.toContain("invalid_model_output");
+    expect(html).not.toContain("missing_location_or_route");
+    expect(html).not.toContain("status_update_failed");
   });
 
   test("provider failure marks extraction_failed, records safe usage failure, and approves no cards", async () => {
@@ -384,7 +384,7 @@ describe("Facebook capture extract and approve all action", () => {
     expect(audits.some((audit) => audit.operation === "approve")).toBe(false);
   });
 
-  test("detail page renders safe approve-all approval failure diagnostics", async () => {
+  test("detail page does not render legacy approve-all approval diagnostics", async () => {
     authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
     const review = await createCapturedFacebookReview({ id: "approval-error-diagnostics", rawText: "Readable captured Facebook text." });
     const { default: FacebookCaptureReviewDetailPage } = await import("@/app/admin/knowledge/facebook-captures/[reviewId]/page");
@@ -394,7 +394,7 @@ describe("Facebook capture extract and approve all action", () => {
       searchParams: Promise.resolve({ approvalFailed: "1", approvalError: "not_reviewable" }),
     });
 
-    expect(renderToStaticMarkup(element)).toContain("Mã lỗi an toàn: not_reviewable");
+    expect(renderToStaticMarkup(element)).not.toContain("not_reviewable");
   });
 
   test("unauthorized users fail before review lookup, provider calls, usage writes, or mutations", async () => {
@@ -412,21 +412,22 @@ describe("Facebook capture extract and approve all action", () => {
     await expect(testDb.select().from(facebookCaptureReviews).where(eq(facebookCaptureReviews.id, review.id))).resolves.toMatchObject([{ status: "needs_review" }]);
   });
 
-  test("detail page renders approve-all form only for actionable captures", async () => {
+  test("detail page never renders approve-all controls", async () => {
     authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
     const review = await createCapturedFacebookReview({ id: "render-approve-all", rawText: "Detail page raw text for operator review." });
     const { default: FacebookCaptureReviewDetailPage } = await import("@/app/admin/knowledge/facebook-captures/[reviewId]/page");
 
     const actionableElement = await FacebookCaptureReviewDetailPage({ params: Promise.resolve({ reviewId: review.id }) });
     const actionableHtml = renderToStaticMarkup(actionableElement);
-    expect(actionableHtml).toContain("Trích xuất và phê duyệt tất cả");
-    expect(actionableHtml).toContain("Tôi đã kiểm tra nội dung capture, trust/confidence và freshness");
+    expect(actionableHtml).toContain("Trạng thái canonical ingestion");
+    expect(actionableHtml).not.toContain("Trích xuất và phê duyệt tất cả");
+    expect(actionableHtml).not.toContain("approveAllConfirmed");
 
     const missingConfirmationElement = await FacebookCaptureReviewDetailPage({
       params: Promise.resolve({ reviewId: review.id }),
       searchParams: Promise.resolve({ approveAllError: "Vui lòng xác nhận đã kiểm tra capture, trust/confidence và freshness trước khi phê duyệt tất cả." }),
     });
-    expect(renderToStaticMarkup(missingConfirmationElement)).toContain("Vui lòng xác nhận đã kiểm tra capture, trust/confidence và freshness trước khi phê duyệt tất cả.");
+    expect(renderToStaticMarkup(missingConfirmationElement)).not.toContain("Vui lòng xác nhận đã kiểm tra capture, trust/confidence và freshness trước khi phê duyệt tất cả.");
 
     await testDb.insert(knowledgeCards).values({
       id: "render-extracted-card",
@@ -468,6 +469,6 @@ describe("Facebook capture extract and approve all action", () => {
     });
     const nonActionableElement = await FacebookCaptureReviewDetailPage({ params: Promise.resolve({ reviewId: failedReview.id }) });
     const nonActionableHtml = renderToStaticMarkup(nonActionableElement);
-    expect(nonActionableHtml).toContain("approveAllConfirmed");
+    expect(nonActionableHtml).not.toContain("approveAllConfirmed");
   });
 });

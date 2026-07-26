@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { facebookCaptureReviews, knowledgeCards, knowledgeCardSources, knowledgeExtractionJobs, rawSourceMaterial, sourceCaptureVersions, sources, userRoles, users, type UserRole } from "@/db/schema";
+import { facebookCaptureReviews, knowledgeCards, knowledgeCardSources, knowledgeExtractionJobs, knowledgeIngestionJobs, rawSourceMaterial, sourceCaptureVersions, sources, userRoles, users, type UserRole } from "@/db/schema";
 import { ensureFacebookCaptureReviewForCapturedSource, markFacebookCaptureReviewStatus } from "@/features/knowledge/facebook-capture-review";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
@@ -167,6 +167,34 @@ describe("admin Facebook capture review helpers", () => {
     expect(JSON.stringify(detail)).not.toContain("secret-storage");
   });
 
+  test("Admin queue and detail show the canonical ingestion job for the captured version", async () => {
+    authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
+    const review = await createCapturedFacebookSource({ id: "ingestion-status", rawText: "Đèo Hải Vân cần kiểm tra tình trạng đường trước khi đi." });
+    await testDb.insert(knowledgeIngestionJobs).values({
+      id: "ingestion-status-job",
+      sourceId: review.sourceId,
+      captureVersionId: review.captureVersionId!,
+      submittedByUserId: "operator-user",
+      submittedByEmail: "operator-user@example.com",
+      stage: "judging",
+      stageVersion: 3,
+      attemptCount: 2,
+      maxAttempts: 3,
+      nextRunAt: new Date("2026-07-13T01:00:00.000Z"),
+      lastErrorCode: "candidate_missing_required_fields",
+    });
+
+    const { default: FacebookCaptureReviewQueuePage } = await import("@/app/admin/knowledge/facebook-captures/page");
+    const queueHtml = renderToStaticMarkup(await FacebookCaptureReviewQueuePage({ searchParams: Promise.resolve({}) }));
+    expect(queueHtml).toContain("Đang đánh giá evidence · lần thử 2/3");
+
+    const { default: FacebookCaptureReviewDetailPage } = await import("@/app/admin/knowledge/facebook-captures/[reviewId]/page");
+    const detailHtml = renderToStaticMarkup(await FacebookCaptureReviewDetailPage({ params: Promise.resolve({ reviewId: review.id }) }));
+    expect(detailHtml).toContain("Đang đánh giá chất lượng evidence");
+    expect(detailHtml).toContain("Job ingestion-status-job · lần thử 2/3");
+    expect(detailHtml).toContain("AI không xác định đủ loại thông tin");
+  });
+
   test("admin read models sanitize unsafe values inside allowed metadata fields", async () => {
     authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
     const review = await createCapturedFacebookSource({
@@ -222,7 +250,7 @@ describe("admin Facebook capture review helpers", () => {
 
   test("queue page renders compact Vietnamese labels with captured text preview for operators", async () => {
     authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
-    const review = await createCapturedFacebookSource({
+    await createCapturedFacebookSource({
       id: "queue-page",
       rawText: `${"Queue preview sentence. ".repeat(30)}Sensitive tail should only be on detail.`,
       rawMetadata: {
@@ -246,19 +274,10 @@ describe("admin Facebook capture review helpers", () => {
     expect(html).toContain("Cần duyệt");
     expect(html).toContain("1");
     expect(html).toContain("Queue preview sentence.");
-    expect(html).toContain("Trích xuất và phê duyệt tất cả");
-    expect(html).toContain(`name="reviewId" value="${review.id}"`);
-    expect(html).toContain("name=\"returnTo\" value=\"facebook_capture_queue\"");
-    expect(html).toContain("name=\"approveAllConfirmed\"");
+    expect(html).toContain("Canonical ingestion");
+    expect(html).not.toContain("Trích xuất và phê duyệt tất cả");
+    expect(html).not.toContain("approveAllConfirmed");
     expect(html).not.toContain("Sensitive tail should only be on detail.");
-  });
-
-  test("queue page confirms an approve-all job without leaving the list", async () => {
-    authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
-    const { default: FacebookCaptureReviewQueuePage } = await import("@/app/admin/knowledge/facebook-captures/page");
-    const element = await FacebookCaptureReviewQueuePage({ searchParams: Promise.resolve({ approveAllQueued: "1", jobId: "queued-job" }) });
-
-    expect(renderToStaticMarkup(element)).toContain("Yêu cầu trích xuất và phê duyệt tất cả đã được đưa vào hàng đợi");
   });
 
   test("queue page paginates capture rows", async () => {
@@ -476,7 +495,7 @@ describe("admin Facebook capture review helpers", () => {
     expect(html).not.toContain("unsafe-provider-token");
   });
 
-  test("detail page renders recapture form for needs-review captures", async () => {
+  test("detail page renders canonical ingestion status and recapture for needs-review captures", async () => {
     authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
     const review = await createCapturedFacebookSource({ id: "extract-action", rawText: "Readable captured Facebook text." });
 
@@ -484,11 +503,11 @@ describe("admin Facebook capture review helpers", () => {
     const element = await FacebookCaptureReviewDetailPage({ params: Promise.resolve({ reviewId: review.id }) });
     const html = renderToStaticMarkup(element);
 
-    expect(html).toContain("Trích xuất bản nháp");
-    expect(html).toContain("AI sẽ tạo thẻ nháp để bạn duyệt");
+    expect(html).toContain("Trạng thái canonical ingestion");
+    expect(html).toContain("Chưa có canonical job cho capture version này");
+    expect(html).not.toContain("Trích xuất bản nháp");
     expect(html).toContain(`name="reviewId" value="${review.id}"`);
-    expect(html).toContain("Trích xuất và phê duyệt tất cả");
-    expect(html).toContain("Tôi đã kiểm tra nội dung capture, trust/confidence và freshness");
+    expect(html).not.toContain("Trích xuất và phê duyệt tất cả");
     expect(html).toContain("Recapture");
     expect(html).toContain("Xóa text capture hiện tại");
     expect(html).not.toContain("Từ chối capture");
@@ -496,7 +515,7 @@ describe("admin Facebook capture review helpers", () => {
     expect(html).not.toContain("Reject / reopen capture (4.1F)");
   });
 
-  test("detail page routes extracted and approved captures to next workflow steps without duplicate extraction", async () => {
+  test("detail page keeps legacy linked cards visible without offering extraction actions", async () => {
     authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
     const extractedReview = await createCapturedFacebookSource({ id: "detail-extracted", rawText: "Extracted detail raw text." });
     await testDb.insert(knowledgeCards).values({
@@ -538,9 +557,7 @@ describe("admin Facebook capture review helpers", () => {
     const extractedElement = await FacebookCaptureReviewDetailPage({ params: Promise.resolve({ reviewId: extractedReview.id }), searchParams: Promise.resolve({ extracted: "1" }) });
     const extractedHtml = renderToStaticMarkup(extractedElement);
 
-    expect(extractedHtml).toContain("hàng đợi bản nháp");
     expect(extractedHtml).toContain("/admin/knowledge/drafts/draft-detail-card");
-    expect(extractedHtml).toContain("Capture này đã có thẻ liên kết");
     expect(extractedHtml).not.toContain("Trích xuất bản nháp</button>");
     expect(extractedHtml).not.toContain("approveAllConfirmed");
 
@@ -548,7 +565,6 @@ describe("admin Facebook capture review helpers", () => {
     const approvedHtml = renderToStaticMarkup(approvedElement);
 
     expect(approvedHtml).toContain("/admin/knowledge/approved/approved-detail-card");
-    expect(approvedHtml).toContain("Confidence nguồn Facebook/cộng đồng vẫn được giữ theo guardrail");
     expect(approvedHtml).not.toContain("Trích xuất bản nháp</button>");
     expect(approvedHtml).not.toContain("approveAllConfirmed");
   });

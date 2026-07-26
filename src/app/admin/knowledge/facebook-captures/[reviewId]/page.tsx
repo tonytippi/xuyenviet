@@ -2,11 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { type FacebookCaptureReviewStatus } from "@/db/schema";
-import { sourceKnowledgeDraftExtractionPromptVersion } from "@/features/ai/prompts";
-import { extractAndApproveFacebookCaptureDraftsForm, extractKnowledgeDraftsFromFacebookCaptureForm, requestFacebookCaptureRecaptureForm } from "@/features/knowledge/actions";
+import { requestFacebookCaptureRecaptureForm } from "@/features/knowledge/actions";
 import { getAdminFacebookCaptureReviewDetail } from "@/features/knowledge/facebook-capture-review-admin";
-
-import { ApproveAllSubmitStatus } from "./approve-all-submit-status";
 
 type FacebookCaptureReviewDetailPageProps = {
   params: Promise<{
@@ -21,6 +18,27 @@ const statusLabels: Record<FacebookCaptureReviewStatus, string> = {
   extracted: "Đã trích xuất",
   extracted_approved: "Đã trích xuất và duyệt",
   extraction_failed: "Trích xuất lỗi",
+};
+
+const ingestionStageLabels = {
+  queued: "Đang chờ worker nhận job",
+  triaging: "Đang sàng lọc nội dung",
+  extracting: "Đang trích xuất candidate và evidence",
+  judging: "Đang đánh giá chất lượng evidence",
+  relating: "Đang đối chiếu thẻ tri thức liên quan",
+  published: "Đã xuất bản canonical knowledge",
+  suppressed: "Đã giữ lại, không xuất bản",
+  review_recommended: "Cần vận hành kiểm tra",
+  verify_first: "Cần xác minh trước khi dùng",
+  failed: "Xử lý thất bại",
+} as const;
+
+const ingestionReasonDetails: Record<string, string> = {
+  candidate_invalid_structure: "AI không trả về candidate theo cấu trúc được yêu cầu. Kiểm tra lại raw text; recapture nếu nội dung thiếu hoặc sai.",
+  candidate_missing_required_fields: "AI không xác định đủ loại thông tin, tiêu đề, tóm tắt, địa điểm/cung đường hoặc evidence quote. Kiểm tra raw text; recapture nếu thiếu ngữ cảnh địa điểm hoặc hành trình.",
+  candidate_sensitive_content: "Candidate có thông tin nhạy cảm nên bị loại theo chính sách. Không xuất bản nội dung này.",
+  candidate_evidence_mismatch: "Evidence AI trích xuất không khớp chính xác với raw text capture. Recapture nếu text bị mất, sai hoặc không đầy đủ.",
+  candidate_insufficient_travel_context: "Nội dung không đủ ngữ cảnh du lịch thực tế, hoặc mang tính quảng cáo, câu hỏi hay cảm nhận chung. Không cần thao tác thêm trừ khi raw text capture bị sai.",
 };
 
 function formatDate(value: Date | string | null) {
@@ -40,17 +58,7 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
     notFound();
   }
 
-  const hasExtractionCards = review.existingCards.some((card) => card.aiPromptVersion === sourceKnowledgeDraftExtractionPromptVersion);
-  const activeExtractionJob = review.activeExtractionJob;
-  const hasActiveExtractionJob = Boolean(activeExtractionJob);
-  const isRetryableExtractionStatus = review.status === "needs_review" || review.status === "extraction_failed";
-  const canExtract = isRetryableExtractionStatus && Boolean(review.rawText?.trim()) && review.sourceType === "community" && !hasExtractionCards && !hasActiveExtractionJob;
-  const canExtractAndApproveAll = canExtract;
-  const canRecapture = (review.status === "needs_review" || review.status === "extraction_failed" || review.status === "rejected") && !hasExtractionCards;
-  const draftCards = review.existingCards.filter((card) => card.status === "draft");
-  const approvedCards = review.existingCards.filter((card) => card.status === "approved");
-  const extractedCount = getSearchParam(query.extracted);
-  const approvedAllCount = getSearchParam(query.approvedAll);
+  const canRecapture = review.status === "needs_review" || review.status === "extraction_failed" || review.status === "rejected";
   const rejected = getSearchParam(query.rejected) === "1";
   const rejectError = getSearchParam(query.rejectError);
   const rejectStatus = getSearchParam(query.rejectStatus);
@@ -60,22 +68,6 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
   const recaptureRequested = getSearchParam(query.recaptureRequested) === "1";
   const recaptureError = getSearchParam(query.recaptureError);
   const recaptureStatus = getSearchParam(query.recaptureStatus);
-  const extractError = getSearchParam(query.extractError);
-  const approveAllError = getSearchParam(query.approveAllError);
-  const approveAllStatus = getSearchParam(query.approveAllStatus);
-  const approveAllRecoveryStatus = getSearchParam(query.approveAllRecoveryStatus);
-  const approvalFailed = getSearchParam(query.approvalFailed) === "1";
-  const approvalError = getSearchParam(query.approvalError);
-  const recoveryStatus = getSearchParam(query.recoveryStatus);
-  const failureStatus = getSearchParam(query.failureStatus);
-  const errorCode = getSearchParam(query.errorCode);
-  const errorDetail = getSearchParam(query.errorDetail);
-  const statusReason = getSearchParam(query.statusReason);
-  const alreadyExtracted = getSearchParam(query.alreadyExtracted) === "1";
-  const jobId = getSearchParam(query.jobId);
-  const queuedJobStillActive = hasActiveExtractionJob && (!jobId || activeExtractionJob?.id === jobId);
-  const extractQueued = getSearchParam(query.extractQueued) === "1" && queuedJobStillActive;
-  const approveAllQueued = getSearchParam(query.approveAllQueued) === "1" && queuedJobStillActive;
 
   return (
     <div>
@@ -85,31 +77,11 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
       <p className="mt-6 text-sm font-semibold uppercase tracking-[0.2em] text-[#8c4f13]">Capture Facebook cần vận hành kiểm tra</p>
       <h1 className="mt-4 max-w-3xl text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">{review.sourceLabel}</h1>
       <p className="mt-5 max-w-2xl text-lg leading-8 text-[#4f625a]">
-        Nội dung này chỉ dành cho vận hành. Chưa trích xuất, chưa duyệt, chưa dùng cho câu trả lời của khách.
+        Nội dung này chỉ dành cho vận hành. Canonical ingestion xử lý capture tự động; chỉ outcome đủ điều kiện mới có thể được dùng cho câu trả lời của khách.
       </p>
 
-      {(extractedCount || approvedAllCount || rejected || rejectError || rejectStatus || reopened || reopenError || reopenStatus || recaptureRequested || recaptureError || recaptureStatus || extractError || approveAllError || approveAllStatus || approveAllRecoveryStatus || approvalFailed || recoveryStatus || alreadyExtracted || extractQueued || approveAllQueued) && (
+      {(rejected || rejectError || rejectStatus || reopened || reopenError || reopenStatus || recaptureRequested || recaptureError || recaptureStatus) && (
         <section className="mt-6 rounded-2xl border border-[#d8c9ad] bg-white/80 p-4 text-sm leading-6 text-[#17342c]">
-          {extractedCount ? (
-            <div>
-              <p>
-                Đã tạo {extractedCount} bản nháp. Mở{" "}
-                <Link className="font-semibold text-[#1f5f46] underline underline-offset-4" href="/admin/knowledge/drafts">
-                  hàng đợi bản nháp
-                </Link>{" "}
-                để kiểm tra trước khi phê duyệt.
-              </p>
-              {draftCards.length > 0 ? (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {draftCards.map((card) => (
-                    <Link className="rounded-xl border border-[#8fb59f] bg-[#edf7ef] px-3 py-2 font-semibold text-[#1f5f46]" href={`/admin/knowledge/drafts/${encodeURIComponent(card.id)}`} key={card.id}>
-                      Mở draft: {card.title}
-                    </Link>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          ) : null}
           {rejected ? <p>Đã từ chối capture. Nội dung này không còn nằm trong hàng đợi cần xử lý và chưa tạo thẻ tri thức.</p> : null}
           {rejectError ? <p>Lý do từ chối không an toàn hoặc capture này không thể từ chối.</p> : null}
           {rejectStatus ? <p>Capture này không chuyển sang trạng thái từ chối ({rejectStatus}). Kiểm tra trạng thái hiện tại trước khi thử lại.</p> : null}
@@ -119,69 +91,19 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
           {recaptureRequested ? <p>Đã đưa capture này về hàng đợi recapture. Chạy công cụ capture Facebook để lấy text mới rồi quay lại duyệt.</p> : null}
           {recaptureError ? <p>Lý do recapture không an toàn hoặc capture này không thể recapture.</p> : null}
           {recaptureStatus ? <p>Capture này không thể recapture ({recaptureStatus}). Kiểm tra trạng thái review và thẻ liên kết hiện có.</p> : null}
-          {approvedAllCount ? (
-            <div>
-              <p>
-                Đã trích xuất và phê duyệt {approvedAllCount} thẻ. Confidence nguồn Facebook/cộng đồng vẫn được giữ theo guardrail. Mở{" "}
-                <Link className="font-semibold text-[#1f5f46] underline underline-offset-4" href="/admin/knowledge/approved">
-                  danh sách thẻ đã duyệt
-                </Link>
-                .
-              </p>
-              {approvedCards.length > 0 ? (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {approvedCards.map((card) => (
-                    <Link className="rounded-xl border border-[#8fb59f] bg-[#edf7ef] px-3 py-2 font-semibold text-[#1f5f46]" href={`/admin/knowledge/approved/${encodeURIComponent(card.id)}`} key={card.id}>
-                      Mở thẻ approved: {card.title}
-                    </Link>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-          {extractError ? (
-            <p>
-              Không thể trích xuất capture này.
-              {failureStatus === "updated" ? " Trạng thái đã chuyển sang Trích xuất lỗi để bạn kiểm tra hoặc thử lại." : " Trạng thái review có thể đã thay đổi; kiểm tra trạng thái và thẻ liên kết hiện có trước khi thử lại."}
-            </p>
-          ) : null}
-          {approveAllError ? (
-            <p>
-              {approveAllError}
-              {failureStatus === "updated" ? " Trạng thái đã được cập nhật an toàn nếu phù hợp." : " Kiểm tra trạng thái review và thẻ liên kết hiện có trước khi thử lại."}
-              {errorCode ? ` Mã lỗi an toàn: ${errorCode}.` : null}
-              {errorDetail ? ` Chi tiết an toàn: ${errorDetail}.` : null}
-              {failureStatus ? ` Cập nhật trạng thái lỗi: ${failureStatus}.` : null}
-              {statusReason ? ` Lý do cập nhật trạng thái: ${statusReason}.` : null}
-            </p>
-          ) : null}
-          {approveAllStatus ? <p>Capture này không còn ở trạng thái có thể trích xuất và phê duyệt tất cả ({approveAllStatus}).</p> : null}
-          {approveAllRecoveryStatus ? <p>Không thể hoàn tất cập nhật trạng thái approve-all ({approveAllRecoveryStatus}). Kiểm tra trạng thái review và các thẻ liên kết hiện có.</p> : null}
-          {approvalFailed ? (
-            <p>
-              Đã tạo bản nháp nhưng chưa phê duyệt toàn bộ. Kiểm tra{" "}
-              <Link className="font-semibold text-[#1f5f46] underline underline-offset-4" href="/admin/knowledge/drafts">
-                hàng đợi bản nháp
-              </Link>{" "}
-              trước khi thử lại.
-              {approvalError ? ` Mã lỗi an toàn: ${approvalError}.` : null}
-            </p>
-          ) : null}
-          {recoveryStatus ? <p>Không thể hoàn tất cập nhật trạng thái sau khi trích xuất ({recoveryStatus}). Kiểm tra trạng thái review và các thẻ liên kết hiện có.</p> : null}
-          {alreadyExtracted ? <p>Capture này đã có thẻ được trích xuất. Kiểm tra các thẻ liên kết thay vì trích xuất lại.</p> : null}
-          {extractQueued ? <p>Yêu cầu trích xuất đã được đưa vào hàng đợi. Bạn có thể quay lại sau để xem bản nháp.{jobId ? ` Job: ${jobId}.` : null}</p> : null}
-          {approveAllQueued ? <p>Yêu cầu trích xuất và phê duyệt tất cả đã được đưa vào hàng đợi. Không cần bấm lại; hệ thống sẽ cập nhật khi hoàn tất.{jobId ? ` Job: ${jobId}.` : null}</p> : null}
         </section>
       )}
 
-      {activeExtractionJob ? (
-        <section className="mt-6 rounded-2xl border border-[#8fb59f] bg-[#edf7ef] p-4 text-sm leading-6 text-[#17342c]">
-          <p className="font-semibold">Đang trích xuất bằng AI</p>
-          <p className="mt-1">AI đang đọc nguồn này. Không cần bấm lại; hệ thống sẽ cập nhật khi hoàn tất.</p>
-          <p className="mt-1 text-[#4f625a]">Job {activeExtractionJob.id} · {activeExtractionJob.mode} · {activeExtractionJob.status} · lần thử {activeExtractionJob.attemptCount}/{activeExtractionJob.maxAttempts}</p>
-          {activeExtractionJob.lastErrorMessage ? <p className="mt-1 text-[#9b2f29]">Trích xuất lỗi tạm thời. Hệ thống sẽ thử lại tự động.</p> : null}
-        </section>
-      ) : null}
+      <section className="mt-6 rounded-2xl border border-[#8fb59f] bg-[#edf7ef] p-4 text-sm leading-6 text-[#17342c]">
+        <p className="font-semibold">Trạng thái canonical ingestion</p>
+        {review.ingestionJob ? (
+          <>
+            <p className="mt-1">{ingestionStageLabels[review.ingestionJob.stage]}. Worker tự xử lý và không cần thao tác phê duyệt/extract từ màn hình này.</p>
+            <p className="mt-1 text-[#4f625a]">Job {review.ingestionJob.id} · lần thử {review.ingestionJob.attemptCount}/{review.ingestionJob.maxAttempts} · cập nhật {formatDate(review.ingestionJob.updatedAt)}</p>
+            {review.ingestionJob.lastErrorCode ? <p className="mt-1 text-[#9b2f29]">Lý do: {ingestionReasonDetails[review.ingestionJob.lastErrorCode] ?? `Mã lỗi an toàn: ${review.ingestionJob.lastErrorCode}`}</p> : null}
+          </>
+        ) : <p className="mt-1">Chưa có canonical job cho capture version này. Kiểm tra deployment của knowledge-ingestion worker nếu trạng thái không được tạo sau capture.</p>}
+      </section>
 
       <section className="mt-8 rounded-[1.5rem] border border-[#d8c9ad] bg-[#f4ead7] p-5 sm:p-6">
         <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#8c4f13]">Nguồn Facebook/cộng đồng, chưa xác minh</p>
@@ -235,7 +157,7 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
         <h2 className="text-2xl font-semibold tracking-[-0.03em] text-[#17342c]">Thẻ tri thức đã liên kết</h2>
         <div className="mt-4 grid gap-3">
           {review.existingCards.length === 0 ? (
-            <p className="rounded-2xl bg-[#fbf7ed] p-3 text-[#4f625a]">Chưa có thẻ draft/approved liên kết với capture này.</p>
+            <p className="rounded-2xl bg-[#fbf7ed] p-3 text-[#4f625a]">Chưa có thẻ tri thức liên kết với capture này.</p>
           ) : (
             review.existingCards.map((card) => (
               <div key={card.id} className="rounded-2xl border border-[#d8c9ad] bg-[#fbf7ed] p-4 text-sm text-[#4f625a]">
@@ -255,37 +177,8 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
 
       <section className="mt-8 rounded-[1.5rem] border border-[#d8c9ad] bg-[#fbf7ed] p-5 sm:p-6">
         <h2 className="text-2xl font-semibold tracking-[-0.03em] text-[#17342c]">Hành động vận hành</h2>
-        {canExtract ? (
-          <div className="mt-4 rounded-2xl border border-[#d8c9ad] bg-white/75 p-4">
-            <p className="text-sm font-semibold text-[#17342c]">AI sẽ tạo thẻ nháp để bạn duyệt. Chưa có thẻ nào được phê duyệt hoặc dùng cho câu trả lời của khách.</p>
-            <form action={extractKnowledgeDraftsFromFacebookCaptureForm} className="mt-4">
-              <input name="reviewId" type="hidden" value={review.id} />
-              <button className="min-h-12 rounded-2xl bg-[#1f5f46] px-5 py-3 font-semibold text-white transition hover:bg-[#194d39] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]" type="submit">
-                Trích xuất bản nháp
-              </button>
-            </form>
-          </div>
-        ) : (
-          <p className="mt-4 rounded-2xl border border-[#d8c9ad] bg-white/75 p-4 text-sm leading-6 text-[#4f625a]">
-            {hasActiveExtractionJob ? "Capture này đang được trích xuất bằng AI. Không cần bấm lại." : "Capture này đã có thẻ liên kết hoặc không còn ở trạng thái có thể trích xuất mới. Kiểm tra bản nháp hoặc thẻ đã duyệt thay vì trích xuất lại."}
-          </p>
-        )}
-        <div className="mt-4 grid gap-3 lg:grid-cols-2">
-          {canExtractAndApproveAll ? (
-            <div className="rounded-2xl border border-[#d99a93] bg-[#fff7f2] p-4">
-              <p className="text-sm font-semibold leading-6 text-[#9b2f29]">Hành động này tạo thẻ bằng AI rồi phê duyệt ngay. Chỉ dùng khi capture đáng tin cậy và đã được kiểm tra.</p>
-              <form action={extractAndApproveFacebookCaptureDraftsForm} className="mt-4 space-y-4">
-                <input name="reviewId" type="hidden" value={review.id} />
-                <label className="flex gap-3 rounded-2xl border border-[#d8c9ad] bg-white/80 p-3 text-sm font-semibold leading-6 text-[#17342c]">
-                  <input className="mt-1 size-4 accent-[#1f5f46]" name="approveAllConfirmed" type="checkbox" />
-                  <span>Tôi đã kiểm tra nội dung capture, trust/confidence và freshness; có thể trích xuất và phê duyệt tất cả thẻ được tạo.</span>
-                </label>
-                <ApproveAllSubmitStatus />
-              </form>
-            </div>
-          ) : (
-            <p className="rounded-2xl border border-[#d8c9ad] bg-white/75 p-4 text-sm leading-6 text-[#4f625a]">Extract & Approve All chỉ khả dụng khi capture đang cần duyệt hoặc trích xuất lỗi, có raw text đọc được, chưa có thẻ trích xuất và vẫn là nguồn Facebook/cộng đồng chưa xác minh.</p>
-          )}
+        <p className="mt-4 rounded-2xl border border-[#d8c9ad] bg-white/75 p-4 text-sm leading-6 text-[#4f625a]">Các thẻ tri thức được tạo và quyết định publication bằng canonical ingestion pipeline. Màn hình này chỉ theo dõi trạng thái và hỗ trợ recapture khi nội dung capture có vấn đề.</p>
+        <div className="mt-4">
           {canRecapture ? (
             <form action={requestFacebookCaptureRecaptureForm} className="rounded-2xl border border-[#d8c9ad] bg-white/75 p-4">
               <input name="reviewId" type="hidden" value={review.id} />
@@ -299,7 +192,7 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
               </button>
             </form>
           ) : null}
-          {!canRecapture ? <p className="rounded-2xl border border-[#d8c9ad] bg-white/75 p-4 text-sm leading-6 text-[#4f625a]">Recapture chỉ khả dụng khi capture chưa có thẻ trích xuất được liên kết.</p> : null}
+          {!canRecapture ? <p className="rounded-2xl border border-[#d8c9ad] bg-white/75 p-4 text-sm leading-6 text-[#4f625a]">Recapture không khả dụng với trạng thái review hiện tại.</p> : null}
         </div>
       </section>
     </div>
