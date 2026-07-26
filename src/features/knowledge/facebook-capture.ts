@@ -43,6 +43,8 @@ export type SafeFacebookCaptureMetadata = {
 export type FacebookCaptureActor = {
   userId: string;
   email: string;
+  actorClass?: "user" | "system";
+  actorSystem?: string;
 };
 
 export type DiscoveredFacebookPost = {
@@ -266,6 +268,8 @@ export async function updateQueuedFacebookSourceRawText(
             targetType: "sources",
             targetId: queued.sourceId,
             afterSummary: `Facebook capture skipped as duplicate of source ${duplicate.id}.`,
+            actorClass: input.actor.actorClass ?? "user",
+            actorSystem: input.actor.actorSystem ?? null,
             createdAt: input.now,
           });
         }
@@ -319,8 +323,10 @@ export async function updateQueuedFacebookSourceRawText(
         targetType: "source_capture_version",
         targetId: version.id,
         beforeSummary: `Facebook capture version appended; method: ${rawMetadata.captureMethod}`,
-        afterSummary: `Facebook capture version appended; capturedAt: ${rawMetadata.capturedAt}`,
-        createdAt: input.now,
+          afterSummary: `Facebook capture version appended; capturedAt: ${rawMetadata.capturedAt}`,
+          actorClass: input.actor.actorClass ?? "user",
+          actorSystem: input.actor.actorSystem ?? null,
+          createdAt: input.now,
       });
     }
 
@@ -415,6 +421,8 @@ async function queueDiscoveredFacebookPostsInTransaction(
     targetType: "facebook_capture_discovered_posts",
     targetId: input.sourceId,
     afterSummary: `Facebook capture discovered posts: queued=${postsToQueue.length}; existing=${discoveredPosts.length - postsToQueue.length}.`,
+    actorClass: input.actor.actorClass ?? "user",
+    actorSystem: input.actor.actorSystem ?? null,
   });
 
   return { queuedCount: postsToQueue.length, duplicateCount: discoveredPosts.length - postsToQueue.length };

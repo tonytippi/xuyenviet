@@ -88,7 +88,7 @@ Do not use `pnpm db:reset` for test verification: Vitest owns only `DATABASE_URL
 
 ## Server deployment
 
-Docker Compose runs the web application plus the long-running knowledge extraction and indexing workers. PostgreSQL remains external and must be reachable through the `DATABASE_URL` set in the deployment environment file.
+Docker Compose runs the web application plus the long-running legacy extraction, canonical ingestion, and indexing workers. PostgreSQL remains external and must be reachable through the `DATABASE_URL` set in the deployment environment file.
 
 1. Create a production environment file, for example `production.env`, from `.env.example`. Set `APP_ENV="production"`, a TLS-enabled non-localhost `DATABASE_URL` required by the selected Postgres provider, `AUTH_URL` to the public HTTPS Cloudflare Tunnel hostname, and real provider/authentication secrets.
 2. Run migrations once for each release that includes database changes:
@@ -103,7 +103,7 @@ Docker Compose runs the web application plus the long-running knowledge extracti
    ENV_FILE=production.env docker compose up -d --build
    ```
 
-The application binds to `127.0.0.1:3000` only. Configure the Cloudflare Tunnel origin as `http://localhost:3000`; no public inbound port needs to be exposed by the server. The container readiness check at `/api/health` validates its production environment and external database connection. The `knowledge-extractor` and `knowledge-indexing` services run continuously and restart independently. Use the same `ENV_FILE` value with `docker compose logs -f app`, `docker compose logs -f knowledge-extractor`, and `docker compose down`.
+The application binds to `127.0.0.1:3000` only. Configure the Cloudflare Tunnel origin as `http://localhost:3000`; no public inbound port needs to be exposed by the server. The container readiness check at `/api/health` validates its production environment and external database connection. The `knowledge-extractor`, `knowledge-ingestion`, and `knowledge-indexing` services run continuously and restart independently. Use the same `ENV_FILE` value with `docker compose logs -f app`, `docker compose logs -f knowledge-ingestion`, and `docker compose down`.
 
 Database scripts:
 
@@ -122,6 +122,8 @@ pnpm youtube:capture --limit 5
 pnpm capture-cache:migrate
 pnpm knowledge:extraction-worker
 pnpm knowledge:extraction-worker --once
+pnpm knowledge:ingestion-worker
+pnpm knowledge:ingestion-worker --once
 pnpm knowledge:indexing-worker
 pnpm knowledge:indexing-worker --once
 ```
@@ -131,6 +133,8 @@ pnpm knowledge:indexing-worker --once
 Capture commands use two databases: `DATABASE_URL` is the application database reached through the protected operator tunnel, while `CAPTURE_CACHE_DATABASE_URL` is a separate local PostgreSQL archive. Run `pnpm capture-cache:migrate` once before capture. The commands fail closed if either URL is invalid, the targets are the same, or the archive schema is absent. Back up the local archive with encrypted, tested restores; it contains durable validated capture artifacts and is required to replay after an application database reset. Never commit either URL, Gemini keys, browser profiles, or backups.
 
 `knowledge:extraction-worker` runs queued AI knowledge extraction jobs outside the admin request path. Use the default long-running mode for production worker processes, or `--once` for local/debug runs. The worker uses PostgreSQL job state, retries transient provider failures, and requeues stale `running` jobs after `KNOWLEDGE_EXTRACTION_WORKER_STALE_MS`.
+
+`knowledge:ingestion-worker` runs the canonical source-version ingestion pipeline outside the request path. It recovers expired fenced jobs, processes queued jobs continuously, and waits for `KNOWLEDGE_INGESTION_WORKER_POLL_MS` when no work is available. Use `--once` only for local/debug runs; production must run the `knowledge-ingestion` supervised service.
 
 `knowledge:indexing-worker` continuously indexes approved, source-linked knowledge cards into active search documents for AI Ask retrieval. Use `--once` to backfill the next batch locally/debug. Tune polling with `KNOWLEDGE_INDEXING_WORKER_POLL_MS` and batch size with `KNOWLEDGE_INDEXING_WORKER_BATCH_SIZE`.
 

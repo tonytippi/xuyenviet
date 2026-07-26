@@ -2,7 +2,7 @@
 
 ## Trạng Thái
 
-Định hướng được ghi nhận ngày 2026-07-24 để xem xét khi cập nhật PRD, kiến trúc, UX, epic và story. Đây không phải kế hoạch triển khai được phê duyệt và không thay đổi phạm vi MVP hiện tại. Google Maps, OTA/booking và partner flows đều là MVP non-goals trong PRD hiện hành.
+Định hướng được ghi nhận ngày 2026-07-24 và cập nhật ngày 2026-07-26 để xem xét khi cập nhật PRD, kiến trúc, UX, epic và story. Đây không phải kế hoạch triển khai được phê duyệt và không thay đổi phạm vi MVP hiện tại. Google Maps, OTA/booking và partner flows đều là MVP non-goals trong PRD hiện hành.
 
 ## Vấn Đề
 
@@ -10,7 +10,59 @@ Một câu hỏi phổ biến của người đi road trip là tìm chỗ ở, �
 
 XuyenViet không nên trả lời bằng danh sách OTA hoặc thứ hạng Google Maps đơn thuần. Mục tiêu là tạo shortlist ít lựa chọn nhưng phù hợp ràng buộc của chuyến đi, giải thích trade-off, hiển thị nguồn/thời điểm và chỉ ra điều người dùng cần xác nhận trước khi đặt.
 
+Sản phẩm cũng không cần cố thay người dùng tìm "giá cuối cùng" hay quyết định kênh đặt. Giá theo account Agoda, coupon, membership và giá gọi trực tiếp là dữ liệu cá nhân, thay đổi nhanh, và chỉ người dùng mới có thể xác nhận đáng tin cậy. Giá không là điều kiện để người dùng thêm nơi ở họ đã chọn vào Trip Project.
+
 ## Định Hướng Sản Phẩm
+
+### Accommodation Decision Assistant
+
+Đây là capability hỗ trợ một quyết định lưu trú, không phải màn hình OTA, booking engine, hay form thu thập giá. Khi Trip Project có một chặng/ngày nghỉ tại địa điểm rõ nhưng chưa có nơi ở, trợ lý chủ động hỏi một lần theo ngữ cảnh:
+
+```text
+Bạn sẽ nghỉ tại Đà Nẵng từ 12 đến 14/08 nhưng chưa có chỗ ở.
+Bạn có muốn mình tìm vài lựa chọn phù hợp với gia đình không?
+
+[Mình cần gợi ý phòng] [Tự tìm rồi báo bạn] [Để sau]
+```
+
+`Tự tìm rồi báo bạn` và `Để sau` là trạng thái hợp lệ. Không coi chỗ ở chưa chọn là lỗi và không lặp lại lời mời một cách gây phiền nhiễu.
+
+Khi người dùng yêu cầu hỗ trợ, hệ thống dùng ngày ở, số khách/trẻ em, ràng buộc xe, ngân sách, ưu tiên khu vực và chặng tiếp theo đã có trong Trip Project. Nếu thiếu một dữ kiện làm shortlist kém hữu ích, chỉ hỏi một câu ngắn, ví dụ ưu tiên gần biển, trung tâm hay thuận tiện đi tiếp. Sau đó capability thực hiện:
+
+```text
+Trip context
+  -> Agoda catalog + Search API: candidate và availability/rate còn hiệu lực
+  -> Google Places: khớp đúng khách sạn, Maps link, rating/review signal, phone công khai
+  -> trip-fit filtering/ranking và giải thích trade-off
+  -> 3-5 accommodation decision cards
+  -> người dùng tự kiểm tra Agoda, đọc review gốc hoặc gọi khách sạn
+  -> người dùng báo lựa chọn trong chat
+  -> typed Trip Change Proposal
+  -> owner xác nhận
+  -> Trip Project cập nhật nơi ở đã chọn
+```
+
+Mỗi card chỉ cần trả lời tại sao phù hợp với chuyến đi và dẫn người dùng tới nơi tự quyết định:
+
+```text
+[Tên khách sạn]
+Phù hợp vì: gần bãi biển, có tín hiệu bãi đỗ xe, thuận tiện đi Hội An sáng hôm sau.
+Google Maps: 4,4/5 từ 1.240 review; review gần đây khen vị trí, một số nhắc cách âm.
+
+[Xem trên Agoda] [Mở Google Maps] [Gọi khách sạn]
+```
+
+Agoda rate/availability có thể hỗ trợ sàng lọc và hiển thị theo policy provider, nhưng không được khẳng định là giá tốt nhất, giá cuối cùng, hay phòng được giữ. Không truyền email người dùng sang Agoda Search API để cố lấy account-specific pricing: Demand Search contract công khai chỉ nhận criteria lưu trú, occupancy, locale/currency và `userCountry`, không có user-owned Agoda identity hoặc coupon field. Nếu người dùng muốn kiểm tra ưu đãi theo account, họ làm trên Agoda qua link chính thức.
+
+Câu chốt của trợ lý sau shortlist phải rõ và nhẹ:
+
+```text
+Bạn có thể xem giá và ưu đãi theo tài khoản trên Agoda, đọc review gốc trên Google Maps,
+hoặc gọi trực tiếp khách sạn. Khi chọn được nơi ở, chỉ cần nhắn cho mình, ví dụ
+"Chốt khách sạn A, 12-14/08"; mình sẽ thêm vào Trip Project.
+```
+
+Người dùng không bị yêu cầu nhập giá Agoda, giá gọi trực tiếp, coupon, điều kiện hủy hay mã booking để lưu lựa chọn. Nếu họ chủ động cung cấp giá hoặc booking reference không nhạy cảm, đó là metadata tùy chọn với nhãn rõ là do người dùng cung cấp, không phải provider-verified fact.
 
 ```text
 Trip context
@@ -149,6 +201,8 @@ Gemini grounding with Google Maps, nếu được dùng và điều khoản cho 
 
 Không scrape Google Maps hoặc Google Reviews. Trước khi persist bất kỳ field nào, cần xác nhận điều khoản của API/SKU cụ thể về caching, retention, attribution và hiển thị rating, contact, photos hoặc review content. Mặc định an toàn là lưu dài hạn provider identifier/deep link; lưu data provider thành snapshot có TTL; không copy review text/ảnh vào knowledge store; không biến rating/review Google thành evidence của knowledge card.
 
+Google Places không được giả định là có thể lọc hoặc xếp hạng review theo "Local Guide". Chỉ hiển thị/diễn giải thuộc tính reviewer nếu Google API và hợp đồng cho phép cung cấp rõ ràng. Nếu không, review signal chỉ dựa trên dữ liệu hợp lệ như rating, review count, độ mới và các chủ đề lặp lại trong phần review được phép hiển thị.
+
 ## Ranking Theo Trip-Fit
 
 Google rating và review count là tín hiệu ranking yếu, không phải điểm chất lượng hay bảo đảm phù hợp. Hệ thống nên xếp theo `trip-fit` thay vì "homestay tốt nhất".
@@ -192,7 +246,9 @@ generate-homestay-shortlist
   -> 3-5 lựa chọn, trade-off, evidence, dữ kiện thiếu, hành động tiếp theo
 ```
 
-Mỗi shortlist card nên có lý do phù hợp, dữ liệu cần xác nhận, thời điểm kiểm tra gần nhất, nguồn/deep links và các hành động: mở Maps, liên hệ chủ nhà, xem nguồn, lưu như phương án B hoặc tạo Trip Change Proposal. AI không tự thêm một nơi ở vào itinerary hoặc chuyển nó thành `confirmed`; người dùng phải chấp nhận proposal và xác nhận booking.
+Mỗi shortlist card nên có lý do phù hợp, dữ liệu cần xác nhận, thời điểm kiểm tra gần nhất, nguồn/deep links và các hành động: xem trên Agoda, mở Maps, gọi/liên hệ nơi ở, hoặc xem thêm lựa chọn. Không biến card thành action ghi plan state. AI không tự thêm một nơi ở vào itinerary hoặc chuyển nó thành `confirmed`; chỉ khi người dùng nói họ đã chọn nơi ở thì hệ thống mới tạo proposal, và owner phải chấp nhận proposal đó.
+
+Người dùng có thể trả lời bằng ngôn ngữ tự nhiên, chẳng hạn "Chốt khách sạn A, ở 12 đến 14/08". Hệ thống dùng candidate vừa hiển thị để resolve nơi ở; nếu nhiều place trùng tên hoặc confidence thấp, yêu cầu chọn đúng một nơi. Proposal tối thiểu chứa tên/khu vực, thời gian ở và trạng thái owner chọn (`planned`, `confirmed`, hoặc `backup`). `confirmed` vẫn chỉ là owner-confirmed decision, không khẳng định booking, availability, giá hoặc provider validation.
 
 ## Ranh Giới Và Invariant
 
@@ -201,6 +257,9 @@ Mỗi shortlist card nên có lý do phù hợp, dữ liệu cần xác nhận, 
 - Web/Maps result dùng để trả lời ngay phải có provenance, thời điểm kiểm tra và uncertainty riêng; không tự làm nhiễm knowledge lâu dài.
 - Giá, availability, parking, phụ thu và booking policy không được khẳng định nếu không có nguồn provider thích hợp, còn hiệu lực hoặc xác nhận trực tiếp.
 - AI chỉ tạo explanation/shortlist/proposal; mọi persistent trip mutation cần user confirmation và server-side policy checks.
+- Provider snapshot, raw review text, request/response payload, account-specific offer, coupon và direct-call quote không là Trip Project memory mặc định. Chỉ user-confirmed accommodation decision mới là persistent state.
+- Không yêu cầu giá để tạo accommodation proposal. Giá hoặc kênh đặt chỉ là metadata tùy chọn do owner chủ động cung cấp.
+- Agoda integration bắt đầu bằng Online Affiliate/MSE model, Content API, Search API và provider-issued `landingUrl` nếu partner agreement cho phép. Không đưa Book API, payment, booking servicing, scrape hoặc dùng session/cookie Agoda của người dùng vào scope này.
 - Google Maps, OTA, website, Facebook Page và từng evidence record có provenance riêng; không gán nhãn `official` cho toàn bộ domain/provider.
 - Data retention, caching, attribution, quota và chi phí của từng provider là architecture/configuration concern, không hard-code trong prompt hay UI.
 
@@ -208,6 +267,8 @@ Mỗi shortlist card nên có lý do phù hợp, dữ liệu cần xác nhận, 
 
 - Google Maps Platform API/SKU nào phù hợp, quota/chi phí ra sao, và điều khoản cho retention/attribution của từng field là gì?
 - OTA/provider nào có API hoặc nguồn dữ liệu phù hợp cho availability/price mà không tạo dependency vào booking flow?
+- Agoda có phê duyệt XuyenViet cho Online Affiliate/MSE model tại Việt Nam không; `metaSearch`/`landingUrl`, display, attribution, cache/TTL, quota và Search API certification áp dụng thế nào?
+- Google Places API/SKU có trả review, contact/phone và attribution theo điều kiện nào; có bất kỳ supported field nào cho reviewer authority/Local Guide hay không?
 - Canonical place identity và entity-resolution policy xử lý thế nào khi cùng một homestay đổi tên, có nhiều listing hoặc sai tọa độ?
 - Những yêu cầu nào là hard constraint ban đầu cho family road trip: parking, xe 7 chỗ, EV, trẻ em, late check-in, ngân sách hay lệch route?
 - TTL/refresh policy nào áp dụng cho Maps, OTA, route/ETA, contact và dữ liệu hoạt động?
@@ -215,14 +276,30 @@ Mỗi shortlist card nên có lý do phù hợp, dữ liệu cần xác nhận, 
 - Gemini grounding with Google Maps có capability, citation và terms đủ rõ để dùng như discovery fallback không?
 - UX nào cho phép người dùng xác nhận dữ kiện thiếu hoặc chuyển candidate thành `planned`/`confirmed` mà không biến AI thành booking agent?
 
+## Điều Kiện Trước Khi Đăng Ký Agoda
+
+XuyenViet chưa nên đăng ký Online Affiliate/MSE chỉ để bắt đầu development. Hoàn thiện trải nghiệm Trip Project và bề mặt sản phẩm công khai trước để có một website, user journey và traffic case đáng tin cậy khi Agoda thực hiện feasibility study.
+
+Trước khi liên hệ Agoda Account Manager, cần có tối thiểu:
+
+- Trang XuyenViet public và authenticated flow hoạt động ổn định, có URL/domain chính thức, privacy policy và terms phù hợp để review.
+- Trip Project đủ hoàn chỉnh để minh họa user journey: owner tạo/open trip, chat là command surface, và user-confirmed accommodation decision đi qua proposal/apply/history.
+- Mockup hoặc prototype decision card thể hiện rõ Agoda attribution, provider-issued click-out, Google attribution tách biệt, review/phone disclosure và việc XuyenViet không xử lý payment/booking.
+- Data-flow, security và privacy note cho thấy chỉ server gọi provider API; không dùng user Agoda credentials, cookie/session, coupon/account data, raw provider payload hoặc payment data.
+- Ước lượng traffic/search volume, thị trường Việt Nam, locale `vi-vn`, currency `VND`, expected peak request rate, domain và egress IP để Agoda đánh giá commercial/technical feasibility và whitelist khi cần.
+- Xác nhận nội bộ rằng initial scope là Online Affiliate/MSE Search/Content + `landingUrl`, không phải Book API, payment, customer service hay booking fulfillment.
+
+Sau khi các điều kiện này đạt, gửi inquiry nêu rõ XuyenViet là Vietnamese AI-first road-trip planning assistant: dùng Agoda để hỗ trợ shortlist theo Trip Project, để người dùng click-out và tự quyết định, rồi chỉ lưu lựa chọn do owner xác nhận vào Trip Project.
+
 ## Thứ Tự Đề Xuất
 
 1. Xác nhận PRD contract cho place identity, source classes, snapshot/provenance, user-confirmed trip state và uncertainty.
 2. Thiết kế architecture cho Google Places/Routes adapter, provider terms, caching/attribution, entity resolution, quota/cost và server-side mutation policy.
-3. Bổ sung Trip Project structured planning và change-proposal UX làm nền cho shortlist có thể hành động.
-4. Xây Places/Routes discovery, route-fit và deep link trước; dùng deterministic filtering/ranking trước khi thêm AI explanation.
-5. Liên kết knowledge cards Facebook/YouTube với canonical places bằng confidence có thể review.
-6. Thêm OTA/official-contact enrichment và confirmation flow; chỉ sau đó đánh giá Gemini Maps grounding như fallback discovery.
+3. Hoàn thành Trip Project structured planning và change-proposal UX làm nền cho một nơi ở user-chosen có thể được thêm an toàn.
+4. Thêm accommodation-gap prompt có opt-in: hỏi owner có muốn shortlist hay tự tìm/để sau; không coi open accommodation là lỗi.
+5. Xây Places discovery, entity match, Maps deep link/contact và deterministic trip-fit trước; dùng AI để giải thích sau khi filter/rank.
+6. Thêm Agoda Online Affiliate/MSE Content/Search và `landingUrl` sau khi partnership, terms, cache/attribution và certification được xác nhận; không dùng Book API.
+7. Liên kết knowledge cards Facebook/YouTube với canonical places bằng confidence có thể review, sau đó đánh giá Gemini Maps grounding như fallback discovery.
 
 ## Tài Liệu Liên Quan
 

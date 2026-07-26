@@ -65,45 +65,25 @@ Community posts may identify small homestays or accommodation experiences absent
 The current public-MVP readiness report is **no-go** for production scheduled Facebook capture:
 
 - The canonical `knowledge:ingestion-worker` has no evidenced continuously supervised deployment. The Compose `knowledge-extractor` service is a legacy worker and is not proof that canonical ingestion is running.
-- `facebook:capture --yes` verifies that the configured service actor ID and email match a user record, but it does not yet enforce that the user has an `admin` or `operator` role.
 
-Do not enable unattended production scheduling or rely on automatic ingestion until both gaps have a completed hardening/deployment record. Manual controlled capture remains available to authorized operators, subject to the existing role and audit controls.
+Do not enable unattended production scheduling or rely on automatic ingestion until the canonical ingestion-worker deployment gap has a completed deployment record. Process access is controlled by the deployment environment, not per-run CLI identity.
 
 ## Service Audit Actor
 
-Scheduled capture runs use a system/service actor by default. This is required because `audit_events.actor_user_id` has a foreign key to `users.id`.
+Every capture run uses a fixed reserved system actor because `audit_events.actor_user_id` has a foreign key to `users.id`. It is a technical identity only: it has no role, session, OAuth account, or human approval authority.
 
 Default service actor:
 
 ```text
-FACEBOOK_CAPTURE_ACTOR_USER_ID=system-facebook-capture
-FACEBOOK_CAPTURE_ACTOR_EMAIL=system-facebook-capture@xuyenviet.internal
+system-facebook-capture
+system-facebook-capture@xuyenviet.invalid
 ```
 
-Before scheduled runs, create a matching user row in each environment database:
-
-```sql
-insert into users (id, email, name)
-values ('system-facebook-capture', 'system-facebook-capture@xuyenviet.internal', 'System Facebook Capture')
-on conflict do nothing;
-```
-
-If an environment uses different service actor values, set both variables:
-
-```bash
-FACEBOOK_CAPTURE_ACTOR_USER_ID="system-facebook-capture"
-FACEBOOK_CAPTURE_ACTOR_EMAIL="system-facebook-capture@xuyenviet.internal"
-```
-
-Manual operator runs may still override the actor explicitly:
-
-```bash
-pnpm facebook:capture --limit 5 --actor-user-id <operator-user-id> --actor-email <operator-email>
-```
+Migration `0065_system_facebook_capture_actor.sql` creates and reserves this exact identity in every environment. It fails closed if the ID or email is already associated with another user. Do not configure an alternate actor through environment variables.
 
 ## Running Capture
 
-Capture up to five queued sources using the configured service actor:
+Capture up to five queued sources with an interactive confirmation before each save:
 
 ```bash
 pnpm facebook:capture --limit 5
@@ -115,7 +95,7 @@ Capture one queued source:
 pnpm facebook:capture --source-id <source-id>
 ```
 
-Skip interactive confirmation and save each successful capture:
+`--yes` skips interactive confirmation. Both modes audit as `system-facebook-capture`; it accepts no actor override:
 
 ```bash
 pnpm facebook:capture --limit 5 --yes
@@ -132,7 +112,7 @@ Production scheduling should decide explicitly where this browser profile lives 
 ## Workflow
 
 1. Operator submits Facebook links through admin intake or batch intake.
-2. An authorized operator runs capture manually. Do not schedule `pnpm facebook:capture --limit 25 --yes` in production while the [Operational Status](#operational-status) blockers remain open.
+2. An authorized deployment process runs capture. Interactive runs ask before each save; scheduled runs use `--yes`. Both use the fixed system actor. Do not schedule `pnpm facebook:capture --limit 25 --yes` in production while the [Operational Status](#operational-status) blocker remains open.
 3. A cache hit replays its original captured time and safe provenance without opening Facebook. A cache miss derives bounded text from rendered/DOM content, commits the artifact to the local archive first, then flushes it to production.
 4. Capture may queue up to 20 unique linked Facebook post/share URLs from the captured post as bounded candidates for a later run. Links that already match a stored canonical source URL are skipped. Candidate links must still pass queue/admission policy before capture; this does not browse feeds, recursively crawl Facebook, or open linked posts in the same run.
 5. Capture appends an immutable capture version, atomically creates its canonical ingestion job, and creates or updates the Facebook review record used for legacy/manual inspection and recapture controls.
@@ -163,7 +143,7 @@ The web review queue is an admin/operator-only surface. Operators should not tre
 
 If the script reports no queued sources, no matching eligible Facebook source lacks a current capture version.
 
-If the script reports an audit actor error, create the service user row or set `FACEBOOK_CAPTURE_ACTOR_USER_ID` and `FACEBOOK_CAPTURE_ACTOR_EMAIL` to an existing user row.
+If a run reports a system actor error, apply migration `0065_system_facebook_capture_actor.sql` and investigate any reserved-identity collision.
 
 If Facebook shows login, blocked, or empty content, refresh the local Playwright profile manually and rerun the command.
 

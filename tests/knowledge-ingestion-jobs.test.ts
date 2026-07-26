@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, test } from "vitest";
 
 import { knowledgeIngestionJobs, sourceCaptureVersions, sources, users } from "@/db/schema";
 import { claimNextKnowledgeIngestionJob, commitKnowledgeIngestionStage, ensureIngestionJobForCaptureVersion, listKnowledgeIngestionJobStatuses, recoverKnowledgeIngestionJobs, retryKnowledgeIngestionStage } from "@/features/knowledge/ingestion-jobs";
+import { runKnowledgeIngestionWorkerLoop } from "@/features/knowledge/ingestion-worker";
 import { appendSourceCaptureVersion, hashCaptureText } from "@/features/knowledge/source-captures";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
@@ -39,6 +40,10 @@ describe("canonical knowledge ingestion jobs", () => {
     ]);
     await expect(ensureIngestionJobForCaptureVersion(testDb, { sourceId: "source-one", captureVersionId: capture.id })).resolves.toMatchObject({ captureVersionId: capture.id, submittedByEmail: "operator@example.com" });
     await expect(testDb.select().from(knowledgeIngestionJobs)).resolves.toHaveLength(1);
+  });
+
+  test("keeps the canonical worker loop available for supervised execution and supports a one-shot no-work check", async () => {
+    await expect(runKnowledgeIngestionWorkerLoop({ once: true, workerId: "supervised-worker" })).resolves.toBeNull();
   });
 
   test("creates exactly one canonical job when concurrent callers ensure an unqueued readable capture", async () => {
