@@ -1,7 +1,7 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 
-import { schema } from "@/db/schema";
+import { schema, users } from "@/db/schema";
 
 import { getTestDatabaseUrl } from "./env-file";
 
@@ -25,6 +25,10 @@ export async function resetTestDatabase() {
   const tableList = tables.map(({ table_name: tableName }) => `"${tableName.replaceAll('"', '""')}"`).join(", ");
 
   await testSql.unsafe(`truncate table ${tableList} restart identity cascade`);
+}
+
+export async function seedTestOperator() {
+  await testDb.insert(users).values({ id: "operator", email: "operator@example.com" });
 }
 
 export async function closeTestDatabase() {

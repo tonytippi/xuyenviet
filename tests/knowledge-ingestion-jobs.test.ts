@@ -1,12 +1,12 @@
 import { eq, sql } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { knowledgeIngestionCandidates, knowledgeIngestionJobs, sourceCaptureVersions, sources } from "@/db/schema";
+import { knowledgeIngestionCandidates, knowledgeIngestionJobs, sourceCaptureVersions, sources, users } from "@/db/schema";
 import { claimNextKnowledgeIngestionJob, commitKnowledgeIngestionStage, ensureIngestionJobForCaptureVersion, listKnowledgeIngestionJobStatuses, recoverKnowledgeIngestionJobs, retryKnowledgeIngestionStage } from "@/features/knowledge/ingestion-jobs";
 import { runKnowledgeIngestionWorkerLoop } from "@/features/knowledge/ingestion-worker";
 import { appendSourceCaptureVersion, hashCaptureText } from "@/features/knowledge/source-captures";
 
-import { resetTestDatabase, testDb } from "./helpers/db";
+import { resetTestDatabase, seedTestOperator, testDb } from "./helpers/db";
 
 async function createSource(id: string, submitterId = "operator") {
   await testDb.insert(sources).values({ id, kind: "pasted_text", label: `Source ${id}`, sourceType: "curated", verificationStatus: "unverified", official: false, partner: false, submittedByUserId: submitterId });
@@ -25,6 +25,7 @@ async function appendReadableCapture(sourceId: string, rawText = "Đèo Hải V�
 describe("canonical knowledge ingestion jobs", () => {
   beforeEach(async () => {
     await resetTestDatabase();
+    await seedTestOperator();
   });
 
   test("creates exactly one queued job with immutable submitter provenance for a readable capture", async () => {
