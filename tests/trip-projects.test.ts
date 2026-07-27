@@ -1,5 +1,4 @@
 import { asc, eq, sql } from "drizzle-orm";
-import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { aiUsageEvents, answerUsefulnessFeedback, assistantResponseProvenance, assistantRetrievalDecisions, auditEvents, chatContext, conversations, messageImageAttachments, messages, tripChangeProposals, tripPlanItems, tripProjectConstraints, tripProjects, users, webSearchResults } from "@/db/schema";
@@ -145,50 +144,6 @@ describe("Trip project helpers", () => {
 
     await expect(testDb.update(tripProjects).set({ primaryConversationId: wrongProject.id }).where(eq(tripProjects.id, project.id))).rejects.toThrow();
     await expect(testDb.update(tripProjects).set({ primaryConversationId: wrongOwner.id }).where(eq(tripProjects.id, project.id))).rejects.toThrow();
-  });
-
-  test("applies the actual 0062 migration to legacy zero, one, and multiple-chat projects without losing history", async () => {
-    const migrationSql = readFileSync("drizzle/migrations/0062_faithful_mysterio.sql", "utf8").replaceAll("--> statement-breakpoint", "");
-
-    await testDb.transaction(async (transaction) => {
-      await transaction.execute(sql.raw(`
-        create temp table trip_projects (id text primary key, user_id text not null, title text not null);
-        create temp table conversations (id text primary key, user_id text not null, trip_project_id text, created_at timestamp not null default now(), updated_at timestamp not null default now(), unique (id, trip_project_id, user_id));
-        create temp table messages (id text primary key, conversation_id text not null, content text not null);
-        create temp table chat_context (id text primary key, conversation_id text not null, value text not null);
-        insert into trip_projects (id, user_id, title) values ('zero', 'user-1', 'Zero'), ('one', 'user-1', 'One'), ('many', 'user-1', 'Many');
-        insert into conversations (id, user_id, trip_project_id, updated_at) values ('one-chat', 'user-1', 'one', '2026-07-01'), ('old-chat', 'user-1', 'many', '2026-07-01'), ('new-chat', 'user-1', 'many', '2026-07-02');
-        insert into messages (id, conversation_id, content) values ('message-old', 'old-chat', 'historic message');
-        insert into chat_context (id, conversation_id, value) values ('context-old', 'old-chat', 'historic context');
-      `));
-      await transaction.execute(sql.raw("set local search_path to pg_temp, public"));
-      await transaction.execute(sql.raw(migrationSql));
-
-      const projects = await transaction.execute<{ id: string; primary_conversation_id: string }>(sql.raw("select id, primary_conversation_id from trip_projects order by id"));
-      const conversationsAfterFirstRun = await transaction.execute<{ id: string }>(sql.raw("select id from conversations order by id"));
-      await transaction.execute(sql.raw(`
-        with ranked_conversations as (
-          select id, trip_project_id, user_id, row_number() over (partition by trip_project_id, user_id order by updated_at desc, id desc) as rank
-          from conversations where trip_project_id is not null
-        )
-        update trip_projects as project set primary_conversation_id = ranked.id
-        from ranked_conversations as ranked
-        where project.id = ranked.trip_project_id and project.user_id = ranked.user_id and ranked.rank = 1 and project.primary_conversation_id is null;
-      `));
-      const conversationsAfterSecondRun = await transaction.execute<{ id: string }>(sql.raw("select id from conversations order by id"));
-      const preserved = await transaction.execute<{ messages: number; contexts: number }>(sql.raw("select (select count(*)::int from messages) as messages, (select count(*)::int from chat_context) as contexts"));
-
-      expect(projects).toEqual(expect.arrayContaining([
-        { id: "many", primary_conversation_id: "new-chat" },
-        { id: "one", primary_conversation_id: "one-chat" },
-      ]));
-      const zeroPrimary = projects.find((project) => project.id === "zero")?.primary_conversation_id;
-      expect(zeroPrimary).toMatch(/^[a-f0-9]{32}$/);
-      expect(conversationsAfterFirstRun).toEqual(conversationsAfterSecondRun);
-      expect(conversationsAfterFirstRun.map((row) => row.id)).toEqual([zeroPrimary, "new-chat", "old-chat", "one-chat"].sort());
-      expect(preserved).toEqual([{ messages: 1, contexts: 1 }]);
-      await transaction.execute(sql.raw("drop table chat_context, messages, conversations, trip_projects"));
-    });
   });
 
   test("deleting a trip project detaches related conversations without clearing ownership", async () => {

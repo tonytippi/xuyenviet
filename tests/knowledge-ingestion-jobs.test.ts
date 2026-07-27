@@ -1,7 +1,4 @@
 import { eq, sql } from "drizzle-orm";
-import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { beforeEach, describe, expect, test } from "vitest";
 
 import { knowledgeIngestionCandidates, knowledgeIngestionJobs, sourceCaptureVersions, sources, users } from "@/db/schema";
@@ -150,37 +147,6 @@ describe("canonical knowledge ingestion jobs", () => {
     expect(staleClaim).toBeNull();
   });
 
-  test("backfills only readable retained versions with immutable source submitter provenance", async () => {
-    await createSource("migration-readable");
-    await createSource("migration-unreadable");
-    await createSource("migration-tombstoned");
-    await testDb.insert(sourceCaptureVersions).values([
-      { id: "migration-readable-version", sourceId: "migration-readable", versionSequence: 1, captureKind: "pasted_text", rawText: "Readable historical capture.", contentHash: hashCaptureText("Readable historical capture."), capturedAt: new Date("2026-01-01T00:00:00.000Z") },
-      { id: "migration-unreadable-version", sourceId: "migration-unreadable", versionSequence: 1, captureKind: "pasted_text", rawText: null, contentHash: hashCaptureText("unreadable"), capturedAt: new Date("2026-01-01T00:00:00.000Z") },
-      { id: "migration-tombstoned-version", sourceId: "migration-tombstoned", versionSequence: 1, captureKind: "pasted_text", rawText: null, contentHash: hashCaptureText("tombstoned"), capturedAt: new Date("2026-01-01T00:00:00.000Z"), payloadDeletedAt: new Date("2026-02-01T00:00:00.000Z") },
-    ]);
-
-    const migration = readFileSync(resolve(process.cwd(), "drizzle/migrations/0043_wealthy_glorian.sql"), "utf8");
-    const schemaName = `migration_0043_${randomUUID().replaceAll("-", "")}`;
-    const scopedMigration = migration.replaceAll('"public".', `"${schemaName}".`);
-
-    await testDb.transaction(async (transaction) => {
-      await transaction.execute(sql.raw(`create schema "${schemaName}"`));
-      await transaction.execute(sql.raw(`create table "${schemaName}".users (id text primary key, email text not null)`));
-      await transaction.execute(sql.raw(`create table "${schemaName}".sources (id text primary key, submitted_by_user_id text not null)`));
-      await transaction.execute(sql.raw(`create table "${schemaName}".source_capture_versions (id text not null, source_id text not null, payload_deleted_at timestamp, raw_text text, primary key (id, source_id))`));
-      await transaction.execute(sql.raw(`insert into "${schemaName}".users values ('operator', 'operator@example.com')`));
-      await transaction.execute(sql.raw(`insert into "${schemaName}".sources values ('migration-readable', 'operator'), ('migration-unreadable', 'operator'), ('migration-tombstoned', 'operator')`));
-      await transaction.execute(sql.raw(`insert into "${schemaName}".source_capture_versions values ('migration-readable-version', 'migration-readable', null, 'Readable historical capture.'), ('migration-unreadable-version', 'migration-unreadable', null, null), ('migration-tombstoned-version', 'migration-tombstoned', now(), 'Tombstoned historical capture.')`));
-      await transaction.execute(sql.raw(`set local search_path to "${schemaName}"`));
-      for (const statement of scopedMigration.split("--> statement-breakpoint").map((part) => part.trim()).filter(Boolean)) await transaction.execute(sql.raw(statement));
-
-      await expect(transaction.execute(sql`select capture_version_id, source_id, submitted_by_user_id, submitted_by_email, stage, stage_version, attempt_count from knowledge_ingestion_jobs`)).resolves.toEqual([
-        { capture_version_id: "migration-readable-version", source_id: "migration-readable", submitted_by_user_id: "operator", submitted_by_email: "operator@example.com", stage: "queued", stage_version: 1, attempt_count: 0 },
-      ]);
-    });
-  });
-
   test("rejects unreadable and mismatched versions and exposes no raw payload or fence in the operator projection", async () => {
     await createSource("private-source");
     await createSource("other-source");
@@ -241,16 +207,4 @@ describe("canonical knowledge ingestion jobs", () => {
     await expect(commitKnowledgeIngestionStage({ jobId: claim.jobId, expectedStage: "queued", expectedStageVersion: 1, fencingToken: claim.fencingToken, nextStage: "suppressed", checkpoint }, testDb)).rejects.toThrow("Checkpoint is invalid");
   });
 
-  test("migration 0045 clears unrecoverable staged jobs while preserving queued jobs", async () => {
-    const migration = readFileSync(resolve(process.cwd(), "drizzle/migrations/0045_recover_knowledge_ingestion_jobs.sql"), "utf8");
-    const schemaName = `migration_0045_${randomUUID().replaceAll("-", "")}`;
-    await testDb.transaction(async (transaction) => {
-      await transaction.execute(sql.raw(`create schema "${schemaName}"`));
-      await transaction.execute(sql.raw(`create table "${schemaName}"."knowledge_ingestion_jobs" (id text primary key, stage text not null, stage_version integer not null, last_error_code text, requeue_reason_code text, claimed_by text, claimed_at timestamp, lease_expires_at timestamp, fencing_token text, updated_at timestamp)`));
-      await transaction.execute(sql.raw(`insert into "${schemaName}"."knowledge_ingestion_jobs" (id, stage, stage_version, claimed_by, claimed_at, lease_expires_at, fencing_token) values ('staged', 'extracting', 2, 'worker', now(), now() + interval '1 minute', '${"a".repeat(64)}'), ('queued', 'queued', 1, null, null, null, null)`));
-      await transaction.execute(sql.raw(`set local search_path to "${schemaName}"`));
-      for (const statement of migration.split("--> statement-breakpoint").map((part) => part.trim()).filter(Boolean)) await transaction.execute(sql.raw(statement));
-      await expect(transaction.execute(sql.raw(`select id, stage, stage_version, checkpoint, claimed_by from "${schemaName}"."knowledge_ingestion_jobs" order by id`))).resolves.toEqual([{ id: "queued", stage: "queued", stage_version: 1, checkpoint: null, claimed_by: null }, { id: "staged", stage: "failed", stage_version: 3, checkpoint: null, claimed_by: null }]);
-    });
-  });
 });

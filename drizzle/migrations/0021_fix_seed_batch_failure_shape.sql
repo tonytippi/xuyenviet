@@ -1,1 +1,0 @@
--- Consolidated into 0020_stormy_caretaker.sql before Story 4.5 shipped.

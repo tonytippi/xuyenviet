@@ -423,7 +423,7 @@ describe("Story 7.6 AC1 cross-cutting trip planning safety", () => {
       // conversation. The deleted case is covered in 2.2. For the unlinked case,
       // the composite FK trip_projects_primary_conversation_owner_fk
       // (primary_conversation_id, id, user_id) -> conversations(id, trip_project_id,
-      // user_id) (migration 0062) guarantees a referenced primary conversation
+      // user_id) (the baseline migration) guarantees a referenced primary conversation
       // stays linked to the project: nulling its trip_project_id while the
       // project points at it violates the FK. Assert the schema rejects both
       // unlinking a referenced primary and pointing a project at a conversation

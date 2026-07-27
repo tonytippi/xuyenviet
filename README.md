@@ -112,7 +112,7 @@ pnpm db:generate
 pnpm db:migrate
 ```
 
-`db:generate` and `db:migrate` use `drizzle.config.ts` and `DATABASE_URL`. Story 1.1 intentionally configures Drizzle without adding domain tables.
+`db:generate` and `db:migrate` use `drizzle.config.ts` and `DATABASE_URL`. The repository starts from the consolidated `0000_baseline` migration; all subsequent schema changes must be forward-only migrations.
 
 Operations scripts:
 

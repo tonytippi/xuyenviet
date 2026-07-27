@@ -142,27 +142,6 @@ describe("Story 8.6 actor isolation", () => {
     await expect(testDb.execute(sql`select id from users where id in (${sql.join(catalogIds.map((id) => sql`${id}`), sql`, `)})`)).resolves.toEqual([]);
   });
 
-  test("makes upgraded databases with historic system users stop for an explicit reset and reseed", async () => {
-    const migration = readFileSync("drizzle/migrations/0072_reject_system_executor_user_ids.sql", "utf8");
-    const schemaName = `migration_0072_${crypto.randomUUID().replaceAll("-", "")}`;
-
-    await testDb.transaction(async (transaction) => {
-      await transaction.execute(sql.raw(`create schema "${schemaName}"`));
-      await transaction.execute(sql.raw(`set local search_path to "${schemaName}"`));
-      await transaction.execute(sql.raw('create table users (id text primary key)'));
-      await transaction.execute(sql.raw('create table historic_principals (user_id text not null references users(id) on delete restrict)'));
-      await transaction.execute(sql.raw("insert into users (id) values ('system-trip-planning')"));
-      await transaction.execute(sql.raw("insert into historic_principals (user_id) values ('system-trip-planning')"));
-
-      await expect(transaction.transaction((savepoint) => executeMigration(savepoint, migration))).rejects.toThrow("Migration 0072 requires an explicit reset and reseed");
-      await expect(transaction.execute(sql.raw("select constraint_name from information_schema.table_constraints where table_schema = current_schema() and table_name = 'users' and constraint_name = 'users_no_system_executor_id_check'"))).resolves.toEqual([]);
-
-      await transaction.execute(sql.raw('delete from historic_principals'));
-      await transaction.execute(sql.raw('delete from users'));
-      await expect(executeMigration(transaction, migration)).resolves.toBeUndefined();
-      await expect(transaction.transaction((savepoint) => savepoint.execute(sql.raw("insert into users (id) values ('system-trip-planning')")))).rejects.toThrow();
-    });
-  });
 });
 
 describe("Story 8.6 Audit-owned write boundary", () => {
@@ -268,12 +247,6 @@ function resolveConstString(reference: ts.Identifier): string | null {
     }
   }
   return null;
-}
-
-async function executeMigration(database: Parameters<Parameters<typeof testDb.transaction>[0]>[0], migration: string) {
-  for (const statement of migration.split("--> statement-breakpoint").map((part) => part.trim()).filter(Boolean)) {
-    await database.execute(sql.raw(statement));
-  }
 }
 
 function listTypeScriptFiles(directory: string): string[] {
