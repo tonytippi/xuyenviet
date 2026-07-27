@@ -7,6 +7,7 @@ import { auditEvents, conversations, sources, tripProjects, userRoles, users } f
 import { recordAuditEvent } from "@/features/audit/events";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
+import { getTestDatabaseUrl } from "./helpers/env-file";
 
 const reservedUserIds = [
   "system-knowledge-pipeline",
@@ -14,13 +15,15 @@ const reservedUserIds = [
   "system-facebook-capture",
   "system-youtube-capture",
 ];
+const testDatabaseUrl = getTestDatabaseUrl();
 
 describe("Story 8.5 clean-break seed", () => {
   beforeEach(async () => {
     await resetTestDatabase();
     execFileSync("pnpm", ["exec", "tsx", "scripts/db-seed.ts"], {
       cwd: process.cwd(),
-      env: { ...process.env, APP_ENV: "local", DATABASE_URL: process.env.DATABASE_URL },
+      // The seed subprocess must not inherit Vitest's DATABASE_URL remapping.
+      env: { ...process.env, APP_ENV: "local", DATABASE_URL: testDatabaseUrl },
       stdio: "inherit",
     });
   });

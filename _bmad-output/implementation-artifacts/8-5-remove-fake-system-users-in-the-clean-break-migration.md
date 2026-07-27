@@ -75,6 +75,10 @@ so that fake system identities cannot reappear through migrations, fixtures, or 
   - [x] Run `pnpm lint`, `pnpm typecheck`, and `pnpm build`.
   - [x] Do not require `pnpm db:generate`: this story removes data-only migration files and does not change schema. If it is run, record the known non-TTY Drizzle rename-disambiguation result exactly rather than treating it as a Story 8.5 failure.
 
+### Review Findings
+
+- [x] [Review][Patch] Bind the focused seed subprocess explicitly to `DATABASE_URL_TEST` [tests/story-8-5-clean-break.test.ts:18] — The test resolves the dedicated test URL through `getTestDatabaseUrl()` and passes it explicitly as the child process `DATABASE_URL`; it no longer reads `process.env.DATABASE_URL` or relies on Vitest remapping. The seed-result assertions execute through the same `testDb` target, preserving the isolation regression.
+
 ## Dev Notes
 
 ### Required Domain Contract
@@ -156,6 +160,8 @@ gpt-5.6-terra
 - Hard blocker if that confirmation is unavailable or target data is durable: stop Story 8.5 and obtain an expand-migrate-contract design. Do not reset, backfill, or delete fake-user history.
 - Removed the three obsolete reserved-user migration files and journal entries, two obsolete migration tests, and the two fake seed users. Active capture runbooks now identify cataloged executors as non-user identities.
 - Added `tests/story-8-5-clean-break.test.ts` for isolated seed and cataloged-system-audit regression coverage. All Story 8.5 tasks and acceptance criteria are complete; status is `review`.
+- Repaired the sole high review finding: the seed child process now receives `DATABASE_URL` directly from the `DATABASE_URL_TEST`-resolving helper, while its existing seed-result assertions remain against `testDb`. No development reset, migration, seed script, Story 8.6, or commit action was performed.
+- Independent clean-shell verification loaded `.env` and passed `tests/story-8-5-clean-break.test.ts` (2 tests); `pnpm typecheck` also passed. The seed subprocess receives `testDatabaseUrl`, and no development database reset was involved.
 
 ### File List
 
@@ -179,3 +185,7 @@ gpt-5.6-terra
 - 2026-07-27: Created and non-interactively validated the Story 8.5 implementation guide; status set to `ready-for-dev`. No code, migration, reset, test, commit, or Story 8.6 work was performed.
 - 2026-07-27: Revalidated the Story 8.5 guide and clarified the effective `DATABASE_URL` identity/disposability preflight and the separation between `DATABASE_URL_TEST` regressions and the authoritative development reset/seed acceptance check. Status remains `ready-for-dev`. No code, migration, reset, test, commit, or Story 8.6 work was performed.
 - 2026-07-27: Completed the authorized clean-break implementation and approved local reset/reseed of `localhost:5432/xuyenviet`; removed fake-user migration/seed/test/runbook paths, added focused seed coverage, and set status to `review`. No commit or Story 8.6 work was performed.
+- 2026-07-27: BMad adversarial code review of `3a91fbf..304aed53c001ab477d296470d78878c97038d5cd` found one high-severity focused-test isolation patch: bind the seed subprocess directly to `DATABASE_URL_TEST`. Status set to `in-progress`; no code, commit, or Story 8.6 work was performed.
+- 2026-07-27: Fresh narrow BMad code review of `3a91fbf..304aed53c001ab477d296470d78878c97038d5cd` reran Blind Hunter, Edge Case Hunter, and Acceptance Auditor. The same unresolved high-severity `DATABASE_URL_TEST` subprocess-binding patch remains; status remains `in-progress`. No implementation, test, migration, commit, or Story 8.6 work was performed.
+- 2026-07-27: Repaired the sole high review finding in `tests/story-8-5-clean-break.test.ts`: the seed subprocess receives `DATABASE_URL` explicitly from the `DATABASE_URL_TEST`-resolving helper, never from `process.env.DATABASE_URL` or Vitest remapping. `DATABASE_URL_TEST="$DATABASE_URL_TEST" pnpm test:run tests/story-8-5-clean-break.test.ts` was attempted but Vitest global setup failed closed with `DATABASE_URL_TEST is required for integration tests.` before migrations, test setup, or the seed subprocess ran. `pnpm typecheck` passed. Status returned to `review` with this environment blocker recorded. No development reset, migration, seed script, Story 8.6, or commit action was performed.
+- 2026-07-27: Independent verification resolved the prior environment blocker: with `.env` loaded in a clean shell, `tests/story-8-5-clean-break.test.ts` passed 2 tests and `pnpm typecheck` passed. The focused seed subprocess receives `testDatabaseUrl`; no development database reset, production/migration/seed change, Story 8.6 work, or commit action was performed. Status remains `review`.

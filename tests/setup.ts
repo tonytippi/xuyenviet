@@ -4,8 +4,10 @@ import { getTestDatabaseUrl } from "./helpers/env-file";
 import { closeTestDatabase, resetTestDatabase } from "./helpers/db";
 
 const testDatabaseUrl = getTestDatabaseUrl();
+const applicationDatabaseUrl = process.env.DATABASE_URL;
 
 process.env.APP_ENV = "local";
+process.env.TEST_APPLICATION_DATABASE_URL = applicationDatabaseUrl;
 process.env.DATABASE_URL = testDatabaseUrl;
 process.env.AUTH_SECRET = "test-secret";
 process.env.AUTH_URL = "http://localhost:3000";

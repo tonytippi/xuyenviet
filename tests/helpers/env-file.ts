@@ -33,7 +33,7 @@ export function getTestDatabaseUrl() {
     throw new Error("DATABASE_URL_TEST is required for integration tests.");
   }
 
-  const databaseUrl = process.env.DATABASE_URL;
+  const databaseUrl = process.env.TEST_APPLICATION_DATABASE_URL ?? process.env.DATABASE_URL;
 
   if (!databaseUrl) {
     throw new Error("DATABASE_URL must be set so tests can prove DATABASE_URL_TEST is separate.");
