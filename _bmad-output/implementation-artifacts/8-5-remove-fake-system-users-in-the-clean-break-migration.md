@@ -4,7 +4,7 @@ baseline_commit: 3a91fbf
 
 # Story 8.5: Remove Fake System Users in the Clean-Break Migration
 
-Status: review
+Status: done
 
 ## Story
 
@@ -189,3 +189,4 @@ gpt-5.6-terra
 - 2026-07-27: Fresh narrow BMad code review of `3a91fbf..304aed53c001ab477d296470d78878c97038d5cd` reran Blind Hunter, Edge Case Hunter, and Acceptance Auditor. The same unresolved high-severity `DATABASE_URL_TEST` subprocess-binding patch remains; status remains `in-progress`. No implementation, test, migration, commit, or Story 8.6 work was performed.
 - 2026-07-27: Repaired the sole high review finding in `tests/story-8-5-clean-break.test.ts`: the seed subprocess receives `DATABASE_URL` explicitly from the `DATABASE_URL_TEST`-resolving helper, never from `process.env.DATABASE_URL` or Vitest remapping. `DATABASE_URL_TEST="$DATABASE_URL_TEST" pnpm test:run tests/story-8-5-clean-break.test.ts` was attempted but Vitest global setup failed closed with `DATABASE_URL_TEST is required for integration tests.` before migrations, test setup, or the seed subprocess ran. `pnpm typecheck` passed. Status returned to `review` with this environment blocker recorded. No development reset, migration, seed script, Story 8.6, or commit action was performed.
 - 2026-07-27: Independent verification resolved the prior environment blocker: with `.env` loaded in a clean shell, `tests/story-8-5-clean-break.test.ts` passed 2 tests and `pnpm typecheck` passed. The focused seed subprocess receives `testDatabaseUrl`; no development database reset, production/migration/seed change, Story 8.6 work, or commit action was performed. Status remains `review`.
+- 2026-07-27: Second bounded BMad code review through repair commit `7a23d44968ecaec111b415eeae1f2ba52d00fa71` ran Blind Hunter, Edge Case Hunter, and Acceptance Auditor. No actionable in-scope findings remain; status synchronized to `done`. Dockerfile dirty work, disposable-reset context, and known full-suite failures were excluded. No code edit, commit, or Story 8.6 work was performed.

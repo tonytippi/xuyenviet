@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-07-27 (Independent clean-shell verification passed the Story 8.5 focused isolation test and typecheck; story is in review.)
+# last_updated: 2026-07-27 (Second bounded Story 8.5 review through 7a23d449 found no actionable in-scope findings; story is done.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-07-27 (Independent clean-shell verification passed the Story 8.5 focused isolation test and typecheck; story is in review.)
+last_updated: 2026-07-27 (Second bounded Story 8.5 review through 7a23d449 found no actionable in-scope findings; story is done.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -150,7 +150,8 @@ development_status:
   # 2026-07-27: Fresh narrow recovery review of 304aed53 reran all three adversarial layers. Blind Hunter found no additional issue; Edge Case Hunter and Acceptance Auditor confirmed the same unresolved high patch. No implementation, test, migration, commit, or Story 8.6 work was performed.
   # 2026-07-27: Repaired the sole Story 8.5 high finding: the clean-break seed subprocess now receives DATABASE_URL explicitly from the DATABASE_URL_TEST-resolving helper, without reading process.env.DATABASE_URL or relying on Vitest remapping. pnpm typecheck passed; focused verification failed closed before setup with DATABASE_URL_TEST is required for integration tests. No development reset, migration, seed script, Story 8.6, or commit action was performed. Status returned to review with the environment blocker recorded in the Story 8.5 artifact.
   # 2026-07-27: Independent clean-shell verification loaded .env and passed tests/story-8-5-clean-break.test.ts (2 tests); pnpm typecheck passed. The seed subprocess receives testDatabaseUrl, and no development database reset was involved. The prior focused-test environment blocker is resolved; status remains review. No production, migration, seed-script, Story 8.6, or commit changes.
-  8-5-remove-fake-system-users-in-the-clean-break-migration: review
+  # Finalized 2026-07-27 after second bounded BMad review through repair commit 7a23d44968ecaec111b415eeae1f2ba52d00fa71. Blind Hunter, Edge Case Hunter, and Acceptance Auditor found no actionable in-scope findings. Dockerfile dirty work, authorized disposable-reset context, and known full-suite failures were excluded. No code edit, commit, or Story 8.6 work was performed.
+  8-5-remove-fake-system-users-in-the-clean-break-migration: done
   8-6-verify-actor-isolation-and-attribution-end-to-end: backlog
   epic-8-retrospective: optional
 
