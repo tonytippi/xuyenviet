@@ -118,10 +118,14 @@ Interpret the sprint map using the installed `bmad-sprint-status` rules:
 - Sort stories by numeric epic then numeric story. Do not use lexicographic
   sorting (`10-1` must follow `9-9`).
 
-Retain the most recent completed worker's final output in an in-memory
-`last_worker_result` record, together with its target story or epic and expected
-final status. On the first iteration, this record is absent. After that, a
-missing, malformed, blocked, or contradictory result is a stop condition.
+Retain the most recent completed worker's complete final report in an in-memory
+`last_worker_result` record, together with its target story or epic, expected
+final status, and report provenance (`herdr-read` or `captured-handoff`). A
+`captured-handoff` is the verbatim complete report block captured from that
+worker and supplied to this coordinator after its terminal history is no longer
+readable; it is report transport, not a paraphrase or a reconstructed report.
+On the first iteration, this record is absent. After that, a missing,
+malformed, blocked, or contradictory result is a stop condition.
 
 At the beginning of every loop iteration, start a new coordinator pane and
 agent. Give it `last_worker_result`, then ask it to use `bmad-sprint-status` in
@@ -142,11 +146,18 @@ selection: run its bounded repair loop first.
 Give the coordinator the complete final report block, not the result of
 `herdr agent prompt --wait` or a paraphrase. It must parse the final delimited
 block by its field labels, accepting wrapped `SUMMARY` and `BLOCKER` values.
-If that block is absent or malformed in the initial 160-line read, re-read the
-same worker once with `herdr agent read <name> --source recent-unwrapped --lines 300`.
-If that retry is still absent or malformed, send the same worker one bounded,
-non-mutating recovery prompt: `Do not inspect, edit, test, commit, or
-synchronize anything. Reprint only your final complete
+Prefer a block read from the worker with Herdr. If the invoking coordinator
+already retains a verbatim complete block from that same worker, pass it as a
+`captured-handoff` and parse it before attempting report recovery. A valid
+captured-handoff is sufficient report transport; do not reject it merely
+because a later `herdr agent read` does not contain it, and do not ask the
+worker to reprint it.
+
+Only when neither a Herdr read nor a captured-handoff contains a valid block,
+re-read the same worker once with `herdr agent read <name> --source
+recent-unwrapped --lines 300`. If that retry is still absent or malformed, send
+the same worker one bounded, non-mutating recovery prompt: `Do not inspect,
+edit, test, commit, or synchronize anything. Reprint only your final complete
 --- CHIEF-OF-STAFF-REPORT --- block now.` Wait for it, then re-read the worker
 once with `herdr agent read <name> --source recent-unwrapped --lines 160`.
 Treat the recovery response only as a report transport retry, not a new stage
@@ -192,13 +203,16 @@ BLOCKER: <none or reason>
 --- END-CHIEF-OF-STAFF-REPORT ---
 ```
 
-The report must be the worker's last substantive terminal output. Parse it
-semantically, not by exact presentation. Prefer the canonical delimiter block,
-but accept an understandable self-contained final report when its delimiters,
-hyphenation, whitespace, capitalization, line wrapping, or Markdown decoration
-vary. Locate labeled fields case-insensitively and normalize harmless spacing or
-punctuation around the labels. `SUMMARY` and `BLOCKER` values may continue on
-following wrapped lines until the next recognized label or the report end.
+The report must be the worker's last substantive terminal output when it is
+read directly from Herdr. A captured-handoff must be the verbatim complete block
+previously retained from that worker, but does not require the terminal history
+to remain available. Parse either transport semantically, not by exact
+presentation. Prefer the canonical delimiter block, but accept an
+understandable self-contained final report when its delimiters, hyphenation,
+whitespace, capitalization, line wrapping, or Markdown decoration vary. Locate
+labeled fields case-insensitively and normalize harmless spacing or punctuation
+around the labels. `SUMMARY` and `BLOCKER` values may continue on following
+wrapped lines until the next recognized label or the report end.
 
 Accept the report only when it unambiguously contains exactly one semantic value
 for each required field: `RESULT`, `TARGET`, `SPRINT STATUS`, `SPRINT STATUS
@@ -215,7 +229,11 @@ absent or contradictory, or its result and independently verified sprint status
 do not meet the stage requirements. After reading a mutating worker's final
 output, accept it only when `RESULT` is semantically successful, `SPRINT STATUS
 SYNCHRONIZED` is affirmative, and the exact stage-appropriate final status is
-independently observed in `sprint-status.yaml`.
+independently observed in `sprint-status.yaml`. When `SUMMARY` supplies a
+commit SHA or an absolute target path, independently verify that the commit or
+path exists before proceeding. A verification failure is a state-verification
+failure, not a missing-report failure; diagnose it through one narrowly scoped
+recovery worker before escalation.
 Save the normalized complete report as `last_worker_result` before creating
 another pane.
 A worker that cannot synchronize the expected status must return `BLOCKED`; do
@@ -366,6 +384,14 @@ sprint-status.yaml to set this story to review. Do not commit. End with the
 required machine-checkable report, including the findings fixed, tests run, and
 changed files in SUMMARY.
 ```
+
+Use the accepted review report itself as the source for the supplied findings.
+Do not create a coordinator-selection pane, request a report reprint, or treat
+the review as blocked solely because the completed review worker's terminal
+history later becomes unavailable. First independently verify that the report's
+target status is `in-progress` in `sprint-status.yaml` and that any reported
+commit and story path exist in the current checkout. If that verification
+passes, start this repair worker immediately.
 
 After the repair report and sprint-status synchronization are verified, run the
 Commit stage and then repeat Story Review once.
