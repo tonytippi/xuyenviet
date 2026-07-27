@@ -2,14 +2,19 @@ FROM node:20-bookworm-slim AS base
 
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 
-RUN corepack enable
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates git python3 make g++ \
+    && rm -rf /var/lib/apt/lists/* \
+    && corepack enable
 
 WORKDIR /app
 
 FROM base AS deps
 
-COPY package.json pnpm-lock.yaml ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY patches ./patches
 RUN pnpm install --frozen-lockfile
 
 FROM deps AS build
@@ -19,7 +24,8 @@ RUN pnpm build
 
 FROM base AS production-deps
 
-COPY package.json pnpm-lock.yaml ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY patches ./patches
 RUN pnpm install --frozen-lockfile --prod
 
 FROM base AS runner
