@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-07-27 (Story 8.4 finalized after status-only repair-commit verification.)
+# last_updated: 2026-07-27 (Story 8.5 completed approved local clean-break reset/seed validation and is ready for review.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-07-27 (Story 8.4 finalized after status-only repair-commit verification.)
+last_updated: 2026-07-27 (Story 8.5 completed approved local clean-break reset/seed validation and is ready for review.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -144,7 +144,9 @@ development_status:
   # 2026-07-27: Final Story 8.4 review patch broadens the source-level enforcement to reject every direct .insert(tripPlanChangeHistory) receiver form and adds a getDb().insert(...) regression. The deferred pre-existing pending-list expiry behavior at trip-change-proposals.ts:930 remains unchanged. Focused 5-file suite passed 109 tests. Status returned to review; no schema, migration, Story 8.5, production-code, or commit changes.
   # Finalized 2026-07-27 after status-only verification of supplied final repair commit 8a3bb133aa2f4ec97e53a74f87fadfbb530037af. Authorized exception: the only pre-existing worktree change was review-created _bmad-output/implementation-artifacts/deferred-work.md, explicitly approved for inclusion in the final status commit; it was not edited. No code correctness, test, review, or commit inspection was performed.
   8-4-attribute-trip-proposal-expiry-through-the-audit-boundary: done
-  8-5-remove-fake-system-users-in-the-clean-break-migration: backlog
+  # Story guide created 2026-07-27. Implementation must first affirm that the exact reset target is intentionally disposable local development data; otherwise stop for an expand-migrate-contract design.
+  # 2026-07-27: User-authorized disposable local target `localhost:5432/xuyenviet` was identity-preflighted, reset, migrated, and seeded. Focused 54-test suite, lint, typecheck, and build passed; full suite has seven unrelated pre-existing failures. Bounded Story 8.5 review found no in-scope findings. No commit.
+  8-5-remove-fake-system-users-in-the-clean-break-migration: review
   8-6-verify-actor-isolation-and-attribution-end-to-end: backlog
   epic-8-retrospective: optional
 

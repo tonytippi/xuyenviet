@@ -16,7 +16,7 @@ Readable capture creates an immutable capture version and one canonical ingestio
 - `GEMINI_YOUTUBE_MEDIA_RESOLUTION` is optional and defaults to `MEDIA_RESOLUTION_LOW`. Use `MEDIA_RESOLUTION_MEDIUM` only when smaller on-screen detail is necessary; `MEDIA_RESOLUTION_HIGH` has the highest cost. The selected value is part of the capture cache identity.
 - Set `DATABASE_URL` to the protected-tunnel/private-network application database and `CAPTURE_CACHE_DATABASE_URL` to a separate local PostgreSQL database. Run `pnpm capture-cache:migrate` before capture; commands fail closed for missing, malformed, equivalent, or uninitialized targets.
 - Do not expose the key to browser code, request routes, logs, audit records, or Git.
-- Create the configured service actor user before scheduled runs. Defaults are `system-youtube-capture` and `system-youtube-capture@xuyenviet.internal`.
+- Capture executes as the cataloged `system-youtube-capture` executor. It is not a `users` row and has no session or role; every queued source must retain real-person submitter provenance.
 
 ## Current Manual Run
 

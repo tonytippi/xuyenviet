@@ -68,18 +68,9 @@ The current public-MVP readiness report is **no-go** for production scheduled Fa
 
 Do not enable unattended production scheduling or rely on automatic ingestion until the canonical ingestion-worker deployment gap has a completed deployment record. Process access is controlled by the deployment environment, not per-run CLI identity.
 
-## Service Audit Actor
+## System Executor
 
-Every capture run uses a fixed reserved system actor because `audit_events.actor_user_id` has a foreign key to `users.id`. It is a technical identity only: it has no role, session, OAuth account, or human approval authority.
-
-Default service actor:
-
-```text
-system-facebook-capture
-system-facebook-capture@xuyenviet.invalid
-```
-
-Migration `0065_system_facebook_capture_actor.sql` creates and reserves this exact identity in every environment. It fails closed if the ID or email is already associated with another user. Do not configure an alternate actor through environment variables.
+Every capture run uses the cataloged `system-facebook-capture` executor. It is not a `users` row and has no session, OAuth account, role, or human approval authority. Do not configure an alternate executor through environment variables; sources retain a real-person submitter for provenance.
 
 ## Running Capture
 
@@ -143,7 +134,7 @@ The web review queue is an admin/operator-only surface. Operators should not tre
 
 If the script reports no queued sources, no matching eligible Facebook source lacks a current capture version.
 
-If a run reports a system actor error, apply migration `0065_system_facebook_capture_actor.sql` and investigate any reserved-identity collision.
+If a run reports a system executor error, investigate the cataloged executor configuration and audit writer; do not create a service user or apply a reserved-user migration.
 
 If Facebook shows login, blocked, or empty content, refresh the local Playwright profile manually and rerun the command.
 
