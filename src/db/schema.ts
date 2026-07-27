@@ -1223,7 +1223,7 @@ export const knowledgeCardSearchDocuments = pgTable(
       .references(() => knowledgeCards.id, { onDelete: "cascade" }),
     contentVersion: integer("content_version").default(1).notNull(),
     acceptedFence: text("accepted_fence").default("legacy").notNull(),
-    executorSystem: text("executor_system"),
+    executorSystem: text("executor_system").notNull(),
     status: text("status").$type<KnowledgeSearchDocumentStatus>().default("active").notNull(),
     searchableText: text("searchable_text").notNull(),
     textHash: text("text_hash").notNull(),
@@ -1248,7 +1248,7 @@ export const knowledgeCardSearchDocuments = pgTable(
     check("knowledge_card_search_documents_source_count_check", sql`${document.sourceCount} > 0`),
     check("knowledge_card_search_documents_content_version_check", sql`${document.contentVersion} >= 1`),
     check("knowledge_card_search_documents_accepted_fence_check", sql`length(btrim(${document.acceptedFence})) between 1 and 128`),
-    check("knowledge_card_search_documents_executor_system_check", sql`${document.executorSystem} is null or length(btrim(${document.executorSystem})) between 1 and 160`),
+    check("knowledge_card_search_documents_executor_system_check", sql`length(btrim(${document.executorSystem})) between 1 and 160`),
     check("knowledge_card_search_documents_disabled_at_check", sql`(${document.status} = 'active' and ${document.disabledAt} is null) or (${document.status} <> 'active' and ${document.disabledAt} is not null)`),
   ],
 );

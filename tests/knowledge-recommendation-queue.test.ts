@@ -56,6 +56,15 @@ describe("knowledge recommendation queue", () => {
     ]);
   });
 
+  test("clears pipeline execution attribution when an operator resolves automated work", async () => {
+    await scheduleKnowledgeRecommendation({ cardId: "card", contentVersion: 1, evidenceSetRevision: 1, reason: "risk", executorSystem: "system-knowledge-pipeline" }, testDb);
+    const [recommendation] = await testDb.select().from(knowledgeRecommendations);
+    if (!recommendation) throw new Error("expected recommendation");
+
+    await expect(resolveKnowledgeRecommendation({ recommendationId: recommendation.id, expectedContentVersion: 1, expectedEvidenceSetRevision: 1, action: "suppress", actor: { userId: "operator", email: "operator@example.com" } }, testDb)).resolves.toMatchObject({ status: "resolved" });
+    await expect(testDb.select().from(knowledgeRecommendations).where(eq(knowledgeRecommendations.id, recommendation.id))).resolves.toMatchObject([{ status: "resolved", resolvedByUserId: "operator", executorSystem: null }]);
+  });
+
   test("supersedes in-review work when a material resolution changes the card version", async () => {
     await scheduleKnowledgeRecommendation({ cardId: "card", contentVersion: 1, evidenceSetRevision: 1, reason: "risk" }, testDb);
     await scheduleKnowledgeRecommendation({ cardId: "card", contentVersion: 1, evidenceSetRevision: 1, reason: "weak_evidence" }, testDb);
@@ -299,7 +308,7 @@ describe("knowledge recommendation queue", () => {
     const [trigger] = await testDb.select().from(knowledgeRecommendations).where(eq(knowledgeRecommendations.knowledgeCardId, "sample-2"));
     if (!trigger?.policyId) throw new Error("expected sampling policy");
     await expect(testDb.select().from(knowledgeRecommendations).where(eq(knowledgeRecommendations.knowledgeCardId, unselectedId))).resolves.toEqual([]);
-    await testDb.insert(knowledgeCardSearchDocuments).values({ knowledgeCardId: unselectedId, searchableText: "Điểm không được lấy mẫu", textHash: "a".repeat(64), sourceCount: 1, confidence: "community", freshnessSensitive: false });
+    await testDb.insert(knowledgeCardSearchDocuments).values({ knowledgeCardId: unselectedId, executorSystem: "system-knowledge-pipeline", searchableText: "Điểm không được lấy mẫu", textHash: "a".repeat(64), sourceCount: 1, confidence: "community", freshnessSensitive: false });
 
     await resolveKnowledgeRecommendation({ recommendationId: trigger.id, expectedContentVersion: 1, expectedEvidenceSetRevision: 1, action: "sampling_fail", samplingDispositionReason: "material_error", highSeverity: true, actor: { userId: "operator", email: "operator@example.com" } }, testDb);
     await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, "sample-2"))).resolves.toMatchObject([{ publicationState: "suppressed", contentVersion: 2 }]);

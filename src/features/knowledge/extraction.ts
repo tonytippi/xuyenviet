@@ -80,7 +80,7 @@ export function isKnowledgeExtractionError(error: unknown) {
 export async function extractKnowledgeDraftsFromSource(sourceId: string, options: { preProviderGuard?: KnowledgeDraftExtractionPreProviderGuard } = {}): Promise<KnowledgeDraftExtractionResult> {
   const { requireAdminSession } = await import("@/server/auth");
   const session = await requireAdminSession();
-  return extractKnowledgeDraftsFromSourceAsActor(sourceId, session, options);
+  return extractKnowledgeDraftsFromSourceAsActor(sourceId, session, { ...options, executorSystem: "system-ai-orchestration" });
 }
 
 export async function extractKnowledgeDraftsFromSourceAsActor(sourceId: string, actor: AuthenticatedSession, options: { preProviderGuard?: KnowledgeDraftExtractionPreProviderGuard; resultJobId?: string; captureVersionId?: string | null; executorSystem?: SystemAuditActorId } = {}): Promise<KnowledgeDraftExtractionResult> {
@@ -188,7 +188,8 @@ export async function extractKnowledgeDraftsFromSourceAsActor(sourceId: string, 
 
       await options.preProviderGuard?.({ db: transaction, sourceId: sourceBundle.source.id, captureVersionId: options.captureVersionId ?? sourceBundle.source.currentCaptureVersionId });
 
-      const inserted = await transaction.insert(knowledgeCards).values(drafts.map((draft) => ({ ...draft, aiGatewayModelId: model.id, ...(options.executorSystem ? { executorSystem: options.executorSystem } : { createdByUserId: actor.userId }) }))).returning({ id: knowledgeCards.id });
+      const initiatedByUserId = options.executorSystem === "system-ai-orchestration" ? actor.userId : undefined;
+      const inserted = await transaction.insert(knowledgeCards).values(drafts.map((draft) => ({ ...draft, aiGatewayModelId: model.id, ...(options.executorSystem ? { ...(initiatedByUserId ? { createdByUserId: initiatedByUserId } : {}), executorSystem: options.executorSystem } : { createdByUserId: actor.userId }) }))).returning({ id: knowledgeCards.id });
 
       await transaction.insert(knowledgeCardSources).values(inserted.map((card) => ({ knowledgeCardId: card.id, sourceId: sourceBundle.source.id, supportLevel: "primary" as const })));
 
@@ -220,13 +221,13 @@ export async function extractKnowledgeDraftsFromSourceAsActor(sourceId: string, 
     });
 
     if (providerUsage) {
-      await writeUsageForProviderCall(db, options.executorSystem ? null : actor.userId, options.executorSystem ?? "system-ai-orchestration", model, providerUsage);
+      await writeUsageForProviderCall(db, options.executorSystem === "system-knowledge-pipeline" ? null : actor.userId, options.executorSystem ?? "system-ai-orchestration", model, providerUsage);
     }
 
     return extraction;
   } catch (error) {
     if (providerUsage && error instanceof KnowledgeExtractionError) {
-      await writeUsageForProviderCall(db, options.executorSystem ? null : actor.userId, options.executorSystem ?? "system-ai-orchestration", model, providerUsage);
+      await writeUsageForProviderCall(db, options.executorSystem === "system-knowledge-pipeline" ? null : actor.userId, options.executorSystem ?? "system-ai-orchestration", model, providerUsage);
     }
     throw error;
   }

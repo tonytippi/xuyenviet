@@ -13,7 +13,7 @@ export async function enqueueKnowledgeIndexWork(
   db: IndexingMutationDb,
   input: { cardId: string; contentVersion: number; evidenceSetRevision: number; reason: string; executorSystem?: unknown },
 ) {
-  const executor = createSystemAuditActor(input.executorSystem ?? "system-knowledge-pipeline");
+  const executor = input.executorSystem === undefined ? null : createSystemAuditActor(input.executorSystem);
   await db
     .insert(knowledgeIndexDirtyMarkers)
     .values({
@@ -21,14 +21,14 @@ export async function enqueueKnowledgeIndexWork(
       contentVersion: input.contentVersion,
       evidenceSetRevision: input.evidenceSetRevision,
       reason: input.reason,
-      executorSystem: executor.system,
+      executorSystem: executor?.system ?? null,
       status: "pending",
       nextRunAt: new Date(),
       updatedAt: new Date(),
     })
     .onConflictDoUpdate({
       target: [knowledgeIndexDirtyMarkers.knowledgeCardId, knowledgeIndexDirtyMarkers.contentVersion],
-      set: { reason: sql`least(${knowledgeIndexDirtyMarkers.reason}, excluded.reason)`, executorSystem: executor.system, updatedAt: new Date() },
+      set: { reason: sql`least(${knowledgeIndexDirtyMarkers.reason}, excluded.reason)`, executorSystem: executor?.system ?? null, updatedAt: new Date() },
     });
 }
 

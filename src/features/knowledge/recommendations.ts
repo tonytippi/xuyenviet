@@ -85,7 +85,7 @@ export async function enrollVerifyFirstSampling(input: { terminalIngestionJobId:
   const corridorBucket = getCorridorBucketLabel(input.routeSegment, input.locationName);
   const facts = { policyId: verification.policyId, knowledgeCardId: input.cardId, contentVersion: input.contentVersion, evidenceSetRevision: input.evidenceSetRevision, corridorBucket: corridorBucket ?? "", outsideCorridor: corridorBucket === null };
   await db.insert(knowledgeVerifyFirstSamplingObligations).values({ terminalIngestionJobId: input.terminalIngestionJobId, ...facts }).onConflictDoNothing();
-  await db.insert(knowledgeRecommendations).values({ policyId: facts.policyId, knowledgeCardId: facts.knowledgeCardId, contentVersion: facts.contentVersion, evidenceSetRevision: facts.evidenceSetRevision, reason: "sampling", priority: priorityFor("sampling"), requiredForSampling: true, policySnapshot: { selection: "required" } }).onConflictDoNothing();
+  await db.insert(knowledgeRecommendations).values({ policyId: facts.policyId, knowledgeCardId: facts.knowledgeCardId, contentVersion: facts.contentVersion, evidenceSetRevision: facts.evidenceSetRevision, reason: "sampling", priority: priorityFor("sampling"), requiredForSampling: true, policySnapshot: { selection: "required" }, executorSystem: "system-knowledge-pipeline" }).onConflictDoNothing();
 }
 
 export async function sealClosedKnowledgeSamplingPolicy(policyId: string, now = new Date(), db: RecommendationDb = getDb()) {
@@ -270,8 +270,8 @@ export async function resolveKnowledgeRecommendation(input: { recommendationId: 
       updatedAt: new Date(),
     };
     await tx.update(knowledgeCards).set(next).where(eq(knowledgeCards.id, card.id));
-    await tx.update(knowledgeRecommendations).set({ status: "resolved", resolution, samplingDispositionReason: samplingDisposition?.reason ?? null, samplingRationale: samplingDisposition?.rationale ?? null, resolvedByUserId: input.actor.userId, resolvedAt: new Date(), updatedAt: new Date() }).where(eq(knowledgeRecommendations.id, recommendation.id));
-    if (material) await tx.update(knowledgeRecommendations).set({ status: "superseded", resolution: "accepted", resolvedByUserId: input.actor.userId, resolvedAt: new Date(), updatedAt: new Date() }).where(and(eq(knowledgeRecommendations.knowledgeCardId, card.id), sql`${knowledgeRecommendations.status} in ('open', 'in_review')`, sql`${knowledgeRecommendations.id} <> ${recommendation.id}`));
+    await tx.update(knowledgeRecommendations).set({ status: "resolved", resolution, samplingDispositionReason: samplingDisposition?.reason ?? null, samplingRationale: samplingDisposition?.rationale ?? null, resolvedByUserId: input.actor.userId, resolvedAt: new Date(), executorSystem: null, updatedAt: new Date() }).where(eq(knowledgeRecommendations.id, recommendation.id));
+    if (material) await tx.update(knowledgeRecommendations).set({ status: "superseded", resolution: "accepted", resolvedByUserId: input.actor.userId, resolvedAt: new Date(), executorSystem: null, updatedAt: new Date() }).where(and(eq(knowledgeRecommendations.knowledgeCardId, card.id), sql`${knowledgeRecommendations.status} in ('open', 'in_review')`, sql`${knowledgeRecommendations.id} <> ${recommendation.id}`));
     const auditSummary = input.action === "resolve_relation"
       ? `Resolved ${recommendation.reason} recommendation with resolve_relation${hasRemainingSupport ? "" : " without reactivation because supporting evidence is insufficient"}. Final card contentVersion=${next.contentVersion}, evidenceSetRevision=${next.evidenceSetRevision}, publicationState=${next.publicationState}.`
       : input.action === "sampling_pass" || input.action === "sampling_fail"

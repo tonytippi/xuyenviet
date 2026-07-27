@@ -26,7 +26,7 @@ describe("knowledge source removal", () => {
     await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: "removed-card", sourceId: "removed-source", supportLevel: "primary" });
     const capture = await seedSourceCaptureVersion({ sourceId: "removed-source", captureKind: "url", rawText: "Bằng chứng bị gỡ." });
     await seedKnowledgeCardEvidence({ cardId: "removed-card", sourceId: "removed-source", captureVersionId: capture.id, quoteText: "Bằng chứng bị gỡ." });
-    await testDb.insert(knowledgeCardSearchDocuments).values({ knowledgeCardId: "removed-card", status: "active", searchableText: "Huế", textHash: "a".repeat(64), sourceCount: 1, confidence: "curated", freshnessSensitive: false });
+    await testDb.insert(knowledgeCardSearchDocuments).values({ knowledgeCardId: "removed-card", executorSystem: "system-knowledge-pipeline", status: "active", searchableText: "Huế", textHash: "a".repeat(64), sourceCount: 1, confidence: "curated", freshnessSensitive: false });
 
     await expect(removeKnowledgeSource({ sourceId: "removed-source", reason: "withdrawn", actor: { userId: "operator", email: "operator@example.com" } }, testDb)).resolves.toEqual({ status: "completed", sourceId: "removed-source", changedCardIds: ["removed-card"] });
     await expect(testDb.select({ eligibility: sources.eligibility, removalReason: sources.removalReason, current: sources.currentCaptureVersionId }).from(sources).where(eq(sources.id, "removed-source"))).resolves.toEqual([{ eligibility: "withdrawn", removalReason: "withdrawn", current: null }]);

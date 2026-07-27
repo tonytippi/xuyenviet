@@ -383,7 +383,7 @@ describe("knowledge card state-model retrieval safety", () => {
   test("disables a stale active projection after owner-row eligibility recheck", async () => {
     await createUser("stale-operator", ["operator"]);
     const card = await createApprovedCardWithSource("stale-operator", "stale-projection-card");
-    await testDb.insert(knowledgeCardSearchDocuments).values({ knowledgeCardId: card.id, status: "active", searchableText: "Điểm dừng tại Huế", textHash: "a".repeat(64), sourceCount: 1, confidence: "curated", freshnessSensitive: false });
+    await testDb.insert(knowledgeCardSearchDocuments).values({ knowledgeCardId: card.id, executorSystem: "system-knowledge-pipeline", status: "active", searchableText: "Điểm dừng tại Huế", textHash: "a".repeat(64), sourceCount: 1, confidence: "curated", freshnessSensitive: false });
     const { searchApprovedKnowledge } = await import("@/features/knowledge/search");
 
     await expect(searchApprovedKnowledge("Huế")).resolves.toEqual([]);
@@ -393,7 +393,7 @@ describe("knowledge card state-model retrieval safety", () => {
   test("indexing worker disables an active document when its active card becomes state-ineligible", async () => {
     await createUser("worker-state-operator", ["operator"]);
     const card = await createApprovedCardWithSource("worker-state-operator", "worker-superseded-card");
-    await testDb.insert(knowledgeCardSearchDocuments).values({ knowledgeCardId: card.id, status: "active", searchableText: "Điểm dừng tại Huế", textHash: "d".repeat(64), sourceCount: 1, confidence: "curated", freshnessSensitive: false });
+    await testDb.insert(knowledgeCardSearchDocuments).values({ knowledgeCardId: card.id, executorSystem: "system-knowledge-pipeline", status: "active", searchableText: "Điểm dừng tại Huế", textHash: "d".repeat(64), sourceCount: 1, confidence: "curated", freshnessSensitive: false });
     await testDb.update(knowledgeCards).set({ knowledgeState: "superseded" }).where(eq(knowledgeCards.id, card.id));
     await enqueueIndexWork(card.id, "superseded");
     const { processNextApprovedKnowledgeIndexingBatch } = await import("@/features/knowledge/indexing-worker");
@@ -408,8 +408,8 @@ describe("knowledge card state-model retrieval safety", () => {
     const disabled = await createApprovedCardWithSource("worker-operator", "worker-disabled-document-card");
     const stale = await createApprovedCardWithSource("worker-operator", "worker-stale-document-card");
     await testDb.insert(knowledgeCardSearchDocuments).values([
-      { knowledgeCardId: disabled.id, status: "disabled", searchableText: "disabled", textHash: "b".repeat(64), sourceCount: 1, confidence: "curated", freshnessSensitive: false, disabledAt: new Date() },
-      { knowledgeCardId: stale.id, status: "active", searchableText: "stale", textHash: "c".repeat(64), sourceCount: 1, confidence: "curated", freshnessSensitive: false, updatedAt: new Date(0) },
+      { knowledgeCardId: disabled.id, executorSystem: "system-knowledge-pipeline", status: "disabled", searchableText: "disabled", textHash: "b".repeat(64), sourceCount: 1, confidence: "curated", freshnessSensitive: false, disabledAt: new Date() },
+      { knowledgeCardId: stale.id, executorSystem: "system-knowledge-pipeline", status: "active", searchableText: "stale", textHash: "c".repeat(64), sourceCount: 1, confidence: "curated", freshnessSensitive: false, updatedAt: new Date(0) },
     ]);
     await enqueueIndexWork(stale.id, "legacy_stale");
     const { processNextApprovedKnowledgeIndexingBatch } = await import("@/features/knowledge/indexing-worker");

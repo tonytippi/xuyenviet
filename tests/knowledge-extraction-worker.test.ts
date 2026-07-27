@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { aiGatewayModels, facebookCaptureReviews, knowledgeCards, knowledgeCardSources, knowledgeExtractionJobs, rawSourceMaterial, sourceCaptureVersions, sources, userRoles, users, type UserRole } from "@/db/schema";
+import { aiGatewayModels, auditEvents, facebookCaptureReviews, knowledgeCards, knowledgeCardSources, knowledgeExtractionJobs, rawSourceMaterial, sourceCaptureVersions, sources, userRoles, users, type UserRole } from "@/db/schema";
 import { ensureFacebookCaptureReviewForCapturedSource } from "@/features/knowledge/facebook-capture-review";
 import { enqueueKnowledgeExtractionJob, processKnowledgeExtractionJob, recoverStaleKnowledgeExtractionJobs, runKnowledgeExtractionWorkerLoop } from "@/features/knowledge/extraction-jobs";
 
@@ -204,6 +204,10 @@ describe("knowledge extraction worker jobs", () => {
 
     await expect(testDb.select().from(knowledgeExtractionJobs).where(eq(knowledgeExtractionJobs.id, queued.job.id))).resolves.toMatchObject([
       { status: "queued", lastErrorCode: "provider_failed", lastErrorMessage: "Extraction failed: provider_failed" },
+    ]);
+    await expect(testDb.select().from(auditEvents).where(eq(auditEvents.targetId, queued.job.id))).resolves.toMatchObject([
+      { actorClass: "system", actorSystem: "system-knowledge-pipeline", afterSummary: "Knowledge extraction job worker transition: claimed." },
+      { actorClass: "system", actorSystem: "system-knowledge-pipeline", afterSummary: "Knowledge extraction job worker transition: retry_queued." },
     ]);
     const workerWarnings = warn.mock.calls.filter(([message]) => message === "Knowledge extraction job failed");
     expect(workerWarnings).toHaveLength(1);

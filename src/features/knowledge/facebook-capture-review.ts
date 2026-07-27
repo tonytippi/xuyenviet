@@ -85,7 +85,7 @@ export async function ensureFacebookCaptureReviewForCapturedSource(
   const [existing] = await db.select().from(facebookCaptureReviews).where(eq(facebookCaptureReviews.sourceId, input.sourceId)).limit(1);
 
   if (existing) {
-    const [review] = await db.update(facebookCaptureReviews).set({ ...(input.captureVersionId ? { captureVersionId: input.captureVersionId } : {}), status: "needs_review", reviewerUserId: null, reviewedAt: null, rejectionReason: null, extractionError: null, updatedAt: input.now }).where(eq(facebookCaptureReviews.id, existing.id)).returning();
+    const [review] = await db.update(facebookCaptureReviews).set({ ...(input.captureVersionId ? { captureVersionId: input.captureVersionId } : {}), status: "needs_review", reviewerUserId: null, executorSystem: null, reviewedAt: null, rejectionReason: null, extractionError: null, updatedAt: input.now }).where(eq(facebookCaptureReviews.id, existing.id)).returning();
     return { status: "exists" as const, review };
   }
 
@@ -350,6 +350,7 @@ export async function reopenFacebookCaptureForRecapture(
       .set({
         status: "needs_review",
         reviewerUserId: null,
+        executorSystem: null,
         reviewedAt: null,
         rejectionReason: null,
         extractionError: null,
@@ -428,6 +429,7 @@ export async function requestFacebookCaptureRecapture(
       .set({
         status: "needs_review",
         reviewerUserId: null,
+        executorSystem: null,
         reviewedAt: null,
         rejectionReason: null,
         extractionError: null,

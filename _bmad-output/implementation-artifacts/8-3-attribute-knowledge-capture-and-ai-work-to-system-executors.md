@@ -74,7 +74,18 @@ so that a worker never impersonates the person who submitted or requested work.
   - [x] Extend Facebook/YouTube capture and script tests: no system-user lookup/fixture; correct catalog executor; original human submitter and discovered-source lineage retained; direct YouTube capture without real-user source provenance is rejected; no session-shaped executor accepted; legacy user-like executor metadata is not written.
   - [x] Retain `tests/ai-usage-events.test.ts` and admin-user aggregation coverage proving worker-only usage uses null `initiatedByUserId` and cannot enter person metrics.
   - [x] Inventory direct inserts and shared fixtures for every executor-bearing table before making a column non-null for an automated shape. Update `tests/helpers/source-captures.ts`, indexing-worker/search fixtures, and migrated-flow tests so human fixtures stay human-provenance-only and automated fixtures use catalog executors; remove fake-user setup/assertions from migrated-flow tests without deleting Story 8.5's historical migration/seed/helper artifacts.
-  - [x] Run focused relevant `pnpm test:run` targets, `pnpm lint`, `pnpm typecheck`, and `pnpm build`. Attempt `pnpm db:generate` for the schema change and record the known non-TTY Drizzle rename-disambiguation blocker exactly if it remains.
+   - [x] Run focused relevant `pnpm test:run` targets, `pnpm lint`, `pnpm typecheck`, and `pnpm build`. Attempt `pnpm db:generate` for the schema change and record the known non-TTY Drizzle rename-disambiguation blocker exactly if it remains.
+
+### Review Findings
+
+- [x] [Review][Patch][High] S8.3-R1: Clear system executor on human recommendation resolution [`src/features/knowledge/recommendations.ts`] -- Resolved and human-superseded rows now set `executorSystem: null`; regression verifies a pipeline-created recommendation resolves with real human provenance and no executor.
+- [x] [Review][Patch][High] S8.3-R2: Separate human index enqueue provenance from worker execution attribution [`src/features/knowledge/indexing-queue.ts`, `src/features/knowledge/indexing-worker.ts`] -- Queue writes retain null executor unless a validated system executor is supplied; claim, lease recovery, completion, and retry transitions persist `system-knowledge-pipeline` under their existing fences/CAS conditions.
+- [x] [Review][Patch][High] S8.3-R3: Attribute verify-first sampling recommendations to the pipeline [`src/features/knowledge/recommendations.ts`] -- The direct mandatory-sampling insert persists `system-knowledge-pipeline`; the verify-first pipeline regression asserts it.
+- [x] [Review][Patch][High] S8.3-R4: Audit all extraction-worker state transitions [`src/features/knowledge/extraction-jobs.ts`] -- Claim, success, retry, terminal failure, and stale recovery updates now write paired, transaction-coupled Audit-owned pipeline events.
+- [x] [Review][Patch][High] S8.3-R5: Attribute direct authenticated extraction artifacts to AI orchestration [`src/features/knowledge/extraction.ts`] -- The direct boundary requires `system-ai-orchestration`; cards retain `createdByUserId`, usage retains `initiatedByUserId`, and Audit records the system executor. Regression covers all three artifacts.
+- [x] [Review][Patch][Medium] S8.3-R6: Clear stale executor when Facebook capture review returns to human review [`src/features/knowledge/facebook-capture-review.ts`] -- Existing-capture reset, reopen, and recapture paths all clear `executorSystem` with the human-review fields. Regression covers a system-attributed failure returning to `needs_review`.
+- [x] [Review][Patch][Medium] S8.3-R7: Require executor attribution for persisted search projections [`src/db/schema.ts`, `drizzle/migrations/0070_story_8_3_knowledge_executor_attribution.sql`, `drizzle/migrations/0071_story_8_3_search_projection_executor_required.sql`] -- Projection executor is non-null and nonblank in schema and migration constraints; the focused database regression rejects a null executor.
+- [x] [Review][Scope Observation] `.agents/skills/chief-of-staff/SKILL.md` lies within `6f9a3a4..f039bb7` but is absent from Story 8.3's File List and scope. This is scope creep in the commit range; it is not a Story 8.3 runtime failure, but should be separated from the Story 8.3 repair/commit.
 
 ## Dev Notes
 
@@ -181,6 +192,7 @@ gpt-5.6-terra
 - Blocked before implementation: confirm that the populated configured PostgreSQL database is disposable/reset-only, or provide an expand-migrate-contract design for durable data. No code, migration, or test was run.
 - Completed Story 8.3 with first-class Audit-catalog executor attribution for knowledge pipeline, worker extraction, indexing, Facebook capture, and YouTube capture. Human provenance remains in real-user fields.
 - Verification: `pnpm db:reset` passed; focused 12-file suite passed (189 tests); `pnpm lint` passed with 3 pre-existing warnings in `tests/knowledge-search.test.ts`; `pnpm typecheck` and `pnpm build` passed. `pnpm db:generate` remains blocked because Drizzle requires an interactive TTY rename prompt. Full-suite run was attempted but timed out after unrelated test-isolation failures.
+- 2026-07-27: Repaired and verified all seven reconstructed review findings S8.3-R1 through S8.3-R7. `pnpm db:reset` passed; focused 7-file suite passed (124 tests); `pnpm lint` passed with 3 pre-existing warnings in `tests/knowledge-search.test.ts`; `pnpm typecheck` and `pnpm build` passed. No commit created. `pnpm db:generate` was not retried because its documented non-TTY rename-disambiguation blocker is unchanged.
 
 ### File List
 
@@ -205,15 +217,21 @@ gpt-5.6-terra
 - scripts/facebook-capture.ts
 - scripts/youtube-capture.ts
 - tests/knowledge-ingestion-pipeline.test.ts
+- tests/knowledge-recommendation-queue.test.ts
 - tests/knowledge-indexing-worker.test.ts
 - tests/knowledge-extraction-worker.test.ts
+- tests/knowledge-draft-extraction.test.ts
 - tests/knowledge-source-suggestions.test.ts
+- tests/knowledge-search.test.ts
+- tests/knowledge-source-removal.test.ts
 - tests/facebook-capture.test.ts
 - tests/facebook-capture-review.test.ts
 - tests/facebook-capture-script.test.ts
 - tests/facebook-capture-extraction-action.test.ts
 - tests/facebook-capture-approve-all-action.test.ts
 - tests/youtube-capture.test.ts
+- drizzle/migrations/0071_story_8_3_search_projection_executor_required.sql
+- tests/story-8-3-executor-schema.test.ts
 
 ## Change Log
 
@@ -222,3 +240,5 @@ gpt-5.6-terra
 - 2026-07-27: Revalidated again and made recommendation creation, durable indexing-marker execution, and per-writer Audit catalog validation binding requirements; status remains `ready-for-dev`. No code, migration, test, commit, review, or later-story work was performed.
 - 2026-07-27: Began `bmad-dev-story` for Story 8.3 and set status to `in-progress`. Halted under AD-31 before implementation because the configured PostgreSQL target is populated and its disposable/reset-only status is not verifiable. No code, migration, test, commit, review, or later-story work was performed.
 - 2026-07-27: Completed Story 8.3 under the user-authorized disposable development-data clean break. Added executor attribution schema/migration, migrated in-scope writers, removed runtime fake-user use in scope, and added focused regression coverage. Status set to `review`; no commit created.
+- 2026-07-27: Fresh BMad code review of `6f9a3a4..f039bb7` found seven actionable attribution and persistence defects (five high, two medium). Review findings recorded; status set to `in-progress`. User-authorized disposable reset and known non-TTY `db:generate`/full-suite gaps were treated as context, not findings. No implementation code, tests, migrations, or commit were performed during review-status synchronization.
+- 2026-07-27: Repaired S8.3-R1 through S8.3-R7 only: human recommendation terminal shapes, queue versus worker executor attribution, verify-first sampling executor, transaction-coupled extraction-worker Audit events, direct authenticated AI orchestration provenance, Facebook reset executor cleanup, and required search-projection executor persistence. Added focused regressions; `db:reset`, 124 focused tests, lint, typecheck, and build passed. Status set to `review`; no commit created.

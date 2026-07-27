@@ -205,7 +205,7 @@ describe("knowledge ingestion pipeline", () => {
     await expect(testDb.select().from(knowledgeCards)).resolves.toMatchObject([{ publicationState: "suppressed", verificationState: "required", reviewState: "ai_recommended", evidenceSetRevision: 2 }]);
     await expect(testDb.select().from(knowledgeRecommendations)).resolves.toMatchObject([
       { reason: "verification", status: "open", contentVersion: 2, evidenceSetRevision: 2 },
-      { reason: "sampling", requiredForSampling: true, status: "open", contentVersion: 2, evidenceSetRevision: 2 },
+      { reason: "sampling", requiredForSampling: true, status: "open", contentVersion: 2, evidenceSetRevision: 2, executorSystem: "system-knowledge-pipeline" },
     ]);
     await expect(testDb.select().from(knowledgeIndexDirtyMarkers)).resolves.toMatchObject([{ contentVersion: 2, evidenceSetRevision: 2, status: "pending" }]);
   });
@@ -248,7 +248,7 @@ describe("knowledge ingestion pipeline", () => {
 
   test("uses the relation checkpoint to suppress an active conflicting card for a high-risk candidate", async () => {
     await testDb.insert(knowledgeCards).values({ id: "existing-high-risk", status: "approved", publicationState: "active", knowledgeState: "community_observation", reviewState: "reviewed", verificationState: "not_required", type: "ev_charging", title: "Trạm sạc Đà Nẵng", summary: "Trạm sạc đang hoạt động.", locationName: "Đà Nẵng", conditions: [], confidence: "community", freshnessSensitive: false, needsReview: false, aiPromptVersion: "test", createdByUserId: "operator" });
-    await testDb.insert(knowledgeCardSearchDocuments).values({ knowledgeCardId: "existing-high-risk", searchableText: "Trạm sạc đang hoạt động.", textHash: "a".repeat(64), sourceCount: 1, confidence: "community", freshnessSensitive: false });
+    await testDb.insert(knowledgeCardSearchDocuments).values({ knowledgeCardId: "existing-high-risk", executorSystem: "system-knowledge-pipeline", searchableText: "Trạm sạc đang hoạt động.", textHash: "a".repeat(64), sourceCount: 1, confidence: "community", freshnessSensitive: false });
     await testDb.insert(sources).values({ id: "source-2", kind: "pasted_text", label: "Second safe source", sourceType: "community", verificationStatus: "unverified", official: false, partner: false, submittedByUserId: "operator" });
     const highRiskText = "Đà Nẵng không có trạm sạc đang hoạt động.";
     const { claim } = await claimFor(highRiskText, "source-2");
@@ -401,7 +401,7 @@ describe("knowledge ingestion pipeline", () => {
     vi.mocked(fetch).mockResolvedValueOnce(extractionResponse(candidate(firstText))).mockResolvedValueOnce(judgmentResponse());
     const firstResult = await runKnowledgeIngestionPipeline(firstClaim, testDb);
     if (!firstResult?.cardId) throw new Error("expected initial card");
-    await testDb.insert(knowledgeCardSearchDocuments).values({ knowledgeCardId: firstResult.cardId, searchableText: "Có điểm dừng ngắm cảnh phù hợp ban ngày.", textHash: "b".repeat(64), sourceCount: 1, confidence: "community", freshnessSensitive: false });
+    await testDb.insert(knowledgeCardSearchDocuments).values({ knowledgeCardId: firstResult.cardId, executorSystem: "system-knowledge-pipeline", searchableText: "Có điểm dừng ngắm cảnh phù hợp ban ngày.", textHash: "b".repeat(64), sourceCount: 1, confidence: "community", freshnessSensitive: false });
     await testDb.insert(sources).values({ id: "source-2", kind: "pasted_text", label: "Second safe source", sourceType: "community", verificationStatus: "unverified", official: false, partner: false, submittedByUserId: "operator" });
     const secondText = "Đèo Hải Vân không có điểm dừng ngắm cảnh an toàn vào ban ngày.";
     const { claim } = await claimFor(secondText, "source-2");

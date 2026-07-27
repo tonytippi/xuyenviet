@@ -148,12 +148,14 @@ describe("knowledge draft extraction", () => {
         confidence: "unverified",
         freshnessSensitive: true,
         needsReview: true,
+        createdByUserId: "operator-user",
+        executorSystem: "system-ai-orchestration",
       },
     ]);
     await expect(testDb.select().from(knowledgeCardSources)).resolves.toMatchObject([{ sourceId: source.id, supportLevel: "primary" }]);
-    await expect(testDb.select().from(aiUsageEvents)).resolves.toMatchObject([{ status: "success", purpose: "extraction", promptVersion: "source_knowledge_draft_extraction_v1" }]);
+    await expect(testDb.select().from(aiUsageEvents)).resolves.toMatchObject([{ status: "success", purpose: "extraction", promptVersion: "source_knowledge_draft_extraction_v1", initiatedByUserId: "operator-user", executorSystem: "system-ai-orchestration" }]);
     const audits = await testDb.select().from(auditEvents);
-    expect(audits).toMatchObject([{ targetType: "knowledge_draft_extraction", targetId: source.id }]);
+    expect(audits).toMatchObject([{ targetType: "knowledge_draft_extraction", targetId: source.id, actorClass: "system", actorSystem: "system-ai-orchestration", actorUserId: null }]);
     expect(audits[0]?.afterSummary).not.toContain("80.000đ");
   });
 

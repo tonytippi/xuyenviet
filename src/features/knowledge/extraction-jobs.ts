@@ -15,6 +15,7 @@ import { assertFacebookCaptureStillNeedsReview } from "@/features/knowledge/extr
 import { markFacebookCaptureReviewStatus, markFacebookCaptureReviewStatusInTransaction } from "@/features/knowledge/facebook-capture-review";
 import { approveKnowledgeDraftBatchForSystemInTransaction } from "@/features/knowledge/review-approval-core";
 import { createSystemAuditActor } from "@/features/audit/actors";
+import { recordAuditEvent } from "@/features/audit/events";
 
 type ExtractionJobDb = ReturnType<typeof getDb>;
 
@@ -181,6 +182,7 @@ async function claimNextKnowledgeExtractionJob(options: { workerId?: string; now
       .where(and(eq(knowledgeExtractionJobs.id, id), eq(knowledgeExtractionJobs.status, "queued")))
       .returning();
 
+    if (claimed) await recordExtractionJobTransitionAudit(transaction, claimed.id, "claimed");
     return claimed ?? null;
   });
 }
@@ -257,10 +259,12 @@ async function finalizeJobSuccess(
       }
     }
 
-    await transaction
+    const [succeeded] = await transaction
       .update(knowledgeExtractionJobs)
       .set({ status: "succeeded", resultDraftIds: result.draftIds, resultDraftCount: result.draftCount, finishedAt: new Date(), lockedAt: null, lockedBy: null, updatedAt: new Date(), lastErrorCode: null, lastErrorMessage: null })
-      .where(and(eq(knowledgeExtractionJobs.id, job.id), eq(knowledgeExtractionJobs.status, "running"), eq(knowledgeExtractionJobs.lockedBy, job.lockedBy ?? "")));
+      .where(and(eq(knowledgeExtractionJobs.id, job.id), eq(knowledgeExtractionJobs.status, "running"), eq(knowledgeExtractionJobs.lockedBy, job.lockedBy ?? "")))
+      .returning({ id: knowledgeExtractionJobs.id });
+    if (succeeded) await recordExtractionJobTransitionAudit(transaction, job.id, "succeeded");
   });
 }
 
@@ -291,20 +295,28 @@ async function handleJobFailure(job: typeof knowledgeExtractionJobs.$inferSelect
   const safe = toSafeJobError(error);
 
   if (retryable && attemptsRemain) {
-    const [updated] = await db
-      .update(knowledgeExtractionJobs)
-      .set({ status: "queued", nextRunAt: new Date(now.getTime() + getRetryDelayMs(job.attemptCount)), lockedAt: null, lockedBy: null, lastErrorCode: safe.code, lastErrorMessage: safe.message, updatedAt: now })
-      .where(and(eq(knowledgeExtractionJobs.id, job.id), eq(knowledgeExtractionJobs.status, "running"), eq(knowledgeExtractionJobs.lockedBy, job.lockedBy ?? "")))
-      .returning({ id: knowledgeExtractionJobs.id });
+    const updated = await db.transaction(async (transaction) => {
+      const [transition] = await transaction
+        .update(knowledgeExtractionJobs)
+        .set({ status: "queued", nextRunAt: new Date(now.getTime() + getRetryDelayMs(job.attemptCount)), lockedAt: null, lockedBy: null, lastErrorCode: safe.code, lastErrorMessage: safe.message, updatedAt: now })
+        .where(and(eq(knowledgeExtractionJobs.id, job.id), eq(knowledgeExtractionJobs.status, "running"), eq(knowledgeExtractionJobs.lockedBy, job.lockedBy ?? "")))
+        .returning({ id: knowledgeExtractionJobs.id });
+      if (transition) await recordExtractionJobTransitionAudit(transaction, job.id, "retry_queued");
+      return transition;
+    });
     if (!updated) return null;
     return toJobFailureLog(job, safe, true, "queued");
   }
 
-  const [updated] = await db
-    .update(knowledgeExtractionJobs)
-    .set({ status: "failed", finishedAt: now, lockedAt: null, lockedBy: null, lastErrorCode: safe.code, lastErrorMessage: safe.message, updatedAt: now })
-    .where(and(eq(knowledgeExtractionJobs.id, job.id), eq(knowledgeExtractionJobs.status, "running"), eq(knowledgeExtractionJobs.lockedBy, job.lockedBy ?? "")))
-    .returning({ id: knowledgeExtractionJobs.id });
+  const updated = await db.transaction(async (transaction) => {
+    const [transition] = await transaction
+      .update(knowledgeExtractionJobs)
+      .set({ status: "failed", finishedAt: now, lockedAt: null, lockedBy: null, lastErrorCode: safe.code, lastErrorMessage: safe.message, updatedAt: now })
+      .where(and(eq(knowledgeExtractionJobs.id, job.id), eq(knowledgeExtractionJobs.status, "running"), eq(knowledgeExtractionJobs.lockedBy, job.lockedBy ?? "")))
+      .returning({ id: knowledgeExtractionJobs.id });
+    if (transition) await recordExtractionJobTransitionAudit(transaction, job.id, "failed");
+    return transition;
+  });
 
   if (!updated) return null;
 
@@ -321,11 +333,15 @@ export async function recoverStaleKnowledgeExtractionJobs(options: { now?: Date;
   const now = options.now ?? new Date();
   const staleBefore = new Date(now.getTime() - (options.staleMs ?? getStaleRunningMs()));
 
-  const failedRows = await db
-    .update(knowledgeExtractionJobs)
-    .set({ status: "failed", finishedAt: now, lockedAt: null, lockedBy: null, lastErrorCode: "stale_max_attempts", lastErrorMessage: "Extraction failed: stale_max_attempts", updatedAt: now })
-    .where(and(eq(knowledgeExtractionJobs.status, "running"), isNotNull(knowledgeExtractionJobs.lockedAt), lte(knowledgeExtractionJobs.lockedAt, staleBefore), sql`${knowledgeExtractionJobs.attemptCount} >= ${knowledgeExtractionJobs.maxAttempts}`))
-    .returning({ id: knowledgeExtractionJobs.id, sourceId: knowledgeExtractionJobs.sourceId, facebookCaptureReviewId: knowledgeExtractionJobs.facebookCaptureReviewId, captureVersionId: knowledgeExtractionJobs.captureVersionId, mode: knowledgeExtractionJobs.mode, attemptCount: knowledgeExtractionJobs.attemptCount, maxAttempts: knowledgeExtractionJobs.maxAttempts, createdByUserId: knowledgeExtractionJobs.createdByUserId, createdByEmail: knowledgeExtractionJobs.createdByEmail });
+  const failedRows = await db.transaction(async (transaction) => {
+    const transitions = await transaction
+      .update(knowledgeExtractionJobs)
+      .set({ status: "failed", finishedAt: now, lockedAt: null, lockedBy: null, lastErrorCode: "stale_max_attempts", lastErrorMessage: "Extraction failed: stale_max_attempts", updatedAt: now })
+      .where(and(eq(knowledgeExtractionJobs.status, "running"), isNotNull(knowledgeExtractionJobs.lockedAt), lte(knowledgeExtractionJobs.lockedAt, staleBefore), sql`${knowledgeExtractionJobs.attemptCount} >= ${knowledgeExtractionJobs.maxAttempts}`))
+      .returning({ id: knowledgeExtractionJobs.id, sourceId: knowledgeExtractionJobs.sourceId, facebookCaptureReviewId: knowledgeExtractionJobs.facebookCaptureReviewId, captureVersionId: knowledgeExtractionJobs.captureVersionId, mode: knowledgeExtractionJobs.mode, attemptCount: knowledgeExtractionJobs.attemptCount, maxAttempts: knowledgeExtractionJobs.maxAttempts, createdByUserId: knowledgeExtractionJobs.createdByUserId, createdByEmail: knowledgeExtractionJobs.createdByEmail });
+    for (const transition of transitions) await recordExtractionJobTransitionAudit(transaction, transition.id, "stale_failed");
+    return transitions;
+  });
 
   for (const row of failedRows) {
     if (row.facebookCaptureReviewId && row.captureVersionId) {
@@ -335,11 +351,15 @@ export async function recoverStaleKnowledgeExtractionJobs(options: { now?: Date;
     }
   }
 
-  const rows = await db
-    .update(knowledgeExtractionJobs)
-    .set({ status: "queued", lockedAt: null, lockedBy: null, nextRunAt: now, updatedAt: now })
-    .where(and(eq(knowledgeExtractionJobs.status, "running"), isNotNull(knowledgeExtractionJobs.lockedAt), lte(knowledgeExtractionJobs.lockedAt, staleBefore), sql`${knowledgeExtractionJobs.attemptCount} < ${knowledgeExtractionJobs.maxAttempts}`))
-    .returning({ id: knowledgeExtractionJobs.id });
+  const rows = await db.transaction(async (transaction) => {
+    const transitions = await transaction
+      .update(knowledgeExtractionJobs)
+      .set({ status: "queued", lockedAt: null, lockedBy: null, nextRunAt: now, updatedAt: now })
+      .where(and(eq(knowledgeExtractionJobs.status, "running"), isNotNull(knowledgeExtractionJobs.lockedAt), lte(knowledgeExtractionJobs.lockedAt, staleBefore), sql`${knowledgeExtractionJobs.attemptCount} < ${knowledgeExtractionJobs.maxAttempts}`))
+      .returning({ id: knowledgeExtractionJobs.id });
+    for (const transition of transitions) await recordExtractionJobTransitionAudit(transaction, transition.id, "stale_requeued");
+    return transitions;
+  });
 
   return {
     recoveredCount: rows.length,
@@ -409,6 +429,10 @@ function toJobFailureLog(job: Pick<typeof knowledgeExtractionJobs.$inferSelect, 
 
 function getRetryDelayMs(attemptCount: number) {
   return retryBackoffMs[Math.min(Math.max(attemptCount - 1, 0), retryBackoffMs.length - 1)];
+}
+
+async function recordExtractionJobTransitionAudit(db: Pick<ExtractionJobDb, "insert">, jobId: string, transition: string) {
+  await recordAuditEvent({ actor: createSystemAuditActor("system-knowledge-pipeline"), operation: "update", targetType: "knowledge_extraction_job", targetId: jobId, afterSummary: `Knowledge extraction job worker transition: ${transition}.` }, db);
 }
 
 function getWorkerPollIntervalMs() {

@@ -315,6 +315,16 @@ describe("Facebook capture review state", () => {
     expect(JSON.stringify(audits)).not.toContain("Rejected raw Facebook text");
   });
 
+  test("clears system execution attribution whenever recapture returns work to human review", async () => {
+    await createSource({ id: "system-recapture", rawText: "Captured text awaiting recapture." });
+    const ensured = await ensureFacebookCaptureReviewForCapturedSource(testDb, { sourceId: "system-recapture", rawSourceMaterialId: "raw-system-recapture" });
+    if (ensured.status !== "created") throw new Error("test setup failed");
+    await testDb.update(facebookCaptureReviews).set({ status: "extraction_failed", executorSystem: "system-knowledge-pipeline", reviewedAt: new Date(), extractionError: "Extraction failed: provider_failed" }).where(eq(facebookCaptureReviews.id, ensured.review.id));
+
+    await expect(requestFacebookCaptureRecapture(testDb, { reviewId: ensured.review.id, actor: { userId: "operator-user", email: "operator-user@example.com" }, reason: "Capture must be refreshed" })).resolves.toMatchObject({ status: "updated" });
+    await expect(testDb.select().from(facebookCaptureReviews).where(eq(facebookCaptureReviews.id, ensured.review.id))).resolves.toMatchObject([{ status: "needs_review", reviewerUserId: null, executorSystem: null, reviewedAt: null }]);
+  });
+
   test("reopen only accepts rejected captures and safe short reasons", async () => {
     await createSource({ id: "not-rejected", rawText: "Captured text" });
     const ensured = await ensureFacebookCaptureReviewForCapturedSource(testDb, { sourceId: "not-rejected", rawSourceMaterialId: "raw-not-rejected" });

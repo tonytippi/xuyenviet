@@ -11,7 +11,7 @@ import { seedKnowledgeCardEvidence, seedSourceCaptureVersion } from "./helpers/s
 async function createMarker(id: string) {
   await testDb.insert(users).values({ id: "index-worker-user", email: "index-worker@example.com" }).onConflictDoNothing();
   await testDb.insert(knowledgeCards).values({ id, type: "place", title: "Điểm dừng", locationName: "Huế", summary: "Tóm tắt an toàn.", aiPromptVersion: "test", createdByUserId: "index-worker-user" });
-  await testDb.insert(knowledgeIndexDirtyMarkers).values({ knowledgeCardId: id, contentVersion: 1, evidenceSetRevision: 1, reason: "test", executorSystem: "system-knowledge-pipeline", nextRunAt: new Date(0) });
+  await testDb.insert(knowledgeIndexDirtyMarkers).values({ knowledgeCardId: id, contentVersion: 1, evidenceSetRevision: 1, reason: "test", nextRunAt: new Date(0) });
 }
 
 async function makeMarkerProjectable(id: string) {
@@ -59,9 +59,10 @@ describe("versioned knowledge indexing work", () => {
     await expect(completeKnowledgeIndexWork(claim, "disabled", testDb)).resolves.toBe(true);
   });
 
-  test("persists the catalog executor on queued work and its projection", async () => {
+  test("keeps human enqueues unattributed until a worker transition and projects with the pipeline executor", async () => {
     await makeMarkerProjectable("executor-attribution");
-    await enqueueKnowledgeIndexWork(testDb, { cardId: "executor-attribution", contentVersion: 1, evidenceSetRevision: 1, reason: "executor", executorSystem: "system-knowledge-pipeline" });
+    await enqueueKnowledgeIndexWork(testDb, { cardId: "executor-attribution", contentVersion: 1, evidenceSetRevision: 1, reason: "executor" });
+    await expect(testDb.select().from(knowledgeIndexDirtyMarkers).where(eq(knowledgeIndexDirtyMarkers.knowledgeCardId, "executor-attribution"))).resolves.toMatchObject([{ executorSystem: null, status: "pending" }]);
     const claim = await claimNextKnowledgeIndexWork({ workerId: "executor-worker" }, testDb);
     if (!claim) throw new Error("Expected claim");
     expect(claim.executorSystem).toBe("system-knowledge-pipeline");
@@ -77,7 +78,7 @@ describe("versioned knowledge indexing work", () => {
 
   test("backfill queues only policy-eligible cards and disables an ineligible current projection", async () => {
     await createMarker("backfill-ineligible");
-    await testDb.insert(knowledgeCardSearchDocuments).values({ knowledgeCardId: "backfill-ineligible", contentVersion: 1, acceptedFence: "legacy", status: "active", searchableText: "safe", textHash: "a".repeat(64), sourceCount: 1, confidence: "curated", freshnessSensitive: false });
+    await testDb.insert(knowledgeCardSearchDocuments).values({ knowledgeCardId: "backfill-ineligible", contentVersion: 1, acceptedFence: "legacy", executorSystem: "system-knowledge-pipeline", status: "active", searchableText: "safe", textHash: "a".repeat(64), sourceCount: 1, confidence: "curated", freshnessSensitive: false });
     await backfillKnowledgeIndexWork({}, testDb);
     await expect(testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, "backfill-ineligible"))).resolves.toMatchObject([{ status: "disabled" }]);
     await expect(testDb.select().from(knowledgeIndexDirtyMarkers).where(eq(knowledgeIndexDirtyMarkers.knowledgeCardId, "backfill-ineligible"))).resolves.toMatchObject([{ status: "pending" }]);
