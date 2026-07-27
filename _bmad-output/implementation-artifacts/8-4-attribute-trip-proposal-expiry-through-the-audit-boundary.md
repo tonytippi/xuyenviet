@@ -4,7 +4,7 @@ baseline_commit: a95aeb7
 
 # Story 8.4: Attribute Trip Proposal Expiry Through the Audit Boundary
 
-Status: review
+Status: done
 
 ## Story
 
@@ -150,6 +150,7 @@ gpt-5.6-terra
 - Completion synchronization is authorized only through the review checkpoint. Independent adversarial review remains the next required workflow action; this record does not represent review approval or story completion.
 - 2026-07-27: Repaired all three adversarial review patches only. The apply command captures its expiry clock after proposal locking; worker/read expiry contention is deterministic; the scoped direct-history-insert guard detects formatted inserts. `pnpm test:run tests/trip-change-proposals.test.ts tests/trip-proposal-expiry-worker.test.ts tests/trip-planning-safety.test.ts tests/audit-actors.test.ts tests/audit-attribution-migration.test.ts` passed 109 tests; `pnpm build` and a post-build `pnpm typecheck` passed. `pnpm lint` has 0 errors and the existing three unused-variable warnings in `tests/knowledge-search.test.ts`. No schema, migration, Story 8.5, or commit changes were made. Story returned to `review` pending follow-up review.
 - 2026-07-27: Repaired the final bounded Story 8.4 finding in test enforcement only. The Chat/Trips guard now rejects all direct `.insert(tripPlanChangeHistory)` calls, including chained `getDb().insert(...)`; the deferred pre-existing pending-list expiry behavior at `trip-change-proposals.ts:930` remains unchanged. `pnpm test:run tests/trip-change-proposals.test.ts tests/trip-proposal-expiry-worker.test.ts tests/trip-planning-safety.test.ts tests/audit-actors.test.ts tests/audit-attribution-migration.test.ts` passed 109 tests. Status returned to `review`. No schema, migration, Story 8.5, production-code, or commit changes.
+- 2026-07-27: Finalized after status-only verification of supplied final repair commit `8a3bb133aa2f4ec97e53a74f87fadfbb530037af`. The only pre-existing worktree change was the user-authorized review-created `_bmad-output/implementation-artifacts/deferred-work.md`, approved for inclusion in the final status commit and not edited during this synchronization. No code, test, review, or commit inspection was performed.
 
 ### File List
 
@@ -168,3 +169,4 @@ gpt-5.6-terra
 - 2026-07-27: Repaired the three Story 8.4 adversarial review findings and returned the story to `review`. Added lock-time expiry, deterministic worker/read contention, and formatted direct-insert enforcement regressions. No schema/migration, Story 8.5, or commit changes.
 - 2026-07-27: Second bounded BMad code review of `a95aeb7..e6cd0f972172cbb3edd00f4d2bc81991d2264123` ran Blind Hunter, Edge Case Hunter, and Acceptance Auditor. One medium patch remains: the Chat/Trips direct-history enforcement guard misses chained writers such as `getDb().insert(...)`. A separate elapsed-row-on-transient-read issue was verified pre-existing and deferred. Focused five-file suite passed 109 tests. Status set to `in-progress`; no code, test, migration, or commit changes were made.
 - 2026-07-27: Repaired the final Story 8.4 review finding in `tests/trip-change-proposals.test.ts`: direct-history enforcement now rejects every `.insert(tripPlanChangeHistory)` receiver form, including chained `getDb().insert(...)`. The deferred pre-existing pending-list expiry behavior at `src/features/chat-trips/trip-change-proposals.ts:930` was not changed. The focused five-file suite passed 109 tests; status returned to `review`. No schema, migration, Story 8.5, production-code, or commit changes.
+- 2026-07-27: Finalized after status-only verification of supplied final repair commit `8a3bb133aa2f4ec97e53a74f87fadfbb530037af`; status set to `done`. Authorized exception: the only pre-existing worktree change was review-created `_bmad-output/implementation-artifacts/deferred-work.md`, approved for inclusion in the final status commit; it was not edited. No code correctness, test, review, or commit inspection was performed.

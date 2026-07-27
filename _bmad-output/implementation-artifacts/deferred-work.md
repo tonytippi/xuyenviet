@@ -122,3 +122,9 @@
 ## Deferred from: code review of spec-4-1-migrate-retrieval-to-state-aware-active-knowledge.md (2026-07-23)
 
 - Guard the index upsert against concurrent card state changes in `src/features/knowledge/search.ts:50`. `indexApprovedKnowledgeCard` rechecks eligibility before an unconditional projection upsert without locking the card or fencing that write by current version/state. A concurrent state transition can recreate an active stale projection; search-time revalidation prevents retrieval, while durable projection versioning belongs to Story 4.2.
+
+## Deferred from: code review of 8-4-attribute-trip-proposal-expiry-through-the-audit-boundary (2026-07-27)
+
+- source_spec: `8-4-attribute-trip-proposal-expiry-through-the-audit-boundary.md`
+  summary: Withhold elapsed proposals from owner reads when best-effort expiry fails transiently.
+  evidence: `listPendingProposalsForTripProject` at `src/features/chat-trips/trip-change-proposals.ts:930` filters only on pending status after `expireElapsedPendingProposals` suppresses a transient expiry failure. The row can therefore remain visible as actionable pending. The behavior predates Story 8.4 baseline `a95aeb7`; defer it outside this bounded repair.
