@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-07-27 (Second bounded Story 8.5 review through 7a23d449 found no actionable in-scope findings; story is done.)
+# last_updated: 2026-07-27 (Story 8.6 evidence synchronized; independent post-commit review required.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-07-27 (Second bounded Story 8.5 review through 7a23d449 found no actionable in-scope findings; story is done.)
+last_updated: 2026-07-27 (Story 8.6 evidence synchronized; independent post-commit review required.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -152,7 +152,9 @@ development_status:
   # 2026-07-27: Independent clean-shell verification loaded .env and passed tests/story-8-5-clean-break.test.ts (2 tests); pnpm typecheck passed. The seed subprocess receives testDatabaseUrl, and no development database reset was involved. The prior focused-test environment blocker is resolved; status remains review. No production, migration, seed-script, Story 8.6, or commit changes.
   # Finalized 2026-07-27 after second bounded BMad review through repair commit 7a23d44968ecaec111b415eeae1f2ba52d00fa71. Blind Hunter, Edge Case Hunter, and Acceptance Auditor found no actionable in-scope findings. Dockerfile dirty work, authorized disposable-reset context, and known full-suite failures were excluded. No code edit, commit, or Story 8.6 work was performed.
   8-5-remove-fake-system-users-in-the-clean-break-migration: done
-  8-6-verify-actor-isolation-and-attribution-end-to-end: backlog
+  # Story guide created and validated 2026-07-27; no implementation, test, migration, database reset, or commit was performed.
+  # 2026-07-27: Actor-isolation suite added; development database identity/migration/seed state verified read-only without reset; serial DATABASE_URL_TEST matrix (16 files, 279 tests), lint, post-build typecheck, and build passed. Chief-of-Staff-authorized internal adversarial checkpoint was not executed because the prior worker ended at its prompt. Independent post-commit BMad code review remains required; status stays review.
+  8-6-verify-actor-isolation-and-attribution-end-to-end: review
   epic-8-retrospective: optional
 
 action_items:
