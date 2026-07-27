@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-07-27 (Second bounded Story 8.2 review repair complete; status set to review.)
+# last_updated: 2026-07-27 (Third/final Story 8.2 review approved; status set to done.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-07-27 (Second bounded Story 8.2 review repair complete; status set to review.)
+last_updated: 2026-07-27 (Third/final Story 8.2 review approved; status set to done.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -129,7 +129,8 @@ development_status:
   # Review repair 2026-07-27: authorized disposable/reset-only clean break deletes the three attribution tables before constraints; durable populated databases are unsupported. Restored chat-context project usage attribution and added migration/history/Facebook regressions. Focused 4-file suite (51 tests), lint (0 errors; 3 pre-existing warnings), typecheck, and build pass. db:generate remains blocked by Drizzle's non-TTY rename prompt.
   # Second bounded review 2026-07-27 through repair commit c5e22f97: 3 unresolved Story 8.2 patches (NULL-bypassable actor XOR checks, missing web-search trip-project usage attribution, and exported normalized usage writer bypassing Audit executor validation); two legacy fake-user system-audit paths remain explicitly deferred to Stories 8.3 and 8.4. Authorized clean-break and isolated non-TTY db:generate gap were not re-raised. Focused 4-file suite: 48 tests passed.
   # Second-review repair 2026-07-27: migration and Drizzle checks reject NULL actor-identity bypasses; web-search usage retains available trip project scope; Audit is the sole public normalized usage writer with catalog validation. No Story 8.3/8.4 legacy paths changed. Focused migration/usage/source-bundle suite: 106 tests passed; lint (0 errors, 3 pre-existing unrelated warnings), typecheck, and build pass; db:generate remains blocked by the non-TTY Drizzle rename prompt.
-  8-2-persist-valid-audit-history-and-usage-attribution: review
+  # Third/final permitted BMad review 2026-07-27 through b4f39f880c23e63474fb00dc872fe2d9df4dfde9: Blind Hunter, Edge Case Hunter, and Acceptance Auditor found no actionable in-scope findings. Focused 8-file suite (151 tests), lint (0 errors; 3 pre-existing warnings), typecheck, and build pass. Authorized disposable/reset-only migration contract and documented db:generate/full-suite gaps remain unchanged.
+  8-2-persist-valid-audit-history-and-usage-attribution: done
   8-3-attribute-knowledge-capture-and-ai-work-to-system-executors: backlog
   8-4-attribute-trip-proposal-expiry-through-the-audit-boundary: backlog
   8-5-remove-fake-system-users-in-the-clean-break-migration: backlog

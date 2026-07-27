@@ -4,7 +4,7 @@ baseline_commit: 5776071
 
 # Story 8.2: Persist Valid Audit, History, and Usage Attribution
 
-Status: review
+Status: done
 
 ## Story
 
@@ -212,3 +212,4 @@ gpt-5.6-terra
 - 2026-07-27: Resolved all Story 8.2 review findings under the authorized disposable/reset-only clean-break decision. Status set to review; no commit created. Focused migration/writer/caller/Facebook coverage (51 tests), lint, typecheck, and build pass. `db:generate` remains non-interactively blocked by Drizzle's rename prompt.
 - 2026-07-27: Second bounded BMad adversarial review through repair commit `c5e22f97e88109fa37974f016ba85339cabd8820` found three unresolved Story 8.2 patches: NULL-bypassable audit/history XOR checks, missing trip-project usage attribution for web search, and an exported normalized usage writer that bypasses Audit executor validation. Two legacy fake-user system-audit paths remain explicitly deferred to Stories 8.3 and 8.4. Status set to in-progress; no code or commit changed during review. Focused migration/writer/caller/Facebook suite passed (48 tests). The authorized disposable/reset clean break and isolated non-TTY `db:generate` gap were not re-raised.
 - 2026-07-27: Resolved the three bounded Story 8.2 review risks without modifying deferred Stories 8.3 or 8.4 paths. Status set to review; no commit created. Focused migration/usage/source-bundle coverage (106 tests), lint, typecheck, and build pass. `db:generate` remains non-interactively blocked by Drizzle's rename prompt.
+- 2026-07-27: Third and final permitted BMad adversarial review through `b4f39f880c23e63474fb00dc872fe2d9df4dfde9` found no actionable findings. Blind Hunter, Edge Case Hunter, and Acceptance Auditor all passed. Focused Story 8.2 coverage (8 files, 151 tests), lint (0 errors; 3 pre-existing unrelated warnings), typecheck, and build pass. The authorized disposable/reset-only migration contract and documented `db:generate`/full-suite gaps remain excluded and unchanged. Status set to done; no code or commit changed during review.
