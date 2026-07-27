@@ -141,6 +141,28 @@ describe("Story 8.6 actor isolation", () => {
     await expect(testDb.execute(sql`select id from users where id like 'system-%' or email like 'system-%@%'`)).resolves.toEqual([]);
     await expect(testDb.execute(sql`select id from users where id in (${sql.join(catalogIds.map((id) => sql`${id}`), sql`, `)})`)).resolves.toEqual([]);
   });
+
+  test("makes upgraded databases with historic system users stop for an explicit reset and reseed", async () => {
+    const migration = readFileSync("drizzle/migrations/0072_reject_system_executor_user_ids.sql", "utf8");
+    const schemaName = `migration_0072_${crypto.randomUUID().replaceAll("-", "")}`;
+
+    await testDb.transaction(async (transaction) => {
+      await transaction.execute(sql.raw(`create schema "${schemaName}"`));
+      await transaction.execute(sql.raw(`set local search_path to "${schemaName}"`));
+      await transaction.execute(sql.raw('create table users (id text primary key)'));
+      await transaction.execute(sql.raw('create table historic_principals (user_id text not null references users(id) on delete restrict)'));
+      await transaction.execute(sql.raw("insert into users (id) values ('system-trip-planning')"));
+      await transaction.execute(sql.raw("insert into historic_principals (user_id) values ('system-trip-planning')"));
+
+      await expect(transaction.transaction((savepoint) => executeMigration(savepoint, migration))).rejects.toThrow("Migration 0072 requires an explicit reset and reseed");
+      await expect(transaction.execute(sql.raw("select constraint_name from information_schema.table_constraints where table_schema = current_schema() and table_name = 'users' and constraint_name = 'users_no_system_executor_id_check'"))).resolves.toEqual([]);
+
+      await transaction.execute(sql.raw('delete from historic_principals'));
+      await transaction.execute(sql.raw('delete from users'));
+      await expect(executeMigration(transaction, migration)).resolves.toBeUndefined();
+      await expect(transaction.transaction((savepoint) => savepoint.execute(sql.raw("insert into users (id) values ('system-trip-planning')")))).rejects.toThrow();
+    });
+  });
 });
 
 describe("Story 8.6 Audit-owned write boundary", () => {
@@ -161,6 +183,10 @@ describe("Story 8.6 Audit-owned write boundary", () => {
       'import { tripPlanChangeHistory } from "@/db/schema"; transaction["insert"](tripPlanChangeHistory)',
       'import { aiUsageEvents } from "@/db/schema"; writer?.["insert"](aiUsageEvents)',
       'import { auditEvents } from "@/db/schema"; const events = auditEvents; getDb().insert(events)',
+      'import * as schema from "@/db/schema"; db.insert(schema["auditEvents"])',
+      'import * as schema from "@/db/schema"; const events = schema["auditEvents"]; db.insert(events)',
+      'import * as schema from "@/db/schema"; const key = "auditEvents"; const events = schema[key]; db.insert(events)',
+      'import * as schema from "@/db/schema"; const key = "auditEvents"; { const key = "other"; void schema[key]; } db.insert(schema[key])',
     ]) {
       expect(findProtectedTableInserts(source), source).not.toEqual([]);
     }
@@ -217,7 +243,37 @@ function resolveProtectedTable(expression: ts.Expression, importedTables: Set<st
   while (ts.isParenthesizedExpression(expression) || ts.isAsExpression(expression) || ts.isSatisfiesExpression(expression) || ts.isNonNullExpression(expression)) expression = expression.expression;
   if (ts.isIdentifier(expression)) return aliases.get(expression.text) ?? (importedTables.has(expression.text) ? expression.text : null);
   if (ts.isPropertyAccessExpression(expression) && ts.isIdentifier(expression.expression) && namespaces.has(expression.expression.text) && protectedTables.has(expression.name.text)) return expression.name.text;
+  if (ts.isElementAccessExpression(expression) && ts.isIdentifier(expression.expression) && namespaces.has(expression.expression.text) && expression.argumentExpression) {
+    const key = ts.isStringLiteral(expression.argumentExpression)
+      ? expression.argumentExpression.text
+      : ts.isIdentifier(expression.argumentExpression)
+        ? resolveConstString(expression.argumentExpression)
+        : null;
+    if (key && protectedTables.has(key)) return key;
+  }
   return null;
+}
+
+function resolveConstString(reference: ts.Identifier): string | null {
+  for (let scope: ts.Node | undefined = reference.parent; scope; scope = scope.parent) {
+    if (!ts.isBlock(scope) && !ts.isSourceFile(scope)) continue;
+    for (const statement of scope.statements) {
+      if (!ts.isVariableStatement(statement) || statement.getStart() >= reference.getStart()) continue;
+      const declarations = statement.declarationList;
+      if (!(declarations.flags & ts.NodeFlags.Const)) continue;
+      for (const declaration of declarations.declarations) {
+        const initializer = declaration.initializer;
+        if (ts.isIdentifier(declaration.name) && declaration.name.text === reference.text && initializer && ts.isStringLiteral(initializer)) return initializer.text;
+      }
+    }
+  }
+  return null;
+}
+
+async function executeMigration(database: Parameters<Parameters<typeof testDb.transaction>[0]>[0], migration: string) {
+  for (const statement of migration.split("--> statement-breakpoint").map((part) => part.trim()).filter(Boolean)) {
+    await database.execute(sql.raw(statement));
+  }
 }
 
 function listTypeScriptFiles(directory: string): string[] {

@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-07-27 (Story 8.6 repaired four review findings; focused checks passed and status returned to review.)
+# last_updated: 2026-07-27 (Story 8.6 lexical computed-key shadowing repair verified; status remains review.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-07-27 (Story 8.6 repaired four review findings; focused checks passed and status returned to review.)
+last_updated: 2026-07-27 (Story 8.6 lexical computed-key shadowing repair verified; status remains review.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -156,6 +156,10 @@ development_status:
   # 2026-07-27: Actor-isolation suite added; development database identity/migration/seed state verified read-only without reset; serial DATABASE_URL_TEST matrix (16 files, 279 tests), lint, post-build typecheck, and build passed. Chief-of-Staff-authorized internal adversarial checkpoint was not executed because the prior worker ended at its prompt. Independent post-commit BMad code review remains required; status stays review.
   # 2026-07-27: Independent post-commit BMad code review of fddf146..2257a4ac3b5c353fb7e440cace7c1a995afb0f67 ran Blind Hunter, Edge Case Hunter, and Acceptance Auditor. Four unresolved repairs: High clean migration verification is missing; High catalog executors are only absent from seed data, not prevented from user/auth principal use; Medium isolation matrix omits user-scoped relationships; Medium direct-write guard is bypassable. No implementation, test, migration, database, or commit action was performed.
   # 2026-07-27: Repaired only those four findings. Migration 0072 rejects every catalog executor at users.id; the Story 8.6 regression recreates, migrates, and seeds only DATABASE_URL_TEST; it scans all foreign keys to users and uses import-aware TypeScript AST enforcement against direct protected Audit writes. Serial DATABASE_URL_TEST matrix: 16 files, 280 tests passed. lint had 0 errors and 3 existing warnings; typecheck and build passed. No DATABASE_URL reset, Story 8.5 change, or commit. Independent follow-up review remains required.
+  # 2026-07-27: Second bounded BMad review through 84ae1a5d4122bfe3687d4404e058bf9e1c4abb36 ran Blind Hunter, Edge Case Hunter, and Acceptance Auditor. Two unresolved patches: HIGH substantial-risk migration 0072 cannot apply to upgraded databases retaining historic catalog user rows; MEDIUM Audit direct-write guard misses computed namespace-table aliases such as schema["auditEvents"]. Recommendations: make the clean-break/upgrade path explicit before adding the constraint, and resolve/test string-literal namespace element access. No implementation, test, migration, database, or commit action was performed.
+  # 2026-07-27: Repaired only the final substantial-risk Story 8.6 findings. Migration 0072 now fails before adding its reserved-ID constraint when historic catalog user rows exist, with an actionable reset/reseed requirement; it performs no dependent cleanup/backfill and does not support durable-data upgrades. The isolated upgrade-state regression proves the blocked path leaves no constraint and a cleaned disposable state can migrate. Audit AST enforcement now resolves string-literal namespace ElementAccessExpression values and local aliases, with direct and alias bypass regressions. DATABASE_URL_TEST-only targeted suite passed (6 tests); pnpm typecheck passed. No development reset, Story 8.5 change, or commit.
+  # 2026-07-27: Final direct-write review repair resolves local immutable string-literal computed schema keys, rejecting `const key = "auditEvents"; const events = schema[key]; db.insert(events)` without generalized dataflow. With .env loaded, the DATABASE_URL_TEST-only Story 8.6 suite passed (1 file, 6 tests) and pnpm typecheck passed. No development reset, Story 8.5 change, or commit; status remains review.
+  # 2026-07-27: Repaired the Story 8.6 lexical scope-shadowing bypass in computed schema keys. The Audit AST guard resolves the nearest preceding lexical const string binding from enclosing block/source scopes at the reference; an inner `key = "other"` no longer overwrites the outer protected `key = "auditEvents"` after that block ends. Focused DATABASE_URL_TEST verification, typecheck, and diff whitespace validation passed. No development reset, Story 8.5 change, or commit; status remains review.
   8-6-verify-actor-isolation-and-attribution-end-to-end: review
   epic-8-retrospective: optional
 
