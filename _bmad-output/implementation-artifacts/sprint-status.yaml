@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-07-27 (Authorized exception advanced Story 8.2 to review after focused evidence passed; unrelated blockers remain.)
+# last_updated: 2026-07-27 (Story 8.2 review repairs completed under the authorized disposable/reset-only clean break; status returned to review.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-07-27 (Authorized exception advanced Story 8.2 to review after focused evidence passed; unrelated blockers remain.)
+last_updated: 2026-07-27 (Story 8.2 review repairs completed under the authorized disposable/reset-only clean break; status returned to review.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -126,6 +126,7 @@ development_status:
   # Finalized 2026-07-27 after status-only verification of supplied final repair commit 6687df2d8ed78b1a6f701d459a4f2cc66d24958e and a clean pre-update worktree; status synchronized to done. No additional code review or implementation verification was performed.
   8-1-establish-the-audit-actor-boundary-and-system-catalog: done
   # Authorized exception 2026-07-27: focused Story 8.2 rerun passed (8 files, 272 tests); review status granted despite four pre-existing unrelated full-suite failures and Drizzle's non-TTY rename prompt. Blockers remain unresolved outside this story.
+  # Review repair 2026-07-27: authorized disposable/reset-only clean break deletes the three attribution tables before constraints; durable populated databases are unsupported. Restored chat-context project usage attribution and added migration/history/Facebook regressions. Focused 4-file suite (51 tests), lint (0 errors; 3 pre-existing warnings), typecheck, and build pass. db:generate remains blocked by Drizzle's non-TTY rename prompt.
   8-2-persist-valid-audit-history-and-usage-attribution: review
   8-3-attribute-knowledge-capture-and-ai-work-to-system-executors: backlog
   8-4-attribute-trip-proposal-expiry-through-the-audit-boundary: backlog

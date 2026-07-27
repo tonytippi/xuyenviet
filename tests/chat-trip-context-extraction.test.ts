@@ -117,6 +117,9 @@ describe("chat/trip context extraction", () => {
       { field: "destination", value: "Huế", scope: "trip_project", tripProjectId: project.id },
       { field: "notes", value: "Hỏi riêng về quán ăn tối nay", scope: "conversation", tripProjectId: null },
     ]);
+    await expect(testDb.select({ tripProjectId: aiUsageEvents.tripProjectId }).from(aiUsageEvents)).resolves.toEqual([
+      { tripProjectId: project.id },
+    ]);
   });
 
   test("stores conversation corrections as a new active latest fact", async () => {

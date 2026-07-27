@@ -33,7 +33,7 @@ so that human activity, autonomous work, and reporting cannot be conflated.
   - [ ] Update `trip_plan_change_history`: retain its project-owner relationship and existing safe JSON/operation constraints; add the same actor XOR `CHECK` appropriate to a table with no email snapshot column.
    - [ ] Replace `ai_usage_events.user_id` with nullable `initiated_by_user_id` (real-user FK retaining the current `onDelete: cascade` behavior), add nullable `trip_project_id` for applicable trip context, and add required `executor_system`; replace the user-created index with an initiator-created index and add an index beginning with `executor_system`.
    - [ ] Preserve all existing usage status, token, cost, provider-request-ID, and nullable message/conversation constraints. The new trip-project reference must preserve usage after project deletion with the same nullable-context behavior as conversation/message references. Do not introduce a system-actor database table or a catalog-label column.
-  - [ ] Generate and inspect the Drizzle migration. Do not remove reserved-user migrations, seed rows, fixtures, or reset/reseed behavior: those clean-break changes belong only to Story 8.5. If the target database is durable rather than disposable, stop and request an expand-migrate-contract design instead of inventing a backfill.
+   - [x] Generate and inspect the Drizzle migration. Epic 8 target data is disposable: this migration clears the three attribution tables before applying the new shape constraints, and `db:reset` recreates then reseeds the local database. Applying this migration to any durable populated database is unsupported; stop and select an expand-migrate-contract design instead.
 
 - [x] Widen the Audit event writer and add the Audit-owned plan-history writer (AC: 1)
   - [ ] In `src/features/audit/events.ts`, change the accepted actor from `UserAuditActor` to `AuditActor`, call `validateAuditActor` before its injected writer, and map the validated discriminant to exactly one persistence shape.
@@ -53,14 +53,20 @@ so that human activity, autonomous work, and reporting cannot be conflated.
    - [ ] Update `src/features/admin/users.ts` to group/filter `initiatedByUserId` only, preserving its bounded paged-roster aggregation and all-status/null-token behavior. A worker-only event (`initiatedByUserId: null`) must not affect any roster member. There is no new operations-reporting UI in this story; prove at the persistence/query level that autonomous events remain groupable by `executorSystem` and are never grouped under a user initiator.
   - [ ] Defer knowledge/capture executor-column work and non-usage artifact/side-effect migration to Story 8.3. Do not add executor columns to knowledge or capture artifacts in this story.
 
-- [ ] Add focused migration, writer, transaction, and reporting coverage (AC: 1, 2)
+- [x] Add focused migration, writer, transaction, and reporting coverage (AC: 1, 2)
   - [ ] Extend `tests/audit-actors.test.ts`: valid user and system `recordAuditEvent` rows, null human fields for system rows, preserved email snapshot for user rows, and malformed/mixed/blank/catalog-invalid actor input rejected before writer invocation.
   - [ ] Add focused coverage for the plan-history writer: user and system actor mappings, validation before insert, injected-transaction use, and preservation of existing safe payload/owner fields.
    - [ ] Update `tests/ai-usage-events.test.ts` fixtures/assertions for `initiatedByUserId`, `executorSystem`, and nullable `tripProjectId`; retain all existing cost/token/privacy assertions and add a worker-only usage event with null initiator plus a catalog-invalid executor rejection before insert. Prove executor-based operations grouping keeps autonomous work separate from user initiators.
    - [ ] Extend `tests/admin-user-management.test.ts` to prove usage aggregates by initiator and excludes a null-initiator worker event.
   - [ ] Update all affected database fixtures and call-site assertions, including at least `tests/ai-ask-sessions.test.ts`, `tests/trip-projects.test.ts`, `tests/chat-trip-context-extraction.test.ts`, `tests/knowledge-ingestion-pipeline.test.ts`, and affected knowledge/capture usage tests. Do not leave obsolete `aiUsageEvents.userId` fixtures after the schema rename.
-   - [ ] Use database-backed schema/migration tests where available to prove both valid actor shapes and rejection of every malformed shape: user class with missing user FK or non-null system ID; system class with non-null user/email, blank/missing system ID; and missing/invalid class. Include the existing Facebook-capture system actor path to prove it no longer attempts the former mixed shape. Keep existing audited-mutation and proposal terminal-change transaction tests passing, and add a regression proving the Audit history helper uses the supplied transaction so terminal update, history, and audit roll back together.
-  - [ ] Run `pnpm db:generate`, relevant `pnpm test:run` targets, `pnpm lint`, `pnpm typecheck`, and `pnpm build`. Record exact failures/blockers; do not claim verification not run.
+   - [x] Use database-backed schema/migration tests where available to prove both valid actor shapes and rejection of every malformed shape: user class with missing user FK or non-null system ID; system class with non-null user/email, blank/missing system ID; and missing/invalid class. Include the existing Facebook-capture system actor path to prove it no longer attempts the former mixed shape. Keep existing audited-mutation and proposal terminal-change transaction tests passing, and add a regression proving the Audit history helper uses the supplied transaction so terminal update, history, and audit roll back together.
+   - [x] Run `pnpm db:generate`, relevant `pnpm test:run` targets, `pnpm lint`, `pnpm typecheck`, and `pnpm build`. Record exact failures/blockers; do not claim verification not run.
+
+### Review Findings
+
+- [x] [Review][Decision] Migration cannot apply to a populated historical database [drizzle/migrations/0069_persist_audit_usage_attribution.sql:1] — User decision accepted: Epic 8 target data is disposable/reset only. The migration explicitly deletes `audit_events`, `trip_plan_change_history`, and `ai_usage_events` before the new constraints; comments and migration-backed tests document that durable populated databases are unsupported and require an expand-migrate-contract redesign.
+- [x] [Review][Patch] Preserve available chat-context trip-project usage attribution [src/features/chat-trips/context-extraction.ts:83] — Both failure and success `recordExtractionUsage` payloads now pass `input.tripProjectId`; database coverage verifies project-scoped extraction usage retains the ID.
+- [x] [Review][Patch] Add required database and history-writer regression coverage [tests/audit-attribution-migration.test.ts:1] — Added migration-backed valid/invalid XOR-shape checks for audit/history tables, `recordPlanHistory` actor/supplied-transaction/payload coverage, and a real Facebook system-capture persistence regression.
 
 ## Dev Notes
 
@@ -148,6 +154,7 @@ gpt-5.6-terra
 - 2026-07-27 recovery: completed the attribution schema, Audit/Usage boundaries, compatible callers, and affected fixtures. Added `0069_persist_audit_usage_attribution.sql`; it renames the usage initiator column, adds nullable project context plus required executor attribution, and enforces audit/history actor XOR shapes. Drizzle's rename-disambiguation prompt cannot complete in the non-TTY runner, so the equivalent migration was written explicitly and verified by migration-driven tests; no durable database was migrated.
 - Focused Story 8.2 coverage initially passed with 189 tests across actor validation, usage attribution, admin aggregation, AI Ask session deletion, trip projects, ingestion, and proposal history. Full-suite validation remains blocked by four pre-existing unrelated failures: a missing `answer_usefulness_feedback.userId` fixture, two Facebook recovery-page query-message assertions, and an operator fixture rejected by exact-admin authorization. `pnpm db:generate` is additionally blocked by Drizzle's non-TTY rename-disambiguation prompt; the equivalent explicit migration was verified by migration-driven tests.
 - 2026-07-27 authorized exception: reran the focused Story 8.2 suite successfully (8 files, 272 tests). Advanced this story to `review` despite the four unrelated full-suite failures and the non-TTY `db:generate` rename prompt. No code, tests, migration, or other story records were changed as part of this status advancement; those blockers remain recorded for resolution outside Story 8.2.
+- 2026-07-27 review repair: user selected the documented disposable/reset-only clean break. `0069` now deletes Epic 8 attribution history before imposing the new shape constraints and explicitly rejects durable populated targets. Restored `tripProjectId` in both chat-context usage paths. Added database-backed migration XOR coverage, Audit history supplied-writer/payload coverage, and Facebook system-capture persistence coverage. Focused suite passed (4 files, 51 tests); lint passed with 0 errors and 3 pre-existing unrelated warnings; typecheck and build passed. `pnpm db:generate` remains blocked because Drizzle demands a TTY for rename disambiguation.
 
 ### File List
 
@@ -179,6 +186,9 @@ gpt-5.6-terra
 - src/features/knowledge/ingestion-pipeline.ts
 - src/features/knowledge/suggestions.ts
 - tests/audit-actors.test.ts
+- tests/audit-attribution-migration.test.ts
+- tests/chat-trip-context-extraction.test.ts
+- tests/facebook-capture.test.ts
 - tests/ai-usage-events.test.ts
 - tests/admin-user-management.test.ts
 - tests/ai-ask-sessions.test.ts
@@ -192,3 +202,5 @@ gpt-5.6-terra
 - 2026-07-27: Revalidated and repaired Story 8.2 documentation-only gaps; status remains ready-for-dev.
 - 2026-07-27: Recovered interrupted implementation; focused migration-driven coverage passes, but unrelated full-suite failures block review.
 - 2026-07-27: Authorized exception applied: focused Story 8.2 evidence rerun passed (8 files, 272 tests); status advanced to review despite four pre-existing unrelated full-suite failures and the non-TTY Drizzle rename prompt.
+- 2026-07-27: BMad adversarial code review of committed range `5776071..ce7afcdae6672c42d9b8e600984b0d5ccd4ad83d` found one durable-migration design blocker and two implementation/test gaps. Status set to in-progress; no code or commit was changed during review.
+- 2026-07-27: Resolved all Story 8.2 review findings under the authorized disposable/reset-only clean-break decision. Status set to review; no commit created. Focused migration/writer/caller/Facebook coverage (51 tests), lint, typecheck, and build pass. `db:generate` remains non-interactively blocked by Drizzle's rename prompt.

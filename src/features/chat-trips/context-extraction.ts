@@ -83,6 +83,7 @@ export async function extractChatTripContext(input: ExtractChatTripContextInput)
     await recordExtractionUsage(db, {
       initiatedByUserId: input.session.userId,
       executorSystem: "system-ai-orchestration",
+      tripProjectId: input.tripProjectId,
       conversationId: input.conversationId,
       userMessageId: input.userMessage.id,
       purpose: chatContextExtractionPurpose,
@@ -104,6 +105,7 @@ export async function extractChatTripContext(input: ExtractChatTripContextInput)
   await recordExtractionUsage(db, {
     initiatedByUserId: input.session.userId,
     executorSystem: "system-ai-orchestration",
+    tripProjectId: input.tripProjectId,
     conversationId: input.conversationId,
     userMessageId: input.userMessage.id,
     purpose: chatContextExtractionPurpose,

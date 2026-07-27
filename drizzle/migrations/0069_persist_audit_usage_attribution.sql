@@ -1,3 +1,9 @@
+-- Epic 8 attribution data is a disposable clean break. `db:reset` recreates this
+-- schema before reseeding; applying this migration to a durable populated database
+-- is unsupported because it deliberately discards these historical attribution rows.
+DELETE FROM "audit_events";--> statement-breakpoint
+DELETE FROM "trip_plan_change_history";--> statement-breakpoint
+DELETE FROM "ai_usage_events";--> statement-breakpoint
 ALTER TABLE "audit_events" ALTER COLUMN "actor_user_id" DROP NOT NULL;--> statement-breakpoint
 ALTER TABLE "audit_events" ALTER COLUMN "actor_email" DROP NOT NULL;--> statement-breakpoint
 ALTER TABLE "audit_events" ADD CONSTRAINT "audit_events_actor_shape_check" CHECK (("audit_events"."actor_class" = 'user' and "audit_events"."actor_user_id" is not null and length(btrim("audit_events"."actor_email")) > 0 and "audit_events"."actor_system" is null) or ("audit_events"."actor_class" = 'system' and "audit_events"."actor_user_id" is null and "audit_events"."actor_email" is null and length(btrim("audit_events"."actor_system")) > 0));--> statement-breakpoint

@@ -144,6 +144,36 @@ describe("Facebook capture queue", () => {
     ]);
   });
 
+  test("persists system Facebook capture audits with no human attribution fields", async () => {
+    await createSource({ id: "system-captured-facebook", kind: "facebook", rawText: null });
+
+    await expect(updateQueuedFacebookSourceRawText(testDb, {
+      sourceId: "system-captured-facebook",
+      rawText: "Captured by the system worker.",
+      captureMetadata: {
+        captureMethod: "playwright_operator_browser",
+        capturedAt: "2026-07-27T00:00:00.000Z",
+        sourceUrl: "https://facebook.com/groups/xuyenviet/posts/system-captured-facebook",
+        finalUrl: "https://facebook.com/groups/xuyenviet/posts/system-captured-facebook",
+      },
+      actor: {
+        userId: "operator-user",
+        email: "operator@example.com",
+        actorClass: "system",
+        actorSystem: "system-facebook-capture",
+      },
+    })).resolves.toMatchObject({ status: "updated" });
+
+    await expect(testDb.select({ actorClass: auditEvents.actorClass, actorUserId: auditEvents.actorUserId, actorEmail: auditEvents.actorEmail, actorSystem: auditEvents.actorSystem }).from(auditEvents)).resolves.toEqual([
+      {
+        actorClass: "system",
+        actorUserId: null,
+        actorEmail: null,
+        actorSystem: "system-facebook-capture",
+      },
+    ]);
+  });
+
   test("skips a capture that resolves to an existing canonical Facebook source", async () => {
     await createSource({ id: "existing-facebook", kind: "facebook", rawText: "Existing post text" });
     await testDb.update(sources).set({ canonicalUrl: "https://web.facebook.com/groups/xuyenviet/posts/123?fbclid=ignored" }).where(eq(sources.id, "existing-facebook"));

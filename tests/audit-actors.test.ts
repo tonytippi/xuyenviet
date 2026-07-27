@@ -11,6 +11,7 @@ import {
   validateUserAuditActor,
 } from "@/features/audit/actors";
 import { recordAuditEvent } from "@/features/audit/events";
+import { recordPlanHistory } from "@/features/audit/history";
 
 describe("audit actor boundary", () => {
   test("converts an authenticated session to an immutable user actor preserving its email snapshot", () => {
@@ -94,6 +95,68 @@ describe("audit actor boundary", () => {
       actor: { kind: "system", system: "untrusted-system" } as never,
       operation: "create",
       targetType: "test",
+    }, { insert } as never)).rejects.toThrow(AuditActorValidationError);
+
+    expect(insert).not.toHaveBeenCalled();
+  });
+
+  test("maps history actors through the supplied transaction while preserving caller payloads", async () => {
+    const insert = vi.fn();
+    const values = vi.fn();
+    insert.mockReturnValue({ values });
+    const transaction = { insert };
+    const affectedItemReferences = [{ itemId: "item-1", operation: "update" }];
+    const safeBeforeAfterSummary = { before: { title: "Old" }, after: { title: "New" } };
+
+    await recordPlanHistory({
+      actor: { kind: "user", userId: "owner-1", email: "owner@example.com" },
+      tripProjectId: "project-1",
+      userId: "owner-1",
+      proposalId: "proposal-1",
+      operationClass: "apply",
+      affectedItemReferences,
+      safeBeforeAfterSummary,
+    }, transaction as never);
+    await recordPlanHistory({
+      actor: { kind: "system", system: "system-trip-planning" },
+      tripProjectId: "project-1",
+      userId: "owner-1",
+      operationClass: "expire",
+      affectedItemReferences,
+      safeBeforeAfterSummary,
+    }, transaction as never);
+
+    expect(insert).toHaveBeenCalledTimes(2);
+    expect(values).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      tripProjectId: "project-1",
+      userId: "owner-1",
+      proposalId: "proposal-1",
+      actorClass: "user",
+      actorUserId: "owner-1",
+      actorSystem: null,
+      affectedItemReferences,
+      safeBeforeAfterSummary,
+    }));
+    expect(values).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      proposalId: null,
+      actorClass: "system",
+      actorUserId: null,
+      actorSystem: "system-trip-planning",
+      affectedItemReferences,
+      safeBeforeAfterSummary,
+    }));
+  });
+
+  test("rejects malformed history actors before invoking the supplied transaction", async () => {
+    const insert = vi.fn();
+
+    await expect(recordPlanHistory({
+      actor: { kind: "system", system: "untrusted-system" } as never,
+      tripProjectId: "project-1",
+      userId: "owner-1",
+      operationClass: "apply",
+      affectedItemReferences: [],
+      safeBeforeAfterSummary: {},
     }, { insert } as never)).rejects.toThrow(AuditActorValidationError);
 
     expect(insert).not.toHaveBeenCalled();
