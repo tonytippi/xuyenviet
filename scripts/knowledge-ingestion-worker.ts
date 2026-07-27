@@ -15,7 +15,19 @@ async function main() {
   process.once("SIGTERM", stop);
 
   console.log("Knowledge ingestion worker started", { workerId, once });
-  const result = await runKnowledgeIngestionWorkerLoop({ once, workerId, signal: controller.signal, onPollComplete: () => writeFile(heartbeatPath, String(Date.now())) });
+  const result = await runKnowledgeIngestionWorkerLoop({
+    once,
+    workerId,
+    signal: controller.signal,
+    onPollComplete: () => writeFile(heartbeatPath, String(Date.now())),
+    onWorkClaimed: (work) => console.log("Knowledge ingestion worker processing", work),
+    onWorkComplete: (work) => {
+      if (work && "jobId" in work) console.log("Knowledge ingestion worker completed", { jobId: work.jobId, sourceId: work.sourceId, outcome: work.outcome, cardId: work.cardId });
+      else if (work) console.log("Knowledge ingestion worker candidate stage committed", { jobId: work.ingestionJobId });
+      else if (once) console.log("Knowledge ingestion worker found no work");
+    },
+    onIdle: (pollIntervalMs) => console.log("Knowledge ingestion worker idle; sleeping", { pollIntervalMs }),
+  });
   console.log("Knowledge ingestion worker stopped", result ? { jobId: "jobId" in result ? result.jobId : undefined, sourceId: "sourceId" in result ? result.sourceId : undefined, outcome: "outcome" in result ? result.outcome : undefined, status: "status" in result ? result.status : undefined } : { status: "no_job" });
 
   // The database client intentionally stays open for the supervised worker; one-shot runs must exit.

@@ -26,7 +26,17 @@ async function main() {
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
 
-  const result = await runApprovedKnowledgeIndexingWorkerLoop({ once: options.once, batchSize: options.batchSize, signal: controller.signal });
+  const result = await runApprovedKnowledgeIndexingWorkerLoop({
+    once: options.once,
+    batchSize: options.batchSize,
+    signal: controller.signal,
+    onWorkClaimed: (claims) => console.log("Knowledge indexing worker processing", claims.map((claim) => ({ markerId: claim.markerId, cardId: claim.cardId, contentVersion: claim.contentVersion }))),
+    onWorkComplete: (work) => {
+      if (work.status === "indexed") console.log("Knowledge indexing worker completed batch", { indexedCount: work.indexedCount, skippedCount: work.skippedCount, cardIds: work.cardIds });
+      else if (options.once) console.log("Knowledge indexing worker found no work");
+    },
+    onIdle: (pollIntervalMs) => console.log("Knowledge indexing worker idle; sleeping", { pollIntervalMs }),
+  });
   console.log("Knowledge indexing worker stopped", result);
 }
 

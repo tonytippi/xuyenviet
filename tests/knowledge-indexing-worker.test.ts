@@ -53,6 +53,15 @@ describe("versioned knowledge indexing work", () => {
     }
   });
 
+  test("reports idle polling before the worker sleeps", async () => {
+    const controller = new AbortController();
+    const onIdle = vi.fn(() => controller.abort());
+
+    await expect(runApprovedKnowledgeIndexingWorkerLoop({ workerId: "idle-worker", pollIntervalMs: 10, signal: controller.signal, onIdle })).resolves.toEqual({ status: "stopped" });
+
+    expect(onIdle).toHaveBeenCalledWith(10);
+  });
+
   test("reclaims an expired lease with a new fence and rejects the old worker completion", async () => {
     await createMarker("fenced-marker");
     const first = await claimNextKnowledgeIndexWork({ workerId: "old-worker" }, testDb);

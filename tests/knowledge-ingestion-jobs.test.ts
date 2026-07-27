@@ -59,6 +59,15 @@ describe("canonical knowledge ingestion jobs", () => {
     expect(onPollComplete).toHaveBeenCalledTimes(1);
   });
 
+  test("reports idle polling before the worker sleeps", async () => {
+    const controller = new AbortController();
+    const onIdle = vi.fn(() => controller.abort());
+
+    await expect(runKnowledgeIngestionWorkerLoop({ workerId: "idle-worker", pollIntervalMs: 10, signal: controller.signal, onIdle })).resolves.toEqual({ status: "stopped" });
+
+    expect(onIdle).toHaveBeenCalledWith(10);
+  });
+
   test("removes the idle poll abort listener when the timeout completes", async () => {
     const controller = new AbortController();
     const originalRemoveEventListener = controller.signal.removeEventListener.bind(controller.signal);
