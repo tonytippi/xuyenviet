@@ -1,18 +1,11 @@
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { tripChangeProposals, tripPlanChangeHistory, tripPlanItems, tripProjects, users } from "@/db/schema";
+import { auditEvents, tripChangeProposals, tripPlanChangeHistory, tripPlanItems, tripProjects, users } from "@/db/schema";
 
 import { testDb } from "./helpers/db";
 async function createTestUser(userId: string) {
   await testDb.insert(users).values({ id: userId, email: `${userId}@example.com` });
-}
-
-async function ensureSystemTripPlanningActor() {
-  const [existing] = await testDb.select({ id: users.id }).from(users).where(eq(users.id, "system-trip-planning")).limit(1);
-  if (!existing) {
-    await testDb.insert(users).values({ id: "system-trip-planning", email: "system-trip-planning@xuyenviet.invalid" });
-  }
 }
 
 async function seedExpiredProposal(projectId: string, userId: string, proposalId: string, itemId: string, expiresAt: Date) {
@@ -38,7 +31,6 @@ describe("Story 7.5 trip-proposal-expiry-worker", () => {
   });
 
   test("processNextExpiredTripChangeProposal expires elapsed pending proposals and returns the count", async () => {
-    await ensureSystemTripPlanningActor();
     await createTestUser("worker-user-1");
     const past = new Date("2026-01-01T00:00:00.000Z");
     await seedExpiredProposal("worker-project-1", "worker-user-1", "worker-proposal-1", "worker-leg-1", past);
@@ -52,10 +44,17 @@ describe("Story 7.5 trip-proposal-expiry-worker", () => {
     expect(rows[0]?.status).toBe("expired");
     const historyRows = await testDb.select().from(tripPlanChangeHistory);
     expect(historyRows.filter((row) => row.operationClass === "expire")).toHaveLength(2);
+    expect(historyRows.filter((row) => row.operationClass === "expire")).toEqual(expect.arrayContaining([
+      expect.objectContaining({ actorClass: "system", actorSystem: "system-trip-planning", actorUserId: null }),
+    ]));
+    const audits = await testDb.select().from(auditEvents).where(eq(auditEvents.operation, "expire"));
+    expect(audits).toHaveLength(2);
+    expect(audits).toEqual(expect.arrayContaining([
+      expect.objectContaining({ actorClass: "system", actorSystem: "system-trip-planning", actorUserId: null, actorEmail: null }),
+    ]));
   });
 
   test("a second call with no elapsed rows returns processed: 0", async () => {
-    await ensureSystemTripPlanningActor();
     await createTestUser("worker-user-2");
     // A pending proposal that is NOT expired (future expiry).
     await seedExpiredProposal("worker-project-2", "worker-user-2", "worker-proposal-2", "worker-leg-2", new Date("2026-12-01T00:00:00.000Z"));
@@ -69,7 +68,6 @@ describe("Story 7.5 trip-proposal-expiry-worker", () => {
   });
 
   test("runTripChangeProposalExpiryWorkerLoop with once: true processes once and exits", async () => {
-    await ensureSystemTripPlanningActor();
     await createTestUser("worker-user-3");
     await seedExpiredProposal("worker-project-3", "worker-user-3", "worker-proposal-3", "worker-leg-3", new Date("2026-01-01T00:00:00.000Z"));
 
@@ -85,7 +83,6 @@ describe("Story 7.5 trip-proposal-expiry-worker", () => {
   });
 
   test("concurrent workers do not double-process the same row (FOR UPDATE SKIP LOCKED)", async () => {
-    await ensureSystemTripPlanningActor();
     await createTestUser("worker-user-4");
     const past = new Date("2026-01-01T00:00:00.000Z");
     // Seed three elapsed proposals.
@@ -115,6 +112,10 @@ describe("Story 7.5 trip-proposal-expiry-worker", () => {
     for (const seededId of seededIds) {
       const historyForRow = await testDb.select().from(tripPlanChangeHistory).where(eq(tripPlanChangeHistory.proposalId, seededId));
       expect(historyForRow).toHaveLength(1);
+      expect(historyForRow[0]).toMatchObject({ actorClass: "system", actorSystem: "system-trip-planning", actorUserId: null });
+      const auditsForRow = await testDb.select().from(auditEvents).where(eq(auditEvents.targetId, seededId));
+      expect(auditsForRow).toHaveLength(1);
+      expect(auditsForRow[0]).toMatchObject({ actorClass: "system", actorSystem: "system-trip-planning", actorUserId: null, actorEmail: null });
     }
   });
 });

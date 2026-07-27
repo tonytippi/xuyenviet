@@ -44,13 +44,7 @@ import { getAuthenticatedSession } from "@/server/auth";
 // No plan state is mutated by the 7.4 draft path; only apply mutates plan
 // state, and only inside one locked transaction.
 
-// The legacy user row remains until Story 8.4 can atomically move expiry to
-// system persistence. The catalog actor is ready for that future path.
-const systemTripPlanningActorId = "system-trip-planning";
-const systemTripPlanningActorEmail = "system-trip-planning@xuyenviet.invalid";
-const legacySystemTripPlanningUserActor = toUserAuditActor({ userId: systemTripPlanningActorId, email: systemTripPlanningActorEmail });
-const systemTripPlanningActor = createSystemAuditActor(systemTripPlanningActorId);
-const systemTripPlanningActorSystem = "system-trip-planning";
+const systemTripPlanningActor = createSystemAuditActor("system-trip-planning");
 
 type Transaction = Parameters<ReturnType<typeof getDb>["transaction"]>[0] extends (transaction: infer T) => unknown ? T : never;
 
@@ -1375,11 +1369,16 @@ export async function applyApprovedTripChange(
       // Idempotent re-apply: an already-terminal proposal is no-longer-applicable.
       if (proposalRow.status !== "pending") return { success: false, reason: "not_found" } as const;
 
-      // Expired: refuse without calling expire (the next read will expire it).
-      // Apply writes NO history row on failure.
-      if (proposalRow.expiresAt && proposalRow.expiresAt.getTime() <= now.getTime()) {
-        return { success: false, reason: "expired" } as const;
-      }
+       // Expiry is a terminal system command, even when apply discovers it.
+       // Keep it in this transaction so no plan operation can follow it.
+       if (proposalRow.expiresAt && proposalRow.expiresAt.getTime() <= now.getTime()) {
+         await expireTripChangeProposalInTransaction(transaction, {
+           tripProjectId: input.tripProjectId,
+           proposalId: input.proposalId,
+           now,
+         });
+         return { success: false, reason: "expired" } as const;
+       }
 
       // Aggregate version fence.
       if (project.aggregateVersion !== proposalRow.expectedAggregateVersion) {
@@ -2076,6 +2075,13 @@ export async function expireTripChangeProposalInTransaction(
     return { success: true, proposal: toOwnedSummary(row, row.tripProjectId, row.operations, knownItems) } as const;
   }
 
+  // The sessionless system command can only expire an elapsed, configured
+  // expiry. Future and non-expiring pending proposals are successful no-ops.
+  if (!row.expiresAt || row.expiresAt.getTime() > now.getTime()) {
+    const knownItems = await loadKnownItemsForSummary(row.tripProjectId, row.userId);
+    return { success: true, proposal: toOwnedSummary(row, row.tripProjectId, row.operations, knownItems) } as const;
+  }
+
   const terminalTimestamp = now;
   await transaction
     .update(tripChangeProposals)
@@ -2089,25 +2095,19 @@ export async function expireTripChangeProposalInTransaction(
   const affectedItems = deriveAffectedItems(operations, knownById);
   const beforeAfter = deriveBeforeAfter(operations, knownById);
 
-  await transaction.insert(tripPlanChangeHistory).values({
+  await recordPlanHistory({
     tripProjectId: row.tripProjectId,
     userId: row.userId,
     proposalId: input.proposalId,
-    actorUserId: null,
-    actorClass: "system",
-    actorSystem: systemTripPlanningActorSystem,
+    actor: systemTripPlanningActor,
     operationClass: "expire",
     affectedItemReferences: affectedItems as unknown as Record<string, unknown>,
     safeBeforeAfterSummary: boundBeforeAfterSummary(beforeAfter),
-  });
+  }, transaction);
 
-  // P12: record the expire audit row via recordAuditEvent (spec line 190: reuse
-  // it for apply/dismiss/expire) so normalizeAuditSummary's 2000-char cap
-  // applies consistently. The system-trip-planning actor mirrors the
-  // system-knowledge-pipeline pattern verbatim.
   await recordAuditEvent(
     {
-      actor: legacySystemTripPlanningUserActor,
+      actor: systemTripPlanningActor,
       operation: "expire",
       targetType: "trip_change_proposal",
       targetId: input.proposalId,

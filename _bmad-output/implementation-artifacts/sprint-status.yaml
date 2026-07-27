@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-07-27 (Story 8.3 finalized; status is done.)
+# last_updated: 2026-07-27 (Story 8.4 implementation complete; independent adversarial review next.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-07-27 (Story 8.3 finalized; status is done.)
+last_updated: 2026-07-27 (Story 8.4 implementation complete; independent adversarial review next.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -137,7 +137,8 @@ development_status:
   # Narrow recovery verified 2026-07-27: source removal clears executorSystem on human terminal supersession; extraction success fences on the original lockedAt/lockedBy lease before side effects, terminal transition, or audit. Focused 2-file suite (18 tests), lint (0 errors; 3 pre-existing unrelated warnings), typecheck, and build passed. Status remains review; no commit.
   # Finalized 2026-07-27 after status-only verification of supplied final repair commit 97ac3b3aa4d1d23e019c5df5784460aa0f193e95 and a clean pre-update worktree; status synchronized to done. No additional implementation inspection, tests, review, or commit was performed.
   8-3-attribute-knowledge-capture-and-ai-work-to-system-executors: done
-  8-4-attribute-trip-proposal-expiry-through-the-audit-boundary: backlog
+  # 2026-07-27: Chief-of-Staff-authorized completion synchronization. bmad-dev-story implementation completed with focused 108-test, lint, typecheck, and build evidence; no migrations changed. Independent adversarial review remains next. No commit performed.
+  8-4-attribute-trip-proposal-expiry-through-the-audit-boundary: review
   8-5-remove-fake-system-users-in-the-clean-break-migration: backlog
   8-6-verify-actor-isolation-and-attribution-end-to-end: backlog
   epic-8-retrospective: optional

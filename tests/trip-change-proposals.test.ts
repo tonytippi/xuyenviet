@@ -1,5 +1,8 @@
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { and, eq } from "drizzle-orm";
-import { beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { auditEvents, tripChangeProposals, tripPlanChangeHistory, tripPlanItems, tripProjects, users } from "@/db/schema";
 
@@ -7,22 +10,6 @@ import { testDb } from "./helpers/db";
 
 async function createTestUser(userId: string) {
   await testDb.insert(users).values({ id: userId, email: `${userId}@example.com` });
-}
-
-// Story 7.5: the system-trip-planning reserved user is created by migration
-// 0064, but other test files that call resetTestDatabase() truncate the users
-// table. Ensure the reserved system actor exists before expire tests run so
-// the audit_events.actorUserId FK is satisfied. Check-then-insert to avoid
-// depending on conflict-target syntax.
-async function ensureSystemTripPlanningActor() {
-  const [existing] = await testDb.select({ id: users.id }).from(users).where(eq(users.id, "system-trip-planning")).limit(1);
-  if (!existing) {
-    try {
-      await testDb.insert(users).values({ id: "system-trip-planning", email: "system-trip-planning@xuyenviet.invalid" });
-    } catch (error) {
-      console.error("ensureSystemTripPlanningActor insert failed", error instanceof Error ? error.message : String(error));
-    }
-  }
 }
 
 type KnownPlanItem = {
@@ -648,25 +635,23 @@ describe("Story 7.5 applyApprovedTripChange DB-backed tests", () => {
     expect(historyRows).toHaveLength(0);
   });
 
-  test("returns expired when expiresAt <= now and applies nothing (no history row)", async () => {
+  test("terminalizes elapsed proposals as system expiry before returning expired and applies nothing", async () => {
     await createTestUser("apply-user-4");
     await setupProjectWithItem("apply-user-4", "apply-project-4");
     const { persistAiTripChangeProposalDraft } = await loadModuleAs("apply-user-4", "apply-user-4@example.com");
-    // E7R2-F4: persist rejects a past-date expiry, so persist a near-future
-    // expiry (1 ms ahead) that is already elapsed by the time apply runs
-    // (real clock advances past it). This models a proposal that aged past
-    // expiry — the realistic path to an expired pending row.
     const persisted = await persistAiTripChangeProposalDraft({
       tripProjectId: "apply-project-4",
       expectedAggregateVersion: 1,
       expectedItemVersions: { "leg-1": 1 },
       operations: [{ kind: "change-item-state", itemId: "leg-1", state: "confirmed" }],
       rationale: "Đã hết hạn.",
-      expiresAt: new Date(Date.now() + 1),
+      expiresAt: new Date(Date.now() + 60_000),
     });
     if (!persisted.success) throw new Error("persist failed");
-    // Yield so the near-future expiry elapses before apply reads it.
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await testDb
+      .update(tripChangeProposals)
+      .set({ expiresAt: new Date("2026-01-01T00:00:00.000Z") })
+      .where(eq(tripChangeProposals.id, persisted.proposal.id));
     const { applyApprovedTripChange } = await loadModuleAs("apply-user-4", "apply-user-4@example.com");
 
     const result = await applyApprovedTripChange({ tripProjectId: "apply-project-4", proposalId: persisted.proposal.id });
@@ -675,7 +660,13 @@ describe("Story 7.5 applyApprovedTripChange DB-backed tests", () => {
     const [savedItem] = await testDb.select().from(tripPlanItems).where(eq(tripPlanItems.id, "leg-1"));
     expect(savedItem.state).toBe("planned");
     const historyRows = await testDb.select().from(tripPlanChangeHistory).where(eq(tripPlanChangeHistory.proposalId, persisted.proposal.id));
-    expect(historyRows).toHaveLength(0);
+    expect(historyRows).toHaveLength(1);
+    expect(historyRows[0]).toMatchObject({ operationClass: "expire", actorClass: "system", actorSystem: "system-trip-planning", actorUserId: null });
+    const audits = await testDb.select().from(auditEvents).where(and(eq(auditEvents.operation, "expire"), eq(auditEvents.targetId, persisted.proposal.id)));
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({ actorClass: "system", actorSystem: "system-trip-planning", actorUserId: null, actorEmail: null });
+    const [project] = await testDb.select().from(tripProjects).where(eq(tripProjects.id, "apply-project-4"));
+    expect(project.aggregateVersion).toBe(1);
   });
 
   test("cross-owner apply returns not_found without leaking existence and applies nothing", async () => {
@@ -804,27 +795,19 @@ describe("Story 7.5 dismissTripChangeProposal DB-backed tests", () => {
 });
 
 describe("Story 7.5 expireTripChangeProposal DB-backed tests", () => {
-  beforeAll(async () => {
-    await ensureSystemTripPlanningActor();
-  });
-
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
   });
 
   test("expires a pending proposal with the system-trip-planning actor: one expire history + audit row, no plan mutation", async () => {
-    await ensureSystemTripPlanningActor();
     await createTestUser("expire-user-1");
     await testDb.insert(tripProjects).values({ id: "expire-project-1", userId: "expire-user-1", title: "Huế", aggregateVersion: 1 });
     await testDb.insert(tripPlanItems).values({ id: "expire-leg-1", tripProjectId: "expire-project-1", userId: "expire-user-1", kind: "leg", type: "transport", state: "planned", label: "Chạy xe", ordinal: 0, version: 1 });
     vi.resetModules();
     vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "expire-user-1", email: "expire-user-1@example.com" }) }));
     const { persistAiTripChangeProposalDraft, expireTripChangeProposal } = await import("@/features/chat-trips/trip-change-proposals");
-    // E7R2-F4: persist rejects a past-date expiry. Persist a near-future
-    // expiry (1 ms ahead) that has elapsed by the time expire runs, then
-    // expire with an explicit now past the persisted expiry.
-    const futureExpiry = new Date(Date.now() + 1);
+    const futureExpiry = new Date(Date.now() + 60_000);
     const persisted = await persistAiTripChangeProposalDraft({
       tripProjectId: "expire-project-1",
       expectedAggregateVersion: 1,
@@ -852,11 +835,10 @@ describe("Story 7.5 expireTripChangeProposal DB-backed tests", () => {
 
     const expireAudits = await testDb.select().from(auditEvents).where(and(eq(auditEvents.operation, "expire"), eq(auditEvents.targetId, persisted.proposal.id)));
     expect(expireAudits).toHaveLength(1);
-    expect(expireAudits[0]).toMatchObject({ actorClass: "user", actorSystem: null, actorUserId: "system-trip-planning" });
+    expect(expireAudits[0]).toMatchObject({ actorClass: "system", actorSystem: "system-trip-planning", actorUserId: null, actorEmail: null });
   });
 
   test("idempotent expire on an already-expired proposal: no second history row", async () => {
-    await ensureSystemTripPlanningActor();
     await createTestUser("expire-user-2");
     await testDb.insert(tripProjects).values({ id: "expire-project-2", userId: "expire-user-2", title: "Huế", aggregateVersion: 1 });
     await testDb.insert(tripPlanItems).values({ id: "expire-leg-2", tripProjectId: "expire-project-2", userId: "expire-user-2", kind: "leg", type: "transport", state: "planned", label: "Chạy xe", ordinal: 0, version: 1 });
@@ -871,11 +853,13 @@ describe("Story 7.5 expireTripChangeProposal DB-backed tests", () => {
       expectedAggregateVersion: 1,
       operations: [{ kind: "change-item-state", itemId: "expire-leg-2", state: "confirmed" }],
       rationale: "Hết hạn.",
-      expiresAt: new Date(Date.now() + 1),
+      expiresAt: new Date(Date.now() + 60_000),
     });
     if (!persisted.success) throw new Error("persist failed");
-    // Yield so the near-future expiry elapses before expire reads it.
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await testDb
+      .update(tripChangeProposals)
+      .set({ expiresAt: new Date("2026-01-01T00:00:00.000Z") })
+      .where(eq(tripChangeProposals.id, persisted.proposal.id));
 
     await expireTripChangeProposal({ tripProjectId: "expire-project-2", proposalId: persisted.proposal.id });
     await expireTripChangeProposal({ tripProjectId: "expire-project-2", proposalId: persisted.proposal.id });
@@ -885,7 +869,6 @@ describe("Story 7.5 expireTripChangeProposal DB-backed tests", () => {
   });
 
   test("expire returns not_found for a missing proposal without leaking existence (system command, no user auth)", async () => {
-    await ensureSystemTripPlanningActor();
     await createTestUser("expire-attacker");
     await testDb.insert(tripProjects).values({ id: "expire-attacker-project", userId: "expire-attacker", title: "Riêng", aggregateVersion: 1 });
     const { expireTripChangeProposal } = await import("@/features/chat-trips/trip-change-proposals");
@@ -896,20 +879,35 @@ describe("Story 7.5 expireTripChangeProposal DB-backed tests", () => {
     const result = await expireTripChangeProposal({ tripProjectId: "expire-attacker-project", proposalId: "nonexistent-proposal" });
     expect(result).toEqual({ success: false, reason: "not_found" });
   });
+
+  test("leaves future and non-expiring pending proposals unchanged without terminal records", async () => {
+    await createTestUser("expire-user-3");
+    await testDb.insert(tripProjects).values({ id: "expire-project-3", userId: "expire-user-3", title: "Huế", aggregateVersion: 1 });
+    await testDb.insert(tripChangeProposals).values([
+      { id: "expire-future", tripProjectId: "expire-project-3", userId: "expire-user-3", creatorClass: "ai_orchestration", status: "pending", rationale: "Tương lai", operations: [{ kind: "change-item-state", itemId: "missing", state: "confirmed" }], expectedAggregateVersion: 1, expiresAt: new Date("2026-12-01T00:00:00.000Z") },
+      { id: "expire-none", tripProjectId: "expire-project-3", userId: "expire-user-3", creatorClass: "ai_orchestration", status: "pending", rationale: "Không hạn", operations: [{ kind: "change-item-state", itemId: "missing", state: "confirmed" }], expectedAggregateVersion: 1, expiresAt: null },
+    ]);
+    const { expireTripChangeProposal } = await import("@/features/chat-trips/trip-change-proposals");
+    const now = new Date("2026-07-25T00:00:00.000Z");
+
+    for (const proposalId of ["expire-future", "expire-none"]) {
+      const result = await expireTripChangeProposal({ tripProjectId: "expire-project-3", proposalId, now });
+      expect(result.success).toBe(true);
+      if (result.success) expect(result.proposal.status).toBe("pending");
+    }
+
+    await expect(testDb.select().from(tripPlanChangeHistory).where(eq(tripPlanChangeHistory.tripProjectId, "expire-project-3"))).resolves.toHaveLength(0);
+    await expect(testDb.select().from(auditEvents).where(eq(auditEvents.targetType, "trip_change_proposal"))).resolves.toHaveLength(0);
+  });
 });
 
 describe("Story 7.5 expire-on-read and plan history read", () => {
-  beforeAll(async () => {
-    await ensureSystemTripPlanningActor();
-  });
-
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
   });
 
   test("listPendingProposalsForTripProject expires elapsed pending proposals before returning so they drop out of the pending list", async () => {
-    await ensureSystemTripPlanningActor();
     await createTestUser("expire-read-user-1");
     await testDb.insert(tripProjects).values({ id: "expire-read-project-1", userId: "expire-read-user-1", title: "Huế", aggregateVersion: 1 });
     await testDb.insert(tripPlanItems).values({ id: "expire-read-leg-1", tripProjectId: "expire-read-project-1", userId: "expire-read-user-1", kind: "leg", type: "transport", state: "planned", label: "Chạy xe", ordinal: 0, version: 1 });
@@ -1103,12 +1101,16 @@ describe("Story 7.5 applyApprovedTripChange pure unit tests (mocked helpers)", (
     }));
     vi.doMock("@/db/client", () => ({
       getDb: () => ({
+        select: tx.select,
         transaction: async (callback: (t: MockTransaction) => Promise<unknown>) => callback(tx),
       }),
     }));
     vi.doMock("@/features/chat-trips/trip-projects", () => helperMocks);
     vi.doMock("@/features/audit/events", () => ({
       recordAuditEvent: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock("@/features/audit/history", () => ({
+      recordPlanHistory: vi.fn().mockResolvedValue(undefined),
     }));
     vi.doMock("@/features/chat-trips/trip-home-labels", () => ({
       tripPlanItemStateLabels: { idea: "Ý tưởng", planned: "Đã lên kế hoạch", confirmed: "Đã chốt", backup: "Dự phòng" },
@@ -1223,6 +1225,7 @@ describe("Story 7.5 applyApprovedTripChange pure unit tests (mocked helpers)", (
 
     const result = await applyApprovedTripChange({ tripProjectId: "project-1", proposalId: "prop-1" });
     expect(result).toEqual({ success: false, reason: "expired" });
+    expect(helpers.createTripPlanItemInTransaction).not.toHaveBeenCalled();
   });
 
   test("(e) cross-owner (missing project) returns not_found", async () => {
@@ -1372,6 +1375,25 @@ describe("Story 7.5 applyApprovedTripChange pure unit tests (mocked helpers)", (
     expect(secondValues.plannedAt).toEqual(new Date(newPlannedAt));
   });
 });
+
+describe("Story 8.4 Audit history boundary", () => {
+  test("Chat/Trips has no direct trip plan history insert", () => {
+    const files = listTypeScriptFiles("src/features/chat-trips");
+    for (const file of files) {
+      const source = readFileSync(file, "utf8");
+      expect(source).not.toMatch(/(?:transaction|\w+)\.insert\(tripPlanChangeHistory\)/);
+    }
+    expect(readFileSync("src/features/chat-trips/trip-change-proposals.ts", "utf8")).toContain("recordPlanHistory(");
+  });
+});
+
+function listTypeScriptFiles(directory: string): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) return listTypeScriptFiles(path);
+    return entry.isFile() && /\.tsx?$/.test(entry.name) ? [path] : [];
+  });
+}
 
 // Q1: expire-on-read is a best-effort side effect; a transient DB error during
 // expire must NOT fail the user's pending-proposals read. P11 made

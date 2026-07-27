@@ -22,26 +22,6 @@ async function createTestUser(userId: string) {
   await testDb.insert(users).values({ id: userId, email: `${userId}@example.com` });
 }
 
-async function ensureSystemTripPlanningActor() {
-  const [existing] = await testDb
-    .select({ id: users.id })
-    .from(users)
-    .where(eq(users.id, "system-trip-planning"))
-    .limit(1);
-  if (!existing) {
-    try {
-      await testDb
-        .insert(users)
-        .values({ id: "system-trip-planning", email: "system-trip-planning@xuyenviet.invalid" });
-    } catch (error) {
-      console.error(
-        "ensureSystemTripPlanningActor insert failed",
-        error instanceof Error ? error.message : String(error),
-      );
-    }
-  }
-}
-
 async function loadModuleAs(userId: string, email: string) {
   vi.resetModules();
   vi.doMock("@/server/auth", () => ({
@@ -557,9 +537,8 @@ describe("Story 7.6 AC1 cross-cutting trip planning safety", () => {
 
   // Task 5: Proposal expiry, concurrent applies, and project-deletion cascade.
   describe("Task 5 — concurrent terminal actions and deletion cascade", () => {
-    test("5.1 expired proposal apply returns expired, writes no history row, mutates no plan state", async () => {
+    test("5.1 expired proposal apply terminalizes once with system attribution and mutates no plan state", async () => {
       await createTestUser("safety-exp-user");
-      await ensureSystemTripPlanningActor();
       await testDb.insert(tripProjects).values({
         id: "safety-exp-p",
         userId: "safety-exp-user",
@@ -588,14 +567,10 @@ describe("Story 7.6 AC1 cross-cutting trip planning safety", () => {
         expectedItemVersions: { "safety-exp-leg": 1 },
         operations: [{ kind: "change-item-state", itemId: "safety-exp-leg", state: "confirmed" }],
         rationale: "Xác nhận",
-        // E7R2-F4: persist rejects a past-date expiry. Persist a near-future
-        // expiry (1 ms ahead) that elapses before apply runs, modeling a
-        // proposal that aged past expiry.
-        expiresAt: new Date(Date.now() + 1),
+        expiresAt: new Date(Date.now() + 60_000),
       });
       if (!persisted.success) throw new Error("persist failed");
-      // Yield so the near-future expiry elapses before apply reads it.
-      await new Promise((resolve) => setTimeout(resolve, 5));
+      await testDb.update(tripChangeProposals).set({ expiresAt: new Date("2026-01-01T00:00:00.000Z") }).where(eq(tripChangeProposals.id, persisted.proposal.id));
 
       const { applyApprovedTripChange } = await loadModuleAs(
         "safety-exp-user",
@@ -607,12 +582,16 @@ describe("Story 7.6 AC1 cross-cutting trip planning safety", () => {
       });
       expect(result).toEqual({ success: false, reason: "expired" });
 
-      // No history row written.
       const historyRows = await testDb
         .select()
         .from(tripPlanChangeHistory)
         .where(eq(tripPlanChangeHistory.proposalId, persisted.proposal.id));
-      expect(historyRows).toHaveLength(0);
+      expect(historyRows).toHaveLength(1);
+      expect(historyRows[0]).toMatchObject({ operationClass: "expire", actorClass: "system", actorSystem: "system-trip-planning", actorUserId: null });
+      const audits = await testDb.select().from(auditEvents).where(eq(auditEvents.targetId, persisted.proposal.id));
+      expect(audits.filter((audit) => audit.operation === "expire")).toEqual([
+        expect.objectContaining({ actorClass: "system", actorSystem: "system-trip-planning", actorUserId: null, actorEmail: null }),
+      ]);
 
       // Plan state unchanged.
       const [item] = await testDb
@@ -621,6 +600,8 @@ describe("Story 7.6 AC1 cross-cutting trip planning safety", () => {
         .where(eq(tripPlanItems.id, "safety-exp-leg"));
       expect(item.state).toBe("planned");
       expect(item.version).toBe(1);
+      const [project] = await testDb.select().from(tripProjects).where(eq(tripProjects.id, "safety-exp-p"));
+      expect(project.aggregateVersion).toBe(1);
     });
 
     test("5.2 two concurrent applyApprovedTripChange calls — exactly one wins, the other returns not_found", async () => {
@@ -1276,7 +1257,6 @@ describe("Story 7.6 AC1 cross-cutting trip planning safety", () => {
   describe("Task 5.3b — worker vs. read expire idempotency", () => {
     test("a worker expiring while a read does expire-on-read produces exactly one expire history row", async () => {
       await createTestUser("safety-wr-user");
-      await ensureSystemTripPlanningActor();
       await testDb.insert(tripProjects).values({
         id: "safety-wr-p",
         userId: "safety-wr-user",
@@ -1350,6 +1330,11 @@ describe("Story 7.6 AC1 cross-cutting trip planning safety", () => {
       expect(expireHistory).toHaveLength(1);
       expect(expireHistory[0].operationClass).toBe("expire");
       expect(expireHistory[0].actorClass).toBe("system");
+      expect(expireHistory[0]).toMatchObject({ actorSystem: "system-trip-planning", actorUserId: null });
+      const expireAudits = await testDb.select().from(auditEvents).where(eq(auditEvents.targetId, proposalId));
+      expect(expireAudits.filter((audit) => audit.operation === "expire")).toEqual([
+        expect.objectContaining({ actorClass: "system", actorSystem: "system-trip-planning", actorUserId: null, actorEmail: null }),
+      ]);
     });
   });
 
