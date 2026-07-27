@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { asc, eq } from "drizzle-orm";
 
-import { assistantResponseProvenance, assistantRetrievalDecisions, chatContext, conversations, knowledgeCards, knowledgeCardSources, messages, sources, tripProjects, users, webSearchResults, type ChatContextField, type ChatContextScope } from "@/db/schema";
+import { aiUsageEvents, assistantResponseProvenance, assistantRetrievalDecisions, chatContext, conversations, knowledgeCards, knowledgeCardSources, messages, sources, tripProjects, users, webSearchResults, type ChatContextField, type ChatContextScope } from "@/db/schema";
 import type { KnowledgeSearchResult } from "@/features/knowledge/search";
 import type { ContextPrioritySourceBundle } from "@/features/retrieval/source-bundle";
 
@@ -1188,7 +1188,8 @@ describe("answer context assembly", () => {
 
   test("source bundle propagates retrieval exclusion policy into production fallback decisions", async () => {
     await createTestUser("user-1");
-    const { conversation, message } = await createConversationWithUserMessage({ userId: "user-1" });
+    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế" }).returning({ id: tripProjects.id });
+    const { conversation, message } = await createConversationWithUserMessage({ userId: "user-1", tripProjectId: project.id });
     const searchWebForSourceBundle = vi.fn().mockResolvedValue({ ok: false, code: "low_quality_results", attempt: { provider: "tavily", mechanism: "search", latencyMs: 1, status: "failure", errorCode: "low_quality_results" } });
     vi.doMock("@/features/retrieval/approved-knowledge", () => ({
       loadApprovedKnowledgeForAiAsk: vi.fn().mockResolvedValue({ results: [], candidateCount: 0, policySummary: { excludedPolicyCounts: { conflict: 1, verificationRequired: 1, other: 0 }, excludedReasonCodes: ["verification_failed"] } }),
@@ -1197,12 +1198,14 @@ describe("answer context assembly", () => {
     vi.doMock("@/features/retrieval/web-search", () => ({ searchWebForSourceBundle, captureWebSearchResults: vi.fn() }));
     const { assembleContextPrioritySourceBundle, buildSourceBundlePromptSection } = await import("@/features/retrieval/source-bundle");
 
-    const bundle = await assembleContextPrioritySourceBundle({ userId: "user-1", conversationId: conversation.id, userMessageId: message.id, question: "Có nên dừng ở Huế không?" });
+    const bundle = await assembleContextPrioritySourceBundle({ userId: "user-1", conversationId: conversation.id, tripProjectId: project.id, userMessageId: message.id, question: "Có nên dừng ở Huế không?" });
+    const [usage] = await testDb.select({ tripProjectId: aiUsageEvents.tripProjectId }).from(aiUsageEvents);
 
     expect(bundle.retrievalDecision.webSearchTriggerReasons).toEqual(expect.arrayContaining(["excluded_conflict_candidate", "excluded_verification_required_candidate"]));
     expect(bundle.retrievalDecision.knowledgePolicySummary).toMatchObject({ excludedPolicyCounts: { conflict: 1, verificationRequired: 1 } });
     expect(buildSourceBundlePromptSection(bundle)).not.toContain("verification_failed");
     expect(searchWebForSourceBundle).toHaveBeenCalled();
+    expect(usage).toEqual({ tripProjectId: project.id });
     vi.doUnmock("@/features/retrieval/approved-knowledge");
     vi.doUnmock("@/features/retrieval/web-search");
     vi.resetModules();

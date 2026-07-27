@@ -302,7 +302,7 @@ export const auditEvents = pgTable(
     check("audit_events_actor_class_check", sql`${auditEvent.actorClass} in ('user', 'system')`),
     check(
       "audit_events_actor_shape_check",
-      sql`(${auditEvent.actorClass} = 'user' and ${auditEvent.actorUserId} is not null and length(btrim(${auditEvent.actorEmail})) > 0 and ${auditEvent.actorSystem} is null) or (${auditEvent.actorClass} = 'system' and ${auditEvent.actorUserId} is null and ${auditEvent.actorEmail} is null and length(btrim(${auditEvent.actorSystem})) > 0)`,
+      sql`(${auditEvent.actorClass} = 'user' and ${auditEvent.actorUserId} is not null and ${auditEvent.actorEmail} is not null and length(btrim(${auditEvent.actorEmail})) > 0 and ${auditEvent.actorSystem} is null) or (${auditEvent.actorClass} = 'system' and ${auditEvent.actorUserId} is null and ${auditEvent.actorEmail} is null and ${auditEvent.actorSystem} is not null and length(btrim(${auditEvent.actorSystem})) > 0)`,
     ),
   ],
 );
@@ -805,7 +805,7 @@ export const tripPlanChangeHistory = pgTable(
     check("trip_plan_change_history_actor_class_check", sql`${row.actorClass} in ('user', 'system')`),
     check(
       "trip_plan_change_history_actor_shape_check",
-      sql`(${row.actorClass} = 'user' and ${row.actorUserId} is not null and ${row.actorSystem} is null) or (${row.actorClass} = 'system' and ${row.actorUserId} is null and length(btrim(${row.actorSystem})) > 0)`,
+      sql`(${row.actorClass} = 'user' and ${row.actorUserId} is not null and ${row.actorSystem} is null) or (${row.actorClass} = 'system' and ${row.actorUserId} is null and ${row.actorSystem} is not null and length(btrim(${row.actorSystem})) > 0)`,
     ),
     check("trip_plan_change_history_operation_class_check", sql`${row.operationClass} in ('apply', 'dismiss', 'expire')`),
     check("trip_plan_change_history_affected_references_check", sql`jsonb_typeof(${row.affectedItemReferences}) = 'array'`),

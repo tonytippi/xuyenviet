@@ -131,7 +131,7 @@ export async function assembleContextPrioritySourceBundle({
     warnings,
     policySummary: knowledgeResult.status === "fulfilled" ? knowledgeResult.value.policySummary : undefined,
   });
-  const web = await loadTriggeredWebSearch({ userId, conversationId, userMessageId, webSearchUsageContext, question, retrievalDecision, warnings, abortSignal });
+  const web = await loadTriggeredWebSearch({ userId, conversationId, tripProjectId, userMessageId, webSearchUsageContext, question, retrievalDecision, warnings, abortSignal });
 
   return {
     chatTripContext,
@@ -147,11 +147,13 @@ type WebSearchUsageContext = {
   userId: string;
   conversationId: string;
   userMessageId: string;
+  tripProjectId?: string | null;
 };
 
 async function loadTriggeredWebSearch({
   userId,
   conversationId,
+  tripProjectId,
   userMessageId,
   webSearchUsageContext,
   question,
@@ -161,6 +163,7 @@ async function loadTriggeredWebSearch({
 }: {
   userId: string;
   conversationId: string;
+  tripProjectId?: string;
   userMessageId?: string;
   webSearchUsageContext?: WebSearchUsageContext;
   question: string;
@@ -197,7 +200,7 @@ async function loadTriggeredWebSearch({
     return [];
   }
 
-  await recordWebSearchUsage({ usageContext: webSearchUsageContext ?? { userId, conversationId, userMessageId }, searchResult });
+  await recordWebSearchUsage({ usageContext: webSearchUsageContext ?? { userId, conversationId, userMessageId, tripProjectId }, searchResult });
 
   if (!searchResult.ok) {
     warnings.push(searchResult.code === "low_quality_results" ? "web_search_low_quality" : "web_search_load_failed");
@@ -237,6 +240,7 @@ async function recordWebSearchUsage({
     await writeAiUsageEvent(getDb(), {
       initiatedByUserId: usageContext.userId,
       executorSystem: "system-ai-orchestration",
+      tripProjectId: usageContext.tripProjectId ?? null,
       conversationId: usageContext.conversationId,
       userMessageId: usageContext.userMessageId,
       purpose: aiUsagePurposes.webSearchFallback,
