@@ -4,7 +4,7 @@ baseline_commit: fddf146
 
 # Story 8.6: Verify Actor Isolation and Attribution End to End
 
-Status: review
+Status: done
 
 ## Story
 
@@ -183,3 +183,4 @@ gpt-5.6-terra
 - 2026-07-27: Repaired only the final substantial-risk Story 8.6 review findings. Migration 0072 now explicitly stops an upgraded database containing historic reserved system-user IDs and requires an operator-confirmed reset/reseed; it performs no cleanup/backfill and provides no durable-data upgrade support. An isolated upgrade-state regression proves no constraint is installed on the blocked path and a cleaned disposable state can apply it. The Audit AST guard now resolves string-literal namespace element access and aliases; direct and aliased bypass regressions are rejected. `DATABASE_URL_TEST="$DATABASE_URL_TEST" pnpm test:run --no-file-parallelism tests/story-8-6-actor-isolation.test.ts` passed (6 tests) and `pnpm typecheck` passed. No development reset, Story 8.5 change, or commit was performed. Status returned to `review` pending follow-up review.
 - 2026-07-27: Repaired the final Story 8.6 direct-write review finding. The Audit AST guard now resolves a local immutable string literal when it is used as a computed schema namespace key, so `const key = "auditEvents"; const events = schema[key]; db.insert(events)` is rejected. The regression is in the focused Story 8.6 suite; no generalized dataflow resolution was added. With `.env` loaded, `DATABASE_URL_TEST="$DATABASE_URL_TEST" pnpm test:run --no-file-parallelism tests/story-8-6-actor-isolation.test.ts` passed (1 file, 6 tests), and `pnpm typecheck` passed. No development reset, Story 8.5 change, or commit was performed. Status remains `review` pending follow-up review.
 - 2026-07-27: Repaired the lexical scope-shadowing bypass in Story 8.6 computed schema-key enforcement. The AST guard now resolves the nearest preceding lexical `const identifier = "string"` from enclosing block/source scopes at each identifier reference, without broad dataflow analysis. The regression preserves an outer protected key after an inner nonprotected shadow. Focused `DATABASE_URL_TEST` verification, typecheck, and diff whitespace validation were run; no development reset, Story 8.5 change, or commit was performed. Status remains `review`.
+- 2026-07-27: Finalized after the bounded Story 8.6 review/repair cycle through `aa79345`. The migration preflight and computed-key Audit guard were reviewed after their repairs, including local alias and lexical-shadowing paths. The focused `DATABASE_URL_TEST` suite passed (1 file, 6 tests), `pnpm typecheck` passed, and `git diff --check` passed. No development database reset or Story 8.5 change was performed.
