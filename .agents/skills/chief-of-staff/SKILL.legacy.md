@@ -1,0 +1,564 @@
+---
+name: chief-of-staff
+description: "Run the BMAD backlog autonomously through fresh Herdr panes: create and validate each story, develop, commit, review, and perform an epic review. Use only when the user asks to run, automate, or orchestrate the BMAD backlog with Herdr."
+---
+
+# Chief of Staff
+
+## Purpose
+
+Orchestrate the active BMAD implementation backlog from `sprint-status.yaml`.
+Every BMAD action runs in a newly split Herdr pane with a newly started OpenCode
+agent, so no worker inherits a previous worker's conversational context.
+
+The source of truth is `{implementation_artifacts}/sprint-status.yaml`, as
+resolved from `_bmad/bmm/config.yaml`. Never infer completion from terminal
+text alone. A story is complete only when its sprint status is `done`; an epic
+is complete only when its sprint status is `done` and every associated story is
+`done`.
+
+## Guardrails
+
+- Requires a clean tracked worktree before starting. Stop and report the exact
+  `git status --short` output if it is not clean. Do not absorb or commit work
+  that predates the run.
+- Requires `HERDR_ENV=1`. Do not control Herdr from outside a Herdr pane.
+- Confirm the installed CLI syntax with `herdr --help`, `herdr pane`, and
+  `herdr agent` before issuing its first mutating Herdr command.
+- Use `--current`, explicit returned pane IDs, `--cwd "$PWD"`, and
+  `--no-focus`. Never target the human's focused pane implicitly.
+- Start each worker with `herdr agent start <name> --kind opencode --pane
+  <pane-id>`. Worker names must be unique and match Herdr's naming rules.
+- Submit work with `herdr agent prompt <name> "..."`, then wait explicitly for
+  `idle`, `done`, `blocked`, or `unknown`. A worker that has printed its final
+  report may become `idle` rather than `done`. `idle` is a progress-check
+  signal, never evidence that a stage is complete: a worker can become idle
+  while its own review subagents are still running. Before treating any wait
+  result as success, read and retain the worker's terminal output with `herdr
+  agent read <name> --source recent-unwrapped --lines 160`. If the output does
+  not yet contain the stage's required completed and synchronized result,
+  continue waiting for that same worker; do not select the next action or ask
+  it to reprint a final report merely because it is idle.
+- Every mutating worker must read, synchronize, and report the target entry in
+  `sprint-status.yaml` before it finishes. The coordinator is read-only, but
+  must use the most recent worker output as well as the file to select the next
+  action. Never make a decision from the sprint file alone.
+- Operate autonomously by default. A `blocked`, `unknown`, timeout, failed
+  command, missing artifact, failed test, validation failure, or unexpected
+  status transition is a recovery signal first, not an automatic stop. Read the
+  worker output, inspect the relevant artifacts and current state, and use the
+  bounded Autonomous Recovery procedure below before asking the user. Actionable
+  review findings enter the bounded repair loops described below. Status
+  Finalization is not a review: a potential defect noticed by that worker is
+  outside its authority and is not a stop condition. Only its objective
+  finalization checks may block it.
+- Do not close panes, tabs, workspaces, or agents created by another person or
+  another run. Close only pane IDs recorded by this run.
+- Retain no more than two child panes from this run at any time: the current
+  worker and, when useful, its immediately preceding completed worker for
+  audit. A completed pane is not a future workflow dependency and must not be
+  retained until a story or epic finishes.
+- After each story's Status Commit succeeds, compact the coordinator's own
+  context before selecting the next story or epic action. First retain the
+  completed story key, its implementation and status commit SHAs, the verified
+  `done` status, the current epic, and any active recovery or review state in a
+  concise handoff record. Then invoke the environment's context-compaction
+  command (for OpenCode, `/compact`) exactly once. Never compact before the
+  status commit has left the worktree clean, and never ask a worker to compact:
+  workers are already fresh per stage.
+- Use no parallel workers against this checkout. The workflow is strictly
+  sequential because each stage changes shared files and sprint state.
+- Do not use `bmad-dev-auto` here. It is intentionally one-story scoped and
+  has its own loop; this orchestrator must own the backlog-level lifecycle and
+  pane boundaries.
+
+## Autonomous Recovery And Escalation
+
+The coordinator must solve routine workflow failures before escalating. It may
+inspect worker output, the target story, sprint status, git state, logs, and
+relevant code; start one fresh, narrowly scoped recovery worker; rerun a failed
+read-only command or verification; repair an in-scope story-document or code
+defect; and retry the current stage when the prior worker did not complete it.
+It must preserve the existing story target, respect all stage boundaries, and
+independently verify the recovery result before continuing.
+
+For each failed stage, make at most one autonomous recovery attempt beyond the
+explicit report-reprint, report-correction, and review-repair loops defined in
+this skill. The recovery worker must receive the exact failure evidence and a
+prompt to fix only that failure. It must not begin another story, widen scope,
+fabricate a report, infer missing approval, alter unrelated work, or bypass a
+required verification. If the retry succeeds, continue normally. If it fails,
+is contradictory, or reveals a different issue, reassess it once; escalate only
+when no further safe, bounded action remains.
+
+Ask the user and stop only when an important decision or information is truly
+required: approval for an irreversible or destructive operation; credentials,
+access, or an external dependency the coordinator cannot obtain; a product,
+security, or acceptance-criteria ambiguity requiring an owner decision;
+conflicting authoritative artifacts; unrelated pre-existing work that cannot be
+cleanly separated; or an exhausted bounded recovery. State the evidence, the
+safe options, the recommended option, and the exact decision or information
+needed. Do not stop merely to report a routine failure that can be diagnosed or
+repaired safely.
+
+## Inputs And Statuses
+
+Resolve BMAD configuration first:
+
+```bash
+uv run --python 3.11 "$_BmadRoot/scripts/resolve_config.py" --project-root "$PWD"
+```
+
+Set `_BmadRoot="$PWD/_bmad"`. From the returned configuration, obtain
+`implementation_artifacts`, then use
+`$implementation_artifacts/sprint-status.yaml`.
+
+Interpret the sprint map using the installed `bmad-sprint-status` rules:
+
+- Story statuses: `backlog`, `ready-for-dev`, `in-progress`, `review`, `done`.
+- Epic statuses: `backlog`, `in-progress`, `done`.
+- Legacy `drafted` means `ready-for-dev`; legacy `contexted` means
+  `in-progress`.
+- Sort stories by numeric epic then numeric story. Do not use lexicographic
+  sorting (`10-1` must follow `9-9`).
+
+Retain the most recent completed worker's complete final report in an in-memory
+`last_worker_result` record, together with its target story or epic, expected
+final status, and report provenance (`herdr-read` or `captured-handoff`). A
+`captured-handoff` is the verbatim complete report block captured from that
+worker and supplied to this coordinator after its terminal history is no longer
+readable; it is report transport, not a paraphrase or a reconstructed report.
+On the first iteration, this record is absent. After that, a missing,
+malformed, blocked, or contradictory result is a stop condition.
+
+At the beginning of every loop iteration, start a new coordinator pane and
+agent. Give it `last_worker_result`, then ask it to use `bmad-sprint-status` in
+data mode, inspect the full sprint file, compare both sources, and return
+exactly one of:
+
+`create <story-key>`, `develop <story-path>`, `review <story-path>`,
+`epic-review <epic-number>`, `complete`, or `blocked <reason>`.
+
+Do not let this coordinator modify code, story documents, or sprint status.
+Its job is to verify the prior action and select the next safe action. It must
+return `blocked <reason>` when the worker output does not explicitly confirm
+the expected final status or conflicts with `sprint-status.yaml`; it must never
+repeat an action merely because the file was not synchronized. An accepted
+review result with actionable findings is not eligible for coordinator
+selection: run its bounded repair loop first.
+
+Give the coordinator the complete final report block, not the result of
+`herdr agent prompt --wait` or a paraphrase. It must parse the final delimited
+block by its field labels, accepting wrapped `SUMMARY` and `BLOCKER` values.
+Prefer a block read from the worker with Herdr. If the invoking coordinator
+already retains a verbatim complete block from that same worker, pass it as a
+`captured-handoff` and parse it before attempting report recovery. A valid
+captured-handoff is sufficient report transport; do not reject it merely
+because a later `herdr agent read` does not contain it, and do not ask the
+worker to reprint it.
+
+Only when neither a Herdr read nor a captured-handoff contains a valid block,
+re-read the same worker once with `herdr agent read <name> --source
+recent-unwrapped --lines 300`. If that retry is still absent or malformed, send
+the same worker one bounded, non-mutating recovery prompt: `Do not inspect,
+edit, test, commit, or synchronize anything. Reprint only your final complete
+--- CHIEF-OF-STAFF-REPORT --- block now.` Wait for it, then re-read the worker
+once with `herdr agent read <name> --source recent-unwrapped --lines 160`.
+Treat the recovery response only as a report transport retry, not a new stage
+or worker result. Only after this final retry may a missing or malformed report
+become a stop condition. Never synthesize report fields from a commit, `git
+status`, or the sprint file.
+
+## Herdr Worker Procedure
+
+For every stage below, create a brand-new sibling pane. Pick `right` for a
+wide caller pane and `down` for a narrow/tall caller pane, based on
+`herdr pane layout --pane "$HERDR_PANE_ID"`. Example:
+
+```bash
+herdr pane split --current --direction right --cwd "$PWD" --no-focus
+herdr agent start <unique-name> --kind opencode --pane <returned-pane-id>
+herdr agent prompt <unique-name> "<stage prompt>"
+herdr agent wait <unique-name> --until idle --until done --until blocked --until unknown --timeout 1800000
+herdr agent read <unique-name> --source recent-unwrapped --lines 160
+```
+
+Take `<returned-pane-id>` only from the JSON returned by `herdr pane split`.
+If the explicit wait reaches `idle` or `done`, immediately read and parse the
+worker's terminal output. On `idle`, require the required completed and
+synchronized stage result before considering the stage complete. If it is
+absent, the output says a review layer is still running, or a review result has
+not yet been synchronized, continue waiting for the same worker and read its
+output again. Do not prompt it to reprint a final report, create another worker,
+or select another action while that result is pending. This is required for
+`bmad-code-review`, which can run Blind Hunter, Edge Case Hunter, and Acceptance
+Auditor subagents in parallel. If it reaches `blocked` or `unknown`, or times
+out, inspect the worker with `herdr agent get <unique-name>` and read its
+terminal output before deciding whether it completed or needs recovery. A failed
+wait is a stop condition only when the final terminal report cannot be read and
+independently verified after the report retries and one applicable Autonomous
+Recovery attempt. If the worker reports `BLOCKED`, read its final report,
+diagnose the stated failure, and apply the Autonomous Recovery procedure before
+escalating.
+
+Every mutating worker prompt must require this final, machine-checkable report:
+
+```text
+--- CHIEF-OF-STAFF-REPORT ---
+RESULT: SUCCESS or BLOCKED
+TARGET: <story-key, absolute story path, or epic number>
+SPRINT STATUS: <target entry> = <final status>
+SPRINT STATUS SYNCHRONIZED: yes or no
+SUMMARY: <concise stage evidence, including tests, commit, or review outcome>
+BLOCKER: <none or reason>
+--- END-CHIEF-OF-STAFF-REPORT ---
+```
+
+The report must be the worker's last substantive terminal output when it is
+read directly from Herdr. A captured-handoff must be the verbatim complete block
+previously retained from that worker, but does not require the terminal history
+to remain available. Parse either transport semantically, not by exact
+presentation. Prefer the canonical delimiter block, but accept an
+understandable self-contained final report when its delimiters, hyphenation,
+whitespace, capitalization, line wrapping, or Markdown decoration vary. Locate
+labeled fields case-insensitively and normalize harmless spacing or punctuation
+around the labels. `SUMMARY` and `BLOCKER` values may continue on following
+wrapped lines until the next recognized label or the report end.
+
+Accept the report only when it unambiguously contains exactly one semantic value
+for each required field: `RESULT`, `TARGET`, `SPRINT STATUS`, `SPRINT STATUS
+SYNCHRONIZED`, `SUMMARY`, and `BLOCKER`. Treat synonymous boolean wording such
+as `true`, `yes`, or `synchronized` as affirmative only for `SPRINT STATUS
+SYNCHRONIZED`; normalize known status spelling variants before comparison. For
+`RESULT`, accept `SUCCESS` or an unambiguous affirmative completion statement,
+such as `Committed final Story 5.2 repair successfully.` Normalize either form
+to semantic success only when it contains no failure, block, error, incomplete,
+pending, cannot, or unresolved qualification. Do not infer a required field
+from surrounding terminal output, a commit, git state, or the sprint file.
+Reject a report only when its meaning is ambiguous, a required semantic field is
+absent or contradictory, or its result and independently verified sprint status
+do not meet the stage requirements. After reading a mutating worker's final
+output, accept it only when `RESULT` is semantically successful, `SPRINT STATUS
+SYNCHRONIZED` is affirmative, and the exact stage-appropriate final status is
+independently observed in `sprint-status.yaml`. When `SUMMARY` supplies a
+commit SHA or an absolute target path, independently verify that the commit or
+path exists before proceeding. A verification failure is a state-verification
+failure, not a missing-report failure; diagnose it through one narrowly scoped
+recovery worker before escalation.
+Save the normalized complete report as `last_worker_result` before creating
+another pane.
+A worker that cannot synchronize the expected status must return `BLOCKED`; do
+not repair or guess its status in the coordinator. Diagnose and recover through
+a properly scoped worker where possible; escalate only if that bounded recovery
+cannot synchronize an independently verified status.
+
+The Story Review and Epic Review stages have one narrow report-correction
+exception to the `RESULT: SUCCESS` rule. Apply it only when the final report
+says `RESULT: BLOCKED` but explicitly confirms the review completed, lists
+actionable findings, and reports the required synchronized repair status
+(`in-progress` for a story; the required preserved status for an epic).
+Independently confirm that status in `sprint-status.yaml`. This is a malformed
+review outcome, not a blocked review: send the same worker one non-mutating
+recovery prompt requiring it to reprint its final report with `RESULT: SUCCESS`,
+the same target, status, findings, and risk classification. It must not inspect,
+review, edit, test, commit, or synchronize anything during that retry. Read the
+corrected report using the standard 160-line and 300-line procedure, then
+continue the applicable bounded repair loop. If any condition is absent, the
+correction fails, or the status cannot be independently confirmed, it remains a
+stop condition.
+
+Maintain an in-memory rolling `audit_panes` ledger, ordered oldest to newest.
+It contains only child pane IDs created by this run, including coordinator
+panes. Never put the caller pane in this ledger.
+
+- Before splitting a new pane, if `audit_panes` already contains two pane IDs,
+  close and remove its oldest ID. This guarantees the new pane cannot raise the
+  retained child-pane count above two.
+- Add the returned pane ID to `audit_panes` immediately after the split. Once
+  its result has been independently verified, it is merely the newest audit
+  record; do not retain it because it belongs to a particular story or epic.
+- A stop condition leaves at most the blocking pane and its immediately
+  preceding audit pane open. All older panes must already have been closed.
+- Run `herdr pane close <pane-id>` one at a time. If a close fails because the
+  pane was already closed, remove it from the ledger and continue. For any
+  other close failure, stop and report it; do not create another pane.
+
+## Story Lifecycle
+
+Run the selected story through these stages in order. The text sent to each
+worker is intentionally explicit so it can load the relevant project skill.
+
+### 1. Create
+
+For `create <story-key>`, create a fresh pane and prompt:
+
+```text
+Use the bmad-create-story skill to create story <story-key>. Follow its workflow
+fully and non-interactively where the installed workflow permits. Work only on
+this target story. Do not develop code, commit, or begin another story. Finish
+only after the story file exists and you have synchronized sprint-status.yaml to
+mark this story ready-for-dev. End with the required machine-checkable report,
+including the absolute story-file path in SUMMARY.
+```
+
+After completion, independently re-read the full sprint file. Continue only
+when the target is `ready-for-dev` and its story file exists. Otherwise stop.
+
+### 2. Validate
+
+Create a new pane and prompt:
+
+```text
+Use bmad-create-story with its validate action for story <absolute-story-path>.
+Follow the validation workflow fully. Do not implement code, commit, or select
+another story. If validation identifies a repairable story-document issue,
+repair it and rerun validation in this same worker until it passes. Finish only
+when validation is successful and you have synchronized sprint-status.yaml to
+keep the target ready-for-dev. End with the required machine-checkable report.
+```
+
+Continue only on an explicit successful validation and a `ready-for-dev`
+target. Do not treat a warning or an unfinished validation report as a pass.
+
+### 3. Develop
+
+Create a new pane and prompt:
+
+```text
+Use bmad-dev-story to implement <absolute-story-path>. Follow the skill exactly,
+including all required tests and updates to the story record and sprint status.
+Do not commit. Do not start a different story. Finish only when all acceptance
+criteria and tasks are complete and you have synchronized sprint-status.yaml to
+place the target story in review. End with the required machine-checkable report
+and include tests run and changed files in SUMMARY.
+```
+
+Re-read sprint status and require the target to be `review`. If it remains
+`in-progress`, is missing, or the worker reports an incomplete task, stop.
+
+### 4. Commit
+
+Create a new pane and prompt:
+
+```text
+Act as the commit gate for completed story <story-key>. Inspect git status and
+the target story's File List and acceptance record. Verify the worktree contains
+only this story's intended changes, run the project's relevant verification if
+needed, then create one conventional, descriptive git commit for this story.
+Never amend, force, reset, stash, discard, or include unrelated changes. If the
+tree is already clean, verify whether the story's implementation is already
+committed and report the exact commit; otherwise stop as blocked. Report the
+commit SHA, subject, files committed, and any blocker. Before finishing,
+synchronize sprint-status.yaml and preserve this story in review; do not advance
+it to done. End with the required machine-checkable report and include the
+commit SHA in SUMMARY.
+```
+
+Require a clean `git status --short` and a non-empty commit SHA. If either check
+fails, stop before review.
+
+### 5. Story Review
+
+Create a new pane and prompt:
+
+```text
+Use bmad-code-review to review committed story <absolute-story-path> and its
+implementation. Follow the skill completely. Compare the current commit and
+story acceptance criteria. Do not edit code, commit, or start another story.
+Wait synchronously for every review subagent that bmad-code-review launches.
+Do not emit a completed result, synchronize sprint status, or finish this stage
+until all review layers have returned or have been explicitly recorded as failed,
+and their findings have been collected and triaged.
+The Chief of Staff has already selected this exact target and authorizes the
+mandatory pre-review checkpoint: answer `Y` and proceed with the adversarial
+review layers. Do not stop to request the same target confirmation from the
+human. This authorization applies only to this read-only review, not to editing,
+committing, status synchronization, or any other workflow stage.
+On approval, synchronize sprint-status.yaml to mark the story done. If there is
+an actionable finding, set its status to in-progress and synchronize it. A
+completed review returns `RESULT: SUCCESS` whether it is APPROVED or has
+findings; reserve `RESULT: BLOCKED` for a review that cannot finish. Include
+the review outcome and every finding with severity in SUMMARY.
+```
+
+If the review is approved, re-read sprint status and require the target to be
+`done`, then run the Status Commit stage and Coordinator Context Compaction.
+Keep the approved review pane only as the newest rolling audit pane; the next
+pane creation will evict the oldest pane if needed. Restart the coordinator loop
+in a new pane only after the status commit leaves a clean worktree and the
+coordinator context has been compacted.
+
+If the first review contains actionable findings, do not advance. Create a new
+fresh development pane and prompt it:
+
+```text
+Use bmad-agent-dev to fix only the supplied actionable findings for
+<absolute-story-path>. Do not begin another story or perform a code review.
+Run the relevant tests, update the story record, and synchronize
+sprint-status.yaml to set this story to review. Do not commit. End with the
+required machine-checkable report, including the findings fixed, tests run, and
+changed files in SUMMARY.
+```
+
+Use the accepted review report itself as the source for the supplied findings.
+Do not create a coordinator-selection pane, request a report reprint, or treat
+the review as blocked solely because the completed review worker's terminal
+history later becomes unavailable. First independently verify that the report's
+target status is `in-progress` in `sprint-status.yaml` and that any reported
+commit and story path exist in the current checkout. If that verification
+passes, start this repair worker immediately.
+
+After the repair report and sprint-status synchronization are verified, run the
+Commit stage and then repeat Story Review once.
+
+If the second review still contains actionable findings, classify whether it
+exposes substantial new risk. Substantial new risk means a high-severity
+finding, or a new systemic acceptance-criteria, security, data-integrity, or
+cross-feature failure that materially changes confidence in the repair. Ordinary
+remaining findings do not qualify. Record that classification in the review
+SUMMARY.
+
+If the second review does not expose substantial new risk, create one final
+fresh development pane and give it the same repair prompt. Require it to
+synchronize the story to `review`, then run the Commit stage and Status
+Finalization stage, followed by the Status Commit stage and Coordinator Context
+Compaction. Do not run a third story review.
+
+If the second review exposes substantial new risk, create a fresh development
+pane using the same repair prompt, require it to synchronize the story to
+`review`, and run the Commit stage. Then run one third and final Story Review
+using the normal review prompt. If that final review is approved, synchronize
+the story to `done` as usual and run the Status Commit stage and Coordinator
+Context Compaction. If it has
+actionable findings, create one final fresh development pane using the same
+repair prompt, run the Commit stage, then run Status Finalization and the Status
+Commit stage and Coordinator Context Compaction. Do not run a fourth story
+review. A blocked final-fix, commit, review, status-only, or status-commit worker
+remains a stop condition.
+
+### 6. Status Finalization
+
+This stage executes the bounded story-review policy after a final repair
+commit: either after a second review that did not expose substantial new risk,
+or after repairing findings from the permitted third review. It is
+administrative finalization, not an additional review or an opportunity to
+reopen the repair loop. Its only blocking conditions are an unverifiable
+supplied commit, a non-clean worktree, a missing story record, or an inability
+to synchronize the required records.
+
+Create a fresh pane and prompt:
+
+```text
+Finalize completed story <absolute-story-path> after its final repair commit.
+This is a status-only operation, not an additional code review. Do not inspect source
+code or diffs for correctness, evaluate acceptance criteria, discover or report
+new findings, run tests, edit implementation code, run a code review, or create
+a commit. Verify only that the supplied final repair commit exists and the
+worktree is clean, then update the story record to done and synchronize
+sprint-status.yaml to mark this story done. Do not leave the story in review or
+in-progress because of a potential issue noticed while performing these limited
+checks; the bounded repair loop is complete. Return BLOCKED only if the supplied
+commit cannot be verified, the worktree is not clean, the story record is
+missing, or the required done status cannot be synchronized. End with the
+required machine-checkable report including the verified commit SHA and final
+status in SUMMARY.
+```
+
+Continue only when the report is successful and both the story record and
+`sprint-status.yaml` independently show `done`.
+
+### 7. Status Commit
+
+Every transition of a story to `done` changes the story record and
+`sprint-status.yaml`. This stage commits those administrative artifacts before
+the coordinator may select another story or epic action. It runs after an
+approved Story Review and after Status Finalization; it does not run while the
+story remains `review` or `in-progress`.
+
+Create a fresh pane and prompt:
+
+```text
+Act as the status commit gate for completed story <story-key>. Inspect git
+status and verify that the only tracked changes are this story's record and
+sprint-status.yaml transition to done. Do not edit implementation code, run a
+review, alter acceptance decisions, or include unrelated changes. Create one
+conventional documentation/status commit for those changes. Never amend, force,
+reset, stash, discard, or include unrelated changes. If the tree is already
+clean, verify that this story's done transition is already committed and report
+the exact commit; otherwise stop as blocked. Require the story record and
+sprint-status.yaml to remain done, then end with the required machine-checkable
+report including the commit SHA and files committed in SUMMARY.
+```
+
+Require a clean `git status --short`, a non-empty status commit SHA, and both
+the story record and `sprint-status.yaml` independently showing `done` before
+the coordinator continues.
+
+### 8. Coordinator Context Compaction
+
+Run this coordinator-only step immediately after every successful Status Commit
+and before creating the next coordinator pane. It is not a worker stage and
+does not modify the checkout.
+
+Create a concise in-memory handoff record containing only:
+
+- completed story key;
+- implementation and status commit SHAs;
+- independently verified `done` status;
+- current epic number and whether it is eligible for epic review; and
+- any active bounded recovery or review-loop state.
+
+After the handoff record exists and `git status --short` is clean, invoke
+`/compact` in the coordinator's current OpenCode context exactly once. Resume
+by reading the retained handoff record, the most recent worker report, and the
+authoritative sprint status before selecting the next action. Do not compact
+during a story's create, development, commit, review, repair, finalization, or
+status-commit sequence, and do not compact when a stage is blocked.
+
+## Epic Completion Review
+
+After every completed story, inspect its epic. When every story whose key begins
+with `<epic-number>-` is `done`, and `epic-<epic-number>` is `done`, create one
+fresh pane and prompt:
+
+```text
+Use bmad-code-review for the completed Epic <epic-number>. Review the aggregate
+of all stories in the epic, their acceptance criteria, cross-story integration,
+and the commits that implement them. Do not edit code or commit. Report either
+APPROVED with no actionable epic-level findings, or actionable findings with
+affected story keys. Wait synchronously for every review subagent that
+`bmad-code-review` launches. Do not emit a completed result, synchronize sprint
+status, or finish this stage until all review layers have returned or have been
+explicitly recorded as failed, and their findings have been collected and
+triaged. The Chief of Staff has already selected this exact epic and authorizes
+the mandatory pre-review checkpoint: answer `Y` and proceed with the adversarial
+review layers. Do not stop to request the same target confirmation from the
+human. This authorization applies only to this read-only epic review, not to
+editing, committing, status synchronization, or any other workflow stage.
+Synchronize sprint-status.yaml before finishing: preserve
+`epic-<epic-number>` as done. End with the required machine-checkable report.
+```
+
+If the first epic review has actionable findings, create a fresh development
+pane for each affected story in numeric order. Prompt it to use `bmad-agent-dev`
+to fix only the assigned epic-review findings, run relevant tests, update the
+story record, and leave the story in `review` without committing. Run the Commit
+stage, Status Finalization stage, Status Commit stage, and Coordinator Context
+Compaction for each repaired story. Once every affected story is again `done`,
+repeat the epic review once.
+
+If the second epic review still has actionable findings, repeat that repair,
+commit, status finalization, and status commit sequence for its affected stories,
+then run Coordinator Context Compaction after each repaired story and preserve
+the epic and all stories as `done`. Do not run a third epic review.
+Any blocked worker, failed verification, incomplete status finalization, or
+status commit remains a stop condition.
+
+## Completion
+
+When the coordinator reports `complete`, independently verify that no story is
+in `backlog`, `ready-for-dev`, `in-progress`, or `review`, and that every epic
+is `done`. Report the list of committed story SHAs and completed epic reviews.
+After that verification, close every remaining pane in `audit_panes`, one at a
+time. Successful runs leave no child pane open; stopped or blocked runs leave
+at most two as the execution record.
