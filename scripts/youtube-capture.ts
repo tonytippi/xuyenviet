@@ -1,19 +1,17 @@
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 
-import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 
-import { schema, users } from "../src/db/schema";
+import { schema } from "../src/db/schema";
 import { admitArtifact, assertCaptureCacheReady, findReusableArtifact, finishImport, prepareImport } from "../src/features/knowledge/capture-cache";
 import { flushCachedArtifact } from "../src/features/knowledge/capture-orchestration";
 import { YOUTUBE_CAPTURE_PAYLOAD_SCHEMA_VERSION, captureReuseKey, youtubeCaptureMethodVersion, youtubeResourceIdentity, youtubeVideoId, youtubeWindowResourceIdentity } from "../src/features/knowledge/capture-identity";
-import { findYoutubeCaptureImportByCorrelationToken, listQueuedYoutubeSources, maxYoutubeEvidenceItemsPerVideo, maxYoutubeEvidenceItemsPerWindow, parseYoutubeEvidence, recordYoutubeCaptureFailure, sanitizeYoutubeMetadata, saveYoutubeEvidence, type YoutubeCaptureActor, type YoutubeEvidence } from "../src/features/knowledge/youtube-capture";
+import { findYoutubeCaptureImportByCorrelationToken, listQueuedYoutubeSources, maxYoutubeEvidenceItemsPerVideo, maxYoutubeEvidenceItemsPerWindow, parseYoutubeEvidence, recordYoutubeCaptureFailure, sanitizeYoutubeMetadata, saveYoutubeEvidence, type YoutubeEvidence } from "../src/features/knowledge/youtube-capture";
 import { assertDistinctCaptureDatabases, getCaptureCacheDatabaseUrl, getDatabaseUrl, getEnvValue } from "./db-env";
 
-type Options = { sourceId?: string; limit?: number; yes: boolean; actorUserId?: string; actorEmail?: string };
-const defaultActor = { userId: "system-youtube-capture", email: "system-youtube-capture@xuyenviet.internal" };
+type Options = { sourceId?: string; limit?: number; yes: boolean };
 export const youtubeEvidencePromptVersion = "youtube-evidence-v1";
 export const youtubeWindowSeconds = 30 * 60;
 export const retainedYoutubeEvidenceItemsPerWindow = 10;
@@ -171,25 +169,15 @@ function parseArgs(argv: string[]): Options {
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--yes" || arg === "-y") options.yes = true;
-    else if (arg === "--source-id" || arg === "--limit" || arg === "--actor-user-id" || arg === "--actor-email") {
+    else if (arg === "--source-id" || arg === "--limit") {
       const value = argv[++index];
       if (!value || value.startsWith("-")) throw new Error(`${arg} requires a value.`);
       if (arg === "--source-id") options.sourceId = value;
       if (arg === "--limit") { const limit = Number(value); if (!Number.isInteger(limit) || limit < 1 || limit > 25) throw new Error("--limit must be an integer between 1 and 25."); options.limit = limit; }
-      if (arg === "--actor-user-id") options.actorUserId = value;
-      if (arg === "--actor-email") options.actorEmail = value;
     } else if (arg === "--help" || arg === "-h") { console.log("Usage: pnpm youtube:capture [--source-id <id> | --limit <1-25>] [--yes]"); process.exit(0); }
     else throw new Error(`Unknown option: ${arg}`);
   }
-  if (Boolean(options.actorUserId) !== Boolean(options.actorEmail)) throw new Error("Provide both --actor-user-id and --actor-email, or omit both.");
   return options;
-}
-
-async function resolveActor(db: ReturnType<typeof drizzle<typeof schema>>, options: Options): Promise<YoutubeCaptureActor> {
-  const actor = { userId: options.actorUserId ?? getEnvValue("YOUTUBE_CAPTURE_ACTOR_USER_ID") ?? defaultActor.userId, email: options.actorEmail ?? getEnvValue("YOUTUBE_CAPTURE_ACTOR_EMAIL") ?? defaultActor.email };
-  const [user] = await db.select({ id: users.id, email: users.email }).from(users).where(eq(users.id, actor.userId)).limit(1);
-  if (!user || user.email !== actor.email) throw new Error("YouTube capture audit actor not found or email mismatch.");
-  return actor;
 }
 
 async function confirm(sourceId: string, count: number) {
@@ -215,14 +203,13 @@ async function main() {
   try {
     await assertDistinctCaptureDatabases(client, cacheClient);
     await assertCaptureCacheReady(cacheClient);
-    const actor = await resolveActor(db, options);
     const queued = await listQueuedYoutubeSources(db, options);
     if (!queued.length) { console.log("No queued YouTube sources need evidence."); return; }
     for (const source of queued) {
       const startedAt = Date.now();
       const url = source.canonicalUrl ?? source.url;
       console.log(`${source.sourceId}: capture started ${url ?? "youtube_url_unavailable"}`);
-      if (!url || !/^https:\/\/www\.youtube\.com\/watch\?v=[A-Za-z0-9_-]{6,20}$/.test(url)) { await recordYoutubeCaptureFailure(db, { sourceId: source.sourceId, reason: "youtube_video_url_required", actor }); console.log(`${source.sourceId}: finished youtube_video_url_required (${formatDuration(startedAt)})`); continue; }
+      if (!url || !/^https:\/\/www\.youtube\.com\/watch\?v=[A-Za-z0-9_-]{6,20}$/.test(url)) { await recordYoutubeCaptureFailure(db, { sourceId: source.sourceId, reason: "youtube_video_url_required" }); console.log(`${source.sourceId}: finished youtube_video_url_required (${formatDuration(startedAt)})`); continue; }
       try {
         const resourceIdentity = youtubeResourceIdentity(url);
         if (!resourceIdentity) throw new Error("youtube_video_url_required");
@@ -234,7 +221,7 @@ async function main() {
         if (cached) {
           const payload = parseCachedYoutubePayload(cached.payload);
           const title = await requestYoutubeTitle(url);
-          const result = await flushCachedArtifact({ artifact: cached, sourceId: source.sourceId, prepareImport: () => prepareImport(cacheClient, cached.id, source.sourceId), importCommitted: (correlationToken) => findYoutubeCaptureImportByCorrelationToken(db, { sourceId: source.sourceId, correlationToken }), flush: (correlationToken) => saveYoutubeEvidence(db, { sourceId: source.sourceId, evidence: payload.evidence, metadata: { ...payload.metadata, captureMethod: "gemini_youtube_url", capturedAt: cached.capturedAt, sourceUrl: url, model, mediaResolution, promptVersion: youtubeEvidencePromptVersion, evidenceCount: payload.evidence.length, captureOrigin: "cache", captureArtifactId: cached.id, importedAt: new Date().toISOString(), importCorrelationToken: correlationToken, payloadSchemaVersion: YOUTUBE_CAPTURE_PAYLOAD_SCHEMA_VERSION, importActorId: actor.userId }, actor, title }).then((value) => value.status), finishImport: (correlationToken, leaseOwner, outcome) => finishImport(cacheClient, cached.id, source.sourceId, correlationToken, leaseOwner, outcome) });
+          const result = await flushCachedArtifact({ artifact: cached, sourceId: source.sourceId, prepareImport: () => prepareImport(cacheClient, cached.id, source.sourceId), importCommitted: (correlationToken) => findYoutubeCaptureImportByCorrelationToken(db, { sourceId: source.sourceId, correlationToken }), flush: (correlationToken) => saveYoutubeEvidence(db, { sourceId: source.sourceId, evidence: payload.evidence, metadata: { ...payload.metadata, captureMethod: "gemini_youtube_url", capturedAt: cached.capturedAt, sourceUrl: url, model, mediaResolution, promptVersion: youtubeEvidencePromptVersion, evidenceCount: payload.evidence.length, captureOrigin: "cache", captureArtifactId: cached.id, importedAt: new Date().toISOString(), importCorrelationToken: correlationToken, payloadSchemaVersion: YOUTUBE_CAPTURE_PAYLOAD_SCHEMA_VERSION }, title }).then((value) => value.status), finishImport: (correlationToken, leaseOwner, outcome) => finishImport(cacheClient, cached.id, source.sourceId, correlationToken, leaseOwner, outcome) });
           console.log(`${source.sourceId}: finished ${result} (${formatDuration(startedAt)})`);
           continue;
         }
@@ -262,17 +249,17 @@ async function main() {
           segments.push({ evidence: result.evidence, window, latencyMs: result.latencyMs });
         }
         const evidence = mergeYoutubeWindowEvidence(segments);
-        if (!evidence.length) { await recordYoutubeCaptureFailure(db, { sourceId: source.sourceId, reason: "no_travel_evidence", actor }); console.log(`${source.sourceId}: finished no_travel_evidence (${formatDuration(startedAt)})`); continue; }
+        if (!evidence.length) { await recordYoutubeCaptureFailure(db, { sourceId: source.sourceId, reason: "no_travel_evidence" }); console.log(`${source.sourceId}: finished no_travel_evidence (${formatDuration(startedAt)})`); continue; }
         if (!options.yes && !(await confirm(source.sourceId, evidence.length))) { console.log(`${source.sourceId}: finished skipped (${formatDuration(startedAt)})`); continue; }
         const title = await requestYoutubeTitle(url);
         const capturedAt = new Date().toISOString();
         const latencyMs = segments.reduce((total, segment) => total + segment.latencyMs, 0);
         const artifact = await admitArtifact(cacheClient, { provider: "youtube", reuseKey, resourceIdentity, captureMethodVersion, payloadSchemaVersion: YOUTUBE_CAPTURE_PAYLOAD_SCHEMA_VERSION, promptVersion: youtubeEvidencePromptVersion, model, payload: { evidence, metadata: sanitizeYoutubeMetadata({ captureMethod: "gemini_youtube_url", capturedAt, sourceUrl: url, model, mediaResolution, promptVersion: youtubeEvidencePromptVersion, evidenceCount: evidence.length, latencyMs, videoDurationSeconds: durationSeconds, windowCount: segments.length }) }, metadata: { captureOrigin: "live" }, capturedAt });
-        const saved = await flushCachedArtifact({ artifact, sourceId: source.sourceId, prepareImport: () => prepareImport(cacheClient, artifact.id, source.sourceId), importCommitted: (correlationToken) => findYoutubeCaptureImportByCorrelationToken(db, { sourceId: source.sourceId, correlationToken }), flush: (correlationToken) => saveYoutubeEvidence(db, { sourceId: source.sourceId, evidence, metadata: { captureMethod: "gemini_youtube_url", capturedAt, sourceUrl: url, model, mediaResolution, promptVersion: youtubeEvidencePromptVersion, evidenceCount: evidence.length, latencyMs, videoDurationSeconds: durationSeconds, windowCount: segments.length, captureOrigin: "live", captureArtifactId: artifact.id, importedAt: new Date().toISOString(), importCorrelationToken: correlationToken, payloadSchemaVersion: YOUTUBE_CAPTURE_PAYLOAD_SCHEMA_VERSION, importActorId: actor.userId }, actor, title }).then((value) => value.status), finishImport: (correlationToken, leaseOwner, outcome) => finishImport(cacheClient, artifact.id, source.sourceId, correlationToken, leaseOwner, outcome) });
+        const saved = await flushCachedArtifact({ artifact, sourceId: source.sourceId, prepareImport: () => prepareImport(cacheClient, artifact.id, source.sourceId), importCommitted: (correlationToken) => findYoutubeCaptureImportByCorrelationToken(db, { sourceId: source.sourceId, correlationToken }), flush: (correlationToken) => saveYoutubeEvidence(db, { sourceId: source.sourceId, evidence, metadata: { captureMethod: "gemini_youtube_url", capturedAt, sourceUrl: url, model, mediaResolution, promptVersion: youtubeEvidencePromptVersion, evidenceCount: evidence.length, latencyMs, videoDurationSeconds: durationSeconds, windowCount: segments.length, captureOrigin: "live", captureArtifactId: artifact.id, importedAt: new Date().toISOString(), importCorrelationToken: correlationToken, payloadSchemaVersion: YOUTUBE_CAPTURE_PAYLOAD_SCHEMA_VERSION }, title }).then((value) => value.status), finishImport: (correlationToken, leaseOwner, outcome) => finishImport(cacheClient, artifact.id, source.sourceId, correlationToken, leaseOwner, outcome) });
         console.log(`${source.sourceId}: finished ${saved} (${formatDuration(startedAt)})`);
       } catch (error) {
         const reason = error instanceof YoutubeSegmentError ? error.message : captureFailureCode(error);
-        await recordYoutubeCaptureFailure(db, { sourceId: source.sourceId, reason, actor });
+        await recordYoutubeCaptureFailure(db, { sourceId: source.sourceId, reason });
         console.log(`${source.sourceId}: finished ${reason.replace(/[^a-z0-9_.:-]+/gi, "_").slice(0, 120)} (${formatDuration(startedAt)})`);
         if (error instanceof GeminiRequestError && error.diagnostic) console.error(`${source.sourceId}: Gemini diagnostic status: ${error.diagnostic}`);
         if (error instanceof YoutubeSegmentError && error.diagnostic) console.error(`${source.sourceId}: Gemini diagnostic status: ${error.diagnostic}`);

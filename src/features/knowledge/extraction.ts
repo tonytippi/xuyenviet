@@ -21,7 +21,7 @@ import {
   sourceKnowledgeDraftExtractionPurpose,
 } from "@/features/ai/prompts";
 import { recordAuditEvent } from "@/features/audit/events";
-import { toUserAuditActor } from "@/features/audit/actors";
+import { createSystemAuditActor, toUserAuditActor, type SystemAuditActorId } from "@/features/audit/actors";
 import { writeAiUsageEvent } from "@/features/audit/usage";
 import type { AuthenticatedSession } from "@/server/auth";
 
@@ -83,9 +83,9 @@ export async function extractKnowledgeDraftsFromSource(sourceId: string, options
   return extractKnowledgeDraftsFromSourceAsActor(sourceId, session, options);
 }
 
-export async function extractKnowledgeDraftsFromSourceAsActor(sourceId: string, actor: AuthenticatedSession, options: { preProviderGuard?: KnowledgeDraftExtractionPreProviderGuard; resultJobId?: string; captureVersionId?: string | null } = {}): Promise<KnowledgeDraftExtractionResult> {
+export async function extractKnowledgeDraftsFromSourceAsActor(sourceId: string, actor: AuthenticatedSession, options: { preProviderGuard?: KnowledgeDraftExtractionPreProviderGuard; resultJobId?: string; captureVersionId?: string | null; executorSystem?: SystemAuditActorId } = {}): Promise<KnowledgeDraftExtractionResult> {
   const normalizedSourceId = sourceId.trim();
-  let providerUsage: Parameters<typeof writeUsageForProviderCall>[3] | null = null;
+  let providerUsage: Parameters<typeof writeUsageForProviderCall>[4] | null = null;
 
   if (!normalizedSourceId) {
     throw new KnowledgeExtractionError("Không tìm thấy nguồn cần trích xuất.", "invalid_source");
@@ -188,7 +188,7 @@ export async function extractKnowledgeDraftsFromSourceAsActor(sourceId: string, 
 
       await options.preProviderGuard?.({ db: transaction, sourceId: sourceBundle.source.id, captureVersionId: options.captureVersionId ?? sourceBundle.source.currentCaptureVersionId });
 
-      const inserted = await transaction.insert(knowledgeCards).values(drafts.map((draft) => ({ ...draft, createdByUserId: actor.userId, aiGatewayModelId: model.id }))).returning({ id: knowledgeCards.id });
+      const inserted = await transaction.insert(knowledgeCards).values(drafts.map((draft) => ({ ...draft, aiGatewayModelId: model.id, ...(options.executorSystem ? { executorSystem: options.executorSystem } : { createdByUserId: actor.userId }) }))).returning({ id: knowledgeCards.id });
 
       await transaction.insert(knowledgeCardSources).values(inserted.map((card) => ({ knowledgeCardId: card.id, sourceId: sourceBundle.source.id, supportLevel: "primary" as const })));
 
@@ -207,7 +207,7 @@ export async function extractKnowledgeDraftsFromSourceAsActor(sourceId: string, 
 
       await recordAuditEvent(
         {
-          actor: toUserAuditActor({ userId: actor.userId, email: actor.email }),
+          actor: options.executorSystem ? createSystemAuditActor(options.executorSystem) : toUserAuditActor({ userId: actor.userId, email: actor.email }),
           operation: "create",
           targetType: "knowledge_draft_extraction",
           targetId: sourceBundle.source.id,
@@ -220,13 +220,13 @@ export async function extractKnowledgeDraftsFromSourceAsActor(sourceId: string, 
     });
 
     if (providerUsage) {
-      await writeUsageForProviderCall(db, actor.userId, model, providerUsage);
+      await writeUsageForProviderCall(db, options.executorSystem ? null : actor.userId, options.executorSystem ?? "system-ai-orchestration", model, providerUsage);
     }
 
     return extraction;
   } catch (error) {
     if (providerUsage && error instanceof KnowledgeExtractionError) {
-      await writeUsageForProviderCall(db, actor.userId, model, providerUsage);
+      await writeUsageForProviderCall(db, options.executorSystem ? null : actor.userId, options.executorSystem ?? "system-ai-orchestration", model, providerUsage);
     }
     throw error;
   }
@@ -278,7 +278,8 @@ async function assertEligibleSourceCapture(db: ExtractionQueryDb, sourceId: stri
 
 async function writeUsageForProviderCall(
   db: Pick<ExtractionDb, "insert">,
-  userId: string,
+  userId: string | null,
+  executorSystem: SystemAuditActorId,
   model: SelectedAiGatewayModel,
   event: {
     status: AiUsageStatus;
@@ -295,7 +296,7 @@ async function writeUsageForProviderCall(
 ) {
   await writeAiUsageEvent(db, {
     initiatedByUserId: userId,
-    executorSystem: "system-ai-orchestration",
+    executorSystem,
     purpose: sourceKnowledgeDraftExtractionPurpose,
     provider: event.provider,
     model: event.model,

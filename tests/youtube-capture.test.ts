@@ -28,12 +28,14 @@ describe("YouTube capture", () => {
 
   test("persists bounded evidence and a content-free audit summary", async () => {
     await createSource("queued");
-    await expect(saveYoutubeEvidence(testDb, { sourceId: "queued", evidence: parseYoutubeEvidence({ evidence }), metadata: { captureMethod: "gemini_youtube_url", capturedAt: "2026-07-17T00:00:00.000Z", sourceUrl: "https://www.youtube.com/watch?v=abcDEF12345", model: "gemini-3.5-flash", mediaResolution: "MEDIA_RESOLUTION_LOW", promptVersion: "youtube-evidence-v1", evidenceCount: 1, latencyMs: 2000, promptTokens: 150000, outputTokens: 7500, totalTokens: 157500 }, actor, title: "Hành trình qua Phan Thiết" })).resolves.toMatchObject({ status: "updated" });
+    await expect(saveYoutubeEvidence(testDb, { sourceId: "queued", evidence: parseYoutubeEvidence({ evidence }), metadata: { captureMethod: "gemini_youtube_url", capturedAt: "2026-07-17T00:00:00.000Z", sourceUrl: "https://www.youtube.com/watch?v=abcDEF12345", model: "gemini-3.5-flash", mediaResolution: "MEDIA_RESOLUTION_LOW", promptVersion: "youtube-evidence-v1", evidenceCount: 1, latencyMs: 2000, promptTokens: 150000, outputTokens: 7500, totalTokens: 157500, importActorId: "system-youtube-capture" } as never, title: "Hành trình qua Phan Thiết" })).resolves.toMatchObject({ status: "updated" });
     const [raw] = await testDb.select().from(sourceCaptureVersions).where(eq(sourceCaptureVersions.sourceId, "queued"));
     expect(raw.rawText).toContain("NovaWorld Phan Thiết");
+    expect(raw.rawMetadata).not.toHaveProperty("importActorId");
     await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.captureVersionId, raw.id))).resolves.toMatchObject([{ stage: "queued" }]);
     await expect(testDb.select({ label: sources.label }).from(sources).where(eq(sources.id, "queued"))).resolves.toEqual([{ label: "Hành trình qua Phan Thiết" }]);
     const [audit] = await testDb.select().from(auditEvents).where(eq(auditEvents.targetType, "source_capture_version"));
+    expect(audit).toMatchObject({ actorClass: "system", actorUserId: null, actorEmail: null, actorSystem: "system-youtube-capture" });
     expect(audit.afterSummary).not.toContain("NovaWorld");
     expect(audit.afterSummary).toContain("evidenceCount: 1");
   });
@@ -43,7 +45,7 @@ describe("YouTube capture", () => {
     await testDb.insert(knowledgeCards).values({ id: "linked-card", type: "place", title: "Điểm dừng", locationName: "Huế", summary: "Tóm tắt", aiPromptVersion: "test", createdByUserId: actor.userId });
     await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: "linked-card", sourceId: "linked", supportLevel: "primary" });
     await testDb.insert(knowledgeCardSearchDocuments).values({ knowledgeCardId: "linked-card", contentVersion: 1, acceptedFence: "legacy", status: "active", searchableText: "YouTube video", textHash: "b".repeat(64), sourceCount: 1, confidence: "community", freshnessSensitive: false });
-    await saveYoutubeEvidence(testDb, { sourceId: "linked", evidence: parseYoutubeEvidence({ evidence }), metadata: { captureMethod: "gemini_youtube_url", capturedAt: "2026-07-17T00:00:00.000Z", sourceUrl: "https://www.youtube.com/watch?v=abcDEF12345", model: "gemini-3.5-flash", mediaResolution: "MEDIA_RESOLUTION_LOW", promptVersion: "youtube-evidence-v1", evidenceCount: 1, latencyMs: 1 }, actor, title: "Tiêu đề mới" });
+    await saveYoutubeEvidence(testDb, { sourceId: "linked", evidence: parseYoutubeEvidence({ evidence }), metadata: { captureMethod: "gemini_youtube_url", capturedAt: "2026-07-17T00:00:00.000Z", sourceUrl: "https://www.youtube.com/watch?v=abcDEF12345", model: "gemini-3.5-flash", mediaResolution: "MEDIA_RESOLUTION_LOW", promptVersion: "youtube-evidence-v1", evidenceCount: 1, latencyMs: 1 }, title: "Tiêu đề mới" });
     await expect(testDb.select({ contentVersion: knowledgeCards.contentVersion }).from(knowledgeCards).where(eq(knowledgeCards.id, "linked-card"))).resolves.toEqual([{ contentVersion: 2 }]);
     await expect(testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, "linked-card"))).resolves.toMatchObject([{ status: "disabled" }]);
     await expect(testDb.select().from(knowledgeIndexDirtyMarkers).where(eq(knowledgeIndexDirtyMarkers.knowledgeCardId, "linked-card"))).resolves.toMatchObject([{ contentVersion: 2, status: "pending" }]);
@@ -51,7 +53,7 @@ describe("YouTube capture", () => {
 
   test("records a safe audit outcome when Gemini capture fails", async () => {
     await createSource("failed");
-    await recordYoutubeCaptureFailure(testDb, { sourceId: "failed", reason: "gemini_http_400", actor });
+    await recordYoutubeCaptureFailure(testDb, { sourceId: "failed", reason: "gemini_http_400" });
 
     const [audit] = await testDb.select().from(auditEvents).where(eq(auditEvents.targetType, "youtube_capture"));
     expect(audit).toMatchObject({ targetId: "failed", afterSummary: "YouTube capture failed: gemini_http_400." });
@@ -60,7 +62,7 @@ describe("YouTube capture", () => {
 
   test("keeps a failed window number in the safe audit code", async () => {
     await createSource("segment-failed");
-    await recordYoutubeCaptureFailure(testDb, { sourceId: "segment-failed", reason: "youtube_segment_2_gemini_http_429", actor });
+    await recordYoutubeCaptureFailure(testDb, { sourceId: "segment-failed", reason: "youtube_segment_2_gemini_http_429" });
 
     const [audit] = await testDb.select().from(auditEvents).where(eq(auditEvents.targetId, "segment-failed"));
     expect(audit.afterSummary).toBe("YouTube capture failed: youtube_segment_2_gemini_http_429.");
@@ -75,7 +77,7 @@ describe("YouTube capture", () => {
 
   test("does not overwrite evidence after another worker captures it", async () => {
     await createSource("race", "Captured elsewhere");
-    await expect(saveYoutubeEvidence(testDb, { sourceId: "race", evidence: parseYoutubeEvidence({ evidence }), metadata: { captureMethod: "gemini_youtube_url", capturedAt: "2026-07-17T00:00:00.000Z", sourceUrl: "https://www.youtube.com/watch?v=abcDEF12345", model: "gemini-3.5-flash", mediaResolution: "MEDIA_RESOLUTION_LOW", promptVersion: "youtube-evidence-v1", evidenceCount: 1, latencyMs: 1 }, actor })).resolves.toEqual({ status: "not_queued" });
+    await expect(saveYoutubeEvidence(testDb, { sourceId: "race", evidence: parseYoutubeEvidence({ evidence }), metadata: { captureMethod: "gemini_youtube_url", capturedAt: "2026-07-17T00:00:00.000Z", sourceUrl: "https://www.youtube.com/watch?v=abcDEF12345", model: "gemini-3.5-flash", mediaResolution: "MEDIA_RESOLUTION_LOW", promptVersion: "youtube-evidence-v1", evidenceCount: 1, latencyMs: 1 } })).resolves.toEqual({ status: "not_queued" });
   });
 
   test("sends the Gemini key in a header rather than the request URL", async () => {

@@ -3,12 +3,11 @@ import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
 import { knowledgeCardSources, knowledgeCards, rawSourceMaterial, schema, sourceCaptureVersions, sources } from "../../db/schema";
 import { recordAuditEvent } from "../audit/events";
+import { createSystemAuditActor } from "../audit/actors";
 import { appendSourceCaptureVersion, type YoutubeCaptureMetadata } from "./source-captures";
 import { disableStaleKnowledgeSearchProjection, enqueueKnowledgeIndexWork } from "./indexing-queue";
 
 export type YoutubeCaptureDb = PostgresJsDatabase<typeof schema>;
-
-export type YoutubeCaptureActor = { userId: string; email: string };
 
 export type QueuedYoutubeSource = {
   sourceId: string;
@@ -47,7 +46,6 @@ export type SafeYoutubeCaptureMetadata = {
   importedAt?: string;
   importCorrelationToken?: string;
   payloadSchemaVersion?: string;
-  importActorId?: string;
   videoDurationSeconds?: number;
   windowStartSeconds?: number;
   windowEndSeconds?: number;
@@ -103,7 +101,7 @@ export function serializeYoutubeEvidence(evidence: YoutubeEvidence[]) {
   return rawText;
 }
 
-export async function saveYoutubeEvidence(db: YoutubeCaptureDb, input: { sourceId: string; evidence: YoutubeEvidence[]; metadata: SafeYoutubeCaptureMetadata; actor: YoutubeCaptureActor; title?: string | null; now?: Date }) {
+export async function saveYoutubeEvidence(db: YoutubeCaptureDb, input: { sourceId: string; evidence: YoutubeEvidence[]; metadata: SafeYoutubeCaptureMetadata; title?: string | null; now?: Date }) {
   const rawText = serializeYoutubeEvidence(input.evidence);
   return db.transaction(async (transaction) => {
     const linkedCards = await transaction.select({ id: knowledgeCards.id }).from(knowledgeCardSources).innerJoin(knowledgeCards, eq(knowledgeCards.id, knowledgeCardSources.knowledgeCardId)).where(eq(knowledgeCardSources.sourceId, input.sourceId)).orderBy(asc(knowledgeCards.id));
@@ -125,6 +123,7 @@ export async function saveYoutubeEvidence(db: YoutubeCaptureDb, input: { sourceI
       captureKind: "youtube",
       rawText,
       metadata: { ...sanitizeYoutubeMetadata(input.metadata), kind: "youtube" } as YoutubeCaptureMetadata,
+      executorSystem: "system-youtube-capture",
       capturedAt: new Date(input.metadata.capturedAt),
     });
 
@@ -139,7 +138,7 @@ export async function saveYoutubeEvidence(db: YoutubeCaptureDb, input: { sourceI
     }
 
     await recordAuditEvent({
-      actor: { kind: "user", ...input.actor },
+      actor: createSystemAuditActor("system-youtube-capture"),
       operation: "update",
       targetType: "source_capture_version",
       targetId: version.id,
@@ -156,9 +155,9 @@ export async function findYoutubeCaptureImportByCorrelationToken(db: YoutubeCapt
   return Boolean(row);
 }
 
-export async function recordYoutubeCaptureFailure(db: YoutubeCaptureDb, input: { sourceId: string; reason: string; actor: YoutubeCaptureActor; now?: Date }) {
+export async function recordYoutubeCaptureFailure(db: YoutubeCaptureDb, input: { sourceId: string; reason: string; now?: Date }) {
   await recordAuditEvent({
-    actor: { kind: "user", ...input.actor },
+    actor: createSystemAuditActor("system-youtube-capture"),
     operation: "update",
     targetType: "youtube_capture",
     targetId: input.sourceId,
@@ -214,7 +213,7 @@ function safeFailureReason(reason: string) {
 }
 
 export function sanitizeYoutubeMetadata(metadata: Record<string, unknown>) {
-  const allowed = new Set<keyof SafeYoutubeCaptureMetadata>(["captureMethod", "capturedAt", "sourceUrl", "model", "mediaResolution", "promptVersion", "evidenceCount", "latencyMs", "promptTokens", "outputTokens", "totalTokens", "captureOrigin", "captureArtifactId", "importedAt", "importCorrelationToken", "payloadSchemaVersion", "importActorId", "videoDurationSeconds", "windowStartSeconds", "windowEndSeconds", "windowCount"]);
+  const allowed = new Set<keyof SafeYoutubeCaptureMetadata>(["captureMethod", "capturedAt", "sourceUrl", "model", "mediaResolution", "promptVersion", "evidenceCount", "latencyMs", "promptTokens", "outputTokens", "totalTokens", "captureOrigin", "captureArtifactId", "importedAt", "importCorrelationToken", "payloadSchemaVersion", "videoDurationSeconds", "windowStartSeconds", "windowEndSeconds", "windowCount"]);
   return Object.fromEntries(Object.entries(metadata).filter(([key, value]) => allowed.has(key as keyof SafeYoutubeCaptureMetadata) && value !== undefined)) as SafeYoutubeCaptureMetadata;
 }
 

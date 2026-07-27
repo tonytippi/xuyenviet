@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { chooseFacebookCaptureText, detectFacebookCaptureStopReason, FACEBOOK_CAPTURE_SYSTEM_ACTOR, getFacebookCaptureDelayMs, parseFacebookCaptureArgs } from "../scripts/facebook-capture";
+import { chooseFacebookCaptureText, detectFacebookCaptureStopReason, getFacebookCaptureDelayMs, parseFacebookCaptureArgs } from "../scripts/facebook-capture";
 
 describe("Facebook visible-DOM capture", () => {
   test("selects bounded visible DOM text without a network candidate path", () => {
@@ -21,18 +21,9 @@ describe("Facebook visible-DOM capture", () => {
     expect(detectFacebookCaptureStopReason({ url: "https://www.facebook.com/groups/example", bodyText: "A normal post." })).toBeNull();
   });
 
-  test("reserves a fixed system actor for every capture run", () => {
-    expect(FACEBOOK_CAPTURE_SYSTEM_ACTOR).toEqual({
-      userId: "system-facebook-capture",
-      email: "system-facebook-capture@xuyenviet.invalid",
-      actorClass: "system",
-      actorSystem: "system-facebook-capture",
-    });
+  test("does not accept per-run actor identities", () => {
     expect(parseFacebookCaptureArgs(["--limit", "5", "--yes"])).toMatchObject({ limit: 5, yes: true });
     expect(parseFacebookCaptureArgs(["--source-id", "source-1"])).toMatchObject({ sourceId: "source-1", yes: false });
-  });
-
-  test("does not accept per-run audit actor overrides", () => {
     expect(() => parseFacebookCaptureArgs(["--actor-user-id", "operator"])).toThrow("Unknown or incomplete option");
     expect(() => parseFacebookCaptureArgs(["--actor-email", "operator@example.com"])).toThrow("Unknown or incomplete option");
   });

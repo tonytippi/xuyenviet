@@ -7,7 +7,7 @@ import { ensureFacebookCaptureReviewForCapturedSource, markFacebookCaptureReview
 import { resetTestDatabase, testDb } from "./helpers/db";
 import { seedSourceCaptureVersion } from "./helpers/source-captures";
 
-const authMock = vi.fn();
+const authMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/auth", () => ({
   auth: authMock,
@@ -131,7 +131,7 @@ describe("Facebook capture extraction action", () => {
     await expect(testDb.select().from(knowledgeCards)).resolves.toMatchObject([{ status: "draft", needsReview: true, confidence: "unverified" }]);
     await expect(testDb.select().from(knowledgeCardSources)).resolves.toMatchObject([{ sourceId: "success", supportLevel: "primary" }]);
     await expect(testDb.select().from(facebookCaptureReviews).where(eq(facebookCaptureReviews.id, review.id))).resolves.toMatchObject([
-      { status: "extracted", reviewerUserId: "operator-user", extractionError: null },
+      { status: "extracted", reviewerUserId: null, executorSystem: "system-knowledge-pipeline", extractionError: null },
     ]);
   });
 
@@ -149,7 +149,7 @@ describe("Facebook capture extraction action", () => {
     expect(fetch).not.toHaveBeenCalled();
     await expect(testDb.select().from(knowledgeCards)).resolves.toHaveLength(0);
     await expect(testDb.select().from(facebookCaptureReviews).where(eq(facebookCaptureReviews.id, review.id))).resolves.toMatchObject([
-      { status: "extraction_failed", extractionError: "Extraction failed: model_unavailable" },
+      { status: "extraction_failed", reviewerUserId: null, executorSystem: "system-knowledge-pipeline", extractionError: "Extraction failed: model_unavailable" },
     ]);
     await expect(testDb.select().from(knowledgeExtractionJobs)).resolves.toMatchObject([{ status: "failed", lastErrorCode: "model_unavailable" }]);
   });
@@ -213,7 +213,8 @@ describe("Facebook capture extraction action", () => {
     });
     const html = renderToStaticMarkup(element);
 
-    expect(html).toContain("Không thể hoàn tất cập nhật trạng thái sau khi trích xuất (stale_review)");
+    expect(html).toContain("Trạng thái canonical ingestion");
+    expect(html).not.toContain("Không thể hoàn tất cập nhật trạng thái sau khi trích xuất");
   });
 
   test("does not claim extraction_failed status changed when failure transition was not updated", async () => {
@@ -228,7 +229,8 @@ describe("Facebook capture extraction action", () => {
     });
     const html = renderToStaticMarkup(element);
 
-    expect(html).toContain("Trạng thái review có thể đã thay đổi");
+    expect(html).toContain("Trạng thái canonical ingestion");
+    expect(html).not.toContain("Trạng thái review có thể đã thay đổi");
     expect(html).not.toContain("Trạng thái đã chuyển sang Trích xuất lỗi");
   });
 

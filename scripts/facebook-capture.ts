@@ -1,12 +1,11 @@
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 
-import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { chromium, type Page } from "playwright";
 
-import { schema, users } from "../src/db/schema";
+import { schema } from "../src/db/schema";
 import { findFacebookCaptureImportByCorrelationToken, listQueuedFacebookSources, normalizeDiscoveredFacebookPosts, recordFacebookCaptureFailure, updateQueuedFacebookSourceRawText, type SafeFacebookCaptureMetadata } from "../src/features/knowledge/facebook-capture";
 import { admitArtifact, admitArtifactAlias, assertCaptureCacheReady, findArtifactByAlias, findForceLiveArtifact, findReusableArtifact, finishImport, linkForceLiveArtifact, prepareImport, supersedeDefaultArtifacts } from "../src/features/knowledge/capture-cache";
 import { flushCachedArtifact } from "../src/features/knowledge/capture-orchestration";
@@ -125,12 +124,6 @@ function normalizeFacebookCaptureUrl(value: string) {
 }
 
 
-export const FACEBOOK_CAPTURE_SYSTEM_ACTOR = {
-  userId: "system-facebook-capture",
-  email: "system-facebook-capture@xuyenviet.invalid",
-  actorClass: "system" as const,
-  actorSystem: "system-facebook-capture",
-};
 const DEFAULT_CAPTURE_DELAY_MIN_MS = 12_000;
 const DEFAULT_CAPTURE_DELAY_MAX_MS = 25_000;
 const DEFAULT_CAPTURE_BATCH_SIZE = 10;
@@ -264,19 +257,10 @@ Options:
 First run opens a headed Chromium profile at .playwright/facebook-profile.
 Log into Facebook manually in that browser, close or leave it open, then rerun this command.
 Profile data stays local and must never be committed, copied into app secrets, or stored in PostgreSQL.
-Every capture run uses the fixed system capture actor for audit attribution.
 Pacing is configured through FACEBOOK_CAPTURE_DELAY_MIN_MS, FACEBOOK_CAPTURE_DELAY_MAX_MS,
 FACEBOOK_CAPTURE_BATCH_SIZE, and FACEBOOK_CAPTURE_BATCH_COOLDOWN_MS. Defaults are a randomized
 12-25 second delay between attempts and a one-minute cooldown after every 10 attempts.
 This tool captures visible post text only. Broad Facebook content reuse, quoting, retention, and deletion policy remains an open product/legal operations question.`);
-}
-
-async function resolveCaptureActor(db: ReturnType<typeof drizzle<typeof schema>>) {
-  const [systemActor] = await db.select({ id: users.id, email: users.email }).from(users).where(eq(users.id, FACEBOOK_CAPTURE_SYSTEM_ACTOR.userId)).limit(1);
-  if (!systemActor || systemActor.email !== FACEBOOK_CAPTURE_SYSTEM_ACTOR.email) {
-    throw new Error("Facebook capture system actor is missing or has an unexpected identity. Apply the reserved system-actor migration before capture.");
-  }
-  return FACEBOOK_CAPTURE_SYSTEM_ACTOR;
 }
 
 function previewText(text: string) {
@@ -574,7 +558,6 @@ async function main() {
   try {
     await assertDistinctCaptureDatabases(client, cacheClient);
     await assertCaptureCacheReady(cacheClient);
-    const actor = await resolveCaptureActor(db);
     const pacing = getFacebookCapturePacing();
     const queued = await listQueuedFacebookSources(db, { sourceId: options.sourceId, limit: options.limit });
 
@@ -606,7 +589,7 @@ async function main() {
         if (artifact) {
           const cachedArtifact = artifact;
           const payload = parseCachedFacebookPayload(cachedArtifact.payload, sourceUrl);
-          const result = await flushCachedArtifact({ artifact: cachedArtifact, sourceId: source.sourceId, prepareImport: () => prepareImport(cacheClient, cachedArtifact.id, source.sourceId), importCommitted: (correlationToken) => findFacebookCaptureImportByCorrelationToken(db, { sourceId: source.sourceId, correlationToken }), flush: (correlationToken) => updateQueuedFacebookSourceRawText(db, { sourceId: source.sourceId, rawText: payload.rawText, captureMetadata: { ...payload.metadata, captureOrigin: source.forceLiveCapture ? "live" : "cache", captureArtifactId: cachedArtifact.id, importedAt: new Date().toISOString(), importCorrelationToken: correlationToken, captureMethodVersion: FACEBOOK_CAPTURE_METHOD_VERSION, payloadSchemaVersion: CAPTURE_PAYLOAD_SCHEMA_VERSION, importActorId: actor.userId }, actor, discoveredUrls: payload.discoveredUrls, sourceUrl: payload.sourceUrl, expectedForceLiveCapture: source.forceLiveCapture, expectedForceLiveCaptureGeneration: source.forceLiveCaptureGeneration }).then((value) => value.status), finishImport: (correlationToken, leaseOwner, outcome) => finishImport(cacheClient, cachedArtifact.id, source.sourceId, correlationToken, leaseOwner, outcome) });
+          const result = await flushCachedArtifact({ artifact: cachedArtifact, sourceId: source.sourceId, prepareImport: () => prepareImport(cacheClient, cachedArtifact.id, source.sourceId), importCommitted: (correlationToken) => findFacebookCaptureImportByCorrelationToken(db, { sourceId: source.sourceId, correlationToken }), flush: (correlationToken) => updateQueuedFacebookSourceRawText(db, { sourceId: source.sourceId, rawText: payload.rawText, captureMetadata: { ...payload.metadata, captureOrigin: source.forceLiveCapture ? "live" : "cache", captureArtifactId: cachedArtifact.id, importedAt: new Date().toISOString(), importCorrelationToken: correlationToken, captureMethodVersion: FACEBOOK_CAPTURE_METHOD_VERSION, payloadSchemaVersion: CAPTURE_PAYLOAD_SCHEMA_VERSION }, discoveredUrls: payload.discoveredUrls, sourceUrl: payload.sourceUrl, expectedForceLiveCapture: source.forceLiveCapture, expectedForceLiveCaptureGeneration: source.forceLiveCaptureGeneration }).then((value) => value.status), finishImport: (correlationToken, leaseOwner, outcome) => finishImport(cacheClient, cachedArtifact.id, source.sourceId, correlationToken, leaseOwner, outcome) });
           console.log(`Capture cache replay for ${source.sourceId}: ${result}`);
           continue;
         }
@@ -689,7 +672,7 @@ async function main() {
         }
         const liveArtifact = artifact;
         const livePayload = parseCachedFacebookPayload(liveArtifact.payload, sourceUrl);
-        const result = await flushCachedArtifact({ artifact: liveArtifact, sourceId: source.sourceId, prepareImport: () => prepareImport(cacheClient, liveArtifact.id, source.sourceId), importCommitted: (correlationToken) => findFacebookCaptureImportByCorrelationToken(db, { sourceId: source.sourceId, correlationToken }), flush: (correlationToken) => updateQueuedFacebookSourceRawText(db, { sourceId: source.sourceId, rawText: livePayload.rawText, captureMetadata: { ...livePayload.metadata, captureOrigin: "live", captureArtifactId: liveArtifact.id, importedAt: new Date().toISOString(), importCorrelationToken: correlationToken, captureMethodVersion: FACEBOOK_CAPTURE_METHOD_VERSION, payloadSchemaVersion: CAPTURE_PAYLOAD_SCHEMA_VERSION, captureActorId: actor.userId, importActorId: actor.userId }, actor, discoveredUrls: livePayload.discoveredUrls, sourceUrl: livePayload.sourceUrl, expectedForceLiveCapture: source.forceLiveCapture, expectedForceLiveCaptureGeneration: source.forceLiveCaptureGeneration }).then((value) => value.status), finishImport: (correlationToken, leaseOwner, outcome) => finishImport(cacheClient, liveArtifact.id, source.sourceId, correlationToken, leaseOwner, outcome) });
+        const result = await flushCachedArtifact({ artifact: liveArtifact, sourceId: source.sourceId, prepareImport: () => prepareImport(cacheClient, liveArtifact.id, source.sourceId), importCommitted: (correlationToken) => findFacebookCaptureImportByCorrelationToken(db, { sourceId: source.sourceId, correlationToken }), flush: (correlationToken) => updateQueuedFacebookSourceRawText(db, { sourceId: source.sourceId, rawText: livePayload.rawText, captureMetadata: { ...livePayload.metadata, captureOrigin: "live", captureArtifactId: liveArtifact.id, importedAt: new Date().toISOString(), importCorrelationToken: correlationToken, captureMethodVersion: FACEBOOK_CAPTURE_METHOD_VERSION, payloadSchemaVersion: CAPTURE_PAYLOAD_SCHEMA_VERSION }, discoveredUrls: livePayload.discoveredUrls, sourceUrl: livePayload.sourceUrl, expectedForceLiveCapture: source.forceLiveCapture, expectedForceLiveCaptureGeneration: source.forceLiveCaptureGeneration }).then((value) => value.status), finishImport: (correlationToken, leaseOwner, outcome) => finishImport(cacheClient, liveArtifact.id, source.sourceId, correlationToken, leaseOwner, outcome) });
         if (source.forceLiveCapture && (result === "updated" || result === "imported")) await supersedeDefaultArtifacts(cacheClient, artifact);
 
         console.log(`Capture result for ${source.sourceId}: ${result}`);

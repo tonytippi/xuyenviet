@@ -8,6 +8,7 @@ import { disableStaleKnowledgeSearchProjection, enqueueKnowledgeIndexWork } from
 import { getCurrentValidEvidenceFencesForReadiness } from "@/features/knowledge/readiness-evidence";
 import { knowledgeCardEvidence, knowledgeCards, knowledgeRecommendations, knowledgeSamplingCandidateLedger, knowledgeSamplingCohortMembers, knowledgeSamplingDispositionReasonValues, knowledgeSamplingPolicies, knowledgeVerifyFirstSamplingObligations, type KnowledgeRecommendationAction, type KnowledgeRecommendationReason, type KnowledgeSamplingDispositionReason } from "@/db/schema";
 import { recordAuditEvent } from "@/features/audit/events";
+import { type SystemAuditActorId } from "@/features/audit/actors";
 import { getCorridorBucketLabel } from "@/features/knowledge/corridor";
 
 type RecommendationDb = ReturnType<typeof getDb>;
@@ -57,13 +58,13 @@ export function shouldSampleKnowledgeCard(cardId: string, contentVersion: number
   return (hash >>> 0) % 100 < percent;
 }
 
-export async function scheduleKnowledgeRecommendation(input: { cardId: string; contentVersion: number; evidenceSetRevision: number; reason: KnowledgeRecommendationReason; priority?: number; policy?: "sample" | "verify_first"; now?: Date; supersedeStaleBy?: RecommendationActor }, db: RecommendationDb | Transaction = getDb()) {
+export async function scheduleKnowledgeRecommendation(input: { cardId: string; contentVersion: number; evidenceSetRevision: number; reason: KnowledgeRecommendationReason; priority?: number; policy?: "sample" | "verify_first"; now?: Date; executorSystem?: SystemAuditActorId; supersedeStale?: boolean; supersedeStaleBy?: RecommendationActor }, db: RecommendationDb | Transaction = getDb()) {
   return db.transaction((tx) => scheduleKnowledgeRecommendationInTransaction(input, tx));
 }
 
 export async function enrollAutoActiveSampling(input: { terminalIngestionJobId: string; cardId: string; contentVersion: number; evidenceSetRevision: number; routeSegment: string | null; locationName: string | null; now?: Date }, db: Transaction) {
   const now = input.now ?? new Date();
-  await scheduleKnowledgeRecommendation({ cardId: input.cardId, contentVersion: input.contentVersion, evidenceSetRevision: input.evidenceSetRevision, reason: "sampling", policy: "sample", now, supersedeStaleBy: systemActor }, db);
+  await scheduleKnowledgeRecommendation({ cardId: input.cardId, contentVersion: input.contentVersion, evidenceSetRevision: input.evidenceSetRevision, reason: "sampling", policy: "sample", now, executorSystem: "system-knowledge-pipeline", supersedeStale: true }, db);
   const [member] = await db
     .select({ policyId: knowledgeSamplingCohortMembers.policyId, selectedForSampling: knowledgeSamplingCohortMembers.selectedForSampling })
     .from(knowledgeSamplingCohortMembers)
@@ -78,7 +79,7 @@ export async function enrollAutoActiveSampling(input: { terminalIngestionJobId: 
 
 export async function enrollVerifyFirstSampling(input: { terminalIngestionJobId: string; cardId: string; contentVersion: number; evidenceSetRevision: number; routeSegment: string | null; locationName: string | null; now?: Date }, db: Transaction) {
   const now = input.now ?? new Date();
-  await scheduleKnowledgeRecommendation({ cardId: input.cardId, contentVersion: input.contentVersion, evidenceSetRevision: input.evidenceSetRevision, reason: "verification", policy: "verify_first", priority: 2, now, supersedeStaleBy: systemActor }, db);
+  await scheduleKnowledgeRecommendation({ cardId: input.cardId, contentVersion: input.contentVersion, evidenceSetRevision: input.evidenceSetRevision, reason: "verification", policy: "verify_first", priority: 2, now, executorSystem: "system-knowledge-pipeline", supersedeStale: true }, db);
   const [verification] = await db.select({ policyId: knowledgeRecommendations.policyId }).from(knowledgeRecommendations).where(and(eq(knowledgeRecommendations.knowledgeCardId, input.cardId), eq(knowledgeRecommendations.contentVersion, input.contentVersion), eq(knowledgeRecommendations.evidenceSetRevision, input.evidenceSetRevision), eq(knowledgeRecommendations.reason, "verification"))).orderBy(desc(knowledgeRecommendations.createdAt)).limit(1);
   if (!verification?.policyId) return;
   const corridorBucket = getCorridorBucketLabel(input.routeSegment, input.locationName);
@@ -86,8 +87,6 @@ export async function enrollVerifyFirstSampling(input: { terminalIngestionJobId:
   await db.insert(knowledgeVerifyFirstSamplingObligations).values({ terminalIngestionJobId: input.terminalIngestionJobId, ...facts }).onConflictDoNothing();
   await db.insert(knowledgeRecommendations).values({ policyId: facts.policyId, knowledgeCardId: facts.knowledgeCardId, contentVersion: facts.contentVersion, evidenceSetRevision: facts.evidenceSetRevision, reason: "sampling", priority: priorityFor("sampling"), requiredForSampling: true, policySnapshot: { selection: "required" } }).onConflictDoNothing();
 }
-
-const systemActor = { userId: "system-knowledge-pipeline", email: "system-knowledge-pipeline@xuyenviet.invalid" };
 
 export async function sealClosedKnowledgeSamplingPolicy(policyId: string, now = new Date(), db: RecommendationDb = getDb()) {
   return db.transaction(async (tx) => {
@@ -166,7 +165,7 @@ function fenceKey(value: { knowledgeCardId: string; contentVersion: number; evid
   return `${value.knowledgeCardId}:${value.contentVersion}:${value.evidenceSetRevision}`;
 }
 
-async function scheduleKnowledgeRecommendationInTransaction(input: { cardId: string; contentVersion: number; evidenceSetRevision: number; reason: KnowledgeRecommendationReason; priority?: number; policy?: "sample" | "verify_first"; now?: Date; supersedeStaleBy?: RecommendationActor }, db: Transaction) {
+async function scheduleKnowledgeRecommendationInTransaction(input: { cardId: string; contentVersion: number; evidenceSetRevision: number; reason: KnowledgeRecommendationReason; priority?: number; policy?: "sample" | "verify_first"; now?: Date; executorSystem?: SystemAuditActorId; supersedeStale?: boolean; supersedeStaleBy?: RecommendationActor }, db: Transaction) {
   const now = input.now ?? new Date();
   let policyId: string | null = null;
   let policySnapshot: Record<string, unknown> = {};
@@ -193,8 +192,8 @@ async function scheduleKnowledgeRecommendationInTransaction(input: { cardId: str
     }
   }
   const priority = input.priority ?? priorityFor(input.reason);
-  if (input.supersedeStaleBy) {
-    await db.update(knowledgeRecommendations).set({ status: "superseded", resolution: "accepted", resolvedByUserId: input.supersedeStaleBy.userId, resolvedAt: now, updatedAt: now }).where(and(
+  if (input.supersedeStale || input.supersedeStaleBy) {
+    await db.update(knowledgeRecommendations).set({ status: "superseded", resolution: "accepted", resolvedByUserId: input.supersedeStaleBy?.userId ?? null, resolvedAt: now, executorSystem: input.supersedeStaleBy ? null : input.executorSystem ?? null, updatedAt: now }).where(and(
       eq(knowledgeRecommendations.knowledgeCardId, input.cardId),
       sql`${knowledgeRecommendations.status} in ('open', 'in_review')`,
       sql`(${knowledgeRecommendations.contentVersion}, ${knowledgeRecommendations.evidenceSetRevision}) <> (${input.contentVersion}, ${input.evidenceSetRevision})`,
@@ -212,7 +211,7 @@ async function scheduleKnowledgeRecommendationInTransaction(input: { cardId: str
     await db.insert(knowledgeSamplingCohortMembers).values({ policyId: activePolicy.id, knowledgeCardId: input.cardId, contentVersion: input.contentVersion, evidenceSetRevision: input.evidenceSetRevision, corridorBucket, outsideCorridor: corridorBucket === null, selectedForSampling }).onConflictDoNothing();
     if (!selectedForSampling) return;
   }
-  await db.insert(knowledgeRecommendations).values({ knowledgeCardId: input.cardId, contentVersion: input.contentVersion, evidenceSetRevision: input.evidenceSetRevision, reason: input.reason, priority, policyId, policySnapshot }).onConflictDoNothing();
+  await db.insert(knowledgeRecommendations).values({ knowledgeCardId: input.cardId, contentVersion: input.contentVersion, evidenceSetRevision: input.evidenceSetRevision, reason: input.reason, priority, policyId, policySnapshot, executorSystem: input.executorSystem ?? null }).onConflictDoNothing();
 }
 
 export async function resolveKnowledgeRecommendation(input: { recommendationId: string; expectedContentVersion: number; expectedEvidenceSetRevision: number; action: KnowledgeRecommendationAction; actor: RecommendationActor; editSummary?: string; samplingDispositionReason?: string; samplingRationale?: string; highSeverity?: boolean }, db: RecommendationDb = getDb()) {

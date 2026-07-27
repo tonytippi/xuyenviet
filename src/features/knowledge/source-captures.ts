@@ -7,6 +7,7 @@ import { and, desc, eq, inArray, isNull, lte, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { facebookCaptureReviews, knowledgeCardEvidence, knowledgeCards, knowledgeExtractionJobs, knowledgeIngestionJobs, rawSourceMaterial, sourceCaptureVersions, sources, userRoles, users, type SourceKind } from "@/db/schema";
 import { recordAuditEvent } from "@/features/audit/events";
+import { createSystemAuditActor, type SystemAuditActorId } from "@/features/audit/actors";
 import { ensureIngestionJobForCaptureVersion } from "@/features/knowledge/ingestion-jobs";
 
 const submittedKinds = new Set<SourceKind>(["url", "copied_post", "pasted_text", "screenshot"]);
@@ -16,8 +17,8 @@ const maxMetadataKeyLength = 48;
 const maxMetadataValueLength = 500;
 
 export type GenericCaptureMetadata = { kind: "submitted"; fileName?: string; mimeType?: "image/jpeg" | "image/png" | "image/webp"; byteSize?: number; storageKey?: string };
-export type FacebookCaptureMetadata = { kind: "facebook_operator"; captureMethod: "playwright_operator_browser"; capturedAt: string; sourceUrl: string; finalUrl: string; authorText?: string; groupName?: string; timestampText?: string; postCreatedAt?: string; captureOrigin?: "live" | "cache"; captureArtifactId?: string; importCorrelationToken?: string; captureMethodVersion?: string; payloadSchemaVersion?: string; captureActorId?: string; importActorId?: string };
-export type YoutubeCaptureMetadata = { kind: "youtube"; captureMethod: "gemini_youtube_url"; capturedAt: string; sourceUrl: string; model: string; mediaResolution: "MEDIA_RESOLUTION_LOW" | "MEDIA_RESOLUTION_MEDIUM" | "MEDIA_RESOLUTION_HIGH"; promptVersion: string; evidenceCount: number; latencyMs: number; videoDurationSeconds?: number; windowStartSeconds?: number; windowEndSeconds?: number; windowCount?: number; captureOrigin?: "live" | "cache"; captureArtifactId?: string; importedAt?: string; importCorrelationToken?: string; payloadSchemaVersion?: string; importActorId?: string; promptTokens?: number; outputTokens?: number; totalTokens?: number };
+export type FacebookCaptureMetadata = { kind: "facebook_operator"; captureMethod: "playwright_operator_browser"; capturedAt: string; sourceUrl: string; finalUrl: string; authorText?: string; groupName?: string; timestampText?: string; postCreatedAt?: string; captureOrigin?: "live" | "cache"; captureArtifactId?: string; importCorrelationToken?: string; captureMethodVersion?: string; payloadSchemaVersion?: string };
+export type YoutubeCaptureMetadata = { kind: "youtube"; captureMethod: "gemini_youtube_url"; capturedAt: string; sourceUrl: string; model: string; mediaResolution: "MEDIA_RESOLUTION_LOW" | "MEDIA_RESOLUTION_MEDIUM" | "MEDIA_RESOLUTION_HIGH"; promptVersion: string; evidenceCount: number; latencyMs: number; videoDurationSeconds?: number; windowStartSeconds?: number; windowEndSeconds?: number; windowCount?: number; captureOrigin?: "live" | "cache"; captureArtifactId?: string; importedAt?: string; importCorrelationToken?: string; payloadSchemaVersion?: string; promptTokens?: number; outputTokens?: number; totalTokens?: number };
 export type SafeCaptureMetadata = GenericCaptureMetadata | FacebookCaptureMetadata | YoutubeCaptureMetadata;
 
 export class SourceCaptureValidationError extends Error {
@@ -75,8 +76,8 @@ export function validateSafeCaptureMetadata(captureKind: SourceKind, value: Safe
 
 function allowedMetadataKeys(kind: SafeCaptureMetadata["kind"]) {
   if (kind === "submitted") return new Set(["kind", "fileName", "mimeType", "byteSize", "storageKey"]);
-  if (kind === "facebook_operator") return new Set(["kind", "captureMethod", "capturedAt", "sourceUrl", "finalUrl", "authorText", "groupName", "timestampText", "postCreatedAt", "captureOrigin", "captureArtifactId", "importCorrelationToken", "captureMethodVersion", "payloadSchemaVersion", "captureActorId", "importActorId"]);
-  return new Set(["kind", "captureMethod", "capturedAt", "sourceUrl", "model", "mediaResolution", "promptVersion", "evidenceCount", "latencyMs", "videoDurationSeconds", "windowStartSeconds", "windowEndSeconds", "windowCount", "captureOrigin", "captureArtifactId", "importedAt", "importCorrelationToken", "payloadSchemaVersion", "importActorId", "promptTokens", "outputTokens", "totalTokens"]);
+  if (kind === "facebook_operator") return new Set(["kind", "captureMethod", "capturedAt", "sourceUrl", "finalUrl", "authorText", "groupName", "timestampText", "postCreatedAt", "captureOrigin", "captureArtifactId", "importCorrelationToken", "captureMethodVersion", "payloadSchemaVersion"]);
+  return new Set(["kind", "captureMethod", "capturedAt", "sourceUrl", "model", "mediaResolution", "promptVersion", "evidenceCount", "latencyMs", "videoDurationSeconds", "windowStartSeconds", "windowEndSeconds", "windowCount", "captureOrigin", "captureArtifactId", "importedAt", "importCorrelationToken", "payloadSchemaVersion", "promptTokens", "outputTokens", "totalTokens"]);
 }
 
 function isSafeCaptureMetadataKind(value: unknown): value is SafeCaptureMetadata["kind"] {
@@ -103,13 +104,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 export async function appendSourceCaptureVersion(
   db: CaptureDb,
-  input: { sourceId: string; captureKind: SourceKind; rawText: string; metadata: SafeCaptureMetadata; capturedAt?: Date; file?: { fileName?: string | null; mimeType?: string | null; byteSize?: number | null; storageKey?: string | null } },
+  input: { sourceId: string; captureKind: SourceKind; rawText: string; metadata: SafeCaptureMetadata; executorSystem?: SystemAuditActorId; capturedAt?: Date; file?: { fileName?: string | null; mimeType?: string | null; byteSize?: number | null; storageKey?: string | null } },
 ) {
   const rawText = normalizeCaptureText(input.rawText);
   const limit = input.captureKind === "youtube" ? 120_000 : 20_000;
   if (!rawText) throw new SourceCaptureValidationError("Captured readable material cannot be empty.");
   if (rawText.length > limit) throw new SourceCaptureValidationError(`Captured readable material exceeds the ${limit}-character limit.`);
   const rawMetadata = validateSafeCaptureMetadata(input.captureKind, input.metadata);
+  const executorSystem = input.executorSystem ? createSystemAuditActor(input.executorSystem).system : undefined;
   const transactionalDb = db as ReturnType<typeof getDb>;
   return transactionalDb.transaction(async (tx) => {
     // This lock spans sequence allocation, the pointer update, and job creation.
@@ -125,6 +127,7 @@ export async function appendSourceCaptureVersion(
       rawText,
       contentHash: hashCaptureText(rawText),
       rawMetadata,
+      executorSystem,
       capturedAt: input.capturedAt ?? new Date(),
       fileName: input.file?.fileName ?? null,
       mimeType: input.file?.mimeType ?? null,

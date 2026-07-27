@@ -85,11 +85,12 @@ describe("Facebook capture queue", () => {
         groupName: "Cộng đồng Xuyên Việt",
         timestampText: "Hôm qua lúc 10:00",
         postCreatedAt: "2026-07-09T10:00:00.000Z",
+        captureActorId: "system-facebook-capture",
+        importActorId: "system-facebook-capture",
         cookies: "must-not-store",
         localStorage: { secret: true },
         html: "<html>hidden dump</html>",
       },
-      actor: { userId: "operator-user", email: "operator@example.com" },
       now: new Date("2026-07-10T00:00:00.000Z"),
     });
 
@@ -112,6 +113,8 @@ describe("Facebook capture queue", () => {
     expect(raw.rawMetadata).not.toHaveProperty("cookies");
     expect(raw.rawMetadata).not.toHaveProperty("localStorage");
     expect(raw.rawMetadata).not.toHaveProperty("html");
+    expect(raw.rawMetadata).not.toHaveProperty("captureActorId");
+    expect(raw.rawMetadata).not.toHaveProperty("importActorId");
 
     const [source] = await testDb.select().from(sources).where(eq(sources.id, "queued-facebook"));
     expect(source).toMatchObject({ sourceType: "community", verificationStatus: "unverified", official: false, partner: false });
@@ -144,7 +147,7 @@ describe("Facebook capture queue", () => {
     ]);
   });
 
-  test("persists system Facebook capture audits with no human attribution fields", async () => {
+  test("persists cataloged Facebook capture audits with no human attribution fields", async () => {
     await createSource({ id: "system-captured-facebook", kind: "facebook", rawText: null });
 
     await expect(updateQueuedFacebookSourceRawText(testDb, {
@@ -155,12 +158,6 @@ describe("Facebook capture queue", () => {
         capturedAt: "2026-07-27T00:00:00.000Z",
         sourceUrl: "https://facebook.com/groups/xuyenviet/posts/system-captured-facebook",
         finalUrl: "https://facebook.com/groups/xuyenviet/posts/system-captured-facebook",
-      },
-      actor: {
-        userId: "operator-user",
-        email: "operator@example.com",
-        actorClass: "system",
-        actorSystem: "system-facebook-capture",
       },
     })).resolves.toMatchObject({ status: "updated" });
 
@@ -188,7 +185,6 @@ describe("Facebook capture queue", () => {
         sourceUrl: "https://facebook.com/share/p/duplicate-facebook",
         finalUrl: "https://www.facebook.com/groups/xuyenviet/posts/123?fbclid=ignored",
       },
-      actor: { userId: "operator-user", email: "operator@example.com" },
     });
 
     expect(result).toEqual({ status: "duplicate", duplicateSourceId: "existing-facebook" });
@@ -228,7 +224,6 @@ describe("Facebook capture queue", () => {
         finalUrl: "https://facebook.com/groups/xuyenviet/posts/metadata-facebook",
         diagnostics: { textLength: 26, html: "<html>hidden dump</html>", cookieValue: "secret" },
       },
-      actor: { userId: "operator-user", email: "operator@example.com" },
     });
 
     const [raw] = await testDb.select().from(sourceCaptureVersions).where(eq(sourceCaptureVersions.sourceId, "metadata-facebook"));
@@ -280,13 +275,12 @@ describe("Facebook capture queue", () => {
         "https://web.facebook.com/groups/xuyenviet",
         "https://example.com/not-facebook",
       ],
-      actor: { userId: "operator-user", email: "operator@example.com" },
     });
 
     expect(result).toEqual({ queuedCount: 1, duplicateCount: 1 });
     await expect(listQueuedFacebookSources(testDb, { limit: 10 })).resolves.toMatchObject([
       { sourceId: "existing-post" },
-      { canonicalUrl: "https://facebook.com/share/p/new-post", rawMetadata: { discoveredFromSourceId: "summary" } },
+      { canonicalUrl: "https://facebook.com/share/p/new-post", submittedByUserId: "operator-user", rawMetadata: { discoveredFromSourceId: "summary" } },
     ]);
   });
 
@@ -351,15 +345,12 @@ describe("Facebook capture queue", () => {
 
   test("does not discover another generation from a discovered post", async () => {
     await createSource({ id: "summary", kind: "facebook", rawText: null });
-    const actor = { userId: "operator-user", email: "operator@example.com" };
-
     const summaryResult = await updateQueuedFacebookSourceRawText(testDb, {
       sourceId: "summary",
       rawText: "Summary post",
       captureMetadata: { captureMethod: "playwright_operator_browser", capturedAt: "2026-07-15T00:00:00.000Z", sourceUrl: "https://facebook.com/share/p/summary", finalUrl: "https://facebook.com/share/p/summary" },
       sourceUrl: "https://facebook.com/share/p/summary",
       discoveredUrls: ["https://facebook.com/share/p/child"],
-      actor,
     });
     const [child] = await testDb.select({ id: sources.id }).from(sources).where(eq(sources.canonicalUrl, "https://facebook.com/share/p/child"));
 
@@ -369,7 +360,6 @@ describe("Facebook capture queue", () => {
       captureMetadata: { captureMethod: "playwright_operator_browser", capturedAt: "2026-07-15T00:00:00.000Z", sourceUrl: "https://facebook.com/share/p/child", finalUrl: "https://facebook.com/share/p/child" },
       sourceUrl: "https://facebook.com/share/p/child",
       discoveredUrls: ["https://facebook.com/share/p/grandchild"],
-      actor,
     });
 
     expect(summaryResult).toMatchObject({ status: "updated", discovered: { queuedCount: 1 } });
@@ -389,7 +379,6 @@ describe("Facebook capture queue", () => {
         sourceUrl: "https://facebook.com/groups/xuyenviet/posts/handoff-facebook",
         finalUrl: "https://facebook.com/groups/xuyenviet/posts/handoff-facebook",
       },
-      actor: { userId: "operator-user", email: "operator@example.com" },
     });
 
     const [raw] = await testDb.select().from(sourceCaptureVersions).where(eq(sourceCaptureVersions.sourceId, "handoff-facebook"));

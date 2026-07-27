@@ -72,7 +72,6 @@ describe("Facebook capture review state", () => {
         sourceUrl: "https://facebook.com/groups/xuyenviet/posts/captured-facebook",
         finalUrl: "https://facebook.com/groups/xuyenviet/posts/captured-facebook",
       },
-      actor: { userId: "operator-user", email: "operator-user@example.com" },
       now: new Date("2026-07-13T00:00:00.000Z"),
     });
 
@@ -305,7 +304,6 @@ describe("Facebook capture review state", () => {
           sourceUrl: "https://facebook.com/groups/xuyenviet/posts/recapture-facebook",
           finalUrl: "https://m.facebook.com/groups/xuyenviet/posts/recapture-facebook",
         },
-        actor: { userId: "operator-user", email: "operator-user@example.com" },
         now: new Date("2026-07-13T03:00:00.000Z"),
       }),
     ).resolves.toMatchObject({ status: "updated", rawMaterialId: "raw-recapture-facebook", reviewId: ensured.review.id });

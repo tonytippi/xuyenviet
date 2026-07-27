@@ -2,7 +2,7 @@ import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
 import { facebookCaptureReviews, rawSourceMaterial, schema, sourceCaptureVersions, sources } from "../../db/schema";
-import { type AuditActor, createSystemAuditActor } from "../audit/actors";
+import { createSystemAuditActor } from "../audit/actors";
 import { recordAuditEvent } from "../audit/events";
 import { canonicalizeFacebookUrl } from "./capture-identity";
 import { lockFacebookCaptureResources } from "./facebook-capture-locks";
@@ -18,6 +18,7 @@ export type QueuedFacebookSource = {
   label: string;
   rawMaterialId: string;
   rawMetadata: Record<string, unknown> | null;
+  submittedByUserId: string;
   forceLiveCapture: boolean;
   forceLiveCaptureGeneration: number;
 };
@@ -38,15 +39,6 @@ export type SafeFacebookCaptureMetadata = {
   importCorrelationToken?: string;
   captureMethodVersion?: string;
   payloadSchemaVersion?: string;
-  captureActorId?: string;
-  importActorId?: string;
-};
-
-export type FacebookCaptureActor = {
-  userId: string;
-  email: string;
-  actorClass?: "user" | "system";
-  actorSystem?: string;
 };
 
 export type DiscoveredFacebookPost = {
@@ -67,7 +59,7 @@ const safeMetadataKeys = new Set<keyof SafeFacebookCaptureMetadata>([
   "groupName",
   "timestampText",
   "postCreatedAt",
-  "captureOrigin", "captureArtifactId", "importCorrelationToken", "captureMethodVersion", "payloadSchemaVersion", "captureActorId", "importActorId",
+  "captureOrigin", "captureArtifactId", "importCorrelationToken", "captureMethodVersion", "payloadSchemaVersion",
 ]);
 
 function queuedRawTextCondition() {
@@ -169,6 +161,7 @@ export async function listQueuedFacebookSources(db: FacebookCaptureDb, input: { 
       label: sources.label,
       rawMaterialId: rawSourceMaterial.id,
       rawMetadata: rawSourceMaterial.rawMetadata,
+      submittedByUserId: sources.submittedByUserId,
       forceLiveCapture: sql<boolean>`coalesce(${facebookCaptureReviews.forceLiveCapture}, false)`,
       forceLiveCaptureGeneration: sql<number>`coalesce(${facebookCaptureReviews.forceLiveCaptureGeneration}, 0)`,
     })
@@ -188,7 +181,6 @@ export async function updateQueuedFacebookSourceRawText(
     sourceId: string;
     rawText: string;
     captureMetadata: SafeFacebookCaptureMetadata & Record<string, unknown>;
-    actor?: FacebookCaptureActor;
     now?: Date;
     discoveredUrls?: string[];
     sourceUrl?: string;
@@ -197,7 +189,7 @@ export async function updateQueuedFacebookSourceRawText(
   },
 ) {
   const canonicalFinalUrl = canonicalizeFacebookUrl(input.captureMetadata.finalUrl);
-  const discoveredPosts = input.actor && input.sourceUrl
+  const discoveredPosts = input.sourceUrl
     ? normalizeDiscoveredFacebookPosts(input.discoveredUrls ?? [], input.sourceUrl)
     : [];
 
@@ -213,6 +205,7 @@ export async function updateQueuedFacebookSourceRawText(
         sourceId: sources.id,
         rawMaterialId: rawSourceMaterial.id,
         rawMetadata: rawSourceMaterial.rawMetadata,
+        submittedByUserId: sources.submittedByUserId,
       })
       .from(sources)
       .innerJoin(rawSourceMaterial, eq(rawSourceMaterial.sourceId, sources.id))
@@ -262,16 +255,14 @@ export async function updateQueuedFacebookSourceRawText(
           })
           .where(eq(rawSourceMaterial.id, queued.rawMaterialId));
 
-        if (input.actor) {
-          await recordAuditEvent({
-            actor: auditActorForCapture(input.actor),
-            operation: "update",
-            targetType: "sources",
-            targetId: queued.sourceId,
-            afterSummary: `Facebook capture skipped as duplicate of source ${duplicate.id}.`,
-            createdAt: input.now,
-          }, transaction);
-        }
+        await recordAuditEvent({
+          actor: createSystemAuditActor("system-facebook-capture"),
+          operation: "update",
+          targetType: "sources",
+          targetId: queued.sourceId,
+          afterSummary: `Facebook capture skipped as duplicate of source ${duplicate.id}.`,
+          createdAt: input.now,
+        }, transaction);
 
         return { status: "duplicate" as const, duplicateSourceId: duplicate.id };
       }
@@ -283,6 +274,7 @@ export async function updateQueuedFacebookSourceRawText(
       captureKind: "facebook",
       rawText: input.rawText,
       metadata: { ...rawMetadata, kind: "facebook_operator" } as FacebookCaptureMetadata,
+      executorSystem: "system-facebook-capture",
       capturedAt: new Date(input.captureMetadata.capturedAt),
     });
 
@@ -314,24 +306,22 @@ export async function updateQueuedFacebookSourceRawText(
         ));
     }
 
-    if (input.actor) {
-      await recordAuditEvent({
-        actor: auditActorForCapture(input.actor),
-        operation: "update",
-        targetType: "source_capture_version",
-        targetId: version.id,
-        beforeSummary: `Facebook capture version appended; method: ${rawMetadata.captureMethod}`,
-          afterSummary: `Facebook capture version appended; capturedAt: ${rawMetadata.capturedAt}`,
-        createdAt: input.now,
-      }, transaction);
-    }
+    await recordAuditEvent({
+      actor: createSystemAuditActor("system-facebook-capture"),
+      operation: "update",
+      targetType: "source_capture_version",
+      targetId: version.id,
+      beforeSummary: `Facebook capture version appended; method: ${rawMetadata.captureMethod}`,
+      afterSummary: `Facebook capture version appended; capturedAt: ${rawMetadata.capturedAt}`,
+      createdAt: input.now,
+    }, transaction);
 
-    const discovered = input.actor && input.sourceUrl && !queued.rawMetadata?.discoveredFromSourceId
+    const discovered = input.sourceUrl && !queued.rawMetadata?.discoveredFromSourceId
         ? await queueDiscoveredFacebookPostsInTransaction(transaction, {
           sourceId: queued.sourceId,
           sourceUrl: input.sourceUrl,
           urls: input.discoveredUrls ?? [],
-          actor: input.actor,
+          submitterUserId: queued.submittedByUserId,
         }, discoveredPosts, true)
       : { queuedCount: 0, duplicateCount: 0 };
 
@@ -350,7 +340,6 @@ export async function queueDiscoveredFacebookPosts(
     sourceId: string;
     sourceUrl: string;
     urls: string[];
-    actor: FacebookCaptureActor;
   },
 ) {
   const discoveredPosts = normalizeDiscoveredFacebookPosts(input.urls, input.sourceUrl);
@@ -360,13 +349,20 @@ export async function queueDiscoveredFacebookPosts(
   }
 
   return db.transaction(async (transaction) => {
-    return queueDiscoveredFacebookPostsInTransaction(transaction, input, discoveredPosts);
+    const [source] = await transaction
+      .select({ submittedByUserId: sources.submittedByUserId })
+      .from(sources)
+      .where(eq(sources.id, input.sourceId))
+      .limit(1)
+      .for("update");
+    if (!source) throw new Error("Originating Facebook source does not exist.");
+    return queueDiscoveredFacebookPostsInTransaction(transaction, { ...input, submitterUserId: source.submittedByUserId }, discoveredPosts);
   });
 }
 
 async function queueDiscoveredFacebookPostsInTransaction(
   transaction: Parameters<Parameters<FacebookCaptureDb["transaction"]>[0]>[0],
-  input: { sourceId: string; sourceUrl: string; urls: string[]; actor: FacebookCaptureActor },
+  input: { sourceId: string; sourceUrl: string; urls: string[]; submitterUserId: string },
   discoveredPosts = normalizeDiscoveredFacebookPosts(input.urls, input.sourceUrl),
   locksHeld = false,
 ) {
@@ -401,7 +397,7 @@ async function queueDiscoveredFacebookPostsInTransaction(
         verificationStatus: "unverified" as const,
         official: false,
         partner: false,
-        submittedByUserId: input.actor.userId,
+        submittedByUserId: input.submitterUserId,
       })))
       .returning({ id: sources.id });
     await transaction.insert(rawSourceMaterial).values(queuedSources.map((source) => ({
@@ -411,7 +407,7 @@ async function queueDiscoveredFacebookPostsInTransaction(
   }
 
   await recordAuditEvent({
-    actor: auditActorForCapture(input.actor),
+    actor: createSystemAuditActor("system-facebook-capture"),
     operation: "create",
     targetType: "facebook_capture_discovered_posts",
     targetId: input.sourceId,
@@ -442,12 +438,4 @@ export function normalizeDiscoveredFacebookPosts(urls: string[], sourceUrl: stri
 
 export function recordFacebookCaptureFailure(sourceId: string, reason: string) {
   return { sourceId, status: "failed" as const, reason };
-}
-
-function auditActorForCapture(actor: FacebookCaptureActor): AuditActor {
-  if (actor.actorClass === "system") {
-    return createSystemAuditActor(actor.actorSystem);
-  }
-
-  return { kind: "user", userId: actor.userId, email: actor.email };
 }

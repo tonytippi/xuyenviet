@@ -4,16 +4,14 @@ import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { sourceKnowledgeDraftExtractionPromptVersion } from "../ai/prompts";
 import { facebookCaptureReviews, knowledgeCards, knowledgeCardSources, rawSourceMaterial, schema, sourceCaptureVersions, sources, type FacebookCaptureReviewStatus } from "../../db/schema";
 import { recordAuditEvent } from "../audit/events";
+import { createUserAuditActor, type AuditActor } from "../audit/actors";
 import { lockFacebookCaptureResources } from "./facebook-capture-locks";
 
 export type FacebookCaptureReviewDb = Pick<PostgresJsDatabase<typeof schema>, "select" | "insert" | "update" | "execute">;
 type FacebookCaptureReviewTransitionDb = FacebookCaptureReviewDb & Pick<PostgresJsDatabase<typeof schema>, "transaction">;
 type FacebookCaptureReviewLockDb = Pick<PostgresJsDatabase<typeof schema>, "execute">;
 
-export type FacebookCaptureReviewActor = {
-  userId: string;
-  email: string;
-};
+export type FacebookCaptureReviewActor = AuditActor | { userId: string; email: string };
 
 const maxSafeReasonLength = 500;
 const unsafeSummaryPattern = /provider[_-]?payload|raw[_-]?text|cookie|token|password|localstorage|local_storage|<html|secret/i;
@@ -231,6 +229,7 @@ export async function markFacebookCaptureReviewStatusInTransaction(
     now?: Date;
   },
 ) {
+  const actor = normalizeActor(input.actor);
   if (!Object.hasOwn(allowedTransitionSourceStatuses, input.status)) {
     throw new Error("Unsupported Facebook capture review transition status.");
   }
@@ -284,7 +283,8 @@ export async function markFacebookCaptureReviewStatusInTransaction(
     .update(facebookCaptureReviews)
     .set({
       status: input.status,
-      reviewerUserId: input.actor.userId,
+       reviewerUserId: actor.kind === "user" ? actor.userId : null,
+       executorSystem: actor.kind === "system" ? actor.system : null,
       reviewedAt: mutationTimestamp,
       rejectionReason: input.status === "rejected" ? rejectionReason : null,
       extractionError: input.status === "extraction_failed" ? extractionError : null,
@@ -298,7 +298,7 @@ export async function markFacebookCaptureReviewStatusInTransaction(
   }
 
   await recordAuditEvent({
-    actor: { kind: "user", ...input.actor },
+     actor,
     operation: "update",
     targetType: "facebook_capture_review",
     targetId: lockedReview.id,
@@ -368,7 +368,7 @@ export async function reopenFacebookCaptureForRecapture(
     await transaction.update(sources).set({ currentCaptureVersionId: null }).where(eq(sources.id, lockedReview.sourceId));
 
     await recordAuditEvent({
-      actor: { kind: "user", ...input.actor },
+      actor: normalizeActor(input.actor),
       operation: "update",
       targetType: "facebook_capture_review",
       targetId: lockedReview.id,
@@ -446,7 +446,7 @@ export async function requestFacebookCaptureRecapture(
     await transaction.update(sources).set({ currentCaptureVersionId: null }).where(eq(sources.id, lockedReview.sourceId));
 
     await recordAuditEvent({
-      actor: { kind: "user", ...input.actor },
+      actor: normalizeActor(input.actor),
       operation: "update",
       targetType: "facebook_capture_review",
       targetId: lockedReview.id,
@@ -461,6 +461,10 @@ export async function requestFacebookCaptureRecapture(
 
 async function lockFacebookCaptureSource(db: FacebookCaptureReviewLockDb, sourceId: string) {
   await lockFacebookCaptureResources(db, { sourceId });
+}
+
+function normalizeActor(actor: FacebookCaptureReviewActor): AuditActor {
+  return "kind" in actor ? actor : createUserAuditActor(actor);
 }
 
 function getMutationTimestamp(requested: Date | undefined) {

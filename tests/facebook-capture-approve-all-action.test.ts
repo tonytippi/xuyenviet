@@ -170,7 +170,7 @@ describe("Facebook capture extract and approve all action", () => {
     const approvedCard = cards.find((card) => card.status === "approved");
     expect(approvedCard).toBeDefined();
     await expect(testDb.select().from(knowledgeCardSources).where(eq(knowledgeCardSources.knowledgeCardId, approvedCard?.id ?? ""))).resolves.toMatchObject([{ sourceId: "approve-success", supportLevel: "primary" }]);
-    await expect(testDb.select().from(facebookCaptureReviews).where(eq(facebookCaptureReviews.id, review.id))).resolves.toMatchObject([{ status: "extracted_approved", reviewerUserId: "operator-user" }]);
+    await expect(testDb.select().from(facebookCaptureReviews).where(eq(facebookCaptureReviews.id, review.id))).resolves.toMatchObject([{ status: "extracted_approved", reviewerUserId: null, executorSystem: "system-knowledge-pipeline" }]);
   });
 
   test("returns queue actions to the Facebook capture list after queueing", async () => {
@@ -208,7 +208,7 @@ describe("Facebook capture extract and approve all action", () => {
 
     expect(fetch).not.toHaveBeenCalled();
     await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, generatedDraft.id))).resolves.toMatchObject([{ status: "approved", needsReview: false }]);
-    await expect(testDb.select().from(facebookCaptureReviews).where(eq(facebookCaptureReviews.id, review.id))).resolves.toMatchObject([{ status: "extracted_approved", reviewerUserId: "operator-user" }]);
+    await expect(testDb.select().from(facebookCaptureReviews).where(eq(facebookCaptureReviews.id, review.id))).resolves.toMatchObject([{ status: "extracted_approved", reviewerUserId: "operator-user", executorSystem: null }]);
   });
 
   test("invalid provider output marks extraction_failed and approves no cards", async () => {
@@ -299,7 +299,7 @@ describe("Facebook capture extract and approve all action", () => {
     await expect(processNextKnowledgeExtractionJob({ workerId: "test-worker" })).resolves.toMatchObject({ status: "processed" });
 
     await expect(testDb.select().from(knowledgeCards)).resolves.toMatchObject([{ status: "approved", needsReview: false }]);
-    await expect(testDb.select().from(facebookCaptureReviews).where(eq(facebookCaptureReviews.id, review.id))).resolves.toMatchObject([{ status: "extracted_approved", reviewerUserId: "operator-user" }]);
+    await expect(testDb.select().from(facebookCaptureReviews).where(eq(facebookCaptureReviews.id, review.id))).resolves.toMatchObject([{ status: "extracted_approved", reviewerUserId: null, executorSystem: "system-knowledge-pipeline" }]);
   });
 
   test("model unavailable marks extraction_failed without provider payload or approvals", async () => {

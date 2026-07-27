@@ -180,7 +180,7 @@ export async function suggestKnowledgeFromSourceUrl(sourceId: string): Promise<K
         if (suggestion.draft) {
           const [card] = await transaction
             .insert(knowledgeCards)
-            .values({ ...suggestion.draft, createdByUserId: session.userId, aiGatewayModelId: model.id })
+            .values({ ...suggestion.draft, createdByUserId: session.userId, executorSystem: "system-ai-orchestration", aiGatewayModelId: model.id })
             .returning({ id: knowledgeCards.id });
 
           suggestedCardId = card.id;
@@ -200,6 +200,7 @@ export async function suggestKnowledgeFromSourceUrl(sourceId: string): Promise<K
           aiPromptVersion: sourceKnowledgeSuggestionPromptVersion,
           aiGatewayModelId: model.id,
           createdByUserId: session.userId,
+          executorSystem: "system-ai-orchestration",
         });
         actions.push(suggestion.action);
       }

@@ -8,6 +8,7 @@ import { getDb } from "@/db/client";
 import { knowledgeCardEvidence, knowledgeCards, knowledgeCardSearchDocuments, knowledgeCardSources, sourceCaptureVersions, sources, type KnowledgeSourceSupport } from "@/db/schema";
 import { evaluateKnowledgeTravelerPolicy, type KnowledgeTravelerPolicy, type KnowledgeTravelerPolicyReason } from "@/features/knowledge/state";
 import { enqueueKnowledgeIndexWork } from "@/features/knowledge/indexing-queue";
+import { createSystemAuditActor } from "@/features/audit/actors";
 
 const defaultSearchLimit = 5;
 const maxSearchLimit = 10;
@@ -86,7 +87,8 @@ type ActiveSupportingEvidenceRow = {
  * Compatibility-only projection entrypoint. Production workers must provide the
  * claimed marker identity and fence so an obsolete version cannot win a race.
  */
-export async function projectClaimedKnowledgeIndexWork(input: { markerId: string; cardId: string; contentVersion: number; fencingToken: string; now?: Date }, db = getDb()) {
+export async function projectClaimedKnowledgeIndexWork(input: { markerId: string; cardId: string; contentVersion: number; fencingToken: string; executorSystem?: unknown; now?: Date }, db = getDb()) {
+  const executor = createSystemAuditActor(input.executorSystem ?? "system-knowledge-pipeline");
   return db.transaction(async (transaction) => {
     // Lock and validate the claim before any projection write, including a first insert.
     const [claim] = await transaction.execute(sql`select id from knowledge_index_dirty_markers where id = ${input.markerId} and knowledge_card_id = ${input.cardId} and content_version = ${input.contentVersion} and status = 'claimed' and fencing_token = ${input.fencingToken} and lease_expires_at > clock_timestamp() for update`) as Array<{ id: string }>;
@@ -107,7 +109,7 @@ export async function projectClaimedKnowledgeIndexWork(input: { markerId: string
     }
     const searchableText = buildSearchableText(eligibleCard);
     const textHash = hashSearchableText(searchableText);
-    const [document] = await transaction.insert(knowledgeCardSearchDocuments).values({ knowledgeCardId: eligibleCard.id, contentVersion: input.contentVersion, acceptedFence: input.fencingToken, status: "active", searchableText, textHash, sourceCount: eligibleCard.sources.length, confidence: eligibleCard.confidence, freshnessSensitive: eligibleCard.freshnessSensitive, updatedAt: sql`clock_timestamp()`, disabledAt: null }).onConflictDoUpdate({ target: knowledgeCardSearchDocuments.knowledgeCardId, set: { contentVersion: input.contentVersion, acceptedFence: input.fencingToken, status: "active", searchableText, textHash, sourceCount: eligibleCard.sources.length, confidence: eligibleCard.confidence, freshnessSensitive: eligibleCard.freshnessSensitive, updatedAt: sql`clock_timestamp()`, disabledAt: null }, where: sql`${knowledgeCardSearchDocuments.contentVersion} <= ${input.contentVersion} and ${claimIsCurrent}` }).returning();
+    const [document] = await transaction.insert(knowledgeCardSearchDocuments).values({ knowledgeCardId: eligibleCard.id, contentVersion: input.contentVersion, acceptedFence: input.fencingToken, executorSystem: executor.system, status: "active", searchableText, textHash, sourceCount: eligibleCard.sources.length, confidence: eligibleCard.confidence, freshnessSensitive: eligibleCard.freshnessSensitive, updatedAt: sql`clock_timestamp()`, disabledAt: null }).onConflictDoUpdate({ target: knowledgeCardSearchDocuments.knowledgeCardId, set: { contentVersion: input.contentVersion, acceptedFence: input.fencingToken, executorSystem: executor.system, status: "active", searchableText, textHash, sourceCount: eligibleCard.sources.length, confidence: eligibleCard.confidence, freshnessSensitive: eligibleCard.freshnessSensitive, updatedAt: sql`clock_timestamp()`, disabledAt: null }, where: sql`${knowledgeCardSearchDocuments.contentVersion} <= ${input.contentVersion} and ${claimIsCurrent}` }).returning();
     return document ? { cardId: eligibleCard.id, indexed: true as const, outcome: "indexed" as const } : { cardId: input.cardId, indexed: false as const, outcome: "lost_claim" as const };
   });
 }
@@ -123,7 +125,7 @@ export async function indexApprovedKnowledgeCard(cardId: string) {
   const db = getDb();
   const [card] = await db.select({ contentVersion: knowledgeCards.contentVersion, evidenceSetRevision: knowledgeCards.evidenceSetRevision }).from(knowledgeCards).where(eq(knowledgeCards.id, normalizedCardId)).limit(1);
   if (!card) throw new KnowledgeSearchError("Knowledge card ID is required.", "invalid_card");
-  await db.transaction((tx) => enqueueKnowledgeIndexWork(tx, { cardId: normalizedCardId, contentVersion: card.contentVersion, evidenceSetRevision: card.evidenceSetRevision, reason: "compatibility" }));
+  await db.transaction((tx) => enqueueKnowledgeIndexWork(tx, { cardId: normalizedCardId, contentVersion: card.contentVersion, evidenceSetRevision: card.evidenceSetRevision, reason: "compatibility", executorSystem: "system-knowledge-pipeline" }));
   return { cardId: normalizedCardId, indexed: false as const };
 }
 

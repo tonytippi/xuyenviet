@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-07-27 (Third/final Story 8.2 review approved; status set to done.)
+# last_updated: 2026-07-27 (Story 8.3 completed under the user-authorized disposable development-data clean break and is ready for review.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-07-27 (Third/final Story 8.2 review approved; status set to done.)
+last_updated: 2026-07-27 (Story 8.3 completed under the user-authorized disposable development-data clean break and is ready for review.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -131,7 +131,8 @@ development_status:
   # Second-review repair 2026-07-27: migration and Drizzle checks reject NULL actor-identity bypasses; web-search usage retains available trip project scope; Audit is the sole public normalized usage writer with catalog validation. No Story 8.3/8.4 legacy paths changed. Focused migration/usage/source-bundle suite: 106 tests passed; lint (0 errors, 3 pre-existing unrelated warnings), typecheck, and build pass; db:generate remains blocked by the non-TTY Drizzle rename prompt.
   # Third/final permitted BMad review 2026-07-27 through b4f39f880c23e63474fb00dc872fe2d9df4dfde9: Blind Hunter, Edge Case Hunter, and Acceptance Auditor found no actionable in-scope findings. Focused 8-file suite (151 tests), lint (0 errors; 3 pre-existing warnings), typecheck, and build pass. Authorized disposable/reset-only migration contract and documented db:generate/full-suite gaps remain unchanged.
   8-2-persist-valid-audit-history-and-usage-attribution: done
-  8-3-attribute-knowledge-capture-and-ai-work-to-system-executors: backlog
+  # Story 8.3 completed 2026-07-27 under the user-authorized disposable development-data clean break. Focused 12-file suite: 189 tests passed; lint (0 errors, 3 pre-existing warnings), typecheck, build, and db:reset passed. db:generate remains blocked by its non-TTY rename prompt. No commit performed.
+  8-3-attribute-knowledge-capture-and-ai-work-to-system-executors: review
   8-4-attribute-trip-proposal-expiry-through-the-audit-boundary: backlog
   8-5-remove-fake-system-users-in-the-clean-break-migration: backlog
   8-6-verify-actor-isolation-and-attribution-end-to-end: backlog

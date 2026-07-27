@@ -4,7 +4,7 @@ import { alias } from "drizzle-orm/pg-core";
 import { getDb } from "@/db/client";
 import { knowledgeCards, knowledgeCardSources, knowledgeSourceSuggestions, sourceCaptureVersions, sources } from "@/db/schema";
 import { recordAuditEvent } from "@/features/audit/events";
-import { toUserAuditActor } from "@/features/audit/actors";
+import { createSystemAuditActor, toUserAuditActor, type SystemAuditActorId } from "@/features/audit/actors";
 import { enqueueKnowledgeIndexWork } from "@/features/knowledge/indexing-queue";
 import type { AuthenticatedSession } from "@/server/auth";
 
@@ -38,7 +38,20 @@ export async function approveKnowledgeDraftBatchForActorInTransaction(transactio
   return { draftIds: approvedDraftIds };
 }
 
-async function approveKnowledgeDraftForActorInTransaction(transaction: ReviewMutationDb, actor: AuthenticatedSession, draftId: string) {
+export async function approveKnowledgeDraftBatchForSystemInTransaction(transaction: ReviewMutationDb, executorSystem: SystemAuditActorId, draftIds: string[]): Promise<{ draftIds: string[] }> {
+  if (draftIds.length === 0) {
+    throw new KnowledgeDraftApprovalCoreError("Không có bản nháp nào để phê duyệt.", "invalid_draft");
+  }
+
+  const approvedDraftIds: string[] = [];
+  for (const draftId of draftIds) {
+    const result = await approveKnowledgeDraftForActorInTransaction(transaction, null, draftId, executorSystem);
+    approvedDraftIds.push(result.draftId);
+  }
+  return { draftIds: approvedDraftIds };
+}
+
+async function approveKnowledgeDraftForActorInTransaction(transaction: ReviewMutationDb, actor: AuthenticatedSession | null, draftId: string, executorSystem?: SystemAuditActorId) {
   const sourceSnapshot = await loadReviewableDraft(transaction, draftId);
   for (const source of sourceSnapshot.sources.sort((left, right) => left.id.localeCompare(right.id))) {
     await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${source.id}, 44))`);
@@ -71,7 +84,7 @@ async function approveKnowledgeDraftForActorInTransaction(transaction: ReviewMut
   await enqueueKnowledgeIndexWork(transaction, { cardId: draftId, contentVersion: updatedDraft.contentVersion, evidenceSetRevision: updatedDraft.evidenceSetRevision, reason: "draft_approval" });
 
   await recordAuditEvent({
-    actor: toUserAuditActor(actor),
+    actor: executorSystem ? createSystemAuditActor(executorSystem) : toUserAuditActor(actor!),
     operation: "approve",
     targetType: "knowledge_draft",
     targetId: draftId,

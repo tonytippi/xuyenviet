@@ -15,7 +15,7 @@ const defaultBatchSize = 10;
 const maxBatchSize = 50;
 const defaultLeaseMs = 5 * 60_000;
 
-export type KnowledgeIndexingClaim = { markerId: string; cardId: string; contentVersion: number; fencingToken: string; leaseExpiresAt: Date };
+export type KnowledgeIndexingClaim = { markerId: string; cardId: string; contentVersion: number; fencingToken: string; leaseExpiresAt: Date; executorSystem: string | null };
 export type KnowledgeIndexingWorkerResult =
   | { status: "indexed"; indexedCount: number; skippedCount: number; cardIds: string[] }
   | { status: "no_job"; indexedCount: 0; skippedCount: 0; cardIds: [] }
@@ -31,7 +31,7 @@ export async function claimNextKnowledgeIndexWork(input: { workerId: string }, d
     const rows = await tx.execute(sql`select id from knowledge_index_dirty_markers where status = 'pending' and next_run_at <= clock_timestamp() and attempt_count < max_attempts order by next_run_at asc, created_at asc for update skip locked limit 1`) as Array<{ id: string }>;
     if (!rows[0]) return null;
     const [claimed] = await tx.update(knowledgeIndexDirtyMarkers).set({ status: "claimed", claimedBy: workerId, claimedAt: sql`clock_timestamp()`, leaseExpiresAt: sql`clock_timestamp() + ${getKnowledgeIndexLeaseMs()} * interval '1 millisecond'`, fencingToken, attemptCount: sql`${knowledgeIndexDirtyMarkers.attemptCount} + 1`, updatedAt: sql`clock_timestamp()`, failureCode: null, failureReason: null }).where(and(eq(knowledgeIndexDirtyMarkers.id, rows[0].id), eq(knowledgeIndexDirtyMarkers.status, "pending"), sql`${knowledgeIndexDirtyMarkers.nextRunAt} <= clock_timestamp()`)).returning();
-    return claimed ? { markerId: claimed.id, cardId: claimed.knowledgeCardId, contentVersion: claimed.contentVersion, fencingToken, leaseExpiresAt: claimed.leaseExpiresAt! } : null;
+    return claimed ? { markerId: claimed.id, cardId: claimed.knowledgeCardId, contentVersion: claimed.contentVersion, fencingToken, leaseExpiresAt: claimed.leaseExpiresAt!, executorSystem: claimed.executorSystem } : null;
   });
 }
 
@@ -84,7 +84,7 @@ export async function backfillKnowledgeIndexWork(input: { cursor?: string; batch
       if (!current) return;
       const { isKnowledgeCardEligibleForProjection } = await import("@/features/knowledge/search");
       if (await isKnowledgeCardEligibleForProjection(tx, card.id)) {
-        await enqueueKnowledgeIndexWork(tx, { cardId: card.id, contentVersion: current.contentVersion, evidenceSetRevision: current.evidenceSetRevision, reason: "backfill" });
+        await enqueueKnowledgeIndexWork(tx, { cardId: card.id, contentVersion: current.contentVersion, evidenceSetRevision: current.evidenceSetRevision, reason: "backfill", executorSystem: "system-knowledge-pipeline" });
       } else {
         await tx.update(knowledgeCardSearchDocuments).set({ status: "disabled", disabledAt: now, updatedAt: now }).where(and(eq(knowledgeCardSearchDocuments.knowledgeCardId, card.id), eq(knowledgeCardSearchDocuments.status, "active")));
       }

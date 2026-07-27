@@ -4,7 +4,7 @@ import { and, desc, eq, isNull, or, sql } from "drizzle-orm";
 import { createHash } from "node:crypto";
 
 import { getDb } from "@/db/client";
-import { auditEvents, knowledgeCardEvidence, knowledgeCardSearchDocuments, knowledgeCards, knowledgeCardSources, knowledgeCardTypeValues, knowledgeIngestionCandidates, knowledgeIngestionJobs, sourceCaptureVersions, sources } from "@/db/schema";
+import { knowledgeCardEvidence, knowledgeCardSearchDocuments, knowledgeCards, knowledgeCardSources, knowledgeCardTypeValues, knowledgeIngestionCandidates, knowledgeIngestionJobs, sourceCaptureVersions, sources } from "@/db/schema";
 import { completeEvaluation, completeExtraction } from "@/features/ai/gateway";
 import { getAiGatewayPricingSnapshot, selectActiveAiGatewayModel, type SelectedAiGatewayModel } from "@/features/ai/models";
 import { buildKnowledgePipelineExtractionMessages, buildKnowledgePipelineJudgmentMessages, buildKnowledgePipelineMultiFactExtractionMessages, buildKnowledgePipelineRelationJudgmentMessages, knowledgePipelineExtractionPromptVersion, knowledgePipelineExtractionPurpose, knowledgePipelineJudgmentPromptVersion, knowledgePipelineJudgmentPurpose, knowledgePipelineMultiFactExtractionPromptVersion } from "@/features/ai/prompts";
@@ -12,10 +12,10 @@ import { commitKnowledgeIngestionStage, finalizeV2Parent, retryKnowledgeIngestio
 import { disableStaleKnowledgeSearchProjection, enqueueKnowledgeIndexWork } from "@/features/knowledge/indexing-queue";
 import { enrollAutoActiveSampling, enrollVerifyFirstSampling, lockSamplingPolicyBoundary, scheduleKnowledgeRecommendation } from "@/features/knowledge/recommendations";
 import { writeAiUsageEvent } from "@/features/audit/usage";
+import { createSystemAuditActor } from "@/features/audit/actors";
+import { recordAuditEvent } from "@/features/audit/events";
 
-const systemActorId = "system-knowledge-pipeline";
-const systemActorEmail = "system-knowledge-pipeline@xuyenviet.invalid";
-const systemRecommendationActor = { userId: systemActorId, email: systemActorEmail };
+const pipelineActor = createSystemAuditActor("system-knowledge-pipeline");
 type PipelineDb = ReturnType<typeof getDb>;
 type Candidate = { type: (typeof knowledgeCardTypeValues)[number]; title: string; summary: string; locationName: string | null; routeSegment: string | null; conditions: string[]; freshnessSensitive: boolean; evidence: { quoteText: string; spanStart: number; spanEnd: number } };
 type Judgment = { decision: "publish" | "review_recommended" | "verify_first" | "suppress"; summary: string; relevance: number; extractability: number; evidenceGrounding: number; specificity: number; actionability: number; firstHandLikelihood: number; spamCommercialRisk: number };
@@ -214,12 +214,12 @@ async function persistV2CandidateCard(claim: KnowledgeIngestionCandidateClaim, c
       await attachEvidence(tx, target.id, v1Claim, fact, bundle, "conflicting");
       await tx.update(knowledgeCards).set({ publicationState: "suppressed", knowledgeState: "conflicted", reviewState: "ai_recommended", verificationState: isHighRisk(fact) ? "required" : target.verificationState, needsReview: true, contentVersion: sql`${knowledgeCards.contentVersion} + 1`, updatedAt: new Date() }).where(eq(knowledgeCards.id, target.id));
       const [version] = await tx.select({ contentVersion: knowledgeCards.contentVersion, evidenceSetRevision: knowledgeCards.evidenceSetRevision }).from(knowledgeCards).where(eq(knowledgeCards.id, target.id)).limit(1);
-      if (version) { await scheduleKnowledgeRecommendation({ cardId: target.id, contentVersion: version.contentVersion, evidenceSetRevision: version.evidenceSetRevision, reason: "conflict", supersedeStaleBy: systemRecommendationActor }, tx); await invalidateConflictedProjection(tx, target.id, version); }
+      if (version) { await scheduleKnowledgeRecommendation({ cardId: target.id, contentVersion: version.contentVersion, evidenceSetRevision: version.evidenceSetRevision, reason: "conflict", executorSystem: pipelineActor.system, supersedeStale: true }, tx); await invalidateConflictedProjection(tx, target.id, version); }
       await tx.update(knowledgeIngestionCandidates).set({ stage: "review_recommended", knowledgeCardId: target.id }).where(eq(knowledgeIngestionCandidates.id, claim.candidateId));
       return finishV2Candidate(tx, locked.jobId, claim.sourceId, "review_recommended", target.id);
     }
     const verificationRequired = outcome === "verify_first";
-    const [card] = await tx.insert(knowledgeCards).values({ type: fact.type, title: fact.title, summary: fact.summary, locationName: fact.locationName, routeSegment: fact.routeSegment, conditions: fact.conditions, freshnessSensitive: fact.freshnessSensitive, confidence: capture.sourceType === "community" ? "community" : "unverified", status: "approved", publicationState: outcome === "published" ? "active" : "suppressed", knowledgeState: outcome === "published" ? "community_observation" : "uncertain", reviewState: outcome === "published" ? "reviewed" : "ai_recommended", verificationState: verificationRequired ? "required" : "not_required", needsReview: outcome !== "published", currentJudgeSummary: judgment.summary, aiPromptVersion: candidate.extractionPromptVersion, aiGatewayModelId: candidate.extractionModelId, createdByUserId: systemActorId }).returning({ id: knowledgeCards.id });
+    const [card] = await tx.insert(knowledgeCards).values({ type: fact.type, title: fact.title, summary: fact.summary, locationName: fact.locationName, routeSegment: fact.routeSegment, conditions: fact.conditions, freshnessSensitive: fact.freshnessSensitive, confidence: capture.sourceType === "community" ? "community" : "unverified", status: "approved", publicationState: outcome === "published" ? "active" : "suppressed", knowledgeState: outcome === "published" ? "community_observation" : "uncertain", reviewState: outcome === "published" ? "reviewed" : "ai_recommended", verificationState: verificationRequired ? "required" : "not_required", needsReview: outcome !== "published", currentJudgeSummary: judgment.summary, aiPromptVersion: candidate.extractionPromptVersion, aiGatewayModelId: candidate.extractionModelId, executorSystem: pipelineActor.system }).returning({ id: knowledgeCards.id });
     await tx.insert(knowledgeCardSources).values({ knowledgeCardId: card.id, sourceId: claim.sourceId, supportLevel: "primary" });
     await tx.insert(knowledgeCardEvidence).values({ knowledgeCardId: card.id, sourceId: claim.sourceId, captureVersionId: claim.captureVersionId, quoteText: fact.evidence.quoteText, spanStart: fact.evidence.spanStart, spanEnd: fact.evidence.spanEnd, observedAt: capture.capturedAt, capturedAt: capture.capturedAt, conditions: fact.conditions, supportLevel: "supporting", displayPolicy: capture.sourceKind === "facebook" ? "operator_only" : "fact_only", state: "active", independenceKey: claim.sourceId });
     await tx.update(knowledgeCards).set({ contentVersion: sql`${knowledgeCards.contentVersion} + 1`, evidenceSetRevision: sql`${knowledgeCards.evidenceSetRevision} + 1`, updatedAt: new Date() }).where(eq(knowledgeCards.id, card.id));
@@ -229,9 +229,9 @@ async function persistV2CandidateCard(claim: KnowledgeIngestionCandidateClaim, c
       await markIndexDirty(tx, card.id, version, outcome === "published" ? "ingestion_publication" : outcome === "verify_first" ? "ingestion_verify_first" : "ingestion_relation_review");
       if (outcome === "published") await enrollAutoActiveSampling({ terminalIngestionJobId: claim.jobId, cardId: card.id, contentVersion: version.contentVersion, evidenceSetRevision: version.evidenceSetRevision, routeSegment: fact.routeSegment, locationName: fact.locationName }, tx);
       if (outcome === "verify_first") await enrollVerifyFirstSampling({ terminalIngestionJobId: claim.jobId, cardId: card.id, contentVersion: version.contentVersion, evidenceSetRevision: version.evidenceSetRevision, routeSegment: fact.routeSegment, locationName: fact.locationName }, tx);
-      if (outcome === "review_recommended") await scheduleKnowledgeRecommendation({ cardId: card.id, contentVersion: version.contentVersion, evidenceSetRevision: version.evidenceSetRevision, reason: relation.action === "ambiguous" ? "relation" : "missing_context", supersedeStaleBy: systemRecommendationActor }, tx);
+      if (outcome === "review_recommended") await scheduleKnowledgeRecommendation({ cardId: card.id, contentVersion: version.contentVersion, evidenceSetRevision: version.evidenceSetRevision, reason: relation.action === "ambiguous" ? "relation" : "missing_context", executorSystem: pipelineActor.system, supersedeStale: true }, tx);
     }
-    await tx.insert(auditEvents).values({ actorUserId: systemActorId, actorEmail: systemActorEmail, operation: "create", targetType: "knowledge_ingestion_candidate", targetId: card.id, afterSummary: "System pipeline persisted an independently judged candidate." });
+    await recordAuditEvent({ actor: pipelineActor, operation: "create", targetType: "knowledge_ingestion_candidate", targetId: card.id, afterSummary: "System pipeline persisted an independently judged candidate." }, tx);
     return finishV2Candidate(tx, locked.jobId, claim.sourceId, outcome, card.id);
   });
 }
@@ -306,7 +306,7 @@ async function publish(claim: KnowledgeIngestionClaim, version: number, candidat
           if (promoted) await markIndexDirty(tx, target.id, attachedVersion, "ingestion_promotion");
             await enrollAutoActiveSampling({ terminalIngestionJobId: claim.jobId, cardId: target.id, contentVersion: attachedVersion.contentVersion, evidenceSetRevision: attachedVersion.evidenceSetRevision, routeSegment: target.routeSegment, locationName: target.locationName }, tx);
         }
-       await tx.insert(auditEvents).values({ actorUserId: systemActorId, actorEmail: systemActorEmail, operation: "update", targetType: "knowledge_ingestion_evidence", targetId: target.id, afterSummary: "System pipeline attached independent supporting evidence." });
+       await recordAuditEvent({ actor: pipelineActor, operation: "update", targetType: "knowledge_ingestion_evidence", targetId: target.id, afterSummary: "System pipeline attached independent supporting evidence." }, tx);
       return { jobId: claim.jobId, sourceId: claim.sourceId, outcome: "published", cardId: target.id };
     }
     if (relation.action === "conflict" && target) {
@@ -316,17 +316,17 @@ async function publish(claim: KnowledgeIngestionClaim, version: number, candidat
         await tx.update(knowledgeCards).set({ publicationState: "suppressed", knowledgeState: "conflicted", reviewState: "ai_recommended", verificationState: isHighRisk(candidate) ? "required" : target.verificationState, needsReview: true, contentVersion: sql`${knowledgeCards.contentVersion} + 1`, updatedAt: new Date() }).where(eq(knowledgeCards.id, target.id));
         const [updated] = await tx.select({ contentVersion: knowledgeCards.contentVersion, evidenceSetRevision: knowledgeCards.evidenceSetRevision }).from(knowledgeCards).where(eq(knowledgeCards.id, target.id)).limit(1);
         if (updated) {
-          await scheduleKnowledgeRecommendation({ cardId: target.id, contentVersion: updated.contentVersion, evidenceSetRevision: updated.evidenceSetRevision, reason: "conflict", supersedeStaleBy: systemRecommendationActor }, tx);
+          await scheduleKnowledgeRecommendation({ cardId: target.id, contentVersion: updated.contentVersion, evidenceSetRevision: updated.evidenceSetRevision, reason: "conflict", executorSystem: pipelineActor.system, supersedeStale: true }, tx);
           await invalidateConflictedProjection(tx, target.id, updated);
         }
-      await tx.insert(auditEvents).values({ actorUserId: systemActorId, actorEmail: systemActorEmail, operation: "update", targetType: "knowledge_ingestion_conflict", targetId: target.id, afterSummary: "System pipeline suppressed a conflicted card for review." });
+      await recordAuditEvent({ actor: pipelineActor, operation: "update", targetType: "knowledge_ingestion_conflict", targetId: target.id, afterSummary: "System pipeline suppressed a conflicted card for review." }, tx);
       return { jobId: claim.jobId, sourceId: claim.sourceId, outcome: "review_recommended" };
     }
     if (relation.action !== "create") return terminal(claim, version, "review_recommended", "invalid_relation_action", tx);
     if (!await fence(claim, version, "published", undefined, tx)) return null;
-      const [card] = await tx.insert(knowledgeCards).values({ type: candidate.type, title: candidate.title, summary: candidate.summary, locationName: candidate.locationName, routeSegment: candidate.routeSegment, conditions: candidate.conditions, freshnessSensitive: candidate.freshnessSensitive, confidence: bundle.source.sourceType === "community" ? "community" : "unverified", status: "approved", publicationState: "active", knowledgeState: "community_observation", reviewState: "reviewed", verificationState: "not_required", needsReview: false, currentJudgeSummary: judgment.summary, aiPromptVersion: knowledgePipelineExtractionPromptVersion, aiGatewayModelId: extractionModelId, createdByUserId: systemActorId }).returning({ id: knowledgeCards.id });
+      const [card] = await tx.insert(knowledgeCards).values({ type: candidate.type, title: candidate.title, summary: candidate.summary, locationName: candidate.locationName, routeSegment: candidate.routeSegment, conditions: candidate.conditions, freshnessSensitive: candidate.freshnessSensitive, confidence: bundle.source.sourceType === "community" ? "community" : "unverified", status: "approved", publicationState: "active", knowledgeState: "community_observation", reviewState: "reviewed", verificationState: "not_required", needsReview: false, currentJudgeSummary: judgment.summary, aiPromptVersion: knowledgePipelineExtractionPromptVersion, aiGatewayModelId: extractionModelId, executorSystem: pipelineActor.system }).returning({ id: knowledgeCards.id });
     await tx.insert(knowledgeCardSources).values({ knowledgeCardId: card.id, sourceId: claim.sourceId, supportLevel: "primary" }); await attachEvidence(tx, card.id, claim, candidate, bundle, "supporting");
-     await tx.insert(auditEvents).values({ actorUserId: systemActorId, actorEmail: systemActorEmail, operation: "create", targetType: "knowledge_ingestion_publication", targetId: card.id, afterSummary: "System pipeline published an evidence-grounded knowledge card." });
+     await recordAuditEvent({ actor: pipelineActor, operation: "create", targetType: "knowledge_ingestion_publication", targetId: card.id, afterSummary: "System pipeline published an evidence-grounded knowledge card." }, tx);
      const [cardVersion] = await tx.select({ contentVersion: knowledgeCards.contentVersion, evidenceSetRevision: knowledgeCards.evidenceSetRevision }).from(knowledgeCards).where(eq(knowledgeCards.id, card.id)).limit(1);
       if (cardVersion) {
         await markIndexDirty(tx, card.id, cardVersion, "ingestion_publication");
@@ -357,7 +357,7 @@ async function publishVerifyFirst(claim: KnowledgeIngestionClaim, version: numbe
       await markIndexDirty(tx, target.id, attachedVersion, "ingestion_attach");
       if (promoted) await markIndexDirty(tx, target.id, attachedVersion, "ingestion_promotion");
       await enrollVerifyFirstSampling({ terminalIngestionJobId: claim.jobId, cardId: target.id, contentVersion: attachedVersion.contentVersion, evidenceSetRevision: attachedVersion.evidenceSetRevision, routeSegment: target.routeSegment, locationName: target.locationName }, tx);
-      await tx.insert(auditEvents).values({ actorUserId: systemActorId, actorEmail: systemActorEmail, operation: "update", targetType: "knowledge_ingestion_verify_first_evidence", targetId: target.id, afterSummary: "System pipeline attached corroborating evidence to a suppressed verification-required card." });
+      await recordAuditEvent({ actor: pipelineActor, operation: "update", targetType: "knowledge_ingestion_verify_first_evidence", targetId: target.id, afterSummary: "System pipeline attached corroborating evidence to a suppressed verification-required card." }, tx);
       return { jobId: claim.jobId, sourceId: claim.sourceId, outcome: "verify_first", cardId: target.id };
     }
     if (relation.action === "conflict" && relation.targetCardId) {
@@ -370,21 +370,21 @@ async function publishVerifyFirst(claim: KnowledgeIngestionClaim, version: numbe
       await tx.update(knowledgeCards).set({ publicationState: "suppressed", knowledgeState: "conflicted", reviewState: "ai_recommended", verificationState: "required", needsReview: true, contentVersion: sql`${knowledgeCards.contentVersion} + 1`, updatedAt: new Date() }).where(eq(knowledgeCards.id, target.id));
       const [updated] = await tx.select({ contentVersion: knowledgeCards.contentVersion, evidenceSetRevision: knowledgeCards.evidenceSetRevision }).from(knowledgeCards).where(eq(knowledgeCards.id, target.id)).limit(1);
       if (!updated) return null;
-      await scheduleKnowledgeRecommendation({ cardId: target.id, contentVersion: updated.contentVersion, evidenceSetRevision: updated.evidenceSetRevision, reason: "conflict", supersedeStaleBy: systemRecommendationActor }, tx);
+      await scheduleKnowledgeRecommendation({ cardId: target.id, contentVersion: updated.contentVersion, evidenceSetRevision: updated.evidenceSetRevision, reason: "conflict", executorSystem: pipelineActor.system, supersedeStale: true }, tx);
       await invalidateConflictedProjection(tx, target.id, updated);
-      await tx.insert(auditEvents).values({ actorUserId: systemActorId, actorEmail: systemActorEmail, operation: "update", targetType: "knowledge_ingestion_conflict", targetId: target.id, afterSummary: "System pipeline suppressed a conflicted high-risk card for required verification." });
+      await recordAuditEvent({ actor: pipelineActor, operation: "update", targetType: "knowledge_ingestion_conflict", targetId: target.id, afterSummary: "System pipeline suppressed a conflicted high-risk card for required verification." }, tx);
       return { jobId: claim.jobId, sourceId: claim.sourceId, outcome: "review_recommended" };
     }
     if (relation.action !== "create") return terminal(claim, version, "review_recommended", "verify_first_relation_not_create", tx);
     if (!await fence(claim, version, "verify_first", "verification_required", tx)) return null;
-    const [card] = await tx.insert(knowledgeCards).values({ type: candidate.type, title: candidate.title, summary: candidate.summary, locationName: candidate.locationName, routeSegment: candidate.routeSegment, conditions: candidate.conditions, freshnessSensitive: candidate.freshnessSensitive, confidence: bundle.source.sourceType === "community" ? "community" : "unverified", status: "approved", publicationState: "suppressed", knowledgeState: "uncertain", reviewState: "ai_recommended", verificationState: "required", needsReview: true, currentJudgeSummary: judgment.summary, aiPromptVersion: knowledgePipelineExtractionPromptVersion, aiGatewayModelId: extractionModelId, createdByUserId: systemActorId }).returning({ id: knowledgeCards.id, contentVersion: knowledgeCards.contentVersion });
+    const [card] = await tx.insert(knowledgeCards).values({ type: candidate.type, title: candidate.title, summary: candidate.summary, locationName: candidate.locationName, routeSegment: candidate.routeSegment, conditions: candidate.conditions, freshnessSensitive: candidate.freshnessSensitive, confidence: bundle.source.sourceType === "community" ? "community" : "unverified", status: "approved", publicationState: "suppressed", knowledgeState: "uncertain", reviewState: "ai_recommended", verificationState: "required", needsReview: true, currentJudgeSummary: judgment.summary, aiPromptVersion: knowledgePipelineExtractionPromptVersion, aiGatewayModelId: extractionModelId, executorSystem: pipelineActor.system }).returning({ id: knowledgeCards.id, contentVersion: knowledgeCards.contentVersion });
     await tx.insert(knowledgeCardSources).values({ knowledgeCardId: card.id, sourceId: claim.sourceId, supportLevel: "primary" });
     await attachEvidence(tx, card.id, claim, candidate, bundle, "supporting");
     const [versioned] = await tx.select({ contentVersion: knowledgeCards.contentVersion, evidenceSetRevision: knowledgeCards.evidenceSetRevision }).from(knowledgeCards).where(eq(knowledgeCards.id, card.id)).limit(1);
     if (!versioned) return null;
     await markIndexDirty(tx, card.id, versioned, "ingestion_verify_first");
     await enrollVerifyFirstSampling({ terminalIngestionJobId: claim.jobId, cardId: card.id, contentVersion: versioned.contentVersion, evidenceSetRevision: versioned.evidenceSetRevision, routeSegment: candidate.routeSegment, locationName: candidate.locationName }, tx);
-    await tx.insert(auditEvents).values({ actorUserId: systemActorId, actorEmail: systemActorEmail, operation: "create", targetType: "knowledge_ingestion_verify_first", targetId: card.id, afterSummary: "System pipeline retained a suppressed canonical card for required verification." });
+    await recordAuditEvent({ actor: pipelineActor, operation: "create", targetType: "knowledge_ingestion_verify_first", targetId: card.id, afterSummary: "System pipeline retained a suppressed canonical card for required verification." }, tx);
     return { jobId: claim.jobId, sourceId: claim.sourceId, outcome: "verify_first", cardId: card.id };
   });
 }
@@ -404,14 +404,14 @@ async function retainCandidateForReview(claim: KnowledgeIngestionClaim, version:
 async function persistCandidateForReview(claim: KnowledgeIngestionClaim, version: number, candidate: Candidate, judgment: Judgment, bundle: NonNullable<Awaited<ReturnType<typeof loadBundle>>>, extractionModelId: string, reason: "relation" | "missing_context" | "weak_evidence", code: string, tx: Parameters<Parameters<PipelineDb["transaction"]>[0]>[0], expectedStage: "judging" | "relating" = "relating"): Promise<KnowledgeIngestionPipelineResult | null> {
   if (!await fence(claim, version, "review_recommended", code, tx, expectedStage)) return null;
   const verificationRequired = judgment.decision === "verify_first" || candidate.freshnessSensitive || isHighRisk(candidate);
-  const [card] = await tx.insert(knowledgeCards).values({ type: candidate.type, title: candidate.title, summary: candidate.summary, locationName: candidate.locationName, routeSegment: candidate.routeSegment, conditions: candidate.conditions, freshnessSensitive: candidate.freshnessSensitive, confidence: bundle.source.sourceType === "community" ? "community" : "unverified", status: "approved", publicationState: "suppressed", knowledgeState: "uncertain", reviewState: "ai_recommended", verificationState: verificationRequired ? "required" : "not_required", needsReview: true, currentJudgeSummary: judgment.summary, aiPromptVersion: knowledgePipelineExtractionPromptVersion, aiGatewayModelId: extractionModelId, createdByUserId: systemActorId }).returning({ id: knowledgeCards.id });
+  const [card] = await tx.insert(knowledgeCards).values({ type: candidate.type, title: candidate.title, summary: candidate.summary, locationName: candidate.locationName, routeSegment: candidate.routeSegment, conditions: candidate.conditions, freshnessSensitive: candidate.freshnessSensitive, confidence: bundle.source.sourceType === "community" ? "community" : "unverified", status: "approved", publicationState: "suppressed", knowledgeState: "uncertain", reviewState: "ai_recommended", verificationState: verificationRequired ? "required" : "not_required", needsReview: true, currentJudgeSummary: judgment.summary, aiPromptVersion: knowledgePipelineExtractionPromptVersion, aiGatewayModelId: extractionModelId, executorSystem: pipelineActor.system }).returning({ id: knowledgeCards.id });
   await tx.insert(knowledgeCardSources).values({ knowledgeCardId: card.id, sourceId: claim.sourceId, supportLevel: "primary" });
   await attachEvidence(tx, card.id, claim, candidate, bundle, "supporting");
   const [versioned] = await tx.select({ contentVersion: knowledgeCards.contentVersion, evidenceSetRevision: knowledgeCards.evidenceSetRevision }).from(knowledgeCards).where(eq(knowledgeCards.id, card.id)).limit(1);
   if (!versioned) return null;
   await markIndexDirty(tx, card.id, versioned, "ingestion_relation_review");
-  await scheduleKnowledgeRecommendation({ cardId: card.id, contentVersion: versioned.contentVersion, evidenceSetRevision: versioned.evidenceSetRevision, reason, supersedeStaleBy: systemRecommendationActor }, tx);
-  await tx.insert(auditEvents).values({ actorUserId: systemActorId, actorEmail: systemActorEmail, operation: "create", targetType: "knowledge_ingestion_relation_review", targetId: card.id, afterSummary: `System pipeline retained a suppressed canonical card for ${verificationRequired ? "required verification and " : ""}${reason === "relation" ? "relation" : reason === "weak_evidence" ? "weak-evidence" : "missing-context"} review.` });
+  await scheduleKnowledgeRecommendation({ cardId: card.id, contentVersion: versioned.contentVersion, evidenceSetRevision: versioned.evidenceSetRevision, reason, executorSystem: pipelineActor.system, supersedeStale: true }, tx);
+  await recordAuditEvent({ actor: pipelineActor, operation: "create", targetType: "knowledge_ingestion_relation_review", targetId: card.id, afterSummary: `System pipeline retained a suppressed canonical card for ${verificationRequired ? "required verification and " : ""}${reason === "relation" ? "relation" : reason === "weak_evidence" ? "weak-evidence" : "missing-context"} review.` }, tx);
   return { jobId: claim.jobId, sourceId: claim.sourceId, outcome: "review_recommended", cardId: card.id };
 }
 async function invalidateConflictedProjection(tx: Parameters<Parameters<PipelineDb["transaction"]>[0]>[0], cardId: string, version: { contentVersion: number; evidenceSetRevision: number }) {

@@ -12,8 +12,9 @@ import {
 import { sourceKnowledgeDraftExtractionPromptVersion } from "@/features/ai/prompts";
 import { extractKnowledgeDraftsFromSourceAsActor, isKnowledgeExtractionError, KnowledgeExtractionError } from "@/features/knowledge/extraction";
 import { assertFacebookCaptureStillNeedsReview } from "@/features/knowledge/extraction";
-import { markFacebookCaptureReviewStatus, markFacebookCaptureReviewStatusInTransaction, type FacebookCaptureReviewActor } from "@/features/knowledge/facebook-capture-review";
-import { approveKnowledgeDraftBatchForActorInTransaction } from "@/features/knowledge/review-approval-core";
+import { markFacebookCaptureReviewStatus, markFacebookCaptureReviewStatusInTransaction } from "@/features/knowledge/facebook-capture-review";
+import { approveKnowledgeDraftBatchForSystemInTransaction } from "@/features/knowledge/review-approval-core";
+import { createSystemAuditActor } from "@/features/audit/actors";
 
 type ExtractionJobDb = ReturnType<typeof getDb>;
 
@@ -23,7 +24,7 @@ const defaultPollIntervalMs = 5_000;
 const defaultStaleRunningMs = 15 * 60_000;
 const retryBackoffMs = [30_000, 120_000, 300_000] as const;
 
-export type KnowledgeExtractionJobActor = FacebookCaptureReviewActor;
+export type KnowledgeExtractionJobActor = { userId: string; email: string };
 
 export type EnqueueKnowledgeExtractionJobInput = {
   sourceId: string;
@@ -191,20 +192,22 @@ export async function processKnowledgeExtractionJob(jobId: string, db = getDb())
     return { status: "not_processable" as const };
   }
 
-  const actor = { userId: job.createdByUserId, email: job.createdByEmail };
+  const requester = { userId: job.createdByUserId, email: job.createdByEmail };
+  const workerActor = createSystemAuditActor("system-knowledge-pipeline");
 
   try {
     if (job.resultDraftIds && job.resultDraftIds.length > 0) {
-      await finalizeExistingDrafts(job, actor, db);
+      await finalizeExistingDrafts(job, workerActor, db);
     } else {
-        const result = await extractKnowledgeDraftsFromSourceAsActor(job.sourceId, actor, {
+        const result = await extractKnowledgeDraftsFromSourceAsActor(job.sourceId, requester, {
           captureVersionId: job.captureVersionId,
+          executorSystem: workerActor.system,
         resultJobId: job.id,
         preProviderGuard: job.facebookCaptureReviewId ? ({ db: guardDb, sourceId, captureVersionId }) => assertFacebookCaptureStillNeedsReview(guardDb, { reviewId: job.facebookCaptureReviewId as string, sourceId, captureVersionId }) : undefined,
       });
 
       await db.update(knowledgeExtractionJobs).set({ resultDraftIds: result.draftIds, resultDraftCount: result.draftCount, updatedAt: new Date() }).where(eq(knowledgeExtractionJobs.id, job.id));
-      await finalizeJobSuccess(job, result, actor, db);
+      await finalizeJobSuccess(job, result, workerActor, db);
     }
 
     return { status: "processed" as const, jobId: job.id };
@@ -214,17 +217,17 @@ export async function processKnowledgeExtractionJob(jobId: string, db = getDb())
   }
 }
 
-async function finalizeExistingDrafts(job: typeof knowledgeExtractionJobs.$inferSelect, actor: KnowledgeExtractionJobActor, db: ExtractionJobDb) {
+async function finalizeExistingDrafts(job: typeof knowledgeExtractionJobs.$inferSelect, workerActor: ReturnType<typeof createSystemAuditActor>, db: ExtractionJobDb) {
   const draftIds = job.resultDraftIds ?? [];
   await assertJobDraftIdsBelongToSource(db, job.sourceId, draftIds, job.resultDraftCount);
   const result = { sourceId: job.sourceId, draftIds, draftCount: draftIds.length };
-  await finalizeJobSuccess(job, result, actor, db);
+  await finalizeJobSuccess(job, result, workerActor, db);
 }
 
 async function finalizeJobSuccess(
   job: typeof knowledgeExtractionJobs.$inferSelect,
   result: { sourceId: string; draftIds: string[]; draftCount: number },
-  actor: KnowledgeExtractionJobActor,
+  workerActor: ReturnType<typeof createSystemAuditActor>,
   db: ExtractionJobDb,
 ) {
   await db.transaction(async (transaction) => {
@@ -235,18 +238,18 @@ async function finalizeJobSuccess(
     }
 
     if (job.mode === "extract_and_approve_all") {
-      await approveKnowledgeDraftBatchForActorInTransaction(transaction, actor, result.draftIds);
+      await approveKnowledgeDraftBatchForSystemInTransaction(transaction, workerActor.system, result.draftIds);
     }
 
     if (job.facebookCaptureReviewId) {
-      const extractedStatus = await markFacebookCaptureReviewStatusInTransaction(transaction, { reviewId: job.facebookCaptureReviewId, status: "extracted", actor });
+      const extractedStatus = await markFacebookCaptureReviewStatusInTransaction(transaction, { reviewId: job.facebookCaptureReviewId, status: "extracted", actor: workerActor });
 
       if (extractedStatus.status !== "updated") {
         throw new Error(`extract_status_${extractedStatus.status}`);
       }
 
       if (job.mode === "extract_and_approve_all") {
-        const approvedStatus = await markFacebookCaptureReviewStatusInTransaction(transaction, { reviewId: job.facebookCaptureReviewId, status: "extracted_approved", actor });
+        const approvedStatus = await markFacebookCaptureReviewStatusInTransaction(transaction, { reviewId: job.facebookCaptureReviewId, status: "extracted_approved", actor: workerActor });
 
         if (approvedStatus.status !== "updated") {
           throw new Error(`approve_all_status_${approvedStatus.status}`);
@@ -307,7 +310,7 @@ async function handleJobFailure(job: typeof knowledgeExtractionJobs.$inferSelect
 
   if (job.facebookCaptureReviewId && job.captureVersionId) {
     await assertFacebookCaptureStillNeedsReview(db, { reviewId: job.facebookCaptureReviewId, sourceId: job.sourceId, captureVersionId: job.captureVersionId })
-      .then(() => markFacebookCaptureReviewStatus(db, { reviewId: job.facebookCaptureReviewId as string, status: "extraction_failed", actor: { userId: job.createdByUserId, email: job.createdByEmail }, extractionError: `Extraction failed: ${safe.code}` }))
+      .then(() => markFacebookCaptureReviewStatus(db, { reviewId: job.facebookCaptureReviewId as string, status: "extraction_failed", actor: createSystemAuditActor("system-knowledge-pipeline"), extractionError: `Extraction failed: ${safe.code}` }))
       .catch(() => undefined);
   }
 
@@ -327,7 +330,7 @@ export async function recoverStaleKnowledgeExtractionJobs(options: { now?: Date;
   for (const row of failedRows) {
     if (row.facebookCaptureReviewId && row.captureVersionId) {
       await assertFacebookCaptureStillNeedsReview(db, { reviewId: row.facebookCaptureReviewId, sourceId: row.sourceId, captureVersionId: row.captureVersionId })
-        .then(() => markFacebookCaptureReviewStatus(db, { reviewId: row.facebookCaptureReviewId as string, status: "extraction_failed", actor: { userId: row.createdByUserId, email: row.createdByEmail }, extractionError: "Extraction failed: stale_max_attempts" }))
+        .then(() => markFacebookCaptureReviewStatus(db, { reviewId: row.facebookCaptureReviewId as string, status: "extraction_failed", actor: createSystemAuditActor("system-knowledge-pipeline"), extractionError: "Extraction failed: stale_max_attempts" }))
         .catch(() => undefined);
     }
   }

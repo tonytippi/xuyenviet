@@ -13,7 +13,6 @@ describe("knowledge ingestion pipeline", () => {
     await resetTestDatabase();
     await testDb.insert(users).values([
       { id: "operator", email: "operator@example.com" },
-      { id: "system-knowledge-pipeline", email: "system-knowledge-pipeline@xuyenviet.invalid" },
     ]);
     await testDb.insert(sources).values({ id: "source", kind: "pasted_text", label: "Safe source", sourceType: "curated", verificationStatus: "unverified", official: false, partner: false, submittedByUserId: "operator" });
     await testDb.insert(aiGatewayModels).values([
@@ -107,7 +106,7 @@ describe("knowledge ingestion pipeline", () => {
     await expect(runKnowledgeIngestionPipeline(claim, testDb)).resolves.toMatchObject({ outcome: "published", sourceId: "source" });
     expect(fetch).toHaveBeenCalledTimes(3);
     await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, claim.jobId))).resolves.toMatchObject([{ stage: "published", claimedBy: null, fencingToken: null }]);
-    await expect(testDb.select().from(knowledgeCards)).resolves.toMatchObject([{ createdByUserId: "system-knowledge-pipeline", publicationState: "active", reviewState: "reviewed", aiGatewayModelId: "extract", evidenceSetRevision: 2 }]);
+    await expect(testDb.select().from(knowledgeCards)).resolves.toMatchObject([{ createdByUserId: null, executorSystem: "system-knowledge-pipeline", publicationState: "active", reviewState: "reviewed", aiGatewayModelId: "extract", evidenceSetRevision: 2 }]);
     await expect(testDb.select().from(knowledgeCardEvidence)).resolves.toMatchObject([{ captureVersionId: capture.id, quoteText: quote, spanStart: start, spanEnd: rawText.length }]);
     await expect(testDb.select().from(aiUsageEvents)).resolves.toMatchObject([{ initiatedByUserId: null, executorSystem: "system-knowledge-pipeline", purpose: "extraction", promptVersion: "knowledge_pipeline_extraction_v1", status: "success" }, { initiatedByUserId: null, executorSystem: "system-knowledge-pipeline", purpose: "evaluation", promptVersion: "knowledge_pipeline_judgment_v1", status: "success" }, { initiatedByUserId: null, executorSystem: "system-knowledge-pipeline", purpose: "evaluation", promptVersion: "knowledge_pipeline_judgment_v1", status: "success" }]);
   });
@@ -413,7 +412,7 @@ describe("knowledge ingestion pipeline", () => {
     await expect(testDb.select().from(knowledgeCardEvidence).where(eq(knowledgeCardEvidence.supportLevel, "conflicting"))).resolves.toHaveLength(1);
     await expect(testDb.select().from(knowledgeIndexDirtyMarkers).where(eq(knowledgeIndexDirtyMarkers.knowledgeCardId, firstResult.cardId))).resolves.toEqual(expect.arrayContaining([expect.objectContaining({ reason: "ingestion_conflict", contentVersion: 4, evidenceSetRevision: 3 })]));
     await expect(testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, firstResult.cardId))).resolves.toMatchObject([{ status: "disabled", disabledAt: expect.any(Date) }]);
-    await expect(testDb.select().from(auditEvents).where(eq(auditEvents.targetType, "knowledge_ingestion_conflict"))).resolves.toMatchObject([{ actorUserId: "system-knowledge-pipeline", actorEmail: "system-knowledge-pipeline@xuyenviet.invalid" }]);
+    await expect(testDb.select().from(auditEvents).where(eq(auditEvents.targetType, "knowledge_ingestion_conflict"))).resolves.toMatchObject([{ actorClass: "system", actorSystem: "system-knowledge-pipeline", actorUserId: null, actorEmail: null }]);
   });
 
   test("suppresses a conflict only when conditions are normalized equivalents", async () => {
