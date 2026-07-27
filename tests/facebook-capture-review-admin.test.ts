@@ -195,6 +195,17 @@ describe("admin Facebook capture review helpers", () => {
     expect(detailHtml).toContain("AI không xác định đủ loại thông tin");
   });
 
+  test("detail exposes retry only for a terminal v2 canonical ingestion job", async () => {
+    authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
+    const review = await createCapturedFacebookSource({ id: "retry-ingestion", rawText: "Đèo Hải Vân có điểm dừng an toàn ban ngày." });
+    await testDb.insert(knowledgeIngestionJobs).values({ id: "retry-ingestion-job", sourceId: review.sourceId, captureVersionId: review.captureVersionId!, submittedByUserId: "operator-user", submittedByEmail: "operator-user@example.com", protocolVersion: 2, stage: "suppressed", stageVersion: 2, attemptCount: 1, maxAttempts: 3, nextRunAt: new Date() });
+
+    const { default: FacebookCaptureReviewDetailPage } = await import("@/app/admin/knowledge/facebook-captures/[reviewId]/page");
+    const html = renderToStaticMarkup(await FacebookCaptureReviewDetailPage({ params: Promise.resolve({ reviewId: review.id }) }));
+
+    expect(html).toContain("Retry canonical ingestion");
+  });
+
   test("admin read models sanitize unsafe values inside allowed metadata fields", async () => {
     authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
     const review = await createCapturedFacebookSource({

@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { aiUsageEvents, auditEvents, facebookCaptureReviews, knowledgeCards, rawSourceMaterial, sourceCaptureVersions, sources, userRoles, users, type UserRole } from "@/db/schema";
+import { aiGatewayModels, aiUsageEvents, auditEvents, facebookCaptureReviews, knowledgeCards, knowledgeIngestionCandidates, knowledgeIngestionJobs, rawSourceMaterial, sourceCaptureVersions, sources, userRoles, users, type UserRole } from "@/db/schema";
 import { ensureFacebookCaptureReviewForCapturedSource, listFacebookCaptureReviews, markFacebookCaptureReviewStatus } from "@/features/knowledge/facebook-capture-review";
 import { listQueuedFacebookSources } from "@/features/knowledge/facebook-capture";
 
@@ -130,5 +130,21 @@ describe("Facebook capture reject and reopen actions", () => {
     await expect(testDb.select().from(auditEvents)).resolves.toHaveLength(0);
     await expect(testDb.select().from(knowledgeCards)).resolves.toHaveLength(0);
     await expect(testDb.select().from(facebookCaptureReviews).where(eq(facebookCaptureReviews.id, review.id))).resolves.toMatchObject([{ status: "needs_review" }]);
+  });
+
+  test("operator can retry a suppressed v2 canonical job without changing the capture", async () => {
+    authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
+    const review = await createCapturedFacebookReview({ id: "retry-canonical", rawText: "Raw Facebook text with a safe travel fact." });
+    if (!review.captureVersionId) throw new Error("Expected capture version");
+    await testDb.insert(aiGatewayModels).values({ id: "model", gatewayModelName: "extract-model", displayLabel: "Extract", purpose: "extraction", active: true, defaultForPurpose: true, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000, pricingEffectiveAt: new Date() });
+    await testDb.insert(knowledgeIngestionJobs).values({ id: "retry-canonical-job", sourceId: review.sourceId, captureVersionId: review.captureVersionId, submittedByUserId: "operator-user", submittedByEmail: "operator-user@example.com", protocolVersion: 2, stage: "suppressed", stageVersion: 2, attemptCount: 1, maxAttempts: 3, nextRunAt: new Date(), discoveryComplete: true, discoveredCandidateCount: 1, terminalCandidateCount: 1, suppressedCandidateCount: 1, invalidCandidateCount: 1 });
+    await testDb.insert(knowledgeIngestionCandidates).values({ ingestionJobId: "retry-canonical-job", sourceId: review.sourceId, captureVersionId: review.captureVersionId, fingerprint: "a".repeat(64), type: "general_travel_tip", title: "Candidate extraction rejected", summary: "Rejected during structural validation.", conditions: [], freshnessSensitive: false, spanStart: 0, spanEnd: 1, extractionModelId: "model", extractionPromptVersion: "prompt", stage: "suppressed", stageVersion: 2, outcomeReasonCode: "invalid_discovery_candidate" });
+    const { retryFacebookCanonicalIngestionForm } = await import("@/features/knowledge/actions");
+
+    await expect(retryFacebookCanonicalIngestionForm(formData({ reviewId: review.id }))).rejects.toThrow(/NEXT_REDIRECT:.*ingestionRetried=1/);
+
+    await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, "retry-canonical-job"))).resolves.toMatchObject([{ stage: "queued", attemptCount: 0, discoveryComplete: false, discoveredCandidateCount: 0, terminalCandidateCount: 0, requeueReasonCode: "operator_retry" }]);
+    await expect(testDb.select().from(knowledgeIngestionCandidates).where(eq(knowledgeIngestionCandidates.ingestionJobId, "retry-canonical-job"))).resolves.toEqual([]);
+    await expect(testDb.select().from(sourceCaptureVersions).where(eq(sourceCaptureVersions.id, review.captureVersionId))).resolves.toMatchObject([{ rawText: "Raw Facebook text with a safe travel fact." }]);
   });
 });

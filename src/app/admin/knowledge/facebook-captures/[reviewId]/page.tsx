@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { type FacebookCaptureReviewStatus } from "@/db/schema";
-import { requestFacebookCaptureRecaptureForm } from "@/features/knowledge/actions";
+import { requestFacebookCaptureRecaptureForm, retryFacebookCanonicalIngestionForm } from "@/features/knowledge/actions";
 import { getAdminFacebookCaptureReviewDetail } from "@/features/knowledge/facebook-capture-review-admin";
 
 type FacebookCaptureReviewDetailPageProps = {
@@ -68,6 +68,9 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
   const recaptureRequested = getSearchParam(query.recaptureRequested) === "1";
   const recaptureError = getSearchParam(query.recaptureError);
   const recaptureStatus = getSearchParam(query.recaptureStatus);
+  const ingestionRetried = getSearchParam(query.ingestionRetried) === "1";
+  const ingestionRetryError = getSearchParam(query.ingestionRetryError) === "1";
+  const canRetryIngestion = review.ingestionJob?.protocolVersion === 2 && ["suppressed", "failed"].includes(review.ingestionJob.stage);
 
   return (
     <div>
@@ -80,7 +83,7 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
         Nội dung này chỉ dành cho vận hành. Canonical ingestion xử lý capture tự động; chỉ outcome đủ điều kiện mới có thể được dùng cho câu trả lời của khách.
       </p>
 
-      {(rejected || rejectError || rejectStatus || reopened || reopenError || reopenStatus || recaptureRequested || recaptureError || recaptureStatus) && (
+      {(rejected || rejectError || rejectStatus || reopened || reopenError || reopenStatus || recaptureRequested || recaptureError || recaptureStatus || ingestionRetried || ingestionRetryError) && (
         <section className="mt-6 rounded-2xl border border-[#d8c9ad] bg-white/80 p-4 text-sm leading-6 text-[#17342c]">
           {rejected ? <p>Đã từ chối capture. Nội dung này không còn nằm trong hàng đợi cần xử lý và chưa tạo thẻ tri thức.</p> : null}
           {rejectError ? <p>Lý do từ chối không an toàn hoặc capture này không thể từ chối.</p> : null}
@@ -90,7 +93,9 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
           {reopenStatus ? <p>Capture này không thể mở lại để capture lại ({reopenStatus}). Kiểm tra trạng thái hiện tại trước khi thử lại.</p> : null}
           {recaptureRequested ? <p>Đã đưa capture này về hàng đợi recapture. Chạy công cụ capture Facebook để lấy text mới rồi quay lại duyệt.</p> : null}
           {recaptureError ? <p>Lý do recapture không an toàn hoặc capture này không thể recapture.</p> : null}
-          {recaptureStatus ? <p>Capture này không thể recapture ({recaptureStatus}). Kiểm tra trạng thái review và thẻ liên kết hiện có.</p> : null}
+            {recaptureStatus ? <p>Capture này không thể recapture ({recaptureStatus}). Kiểm tra trạng thái review và thẻ liên kết hiện có.</p> : null}
+            {ingestionRetried ? <p>Đã đưa canonical ingestion về hàng đợi xử lý lại với cùng capture version.</p> : null}
+            {ingestionRetryError ? <p>Canonical ingestion hiện không thể retry. Chỉ job v2 đã giữ lại hoặc thất bại mới có thể xử lý lại.</p> : null}
         </section>
       )}
 
@@ -181,8 +186,18 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
       <section className="mt-8 rounded-[1.5rem] border border-[#d8c9ad] bg-[#fbf7ed] p-5 sm:p-6">
         <h2 className="text-2xl font-semibold tracking-[-0.03em] text-[#17342c]">Hành động vận hành</h2>
         <p className="mt-4 rounded-2xl border border-[#d8c9ad] bg-white/75 p-4 text-sm leading-6 text-[#4f625a]">Các thẻ tri thức được tạo và quyết định publication bằng canonical ingestion pipeline. Màn hình này chỉ theo dõi trạng thái và hỗ trợ recapture khi nội dung capture có vấn đề.</p>
-        <div className="mt-4">
-          {canRecapture ? (
+          <div className="mt-4">
+           {canRetryIngestion ? (
+             <form action={retryFacebookCanonicalIngestionForm} className="mb-4 rounded-2xl border border-[#8fb59f] bg-[#edf7ef] p-4">
+               <input name="reviewId" type="hidden" value={review.id} />
+               <p className="text-sm font-semibold leading-6 text-[#17342c]">Chạy lại canonical ingestion</p>
+               <p className="mt-2 text-sm leading-6 text-[#4f625a]">Xóa candidate vận hành cũ và chạy lại discovery với cùng raw capture. Không thay đổi raw capture hoặc các thẻ đã xuất bản.</p>
+               <button className="mt-4 min-h-12 rounded-2xl bg-[#1f5f46] px-5 py-3 font-semibold text-white transition hover:bg-[#194d39] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]" type="submit">
+                 Retry canonical ingestion
+               </button>
+             </form>
+           ) : null}
+           {canRecapture ? (
             <form action={requestFacebookCaptureRecaptureForm} className="rounded-2xl border border-[#d8c9ad] bg-white/75 p-4">
               <input name="reviewId" type="hidden" value={review.id} />
               <input name="recaptureReason" type="hidden" value="Operator requested recapture from detail page" />

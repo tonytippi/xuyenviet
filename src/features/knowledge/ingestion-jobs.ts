@@ -7,7 +7,7 @@ import { and, asc, eq, gt, isNull, lte, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { knowledgeIngestionCandidates, knowledgeIngestionJobs, knowledgeCardTypeValues, sourceCaptureVersions, sources, users } from "@/db/schema";
 
-type IngestionJobDb = Pick<ReturnType<typeof getDb>, "select" | "insert" | "update" | "execute" | "transaction">;
+type IngestionJobDb = Pick<ReturnType<typeof getDb>, "select" | "insert" | "update" | "delete" | "execute" | "transaction">;
 type Stage = typeof knowledgeIngestionJobs.$inferSelect.stage;
 export type NonterminalIngestionStage = Exclude<Stage, "published" | "suppressed" | "review_recommended" | "verify_first" | "failed">;
 type CheckpointCandidate = { type: (typeof knowledgeCardTypeValues)[number]; title: string; summary: string; locationName: string | null; routeSegment: string | null; conditions: string[]; freshnessSensitive: boolean; spanStart: number; spanEnd: number; modelId: string; modelGatewayName: string; promptVersion: string };
@@ -45,6 +45,15 @@ export async function ensureIngestionJobForCaptureVersion(db: IngestionJobDb, in
   const [existing] = await db.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.captureVersionId, captureVersionId)).limit(1);
   if (!existing) throw new KnowledgeIngestionJobError("The canonical ingestion job could not be created.");
   return existing;
+}
+
+export async function retryTerminalKnowledgeIngestionJob(input: { jobId: string; sourceId: string; captureVersionId: string; now?: Date }, db: IngestionJobDb = getDb()) {
+  const now = input.now ?? new Date();
+  const [job] = await db.select({ id: knowledgeIngestionJobs.id, protocolVersion: knowledgeIngestionJobs.protocolVersion, stage: knowledgeIngestionJobs.stage }).from(knowledgeIngestionJobs).where(and(eq(knowledgeIngestionJobs.id, input.jobId), eq(knowledgeIngestionJobs.sourceId, input.sourceId), eq(knowledgeIngestionJobs.captureVersionId, input.captureVersionId))).limit(1).for("update");
+  if (!job || job.protocolVersion !== 2 || !["suppressed", "failed"].includes(job.stage)) return null;
+  await db.delete(knowledgeIngestionCandidates).where(eq(knowledgeIngestionCandidates.ingestionJobId, job.id));
+  const [retried] = await db.update(knowledgeIngestionJobs).set({ stage: "queued", discoveryCursor: 0, discoveryWindowSize: 8_000, discoveryComplete: false, discoveredCandidateCount: 0, terminalCandidateCount: 0, publishedCandidateCount: 0, suppressedCandidateCount: 0, reviewRecommendedCandidateCount: 0, verifyFirstCandidateCount: 0, failedCandidateCount: 0, invalidCandidateCount: 0, stageVersion: sql`${knowledgeIngestionJobs.stageVersion} + 1`, attemptCount: 0, nextRunAt: now, lastErrorCode: null, requeueReasonCode: "operator_retry", checkpoint: null, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, updatedAt: now }).where(and(eq(knowledgeIngestionJobs.id, job.id), eq(knowledgeIngestionJobs.stage, job.stage))).returning({ id: knowledgeIngestionJobs.id });
+  return retried ?? null;
 }
 
 export async function claimNextKnowledgeIngestionCandidate(input: { workerId: string; now?: Date }, db: IngestionJobDb = getDb()): Promise<KnowledgeIngestionCandidateClaim | null> {

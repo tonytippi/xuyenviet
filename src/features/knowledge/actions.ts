@@ -1,9 +1,10 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { eq } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { sources, type FacebookCaptureReviewStatus } from "@/db/schema";
+import { facebookCaptureReviews, knowledgeIngestionJobs, sources, type FacebookCaptureReviewStatus } from "@/db/schema";
 import { sourceKnowledgeDraftExtractionPromptVersion } from "@/features/ai/prompts";
 import { AdminAuthorizationError, requireAdminSession } from "@/server/auth";
 import { runAuditedAdminMutation } from "@/server/mutations";
@@ -28,6 +29,7 @@ import {
 } from "./review";
 import { isSourceValidationError, normalizeTravelSourceInput, type TravelSourceInput } from "./sources";
 import { appendSourceCaptureVersion } from "./source-captures";
+import { retryTerminalKnowledgeIngestionJob } from "./ingestion-jobs";
 import { isKnowledgeSuggestionError, suggestKnowledgeFromSourceUrl as suggestKnowledgeFromSourceUrlService } from "./suggestions";
 import { resolveKnowledgeRecommendation } from "./recommendations";
 import { sealClosedKnowledgeSamplingPolicyForAdmin } from "./sampling-maintenance";
@@ -175,6 +177,31 @@ export async function markFacebookCaptureReviewStatusAsAdmin(input: {
   const actor: FacebookCaptureReviewActor = { userId: session.userId, email: session.email };
 
   return markFacebookCaptureReviewStatus(getDb(), { ...input, actor });
+}
+
+export async function retryFacebookCanonicalIngestionForm(formData: FormData) {
+  const reviewId = getOptionalFormString(formData, "reviewId") ?? "";
+  let status: "retried" | "not_retryable" = "not_retryable";
+
+  try {
+    status = await runAuditedAdminMutation({
+      audit: {
+        operation: "update",
+        targetType: "knowledge_ingestion_job",
+        afterSummary: "Operator reset a terminal Facebook canonical ingestion job for retry.",
+      },
+      action: async (_session, transaction) => {
+        const [review] = await transaction.select({ sourceId: facebookCaptureReviews.sourceId, captureVersionId: facebookCaptureReviews.captureVersionId, ingestionJobId: knowledgeIngestionJobs.id }).from(facebookCaptureReviews).innerJoin(knowledgeIngestionJobs, eq(knowledgeIngestionJobs.captureVersionId, facebookCaptureReviews.captureVersionId)).where(eq(facebookCaptureReviews.id, reviewId)).limit(1);
+        if (!review?.captureVersionId) return "not_retryable" as const;
+        const retried = await retryTerminalKnowledgeIngestionJob({ jobId: review.ingestionJobId, sourceId: review.sourceId, captureVersionId: review.captureVersionId }, transaction);
+        return retried ? "retried" as const : "not_retryable" as const;
+      },
+    });
+  } catch (error) {
+    if (error instanceof AdminAuthorizationError || (error instanceof Error && error.name === "AdminAuthorizationError")) throw error;
+  }
+
+  redirect(getFacebookCaptureRedirectPath(reviewId, status === "retried" ? { ingestionRetried: "1" } : { ingestionRetryError: "1" }));
 }
 
 export async function updateKnowledgeDraftForm(formData: FormData) {

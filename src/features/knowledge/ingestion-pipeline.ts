@@ -30,23 +30,24 @@ export async function runKnowledgeIngestionPipeline(claim: KnowledgeIngestionCla
     if (!committed) return false; stage = nextStage as typeof stage; stageVersion = committed.stageVersion; return true;
   };
   const bundle = await loadBundle(db, claim); const rawText = bundle?.rawText;
-  if (!bundle || !rawText?.trim() || containsSensitiveText(rawText)) return finish(claim, stage, stageVersion, "suppressed", "unsafe_or_unreadable_capture", db);
+  if (!bundle || !rawText?.trim()) return finish(claim, stage, stageVersion, "suppressed", "unsafe_or_unreadable_capture", db);
+  const safeRawText = redactContactDetails(rawText);
   let checkpoint = claim.checkpoint;
   if (stage === "queued") {
-    if (isCommercial(rawText) || isQuestionOnly(rawText) || isOpinionOnly(rawText) || !hasTravelContext(rawText)) return finish(claim, stage, stageVersion, "suppressed", "insufficient_travel_context", db);
+    if (isCommercial(safeRawText) || isQuestionOnly(safeRawText) || isOpinionOnly(safeRawText) || !hasTravelContext(safeRawText)) return finish(claim, stage, stageVersion, "suppressed", "insufficient_travel_context", db);
     checkpoint = { version: 1, completedStage: "triaging", passed: true };
     if (!await advance("triaging", checkpoint)) return null;
   }
   if (!checkpoint || (stage !== "triaging" && stage !== "extracting" && stage !== "judging" && stage !== "relating")) return finish(claim, stage, stageVersion, "failed", "invalid_checkpoint", db);
-  let candidate: Candidate | null = checkpoint.completedStage !== "triaging" ? candidateFromCheckpoint(checkpoint, rawText) : null;
+  let candidate: Candidate | null = checkpoint.completedStage !== "triaging" ? candidateFromCheckpoint(checkpoint, safeRawText) : null;
   let extractionModel: SelectedAiGatewayModel | null = null;
   if (stage === "triaging") {
     extractionModel = await selectActiveAiGatewayModel({ purpose: knowledgePipelineExtractionPurpose, requiredCapabilities: { textInput: true, extraction: true }, db });
     if (!extractionModel) return finish(claim, stage, stageVersion, "failed", "model_unavailable", db);
-    const extracted = await completeExtraction({ model: extractionModel.gatewayModelName, messages: buildKnowledgePipelineExtractionMessages({ source: bundle.source, rawText }) });
+    const extracted = await completeExtraction({ model: extractionModel.gatewayModelName, messages: buildKnowledgePipelineExtractionMessages({ source: bundle.source, rawText: safeRawText }) });
     await recordUsage(db, extractionModel, knowledgePipelineExtractionPurpose, knowledgePipelineExtractionPromptVersion, extracted);
     if (!extracted.ok) return retryOrFail(claim, stage, stageVersion, "provider_failed", db);
-    const parsedCandidate = parseCandidate(extracted.content, rawText);
+    const parsedCandidate = parseCandidate(extracted.content, safeRawText);
     candidate = parsedCandidate.candidate;
     if (!candidate) return finish(claim, stage, stageVersion, "suppressed", parsedCandidate.reason, db);
     checkpoint = checkpointForCandidate(candidate, extractionModel);
@@ -100,8 +101,8 @@ const windowOverlap = 1_000;
 async function runV2Discovery(claim: KnowledgeIngestionClaim, db: PipelineDb): Promise<KnowledgeIngestionPipelineResult | null> {
   const [bundle] = await db.select({ rawText: sourceCaptureVersions.rawText, source: { id: sources.id, kind: sources.kind, label: sources.label, sourceType: sources.sourceType, verificationStatus: sources.verificationStatus, official: sources.official, partner: sources.partner }, cursor: knowledgeIngestionJobs.discoveryCursor, windowSize: knowledgeIngestionJobs.discoveryWindowSize }).from(knowledgeIngestionJobs).innerJoin(sourceCaptureVersions, eq(sourceCaptureVersions.id, knowledgeIngestionJobs.captureVersionId)).innerJoin(sources, eq(sources.id, knowledgeIngestionJobs.sourceId)).where(and(eq(knowledgeIngestionJobs.id, claim.jobId), eq(knowledgeIngestionJobs.fencingToken, claim.fencingToken), eq(sources.currentCaptureVersionId, claim.captureVersionId), eq(sources.eligibility, "eligible"), isNull(sourceCaptureVersions.payloadDeletedAt))).limit(1);
   if (!bundle?.rawText) return terminalizeStaleV2Discovery(claim, db);
-  if (containsSensitiveText(bundle.rawText)) return finish(claim, claim.stage, claim.stageVersion, "suppressed", "unsafe_or_unreadable_capture", db);
-  const total = Array.from(bundle.rawText).length;
+  const safeRawText = redactContactDetails(bundle.rawText);
+  const total = Array.from(safeRawText).length;
   const coreStart = bundle.cursor;
   if (coreStart >= total) {
     const [committed] = await db.update(knowledgeIngestionJobs).set({ discoveryComplete: true, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, updatedAt: new Date() }).where(and(eq(knowledgeIngestionJobs.id, claim.jobId), eq(knowledgeIngestionJobs.protocolVersion, 2), eq(knowledgeIngestionJobs.stage, "queued"), eq(knowledgeIngestionJobs.stageVersion, claim.stageVersion), eq(knowledgeIngestionJobs.fencingToken, claim.fencingToken), sql`${knowledgeIngestionJobs.leaseExpiresAt} > timezone('UTC', now())`)).returning({ id: knowledgeIngestionJobs.id });
@@ -114,10 +115,10 @@ async function runV2Discovery(claim: KnowledgeIngestionClaim, db: PipelineDb): P
   const model = await selectActiveAiGatewayModel({ purpose: knowledgePipelineExtractionPurpose, requiredCapabilities: { textInput: true, extraction: true }, db });
   if (!model) return finish(claim, claim.stage, claim.stageVersion, "failed", "model_unavailable", db);
   const windowStart = Math.max(0, coreStart - windowOverlap);
-  const extracted = await completeExtraction({ model: model.gatewayModelName, messages: buildKnowledgePipelineMultiFactExtractionMessages({ source: bundle.source, rawText: Array.from(bundle.rawText).slice(windowStart, requestEnd).join(""), sourceOffset: windowStart, coreStart, coreEnd }) });
+  const extracted = await completeExtraction({ model: model.gatewayModelName, messages: buildKnowledgePipelineMultiFactExtractionMessages({ source: bundle.source, rawText: Array.from(safeRawText).slice(windowStart, requestEnd).join(""), sourceOffset: windowStart, coreStart, coreEnd }) });
   await recordUsage(db, model, knowledgePipelineExtractionPurpose, knowledgePipelineMultiFactExtractionPromptVersion, extracted);
   if (!extracted.ok) return retryOrFail(claim, claim.stage, claim.stageVersion, "provider_failed", db);
-  const parsed = parseCandidates(extracted.content, bundle.rawText, coreStart, coreEnd);
+  const parsed = parseCandidates(extracted.content, safeRawText, coreStart, coreEnd);
   if (!parsed) return retryV2Discovery(claim, bundle.windowSize, db);
   const candidates = parsed.candidates;
   return db.transaction(async (tx) => {
@@ -161,6 +162,7 @@ export async function runKnowledgeIngestionCandidatePipeline(claim: KnowledgeIng
   const [capture] = await db.select({ rawText: sourceCaptureVersions.rawText, capturedAt: sourceCaptureVersions.capturedAt, sourceKind: sources.kind, sourceType: sources.sourceType }).from(sourceCaptureVersions).innerJoin(sources, eq(sources.id, sourceCaptureVersions.sourceId)).where(and(eq(sourceCaptureVersions.id, claim.captureVersionId), eq(sources.currentCaptureVersionId, claim.captureVersionId), eq(sources.eligibility, "eligible"), isNull(sourceCaptureVersions.payloadDeletedAt))).limit(1);
   const quoteText = capture?.rawText ? slice(capture.rawText, candidate.spanStart, candidate.spanEnd) : null;
   if (!quoteText) return terminalizeKnowledgeIngestionCandidate({ candidateId: claim.candidateId, expectedStage: claim.stage, expectedStageVersion: claim.stageVersion, fencingToken: claim.fencingToken, outcome: "suppressed", reasonCode: "stale_or_deleted_capture" }, db);
+  if (containsSensitiveText(quoteText)) return terminalizeKnowledgeIngestionCandidate({ candidateId: claim.candidateId, expectedStage: claim.stage, expectedStageVersion: claim.stageVersion, fencingToken: claim.fencingToken, outcome: "suppressed", reasonCode: "candidate_sensitive_content" }, db);
   const model = await selectActiveAiGatewayModel({ purpose: knowledgePipelineJudgmentPurpose, requiredCapabilities: { textInput: true, evaluation: true }, db });
   if (!model) return terminalizeKnowledgeIngestionCandidate({ candidateId: claim.candidateId, expectedStage: claim.stage, expectedStageVersion: claim.stageVersion, fencingToken: claim.fencingToken, outcome: "failed", reasonCode: "judge_model_unavailable" }, db);
   if (model.id === candidate.extractionModelId) return terminalizeKnowledgeIngestionCandidate({ candidateId: claim.candidateId, expectedStage: claim.stage, expectedStageVersion: claim.stageVersion, fencingToken: claim.fencingToken, outcome: "review_recommended", reasonCode: "judge_model_not_independent" }, db);
@@ -477,7 +479,10 @@ async function recordUsage(db: Parameters<Parameters<PipelineDb["transaction"]>[
 function passes(value: Judgment) { return value.relevance >= .75 && value.extractability >= .70 && value.evidenceGrounding >= .90 && value.specificity >= .65 && value.actionability >= .65 && value.firstHandLikelihood >= .55 && value.spamCommercialRisk <= .25; }
 function isHighRisk(candidate: Candidate) { return ["warning", "route_note", "ev_charging", "cost_note", "discount_promotion", "parking"].includes(candidate.type) || isHighRiskText(`${candidate.title}\n${candidate.summary}\n${candidate.conditions.join("\n")}\n${candidate.evidence.quoteText}`); }
 function isHighRiskText(value: string) { return /\b(?:ev|sạc|charging|giá|phí|mở cửa|đóng cửa|lịch|còn chỗ|availability|đặt chỗ|booking|khuyến mãi|giảm giá|sạt lở|tai nạn|cấm đường|đường đóng)\b/i.test(value); }
-function containsSensitiveText(value: string) { return /(?:\+?84|0)(?:[\s.-]?\d){8,10}\b|\b[\w.%+-]+@[\w.-]+\.[a-z]{2,}\b/i.test(value); }
+const contactDetailPattern = /(?:\+?84|0)(?:[\s.-]?\d){8,10}\b|\b[\w.%+-]+@[\w.-]+\.[a-z]{2,}\b/i;
+const contactDetailPatternGlobal = /(?:\+?84|0)(?:[\s.-]?\d){8,10}\b|\b[\w.%+-]+@[\w.-]+\.[a-z]{2,}\b/gi;
+function containsSensitiveText(value: string) { return contactDetailPattern.test(value); }
+function redactContactDetails(value: string) { return value.replace(contactDetailPatternGlobal, (match) => Array.from(match).map(() => "*").join("")); }
 function isCommercial(value: string) { return /\b(liên hệ|inbox|đặt ngay|mua ngay|sale|khuyến mãi|giảm giá|ưu đãi|hotline|zalo)\b/i.test(value); }
 function isQuestionOnly(value: string) { const parts = value.split(/[.!?\n]+/).map((part) => part.trim()).filter(Boolean); return parts.length > 0 && parts.every((part) => /\?|\b(ai biết|xin hỏi|có ai|cho hỏi)\b/i.test(part)); }
 function isOpinionOnly(value: string) { return /(tôi nghĩ|theo tôi|cảm thấy|rất đẹp|rất hay|tuyệt vời|đáng đi)/i.test(value) && !/(có|không có|mở|đóng|cấm|bãi|trạm|quán|khách sạn|km|giờ|phí|chỗ)/i.test(value); }

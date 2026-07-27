@@ -91,6 +91,33 @@ describe("knowledge ingestion pipeline", () => {
     await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.captureVersionId, capture.id))).resolves.toMatchObject([{ discoveredCandidateCount: 1 }]);
   });
 
+  test("v2 redacts contact details before discovery while preserving offsets for safe evidence", async () => {
+    const rawText = "Gọi 0901234567 để đặt phòng. Đèo Hải Vân có điểm dừng ngắm cảnh an toàn vào ban ngày.";
+    const safeQuote = "Đèo Hải Vân có điểm dừng ngắm cảnh an toàn vào ban ngày.";
+    const start = rawText.indexOf("Đèo");
+    const capture = await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText, metadata: { kind: "submitted" }, capturedAt: new Date("2026-07-22T00:00:00.000Z") });
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ model: "extract-model", choices: [{ message: { content: JSON.stringify({ candidates: [candidate(rawText, { evidence: { quote_text: safeQuote, span_start: start, span_end: start + Array.from(safeQuote).length } })] }) } }] }), { status: 200 }))
+      .mockResolvedValueOnce(judgmentResponse("publish"))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ model: "judge-model", choices: [{ message: { content: JSON.stringify({ action: "create", target_card_id: null, summary: "Khác biệt." }) } }] }), { status: 200 }));
+
+    const discovery = await claimNextKnowledgeIngestionJob({ workerId: "v2-redaction", now: new Date(Date.now() + 1_000) }, testDb);
+    if (!discovery) throw new Error("expected discovery claim");
+    await runKnowledgeIngestionPipeline(discovery, testDb);
+
+    const request = JSON.parse(String(vi.mocked(fetch).mock.calls[0]?.[1]?.body)) as { messages: Array<{ content: string }> };
+    expect(request.messages[1]?.content).not.toContain("0901234567");
+    expect(request.messages[1]?.content).toContain("**********");
+
+    const [queuedCandidate] = await testDb.select({ nextRunAt: knowledgeIngestionCandidates.nextRunAt }).from(knowledgeIngestionCandidates).where(eq(knowledgeIngestionCandidates.captureVersionId, capture.id));
+    if (!queuedCandidate) throw new Error("expected queued candidate");
+    const candidateClaim = await claimNextKnowledgeIngestionCandidate({ workerId: "v2-redaction-candidate", now: new Date(queuedCandidate.nextRunAt.getTime() + 1_000) }, testDb);
+    if (!candidateClaim) throw new Error("expected candidate claim");
+    await runKnowledgeIngestionCandidatePipeline(candidateClaim, testDb);
+
+    await expect(testDb.select().from(knowledgeCardEvidence).where(eq(knowledgeCardEvidence.captureVersionId, capture.id))).resolves.toMatchObject([{ quoteText: safeQuote, spanStart: start }]);
+  });
+
   test("publishes only after independent extraction and judgment with exact evidence", async () => {
     const rawText = "Đèo Hải Vân có điểm dừng ngắm cảnh an toàn vào ban ngày.";
     const capture = await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText, metadata: { kind: "submitted" }, capturedAt: new Date("2026-07-22T00:00:00.000Z") });
