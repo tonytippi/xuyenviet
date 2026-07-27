@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-07-27 (Story 8.4 review patches repaired; follow-up review pending.)
+# last_updated: 2026-07-27 (Story 8.4 final direct-history enforcement patch verified.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-07-27 (Story 8.4 review patches repaired; follow-up review pending.)
+last_updated: 2026-07-27 (Story 8.4 final direct-history enforcement patch verified.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -140,6 +140,8 @@ development_status:
   # 2026-07-27: Chief-of-Staff-authorized completion synchronization. bmad-dev-story implementation completed with focused 108-test, lint, typecheck, and build evidence; no migrations changed. Independent adversarial review remains next. No commit performed.
   # 2026-07-27: bmad-code-review of a95aeb7..9ee5744 ran Blind Hunter, Edge Case Hunter, and Acceptance Auditor. Three patch findings remain: stale apply expiry time after lock waits; worker-vs-read contention regression does not invoke the worker; direct-history enforcement matcher is whitespace-bypassable. Focused 5-file suite passed 108 tests. Status synchronized to in-progress; no code or commit performed.
   # 2026-07-27: repaired all three review patches only. Apply captures expiry time after proposal locking with a fake-clock regression; worker/read contention persists then deterministically backdates an elapsed row and uses a fixed worker time; direct-history enforcement accepts whitespace/newlines and proves a formatted bypass is rejected. Focused 5-file suite: 109 tests passed; build and post-build typecheck passed; lint has 0 errors and 3 existing unrelated warnings. Follow-up review pending. No Story 8.5/schema/migration change or commit.
+  # 2026-07-27: Second bounded BMad code review of a95aeb7..e6cd0f972172cbb3edd00f4d2bc81991d2264123 ran Blind Hunter, Edge Case Hunter, and Acceptance Auditor. One medium patch remains: the scoped direct-history-insert enforcement guard misses chained writers such as getDb().insert(tripPlanChangeHistory). A separate elapsed-pending-row result after transient read-expiry failure is pre-existing to the baseline and deferred. Focused 5-file suite passed 109 tests. Status synchronized to in-progress; no code, test, migration, or commit changes.
+  # 2026-07-27: Final Story 8.4 review patch broadens the source-level enforcement to reject every direct .insert(tripPlanChangeHistory) receiver form and adds a getDb().insert(...) regression. The deferred pre-existing pending-list expiry behavior at trip-change-proposals.ts:930 remains unchanged. Focused 5-file suite passed 109 tests. Status returned to review; no schema, migration, Story 8.5, production-code, or commit changes.
   8-4-attribute-trip-proposal-expiry-through-the-audit-boundary: review
   8-5-remove-fake-system-users-in-the-clean-break-migration: backlog
   8-6-verify-actor-isolation-and-attribution-end-to-end: backlog

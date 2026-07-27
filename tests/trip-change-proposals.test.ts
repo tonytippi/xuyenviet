@@ -1414,14 +1414,15 @@ describe("Story 7.5 applyApprovedTripChange pure unit tests (mocked helpers)", (
 });
 
 describe("Story 8.4 Audit history boundary", () => {
-  test("Chat/Trips has no direct trip plan history insert", () => {
-    const directHistoryInsert = /\b(?:transaction|\w+)\s*\.\s*insert\s*\(\s*tripPlanChangeHistory\b/;
+  test("Chat/Trips has no direct trip plan history insert through any receiver", () => {
+    const directHistoryInsert = /\.\s*insert\s*\(\s*tripPlanChangeHistory\b/;
     const files = listTypeScriptFiles("src/features/chat-trips");
     for (const file of files) {
       const source = readFileSync(file, "utf8");
       expect(source).not.toMatch(directHistoryInsert);
     }
     expect("transaction.insert(\n  tripPlanChangeHistory,\n)").toMatch(directHistoryInsert);
+    expect("getDb().insert(tripPlanChangeHistory)").toMatch(directHistoryInsert);
     expect(readFileSync("src/features/chat-trips/trip-change-proposals.ts", "utf8")).toContain("recordPlanHistory(");
   });
 });
