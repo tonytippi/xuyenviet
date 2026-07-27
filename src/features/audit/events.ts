@@ -1,19 +1,20 @@
 import { getDb } from "@/db/client";
 import { auditEvents, type AuditOperation } from "@/db/schema";
 
-import { type UserAuditActor, validateUserAuditActor } from "./actors";
+import { type AuditActor, validateAuditActor } from "./actors";
 
 export type AuditEventWriter = Pick<ReturnType<typeof getDb>, "insert">;
 
 const maxAuditSummaryLength = 2000;
 
 export type AuditEventInput = {
-  actor: UserAuditActor;
+  actor: AuditActor;
   operation: AuditOperation;
   targetType: string;
   targetId?: string;
   beforeSummary?: string;
   afterSummary?: string;
+  createdAt?: Date;
 };
 
 function normalizeAuditSummary(summary: string | undefined) {
@@ -31,18 +32,20 @@ export async function recordAuditEvent({
   targetId,
   beforeSummary,
   afterSummary,
+  createdAt,
 }: AuditEventInput, database: AuditEventWriter = getDb()) {
-  const validatedActor = validateUserAuditActor(actor);
+  const validatedActor = validateAuditActor(actor);
 
   await database.insert(auditEvents).values({
-    actorUserId: validatedActor.userId,
-    actorEmail: validatedActor.email,
+    actorUserId: validatedActor.kind === "user" ? validatedActor.userId : null,
+    actorEmail: validatedActor.kind === "user" ? validatedActor.email : null,
     operation,
     targetType,
     targetId,
     beforeSummary: normalizeAuditSummary(beforeSummary),
     afterSummary: normalizeAuditSummary(afterSummary),
-    actorClass: "user",
-    actorSystem: null,
+    actorClass: validatedActor.kind,
+    actorSystem: validatedActor.kind === "system" ? validatedActor.system : null,
+    createdAt,
   });
 }

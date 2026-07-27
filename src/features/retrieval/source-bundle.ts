@@ -5,7 +5,8 @@ import { type AnswerContextDigest, type AnswerContextFact, loadAnswerContext } f
 import { buildApprovedKnowledgePromptSection, loadApprovedKnowledgeForAiAsk } from "@/features/retrieval/approved-knowledge";
 import { captureWebSearchResults, searchWebForSourceBundle, type NormalizedWebSearchResult } from "@/features/retrieval/web-search";
 import type { KnowledgeSearchResult } from "@/features/knowledge/search";
-import { aiUsageMechanisms, aiUsagePromptVersions, aiUsageProviders, aiUsagePurposes, writeAiUsageEvent } from "@/features/usage/events";
+import { writeAiUsageEvent } from "@/features/audit/usage";
+import { aiUsageMechanisms, aiUsagePromptVersions, aiUsageProviders, aiUsagePurposes } from "@/features/usage/events";
 
 const answerContextLoadTimeoutMs = 1_500;
 const approvedKnowledgeRetrievalTimeoutMs = 1_500;
@@ -234,7 +235,8 @@ async function recordWebSearchUsage({
 }) {
   try {
     await writeAiUsageEvent(getDb(), {
-      userId: usageContext.userId,
+      initiatedByUserId: usageContext.userId,
+      executorSystem: "system-ai-orchestration",
       conversationId: usageContext.conversationId,
       userMessageId: usageContext.userMessageId,
       purpose: aiUsagePurposes.webSearchFallback,

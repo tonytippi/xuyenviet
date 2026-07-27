@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-07-27 (Story 8.1 finalized as done after status-only verification of supplied final repair commit 6687df2d8ed78b1a6f701d459a4f2cc66d24958e and a clean pre-update worktree.)
+# last_updated: 2026-07-27 (Authorized exception advanced Story 8.2 to review after focused evidence passed; unrelated blockers remain.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-07-27 (Story 8.1 finalized as done after status-only verification of supplied final repair commit 6687df2d8ed78b1a6f701d459a4f2cc66d24958e and a clean pre-update worktree.)
+last_updated: 2026-07-27 (Authorized exception advanced Story 8.2 to review after focused evidence passed; unrelated blockers remain.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -125,7 +125,8 @@ development_status:
   epic-8: in-progress
   # Finalized 2026-07-27 after status-only verification of supplied final repair commit 6687df2d8ed78b1a6f701d459a4f2cc66d24958e and a clean pre-update worktree; status synchronized to done. No additional code review or implementation verification was performed.
   8-1-establish-the-audit-actor-boundary-and-system-catalog: done
-  8-2-persist-valid-audit-history-and-usage-attribution: backlog
+  # Authorized exception 2026-07-27: focused Story 8.2 rerun passed (8 files, 272 tests); review status granted despite four pre-existing unrelated full-suite failures and Drizzle's non-TTY rename prompt. Blockers remain unresolved outside this story.
+  8-2-persist-valid-audit-history-and-usage-attribution: review
   8-3-attribute-knowledge-capture-and-ai-work-to-system-executors: backlog
   8-4-attribute-trip-proposal-expiry-through-the-audit-boundary: backlog
   8-5-remove-fake-system-users-in-the-clean-break-migration: backlog

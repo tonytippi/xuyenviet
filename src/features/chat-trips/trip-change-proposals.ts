@@ -18,6 +18,7 @@ import {
   type TripPlanItemType,
 } from "@/db/schema";
 import { recordAuditEvent } from "@/features/audit/events";
+import { recordPlanHistory } from "@/features/audit/history";
 import { createSystemAuditActor, getSystemAuditActorLabel, toUserAuditActor } from "@/features/audit/actors";
 import {
   changeInternalTripPlanItemStateInTransaction,
@@ -1464,17 +1465,15 @@ export async function applyApprovedTripChange(
       const affectedItems = deriveAffectedItems(operations, knownById);
       const beforeAfter = deriveBeforeAfter(operations, knownById);
 
-      await transaction.insert(tripPlanChangeHistory).values({
+      await recordPlanHistory({
         tripProjectId: input.tripProjectId,
         userId: session.userId,
         proposalId: input.proposalId,
-        actorUserId: session.userId,
-        actorClass: "user",
-        actorSystem: null,
+        actor: toUserAuditActor({ userId: session.userId, email: session.email }),
         operationClass: "apply",
         affectedItemReferences: affectedItems as unknown as Record<string, unknown>,
         safeBeforeAfterSummary: boundBeforeAfterSummary(beforeAfter),
-      });
+      }, transaction);
 
       // Record the apply audit row (actorClass = 'user').
       await recordAuditEvent(
@@ -1972,17 +1971,15 @@ export async function dismissTripChangeProposal(
       const affectedItems = deriveAffectedItems(operations, knownById);
       const beforeAfter = deriveBeforeAfter(operations, knownById);
 
-      await transaction.insert(tripPlanChangeHistory).values({
+      await recordPlanHistory({
         tripProjectId: input.tripProjectId,
         userId: session.userId,
         proposalId: input.proposalId,
-        actorUserId: session.userId,
-        actorClass: "user",
-        actorSystem: null,
+        actor: toUserAuditActor({ userId: session.userId, email: session.email }),
         operationClass: "dismiss",
         affectedItemReferences: affectedItems as unknown as Record<string, unknown>,
         safeBeforeAfterSummary: boundBeforeAfterSummary(beforeAfter),
-      });
+      }, transaction);
 
       await recordAuditEvent(
         {

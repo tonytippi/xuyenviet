@@ -59,14 +59,14 @@ export async function listAdminUsers(input: { page?: number | string; search?: s
     ? []
     : await db
         .select({
-          userId: aiUsageEvents.userId,
+          userId: aiUsageEvents.initiatedByUserId,
           aiRequestCount: sql<string>`count(${aiUsageEvents.id})::text`,
           inputTokens: sql<string>`coalesce(sum(${aiUsageEvents.promptTokens}), 0)::text`,
           outputTokens: sql<string>`coalesce(sum(${aiUsageEvents.completionTokens}), 0)::text`,
         })
         .from(aiUsageEvents)
-        .where(inArray(aiUsageEvents.userId, userIds))
-        .groupBy(aiUsageEvents.userId);
+        .where(inArray(aiUsageEvents.initiatedByUserId, userIds))
+        .groupBy(aiUsageEvents.initiatedByUserId);
   const rolesByUserId = new Map<string, UserRole[]>();
   const usageByUserId = new Map(usageRows.map(({ userId, ...usage }) => [userId, usage]));
 

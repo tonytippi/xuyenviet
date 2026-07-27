@@ -1,7 +1,9 @@
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
-import { auditEvents, facebookCaptureReviews, rawSourceMaterial, schema, sourceCaptureVersions, sources } from "../../db/schema";
+import { facebookCaptureReviews, rawSourceMaterial, schema, sourceCaptureVersions, sources } from "../../db/schema";
+import { type AuditActor, createSystemAuditActor } from "../audit/actors";
+import { recordAuditEvent } from "../audit/events";
 import { canonicalizeFacebookUrl } from "./capture-identity";
 import { lockFacebookCaptureResources } from "./facebook-capture-locks";
 import { ensureFacebookCaptureReviewForCapturedSource } from "./facebook-capture-review";
@@ -261,17 +263,14 @@ export async function updateQueuedFacebookSourceRawText(
           .where(eq(rawSourceMaterial.id, queued.rawMaterialId));
 
         if (input.actor) {
-          await transaction.insert(auditEvents).values({
-            actorUserId: input.actor.userId,
-            actorEmail: input.actor.email,
+          await recordAuditEvent({
+            actor: auditActorForCapture(input.actor),
             operation: "update",
             targetType: "sources",
             targetId: queued.sourceId,
             afterSummary: `Facebook capture skipped as duplicate of source ${duplicate.id}.`,
-            actorClass: input.actor.actorClass ?? "user",
-            actorSystem: input.actor.actorSystem ?? null,
             createdAt: input.now,
-          });
+          }, transaction);
         }
 
         return { status: "duplicate" as const, duplicateSourceId: duplicate.id };
@@ -316,18 +315,15 @@ export async function updateQueuedFacebookSourceRawText(
     }
 
     if (input.actor) {
-      await transaction.insert(auditEvents).values({
-        actorUserId: input.actor.userId,
-        actorEmail: input.actor.email,
+      await recordAuditEvent({
+        actor: auditActorForCapture(input.actor),
         operation: "update",
         targetType: "source_capture_version",
         targetId: version.id,
         beforeSummary: `Facebook capture version appended; method: ${rawMetadata.captureMethod}`,
           afterSummary: `Facebook capture version appended; capturedAt: ${rawMetadata.capturedAt}`,
-          actorClass: input.actor.actorClass ?? "user",
-          actorSystem: input.actor.actorSystem ?? null,
-          createdAt: input.now,
-      });
+        createdAt: input.now,
+      }, transaction);
     }
 
     const discovered = input.actor && input.sourceUrl && !queued.rawMetadata?.discoveredFromSourceId
@@ -414,16 +410,13 @@ async function queueDiscoveredFacebookPostsInTransaction(
     })));
   }
 
-  await transaction.insert(auditEvents).values({
-    actorUserId: input.actor.userId,
-    actorEmail: input.actor.email,
+  await recordAuditEvent({
+    actor: auditActorForCapture(input.actor),
     operation: "create",
     targetType: "facebook_capture_discovered_posts",
     targetId: input.sourceId,
     afterSummary: `Facebook capture discovered posts: queued=${postsToQueue.length}; existing=${discoveredPosts.length - postsToQueue.length}.`,
-    actorClass: input.actor.actorClass ?? "user",
-    actorSystem: input.actor.actorSystem ?? null,
-  });
+  }, transaction);
 
   return { queuedCount: postsToQueue.length, duplicateCount: discoveredPosts.length - postsToQueue.length };
 }
@@ -449,4 +442,12 @@ export function normalizeDiscoveredFacebookPosts(urls: string[], sourceUrl: stri
 
 export function recordFacebookCaptureFailure(sourceId: string, reason: string) {
   return { sourceId, status: "failed" as const, reason };
+}
+
+function auditActorForCapture(actor: FacebookCaptureActor): AuditActor {
+  if (actor.actorClass === "system") {
+    return createSystemAuditActor(actor.actorSystem);
+  }
+
+  return { kind: "user", userId: actor.userId, email: actor.email };
 }

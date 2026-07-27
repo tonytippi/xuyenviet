@@ -2,7 +2,8 @@ import { and, count, desc, eq, isNotNull, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
 import { sourceKnowledgeDraftExtractionPromptVersion } from "../ai/prompts";
-import { auditEvents, facebookCaptureReviews, knowledgeCards, knowledgeCardSources, rawSourceMaterial, schema, sourceCaptureVersions, sources, type FacebookCaptureReviewStatus } from "../../db/schema";
+import { facebookCaptureReviews, knowledgeCards, knowledgeCardSources, rawSourceMaterial, schema, sourceCaptureVersions, sources, type FacebookCaptureReviewStatus } from "../../db/schema";
+import { recordAuditEvent } from "../audit/events";
 import { lockFacebookCaptureResources } from "./facebook-capture-locks";
 
 export type FacebookCaptureReviewDb = Pick<PostgresJsDatabase<typeof schema>, "select" | "insert" | "update" | "execute">;
@@ -296,16 +297,15 @@ export async function markFacebookCaptureReviewStatusInTransaction(
     return { status: "stale_review" as const };
   }
 
-  await db.insert(auditEvents).values({
-    actorUserId: input.actor.userId,
-    actorEmail: input.actor.email,
+  await recordAuditEvent({
+    actor: { kind: "user", ...input.actor },
     operation: "update",
     targetType: "facebook_capture_review",
     targetId: lockedReview.id,
     beforeSummary: `Facebook capture review ${lockedReview.id}: status=${lockedReview.status}; sourceId=${lockedReview.sourceId}.`,
     afterSummary: `Facebook capture review ${lockedReview.id}: ${lockedReview.status} -> ${input.status}; sourceId=${lockedReview.sourceId}; reason=${rejectionReason ?? extractionError ?? "none"}.`,
     createdAt: updated.updatedAt,
-  });
+  }, db);
 
   return { status: "updated" as const, review: updated };
 }
@@ -367,16 +367,15 @@ export async function reopenFacebookCaptureForRecapture(
 
     await transaction.update(sources).set({ currentCaptureVersionId: null }).where(eq(sources.id, lockedReview.sourceId));
 
-    await transaction.insert(auditEvents).values({
-      actorUserId: input.actor.userId,
-      actorEmail: input.actor.email,
+    await recordAuditEvent({
+      actor: { kind: "user", ...input.actor },
       operation: "update",
       targetType: "facebook_capture_review",
       targetId: lockedReview.id,
       beforeSummary: `Facebook capture review ${lockedReview.id}: status=rejected; sourceId=${lockedReview.sourceId}; rawTextPresent=${Boolean(lockedReview.rawText?.trim())}.`,
       afterSummary: `Facebook capture review ${lockedReview.id}: rejected -> recapture-ready; sourceId=${lockedReview.sourceId}; rawSourceMaterialId=${lockedReview.rawSourceMaterialId}; reason=${reopenReason}.`,
       createdAt: updatedReview.updatedAt,
-    });
+    }, transaction);
 
     return { status: "updated" as const, review: updatedReview };
   });
@@ -446,16 +445,15 @@ export async function requestFacebookCaptureRecapture(
 
     await transaction.update(sources).set({ currentCaptureVersionId: null }).where(eq(sources.id, lockedReview.sourceId));
 
-    await transaction.insert(auditEvents).values({
-      actorUserId: input.actor.userId,
-      actorEmail: input.actor.email,
+    await recordAuditEvent({
+      actor: { kind: "user", ...input.actor },
       operation: "update",
       targetType: "facebook_capture_review",
       targetId: lockedReview.id,
       beforeSummary: `Facebook capture review ${lockedReview.id}: status=${lockedReview.status}; sourceId=${lockedReview.sourceId}; rawTextPresent=${Boolean(lockedReview.rawText?.trim())}.`,
       afterSummary: `Facebook capture review ${lockedReview.id}: ${lockedReview.status} -> recapture-ready; sourceId=${lockedReview.sourceId}; rawSourceMaterialId=${lockedReview.rawSourceMaterialId}; reason=${recaptureReason}.`,
       createdAt: updatedReview.updatedAt,
-    });
+    }, transaction);
 
     return { status: "updated" as const, review: updatedReview };
   });

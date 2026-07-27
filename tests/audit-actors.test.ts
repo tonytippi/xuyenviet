@@ -66,15 +66,35 @@ describe("audit actor boundary", () => {
     expect(() => validateUserAuditActor({ kind: "system", system: "system-trip-planning" })).toThrow(AuditActorValidationError);
   });
 
-  test("rejects a system-shaped event actor before invoking its writer", async () => {
+  test("maps valid user and system event actors to exclusive persistence shapes", async () => {
     const insert = vi.fn();
+    const values = vi.fn();
+    insert.mockReturnValue({ values });
     const writer = { insert };
 
-    await expect(recordAuditEvent({
-      actor: { kind: "system", system: "system-trip-planning" } as never,
+    await recordAuditEvent({
+      actor: { kind: "user", userId: "user-1", email: "person@example.com" },
       operation: "create",
       targetType: "test",
-    }, writer as never)).rejects.toThrow(AuditActorValidationError);
+    }, writer as never);
+    await recordAuditEvent({
+      actor: { kind: "system", system: "system-trip-planning" },
+      operation: "create",
+      targetType: "test",
+    }, writer as never);
+
+    expect(values).toHaveBeenNthCalledWith(1, expect.objectContaining({ actorClass: "user", actorUserId: "user-1", actorEmail: "person@example.com", actorSystem: null }));
+    expect(values).toHaveBeenNthCalledWith(2, expect.objectContaining({ actorClass: "system", actorUserId: null, actorEmail: null, actorSystem: "system-trip-planning" }));
+  });
+
+  test("rejects malformed event actors before invoking its writer", async () => {
+    const insert = vi.fn();
+
+    await expect(recordAuditEvent({
+      actor: { kind: "system", system: "untrusted-system" } as never,
+      operation: "create",
+      targetType: "test",
+    }, { insert } as never)).rejects.toThrow(AuditActorValidationError);
 
     expect(insert).not.toHaveBeenCalled();
   });

@@ -1,7 +1,8 @@
 import { describe, expect, test } from "vitest";
 
 import { aiUsageEvents } from "@/db/schema";
-import { aiUsageMechanisms, aiUsagePromptVersions, aiUsageProviders, aiUsagePurposes, writeAiUsageEvent } from "@/features/usage/events";
+import { writeAiUsageEvent } from "@/features/audit/usage";
+import { aiUsageMechanisms, aiUsagePromptVersions, aiUsageProviders, aiUsagePurposes } from "@/features/usage/events";
 
 function createUsageDb() {
   const rows: Array<typeof aiUsageEvents.$inferInsert> = [];
@@ -23,7 +24,7 @@ describe("AI usage events", () => {
     const { db, rows } = createUsageDb();
 
     await writeAiUsageEvent(db, {
-      userId: "user-1",
+      initiatedByUserId: "user-1", executorSystem: "system-ai-orchestration", tripProjectId: "project-1",
       conversationId: "conversation-1",
       userMessageId: "message-1",
       assistantMessageId: "message-2",
@@ -53,7 +54,7 @@ describe("AI usage events", () => {
 
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
-      userId: "user-1",
+      initiatedByUserId: "user-1", executorSystem: "system-ai-orchestration",
       purpose: "ai_ask_initial_answer",
       provider: "ai_gateway",
       model: "cx/gpt-5.5-test",
@@ -80,7 +81,7 @@ describe("AI usage events", () => {
     const { db, rows } = createUsageDb();
 
     await writeAiUsageEvent(db, {
-      userId: "user-1",
+      initiatedByUserId: "user-1", executorSystem: "system-ai-orchestration",
       purpose: aiUsagePurposes.extraction,
       provider: "ai_gateway",
       model: "cx/extract",
@@ -128,7 +129,7 @@ describe("AI usage events", () => {
     const { db, rows } = createUsageDb();
 
     await writeAiUsageEvent(db, {
-      userId: "user-1",
+      initiatedByUserId: "user-1", executorSystem: "system-ai-orchestration",
       purpose: aiUsagePurposes.aiAskInitialAnswer,
       provider: "ai_gateway",
       model: "cx/gpt-5.5-test",
@@ -151,7 +152,7 @@ describe("AI usage events", () => {
     const { db, rows } = createUsageDb();
 
     await writeAiUsageEvent(db, {
-      userId: "user-1",
+      initiatedByUserId: "user-1", executorSystem: "system-ai-orchestration",
       purpose: aiUsagePurposes.aiAskInitialAnswer,
       provider: "ai_gateway",
       model: "cx/gpt-5.5-test",
@@ -189,7 +190,7 @@ describe("AI usage events", () => {
     const { db, rows } = createUsageDb();
 
     await writeAiUsageEvent(db, {
-      userId: "user-1",
+      initiatedByUserId: "user-1", executorSystem: "system-ai-orchestration",
       conversationId: "conversation-1",
       userMessageId: "message-1",
       purpose: aiUsagePurposes.webSearchFallback,
@@ -221,7 +222,7 @@ describe("AI usage events", () => {
     const { db, rows } = createUsageDb();
 
     await writeAiUsageEvent(db, {
-      userId: "user-1",
+      initiatedByUserId: "user-1", executorSystem: "system-ai-orchestration",
       conversationId: "conversation-1",
       userMessageId: "message-1",
       purpose: aiUsagePurposes.aiAskInitialAnswer,
@@ -243,7 +244,7 @@ describe("AI usage events", () => {
     const { db, rows } = createUsageDb();
 
     await writeAiUsageEvent(db, {
-      userId: "user-1",
+      initiatedByUserId: "user-1", executorSystem: "system-ai-orchestration",
       purpose: aiUsagePurposes.aiAskInitialAnswer,
       provider: "ai_gateway",
       model: "cx/incomplete-pricing",
@@ -278,7 +279,7 @@ describe("AI usage events", () => {
     const { db, rows } = createUsageDb();
 
     await writeAiUsageEvent(db, {
-      userId: "user-1",
+      initiatedByUserId: "user-1", executorSystem: "system-ai-orchestration",
       purpose: aiUsagePurposes.aiAskInitialAnswer,
       provider: "ai_gateway",
       model: "cx/request-metadata",
@@ -296,7 +297,8 @@ describe("AI usage events", () => {
     const { db, rows } = createUsageDb();
 
     await writeAiUsageEvent(db, {
-      userId: "user-1",
+      initiatedByUserId: "user-1",
+      executorSystem: "system-ai-orchestration",
       purpose: aiUsagePurposes.aiAskInitialAnswer,
       provider: "ai_gateway",
       model: "cx/overflow",
@@ -319,5 +321,33 @@ describe("AI usage events", () => {
     });
 
     expect(rows[0]).toMatchObject({ estimatedInputCostMicros: null, estimatedTotalCostMicros: null, costStatus: "missing_cost" });
+  });
+
+  test("keeps worker-only events separate from a user initiator and rejects invalid executors before insert", async () => {
+    const { db, rows } = createUsageDb();
+
+    await writeAiUsageEvent(db, {
+      initiatedByUserId: null,
+      executorSystem: "system-knowledge-pipeline",
+      purpose: aiUsagePurposes.extraction,
+      provider: "ai_gateway",
+      model: "cx/worker",
+      promptVersion: aiUsagePromptVersions.chatContextExtraction,
+      status: "success",
+      latencyMs: 1,
+    });
+
+    expect(rows).toMatchObject([{ initiatedByUserId: null, executorSystem: "system-knowledge-pipeline", tripProjectId: null }]);
+    await expect(writeAiUsageEvent(db, {
+      initiatedByUserId: "user-1",
+      executorSystem: "untrusted-system" as never,
+      purpose: aiUsagePurposes.extraction,
+      provider: "ai_gateway",
+      model: "cx/invalid",
+      promptVersion: aiUsagePromptVersions.chatContextExtraction,
+      status: "failure",
+      latencyMs: 1,
+    })).rejects.toThrow("Invalid AI usage executor.");
+    expect(rows).toHaveLength(1);
   });
 });

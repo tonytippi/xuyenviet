@@ -14,7 +14,7 @@ import { persistAiTripChangeProposalDraft } from "@/features/chat-trips/trip-cha
 import { resolveOwnedPrimaryConversationInTransaction } from "@/features/chat-trips/trip-projects";
 import { persistAssistantAnswerProvenance, type AssistantMessageProvenanceItem } from "@/features/retrieval/provenance";
 import { assembleContextPrioritySourceBundle, buildSourceBundlePromptSection } from "@/features/retrieval/source-bundle";
-import { writeAiUsageEvent } from "@/features/usage/events";
+import { writeAiUsageEvent } from "@/features/audit/usage";
 import { getAuthenticatedSession, type AuthenticatedSession } from "@/server/auth";
 
 const maxQuestionLength = 2_000;
@@ -243,7 +243,9 @@ async function streamAnswer({
 
     if (!gatewayResult.ok) {
       await writeAiUsageEvent(db, {
-        userId: session.userId,
+        initiatedByUserId: session.userId,
+        executorSystem: "system-ai-orchestration",
+        tripProjectId: tripProjectId ?? null,
         conversationId: saved.conversationId,
         userMessageId: saved.userMessage.id,
         purpose: aiAskInitialAnswerPurpose,
@@ -269,7 +271,9 @@ async function streamAnswer({
 
     if (abortSignal.aborted) {
       await writeAiUsageEvent(db, {
-        userId: session.userId,
+        initiatedByUserId: session.userId,
+        executorSystem: "system-ai-orchestration",
+        tripProjectId: tripProjectId ?? null,
         conversationId: saved.conversationId,
         userMessageId: saved.userMessage.id,
         purpose: aiAskInitialAnswerPurpose,
@@ -323,7 +327,9 @@ async function streamAnswer({
         });
 
         await writeAiUsageEvent(transaction, {
-          userId: session.userId,
+          initiatedByUserId: session.userId,
+          executorSystem: "system-ai-orchestration",
+          tripProjectId: tripProjectId ?? null,
           conversationId: savedTurn.conversationId,
           userMessageId: savedTurn.userMessage.id,
           assistantMessageId: assistantMessage.id,
@@ -366,7 +372,9 @@ async function streamAnswer({
           });
 
           await writeAiUsageEvent(transaction, {
-            userId: session.userId,
+            initiatedByUserId: session.userId,
+            executorSystem: "system-ai-orchestration",
+            tripProjectId: tripProjectId ?? null,
             conversationId: savedTurn.conversationId,
             userMessageId: savedTurn.userMessage.id,
             assistantMessageId: assistantMessage.id,

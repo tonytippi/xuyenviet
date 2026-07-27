@@ -10,7 +10,7 @@ import { selectActiveAiGatewayModel } from "@/features/ai/models";
 import { buildChatContextExtractionMessages, chatContextExtractionPromptVersion, chatContextExtractionPurpose } from "@/features/ai/prompts";
 import { recordAuditEvent } from "@/features/audit/events";
 import { toUserAuditActor } from "@/features/audit/actors";
-import { writeAiUsageEvent, type WriteAiUsageEventInput } from "@/features/usage/events";
+import { writeAiUsageEvent, type WriteAiUsageEventInput } from "@/features/audit/usage";
 import type { AuthenticatedSession } from "@/server/auth";
 
 type PromptHistoryMessage = { role: "user" | "assistant"; content: string };
@@ -81,7 +81,8 @@ export async function extractChatTripContext(input: ExtractChatTripContextInput)
 
   if (!extractionResult.ok) {
     await recordExtractionUsage(db, {
-      userId: input.session.userId,
+      initiatedByUserId: input.session.userId,
+      executorSystem: "system-ai-orchestration",
       conversationId: input.conversationId,
       userMessageId: input.userMessage.id,
       purpose: chatContextExtractionPurpose,
@@ -101,7 +102,8 @@ export async function extractChatTripContext(input: ExtractChatTripContextInput)
   const facts = parseAllowedFacts(extractionResult.content, Boolean(input.tripProjectId), input.userMessage.content);
 
   await recordExtractionUsage(db, {
-    userId: input.session.userId,
+    initiatedByUserId: input.session.userId,
+    executorSystem: "system-ai-orchestration",
     conversationId: input.conversationId,
     userMessageId: input.userMessage.id,
     purpose: chatContextExtractionPurpose,

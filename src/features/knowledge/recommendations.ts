@@ -6,7 +6,8 @@ import { and, asc, desc, eq, gt, lte, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { disableStaleKnowledgeSearchProjection, enqueueKnowledgeIndexWork } from "@/features/knowledge/indexing-queue";
 import { getCurrentValidEvidenceFencesForReadiness } from "@/features/knowledge/readiness-evidence";
-import { auditEvents, knowledgeCardEvidence, knowledgeCards, knowledgeRecommendations, knowledgeSamplingCandidateLedger, knowledgeSamplingCohortMembers, knowledgeSamplingDispositionReasonValues, knowledgeSamplingPolicies, knowledgeVerifyFirstSamplingObligations, type KnowledgeRecommendationAction, type KnowledgeRecommendationReason, type KnowledgeSamplingDispositionReason } from "@/db/schema";
+import { knowledgeCardEvidence, knowledgeCards, knowledgeRecommendations, knowledgeSamplingCandidateLedger, knowledgeSamplingCohortMembers, knowledgeSamplingDispositionReasonValues, knowledgeSamplingPolicies, knowledgeVerifyFirstSamplingObligations, type KnowledgeRecommendationAction, type KnowledgeRecommendationReason, type KnowledgeSamplingDispositionReason } from "@/db/schema";
+import { recordAuditEvent } from "@/features/audit/events";
 import { getCorridorBucketLabel } from "@/features/knowledge/corridor";
 
 type RecommendationDb = ReturnType<typeof getDb>;
@@ -277,7 +278,7 @@ export async function resolveKnowledgeRecommendation(input: { recommendationId: 
       : input.action === "sampling_pass" || input.action === "sampling_fail"
         ? `Resolved sampling recommendation with ${input.action}; disposition=${samplingDisposition!.reason}${input.highSeverity ? "; high_severity=true" : ""}.`
         : `Resolved ${recommendation.reason} recommendation with ${input.action}.`;
-    await tx.insert(auditEvents).values({ actorUserId: input.actor.userId, actorEmail: input.actor.email, operation: "update", targetType: "knowledge_recommendation", targetId: recommendation.id, afterSummary: auditSummary });
+    await recordAuditEvent({ actor: { kind: "user", ...input.actor }, operation: "update", targetType: "knowledge_recommendation", targetId: recommendation.id, afterSummary: auditSummary }, tx);
     await enqueueKnowledgeIndexWork(tx, { cardId: card.id, contentVersion: next.contentVersion, evidenceSetRevision: next.evidenceSetRevision, reason: `recommendation:${input.action}` });
     if (next.publicationState !== "active" || next.verificationState === "failed") await disableStaleKnowledgeSearchProjection(tx, card.id, next.contentVersion);
     if (input.action === "sampling_fail" && input.highSeverity && recommendation.policyId) await escalateSamplingCohort(tx, recommendation.policyId, input.actor);
@@ -301,9 +302,9 @@ async function escalateSamplingCohort(tx: Transaction, policyId: string, actor: 
     if (!updated) continue;
     await disableStaleKnowledgeSearchProjection(tx, item.cardId, updated.contentVersion);
     await enqueueKnowledgeIndexWork(tx, { cardId: item.cardId, contentVersion: updated.contentVersion, evidenceSetRevision: updated.evidenceSetRevision, reason: "sampling_high_severity" });
-    await tx.insert(auditEvents).values({ actorUserId: actor.userId, actorEmail: actor.email, operation: "update", targetType: "knowledge_sampling_card", targetId: item.cardId, afterSummary: "High-severity sampling failure suppressed this cohort card." });
+    await recordAuditEvent({ actor: { kind: "user", ...actor }, operation: "update", targetType: "knowledge_sampling_card", targetId: item.cardId, afterSummary: "High-severity sampling failure suppressed this cohort card." }, tx);
   }
-  await tx.insert(auditEvents).values({ actorUserId: actor.userId, actorEmail: actor.email, operation: "update", targetType: "knowledge_sampling_cohort", targetId: policy.id, afterSummary: "High-severity sampling failure suppressed only the affected cohort." });
+  await recordAuditEvent({ actor: { kind: "user", ...actor }, operation: "update", targetType: "knowledge_sampling_cohort", targetId: policy.id, afterSummary: "High-severity sampling failure suppressed only the affected cohort." }, tx);
 }
 
 export async function lockSamplingPolicyBoundary(db: Transaction) {

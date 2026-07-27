@@ -22,7 +22,7 @@ import {
 } from "@/features/ai/prompts";
 import { recordAuditEvent } from "@/features/audit/events";
 import { toUserAuditActor } from "@/features/audit/actors";
-import { writeAiUsageEvent } from "@/features/usage/events";
+import { writeAiUsageEvent } from "@/features/audit/usage";
 import type { AuthenticatedSession } from "@/server/auth";
 
 const maxDraftsPerExtraction = 12;
@@ -294,7 +294,8 @@ async function writeUsageForProviderCall(
   },
 ) {
   await writeAiUsageEvent(db, {
-    userId,
+    initiatedByUserId: userId,
+    executorSystem: "system-ai-orchestration",
     purpose: sourceKnowledgeDraftExtractionPurpose,
     provider: event.provider,
     model: event.model,

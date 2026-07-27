@@ -17,7 +17,8 @@ import { generateEvaluationAiAskAnswer, type EvaluationAiAskAnswer } from "@/fea
 import { cleanupEvaluationScenarioFixture, prepareEvaluationScenarioFixture } from "@/features/feedback/evaluation-fixtures";
 import { completeEvaluation, type AiGatewayExtractionResult } from "@/features/ai/gateway";
 import { getAiGatewayPricingSnapshot, selectActiveAiGatewayModel, type SelectedAiGatewayModel } from "@/features/ai/models";
-import { aiUsagePromptVersions, aiUsagePurposes, writeAiUsageEvent } from "@/features/usage/events";
+import { writeAiUsageEvent } from "@/features/audit/usage";
+import { aiUsagePromptVersions, aiUsagePurposes } from "@/features/usage/events";
 import { getAuthenticatedSessionWithRoles, hasAdminAccess } from "@/server/auth";
 
 export const publicMvpEvaluationPromptSetVersion = "public_mvp_ai_first_v2";
@@ -441,7 +442,8 @@ async function scoreWithEvaluationModel({ db, prompt, scenario, model, actorUser
 
 async function recordEvaluationUsage(db: ReturnType<typeof getDb>, model: SelectedAiGatewayModel, gatewayResult: AiGatewayExtractionResult, actorUserId: string) {
   return writeAiUsageEvent(db, {
-    userId: actorUserId,
+    initiatedByUserId: actorUserId,
+    executorSystem: "system-ai-orchestration",
     purpose: aiUsagePurposes.evaluation,
     provider: gatewayResult.provider,
     model: gatewayResult.model,

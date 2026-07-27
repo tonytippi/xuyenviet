@@ -484,6 +484,13 @@
       "when": 1785355200000,
       "tag": "0068_harden_multi_fact_discovery",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1785355200001,
+      "tag": "0069_persist_audit_usage_attribution",
+      "breakpoints": true
     }
   ]
 }

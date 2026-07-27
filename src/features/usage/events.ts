@@ -1,6 +1,7 @@
 import { aiUsageEvents, type AiUsageStatus } from "@/db/schema";
 
 import { estimateAiUsageCost, type AiGatewayPricingSnapshot } from "@/features/ai/models";
+import type { SystemAuditActorId } from "@/features/audit/actors";
 export { aiUsageMechanisms, aiUsagePromptVersions, aiUsageProviders, aiUsagePurposes } from "@/features/usage/constants";
 
 type UsageEventDb = {
@@ -9,8 +10,10 @@ type UsageEventDb = {
   };
 };
 
-export type WriteAiUsageEventInput = {
-  userId: string;
+export type NormalizedUsageEventInput = {
+  initiatedByUserId?: string | null;
+  tripProjectId?: string | null;
+  executorSystem: SystemAuditActorId;
   conversationId?: string | null;
   userMessageId?: string | null;
   assistantMessageId?: string | null;
@@ -31,7 +34,7 @@ export type WriteAiUsageEventInput = {
   providerRequestId?: string | null;
 };
 
-export async function writeAiUsageEvent(db: UsageEventDb, input: WriteAiUsageEventInput) {
+export async function writeNormalizedAiUsageEvent(db: UsageEventDb, input: NormalizedUsageEventInput) {
   const id = crypto.randomUUID();
   const tokens = normalizeUsageTokens(input);
   const cost = estimateAiUsageCost(input.pricingSnapshot, {
@@ -43,7 +46,9 @@ export async function writeAiUsageEvent(db: UsageEventDb, input: WriteAiUsageEve
 
   await db.insert(aiUsageEvents).values({
     id,
-    userId: input.userId,
+    initiatedByUserId: input.initiatedByUserId ?? null,
+    tripProjectId: input.tripProjectId ?? null,
+    executorSystem: input.executorSystem,
     conversationId: input.conversationId ?? null,
     userMessageId: input.userMessageId ?? null,
     assistantMessageId: input.assistantMessageId ?? null,
@@ -80,7 +85,7 @@ export async function writeAiUsageEvent(db: UsageEventDb, input: WriteAiUsageEve
   return id;
 }
 
-function normalizeUsageTokens(input: WriteAiUsageEventInput) {
+function normalizeUsageTokens(input: NormalizedUsageEventInput) {
   const promptTokens = normalizeDbInteger(input.promptTokens);
   const completionTokens = normalizeDbInteger(input.completionTokens);
 

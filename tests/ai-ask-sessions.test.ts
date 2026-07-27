@@ -136,7 +136,7 @@ describe("AI Ask owned conversation deletion", () => {
     const [assistantMessage] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "assistant", content: "Nên chia chặng." }).returning({ id: messages.id });
     await testDb.insert(messageImageAttachments).values({ conversationId: conversation.id, messageId: userMessage.id, userId: "user-1", originalFileName: "road.png", mimeType: "image/png", byteSize: 16 });
     await testDb.insert(chatContext).values({ conversationId: conversation.id, sourceMessageId: userMessage.id, userId: "user-1", field: "destination", scope: "conversation", value: "Huế", confidence: 90 });
-    await testDb.insert(aiUsageEvents).values({ userId: "user-1", conversationId: conversation.id, userMessageId: userMessage.id, assistantMessageId: assistantMessage.id, purpose: "ai_ask_initial_answer", provider: "ai_gateway", model: "test-model", promptVersion: "test-v1", status: "success" });
+    await testDb.insert(aiUsageEvents).values({ initiatedByUserId: "user-1", executorSystem: "system-ai-orchestration", conversationId: conversation.id, userMessageId: userMessage.id, assistantMessageId: assistantMessage.id, purpose: "ai_ask_initial_answer", provider: "ai_gateway", model: "test-model", promptVersion: "test-v1", status: "success" });
     await testDb.insert(assistantRetrievalDecisions).values({ userId: "user-1", conversationId: conversation.id, userMessageId: userMessage.id, assistantMessageId: assistantMessage.id, approvedKnowledgeCandidateCount: 1, approvedKnowledgeSelectedCount: 1, approvedKnowledgeTargetCount: 3, approvedKnowledgeRelevanceThreshold: 1, broadPlanningQuestion: false, freshnessRequired: false, conflictDetected: false, webSearchTriggered: false, webSearchTriggerReasons: [], generalReasoningUsed: true, warnings: [] });
     await testDb.insert(assistantResponseProvenance).values({ userId: "user-1", conversationId: conversation.id, userMessageId: userMessage.id, assistantMessageId: assistantMessage.id, sourceCategory: "general", rank: 1, verificationStatus: "unverified", usedInPrompt: true, citedInAnswer: false, sourceSnapshot: { available: true } });
     vi.doMock("@/server/auth", () => ({
@@ -156,7 +156,7 @@ describe("AI Ask owned conversation deletion", () => {
     const auditRows = await testDb.select().from(auditEvents);
 
     expect(usageRows).toHaveLength(1);
-    expect(usageRows[0]).toMatchObject({ userId: "user-1", conversationId: null, userMessageId: null, assistantMessageId: null, status: "success" });
+    expect(usageRows[0]).toMatchObject({ initiatedByUserId: "user-1", executorSystem: "system-ai-orchestration", conversationId: null, userMessageId: null, assistantMessageId: null, status: "success" });
     expect(auditRows).toHaveLength(1);
     expect(auditRows[0]).toMatchObject({ actorUserId: "user-1", operation: "delete", targetType: "conversation", targetId: conversation.id });
     expect(auditRows[0].beforeSummary).toContain('"messageCount":2');
@@ -169,7 +169,7 @@ describe("AI Ask owned conversation deletion", () => {
     await createTestUser("user-1");
     await createTestUser("user-2");
     const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
-    await testDb.insert(aiUsageEvents).values({ userId: "user-2", conversationId: conversation.id, purpose: "ai_ask_initial_answer", provider: "ai_gateway", model: "test-model", promptVersion: "test-v1", status: "success" });
+    await testDb.insert(aiUsageEvents).values({ initiatedByUserId: "user-2", executorSystem: "system-ai-orchestration", conversationId: conversation.id, purpose: "ai_ask_initial_answer", provider: "ai_gateway", model: "test-model", promptVersion: "test-v1", status: "success" });
     vi.doMock("@/server/auth", () => ({
       getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }),
     }));

@@ -1760,7 +1760,8 @@ describe("AI Ask streaming route", () => {
 
     expect(response.status).toBe(200);
     expect(webUsage).toMatchObject({
-      userId: "user-1",
+      initiatedByUserId: "user-1",
+      executorSystem: "system-ai-orchestration",
       purpose: "web_search_fallback",
       provider: "tavily",
       model: "search",

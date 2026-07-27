@@ -4,7 +4,9 @@ import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
 import { disableStaleKnowledgeSearchProjection, enqueueKnowledgeIndexWork } from "@/features/knowledge/indexing-queue";
-import { auditEvents, knowledgeCardEvidence, knowledgeCardSources, knowledgeCards, knowledgeRecommendations, knowledgeSourceSuggestions, rawSourceMaterial, sourceCaptureVersions, sources, type SourceRemovalReason } from "@/db/schema";
+import { knowledgeCardEvidence, knowledgeCardSources, knowledgeCards, knowledgeRecommendations, knowledgeSourceSuggestions, rawSourceMaterial, sourceCaptureVersions, sources, type SourceRemovalReason } from "@/db/schema";
+import { recordAuditEvent } from "@/features/audit/events";
+import { createUserAuditActor } from "@/features/audit/actors";
 
 export class SourceRemovalError extends Error {
   constructor(message: string) {
@@ -68,13 +70,13 @@ export async function removeKnowledgeSource(
        await enqueueKnowledgeIndexWork(tx, { cardId, contentVersion: updated.contentVersion, evidenceSetRevision: updated.evidenceSetRevision, reason: "source_removal" });
       // Reindex from remaining evidence before a projection can become active again.
        await disableStaleKnowledgeSearchProjection(tx, cardId, updated.contentVersion, now);
-      await tx.insert(auditEvents).values({ actorUserId: input.actor.userId, actorEmail: input.actor.email.trim().toLowerCase(), operation: "archive", targetType: "knowledge_source_removal_card", targetId: cardId, afterSummary: `Source removal changed evidence eligibility; sourceId=${sourceId}; card remains traveler-eligible=${!ineligible}.` });
+      await recordAuditEvent({ actor: createUserAuditActor({ userId: input.actor.userId, email: input.actor.email.trim().toLowerCase() }), operation: "archive", targetType: "knowledge_source_removal_card", targetId: cardId, afterSummary: `Source removal changed evidence eligibility; sourceId=${sourceId}; card remains traveler-eligible=${!ineligible}.` }, tx);
     }
 
     await tx.update(sourceCaptureVersions).set({ rawText: null, fileName: null, mimeType: null, byteSize: null, storageKey: null, rawMetadata: null, payloadDeletedAt: now }).where(and(eq(sourceCaptureVersions.sourceId, sourceId), isNull(sourceCaptureVersions.payloadDeletedAt)));
     await tx.update(rawSourceMaterial).set({ rawText: null, fileName: null, mimeType: null, byteSize: null, storageKey: null, rawMetadata: null }).where(eq(rawSourceMaterial.sourceId, sourceId));
     await tx.delete(knowledgeSourceSuggestions).where(eq(knowledgeSourceSuggestions.sourceId, sourceId));
-    await tx.insert(auditEvents).values({ actorUserId: input.actor.userId, actorEmail: input.actor.email.trim().toLowerCase(), operation: "archive", targetType: "knowledge_source_removal", targetId: sourceId, afterSummary: `Source removal completed; reason=${input.reason}; affectedCardCount=${cardIds.length}.` });
+    await recordAuditEvent({ actor: createUserAuditActor({ userId: input.actor.userId, email: input.actor.email.trim().toLowerCase() }), operation: "archive", targetType: "knowledge_source_removal", targetId: sourceId, afterSummary: `Source removal completed; reason=${input.reason}; affectedCardCount=${cardIds.length}.` }, tx);
     return { status: "completed" as const, sourceId, changedCardIds: cardIds };
   });
 }

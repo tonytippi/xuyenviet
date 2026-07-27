@@ -5,7 +5,7 @@ import { getAiGatewayPricingSnapshot, selectActiveAiGatewayModel } from "@/featu
 import { buildTripChangeProposalDraftMessages, tripChangeProposalDraftPromptVersion } from "@/features/ai/prompts";
 import { readOwnedTripProjectAggregateForProposalDraft } from "@/features/chat-trips/trip-projects";
 import { aiUsagePurposes } from "@/features/usage/constants";
-import { writeAiUsageEvent } from "@/features/usage/events";
+import { writeAiUsageEvent } from "@/features/audit/usage";
 import type { AuthenticatedSession } from "@/server/auth";
 import { getDb } from "@/db/client";
 
@@ -113,7 +113,7 @@ export async function draftTripChangeProposal({
 
   if (!result.ok) {
     await recordDraftUsage(db, {
-      userId: session.userId,
+      initiatedByUserId: session.userId,
       tripProjectId,
       purpose: tripChangeProposalDraftPurpose,
       provider: result.provider,
@@ -150,7 +150,7 @@ export async function draftTripChangeProposal({
 
   if (!parsed) {
     await recordDraftUsage(db, {
-      userId: session.userId,
+      initiatedByUserId: session.userId,
       tripProjectId,
       purpose: tripChangeProposalDraftPurpose,
       provider: result.provider,
@@ -225,7 +225,7 @@ export async function recordTripChangeProposalDraftUsage(input: {
 }) {
   if (!input.draft.ok) return;
   await recordDraftUsage(getDb(), {
-    userId: input.session.userId,
+    initiatedByUserId: input.session.userId,
     tripProjectId: input.tripProjectId,
     purpose: tripChangeProposalDraftPurpose,
     provider: input.draft.usage.provider,
@@ -245,7 +245,7 @@ export async function recordTripChangeProposalDraftUsage(input: {
 }
 
 type DraftUsageInput = {
-  userId: string;
+  initiatedByUserId: string;
   tripProjectId: string;
   purpose: string;
   provider: string;
@@ -267,7 +267,9 @@ type DraftUsageInput = {
 async function recordDraftUsage(db: ReturnType<typeof getDb>, input: DraftUsageInput) {
   try {
     await writeAiUsageEvent(db, {
-      userId: input.userId,
+      initiatedByUserId: input.initiatedByUserId,
+      executorSystem: "system-ai-orchestration",
+      tripProjectId: input.tripProjectId,
       purpose: input.purpose,
       provider: input.provider,
       model: input.model,

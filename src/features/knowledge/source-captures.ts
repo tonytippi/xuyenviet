@@ -5,7 +5,8 @@ import { createHash } from "node:crypto";
 import { and, desc, eq, inArray, isNull, lte, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { auditEvents, facebookCaptureReviews, knowledgeCardEvidence, knowledgeCards, knowledgeExtractionJobs, knowledgeIngestionJobs, rawSourceMaterial, sourceCaptureVersions, sources, userRoles, users, type SourceKind } from "@/db/schema";
+import { facebookCaptureReviews, knowledgeCardEvidence, knowledgeCards, knowledgeExtractionJobs, knowledgeIngestionJobs, rawSourceMaterial, sourceCaptureVersions, sources, userRoles, users, type SourceKind } from "@/db/schema";
+import { recordAuditEvent } from "@/features/audit/events";
 import { ensureIngestionJobForCaptureVersion } from "@/features/knowledge/ingestion-jobs";
 
 const submittedKinds = new Set<SourceKind>(["url", "copied_post", "pasted_text", "screenshot"]);
@@ -190,7 +191,7 @@ export async function retainExpiredFacebookCaptureVersions(
          await transaction.update(rawSourceMaterial).set({ rawText: null, fileName: null, mimeType: null, byteSize: null, storageKey: null, rawMetadata: null }).where(eq(rawSourceMaterial.sourceId, version.sourceId));
        }
        if (current.currentCaptureVersionId === version.id) await transaction.update(sources).set({ currentCaptureVersionId: null }).where(and(eq(sources.id, version.sourceId), eq(sources.currentCaptureVersionId, version.id)));
-       await transaction.insert(auditEvents).values({ actorUserId, actorEmail, operation: "delete", targetType: "source_capture_version_retention", targetId: version.id, afterSummary: `Retention tombstoned capture version; sourceId=${version.sourceId}; basis=captured_at_180_days.` , createdAt: now });
+        await recordAuditEvent({ actor: { kind: "user", userId: actorUserId, email: actorEmail }, operation: "delete", targetType: "source_capture_version_retention", targetId: version.id, afterSummary: `Retention tombstoned capture version; sourceId=${version.sourceId}; basis=captured_at_180_days.`, createdAt: now }, transaction);
       return "tombstoned" as const;
     });
     if (outcome === "tombstoned" || outcome === "would_tombstone") tombstoned.push(candidate.id);

@@ -62,10 +62,11 @@ describe("admin user management", () => {
     await testDb.insert(accounts).values({ userId: "first", type: "oauth", provider: "google", providerAccountId: "private-account", access_token: "secret" });
     await testDb.insert(sessions).values({ sessionToken: "private-session", userId: "first", expires: new Date("2027-01-01T00:00:00.000Z") });
     await testDb.insert(aiUsageEvents).values([
-      { userId: "first", purpose: "ai_ask_initial_answer", provider: "ai_gateway", model: "test", promptVersion: "test", status: "success", promptTokens: 120, completionTokens: 80 },
-      { userId: "first", purpose: "extraction", provider: "ai_gateway", model: "test", promptVersion: "test", status: "failure", promptTokens: 30, completionTokens: 20 },
-      { userId: "first", purpose: "web_search_fallback", provider: "tavily", model: "search", promptVersion: "test", status: "failure" },
-      { userId: "second", purpose: "ai_ask_initial_answer", provider: "ai_gateway", model: "test", promptVersion: "test", status: "success", promptTokens: 999, completionTokens: 999 },
+      { initiatedByUserId: "first", executorSystem: "system-ai-orchestration", purpose: "ai_ask_initial_answer", provider: "ai_gateway", model: "test", promptVersion: "test", status: "success", promptTokens: 120, completionTokens: 80 },
+      { initiatedByUserId: "first", executorSystem: "system-ai-orchestration", purpose: "extraction", provider: "ai_gateway", model: "test", promptVersion: "test", status: "failure", promptTokens: 30, completionTokens: 20 },
+      { initiatedByUserId: "first", executorSystem: "system-ai-orchestration", purpose: "web_search_fallback", provider: "tavily", model: "search", promptVersion: "test", status: "failure" },
+      { initiatedByUserId: null, executorSystem: "system-knowledge-pipeline", purpose: "extraction", provider: "ai_gateway", model: "test", promptVersion: "test", status: "success", promptTokens: 999, completionTokens: 999 },
+      { initiatedByUserId: "second", executorSystem: "system-ai-orchestration", purpose: "ai_ask_initial_answer", provider: "ai_gateway", model: "test", promptVersion: "test", status: "success", promptTokens: 999, completionTokens: 999 },
     ]);
     authenticate("admin");
     const { listAdminUsers } = await import("@/features/admin/users");

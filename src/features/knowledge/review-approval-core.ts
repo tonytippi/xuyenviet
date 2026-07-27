@@ -2,7 +2,9 @@ import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
 import { getDb } from "@/db/client";
-import { auditEvents, knowledgeCards, knowledgeCardSources, knowledgeSourceSuggestions, sourceCaptureVersions, sources } from "@/db/schema";
+import { knowledgeCards, knowledgeCardSources, knowledgeSourceSuggestions, sourceCaptureVersions, sources } from "@/db/schema";
+import { recordAuditEvent } from "@/features/audit/events";
+import { toUserAuditActor } from "@/features/audit/actors";
 import { enqueueKnowledgeIndexWork } from "@/features/knowledge/indexing-queue";
 import type { AuthenticatedSession } from "@/server/auth";
 
@@ -68,15 +70,14 @@ async function approveKnowledgeDraftForActorInTransaction(transaction: ReviewMut
   }
   await enqueueKnowledgeIndexWork(transaction, { cardId: draftId, contentVersion: updatedDraft.contentVersion, evidenceSetRevision: updatedDraft.evidenceSetRevision, reason: "draft_approval" });
 
-  await transaction.insert(auditEvents).values({
-    actorUserId: actor.userId,
-    actorEmail: actor.email,
+  await recordAuditEvent({
+    actor: toUserAuditActor(actor),
     operation: "approve",
     targetType: "knowledge_draft",
     targetId: draftId,
     beforeSummary: `Draft before mutation: status=${draft.card.status}; type=${draft.card.type}; confidence=${draft.card.confidence}; needsReview=${draft.card.needsReview}; freshnessSensitive=${draft.card.freshnessSensitive}.`,
     afterSummary: `Operator approved legacy draft state: status=approved; publicationState=active; knowledgeState=uncertain; retrieval remains blocked until bounded evidence exists; linkedSources=${draft.sources.length}.`,
-  });
+  }, transaction);
 
   return { draftId };
 }

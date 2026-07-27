@@ -10,7 +10,7 @@ import { getAiGatewayPricingSnapshot, selectActiveAiGatewayModel, type SelectedA
 import { aiAskInitialAnswerPromptVersion, aiAskInitialAnswerPurpose, buildAiAskMessages } from "@/features/ai/prompts";
 import { persistAssistantAnswerProvenance } from "@/features/retrieval/provenance";
 import { assembleContextPrioritySourceBundle, buildSourceBundlePromptSection } from "@/features/retrieval/source-bundle";
-import { writeAiUsageEvent } from "@/features/usage/events";
+import { writeAiUsageEvent } from "@/features/audit/usage";
 
 export type EvaluationAiAskAnswer = {
   answerText: string;
@@ -79,7 +79,8 @@ export async function generateEvaluationAiAskAnswer({
 
   if (!gatewayResult.ok) {
     const usageEventId = await writeAiUsageEvent(db, {
-      userId,
+      initiatedByUserId: userId,
+      executorSystem: "system-ai-orchestration",
       conversationId: saved.conversationId,
       userMessageId: saved.userMessageId,
       purpose: aiAskInitialAnswerPurpose,
@@ -136,7 +137,8 @@ export async function generateEvaluationAiAskAnswer({
       .from(assistantResponseProvenance)
       .where(eq(assistantResponseProvenance.assistantMessageId, assistantMessage.id));
     const usageEventId = await writeAiUsageEvent(transaction, {
-      userId,
+      initiatedByUserId: userId,
+      executorSystem: "system-ai-orchestration",
       conversationId: saved.conversationId,
       userMessageId: saved.userMessageId,
       assistantMessageId: assistantMessage.id,

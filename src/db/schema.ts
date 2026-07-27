@@ -280,9 +280,8 @@ export const auditEvents = pgTable(
       .primaryKey()
       .$defaultFn(() => crypto.randomUUID()),
     actorUserId: text("actor_user_id")
-      .notNull()
       .references(() => users.id, { onDelete: "restrict" }),
-    actorEmail: text("actor_email").notNull(),
+    actorEmail: text("actor_email"),
     operation: text("operation").$type<AuditOperation>().notNull(),
     targetType: text("target_type").notNull(),
     targetId: text("target_id"),
@@ -301,6 +300,10 @@ export const auditEvents = pgTable(
       sql`${auditEvent.operation} in ('access_check', 'create', 'update', 'delete', 'archive', 'approve', 'apply', 'dismiss', 'expire')`,
     ),
     check("audit_events_actor_class_check", sql`${auditEvent.actorClass} in ('user', 'system')`),
+    check(
+      "audit_events_actor_shape_check",
+      sql`(${auditEvent.actorClass} = 'user' and ${auditEvent.actorUserId} is not null and length(btrim(${auditEvent.actorEmail})) > 0 and ${auditEvent.actorSystem} is null) or (${auditEvent.actorClass} = 'system' and ${auditEvent.actorUserId} is null and ${auditEvent.actorEmail} is null and length(btrim(${auditEvent.actorSystem})) > 0)`,
+    ),
   ],
 );
 
@@ -800,6 +803,10 @@ export const tripPlanChangeHistory = pgTable(
     }).onDelete("cascade"),
     index("trip_plan_change_history_owner_created_idx").on(row.userId, row.tripProjectId, row.createdAt),
     check("trip_plan_change_history_actor_class_check", sql`${row.actorClass} in ('user', 'system')`),
+    check(
+      "trip_plan_change_history_actor_shape_check",
+      sql`(${row.actorClass} = 'user' and ${row.actorUserId} is not null and ${row.actorSystem} is null) or (${row.actorClass} = 'system' and ${row.actorUserId} is null and length(btrim(${row.actorSystem})) > 0)`,
+    ),
     check("trip_plan_change_history_operation_class_check", sql`${row.operationClass} in ('apply', 'dismiss', 'expire')`),
     check("trip_plan_change_history_affected_references_check", sql`jsonb_typeof(${row.affectedItemReferences}) = 'array'`),
     check("trip_plan_change_history_safe_summary_check", sql`jsonb_typeof(${row.safeBeforeAfterSummary}) = 'object' and octet_length(${row.safeBeforeAfterSummary}::text) <= 8192`),
@@ -1512,9 +1519,10 @@ export const aiUsageEvents = pgTable(
     id: text("id")
       .primaryKey()
       .$defaultFn(() => crypto.randomUUID()),
-    userId: text("user_id")
-      .notNull()
+    initiatedByUserId: text("initiated_by_user_id")
       .references(() => users.id, { onDelete: "cascade" }),
+    tripProjectId: text("trip_project_id").references(() => tripProjects.id, { onDelete: "set null" }),
+    executorSystem: text("executor_system").notNull(),
     conversationId: text("conversation_id").references(() => conversations.id, { onDelete: "set null" }),
     userMessageId: text("user_message_id").references(() => messages.id, { onDelete: "set null" }),
     assistantMessageId: text("assistant_message_id").references(() => messages.id, { onDelete: "set null" }),
@@ -1549,7 +1557,8 @@ export const aiUsageEvents = pgTable(
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
   },
   (aiUsageEvent) => [
-    index("ai_usage_events_user_id_created_at_idx").on(aiUsageEvent.userId, aiUsageEvent.createdAt),
+    index("ai_usage_events_initiated_by_user_id_created_at_idx").on(aiUsageEvent.initiatedByUserId, aiUsageEvent.createdAt),
+    index("ai_usage_events_executor_system_created_at_idx").on(aiUsageEvent.executorSystem, aiUsageEvent.createdAt),
     index("ai_usage_events_conversation_id_idx").on(aiUsageEvent.conversationId),
     index("ai_usage_events_ai_gateway_model_id_idx").on(aiUsageEvent.aiGatewayModelId),
     index("ai_usage_events_status_idx").on(aiUsageEvent.status),
@@ -1575,6 +1584,7 @@ export const aiUsageEvents = pgTable(
     check("ai_usage_events_cache_write_price_non_negative_check", sql`${aiUsageEvent.cacheWriteTokenPriceMicros} is null or ${aiUsageEvent.cacheWriteTokenPriceMicros} >= 0`),
     check("ai_usage_events_cost_status_check", sql`${aiUsageEvent.costStatus} in ('estimated', 'missing_pricing', 'missing_usage', 'missing_cost')`),
     check("ai_usage_events_provider_request_id_check", sql`${aiUsageEvent.providerRequestId} is null or length(btrim(${aiUsageEvent.providerRequestId})) between 1 and 200`),
+    check("ai_usage_events_executor_system_check", sql`length(btrim(${aiUsageEvent.executorSystem})) > 0`),
   ],
 );
 

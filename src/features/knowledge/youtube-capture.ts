@@ -1,7 +1,8 @@
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
-import { auditEvents, knowledgeCardSources, knowledgeCards, rawSourceMaterial, schema, sourceCaptureVersions, sources } from "../../db/schema";
+import { knowledgeCardSources, knowledgeCards, rawSourceMaterial, schema, sourceCaptureVersions, sources } from "../../db/schema";
+import { recordAuditEvent } from "../audit/events";
 import { appendSourceCaptureVersion, type YoutubeCaptureMetadata } from "./source-captures";
 import { disableStaleKnowledgeSearchProjection, enqueueKnowledgeIndexWork } from "./indexing-queue";
 
@@ -137,16 +138,15 @@ export async function saveYoutubeEvidence(db: YoutubeCaptureDb, input: { sourceI
       }
     }
 
-    await transaction.insert(auditEvents).values({
-      actorUserId: input.actor.userId,
-      actorEmail: input.actor.email,
+    await recordAuditEvent({
+      actor: { kind: "user", ...input.actor },
       operation: "update",
       targetType: "source_capture_version",
       targetId: version.id,
       beforeSummary: "YouTube capture version appended.",
       afterSummary: `YouTube evidence capture version appended; method: gemini_youtube_url; evidenceCount: ${input.evidence.length}; capturedAt: ${input.metadata.capturedAt}.`,
       createdAt: input.now,
-    });
+    }, transaction);
     return { status: "updated" as const, rawMaterialId: queued.rawMaterialId, captureVersionId: version.id };
   });
 }
@@ -157,15 +157,14 @@ export async function findYoutubeCaptureImportByCorrelationToken(db: YoutubeCapt
 }
 
 export async function recordYoutubeCaptureFailure(db: YoutubeCaptureDb, input: { sourceId: string; reason: string; actor: YoutubeCaptureActor; now?: Date }) {
-  await db.insert(auditEvents).values({
-    actorUserId: input.actor.userId,
-    actorEmail: input.actor.email,
+  await recordAuditEvent({
+    actor: { kind: "user", ...input.actor },
     operation: "update",
     targetType: "youtube_capture",
     targetId: input.sourceId,
     afterSummary: `YouTube capture failed: ${safeFailureReason(input.reason)}.`,
     createdAt: input.now,
-  });
+  }, db);
 }
 
 function normalizeEvidence(value: unknown, index: number): YoutubeEvidence {

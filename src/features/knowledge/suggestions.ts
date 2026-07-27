@@ -20,7 +20,7 @@ import { getAiGatewayPricingSnapshot, selectActiveAiGatewayModel, type SelectedA
 import { buildSourceKnowledgeSuggestionMessages, sourceKnowledgeSuggestionPromptVersion, sourceKnowledgeSuggestionPurpose } from "@/features/ai/prompts";
 import { recordAuditEvent } from "@/features/audit/events";
 import { toUserAuditActor } from "@/features/audit/actors";
-import { writeAiUsageEvent } from "@/features/usage/events";
+import { writeAiUsageEvent } from "@/features/audit/usage";
 import { requireAdminSession } from "@/server/auth";
 
 const maxSuggestionsPerRun = 12;
@@ -340,7 +340,8 @@ async function writeUsageForProviderCall(
   },
 ) {
   await writeAiUsageEvent(db, {
-    userId,
+    initiatedByUserId: userId,
+    executorSystem: "system-ai-orchestration",
     purpose: sourceKnowledgeSuggestionPurpose,
     provider: event.provider,
     model: event.model,
