@@ -13,12 +13,13 @@ export async function processNextKnowledgeIngestionJob(workerId: string) {
   return claim ? runKnowledgeIngestionPipeline(claim) : null;
 }
 
-export async function runKnowledgeIngestionWorkerLoop(options: { once?: boolean; workerId?: string; pollIntervalMs?: number; signal?: AbortSignal } = {}) {
+export async function runKnowledgeIngestionWorkerLoop(options: { once?: boolean; workerId?: string; pollIntervalMs?: number; signal?: AbortSignal; onPollComplete?: () => void | Promise<void> } = {}) {
   const workerId = options.workerId ?? `knowledge-ingestion-worker-${process.pid}`;
   const pollIntervalMs = options.pollIntervalMs ?? getWorkerPollIntervalMs();
 
   while (!options.signal?.aborted) {
     const result = await processNextKnowledgeIngestionJob(workerId);
+    await options.onPollComplete?.();
 
     if (options.once) return result;
     if (!result) await sleep(pollIntervalMs, options.signal);
@@ -35,10 +36,15 @@ function getWorkerPollIntervalMs() {
 function sleep(ms: number, signal?: AbortSignal) {
   return new Promise<void>((resolve) => {
     if (signal?.aborted) return resolve();
-    const timeout = setTimeout(resolve, ms);
-    signal?.addEventListener("abort", () => {
+    const onAbort = () => {
       clearTimeout(timeout);
+      signal?.removeEventListener("abort", onAbort);
       resolve();
-    }, { once: true });
+    };
+    const timeout = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
   });
 }

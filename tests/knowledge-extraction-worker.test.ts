@@ -148,6 +148,35 @@ describe("knowledge extraction worker jobs", () => {
     await expect(runKnowledgeExtractionWorkerLoop({ once: true, workerId: "test-worker" })).resolves.toMatchObject({ status: "no_job" });
   });
 
+  test("removes the idle poll abort listener when the timeout completes", async () => {
+    const controller = new AbortController();
+    const originalRemoveEventListener = controller.signal.removeEventListener.bind(controller.signal);
+    let shutdownStarted = false;
+    let removedOnTimeout = false;
+    const removeEventListener = vi.spyOn(controller.signal, "removeEventListener").mockImplementation((...args) => {
+      const result = originalRemoveEventListener(...args);
+      if (!shutdownStarted) {
+        removedOnTimeout = true;
+        controller.abort();
+      }
+      return result;
+    });
+    const fallbackShutdown = setTimeout(() => {
+      shutdownStarted = true;
+      controller.abort();
+    }, 1_000);
+
+    try {
+      await expect(runKnowledgeExtractionWorkerLoop({ workerId: "listener-cleanup-worker", pollIntervalMs: 10, signal: controller.signal })).resolves.toEqual({ status: "stopped" });
+      expect(removeEventListener).toHaveBeenCalledWith("abort", expect.any(Function));
+      expect(removedOnTimeout).toBe(true);
+    } finally {
+      clearTimeout(fallbackShutdown);
+      controller.abort();
+      removeEventListener.mockRestore();
+    }
+  });
+
   test("logs and persists only safe malformed-output diagnostics", async () => {
     await createExtractionModel();
     const review = await createCapturedFacebookReview("malformed-output-job");

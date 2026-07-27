@@ -1,8 +1,8 @@
 import { eq, sql } from "drizzle-orm";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import { knowledgeCardSearchDocuments, knowledgeCards, knowledgeCardSources, knowledgeIndexBackfillState, knowledgeIndexDirtyMarkers, sources, users } from "@/db/schema";
-import { backfillKnowledgeIndexWork, claimNextKnowledgeIndexWork, completeKnowledgeIndexWork, processNextApprovedKnowledgeIndexingBatch, recoverExpiredKnowledgeIndexWork, runKnowledgeIndexBackfill } from "@/features/knowledge/indexing-worker";
+import { backfillKnowledgeIndexWork, claimNextKnowledgeIndexWork, completeKnowledgeIndexWork, processNextApprovedKnowledgeIndexingBatch, recoverExpiredKnowledgeIndexWork, runApprovedKnowledgeIndexingWorkerLoop, runKnowledgeIndexBackfill } from "@/features/knowledge/indexing-worker";
 import { projectClaimedKnowledgeIndexWork } from "@/features/knowledge/search";
 import { enqueueKnowledgeIndexWork } from "@/features/knowledge/indexing-queue";
 import { testDb } from "./helpers/db";
@@ -24,6 +24,35 @@ async function makeMarkerProjectable(id: string) {
 }
 
 describe("versioned knowledge indexing work", () => {
+  test("removes the idle poll abort listener when the timeout completes", async () => {
+    const controller = new AbortController();
+    const originalRemoveEventListener = controller.signal.removeEventListener.bind(controller.signal);
+    let shutdownStarted = false;
+    let removedOnTimeout = false;
+    const removeEventListener = vi.spyOn(controller.signal, "removeEventListener").mockImplementation((...args) => {
+      const result = originalRemoveEventListener(...args);
+      if (!shutdownStarted) {
+        removedOnTimeout = true;
+        controller.abort();
+      }
+      return result;
+    });
+    const fallbackShutdown = setTimeout(() => {
+      shutdownStarted = true;
+      controller.abort();
+    }, 1_000);
+
+    try {
+      await expect(runApprovedKnowledgeIndexingWorkerLoop({ workerId: "listener-cleanup-worker", pollIntervalMs: 10, signal: controller.signal })).resolves.toEqual({ status: "stopped" });
+      expect(removeEventListener).toHaveBeenCalledWith("abort", expect.any(Function));
+      expect(removedOnTimeout).toBe(true);
+    } finally {
+      clearTimeout(fallbackShutdown);
+      controller.abort();
+      removeEventListener.mockRestore();
+    }
+  });
+
   test("reclaims an expired lease with a new fence and rejects the old worker completion", async () => {
     await createMarker("fenced-marker");
     const first = await claimNextKnowledgeIndexWork({ workerId: "old-worker" }, testDb);

@@ -1,7 +1,7 @@
 import { eq, sql } from "drizzle-orm";
-import { beforeEach, describe, expect, test } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { knowledgeIngestionCandidates, knowledgeIngestionJobs, sourceCaptureVersions, sources, users } from "@/db/schema";
+import { knowledgeIngestionCandidates, knowledgeIngestionJobs, sourceCaptureVersions, sources } from "@/db/schema";
 import { claimNextKnowledgeIngestionJob, commitKnowledgeIngestionStage, ensureIngestionJobForCaptureVersion, listKnowledgeIngestionJobStatuses, recoverKnowledgeIngestionJobs, retryKnowledgeIngestionStage } from "@/features/knowledge/ingestion-jobs";
 import { runKnowledgeIngestionWorkerLoop } from "@/features/knowledge/ingestion-worker";
 import { appendSourceCaptureVersion, hashCaptureText } from "@/features/knowledge/source-captures";
@@ -25,7 +25,6 @@ async function appendReadableCapture(sourceId: string, rawText = "Đèo Hải V�
 describe("canonical knowledge ingestion jobs", () => {
   beforeEach(async () => {
     await resetTestDatabase();
-    await testDb.insert(users).values({ id: "operator", email: "operator@example.com" });
   });
 
   test("creates exactly one queued job with immutable submitter provenance for a readable capture", async () => {
@@ -49,6 +48,43 @@ describe("canonical knowledge ingestion jobs", () => {
 
   test("keeps the canonical worker loop available for supervised execution and supports a one-shot no-work check", async () => {
     await expect(runKnowledgeIngestionWorkerLoop({ once: true, workerId: "supervised-worker" })).resolves.toBeNull();
+  });
+
+  test("reports a heartbeat only after a database poll completes", async () => {
+    const onPollComplete = vi.fn();
+
+    await expect(runKnowledgeIngestionWorkerLoop({ once: true, workerId: "heartbeat-worker", onPollComplete })).resolves.toBeNull();
+
+    expect(onPollComplete).toHaveBeenCalledTimes(1);
+  });
+
+  test("removes the idle poll abort listener when the timeout completes", async () => {
+    const controller = new AbortController();
+    const originalRemoveEventListener = controller.signal.removeEventListener.bind(controller.signal);
+    let shutdownStarted = false;
+    let removedOnTimeout = false;
+    const removeEventListener = vi.spyOn(controller.signal, "removeEventListener").mockImplementation((...args) => {
+      const result = originalRemoveEventListener(...args);
+      if (!shutdownStarted) {
+        removedOnTimeout = true;
+        controller.abort();
+      }
+      return result;
+    });
+    const fallbackShutdown = setTimeout(() => {
+      shutdownStarted = true;
+      controller.abort();
+    }, 1_000);
+
+    try {
+      await expect(runKnowledgeIngestionWorkerLoop({ workerId: "listener-cleanup-worker", pollIntervalMs: 10, signal: controller.signal })).resolves.toEqual({ status: "stopped" });
+      expect(removeEventListener).toHaveBeenCalledWith("abort", expect.any(Function));
+      expect(removedOnTimeout).toBe(true);
+    } finally {
+      clearTimeout(fallbackShutdown);
+      controller.abort();
+      removeEventListener.mockRestore();
+    }
   });
 
   test("creates exactly one canonical job when concurrent callers ensure an unqueued readable capture", async () => {
