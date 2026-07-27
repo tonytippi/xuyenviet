@@ -1,9 +1,20 @@
 import { execFileSync } from "node:child_process";
 
-import { and, eq, inArray, like } from "drizzle-orm";
+import { eq, inArray, like } from "drizzle-orm";
 import { beforeEach, describe, expect, test } from "vitest";
 
-import { auditEvents, conversations, sources, tripProjects, userRoles, users } from "@/db/schema";
+import {
+  assistantRetrievalDecisions,
+  auditEvents,
+  chatContext,
+  conversations,
+  messages,
+  rawSourceMaterial,
+  sources,
+  tripProjects,
+  users,
+  webSearchResults,
+} from "@/db/schema";
 import { recordAuditEvent } from "@/features/audit/events";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
@@ -28,17 +39,28 @@ describe("Story 8.5 clean-break seed", () => {
     });
   });
 
-  test("seeds only deliberate people and preserves their relationships", async () => {
+  test("seeds only the operator and preserves source provenance", async () => {
     await expect(testDb.select().from(users).where(inArray(users.id, reservedUserIds))).resolves.toEqual([]);
     await expect(testDb.select().from(users).where(like(users.id, "system-%"))).resolves.toEqual([]);
-    await expect(testDb.select({ id: users.id, email: users.email }).from(users).where(inArray(users.id, ["seed-fixture-operator-user", "seed-traveler-user"]))).resolves.toEqual([
+    await expect(testDb.select({ id: users.id, email: users.email }).from(users)).resolves.toEqual([
       { id: "seed-fixture-operator-user", email: "fixture-operator@xuyenviet.local" },
-      { id: "seed-traveler-user", email: "fixture-traveler@xuyenviet.local" },
     ]);
-    await expect(testDb.select().from(userRoles).where(and(eq(userRoles.userId, "seed-traveler-user"), eq(userRoles.role, "traveler")))).resolves.toHaveLength(1);
-    await expect(testDb.select().from(sources).where(eq(sources.submittedByUserId, "seed-fixture-operator-user"))).resolves.toHaveLength(18);
-    await expect(testDb.select().from(tripProjects).where(eq(tripProjects.userId, "seed-traveler-user"))).resolves.toHaveLength(1);
-    await expect(testDb.select().from(conversations).where(eq(conversations.userId, "seed-traveler-user"))).resolves.toHaveLength(1);
+    const seededSources = await testDb.select({ id: sources.id, kind: sources.kind, submittedByUserId: sources.submittedByUserId }).from(sources);
+    expect(seededSources).toHaveLength(18);
+    expect(seededSources).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "facebook", submittedByUserId: "seed-fixture-operator-user" }),
+      expect.objectContaining({ kind: "youtube", submittedByUserId: "seed-fixture-operator-user" }),
+    ]));
+    expect(seededSources.every(({ kind, submittedByUserId }) => (kind === "facebook" || kind === "youtube") && submittedByUserId === "seed-fixture-operator-user")).toBe(true);
+    const rawMaterial = await testDb.select({ sourceId: rawSourceMaterial.sourceId }).from(rawSourceMaterial);
+    expect(rawMaterial.map(({ sourceId }) => sourceId).sort()).toEqual(seededSources.map(({ id }) => id).sort());
+    await expect(testDb.select().from(users).where(eq(users.id, "seed-traveler-user"))).resolves.toEqual([]);
+    await expect(testDb.select().from(tripProjects).where(eq(tripProjects.id, "seed-trip-hanoi-hue"))).resolves.toEqual([]);
+    await expect(testDb.select().from(conversations).where(eq(conversations.id, "seed-conversation-hanoi-hue"))).resolves.toEqual([]);
+    await expect(testDb.select().from(messages).where(inArray(messages.id, ["seed-message-user-1", "seed-message-assistant-1"]))).resolves.toEqual([]);
+    await expect(testDb.select().from(chatContext).where(inArray(chatContext.id, ["seed-chat-context-origin", "seed-chat-context-destination"]))).resolves.toEqual([]);
+    await expect(testDb.select().from(webSearchResults).where(eq(webSearchResults.id, "seed-web-result-hue-weather"))).resolves.toEqual([]);
+    await expect(testDb.select().from(assistantRetrievalDecisions).where(eq(assistantRetrievalDecisions.id, "seed-retrieval-decision-1"))).resolves.toEqual([]);
   });
 
   test("records a cataloged system audit without a matching user row", async () => {

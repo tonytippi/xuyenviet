@@ -39,7 +39,7 @@ so that attribution stays correct as Audit, workers, and user-facing reporting e
   - [x] Exercise the valid user actor and all five valid system actors: `system-ai-orchestration`, `system-knowledge-pipeline`, `system-trip-planning`, `system-facebook-capture`, and `system-youtube-capture`.
   - [x] Exercise malformed input at the Audit boundary and persistence boundary: blank/missing user ID or email, blank/unknown system ID, mixed user/system fields, missing/invalid class, non-record values, and SQL `NULL`-bypass attempts. Reuse the canonical generic actor/XOR coverage rather than duplicating writers or schema fixtures unnecessarily.
   - [x] Prove catalog IDs are execution identifiers only: none appears as a `users` row, OAuth account, Auth.js session, `user_roles` row, referral relationship, owner/requester/submitter/reviewer/approver value, or authenticated session principal. Include `system-ai-orchestration`, not only the four historic fake IDs.
-  - [x] Keep deliberate human fixtures valid and prove their existing role, source-submitter, Trip Project, and conversation relationships remain real-user relationships.
+   - [x] Keep the deliberate operator fixture valid and prove its Facebook/YouTube source-submitter relationship remains a real-user relationship; the traveler fixture graph is intentionally absent.
 
 - [x] Verify attribution through the complete automated-flow matrix (AC: 2)
   - [x] Reuse and extend existing focused flow tests instead of recreating production paths: ingestion/recovery/extraction/indexing and automated recommendations use `system-knowledge-pipeline`; synchronous authenticated model work uses `system-ai-orchestration` while retaining the actual initiator; Facebook and YouTube capture use their respective catalog executors while retaining originating source submitter and source lineage; Trip Proposal expiry uses `system-trip-planning` without owner/session impersonation.
@@ -53,7 +53,7 @@ so that attribution stays correct as Audit, workers, and user-facing reporting e
   - [x] Detect receiver and formatting variants, including whitespace/newline forms and chained writers such as `getDb().insert(...)`. Audit-owned typed writers remain the only legal production boundary.
 
 - [x] Verify clean-break migration, seed, and repository state (AC: 3)
-  - [x] Use `DATABASE_URL_TEST` for automated migration/seed regressions. Prove the test seed output contains no `users.id LIKE 'system-%'`, no historic reserved IDs, and no invalid system-email user fixture, while valid person fixtures and their human-owned relationships remain present.
+   - [x] Use `DATABASE_URL_TEST` for automated migration/seed regressions. Prove the test seed output contains no `users.id LIKE 'system-%'`, no historic reserved IDs, no invalid system-email user fixture, and no traveler fixture graph, while the operator source-submitter relationship remains present.
   - [x] Search current migration history, seed/runtime code, test helpers/fixtures, and active runbooks for reserved-user migrations, fake system IDs/emails, and user-creation paths. Catalog references and explicitly historical/superseded BMad documents may remain; no active migration, seed, runtime path, fixture/helper, or active runbook may create a catalog executor as a person.
   - [x] If an authoritative development `pnpm db:reset` plus migration/seed check is required, first resolve the effective `DATABASE_URL`, verify its credential-free host/port/database identity directly, and obtain affirmative confirmation that the exact local target and all its contents are disposable. If it is non-local, protected, durable, customer-facing, operational, or cannot be confirmed disposable, stop and request an expand-migrate-contract rollout. Do not reset, backfill, delete, or treat `DATABASE_URL_TEST` as proof that the development target is safe.
 
@@ -148,13 +148,13 @@ gpt-5.6-terra
 - No application code, migration, test execution, database reset, seed run, commit, or code review was performed.
 - 2026-07-27: Began Story 8.6 implementation. The user confirmed `localhost:5432/xuyenviet` was just reset and is disposable; verification will inspect its migration/seed state without performing another reset. Database-backed Story 8.6 tests will run serially against `DATABASE_URL_TEST`.
 - 2026-07-27: Verified `DATABASE_URL` identity read-only as `127.0.0.1:5432/xuyenviet` (user `postgres`), with 69 applied migrations and the three attribution tables present. No development reset was run.
-- 2026-07-27: Development seed inspection found 2 deliberate people, 0 `system-%` user IDs/emails, and 0 catalog account/session/role rows. It preserved 18 operator-submitted sources plus one traveler Trip Project and conversation.
+- Historical verification note: the former two-person seed inspection is superseded by the 2026-07-27 single-operator seed contract. Future verification must preserve 18 operator-submitted sources and assert the traveler fixture graph is absent.
 - 2026-07-27: Added `tests/story-8-6-actor-isolation.test.ts`: explicit `DATABASE_URL_TEST` seed subprocess, five-system-catalog actor checks, malformed boundary cases, catalog identity/ownership/referral/session isolation, clean seed checks, and the global Audit-owned insert guard.
 - 2026-07-27: Serial `DATABASE_URL_TEST` matrix passed: 16 files, 279 tests. `pnpm lint` passed with 0 errors and 3 existing unused-variable warnings in `tests/knowledge-search.test.ts`; `pnpm build` and a post-build `pnpm typecheck` passed. The first typecheck run raced concurrent `.next/types` regeneration and was rerun successfully. `pnpm db:generate` was not required and was not run; no migration/schema change was needed.
 
 ### Completion Notes List
 
-- Read-only development identity/migration/seed inspection completed without a reset. The confirmed local development target was `127.0.0.1:5432/xuyenviet` with 69 applied migrations, attribution tables present, two deliberate people, no system users/emails, and no catalog account/session/role rows.
+- Historical verification note: the prior read-only inspection reporting two deliberate people is superseded by the single-operator seed contract; it must not be used as current seed evidence.
 - The serial `DATABASE_URL_TEST` verification matrix passed: 16 files and 279 tests.
 - `pnpm lint` passed with 0 errors and 3 existing unrelated unused-variable warnings in `tests/knowledge-search.test.ts`; `pnpm build` and the post-build `pnpm typecheck` passed. The first typecheck raced `.next/types` regeneration and the rerun passed.
 - `pnpm db:generate` was not required and was not run; no migration or schema change was needed.

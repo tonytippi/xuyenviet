@@ -9,12 +9,10 @@ import { beforeEach, describe, expect, test } from "vitest";
 import {
   accounts,
   auditEvents,
-  conversations,
   referralAttributions,
   referralCodes,
   sessions,
   sources,
-  tripProjects,
   userRoles,
   users,
 } from "@/db/schema";
@@ -50,7 +48,7 @@ describe("Story 8.6 actor isolation", () => {
   });
 
   test("accepts the real user and every catalog executor while rejecting malformed actor shapes before writing", async () => {
-    const userActor = { kind: "user", userId: "seed-traveler-user", email: "fixture-traveler@xuyenviet.local" };
+    const userActor = { kind: "user", userId: "seed-fixture-operator-user", email: "fixture-operator@xuyenviet.local" };
     expect(validateAuditActor(userActor)).toEqual(userActor);
 
     for (const system of catalogIds) {
@@ -62,10 +60,10 @@ describe("Story 8.6 actor isolation", () => {
 
     for (const invalidActor of [
       { kind: "user", userId: "", email: "person@example.com" },
-      { kind: "user", userId: "seed-traveler-user", email: " " },
+      { kind: "user", userId: "seed-fixture-operator-user", email: " " },
       { kind: "system", system: "" },
       { kind: "system", system: "untrusted-system" },
-      { kind: "system", system: "system-trip-planning", userId: "seed-traveler-user" },
+      { kind: "system", system: "system-trip-planning", userId: "seed-fixture-operator-user" },
       { kind: "worker", system: "system-trip-planning" },
       null,
       [],
@@ -126,15 +124,12 @@ describe("Story 8.6 actor isolation", () => {
       expect(rows, `${table_name}.${column_name}`).toEqual([]);
     }
 
-    await expect(testDb.select({ id: users.id }).from(users).where(inArray(users.id, ["seed-fixture-operator-user", "seed-traveler-user"]))).resolves.toEqual([
+    await expect(testDb.select({ id: users.id }).from(users)).resolves.toEqual([
       { id: "seed-fixture-operator-user" },
-      { id: "seed-traveler-user" },
     ]);
-    await expect(testDb.select().from(userRoles).where(eq(userRoles.userId, "seed-traveler-user"))).resolves.toHaveLength(1);
     await expect(testDb.select().from(sources).where(eq(sources.submittedByUserId, "seed-fixture-operator-user"))).resolves.toHaveLength(18);
     await expect(testDb.select().from(sources).where(eq(sources.removedByUserId, "seed-fixture-operator-user"))).resolves.toEqual([]);
-    await expect(testDb.select().from(tripProjects).where(eq(tripProjects.userId, "seed-traveler-user"))).resolves.toHaveLength(1);
-    await expect(testDb.select().from(conversations).where(eq(conversations.userId, "seed-traveler-user"))).resolves.toHaveLength(1);
+    await expect(testDb.select().from(users).where(eq(users.id, "seed-traveler-user"))).resolves.toEqual([]);
   });
 
   test("has clean seed data with no reserved user IDs or system-email people", async () => {

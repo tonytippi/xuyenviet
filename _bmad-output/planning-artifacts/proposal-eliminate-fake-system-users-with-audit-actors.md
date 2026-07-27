@@ -130,7 +130,7 @@ Use a clean-break schema rollout while the database remains disposable. Update/r
 1. **Inventory scope.** Search code, tests, seeds, and migrations for reserved IDs, invalid-domain system emails, and all user-or-system fields. Classify each field by human provenance versus automated execution.
 2. **Replace schema and APIs.** Introduce the `AuditActor` union, actor-shape checks, executor fields, and typed audit/usage writers. Remove fake-user-only FKs and requirements in the same schema change.
 3. **Migrate writes.** Change ingestion, extraction, indexing, trip expiry, Facebook/YouTube capture, recommendations, and AI usage to write explicit cataloged system actors. Preserve only real requester/submitting-user fields as provenance.
-4. **Remove reservation and seed logic.** Remove reserved-user migrations, fake fixture rows, test helpers, and runtime identity checks. Keep person fixtures such as `seed-fixture-operator-user` and `seed-traveler-user`.
+4. **Remove reservation and seed logic.** Remove reserved-user migrations, fake fixture rows, test helpers, and runtime identity checks. Retain `seed-fixture-operator-user` only where real source-submitter provenance is required.
 5. **Reset and validate.** Recreate the database, run `db:seed`, assert no system user exists, assert every actor shape is valid, and run targeted worker/audit tests.
 
 ## Backfill Mapping
