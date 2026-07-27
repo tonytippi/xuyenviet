@@ -247,6 +247,23 @@ describe("knowledge extraction worker jobs", () => {
     await expect(testDb.select().from(facebookCaptureReviews).where(eq(facebookCaptureReviews.id, review.id))).resolves.toMatchObject([{ status: "extracted_approved" }]);
   });
 
+  test("does not complete or audit a lease reclaimed after processing began", async () => {
+    const review = await createCapturedFacebookReview("reclaimed-success-lease");
+    const [draft] = await testDb.insert(knowledgeCards).values({ type: "route_note", title: "Owned draft", routeSegment: "Huế - Đà Nẵng", summary: "Thông tin cộng đồng cần duyệt trước khi dùng.", confidence: "community", freshnessSensitive: false, aiPromptVersion: "source_knowledge_draft_extraction_v1", createdByUserId: "operator-user" }).returning();
+    await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: draft.id, sourceId: review.sourceId, supportLevel: "primary" });
+    const originalLockedAt = new Date("2026-07-14T00:00:00.000Z");
+    const [job] = await testDb.insert(knowledgeExtractionJobs).values({ sourceId: review.sourceId, facebookCaptureReviewId: review.id, captureVersionId: review.captureVersionId, mode: "extract_only", status: "running", attemptCount: 1, lockedAt: originalLockedAt, lockedBy: "reused-worker-id", startedAt: originalLockedAt, resultDraftIds: [draft.id], resultDraftCount: 1, createdByUserId: "operator-user", createdByEmail: "operator-user@example.com" }).returning();
+    const transaction = vi.spyOn(testDb, "transaction").mockImplementationOnce(async (callback) => {
+      await testDb.update(knowledgeExtractionJobs).set({ lockedAt: new Date("2026-07-14T00:20:00.000Z"), startedAt: new Date("2026-07-14T00:20:00.000Z") }).where(eq(knowledgeExtractionJobs.id, job.id));
+      return callback(testDb as never);
+    });
+
+    await expect(processKnowledgeExtractionJob(job.id, testDb)).resolves.toMatchObject({ status: "processed" });
+    await expect(testDb.select().from(knowledgeExtractionJobs).where(eq(knowledgeExtractionJobs.id, job.id))).resolves.toMatchObject([{ status: "running", lockedAt: new Date("2026-07-14T00:20:00.000Z"), lockedBy: "reused-worker-id" }]);
+    await expect(testDb.select().from(auditEvents).where(eq(auditEvents.targetId, job.id))).resolves.toEqual([]);
+    transaction.mockRestore();
+  });
+
   test("worker script entrypoint can be imported by vitest", async () => {
     await expect(import("../scripts/knowledge-extraction-worker")).resolves.toBeDefined();
   });

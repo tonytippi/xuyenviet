@@ -232,7 +232,25 @@ async function finalizeJobSuccess(
   workerActor: ReturnType<typeof createSystemAuditActor>,
   db: ExtractionJobDb,
 ) {
+  if (!job.lockedAt || !job.lockedBy) return;
+  const lockedAt = job.lockedAt;
+  const lockedBy = job.lockedBy;
+
   await db.transaction(async (transaction) => {
+    const [lease] = await transaction
+      .select({ id: knowledgeExtractionJobs.id })
+      .from(knowledgeExtractionJobs)
+      .where(and(
+        eq(knowledgeExtractionJobs.id, job.id),
+        eq(knowledgeExtractionJobs.status, "running"),
+        eq(knowledgeExtractionJobs.lockedBy, lockedBy),
+        eq(knowledgeExtractionJobs.lockedAt, lockedAt),
+      ))
+      .limit(1)
+      .for("update");
+
+    if (!lease) return;
+
     await assertJobDraftIdsBelongToSource(transaction, job.sourceId, result.draftIds, result.draftCount);
 
     if (job.facebookCaptureReviewId) {
@@ -262,7 +280,12 @@ async function finalizeJobSuccess(
     const [succeeded] = await transaction
       .update(knowledgeExtractionJobs)
       .set({ status: "succeeded", resultDraftIds: result.draftIds, resultDraftCount: result.draftCount, finishedAt: new Date(), lockedAt: null, lockedBy: null, updatedAt: new Date(), lastErrorCode: null, lastErrorMessage: null })
-      .where(and(eq(knowledgeExtractionJobs.id, job.id), eq(knowledgeExtractionJobs.status, "running"), eq(knowledgeExtractionJobs.lockedBy, job.lockedBy ?? "")))
+      .where(and(
+        eq(knowledgeExtractionJobs.id, job.id),
+        eq(knowledgeExtractionJobs.status, "running"),
+        eq(knowledgeExtractionJobs.lockedBy, lockedBy),
+        eq(knowledgeExtractionJobs.lockedAt, lockedAt),
+      ))
       .returning({ id: knowledgeExtractionJobs.id });
     if (succeeded) await recordExtractionJobTransitionAudit(transaction, job.id, "succeeded");
   });

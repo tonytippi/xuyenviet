@@ -66,7 +66,7 @@ export async function removeKnowledgeSource(
         ...(downgradePattern ? { knowledgeState: "community_observation" as const } : {}),
       }).where(eq(knowledgeCards.id, cardId)).returning({ contentVersion: knowledgeCards.contentVersion, evidenceSetRevision: knowledgeCards.evidenceSetRevision });
       if (!updated) continue;
-      await tx.update(knowledgeRecommendations).set({ status: "superseded", resolution: "accepted", resolvedByUserId: input.actor.userId, resolvedAt: now, updatedAt: now }).where(and(eq(knowledgeRecommendations.knowledgeCardId, cardId), inArray(knowledgeRecommendations.status, ["open", "in_review"])));
+      await tx.update(knowledgeRecommendations).set({ status: "superseded", resolution: "accepted", resolvedByUserId: input.actor.userId, resolvedAt: now, executorSystem: null, updatedAt: now }).where(and(eq(knowledgeRecommendations.knowledgeCardId, cardId), inArray(knowledgeRecommendations.status, ["open", "in_review"])));
        await enqueueKnowledgeIndexWork(tx, { cardId, contentVersion: updated.contentVersion, evidenceSetRevision: updated.evidenceSetRevision, reason: "source_removal" });
       // Reindex from remaining evidence before a projection can become active again.
        await disableStaleKnowledgeSearchProjection(tx, cardId, updated.contentVersion, now);

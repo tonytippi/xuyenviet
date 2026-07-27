@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test } from "vitest";
 
-import { auditEvents, knowledgeCardEvidence, knowledgeCardSearchDocuments, knowledgeCards, knowledgeIndexDirtyMarkers, knowledgeCardSources, knowledgeSourceSuggestions, sourceCaptureVersions, sources, users } from "@/db/schema";
+import { auditEvents, knowledgeCardEvidence, knowledgeCardSearchDocuments, knowledgeCards, knowledgeIndexDirtyMarkers, knowledgeCardSources, knowledgeRecommendations, knowledgeSourceSuggestions, sourceCaptureVersions, sources, users } from "@/db/schema";
 import { removeKnowledgeSource } from "@/features/knowledge/source-removal";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
@@ -27,6 +27,7 @@ describe("knowledge source removal", () => {
     const capture = await seedSourceCaptureVersion({ sourceId: "removed-source", captureKind: "url", rawText: "Bằng chứng bị gỡ." });
     await seedKnowledgeCardEvidence({ cardId: "removed-card", sourceId: "removed-source", captureVersionId: capture.id, quoteText: "Bằng chứng bị gỡ." });
     await testDb.insert(knowledgeCardSearchDocuments).values({ knowledgeCardId: "removed-card", executorSystem: "system-knowledge-pipeline", status: "active", searchableText: "Huế", textHash: "a".repeat(64), sourceCount: 1, confidence: "curated", freshnessSensitive: false });
+    const [recommendation] = await testDb.insert(knowledgeRecommendations).values({ knowledgeCardId: "removed-card", contentVersion: 1, evidenceSetRevision: 1, reason: "risk", priority: 50, executorSystem: "system-knowledge-pipeline" }).returning();
 
     await expect(removeKnowledgeSource({ sourceId: "removed-source", reason: "withdrawn", actor: { userId: "operator", email: "operator@example.com" } }, testDb)).resolves.toEqual({ status: "completed", sourceId: "removed-source", changedCardIds: ["removed-card"] });
     await expect(testDb.select({ eligibility: sources.eligibility, removalReason: sources.removalReason, current: sources.currentCaptureVersionId }).from(sources).where(eq(sources.id, "removed-source"))).resolves.toEqual([{ eligibility: "withdrawn", removalReason: "withdrawn", current: null }]);
@@ -34,6 +35,7 @@ describe("knowledge source removal", () => {
     await expect(testDb.select({ publicationState: knowledgeCards.publicationState, evidenceSetRevision: knowledgeCards.evidenceSetRevision }).from(knowledgeCards).where(eq(knowledgeCards.id, "removed-card"))).resolves.toEqual([{ publicationState: "suppressed", evidenceSetRevision: 2 }]);
     await expect(testDb.select({ status: knowledgeCardSearchDocuments.status }).from(knowledgeCardSearchDocuments)).resolves.toEqual([{ status: "disabled" }]);
     await expect(testDb.select({ rawText: sourceCaptureVersions.rawText, rawMetadata: sourceCaptureVersions.rawMetadata }).from(sourceCaptureVersions)).resolves.toEqual([{ rawText: null, rawMetadata: null }]);
+    await expect(testDb.select({ status: knowledgeRecommendations.status, executorSystem: knowledgeRecommendations.executorSystem, resolvedByUserId: knowledgeRecommendations.resolvedByUserId }).from(knowledgeRecommendations).where(eq(knowledgeRecommendations.id, recommendation.id))).resolves.toEqual([{ status: "superseded", executorSystem: null, resolvedByUserId: "operator" }]);
     await expect(testDb.select().from(knowledgeIndexDirtyMarkers)).resolves.toHaveLength(1);
     await expect(testDb.select().from(auditEvents).where(eq(auditEvents.targetType, "knowledge_source_removal"))).resolves.toHaveLength(1);
     await expect(removeKnowledgeSource({ sourceId: "removed-source", reason: "withdrawn", actor: { userId: "operator", email: "operator@example.com" } }, testDb)).resolves.toMatchObject({ status: "already_completed" });
