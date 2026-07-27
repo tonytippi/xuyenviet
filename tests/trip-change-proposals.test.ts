@@ -1050,6 +1050,7 @@ describe("Story 7.5 applyApprovedTripChange pure unit tests (mocked helpers)", (
     } | null;
     items?: Array<Record<string, unknown>>;
     constraintsVersion?: number | null;
+    onProposalLock?: () => void;
   }): MockTransaction {
     const selectMock = vi.fn();
     const updateMock = vi.fn(() => ({ set: vi.fn(() => ({ where: vi.fn(() => Promise.resolve()) })) }));
@@ -1082,7 +1083,10 @@ describe("Story 7.5 applyApprovedTripChange pure unit tests (mocked helpers)", (
         from: vi.fn(() => ({
           where: vi.fn(() => {
             const promise = Promise.resolve(resolveResult()) as Promise<unknown> & { for: ReturnType<typeof vi.fn> };
-            promise.for = vi.fn(() => promise);
+             promise.for = vi.fn(() => {
+               if (isProposalQuery) scenario.onProposalLock?.();
+               return promise;
+             });
             return { limit: vi.fn(() => promise) };
           }),
         })),
@@ -1226,6 +1230,39 @@ describe("Story 7.5 applyApprovedTripChange pure unit tests (mocked helpers)", (
     const result = await applyApprovedTripChange({ tripProjectId: "project-1", proposalId: "prop-1" });
     expect(result).toEqual({ success: false, reason: "expired" });
     expect(helpers.createTripPlanItemInTransaction).not.toHaveBeenCalled();
+  });
+
+  test("(d) rechecks expiry after acquiring the proposal lock", async () => {
+    vi.useFakeTimers();
+    try {
+      const lockTime = new Date("2026-07-27T12:00:00.000Z");
+      vi.setSystemTime(lockTime);
+      const helpers = makeHelperMocks();
+      const { applyApprovedTripChange } = await setupApplyMocks({
+        project: baseProject,
+        proposal: {
+          id: "prop-1",
+          status: "pending",
+          rationale: "Test",
+          operations: [],
+          alternatives: [],
+          expiresAt: new Date(lockTime.getTime() + 1),
+          createdAt: lockTime,
+          expectedAggregateVersion: 1,
+          expectedItemVersions: null,
+          orderingPreconditions: null,
+        },
+        items: [],
+        constraintsVersion: null,
+        onProposalLock: () => vi.setSystemTime(lockTime.getTime() + 2),
+      }, helpers);
+
+      await expect(applyApprovedTripChange({ tripProjectId: "project-1", proposalId: "prop-1" }))
+        .resolves.toEqual({ success: false, reason: "expired" });
+      expect(helpers.createTripPlanItemInTransaction).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   test("(e) cross-owner (missing project) returns not_found", async () => {
@@ -1378,11 +1415,13 @@ describe("Story 7.5 applyApprovedTripChange pure unit tests (mocked helpers)", (
 
 describe("Story 8.4 Audit history boundary", () => {
   test("Chat/Trips has no direct trip plan history insert", () => {
+    const directHistoryInsert = /\b(?:transaction|\w+)\s*\.\s*insert\s*\(\s*tripPlanChangeHistory\b/;
     const files = listTypeScriptFiles("src/features/chat-trips");
     for (const file of files) {
       const source = readFileSync(file, "utf8");
-      expect(source).not.toMatch(/(?:transaction|\w+)\.insert\(tripPlanChangeHistory\)/);
+      expect(source).not.toMatch(directHistoryInsert);
     }
+    expect("transaction.insert(\n  tripPlanChangeHistory,\n)").toMatch(directHistoryInsert);
     expect(readFileSync("src/features/chat-trips/trip-change-proposals.ts", "utf8")).toContain("recordPlanHistory(");
   });
 });

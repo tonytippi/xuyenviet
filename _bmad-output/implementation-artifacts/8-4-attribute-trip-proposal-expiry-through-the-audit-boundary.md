@@ -53,6 +53,12 @@ so that history distinguishes autonomous expiry from actions performed by people
    - [x] Run `pnpm lint`, `pnpm typecheck`, and `pnpm build`.
    - [x] Do not run or modify Drizzle migrations/schema solely for this wiring change. If investigation proves a schema change is necessary, stop: the existing Story 8.2 system actor shape already supports this flow, and any new migration must respect the authorized disposable/reset-only clean-break policy.
 
+### Review Findings
+
+- [x] [Review][Patch] Re-evaluate proposal expiry after waiting for the apply locks [src/features/chat-trips/trip-change-proposals.ts:1333] — `now` is captured immediately after the proposal `FOR UPDATE` lock and before the expiry comparison/terminal command. A fake-clock regression advances time at lock acquisition and verifies expiry wins without plan mutation.
+- [x] [Review][Patch] Make worker-versus-read expiry contention deterministic [tests/trip-planning-safety.test.ts:1277] — the test persists a valid future expiry, backdates it deterministically, and uses a fixed worker `now` after it. No sleep or wall-clock comparison remains; the concurrent worker/read paths contend on the same elapsed row and verify exactly-once system attribution.
+- [x] [Review][Patch] Harden the direct-history-insert convention matcher [tests/trip-change-proposals.test.ts:1384] — the scoped guard now permits arbitrary whitespace around member access, `insert`, and the opening argument, and explicitly proves it rejects a newline-formatted direct insert.
+
 ## Dev Notes
 
 ### Required Domain Contract
@@ -140,11 +146,15 @@ gpt-5.6-terra
 - Implementation stop condition: if any proposed schema/migration or deployment activity would target durable customer/operational data, stop and obtain an expand-migrate-contract design rather than extending the disposable/reset-only Epic 8 clean break.
 - 2026-07-27: `bmad-dev-story` implementation completed. The focused Story 8.4 suite passed 108 tests; `pnpm lint`, `pnpm typecheck`, and `pnpm build` passed. No migration was added or modified.
 - Completion synchronization is authorized only through the review checkpoint. Independent adversarial review remains the next required workflow action; this record does not represent review approval or story completion.
+- 2026-07-27: Repaired all three adversarial review patches only. The apply command captures its expiry clock after proposal locking; worker/read expiry contention is deterministic; the scoped direct-history-insert guard detects formatted inserts. `pnpm test:run tests/trip-change-proposals.test.ts tests/trip-proposal-expiry-worker.test.ts tests/trip-planning-safety.test.ts tests/audit-actors.test.ts tests/audit-attribution-migration.test.ts` passed 109 tests; `pnpm build` and a post-build `pnpm typecheck` passed. `pnpm lint` has 0 errors and the existing three unused-variable warnings in `tests/knowledge-search.test.ts`. No schema, migration, Story 8.5, or commit changes were made. Story returned to `review` pending follow-up review.
 
 ### File List
 
 - _bmad-output/implementation-artifacts/8-4-attribute-trip-proposal-expiry-through-the-audit-boundary.md
 - _bmad-output/implementation-artifacts/sprint-status.yaml
+- src/features/chat-trips/trip-change-proposals.ts
+- tests/trip-change-proposals.test.ts
+- tests/trip-planning-safety.test.ts
 
 ## Change Log
 
@@ -152,3 +162,4 @@ gpt-5.6-terra
 - 2026-07-27: Revalidated and repaired documentation-only expiry command semantics, sessionless ownership wording, scoped enforcement terminology, and affected safety/worker test guidance; status remains `ready-for-dev`. No code, migration, test, commit, review, or later-story work was performed.
 - 2026-07-27: Revalidated the repaired guide again and made the existing proposal-suite application-at-expiry DB and mocked regression updates explicit; status remains `ready-for-dev`. No code, migration, test, commit, review, or later-story work was performed.
 - 2026-07-27: Synchronized the completed `bmad-dev-story` implementation to `review` under Chief of Staff authorization. Recorded focused 108-test, lint, typecheck, and build evidence. No code, test, migration, commit, or independent review was performed in this synchronization; independent adversarial review remains next.
+- 2026-07-27: Repaired the three Story 8.4 adversarial review findings and returned the story to `review`. Added lock-time expiry, deterministic worker/read contention, and formatted direct-insert enforcement regressions. No schema/migration, Story 8.5, or commit changes.

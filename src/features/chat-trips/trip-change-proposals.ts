@@ -1330,7 +1330,6 @@ export async function applyApprovedTripChange(
   const session = await getAuthenticatedSession();
   if (!session) return { success: false, reason: "unauthenticated" };
 
-  const now = new Date();
   try {
     return await getDb().transaction(async (transaction) => {
       // Lock the Trip Project FOR UPDATE by (id, userId).
@@ -1369,7 +1368,11 @@ export async function applyApprovedTripChange(
       // Idempotent re-apply: an already-terminal proposal is no-longer-applicable.
       if (proposalRow.status !== "pending") return { success: false, reason: "not_found" } as const;
 
-       // Expiry is a terminal system command, even when apply discovers it.
+        // Capture time after acquiring both locks: a proposal may expire while
+        // this apply waits, and must terminalize rather than be applied.
+        const now = new Date();
+
+        // Expiry is a terminal system command, even when apply discovers it.
        // Keep it in this transaction so no plan operation can follow it.
        if (proposalRow.expiresAt && proposalRow.expiresAt.getTime() <= now.getTime()) {
          await expireTripChangeProposalInTransaction(transaction, {
