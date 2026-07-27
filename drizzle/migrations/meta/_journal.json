@@ -484,6 +484,13 @@
       "when": 1785363600000,
       "tag": "0071_story_8_3_search_projection_executor_required",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1785367200000,
+      "tag": "0072_reject_system_executor_user_ids",
+      "breakpoints": true
     }
   ]
 }

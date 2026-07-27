@@ -60,7 +60,14 @@ so that attribution stays correct as Audit, workers, and user-facing reporting e
 - [x] Run and record scoped verification (AC: 1, 2, 3)
   - [x] Run database-backed tests serially: `tests/story-8-6-actor-isolation.test.ts`, `tests/audit-actors.test.ts`, `tests/audit-attribution-migration.test.ts`, `tests/story-8-5-clean-break.test.ts`, `tests/ai-usage-events.test.ts`, `tests/admin-user-management.test.ts`, `tests/knowledge-ingestion-pipeline.test.ts`, `tests/knowledge-indexing-worker.test.ts`, `tests/knowledge-extraction-worker.test.ts`, `tests/knowledge-draft-extraction.test.ts`, `tests/knowledge-recommendation-queue.test.ts`, `tests/facebook-capture.test.ts`, `tests/youtube-capture.test.ts`, `tests/trip-change-proposals.test.ts`, `tests/trip-proposal-expiry-worker.test.ts`, and `tests/trip-planning-safety.test.ts`.
   - [x] Run `pnpm lint`, `pnpm typecheck`, and `pnpm build`. Record actual results and existing warnings/failures exactly; do not claim a full-suite or `pnpm db:generate` pass without current evidence.
-  - [x] Do not require `pnpm db:generate` unless a confirmed production/schema defect requires a migration. Its known non-TTY rename-disambiguation prompt must be recorded as a blocker if encountered, not bypassed.
+   - [x] Do not require `pnpm db:generate` unless a confirmed production/schema defect requires a migration. Its known non-TTY rename-disambiguation prompt must be recorded as a blocker if encountered, not bypassed.
+
+### Review Findings
+
+- [x] [Review][Patch] Clean migration verification [tests/story-8-6-actor-isolation.test.ts] — **High repaired.** Each regression recreates only `DATABASE_URL_TEST`'s `public` and Drizzle journal schemas, invokes an explicitly bound `drizzle-kit migrate`, then invokes the explicitly bound seed subprocess before inspecting schema and data.
+- [x] [Review][Patch] Catalog actors cannot become user/auth principals [src/db/schema.ts; drizzle/migrations/0072_reject_system_executor_user_ids.sql; tests/story-8-6-actor-isolation.test.ts] — **High repaired.** The database rejects all five catalog IDs at the `users.id` boundary, transitively preventing accounts, sessions, roles, and user-scoped foreign-key rows; regressions prove direct user/account/session/role creation fails.
+- [x] [Review][Patch] Actor-isolation matrix covers user-scoped relationships [tests/story-8-6-actor-isolation.test.ts] — **Medium repaired.** The regression discovers every foreign key targeting `users`, scans each for all catalog IDs, asserts the required remover/reviewer/creator/submitter relationships, and preserves valid seed-person assertions.
+- [x] [Review][Patch] Audit-owned direct-write guard is non-bypassable for supported forms [tests/story-8-6-actor-isolation.test.ts] — **Medium repaired.** Import-aware TypeScript AST inspection catches direct, aliased, namespace/member, optional, computed, and local-alias protected-table insert calls; adversarial bypass forms are rejected.
 
 ## Dev Notes
 
@@ -148,12 +155,16 @@ gpt-5.6-terra
 - `pnpm lint` passed with 0 errors and 3 existing unrelated unused-variable warnings in `tests/knowledge-search.test.ts`; `pnpm build` and the post-build `pnpm typecheck` passed. The first typecheck raced `.next/types` regeneration and the rerun passed.
 - `pnpm db:generate` was not required and was not run; no migration or schema change was needed.
 - Story status remains `review`. Chief of Staff authorized an internal adversarial checkpoint, but it was not performed because the prior worker ended at the prompt. An independent post-commit BMad code review remains required before Story 8.6 can be finalized.
+- 2026-07-27: Repaired only the four Story 8.6 review findings. Added migration `0072_reject_system_executor_user_ids` to reserve all five catalog IDs at the `users` boundary. The final suite recreates only `DATABASE_URL_TEST` schemas, explicitly migrates and seeds that target, rejects catalog user/auth principal creation, dynamically scans every user foreign-key relationship, and uses import-aware TypeScript AST enforcement for protected Audit-owned inserts. Serial `DATABASE_URL_TEST` matrix passed: 16 files, 280 tests. `pnpm typecheck` and `pnpm build` passed; `pnpm lint` had 0 errors and 3 existing unused-variable warnings in `tests/knowledge-search.test.ts`. No development target reset and no Story 8.5 change occurred. Status returned to `review`; independent review remains required before `done`.
 
 ### File List
 
 - _bmad-output/implementation-artifacts/8-6-verify-actor-isolation-and-attribution-end-to-end.md
 - _bmad-output/implementation-artifacts/sprint-status.yaml
 - tests/story-8-6-actor-isolation.test.ts
+- src/db/schema.ts
+- drizzle/migrations/0072_reject_system_executor_user_ids.sql
+- drizzle/migrations/meta/_journal.json
 
 ## Change Log
 
@@ -162,3 +173,5 @@ gpt-5.6-terra
 - 2026-07-27: Started Story 8.6 development after explicit confirmation that the disposable local `localhost:5432/xuyenviet` target was reset. No reset will be run unless separately required.
 - 2026-07-27: Added final actor-isolation, clean-seed, and protected-write enforcement coverage; verified the clean local migration/seed state without resetting it. The required serial `DATABASE_URL_TEST` matrix passed (16 files, 279 tests); lint (0 errors, 3 pre-existing warnings), post-build typecheck, and build passed. Status set to `review`; no migration, development reset, `db:generate`, or commit was performed.
 - 2026-07-27: Evidence/status synchronization only. Recorded the read-only development migration/seed identity check, serial 16-file/279-test `DATABASE_URL_TEST` matrix, lint, post-build typecheck, and build evidence. Story remains `review`; the Chief-of-Staff-authorized internal adversarial checkpoint was not executed because the prior worker ended at its prompt. Independent post-commit BMad code review remains required. No code, test, migration, database, or commit action was performed.
+- 2026-07-27: Independent post-commit BMad code review of `fddf146..2257a4ac3b5c353fb7e440cace7c1a995afb0f67` ran Blind Hunter, Edge Case Hunter, and Acceptance Auditor. Four unresolved findings require repair: two High (clean migration verification is missing; catalog executors are only absent from seed data rather than prevented from user/auth principal use) and two Medium (the isolation matrix omits user-scoped relationships; the direct-write guard is bypassable). Status set to `in-progress`; no implementation, test, migration, database, or commit action was performed.
+- 2026-07-27: Repaired all four authorized Story 8.6 review findings. Added the catalog-user-ID rejection migration; clean verification now recreates, migrates, and seeds only `DATABASE_URL_TEST`; user-scoped relationship coverage is discovered from database foreign keys; and protected-write enforcement uses import-aware TypeScript AST inspection with adversarial bypass coverage. Serial 16-file/280-test matrix, lint (0 errors; 3 existing warnings), typecheck, and build passed. No `DATABASE_URL` reset, Story 8.5 modification, or commit was performed. Status returned to `review` pending independent follow-up review.

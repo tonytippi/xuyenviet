@@ -210,7 +210,12 @@ export const users = pgTable("users", {
   email: text("email").unique(),
   emailVerified: timestamp("email_verified", { mode: "date" }),
   image: text("image"),
-});
+}, (user) => [
+  check(
+    "users_no_system_executor_id_check",
+    sql`${user.id} not in ('system-ai-orchestration', 'system-knowledge-pipeline', 'system-trip-planning', 'system-facebook-capture', 'system-youtube-capture')`,
+  ),
+]);
 
 export const accounts = pgTable(
   "accounts",

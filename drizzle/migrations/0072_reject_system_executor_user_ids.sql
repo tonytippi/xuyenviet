@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD CONSTRAINT "users_no_system_executor_id_check" CHECK ("id" not in ('system-ai-orchestration', 'system-knowledge-pipeline', 'system-trip-planning', 'system-facebook-capture', 'system-youtube-capture'));

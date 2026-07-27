@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-07-27 (Story 8.6 evidence synchronized; independent post-commit review required.)
+# last_updated: 2026-07-27 (Story 8.6 repaired four review findings; focused checks passed and status returned to review.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-07-27 (Story 8.6 evidence synchronized; independent post-commit review required.)
+last_updated: 2026-07-27 (Story 8.6 repaired four review findings; focused checks passed and status returned to review.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -154,6 +154,8 @@ development_status:
   8-5-remove-fake-system-users-in-the-clean-break-migration: done
   # Story guide created and validated 2026-07-27; no implementation, test, migration, database reset, or commit was performed.
   # 2026-07-27: Actor-isolation suite added; development database identity/migration/seed state verified read-only without reset; serial DATABASE_URL_TEST matrix (16 files, 279 tests), lint, post-build typecheck, and build passed. Chief-of-Staff-authorized internal adversarial checkpoint was not executed because the prior worker ended at its prompt. Independent post-commit BMad code review remains required; status stays review.
+  # 2026-07-27: Independent post-commit BMad code review of fddf146..2257a4ac3b5c353fb7e440cace7c1a995afb0f67 ran Blind Hunter, Edge Case Hunter, and Acceptance Auditor. Four unresolved repairs: High clean migration verification is missing; High catalog executors are only absent from seed data, not prevented from user/auth principal use; Medium isolation matrix omits user-scoped relationships; Medium direct-write guard is bypassable. No implementation, test, migration, database, or commit action was performed.
+  # 2026-07-27: Repaired only those four findings. Migration 0072 rejects every catalog executor at users.id; the Story 8.6 regression recreates, migrates, and seeds only DATABASE_URL_TEST; it scans all foreign keys to users and uses import-aware TypeScript AST enforcement against direct protected Audit writes. Serial DATABASE_URL_TEST matrix: 16 files, 280 tests passed. lint had 0 errors and 3 existing warnings; typecheck and build passed. No DATABASE_URL reset, Story 8.5 change, or commit. Independent follow-up review remains required.
   8-6-verify-actor-isolation-and-attribution-end-to-end: review
   epic-8-retrospective: optional
 
