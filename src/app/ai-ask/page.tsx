@@ -200,6 +200,8 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
             tripWorkspace={tripWorkspaceForComposer}
             supportsImageInput={Boolean(imageInputModel)}
             userEmail={session.email}
+            userName={session.name}
+            userImage={session.image}
             canAccessAdmin={hasAdminAccess(session.roles)}
             createTripProjectAction={createTripProjectFromForm}
             deleteConversationAction={deleteConversationAction}

@@ -14,7 +14,8 @@ import type { TripWorkspaceReadModel } from "@/features/chat-trips/trip-home";
 import { tripChangeProposalLabels } from "@/features/chat-trips/trip-home-labels";
 import { TripWorkspacePanel } from "@/features/ai/trip-workspace-panel";
 import { TripProposalReviewCard, type TripProposalTerminalOutcome } from "@/features/ai/trip-proposal-review-card";
-import { AccountIcon, AttachmentIcon, ChatIcon, CloseIcon, CostIcon, HotelAreaIcon, LoadingIcon, NewChatIcon, PlaceIcon, ProjectIcon, RouteSegmentIcon, SendIcon, SourceIcon } from "@/components/ui/icons";
+import { BrandMark } from "@/components/ui/brand-mark";
+import { AccountIcon, AttachmentIcon, ChatIcon, CloseIcon, CostIcon, HotelAreaIcon, LoadingIcon, MenuIcon, NewChatIcon, PlaceIcon, ProjectIcon, RouteSegmentIcon, SendIcon, SourceIcon } from "@/components/ui/icons";
 
 const maxQuestionLength = 2_000;
 const maxImageByteSize = 5 * 1024 * 1024;
@@ -140,6 +141,8 @@ type AiAskComposerProps = {
   tripWorkspace?: TripWorkspaceReadModel | null;
   supportsImageInput?: boolean;
   userEmail?: string;
+  userName?: string | null;
+  userImage?: string | null;
   canAccessAdmin?: boolean;
   createTripProjectAction?: CreateTripProjectAction;
   deleteConversationAction?: DeleteConversationAction;
@@ -673,6 +676,8 @@ export function AiAskComposer({
   tripWorkspace = null,
   supportsImageInput = false,
   userEmail,
+  userName,
+  userImage,
   canAccessAdmin = false,
   createTripProjectAction,
   deleteConversationAction,
@@ -705,6 +710,7 @@ export function AiAskComposer({
   const [selectedAnswerEntity, setSelectedAnswerEntity] = useState<AnswerEntityDescriptor | null>(null);
   const [isDesktopViewport, setIsDesktopViewport] = useState(false);
   const [isWorkspaceSheetOpen, setWorkspaceSheetOpen] = useState(false);
+  const [isSidebarCollapsed, setSidebarCollapsed] = useState(false);
   // P9: plan history sheet state for mobile. Coordinates with the workspace
   // sheet so only one aria-modal dialog is open at a time.
   const [isPlanHistorySheetOpen, setPlanHistorySheetOpen] = useState(false);
@@ -1636,6 +1642,12 @@ export function AiAskComposer({
     textareaRef.current?.focus();
   }
 
+  function handleQuestionChange(event: ChangeEvent<HTMLTextAreaElement>) {
+    setQuestion(event.target.value);
+    event.currentTarget.style.height = "0px";
+    event.currentTarget.style.height = `${event.currentTarget.scrollHeight}px`;
+  }
+
   // Story 7.5: on terminal success, move focus back to the originating answer
   // card heading (answer surface) or the Trip Home focus card heading
   // (workspace panel) — 7.4 left this as a 7.5 hook.
@@ -1650,17 +1662,17 @@ export function AiAskComposer({
   }
 
   const planningScope = (
-    <section className="border-t border-[#d8c9ad] pt-4 text-left">
+    <details className="border-t border-[#e6e6e6] pt-3 text-left">
+      <summary className="cursor-pointer px-2 text-[11px] font-medium text-[#777]">Quản lý chuyến đi</summary>
       <div className="flex flex-col gap-3">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#8c4f13]">Phạm vi lập kế hoạch</p>
-          <h2 className="mt-1 text-lg font-semibold text-[#17342c]">
+          <h2 className="mt-3 text-sm font-semibold text-[#202020]">
             {selectedTripProject ? `Dự án: ${formatTripProjectLabel(selectedTripProject)}` : "Trò chuyện thường"}
           </h2>
-          <p className="mt-2 text-sm leading-6 text-[#4f625a]">
+          <p className="mt-1 text-sm leading-6 text-[#6b6b6b]">
             {selectedTripProject
-              ? "Tin nhắn mới luôn đi vào hội thoại chính của dự án."
-              : "Bạn đang hỏi trong hội thoại thường. Chọn hoặc tạo dự án nếu muốn gom kế hoạch cho một chuyến cụ thể."}
+              ? "Tin nhắn mới sẽ vào hội thoại chính."
+              : "Tạo dự án khi bạn muốn gom kế hoạch cho một chuyến đi."}
           </p>
           {selectedTripProject ? <p className="mt-2 text-sm font-semibold text-[#1f5f46]">Lịch sử trao đổi: chọn một hội thoại bên trên để xem lại mà không tạo nhánh soạn tin mới.</p> : null}
         </div>
@@ -1715,14 +1727,27 @@ export function AiAskComposer({
           </form>
         </details>
       ) : null}
-    </section>
+    </details>
   );
 
+  const accountName = userName?.trim() || userEmail?.split("@")[0] || "Tài khoản";
+  const accountInitial = accountName.slice(0, 1).toLocaleUpperCase("vi-VN");
+
   const accountPrivacyLinks = (
-    <section className="border-t border-[#d8c9ad] pt-4 text-left" aria-label="Tài khoản và quyền riêng tư">
-      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#8c4f13]">Tài khoản</p>
-      {userEmail ? <p className="mt-2 flex items-center gap-2 break-words text-sm font-semibold text-[#17342c]"><AccountIcon className="text-base text-[#1f5f46]" />{userEmail}</p> : null}
-      <p className="mt-2 text-sm leading-6 text-[#4f625a]">Chat và dự án chuyến đi thuộc tài khoản của bạn.</p>
+    <details className="border-t border-[#e6e6e6] pt-3 text-left" aria-label="Tài khoản và quyền riêng tư">
+      <summary className="flex cursor-pointer list-none items-center gap-3 rounded-xl px-2 py-2 transition hover:bg-[#f1f1f1] focus:outline-none focus:ring-2 focus:ring-[#167c5a]">
+        {userImage ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img alt="" className="size-9 rounded-full object-cover" src={userImage} />
+        ) : (
+          <span aria-hidden="true" className="grid size-9 place-items-center rounded-full bg-[#167c5a] text-sm font-semibold text-white">{accountInitial}</span>
+        )}
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-medium text-[#292929]">{accountName}</span>
+          {userEmail ? <span className="block truncate text-xs text-[#858585]">{userEmail}</span> : null}
+        </span>
+        <span aria-hidden="true" className="text-sm text-[#858585]">...</span>
+      </summary>
       <div className="mt-3 flex flex-col gap-2">
         {canAccessAdmin ? (
           <Link className="min-h-11 rounded-2xl bg-[#17342c] px-4 py-3 text-center text-sm font-semibold text-white transition hover:bg-[#24483e] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]" href="/admin">
@@ -1734,17 +1759,35 @@ export function AiAskComposer({
         </Link>
         {signOutAction ? <form action={signOutAction}><button className="min-h-11 w-full rounded-2xl border border-[#d8c9ad] bg-white px-4 py-3 text-sm font-semibold text-[#17342c] transition hover:bg-[#fff8ec] focus:outline-none focus:ring-4 focus:ring-[#e5bd82]" type="submit">Đăng xuất</button></form> : null}
       </div>
-    </section>
+    </details>
   );
 
   return (
-    <div className="flex min-h-screen">
-      <nav aria-label="Danh sách trò chuyện và dự án chuyến đi" className="hidden min-h-screen w-[276px] shrink-0 flex-col gap-5 border-r border-[#d8c9ad] bg-[#f5f1e8] p-4 lg:flex">
-        <Link className="flex min-h-11 items-center gap-2 rounded-xl px-2 text-lg font-bold tracking-[-0.04em] text-[#17342c] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]" href="/">
-          <span className="grid h-8 w-8 place-items-center rounded-lg bg-[#1f5f46] text-xs font-black text-white">XV</span>
-          XuyenViet
-        </Link>
-        <div className="min-h-0 flex-1">
+    <div className="flex min-h-[100dvh] bg-white text-[#202020]">
+      <nav aria-label="Danh sách trò chuyện và dự án chuyến đi" className={`${isSidebarCollapsed ? "hidden" : "lg:flex"} hidden min-h-[100dvh] w-[264px] shrink-0 flex-col gap-4 border-r border-[#e6e6e6] bg-[#f9f9f9] p-3`}>
+        <div className="flex items-center justify-between">
+          <Link className="flex min-h-10 items-center gap-2 rounded-lg px-2 text-[15px] font-semibold tracking-[-0.025em] focus:outline-none" href="/">
+            <BrandMark className="size-8" />
+            XuyenViet
+          </Link>
+          <button
+            aria-label="Thu gọn thanh bên"
+            className="grid size-9 place-items-center rounded-lg text-[#666] transition hover:bg-[#ededed] focus:outline-none focus:ring-2 focus:ring-[#167c5a]"
+            onClick={() => setSidebarCollapsed(true)}
+            type="button"
+          >
+            <MenuIcon />
+          </button>
+        </div>
+        <section aria-labelledby="trip-project-list-heading">
+          <h2 className="px-2 text-[11px] font-medium text-[#777]" id="trip-project-list-heading">Chuyến đi</h2>
+          <div className="mt-2 flex flex-col gap-1">
+            <button aria-current={!selectedTripProject ? "page" : undefined} className={!selectedTripProject ? "min-h-11 rounded-xl bg-[#e5eeea] px-3 py-2 text-left text-sm font-medium text-[#285c49] focus:outline-none focus:ring-2 focus:ring-[#167c5a]" : "min-h-11 rounded-xl px-3 py-2 text-left text-sm font-medium text-[#303030] transition hover:bg-white focus:outline-none focus:ring-2 focus:ring-[#167c5a]"} disabled={projectActionsDisabled} onClick={() => handleSelectTripProject("")} type="button">Trò chuyện thường</button>
+            {tripProjects.map((project) => <button aria-current={project.id === activeTripProjectId ? "page" : undefined} className={project.id === activeTripProjectId ? "min-h-11 rounded-xl bg-[#e5eeea] px-3 py-2 text-left text-sm font-medium text-[#285c49] focus:outline-none focus:ring-2 focus:ring-[#167c5a]" : "min-h-11 rounded-xl px-3 py-2 text-left text-sm font-medium text-[#303030] transition hover:bg-white focus:outline-none focus:ring-2 focus:ring-[#167c5a]"} disabled={projectActionsDisabled} key={project.id} onClick={() => handleSelectTripProject(project.id)} type="button">{formatTripProjectLabel(project)}</button>)}
+          </div>
+        </section>
+        {planningScope}
+        <div className="min-h-0 flex-1 border-t border-[#e6e6e6] pt-4">
           <ConversationList
             sessions={sessions}
             activeConversationId={conversationId}
@@ -1754,18 +1797,55 @@ export function AiAskComposer({
             onNewChat={handleNewChat}
           />
         </div>
-        <section className="border-t border-[#d8c9ad] pt-4" aria-labelledby="trip-project-list-heading">
-          <h2 className="text-xs font-semibold uppercase tracking-[0.16em] text-[#66776f]" id="trip-project-list-heading">Chuyến đi</h2>
-          <div className="mt-2 flex flex-col gap-1">
-            <button aria-current={!selectedTripProject ? "page" : undefined} className={!selectedTripProject ? "min-h-11 rounded-xl bg-[#1f5f46]/10 px-3 py-2 text-left text-sm font-semibold text-[#17342c] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]" : "min-h-11 rounded-xl px-3 py-2 text-left text-sm font-semibold text-[#17342c] hover:bg-white/60 focus:outline-none focus:ring-4 focus:ring-[#8fb59f]"} disabled={projectActionsDisabled} onClick={() => handleSelectTripProject("")} type="button">Trò chuyện thường</button>
-            {tripProjects.map((project) => <button aria-current={project.id === activeTripProjectId ? "page" : undefined} className={project.id === activeTripProjectId ? "min-h-11 rounded-xl bg-[#1f5f46]/10 px-3 py-2 text-left text-sm font-semibold text-[#17342c] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]" : "min-h-11 rounded-xl px-3 py-2 text-left text-sm font-semibold text-[#17342c] hover:bg-white/60 focus:outline-none focus:ring-4 focus:ring-[#8fb59f]"} disabled={projectActionsDisabled} key={project.id} onClick={() => handleSelectTripProject(project.id)} type="button">{formatTripProjectLabel(project)}</button>)}
-          </div>
-        </section>
-        {planningScope}
         {accountPrivacyLinks}
       </nav>
 
-      <div className="flex min-h-screen min-w-0 flex-1 flex-col justify-between gap-5 bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:p-6 lg:max-w-[calc(100%-276px)]">
+       <div className={`flex min-h-[100dvh] min-w-0 flex-1 flex-col justify-between gap-5 bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:p-6 ${isSidebarCollapsed ? "lg:pl-[76px]" : "lg:max-w-[calc(100%-264px)]"}`}>
+        {isSidebarCollapsed ? (
+          <aside aria-label="Thanh công cụ thu gọn" className="fixed inset-y-0 left-0 z-10 hidden w-[60px] flex-col items-center border-r border-[#e6e6e6] bg-[#f9f9f9] py-3 lg:flex">
+            <button
+              aria-label="Mở thanh bên"
+              className="grid size-10 place-items-center rounded-lg text-[#555] transition hover:bg-[#ededed] focus:outline-none focus:ring-2 focus:ring-[#167c5a]"
+              onClick={() => setSidebarCollapsed(false)}
+              type="button"
+            >
+              <MenuIcon />
+            </button>
+            <button
+              aria-label="Trò chuyện mới"
+              className="mt-3 grid size-10 place-items-center rounded-lg text-[#555] transition hover:bg-[#ededed] focus:outline-none focus:ring-2 focus:ring-[#167c5a]"
+              disabled={sessionActionsDisabled}
+              onClick={handleNewChat}
+              title="Trò chuyện mới"
+              type="button"
+            >
+              <NewChatIcon />
+            </button>
+            <button
+              aria-label="Mở chuyến đi"
+              className="mt-2 grid size-10 place-items-center rounded-lg text-[#555] transition hover:bg-[#ededed] focus:outline-none focus:ring-2 focus:ring-[#167c5a]"
+              onClick={() => setSidebarCollapsed(false)}
+              title="Chuyến đi"
+              type="button"
+            >
+              <ProjectIcon />
+            </button>
+            <button
+              aria-label="Mở tài khoản"
+              className="mt-auto grid size-10 place-items-center rounded-full transition hover:ring-2 hover:ring-[#167c5a] focus:outline-none focus:ring-2 focus:ring-[#167c5a]"
+              onClick={() => setSidebarCollapsed(false)}
+              title={accountName}
+              type="button"
+            >
+              {userImage ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img alt="" className="size-9 rounded-full object-cover" src={userImage} />
+              ) : (
+                <span aria-hidden="true" className="grid size-9 place-items-center rounded-full bg-[#167c5a] text-sm font-semibold text-white">{accountInitial}</span>
+              )}
+            </button>
+          </aside>
+        ) : null}
         <div className="flex items-center justify-between gap-3 lg:hidden">
           <button
             ref={sessionSheetTriggerRef}
@@ -1821,32 +1901,26 @@ export function AiAskComposer({
         ) : null}
 
         {showEmptyState && !isHistoricReview ? (
-        <div className="mx-auto flex w-full max-w-[780px] flex-1 flex-col justify-center gap-5 py-8 text-center">
-          <p className="mx-auto w-fit rounded-full border border-[#c47a24]/45 bg-[#fff8ec] px-4 py-2 text-sm font-semibold text-[#8c4f13]">
-            Bắt đầu bằng một câu hỏi hành trình
-          </p>
-          <h2 className="text-4xl font-semibold tracking-[-0.06em] text-[#17342c] sm:text-6xl">Mình sẽ đi đâu?</h2>
-          <p className="text-base leading-7 text-[#4f625a] sm:text-lg">
-            Bắt đầu bằng một câu hỏi tự nhiên. XuyenViet sẽ giúp bạn lên route, chọn điểm dừng, nơi ở và những điều cần kiểm chứng.
-          </p>
+        <div className="mx-auto flex w-full max-w-[760px] flex-1 flex-col justify-center gap-4 py-8 text-center">
+          <h2 className="text-4xl font-semibold tracking-[-0.05em] text-[#202020] sm:text-5xl">Mình sẽ đi đâu?</h2>
 
           {selectedTripProject ? (
-            <p className="mx-auto max-w-2xl rounded-2xl border border-[#8fb59f] bg-[#edf7f0] px-4 py-3 text-sm font-semibold leading-6 text-[#17342c]">
-              Đang hỏi trong dự án: {formatTripProjectLabel(selectedTripProject)}. Tin nhắn mới sẽ dùng ngữ cảnh dự án này.
+            <p className="mx-auto max-w-2xl rounded-xl bg-[#edf7f2] px-3 py-2 text-sm text-[#285c49]">
+              Dự án: {formatTripProjectLabel(selectedTripProject)}
             </p>
           ) : null}
         </div>
         ) : null}
 
-        <div className="space-y-4">
+        <div className="space-y-5">
           {displayedMessages.length > 0 ? (
             <section aria-label="Lịch sử hội thoại" aria-live="polite" className="mx-auto max-w-[760px] space-y-4">
               {displayedMessages.map((message) => (
                 <article
                   className={
                     message.role === "assistant"
-                      ? "rounded-[1.5rem] border border-[#d8c9ad] bg-[#fffdf8] p-5 text-[#17342c] shadow-[0_16px_40px_rgba(41,33,18,0.08)]"
-                      : "ml-auto rounded-[1.25rem] bg-[#1f5f46] p-4 text-white shadow-[0_12px_30px_rgba(31,95,70,0.18)] sm:max-w-[80%]"
+                      ? "rounded-2xl border border-[#e5e5e5] bg-white p-5 text-[#282828] shadow-[0_1px_3px_rgba(0,0,0,0.04)]"
+                      : "ml-auto rounded-2xl bg-[#f1f1f1] p-4 text-[#292929] sm:max-w-[80%]"
                   }
                   key={message.id}
                 >
@@ -1911,55 +1985,54 @@ export function AiAskComposer({
             </section>
           ) : null}
 
-          {!isHistoricReview ? <form className="mx-auto max-w-[760px] rounded-[1.75rem] border border-[#d8c9ad] bg-white/90 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_20px_60px_rgba(41,33,18,0.14)]" onSubmit={handleSubmit} ref={formRef}>
+           {!isHistoricReview ? <form className="relative mx-auto max-w-[760px] rounded-2xl border border-[#d8d8d8] bg-white p-3 shadow-[0_2px_10px_rgba(0,0,0,0.06)]" onSubmit={handleSubmit} ref={formRef}>
             <label className="sr-only" htmlFor="ai-ask-question">
               Câu hỏi của bạn
             </label>
             <textarea
-              className="min-h-24 w-full resize-y rounded-2xl border-0 bg-transparent px-3 py-2 text-base leading-7 text-[#17342c] outline-none placeholder:text-[#7b8b84] focus:ring-4 focus:ring-[#8fb59f]/45"
+              className={`h-12 max-h-44 w-full resize-none rounded-xl border-0 bg-transparent py-3 text-base leading-6 text-[#282828] outline-none placeholder:text-[#8a8a8a] ${supportsImageInput ? "pl-16 pr-16" : "px-3 pr-16"}`}
               disabled={askFormDisabled}
               aria-describedby="ai-ask-status"
               id="ai-ask-question"
               maxLength={maxQuestionLength + 1}
-              onChange={(event) => setQuestion(event.target.value)}
+              onChange={handleQuestionChange}
               onKeyDown={handleKeyDown}
               placeholder="Ví dụ: Hà Nội đi Đà Nẵng 7 ngày cùng gia đình nên dừng ở đâu?"
               ref={textareaRef}
+              rows={1}
               value={question}
             />
-            <div className="mt-2 flex items-center justify-between gap-3 border-t border-[#eadfc8] pt-2">
-              {supportsImageInput ? (
-                <div className="flex items-center gap-2">
-                  <label
-                    aria-label="Đính kèm ảnh tham khảo"
-                    className={`grid h-11 w-11 cursor-pointer place-items-center rounded-xl text-[#4f625a] transition hover:bg-[#edf7f0] hover:text-[#14532d] focus-within:outline-none focus-within:ring-4 focus-within:ring-[#8fb59f]/45 ${askFormDisabled ? "cursor-not-allowed opacity-50" : ""}`}
-                    htmlFor="ai-ask-image"
-                    title="Đính kèm ảnh"
-                  >
-                    <AttachmentIcon />
-                    <span className="sr-only">Đính kèm ảnh tham khảo tuỳ chọn</span>
-                  </label>
-                  <input
-                    accept="image/jpeg,image/png,image/webp"
-                    className="sr-only"
-                    disabled={askFormDisabled}
-                    id="ai-ask-image"
-                    onChange={handleImageChange}
-                    ref={imageInputRef}
-                    type="file"
-                  />
-                </div>
-              ) : null}
-              <button
-                aria-label={isPending ? "Đang gửi câu hỏi" : deletingTripProjectId ? "Đang xoá dự án chuyến đi" : "Gửi câu hỏi"}
-                className="grid h-11 w-11 place-items-center rounded-2xl bg-[#1f5f46] text-white shadow-[0_12px_30px_rgba(31,95,70,0.24)] transition hover:bg-[#194d39] focus:outline-none focus:ring-4 focus:ring-[#8fb59f] disabled:cursor-not-allowed disabled:bg-[#8aa89b]"
-                disabled={askFormDisabled}
-                title="Gửi câu hỏi"
-                type="submit"
+            {supportsImageInput ? (
+              <label
+                aria-label="Đính kèm ảnh tham khảo"
+                className={`absolute bottom-5 left-5 grid h-10 w-10 cursor-pointer place-items-center rounded-xl text-[#4f5a55] transition hover:bg-[#edf7f2] hover:text-[#167c5a] focus-within:outline-none focus-within:ring-2 focus-within:ring-[#167c5a] ${askFormDisabled ? "cursor-not-allowed opacity-50" : ""}`}
+                htmlFor="ai-ask-image"
+                title="Đính kèm ảnh"
               >
-                {isPending ? <LoadingIcon /> : <SendIcon />}
-              </button>
-            </div>
+                <AttachmentIcon />
+                <span className="sr-only">Đính kèm ảnh tham khảo tuỳ chọn</span>
+              </label>
+            ) : null}
+            {supportsImageInput ? (
+              <input
+                accept="image/jpeg,image/png,image/webp"
+                className="sr-only"
+                disabled={askFormDisabled}
+                id="ai-ask-image"
+                onChange={handleImageChange}
+                ref={imageInputRef}
+                type="file"
+              />
+            ) : null}
+            <button
+              aria-label={isPending ? "Đang gửi câu hỏi" : deletingTripProjectId ? "Đang xoá dự án chuyến đi" : "Gửi câu hỏi"}
+              className="absolute bottom-5 right-5 grid h-10 w-10 place-items-center rounded-xl bg-[#202020] text-white transition hover:bg-[#383838] active:translate-y-px disabled:cursor-not-allowed disabled:bg-[#a3a3a3]"
+              disabled={askFormDisabled}
+              title="Gửi câu hỏi"
+              type="submit"
+            >
+              {isPending ? <LoadingIcon /> : <SendIcon />}
+            </button>
             {selectedImage ? (
               <div className="mt-3 flex items-center justify-between gap-3 rounded-xl bg-[#fffdf8] px-3 py-2 text-sm text-[#4f625a]">
                 <div className="flex min-w-0 items-center gap-3">
@@ -1982,10 +2055,10 @@ export function AiAskComposer({
 
           {showEmptyState && !isHistoricReview ? (
             <>
-              <div className="mx-auto grid max-w-[760px] gap-3 sm:grid-cols-2" aria-label="Gợi ý câu hỏi bắt đầu">
+                <div className="mx-auto grid max-w-[760px] gap-2 sm:grid-cols-2" aria-label="Gợi ý câu hỏi bắt đầu">
                 {starterCards.map(({ Icon, ...card }) => (
                   <button
-                    className="grid min-h-[76px] grid-cols-[2.25rem_minmax(0,1fr)] items-center gap-3 rounded-[1.25rem] border border-[#d8c9ad] bg-white/80 p-4 text-left shadow-[0_12px_36px_rgba(31,41,55,0.06)] transition hover:border-[#8fb59f] hover:bg-white focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45"
+                    className="grid min-h-[68px] grid-cols-[2.25rem_minmax(0,1fr)] items-center gap-3 rounded-xl border border-[#e6e6e6] bg-[#fafafa] p-3 text-left transition hover:bg-[#f3f3f3]"
                     key={card.title}
                     onClick={() => {
                       if (askFormDisabled) {
@@ -2004,21 +2077,14 @@ export function AiAskComposer({
                     disabled={askFormDisabled}
                     type="button"
                   >
-                    <span aria-hidden="true" className="grid h-9 w-9 place-items-center rounded-xl bg-[#e8f3ec] text-lg text-[#14532d]"><Icon /></span>
+                    <span aria-hidden="true" className="grid h-9 w-9 place-items-center rounded-lg bg-[#edf7f2] text-lg text-[#167c5a]"><Icon /></span>
                     <span>
-                      <span className="block text-sm font-bold text-[#17342c]">{card.title}</span>
-                      <span className="mt-1 block text-xs leading-5 text-[#5d6f67]">{card.description}</span>
+                      <span className="block text-sm font-medium text-[#303030]">{card.title}</span>
+                      <span className="mt-0.5 block text-xs leading-5 text-[#777]">{card.description}</span>
                     </span>
                   </button>
                 ))}
               </div>
-              <section className="mx-auto max-w-[760px] rounded-2xl border border-[#d8c9ad] bg-white/70 p-4 text-left">
-                <h2 className="text-sm font-bold text-[#17342c]">Lưu trữ hội thoại</h2>
-                <p className="mt-2 text-sm leading-6 text-[#4f625a]">
-                  Để hỗ trợ cuộc trò chuyện và kế hoạch chuyến đi, XuyenViet có thể lưu nội dung bạn cung cấp và gửi yêu cầu đến dịch vụ AI đã cấu hình để tạo câu trả lời. Bạn có thể xóa cuộc trò chuyện hoặc dự án chuyến đi bất cứ lúc nào.
-                </p>
-                <Link className="mt-3 inline-flex text-sm font-semibold text-[#1f5f46] underline underline-offset-4 focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45" href="/#quyen-rieng-tu">Tìm hiểu thêm về quyền riêng tư</Link>
-              </section>
             </>
           ) : null}
         </div>
@@ -2169,7 +2235,7 @@ export function AiAskComposer({
               <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#8c4f13]">Ngữ cảnh</p>
               <h2 className="mt-1 text-xl font-semibold tracking-[-0.03em] text-[#17342c]">Chọn chi tiết trong câu trả lời</h2>
             </div>
-            <span aria-hidden="true" className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-[#e8f3ec] text-sm font-black text-[#14532d]">XV</span>
+            <BrandMark className="size-10 shrink-0" />
           </div>
           <AnswerDetailPanel selectedEntity={selectedAnswerEntity} panelId={desktopAnswerDetailPanelId} panelRef={desktopAnswerDetailPanelRef} onClose={closeAnswerDetailPanel} />
         </aside>

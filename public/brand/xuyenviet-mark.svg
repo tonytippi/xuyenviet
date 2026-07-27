@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-labelledby="title desc">
+  <title id="title">XuyenViet</title>
+  <desc id="desc">A winding road forming a V for journeys across Vietnam.</desc>
+  <rect width="48" height="48" rx="14" fill="#167C5A"/>
+  <path d="M13 13c5 0 7 5 11 10s7 9 11 9" fill="none" stroke="#fff" stroke-linecap="round" stroke-width="5"/>
+  <path d="M13 35c5 0 7-5 11-10s7-9 11-9" fill="none" stroke="#fff" stroke-linecap="round" stroke-width="5"/>
+  <circle cx="24" cy="24" r="2.2" fill="#B7E2D2"/>
+</svg>

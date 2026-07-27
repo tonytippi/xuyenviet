@@ -9,6 +9,8 @@ import { userRoles, type UserRole } from "@/db/schema";
 export type AuthenticatedSession = {
   userId: string;
   email: string;
+  name?: string | null;
+  image?: string | null;
 };
 
 export type AuthenticatedSessionWithRoles = AuthenticatedSession & {
@@ -32,7 +34,7 @@ export async function getAuthenticatedSession(): Promise<AuthenticatedSession | 
       return null;
     }
 
-    return { userId, email };
+    return { userId, email, name: session.user?.name ?? null, image: session.user?.image ?? null };
   } catch {
     return null;
   }
