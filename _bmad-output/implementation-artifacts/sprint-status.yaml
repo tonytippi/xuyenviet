@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-07-27 (Story 8.3 narrow recovery verified; status is review.)
+# last_updated: 2026-07-27 (Story 8.3 finalized; status is done.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-07-27 (Story 8.3 narrow recovery verified; status is review.)
+last_updated: 2026-07-27 (Story 8.3 finalized; status is done.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -135,7 +135,8 @@ development_status:
   # Fresh BMad code review 2026-07-27 of 6f9a3a4..f039bb7 found seven actionable findings (5 high, 2 medium): human recommendation resolution retains system executor and violates the resolved-row constraint; index queue defaults pipeline executor for human enqueue while worker transitions omit it; verify-first sampling recommendation lacks pipeline executor; extraction-worker transitions lack paired Audit events; direct authenticated extraction omits system-ai-orchestration executor attribution; Facebook review resets retain stale executor; search projections permit null executor. Story review record contains exact locations and repairs. Authorized disposable reset and known non-TTY db:generate/full-suite gaps are context, not findings. Scope observation: .agents/skills/chief-of-staff/SKILL.md is in the range but outside Story 8.3 File List/scope; separate it from the Story 8.3 repair/commit.
   # Review repair 2026-07-27: all seven S8.3-R1..R7 findings repaired and regression-tested. Human recommendation resolution clears stale executor; human enqueue remains unattributed until pipeline worker transitions; verify-first sampling is pipeline-attributed; extraction worker transitions use transaction-coupled Audit events; direct authenticated extraction retains human provenance with system-ai-orchestration executor; Facebook needs_review resets clear stale executor; search projections require nonblank executor through schema/migration and null-rejection regression. db:reset, 124 focused tests, lint (0 errors, 3 pre-existing warnings), typecheck, and build passed. db:generate not retried: unchanged non-TTY rename-disambiguation blocker. No Story 8.4/8.5 changes or commit.
   # Narrow recovery verified 2026-07-27: source removal clears executorSystem on human terminal supersession; extraction success fences on the original lockedAt/lockedBy lease before side effects, terminal transition, or audit. Focused 2-file suite (18 tests), lint (0 errors; 3 pre-existing unrelated warnings), typecheck, and build passed. Status remains review; no commit.
-  8-3-attribute-knowledge-capture-and-ai-work-to-system-executors: review
+  # Finalized 2026-07-27 after status-only verification of supplied final repair commit 97ac3b3aa4d1d23e019c5df5784460aa0f193e95 and a clean pre-update worktree; status synchronized to done. No additional implementation inspection, tests, review, or commit was performed.
+  8-3-attribute-knowledge-capture-and-ai-work-to-system-executors: done
   8-4-attribute-trip-proposal-expiry-through-the-audit-boundary: backlog
   8-5-remove-fake-system-users-in-the-clean-break-migration: backlog
   8-6-verify-actor-isolation-and-attribution-end-to-end: backlog

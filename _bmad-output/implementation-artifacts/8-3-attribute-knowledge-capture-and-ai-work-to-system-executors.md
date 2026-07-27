@@ -4,7 +4,7 @@ baseline_commit: 6f9a3a4
 
 # Story 8.3: Attribute Knowledge, Capture, and AI Work to System Executors
 
-Status: review
+Status: done
 
 ## Story
 
@@ -196,6 +196,7 @@ gpt-5.6-terra
 - Verification: `pnpm db:reset` passed; focused 12-file suite passed (189 tests); `pnpm lint` passed with 3 pre-existing warnings in `tests/knowledge-search.test.ts`; `pnpm typecheck` and `pnpm build` passed. `pnpm db:generate` remains blocked because Drizzle requires an interactive TTY rename prompt. Full-suite run was attempted but timed out after unrelated test-isolation failures.
 - 2026-07-27: Repaired and verified all seven reconstructed review findings S8.3-R1 through S8.3-R7. `pnpm db:reset` passed; focused 7-file suite passed (124 tests); `pnpm lint` passed with 3 pre-existing warnings in `tests/knowledge-search.test.ts`; `pnpm typecheck` and `pnpm build` passed. No commit created. `pnpm db:generate` was not retried because its documented non-TTY rename-disambiguation blocker is unchanged.
 - 2026-07-27: Narrow recovery for S8.3-R8 and S8.3-R9 confirmed the supplied implementation. Focused `knowledge-source-removal` and extraction-worker tests passed (18 tests); lint passed with the same 3 pre-existing warnings in `tests/knowledge-search.test.ts`; typecheck and build passed. Status remains `review`; no commit created.
+- 2026-07-27: Status-only finalization verified repair commit `97ac3b3aa4d1d23e019c5df5784460aa0f193e95` exists and the pre-update worktree is clean. Status set to `done`; no implementation inspection, tests, review, or commit was performed.
 
 ### File List
 
@@ -246,3 +247,4 @@ gpt-5.6-terra
 - 2026-07-27: Fresh BMad code review of `6f9a3a4..f039bb7` found seven actionable attribution and persistence defects (five high, two medium). Review findings recorded; status set to `in-progress`. User-authorized disposable reset and known non-TTY `db:generate`/full-suite gaps were treated as context, not findings. No implementation code, tests, migrations, or commit were performed during review-status synchronization.
 - 2026-07-27: Repaired S8.3-R1 through S8.3-R7 only: human recommendation terminal shapes, queue versus worker executor attribution, verify-first sampling executor, transaction-coupled extraction-worker Audit events, direct authenticated AI orchestration provenance, Facebook reset executor cleanup, and required search-projection executor persistence. Added focused regressions; `db:reset`, 124 focused tests, lint, typecheck, and build passed. Status set to `review`; no commit created.
 - 2026-07-27: Completed the narrow incomplete-repair recovery without changing unrelated work. Verified source-removal terminal human supersession clears `executorSystem`, and extraction-job success row-locks plus compares the original `lockedAt`/`lockedBy` lease before side effects or audit. Focused 2-file suite: 18 tests passed; lint (0 errors, 3 pre-existing unrelated warnings), typecheck, and build passed. Status remains `review`; no commit created.
+- 2026-07-27: Finalized after status-only verification that supplied final repair commit `97ac3b3aa4d1d23e019c5df5784460aa0f193e95` exists and the pre-update worktree is clean; status synchronized to `done`. No implementation/diff correctness inspection, test, review, or commit was performed.
