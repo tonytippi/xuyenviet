@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-07-28 (Approved API-first runtime and launch-readiness course correction.)
+# last_updated: 2026-07-28 (Epic 9 story guides created and ready for development.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-07-28 (Approved API-first runtime and launch-readiness course correction.)
+last_updated: 2026-07-28 (Epic 9 story guides created and ready for development.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -167,11 +167,11 @@ development_status:
 
   # Approved by sprint-change-proposal-2026-07-28.md. These are new API/BFF
   # capability cutovers; completed baseline epics and their history remain intact.
-  epic-9: backlog
-  9-1-establish-bff-credentials-and-api-request-principals: backlog
-  9-2-govern-initial-administration-and-role-changes: backlog
-  9-3-enforce-the-private-bff-transport-boundary: backlog
-  9-4-publish-versioned-api-contracts-and-migrate-a-protected-read: backlog
+  epic-9: in-progress
+  9-1-establish-bff-credentials-and-api-request-principals: ready-for-dev
+  9-2-govern-initial-administration-and-role-changes: ready-for-dev
+  9-3-enforce-the-private-bff-transport-boundary: ready-for-dev
+  9-4-publish-versioned-api-contracts-and-migrate-a-protected-read: ready-for-dev
   epic-9-retrospective: optional
 
   epic-10: backlog

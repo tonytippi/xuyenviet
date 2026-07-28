@@ -1,0 +1,104 @@
+# Story 9.1: Establish BFF Credentials and API Request Principals
+
+Status: ready-for-dev
+
+## Story
+
+As a traveler or operator,
+I want my BFF-authenticated request to become a validated private API principal,
+so that API authorization does not trust browser cookies or expose an internal credential to the browser.
+
+## Acceptance Criteria
+
+1. Given a web or admin BFF has validated its own host-only Auth.js session, when it calls the private API, then it mints an ES256 JWT with issuer `xuyenviet-web-bff` or `xuyenviet-admin-bff`, audience `api.railway.internal`, stable user subject, session ID, sorted roles, authorization version, `jti`, `kid`, and a maximum five-minute lifetime. The credential contains no email, cookie, provider token, or unrestricted claims and is never returned to the browser.
+2. Given Nest receives a protected request, when its resource-server guard creates a `RequestPrincipal`, then it verifies the issuer-specific ES256 key, known `kid`, exact issuer/audience, clock bounds, unique token ID, active unexpired session matching subject/session ID, and current authorization version. Invalid signature, claim, session, or authorization-version requests fail through the safe API error envelope without entering a domain use case.
+3. Given an active BFF signing key rotates, when the API validates credentials during the bounded overlap, then it accepts only the active key and one previous verification-only key for the matching issuer. Unknown, expired-overlap, or cross-issuer keys are rejected.
+
+## Tasks / Subtasks
+
+- [ ] Establish the workspace/API foundation required by this identity slice (AC: 1-3)
+  - [ ] Add `apps/api` as a Nest HTTP bootstrap; retain the root Next app as the traveler BFF.
+  - [ ] Add only shared packages that are needed by more than one runtime, starting with contracts/config/domain seams as justified.
+  - [ ] Do not create `apps/web`, move the existing traveler app, create a worker runtime, or migrate an API capability in this story.
+  - [ ] Add validated API/BFF signing configuration with separate web and admin issuer key sets, active `kid`, and one bounded previous verifier key.
+- [ ] Define domain-neutral identity contracts (AC: 1-2)
+  - [ ] Define the minimal internal JWT claim contract and `RequestPrincipal` without importing Auth.js, Next, cookies, or request objects into the domain contract.
+  - [ ] Add the persisted authorization-version field and a Drizzle-owned forward migration; preserve existing human-only `users` and `user_roles` constraints.
+  - [ ] Extract only the session/role/version lookup seam needed by the resource server. It must validate Auth.js database session ownership and expiry without depending on browser session serialization.
+- [ ] Implement BFF credential minting (AC: 1)
+  - [ ] Keep `src/server/auth.ts` as the host-only Auth.js boundary. Mint credentials only after it has validated the current BFF session.
+  - [ ] Include exactly `sub`, `sid`, sorted `roles`, `rv`, `jti`, `iss`, `aud`, `iat`, `nbf`, `exp`, and protected JOSE `kid` metadata; enforce a maximum 300-second lifetime.
+  - [ ] Keep private signing material server-only and never serialize the token into a page, action result, browser response, log, or error.
+- [ ] Implement Nest resource-server verification and principal creation (AC: 2-3)
+  - [ ] Require a bearer token for protected routes and verify it before controller/use-case entry.
+  - [ ] Select verification keys by exact issuer, reject cross-issuer/unknown `kid`, and limit rotation acceptance to active plus one configured previous key in its bounded overlap.
+  - [ ] Verify signature, issuer, audience, `iat`/`nbf`/`exp`, nonblank unique `jti`, session existence/expiry/user match, and current authorization version before producing a normalized principal.
+  - [ ] Project all rejection paths through the safe API error contract; do not leak token data, key-selection detail, session data, stack, or SQL error.
+- [ ] Add identity integration coverage (AC: 1-3)
+  - [ ] Test valid web/admin credentials and issuer-specific key selection.
+  - [ ] Test invalid signature, issuer, audience, `kid`, clock claims, malformed/missing claims, session absence/expiry/mismatch, and stale authorization version.
+  - [ ] Test active/previous key overlap and rejection after overlap/cross-issuer use.
+  - [ ] Prove rejected credentials never invoke the protected controller or domain use case and no browser-facing response contains an internal credential.
+
+## Dev Notes
+
+### Implementation Guardrails
+
+- This is the first API-first vertical slice. The repository is currently one root Next.js application with no Nest app or workspace packages. Introduce the minimum foundation needed for private identity; do not perform a big-bang monorepo migration.
+- Nest may import only extracted workspace packages. It must not import `src/app`, `next/*`, `next-auth`, `server-only`, or modules marked `"use server"`.
+- Keep PostgreSQL and Drizzle as the state/migration owner. Add the user authorization version through schema plus a reviewed forward migration; do not use an in-memory revocation list as a substitute for the session/version checks.
+- A principal is domain-neutral. Controllers receive `RequestPrincipal`, and domain use cases must not receive `Request`, `Response`, Auth.js sessions, or Next callbacks.
+- `user_roles` remains authoritative. The JWT role claim is an asserted snapshot that must be tied to the live authorization version; it does not become an alternative role store.
+- `sessions.sessionToken` is the current Auth.js database-session identifier and is the intended `sid` lookup reference. Validate its user ownership and expiration at the API boundary.
+- Use a maintained ES256/JWT library selected during implementation. Do not implement JWT signing or verification primitives manually.
+
+### Existing Code to Preserve
+
+- `src/auth.ts` currently configures Auth.js database sessions and referral attribution. Preserve Google sign-in and referral behavior. Its environment-driven role provisioner is deliberately retired in Story 9.2, not silently changed here unless a shared extraction makes a compatible preparatory change necessary.
+- `src/server/auth.ts` currently resolves the host-only Auth.js session and database roles. It is a BFF adapter boundary, not an API authorization dependency.
+- `src/db/schema.ts` defines real-human `users`, database `sessions`, constrained `user_roles`, and actor-correct audit persistence. Do not weaken system-actor exclusions or audit checks.
+- Existing audit APIs are owned by `src/features/audit/*`; feature code must not directly insert protected audit/history/usage tables.
+
+### Suggested File Structure
+
+- NEW `apps/api/src/main.ts`, `apps/api/src/app.module.ts`: Nest bootstrap and module composition.
+- NEW `apps/api/src/auth/*`: bearer extraction, resource-server guard, principal decorator, issuer/key verifier, and session/version verifier.
+- NEW extracted `packages/contracts/src/auth/*` and only necessary `packages/config`/`packages/domain` modules: claim/principal and configuration contracts usable by both BFF and API.
+- NEW `src/server/bff-credentials.ts`: root Next BFF adapter that mints an internal credential after local Auth.js validation.
+- UPDATE `src/db/schema.ts` and `drizzle/migrations/*`: authorization version and migration only.
+- UPDATE root workspace/package/build configuration only to support the API slice. Keep existing root Next scripts functioning.
+
+### Testing Requirements
+
+- Use the existing Vitest plus PostgreSQL `DATABASE_URL_TEST` harness for session, role, and authorization-version integration behavior. Do not replace the test stack.
+- Add a genuine Nest API integration layer for crypto/guard behavior; mocked guard-only tests are insufficient.
+- Run targeted identity tests plus `pnpm lint`, `pnpm typecheck`, and `pnpm build`. Run the applicable migration/schema verification and record exact blockers if the known non-interactive Drizzle prompt remains.
+
+### Scope Boundaries
+
+- No public API origin, mobile/OIDC issuer, generated SDK, Redis/BullMQ/Kafka/Temporal, worker runtime, AI Ask cutover, separate deployed admin app, or public `api.xuyenviet.app`.
+- No protected capability cutover yet. Story 9.4 owns the first BFF-to-API read, OpenAPI health/version contract, routing switch, and single-owner proof.
+
+### References
+
+- [Source: _bmad-output/planning-artifacts/epics.md#Story 9.1: Establish BFF Credentials and API Request Principals]
+- [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md#AD-1: API-First Modular Monolith Runtime]
+- [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md#AD-4: Identity Maps Into A Domain-Neutral Request Principal]
+- [Source: docs/proposals/nestjs-api-implementation-plan.md#Kiến Trúc Package Chuyển Tiếp]
+- [Source: src/auth.ts]
+- [Source: src/server/auth.ts]
+- [Source: src/db/schema.ts#users, sessions, and userRoles]
+
+## Dev Agent Record
+
+### Agent Model Used
+
+gpt-5.6-terra
+
+### Debug Log References
+
+### Completion Notes List
+
+- Ultimate context engine analysis completed - comprehensive developer guide created.
+
+### File List
