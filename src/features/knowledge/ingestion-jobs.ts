@@ -47,13 +47,17 @@ export async function ensureIngestionJobForCaptureVersion(db: IngestionJobDb, in
   return existing;
 }
 
-export async function retryTerminalKnowledgeIngestionJob(input: { jobId: string; sourceId: string; captureVersionId: string; now?: Date }, db: IngestionJobDb = getDb()) {
+/**
+ * Replays immutable capture text through the current pipeline. Deleting operational
+ * candidates and advancing the parent fence makes any in-flight worker harmless.
+ */
+export async function rerunKnowledgeIngestionJob(input: { jobId: string; sourceId: string; captureVersionId: string; now?: Date }, db: IngestionJobDb = getDb()) {
   const now = input.now ?? new Date();
-  const [job] = await db.select({ id: knowledgeIngestionJobs.id, protocolVersion: knowledgeIngestionJobs.protocolVersion, stage: knowledgeIngestionJobs.stage }).from(knowledgeIngestionJobs).where(and(eq(knowledgeIngestionJobs.id, input.jobId), eq(knowledgeIngestionJobs.sourceId, input.sourceId), eq(knowledgeIngestionJobs.captureVersionId, input.captureVersionId))).limit(1).for("update");
-  if (!job || job.protocolVersion !== 2 || !["suppressed", "failed"].includes(job.stage)) return null;
+  const [job] = await db.select({ id: knowledgeIngestionJobs.id, protocolVersion: knowledgeIngestionJobs.protocolVersion, stage: knowledgeIngestionJobs.stage, stageVersion: knowledgeIngestionJobs.stageVersion }).from(knowledgeIngestionJobs).where(and(eq(knowledgeIngestionJobs.id, input.jobId), eq(knowledgeIngestionJobs.sourceId, input.sourceId), eq(knowledgeIngestionJobs.captureVersionId, input.captureVersionId))).limit(1).for("update");
+  if (!job || job.protocolVersion !== 2) return null;
   await db.delete(knowledgeIngestionCandidates).where(eq(knowledgeIngestionCandidates.ingestionJobId, job.id));
-  const [retried] = await db.update(knowledgeIngestionJobs).set({ stage: "queued", discoveryCursor: 0, discoveryWindowSize: 8_000, discoveryComplete: false, discoveredCandidateCount: 0, terminalCandidateCount: 0, publishedCandidateCount: 0, suppressedCandidateCount: 0, reviewRecommendedCandidateCount: 0, verifyFirstCandidateCount: 0, failedCandidateCount: 0, invalidCandidateCount: 0, stageVersion: sql`${knowledgeIngestionJobs.stageVersion} + 1`, attemptCount: 0, nextRunAt: now, lastErrorCode: null, requeueReasonCode: "operator_retry", checkpoint: null, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, updatedAt: now }).where(and(eq(knowledgeIngestionJobs.id, job.id), eq(knowledgeIngestionJobs.stage, job.stage))).returning({ id: knowledgeIngestionJobs.id });
-  return retried ?? null;
+  const [rerun] = await db.update(knowledgeIngestionJobs).set({ stage: "queued", discoveredCandidateCount: 0, terminalCandidateCount: 0, publishedCandidateCount: 0, suppressedCandidateCount: 0, reviewRecommendedCandidateCount: 0, verifyFirstCandidateCount: 0, failedCandidateCount: 0, invalidCandidateCount: 0, stageVersion: sql`${knowledgeIngestionJobs.stageVersion} + 1`, attemptCount: 0, nextRunAt: now, lastErrorCode: null, requeueReasonCode: "operator_rerun_current_pipeline", rawDiscoveryResponse: null, checkpoint: null, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, updatedAt: now }).where(and(eq(knowledgeIngestionJobs.id, job.id), eq(knowledgeIngestionJobs.stage, job.stage), eq(knowledgeIngestionJobs.stageVersion, job.stageVersion))).returning({ id: knowledgeIngestionJobs.id });
+  return rerun ?? null;
 }
 
 export async function claimNextKnowledgeIngestionCandidate(input: { workerId: string; now?: Date }, db: IngestionJobDb = getDb()): Promise<KnowledgeIngestionCandidateClaim | null> {
@@ -82,7 +86,7 @@ export async function terminalizeKnowledgeIngestionCandidate(input: { candidateI
 }
 
 export async function finalizeV2Parent(db: Pick<IngestionJobDb, "update" | "execute">, jobId: string, now = new Date()) {
-  await db.execute(sql`update knowledge_ingestion_jobs set stage = case when failed_candidate_count > 0 then 'failed' when published_candidate_count > 0 then 'published' when verify_first_candidate_count > 0 then 'verify_first' when review_recommended_candidate_count > 0 then 'review_recommended' else 'suppressed' end, stage_version = stage_version + 1, claimed_by = null, claimed_at = null, lease_expires_at = null, fencing_token = null, updated_at = ${now.toISOString()}::timestamptz where id = ${jobId} and protocol_version = 2 and discovery_complete = true and terminal_candidate_count = discovered_candidate_count and stage = 'queued'`);
+  await db.execute(sql`update knowledge_ingestion_jobs set stage = case when failed_candidate_count > 0 then 'failed' when published_candidate_count > 0 then 'published' when verify_first_candidate_count > 0 then 'verify_first' when review_recommended_candidate_count > 0 then 'review_recommended' else 'suppressed' end, stage_version = stage_version + 1, claimed_by = null, claimed_at = null, lease_expires_at = null, fencing_token = null, updated_at = ${now.toISOString()}::timestamptz where id = ${jobId} and protocol_version = 2 and terminal_candidate_count = discovered_candidate_count and stage = 'queued'`);
 }
 
 /** Invalidates expired fences before a recovered stage can be claimed. */
@@ -119,7 +123,7 @@ export async function claimNextKnowledgeIngestionJob(input: { workerId: string; 
   const now = input.now ?? new Date(); const leaseExpiresAt = new Date(now.getTime() + getClaimLeaseMs()); const fencingToken = randomBytes(32).toString("hex");
   return db.transaction(async (tx) => {
     const version = input.expectedStageVersion === undefined ? sql`` : sql`and stage_version = ${input.expectedStageVersion}`;
-    const rows = await tx.execute(sql`select id from knowledge_ingestion_jobs where stage not in ('published', 'suppressed', 'review_recommended', 'verify_first', 'failed') and (stage = 'queued' or checkpoint is not null) and next_run_at <= timezone('UTC', ${now.toISOString()}::timestamptz) and attempt_count < max_attempts and claimed_by is null and not (protocol_version = 2 and discovery_complete = true and terminal_candidate_count < discovered_candidate_count) ${version} order by next_run_at asc, created_at asc for update skip locked limit 1`) as Array<{ id: string }>;
+    const rows = await tx.execute(sql`select id from knowledge_ingestion_jobs where stage not in ('published', 'suppressed', 'review_recommended', 'verify_first', 'failed') and (stage = 'queued' or checkpoint is not null) and next_run_at <= timezone('UTC', ${now.toISOString()}::timestamptz) and attempt_count < max_attempts and claimed_by is null and not (protocol_version = 2 and discovered_candidate_count > terminal_candidate_count) ${version} order by next_run_at asc, created_at asc for update skip locked limit 1`) as Array<{ id: string }>;
     if (!rows[0]) return null;
     const [claimed] = await tx.update(knowledgeIngestionJobs).set({ claimedBy: workerId, claimedAt: now, leaseExpiresAt, fencingToken, attemptCount: sql`${knowledgeIngestionJobs.attemptCount} + 1`, requeueReasonCode: null, updatedAt: now }).where(and(eq(knowledgeIngestionJobs.id, rows[0].id), isNull(knowledgeIngestionJobs.claimedBy), lte(knowledgeIngestionJobs.nextRunAt, now), sql`${knowledgeIngestionJobs.attemptCount} < ${knowledgeIngestionJobs.maxAttempts}`)).returning();
     if (!claimed || isTerminalStage(claimed.stage)) return null;

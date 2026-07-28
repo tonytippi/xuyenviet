@@ -187,9 +187,10 @@ export async function retainExpiredFacebookCaptureVersions(
       if (!current || await hasRetentionBlocker(transaction, version.sourceId, version.id)) return "blocked" as const;
       if (input.dryRun) return "would_tombstone" as const;
 
-       const [updated] = await transaction.update(sourceCaptureVersions).set({ rawText: null, fileName: null, mimeType: null, byteSize: null, storageKey: null, rawMetadata: null, payloadDeletedAt: now }).where(and(eq(sourceCaptureVersions.id, version.id), isNull(sourceCaptureVersions.payloadDeletedAt))).returning({ id: sourceCaptureVersions.id });
-       if (!updated) return "skip" as const;
-       // Legacy material was copied into the first immutable capture version.
+        const [updated] = await transaction.update(sourceCaptureVersions).set({ rawText: null, fileName: null, mimeType: null, byteSize: null, storageKey: null, rawMetadata: null, payloadDeletedAt: now }).where(and(eq(sourceCaptureVersions.id, version.id), isNull(sourceCaptureVersions.payloadDeletedAt))).returning({ id: sourceCaptureVersions.id });
+        if (!updated) return "skip" as const;
+        await transaction.update(knowledgeIngestionJobs).set({ rawDiscoveryResponse: null, updatedAt: now }).where(eq(knowledgeIngestionJobs.captureVersionId, version.id));
+        // Legacy material was copied into the first immutable capture version.
        if (version.versionSequence === 1) {
          await transaction.update(rawSourceMaterial).set({ rawText: null, fileName: null, mimeType: null, byteSize: null, storageKey: null, rawMetadata: null }).where(eq(rawSourceMaterial.sourceId, version.sourceId));
        }

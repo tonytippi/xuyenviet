@@ -10,7 +10,7 @@ export const sourceKnowledgeSuggestionPurpose = aiUsagePurposes.extraction;
 export const sourceKnowledgeSuggestionPromptVersion = aiUsagePromptVersions.sourceKnowledgeSuggestion;
 export const knowledgePipelineExtractionPurpose = aiUsagePurposes.extraction;
 export const knowledgePipelineExtractionPromptVersion = aiUsagePromptVersions.knowledgePipelineExtraction;
-export const knowledgePipelineMultiFactExtractionPromptVersion = "knowledge_pipeline_multi_fact_extraction_v2";
+export const knowledgePipelineMultiFactExtractionPromptVersion = "knowledge_pipeline_multi_fact_extraction_v8";
 export const knowledgePipelineJudgmentPurpose = aiUsagePurposes.evaluation;
 export const knowledgePipelineJudgmentPromptVersion = aiUsagePromptVersions.knowledgePipelineJudgment;
 export const tripChangeProposalDraftPurpose = aiUsagePurposes.tripChangeProposalDraft;
@@ -88,22 +88,33 @@ const sourceKnowledgeSuggestionSystemPrompt = [
 const knowledgePipelineExtractionSystemPrompt = [
   "Extract at most one atomic Vietnam road-trip fact from an immutable source capture.",
   "Return strict JSON only. Never return personal data, contacts, or a fact that is only an opinion, question, advertisement, or unsupported claim.",
-  "Return {candidate:null} when no safe fact exists. Otherwise candidate must include type, title, summary, location_name or route_segment, conditions, freshness_sensitive, and evidence {quote_text, span_start, span_end}.",
-  "quote_text must be an exact contiguous substring of source_text and the offsets are zero-based PostgreSQL character offsets (Unicode code points, not UTF-16 code units). Paraphrase every non-evidence field.",
+  "Return {candidate:null} when no safe fact exists. Otherwise candidate must include type, title, summary, location_name or route_segment, conditions, freshness_sensitive, and evidence {quote_text}.",
+  "quote_text must be an exact contiguous substring of source_text. Paraphrase every non-evidence field.",
 ].join("\n");
 
 const knowledgePipelineMultiFactExtractionSystemPrompt = [
-  "Extract every independently useful, atomic Vietnam road-trip fact whose exact evidence begins inside the supplied core range.",
-  "Return strict JSON only: {candidates:[...]}. Return an empty candidates array when none qualify; never select a representative fact or impose a fact quota.",
-  "Each candidate requires type, title, summary, location_name or route_segment, conditions, freshness_sensitive, and evidence {quote_text, span_start, span_end}.",
-  "Offsets are absolute zero-based Unicode code-point offsets in the complete source_text. quote_text must exactly equal that contiguous source substring.",
-  "Paraphrase title, summary, and conditions. Do not return contacts, personal data, opinions, questions, advertisements, raw provider data, or claims without independent actionable travel value.",
+  "Extract every scoped Vietnam road-trip observation from the complete immutable source capture. Optimize for recall: discovery is not the evidence, policy, or quality gate; a separate independent judge handles grounding, confidence, freshness, publication, and suppression.",
+  "Return strict JSON only: {candidates:[...]}. Return an empty candidates array only when the capture has no scoped travel observations. Never select a representative fact or impose a fact quota.",
+  "Allowed type values only: place, food, hotel_area, activity, service, route_note, warning, cost_note, parking, ev_charging, kid_friendly_tip, discount_promotion, general_travel_tip. Use warning for weather or environmental conditions that affect a visit. Never invent a type such as trip_overview or weather.",
+  "Each candidate requires type, title, summary, at least one non-null scope field (location_name for a specific place/area or route_segment for a named road segment), conditions, and freshness_sensitive. evidence_hint with quote_text is optional and may be paraphrased; do not return offsets.",
+  "For a narrative trip report, extract every materially distinct observation about: a named route leg's duration, distance, driving difficulty, delay, incident, fuel concern, or stop; a named place's fee, opening/access constraint, distance, climb/walk, parking, crowd, weather, or timing; a named venue's food, service, lodging, availability, or practical experience; and a place's scenery, atmosphere, or suitability when tied to a concrete visit detail.",
+  "A firsthand community observation qualifies even when subjective, stale, incomplete, uncorroborated, or potentially unsuitable for publication. Preserve uncertainty in the paraphrased summary and conditions; do not self-suppress it. Do not require independent corroboration at extraction time; the later judge handles confidence and verification.",
+  "For example, extract a named route leg with a stated delay or disruption; a named attraction with a stated entry fee, distance, climb, or transport effort; a named destination with a stated crowd, weather, or timing condition; and a named restaurant, hotel, or stop with the author's stated experience. Split materially distinct observations into separate candidates.",
+  "Do not create candidates for an unscoped opening greeting or trip-wide overview. Do not return contacts, personal data, questions, advertisements, raw provider data, or praise/dislike that cannot be tied to a named place, venue, or route segment.",
 ].join("\n");
 
 const knowledgePipelineJudgmentSystemPrompt = [
   "Independently judge one evidence-grounded road-trip candidate. Return strict JSON only.",
   "Return relevance, extractability, evidence_grounding, specificity, actionability, first_hand_likelihood, spam_commercial_risk as numbers from 0 to 1, plus decision of publish, review_recommended, verify_first, or suppress and a concise Vietnamese summary.",
   "High-risk road, safety, EV, price, hours, availability, booking, or promotion facts must be verify_first. Never upgrade evidence or invent facts.",
+].join("\n");
+
+const knowledgePipelineBatchGroundingJudgmentSystemPrompt = [
+  "Independently ground and judge every supplied road-trip candidate against the complete immutable source capture.",
+  "Return strict JSON only: {results:[...]}. Return exactly one result for each supplied candidate id.",
+  "Each result requires candidate_id, decision (publish, review_recommended, verify_first, or suppress), summary, relevance, extractability, evidence_grounding, specificity, actionability, first_hand_likelihood, spam_commercial_risk, and evidence {quote_text} or evidence:null.",
+  "When evidence is present, quote_text must be one exact contiguous substring from source_text. Never use ellipses to join separate passages and never paraphrase evidence.",
+  "If the candidate is not supported by an exact source passage, return evidence:null and decision:suppress. High-risk facts must be verify_first when grounded.",
 ].join("\n");
 
 const knowledgePipelineRelationJudgmentSystemPrompt = [
@@ -321,8 +332,12 @@ export function buildKnowledgePipelineExtractionMessages(input: { source: Record
   return [{ role: "system" as const, content: knowledgePipelineExtractionSystemPrompt }, { role: "user" as const, content: JSON.stringify({ source_metadata: input.source, source_text: input.rawText }) }];
 }
 
-export function buildKnowledgePipelineMultiFactExtractionMessages(input: { source: Record<string, unknown>; rawText: string; sourceOffset: number; coreStart: number; coreEnd: number }) {
-  return [{ role: "system" as const, content: knowledgePipelineMultiFactExtractionSystemPrompt }, { role: "user" as const, content: JSON.stringify({ source_metadata: input.source, source_text: input.rawText, source_offset: input.sourceOffset, core_range: { start: input.coreStart, end: input.coreEnd }, expected_output: { candidates: [] } }) }];
+export function buildKnowledgePipelineMultiFactExtractionMessages(input: { source: Record<string, unknown>; rawText: string }) {
+  return [{ role: "system" as const, content: knowledgePipelineMultiFactExtractionSystemPrompt }, { role: "user" as const, content: JSON.stringify({ source_metadata: input.source, source_text: input.rawText, extraction_contract: { allowed_types: ["place", "food", "hotel_area", "activity", "service", "route_note", "warning", "cost_note", "parking", "ev_charging", "kid_friendly_tip", "discount_promotion", "general_travel_tip"], require_at_least_one_scope_field: true, optimize_for_semantic_recall: true, include_scoped_firsthand_community_observations: true, defer_grounding_quality_and_publication_to_judgment: true, evidence_hint_optional: true }, expected_output: { candidates: [{ type: "route_note", title: "Tiêu đề ngắn", summary: "Tóm tắt quan sát có điều kiện", location_name: null, route_segment: "Chặng đường có tên", conditions: [], freshness_sensitive: true, evidence_hint: { quote_text: "Gợi ý evidence nếu hữu ích" } }] } }) }];
+}
+
+export function buildKnowledgePipelineBatchGroundingJudgmentMessages(input: { rawText: string; candidates: Array<Record<string, unknown>> }) {
+  return [{ role: "system" as const, content: knowledgePipelineBatchGroundingJudgmentSystemPrompt }, { role: "user" as const, content: JSON.stringify({ source_text: input.rawText, candidates: input.candidates }) }];
 }
 
 export function buildKnowledgePipelineJudgmentMessages(input: { candidate: Record<string, unknown>; evidence: { quoteText: string; spanStart: number; spanEnd: number } }) {

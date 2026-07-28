@@ -3,7 +3,7 @@ import "server-only";
 import { eq, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { facebookCaptureReviews, facebookCaptureReviewStatusValues, knowledgeIngestionCandidates, knowledgeIngestionJobs, sourceCaptureVersions, sources, type FacebookCaptureReviewStatus } from "@/db/schema";
+import { facebookCaptureReviews, facebookCaptureReviewStatusValues, knowledgeCardTypeValues, knowledgeIngestionCandidates, knowledgeIngestionJobs, sourceCaptureVersions, sources, type FacebookCaptureReviewStatus } from "@/db/schema";
 import { countFacebookCaptureReviewsByStatus, getExistingCardsForCaptureSource, listFacebookCaptureReviews } from "@/features/knowledge/facebook-capture-review";
 import { requireAdminSession } from "@/server/auth";
 
@@ -93,11 +93,11 @@ export async function getAdminFacebookCaptureReviewDetail(reviewId: string) {
   return {
     ...sanitizeReviewMetadata(review),
     existingCards: await getExistingCardsForCaptureSource(db, review.sourceId),
-    ingestionJob: await getKnowledgeIngestionJobForCaptureVersion(db, review.captureVersionId),
+    ingestionJob: await getKnowledgeIngestionJobForCaptureVersion(db, review.captureVersionId, review.rawText),
   };
 }
 
-async function getKnowledgeIngestionJobForCaptureVersion(db: ReturnType<typeof getDb>, captureVersionId: string | null) {
+async function getKnowledgeIngestionJobForCaptureVersion(db: ReturnType<typeof getDb>, captureVersionId: string | null, rawText: string | null = null) {
   if (!captureVersionId) return null;
 
   const [job] = await db
@@ -109,8 +109,8 @@ async function getKnowledgeIngestionJobForCaptureVersion(db: ReturnType<typeof g
       maxAttempts: knowledgeIngestionJobs.maxAttempts,
       nextRunAt: knowledgeIngestionJobs.nextRunAt,
       lastErrorCode: knowledgeIngestionJobs.lastErrorCode,
+      rawDiscoveryResponse: knowledgeIngestionJobs.rawDiscoveryResponse,
       updatedAt: knowledgeIngestionJobs.updatedAt,
-      discoveryComplete: knowledgeIngestionJobs.discoveryComplete,
       discoveredCandidateCount: knowledgeIngestionJobs.discoveredCandidateCount,
       terminalCandidateCount: knowledgeIngestionJobs.terminalCandidateCount,
       failedCandidateCount: knowledgeIngestionJobs.failedCandidateCount,
@@ -120,9 +120,41 @@ async function getKnowledgeIngestionJobForCaptureVersion(db: ReturnType<typeof g
     .limit(1);
 
   if (!job) return null;
-  const candidates = job.protocolVersion === 2 ? await db.select({ id: knowledgeIngestionCandidates.id, type: knowledgeIngestionCandidates.type, title: knowledgeIngestionCandidates.title, locationName: knowledgeIngestionCandidates.locationName, routeSegment: knowledgeIngestionCandidates.routeSegment, stage: knowledgeIngestionCandidates.stage, outcomeReasonCode: knowledgeIngestionCandidates.outcomeReasonCode, knowledgeCardId: knowledgeIngestionCandidates.knowledgeCardId }).from(knowledgeIngestionCandidates).where(eq(knowledgeIngestionCandidates.ingestionJobId, job.id)).orderBy(knowledgeIngestionCandidates.createdAt).limit(candidateProjectionLimit) : [];
+  const candidates = job.protocolVersion === 2 ? await db.select({ id: knowledgeIngestionCandidates.id, type: knowledgeIngestionCandidates.type, title: knowledgeIngestionCandidates.title, summary: knowledgeIngestionCandidates.summary, locationName: knowledgeIngestionCandidates.locationName, routeSegment: knowledgeIngestionCandidates.routeSegment, conditions: knowledgeIngestionCandidates.conditions, freshnessSensitive: knowledgeIngestionCandidates.freshnessSensitive, stage: knowledgeIngestionCandidates.stage, outcomeReasonCode: knowledgeIngestionCandidates.outcomeReasonCode, judgmentSummary: knowledgeIngestionCandidates.judgmentSummary, scores: knowledgeIngestionCandidates.scores, knowledgeCardId: knowledgeIngestionCandidates.knowledgeCardId }).from(knowledgeIngestionCandidates).where(eq(knowledgeIngestionCandidates.ingestionJobId, job.id)).orderBy(knowledgeIngestionCandidates.createdAt).limit(candidateProjectionLimit) : [];
   const [{ count }] = job.protocolVersion === 2 ? await db.select({ count: sql<number>`count(*)::integer` }).from(knowledgeIngestionCandidates).where(eq(knowledgeIngestionCandidates.ingestionJobId, job.id)) : [{ count: 0 }];
-  return { ...job, candidates, candidateTotalCount: count, candidateHasMore: count > candidates.length };
+  return { ...job, candidates: hydrateLegacyEvidenceMismatchCandidates(candidates, job.rawDiscoveryResponse, rawText), candidateTotalCount: count, candidateHasMore: count > candidates.length };
+}
+
+type CandidateProjection = { id: string; type: (typeof knowledgeCardTypeValues)[number]; title: string; summary: string; locationName: string | null; routeSegment: string | null; conditions: string[]; freshnessSensitive: boolean; stage: string; outcomeReasonCode: string | null; judgmentSummary: string | null; scores: Record<string, number> | null; knowledgeCardId: string | null };
+type RejectedCandidateDiagnostic = Pick<CandidateProjection, "type" | "title" | "summary" | "locationName" | "routeSegment" | "conditions" | "freshnessSensitive"> & { rejectedQuoteText: string };
+
+function hydrateLegacyEvidenceMismatchCandidates(candidates: CandidateProjection[], rawResponse: string | null, rawText: string | null) {
+  const diagnostics = parseEvidenceMismatchDiagnostics(rawResponse, rawText);
+  let diagnosticIndex = 0;
+  return candidates.map((candidate) => {
+    if (candidate.outcomeReasonCode !== "candidate_evidence_mismatch" || candidate.title !== "Candidate extraction rejected") return candidate;
+    const diagnostic = diagnostics[diagnosticIndex++];
+    return diagnostic ? { ...candidate, ...diagnostic } : candidate;
+  });
+}
+
+function parseEvidenceMismatchDiagnostics(rawResponse: string | null, rawText: string | null): RejectedCandidateDiagnostic[] {
+  if (!rawResponse || !rawText) return [];
+  try {
+    const value: unknown = JSON.parse(rawResponse);
+    if (!isRecord(value) || !Array.isArray(value.candidates)) return [];
+    return value.candidates.flatMap((entry) => {
+      if (!isRecord(entry)) return [];
+      const type = normalizeCandidateType(entry.type); const title = bounded(entry.title, 160); const summary = bounded(entry.summary, 1200); const locationName = optionalBounded(entry.location_name, 160); const routeSegment = optionalBounded(entry.route_segment, 160); const evidence = isRecord(entry.evidence) ? entry.evidence : null; const rejectedQuoteText = evidence ? bounded(evidence.quote_text, 2000) : null;
+      const conditions = Array.isArray(entry.conditions) ? entry.conditions.map((condition) => bounded(condition, 160)).filter((condition): condition is string => Boolean(condition)).slice(0, 12) : [];
+      if (!type || !title || !summary || (!locationName && !routeSegment) || typeof entry.freshness_sensitive !== "boolean" || !rejectedQuoteText || rawText.includes(rejectedQuoteText)) return [];
+      const values = [title, summary, ...[locationName, routeSegment].filter((item): item is string => item !== null), ...conditions, rejectedQuoteText];
+      if (values.some(containsSensitiveText)) return [];
+      return [{ type, title, summary, locationName, routeSegment, conditions, freshnessSensitive: entry.freshness_sensitive, rejectedQuoteText }];
+    });
+  } catch {
+    return [];
+  }
 }
 
 export async function getAdminFacebookCaptureReviewExtractionTarget(reviewId: string) {
@@ -218,3 +250,12 @@ function sanitizeMetadataUrl(value: string | null) {
     return null;
   }
 }
+
+function normalizeCandidateType(value: unknown): (typeof knowledgeCardTypeValues)[number] | null {
+  if (value === "weather") return "warning";
+  return knowledgeCardTypeValues.includes(value as (typeof knowledgeCardTypeValues)[number]) ? value as (typeof knowledgeCardTypeValues)[number] : null;
+}
+function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
+function bounded(value: unknown, max: number) { return typeof value === "string" && value.trim() && value.trim().length <= max ? value.trim() : null; }
+function optionalBounded(value: unknown, max: number) { return value === null || value === undefined ? null : bounded(value, max); }
+function containsSensitiveText(value: string) { return /(?:\+?84|0)(?:[\s.-]?\d){8,10}\b|\b[\w.%+-]+@[\w.-]+\.[a-z]{2,}\b/i.test(value); }

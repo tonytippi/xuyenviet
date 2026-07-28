@@ -36,7 +36,7 @@ immutable capture version
   -> active | suppressed | review_recommended | verify_first | failed
 ```
 
-Only policy-eligible active cards can enter traveler retrieval. High-risk road, safety, EV, price, availability, booking, promotion, and opening-hours claims require verification and remain caveat-only until corroborated. Conflicted claims cannot become factual itinerary premises. These are established in `_bmad-output/implementation-artifacts/epic-3-context.md`.
+Only policy-eligible active cards can enter traveler retrieval. Automation routes grounded high-risk road, safety, EV, price, availability, booking, promotion, and opening-hours claims to `verify_first`; an authorized operator may revise or publish the card with its available validated evidence. A one-source operator-authorized publication does not imply a corroborated community pattern. Conflicted claims cannot become factual itinerary premises. These are established in the active PRD and architecture spine.
 
 Facebook capture established useful operational boundaries that this proposal preserves: separate capture archive, safe audit actor, idempotent replay after a production write failure, bounded operator-only source material, and no raw source content in operational logs. See [Facebook Capture Operations](../runbooks/facebook-capture.md).
 
@@ -251,7 +251,7 @@ The following is sequencing guidance, not yet an epic/story commitment.
 - Comments affect triage only; they never become evidence, capture text, cards, source bundles, or traveler UI content.
 - Every readable Gemini capture is immutable, content/version identified, operator-only at raw level, and atomically obtains one canonical ingestion job.
 - AI triage cannot override hard admission, privacy, evidence, verification, conflict, or publication gates.
-- High-risk claims remain verification-required and caveat-only until corroborated; conflicted claims cannot support factual itinerary premises.
+- Automation routes grounded high-risk claims to `verify_first`; only an authorized operator may revise or publish them with available validated evidence. Conflicted claims cannot support factual itinerary premises.
 - Quota and provider deferrals retry by priority and age without notification noise; persistent failures and aging high-priority work become action-required.
 - Operators can independently disable discovery and auto-capture; stopping automation does not mutate completed knowledge.
 - Control-tower projections and logs expose only safe operational summaries, never secrets, raw comments, raw source material, model prompts/responses, provider payloads, or evidence spans.

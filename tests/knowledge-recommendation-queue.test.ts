@@ -144,8 +144,8 @@ describe("knowledge recommendation queue", () => {
     await scheduleKnowledgeRecommendation({ cardId: "card", contentVersion: 1, evidenceSetRevision: 1, reason: "verification", policy: "verify_first" }, testDb);
     const [recommendation] = await testDb.select().from(knowledgeRecommendations);
 
-    await expect(resolveKnowledgeRecommendation({ recommendationId: recommendation!.id, expectedContentVersion: 1, expectedEvidenceSetRevision: 1, action: "edit", editSummary: "Bãi đỗ xe có mái che tại Huế.", actor: { userId: "operator", email: "operator@example.com" } }, testDb)).resolves.toMatchObject({ status: "resolved" });
-    await expect(testDb.select().from(knowledgeCards)).resolves.toMatchObject([{ contentVersion: 2, reviewState: "ai_recommended", verificationState: "required", needsReview: true }]);
+    await expect(resolveKnowledgeRecommendation({ recommendationId: recommendation!.id, expectedContentVersion: 1, expectedEvidenceSetRevision: 1, action: "edit", editSummary: "Operator đã xác minh bãi đỗ xe có mái che, lối vào từ phía nam.", actor: { userId: "operator", email: "operator@example.com" } }, testDb)).resolves.toMatchObject({ status: "resolved" });
+    await expect(testDb.select().from(knowledgeCards)).resolves.toMatchObject([{ summary: "Operator đã xác minh bãi đỗ xe có mái che, lối vào từ phía nam.", contentVersion: 2, reviewState: "ai_recommended", verificationState: "required", needsReview: true }]);
     await expect(testDb.select().from(knowledgeRecommendations).where(eq(knowledgeRecommendations.status, "open"))).resolves.toMatchObject([{ reason: "verification", contentVersion: 2, evidenceSetRevision: 1 }]);
   });
 
@@ -247,7 +247,7 @@ describe("knowledge recommendation queue", () => {
     await expect(testDb.select({ afterSummary: auditEvents.afterSummary }).from(auditEvents).where(eq(auditEvents.targetId, recommendation!.id))).resolves.toEqual([{ afterSummary: "Resolved sampling recommendation with sampling_pass; disposition=confirmed." }]);
   });
 
-  test("requires two independent supporting records before verifying a suppressed verify-first card", async () => {
+  test("lets an operator verify and publish a suppressed verify-first card with one supporting source", async () => {
     await testDb.update(knowledgeCards).set({ publicationState: "suppressed", knowledgeState: "uncertain", reviewState: "ai_recommended", verificationState: "required", needsReview: true }).where(eq(knowledgeCards.id, "card"));
     await testDb.insert(sources).values({ id: "source", kind: "pasted_text", label: "Safe source", sourceType: "curated", verificationStatus: "unverified", official: false, partner: false, submittedByUserId: "author" });
     await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: "card", sourceId: "source", supportLevel: "primary" });
@@ -255,12 +255,6 @@ describe("knowledge recommendation queue", () => {
     await seedKnowledgeCardEvidence({ cardId: "card", sourceId: "source", captureVersionId: capture.id, quoteText: "Bãi đỗ xe có mái che tại Huế." });
     await scheduleKnowledgeRecommendation({ cardId: "card", contentVersion: 1, evidenceSetRevision: 1, reason: "verification", policy: "verify_first" }, testDb);
     const [recommendation] = await testDb.select().from(knowledgeRecommendations);
-
-    await expect(resolveKnowledgeRecommendation({ recommendationId: recommendation!.id, expectedContentVersion: 1, expectedEvidenceSetRevision: 1, action: "verify", actor: { userId: "operator", email: "operator@example.com" } }, testDb)).resolves.toEqual({ status: "invalid_action" });
-    await testDb.insert(sources).values({ id: "source-2", kind: "pasted_text", label: "Second safe source", sourceType: "curated", verificationStatus: "unverified", official: false, partner: false, submittedByUserId: "author" });
-    await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: "card", sourceId: "source-2", supportLevel: "supporting" });
-    const secondCapture = await seedSourceCaptureVersion({ sourceId: "source-2", captureKind: "pasted_text", rawText: "Bãi đỗ xe có mái che tại Huế." });
-    await seedKnowledgeCardEvidence({ cardId: "card", sourceId: "source-2", captureVersionId: secondCapture.id, quoteText: "Bãi đỗ xe có mái che tại Huế." });
 
     await expect(resolveKnowledgeRecommendation({ recommendationId: recommendation!.id, expectedContentVersion: 1, expectedEvidenceSetRevision: 1, action: "verify", actor: { userId: "operator", email: "operator@example.com" } }, testDb)).resolves.toMatchObject({ status: "resolved" });
     await expect(testDb.select().from(knowledgeCards)).resolves.toMatchObject([{ publicationState: "active", verificationState: "corroborated", reviewState: "reviewed", needsReview: false, contentVersion: 2 }]);

@@ -232,7 +232,7 @@ export async function resolveKnowledgeRecommendation(input: { recommendationId: 
     if (!card || card.contentVersion !== input.expectedContentVersion || card.evidenceSetRevision !== input.expectedEvidenceSetRevision || card.contentVersion !== recommendation.contentVersion || card.evidenceSetRevision !== recommendation.evidenceSetRevision) return { status: "stale" as const };
     if (card.verificationState === "failed" && ["restore", "verify", "resolve_relation"].includes(input.action)) return { status: "invalid_action" as const };
     if (card.verificationState === "required" && input.action === "restore") return { status: "invalid_action" as const };
-    if (input.action === "edit" && input.editSummary?.trim()) {
+    if (input.action === "edit" && input.editSummary?.trim() && recommendation.reason !== "verification") {
       const evidence = await tx.select({ quoteText: knowledgeCardEvidence.quoteText }).from(knowledgeCardEvidence).where(and(eq(knowledgeCardEvidence.knowledgeCardId, card.id), eq(knowledgeCardEvidence.state, "active"), eq(knowledgeCardEvidence.supportLevel, "supporting"))).limit(4);
       if (!evidence.some((item) => input.editSummary!.trim() === item.quoteText.trim())) return { status: "invalid_evidence" as const };
     }
@@ -242,7 +242,8 @@ export async function resolveKnowledgeRecommendation(input: { recommendationId: 
       const evidence = await tx.select({ independenceKey: knowledgeCardEvidence.independenceKey }).from(knowledgeCardEvidence).where(and(eq(knowledgeCardEvidence.knowledgeCardId, card.id), eq(knowledgeCardEvidence.state, "active"), eq(knowledgeCardEvidence.supportLevel, "supporting")));
       const validVerificationTarget = card.status === "approved" && card.publicationState === "suppressed" && card.reviewState === "ai_recommended" && card.verificationState === "required" && card.needsReview;
       const corroborated = new Set(evidence.map((item) => item.independenceKey)).size >= 2;
-      if (!validVerificationTarget || !corroborated || (recommendation.reason === "conflict" ? card.knowledgeState !== "conflicted" : !["uncertain", "community_pattern", "conflicted"].includes(card.knowledgeState))) return { status: recommendation.reason === "conflict" ? "invalid_verification" as const : "invalid_action" as const };
+      const operatorOverride = recommendation.reason === "verification";
+      if (!validVerificationTarget || (!operatorOverride && !corroborated) || (recommendation.reason === "conflict" ? card.knowledgeState !== "conflicted" : !["uncertain", "community_pattern", "conflicted"].includes(card.knowledgeState))) return { status: recommendation.reason === "conflict" ? "invalid_verification" as const : "invalid_action" as const };
     }
     let removedConflictCount = 0;
     let hasRemainingSupport = true;

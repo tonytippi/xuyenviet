@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { facebookCaptureReviews, knowledgeCards, knowledgeCardSources, knowledgeExtractionJobs, knowledgeIngestionJobs, rawSourceMaterial, sourceCaptureVersions, sources, userRoles, users, type UserRole } from "@/db/schema";
+import { facebookCaptureReviews, knowledgeCards, knowledgeCardSources, knowledgeExtractionJobs, knowledgeIngestionCandidates, knowledgeIngestionJobs, rawSourceMaterial, sourceCaptureVersions, sources, userRoles, users, type UserRole } from "@/db/schema";
 import { ensureFacebookCaptureReviewForCapturedSource, markFacebookCaptureReviewStatus } from "@/features/knowledge/facebook-capture-review";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
@@ -195,15 +195,51 @@ describe("admin Facebook capture review helpers", () => {
     expect(detailHtml).toContain("AI không xác định đủ loại thông tin");
   });
 
-  test("detail exposes retry only for a terminal v2 canonical ingestion job", async () => {
+  test("detail exposes current-pipeline re-run for an active v2 canonical ingestion job", async () => {
     authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
     const review = await createCapturedFacebookSource({ id: "retry-ingestion", rawText: "Đèo Hải Vân có điểm dừng an toàn ban ngày." });
-    await testDb.insert(knowledgeIngestionJobs).values({ id: "retry-ingestion-job", sourceId: review.sourceId, captureVersionId: review.captureVersionId!, submittedByUserId: "operator-user", submittedByEmail: "operator-user@example.com", protocolVersion: 2, stage: "suppressed", stageVersion: 2, attemptCount: 1, maxAttempts: 3, nextRunAt: new Date() });
+    await testDb.insert(knowledgeIngestionJobs).values({ id: "retry-ingestion-job", sourceId: review.sourceId, captureVersionId: review.captureVersionId!, submittedByUserId: "operator-user", submittedByEmail: "operator-user@example.com", protocolVersion: 2, stage: "queued", stageVersion: 2, attemptCount: 1, maxAttempts: 3, nextRunAt: new Date() });
 
     const { default: FacebookCaptureReviewDetailPage } = await import("@/app/admin/knowledge/facebook-captures/[reviewId]/page");
     const html = renderToStaticMarkup(await FacebookCaptureReviewDetailPage({ params: Promise.resolve({ reviewId: review.id }) }));
 
-    expect(html).toContain("Retry canonical ingestion");
+    expect(html).toContain("Chạy lại với pipeline hiện hành");
+    expect(html).toContain("Re-run current pipeline");
+  });
+
+  test("detail shows color-coded candidate statuses and specific reason filters", async () => {
+    authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
+    const review = await createCapturedFacebookSource({ id: "candidate-status", rawText: "Đèo Hải Vân có điểm dừng an toàn ban ngày." });
+    await testDb.insert(knowledgeIngestionJobs).values({ id: "candidate-status-job", sourceId: review.sourceId, captureVersionId: review.captureVersionId!, submittedByUserId: "operator-user", submittedByEmail: "operator-user@example.com", protocolVersion: 2, stage: "queued", nextRunAt: new Date() });
+    await testDb.insert(knowledgeIngestionCandidates).values([
+      { ingestionJobId: "candidate-status-job", sourceId: review.sourceId, captureVersionId: review.captureVersionId!, fingerprint: "b".repeat(64), type: "place", title: "Đã xuất bản", summary: "Candidate active.", locationName: "Đèo Hải Vân", conditions: [], freshnessSensitive: false, spanStart: 0, spanEnd: 1, extractionPromptVersion: "test", stage: "published", stageVersion: 2 },
+      { ingestionJobId: "candidate-status-job", sourceId: review.sourceId, captureVersionId: review.captureVersionId!, fingerprint: "c".repeat(64), type: "place", title: "Judge loại", summary: "Candidate suppressed.", locationName: "Đèo Hải Vân", conditions: [], freshnessSensitive: false, spanStart: 0, spanEnd: 1, extractionPromptVersion: "test", stage: "suppressed", stageVersion: 2, outcomeReasonCode: "judge_suppressed", judgeDecision: "suppress", judgmentSummary: "Không phù hợp để xuất bản." },
+    ]);
+
+    const { default: FacebookCaptureReviewDetailPage } = await import("@/app/admin/knowledge/facebook-captures/[reviewId]/page");
+    const html = renderToStaticMarkup(await FacebookCaptureReviewDetailPage({ params: Promise.resolve({ reviewId: review.id }), searchParams: Promise.resolve({ candidateReason: "judge_suppressed" }) }));
+
+    expect(html).toContain("Đã xuất bản");
+    expect(html).toContain("Không xuất bản");
+    expect(html).toContain("judge_suppressed");
+    expect(html).toContain("Judge đã ground evidence");
+    expect(html).toContain("Judge loại");
+    expect(html).not.toContain("Candidate active.");
+  });
+
+  test("detail reconstructs safe legacy evidence-mismatch content from the protected discovery completion", async () => {
+    authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
+    const review = await createCapturedFacebookSource({ id: "legacy-mismatch", rawText: "Quán Nguyệt nằm gần Bãi Đá Nhảy và có cháo canh." });
+    await testDb.insert(knowledgeIngestionJobs).values({ id: "legacy-mismatch-job", sourceId: review.sourceId, captureVersionId: review.captureVersionId!, submittedByUserId: "operator-user", submittedByEmail: "operator-user@example.com", protocolVersion: 2, stage: "queued", rawDiscoveryResponse: JSON.stringify({ candidates: [{ type: "food", title: "Quán Nguyệt gần Bãi Đá Nhảy", summary: "Quán có cháo canh.", location_name: "Quán Nguyệt, Quảng Bình", route_segment: null, conditions: ["Theo trải nghiệm cá nhân."], freshness_sensitive: false, evidence: { quote_text: "Quán Nguyệt ... cháo canh" } }] }) });
+    await testDb.insert(knowledgeIngestionCandidates).values({ ingestionJobId: "legacy-mismatch-job", sourceId: review.sourceId, captureVersionId: review.captureVersionId!, fingerprint: "a".repeat(64), type: "general_travel_tip", title: "Candidate extraction rejected", summary: "Rejected during structural or safety validation.", conditions: [], freshnessSensitive: false, spanStart: 0, spanEnd: 1, extractionPromptVersion: "test", stage: "suppressed", stageVersion: 2, outcomeReasonCode: "candidate_evidence_mismatch" });
+
+    const { default: FacebookCaptureReviewDetailPage } = await import("@/app/admin/knowledge/facebook-captures/[reviewId]/page");
+    const html = renderToStaticMarkup(await FacebookCaptureReviewDetailPage({ params: Promise.resolve({ reviewId: review.id }) }));
+
+    expect(html).toContain("Quán Nguyệt gần Bãi Đá Nhảy");
+    expect(html).toContain("Quán Nguyệt, Quảng Bình");
+    expect(html).toContain("Quote AI bị từ chối: Quán Nguyệt ... cháo canh");
+    expect(html).not.toContain("Candidate extraction rejected");
   });
 
   test("admin read models sanitize unsafe values inside allowed metadata fields", async () => {

@@ -26,6 +26,7 @@ export default async function KnowledgeRecommendationPage({ params, searchParams
     <p className="mt-6 text-sm font-semibold uppercase tracking-[0.2em] text-[#8c4f13]">Khuyến nghị {recommendation.reason}</p>
     <h1 className="mt-3 text-4xl font-semibold text-[#17342c]">{recommendation.card.title}</h1>
     <p className="mt-4 text-lg leading-8 text-[#4f625a]">Phiên bản đã khuyến nghị: nội dung {recommendation.contentVersion}, evidence {recommendation.evidenceSetRevision}. Hiện tại: {recommendation.card.contentVersion}/{recommendation.card.evidenceSetRevision}. {stale ? "Khuyến nghị đã cũ, không thể xử lý." : ""}</p>
+    {recommendation.reason === "verification" ? <p className="mt-4 rounded-xl border border-[#8fb59f] bg-[#edf7ef] p-4 text-sm leading-6 text-[#17342c]">Bạn là điểm phê duyệt cuối: chọn <strong>Xác nhận và xuất bản</strong> để xuất bản ngay cả khi chỉ có một nguồn. Có thể sửa fact tự do trước khi lưu; hệ thống vẫn ghi audit log, phiên bản nội dung và giữ evidence hiện có.</p> : null}
     {notice.error ? <p className="mt-5 rounded-xl bg-[#f4ead7] p-4">Không thể xử lý: {notice.error}</p> : null}
     {notice.resolved ? <p className="mt-5 rounded-xl bg-[#edf7ef] p-4">Đã xử lý an toàn.</p> : null}
     <section className="mt-7 rounded-2xl border border-[#d8c9ad] bg-white/75 p-5">
@@ -40,10 +41,10 @@ export default async function KnowledgeRecommendationPage({ params, searchParams
       <input name="evidenceSetRevision" type="hidden" value={recommendation.evidenceSetRevision} />
       <label className="grid gap-2 font-semibold">Lệnh xử lý
         <select className="min-h-11 rounded-xl border border-[#d8c9ad] px-3" defaultValue={actions[0]} disabled={stale || recommendation.status === "resolved" || recommendation.status === "superseded"} name="action">
-          {actions.map((action) => <option key={action} value={action}>{action}</option>)}
+          {actions.map((action) => <option key={action} value={action}>{recommendation.reason === "verification" ? ({ verify: "Xác nhận và xuất bản", edit: "Sửa và giữ chờ xác nhận", suppress: "Không xuất bản" }[action] ?? action) : action}</option>)}
         </select>
       </label>
-      <label className="grid gap-2 font-semibold">Fact đã chỉnh sửa (chỉ dùng với edit)<textarea className="min-h-24 rounded-xl border border-[#d8c9ad] p-3" name="editSummary" /></label>
+      <label className="grid gap-2 font-semibold">Fact đã chỉnh sửa (chỉ dùng với sửa)<textarea className="min-h-24 rounded-xl border border-[#d8c9ad] p-3" name="editSummary" /></label>
       {recommendation.reason === "sampling" ? <><label className="grid gap-2 font-semibold">Mã kết quả lấy mẫu<select className="min-h-11 rounded-xl border border-[#d8c9ad] px-3" name="samplingDispositionReason" required><option value="">Chọn mã bắt buộc</option>{["confirmed", "minor_issue", "insufficient_evidence", "stale_or_changed", "material_error", "safety_risk"].map((reason) => <option key={reason} value={reason}>{reason}</option>)}</select></label><label className="grid gap-2 font-semibold">Lý do bổ sung (tùy chọn, tối đa 500 ký tự)<textarea className="min-h-20 rounded-xl border border-[#d8c9ad] p-3" maxLength={500} name="samplingRationale" /></label><label className="flex gap-2"><input name="highSeverity" type="checkbox" /> Lỗi lấy mẫu nghiêm trọng</label></> : null}
       <button className="min-h-11 rounded-xl bg-[#1f5f46] px-4 font-semibold text-white disabled:opacity-50" disabled={stale || recommendation.status === "resolved" || recommendation.status === "superseded"} type="submit">Lưu xử lý</button>
     </form>

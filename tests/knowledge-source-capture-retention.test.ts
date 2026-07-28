@@ -23,10 +23,12 @@ describe("source capture retention", () => {
     const now = new Date("2026-07-21T00:00:00.000Z");
     await createCandidate("old", new Date("2026-01-22T00:00:00.000Z"));
     await createCandidate("recent", new Date("2026-01-23T00:00:00.000Z"));
+    await testDb.insert(knowledgeIngestionJobs).values({ sourceId: "old", captureVersionId: "version-old", submittedByUserId: "operator", submittedByEmail: "operator@example.com", stage: "suppressed", rawDiscoveryResponse: "{\"candidates\":[]}" });
     await expect(retainExpiredFacebookCaptureVersions({ actorUserId: "operator", actorEmail: "operator@example.com", dryRun: true, now }, testDb)).resolves.toMatchObject({ tombstonedVersionIds: ["version-old"] });
     await expect(testDb.select({ rawText: sourceCaptureVersions.rawText }).from(sourceCaptureVersions).where(eq(sourceCaptureVersions.id, "version-old"))).resolves.toEqual([{ rawText: "Operator-only capture" }]);
     await retainExpiredFacebookCaptureVersions({ actorUserId: "operator", actorEmail: "operator@example.com", dryRun: false, now }, testDb);
     await expect(testDb.select().from(sourceCaptureVersions).where(eq(sourceCaptureVersions.id, "version-old"))).resolves.toMatchObject([{ id: "version-old", rawText: null, rawMetadata: null, payloadDeletedAt: now }]);
+    await expect(testDb.select({ rawDiscoveryResponse: knowledgeIngestionJobs.rawDiscoveryResponse }).from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.captureVersionId, "version-old"))).resolves.toEqual([{ rawDiscoveryResponse: null }]);
     await expect(testDb.select({ currentCaptureVersionId: sources.currentCaptureVersionId }).from(sources).where(eq(sources.id, "old"))).resolves.toEqual([{ currentCaptureVersionId: null }]);
     await expect(testDb.select({ rawText: sourceCaptureVersions.rawText }).from(sourceCaptureVersions).where(eq(sourceCaptureVersions.id, "version-recent"))).resolves.toEqual([{ rawText: "Operator-only capture" }]);
     await expect(testDb.select().from(auditEvents).where(eq(auditEvents.targetType, "source_capture_version_retention"))).resolves.toHaveLength(1);

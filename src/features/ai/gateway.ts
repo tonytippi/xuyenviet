@@ -172,12 +172,14 @@ export async function completeExtraction({
   model,
   messages,
   abortSignal,
+  omitOutputTokenLimit = false,
 }: {
   model: string;
   messages: GatewayMessage[];
   abortSignal?: AbortSignal;
+  omitOutputTokenLimit?: boolean;
 }): Promise<AiGatewayExtractionResult> {
-  return completeGatewayPrompt({ model, messages, abortSignal, purpose: "extraction", maxTokens: maxExtractionTokens });
+  return completeGatewayPrompt({ model, messages, abortSignal, purpose: "extraction", maxTokens: omitOutputTokenLimit ? null : maxExtractionTokens });
 }
 
 export async function completeInitialAiAskAnswer({
@@ -227,7 +229,7 @@ async function completeGatewayPrompt({
   messages: GatewayMessage[];
   abortSignal?: AbortSignal;
   purpose: AiGatewayCompletionPurpose;
-  maxTokens: number;
+  maxTokens: number | null;
 }): Promise<AiGatewayExtractionResult> {
   const startedAt = Date.now();
   const controller = new AbortController();
@@ -255,7 +257,7 @@ async function completeGatewayPrompt({
       body: JSON.stringify({
         model,
         messages,
-        max_tokens: maxTokens,
+        ...(maxTokens === null ? {} : { max_tokens: maxTokens }),
         temperature: 0,
         stream: false,
       }),

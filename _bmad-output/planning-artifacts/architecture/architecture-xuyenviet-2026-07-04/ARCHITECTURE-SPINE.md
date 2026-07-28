@@ -140,15 +140,15 @@ Rule: An extracted candidate is an operational artifact only. After deterministi
 
 Rule: `knowledge_cards` own the current normalized fact, conditions, confidence, freshness risk, a monotonic `content_version`, current judge summary, and separate `publication_state`, `knowledge_state`, `review_state`, and `verification_state`.
 
-Rule: `publication_state` is `active | suppressed | archived`. `knowledge_state` is `community_observation | community_pattern | conditional | uncertain | conflicted | confirmed | superseded`. `review_state` is `none | ai_recommended | in_review | reviewed`. `verification_state` is `not_required | required | corroborated | failed`.
+Rule: `publication_state` is `active | suppressed | archived`. `knowledge_state` is `community_observation | community_pattern | conditional | uncertain | conflicted | confirmed | superseded`. `review_state` is `none | ai_recommended | in_review | reviewed`. `verification_state` is `not_required | required | corroborated | failed`. An operator-authorized `verify_first` publication may be active with its available validated evidence and `verification_state = corroborated`; this records the operator decision, not multi-source corroboration or a `community_pattern` upgrade.
 
-Rule: Only `active` cards may be retrieved. `superseded`, `suppressed`, and `archived` cards are not retrievable. `uncertain` cards are caveat-only. `conflicted` cards cannot support a factual itinerary recommendation. `required` verification is caveat-only until corroborated and never makes a card `confirmed` by itself.
+Rule: Only `active` cards may be retrieved. `superseded`, `suppressed`, and `archived` cards are not retrievable. `uncertain` cards are caveat-only. `conflicted` cards cannot support a factual itinerary recommendation. `required` verification is caveat-only until corroborated by independent evidence or resolved through the authorized `verification` recommendation; neither path makes a card `confirmed` by itself.
 
 Rule: Every card has one or more current `knowledge_card_evidence` records. Evidence contains only a bounded validated quote/span, source reference, observed/captured time, conditions, support level, display policy, and active/inactive/removed state. Raw source material remains operator-only and never enters traveler source bundles.
 
 Rule: A card may be active without operator review only when code validates its evidence span and privacy policy and the independent judge meets the PRD hard gates and thresholds. Operator approval records review; it is not a publication prerequisite.
 
-Rule: Every evidence record stores a deterministic `independence_key`: the normalized canonical source identity for a directly authored source, or the known original source identity when the capture is a repost/share. `community_pattern` requires at least two active supporting evidence records with distinct independence keys. Freshness-sensitive road, safety, EV, price, hours, availability, booking, and promotion claims automatically set `verification_state = required` and `review_state = ai_recommended`; until corroborated, they are conditional caveats only.
+Rule: Every evidence record stores a deterministic `independence_key`: the normalized canonical source identity for a directly authored source, or the known original source identity when the capture is a repost/share. `community_pattern` requires at least two active supporting evidence records with distinct independence keys. Freshness-sensitive road, safety, EV, price, hours, availability, booking, and promotion claims automatically set `verification_state = required` and `review_state = ai_recommended`; automation retains them in `verify_first` rather than auto-publishing. An authorized operator may revise and publish that card as the final operational decision, with a version-fenced audit, without upgrading it to `community_pattern`.
 
 ### AD-7A: Facebook Capture Is Operator-Controlled And Raw-Material Only
 
@@ -427,7 +427,7 @@ Binds: source triage, extraction, independent judging, relation matching, retrie
 
 Prevents: separate queues re-running completed AI stages, disagreeing about the source lifecycle, or leaving operators unable to identify the current outcome.
 
-Rule: Knowledge owns one stateful ingestion job for each source capture version. Its stages are `queued -> triaging -> extracting -> judging -> relating`, with terminal outcomes `published | suppressed | review_recommended | verify_first | failed`. A retry resumes the failed stage and preserves completed-stage outputs only for short operational retention.
+Rule: Knowledge owns one stateful ingestion job for each source capture version. For v2 text ingestion, discovery submits the complete immutable redacted capture once and persists scoped semantic candidates; one independent batch grounding-and-judgment call returns exactly one exact-contiguous quote or `evidence:null` for every candidate. The server derives Unicode code-point spans and only grounded candidates enter relation work. Its stages are `queued -> triaging -> extracting -> judging -> relating`, with terminal outcomes `published | suppressed | review_recommended | verify_first | failed`. A retry resumes the failed stage and preserves completed-stage outputs only for short operational retention.
 
 Rule: Recapture creates a new source capture version and ingestion job. It never overwrites a completed job's provenance. The ingestion job records the submitted-by provenance, while automation mutations use the `system-knowledge-pipeline` service actor.
 
@@ -465,7 +465,7 @@ Rule: Cards retain current states, `content_version`, current judge summary, and
 
 Rule: `system-knowledge-pipeline` is the actor for automated triage, judging, relation, publication, conflict, and indexing mutations. The source submitter remains provenance and is linked to the source/job; they are not represented as the actor for automated decisions.
 
-Rule: A review recommendation references the card `content_version`, active evidence-set revision, and recommended action. Resolving it is compare-and-swap against those references; a changed card automatically receives a new recommendation rather than inheriting `reviewed` from an earlier version.
+Rule: A review recommendation references the card `content_version`, active evidence-set revision, and recommended action. Resolving it is compare-and-swap against those references; a changed card automatically receives a new recommendation rather than inheriting `reviewed` from an earlier version. A `verification` recommendation grants an authorized operator the final decision to freely revise, publish, or suppress the card; this exception is audit-recorded and does not relax automated evidence validation or other recommendation types.
 
 Rule: Quality sampling creates card-version-bound review recommendations for 15% of auto-active cards during the first four weeks and 100% of `verify_first` outcomes. Sampling resolution records pass/fail reason codes and raises sampling or suppresses the affected policy cohort when a high-severity failure occurs.
 

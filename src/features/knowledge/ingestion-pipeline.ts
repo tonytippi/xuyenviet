@@ -7,7 +7,7 @@ import { getDb } from "@/db/client";
 import { knowledgeCardEvidence, knowledgeCardSearchDocuments, knowledgeCards, knowledgeCardSources, knowledgeCardTypeValues, knowledgeIngestionCandidates, knowledgeIngestionJobs, sourceCaptureVersions, sources } from "@/db/schema";
 import { completeEvaluation, completeExtraction } from "@/features/ai/gateway";
 import { getAiGatewayPricingSnapshot, selectActiveAiGatewayModel, type SelectedAiGatewayModel } from "@/features/ai/models";
-import { buildKnowledgePipelineExtractionMessages, buildKnowledgePipelineJudgmentMessages, buildKnowledgePipelineMultiFactExtractionMessages, buildKnowledgePipelineRelationJudgmentMessages, knowledgePipelineExtractionPromptVersion, knowledgePipelineExtractionPurpose, knowledgePipelineJudgmentPromptVersion, knowledgePipelineJudgmentPurpose, knowledgePipelineMultiFactExtractionPromptVersion } from "@/features/ai/prompts";
+import { buildKnowledgePipelineBatchGroundingJudgmentMessages, buildKnowledgePipelineExtractionMessages, buildKnowledgePipelineJudgmentMessages, buildKnowledgePipelineMultiFactExtractionMessages, buildKnowledgePipelineRelationJudgmentMessages, knowledgePipelineExtractionPromptVersion, knowledgePipelineExtractionPurpose, knowledgePipelineJudgmentPromptVersion, knowledgePipelineJudgmentPurpose, knowledgePipelineMultiFactExtractionPromptVersion } from "@/features/ai/prompts";
 import { commitKnowledgeIngestionStage, finalizeV2Parent, retryKnowledgeIngestionCandidate, retryKnowledgeIngestionStage, terminalizeKnowledgeIngestionCandidate, type KnowledgeIngestionCandidateClaim, type KnowledgeIngestionCheckpoint, type KnowledgeIngestionClaim } from "@/features/knowledge/ingestion-jobs";
 import { disableStaleKnowledgeSearchProjection, enqueueKnowledgeIndexWork } from "@/features/knowledge/indexing-queue";
 import { enrollAutoActiveSampling, enrollVerifyFirstSampling, lockSamplingPolicyBoundary, scheduleKnowledgeRecommendation } from "@/features/knowledge/recommendations";
@@ -18,6 +18,7 @@ import { recordAuditEvent } from "@/features/audit/events";
 const pipelineActor = createSystemAuditActor("system-knowledge-pipeline");
 type PipelineDb = ReturnType<typeof getDb>;
 type Candidate = { type: (typeof knowledgeCardTypeValues)[number]; title: string; summary: string; locationName: string | null; routeSegment: string | null; conditions: string[]; freshnessSensitive: boolean; evidence: { quoteText: string; spanStart: number; spanEnd: number } };
+type RejectedCandidate = { candidate: Candidate | null; reason: string };
 type Judgment = { decision: "publish" | "review_recommended" | "verify_first" | "suppress"; summary: string; relevance: number; extractability: number; evidenceGrounding: number; specificity: number; actionability: number; firstHandLikelihood: number; spamCommercialRisk: number };
 type Relation = { action: "attach" | "create" | "conflict" | "ambiguous"; targetCardId: string | null; summary: string };
 export type KnowledgeIngestionPipelineResult = { jobId: string; sourceId: string; outcome: "published" | "suppressed" | "review_recommended" | "verify_first" | "failed"; cardId?: string };
@@ -94,58 +95,56 @@ export async function runKnowledgeIngestionPipeline(claim: KnowledgeIngestionCla
   return publish(claim, stageVersion, candidate, judgment, bundle, checkpoint.candidate.modelId, relation, db);
 }
 
-const maxWindowCoreSize = 8_000;
-const minWindowCoreSize = 500;
-const windowOverlap = 1_000;
-
 async function runV2Discovery(claim: KnowledgeIngestionClaim, db: PipelineDb): Promise<KnowledgeIngestionPipelineResult | null> {
-  const [bundle] = await db.select({ rawText: sourceCaptureVersions.rawText, source: { id: sources.id, kind: sources.kind, label: sources.label, sourceType: sources.sourceType, verificationStatus: sources.verificationStatus, official: sources.official, partner: sources.partner }, cursor: knowledgeIngestionJobs.discoveryCursor, windowSize: knowledgeIngestionJobs.discoveryWindowSize }).from(knowledgeIngestionJobs).innerJoin(sourceCaptureVersions, eq(sourceCaptureVersions.id, knowledgeIngestionJobs.captureVersionId)).innerJoin(sources, eq(sources.id, knowledgeIngestionJobs.sourceId)).where(and(eq(knowledgeIngestionJobs.id, claim.jobId), eq(knowledgeIngestionJobs.fencingToken, claim.fencingToken), eq(sources.currentCaptureVersionId, claim.captureVersionId), eq(sources.eligibility, "eligible"), isNull(sourceCaptureVersions.payloadDeletedAt))).limit(1);
+  const [bundle] = await db.select({ rawText: sourceCaptureVersions.rawText, source: { id: sources.id, kind: sources.kind, label: sources.label, sourceType: sources.sourceType, verificationStatus: sources.verificationStatus, official: sources.official, partner: sources.partner } }).from(knowledgeIngestionJobs).innerJoin(sourceCaptureVersions, eq(sourceCaptureVersions.id, knowledgeIngestionJobs.captureVersionId)).innerJoin(sources, eq(sources.id, knowledgeIngestionJobs.sourceId)).where(and(eq(knowledgeIngestionJobs.id, claim.jobId), eq(knowledgeIngestionJobs.fencingToken, claim.fencingToken), eq(sources.currentCaptureVersionId, claim.captureVersionId), eq(sources.eligibility, "eligible"), isNull(sourceCaptureVersions.payloadDeletedAt))).limit(1);
   if (!bundle?.rawText) return terminalizeStaleV2Discovery(claim, db);
   const safeRawText = redactContactDetails(bundle.rawText);
   const total = Array.from(safeRawText).length;
-  const coreStart = bundle.cursor;
-  if (coreStart >= total) {
-    const [committed] = await db.update(knowledgeIngestionJobs).set({ discoveryComplete: true, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, updatedAt: new Date() }).where(and(eq(knowledgeIngestionJobs.id, claim.jobId), eq(knowledgeIngestionJobs.protocolVersion, 2), eq(knowledgeIngestionJobs.stage, "queued"), eq(knowledgeIngestionJobs.stageVersion, claim.stageVersion), eq(knowledgeIngestionJobs.fencingToken, claim.fencingToken), sql`${knowledgeIngestionJobs.leaseExpiresAt} > timezone('UTC', now())`)).returning({ id: knowledgeIngestionJobs.id });
-    if (!committed) return null;
-    await finalizeV2Parent(db, claim.jobId);
-    return { jobId: claim.jobId, sourceId: claim.sourceId, outcome: "suppressed" };
-  }
-  const coreEnd = Math.min(coreStart + bundle.windowSize, total);
-  const requestEnd = Math.min(coreEnd + windowOverlap, total);
   const model = await selectActiveAiGatewayModel({ purpose: knowledgePipelineExtractionPurpose, requiredCapabilities: { textInput: true, extraction: true }, db });
   if (!model) return finish(claim, claim.stage, claim.stageVersion, "failed", "model_unavailable", db);
-  const windowStart = Math.max(0, coreStart - windowOverlap);
-  const extracted = await completeExtraction({ model: model.gatewayModelName, messages: buildKnowledgePipelineMultiFactExtractionMessages({ source: bundle.source, rawText: Array.from(safeRawText).slice(windowStart, requestEnd).join(""), sourceOffset: windowStart, coreStart, coreEnd }) });
+  const extracted = await completeExtraction({ model: model.gatewayModelName, messages: buildKnowledgePipelineMultiFactExtractionMessages({ source: bundle.source, rawText: safeRawText }), omitOutputTokenLimit: true });
   await recordUsage(db, model, knowledgePipelineExtractionPurpose, knowledgePipelineMultiFactExtractionPromptVersion, extracted);
   if (!extracted.ok) return retryOrFail(claim, claim.stage, claim.stageVersion, "provider_failed", db);
-  const parsed = parseCandidates(extracted.content, safeRawText, coreStart, coreEnd);
-  if (!parsed) return retryV2Discovery(claim, bundle.windowSize, db);
-  const candidates = parsed.candidates;
+  const parsed = parseCandidates(extracted.content);
+  if (!parsed) {
+    await persistRawDiscoveryResponse(claim, extracted.content, db);
+    return retryOrFail(claim, claim.stage, claim.stageVersion, "invalid_discovery_response", db);
+  }
+  const judgmentModel = await selectActiveAiGatewayModel({ purpose: knowledgePipelineJudgmentPurpose, requiredCapabilities: { textInput: true, evaluation: true }, db });
+  if (!judgmentModel) return retryOrFail(claim, claim.stage, claim.stageVersion, "judge_model_unavailable", db);
+  if (judgmentModel.id === model.id || judgmentModel.gatewayModelName === model.gatewayModelName) return finish(claim, claim.stage, claim.stageVersion, "review_recommended", "judge_model_not_independent", db);
+  const grounded = await completeEvaluation({ model: judgmentModel.gatewayModelName, messages: buildKnowledgePipelineBatchGroundingJudgmentMessages({ rawText: safeRawText, candidates: parsed.candidates.map((candidate, index) => ({ candidate_id: String(index), type: candidate.type, title: candidate.title, summary: candidate.summary, location_name: candidate.locationName, route_segment: candidate.routeSegment, conditions: candidate.conditions, freshness_sensitive: candidate.freshnessSensitive })) }) });
+  await recordUsage(db, judgmentModel, knowledgePipelineJudgmentPurpose, knowledgePipelineJudgmentPromptVersion, grounded);
+  if (!grounded.ok) return retryOrFail(claim, claim.stage, claim.stageVersion, "judge_provider_failed", db);
+  const groundingResults = parseBatchGroundingJudgments(grounded.content, parsed.candidates, safeRawText);
+  if (!groundingResults) return retryOrFail(claim, claim.stage, claim.stageVersion, "judge_provider_failed", db);
   return db.transaction(async (tx) => {
     const [current] = await tx.select({ id: knowledgeIngestionJobs.id }).from(knowledgeIngestionJobs).innerJoin(sources, eq(sources.id, knowledgeIngestionJobs.sourceId)).where(and(eq(knowledgeIngestionJobs.id, claim.jobId), eq(knowledgeIngestionJobs.sourceId, claim.sourceId), eq(knowledgeIngestionJobs.captureVersionId, claim.captureVersionId), eq(knowledgeIngestionJobs.fencingToken, claim.fencingToken), eq(knowledgeIngestionJobs.stageVersion, claim.stageVersion), sql`${knowledgeIngestionJobs.leaseExpiresAt} > timezone('UTC', now())`, eq(sources.currentCaptureVersionId, claim.captureVersionId), eq(sources.eligibility, "eligible"))).limit(1).for("update");
     if (!current) return null;
     let inserted = 0;
+    let terminalInserted = 0;
     let invalidInserted = 0;
-    for (const candidate of candidates) {
-      const rows = await tx.insert(knowledgeIngestionCandidates).values({ ingestionJobId: claim.jobId, sourceId: claim.sourceId, captureVersionId: claim.captureVersionId, fingerprint: fingerprint(candidate), type: candidate.type, title: candidate.title, summary: candidate.summary, locationName: candidate.locationName, routeSegment: candidate.routeSegment, conditions: candidate.conditions, freshnessSensitive: candidate.freshnessSensitive, spanStart: candidate.evidence.spanStart, spanEnd: candidate.evidence.spanEnd, extractionModelId: model.id, extractionPromptVersion: knowledgePipelineMultiFactExtractionPromptVersion }).onConflictDoNothing().returning({ id: knowledgeIngestionCandidates.id });
+    for (const groundedCandidate of groundingResults) {
+      const { candidate, judgment } = groundedCandidate;
+      const isGrounded = Boolean(candidate.evidence.quoteText);
+      const outcome = isGrounded ? decideOutcome(candidate, judgment) : "suppressed";
+      const suppressionReason = isGrounded ? judgmentSuppressionReason(judgment) : "judge_evidence_not_grounded";
+      const rows = await tx.insert(knowledgeIngestionCandidates).values({ ingestionJobId: claim.jobId, sourceId: claim.sourceId, captureVersionId: claim.captureVersionId, fingerprint: fingerprint(candidate), type: candidate.type, title: candidate.title, summary: candidate.summary, locationName: candidate.locationName, routeSegment: candidate.routeSegment, conditions: candidate.conditions, freshnessSensitive: candidate.freshnessSensitive, spanStart: candidate.evidence.spanStart, spanEnd: candidate.evidence.spanEnd, extractionModelId: model.id, extractionPromptVersion: knowledgePipelineMultiFactExtractionPromptVersion, stage: outcome === "suppressed" ? "suppressed" : "relating", stageVersion: outcome === "suppressed" ? 2 : 1, outcomeReasonCode: outcome === "suppressed" ? suppressionReason : null, judgeDecision: judgment.decision, judgmentSummary: judgment.summary, scores: scoresFor(judgment) }).onConflictDoNothing().returning({ id: knowledgeIngestionCandidates.id });
       inserted += rows.length;
+      if (rows.length && outcome === "suppressed") terminalInserted += rows.length;
     }
-    for (let index = 0; index < parsed.invalidCount; index += 1) {
-      const rows = await tx.insert(knowledgeIngestionCandidates).values({ ingestionJobId: claim.jobId, sourceId: claim.sourceId, captureVersionId: claim.captureVersionId, fingerprint: invalidFingerprint(coreStart, index), type: "general_travel_tip", title: "Candidate extraction rejected", summary: "Rejected during structural or safety validation.", conditions: [], freshnessSensitive: false, spanStart: coreStart, spanEnd: Math.min(coreStart + 1, total), extractionModelId: model.id, extractionPromptVersion: knowledgePipelineMultiFactExtractionPromptVersion, stage: "suppressed", stageVersion: 2, outcomeReasonCode: "invalid_discovery_candidate" }).onConflictDoNothing().returning({ id: knowledgeIngestionCandidates.id });
+    for (const [index, rejected] of parsed.invalidCandidates.entries()) {
+      const candidate = rejected.candidate;
+      const rows = await tx.insert(knowledgeIngestionCandidates).values({ ingestionJobId: claim.jobId, sourceId: claim.sourceId, captureVersionId: claim.captureVersionId, fingerprint: invalidFingerprint(index), type: candidate?.type ?? "general_travel_tip", title: candidate?.title ?? "Candidate extraction rejected", summary: candidate?.summary ?? "Rejected during structural or safety validation.", locationName: candidate?.locationName, routeSegment: candidate?.routeSegment, conditions: candidate?.conditions ?? [], freshnessSensitive: candidate?.freshnessSensitive ?? false, spanStart: candidate?.evidence.spanStart ?? 0, spanEnd: candidate?.evidence.spanEnd ?? Math.min(1, total), extractionModelId: model.id, extractionPromptVersion: knowledgePipelineMultiFactExtractionPromptVersion, stage: "suppressed", stageVersion: 2, outcomeReasonCode: rejected.reason }).onConflictDoNothing().returning({ id: knowledgeIngestionCandidates.id });
       inserted += rows.length;
       invalidInserted += rows.length;
+      terminalInserted += rows.length;
     }
-    const [advanced] = await tx.update(knowledgeIngestionJobs).set({ discoveryCursor: coreEnd, discoveryWindowSize: maxWindowCoreSize, discoveredCandidateCount: sql`${knowledgeIngestionJobs.discoveredCandidateCount} + ${inserted}`, terminalCandidateCount: sql`${knowledgeIngestionJobs.terminalCandidateCount} + ${invalidInserted}`, suppressedCandidateCount: sql`${knowledgeIngestionJobs.suppressedCandidateCount} + ${invalidInserted}`, invalidCandidateCount: sql`${knowledgeIngestionJobs.invalidCandidateCount} + ${invalidInserted}`, lastErrorCode: invalidInserted > 0 ? "invalid_discovery_candidate" : null, attemptCount: 0, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, nextRunAt: new Date(), updatedAt: new Date() }).where(and(eq(knowledgeIngestionJobs.id, claim.jobId), eq(knowledgeIngestionJobs.sourceId, claim.sourceId), eq(knowledgeIngestionJobs.captureVersionId, claim.captureVersionId), eq(knowledgeIngestionJobs.fencingToken, claim.fencingToken), eq(knowledgeIngestionJobs.stageVersion, claim.stageVersion), sql`${knowledgeIngestionJobs.leaseExpiresAt} > timezone('UTC', now())`)).returning();
-    return advanced ? { jobId: claim.jobId, sourceId: claim.sourceId, outcome: "suppressed" as const } : null;
+    const [advanced] = await tx.update(knowledgeIngestionJobs).set({ discoveredCandidateCount: sql`${knowledgeIngestionJobs.discoveredCandidateCount} + ${inserted}`, terminalCandidateCount: sql`${knowledgeIngestionJobs.terminalCandidateCount} + ${terminalInserted}`, suppressedCandidateCount: sql`${knowledgeIngestionJobs.suppressedCandidateCount} + ${terminalInserted}`, invalidCandidateCount: sql`${knowledgeIngestionJobs.invalidCandidateCount} + ${invalidInserted}`, lastErrorCode: invalidInserted > 0 ? "invalid_discovery_candidate" : null, rawDiscoveryResponse: extracted.content, attemptCount: 0, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, nextRunAt: new Date(), updatedAt: new Date() }).where(and(eq(knowledgeIngestionJobs.id, claim.jobId), eq(knowledgeIngestionJobs.sourceId, claim.sourceId), eq(knowledgeIngestionJobs.captureVersionId, claim.captureVersionId), eq(knowledgeIngestionJobs.fencingToken, claim.fencingToken), eq(knowledgeIngestionJobs.stageVersion, claim.stageVersion), sql`${knowledgeIngestionJobs.leaseExpiresAt} > timezone('UTC', now())`)).returning();
+    if (!advanced) return null;
+    await finalizeV2Parent(tx, claim.jobId);
+    return { jobId: claim.jobId, sourceId: claim.sourceId, outcome: "suppressed" as const };
   });
-}
-
-async function retryV2Discovery(claim: KnowledgeIngestionClaim, windowSize: number, db: PipelineDb) {
-  if (windowSize > minWindowCoreSize) {
-    const [retried] = await db.update(knowledgeIngestionJobs).set({ discoveryWindowSize: Math.max(minWindowCoreSize, Math.floor(windowSize / 2)), attemptCount: 0, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, nextRunAt: new Date(), lastErrorCode: "discovery_window_subdivided", updatedAt: new Date() }).where(and(eq(knowledgeIngestionJobs.id, claim.jobId), eq(knowledgeIngestionJobs.stage, claim.stage), eq(knowledgeIngestionJobs.stageVersion, claim.stageVersion), eq(knowledgeIngestionJobs.fencingToken, claim.fencingToken), sql`${knowledgeIngestionJobs.leaseExpiresAt} > timezone('UTC', now())`)).returning({ id: knowledgeIngestionJobs.id });
-    return retried ? null : finish(claim, claim.stage, claim.stageVersion, "failed", "invalid_discovery_response", db);
-  }
-  return retryOrFail(claim, claim.stage, claim.stageVersion, "invalid_discovery_response", db);
 }
 
 async function terminalizeStaleV2Discovery(claim: KnowledgeIngestionClaim, db: PipelineDb) {
@@ -156,6 +155,10 @@ async function terminalizeStaleV2Discovery(claim: KnowledgeIngestionClaim, db: P
   });
 }
 
+async function persistRawDiscoveryResponse(claim: KnowledgeIngestionClaim, response: string, db: PipelineDb) {
+  await db.update(knowledgeIngestionJobs).set({ rawDiscoveryResponse: response, updatedAt: new Date() }).where(and(eq(knowledgeIngestionJobs.id, claim.jobId), eq(knowledgeIngestionJobs.sourceId, claim.sourceId), eq(knowledgeIngestionJobs.captureVersionId, claim.captureVersionId), eq(knowledgeIngestionJobs.fencingToken, claim.fencingToken), eq(knowledgeIngestionJobs.stageVersion, claim.stageVersion), sql`${knowledgeIngestionJobs.leaseExpiresAt} > timezone('UTC', now())`));
+}
+
 export async function runKnowledgeIngestionCandidatePipeline(claim: KnowledgeIngestionCandidateClaim, db: PipelineDb = getDb()) {
   const [candidate] = await db.select().from(knowledgeIngestionCandidates).where(and(eq(knowledgeIngestionCandidates.id, claim.candidateId), eq(knowledgeIngestionCandidates.ingestionJobId, claim.jobId), eq(knowledgeIngestionCandidates.sourceId, claim.sourceId), eq(knowledgeIngestionCandidates.captureVersionId, claim.captureVersionId), eq(knowledgeIngestionCandidates.fencingToken, claim.fencingToken))).limit(1);
   if (!candidate) return null;
@@ -163,18 +166,14 @@ export async function runKnowledgeIngestionCandidatePipeline(claim: KnowledgeIng
   const quoteText = capture?.rawText ? slice(capture.rawText, candidate.spanStart, candidate.spanEnd) : null;
   if (!quoteText) return terminalizeKnowledgeIngestionCandidate({ candidateId: claim.candidateId, expectedStage: claim.stage, expectedStageVersion: claim.stageVersion, fencingToken: claim.fencingToken, outcome: "suppressed", reasonCode: "stale_or_deleted_capture" }, db);
   if (containsSensitiveText(quoteText)) return terminalizeKnowledgeIngestionCandidate({ candidateId: claim.candidateId, expectedStage: claim.stage, expectedStageVersion: claim.stageVersion, fencingToken: claim.fencingToken, outcome: "suppressed", reasonCode: "candidate_sensitive_content" }, db);
-  const model = await selectActiveAiGatewayModel({ purpose: knowledgePipelineJudgmentPurpose, requiredCapabilities: { textInput: true, evaluation: true }, db });
-  if (!model) return terminalizeKnowledgeIngestionCandidate({ candidateId: claim.candidateId, expectedStage: claim.stage, expectedStageVersion: claim.stageVersion, fencingToken: claim.fencingToken, outcome: "failed", reasonCode: "judge_model_unavailable" }, db);
-  if (model.id === candidate.extractionModelId) return terminalizeKnowledgeIngestionCandidate({ candidateId: claim.candidateId, expectedStage: claim.stage, expectedStageVersion: claim.stageVersion, fencingToken: claim.fencingToken, outcome: "review_recommended", reasonCode: "judge_model_not_independent" }, db);
   const fact: Candidate = { type: candidate.type, title: candidate.title, summary: candidate.summary, locationName: candidate.locationName, routeSegment: candidate.routeSegment, conditions: candidate.conditions, freshnessSensitive: candidate.freshnessSensitive, evidence: { quoteText, spanStart: candidate.spanStart, spanEnd: candidate.spanEnd } };
-  const judged = await completeEvaluation({ model: model.gatewayModelName, messages: buildKnowledgePipelineJudgmentMessages({ candidate: fact as unknown as Record<string, unknown>, evidence: fact.evidence }) });
-  await recordUsage(db, model, knowledgePipelineJudgmentPurpose, knowledgePipelineJudgmentPromptVersion, judged);
-  const judgment = judged.ok ? parseJudgment(judged.content) : null;
-  const outcome: "published" | "suppressed" | "review_recommended" | "verify_first" | "failed" = judgment ? decideOutcome(fact, judgment) : "failed";
-  if (!judgment) return retryKnowledgeIngestionCandidate({ candidateId: claim.candidateId, expectedStage: claim.stage, expectedStageVersion: claim.stageVersion, fencingToken: claim.fencingToken, errorCode: "judge_provider_failed" }, db);
-  if (outcome === "suppressed") return terminalizeKnowledgeIngestionCandidate({ candidateId: claim.candidateId, expectedStage: claim.stage, expectedStageVersion: claim.stageVersion, fencingToken: claim.fencingToken, outcome, reasonCode: "candidate_terminalized", judgmentSummary: judgment.summary, scores: scoresFor(judgment) }, db);
+  const judgment = judgmentFromCandidate(candidate);
+  if (!judgment) return terminalizeKnowledgeIngestionCandidate({ candidateId: claim.candidateId, expectedStage: claim.stage, expectedStageVersion: claim.stageVersion, fencingToken: claim.fencingToken, outcome: "failed", reasonCode: "judge_provider_failed" }, db);
+  const outcome = decideOutcome(fact, judgment);
   if (outcome === "review_recommended") return persistV2CandidateCard(claim, candidate, fact, judgment, outcome, capture, { action: "ambiguous", targetCardId: null, summary: "relation_ambiguous" }, db);
   const related = await loadRelatedCandidates(db, fact);
+  const model = await selectActiveAiGatewayModel({ purpose: knowledgePipelineJudgmentPurpose, requiredCapabilities: { textInput: true, evaluation: true }, db });
+  if (!model) return retryKnowledgeIngestionCandidate({ candidateId: claim.candidateId, expectedStage: claim.stage, expectedStageVersion: claim.stageVersion, fencingToken: claim.fencingToken, errorCode: "judge_model_unavailable" }, db);
   const relatedResult = await completeEvaluation({ model: model.gatewayModelName, messages: buildKnowledgePipelineRelationJudgmentMessages({ candidate: fact as unknown as Record<string, unknown>, candidates: related }) });
   await recordUsage(db, model, knowledgePipelineJudgmentPurpose, knowledgePipelineJudgmentPromptVersion, relatedResult);
   if (!relatedResult.ok) return retryKnowledgeIngestionCandidate({ candidateId: claim.candidateId, expectedStage: claim.stage, expectedStageVersion: claim.stageVersion, fencingToken: claim.fencingToken, errorCode: "relation_provider_failed" }, db);
@@ -198,7 +197,7 @@ async function persistV2CandidateCard(claim: KnowledgeIngestionCandidateClaim, c
     }
     if (relation.action === "attach" && target && (outcome === "published" ? target.publicationState !== "active" : outcome === "verify_first" ? target.publicationState !== "suppressed" || target.verificationState !== "required" || target.reviewState !== "ai_recommended" || !["uncertain", "community_pattern"].includes(target.knowledgeState) : true)) relation = { action: "ambiguous", targetCardId: null, summary: "stale_relation_target" };
     if (relation.action === "conflict" && target && target.publicationState !== "active") relation = { action: "ambiguous", targetCardId: null, summary: "stale_relation_target" };
-    const reasonCode = relation.action === "ambiguous" ? "relation_ambiguous" : relation.action === "create" && relation.targetCardId ? "relation_invalid" : !target ? "stale_relation_target" : !sameConditions(target.conditions, fact.conditions) ? relation.action === "attach" ? "attach_condition_mismatch" : "conflict_condition_mismatch" : "candidate_terminalized";
+    const reasonCode = relation.action === "ambiguous" ? "relation_ambiguous" : relation.action === "create" && relation.targetCardId ? "relation_invalid" : !target && relation.action !== "create" ? "stale_relation_target" : target && !sameConditions(target.conditions, fact.conditions) ? relation.action === "attach" ? "attach_condition_mismatch" : "conflict_condition_mismatch" : null;
     if (relation.action === "ambiguous" || (relation.action !== "create" && (!target || !sameConditions(target.conditions, fact.conditions))) || (relation.action === "create" && relation.targetCardId)) outcome = "review_recommended";
     const [locked] = await tx.update(knowledgeIngestionCandidates).set({ stage: outcome, stageVersion: claim.stageVersion + 1, outcomeReasonCode: reasonCode, judgmentSummary: judgment.summary, scores: scoresFor(judgment), claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, updatedAt: new Date() }).where(and(eq(knowledgeIngestionCandidates.id, claim.candidateId), eq(knowledgeIngestionCandidates.ingestionJobId, claim.jobId), eq(knowledgeIngestionCandidates.sourceId, claim.sourceId), eq(knowledgeIngestionCandidates.captureVersionId, claim.captureVersionId), eq(knowledgeIngestionCandidates.stage, claim.stage), eq(knowledgeIngestionCandidates.stageVersion, claim.stageVersion), eq(knowledgeIngestionCandidates.fencingToken, claim.fencingToken), sql`${knowledgeIngestionCandidates.leaseExpiresAt} > timezone('UTC', now())`)).returning({ id: knowledgeIngestionCandidates.id, jobId: knowledgeIngestionCandidates.ingestionJobId });
     if (!locked) return null;
@@ -447,33 +446,59 @@ async function markIndexDirty(tx: Parameters<Parameters<PipelineDb["transaction"
 async function fence(claim: KnowledgeIngestionClaim, version: number, stage: "published" | "suppressed" | "review_recommended" | "verify_first", code: string | undefined, tx: Parameters<Parameters<PipelineDb["transaction"]>[0]>[0], expectedStage: "judging" | "relating" = "relating") { const [row] = await tx.execute(sql`update knowledge_ingestion_jobs set stage = ${stage}, stage_version = ${version + 1}, checkpoint = null, last_error_code = ${code ?? null}, claimed_by = null, claimed_at = null, lease_expires_at = null, fencing_token = null, updated_at = timezone('UTC', now()) where id = ${claim.jobId} and stage = ${expectedStage} and stage_version = ${version} and fencing_token = ${claim.fencingToken} and lease_expires_at > timezone('UTC', now()) returning id`) as Array<{ id: string }>; return row ?? null; }
 async function terminal(claim: KnowledgeIngestionClaim, version: number, stage: "suppressed" | "review_recommended", code: string, tx: Parameters<Parameters<PipelineDb["transaction"]>[0]>[0]) { const committed = await fence(claim, version, stage, code, tx); return committed ? { jobId: claim.jobId, sourceId: claim.sourceId, outcome: stage } : null; }
 async function terminalVerifyFirst(claim: KnowledgeIngestionClaim, version: number, tx: Parameters<Parameters<PipelineDb["transaction"]>[0]>[0]) { const [row] = await tx.execute(sql`update knowledge_ingestion_jobs set stage = 'suppressed', stage_version = ${version + 1}, checkpoint = null, last_error_code = 'stale_or_deleted_capture', claimed_by = null, claimed_at = null, lease_expires_at = null, fencing_token = null, updated_at = timezone('UTC', now()) where id = ${claim.jobId} and stage = 'relating' and stage_version = ${version} and fencing_token = ${claim.fencingToken} and lease_expires_at > timezone('UTC', now()) returning id`) as Array<{ id: string }>; return row ? { jobId: claim.jobId, sourceId: claim.sourceId, outcome: "suppressed" as const } : null; }
-function decideOutcome(candidate: Candidate, judgment: Judgment): KnowledgeIngestionPipelineResult["outcome"] { if (!passes(judgment)) return "suppressed"; if (candidate.freshnessSensitive || isHighRisk(candidate) || judgment.decision === "verify_first") return "verify_first"; return judgment.decision === "publish" ? "published" : judgment.decision === "suppress" ? "suppressed" : "review_recommended"; }
-function parseCandidate(content: string, rawText: string): { candidate: Candidate | null; reason: string } {
-  const value = parseObject(content)?.candidate;
-  if (!isRecord(value) || !knowledgeCardTypeValues.includes(value.type as Candidate["type"])) return { candidate: null, reason: "candidate_invalid_structure" };
-  const title = bounded(value.title, 160); const summary = bounded(value.summary, 1200); const locationName = optionalBounded(value.location_name, 160); const routeSegment = optionalBounded(value.route_segment, 160); const evidence = isRecord(value.evidence) ? value.evidence : null; const quoteText = evidence ? bounded(evidence.quote_text, 2000) : null; const start = evidence?.span_start; const end = evidence?.span_end; const conditions = Array.isArray(value.conditions) ? [...new Set(value.conditions.map((item) => bounded(item, 160)).filter((item): item is string => Boolean(item)).map(normalize))].slice(0, 12) : [];
-  if (!title || !summary || (!locationName && !routeSegment) || typeof value.freshness_sensitive !== "boolean" || !quoteText || !Number.isInteger(start) || !Number.isInteger(end)) return { candidate: null, reason: "candidate_missing_required_fields" };
-  const spanStart = start as number; const spanEnd = end as number; const persisted = [title, summary, ...[locationName, routeSegment].filter((item): item is string => item !== null), ...conditions, quoteText];
-  if (persisted.some(containsSensitiveText)) return { candidate: null, reason: "candidate_sensitive_content" };
-  const text = persisted.join("\n");
-  if (spanStart < 0 || spanEnd <= spanStart || slice(rawText, spanStart, spanEnd) !== quoteText) return { candidate: null, reason: "candidate_evidence_mismatch" };
-  if (isCommercial(text) || isQuestionOnly(text) || isOpinionOnly(text) || !hasTravelContext(text)) return { candidate: null, reason: "candidate_insufficient_travel_context" };
-  return { candidate: { type: value.type as Candidate["type"], title, summary, locationName, routeSegment, conditions, freshnessSensitive: value.freshness_sensitive, evidence: { quoteText, spanStart, spanEnd } }, reason: "" };
+function decideOutcome(candidate: Candidate, judgment: Judgment): KnowledgeIngestionPipelineResult["outcome"] {
+  if (judgment.decision === "suppress") return "suppressed";
+  if (candidate.freshnessSensitive || isHighRisk(candidate) || judgment.decision === "verify_first") return "verify_first";
+  return passes(judgment) ? judgment.decision === "publish" ? "published" : "review_recommended" : "suppressed";
 }
-function parseCandidates(content: string, rawText: string, coreStart: number, coreEnd: number) {
+function judgmentSuppressionReason(judgment: Judgment) { return judgment.decision === "suppress" ? "judge_suppressed" : "judge_below_quality_threshold"; }
+function parseCandidate(content: string, rawText?: string): { candidate: Candidate | null; rejectedCandidate: Candidate | null; reason: string } {
+  const value = parseObject(content)?.candidate;
+  const type = isRecord(value) ? normalizeCandidateType(value.type) : null;
+  if (!isRecord(value) || !type) return { candidate: null, rejectedCandidate: null, reason: "candidate_invalid_structure" };
+  const title = bounded(value.title, 160); const summary = bounded(value.summary, 1200); const locationName = optionalBounded(value.location_name, 160); const routeSegment = optionalBounded(value.route_segment, 160); const evidence = isRecord(value.evidence) ? bounded(value.evidence.quote_text, 2000) : null; const hint = isRecord(value.evidence_hint) ? bounded(value.evidence_hint.quote_text, 2000) : null; const quoteText = hint ?? evidence; const conditions = Array.isArray(value.conditions) ? [...new Set(value.conditions.map((item) => bounded(item, 160)).filter((item): item is string => Boolean(item)).map(normalize))].slice(0, 12) : [];
+  if (!title || !summary || (!locationName && !routeSegment) || typeof value.freshness_sensitive !== "boolean" || (rawText && !quoteText)) return { candidate: null, rejectedCandidate: null, reason: "candidate_missing_required_fields" };
+  const persisted = [title, summary, ...[locationName, routeSegment].filter((item): item is string => item !== null), ...conditions, ...(quoteText ? [quoteText] : [])];
+  if (persisted.some(containsSensitiveText)) return { candidate: null, rejectedCandidate: null, reason: "candidate_sensitive_content" };
+  if (!rawText) return { candidate: { type, title, summary, locationName, routeSegment, conditions, freshnessSensitive: value.freshness_sensitive, evidence: { quoteText: quoteText ?? "", spanStart: 0, spanEnd: 1 } }, rejectedCandidate: null, reason: "" };
+  const spanStart = indexOfQuote(rawText, quoteText!);
+  if (spanStart < 0) return { candidate: null, rejectedCandidate: null, reason: "candidate_evidence_mismatch" };
+  return { candidate: { type, title, summary, locationName, routeSegment, conditions, freshnessSensitive: value.freshness_sensitive, evidence: { quoteText: quoteText!, spanStart, spanEnd: spanStart + Array.from(quoteText!).length } }, rejectedCandidate: null, reason: "" };
+}
+function parseCandidates(content: string) {
   if (Buffer.byteLength(content, "utf8") > 256_000) return null;
   const value = parseObject(content);
   if (!value || !Array.isArray(value.candidates) || Object.keys(value).length !== 1) return null;
   const unique = new Map<string, Candidate>();
-  let invalidCount = 0;
+  const invalidCandidates: RejectedCandidate[] = [];
   for (const entry of value.candidates) {
-    const parsed = parseCandidate(JSON.stringify({ candidate: entry }), rawText);
-    if (parsed.candidate && parsed.candidate.evidence.spanStart >= coreStart && parsed.candidate.evidence.spanStart < coreEnd) unique.set(fingerprint(parsed.candidate), parsed.candidate);
-    else if (!parsed.candidate) invalidCount += 1;
+    const parsed = parseCandidate(JSON.stringify({ candidate: entry }));
+    if (parsed.candidate) unique.set(fingerprint(parsed.candidate), parsed.candidate);
+    else invalidCandidates.push({ candidate: parsed.rejectedCandidate, reason: parsed.reason });
   }
-  return { candidates: [...unique.values()], invalidCount };
+  return { candidates: [...unique.values()], invalidCandidates };
 }
 function parseJudgment(content: string): Judgment | null { const value = parseObject(content); if (!isRecord(value) || !["publish", "review_recommended", "verify_first", "suppress"].includes(String(value.decision))) return null; const summary = bounded(value.summary, 1000); const keys = ["relevance", "extractability", "evidence_grounding", "specificity", "actionability", "first_hand_likelihood", "spam_commercial_risk"] as const; if (!summary || keys.some((key) => typeof value[key] !== "number" || value[key] < 0 || value[key] > 1)) return null; return { decision: value.decision as Judgment["decision"], summary, relevance: value.relevance as number, extractability: value.extractability as number, evidenceGrounding: value.evidence_grounding as number, specificity: value.specificity as number, actionability: value.actionability as number, firstHandLikelihood: value.first_hand_likelihood as number, spamCommercialRisk: value.spam_commercial_risk as number }; }
+function parseBatchGroundingJudgments(content: string, candidates: Candidate[], rawText: string): Array<{ candidate: Candidate; judgment: Judgment }> | null {
+  const value = parseObject(content); if (!value || !Array.isArray(value.results) || Object.keys(value).length !== 1 || value.results.length !== candidates.length) return null;
+  const results = new Map<number, { candidate: Candidate; judgment: Judgment }>();
+  for (const entry of value.results) {
+    if (!isRecord(entry) || !Number.isInteger(entry.candidate_id) && !/^\d+$/.test(String(entry.candidate_id))) return null;
+    const index = Number(entry.candidate_id); const base = candidates[index]; const judgment = parseJudgment(JSON.stringify(entry)); const evidence = entry.evidence === null ? null : isRecord(entry.evidence) ? bounded(entry.evidence.quote_text, 2000) : null;
+    if (!base || !judgment || results.has(index)) return null;
+    if (!evidence) { if (entry.evidence !== null || judgment.decision !== "suppress") return null; results.set(index, { candidate: base, judgment }); continue; }
+    const spanStart = indexOfQuote(rawText, evidence); if (spanStart < 0) return null;
+    results.set(index, { candidate: { ...base, evidence: { quoteText: evidence, spanStart, spanEnd: spanStart + Array.from(evidence).length } }, judgment });
+  }
+  return results.size === candidates.length ? candidates.map((_, index) => results.get(index)!).filter(Boolean) : null;
+}
+function judgmentFromCandidate(candidate: typeof knowledgeIngestionCandidates.$inferSelect): Judgment | null {
+  const scores = candidate.scores; const decision = candidate.judgeDecision; const summary = candidate.judgmentSummary;
+  if (!scores || !summary || !decision || !["publish", "review_recommended", "verify_first", "suppress"].includes(decision)) return null;
+  const fields = ["relevance", "extractability", "evidenceGrounding", "specificity", "actionability", "firstHandLikelihood", "spamCommercialRisk"] as const;
+  if (fields.some((field) => typeof scores[field] !== "number" || scores[field] < 0 || scores[field] > 1)) return null;
+  return { decision: decision as Judgment["decision"], summary, relevance: scores.relevance, extractability: scores.extractability, evidenceGrounding: scores.evidenceGrounding, specificity: scores.specificity, actionability: scores.actionability, firstHandLikelihood: scores.firstHandLikelihood, spamCommercialRisk: scores.spamCommercialRisk };
+}
 function parseRelation(content: string, ids: Set<string>): Relation | null { const value = parseObject(content); if (!isRecord(value) || !["attach", "create", "conflict", "ambiguous"].includes(String(value.action))) return null; const summary = bounded(value.summary, 1000); const targetCardId = optionalBounded(value.target_card_id, 160); if (!summary || (targetCardId && !ids.has(targetCardId)) || (["attach", "conflict"].includes(String(value.action)) && !targetCardId)) return null; return { action: value.action as Relation["action"], targetCardId, summary }; }
 async function recordUsage(db: Parameters<Parameters<PipelineDb["transaction"]>[0]>[0] | PipelineDb, model: SelectedAiGatewayModel, purpose: string, promptVersion: string, result: Awaited<ReturnType<typeof completeExtraction>>) { try { await writeAiUsageEvent(db, { initiatedByUserId: null, executorSystem: "system-knowledge-pipeline", purpose, provider: result.provider, model: result.model, aiGatewayModelId: model.id, promptVersion, status: result.ok ? "success" : "failure", latencyMs: result.latencyMs, ...(result.ok ? result.usage : {}), pricingSnapshot: getAiGatewayPricingSnapshot(model), errorCode: result.ok ? null : result.errorCode }); } catch { /* telemetry never changes the fenced outcome */ } }
 function passes(value: Judgment) { return value.relevance >= .75 && value.extractability >= .70 && value.evidenceGrounding >= .90 && value.specificity >= .65 && value.actionability >= .65 && value.firstHandLikelihood >= .55 && value.spamCommercialRisk <= .25; }
@@ -488,14 +513,19 @@ function isQuestionOnly(value: string) { const parts = value.split(/[.!?\n]+/).m
 function isOpinionOnly(value: string) { return /(tôi nghĩ|theo tôi|cảm thấy|rất đẹp|rất hay|tuyệt vời|đáng đi)/i.test(value) && !/(có|không có|mở|đóng|cấm|bãi|trạm|quán|khách sạn|km|giờ|phí|chỗ)/i.test(value); }
 function hasTravelContext(value: string) { return value.length >= 20 && /(đèo|đường|quốc lộ|cao tốc|bãi|trạm|quán|nhà hàng|khách sạn|homestay|điểm dừng|điểm ngắm|địa chỉ|km|phường|xã|thành phố|tỉnh|ban ngày|buổi sáng|buổi tối)/i.test(value); }
 function slice(value: string, start: number, end: number) { return Array.from(value).slice(start, end).join(""); }
+function indexOfQuote(value: string, quote: string) { return Array.from(value).join("").indexOf(quote) < 0 ? -1 : Array.from(value.slice(0, value.indexOf(quote))).length; }
 function normalize(value: string) { return value.normalize("NFKC").trim().toLocaleLowerCase("vi").replace(/\s+/g, " "); }
 function sameScope(card: { locationName: string | null; routeSegment: string | null }, candidate: Candidate) { return candidate.locationName ? normalize(card.locationName ?? "") === normalize(candidate.locationName) : normalize(card.routeSegment ?? "") === normalize(candidate.routeSegment ?? ""); }
 function sameConditions(left: string[], right: string[]) { const normalizedLeft = [...new Set(left.map(normalize))].sort(); const normalizedRight = [...new Set(right.map(normalize))].sort(); return normalizedLeft.length === normalizedRight.length && normalizedLeft.every((condition, index) => condition === normalizedRight[index]); }
 function identity(candidate: Candidate) { return `${candidate.type}:${normalize(candidate.locationName ?? candidate.routeSegment ?? "")}:${[...new Set(candidate.conditions.map(normalize))].sort().join("|")}:${createHash("sha256").update(candidate.evidence.quoteText, "utf8").digest("hex")}`; }
-function fingerprint(candidate: Candidate) { return createHash("sha256").update(`${candidate.type}\u0000${candidate.evidence.spanStart}\u0000${candidate.evidence.spanEnd}\u0000${normalize(candidate.locationName ?? candidate.routeSegment ?? "")}\u0000${[...new Set(candidate.conditions.map(normalize))].sort().join("|")}`, "utf8").digest("hex"); }
-function invalidFingerprint(coreStart: number, index: number) { return createHash("sha256").update(`invalid\u0000${coreStart}\u0000${index}`, "utf8").digest("hex"); }
+function fingerprint(candidate: Candidate) { return createHash("sha256").update(`${candidate.type}\u0000${normalize(candidate.title)}\u0000${normalize(candidate.locationName ?? candidate.routeSegment ?? "")}\u0000${[...new Set(candidate.conditions.map(normalize))].sort().join("|")}`, "utf8").digest("hex"); }
+function invalidFingerprint(index: number) { return createHash("sha256").update(`invalid\u0000${index}`, "utf8").digest("hex"); }
 function scoresFor(judgment: Judgment) { return { relevance: judgment.relevance, extractability: judgment.extractability, evidenceGrounding: judgment.evidenceGrounding, specificity: judgment.specificity, actionability: judgment.actionability, firstHandLikelihood: judgment.firstHandLikelihood, spamCommercialRisk: judgment.spamCommercialRisk }; }
 function parseObject(content: string): Record<string, unknown> | null { try { const value: unknown = JSON.parse(content); return isRecord(value) ? value : null; } catch { return null; } }
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
+function normalizeCandidateType(value: unknown): Candidate["type"] | null {
+  if (value === "weather") return "warning";
+  return knowledgeCardTypeValues.includes(value as Candidate["type"]) ? value as Candidate["type"] : null;
+}
 function bounded(value: unknown, max: number) { return typeof value === "string" && value.trim() && value.trim().length <= max ? value.trim() : null; }
 function optionalBounded(value: unknown, max: number) { return value === null || value === undefined ? null : bounded(value, max); }
