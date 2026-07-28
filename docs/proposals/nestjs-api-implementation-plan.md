@@ -17,7 +17,7 @@ Kế hoạch này không thay thế PRD hoặc Architecture Spine hiện hành. 
 
 ### Khoảng Trống Phải Đóng Trước Cutover
 
-1. Chưa có API principal độc lập với `AuthenticatedSession`. Current domain paths đọc session trực tiếp qua `getAuthenticatedSession()` hoặc import Next primitives.
+1. Chưa có API principal độc lập với `AuthenticatedSession`, hoặc server-only resolver lấy chính xác Auth.js database session token từ BFF request đã xác thực. Current domain paths đọc session trực tiếp qua `getAuthenticatedSession()` hoặc import Next primitives.
 2. AI Ask còn gọi `after()` của Next để chạy context extraction. Side effect này phải trở thành command/worker dispatch adapter để Nest có thể host transport mà không phụ thuộc Next runtime.
 3. Server actions hiện trộn input `FormData`, authorization, command, `redirect`, và `revalidatePath`, đặc biệt ở admin/knowledge. Cần tách use case thuần trước; không chuyển nguyên server action vào controller.
 4. Chưa có railway config, service topology, health contract, token issuer/verification contract, OpenAPI baseline hay CI matrix cho nhiều app.
@@ -31,6 +31,7 @@ Kế hoạch này không thay thế PRD hoặc Architecture Spine hiện hành. 
 - Không public `api.xuyenviet.app` trong phase web-BFF. Web/admin gọi `api.railway.internal` và browser chỉ gọi origin Next tương ứng.
 - Web/admin BFF dùng internal short-lived token; mobile sau này dùng Nest-hosted OAuth/OIDC token riêng. Cả hai chỉ map vào cùng domain-neutral `RequestPrincipal`, không làm domain API phụ thuộc Auth.js session format.
 - Mỗi phase chỉ cut over một capability có contract, authorization matrix, rollback switch và test đầy đủ. Dọn legacy writer ngay sau cutover ổn định, không tích lũy compatibility layer.
+- Platform foundation hoàn tất theo thứ tự: credential/principal và safe error contract, role/bootstrap governance, BFF CSRF/transport boundary, rồi protected-read cutover. Không triển khai một story tiêu thụ primitive khi prerequisite chưa được verified.
 
 ## Kiến Trúc Package Chuyển Tiếp
 
@@ -79,8 +80,8 @@ Chạy các spike trên branch/worktree cách ly; không cut over traffic produc
 
 Thực hiện theo vertical slice, bắt đầu với read-only authenticated capability nhỏ rồi AI Ask.
 
-1. Định nghĩa `RequestPrincipal` và `SystemExecutionContext` độc lập với Auth.js, nhưng map session hiện tại tại Next adapter boundary.
-2. Chuyển `AuditActor` mapping, role lookup, ownership checks và transaction-scoped use case vào domain module. Không truyền `Request`, `Response`, `FormData`, session object hoặc Next callback vào use case.
+1. Định nghĩa `RequestPrincipal` và `SystemExecutionContext` độc lập với Auth.js. Next adapter phải resolve chính xác host-specific database session token từ request đã xác thực, kiểm tra ownership/expiry, rồi mới mint credential; Nest không parse cookie hoặc Auth.js serialization.
+2. Chuyển `AuditActor` mapping, role lookup, ownership checks và transaction-scoped use case vào domain module. First-admin bootstrap dùng deployment-only `system-admin-bootstrap` context chỉ có quyền gọi command đó; nó không giả mạo `RequestPrincipal` admin. Không truyền `Request`, `Response`, `FormData`, session object hoặc Next callback vào use case.
 3. Tách input parsing, redirect/revalidation và route-response formatting khỏi server actions. Giữ page-level redirect tại Next adapter.
 4. Tách AI Ask orchestration khỏi `route.ts`: validate command input, persist user turn, assemble source bundle, stream provider, finalize transaction, và dispatch context extraction. Thay `after()` bằng port có hai adapter: Next background adapter tạm thời và worker/job adapter đích.
 5. Thêm integration tests chạy `DATABASE_URL_TEST` cho ownership, authorization, audit/provenance và rollback của slice đã extract.
@@ -90,9 +91,9 @@ Thực hiện theo vertical slice, bắt đầu với read-only authenticated ca
 ### 3. Platform Skeleton
 
 1. Cài NestJS, pnpm workspace config, project references/build scripts và dependency constraints.
-2. Dựng `apps/api` với config validation, `/health/live`, `/health/ready`, correlation ID middleware, global validation pipe, exception filter, auth guard và OpenAPI `/v1`.
+2. Dựng `apps/api` với config validation, `/health/live`, `/health/ready`, correlation ID middleware, global validation pipe, exception filter, auth guard và OpenAPI `/v1`. Safe error contract được tạo ở platform foundation để auth guard và các controller dùng cùng một envelope.
 3. Dựng `apps/worker` với shutdown signal, readiness phản ánh database/loop state, structured logs và một low-risk loop. Ban đầu chọn Trip Proposal expiry vì đã idempotent và có concurrency tests.
-4. Cung cấp thin API client cho Next BFF: internal base URL, correlation ID forwarding, token exchange, typed error mapping, timeout/abort forwarding. Không thêm generated SDK.
+4. Cung cấp thin API client cho Next BFF: internal base URL, correlation ID forwarding, token exchange, typed error mapping, timeout/abort forwarding. Unsafe cookie-authenticated routes dùng signed double-submit CSRF cookie/header và exact BFF origin validation trước bất kỳ credential mint/API call nào. Không thêm generated SDK.
 5. Dựng `apps/admin` chỉ với Auth.js boundary, API client/BFF, health route và admin authorization guard. Chưa copy workflow hoặc cấp database credential cho app này.
 6. Thêm Railway staging topology và migration release job. Migrations chỉ chạy một lần trước deploy workloads cần schema.
 
@@ -146,9 +147,10 @@ Trước public launch, chạy load test cho DB connection pool và AI stream co
 ### Internal Web/Admin Token
 
 - Token chỉ dùng từ Next BFF đến `api.railway.internal`; không gửi về browser và không dùng làm mobile credential.
-- Claim tối thiểu: issuer, audience, subject user ID, session reference, issued/expiry time, token ID, role/version claim và correlation ID chỉ khi không làm token reusable tracking artifact.
-- API xác thực chữ ký, issuer, audience, expiry, session validity và role/version theo decision record. Sensitive admin actions luôn re-check role server-side.
+- Claim tối thiểu: issuer, audience, subject user ID, exact Auth.js database session-token reference, issued/expiry time, cryptographically random token ID, role/version claim. Correlation ID không thuộc credential.
+- API xác thực chữ ký, issuer, audience, clock bounds, expiry, active session ownership và role/version theo decision record. `jti` là token identity, không phải replay ledger. Sensitive admin actions luôn re-check role server-side.
 - `web` và `admin` giữ credential riêng để mint/request token; API verifier/key material là secret riêng. Không dùng một static shared secret đại diện người dùng.
+- Per issuer chỉ chấp nhận active `kid` và tối đa một previous verification-only `kid` với expiry overlap rõ ràng; cross-issuer và expired-overlap keys bị từ chối.
 - Internal issuer và future Nest-hosted OAuth/OIDC issuer là hai boundary tách biệt, nhưng cùng normalize sang `RequestPrincipal` và `users.id`. API contract, ownership và authorization policy không đổi khi mobile identity cut over.
 
 ### API Error Và Observability
@@ -156,6 +158,7 @@ Trước public launch, chạy load test cho DB connection pool và AI stream co
 - Dùng một envelope ổn định: `code`, safe `message`, `requestId`, optional safe field violations. Không trả stack trace, SQL, provider payload, raw evidence hoặc operator-only state.
 - BFF forward/generate correlation ID; API/worker log it alongside capability, principal class, aggregate ID khi safe, latency và result code.
 - Readiness khác liveness: liveness chỉ xác nhận process event loop; readiness xác nhận config, database và critical dependencies cần nhận work.
+- BFF CSRF cho unsafe cookie-authenticated routes yêu cầu exact origin, allowed same-site Fetch Metadata khi có, và signed double-submit `X-XuyenViet-CSRF` header khớp host-only `Secure`, `SameSite=Strict`, `Path=/` cookie. Token phải còn hạn và so sánh constant-time trước khi gọi API.
 
 ### Migration Safety
 

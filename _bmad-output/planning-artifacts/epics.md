@@ -396,7 +396,7 @@ Travelers and operators use BFFs that call documented, protected `/v1` APIs with
 
 **FRs covered:** FR-51, FR-52, FR-54, FR-55, FR-56. **NFRs covered:** NFR-14, NFR-15.
 
-**Implementation notes:** Establish the web/admin BFF credential contract, Nest resource-server verification, session and authorization-version checks, role authority, one-shot first-admin bootstrap, safe error envelope, `/v1` OpenAPI/health/version contracts, private bearer-only transport, and one protected read capability migrated end to end.
+**Implementation notes:** Implement in order: 9.1 establishes the web credential/principal, session-token resolver, issuer isolation, and shared safe-error contract; 9.2 governs bootstrap and role changes; 9.3 consumes verified 9.1 primitives for BFF transport/CSRF; 9.4 consumes verified 9.1-9.3 primitives for one protected read. Do not begin a dependent story before its prerequisite story has passed its integration coverage. The separate admin BFF remains later deployment work; this epic configures its future issuer/verifier isolation without sharing root-web cookies.
 
 ### Epic 10: Reliable AI Ask API Cutover
 
@@ -1349,8 +1349,8 @@ So that browser-originated requests cannot bypass CSRF and API authorization con
 
 **Acceptance Criteria:**
 
-**Given** a browser invokes a cookie-authenticated web or admin mutation
-**When** the BFF accepts the request
+**Given** a capability-specific BFF mutation adapter receives a cookie-authenticated web or admin request
+**When** it accepts the request
 **Then** it applies its CSRF validation, validates and projects input, mints or forwards only a valid BFF credential, and maps the API safe error envelope to the presentation response
 **And** it forwards correlation ID, timeout/abort behavior, and `Idempotency-Key` where applicable.
 

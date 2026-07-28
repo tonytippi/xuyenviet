@@ -20,22 +20,23 @@ so that API authorization does not trust browser cookies or expose an internal c
   - [ ] Add `apps/api` as a Nest HTTP bootstrap; retain the root Next app as the traveler BFF.
   - [ ] Add only shared packages that are needed by more than one runtime, starting with contracts/config/domain seams as justified.
   - [ ] Do not create `apps/web`, move the existing traveler app, create a worker runtime, or migrate an API capability in this story.
-  - [ ] Add validated API/BFF signing configuration with separate web and admin issuer key sets, active `kid`, and one bounded previous verifier key.
+  - [ ] Add the shared safe API error contract now: `code`, safe `message`, `requestId`, and optional bounded field violations. The guard must use this same contract; Story 9.3 only wires its global transport implementation.
+  - [ ] Add validated API/BFF signing configuration with separate web and admin issuer key sets, active `kid`, and one bounded previous verifier key with an explicit verification-end timestamp.
 - [ ] Define domain-neutral identity contracts (AC: 1-2)
   - [ ] Define the minimal internal JWT claim contract and `RequestPrincipal` without importing Auth.js, Next, cookies, or request objects into the domain contract.
   - [ ] Add the persisted authorization-version field and a Drizzle-owned forward migration; preserve existing human-only `users` and `user_roles` constraints.
-  - [ ] Extract only the session/role/version lookup seam needed by the resource server. It must validate Auth.js database session ownership and expiry without depending on browser session serialization.
+  - [ ] Add a host-only BFF session-token resolver that reads the exact Auth.js database-session cookie from the server request, resolves its `sessions.sessionToken`, and verifies the current user/expiry binding before minting. The API lookup validates the same session ownership and expiry without depending on browser session serialization.
 - [ ] Implement BFF credential minting (AC: 1)
-  - [ ] Keep `src/server/auth.ts` as the host-only Auth.js boundary. Mint credentials only after it has validated the current BFF session.
+  - [ ] Keep `src/server/auth.ts` as the host-only Auth.js boundary. Mint credentials only after it has validated the current BFF session and the server-only session-token resolver has returned its matching database session token.
   - [ ] Include exactly `sub`, `sid`, sorted `roles`, `rv`, `jti`, `iss`, `aud`, `iat`, `nbf`, `exp`, and protected JOSE `kid` metadata; enforce a maximum 300-second lifetime.
   - [ ] Keep private signing material server-only and never serialize the token into a page, action result, browser response, log, or error.
 - [ ] Implement Nest resource-server verification and principal creation (AC: 2-3)
   - [ ] Require a bearer token for protected routes and verify it before controller/use-case entry.
-  - [ ] Select verification keys by exact issuer, reject cross-issuer/unknown `kid`, and limit rotation acceptance to active plus one configured previous key in its bounded overlap.
-  - [ ] Verify signature, issuer, audience, `iat`/`nbf`/`exp`, nonblank unique `jti`, session existence/expiry/user match, and current authorization version before producing a normalized principal.
+  - [ ] Select verification keys by exact issuer, reject cross-issuer/unknown `kid`, and limit rotation acceptance to active plus one configured previous key before its explicit verification-end timestamp.
+  - [ ] Verify signature, issuer, audience, `iat`/`nbf`/`exp`, a cryptographically random nonblank `jti`, session existence/expiry/user match, and current authorization version before producing a normalized principal. `jti` is token identity, not a replay ledger.
   - [ ] Project all rejection paths through the safe API error contract; do not leak token data, key-selection detail, session data, stack, or SQL error.
 - [ ] Add identity integration coverage (AC: 1-3)
-  - [ ] Test valid web/admin credentials and issuer-specific key selection.
+  - [ ] Test valid web credentials, configured admin-issuer verifier isolation, and issuer-specific key selection. Live admin-BFF minting is a later separate-admin deployment test.
   - [ ] Test invalid signature, issuer, audience, `kid`, clock claims, malformed/missing claims, session absence/expiry/mismatch, and stale authorization version.
   - [ ] Test active/previous key overlap and rejection after overlap/cross-issuer use.
   - [ ] Prove rejected credentials never invoke the protected controller or domain use case and no browser-facing response contains an internal credential.
@@ -44,12 +45,13 @@ so that API authorization does not trust browser cookies or expose an internal c
 
 ### Implementation Guardrails
 
-- This is the first API-first vertical slice. The repository is currently one root Next.js application with no Nest app or workspace packages. Introduce the minimum foundation needed for private identity; do not perform a big-bang monorepo migration.
+- This is the first API-first vertical slice. The repository is currently one root Next.js application with no Nest app or workspace packages. Introduce the minimum foundation needed for private identity, including the shared safe-error contract; do not perform a big-bang monorepo migration.
 - Nest may import only extracted workspace packages. It must not import `src/app`, `next/*`, `next-auth`, `server-only`, or modules marked `"use server"`.
 - Keep PostgreSQL and Drizzle as the state/migration owner. Add the user authorization version through schema plus a reviewed forward migration; do not use an in-memory revocation list as a substitute for the session/version checks.
 - A principal is domain-neutral. Controllers receive `RequestPrincipal`, and domain use cases must not receive `Request`, `Response`, Auth.js sessions, or Next callbacks.
 - `user_roles` remains authoritative. The JWT role claim is an asserted snapshot that must be tied to the live authorization version; it does not become an alternative role store.
-- `sessions.sessionToken` is the current Auth.js database-session identifier and is the intended `sid` lookup reference. Validate its user ownership and expiration at the API boundary.
+- `sessions.sessionToken` is the current Auth.js database-session identifier and is the intended `sid` lookup reference. The BFF must resolve it only from the verified server request using the host-specific Auth.js cookie configuration; validate its user ownership and expiration before minting and again at the API boundary. Never substitute `user.id` or return the token to a browser.
+- The root Next app is the only BFF deployed in this story. Implement and test web issuer credentials end to end. Define the admin issuer config and API verifier isolation, but defer live admin-host session minting until the separate admin BFF exists; do not simulate a second host by sharing the root Auth.js cookie.
 - Use a maintained ES256/JWT library selected during implementation. Do not implement JWT signing or verification primitives manually.
 
 ### Existing Code to Preserve
@@ -63,6 +65,7 @@ so that API authorization does not trust browser cookies or expose an internal c
 
 - NEW `apps/api/src/main.ts`, `apps/api/src/app.module.ts`: Nest bootstrap and module composition.
 - NEW `apps/api/src/auth/*`: bearer extraction, resource-server guard, principal decorator, issuer/key verifier, and session/version verifier.
+- NEW shared `packages/contracts/src/errors/*`: safe envelope and safe validation violations used by the guard and later global exception filter.
 - NEW extracted `packages/contracts/src/auth/*` and only necessary `packages/config`/`packages/domain` modules: claim/principal and configuration contracts usable by both BFF and API.
 - NEW `src/server/bff-credentials.ts`: root Next BFF adapter that mints an internal credential after local Auth.js validation.
 - UPDATE `src/db/schema.ts` and `drizzle/migrations/*`: authorization version and migration only.

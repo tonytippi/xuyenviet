@@ -52,8 +52,8 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - Use Next.js App Router conventions under `src/app/`. Prefer server components by default; add `"use client"` only when browser interactivity requires it.
 - Public routes may render without auth, but AI Ask and admin/operator routes/actions must resolve auth server-side before reading or mutating protected data.
 - UI and route handlers should call feature-owned server entrypoints, not mutate another module's aggregate directly.
-- Keep the MVP as one Next.js modular monolith. Do not split chat, admin, retrieval, auth, or AI orchestration into separate services.
-- Keep the current root-level Next.js project structure for the web MVP. Do not introduce an `apps/web` monorepo layout, `packages/*` extraction, or shared workspace setup for future mobile support unless a later architecture or correct-course decision explicitly approves that restructure.
+- Keep the MVP as one modular monolith, not microservices. The approved API-first transition uses Nest API/worker runtimes, a root Next traveler BFF until it moves, and a separately deployed Next admin BFF later.
+- `apps/api` and the smallest justified `packages/database`, `packages/domain`, `packages/contracts`, or `packages/config` workspace seams are approved. Nest must never import `src/app`, `next/*`, `next-auth`, `server-only`, or modules marked `"use server"`. Do not create `apps/web` until the traveler app is actually moved.
 - Preserve Vietnamese-first UX. User-facing copy should use Vietnamese diacritics, `html lang="vi"`, and readable mobile/desktop layouts.
 - Preserve current visual direction unless a UX story changes it: map-paper utility feel, route green, guide amber, no generic travel gradients, no map-first UI.
 - Do not add booking, payments, rewards, credits, Google Maps, affiliate, partner transaction, or referral reward UI. These are PRD non-goals for MVP.
@@ -62,7 +62,7 @@ _This file contains critical rules and patterns that AI agents must follow when 
 ### Testing Rules
 
 - Current baseline checks are `pnpm lint`, `pnpm typecheck`, and `pnpm build`; run relevant checks after code changes and record blockers exactly.
-- No unit or E2E framework exists yet. Do not invent a test stack casually; add one only when a story requires it or architecture is updated.
+- Vitest exists, including PostgreSQL `DATABASE_URL_TEST` integration coverage. Use it for platform/domain integration tests; do not replace the test stack casually.
 - For auth, protected routes, mutations, retrieval, AI usage, deletion, and admin workflows, prefer server-side tests when a test stack is introduced; client-only checks are not enough.
 - Any story that adds persistent tables must verify Drizzle schema/migration behavior and must not require a live database for ordinary lint/typecheck/build.
 - Any story that stores chat/project-derived retrievable content must define and verify deletion behavior for owner chat/project deletion.
@@ -94,7 +94,7 @@ _This file contains critical rules and patterns that AI agents must follow when 
 
 - Do not implement Google OAuth before the Auth.js story owns it. Story 1.2 may gate routes and present sign-in entry, but Story 1.3 owns real Google Login.
 - Do not make AI calls for unauthenticated users, invalid submissions, or blocked routes. No conversation, context, retrieval, usage, or provider call should be created in those paths.
-- Do not treat web search, Facebook, copied posts, or image-derived facts as approved knowledge. They remain unverified until operator approval.
+- Do not treat web search, Facebook, copied posts, or image-derived facts as confirmed or official knowledge. They remain unverified unless the applicable evidence, privacy, publication, review, and verification policy permits a traveler-safe active community/conditional card; operator approval is not a universal publication prerequisite.
 - Do not expose `raw_source_material`, operator-only notes, provider payloads, secrets, or admin controls to normal travelers.
 - Do not render source/confidence UI from parsed answer text. Source/confidence must come from stored provenance once that feature exists.
 - Do not stream user-visible AI answers before retrieval/search context and provenance ledger inputs are assembled.
@@ -102,6 +102,8 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - Do not create reward, credit, payout, ranking, or balance behavior for referrals or usage. MVP only captures referral attribution and AI usage metadata.
 - Any new table containing chat/project-derived retrievable content must define deletion behavior before migration approval.
 - Production-facing code must not accept placeholder secrets or local bypasses as deployable defaults.
+- The private API is bearer-only and emits no CORS allow-origin response. BFFs resolve host-only Auth.js sessions and database session tokens server-side; credentials and cookies never reach browsers or Nest controllers.
+- Unsafe cookie-authenticated BFF routes must validate the approved signed double-submit CSRF header/cookie and origin before credential minting or API invocation. API safe errors use only `code`, `message`, `requestId`, and allowed field violations.
 
 ---
 

@@ -10,7 +10,7 @@ so that browser-originated requests cannot bypass CSRF and API authorization con
 
 ## Acceptance Criteria
 
-1. Given a browser invokes a cookie-authenticated web or admin mutation, when the BFF accepts the request, then it applies CSRF validation, validates and projects input, mints or forwards only a valid BFF credential, and maps the API safe error envelope to the presentation response. It forwards correlation ID, timeout/abort behavior, and `Idempotency-Key` where applicable.
+1. Given a capability-specific BFF mutation adapter receives a cookie-authenticated web or admin request, when it accepts the request, then it applies CSRF validation, validates and projects input, mints or forwards only a valid BFF credential, and maps the API safe error envelope to the presentation response. It forwards correlation ID, timeout/abort behavior, and `Idempotency-Key` where applicable.
 2. Given any browser-originated request reaches the private API directly, when it lacks a valid BFF bearer credential, then the API rejects it without interpreting Auth.js cookies or browser session serialization and emits no CORS allow-origin response.
 3. Given protected capability, health/version, and authorization failures are documented, when API contract checks run, then protected controllers accept only a normalized `RequestPrincipal` and return stable `code`, safe `message`, `requestId`, and applicable safe field violations. No controller exposes stack traces, SQL errors, cookies, or token contents.
 
@@ -21,7 +21,7 @@ so that browser-originated requests cannot bypass CSRF and API authorization con
   - [ ] Define typed safe-error envelope parsing/mapping and typed safe field violations in shared contracts.
   - [ ] Forward `Idempotency-Key` unchanged only for capabilities that declare it; do not introduce idempotency behavior for unrelated calls.
 - [ ] Establish BFF mutation protections (AC: 1)
-  - [ ] Define a reusable BFF-side CSRF validation approach for host-cookie-authenticated mutations before minting/calling the API.
+  - [ ] Implement the approved reusable BFF-side CSRF policy before minting/calling the API: exact BFF `Origin`, allowed same-site Fetch Metadata when supplied, and a signed double-submit `X-XuyenViet-CSRF` header matching a host-only `Secure`, `SameSite=Strict`, `Path=/` CSRF cookie in constant time with signature/expiry validation.
   - [ ] Validate and project external input at the BFF boundary; forward only the capability DTO, correlation ID, applicable idempotency key, abort/timeout behavior, and internal bearer credential.
   - [ ] Keep cookies, Auth.js session serialization, provider tokens, raw `FormData`, and browser-only data out of the API request.
 - [ ] Harden the Nest API transport boundary (AC: 2-3)
@@ -32,16 +32,17 @@ so that browser-originated requests cannot bypass CSRF and API authorization con
 - [ ] Document and verify transport failures (AC: 2-3)
   - [ ] Define stable error codes and Vietnamese-safe presentation copy mapping without exposing provider, token, SQL, stack, cookie, or raw-source details.
   - [ ] Test direct API requests with no bearer, malformed bearer, and cookies-only requests; assert denial and absence of `Access-Control-Allow-Origin`.
-  - [ ] Test BFF CSRF rejection before any API invocation, correlation generation/forwarding, abort/timeout propagation, idempotency header forwarding, and safe-error redaction.
+  - [ ] Test the capability-adapter seam with a protected transport test handler: CSRF rejection before any credential/API invocation, correlation generation/forwarding, abort/timeout propagation, declared idempotency-header forwarding, and safe-error redaction. This is transport proof only, not a second production capability owner.
   - [ ] Test that a protected controller cannot run from cookie/session serialization and receives only `RequestPrincipal`.
 
 ## Dev Notes
 
 ### Implementation Guardrails
 
-- This story consumes the Story 9.1 BFF credential and resource-server guard. Do not duplicate signing, bearer parsing, session validation, or `RequestPrincipal` creation.
+- This story consumes the completed and verified Story 9.1 BFF credential, resource-server guard, and safe-error DTO. Do not duplicate signing, bearer parsing, session validation, `RequestPrincipal` creation, or the envelope shape.
+- Start only after Story 9.1 completes. Its capability-adapter transport test must not cut over a real domain capability; the first real production read cutover remains Story 9.4.
 - The private API is not a browser API. It uses `api.railway.internal`, bearer credentials only, and no CORS allow-origin header. Do not expose `api.xuyenviet.app` or add browser CORS as a convenience.
-- CSRF belongs on web/admin BFF mutations because they authenticate the browser cookie. It is not a reason to let the API inspect a browser cookie.
+- CSRF belongs on web/admin BFF mutations because they authenticate the browser cookie. Use the AD-4 exact-origin, Fetch Metadata, signed double-submit policy; it is not a reason to let the API inspect a browser cookie.
 - The BFF client is intentionally thin: no generated SDK and no domain authorization/persistence logic. The API/domain layer remains the authority.
 - Correlation ID is safe operational metadata. Preserve it across BFF/API calls and use it in logs/errors, but do not put it into a reusable credential unless a future identity decision explicitly permits that.
 - Health/version endpoints are introduced and contract-tested in Story 9.4. This story establishes their common error/telemetry rules but must not claim the platform contract is delivered yet.

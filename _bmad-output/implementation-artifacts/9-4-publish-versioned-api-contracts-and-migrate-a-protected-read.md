@@ -18,21 +18,22 @@ so that the API-first boundary is proven by behavior rather than only by credent
 
 - [ ] Select and document the first protected read (AC: 1-3)
   - [ ] Use ordinary owned conversation summaries as the default selected capability unless a documented architecture decision chooses another small read-only capability before implementation.
-  - [ ] Record the API contract, authorization matrix, owner predicate, stable ordering, routing switch, rollback route, and legacy-owner retirement condition in the implementation record.
+  - [ ] Record the API contract, authorization matrix, owner predicate, stable ordering, routing switch, rollback route, staging comparison evidence, and legacy-owner retirement condition in the implementation record.
   - [ ] Do not select AI Ask, an admin mutation, or trip-project workspace data for this first cutover; those have broader transaction/streaming dependencies.
 - [ ] Extract the selected read model from Next session coupling (AC: 1-2)
-  - [ ] Split the existing conversation-summary query into an owner-scoped read model accepting a principal/user ID and a temporary Next adapter that obtains the host-only session.
-  - [ ] Preserve the existing safe projection: `id`, `updatedAt`, and preview only; preserve exclusion of trip-project conversations and deterministic ordering by conversation update/id then user message creation/id.
+  - [ ] Split the existing conversation-summary query into the shared Chat/Trips domain package as an owner-scoped read model accepting a principal/user ID, with root Next and Nest adapters using the same exported contract. Nest must not import `src/features/chat-trips/conversations.ts`, `server-only`, root aliases, or Next session helpers.
+  - [ ] Preserve the existing safe projection: `id`, ISO-8601 UTC `updatedAt`, and preview only; preserve exclusion of trip-project conversations and deterministic ordering by conversation update/id then user message creation/id. This first contract is an unpaginated bounded list; any pagination needs an explicit compatible cursor contract.
   - [ ] Do not move full conversation messages, provenance, annotations, trip planning, or mutation behavior into this contract.
 - [ ] Publish API platform contracts (AC: 1)
+  - [ ] Implement the API-foundation `release_schema_versions` record, migration advisory lock, checked-in workload compatibility declaration, and readiness admission test required by AD-33 before API traffic. The migration command records the applied version; API readiness rejects a non-compatible schema.
   - [ ] Implement Nest `/health/live`, `/health/ready`, and `/v1/version` with distinct liveness/readiness semantics.
   - [ ] Implement the protected `/v1` conversation-summary endpoint using the Story 9.1 principal guard and Story 9.3 validation/error/correlation boundary.
   - [ ] Generate/publish OpenAPI for `/v1` and describe auth, ownership, stable ordering/pagination behavior, response DTOs, safe errors, and health/version behavior.
 - [ ] Adapt the root Next BFF and cut over one owner (AC: 2-3)
   - [ ] Add a capability-specific BFF adapter using the Story 9.3 API client; its response must remain the page/component presentation contract and never expose the bearer credential.
-  - [ ] Add a named routing flag that chooses the legacy read or API/BFF read before either accepts the request.
-  - [ ] Keep any shadow comparison read-only and development/staging-only. Do not create a dual-write path; this is a read, but the same single-owner rule must remain explicit for future commands.
-  - [ ] After the API path is stable, remove the matching legacy transport owner rather than preserving a permanent compatibility path. Roll back by routing before the new owner accepts requests; never destructively roll back schema.
+  - [ ] Add validated `XV_CONVERSATION_SUMMARY_API_ENABLED`, defaulting false outside an explicitly enabled deployment, that chooses the legacy read or API/BFF read before either accepts the request.
+  - [ ] Keep any shadow comparison read-only and development/staging-only, after the selected response, tagged by correlation ID and excluded from browser response behavior. Do not create a dual-write path; this is a read, but the same single-owner rule must remain explicit for future commands.
+  - [ ] After documented staging evidence proves selected-owner execution, contract equivalence, and rollback success, remove the matching legacy transport owner rather than preserving a permanent compatibility path. Roll back by routing before the new owner accepts requests; never destructively roll back schema.
 - [ ] Verify contracts and end-to-end behavior (AC: 1-3)
   - [ ] Add OpenAPI/HTTP contract tests for health, readiness failure, version, protected read success/failure, ownership isolation, safe envelopes, and stable ordering.
   - [ ] Add BFF integration tests proving host-only session validation, internal credential containment, direct-browser denial/no CORS, and response serialization.
@@ -49,15 +50,16 @@ so that the API-first boundary is proven by behavior rather than only by credent
 ### Implementation Guardrails
 
 - Build on Stories 9.1-9.3. Do not recreate JWT verification, principal construction, CSRF, BFF transport, correlation, or safe-error logic inside the read module.
-- Liveness proves process operation only. Readiness verifies validated configuration, database access, and the critical dependencies required to serve assigned API traffic. Do not make liveness depend on the database.
+- Start only after Stories 9.1-9.3 complete and their identity/transport integration coverage passes.
+- Liveness proves process operation only. Readiness verifies validated configuration, compatible schema version from the API-foundation release record, database access, configured issuer verification keys, and the critical dependencies required to serve assigned API traffic. Do not make liveness depend on the database.
 - The controller accepts only `RequestPrincipal` and a validated request DTO. The extracted read model accepts domain input/principal/user ID, not a Next session, request, cookie, redirect, or revalidation callback.
 - API ownership enforcement is server-side; a BFF/page-side role or user check is presentation gating, not the authorization decision.
-- The route flag chooses exactly one transport before request acceptance. Shadow checks compare safe read outcomes only in development/staging and must not become a second public owner.
+- The validated `XV_CONVERSATION_SUMMARY_API_ENABLED` flag chooses exactly one transport before request acceptance. Shadow checks compare safe read outcomes only after the selected response in development/staging, tag results with the correlation ID, and must not become a second public owner.
 - Preserve the root Next traveler app. `apps/web` and the separately deployed admin BFF remain later work.
 
 ### Existing Code to Preserve
 
-- `src/features/chat-trips/conversations.ts#listOwnedConversations` is the behavior reference, but it calls `getAuthenticatedSession()` internally and cannot be called directly by Nest. Split query ownership from the Next session adapter rather than importing it into `apps/api`.
+- `src/features/chat-trips/conversations.ts#listOwnedConversations` is the behavior reference, but it calls `getAuthenticatedSession()` internally and cannot be called directly by Nest. Extract its query into the shared domain/database seam and retain this file as the temporary Next session adapter rather than importing it into `apps/api`.
 - `src/app/ai-ask/page.tsx` server-loads ordinary sessions unless a trip project is selected. Keep URL selection and shell ownership unchanged; only adapt the selected summary-list source through the BFF/API path.
 - `src/app/api/health/route.ts` is the legacy combined health endpoint. Retire/re-route only after the new health contract is verified; do not conflate `/health/live` and `/health/ready`.
 - Keep full conversation reads, image attachment behavior, answer provenance/annotations, and trip-project history in their existing Chat/Trips owners. They are not part of this read slice.
@@ -65,6 +67,7 @@ so that the API-first boundary is proven by behavior rather than only by credent
 ### Suggested File Structure
 
 - NEW `apps/api/src/health/*`, `apps/api/src/version/*`, and `apps/api/src/conversations/*`: controller/DTO/OpenAPI adapters only.
+- NEW/UPDATE `packages/database` and `packages/domain/src/chat-trips/*`: Drizzle client/schema and the extracted owner-scoped conversation-summary read model shared by root Next and Nest.
 - NEW/UPDATE shared contracts for health/version/conversation-summary response and safe error DTOs.
 - UPDATE `src/features/chat-trips/conversations.ts`: exported principal/user-ID scoped read query plus an existing Next-session adapter that calls it.
 - UPDATE `src/server/bff-api-client.ts` and add a narrow Chat/Trips BFF read adapter.
@@ -74,7 +77,7 @@ so that the API-first boundary is proven by behavior rather than only by credent
 ### Testing Requirements
 
 - Use API integration/contract tests for HTTP status, DTOs, OpenAPI, safe error envelopes, owner isolation, and stable ordering.
-- Test `/health/live` independently from database readiness, then test `/health/ready` for config/database dependency failure.
+- Test `/health/live` independently from database readiness, then test `/health/ready` for config, release-schema compatibility, issuer-key, and database dependency failure.
 - Test browser-facing BFF behavior separately: it must not expose `Authorization`, private URL/configuration, token claims, or cookie/session data.
 - Test direct API browser/cookie calls are denied with no CORS allow-origin header.
 - Test both routing positions and assert only the selected transport executes. Any shadow test must be environment-gated and read-only.

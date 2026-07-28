@@ -23,13 +23,13 @@ so that environment configuration, callbacks, and direct data edits cannot silen
   - [ ] Grant/revoke only `operator` and `admin`, increment the target authorization version only for a committed role change, and record the actor-correct audit transition in the same transaction.
 - [ ] Implement the one-shot initial-admin bootstrap (AC: 1)
   - [ ] Add a deployment command using `INITIAL_ADMIN_EMAIL`, normalized consistently with Auth.js email handling.
-  - [ ] Find an existing real authenticated user by normalized email, fail closed when absent or when any admin already exists, and use the same Auth/Admin command/transactional boundary.
-  - [ ] Grant `admin` only, increment authorization version, and record an audit event. A repeat invocation must make no mutation.
+  - [ ] Find an existing real user with a linked Auth.js account by normalized email, fail closed when absent or when any admin already exists, and use the same transactional role-write boundary without requiring an admin `RequestPrincipal`.
+  - [ ] Invoke the capability-scoped `system-admin-bootstrap` deployment context, grant `admin` only, increment authorization version, and record its system audit event. A repeat invocation must make no mutation.
 - [ ] Retire all alternative privilege-grant paths (AC: 3)
   - [ ] Remove the `ADMIN_EMAIL` sign-in callback provisioner from `src/auth.ts` while preserving referral attribution for new users.
   - [ ] Remove or replace `scripts/db-promote-admin.ts` and `pnpm db:promote-admin` so no generic direct database promotion path remains.
   - [ ] Adapt temporary Next admin/server-action callers to the extracted command rather than retaining a second role writer.
-  - [ ] Ensure migrations/seeds/test helpers do not create roles through environment matching or a feature-level direct insert bypass.
+  - [ ] Ensure request-serving code, migrations/seeds/test helpers, and repository scripts do not create roles through environment matching or a feature-level direct insert bypass. Treat isolated migration/DBA credentials as trusted deployment control plane only; document/audit any exceptional role repair rather than claiming database owners are technically prevented from writes.
 - [ ] Verify role governance and token revocation behavior (AC: 1-3)
   - [ ] Cover bootstrap success, normalization, missing user, existing admin, and repeat execution with no mutation on failure.
   - [ ] Cover authorized/unauthorized grant and revoke, target-row locking/concurrent role changes, final-admin rejection, actor correctness, and transaction rollback.
@@ -40,12 +40,13 @@ so that environment configuration, callbacks, and direct data edits cannot silen
 
 ### Implementation Guardrails
 
-- Story 9.1 supplies `RequestPrincipal` and the authorization-version schema. Build on it; do not define a parallel principal, role version, or JWT revocation mechanism.
+- Story 9.1 supplies `RequestPrincipal`, authorization-version schema, and safe error contract. Build on it; do not define a parallel principal, role version, or JWT revocation mechanism.
+- Start only after Story 9.1 identity integration coverage verifies principal staleness after a committed authorization-version change.
 - Auth/Admin owns role policy. The Next server action and future API controller are adapters only. They may parse/project input but may not implement separate authorization, transaction, audit, or role-write behavior.
 - `user_roles` is the only authorization authority. Do not add a role column to `users`, trust a configured email after bootstrap, or make a JWT claim authoritative without Story 9.1 live-version validation.
 - Audit must use the existing typed Audit boundary and a real authenticated user actor. Do not directly insert `audit_events`.
 - The role change, version increment, and audit record must share one transaction. A failed audit or authorization check must roll back the role/version change.
-- The initial bootstrap applies only to an existing authenticated real person. It must never create a user, system actor, OAuth identity, or operator role as a shortcut.
+- The initial bootstrap applies only to an existing real person with a linked Auth.js account. It must never create a user, OAuth identity, session, system user, or operator role as a shortcut. It uses the capability-scoped `system-admin-bootstrap` audit actor because no administrator exists yet; ordinary later role changes must retain the real admin caller actor.
 
 ### Existing Code to Preserve or Replace
 
@@ -53,7 +54,7 @@ so that environment configuration, callbacks, and direct data edits cannot silen
 - `src/server/mutations.ts` demonstrates an exact-admin transaction lock and actor-correct audit insertion. Do not reuse it as the domain API because it accepts `AuthenticatedSession`; preserve it only for temporary adapters where appropriate.
 - `src/auth.ts` currently calls `provisionConfiguredAdminRoles()` on every sign-in with `ADMIN_EMAIL`, granting both `admin` and `operator`. This is incompatible with the story and must be removed, while `captureFirstTouchReferralAttribution()` remains.
 - `scripts/db-promote-admin.ts` and the `db:promote-admin` package script are legacy direct-grant paths to retire.
-- Existing `users` system-executor exclusion and `user_roles` constraints remain mandatory. Never let a cataloged system executor authenticate or receive roles.
+- Existing `users` system-executor exclusion and `user_roles` constraints remain mandatory. Never let a cataloged system executor authenticate or receive roles. `system-admin-bootstrap` is an execution actor only, not a user or database role.
 
 ### Suggested File Structure
 
