@@ -58,7 +58,7 @@ describe("admin Facebook capture review helpers", () => {
     await createUserWithRoles("operator-user", ["operator"]);
   });
 
-  test.each(["operator", "admin"] as UserRole[])("%s can read default actionable queue with raw text for review", async (role) => {
+  test.each(["operator", "admin"] as UserRole[])("%s can read the default ingestion-led queue without raw text", async (role) => {
     await createUserWithRoles(`${role}-reader`, [role]);
     authMock.mockResolvedValue({ user: { id: `${role}-reader`, email: `${role}-reader@example.com` } });
     await createCapturedFacebookSource({
@@ -74,6 +74,8 @@ describe("admin Facebook capture review helpers", () => {
       },
     });
     const rejected = await createCapturedFacebookSource({ id: "rejected", rawText: "Rejected raw text" });
+    if (!rejected.captureVersionId) throw new Error("Expected capture version");
+    await testDb.insert(knowledgeIngestionJobs).values({ id: "rejected-job", sourceId: rejected.sourceId, captureVersionId: rejected.captureVersionId, submittedByUserId: "operator-user", submittedByEmail: "operator-user@example.com", stage: "suppressed" });
     await markFacebookCaptureReviewStatus(testDb, {
       reviewId: rejected.id,
       status: "rejected",
@@ -81,8 +83,8 @@ describe("admin Facebook capture review helpers", () => {
       rejectionReason: "Wrong visible post content",
     });
 
-    const { listAdminFacebookCaptureReviews } = await import("@/features/knowledge/facebook-capture-review-admin");
-    const reviews = await listAdminFacebookCaptureReviews();
+    const { listAdminFacebookCaptureQueue } = await import("@/features/knowledge/facebook-capture-review-admin");
+    const reviews = await listAdminFacebookCaptureQueue();
 
     expect(reviews).toMatchObject([
       {
@@ -94,13 +96,14 @@ describe("admin Facebook capture review helpers", () => {
         authorText: "Cộng đồng Xuyên Việt",
         groupName: "Nhóm Xuyên Việt",
         timestampText: "2 giờ trước",
-        rawText: "Raw Facebook text must stay out of queue rows.",
+        ingestionJob: null,
+        captureOperation: "awaiting_ingestion_job",
       },
     ]);
-    expect(JSON.stringify(reviews)).toContain("Raw Facebook text");
+    expect(JSON.stringify(reviews)).not.toContain("Raw Facebook text");
   });
 
-  test("explicit status filters include non-actionable captures and linked existing cards", async () => {
+  test("canonical terminal filters include linked existing cards regardless of legacy review status", async () => {
     authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
     const review = await createCapturedFacebookSource({ id: "extracted", rawText: "Extracted raw text" });
     await testDb.insert(knowledgeCards).values({
@@ -119,9 +122,11 @@ describe("admin Facebook capture review helpers", () => {
       .update(facebookCaptureReviews)
       .set({ status: "extracted", reviewerUserId: "operator-user", reviewedAt: new Date("2026-07-13T01:00:00.000Z"), updatedAt: new Date("2026-07-13T01:00:00.000Z") })
       .where(eq(facebookCaptureReviews.id, review.id));
+    if (!review.captureVersionId) throw new Error("Expected capture version");
+    await testDb.insert(knowledgeIngestionJobs).values({ id: "extracted-job", sourceId: review.sourceId, captureVersionId: review.captureVersionId, submittedByUserId: "operator-user", submittedByEmail: "operator-user@example.com", stage: "published" });
 
-    const { listAdminFacebookCaptureReviews } = await import("@/features/knowledge/facebook-capture-review-admin");
-    await expect(listAdminFacebookCaptureReviews({ status: "extracted" })).resolves.toMatchObject([
+    const { listAdminFacebookCaptureQueue } = await import("@/features/knowledge/facebook-capture-review-admin");
+    await expect(listAdminFacebookCaptureQueue({ filter: "published" })).resolves.toMatchObject([
       {
         sourceId: "extracted",
         status: "extracted",
@@ -186,13 +191,51 @@ describe("admin Facebook capture review helpers", () => {
 
     const { default: FacebookCaptureReviewQueuePage } = await import("@/app/admin/knowledge/facebook-captures/page");
     const queueHtml = renderToStaticMarkup(await FacebookCaptureReviewQueuePage({ searchParams: Promise.resolve({}) }));
-    expect(queueHtml).toContain("Đang đánh giá evidence · lần thử 2/3");
+    expect(queueHtml).toContain("Trạng thái chính: ");
+    expect(queueHtml).toContain("Canonical ingestion Đang đánh giá evidence.");
 
     const { default: FacebookCaptureReviewDetailPage } = await import("@/app/admin/knowledge/facebook-captures/[reviewId]/page");
     const detailHtml = renderToStaticMarkup(await FacebookCaptureReviewDetailPage({ params: Promise.resolve({ reviewId: review.id }) }));
     expect(detailHtml).toContain("Đang đánh giá chất lượng evidence");
     expect(detailHtml).toContain("Job ingestion-status-job · lần thử 2/3");
     expect(detailHtml).toContain("AI không xác định đủ loại thông tin");
+  });
+
+  test("canonical stages drive in-progress, attention, failure, and history filters", async () => {
+    authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
+    const published = await createCapturedFacebookSource({ id: "published-needs-review", rawText: "Published capture." });
+    const verify = await createCapturedFacebookSource({ id: "verify-needs-review", rawText: "Verify capture." });
+    const failed = await createCapturedFacebookSource({ id: "failed-needs-review", rawText: "Failed capture." });
+    if (!published.captureVersionId || !verify.captureVersionId || !failed.captureVersionId) throw new Error("Expected capture versions");
+    await testDb.insert(knowledgeIngestionJobs).values([
+      { id: "published-needs-review-job", sourceId: published.sourceId, captureVersionId: published.captureVersionId, submittedByUserId: "operator-user", submittedByEmail: "operator-user@example.com", stage: "published" },
+      { id: "verify-needs-review-job", sourceId: verify.sourceId, captureVersionId: verify.captureVersionId, submittedByUserId: "operator-user", submittedByEmail: "operator-user@example.com", stage: "verify_first" },
+      { id: "failed-needs-review-job", sourceId: failed.sourceId, captureVersionId: failed.captureVersionId, submittedByUserId: "operator-user", submittedByEmail: "operator-user@example.com", stage: "failed" },
+    ]);
+
+    const { listAdminFacebookCaptureQueue, listAdminFacebookCaptureQueueCounts, parseFacebookCaptureQueueFilter } = await import("@/features/knowledge/facebook-capture-review-admin");
+    await expect(listAdminFacebookCaptureQueue()).resolves.toEqual([]);
+    await expect(listAdminFacebookCaptureQueue({ filter: "needs_attention" })).resolves.toMatchObject([{ sourceId: "verify-needs-review" }]);
+    await expect(listAdminFacebookCaptureQueue({ filter: "failed" })).resolves.toMatchObject([{ sourceId: "failed-needs-review" }]);
+    await expect(listAdminFacebookCaptureQueue({ filter: "published" })).resolves.toMatchObject([{ sourceId: "published-needs-review", status: "needs_review", ingestionJob: { stage: "published" } }]);
+    await expect(listAdminFacebookCaptureQueueCounts()).resolves.toEqual({ in_progress: 0, needs_attention: 1, failed: 1, published: 1, suppressed: 0 });
+    expect(parseFacebookCaptureQueueFilter("extracted")).toBe("published");
+    expect(parseFacebookCaptureQueueFilter("attention")).toBe("in_progress");
+    expect(parseFacebookCaptureQueueFilter("unexpected-status")).toBe("in_progress");
+  });
+
+  test("v1 parent lifecycle is visible without v2 candidate controls", async () => {
+    authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
+    const review = await createCapturedFacebookSource({ id: "v1-job", rawText: "Historical capture." });
+    if (!review.captureVersionId) throw new Error("Expected capture version");
+    await testDb.insert(knowledgeIngestionJobs).values({ id: "v1-job-id", sourceId: review.sourceId, captureVersionId: review.captureVersionId, submittedByUserId: "operator-user", submittedByEmail: "operator-user@example.com", protocolVersion: 1, stage: "suppressed" });
+
+    const { default: FacebookCaptureReviewDetailPage } = await import("@/app/admin/knowledge/facebook-captures/[reviewId]/page");
+    const html = renderToStaticMarkup(await FacebookCaptureReviewDetailPage({ params: Promise.resolve({ reviewId: review.id }) }));
+    expect(html).toContain("Đã giữ lại, không xuất bản");
+    expect(html).toContain("Job legacy v1");
+    expect(html).not.toContain("Candidate canonical an toàn");
+    expect(html).not.toContain("Re-run current pipeline");
   });
 
   test("detail exposes current-pipeline re-run for an active v2 canonical ingestion job", async () => {
@@ -222,7 +265,7 @@ describe("admin Facebook capture review helpers", () => {
     expect(html).toContain("Đã xuất bản");
     expect(html).toContain("Không xuất bản");
     expect(html).toContain("judge_suppressed");
-    expect(html).toContain("Judge đã ground evidence");
+    expect(html).toContain("Bộ đánh giá đã xác nhận bằng chứng");
     expect(html).toContain("Judge loại");
     expect(html).not.toContain("Candidate active.");
   });
@@ -257,8 +300,8 @@ describe("admin Facebook capture review helpers", () => {
       },
     });
 
-    const { getAdminFacebookCaptureReviewDetail, listAdminFacebookCaptureReviews } = await import("@/features/knowledge/facebook-capture-review-admin");
-    const [queueRow] = await listAdminFacebookCaptureReviews();
+    const { getAdminFacebookCaptureReviewDetail, listAdminFacebookCaptureQueue } = await import("@/features/knowledge/facebook-capture-review-admin");
+    const [queueRow] = await listAdminFacebookCaptureQueue();
     const detail = await getAdminFacebookCaptureReviewDetail(review.id);
 
     expect(queueRow).toMatchObject({
@@ -295,7 +338,7 @@ describe("admin Facebook capture review helpers", () => {
     await expect(getAdminFacebookCaptureReviewDetail(review.id)).rejects.toThrow(AdminAuthorizationError);
   });
 
-  test("queue page renders compact Vietnamese labels with captured text preview for operators", async () => {
+  test("queue page renders Vietnamese ingestion-led labels without raw text for operators", async () => {
     authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
     await createCapturedFacebookSource({
       id: "queue-page",
@@ -311,17 +354,15 @@ describe("admin Facebook capture review helpers", () => {
     const element = await FacebookCaptureReviewQueuePage({ searchParams: Promise.resolve({}) });
     const html = renderToStaticMarkup(element);
 
-    expect(html).toContain("Hàng đợi duyệt capture Facebook");
+    expect(html).toContain("Hàng đợi ingestion capture Facebook");
     expect(html).toContain("Nguồn Facebook/cộng đồng, chưa xác minh");
     expect(html).toContain("Tác giả cộng đồng");
-    expect(html).toContain("Preview nội dung đã capture");
-    expect(html).toContain("Mở chi tiết để đọc toàn bộ raw text");
-    expect(html).toContain("Bước tiếp theo");
+    expect(html).toContain("Trạng thái chính");
+    expect(html).toContain("Capture đang chờ tạo canonical ingestion job");
     expect(html).toContain("Cần xử lý");
-    expect(html).toContain("Cần duyệt");
+    expect(html).not.toContain("Cần theo dõi");
     expect(html).toContain("1");
-    expect(html).toContain("Queue preview sentence.");
-    expect(html).toContain("Canonical ingestion");
+    expect(html).not.toContain("Queue preview sentence.");
     expect(html).not.toContain("Trích xuất và phê duyệt tất cả");
     expect(html).not.toContain("approveAllConfirmed");
     expect(html).not.toContain("Sensitive tail should only be on detail.");
@@ -352,11 +393,11 @@ describe("admin Facebook capture review helpers", () => {
     authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
 
     const { default: AdminPage } = await import("@/app/admin/page");
-    const adminHtml = renderToStaticMarkup(AdminPage());
+    const adminHtml = renderToStaticMarkup(await AdminPage());
 
-    expect(adminHtml).toContain("Duyệt capture Facebook");
+    expect(adminHtml).toContain("Theo dõi xử lý");
     expect(adminHtml).toContain("/admin/knowledge/facebook-captures");
-    expect(adminHtml).toContain("Nguồn Facebook/cộng đồng vẫn chưa xác minh");
+    expect(adminHtml).toContain("Capture, trích xuất và sàng lọc AI.");
 
     await testDb.insert(sources).values([
       {
@@ -478,25 +519,49 @@ describe("admin Facebook capture review helpers", () => {
     expect(intakeHtml.indexOf("newer-facebook-source")).toBeLessThan(intakeHtml.indexOf("https://example.com/older"));
   });
 
-  test("default and rejected queue empty states explain actionable workflow outcomes", async () => {
+  test("canonical queue empty states explain in-progress, failure, and terminal outcomes", async () => {
     authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
 
     const { default: FacebookCaptureReviewQueuePage } = await import("@/app/admin/knowledge/facebook-captures/page");
     const defaultElement = await FacebookCaptureReviewQueuePage({ searchParams: Promise.resolve({}) });
     const defaultHtml = renderToStaticMarkup(defaultElement);
 
-    expect(defaultHtml).toContain("Chưa có capture cần duyệt");
-    expect(defaultHtml).toContain("hãy chạy công cụ capture trước");
-    expect(defaultHtml).toContain("kiểm tra các filter Đã trích xuất, Đã trích xuất và duyệt, hoặc Đã từ chối");
+    expect(defaultHtml).toContain("Chưa có nội dung đang xử lý");
+    expect(defaultHtml).toContain("tác vụ đang chạy, đang chờ tạo hoặc đang chờ thu thập lại");
 
-    const rejectedElement = await FacebookCaptureReviewQueuePage({ searchParams: Promise.resolve({ status: "rejected" }) });
-    const rejectedHtml = renderToStaticMarkup(rejectedElement);
+    const failedElement = await FacebookCaptureReviewQueuePage({ searchParams: Promise.resolve({ status: "failed" }) });
+    const failedHtml = renderToStaticMarkup(failedElement);
+    expect(failedHtml).toContain("Chưa có nội dung xử lý thất bại");
+    expect(failedHtml).toContain("tác vụ xử lý thất bại");
 
-    expect(rejectedHtml).toContain("Capture đã từ chối không còn nằm trong hàng đợi cần xử lý");
-    expect(rejectedHtml).toContain("chưa tạo thẻ tri thức cho traveler");
+    const suppressedElement = await FacebookCaptureReviewQueuePage({ searchParams: Promise.resolve({ status: "suppressed" }) });
+    const suppressedHtml = renderToStaticMarkup(suppressedElement);
+
+    expect(suppressedHtml).toContain("Chưa có dữ liệu nhập bị giữ lại");
+    expect(suppressedHtml).toContain("tác vụ xử lý chính ở trạng thái bị giữ lại");
   });
 
-  test("rejected queue page renders safe rejection reason and captured text preview", async () => {
+  test("recapture-pending reviews remain visible in the in-progress queue and detail route", async () => {
+    authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
+    const review = await createCapturedFacebookSource({ id: "recapture-pending", rawText: "Capture text queued for replacement." });
+    await testDb
+      .update(facebookCaptureReviews)
+      .set({ captureVersionId: null, updatedAt: new Date("2026-07-13T03:00:00.000Z") })
+      .where(eq(facebookCaptureReviews.id, review.id));
+
+    const { listAdminFacebookCaptureQueue, listAdminFacebookCaptureQueueCounts, getAdminFacebookCaptureReviewDetail } = await import("@/features/knowledge/facebook-capture-review-admin");
+    await expect(listAdminFacebookCaptureQueue()).resolves.toMatchObject([{ id: review.id, captureVersionId: null, ingestionJob: null, captureOperation: "recapture_pending" }]);
+    await expect(listAdminFacebookCaptureQueueCounts()).resolves.toMatchObject({ in_progress: 1, needs_attention: 0, failed: 0, published: 0, suppressed: 0 });
+    await expect(getAdminFacebookCaptureReviewDetail(review.id)).resolves.toMatchObject({ id: review.id, captureVersionId: null, rawText: null, ingestionJob: null });
+
+    const { default: FacebookCaptureReviewDetailPage } = await import("@/app/admin/knowledge/facebook-captures/[reviewId]/page");
+    const html = renderToStaticMarkup(await FacebookCaptureReviewDetailPage({ params: Promise.resolve({ reviewId: review.id }), searchParams: Promise.resolve({ recaptureRequested: "1" }) }));
+    expect(html).toContain("Đã đưa capture này về hàng đợi recapture");
+    expect(html).toContain("Chưa có canonical job cho capture version này");
+    expect(html).toContain("Chưa có nội dung text.");
+  });
+
+  test("legacy rejected URL resolves safely to canonical suppressed history", async () => {
     authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
     const review = await createCapturedFacebookSource({ id: "rejected-queue-page", rawText: `${"Rejected queue preview. ".repeat(30)}Rejected tail should only be on detail.` });
     await markFacebookCaptureReviewStatus(testDb, {
@@ -505,15 +570,17 @@ describe("admin Facebook capture review helpers", () => {
       actor: { userId: "operator-user", email: "operator-user@example.com" },
       rejectionReason: "Wrong visible post content",
     });
+    if (!review.captureVersionId) throw new Error("Expected capture version");
+    await testDb.insert(knowledgeIngestionJobs).values({ id: "rejected-queue-job", sourceId: review.sourceId, captureVersionId: review.captureVersionId, submittedByUserId: "operator-user", submittedByEmail: "operator-user@example.com", stage: "suppressed" });
 
     const { default: FacebookCaptureReviewQueuePage } = await import("@/app/admin/knowledge/facebook-captures/page");
     const element = await FacebookCaptureReviewQueuePage({ searchParams: Promise.resolve({ status: "rejected" }) });
     const html = renderToStaticMarkup(element);
 
-    expect(html).toContain("Lý do từ chối");
-    expect(html).toContain("Wrong visible post content");
-    expect(html).toContain("Rejected queue preview.");
-    expect(html).not.toContain("Rejected tail should only be on detail.");
+    expect(html).toContain("Không xuất bản");
+    expect(html).toContain("Canonical ingestion Đã giữ lại, không xuất bản.");
+    expect(html).not.toContain("Wrong visible post content");
+    expect(html).not.toContain("Rejected queue preview.");
     expect(html).not.toContain("approveAllConfirmed");
   });
 
@@ -550,7 +617,7 @@ describe("admin Facebook capture review helpers", () => {
     const element = await FacebookCaptureReviewDetailPage({ params: Promise.resolve({ reviewId: review.id }) });
     const html = renderToStaticMarkup(element);
 
-    expect(html).toContain("Trạng thái canonical ingestion");
+    expect(html).toContain("Trạng thái chính: canonical ingestion");
     expect(html).toContain("Chưa có canonical job cho capture version này");
     expect(html).not.toContain("Trích xuất bản nháp");
     expect(html).toContain(`name="reviewId" value="${review.id}"`);

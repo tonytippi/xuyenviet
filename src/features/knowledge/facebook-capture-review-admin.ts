@@ -1,46 +1,116 @@
 import "server-only";
 
-import { eq, sql } from "drizzle-orm";
+import { count, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { facebookCaptureReviews, facebookCaptureReviewStatusValues, knowledgeCardTypeValues, knowledgeIngestionCandidates, knowledgeIngestionJobs, sourceCaptureVersions, sources, type FacebookCaptureReviewStatus } from "@/db/schema";
-import { countFacebookCaptureReviewsByStatus, getExistingCardsForCaptureSource, listFacebookCaptureReviews } from "@/features/knowledge/facebook-capture-review";
+import { facebookCaptureReviews, knowledgeCardTypeValues, knowledgeIngestionCandidates, knowledgeIngestionJobs, sourceCaptureVersions, sources, type KnowledgeIngestionStage } from "@/db/schema";
+import { getExistingCardsForCaptureSource } from "@/features/knowledge/facebook-capture-review";
 import { requireAdminSession } from "@/server/auth";
 
-const defaultReviewStatus: FacebookCaptureReviewStatus = "needs_review";
+export const facebookCaptureQueueFilters = ["in_progress", "needs_attention", "failed", "published", "suppressed"] as const;
+export type FacebookCaptureQueueFilter = (typeof facebookCaptureQueueFilters)[number];
+const defaultQueueFilter: FacebookCaptureQueueFilter = "in_progress";
 const safeMetadataMaxLength = 500;
 const candidateProjectionLimit = 100;
 const unsafeMetadataValuePattern = /cookie|token|local\s*storage|localStorage|provider\s*payload|providerPayload|browser\s*profile|playwright\/facebook-profile|<html|<!doctype|hidden\s*data/i;
 
-export function parseFacebookCaptureReviewStatus(value: string | undefined): FacebookCaptureReviewStatus {
-  if (value && facebookCaptureReviewStatusValues.includes(value as FacebookCaptureReviewStatus)) {
-    return value as FacebookCaptureReviewStatus;
-  }
-
-  return defaultReviewStatus;
+export function parseFacebookCaptureQueueFilter(value: string | undefined): FacebookCaptureQueueFilter {
+  if (facebookCaptureQueueFilters.includes(value as FacebookCaptureQueueFilter)) return value as FacebookCaptureQueueFilter;
+  if (value === "attention") return "in_progress";
+  if (value === "published" || value === "extracted" || value === "extracted_approved") return "published";
+  if (value === "suppressed" || value === "rejected") return "suppressed";
+  return defaultQueueFilter;
 }
 
-export async function listAdminFacebookCaptureReviews(input: { status?: FacebookCaptureReviewStatus; limit?: number; offset?: number } = {}) {
+export function getFacebookCaptureQueueFilterForStage(stage: KnowledgeIngestionStage | null): FacebookCaptureQueueFilter {
+  if (stage === "published") return "published";
+  if (stage === "suppressed") return "suppressed";
+  if (stage === "failed") return "failed";
+  if (stage === "review_recommended" || stage === "verify_first") return "needs_attention";
+  return "in_progress";
+}
+
+export async function listAdminFacebookCaptureQueue(input: { filter?: FacebookCaptureQueueFilter; limit?: number; offset?: number } = {}) {
   await requireAdminSession();
   const db = getDb();
-  const status = input.status ?? defaultReviewStatus;
-  const reviews = await listFacebookCaptureReviews(db, { status, limit: input.limit, offset: input.offset });
+  const filter = input.filter ?? defaultQueueFilter;
+  const queueCondition = filter === "in_progress"
+    ? or(isNull(knowledgeIngestionJobs.id), inArray(knowledgeIngestionJobs.stage, ["queued", "triaging", "extracting", "judging", "relating"]))
+    : filter === "needs_attention"
+      ? inArray(knowledgeIngestionJobs.stage, ["review_recommended", "verify_first"])
+      : eq(knowledgeIngestionJobs.stage, filter);
+  const rows = await db
+    .select({
+      id: facebookCaptureReviews.id,
+      sourceId: facebookCaptureReviews.sourceId,
+      captureVersionId: facebookCaptureReviews.captureVersionId,
+      status: facebookCaptureReviews.status,
+      createdAt: facebookCaptureReviews.createdAt,
+      updatedAt: facebookCaptureReviews.updatedAt,
+      sourceLabel: sources.label,
+      sourceUrl: sources.url,
+      sourceCanonicalUrl: sources.canonicalUrl,
+      sourceType: sources.sourceType,
+      verificationStatus: sources.verificationStatus,
+      official: sources.official,
+      partner: sources.partner,
+      captureMethod: sql<string | null>`${sourceCaptureVersions.rawMetadata}->>'captureMethod'`,
+      capturedAt: sql<string | null>`${sourceCaptureVersions.rawMetadata}->>'capturedAt'`,
+      finalUrl: sql<string | null>`${sourceCaptureVersions.rawMetadata}->>'finalUrl'`,
+      authorText: sql<string | null>`${sourceCaptureVersions.rawMetadata}->>'authorText'`,
+      groupName: sql<string | null>`${sourceCaptureVersions.rawMetadata}->>'groupName'`,
+      timestampText: sql<string | null>`${sourceCaptureVersions.rawMetadata}->>'timestampText'`,
+      postCreatedAt: sql<string | null>`${sourceCaptureVersions.rawMetadata}->>'postCreatedAt'`,
+      hasRawText: sql<boolean>`length(btrim(coalesce(${sourceCaptureVersions.rawText}, ''))) > 0`,
+      ingestionJob: {
+        id: knowledgeIngestionJobs.id,
+        protocolVersion: knowledgeIngestionJobs.protocolVersion,
+        stage: knowledgeIngestionJobs.stage,
+        attemptCount: knowledgeIngestionJobs.attemptCount,
+        maxAttempts: knowledgeIngestionJobs.maxAttempts,
+        updatedAt: knowledgeIngestionJobs.updatedAt,
+        discoveredCandidateCount: knowledgeIngestionJobs.discoveredCandidateCount,
+        terminalCandidateCount: knowledgeIngestionJobs.terminalCandidateCount,
+        failedCandidateCount: knowledgeIngestionJobs.failedCandidateCount,
+      },
+    })
+    .from(facebookCaptureReviews)
+    .innerJoin(sources, eq(sources.id, facebookCaptureReviews.sourceId))
+    .leftJoin(sourceCaptureVersions, eq(sourceCaptureVersions.id, facebookCaptureReviews.captureVersionId))
+    .leftJoin(knowledgeIngestionJobs, eq(knowledgeIngestionJobs.captureVersionId, facebookCaptureReviews.captureVersionId))
+    .where(queueCondition)
+    .orderBy(
+      sql`case ${knowledgeIngestionJobs.stage} when 'queued' then 0 when 'triaging' then 1 when 'extracting' then 2 when 'judging' then 3 when 'relating' then 4 when 'review_recommended' then 5 when 'verify_first' then 6 when 'failed' then 7 when 'published' then 8 when 'suppressed' then 9 else 10 end`,
+      desc(knowledgeIngestionJobs.updatedAt),
+      desc(facebookCaptureReviews.updatedAt),
+    )
+    .limit(input.limit ?? 25)
+    .offset(input.offset ?? 0);
 
   return Promise.all(
-    reviews.map(async (review) => ({
-      ...sanitizeReviewMetadata(review),
-      ingestionJob: await getKnowledgeIngestionJobForCaptureVersion(db, review.captureVersionId),
+    rows.map(async (row) => ({
+      ...sanitizeReviewMetadata(row),
+      ingestionJob: row.ingestionJob?.id ? row.ingestionJob : null,
+      captureOperation: row.ingestionJob?.id ? null : row.hasRawText ? "awaiting_ingestion_job" as const : "recapture_pending" as const,
+      existingCards: await getExistingCardsForCaptureSource(db, row.sourceId),
     })),
   );
 }
 
-export async function listAdminFacebookCaptureReviewStatusCounts() {
+export async function listAdminFacebookCaptureQueueCounts() {
   await requireAdminSession();
   const db = getDb();
-  const counts = await countFacebookCaptureReviewsByStatus(db);
-
-  return Object.fromEntries(facebookCaptureReviewStatusValues.map((status) => [status, counts[status] ?? 0])) as Record<FacebookCaptureReviewStatus, number>;
+  const rows = await db
+    .select({ stage: knowledgeIngestionJobs.stage, count: count() })
+    .from(facebookCaptureReviews)
+    .leftJoin(sourceCaptureVersions, eq(sourceCaptureVersions.id, facebookCaptureReviews.captureVersionId))
+    .leftJoin(knowledgeIngestionJobs, eq(knowledgeIngestionJobs.captureVersionId, facebookCaptureReviews.captureVersionId))
+    .groupBy(knowledgeIngestionJobs.stage);
+  const counts: Record<FacebookCaptureQueueFilter, number> = { in_progress: 0, needs_attention: 0, failed: 0, published: 0, suppressed: 0 };
+  for (const row of rows) counts[getFacebookCaptureQueueFilterForStage(row.stage)] += Number(row.count);
+  return counts;
 }
+
 
 export async function getAdminFacebookCaptureReviewDetail(reviewId: string) {
   await requireAdminSession();
@@ -82,7 +152,7 @@ export async function getAdminFacebookCaptureReviewDetail(reviewId: string) {
     })
     .from(facebookCaptureReviews)
     .innerJoin(sources, eq(sources.id, facebookCaptureReviews.sourceId))
-     .innerJoin(sourceCaptureVersions, eq(sourceCaptureVersions.id, facebookCaptureReviews.captureVersionId))
+      .leftJoin(sourceCaptureVersions, eq(sourceCaptureVersions.id, facebookCaptureReviews.captureVersionId))
     .where(eq(facebookCaptureReviews.id, normalizedReviewId))
     .limit(1);
 

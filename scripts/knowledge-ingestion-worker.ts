@@ -33,4 +33,4 @@ async function main() {
   if (once) process.exit(0);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) main().catch(() => { console.error("Knowledge ingestion worker failed"); process.exit(1); });
+if (import.meta.url === `file://${process.argv[1]}`) main().catch((error: unknown) => { console.error("Knowledge ingestion worker failed", error); process.exit(1); });

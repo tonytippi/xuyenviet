@@ -47,7 +47,7 @@ export default async function AdminPage() {
         <Metric label="Nguồn còn hiệu lực" value={overview.sourcesReadyForProcessing} detail="Nguồn có thể đi tiếp trong pipeline." href="/admin/knowledge/intake" />
         <Metric label="Đang xử lý AI" value={overview.processingJobs} detail="Đang sàng lọc, trích xuất hoặc đối chiếu." href="/admin/knowledge/facebook-captures" />
         <Metric label="Tri thức active" value={overview.activeKnowledgeCards} detail="Thẻ canonical hiện được phép dùng theo policy." href="/admin/knowledge/approved" />
-        <Metric label="Lỗi pipeline" value={overview.failedProcessingJobs} detail="Job thất bại cần được kiểm tra hoặc chạy lại." href="/admin/knowledge/facebook-captures?status=extraction_failed" tone={overview.failedProcessingJobs > 0 ? "warning" : "default"} />
+        <Metric label="Lỗi pipeline" value={overview.failedProcessingJobs} detail="Job thất bại cần được kiểm tra hoặc chạy lại." href="/admin/knowledge/facebook-captures?status=failed" tone={overview.failedProcessingJobs > 0 ? "warning" : "default"} />
       </section>
 
       <section className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
