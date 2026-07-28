@@ -128,3 +128,6 @@
 - source_spec: `8-4-attribute-trip-proposal-expiry-through-the-audit-boundary.md`
   summary: Withhold elapsed proposals from owner reads when best-effort expiry fails transiently.
   evidence: `listPendingProposalsForTripProject` at `src/features/chat-trips/trip-change-proposals.ts:930` filters only on pending status after `expireElapsedPendingProposals` suppresses a transient expiry failure. The row can therefore remain visible as actionable pending. The behavior predates Story 8.4 baseline `a95aeb7`; defer it outside this bounded repair.
+- source_spec: `spec-9-1-establish-bff-credentials-and-api-request-principals.md`
+  summary: Increment users.authorizationVersion transactionally for every role grant or revoke.
+  evidence: Story 9.1 validates the JWT role snapshot against persisted authorization version but intentionally preserves the existing ADMIN_EMAIL provisioner and introduces no role-governance command. Story 9.2 owns the role mutation boundary that must invalidate stale credentials.

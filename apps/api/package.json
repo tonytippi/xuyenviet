@@ -1,0 +1,25 @@
+{
+  "name": "@xuyenviet/api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/main.ts --bundle --platform=node --format=esm --target=node20 --external:@nestjs/* --external:jose --external:postgres --external:reflect-metadata --external:rxjs --outfile=dist/main.mjs",
+    "start": "node dist/main.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.1.28",
+    "@nestjs/core": "^11.1.28",
+    "@nestjs/platform-express": "^11.1.28",
+    "@xuyenviet/config": "workspace:*",
+    "@xuyenviet/contracts": "workspace:*",
+    "@xuyenviet/database": "workspace:*",
+    "jose": "^6.2.3",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.1",
+    "typescript": "^5.8.3"
+  }
+}

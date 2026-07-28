@@ -11,6 +11,8 @@
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
     "jsx": "preserve",
     "incremental": true,
     "plugins": [
@@ -19,7 +21,10 @@
       }
     ],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@xuyenviet/contracts": ["./packages/contracts/src/index.ts"],
+      "@xuyenviet/config": ["./packages/config/src/index.ts"],
+      "@xuyenviet/database": ["./packages/database/src/index.ts"]
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],

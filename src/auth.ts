@@ -19,6 +19,17 @@ export const { handlers, auth, signIn, signOut } = NextAuth(() => ({
   session: {
     strategy: "database",
   },
+  cookies: {
+    sessionToken: {
+      name: "xuyenviet.session-token",
+      options: {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        secure: process.env.NODE_ENV === "production",
+      },
+    },
+  },
   pages: {
     signIn: "/sign-in",
     error: "/sign-in",

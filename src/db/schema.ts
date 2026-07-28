@@ -210,6 +210,7 @@ export const users = pgTable("users", {
   email: text("email").unique(),
   emailVerified: timestamp("email_verified", { mode: "date" }),
   image: text("image"),
+  authorizationVersion: integer("authorization_version").default(1).notNull(),
 }, (user) => [
   check(
     "users_no_system_executor_id_check",
