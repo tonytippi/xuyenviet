@@ -193,7 +193,7 @@ development_status:
   epic-9-retrospective: optional
 
   epic-10: backlog
-  10-1-make-ai-ask-commands-idempotent: backlog
+  10-1-make-ai-ask-commands-idempotent: ready-for-dev
   10-2-fence-terminal-ai-ask-persistence: backlog
   10-3-dispatch-ai-ask-follow-up-work-through-a-transactional-outbox: backlog
   10-4-preserve-completed-ai-ask-results-while-consumers-run: backlog
