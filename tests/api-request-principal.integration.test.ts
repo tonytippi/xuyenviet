@@ -111,6 +111,7 @@ describe("API request principals", () => {
     const unrelated = await keySet("web-active");
     const cases = [
       undefined,
+      "malformed-bearer",
       await tokenFor(config, "xuyenviet-web-bff", {}, unrelated),
       await tokenFor(config, "xuyenviet-web-bff", { iss: "untrusted-issuer" }),
       await tokenFor(config, "xuyenviet-web-bff", { aud: "wrong-audience" }),
@@ -268,8 +269,9 @@ async function rejected(token?: string) {
   controller().calls = 0;
   const response = await request(app.getHttpServer())
     .get("/_identity-test")
-    .set(token ? { Authorization: `Bearer ${token}` } : {})
+    .set({ Origin: "https://web.xuyenviet.vn", ...(token ? { Authorization: `Bearer ${token}` } : {}) })
     .expect(401);
+  expect(response.headers["access-control-allow-origin"]).toBeUndefined();
   expect(response.body).toEqual({ code: "unauthorized", message: "Không được phép truy cập.", requestId: expect.any(String) });
   expect(Object.keys(response.body).sort()).toEqual(["code", "message", "requestId"]);
   expect(response.body.requestId.length).toBeLessThanOrEqual(128);

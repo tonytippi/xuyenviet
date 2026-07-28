@@ -94,5 +94,7 @@ gpt-5.6-terra
 ### Completion Notes List
 
 - Ultimate context engine analysis completed - comprehensive developer guide created.
+- 2026-07-28 independent review of `ac7ce47c6002486fd1949faf6f4ec0dab723e4fe..2d04e47a7def551ff20927bda84449befe858f18` ran Blind Hunter, Edge Case Hunter, and Acceptance Auditor synchronously. BLOCKED with two patch findings: MEDIUM `src/server/bff-api-client.ts:49-50,67-69` projects bounded upstream field violations for non-validation errors, which can disclose authorization/resource-detail signals; permit violations only for `validation_error` and add a regression. LOW `tests/api-request-principal.integration.test.ts:110-124,267-276` omits Origin/no-`Access-Control-Allow-Origin` assertions for no-bearer and malformed-bearer direct API requests required by AC2; add those assertions. Edge Case Hunter's future public health/version route guard concern is deferred: Story 9.4 expressly owns those endpoints and their contract. Focused transport suite passed: `pnpm vitest run tests/bff-transport.test.ts tests/api-request-principal.integration.test.ts tests/safe-api-exception.filter.test.ts tests/safe-validation.pipe.test.ts` (4 files, 38 tests).
+- 2026-07-28 repair: field violations now project only from `validation_error` envelopes, with a forbidden-envelope regression. Direct no-bearer and malformed-bearer requests now carry `Origin` and assert no `Access-Control-Allow-Origin`. Targeted transport suite, typecheck, and diff check passed; status returned to ready-for-dev pending follow-up independent review.
 
 ### File List

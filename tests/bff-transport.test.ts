@@ -171,6 +171,20 @@ describe("private BFF transport", () => {
     });
   });
 
+  test("does not expose violations from non-validation upstream errors", async () => {
+    const upstream = {
+      code: "forbidden",
+      message: "Role assignment is restricted.",
+      requestId: "upstream_request_1",
+      violations: [{ field: "role", code: "restricted", message: "Operator only." }],
+    };
+
+    await expect(callPrivateApi({ config, credential: "private-token", correlationId: "request_1", path: "/v1/test", method: "POST", parseResult: parseAccepted, fetcher: async () => new Response(JSON.stringify(upstream), { status: 403 }) })).rejects.toMatchObject({
+      safe: { code: "forbidden", message: "Bạn không có quyền thực hiện thao tác này.", requestId: "request_1" },
+    });
+    await expect(callPrivateApi({ config, credential: "private-token", correlationId: "request_1", path: "/v1/test", method: "POST", parseResult: parseAccepted, fetcher: async () => new Response(JSON.stringify(upstream), { status: 403 }) })).rejects.not.toMatchObject({ safe: { violations: expect.anything() } });
+  });
+
   test("uses the required CSRF header, accepts same-site Fetch Metadata, and issues a host-only strict cookie", () => {
     const token = issueCsrfToken(config, 1_000_000);
     const request = { headers: new Headers({ origin: config.bffOrigin, "X-XuyenViet-CSRF": token }), cookies: { get: () => ({ value: token }) } };

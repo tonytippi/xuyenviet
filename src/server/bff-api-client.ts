@@ -65,7 +65,7 @@ function internalError(requestId: string): BffApiError { return new BffApiError(
 function timeoutError(requestId: string): BffApiError { return new BffApiError(safeError("request_timeout", messageFor("request_timeout"), requestId)); }
 function safeError(code: SafeApiError["code"], message: string, requestId: string, violations?: SafeApiError["violations"]): SafeApiError { return { code, message, requestId, ...(violations ? { violations } : {}) }; }
 function presentationViolations(error: SafeApiError): SafeApiError["violations"] {
-  if (!error.violations) return undefined;
+  if (error.code !== "validation_error" || !error.violations) return undefined;
   return error.violations.map(({ field, code }) => ({ field, code, message: messageFor(error.code) }));
 }
 function messageFor(code: SafeApiError["code"]): string {
