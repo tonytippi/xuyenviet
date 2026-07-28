@@ -1,11 +1,11 @@
-import { Controller, Get, INestApplication, Module, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Headers as NestHeaders, INestApplication, Module, Post, UseGuards } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import { exportJWK, generateKeyPair, importJWK, SignJWT } from "jose";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { apiAudience } from "@xuyenviet/contracts";
-import { createBffCredentialConfig, type BffCredentialConfig, type Jwk } from "@xuyenviet/config";
+import { createBffCredentialConfig, createBffTransportConfig, type BffCredentialConfig, type Jwk } from "@xuyenviet/config";
 import { createPostgresApiIdentityRepository } from "@xuyenviet/database";
 import { createApiModule } from "../apps/api/src/app.module";
 import { Principal } from "../apps/api/src/auth/principal.decorator";
@@ -14,6 +14,8 @@ import { getTestDatabaseUrl } from "./helpers/env-file";
 import { resetTestDatabase, testDb } from "./helpers/db";
 import { sessions, userRoles, users } from "@/db/schema";
 import type { RequestPrincipal } from "@xuyenviet/contracts";
+import { issueCsrfToken } from "@/server/csrf";
+import { executeProtectedBffMutation } from "@/server/protected-bff-adapter";
 
 let app: INestApplication;
 let config: BffCredentialConfig;
@@ -23,15 +25,54 @@ const authMock = vi.fn();
 
 vi.mock("@/auth", () => ({ auth: authMock, signIn: vi.fn(), signOut: vi.fn() }));
 
+class MutationDto {
+  constructor(readonly title: string) {}
+
+  static parse(value: unknown): { ok: true; value: MutationDto } | { ok: false } {
+    return typeof value === "object" && value !== null && typeof (value as { title?: unknown }).title === "string"
+      ? { ok: true, value: new MutationDto((value as { title: string }).title) }
+      : { ok: false };
+  }
+}
+
+class ThrowingMutationDto {
+  static parse() {
+    throw new Error("DTO parser failure");
+  }
+}
+
 @Controller("_identity-test")
 class IdentityTestController {
   calls = 0;
+  protectedMutationCalls = 0;
+  protectedMutationRequest?: { title: string; requestId?: string; idempotencyKey?: string };
 
   @Get()
   @UseGuards(ResourceServerGuard)
   getPrincipal(@Principal() principal: RequestPrincipal) {
     this.calls += 1;
     return { userId: principal.userId };
+  }
+
+  @Get("failure")
+  @UseGuards(ResourceServerGuard)
+  failure() {
+    throw new Error("database password and bearer token must not leak");
+  }
+
+  @Post("protected-mutation")
+  @UseGuards(ResourceServerGuard)
+  protectedMutation(@Body() body: MutationDto, @NestHeaders("x-request-id") requestId?: string, @NestHeaders("idempotency-key") idempotencyKey?: string) {
+    this.protectedMutationCalls += 1;
+    this.protectedMutationRequest = { title: body.title, requestId, idempotencyKey };
+    if (body.title === "explode") throw new Error("database password and bearer token must not leak");
+    return { accepted: true };
+  }
+
+  @Post("validation-throw")
+  validationThrow(@Body() body: ThrowingMutationDto) {
+    void body;
+    throw new Error("The validation pipe should have rejected this request.");
   }
 }
 
@@ -80,6 +121,70 @@ describe("API request principals", () => {
     ];
 
     for (const token of cases) await rejected(token);
+  });
+
+  test("rejects browser cookies without a bearer and emits no CORS allow-origin header", async () => {
+    const response = await request(app.getHttpServer())
+      .get("/_identity-test")
+      .set({ Cookie: "authjs.session-token=browser-cookie", Origin: "https://web.xuyenviet.vn" })
+      .expect(401);
+
+    expect(response.headers["access-control-allow-origin"]).toBeUndefined();
+    expect(response.body).toEqual({ code: "unauthorized", message: "Không được phép truy cập.", requestId: expect.any(String) });
+    expect(controller().calls).toBe(0);
+  });
+
+  test("redacts unexpected protected API exceptions with the canonical request ID", async () => {
+    const token = await tokenFor(config, "xuyenviet-web-bff");
+    const response = await request(app.getHttpServer())
+      .get("/_identity-test/failure")
+      .set({ Authorization: `Bearer ${token}`, "X-Request-Id": "known_request" })
+      .expect(500);
+
+    expect(response.body).toEqual({ code: "internal_error", message: "Không thể xử lý yêu cầu.", requestId: "known_request" });
+    expect(response.text).not.toContain("database password");
+    expect(response.text).not.toContain("bearer token");
+  });
+
+  test("projects a throwing DTO parser as a safe 400 validation envelope", async () => {
+    const token = await tokenFor(config, "xuyenviet-web-bff");
+    const response = await request(app.getHttpServer())
+      .post("/_identity-test/validation-throw")
+      .set({ Authorization: `Bearer ${token}`, "X-Request-Id": "parser_failure" })
+      .send({ title: "valid" })
+      .expect(400);
+
+    expect(response.body).toEqual({ code: "validation_error", message: "Dữ liệu yêu cầu không hợp lệ.", requestId: "parser_failure", violations: [] });
+  });
+
+  test("executes protected BFF mutations over HTTP with CSRF ordering, canonical correlation, declared idempotency, and safe error projection", async () => {
+    const transport = createBffTransportConfig({ privateApiUrl: new URL("https://api.railway.internal"), bffOrigin: "https://web.xuyenviet.vn", csrfSigningSecret: "a".repeat(32), csrfLifetimeSeconds: 300, requestTimeoutMs: 1_000 });
+    const token = issueCsrfToken(transport);
+    await app.listen(0, "127.0.0.1");
+    vi.unstubAllGlobals();
+    const address = app.getHttpServer().address();
+    if (!address || typeof address === "string") throw new Error("Expected a listening test API server.");
+    const fetcher: typeof fetch = (url, init) => {
+      const localUrl = new URL(typeof url === "string" || url instanceof URL ? url : url.url);
+      localUrl.protocol = "http:";
+      localUrl.hostname = "127.0.0.1";
+      localUrl.port = String(address.port);
+      return fetch(localUrl, init);
+    };
+    const request = { headers: new Headers({ origin: transport.bffOrigin, "sec-fetch-site": "same-origin", "X-XuyenViet-CSRF": token, "x-request-id": "story_9_3" }), cookies: { get: () => ({ value: token }) } };
+    const mintCredential = vi.fn(() => tokenFor(config, "xuyenviet-web-bff"));
+
+    const rejected = await executeProtectedBffMutation({ request: { ...request, headers: new Headers({ origin: "https://foreign.example", "X-XuyenViet-CSRF": token }) }, rawInput: { title: "valid" }, parseInput: parseMutation, parseResult: parseAccepted, config: transport, mintCredential, path: "/_identity-test/protected-mutation", method: "POST", fetcher });
+    expect(rejected).toMatchObject({ ok: false, error: { code: "csrf_invalid" } });
+    expect(mintCredential).not.toHaveBeenCalled();
+    expect(controller().protectedMutationCalls).toBe(0);
+
+    const accepted = await executeProtectedBffMutation({ request, rawInput: { title: "valid" }, parseInput: parseMutation, parseResult: parseAccepted, config: transport, mintCredential, path: "/_identity-test/protected-mutation", method: "POST", idempotencyKey: "declared-9-3", allowIdempotencyKey: true, fetcher });
+    expect(accepted).toEqual({ ok: true, value: { accepted: true }, requestId: "story_9_3" });
+    expect(controller().protectedMutationRequest).toEqual({ title: "valid", requestId: "story_9_3", idempotencyKey: "declared-9-3" });
+
+    const failure = await executeProtectedBffMutation({ request, rawInput: { title: "explode" }, parseInput: parseMutation, parseResult: parseAccepted, config: transport, mintCredential, path: "/_identity-test/protected-mutation", method: "POST", fetcher });
+    expect(failure).toEqual({ ok: false, error: { code: "internal_error", message: "Không thể xử lý yêu cầu.", requestId: "story_9_3" } });
   });
 
   test("rejects invalid clock constraints before controller execution", async () => {
@@ -165,10 +270,18 @@ async function rejected(token?: string) {
     .get("/_identity-test")
     .set(token ? { Authorization: `Bearer ${token}` } : {})
     .expect(401);
-  expect(response.body).toEqual({ code: "unauthorized", message: "Unauthorized.", requestId: expect.any(String) });
+  expect(response.body).toEqual({ code: "unauthorized", message: "Không được phép truy cập.", requestId: expect.any(String) });
   expect(Object.keys(response.body).sort()).toEqual(["code", "message", "requestId"]);
   expect(response.body.requestId.length).toBeLessThanOrEqual(128);
   expect(controller().calls).toBe(0);
+}
+
+function parseMutation(value: unknown): { title: string } | null {
+  return typeof value === "object" && value !== null && typeof (value as { title?: unknown }).title === "string" ? { title: (value as { title: string }).title } : null;
+}
+
+function parseAccepted(value: unknown): { accepted: boolean } | null {
+  return typeof value === "object" && value !== null && typeof (value as { accepted?: unknown }).accepted === "boolean" ? { accepted: (value as { accepted: boolean }).accepted } : null;
 }
 
 async function keySet(kid: string) {

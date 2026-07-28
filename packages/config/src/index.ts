@@ -20,6 +20,43 @@ export type WebBffSigningConfig = {
   issuer: "xuyenviet-web-bff";
   active: { kid: string; publicKey: Jwk; privateKey: Jwk };
 };
+export type BffTransportConfig = {
+  readonly privateApiUrl: string;
+  readonly bffOrigin: string;
+  readonly csrfSigningSecret: string;
+  readonly csrfLifetimeSeconds: number;
+  readonly requestTimeoutMs: number;
+};
+
+export function createBffTransportConfig(input: Omit<BffTransportConfig, "privateApiUrl"> & { privateApiUrl: URL }): BffTransportConfig {
+  if (
+    !(input.privateApiUrl instanceof URL) || input.privateApiUrl.protocol !== "https:" || input.privateApiUrl.hostname !== apiAudience || input.privateApiUrl.username || input.privateApiUrl.password ||
+    !isExactHttpsOrigin(input.bffOrigin) ||
+    typeof input.csrfSigningSecret !== "string" || input.csrfSigningSecret.length < 32 ||
+    !Number.isInteger(input.csrfLifetimeSeconds) || input.csrfLifetimeSeconds < 60 || input.csrfLifetimeSeconds > 3600 ||
+    !Number.isInteger(input.requestTimeoutMs) || input.requestTimeoutMs < 100 || input.requestTimeoutMs > 30_000
+  ) throw new Error("Invalid BFF transport configuration.");
+  return Object.freeze({
+    privateApiUrl: input.privateApiUrl.href,
+    bffOrigin: input.bffOrigin,
+    csrfSigningSecret: input.csrfSigningSecret,
+    csrfLifetimeSeconds: input.csrfLifetimeSeconds,
+    requestTimeoutMs: input.requestTimeoutMs,
+  });
+}
+
+export function getBffTransportConfig(environment: NodeJS.ProcessEnv = process.env): BffTransportConfig {
+  const privateApiUrl = requiredUrl(environment.XV_PRIVATE_API_URL);
+  const bffOrigin = requiredExactHttpsOrigin(environment.XV_WEB_BFF_ORIGIN);
+  const csrfSigningSecret = requiredValue(environment.XV_BFF_CSRF_SIGNING_SECRET);
+  return createBffTransportConfig({
+    privateApiUrl,
+    bffOrigin,
+    csrfSigningSecret,
+    csrfLifetimeSeconds: requiredInteger(environment.XV_BFF_CSRF_LIFETIME_SECONDS),
+    requestTimeoutMs: requiredInteger(environment.XV_BFF_REQUEST_TIMEOUT_MS),
+  });
+}
 
 export function parseBffCredentialConfig(input: unknown): BffCredentialConfig {
   if (!input || typeof input !== "object") {
@@ -115,4 +152,29 @@ function privateKeyMatchesPublicKey(privateKey: Jwk, publicKey: Jwk): boolean {
   } catch {
     return false;
   }
+}
+
+function requiredValue(value: string | undefined): string {
+  if (!value?.trim()) throw new Error("Invalid BFF transport configuration.");
+  return value;
+}
+
+function requiredUrl(value: string | undefined): URL {
+  try { return new URL(requiredValue(value)); } catch { throw new Error("Invalid BFF transport configuration."); }
+}
+
+function requiredExactHttpsOrigin(value: string | undefined): string {
+  const origin = requiredValue(value);
+  if (!isExactHttpsOrigin(origin)) throw new Error("Invalid BFF transport configuration.");
+  return origin;
+}
+
+function requiredInteger(value: string | undefined): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed)) throw new Error("Invalid BFF transport configuration.");
+  return parsed;
+}
+
+function isExactHttpsOrigin(value: string): boolean {
+  try { const url = new URL(value); return url.protocol === "https:" && url.origin === value; } catch { return false; }
 }
