@@ -2,9 +2,11 @@
 
 ## Trạng Thái
 
-**Hướng kiến trúc đã được chốt, chưa bắt đầu implementation.** Tạo ngày 2026-07-28, cập nhật ngày 2026-07-28 theo Fast path. Các mục mang nhãn `[ASSUMPTION]` còn cần được xác nhận trong spike hoặc trước capability liên quan; chúng không thay đổi quyết định kiến trúc này.
+**Hướng kiến trúc đã được phê duyệt, chưa bắt đầu implementation.** Tạo ngày 2026-07-28, cập nhật ngày 2026-07-28 theo Fast path. Các mục mang nhãn `[ASSUMPTION]` còn cần được xác nhận trong spike hoặc trước capability liên quan; chúng không thay đổi quyết định kiến trúc này.
 
-Proposal này thay thế định hướng runtime của MVP hiện tại **chỉ khi được phê duyệt**. Cho đến lúc đó, PRD và Architecture Spine hiện hành vẫn là nguồn chân lý: Next.js modular monolith, admin cùng application, và worker Node được giám sát riêng.
+Kế hoạch triển khai và kết quả rà soát codebase được ghi tại [Kế Hoạch Thực Hiện NestJS API Và Admin Tách Riêng](./nestjs-api-implementation-plan.md). Implementation vẫn chờ BMad baseline và các spike bắt buộc được hoàn tất.
+
+Proposal này thay thế định hướng runtime của MVP hiện tại. PRD và Architecture Spine phải được cập nhật theo Workstream 0 trước implementation; cho đến khi việc cập nhật hoàn tất, chúng vẫn là nguồn chân lý cho product scope và các invariant chưa được proposal này thay thế.
 
 ## Quyết Định Đề Xuất
 
@@ -205,6 +207,13 @@ Lý do: tránh để browser cookie của Auth.js trở thành cross-origin API 
 | Dùng shared static service secret từ frontend | Cấm | Không đại diện user/session và không an toàn cho browser/mobile. |
 
 Trước mobile implementation, cần chốt authorization-server library và Google identity federation/configuration cho Nest-hosted OAuth/OIDC. Không coi internal web access token là mobile identity solution cuối cùng.
+
+### Quyết Định Phê Duyệt: Hai Token Boundary
+
+- `web` và `admin` BFF mint internal short-lived token chỉ để gọi `api.railway.internal`. Token này không được gửi xuống browser, không có refresh capability, không được chấp nhận tại public API, và không phải OAuth/OIDC token.
+- Mobile dùng Nest-hosted OAuth/OIDC access/refresh token qua authorization-code flow with PKCE khi mobile initiative bắt đầu. Mobile không dùng Auth.js cookie hoặc internal BFF token.
+- Cả hai luồng map vào cùng domain-neutral `RequestPrincipal`: stable `users.id` là `sub`; role/version, issuer, audience, issued/expiry và token ID là claims/metadata tiêu chuẩn. Domain API không phụ thuộc cookie format hoặc serialized Auth.js session.
+- Identity spike phải chốt issuer, audience, key rotation, TTL, logout/revocation và role-freshness cho internal token, đồng thời chứng minh public/mobile issuer sau này thay thế được mà không đổi API contract, ownership hay authorization policy.
 
 ## Worker, Cron Và Operations
 
