@@ -47,6 +47,7 @@ describe("audit actor boundary", () => {
       "system-trip-planning",
       "system-facebook-capture",
       "system-youtube-capture",
+      "system-admin-bootstrap",
     ]);
     expect(ids.map(createSystemAuditActor)).toEqual(ids.map((system) => ({ kind: "system", system })));
     expect(Object.isFrozen(systemAuditActorCatalog)).toBe(true);

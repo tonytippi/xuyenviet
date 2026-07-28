@@ -14,7 +14,7 @@
     "db:migrate": "drizzle-kit migrate",
     "db:seed": "tsx scripts/db-seed.ts",
     "db:reset": "tsx scripts/db-reset.ts",
-    "db:promote-admin": "tsx scripts/db-promote-admin.ts",
+    "bootstrap:initial-admin": "node --conditions react-server --import tsx scripts/bootstrap-initial-admin.ts",
     "facebook:capture": "node --conditions react-server --import tsx scripts/facebook-capture.ts",
     "youtube:capture": "tsx scripts/youtube-capture.ts",
     "capture-cache:migrate": "tsx scripts/capture-cache-migrate.ts",

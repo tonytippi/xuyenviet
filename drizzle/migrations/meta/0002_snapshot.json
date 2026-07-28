@@ -10177,7 +10177,7 @@
       "checkConstraints": {
         "users_no_system_executor_id_check": {
           "name": "users_no_system_executor_id_check",
-          "value": "\"users\".\"id\" not in ('system-ai-orchestration', 'system-knowledge-pipeline', 'system-trip-planning', 'system-facebook-capture', 'system-youtube-capture')"
+          "value": "\"users\".\"id\" not in ('system-ai-orchestration', 'system-knowledge-pipeline', 'system-trip-planning', 'system-facebook-capture', 'system-youtube-capture', 'system-admin-bootstrap')"
         }
       },
       "isRLSEnabled": false

@@ -214,7 +214,7 @@ export const users = pgTable("users", {
 }, (user) => [
   check(
     "users_no_system_executor_id_check",
-    sql`${user.id} not in ('system-ai-orchestration', 'system-knowledge-pipeline', 'system-trip-planning', 'system-facebook-capture', 'system-youtube-capture')`,
+    sql`${user.id} not in ('system-ai-orchestration', 'system-knowledge-pipeline', 'system-trip-planning', 'system-facebook-capture', 'system-youtube-capture', 'system-admin-bootstrap')`,
   ),
 ]);
 

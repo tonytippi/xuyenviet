@@ -1,8 +1,13 @@
 "use server";
 
-import { and, eq, ne, sql } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 
-import { aiGatewayModels, userRoles, users, type AiGatewayModelPurpose, type UserRole } from "@/db/schema";
+import type { RequestPrincipal } from "@xuyenviet/contracts";
+
+import { getDb } from "@/db/client";
+import { aiGatewayModels, users, type AiGatewayModelPurpose } from "@/db/schema";
+import { changeUserRole, type ManagedUserRole, type UserRoleDeltaResult } from "@/features/auth/role-governance";
+import { requireExactAdminSession } from "@/server/auth";
 import { runAuditedAdminMutation, runAuditedExactAdminMutation } from "@/server/mutations";
 
 type AiGatewayModelMutationInput = {
@@ -175,66 +180,12 @@ export async function setDefaultAiGatewayModel(modelId: string) {
   });
 }
 
-type ManagedUserRole = Extract<UserRole, "operator" | "admin">;
-
-type UserRoleDeltaResult = {
-  changed: boolean;
-  targetUserId: string;
-  role: ManagedUserRole;
-  operation: "grant" | "revoke";
-};
-
 export async function grantAdminUserRole(targetUserId: string, role: ManagedUserRole): Promise<UserRoleDeltaResult> {
-  const id = normalizeManagedUserId(targetUserId);
-  const managedRole = normalizeManagedRole(role);
-
-  return runAuditedExactAdminMutation({
-    audit: (result) => result.changed ? roleDeltaAudit(result) : undefined,
-    action: async (_session, transaction) => {
-      const [target] = await transaction.select({ id: users.id }).from(users).where(eq(users.id, id)).limit(1);
-
-      if (!target) {
-        throw new Error("User not found.");
-      }
-
-      const inserted = await transaction.insert(userRoles).values({ userId: id, role: managedRole }).onConflictDoNothing().returning({ userId: userRoles.userId });
-      if (inserted.length > 0) {
-        await transaction.update(users).set({ authorizationVersion: sql`${users.authorizationVersion} + 1` }).where(eq(users.id, id));
-      }
-      return { changed: inserted.length > 0, targetUserId: id, role: managedRole, operation: "grant" };
-    },
-  });
+  return changeUserRole(await getActionPrincipal(), { targetUserId, role, operation: "grant" });
 }
 
 export async function revokeAdminUserRole(targetUserId: string, role: ManagedUserRole): Promise<UserRoleDeltaResult> {
-  const id = normalizeManagedUserId(targetUserId);
-  const managedRole = normalizeManagedRole(role);
-
-  return runAuditedExactAdminMutation({
-    audit: (result) => result.changed ? roleDeltaAudit(result) : undefined,
-    action: async (_session, transaction) => {
-      const [target] = await transaction.select({ id: users.id }).from(users).where(eq(users.id, id)).limit(1);
-
-      if (!target) {
-        throw new Error("User not found.");
-      }
-
-      if (managedRole === "admin") {
-        const administrators = await transaction.select({ userId: userRoles.userId }).from(userRoles).where(eq(userRoles.role, "admin")).for("update");
-        const targetIsAdministrator = administrators.some((administrator) => administrator.userId === id);
-
-        if (targetIsAdministrator && administrators.length === 1) {
-          throw new Error("Cannot revoke the final administrator role.");
-        }
-      }
-
-      const removed = await transaction.delete(userRoles).where(and(eq(userRoles.userId, id), eq(userRoles.role, managedRole))).returning({ userId: userRoles.userId });
-      if (removed.length > 0) {
-        await transaction.update(users).set({ authorizationVersion: sql`${users.authorizationVersion} + 1` }).where(eq(users.id, id));
-      }
-      return { changed: removed.length > 0, targetUserId: id, role: managedRole, operation: "revoke" };
-    },
-  });
+  return changeUserRole(await getActionPrincipal(), { targetUserId, role, operation: "revoke" });
 }
 
 export async function grantAdminUserRoleForm(formData: FormData) {
@@ -303,30 +254,30 @@ function normalizeId(id: string) {
   return normalizeRequiredString(id, "AI Gateway model id");
 }
 
-function normalizeManagedUserId(id: string) {
-  return normalizeRequiredString(id, "User id");
-}
-
-function normalizeManagedRole(role: string): ManagedUserRole {
-  if (role !== "operator" && role !== "admin") {
-    throw new Error("Role must be operator or admin.");
-  }
-
-  return role;
-}
-
 function getFormString(formData: FormData, key: string) {
   const value = formData.get(key);
   return typeof value === "string" ? value : "";
 }
 
-function roleDeltaAudit(result: UserRoleDeltaResult) {
-  const summary = JSON.stringify({ role: result.role });
+async function getActionPrincipal(): Promise<RequestPrincipal> {
+  const session = await requireExactAdminSession();
+  const [identity] = await getDb()
+    .select({ authorizationVersion: users.authorizationVersion })
+    .from(users)
+    .where(eq(users.id, session.userId))
+    .limit(1);
+
+  if (!identity) {
+    throw new Error("Authenticated user not found.");
+  }
+
   return {
-    operation: "update" as const,
-    targetType: "user_role",
-    targetId: result.targetUserId,
-    ...(result.operation === "grant" ? { afterSummary: summary } : { beforeSummary: summary }),
+    userId: session.userId,
+    sessionId: "next-server-action",
+    roles: [],
+    authorizationVersion: identity.authorizationVersion,
+    issuer: "xuyenviet-web-bff",
+    tokenId: "next-server-action",
   };
 }
 

@@ -1,4 +1,3 @@
-import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { userRoles, users } from "@/db/schema";
@@ -42,82 +41,30 @@ async function getSignInEvent() {
   return signIn;
 }
 
-async function createUser(id: string, email: string) {
-  await testDb.insert(users).values({ id, email });
-}
-
-async function getRoles(userId: string) {
-  const rows = await testDb.select({ role: userRoles.role }).from(userRoles).where(eq(userRoles.userId, userId));
-
-  return rows.map((row) => row.role).sort();
-}
-
-describe("ADMIN_EMAIL login-time role provisioning", () => {
+describe("sign-in events", () => {
   beforeEach(() => {
     delete process.env.ADMIN_EMAIL;
     authMocks.captureFirstTouchReferralAttribution.mockReset();
     authMocks.nextAuthConfigFactory = undefined;
   });
 
-  test("grants admin and operator roles when ADMIN_EMAIL matches with normalization", async () => {
+  test("does not grant roles when ADMIN_EMAIL matches", async () => {
     process.env.ADMIN_EMAIL = " Admin@Example.com ";
-    await createUser("admin-user", "admin@example.com");
+    await testDb.insert(users).values({ id: "admin-user", email: "admin@example.com" });
     const signIn = await getSignInEvent();
 
     await signIn({ user: { id: "admin-user", email: "admin@example.com" }, isNewUser: false });
 
-    expect(await getRoles("admin-user")).toEqual(["admin", "operator"]);
+    await expect(testDb.select().from(userRoles)).resolves.toEqual([]);
   });
 
-  test("does not grant roles when ADMIN_EMAIL does not match", async () => {
-    process.env.ADMIN_EMAIL = "admin@example.com";
-    await createUser("traveler-user", "traveler@example.com");
+  test("preserves first-touch referral attribution for new users", async () => {
+    await testDb.insert(users).values({ id: "new-user", email: "new@example.com" });
     const signIn = await getSignInEvent();
 
-    await signIn({ user: { id: "traveler-user", email: "traveler@example.com" }, isNewUser: false });
+    await signIn({ user: { id: "new-user", email: "new@example.com" }, isNewUser: true });
 
-    expect(await getRoles("traveler-user")).toEqual([]);
-  });
-
-  test.each([
-    { name: "missing ADMIN_EMAIL", adminEmail: undefined, user: { id: "incomplete-user", email: "admin@example.com" } },
-    { name: "blank ADMIN_EMAIL", adminEmail: "  ", user: { id: "incomplete-user", email: "admin@example.com" } },
-    { name: "missing user id", adminEmail: "admin@example.com", user: { email: "admin@example.com" } },
-    { name: "missing user email", adminEmail: "admin@example.com", user: { id: "incomplete-user" } },
-  ])("does not grant roles for $name", async ({ adminEmail, user }) => {
-    if (adminEmail === undefined) {
-      delete process.env.ADMIN_EMAIL;
-    } else {
-      process.env.ADMIN_EMAIL = adminEmail;
-    }
-
-    await createUser("incomplete-user", "admin@example.com");
-    const signIn = await getSignInEvent();
-
-    await signIn({ user, isNewUser: false });
-
-    expect(await getRoles("incomplete-user")).toEqual([]);
-  });
-
-  test("repeated matching sign-ins are idempotent", async () => {
-    process.env.ADMIN_EMAIL = "admin@example.com";
-    await createUser("admin-user", "admin@example.com");
-    const signIn = await getSignInEvent();
-
-    await signIn({ user: { id: "admin-user", email: "admin@example.com" }, isNewUser: false });
-    await signIn({ user: { id: "admin-user", email: "admin@example.com" }, isNewUser: false });
-
-    expect(await getRoles("admin-user")).toEqual(["admin", "operator"]);
-  });
-
-  test("preserves first-touch referral attribution for new admin users", async () => {
-    process.env.ADMIN_EMAIL = "admin@example.com";
-    await createUser("new-admin-user", "admin@example.com");
-    const signIn = await getSignInEvent();
-
-    await signIn({ user: { id: "new-admin-user", email: "admin@example.com" }, isNewUser: true });
-
-    expect(authMocks.captureFirstTouchReferralAttribution).toHaveBeenCalledWith("new-admin-user");
-    expect(await getRoles("new-admin-user")).toEqual(["admin", "operator"]);
+    expect(authMocks.captureFirstTouchReferralAttribution).toHaveBeenCalledWith("new-user");
+    await expect(testDb.select().from(userRoles)).resolves.toEqual([]);
   });
 });
