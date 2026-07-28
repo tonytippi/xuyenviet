@@ -1385,7 +1385,8 @@ So that the API-first boundary is proven by behavior rather than only by credent
 **Given** the selected capability is cut over
 **When** its migration flag routes a request
 **Then** exactly one transport owner accepts the read or command
-**And** staging tests prove no legacy/API dual write or divergent ownership path exists.
+**And** local contract and routing tests prove no legacy/API dual write or divergent ownership path exists
+**And** Epic 14 Story 14.2 owns deployed selected-owner, migration-ordering, rollback, and legacy-retirement evidence.
 
 ## Epic 10: Reliable AI Ask API Cutover
 
@@ -1757,6 +1758,8 @@ So that public readiness is explicit about completed proof, accepted risk, and b
 **When** the gate is produced
 **Then** OAuth/admin/referral smoke, private networking, migration ordering, worker health, connection-pool and AI-stream concurrency, backup restore, monitoring, alerting, on-call, provider privacy, and search/provider readiness each have an owner, evidence link, and `complete`, `accepted_risk`, or `blocked` status
 **And** unresolved product, legal, provider, or operations decisions identify owner, due date, and launch impact.
+
+**And** each completed capability cutover records deployed API workload selection, private route/probe evidence, migration-before-traffic order, selected-owner execution, response-equivalence or approved risk, rollback proof, and legacy-owner retirement disposition.
 
 **Given** a mandatory launch item is unowned or lacks evidence/disposition
 **When** launch readiness is calculated

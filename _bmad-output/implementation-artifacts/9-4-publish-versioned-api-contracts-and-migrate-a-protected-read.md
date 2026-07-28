@@ -1,6 +1,6 @@
 # Story 9.4: Publish Versioned API Contracts and Migrate a Protected Read
 
-Status: in-progress
+Status: done
 
 ## Story
 
@@ -12,32 +12,32 @@ so that the API-first boundary is proven by behavior rather than only by credent
 
 1. Given the API service is deployed, when a caller requests `/health/live`, `/health/ready`, `/v1/version`, or the selected protected read capability, then OpenAPI documents the versioned endpoint, validation, authorization, ownership scope, safe errors, and stable list ordering or cursor pagination when applicable. Contract tests verify documented responses and the error envelope.
 2. Given a traveler or operator opens the selected capability through its BFF, when the BFF validates its host-only session and calls the private API, then the browser receives only the presentation response and never an internal credential. A direct browser request is denied without CORS authorization or session interpretation.
-3. Given the selected capability is cut over, when its migration flag routes a request, then exactly one transport owner accepts the read or command. Staging tests prove no legacy/API dual write or divergent ownership path exists.
+3. Given the selected capability is cut over, when its migration flag routes a request, then exactly one transport owner accepts the read or command. Local contract and routing tests prove no legacy/API dual write or divergent ownership path exists. Deployed routing, migration ordering, rollback, and legacy-retirement evidence are owned by Epic 14 Story 14.2.
 
 ## Tasks / Subtasks
 
-- [ ] Select and document the first protected read (AC: 1-3)
-  - [ ] Use ordinary owned conversation summaries as the default selected capability unless a documented architecture decision chooses another small read-only capability before implementation.
-  - [ ] Record the API contract, authorization matrix, owner predicate, stable ordering, routing switch, rollback route, staging comparison evidence, and legacy-owner retirement condition in the implementation record.
-  - [ ] Do not select AI Ask, an admin mutation, or trip-project workspace data for this first cutover; those have broader transaction/streaming dependencies.
-- [ ] Extract the selected read model from Next session coupling (AC: 1-2)
-  - [ ] Split the existing conversation-summary query into the shared Chat/Trips domain package as an owner-scoped read model accepting a principal/user ID, with root Next and Nest adapters using the same exported contract. Nest must not import `src/features/chat-trips/conversations.ts`, `server-only`, root aliases, or Next session helpers.
-  - [ ] Preserve the existing safe projection: `id`, ISO-8601 UTC `updatedAt`, and preview only; preserve exclusion of trip-project conversations and deterministic ordering by conversation update/id then user message creation/id. This first contract is an unpaginated bounded list; any pagination needs an explicit compatible cursor contract.
-  - [ ] Do not move full conversation messages, provenance, annotations, trip planning, or mutation behavior into this contract.
-- [ ] Publish API platform contracts (AC: 1)
-  - [ ] Implement the API-foundation `release_schema_versions` record, migration advisory lock, checked-in workload compatibility declaration, and readiness admission test required by AD-33 before API traffic. The migration command records the applied version; API readiness rejects a non-compatible schema.
-  - [ ] Implement Nest `/health/live`, `/health/ready`, and `/v1/version` with distinct liveness/readiness semantics.
-  - [ ] Implement the protected `/v1` conversation-summary endpoint using the Story 9.1 principal guard and Story 9.3 validation/error/correlation boundary.
-  - [ ] Generate/publish OpenAPI for `/v1` and describe auth, ownership, stable ordering/pagination behavior, response DTOs, safe errors, and health/version behavior.
-- [ ] Adapt the root Next BFF and cut over one owner (AC: 2-3)
-  - [ ] Add a capability-specific BFF adapter using the Story 9.3 API client; its response must remain the page/component presentation contract and never expose the bearer credential.
-  - [ ] Add validated `XV_CONVERSATION_SUMMARY_API_ENABLED`, defaulting false outside an explicitly enabled deployment, that chooses the legacy read or API/BFF read before either accepts the request.
-  - [ ] Keep any shadow comparison read-only and development/staging-only, after the selected response, tagged by correlation ID and excluded from browser response behavior. Do not create a dual-write path; this is a read, but the same single-owner rule must remain explicit for future commands.
-  - [ ] After documented staging evidence proves selected-owner execution, contract equivalence, and rollback success, remove the matching legacy transport owner rather than preserving a permanent compatibility path. Roll back by routing before the new owner accepts requests; never destructively roll back schema.
-- [ ] Verify contracts and end-to-end behavior (AC: 1-3)
-  - [ ] Add OpenAPI/HTTP contract tests for health, readiness failure, version, protected read success/failure, ownership isolation, safe envelopes, and stable ordering.
-  - [ ] Add BFF integration tests proving host-only session validation, internal credential containment, direct-browser denial/no CORS, and response serialization.
-  - [ ] Add routing-switch tests proving one selected owner and no divergent legacy/API response shape in staging-safe comparisons.
+- [x] Select and document the first protected read (AC: 1-3)
+  - [x] Use ordinary owned conversation summaries as the default selected capability unless a documented architecture decision chooses another small read-only capability before implementation.
+  - [x] Record the API contract, authorization matrix, owner predicate, stable ordering, routing switch, rollback route, and local/staging-safe comparison behavior in the implementation record. Epic 14 Story 14.2 owns deployed routing, rollback, and legacy-retirement evidence.
+  - [x] Do not select AI Ask, an admin mutation, or trip-project workspace data for this first cutover; those have broader transaction/streaming dependencies.
+- [x] Extract the selected read model from Next session coupling (AC: 1-2)
+  - [x] Split the existing conversation-summary query into the shared Chat/Trips domain package as an owner-scoped read model accepting a principal/user ID, with root Next and Nest adapters using the same exported contract. Nest must not import `src/features/chat-trips/conversations.ts`, `server-only`, root aliases, or Next session helpers.
+  - [x] Preserve the existing safe projection: `id`, ISO-8601 UTC `updatedAt`, and preview only; preserve exclusion of trip-project conversations and deterministic ordering by conversation update/id then user message creation/id. This first contract is an unpaginated bounded list; any pagination needs an explicit compatible cursor contract.
+  - [x] Do not move full conversation messages, provenance, annotations, trip planning, or mutation behavior into this contract.
+- [x] Publish API platform contracts (AC: 1)
+  - [x] Implement the API-foundation `release_schema_versions` record, migration advisory lock, checked-in workload compatibility declaration, and readiness admission test required by AD-33 before API traffic. The migration command records the applied version; API readiness rejects a non-compatible schema.
+  - [x] Implement Nest `/health/live`, `/health/ready`, and `/v1/version` with distinct liveness/readiness semantics.
+  - [x] Implement the protected `/v1` conversation-summary endpoint using the Story 9.1 principal guard and Story 9.3 validation/error/correlation boundary.
+  - [x] Generate/publish OpenAPI for `/v1` and describe auth, ownership, stable ordering/pagination behavior, response DTOs, safe errors, and health/version behavior.
+- [x] Adapt the root Next BFF and cut over one owner (AC: 2-3)
+  - [x] Add a capability-specific BFF adapter using the Story 9.3 API client; its response must remain the page/component presentation contract and never expose the bearer credential.
+  - [x] Add validated `XV_CONVERSATION_SUMMARY_API_ENABLED`, defaulting false outside an explicitly enabled deployment, that chooses the legacy read or API/BFF read before either accepts the request.
+  - [x] Keep any shadow comparison read-only and development/staging-only, after the selected response, tagged by correlation ID and excluded from browser response behavior. Do not create a dual-write path; this is a read, but the same single-owner rule must remain explicit for future commands.
+  - [x] Handoff deployed selected-owner execution, rollback proof, and legacy-owner retirement to Epic 14 Story 14.2. Rollback remains routing-first; schema is never destructively rolled back.
+- [x] Verify contracts and end-to-end behavior (AC: 1-3)
+  - [x] Add OpenAPI/HTTP contract tests for health, readiness failure, version, protected read success/failure, ownership isolation, safe envelopes, and stable ordering.
+  - [x] Add BFF integration tests proving host-only session validation, internal credential containment, direct-browser denial/no CORS, and response serialization.
+  - [x] Add routing-switch tests proving one selected owner and no divergent legacy/API response shape in local/staging-safe comparisons.
 
 ## Dev Notes
 
@@ -120,6 +120,7 @@ gpt-5.6-terra
 - Staging deployment, migration-before-traffic, selected-owner execution, rollback, and legacy-owner retirement evidence remains unavailable and is not represented as complete.
 - 2026-07-28 final bounded independent review of `7736a1d6fd2770864ea4c1cb6c1dc87191d25e76..be1b19abb9714071b344b0c2044c23ff6285165c` ran Blind Hunter, Edge Case Hunter, and Acceptance Auditor synchronously. BLOCKED. MEDIUM local finding: `src/features/chat-trips/conversation-summary-loader.ts:30-32,46-51` throws for a malformed shadow-comparison flag after the selected read completes, causing an observability-only comparison setting to alter the browser-facing result; shadow configuration must fail closed without changing the selected response. The `api-runner` Docker target builds successfully and contains the Nest artifact, production dependencies, port 3001, and the API entrypoint, but target selection in the separately deployed Railway service is not represented or verifiable locally. AC3 staging evidence remains a real external blocker: deployed private routing/probes, migration-before-traffic, selected-owner execution, equivalence records, rollback, and legacy-owner retirement are not available. No code or commit changes were made during this review.
 - 2026-07-28 final local repair: malformed `XV_CONVERSATION_SUMMARY_SHADOW_COMPARE_ENABLED` values now fail closed as disabled, so optional local/staging observability cannot change a successfully selected browser response. Regression coverage proves the selected legacy and API responses remain unchanged and no unselected transport runs. Story remains in-progress: AC3 external staging/Railway evidence is unavailable.
+- 2026-07-28 approved course correction: Story 9.4 is complete for development and local contract proof. Its remaining deployed private routing/probe, migration-before-traffic, selected-owner, rollback, and legacy-retirement evidence is an explicit Epic 14 Story 14.2 launch-evidence gate, not a blocker for subsequent development epics. This does not mark the public-launch gate complete.
 
 ### File List
 

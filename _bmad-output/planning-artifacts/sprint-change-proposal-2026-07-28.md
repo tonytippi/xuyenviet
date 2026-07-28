@@ -163,3 +163,4 @@ The four detailed change proposals and the complete proposal were approved by To
 - 2026-07-28: Tony selected incremental review and approved all four edit proposals.
 - 2026-07-28: Tony approved the complete Sprint Change Proposal.
 - 2026-07-28: Product planning artifacts and sprint backlog were updated. No production code, completed-epic status, or historic sprint evidence was modified.
+- 2026-07-28: Tony approved a follow-on sequencing clarification: Story 9.4 completion is limited to development and local contract proof. Its unavailable deployment, private-route/probe, migration-ordering, selected-owner, rollback, and legacy-retirement evidence is owned by Epic 14 Story 14.2. Epic 10 development may proceed after Epic 9 completes; Epic 14 remains the mandatory public-launch gate.
