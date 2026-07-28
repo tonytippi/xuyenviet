@@ -1,6 +1,6 @@
 # Story 9.1: Establish BFF Credentials and API Request Principals
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -125,5 +125,6 @@ gpt-5.6-terra
 - Recovery evidence (2026-07-28): PostgreSQL-backed Nest integration proves an already-minted web credential is rejected after both a successful role grant and a successful role revoke; an unchanged duplicate mutation does not increment the version. It also accepts a valid `xuyenviet-admin-bff` ES256 credential with its matching admin issuer/key while retaining cross-issuer rejection.
 - Recovery evidence (2026-07-28): the real `GET /api/bff/session` browser-facing BFF route mints its internal credential server-side and serializes only `{ authenticated: true, user: { id } }`; its route test proves the response excludes the credential, database session token, and private JWK material. Credential lifetimes now require an uncoerced finite integer in `[1, 300]`, and Node crypto imports validate public/private JWK material at configuration startup.
 - Verification (2026-07-28): `pnpm vitest run tests/api-request-principal.integration.test.ts tests/admin-user-management.test.ts tests/bff-credentials.test.ts tests/bff-session-route.test.ts` passed (4 files, 25 tests); `pnpm typecheck` passed; `pnpm lint` passed with 0 errors and 3 pre-existing unrelated warnings in `tests/knowledge-search.test.ts`. Status restored to `ready-for-dev`; follow-up independent review remains the next Story 9.1 workflow action.
+- Final recovery verification review (2026-07-28) of exact range `2d9228ed5b8e8d3480c8e23dc231b4d18cd20cff..1026f1e85e7e68e31314edaf838c1a378d5cff33` ran Blind Hunter, Edge Case Hunter, and Acceptance Auditor synchronously. No actionable findings. All Story 9.1 ACs are satisfied. The grant/revoke authorization-version increment is in the existing audited transaction and runs only when the respective `RETURNING` insert/delete changed a role row; PostgreSQL-backed Nest coverage rejects already-minted credentials after both changed mutations, while duplicate/no-op mutations retain the version. Verification passed: focused 4-file suite (25 tests), `pnpm typecheck`, and `pnpm lint` (0 errors; 4 warnings, including generated `apps/api/dist/main.mjs` and 3 pre-existing `tests/knowledge-search.test.ts` warnings). Status synchronized to `done`; no code changes or commit performed.
 
 ### File List
