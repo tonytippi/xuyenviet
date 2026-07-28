@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-07-28 (Story 9.3 final permitted abort/timeout race repair verified; status set to done.)
+# last_updated: 2026-07-28 (Story 9.4 local review repairs complete; staging evidence remains required.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-07-28 (Story 9.3 final permitted abort/timeout race repair verified; status set to done.)
+last_updated: 2026-07-28 (Story 9.4 local review repairs complete; staging evidence remains required.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -183,6 +183,8 @@ development_status:
   # 2026-07-28: Final bounded independent review of ac7ce47c6002486fd1949faf6f4ec0dab723e4fe..3b912494dfd943da254301836c1a0dd6a0364423 ran Blind Hunter, Edge Case Hunter, and Acceptance Auditor synchronously. One MEDIUM patch remains: src/server/bff-api-client.ts:45-54 does not re-check caller abort or local timeout after response.json(), so a protected mutation can return success when cancellation happens during response-body consumption. Add a post-body abort/timeout check with a regression. Blind Hunter and Acceptance Auditor clean. Focused transport suite: 4 files, 39 tests passed. No code or commit changes.
   # 2026-07-28: Final permitted repair re-checks caller abort/local timeout after response-body parsing and before error or success projection. Regression covers cancellation and timeout during JSON parsing. Targeted transport/API suite passed (4 files, 40 tests); pnpm typecheck and git diff --check passed. Status set to done.
   9-3-enforce-the-private-bff-transport-boundary: done
+  # 2026-07-28: Independent review of 7736a1d6fd2770864ea4c1cb6c1dc87191d25e76..21303df22f5dc3e10a3d7fb9419c868678d539ba ran Blind Hunter, Edge Case Hunter, and Acceptance Auditor synchronously. BLOCKED: HIGH Docker runtime omission means the built API workload cannot be deployed/reached; MEDIUM AC3 lacks a staging-safe, correlation-tagged equivalence comparison between real legacy/API adapters. AC1/AC2 local contracts pass; required staging deployment, migration-before-traffic, selected-owner, equivalence, rollback, and legacy-retirement evidence is externally unavailable and must be recorded before completion. Local review evidence: 16 targeted tests, typecheck, build, and diff check passed; lint 0 errors and 4 warnings. No application code or commit changes during review.
+  # 2026-07-28: Repaired only the local review findings. Dockerfile now has an independently deployable api-runner target that copies and starts apps/api/dist on 3001. The protected-read loader runs a correlation-tagged, read-only actual-adapter equivalence comparison only when explicitly enabled in local/staging, after the selected owner returns, and never in production; the ID is propagated to the API adapter, and focused coverage proves equivalent legacy/API projections plus production no-dual-read behavior. No staging deployment, migration ordering, selected-owner execution, rollback, or legacy-retirement evidence was fabricated; follow-up independent review and externally recorded staging evidence remain required.
   9-4-publish-versioned-api-contracts-and-migrate-a-protected-read: ready-for-dev
   epic-9-retrospective: optional
 

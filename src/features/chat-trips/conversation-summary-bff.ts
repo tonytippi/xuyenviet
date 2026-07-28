@@ -16,13 +16,13 @@ type Dependencies = {
 
 const defaults: Dependencies = { config: getBffTransportConfig, mintCredential: mintWebBffCredential, callApi: (input) => callPrivateApi(input) };
 
-export async function listOwnedConversationSummariesFromApi(dependencies: Dependencies = defaults): Promise<OwnedConversationSummary[]> {
+export async function listOwnedConversationSummariesFromApi(dependencies: Dependencies = defaults, correlationId = crypto.randomUUID()): Promise<OwnedConversationSummary[]> {
   const config = dependencies.config();
   const credential = await dependencies.mintCredential();
   const response = await dependencies.callApi({
     config,
     credential,
-    correlationId: crypto.randomUUID(),
+    correlationId,
     path: "/v1/conversations/summaries",
     method: "GET",
     parseResult: parseConversationSummaryListResponse,

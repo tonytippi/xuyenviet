@@ -46,6 +46,24 @@ USER nextjs
 
 CMD ["node_modules/.bin/next", "start"]
 
+# Railway deploys the Nest API separately from the Next BFF. Select this target
+# for the private API service so its build output and port are not coupled to web.
+FROM base AS api-runner
+
+ENV NODE_ENV=production
+ENV PORT=3001
+
+RUN groupadd --system api && useradd --system --gid api api
+
+COPY --chown=api:api --from=production-deps /app/node_modules ./node_modules
+COPY --chown=api:api --from=build /app/apps/api/dist ./apps/api/dist
+
+EXPOSE 3001
+
+USER api
+
+CMD ["node", "apps/api/dist/main.mjs"]
+
 FROM deps AS migrator
 
 COPY . .

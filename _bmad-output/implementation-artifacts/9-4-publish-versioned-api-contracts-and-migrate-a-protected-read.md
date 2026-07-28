@@ -110,5 +110,18 @@ gpt-5.6-terra
 ### Completion Notes List
 
 - Ultimate context engine analysis completed - comprehensive developer guide created.
+- 2026-07-28 independent Story 9.4 review of `7736a1d6fd2770864ea4c1cb6c1dc87191d25e76..21303df22f5dc3e10a3d7fb9419c868678d539ba` is blocked; no application code was changed during review.
+- Local evidence: `pnpm vitest run tests/api-platform-contract.test.ts tests/conversation-summary-cutover.test.ts tests/ai-ask-sessions.test.ts` passed (3 files, 16 tests); `pnpm lint` passed with 4 warnings and 0 errors; `pnpm typecheck`, `pnpm build`, and range `git diff --check` passed.
+- HIGH code/integration finding: `Dockerfile:39-47` ships only the Next runtime and starts `next start`; it omits the built `apps/api/dist` workload and an API start command. The newly enabled BFF route therefore has no API workload to reach in Docker-based deployment.
+- MEDIUM AC3 code finding: `src/features/chat-trips/conversation-summary-loader.ts:10-15` selects one transport but implements neither the required development/staging-only, correlation-tagged, read-only comparison nor response-equivalence coverage against both real adapters. `tests/conversation-summary-cutover.test.ts:8-19` exercises synthetic callbacks only.
+- External prerequisite, not a local code failure: no local evidence establishes a separately deployed API workload, private route/probes, migration-before-traffic ordering, selected-owner execution, response equivalence, or rollback. The required staging evidence and post-proof legacy-owner retirement in AC3 remain unavailable; do not mark this story done until recorded.
+- 2026-07-28 local independent-review repair: `Dockerfile` now provides an `api-runner` target that copies `apps/api/dist`, starts Nest on port 3001, and remains separately deployable from the Next `runner` target. This satisfies the local workload packaging finding without claiming deployment evidence.
+- 2026-07-28 local independent-review repair: the conversation-summary loader now optionally performs an asynchronous, read-only equivalence comparison only when `XV_CONVERSATION_SUMMARY_SHADOW_COMPARE_ENABLED=true` and `APP_ENV` is `local` or `staging`. It begins only after the selected owner returns, has no browser-response effect, logs only equivalence metadata tagged with its correlation ID, propagates that ID to the API adapter, and is disabled in production. Focused coverage invokes the actual legacy/API adapter seams with equivalent serialized responses.
+- Staging deployment, migration-before-traffic, selected-owner execution, rollback, and legacy-owner retirement evidence remains unavailable and is not represented as complete.
 
 ### File List
+
+- Dockerfile
+- src/features/chat-trips/conversation-summary-bff.ts
+- src/features/chat-trips/conversation-summary-loader.ts
+- tests/conversation-summary-cutover.test.ts
