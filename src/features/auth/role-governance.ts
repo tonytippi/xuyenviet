@@ -85,6 +85,7 @@ export async function bootstrapInitialAdmin(
 
   return dependencies.database.transaction(async (transaction) => {
     await lockRoleGovernance(transaction);
+    await lockBootstrapCandidates(transaction);
     const administrators = await transaction
       .select({ userId: userRoles.userId })
       .from(userRoles)
@@ -138,6 +139,12 @@ export async function bootstrapInitialAdmin(
 
 async function lockRoleGovernance(transaction: RoleGovernanceTransaction) {
   await transaction.execute(sql`select pg_advisory_xact_lock(727556452)`);
+}
+
+async function lockBootstrapCandidates(transaction: RoleGovernanceTransaction) {
+  // JavaScript Unicode normalization prevents a database predicate lock over the candidate set.
+  // Block user/email and Auth.js account writes until the selected candidate is granted.
+  await transaction.execute(sql`lock table users, accounts in share row exclusive mode`);
 }
 
 async function requireLiveExactAdmin(transaction: RoleGovernanceTransaction, principal: RequestPrincipal) {

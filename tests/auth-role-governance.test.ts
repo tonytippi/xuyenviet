@@ -157,6 +157,20 @@ describe("Auth/Admin role governance", () => {
     await expect(testDb.select().from(auditEvents)).resolves.toEqual([]);
   });
 
+  test("rolls back bootstrap role and authorization mutations when audit recording fails", async () => {
+    await createUser("first-admin", [], "admin@example.com");
+    await testDb.insert(accounts).values({ userId: "first-admin", type: "oauth", provider: "google", providerAccountId: "account-1" });
+    const auditFailure = new Error("audit write failed");
+
+    await expect(bootstrapInitialAdmin("admin@example.com", {
+      database: testDb,
+      recordAuditEvent: async () => { throw auditFailure; },
+    })).rejects.toThrow(auditFailure);
+    await expect(testDb.select().from(userRoles).where(eq(userRoles.userId, "first-admin"))).resolves.toEqual([]);
+    await expect(authorizationVersion("first-admin")).resolves.toBe(1);
+    await expect(testDb.select().from(auditEvents)).resolves.toEqual([]);
+  });
+
   test("waits for the transaction-scoped governance advisory lock before mutating", async () => {
     await createUser("admin", ["admin"]);
     await createUser("target");

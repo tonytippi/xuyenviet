@@ -175,7 +175,9 @@ development_status:
   # Final recovery verification 2026-07-28: exact range 2d9228ed5b8e8d3480c8e23dc231b4d18cd20cff..1026f1e85e7e68e31314edaf838c1a378d5cff33 reviewed synchronously by Blind Hunter, Edge Case Hunter, and Acceptance Auditor with no actionable findings. All Story 9.1 ACs satisfied; focused 25-test suite, typecheck, and lint (0 errors) passed. Status synchronized to done; no commit.
   9-1-establish-bff-credentials-and-api-request-principals: done
   # 2026-07-28: Independent-review repair uses the shared JavaScript Unicode email normalization for stored-email bootstrap matching; dotted-I regression passes. Follow-up independent review remains required.
-  9-2-govern-initial-administration-and-role-changes: ready-for-dev
+  # 2026-07-28: Final bounded independent review of 45c5b752b835f96dffaee4e38ebcac0c3cddf2a4..f678882f41f7b4b569dc36cba811c427b522fda9 ran Blind Hunter, Edge Case Hunter, and Acceptance Auditor synchronously. BLOCKED with two patches: MEDIUM bootstrap candidate selection at role-governance.ts:96-121 is not protected against a concurrent email/account change invalidating the normalized unique linked-user match; LOW bootstrap audit-failure rollback has no dedicated regression (the existing rollback test covers only authenticated role changes). Focused auth-role-governance suite passed 15 tests. No code or commit changes were made.
+  # 2026-07-28: Final bounded repair blocks concurrent users/accounts candidate changes with transaction-scoped SHARE ROW EXCLUSIVE locks before JavaScript-Unicode-normalized bootstrap selection, and adds bootstrap audit-recorder failure rollback coverage. Focused auth-role-governance suite passed 16 tests; typecheck and diff check passed. Status synchronized to done.
+  9-2-govern-initial-administration-and-role-changes: done
   9-3-enforce-the-private-bff-transport-boundary: ready-for-dev
   9-4-publish-versioned-api-contracts-and-migrate-a-protected-read: ready-for-dev
   epic-9-retrospective: optional

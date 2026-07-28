@@ -1,6 +1,6 @@
 # Story 9.2: Govern Initial Administration and Role Changes
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -98,6 +98,8 @@ gpt-5.6-terra
 
 - Ultimate context engine analysis completed - comprehensive developer guide created.
 - 2026-07-28 repair: initial-admin lookup now applies the shared JavaScript Unicode normalization to stored user emails rather than comparing PostgreSQL `lower(email)` against a JavaScript-normalized configuration value. Added a dotted-I regression covering the previously divergent casing path. Focused `pnpm exec vitest run tests/auth-role-governance.test.ts` passed (15 tests).
+- 2026-07-28 final bounded independent review of `45c5b752b835f96dffaee4e38ebcac0c3cddf2a4..f678882f41f7b4b569dc36cba811c427b522fda9` ran Blind Hunter, Edge Case Hunter, and Acceptance Auditor synchronously. BLOCKED with two actionable patches: (1) MEDIUM `src/features/auth/role-governance.ts:96-121` bootstrap reads the normalized-email candidate set before locking only the selected user/account, so a concurrent account/email change can invalidate the required unique linked-user match before the grant; use serializable predicate protection or a revalidation that prevents/handles concurrent candidate changes. (2) LOW `tests/auth-role-governance.test.ts:145-158` proves audit-failure rollback only for authenticated role changes, not the separate bootstrap transaction; add a bootstrap audit-recorder failure regression that asserts the role and authorization-version update roll back. Focused `pnpm exec vitest run tests/auth-role-governance.test.ts` passed (15 tests). No code or commit changes were made in this review.
+- 2026-07-28 final bounded repair: bootstrap takes a transaction-scoped `SHARE ROW EXCLUSIVE` lock on `users` and `accounts` before normalized candidate selection. This blocks concurrent user-email and Auth.js-account writes through grant/audit completion, making the JavaScript-Unicode-normalized candidate predicate safe without relying on a database collation. Added bootstrap audit-recorder failure coverage proving no role grant, authorization-version increment, or audit event persists. `pnpm exec vitest run tests/auth-role-governance.test.ts` passed (16 tests); `pnpm typecheck` and `git diff --check` passed.
 
 ### File List
 
