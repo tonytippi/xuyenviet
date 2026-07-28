@@ -1,6 +1,6 @@
 # Story 9.4: Publish Versioned API Contracts and Migrate a Protected Read
 
-Status: ready-for-dev
+Status: in-progress
 
 ## Story
 
@@ -118,6 +118,8 @@ gpt-5.6-terra
 - 2026-07-28 local independent-review repair: `Dockerfile` now provides an `api-runner` target that copies `apps/api/dist`, starts Nest on port 3001, and remains separately deployable from the Next `runner` target. This satisfies the local workload packaging finding without claiming deployment evidence.
 - 2026-07-28 local independent-review repair: the conversation-summary loader now optionally performs an asynchronous, read-only equivalence comparison only when `XV_CONVERSATION_SUMMARY_SHADOW_COMPARE_ENABLED=true` and `APP_ENV` is `local` or `staging`. It begins only after the selected owner returns, has no browser-response effect, logs only equivalence metadata tagged with its correlation ID, propagates that ID to the API adapter, and is disabled in production. Focused coverage invokes the actual legacy/API adapter seams with equivalent serialized responses.
 - Staging deployment, migration-before-traffic, selected-owner execution, rollback, and legacy-owner retirement evidence remains unavailable and is not represented as complete.
+- 2026-07-28 final bounded independent review of `7736a1d6fd2770864ea4c1cb6c1dc87191d25e76..be1b19abb9714071b344b0c2044c23ff6285165c` ran Blind Hunter, Edge Case Hunter, and Acceptance Auditor synchronously. BLOCKED. MEDIUM local finding: `src/features/chat-trips/conversation-summary-loader.ts:30-32,46-51` throws for a malformed shadow-comparison flag after the selected read completes, causing an observability-only comparison setting to alter the browser-facing result; shadow configuration must fail closed without changing the selected response. The `api-runner` Docker target builds successfully and contains the Nest artifact, production dependencies, port 3001, and the API entrypoint, but target selection in the separately deployed Railway service is not represented or verifiable locally. AC3 staging evidence remains a real external blocker: deployed private routing/probes, migration-before-traffic, selected-owner execution, equivalence records, rollback, and legacy-owner retirement are not available. No code or commit changes were made during this review.
+- 2026-07-28 final local repair: malformed `XV_CONVERSATION_SUMMARY_SHADOW_COMPARE_ENABLED` values now fail closed as disabled, so optional local/staging observability cannot change a successfully selected browser response. Regression coverage proves the selected legacy and API responses remain unchanged and no unselected transport runs. Story remains in-progress: AC3 external staging/Railway evidence is unavailable.
 
 ### File List
 

@@ -82,4 +82,24 @@ describe("conversation summary API cutover", () => {
     expect(legacyAdapter).not.toHaveBeenCalled();
     expect(apiCall).toHaveBeenCalledTimes(1);
   });
+
+  test("fails closed for malformed shadow comparison configuration without changing the selected response", async () => {
+    for (const [apiEnabled, expectedId] of [["false", "legacy"], ["true", "api"]] as const) {
+      const legacy = vi.fn(async () => [{ id: "legacy", updatedAt: new Date("2026-07-01T00:00:00.000Z"), preview: "Hội thoại mới" }]);
+      const api = vi.fn(async () => [{ id: "api", updatedAt: new Date("2026-07-02T00:00:00.000Z"), preview: "Từ API" }]);
+
+      await expect(loadOwnedConversationSummaries({
+        legacy,
+        api,
+        environment: {
+          APP_ENV: "staging",
+          XV_CONVERSATION_SUMMARY_API_ENABLED: apiEnabled,
+          XV_CONVERSATION_SUMMARY_SHADOW_COMPARE_ENABLED: "enabled",
+        },
+      })).resolves.toMatchObject([{ id: expectedId }]);
+
+      expect(legacy).toHaveBeenCalledTimes(apiEnabled === "false" ? 1 : 0);
+      expect(api).toHaveBeenCalledTimes(apiEnabled === "true" ? 1 : 0);
+    }
+  });
 });

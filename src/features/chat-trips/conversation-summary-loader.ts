@@ -45,8 +45,7 @@ function isConversationSummaryApiEnabled(environment?: ConversationSummaryEnviro
 
 function isShadowComparisonEnabled(environment?: ConversationSummaryEnvironment): boolean {
   const enabled = environment ? environment.XV_CONVERSATION_SUMMARY_SHADOW_COMPARE_ENABLED : process.env.XV_CONVERSATION_SUMMARY_SHADOW_COMPARE_ENABLED;
-  if (enabled === undefined || enabled === "" || enabled === "false") return false;
-  if (enabled !== "true") throw new Error("Invalid conversation-summary shadow comparison configuration.");
+  if (enabled !== "true") return false;
   const appEnv = environment ? environment.APP_ENV : process.env.APP_ENV;
   return appEnv === "local" || appEnv === "staging";
 }
