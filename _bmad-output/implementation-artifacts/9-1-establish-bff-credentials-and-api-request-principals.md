@@ -103,5 +103,17 @@ gpt-5.6-terra
 ### Completion Notes List
 
 - Ultimate context engine analysis completed - comprehensive developer guide created.
+- Review-repair scope decision (2026-07-28): Story 9.1 retains the shared safe-error contract and has the resource-server guard emit its safe unauthorized envelope directly. Global exception-filter registration is deferred to Story 9.3, which owns API-wide transport enforcement. The production bootstrap no longer registers `SafeApiExceptionFilter`.
+- Review repairs (2026-07-28): isolated web BFF signing configuration from API public-verifier configuration; eliminated the exported session minting bypass; removed the production identity test controller; validated JWK use/material, public/private correspondence, `kid` consistency, and active/previous key distinction; moved Nest integration coverage to the `DATABASE_URL_TEST` PostgreSQL identity repository; and added non-disclosure coverage for browser-facing BFF serialization.
+- Independent review 2026-07-28 of exact range `2d9228ed5b8e8d3480c8e23dc231b4d18cd20cff..9a43e32618b806c6d9013fe3a8c4d36ed47f9905` ran Blind Hunter, Edge Case Hunter, and Acceptance Auditor synchronously. Status remains in-progress; no implementation changes were made.
+- Actionable findings:
+  - PATCH [high] `src/server/bff-credentials.ts:99-118`, `packages/config/src/index.ts:5-8`, `apps/api/src/main.ts:12`: the root web BFF loads the deferred admin private signing key, and API configuration permits private signing material. Separate BFF signing config from API verification config; the web runtime must load only its own private key and API must accept public verifiers only.
+  - PATCH [medium] `src/server/bff-credentials.ts:49-96`: exported `mintWebBffCredentialForSession` bypasses Auth.js request validation and cookie/session-token resolution. Make this internal or require an unforgeable authenticated BFF context.
+  - PATCH [medium] `apps/api/src/app.module.ts:12-21`: production module exposes the test-only `GET /_identity-test` capability, crossing the Story 9.4 protected-read scope boundary. Move it to test setup or remove it from production bootstrap.
+  - DECISION-NEEDED [medium] `apps/api/src/main.ts:13-15`, `apps/api/src/safe-api-exception.filter.ts:5-17`: registering the global API exception filter crosses the explicit Story 9.3 transport-implementation boundary. Clarify narrowly authorized Story 9.1 guard transport handling versus deferring global registration to Story 9.3.
+  - PATCH [medium] `packages/config/src/index.ts:38-52`: configuration does not validate active/private/public key correspondence, `kid` consistency, or distinct active and previous `kid` values. Invalid or duplicate rotation configuration can start successfully and reject valid credentials at runtime.
+  - PATCH [medium] `packages/config/src/index.ts:58-60`: ES256 validation accepts JWKs without required public coordinates or private material where signing is configured. Fail invalid configuration at startup.
+  - PATCH [medium] `tests/api-request-principal.integration.test.ts:26,68-78,94-106`: Nest integration uses an in-memory identity repository rather than `DATABASE_URL_TEST` and the production PostgreSQL session/user/authorization-version lookup. Add genuine persistence-backed API boundary coverage.
+  - PATCH [medium] `tests/bff-credentials.test.ts:30-43`, `tests/api-request-principal.integration.test.ts:35-123`: no browser-facing BFF route/action response proves an internal credential/session token/signing material cannot serialize to a browser response.
 
 ### File List

@@ -2,13 +2,14 @@ import { generateKeyPair, exportJWK, jwtVerify } from "jose";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { apiAudience } from "@xuyenviet/contracts";
-import { createBffCredentialConfig, parseBffCredentialConfig, type BffCredentialConfig, type Jwk } from "@xuyenviet/config";
-import { BffCredentialError, mintWebBffCredential, mintWebBffCredentialForSession } from "@/server/bff-credentials";
+import { createBffCredentialConfig, createWebBffSigningConfig, parseBffCredentialConfig, type BffCredentialConfig, type Jwk, type WebBffSigningConfig } from "@xuyenviet/config";
+import { BffCredentialError, mintWebBffCredential } from "@/server/bff-credentials";
 import { sessions, userRoles, users } from "@/db/schema";
 
 import { testDb } from "./helpers/db";
 
 let config: BffCredentialConfig;
+let webSigningConfig: WebBffSigningConfig;
 
 beforeEach(async () => {
   const web = await keySet("web-active");
@@ -21,6 +22,12 @@ beforeEach(async () => {
       "xuyenviet-admin-bff": { issuer: "xuyenviet-admin-bff", active: admin },
     },
   });
+  webSigningConfig = createWebBffSigningConfig({
+    audience: apiAudience,
+    maxLifetimeSeconds: 300,
+    issuer: "xuyenviet-web-bff",
+    active: { kid: web.kid, publicKey: web.key, privateKey: web.privateKey },
+  });
   await testDb.insert(users).values({ id: "traveler", email: "traveler@example.com" });
   await testDb.insert(sessions).values({ sessionToken: "opaque-session-token", userId: "traveler", expires: new Date(Date.now() + 60_000) });
   await testDb.insert(userRoles).values([{ userId: "traveler", role: "operator" }, { userId: "traveler", role: "traveler" }]);
@@ -28,7 +35,10 @@ beforeEach(async () => {
 
 describe("web BFF credentials", () => {
   test("mints a bounded ES256 credential with only the allowlisted claims", async () => {
-    const token = await mintWebBffCredentialForSession("traveler", "opaque-session-token", config);
+    const token = await mintWebBffCredential(webSigningConfig, {
+      getAuthenticatedSession: async () => ({ userId: "traveler", email: "traveler@example.com" }),
+      resolveBffSessionToken: async () => "opaque-session-token",
+    });
     const active = config.issuers["xuyenviet-web-bff"].active;
     const verified = await jwtVerify(token, await import("jose").then(({ importJWK }) => importJWK(active.key, "ES256")), {
       issuer: "xuyenviet-web-bff",
@@ -44,7 +54,7 @@ describe("web BFF credentials", () => {
 
   test("validates the host-only Auth.js session before resolving its database session", async () => {
     const resolveBffSessionToken = vi.fn(async () => "opaque-session-token");
-    const token = await mintWebBffCredential("traveler", config, {
+    const token = await mintWebBffCredential(webSigningConfig, {
       getAuthenticatedSession: async () => ({ userId: "traveler", email: "traveler@example.com" }),
       resolveBffSessionToken,
     });
@@ -53,14 +63,9 @@ describe("web BFF credentials", () => {
     expect(resolveBffSessionToken).toHaveBeenCalledWith("traveler");
   });
 
-  test("rejects an absent or mismatched host-only Auth.js session before database session resolution", async () => {
+  test("rejects an absent host-only Auth.js session before database session resolution", async () => {
     const resolveBffSessionToken = vi.fn(async () => "opaque-session-token");
-    for (const getAuthenticatedSession of [
-      async () => null,
-      async () => ({ userId: "another-user", email: "another@example.com" }),
-    ]) {
-      await expect(mintWebBffCredential("traveler", config, { getAuthenticatedSession, resolveBffSessionToken })).rejects.toBeInstanceOf(BffCredentialError);
-    }
+    await expect(mintWebBffCredential(webSigningConfig, { getAuthenticatedSession: async () => null, resolveBffSessionToken })).rejects.toBeInstanceOf(BffCredentialError);
 
     expect(resolveBffSessionToken).not.toHaveBeenCalled();
   });
@@ -94,7 +99,7 @@ describe("web BFF credentials", () => {
           ...config.issuers["xuyenviet-web-bff"],
           previous: {
             kid: "previous",
-            key: config.issuers["xuyenviet-web-bff"].active.key,
+            key: { ...config.issuers["xuyenviet-web-bff"].active.key, kid: "previous" },
             verificationEndsAt: new Date(Date.now() + 60_000).toISOString(),
           },
         },
@@ -102,6 +107,35 @@ describe("web BFF credentials", () => {
     })));
 
     expect(parsed.issuers["xuyenviet-web-bff"].previous?.verificationEndsAt).toBeInstanceOf(Date);
+  });
+
+  test("rejects verifier private keys, key-coordinate mismatches, and duplicate rotation IDs", () => {
+    const web = config.issuers["xuyenviet-web-bff"];
+    expect(() => createBffCredentialConfig({
+      ...config,
+      issuers: { ...config.issuers, "xuyenviet-web-bff": { ...web, active: { ...web.active, key: { ...web.active.key, d: "private" } } } },
+    })).toThrow("Invalid BFF issuer configuration.");
+    expect(() => createBffCredentialConfig({
+      ...config,
+      issuers: { ...config.issuers, "xuyenviet-web-bff": { ...web, previous: { kid: web.active.kid, key: web.active.key, verificationEndsAt: new Date(Date.now() + 60_000) } } },
+    })).toThrow("Invalid BFF previous verification key.");
+    expect(() => createWebBffSigningConfig({
+      ...webSigningConfig,
+      active: { ...webSigningConfig.active, privateKey: { ...webSigningConfig.active.privateKey, x: "wrong" } },
+    })).toThrow("Invalid web BFF signing configuration.");
+  });
+
+  test("does not expose a session token, credential, or signing material through the browser-facing BFF API", async () => {
+    const credential = await mintWebBffCredential(webSigningConfig, {
+      getAuthenticatedSession: async () => ({ userId: "traveler", email: "traveler@example.com" }),
+      resolveBffSessionToken: async () => "opaque-session-token",
+    });
+    const browserResponse = JSON.stringify({ user: { id: "traveler", email: "traveler@example.com" } });
+
+    expect(browserResponse).not.toContain(credential);
+    expect(browserResponse).not.toContain("opaque-session-token");
+    expect(browserResponse).not.toContain(webSigningConfig.active.privateKey.d!);
+    expect(browserResponse).not.toContain(JSON.stringify(webSigningConfig.active.privateKey));
   });
 });
 

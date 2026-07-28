@@ -5,7 +5,7 @@ import { apiAudience, isBffIssuer, isRequestRole, type InternalCredentialClaims,
 import { type BffCredentialConfig } from "@xuyenviet/config";
 import { type ApiIdentityRepository } from "@xuyenviet/database";
 
-type RequestWithPrincipal = { headers: { authorization?: string }; principal?: RequestPrincipal };
+type RequestWithPrincipal = { headers: { authorization?: string; "x-request-id"?: string | string[] }; principal?: RequestPrincipal };
 export const BFF_CREDENTIAL_CONFIG = Symbol("BFF_CREDENTIAL_CONFIG");
 export const API_IDENTITY_REPOSITORY = Symbol("API_IDENTITY_REPOSITORY");
 
@@ -20,7 +20,7 @@ export class ResourceServerGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<RequestWithPrincipal>();
     const token = bearerToken(request.headers.authorization);
     if (!token) {
-      throw unauthorized();
+      throw unauthorized(request);
     }
     try {
       const payload = decodeJwt(token);
@@ -51,7 +51,7 @@ export class ResourceServerGuard implements CanActivate {
       };
       return true;
     } catch {
-      throw unauthorized();
+      throw unauthorized(request);
     }
   }
 }
@@ -100,6 +100,8 @@ function bearerToken(header: string | undefined): string | null {
   return match?.[1] ?? null;
 }
 
-function unauthorized() {
-  return new UnauthorizedException({ code: "unauthorized", message: "Unauthorized." });
+function unauthorized(request: RequestWithPrincipal) {
+  const value = request.headers["x-request-id"];
+  const requestId = typeof value === "string" && value.length > 0 ? value.slice(0, 128) : crypto.randomUUID();
+  return new UnauthorizedException({ code: "unauthorized", message: "Unauthorized.", requestId });
 }

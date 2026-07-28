@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-07-28 (Epic 9 story guides created and ready for development.)
+# last_updated: 2026-07-28 (Story 9.1 independent-review repairs completed; status synchronized to ready-for-dev.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-07-28 (Epic 9 story guides created and ready for development.)
+last_updated: 2026-07-28 (Story 9.1 independent-review repairs completed; status synchronized to ready-for-dev.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -168,6 +168,8 @@ development_status:
   # Approved by sprint-change-proposal-2026-07-28.md. These are new API/BFF
   # capability cutovers; completed baseline epics and their history remain intact.
   epic-9: in-progress
+  # 2026-07-28: Independent review of 2d9228ed5b8e8d3480c8e23dc231b4d18cd20cff..9a43e32618b806c6d9013fe3a8c4d36ed47f9905 ran Blind Hunter, Edge Case Hunter, and Acceptance Auditor. Eight actionable findings remain: private key isolation, minting-boundary bypass, production test endpoint, global transport scope decision, configuration key/kid validation, incomplete JWK material validation, non-PostgreSQL API integration, and missing browser-response non-disclosure proof.
+  # 2026-07-28: Repaired only the independent-review findings. Web BFF loads only its own signer; API accepts public verifiers only; session minting has no bypass export; the identity test route is test-only; public/private JWK and rotation identity checks fail at startup; the Nest guard uses DATABASE_URL_TEST PostgreSQL coverage; browser serialization excludes credential/session/signing material. Scope decision: guard envelope remains in Story 9.1, global transport filter registration is deferred to Story 9.3. Status restored to ready-for-dev pending follow-up review.
   9-1-establish-bff-credentials-and-api-request-principals: ready-for-dev
   9-2-govern-initial-administration-and-role-changes: ready-for-dev
   9-3-enforce-the-private-bff-transport-boundary: ready-for-dev

@@ -6,7 +6,7 @@ import { SignJWT, importJWK } from "jose";
 import { and, eq, gt } from "drizzle-orm";
 
 import { apiAudience, type InternalCredentialClaims, type RequestRole } from "@xuyenviet/contracts";
-import { createBffCredentialConfig, type BffCredentialConfig } from "@xuyenviet/config";
+import { createWebBffSigningConfig, type WebBffSigningConfig } from "@xuyenviet/config";
 
 import { getDb } from "@/db/client";
 import { sessions, userRoles, users } from "@/db/schema";
@@ -31,22 +31,22 @@ type BffCredentialDependencies = {
 const defaultDependencies: BffCredentialDependencies = { getAuthenticatedSession, resolveBffSessionToken };
 
 export async function mintWebBffCredential(
-  userId: string,
   config = getBffCredentialConfig(),
   dependencies: BffCredentialDependencies = defaultDependencies,
 ): Promise<string> {
   const authenticatedSession = await dependencies.getAuthenticatedSession();
-  if (!authenticatedSession || authenticatedSession.userId !== userId) {
+  if (!authenticatedSession) {
     throw new BffCredentialError();
   }
+  const userId = authenticatedSession.userId;
   const sessionToken = await dependencies.resolveBffSessionToken(userId);
   if (!sessionToken) {
     throw new BffCredentialError();
   }
-  return mintWebBffCredentialForSession(userId, sessionToken, config);
+  return mintCredentialForValidatedSession(userId, sessionToken, config);
 }
 
-export async function mintWebBffCredentialForSession(userId: string, sessionToken: string, config: BffCredentialConfig): Promise<string> {
+async function mintCredentialForValidatedSession(userId: string, sessionToken: string, config: WebBffSigningConfig): Promise<string> {
   const session = await getDb()
     .select({ sessionToken: sessions.sessionToken })
     .from(sessions)
@@ -66,10 +66,6 @@ export async function mintWebBffCredentialForSession(userId: string, sessionToke
   const roles = (await getDb().select({ role: userRoles.role }).from(userRoles).where(eq(userRoles.userId, userId)))
     .map((row) => row.role as RequestRole)
     .sort();
-  const issuer = config.issuers[webIssuer];
-  if (!issuer.active.privateKey) {
-    throw new BffCredentialError();
-  }
   const now = Math.floor(Date.now() / 1000);
   const claims: InternalCredentialClaims = {
     sub: userId,
@@ -83,9 +79,9 @@ export async function mintWebBffCredentialForSession(userId: string, sessionToke
     nbf: now,
     exp: now + config.maxLifetimeSeconds,
   };
-  const signingKey = await importJWK(issuer.active.privateKey, "ES256");
+  const signingKey = await importJWK(config.active.privateKey, "ES256");
   return new SignJWT({ sid: claims.sid, roles: claims.roles, rv: claims.rv, jti: claims.jti })
-    .setProtectedHeader({ alg: "ES256", kid: issuer.active.kid })
+    .setProtectedHeader({ alg: "ES256", kid: config.active.kid })
     .setSubject(claims.sub)
     .setIssuer(claims.iss)
     .setAudience(claims.aud)
@@ -95,29 +91,17 @@ export async function mintWebBffCredentialForSession(userId: string, sessionToke
     .sign(signingKey);
 }
 
-function getBffCredentialConfig(): BffCredentialConfig {
-  return createBffCredentialConfig({
+function getBffCredentialConfig(): WebBffSigningConfig {
+  return createWebBffSigningConfig({
     audience: apiAudience,
     maxLifetimeSeconds: 300,
-    issuers: {
-      "xuyenviet-web-bff": loadIssuer("xuyenviet-web-bff", "XV_WEB_BFF"),
-      "xuyenviet-admin-bff": loadIssuer("xuyenviet-admin-bff", "XV_ADMIN_BFF"),
+    issuer: webIssuer,
+    active: {
+      kid: required("XV_WEB_BFF_ACTIVE_KID"),
+      publicKey: parseJwk("XV_WEB_BFF_ACTIVE_JWK"),
+      privateKey: parseJwk("XV_WEB_BFF_ACTIVE_PRIVATE_JWK"),
     },
   });
-}
-
-function loadIssuer(issuer: "xuyenviet-web-bff" | "xuyenviet-admin-bff", prefix: string) {
-  const active = parseJwk(`${prefix}_ACTIVE_JWK`);
-  const privateKey = parseJwk(`${prefix}_ACTIVE_PRIVATE_JWK`);
-  const previousValue = process.env[`${prefix}_PREVIOUS_JWK`];
-  const previousEndsAt = process.env[`${prefix}_PREVIOUS_VERIFICATION_ENDS_AT`];
-  return {
-    issuer,
-    active: { kid: required(`${prefix}_ACTIVE_KID`), key: active, privateKey },
-    ...(previousValue || previousEndsAt
-      ? { previous: { kid: required(`${prefix}_PREVIOUS_KID`), key: parseJwk(`${prefix}_PREVIOUS_JWK`), verificationEndsAt: new Date(required(`${prefix}_PREVIOUS_VERIFICATION_ENDS_AT`)) } }
-      : {}),
-  };
 }
 
 function required(name: string): string {
@@ -131,7 +115,7 @@ function required(name: string): string {
 function parseJwk(name: string) {
   try {
     const key = JSON.parse(required(name));
-    if (!key || key.kty !== "EC" || key.crv !== "P-256") {
+    if (!key || key.kty !== "EC" || key.crv !== "P-256" || typeof key.x !== "string" || typeof key.y !== "string") {
       throw new Error("invalid key");
     }
     return key as JsonWebKey & { kty: "EC"; crv: "P-256" };
