@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-07-27 (Traveler seed fixture removal in progress.)
+# last_updated: 2026-07-28 (Approved API-first runtime and launch-readiness course correction.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-07-27 (Traveler seed fixture removal in progress.)
+last_updated: 2026-07-28 (Approved API-first runtime and launch-readiness course correction.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -164,6 +164,47 @@ development_status:
   8-6-verify-actor-isolation-and-attribution-end-to-end: done
   # 2026-07-27: The former two-person seed evidence is superseded by the approved single-operator seed contract. Facebook/YouTube source provenance stays with seed-fixture-operator-user; seed-traveler-user and its graph are removed. Epic 8 remains done; this is a seed fixture correction.
   epic-8-retrospective: optional
+
+  # Approved by sprint-change-proposal-2026-07-28.md. These are new API/BFF
+  # capability cutovers; completed baseline epics and their history remain intact.
+  epic-9: backlog
+  9-1-establish-bff-credentials-and-api-request-principals: backlog
+  9-2-govern-initial-administration-and-role-changes: backlog
+  9-3-enforce-the-private-bff-transport-boundary: backlog
+  9-4-publish-versioned-api-contracts-and-migrate-a-protected-read: backlog
+  epic-9-retrospective: optional
+
+  epic-10: backlog
+  10-1-make-ai-ask-commands-idempotent: backlog
+  10-2-fence-terminal-ai-ask-persistence: backlog
+  10-3-dispatch-ai-ask-follow-up-work-through-a-transactional-outbox: backlog
+  10-4-preserve-completed-ai-ask-results-while-consumers-run: backlog
+  10-5-cut-ai-ask-streaming-to-the-versioned-api: backlog
+  epic-10-retrospective: optional
+
+  epic-11: backlog
+  11-1-publish-canonical-trip-answer-context-snapshots: backlog
+  11-2-withdraw-historical-provenance-safely: backlog
+  11-3-validate-persisted-answer-annotations: backlog
+  11-4-bind-annotation-details-and-actions-to-current-ownership: backlog
+  11-5-serve-planning-context-and-details-through-the-api-cutover: backlog
+  epic-11-retrospective: optional
+
+  epic-12: backlog
+  12-1-bootstrap-the-dedicated-worker-and-bounded-sweep-runtime: backlog
+  12-2-verify-worker-operations-telemetry-and-schema-compatibility: backlog
+  12-3-gate-schema-changes-for-overlapping-runtimes: backlog
+  epic-12-retrospective: optional
+
+  epic-13: backlog
+  13-1-establish-the-separately-deployed-admin-bff-application: backlog
+  13-2-migrate-operator-capabilities-and-retire-legacy-admin-ownership: backlog
+  epic-13-retrospective: optional
+
+  epic-14: backlog
+  14-1-inventory-and-retire-legacy-domain-transport-owners: backlog
+  14-2-produce-the-public-launch-evidence-gate: backlog
+  epic-14-retrospective: optional
 
 action_items:
   - epic: 3
