@@ -93,14 +93,24 @@ export async function bootstrapInitialAdmin(
 
     if (administrators.length > 0) throw new Error("Initial administrator bootstrap has already completed.");
 
-    const targets = await transaction
-      .select({ id: users.id })
+    const candidates = await transaction
+      .selectDistinct({ id: users.id, email: users.email })
       .from(users)
-      .where(sql`lower(${users.email}) = ${email}`)
-      .limit(2)
-      .for("update");
+      .innerJoin(accounts, eq(accounts.userId, users.id))
+      .where(sql`${users.email} is not null`);
+    const targets = candidates
+      .filter((user) => normalizeEmail(user.email) === email)
+      .slice(0, 2);
     if (targets.length !== 1) throw new Error("INITIAL_ADMIN_EMAIL must identify exactly one authenticated user.");
-    const [target] = targets;
+    const [candidate] = targets;
+    const [target] = await transaction
+      .select({ id: users.id, email: users.email })
+      .from(users)
+      .where(eq(users.id, candidate.id))
+      .for("update");
+    if (!target || normalizeEmail(target.email) !== email) {
+      throw new Error("INITIAL_ADMIN_EMAIL must identify exactly one authenticated user.");
+    }
 
     const [account] = await transaction
       .select({ userId: accounts.userId })

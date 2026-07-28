@@ -97,5 +97,11 @@ gpt-5.6-terra
 ### Completion Notes List
 
 - Ultimate context engine analysis completed - comprehensive developer guide created.
+- 2026-07-28 repair: initial-admin lookup now applies the shared JavaScript Unicode normalization to stored user emails rather than comparing PostgreSQL `lower(email)` against a JavaScript-normalized configuration value. Added a dotted-I regression covering the previously divergent casing path. Focused `pnpm exec vitest run tests/auth-role-governance.test.ts` passed (15 tests).
 
 ### File List
+
+- src/features/auth/role-governance.ts
+- tests/auth-role-governance.test.ts
+- _bmad-output/implementation-artifacts/9-2-govern-initial-administration-and-role-changes.md
+- _bmad-output/implementation-artifacts/sprint-status.yaml

@@ -41,6 +41,14 @@ describe("Auth/Admin role governance", () => {
     ]);
   });
 
+  test("uses JavaScript Unicode normalization for the stored email lookup", async () => {
+    await createUser("unicode-admin", [], "İadmin@example.com");
+    await testDb.insert(accounts).values({ userId: "unicode-admin", type: "oauth", provider: "google", providerAccountId: "unicode-account-1" });
+
+    await expect(bootstrapInitialAdmin("i\u0307ADMIN@example.com", { database: testDb })).resolves.toEqual({ targetUserId: "unicode-admin", role: "admin" });
+    await expect(testDb.select().from(userRoles).where(eq(userRoles.userId, "unicode-admin"))).resolves.toEqual([{ userId: "unicode-admin", role: "admin" }]);
+  });
+
   test.each([
     { name: "missing email", email: undefined, account: true, existingAdmin: false },
     { name: "unknown user", email: "missing@example.com", account: false, existingAdmin: false },
