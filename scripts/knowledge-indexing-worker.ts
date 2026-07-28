@@ -35,7 +35,6 @@ async function main() {
       if (work.status === "indexed") console.log("Knowledge indexing worker completed batch", { indexedCount: work.indexedCount, skippedCount: work.skippedCount, cardIds: work.cardIds });
       else if (options.once) console.log("Knowledge indexing worker found no work");
     },
-    onIdle: (pollIntervalMs) => console.log("Knowledge indexing worker idle; sleeping", { pollIntervalMs }),
   });
   console.log("Knowledge indexing worker stopped", result);
 }

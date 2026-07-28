@@ -26,7 +26,6 @@ async function main() {
       else if (work) console.log("Knowledge ingestion worker candidate stage committed", { jobId: work.ingestionJobId });
       else if (once) console.log("Knowledge ingestion worker found no work");
     },
-    onIdle: (pollIntervalMs) => console.log("Knowledge ingestion worker idle; sleeping", { pollIntervalMs }),
   });
   console.log("Knowledge ingestion worker stopped", result ? { jobId: "jobId" in result ? result.jobId : undefined, sourceId: "sourceId" in result ? result.sourceId : undefined, outcome: "outcome" in result ? result.outcome : undefined, status: "status" in result ? result.status : undefined } : { status: "no_job" });
 
