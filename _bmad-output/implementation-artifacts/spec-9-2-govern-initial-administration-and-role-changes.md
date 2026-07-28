@@ -2,10 +2,11 @@
 title: 'Govern initial administration and role changes'
 type: 'feature'
 created: '2026-07-28'
-status: 'in-review'
+status: 'done'
 baseline_revision: '45c5b752b835f96dffaee4e38ebcac0c3cddf2a4'
 review_loop_iteration: 0
 followup_review_recommended: false
+final_revision: '0a44713e2c783b900c4c2a3bb2e1702431db9ae6'
 context:
   - '/home/sonnh/projects/xuyenviet/_bmad-output/project-context.md'
   - '/home/sonnh/projects/xuyenviet/_bmad-output/implementation-artifacts/epic-9-context.md'
