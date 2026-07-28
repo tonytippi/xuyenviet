@@ -2,7 +2,7 @@
 title: XuyenViet AI Travel Information MVP PRD
 status: final
 created: 2026-07-04
-updated: 2026-07-26
+updated: 2026-07-28
 ---
 
 # XuyenViet AI Travel Information MVP PRD
@@ -21,6 +21,8 @@ The MVP is not a complete travel marketplace, booking product, Google Maps repla
 - Turn an approved trip direction into a user-controlled, structured road-trip plan rather than leaving important decisions only in chat history.
 - Build an AI-first knowledge collection workflow that turns raw travel information into evidence-grounded provisional knowledge, while routing only risky or uncertain claims to operators.
 - Make AI answers source-aware, confidence-aware, and explicit when information may be outdated or incomplete.
+- Establish a versioned, API-first delivery boundary that lets the traveler web, a separately deployed operator app, and a future mobile client use the same product capabilities without duplicating domain policy.
+- Run background work in an observable, independently supervised runtime while preserving the product's existing PostgreSQL-backed safety and idempotency guarantees.
 
 ## 3. Non-Goals
 
@@ -237,6 +239,19 @@ Internal owner or future small operations team member who collects travel inform
 - FR-49: The system shall manage AI Gateway model records with gateway model name, intended purpose, supported input/output capabilities, active status, and input/output/cache pricing metadata.
 - FR-50: The system shall use configured model pricing metadata to estimate AI usage cost when provider usage token metadata is available, without creating credit balance or billing behavior in MVP.
 
+### 8.8 API, Runtime, And Deployment Boundary
+
+- FR-51: The system shall expose versioned domain API contracts that support the traveler web, the operator app, and a future mobile client without making those clients depend on Next.js server actions, route-handler internals, or Auth.js session serialization.
+- FR-52: The system shall keep the traveler browser behind its Next.js BFF during the initial web phase; the browser shall not receive an internal API credential or call the private domain API directly.
+- FR-53: The system shall provide a separately deployed operator/admin application with its own origin and release lifecycle. It shall use the same protected API boundary as other clients and shall not receive direct database credentials or import domain mutation code.
+- FR-54: The system shall authorize every protected API read and command using a domain-neutral request principal. Web and admin BFF callers shall map their authenticated sessions to short-lived, audience-scoped internal credentials; a future mobile identity flow shall map to the same principal without changing domain ownership or authorization policy.
+- FR-55: The system shall provide a stable API error contract with a machine-readable code, safe message, request/correlation ID, and safe field violations when applicable. It shall not expose stack traces, SQL errors, raw provider payloads, raw evidence, or operator-only state.
+- FR-56: The system shall provide documented API contracts for health/version and protected capabilities, including validation, authorization, ownership scope, pagination and stable ordering where list behavior applies, and AI streaming semantics where applicable.
+- FR-57: The system shall run continuous background work in a dedicated worker runtime and shall run only bounded, short-lived sweeps through scheduled one-shot commands. Workers shall use the existing PostgreSQL job/claim/lease/fencing/idempotency protocols rather than in-memory coordination.
+- FR-58: The system shall preserve a single writer for each aggregate command during migration. A capability cutover shall route a request to exactly one transport owner and shall not dual-write user messages, assistant messages, provenance, usage, trip state, or knowledge state.
+- FR-59: The system shall move AI Ask streaming to the versioned API while retaining the existing NDJSON event contract of `preparing`, `delta`, `done`, and `error`; cancellation shall stop provider work when possible, and terminal assistant content, provenance, and usage shall persist atomically.
+- FR-60: The system shall retire legacy Next.js domain route handlers, server-action writers, and the legacy `/admin` operational surface before public launch. Presentation-only Next.js behavior may remain, but it shall not own domain transport or mutation policy.
+
 ## 9. Non-Functional Requirements
 
 - NFR-1: User-facing chat responses should feel responsive enough for interactive planning. [ASSUMPTION: exact latency target to be defined after architecture spikes.]
@@ -251,6 +266,13 @@ Internal owner or future small operations team member who collects travel inform
 - NFR-9A: Source ingestion shall make bounded progress through large source material without imposing a maximum accepted-fact quota. Retry, interruption, duplicate delivery, and supersession shall not duplicate candidates or permit obsolete work to change canonical knowledge.
 - NFR-10: Trip Project reads and mutations, including primary-conversation access, structured plan data, proposals, and history, shall remain owner-scoped until a separately approved collaboration model exists.
 - NFR-11: Applying a Trip Change Proposal shall validate the proposal belongs to the selected Trip Project, is still applicable, and is authorized for the owner before writing an auditable change.
+- NFR-12: API, worker, traveler web, operator app, and migration workloads shall be independently deployable to staging with separate least-privilege configuration and health contracts. Database migrations shall run once before dependent workloads receive traffic.
+- NFR-13: Liveness shall verify that a process can run; readiness shall verify the configuration, database, and critical dependencies needed to receive its assigned traffic or work. Worker shutdown shall stop new claims and safely complete or release in-progress work according to the persisted lease protocol.
+- NFR-14: The system shall propagate a correlation ID across BFF, API, worker, and provider operations where applicable, and emit safe structured telemetry for capability, principal class, result code, latency, job lag/retry/lease recovery, and aggregate identifier only when safe.
+- NFR-15: Private web/admin-to-API traffic and database traffic shall not require public endpoints. Staging and production shall use isolated credentials, databases, OAuth configuration, API audiences, and observability projects.
+- NFR-16: Development may use clean-break migrations while data is disposable; once staging or public data is durable or old and new runtimes can overlap, schema changes shall use an approved expand-migrate-contract plan. Rollback shall revert traffic or compatible code, not destructively roll back persisted schema.
+- NFR-17: Before a legacy worker loop is retired, its operational dashboard and runbook shall demonstrate stable lag, retry, lease-recovery, duplicate-poller, and restart behavior for that loop.
+- NFR-18: Before public launch, the deployment operator shall approve ownership for Railway services, domains, DNS/CSP/OAuth callback configuration, secrets, backup/restore, monitoring, alerting, and on-call response. The launch topology shall have passed database connection-pool and AI-stream-concurrency load tests plus a backup-restore test.
 
 ## 10. MVP Product Contracts
 
@@ -394,6 +416,15 @@ The public MVP should focus on the Hanoi-to-HCMC road-trip corridor. Initial kno
 - AC-22: When AI suggests a persistent trip change, the owner sees a structured proposal and no persistent plan mutation occurs until that owner explicitly applies it.
 - AC-23: Applying, dismissing, or expiring a proposal produces an owner-visible, actor/timestamped history and cannot affect another owner's trip.
 - AC-24: Trip Home deterministically shows a pending unexpired proposal, then a defined confirmed-item gap, then the next dated `planned` or `confirmed` leg, or preparation when no such leg exists; it provides access to the primary conversation and never represents `confirmed` as a booking/provider validation.
+- AC-25: In staging, traveler web, separate admin app, API, worker, and migration job deploy independently; health/readiness, private service connectivity, isolated environment configuration, and migration ordering are verified.
+- AC-26: A protected API read model accepts a valid BFF-derived principal and rejects invalid expiry, issuer, audience, session validity, or role-version conditions without exposing sensitive details.
+- AC-27: The API publishes versioned OpenAPI documentation and returns the stable safe error envelope for validation, authorization, ownership, and internal-failure cases.
+- AC-28: `POST /v1/ai-ask/stream` passes byte-for-byte NDJSON protocol tests for event order and terminal states; client abort, provider failure, and context-extraction dispatch failure do not leave incorrect completed assistant/provenance/usage state.
+- AC-29: Every migrated worker loop passes graceful shutdown and duplicate-poller/restart tests while preserving its existing claim predicate, lease, fencing token, idempotency, and `FOR UPDATE SKIP LOCKED` behavior where applicable.
+- AC-30: Before public launch, all operational workflows are available through the separate admin app, no admin app has direct database access, and no legacy Next.js domain route handler or server action remains a public transport owner.
+- AC-31: Before a legacy worker entrypoint is retired, a runbook and dashboard show stable lag, retry, lease-recovery, duplicate-poller, and restart behavior for the replacement worker loop.
+- AC-32: Before public launch, responsible owners approve Railway service, domain/DNS/CSP/OAuth callback, secret, backup/restore, monitoring, alerting, and on-call configuration; database connection-pool and AI stream concurrency load tests and a backup-restore test pass with recorded results.
+- AC-33: When durable staging/public data or overlapping runtime versions require it, the released schema change has an approved expand-migrate-contract compatibility matrix and migration-job gate; traffic/code rollback keeps the persisted schema intact.
 
 ## 14. Risks
 
@@ -407,6 +438,9 @@ The public MVP should focus on the Hanoi-to-HCMC road-trip corridor. Initial kno
 - R-8: AI-first publication can amplify poor extraction or evaluation decisions if retrieval guardrails, quality sampling, and suppression workflows are weak.
 - R-9: AI-generated itinerary changes could create false commitments or erase user intent if proposal confirmation, ownership, and version/conflict checks are incomplete.
 - R-10: Migrating existing linked conversations to one primary conversation could hide or detach historic context if migration and fallback access are not verified.
+- R-11: A flawed web-BFF-to-API identity boundary could accept stale, replayed, incorrectly scoped, or role-inaccurate requests.
+- R-12: A streaming or worker-runtime cutover could violate atomic answer persistence, cancellation, job lease, or duplicate-delivery guarantees that currently protect user and knowledge state.
+- R-13: Separate workload deployment can fail through misconfigured private networking, migration ordering, OAuth callback/session isolation, health checks, or insufficient operational ownership.
 
 ## 15. Open Questions
 
@@ -417,3 +451,5 @@ The public MVP should focus on the Hanoi-to-HCMC road-trip corridor. Initial kno
 - OQ-5: Should AI-generated image output become an MVP workflow, or remain deferred until after text/image-input planning is validated?
 - OQ-6: What legal/content-reuse policy permits retention and traveler-visible display of short Facebook-derived evidence quotes and source links?
 - OQ-8: Resolved in the architecture: a proposal created from an earlier chat request fails safely when the owner has applied a newer conflicting proposal, and the user can request a refreshed proposal in chat.
+- OQ-9: Which maintained authorization-server implementation will provide the future Nest-hosted OAuth/OIDC flow for mobile, and what issuer/key-rotation/revocation policy will it use?
+- OQ-10: Before staging topology and public launch, who owns Railway service configuration, domain/DNS/CSP/callback configuration, secrets, backup/restore testing, monitoring, alerting, and on-call response?

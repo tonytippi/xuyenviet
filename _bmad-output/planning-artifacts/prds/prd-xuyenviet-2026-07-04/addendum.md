@@ -41,6 +41,20 @@
 - Architecture must define the Trip Project aggregate boundary, primary-conversation migration, owner-scoped plan/proposal commands, proposal expiry/conflict handling, audit history, and deletion propagation for all derived Trip Planning data.
 - Weather, location, Google Maps/Places/Routes, booking/OTA data, dynamic provider snapshots, budget, checklists, travel vault, collaboration, and notifications remain deferred from the Trip Planning Foundation tranche.
 
+## Approved API-First Runtime Direction
+
+- NestJS will own the versioned domain API, authorization boundary, extracted use cases, and dedicated worker bootstrap. This remains a modular monolith: it does not introduce microservices, database-per-service, an event bus, or a new queue platform.
+- Next.js remains the traveler presentation layer and browser BFF during the initial phase. A separate Next.js admin app will have its own deployment and origin but will use the same API boundary and domain policy. Neither frontend receives database credentials.
+- The target workspace has `web`, `admin`, `api`, and `worker` applications with narrowly extracted `database`, `domain`, `contracts`, and `config` packages. Existing root Next.js code moves only as a vertical slice needs a shared consumer; there is no big-bang reorganization.
+- PostgreSQL remains the only product and job data plane, and Drizzle remains the only schema/migration owner. Existing transactions, `FOR UPDATE SKIP LOCKED`, claims, leases, fencing tokens, and idempotency protocols are preserved by workers and use cases.
+- The initial deployment target is Railway. Web/admin BFFs call the API through private networking; `api.xuyenviet.app` is reserved for a future public/mobile API and is not exposed merely to demonstrate the API.
+- Web/admin Auth.js sessions are mapped at the BFF boundary to short-lived, audience-scoped internal tokens for the private API. The browser never receives those credentials. A future maintained Nest-hosted OAuth/OIDC integration for mobile is a separate issuer but normalizes into the same `RequestPrincipal` and `users.id` ownership model.
+- API contracts use `/v1`, OpenAPI, task-oriented read models, safe errors, validation, scoped authorization, cursor pagination where required, and a hand-written thin BFF client. Generated SDKs are deferred.
+- AI Ask retains NDJSON initially. Its Nest API slice must preserve `preparing`, `delta`, `done`, and `error`, abort handling, final policy checks, and atomic terminal assistant/provenance/usage persistence. `after()`-based context extraction is replaced by a durable worker-dispatch port.
+- Continuous worker loops run in the dedicated worker service. Railway Cron is restricted to bounded `--once` sweeps. Facebook and YouTube capture remain operator-controlled runtimes outside the Railway worker.
+- Public launch requires a clean cutover: each aggregate command has one writer, no dual-write occurs, the legacy `/admin` surface is retired, and no Next.js server action or route handler remains a domain transport owner. Rollback changes traffic or compatible code, never destructively rolls back schema.
+- Four pre-cutover spikes must produce decision records and failure-mode tests: identity/resource-server behavior, Nest AI Ask NDJSON streaming, Railway/monorepo deployment, and worker lifecycle/operations. Railway ownership, domains, secrets, backup/restore, monitoring, and on-call policy remain an explicit pre-staging/public-launch decision.
+
 ## Market Context Digest
 
 - AI trip planners commonly converge on chat-to-itinerary plus booking marketplace flows.
