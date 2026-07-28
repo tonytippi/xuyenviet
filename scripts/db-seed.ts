@@ -96,8 +96,8 @@ async function main() {
     },
     {
       id: "seed-model-evaluation",
-      gatewayModelName: "cx/gpt-5.6-luna",
-      displayLabel: "GPT 5.6 Luna Evaluation",
+      gatewayModelName: "cx/gpt-5.6-terra",
+      displayLabel: "GPT 5.6 Terra Evaluation",
       purpose: "evaluation",
       active: true,
       defaultForPurpose: true,
