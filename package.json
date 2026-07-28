@@ -11,7 +11,7 @@
     "test:run": "vitest run",
     "typecheck": "tsc --noEmit && pnpm --filter @xuyenviet/api typecheck",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
+    "db:migrate": "tsx scripts/migrate-api-schema.ts",
     "db:seed": "tsx scripts/db-seed.ts",
     "db:reset": "tsx scripts/db-reset.ts",
     "bootstrap:initial-admin": "node --conditions react-server --import tsx scripts/bootstrap-initial-admin.ts",

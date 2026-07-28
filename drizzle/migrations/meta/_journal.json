@@ -22,6 +22,13 @@
       "when": 1785316400000,
       "tag": "0002_system_admin_bootstrap_actor",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1785245901541,
+      "tag": "0003_release_schema_versions",
+      "breakpoints": true
     }
   ]
 }

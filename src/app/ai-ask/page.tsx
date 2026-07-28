@@ -4,6 +4,7 @@ import { AiAskComposer } from "@/features/ai/ai-ask-composer";
 import { signOutCurrentUser } from "@/features/auth/actions";
 import { normalizePublicAskDraft } from "@/features/auth/redirects";
 import { getOwnedConversation, listOwnedConversations } from "@/features/chat-trips/conversations";
+import { loadOwnedConversationSummaries } from "@/features/chat-trips/conversation-summary-loader";
 import { applyTripChangeProposalAction, createTripProjectFromForm, deleteConversationAction, deleteTripProjectAction, dismissTripChangeProposalAction } from "@/features/chat-trips/actions";
 import { getOwnedTripProjectSummary, listOwnedTripProjects } from "@/features/chat-trips/trip-projects";
 import { saveAnswerUsefulnessFeedbackAction } from "@/features/feedback/actions";
@@ -116,7 +117,7 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
     destination: project.destination,
     updatedAt: project.updatedAt,
   }));
-  const initialSessions = selectedTripProject ? selectedTripProject.historicChats : (await listOwnedConversations()) ?? [];
+  const initialSessions = selectedTripProject ? selectedTripProject.historicChats : (await loadOwnedConversationSummaries({ legacy: listOwnedConversations })) ?? [];
   const imageInputModel = await selectActiveAiGatewayModel({
     purpose: aiAskInitialAnswerPurpose,
     requiredCapabilities: { textInput: true, streaming: true, imageInput: true },

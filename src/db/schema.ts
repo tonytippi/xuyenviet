@@ -250,6 +250,11 @@ export const sessions = pgTable("sessions", {
   expires: timestamp("expires", { mode: "date" }).notNull(),
 });
 
+export const releaseSchemaVersions = pgTable("release_schema_versions", {
+  version: text("version").primaryKey(),
+  recordedAt: timestamp("recorded_at", { mode: "date" }).defaultNow().notNull(),
+});
+
 export const verificationTokens = pgTable(
   "verification_tokens",
   {

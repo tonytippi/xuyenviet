@@ -3,13 +3,17 @@ import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
 
 import { parseBffCredentialConfig } from "@xuyenviet/config";
-import { createPostgresApiIdentityRepository } from "@xuyenviet/database";
+import { createPostgresApiIdentityRepository, createPostgresConversationSummaryRepository, createPostgresReleaseSchemaVersionRepository } from "@xuyenviet/database";
 
 import { createApiModule } from "./app.module";
 
 async function bootstrap() {
   const config = parseBffCredentialConfig(JSON.parse(required("XV_BFF_CREDENTIAL_CONFIG")));
-  const app = await NestFactory.create(createApiModule(config, createPostgresApiIdentityRepository(required("DATABASE_URL"))));
+  const databaseUrl = required("DATABASE_URL");
+  const app = await NestFactory.create(createApiModule(config, createPostgresApiIdentityRepository(databaseUrl), {
+    conversationSummaries: createPostgresConversationSummaryRepository(databaseUrl),
+    schemaVersions: createPostgresReleaseSchemaVersionRepository(databaseUrl),
+  }));
   await app.listen(Number(process.env.PORT ?? 3001));
 }
 

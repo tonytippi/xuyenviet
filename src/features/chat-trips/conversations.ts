@@ -1,6 +1,7 @@
 import "server-only";
 
-import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { listOwnedConversationSummaries, type OwnedConversationSummary } from "@xuyenviet/domain";
 
 import { getDb } from "@/db/client";
 import { aiUsageEvents, answerUsefulnessFeedback, assistantResponseProvenance, chatContext, conversations, messageImageAttachments, messages, tripProjects } from "@/db/schema";
@@ -11,14 +12,7 @@ import { selectActiveAiGatewayModel } from "@/features/ai/models";
 import { formatAssistantMessageProvenance } from "@/features/retrieval/provenance";
 import { getAuthenticatedSession } from "@/server/auth";
 
-const newConversationPreview = "Hội thoại mới";
-const previewMaxLength = 60;
-
-export type OwnedConversationSummary = {
-  id: string;
-  updatedAt: Date;
-  preview: string;
-};
+export type { OwnedConversationSummary } from "@xuyenviet/domain";
 
 export type DeleteOwnedConversationResult = {
   success: boolean;
@@ -147,37 +141,24 @@ export async function listOwnedConversations(): Promise<OwnedConversationSummary
     return null;
   }
 
-  const rows = await getDb()
-    .select({
-      id: conversations.id,
-      updatedAt: conversations.updatedAt,
-      messageContent: messages.content,
-    })
-    .from(conversations)
-    .leftJoin(
-      messages,
-      and(
-        eq(messages.conversationId, conversations.id),
-        eq(messages.userId, session.userId),
-        eq(messages.role, "user"),
-      ),
-    )
-    .where(and(eq(conversations.userId, session.userId), isNull(conversations.tripProjectId)))
-    .orderBy(desc(conversations.updatedAt), desc(conversations.id), asc(messages.createdAt), asc(messages.id));
+  return listOwnedConversationSummaries({
+    async listOwnedConversationSummaryRows(userId, limit) {
+      const selected = await getDb().select({ id: conversations.id, updatedAt: conversations.updatedAt }).from(conversations)
+        .where(and(eq(conversations.userId, userId), sql`${conversations.tripProjectId} is null`))
+        .orderBy(desc(conversations.updatedAt), desc(conversations.id))
+        .limit(limit);
+      if (selected.length === 0) return [];
 
-  const seenConversationIds = new Set<string>();
-  const summaries: OwnedConversationSummary[] = [];
-
-  for (const row of rows) {
-    if (seenConversationIds.has(row.id)) {
-      continue;
-    }
-
-    seenConversationIds.add(row.id);
-    summaries.push({ id: row.id, updatedAt: row.updatedAt, preview: formatPreview(row.messageContent) });
-  }
-
-  return summaries;
+      const firstMessages = await getDb().selectDistinctOn([messages.conversationId], {
+        conversationId: messages.conversationId,
+        content: messages.content,
+      }).from(messages)
+        .where(and(inArray(messages.conversationId, selected.map((conversation) => conversation.id)), eq(messages.userId, userId), eq(messages.role, "user")))
+        .orderBy(messages.conversationId, asc(messages.createdAt), asc(messages.id));
+      const previews = new Map(firstMessages.map((message) => [message.conversationId, message.content]));
+      return selected.map((conversation) => ({ ...conversation, messageContent: previews.get(conversation.id) ?? null }));
+    },
+  }, session.userId);
 }
 
 export async function deleteOwnedConversation(conversationId: string): Promise<DeleteOwnedConversationResult> {
@@ -255,18 +236,4 @@ export async function deleteOwnedConversation(conversationId: string): Promise<D
     console.error("Failed to delete owned conversation.", { conversationId, userId: session.userId, error });
     return { success: false, reason: "failed" };
   }
-}
-
-function formatPreview(content: string | null): string {
-  if (!content) {
-    return newConversationPreview;
-  }
-
-  const trimmed = content.trim();
-
-  if (trimmed.length <= previewMaxLength) {
-    return trimmed;
-  }
-
-  return `${trimmed.slice(0, previewMaxLength).trimEnd()}…`;
 }

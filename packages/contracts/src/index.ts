@@ -37,6 +37,33 @@ export type SafeApiError = {
   violations?: SafeFieldViolation[];
 };
 
+export const conversationSummaryLimit = 100;
+export type ConversationSummary = { id: string; updatedAt: string; preview: string };
+export type ConversationSummaryListResponse = { summaries: ConversationSummary[] };
+export type ApiVersionResponse = { version: "v1"; conversationSummaryLimit: number };
+export type HealthResponse = { status: "ok" };
+
+export function parseConversationSummaryListResponse(value: unknown): ConversationSummaryListResponse | null {
+  if (!value || typeof value !== "object" || !Array.isArray((value as { summaries?: unknown }).summaries)) return null;
+  const summaries = (value as { summaries: unknown[] }).summaries;
+  if (summaries.length > conversationSummaryLimit || !summaries.every(isConversationSummary)) return null;
+  return { summaries: summaries as ConversationSummary[] };
+}
+
+function isConversationSummary(value: unknown): value is ConversationSummary {
+  if (!value || typeof value !== "object") return false;
+  const summary = value as Record<string, unknown>;
+  return typeof summary.id === "string" && summary.id.length > 0 && summary.id.length <= 128
+    && typeof summary.updatedAt === "string" && isUtcIsoTimestamp(summary.updatedAt)
+    && typeof summary.preview === "string" && summary.preview.length <= 61;
+}
+
+function isUtcIsoTimestamp(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) return false;
+  const parsed = new Date(value);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString() === value;
+}
+
 export function isBffIssuer(value: unknown): value is BffIssuer {
   return typeof value === "string" && (bffIssuers as readonly string[]).includes(value);
 }

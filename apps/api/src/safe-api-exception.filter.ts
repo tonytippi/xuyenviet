@@ -9,7 +9,7 @@ export class SafeApiExceptionFilter implements ExceptionFilter {
     const request = host.switchToHttp().getRequest<{ requestId?: string; headers: { "x-request-id"?: string | string[] } }>();
     const supplied = exception instanceof HttpException ? safeDetails(exception.getResponse()) : null;
     const code = supplied?.code ?? codeFor(exception instanceof HttpException ? exception.getStatus() : 500);
-    const status = statusFor(code);
+    const status = exception instanceof HttpException && exception.getStatus() === 503 && code === "internal_error" ? 503 : statusFor(code);
     const body: SafeApiError = {
       code,
       message: messageFor(code),

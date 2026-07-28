@@ -1,9 +1,13 @@
-import { CanActivate, ExecutionContext, Inject, Injectable, UnauthorizedException } from "@nestjs/common";
+import { CanActivate, ExecutionContext, Inject, Injectable, Optional, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
+import { Reflector } from "@nestjs/core";
 import { decodeJwt, importJWK, jwtVerify, type JWTPayload } from "jose";
 
 import { apiAudience, isBffIssuer, isRequestRole, type InternalCredentialClaims, type RequestPrincipal } from "@xuyenviet/contracts";
 import { type BffCredentialConfig } from "@xuyenviet/config";
-import { type ApiIdentityRepository } from "@xuyenviet/database";
+import { type ApiIdentityRepository, type ReleaseSchemaVersionRepository } from "@xuyenviet/database";
+
+import { PUBLIC_ROUTE } from "./public-route.decorator";
+import { API_CONFIGURATION_VALID, isApiReady, RELEASE_SCHEMA_VERSION_REPOSITORY } from "../release-schema";
 
 type RequestWithPrincipal = { headers: { authorization?: string; "x-request-id"?: string | string[] }; requestId?: string; principal?: RequestPrincipal };
 export const BFF_CREDENTIAL_CONFIG = Symbol("BFF_CREDENTIAL_CONFIG");
@@ -14,9 +18,13 @@ export class ResourceServerGuard implements CanActivate {
   constructor(
     @Inject(BFF_CREDENTIAL_CONFIG) private readonly config: BffCredentialConfig,
     @Inject(API_IDENTITY_REPOSITORY) private readonly identities: ApiIdentityRepository,
+    private readonly reflector: Reflector,
+    @Optional() @Inject(RELEASE_SCHEMA_VERSION_REPOSITORY) private readonly schemaVersions?: ReleaseSchemaVersionRepository,
+    @Optional() @Inject(API_CONFIGURATION_VALID) private readonly configValid?: boolean,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
+    if (this.reflector.getAllAndOverride<boolean>(PUBLIC_ROUTE, [context.getHandler(), context.getClass()])) return true;
     const request = context.switchToHttp().getRequest<RequestWithPrincipal>();
     const token = bearerToken(request.headers.authorization);
     if (!token) {
@@ -37,7 +45,12 @@ export class ResourceServerGuard implements CanActivate {
         throw new Error("missing key id");
       }
       const claims = validateClaims(payload);
-      const session = await this.identities.getSession(claims.sid);
+      let session;
+      try {
+        session = await this.identities.getSession(claims.sid);
+      } catch {
+        throw new IdentityUnavailableError();
+      }
       if (!session || session.userId !== claims.sub || session.expires <= new Date() || session.authorizationVersion !== claims.rv) {
         throw new Error("stale identity");
       }
@@ -49,12 +62,20 @@ export class ResourceServerGuard implements CanActivate {
         issuer: claims.iss,
         tokenId: claims.jti,
       };
-      return true;
-    } catch {
+    } catch (error) {
+      if (error instanceof IdentityUnavailableError) {
+        throw new ServiceUnavailableException({ code: "internal_error" });
+      }
       throw unauthorized(request);
     }
+    if (this.schemaVersions && !await isApiReady({ configValid: this.configValid ?? false, repository: this.schemaVersions })) {
+      throw new ServiceUnavailableException({ code: "internal_error" });
+    }
+    return true;
   }
 }
+
+class IdentityUnavailableError extends Error {}
 
 async function keyForToken(issuer: BffCredentialConfig["issuers"][keyof BffCredentialConfig["issuers"]], token: string) {
   const { kid } = JSON.parse(Buffer.from(token.split(".")[0], "base64url").toString("utf8")) as { kid?: unknown };
