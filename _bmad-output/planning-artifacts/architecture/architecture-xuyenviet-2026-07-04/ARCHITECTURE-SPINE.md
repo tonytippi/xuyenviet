@@ -75,9 +75,13 @@ Prevents: Nest depending on Auth.js cookie/session serialization, browser-held i
 
 Rule: Web and admin retain separate host-only Auth.js session cookies and callback configuration. Each BFF validates its session, then obtains or mints a short-lived, audience-scoped internal credential only for `api.railway.internal`; that credential never reaches a browser or public API.
 
-Rule: The Nest resource server verifies signature, issuer, audience, expiry, token ID, session validity, and role/version freshness before creating `RequestPrincipal`. Sensitive admin operations re-check roles server-side. Token signing/verification library, key rotation, TTL, revocation, logout, CORS, and CSRF behavior are mandatory identity-spike decisions.
+Rule: The web and admin BFFs issue ES256 JWTs from separate per-environment private keys. Issuers are exactly `xuyenviet-web-bff` and `xuyenviet-admin-bff`; audience is exactly `api.railway.internal`; the API receives only their configured public keys. A credential has `sub` (stable `users.id`), `sid` (Auth.js session token identifier), `roles` (sorted roles), `rv` (authorization version), `jti`, `iss`, `aud`, `iat`, `nbf`, and `exp`; no email, browser cookie, provider token, or unrestricted claims are included.
 
-Rule: No API skeleton accepts BFF credentials and no protected capability cuts over until one identity decision record fixes issuer-of-record, exact claims, credential issuance/exchange, key selection/rotation, TTL, session-validity lookup, revocation/logout, role freshness, and CORS/CSRF behavior. Web and admin must consume that one contract.
+Rule: BFF credentials have a five-minute maximum lifetime and are minted only after the BFF validates the host-only Auth.js session. The Nest resource server verifies ES256 signature against the issuer-specific public key, exact issuer/audience, clock bounds, unique `jti`, active unexpired session matching `sid` and `sub`, and current user authorization version matching `rv` before creating `RequestPrincipal`. Logout deletes or expires the session, so further API calls fail on the session lookup; role changes increment the user's authorization version in the same transaction.
+
+Rule: `user_roles` is the authorization authority. Initial administration is bootstrapped only by an auditable, one-shot deployment command using `INITIAL_ADMIN_EMAIL`; the command fails if an admin already exists, finds the authenticated real user by normalized email, assigns `admin`, increments authorization version, records an Audit event, and is disabled after bootstrap. Thereafter only an admin-authorized Auth/Admin domain command may grant or revoke `operator` or `admin`; it locks affected role rows, records the audit transition, increments the target authorization version, and cannot revoke the last active admin. Environment email matching, direct database edits, and sign-in callbacks cannot grant roles after bootstrap.
+
+Rule: The private API accepts bearer credentials only and sends no CORS allow-origin response. Browser requests never call it. CSRF protection is enforced at the web/admin BFF boundary for cookie-authenticated mutations; the BFF forwards only validated body data and a bearer credential. BFF signing keys rotate through an active `kid` plus one previous verification-only key; the API accepts both only during a bounded overlap, and rejects unknown keys.
 
 Rule: Future mobile OAuth/OIDC uses a maintained Nest-hosted authorization-server integration and a distinct issuer. Both internal BFF and mobile credentials normalize to the same `RequestPrincipal` and stable `users.id`; domain API contracts and ownership policy do not depend on either token format.
 
@@ -299,11 +303,13 @@ Prevents: partial AI answers that cannot satisfy source/confidence display requi
 
 Rule: `POST /v1/ai-ask/stream` is Nest transport and preserves NDJSON `preparing`, `delta`, `done`, and `error` events. The traveler BFF forwards the protocol, request correlation ID, timeout, and abort without changing browser UX.
 
-Rule: The stream command carries a caller-generated idempotency key scoped to its owner conversation/project. One key creates at most one user turn and terminal result. Events are strictly ordered `preparing`, zero or more `delta`, then exactly one `done` or `error`; each event has the request ID and terminal events identify the persisted message/result when one exists. Reconnection/replay is deferred; after an ambiguous disconnect, the BFF refreshes the persisted conversation rather than reissuing a new command without the same idempotency key.
+Rule: The BFF sends a required `Idempotency-Key` header containing 16-128 URL-safe ASCII characters. AI Orchestration owns `ai_ask_commands`, uniquely keyed by `(user_id, scope_kind, scope_id, idempotency_key)`, where scope is the existing conversation ID or selected Trip Project ID; a new unscoped conversation uses a command-generated scope ID returned only after command creation. The row stores a SHA-256 digest of normalized question, attachment metadata, and selected scope, command status, user/assistant message IDs when created, terminal result, and expiry. The same key with a different digest returns `idempotency_key_reused`; a pending identical command returns its persisted conversation/message IDs and `in_progress`; a terminal identical command returns its persisted terminal result without another provider call. Keys and terminal command metadata retain for 24 hours.
 
-Rule: Extracted AI orchestration validates the command, captures the live owner conversation/project version, persists the user turn, builds the source bundle, streams the provider, performs final policy validation, and atomically persists terminal assistant content, retrieval decision, provenance, usage, and proposal draft when applicable only if the owner resources remain live at the captured version. Deletion or version mismatch finalizes no new visible content. Partial tokens are transient UI state only.
+Rule: Events are strictly ordered `preparing`, zero or more `delta`, then exactly one `done` or `error`; each contains the request ID and terminal events identify persisted command/message IDs when present. Reconnection/replay is deferred: after an ambiguous disconnect the BFF reads the command/conversation state using the same key and never creates a new command by retrying with a different key.
 
-Rule: Context extraction and post-answer annotation enrichment use durable dispatch ports. Their writes validate the owning message/conversation/project remains live at its expected version; dispatch failure leaves retryable state and must not make a completed answer/provenance/usage record incorrect. Abort stops provider work when possible; a pre-finalization failure returns a recoverable error and creates no misleading completed assistant message.
+Rule: Conversations carry a monotonic `lifecycle_version`; Trip Projects use `aggregate_version`. Command creation captures `{ conversation_id, conversation_lifecycle_version, trip_project_id?, trip_project_aggregate_version? }` after locking owner rows. Conversation/project deletion, project link or primary-conversation changes, and aggregate changes that alter TripAnswerContext increment their corresponding version. Final assistant/provenance/usage persistence conditionally verifies that exact fence in one transaction. A failed fence marks the command terminal `discarded` and sends a safe `error` with `refresh_required`; it creates no visible assistant response, provenance, usage success event, annotations, or proposal.
+
+Rule: Extracted AI orchestration validates the command, persists the user turn and command fence, builds the source bundle, streams the provider, and atomically persists final assistant content, retrieval decision, provenance, usage, and source-bundle snapshot only when the fence still holds. Partial tokens are transient UI state only. Proposal drafting is a separately durable command and its output may be attached only after it validates the same or a newer Trip Project aggregate fence.
 
 Seed latency target: first visible answer within 5 seconds without web search and within 10 seconds with web search. [ASSUMPTION]
 
@@ -359,7 +365,7 @@ Prevents: UI teams independently parsing Vietnamese answer prose to create links
 
 Rule: Selectable answer annotations are best-effort post-answer enrichment. Their descriptors are validated against persisted assistant-message text and stored provenance/retrieval/source-bundle snapshots before storage and rendering.
 
-Rule: A descriptor type is `source | warning | trip_fact | action | place | hotel_area | route_segment | cost`. It includes a display label, answer text range or section, source category, one or more owning provenance-row references where applicable, and bounded traveler-safe display metadata.
+Rule: A descriptor type is `source | warning | trip_fact | action | place | hotel_area | route_segment | cost`. `source`, `place`, `hotel_area`, `route_segment`, and `cost` require one or more owning provenance-row references. `warning` and `trip_fact` may omit provenance only when they represent answer-local guidance or owner context, contain no source-derived quick facts or actions, and render as non-navigable text. `action` requires provenance when it acts on source-backed state; an owner-context action may omit provenance but its server command must derive the current target from the selected owner-scoped route state.
 
 Rule: Every annotated range uses `{ start, end, text }`, where `start` and `end` are zero-based UTF-16 code-unit offsets into the final persisted assistant-message content, `end` is exclusive, and `text` exactly equals `content.slice(start, end)`. Ranges require integer bounds `0 <= start < end <= content.length`; the validator rejects overlapping ranges and any mismatch after persistence/backfill. The client renders persisted offsets only and never normalizes, re-searches, or re-matches Vietnamese prose to recover an entity.
 
@@ -561,6 +567,42 @@ Rule: API, web, admin, and worker readiness validate the deployed schema version
 
 Rule: Each public-launch transport owner is listed in a cutover inventory with its replacement API contract, authorization matrix, routing switch, rollback evidence, and removal proof. The inventory must be empty of legacy Next domain owners before launch.
 
+### AD-34: Durable Work Uses A PostgreSQL Transactional Outbox
+
+Binds: context extraction, annotation enrichment, proposal drafting, worker dispatch, retry behavior, and delivery fencing.
+
+Prevents: `after()` callbacks, fire-and-forget promises, or independently shaped worker jobs losing work or applying stale writes.
+
+Rule: The originating domain transaction writes a versioned `domain_outbox` row with event type, aggregate/resource ID, expected owner fence, deterministic dedupe key, safe bounded payload, status, attempt count, available-at, lease/fencing token, and terminal failure code. The unique dedupe key is defined by the originating command and makes duplicate dispatch harmless.
+
+Rule: The dedicated worker claims outbox rows with `FOR UPDATE SKIP LOCKED`, lease expiry, fencing token, and compare-and-swap acknowledgement. A consumer validates the expected owner fence before every write, is idempotent by dedupe key, and marks success only with its resulting state transaction. Retry uses bounded exponential backoff; exhausted jobs become `failed` with a safe reason and alert signal. No MVP dead-letter replay tool bypasses the owning domain command.
+
+Rule: AI Ask atomically enqueues context extraction only after user-turn persistence, annotation enrichment only after terminal assistant/provenance persistence, and proposal drafting only after terminal assistant persistence. Failure or delay of those jobs cannot change a terminal AI Ask command from completed to failed, and each consumer exposes its own pending/failed state through an owning read model.
+
+### AD-35: Chat/Trips Publishes A Versioned TripAnswerContext
+
+Binds: AI Ask trip context, plan/constraint precedence, source bundle serialization, proposal drafting, and evaluation.
+
+Prevents: AI Orchestration, Chat/Trips, and legacy chat-context readers constructing incompatible versions of a selected Trip Project.
+
+Rule: Chat/Trips exclusively exposes `TripAnswerContext v1`, captured with the Trip Project aggregate version. It contains stable project anchors, ordered plan items, structured constraints, primary-conversation ID, and bounded current conversation facts. It serializes no raw transcript, provider data, hidden proposal, or dynamic/deferred domain data.
+
+Rule: Within `TripAnswerContext`, structured anchors, plan items, and `trip_project_constraints` are canonical. Legacy `trip_projects` fields are migration-only aliases of those structured fields and must not override them. Project-scoped `chat_context` may supplement only fields absent from structured state; conversation-scoped `chat_context` is lower priority and becomes a typed conflict entry when it differs from canonical project state. AI answers use canonical state and may ask a concise clarification for a material conflict; proposal drafting uses canonical structured state only.
+
+Rule: The source bundle stores the `TripAnswerContext` version, aggregate version, ordered included field/item identifiers and versions, conflict list, deterministic bounded serialization, and SHA-256 digest of the final prompt section. AI Orchestration, provenance, usage, and evaluation reference this immutable source-bundle snapshot; selected but compacted-out items are recorded with an exclusion reason and are never represented as model input.
+
+### AD-36: Provenance Withdrawal Is First-Class And Read-Time Safe
+
+Binds: source removal, evidence withdrawal, historical answer provenance, annotations, detail projections, and traveler rendering.
+
+Prevents: a safe source removal leaving an old URL, quote, quick fact, or annotation visible through a persisted answer snapshot.
+
+Rule: `assistant_response_provenance` has an availability state `available | withdrawn`, withdrawn timestamp, and safe withdrawal reason. Source removal transactionally identifies linked provenance rows by evidence/source/card references, marks them withdrawn, removes traveler-visible snapshot URL/quote/quick facts, and invalidates annotations that reference them. The operation is idempotent and records only safe counts/identifiers in audit state.
+
+Rule: Traveler provenance and detail read models always apply current availability at read time. A withdrawn item renders only a localized unavailable marker with no source URL, quote, derived fact, or executable action. An annotation whose last required provenance reference is withdrawn is omitted; an answer-local annotation remains only when it satisfies AD-20 without provenance.
+
+Rule: Existing historical provenance is backfilled before source-removal cutover. Until backfill completes, a source-removal command fails closed for any answer whose provenance cannot be safely identified and redacted; it must not delete source evidence while an unsafe traveler snapshot remains.
+
 ## Shared Data Contracts
 
 Frontend shell state contract:
@@ -576,9 +618,9 @@ Selectable answer entity descriptor minimum fields:
 - `range`: `{ start, end, text }` using AD-20 zero-based UTF-16, exclusive-end semantics against the final persisted assistant message
 - `section`: answer section identifier when available
 - `sourceCategory`: `trip_context | chat_context | knowledge | web | general` when applicable
-- `owner`: safe reference to the owning provenance row/snapshot; entity descriptors require one or more provenance-row references
+- `owner`: safe reference to the owning provenance row/snapshot when AD-20 requires provenance
 - `detail`: bounded traveler-safe summary and at most six `{ label, value }` quick facts from the AD-20 safe-provenance allowlist, with each field anchored to the answer text or linked safe projection
-- `provenance`: stored provenance row IDs and safe source snapshot references; entity descriptors require non-empty provenance IDs
+- `provenance`: stored provenance row IDs and safe source snapshot references when AD-20 requires provenance; otherwise an empty list
 - `action`: optional registered `{ command, label, arguments }` object resolved and authorized by its owning server module; never a client-derived route or label-only behavior
 
 Detail panel payloads are read models. They are not persisted as separate product state.
@@ -605,7 +647,7 @@ Core persisted entities:
 
 - `users`, `accounts`, `sessions`, `roles`
 - `referral_codes`, `referral_attributions`
-- `trip_projects`, `conversations`, `messages`, `chat_context`, `assistant_response_provenance`
+- `trip_projects`, `conversations`, `messages`, `chat_context`, `TripAnswerContext` snapshots, `ai_ask_commands`, `domain_outbox`, `assistant_response_provenance`
 - `trip_project_constraints`, `trip_plan_items`, `trip_change_proposals`, `trip_plan_change_history`
 - `context_embeddings`
 - `sources`, `raw_source_material`, `knowledge_ingestion_jobs`, `knowledge_cards`, `knowledge_card_evidence`, `knowledge_card_relations`, `knowledge_review_recommendations`, `knowledge_card_search_documents`
@@ -645,6 +687,10 @@ Multimodal provider rule: Image inputs passed to the Gateway must be validated f
 Trip Planning minimum persisted contract:
 
 - `trip_projects`: owner ID, current aggregate version, nullable migration-only `primary_conversation_id` constrained to a same-owner linked conversation, and existing project metadata.
+- `conversations`: owner ID, optional Trip Project linkage, monotonic lifecycle version, and timestamps.
+- `ai_ask_commands`: owner/scope, idempotency key and normalized payload digest, captured conversation/project fence, user/assistant message references, source-bundle snapshot reference, lifecycle/terminal result, and 24-hour expiry.
+- `domain_outbox`: originating domain, versioned event type, aggregate/resource ID, expected fence, deterministic dedupe key, safe payload, retry/lease/fencing state, and terminal safe failure code.
+- `assistant_response_provenance`: source-bundle snapshot reference plus availability/withdrawal state and safe withdrawal metadata; snapshots never remain traveler-visible after linked source withdrawal.
 - `trip_project_constraints`: Trip Project ID, owner ID, one structured constraint record with travelers/children, vehicle or EV needs, driving tolerance, budget range, preferences, avoid-list values, monotonic version, and created/updated timestamps. It contains no actual expenses, payment data, or provider-derived state.
 - `trip_plan_items`: Trip Project ID, owner ID, kind, discriminated anchor role or leg/activity type, same-project parent only for an activity under a leg, required same-project alternative target for `backup` and null alternative target otherwise, `idea | planned | confirmed | backup` state, ordinal unique within `(trip_project_id, parent_item_id)`, bounded user-confirmed label/notes, optional planned date/time, monotonic version, and created/updated timestamps. It contains no provider snapshot, booking credential/reference, exact GPS history, or dynamic weather/route result.
 - `trip_change_proposals`: Trip Project ID, owner ID, creator class, `pending | applied | dismissed | expired` status, bounded rationale, typed operation list, expected aggregate and affected-item version fences, ordering/parent preconditions when applicable, optional expiry, and terminal timestamp. Proposal operations identify only the target item and permitted structured-field changes; they do not embed executable SQL, arbitrary routes, or provider/model payloads.
@@ -656,7 +702,7 @@ Trip Planning deletion rule: deleting an owned Trip Project cascades or transact
 
 Retrieval returns a normalized source bundle:
 
-- `chat_trip_context`: selected trip project context and current chat session context used
+- `chat_trip_context`: versioned `TripAnswerContext` plus current chat session context used, conflict entries, included/excluded item references, and source-bundle digest
 - `knowledge`: active cards with IDs, titles, summaries, conditions, current knowledge/verification state, confidence, safe current evidence/source metadata, freshness flags, and scores
 - `web`: external results with URL, title, snippet/content, checkedAt, provider score, and `unverified` confidence
 - `general`: explicit marker when model reasoning fills gaps without source grounding
@@ -686,7 +732,7 @@ Production must have:
 - Railway `web`, `admin`, `api`, `worker`, and migration workloads independently verified in staging with private service discovery, build/start commands, health/readiness, isolated environment configuration, and migration ordering.
 - Separate staging/production databases, secrets, OAuth callback configuration, API audiences, and observability projects.
 - Server-side API authorization and role enforcement for protected capabilities, with API resource-server token verification independent of Auth.js session parsing.
-- A thin BFF API client that forwards/generates correlation IDs, uses internal base URL/token exchange, maps typed safe errors, and forwards timeout/abort behavior. No generated SDK is required.
+- A thin BFF API client that forwards/generates correlation IDs, mints the AD-4 BFF credential, maps typed safe errors, preserves `Idempotency-Key`, and forwards timeout/abort behavior. No generated SDK is required.
 - API `/v1` OpenAPI for health/version and protected contracts, a global validation boundary, and a stable safe error envelope of `code`, `message`, `requestId`, and optional safe field violations.
 - Dedicated Nest worker loops that retain PostgreSQL claim predicates, leases, fencing tokens, `FOR UPDATE SKIP LOCKED`, idempotency, and existing system actors. Railway Cron invokes only bounded `--once` sweep commands; Facebook and YouTube capture remain operator-controlled external runtimes.
 - Graceful shutdown and duplicate-poller/restart tests, lag/retry/lease-recovery metrics, and a restart runbook for every migrated worker before retiring its legacy entrypoint.
@@ -700,7 +746,6 @@ Production must have:
 
 ## Deferred
 
-- Token signing/verification library, key storage/rotation, exact TTL, revocation/logout, role-freshness, CORS, and CSRF behavior, pending the mandatory identity/resource-server spike.
 - Railway service ownership, domains/DNS/CSP/callback values, secret allocation, backup/restore runbook, monitoring/alert thresholds, and on-call policy, pending their required pre-staging/public-launch operational decision.
 - Legal review of Facebook content reuse before traveler-visible quote/link display or broad group discovery.
 - Dedicated self-service privacy dashboard beyond chat/trip deletion.
