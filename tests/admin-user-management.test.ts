@@ -113,9 +113,13 @@ describe("admin user management", () => {
     const { grantAdminUserRole, revokeAdminUserRole } = await import("@/features/admin/actions");
 
     await expect(grantAdminUserRole("target", "operator")).resolves.toMatchObject({ changed: true, operation: "grant" });
+    await expect(testDb.select({ authorizationVersion: users.authorizationVersion }).from(users).where(eq(users.id, "target"))).resolves.toEqual([{ authorizationVersion: 2 }]);
     await expect(grantAdminUserRole("target", "operator")).resolves.toMatchObject({ changed: false });
+    await expect(testDb.select({ authorizationVersion: users.authorizationVersion }).from(users).where(eq(users.id, "target"))).resolves.toEqual([{ authorizationVersion: 2 }]);
     await expect(revokeAdminUserRole("target", "operator")).resolves.toMatchObject({ changed: true, operation: "revoke" });
+    await expect(testDb.select({ authorizationVersion: users.authorizationVersion }).from(users).where(eq(users.id, "target"))).resolves.toEqual([{ authorizationVersion: 3 }]);
     await expect(revokeAdminUserRole("target", "operator")).resolves.toMatchObject({ changed: false });
+    await expect(testDb.select({ authorizationVersion: users.authorizationVersion }).from(users).where(eq(users.id, "target"))).resolves.toEqual([{ authorizationVersion: 3 }]);
     await expect(testDb.select().from(auditEvents).where(eq(auditEvents.targetId, "target"))).resolves.toEqual([
       expect.objectContaining({ operation: "update", targetType: "user_role", beforeSummary: null, afterSummary: '{"role":"operator"}' }),
       expect.objectContaining({ operation: "update", targetType: "user_role", beforeSummary: '{"role":"operator"}', afterSummary: null }),

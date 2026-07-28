@@ -2,7 +2,7 @@ import { Controller, Get, INestApplication, Module, UseGuards } from "@nestjs/co
 import { NestFactory } from "@nestjs/core";
 import { exportJWK, generateKeyPair, importJWK, SignJWT } from "jose";
 import request from "supertest";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { apiAudience } from "@xuyenviet/contracts";
 import { createBffCredentialConfig, type BffCredentialConfig, type Jwk } from "@xuyenviet/config";
@@ -12,13 +12,16 @@ import { Principal } from "../apps/api/src/auth/principal.decorator";
 import { ResourceServerGuard } from "../apps/api/src/auth/resource-server.guard";
 import { getTestDatabaseUrl } from "./helpers/env-file";
 import { resetTestDatabase, testDb } from "./helpers/db";
-import { sessions, users } from "@/db/schema";
+import { sessions, userRoles, users } from "@/db/schema";
 import type { RequestPrincipal } from "@xuyenviet/contracts";
 
 let app: INestApplication;
 let config: BffCredentialConfig;
 let webPrevious: Awaited<ReturnType<typeof keySet>>;
 let adminActive: Awaited<ReturnType<typeof keySet>>;
+const authMock = vi.fn();
+
+vi.mock("@/auth", () => ({ auth: authMock, signIn: vi.fn(), signOut: vi.fn() }));
 
 @Controller("_identity-test")
 class IdentityTestController {
@@ -114,6 +117,29 @@ describe("API request principals", () => {
     await restartApp();
     await rejected(await tokenFor(config, "xuyenviet-web-bff", {}, webPrevious));
   });
+
+  test("accepts a valid admin credential while rejecting its key for the web issuer", async () => {
+    await request(app.getHttpServer()).get("/_identity-test").set("Authorization", `Bearer ${await tokenFor(config, "xuyenviet-admin-bff")}`).expect(200, { userId: "user-1" });
+    expect(controller().calls).toBe(1);
+
+    await rejected(await tokenFor(config, "xuyenviet-web-bff", {}, adminActive));
+  });
+
+  test("rejects already minted credentials after role grants and revokes change authorization version", async () => {
+    await testDb.insert(users).values({ id: "admin-1", email: "admin-1@example.com" });
+    await testDb.insert(userRoles).values({ userId: "admin-1", role: "admin" });
+    authMock.mockResolvedValue({ user: { id: "admin-1", email: "admin-1@example.com" } });
+    const { grantAdminUserRole, revokeAdminUserRole } = await import("@/features/admin/actions");
+
+    const beforeGrant = await tokenFor(config, "xuyenviet-web-bff");
+    await expect(grantAdminUserRole("user-1", "operator")).resolves.toMatchObject({ changed: true });
+    await rejected(beforeGrant);
+
+    const beforeRevoke = await tokenFor(config, "xuyenviet-web-bff", { rv: 2 });
+    await request(app.getHttpServer()).get("/_identity-test").set("Authorization", `Bearer ${beforeRevoke}`).expect(200);
+    await expect(revokeAdminUserRole("user-1", "operator")).resolves.toMatchObject({ changed: true });
+    await rejected(beforeRevoke);
+  });
 });
 
 async function startApp() {
@@ -155,11 +181,11 @@ function asEs256Jwk(key: JsonWebKey, kid: string): Jwk {
   return { ...key, kty: "EC", crv: "P-256", kid };
 }
 
-type TokenOverrides = { kid?: string; iss?: string; aud?: string; iat?: number; nbf?: number; exp?: number; sid?: string; roles?: string[]; jti?: string };
+type TokenOverrides = { kid?: string; iss?: string; aud?: string; iat?: number; nbf?: number; exp?: number; sid?: string; roles?: string[]; rv?: number; jti?: string };
 
 async function tokenFor(config: BffCredentialConfig, issuer: "xuyenviet-web-bff" | "xuyenviet-admin-bff", overrides: TokenOverrides = {}, signer = config.issuers[issuer].active as Awaited<ReturnType<typeof keySet>>) {
   const now = Math.floor(Date.now() / 1000);
-  const claims = { roles: overrides.roles ?? ["traveler"], rv: 1, jti: overrides.jti ?? crypto.randomUUID() };
+  const claims = { roles: overrides.roles ?? ["traveler"], rv: overrides.rv ?? 1, jti: overrides.jti ?? crypto.randomUUID() };
   if (overrides.sid !== undefined) Object.assign(claims, { sid: overrides.sid });
   else if (!("sid" in overrides)) Object.assign(claims, { sid: "session-1" });
   return new SignJWT(claims)

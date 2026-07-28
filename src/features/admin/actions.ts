@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 
 import { aiGatewayModels, userRoles, users, type AiGatewayModelPurpose, type UserRole } from "@/db/schema";
 import { runAuditedAdminMutation, runAuditedExactAdminMutation } from "@/server/mutations";
@@ -198,6 +198,9 @@ export async function grantAdminUserRole(targetUserId: string, role: ManagedUser
       }
 
       const inserted = await transaction.insert(userRoles).values({ userId: id, role: managedRole }).onConflictDoNothing().returning({ userId: userRoles.userId });
+      if (inserted.length > 0) {
+        await transaction.update(users).set({ authorizationVersion: sql`${users.authorizationVersion} + 1` }).where(eq(users.id, id));
+      }
       return { changed: inserted.length > 0, targetUserId: id, role: managedRole, operation: "grant" };
     },
   });
@@ -226,6 +229,9 @@ export async function revokeAdminUserRole(targetUserId: string, role: ManagedUse
       }
 
       const removed = await transaction.delete(userRoles).where(and(eq(userRoles.userId, id), eq(userRoles.role, managedRole))).returning({ userId: userRoles.userId });
+      if (removed.length > 0) {
+        await transaction.update(users).set({ authorizationVersion: sql`${users.authorizationVersion} + 1` }).where(eq(users.id, id));
+      }
       return { changed: removed.length > 0, targetUserId: id, role: managedRole, operation: "revoke" };
     },
   });

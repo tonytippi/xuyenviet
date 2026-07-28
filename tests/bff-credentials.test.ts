@@ -125,17 +125,12 @@ describe("web BFF credentials", () => {
     })).toThrow("Invalid web BFF signing configuration.");
   });
 
-  test("does not expose a session token, credential, or signing material through the browser-facing BFF API", async () => {
-    const credential = await mintWebBffCredential(webSigningConfig, {
-      getAuthenticatedSession: async () => ({ userId: "traveler", email: "traveler@example.com" }),
-      resolveBffSessionToken: async () => "opaque-session-token",
-    });
-    const browserResponse = JSON.stringify({ user: { id: "traveler", email: "traveler@example.com" } });
-
-    expect(browserResponse).not.toContain(credential);
-    expect(browserResponse).not.toContain("opaque-session-token");
-    expect(browserResponse).not.toContain(webSigningConfig.active.privateKey.d!);
-    expect(browserResponse).not.toContain(JSON.stringify(webSigningConfig.active.privateKey));
+  test("rejects non-integer lifetimes and JWKs that cannot be imported", () => {
+    expect(() => createBffCredentialConfig({ ...config, maxLifetimeSeconds: "300" as unknown as number })).toThrow("Invalid BFF credential configuration.");
+    expect(() => createWebBffSigningConfig({
+      ...webSigningConfig,
+      active: { ...webSigningConfig.active, publicKey: { ...webSigningConfig.active.publicKey, x: "invalid" } },
+    })).toThrow("Invalid web BFF signing configuration.");
   });
 });
 

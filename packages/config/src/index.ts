@@ -37,7 +37,7 @@ export function parseBffCredentialConfig(input: unknown): BffCredentialConfig {
 }
 
 export function createBffCredentialConfig(input: BffCredentialConfig): BffCredentialConfig {
-  if (input.audience !== apiAudience || input.maxLifetimeSeconds < 1 || input.maxLifetimeSeconds > 300) {
+  if (input.audience !== apiAudience || !isCredentialLifetime(input.maxLifetimeSeconds)) {
     throw new Error("Invalid BFF credential configuration.");
   }
 
@@ -63,8 +63,7 @@ export function createBffCredentialConfig(input: BffCredentialConfig): BffCreden
 export function createWebBffSigningConfig(input: WebBffSigningConfig): WebBffSigningConfig {
   if (
     input.audience !== apiAudience ||
-    input.maxLifetimeSeconds < 1 ||
-    input.maxLifetimeSeconds > 300 ||
+    !isCredentialLifetime(input.maxLifetimeSeconds) ||
     input.issuer !== "xuyenviet-web-bff" ||
     !isVerificationKey({ kid: input.active.kid, key: input.active.publicKey }) ||
     !isPrivateEs256Key(input.active.privateKey) ||
@@ -82,11 +81,31 @@ function isVerificationKey(key: VerificationKey): boolean {
 }
 
 function isPublicEs256Key(key: Jwk): boolean {
-  return key.kty === "EC" && key.crv === "P-256" && typeof key.x === "string" && typeof key.y === "string" && !key.d;
+  if (key.kty !== "EC" || key.crv !== "P-256" || typeof key.x !== "string" || typeof key.y !== "string" || key.d) {
+    return false;
+  }
+  try {
+    createPublicKey({ key: key as unknown as NodeJsonWebKey, format: "jwk" });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function isPrivateEs256Key(key: Jwk): boolean {
-  return key.kty === "EC" && key.crv === "P-256" && typeof key.x === "string" && typeof key.y === "string" && typeof key.d === "string";
+  if (key.kty !== "EC" || key.crv !== "P-256" || typeof key.x !== "string" || typeof key.y !== "string" || typeof key.d !== "string") {
+    return false;
+  }
+  try {
+    createPrivateKey({ key: key as unknown as NodeJsonWebKey, format: "jwk" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isCredentialLifetime(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && Number.isInteger(value) && value >= 1 && value <= 300;
 }
 
 function privateKeyMatchesPublicKey(privateKey: Jwk, publicKey: Jwk): boolean {
