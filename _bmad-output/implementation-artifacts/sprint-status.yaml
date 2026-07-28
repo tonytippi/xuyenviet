@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-07-28 (Story 9.3 independent-review repairs completed; status returned to ready-for-dev.)
+# last_updated: 2026-07-28 (Story 9.3 final permitted abort/timeout race repair verified; status set to done.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-07-28 (Story 9.3 independent-review repairs completed; status returned to ready-for-dev.)
+last_updated: 2026-07-28 (Story 9.3 final permitted abort/timeout race repair verified; status set to done.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -180,7 +180,9 @@ development_status:
   9-2-govern-initial-administration-and-role-changes: done
   # 2026-07-28: Independent review of ac7ce47c6002486fd1949faf6f4ec0dab723e4fe..2d04e47a7def551ff20927bda84449befe858f18 ran Blind Hunter, Edge Case Hunter, and Acceptance Auditor synchronously. Two patch findings remain: MEDIUM BFF error projection retains field violations from non-validation safe envelopes, and LOW no-bearer/malformed-bearer direct API tests omit Origin/no-CORS assertions required by AC2. The prospective public health/version guard concern is deferred to Story 9.4, which owns those endpoints. Focused transport suite passed: 4 files, 38 tests. No code or commit changes were made.
   # 2026-07-28: Repaired only the two independent-review findings: BFF field violations are now projected only for validation_error envelopes, with a forbidden-envelope regression; direct no-bearer and malformed-bearer requests now send Origin and prove the API emits no Access-Control-Allow-Origin. Targeted transport suite, typecheck, and diff check passed. Status returned to ready-for-dev pending follow-up independent review.
-  9-3-enforce-the-private-bff-transport-boundary: ready-for-dev
+  # 2026-07-28: Final bounded independent review of ac7ce47c6002486fd1949faf6f4ec0dab723e4fe..3b912494dfd943da254301836c1a0dd6a0364423 ran Blind Hunter, Edge Case Hunter, and Acceptance Auditor synchronously. One MEDIUM patch remains: src/server/bff-api-client.ts:45-54 does not re-check caller abort or local timeout after response.json(), so a protected mutation can return success when cancellation happens during response-body consumption. Add a post-body abort/timeout check with a regression. Blind Hunter and Acceptance Auditor clean. Focused transport suite: 4 files, 39 tests passed. No code or commit changes.
+  # 2026-07-28: Final permitted repair re-checks caller abort/local timeout after response-body parsing and before error or success projection. Regression covers cancellation and timeout during JSON parsing. Targeted transport/API suite passed (4 files, 40 tests); pnpm typecheck and git diff --check passed. Status set to done.
+  9-3-enforce-the-private-bff-transport-boundary: done
   9-4-publish-versioned-api-contracts-and-migrate-a-protected-read: ready-for-dev
   epic-9-retrospective: optional
 

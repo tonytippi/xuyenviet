@@ -45,6 +45,8 @@ export async function callPrivateApi<T>(input: { config: BffTransportConfig; cre
     if (abortKind === "timeout") throw timeoutError(input.correlationId);
     if (abortKind === "caller") input.signal?.throwIfAborted();
     const body: unknown = await response.json().catch(() => null);
+    if (abortKind === "timeout") throw timeoutError(input.correlationId);
+    if (abortKind === "caller") input.signal?.throwIfAborted();
     if (!response.ok) {
       const upstream = parseSafeApiError(body);
       throw new BffApiError(upstream ? safeError(upstream.code, messageFor(upstream.code), input.correlationId, presentationViolations(upstream)) : safeError("internal_error", messageFor("internal_error"), input.correlationId));

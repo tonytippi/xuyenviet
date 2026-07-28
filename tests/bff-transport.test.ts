@@ -244,6 +244,27 @@ describe("private BFF transport", () => {
       fetcher: async () => new Promise((resolve) => setTimeout(() => resolve(new Response(JSON.stringify({ accepted: true }), { status: 200 })), 10)),
     })).rejects.toMatchObject({ safe: { code: "request_timeout", requestId: "request_1" } });
   });
+
+  test("rejects caller aborts and local timeouts that occur while parsing a response body", async () => {
+    const caller = new AbortController();
+    const callerAbort = new Error("caller cancelled");
+    let beginParsing!: () => void;
+    let finishParsing!: () => void;
+    const parsingStarted = new Promise<void>((resolve) => { beginParsing = resolve; });
+    const callerRequest = callPrivateApi({
+      config, credential: "private-token", correlationId: "request_1", path: "/v1/test", method: "GET", parseResult: parseAccepted, signal: caller.signal,
+      fetcher: async () => ({ ok: true, json: async () => { beginParsing(); return new Promise((resolve) => { finishParsing = () => resolve({ accepted: true }); }); } }) as Response,
+    });
+    await parsingStarted;
+    caller.abort(callerAbort);
+    finishParsing();
+    await expect(callerRequest).rejects.toBe(callerAbort);
+
+    await expect(callPrivateApi({
+      config: { ...config, requestTimeoutMs: 1 }, credential: "private-token", correlationId: "request_1", path: "/v1/test", method: "GET", parseResult: parseAccepted,
+      fetcher: async () => ({ ok: true, json: async () => new Promise((resolve) => setTimeout(() => resolve({ accepted: true }), 10)) }) as Response,
+    })).rejects.toMatchObject({ safe: { code: "request_timeout", requestId: "request_1" } });
+  });
 });
 
 async function adapter(input: { mintCredential: () => Promise<string>; fetcher: typeof fetch; rawInput: unknown; origin?: string; idempotencyKey?: string; allowIdempotencyKey?: boolean; parseInput?: (value: unknown) => { title: string } | null | undefined; signal?: AbortSignal }) {
