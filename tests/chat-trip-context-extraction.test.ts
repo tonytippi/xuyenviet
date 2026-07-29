@@ -1,4 +1,4 @@
-import { asc, sql } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { aiGatewayModels, aiUsageEvents, auditEvents, chatContext, conversations, messages, tripProjects, users } from "@/db/schema";
@@ -439,7 +439,7 @@ describe("chat/trip context extraction", () => {
     await expect(testDb.select().from(chatContext)).resolves.toHaveLength(0);
   });
 
-  test("stream route triggers extraction only after validated message persistence", async () => {
+  test("stream route schedules extraction only after matching fenced finalization", async () => {
     await createTestUser("user-1");
     await createModel({ id: "extract-model", gatewayModelName: "cx/extract" });
     await createModel({ id: "answer-model", gatewayModelName: "cx/answer", purpose: "ai_ask_initial_answer", supportsExtraction: false, supportsStreaming: true });
@@ -457,11 +457,8 @@ describe("chat/trip context extraction", () => {
       ].join(""), { status: 200, headers: { "content-type": "text/event-stream" } });
     });
     vi.stubGlobal("fetch", fetchMock);
-    vi.doMock("next/server", () => ({
-      after: (callback: () => Promise<void> | void) => {
-        void Promise.resolve(callback()).catch(() => undefined);
-      },
-    }));
+    const afterCallbacks: Array<() => Promise<void> | void> = [];
+    vi.doMock("next/server", () => ({ after: (callback: () => Promise<void> | void) => afterCallbacks.push(callback) }));
     vi.doMock("@/server/auth", () => ({
       getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }),
     }));
@@ -473,6 +470,15 @@ describe("chat/trip context extraction", () => {
     const responseText = await response.text();
 
     expect(responseText).toContain('"type":"done"');
+    expect(fetchMock.mock.calls.some(([, init]) => JSON.parse(String(init?.body))?.stream === false)).toBe(false);
+    expect(afterCallbacks).toHaveLength(1);
+    await expect(testDb.select({ role: messages.role }).from(messages).orderBy(asc(messages.createdAt))).resolves.toEqual([
+      { role: "user" },
+      { role: "assistant" },
+    ]);
+
+    await afterCallbacks[0]();
+
     expect(fetchMock.mock.calls.some(([, init]) => JSON.parse(String(init?.body))?.stream === false)).toBe(true);
     await vi.waitFor(async () => {
       await expect(testDb.select().from(chatContext)).resolves.toMatchObject([{ field: "destination", value: "Huế", scope: "conversation" }]);
@@ -484,6 +490,40 @@ describe("chat/trip context extraction", () => {
         expect.objectContaining({ purpose: "extraction", status: "success" }),
       ]));
     });
+  });
+
+  test("stream route does not schedule extraction when finalization discards a stale fence", async () => {
+    await createTestUser("user-1");
+    await createModel({ id: "extract-model", gatewayModelName: "cx/extract" });
+    await createModel({ id: "answer-model", gatewayModelName: "cx/answer", purpose: "ai_ask_initial_answer", supportsExtraction: false, supportsStreaming: true });
+    const fetchMock = vi.fn(async () => new Response([
+      'data: {"model":"cx/answer","choices":[{"delta":{"content":"Nên đi 5 ngày."}}]}\n\n',
+      'data: {"choices":[{"finish_reason":"stop"}]}\n\n',
+      "data: [DONE]\n\n",
+    ].join(""), { status: 200, headers: { "content-type": "text/event-stream" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const afterCallbacks: Array<() => Promise<void> | void> = [];
+    vi.doMock("next/server", () => ({ after: (callback: () => Promise<void> | void) => afterCallbacks.push(callback) }));
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }),
+    }));
+    const formData = new FormData();
+    formData.set("question", "Tôi muốn đi Huế 5 ngày.");
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData, headers: { "Idempotency-Key": crypto.randomUUID().replaceAll("-", "") } }) as never);
+    await vi.waitFor(async () => {
+      const [conversation] = await testDb.select({ id: conversations.id }).from(conversations);
+      expect(conversation).toBeDefined();
+      await testDb.update(conversations).set({ lifecycleVersion: 2 }).where(eq(conversations.id, conversation!.id));
+    });
+    const responseText = await response.text();
+
+    expect(responseText).toContain('"type":"error"');
+    expect(responseText).toContain('"code":"refresh_required"');
+    expect(fetchMock.mock.calls.some(([, init]) => JSON.parse(String(init?.body))?.stream === false)).toBe(false);
+    expect(afterCallbacks).toHaveLength(0);
+    await expect(testDb.select().from(chatContext)).resolves.toHaveLength(0);
   });
 
   test("stream route does not delay final answer event for slow extraction", async () => {
