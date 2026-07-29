@@ -130,6 +130,8 @@ export async function callPrivateApiStream(input: {
 function abortableBody(body: ReadableStream<Uint8Array>, controller: AbortController, cleanup: () => void, abortKind: () => "caller" | "timeout" | null): ReadableStream<Uint8Array> {
   const reader = body.getReader();
   let closed = false;
+  let recoveryAllowed = false;
+  let prefixInvalid = false;
   const framer = createNdjsonFramer();
   const finish = () => {
     if (closed) return;
@@ -143,7 +145,7 @@ function abortableBody(body: ReadableStream<Uint8Array>, controller: AbortContro
     const kind = abortKind();
     finish();
     try {
-      if (kind === "timeout") outputController?.enqueue(safeStreamFailure);
+      if (kind === "timeout" && recoveryAllowed) outputController?.enqueue(safeStreamFailure);
     } finally {
       outputController?.close();
       void reader.cancel(controller.signal.reason).catch(() => {});
@@ -173,12 +175,22 @@ function abortableBody(body: ReadableStream<Uint8Array>, controller: AbortContro
         if (controller.signal.aborted) return;
         if (next.done) {
           finish();
-          output.enqueue(safeStreamFailure);
+          if (recoveryAllowed) output.enqueue(safeStreamFailure);
           output.close();
           return;
         }
         const relayed = framer.push(next.value);
         if (!relayed) continue;
+        for (const recordType of relayed.recordTypes) {
+          if (prefixInvalid) continue;
+          if (!recoveryAllowed) {
+            if (recordType === "preparing") recoveryAllowed = true;
+            else prefixInvalid = true;
+          } else if (recordType !== "delta") {
+            recoveryAllowed = false;
+            prefixInvalid = true;
+          }
+        }
         output.enqueue(relayed.bytes);
         if (relayed.terminal) {
           finish();
@@ -193,7 +205,7 @@ function abortableBody(body: ReadableStream<Uint8Array>, controller: AbortContro
       if (controller.signal.aborted) return;
       finish();
       try {
-        output.enqueue(safeStreamFailure);
+        if (recoveryAllowed) output.enqueue(safeStreamFailure);
       } finally {
         output.close();
         void reader.cancel().catch(() => {});
@@ -202,7 +214,7 @@ function abortableBody(body: ReadableStream<Uint8Array>, controller: AbortContro
   }
 }
 
-function createNdjsonFramer(): { push(bytes: Uint8Array): { bytes: Uint8Array; terminal: boolean } | undefined } {
+function createNdjsonFramer(): { push(bytes: Uint8Array): { bytes: Uint8Array; terminal: boolean; recordTypes: Array<string | undefined> } | undefined } {
   let buffered = new Uint8Array();
   const decoder = new TextDecoder("utf-8", { fatal: true });
   return {
@@ -211,23 +223,25 @@ function createNdjsonFramer(): { push(bytes: Uint8Array): { bytes: Uint8Array; t
       const combined = hadBufferedBytes ? joinBytes(buffered, bytes) : bytes;
       let start = 0;
       let completeEnd = 0;
+      const recordTypes: Array<string | undefined> = [];
       for (let index = 0; index < combined.byteLength; index += 1) {
         if (combined[index] !== 10) continue;
         // Examine a completed record without changing the bytes sent to the caller.
         const recordType = ndjsonRecordType(combined.subarray(start, index + 1), decoder);
+        recordTypes.push(recordType);
         completeEnd = index + 1;
         start = index + 1;
         const terminal = recordType === "done" || recordType === "error" || recordType === "in_progress";
         if (terminal) {
           buffered = new Uint8Array();
-          return { bytes: completeBytes(combined, bytes, hadBufferedBytes, completeEnd), terminal: true };
+          return { bytes: completeBytes(combined, bytes, hadBufferedBytes, completeEnd), terminal: true, recordTypes };
         }
       }
       const incompleteLength = combined.byteLength - completeEnd;
       if (incompleteLength > maxIncompleteNdjsonRecordBytes) throw new Error("Incomplete NDJSON record exceeds relay limit.");
       // Copy the tail so a small incomplete record cannot retain a large source chunk.
       buffered = incompleteLength === 0 ? new Uint8Array() : combined.slice(completeEnd);
-      return completeEnd === 0 ? undefined : { bytes: completeBytes(combined, bytes, hadBufferedBytes, completeEnd), terminal: false };
+      return completeEnd === 0 ? undefined : { bytes: completeBytes(combined, bytes, hadBufferedBytes, completeEnd), terminal: false, recordTypes };
     },
   };
 }

@@ -86,6 +86,19 @@ describe("private BFF transport", () => {
     expect(cancelled).toBe(true);
   });
 
+  test("does not emit a terminal error when timeout occurs before a complete preparing record", async () => {
+    let cancelled = false;
+    const upstream = new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(new TextEncoder().encode('{"type":"prepar')); },
+      pull() {},
+      cancel() { cancelled = true; },
+    });
+    const result = await callPrivateApiStream({ config: { ...config, requestTimeoutMs: 1 }, credential: "private-token", correlationId: "request_1", path: "/v1/ai-ask/stream", idempotencyKey: "valid_idempotency_key", body: requestBody(), contentType: "multipart/form-data; boundary=boundary", fetcher: async () => new Response(upstream, { headers: { "content-type": "application/x-ndjson" } }) });
+
+    await expect(new Response(result.body).text()).resolves.toBe("");
+    expect(cancelled).toBe(true);
+  });
+
   test("stops at a terminal frame without appending an error or relaying later bytes", async () => {
     let cancelled = false;
     const upstream = new ReadableStream<Uint8Array>({
@@ -134,6 +147,30 @@ describe("private BFF transport", () => {
     const result = await callPrivateApiStream({ config, credential: "private-token", correlationId: "request_1", path: "/v1/ai-ask/stream", idempotencyKey: "valid_idempotency_key", body: requestBody(), contentType: "multipart/form-data; boundary=boundary", fetcher: async () => new Response(upstream, { headers: { "content-type": "application/x-ndjson" } }) });
 
     await expect(new Response(result.body).text()).resolves.toBe('{"type":"preparing"}\n{"type":"error","errorMessage":"Không thể hoàn tất luồng trả lời lúc này. Hãy thử lại sau."}\n');
+  });
+
+  test("does not emit a terminal error after EOF before a complete preparing record", async () => {
+    const upstream = new TextEncoder().encode('{"type":"prepar');
+    const result = await callPrivateApiStream({ config, credential: "private-token", correlationId: "request_1", path: "/v1/ai-ask/stream", idempotencyKey: "valid_idempotency_key", body: requestBody(), contentType: "multipart/form-data; boundary=boundary", fetcher: async () => new Response(upstream, { headers: { "content-type": "application/x-ndjson" } }) });
+
+    await expect(new Response(result.body).text()).resolves.toBe("");
+  });
+
+  test("does not recover an invalid delta-before-preparing prefix after EOF", async () => {
+    const upstream = new TextEncoder().encode('{"type":"delta","content":"out of order"}\n{"type":"preparing"}\n');
+    const result = await callPrivateApiStream({ config, credential: "private-token", correlationId: "request_1", path: "/v1/ai-ask/stream", idempotencyKey: "valid_idempotency_key", body: requestBody(), contentType: "multipart/form-data; boundary=boundary", fetcher: async () => new Response(upstream, { headers: { "content-type": "application/x-ndjson" } }) });
+
+    await expect(new Response(result.body).text()).resolves.toBe('{"type":"delta","content":"out of order"}\n{"type":"preparing"}\n');
+  });
+
+  test("does not emit a terminal error after an upstream read failure before a complete preparing record", async () => {
+    const upstream = new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(new TextEncoder().encode('{"type":"prepar')); },
+      pull() { throw new Error("upstream read failure"); },
+    });
+    const result = await callPrivateApiStream({ config, credential: "private-token", correlationId: "request_1", path: "/v1/ai-ask/stream", idempotencyKey: "valid_idempotency_key", body: requestBody(), contentType: "multipart/form-data; boundary=boundary", fetcher: async () => new Response(upstream, { headers: { "content-type": "application/x-ndjson" } }) });
+
+    await expect(new Response(result.body).text()).resolves.toBe("");
   });
 
   test("accepts a complete pending replay immediately, even when the upstream remains open through timeout", async () => {
@@ -199,7 +236,7 @@ describe("private BFF transport", () => {
     expect(cancelled).toBe(true);
   });
 
-  test("cancels upstream after a framing failure", async () => {
+  test("closes without a terminal error after a framing failure before preparing", async () => {
     let cancelled = false;
     const upstream = new ReadableStream<Uint8Array>({
       start(controller) { controller.enqueue(new Uint8Array(1_048_577).fill(65)); },
@@ -207,7 +244,7 @@ describe("private BFF transport", () => {
     });
     const result = await callPrivateApiStream({ config, credential: "private-token", correlationId: "request_1", path: "/v1/ai-ask/stream", idempotencyKey: "valid_idempotency_key", body: requestBody(), contentType: "multipart/form-data; boundary=boundary", fetcher: async () => new Response(upstream, { headers: { "content-type": "application/x-ndjson" } }) });
 
-    await expect(new Response(result.body).text()).resolves.toBe('{"type":"error","errorMessage":"Không thể hoàn tất luồng trả lời lúc này. Hãy thử lại sau."}\n');
+    await expect(new Response(result.body).text()).resolves.toBe("");
     expect(cancelled).toBe(true);
   });
 
