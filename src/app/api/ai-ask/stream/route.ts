@@ -39,7 +39,7 @@ type StreamEvent =
   | { type: "delta"; content: string }
   | { type: "in_progress"; conversationId?: string; userMessage?: { id: string; content: string } }
   | { type: "done"; conversationId: string; userMessage: { id: string; content: string }; assistantMessage: { id: string; content: string; provenance?: AssistantMessageProvenanceItem[]; annotations?: AnswerAnnotation[] }; proposal?: ProposalDoneSummary }
-  | { type: "error"; conversationId?: string; userMessage?: { id: string; content: string }; errorMessage: string };
+  | { type: "error"; code?: "refresh_required"; conversationId?: string; userMessage?: { id: string; content: string }; errorMessage: string };
 
 export async function POST(request: Request) {
   const session = await getAuthenticatedSession();
@@ -110,14 +110,12 @@ export async function POST(request: Request) {
     });
   } catch {
     const result: StreamEvent = { type: "error", conversationId: acquisition.conversationId, userMessage: acquisition.userMessage, errorMessage: "Không thể chuẩn bị luồng trả lời lúc này. Hãy thử lại sau." };
-    await terminalizeAiAskCommand(acquisition.commandId, "failed", result);
-    return streamSingleEvent(result);
+    return streamSingleEvent(await terminalizeAiAskCommand(acquisition.commandId, "failed", result) as StreamEvent);
   }
 
   if (!selectedModel) {
     const result: StreamEvent = { type: "error", conversationId: acquisition.conversationId, userMessage: acquisition.userMessage, errorMessage: imageFile ? "Selected AI model does not support streaming image input." : "No active streaming AI Ask model is configured." };
-    await terminalizeAiAskCommand(acquisition.commandId, "failed", result);
-    return streamSingleEvent(result);
+    return streamSingleEvent(await terminalizeAiAskCommand(acquisition.commandId, "failed", result) as StreamEvent);
   }
 
   const encoder = new TextEncoder();
@@ -182,20 +180,6 @@ async function streamAnswer({
     const gatewayMessages = buildAiAskMessages({ question, history: saved.history, contextSection });
     const finalGatewayMessages = imageDataUrl ? attachImageToFinalUserMessage(gatewayMessages, imageDataUrl) : gatewayMessages;
     const finalPolicyValidationRequired = requiresAiAskAnswerFinalization(sourceBundle);
-    const extractionInput = saved;
-    after(() => extractChatTripContext({
-      session,
-      conversationId: extractionInput.conversationId,
-      tripProjectId,
-      userMessage: extractionInput.userMessage,
-      history: extractionInput.history,
-    }).catch((error) => {
-      console.warn("Chat context extraction skipped after failure", {
-        conversationId: extractionInput.conversationId,
-        userMessageId: extractionInput.userMessage.id,
-        error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
-      });
-    }));
     const gatewayResult = await streamInitialAiAskAnswer({
       model: selectedModel.gatewayModelName,
       messages: finalGatewayMessages,
@@ -234,8 +218,7 @@ async function streamAnswer({
           ? "Luồng trả lời đã bị dừng. Tin nhắn của bạn đã được lưu nhưng chưa có câu trả lời trợ lý cho lượt này."
           : "Mình chưa tạo được câu trả lời hoàn chỉnh. Tin nhắn của bạn đã được lưu nhưng chưa có câu trả lời trợ lý cho lượt này.",
       };
-      await terminalizeAiAskCommand(command.commandId, aborted ? "aborted" : "failed", result);
-      sendEvent(controller, encoder, result);
+      sendEvent(controller, encoder, await terminalizeAiAskCommand(command.commandId, aborted ? "aborted" : "failed", result) as StreamEvent);
       return;
     }
 
@@ -268,8 +251,7 @@ async function streamAnswer({
         userMessage: saved.userMessage,
         errorMessage: "Luồng trả lời đã bị dừng. Tin nhắn của bạn đã được lưu nhưng chưa có câu trả lời trợ lý cho lượt này.",
       };
-      await terminalizeAiAskCommand(command.commandId, "aborted", result);
-      sendEvent(controller, encoder, result);
+      sendEvent(controller, encoder, await terminalizeAiAskCommand(command.commandId, "aborted", result) as StreamEvent);
       return;
     }
 
@@ -327,8 +309,22 @@ async function streamAnswer({
         return { assistantMessageId: assistantMessage.id, result: { type: "done" as const, conversationId: fencedCommand.conversationId, userMessage: savedTurn.userMessage, assistantMessage: completed }, completed };
       });
 
-    if (!("discarded" in finalization)) {
-      const completed = finalization.completed;
+      if (!("discarded" in finalization)) {
+        const completed = finalization.completed;
+        const extractionInput = savedTurn;
+        after(() => extractChatTripContext({
+          session,
+          conversationId: extractionInput.conversationId,
+          tripProjectId,
+          userMessage: extractionInput.userMessage,
+          history: extractionInput.history,
+        }).catch((error) => {
+          console.warn("Chat context extraction skipped after failure", {
+            conversationId: extractionInput.conversationId,
+            userMessageId: extractionInput.userMessage.id,
+            error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
+          });
+        }));
       // The assistant/provenance/usage transaction is the durable success boundary.
       // A caller abort or optional follow-up failure after it commits cannot turn the
       // command into an aborted/no-answer result.
@@ -373,8 +369,7 @@ async function streamAnswer({
       userMessage: saved?.userMessage,
       errorMessage: "Không thể hoàn tất luồng trả lời lúc này. Hãy thử lại sau.",
     };
-    await terminalizeAiAskCommand(command.commandId, abortSignal.aborted ? "aborted" : "failed", result);
-    sendEvent(controller, encoder, result);
+    sendEvent(controller, encoder, await terminalizeAiAskCommand(command.commandId, abortSignal.aborted ? "aborted" : "failed", result) as StreamEvent);
   } finally {
     try {
       controller.close();

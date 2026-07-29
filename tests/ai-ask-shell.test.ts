@@ -913,6 +913,25 @@ describe("AI Ask structured answer rendering", () => {
     expect(source).toContain("setIsPreparing(true);\n        setStreamingContent");
   });
 
+  test("composer clears speculative assistant state and refreshes the URL-owned shell on refresh_required", () => {
+    const source = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
+
+    expect(source).toContain('if (result.code === "refresh_required")');
+    expect(source).toContain('setStreamingContent("");');
+    expect(source).toContain("reconcileSelection(conversationId, activeTripProjectId);");
+  });
+
+  test("context extraction is scheduled only after a matching fenced finalization", () => {
+    const routeSource = readFileSync("src/app/api/ai-ask/stream/route.ts", "utf8");
+    const finalizationStart = routeSource.indexOf("const finalization = await finalizeAiAskCommand");
+    const discardedBranch = routeSource.indexOf('if (!("discarded" in finalization))', finalizationStart);
+    const extractionStart = routeSource.indexOf("after(() => extractChatTripContext", finalizationStart);
+
+    expect(finalizationStart).toBeGreaterThan(-1);
+    expect(discardedBranch).toBeGreaterThan(finalizationStart);
+    expect(extractionStart).toBeGreaterThan(discardedBranch);
+  });
+
   test("composer source accepts removable validated traveler images", () => {
     const source = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
 

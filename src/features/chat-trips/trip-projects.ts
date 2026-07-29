@@ -385,7 +385,8 @@ export async function resolveOwnedPrimaryConversationInTransaction(
       .select({ id: conversations.id, tripProjectId: conversations.tripProjectId, lifecycleVersion: conversations.lifecycleVersion, updatedAt: conversations.updatedAt })
       .from(conversations)
       .where(and(eq(conversations.id, project.primaryConversationId), eq(conversations.userId, userId), eq(conversations.tripProjectId, tripProjectId)))
-      .limit(1);
+      .limit(1)
+      .for("update");
     if (primary) return primary;
   }
 
@@ -394,7 +395,8 @@ export async function resolveOwnedPrimaryConversationInTransaction(
     .from(conversations)
     .where(and(eq(conversations.userId, userId), eq(conversations.tripProjectId, tripProjectId)))
     .orderBy(desc(conversations.updatedAt), desc(conversations.id))
-    .limit(1);
+    .limit(1)
+    .for("update");
   const [primary] = existing
     ? [existing]
     : await transaction.insert(conversations).values({ userId, tripProjectId }).returning({ id: conversations.id, tripProjectId: conversations.tripProjectId, lifecycleVersion: conversations.lifecycleVersion, updatedAt: conversations.updatedAt });

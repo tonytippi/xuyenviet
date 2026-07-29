@@ -13,6 +13,7 @@ const commandLifetimeMs = 24 * 60 * 60 * 1000;
 
 export type AiAskTerminalResult = {
   type: "done" | "error";
+  code?: "refresh_required";
   conversationId?: string;
   userMessage?: { id: string; content: string };
   assistantMessage?: { id: string; content: string; provenance?: unknown[]; annotations?: unknown[] };
@@ -66,6 +67,25 @@ export async function acquireAiAskCommand(input: AcquireAiAskCommandInput): Prom
   } : null;
 
   return getDb().transaction(async (transaction) => {
+    const requestedScope = input.tripProjectId
+      ? { kind: "trip_project" as const, id: input.tripProjectId }
+      : input.conversationId
+        ? { kind: "conversation" as const, id: input.conversationId }
+        : { kind: "new_conversation" as const };
+    const retainedPredicate = requestedScope.kind === "new_conversation"
+      ? and(eq(aiAskCommands.userId, input.userId), eq(aiAskCommands.scopeKind, requestedScope.kind), eq(aiAskCommands.idempotencyKey, input.idempotencyKey!))
+      : and(eq(aiAskCommands.userId, input.userId), eq(aiAskCommands.scopeKind, requestedScope.kind), eq(aiAskCommands.scopeId, requestedScope.id), eq(aiAskCommands.idempotencyKey, input.idempotencyKey!));
+    // A discarded projection is immutable; inspect it before live scope validation
+    // without taking the command lock ahead of the project/conversation locks.
+    const [retained] = await transaction.select().from(aiAskCommands).where(retainedPredicate).limit(1);
+    if (retained?.status === "discarded") {
+      const identityScope = requestedScope.kind === "new_conversation" ? { kind: requestedScope.kind } : requestedScope;
+      const requestDigest = digest(JSON.stringify({ version: 1, question, scope: identityScope, attachment }));
+      return retained.requestDigest === requestDigest && retained.expiresAt > new Date()
+        ? { kind: "terminal_replay", result: retained.terminalResult as AiAskTerminalResult }
+        : { kind: "key_reused" };
+    }
+
     const resolved = await resolveScope(transaction, input.userId, input.conversationId, input.tripProjectId);
     if (!resolved) return { kind: "validation_failure", message: "Không tìm thấy phạm vi hội thoại hoặc dự án của bạn." };
 
@@ -112,7 +132,7 @@ export async function acquireAiAskCommand(input: AcquireAiAskCommandInput): Prom
   });
 }
 
-export async function terminalizeAiAskCommand(commandId: string, status: "completed" | "failed" | "aborted", result: AiAskTerminalResult, assistantMessageId?: string) {
+export async function terminalizeAiAskCommand(commandId: string, status: "completed" | "failed" | "aborted", result: AiAskTerminalResult, assistantMessageId?: string): Promise<AiAskTerminalResult> {
   // This is deliberately separate from the assistant/provenance/usage transaction.
   // Story 10.2 owns atomic finalization fences, so for now we retry and verify the
   // persisted command projection before the route can report a terminal outcome.
@@ -122,15 +142,16 @@ export async function terminalizeAiAskCommand(commandId: string, status: "comple
         .set({ status, terminalResult: result, assistantMessageId: assistantMessageId ?? null, terminalAt: new Date(), updatedAt: new Date() })
         .where(and(eq(aiAskCommands.id, commandId), eq(aiAskCommands.status, "pending")))
         .returning({ id: aiAskCommands.id });
-      if (updated) return;
+      if (updated) return result;
 
       const [existing] = await getDb().select({ status: aiAskCommands.status, terminalResult: aiAskCommands.terminalResult }).from(aiAskCommands).where(eq(aiAskCommands.id, commandId)).limit(1);
-      if (existing?.status === status && terminalResultsEqual(existing.terminalResult, result)) return;
-      throw new Error("AI Ask command has a conflicting terminal state.");
+      if (existing?.terminalResult) return existing.terminalResult as AiAskTerminalResult;
+      throw new Error("AI Ask command was not found.");
     } catch (error) {
       if (attempt === 2) throw error;
     }
   }
+  throw new Error("AI Ask command terminalization failed.");
 }
 
 export async function finalizeAiAskCommand<T extends { result: AiAskTerminalResult; assistantMessageId: string }>(commandId: string, persist: (transaction: Transaction, command: { userId: string; conversationId: string; tripProjectId: string | null; userMessageId: string }) => Promise<T>): Promise<T | { result: AiAskTerminalResult; discarded: true }> {
@@ -153,7 +174,7 @@ export async function finalizeAiAskCommand<T extends { result: AiAskTerminalResu
       ? await transaction.select({ id: tripProjects.id, aggregateVersion: tripProjects.aggregateVersion }).from(tripProjects).where(and(eq(tripProjects.id, command.tripProjectId), eq(tripProjects.userId, command.userId))).limit(1)
       : [];
     if (!conversation || !command.userMessageId || conversation.lifecycleVersion !== command.conversationLifecycleVersion || (command.tripProjectId !== null && (!project || project.aggregateVersion !== command.tripProjectAggregateVersion))) {
-      const result = refreshRequiredResult();
+      const result = refreshRequiredResult(conversation.id);
       await transaction.update(aiAskCommands).set({ status: "discarded", terminalResult: result, terminalAt: new Date(), assistantMessageId: null, userMessageId: null, conversationId: null, tripProjectId: null, conversationLifecycleVersion: null, tripProjectAggregateVersion: null, normalizedQuestion: "[discarded]", attachmentMetadata: null, updatedAt: new Date() }).where(and(eq(aiAskCommands.id, command.id), eq(aiAskCommands.status, "pending")));
       return { result, discarded: true };
     }
@@ -171,8 +192,8 @@ export async function discardAiAskCommandsForDeletedConversations(transaction: T
   await transaction.update(aiAskCommands).set({ status: "discarded", terminalResult: refreshRequiredResult(), terminalAt: new Date(), assistantMessageId: null, userMessageId: null, conversationId: null, tripProjectId: null, conversationLifecycleVersion: null, tripProjectAggregateVersion: null, normalizedQuestion: "[discarded]", attachmentMetadata: null, updatedAt: new Date() }).where(inArray(aiAskCommands.id, commands.map((command) => command.id)));
 }
 
-function refreshRequiredResult(): AiAskTerminalResult {
-  return { type: "error", errorMessage: aiAskRefreshRequiredMessage };
+function refreshRequiredResult(conversationId?: string): AiAskTerminalResult {
+  return { type: "error", code: "refresh_required", ...(conversationId ? { conversationId } : {}), errorMessage: aiAskRefreshRequiredMessage };
 }
 
 // jsonb object key order is not part of the terminal-result contract. Arrays remain

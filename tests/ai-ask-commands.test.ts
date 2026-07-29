@@ -4,7 +4,7 @@ import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 
 import { aiAskCommands, conversations, messages, schema, tripProjects, users } from "@/db/schema";
-import { acquireAiAskCommand, finalizeAiAskCommand, terminalizeAiAskCommand, terminalResultsEqual, validateAiAskIdempotencyKey } from "@/features/ai/ai-ask-commands";
+import { acquireAiAskCommand, aiAskRefreshRequiredMessage, discardAiAskCommandsForDeletedConversations, finalizeAiAskCommand, terminalizeAiAskCommand, terminalResultsEqual, validateAiAskIdempotencyKey } from "@/features/ai/ai-ask-commands";
 
 import { testDb } from "./helpers/db";
 
@@ -92,7 +92,7 @@ describe("AI Ask command ledger", () => {
       terminalResult: { proposal: { affectedItems: ["first", "second"], rationale: "An toàn" }, assistantMessage: { content: "Gợi ý an toàn", id: assistant.id }, userMessage: admitted.userMessage, conversationId: conversation.id, type: "done" },
     }).where(eq(aiAskCommands.id, admitted.commandId));
 
-    await expect(terminalizeAiAskCommand(admitted.commandId, "completed", result, assistant.id)).resolves.toBeUndefined();
+    await expect(terminalizeAiAskCommand(admitted.commandId, "completed", result, assistant.id)).resolves.toEqual(result);
     await expect(acquireAiAskCommand({ userId: "owner", idempotencyKey: key, question: "Đi Huế", conversationId: conversation.id })).resolves.toEqual({ kind: "terminal_replay", result });
   });
 
@@ -120,11 +120,11 @@ describe("AI Ask command ledger", () => {
 
     const finalized = await finalizeAiAskCommand(admitted.commandId, persist);
 
-    expect(finalized).toMatchObject({ discarded: true, result: { type: "error" } });
+    expect(finalized).toMatchObject({ discarded: true, result: { type: "error", code: "refresh_required", conversationId: conversation.id } });
     expect(persist).not.toHaveBeenCalled();
     const [command] = await testDb.select().from(aiAskCommands).where(eq(aiAskCommands.id, admitted.commandId));
     expect(command).toMatchObject({ status: "discarded", conversationId: null, userMessageId: null, assistantMessageId: null });
-    expect(command.terminalResult).toMatchObject({ type: "error" });
+    expect(command.terminalResult).toMatchObject({ type: "error", code: "refresh_required", errorMessage: aiAskRefreshRequiredMessage });
     expect(await testDb.select({ id: messages.id, role: messages.role, content: messages.content }).from(messages)).toEqual([{ id: admitted.userMessage.id, role: "user", content: admitted.userMessage.content }]);
   });
 
@@ -239,6 +239,35 @@ describe("AI Ask command ledger", () => {
     const retained = await testDb.select().from(aiAskCommands);
     expect(retained).toHaveLength(1);
     expect(retained[0].conversationId).toBeNull();
+  });
+
+  test("replays a retained discarded command after its conversation was deleted before scope validation", async () => {
+    await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
+    const [conversation] = await testDb.insert(conversations).values({ id: "conversation", userId: "owner" }).returning({ id: conversations.id });
+    const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: key, question: "Đi Huế", conversationId: conversation.id });
+    if (admitted.kind !== "admitted") throw new Error("Expected command admission");
+    await testDb.transaction((transaction) => discardAiAskCommandsForDeletedConversations(transaction, "owner", [conversation.id]));
+    await testDb.delete(conversations).where(eq(conversations.id, conversation.id));
+
+    await expect(acquireAiAskCommand({ userId: "owner", idempotencyKey: key, question: "Đi Huế", conversationId: conversation.id })).resolves.toEqual({
+      kind: "terminal_replay",
+      result: { type: "error", code: "refresh_required", errorMessage: aiAskRefreshRequiredMessage },
+    });
+    await expect(acquireAiAskCommand({ userId: "owner", idempotencyKey: key, question: "Đi Đà Nẵng", conversationId: conversation.id })).resolves.toEqual({ kind: "key_reused" });
+  });
+
+  test("replays the authoritative discarded terminal projection when failure terminalization races deletion", async () => {
+    await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
+    const [conversation] = await testDb.insert(conversations).values({ id: "conversation", userId: "owner" }).returning({ id: conversations.id });
+    const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: key, question: "Đi Huế", conversationId: conversation.id });
+    if (admitted.kind !== "admitted") throw new Error("Expected command admission");
+    await testDb.transaction((transaction) => discardAiAskCommandsForDeletedConversations(transaction, "owner", [conversation.id]));
+
+    await expect(terminalizeAiAskCommand(admitted.commandId, "failed", { type: "error", errorMessage: "Provider failed" })).resolves.toEqual({
+      type: "error",
+      code: "refresh_required",
+      errorMessage: aiAskRefreshRequiredMessage,
+    });
   });
 
   test("replays an adopted unscoped command without another user turn", async () => {

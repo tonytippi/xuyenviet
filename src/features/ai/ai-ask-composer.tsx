@@ -1225,6 +1225,16 @@ export function AiAskComposer({
       if (result.status === "answer-failed") {
         const failedUserMessage = result.userMessage;
 
+        if (result.code === "refresh_required") {
+          setStreamingContent("");
+          setFailedQuestionIds([]);
+          setSelectedAnswerEntity(null);
+          answerEntityTriggerRef.current = null;
+          setStatus(result.errorMessage);
+          setRecoveryMessage("Kế hoạch hoặc hội thoại đã thay đổi. Đã bỏ phần trả lời tạm thời và làm mới dữ liệu hiện tại.");
+          reconcileSelection(conversationId, activeTripProjectId);
+          return;
+        }
         if (result.conversationId && failedUserMessage) {
           const newConversationId = result.conversationId;
           submission.adoptedConversationId = newConversationId;
@@ -2342,6 +2352,7 @@ type StreamResult = {
   userMessage?: DisplayMessage;
 } | {
   status: "answer-failed";
+  code?: "refresh_required";
   conversationId?: string;
   userMessage?: DisplayMessage;
   errorMessage: string;
@@ -2425,7 +2436,7 @@ async function submitAiAskStream({
       }
 
       if (event.type === "error" && terminalResult?.status !== "answer-created") {
-        terminalResult = { status: "answer-failed", conversationId: event.conversationId, userMessage: event.userMessage, errorMessage: event.errorMessage ?? "Mình chưa tạo được câu trả lời lúc này." };
+        terminalResult = { status: "answer-failed", code: event.code, conversationId: event.conversationId, userMessage: event.userMessage, errorMessage: event.errorMessage ?? "Mình chưa tạo được câu trả lời lúc này." };
       }
     }
 
@@ -2457,7 +2468,7 @@ export function buildAiAskStreamFormData({
 
 function parseStreamEvent(line: string) {
   try {
-    return JSON.parse(line) as { type: string; content?: string; conversationId?: string; userMessage?: DisplayMessage; assistantMessage?: DisplayMessage; errorMessage?: string; proposal?: ProposalDoneSummary };
+    return JSON.parse(line) as { type: string; code?: "refresh_required"; content?: string; conversationId?: string; userMessage?: DisplayMessage; assistantMessage?: DisplayMessage; errorMessage?: string; proposal?: ProposalDoneSummary };
   } catch {
     return null;
   }
