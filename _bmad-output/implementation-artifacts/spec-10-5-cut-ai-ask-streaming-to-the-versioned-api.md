@@ -3,10 +3,10 @@ title: 'Story 10.5: Cut AI Ask Streaming to the Versioned API'
 type: 'feature'
 created: '2026-07-29'
 status: 'done'
-baseline_revision: '9ca515df208695526d758444b07e8b33ffc2e26d'
+baseline_revision: '945b619'
 review_loop_iteration: 0
 followup_review_recommended: false
-final_revision: '4fd6312'
+final_revision: '9259cab'
 context:
   - '/home/sonnh/projects/xuyenviet/_bmad-output/project-context.md'
   - '/home/sonnh/projects/xuyenviet/_bmad-output/implementation-artifacts/10-5-cut-ai-ask-streaming-to-the-versioned-api.md'
@@ -97,13 +97,25 @@ warnings: [oversized]
   - `[medium] [patch]` Added BFF pre-header timeout behavior, safe selected-owner telemetry, session-before-minting, and shared CSRF/origin enforcement for both routing states.
   - `[medium] [patch]` Migrated API/BFF and legacy route tests to the package-owned execution seam and added raw-byte, routing, abort, timeout, and CSRF regressions.
 
+### 2026-07-29 - Epic 10 completion-review targeted repair
+- intent_gap: 0
+- bad_spec: 0
+- patch: 4 (high 2, medium 2)
+- defer: 0
+- reject: 0
+- addressed_findings:
+  - `[high] [patch]` Selected the disabled legacy owner before loading API-only private transport configuration, preserving shared CSRF validation without `XV_PRIVATE_API_URL`.
+  - `[high] [patch]` Kept BFF timeout active through the stream lifetime and made API/BFF raw-frame relays produce exactly one safe terminal while cancelling upstream work on timeout.
+  - `[medium] [patch]` Repaired API iterator/write truncation, incomplete-frame handling, root-terminal detection, and post-terminal byte suppression.
+  - `[medium] [patch]` Added authenticated CSRF-valid BFF-to-live-Nest PostgreSQL integration coverage for byte relay, ordering/non-disclosure, abort, provider failure, stale fence, dispatch failure, atomic persistence, and replay.
+
 ## Auto Run Result
 
 - Status: done
-- Implementation: extracted the full AI Ask execution/persistence dependency closure into `@xuyenviet/database`; root modules are compatibility re-exports, and both Nest and disabled Next compatibility routing construct the same `@xuyenviet/domain` execution over that port. Nest imports workspace packages only.
-- Transport: Nest owns enabled `POST /v1/ai-ask/stream`; the BFF validates session/CSRF/origin before minting, relays raw NDJSON bytes, preserves header-only correlation, and chooses exactly one owner. The disabled compatibility route uses the same execution path.
-- Review: synchronous blind, edge-case, and acceptance reviews found and repaired stream lifecycle, terminalization, multipart, timeout, telemetry, CSRF, and test-isolation defects. Final review found no remaining actionable issue.
-- Verification: serial focused suites passed: API/BFF 46 tests, command/outbox/context 169 tests, and shell/protocol 160 tests. `pnpm typecheck`, `pnpm build`, and `git diff --check` passed. `pnpm lint` had zero errors and five pre-existing warnings.
+- Implementation: repaired the selected-owner boundary and raw NDJSON frame relays without changing the header-only `x-request-id` protocol or the one shared PostgreSQL execution/persistence path.
+- Transport: disabled compatibility routing does not require API-only configuration; enabled BFF timeout covers the full response and cancels upstream work. API/BFF frame complete records, recognize only root `done`/`error` terminals, discard incomplete fragments and post-terminal bytes, and emit a canonical safe terminal exactly once where recovery is possible.
+- Review: synchronous blind, edge-case, and acceptance reviews repaired all four Epic 10 completion-review findings. The final blocking reviews reported no actionable high or medium findings.
+- Verification: serial focused suites passed: API/BFF 47 tests, command/outbox/context 169 tests, and shell/session 154 tests. `pnpm typecheck`, `pnpm build`, and `git diff --check` passed. `pnpm lint` had zero errors and five pre-existing warnings.
 
 ## Design Notes
 
