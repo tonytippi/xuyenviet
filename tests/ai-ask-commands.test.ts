@@ -4,7 +4,7 @@ import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 
 import { aiAskCommands, conversations, messages, schema, tripProjects, users } from "@/db/schema";
-import { acquireAiAskCommand, recoverCompletedAiAskCommand, terminalizeAiAskCommand, terminalResultsEqual, validateAiAskIdempotencyKey } from "@/features/ai/ai-ask-commands";
+import { acquireAiAskCommand, prepareAiAskCommandTerminalResult, recoverCompletedAiAskCommand, terminalizeAiAskCommand, terminalResultsEqual, validateAiAskIdempotencyKey } from "@/features/ai/ai-ask-commands";
 
 import { testDb } from "./helpers/db";
 
@@ -96,7 +96,7 @@ describe("AI Ask command ledger", () => {
     await expect(acquireAiAskCommand({ userId: "owner", idempotencyKey: key, question: "Đi Huế", conversationId: conversation.id })).resolves.toEqual({ kind: "terminal_replay", result });
   });
 
-  test("recovers a pending command with a committed assistant marker as a safe completed replay", async () => {
+  test("does not make assistant persistence authoritative before the complete terminal projection is prepared", async () => {
     await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
     const [conversation] = await testDb.insert(conversations).values({ id: "conversation", userId: "owner" }).returning({ id: conversations.id });
     const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: key, question: "Đi Huế", conversationId: conversation.id });
@@ -104,13 +104,25 @@ describe("AI Ask command ledger", () => {
     const [assistant] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "owner", role: "assistant", content: "Gợi ý đã lưu" }).returning({ id: messages.id });
     await testDb.update(aiAskCommands).set({ assistantMessageId: assistant.id }).where(eq(aiAskCommands.id, admitted.commandId));
 
-    await expect(recoverCompletedAiAskCommand(admitted.commandId)).resolves.toEqual({
-      type: "done", conversationId: conversation.id, userMessage: admitted.userMessage, assistantMessage: { id: assistant.id, content: "Gợi ý đã lưu" },
+    await expect(acquireAiAskCommand({ userId: "owner", idempotencyKey: key, question: "Đi Huế", conversationId: conversation.id })).resolves.toEqual({
+      kind: "pending_replay", conversationId: conversation.id, userMessage: admitted.userMessage,
     });
+    await expect(recoverCompletedAiAskCommand(admitted.commandId)).resolves.toBeNull();
+
+    const result = {
+      type: "done" as const,
+      conversationId: conversation.id,
+      userMessage: admitted.userMessage,
+      assistantMessage: { id: assistant.id, content: "Gợi ý đã lưu", annotations: [{ source: "durable" }] },
+      proposal: { proposalId: "proposal-1", rationale: "Đã kiểm tra", affectedItems: [], beforeAfter: [], alternatives: [], hasAlternatives: false, expiresAt: null, status: "pending" },
+    };
+    await prepareAiAskCommandTerminalResult(admitted.commandId, result, assistant.id);
+
     await expect(acquireAiAskCommand({ userId: "owner", idempotencyKey: key, question: "Đi Huế", conversationId: conversation.id })).resolves.toEqual({
       kind: "terminal_replay",
-      result: { type: "done", conversationId: conversation.id, userMessage: admitted.userMessage, assistantMessage: { id: assistant.id, content: "Gợi ý đã lưu" } },
+      result,
     });
+    await expect(recoverCompletedAiAskCommand(admitted.commandId)).resolves.toEqual(result);
   });
 
   test("serializes and replays only the safe terminal browser projection", async () => {

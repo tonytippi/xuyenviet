@@ -994,7 +994,7 @@ export const aiAskCommands = pgTable(
     check("ai_ask_commands_digest_check", sql`${command.requestDigest} ~ '^[a-f0-9]{64}$' and ${command.selectedScopeDigest} ~ '^[a-f0-9]{64}$'`),
     check("ai_ask_commands_status_check", sql`${command.status} in ('pending', 'completed', 'failed', 'aborted')`),
     check("ai_ask_commands_question_check", sql`char_length(${command.normalizedQuestion}) between 1 and 2000`),
-    check("ai_ask_commands_terminal_shape_check", sql`(${command.status} = 'pending' and ${command.terminalResult} is null and ${command.terminalAt} is null) or (${command.status} <> 'pending' and ${command.terminalResult} is not null and ${command.terminalAt} is not null)`),
+    check("ai_ask_commands_terminal_shape_check", sql`(${command.status} = 'pending' and ${command.terminalAt} is null and (${command.terminalResult} is null or ${command.assistantMessageId} is not null)) or (${command.status} <> 'pending' and ${command.terminalResult} is not null and ${command.terminalAt} is not null)`),
   ],
 );
 

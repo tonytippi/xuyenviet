@@ -2,7 +2,7 @@ import "server-only";
 
 import { createHash } from "node:crypto";
 
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
 import { aiAskCommands, conversations, messageImageAttachments, messages } from "@/db/schema";
@@ -94,7 +94,7 @@ export async function acquireAiAskCommand(input: AcquireAiAskCommandInput): Prom
       const [winner] = await transaction.select().from(aiAskCommands).where(winnerPredicate).limit(1).for("update");
       if (!winner || winner.requestDigest !== requestDigest || winner.expiresAt <= new Date()) return { kind: "key_reused" };
       if (winner.status !== "pending") return { kind: "terminal_replay", result: winner.terminalResult as AiAskTerminalResult };
-      if (winner.assistantMessageId) {
+      if (winner.terminalResult) {
         const recovered = await recoverCompletedAiAskCommandInTransaction(winner.id, transaction);
         if (recovered) return { kind: "terminal_replay", result: recovered };
       }
@@ -133,6 +133,18 @@ export async function terminalizeAiAskCommand(commandId: string, status: "comple
   }
 }
 
+export async function prepareAiAskCommandTerminalResult(commandId: string, result: AiAskTerminalResult, assistantMessageId: string) {
+  const [prepared] = await getDb().update(aiAskCommands)
+    .set({ terminalResult: result, assistantMessageId, updatedAt: new Date() })
+    .where(and(eq(aiAskCommands.id, commandId), eq(aiAskCommands.status, "pending"), isNull(aiAskCommands.terminalResult)))
+    .returning({ id: aiAskCommands.id });
+  if (prepared) return;
+
+  const [existing] = await getDb().select({ status: aiAskCommands.status, terminalResult: aiAskCommands.terminalResult }).from(aiAskCommands).where(eq(aiAskCommands.id, commandId)).limit(1);
+  if (existing && terminalResultsEqual(existing.terminalResult, result)) return;
+  throw new Error("AI Ask command has a conflicting prepared terminal result.");
+}
+
 export async function recoverCompletedAiAskCommand(commandId: string): Promise<AiAskTerminalResult | null> {
   return getDb().transaction((transaction) => recoverCompletedAiAskCommandInTransaction(commandId, transaction));
 }
@@ -149,20 +161,9 @@ async function recoverCompletedAiAskCommandInTransaction(commandId: string, tran
   }).from(aiAskCommands).where(eq(aiAskCommands.id, commandId)).limit(1).for("update");
   if (!command) return null;
   if (command.status !== "pending") return command.terminalResult as AiAskTerminalResult;
-  if (!command.conversationId || !command.userMessageId || !command.assistantMessageId) return null;
+  if (!command.terminalResult) return null;
 
-  const [userMessage, assistantMessage] = await Promise.all([
-    readMessage(transaction, command.userMessageId, command.userId),
-    readMessage(transaction, command.assistantMessageId, command.userId),
-  ]);
-  if (!userMessage || !assistantMessage) return null;
-
-  const result: AiAskTerminalResult = {
-    type: "done",
-    conversationId: command.conversationId,
-    userMessage,
-    assistantMessage,
-  };
+  const result = command.terminalResult as AiAskTerminalResult;
   await transaction.update(aiAskCommands).set({ status: "completed", terminalResult: result, terminalAt: new Date(), updatedAt: new Date() }).where(eq(aiAskCommands.id, command.id));
   return result;
 }

@@ -2,8 +2,8 @@ import { eq } from "drizzle-orm";
 import { after } from "next/server";
 
 import { getDb } from "@/db/client";
-import { aiAskCommands, conversations, messages } from "@/db/schema";
-import { acquireAiAskCommand, recoverCompletedAiAskCommand, terminalizeAiAskCommand } from "@/features/ai/ai-ask-commands";
+import { conversations, messages } from "@/db/schema";
+import { acquireAiAskCommand, prepareAiAskCommandTerminalResult, recoverCompletedAiAskCommand, terminalizeAiAskCommand } from "@/features/ai/ai-ask-commands";
 import { buildValidatedAnswerAnnotations, sanitizeStoredAnswerAnnotations, type AnswerAnnotation } from "@/features/ai/answer-annotations";
 import { ensureAiAskFreshnessWarning, requiresAiAskAnswerFinalization } from "@/features/ai/answer-freshness";
 import { streamInitialAiAskAnswer } from "@/features/ai/gateway";
@@ -326,10 +326,6 @@ async function streamAnswer({
           pricingSnapshot,
           providerRequestId: gatewayResult.requestMetadata.providerRequestId,
         });
-        // This marker shares the assistant transaction so a later terminal write
-        // failure can recover a safe completed result without inventing a fence.
-        await transaction.update(aiAskCommands).set({ assistantMessageId: assistantMessage.id, updatedAt: new Date() }).where(eq(aiAskCommands.id, command.commandId));
-
         return { id: assistantMessage.id, content: assistantContent.content, provenance, annotations: [] };
       });
     } catch {
@@ -374,8 +370,6 @@ async function streamAnswer({
             pricingSnapshot,
           providerRequestId: gatewayResult.requestMetadata.providerRequestId,
         });
-        await transaction.update(aiAskCommands).set({ assistantMessageId: assistantMessage.id, updatedAt: new Date() }).where(eq(aiAskCommands.id, command.commandId));
-
         return { id: assistantMessage.id, content: assistantContent.content, provenance, annotations: [] };
         });
       } catch {
@@ -414,7 +408,12 @@ async function streamAnswer({
         ? await draftAndPersistProposal({ session, tripProjectId, question, assistantMessageId: completed.id, abortSignal })
         : undefined;
       const result: StreamEvent = { type: "done", conversationId: savedTurn.conversationId, userMessage: savedTurn.userMessage, assistantMessage: completed, proposal: proposalSummary };
+      let prepared = false;
       try {
+        // Publish the complete browser projection before allowing recovery. A retry
+        // can only promote and replay this exact durable event.
+        await prepareAiAskCommandTerminalResult(command.commandId, result, completed.id);
+        prepared = true;
         await terminalizeAiAskCommand(command.commandId, "completed", result, completed.id);
       } catch (terminalizationError) {
         // The assistant/provenance/usage transaction committed. Do not reclassify
@@ -431,6 +430,7 @@ async function streamAnswer({
             error: recoveryError instanceof Error ? { name: recoveryError.name, message: recoveryError.message } : String(recoveryError),
           });
         }
+        if (!prepared) throw terminalizationError;
       }
       sendEvent(controller, encoder, result);
     } else {

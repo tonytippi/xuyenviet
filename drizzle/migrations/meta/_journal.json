@@ -57,6 +57,13 @@
       "when": 1785337300000,
       "tag": "0007_married_agent_zero",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1785337400000,
+      "tag": "0008_stable_ai_ask_terminal_projection",
+      "breakpoints": true
     }
   ]
 }
