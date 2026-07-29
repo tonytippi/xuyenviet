@@ -35,9 +35,9 @@ export class AiAskController {
     request.once("aborted", onAborted);
     response.once("close", onResponseClose);
     let iterator: AsyncIterator<Uint8Array> | undefined;
-    // A received byte commits this connection to the stream protocol even when it
-    // does not complete a frame. The framer retains that fragment locally.
-    let sourceBegun = false;
+    let recoveryAllowed = false;
+    let prefixInvalid = false;
+    let upstreamObserved = false;
     let terminalSent = false;
     const framer = createNdjsonFramer();
     try {
@@ -49,9 +49,18 @@ export class AiAskController {
       }
       while (!next.done) {
         if (abort.signal.aborted || response.writableEnded) break;
-        sourceBegun = true;
+        upstreamObserved = true;
         for (const frame of framer.push(next.value)) {
           if (response.write(frame.bytes) === false) await waitForDrain(response, abort.signal);
+          if (!prefixInvalid) {
+            if (!recoveryAllowed) {
+              if (frame.validPrefix === "preparing") recoveryAllowed = true;
+              else prefixInvalid = true;
+            } else if (frame.validPrefix !== "delta") {
+              recoveryAllowed = false;
+              prefixInvalid = true;
+            }
+          }
           if (frame.terminal || frame.inProgress) {
             terminalSent = true;
             break;
@@ -64,12 +73,12 @@ export class AiAskController {
     } catch (error) {
       // Validation failures happened before the protocol began. Once it has begun,
       // only the retained NDJSON terminal shape is legal on this connection.
-      if (!sourceBegun && !response.headersSent) {
+       if (!upstreamObserved && !response.headersSent) {
         if (error instanceof AiAskAdmissionValidationError) throw new BadRequestException({ code: "validation_error" });
         throw new InternalServerErrorException({ code: "internal_error" });
       }
     } finally {
-      if (sourceBegun && !terminalSent && !abort.signal.aborted && !response.writableEnded) {
+       if (recoveryAllowed && !terminalSent && !abort.signal.aborted && !response.writableEnded) {
         try { response.write(safeStreamFailure); } catch { /* The client may have disconnected between write failure and close. */ }
       }
       try { await iterator?.return?.(); } catch { /* Iterator cleanup cannot keep an already-completed HTTP response open. */ }
@@ -80,7 +89,7 @@ export class AiAskController {
   }
 }
 
-function createNdjsonFramer(): { push(bytes: Uint8Array): Array<{ bytes: Uint8Array; terminal: boolean; inProgress: boolean }> } {
+function createNdjsonFramer(): { push(bytes: Uint8Array): Array<{ bytes: Uint8Array; terminal: boolean; inProgress: boolean; validPrefix: "preparing" | "delta" | undefined }> } {
   let buffered = new Uint8Array();
   const decoder = new TextDecoder("utf-8", { fatal: true });
   return {
@@ -88,17 +97,16 @@ function createNdjsonFramer(): { push(bytes: Uint8Array): Array<{ bytes: Uint8Ar
       const combined = new Uint8Array(buffered.byteLength + bytes.byteLength);
       combined.set(buffered);
       combined.set(bytes, buffered.byteLength);
-      const frames: Array<{ bytes: Uint8Array; terminal: boolean; inProgress: boolean }> = [];
+      const frames: Array<{ bytes: Uint8Array; terminal: boolean; inProgress: boolean; validPrefix: "preparing" | "delta" | undefined }> = [];
       let start = 0;
       for (let index = 0; index < combined.byteLength; index += 1) {
         if (combined[index] !== 10) continue;
         const frame = combined.slice(start, index + 1);
         // Inspect only fully framed records. Frames themselves remain unmodified.
-        const recordType = ndjsonRecordType(frame, decoder);
-        const terminal = recordType === "done" || recordType === "error";
-        frames.push({ bytes: frame, terminal, inProgress: recordType === "in_progress" });
+        const record = ndjsonRecord(frame, decoder);
+        frames.push({ bytes: frame, terminal: record.terminal && !record.inProgress, inProgress: record.inProgress, validPrefix: record.validPrefix });
         start = index + 1;
-        if (terminal) {
+        if (record.terminal) {
           buffered = new Uint8Array();
           return frames;
         }
@@ -112,13 +120,28 @@ function createNdjsonFramer(): { push(bytes: Uint8Array): Array<{ bytes: Uint8Ar
   };
 }
 
-function ndjsonRecordType(bytes: Uint8Array, decoder: TextDecoder): string | undefined {
+function ndjsonRecord(bytes: Uint8Array, decoder: TextDecoder): { terminal: boolean; inProgress: boolean; validPrefix: "preparing" | "delta" | undefined } {
   try {
     const record: unknown = JSON.parse(decoder.decode(bytes));
-    const type = typeof record === "object" && record !== null && !Array.isArray(record) ? (record as { type?: unknown }).type : undefined;
-    return typeof type === "string" ? type : undefined;
+    if (typeof record !== "object" || record === null || Array.isArray(record)) return { terminal: false, inProgress: false, validPrefix: undefined };
+    const value = record as Record<string, unknown>;
+    const type = typeof value.type === "string" ? value.type : undefined;
+    const keys = Object.keys(value);
+    const validPrefix = type === "preparing" && keys.length === 1
+      ? "preparing"
+      : type === "delta" && typeof value.content === "string" && keys.length === 2 && keys.includes("content")
+        ? "delta"
+        : undefined;
+    const message = value.userMessage;
+    const validMessage = typeof message === "object" && message !== null && !Array.isArray(message) && Object.keys(message).length === 2 && typeof (message as Record<string, unknown>).id === "string" && typeof (message as Record<string, unknown>).content === "string";
+    const assistant = value.assistantMessage;
+    const validAssistant = typeof assistant === "object" && assistant !== null && !Array.isArray(assistant) && [2, 3].includes(Object.keys(assistant).length) && typeof (assistant as Record<string, unknown>).id === "string" && typeof (assistant as Record<string, unknown>).content === "string" && ((assistant as Record<string, unknown>).provenance === undefined || Array.isArray((assistant as Record<string, unknown>).provenance));
+    const inProgress = type === "in_progress" && keys.every((key) => ["type", "conversationId", "userMessage"].includes(key)) && (value.conversationId === undefined || typeof value.conversationId === "string") && (value.userMessage === undefined || validMessage);
+    const terminal = inProgress || type === "done" && keys.every((key) => ["type", "conversationId", "userMessage", "assistantMessage"].includes(key)) && typeof value.conversationId === "string" && validMessage && validAssistant
+      || type === "error" && keys.every((key) => ["type", "code", "conversationId", "userMessage", "errorMessage"].includes(key)) && typeof value.errorMessage === "string" && (value.code === undefined || value.code === "refresh_required") && (value.conversationId === undefined || typeof value.conversationId === "string") && (value.userMessage === undefined || validMessage);
+    return { terminal, inProgress, validPrefix };
   } catch {
-    return undefined;
+    return { terminal: false, inProgress: false, validPrefix: undefined };
   }
 }
 

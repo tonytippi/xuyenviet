@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-07-29 (Story 10.5 final confirmation AC1 BFF stream-protocol repair completed; Epic 10 remains done.)
+# last_updated: 2026-07-29 (Final Story 10.5 AC1 framing repairs verified and synchronized; Epic 10 remains done.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-07-29 (Story 10.5 final confirmation AC1 BFF stream-protocol repair completed; Epic 10 remains done.)
+last_updated: 2026-07-29 (Final Story 10.5 AC1 framing repairs verified and synchronized; Epic 10 remains done.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -207,6 +207,7 @@ development_status:
   # 2026-07-29: Final permitted Epic 10 completion review of repair range 9259cab8^..b381a68 ran Blind Hunter, Edge Case Hunter, and Acceptance Auditor synchronously. Three actionable Story 10.5 repair findings remain: pending `in_progress` replay is followed by an erroneous terminal failure; the BFF raw relay bypasses downstream backpressure; and disabled rollback CSRF config bypasses established secret/lifetime bounds. Story 10.5 set to in-progress; Epic 10 remains done per review instruction. Focused verification: 63 API/BFF tests, 169 command/outbox/context tests, and 154 shell/session tests passed; typecheck and build passed; lint had 0 errors and 5 pre-existing warnings; git diff --check passed.
   # 2026-07-29: Final permitted repair completed. `in_progress` replays are accepted as exactly one record; BFF streaming is pull-driven with bounded incomplete framing and cancellation-safe lifecycle; disabled rollback CSRF uses enabled transport's 32-character secret and 60-3600 second TTL bounds. Final synchronous blind, edge-case, and acceptance review found no actionable findings. Serial verification passed 47 API/BFF, 169 command/outbox/context, and 154 shell/session tests; typecheck/build/diff check passed; lint had 0 errors and 5 pre-existing warnings. Story status synchronized to done; Epic 10 remains done.
   # 2026-07-29: Final confirmation review found one MEDIUM Story 10.5 AC1 BFF protocol repair: timeout/EOF/read failure could emit a standalone synthetic terminal before a complete `preparing` frame. The targeted repair permits safe terminal recovery only after a complete valid `preparing`, zero or more `delta` prefix; incomplete, malformed, or out-of-order prefixes close without a synthetic error. Synchronous blind, edge-case, and acceptance reviews found no actionable findings. Focused API/BFF/routing verification passed 70 tests; typecheck, build, and diff check passed; lint had 0 errors and 5 pre-existing warnings. Story status synchronized to done; Epic 10 remains done.
+  # 2026-07-29: Final Epic 10 confirmation review found two MEDIUM Story 10.5 AC1 repairs: BFF recovery accepted type-only invalid `preparing`/`delta` frames as a valid prefix, and the API adapter emitted a lone synthetic terminal after arbitrary incomplete/invalid bytes. The targeted repair requires complete protocol-valid `preparing`, followed by zero or more complete valid `delta` frames, at both seams before safe-terminal recovery is allowed. Type-only, malformed, incomplete, oversized, and out-of-order initial frames close without a synthetic terminal. Synchronous blind, edge-case, and acceptance reviews found no actionable AC1 findings. Serial verification passed 75 API/BFF/routing tests, 169 command/outbox/context tests, and 154 shell/session tests; typecheck/build/diff check passed; lint had 0 errors and 5 pre-existing warnings. Story synchronized to done; Epic 10 remains done.
   10-5-cut-ai-ask-streaming-to-the-versioned-api: done
   epic-10-retrospective: optional
 

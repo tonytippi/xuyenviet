@@ -95,7 +95,18 @@ warnings: [oversized]
   - `[high] [patch]` Moved the complete command, fenced finalization, retrieval, gateway, provenance, usage, and outbox closure to `@xuyenviet/database`, retaining root compatibility re-exports and a single transaction path.
   - `[high] [patch]` Repaired API abort lifecycle, bounded bridge/backpressure, strict multipart framing, pre-stream safe error classification, and exact terminal stream behavior.
   - `[medium] [patch]` Added BFF pre-header timeout behavior, safe selected-owner telemetry, session-before-minting, and shared CSRF/origin enforcement for both routing states.
-  - `[medium] [patch]` Migrated API/BFF and legacy route tests to the package-owned execution seam and added raw-byte, routing, abort, timeout, and CSRF regressions.
+    - `[medium] [patch]` Migrated API/BFF and legacy route tests to the package-owned execution seam and added raw-byte, routing, abort, timeout, and CSRF regressions.
+
+### 2026-07-29 - Final AC1 framing confirmation
+- intent_gap: 0
+- bad_spec: 0
+- patch: 2 (medium 2)
+- defer: 0
+- reject: 1 (high 1)
+- addressed_findings:
+  - `[medium] [patch]` Required complete protocol-valid `preparing`, followed only by complete valid `delta` frames, before either adapter can append a safe recovery terminal.
+  - `[medium] [patch]` Removed API byte-observation recovery so incomplete, malformed, or oversized initial bytes cannot produce a standalone terminal.
+  - `[reject]` Did not relay incomplete records at EOF/failure because the established frame relay deliberately emits only complete NDJSON records and drops incomplete fragments.
 
 ### 2026-07-29 - Epic 10 completion-review targeted repair
 - intent_gap: 0
@@ -116,6 +127,7 @@ warnings: [oversized]
 - Transport: disabled compatibility routing does not require API-only configuration; enabled BFF timeout covers the full response and cancels upstream work. API/BFF frame complete records, recognize only root `done`/`error` terminals, discard incomplete fragments and post-terminal bytes, and emit a canonical safe terminal exactly once where recovery is possible.
 - Review: synchronous blind, edge-case, and acceptance reviews repaired all four Epic 10 completion-review findings. The final blocking reviews reported no actionable high or medium findings.
 - Verification: serial focused suites passed: API/BFF 47 tests, command/outbox/context 169 tests, and shell/session 154 tests. `pnpm typecheck`, `pnpm build`, and `git diff --check` passed. `pnpm lint` had zero errors and five pre-existing warnings.
+- Final AC1 confirmation: 75 API/BFF/routing tests, 169 command/outbox/context tests, and 154 shell/session tests passed serially. `pnpm typecheck`, `pnpm build`, and `git diff --check` passed. `pnpm lint` had zero errors and five pre-existing warnings.
 
 ## Design Notes
 

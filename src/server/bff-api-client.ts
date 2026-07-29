@@ -181,12 +181,12 @@ function abortableBody(body: ReadableStream<Uint8Array>, controller: AbortContro
         }
         const relayed = framer.push(next.value);
         if (!relayed) continue;
-        for (const recordType of relayed.recordTypes) {
+        for (const record of relayed.records) {
           if (prefixInvalid) continue;
           if (!recoveryAllowed) {
-            if (recordType === "preparing") recoveryAllowed = true;
+            if (record.validPrefix === "preparing") recoveryAllowed = true;
             else prefixInvalid = true;
-          } else if (recordType !== "delta") {
+          } else if (record.validPrefix !== "delta") {
             recoveryAllowed = false;
             prefixInvalid = true;
           }
@@ -214,7 +214,7 @@ function abortableBody(body: ReadableStream<Uint8Array>, controller: AbortContro
   }
 }
 
-function createNdjsonFramer(): { push(bytes: Uint8Array): { bytes: Uint8Array; terminal: boolean; recordTypes: Array<string | undefined> } | undefined } {
+function createNdjsonFramer(): { push(bytes: Uint8Array): { bytes: Uint8Array; terminal: boolean; records: Array<{ validPrefix: "preparing" | "delta" | undefined }> } | undefined } {
   let buffered = new Uint8Array();
   const decoder = new TextDecoder("utf-8", { fatal: true });
   return {
@@ -223,25 +223,25 @@ function createNdjsonFramer(): { push(bytes: Uint8Array): { bytes: Uint8Array; t
       const combined = hadBufferedBytes ? joinBytes(buffered, bytes) : bytes;
       let start = 0;
       let completeEnd = 0;
-      const recordTypes: Array<string | undefined> = [];
+      const records: Array<{ validPrefix: "preparing" | "delta" | undefined }> = [];
       for (let index = 0; index < combined.byteLength; index += 1) {
         if (combined[index] !== 10) continue;
         // Examine a completed record without changing the bytes sent to the caller.
-        const recordType = ndjsonRecordType(combined.subarray(start, index + 1), decoder);
-        recordTypes.push(recordType);
+        const record = ndjsonRecord(combined.subarray(start, index + 1), decoder);
+        records.push(record);
         completeEnd = index + 1;
         start = index + 1;
-        const terminal = recordType === "done" || recordType === "error" || recordType === "in_progress";
+        const terminal = record.terminal;
         if (terminal) {
           buffered = new Uint8Array();
-          return { bytes: completeBytes(combined, bytes, hadBufferedBytes, completeEnd), terminal: true, recordTypes };
+          return { bytes: completeBytes(combined, bytes, hadBufferedBytes, completeEnd), terminal: true, records };
         }
       }
       const incompleteLength = combined.byteLength - completeEnd;
       if (incompleteLength > maxIncompleteNdjsonRecordBytes) throw new Error("Incomplete NDJSON record exceeds relay limit.");
       // Copy the tail so a small incomplete record cannot retain a large source chunk.
       buffered = incompleteLength === 0 ? new Uint8Array() : combined.slice(completeEnd);
-      return completeEnd === 0 ? undefined : { bytes: completeBytes(combined, bytes, hadBufferedBytes, completeEnd), terminal: false, recordTypes };
+      return completeEnd === 0 ? undefined : { bytes: completeBytes(combined, bytes, hadBufferedBytes, completeEnd), terminal: false, records };
     },
   };
 }
@@ -257,13 +257,28 @@ function completeBytes(combined: Uint8Array, source: Uint8Array, hadBufferedByte
   return !hadBufferedBytes && length === source.byteLength ? source : combined.slice(0, length);
 }
 
-function ndjsonRecordType(bytes: Uint8Array, decoder: TextDecoder): string | undefined {
+function ndjsonRecord(bytes: Uint8Array, decoder: TextDecoder): { terminal: boolean; validPrefix: "preparing" | "delta" | undefined } {
   try {
     const record: unknown = JSON.parse(decoder.decode(bytes));
-    const type = typeof record === "object" && record !== null && !Array.isArray(record) ? (record as { type?: unknown }).type : undefined;
-    return typeof type === "string" ? type : undefined;
+    if (typeof record !== "object" || record === null || Array.isArray(record)) return { terminal: false, validPrefix: undefined };
+    const value = record as Record<string, unknown>;
+    const type = typeof value.type === "string" ? value.type : undefined;
+    const keys = Object.keys(value);
+    const validPrefix = type === "preparing" && keys.length === 1
+      ? "preparing"
+      : type === "delta" && typeof value.content === "string" && keys.length === 2 && keys.includes("content")
+        ? "delta"
+        : undefined;
+    const message = value.userMessage;
+    const validMessage = typeof message === "object" && message !== null && !Array.isArray(message) && Object.keys(message).length === 2 && typeof (message as Record<string, unknown>).id === "string" && typeof (message as Record<string, unknown>).content === "string";
+    const assistant = value.assistantMessage;
+    const validAssistant = typeof assistant === "object" && assistant !== null && !Array.isArray(assistant) && [2, 3].includes(Object.keys(assistant).length) && typeof (assistant as Record<string, unknown>).id === "string" && typeof (assistant as Record<string, unknown>).content === "string" && ((assistant as Record<string, unknown>).provenance === undefined || Array.isArray((assistant as Record<string, unknown>).provenance));
+    const terminal = type === "in_progress" && keys.every((key) => ["type", "conversationId", "userMessage"].includes(key)) && (value.conversationId === undefined || typeof value.conversationId === "string") && (value.userMessage === undefined || validMessage)
+      || type === "done" && keys.every((key) => ["type", "conversationId", "userMessage", "assistantMessage"].includes(key)) && typeof value.conversationId === "string" && validMessage && validAssistant
+      || type === "error" && keys.every((key) => ["type", "code", "conversationId", "userMessage", "errorMessage"].includes(key)) && typeof value.errorMessage === "string" && (value.code === undefined || value.code === "refresh_required") && (value.conversationId === undefined || typeof value.conversationId === "string") && (value.userMessage === undefined || validMessage);
+    return { terminal, validPrefix };
   } catch {
-    return undefined;
+    return { terminal: false, validPrefix: undefined };
   }
 }
 

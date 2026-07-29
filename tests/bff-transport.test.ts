@@ -99,27 +99,49 @@ describe("private BFF transport", () => {
     expect(cancelled).toBe(true);
   });
 
+  test("recovers after a complete preparing record split across raw byte chunks", async () => {
+    const preparing = new TextEncoder().encode('{"type":"preparing"}\n');
+    const upstream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(preparing.subarray(0, 9));
+        controller.enqueue(preparing.subarray(9));
+        controller.close();
+      },
+    });
+    const result = await callPrivateApiStream({ config, credential: "private-token", correlationId: "request_1", path: "/v1/ai-ask/stream", idempotencyKey: "valid_idempotency_key", body: requestBody(), contentType: "multipart/form-data; boundary=boundary", fetcher: async () => new Response(upstream, { headers: { "content-type": "application/x-ndjson" } }) });
+
+    await expect(new Response(result.body).text()).resolves.toBe('{"type":"preparing"}\n{"type":"error","errorMessage":"Không thể hoàn tất luồng trả lời lúc này. Hãy thử lại sau."}\n');
+  });
+
+  test("forwards malformed and type-only initial records without synthesizing a terminal", async () => {
+    for (const initial of ['{"type":"preparing","unexpected":true}\n', '{"type":"delta"}\n', '{"type":"preparing"\n']) {
+      const result = await callPrivateApiStream({ config, credential: "private-token", correlationId: "request_1", path: "/v1/ai-ask/stream", idempotencyKey: "valid_idempotency_key", body: requestBody(), contentType: "multipart/form-data; boundary=boundary", fetcher: async () => new Response(initial, { headers: { "content-type": "application/x-ndjson" } }) });
+
+      await expect(new Response(result.body).text()).resolves.toBe(initial);
+    }
+  });
+
   test("stops at a terminal frame without appending an error or relaying later bytes", async () => {
     let cancelled = false;
     const upstream = new ReadableStream<Uint8Array>({
-      start(controller) { controller.enqueue(new TextEncoder().encode('{"type":"preparing"}\n{"type":"done"}\n{"type":"delta","content":"ignored"}\n')); },
+      start(controller) { controller.enqueue(new TextEncoder().encode('{"type":"preparing"}\n{"type":"error","errorMessage":"safe"}\n{"type":"delta","content":"ignored"}\n')); },
       cancel() { cancelled = true; },
     });
     const result = await callPrivateApiStream({ config, credential: "private-token", correlationId: "request_1", path: "/v1/ai-ask/stream", idempotencyKey: "valid_idempotency_key", body: requestBody(), contentType: "multipart/form-data; boundary=boundary", fetcher: async () => new Response(upstream, { headers: { "content-type": "application/x-ndjson" } }) });
 
-    await expect(new Response(result.body).text()).resolves.toBe('{"type":"preparing"}\n{"type":"done"}\n');
+    await expect(new Response(result.body).text()).resolves.toBe('{"type":"preparing"}\n{"type":"error","errorMessage":"safe"}\n');
     expect(cancelled).toBe(true);
   });
 
   test("closes the downstream after a terminal record even when upstream cancellation rejects", async () => {
     const upstream = new ReadableStream<Uint8Array>({
-      start(controller) { controller.enqueue(new TextEncoder().encode('{"type":"done"}\n')); },
+      start(controller) { controller.enqueue(new TextEncoder().encode('{"type":"error","errorMessage":"safe"}\n')); },
       cancel() { return Promise.reject(new Error("upstream already closed")); },
     });
     const result = await callPrivateApiStream({ config, credential: "private-token", correlationId: "request_1", path: "/v1/ai-ask/stream", idempotencyKey: "valid_idempotency_key", body: requestBody(), contentType: "multipart/form-data; boundary=boundary", fetcher: async () => new Response(upstream, { headers: { "content-type": "application/x-ndjson" } }) });
     const reader = result.body.getReader();
 
-    await expect(reader.read()).resolves.toMatchObject({ done: false, value: new TextEncoder().encode('{"type":"done"}\n') });
+    await expect(reader.read()).resolves.toMatchObject({ done: false, value: new TextEncoder().encode('{"type":"error","errorMessage":"safe"}\n') });
     await expect(reader.read()).resolves.toEqual({ done: true, value: undefined });
   });
 
@@ -188,7 +210,7 @@ describe("private BFF transport", () => {
 
   test("reads upstream only as the downstream reader demands frames", async () => {
     let pulls = 0;
-    const records = ['{"type":"preparing"}\n', '{"type":"delta","content":"slow"}\n', '{"type":"done"}\n'];
+    const records = ['{"type":"preparing"}\n', '{"type":"delta","content":"slow"}\n', '{"type":"error","errorMessage":"safe"}\n'];
     const upstream = new ReadableStream<Uint8Array>({
       pull(controller) {
         const record = records[pulls++];
@@ -236,7 +258,7 @@ describe("private BFF transport", () => {
     expect(cancelled).toBe(true);
   });
 
-  test("closes without a terminal error after a framing failure before preparing", async () => {
+  test("closes without a terminal error after an oversized initial frame", async () => {
     let cancelled = false;
     const upstream = new ReadableStream<Uint8Array>({
       start(controller) { controller.enqueue(new Uint8Array(1_048_577).fill(65)); },

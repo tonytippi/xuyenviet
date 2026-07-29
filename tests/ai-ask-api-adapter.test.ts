@@ -8,7 +8,7 @@ import type { RequestPrincipal } from "@xuyenviet/contracts";
 describe("AI Ask API adapter", () => {
   test("routes validated multipart input to the injected execution owner and writes its bytes unchanged", async () => {
     const first = new Uint8Array([123, 34, 116, 121, 112, 101, 34, 58, 34, 112, 114, 101, 112, 97, 114, 105, 110, 103, 34, 125, 10]);
-    const terminal = new Uint8Array([123, 34, 116, 121, 112, 101, 34, 58, 34, 100, 111, 110, 101, 34, 125, 10]);
+    const terminal = new TextEncoder().encode('{"type":"error","errorMessage":"safe"}\n');
     const execute = vi.fn<AiAskStreamExecution["execute"]>(async function* () { yield first; yield terminal; });
     const controller = new AiAskController({ execute });
     const written: Uint8Array[] = [];
@@ -44,7 +44,7 @@ describe("AI Ask API adapter", () => {
       execute: async function* (_input, _principal, _requestId, abortSignal) {
         signal = abortSignal;
         yield new TextEncoder().encode('{"type":"preparing"}\n');
-        yield new TextEncoder().encode('{"type":"done"}\n');
+        yield new TextEncoder().encode('{"type":"error","errorMessage":"safe"}\n');
       },
     });
     const listeners = new Map<string, () => void>();
@@ -162,7 +162,7 @@ describe("AI Ask API adapter", () => {
 
   test("ends the response when execution iterator cleanup rejects", async () => {
     const iterator = {
-      next: vi.fn(async () => ({ done: false as const, value: new TextEncoder().encode('{"type":"done"}\n') })),
+      next: vi.fn(async () => ({ done: false as const, value: new TextEncoder().encode('{"type":"error","errorMessage":"safe"}\n') })),
       return: vi.fn(async () => { throw new Error("iterator cleanup failed"); }),
     };
     const controller = new AiAskController({ execute: vi.fn(() => ({ [Symbol.asyncIterator]: () => iterator })) as AiAskStreamExecution["execute"] });
@@ -202,7 +202,7 @@ describe("AI Ask API adapter", () => {
     expect(new TextDecoder().decode(concatenate(written))).toBe('{"type":"preparing"}\n{"type":"error","errorMessage":"Không thể hoàn tất luồng trả lời lúc này. Hãy thử lại sau."}\n');
   });
 
-  test("bounds an unterminated upstream record before emitting the canonical terminal", async () => {
+  test("closes without a synthetic terminal when the initial upstream record exceeds the framing limit", async () => {
     const iterator = {
       next: vi.fn(async () => ({ done: false as const, value: new Uint8Array(1_048_577).fill(65) })),
       return: vi.fn(async () => ({ done: true as const, value: undefined })),
@@ -213,12 +213,50 @@ describe("AI Ask API adapter", () => {
 
     await controller.stream(principal(), "valid_idempotency_key", multipartRequest("adapter-boundary"), response);
 
-    expect(new TextDecoder().decode(concatenate(written))).toBe('{"type":"error","errorMessage":"Không thể hoàn tất luồng trả lời lúc này. Hãy thử lại sau."}\n');
+    expect(new TextDecoder().decode(concatenate(written))).toBe("");
     expect(iterator.return).toHaveBeenCalledOnce();
   });
 
+  test("recovers after a complete preparing record split across raw byte chunks", async () => {
+    const preparing = new TextEncoder().encode('{"type":"preparing"}\n');
+    const controller = new AiAskController({
+      execute: async function* () {
+        yield preparing.subarray(0, 9);
+        yield preparing.subarray(9);
+      },
+    });
+    const written: Uint8Array[] = [];
+    const response = { writableEnded: false, headersSent: false, setHeader: vi.fn(), write: vi.fn((bytes: Uint8Array) => { written.push(bytes); return true; }), end: vi.fn(), once: vi.fn(), removeListener: vi.fn() };
+
+    await controller.stream(principal(), "valid_idempotency_key", multipartRequest("adapter-boundary"), response);
+
+    expect(new TextDecoder().decode(concatenate(written))).toBe('{"type":"preparing"}\n{"type":"error","errorMessage":"Không thể hoàn tất luồng trả lời lúc này. Hãy thử lại sau."}\n');
+  });
+
+  test("forwards malformed and type-only initial records without synthesizing a terminal", async () => {
+    for (const initial of ['{"type":"preparing","unexpected":true}\n', '{"type":"delta"}\n', '{"type":"preparing"\n']) {
+      const controller = new AiAskController({ execute: async function* () { yield new TextEncoder().encode(initial); } });
+      const written: Uint8Array[] = [];
+      const response = { writableEnded: false, headersSent: false, setHeader: vi.fn(), write: vi.fn((bytes: Uint8Array) => { written.push(bytes); return true; }), end: vi.fn(), once: vi.fn(), removeListener: vi.fn() };
+
+      await controller.stream(principal(), "valid_idempotency_key", multipartRequest("adapter-boundary"), response);
+
+      expect(new TextDecoder().decode(concatenate(written))).toBe(initial);
+    }
+  });
+
+  test("closes without a synthetic terminal after an incomplete initial frame", async () => {
+    const controller = new AiAskController({ execute: async function* () { yield new TextEncoder().encode('{"type":"prepar'); } });
+    const written: Uint8Array[] = [];
+    const response = { writableEnded: false, headersSent: false, setHeader: vi.fn(), write: vi.fn((bytes: Uint8Array) => { written.push(bytes); return true; }), end: vi.fn(), once: vi.fn(), removeListener: vi.fn() };
+
+    await controller.stream(principal(), "valid_idempotency_key", multipartRequest("adapter-boundary"), response);
+
+    expect(new TextDecoder().decode(concatenate(written))).toBe("");
+  });
+
   test("suppresses frames after a split or coalesced terminal record and returns the iterator", async () => {
-    const terminalThenData = new TextEncoder().encode('{"type":"preparing"}\n{"type":"done"}\n{"type":"delta","content":"ignored"}\n');
+    const terminalThenData = new TextEncoder().encode('{"type":"preparing"}\n{"type":"error","errorMessage":"safe"}\n{"type":"delta","content":"ignored"}\n');
     const iterator = {
       next: vi.fn()
         .mockResolvedValueOnce({ done: false, value: terminalThenData.subarray(0, 31) })
@@ -234,16 +272,16 @@ describe("AI Ask API adapter", () => {
 
     await controller.stream(principal(), "valid_idempotency_key", multipartRequest(boundary), response);
 
-    expect(new TextDecoder().decode(concatenate(written))).toBe('{"type":"preparing"}\n{"type":"done"}\n');
+    expect(new TextDecoder().decode(concatenate(written))).toBe('{"type":"preparing"}\n{"type":"error","errorMessage":"safe"}\n');
     expect(iterator.next).toHaveBeenCalledTimes(2);
     expect(iterator.return).toHaveBeenCalledOnce();
   });
 
-  test("does not treat nested type fields or malformed completed records as terminal", async () => {
+  test("does not treat nested type fields or type-only terminal records as terminal", async () => {
     const records = [
       '{"type":"delta","metadata":{"type":"done"}}\n',
-      '{"type":"delta","content":"broken","metadata":{"type":"error"}\n',
       '{"type":"done"}\n',
+      '{"type":"error","errorMessage":"safe"}\n',
     ];
     const controller = new AiAskController({
       execute: async function* () {
