@@ -20,9 +20,9 @@ ALTER TABLE "ai_ask_commands" DROP CONSTRAINT "ai_ask_commands_conversation_owne
 --> statement-breakpoint
 ALTER TABLE "ai_ask_commands" DROP CONSTRAINT "ai_ask_commands_trip_project_owner_fk";
 --> statement-breakpoint
-ALTER TABLE "ai_ask_commands" DROP CONSTRAINT "ai_ask_commands_user_message_owner_fk";
+ALTER TABLE "ai_ask_commands" DROP CONSTRAINT "ai_ask_commands_user_message_conversation_owner_fk";
 --> statement-breakpoint
-ALTER TABLE "ai_ask_commands" DROP CONSTRAINT "ai_ask_commands_assistant_message_owner_fk";
+ALTER TABLE "ai_ask_commands" DROP CONSTRAINT "ai_ask_commands_assistant_message_conversation_owner_fk";
 --> statement-breakpoint
 ALTER TABLE "ai_ask_commands" ADD CONSTRAINT "ai_ask_commands_conversation_owner_fk" FOREIGN KEY ("conversation_id", "user_id") REFERENCES "public"."conversations"("id", "user_id") ON DELETE SET NULL ("conversation_id") ON UPDATE no action;
 --> statement-breakpoint
