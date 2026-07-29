@@ -1443,7 +1443,9 @@ describe("AI Ask streaming route", () => {
     const response = await POST(createAiAskStreamRequest(formData) as never);
 
     expect(response.status).toBe(200);
-    expect(await response.text()).toContain('"type":"error"');
+    const events = (await response.text()).trim().split("\n").map((line) => JSON.parse(line));
+    expect(events).toHaveLength(2);
+    expect(events.map((event) => event.type)).toEqual(["preparing", "error"]);
     expect(fetchMock).not.toHaveBeenCalled();
     expect(await countConversations()).toBe(1);
     expect(await countMessages()).toBe(1);

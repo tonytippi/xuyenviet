@@ -470,7 +470,10 @@ describe("chat/trip context extraction", () => {
     const responseText = await response.text();
 
     expect(responseText).toContain('"type":"done"');
-    expect(fetchMock.mock.calls.some(([, init]) => JSON.parse(String(init?.body))?.stream === false)).toBe(false);
+    expect(fetchMock.mock.calls.some((call) => {
+      const init = Reflect.get(call, "1") as RequestInit | undefined;
+      return JSON.parse(String(init?.body))?.stream === false;
+    })).toBe(false);
     expect(afterCallbacks).toHaveLength(1);
     await expect(testDb.select({ role: messages.role }).from(messages).orderBy(asc(messages.createdAt))).resolves.toEqual([
       { role: "user" },
@@ -521,7 +524,10 @@ describe("chat/trip context extraction", () => {
 
     expect(responseText).toContain('"type":"error"');
     expect(responseText).toContain('"code":"refresh_required"');
-    expect(fetchMock.mock.calls.some(([, init]) => JSON.parse(String(init?.body))?.stream === false)).toBe(false);
+    expect(fetchMock.mock.calls.some((call) => {
+      const init = Reflect.get(call, "1") as RequestInit | undefined;
+      return JSON.parse(String(init?.body))?.stream === false;
+    })).toBe(false);
     expect(afterCallbacks).toHaveLength(0);
     await expect(testDb.select().from(chatContext)).resolves.toHaveLength(0);
   });

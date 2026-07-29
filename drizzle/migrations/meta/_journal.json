@@ -71,6 +71,13 @@
       "when": 1785337500000,
       "tag": "0009_fence_terminal_ai_ask_persistence",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1785337600000,
+      "tag": "0010_scrub_retained_ai_ask_commands_on_delete",
+      "breakpoints": true
     }
   ]
 }

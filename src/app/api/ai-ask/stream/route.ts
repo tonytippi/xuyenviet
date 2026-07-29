@@ -3,7 +3,7 @@ import { after } from "next/server";
 
 import { getDb } from "@/db/client";
 import { conversations, messages } from "@/db/schema";
-import { acquireAiAskCommand, finalizeAiAskCommand, terminalizeAiAskCommand } from "@/features/ai/ai-ask-commands";
+import { acquireAiAskCommand, finalizeAiAskCommand, terminalizeAiAskCommand, updateCompletedAiAskCommandTerminalResult } from "@/features/ai/ai-ask-commands";
 import { buildValidatedAnswerAnnotations, sanitizeStoredAnswerAnnotations, type AnswerAnnotation } from "@/features/ai/answer-annotations";
 import { ensureAiAskFreshnessWarning, requiresAiAskAnswerFinalization } from "@/features/ai/answer-freshness";
 import { streamInitialAiAskAnswer } from "@/features/ai/gateway";
@@ -110,12 +110,12 @@ export async function POST(request: Request) {
     });
   } catch {
     const result: StreamEvent = { type: "error", conversationId: acquisition.conversationId, userMessage: acquisition.userMessage, errorMessage: "Không thể chuẩn bị luồng trả lời lúc này. Hãy thử lại sau." };
-    return streamSingleEvent(await terminalizeAiAskCommand(acquisition.commandId, "failed", result) as StreamEvent);
+    return streamPreparingThenTerminal(await terminalizeAiAskCommand(acquisition.commandId, "failed", result) as StreamEvent);
   }
 
   if (!selectedModel) {
     const result: StreamEvent = { type: "error", conversationId: acquisition.conversationId, userMessage: acquisition.userMessage, errorMessage: imageFile ? "Selected AI model does not support streaming image input." : "No active streaming AI Ask model is configured." };
-    return streamSingleEvent(await terminalizeAiAskCommand(acquisition.commandId, "failed", result) as StreamEvent);
+    return streamPreparingThenTerminal(await terminalizeAiAskCommand(acquisition.commandId, "failed", result) as StreamEvent);
   }
 
   const encoder = new TextEncoder();
@@ -310,7 +310,8 @@ async function streamAnswer({
       });
 
       if (!("discarded" in finalization)) {
-        const completed = finalization.completed;
+       const completed = finalization.completed;
+       let terminalResult = finalization.result as Extract<StreamEvent, { type: "done" }>;
         const extractionInput = savedTurn;
         after(() => extractChatTripContext({
           session,
@@ -340,19 +341,26 @@ async function streamAnswer({
           error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
         });
       }
-      if (completed.annotations.length > 0) {
-        try {
-          await db.update(messages).set({ answerAnnotations: completed.annotations }).where(eq(messages.id, completed.id));
-        } catch (error) {
+       if (completed.annotations.length > 0) {
+         try {
+           await db.update(messages).set({ answerAnnotations: completed.annotations }).where(eq(messages.id, completed.id));
+           terminalResult = await updateCompletedAiAskCommandTerminalResult(command.commandId, {
+             ...terminalResult,
+             assistantMessage: { ...terminalResult.assistantMessage, annotations: completed.annotations },
+           }) as Extract<StreamEvent, { type: "done" }>;
+         } catch (error) {
           console.error("Failed to persist answer annotations.", { assistantMessageId: completed.id, error });
         }
       }
       // Proposal drafting is a non-durable follow-up. It starts only after the
       // matching fence has committed, so discarded commands never invoke it.
-      const proposalSummary = tripProjectId
-        ? await draftAndPersistProposal({ session, tripProjectId, question, assistantMessageId: completed.id, abortSignal })
-        : undefined;
-      sendEvent(controller, encoder, { ...(finalization.result as Extract<StreamEvent, { type: "done" }>), proposal: proposalSummary });
+       const proposalSummary = tripProjectId
+         ? await draftAndPersistProposal({ session, tripProjectId, question, assistantMessageId: completed.id, abortSignal })
+         : undefined;
+       if (proposalSummary) {
+         terminalResult = await updateCompletedAiAskCommandTerminalResult(command.commandId, { ...terminalResult, proposal: proposalSummary }) as Extract<StreamEvent, { type: "done" }>;
+       }
+       sendEvent(controller, encoder, terminalResult);
     } else {
       sendEvent(controller, encoder, finalization.result as StreamEvent);
     }
@@ -537,6 +545,17 @@ function streamSingleEvent(event: StreamEvent) {
   const encoder = new TextEncoder();
   return new Response(new ReadableStream<Uint8Array>({
     start(controller) {
+      controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+      controller.close();
+    },
+  }), { headers: { "cache-control": "no-store", "content-type": "application/x-ndjson; charset=utf-8" } });
+}
+
+function streamPreparingThenTerminal(event: StreamEvent) {
+  const encoder = new TextEncoder();
+  return new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode(`${JSON.stringify({ type: "preparing" })}\n`));
       controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
       controller.close();
     },

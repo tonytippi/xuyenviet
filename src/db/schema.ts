@@ -968,6 +968,8 @@ export const aiAskCommands = pgTable(
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
   },
+  // Retained-command scrub-on-delete is a PostgreSQL trigger declared in
+  // migration 0010; Drizzle has no trigger declaration API.
   (command) => [
     foreignKey({
       columns: [command.conversationId, command.userId],

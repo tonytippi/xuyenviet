@@ -154,6 +154,21 @@ export async function terminalizeAiAskCommand(commandId: string, status: "comple
   throw new Error("AI Ask command terminalization failed.");
 }
 
+// Follow-ups are intentionally outside fenced finalization. When one produces
+// browser-visible state, keep the retained replay projection in sync before it
+// can be emitted as the command's single terminal event.
+export async function updateCompletedAiAskCommandTerminalResult(commandId: string, result: AiAskTerminalResult): Promise<AiAskTerminalResult> {
+  const [updated] = await getDb().update(aiAskCommands)
+    .set({ terminalResult: result, updatedAt: new Date() })
+    .where(and(eq(aiAskCommands.id, commandId), eq(aiAskCommands.status, "completed")))
+    .returning({ terminalResult: aiAskCommands.terminalResult });
+  if (updated) return updated.terminalResult as AiAskTerminalResult;
+
+  const [existing] = await getDb().select({ terminalResult: aiAskCommands.terminalResult }).from(aiAskCommands).where(eq(aiAskCommands.id, commandId)).limit(1);
+  if (existing?.terminalResult) return existing.terminalResult as AiAskTerminalResult;
+  throw new Error("AI Ask command was not found.");
+}
+
 export async function finalizeAiAskCommand<T extends { result: AiAskTerminalResult; assistantMessageId: string }>(commandId: string, persist: (transaction: Transaction, command: { userId: string; conversationId: string; tripProjectId: string | null; userMessageId: string }) => Promise<T>): Promise<T | { result: AiAskTerminalResult; discarded: true }> {
   return getDb().transaction(async (transaction) => {
     const [unlocked] = await transaction.select().from(aiAskCommands).where(eq(aiAskCommands.id, commandId)).limit(1);
