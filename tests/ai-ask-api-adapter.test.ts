@@ -296,6 +296,27 @@ describe("AI Ask API adapter", () => {
     expect(new TextDecoder().decode(concatenate(written))).toBe(records.join(""));
   });
 
+  test("forwards a done record with an unexpected assistant key until a later valid terminal", async () => {
+    const records = [
+      '{"type":"preparing"}\n',
+      '{ "assistantMessage" : { "unexpected" : true, "content" : "Wrong", "id" : "assistant-1" }, "userMessage" : { "content" : "Hi", "id" : "user-1" }, "conversationId" : "conversation-1", "type" : "done" }\n',
+      '{ "assistantMessage" : { "provenance" : [], "content" : "Right", "id" : "assistant-2" }, "userMessage" : { "content" : "Hi", "id" : "user-1" }, "conversationId" : "conversation-1", "type" : "done" }\n',
+      '{"type":"delta","content":"ignored"}\n',
+    ];
+    const encoder = new TextEncoder();
+    const controller = new AiAskController({
+      execute: async function* () {
+        yield new TextEncoder().encode(records.join(""));
+      },
+    });
+    const written: Uint8Array[] = [];
+    const response = { writableEnded: false, headersSent: false, setHeader: vi.fn(), write: vi.fn((bytes: Uint8Array) => { written.push(bytes); return true; }), end: vi.fn(), once: vi.fn(), removeListener: vi.fn() };
+
+    await controller.stream(principal(), "valid_idempotency_key", multipartRequest("adapter-boundary"), response);
+
+    expect(concatenate(written)).toEqual(encoder.encode(records.slice(0, 3).join("")));
+  });
+
   test("rejects unterminated multipart framing and duplicate recognized fields before execution", async () => {
     const execute = vi.fn<AiAskStreamExecution["execute"]>(async function* () {});
     const controller = new AiAskController({ execute });

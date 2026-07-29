@@ -164,6 +164,26 @@ describe("private BFF transport", () => {
     await expect(new Response(result.body).text()).resolves.toBe(records.slice(0, 3).join(""));
   });
 
+  test("forwards a done record with an unexpected assistant key until a later valid terminal", async () => {
+    const records = [
+      '{"type":"preparing"}\n',
+      '{ "assistantMessage" : { "unexpected" : true, "content" : "Wrong", "id" : "assistant-1" }, "userMessage" : { "content" : "Hi", "id" : "user-1" }, "conversationId" : "conversation-1", "type" : "done" }\n',
+      '{ "assistantMessage" : { "provenance" : [], "content" : "Right", "id" : "assistant-2" }, "userMessage" : { "content" : "Hi", "id" : "user-1" }, "conversationId" : "conversation-1", "type" : "done" }\n',
+      '{"type":"delta","content":"ignored"}\n',
+    ];
+    const encoder = new TextEncoder();
+    let recordIndex = 0;
+    const upstream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(new TextEncoder().encode(records[recordIndex++]));
+        if (recordIndex === records.length) controller.close();
+      },
+    });
+    const result = await callPrivateApiStream({ config, credential: "private-token", correlationId: "request_1", path: "/v1/ai-ask/stream", idempotencyKey: "valid_idempotency_key", body: requestBody(), contentType: "multipart/form-data; boundary=boundary", fetcher: async () => new Response(upstream, { headers: { "content-type": "application/x-ndjson" } }) });
+
+    await expect(new Response(result.body).arrayBuffer()).resolves.toEqual(encoder.encode(records.slice(0, 3).join("")).buffer);
+  });
+
   test("adds exactly one safe terminal error after a truncated upstream body", async () => {
     const upstream = new TextEncoder().encode('{"type":"preparing"}\n{"type":"delta","content":"half');
     const result = await callPrivateApiStream({ config, credential: "private-token", correlationId: "request_1", path: "/v1/ai-ask/stream", idempotencyKey: "valid_idempotency_key", body: requestBody(), contentType: "multipart/form-data; boundary=boundary", fetcher: async () => new Response(upstream, { headers: { "content-type": "application/x-ndjson" } }) });

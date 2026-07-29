@@ -120,6 +120,17 @@ warnings: [oversized]
   - `[medium] [patch]` Repaired API iterator/write truncation, incomplete-frame handling, root-terminal detection, and post-terminal byte suppression.
   - `[medium] [patch]` Added authenticated CSRF-valid BFF-to-live-Nest PostgreSQL integration coverage for byte relay, ordering/non-disclosure, abort, provider failure, stale fence, dispatch failure, atomic persistence, and replay.
 
+### 2026-07-29 - Final-final nested terminal repair
+- intent_gap: 0
+- bad_spec: 0
+- patch: 3 (low 3)
+- defer: 0
+- reject: 0
+- addressed_findings:
+  - `[low] [patch]` Restricted nested `done.assistantMessage` keys to `id`, `content`, and optional array `provenance` at both raw framers, so malformed candidates cannot suppress a later valid terminal.
+  - `[low] [patch]` Replaced the obsolete type-only terminal integration fixture with a complete valid terminal after a malformed nested candidate.
+  - `[low] [patch]` Strengthened the API, BFF, and composed-seam regressions to compare direct raw bytes with noncanonical JSON formatting, preventing a parse-and-reserialize false pass.
+
 ## Auto Run Result
 
 - Status: done
@@ -128,6 +139,7 @@ warnings: [oversized]
 - Review: synchronous blind, edge-case, and acceptance reviews repaired all four Epic 10 completion-review findings. The final blocking reviews reported no actionable high or medium findings.
 - Verification: serial focused suites passed: API/BFF 47 tests, command/outbox/context 169 tests, and shell/session 154 tests. `pnpm typecheck`, `pnpm build`, and `git diff --check` passed. `pnpm lint` had zero errors and five pre-existing warnings.
 - Final AC1 confirmation: 75 API/BFF/routing tests, 169 command/outbox/context tests, and 154 shell/session tests passed serially. `pnpm typecheck`, `pnpm build`, and `git diff --check` passed. `pnpm lint` had zero errors and five pre-existing warnings.
+- Final-final nested terminal repair: synchronous blind, edge-case, and acceptance reviews found no actionable findings. Serial verification passed 79 API/BFF, 169 command/outbox/context, and 154 shell/session tests; `pnpm typecheck`, `pnpm build`, and `git diff --check` passed. `pnpm lint` had zero errors and five pre-existing warnings.
 
 ## Design Notes
 

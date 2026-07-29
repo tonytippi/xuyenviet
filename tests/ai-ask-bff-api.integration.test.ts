@@ -78,13 +78,19 @@ afterEach(async () => {
 
 describe("AI Ask enabled BFF to API integration", () => {
   test("relays exact protected API bytes through a CSRF-valid authenticated BFF request without disclosing internal data", async () => {
-    const raw = new Uint8Array([123, 34, 116, 121, 112, 101, 34, 58, 34, 112, 114, 101, 112, 97, 114, 105, 110, 103, 34, 125, 10, 32, 123, 34, 116, 121, 112, 101, 34, 58, 34, 100, 111, 110, 101, 34, 125, 10, 123, 34, 116, 121, 112, 101, 34, 58, 34, 100, 101, 108, 116, 97, 34, 125, 10]);
-    const expected = new TextEncoder().encode('{"type":"preparing"}\n {"type":"done"}\n');
+    const records = [
+      '{"type":"preparing"}\n',
+      '{ "assistantMessage" : { "unexpected" : true, "content" : "Wrong", "id" : "assistant-1" }, "userMessage" : { "content" : "Hi", "id" : "user-1" }, "conversationId" : "conversation-1", "type" : "done" }\n',
+      '{ "assistantMessage" : { "provenance" : [], "content" : "Right", "id" : "assistant-2" }, "userMessage" : { "content" : "Hi", "id" : "user-1" }, "conversationId" : "conversation-1", "type" : "done" }\n',
+      '{"type":"delta","content":"ignored"}\n',
+    ];
+    const raw = new TextEncoder().encode(records.join(""));
+    const expected = new TextEncoder().encode(records.slice(0, 3).join(""));
     let receivedPrincipal: unknown;
     const iterator = {
       next: vi.fn()
-        .mockResolvedValueOnce({ done: false as const, value: raw.subarray(0, 29) })
-        .mockResolvedValueOnce({ done: false as const, value: raw.subarray(29) }),
+        .mockResolvedValueOnce({ done: false as const, value: raw.subarray(0, raw.indexOf(10) + 1) })
+        .mockResolvedValueOnce({ done: false as const, value: raw.subarray(raw.indexOf(10) + 1) }),
       return: vi.fn(async () => ({ done: true as const, value: undefined })),
     };
     const execution: AiAskStreamExecution = {
@@ -97,10 +103,9 @@ describe("AI Ask enabled BFF to API integration", () => {
     const getAuthenticatedSession = await loadEnabledRoute();
 
     const response = await postBffRequest("relay_request_1");
-    const responseText = await response.text();
-    const body = new TextEncoder().encode(responseText);
+    const body = new Uint8Array(await response.arrayBuffer());
 
-    expect(response.status, responseText).toBe(201);
+    expect(response.status).toBe(201);
     expect(body).toEqual(expected);
     expect(iterator.next).toHaveBeenCalledTimes(2);
     expect(iterator.return).toHaveBeenCalledOnce();
