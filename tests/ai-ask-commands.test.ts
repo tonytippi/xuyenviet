@@ -3,8 +3,8 @@ import { eq } from "drizzle-orm";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 
-import { aiAskCommands, conversations, messages, schema, tripProjects, users } from "@/db/schema";
-import { acquireAiAskCommand, aiAskRefreshRequiredMessage, discardAiAskCommandsForDeletedConversations, finalizeAiAskCommand, readAiAskCommandTerminalResult, terminalizeAiAskCommand, terminalResultsEqual, validateAiAskIdempotencyKey } from "@/features/ai/ai-ask-commands";
+import { aiAskCommands, conversations, domainOutbox, messages, schema, tripProjects, users } from "@/db/schema";
+import { acquireAiAskCommand, aiAskRefreshRequiredMessage, discardAiAskCommandsForDeletedConversations, finalizeAiAskCommand, maxAiAskConsumerStatusMessageIds, readAiAskCommandTerminalResult, readOwnedCompletedAiAskConsumerStatuses, terminalizeAiAskCommand, terminalResultsEqual, validateAiAskIdempotencyKey } from "@/features/ai/ai-ask-commands";
 
 import { testDb } from "./helpers/db";
 
@@ -122,6 +122,141 @@ describe("AI Ask command ledger", () => {
     if ("discarded" in finalized) throw new Error("Expected completed command");
     await expect(readAiAskCommandTerminalResult(admitted.commandId)).resolves.toEqual(finalized.result);
     await expect(acquireAiAskCommand({ userId: "owner", idempotencyKey: key, question: "Đi Huế", conversationId: conversation.id })).resolves.toEqual({ kind: "terminal_replay", result: finalized.result });
+  });
+
+  test("projects only one safe owner-scoped optional state per category without changing a completed result", async () => {
+    await testDb.insert(users).values([
+      { id: "owner", email: "owner@example.com" },
+      { id: "other", email: "other@example.com" },
+    ]);
+    const [conversation] = await testDb.insert(conversations).values({ id: "conversation", userId: "owner" }).returning({ id: conversations.id });
+    const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: key, question: "Đi Huế", conversationId: conversation.id });
+    if (admitted.kind !== "admitted") throw new Error("Expected command admission");
+    const finalized = await finalizeAiAskCommand(admitted.commandId, async (transaction, command) => {
+      const [assistant] = await transaction.insert(messages).values({ conversationId: command.conversationId, userId: command.userId, role: "assistant", content: "Gợi ý đã lưu" }).returning({ id: messages.id });
+      return { assistantMessageId: assistant.id, result: { type: "done" as const, conversationId: command.conversationId, userMessage: admitted.userMessage, assistantMessage: { id: assistant.id, content: "Gợi ý đã lưu" } } };
+    });
+    if ("discarded" in finalized) throw new Error("Expected completed command");
+    const terminalSnapshot = await testDb.select({ status: aiAskCommands.status, terminalResult: aiAskCommands.terminalResult, terminalAt: aiAskCommands.terminalAt }).from(aiAskCommands).where(eq(aiAskCommands.id, admitted.commandId));
+    await testDb.update(domainOutbox).set({ status: "processing", claimedBy: "worker", claimedAt: new Date(), leaseExpiresAt: new Date(Date.now() + 60_000), fencingToken: "a".repeat(64) }).where(eq(domainOutbox.eventType, "ai_ask.context_extraction.v1"));
+    await testDb.update(domainOutbox).set({ status: "failed", failedAt: new Date(), failureCode: "provider_internal", lastErrorCode: "provider_internal" }).where(eq(domainOutbox.eventType, "ai_ask.answer_annotation.v1"));
+    await testDb.insert(domainOutbox).values({ originatingCommandId: admitted.commandId, eventType: "ai_ask.trip_proposal_draft.v1", eventVersion: 1, aggregateType: "ai_ask_command", aggregateId: admitted.commandId, userId: "owner", conversationId: conversation.id, assistantMessageId: finalized.assistantMessageId, conversationLifecycleVersion: 1, dedupeKey: "projectless-proposal", payload: {}, status: "pending" });
+    const [duplicateCommand] = await testDb.insert(aiAskCommands).values({
+      userId: "owner",
+      scopeKind: "conversation",
+      scopeId: conversation.id,
+      idempotencyKey: "duplicate_status_key",
+      requestDigest: "c".repeat(64),
+      normalizedQuestion: "Đi Huế",
+      selectedScopeDigest: "d".repeat(64),
+      status: "completed",
+      conversationId: conversation.id,
+      assistantMessageId: finalized.assistantMessageId,
+      terminalAt: new Date(),
+      terminalResult: { type: "done" },
+      expiresAt: new Date(Date.now() + 60_000),
+    }).returning({ id: aiAskCommands.id });
+    await testDb.insert(domainOutbox).values([
+      { originatingCommandId: duplicateCommand.id, eventType: "ai_ask.context_extraction.v1", eventVersion: 1, aggregateType: "ai_ask_command", aggregateId: duplicateCommand.id, userId: "owner", conversationId: conversation.id, assistantMessageId: finalized.assistantMessageId, conversationLifecycleVersion: 1, dedupeKey: "duplicate-context-pending", payload: {}, status: "pending" },
+      { originatingCommandId: duplicateCommand.id, eventType: "ai_ask.answer_annotation.v1", eventVersion: 1, aggregateType: "ai_ask_command", aggregateId: duplicateCommand.id, userId: "owner", conversationId: conversation.id, assistantMessageId: finalized.assistantMessageId, conversationLifecycleVersion: 1, dedupeKey: "duplicate-annotation-pending", payload: {}, status: "pending" },
+    ]);
+
+    await expect(readOwnedCompletedAiAskConsumerStatuses("owner", [finalized.assistantMessageId])).resolves.toEqual([
+      { assistantMessageId: finalized.assistantMessageId, category: "context_extraction", state: "pending" },
+      { assistantMessageId: finalized.assistantMessageId, category: "answer_annotation", state: "failed" },
+    ]);
+    await expect(readOwnedCompletedAiAskConsumerStatuses("other", [finalized.assistantMessageId])).resolves.toEqual([]);
+    const safeProjection = JSON.stringify(await readOwnedCompletedAiAskConsumerStatuses("owner", [finalized.assistantMessageId]));
+    expect(safeProjection).not.toContain("provider_internal");
+    expect(safeProjection).not.toContain("worker");
+    await expect(testDb.select({ status: aiAskCommands.status, terminalResult: aiAskCommands.terminalResult, terminalAt: aiAskCommands.terminalAt }).from(aiAskCommands).where(eq(aiAskCommands.id, admitted.commandId))).resolves.toEqual(terminalSnapshot);
+  });
+
+  test("maps an owned project proposal follow-up to its dedicated display category", async () => {
+    await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
+    const [project] = await testDb.insert(tripProjects).values({ id: "project", userId: "owner", title: "Huế" }).returning({ id: tripProjects.id });
+    const [conversation] = await testDb.insert(conversations).values({ id: "conversation", userId: "owner", tripProjectId: project.id }).returning({ id: conversations.id });
+    await testDb.update(tripProjects).set({ primaryConversationId: conversation.id }).where(eq(tripProjects.id, project.id));
+    const [assistant] = await testDb.insert(messages).values({ id: "assistant", conversationId: conversation.id, userId: "owner", role: "assistant", content: "Gợi ý đã lưu" }).returning({ id: messages.id });
+    const [command] = await testDb.insert(aiAskCommands).values({
+      userId: "owner", scopeKind: "trip_project", scopeId: project.id, idempotencyKey: "project_proposal_status", requestDigest: "a".repeat(64), normalizedQuestion: "Đi Huế", selectedScopeDigest: "b".repeat(64), status: "completed", conversationId: conversation.id, tripProjectId: project.id, assistantMessageId: assistant.id, terminalAt: new Date(), terminalResult: { type: "done" }, expiresAt: new Date(Date.now() + 60_000),
+    }).returning({ id: aiAskCommands.id });
+    await testDb.insert(domainOutbox).values({ originatingCommandId: command.id, eventType: "ai_ask.trip_proposal_draft.v1", eventVersion: 1, aggregateType: "ai_ask_command", aggregateId: command.id, userId: "owner", conversationId: conversation.id, tripProjectId: project.id, assistantMessageId: assistant.id, conversationLifecycleVersion: 1, tripProjectAggregateVersion: 1, dedupeKey: "project-proposal-status", payload: {}, status: "pending" });
+
+    await expect(readOwnedCompletedAiAskConsumerStatuses("owner", [assistant.id])).resolves.toEqual([
+      { assistantMessageId: assistant.id, category: "trip_proposal_draft", state: "pending" },
+    ]);
+  });
+
+  test("caps and deduplicates shell-derived IDs before projecting owner-safe consumer statuses", async () => {
+    await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
+    const [conversation] = await testDb.insert(conversations).values({ id: "conversation", userId: "owner" }).returning({ id: conversations.id });
+    const [acceptedAssistant, excludedAssistant] = await testDb.insert(messages).values([
+      { id: "assistant-accepted", conversationId: conversation.id, userId: "owner", role: "assistant", content: "Included" },
+      { id: "assistant-excluded", conversationId: conversation.id, userId: "owner", role: "assistant", content: "Excluded" },
+    ]).returning({ id: messages.id });
+    const [acceptedCommand, excludedCommand] = await testDb.insert(aiAskCommands).values([
+      { userId: "owner", scopeKind: "conversation", scopeId: conversation.id, idempotencyKey: "accepted_consumer_status", requestDigest: "a".repeat(64), normalizedQuestion: "Đi Huế", selectedScopeDigest: "b".repeat(64), status: "completed", conversationId: conversation.id, assistantMessageId: acceptedAssistant.id, terminalAt: new Date(), terminalResult: { type: "done" }, expiresAt: new Date(Date.now() + 60_000) },
+      { userId: "owner", scopeKind: "conversation", scopeId: conversation.id, idempotencyKey: "excluded_consumer_status", requestDigest: "c".repeat(64), normalizedQuestion: "Đi Huế", selectedScopeDigest: "d".repeat(64), status: "completed", conversationId: conversation.id, assistantMessageId: excludedAssistant.id, terminalAt: new Date(), terminalResult: { type: "done" }, expiresAt: new Date(Date.now() + 60_000) },
+    ]).returning({ id: aiAskCommands.id });
+    await testDb.insert(domainOutbox).values([
+      { originatingCommandId: acceptedCommand.id, eventType: "ai_ask.answer_annotation.v1", eventVersion: 1, aggregateType: "ai_ask_command", aggregateId: acceptedCommand.id, userId: "owner", conversationId: conversation.id, assistantMessageId: acceptedAssistant.id, conversationLifecycleVersion: 1, dedupeKey: "accepted-consumer-status", payload: {}, status: "pending" },
+      { originatingCommandId: excludedCommand.id, eventType: "ai_ask.answer_annotation.v1", eventVersion: 1, aggregateType: "ai_ask_command", aggregateId: excludedCommand.id, userId: "owner", conversationId: conversation.id, assistantMessageId: excludedAssistant.id, conversationLifecycleVersion: 1, dedupeKey: "excluded-consumer-status", payload: {}, status: "pending" },
+    ]);
+    const shellIds = [acceptedAssistant.id, acceptedAssistant.id, ...Array.from({ length: maxAiAskConsumerStatusMessageIds - 1 }, (_, index) => `filler-${index}`), excludedAssistant.id];
+
+    const statuses = await readOwnedCompletedAiAskConsumerStatuses("owner", shellIds);
+
+    expect(statuses).toEqual([{ assistantMessageId: acceptedAssistant.id, category: "answer_annotation", state: "pending" }]);
+    expect(statuses).not.toContainEqual(expect.objectContaining({ assistantMessageId: excludedAssistant.id }));
+    expect(statuses).toHaveLength(1);
+  });
+
+  test("removes owner status projections after source message, conversation, and project scrubbing", async () => {
+    await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
+
+    async function createCompletedProposalFixture(suffix: string) {
+      const [project] = await testDb.insert(tripProjects).values({ id: `project-${suffix}`, userId: "owner", title: "Huế" }).returning({ id: tripProjects.id });
+      const [conversation] = await testDb.insert(conversations).values({ id: `conversation-${suffix}`, userId: "owner", tripProjectId: project.id }).returning({ id: conversations.id });
+      await testDb.update(tripProjects).set({ primaryConversationId: conversation.id }).where(eq(tripProjects.id, project.id));
+      const [assistant] = await testDb.insert(messages).values({ id: `assistant-${suffix}`, conversationId: conversation.id, userId: "owner", role: "assistant", content: "Gợi ý đã lưu" }).returning({ id: messages.id });
+      const [command] = await testDb.insert(aiAskCommands).values({
+        userId: "owner", scopeKind: "trip_project", scopeId: project.id, idempotencyKey: `scrub_status_${suffix}`, requestDigest: "a".repeat(64), normalizedQuestion: "Đi Huế", selectedScopeDigest: "b".repeat(64), status: "completed", conversationId: conversation.id, tripProjectId: project.id, assistantMessageId: assistant.id, terminalAt: new Date(), terminalResult: { type: "done" }, expiresAt: new Date(Date.now() + 60_000),
+      }).returning({ id: aiAskCommands.id });
+      await testDb.insert(domainOutbox).values({ originatingCommandId: command.id, eventType: "ai_ask.trip_proposal_draft.v1", eventVersion: 1, aggregateType: "ai_ask_command", aggregateId: command.id, userId: "owner", conversationId: conversation.id, tripProjectId: project.id, assistantMessageId: assistant.id, conversationLifecycleVersion: 1, tripProjectAggregateVersion: 1, dedupeKey: `scrub-status-${suffix}`, payload: {}, status: "pending" });
+      return { project, conversation, assistant, command };
+    }
+
+    const sourceMessage = await createCompletedProposalFixture("message");
+    await testDb.delete(messages).where(eq(messages.id, sourceMessage.assistant.id));
+    await expect(readOwnedCompletedAiAskConsumerStatuses("owner", [sourceMessage.assistant.id])).resolves.toEqual([]);
+    await expect(testDb.select({ status: aiAskCommands.status, assistantMessageId: aiAskCommands.assistantMessageId }).from(aiAskCommands).where(eq(aiAskCommands.id, sourceMessage.command.id))).resolves.toEqual([{ status: "discarded", assistantMessageId: null }]);
+
+    const sourceConversation = await createCompletedProposalFixture("conversation");
+    await testDb.delete(conversations).where(eq(conversations.id, sourceConversation.conversation.id));
+    await expect(readOwnedCompletedAiAskConsumerStatuses("owner", [sourceConversation.assistant.id])).resolves.toEqual([]);
+    await expect(testDb.select({ status: aiAskCommands.status, conversationId: aiAskCommands.conversationId }).from(aiAskCommands).where(eq(aiAskCommands.id, sourceConversation.command.id))).resolves.toEqual([{ status: "discarded", conversationId: null }]);
+
+    const sourceProject = await createCompletedProposalFixture("project");
+    await testDb.delete(tripProjects).where(eq(tripProjects.id, sourceProject.project.id));
+    await expect(readOwnedCompletedAiAskConsumerStatuses("owner", [sourceProject.assistant.id])).resolves.toEqual([]);
+    await expect(testDb.select({ status: aiAskCommands.status, tripProjectId: aiAskCommands.tripProjectId }).from(aiAskCommands).where(eq(aiAskCommands.id, sourceProject.command.id))).resolves.toEqual([{ status: "discarded", tripProjectId: null }]);
+  });
+
+  test("omits completed and scrubbed command consumer work", async () => {
+    await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
+    const [conversation] = await testDb.insert(conversations).values({ id: "conversation", userId: "owner" }).returning({ id: conversations.id });
+    const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: key, question: "Đi Huế", conversationId: conversation.id });
+    if (admitted.kind !== "admitted") throw new Error("Expected command admission");
+    const finalized = await finalizeAiAskCommand(admitted.commandId, async (transaction, command) => {
+      const [assistant] = await transaction.insert(messages).values({ conversationId: command.conversationId, userId: command.userId, role: "assistant", content: "Gợi ý đã lưu" }).returning({ id: messages.id });
+      return { assistantMessageId: assistant.id, result: { type: "done" as const, conversationId: command.conversationId, userMessage: admitted.userMessage, assistantMessage: { id: assistant.id, content: "Gợi ý đã lưu" } } };
+    });
+    if ("discarded" in finalized) throw new Error("Expected completed command");
+    await testDb.update(domainOutbox).set({ status: "completed", completedAt: new Date() }).where(eq(domainOutbox.originatingCommandId, admitted.commandId));
+    await expect(readOwnedCompletedAiAskConsumerStatuses("owner", [finalized.assistantMessageId])).resolves.toEqual([]);
+    await testDb.transaction((transaction) => discardAiAskCommandsForDeletedConversations(transaction, "owner", [conversation.id]));
+    await expect(readOwnedCompletedAiAskConsumerStatuses("owner", [finalized.assistantMessageId])).resolves.toEqual([]);
   });
 
   test("publishes the scrubbed projection when deletion wins after completion and optional follow-up", async () => {

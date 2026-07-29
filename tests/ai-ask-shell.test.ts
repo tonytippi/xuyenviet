@@ -6,7 +6,7 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { aiGatewayModels, aiUsageEvents, answerUsefulnessFeedback, assistantResponseProvenance, assistantRetrievalDecisions, conversations, messageImageAttachments, messages, schema, tripChangeProposals, tripPlanChangeHistory, tripPlanItems, tripProjectConstraints, tripProjects, users } from "@/db/schema";
+import { aiAskCommands, aiGatewayModels, aiUsageEvents, answerUsefulnessFeedback, assistantResponseProvenance, assistantRetrievalDecisions, conversations, domainOutbox, messageImageAttachments, messages, schema, tripChangeProposals, tripPlanChangeHistory, tripPlanItems, tripProjectConstraints, tripProjects, users } from "@/db/schema";
 import type { AnswerAnnotation } from "@/features/ai/answer-annotations";
 import type { AnswerEntityDescriptor } from "@/features/ai/ai-ask-composer";
 import { TripProposalReviewCard } from "@/features/ai/trip-proposal-review-card";
@@ -205,6 +205,73 @@ describe("AI Ask authenticated shell", () => {
     expect(html).not.toContain("Chưa có chi tiết được chọn");
     expect(html).not.toContain("Bảng chi tiết đã chọn");
     expect(html).not.toContain("source-chip");
+  });
+
+  test("renders a completed answer with supplemental safe optional-work states", async () => {
+    await createTestUser("user-1");
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
+    const [assistant] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "assistant", content: "Câu trả lời đã hoàn tất." }).returning({ id: messages.id });
+    const [command] = await testDb.insert(aiAskCommands).values({ userId: "user-1", scopeKind: "conversation", scopeId: conversation.id, idempotencyKey: "shell_consumer_status", requestDigest: "a".repeat(64), normalizedQuestion: "Đi Huế", selectedScopeDigest: "b".repeat(64), status: "completed", conversationId: conversation.id, assistantMessageId: assistant.id, terminalAt: new Date(), terminalResult: { type: "done" }, expiresAt: new Date(Date.now() + 60_000) }).returning({ id: aiAskCommands.id });
+    await testDb.insert(domainOutbox).values([
+      { originatingCommandId: command.id, eventType: "ai_ask.context_extraction.v1", eventVersion: 1, aggregateType: "ai_ask_command", aggregateId: command.id, userId: "user-1", conversationId: conversation.id, conversationLifecycleVersion: 1, dedupeKey: "shell-status-context", payload: {}, status: "pending" },
+      { originatingCommandId: command.id, eventType: "ai_ask.answer_annotation.v1", eventVersion: 1, aggregateType: "ai_ask_command", aggregateId: command.id, userId: "user-1", conversationId: conversation.id, assistantMessageId: assistant.id, conversationLifecycleVersion: 1, dedupeKey: "shell-status-annotation", payload: {}, status: "failed", failureCode: "provider_internal", lastErrorCode: "provider_internal", failedAt: new Date() },
+    ]);
+
+    const html = await renderAuthenticatedAiAskShell({ conversationId: conversation.id });
+
+    expect(html).toContain("Câu trả lời đã hoàn tất.");
+    expect(html).toContain("Đang chuẩn bị thêm ngữ cảnh kế hoạch tuỳ chọn");
+    expect(html).toContain("Chưa thể chuẩn bị thêm chi tiết tham khảo tuỳ chọn");
+    expect(html).toContain("Câu trả lời đã hoàn tất vẫn sẵn sàng để bạn sử dụng.");
+    expect(html).not.toContain("provider_internal");
+  });
+
+  test("keeps consumer notices visible while reserving polite announcements for later status changes", () => {
+    const source = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
+
+    expect(source).toContain('const sortedStatuses = [...(statuses ?? [])].sort((left, right) => left.category.localeCompare(right.category) || left.state.localeCompare(right.state));');
+    expect(source).toContain('const statusKey = sortedStatuses.map((status) => `${status.category}:${status.state}`).join(",");');
+    expect(source).toContain("const previousStatusKeyRef = useRef<string | undefined>(undefined);");
+    expect(source).toContain("if (previousStatusKeyRef.current === undefined)");
+    expect(source).toContain('setAnnouncedNotice(notice || "Các chi tiết lập kế hoạch tuỳ chọn đã được cập nhật.");');
+    expect(source).toContain('<p aria-live="polite" className="sr-only">{announcedNotice}</p>');
+    expect(source).toContain('<section aria-label="Lịch sử hội thoại" className="mx-auto max-w-[760px] space-y-4">');
+    expect(source).not.toContain('<section aria-label="Lịch sử hội thoại" aria-live="polite"');
+  });
+
+  test("refreshes the server projection after a completed terminal answer without polling", () => {
+    const source = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
+    const completionStart = source.indexOf("setConversationId(result.conversationId);");
+    const completionEnd = source.indexOf("} catch (error)", completionStart);
+    const completion = source.slice(completionStart, completionEnd);
+
+    expect(completion).toContain("reconcileSelection(result.conversationId, activeTripProjectId);");
+    expect(source).toContain("router.refresh();");
+    expect(source).not.toContain("setInterval(");
+    expect(source).not.toContain("domain-outbox-worker");
+  });
+
+  test("does not render consumer indicators for completed or fenced work, foreign owners, or projectless proposals", async () => {
+    await createTestUser("user-1");
+    await createTestUser("user-2");
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
+    const [assistant] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "assistant", content: "Câu trả lời vẫn dùng được." }).returning({ id: messages.id });
+    const [command] = await testDb.insert(aiAskCommands).values({ userId: "user-1", scopeKind: "conversation", scopeId: conversation.id, idempotencyKey: "shell_suppressed_status", requestDigest: "a".repeat(64), normalizedQuestion: "Đi Huế", selectedScopeDigest: "b".repeat(64), status: "completed", conversationId: conversation.id, assistantMessageId: assistant.id, terminalAt: new Date(), terminalResult: { type: "done" }, expiresAt: new Date(Date.now() + 60_000) }).returning({ id: aiAskCommands.id });
+    const [foreignConversation] = await testDb.insert(conversations).values({ userId: "user-2" }).returning({ id: conversations.id });
+    const [foreignAssistant] = await testDb.insert(messages).values({ conversationId: foreignConversation.id, userId: "user-2", role: "assistant", content: "Không thuộc phiên này." }).returning({ id: messages.id });
+    const [foreignCommand] = await testDb.insert(aiAskCommands).values({ userId: "user-2", scopeKind: "conversation", scopeId: foreignConversation.id, idempotencyKey: "shell_foreign_status", requestDigest: "c".repeat(64), normalizedQuestion: "Đi Đà Nẵng", selectedScopeDigest: "d".repeat(64), status: "completed", conversationId: foreignConversation.id, assistantMessageId: foreignAssistant.id, terminalAt: new Date(), terminalResult: { type: "done" }, expiresAt: new Date(Date.now() + 60_000) }).returning({ id: aiAskCommands.id });
+    await testDb.insert(domainOutbox).values([
+      { originatingCommandId: command.id, eventType: "ai_ask.context_extraction.v1", eventVersion: 1, aggregateType: "ai_ask_command", aggregateId: command.id, userId: "user-1", conversationId: conversation.id, assistantMessageId: assistant.id, conversationLifecycleVersion: 1, dedupeKey: "shell-completed-fenced", payload: {}, status: "completed", completedAt: new Date() },
+      { originatingCommandId: command.id, eventType: "ai_ask.trip_proposal_draft.v1", eventVersion: 1, aggregateType: "ai_ask_command", aggregateId: command.id, userId: "user-1", conversationId: conversation.id, assistantMessageId: assistant.id, conversationLifecycleVersion: 1, dedupeKey: "shell-projectless-proposal", payload: {}, status: "pending" },
+      { originatingCommandId: foreignCommand.id, eventType: "ai_ask.answer_annotation.v1", eventVersion: 1, aggregateType: "ai_ask_command", aggregateId: foreignCommand.id, userId: "user-2", conversationId: foreignConversation.id, assistantMessageId: foreignAssistant.id, conversationLifecycleVersion: 1, dedupeKey: "shell-foreign-failed", payload: {}, status: "failed", failureCode: "provider_internal", lastErrorCode: "provider_internal", failedAt: new Date() },
+    ]);
+
+    const html = await renderAuthenticatedAiAskShell({ conversationId: conversation.id });
+
+    expect(html).toContain("Câu trả lời vẫn dùng được.");
+    expect(html).not.toContain("Đang chuẩn bị thêm ngữ cảnh kế hoạch tuỳ chọn");
+    expect(html).not.toContain("Chưa thể chuẩn bị thêm chi tiết tham khảo tuỳ chọn");
+    expect(html).not.toContain("provider_internal");
   });
 
   test("renders assistant answer usefulness feedback controls and persisted state", async () => {
@@ -1312,6 +1379,26 @@ describe("AI Ask conversation data layer", () => {
     expect(assistant?.provenance.map((item) => item.title)).toEqual(["Nguồn duyệt Huế", "Web Huế"]);
     expect(assistant?.provenance.map((item) => item.sourceCategory)).toEqual(["knowledge", "web"]);
     expect(JSON.stringify(result)).not.toContain("Nguồn riêng user-2");
+  });
+
+  test("reads stored annotations without provider calls or persistence backfill", async () => {
+    await createTestUser("user-1");
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }),
+    }));
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
+    const [userMessage] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "user", content: "Đi Huế?" }).returning({ id: messages.id });
+    const [assistant] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "assistant", content: "Nên đi nhẹ." }).returning({ id: messages.id });
+    await testDb.insert(assistantResponseProvenance).values({ userId: "user-1", conversationId: conversation.id, userMessageId: userMessage.id, assistantMessageId: assistant.id, sourceCategory: "knowledge", rank: 1, verificationStatus: "verified", usedInPrompt: true, citedInAnswer: false, sourceSnapshot: { title: "Nguồn Huế" } });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const { getOwnedConversation } = await import("@/features/chat-trips/conversations");
+
+    const loaded = await getOwnedConversation(conversation.id);
+
+    expect(loaded?.messages.find((message) => message.id === assistant.id)?.annotations).toEqual([]);
+    expect(fetchMock).not.toHaveBeenCalled();
+    await expect(testDb.select({ answerAnnotations: messages.answerAnnotations }).from(messages).where(eq(messages.id, assistant.id))).resolves.toEqual([{ answerAnnotations: [] }]);
   });
 
   test("returns null for conversations owned by another user", async () => {

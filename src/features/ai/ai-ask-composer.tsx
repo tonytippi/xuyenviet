@@ -33,6 +33,7 @@ type DisplayMessage = {
   provenance?: AssistantMessageProvenanceItem[];
   annotations?: AnswerAnnotation[];
   feedback?: AnswerUsefulnessFeedbackSummary | null;
+  consumerStatuses?: Array<{ category: "context_extraction" | "answer_annotation" | "trip_proposal_draft"; state: "pending" | "failed" }>;
 };
 
 export type AnswerEntityDescriptor = {
@@ -247,6 +248,47 @@ function AnswerUsefulnessFeedbackControl({
       ) : null}
       {pending ? <p className="mt-2 text-sm font-semibold text-[#4f625a]">Đang lưu đánh giá...</p> : null}
     </section>
+  );
+}
+
+function AiAskConsumerStatusNotice({ statuses }: { statuses?: DisplayMessage["consumerStatuses"] }) {
+  const labels = {
+    context_extraction: "ngữ cảnh kế hoạch",
+    answer_annotation: "chi tiết tham khảo",
+    trip_proposal_draft: "bản nháp đề xuất chuyến đi",
+  };
+  const sortedStatuses = [...(statuses ?? [])].sort((left, right) => left.category.localeCompare(right.category) || left.state.localeCompare(right.state));
+  const pending = sortedStatuses.filter((status) => status.state === "pending").map((status) => labels[status.category]);
+  const failed = sortedStatuses.filter((status) => status.state === "failed").map((status) => labels[status.category]);
+  const notice = [
+    pending.length > 0 ? `Đang chuẩn bị thêm ${pending.join(", ")} tuỳ chọn. Câu trả lời này đã sẵn sàng để bạn sử dụng.` : null,
+    failed.length > 0 ? `Chưa thể chuẩn bị thêm ${failed.join(", ")} tuỳ chọn. Câu trả lời đã hoàn tất vẫn sẵn sàng để bạn sử dụng.` : null,
+  ].filter(Boolean).join(" ");
+  const statusKey = sortedStatuses.map((status) => `${status.category}:${status.state}`).join(",");
+  const previousStatusKeyRef = useRef<string | undefined>(undefined);
+  const [announcedNotice, setAnnouncedNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (previousStatusKeyRef.current === undefined) {
+      previousStatusKeyRef.current = statusKey;
+      return;
+    }
+    if (previousStatusKeyRef.current !== statusKey) {
+      previousStatusKeyRef.current = statusKey;
+      setAnnouncedNotice(notice || "Các chi tiết lập kế hoạch tuỳ chọn đã được cập nhật.");
+    }
+  }, [notice, statusKey]);
+
+  return (
+    <>
+      <p aria-live="polite" className="sr-only">{announcedNotice}</p>
+      {notice ? (
+        <section aria-label="Trạng thái chi tiết lập kế hoạch tuỳ chọn" className="mt-4 space-y-2">
+          {pending.length > 0 ? <p className="rounded-xl border border-[#d8c9ad] bg-[#fff8ec] px-3 py-2 text-sm leading-6 text-[#6f3f12]">Đang chuẩn bị thêm {pending.join(", ")} tuỳ chọn. Câu trả lời này đã sẵn sàng để bạn sử dụng.</p> : null}
+          {failed.length > 0 ? <p className="rounded-xl border border-[#f0c8a0] bg-[#fff7ed] px-3 py-2 text-sm leading-6 text-[#6f3f12]">Chưa thể chuẩn bị thêm {failed.join(", ")} tuỳ chọn. Câu trả lời đã hoàn tất vẫn sẵn sàng để bạn sử dụng.</p> : null}
+        </section>
+      ) : null}
+    </>
   );
 }
 
@@ -1873,7 +1915,7 @@ export function AiAskComposer({
 
         <div className="space-y-5">
           {displayedMessages.length > 0 ? (
-            <section aria-label="Lịch sử hội thoại" aria-live="polite" className="mx-auto max-w-[760px] space-y-4">
+            <section aria-label="Lịch sử hội thoại" className="mx-auto max-w-[760px] space-y-4">
               {displayedMessages.map((message) => (
                 <article
                   className={
@@ -1889,6 +1931,7 @@ export function AiAskComposer({
                   {message.role === "assistant" ? (
                     <>
                       <AssistantMessageContent messageId={message.id} content={message.content} annotations={message.annotations} selectedEntityId={selectedAnswerEntityId} detailPanelIds={answerDetailPanelIds} onSelectEntity={handleSelectAnswerEntity} />
+                      <AiAskConsumerStatusNotice statuses={message.consumerStatuses} />
                       <AssistantProvenanceBlock provenance={message.provenance} selectedEntityId={selectedAnswerEntityId} detailPanelIds={answerDetailPanelIds} onSelectEntity={handleSelectAnswerEntity} />
                       {saveAnswerUsefulnessFeedbackAction ? (
                         <AnswerUsefulnessFeedbackControl

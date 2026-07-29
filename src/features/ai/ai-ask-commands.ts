@@ -5,12 +5,14 @@ import { createHash } from "node:crypto";
 import { and, asc, eq, inArray } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { aiAskCommands, conversations, messageImageAttachments, messages, tripProjects } from "@/db/schema";
+import { aiAskCommands, conversations, domainOutbox, messageImageAttachments, messages, tripProjects } from "@/db/schema";
 import { enqueueAiAskFollowUpInTransaction } from "@/features/ai/domain-outbox";
 import { resolveOwnedPrimaryConversationInTransaction } from "@/features/chat-trips/trip-projects";
 
 const keyPattern = /^[A-Za-z0-9_-]{16,128}$/;
 const commandLifetimeMs = 24 * 60 * 60 * 1000;
+export const maxAiAskConsumerStatusMessageIds = 100;
+const aiAskConsumerStatusCategories = ["context_extraction", "answer_annotation", "trip_proposal_draft"] as const;
 
 export type AiAskTerminalResult = {
   type: "done" | "error";
@@ -19,6 +21,12 @@ export type AiAskTerminalResult = {
   userMessage?: { id: string; content: string };
   assistantMessage?: { id: string; content: string; provenance?: unknown[]; annotations?: unknown[] };
   errorMessage?: string;
+};
+
+export type AiAskConsumerStatus = {
+  assistantMessageId: string;
+  category: "context_extraction" | "answer_annotation" | "trip_proposal_draft";
+  state: "pending" | "failed";
 };
 
 export const aiAskRefreshRequiredMessage = "Nội dung lập kế hoạch đã thay đổi. Vui lòng làm mới và gửi lại câu hỏi để nhận câu trả lời phù hợp.";
@@ -171,6 +179,57 @@ export async function readAiAskCommandTerminalResult(commandId: string): Promise
   const [command] = await getDb().select({ terminalResult: aiAskCommands.terminalResult }).from(aiAskCommands).where(eq(aiAskCommands.id, commandId)).limit(1);
   if (command?.terminalResult) return command.terminalResult as AiAskTerminalResult;
   throw new Error("AI Ask command terminal result was not found.");
+}
+
+// This intentionally projects only display categories from completed commands.
+// The owning shell already reads the persisted answer and must not receive queue data.
+export async function readOwnedCompletedAiAskConsumerStatuses(userId: string, assistantMessageIds: string[]): Promise<AiAskConsumerStatus[]> {
+  const acceptedAssistantMessageIds: string[] = [];
+  const seenAssistantMessageIds = new Set<string>();
+  for (const assistantMessageId of assistantMessageIds) {
+    if (!assistantMessageId || seenAssistantMessageIds.has(assistantMessageId)) continue;
+    seenAssistantMessageIds.add(assistantMessageId);
+    acceptedAssistantMessageIds.push(assistantMessageId);
+    if (acceptedAssistantMessageIds.length === maxAiAskConsumerStatusMessageIds) break;
+  }
+  if (acceptedAssistantMessageIds.length === 0) return [];
+
+  const rows = await getDb().select({
+    assistantMessageId: aiAskCommands.assistantMessageId,
+    tripProjectId: aiAskCommands.tripProjectId,
+    eventType: domainOutbox.eventType,
+    status: domainOutbox.status,
+  }).from(aiAskCommands)
+    .innerJoin(domainOutbox, and(
+      eq(domainOutbox.originatingCommandId, aiAskCommands.id),
+      eq(domainOutbox.userId, aiAskCommands.userId),
+    ))
+    .where(and(
+      eq(aiAskCommands.userId, userId),
+      eq(aiAskCommands.status, "completed"),
+      inArray(aiAskCommands.assistantMessageId, acceptedAssistantMessageIds),
+    ));
+
+  const statuses = new Map<string, AiAskConsumerStatus>();
+  for (const row of rows) {
+    if (!row.assistantMessageId || (row.status !== "pending" && row.status !== "processing" && row.status !== "failed")) continue;
+    const category = row.eventType === "ai_ask.context_extraction.v1"
+      ? "context_extraction"
+      : row.eventType === "ai_ask.answer_annotation.v1"
+        ? "answer_annotation"
+        : row.eventType === "ai_ask.trip_proposal_draft.v1"
+          ? "trip_proposal_draft"
+          : null;
+    if (!category) continue;
+    if (category === "trip_proposal_draft" && !row.tripProjectId) continue;
+    const state = row.status === "failed" ? "failed" : "pending";
+    const key = `${row.assistantMessageId}:${category}`;
+    const existing = statuses.get(key);
+    // Multiple durable events can reference one retained answer. A terminal
+    // failure is the only safe display state when their projections disagree.
+    if (!existing || state === "failed") statuses.set(key, { assistantMessageId: row.assistantMessageId, category, state });
+  }
+  return [...statuses.values()].slice(0, acceptedAssistantMessageIds.length * aiAskConsumerStatusCategories.length);
 }
 
 export async function finalizeAiAskCommand<T extends { result: AiAskTerminalResult; assistantMessageId: string }>(commandId: string, persist: (transaction: Transaction, command: { userId: string; conversationId: string; tripProjectId: string | null; userMessageId: string }) => Promise<T>): Promise<T | { result: AiAskTerminalResult; discarded: true }> {

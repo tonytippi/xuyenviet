@@ -10,6 +10,7 @@ import { getOwnedTripProjectSummary, listOwnedTripProjects } from "@/features/ch
 import { saveAnswerUsefulnessFeedbackAction } from "@/features/feedback/actions";
 import { selectActiveAiGatewayModel } from "@/features/ai/models";
 import { aiAskInitialAnswerPurpose } from "@/features/ai/prompts";
+import { readOwnedCompletedAiAskConsumerStatuses } from "@/features/ai/ai-ask-commands";
 import { getAuthenticatedSessionWithRoles, hasAdminAccess } from "@/server/auth";
 
 type AiAskPageProps = {
@@ -162,6 +163,14 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
     redirect(canonicalUrl);
   }
 
+  const consumerStatuses = await readOwnedCompletedAiAskConsumerStatuses(
+    session.userId,
+    [
+      ...(loadedConversation?.messages ?? []),
+      ...(historyConversation?.messages ?? []),
+    ].filter((message) => message.role === "assistant").map((message) => message.id),
+  );
+
   return (
     <main className="min-h-screen bg-white text-[#17342c]">
       <h1 className="sr-only">Hỏi trợ lý chuyến đi Việt Nam</h1>
@@ -181,7 +190,8 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
               })),
               provenance: message.provenance,
               annotations: message.annotations,
-              feedback: message.feedback,
+               feedback: message.feedback,
+               consumerStatuses: consumerStatuses.filter((status) => status.assistantMessageId === message.id).map(({ category, state }) => ({ category, state })),
             }))}
             initialSessions={initialSessions}
             historyConversation={historyConversation ? {
@@ -193,7 +203,8 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
                 imageAttachments: message.imageAttachments,
                 provenance: message.provenance,
                 annotations: message.annotations,
-                feedback: message.feedback,
+                 feedback: message.feedback,
+                 consumerStatuses: consumerStatuses.filter((status) => status.assistantMessageId === message.id).map(({ category, state }) => ({ category, state })),
               })),
             } : null}
             initialTripProjects={initialTripProjects}

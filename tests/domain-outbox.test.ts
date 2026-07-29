@@ -3,8 +3,8 @@ import { and, eq } from "drizzle-orm";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 
-import { aiAskCommands, conversations, domainOutbox, domainOutboxEffects, messages, schema, tripProjects, users } from "@/db/schema";
-import { acquireAiAskCommand } from "@/features/ai/ai-ask-commands";
+import { aiAskCommands, aiUsageEvents, assistantResponseProvenance, conversations, domainOutbox, domainOutboxEffects, messages, schema, tripProjects, users } from "@/db/schema";
+import { acquireAiAskCommand, finalizeAiAskCommand } from "@/features/ai/ai-ask-commands";
 import { acknowledgeDomainOutboxEvent, aiAskOutboxDedupeKey, claimDueDomainOutboxEvents, completeDomainOutboxClaimInTransaction, enqueueAiAskFollowUpInTransaction, failDomainOutboxClaimInTransaction, failDomainOutboxEvent, getDomainOutboxBatchSize, getDomainOutboxLeaseMs, parseAiAskOutboxEnvelope, retryDelayMs } from "@/features/ai/domain-outbox";
 import { processAiAskDomainOutboxBatch } from "@/features/ai/domain-outbox-worker";
 
@@ -34,6 +34,27 @@ const base = {
   userMessageId: "message-1",
   conversationLifecycleVersion: 1,
 };
+
+async function createCompletedCommandSnapshot() {
+  await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
+  const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: "outbox_completed_snapshot", question: "Đi Huế" });
+  if (admitted.kind !== "admitted") throw new Error("Expected command admission");
+  const finalized = await finalizeAiAskCommand(admitted.commandId, async (transaction, command) => {
+    const [assistant] = await transaction.insert(messages).values({ conversationId: command.conversationId, userId: command.userId, role: "assistant", content: "Gợi ý Huế đã hoàn tất." }).returning({ id: messages.id, content: messages.content });
+    await transaction.insert(assistantResponseProvenance).values({ userId: command.userId, conversationId: command.conversationId, userMessageId: command.userMessageId, assistantMessageId: assistant.id, sourceCategory: "general", rank: 1, verificationStatus: "unverified", usedInPrompt: true, citedInAnswer: false, sourceSnapshot: { title: "Nguồn chung" } });
+    await transaction.insert(aiUsageEvents).values({ initiatedByUserId: command.userId, executorSystem: "system-ai-orchestration", conversationId: command.conversationId, userMessageId: command.userMessageId, assistantMessageId: assistant.id, purpose: "ai_ask_initial_answer", provider: "ai_gateway", model: "test", promptVersion: "test-v1", status: "success" });
+    return { assistantMessageId: assistant.id, result: { type: "done" as const, conversationId: command.conversationId, userMessage: admitted.userMessage, assistantMessage: assistant } };
+  });
+  if ("discarded" in finalized) throw new Error("Expected completed command");
+  await testDb.update(domainOutbox).set({ availableAt: new Date("2099-01-01T00:00:00.000Z") }).where(eq(domainOutbox.eventType, "ai_ask.context_extraction.v1"));
+  const snapshot = async () => ({
+    command: await testDb.select({ status: aiAskCommands.status, terminalResult: aiAskCommands.terminalResult, terminalAt: aiAskCommands.terminalAt }).from(aiAskCommands).where(eq(aiAskCommands.id, admitted.commandId)),
+    assistant: await testDb.select({ content: messages.content }).from(messages).where(eq(messages.id, finalized.assistantMessageId)),
+    provenance: await testDb.select({ sourceSnapshot: assistantResponseProvenance.sourceSnapshot, usedInPrompt: assistantResponseProvenance.usedInPrompt }).from(assistantResponseProvenance).where(eq(assistantResponseProvenance.assistantMessageId, finalized.assistantMessageId)),
+    initialUsage: await testDb.select({ purpose: aiUsageEvents.purpose, status: aiUsageEvents.status }).from(aiUsageEvents).where(eq(aiUsageEvents.assistantMessageId, finalized.assistantMessageId)),
+  });
+  return { admitted, finalized, snapshot };
+}
 
 describe("AI Ask domain outbox contract", () => {
   test("accepts only the exact context v1 ID-and-fence envelope", () => {
@@ -146,6 +167,16 @@ describe("AI Ask domain outbox contract", () => {
     await expect(testDb.select({ status: domainOutbox.status, failureCode: domainOutbox.failureCode, claimedBy: domainOutbox.claimedBy }).from(domainOutbox).where(eq(domainOutbox.originatingCommandId, admitted.commandId))).resolves.toEqual([{ status: "failed", failureCode: "invalid_envelope", claimedBy: null }]);
   });
 
+  test("keeps a completed command snapshot immutable when invalid-envelope delivery is terminalized", async () => {
+    const { admitted, finalized, snapshot } = await createCompletedCommandSnapshot();
+    const before = await snapshot();
+    await testDb.update(domainOutbox).set({ payload: { ...base, commandId: admitted.commandId, userId: "owner", conversationId: admitted.conversationId, userMessageId: admitted.userMessage.id, assistantMessageId: finalized.assistantMessageId, unexpected: true }, availableAt: new Date("2020-01-01T00:00:00.000Z") }).where(eq(domainOutbox.eventType, "ai_ask.answer_annotation.v1"));
+
+    await expect(processAiAskDomainOutboxBatch({ workerId: "invalid-completed-snapshot-worker" })).resolves.toEqual({ kind: "processed", count: 1 });
+    await expect(snapshot()).resolves.toEqual(before);
+    await expect(testDb.select({ effectType: domainOutboxEffects.effectType }).from(domainOutboxEffects)).resolves.toEqual([]);
+  });
+
   test("releases an active provider failure atomically after its one failure usage write", async () => {
     await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
     const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: "outbox_atomic_retry_key", question: "Đi Huế" });
@@ -250,6 +281,27 @@ describe("AI Ask domain outbox contract", () => {
     expect(activeCompletion.completed).toBe(true);
     await expect(testDb.select({ status: domainOutbox.status }).from(domainOutbox).where(and(eq(domainOutbox.id, event.id), eq(domainOutbox.status, "completed")))).resolves.toEqual([{ status: "completed" }]);
     await expect(testDb.select({ effectType: domainOutboxEffects.effectType }).from(domainOutboxEffects).where(eq(domainOutboxEffects.outboxEventId, event.id))).resolves.toEqual([{ effectType: "context_extraction" }]);
+  });
+
+  test("keeps a completed command snapshot immutable when stale fencing-token or event-version delivery is rejected", async () => {
+    if (!staleWorkerSql || !reclaimWorkerSql) throw new Error("outbox concurrency clients were not initialized");
+    const { finalized, snapshot } = await createCompletedCommandSnapshot();
+    const before = await snapshot();
+    await testDb.update(domainOutbox).set({ availableAt: new Date("2020-01-01T00:00:00.000Z") }).where(eq(domainOutbox.eventType, "ai_ask.answer_annotation.v1"));
+    const [claim] = await claimDueDomainOutboxEvents({ workerId: "completed-snapshot-worker", now: new Date(Date.now() + 60_000) });
+    if (!claim) throw new Error("Expected claim");
+    const staleDb = drizzle(staleWorkerSql, { schema });
+
+    await expect(staleDb.transaction((transaction) => completeDomainOutboxClaimInTransaction(transaction, { ...claim, fencingToken: "0".repeat(64) }, async () => {
+      await transaction.insert(domainOutboxEffects).values({ outboxEventId: claim.id, effectType: "answer_annotation" });
+      await transaction.update(messages).set({ content: "stale write" }).where(eq(messages.id, finalized.assistantMessageId));
+    }))).resolves.toEqual({ completed: false });
+    await expect(staleDb.transaction((transaction) => completeDomainOutboxClaimInTransaction(transaction, { ...claim, eventVersion: claim.eventVersion + 1 }, async () => {
+      await transaction.insert(domainOutboxEffects).values({ outboxEventId: claim.id, effectType: "answer_annotation" });
+    }))).resolves.toEqual({ completed: false });
+
+    await expect(snapshot()).resolves.toEqual(before);
+    await expect(testDb.select({ effectType: domainOutboxEffects.effectType }).from(domainOutboxEffects).where(eq(domainOutboxEffects.outboxEventId, claim.id))).resolves.toEqual([]);
   });
 
   test("does not claim rows when explicit worker configuration is invalid", async () => {

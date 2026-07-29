@@ -1,7 +1,7 @@
-import { asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { aiGatewayModels, aiUsageEvents, assistantResponseProvenance, auditEvents, chatContext, conversations, domainOutbox, domainOutboxEffects, messages, tripChangeProposals, tripProjects, users } from "@/db/schema";
+import { aiAskCommands, aiGatewayModels, aiUsageEvents, assistantResponseProvenance, auditEvents, chatContext, conversations, domainOutbox, domainOutboxEffects, messages, tripChangeProposals, tripProjects, users } from "@/db/schema";
 
 import { testDb } from "./helpers/db";
 import { acquireAiAskCommand } from "@/features/ai/ai-ask-commands";
@@ -54,6 +54,15 @@ function mockExtractionResponse(content: unknown) {
   vi.stubGlobal("fetch", fetchMock);
 
   return fetchMock;
+}
+
+async function completedAnswerSnapshot() {
+  return {
+    command: await testDb.select({ status: aiAskCommands.status, terminalResult: aiAskCommands.terminalResult, terminalAt: aiAskCommands.terminalAt }).from(aiAskCommands).where(eq(aiAskCommands.status, "completed")),
+    assistants: await testDb.select({ id: messages.id, content: messages.content }).from(messages).where(eq(messages.role, "assistant")),
+    provenance: await testDb.select({ id: assistantResponseProvenance.id, sourceSnapshot: assistantResponseProvenance.sourceSnapshot }).from(assistantResponseProvenance),
+    initialUsage: await testDb.select({ id: aiUsageEvents.id, status: aiUsageEvents.status, purpose: aiUsageEvents.purpose }).from(aiUsageEvents).where(and(eq(aiUsageEvents.purpose, "ai_ask_initial_answer"), isNull(aiUsageEvents.providerRequestId))),
+  };
 }
 
 describe("chat/trip context extraction", () => {
@@ -574,15 +583,20 @@ describe("chat/trip context extraction", () => {
     formData.set("question", "Tôi muốn đi Huế 5 ngày.");
     const { POST } = await import("@/app/api/ai-ask/stream/route");
     await (await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData, headers: { "Idempotency-Key": crypto.randomUUID().replaceAll("-", "") } }) as never)).text();
+    const terminalSnapshot = await completedAnswerSnapshot();
     await testDb.update(domainOutbox).set({ availableAt: new Date("2099-01-01T00:00:00.000Z") }).where(eq(domainOutbox.eventType, "ai_ask.answer_annotation.v1"));
     await testDb.update(domainOutbox).set({ availableAt: new Date("2020-01-01T00:00:00.000Z") }).where(eq(domainOutbox.eventType, "ai_ask.context_extraction.v1"));
 
     await expect(processAiAskDomainOutboxBatch({ workerId: "context-failure-worker" })).resolves.toEqual({ kind: "processed", count: 1 });
     const [event] = await testDb.select({ status: domainOutbox.status, lastErrorCode: domainOutbox.lastErrorCode }).from(domainOutbox).where(eq(domainOutbox.eventType, "ai_ask.context_extraction.v1"));
     expect(event).toMatchObject({ status: "pending", lastErrorCode: "context_provider_failed" });
+    await expect(completedAnswerSnapshot()).resolves.toEqual(terminalSnapshot);
     await expect(testDb.select({ status: aiUsageEvents.status, errorCode: aiUsageEvents.errorCode }).from(aiUsageEvents).where(eq(aiUsageEvents.purpose, "extraction"))).resolves.toEqual([{ status: "failure", errorCode: "gateway_http_error" }]);
 
+    await testDb.update(domainOutbox).set({ maxAttempts: 1, availableAt: new Date("2020-01-01T00:00:00.000Z") }).where(eq(domainOutbox.eventType, "ai_ask.context_extraction.v1"));
     await expect(processAiAskDomainOutboxBatch({ workerId: "context-failure-worker" })).resolves.toEqual({ kind: "no_work" });
+    await expect(testDb.select({ status: domainOutbox.status, failureCode: domainOutbox.failureCode }).from(domainOutbox).where(eq(domainOutbox.eventType, "ai_ask.context_extraction.v1"))).resolves.toEqual([{ status: "failed", failureCode: "retry_exhausted" }]);
+    await expect(completedAnswerSnapshot()).resolves.toEqual(terminalSnapshot);
     await expect(testDb.select().from(aiUsageEvents).where(eq(aiUsageEvents.purpose, "extraction"))).resolves.toHaveLength(1);
   });
 
@@ -631,6 +645,7 @@ describe("chat/trip context extraction", () => {
     const formData = new FormData();
     formData.set("question", "Đi Huế.");
     await (await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData, headers: { "Idempotency-Key": "annotation-revalidation-race" } }) as never)).text();
+    const terminalSnapshot = await completedAnswerSnapshot();
     await testDb.update(domainOutbox).set({ availableAt: new Date("2099-01-01T00:00:00.000Z") }).where(eq(domainOutbox.eventType, "ai_ask.context_extraction.v1"));
     await testDb.update(domainOutbox).set({ availableAt: new Date("2020-01-01T00:00:00.000Z") }).where(eq(domainOutbox.eventType, "ai_ask.answer_annotation.v1"));
     const callsBeforeDelivery = fetchMock.mock.calls.length;
@@ -652,6 +667,7 @@ describe("chat/trip context extraction", () => {
     await expect(processIsolatedBatch({ workerId: "annotation-revalidation-worker" })).resolves.toEqual({ kind: "processed", count: 1 });
     expect(fetchMock).toHaveBeenCalledTimes(callsBeforeDelivery);
     await expect(testDb.select({ effectType: domainOutboxEffects.effectType }).from(domainOutboxEffects)).resolves.toEqual([{ effectType: "fenced_out" }]);
+    await expect(completedAnswerSnapshot()).resolves.toEqual(terminalSnapshot);
   });
 
   test("delivers annotation and proposal effects with one success usage each across redelivery", async () => {
@@ -685,6 +701,7 @@ describe("chat/trip context extraction", () => {
     const [provenance] = await testDb.select({ id: assistantResponseProvenance.id }).from(assistantResponseProvenance).where(eq(assistantResponseProvenance.assistantMessageId, assistant.id));
     if (!provenance) throw new Error("Expected assistant provenance");
     await testDb.update(assistantResponseProvenance).set({ sourceCategory: "knowledge", sourceType: "knowledge_card", verificationStatus: "verified", usedInPrompt: true, sourceSnapshot: { title: "Huế" } }).where(eq(assistantResponseProvenance.id, provenance.id));
+    const terminalSnapshot = await completedAnswerSnapshot();
     await testDb.update(domainOutbox).set({ availableAt: new Date("2099-01-01T00:00:00.000Z") }).where(eq(domainOutbox.eventType, "ai_ask.context_extraction.v1"));
     await testDb.update(domainOutbox).set({ availableAt: new Date("2020-01-01T00:00:00.000Z") }).where(inArray(domainOutbox.eventType, ["ai_ask.answer_annotation.v1", "ai_ask.trip_proposal_draft.v1"]));
 
@@ -701,6 +718,7 @@ describe("chat/trip context extraction", () => {
     await expect(testDb.select().from(domainOutboxEffects).where(inArray(domainOutboxEffects.effectType, ["answer_annotation", "trip_proposal_draft"]))).resolves.toHaveLength(2);
     await expect(testDb.select().from(aiUsageEvents).where(inArray(aiUsageEvents.purpose, ["ai_ask_initial_answer", "trip_proposal_draft"]))).resolves.toHaveLength(3);
     await expect(testDb.select().from(tripChangeProposals)).resolves.toHaveLength(1);
+    await expect(completedAnswerSnapshot()).resolves.toEqual(terminalSnapshot);
   });
 
   test("does not deliver final effects after deleting the assistant message fences out the outbox rows", async () => {

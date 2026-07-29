@@ -7,8 +7,7 @@ import { getDb } from "@/db/client";
 import { aiUsageEvents, answerUsefulnessFeedback, assistantResponseProvenance, chatContext, conversations, messageImageAttachments, messages, tripProjects } from "@/db/schema";
 import { recordAuditEvent } from "@/features/audit/events";
 import { toUserAuditActor } from "@/features/audit/actors";
-import { buildValidatedAnswerAnnotations, sanitizeStoredAnswerAnnotations } from "@/features/ai/answer-annotations";
-import { selectActiveAiGatewayModel } from "@/features/ai/models";
+import { sanitizeStoredAnswerAnnotations } from "@/features/ai/answer-annotations";
 import { formatAssistantMessageProvenance } from "@/features/retrieval/provenance";
 import { getAuthenticatedSession } from "@/server/auth";
 import { discardAiAskCommandsForDeletedConversations } from "@/features/ai/ai-ask-commands";
@@ -97,37 +96,17 @@ export async function getOwnedConversation(conversationId: string) {
     .orderBy(asc(answerUsefulnessFeedback.assistantMessageId));
 
   const feedbackByMessageId = new Map(feedbackRows.map((row) => [row.assistantMessageId, { rating: row.rating, comment: row.comment, updatedAt: row.updatedAt }]));
-  const shouldBackfillAnnotations = conversationMessages.some((message) => message.role === "assistant" && message.answerAnnotations.length === 0 && (provenanceByMessageId.get(message.id)?.length ?? 0) > 0);
-  const backfillModel = shouldBackfillAnnotations ? await selectActiveAiGatewayModel({ purpose: "ai_ask_initial_answer", requiredCapabilities: { textInput: true } }) : null;
-  const messagesWithAnnotations = await Promise.all(conversationMessages.map(async (message) => {
+  const messagesWithAnnotations = conversationMessages.map((message) => {
     const provenance = message.role === "assistant" ? provenanceByMessageId.get(message.id) ?? [] : [];
     const storedAnnotations = message.role === "assistant" ? sanitizeStoredAnswerAnnotations({ answerText: message.content, annotations: message.answerAnnotations, provenance }) : [];
-    let annotations = storedAnnotations;
-
-    if (message.role === "assistant" && annotations.length === 0 && provenance.length > 0 && backfillModel) {
-      annotations = sanitizeStoredAnswerAnnotations({
-        answerText: message.content,
-        annotations: await buildValidatedAnswerAnnotations({ answerText: message.content, provenance, model: backfillModel.gatewayModelName }),
-        provenance,
-      });
-
-      if (annotations.length > 0) {
-        try {
-          await getDb().update(messages).set({ answerAnnotations: annotations }).where(eq(messages.id, message.id));
-        } catch (error) {
-          console.error("Failed to backfill answer annotations.", { assistantMessageId: message.id, error });
-        }
-      }
-    }
-
     return {
       ...message,
       imageAttachments: attachmentsByMessageId.get(message.id) ?? [],
       provenance,
-      annotations,
+      annotations: storedAnnotations,
       feedback: message.role === "assistant" ? feedbackByMessageId.get(message.id) ?? null : null,
     };
-  }));
+  });
 
   return {
     ...conversation,
