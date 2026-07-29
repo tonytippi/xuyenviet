@@ -3,11 +3,15 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { aiUsageEvents, answerUsefulnessFeedback, assistantResponseProvenance, assistantRetrievalDecisions, auditEvents, chatContext, conversations, messageImageAttachments, messages, tripChangeProposals, tripPlanItems, tripProjectConstraints, tripProjects, users, webSearchResults } from "@/db/schema";
 
-import { testDb } from "./helpers/db";
+import { resetTestDatabase, testDb } from "./helpers/db";
 
 async function createTestUser(userId: string) {
   await testDb.insert(users).values({ id: userId, email: `${userId}@example.com` });
 }
+
+beforeEach(async () => {
+  await resetTestDatabase();
+});
 
 describe("Trip project helpers", () => {
   beforeEach(() => {

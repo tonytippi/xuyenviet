@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { accounts, aiUsageEvents, auditEvents, sessions, userRoles, users, type UserRole } from "@/db/schema";
 
-import { testDb } from "./helpers/db";
+import { resetTestDatabase, testDb } from "./helpers/db";
 
 const authMock = vi.fn();
 
@@ -24,6 +24,10 @@ async function createUser(userId: string, roles: UserRole[] = [], values: Partia
 function authenticate(userId: string) {
   authMock.mockResolvedValue({ user: { id: userId, email: `${userId}@example.com` } });
 }
+
+beforeEach(async () => {
+  await resetTestDatabase();
+});
 
 describe("admin user management", () => {
   beforeEach(() => {

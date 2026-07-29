@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { auditEvents, tripChangeProposals, tripPlanChangeHistory, tripPlanItems, tripProjects, users } from "@/db/schema";
 
-import { testDb } from "./helpers/db";
+import { resetTestDatabase, testDb } from "./helpers/db";
 
 async function createTestUser(userId: string) {
   await testDb.insert(users).values({ id: userId, email: `${userId}@example.com` });
@@ -21,6 +21,10 @@ type KnownPlanItem = {
   parentItemId: string | null;
   backupTargetItemId: string | null;
 };
+
+beforeEach(async () => {
+  await resetTestDatabase();
+});
 
 function makeKnownItem(overrides: Partial<KnownPlanItem> & { id: string }): KnownPlanItem {
   return {

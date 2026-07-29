@@ -3,9 +3,13 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { aiGatewayModels, auditEvents, userRoles, users, type UserRole } from "@/db/schema";
 
-import { testDb } from "./helpers/db";
+import { resetTestDatabase, testDb } from "./helpers/db";
 
 const authMock = vi.fn();
+
+beforeEach(async () => {
+  await resetTestDatabase();
+});
 
 vi.mock("@/auth", () => ({
   auth: authMock,

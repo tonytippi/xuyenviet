@@ -5,7 +5,7 @@ import { aiUsageEvents, assistantResponseProvenance, assistantRetrievalDecisions
 import type { KnowledgeSearchResult } from "@/features/knowledge/search";
 import type { ContextPrioritySourceBundle } from "@/features/retrieval/source-bundle";
 
-import { testDb } from "./helpers/db";
+import { resetTestDatabase, testDb } from "./helpers/db";
 import { seedKnowledgeCardEvidence, seedSourceCaptureVersion } from "./helpers/source-captures";
 
 async function createTestUser(userId: string) {
@@ -222,6 +222,10 @@ function mockWebSearch(result: { ok: true; results: unknown[] } | { ok: false; c
 
   return { searchWebForSourceBundle, captureWebSearchResults };
 }
+
+beforeEach(async () => {
+  await resetTestDatabase();
+});
 
 describe("answer context assembly", () => {
   beforeEach(() => {

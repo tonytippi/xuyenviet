@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 
 import { auditEvents, knowledgeCards, knowledgeCardSearchDocuments, knowledgeCardSources, rawSourceMaterial, sources, userRoles, users, type UserRole } from "@/db/schema";
 
-import { testDb } from "./helpers/db";
+import { resetTestDatabase, testDb } from "./helpers/db";
 import { seedKnowledgeCardEvidence, seedSourceCaptureVersion } from "./helpers/source-captures";
 
 const authMock = vi.fn();
@@ -84,7 +84,8 @@ async function createCard(userId: string, values: Partial<typeof knowledgeCards.
 }
 
 describe("approved knowledge cards", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await resetTestDatabase();
     authMock.mockReset();
   });
 

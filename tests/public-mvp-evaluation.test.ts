@@ -25,7 +25,7 @@ import {
   type UserRole,
 } from "@/db/schema";
 
-import { testDb } from "./helpers/db";
+import { resetTestDatabase, testDb } from "./helpers/db";
 
 const sessionWithRolesMock = vi.fn();
 
@@ -185,6 +185,10 @@ async function createPersistedEvaluationAnswer(userId: string, promptType: strin
 function answerGenerator(userId = "admin") {
   return async ({ prompt, scenario }: { prompt: { type: string }; scenario: { id: string } }) => ({ ok: true as const, answer: await createPersistedEvaluationAnswer(userId, prompt.type, scenario.id) });
 }
+
+beforeEach(async () => {
+  await resetTestDatabase();
+});
 
 describe("public MVP answer evaluation", () => {
   beforeEach(() => {

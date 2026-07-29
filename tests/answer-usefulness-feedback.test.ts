@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { answerUsefulnessFeedback, conversations, messages, users } from "@/db/schema";
 
-import { testDb } from "./helpers/db";
+import { resetTestDatabase, testDb } from "./helpers/db";
 
 async function createTestUser(userId: string) {
   await testDb.insert(users).values({ id: userId, email: `${userId}@example.com` });
@@ -27,6 +27,10 @@ async function mockSession(userId: string | null) {
 async function getFeedbackRows() {
   return testDb.select().from(answerUsefulnessFeedback);
 }
+
+beforeEach(async () => {
+  await resetTestDatabase();
+});
 
 describe("answer usefulness feedback", () => {
   beforeEach(() => {

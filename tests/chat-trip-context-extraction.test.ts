@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { aiGatewayModels, aiUsageEvents, auditEvents, chatContext, conversations, messages, tripProjects, users } from "@/db/schema";
 
-import { testDb } from "./helpers/db";
+import { resetTestDatabase, testDb } from "./helpers/db";
 
 async function createTestUser(userId: string) {
   await testDb.insert(users).values({ id: userId, email: `${userId}@example.com` });
@@ -53,6 +53,10 @@ function mockExtractionResponse(content: unknown) {
 
   return fetchMock;
 }
+
+beforeEach(async () => {
+  await resetTestDatabase();
+});
 
 describe("chat/trip context extraction", () => {
   beforeEach(() => {

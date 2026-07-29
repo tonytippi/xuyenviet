@@ -29,7 +29,7 @@ import {
   type UserRole,
 } from "@/db/schema";
 
-import { testDb } from "./helpers/db";
+import { resetTestDatabase, testDb } from "./helpers/db";
 import { seedKnowledgeCardEvidence, seedSourceCaptureVersion } from "./helpers/source-captures";
 
 const sessionWithRolesMock = vi.fn();
@@ -249,6 +249,10 @@ async function seedSamplingFence(input: { id: string; userId: string; publicatio
 function enrollmentEntry(id: string, contentVersion = 1, evidenceSetRevision = 1, selectedForSampling = true) {
   return `${id}:${contentVersion}:${evidenceSetRevision}:Huế:false:${selectedForSampling}`;
 }
+
+beforeEach(async () => {
+  await resetTestDatabase();
+});
 
 describe("public MVP quality dashboard", () => {
   beforeEach(() => {

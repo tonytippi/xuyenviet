@@ -16,7 +16,7 @@ import {
   users,
 } from "@/db/schema";
 
-import { testDb } from "./helpers/db";
+import { resetTestDatabase, testDb } from "./helpers/db";
 
 async function createTestUser(userId: string) {
   await testDb.insert(users).values({ id: userId, email: `${userId}@example.com` });
@@ -151,7 +151,8 @@ function delay(ms: number): Promise<void> {
 // history, and ordering-precondition fail-closed. DB-backed where locking,
 // cascade, or concurrency must be real (mocked DB is insufficient).
 describe("Story 7.6 AC1 cross-cutting trip planning safety", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await resetTestDatabase();
     vi.resetModules();
     vi.clearAllMocks();
   });

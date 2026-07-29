@@ -1,11 +1,11 @@
 import { eq, sql } from "drizzle-orm";
-import { describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { knowledgeCardSearchDocuments, knowledgeCards, knowledgeCardSources, knowledgeIndexBackfillState, knowledgeIndexDirtyMarkers, sources, users } from "@/db/schema";
 import { backfillKnowledgeIndexWork, claimNextKnowledgeIndexWork, completeKnowledgeIndexWork, processNextApprovedKnowledgeIndexingBatch, recoverExpiredKnowledgeIndexWork, runApprovedKnowledgeIndexingWorkerLoop, runKnowledgeIndexBackfill } from "@/features/knowledge/indexing-worker";
 import { projectClaimedKnowledgeIndexWork } from "@/features/knowledge/search";
 import { enqueueKnowledgeIndexWork } from "@/features/knowledge/indexing-queue";
-import { testDb } from "./helpers/db";
+import { resetTestDatabase, testDb } from "./helpers/db";
 import { seedKnowledgeCardEvidence, seedSourceCaptureVersion } from "./helpers/source-captures";
 
 async function createMarker(id: string) {
@@ -13,6 +13,10 @@ async function createMarker(id: string) {
   await testDb.insert(knowledgeCards).values({ id, type: "place", title: "Điểm dừng", locationName: "Huế", summary: "Tóm tắt an toàn.", aiPromptVersion: "test", createdByUserId: "index-worker-user" });
   await testDb.insert(knowledgeIndexDirtyMarkers).values({ knowledgeCardId: id, contentVersion: 1, evidenceSetRevision: 1, reason: "test", nextRunAt: new Date(0) });
 }
+
+beforeEach(async () => {
+  await resetTestDatabase();
+});
 
 async function makeMarkerProjectable(id: string) {
   await createMarker(id);

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { userRoles, users } from "@/db/schema";
 
-import { testDb } from "./helpers/db";
+import { resetTestDatabase, testDb } from "./helpers/db";
 
 type SignInEvent = (message: { user: { id?: string; email?: string | null }; isNewUser?: boolean }) => Promise<void>;
 
@@ -51,6 +51,10 @@ async function getRoles(userId: string) {
 
   return rows.map((row) => row.role).sort();
 }
+
+beforeEach(async () => {
+  await resetTestDatabase();
+});
 
 describe("ADMIN_EMAIL login-time role provisioning", () => {
   beforeEach(() => {

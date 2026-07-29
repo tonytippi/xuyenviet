@@ -62,7 +62,10 @@ _This file contains critical rules and patterns that AI agents must follow when 
 ### Testing Rules
 
 - Current baseline checks are `pnpm lint`, `pnpm typecheck`, and `pnpm build`; run relevant checks after code changes and record blockers exactly.
-- No unit or E2E framework exists yet. Do not invent a test stack casually; add one only when a story requires it or architecture is updated.
+- Vitest has separate `unit` and `integration` projects. Use `pnpm test:unit` for infrastructure-free tests and `pnpm test:integration` for PostgreSQL-backed tests.
+- Unit tests must not require `DATABASE_URL`, `DATABASE_URL_TEST`, Drizzle migration, or a PostgreSQL connection. Integration setup exclusively owns test-DB URL validation, migration, and connection cleanup.
+- Integration tests share one physical test database and run serially. Do not enable file parallelism or more workers until schemas/databases are isolated per worker.
+- Integration tests that require clean tables must explicitly call `resetTestDatabase()` in their local setup. Do not reintroduce a global database-reset hook that runs before every Vitest test.
 - For auth, protected routes, mutations, retrieval, AI usage, deletion, and admin workflows, prefer server-side tests when a test stack is introduced; client-only checks are not enough.
 - Any story that adds persistent tables must verify Drizzle schema/migration behavior and must not require a live database for ordinary lint/typecheck/build.
 - Any story that stores chat/project-derived retrievable content must define and verify deletion behavior for owner chat/project deletion.

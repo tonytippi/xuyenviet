@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { knowledgeCardEvidence, knowledgeCardSearchDocuments, knowledgeCards, knowledgeCardSources, knowledgeIndexDirtyMarkers, rawSourceMaterial, sourceCaptureVersions, sources, userRoles, users, type UserRole } from "@/db/schema";
 
-import { testDb } from "./helpers/db";
+import { resetTestDatabase, testDb } from "./helpers/db";
 import { seedKnowledgeCardEvidence, seedSourceCaptureVersion } from "./helpers/source-captures";
 
 const authMock = vi.fn();
@@ -41,6 +41,10 @@ async function enqueueAndProcessIndexWork(cardId: string) {
   await indexApprovedKnowledgeCard(cardId);
   return processNextApprovedKnowledgeIndexingBatch({}, testDb);
 }
+
+beforeEach(async () => {
+  await resetTestDatabase();
+});
 
 describe("knowledge card state-model retrieval safety", () => {
   beforeEach(() => authMock.mockReset());
