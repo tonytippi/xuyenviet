@@ -6,7 +6,7 @@ status: 'done'
 baseline_revision: '945b619'
 review_loop_iteration: 0
 followup_review_recommended: false
-final_revision: '9259cab'
+final_revision: '763b5b6'
 context:
   - '/home/sonnh/projects/xuyenviet/_bmad-output/project-context.md'
   - '/home/sonnh/projects/xuyenviet/_bmad-output/implementation-artifacts/10-5-cut-ai-ask-streaming-to-the-versioned-api.md'
