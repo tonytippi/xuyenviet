@@ -166,7 +166,7 @@ export async function finalizeAiAskCommand<T extends { result: AiAskTerminalResu
 
 export async function discardAiAskCommandsForDeletedConversations(transaction: Transaction, userId: string, conversationIds: string[]) {
   if (conversationIds.length === 0) return;
-  const commands = await transaction.select({ id: aiAskCommands.id }).from(aiAskCommands).where(and(eq(aiAskCommands.userId, userId), inArray(aiAskCommands.conversationId, conversationIds), eq(aiAskCommands.status, "pending"))).orderBy(asc(aiAskCommands.id)).for("update");
+  const commands = await transaction.select({ id: aiAskCommands.id }).from(aiAskCommands).where(and(eq(aiAskCommands.userId, userId), inArray(aiAskCommands.conversationId, conversationIds))).orderBy(asc(aiAskCommands.id)).for("update");
   if (commands.length === 0) return;
   await transaction.update(aiAskCommands).set({ status: "discarded", terminalResult: refreshRequiredResult(), terminalAt: new Date(), assistantMessageId: null, userMessageId: null, conversationId: null, tripProjectId: null, conversationLifecycleVersion: null, tripProjectAggregateVersion: null, normalizedQuestion: "[discarded]", attachmentMetadata: null, updatedAt: new Date() }).where(inArray(aiAskCommands.id, commands.map((command) => command.id)));
 }
