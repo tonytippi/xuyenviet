@@ -2590,13 +2590,14 @@ describe("AI Ask streaming route", () => {
       expect(composerSource).toContain("TripProposalReviewCard");
     });
 
-    test("stream route wires proposal drafting before done and records trip_proposal_draft usage", () => {
+    test("stream route runs proposal drafting only after the committed fence and records trip_proposal_draft usage", () => {
       const routeSource = readFileSync("src/app/api/ai-ask/stream/route.ts", "utf8");
 
       expect(routeSource).toContain("draftTripChangeProposal");
       expect(routeSource).toContain("persistAiTripChangeProposalDraft");
       expect(routeSource).toContain("recordTripChangeProposalDraftUsage");
       expect(routeSource).toContain("proposal: proposalSummary");
+      expect(routeSource.indexOf('if (!("discarded" in finalization))')).toBeLessThan(routeSource.indexOf("await draftAndPersistProposal"));
       // The trip_proposal_draft purpose label lives in usage constants and is applied
       // inside recordTripChangeProposalDraftUsage; verify the constants module exports it.
       const constantsSource = readFileSync("src/features/usage/constants.ts", "utf8");

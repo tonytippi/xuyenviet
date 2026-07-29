@@ -9,7 +9,9 @@ import { ensureAiAskFreshnessWarning, requiresAiAskAnswerFinalization } from "@/
 import { streamInitialAiAskAnswer } from "@/features/ai/gateway";
 import { getAiGatewayPricingSnapshot, selectActiveAiGatewayModel } from "@/features/ai/models";
 import { aiAskInitialAnswerPromptVersion, aiAskInitialAnswerPurpose, buildAiAskMessages } from "@/features/ai/prompts";
+import { draftTripChangeProposal, recordTripChangeProposalDraftUsage, type UntrustedTripChangeProposalDraft } from "@/features/ai/trip-proposal-draft";
 import { extractChatTripContext } from "@/features/chat-trips/context-extraction";
+import { persistAiTripChangeProposalDraft } from "@/features/chat-trips/trip-change-proposals";
 import { persistAssistantAnswerProvenance, type AssistantMessageProvenanceItem } from "@/features/retrieval/provenance";
 import { assembleContextPrioritySourceBundle, buildSourceBundlePromptSection } from "@/features/retrieval/source-bundle";
 import { writeAiUsageEvent } from "@/features/audit/usage";
@@ -19,11 +21,24 @@ const maxQuestionLength = 2_000;
 const maxImageByteSize = 5 * 1024 * 1024;
 const maxMultipartBodySize = 6 * 1024 * 1024;
 const acceptedImageTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
+const proposalDraftTimeoutMs = 20_000;
+
+type ProposalDoneSummary = {
+  proposalId: string;
+  rationale: string;
+  affectedItems: Array<{ itemId: string; kind: string; label: string; change: string }>;
+  beforeAfter: Array<{ operation: string; before: string | null; after: string | null }>;
+  alternatives: Array<{ summary: string }>;
+  hasAlternatives: boolean;
+  expiresAt: Date | null;
+  status: string;
+};
+
 type StreamEvent =
   | { type: "preparing" }
   | { type: "delta"; content: string }
   | { type: "in_progress"; conversationId?: string; userMessage?: { id: string; content: string } }
-  | { type: "done"; conversationId: string; userMessage: { id: string; content: string }; assistantMessage: { id: string; content: string; provenance?: AssistantMessageProvenanceItem[]; annotations?: AnswerAnnotation[] } }
+  | { type: "done"; conversationId: string; userMessage: { id: string; content: string }; assistantMessage: { id: string; content: string; provenance?: AssistantMessageProvenanceItem[]; annotations?: AnswerAnnotation[] }; proposal?: ProposalDoneSummary }
   | { type: "error"; conversationId?: string; userMessage?: { id: string; content: string }; errorMessage: string };
 
 export async function POST(request: Request) {
@@ -336,7 +351,12 @@ async function streamAnswer({
           console.error("Failed to persist answer annotations.", { assistantMessageId: completed.id, error });
         }
       }
-      sendEvent(controller, encoder, finalization.result as StreamEvent);
+      // Proposal drafting is a non-durable follow-up. It starts only after the
+      // matching fence has committed, so discarded commands never invoke it.
+      const proposalSummary = tripProjectId
+        ? await draftAndPersistProposal({ session, tripProjectId, question, assistantMessageId: completed.id, abortSignal })
+        : undefined;
+      sendEvent(controller, encoder, { ...(finalization.result as Extract<StreamEvent, { type: "done" }>), proposal: proposalSummary });
     } else {
       sendEvent(controller, encoder, finalization.result as StreamEvent);
     }
@@ -426,6 +446,88 @@ function attachImageToFinalUserMessage(messagesForGateway: ReturnType<typeof bui
       ],
     };
   });
+}
+
+async function draftAndPersistProposal({
+  session,
+  tripProjectId,
+  question,
+  assistantMessageId,
+  abortSignal,
+}: {
+  session: AuthenticatedSession;
+  tripProjectId: string;
+  question: string;
+  assistantMessageId: string;
+  abortSignal: AbortSignal;
+}): Promise<ProposalDoneSummary | undefined> {
+  const proposalAbort = new AbortController();
+  const timeout = setTimeout(() => proposalAbort.abort(), proposalDraftTimeoutMs);
+  const onExternalAbort = () => proposalAbort.abort();
+  if (abortSignal.aborted) {
+    proposalAbort.abort();
+  } else {
+    abortSignal.addEventListener("abort", onExternalAbort, { once: true });
+  }
+
+  try {
+    let draft: UntrustedTripChangeProposalDraft;
+    try {
+      draft = await draftTripChangeProposal({ session, tripProjectId, question, abortSignal: proposalAbort.signal });
+    } catch (error) {
+      console.warn("Trip change proposal drafting failed or timed out", {
+        tripProjectId,
+        assistantMessageId,
+        error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
+      });
+      return undefined;
+    }
+
+    if (!draft.ok) return undefined;
+
+    await recordTripChangeProposalDraftUsage({ session, tripProjectId, draft });
+
+    const draftExpiresAt = draft.expiresAt ? new Date(draft.expiresAt) : null;
+    const expiresAtValid = draftExpiresAt instanceof Date
+      && !Number.isNaN(draftExpiresAt.getTime())
+      && draftExpiresAt.getTime() > Date.now();
+    if (draft.expiresAt && !expiresAtValid) return undefined;
+
+    const persistResult = await persistAiTripChangeProposalDraft({
+      tripProjectId,
+      expectedAggregateVersion: draft.expectedAggregateVersion,
+      expectedItemVersions: draft.expectedItemVersions,
+      operations: draft.operations,
+      rationale: draft.rationale,
+      alternatives: draft.alternatives,
+      orderingPreconditions: draft.orderingPreconditions,
+      expiresAt: expiresAtValid ? draftExpiresAt : null,
+      sourceAssistantMessageId: assistantMessageId,
+    });
+    if (!persistResult.success) return undefined;
+
+    const proposal = persistResult.proposal;
+    return {
+      proposalId: proposal.id,
+      rationale: proposal.rationale,
+      affectedItems: proposal.affectedItems,
+      beforeAfter: proposal.beforeAfter,
+      alternatives: proposal.alternatives,
+      hasAlternatives: proposal.hasAlternatives,
+      expiresAt: proposal.expiresAt,
+      status: proposal.status,
+    };
+  } catch (error) {
+    console.warn("Trip change proposal drafting failed unexpectedly", {
+      tripProjectId,
+      assistantMessageId,
+      error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
+    });
+    return undefined;
+  } finally {
+    clearTimeout(timeout);
+    abortSignal.removeEventListener("abort", onExternalAbort);
+  }
 }
 
 function sendEvent(controller: ReadableStreamDefaultController<Uint8Array>, encoder: TextEncoder, event: StreamEvent) {
