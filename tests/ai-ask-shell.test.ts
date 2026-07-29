@@ -949,6 +949,36 @@ describe("AI Ask structured answer rendering", () => {
     expect(source).not.toContain("optimisticAssistant");
   });
 
+  test("preserves an unscoped submission key and scope after adopting its failed conversation", async () => {
+    const { getIdempotentAiAskSubmission } = await import("@/features/ai/ai-ask-composer");
+    const first = getIdempotentAiAskSubmission({
+      previous: null,
+      payloadFingerprint: "Hà Nội đi Huế?",
+      conversationId: undefined,
+      tripProjectId: undefined,
+      createKey: () => "first-key",
+    });
+
+    first.adoptedConversationId = "server-created-conversation";
+    const retry = getIdempotentAiAskSubmission({
+      previous: first,
+      payloadFingerprint: "Hà Nội đi Huế?",
+      conversationId: "server-created-conversation",
+      tripProjectId: undefined,
+      createKey: () => "second-key",
+    });
+    const newRequest = getIdempotentAiAskSubmission({
+      previous: retry,
+      payloadFingerprint: "Hà Nội đi Đà Nẵng?",
+      conversationId: "server-created-conversation",
+      tripProjectId: undefined,
+      createKey: () => "third-key",
+    });
+
+    expect(retry).toMatchObject({ key: "first-key", conversationId: undefined });
+    expect(newRequest).toMatchObject({ key: "third-key", conversationId: "server-created-conversation" });
+  });
+
   test("renders answer-scoped navigation and uncertainty sections without source chips", async () => {
     const { AssistantMessageContent } = await import("@/features/ai/ai-ask-composer");
     const assistantContent = ["## Kế hoạch gợi ý:", "- Ngày 1: đi nhẹ và nghỉ sớm.", "", "**Điều chưa chắc chắn:**", "Cần xác minh giờ mở cửa.", "", "**Nguồn và độ tin cậy:**", "Đây là gợi ý tổng quát, chưa dùng nguồn tuyển chọn.", "", "1. Câu hỏi tiếp theo:", "Bạn đi cùng trẻ nhỏ không?"].join("\n");

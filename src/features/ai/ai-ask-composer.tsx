@@ -76,6 +76,37 @@ type TripProjectSummary = {
 
 type CreateTripProjectFormState = { error?: string };
 
+export type IdempotentAiAskSubmission = {
+  payloadFingerprint: string;
+  key: string;
+  conversationId?: string;
+  tripProjectId?: string;
+  adoptedConversationId?: string;
+};
+
+export function getIdempotentAiAskSubmission({
+  previous,
+  payloadFingerprint,
+  conversationId,
+  tripProjectId,
+  createKey,
+}: {
+  previous: IdempotentAiAskSubmission | null;
+  payloadFingerprint: string;
+  conversationId?: string;
+  tripProjectId?: string;
+  createKey: () => string;
+}): IdempotentAiAskSubmission {
+  const keepsOriginalScope = previous?.conversationId === conversationId
+    || (!previous?.conversationId && previous?.adoptedConversationId === conversationId);
+
+  if (previous && previous.payloadFingerprint === payloadFingerprint && previous.tripProjectId === tripProjectId && keepsOriginalScope) {
+    return previous;
+  }
+
+  return { payloadFingerprint, key: createKey(), conversationId, tripProjectId };
+}
+
 type CreateTripProjectAction = (
   state: CreateTripProjectFormState | undefined,
   formData: FormData,
@@ -746,7 +777,7 @@ export function AiAskComposer({
   const isSubmittingRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const activeRequestIdRef = useRef(0);
-  const idempotencyKeyRef = useRef<{ fingerprint: string; key: string } | null>(null);
+  const idempotencyKeyRef = useRef<IdempotentAiAskSubmission | null>(null);
   const deletingConversationIdRef = useRef<string | null>(null);
   const deletingTripProjectIdRef = useRef<string | null>(null);
   const sessionSheetTriggerRef = useRef<HTMLButtonElement>(null);
@@ -1139,16 +1170,20 @@ export function AiAskComposer({
     setStatus(selectedImage ? "Đang kiểm tra ảnh và chuẩn bị luồng trả lời..." : "Đang gửi câu hỏi và chuẩn bị luồng trả lời...");
 
     try {
-      const hadConversation = Boolean(conversationId || messages.length > 0);
       const controller = new AbortController();
       abortControllerRef.current = controller;
       const imageDigest = selectedImage ? await digestFileForIdempotency(selectedImage) : "";
-      const fingerprint = `${trimmedQuestion}\u0000${conversationId ?? ""}\u0000${activeTripProjectId ?? ""}\u0000${selectedImage?.name ?? ""}\u0000${selectedImage?.type ?? ""}\u0000${selectedImage?.size ?? ""}\u0000${imageDigest}`;
-      const idempotencyKey = idempotencyKeyRef.current?.fingerprint === fingerprint
-        ? idempotencyKeyRef.current.key
-        : crypto.randomUUID().replaceAll("-", "");
-      idempotencyKeyRef.current = { fingerprint, key: idempotencyKey };
-      const result = await submitAiAskStream({ question: trimmedQuestion, conversationId, tripProjectId: activeTripProjectId, image: selectedImage, idempotencyKey, signal: controller.signal, onPreparing: () => {
+      const payloadFingerprint = `${trimmedQuestion}\u0000${activeTripProjectId ?? ""}\u0000${selectedImage?.name ?? ""}\u0000${selectedImage?.type ?? ""}\u0000${selectedImage?.size ?? ""}\u0000${imageDigest}`;
+      const submission = getIdempotentAiAskSubmission({
+        previous: idempotencyKeyRef.current,
+        payloadFingerprint,
+        conversationId,
+        tripProjectId: activeTripProjectId,
+        createKey: () => crypto.randomUUID().replaceAll("-", ""),
+      });
+      idempotencyKeyRef.current = submission;
+      const hadConversation = Boolean(submission.conversationId || messages.length > 0);
+      const result = await submitAiAskStream({ question: trimmedQuestion, conversationId: submission.conversationId, tripProjectId: submission.tripProjectId, image: selectedImage, idempotencyKey: submission.key, signal: controller.signal, onPreparing: () => {
         if (activeRequestIdRef.current === requestId) {
           setIsPreparing(true);
           setStatus("Trợ lý đang chuẩn bị ngữ cảnh cho câu hỏi của bạn.");
@@ -1167,6 +1202,9 @@ export function AiAskComposer({
       }
 
       if (result.status === "in-progress") {
+        if (result.conversationId) {
+          submission.adoptedConversationId = result.conversationId;
+        }
         setStatus("Yêu cầu này vẫn đang được xử lý. Hãy chờ kết quả hoàn tất.");
         setRecoveryMessage("Yêu cầu đang xử lý. Hãy chờ một lát trước khi gửi lại.");
         return;
@@ -1177,6 +1215,7 @@ export function AiAskComposer({
 
         if (result.conversationId && failedUserMessage) {
           const newConversationId = result.conversationId;
+          submission.adoptedConversationId = newConversationId;
           setConversationId(newConversationId);
           setFailedQuestionIds((currentIds) => currentIds.includes(failedUserMessage.id) ? currentIds : [...currentIds, failedUserMessage.id]);
           setMessages((currentMessages) => appendMessagesWithoutDuplicateIds(currentMessages, [
