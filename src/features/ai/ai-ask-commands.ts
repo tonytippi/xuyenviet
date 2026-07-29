@@ -94,6 +94,10 @@ export async function acquireAiAskCommand(input: AcquireAiAskCommandInput): Prom
       const [winner] = await transaction.select().from(aiAskCommands).where(winnerPredicate).limit(1).for("update");
       if (!winner || winner.requestDigest !== requestDigest || winner.expiresAt <= new Date()) return { kind: "key_reused" };
       if (winner.status !== "pending") return { kind: "terminal_replay", result: winner.terminalResult as AiAskTerminalResult };
+      if (winner.assistantMessageId) {
+        const recovered = await recoverCompletedAiAskCommandInTransaction(winner.id, transaction);
+        if (recovered) return { kind: "terminal_replay", result: recovered };
+      }
       return { kind: "pending_replay", conversationId: winner.conversationId ?? undefined, userMessage: winner.userMessageId ? await readMessage(transaction, winner.userMessageId, input.userId) : undefined };
     }
 
@@ -121,12 +125,65 @@ export async function terminalizeAiAskCommand(commandId: string, status: "comple
       if (updated) return;
 
       const [existing] = await getDb().select({ status: aiAskCommands.status, terminalResult: aiAskCommands.terminalResult }).from(aiAskCommands).where(eq(aiAskCommands.id, commandId)).limit(1);
-      if (existing?.status === status && JSON.stringify(existing.terminalResult) === JSON.stringify(result)) return;
+      if (existing?.status === status && terminalResultsEqual(existing.terminalResult, result)) return;
       throw new Error("AI Ask command has a conflicting terminal state.");
     } catch (error) {
       if (attempt === 2) throw error;
     }
   }
+}
+
+export async function recoverCompletedAiAskCommand(commandId: string): Promise<AiAskTerminalResult | null> {
+  return getDb().transaction((transaction) => recoverCompletedAiAskCommandInTransaction(commandId, transaction));
+}
+
+async function recoverCompletedAiAskCommandInTransaction(commandId: string, transaction: Transaction): Promise<AiAskTerminalResult | null> {
+  const [command] = await transaction.select({
+    id: aiAskCommands.id,
+    status: aiAskCommands.status,
+    terminalResult: aiAskCommands.terminalResult,
+    conversationId: aiAskCommands.conversationId,
+    userId: aiAskCommands.userId,
+    userMessageId: aiAskCommands.userMessageId,
+    assistantMessageId: aiAskCommands.assistantMessageId,
+  }).from(aiAskCommands).where(eq(aiAskCommands.id, commandId)).limit(1).for("update");
+  if (!command) return null;
+  if (command.status !== "pending") return command.terminalResult as AiAskTerminalResult;
+  if (!command.conversationId || !command.userMessageId || !command.assistantMessageId) return null;
+
+  const [userMessage, assistantMessage] = await Promise.all([
+    readMessage(transaction, command.userMessageId, command.userId),
+    readMessage(transaction, command.assistantMessageId, command.userId),
+  ]);
+  if (!userMessage || !assistantMessage) return null;
+
+  const result: AiAskTerminalResult = {
+    type: "done",
+    conversationId: command.conversationId,
+    userMessage,
+    assistantMessage,
+  };
+  await transaction.update(aiAskCommands).set({ status: "completed", terminalResult: result, terminalAt: new Date(), updatedAt: new Date() }).where(eq(aiAskCommands.id, command.id));
+  return result;
+}
+
+// jsonb object key order is not part of the terminal-result contract. Arrays remain
+// ordered because their order is meaningful to the browser projection.
+export function terminalResultsEqual(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  if (!left || !right || typeof left !== "object" || typeof right !== "object") return false;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left) && Array.isArray(right)
+      && left.length === right.length
+      && left.every((value, index) => terminalResultsEqual(value, right[index]));
+  }
+
+  const leftRecord = left as Record<string, unknown>;
+  const rightRecord = right as Record<string, unknown>;
+  const leftKeys = Object.keys(leftRecord).sort();
+  const rightKeys = Object.keys(rightRecord).sort();
+  return leftKeys.length === rightKeys.length
+    && leftKeys.every((key, index) => key === rightKeys[index] && terminalResultsEqual(leftRecord[key], rightRecord[key]));
 }
 
 async function resolveScope(transaction: Transaction, userId: string, conversationId: string | undefined, tripProjectId: string | undefined) {

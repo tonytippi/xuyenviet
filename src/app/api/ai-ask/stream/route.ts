@@ -2,8 +2,8 @@ import { eq } from "drizzle-orm";
 import { after } from "next/server";
 
 import { getDb } from "@/db/client";
-import { conversations, messages } from "@/db/schema";
-import { acquireAiAskCommand, terminalizeAiAskCommand } from "@/features/ai/ai-ask-commands";
+import { aiAskCommands, conversations, messages } from "@/db/schema";
+import { acquireAiAskCommand, recoverCompletedAiAskCommand, terminalizeAiAskCommand } from "@/features/ai/ai-ask-commands";
 import { buildValidatedAnswerAnnotations, sanitizeStoredAnswerAnnotations, type AnswerAnnotation } from "@/features/ai/answer-annotations";
 import { ensureAiAskFreshnessWarning, requiresAiAskAnswerFinalization } from "@/features/ai/answer-freshness";
 import { streamInitialAiAskAnswer } from "@/features/ai/gateway";
@@ -326,6 +326,9 @@ async function streamAnswer({
           pricingSnapshot,
           providerRequestId: gatewayResult.requestMetadata.providerRequestId,
         });
+        // This marker shares the assistant transaction so a later terminal write
+        // failure can recover a safe completed result without inventing a fence.
+        await transaction.update(aiAskCommands).set({ assistantMessageId: assistantMessage.id, updatedAt: new Date() }).where(eq(aiAskCommands.id, command.commandId));
 
         return { id: assistantMessage.id, content: assistantContent.content, provenance, annotations: [] };
       });
@@ -369,10 +372,11 @@ async function streamAnswer({
             cachedPromptTokens: gatewayResult.usage.cachedPromptTokens,
             cacheWritePromptTokens: gatewayResult.usage.cacheWritePromptTokens,
             pricingSnapshot,
-            providerRequestId: gatewayResult.requestMetadata.providerRequestId,
-          });
+          providerRequestId: gatewayResult.requestMetadata.providerRequestId,
+        });
+        await transaction.update(aiAskCommands).set({ assistantMessageId: assistantMessage.id, updatedAt: new Date() }).where(eq(aiAskCommands.id, command.commandId));
 
-          return { id: assistantMessage.id, content: assistantContent.content, provenance, annotations: [] };
+        return { id: assistantMessage.id, content: assistantContent.content, provenance, annotations: [] };
         });
       } catch {
         completed = null;
@@ -380,22 +384,21 @@ async function streamAnswer({
     }
 
     if (completed) {
-      if (abortSignal.aborted) {
-        const result: StreamEvent = {
-          type: "error",
-          conversationId: savedTurn.conversationId,
-          userMessage: savedTurn.userMessage,
-          errorMessage: "Luồng trả lời đã bị dừng. Tin nhắn của bạn đã được lưu nhưng chưa có câu trả lời trợ lý cho lượt này.",
-        };
-        await terminalizeAiAskCommand(command.commandId, "aborted", result);
-        sendEvent(controller, encoder, result);
-        return;
+      // The assistant/provenance/usage transaction is the durable success boundary.
+      // A caller abort or optional follow-up failure after it commits cannot turn the
+      // command into an aborted/no-answer result.
+      try {
+        completed.annotations = sanitizeStoredAnswerAnnotations({
+          answerText: completed.content,
+          annotations: await buildValidatedAnswerAnnotations({ answerText: completed.content, provenance: completed.provenance, model: selectedModel.gatewayModelName, abortSignal }),
+          provenance: completed.provenance,
+        });
+      } catch (error) {
+        console.warn("Failed to build answer annotations after assistant persistence.", {
+          assistantMessageId: completed.id,
+          error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
+        });
       }
-      completed.annotations = sanitizeStoredAnswerAnnotations({
-        answerText: completed.content,
-        annotations: await buildValidatedAnswerAnnotations({ answerText: completed.content, provenance: completed.provenance, model: selectedModel.gatewayModelName, abortSignal }),
-        provenance: completed.provenance,
-      });
       if (completed.annotations.length > 0) {
         try {
           await db.update(messages).set({ answerAnnotations: completed.annotations }).where(eq(messages.id, completed.id));
@@ -410,17 +413,6 @@ async function streamAnswer({
       const proposalSummary = tripProjectId
         ? await draftAndPersistProposal({ session, tripProjectId, question, assistantMessageId: completed.id, abortSignal })
         : undefined;
-      if (abortSignal.aborted) {
-        const result: StreamEvent = {
-          type: "error",
-          conversationId: savedTurn.conversationId,
-          userMessage: savedTurn.userMessage,
-          errorMessage: "Luồng trả lời đã bị dừng. Tin nhắn của bạn đã được lưu nhưng chưa có câu trả lời trợ lý cho lượt này.",
-        };
-        await terminalizeAiAskCommand(command.commandId, "aborted", result);
-        sendEvent(controller, encoder, result);
-        return;
-      }
       const result: StreamEvent = { type: "done", conversationId: savedTurn.conversationId, userMessage: savedTurn.userMessage, assistantMessage: completed, proposal: proposalSummary };
       try {
         await terminalizeAiAskCommand(command.commandId, "completed", result, completed.id);
@@ -431,7 +423,14 @@ async function streamAnswer({
           commandId: command.commandId,
           error: terminalizationError instanceof Error ? { name: terminalizationError.name, message: terminalizationError.message } : String(terminalizationError),
         });
-        return;
+        try {
+          await recoverCompletedAiAskCommand(command.commandId);
+        } catch (recoveryError) {
+          console.error("AI Ask completed command recovery could not be verified", {
+            commandId: command.commandId,
+            error: recoveryError instanceof Error ? { name: recoveryError.name, message: recoveryError.message } : String(recoveryError),
+          });
+        }
       }
       sendEvent(controller, encoder, result);
     } else {

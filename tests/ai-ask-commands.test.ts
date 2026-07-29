@@ -4,7 +4,7 @@ import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 
 import { aiAskCommands, conversations, messages, schema, tripProjects, users } from "@/db/schema";
-import { acquireAiAskCommand, terminalizeAiAskCommand, validateAiAskIdempotencyKey } from "@/features/ai/ai-ask-commands";
+import { acquireAiAskCommand, recoverCompletedAiAskCommand, terminalizeAiAskCommand, terminalResultsEqual, validateAiAskIdempotencyKey } from "@/features/ai/ai-ask-commands";
 
 import { testDb } from "./helpers/db";
 
@@ -37,6 +37,14 @@ describe("AI Ask command ledger", () => {
     expect(validateAiAskIdempotencyKey("contains spaces here")).toBe(false);
   });
 
+  test("compares terminal json projections structurally without changing array order", () => {
+    expect(terminalResultsEqual(
+      { type: "done", assistantMessage: { id: "assistant", content: "Gợi ý" }, proposal: { rationale: "An toàn", affectedItems: ["a", "b"] } },
+      { proposal: { affectedItems: ["a", "b"], rationale: "An toàn" }, assistantMessage: { content: "Gợi ý", id: "assistant" }, type: "done" },
+    )).toBe(true);
+    expect(terminalResultsEqual({ items: ["a", "b"] }, { items: ["b", "a"] })).toBe(false);
+  });
+
   test("creates one turn and replays pending then terminal commands", async () => {
     await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
     const [conversation] = await testDb.insert(conversations).values({ id: "conversation", userId: "owner" }).returning({ id: conversations.id });
@@ -67,6 +75,42 @@ describe("AI Ask command ledger", () => {
     await terminalizeAiAskCommand(admitted.commandId, "completed", result, assistant.id);
     await expect(acquireAiAskCommand({ userId: "owner", idempotencyKey: key, question: "Đi Huế", conversationId: conversation.id })).resolves.toEqual({ kind: "terminal_replay", result });
     expect(await testDb.select().from(messages)).toHaveLength(2);
+  });
+
+  test("accepts an ambiguous completed terminalization already committed with reordered jsonb keys", async () => {
+    await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
+    const [conversation] = await testDb.insert(conversations).values({ id: "conversation", userId: "owner" }).returning({ id: conversations.id });
+    const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: key, question: "Đi Huế", conversationId: conversation.id });
+    if (admitted.kind !== "admitted") throw new Error("Expected command admission");
+    const [assistant] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "owner", role: "assistant", content: "Gợi ý an toàn" }).returning({ id: messages.id });
+    const result = { type: "done" as const, conversationId: conversation.id, userMessage: admitted.userMessage, assistantMessage: { id: assistant.id, content: "Gợi ý an toàn" }, proposal: { rationale: "An toàn", affectedItems: ["first", "second"] } };
+
+    await testDb.update(aiAskCommands).set({
+      status: "completed",
+      terminalAt: new Date(),
+      assistantMessageId: assistant.id,
+      terminalResult: { proposal: { affectedItems: ["first", "second"], rationale: "An toàn" }, assistantMessage: { content: "Gợi ý an toàn", id: assistant.id }, userMessage: admitted.userMessage, conversationId: conversation.id, type: "done" },
+    }).where(eq(aiAskCommands.id, admitted.commandId));
+
+    await expect(terminalizeAiAskCommand(admitted.commandId, "completed", result, assistant.id)).resolves.toBeUndefined();
+    await expect(acquireAiAskCommand({ userId: "owner", idempotencyKey: key, question: "Đi Huế", conversationId: conversation.id })).resolves.toEqual({ kind: "terminal_replay", result });
+  });
+
+  test("recovers a pending command with a committed assistant marker as a safe completed replay", async () => {
+    await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
+    const [conversation] = await testDb.insert(conversations).values({ id: "conversation", userId: "owner" }).returning({ id: conversations.id });
+    const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: key, question: "Đi Huế", conversationId: conversation.id });
+    if (admitted.kind !== "admitted") throw new Error("Expected command admission");
+    const [assistant] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "owner", role: "assistant", content: "Gợi ý đã lưu" }).returning({ id: messages.id });
+    await testDb.update(aiAskCommands).set({ assistantMessageId: assistant.id }).where(eq(aiAskCommands.id, admitted.commandId));
+
+    await expect(recoverCompletedAiAskCommand(admitted.commandId)).resolves.toEqual({
+      type: "done", conversationId: conversation.id, userMessage: admitted.userMessage, assistantMessage: { id: assistant.id, content: "Gợi ý đã lưu" },
+    });
+    await expect(acquireAiAskCommand({ userId: "owner", idempotencyKey: key, question: "Đi Huế", conversationId: conversation.id })).resolves.toEqual({
+      kind: "terminal_replay",
+      result: { type: "done", conversationId: conversation.id, userMessage: admitted.userMessage, assistantMessage: { id: assistant.id, content: "Gợi ý đã lưu" } },
+    });
   });
 
   test("serializes and replays only the safe terminal browser projection", async () => {
