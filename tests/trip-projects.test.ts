@@ -104,7 +104,7 @@ describe("Trip project helpers", () => {
     expect(summary?.historicChats).toEqual([]);
   });
 
-  test("resolves one deterministic primary without changing the aggregate version", async () => {
+  test("resolves one deterministic primary and advances fences only for the primary-link mutation", async () => {
     await createTestUser("user-1");
     const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Hà Giang" }).returning();
     await testDb.insert(conversations).values({ id: "older", userId: "user-1", tripProjectId: project.id, updatedAt: new Date("2026-07-01T00:00:00.000Z") });
@@ -115,7 +115,9 @@ describe("Trip project helpers", () => {
     await expect(resolveOwnedPrimaryConversation(project.id)).resolves.toMatchObject({ id: "newer" });
     await expect(resolveOwnedPrimaryConversation(project.id)).resolves.toMatchObject({ id: "newer" });
     const [savedProject] = await testDb.select().from(tripProjects).where(eq(tripProjects.id, project.id));
-    expect(savedProject).toMatchObject({ primaryConversationId: "newer", aggregateVersion: 1 });
+    const [savedPrimary] = await testDb.select().from(conversations).where(eq(conversations.id, "newer"));
+    expect(savedProject).toMatchObject({ primaryConversationId: "newer", aggregateVersion: 2 });
+    expect(savedPrimary.lifecycleVersion).toBe(2);
   });
 
   test("serializes concurrent first primary resolution without duplicate conversations", async () => {
@@ -130,7 +132,7 @@ describe("Trip project helpers", () => {
 
     expect(new Set(resolved.map((conversation) => conversation?.id)).size).toBe(1);
     expect(rows).toHaveLength(1);
-    expect(savedProject).toMatchObject({ primaryConversationId: rows[0].id, aggregateVersion: 1 });
+    expect(savedProject).toMatchObject({ primaryConversationId: rows[0].id, aggregateVersion: 2 });
   });
 
   test("database pointer rejects cross-project and cross-owner conversations", async () => {
@@ -425,8 +427,8 @@ describe("Trip project helpers", () => {
     expect(summary?.planItems.map((item) => item.label)).toEqual(["Hà Nội", "Chạy xe Hà Nội - Huế", "Khách sạn Huế"]);
     expect(summary?.constraints).toMatchObject({ adultCount: 2, childCount: 1, vehicleType: "car", drivingToleranceHours: 4, budgetCurrency: "VND", budgetMinVnd: 5_000_000, budgetMaxVnd: 10_000_000, preferenceTags: ["Thiên nhiên", "Văn hoá"] });
     expect(summary?.tripHome.kind).toBe("confirmed-item-gap");
-    // Read-only: aggregate version, item versions, and constraints version must not change.
-    expect(savedProject.aggregateVersion).toBe(1);
+    // Resolving the initially unlinked primary is the one intentional aggregate mutation.
+    expect(savedProject.aggregateVersion).toBe(2);
     expect(savedPlanItems.every((item) => item.version === 1)).toBe(true);
     expect(savedConstraints.version).toBe(1);
   });
@@ -477,16 +479,19 @@ describe("Trip project helpers", () => {
     const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế" }).returning({ id: tripProjects.id });
     await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id });
     vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }) }));
-    const { getOwnedTripProjectSummary } = await import("@/features/chat-trips/trip-projects");
+    const { getOwnedTripProjectSummary, resolveOwnedPrimaryConversation } = await import("@/features/chat-trips/trip-projects");
 
+    await resolveOwnedPrimaryConversation(project.id);
     const auditsBefore = await testDb.select().from(auditEvents);
+    const [projectBefore] = await testDb.select().from(tripProjects).where(eq(tripProjects.id, project.id));
     await getOwnedTripProjectSummary(project.id);
     await getOwnedTripProjectSummary(project.id);
     const auditsAfter = await testDb.select().from(auditEvents);
     const [savedProject] = await testDb.select().from(tripProjects).where(eq(tripProjects.id, project.id));
 
     expect(auditsAfter).toHaveLength(auditsBefore.length);
-    expect(savedProject.aggregateVersion).toBe(1);
+    expect(projectBefore.aggregateVersion).toBe(2);
+    expect(savedProject.aggregateVersion).toBe(projectBefore.aggregateVersion);
   });
 
   test("getOwnedTripProjectSummary feeds real pending proposals into the workspace read model", async () => {
