@@ -949,7 +949,7 @@ describe("AI Ask structured answer rendering", () => {
     expect(source).not.toContain("optimisticAssistant");
   });
 
-  test("preserves an unscoped submission key and scope after adopting its failed conversation", async () => {
+  test("preserves an unscoped pending replay scope while using its adopted conversation for a changed payload", async () => {
     const { getIdempotentAiAskSubmission } = await import("@/features/ai/ai-ask-composer");
     const first = getIdempotentAiAskSubmission({
       previous: null,
@@ -959,6 +959,7 @@ describe("AI Ask structured answer rendering", () => {
       createKey: () => "first-key",
     });
 
+    // A pending replay reports the server-created conversation before its answer is terminal.
     first.adoptedConversationId = "server-created-conversation";
     const retry = getIdempotentAiAskSubmission({
       previous: first,

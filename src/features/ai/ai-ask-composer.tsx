@@ -1203,7 +1203,15 @@ export function AiAskComposer({
 
       if (result.status === "in-progress") {
         if (result.conversationId) {
-          submission.adoptedConversationId = result.conversationId;
+          const newConversationId = result.conversationId;
+          submission.adoptedConversationId = newConversationId;
+          setConversationId(newConversationId);
+          if (!hadConversation) {
+            setSessions((currentSessions) => [summarizeSession(newConversationId, trimmedQuestion), ...currentSessions]);
+          } else {
+            setSessions((currentSessions) => moveSessionToTop(currentSessions, newConversationId));
+          }
+          reconcileSelection(newConversationId, activeTripProjectId);
         }
         setStatus("Yêu cầu này vẫn đang được xử lý. Hãy chờ kết quả hoàn tất.");
         setRecoveryMessage("Yêu cầu đang xử lý. Hãy chờ một lát trước khi gửi lại.");
