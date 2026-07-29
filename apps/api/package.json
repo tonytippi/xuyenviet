@@ -14,6 +14,7 @@
     "@xuyenviet/config": "workspace:*",
     "@xuyenviet/contracts": "workspace:*",
     "@xuyenviet/database": "workspace:*",
+    "@xuyenviet/domain": "workspace:*",
     "jose": "^6.2.3",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2"

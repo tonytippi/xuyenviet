@@ -1,4 +1,28 @@
 import postgres from "postgres";
+import type { AiAskStreamExecutionPort } from "@xuyenviet/domain";
+import { createAiAskStreamExecutionPort } from "./ai-ask-stream-execution";
+
+export * from "./ai-ask-commands";
+export * from "./ai-ask-stream-execution";
+export * from "./answer-context";
+export * from "./answer-freshness";
+export * from "./approved-knowledge";
+export * from "./actors";
+export * from "./client";
+export * from "./domain-outbox";
+export * from "./gateway";
+export * from "./knowledge-search";
+export * from "./knowledge-indexing-queue";
+export * from "./knowledge-state";
+export * from "./models";
+export * from "./prompts";
+export * from "./provenance";
+export * from "./schema";
+export * from "./source-bundle";
+export * from "./usage";
+export * from "./usage-constants";
+export * from "./usage-events";
+export * from "./web-search";
 
 export type ApiIdentityRecord = {
   userId: string;
@@ -75,4 +99,8 @@ export function createPostgresApiIdentityRepository(databaseUrl: string): ApiIde
       return rows[0] ?? null;
     },
   };
+}
+
+export function createPostgresAiAskStreamExecutionPort(_databaseUrl: string): AiAskStreamExecutionPort {
+  return createAiAskStreamExecutionPort();
 }

@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 
 import { createBffTransportConfig, getBffTransportConfig } from "@xuyenviet/config";
-import { BffApiError, callPrivateApi } from "@/server/bff-api-client";
+import { BffApiError, callPrivateApi, callPrivateApiStream } from "@/server/bff-api-client";
 import { issueCsrfToken, issueCsrfTokenWithCookie, validateCsrfRequest } from "@/server/csrf";
 import { executeProtectedBffMutation } from "@/server/protected-bff-adapter";
 
@@ -32,6 +32,54 @@ describe("private BFF transport", () => {
     expect(headers.get("idempotency-key")).toBe("declared");
     expect(init.body).toBe('{"title":"valid"}');
     expect(init.redirect).toBe("error");
+  });
+
+  test("forwards AI Ask multipart bytes unchanged through the private stream seam", async () => {
+    const requestBytes = new Uint8Array([0, 255, 13, 10, 45, 45, 98, 111, 117, 110, 100, 97, 114, 121]);
+    const requestBody = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(requestBytes); controller.close(); } });
+    const upstreamBytes = new Uint8Array([123, 34, 116, 121, 112, 101, 34, 58, 34, 100, 111, 110, 101, 34, 125, 10]);
+    const fetcher = vi.fn<typeof fetch>(async () => new Response(upstreamBytes, { status: 200, headers: { "content-type": "application/x-ndjson; charset=utf-8", "x-request-id": "upstream_1" } }));
+
+    const result = await callPrivateApiStream({
+      config,
+      credential: "private-token",
+      correlationId: "request_1",
+      path: "/v1/ai-ask/stream",
+      idempotencyKey: "valid_idempotency_key",
+      body: requestBody,
+      contentType: "multipart/form-data; boundary=boundary",
+      fetcher,
+    });
+    const init = fetcher.mock.calls[0]?.[1];
+    if (!init) throw new Error("Expected BFF stream request initialization.");
+
+    expect(init.body).toBe(requestBody);
+    const headers = new Headers(init.headers);
+    expect(headers.get("authorization")).toBe("Bearer private-token");
+    expect(headers.get("x-request-id")).toBe("request_1");
+    expect(headers.get("idempotency-key")).toBe("valid_idempotency_key");
+    expect(headers.get("accept")).toBe("application/x-ndjson");
+    expect(result.requestId).toBe("upstream_1");
+    expect(new Uint8Array(await new Response(result.body).arrayBuffer())).toEqual(upstreamBytes);
+  });
+
+  test("does not truncate established NDJSON when the local connection timeout elapses", async () => {
+    let cancelled = false;
+    const upstreamBytes = new Uint8Array([123, 34, 116, 121, 112, 101, 34, 58, 34, 112, 114, 101, 112, 97, 114, 105, 110, 103, 34, 125, 10, 123, 34, 116, 121, 112, 101, 34, 58, 34, 100, 111, 110, 101, 34, 125, 10]);
+    const upstream = new ReadableStream<Uint8Array>({ async start(controller) { await new Promise((resolve) => setTimeout(resolve, 10)); controller.enqueue(upstreamBytes); controller.close(); }, cancel() { cancelled = true; } });
+    const result = await callPrivateApiStream({ config: { ...config, requestTimeoutMs: 1 }, credential: "private-token", correlationId: "request_1", path: "/v1/ai-ask/stream", idempotencyKey: "valid_idempotency_key", body: new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array([1])); controller.close(); } }), contentType: "multipart/form-data; boundary=boundary", fetcher: async () => new Response(upstream, { headers: { "content-type": "application/x-ndjson" } }) });
+
+    expect(new Uint8Array(await new Response(result.body).arrayBuffer())).toEqual(upstreamBytes);
+    expect(cancelled).toBe(false);
+  });
+
+  test("cancelling the browser stream cancels the established upstream body", async () => {
+    let cancelled = false;
+    const upstream = new ReadableStream<Uint8Array>({ pull() {}, cancel() { cancelled = true; } });
+    const result = await callPrivateApiStream({ config, credential: "private-token", correlationId: "request_1", path: "/v1/ai-ask/stream", idempotencyKey: "valid_idempotency_key", body: new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array([1])); controller.close(); } }), contentType: "multipart/form-data; boundary=boundary", fetcher: async () => new Response(upstream, { headers: { "content-type": "application/x-ndjson" } }) });
+
+    await result.body.cancel("browser disconnected");
+    expect(cancelled).toBe(true);
   });
 
   test("uses the DTO JSON serialized before minting a credential", async () => {

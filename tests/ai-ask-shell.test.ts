@@ -6,6 +6,8 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
+import { setSourceBundleTestDependencies } from "../packages/database/src/source-bundle";
+import { issueCsrfToken } from "@/server/csrf";
 import { aiAskCommands, aiGatewayModels, aiUsageEvents, answerUsefulnessFeedback, assistantResponseProvenance, assistantRetrievalDecisions, conversations, domainOutbox, messageImageAttachments, messages, schema, tripChangeProposals, tripPlanChangeHistory, tripPlanItems, tripProjectConstraints, tripProjects, users } from "@/db/schema";
 import type { AnswerAnnotation } from "@/features/ai/answer-annotations";
 import type { AnswerEntityDescriptor } from "@/features/ai/ai-ask-composer";
@@ -63,13 +65,32 @@ function findUsageEvent(rows: Array<typeof aiUsageEvents.$inferSelect>, purpose:
   return rows.find((row) => row.purpose === purpose && (!provider || row.provider === provider));
 }
 
-function createAiAskStreamRequest(formData: FormData, idempotencyKey = crypto.randomUUID().replaceAll("-", ""), signal?: AbortSignal) {
-  return new Request("https://xuyenviet.test/api/ai-ask/stream", {
+const legacyBffTransport = {
+  privateApiUrl: "https://api.railway.internal",
+  bffOrigin: "https://xuyenviet.test",
+  csrfSigningSecret: "a".repeat(32),
+  csrfLifetimeSeconds: 300,
+  requestTimeoutMs: 100,
+};
+
+function withValidCsrfRequest(request: Request) {
+  const token = issueCsrfToken(legacyBffTransport);
+  request.headers.set("origin", legacyBffTransport.bffOrigin);
+  request.headers.set("sec-fetch-site", "same-origin");
+  request.headers.set("X-XuyenViet-CSRF", token);
+  Object.assign(request, { cookies: { get: (name: string) => name === "xv_bff_csrf" ? { value: token } : undefined } });
+  return request;
+}
+
+function createAiAskStreamRequest(formData: FormData, idempotencyKey: string | undefined = crypto.randomUUID().replaceAll("-", ""), signal?: AbortSignal) {
+  const headers = new Headers();
+  if (idempotencyKey) headers.set("Idempotency-Key", idempotencyKey);
+  return withValidCsrfRequest(new Request("https://xuyenviet.test/api/ai-ask/stream", {
     method: "POST",
     body: formData,
-    headers: { "Idempotency-Key": idempotencyKey },
+    headers,
     signal,
-  });
+  }));
 }
 
 async function renderAuthenticatedAiAskShell(searchParams: Record<string, string> = {}, roles: string[] = []) {
@@ -990,16 +1011,20 @@ describe("AI Ask structured answer rendering", () => {
 
   test("stream route completes from the fenced projection without inline follow-up work", () => {
     const routeSource = readFileSync("src/app/api/ai-ask/stream/route.ts", "utf8");
-    const finalizationStart = routeSource.indexOf("const finalization = await finalizeAiAskCommand");
+    const executionSource = readFileSync("packages/database/src/ai-ask-stream-execution.ts", "utf8");
+    const finalizationStart = executionSource.indexOf("const finalization = await finalizeAiAskCommand");
 
-    expect(finalizationStart).toBeGreaterThan(-1);
+    expect(routeSource).toContain("createPostgresAiAskStreamExecutionPort");
+    expect(routeSource).toContain("createAiAskStreamExecution");
+    expect(routeSource).not.toContain("finalizeAiAskCommand");
+    expect(routeSource).not.toContain("readAiAskCommandTerminalResult");
     expect(routeSource).not.toContain("after(");
-    expect(routeSource).not.toContain("void streamAnswer");
     expect(routeSource).not.toContain("extractChatTripContext");
     expect(routeSource).not.toContain("buildValidatedAnswerAnnotations");
     expect(routeSource).not.toContain("draftTripChangeProposal");
     expect(routeSource).not.toContain("persistAiTripChangeProposalDraft");
-    expect(routeSource.slice(finalizationStart)).toContain("readAiAskCommandTerminalResult");
+    expect(finalizationStart).toBeGreaterThan(-1);
+    expect(executionSource.slice(finalizationStart)).toContain("readAiAskCommandTerminalResult");
   });
 
   test("composer source accepts removable validated traveler images", () => {
@@ -1416,26 +1441,35 @@ describe("AI Ask conversation data layer", () => {
 
 describe("AI Ask streaming route", () => {
   afterEach(() => {
-    vi.doUnmock("@/features/retrieval/provenance");
+    vi.doUnmock("/home/sonnh/projects/xuyenviet/packages/database/src/provenance.ts");
+    vi.unstubAllEnvs();
+    setSourceBundleTestDependencies(undefined);
   });
 
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
+    vi.stubEnv("APP_ENV", "test");
+    vi.stubEnv("XV_AI_ASK_API_ENABLED", "false");
+    vi.stubEnv("XV_PRIVATE_API_URL", legacyBffTransport.privateApiUrl);
+    vi.stubEnv("XV_WEB_BFF_ORIGIN", legacyBffTransport.bffOrigin);
+    vi.stubEnv("XV_BFF_CSRF_SIGNING_SECRET", legacyBffTransport.csrfSigningSecret);
+    vi.stubEnv("XV_BFF_CSRF_LIFETIME_SECONDS", String(legacyBffTransport.csrfLifetimeSeconds));
+    vi.stubEnv("XV_BFF_REQUEST_TIMEOUT_MS", String(legacyBffTransport.requestTimeoutMs));
     delete process.env.AI_GATEWAY_TIMEOUT_MS;
     vi.doMock("next/server", () => ({
       after: (callback: () => Promise<void> | void) => {
         void Promise.resolve(callback()).catch(() => undefined);
       },
     }));
-    vi.doMock("@/features/retrieval/web-search", () => ({
+    setSourceBundleTestDependencies({
       searchWebForSourceBundle: vi.fn().mockResolvedValue({
         ok: false,
         code: "low_quality_results",
         attempt: { provider: "tavily", mechanism: "search", latencyMs: 12, status: "failure", errorCode: "low_quality_results" },
-      }),
-      captureWebSearchResults: vi.fn().mockResolvedValue(undefined),
-    }));
+      }) as never,
+      captureWebSearchResults: vi.fn().mockResolvedValue(undefined) as never,
+    });
   });
 
   test("rejects empty stream questions before persistence or provider calls", async () => {
@@ -1470,7 +1504,7 @@ describe("AI Ask streaming route", () => {
     formData.set("question", "Hà Nội đi Đà Nẵng?");
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData, "") as never);
 
     expect(response.status).toBe(400);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -1659,8 +1693,8 @@ describe("AI Ask streaming route", () => {
       "data: [DONE]\n\n",
     ].join(""), { status: 200, headers: { "content-type": "text/event-stream" } }));
     vi.stubGlobal("fetch", fetchMock);
-    vi.doMock("@/features/retrieval/provenance", async () => {
-      const actual = await vi.importActual<typeof import("@/features/retrieval/provenance")>("@/features/retrieval/provenance");
+    vi.doMock("/home/sonnh/projects/xuyenviet/packages/database/src/provenance.ts", async () => {
+      const actual = await vi.importActual<typeof import("@xuyenviet/database")>("/home/sonnh/projects/xuyenviet/packages/database/src/provenance.ts");
       return { ...actual, persistAssistantAnswerProvenance: vi.fn().mockRejectedValue(new Error("persistence unavailable")) };
     });
     vi.doMock("@/server/auth", () => ({
@@ -1714,11 +1748,11 @@ describe("AI Ask streaming route", () => {
     }));
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", {
+    const response = await POST(withValidCsrfRequest(new Request("https://xuyenviet.test/api/ai-ask/stream", {
       method: "POST",
       body: "not-a-valid-multipart-body",
       headers: { "content-type": "multipart/form-data; boundary=bad" },
-    }) as never);
+    })) as never);
 
     expect(response.status).toBe(400);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -2016,7 +2050,7 @@ describe("AI Ask streaming route", () => {
   test("records safe Tavily success usage during AI Ask without raw web content in usage rows", async () => {
     await createTestUser("user-1");
     await createDefaultAiAskModel({ supportsStreaming: true });
-    vi.doMock("@/features/retrieval/web-search", () => ({
+    setSourceBundleTestDependencies({
       searchWebForSourceBundle: vi.fn().mockResolvedValue({
         ok: true,
         attempt: { provider: "tavily", mechanism: "search", latencyMs: 34, status: "success", errorCode: null },
@@ -2033,9 +2067,9 @@ describe("AI Ask streaming route", () => {
           triggerReason: "freshness_sensitive_request",
           rank: 1,
         }],
-      }),
-      captureWebSearchResults: vi.fn().mockResolvedValue(undefined),
-    }));
+      }) as never,
+      captureWebSearchResults: vi.fn().mockResolvedValue(undefined) as never,
+    });
     const fetchMock = vi.fn().mockResolvedValue(new Response([
       'data: {"choices":[{"delta":{"content":"Cần kiểm tra nguồn chính thức."}}]}\n\n',
       'data: {"choices":[{"finish_reason":"stop"}]}\n\n',
@@ -2301,11 +2335,11 @@ describe("AI Ask streaming route", () => {
     }));
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", {
+    const response = await POST(withValidCsrfRequest(new Request("https://xuyenviet.test/api/ai-ask/stream", {
       method: "POST",
       body: "oversized",
       headers: { "content-length": String(7 * 1024 * 1024) },
-    }) as never);
+    })) as never);
 
     expect(response.status).toBe(413);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -2352,6 +2386,7 @@ describe("AI Ask streaming route", () => {
     const response = await POST(createAiAskStreamRequest(formData) as never);
 
     expect(response.status).toBe(200);
+    await response.text();
     expect(fetchMock).not.toHaveBeenCalled();
     expect(await countConversations()).toBe(1);
     expect(await countMessages()).toBe(1);

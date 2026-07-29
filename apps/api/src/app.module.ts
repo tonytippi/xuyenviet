@@ -14,10 +14,12 @@ import { HealthController } from "./health/health.controller";
 import { OpenApiController } from "./openapi.controller";
 import { API_CONFIGURATION_VALID, RELEASE_SCHEMA_VERSION_REPOSITORY } from "./release-schema";
 import { VersionController } from "./version/version.controller";
+import { AiAskController, AI_ASK_STREAM_EXECUTION } from "./ai-ask/ai-ask.controller";
+import type { AiAskStreamExecution } from "@xuyenviet/domain";
 
-export function createApiModule(config: BffCredentialConfig, identities: ApiIdentityRepository, dependencies?: { conversationSummaries: ConversationSummaryRepository; schemaVersions: ReleaseSchemaVersionRepository; configValid?: boolean }) {
+export function createApiModule(config: BffCredentialConfig, identities: ApiIdentityRepository, dependencies?: { conversationSummaries: ConversationSummaryRepository; schemaVersions: ReleaseSchemaVersionRepository; aiAskExecution?: AiAskStreamExecution; configValid?: boolean }) {
   @Module({
-    controllers: dependencies ? [HealthController, VersionController, ConversationsController, OpenApiController] : [],
+    controllers: dependencies ? [HealthController, VersionController, ConversationsController, OpenApiController, ...(dependencies.aiAskExecution ? [AiAskController] : [])] : [],
     providers: [
       { provide: BFF_CREDENTIAL_CONFIG, useValue: config },
       { provide: API_IDENTITY_REPOSITORY, useValue: identities },
@@ -25,6 +27,7 @@ export function createApiModule(config: BffCredentialConfig, identities: ApiIden
         { provide: CONVERSATION_SUMMARY_REPOSITORY, useValue: dependencies.conversationSummaries },
         { provide: RELEASE_SCHEMA_VERSION_REPOSITORY, useValue: dependencies.schemaVersions },
         { provide: API_CONFIGURATION_VALID, useValue: dependencies.configValid ?? true },
+        ...(dependencies.aiAskExecution ? [{ provide: AI_ASK_STREAM_EXECUTION, useValue: dependencies.aiAskExecution }] : []),
       ] : []),
       ResourceServerGuard,
       RequestIdMiddleware,

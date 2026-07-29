@@ -63,6 +63,75 @@ export async function callPrivateApi<T>(input: { config: BffTransportConfig; cre
   }
 }
 
+export async function callPrivateApiStream(input: {
+  config: BffTransportConfig;
+  credential: string;
+  correlationId: string;
+  path: string;
+  idempotencyKey: string;
+  body: ReadableStream<Uint8Array> | null;
+  contentType: string | null;
+  signal?: AbortSignal;
+  fetcher?: typeof fetch;
+}): Promise<{ status: number; body: ReadableStream<Uint8Array>; requestId: string }> {
+  if (!input.path.startsWith("/") || input.path.startsWith("//") || !input.contentType?.toLowerCase().startsWith("multipart/form-data;") || !input.body) throw internalError(input.correlationId);
+  let url: URL;
+  try {
+    const privateApiUrl = new URL(input.config.privateApiUrl);
+    url = new URL(input.path, privateApiUrl);
+    if (url.origin !== privateApiUrl.origin) throw new Error("private origin mismatch");
+  } catch {
+    throw internalError(input.correlationId);
+  }
+  input.signal?.throwIfAborted();
+  const controller = new AbortController();
+  let abortKind: "caller" | "timeout" | null = null;
+  const timeout = setTimeout(() => { if (!abortKind) { abortKind = "timeout"; controller.abort(); } }, input.config.requestTimeoutMs);
+  const onAbort = () => { if (!abortKind) { abortKind = "caller"; controller.abort(input.signal?.reason); } };
+  input.signal?.addEventListener("abort", onAbort, { once: true });
+  try {
+    const response = await (input.fetcher ?? fetch)(url, {
+      method: "POST",
+      headers: { authorization: `Bearer ${input.credential}`, "x-request-id": input.correlationId, "idempotency-key": input.idempotencyKey, "content-type": input.contentType, accept: "application/x-ndjson" },
+      body: input.body,
+      duplex: "half",
+      redirect: "error",
+      signal: controller.signal,
+    } as RequestInit);
+    if (abortKind === "timeout") throw timeoutError(input.correlationId);
+    if (abortKind === "caller") input.signal?.throwIfAborted();
+    if (!response.ok) {
+      const safe = parseSafeApiError(await response.json().catch(() => null));
+      throw new BffApiError(safe ? safeError(safe.code, messageFor(safe.code), input.correlationId, presentationViolations(safe)) : safeError("internal_error", messageFor("internal_error"), input.correlationId));
+    }
+    if (!response.body || !response.headers.get("content-type")?.toLowerCase().startsWith("application/x-ndjson")) throw internalError(input.correlationId);
+    const upstreamRequestId = response.headers.get("x-request-id");
+    // The local timeout protects connection establishment only. Once the API has
+    // committed NDJSON headers, aborting it would silently truncate the protocol.
+    clearTimeout(timeout);
+    return { status: response.status, body: abortableBody(response.body, controller, () => { input.signal?.removeEventListener("abort", onAbort); }), requestId: /^[A-Za-z0-9_-]{1,128}$/.test(upstreamRequestId ?? "") ? upstreamRequestId! : input.correlationId };
+  } catch (error) {
+    clearTimeout(timeout);
+    input.signal?.removeEventListener("abort", onAbort);
+    if (abortKind === "caller") throw error;
+    if (error instanceof BffApiError) throw error;
+    throw abortKind === "timeout" ? timeoutError(input.correlationId) : internalError(input.correlationId);
+  }
+}
+
+function abortableBody(body: ReadableStream<Uint8Array>, controller: AbortController, cleanup: () => void): ReadableStream<Uint8Array> {
+  const reader = body.getReader();
+  return new ReadableStream({
+    async pull(output) {
+      try {
+        const next = await reader.read();
+        if (next.done) { cleanup(); output.close(); } else output.enqueue(next.value);
+      } catch (error) { cleanup(); output.error(error); }
+    },
+    async cancel(reason) { cleanup(); controller.abort(reason); await reader.cancel(reason); },
+  });
+}
+
 function internalError(requestId: string): BffApiError { return new BffApiError(safeError("internal_error", messageFor("internal_error"), requestId)); }
 function timeoutError(requestId: string): BffApiError { return new BffApiError(safeError("request_timeout", messageFor("request_timeout"), requestId)); }
 function safeError(code: SafeApiError["code"], message: string, requestId: string, violations?: SafeApiError["violations"]): SafeApiError { return { code, message, requestId, ...(violations ? { violations } : {}) }; }

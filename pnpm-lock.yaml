@@ -134,6 +134,9 @@ importers:
       '@xuyenviet/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@xuyenviet/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
       jose:
         specifier: ^6.2.3
         version: 6.2.3
@@ -157,11 +160,18 @@ importers:
 
   packages/database:
     dependencies:
+      '@xuyenviet/domain':
+        specifier: workspace:*
+        version: link:../domain
       postgres:
         specifier: ^3.4.9
         version: 3.4.9
 
-  packages/domain: {}
+  packages/domain:
+    dependencies:
+      '@xuyenviet/contracts':
+        specifier: workspace:*
+        version: link:../contracts
 
 packages:
 

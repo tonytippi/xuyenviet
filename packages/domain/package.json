@@ -1,5 +1,8 @@
 {
   "name": "@xuyenviet/domain",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "dependencies": {
+    "@xuyenviet/contracts": "workspace:*"
+  }
 }

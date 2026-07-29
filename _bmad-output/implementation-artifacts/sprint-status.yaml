@@ -201,7 +201,8 @@ development_status:
   10-3-dispatch-ai-ask-follow-up-work-through-a-transactional-outbox: done
   # 2026-07-29: bmad-dev-auto completed the bounded owner-scoped consumer projection, read-only shell enrichment boundary, and non-blocking shell UI. Synchronous Blind Hunter, Edge Case Hunter, and acceptance review repairs are complete. Serial verification passed 49 command/outbox, 130 context/session, and 176 shell/transport/API tests; typecheck/build/diff check passed; lint had 0 errors and 5 pre-existing warnings.
   10-4-preserve-completed-ai-ask-results-while-consumers-run: done
-  10-5-cut-ai-ask-streaming-to-the-versioned-api: backlog
+  # 2026-07-29: Story 10.5 completed after product-owner-authorized coordinated extraction. The shared `@xuyenviet/database` execution now owns command admission, fenced terminal persistence, retrieval/source bundles, gateway streaming, provenance, usage, and transactional outbox; Nest and the disabled compatibility adapter use it without an apps/api-to-root-src import or a second persistence path. Synchronous blind, edge, and acceptance reviews repaired lifecycle, protocol, timeout, CSRF, telemetry, and routing issues. Serial verification passed 46 API/BFF, 169 command/outbox/context, and 160 shell/protocol tests; typecheck/build/diff check passed; lint had 0 errors and 5 pre-existing warnings.
+  10-5-cut-ai-ask-streaming-to-the-versioned-api: done
   epic-10-retrospective: optional
 
   epic-11: backlog

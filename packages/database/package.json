@@ -3,6 +3,8 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@xuyenviet/domain": "workspace:*",
+    "drizzle-orm": "^0.44.5",
     "postgres": "^3.4.9"
   }
 }

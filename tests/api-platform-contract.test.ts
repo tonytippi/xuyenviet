@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { apiAudience } from "@xuyenviet/contracts";
 import { createBffCredentialConfig, type BffCredentialConfig, type Jwk } from "@xuyenviet/config";
 import type { ApiIdentityRepository, ConversationSummaryRepository, ReleaseSchemaVersionRepository } from "@xuyenviet/database";
+import type { AiAskStreamExecution } from "@xuyenviet/domain";
 import { createApiModule } from "../apps/api/src/app.module";
 import { apiCompatibleSchemaVersion } from "../apps/api/src/release-schema";
 
@@ -36,7 +37,8 @@ beforeEach(async () => {
     async hasCompatibleSchemaVersion(version) { return ready && version === apiCompatibleSchemaVersion; },
     async recordSchemaVersion() {},
   };
-  const ApiModule = createApiModule(config, identities, { conversationSummaries: summaries, schemaVersions: versions });
+  const aiAskExecution: AiAskStreamExecution = { async *execute() { yield new Uint8Array([123, 34, 116, 121, 112, 101, 34, 58, 34, 112, 114, 101, 112, 97, 114, 105, 110, 103, 34, 125, 10]); yield new Uint8Array([123, 34, 116, 121, 112, 101, 34, 58, 34, 100, 111, 110, 101, 34, 125, 10]); } };
+  const ApiModule = createApiModule(config, identities, { conversationSummaries: summaries, schemaVersions: versions, aiAskExecution });
   @Module({ imports: [ApiModule] })
   class TestModule {}
   app = await NestFactory.create(TestModule, { logger: false });
@@ -70,6 +72,21 @@ describe("API platform contracts", () => {
       { id: "conversation-a", updatedAt: "2026-07-01T00:00:00.000Z", preview: "Hội thoại mới" },
     ] });
     expect(JSON.stringify(response.body)).not.toContain("conversation-other");
+  });
+
+  test("streams the execution owner's raw NDJSON bytes through the authenticated versioned API", async () => {
+    const boundary = "http-boundary";
+    const multipart = Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="question"\r\n\r\nĐi đâu?\r\n--${boundary}--\r\n`);
+    const response = await request(app.getHttpServer())
+      .post("/v1/ai-ask/stream")
+      .set("Authorization", `Bearer ${await tokenFor()}`)
+      .set("Idempotency-Key", "valid_idempotency_key")
+      .set("Content-Type", `multipart/form-data; boundary=${boundary}`)
+      .send(multipart)
+      .expect(201);
+
+    expect(response.headers["content-type"]).toContain("application/x-ndjson");
+    expect(response.text).toBe('{"type":"preparing"}\n{"type":"done"}\n');
   });
 });
 

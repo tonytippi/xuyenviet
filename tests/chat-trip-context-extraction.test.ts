@@ -1,11 +1,36 @@
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { aiAskCommands, aiGatewayModels, aiUsageEvents, assistantResponseProvenance, auditEvents, chatContext, conversations, domainOutbox, domainOutboxEffects, messages, tripChangeProposals, tripProjects, users } from "@/db/schema";
 
 import { testDb } from "./helpers/db";
 import { acquireAiAskCommand } from "@/features/ai/ai-ask-commands";
 import { processAiAskDomainOutboxBatch } from "@/features/ai/domain-outbox-worker";
+import { issueCsrfToken } from "@/server/csrf";
+
+const legacyBffTransport = {
+  privateApiUrl: "https://api.railway.internal",
+  bffOrigin: "https://xuyenviet.test",
+  csrfSigningSecret: "a".repeat(32),
+  csrfLifetimeSeconds: 300,
+  requestTimeoutMs: 100,
+};
+
+function createAiAskStreamRequest(formData: FormData, idempotencyKey = crypto.randomUUID().replaceAll("-", "")) {
+  const token = issueCsrfToken(legacyBffTransport);
+  const request = new Request("https://xuyenviet.test/api/ai-ask/stream", {
+    method: "POST",
+    body: formData,
+    headers: {
+      "Idempotency-Key": idempotencyKey,
+      origin: legacyBffTransport.bffOrigin,
+      "sec-fetch-site": "same-origin",
+      "X-XuyenViet-CSRF": token,
+    },
+  });
+  Object.assign(request, { cookies: { get: (name: string) => name === "xv_bff_csrf" ? { value: token } : undefined } });
+  return request;
+}
 
 async function createTestUser(userId: string) {
   await testDb.insert(users).values({ id: userId, email: `${userId}@example.com` });
@@ -66,11 +91,22 @@ async function completedAnswerSnapshot() {
 }
 
 describe("chat/trip context extraction", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
     vi.spyOn(console, "info").mockImplementation(() => undefined);
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.stubEnv("APP_ENV", "test");
+    vi.stubEnv("XV_AI_ASK_API_ENABLED", "false");
+    vi.stubEnv("XV_PRIVATE_API_URL", legacyBffTransport.privateApiUrl);
+    vi.stubEnv("XV_WEB_BFF_ORIGIN", legacyBffTransport.bffOrigin);
+    vi.stubEnv("XV_BFF_CSRF_SIGNING_SECRET", legacyBffTransport.csrfSigningSecret);
+    vi.stubEnv("XV_BFF_CSRF_LIFETIME_SECONDS", String(legacyBffTransport.csrfLifetimeSeconds));
+    vi.stubEnv("XV_BFF_REQUEST_TIMEOUT_MS", String(legacyBffTransport.requestTimeoutMs));
   });
 
   test("stores allowed facts as conversation-scoped context for ordinary chat", async () => {
@@ -475,7 +511,7 @@ describe("chat/trip context extraction", () => {
     formData.set("question", "Tôi muốn đi Huế 5 ngày.");
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData, headers: { "Idempotency-Key": crypto.randomUUID().replaceAll("-", "") } }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     const responseText = await response.text();
 
     expect(responseText).toContain('"type":"done"');
@@ -512,7 +548,7 @@ describe("chat/trip context extraction", () => {
     formData.set("question", "Tôi muốn đi Huế 5 ngày.");
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData, headers: { "Idempotency-Key": crypto.randomUUID().replaceAll("-", "") } }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     await vi.waitFor(async () => {
       const [conversation] = await testDb.select({ id: conversations.id }).from(conversations);
       expect(conversation).toBeDefined();
@@ -555,7 +591,7 @@ describe("chat/trip context extraction", () => {
     formData.set("question", "Tôi muốn đi Huế 5 ngày.");
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData, headers: { "Idempotency-Key": crypto.randomUUID().replaceAll("-", "") } }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     const responseText = await response.text();
 
     expect(responseText).toContain('"type":"done"');
@@ -582,7 +618,7 @@ describe("chat/trip context extraction", () => {
     const formData = new FormData();
     formData.set("question", "Tôi muốn đi Huế 5 ngày.");
     const { POST } = await import("@/app/api/ai-ask/stream/route");
-    await (await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData, headers: { "Idempotency-Key": crypto.randomUUID().replaceAll("-", "") } }) as never)).text();
+    await (await POST(createAiAskStreamRequest(formData) as never)).text();
     const terminalSnapshot = await completedAnswerSnapshot();
     await testDb.update(domainOutbox).set({ availableAt: new Date("2099-01-01T00:00:00.000Z") }).where(eq(domainOutbox.eventType, "ai_ask.answer_annotation.v1"));
     await testDb.update(domainOutbox).set({ availableAt: new Date("2020-01-01T00:00:00.000Z") }).where(eq(domainOutbox.eventType, "ai_ask.context_extraction.v1"));
@@ -644,7 +680,7 @@ describe("chat/trip context extraction", () => {
     const { POST } = await import("@/app/api/ai-ask/stream/route");
     const formData = new FormData();
     formData.set("question", "Đi Huế.");
-    await (await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData, headers: { "Idempotency-Key": "annotation-revalidation-race" } }) as never)).text();
+    await (await POST(createAiAskStreamRequest(formData, "annotation-revalidation-race") as never)).text();
     const terminalSnapshot = await completedAnswerSnapshot();
     await testDb.update(domainOutbox).set({ availableAt: new Date("2099-01-01T00:00:00.000Z") }).where(eq(domainOutbox.eventType, "ai_ask.context_extraction.v1"));
     await testDb.update(domainOutbox).set({ availableAt: new Date("2020-01-01T00:00:00.000Z") }).where(eq(domainOutbox.eventType, "ai_ask.answer_annotation.v1"));
@@ -694,7 +730,7 @@ describe("chat/trip context extraction", () => {
     formData.set("tripProjectId", project.id);
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    await (await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData, headers: { "Idempotency-Key": crypto.randomUUID().replaceAll("-", "") } }) as never)).text();
+    await (await POST(createAiAskStreamRequest(formData) as never)).text();
     const [assistant] = await testDb.select({ id: messages.id, conversationId: messages.conversationId }).from(messages).where(eq(messages.role, "assistant"));
     const [userMessage] = await testDb.select({ id: messages.id }).from(messages).where(eq(messages.role, "user"));
     if (!assistant || !userMessage) throw new Error("Expected finalized messages");
@@ -737,7 +773,7 @@ describe("chat/trip context extraction", () => {
     formData.set("tripProjectId", project.id);
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    await (await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData, headers: { "Idempotency-Key": crypto.randomUUID().replaceAll("-", "") } }) as never)).text();
+    await (await POST(createAiAskStreamRequest(formData) as never)).text();
     const [assistant] = await testDb.select({ id: messages.id }).from(messages).where(eq(messages.role, "assistant"));
     if (!assistant) throw new Error("Expected finalized assistant message");
     await testDb.update(domainOutbox).set({ availableAt: new Date("2099-01-01T00:00:00.000Z") }).where(eq(domainOutbox.eventType, "ai_ask.context_extraction.v1"));
@@ -772,7 +808,7 @@ describe("chat/trip context extraction", () => {
     formData.set("tripProjectId", otherProject.id);
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData, headers: { "Idempotency-Key": crypto.randomUUID().replaceAll("-", "") } }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
 
     expect(response.status).toBe(400);
     expect(fetchMock).not.toHaveBeenCalled();
