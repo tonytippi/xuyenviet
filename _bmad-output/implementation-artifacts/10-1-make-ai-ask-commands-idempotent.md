@@ -1,6 +1,6 @@
 # Story 10.1: Make AI Ask Commands Idempotent
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -16,34 +16,34 @@ so that network uncertainty cannot create duplicate turns, provider calls, or as
 
 ## Tasks / Subtasks
 
-- [ ] Define the AI Orchestration command-ledger model and migration (AC: 1-3)
-  - [ ] Add `ai_ask_commands` to `src/db/schema.ts` and generate the next forward-only Drizzle migration and metadata from the current migration journal.
-  - [ ] Persist only safe, bounded command input/result data: owner, scope, key, normalized request/digest, lifecycle status, message references, terminal projection, timestamps, and expiry. Never persist image bytes/data URLs, prompts, provider payloads, credentials, cookies, raw source material, or exception text.
-  - [ ] Enforce the database identity `(user_id, scope_kind, scope_id, idempotency_key)` and schema constraints needed for strict key, digest, status, and expiry invariants. Add lookup/retention indexes justified by the command read paths.
-  - [ ] Keep foreign keys compatible with existing owner conversation/Trip Project deletion cascades. Do not add Story 10.2 lifecycle/aggregate fence semantics early.
-- [ ] Create one AI Orchestration command-acquisition service (AC: 1-3)
-  - [ ] Add an AI-owned server-only module, for example `src/features/ai/ai-ask-commands.ts`, that is the sole place for key validation, canonical request normalization/digest construction, owner-scoped scope resolution, and transactionally acquiring or replaying a command.
-  - [ ] Use the unique database constraint as the concurrency arbiter. A conflict loser must lock/read the durable winner and compare its digest before any turn or provider work; never use a read-then-insert existence check.
-  - [ ] Canonicalize exactly the question used for persistence/prompting. Include explicit scope semantics, selected scope digest, validated attachment metadata, and attachment-content SHA-256 in the request identity so distinct images with matching filename/MIME/size cannot replay as identical.
-  - [ ] Resolve conversations and Trip Projects with owner predicates inside the acquisition transaction. Reuse existing lock/primary-conversation patterns rather than accepting a browser-controlled unscoped scope ID.
-  - [ ] For a genuinely new unscoped request, generate the server-side command scope first, create the command, then create/link the conversation. Replays must recover the original persisted conversation instead of creating another one.
-  - [ ] Return a typed acquisition outcome: admitted command, identical pending replay, identical terminal replay, safe key-reused failure, or safe validation failure. Keep terminal replay data limited to the existing safe browser result shape.
-- [ ] Integrate acquisition ahead of the current single legacy writer (AC: 1-3)
-  - [ ] Update `src/app/api/ai-ask/stream/route.ts` so it obtains/adopts/replays a command before it persists a user message, performs retrieval, selects a model, or invokes the provider.
-  - [ ] Preserve the current route as the only AI Ask command writer for this story. Do not add Nest `POST /v1/ai-ask/stream`, BFF forwarding, a second writer, or a legacy/API compatibility path; Story 10.5 owns that cutover.
-  - [ ] Preserve the existing atomic assistant/provenance/usage transaction and current NDJSON behavior. Do not claim terminal fence verification, `discarded` results, durable follow-up dispatch, or consumer recovery: Stories 10.2-10.4 own those guarantees.
-  - [ ] Terminalize the command with a bounded safe status/result for every terminal route outcome, including success, provider failure, caller abort, final assistant/provenance/usage persistence failure, and outer route failure. An identical retry must replay that exact safe terminal projection without side effects; define caller-abort behavior consistently with the existing UI/NDJSON contract. Never retain raw provider errors, exceptions, prompts, image bytes, source bundles, or internal diagnostics.
-  - [ ] Ensure replay paths perform no provider call, no additional user/assistant/provenance/usage write, and no `after()`/annotation/proposal follow-up scheduling.
-  - [ ] Return only safe validation/key-reuse recovery data. Do not expose provider errors, source bundles, SQL, stack traces, raw inputs, or private configuration.
-- [ ] Carry the key through the browser submission boundary (AC: 1-3)
-  - [ ] Update `src/features/ai/ai-ask-composer.tsx` to generate a key for one logical submit, send it in `Idempotency-Key`, and retain it for ambiguous transport retry/reconnect of that exact payload.
-  - [ ] Generate a new key only for a deliberate new request/payload. Preserve existing in-component duplicate-submit protection, abort behavior, Vietnamese UI, and NDJSON rendering.
-  - [ ] Do not expose a BFF/API credential or make a direct browser call to the private API.
-- [ ] Prove idempotency, ownership, and non-regression behavior (AC: 1-3)
-  - [ ] Add focused PostgreSQL-backed command tests, for example `tests/ai-ask-commands.test.ts`, covering accepted 16/128-character keys, invalid boundaries/characters, same-key pending and terminal replay, provider failure/caller abort/final-persistence failure replay, changed question, changed image content with identical metadata, owner/scope isolation, unscoped command-first creation, expiry/new-key behavior, safe replay serialization, and concurrent first delivery.
-  - [ ] Prove concurrent acquisition creates exactly one command, one user turn, and one provider invocation using independent database connections/transactions, not concurrent calls through the single shared test connection.
-  - [ ] Extend existing route coverage only where required to prove acquisition occurs before provider work and preserves image, source-bundle, provenance, usage, extraction, annotation, and proposal behavior.
-  - [ ] Run focused suites, migration-backed tests, `pnpm lint`, `pnpm typecheck`, and `pnpm build`. Record exact results and blockers in the Dev Agent Record.
+- [x] Define the AI Orchestration command-ledger model and migration (AC: 1-3)
+  - [x] Add `ai_ask_commands` to `src/db/schema.ts` and generate the next forward-only Drizzle migration and metadata from the current migration journal.
+  - [x] Persist only safe, bounded command input/result data: owner, scope, key, normalized request/digest, lifecycle status, message references, terminal projection, timestamps, and expiry. Never persist image bytes/data URLs, prompts, provider payloads, credentials, cookies, raw source material, or exception text.
+  - [x] Enforce the database identity `(user_id, scope_kind, scope_id, idempotency_key)` and schema constraints needed for strict key, digest, status, and expiry invariants. Add lookup/retention indexes justified by the command read paths.
+  - [x] Keep foreign keys compatible with existing owner conversation/Trip Project deletion cascades. Do not add Story 10.2 lifecycle/aggregate fence semantics early.
+- [x] Create one AI Orchestration command-acquisition service (AC: 1-3)
+  - [x] Add an AI-owned server-only module, `src/features/ai/ai-ask-commands.ts`, as the sole place for key validation, canonical request normalization/digest construction, owner-scoped scope resolution, and transactionally acquiring or replaying a command.
+  - [x] Use the unique database constraint as the concurrency arbiter. A conflict loser locks/reads the durable winner and compares its digest before any turn or provider work.
+  - [x] Canonicalize the persisted/prompted question and include explicit scope semantics, selected-scope digest, validated attachment metadata, and attachment-content SHA-256 in request identity.
+  - [x] Resolve conversations and Trip Projects with owner predicates inside the acquisition transaction, and use a server-generated unscoped command scope.
+  - [x] Create the command before the conversation for a new unscoped request; identical replays recover the original persisted command/conversation without another user turn.
+  - [x] Return typed admitted, pending replay, terminal replay, key-reused, and validation-failure outcomes with the safe browser result projection.
+- [x] Integrate acquisition ahead of the current single legacy writer (AC: 1-3)
+  - [x] Update `src/app/api/ai-ask/stream/route.ts` to obtain/adopt/replay a command before message persistence, retrieval, model selection, or provider invocation.
+  - [x] Preserve the current legacy route as the only AI Ask writer; no Nest AI Ask endpoint, BFF forwarding, second writer, or compatibility path was added.
+  - [x] Preserve the assistant/provenance/usage transaction and NDJSON behavior without claiming Story 10.2-10.4 fence, outbox, or consumer-recovery guarantees.
+  - [x] Terminalize every route outcome with a safe projection. A prepared complete projection can be recovered without reclassifying committed assistant persistence; identical retries replay the durable projection without side effects.
+  - [x] Ensure replay paths perform no provider call, additional user/assistant/provenance/usage write, or follow-up scheduling.
+  - [x] Return only safe validation/key-reuse recovery data.
+- [x] Carry the key through the browser submission boundary (AC: 1-3)
+  - [x] Generate and retain an idempotency key for one logical submit in `src/features/ai/ai-ask-composer.tsx`.
+  - [x] Retain immutable original request scope for exact retry after a server-created conversation is adopted; changed payloads generate a new key in the adopted/current scope.
+  - [x] Preserve duplicate-submit protection, abort behavior, Vietnamese UI, NDJSON rendering, and the private Next route boundary.
+- [x] Prove idempotency, ownership, and non-regression behavior (AC: 1-3)
+  - [x] Add PostgreSQL-backed command coverage for key validation, pending/terminal replay, safe terminal serialization, expiry/new-key behavior, owner/scope isolation, attachment digest identity, command-first unscoped creation, prepared-projection recovery, and concurrency.
+  - [x] Prove concurrent acquisition creates one command and one user turn with independent database transactions.
+  - [x] Extend route/composer regression coverage for acquisition-before-provider work, terminal outcomes, annotation/proposal behavior, and retained unscoped retry scope after UI adoption.
+  - [x] Run migration-backed focused suites, transport/API contract suites, `pnpm lint`, `pnpm typecheck`, and `pnpm build`.
 
 ## Dev Notes
 
@@ -128,14 +128,33 @@ gpt-5.6-terra-review
 
 ### Debug Log References
 
-- Story creation only. No production code, schema, migration, test, database, or runtime command was executed.
+- Implementation and repair commits: `2e300fd`, `b2df273`, `61a5c16`, `598da95`, `df3cc50`, `1978360`, `be97f64`, `9f5bc7a`, `d1c7933`.
+- Forward-only migrations `0006` through `0008` applied successfully against `DATABASE_URL_TEST` during focused verification.
 
 ### Completion Notes List
 
 - Comprehensive Story 10.1 implementation guide created from the current PRD, architecture spine, active Epic 10 plan, approved sprint change proposal, Epic 9 foundation context, and current AI Ask implementation patterns.
 - Validation passed on 2026-07-28: acceptance criteria are complete and traceable; task coverage maps to all criteria; schema/concurrency, all terminal replay outcomes, safe-error, ownership, attachment-identity, migration, testing, and scope-boundary guardrails are explicit; no Story 10.2-10.5 work is pulled forward.
-- Status is `ready-for-dev`. This artifact does not claim implementation or test completion.
+- Implemented command-ledger admission/replay, owner- and conversation-scoped message references, safe terminal projections, browser idempotency-key retention, and forward-only migrations.
+- Final independent review found no actionable defects after the retained unscoped retry-scope repair. Residual coverage risk is a browser interaction test around retry fetch interception; the component request-shape and PostgreSQL ledger regressions cover the production paths.
+- Verification passed: focused Story 10.1 bundle (5 files, 277 tests), protected transport/API suite (3 files, 33 tests), `pnpm typecheck`, `pnpm lint` (0 errors; 4 pre-existing warnings), and `pnpm build`.
+- Status is `done`. Atomic terminal fences remain Story 10.2 work, and durable follow-up/outbox recovery remains Story 10.3 work.
 
 ### File List
 
 - _bmad-output/implementation-artifacts/10-1-make-ai-ask-commands-idempotent.md
+- drizzle/migrations/0006_owner_scoped_ai_ask_command_references.sql
+- drizzle/migrations/0007_married_agent_zero.sql
+- drizzle/migrations/0008_stable_ai_ask_terminal_projection.sql
+- drizzle/migrations/meta/_journal.json
+- drizzle/migrations/meta/0006_snapshot.json
+- drizzle/migrations/meta/0007_snapshot.json
+- src/app/api/ai-ask/stream/route.ts
+- src/db/schema.ts
+- src/features/ai/ai-ask-commands.ts
+- src/features/ai/ai-ask-composer.tsx
+- tests/ai-ask-commands.test.ts
+- tests/ai-ask-shell.test.ts
+- tests/answer-context.test.ts
+- tests/chat-trip-context-extraction.test.ts
+- tests/ai-ask-sessions.test.ts

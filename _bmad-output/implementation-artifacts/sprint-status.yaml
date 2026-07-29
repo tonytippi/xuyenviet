@@ -192,8 +192,9 @@ development_status:
   9-4-publish-versioned-api-contracts-and-migrate-a-protected-read: done
   epic-9-retrospective: optional
 
-  epic-10: backlog
-  10-1-make-ai-ask-commands-idempotent: ready-for-dev
+  epic-10: in-progress
+  # 2026-07-29: Story 10.1 completed after independent blind, edge-case, and acceptance reviews plus bounded repairs for command message-reference ownership, terminal projection recovery, and retained browser retry scope. Migration-backed Story 10.1 regression bundle passed (5 files, 277 tests); protected transport/API suite passed (3 files, 33 tests); typecheck and build passed; lint had 0 errors and 4 pre-existing warnings. Atomic fence and durable follow-up guarantees remain explicitly deferred to Stories 10.2 and 10.3.
+  10-1-make-ai-ask-commands-idempotent: done
   10-2-fence-terminal-ai-ask-persistence: backlog
   10-3-dispatch-ai-ask-follow-up-work-through-a-transactional-outbox: backlog
   10-4-preserve-completed-ai-ask-results-while-consumers-run: backlog
