@@ -109,7 +109,24 @@ export async function acquireAiAskCommand(input: AcquireAiAskCommandInput): Prom
 }
 
 export async function terminalizeAiAskCommand(commandId: string, status: "completed" | "failed" | "aborted", result: AiAskTerminalResult, assistantMessageId?: string) {
-  await getDb().update(aiAskCommands).set({ status, terminalResult: result, assistantMessageId: assistantMessageId ?? null, terminalAt: new Date(), updatedAt: new Date() }).where(and(eq(aiAskCommands.id, commandId), eq(aiAskCommands.status, "pending")));
+  // This is deliberately separate from the assistant/provenance/usage transaction.
+  // Story 10.2 owns atomic finalization fences, so for now we retry and verify the
+  // persisted command projection before the route can report a terminal outcome.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const [updated] = await getDb().update(aiAskCommands)
+        .set({ status, terminalResult: result, assistantMessageId: assistantMessageId ?? null, terminalAt: new Date(), updatedAt: new Date() })
+        .where(and(eq(aiAskCommands.id, commandId), eq(aiAskCommands.status, "pending")))
+        .returning({ id: aiAskCommands.id });
+      if (updated) return;
+
+      const [existing] = await getDb().select({ status: aiAskCommands.status, terminalResult: aiAskCommands.terminalResult }).from(aiAskCommands).where(eq(aiAskCommands.id, commandId)).limit(1);
+      if (existing?.status === status && JSON.stringify(existing.terminalResult) === JSON.stringify(result)) return;
+      throw new Error("AI Ask command has a conflicting terminal state.");
+    } catch (error) {
+      if (attempt === 2) throw error;
+    }
+  }
 }
 
 async function resolveScope(transaction: Transaction, userId: string, conversationId: string | undefined, tripProjectId: string | undefined) {

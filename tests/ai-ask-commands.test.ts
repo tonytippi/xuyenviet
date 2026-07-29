@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 
-import { aiAskCommands, conversations, messages, schema, users } from "@/db/schema";
+import { aiAskCommands, conversations, messages, schema, tripProjects, users } from "@/db/schema";
 import { acquireAiAskCommand, terminalizeAiAskCommand, validateAiAskIdempotencyKey } from "@/features/ai/ai-ask-commands";
 
 import { testDb } from "./helpers/db";
@@ -69,6 +69,20 @@ describe("AI Ask command ledger", () => {
     expect(await testDb.select().from(messages)).toHaveLength(2);
   });
 
+  test("serializes and replays only the safe terminal browser projection", async () => {
+    await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
+    const [conversation] = await testDb.insert(conversations).values({ id: "conversation", userId: "owner" }).returning({ id: conversations.id });
+    const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: key, question: "Đi Huế", conversationId: conversation.id });
+    if (admitted.kind !== "admitted") throw new Error("Expected command admission");
+    const result = { type: "error" as const, conversationId: conversation.id, userMessage: admitted.userMessage, errorMessage: "Không thể hoàn tất luồng trả lời lúc này. Hãy thử lại sau." };
+
+    await terminalizeAiAskCommand(admitted.commandId, "failed", result);
+    const [stored] = await testDb.select({ terminalResult: aiAskCommands.terminalResult }).from(aiAskCommands).where(eq(aiAskCommands.id, admitted.commandId));
+
+    expect(JSON.parse(JSON.stringify(stored.terminalResult))).toEqual(result);
+    await expect(acquireAiAskCommand({ userId: "owner", idempotencyKey: key, question: "Đi Huế", conversationId: conversation.id })).resolves.toEqual({ kind: "terminal_replay", result });
+  });
+
   test("rejects a changed digest without another turn", async () => {
     await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
     const [conversation] = await testDb.insert(conversations).values({ id: "conversation", userId: "owner" }).returning({ id: conversations.id });
@@ -108,6 +122,52 @@ describe("AI Ask command ledger", () => {
       conversationId: conversation.id,
       expiresAt: new Date(Date.now() + 60_000),
     })).rejects.toThrow();
+  });
+
+  test("rejects same-owner message references from another conversation", async () => {
+    await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
+    const [commandConversation] = await testDb.insert(conversations).values({ id: "command-conversation", userId: "owner" }).returning({ id: conversations.id });
+    const [otherConversation] = await testDb.insert(conversations).values({ id: "other-conversation", userId: "owner" }).returning({ id: conversations.id });
+    const [otherMessage] = await testDb.insert(messages).values({ conversationId: otherConversation.id, userId: "owner", role: "user", content: "Không thuộc hội thoại lệnh" }).returning({ id: messages.id });
+
+    await expect(testDb.insert(aiAskCommands).values({
+      userId: "owner",
+      scopeKind: "conversation",
+      scopeId: commandConversation.id,
+      idempotencyKey: "another_valid_key_1",
+      requestDigest: "a".repeat(64),
+      normalizedQuestion: "Đi Huế",
+      selectedScopeDigest: "b".repeat(64),
+      conversationId: commandConversation.id,
+      userMessageId: otherMessage.id,
+      expiresAt: new Date(Date.now() + 60_000),
+    })).rejects.toThrow();
+  });
+
+  test("replays the same key for a selected Trip Project primary conversation", async () => {
+    await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
+    const [project] = await testDb.insert(tripProjects).values({ id: "project", userId: "owner", title: "Huế" }).returning({ id: tripProjects.id });
+    const [primary] = await testDb.insert(conversations).values({ id: "project-primary", userId: "owner", tripProjectId: project.id }).returning({ id: conversations.id });
+    await testDb.update(tripProjects).set({ primaryConversationId: primary.id }).where(eq(tripProjects.id, project.id));
+
+    const first = await acquireAiAskCommand({ userId: "owner", idempotencyKey: key, question: "Đi Huế", tripProjectId: project.id });
+    const second = await acquireAiAskCommand({ userId: "owner", idempotencyKey: key, question: "Đi Huế", tripProjectId: project.id });
+
+    expect(first).toMatchObject({ kind: "admitted", conversationId: primary.id, tripProjectId: project.id });
+    expect(second).toMatchObject({ kind: "pending_replay", conversationId: primary.id });
+    expect(await testDb.select().from(messages)).toHaveLength(1);
+  });
+
+  test("retains expired commands and requires a new key for a later request", async () => {
+    await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
+    const [conversation] = await testDb.insert(conversations).values({ id: "conversation", userId: "owner" }).returning({ id: conversations.id });
+    const first = await acquireAiAskCommand({ userId: "owner", idempotencyKey: key, question: "Đi Huế", conversationId: conversation.id });
+    if (first.kind !== "admitted") throw new Error("Expected command admission");
+    await testDb.update(aiAskCommands).set({ expiresAt: new Date(Date.now() - 1_000) }).where(eq(aiAskCommands.id, first.commandId));
+
+    await expect(acquireAiAskCommand({ userId: "owner", idempotencyKey: key, question: "Đi Huế", conversationId: conversation.id })).resolves.toEqual({ kind: "key_reused" });
+    await expect(acquireAiAskCommand({ userId: "owner", idempotencyKey: "another_valid_key_2", question: "Đi Huế", conversationId: conversation.id })).resolves.toMatchObject({ kind: "admitted" });
+    expect(await testDb.select().from(aiAskCommands)).toHaveLength(2);
   });
 
   test("cascades command deletion with its owned conversation", async () => {

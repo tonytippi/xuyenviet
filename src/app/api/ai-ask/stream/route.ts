@@ -380,6 +380,17 @@ async function streamAnswer({
     }
 
     if (completed) {
+      if (abortSignal.aborted) {
+        const result: StreamEvent = {
+          type: "error",
+          conversationId: savedTurn.conversationId,
+          userMessage: savedTurn.userMessage,
+          errorMessage: "Luồng trả lời đã bị dừng. Tin nhắn của bạn đã được lưu nhưng chưa có câu trả lời trợ lý cho lượt này.",
+        };
+        await terminalizeAiAskCommand(command.commandId, "aborted", result);
+        sendEvent(controller, encoder, result);
+        return;
+      }
       completed.annotations = sanitizeStoredAnswerAnnotations({
         answerText: completed.content,
         annotations: await buildValidatedAnswerAnnotations({ answerText: completed.content, provenance: completed.provenance, model: selectedModel.gatewayModelName, abortSignal }),
@@ -399,8 +410,29 @@ async function streamAnswer({
       const proposalSummary = tripProjectId
         ? await draftAndPersistProposal({ session, tripProjectId, question, assistantMessageId: completed.id, abortSignal })
         : undefined;
+      if (abortSignal.aborted) {
+        const result: StreamEvent = {
+          type: "error",
+          conversationId: savedTurn.conversationId,
+          userMessage: savedTurn.userMessage,
+          errorMessage: "Luồng trả lời đã bị dừng. Tin nhắn của bạn đã được lưu nhưng chưa có câu trả lời trợ lý cho lượt này.",
+        };
+        await terminalizeAiAskCommand(command.commandId, "aborted", result);
+        sendEvent(controller, encoder, result);
+        return;
+      }
       const result: StreamEvent = { type: "done", conversationId: savedTurn.conversationId, userMessage: savedTurn.userMessage, assistantMessage: completed, proposal: proposalSummary };
-      await terminalizeAiAskCommand(command.commandId, "completed", result, completed.id);
+      try {
+        await terminalizeAiAskCommand(command.commandId, "completed", result, completed.id);
+      } catch (terminalizationError) {
+        // The assistant/provenance/usage transaction committed. Do not reclassify
+        // that durable result as failed while Story 10.2 lacks atomic fencing.
+        console.error("AI Ask completed command terminalization could not be verified", {
+          commandId: command.commandId,
+          error: terminalizationError instanceof Error ? { name: terminalizationError.name, message: terminalizationError.message } : String(terminalizationError),
+        });
+        return;
+      }
       sendEvent(controller, encoder, result);
     } else {
       const result: StreamEvent = {
