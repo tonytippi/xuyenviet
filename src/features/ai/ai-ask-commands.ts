@@ -169,6 +169,14 @@ export async function updateCompletedAiAskCommandTerminalResult(commandId: strin
   throw new Error("AI Ask command was not found.");
 }
 
+// The stream must publish the retained projection, not a stale in-memory copy:
+// deletion can scrub a completed command while optional follow-up work is running.
+export async function readAiAskCommandTerminalResult(commandId: string): Promise<AiAskTerminalResult> {
+  const [command] = await getDb().select({ terminalResult: aiAskCommands.terminalResult }).from(aiAskCommands).where(eq(aiAskCommands.id, commandId)).limit(1);
+  if (command?.terminalResult) return command.terminalResult as AiAskTerminalResult;
+  throw new Error("AI Ask command terminal result was not found.");
+}
+
 export async function finalizeAiAskCommand<T extends { result: AiAskTerminalResult; assistantMessageId: string }>(commandId: string, persist: (transaction: Transaction, command: { userId: string; conversationId: string; tripProjectId: string | null; userMessageId: string }) => Promise<T>): Promise<T | { result: AiAskTerminalResult; discarded: true }> {
   return getDb().transaction(async (transaction) => {
     const [unlocked] = await transaction.select().from(aiAskCommands).where(eq(aiAskCommands.id, commandId)).limit(1);

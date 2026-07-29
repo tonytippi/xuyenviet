@@ -4,7 +4,7 @@ import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 
 import { aiAskCommands, conversations, messages, schema, tripProjects, users } from "@/db/schema";
-import { acquireAiAskCommand, aiAskRefreshRequiredMessage, discardAiAskCommandsForDeletedConversations, finalizeAiAskCommand, terminalizeAiAskCommand, terminalResultsEqual, updateCompletedAiAskCommandTerminalResult, validateAiAskIdempotencyKey } from "@/features/ai/ai-ask-commands";
+import { acquireAiAskCommand, aiAskRefreshRequiredMessage, discardAiAskCommandsForDeletedConversations, finalizeAiAskCommand, readAiAskCommandTerminalResult, terminalizeAiAskCommand, terminalResultsEqual, updateCompletedAiAskCommandTerminalResult, validateAiAskIdempotencyKey } from "@/features/ai/ai-ask-commands";
 
 import { testDb } from "./helpers/db";
 
@@ -127,6 +127,35 @@ describe("AI Ask command ledger", () => {
     });
 
     await expect(acquireAiAskCommand({ userId: "owner", idempotencyKey: key, question: "Đi Huế", conversationId: conversation.id })).resolves.toEqual({ kind: "terminal_replay", result: emitted });
+  });
+
+  test("publishes the scrubbed projection when deletion wins after completion and optional follow-up", async () => {
+    await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
+    const [conversation] = await testDb.insert(conversations).values({ id: "conversation", userId: "owner" }).returning({ id: conversations.id });
+    const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: key, question: "Đi Huế", conversationId: conversation.id });
+    if (admitted.kind !== "admitted") throw new Error("Expected command admission");
+    const finalized = await finalizeAiAskCommand(admitted.commandId, async (transaction, command) => {
+      const [assistant] = await transaction.insert(messages).values({ conversationId: command.conversationId, userId: command.userId, role: "assistant", content: "Gợi ý đã lưu" }).returning({ id: messages.id });
+      return { assistantMessageId: assistant.id, result: { type: "done" as const, conversationId: command.conversationId, userMessage: admitted.userMessage, assistantMessage: { id: assistant.id, content: "Gợi ý đã lưu" } } };
+    });
+    if ("discarded" in finalized) throw new Error("Expected completed command");
+    await updateCompletedAiAskCommandTerminalResult(admitted.commandId, {
+      ...finalized.result,
+      assistantMessage: { ...finalized.result.assistantMessage, annotations: [{ kind: "source", label: "Huế" }] },
+      proposal: { proposalId: "proposal", status: "pending" },
+    });
+
+    await testDb.transaction((transaction) => discardAiAskCommandsForDeletedConversations(transaction, "owner", [conversation.id]));
+
+    await expect(readAiAskCommandTerminalResult(admitted.commandId)).resolves.toEqual({
+      type: "error",
+      code: "refresh_required",
+      errorMessage: aiAskRefreshRequiredMessage,
+    });
+    await expect(acquireAiAskCommand({ userId: "owner", idempotencyKey: key, question: "Đi Huế", conversationId: conversation.id })).resolves.toEqual({
+      kind: "terminal_replay",
+      result: { type: "error", code: "refresh_required", errorMessage: aiAskRefreshRequiredMessage },
+    });
   });
 
   test("rolls back assistant and command completion when final persistence fails", async () => {

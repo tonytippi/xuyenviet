@@ -3,7 +3,7 @@ import { after } from "next/server";
 
 import { getDb } from "@/db/client";
 import { conversations, messages } from "@/db/schema";
-import { acquireAiAskCommand, finalizeAiAskCommand, terminalizeAiAskCommand, updateCompletedAiAskCommandTerminalResult } from "@/features/ai/ai-ask-commands";
+import { acquireAiAskCommand, finalizeAiAskCommand, readAiAskCommandTerminalResult, terminalizeAiAskCommand, updateCompletedAiAskCommandTerminalResult } from "@/features/ai/ai-ask-commands";
 import { buildValidatedAnswerAnnotations, sanitizeStoredAnswerAnnotations, type AnswerAnnotation } from "@/features/ai/answer-annotations";
 import { ensureAiAskFreshnessWarning, requiresAiAskAnswerFinalization } from "@/features/ai/answer-freshness";
 import { streamInitialAiAskAnswer } from "@/features/ai/gateway";
@@ -360,7 +360,9 @@ async function streamAnswer({
        if (proposalSummary) {
          terminalResult = await updateCompletedAiAskCommandTerminalResult(command.commandId, { ...terminalResult, proposal: proposalSummary }) as Extract<StreamEvent, { type: "done" }>;
        }
-       sendEvent(controller, encoder, terminalResult);
+        // Optional work can overlap deletion, which scrubs this command's durable
+        // projection. Publish the authoritative terminal result at the boundary.
+        sendEvent(controller, encoder, await readAiAskCommandTerminalResult(command.commandId) as StreamEvent);
     } else {
       sendEvent(controller, encoder, finalization.result as StreamEvent);
     }
