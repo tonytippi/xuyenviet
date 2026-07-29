@@ -41,9 +41,7 @@ export function isAiAskApiEnabled(environment: { APP_ENV?: string; XV_AI_ASK_API
 export function createBffTransportConfig(input: Omit<BffTransportConfig, "privateApiUrl"> & { privateApiUrl: URL }): BffTransportConfig {
   if (
     !(input.privateApiUrl instanceof URL) || input.privateApiUrl.protocol !== "https:" || input.privateApiUrl.hostname !== apiAudience || input.privateApiUrl.username || input.privateApiUrl.password ||
-    !isExactHttpsOrigin(input.bffOrigin) ||
-    typeof input.csrfSigningSecret !== "string" || input.csrfSigningSecret.length < 32 ||
-    !Number.isInteger(input.csrfLifetimeSeconds) || input.csrfLifetimeSeconds < 60 || input.csrfLifetimeSeconds > 3600 ||
+    !isValidBffCsrfConfig(input) ||
     !Number.isInteger(input.requestTimeoutMs) || input.requestTimeoutMs < 100 || input.requestTimeoutMs > 30_000
   ) throw new Error("Invalid BFF transport configuration.");
   return Object.freeze({
@@ -67,11 +65,13 @@ export function getBffTransportConfig(environment: NodeJS.ProcessEnv = process.e
 
 /** The rollback BFF still enforces the same session/CSRF boundary without an API origin. */
 export function getBffCsrfConfig(environment: NodeJS.ProcessEnv = process.env): BffCsrfConfig {
-  return {
+  const config = {
     bffOrigin: requiredExactHttpsOrigin(environment.XV_WEB_BFF_ORIGIN),
     csrfSigningSecret: requiredValue(environment.XV_BFF_CSRF_SIGNING_SECRET),
     csrfLifetimeSeconds: requiredInteger(environment.XV_BFF_CSRF_LIFETIME_SECONDS),
   };
+  if (!isValidBffCsrfConfig(config)) throw new Error("Invalid BFF transport configuration.");
+  return config;
 }
 
 export function parseBffCredentialConfig(input: unknown): BffCredentialConfig {
@@ -193,4 +193,10 @@ function requiredInteger(value: string | undefined): number {
 
 function isExactHttpsOrigin(value: string): boolean {
   try { const url = new URL(value); return url.protocol === "https:" && url.origin === value; } catch { return false; }
+}
+
+function isValidBffCsrfConfig(input: BffCsrfConfig): boolean {
+  return isExactHttpsOrigin(input.bffOrigin)
+    && typeof input.csrfSigningSecret === "string" && input.csrfSigningSecret.length >= 32
+    && Number.isInteger(input.csrfLifetimeSeconds) && input.csrfLifetimeSeconds >= 60 && input.csrfLifetimeSeconds <= 3600;
 }

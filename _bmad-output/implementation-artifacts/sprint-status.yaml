@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-07-29 (Story 10.5 targeted Epic 10 completion-review repairs completed; Epic 10 is done.)
+# last_updated: 2026-07-29 (Story 10.5 final permitted Epic 10 completion-review repairs completed; Epic 10 is done.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-07-29 (Story 10.5 targeted Epic 10 completion-review repairs completed; Epic 10 is done.)
+last_updated: 2026-07-29 (Story 10.5 final permitted Epic 10 completion-review repairs completed; Epic 10 is done.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -204,6 +204,8 @@ development_status:
   # 2026-07-29: Story 10.5 completed after product-owner-authorized coordinated extraction. The shared `@xuyenviet/database` execution now owns command admission, fenced terminal persistence, retrieval/source bundles, gateway streaming, provenance, usage, and transactional outbox; Nest and the disabled compatibility adapter use it without an apps/api-to-root-src import or a second persistence path. Synchronous blind, edge, and acceptance reviews repaired lifecycle, protocol, timeout, CSRF, telemetry, and routing issues. Serial verification passed 46 API/BFF, 169 command/outbox/context, and 160 shell/protocol tests; typecheck/build/diff check passed; lint had 0 errors and 5 pre-existing warnings.
   # 2026-07-29: Epic 10 completion review ran synchronous Blind Hunter, Edge Case Hunter, and Acceptance Auditor layers over 2e300fd^..945b619. Story 10.5 required targeted repair for disabled API-config coupling, full-lifetime BFF timeout, safe API terminalization, and authenticated enabled integration proof.
   # 2026-07-29: Targeted repair completed after synchronous blocking reviews. Disabled compatibility routing now selects before API-only config; API/BFF raw-frame relays enforce one root terminal and safe timeout recovery; live authenticated BFF-to-Nest PostgreSQL proof covers relay, ordering/non-disclosure, abort, provider failure, stale fence, dispatch failure, atomic persistence, and replay. Serial verification: 47 API/BFF, 169 command/outbox/context, and 154 shell/session tests; typecheck/build/diff check passed; lint 0 errors and 5 pre-existing warnings. Status synchronized to done.
+  # 2026-07-29: Final permitted Epic 10 completion review of repair range 9259cab8^..b381a68 ran Blind Hunter, Edge Case Hunter, and Acceptance Auditor synchronously. Three actionable Story 10.5 repair findings remain: pending `in_progress` replay is followed by an erroneous terminal failure; the BFF raw relay bypasses downstream backpressure; and disabled rollback CSRF config bypasses established secret/lifetime bounds. Story 10.5 set to in-progress; Epic 10 remains done per review instruction. Focused verification: 63 API/BFF tests, 169 command/outbox/context tests, and 154 shell/session tests passed; typecheck and build passed; lint had 0 errors and 5 pre-existing warnings; git diff --check passed.
+  # 2026-07-29: Final permitted repair completed. `in_progress` replays are accepted as exactly one record; BFF streaming is pull-driven with bounded incomplete framing and cancellation-safe lifecycle; disabled rollback CSRF uses enabled transport's 32-character secret and 60-3600 second TTL bounds. Final synchronous blind, edge-case, and acceptance review found no actionable findings. Serial verification passed 47 API/BFF, 169 command/outbox/context, and 154 shell/session tests; typecheck/build/diff check passed; lint had 0 errors and 5 pre-existing warnings. Story status synchronized to done; Epic 10 remains done.
   10-5-cut-ai-ask-streaming-to-the-versioned-api: done
   epic-10-retrospective: optional
 

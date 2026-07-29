@@ -4,6 +4,7 @@ import { parseSafeApiError, type SafeApiError } from "@xuyenviet/contracts";
 import type { BffTransportConfig } from "@xuyenviet/config";
 
 const safeStreamFailure = new TextEncoder().encode('{"type":"error","errorMessage":"Không thể hoàn tất luồng trả lời lúc này. Hãy thử lại sau."}\n');
+const maxIncompleteNdjsonRecordBytes = 1024 * 1024;
 
 export class BffApiError extends Error {
   constructor(readonly safe: SafeApiError) { super(safe.message); }
@@ -91,6 +92,7 @@ export async function callPrivateApiStream(input: {
   const timeout = setTimeout(() => { if (!abortKind) { abortKind = "timeout"; controller.abort(); } }, input.config.requestTimeoutMs);
   const onAbort = () => { if (!abortKind) { abortKind = "caller"; controller.abort(input.signal?.reason); } };
   input.signal?.addEventListener("abort", onAbort, { once: true });
+  if (input.signal?.aborted) onAbort();
   try {
     const response = await (input.fetcher ?? fetch)(url, {
       method: "POST",
@@ -128,7 +130,6 @@ export async function callPrivateApiStream(input: {
 function abortableBody(body: ReadableStream<Uint8Array>, controller: AbortController, cleanup: () => void, abortKind: () => "caller" | "timeout" | null): ReadableStream<Uint8Array> {
   const reader = body.getReader();
   let closed = false;
-  let terminalSent = false;
   const framer = createNdjsonFramer();
   const finish = () => {
     if (closed) return;
@@ -141,97 +142,114 @@ function abortableBody(body: ReadableStream<Uint8Array>, controller: AbortContro
     if (closed) return;
     const kind = abortKind();
     finish();
-    if (kind === "timeout" && !terminalSent) {
-      outputController?.enqueue(safeStreamFailure);
+    try {
+      if (kind === "timeout") outputController?.enqueue(safeStreamFailure);
+    } finally {
       outputController?.close();
-    } else {
-      outputController?.close();
+      void reader.cancel(controller.signal.reason).catch(() => {});
     }
-    void reader.cancel(controller.signal.reason);
   };
   return new ReadableStream({
     start(output) {
       outputController = output;
       controller.signal.addEventListener("abort", onAbort, { once: true });
       if (controller.signal.aborted) onAbort();
-      else void pump(output);
+    },
+    pull(output) {
+      return relayPull(output);
     },
     async cancel(reason) {
       finish();
       controller.abort(reason);
       try { await reader.cancel(reason); } catch { /* Upstream abort races are already terminal for this relay. */ }
     },
-  });
+  }, { highWaterMark: 0 });
 
-  async function pump(output: ReadableStreamDefaultController<Uint8Array>) {
-    while (!closed) {
-      try {
+  async function relayPull(output: ReadableStreamDefaultController<Uint8Array>) {
+    if (closed) return;
+    try {
+      while (!closed) {
         const next = await reader.read();
         if (controller.signal.aborted) return;
         if (next.done) {
           finish();
-          if (!terminalSent) output.enqueue(safeStreamFailure);
+          output.enqueue(safeStreamFailure);
           output.close();
           return;
         }
-        for (const frame of framer.push(next.value)) {
-          output.enqueue(frame.bytes);
-          if (frame.terminal) {
-            terminalSent = true;
-            finish();
-            await reader.cancel();
-            output.close();
-            return;
-          }
-        }
-      } catch {
-        if (controller.signal.aborted) return;
-        finish();
-        if (!terminalSent) {
-          output.enqueue(safeStreamFailure);
+        const relayed = framer.push(next.value);
+        if (!relayed) continue;
+        output.enqueue(relayed.bytes);
+        if (relayed.terminal) {
+          finish();
+          // A root in_progress is the complete pending-replay result. Do not wait
+          // for EOF, which may never arrive from an already-running execution.
+          void reader.cancel().catch(() => {});
           output.close();
         }
         return;
+      }
+    } catch {
+      if (controller.signal.aborted) return;
+      finish();
+      try {
+        output.enqueue(safeStreamFailure);
+      } finally {
+        output.close();
+        void reader.cancel().catch(() => {});
       }
     }
   }
 }
 
-function createNdjsonFramer(): { push(bytes: Uint8Array): Array<{ bytes: Uint8Array; terminal: boolean }> } {
+function createNdjsonFramer(): { push(bytes: Uint8Array): { bytes: Uint8Array; terminal: boolean } | undefined } {
   let buffered = new Uint8Array();
   const decoder = new TextDecoder("utf-8", { fatal: true });
   return {
     push(bytes) {
-      const combined = new Uint8Array(buffered.byteLength + bytes.byteLength);
-      combined.set(buffered);
-      combined.set(bytes, buffered.byteLength);
-      const frames: Array<{ bytes: Uint8Array; terminal: boolean }> = [];
+      const hadBufferedBytes = buffered.byteLength > 0;
+      const combined = hadBufferedBytes ? joinBytes(buffered, bytes) : bytes;
       let start = 0;
+      let completeEnd = 0;
       for (let index = 0; index < combined.byteLength; index += 1) {
         if (combined[index] !== 10) continue;
-        const frame = combined.slice(start, index + 1);
         // Examine a completed record without changing the bytes sent to the caller.
-        const terminal = isTerminalNdjsonRecord(frame, decoder);
-        frames.push({ bytes: frame, terminal });
+        const recordType = ndjsonRecordType(combined.subarray(start, index + 1), decoder);
+        completeEnd = index + 1;
         start = index + 1;
+        const terminal = recordType === "done" || recordType === "error" || recordType === "in_progress";
         if (terminal) {
           buffered = new Uint8Array();
-          return frames;
+          return { bytes: completeBytes(combined, bytes, hadBufferedBytes, completeEnd), terminal: true };
         }
       }
-      buffered = combined.slice(start);
-      return frames;
+      const incompleteLength = combined.byteLength - completeEnd;
+      if (incompleteLength > maxIncompleteNdjsonRecordBytes) throw new Error("Incomplete NDJSON record exceeds relay limit.");
+      // Copy the tail so a small incomplete record cannot retain a large source chunk.
+      buffered = incompleteLength === 0 ? new Uint8Array() : combined.slice(completeEnd);
+      return completeEnd === 0 ? undefined : { bytes: completeBytes(combined, bytes, hadBufferedBytes, completeEnd), terminal: false };
     },
   };
 }
 
-function isTerminalNdjsonRecord(bytes: Uint8Array, decoder: TextDecoder) {
+function joinBytes(left: Uint8Array, right: Uint8Array): Uint8Array {
+  const joined = new Uint8Array(left.byteLength + right.byteLength);
+  joined.set(left);
+  joined.set(right, left.byteLength);
+  return joined;
+}
+
+function completeBytes(combined: Uint8Array, source: Uint8Array, hadBufferedBytes: boolean, length: number): Uint8Array {
+  return !hadBufferedBytes && length === source.byteLength ? source : combined.slice(0, length);
+}
+
+function ndjsonRecordType(bytes: Uint8Array, decoder: TextDecoder): string | undefined {
   try {
     const record: unknown = JSON.parse(decoder.decode(bytes));
-    return typeof record === "object" && record !== null && !Array.isArray(record)
-      && ((record as { type?: unknown }).type === "done" || (record as { type?: unknown }).type === "error");
+    const type = typeof record === "object" && record !== null && !Array.isArray(record) ? (record as { type?: unknown }).type : undefined;
+    return typeof type === "string" ? type : undefined;
   } catch {
-    return false;
+    return undefined;
   }
 }
 

@@ -146,6 +146,33 @@ describe("AI Ask API adapter", () => {
     expect(new TextDecoder().decode(concatenate(written))).toBe('{"type":"preparing"}\n{"type":"error","errorMessage":"Không thể hoàn tất luồng trả lời lúc này. Hãy thử lại sau."}\n');
   });
 
+  test("accepts a complete pending replay and suppresses unfinished later bytes", async () => {
+    const replay = new TextEncoder().encode('{"type":"in_progress","conversationId":"conversation-1"}\n{"type":"delta","content":"partial');
+    const controller = new AiAskController({
+      execute: async function* () { yield replay; },
+    });
+    const written: Uint8Array[] = [];
+    const response = { writableEnded: false, headersSent: false, setHeader: vi.fn(), write: vi.fn((bytes: Uint8Array) => { written.push(bytes); return true; }), end: vi.fn(), once: vi.fn(), removeListener: vi.fn() };
+
+    await controller.stream(principal(), "valid_idempotency_key", multipartRequest("adapter-boundary"), response);
+
+    expect(new TextDecoder().decode(concatenate(written))).toBe('{"type":"in_progress","conversationId":"conversation-1"}\n');
+    expect(response.end).toHaveBeenCalledOnce();
+  });
+
+  test("ends the response when execution iterator cleanup rejects", async () => {
+    const iterator = {
+      next: vi.fn(async () => ({ done: false as const, value: new TextEncoder().encode('{"type":"done"}\n') })),
+      return: vi.fn(async () => { throw new Error("iterator cleanup failed"); }),
+    };
+    const controller = new AiAskController({ execute: vi.fn(() => ({ [Symbol.asyncIterator]: () => iterator })) as AiAskStreamExecution["execute"] });
+    const response = { writableEnded: false, headersSent: false, setHeader: vi.fn(), write: vi.fn(() => true), end: vi.fn(), once: vi.fn(), removeListener: vi.fn() };
+
+    await expect(controller.stream(principal(), "valid_idempotency_key", multipartRequest("adapter-boundary"), response)).resolves.toBeUndefined();
+
+    expect(response.end).toHaveBeenCalledOnce();
+  });
+
   test("drops an unterminated raw fragment before the canonical terminal when a begun iterator fails", async () => {
     const controller = new AiAskController({
       execute: async function* () {
@@ -173,6 +200,21 @@ describe("AI Ask API adapter", () => {
     await controller.stream(principal(), "valid_idempotency_key", multipartRequest("adapter-boundary"), response);
 
     expect(new TextDecoder().decode(concatenate(written))).toBe('{"type":"preparing"}\n{"type":"error","errorMessage":"Không thể hoàn tất luồng trả lời lúc này. Hãy thử lại sau."}\n');
+  });
+
+  test("bounds an unterminated upstream record before emitting the canonical terminal", async () => {
+    const iterator = {
+      next: vi.fn(async () => ({ done: false as const, value: new Uint8Array(1_048_577).fill(65) })),
+      return: vi.fn(async () => ({ done: true as const, value: undefined })),
+    };
+    const controller = new AiAskController({ execute: vi.fn(() => ({ [Symbol.asyncIterator]: () => iterator })) as AiAskStreamExecution["execute"] });
+    const written: Uint8Array[] = [];
+    const response = { writableEnded: false, headersSent: false, setHeader: vi.fn(), write: vi.fn((bytes: Uint8Array) => { written.push(bytes); return true; }), end: vi.fn(), once: vi.fn(), removeListener: vi.fn() };
+
+    await controller.stream(principal(), "valid_idempotency_key", multipartRequest("adapter-boundary"), response);
+
+    expect(new TextDecoder().decode(concatenate(written))).toBe('{"type":"error","errorMessage":"Không thể hoàn tất luồng trả lời lúc này. Hãy thử lại sau."}\n');
+    expect(iterator.return).toHaveBeenCalledOnce();
   });
 
   test("suppresses frames after a split or coalesced terminal record and returns the iterator", async () => {

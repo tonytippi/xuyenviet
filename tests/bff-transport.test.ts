@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
 
-import { createBffTransportConfig, getBffTransportConfig } from "@xuyenviet/config";
+import { createBffTransportConfig, getBffCsrfConfig, getBffTransportConfig } from "@xuyenviet/config";
 import { BffApiError, callPrivateApi, callPrivateApiStream } from "@/server/bff-api-client";
 import { issueCsrfToken, issueCsrfTokenWithCookie, validateCsrfRequest } from "@/server/csrf";
 import { executeProtectedBffMutation } from "@/server/protected-bff-adapter";
@@ -98,6 +98,18 @@ describe("private BFF transport", () => {
     expect(cancelled).toBe(true);
   });
 
+  test("closes the downstream after a terminal record even when upstream cancellation rejects", async () => {
+    const upstream = new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(new TextEncoder().encode('{"type":"done"}\n')); },
+      cancel() { return Promise.reject(new Error("upstream already closed")); },
+    });
+    const result = await callPrivateApiStream({ config, credential: "private-token", correlationId: "request_1", path: "/v1/ai-ask/stream", idempotencyKey: "valid_idempotency_key", body: requestBody(), contentType: "multipart/form-data; boundary=boundary", fetcher: async () => new Response(upstream, { headers: { "content-type": "application/x-ndjson" } }) });
+    const reader = result.body.getReader();
+
+    await expect(reader.read()).resolves.toMatchObject({ done: false, value: new TextEncoder().encode('{"type":"done"}\n') });
+    await expect(reader.read()).resolves.toEqual({ done: true, value: undefined });
+  });
+
   test("recognizes only a parsed root terminal type and preserves malformed raw records", async () => {
     const records = [
       '{"type":"delta","metadata":{"type":"done"}}\n',
@@ -124,12 +136,78 @@ describe("private BFF transport", () => {
     await expect(new Response(result.body).text()).resolves.toBe('{"type":"preparing"}\n{"type":"error","errorMessage":"Không thể hoàn tất luồng trả lời lúc này. Hãy thử lại sau."}\n');
   });
 
+  test("accepts a complete pending replay immediately, even when the upstream remains open through timeout", async () => {
+    let cancelled = false;
+    const replay = new TextEncoder().encode('{"type":"in_progress","conversationId":"conversation-1"}\n');
+    const upstream = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(replay); }, pull() {}, cancel() { cancelled = true; } });
+    const result = await callPrivateApiStream({ config: { ...config, requestTimeoutMs: 5 }, credential: "private-token", correlationId: "request_1", path: "/v1/ai-ask/stream", idempotencyKey: "valid_idempotency_key", body: requestBody(), contentType: "multipart/form-data; boundary=boundary", fetcher: async () => new Response(upstream, { headers: { "content-type": "application/x-ndjson" } }) });
+    const reader = result.body.getReader();
+
+    await expect(reader.read()).resolves.toMatchObject({ done: false, value: replay });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await expect(reader.read()).resolves.toEqual({ done: true, value: undefined });
+    expect(cancelled).toBe(true);
+  });
+
+  test("reads upstream only as the downstream reader demands frames", async () => {
+    let pulls = 0;
+    const records = ['{"type":"preparing"}\n', '{"type":"delta","content":"slow"}\n', '{"type":"done"}\n'];
+    const upstream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        const record = records[pulls++];
+        if (record) controller.enqueue(new TextEncoder().encode(record));
+        if (pulls === records.length) controller.close();
+      },
+    }, { highWaterMark: 0 });
+    const result = await callPrivateApiStream({ config, credential: "private-token", correlationId: "request_1", path: "/v1/ai-ask/stream", idempotencyKey: "valid_idempotency_key", body: requestBody(), contentType: "multipart/form-data; boundary=boundary", fetcher: async () => new Response(upstream, { headers: { "content-type": "application/x-ndjson" } }) });
+    const reader = result.body.getReader();
+
+    expect(pulls).toBe(0);
+    await expect(reader.read()).resolves.toMatchObject({ done: false, value: new TextEncoder().encode(records[0]) });
+    expect(pulls).toBe(1);
+    await Promise.resolve();
+    expect(pulls).toBe(1);
+    await expect(reader.read()).resolves.toMatchObject({ done: false, value: new TextEncoder().encode(records[1]) });
+    expect(pulls).toBe(2);
+  });
+
+  test("relays a large coalesced chunk as one pull-driven raw chunk rather than retaining its frames", async () => {
+    let pulls = 0;
+    const coalesced = new TextEncoder().encode(Array.from({ length: 2_000 }, (_, index) => `{"type":"delta","content":"${index}"}\n`).join(""));
+    const upstream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls += 1;
+        controller.enqueue(coalesced);
+      },
+      cancel() {},
+    }, { highWaterMark: 0 });
+    const result = await callPrivateApiStream({ config, credential: "private-token", correlationId: "request_1", path: "/v1/ai-ask/stream", idempotencyKey: "valid_idempotency_key", body: requestBody(), contentType: "multipart/form-data; boundary=boundary", fetcher: async () => new Response(upstream, { headers: { "content-type": "application/x-ndjson" } }) });
+    const reader = result.body.getReader();
+
+    await expect(reader.read()).resolves.toEqual({ done: false, value: coalesced });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(pulls).toBe(1);
+    await reader.cancel();
+  });
+
   test("cancelling the browser stream cancels the established upstream body", async () => {
     let cancelled = false;
     const upstream = new ReadableStream<Uint8Array>({ pull() {}, cancel() { cancelled = true; } });
     const result = await callPrivateApiStream({ config, credential: "private-token", correlationId: "request_1", path: "/v1/ai-ask/stream", idempotencyKey: "valid_idempotency_key", body: new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array([1])); controller.close(); } }), contentType: "multipart/form-data; boundary=boundary", fetcher: async () => new Response(upstream, { headers: { "content-type": "application/x-ndjson" } }) });
 
     await result.body.cancel("browser disconnected");
+    expect(cancelled).toBe(true);
+  });
+
+  test("cancels upstream after a framing failure", async () => {
+    let cancelled = false;
+    const upstream = new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(new Uint8Array(1_048_577).fill(65)); },
+      cancel() { cancelled = true; },
+    });
+    const result = await callPrivateApiStream({ config, credential: "private-token", correlationId: "request_1", path: "/v1/ai-ask/stream", idempotencyKey: "valid_idempotency_key", body: requestBody(), contentType: "multipart/form-data; boundary=boundary", fetcher: async () => new Response(upstream, { headers: { "content-type": "application/x-ndjson" } }) });
+
+    await expect(new Response(result.body).text()).resolves.toBe('{"type":"error","errorMessage":"Không thể hoàn tất luồng trả lời lúc này. Hãy thử lại sau."}\n');
     expect(cancelled).toBe(true);
   });
 
@@ -312,6 +390,20 @@ describe("private BFF transport", () => {
     expect(getBffTransportConfig({ ...environment, XV_WEB_BFF_ORIGIN: "https://web.xuyenviet.vn" }).bffOrigin).toBe("https://web.xuyenviet.vn");
     for (const origin of ["http://web.xuyenviet.vn", "https://web.xuyenviet.vn/path", "https://web.xuyenviet.vn?query=value", "https://web.xuyenviet.vn#fragment", "https://user:password@web.xuyenviet.vn"]) {
       expect(() => getBffTransportConfig({ ...environment, XV_WEB_BFF_ORIGIN: origin })).toThrow("Invalid BFF transport configuration.");
+    }
+  });
+
+  test("enforces the shared CSRF secret and lifetime bounds without private API cutover configuration", () => {
+    const environment: NodeJS.ProcessEnv = { NODE_ENV: "test", XV_WEB_BFF_ORIGIN: "https://web.xuyenviet.vn", XV_BFF_CSRF_SIGNING_SECRET: "a".repeat(32), XV_BFF_CSRF_LIFETIME_SECONDS: "300" };
+
+    expect(getBffCsrfConfig(environment)).toMatchObject({ csrfSigningSecret: "a".repeat(32), csrfLifetimeSeconds: 300 });
+    for (const invalid of [
+      { XV_BFF_CSRF_SIGNING_SECRET: "a".repeat(31) },
+      { XV_BFF_CSRF_LIFETIME_SECONDS: "59" },
+      { XV_BFF_CSRF_LIFETIME_SECONDS: "3601" },
+      { XV_BFF_CSRF_LIFETIME_SECONDS: "300.5" },
+    ]) {
+      expect(() => getBffCsrfConfig({ ...environment, ...invalid })).toThrow("Invalid BFF transport configuration.");
     }
   });
 

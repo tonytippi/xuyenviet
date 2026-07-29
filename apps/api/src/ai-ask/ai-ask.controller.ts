@@ -7,6 +7,7 @@ import { Principal } from "../auth/principal.decorator";
 
 export const AI_ASK_STREAM_EXECUTION = Symbol("AI_ASK_STREAM_EXECUTION");
 const safeStreamFailure = new TextEncoder().encode('{"type":"error","errorMessage":"Không thể hoàn tất luồng trả lời lúc này. Hãy thử lại sau."}\n');
+const maxIncompleteNdjsonRecordBytes = 1024 * 1024;
 
 @Controller("v1/ai-ask")
 export class AiAskController {
@@ -51,7 +52,7 @@ export class AiAskController {
         sourceBegun = true;
         for (const frame of framer.push(next.value)) {
           if (response.write(frame.bytes) === false) await waitForDrain(response, abort.signal);
-          if (frame.terminal) {
+          if (frame.terminal || frame.inProgress) {
             terminalSent = true;
             break;
           }
@@ -71,7 +72,7 @@ export class AiAskController {
       if (sourceBegun && !terminalSent && !abort.signal.aborted && !response.writableEnded) {
         try { response.write(safeStreamFailure); } catch { /* The client may have disconnected between write failure and close. */ }
       }
-      await iterator?.return?.();
+      try { await iterator?.return?.(); } catch { /* Iterator cleanup cannot keep an already-completed HTTP response open. */ }
       request.removeListener("aborted", onAborted);
       response.removeListener("close", onResponseClose);
       if (!response.writableEnded) response.end();
@@ -79,7 +80,7 @@ export class AiAskController {
   }
 }
 
-function createNdjsonFramer(): { push(bytes: Uint8Array): Array<{ bytes: Uint8Array; terminal: boolean }> } {
+function createNdjsonFramer(): { push(bytes: Uint8Array): Array<{ bytes: Uint8Array; terminal: boolean; inProgress: boolean }> } {
   let buffered = new Uint8Array();
   const decoder = new TextDecoder("utf-8", { fatal: true });
   return {
@@ -87,19 +88,23 @@ function createNdjsonFramer(): { push(bytes: Uint8Array): Array<{ bytes: Uint8Ar
       const combined = new Uint8Array(buffered.byteLength + bytes.byteLength);
       combined.set(buffered);
       combined.set(bytes, buffered.byteLength);
-      const frames: Array<{ bytes: Uint8Array; terminal: boolean }> = [];
+      const frames: Array<{ bytes: Uint8Array; terminal: boolean; inProgress: boolean }> = [];
       let start = 0;
       for (let index = 0; index < combined.byteLength; index += 1) {
         if (combined[index] !== 10) continue;
         const frame = combined.slice(start, index + 1);
         // Inspect only fully framed records. Frames themselves remain unmodified.
-        const terminal = isTerminalNdjsonRecord(frame, decoder);
-        frames.push({ bytes: frame, terminal });
+        const recordType = ndjsonRecordType(frame, decoder);
+        const terminal = recordType === "done" || recordType === "error";
+        frames.push({ bytes: frame, terminal, inProgress: recordType === "in_progress" });
         start = index + 1;
         if (terminal) {
           buffered = new Uint8Array();
           return frames;
         }
+      }
+      if (combined.byteLength - start > maxIncompleteNdjsonRecordBytes) {
+        throw new Error("Incomplete NDJSON record exceeds relay limit.");
       }
       buffered = combined.slice(start);
       return frames;
@@ -107,13 +112,13 @@ function createNdjsonFramer(): { push(bytes: Uint8Array): Array<{ bytes: Uint8Ar
   };
 }
 
-function isTerminalNdjsonRecord(bytes: Uint8Array, decoder: TextDecoder) {
+function ndjsonRecordType(bytes: Uint8Array, decoder: TextDecoder): string | undefined {
   try {
     const record: unknown = JSON.parse(decoder.decode(bytes));
-    return typeof record === "object" && record !== null && !Array.isArray(record)
-      && ((record as { type?: unknown }).type === "done" || (record as { type?: unknown }).type === "error");
+    const type = typeof record === "object" && record !== null && !Array.isArray(record) ? (record as { type?: unknown }).type : undefined;
+    return typeof type === "string" ? type : undefined;
   } catch {
-    return false;
+    return undefined;
   }
 }
 
