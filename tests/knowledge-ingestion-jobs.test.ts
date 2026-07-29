@@ -243,6 +243,22 @@ describe("canonical knowledge ingestion jobs", () => {
     await expect(retryKnowledgeIngestionStage({ jobId: claim.jobId, expectedStage: "queued", expectedStageVersion: 1, fencingToken: claim.fencingToken, errorCode: "provider_failed" }, testDb)).resolves.toMatchObject({ stage: "failed", stageVersion: 2, checkpoint: null, lastErrorCode: "retry_exhausted" });
   });
 
+  test("retries AI gateway failures quickly without changing the longer pipeline retry backoff", async () => {
+    await createSource("gateway-retry");
+    await appendReadableCapture("gateway-retry");
+    const now = new Date(Date.now() + 1_000);
+    const gatewayClaim = await claimNextKnowledgeIngestionJob({ workerId: "gateway-worker", now }, testDb);
+    if (!gatewayClaim) throw new Error("expected gateway claim");
+
+    const gatewayRetryAt = new Date(now.getTime() + 5_000);
+    await expect(retryKnowledgeIngestionStage({ jobId: gatewayClaim.jobId, expectedStage: "queued", expectedStageVersion: 1, fencingToken: gatewayClaim.fencingToken, errorCode: "judge_provider_failed", now }, testDb)).resolves.toMatchObject({ stage: "queued", nextRunAt: gatewayRetryAt });
+
+    const retryClaim = await claimNextKnowledgeIngestionJob({ workerId: "pipeline-worker", now: gatewayRetryAt }, testDb);
+    if (!retryClaim) throw new Error("expected retry claim");
+    const pipelineRetryAt = new Date(gatewayRetryAt.getTime() + 60_000);
+    await expect(retryKnowledgeIngestionStage({ jobId: retryClaim.jobId, expectedStage: "queued", expectedStageVersion: 1, fencingToken: retryClaim.fencingToken, errorCode: "invalid_checkpoint", now: gatewayRetryAt }, testDb)).resolves.toMatchObject({ stage: "queued", nextRunAt: pipelineRetryAt });
+  });
+
   test("rejects PII in durable judgment and relation checkpoint summaries", async () => {
     await createSource("checkpoint-pii");
     await appendReadableCapture("checkpoint-pii");

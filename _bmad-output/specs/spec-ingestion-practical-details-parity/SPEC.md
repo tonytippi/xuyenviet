@@ -19,15 +19,15 @@ A pain to solve. The canonical AI-first ingestion pipeline (protocol v2 multi-fa
   - **intent:** The v2 discovery extraction contract lets the model attach practical-details buckets (`tips`, `warnings`, `cost_notes`, `parking_notes`, `kid_notes`) and tags to a candidate when the source supports them.
   - **success:** A capture describing a venue with parking, kid, or cost detail yields candidates whose buckets and tags survive parse, the candidate row, and the card row, proven by `DATABASE_URL_TEST`-backed tests.
 - **CAP-2**
-  - **intent:** A capture principally describing an ordered itinerary, route, or stop list yields exactly one `route_note` candidate carrying the complete ordered stop sequence in source order — including intentional repeats — never one candidate per stop.
-  - **success:** A multi-stop itinerary capture produces one `route_note` candidate whose `ordered_stops` equals the source sequence, with no per-stop sibling candidates.
+  - **intent:** A capture principally describing an ordered itinerary, route, or stop list yields one `route_note` candidate carrying the complete ordered stop sequence in source order — including intentional repeats. Independently useful, scoped observations about a named place, venue, or route option remain separate candidates; bare stop labels never become candidates.
+  - **success:** A route-only capture produces one `route_note` whose `ordered_stops` equals the source sequence, with no stop-label sibling candidates. A rich itinerary produces that route candidate plus a sibling for every materially distinct, scoped observation.
 - **CAP-3**
   - **intent:** Ingestion normalizes and validates practical details, ordered stops, and tags with legacy-equivalent safety rules, persists them into `knowledge_cards` on every terminal publish path, and on attach relation outcomes merges them into the target card as a deduped union within the ceilings, with a content-version bump.
   - **success:** Adversarial outputs (numbered, annotated, prose, contact-laden, or over-limit stops, buckets, and tags) are rejected or normalized exactly per legacy rules; `published`, `verify_first`, and `review_recommended` cards carry the values; and an attach outcome enriches the target card's `practical_details`/`tags` while a conflict outcome leaves target content untouched — all in DB-backed tests.
 
 ## Constraints
 
-- Canonical invariants keep their shape: evidence grounding, independent judgment, relation judgment, fencing, and stage lifecycle are unchanged. Buckets, stops, and tags annotate a candidate; they never become standalone candidates.
+- Canonical invariants keep their shape: evidence grounding, independent judgment, relation judgment, fencing, and stage lifecycle are unchanged. Bare stop labels remain annotations on the route candidate; independently useful, scoped observations remain standalone candidates.
 - Changes target protocol v2 only. The v1 single-fact path stays untouched — every new job is created with `protocol_version = 2`, and v1 remains only for legacy compatibility.
 - The schema change is an additive, backward-compatible migration on `knowledge_ingestion_candidates` (`practical_details` default `{}`, `tags` default `[]`), safe for in-flight rows.
 - Ceilings are copied verbatim from legacy extraction for now: `practical_details` ≤20 keys with ≤500-char strings and ≤10-item arrays; `ordered_stops` ≤40 labels after stripping numbering and annotations; tags ≤12, ≤40 chars each, normalized and deduped. Sensitive-pattern rejection and raw-overlap guards are preserved.
@@ -43,7 +43,7 @@ A pain to solve. The canonical AI-first ingestion pipeline (protocol v2 multi-fa
 
 ## Success signal
 
-A supervised ingestion worker run over an ordered-itinerary capture (for example a 20-stop Hanoi-to-HCMC post) produces one `route_note` card whose `practical_details.ordered_stops` preserves source order, and the AI-answer plus search context for that route renders the stop list — demonstrated by a `DATABASE_URL_TEST` pipeline test and a local worker run.
+A supervised ingestion worker run over a route-only capture (for example a 20-stop Hanoi-to-HCMC post) produces one `route_note` card whose `practical_details.ordered_stops` preserves source order. A rich itinerary additionally produces scoped sibling candidates for its named-place, venue, and route-option observations. AI-answer and search context render the route stop list — demonstrated by `DATABASE_URL_TEST` pipeline tests and a local worker run.
 
 ## Assumptions
 

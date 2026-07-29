@@ -24,17 +24,13 @@ import { recordAuditEvent } from "@/features/audit/events";
 import { createSystemAuditActor, toUserAuditActor, type SystemAuditActorId } from "@/features/audit/actors";
 import { writeAiUsageEvent } from "@/features/audit/usage";
 import type { AuthenticatedSession } from "@/server/auth";
+import { containsUnsafePracticalFields, normalizePracticalDetails, normalizeTags } from "./practical-details";
 
 const maxDraftsPerExtraction = 12;
 const maxTitleLength = 160;
 const maxLocationLength = 160;
 const maxRouteSegmentLength = 160;
 const maxSummaryLength = 1200;
-const maxDetailStringLength = 500;
-const maxDetailArrayItems = 10;
-const maxOrderedStops = 40;
-const maxTags = 12;
-const maxTagLength = 40;
 
 type ExtractionDb = ReturnType<typeof getDb>;
 type ExtractionQueryDb = Pick<ExtractionDb, "select">;
@@ -372,7 +368,7 @@ function normalizeDraft(value: unknown, source: typeof sources.$inferSelect, raw
     return { result: null, reason: "invalid_practical_details" };
   }
 
-  if (containsUnsafeDraftFields({ title, locationName, routeSegment, summary, practicalDetails, tags }, rawText)) {
+  if (containsUnsafePracticalFields({ title, locationName, routeSegment, summary, practicalDetails, tags }, rawText)) {
     return { result: null, reason: "unsafe_raw_overlap_or_sensitive_value" };
   }
 
@@ -437,83 +433,10 @@ function normalizeBoundedString(value: unknown, maxLength: number) {
   return normalized && normalized.length <= maxLength ? normalized : null;
 }
 
-function normalizePracticalDetails(value: unknown): Record<string, unknown> | null {
-  if (!isRecord(value)) {
-    return {};
-  }
-
-  const details: Record<string, unknown> = {};
-
-  const entries = Object.entries(value);
-
-  if (entries.length > 20) {
-    return null;
-  }
-
-  for (const [key, detailValue] of entries) {
-    const safeKey = normalizeBoundedString(key, 60);
-    const safeValue = normalizeDetailValue(safeKey, detailValue);
-
-    if (!safeKey || safeValue === null) {
-      return null;
-    }
-
-    details[safeKey] = safeValue;
-  }
-
-  return details;
+function normalizeForOverlap(value: string) {
+  return value.toLowerCase().replace(/\s+/g, " ").trim();
 }
 
-function normalizeDetailValue(key: string | null, value: unknown): string | string[] | null {
-  if (typeof value === "string") {
-    return normalizeBoundedString(value, maxDetailStringLength);
-  }
-
-  if (Array.isArray(value)) {
-    if (value.length > (key === "ordered_stops" ? maxOrderedStops : maxDetailArrayItems)) {
-      return null;
-    }
-
-    const values = value.map((item) => key === "ordered_stops" ? normalizeOrderedStop(item) : normalizeBoundedString(item, maxDetailStringLength));
-    return values.length > 0 && values.every((item): item is string => item !== null) ? values : null;
-  }
-
-  return null;
-}
-
-function normalizeOrderedStop(value: unknown) {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const normalized = normalizeBoundedString(stripOrderedStopFormatting(value), maxLocationLength);
-  const withoutDecimalNotation = normalized?.replace(/\d+\.\d+/g, "") ?? "";
-
-  if (!normalized || normalized.split(/\s+/).length > 12 || /[\r\n\[\]{}.,;:!?]/.test(withoutDecimalNotation) || /^\d{1,3}\s*[.)]\s+/.test(normalized) || /(rẽ|đi tiếp|chạy tiếp|băng qua|vượt|lướt qua|theo đường)/i.test(normalized)) {
-    return null;
-  }
-
-  return normalized;
-}
-
-function stripOrderedStopFormatting(value: string) {
-  const withoutListNumber = value.replace(/^\s*\d{1,3}\s*[.)]\s+/, "").trim();
-  const trailingAnnotation = withoutListNumber.match(/\s*\(([^()]*)\)\s*$/);
-
-  if (trailingAnnotation && (/^\s*\d{1,3}\s*$/.test(trailingAnnotation[1]) || /(rẽ|đường|lối|tránh|đoạn)/i.test(trailingAnnotation[1]))) {
-    return withoutListNumber.slice(0, trailingAnnotation.index).trim();
-  }
-
-  return withoutListNumber;
-}
-
-function normalizeTags(value: unknown) {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return Array.from(new Set(value.map((tag) => normalizeBoundedString(tag, maxTagLength)).filter((tag): tag is string => tag !== null))).slice(0, maxTags);
-}
 
 function inferLocationFallback(rawText: string): { locationName: string | null; routeSegment: string | null } {
   const normalizedRaw = normalizeForOverlap(rawText);
@@ -542,36 +465,6 @@ function inferLocationFallback(rawText: string): { locationName: string | null; 
   return { locationName: null, routeSegment: null };
 }
 
-function containsUnsafeDraftFields(input: { title: string; locationName: string | null; routeSegment: string | null; summary: string; practicalDetails: Record<string, unknown>; tags: string[] }, rawText: string) {
-  const strictValues = [input.title, input.locationName, input.routeSegment, input.summary, ...input.tags, ...Object.keys(input.practicalDetails)];
-  const detailValues = flattenDetailEntries(input.practicalDetails);
-  return containsUnsafeRawOverlap(strictValues, rawText, { allowContactValues: false }) || detailValues.some((detail) => containsUnsafeRawOverlap([detail.value], rawText, { allowContactValues: isPublicContactDetailKey(detail.key) }));
-}
-
-function flattenDetailEntries(details: Record<string, unknown>) {
-  return Object.entries(details).flatMap(([key, value]) => (Array.isArray(value) ? value : [value]).filter((item): item is string => typeof item === "string").map((item) => ({ key, value: item })));
-}
-
-function containsUnsafeRawOverlap(values: Array<string | null>, rawText: string, options: { allowContactValues: boolean }) {
-  const normalizedRaw = normalizeForOverlap(rawText);
-  return values.some((value) => {
-    if (!value) return false;
-    const normalizedValue = normalizeForOverlap(value);
-    return (!options.allowContactValues && containsSensitivePattern(normalizedValue)) || (normalizedValue.length >= 24 && normalizedRaw.includes(normalizedValue));
-  });
-}
-
-function isPublicContactDetailKey(key: string) {
-  return /contact|phone|tel|hotline|email|booking|reservation|zalo/i.test(key);
-}
-
-function containsSensitivePattern(value: string) {
-  return /(?:\+?84|0)(?:[\s.-]?\d){8,10}\b/.test(value) || /\b[\w.%+-]+@[\w.-]+\.[a-z]{2,}\b/.test(value);
-}
-
-function normalizeForOverlap(value: string) {
-  return value.toLowerCase().replace(/\s+/g, " ").trim();
-}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

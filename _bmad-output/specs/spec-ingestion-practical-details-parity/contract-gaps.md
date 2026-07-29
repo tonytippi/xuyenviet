@@ -6,7 +6,7 @@ File-and-line inventory behind SPEC-ingestion-practical-details-parity. Implemen
 
 | Layer | Legacy extraction | Canonical ingestion |
 |---|---|---|
-| Prompt | `src/features/ai/prompts.ts:69` — dedicated rule: ordered itinerary → exactly one `route_note` draft with `practical_details.ordered_stops`, preserve order, never split per stop | `prompts.ts:95-104` (`knowledgePipelineMultiFactExtractionSystemPrompt`) — no stop-list rule; instructs "Split materially distinct observations into separate candidates" (opposite behavior) |
+| Prompt | `src/features/ai/prompts.ts:69` — legacy draft rule keeps an ordered itinerary in one `route_note` with `practical_details.ordered_stops` | `prompts.ts:95-104` (`knowledgePipelineMultiFactExtractionSystemPrompt`) now preserves the route note while emitting siblings for independently useful scoped observations; bare stop labels are not split into candidates |
 | Parse | `src/features/knowledge/extraction.ts:467-508` — `normalizeDetailValue` special-cases `ordered_stops` (max 40), `normalizeOrderedStop`, `stripOrderedStopFormatting` | `src/features/knowledge/ingestion-pipeline.ts:455-480` (`parseCandidate`/`parseCandidates`) — no such field |
 | Intermediate schema | n/a (drafts insert straight to `knowledge_cards`) | `src/db/schema.ts:602-637` (`knowledge_ingestion_candidates`) — no column |
 | Card persistence | `extraction.ts:368-392` — `practicalDetails` included in draft insert | `ingestion-pipeline.ts` — `publish` (:328), `publishVerifyFirst` (:381), `persistCandidateForReview` (:408), `persistV2CandidateCard` (:223) never set `practicalDetails` |

@@ -19,6 +19,8 @@ const defaultMaxAttempts = 3;
 const defaultLeaseMs = 15 * 60_000;
 const minLeaseMs = 10 * 60_000;
 const maxLeaseMs = 60 * 60_000;
+const gatewayRetryBaseMs = 5_000;
+const gatewayRetryMaxMs = 30_000;
 const terminalStages = ["published", "suppressed", "review_recommended", "verify_first", "failed"] as const;
 
 export class KnowledgeIngestionJobError extends Error { constructor(message: string) { super(message); this.name = "KnowledgeIngestionJobError"; } }
@@ -147,7 +149,7 @@ export async function commitKnowledgeIngestionStage(input: KnowledgeIngestionSta
 
 /** Releases a retryable failure without replaying preceding checkpointed stages. */
 export async function retryKnowledgeIngestionStage(input: { jobId: string; expectedStage: NonterminalIngestionStage; expectedStageVersion: number; fencingToken: string; errorCode: string; now?: Date }, db: IngestionJobDb = getDb()) {
-  const now = input.now ?? new Date(); const retryAt = new Date(now.getTime() + Math.min(60_000 * 2 ** Math.max(0, input.expectedStageVersion - 1), 15 * 60_000)).toISOString();
+  const now = input.now ?? new Date(); const retryAt = new Date(now.getTime() + retryDelayMs(input.errorCode, input.expectedStageVersion)).toISOString();
   const [row] = await db.update(knowledgeIngestionJobs).set({ stage: sql`case when ${knowledgeIngestionJobs.attemptCount} >= ${knowledgeIngestionJobs.maxAttempts} then 'failed' else ${knowledgeIngestionJobs.stage} end`, stageVersion: sql`case when ${knowledgeIngestionJobs.attemptCount} >= ${knowledgeIngestionJobs.maxAttempts} then ${knowledgeIngestionJobs.stageVersion} + 1 else ${knowledgeIngestionJobs.stageVersion} end`, checkpoint: sql`case when ${knowledgeIngestionJobs.attemptCount} >= ${knowledgeIngestionJobs.maxAttempts} then null else ${knowledgeIngestionJobs.checkpoint} end`, lastErrorCode: sql`case when ${knowledgeIngestionJobs.attemptCount} >= ${knowledgeIngestionJobs.maxAttempts} then 'retry_exhausted' else ${input.errorCode} end`, requeueReasonCode: sql`case when ${knowledgeIngestionJobs.attemptCount} >= ${knowledgeIngestionJobs.maxAttempts} then 'retry_exhausted' else 'retryable_stage_failure' end`, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, nextRunAt: sql`case when ${knowledgeIngestionJobs.attemptCount} >= ${knowledgeIngestionJobs.maxAttempts} then ${knowledgeIngestionJobs.nextRunAt} else ${retryAt} end`, updatedAt: now }).where(and(eq(knowledgeIngestionJobs.id, input.jobId), eq(knowledgeIngestionJobs.stage, input.expectedStage), eq(knowledgeIngestionJobs.stageVersion, input.expectedStageVersion), eq(knowledgeIngestionJobs.fencingToken, input.fencingToken), gt(knowledgeIngestionJobs.leaseExpiresAt, now))).returning();
   return row ?? null;
 }
@@ -172,6 +174,12 @@ function parseCheckpointJudgment(value: unknown): CheckpointJudgment | null { co
 function parseCheckpointRelation(value: unknown): CheckpointRelation | null { const keys = ["action", "targetCardId", "summary"]; if (!isRecord(value) || !hasOnlyKeys(value, keys) || !["attach", "create", "conflict"].includes(String(value.action)) || !safeText(value.summary, 1000) || (value.targetCardId !== null && !bounded(value.targetCardId, 160)) || (["attach", "conflict"].includes(String(value.action)) && !value.targetCardId)) return null; return { action: value.action as CheckpointRelation["action"], targetCardId: value.targetCardId as string | null, summary: value.summary as string }; }
 function isCheckpointForStage(checkpoint: KnowledgeIngestionCheckpoint, stage: NonterminalIngestionStage) { return (stage === "queued" && checkpoint.completedStage === "triaging") || (stage === "triaging" && checkpoint.completedStage === "extracting") || (stage === "extracting" && checkpoint.completedStage === "judging") || (stage === "judging" && checkpoint.completedStage === "relating"); }
 function normalizeLeaseMs(value: string | undefined) { if (!value) return defaultLeaseMs; const parsed = Number(value); return Number.isFinite(parsed) ? Math.min(Math.max(Math.trunc(parsed), minLeaseMs), maxLeaseMs) : defaultLeaseMs; }
+function retryDelayMs(errorCode: string, stageVersion: number) {
+  const exponent = Math.max(0, stageVersion - 1);
+  return errorCode.endsWith("provider_failed")
+    ? Math.min(gatewayRetryBaseMs * 2 ** exponent, gatewayRetryMaxMs)
+    : Math.min(60_000 * 2 ** exponent, 15 * 60_000);
+}
 function isTerminalStage(stage: Stage): stage is (typeof terminalStages)[number] { return terminalStages.includes(stage as (typeof terminalStages)[number]); }
 function isAllowedStageTransition(from: NonterminalIngestionStage, to: Stage) { if (isTerminalStage(to)) return true; return (from === "queued" && to === "triaging") || (from === "triaging" && to === "extracting") || (from === "extracting" && to === "judging") || (from === "judging" && to === "relating"); }
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }

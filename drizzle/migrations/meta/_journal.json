@@ -36,6 +36,20 @@
       "when": 1785243600000,
       "tag": "0004_specific_candidate_outcomes",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1785340800000,
+      "tag": "0005_ingestion_candidate_practical_details",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1785427200000,
+      "tag": "0006_candidate_raw_overlap_reason",
+      "breakpoints": true
     }
   ]
 }
