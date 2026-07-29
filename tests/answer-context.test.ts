@@ -504,7 +504,7 @@ describe("answer context assembly", () => {
     formData.set("conversationId", conversation.id);
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData, headers: { "Idempotency-Key": crypto.randomUUID().replaceAll("-", "") } }) as never);
     const responseText = await response.text();
 
     expect(responseText).toContain('"type":"done"');
@@ -528,7 +528,7 @@ describe("answer context assembly", () => {
     formData.set("conversationId", conversation.id);
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData, headers: { "Idempotency-Key": crypto.randomUUID().replaceAll("-", "") } }) as never);
     const responseText = await response.text();
     const events = responseText
       .trim()
@@ -573,7 +573,7 @@ describe("answer context assembly", () => {
     formData.set("conversationId", conversation.id);
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData, headers: { "Idempotency-Key": crypto.randomUUID().replaceAll("-", "") } }) as never);
     const events = (await response.text())
       .trim()
       .split("\n")
@@ -611,7 +611,7 @@ describe("answer context assembly", () => {
     formData.set("tripProjectId", project.id);
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData, headers: { "Idempotency-Key": crypto.randomUUID().replaceAll("-", "") } }) as never);
     const responseText = await response.text();
     const answerRequest = JSON.parse(answerRequestBody) as { messages: Array<{ role: string; content: string }> };
     const systemPrompt = answerRequest.messages[0]?.content ?? "";
@@ -654,7 +654,7 @@ describe("answer context assembly", () => {
     formData.set("tripProjectId", project.id);
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData, headers: { "Idempotency-Key": crypto.randomUUID().replaceAll("-", "") } }) as never);
     const done = (await response.text()).split("\n").map((line) => line ? JSON.parse(line) as { type: string; conversationId?: string } : null).find((event) => event?.type === "done");
     const primaryMessages = await testDb.select().from(messages).where(eq(messages.conversationId, primary.id));
     const historicMessages = await testDb.select().from(messages).where(eq(messages.conversationId, historic.id));
@@ -682,7 +682,7 @@ describe("answer context assembly", () => {
     formData.set("conversationId", historic.id);
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData, headers: { "Idempotency-Key": crypto.randomUUID().replaceAll("-", "") } }) as never);
 
     expect(await response.text()).toContain('"type":"error"');
     expect(gatewayRequests).toHaveLength(0);
@@ -733,7 +733,7 @@ describe("answer context assembly", () => {
     formData.set("conversationId", conversation.id);
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData, headers: { "Idempotency-Key": crypto.randomUUID().replaceAll("-", "") } }) as never);
     const doneEvent = (await response.text())
       .trim()
       .split("\n")
@@ -1902,7 +1902,7 @@ describe("answer context assembly", () => {
     const { POST } = await import("@/app/api/ai-ask/stream/route");
     vi.doUnmock("@/features/retrieval/source-bundle");
 
-    const events = (await (await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never)).text())
+    const events = (await (await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData, headers: { "Idempotency-Key": crypto.randomUUID().replaceAll("-", "") } }) as never)).text())
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line) as { type: string; content?: string; assistantMessage?: { content?: string } });
@@ -1943,7 +1943,7 @@ describe("answer context assembly", () => {
       formData.set("question", "Có nên đi không?");
       formData.set("conversationId", conversation.id);
 
-      const events = (await (await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never)).text())
+      const events = (await (await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData, headers: { "Idempotency-Key": crypto.randomUUID().replaceAll("-", "") } }) as never)).text())
         .trim()
         .split("\n")
         .map((line) => JSON.parse(line) as { type: string; content?: string; assistantMessage?: { content?: string } });
@@ -1980,7 +1980,7 @@ describe("answer context assembly", () => {
     const { POST } = await import("@/app/api/ai-ask/stream/route");
     vi.doUnmock("@/features/retrieval/source-bundle");
 
-    const events = (await (await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never)).text())
+    const events = (await (await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData, headers: { "Idempotency-Key": crypto.randomUUID().replaceAll("-", "") } }) as never)).text())
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line) as { type: string; content?: string; assistantMessage?: { content?: string } });
@@ -2008,7 +2008,7 @@ describe("answer context assembly", () => {
     formData.set("question", "Tư vấn lịch trình rất chung chung");
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData, headers: { "Idempotency-Key": crypto.randomUUID().replaceAll("-", "") } }) as never);
     const responseText = await response.text();
 
     expect(responseText).toContain('"type":"done"');
@@ -2050,7 +2050,7 @@ describe("answer context assembly", () => {
     formData.set("conversationId", conversation.id);
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData, headers: { "Idempotency-Key": crypto.randomUUID().replaceAll("-", "") } }) as never);
     const responseText = await response.text();
     const systemPrompt = (JSON.parse(answerRequestBody) as { messages: Array<{ content: string }> }).messages[0]?.content ?? "";
 
@@ -2095,7 +2095,7 @@ describe("answer context assembly", () => {
     formData.set("conversationId", conversation.id);
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData, headers: { "Idempotency-Key": crypto.randomUUID().replaceAll("-", "") } }) as never);
     const events = (await response.text())
       .trim()
       .split("\n")
@@ -2145,7 +2145,7 @@ describe("answer context assembly", () => {
     formData.set("tripProjectId", project.id);
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData, headers: { "Idempotency-Key": crypto.randomUUID().replaceAll("-", "") } }) as never);
     const responseText = await response.text();
     const savedMessages = await testDb.select().from(messages).orderBy(asc(messages.createdAt), asc(messages.id));
     const decisions = await testDb.select().from(assistantRetrievalDecisions);
@@ -2372,7 +2372,7 @@ describe("answer context assembly", () => {
     formData.set("question", "Có bãi đỗ nào ở Huế không?");
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData, headers: { "Idempotency-Key": crypto.randomUUID().replaceAll("-", "") } }) as never);
     const responseText = await response.text();
 
     expect(responseText).toContain('"type":"done"');
@@ -2475,7 +2475,7 @@ describe("answer context assembly", () => {
     formData.set("question", "Đi Huế 5 ngày?");
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData, headers: { "Idempotency-Key": crypto.randomUUID().replaceAll("-", "") } }) as never);
     const responseText = await response.text();
 
     expect(responseText).toContain('"type":"done"');

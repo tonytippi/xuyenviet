@@ -1,8 +1,9 @@
-import { and, asc, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { after } from "next/server";
 
 import { getDb } from "@/db/client";
-import { conversations, messageImageAttachments, messages, tripProjects } from "@/db/schema";
+import { conversations, messages } from "@/db/schema";
+import { acquireAiAskCommand, terminalizeAiAskCommand } from "@/features/ai/ai-ask-commands";
 import { buildValidatedAnswerAnnotations, sanitizeStoredAnswerAnnotations, type AnswerAnnotation } from "@/features/ai/answer-annotations";
 import { ensureAiAskFreshnessWarning, requiresAiAskAnswerFinalization } from "@/features/ai/answer-freshness";
 import { streamInitialAiAskAnswer } from "@/features/ai/gateway";
@@ -11,7 +12,6 @@ import { aiAskInitialAnswerPromptVersion, aiAskInitialAnswerPurpose, buildAiAskM
 import { draftTripChangeProposal, recordTripChangeProposalDraftUsage, type UntrustedTripChangeProposalDraft } from "@/features/ai/trip-proposal-draft";
 import { extractChatTripContext } from "@/features/chat-trips/context-extraction";
 import { persistAiTripChangeProposalDraft } from "@/features/chat-trips/trip-change-proposals";
-import { resolveOwnedPrimaryConversationInTransaction } from "@/features/chat-trips/trip-projects";
 import { persistAssistantAnswerProvenance, type AssistantMessageProvenanceItem } from "@/features/retrieval/provenance";
 import { assembleContextPrioritySourceBundle, buildSourceBundlePromptSection } from "@/features/retrieval/source-bundle";
 import { writeAiUsageEvent } from "@/features/audit/usage";
@@ -37,6 +37,7 @@ type ProposalDoneSummary = {
 type StreamEvent =
   | { type: "preparing" }
   | { type: "delta"; content: string }
+  | { type: "in_progress"; conversationId?: string; userMessage?: { id: string; content: string } }
   | { type: "done"; conversationId: string; userMessage: { id: string; content: string }; assistantMessage: { id: string; content: string; provenance?: AssistantMessageProvenanceItem[]; annotations?: AnswerAnnotation[] }; proposal?: ProposalDoneSummary }
   | { type: "error"; conversationId?: string; userMessage?: { id: string; content: string }; errorMessage: string };
 
@@ -87,24 +88,42 @@ export async function POST(request: Request) {
     return Response.json({ error: imageDataUrlResult.error }, { status: 400 });
   }
 
-  if (tripProjectId) {
-    const [project] = await getDb().select({ id: tripProjects.id }).from(tripProjects).where(and(eq(tripProjects.id, tripProjectId), eq(tripProjects.userId, session.userId))).limit(1);
-    if (!project) return Response.json({ error: "Không tìm thấy dự án hoặc bạn không có quyền truy cập." }, { status: 400 });
-  }
-
-  const selectedModel = await selectActiveAiGatewayModel({
-    purpose: aiAskInitialAnswerPurpose,
-    requiredCapabilities: { textInput: true, streaming: true, imageInput: Boolean(imageFile) },
+  const acquisition = await acquireAiAskCommand({
+    userId: session.userId,
+    idempotencyKey: request.headers.get("idempotency-key"),
+    question,
+    conversationId,
+    tripProjectId,
+    image: imageFile ? { fileName: sanitizeOriginalFileName(imageFile.name), mimeType: imageFile.type, byteSize: imageFile.size, bytes: new Uint8Array(await imageFile.arrayBuffer()) } : null,
   });
 
+  if (acquisition.kind === "validation_failure") return Response.json({ error: acquisition.message }, { status: 400 });
+  if (acquisition.kind === "key_reused") return Response.json({ error: "Idempotency-Key đã được dùng với nội dung khác. Hãy gửi yêu cầu mới." }, { status: 409 });
+  if (acquisition.kind === "pending_replay") return streamSingleEvent({ type: "in_progress", conversationId: acquisition.conversationId, userMessage: acquisition.userMessage });
+  if (acquisition.kind === "terminal_replay") return streamSingleEvent(acquisition.result as StreamEvent);
+
+  let selectedModel: NonNullable<Awaited<ReturnType<typeof selectActiveAiGatewayModel>>> | null;
+  try {
+    selectedModel = await selectActiveAiGatewayModel({
+      purpose: aiAskInitialAnswerPurpose,
+      requiredCapabilities: { textInput: true, streaming: true, imageInput: Boolean(imageFile) },
+    });
+  } catch {
+    const result: StreamEvent = { type: "error", conversationId: acquisition.conversationId, userMessage: acquisition.userMessage, errorMessage: "Không thể chuẩn bị luồng trả lời lúc này. Hãy thử lại sau." };
+    await terminalizeAiAskCommand(acquisition.commandId, "failed", result);
+    return streamSingleEvent(result);
+  }
+
   if (!selectedModel) {
-    return Response.json({ error: imageFile ? "Selected AI model does not support streaming image input." : "No active streaming AI Ask model is configured." }, { status: 409 });
+    const result: StreamEvent = { type: "error", conversationId: acquisition.conversationId, userMessage: acquisition.userMessage, errorMessage: imageFile ? "Selected AI model does not support streaming image input." : "No active streaming AI Ask model is configured." };
+    await terminalizeAiAskCommand(acquisition.commandId, "failed", result);
+    return streamSingleEvent(result);
   }
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
-      void streamAnswer({ controller, encoder, abortSignal: request.signal, session, question, conversationId, tripProjectId, imageFile, imageDataUrl: imageDataUrlResult.dataUrl, selectedModel });
+      void streamAnswer({ controller, encoder, abortSignal: request.signal, session, question: acquisition.question, tripProjectId: acquisition.tripProjectId ?? undefined, imageDataUrl: imageDataUrlResult.dataUrl, selectedModel, command: acquisition });
     },
   });
 
@@ -122,22 +141,20 @@ async function streamAnswer({
   abortSignal,
   session,
   question,
-  conversationId,
   tripProjectId,
-  imageFile,
   imageDataUrl,
   selectedModel,
+  command,
 }: {
   controller: ReadableStreamDefaultController<Uint8Array>;
   encoder: TextEncoder;
   abortSignal: AbortSignal;
   session: AuthenticatedSession;
   question: string;
-  conversationId?: string;
   tripProjectId?: string;
-  imageFile: File | null;
   imageDataUrl: string | null;
   selectedModel: NonNullable<Awaited<ReturnType<typeof selectActiveAiGatewayModel>>>;
+  command: Extract<Awaited<ReturnType<typeof acquireAiAskCommand>>, { kind: "admitted" }>;
 }) {
   const db = getDb();
   let saved: {
@@ -147,59 +164,7 @@ async function streamAnswer({
   } | null = null;
 
   try {
-    saved = await db.transaction(async (transaction) => {
-      const primary = tripProjectId ? await resolveOwnedPrimaryConversationInTransaction(transaction, session.userId, tripProjectId) : null;
-      if (tripProjectId && !primary) throw new Error("Project not found or access denied.");
-      const [conversation] = primary
-        ? [primary]
-        : conversationId
-        ? await transaction
-            .select({ id: conversations.id, tripProjectId: conversations.tripProjectId, updatedAt: conversations.updatedAt })
-            .from(conversations)
-            .where(and(eq(conversations.id, conversationId), eq(conversations.userId, session.userId)))
-            .limit(1)
-            .for("update")
-        : await transaction.insert(conversations).values({ userId: session.userId, tripProjectId }).returning({ id: conversations.id, tripProjectId: conversations.tripProjectId, updatedAt: conversations.updatedAt });
-
-      if (!conversation) {
-        throw new Error("Conversation not found or access denied.");
-      }
-
-      if (conversationId && tripProjectId && conversationId !== primary?.id) {
-        throw new Error("Conversation does not belong to the selected trip project.");
-      }
-
-      if (conversationId && conversation.tripProjectId && !tripProjectId) {
-        throw new Error("Project-scoped conversation requires its trip project scope.");
-      }
-
-      const history = await transaction
-        .select({ role: messages.role, content: messages.content })
-        .from(messages)
-        .where(and(eq(messages.conversationId, conversation.id), eq(messages.userId, session.userId)))
-        .orderBy(asc(messages.createdAt), asc(messages.id));
-
-      const [message] = await transaction
-        .insert(messages)
-        .values({ conversationId: conversation.id, userId: session.userId, role: "user", content: question })
-        .returning({ id: messages.id });
-
-      if (imageFile) {
-        await transaction.insert(messageImageAttachments).values({
-          conversationId: conversation.id,
-          messageId: message.id,
-          userId: session.userId,
-          originalFileName: sanitizeOriginalFileName(imageFile.name),
-          mimeType: imageFile.type,
-          byteSize: imageFile.size,
-          storageKey: null,
-        });
-      }
-
-      await transaction.update(conversations).set({ updatedAt: new Date() }).where(eq(conversations.id, conversation.id));
-
-      return { conversationId: conversation.id, history, userMessage: { id: message.id, content: question } };
-    });
+    saved = { conversationId: command.conversationId, history: command.history, userMessage: command.userMessage };
 
     sendEvent(controller, encoder, { type: "preparing" });
 
@@ -260,12 +225,17 @@ async function streamAnswer({
         providerRequestId: gatewayResult.requestMetadata.providerRequestId,
       });
 
-      sendEvent(controller, encoder, {
+      const aborted = abortSignal.aborted || gatewayResult.errorCode === "client_stream_aborted";
+      const result: StreamEvent = {
         type: "error",
         conversationId: saved.conversationId,
         userMessage: saved.userMessage,
-        errorMessage: "Mình chưa tạo được câu trả lời hoàn chỉnh. Tin nhắn của bạn đã được lưu nhưng chưa có câu trả lời trợ lý cho lượt này.",
-      });
+        errorMessage: aborted
+          ? "Luồng trả lời đã bị dừng. Tin nhắn của bạn đã được lưu nhưng chưa có câu trả lời trợ lý cho lượt này."
+          : "Mình chưa tạo được câu trả lời hoàn chỉnh. Tin nhắn của bạn đã được lưu nhưng chưa có câu trả lời trợ lý cho lượt này.",
+      };
+      await terminalizeAiAskCommand(command.commandId, aborted ? "aborted" : "failed", result);
+      sendEvent(controller, encoder, result);
       return;
     }
 
@@ -292,6 +262,14 @@ async function streamAnswer({
         errorCode: "client_stream_aborted",
         providerRequestId: gatewayResult.requestMetadata.providerRequestId,
       });
+      const result: StreamEvent = {
+        type: "error",
+        conversationId: saved.conversationId,
+        userMessage: saved.userMessage,
+        errorMessage: "Luồng trả lời đã bị dừng. Tin nhắn của bạn đã được lưu nhưng chưa có câu trả lời trợ lý cho lượt này.",
+      };
+      await terminalizeAiAskCommand(command.commandId, "aborted", result);
+      sendEvent(controller, encoder, result);
       return;
     }
 
@@ -421,14 +399,18 @@ async function streamAnswer({
       const proposalSummary = tripProjectId
         ? await draftAndPersistProposal({ session, tripProjectId, question, assistantMessageId: completed.id, abortSignal })
         : undefined;
-      sendEvent(controller, encoder, { type: "done", conversationId: savedTurn.conversationId, userMessage: savedTurn.userMessage, assistantMessage: completed, proposal: proposalSummary });
+      const result: StreamEvent = { type: "done", conversationId: savedTurn.conversationId, userMessage: savedTurn.userMessage, assistantMessage: completed, proposal: proposalSummary };
+      await terminalizeAiAskCommand(command.commandId, "completed", result, completed.id);
+      sendEvent(controller, encoder, result);
     } else {
-      sendEvent(controller, encoder, {
+      const result: StreamEvent = {
         type: "error",
         conversationId: savedTurn.conversationId,
         userMessage: savedTurn.userMessage,
         errorMessage: "Mình đã tạo được câu trả lời nhưng chưa lưu được lúc này. Hãy thử lại sau.",
-      });
+      };
+      await terminalizeAiAskCommand(command.commandId, "failed", result);
+      sendEvent(controller, encoder, result);
     }
   } catch (error) {
     console.error("AI Ask stream answer failed", {
@@ -437,12 +419,14 @@ async function streamAnswer({
       error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
     });
 
-    sendEvent(controller, encoder, {
+    const result: StreamEvent = {
       type: "error",
       conversationId: saved?.conversationId,
       userMessage: saved?.userMessage,
       errorMessage: "Không thể hoàn tất luồng trả lời lúc này. Hãy thử lại sau.",
-    });
+    };
+    await terminalizeAiAskCommand(command.commandId, abortSignal.aborted ? "aborted" : "failed", result);
+    sendEvent(controller, encoder, result);
   } finally {
     try {
       controller.close();
@@ -623,4 +607,14 @@ function sendEvent(controller: ReadableStreamDefaultController<Uint8Array>, enco
   } catch {
     // The client may have already closed the stream.
   }
+}
+
+function streamSingleEvent(event: StreamEvent) {
+  const encoder = new TextEncoder();
+  return new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+      controller.close();
+    },
+  }), { headers: { "cache-control": "no-store", "content-type": "application/x-ndjson; charset=utf-8" } });
 }

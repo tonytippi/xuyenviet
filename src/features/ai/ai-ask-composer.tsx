@@ -746,6 +746,7 @@ export function AiAskComposer({
   const isSubmittingRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const activeRequestIdRef = useRef(0);
+  const idempotencyKeyRef = useRef<{ fingerprint: string; key: string } | null>(null);
   const deletingConversationIdRef = useRef<string | null>(null);
   const deletingTripProjectIdRef = useRef<string | null>(null);
   const sessionSheetTriggerRef = useRef<HTMLButtonElement>(null);
@@ -1141,7 +1142,13 @@ export function AiAskComposer({
       const hadConversation = Boolean(conversationId || messages.length > 0);
       const controller = new AbortController();
       abortControllerRef.current = controller;
-      const result = await submitAiAskStream({ question: trimmedQuestion, conversationId, tripProjectId: activeTripProjectId, image: selectedImage, signal: controller.signal, onPreparing: () => {
+      const imageDigest = selectedImage ? await digestFileForIdempotency(selectedImage) : "";
+      const fingerprint = `${trimmedQuestion}\u0000${conversationId ?? ""}\u0000${activeTripProjectId ?? ""}\u0000${selectedImage?.name ?? ""}\u0000${selectedImage?.type ?? ""}\u0000${selectedImage?.size ?? ""}\u0000${imageDigest}`;
+      const idempotencyKey = idempotencyKeyRef.current?.fingerprint === fingerprint
+        ? idempotencyKeyRef.current.key
+        : crypto.randomUUID().replaceAll("-", "");
+      idempotencyKeyRef.current = { fingerprint, key: idempotencyKey };
+      const result = await submitAiAskStream({ question: trimmedQuestion, conversationId, tripProjectId: activeTripProjectId, image: selectedImage, idempotencyKey, signal: controller.signal, onPreparing: () => {
         if (activeRequestIdRef.current === requestId) {
           setIsPreparing(true);
           setStatus("Trợ lý đang chuẩn bị ngữ cảnh cho câu hỏi của bạn.");
@@ -1159,17 +1166,22 @@ export function AiAskComposer({
         return;
       }
 
+      if (result.status === "in-progress") {
+        setStatus("Yêu cầu này vẫn đang được xử lý. Hãy chờ kết quả hoàn tất.");
+        setRecoveryMessage("Yêu cầu đang xử lý. Hãy chờ một lát trước khi gửi lại.");
+        return;
+      }
+
       if (result.status === "answer-failed") {
         const failedUserMessage = result.userMessage;
 
         if (result.conversationId && failedUserMessage) {
           const newConversationId = result.conversationId;
           setConversationId(newConversationId);
-          setFailedQuestionIds((currentIds) => [...currentIds, failedUserMessage.id]);
-          setMessages((currentMessages) => [
-            ...currentMessages,
+          setFailedQuestionIds((currentIds) => currentIds.includes(failedUserMessage.id) ? currentIds : [...currentIds, failedUserMessage.id]);
+          setMessages((currentMessages) => appendMessagesWithoutDuplicateIds(currentMessages, [
             { id: failedUserMessage.id, role: "user", content: failedUserMessage.content },
-          ]);
+          ]));
           if (!hadConversation) {
             setSessions((currentSessions) => [summarizeSession(newConversationId, trimmedQuestion), ...currentSessions]);
           } else {
@@ -1188,13 +1200,13 @@ export function AiAskComposer({
       }
 
       setConversationId(result.conversationId);
-      setMessages((currentMessages) => [
-        ...currentMessages,
+      setMessages((currentMessages) => appendMessagesWithoutDuplicateIds(currentMessages, [
         { id: result.userMessage.id, role: "user", content: result.userMessage.content },
         { id: result.assistantMessage.id, role: "assistant", content: result.assistantMessage.content, provenance: result.assistantMessage.provenance, annotations: result.assistantMessage.annotations, proposal: result.proposal },
-      ]);
+      ]));
       setQuestion("");
       setSelectedImage(null);
+      idempotencyKeyRef.current = null;
       setStatus(hadConversation ? "Đã cập nhật hội thoại của bạn." : "Đã tạo câu trả lời đầu tiên cho chuyến đi của bạn.");
       if (!hadConversation) {
         setSessions((currentSessions) => [summarizeSession(result.conversationId, trimmedQuestion), ...currentSessions]);
@@ -2274,17 +2286,32 @@ type StreamResult = {
   assistantMessage: DisplayMessage;
   proposal?: ProposalDoneSummary;
 } | {
+  status: "in-progress";
+  conversationId?: string;
+  userMessage?: DisplayMessage;
+} | {
   status: "answer-failed";
   conversationId?: string;
   userMessage?: DisplayMessage;
   errorMessage: string;
 };
 
+function appendMessagesWithoutDuplicateIds(currentMessages: DisplayMessage[], additions: DisplayMessage[]) {
+  const existingIds = new Set(currentMessages.map((message) => message.id));
+  return [...currentMessages, ...additions.filter((message) => !existingIds.has(message.id))];
+}
+
+async function digestFileForIdempotency(file: File) {
+  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 async function submitAiAskStream({
   question,
   conversationId,
   tripProjectId,
   image,
+  idempotencyKey,
   signal,
   onPreparing,
   onDelta,
@@ -2293,6 +2320,7 @@ async function submitAiAskStream({
   conversationId?: string;
   tripProjectId?: string;
   image: File | null;
+  idempotencyKey: string;
   signal?: AbortSignal;
   onPreparing: () => void;
   onDelta: (content: string) => void;
@@ -2304,7 +2332,7 @@ async function submitAiAskStream({
   if (tripProjectId) formData.set("tripProjectId", tripProjectId);
   if (image) formData.set("image", image);
 
-  const response = await fetch("/api/ai-ask/stream", { method: "POST", body: formData, signal });
+  const response = await fetch("/api/ai-ask/stream", { method: "POST", body: formData, signal, headers: { "Idempotency-Key": idempotencyKey } });
 
   if (!response.ok || !response.body) {
     const payload = await response.json().catch(() => null) as { error?: string } | null;
@@ -2340,6 +2368,10 @@ async function submitAiAskStream({
 
       if (event.type === "delta" && event.content) {
         onDelta(event.content);
+      }
+
+      if (event.type === "in_progress") {
+        terminalResult = { status: "in-progress", conversationId: event.conversationId, userMessage: event.userMessage };
       }
 
       if (event.type === "done" && event.conversationId && event.userMessage && event.assistantMessage) {

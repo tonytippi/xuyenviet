@@ -2,9 +2,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { createElement } from "react";
 import { readFileSync } from "node:fs";
 import { asc, eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { aiGatewayModels, aiUsageEvents, answerUsefulnessFeedback, assistantResponseProvenance, assistantRetrievalDecisions, conversations, messageImageAttachments, messages, tripChangeProposals, tripPlanChangeHistory, tripPlanItems, tripProjectConstraints, tripProjects, users } from "@/db/schema";
+import { aiGatewayModels, aiUsageEvents, answerUsefulnessFeedback, assistantResponseProvenance, assistantRetrievalDecisions, conversations, messageImageAttachments, messages, schema, tripChangeProposals, tripPlanChangeHistory, tripPlanItems, tripProjectConstraints, tripProjects, users } from "@/db/schema";
 import type { AnswerAnnotation } from "@/features/ai/answer-annotations";
 import type { AnswerEntityDescriptor } from "@/features/ai/ai-ask-composer";
 import { TripProposalReviewCard } from "@/features/ai/trip-proposal-review-card";
@@ -59,6 +61,15 @@ async function countUsageEvents() {
 
 function findUsageEvent(rows: Array<typeof aiUsageEvents.$inferSelect>, purpose: string, provider?: string) {
   return rows.find((row) => row.purpose === purpose && (!provider || row.provider === provider));
+}
+
+function createAiAskStreamRequest(formData: FormData, idempotencyKey = crypto.randomUUID().replaceAll("-", ""), signal?: AbortSignal) {
+  return new Request("https://xuyenviet.test/api/ai-ask/stream", {
+    method: "POST",
+    body: formData,
+    headers: { "Idempotency-Key": idempotencyKey },
+    signal,
+  });
 }
 
 async function renderAuthenticatedAiAskShell(searchParams: Record<string, string> = {}, roles: string[] = []) {
@@ -1292,10 +1303,30 @@ describe("AI Ask streaming route", () => {
     formData.set("question", "   ");
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
 
     expect(response.status).toBe(400);
     expect(await response.text()).not.toContain('"type":"preparing"');
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(await countConversations()).toBe(0);
+    expect(await countMessages()).toBe(0);
+    expect(await countUsageEvents()).toBe(0);
+  });
+
+  test("rejects a missing Idempotency-Key before persistence or provider calls", async () => {
+    await createTestUser("user-1");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
+    }));
+    const formData = new FormData();
+    formData.set("question", "Hà Nội đi Đà Nẵng?");
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+
+    expect(response.status).toBe(400);
     expect(fetchMock).not.toHaveBeenCalled();
     expect(await countConversations()).toBe(0);
     expect(await countMessages()).toBe(0);
@@ -1313,7 +1344,7 @@ describe("AI Ask streaming route", () => {
     formData.set("question", "a".repeat(2_001));
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
 
     expect(response.status).toBe(400);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -1332,7 +1363,7 @@ describe("AI Ask streaming route", () => {
     formData.set("question", "Hà Nội đi Đà Nẵng?");
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
 
     expect(response.status).toBe(401);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -1341,7 +1372,7 @@ describe("AI Ask streaming route", () => {
     expect(await countUsageEvents()).toBe(0);
   });
 
-  test("rejects text submissions when no streaming-capable model is configured before side effects", async () => {
+  test("terminalizes text submissions when no streaming-capable model is configured", async () => {
     await createTestUser("user-1");
     await createDefaultAiAskModel({ supportsStreaming: false });
     const fetchMock = vi.fn();
@@ -1353,12 +1384,13 @@ describe("AI Ask streaming route", () => {
     formData.set("question", "Hà Nội đi Huế?");
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
 
-    expect(response.status).toBe(409);
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain('"type":"error"');
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(await countConversations()).toBe(0);
-    expect(await countMessages()).toBe(0);
+    expect(await countConversations()).toBe(1);
+    expect(await countMessages()).toBe(1);
     expect(await countUsageEvents()).toBe(0);
   });
 
@@ -1366,7 +1398,8 @@ describe("AI Ask streaming route", () => {
     await createTestUser("user-1");
     await createDefaultAiAskModel({ id: "ai-ask-500-model", gatewayModelName: "cx/gpt-5.5-500", supportsStreaming: true });
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status: 500 })));
+    const fetchMock = vi.fn().mockResolvedValue(new Response("{}", { status: 500 }));
+    vi.stubGlobal("fetch", fetchMock);
     vi.doMock("@/server/auth", () => ({
       getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
     }));
@@ -1374,7 +1407,8 @@ describe("AI Ask streaming route", () => {
     formData.set("question", "Hà Nội đi Đà Nẵng?");
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const idempotencyKey = "gateway_failure_key_123";
+    const response = await POST(createAiAskStreamRequest(formData, idempotencyKey) as never);
     const body = await response.text();
     const savedMessages = await testDb.select().from(messages).orderBy(asc(messages.createdAt), asc(messages.id));
     const savedUsageEvents = await testDb.select().from(aiUsageEvents);
@@ -1384,6 +1418,119 @@ describe("AI Ask streaming route", () => {
     expect(savedUsageEvents).toHaveLength(2);
     expect(findUsageEvent(savedUsageEvents, "web_search_fallback", "tavily")).toMatchObject({ status: "failure", model: "search", errorCode: "low_quality_results" });
     expect(findUsageEvent(savedUsageEvents, "ai_ask_initial_answer", "ai_gateway")).toMatchObject({ status: "failure", errorCode: "gateway_http_error", model: "cx/gpt-5.5-500", aiGatewayModelId: "ai-ask-500-model" });
+
+    const replay = await POST(createAiAskStreamRequest(formData, idempotencyKey) as never);
+    expect(await replay.text()).toBe(`${body}`);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(await countMessages()).toBe(1);
+  });
+
+  test("invokes the gateway once for concurrent first delivery and returns in_progress to the loser", async () => {
+    await createTestUser("user-1");
+    await createDefaultAiAskModel({ supportsStreaming: true });
+    const sql = postgres(process.env.DATABASE_URL!, { max: 2 });
+    const routeDb = drizzle(sql, { schema });
+    let releaseGateway!: (response: Response) => void;
+    let signalGatewayStarted!: () => void;
+    const gatewayResponse = new Promise<Response>((resolve) => { releaseGateway = resolve; });
+    const gatewayStarted = new Promise<void>((resolve) => { signalGatewayStarted = resolve; });
+    const fetchMock = vi.fn(() => {
+      signalGatewayStarted();
+      return gatewayResponse;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.doMock("@/db/client", () => ({ getDb: () => routeDb }));
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
+    }));
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+    const idempotencyKey = "concurrent_route_key_123";
+    const firstFormData = new FormData();
+    firstFormData.set("question", "Đi Huế thế nào?");
+    const secondFormData = new FormData();
+    secondFormData.set("question", "Đi Huế thế nào?");
+
+    try {
+      const first = await POST(createAiAskStreamRequest(firstFormData, idempotencyKey) as never);
+      await gatewayStarted;
+      const second = await POST(createAiAskStreamRequest(secondFormData, idempotencyKey) as never);
+
+      expect(await second.text()).toContain('"type":"in_progress"');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      releaseGateway(new Response([
+        'data: {"choices":[{"delta":{"content":"Nên đi nhẹ."}}]}\n\n',
+        'data: {"choices":[{"finish_reason":"stop"}]}\n\n',
+        "data: [DONE]\n\n",
+      ].join(""), { status: 200, headers: { "content-type": "text/event-stream" } }));
+      expect(await first.text()).toContain('"type":"done"');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      await sql.end();
+      vi.doUnmock("@/db/client");
+    }
+  });
+
+  test("replays a caller-abort terminal result without another provider call", async () => {
+    await createTestUser("user-1");
+    await createDefaultAiAskModel({ supportsStreaming: true });
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      if (init?.signal?.aborted) {
+        reject(new DOMException("Aborted", "AbortError"));
+        return;
+      }
+      init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
+    }));
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+    const idempotencyKey = "caller_abort_key_123";
+    const controller = new AbortController();
+    const formData = new FormData();
+    formData.set("question", "Đi Phú Yên 4 ngày?");
+
+    const response = await POST(createAiAskStreamRequest(formData, idempotencyKey, controller.signal) as never);
+    controller.abort();
+    const body = await response.text();
+    const replay = await POST(createAiAskStreamRequest(formData, idempotencyKey) as never);
+
+    expect(body).toContain('"type":"error"');
+    expect(await replay.text()).toBe(body);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(await countMessages()).toBe(1);
+  });
+
+  test("replays final persistence failure without another provider call", async () => {
+    await createTestUser("user-1");
+    await createDefaultAiAskModel({ supportsStreaming: true });
+    const fetchMock = vi.fn().mockResolvedValue(new Response([
+      'data: {"choices":[{"delta":{"content":"Nên đi nhẹ."}}]}\n\n',
+      'data: {"choices":[{"finish_reason":"stop"}]}\n\n',
+      "data: [DONE]\n\n",
+    ].join(""), { status: 200, headers: { "content-type": "text/event-stream" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.doMock("@/features/retrieval/provenance", async () => {
+      const actual = await vi.importActual<typeof import("@/features/retrieval/provenance")>("@/features/retrieval/provenance");
+      return { ...actual, persistAssistantAnswerProvenance: vi.fn().mockRejectedValue(new Error("persistence unavailable")) };
+    });
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
+    }));
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+    const idempotencyKey = "persistence_failure_key_123";
+    const formData = new FormData();
+    formData.set("question", "Đi Huế thế nào?");
+
+    const response = await POST(createAiAskStreamRequest(formData, idempotencyKey) as never);
+    const body = await response.text();
+    const replay = await POST(createAiAskStreamRequest(formData, idempotencyKey) as never);
+
+    expect(body).toContain('"type":"error"');
+    expect(await replay.text()).toBe(body);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(await countMessages()).toBe(1);
   });
 
   test("records failed usage and creates no assistant message when the gateway network call fails", async () => {
@@ -1398,7 +1545,7 @@ describe("AI Ask streaming route", () => {
     formData.set("question", "Đi Phú Yên 4 ngày?");
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     const body = await response.text();
     const savedMessages = await testDb.select().from(messages);
     const savedUsageEvents = await testDb.select().from(aiUsageEvents);
@@ -1456,7 +1603,7 @@ describe("AI Ask streaming route", () => {
     formData.set("conversationId", conversation.id);
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     const body = await response.text();
     const savedMessages = await testDb.select().from(messages).where(eq(messages.conversationId, conversation.id)).orderBy(asc(messages.createdAt), asc(messages.id));
     const gatewayMessages = getGatewayRequestMessages(fetchMock, 0);
@@ -1495,7 +1642,7 @@ describe("AI Ask streaming route", () => {
     formData.set("conversationId", conversation.id);
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     const body = await response.text();
 
     expect(fetchMock).not.toHaveBeenCalled();
@@ -1522,7 +1669,7 @@ describe("AI Ask streaming route", () => {
     formData.set("tripProjectId", project.id);
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     await response.text();
     const savedConversations = await testDb.select().from(conversations);
 
@@ -1547,7 +1694,7 @@ describe("AI Ask streaming route", () => {
     formData.set("tripProjectId", otherProject.id);
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
 
     expect(response.status).toBe(400);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -1574,7 +1721,7 @@ describe("AI Ask streaming route", () => {
     formData.set("tripProjectId", projectB.id);
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     const body = await response.text();
 
     expect(response.status).toBe(200);
@@ -1600,7 +1747,7 @@ describe("AI Ask streaming route", () => {
     formData.set("conversationId", conversation.id);
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     const body = await response.text();
 
     expect(response.status).toBe(200);
@@ -1635,7 +1782,7 @@ describe("AI Ask streaming route", () => {
     formData.set("tripProjectId", project.id);
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     await response.text();
     const savedConversation = (await testDb.select().from(conversations).where(eq(conversations.id, conversation.id)))[0];
     const savedMessages = await testDb.select().from(messages).where(eq(messages.conversationId, conversation.id)).orderBy(asc(messages.createdAt), asc(messages.id));
@@ -1675,7 +1822,7 @@ describe("AI Ask streaming route", () => {
     formData.set("question", "Đi Quy Nhơn 3 ngày?");
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     await response.text();
     const requestBody = JSON.parse(String(fetchMock.mock.calls[0][1].body)) as { max_tokens?: number; stream?: boolean };
 
@@ -1701,7 +1848,7 @@ describe("AI Ask streaming route", () => {
     formData.set("question", "Kể cho tôi nghe lịch trình chi tiết 30 ngày?");
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     const body = await response.text();
     const savedMessages = await testDb.select().from(messages).orderBy(asc(messages.createdAt), asc(messages.id));
     const savedUsageEvents = await testDb.select().from(aiUsageEvents);
@@ -1753,7 +1900,7 @@ describe("AI Ask streaming route", () => {
     formData.set("question", "Giá vé Huế hiện tại?");
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     await response.text();
     const savedUsageEvents = await testDb.select().from(aiUsageEvents);
     const webUsage = findUsageEvent(savedUsageEvents, "web_search_fallback", "tavily");
@@ -1794,7 +1941,7 @@ describe("AI Ask streaming route", () => {
     formData.set("question", "Đi Tây Bắc 3 ngày?");
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     const body = await response.text();
     const savedMessages = await testDb.select().from(messages).orderBy(asc(messages.createdAt), asc(messages.id));
 
@@ -1821,7 +1968,7 @@ describe("AI Ask streaming route", () => {
     formData.set("question", "Đi Hà Giang?");
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     const body = await response.text();
     const savedMessages = await testDb.select().from(messages).orderBy(asc(messages.createdAt), asc(messages.id));
 
@@ -1854,7 +2001,7 @@ describe("AI Ask streaming route", () => {
     formData.set("image", new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3])], "ha-giang.png", { type: "image/png" }));
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     const body = await response.text();
     const savedMessages = await testDb.select().from(messages).orderBy(asc(messages.createdAt), asc(messages.id));
     const savedAttachments = await testDb.select().from(messageImageAttachments);
@@ -1912,7 +2059,7 @@ describe("AI Ask streaming route", () => {
     formData.set("question", "Đi Hà Giang thế nào?");
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     const body = await response.text();
     const savedMessages = await testDb.select().from(messages).orderBy(asc(messages.createdAt), asc(messages.id));
     const savedUsageEvents = await testDb.select().from(aiUsageEvents);
@@ -1941,7 +2088,7 @@ describe("AI Ask streaming route", () => {
     formData.set("question", "Đi Hà Giang thế nào?");
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     await response.text();
     const savedMessages = await testDb.select().from(messages);
     const savedUsageEvents = await testDb.select().from(aiUsageEvents);
@@ -1965,7 +2112,7 @@ describe("AI Ask streaming route", () => {
     formData.set("image", new File([new Uint8Array([1])], "note.txt", { type: "text/plain" }));
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
 
     expect(response.status).toBe(400);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -1987,7 +2134,7 @@ describe("AI Ask streaming route", () => {
     formData.set("image", new File([], "empty.png", { type: "image/png" }));
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
 
     expect(response.status).toBe(400);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -2031,7 +2178,7 @@ describe("AI Ask streaming route", () => {
     formData.set("image", new File([new Uint8Array([1, 2, 3])], "fake.png", { type: "image/png" }));
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
 
     expect(response.status).toBe(400);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -2053,7 +2200,7 @@ describe("AI Ask streaming route", () => {
     formData.set("image", new File([new Uint8Array([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50])], "road.webp", { type: "image/webp" }));
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
 
     expect(response.status).toBe(409);
     expect(fetchMock).not.toHaveBeenCalled();

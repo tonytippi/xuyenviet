@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "ai_ask_commands_new_conversation_key_idx" ON "ai_ask_commands" USING btree ("user_id","idempotency_key") WHERE "ai_ask_commands"."scope_kind" = 'new_conversation';

@@ -469,7 +469,7 @@ describe("chat/trip context extraction", () => {
     formData.set("question", "Tôi muốn đi Huế 5 ngày.");
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData, headers: { "Idempotency-Key": crypto.randomUUID().replaceAll("-", "") } }) as never);
     const responseText = await response.text();
 
     expect(responseText).toContain('"type":"done"');
@@ -520,7 +520,7 @@ describe("chat/trip context extraction", () => {
     formData.set("question", "Tôi muốn đi Huế 5 ngày.");
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData, headers: { "Idempotency-Key": crypto.randomUUID().replaceAll("-", "") } }) as never);
     const responseText = await response.text();
 
     expect(responseText).toContain('"type":"done"');
@@ -553,7 +553,7 @@ describe("chat/trip context extraction", () => {
     formData.set("tripProjectId", otherProject.id);
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData, headers: { "Idempotency-Key": crypto.randomUUID().replaceAll("-", "") } }) as never);
 
     expect(response.status).toBe(400);
     expect(fetchMock).not.toHaveBeenCalled();

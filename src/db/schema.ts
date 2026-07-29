@@ -28,6 +28,9 @@ export type MessageRole = (typeof messageRoleValues)[number];
 export const aiUsageStatusValues = ["success", "failure"] as const;
 export type AiUsageStatus = (typeof aiUsageStatusValues)[number];
 
+export const aiAskCommandStatusValues = ["pending", "completed", "failed", "aborted"] as const;
+export type AiAskCommandStatus = (typeof aiAskCommandStatusValues)[number];
+
 export const aiGatewayModelPurposeValues = ["ai_ask_initial_answer", "extraction", "embeddings", "evaluation"] as const;
 export type AiGatewayModelPurpose = (typeof aiGatewayModelPurposeValues)[number];
 
@@ -934,6 +937,64 @@ export const messageImageAttachments = pgTable(
     index("message_image_attachments_user_id_idx").on(attachment.userId),
     check("message_image_attachments_mime_type_check", sql`${attachment.mimeType} in ('image/jpeg', 'image/png', 'image/webp')`),
     check("message_image_attachments_byte_size_check", sql`${attachment.byteSize} > 0 and ${attachment.byteSize} <= 5242880`),
+  ],
+);
+
+export const aiAskCommands = pgTable(
+  "ai_ask_commands",
+  {
+    id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    scopeKind: text("scope_kind").notNull(),
+    scopeId: text("scope_id").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    identityVersion: integer("identity_version").default(1).notNull(),
+    requestDigest: text("request_digest").notNull(),
+    normalizedQuestion: text("normalized_question").notNull(),
+    attachmentMetadata: jsonb("attachment_metadata").$type<{ fileName: string | null; mimeType: string; byteSize: number; contentSha256: string } | null>(),
+    selectedScopeDigest: text("selected_scope_digest").notNull(),
+    status: text("status").$type<AiAskCommandStatus>().default("pending").notNull(),
+    conversationId: text("conversation_id"),
+    tripProjectId: text("trip_project_id"),
+    userMessageId: text("user_message_id"),
+    assistantMessageId: text("assistant_message_id"),
+    terminalResult: jsonb("terminal_result").$type<Record<string, unknown>>(),
+    expiresAt: timestamp("expires_at", { mode: "date" }).notNull(),
+    terminalAt: timestamp("terminal_at", { mode: "date" }),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (command) => [
+    foreignKey({
+      columns: [command.conversationId, command.userId],
+      foreignColumns: [conversations.id, conversations.userId],
+      name: "ai_ask_commands_conversation_owner_fk",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [command.tripProjectId, command.userId],
+      foreignColumns: [tripProjects.id, tripProjects.userId],
+      name: "ai_ask_commands_trip_project_owner_fk",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [command.userMessageId, command.userId],
+      foreignColumns: [messages.id, messages.userId],
+      name: "ai_ask_commands_user_message_owner_fk",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [command.assistantMessageId, command.userId],
+      foreignColumns: [messages.id, messages.userId],
+      name: "ai_ask_commands_assistant_message_owner_fk",
+    }).onDelete("cascade"),
+    uniqueIndex("ai_ask_commands_owner_scope_key_idx").on(command.userId, command.scopeKind, command.scopeId, command.idempotencyKey),
+    uniqueIndex("ai_ask_commands_new_conversation_key_idx").on(command.userId, command.idempotencyKey).where(sql`${command.scopeKind} = 'new_conversation'`),
+    index("ai_ask_commands_owner_conversation_idx").on(command.userId, command.conversationId),
+    index("ai_ask_commands_expiry_idx").on(command.expiresAt),
+    check("ai_ask_commands_scope_kind_check", sql`${command.scopeKind} in ('conversation', 'trip_project', 'new_conversation')`),
+    check("ai_ask_commands_key_check", sql`${command.idempotencyKey} ~ '^[A-Za-z0-9_-]{16,128}$'`),
+    check("ai_ask_commands_digest_check", sql`${command.requestDigest} ~ '^[a-f0-9]{64}$' and ${command.selectedScopeDigest} ~ '^[a-f0-9]{64}$'`),
+    check("ai_ask_commands_status_check", sql`${command.status} in ('pending', 'completed', 'failed', 'aborted')`),
+    check("ai_ask_commands_question_check", sql`char_length(${command.normalizedQuestion}) between 1 and 2000`),
+    check("ai_ask_commands_terminal_shape_check", sql`(${command.status} = 'pending' and ${command.terminalResult} is null and ${command.terminalAt} is null) or (${command.status} <> 'pending' and ${command.terminalResult} is not null and ${command.terminalAt} is not null)`),
   ],
 );
 
