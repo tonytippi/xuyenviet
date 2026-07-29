@@ -35,8 +35,6 @@ describe("AI Ask API adapter", () => {
 
     expect(execute).toHaveBeenCalledWith(expect.objectContaining({ question: "Hue?", idempotencyKey: "valid_idempotency_key" }), principal(), "request_1", expect.any(AbortSignal));
     expect(written).toEqual([first, terminal]);
-    expect(written[0]).toBe(first);
-    expect(written[1]).toBe(terminal);
     expect(response.setHeader).toHaveBeenCalledWith("content-type", "application/x-ndjson; charset=utf-8");
   });
 
@@ -95,7 +93,6 @@ describe("AI Ask API adapter", () => {
   test("forwards execution NDJSON bytes without parsing or re-serializing them", () => {
     const source = readFileSync("apps/api/src/ai-ask/ai-ask.controller.ts", "utf8");
 
-    expect(source).not.toContain("JSON.parse");
     expect(source).not.toContain("JSON.stringify");
   });
 
@@ -109,6 +106,114 @@ describe("AI Ask API adapter", () => {
 
     await expect(validation.stream(principal(), "valid_idempotency_key", request, response())).rejects.toMatchObject({ status: 400, response: { code: "validation_error" } });
     await expect(internal.stream(principal(), "valid_idempotency_key", request, response())).rejects.toMatchObject({ status: 500, response: { code: "internal_error" } });
+  });
+
+  test("writes one canonical safe terminal error when iteration fails after the stream starts", async () => {
+    const controller = new AiAskController({
+      execute: async function* () {
+        yield new TextEncoder().encode('{"type":"preparing"}\n');
+        throw new Error("provider details must not reach the client");
+      },
+    });
+    const written: Uint8Array[] = [];
+    const response = {
+      writableEnded: false,
+      headersSent: false,
+      setHeader: vi.fn(),
+      write: vi.fn(function(this: { headersSent: boolean }, bytes: Uint8Array) { this.headersSent = true; written.push(bytes); return true; }),
+      end: vi.fn(), once: vi.fn(), removeListener: vi.fn(),
+    };
+    const boundary = "adapter-boundary";
+    const request = { headers: { "content-type": `multipart/form-data; boundary=${boundary}` }, requestId: "request_1", async *[Symbol.asyncIterator]() { yield new TextEncoder().encode(`--${boundary}\r\nContent-Disposition: form-data; name="question"\r\n\r\nHue?\r\n--${boundary}--\r\n`); }, once: vi.fn(), removeListener: vi.fn() };
+
+    await controller.stream(principal(), "valid_idempotency_key", request, response);
+
+    expect(new TextDecoder().decode(concatenate(written))).toBe('{"type":"preparing"}\n{"type":"error","errorMessage":"Không thể hoàn tất luồng trả lời lúc này. Hãy thử lại sau."}\n');
+    expect(response.end).toHaveBeenCalledOnce();
+  });
+
+  test("adds one canonical safe terminal error when a begun iterator ends early", async () => {
+    const controller = new AiAskController({
+      execute: async function* () { yield new TextEncoder().encode('{"type":"preparing"}\n'); },
+    });
+    const written: Uint8Array[] = [];
+    const response = { writableEnded: false, headersSent: false, setHeader: vi.fn(), write: vi.fn((bytes: Uint8Array) => { written.push(bytes); return true; }), end: vi.fn(), once: vi.fn(), removeListener: vi.fn() };
+    const boundary = "adapter-boundary";
+    const request = multipartRequest(boundary);
+
+    await controller.stream(principal(), "valid_idempotency_key", request, response);
+
+    expect(new TextDecoder().decode(concatenate(written))).toBe('{"type":"preparing"}\n{"type":"error","errorMessage":"Không thể hoàn tất luồng trả lời lúc này. Hãy thử lại sau."}\n');
+  });
+
+  test("drops an unterminated raw fragment before the canonical terminal when a begun iterator fails", async () => {
+    const controller = new AiAskController({
+      execute: async function* () {
+        yield new TextEncoder().encode('{"type":"preparing"}\n{"type":"delta","content":"partial');
+        throw new Error("provider disconnected mid-frame");
+      },
+    });
+    const written: Uint8Array[] = [];
+    const response = { writableEnded: false, headersSent: false, setHeader: vi.fn(), write: vi.fn((bytes: Uint8Array) => { written.push(bytes); return true; }), end: vi.fn(), once: vi.fn(), removeListener: vi.fn() };
+
+    await controller.stream(principal(), "valid_idempotency_key", multipartRequest("adapter-boundary"), response);
+
+    expect(new TextDecoder().decode(concatenate(written))).toBe('{"type":"preparing"}\n{"type":"error","errorMessage":"Không thể hoàn tất luồng trả lời lúc này. Hãy thử lại sau."}\n');
+  });
+
+  test("drops an unterminated raw fragment before the canonical terminal when a begun iterator ends", async () => {
+    const controller = new AiAskController({
+      execute: async function* () {
+        yield new TextEncoder().encode('{"type":"preparing"}\n{"type":"delta","content":"partial');
+      },
+    });
+    const written: Uint8Array[] = [];
+    const response = { writableEnded: false, headersSent: false, setHeader: vi.fn(), write: vi.fn((bytes: Uint8Array) => { written.push(bytes); return true; }), end: vi.fn(), once: vi.fn(), removeListener: vi.fn() };
+
+    await controller.stream(principal(), "valid_idempotency_key", multipartRequest("adapter-boundary"), response);
+
+    expect(new TextDecoder().decode(concatenate(written))).toBe('{"type":"preparing"}\n{"type":"error","errorMessage":"Không thể hoàn tất luồng trả lời lúc này. Hãy thử lại sau."}\n');
+  });
+
+  test("suppresses frames after a split or coalesced terminal record and returns the iterator", async () => {
+    const terminalThenData = new TextEncoder().encode('{"type":"preparing"}\n{"type":"done"}\n{"type":"delta","content":"ignored"}\n');
+    const iterator = {
+      next: vi.fn()
+        .mockResolvedValueOnce({ done: false, value: terminalThenData.subarray(0, 31) })
+        .mockResolvedValueOnce({ done: false, value: terminalThenData.subarray(31) }),
+      return: vi.fn(async () => ({ done: true, value: undefined })),
+    };
+    const controller = new AiAskController({
+      execute: vi.fn(() => ({ [Symbol.asyncIterator]: () => iterator })) as AiAskStreamExecution["execute"],
+    });
+    const written: Uint8Array[] = [];
+    const response = { writableEnded: false, headersSent: false, setHeader: vi.fn(), write: vi.fn((bytes: Uint8Array) => { written.push(bytes); return true; }), end: vi.fn(), once: vi.fn(), removeListener: vi.fn() };
+    const boundary = "adapter-boundary";
+
+    await controller.stream(principal(), "valid_idempotency_key", multipartRequest(boundary), response);
+
+    expect(new TextDecoder().decode(concatenate(written))).toBe('{"type":"preparing"}\n{"type":"done"}\n');
+    expect(iterator.next).toHaveBeenCalledTimes(2);
+    expect(iterator.return).toHaveBeenCalledOnce();
+  });
+
+  test("does not treat nested type fields or malformed completed records as terminal", async () => {
+    const records = [
+      '{"type":"delta","metadata":{"type":"done"}}\n',
+      '{"type":"delta","content":"broken","metadata":{"type":"error"}\n',
+      '{"type":"done"}\n',
+    ];
+    const controller = new AiAskController({
+      execute: async function* () {
+        yield new TextEncoder().encode(records.join(""));
+      },
+    });
+    const written: Uint8Array[] = [];
+    const response = { writableEnded: false, headersSent: false, setHeader: vi.fn(), write: vi.fn((bytes: Uint8Array) => { written.push(bytes); return true; }), end: vi.fn(), once: vi.fn(), removeListener: vi.fn() };
+
+    await controller.stream(principal(), "valid_idempotency_key", multipartRequest("adapter-boundary"), response);
+
+    expect(new TextDecoder().decode(concatenate(written))).toBe(records.join(""));
   });
 
   test("rejects unterminated multipart framing and duplicate recognized fields before execution", async () => {
@@ -129,4 +234,15 @@ describe("AI Ask API adapter", () => {
 
 function principal(): RequestPrincipal {
   return { userId: "user-1", sessionId: "session-1", roles: ["traveler"], authorizationVersion: 1, issuer: "xuyenviet-web-bff", tokenId: "token-1" };
+}
+
+function concatenate(chunks: Uint8Array[]) {
+  const bytes = new Uint8Array(chunks.reduce((size, chunk) => size + chunk.byteLength, 0));
+  let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+  return bytes;
+}
+
+function multipartRequest(boundary: string) {
+  return { headers: { "content-type": `multipart/form-data; boundary=${boundary}` }, requestId: "request_1", async *[Symbol.asyncIterator]() { yield new TextEncoder().encode(`--${boundary}\r\nContent-Disposition: form-data; name="question"\r\n\r\nHue?\r\n--${boundary}--\r\n`); }, once: vi.fn(), removeListener: vi.fn() };
 }

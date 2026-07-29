@@ -5,6 +5,7 @@ const getAuthenticatedSession = vi.fn();
 const mintWebBffCredential = vi.fn();
 const callPrivateApiStream = vi.fn();
 const validateCsrfRequest = vi.fn();
+const getBffTransportConfig = vi.fn(() => bffTransportConfig);
 const bffTransportConfig = {
   privateApiUrl: "https://api.railway.internal",
   bffOrigin: "https://xuyenviet.test",
@@ -25,7 +26,7 @@ describe("AI Ask BFF cutover routing", () => {
     vi.clearAllMocks();
   });
 
-  test("enabled BFF rejects an unauthenticated request before minting and selects only the API owner", async () => {
+  test("enabled BFF rejects an unauthenticated request before loading API config or minting and selects only the API owner", async () => {
     const log = vi.spyOn(console, "info").mockImplementation(() => undefined);
     await loadRoute(true);
     validateCsrfRequest.mockReset();
@@ -38,12 +39,13 @@ describe("AI Ask BFF cutover routing", () => {
     expect(response.status).toBe(401);
     expect(mintWebBffCredential).not.toHaveBeenCalled();
     expect(callPrivateApiStream).not.toHaveBeenCalled();
+    expect(getBffTransportConfig).not.toHaveBeenCalled();
     expect(log).toHaveBeenCalledTimes(1);
     expect(log).toHaveBeenCalledWith("AI Ask stream selected owner", { owner: "versioned_api", correlationId: "routing_request_1" });
     expectTelemetryIsOwnerAndCorrelation(log);
   });
 
-  test("disabled BFF selects only the compatible legacy owner and logs no request data", async () => {
+  test("disabled BFF selects the compatible legacy owner with shared CSRF/session policy and no API config", async () => {
     const log = vi.spyOn(console, "info").mockImplementation(() => undefined);
     await loadRoute(false);
     validateCsrfRequest.mockReset();
@@ -56,6 +58,7 @@ describe("AI Ask BFF cutover routing", () => {
     expect(response.status).toBe(401);
     expect(mintWebBffCredential).not.toHaveBeenCalled();
     expect(callPrivateApiStream).not.toHaveBeenCalled();
+    expect(getBffTransportConfig).not.toHaveBeenCalled();
     expect(log).toHaveBeenCalledTimes(1);
     expect(log).toHaveBeenCalledWith("AI Ask stream selected owner", { owner: "legacy_compatibility", correlationId: "routing_request_1" });
     expectTelemetryIsOwnerAndCorrelation(log);
@@ -76,6 +79,33 @@ describe("AI Ask BFF cutover routing", () => {
     expect(callPrivateApiStream).not.toHaveBeenCalled();
     expect(log).not.toHaveBeenCalled();
   });
+
+  test("enabled BFF validates CSRF and session before minting, then relays raw bytes without private data", async () => {
+    await loadRoute(true);
+    validateCsrfRequest.mockReturnValue(true);
+    getAuthenticatedSession.mockResolvedValue({ userId: "user-1" });
+    mintWebBffCredential.mockResolvedValue("private-token");
+    const bytes = new TextEncoder().encode('{"type":"preparing"}\n{"type":"done"}\n');
+    callPrivateApiStream.mockResolvedValue({ status: 201, body: new ReadableStream({ start(controller) { controller.enqueue(bytes); controller.close(); } }), requestId: "upstream_1" });
+
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+    const response = await POST(request() as never);
+
+    expect(validateCsrfRequest).toHaveBeenCalledBefore(getAuthenticatedSession);
+    expect(getAuthenticatedSession).toHaveBeenCalledBefore(mintWebBffCredential);
+    expect(callPrivateApiStream).toHaveBeenCalledWith(expect.objectContaining({
+      config: bffTransportConfig,
+      credential: "private-token",
+      correlationId: "routing_request_1",
+      idempotencyKey: "valid_idempotency_key",
+    }));
+    const body = await response.text();
+    expect(body).toBe('{"type":"preparing"}\n{"type":"done"}\n');
+    expect(response.headers.get("x-request-id")).toBe("upstream_1");
+    expect(response.headers.get("set-cookie")).toBeNull();
+    expect([...response.headers.entries()].join(" ")).not.toContain("private-token");
+    expect(body).not.toContain("railway.internal");
+  });
 });
 
 async function loadRoute(enabled: boolean) {
@@ -83,7 +113,8 @@ async function loadRoute(enabled: boolean) {
   vi.doMock("@xuyenviet/config", async () => ({
     ...(await vi.importActual<typeof import("@xuyenviet/config")>("@xuyenviet/config")),
     isAiAskApiEnabled: () => enabled,
-    getBffTransportConfig: () => bffTransportConfig,
+    getBffCsrfConfig: () => bffTransportConfig,
+    getBffTransportConfig,
   }));
   vi.doMock("@/server/auth", () => ({ getAuthenticatedSession }));
   vi.doMock("@/server/bff-credentials", () => ({ mintWebBffCredential }));

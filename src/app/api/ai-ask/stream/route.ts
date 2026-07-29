@@ -1,4 +1,4 @@
-import { getBffTransportConfig, isAiAskApiEnabled } from "@xuyenviet/config";
+import { getBffCsrfConfig, getBffTransportConfig, isAiAskApiEnabled } from "@xuyenviet/config";
 import { aiAskMaxMultipartBodySize, parseAiAskStreamInput } from "@xuyenviet/contracts";
 import { createPostgresAiAskStreamExecutionPort } from "@xuyenviet/database";
 import { createAiAskStreamExecution } from "@xuyenviet/domain";
@@ -12,9 +12,9 @@ import { validateCsrfRequest } from "@/server/csrf";
 
 export async function POST(request: NextRequest) {
   const requestId = correlationId(request.headers.get("x-request-id"));
-  const config = getBffTransportConfig();
-  if (!validateCsrfRequest(request, config)) return Response.json({ error: "Yêu cầu không hợp lệ. Vui lòng tải lại trang và thử lại." }, { status: 403, headers: { "x-request-id": requestId } });
-  if (!isAiAskApiEnabled()) {
+  const apiEnabled = isAiAskApiEnabled();
+  if (!validateCsrfRequest(request, getBffCsrfConfig())) return Response.json({ error: "Yêu cầu không hợp lệ. Vui lòng tải lại trang và thử lại." }, { status: 403, headers: { "x-request-id": requestId } });
+  if (!apiEnabled) {
     console.info("AI Ask stream selected owner", { owner: "legacy_compatibility", correlationId: requestId });
     return postLegacyAiAskStream(request, requestId);
   }
@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const upstream = await callPrivateApiStream({
-      config,
+      config: getBffTransportConfig(),
       credential: await mintWebBffCredential(),
       correlationId: requestId,
       path: "/v1/ai-ask/stream",

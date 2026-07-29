@@ -3,6 +3,8 @@ import "server-only";
 import { parseSafeApiError, type SafeApiError } from "@xuyenviet/contracts";
 import type { BffTransportConfig } from "@xuyenviet/config";
 
+const safeStreamFailure = new TextEncoder().encode('{"type":"error","errorMessage":"Không thể hoàn tất luồng trả lời lúc này. Hãy thử lại sau."}\n');
+
 export class BffApiError extends Error {
   constructor(readonly safe: SafeApiError) { super(safe.message); }
 }
@@ -106,10 +108,14 @@ export async function callPrivateApiStream(input: {
     }
     if (!response.body || !response.headers.get("content-type")?.toLowerCase().startsWith("application/x-ndjson")) throw internalError(input.correlationId);
     const upstreamRequestId = response.headers.get("x-request-id");
-    // The local timeout protects connection establishment only. Once the API has
-    // committed NDJSON headers, aborting it would silently truncate the protocol.
-    clearTimeout(timeout);
-    return { status: response.status, body: abortableBody(response.body, controller, () => { input.signal?.removeEventListener("abort", onAbort); }), requestId: /^[A-Za-z0-9_-]{1,128}$/.test(upstreamRequestId ?? "") ? upstreamRequestId! : input.correlationId };
+    return {
+      status: response.status,
+      body: abortableBody(response.body, controller, () => {
+        clearTimeout(timeout);
+        input.signal?.removeEventListener("abort", onAbort);
+      }, () => abortKind),
+      requestId: /^[A-Za-z0-9_-]{1,128}$/.test(upstreamRequestId ?? "") ? upstreamRequestId! : input.correlationId,
+    };
   } catch (error) {
     clearTimeout(timeout);
     input.signal?.removeEventListener("abort", onAbort);
@@ -119,17 +125,114 @@ export async function callPrivateApiStream(input: {
   }
 }
 
-function abortableBody(body: ReadableStream<Uint8Array>, controller: AbortController, cleanup: () => void): ReadableStream<Uint8Array> {
+function abortableBody(body: ReadableStream<Uint8Array>, controller: AbortController, cleanup: () => void, abortKind: () => "caller" | "timeout" | null): ReadableStream<Uint8Array> {
   const reader = body.getReader();
+  let closed = false;
+  let terminalSent = false;
+  const framer = createNdjsonFramer();
+  const finish = () => {
+    if (closed) return;
+    closed = true;
+    controller.signal.removeEventListener("abort", onAbort);
+    cleanup();
+  };
+  let outputController: ReadableStreamDefaultController<Uint8Array> | undefined;
+  const onAbort = () => {
+    if (closed) return;
+    const kind = abortKind();
+    finish();
+    if (kind === "timeout" && !terminalSent) {
+      outputController?.enqueue(safeStreamFailure);
+      outputController?.close();
+    } else {
+      outputController?.close();
+    }
+    void reader.cancel(controller.signal.reason);
+  };
   return new ReadableStream({
-    async pull(output) {
+    start(output) {
+      outputController = output;
+      controller.signal.addEventListener("abort", onAbort, { once: true });
+      if (controller.signal.aborted) onAbort();
+      else void pump(output);
+    },
+    async cancel(reason) {
+      finish();
+      controller.abort(reason);
+      try { await reader.cancel(reason); } catch { /* Upstream abort races are already terminal for this relay. */ }
+    },
+  });
+
+  async function pump(output: ReadableStreamDefaultController<Uint8Array>) {
+    while (!closed) {
       try {
         const next = await reader.read();
-        if (next.done) { cleanup(); output.close(); } else output.enqueue(next.value);
-      } catch (error) { cleanup(); output.error(error); }
+        if (controller.signal.aborted) return;
+        if (next.done) {
+          finish();
+          if (!terminalSent) output.enqueue(safeStreamFailure);
+          output.close();
+          return;
+        }
+        for (const frame of framer.push(next.value)) {
+          output.enqueue(frame.bytes);
+          if (frame.terminal) {
+            terminalSent = true;
+            finish();
+            await reader.cancel();
+            output.close();
+            return;
+          }
+        }
+      } catch {
+        if (controller.signal.aborted) return;
+        finish();
+        if (!terminalSent) {
+          output.enqueue(safeStreamFailure);
+          output.close();
+        }
+        return;
+      }
+    }
+  }
+}
+
+function createNdjsonFramer(): { push(bytes: Uint8Array): Array<{ bytes: Uint8Array; terminal: boolean }> } {
+  let buffered = new Uint8Array();
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  return {
+    push(bytes) {
+      const combined = new Uint8Array(buffered.byteLength + bytes.byteLength);
+      combined.set(buffered);
+      combined.set(bytes, buffered.byteLength);
+      const frames: Array<{ bytes: Uint8Array; terminal: boolean }> = [];
+      let start = 0;
+      for (let index = 0; index < combined.byteLength; index += 1) {
+        if (combined[index] !== 10) continue;
+        const frame = combined.slice(start, index + 1);
+        // Examine a completed record without changing the bytes sent to the caller.
+        const terminal = isTerminalNdjsonRecord(frame, decoder);
+        frames.push({ bytes: frame, terminal });
+        start = index + 1;
+        if (terminal) {
+          buffered = new Uint8Array();
+          return frames;
+        }
+      }
+      buffered = combined.slice(start);
+      return frames;
     },
-    async cancel(reason) { cleanup(); controller.abort(reason); await reader.cancel(reason); },
-  });
+  };
+}
+
+function isTerminalNdjsonRecord(bytes: Uint8Array, decoder: TextDecoder) {
+  try {
+    const record: unknown = JSON.parse(decoder.decode(bytes));
+    return typeof record === "object" && record !== null && !Array.isArray(record)
+      && ((record as { type?: unknown }).type === "done" || (record as { type?: unknown }).type === "error");
+  } catch {
+    return false;
+  }
 }
 
 function internalError(requestId: string): BffApiError { return new BffApiError(safeError("internal_error", messageFor("internal_error"), requestId)); }

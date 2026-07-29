@@ -6,6 +6,7 @@ import { AiAskAdmissionValidationError, type AiAskStreamExecution } from "@xuyen
 import { Principal } from "../auth/principal.decorator";
 
 export const AI_ASK_STREAM_EXECUTION = Symbol("AI_ASK_STREAM_EXECUTION");
+const safeStreamFailure = new TextEncoder().encode('{"type":"error","errorMessage":"Không thể hoàn tất luồng trả lời lúc này. Hãy thử lại sau."}\n');
 
 @Controller("v1/ai-ask")
 export class AiAskController {
@@ -33,6 +34,11 @@ export class AiAskController {
     request.once("aborted", onAborted);
     response.once("close", onResponseClose);
     let iterator: AsyncIterator<Uint8Array> | undefined;
+    // A received byte commits this connection to the stream protocol even when it
+    // does not complete a frame. The framer retains that fragment locally.
+    let sourceBegun = false;
+    let terminalSent = false;
+    const framer = createNdjsonFramer();
     try {
       iterator = this.execution.execute(parsed, principal, request.requestId!, abort.signal)[Symbol.asyncIterator]();
       let next = await iterator.next();
@@ -41,25 +47,73 @@ export class AiAskController {
         response.setHeader("cache-control", "no-store");
       }
       while (!next.done) {
-        const bytes = next.value;
         if (abort.signal.aborted || response.writableEnded) break;
-        if (response.write(bytes) === false) await waitForDrain(response, abort.signal);
+        sourceBegun = true;
+        for (const frame of framer.push(next.value)) {
+          if (response.write(frame.bytes) === false) await waitForDrain(response, abort.signal);
+          if (frame.terminal) {
+            terminalSent = true;
+            break;
+          }
+        }
+        if (terminalSent) break;
         if (abort.signal.aborted || response.writableEnded) break;
         next = await iterator.next();
       }
     } catch (error) {
       // Validation failures happened before the protocol began. Once it has begun,
       // only the retained NDJSON terminal shape is legal on this connection.
-      if (!response.headersSent) {
+      if (!sourceBegun && !response.headersSent) {
         if (error instanceof AiAskAdmissionValidationError) throw new BadRequestException({ code: "validation_error" });
         throw new InternalServerErrorException({ code: "internal_error" });
       }
     } finally {
+      if (sourceBegun && !terminalSent && !abort.signal.aborted && !response.writableEnded) {
+        try { response.write(safeStreamFailure); } catch { /* The client may have disconnected between write failure and close. */ }
+      }
       await iterator?.return?.();
       request.removeListener("aborted", onAborted);
       response.removeListener("close", onResponseClose);
       if (!response.writableEnded) response.end();
     }
+  }
+}
+
+function createNdjsonFramer(): { push(bytes: Uint8Array): Array<{ bytes: Uint8Array; terminal: boolean }> } {
+  let buffered = new Uint8Array();
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  return {
+    push(bytes) {
+      const combined = new Uint8Array(buffered.byteLength + bytes.byteLength);
+      combined.set(buffered);
+      combined.set(bytes, buffered.byteLength);
+      const frames: Array<{ bytes: Uint8Array; terminal: boolean }> = [];
+      let start = 0;
+      for (let index = 0; index < combined.byteLength; index += 1) {
+        if (combined[index] !== 10) continue;
+        const frame = combined.slice(start, index + 1);
+        // Inspect only fully framed records. Frames themselves remain unmodified.
+        const terminal = isTerminalNdjsonRecord(frame, decoder);
+        frames.push({ bytes: frame, terminal });
+        start = index + 1;
+        if (terminal) {
+          buffered = new Uint8Array();
+          return frames;
+        }
+      }
+      buffered = combined.slice(start);
+      return frames;
+    },
+  };
+}
+
+function isTerminalNdjsonRecord(bytes: Uint8Array, decoder: TextDecoder) {
+  try {
+    const record: unknown = JSON.parse(decoder.decode(bytes));
+    return typeof record === "object" && record !== null && !Array.isArray(record)
+      && ((record as { type?: unknown }).type === "done" || (record as { type?: unknown }).type === "error");
+  } catch {
+    return false;
   }
 }
 

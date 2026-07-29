@@ -27,6 +27,7 @@ export type BffTransportConfig = {
   readonly csrfLifetimeSeconds: number;
   readonly requestTimeoutMs: number;
 };
+export type BffCsrfConfig = Pick<BffTransportConfig, "bffOrigin" | "csrfSigningSecret" | "csrfLifetimeSeconds">;
 
 export function isAiAskApiEnabled(environment: { APP_ENV?: string; XV_AI_ASK_API_ENABLED?: string } = process.env as unknown as { APP_ENV?: string; XV_AI_ASK_API_ENABLED?: string }): boolean {
   const value = environment.XV_AI_ASK_API_ENABLED;
@@ -56,15 +57,21 @@ export function createBffTransportConfig(input: Omit<BffTransportConfig, "privat
 
 export function getBffTransportConfig(environment: NodeJS.ProcessEnv = process.env): BffTransportConfig {
   const privateApiUrl = requiredUrl(environment.XV_PRIVATE_API_URL);
-  const bffOrigin = requiredExactHttpsOrigin(environment.XV_WEB_BFF_ORIGIN);
-  const csrfSigningSecret = requiredValue(environment.XV_BFF_CSRF_SIGNING_SECRET);
+  const csrf = getBffCsrfConfig(environment);
   return createBffTransportConfig({
     privateApiUrl,
-    bffOrigin,
-    csrfSigningSecret,
-    csrfLifetimeSeconds: requiredInteger(environment.XV_BFF_CSRF_LIFETIME_SECONDS),
+    ...csrf,
     requestTimeoutMs: requiredInteger(environment.XV_BFF_REQUEST_TIMEOUT_MS),
   });
+}
+
+/** The rollback BFF still enforces the same session/CSRF boundary without an API origin. */
+export function getBffCsrfConfig(environment: NodeJS.ProcessEnv = process.env): BffCsrfConfig {
+  return {
+    bffOrigin: requiredExactHttpsOrigin(environment.XV_WEB_BFF_ORIGIN),
+    csrfSigningSecret: requiredValue(environment.XV_BFF_CSRF_SIGNING_SECRET),
+    csrfLifetimeSeconds: requiredInteger(environment.XV_BFF_CSRF_LIFETIME_SECONDS),
+  };
 }
 
 export function parseBffCredentialConfig(input: unknown): BffCredentialConfig {

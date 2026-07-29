@@ -63,14 +63,65 @@ describe("private BFF transport", () => {
     expect(new Uint8Array(await new Response(result.body).arrayBuffer())).toEqual(upstreamBytes);
   });
 
-  test("does not truncate established NDJSON when the local connection timeout elapses", async () => {
+  test("keeps the local timeout through the full NDJSON body, returns a safe terminal error, and aborts a stalled upstream", async () => {
     let cancelled = false;
-    const upstreamBytes = new Uint8Array([123, 34, 116, 121, 112, 101, 34, 58, 34, 112, 114, 101, 112, 97, 114, 105, 110, 103, 34, 125, 10, 123, 34, 116, 121, 112, 101, 34, 58, 34, 100, 111, 110, 101, 34, 125, 10]);
-    const upstream = new ReadableStream<Uint8Array>({ async start(controller) { await new Promise((resolve) => setTimeout(resolve, 10)); controller.enqueue(upstreamBytes); controller.close(); }, cancel() { cancelled = true; } });
+    const preparing = new TextEncoder().encode('{"type":"preparing"}\n');
+    const upstream = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(preparing); }, pull() {}, cancel() { cancelled = true; } });
     const result = await callPrivateApiStream({ config: { ...config, requestTimeoutMs: 1 }, credential: "private-token", correlationId: "request_1", path: "/v1/ai-ask/stream", idempotencyKey: "valid_idempotency_key", body: new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array([1])); controller.close(); } }), contentType: "multipart/form-data; boundary=boundary", fetcher: async () => new Response(upstream, { headers: { "content-type": "application/x-ndjson" } }) });
 
-    expect(new Uint8Array(await new Response(result.body).arrayBuffer())).toEqual(upstreamBytes);
-    expect(cancelled).toBe(false);
+    await expect(new Response(result.body).text()).resolves.toBe('{"type":"preparing"}\n{"type":"error","errorMessage":"Không thể hoàn tất luồng trả lời lúc này. Hãy thử lại sau."}\n');
+    expect(cancelled).toBe(true);
+  });
+
+  test("drops a partial record on timeout so the terminal error follows only valid NDJSON frames", async () => {
+    let cancelled = false;
+    const upstream = new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(new TextEncoder().encode('{"type":"preparing"}\n{"type":"delta","content":"half')); },
+      pull() {},
+      cancel() { cancelled = true; },
+    });
+    const result = await callPrivateApiStream({ config: { ...config, requestTimeoutMs: 1 }, credential: "private-token", correlationId: "request_1", path: "/v1/ai-ask/stream", idempotencyKey: "valid_idempotency_key", body: requestBody(), contentType: "multipart/form-data; boundary=boundary", fetcher: async () => new Response(upstream, { headers: { "content-type": "application/x-ndjson" } }) });
+
+    await expect(new Response(result.body).text()).resolves.toBe('{"type":"preparing"}\n{"type":"error","errorMessage":"Không thể hoàn tất luồng trả lời lúc này. Hãy thử lại sau."}\n');
+    expect(cancelled).toBe(true);
+  });
+
+  test("stops at a terminal frame without appending an error or relaying later bytes", async () => {
+    let cancelled = false;
+    const upstream = new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(new TextEncoder().encode('{"type":"preparing"}\n{"type":"done"}\n{"type":"delta","content":"ignored"}\n')); },
+      cancel() { cancelled = true; },
+    });
+    const result = await callPrivateApiStream({ config, credential: "private-token", correlationId: "request_1", path: "/v1/ai-ask/stream", idempotencyKey: "valid_idempotency_key", body: requestBody(), contentType: "multipart/form-data; boundary=boundary", fetcher: async () => new Response(upstream, { headers: { "content-type": "application/x-ndjson" } }) });
+
+    await expect(new Response(result.body).text()).resolves.toBe('{"type":"preparing"}\n{"type":"done"}\n');
+    expect(cancelled).toBe(true);
+  });
+
+  test("recognizes only a parsed root terminal type and preserves malformed raw records", async () => {
+    const records = [
+      '{"type":"delta","metadata":{"type":"done"}}\n',
+      '{"type":"delta","content":"broken","metadata":{"type":"error"}\n',
+      '{"type":"error","errorMessage":"safe"}\n',
+      '{"type":"delta","content":"ignored"}\n',
+    ];
+    let recordIndex = 0;
+    const upstream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(new TextEncoder().encode(records[recordIndex++]));
+        if (recordIndex === records.length) controller.close();
+      },
+    });
+    const result = await callPrivateApiStream({ config, credential: "private-token", correlationId: "request_1", path: "/v1/ai-ask/stream", idempotencyKey: "valid_idempotency_key", body: requestBody(), contentType: "multipart/form-data; boundary=boundary", fetcher: async () => new Response(upstream, { headers: { "content-type": "application/x-ndjson" } }) });
+
+    await expect(new Response(result.body).text()).resolves.toBe(records.slice(0, 3).join(""));
+  });
+
+  test("adds exactly one safe terminal error after a truncated upstream body", async () => {
+    const upstream = new TextEncoder().encode('{"type":"preparing"}\n{"type":"delta","content":"half');
+    const result = await callPrivateApiStream({ config, credential: "private-token", correlationId: "request_1", path: "/v1/ai-ask/stream", idempotencyKey: "valid_idempotency_key", body: requestBody(), contentType: "multipart/form-data; boundary=boundary", fetcher: async () => new Response(upstream, { headers: { "content-type": "application/x-ndjson" } }) });
+
+    await expect(new Response(result.body).text()).resolves.toBe('{"type":"preparing"}\n{"type":"error","errorMessage":"Không thể hoàn tất luồng trả lời lúc này. Hãy thử lại sau."}\n');
   });
 
   test("cancelling the browser stream cancels the established upstream body", async () => {
@@ -332,4 +383,8 @@ function authenticatedRequest(token = issueCsrfToken(config), origin = config.bf
 
 function parseAccepted(value: unknown): { accepted: boolean } | null {
   return typeof value === "object" && value !== null && typeof (value as { accepted?: unknown }).accepted === "boolean" ? { accepted: (value as { accepted: boolean }).accepted } : null;
+}
+
+function requestBody() {
+  return new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(new Uint8Array([1])); controller.close(); } });
 }
