@@ -354,12 +354,12 @@ async function streamAnswer({
       }
       // Proposal drafting is a non-durable follow-up. It starts only after the
       // matching fence has committed, so discarded commands never invoke it.
-       const proposalSummary = tripProjectId
-         ? await draftAndPersistProposal({ session, tripProjectId, question, assistantMessageId: completed.id, abortSignal })
-         : undefined;
-       if (proposalSummary) {
-         terminalResult = await updateCompletedAiAskCommandTerminalResult(command.commandId, { ...terminalResult, proposal: proposalSummary }) as Extract<StreamEvent, { type: "done" }>;
-       }
+        const proposalSummary = tripProjectId
+          ? await draftAndPersistProposal({ session, tripProjectId, question, assistantMessageId: completed.id, abortSignal })
+          : undefined;
+        if (proposalSummary) {
+          await updateCompletedAiAskCommandTerminalResult(command.commandId, { ...terminalResult, proposal: proposalSummary });
+        }
         // Optional work can overlap deletion, which scrubs this command's durable
         // projection. Publish the authoritative terminal result at the boundary.
         sendEvent(controller, encoder, await readAiAskCommandTerminalResult(command.commandId) as StreamEvent);
