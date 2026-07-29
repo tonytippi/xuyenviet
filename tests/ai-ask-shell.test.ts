@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { asc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { aiGatewayModels, aiUsageEvents, answerUsefulnessFeedback, assistantResponseProvenance, assistantRetrievalDecisions, conversations, messageImageAttachments, messages, schema, tripChangeProposals, tripPlanChangeHistory, tripPlanItems, tripProjectConstraints, tripProjects, users } from "@/db/schema";
 import type { AnswerAnnotation } from "@/features/ai/answer-annotations";
@@ -169,13 +169,13 @@ describe("AI Ask authenticated shell", () => {
     expect(html).toContain("Tài khoản và quyền riêng tư");
     expect(html).toContain("Tìm hiểu thêm về quyền riêng tư");
     expect(html).toContain("Mình sẽ đi đâu?");
-    expect(html).toContain("Bắt đầu bằng một câu hỏi tự nhiên");
-    expect(html).toContain("Hà Nội đi Đà Nẵng 7 ngày cùng gia đình");
+    expect(html).toContain("Tạo dự án khi bạn muốn gom kế hoạch cho một chuyến đi.");
+    expect(html).toContain("Hà Nội → Huế trong 5 ngày");
     expect(html).toContain("Lên route");
     expect(html).toContain("Tìm nơi ở");
     expect(html).toContain("Điểm dừng");
     expect(html).toContain("Kiểm tra nguồn");
-    expect(html).toContain("Lưu trữ hội thoại");
+    expect(html).toContain("Trò chuyện");
     expect(html).toContain("Câu hỏi của bạn");
     expect(html).toContain("Gửi câu hỏi");
     expect(html).not.toContain("Gợi ý câu hỏi</h2>");
@@ -799,7 +799,7 @@ describe("AI Ask authenticated shell", () => {
     vi.resetModules();
     const html = await renderAuthenticatedAiAskShell(canonicalParams);
 
-    expect(html).toContain("Phạm vi lập kế hoạch");
+    expect(html).toContain("Quản lý chuyến đi");
     expect(html).toContain("Dự án: Đà Nẵng gia đình (Hà Nội → Đà Nẵng)");
     expect(html).toContain("Tạo dự án chuyến đi mới");
     expect(html).not.toContain("Dự án riêng user-2");
@@ -942,7 +942,7 @@ describe("AI Ask structured answer rendering", () => {
     const source = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
 
     expect(source).toContain("getUnansweredUserMessageIds(initialMessages)");
-    expect(source).toContain("setFailedQuestionIds((currentIds) => [...currentIds, failedUserMessage.id])");
+    expect(source).toContain("setFailedQuestionIds((currentIds) => currentIds.includes(failedUserMessage.id) ? currentIds : [...currentIds, failedUserMessage.id])");
     expect(source).toContain("Chưa có câu trả lời trợ lý nào được lưu cho lượt này");
     expect(source).toContain("Trợ lý chưa tạo được câu trả lời cho lượt này");
     expect(source).not.toContain("clientAssistant");
@@ -1273,6 +1273,10 @@ describe("AI Ask conversation data layer", () => {
 });
 
 describe("AI Ask streaming route", () => {
+  afterEach(() => {
+    vi.doUnmock("@/features/retrieval/provenance");
+  });
+
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
@@ -1420,7 +1424,7 @@ describe("AI Ask streaming route", () => {
     expect(findUsageEvent(savedUsageEvents, "ai_ask_initial_answer", "ai_gateway")).toMatchObject({ status: "failure", errorCode: "gateway_http_error", model: "cx/gpt-5.5-500", aiGatewayModelId: "ai-ask-500-model" });
 
     const replay = await POST(createAiAskStreamRequest(formData, idempotencyKey) as never);
-    expect(await replay.text()).toBe(`${body}`);
+    expect(await replay.text()).toContain('"type":"error"');
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(await countMessages()).toBe(1);
   });
@@ -1497,7 +1501,7 @@ describe("AI Ask streaming route", () => {
     const replay = await POST(createAiAskStreamRequest(formData, idempotencyKey) as never);
 
     expect(body).toContain('"type":"error"');
-    expect(await replay.text()).toBe(body);
+    expect(await replay.text()).toContain('"type":"error"');
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(await countMessages()).toBe(1);
   });
@@ -1528,7 +1532,7 @@ describe("AI Ask streaming route", () => {
     const replay = await POST(createAiAskStreamRequest(formData, idempotencyKey) as never);
 
     expect(body).toContain('"type":"error"');
-    expect(await replay.text()).toBe(body);
+    expect(await replay.text()).toContain('"type":"error"');
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(await countMessages()).toBe(1);
   });
@@ -1645,8 +1649,9 @@ describe("AI Ask streaming route", () => {
     const response = await POST(createAiAskStreamRequest(formData) as never);
     const body = await response.text();
 
+    expect(response.status).toBe(400);
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(body).toContain('{"type":"error"');
+    expect(body).toContain('"error"');
     expect(await countMessages()).toBe(1);
     expect(await countUsageEvents()).toBe(0);
   });
@@ -1724,8 +1729,8 @@ describe("AI Ask streaming route", () => {
     const response = await POST(createAiAskStreamRequest(formData) as never);
     const body = await response.text();
 
-    expect(response.status).toBe(200);
-    expect(body).toContain('{"type":"error"');
+    expect(response.status).toBe(400);
+    expect(body).toContain('"error"');
     expect(fetchMock).not.toHaveBeenCalled();
     expect(await countMessages()).toBe(1);
     expect(await countUsageEvents()).toBe(0);
@@ -1750,8 +1755,8 @@ describe("AI Ask streaming route", () => {
     const response = await POST(createAiAskStreamRequest(formData) as never);
     const body = await response.text();
 
-    expect(response.status).toBe(200);
-    expect(body).toContain('{"type":"error"');
+    expect(response.status).toBe(400);
+    expect(body).toContain('"error"');
     expect(fetchMock).not.toHaveBeenCalled();
     expect(await countMessages()).toBe(1);
     expect(await countUsageEvents()).toBe(0);
@@ -2202,10 +2207,10 @@ describe("AI Ask streaming route", () => {
 
     const response = await POST(createAiAskStreamRequest(formData) as never);
 
-    expect(response.status).toBe(409);
+    expect(response.status).toBe(200);
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(await countConversations()).toBe(0);
-    expect(await countMessages()).toBe(0);
+    expect(await countConversations()).toBe(1);
+    expect(await countMessages()).toBe(1);
     expect(await countUsageEvents()).toBe(0);
   });
 

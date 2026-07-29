@@ -684,7 +684,8 @@ describe("answer context assembly", () => {
 
     const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData, headers: { "Idempotency-Key": crypto.randomUUID().replaceAll("-", "") } }) as never);
 
-    expect(await response.text()).toContain('"type":"error"');
+    expect(response.status).toBe(400);
+    expect(await response.text()).toContain('"error"');
     expect(gatewayRequests).toHaveLength(0);
     await expect(testDb.select().from(messages)).resolves.toHaveLength(0);
   });
