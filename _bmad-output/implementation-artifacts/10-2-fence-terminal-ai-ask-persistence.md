@@ -1,6 +1,6 @@
 # Story 10.2: Fence Terminal AI Ask Persistence
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -159,12 +159,32 @@ gpt-5.6-terra-review
 
 ### Debug Log References
 
-- Story planning only. No implementation logs.
+- Implementation and repair commits: `af2b25b`, `065d035`, `caa039d`, `41b40a7`, `03f9c4e`, `f134bf4`, `5ad16b3`, `5ba4525`, `17c198e`, `57324a5`.
+- Forward-only migrations `0009` and `0010` applied successfully against `DATABASE_URL_TEST` during serial verification.
 
 ### Completion Notes List
 
-- Story artifact created and validated for development readiness. Implementation has not started.
+- Fenced AI Ask admission captures owner-scoped conversation lifecycle and selected Trip Project aggregate versions. Final assistant/provenance/usage/source-bundle persistence and completed command projection commit atomically only when those fences still match.
+- Conversation/project deletion retains only scrubbed 24-hour command metadata and a safe `discarded`/`refresh_required` projection. PostgreSQL deletion triggers enforce this invariant for supported app deletion and direct foreign-key deletion paths.
+- Context extraction and proposal follow-up remain non-durable legacy behavior, but start only after matching fenced finalization. A discard starts neither path. Durable dispatch remains Story 10.3 scope.
+- Terminal publication rereads the authoritative durable command projection, so deletion scrubbing between finalization and stream close emits the same safe outcome as same-key replay.
+- Independent final review found no actionable defects. Residual coverage risk: no full route-level deterministic race forces deletion at the exact terminal publication boundary; ledger-level coverage exercises the durable-result path.
+- Verification passed: serial PostgreSQL regression bundle (10 files, 430 tests), `pnpm typecheck`, `pnpm lint` (0 errors; 4 pre-existing warnings), and `pnpm build`.
+- Status is `done`. Transactional outbox and durable consumers remain Stories 10.3 and 10.4; Nest/BFF stream cutover remains Story 10.5.
 
 ### File List
 
 - _bmad-output/implementation-artifacts/10-2-fence-terminal-ai-ask-persistence.md
+- drizzle/migrations/0009_fence_terminal_ai_ask_persistence.sql
+- drizzle/migrations/0010_scrub_retained_ai_ask_commands_on_delete.sql
+- drizzle/migrations/meta/_journal.json
+- src/app/api/ai-ask/stream/route.ts
+- src/db/schema.ts
+- src/features/ai/ai-ask-commands.ts
+- src/features/ai/ai-ask-composer.tsx
+- src/features/chat-trips/conversations.ts
+- src/features/chat-trips/trip-projects.ts
+- tests/ai-ask-commands.test.ts
+- tests/ai-ask-shell.test.ts
+- tests/chat-trip-context-extraction.test.ts
+- tests/trip-projects.test.ts

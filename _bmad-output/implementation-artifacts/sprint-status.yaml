@@ -195,7 +195,8 @@ development_status:
   epic-10: in-progress
   # 2026-07-29: Story 10.1 completed after independent blind, edge-case, and acceptance reviews plus bounded repairs for command message-reference ownership, terminal projection recovery, and retained browser retry scope. Migration-backed Story 10.1 regression bundle passed (5 files, 277 tests); protected transport/API suite passed (3 files, 33 tests); typecheck and build passed; lint had 0 errors and 4 pre-existing warnings. Atomic fence and durable follow-up guarantees remain explicitly deferred to Stories 10.2 and 10.3.
   10-1-make-ai-ask-commands-idempotent: done
-  10-2-fence-terminal-ai-ask-persistence: ready-for-dev
+  # 2026-07-29: Story 10.2 completed after independent multi-pass review and bounded repairs. Commands capture owner fences, final assistant/provenance/usage/source-bundle/terminal state commits atomically behind matching fences, and deletion retains only scrubbed `discarded`/`refresh_required` command metadata. Serial PostgreSQL verification passed (10 files, 430 tests); typecheck and build passed; lint had 0 errors and 4 pre-existing warnings. Story 10.3 remains responsible for durable outbox dispatch and worker retries.
+  10-2-fence-terminal-ai-ask-persistence: done
   10-3-dispatch-ai-ask-follow-up-work-through-a-transactional-outbox: backlog
   10-4-preserve-completed-ai-ask-results-while-consumers-run: backlog
   10-5-cut-ai-ask-streaming-to-the-versioned-api: backlog
