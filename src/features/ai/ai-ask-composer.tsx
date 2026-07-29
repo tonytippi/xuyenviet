@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { useActionState, useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
+import { useActionState, useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
 
 import { ConversationList, type ChatSessionSummary } from "@/features/chat-trips/conversation-list";
 import { formatTripProjectLabel } from "@/features/chat-trips/labels";
@@ -13,24 +13,12 @@ import type { AssistantMessageProvenanceItem } from "@/features/retrieval/proven
 import type { TripWorkspaceReadModel } from "@/features/chat-trips/trip-home";
 import { tripChangeProposalLabels } from "@/features/chat-trips/trip-home-labels";
 import { TripWorkspacePanel } from "@/features/ai/trip-workspace-panel";
-import { TripProposalReviewCard, type TripProposalTerminalOutcome } from "@/features/ai/trip-proposal-review-card";
 import { BrandMark } from "@/components/ui/brand-mark";
 import { AccountIcon, AttachmentIcon, ChatIcon, CloseIcon, CostIcon, HotelAreaIcon, LoadingIcon, MenuIcon, NewChatIcon, PlaceIcon, ProjectIcon, RouteSegmentIcon, SendIcon, SourceIcon } from "@/components/ui/icons";
 
 const maxQuestionLength = 2_000;
 const maxImageByteSize = 5 * 1024 * 1024;
 const previewMaxLength = 60;
-
-type ProposalDoneSummary = {
-  proposalId: string;
-  rationale: string;
-  affectedItems: Array<{ itemId: string; kind: string; label: string; change: string }>;
-  beforeAfter: Array<{ operation: string; before: string | null; after: string | null }>;
-  alternatives: Array<{ summary: string }>;
-  hasAlternatives: boolean;
-  expiresAt: Date | string | null;
-  status: string;
-};
 
 type DisplayMessage = {
   id: string;
@@ -45,7 +33,6 @@ type DisplayMessage = {
   provenance?: AssistantMessageProvenanceItem[];
   annotations?: AnswerAnnotation[];
   feedback?: AnswerUsefulnessFeedbackSummary | null;
-  proposal?: ProposalDoneSummary;
 };
 
 export type AnswerEntityDescriptor = {
@@ -613,84 +600,6 @@ export function AnswerDetailPanel({ selectedEntity, panelId, panelRef, onClose }
   );
 }
 
-function AnswerProposalCard({
-  proposal,
-  onApply,
-  onDismiss,
-  onRefresh,
-  isPending,
-  pendingAction,
-  terminalOutcome,
-  registerOrigin,
-}: {
-  proposal: ProposalDoneSummary;
-  onApply?: () => void;
-  onDismiss?: () => void;
-  onRefresh?: () => void;
-  isPending?: boolean;
-  pendingAction?: "apply" | "dismiss";
-  terminalOutcome?: TripProposalTerminalOutcome | null;
-  // P13: accept proposalId so the parent can pass a stable useCallback.
-  registerOrigin?: (proposalId: string, element: HTMLDivElement | null) => void;
-}) {
-  const wrapperRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    // Story 7.4 (EXPERIENCE.md interaction primitives): move focus to the
-    // proposal heading when a proposal card appears in the answer surface so
-    // screen-reader and keyboard users land on the review affordance. The
-    // terminal-result focus return to the originating answer card is wired in
-    // 7.5 (focusOriginAfterTerminal) alongside the apply/dismiss handlers.
-    const heading = wrapperRef.current?.querySelector<HTMLHeadingElement>("[tabindex='-1']");
-    heading?.focus();
-  }, [proposal.proposalId]);
-
-  useEffect(() => {
-    if (registerOrigin) registerOrigin(proposal.proposalId, wrapperRef.current);
-    return () => {
-      if (registerOrigin) registerOrigin(proposal.proposalId, null);
-    };
-  }, [registerOrigin, proposal.proposalId]);
-
-  const expiresAt = proposal.expiresAt instanceof Date ? proposal.expiresAt : proposal.expiresAt ? new Date(proposal.expiresAt) : null;
-  const alternatives = Array.isArray(proposal.alternatives) ? proposal.alternatives : [];
-  const focusInput = {
-    id: proposal.proposalId,
-    expiresAt: expiresAt && !Number.isNaN(expiresAt.getTime()) ? expiresAt : null,
-    createdAt: new Date(),
-    rationale: proposal.rationale,
-    status: proposal.status as "pending" | "applied" | "dismissed" | "expired",
-    affectedItems: proposal.affectedItems.map((item) => ({
-      itemId: item.itemId,
-      kind: item.kind as "anchor" | "leg" | "activity",
-      label: item.label,
-      change: item.change as "create" | "update" | "remove" | "reorder" | "change-state" | "upsert-constraints",
-    })),
-    beforeAfter: proposal.beforeAfter,
-    alternatives,
-    // Story 7.4 review finding 4: the answer-surface card must offer "Xem phương
-    // án khác" when alternatives are supplied, consistent with the workspace
-    // panel. Prefer the explicit hasAlternatives flag from the done payload, fall
-    // back to deriving from the alternatives array.
-    hasAlternatives: Boolean(proposal.hasAlternatives ?? alternatives.length > 0),
-  };
-
-  return (
-    <div ref={wrapperRef} className="mt-4" data-story="7.4">
-      <TripProposalReviewCard
-        idPrefix="answer-"
-        proposal={focusInput}
-        now={new Date()}
-        onApply={onApply}
-        onDismiss={onDismiss}
-        onRefresh={onRefresh}
-        isPending={isPending}
-        pendingAction={pendingAction}
-        terminalOutcome={terminalOutcome ?? null}
-      />
-    </div>
-  );
-}
-
 function getFocusableElements(container: HTMLElement) {  return Array.from(
     container.querySelectorAll<HTMLElement>(
       'button:not(:disabled), [href], input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])',
@@ -748,21 +657,14 @@ export function AiAskComposer({
   // sheet so only one aria-modal dialog is open at a time.
   const [isPlanHistorySheetOpen, setPlanHistorySheetOpen] = useState(false);
   const planHistorySheetPanelRef = useRef<HTMLDivElement>(null);
-  // Story 7.5: per-proposal pending action and terminal outcome state for the
-  // workspace panel + answer-surface proposal cards. Keyed by proposal id.
+  // Story 7.5: per-proposal pending action and terminal outcome state for the workspace panel.
   const [proposalPending, setProposalPending] = useState<Record<string, { action: "apply" | "dismiss" } | undefined>>({});
   const [proposalTerminalOutcome, setProposalTerminalOutcome] = useState<Record<string, "applied" | "dismissed" | "expired" | "refresh-required" | "transient-error" | null>>({});
-  const proposalApplyOriginRef = useRef<Record<string, HTMLElement | null>>({});
   // Q4: synchronous in-flight dedup set. proposalPending is React state, so two
   // clicks in the same render cycle both pass the state guard. This ref is
   // checked and mutated synchronously before any await so the second click is
   // blocked immediately.
   const proposalInFlightRef = useRef<Set<string>>(new Set());
-  // P13: stable callback identity so the AnswerProposalCard effect does not
-  // re-run every render (which could clear and reset the origin ref).
-  const registerProposalOrigin = useCallback((proposalId: string, element: HTMLDivElement | null) => {
-    proposalApplyOriginRef.current[proposalId] = element;
-  }, []);
   const [createProjectState, createProjectFormAction, isCreatingProject] = useActionState<CreateTripProjectFormState | undefined, FormData>(
     createTripProjectAction ?? noOpCreateTripProjectAction,
     undefined,
@@ -1263,7 +1165,7 @@ export function AiAskComposer({
       setConversationId(result.conversationId);
       setMessages((currentMessages) => appendMessagesWithoutDuplicateIds(currentMessages, [
         { id: result.userMessage.id, role: "user", content: result.userMessage.content },
-        { id: result.assistantMessage.id, role: "assistant", content: result.assistantMessage.content, provenance: result.assistantMessage.provenance, annotations: result.assistantMessage.annotations, proposal: result.proposal },
+        { id: result.assistantMessage.id, role: "assistant", content: result.assistantMessage.content, provenance: result.assistantMessage.provenance, annotations: result.assistantMessage.annotations },
       ]));
       setQuestion("");
       setSelectedImage(null);
@@ -1607,25 +1509,15 @@ export function AiAskComposer({
     // any await.
     if (proposalInFlightRef.current.has(proposalId)) return;
     proposalInFlightRef.current.add(proposalId);
-    const origin = proposalApplyOriginRef.current[proposalId] ?? null;
     setProposalPending((current) => ({ ...current, [proposalId]: { action: "apply" } }));
     setStatus("Đang áp dụng đề xuất...");
     try {
       const result = await applyTripChangeProposalAction({ tripProjectId: activeTripProjectId, proposalId });
       if (result.success) {
-        // Update the in-memory proposal status so the answer-surface card
-        // re-renders as terminal immediately, then reconcile from persisted state.
-        setMessages((currentMessages) => currentMessages.map((message) => (
-          message.proposal && message.proposal.proposalId === proposalId
-            ? { ...message, proposal: { ...message.proposal, status: "applied" } }
-            : message
-        )));
         setProposalTerminalOutcome((current) => ({ ...current, [proposalId]: "applied" }));
         setStatus("Đã áp dụng đề xuất. Đang làm mới kế hoạch.");
         router.refresh();
-        // Move focus back to the originating answer card heading (answer
-        // surface) or the Trip Home focus card heading (workspace panel).
-        focusOriginAfterTerminal(origin);
+        focusOriginAfterTerminal(null);
       } else if (result.reason === "transient") {
         // Q3: retryable transient failure — keep the action buttons enabled so
         // the owner can try again. Do NOT use the permanent refresh-required
@@ -1666,21 +1558,15 @@ export function AiAskComposer({
     // both call the dismiss action.
     if (proposalInFlightRef.current.has(proposalId)) return;
     proposalInFlightRef.current.add(proposalId);
-    const origin = proposalApplyOriginRef.current[proposalId] ?? null;
     setProposalPending((current) => ({ ...current, [proposalId]: { action: "dismiss" } }));
     setStatus("Đang giữ kế hoạch...");
     try {
       const result = await dismissTripChangeProposalAction({ tripProjectId: activeTripProjectId, proposalId });
       if (result.success) {
-        setMessages((currentMessages) => currentMessages.map((message) => (
-          message.proposal && message.proposal.proposalId === proposalId
-            ? { ...message, proposal: { ...message.proposal, status: "dismissed" } }
-            : message
-        )));
         setProposalTerminalOutcome((current) => ({ ...current, [proposalId]: "dismissed" }));
         setStatus("Đã giữ kế hoạch. Đang làm mới.");
         router.refresh();
-        focusOriginAfterTerminal(origin);
+        focusOriginAfterTerminal(null);
       } else if (result.reason === "transient") {
         // Q3: retryable transient failure — keep the action buttons enabled.
         setProposalTerminalOutcome((current) => ({ ...current, [proposalId]: "transient-error" }));
@@ -2004,18 +1890,6 @@ export function AiAskComposer({
                     <>
                       <AssistantMessageContent messageId={message.id} content={message.content} annotations={message.annotations} selectedEntityId={selectedAnswerEntityId} detailPanelIds={answerDetailPanelIds} onSelectEntity={handleSelectAnswerEntity} />
                       <AssistantProvenanceBlock provenance={message.provenance} selectedEntityId={selectedAnswerEntityId} detailPanelIds={answerDetailPanelIds} onSelectEntity={handleSelectAnswerEntity} />
-                      {message.proposal ? (
-                        <AnswerProposalCard
-                          proposal={message.proposal}
-                          onApply={applyTripChangeProposalAction && activeTripProjectId ? () => handleApplyProposal(message.proposal!.proposalId) : undefined}
-                          onDismiss={dismissTripChangeProposalAction && activeTripProjectId ? () => handleDismissProposal(message.proposal!.proposalId) : undefined}
-                          onRefresh={activeTripProjectId ? () => handleRefreshProposal(message.proposal!.proposalId) : undefined}
-                          isPending={Boolean(proposalPending[message.proposal.proposalId])}
-                          pendingAction={proposalPending[message.proposal.proposalId]?.action}
-                          terminalOutcome={proposalTerminalOutcome[message.proposal.proposalId] ?? null}
-                          registerOrigin={registerProposalOrigin}
-                        />
-                      ) : null}
                       {saveAnswerUsefulnessFeedbackAction ? (
                         <AnswerUsefulnessFeedbackControl
                           feedback={message.feedback}
@@ -2345,7 +2219,6 @@ type StreamResult = {
   conversationId: string;
   userMessage: DisplayMessage;
   assistantMessage: DisplayMessage;
-  proposal?: ProposalDoneSummary;
 } | {
   status: "in-progress";
   conversationId?: string;
@@ -2432,7 +2305,7 @@ async function submitAiAskStream({
       }
 
       if (event.type === "done" && event.conversationId && event.userMessage && event.assistantMessage) {
-        terminalResult = { status: "answer-created", conversationId: event.conversationId, userMessage: event.userMessage, assistantMessage: event.assistantMessage, proposal: event.proposal };
+        terminalResult = { status: "answer-created", conversationId: event.conversationId, userMessage: event.userMessage, assistantMessage: event.assistantMessage };
       }
 
       if (event.type === "error" && terminalResult?.status !== "answer-created") {
@@ -2468,7 +2341,7 @@ export function buildAiAskStreamFormData({
 
 function parseStreamEvent(line: string) {
   try {
-    return JSON.parse(line) as { type: string; code?: "refresh_required"; content?: string; conversationId?: string; userMessage?: DisplayMessage; assistantMessage?: DisplayMessage; errorMessage?: string; proposal?: ProposalDoneSummary };
+    return JSON.parse(line) as { type: string; code?: "refresh_required"; content?: string; conversationId?: string; userMessage?: DisplayMessage; assistantMessage?: DisplayMessage; errorMessage?: string };
   } catch {
     return null;
   }

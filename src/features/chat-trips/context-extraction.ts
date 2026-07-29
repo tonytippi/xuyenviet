@@ -1,9 +1,10 @@
 import "server-only";
 
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { chatContext, chatContextFieldValues, conversations, messages, type ChatContextField, type ChatContextScope } from "@/db/schema";
+import { aiAskCommands, chatContext, chatContextFieldValues, conversations, domainOutboxEffects, messages, tripProjects, type ChatContextField, type ChatContextScope } from "@/db/schema";
+import { completeDomainOutboxClaimInTransaction, failDomainOutboxClaimInTransaction, hasActiveDomainOutboxClaim, type AiAskOutboxEnvelope, type DomainOutboxClaim } from "@/features/ai/domain-outbox";
 import { completeExtraction } from "@/features/ai/gateway";
 import { getAiGatewayPricingSnapshot } from "@/features/ai/models";
 import { selectActiveAiGatewayModel } from "@/features/ai/models";
@@ -23,6 +24,8 @@ type ExtractChatTripContextInput = {
   history: PromptHistoryMessage[];
   abortSignal?: AbortSignal;
 };
+
+type Transaction = Parameters<ReturnType<typeof getDb>["transaction"]>[0] extends (transaction: infer T) => unknown ? T : never;
 
 const allowedContextFields = new Set<string>(chatContextFieldValues);
 const maxContextValueLength = 500;
@@ -166,6 +169,77 @@ export async function extractChatTripContext(input: ExtractChatTripContextInput)
   });
 
   return { attemptedProviderCall: true, persistedFacts: facts.length };
+}
+
+// The outbox consumer owns claim/effect coordination while Chat/Trips retains
+// ownership of context, usage, and audit writes.
+export async function extractChatTripContextForOutbox(input: { claim: DomainOutboxClaim; envelope: AiAskOutboxEnvelope }) {
+  const { claim, envelope } = input;
+  if (!envelope.userMessageId || !await validOutboxContextState(getDb(), envelope, false)) return "fenced_out" as const;
+  const db = getDb();
+  const [message] = await db.select({ content: messages.content }).from(messages).where(and(eq(messages.id, envelope.userMessageId), eq(messages.userId, envelope.userId), eq(messages.conversationId, envelope.conversationId), eq(messages.role, "user"))).limit(1);
+  if (!message) return "fenced_out" as const;
+  const selectedModel = await selectActiveAiGatewayModel({ purpose: chatContextExtractionPurpose, requiredCapabilities: { textInput: true, extraction: true } });
+  if (!selectedModel) return completeOutboxContextEffect(claim, envelope, [], null, "context_extraction");
+  const conversationMessages = await db.select({ id: messages.id, role: messages.role, content: messages.content }).from(messages).where(and(eq(messages.userId, envelope.userId), eq(messages.conversationId, envelope.conversationId))).orderBy(asc(messages.createdAt), asc(messages.id));
+  const sourceIndex = conversationMessages.findIndex((row) => row.id === envelope.userMessageId);
+  if (sourceIndex < 0) return "fenced_out" as const;
+  const history = conversationMessages.slice(0, sourceIndex).map(({ role, content }) => ({ role, content }));
+  if (!await hasActiveDomainOutboxClaim(claim)) return "fenced_out" as const;
+  if (!await validOutboxContextState(db, envelope, false)) return "fenced_out" as const;
+  const result = await completeExtraction({ model: selectedModel.gatewayModelName, messages: buildChatContextExtractionMessages({ question: message.content, history, projectScopeAvailable: Boolean(envelope.tripProjectId) }) });
+  if (!result.ok) {
+    const released = await db.transaction(async (transaction) => {
+      if (!await validOutboxContextState(transaction, envelope, true)) return false;
+      return Boolean(await failDomainOutboxClaimInTransaction(transaction, { ...claim, code: "context_provider_failed", retryable: true }, async () => {
+        await writeAiUsageEvent(transaction, {
+          initiatedByUserId: envelope.userId, executorSystem: "system-ai-orchestration", tripProjectId: envelope.tripProjectId,
+          conversationId: envelope.conversationId, userMessageId: envelope.userMessageId, purpose: chatContextExtractionPurpose,
+          provider: result.provider, model: result.model, aiGatewayModelId: selectedModel.id, promptVersion: chatContextExtractionPromptVersion,
+          status: "failure", latencyMs: result.latencyMs, pricingSnapshot: getAiGatewayPricingSnapshot(selectedModel), errorCode: result.errorCode,
+        });
+      }));
+    });
+    return released ? "retry_scheduled" as const : "fenced_out" as const;
+  }
+  const facts = parseAllowedFacts(result.content, Boolean(envelope.tripProjectId), message.content);
+  return completeOutboxContextEffect(claim, envelope, facts, {
+    initiatedByUserId: envelope.userId, executorSystem: "system-ai-orchestration", tripProjectId: envelope.tripProjectId,
+    conversationId: envelope.conversationId, userMessageId: envelope.userMessageId, purpose: chatContextExtractionPurpose,
+    provider: result.provider, model: result.model, aiGatewayModelId: selectedModel.id, promptVersion: chatContextExtractionPromptVersion,
+    status: "success", latencyMs: result.latencyMs, promptTokens: result.usage.promptTokens, completionTokens: result.usage.completionTokens,
+    totalTokens: result.usage.totalTokens, cachedPromptTokens: result.usage.cachedPromptTokens, cacheWritePromptTokens: result.usage.cacheWritePromptTokens,
+    pricingSnapshot: getAiGatewayPricingSnapshot(selectedModel),
+  }, "context_extraction");
+}
+
+async function completeOutboxContextEffect(claim: DomainOutboxClaim, envelope: AiAskOutboxEnvelope, facts: Array<{ field: ChatContextField; value: string; scope: ChatContextScope; confidence: number | null }>, usage: WriteAiUsageEventInput | null, effectType: "context_extraction") {
+  return getDb().transaction(async (transaction) => {
+    if (!await validOutboxContextState(transaction, envelope, true)) return "fenced_out" as const;
+    const completion = await completeDomainOutboxClaimInTransaction(transaction, claim, async () => {
+      const [effect] = await transaction.insert(domainOutboxEffects).values({ outboxEventId: claim.id, effectType }).onConflictDoNothing().returning({ id: domainOutboxEffects.id });
+      if (effect) {
+        if (facts.length) await transaction.insert(chatContext).values(facts.map((fact) => ({ userId: envelope.userId, conversationId: envelope.conversationId, tripProjectId: fact.scope === "trip_project" ? envelope.tripProjectId ?? null : null, sourceMessageId: envelope.userMessageId!, field: fact.field, value: fact.value, scope: fact.scope, confidence: fact.confidence })));
+        if (usage) await writeAiUsageEvent(transaction, usage);
+        await recordAuditEvent({ actor: toUserAuditActor({ userId: envelope.userId, email: "outbox@system" }), operation: "create", targetType: "chat_context", targetId: envelope.userMessageId!, afterSummary: JSON.stringify({ conversationId: envelope.conversationId, tripProjectId: envelope.tripProjectId ?? null, sourceMessageId: envelope.userMessageId, persistedFacts: facts.length }) }, transaction);
+      }
+    });
+    return completion.completed ? "completed" as const : "fenced_out" as const;
+  });
+}
+
+async function validOutboxContextState(db: ReturnType<typeof getDb> | Transaction, envelope: AiAskOutboxEnvelope, lock: boolean) {
+  const projectQuery = envelope.tripProjectId
+    ? db.select({ id: tripProjects.id, aggregateVersion: tripProjects.aggregateVersion }).from(tripProjects).where(and(eq(tripProjects.id, envelope.tripProjectId), eq(tripProjects.userId, envelope.userId))).limit(1)
+    : null;
+  const [project] = projectQuery ? lock ? await projectQuery.for("update") : await projectQuery : [];
+  const conversationQuery = db.select({ id: conversations.id, tripProjectId: conversations.tripProjectId, lifecycleVersion: conversations.lifecycleVersion }).from(conversations).where(and(eq(conversations.id, envelope.conversationId), eq(conversations.userId, envelope.userId))).limit(1);
+  const [conversation] = lock ? await conversationQuery.for("update") : await conversationQuery;
+  const commandQuery = db.select({ id: aiAskCommands.id, conversationId: aiAskCommands.conversationId, tripProjectId: aiAskCommands.tripProjectId, userMessageId: aiAskCommands.userMessageId, conversationLifecycleVersion: aiAskCommands.conversationLifecycleVersion, tripProjectAggregateVersion: aiAskCommands.tripProjectAggregateVersion }).from(aiAskCommands).where(and(eq(aiAskCommands.id, envelope.commandId), eq(aiAskCommands.userId, envelope.userId))).limit(1);
+  const [command] = lock ? await commandQuery.for("update") : await commandQuery;
+  const sourceQuery = db.select({ id: messages.id }).from(messages).where(and(eq(messages.id, envelope.userMessageId!), eq(messages.userId, envelope.userId), eq(messages.conversationId, envelope.conversationId), eq(messages.role, "user"))).limit(1);
+  const [source] = lock ? await sourceQuery.for("update") : await sourceQuery;
+  return Boolean(source && command && conversation && (!envelope.tripProjectId || project) && command.conversationId === envelope.conversationId && command.tripProjectId === (envelope.tripProjectId ?? null) && command.userMessageId === envelope.userMessageId && command.conversationLifecycleVersion === envelope.conversationLifecycleVersion && command.tripProjectAggregateVersion === (envelope.tripProjectAggregateVersion ?? null) && conversation.lifecycleVersion === envelope.conversationLifecycleVersion && conversation.tripProjectId === (envelope.tripProjectId ?? null) && project?.aggregateVersion === envelope.tripProjectAggregateVersion);
 }
 
 function parseAllowedFacts(content: string, projectScopeAvailable: boolean, latestUserMessage: string) {

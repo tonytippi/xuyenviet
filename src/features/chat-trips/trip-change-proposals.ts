@@ -764,9 +764,7 @@ export async function persistAiTripChangeProposalDraft(
   const session = await getAuthenticatedSession();
   if (!session) return { success: false, reason: "unauthenticated" };
 
-  const rationaleResult = normalizeRationale(input.rationale);
-  if (!rationaleResult.ok) return { success: false, reason: "invalid" };
-  const rationale = rationaleResult.value;
+  if (!normalizeRationale(input.rationale).ok) return { success: false, reason: "invalid" };
 
   const alternatives = normalizeAlternatives(input.alternatives);
   if (alternatives === "invalid") return { success: false, reason: "invalid" };
@@ -786,7 +784,34 @@ export async function persistAiTripChangeProposalDraft(
   }
 
   try {
-    return await getDb().transaction(async (transaction) => {
+    const expiresAtValidatedAt = Date.now();
+    return await getDb().transaction(async (transaction) => persistAiTripChangeProposalDraftInTransaction(transaction, session, input, expiresAtValidatedAt));
+  } catch (error) {
+    console.error("Failed to persist AI trip change proposal draft.", {
+      tripProjectId: input.tripProjectId,
+      userId: session.userId,
+      error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
+    });
+    return { success: false, reason: "invalid" };
+  }
+}
+
+// Worker callers supply an already-authorized owner and transaction so their
+// outbox effect, aggregate validation, proposal, and acknowledgement can commit
+// atomically. Browser commands continue through the authenticated wrapper.
+export async function persistAiTripChangeProposalDraftInTransaction(
+  transaction: Transaction,
+  session: { userId: string; email: string },
+  input: PersistAiTripChangeProposalDraftInput,
+  expiresAtValidatedAt?: number,
+): Promise<PersistAiTripChangeProposalDraftResult> {
+  const rationaleResult = normalizeRationale(input.rationale);
+  if (!rationaleResult.ok) return { success: false, reason: "invalid" };
+  const rationale = rationaleResult.value;
+  const alternatives = normalizeAlternatives(input.alternatives);
+  if (alternatives === "invalid" || !Number.isInteger(input.expectedAggregateVersion) || input.expectedAggregateVersion < 1) return { success: false, reason: "invalid" };
+  const expiryValidationTime = expiresAtValidatedAt ?? Date.now();
+  if (input.expiresAt !== null && input.expiresAt !== undefined && (!(input.expiresAt instanceof Date) || Number.isNaN(input.expiresAt.getTime()) || input.expiresAt.getTime() <= expiryValidationTime)) return { success: false, reason: "invalid" };
       const [project] = await transaction
         .select({ aggregateVersion: tripProjects.aggregateVersion })
         .from(tripProjects)
@@ -891,15 +916,6 @@ export async function persistAiTripChangeProposalDraft(
 
       const summary = toOwnedSummary(inserted, input.tripProjectId, valid, knownItems);
       return { success: true, proposal: summary };
-    });
-  } catch (error) {
-    console.error("Failed to persist AI trip change proposal draft.", {
-      tripProjectId: input.tripProjectId,
-      userId: session.userId,
-      error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
-    });
-    return { success: false, reason: "invalid" };
-  }
 }
 
 export async function listPendingProposalsForTripProject(

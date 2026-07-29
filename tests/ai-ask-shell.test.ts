@@ -921,15 +921,18 @@ describe("AI Ask structured answer rendering", () => {
     expect(source).toContain("reconcileSelection(conversationId, activeTripProjectId);");
   });
 
-  test("context extraction is scheduled only after a matching fenced finalization", () => {
+  test("stream route completes from the fenced projection without inline follow-up work", () => {
     const routeSource = readFileSync("src/app/api/ai-ask/stream/route.ts", "utf8");
     const finalizationStart = routeSource.indexOf("const finalization = await finalizeAiAskCommand");
-    const discardedBranch = routeSource.indexOf('if (!("discarded" in finalization))', finalizationStart);
-    const extractionStart = routeSource.indexOf("after(() => extractChatTripContext", finalizationStart);
 
     expect(finalizationStart).toBeGreaterThan(-1);
-    expect(discardedBranch).toBeGreaterThan(finalizationStart);
-    expect(extractionStart).toBeGreaterThan(discardedBranch);
+    expect(routeSource).not.toContain("after(");
+    expect(routeSource).not.toContain("void streamAnswer");
+    expect(routeSource).not.toContain("extractChatTripContext");
+    expect(routeSource).not.toContain("buildValidatedAnswerAnnotations");
+    expect(routeSource).not.toContain("draftTripChangeProposal");
+    expect(routeSource).not.toContain("persistAiTripChangeProposalDraft");
+    expect(routeSource.slice(finalizationStart)).toContain("readAiAskCommandTerminalResult");
   });
 
   test("composer source accepts removable validated traveler images", () => {
@@ -2601,36 +2604,20 @@ describe("AI Ask streaming route", () => {
     });
   });
 
-  describe("proposal done payload reconciliation and shell integration", () => {
-    test("composer source accepts the proposal summary from the done event and renders an answer-surface proposal card", () => {
+  describe("proposal shell integration", () => {
+    test("composer does not accept consumer proposal output from a done event", () => {
       const composerSource = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
 
-      expect(composerSource).toContain("proposal?: ProposalDoneSummary");
-      expect(composerSource).toContain("event.proposal");
-      expect(composerSource).toContain("AnswerProposalCard");
-      expect(composerSource).toContain("TripProposalReviewCard");
+      expect(composerSource).not.toContain("proposal?: ProposalDoneSummary");
+      expect(composerSource).not.toContain("event.proposal");
     });
 
-    test("stream route runs proposal drafting only after the committed fence and records trip_proposal_draft usage", () => {
+    test("stream route does not draft or persist proposals before sending done", () => {
       const routeSource = readFileSync("src/app/api/ai-ask/stream/route.ts", "utf8");
 
-      expect(routeSource).toContain("draftTripChangeProposal");
-      expect(routeSource).toContain("persistAiTripChangeProposalDraft");
-      expect(routeSource).toContain("recordTripChangeProposalDraftUsage");
-      expect(routeSource).toContain("proposal: proposalSummary");
-      expect(routeSource.indexOf('if (!("discarded" in finalization))')).toBeLessThan(routeSource.indexOf("await draftAndPersistProposal"));
-      // The trip_proposal_draft purpose label lives in usage constants and is applied
-      // inside recordTripChangeProposalDraftUsage; verify the constants module exports it.
-      const constantsSource = readFileSync("src/features/usage/constants.ts", "utf8");
-      expect(constantsSource).toContain("trip_proposal_draft");
-    });
-
-    test("stream route sends done without a proposal on drafting failure and never breaks the answer", () => {
-      const routeSource = readFileSync("src/app/api/ai-ask/stream/route.ts", "utf8");
-      // The draftAndPersistProposal helper returns undefined on any failure path,
-      // and the done event is sent with proposal: undefined (omitted) in that case.
-      expect(routeSource).toContain("return undefined");
-      expect(routeSource).toMatch(/proposal: proposalSummary/);
+      expect(routeSource).not.toContain("draftTripChangeProposal");
+      expect(routeSource).not.toContain("persistAiTripChangeProposalDraft");
+      expect(routeSource).not.toContain("proposal:");
     });
   });
 

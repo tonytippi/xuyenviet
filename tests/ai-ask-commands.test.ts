@@ -4,7 +4,7 @@ import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 
 import { aiAskCommands, conversations, messages, schema, tripProjects, users } from "@/db/schema";
-import { acquireAiAskCommand, aiAskRefreshRequiredMessage, discardAiAskCommandsForDeletedConversations, finalizeAiAskCommand, readAiAskCommandTerminalResult, terminalizeAiAskCommand, terminalResultsEqual, updateCompletedAiAskCommandTerminalResult, validateAiAskIdempotencyKey } from "@/features/ai/ai-ask-commands";
+import { acquireAiAskCommand, aiAskRefreshRequiredMessage, discardAiAskCommandsForDeletedConversations, finalizeAiAskCommand, readAiAskCommandTerminalResult, terminalizeAiAskCommand, terminalResultsEqual, validateAiAskIdempotencyKey } from "@/features/ai/ai-ask-commands";
 
 import { testDb } from "./helpers/db";
 
@@ -110,7 +110,7 @@ describe("AI Ask command ledger", () => {
     await expect(acquireAiAskCommand({ userId: "owner", idempotencyKey: key, question: "Đi Huế", conversationId: conversation.id })).resolves.toEqual({ kind: "terminal_replay", result: finalized.result });
   });
 
-  test("replays the exact terminal projection after a non-durable follow-up result", async () => {
+  test("keeps the terminal projection stable after finalization", async () => {
     await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
     const [conversation] = await testDb.insert(conversations).values({ id: "conversation", userId: "owner" }).returning({ id: conversations.id });
     const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: key, question: "Đi Huế", conversationId: conversation.id });
@@ -120,13 +120,8 @@ describe("AI Ask command ledger", () => {
       return { assistantMessageId: assistant.id, result: { type: "done" as const, conversationId: command.conversationId, userMessage: admitted.userMessage, assistantMessage: { id: assistant.id, content: "Gợi ý đã lưu" } } };
     });
     if ("discarded" in finalized) throw new Error("Expected completed command");
-    const emitted = await updateCompletedAiAskCommandTerminalResult(admitted.commandId, {
-      ...finalized.result,
-      assistantMessage: { ...finalized.result.assistantMessage, annotations: [{ kind: "source", label: "Huế" }] },
-      proposal: { proposalId: "proposal", status: "pending" },
-    });
-
-    await expect(acquireAiAskCommand({ userId: "owner", idempotencyKey: key, question: "Đi Huế", conversationId: conversation.id })).resolves.toEqual({ kind: "terminal_replay", result: emitted });
+    await expect(readAiAskCommandTerminalResult(admitted.commandId)).resolves.toEqual(finalized.result);
+    await expect(acquireAiAskCommand({ userId: "owner", idempotencyKey: key, question: "Đi Huế", conversationId: conversation.id })).resolves.toEqual({ kind: "terminal_replay", result: finalized.result });
   });
 
   test("publishes the scrubbed projection when deletion wins after completion and optional follow-up", async () => {
@@ -139,12 +134,6 @@ describe("AI Ask command ledger", () => {
       return { assistantMessageId: assistant.id, result: { type: "done" as const, conversationId: command.conversationId, userMessage: admitted.userMessage, assistantMessage: { id: assistant.id, content: "Gợi ý đã lưu" } } };
     });
     if ("discarded" in finalized) throw new Error("Expected completed command");
-    await updateCompletedAiAskCommandTerminalResult(admitted.commandId, {
-      ...finalized.result,
-      assistantMessage: { ...finalized.result.assistantMessage, annotations: [{ kind: "source", label: "Huế" }] },
-      proposal: { proposalId: "proposal", status: "pending" },
-    });
-
     await testDb.transaction((transaction) => discardAiAskCommandsForDeletedConversations(transaction, "owner", [conversation.id]));
 
     await expect(readAiAskCommandTerminalResult(admitted.commandId)).resolves.toEqual({

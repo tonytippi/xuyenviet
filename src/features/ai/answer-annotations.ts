@@ -165,10 +165,28 @@ export async function buildValidatedAnswerAnnotations({
   model: string;
   abortSignal?: AbortSignal;
 }): Promise<AnswerAnnotation[]> {
+  const result = await buildValidatedAnswerAnnotationsResult({ answerText, provenance, model, abortSignal });
+  return result.kind === "annotations" ? result.annotations : [];
+}
+
+// Callers which own retry policy need to distinguish a safe empty annotation
+// result from an unavailable provider. The public compatibility wrapper above
+// intentionally preserves the existing empty-array contract.
+export async function buildValidatedAnswerAnnotationsResult({
+  answerText,
+  provenance,
+  model,
+  abortSignal,
+}: {
+  answerText: string;
+  provenance: AssistantMessageProvenanceItem[];
+  model: string;
+  abortSignal?: AbortSignal;
+}): Promise<{ kind: "annotations"; annotations: AnswerAnnotation[]; usage?: AnnotationProviderUsage } | { kind: "provider_failed" }> {
   const annotationProvenance = getAnnotationProposalProvenance(provenance);
 
   if (abortSignal?.aborted || annotationProvenance.length === 0) {
-    return [];
+    return { kind: "annotations", annotations: [] };
   }
 
   try {
@@ -179,15 +197,41 @@ export async function buildValidatedAnswerAnnotations({
     });
 
     if (!result.ok) {
-      return [];
+      return { kind: "provider_failed" };
     }
 
     const proposals = parseAnswerAnnotationProposals(result.content);
-    return validateAnswerAnnotations({ answerText, proposals, provenance });
+    return {
+      kind: "annotations",
+      annotations: validateAnswerAnnotations({ answerText, proposals, provenance }),
+      usage: {
+        provider: result.provider,
+        model: result.model,
+        latencyMs: result.latencyMs,
+        promptTokens: result.usage.promptTokens,
+        completionTokens: result.usage.completionTokens,
+        totalTokens: result.usage.totalTokens,
+        cachedPromptTokens: result.usage.cachedPromptTokens,
+        cacheWritePromptTokens: result.usage.cacheWritePromptTokens,
+        providerRequestId: result.requestMetadata.providerRequestId,
+      },
+    };
   } catch {
-    return [];
+    return { kind: "provider_failed" };
   }
 }
+
+export type AnnotationProviderUsage = {
+  provider: string;
+  model: string;
+  latencyMs: number;
+  promptTokens: number | null;
+  completionTokens: number | null;
+  totalTokens: number | null;
+  cachedPromptTokens: number | null;
+  cacheWritePromptTokens: number | null;
+  providerRequestId: string | null;
+};
 
 export function buildAnswerAnnotationDetail(input: {
   type: AnswerAnnotationType;

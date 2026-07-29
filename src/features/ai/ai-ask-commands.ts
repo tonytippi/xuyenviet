@@ -6,6 +6,7 @@ import { and, asc, eq, inArray } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
 import { aiAskCommands, conversations, messageImageAttachments, messages, tripProjects } from "@/db/schema";
+import { enqueueAiAskFollowUpInTransaction } from "@/features/ai/domain-outbox";
 import { resolveOwnedPrimaryConversationInTransaction } from "@/features/chat-trips/trip-projects";
 
 const keyPattern = /^[A-Za-z0-9_-]{16,128}$/;
@@ -17,7 +18,6 @@ export type AiAskTerminalResult = {
   conversationId?: string;
   userMessage?: { id: string; content: string };
   assistantMessage?: { id: string; content: string; provenance?: unknown[]; annotations?: unknown[] };
-  proposal?: unknown;
   errorMessage?: string;
 };
 
@@ -128,6 +128,18 @@ export async function acquireAiAskCommand(input: AcquireAiAskCommandInput): Prom
     if (attachment) await transaction.insert(messageImageAttachments).values({ conversationId: conversation.id, messageId: message.id, userId: input.userId, originalFileName: attachment.fileName, mimeType: attachment.mimeType, byteSize: attachment.byteSize, storageKey: null });
     await transaction.update(conversations).set({ updatedAt: new Date() }).where(eq(conversations.id, conversation.id));
     await transaction.update(aiAskCommands).set({ userMessageId: message.id, updatedAt: new Date() }).where(eq(aiAskCommands.id, inserted.id));
+    await enqueueAiAskFollowUpInTransaction(transaction, {
+      eventType: "ai_ask.context_extraction.v1",
+      envelope: {
+        version: 1,
+        commandId: inserted.id,
+        userId: input.userId,
+        conversationId: conversation.id,
+        userMessageId: message.id,
+        ...(resolved.tripProjectId ? { tripProjectId: resolved.tripProjectId, tripProjectAggregateVersion: resolved.tripProjectAggregateVersion! } : {}),
+        conversationLifecycleVersion: conversation.lifecycleVersion,
+      },
+    });
     return { kind: "admitted", commandId: inserted.id, question, conversationId: conversation.id, tripProjectId: resolved.tripProjectId, userMessage: message, history };
   });
 }
@@ -154,23 +166,7 @@ export async function terminalizeAiAskCommand(commandId: string, status: "comple
   throw new Error("AI Ask command terminalization failed.");
 }
 
-// Follow-ups are intentionally outside fenced finalization. When one produces
-// browser-visible state, keep the retained replay projection in sync before it
-// can be emitted as the command's single terminal event.
-export async function updateCompletedAiAskCommandTerminalResult(commandId: string, result: AiAskTerminalResult): Promise<AiAskTerminalResult> {
-  const [updated] = await getDb().update(aiAskCommands)
-    .set({ terminalResult: result, updatedAt: new Date() })
-    .where(and(eq(aiAskCommands.id, commandId), eq(aiAskCommands.status, "completed")))
-    .returning({ terminalResult: aiAskCommands.terminalResult });
-  if (updated) return updated.terminalResult as AiAskTerminalResult;
-
-  const [existing] = await getDb().select({ terminalResult: aiAskCommands.terminalResult }).from(aiAskCommands).where(eq(aiAskCommands.id, commandId)).limit(1);
-  if (existing?.terminalResult) return existing.terminalResult as AiAskTerminalResult;
-  throw new Error("AI Ask command was not found.");
-}
-
-// The stream must publish the retained projection, not a stale in-memory copy:
-// deletion can scrub a completed command while optional follow-up work is running.
+// The stream publishes this immutable retained projection after fenced completion.
 export async function readAiAskCommandTerminalResult(commandId: string): Promise<AiAskTerminalResult> {
   const [command] = await getDb().select({ terminalResult: aiAskCommands.terminalResult }).from(aiAskCommands).where(eq(aiAskCommands.id, commandId)).limit(1);
   if (command?.terminalResult) return command.terminalResult as AiAskTerminalResult;
@@ -204,6 +200,18 @@ export async function finalizeAiAskCommand<T extends { result: AiAskTerminalResu
 
     const completed = await persist(transaction, { userId: command.userId, conversationId: conversation.id, tripProjectId: command.tripProjectId, userMessageId: command.userMessageId });
     await transaction.update(aiAskCommands).set({ status: "completed", terminalResult: completed.result, assistantMessageId: completed.assistantMessageId, terminalAt: new Date(), updatedAt: new Date() }).where(and(eq(aiAskCommands.id, command.id), eq(aiAskCommands.status, "pending")));
+    const envelope = {
+      version: 1 as const,
+      commandId: command.id,
+      userId: command.userId,
+      conversationId: conversation.id,
+      userMessageId: command.userMessageId,
+      assistantMessageId: completed.assistantMessageId,
+      ...(command.tripProjectId ? { tripProjectId: command.tripProjectId, tripProjectAggregateVersion: command.tripProjectAggregateVersion! } : {}),
+      conversationLifecycleVersion: command.conversationLifecycleVersion!,
+    };
+    await enqueueAiAskFollowUpInTransaction(transaction, { eventType: "ai_ask.answer_annotation.v1", envelope });
+    if (command.tripProjectId) await enqueueAiAskFollowUpInTransaction(transaction, { eventType: "ai_ask.trip_proposal_draft.v1", envelope });
     return completed;
   });
 }

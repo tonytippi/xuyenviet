@@ -31,6 +31,12 @@ export type AiUsageStatus = (typeof aiUsageStatusValues)[number];
 export const aiAskCommandStatusValues = ["pending", "completed", "failed", "aborted", "discarded"] as const;
 export type AiAskCommandStatus = (typeof aiAskCommandStatusValues)[number];
 
+export const domainOutboxStatusValues = ["pending", "processing", "completed", "failed"] as const;
+export type DomainOutboxStatus = (typeof domainOutboxStatusValues)[number];
+
+export const aiAskDomainOutboxEventTypeValues = ["ai_ask.context_extraction.v1", "ai_ask.answer_annotation.v1", "ai_ask.trip_proposal_draft.v1"] as const;
+export type AiAskDomainOutboxEventType = (typeof aiAskDomainOutboxEventTypeValues)[number];
+
 export const aiGatewayModelPurposeValues = ["ai_ask_initial_answer", "extraction", "embeddings", "evaluation"] as const;
 export type AiGatewayModelPurpose = (typeof aiGatewayModelPurposeValues)[number];
 
@@ -847,6 +853,7 @@ export const conversations = pgTable(
     updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
   },
   (conversation) => [
+    // The migration scopes SET NULL to trip_project_id so the non-null owner remains intact.
     foreignKey({
       columns: [conversation.tripProjectId, conversation.userId],
       foreignColumns: [tripProjects.id, tripProjects.userId],
@@ -969,7 +976,7 @@ export const aiAskCommands = pgTable(
     updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
   },
   // Retained-command scrub-on-delete is a PostgreSQL trigger declared in
-  // migration 0010; Drizzle has no trigger declaration API.
+  // migrations 0010 and 0013; Drizzle has no trigger declaration API.
   (command) => [
     foreignKey({
       columns: [command.conversationId, command.userId],
@@ -1004,6 +1011,74 @@ export const aiAskCommands = pgTable(
     check("ai_ask_commands_terminal_shape_check", sql`(${command.status} = 'pending' and ${command.terminalAt} is null and ${command.terminalResult} is null) or (${command.status} in ('completed', 'failed', 'aborted') and ${command.terminalResult} is not null and ${command.terminalAt} is not null) or (${command.status} = 'discarded' and ${command.terminalResult} is not null and ${command.terminalAt} is not null and ${command.assistantMessageId} is null)`),
     check("ai_ask_commands_fence_shape_check", sql`${command.conversationId} is null or ${command.conversationLifecycleVersion} >= 1`),
     check("ai_ask_commands_project_fence_shape_check", sql`${command.tripProjectId} is null or ${command.tripProjectAggregateVersion} >= 1`),
+  ],
+);
+
+// AI Orchestration owns this operational handoff. Payloads intentionally mirror
+// only IDs and fences; authoritative state remains in the feature aggregates.
+export const domainOutbox = pgTable(
+  "domain_outbox",
+  {
+    id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    originatingCommandId: text("originating_command_id").notNull().references(() => aiAskCommands.id, { onDelete: "cascade" }),
+    eventType: text("event_type").$type<AiAskDomainOutboxEventType>().notNull(),
+    eventVersion: integer("event_version").default(1).notNull(),
+    aggregateType: text("aggregate_type").default("ai_ask_command").notNull(),
+    aggregateId: text("aggregate_id").notNull(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    conversationId: text("conversation_id").notNull().references(() => conversations.id, { onDelete: "cascade" }),
+    tripProjectId: text("trip_project_id").references(() => tripProjects.id, { onDelete: "cascade" }),
+    userMessageId: text("user_message_id").references(() => messages.id, { onDelete: "cascade" }),
+    assistantMessageId: text("assistant_message_id").references(() => messages.id, { onDelete: "cascade" }),
+    conversationLifecycleVersion: integer("conversation_lifecycle_version").notNull(),
+    tripProjectAggregateVersion: integer("trip_project_aggregate_version"),
+    dedupeKey: text("dedupe_key").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    status: text("status").$type<DomainOutboxStatus>().default("pending").notNull(),
+    attemptCount: integer("attempt_count").default(0).notNull(),
+    maxAttempts: integer("max_attempts").default(3).notNull(),
+    availableAt: timestamp("available_at", { mode: "date" }).defaultNow().notNull(),
+    claimedBy: text("claimed_by"),
+    claimedAt: timestamp("claimed_at", { mode: "date" }),
+    leaseExpiresAt: timestamp("lease_expires_at", { mode: "date" }),
+    fencingToken: text("fencing_token"),
+    lastErrorCode: text("last_error_code"),
+    failureCode: text("failure_code"),
+    completedAt: timestamp("completed_at", { mode: "date" }),
+    failedAt: timestamp("failed_at", { mode: "date" }),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (event) => [
+    uniqueIndex("domain_outbox_dedupe_key_idx").on(event.dedupeKey),
+    index("domain_outbox_due_queue_idx").on(event.status, event.availableAt, event.createdAt, event.id),
+    index("domain_outbox_expired_lease_idx").on(event.status, event.leaseExpiresAt).where(sql`${event.leaseExpiresAt} is not null`),
+    check("domain_outbox_event_type_check", sql`${event.eventType} in ('ai_ask.context_extraction.v1', 'ai_ask.answer_annotation.v1', 'ai_ask.trip_proposal_draft.v1')`),
+    check("domain_outbox_event_version_check", sql`${event.eventVersion} = 1 and ${event.aggregateType} = 'ai_ask_command' and ${event.aggregateId} = ${event.originatingCommandId}`),
+    check("domain_outbox_attempts_check", sql`${event.attemptCount} between 0 and ${event.maxAttempts} and ${event.maxAttempts} between 1 and 10`),
+    check("domain_outbox_payload_check", sql`jsonb_typeof(${event.payload}) = 'object' and octet_length(${event.payload}::text) <= 4096`),
+    check("domain_outbox_safe_code_check", sql`(${event.lastErrorCode} is null or ${event.lastErrorCode} ~ '^[a-z0-9_:-]{1,120}$') and (${event.failureCode} is null or ${event.failureCode} ~ '^[a-z0-9_:-]{1,120}$')`),
+    check("domain_outbox_status_check", sql`${event.status} in ('pending', 'processing', 'completed', 'failed')`),
+    check("domain_outbox_processing_claim_check", sql`(${event.status} = 'processing') = (${event.claimedBy} is not null and ${event.claimedAt} is not null and ${event.leaseExpiresAt} > ${event.claimedAt} and ${event.fencingToken} ~ '^[a-f0-9]{64}$')`),
+    check("domain_outbox_non_processing_claim_check", sql`${event.status} = 'processing' or (${event.claimedBy} is null and ${event.claimedAt} is null and ${event.leaseExpiresAt} is null and ${event.fencingToken} is null)`),
+    check("domain_outbox_terminal_timestamp_check", sql`(${event.status} = 'completed' and ${event.completedAt} is not null) or (${event.status} = 'failed' and ${event.failedAt} is not null) or (${event.status} in ('pending', 'processing') and ${event.completedAt} is null and ${event.failedAt} is null)`),
+    check("domain_outbox_failed_failure_code_check", sql`${event.status} <> 'failed' or ${event.failureCode} is not null`),
+  ],
+);
+
+// The unique event reference is the durable idempotency guard for a completed
+// consumer transaction that is redelivered before its acknowledgement is seen.
+export const domainOutboxEffects = pgTable(
+  "domain_outbox_effects",
+  {
+    id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    outboxEventId: text("outbox_event_id").notNull().references(() => domainOutbox.id, { onDelete: "cascade" }),
+    effectType: text("effect_type").notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (effect) => [
+    uniqueIndex("domain_outbox_effects_event_idx").on(effect.outboxEventId),
+    check("domain_outbox_effects_type_check", sql`${effect.effectType} in ('context_extraction', 'answer_annotation', 'trip_proposal_draft', 'fenced_out')`),
   ],
 );
 

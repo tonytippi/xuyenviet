@@ -9,6 +9,8 @@ import { writeAiUsageEvent } from "@/features/audit/usage";
 import type { AuthenticatedSession } from "@/server/auth";
 import { getDb } from "@/db/client";
 
+type Transaction = Parameters<ReturnType<typeof getDb>["transaction"]>[0] extends (transaction: infer T) => unknown ? T : never;
+
 // Story 7.4: AI Orchestration proposal-draft module. Reads the current Trip
 // Planning aggregate via the Chat/Trips-owned query helper
 // (readOwnedTripProjectAggregateForProposalDraft), builds the prompt, calls the
@@ -64,11 +66,13 @@ export async function draftTripChangeProposal({
   tripProjectId,
   question,
   abortSignal,
+  beforeProviderCall,
 }: {
   session: AuthenticatedSession;
   tripProjectId: string;
   question: string;
   abortSignal?: AbortSignal;
+  beforeProviderCall?: () => Promise<boolean>;
 }): Promise<UntrustedTripChangeProposalDraft> {
   const aggregate = await readOwnedTripProjectAggregateForProposalDraft(tripProjectId, session);
 
@@ -107,26 +111,10 @@ export async function draftTripChangeProposal({
   };
 
   const messages = buildTripChangeProposalDraftMessages({ question, currentAggregateSummary });
+  if (beforeProviderCall && !await beforeProviderCall()) return { ok: false, reason: "no_project" };
   const result = await completeTripChangeProposalDraft({ model: selectedModel.gatewayModelName, messages, abortSignal });
 
-  const db = getDb();
-
   if (!result.ok) {
-    await recordDraftUsage(db, {
-      initiatedByUserId: session.userId,
-      tripProjectId,
-      purpose: tripChangeProposalDraftPurpose,
-      provider: result.provider,
-      model: result.model,
-      aiGatewayModelId: selectedModel.id,
-      promptVersion: tripChangeProposalDraftPromptVersion,
-      status: "failure",
-      latencyMs: result.latencyMs,
-      pricingSnapshot,
-      errorCode: result.errorCode,
-      providerRequestId: result.requestMetadata.providerRequestId,
-    });
-
     return {
       ok: false,
       reason: "gateway_failed",
@@ -149,26 +137,6 @@ export async function draftTripChangeProposal({
   const parsed = parseDraftPayload(result.content);
 
   if (!parsed) {
-    await recordDraftUsage(db, {
-      initiatedByUserId: session.userId,
-      tripProjectId,
-      purpose: tripChangeProposalDraftPurpose,
-      provider: result.provider,
-      model: result.model,
-      aiGatewayModelId: selectedModel.id,
-      promptVersion: tripChangeProposalDraftPromptVersion,
-      status: "failure",
-      latencyMs: result.latencyMs,
-      promptTokens: result.usage.promptTokens,
-      completionTokens: result.usage.completionTokens,
-      totalTokens: result.usage.totalTokens,
-      cachedPromptTokens: result.usage.cachedPromptTokens,
-      cacheWritePromptTokens: result.usage.cacheWritePromptTokens,
-      pricingSnapshot,
-      errorCode: "invalid_gateway_response",
-      providerRequestId: result.requestMetadata.providerRequestId,
-    });
-
     return {
       ok: false,
       reason: "parse_failed",
@@ -218,21 +186,22 @@ export async function draftTripChangeProposal({
   };
 }
 
-export async function recordTripChangeProposalDraftUsage(input: {
+export async function writeTripChangeProposalDraftUsageInTransaction(transaction: Transaction, input: {
   session: AuthenticatedSession;
   tripProjectId: string;
   draft: UntrustedTripChangeProposalDraft;
 }) {
-  if (!input.draft.ok) return;
-  await recordDraftUsage(getDb(), {
+  if (!input.draft.usage || !input.draft.aiGatewayModelId || !input.draft.pricingSnapshot) return;
+  await writeAiUsageEvent(transaction, {
     initiatedByUserId: input.session.userId,
+    executorSystem: "system-ai-orchestration",
     tripProjectId: input.tripProjectId,
     purpose: tripChangeProposalDraftPurpose,
     provider: input.draft.usage.provider,
     model: input.draft.usage.model,
     aiGatewayModelId: input.draft.aiGatewayModelId,
     promptVersion: tripChangeProposalDraftPromptVersion,
-    status: "success",
+    status: input.draft.ok ? "success" : "failure",
     latencyMs: input.draft.usage.latencyMs,
     promptTokens: input.draft.usage.promptTokens,
     completionTokens: input.draft.usage.completionTokens,
@@ -241,58 +210,8 @@ export async function recordTripChangeProposalDraftUsage(input: {
     cacheWritePromptTokens: input.draft.usage.cacheWritePromptTokens,
     pricingSnapshot: input.draft.pricingSnapshot,
     providerRequestId: input.draft.usage.providerRequestId,
+    errorCode: input.draft.ok ? undefined : input.draft.reason === "parse_failed" ? "invalid_gateway_response" : "provider_failed",
   });
-}
-
-type DraftUsageInput = {
-  initiatedByUserId: string;
-  tripProjectId: string;
-  purpose: string;
-  provider: string;
-  model: string;
-  aiGatewayModelId: string;
-  promptVersion: string;
-  status: "success" | "failure";
-  latencyMs: number | null;
-  promptTokens?: number | null;
-  completionTokens?: number | null;
-  totalTokens?: number | null;
-  cachedPromptTokens?: number | null;
-  cacheWritePromptTokens?: number | null;
-  pricingSnapshot: ReturnType<typeof getAiGatewayPricingSnapshot>;
-  errorCode?: string | null;
-  providerRequestId?: string | null;
-};
-
-async function recordDraftUsage(db: ReturnType<typeof getDb>, input: DraftUsageInput) {
-  try {
-    await writeAiUsageEvent(db, {
-      initiatedByUserId: input.initiatedByUserId,
-      executorSystem: "system-ai-orchestration",
-      tripProjectId: input.tripProjectId,
-      purpose: input.purpose,
-      provider: input.provider,
-      model: input.model,
-      aiGatewayModelId: input.aiGatewayModelId,
-      promptVersion: input.promptVersion,
-      status: input.status,
-      latencyMs: input.latencyMs,
-      promptTokens: input.promptTokens,
-      completionTokens: input.completionTokens,
-      totalTokens: input.totalTokens,
-      cachedPromptTokens: input.cachedPromptTokens,
-      cacheWritePromptTokens: input.cacheWritePromptTokens,
-      pricingSnapshot: input.pricingSnapshot,
-      errorCode: input.errorCode,
-      providerRequestId: input.providerRequestId,
-    });
-  } catch (error) {
-    console.warn("Trip change proposal draft usage event could not be recorded", {
-      tripProjectId: input.tripProjectId,
-      status: input.status,
-      error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
-    });
-  }
 }
 
 type ParsedDraft = {

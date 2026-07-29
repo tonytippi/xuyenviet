@@ -741,7 +741,7 @@ describe("answer context assembly", () => {
       .map((line) => JSON.parse(line) as { type: string; assistantMessage?: { annotations?: Array<{ id: string; text: string }> } })
       .find((event) => event.type === "done");
 
-    expect(doneEvent?.assistantMessage?.annotations).toEqual([]);
+    expect(doneEvent?.assistantMessage?.annotations).toBeUndefined();
   });
 
   test("source bundle renderer keeps instruction-like context values delimited as data", async () => {
