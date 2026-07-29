@@ -79,8 +79,10 @@ type CreateTripProjectFormState = { error?: string };
 export type IdempotentAiAskSubmission = {
   payloadFingerprint: string;
   key: string;
-  conversationId?: string;
-  tripProjectId?: string;
+  requestScope: {
+    conversationId?: string;
+    tripProjectId?: string;
+  };
   adoptedConversationId?: string;
 };
 
@@ -97,14 +99,14 @@ export function getIdempotentAiAskSubmission({
   tripProjectId?: string;
   createKey: () => string;
 }): IdempotentAiAskSubmission {
-  const keepsOriginalScope = previous?.conversationId === conversationId
-    || (!previous?.conversationId && previous?.adoptedConversationId === conversationId);
+  const keepsOriginalScope = previous?.requestScope.conversationId === conversationId
+    || (!previous?.requestScope.conversationId && previous?.adoptedConversationId === conversationId);
 
-  if (previous && previous.payloadFingerprint === payloadFingerprint && previous.tripProjectId === tripProjectId && keepsOriginalScope) {
+  if (previous && previous.payloadFingerprint === payloadFingerprint && previous.requestScope.tripProjectId === tripProjectId && keepsOriginalScope) {
     return previous;
   }
 
-  return { payloadFingerprint, key: createKey(), conversationId, tripProjectId };
+  return { payloadFingerprint, key: createKey(), requestScope: { conversationId, tripProjectId } };
 }
 
 type CreateTripProjectAction = (
@@ -1182,8 +1184,10 @@ export function AiAskComposer({
         createKey: () => crypto.randomUUID().replaceAll("-", ""),
       });
       idempotencyKeyRef.current = submission;
-      const hadConversation = Boolean(submission.conversationId || messages.length > 0);
-      const result = await submitAiAskStream({ question: trimmedQuestion, conversationId: submission.conversationId, tripProjectId: submission.tripProjectId, image: selectedImage, idempotencyKey: submission.key, signal: controller.signal, onPreparing: () => {
+      const hadConversation = Boolean(submission.requestScope.conversationId || messages.length > 0);
+      // Adoption updates the UI selection only; a retained logical submission must
+      // keep its original scope so its idempotency key resolves the same command.
+      const result = await submitAiAskStream({ question: trimmedQuestion, conversationId: submission.requestScope.conversationId, tripProjectId: submission.requestScope.tripProjectId, image: selectedImage, idempotencyKey: submission.key, signal: controller.signal, onPreparing: () => {
         if (activeRequestIdRef.current === requestId) {
           setIsPreparing(true);
           setStatus("Trợ lý đang chuẩn bị ngữ cảnh cho câu hỏi của bạn.");
@@ -2372,12 +2376,7 @@ async function submitAiAskStream({
   onPreparing: () => void;
   onDelta: (content: string) => void;
 }): Promise<StreamResult> {
-  const formData = new FormData();
-
-  formData.set("question", question);
-  if (conversationId) formData.set("conversationId", conversationId);
-  if (tripProjectId) formData.set("tripProjectId", tripProjectId);
-  if (image) formData.set("image", image);
+  const formData = buildAiAskStreamFormData({ question, conversationId, tripProjectId, image });
 
   const response = await fetch("/api/ai-ask/stream", { method: "POST", body: formData, signal, headers: { "Idempotency-Key": idempotencyKey } });
 
@@ -2434,6 +2433,26 @@ async function submitAiAskStream({
   }
 
   return terminalResult ?? { status: "answer-failed", errorMessage: "Luồng trả lời kết thúc trước khi lưu câu trả lời hoàn chỉnh." };
+}
+
+export function buildAiAskStreamFormData({
+  question,
+  conversationId,
+  tripProjectId,
+  image,
+}: {
+  question: string;
+  conversationId?: string;
+  tripProjectId?: string;
+  image: File | null;
+}) {
+  const formData = new FormData();
+
+  formData.set("question", question);
+  if (conversationId) formData.set("conversationId", conversationId);
+  if (tripProjectId) formData.set("tripProjectId", tripProjectId);
+  if (image) formData.set("image", image);
+  return formData;
 }
 
 function parseStreamEvent(line: string) {

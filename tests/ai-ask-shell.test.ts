@@ -949,8 +949,8 @@ describe("AI Ask structured answer rendering", () => {
     expect(source).not.toContain("optimisticAssistant");
   });
 
-  test("preserves an unscoped pending replay scope while using its adopted conversation for a changed payload", async () => {
-    const { getIdempotentAiAskSubmission } = await import("@/features/ai/ai-ask-composer");
+  test("retries an adopted unscoped request without a conversationId and scopes changed payloads to it", async () => {
+    const { buildAiAskStreamFormData, getIdempotentAiAskSubmission } = await import("@/features/ai/ai-ask-composer");
     const first = getIdempotentAiAskSubmission({
       previous: null,
       payloadFingerprint: "Hà Nội đi Huế?",
@@ -976,8 +976,10 @@ describe("AI Ask structured answer rendering", () => {
       createKey: () => "third-key",
     });
 
-    expect(retry).toMatchObject({ key: "first-key", conversationId: undefined });
-    expect(newRequest).toMatchObject({ key: "third-key", conversationId: "server-created-conversation" });
+    expect(retry).toMatchObject({ key: "first-key", requestScope: { conversationId: undefined, tripProjectId: undefined } });
+    expect(newRequest).toMatchObject({ key: "third-key", requestScope: { conversationId: "server-created-conversation", tripProjectId: undefined } });
+    expect(buildAiAskStreamFormData({ question: "Hà Nội đi Huế?", ...retry.requestScope, image: null }).has("conversationId")).toBe(false);
+    expect(buildAiAskStreamFormData({ question: "Hà Nội đi Đà Nẵng?", ...newRequest.requestScope, image: null }).get("conversationId")).toBe("server-created-conversation");
   });
 
   test("renders answer-scoped navigation and uncertainty sections without source chips", async () => {

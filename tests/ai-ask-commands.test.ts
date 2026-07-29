@@ -236,16 +236,20 @@ describe("AI Ask command ledger", () => {
     await expect(testDb.select().from(aiAskCommands)).resolves.toEqual([]);
   });
 
-  test("derives a stable unscoped server scope for first-delivery races", async () => {
+  test("replays an adopted unscoped command without another user turn", async () => {
     await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
     const first = await acquireAiAskCommand({ userId: "owner", idempotencyKey: key, question: "Đi Huế" });
-    const second = await acquireAiAskCommand({ userId: "owner", idempotencyKey: key, question: "Đi Huế" });
-    expect(first.kind).toBe("admitted");
-    expect(second.kind).toBe("pending_replay");
+    if (first.kind !== "admitted") throw new Error("Expected command admission");
+
+    // The route exposes this conversation to the browser, but an exact retry must
+    // retain its original unscoped request shape to target the new-conversation key.
+    const replay = await acquireAiAskCommand({ userId: "owner", idempotencyKey: key, question: "Đi Huế" });
+    expect(replay).toMatchObject({ kind: "pending_replay", conversationId: first.conversationId, userMessage: first.userMessage });
     const rows = await testDb.select().from(aiAskCommands).where(eq(aiAskCommands.userId, "owner"));
     expect(rows).toHaveLength(1);
     expect(rows[0].scopeKind).toBe("new_conversation");
     expect(rows[0].scopeId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(await testDb.select().from(messages)).toHaveLength(1);
   });
 
   test("uses independent connections to admit only one concurrent first delivery", async () => {
