@@ -64,6 +64,13 @@
       "when": 1785337400000,
       "tag": "0008_stable_ai_ask_terminal_projection",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1785337500000,
+      "tag": "0009_fence_terminal_ai_ask_persistence",
+      "breakpoints": true
     }
   ]
 }

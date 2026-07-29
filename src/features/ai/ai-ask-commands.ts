@@ -2,10 +2,10 @@ import "server-only";
 
 import { createHash } from "node:crypto";
 
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { aiAskCommands, conversations, messageImageAttachments, messages } from "@/db/schema";
+import { aiAskCommands, conversations, messageImageAttachments, messages, tripProjects } from "@/db/schema";
 import { resolveOwnedPrimaryConversationInTransaction } from "@/features/chat-trips/trip-projects";
 
 const keyPattern = /^[A-Za-z0-9_-]{16,128}$/;
@@ -19,6 +19,8 @@ export type AiAskTerminalResult = {
   proposal?: unknown;
   errorMessage?: string;
 };
+
+export const aiAskRefreshRequiredMessage = "Nội dung lập kế hoạch đã thay đổi. Vui lòng làm mới và gửi lại câu hỏi để nhận câu trả lời phù hợp.";
 
 type Transaction = Parameters<ReturnType<typeof getDb>["transaction"]>[0] extends (transaction: infer T) => unknown ? T : never;
 
@@ -84,6 +86,8 @@ export async function acquireAiAskCommand(input: AcquireAiAskCommandInput): Prom
       selectedScopeDigest,
       tripProjectId: resolved.tripProjectId,
       conversationId: resolved.conversation?.id,
+      conversationLifecycleVersion: resolved.conversation?.lifecycleVersion,
+      tripProjectAggregateVersion: resolved.tripProjectAggregateVersion,
       expiresAt,
     }).onConflictDoNothing().returning({ id: aiAskCommands.id });
 
@@ -94,15 +98,11 @@ export async function acquireAiAskCommand(input: AcquireAiAskCommandInput): Prom
       const [winner] = await transaction.select().from(aiAskCommands).where(winnerPredicate).limit(1).for("update");
       if (!winner || winner.requestDigest !== requestDigest || winner.expiresAt <= new Date()) return { kind: "key_reused" };
       if (winner.status !== "pending") return { kind: "terminal_replay", result: winner.terminalResult as AiAskTerminalResult };
-      if (winner.terminalResult) {
-        const recovered = await recoverCompletedAiAskCommandInTransaction(winner.id, transaction);
-        if (recovered) return { kind: "terminal_replay", result: recovered };
-      }
       return { kind: "pending_replay", conversationId: winner.conversationId ?? undefined, userMessage: winner.userMessageId ? await readMessage(transaction, winner.userMessageId, input.userId) : undefined };
     }
 
-    const conversation = resolved.conversation ?? (await transaction.insert(conversations).values({ userId: input.userId }).returning({ id: conversations.id, tripProjectId: conversations.tripProjectId, updatedAt: conversations.updatedAt }))[0];
-    await transaction.update(aiAskCommands).set({ conversationId: conversation.id, updatedAt: new Date() }).where(eq(aiAskCommands.id, inserted.id));
+    const conversation = resolved.conversation ?? (await transaction.insert(conversations).values({ userId: input.userId }).returning({ id: conversations.id, tripProjectId: conversations.tripProjectId, lifecycleVersion: conversations.lifecycleVersion, updatedAt: conversations.updatedAt }))[0];
+    await transaction.update(aiAskCommands).set({ conversationId: conversation.id, conversationLifecycleVersion: conversation.lifecycleVersion, updatedAt: new Date() }).where(eq(aiAskCommands.id, inserted.id));
     const history = await transaction.select({ role: messages.role, content: messages.content }).from(messages).where(and(eq(messages.conversationId, conversation.id), eq(messages.userId, input.userId))).orderBy(asc(messages.createdAt), asc(messages.id));
     const [message] = await transaction.insert(messages).values({ conversationId: conversation.id, userId: input.userId, role: "user", content: question }).returning({ id: messages.id, content: messages.content });
     if (attachment) await transaction.insert(messageImageAttachments).values({ conversationId: conversation.id, messageId: message.id, userId: input.userId, originalFileName: attachment.fileName, mimeType: attachment.mimeType, byteSize: attachment.byteSize, storageKey: null });
@@ -133,39 +133,46 @@ export async function terminalizeAiAskCommand(commandId: string, status: "comple
   }
 }
 
-export async function prepareAiAskCommandTerminalResult(commandId: string, result: AiAskTerminalResult, assistantMessageId: string) {
-  const [prepared] = await getDb().update(aiAskCommands)
-    .set({ terminalResult: result, assistantMessageId, updatedAt: new Date() })
-    .where(and(eq(aiAskCommands.id, commandId), eq(aiAskCommands.status, "pending"), isNull(aiAskCommands.terminalResult)))
-    .returning({ id: aiAskCommands.id });
-  if (prepared) return;
+export async function finalizeAiAskCommand<T extends { result: AiAskTerminalResult; assistantMessageId: string }>(commandId: string, persist: (transaction: Transaction, command: { userId: string; conversationId: string; tripProjectId: string | null; userMessageId: string }) => Promise<T>): Promise<T | { result: AiAskTerminalResult; discarded: true }> {
+  return getDb().transaction(async (transaction) => {
+    const [unlocked] = await transaction.select().from(aiAskCommands).where(eq(aiAskCommands.id, commandId)).limit(1);
+    if (!unlocked) throw new Error("AI Ask command was not found.");
+    if (unlocked.tripProjectId) await transaction.select({ id: tripProjects.id }).from(tripProjects).where(and(eq(tripProjects.id, unlocked.tripProjectId), eq(tripProjects.userId, unlocked.userId))).limit(1).for("update");
+    if (unlocked.conversationId) await transaction.select({ id: conversations.id }).from(conversations).where(and(eq(conversations.id, unlocked.conversationId), eq(conversations.userId, unlocked.userId))).limit(1).for("update");
+    const [command] = await transaction.select().from(aiAskCommands).where(eq(aiAskCommands.id, commandId)).limit(1).for("update");
+    if (!command) throw new Error("AI Ask command was not found.");
+    if (command.status !== "pending") {
+      if (command.status === "discarded") return { result: command.terminalResult as AiAskTerminalResult, discarded: true };
+      throw new Error("AI Ask command has a conflicting terminal state.");
+    }
 
-  const [existing] = await getDb().select({ status: aiAskCommands.status, terminalResult: aiAskCommands.terminalResult }).from(aiAskCommands).where(eq(aiAskCommands.id, commandId)).limit(1);
-  if (existing && terminalResultsEqual(existing.terminalResult, result)) return;
-  throw new Error("AI Ask command has a conflicting prepared terminal result.");
+    const [conversation] = command.conversationId
+      ? await transaction.select({ id: conversations.id, lifecycleVersion: conversations.lifecycleVersion }).from(conversations).where(and(eq(conversations.id, command.conversationId), eq(conversations.userId, command.userId))).limit(1)
+      : [];
+    const [project] = command.tripProjectId
+      ? await transaction.select({ id: tripProjects.id, aggregateVersion: tripProjects.aggregateVersion }).from(tripProjects).where(and(eq(tripProjects.id, command.tripProjectId), eq(tripProjects.userId, command.userId))).limit(1)
+      : [];
+    if (!conversation || !command.userMessageId || conversation.lifecycleVersion !== command.conversationLifecycleVersion || (command.tripProjectId !== null && (!project || project.aggregateVersion !== command.tripProjectAggregateVersion))) {
+      const result = refreshRequiredResult();
+      await transaction.update(aiAskCommands).set({ status: "discarded", terminalResult: result, terminalAt: new Date(), assistantMessageId: null, userMessageId: null, conversationId: null, tripProjectId: null, conversationLifecycleVersion: null, tripProjectAggregateVersion: null, normalizedQuestion: "[discarded]", attachmentMetadata: null, updatedAt: new Date() }).where(and(eq(aiAskCommands.id, command.id), eq(aiAskCommands.status, "pending")));
+      return { result, discarded: true };
+    }
+
+    const completed = await persist(transaction, { userId: command.userId, conversationId: conversation.id, tripProjectId: command.tripProjectId, userMessageId: command.userMessageId });
+    await transaction.update(aiAskCommands).set({ status: "completed", terminalResult: completed.result, assistantMessageId: completed.assistantMessageId, terminalAt: new Date(), updatedAt: new Date() }).where(and(eq(aiAskCommands.id, command.id), eq(aiAskCommands.status, "pending")));
+    return completed;
+  });
 }
 
-export async function recoverCompletedAiAskCommand(commandId: string): Promise<AiAskTerminalResult | null> {
-  return getDb().transaction((transaction) => recoverCompletedAiAskCommandInTransaction(commandId, transaction));
+export async function discardAiAskCommandsForDeletedConversations(transaction: Transaction, userId: string, conversationIds: string[]) {
+  if (conversationIds.length === 0) return;
+  const commands = await transaction.select({ id: aiAskCommands.id }).from(aiAskCommands).where(and(eq(aiAskCommands.userId, userId), inArray(aiAskCommands.conversationId, conversationIds), eq(aiAskCommands.status, "pending"))).orderBy(asc(aiAskCommands.id)).for("update");
+  if (commands.length === 0) return;
+  await transaction.update(aiAskCommands).set({ status: "discarded", terminalResult: refreshRequiredResult(), terminalAt: new Date(), assistantMessageId: null, userMessageId: null, conversationId: null, tripProjectId: null, conversationLifecycleVersion: null, tripProjectAggregateVersion: null, normalizedQuestion: "[discarded]", attachmentMetadata: null, updatedAt: new Date() }).where(inArray(aiAskCommands.id, commands.map((command) => command.id)));
 }
 
-async function recoverCompletedAiAskCommandInTransaction(commandId: string, transaction: Transaction): Promise<AiAskTerminalResult | null> {
-  const [command] = await transaction.select({
-    id: aiAskCommands.id,
-    status: aiAskCommands.status,
-    terminalResult: aiAskCommands.terminalResult,
-    conversationId: aiAskCommands.conversationId,
-    userId: aiAskCommands.userId,
-    userMessageId: aiAskCommands.userMessageId,
-    assistantMessageId: aiAskCommands.assistantMessageId,
-  }).from(aiAskCommands).where(eq(aiAskCommands.id, commandId)).limit(1).for("update");
-  if (!command) return null;
-  if (command.status !== "pending") return command.terminalResult as AiAskTerminalResult;
-  if (!command.terminalResult) return null;
-
-  const result = command.terminalResult as AiAskTerminalResult;
-  await transaction.update(aiAskCommands).set({ status: "completed", terminalResult: result, terminalAt: new Date(), updatedAt: new Date() }).where(eq(aiAskCommands.id, command.id));
-  return result;
+function refreshRequiredResult(): AiAskTerminalResult {
+  return { type: "error", errorMessage: aiAskRefreshRequiredMessage };
 }
 
 // jsonb object key order is not part of the terminal-result contract. Arrays remain
@@ -191,16 +198,18 @@ async function resolveScope(transaction: Transaction, userId: string, conversati
   if (tripProjectId) {
     const conversation = await resolveOwnedPrimaryConversationInTransaction(transaction, userId, tripProjectId);
     if (!conversation || (conversationId && conversationId !== conversation.id)) return null;
-    return { scopeKind: "trip_project" as const, scopeId: tripProjectId, tripProjectId, conversation };
+    const [project] = await transaction.select({ aggregateVersion: tripProjects.aggregateVersion }).from(tripProjects).where(and(eq(tripProjects.id, tripProjectId), eq(tripProjects.userId, userId))).limit(1);
+    if (!project) return null;
+    return { scopeKind: "trip_project" as const, scopeId: tripProjectId, tripProjectId, tripProjectAggregateVersion: project.aggregateVersion, conversation };
   }
   if (conversationId) {
-    const [conversation] = await transaction.select({ id: conversations.id, tripProjectId: conversations.tripProjectId, updatedAt: conversations.updatedAt }).from(conversations).where(and(eq(conversations.id, conversationId), eq(conversations.userId, userId))).limit(1).for("update");
+    const [conversation] = await transaction.select({ id: conversations.id, tripProjectId: conversations.tripProjectId, lifecycleVersion: conversations.lifecycleVersion, updatedAt: conversations.updatedAt }).from(conversations).where(and(eq(conversations.id, conversationId), eq(conversations.userId, userId))).limit(1).for("update");
     if (!conversation || conversation.tripProjectId) return null;
-    return { scopeKind: "conversation" as const, scopeId: conversation.id, tripProjectId: null, conversation };
+    return { scopeKind: "conversation" as const, scopeId: conversation.id, tripProjectId: null, tripProjectAggregateVersion: null, conversation };
   }
   // The scope is generated only for the new command. A separate immutable unique
   // index on owner/key arbitrates concurrent first deliveries without browser input.
-  return { scopeKind: "new_conversation" as const, scopeId: crypto.randomUUID(), tripProjectId: null, conversation: null };
+  return { scopeKind: "new_conversation" as const, scopeId: crypto.randomUUID(), tripProjectId: null, tripProjectAggregateVersion: null, conversation: null };
 }
 
 async function readMessage(transaction: Transaction, messageId: string, userId: string) {

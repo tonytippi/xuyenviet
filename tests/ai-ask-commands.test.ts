@@ -4,7 +4,7 @@ import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 
 import { aiAskCommands, conversations, messages, schema, tripProjects, users } from "@/db/schema";
-import { acquireAiAskCommand, prepareAiAskCommandTerminalResult, recoverCompletedAiAskCommand, terminalizeAiAskCommand, terminalResultsEqual, validateAiAskIdempotencyKey } from "@/features/ai/ai-ask-commands";
+import { acquireAiAskCommand, finalizeAiAskCommand, terminalizeAiAskCommand, terminalResultsEqual, validateAiAskIdempotencyKey } from "@/features/ai/ai-ask-commands";
 
 import { testDb } from "./helpers/db";
 
@@ -96,33 +96,36 @@ describe("AI Ask command ledger", () => {
     await expect(acquireAiAskCommand({ userId: "owner", idempotencyKey: key, question: "Đi Huế", conversationId: conversation.id })).resolves.toEqual({ kind: "terminal_replay", result });
   });
 
-  test("does not make assistant persistence authoritative before the complete terminal projection is prepared", async () => {
+  test("atomically completes a matching fenced command", async () => {
     await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
     const [conversation] = await testDb.insert(conversations).values({ id: "conversation", userId: "owner" }).returning({ id: conversations.id });
     const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: key, question: "Đi Huế", conversationId: conversation.id });
     if (admitted.kind !== "admitted") throw new Error("Expected command admission");
-    const [assistant] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "owner", role: "assistant", content: "Gợi ý đã lưu" }).returning({ id: messages.id });
-    await testDb.update(aiAskCommands).set({ assistantMessageId: assistant.id }).where(eq(aiAskCommands.id, admitted.commandId));
-
-    await expect(acquireAiAskCommand({ userId: "owner", idempotencyKey: key, question: "Đi Huế", conversationId: conversation.id })).resolves.toEqual({
-      kind: "pending_replay", conversationId: conversation.id, userMessage: admitted.userMessage,
+    const finalized = await finalizeAiAskCommand(admitted.commandId, async (transaction, command) => {
+      const [assistant] = await transaction.insert(messages).values({ conversationId: command.conversationId, userId: command.userId, role: "assistant", content: "Gợi ý đã lưu" }).returning({ id: messages.id });
+      const result = { type: "done" as const, conversationId: command.conversationId, userMessage: admitted.userMessage, assistantMessage: { id: assistant.id, content: "Gợi ý đã lưu" } };
+      return { assistantMessageId: assistant.id, result };
     });
-    await expect(recoverCompletedAiAskCommand(admitted.commandId)).resolves.toBeNull();
+    expect(finalized).toMatchObject({ result: { type: "done" } });
+    await expect(acquireAiAskCommand({ userId: "owner", idempotencyKey: key, question: "Đi Huế", conversationId: conversation.id })).resolves.toEqual({ kind: "terminal_replay", result: finalized.result });
+  });
 
-    const result = {
-      type: "done" as const,
-      conversationId: conversation.id,
-      userMessage: admitted.userMessage,
-      assistantMessage: { id: assistant.id, content: "Gợi ý đã lưu", annotations: [{ source: "durable" }] },
-      proposal: { proposalId: "proposal-1", rationale: "Đã kiểm tra", affectedItems: [], beforeAfter: [], alternatives: [], hasAlternatives: false, expiresAt: null, status: "pending" },
-    };
-    await prepareAiAskCommandTerminalResult(admitted.commandId, result, assistant.id);
+  test("discards a stale fence without invoking final persistence", async () => {
+    await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
+    const [conversation] = await testDb.insert(conversations).values({ id: "conversation", userId: "owner" }).returning({ id: conversations.id });
+    const admitted = await acquireAiAskCommand({ userId: "owner", idempotencyKey: key, question: "Đi Huế", conversationId: conversation.id });
+    if (admitted.kind !== "admitted") throw new Error("Expected command admission");
+    await testDb.update(conversations).set({ lifecycleVersion: 2 }).where(eq(conversations.id, conversation.id));
+    const persist = vi.fn();
 
-    await expect(acquireAiAskCommand({ userId: "owner", idempotencyKey: key, question: "Đi Huế", conversationId: conversation.id })).resolves.toEqual({
-      kind: "terminal_replay",
-      result,
-    });
-    await expect(recoverCompletedAiAskCommand(admitted.commandId)).resolves.toEqual(result);
+    const finalized = await finalizeAiAskCommand(admitted.commandId, persist);
+
+    expect(finalized).toMatchObject({ discarded: true, result: { type: "error" } });
+    expect(persist).not.toHaveBeenCalled();
+    const [command] = await testDb.select().from(aiAskCommands).where(eq(aiAskCommands.id, admitted.commandId));
+    expect(command).toMatchObject({ status: "discarded", conversationId: null, userMessageId: null, assistantMessageId: null });
+    expect(command.terminalResult).toMatchObject({ type: "error" });
+    expect(await testDb.select({ id: messages.id, role: messages.role, content: messages.content }).from(messages)).toEqual([{ id: admitted.userMessage.id, role: "user", content: admitted.userMessage.content }]);
   });
 
   test("serializes and replays only the safe terminal browser projection", async () => {
@@ -226,14 +229,16 @@ describe("AI Ask command ledger", () => {
     expect(await testDb.select().from(aiAskCommands)).toHaveLength(2);
   });
 
-  test("cascades command deletion with its owned conversation", async () => {
+  test("retains a command after direct conversation deletion", async () => {
     await testDb.insert(users).values({ id: "owner", email: "owner@example.com" });
     const [conversation] = await testDb.insert(conversations).values({ id: "conversation", userId: "owner" }).returning({ id: conversations.id });
     await expect(acquireAiAskCommand({ userId: "owner", idempotencyKey: key, question: "Đi Huế", conversationId: conversation.id })).resolves.toMatchObject({ kind: "admitted" });
 
     await testDb.delete(conversations).where(eq(conversations.id, conversation.id));
 
-    await expect(testDb.select().from(aiAskCommands)).resolves.toEqual([]);
+    const retained = await testDb.select().from(aiAskCommands);
+    expect(retained).toHaveLength(1);
+    expect(retained[0].conversationId).toBeNull();
   });
 
   test("replays an adopted unscoped command without another user turn", async () => {

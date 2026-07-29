@@ -11,6 +11,7 @@ import { buildValidatedAnswerAnnotations, sanitizeStoredAnswerAnnotations } from
 import { selectActiveAiGatewayModel } from "@/features/ai/models";
 import { formatAssistantMessageProvenance } from "@/features/retrieval/provenance";
 import { getAuthenticatedSession } from "@/server/auth";
+import { discardAiAskCommandsForDeletedConversations } from "@/features/ai/ai-ask-commands";
 
 export type { OwnedConversationSummary } from "@xuyenviet/domain";
 
@@ -185,7 +186,8 @@ export async function deleteOwnedConversation(conversationId: string): Promise<D
           if (!replacement) return { success: false, reason: "not_found" };
           const [next] = await transaction.select({ id: conversations.id }).from(conversations).where(and(eq(conversations.userId, session.userId), eq(conversations.tripProjectId, project.id), sql`${conversations.id} <> ${initial.id}`)).orderBy(desc(conversations.updatedAt), desc(conversations.id)).limit(1);
           const replacementPrimary = next ?? await transaction.insert(conversations).values({ userId: session.userId, tripProjectId: project.id }).returning({ id: conversations.id });
-          await transaction.update(tripProjects).set({ primaryConversationId: replacementPrimary.id }).where(eq(tripProjects.id, project.id));
+          await transaction.update(conversations).set({ lifecycleVersion: sql`${conversations.lifecycleVersion} + 1`, updatedAt: new Date() }).where(eq(conversations.id, replacementPrimary.id));
+          await transaction.update(tripProjects).set({ primaryConversationId: replacementPrimary.id, aggregateVersion: sql`${tripProjects.aggregateVersion} + 1`, updatedAt: new Date() }).where(eq(tripProjects.id, project.id));
         }
       }
 
@@ -199,6 +201,9 @@ export async function deleteOwnedConversation(conversationId: string): Promise<D
       if (!conversation) {
         return { success: false, reason: "not_found" };
       }
+
+      await discardAiAskCommandsForDeletedConversations(transaction, session.userId, [conversation.id]);
+      await transaction.update(conversations).set({ lifecycleVersion: sql`${conversations.lifecycleVersion} + 1`, updatedAt: new Date() }).where(eq(conversations.id, conversation.id));
 
       const conversationMessages = await transaction.select({ id: messages.id }).from(messages).where(and(eq(messages.conversationId, conversation.id), eq(messages.userId, session.userId)));
       const attachments = await transaction.select({ id: messageImageAttachments.id }).from(messageImageAttachments).where(and(eq(messageImageAttachments.conversationId, conversation.id), eq(messageImageAttachments.userId, session.userId)));

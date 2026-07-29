@@ -10,6 +10,7 @@ import { buildTripWorkspaceReadModelWithConstraints, type ConstraintsProjection,
 import { formatPlanHistoryRow, listPlanHistoryForTripProject, listPendingProposalsForTripProject, type OwnedTripChangeProposalSummary } from "@/features/chat-trips/trip-change-proposals";
 import { validatePlanReferencesRules } from "@/features/chat-trips/plan-references";
 import { getAuthenticatedSession } from "@/server/auth";
+import { discardAiAskCommandsForDeletedConversations } from "@/features/ai/ai-ask-commands";
 
 import { formatTripProjectLabel } from "./labels";
 
@@ -372,7 +373,7 @@ export async function resolveOwnedPrimaryConversationInTransaction(
   tripProjectId: string,
 ) {
   const [project] = await transaction
-    .select({ id: tripProjects.id, userId: tripProjects.userId, primaryConversationId: tripProjects.primaryConversationId })
+    .select({ id: tripProjects.id, userId: tripProjects.userId, primaryConversationId: tripProjects.primaryConversationId, aggregateVersion: tripProjects.aggregateVersion })
     .from(tripProjects)
     .where(and(eq(tripProjects.id, tripProjectId), eq(tripProjects.userId, userId)))
     .limit(1)
@@ -381,7 +382,7 @@ export async function resolveOwnedPrimaryConversationInTransaction(
 
   if (project.primaryConversationId) {
     const [primary] = await transaction
-      .select({ id: conversations.id, tripProjectId: conversations.tripProjectId, updatedAt: conversations.updatedAt })
+      .select({ id: conversations.id, tripProjectId: conversations.tripProjectId, lifecycleVersion: conversations.lifecycleVersion, updatedAt: conversations.updatedAt })
       .from(conversations)
       .where(and(eq(conversations.id, project.primaryConversationId), eq(conversations.userId, userId), eq(conversations.tripProjectId, tripProjectId)))
       .limit(1);
@@ -389,15 +390,19 @@ export async function resolveOwnedPrimaryConversationInTransaction(
   }
 
   const [existing] = await transaction
-    .select({ id: conversations.id, tripProjectId: conversations.tripProjectId, updatedAt: conversations.updatedAt })
+    .select({ id: conversations.id, tripProjectId: conversations.tripProjectId, lifecycleVersion: conversations.lifecycleVersion, updatedAt: conversations.updatedAt })
     .from(conversations)
     .where(and(eq(conversations.userId, userId), eq(conversations.tripProjectId, tripProjectId)))
     .orderBy(desc(conversations.updatedAt), desc(conversations.id))
     .limit(1);
   const [primary] = existing
     ? [existing]
-    : await transaction.insert(conversations).values({ userId, tripProjectId }).returning({ id: conversations.id, tripProjectId: conversations.tripProjectId, updatedAt: conversations.updatedAt });
-  await transaction.update(tripProjects).set({ primaryConversationId: primary.id }).where(and(eq(tripProjects.id, tripProjectId), eq(tripProjects.userId, userId)));
+    : await transaction.insert(conversations).values({ userId, tripProjectId }).returning({ id: conversations.id, tripProjectId: conversations.tripProjectId, lifecycleVersion: conversations.lifecycleVersion, updatedAt: conversations.updatedAt });
+  if (project.primaryConversationId !== primary.id) {
+    await transaction.update(conversations).set({ lifecycleVersion: sql`${conversations.lifecycleVersion} + 1`, updatedAt: new Date() }).where(and(eq(conversations.id, primary.id), eq(conversations.userId, userId)));
+    await transaction.update(tripProjects).set({ primaryConversationId: primary.id, aggregateVersion: project.aggregateVersion + 1, updatedAt: new Date() }).where(and(eq(tripProjects.id, tripProjectId), eq(tripProjects.userId, userId)));
+    return { ...primary, lifecycleVersion: primary.lifecycleVersion + 1 };
+  }
   return primary;
 }
 
@@ -421,7 +426,7 @@ export async function deleteOwnedTripProject(tripProjectId: string): Promise<Del
         return { success: false, reason: "not_found" };
       }
 
-      await transaction.update(tripProjects).set({ primaryConversationId: null }).where(and(eq(tripProjects.id, project.id), eq(tripProjects.userId, session.userId)));
+      await transaction.update(tripProjects).set({ primaryConversationId: null, aggregateVersion: sql`${tripProjects.aggregateVersion} + 1`, updatedAt: new Date() }).where(and(eq(tripProjects.id, project.id), eq(tripProjects.userId, session.userId)));
 
       const [linkedConversationCount] = await transaction.select({ count: count() }).from(conversations).where(and(eq(conversations.tripProjectId, project.id), eq(conversations.userId, session.userId)));
       const [projectContextCount] = await transaction.select({ count: count() }).from(chatContext).where(and(eq(chatContext.tripProjectId, project.id), eq(chatContext.userId, session.userId)));
@@ -429,6 +434,9 @@ export async function deleteOwnedTripProject(tripProjectId: string): Promise<Del
       const [constraintCount] = await transaction.select({ count: count() }).from(tripProjectConstraints).where(and(eq(tripProjectConstraints.tripProjectId, project.id), eq(tripProjectConstraints.userId, session.userId)));
       const [proposalCount] = await transaction.select({ count: count() }).from(tripChangeProposals).where(and(eq(tripChangeProposals.tripProjectId, project.id), eq(tripChangeProposals.userId, session.userId)));
 
+      const linkedConversations = await transaction.select({ id: conversations.id }).from(conversations).where(and(eq(conversations.tripProjectId, project.id), eq(conversations.userId, session.userId))).orderBy(asc(conversations.id)).for("update");
+      await discardAiAskCommandsForDeletedConversations(transaction, session.userId, linkedConversations.map((conversation) => conversation.id));
+      await transaction.update(conversations).set({ lifecycleVersion: sql`${conversations.lifecycleVersion} + 1`, updatedAt: new Date() }).where(and(eq(conversations.tripProjectId, project.id), eq(conversations.userId, session.userId)));
       // The project deletion promise includes every linked conversation. Their owned dependent
       // records cascade through the conversation foreign-key graph before the project is removed.
       await transaction

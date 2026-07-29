@@ -3,15 +3,13 @@ import { after } from "next/server";
 
 import { getDb } from "@/db/client";
 import { conversations, messages } from "@/db/schema";
-import { acquireAiAskCommand, prepareAiAskCommandTerminalResult, recoverCompletedAiAskCommand, terminalizeAiAskCommand } from "@/features/ai/ai-ask-commands";
+import { acquireAiAskCommand, finalizeAiAskCommand, terminalizeAiAskCommand } from "@/features/ai/ai-ask-commands";
 import { buildValidatedAnswerAnnotations, sanitizeStoredAnswerAnnotations, type AnswerAnnotation } from "@/features/ai/answer-annotations";
 import { ensureAiAskFreshnessWarning, requiresAiAskAnswerFinalization } from "@/features/ai/answer-freshness";
 import { streamInitialAiAskAnswer } from "@/features/ai/gateway";
 import { getAiGatewayPricingSnapshot, selectActiveAiGatewayModel } from "@/features/ai/models";
 import { aiAskInitialAnswerPromptVersion, aiAskInitialAnswerPurpose, buildAiAskMessages } from "@/features/ai/prompts";
-import { draftTripChangeProposal, recordTripChangeProposalDraftUsage, type UntrustedTripChangeProposalDraft } from "@/features/ai/trip-proposal-draft";
 import { extractChatTripContext } from "@/features/chat-trips/context-extraction";
-import { persistAiTripChangeProposalDraft } from "@/features/chat-trips/trip-change-proposals";
 import { persistAssistantAnswerProvenance, type AssistantMessageProvenanceItem } from "@/features/retrieval/provenance";
 import { assembleContextPrioritySourceBundle, buildSourceBundlePromptSection } from "@/features/retrieval/source-bundle";
 import { writeAiUsageEvent } from "@/features/audit/usage";
@@ -21,24 +19,11 @@ const maxQuestionLength = 2_000;
 const maxImageByteSize = 5 * 1024 * 1024;
 const maxMultipartBodySize = 6 * 1024 * 1024;
 const acceptedImageTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
-const proposalDraftTimeoutMs = 20_000;
-
-type ProposalDoneSummary = {
-  proposalId: string;
-  rationale: string;
-  affectedItems: Array<{ itemId: string; kind: string; label: string; change: string }>;
-  beforeAfter: Array<{ operation: string; before: string | null; after: string | null }>;
-  alternatives: Array<{ summary: string }>;
-  hasAlternatives: boolean;
-  expiresAt: Date | null;
-  status: string;
-};
-
 type StreamEvent =
   | { type: "preparing" }
   | { type: "delta"; content: string }
   | { type: "in_progress"; conversationId?: string; userMessage?: { id: string; content: string } }
-  | { type: "done"; conversationId: string; userMessage: { id: string; content: string }; assistantMessage: { id: string; content: string; provenance?: AssistantMessageProvenanceItem[]; annotations?: AnswerAnnotation[] }; proposal?: ProposalDoneSummary }
+  | { type: "done"; conversationId: string; userMessage: { id: string; content: string }; assistantMessage: { id: string; content: string; provenance?: AssistantMessageProvenanceItem[]; annotations?: AnswerAnnotation[] } }
   | { type: "error"; conversationId?: string; userMessage?: { id: string; content: string }; errorMessage: string };
 
 export async function POST(request: Request) {
@@ -284,32 +269,29 @@ async function streamAnswer({
     } else if (assistantContent.appendedWarning) {
       sendEvent(controller, encoder, { type: "delta", content: assistantContent.appendedWarning });
     }
-    let completed: { id: string; content: string; provenance: AssistantMessageProvenanceItem[]; annotations: AnswerAnnotation[] } | null = null;
-
-    try {
-      completed = await db.transaction(async (transaction) => {
+    const finalization = await finalizeAiAskCommand(command.commandId, async (transaction, fencedCommand) => {
         const [assistantMessage] = await transaction
           .insert(messages)
-          .values({ conversationId: savedTurn.conversationId, userId: session.userId, role: "assistant", content: assistantContent.content })
+          .values({ conversationId: fencedCommand.conversationId, userId: fencedCommand.userId, role: "assistant", content: assistantContent.content })
           .returning({ id: messages.id });
 
-        await transaction.update(conversations).set({ updatedAt: new Date() }).where(eq(conversations.id, savedTurn.conversationId));
+        await transaction.update(conversations).set({ updatedAt: new Date() }).where(eq(conversations.id, fencedCommand.conversationId));
 
         const provenance = await persistAssistantAnswerProvenance(transaction, {
-          userId: session.userId,
-          conversationId: savedTurn.conversationId,
-          userMessageId: savedTurn.userMessage.id,
+          userId: fencedCommand.userId,
+          conversationId: fencedCommand.conversationId,
+          userMessageId: fencedCommand.userMessageId,
           assistantMessageId: assistantMessage.id,
           sourceBundle,
           promptSection: contextSection,
         });
 
         await writeAiUsageEvent(transaction, {
-          initiatedByUserId: session.userId,
+          initiatedByUserId: fencedCommand.userId,
           executorSystem: "system-ai-orchestration",
-          tripProjectId: tripProjectId ?? null,
-          conversationId: savedTurn.conversationId,
-          userMessageId: savedTurn.userMessage.id,
+          tripProjectId: fencedCommand.tripProjectId,
+          conversationId: fencedCommand.conversationId,
+          userMessageId: fencedCommand.userMessageId,
           assistantMessageId: assistantMessage.id,
           purpose: aiAskInitialAnswerPurpose,
           provider: gatewayResult.provider,
@@ -326,58 +308,12 @@ async function streamAnswer({
           pricingSnapshot,
           providerRequestId: gatewayResult.requestMetadata.providerRequestId,
         });
-        return { id: assistantMessage.id, content: assistantContent.content, provenance, annotations: [] };
+        const completed = { id: assistantMessage.id, content: assistantContent.content, provenance, annotations: [] as AnswerAnnotation[] };
+        return { assistantMessageId: assistantMessage.id, result: { type: "done" as const, conversationId: fencedCommand.conversationId, userMessage: savedTurn.userMessage, assistantMessage: completed }, completed };
       });
-    } catch {
-      // Retry atomic assistant/provenance/usage persistence so the streamed answer is not lost to a transient failure.
-      try {
-        completed = await db.transaction(async (transaction) => {
-          const [assistantMessage] = await transaction
-            .insert(messages)
-            .values({ conversationId: savedTurn.conversationId, userId: session.userId, role: "assistant", content: assistantContent.content })
-            .returning({ id: messages.id });
 
-          await transaction.update(conversations).set({ updatedAt: new Date() }).where(eq(conversations.id, savedTurn.conversationId));
-
-          const provenance = await persistAssistantAnswerProvenance(transaction, {
-            userId: session.userId,
-            conversationId: savedTurn.conversationId,
-            userMessageId: savedTurn.userMessage.id,
-            assistantMessageId: assistantMessage.id,
-            sourceBundle,
-            promptSection: contextSection,
-          });
-
-          await writeAiUsageEvent(transaction, {
-            initiatedByUserId: session.userId,
-            executorSystem: "system-ai-orchestration",
-            tripProjectId: tripProjectId ?? null,
-            conversationId: savedTurn.conversationId,
-            userMessageId: savedTurn.userMessage.id,
-            assistantMessageId: assistantMessage.id,
-            purpose: aiAskInitialAnswerPurpose,
-            provider: gatewayResult.provider,
-            model: gatewayResult.model,
-            aiGatewayModelId: selectedModel.id,
-            promptVersion: aiAskInitialAnswerPromptVersion,
-            status: "success",
-            latencyMs: gatewayResult.latencyMs,
-            promptTokens: gatewayResult.usage.promptTokens,
-            completionTokens: gatewayResult.usage.completionTokens,
-            totalTokens: gatewayResult.usage.totalTokens,
-            cachedPromptTokens: gatewayResult.usage.cachedPromptTokens,
-            cacheWritePromptTokens: gatewayResult.usage.cacheWritePromptTokens,
-            pricingSnapshot,
-          providerRequestId: gatewayResult.requestMetadata.providerRequestId,
-        });
-        return { id: assistantMessage.id, content: assistantContent.content, provenance, annotations: [] };
-        });
-      } catch {
-        completed = null;
-      }
-    }
-
-    if (completed) {
+    if (!("discarded" in finalization)) {
+      const completed = finalization.completed;
       // The assistant/provenance/usage transaction is the durable success boundary.
       // A caller abort or optional follow-up failure after it commits cannot turn the
       // command into an aborted/no-answer result.
@@ -400,48 +336,9 @@ async function streamAnswer({
           console.error("Failed to persist answer annotations.", { assistantMessageId: completed.id, error });
         }
       }
-      // Story 7.4: proposal drafting runs after the assistant message and
-      // annotations are persisted and before `done`, only when a trip project is
-      // selected. On drafting/validation failure or timeout, `done` is sent
-      // without a proposal; the answer still completes.
-      const proposalSummary = tripProjectId
-        ? await draftAndPersistProposal({ session, tripProjectId, question, assistantMessageId: completed.id, abortSignal })
-        : undefined;
-      const result: StreamEvent = { type: "done", conversationId: savedTurn.conversationId, userMessage: savedTurn.userMessage, assistantMessage: completed, proposal: proposalSummary };
-      let prepared = false;
-      try {
-        // Publish the complete browser projection before allowing recovery. A retry
-        // can only promote and replay this exact durable event.
-        await prepareAiAskCommandTerminalResult(command.commandId, result, completed.id);
-        prepared = true;
-        await terminalizeAiAskCommand(command.commandId, "completed", result, completed.id);
-      } catch (terminalizationError) {
-        // The assistant/provenance/usage transaction committed. Do not reclassify
-        // that durable result as failed while Story 10.2 lacks atomic fencing.
-        console.error("AI Ask completed command terminalization could not be verified", {
-          commandId: command.commandId,
-          error: terminalizationError instanceof Error ? { name: terminalizationError.name, message: terminalizationError.message } : String(terminalizationError),
-        });
-        try {
-          await recoverCompletedAiAskCommand(command.commandId);
-        } catch (recoveryError) {
-          console.error("AI Ask completed command recovery could not be verified", {
-            commandId: command.commandId,
-            error: recoveryError instanceof Error ? { name: recoveryError.name, message: recoveryError.message } : String(recoveryError),
-          });
-        }
-        if (!prepared) throw terminalizationError;
-      }
-      sendEvent(controller, encoder, result);
+      sendEvent(controller, encoder, finalization.result as StreamEvent);
     } else {
-      const result: StreamEvent = {
-        type: "error",
-        conversationId: savedTurn.conversationId,
-        userMessage: savedTurn.userMessage,
-        errorMessage: "Mình đã tạo được câu trả lời nhưng chưa lưu được lúc này. Hãy thử lại sau.",
-      };
-      await terminalizeAiAskCommand(command.commandId, "failed", result);
-      sendEvent(controller, encoder, result);
+      sendEvent(controller, encoder, finalization.result as StreamEvent);
     }
   } catch (error) {
     console.error("AI Ask stream answer failed", {
@@ -529,107 +426,6 @@ function attachImageToFinalUserMessage(messagesForGateway: ReturnType<typeof bui
       ],
     };
   });
-}
-
-async function draftAndPersistProposal({
-  session,
-  tripProjectId,
-  question,
-  assistantMessageId,
-  abortSignal,
-}: {
-  session: AuthenticatedSession;
-  tripProjectId: string;
-  question: string;
-  assistantMessageId: string;
-  abortSignal: AbortSignal;
-}): Promise<ProposalDoneSummary | undefined> {
-  const proposalAbort = new AbortController();
-  const timeout = setTimeout(() => proposalAbort.abort(), proposalDraftTimeoutMs);
-  const onExternalAbort = () => proposalAbort.abort();
-  if (abortSignal.aborted) {
-    proposalAbort.abort();
-  } else {
-    abortSignal.addEventListener("abort", onExternalAbort, { once: true });
-  }
-
-  try {
-    let draft: UntrustedTripChangeProposalDraft;
-    try {
-      draft = await draftTripChangeProposal({ session, tripProjectId, question, abortSignal: proposalAbort.signal });
-    } catch (error) {
-      console.warn("Trip change proposal drafting failed or timed out", {
-        tripProjectId,
-        assistantMessageId,
-        error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
-      });
-      return undefined;
-    }
-
-    if (!draft.ok) {
-      return undefined;
-    }
-
-    await recordTripChangeProposalDraftUsage({ session, tripProjectId, draft });
-
-    // E7R2-F4: a past-date expires_at is dead-on-arrival (expire-on-read would
-    // flip it to expired on first view). Normalize and fail fast: drop the
-    // expiry (null) when the model omits it or emits an unparseable value, and
-    // drop the whole proposal when the model emits a past/present timestamp.
-    // persistAiTripChangeProposalDraft re-validates as the canonical seam, but
-    // failing here avoids the persist round-trip and keeps the route's
-    // never-break-the-answer contract intact (the answer still sends `done`).
-    const draftExpiresAt = draft.expiresAt ? new Date(draft.expiresAt) : null;
-    const expiresAtValid = draftExpiresAt instanceof Date
-      && !Number.isNaN(draftExpiresAt.getTime())
-      && draftExpiresAt.getTime() > Date.now();
-    if (draft.expiresAt && !expiresAtValid) {
-      return undefined;
-    }
-
-    const persistResult = await persistAiTripChangeProposalDraft({
-      tripProjectId,
-      expectedAggregateVersion: draft.expectedAggregateVersion,
-      expectedItemVersions: draft.expectedItemVersions,
-      operations: draft.operations,
-      rationale: draft.rationale,
-      alternatives: draft.alternatives,
-      orderingPreconditions: draft.orderingPreconditions,
-      expiresAt: expiresAtValid ? draftExpiresAt : null,
-      sourceAssistantMessageId: assistantMessageId,
-    });
-
-    if (!persistResult.success) {
-      return undefined;
-    }
-
-    const proposal = persistResult.proposal;
-    return {
-      proposalId: proposal.id,
-      rationale: proposal.rationale,
-      affectedItems: proposal.affectedItems,
-      beforeAfter: proposal.beforeAfter,
-      alternatives: proposal.alternatives,
-      hasAlternatives: proposal.hasAlternatives,
-      expiresAt: proposal.expiresAt,
-      status: proposal.status,
-    };
-  } catch (error) {
-    // Open Decision 1 / AC1+AC3: never let proposal drafting break the answer.
-    // An unexpected throw from recordTripChangeProposalDraftUsage (getDb() outside
-    // its inner try/catch) or persistAiTripChangeProposalDraft must not propagate
-    // to the route's outer catch, which would send an error StreamEvent after the
-    // answer text was already streamed and the assistant message persisted.
-    console.warn("Trip change proposal drafting failed unexpectedly", {
-      tripProjectId,
-      assistantMessageId,
-      error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
-    });
-    return undefined;
-  } finally {
-    clearTimeout(timeout);
-    abortSignal.removeEventListener("abort", onExternalAbort);
-  }
 }
 
 function sendEvent(controller: ReadableStreamDefaultController<Uint8Array>, encoder: TextEncoder, event: StreamEvent) {

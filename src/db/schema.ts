@@ -28,7 +28,7 @@ export type MessageRole = (typeof messageRoleValues)[number];
 export const aiUsageStatusValues = ["success", "failure"] as const;
 export type AiUsageStatus = (typeof aiUsageStatusValues)[number];
 
-export const aiAskCommandStatusValues = ["pending", "completed", "failed", "aborted"] as const;
+export const aiAskCommandStatusValues = ["pending", "completed", "failed", "aborted", "discarded"] as const;
 export type AiAskCommandStatus = (typeof aiAskCommandStatusValues)[number];
 
 export const aiGatewayModelPurposeValues = ["ai_ask_initial_answer", "extraction", "embeddings", "evaluation"] as const;
@@ -842,6 +842,7 @@ export const conversations = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     tripProjectId: text("trip_project_id"),
+    lifecycleVersion: integer("lifecycle_version").default(1).notNull(),
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
   },
@@ -857,6 +858,7 @@ export const conversations = pgTable(
     index("conversations_user_id_trip_project_updated_at_idx").on(conversation.userId, conversation.tripProjectId, conversation.updatedAt),
     index("conversations_user_id_updated_at_idx").on(conversation.userId, conversation.updatedAt),
     index("conversations_user_id_created_at_idx").on(conversation.userId, conversation.createdAt),
+    check("conversations_lifecycle_version_check", sql`${conversation.lifecycleVersion} >= 1`),
   ],
 );
 
@@ -956,6 +958,8 @@ export const aiAskCommands = pgTable(
     status: text("status").$type<AiAskCommandStatus>().default("pending").notNull(),
     conversationId: text("conversation_id"),
     tripProjectId: text("trip_project_id"),
+    conversationLifecycleVersion: integer("conversation_lifecycle_version"),
+    tripProjectAggregateVersion: integer("trip_project_aggregate_version"),
     userMessageId: text("user_message_id"),
     assistantMessageId: text("assistant_message_id"),
     terminalResult: jsonb("terminal_result").$type<Record<string, unknown>>(),
@@ -969,32 +973,35 @@ export const aiAskCommands = pgTable(
       columns: [command.conversationId, command.userId],
       foreignColumns: [conversations.id, conversations.userId],
       name: "ai_ask_commands_conversation_owner_fk",
-    }).onDelete("cascade"),
+    }).onDelete("set null"),
     foreignKey({
       columns: [command.tripProjectId, command.userId],
       foreignColumns: [tripProjects.id, tripProjects.userId],
       name: "ai_ask_commands_trip_project_owner_fk",
-    }).onDelete("cascade"),
+    }).onDelete("set null"),
     foreignKey({
       columns: [command.userMessageId, command.conversationId, command.userId],
       foreignColumns: [messages.id, messages.conversationId, messages.userId],
       name: "ai_ask_commands_user_message_conversation_owner_fk",
-    }).onDelete("cascade"),
+    }).onDelete("set null"),
     foreignKey({
       columns: [command.assistantMessageId, command.conversationId, command.userId],
       foreignColumns: [messages.id, messages.conversationId, messages.userId],
       name: "ai_ask_commands_assistant_message_conversation_owner_fk",
-    }).onDelete("cascade"),
+    }).onDelete("set null"),
     uniqueIndex("ai_ask_commands_owner_scope_key_idx").on(command.userId, command.scopeKind, command.scopeId, command.idempotencyKey),
     uniqueIndex("ai_ask_commands_new_conversation_key_idx").on(command.userId, command.idempotencyKey).where(sql`${command.scopeKind} = 'new_conversation'`),
     index("ai_ask_commands_owner_conversation_idx").on(command.userId, command.conversationId),
+    index("ai_ask_commands_owner_fence_finalization_idx").on(command.userId, command.tripProjectId, command.conversationId, command.status),
     index("ai_ask_commands_expiry_idx").on(command.expiresAt),
     check("ai_ask_commands_scope_kind_check", sql`${command.scopeKind} in ('conversation', 'trip_project', 'new_conversation')`),
     check("ai_ask_commands_key_check", sql`${command.idempotencyKey} ~ '^[A-Za-z0-9_-]{16,128}$'`),
     check("ai_ask_commands_digest_check", sql`${command.requestDigest} ~ '^[a-f0-9]{64}$' and ${command.selectedScopeDigest} ~ '^[a-f0-9]{64}$'`),
-    check("ai_ask_commands_status_check", sql`${command.status} in ('pending', 'completed', 'failed', 'aborted')`),
+    check("ai_ask_commands_status_check", sql`${command.status} in ('pending', 'completed', 'failed', 'aborted', 'discarded')`),
     check("ai_ask_commands_question_check", sql`char_length(${command.normalizedQuestion}) between 1 and 2000`),
-    check("ai_ask_commands_terminal_shape_check", sql`(${command.status} = 'pending' and ${command.terminalAt} is null and (${command.terminalResult} is null or ${command.assistantMessageId} is not null)) or (${command.status} <> 'pending' and ${command.terminalResult} is not null and ${command.terminalAt} is not null)`),
+    check("ai_ask_commands_terminal_shape_check", sql`(${command.status} = 'pending' and ${command.terminalAt} is null and ${command.terminalResult} is null) or (${command.status} in ('completed', 'failed', 'aborted') and ${command.terminalResult} is not null and ${command.terminalAt} is not null) or (${command.status} = 'discarded' and ${command.terminalResult} is not null and ${command.terminalAt} is not null and ${command.assistantMessageId} is null)`),
+    check("ai_ask_commands_fence_shape_check", sql`${command.conversationId} is null or ${command.conversationLifecycleVersion} >= 1`),
+    check("ai_ask_commands_project_fence_shape_check", sql`${command.tripProjectId} is null or ${command.tripProjectAggregateVersion} >= 1`),
   ],
 );
 
