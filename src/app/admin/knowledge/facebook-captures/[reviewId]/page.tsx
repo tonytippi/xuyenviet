@@ -34,18 +34,11 @@ const ingestionStageLabels = {
   failed: "Xử lý thất bại",
 } as const;
 
-const ingestionReasonDetails: Record<string, string> = {
-  candidate_invalid_structure: "AI không trả về mục trích xuất theo cấu trúc được yêu cầu. Kiểm tra lại văn bản thô; thu thập lại nếu nội dung thiếu hoặc sai.",
-  candidate_missing_required_fields: "AI không xác định đủ loại thông tin, tiêu đề, tóm tắt, địa điểm/cung đường hoặc trích dẫn làm bằng chứng. Kiểm tra văn bản thô; thu thập lại nếu thiếu ngữ cảnh địa điểm hoặc hành trình.",
-  candidate_sensitive_content: "Mục trích xuất có thông tin nhạy cảm nên bị loại theo chính sách. Không xuất bản nội dung này.",
-  candidate_evidence_mismatch: "Bằng chứng AI trích xuất không khớp chính xác với văn bản đã thu thập. Thu thập lại nếu văn bản bị mất, sai hoặc không đầy đủ.",
-  candidate_insufficient_travel_context: "Nội dung không đủ ngữ cảnh du lịch thực tế, hoặc mang tính quảng cáo, câu hỏi hay cảm nhận chung. Không cần thao tác thêm trừ khi văn bản đã thu thập bị sai.",
-};
-
 const candidateReasonDetails: Record<string, string> = {
   candidate_invalid_structure: "AI trả mục trích xuất không theo cấu trúc bắt buộc, ví dụ loại thông tin không thuộc danh sách chuẩn hoặc thiếu bằng chứng.",
   candidate_missing_required_fields: "AI thiếu trường bắt buộc: loại thông tin hợp lệ, tiêu đề, tóm tắt, địa điểm/cung đường, cờ cần cập nhật hoặc trích dẫn làm bằng chứng.",
   candidate_sensitive_content: "Mục trích xuất hoặc trích dẫn có số điện thoại/email nên bị loại để không lưu thông tin liên hệ vào kho tri thức.",
+  candidate_unsafe_raw_overlap: "Một số chi tiết trong mục trích xuất trùng quá nhiều với nội dung bài viết gốc. Hệ thống giữ lại mục này để tránh lưu hoặc xuất bản nguyên văn nội dung chưa được chuẩn hóa.",
   candidate_evidence_mismatch: "Mục trích xuất được hiển thị để vận hành kiểm tra, nhưng trích dẫn AI trả về không xuất hiện nguyên văn trong nội dung đã thu thập sau khi che dữ liệu nhạy cảm. Hệ thống không tạo bằng chứng, không gửi mục sang bước đánh giá và không xuất bản.",
   candidate_insufficient_travel_context: "Mục trích xuất không qua bước kiểm tra ngữ cảnh du lịch xác định: nội dung có thể là quảng cáo, câu hỏi, nhận xét quá chung chung hoặc thiếu chi tiết du lịch có thể áp dụng.",
   invalid_discovery_candidate: "Mục trích xuất bị loại ở bước phát hiện cũ trước khi hệ thống lưu lý do chi tiết. Xem phản hồi AI thô của lần xử lý hiện tại hoặc chạy lại để có chẩn đoán cụ thể.",
@@ -57,6 +50,11 @@ const candidateReasonDetails: Record<string, string> = {
   stale_relation_target: "Thẻ tri thức đích đã thay đổi hoặc không còn phù hợp trong lúc hệ thống xử lý. Mục trích xuất được giữ lại để tránh gắn bằng chứng sai.",
   attach_condition_mismatch: "Điều kiện của mục trích xuất không khớp thẻ tri thức đích nên hệ thống không gắn bằng chứng vào thẻ đó.",
   conflict_condition_mismatch: "Điều kiện của mục trích xuất không khớp thẻ tri thức xung đột nên hệ thống không tạo xung đột trên thẻ đó.",
+};
+
+const candidateReasonLabels: Record<string, string> = {
+  candidate_unsafe_raw_overlap: "Nội dung trùng bài viết gốc",
+  judge_evidence_not_grounded: "Không tìm thấy bằng chứng trong bài viết",
 };
 
 const candidateStageLabels: Record<string, string> = {
@@ -181,16 +179,14 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
       )}
 
        <section className="mt-6 rounded-2xl border border-[#8fb59f] bg-[#edf7ef] p-4 text-sm leading-6 text-[#17342c]">
-          <p className="font-semibold">Trạng thái chính: xử lý tự động</p>
+          <p className="font-semibold">Trạng thái xử lý</p>
         {review.ingestionJob ? (
           <>
-            <p className="mt-1">{ingestionStageLabels[review.ingestionJob.stage]}. Tiến trình xử lý tự động; không cần phê duyệt hay trích xuất từ màn hình này.</p>
-            <p className="mt-1 text-[#4f625a]">Mã tác vụ {review.ingestionJob.id} · lần thử {review.ingestionJob.attemptCount}/{review.ingestionJob.maxAttempts} · cập nhật {formatDate(review.ingestionJob.updatedAt)}</p>
-            {review.ingestionJob.protocolVersion === 2 ? <p className="mt-1 text-[#4f625a]">Nhiều mục phiên bản 2: {review.ingestionJob.terminalCandidateCount}/{review.ingestionJob.discoveredCandidateCount} mục đã hoàn tất · lỗi {review.ingestionJob.failedCandidateCount}.</p> : <p className="mt-1 text-[#4f625a]">Tác vụ cũ phiên bản 1: kết quả lịch sử theo một mục, không chuyển đổi sang phiên bản 2.</p>}
-            {review.ingestionJob.lastErrorCode ? <p className="mt-1 text-[#9b2f29]">Lý do: {ingestionReasonDetails[review.ingestionJob.lastErrorCode] ?? `Mã lỗi an toàn: ${review.ingestionJob.lastErrorCode}`}</p> : null}
+            <p className="mt-1 font-medium">{ingestionStageLabels[review.ingestionJob.stage]}</p>
+            {review.ingestionJob.protocolVersion === 2 ? <p className="mt-1 text-[#4f625a]">{review.ingestionJob.terminalCandidateCount}/{review.ingestionJob.discoveredCandidateCount} mục đã xử lý · {review.ingestionJob.failedCandidateCount} lỗi · cập nhật {formatDate(review.ingestionJob.updatedAt)}</p> : <p className="mt-1 text-[#4f625a]">Cập nhật {formatDate(review.ingestionJob.updatedAt)}</p>}
           </>
-          ) : <p className="mt-1">Chưa có tác vụ xử lý chính cho phiên bản nội dung này. Nội dung {review.rawText?.trim() ? "đang chờ tạo tác vụ" : "đang chờ thu thập lại"}, chưa có kết quả xử lý.</p>}
-      </section>
+          ) : <p className="mt-1">{review.rawText?.trim() ? "Đang chờ xử lý" : "Đang chờ thu thập lại"}</p>}
+       </section>
 
       {v2IngestionJob ? (
         <section className="mt-6 rounded-2xl border border-[#d8c9ad] bg-white/75 p-4 text-sm text-[#17342c]">
@@ -201,12 +197,12 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
             <FilterLink active={!candidateStage && !candidateReason} href={`/admin/knowledge/facebook-captures/${encodeURIComponent(reviewId)}`}>Tất cả ({v2IngestionJob.candidates.length})</FilterLink>
             {candidateStages.map((stage) => <FilterLink active={candidateStage === stage && !candidateReason} href={candidateFilterHref(reviewId, stage)} key={stage}>{candidateStageLabels[stage] ?? stage} ({v2IngestionJob.candidates.filter((candidate) => candidate.stage === stage).length})</FilterLink>)}
           </div>
-          {candidateReasons.length > 0 ? <div className="mt-2 flex flex-wrap gap-2">{candidateReasons.map((reason) => <FilterLink active={candidateReason === reason} href={candidateFilterHref(reviewId, undefined, reason)} key={reason}>{reason} ({v2IngestionJob.candidates.filter((candidate) => candidate.outcomeReasonCode === reason).length})</FilterLink>)}</div> : null}
+          {candidateReasons.length > 0 ? <div className="mt-2 flex flex-wrap gap-2">{candidateReasons.map((reason) => <FilterLink active={candidateReason === reason} href={candidateFilterHref(reviewId, undefined, reason)} key={reason}>{candidateReasonLabels[reason] ?? reason} ({v2IngestionJob.candidates.filter((candidate) => candidate.outcomeReasonCode === reason).length})</FilterLink>)}</div> : null}
           <div className="mt-3 grid gap-2">
             {candidates.length === 0 ? <p className="rounded-xl bg-[#fbf7ed] p-3 text-[#4f625a]">Không có mục nào khớp bộ lọc.</p> : candidates.map((candidate) => <div className="rounded-xl bg-[#fbf7ed] p-3" key={candidate.id}>
               <div className="flex flex-wrap items-center gap-2"><p className="font-semibold">{candidate.title}</p><span className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${candidateStageClasses[candidate.stage] ?? candidateStageClasses.queued}`}>{candidateStageLabels[candidate.stage] ?? candidate.stage}</span></div>
                <p className="mt-1 text-[#4f625a]">{knowledgeCardTypeLabels[candidate.type] ?? candidate.type} · {candidate.locationName ?? candidate.routeSegment ?? "Không rõ phạm vi"}</p>
-              {candidate.outcomeReasonCode ? <p className="mt-1 font-medium text-[#8c4f13]">Lý do: {candidate.outcomeReasonCode}</p> : null}
+              {candidate.outcomeReasonCode ? <p className="mt-1 font-medium text-[#8c4f13]">Lý do: {candidateReasonLabels[candidate.outcomeReasonCode] ?? candidate.outcomeReasonCode}</p> : null}
               <p className="mt-2 leading-6 text-[#4f625a]">{candidate.summary}</p>
               {candidate.conditions.length > 0 ? <p className="mt-2 text-[#4f625a]">Điều kiện: {candidate.conditions.join(" · ")}</p> : null}
               {candidate.judgmentSummary ? <p className="mt-2 text-[#4f625a]">Kết quả đánh giá: {candidate.judgmentSummary}</p> : null}

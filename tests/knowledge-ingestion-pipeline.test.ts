@@ -122,12 +122,13 @@ describe("knowledge ingestion pipeline", () => {
     ]);
   });
 
-  test("v2 permits source-grounded ordered stop labels but rejects copied prose details", async () => {
-    const rawText = "Điểm dừng ven biển dài này là một tên địa danh hợp lệ cho lịch trình. Mẹo nguyên văn dài này không được sao chép sang thẻ tri thức.";
+  test("v2 rejects substantial copied prose details", async () => {
+    const copiedTip = "Mẹo nguyên văn dài này không được sao chép sang thẻ tri thức vì có thể tái tạo nội dung trải nghiệm riêng của tác giả. ".repeat(2);
+    const rawText = `Điểm dừng ven biển dài này là một tên địa danh hợp lệ cho lịch trình. ${copiedTip}`;
     const capture = await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText, metadata: { kind: "submitted" } });
     vi.mocked(fetch)
       .mockResolvedValueOnce(new Response(JSON.stringify({ model: "extract-model", choices: [{ message: { content: JSON.stringify({ candidates: [
-        candidate(rawText, { type: "route_note", title: "Tuyến ven biển", location_name: null, route_segment: "Tuyến ven biển", practical_details: { ordered_stops: ["Điểm dừng ven biển dài này"], tips: ["Mẹo nguyên văn dài này không được sao chép sang thẻ tri thức."] }, tags: [] }),
+        candidate(rawText, { type: "route_note", title: "Tuyến ven biển", location_name: null, route_segment: "Tuyến ven biển", practical_details: { ordered_stops: ["Điểm dừng ven biển dài này"], tips: [copiedTip] }, tags: [] }),
       ] }) } }] }), { status: 200 }))
       .mockResolvedValueOnce(batchGroundingResponse([]));
     const claim = await claimNextKnowledgeIngestionJob({ workerId: "v2-stop-overlap", now: new Date(Date.now() + 1_000) }, testDb);
@@ -146,6 +147,20 @@ describe("knowledge ingestion pipeline", () => {
     if (!claim) throw new Error("expected discovery claim");
     await runKnowledgeIngestionPipeline(claim, testDb);
     await expect(testDb.select({ stage: knowledgeIngestionCandidates.stage, practicalDetails: knowledgeIngestionCandidates.practicalDetails }).from(knowledgeIngestionCandidates).where(eq(knowledgeIngestionCandidates.captureVersionId, capture.id))).resolves.toEqual([{ stage: "relating", practicalDetails: { ordered_stops: ["Điểm dừng ven biển dài này"] } }]);
+  });
+
+  test("v2 retains a short source-grounded practical detail", async () => {
+    const shortTip = "Dừng lại ban ngày để ngắm cảnh.";
+    const rawText = `Đèo Hải Vân: ${shortTip}`;
+    const capture = await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText, metadata: { kind: "submitted" } });
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ model: "extract-model", choices: [{ message: { content: JSON.stringify({ candidates: [candidate(rawText, { practical_details: { tips: [shortTip] } })] }) } }] }), { status: 200 }))
+      .mockResolvedValueOnce(batchGroundingResponse([{ candidateId: 0, quote: shortTip }]));
+    const claim = await claimNextKnowledgeIngestionJob({ workerId: "v2-short-overlap", now: new Date(Date.now() + 1_000) }, testDb);
+    if (!claim) throw new Error("expected discovery claim");
+    await runKnowledgeIngestionPipeline(claim, testDb);
+
+    await expect(testDb.select({ stage: knowledgeIngestionCandidates.stage, practicalDetails: knowledgeIngestionCandidates.practicalDetails }).from(knowledgeIngestionCandidates).where(eq(knowledgeIngestionCandidates.captureVersionId, capture.id))).resolves.toEqual([{ stage: "relating", practicalDetails: { tips: [shortTip] } }]);
   });
 
   test.each([

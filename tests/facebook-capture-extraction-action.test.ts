@@ -213,7 +213,7 @@ describe("Facebook capture extraction action", () => {
     });
     const html = renderToStaticMarkup(element);
 
-    expect(html).toContain("Trạng thái chính: canonical ingestion");
+    expect(html).toContain("Trạng thái xử lý");
     expect(html).not.toContain("Không thể hoàn tất cập nhật trạng thái sau khi trích xuất");
   });
 
@@ -229,7 +229,7 @@ describe("Facebook capture extraction action", () => {
     });
     const html = renderToStaticMarkup(element);
 
-    expect(html).toContain("Trạng thái chính: canonical ingestion");
+    expect(html).toContain("Trạng thái xử lý");
     expect(html).not.toContain("Trạng thái review có thể đã thay đổi");
     expect(html).not.toContain("Trạng thái đã chuyển sang Trích xuất lỗi");
   });

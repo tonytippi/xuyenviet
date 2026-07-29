@@ -5,6 +5,7 @@ const maxDetailArrayItems = 10;
 const maxOrderedStops = 40;
 const maxTags = 12;
 const maxTagLength = 40;
+const substantialRawOverlapLength = 160;
 
 export type PracticalDetails = Record<string, string | string[]>;
 
@@ -41,7 +42,7 @@ export function getUnsafeIngestionPracticalFieldReason(input: { title: string; l
   const detailValues = Object.entries(input.practicalDetails).flatMap(([key, value]) => (Array.isArray(value) ? value : [value]).map((value) => ({ key, value })));
   const values = [...strictValues, ...detailValues.map((detail) => detail.value)];
   if (values.some((value) => containsSensitivePattern(normalizeForOverlap(value)))) return "candidate_sensitive_content" as const;
-  if (strictValues.some((value) => hasRawOverlap(value, rawText)) || detailValues.some((detail) => detail.key !== "ordered_stops" && hasRawOverlap(detail.value, rawText))) return "candidate_unsafe_raw_overlap" as const;
+  if (strictValues.some((value) => hasSubstantialRawOverlap(value, rawText)) || detailValues.some((detail) => detail.key !== "ordered_stops" && hasSubstantialRawOverlap(detail.value, rawText))) return "candidate_unsafe_raw_overlap" as const;
   return null;
 }
 
@@ -98,9 +99,9 @@ function containsUnsafeRawOverlap(values: Array<string | null>, rawText: string,
   });
 }
 
-function hasRawOverlap(value: string, rawText: string) {
+function hasSubstantialRawOverlap(value: string, rawText: string) {
   const normalizedValue = normalizeForOverlap(value);
-  return normalizedValue.length >= 24 && normalizeForOverlap(rawText).includes(normalizedValue);
+  return normalizedValue.length >= substantialRawOverlapLength && normalizeForOverlap(rawText).includes(normalizedValue);
 }
 
 function isPublicContactDetailKey(key: string) { return /contact|phone|tel|hotline|email|booking|reservation|zalo/i.test(key); }

@@ -250,23 +250,25 @@ describe("admin Facebook capture review helpers", () => {
     expect(html).toContain("Re-run current pipeline");
   });
 
-  test("detail shows color-coded candidate statuses and specific reason filters", async () => {
+  test("detail shows color-coded candidate statuses and Vietnamese reason labels", async () => {
     authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
     const review = await createCapturedFacebookSource({ id: "candidate-status", rawText: "Đèo Hải Vân có điểm dừng an toàn ban ngày." });
     await testDb.insert(knowledgeIngestionJobs).values({ id: "candidate-status-job", sourceId: review.sourceId, captureVersionId: review.captureVersionId!, submittedByUserId: "operator-user", submittedByEmail: "operator-user@example.com", protocolVersion: 2, stage: "queued", nextRunAt: new Date() });
     await testDb.insert(knowledgeIngestionCandidates).values([
       { ingestionJobId: "candidate-status-job", sourceId: review.sourceId, captureVersionId: review.captureVersionId!, fingerprint: "b".repeat(64), type: "place", title: "Đã xuất bản", summary: "Candidate active.", locationName: "Đèo Hải Vân", conditions: [], freshnessSensitive: false, spanStart: 0, spanEnd: 1, extractionPromptVersion: "test", stage: "published", stageVersion: 2 },
-      { ingestionJobId: "candidate-status-job", sourceId: review.sourceId, captureVersionId: review.captureVersionId!, fingerprint: "c".repeat(64), type: "place", title: "Judge loại", summary: "Candidate suppressed.", locationName: "Đèo Hải Vân", conditions: [], freshnessSensitive: false, spanStart: 0, spanEnd: 1, extractionPromptVersion: "test", stage: "suppressed", stageVersion: 2, outcomeReasonCode: "judge_suppressed", judgeDecision: "suppress", judgmentSummary: "Không phù hợp để xuất bản." },
+      { ingestionJobId: "candidate-status-job", sourceId: review.sourceId, captureVersionId: review.captureVersionId!, fingerprint: "c".repeat(64), type: "place", title: "Không có bằng chứng", summary: "Candidate suppressed.", locationName: "Đèo Hải Vân", conditions: [], freshnessSensitive: false, spanStart: 0, spanEnd: 1, extractionPromptVersion: "test", stage: "suppressed", stageVersion: 2, outcomeReasonCode: "judge_evidence_not_grounded" },
+      { ingestionJobId: "candidate-status-job", sourceId: review.sourceId, captureVersionId: review.captureVersionId!, fingerprint: "d".repeat(64), type: "place", title: "Trùng bài viết", summary: "Candidate suppressed.", locationName: "Đèo Hải Vân", conditions: [], freshnessSensitive: false, spanStart: 0, spanEnd: 1, extractionPromptVersion: "test", stage: "suppressed", stageVersion: 2, outcomeReasonCode: "candidate_unsafe_raw_overlap" },
     ]);
 
     const { default: FacebookCaptureReviewDetailPage } = await import("@/app/admin/knowledge/facebook-captures/[reviewId]/page");
-    const html = renderToStaticMarkup(await FacebookCaptureReviewDetailPage({ params: Promise.resolve({ reviewId: review.id }), searchParams: Promise.resolve({ candidateReason: "judge_suppressed" }) }));
+    const html = renderToStaticMarkup(await FacebookCaptureReviewDetailPage({ params: Promise.resolve({ reviewId: review.id }), searchParams: Promise.resolve({ candidateReason: "judge_evidence_not_grounded" }) }));
 
     expect(html).toContain("Đã xuất bản");
     expect(html).toContain("Không xuất bản");
-    expect(html).toContain("judge_suppressed");
-    expect(html).toContain("Bộ đánh giá đã xác nhận bằng chứng");
-    expect(html).toContain("Judge loại");
+    expect(html).toContain("Không tìm thấy bằng chứng trong bài viết");
+    expect(html).toContain("Bộ đánh giá không tìm được đoạn nguyên văn liên tục");
+    expect(html).toContain("Nội dung trùng bài viết gốc");
+    expect(html).toContain("Không có bằng chứng");
     expect(html).not.toContain("Candidate active.");
   });
 
@@ -609,7 +611,7 @@ describe("admin Facebook capture review helpers", () => {
     expect(html).not.toContain("unsafe-provider-token");
   });
 
-  test("detail page renders canonical ingestion status and recapture for needs-review captures", async () => {
+  test("detail page renders a concise processing status and recapture for needs-review captures", async () => {
     authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
     const review = await createCapturedFacebookSource({ id: "extract-action", rawText: "Readable captured Facebook text." });
 
@@ -617,8 +619,8 @@ describe("admin Facebook capture review helpers", () => {
     const element = await FacebookCaptureReviewDetailPage({ params: Promise.resolve({ reviewId: review.id }) });
     const html = renderToStaticMarkup(element);
 
-    expect(html).toContain("Trạng thái chính: canonical ingestion");
-    expect(html).toContain("Chưa có canonical job cho capture version này");
+    expect(html).toContain("Trạng thái xử lý");
+    expect(html).toContain("Đang chờ xử lý");
     expect(html).not.toContain("Trích xuất bản nháp");
     expect(html).toContain(`name="reviewId" value="${review.id}"`);
     expect(html).not.toContain("Trích xuất và phê duyệt tất cả");
