@@ -1702,6 +1702,40 @@ describe("answer context assembly", () => {
     expect(JSON.parse(rendered.tripContext.serialization).primaryConversationId).toHaveLength(160);
   });
 
+  test.each([
+    { name: "compact", count: 11, valueLength: 0, expectedCount: 10, factCount: 20, essential: false },
+    { name: "minimal", count: 2, valueLength: 20, expectedCount: 1, factCount: 30, essential: false },
+    { name: "essential", count: 2, valueLength: 20, expectedCount: 0, factCount: 0, essential: true },
+  ])("persists only %s rendered conflicts in the exact snapshot ledger", async ({ count, valueLength, expectedCount, factCount, essential }) => {
+    const { renderSourceBundlePromptSection } = await import("@/features/retrieval/source-bundle");
+    const conflicts = Array.from({ length: count }, (_, index) => ({
+      field: "destination" as const,
+      canonicalValue: `canonical-${index}-${"c".repeat(valueLength)}`,
+      lowerPriorityValue: `lower-${index}-${"l".repeat(valueLength)}`,
+      projectValue: `canonical-${index}-${"c".repeat(valueLength)}`,
+      conversationValue: `lower-${index}-${"l".repeat(valueLength)}`,
+      source: "conversation_chat" as const,
+      priority: "lower" as const,
+      material: true as const,
+    }));
+    const canonicalFacts = conflicts.map((conflict) => ({ field: conflict.field, value: conflict.canonicalValue, source: "trip_project" as const }));
+    const additionalFacts = Array.from({ length: factCount }, (_, index) => ({ field: "notes" as const, value: `fact-${index}-${"f".repeat(260)}`, source: "trip_project" as const }));
+    const sourceBundle = createSourceBundle({
+      chatTripContext: { tripProjectFacts: [...canonicalFacts, ...additionalFacts], chatFacts: [], conflicts },
+      tripAnswerContext: { version: 1, hasProjectScope: true, tripProjectId: "project", aggregateVersion: 1, primaryConversationId: "conversation", anchors: [...canonicalFacts, ...additionalFacts], planItems: [], constraints: null, currentConversationFacts: [], conflicts },
+      web: essential ? [] : Array.from({ length: 5 }, (_, index) => ({ query: "Huế", title: `Web ${index}`, url: `https://example.com/${index}`, snippet: "web ".repeat(1_000), provider: "tavily", providerScore: 0.8, checkedAt: new Date("2026-07-10T00:00:00.000Z"), sourceType: "official" as const, confidence: "unverified" as const, triggerReason: "no_active_knowledge" as const, rank: index + 1 })),
+      ...(essential ? { retrievalDecision: { ...createSourceBundle().retrievalDecision, webSearchTriggered: true, webSearchTriggerReasons: ["no_active_knowledge".repeat(600) as "no_active_knowledge"] } } : {}),
+    });
+    const rendered = renderSourceBundlePromptSection(sourceBundle);
+    const serialized = JSON.parse(rendered.tripContext.serialization);
+
+    expect(rendered.tripContext.conflicts).toHaveLength(expectedCount);
+    expect(serialized.conflicts).toEqual(rendered.tripContext.conflicts);
+    expect(rendered.section.match(/field="destination"/g) ?? []).toHaveLength(expectedCount);
+    expect(rendered.tripContext.promptDigest).toHaveLength(64);
+    if (essential) expect(rendered.section).not.toContain("Mâu thuẫn giữa chat và dự án");
+  });
+
   test("knowledge provenance marks only cards rendered before the knowledge cap as prompt-used", async () => {
     await createTestUser("user-1");
     const { conversation, message } = await createConversationWithUserMessage({ userId: "user-1" });

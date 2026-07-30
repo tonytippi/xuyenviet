@@ -249,3 +249,12 @@ gpt-5.6-terra-review
 - `selectAllowlistedContext` retains an allowlisted typed conflict when its canonical field/value is selected, even though ordinary fact selection correctly excludes the lower-priority conversational value. That lower-priority value is rendered only by the bounded conflict section.
 - Added execution-level PostgreSQL coverage proving the final prompt contains the typed conflict, excludes its lower-priority value from ordinary chat facts, and persists the exact rendered conflicts and prompt digest in the immutable snapshot.
 - Story status remains done; Epic 11 remains in-progress pending rerun of the Epic completion review.
+
+### Final Epic 11 Ledger Repair
+
+- Date: 2026-07-30
+- Scope: repaired only the Story 11.1/11.5 compacted typed-conflict ledger seam; no further review was run.
+- Every render variant now carries the exact conflict list supplied to `appendConflictSection` into immutable snapshot evidence. Normal rendering persists all rendered conflicts, compact rendering persists its first 10, minimal rendering persists its first 1, and essential rendering persists none. Snapshot serialization and prompt digest correspond to that exact final section.
+- Added PostgreSQL-backed regressions for compact (`>10` conflicts), minimal (`>1` conflict), and essential (no conflict section) rendering. Each asserts final-section conflict count, snapshot conflicts, serialized conflicts, and SHA-256 prompt-digest correspondence.
+- Verification: serial PostgreSQL suites passed: `tests/answer-context.test.ts tests/trip-projects.test.ts tests/trip-change-proposals.test.ts` (221), `tests/ai-ask-commands.test.ts tests/ai-ask-stream-execution.test.ts tests/domain-outbox.test.ts tests/chat-trip-context-extraction.test.ts` (89), and `tests/ai-ask-api-adapter.test.ts tests/ai-ask-bff-api.integration.test.ts` (25), 335 total. `pnpm typecheck`, `pnpm build`, and `git diff --check` passed. `pnpm lint` had 0 errors and 5 pre-existing unrelated warnings.
+- Story status remains done. Epic 11 is synchronized to done by user direction.
