@@ -1,13 +1,12 @@
 import "server-only";
 
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
-import { listOwnedConversationSummaries, type OwnedConversationSummary } from "@xuyenviet/domain";
+import { listOwnedConversationSummaries, resolvePlanningAnnotationCapabilities, sanitizeStoredPlanningAnnotations, type OwnedConversationSummary } from "@xuyenviet/domain";
 
 import { getDb } from "@/db/client";
 import { aiUsageEvents, answerUsefulnessFeedback, assistantResponseProvenance, chatContext, conversations, messageImageAttachments, messages, tripChangeProposals, tripProjects } from "@/db/schema";
 import { recordAuditEvent } from "@/features/audit/events";
 import { toUserAuditActor } from "@/features/audit/actors";
-import { isTripChangeProposalActionAnnotation, sanitizeStoredAnswerAnnotations } from "@/features/ai/answer-annotations";
 import { formatAssistantMessageProvenance } from "@/features/retrieval/provenance";
 import { getAuthenticatedSession } from "@/server/auth";
 import { discardAiAskCommandsForDeletedConversations } from "@/features/ai/ai-ask-commands";
@@ -99,7 +98,7 @@ export async function getOwnedConversation(conversationId: string, establishedSe
   const feedbackByMessageId = new Map(feedbackRows.map((row) => [row.assistantMessageId, { rating: row.rating, comment: row.comment, updatedAt: row.updatedAt }]));
   const messagesWithAnnotations = await Promise.all(conversationMessages.map(async (message) => {
     const provenance = message.role === "assistant" ? provenanceByMessageId.get(message.id) ?? [] : [];
-    const storedAnnotations = message.role === "assistant" ? sanitizeStoredAnswerAnnotations({ answerText: message.content, annotations: message.answerAnnotations, provenance }) : [];
+    const storedAnnotations = message.role === "assistant" ? sanitizeStoredPlanningAnnotations({ answerText: message.content, annotations: message.answerAnnotations, provenance }) : [];
     const annotations = conversation.tripProjectId
       ? await resolveAnnotationCapabilities({ conversationId: conversation.id, tripProjectId: conversation.tripProjectId, userId: session.userId, assistantMessageId: message.id, annotations: storedAnnotations })
       : storedAnnotations;
@@ -138,18 +137,15 @@ export async function getOwnedConversationShell(conversationId: string): Promise
   } as unknown as Awaited<ReturnType<typeof getOwnedConversation>>;
 }
 
-async function resolveAnnotationCapabilities(input: { conversationId: string; tripProjectId: string; userId: string; assistantMessageId: string; annotations: ReturnType<typeof sanitizeStoredAnswerAnnotations> }) {
-  const actionAnnotations = input.annotations.filter((annotation) => annotation.type === "action" && annotation.detail.action);
-  if (actionAnnotations.length === 0) return input.annotations;
-  const proposals = await getDb().select({ id: tripChangeProposals.id, expiresAt: tripChangeProposals.expiresAt })
-    .from(tripChangeProposals)
-    .where(and(eq(tripChangeProposals.tripProjectId, input.tripProjectId), eq(tripChangeProposals.userId, input.userId), eq(tripChangeProposals.status, "pending"), eq(tripChangeProposals.sourceAssistantMessageId, input.assistantMessageId)));
-  if (proposals.length !== 1 || (proposals[0].expiresAt && proposals[0].expiresAt.getTime() <= Date.now())) return input.annotations;
-  return input.annotations.map((annotation) => {
-    const action = annotation.detail.action;
-    return action && isTripChangeProposalActionAnnotation(annotation.id, action.command)
-      ? { ...annotation, detail: { ...annotation.detail, capability: { command: action.command, label: action.label, available: true as const } } }
-      : annotation;
+async function resolveAnnotationCapabilities(input: { conversationId: string; tripProjectId: string; userId: string; assistantMessageId: string; annotations: ReturnType<typeof sanitizeStoredPlanningAnnotations> }) {
+  return resolvePlanningAnnotationCapabilities({
+    annotations: input.annotations,
+    hasCurrentPendingProposal: async () => {
+      const proposals = await getDb().select({ id: tripChangeProposals.id, expiresAt: tripChangeProposals.expiresAt })
+        .from(tripChangeProposals)
+        .where(and(eq(tripChangeProposals.tripProjectId, input.tripProjectId), eq(tripChangeProposals.userId, input.userId), eq(tripChangeProposals.status, "pending"), eq(tripChangeProposals.sourceAssistantMessageId, input.assistantMessageId)));
+      return proposals.length === 1 && (!proposals[0].expiresAt || proposals[0].expiresAt.getTime() > Date.now());
+    },
   });
 }
 

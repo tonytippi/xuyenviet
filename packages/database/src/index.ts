@@ -1,10 +1,10 @@
 import postgres from "postgres";
 import { resolvePlanningAnnotationCapabilities, sanitizeStoredPlanningAnnotations, type AiAskStreamExecutionPort, type PlanningReadRepository } from "@xuyenviet/domain";
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { loadAnswerContext } from "./answer-context";
 import { formatAssistantMessageProvenance } from "./provenance";
 import { assistantResponseProvenance, conversations, messages, tripChangeProposals, tripProjects } from "./schema";
-import { parsePlanningAnswerDetailResponse, type PlanningJsonValue, type PlanningProvenance, type TripAnswerContextResponse } from "@xuyenviet/contracts";
+import { parsePlanningAnswerDetailResponse, planningDetailProvenanceLimit, type PlanningJsonValue, type PlanningProvenance, type TripAnswerContextResponse } from "@xuyenviet/contracts";
 import { createAiAskStreamExecutionPort } from "./ai-ask-stream-execution";
 
 export * from "./ai-ask-commands";
@@ -131,8 +131,14 @@ export function createPostgresPlanningReadRepository(): PlanningReadRepository {
       if (!safeAnswer?.detail) throw new Error("Planning detail serialization exceeded the safe response contract.");
       try {
         const rows = await db.select({ id: assistantResponseProvenance.id, sourceCategory: assistantResponseProvenance.sourceCategory, rank: assistantResponseProvenance.rank, retrievalScore: assistantResponseProvenance.retrievalScore, sourceType: assistantResponseProvenance.sourceType, verificationStatus: assistantResponseProvenance.verificationStatus, availability: assistantResponseProvenance.availability, usedInPrompt: assistantResponseProvenance.usedInPrompt, citedInAnswer: assistantResponseProvenance.citedInAnswer, sourceSnapshot: assistantResponseProvenance.sourceSnapshot })
-          .from(assistantResponseProvenance).where(and(eq(assistantResponseProvenance.userId, userId), eq(assistantResponseProvenance.conversationId, conversationId), eq(assistantResponseProvenance.assistantMessageId, assistantMessageId)));
-        const provenance = formatAssistantMessageProvenance(rows).map(serializePlanningProvenance);
+          .from(assistantResponseProvenance).where(and(eq(assistantResponseProvenance.userId, userId), eq(assistantResponseProvenance.conversationId, conversationId), eq(assistantResponseProvenance.assistantMessageId, assistantMessageId))).orderBy(asc(assistantResponseProvenance.rank), asc(assistantResponseProvenance.id));
+        // Normalize the historical collection before the contract boundary. This
+        // prevents an overlong legacy result from discarding all safe enrichment.
+        const provenance = formatAssistantMessageProvenance(rows)
+          .map(serializePlanningProvenance)
+          .sort((left, right) => left.rank - right.rank || left.id.localeCompare(right.id))
+          .filter((item, index, all) => index === 0 || all[index - 1]!.rank !== item.rank)
+          .slice(0, planningDetailProvenanceLimit);
         const annotations = await resolvePlanningAnnotationCapabilities({
           annotations: sanitizeStoredPlanningAnnotations({ answerText: message.content, annotations: message.answerAnnotations, provenance }),
           hasCurrentPendingProposal: async () => {
@@ -161,8 +167,10 @@ function serializePlanningProvenance(item: ReturnType<typeof formatAssistantMess
   if (item.availability === "withdrawn") {
     return { id: item.id, rank: item.rank, availability: item.availability, unavailableLabel: item.unavailableLabel, usedInPrompt: item.usedInPrompt, citedInAnswer: item.citedInAnswer } as const;
   }
-  return { id: item.id, rank: item.rank, availability: "available", sourceCategory: item.sourceCategory, title: item.title, sourceType: item.sourceType, url: item.url, checkedAt: canonicalUtcTimestamp(item.checkedAt), confidenceLabel: item.confidenceLabel, verificationStatus: item.verificationStatus, usedInPrompt: item.usedInPrompt, citedInAnswer: item.citedInAnswer, retrievalScore: item.retrievalScore, freshnessSensitive: item.freshnessSensitive };
+  return { id: item.id, rank: item.rank, availability: "available", sourceCategory: item.sourceCategory, title: bounded(item.title, 500), sourceType: item.sourceType && item.sourceType.length <= 160 ? item.sourceType : null, url: item.url && item.url.length <= 2_000 ? item.url : null, checkedAt: canonicalUtcTimestamp(item.checkedAt), confidenceLabel: bounded(item.confidenceLabel, 160), verificationStatus: item.verificationStatus, usedInPrompt: item.usedInPrompt, citedInAnswer: item.citedInAnswer, retrievalScore: item.retrievalScore, freshnessSensitive: item.freshnessSensitive };
 }
+
+function bounded(value: string, maximum: number) { return value.length <= maximum ? value : value.slice(0, maximum).trimEnd() || "Không có thông tin"; }
 
 function canonicalUtcTimestamp(value: string | null) {
   if (!value) return null;

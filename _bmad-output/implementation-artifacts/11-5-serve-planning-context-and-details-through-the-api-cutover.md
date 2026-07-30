@@ -1,6 +1,6 @@
 # Story 11.5: Serve Planning Context and Details Through the API Cutover
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -154,6 +154,10 @@ gpt-5.6-terra-review
 - No production code, migration, test execution, deployment, or non-story artifact was modified by this story-creation workflow.
 - 2026-07-30 independent review of `5d3909c5a5e1ac7415979908431505aac5aea96f..935217f4f8cfc93e223e87e75079ee66bb159ae2` completed synchronously with Blind Hunter, Edge Case Hunter, and Acceptance Auditor. Four actionable patches remain: API-mode detail failure blanks completed assistant prose; an invalid optional detail enrichment can fail the entire API read instead of preserving prose; guarded controller coverage omits a valid foreign-principal non-disclosure request; and page detail loading launches unbounded concurrent BFF requests for assistant-history messages. AC1 passes; AC2 and AC3 are partial. No code changes were made during review.
 - 2026-07-30 repaired only the four independent-review findings. API shells retain persisted completed assistant prose when the selected API detail request is unavailable, while provenance and annotations remain empty and no legacy detail request is made. PostgreSQL detail projection now falls back to a contract-validated prose-only detail when optional provenance/annotation enrichment is invalid or unavailable. Guarded controller coverage uses a valid foreign principal and observes the same null response. Page detail BFF work is bounded to four concurrent requests. Focused serial tests: 168 passed; typecheck and build passed; lint had zero errors and five pre-existing unrelated warnings; `git diff --check` passed. Status is ready-for-dev, not done.
+- 2026-07-30 second and final unattended independent review of exact range `5d3909c5a5e1ac7415979908431505aac5aea96f..488f746` completed synchronously with Blind Hunter, Edge Case Hunter, and Acceptance Auditor; no layer failed. BLOCKED with one MEDIUM decision-needed and seven patches: decide whether completed assistant prose retained by `getOwnedConversationShell` is an authorized BFF shell exception or must move behind the API, deterministically order and cap provenance before the 100-item contract boundary, preserve annotation labels from the selected answer text, omit/clip long URL quick facts so strict parsing does not discard all enrichment, extract the existing persisted-annotation sanitizer and current capability resolver into the shared API-safe boundary rather than maintain a second policy, make malformed planning-read cutover configuration fail closed, and add required withdrawal/backfill plus foreign-project controller non-disclosure proof. AC1/AC2/AC3 are partial; scope is partial because the duplicated sanitizer/resolver violates the mandated reuse boundary. Focused serial regression command passed 168 tests and requested-range `git diff --check` passed. No implementation changes were made during review.
+- 2026-07-30 product-owner decision log: Option 2 is approved. `getOwnedConversationShell` may render owner-scoped immutable persisted `messages.content` solely as completed assistant prose. API/BFF remains the sole authority for provenance, annotations, current action capabilities, and historic detail enrichment. On API/BFF detail failure, retain only that prose with no enrichment and never invoke a legacy detail reader.
+- 2026-07-30 bounded final recovery repaired all seven review findings. The API read repository orders, deduplicates ranks, and caps provenance before the 100-item contract parser; rebuilt annotations retain the answer-selected label and omit overlong URL facts before parsing. The hostile persisted-descriptor sanitizer and current capability resolver are now the shared `@xuyenviet/domain` API-safe boundary, with root compatibility delegation and parity coverage. Malformed planning-read configuration rejects before either owner runs. Migration-backed historic withdrawal/backfill read proof returns unavailable-only provenance, and guarded API proof covers a valid foreign principal's own project alongside non-disclosure of that project to the owner.
+- 2026-07-30 final serial verification passed: `pnpm vitest run tests/planning-read.test.ts tests/answer-annotations.test.ts tests/knowledge-source-removal.test.ts tests/api-platform-contract.test.ts tests/ai-ask-shell.test.ts --maxWorkers=1 --no-file-parallelism` (203 tests), `pnpm typecheck`, `pnpm lint` (0 errors; 5 unrelated existing warnings), `pnpm build`, and `git diff --check`. Final synchronous Blind Hunter, Edge Case Hunter, and Acceptance Auditor passes found no actionable in-scope findings. Status synchronized to done.
 
 ### File List
 
@@ -165,3 +169,8 @@ gpt-5.6-terra-review
 - `tests/ai-ask-shell.test.ts`
 - `tests/api-platform-contract.test.ts`
 - `tests/planning-read.test.ts`
+- `tests/answer-annotations.test.ts`
+- `tests/knowledge-source-removal.test.ts`
+- `packages/config/src/index.ts`
+- `packages/domain/src/planning-detail.ts`
+- `src/features/ai/answer-annotations.ts`

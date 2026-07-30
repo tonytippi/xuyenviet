@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-07-30 (Story 11.5 independent-review repairs verified; status synchronized to ready-for-dev.)
+# last_updated: 2026-07-30 (Story 11.5 bounded final recovery reviewed clean; status synchronized to done.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-07-30 (Story 11.5 independent-review repairs verified; status synchronized to ready-for-dev.)
+last_updated: 2026-07-30 (Story 11.5 bounded final recovery reviewed clean; status synchronized to done.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -235,7 +235,10 @@ development_status:
   11-4-bind-annotation-details-and-actions-to-current-ownership: done
   # 2026-07-30: Unattended independent review of 5d3909c5a5e1ac7415979908431505aac5aea96f..935217f4f8cfc93e223e87e75079ee66bb159ae2 completed synchronously with Blind Hunter, Edge Case Hunter, and Acceptance Auditor. BLOCKED with four actionable patches: API-mode detail failure blanks completed assistant prose; invalid optional enrichment can turn the whole detail read into a 500; guarded controller tests omit a valid foreign-principal non-disclosure request; and page detail loading is unbounded concurrent BFF work for assistant history. AC1 passes; AC2 and AC3 are partial. No code changes were made during review.
   # 2026-07-30: Repaired only the four independent-review findings. API-mode unavailable detail preserves persisted completed prose without a legacy detail fallback; optional invalid detail enrichment returns safe prose-only detail; valid foreign-principal controller coverage proves null non-disclosure; and assistant-history BFF detail requests are capped at four concurrent operations. Serial focused suite: 168 tests passed; typecheck/build/diff check passed; lint had zero errors and five pre-existing unrelated warnings. Status is ready-for-dev, not done.
-  11-5-serve-planning-context-and-details-through-the-api-cutover: ready-for-dev
+  # 2026-07-30: Second and final unattended independent review of exact range 5d3909c5a5e1ac7415979908431505aac5aea96f..488f746 ran Blind Hunter, Edge Case Hunter, and Acceptance Auditor synchronously; no layer failed. BLOCKED with eight actionable findings: MEDIUM decision-needed whether API-mode persisted assistant prose from getOwnedConversationShell is an authorized BFF shell exception or must be API-owned; patches for deterministic provenance order/100-item cap, parser-compatible annotation labels, long-URL quick-fact handling, reuse of the existing sanitizer/capability resolver rather than a second policy, malformed planning-read flag fail-closed behavior, historic withdrawal/backfill proof, and valid foreign-project planning-context non-disclosure proof. AC1/AC2/AC3 and scope are partial. Focused serial regression command passed 168 tests and requested-range diff check passed. No code changes were made during review.
+  # 2026-07-30: Product-owner Option 2 approved: owner-scoped immutable persisted assistant messages.content remains a BFF shell-only completed-prose exception. API/BFF exclusively owns provenance, annotations, current action capabilities, and historic detail enrichment; API/BFF failure retains prose only with no legacy detail fallback.
+  # 2026-07-30: Bounded final recovery repaired all seven review findings: provenance is deterministically ordered, duplicate-ranked suppressed and capped before the 100-item parser boundary; annotation labels remain final answer text; overlong URL facts are omitted before parsing; sanitizer/capability policy is extracted to the shared API-safe domain boundary with parity proof; malformed planning-read config rejects before any owner runs; migration-backed historic backfill API reads remain unavailable-only; and valid foreign-project controller coverage proves both owner access and foreign non-disclosure. Serial verification: 203 tests across planning/annotation/withdrawal/API/shell suites, typecheck, lint (0 errors; 5 unrelated existing warnings), build, and diff check passed. Final synchronous Blind Hunter, Edge Case Hunter, and Acceptance Auditor found no actionable findings. Status synchronized to done.
+  11-5-serve-planning-context-and-details-through-the-api-cutover: done
   epic-11-retrospective: optional
 
   epic-12: backlog

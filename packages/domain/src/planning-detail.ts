@@ -22,7 +22,7 @@ export type PlanningAnnotation = {
   text: string;
   type: "source" | "warning" | "trip_fact" | "action" | "place" | "hotel_area" | "route_segment" | "cost";
   detail: {
-    type: string;
+    type: "source" | "warning" | "trip_fact" | "action" | "place" | "hotel_area" | "route_segment" | "cost";
     label: string;
     section?: string;
     summary?: string;
@@ -40,6 +40,9 @@ const types = new Set<PlanningAnnotation["type"]>(["source", "warning", "trip_fa
 const sourceTypes = new Set<PlanningAnnotation["type"]>(["source", "place", "hotel_area", "route_segment", "cost"]);
 const actionIds = new Map([["trip-change-proposal-apply", "trip_change_proposal.apply"], ["trip-change-proposal-dismiss", "trip_change_proposal.dismiss"]]);
 const descriptorKeys = new Set(["type", "label", "section", "summary", "sourceCategory", "owner", "detail", "quickFacts", "provenanceIds", "action"]);
+const maxQuickFactLength = 160;
+const safeDetailLabels = new Set(["Loại", "Độ tin cậy", "Trạng thái", "URL", "Ngày kiểm tra", "Độ mới", "Nhãn nguồn"]);
+const safeQuickFactLabels = new Set([...safeDetailLabels, "Địa điểm", "Khu vực", "Chặng đường", "Chi phí"]);
 
 // This is the hostile persisted-JSON boundary shared by Next and the private API.
 // It derives every visible source field from request-time formatter output.
@@ -75,7 +78,7 @@ export async function resolvePlanningAnnotationCapabilities(input: { annotations
 }
 
 function detailFor(value: Record<string, unknown>, type: PlanningAnnotation["type"], text: string, provenance: Map<string, PlanningProvenance>): PlanningAnnotation["detail"] | null {
-  if (!record(value.detail) || Object.keys(value.detail).some((key) => !descriptorKeys.has(key)) || (value.detail.type !== type && !(type === "source" && value.detail.type === "warning")) || value.detail.label !== text) return null;
+  if (!record(value.detail) || Object.keys(value.detail).some((key) => !descriptorKeys.has(key)) || (value.detail.type !== type && !(type === "source" && value.detail.type === "warning")) || typeof value.detail.label !== "string" || ((type !== "warning" && type !== "trip_fact") && value.detail.label !== text)) return null;
   if (type === "action") {
     const action = value.detail.action;
     if (!record(action)) {
@@ -86,6 +89,7 @@ function detailFor(value: Record<string, unknown>, type: PlanningAnnotation["typ
     if (typeof value.id !== "string" || actionIds.get(value.id) !== action.command || action.label !== text || !record(action.arguments) || Object.keys(action.arguments).length !== 0 || action.anchor !== "trip-change-proposal-action.v1") return null;
     return { type, label: text, section: "Gợi ý hành động", summary: "Thao tác này chỉ khả dụng khi đề xuất hiện tại vẫn thuộc kế hoạch của bạn.", action: { command: action.command as "trip_change_proposal.apply" | "trip_change_proposal.dismiss", label: text, arguments: {}, anchor: "trip-change-proposal-action.v1" } };
   }
+  if (!safeStoredDisplayFields(value.detail)) return null;
   const ids = value.detail.provenanceIds;
   if (!Array.isArray(ids) || ids.length > 6 || ids.some((id) => typeof id !== "string") || new Set(ids).size !== ids.length || (sourceTypes.has(type) && ids.length === 0)) {
     return localGuidance(value.detail, type, text);
@@ -94,8 +98,12 @@ function detailFor(value: Record<string, unknown>, type: PlanningAnnotation["typ
   if (sources.some((item) => !item || item.availability === "withdrawn")) return null;
   const primary = sources[0];
   if (!primary || primary.availability === "withdrawn") return null;
-  const facts = Object.entries({ "Loại": primary.sourceType ?? "Nguồn tham khảo", "Độ tin cậy": primary.confidenceLabel, "Trạng thái": primary.verificationStatus === "verified" ? "đã xác minh" : "chưa xác minh", ...(primary.url ? { URL: primary.url } : {}), ...(primary.checkedAt ? { "Ngày kiểm tra": primary.checkedAt } : {}) }).slice(0, 6);
-  return { type, label: type === "place" || type === "hotel_area" || type === "route_segment" || type === "cost" ? text : primary.title || text, section: primary.sourceCategory === "general" ? "Suy luận AI" : "Nguồn và độ tin cậy", summary: "Chi tiết này dựa trên provenance đã lưu của câu trả lời.", sourceCategory: primary.sourceCategory, owner: { table: "assistant_response_provenance", id: primary.id }, detail: Object.fromEntries(facts), quickFacts: facts.map(([label, value]) => ({ label, value })), provenanceIds: ids };
+  const facts = Object.entries({ "Loại": primary.sourceType ?? "Nguồn tham khảo", "Độ tin cậy": primary.confidenceLabel, "Trạng thái": primary.verificationStatus === "verified" ? "đã xác minh" : "chưa xác minh", ...(primary.url ? { URL: primary.url } : {}), ...(primary.checkedAt ? { "Ngày kiểm tra": primary.checkedAt } : {}) })
+    .filter(([, value]) => value.length <= maxQuickFactLength)
+    .slice(0, 6);
+  // The range text, not a historic source title, is the annotation's label.
+  // This preserves the selected answer text while provenance supplies details.
+  return { type, label: text, section: primary.sourceCategory === "general" ? "Suy luận AI" : "Nguồn và độ tin cậy", summary: "Chi tiết này dựa trên provenance đã lưu của câu trả lời.", sourceCategory: primary.sourceCategory, owner: { table: "assistant_response_provenance", id: primary.id }, detail: Object.fromEntries(facts), quickFacts: facts.map(([label, value]) => ({ label, value })), provenanceIds: ids };
 }
 
 function localGuidance(detail: Record<string, unknown>, type: PlanningAnnotation["type"], text: string): PlanningAnnotation["detail"] | null {
@@ -103,6 +111,13 @@ function localGuidance(detail: Record<string, unknown>, type: PlanningAnnotation
     ? { type, label: text, section: "Lưu ý trong câu trả lời", summary: "Đây là lưu ý cục bộ trong câu trả lời, không phải chi tiết từ nguồn." }
     : null;
 }
+function safeStoredDisplayFields(detail: Record<string, unknown>) {
+  if (detail.section !== undefined && !boundedText(detail.section, 160)) return false;
+  if (detail.summary !== undefined && !boundedText(detail.summary, 500)) return false;
+  if (detail.detail !== undefined && (!record(detail.detail) || Object.keys(detail.detail).length > 6 || Object.entries(detail.detail).some(([key, value]) => !safeDetailLabels.has(key) || !boundedText(value, maxQuickFactLength)))) return false;
+  return detail.quickFacts === undefined || Array.isArray(detail.quickFacts) && detail.quickFacts.length <= 6 && detail.quickFacts.every((fact) => record(fact) && Object.keys(fact).length === 2 && safeQuickFactLabels.has(fact.label as string) && boundedText(fact.label, maxQuickFactLength) && boundedText(fact.value, maxQuickFactLength));
+}
+function boundedText(value: unknown, maximum: number): value is string { return typeof value === "string" && value.trim() === value && value.length > 0 && value.length <= maximum; }
 function isLegacyActionDescriptor(detail: Record<string, unknown>) {
   return Object.keys(detail).every((key) => key === "type" || key === "label" || key === "section" || key === "detail")
     && detail.section === "Gợi ý hành động"

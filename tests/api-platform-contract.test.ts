@@ -34,7 +34,7 @@ beforeEach(async () => {
   const identities: ApiIdentityRepository = { async getSession(sessionId) { return sessionId === "session-1" ? { userId: "user-1", expires: new Date(Date.now() + 60_000), authorizationVersion: 1 } : sessionId === "session-2" ? { userId: "user-2", expires: new Date(Date.now() + 60_000), authorizationVersion: 1 } : null; } };
   const summaries: ConversationSummaryRepository = { async listOwnedConversationSummaryRows(userId) { return rows[userId] ?? []; } };
   const planningReads: PlanningReadRepository = {
-    async loadOwnedPlanningContext(userId, tripProjectId) { return userId === "user-1" && tripProjectId === "project-1" ? { version: 1, hasProjectScope: true, tripProjectId, aggregateVersion: 2, primaryConversationId: "conversation-a", anchors: [], planItems: [], constraints: null, currentConversationFacts: [], conflicts: [] } : null; },
+    async loadOwnedPlanningContext(userId, tripProjectId) { return (userId === "user-1" && tripProjectId === "project-1") || (userId === "user-2" && tripProjectId === "foreign-project") ? { version: 1, hasProjectScope: true, tripProjectId, aggregateVersion: 2, primaryConversationId: userId === "user-1" ? "conversation-a" : "conversation-other", anchors: [], planItems: [], constraints: null, currentConversationFacts: [], conflicts: [] } : null; },
     async loadOwnedAnswerDetail(userId, conversationId, assistantMessageId) { return userId === "user-1" && conversationId === "conversation-a" && assistantMessageId === "answer-1" ? { conversationId, assistantMessageId, content: "Nội dung đã hoàn tất.", provenance: [{ id: "withdrawn", rank: 1, availability: "withdrawn", unavailableLabel: "Nguồn này không còn khả dụng.", usedInPrompt: true, citedInAnswer: false }], annotations: [] } : null; },
   };
   const versions: ReleaseSchemaVersionRepository = {
@@ -86,6 +86,7 @@ describe("API platform contracts", () => {
     const context = await request(app.getHttpServer()).get("/v1/conversations/planning-context/project-1").set("Authorization", `Bearer ${await tokenFor()}`).expect(200);
     expect(context.body.context).toMatchObject({ version: 1, tripProjectId: "project-1", aggregateVersion: 2 });
     await request(app.getHttpServer()).get("/v1/conversations/planning-context/foreign-project").set("Authorization", `Bearer ${await tokenFor()}`).expect(200, { context: null });
+    await request(app.getHttpServer()).get("/v1/conversations/planning-context/foreign-project").set("Authorization", `Bearer ${await tokenFor("user-2", "session-2")}`).expect(200).expect(({ body }) => expect(body.context.tripProjectId).toBe("foreign-project"));
     await request(app.getHttpServer()).get("/v1/conversations/planning-context/%20bad").set("Authorization", `Bearer ${await tokenFor()}`).expect(200, { context: null });
     const detail = await request(app.getHttpServer()).get("/v1/conversations/conversation-a/answers/answer-1").set("Authorization", `Bearer ${await tokenFor()}`).expect(200);
     expect(detail.body.detail).toMatchObject({ content: "Nội dung đã hoàn tất.", provenance: [{ availability: "withdrawn", unavailableLabel: "Nguồn này không còn khả dụng." }] });

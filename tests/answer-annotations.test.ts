@@ -125,7 +125,7 @@ describe("answer annotation validation", () => {
 
     expect(detail).toMatchObject({
       type: "source",
-      label: "Nguồn web cập nhật",
+      label: "Huế",
       owner: { table: "assistant_response_provenance", id: "prov-web" },
       detail: expect.objectContaining({ URL: "https://hue.gov.vn/ticket", "Độ tin cậy": "chưa xác minh" }),
     });

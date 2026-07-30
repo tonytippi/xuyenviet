@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, test } from "vitest";
 import { assistantProvenanceWithdrawalBackfillState, assistantResponseProvenance, auditEvents, conversations, knowledgeCardEvidence, knowledgeCardSearchDocuments, knowledgeCards, knowledgeIndexDirtyMarkers, knowledgeCardSources, knowledgeRecommendations, knowledgeSourceSuggestions, messages, sourceCaptureVersions, sources, users } from "@/db/schema";
 import { removeKnowledgeSource, withdrawKnowledgeEvidence } from "@/features/knowledge/source-removal";
 import { backfillHistoricalAssistantProvenanceWithdrawal, classifyAssistantProvenanceRowsForInsertion, extractHistoricalAnchors, ProvenanceWithdrawalBackfillError } from "../packages/database/src/assistant-provenance-withdrawal";
+import { createPostgresPlanningReadRepository } from "@xuyenviet/database";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
 import { seedKnowledgeCardEvidence, seedSourceCaptureVersion } from "./helpers/source-captures";
@@ -24,6 +25,7 @@ async function provenance(id: string, snapshot: Record<string, unknown>, created
     await transaction.execute(sql`select set_config('xuyenviet.provenance_writer_contract', 'v1', true)`);
     await transaction.insert(assistantResponseProvenance).values({ id, userId: "operator", conversationId: conversation.id, userMessageId: question.id, assistantMessageId: answer.id, sourceCategory: "knowledge", sourceReferenceId: sourceReference?.id ?? null, sourceReferenceType: sourceReference?.type ?? null, rank: 1, verificationStatus: "verified", usedInPrompt: true, citedInAnswer: false, sourceSnapshot: snapshot, createdAt });
   });
+  return { conversationId: conversation.id, assistantMessageId: answer.id };
 }
 
 function knowledgeInsertionRow(sourceReferenceId: string | null, sourceReferenceType: string | null, sourceSnapshot: Record<string, unknown>) {
@@ -125,13 +127,20 @@ describe("knowledge source removal", () => {
     await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: "backfill-card", sourceId: "backfill-source", supportLevel: "primary" });
     const capture = await seedSourceCaptureVersion({ sourceId: "backfill-source", captureKind: "url", rawText: "Backfill evidence." });
     const evidence = await seedKnowledgeCardEvidence({ cardId: "backfill-card", sourceId: "backfill-source", captureVersionId: capture.id, quoteText: "Backfill evidence." });
-    await provenance("backfill-provenance", { knowledgeCardId: "backfill-card", evidence: [{ evidenceId: evidence.id, sourceId: "backfill-source" }] });
+    const historic = await provenance("backfill-provenance", { knowledgeCardId: "backfill-card", evidence: [{ evidenceId: evidence.id, sourceId: "backfill-source" }] });
     await testDb.update(sources).set({ eligibility: "withdrawn", removalReason: "withdrawn", removedByUserId: "operator", removalCompletedAt: new Date() }).where(eq(sources.id, "backfill-source"));
     await testDb.update(assistantProvenanceWithdrawalBackfillState).set({ cutoverAt: new Date("2026-07-02T00:00:00.000Z"), completedAt: null }).where(eq(assistantProvenanceWithdrawalBackfillState.contractKey, "v1"));
 
     await expect(backfillHistoricalAssistantProvenanceWithdrawal({}, testDb)).resolves.toEqual({ status: "progressed", scannedCount: 1 });
     await expect(testDb.select({ availability: assistantResponseProvenance.availability }).from(assistantResponseProvenance)).resolves.toEqual([{ availability: "withdrawn" }]);
     await expect(testDb.select({ cursorId: assistantProvenanceWithdrawalBackfillState.cursorId }).from(assistantProvenanceWithdrawalBackfillState)).resolves.toEqual([{ cursorId: "backfill-provenance" }]);
+    await expect(createPostgresPlanningReadRepository().loadOwnedAnswerDetail("operator", historic.conversationId, historic.assistantMessageId)).resolves.toEqual({
+      conversationId: historic.conversationId,
+      assistantMessageId: historic.assistantMessageId,
+      content: "Answer",
+      provenance: [{ id: "backfill-provenance", rank: 1, availability: "withdrawn", unavailableLabel: "Nguồn này không còn khả dụng.", usedInPrompt: true, citedInAnswer: false }],
+      annotations: [],
+    });
   });
 
   test("fails atomically on malformed or unresolvable owners, preserves its checkpoint, and retries after repair", async () => {

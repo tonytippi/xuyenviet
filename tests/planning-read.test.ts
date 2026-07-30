@@ -6,6 +6,7 @@ import { createPostgresPlanningReadRepository } from "@xuyenviet/database";
 import { assistantResponseProvenance, conversations, messages, tripPlanItems, tripProjects, users } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { loadSelectedAnswerDetail, loadSelectedPlanningContext } from "@/features/chat-trips/planning-read-loader";
+import { sanitizeStoredAnswerAnnotations } from "@/features/ai/answer-annotations";
 import { testDb } from "./helpers/db";
 
 const provenance = [{
@@ -50,6 +51,12 @@ describe("planning API read policy", () => {
     // No production shadow request is observable: the selected legacy path is the only call.
     expect(legacyDetail).toHaveBeenCalledTimes(1);
     expect(apiDetail).not.toHaveBeenCalled();
+
+    const malformedLegacy = vi.fn(async () => ({ context: null }));
+    const malformedApi = vi.fn(async () => ({ context: null }));
+    await expect(loadSelectedPlanningContext({ tripProjectId: "project-1", legacy: malformedLegacy, api: malformedApi, environment: { APP_ENV: "production", XV_PLANNING_READ_API_ENABLED: "enabled" } })).rejects.toThrow("Invalid planning-read API cutover configuration.");
+    expect(malformedLegacy).not.toHaveBeenCalled();
+    expect(malformedApi).not.toHaveBeenCalled();
   });
 
   test("uses a safe empty detail and never calls legacy when API core detail fails", async () => {
@@ -118,6 +125,28 @@ describe("planning API read policy", () => {
       provenance: [],
       annotations: [{ id: "legacy", start: 0, end: answerText.length, text: answerText, type: "action", detail: { type: "action", label: answerText, section: "Gợi ý hành động", detail: { "Nhãn": "Hành động gợi ý", "Giải thích": "Gợi ý thao tác tiếp theo từ câu trả lời, không phải nguồn đã xác minh." } } }],
     })).toEqual([expect.objectContaining({ detail: expect.not.objectContaining({ action: expect.anything(), capability: expect.anything() }) })]);
+  });
+
+  test("preserves selected answer labels and omits overlong URL quick facts before strict parsing", () => {
+    const answerText = "Nguồn được chọn";
+    const annotations = sanitizeStoredPlanningAnnotations({
+      answerText,
+      provenance: [{ ...provenance[0], title: "Tên nguồn lịch sử khác", url: `https://example.com/${"a".repeat(300)}` }],
+      annotations: [{ id: "source", start: 0, end: answerText.length, text: answerText, type: "source", detail: { type: "source", label: answerText, provenanceIds: ["source-1"] } }],
+    });
+    expect(annotations).toEqual([expect.objectContaining({ detail: expect.objectContaining({ label: answerText, detail: expect.not.objectContaining({ URL: expect.anything() }) }) })]);
+    expect(parsePlanningAnswerDetailResponse({ detail: { conversationId: "conversation-1", assistantMessageId: "answer-1", content: answerText, provenance: [{ ...provenance[0], url: `https://example.com/${"a".repeat(300)}` }], annotations } })).not.toBeNull();
+  });
+
+  test("uses the shared API-safe sanitizer with the existing persisted descriptor boundary", () => {
+    const answerText = "Nguồn được chọn";
+    const input = {
+      answerText,
+      provenance,
+      annotations: [{ id: "source", start: 0, end: answerText.length, text: answerText, type: "source", detail: { type: "source", label: answerText, provenanceIds: ["source-1"] } }],
+    };
+    expect(sanitizeStoredPlanningAnnotations(input)).toEqual(sanitizeStoredAnswerAnnotations(input));
+    expect(sanitizeStoredPlanningAnnotations({ ...input, annotations: [{ ...input.annotations[0], detail: { ...input.annotations[0].detail, quickFacts: [{ label: "untrusted", value: "" }] } }] })).toEqual([]);
   });
 
   test("uses the PostgreSQL adapter for owner scope, withdrawal-safe detail, and canonical context", async () => {

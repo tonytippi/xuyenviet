@@ -1,5 +1,6 @@
 import "server-only";
 
+import { sanitizeStoredPlanningAnnotations } from "@xuyenviet/domain";
 import { completeInitialAiAskAnswer } from "@/features/ai/gateway";
 import type { AssistantMessageProvenanceItem, AvailableAssistantMessageProvenanceItem } from "@/features/retrieval/provenance";
 
@@ -61,10 +62,6 @@ export function isTripChangeProposalActionAnnotation(id: string, command: Answer
 
 
 const allowedTypes = new Set<AnswerAnnotationType>(["source", "warning", "trip_fact", "action", "place", "hotel_area", "route_segment", "cost"]);
-const entityTypes = new Set<AnswerAnnotationType>(["place", "hotel_area", "route_segment", "cost"]);
-const detailDescriptorKeys = new Set(["type", "label", "section", "summary", "sourceCategory", "owner", "detail", "quickFacts", "provenanceIds", "action"]);
-const safeDetailLabels = new Set(["Loại", "Độ tin cậy", "Trạng thái", "URL", "Ngày kiểm tra", "Độ mới", "Nhãn nguồn"]);
-const safeQuickFactLabels = new Set([...safeDetailLabels, "Địa điểm", "Khu vực", "Chặng đường", "Chi phí"]);
 const maxAnnotationProposals = 20;
 const maxQuickFacts = 6;
 const maxQuickFactLength = 160;
@@ -139,56 +136,7 @@ export function sanitizeStoredAnswerAnnotations(input: {
   annotations: unknown;
   provenance: AssistantMessageProvenanceItem[];
 }): AnswerAnnotation[] {
-  if (!Array.isArray(input.annotations)) {
-    return [];
-  }
-  if (input.annotations.length > maxAnnotationProposals) {
-    return [];
-  }
-
-  const provenanceById = new Map(input.provenance.map((item) => [item.id, item]));
-  const accepted: AnswerAnnotation[] = [];
-  const seenIds = new Set<string>();
-  const duplicateIds = findDuplicateIds(input.annotations.map((item) => isRecord(item) ? item.id : undefined));
-  const ranges = input.annotations
-    .filter((item): item is StoredAnnotationRange => isValidStoredAnnotationRange(item, input.answerText, duplicateIds, provenanceById))
-    .sort(compareStoredAnnotations);
-
-  if (ranges.some((item, index) => index > 0 && (item.start as number) < (ranges[index - 1].end as number))) {
-    return [];
-  }
-
-  for (const item of input.annotations.slice().sort(compareStoredAnnotations)) {
-    if (accepted.length >= maxAnnotationProposals) {
-      break;
-    }
-    if (!isRecord(item) || typeof item.id !== "string" || duplicateIds.has(item.id) || seenIds.has(item.id) || typeof item.start !== "number" || typeof item.end !== "number" || typeof item.text !== "string" || typeof item.type !== "string" || !allowedTypes.has(item.type as AnswerAnnotationType)) {
-      continue;
-    }
-
-    if (!Number.isInteger(item.start) || !Number.isInteger(item.end) || item.start < 0 || item.end <= item.start || item.end > input.answerText.length || input.answerText.slice(item.start, item.end) !== item.text) {
-      continue;
-    }
-
-    const start = item.start;
-    const end = item.end;
-    if (accepted.some((annotation) => start < annotation.end && end > annotation.start)) {
-      continue;
-    }
-
-    const detail = sanitizeDetailDescriptor(item.detail, item.type as AnswerAnnotationType, item.text, provenanceById);
-    if (!detail) {
-      continue;
-    }
-    if (detail.action && !isTripChangeProposalActionAnnotation(item.id, detail.action.command)) {
-      continue;
-    }
-
-    seenIds.add(item.id);
-    accepted.push({ id: item.id, start, end, text: item.text, type: item.type as AnswerAnnotationType, detail });
-  }
-
-  return accepted;
+  return sanitizeStoredPlanningAnnotations(input) as AnswerAnnotation[];
 }
 
 export async function buildValidatedAnswerAnnotations({
@@ -301,11 +249,11 @@ export function buildAnswerAnnotationDetail(input: {
     "Trạng thái": primary.verificationStatus === "verified" ? "đã xác minh" : "chưa xác minh",
   };
 
-  if (primary.url) {
+  if (primary.url && primary.url.length <= maxQuickFactLength) {
     detail.URL = primary.url;
   }
 
-  if (primary.checkedAt) {
+  if (primary.checkedAt && primary.checkedAt.length <= maxQuickFactLength) {
     detail["Ngày kiểm tra"] = primary.checkedAt;
   }
 
@@ -320,7 +268,7 @@ export function buildAnswerAnnotationDetail(input: {
 
   return {
     type,
-    label: entityTypes.has(type) ? input.text : primary.title || input.text,
+    label: input.text,
     section: primary.sourceCategory === "general" ? "Suy luận AI" : "Nguồn và độ tin cậy",
     summary: getDescriptorSummary(type, primary.sourceCategory),
     sourceCategory: primary.sourceCategory,
@@ -365,6 +313,10 @@ export function parseAnswerAnnotationProposals(content: string): AnswerAnnotatio
 
 function getAnnotationProposalProvenance(provenance: AssistantMessageProvenanceItem[]) {
   return provenance.filter((item): item is Extract<AssistantMessageProvenanceItem, { availability: "available" }> => item.availability === "available" && item.usedInPrompt && item.sourceCategory !== "general");
+}
+
+function isLocalGuidanceType(type: AnswerAnnotationType) {
+  return type === "warning" || type === "trip_fact";
 }
 
 function buildAnnotationProposalMessages({ answerText, provenance }: { answerText: string; provenance: AvailableAssistantMessageProvenanceItem[] }) {
@@ -426,184 +378,9 @@ function formatAnnotationSourceType(item: AvailableAssistantMessageProvenanceIte
   return "Kiến thức XuyenViet đã duyệt";
 }
 
-function sanitizeDetailDescriptor(value: unknown, annotationType: AnswerAnnotationType, text: string, provenanceById: Map<string, AssistantMessageProvenanceItem>): AnswerAnnotationDetailDescriptor | null {
-  if (!isRecord(value) || !isCompatibleStoredDetailType(value.type, annotationType) || typeof value.label !== "string" || Object.keys(value).some((key) => !detailDescriptorKeys.has(key))) {
-    return null;
-  }
-
-  if (annotationType === "action") {
-    const action = sanitizeForwardActionDescriptor(value, text);
-    if (action) {
-      return { type: "action", label: text, section: "Gợi ý hành động", summary: "Thao tác này chỉ khả dụng khi đề xuất hiện tại vẫn thuộc kế hoạch của bạn.", action };
-    }
-    return isLegacyActionDescriptor(value, annotationType) ? buildLegacyActionDetail(text) : null;
-  }
-
-  if (!hasSafeStoredDisplayFields(value)) {
-    return null;
-  }
-
-  const provenanceIds = sanitizeProvenanceIds(value.provenanceIds, provenanceById);
-  if (!provenanceIds || (provenanceIds.length === 0 && !isLocalGuidanceType(annotationType))) {
-    return null;
-  }
-
-  if (provenanceIds.length === 0 && !isCanonicalLocalGuidanceDescriptor(value, annotationType)) {
-    return null;
-  }
-
-  const owner = sanitizeOwner(value.owner, provenanceIds);
-  if (value.owner !== undefined && !owner) {
-    return null;
-  }
-
-  if (entityTypes.has(annotationType) && (!owner || provenanceIds.length === 0)) {
-    return null;
-  }
-
-  // Stored JSON may be stale or tampered with. Its display values never become traveler UI.
-  const trusted = buildAnswerAnnotationDetail({
-    type: annotationType,
-    text,
-    provenance: provenanceIds.map((id) => provenanceById.get(id)!),
-  });
-  if (!trusted) {
-    return null;
-  }
-
-  return trusted;
-}
-
-function sanitizeForwardActionDescriptor(value: Record<string, unknown>, text: string): AnswerAnnotationAction | null {
-  if (value.type !== "action" || value.label !== text || Object.keys(value).some((key) => key !== "type" && key !== "label" && key !== "action")) {
-    return null;
-  }
-  const action = value.action;
-  if (!isRecord(action) || Object.keys(action).some((key) => key !== "command" && key !== "label" && key !== "arguments" && key !== "anchor") || (action.command !== "trip_change_proposal.apply" && action.command !== "trip_change_proposal.dismiss") || action.label !== text || !isRecord(action.arguments) || Object.keys(action.arguments).length !== 0 || action.anchor !== "trip-change-proposal-action.v1") {
-    return null;
-  }
-  return { command: action.command, label: action.label, arguments: {}, anchor: "trip-change-proposal-action.v1" };
-}
-
-function isLocalGuidanceType(type: AnswerAnnotationType) {
-  return type === "warning" || type === "trip_fact";
-}
-
-function isCanonicalLocalGuidanceDescriptor(value: Record<string, unknown>, annotationType: AnswerAnnotationType) {
-  return isLocalGuidanceType(annotationType)
-    && value.type === annotationType
-    && typeof value.label === "string"
-    && Object.keys(value).every((key) => key === "type" || key === "label");
-}
-
-function buildLegacyActionDetail(text: string): AnswerAnnotationDetailDescriptor {
-  return {
-    type: "action",
-    label: text,
-    section: "Gợi ý hành động",
-    summary: "Đây là gợi ý trong câu trả lời, không phải thao tác có thể thực hiện.",
-    quickFacts: [{ label: "Trạng thái", value: "Chưa có thao tác được xác minh" }],
-  };
-}
-
-function sanitizeProvenanceIds(value: unknown, provenanceById: Map<string, AssistantMessageProvenanceItem>) {
-  if (value === undefined) {
-    return [];
-  }
-
-  if (!Array.isArray(value) || value.some((id) => typeof id !== "string") || new Set(value).size !== value.length || value.some((id) => !provenanceById.has(id))) {
-    return null;
-  }
-
-  if (value.some((id) => provenanceById.get(id)?.availability === "withdrawn")) {
-    return null;
-  }
-
-  return value;
-}
-
-function sanitizeOwner(value: unknown, provenanceIds: string[]) {
-  if (!isRecord(value) || value.table !== "assistant_response_provenance" || typeof value.id !== "string" || !provenanceIds.includes(value.id)) {
-    return null;
-  }
-
-  return { table: "assistant_response_provenance" as const, id: value.id };
-}
-
-function isCompatibleStoredDetailType(value: unknown, annotationType: AnswerAnnotationType) {
-  return value === annotationType || (annotationType === "source" && value === "warning");
-}
-
-function hasSafeStoredDisplayFields(value: Record<string, unknown>) {
-  return (value.detail === undefined || hasSafeLegacyDetail(value.detail))
-    && (value.quickFacts === undefined || hasSafeQuickFacts(value.quickFacts));
-}
-
-function isLegacyActionDescriptor(value: Record<string, unknown>, annotationType: AnswerAnnotationType) {
-  if (annotationType !== "action" || value.owner !== undefined || value.provenanceIds !== undefined || value.quickFacts !== undefined || value.summary !== undefined || value.section !== "Gợi ý hành động") {
-    return false;
-  }
-
-  if (Object.keys(value).some((key) => key !== "type" && key !== "label" && key !== "section" && key !== "detail")) {
-    return false;
-  }
-
-  return isRecord(value.detail)
-    && Object.keys(value.detail).length === 2
-    && value.detail["Nhãn"] === "Hành động gợi ý"
-    && value.detail["Giải thích"] === "Gợi ý thao tác tiếp theo từ câu trả lời, không phải nguồn đã xác minh.";
-}
-
-function hasSafeLegacyDetail(value: unknown) {
-  return isRecord(value)
-    && Object.keys(value).length <= maxQuickFacts
-    && Object.entries(value).every(([label, text]) => safeDetailLabels.has(label) && isBoundedString(text));
-}
-
-function hasSafeQuickFacts(value: unknown) {
-  return Array.isArray(value)
-    && value.length <= maxQuickFacts
-    && value.every((fact) => isRecord(fact) && safeQuickFactLabels.has(fact.label as string) && isBoundedString(fact.label) && isBoundedString(fact.value));
-}
-
-function isBoundedString(value: unknown) {
-  return typeof value === "string" && value.trim() === value && value.length > 0 && value.length <= maxQuickFactLength;
-}
-
 function clipQuickFact(value: string) {
   const trimmed = value.trim();
   return trimmed ? trimmed.slice(0, maxQuickFactLength) : null;
-}
-
-function compareStoredAnnotations(left: unknown, right: unknown) {
-  const leftStart = isRecord(left) && typeof left.start === "number" ? left.start : Number.MAX_SAFE_INTEGER;
-  const rightStart = isRecord(right) && typeof right.start === "number" ? right.start : Number.MAX_SAFE_INTEGER;
-  const leftEnd = isRecord(left) && typeof left.end === "number" ? left.end : Number.MAX_SAFE_INTEGER;
-  const rightEnd = isRecord(right) && typeof right.end === "number" ? right.end : Number.MAX_SAFE_INTEGER;
-  return leftStart - rightStart || leftEnd - rightEnd;
-}
-
-type StoredAnnotationRange = Record<string, unknown> & { start: number; end: number };
-
-function isValidStoredAnnotationRange(item: unknown, answerText: string, duplicateIds: Set<string>, provenanceById: Map<string, AssistantMessageProvenanceItem>): item is StoredAnnotationRange {
-  return isRecord(item)
-    && typeof item.id === "string"
-    && !duplicateIds.has(item.id)
-    && typeof item.start === "number"
-    && typeof item.end === "number"
-    && Number.isInteger(item.start)
-    && Number.isInteger(item.end)
-    && item.start >= 0
-    && item.end > item.start
-    && item.end <= answerText.length
-    && typeof item.text === "string"
-    && answerText.slice(item.start, item.end) === item.text
-    && typeof item.type === "string"
-    && allowedTypes.has(item.type as AnswerAnnotationType)
-    && (() => {
-      const detail = sanitizeDetailDescriptor(item.detail, item.type as AnswerAnnotationType, item.text, provenanceById);
-      return Boolean(detail && (!detail.action || isTripChangeProposalActionAnnotation(item.id, detail.action.command)));
-    })();
 }
 
 function getDescriptorSummary(type: AnswerAnnotationType, sourceCategory: AvailableAssistantMessageProvenanceItem["sourceCategory"]) {
