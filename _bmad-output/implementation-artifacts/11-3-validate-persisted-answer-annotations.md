@@ -166,6 +166,7 @@ gpt-5.6-terra-review
 
 - 2026-07-30: Repaired only independent-review patches S11.3-R1 through S11.3-R3. The provider contract no longer offers new `action` annotations; `action` remains accepted only through the existing narrow persisted legacy-read sanitizer. Defined quotes, including `""`, must match the exact UTF-16 final-text slice.
 - Added controlled post-provider-return PostgreSQL coverage: a final-content change is fenced without overwriting the completed content, and a provenance withdrawal is re-sanitized to no persisted annotation. Both paths retain a completed answer with an empty persisted annotation list.
+- Focused serial verification passed: `pnpm vitest run tests/answer-annotations.test.ts tests/chat-trip-context-extraction.test.ts` (2 files, 39 tests). Repair commit: `7b15df77346f28308715ee8d75713b96c44ceb01`.
 - Status returned to `ready-for-dev` pending the required follow-up independent review. This repair does not mark the story done or start another story.
 
 ### File List
