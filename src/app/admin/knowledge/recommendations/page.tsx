@@ -3,12 +3,10 @@ import Link from "next/link";
 import { promoteKnowledgeRecommendationFromQueueForm, suppressKnowledgeRecommendationFromQueueForm, verifyKnowledgeRecommendationFromQueueForm } from "@/features/knowledge/actions";
 import { getKnowledgeRecommendationWorkStatusCounts, knowledgeRecommendationWorkStatusValues, listKnowledgeRecommendations, type KnowledgeRecommendationWorkStatus } from "@/features/knowledge/recommendations";
 import { knowledgeRecommendationReasonValues, type KnowledgeRecommendationReason } from "@/db/schema";
+import { recommendationReasonLabels } from "@/features/knowledge/display-labels";
 
 type Props = { searchParams: Promise<{ error?: string; page?: string; reason?: string; workStatus?: string }> };
 
-const recommendationReasonLabels: Record<string, string> = {
-  risk: "Rủi ro", weak_evidence: "Bằng chứng yếu", freshness: "Thông tin có thể đã cũ", conflict: "Có thông tin mâu thuẫn", duplicate_risk: "Nguy cơ trùng lặp", missing_context: "Thiếu ngữ cảnh", verification: "Cần xác minh", relation: "Cần đối chiếu thẻ liên quan", sampling: "Kiểm tra lấy mẫu",
-};
 const workStatusLabels: Record<KnowledgeRecommendationWorkStatus, string> = { actionable: "Cần xử lý", completed: "Đã hoàn tất", inactive: "Không còn hiệu lực" };
 const resolutionLabels: Record<string, string> = { accepted: "Đã chấp nhận cách diễn đạt", edited: "Đã chỉnh sửa nội dung", suppressed: "Đã ẩn khỏi xuất bản", restored: "Đã khôi phục xuất bản", verified: "Đã xác minh và xuất bản", relation_resolved: "Đã xử lý quan hệ thẻ", sampling_passed: "Mẫu đã đạt yêu cầu", sampling_failed: "Mẫu không đạt yêu cầu" };
 

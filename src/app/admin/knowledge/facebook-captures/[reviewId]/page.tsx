@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { type FacebookCaptureReviewStatus } from "@/db/schema";
 import { requestFacebookCaptureRecaptureForm, rerunFacebookCanonicalIngestionForm, verifyFacebookCaptureCandidatesForm } from "@/features/knowledge/actions";
 import { getAdminFacebookCaptureReviewDetail, getFacebookCaptureQueueFilterForStage } from "@/features/knowledge/facebook-capture-review-admin";
+import { knowledgeCardStatusLabels, knowledgeCardTypeLabels, sourceTypeLabels, verificationStatusLabels } from "@/features/knowledge/display-labels";
 
 type FacebookCaptureReviewDetailPageProps = {
   params: Promise<{
@@ -103,41 +104,6 @@ const ingestionFailureDetails: Record<string, string> = {
   invalid_discovery_response: "Phản hồi AI không có cấu trúc hợp lệ nên chưa thể trích xuất các mục tri thức.",
   provider_failed: "Dịch vụ AI không trả về phản hồi có thể dùng được.",
   judge_provider_failed: "Dịch vụ đánh giá bằng chứng không trả về phản hồi có thể dùng được.",
-};
-
-const knowledgeCardStatusLabels: Record<string, string> = {
-  approved: "Đã phê duyệt",
-  draft: "Bản nháp",
-  rejected: "Đã từ chối",
-  archived: "Đã lưu trữ",
-  duplicate: "Trùng lặp",
-  no_action: "Không cần xử lý",
-};
-
-const sourceTypeLabels: Record<string, string> = {
-  curated: "Đã tuyển chọn",
-  community: "Cộng đồng",
-};
-
-const verificationStatusLabels: Record<string, string> = {
-  unverified: "Chưa xác minh",
-  verified: "Đã xác minh",
-};
-
-const knowledgeCardTypeLabels: Record<string, string> = {
-  place: "Địa điểm",
-  food: "Ăn uống",
-  hotel_area: "Khu vực lưu trú",
-  activity: "Hoạt động",
-  service: "Dịch vụ",
-  route_note: "Lưu ý cung đường",
-  warning: "Cảnh báo",
-  cost_note: "Lưu ý chi phí",
-  parking: "Đỗ xe",
-  ev_charging: "Sạc xe điện",
-  kid_friendly_tip: "Gợi ý cho trẻ em",
-  discount_promotion: "Ưu đãi",
-  general_travel_tip: "Mẹo du lịch chung",
 };
 
 function formatDate(value: Date | string | null) {

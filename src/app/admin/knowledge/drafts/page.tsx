@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { listKnowledgeDraftsForReview } from "@/features/knowledge/review";
+import { knowledgeCardStatusLabels, knowledgeCardTypeLabels, knowledgeConfidenceLabels, sourceKindLabels, sourceTypeLabels, verificationStatusLabels } from "@/features/knowledge/display-labels";
 
 type KnowledgeDraftsPageProps = {
   searchParams: Promise<{
@@ -19,14 +20,14 @@ export default async function KnowledgeDraftsPage({ searchParams }: KnowledgeDra
       <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[#8c4f13]">Duyệt bản nháp AI</p>
       <h1 className="mt-4 max-w-3xl text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">Hàng đợi tri thức cần vận hành kiểm tra.</h1>
       <p className="mt-5 max-w-2xl text-lg leading-8 text-[#4f625a]">
-        Chỉ hiển thị bản nháp còn cần duyệt và metadata nguồn an toàn. Thẻ đã phê duyệt rời khỏi hàng đợi này để các story truy xuất sau lọc bằng status approved.
+        Chỉ hiển thị bản nháp còn cần duyệt và thông tin nguồn an toàn. Thẻ đã phê duyệt rời khỏi hàng đợi này để luồng truy xuất sau chỉ dùng các thẻ đã được phê duyệt.
       </p>
 
       {params.approved ? (
         <div className="mt-6 rounded-2xl border border-[#8fb59f] bg-[#edf7ef] px-4 py-3 font-semibold text-[#1f5f46]" role="status">
-          <p>Đã phê duyệt bản nháp {params.approved}. Thẻ đã chuyển sang approved, không còn nằm trong hàng đợi mặc định và chưa tạo embedding.</p>
+          <p>Đã phê duyệt bản nháp {params.approved}. Thẻ không còn nằm trong hàng đợi mặc định và chưa được tạo chỉ mục ngữ nghĩa.</p>
           <Link className="mt-2 inline-flex underline underline-offset-4" href={`/admin/knowledge/approved/${params.approved}`}>
-            Kiểm tra source, confidence và freshness đã preserved
+            Kiểm tra nguồn, độ tin cậy và thời điểm cần cập nhật
           </Link>
         </div>
       ) : null}
@@ -52,11 +53,11 @@ export default async function KnowledgeDraftsPage({ searchParams }: KnowledgeDra
             <article key={draft.id} className="rounded-[1.5rem] border border-[#d8c9ad] bg-white/75 p-5 shadow-[0_12px_30px_rgba(41,33,18,0.08)]">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#8c4f13]">{draft.type}</p>
+                  <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#8c4f13]">{knowledgeCardTypeLabels[draft.type] ?? draft.type}</p>
                   <h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-[#17342c]">{draft.title}</h2>
                   {draft.suggestion ? (
                     <p className="mt-3 inline-flex rounded-full border border-[#d8c9ad] bg-[#f4ead7] px-3 py-1 text-sm font-semibold text-[#8c4f13]">
-                      Gợi ý AI: {draft.suggestion.action}
+                      Gợi ý AI: {draft.suggestion.action === "create" ? "Tạo thẻ mới" : draft.suggestion.action === "update" ? "Cập nhật thẻ" : draft.suggestion.action === "conflict" ? "Có thông tin mâu thuẫn" : draft.suggestion.action}
                       {draft.suggestion.targetCard ? ` · mục tiêu: ${draft.suggestion.targetCard.title}` : ""}
                     </p>
                   ) : null}
@@ -76,14 +77,14 @@ export default async function KnowledgeDraftsPage({ searchParams }: KnowledgeDra
                 </div>
                 <div className="rounded-2xl bg-[#fbf7ed] p-3">
                   <dt className="font-semibold text-[#17342c]">Trạng thái</dt>
-                  <dd className="mt-1 text-[#4f625a]">{draft.status} · cần duyệt: {draft.needsReview ? "có" : "không"}</dd>
+                  <dd className="mt-1 text-[#4f625a]">{knowledgeCardStatusLabels[draft.status] ?? draft.status} · cần duyệt: {draft.needsReview ? "có" : "không"}</dd>
                 </div>
                 <div className="rounded-2xl bg-[#fbf7ed] p-3">
                   <dt className="font-semibold text-[#17342c]">Độ tin cậy</dt>
-                  <dd className="mt-1 text-[#4f625a]">{draft.confidence}</dd>
+                  <dd className="mt-1 text-[#4f625a]">{knowledgeConfidenceLabels[draft.confidence] ?? draft.confidence}</dd>
                 </div>
                 <div className="rounded-2xl bg-[#fbf7ed] p-3">
-                  <dt className="font-semibold text-[#17342c]">Freshness-sensitive</dt>
+                  <dt className="font-semibold text-[#17342c]">Cần cập nhật theo thời điểm</dt>
                   <dd className="mt-1 text-[#4f625a]">{draft.freshnessSensitive ? "Có" : "Không"}</dd>
                 </div>
               </dl>
@@ -101,7 +102,7 @@ export default async function KnowledgeDraftsPage({ searchParams }: KnowledgeDra
                 <ul className="mt-3 grid gap-2 text-sm text-[#4f625a]">
                   {draft.sources.map((source) => (
                     <li key={source.id}>
-                      {source.label} · {source.kind} · {source.sourceType}/{source.verificationStatus}
+                       {source.label} · {sourceKindLabels[source.kind] ?? source.kind} · {sourceTypeLabels[source.sourceType] ?? source.sourceType}/{verificationStatusLabels[source.verificationStatus] ?? source.verificationStatus}
                       {source.collectedDate ? ` · ${source.collectedDate}` : ""}
                     </li>
                   ))}

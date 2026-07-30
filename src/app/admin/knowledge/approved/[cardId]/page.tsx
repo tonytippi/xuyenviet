@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { getApprovedKnowledgeCard } from "@/features/knowledge/review";
+import { evidenceSupportLevelLabels, knowledgeCardStatusLabels, knowledgeCardTypeLabels, knowledgeConfidenceLabels, sourceKindLabels, sourceTypeLabels, verificationStatusLabels } from "@/features/knowledge/display-labels";
 
 type ApprovedKnowledgeDetailPageProps = {
   params: Promise<{
@@ -40,10 +41,10 @@ export default async function ApprovedKnowledgeDetailPage({ params }: ApprovedKn
       <Link className="text-sm font-semibold text-[#1f5f46] underline underline-offset-4" href="/admin/knowledge/approved">
         Quay lại tri thức đã duyệt
       </Link>
-      <p className="mt-6 text-sm font-semibold uppercase tracking-[0.2em] text-[#8c4f13]">Thẻ approved</p>
+      <p className="mt-6 text-sm font-semibold uppercase tracking-[0.2em] text-[#8c4f13]">Thẻ đã phê duyệt</p>
       <h1 className="mt-4 max-w-3xl text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">{card.title}</h1>
       <p className="mt-5 max-w-2xl text-lg leading-8 text-[#4f625a]">
-        Đây là projection an toàn cho hậu kiểm nguồn và confidence. Không có raw text, raw metadata, storage key hoặc provider payload trên màn hình này.
+        Đây là bản hiển thị an toàn để hậu kiểm nguồn và độ tin cậy. Màn hình này không có nội dung thô, thông tin thô, khóa lưu trữ hoặc dữ liệu từ nhà cung cấp.
       </p>
 
       <section className="mt-8 rounded-[1.5rem] border border-[#d8c9ad] bg-white/75 p-5 sm:p-6">
@@ -52,18 +53,18 @@ export default async function ApprovedKnowledgeDetailPage({ params }: ApprovedKn
         <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
           <div className="rounded-2xl bg-[#fbf7ed] p-3">
             <dt className="font-semibold text-[#17342c]">Trạng thái</dt>
-            <dd className="mt-1 text-[#4f625a]">{card.status} · cần duyệt: {card.needsReview ? "có" : "không"}</dd>
+            <dd className="mt-1 text-[#4f625a]">{knowledgeCardStatusLabels[card.status] ?? card.status} · cần duyệt: {card.needsReview ? "có" : "không"}</dd>
           </div>
           <div className="rounded-2xl bg-[#fbf7ed] p-3">
-            <dt className="font-semibold text-[#17342c]">Loại / confidence</dt>
-            <dd className="mt-1 text-[#4f625a]">{card.type} · {card.confidence}</dd>
+            <dt className="font-semibold text-[#17342c]">Loại / độ tin cậy</dt>
+            <dd className="mt-1 text-[#4f625a]">{knowledgeCardTypeLabels[card.type] ?? card.type} · {knowledgeConfidenceLabels[card.confidence] ?? card.confidence}</dd>
           </div>
           <div className="rounded-2xl bg-[#fbf7ed] p-3">
             <dt className="font-semibold text-[#17342c]">Địa điểm / cung đường</dt>
             <dd className="mt-1 text-[#4f625a]">{[card.locationName, card.routeSegment].filter(Boolean).join(" · ") || "Chưa có"}</dd>
           </div>
           <div className="rounded-2xl bg-[#fbf7ed] p-3">
-            <dt className="font-semibold text-[#17342c]">Freshness-sensitive</dt>
+            <dt className="font-semibold text-[#17342c]">Cần cập nhật theo thời điểm</dt>
             <dd className="mt-1 text-[#4f625a]">{card.freshnessSensitive ? "Có" : "Không"}</dd>
           </div>
         </dl>
@@ -99,11 +100,11 @@ export default async function ApprovedKnowledgeDetailPage({ params }: ApprovedKn
             <div key={source.id} className="rounded-2xl border border-[#d8c9ad] bg-white/70 p-4 text-sm text-[#4f625a]">
               <p className="font-semibold text-[#17342c]">{source.label}</p>
               <p className="mt-2">
-                {source.kind} · {source.sourceType}/{source.verificationStatus} · hỗ trợ: {source.supportLevel}
+                {sourceKindLabels[source.kind] ?? source.kind} · {sourceTypeLabels[source.sourceType] ?? source.sourceType}/{verificationStatusLabels[source.verificationStatus] ?? source.verificationStatus} · hỗ trợ: {evidenceSupportLevelLabels[source.supportLevel] ?? source.supportLevel}
               </p>
               <p className="mt-1">{source.publisher ? `${source.publisher} · ` : ""}{source.collectedDate ?? "Chưa có ngày thu thập"}</p>
               {source.canonicalUrl || source.url ? <p className="mt-1 break-all">{source.canonicalUrl ?? source.url}</p> : null}
-              <p className="mt-1">Official: {source.official ? "có" : "không"} · Partner: {source.partner ? "có" : "không"}</p>
+              <p className="mt-1">Nguồn chính thức: {source.official ? "có" : "không"} · Đối tác: {source.partner ? "có" : "không"}</p>
             </div>
           ))}
         </div>

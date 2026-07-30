@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { listApprovedKnowledgeCardsWithIndexStatus, getApprovedKnowledgeIndexStatuses, type ApprovedKnowledgeIndexStatus } from "@/features/knowledge/review";
 import { searchApprovedKnowledgeWithCandidateCount } from "@/features/knowledge/search";
+import { evidenceSupportLevelLabels, knowledgeCardTypeLabels, knowledgeConfidenceLabels, labelFor, sourceKindLabels, sourceTypeLabels, verificationStatusLabels } from "@/features/knowledge/display-labels";
 
 type ApprovedKnowledgePageProps = {
   searchParams: Promise<{
@@ -11,12 +12,6 @@ type ApprovedKnowledgePageProps = {
 };
 
 const searchLimit = 10;
-const knowledgeTypeLabels: Record<string, string> = { place: "Địa điểm", route_note: "Ghi chú tuyến đường", food: "Ăn uống", accommodation: "Lưu trú", attraction: "Điểm tham quan", parking: "Đỗ xe", warning: "Cảnh báo", ev_charging: "Sạc xe điện", cost_note: "Chi phí", discount_promotion: "Khuyến mãi" };
-const confidenceLabels: Record<string, string> = { unverified: "Chưa xác minh", community: "Cộng đồng", curated: "Đã tuyển chọn", partner: "Đối tác", official: "Chính thức" };
-const sourceKindLabels: Record<string, string> = { url: "Trang web", facebook: "Facebook", youtube: "YouTube", copied_post: "Bài viết đã sao chép", pasted_text: "Văn bản đã dán", screenshot: "Ảnh chụp màn hình" };
-const sourceTypeLabels: Record<string, string> = { curated: "Đã tuyển chọn", community: "Cộng đồng" };
-const verificationStatusLabels: Record<string, string> = { verified: "Đã xác minh", unverified: "Chưa xác minh" };
-const supportLevelLabels: Record<string, string> = { primary: "Chính", supporting: "Bổ sung", conflicting: "Mâu thuẫn" };
 
 export default async function ApprovedKnowledgePage({ searchParams }: ApprovedKnowledgePageProps) {
   const params = await searchParams;
@@ -155,7 +150,7 @@ function ApprovedKnowledgeCardArticle({ card, score }: ApprovedKnowledgeCardArti
     <article className="rounded-[1.5rem] border border-[#d8c9ad] bg-white/75 p-5 shadow-[0_12px_30px_rgba(41,33,18,0.08)]">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#8c4f13]">{labelFor(knowledgeTypeLabels, card.type)} · đã xuất bản</p>
+          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#8c4f13]">{labelFor(knowledgeCardTypeLabels, card.type)} · đã xuất bản</p>
           <h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-[#17342c]">{card.title}</h2>
           <div className="mt-3 flex flex-wrap gap-2 text-sm font-semibold">
             {card.indexStatus ? <IndexStatusBadge status={card.indexStatus} /> : null}
@@ -175,7 +170,7 @@ function ApprovedKnowledgeCardArticle({ card, score }: ApprovedKnowledgeCardArti
         </div>
         <div className="rounded-2xl bg-[#fbf7ed] p-3">
           <dt className="font-semibold text-[#17342c]">Độ tin cậy / độ mới</dt>
-          <dd className="mt-1 text-[#4f625a]">{labelFor(confidenceLabels, card.confidence)} · cần cập nhật theo thời gian: {card.freshnessSensitive ? "có" : "không"}</dd>
+          <dd className="mt-1 text-[#4f625a]">{labelFor(knowledgeConfidenceLabels, card.confidence)} · cần cập nhật theo thời gian: {card.freshnessSensitive ? "có" : "không"}</dd>
         </div>
         <div className="rounded-2xl bg-[#fbf7ed] p-3">
           <dt className="font-semibold text-[#17342c]">Cập nhật</dt>
@@ -205,7 +200,7 @@ function ApprovedKnowledgeCardArticle({ card, score }: ApprovedKnowledgeCardArti
         <ul className="mt-3 grid gap-2 text-sm text-[#4f625a]">
           {card.sources.map((source) => (
             <li key={source.id}>
-              {source.label} · {labelFor(sourceKindLabels, source.kind)} · {labelFor(sourceTypeLabels, source.sourceType)}/{labelFor(verificationStatusLabels, source.verificationStatus)} · hỗ trợ: {labelFor(supportLevelLabels, source.supportLevel)}
+              {source.label} · {labelFor(sourceKindLabels, source.kind)} · {labelFor(sourceTypeLabels, source.sourceType)}/{labelFor(verificationStatusLabels, source.verificationStatus)} · hỗ trợ: {labelFor(evidenceSupportLevelLabels, source.supportLevel)}
               {source.publisher ? ` · ${source.publisher}` : ""}
               {source.collectedDate ? ` · ${source.collectedDate}` : ""}
               {source.canonicalUrl || source.url ? ` · ${source.canonicalUrl ?? source.url}` : ""}
@@ -220,8 +215,4 @@ function ApprovedKnowledgeCardArticle({ card, score }: ApprovedKnowledgeCardArti
 function IndexStatusBadge({ status }: { status: ApprovedKnowledgeIndexStatus }) {
   const className = status.state === "indexed" ? "border-[#8fb59f] bg-[#edf7ef] text-[#1f5f46]" : "border-[#d8c9ad] bg-[#f4ead7] text-[#8c4f13]";
   return <span className={`rounded-full border px-3 py-1 ${className}`}>{status.label}</span>;
-}
-
-function labelFor(labels: Record<string, string>, value: string) {
-  return labels[value] ?? value;
 }

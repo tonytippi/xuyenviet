@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { approveKnowledgeDraftForm, rejectKnowledgeDraftForm, updateKnowledgeDraftForm } from "@/features/knowledge/actions";
 import { getKnowledgeDraftForReview } from "@/features/knowledge/review";
 import { knowledgeCardTypeValues, knowledgeConfidenceValues } from "@/db/schema";
+import { evidenceSupportLevelLabels, knowledgeCardStatusLabels, knowledgeCardTypeLabels, knowledgeConfidenceLabels, sourceKindLabels, sourceTypeLabels, verificationStatusLabels } from "@/features/knowledge/display-labels";
 
 type KnowledgeDraftDetailPageProps = {
   params: Promise<{
@@ -33,7 +34,7 @@ export default async function KnowledgeDraftDetailPage({ params, searchParams }:
       <p className="mt-6 text-sm font-semibold uppercase tracking-[0.2em] text-[#8c4f13]">Sửa bản nháp AI</p>
       <h1 className="mt-4 max-w-3xl text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">{draft.title}</h1>
       <p className="mt-5 max-w-2xl text-lg leading-8 text-[#4f625a]">
-        Chỉnh trường cấu trúc trước khi phê duyệt. Lưu vẫn giữ bản nháp ở trạng thái cần duyệt; phê duyệt chỉ bật lifecycle approved cho truy xuất sau này, chưa tạo embedding.
+        Chỉnh các trường cấu trúc trước khi phê duyệt. Lưu vẫn giữ bản nháp ở trạng thái cần duyệt; phê duyệt chỉ cho phép dùng thẻ trong luồng truy xuất sau này, chưa tạo chỉ mục ngữ nghĩa.
       </p>
 
       {query.error ? (
@@ -54,11 +55,11 @@ export default async function KnowledgeDraftDetailPage({ params, searchParams }:
             <div key={source.id} className="rounded-2xl border border-[#d8c9ad] bg-white/70 p-4 text-sm text-[#4f625a]">
               <p className="font-semibold text-[#17342c]">{source.label}</p>
               <p className="mt-2">
-                {source.kind} · {source.sourceType}/{source.verificationStatus} · hỗ trợ: {source.supportLevel}
+                {sourceKindLabels[source.kind] ?? source.kind} · {sourceTypeLabels[source.sourceType] ?? source.sourceType}/{verificationStatusLabels[source.verificationStatus] ?? source.verificationStatus} · hỗ trợ: {evidenceSupportLevelLabels[source.supportLevel] ?? source.supportLevel}
               </p>
               <p className="mt-1">{source.publisher ? `${source.publisher} · ` : ""}{source.collectedDate ?? "Chưa có ngày thu thập"}</p>
               {source.canonicalUrl || source.url ? <p className="mt-1 break-all">{source.canonicalUrl ?? source.url}</p> : null}
-              <p className="mt-1">Official: {source.official ? "có" : "không"} · Partner: {source.partner ? "có" : "không"}</p>
+              <p className="mt-1">Nguồn chính thức: {source.official ? "có" : "không"} · Đối tác: {source.partner ? "có" : "không"}</p>
             </div>
           ))}
         </div>
@@ -66,8 +67,8 @@ export default async function KnowledgeDraftDetailPage({ params, searchParams }:
 
       {draft.suggestion ? (
         <section className="mt-8 rounded-[1.5rem] border border-[#d8c9ad] bg-white/75 p-5 sm:p-6">
-          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#8c4f13]">Metadata gợi ý AI</p>
-          <h2 className="mt-3 text-2xl font-semibold tracking-[-0.03em] text-[#17342c]">Hành động đề xuất: {draft.suggestion.action}</h2>
+          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#8c4f13]">Thông tin gợi ý của AI</p>
+          <h2 className="mt-3 text-2xl font-semibold tracking-[-0.03em] text-[#17342c]">Hành động đề xuất: {draft.suggestion.action === "create" ? "Tạo thẻ mới" : draft.suggestion.action === "update" ? "Cập nhật thẻ" : draft.suggestion.action === "conflict" ? "Có thông tin mâu thuẫn" : draft.suggestion.action}</h2>
           <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
             {draft.suggestion.beforeSummary ? (
               <div className="rounded-2xl bg-[#fbf7ed] p-3">
@@ -97,7 +98,7 @@ export default async function KnowledgeDraftDetailPage({ params, searchParams }:
           {draft.suggestion.targetCard ? (
             <div className="mt-5 rounded-2xl border border-[#d8c9ad] bg-[#f4ead7] p-4 text-sm text-[#4f625a]">
               <p className="font-semibold text-[#17342c]">Thẻ mục tiêu chưa bị thay đổi</p>
-              <p className="mt-2">{draft.suggestion.targetCard.title} · {draft.suggestion.targetCard.status} · {draft.suggestion.targetCard.type} · {draft.suggestion.targetCard.confidence}</p>
+              <p className="mt-2">{draft.suggestion.targetCard.title} · {knowledgeCardStatusLabels[draft.suggestion.targetCard.status] ?? draft.suggestion.targetCard.status} · {knowledgeCardTypeLabels[draft.suggestion.targetCard.type] ?? draft.suggestion.targetCard.type} · {knowledgeConfidenceLabels[draft.suggestion.targetCard.confidence] ?? draft.suggestion.targetCard.confidence}</p>
               <p className="mt-2 leading-6">{draft.suggestion.targetCard.summary}</p>
             </div>
           ) : null}
@@ -112,7 +113,7 @@ export default async function KnowledgeDraftDetailPage({ params, searchParams }:
             <label className="font-semibold text-[#17342c]" htmlFor="type">Loại thẻ</label>
             <select className="min-h-12 rounded-2xl border border-[#d8c9ad] bg-[#fbf7ed] px-4 text-base outline-none focus:ring-4 focus:ring-[#e5bd82]" defaultValue={draft.type} id="type" name="type">
               {knowledgeCardTypeValues.map((type) => (
-                <option key={type} value={type}>{type}</option>
+                <option key={type} value={type}>{knowledgeCardTypeLabels[type] ?? type}</option>
               ))}
             </select>
           </div>
@@ -120,7 +121,7 @@ export default async function KnowledgeDraftDetailPage({ params, searchParams }:
             <label className="font-semibold text-[#17342c]" htmlFor="confidence">Độ tin cậy</label>
             <select className="min-h-12 rounded-2xl border border-[#d8c9ad] bg-[#fbf7ed] px-4 text-base outline-none focus:ring-4 focus:ring-[#e5bd82]" defaultValue={draft.confidence} id="confidence" name="confidence">
               {knowledgeConfidenceValues.map((confidence) => (
-                <option key={confidence} value={confidence}>{confidence}</option>
+                <option key={confidence} value={confidence}>{knowledgeConfidenceLabels[confidence] ?? confidence}</option>
               ))}
             </select>
           </div>
@@ -153,13 +154,13 @@ export default async function KnowledgeDraftDetailPage({ params, searchParams }:
         </div>
 
         <div className="grid gap-2">
-          <label className="font-semibold text-[#17342c]" htmlFor="tags">Tags, phân tách bằng dấu phẩy</label>
+          <label className="font-semibold text-[#17342c]" htmlFor="tags">Nhãn, phân tách bằng dấu phẩy</label>
           <input className="min-h-12 rounded-2xl border border-[#d8c9ad] bg-[#fbf7ed] px-4 text-base outline-none focus:ring-4 focus:ring-[#e5bd82]" defaultValue={draft.tags.join(", ")} id="tags" name="tags" />
         </div>
 
         <label className="flex items-start gap-3 text-sm font-semibold text-[#4f625a]">
           <input className="mt-1 size-4 accent-[#1f5f46]" defaultChecked={draft.freshnessSensitive} name="freshnessSensitive" type="checkbox" />
-          Freshness-sensitive: giá, lịch, giờ mở cửa, khuyến mãi, tình trạng đường hoặc thông tin dễ thay đổi.
+          Cần cập nhật theo thời điểm: giá, lịch, giờ mở cửa, khuyến mãi, tình trạng đường hoặc thông tin dễ thay đổi.
         </label>
 
         <button className="min-h-12 w-fit rounded-2xl bg-[#1f5f46] px-5 py-4 text-base font-semibold text-white shadow-[0_12px_30px_rgba(31,95,70,0.22)] transition hover:bg-[#194d39] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]" type="submit">
@@ -172,11 +173,11 @@ export default async function KnowledgeDraftDetailPage({ params, searchParams }:
         <input name="updatedAt" type="hidden" value={draft.updatedAt.toISOString()} />
         <h2 className="text-2xl font-semibold tracking-[-0.03em] text-[#1f5f46]">Phê duyệt cho truy xuất</h2>
         <p className="mt-3 max-w-2xl leading-7 text-[#34594b]">
-          Chỉ dùng sau khi đã kiểm tra nội dung, nguồn an toàn, confidence và freshness. Hành động này chuyển thẻ sang approved, bỏ khỏi hàng đợi bản nháp và không gọi AI hay tạo embedding.
+          Chỉ dùng sau khi đã kiểm tra nội dung, nguồn an toàn, độ tin cậy và thời điểm cần cập nhật. Hành động này phê duyệt thẻ, bỏ thẻ khỏi hàng đợi bản nháp và không gọi AI hay tạo chỉ mục ngữ nghĩa.
         </p>
         <label className="mt-5 flex items-start gap-3 text-sm font-semibold text-[#34594b]">
           <input className="mt-1 size-4 accent-[#1f5f46]" name="approvalConfirmed" type="checkbox" />
-          Tôi đã kiểm tra nguồn, confidence và freshness; thẻ này sẵn sàng chuyển sang approved.
+          Tôi đã kiểm tra nguồn, độ tin cậy và thời điểm cần cập nhật; thẻ này sẵn sàng được phê duyệt.
         </label>
         <button className="mt-5 min-h-12 rounded-2xl bg-[#1f5f46] px-5 py-4 text-base font-semibold text-white shadow-[0_12px_30px_rgba(31,95,70,0.22)] transition hover:bg-[#194d39] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]" type="submit">
           Phê duyệt bản nháp
@@ -186,7 +187,7 @@ export default async function KnowledgeDraftDetailPage({ params, searchParams }:
       <form action={rejectKnowledgeDraftForm} className="mt-6 rounded-[1.5rem] border border-[#d99a93] bg-[#fff0ee] p-5 sm:p-6">
         <input name="draftId" type="hidden" value={draft.id} />
         <h2 className="text-2xl font-semibold tracking-[-0.03em] text-[#9b2f29]">Từ chối bản nháp</h2>
-        <p className="mt-3 max-w-2xl leading-7 text-[#6d3f3a]">Hành động này chuyển bản nháp sang rejected, bỏ khỏi hàng đợi mặc định và không tạo phê duyệt, retrieval hay embedding.</p>
+        <p className="mt-3 max-w-2xl leading-7 text-[#6d3f3a]">Hành động này từ chối bản nháp, bỏ bản nháp khỏi hàng đợi mặc định và không tạo phê duyệt, truy xuất hay chỉ mục ngữ nghĩa.</p>
         <button className="mt-5 min-h-12 rounded-2xl bg-[#9b2f29] px-5 py-4 text-base font-semibold text-white transition hover:bg-[#7d2521] focus:outline-none focus:ring-4 focus:ring-[#d99a93]" type="submit">
           Từ chối bản nháp
         </button>

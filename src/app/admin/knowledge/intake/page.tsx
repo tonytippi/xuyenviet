@@ -3,6 +3,7 @@ import Link from "next/link";
 import { listRecentKnowledgeSeedBatches } from "@/features/knowledge/batch-intake";
 import { extractKnowledgeDraftsFromSourceForm, removeKnowledgeSourceForm } from "@/features/knowledge/actions";
 import { listKnowledgeUrlSources } from "@/features/knowledge/sources";
+import { seedBatchItemStatusLabels } from "@/features/knowledge/display-labels";
 
 import { IntakeUrlModal } from "./intake-url-modal";
 
@@ -163,7 +164,7 @@ export default async function KnowledgeIntakePage({ searchParams }: KnowledgeInt
                     <p className="mt-1 text-xs text-[#4f625a]">{batch.id}</p>
                   </div>
                   <p className="text-sm font-semibold text-[#1f5f46]">
-                    Pending {batch.counts.pending} · Review {batch.counts.needs_review} · Approved {batch.counts.approved} · Lỗi/trùng {batch.counts.failed + batch.counts.duplicate + batch.counts.rejected}
+                    Chờ xử lý {batch.counts.pending} · Cần kiểm tra {batch.counts.needs_review} · Đã phê duyệt {batch.counts.approved} · Lỗi/trùng {batch.counts.failed + batch.counts.duplicate + batch.counts.rejected}
                   </p>
                 </div>
                 <div className="mt-3 grid gap-2">
@@ -172,9 +173,9 @@ export default async function KnowledgeIntakePage({ searchParams }: KnowledgeInt
                       <p className="break-all font-semibold text-[#17342c]">
                         Dòng {item.lineNumber}: {item.canonicalUrl ?? item.submittedUrl}
                       </p>
-                      <p className="mt-1 uppercase tracking-[0.12em] text-[#8c4f13]">{item.status}</p>
+                      <p className="mt-1 uppercase tracking-[0.12em] text-[#8c4f13]">{seedBatchItemStatusLabels[item.status] ?? item.status}</p>
                       {item.errorSummary ? <p className="mt-1 text-[#9b2f29]">{item.errorSummary}</p> : null}
-                      {item.sourceId ? <p className="mt-1 text-xs text-[#4f625a]">Source: {item.sourceId}</p> : null}
+                      {item.sourceId ? <p className="mt-1 text-xs text-[#4f625a]">Mã nguồn: {item.sourceId}</p> : null}
                     </div>
                   ))}
                 </div>
@@ -227,13 +228,13 @@ function isSensitiveQueryParam(key: string) {
 }
 
 function getCaptureLabel(kind: string) {
-  return kind === "facebook" ? "Chưa capture" : "Không áp dụng";
+  return kind === "facebook" ? "Chưa thu thập" : "Không áp dụng";
 }
 
 function getExtractionLabel(linkedKnowledgeCardCount: number, facebookCaptureStatus: string | null) {
   if (linkedKnowledgeCardCount > 0 || facebookCaptureStatus === "extracted" || facebookCaptureStatus === "extracted_approved") {
-    return "Đã extract";
+    return "Đã trích xuất";
   }
 
-  return "Chưa extract";
+  return "Chưa trích xuất";
 }

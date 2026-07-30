@@ -2,31 +2,15 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { getKnowledgeRecommendationDetail } from "@/features/knowledge/recommendations";
+import { evidenceSupportLevelLabels, knowledgeCardTypeLabels, recommendationReasonLabels } from "@/features/knowledge/display-labels";
 
 import { RecommendationActionForm } from "./recommendation-action-form";
 
 type Props = { params: Promise<{ recommendationId: string }>; searchParams: Promise<{ error?: string; resolved?: string }> };
 
-const recommendationReasonLabels: Record<string, string> = {
-  risk: "Rủi ro",
-  weak_evidence: "Bằng chứng yếu",
-  freshness: "Thông tin có thể đã cũ",
-  conflict: "Có thông tin mâu thuẫn",
-  duplicate_risk: "Nguy cơ trùng lặp",
-  missing_context: "Thiếu ngữ cảnh",
-  verification: "Cần xác minh",
-  relation: "Cần đối chiếu thẻ liên quan",
-  sampling: "Kiểm tra lấy mẫu",
-};
-
-const knowledgeTypeLabels: Record<string, string> = {
-  place: "Địa điểm", food: "Ăn uống", hotel_area: "Khu vực lưu trú", activity: "Hoạt động", service: "Dịch vụ", route_note: "Lưu ý cung đường", warning: "Cảnh báo", cost_note: "Lưu ý chi phí", parking: "Đỗ xe", ev_charging: "Sạc xe điện", kid_friendly_tip: "Gợi ý cho trẻ em", discount_promotion: "Ưu đãi", general_travel_tip: "Mẹo du lịch chung",
-};
-
 const candidateStageLabels: Record<string, string> = { published: "Đã xuất bản", suppressed: "Không xuất bản", review_recommended: "Cần kiểm tra", verify_first: "Cần xác minh trước", failed: "Xử lý lỗi" };
 const candidateReasonLabels: Record<string, string> = { attach_condition_mismatch: "Điều kiện không khớp để gắn bằng chứng", conflict_condition_mismatch: "Điều kiện không khớp để tạo xung đột", relation_ambiguous: "Không xác định được thẻ liên quan", stale_relation_target: "Thẻ đích đã thay đổi hoặc không còn phù hợp" };
 const judgeDecisionLabels: Record<string, string> = { publish: "Đủ điều kiện xuất bản", review_recommended: "Cần vận hành kiểm tra", verify_first: "Cần xác minh trước", suppress: "Không xuất bản" };
-const evidenceSupportLevelLabels: Record<string, string> = { primary: "Chính", supporting: "Hỗ trợ", conflicting: "Mâu thuẫn" };
 
 function formatDate(value: Date) {
   return value.toLocaleString("vi-VN", { dateStyle: "medium", timeStyle: "short" });
@@ -90,7 +74,7 @@ export default async function KnowledgeRecommendationPage({ params, searchParams
     <section className="mt-7 rounded-2xl border border-[#d8c9ad] bg-white/75 p-5">
       <h2 className="text-xl font-semibold">Bối cảnh để đánh giá</h2>
       <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
-        <div className="rounded-xl bg-[#fbf7ed] p-3"><dt className="font-semibold">Loại tri thức</dt><dd className="mt-1 text-[#4f625a]">{knowledgeTypeLabels[recommendation.card.type] ?? recommendation.card.type}</dd></div>
+        <div className="rounded-xl bg-[#fbf7ed] p-3"><dt className="font-semibold">Loại tri thức</dt><dd className="mt-1 text-[#4f625a]">{knowledgeCardTypeLabels[recommendation.card.type] ?? recommendation.card.type}</dd></div>
         <div className="rounded-xl bg-[#fbf7ed] p-3"><dt className="font-semibold">Phạm vi</dt><dd className="mt-1 text-[#4f625a]">{[recommendation.card.locationName, recommendation.card.routeSegment].filter(Boolean).join(" · ") || "Chưa xác định"}</dd></div>
         <div className="rounded-xl bg-[#fbf7ed] p-3"><dt className="font-semibold">Lý do cần xử lý</dt><dd className="mt-1 text-[#4f625a]">{recommendationReasonLabels[recommendation.reason] ?? recommendation.reason}</dd></div>
         <div className="rounded-xl bg-[#fbf7ed] p-3"><dt className="font-semibold">Độ mới cần lưu ý</dt><dd className="mt-1 text-[#4f625a]">{recommendation.card.freshnessSensitive ? "Có: cần đối chiếu điều kiện hiện tại trước khi xuất bản" : "Không đánh dấu là thông tin dễ thay đổi"}</dd></div>

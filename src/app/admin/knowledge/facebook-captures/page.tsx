@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { type KnowledgeIngestionStage } from "@/db/schema";
 import { facebookCaptureQueueFilters, listAdminFacebookCaptureQueue, listAdminFacebookCaptureQueueCounts, parseFacebookCaptureQueueFilter, type FacebookCaptureQueueFilter } from "@/features/knowledge/facebook-capture-review-admin";
+import { sourceTypeLabels, verificationStatusLabels } from "@/features/knowledge/display-labels";
 
 type FacebookCaptureReviewQueuePageProps = {
   searchParams: Promise<{
@@ -137,7 +138,7 @@ export default async function FacebookCaptureReviewQueuePage({ searchParams }: F
                 </div>
                 <div className="rounded-2xl bg-[#fbf7ed] p-3">
                    <dt className="font-semibold text-[#17342c]">Mức độ tin cậy</dt>
-                   <dd className="mt-1 text-[#4f625a]">{review.sourceType}/{review.verificationStatus} · chính thức: {review.official ? "có" : "không"} · đối tác: {review.partner ? "có" : "không"}</dd>
+                   <dd className="mt-1 text-[#4f625a]">{sourceTypeLabels[review.sourceType] ?? review.sourceType}/{verificationStatusLabels[review.verificationStatus] ?? review.verificationStatus} · chính thức: {review.official ? "có" : "không"} · đối tác: {review.partner ? "có" : "không"}</dd>
                 </div>
                 <div className="rounded-2xl bg-[#fbf7ed] p-3">
                   <dt className="font-semibold text-[#17342c]">Thẻ đã liên kết</dt>
