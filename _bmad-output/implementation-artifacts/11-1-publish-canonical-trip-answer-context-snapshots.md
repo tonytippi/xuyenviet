@@ -1,6 +1,6 @@
 # Story 11.1: Publish Canonical TripAnswerContext Snapshots
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -205,3 +205,39 @@ gpt-5.6-terra-review
 - Added execution-level persistence coverage for exact rendered snapshot evidence, command/provenance/usage links, and aggregate/deletion fence races with no partial terminal records.
 - Verification: serial focused PostgreSQL matrix (7 files, 288 passed), `pnpm typecheck`, `pnpm build`, and `git diff --check` passed. `pnpm lint` had zero errors and five pre-existing unrelated warnings.
 - Status intentionally returned to `ready-for-dev`; the story is not marked done pending follow-up independent review.
+
+### Second And Final Independent Code Review
+
+#### Review Metadata
+
+- Date: 2026-07-30
+- Range: `2847c3d87585033af95edc86c6f3d817ba976a43..bb29086b27042b816f800cf2f5b7ca004484bc3d`
+- Result: blocked; one actionable patch finding remains.
+- Review layers: Blind Hunter, Edge Case Hunter, and Acceptance Auditor all completed synchronously.
+
+#### Actionable Findings
+
+1. **[MEDIUM][patch] Make knowledge prompt usage ledger exact.** `packages/database/src/source-bundle.ts:516,566` records every factual knowledge card in `promptUsage.knowledgeCardIds`, but `buildApprovedKnowledgePromptSection` can stop before later cards at its independent 2,400-character cap (`packages/database/src/approved-knowledge.ts:84-90`). `packages/database/src/provenance.ts:143-159` then persists those omitted cards with `usedInPrompt: true`. Return an explicit selected-card ledger from the knowledge renderer (or render from one), use it for provenance, account for omitted selected cards as excluded where required, and add a cap-regression test. This violates AC3's exact final-prompt evidence requirement.
+
+#### Triage Notes
+
+- **Dismissed:** `packages/database/src/source-bundle.ts:760-766` can compact serialized context values further, but the separately persisted ordered references retain every included identifier and version. The story requires bounded deterministic serialization, not full value retention beyond its bound; no incorrect prompt-usage accounting follows from this path.
+- **Dismissed:** `packages/database/src/answer-context.ts:144-147,175-176` keeps v1 metadata non-enumerable for compatibility, but the only publisher consumer accesses the typed instance directly and explicitly materializes all snapshot fields. No supplied consumer serializes or spreads the contract; this is not a demonstrated story regression.
+- **Dismissed:** `packages/database/src/answer-context.ts:95-101` lets project chat replace a legacy migration alias when structured state is absent. The contract defines project chat as a gap filler in that circumstance, but does not define legacy aliases as canonical over project chat; typed conflicts are required for lower-priority disagreement with canonical structured state.
+- **Deferred:** none.
+
+#### Review Evidence
+
+- Blind Hunter completed and reported the two dismissed observations above.
+- Edge Case Hunter completed and reported the dismissed legacy/project-chat conflict path.
+- Acceptance Auditor found AC1 and AC2 satisfied, AC3 partial because knowledge prompt-use evidence is not exact, and scope satisfied. It reported the actionable finding above.
+- Verification completed by the independent acceptance layer: 313 focused PostgreSQL tests across the requested suites passed; `pnpm typecheck`, `pnpm build`, and requested-range `git diff --check` passed; `pnpm lint` had zero errors and five pre-existing unrelated warnings.
+
+### Final Bounded Repair
+
+- Date: 2026-07-30
+- Scope: repaired only the final independent-review knowledge prompt-use finding.
+- `renderApprovedKnowledgePromptSection` now returns the exact capped rendered-card ledger and omitted-card ledger; source-bundle prompt usage consumes only the rendered card IDs, so provenance records cap-omitted factual cards with `usedInPrompt: false`.
+- Added a PostgreSQL-backed cap regression that persists both rendered and omitted cards and verifies provenance exactly matches the renderer ledger.
+- Verification: `pnpm vitest run tests/answer-context.test.ts` passed (97 tests); `pnpm typecheck`, `pnpm build`, and `git diff --check` passed. `pnpm lint` had zero errors and five pre-existing unrelated warnings.
+- Final permitted repair complete. Story status is done.

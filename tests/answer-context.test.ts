@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { setAiAskStreamTestDependencies } from "../packages/database/src/ai-ask-stream-execution";
 import { setSourceBundleTestDependencies } from "../packages/database/src/source-bundle";
 
@@ -1608,6 +1608,48 @@ describe("answer context assembly", () => {
     expect(rendered.tripContext.included).toHaveLength(30);
     expect(rendered.tripContext.excluded).toEqual([{ kind: "conversation_fact", id: "budget", version: null, reason: "prompt_cap" }]);
     expect(JSON.parse(rendered.tripContext.serialization).primaryConversationId).toHaveLength(160);
+  });
+
+  test("knowledge provenance marks only cards rendered before the knowledge cap as prompt-used", async () => {
+    await createTestUser("user-1");
+    const { conversation, message } = await createConversationWithUserMessage({ userId: "user-1" });
+    const [assistantMessage] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "assistant", content: "Gợi ý có nguồn." }).returning({ id: messages.id });
+    const { renderApprovedKnowledgePromptSection } = await import("../packages/database/src/approved-knowledge");
+    const { renderSourceBundlePromptSection } = await import("@/features/retrieval/source-bundle");
+    const { persistAssistantAnswerProvenance } = await import("@/features/retrieval/provenance");
+    const knowledge = Array.from({ length: 3 }, (_, index) => makeKnowledgeResult(`cap-card-${index + 1}`, `Điểm dừng ${index + 1}`, {
+      summary: "chi tiết hành trình ".repeat(80),
+      practicalDetails: { tips: "lưu ý an toàn ".repeat(80) },
+    }));
+    const knowledgeRender = renderApprovedKnowledgePromptSection(knowledge);
+    const sourceBundle = createSourceBundle({ knowledge });
+    const rendered = renderSourceBundlePromptSection(sourceBundle);
+
+    expect(knowledgeRender.renderedCardIds).not.toHaveLength(0);
+    expect(knowledgeRender.omittedCardIds).not.toHaveLength(0);
+    expect(rendered.promptUsage.knowledgeCardIds).toEqual(knowledgeRender.renderedCardIds);
+    expect(rendered.promptUsage.knowledgeCardIds).not.toContain(knowledgeRender.omittedCardIds[0]);
+
+    await persistAssistantAnswerProvenance(testDb, {
+      userId: "user-1",
+      conversationId: conversation.id,
+      userMessageId: message.id,
+      assistantMessageId: assistantMessage.id,
+      promptUsage: rendered.promptUsage,
+      sourceBundle,
+    });
+    const rows = await testDb.select({ cardId: assistantResponseProvenance.sourceReferenceId, usedInPrompt: assistantResponseProvenance.usedInPrompt })
+      .from(assistantResponseProvenance)
+      .where(and(
+        eq(assistantResponseProvenance.assistantMessageId, assistantMessage.id),
+        eq(assistantResponseProvenance.sourceCategory, "knowledge"),
+      ))
+      .orderBy(asc(assistantResponseProvenance.sourceReferenceId));
+
+    expect(rows).toEqual(knowledge.map((card) => ({
+      cardId: card.id,
+      usedInPrompt: knowledgeRender.renderedCardIds.includes(card.id),
+    })).sort((left, right) => left.cardId.localeCompare(right.cardId)));
   });
 
   test("knowledge provenance is unverified when projected evidence is unverified", async () => {

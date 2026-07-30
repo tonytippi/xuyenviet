@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { type AnswerContextDigest, type AnswerContextFact, type TripAnswerContext, loadAnswerContext } from "./answer-context";
-import { buildApprovedKnowledgePromptSection, loadApprovedKnowledgeForAiAsk } from "./approved-knowledge";
+import { loadApprovedKnowledgeForAiAsk, renderApprovedKnowledgePromptSection } from "./approved-knowledge";
 import { getDb } from "./client";
 import type { KnowledgeSearchResult } from "./knowledge-search";
 import { aiUsageMechanisms, aiUsagePromptVersions, aiUsageProviders, aiUsagePurposes } from "./usage-events";
@@ -513,7 +513,7 @@ export function renderSourceBundlePromptSection(bundle: ContextPrioritySourceBun
   appendFactSection(lines, "2. Ngữ cảnh phiên chat hiện tại", context.chatFacts);
   appendFamilyGuidance(lines, context);
   appendConflictSection(lines, context.conflicts);
-  appendKnowledgeSection(lines, bundle.knowledge.filter(isFactualItineraryPremise));
+  const knowledge = appendKnowledgeSection(lines, bundle.knowledge.filter(isFactualItineraryPremise));
   appendRetrievalDecisionSection(lines, bundle.retrievalDecision);
   appendWarningSection(lines, bundle.warnings);
   appendWebSection(lines, bundle.web, bundle.warnings);
@@ -522,14 +522,14 @@ export function renderSourceBundlePromptSection(bundle: ContextPrioritySourceBun
 
   const section = lines.join("\n");
 
-  if (section.length <= maxSourceBundleSectionLength) return buildRenderedSourceBundle(bundle, section, { contextLimit: maxContextFacts, knowledge: bundle.knowledge.filter(isFactualItineraryPremise), web: bundle.web.slice(0, maxWebResultsInPrompt) });
+  if (section.length <= maxSourceBundleSectionLength) return buildRenderedSourceBundle(bundle, section, { contextLimit: maxContextFacts, knowledgeCardIds: knowledge.renderedCardIds, web: bundle.web.slice(0, maxWebResultsInPrompt) });
   const compacted = buildCompactedSourceBundlePromptSection(bundle);
   return buildRenderedSourceBundle(bundle, compacted.section, compacted);
 }
 
 export function buildSourceBundlePromptSection(bundle: ContextPrioritySourceBundle) { return renderSourceBundlePromptSection(bundle).section; }
 
-function buildRenderedSourceBundle(bundle: ContextPrioritySourceBundle, section: string, selection: { contextLimit: number; knowledge: KnowledgeSearchResult[]; web: NormalizedWebSearchResult[] }): RenderedSourceBundle {
+function buildRenderedSourceBundle(bundle: ContextPrioritySourceBundle, section: string, selection: { contextLimit: number; knowledgeCardIds: string[]; web: NormalizedWebSearchResult[] }): RenderedSourceBundle {
   const { contextLimit } = selection;
   const context = bundle.tripAnswerContext ?? { version: 1 as const, hasProjectScope: false, tripProjectId: null, aggregateVersion: null, primaryConversationId: null, anchors: bundle.chatTripContext.tripProjectFacts, planItems: [], constraints: null, currentConversationFacts: bundle.chatTripContext.chatFacts, conflicts: bundle.chatTripContext.conflicts };
   const references: TripContextReference[] = [
@@ -563,7 +563,7 @@ function buildRenderedSourceBundle(bundle: ContextPrioritySourceBundle, section:
     promptUsage: {
       tripProjectFactIndexes: selectedFactIndexes(bundle.chatTripContext.tripProjectFacts, renderedTripFacts),
       chatFactIndexes: selectedFactIndexes(bundle.chatTripContext.chatFacts, renderedChatFacts),
-      knowledgeCardIds: selection.knowledge.map((item) => item.id),
+      knowledgeCardIds: selection.knowledgeCardIds,
       webRanks: selection.web.map((item) => item.rank),
       generalReasoningUsed: true,
     },
@@ -589,7 +589,7 @@ function appendStructuredTripContext(lines: string[], context: TripAnswerContext
   for (const item of context.planItems.slice(0, limit)) lines.push(`- planItem=${JSON.stringify(item.id)} version=${item.version} kind=${item.kind} anchorRole=${JSON.stringify(item.anchorRole)} type=${JSON.stringify(item.type)} state=${item.state} label=${formatPromptValue(item.label, 160)} ordinal=${item.ordinal} parentItemId=${JSON.stringify(item.parentItemId)}`);
 }
 
-function buildCompactedSourceBundlePromptSection(bundle: ContextPrioritySourceBundle): { section: string; contextLimit: number; knowledge: KnowledgeSearchResult[]; web: NormalizedWebSearchResult[] } {
+function buildCompactedSourceBundlePromptSection(bundle: ContextPrioritySourceBundle): { section: string; contextLimit: number; knowledgeCardIds: string[]; web: NormalizedWebSearchResult[] } {
   const lines = [
     "Gói nguồn ưu tiên cho AI Ask",
     "BEGIN_CONTEXT_PRIORITY_SOURCE_BUNDLE",
@@ -605,7 +605,7 @@ function buildCompactedSourceBundlePromptSection(bundle: ContextPrioritySourceBu
   appendFactSection(lines, "2. Ngữ cảnh phiên chat hiện tại", context.chatFacts.slice(0, 10));
   appendFamilyGuidance(lines, context);
   appendConflictSection(lines, context.conflicts.slice(0, 10));
-  appendKnowledgeSection(lines, bundle.knowledge.filter(isFactualItineraryPremise).slice(0, 1));
+  const knowledge = appendKnowledgeSection(lines, bundle.knowledge.filter(isFactualItineraryPremise).slice(0, 1));
   appendRetrievalDecisionSection(lines, bundle.retrievalDecision);
   appendWarningSection(lines, bundle.warnings);
   appendWebSection(lines, bundle.web.slice(0, 2), bundle.warnings);
@@ -614,11 +614,11 @@ function buildCompactedSourceBundlePromptSection(bundle: ContextPrioritySourceBu
 
   const section = lines.join("\n");
   return section.length <= maxSourceBundleSectionLength
-    ? { section, contextLimit: 10, knowledge: bundle.knowledge.filter(isFactualItineraryPremise).slice(0, 1), web: bundle.web.slice(0, 2) }
+    ? { section, contextLimit: 10, knowledgeCardIds: knowledge.renderedCardIds, web: bundle.web.slice(0, 2) }
     : buildMinimalSourceBundlePromptSection(bundle);
 }
 
-function buildMinimalSourceBundlePromptSection(bundle: ContextPrioritySourceBundle): { section: string; contextLimit: number; knowledge: KnowledgeSearchResult[]; web: NormalizedWebSearchResult[] } {
+function buildMinimalSourceBundlePromptSection(bundle: ContextPrioritySourceBundle): { section: string; contextLimit: number; knowledgeCardIds: string[]; web: NormalizedWebSearchResult[] } {
   const lines = [
     "Gói nguồn ưu tiên cho AI Ask",
     "BEGIN_CONTEXT_PRIORITY_SOURCE_BUNDLE",
@@ -634,7 +634,7 @@ function buildMinimalSourceBundlePromptSection(bundle: ContextPrioritySourceBund
   appendFactSection(lines, "2. Ngữ cảnh phiên chat hiện tại", context.chatFacts.slice(0, 1));
   appendFamilyGuidance(lines, context);
   appendConflictSection(lines, context.conflicts.slice(0, 1));
-  appendKnowledgeSection(lines, bundle.knowledge.filter(isFactualItineraryPremise).slice(0, 1));
+  const knowledge = appendKnowledgeSection(lines, bundle.knowledge.filter(isFactualItineraryPremise).slice(0, 1));
   appendRetrievalDecisionSection(lines, bundle.retrievalDecision);
   appendWarningSection(lines, bundle.warnings);
 
@@ -650,7 +650,7 @@ function buildMinimalSourceBundlePromptSection(bundle: ContextPrioritySourceBund
 
   const section = lines.join("\n");
   if (section.length <= maxSourceBundleSectionLength) {
-    return { section, contextLimit: 1, knowledge: bundle.knowledge.filter(isFactualItineraryPremise).slice(0, 1), web: includesWeb ? bundle.web.slice(0, 1) : [] };
+    return { section, contextLimit: 1, knowledgeCardIds: knowledge.renderedCardIds, web: includesWeb ? bundle.web.slice(0, 1) : [] };
   }
 
   // Do not truncate arbitrary text: re-render a deterministic essential variant
@@ -666,7 +666,7 @@ function buildMinimalSourceBundlePromptSection(bundle: ContextPrioritySourceBund
   appendWarningSection(essential, bundle.warnings);
   essential.push("5. Suy luận tổng quát: chỉ dùng sau các nguồn trên; phải nói rõ khi câu trả lời chỉ là gợi ý tổng quát.");
   essential.push("END_CONTEXT_PRIORITY_SOURCE_BUNDLE");
-  return { section: essential.join("\n"), contextLimit: 0, knowledge: [], web: [] };
+  return { section: essential.join("\n"), contextLimit: 0, knowledgeCardIds: [], web: [] };
 }
 
 function appendRetrievalDecisionSection(lines: string[], decision: RetrievalDecision) {
@@ -827,14 +827,15 @@ function isNegativeFamilyValue(normalizedValue: string) {
 }
 
 function appendKnowledgeSection(lines: string[], knowledge: KnowledgeSearchResult[]) {
-  const section = buildApprovedKnowledgePromptSection(knowledge);
+  const rendered = renderApprovedKnowledgePromptSection(knowledge);
 
-  if (!section) {
-    return;
+  if (!rendered.section) {
+    return rendered;
   }
 
   lines.push("3. Kiến thức Xuyên Việt đang hiệu lực theo trạng thái");
-  lines.push(section);
+  lines.push(rendered.section);
+  return rendered;
 }
 
 function isFactualItineraryPremise(item: KnowledgeSearchResult) {
