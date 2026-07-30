@@ -27,7 +27,10 @@ describe("AI Ask stream execution", () => {
     const provenance = await testDb.select().from(assistantResponseProvenance);
 
     expect(events.at(-1)).toMatchObject({ type: "done" });
+    expect(rendered.section).toContain('lower="Đà Lạt"');
+    expect(rendered.section.split("2. Ngữ cảnh phiên chat hiện tại")[1]?.split("Mâu thuẫn giữa chat và dự án")[0]).not.toContain("Đà Lạt");
     expect(snapshot).toMatchObject({ tripProjectId: project.id, serialization: rendered.tripContext.serialization, promptDigest: rendered.tripContext.promptDigest, includedReferences: rendered.tripContext.included, excludedReferences: rendered.tripContext.excluded });
+    expect(snapshot?.conflicts).toEqual(rendered.tripContext.conflicts);
     expect(command).toMatchObject({ status: "completed", tripAnswerContextSnapshotId: snapshot.id });
     expect(decision?.tripAnswerContextSnapshotId).toBe(snapshot.id);
     expect(usage?.tripAnswerContextSnapshotId).toBe(snapshot.id);
@@ -144,8 +147,8 @@ async function seedUserAndModel() {
 
 function sourceBundle(): ContextPrioritySourceBundle {
   return {
-    tripAnswerContext: { version: 1, hasProjectScope: true, tripProjectId: "project", aggregateVersion: 1, primaryConversationId: "conversation", anchors: [{ field: "destination", value: "Huế", source: "trip_project" }], planItems: [], constraints: null, currentConversationFacts: [{ field: "budget", value: "5 triệu", source: "conversation" }], conflicts: [] },
-    chatTripContext: { tripProjectFacts: [{ field: "destination", value: "Huế", source: "trip_project" }], chatFacts: [{ field: "budget", value: "5 triệu", source: "conversation" }], conflicts: [] },
+    tripAnswerContext: { version: 1, hasProjectScope: true, tripProjectId: "project", aggregateVersion: 1, primaryConversationId: "conversation", anchors: [{ field: "destination", value: "Huế", source: "trip_project" }], planItems: [], constraints: null, currentConversationFacts: [{ field: "budget", value: "5 triệu", source: "conversation" }], conflicts: [{ field: "destination", canonicalValue: "Huế", lowerPriorityValue: "Đà Lạt", projectValue: "Huế", conversationValue: "Đà Lạt", source: "conversation_chat", priority: "lower", material: true }] },
+    chatTripContext: { tripProjectFacts: [{ field: "destination", value: "Huế", source: "trip_project" }], chatFacts: [{ field: "budget", value: "5 triệu", source: "conversation" }], conflicts: [{ field: "destination", canonicalValue: "Huế", lowerPriorityValue: "Đà Lạt", projectValue: "Huế", conversationValue: "Đà Lạt", source: "conversation_chat", priority: "lower", material: true }] },
     knowledge: [], web: [], general: { available: true }, warnings: [],
     retrievalDecision: { approvedKnowledgeCandidateCount: 0, approvedKnowledgeSelectedCount: 0, approvedKnowledgeTargetCount: 3, approvedKnowledgeRelevanceThreshold: 1, broadPlanningQuestion: false, freshnessRequired: false, conflictDetected: false, webSearchTriggered: false, webSearchTriggerReasons: [], generalReasoningUsed: true },
   };

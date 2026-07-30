@@ -857,7 +857,9 @@ function selectAllowlistedContext(context: ContextPrioritySourceBundle["chatTrip
   return {
     tripProjectFacts: selectedTrip,
     chatFacts: selectedChat,
-    conflicts: context.conflicts.filter((conflict) => allowedContextFields.has(conflict.field) && selectedValues.has(`${conflict.field}\u0000${conflict.projectValue}`) && selectedValues.has(`${conflict.field}\u0000${conflict.conversationValue}`)),
+    // A material lower-priority value is intentionally excluded from normal facts.
+    // Keep its typed conflict when the selected canonical value gives it a safe anchor.
+    conflicts: context.conflicts.filter((conflict) => allowedContextFields.has(conflict.field) && selectedValues.has(`${conflict.field}\u0000${conflict.projectValue}`)),
   };
 }
 

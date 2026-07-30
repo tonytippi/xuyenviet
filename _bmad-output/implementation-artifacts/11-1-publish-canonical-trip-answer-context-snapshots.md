@@ -241,3 +241,11 @@ gpt-5.6-terra-review
 - Added a PostgreSQL-backed cap regression that persists both rendered and omitted cards and verifies provenance exactly matches the renderer ledger.
 - Verification: `pnpm vitest run tests/answer-context.test.ts` passed (97 tests); `pnpm typecheck`, `pnpm build`, and `git diff --check` passed. `pnpm lint` had zero errors and five pre-existing unrelated warnings.
 - Final permitted repair complete. Story status is done.
+
+### Epic 11 Completion-Review Repair
+
+- Date: 2026-07-30
+- Scope: repaired only the typed lower-priority clarification-conflict finding shared with Story 11.5.
+- `selectAllowlistedContext` retains an allowlisted typed conflict when its canonical field/value is selected, even though ordinary fact selection correctly excludes the lower-priority conversational value. That lower-priority value is rendered only by the bounded conflict section.
+- Added execution-level PostgreSQL coverage proving the final prompt contains the typed conflict, excludes its lower-priority value from ordinary chat facts, and persists the exact rendered conflicts and prompt digest in the immutable snapshot.
+- Story status remains done; Epic 11 remains in-progress pending rerun of the Epic completion review.
