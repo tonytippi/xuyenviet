@@ -25,6 +25,11 @@ export default async function ApprovedKnowledgePage({ searchParams }: ApprovedKn
   const searchResult = searchMode ? await searchApprovedKnowledgeWithCandidateCount(query, { limit: searchLimit }) : null;
   const cards = searchMode ? [] : await listApprovedKnowledgeCardsWithIndexStatus();
   const searchIndexStatuses = searchResult ? await getApprovedKnowledgeIndexStatuses(searchResult.results.map((card) => card.id)) : new Map<string, ApprovedKnowledgeIndexStatus>();
+  const knowledgeStats = searchMode ? null : {
+    published: cards.length,
+    indexed: cards.filter((card) => card.indexStatus.state === "indexed").length,
+    pendingIndexing: cards.filter((card) => card.indexStatus.state !== "indexed").length,
+  };
 
   return (
     <div>
@@ -33,6 +38,26 @@ export default async function ApprovedKnowledgePage({ searchParams }: ApprovedKn
       <p className="mt-5 max-w-2xl text-lg leading-8 text-[#4f625a]">
           Các thẻ đã xuất bản, sẵn sàng dùng cho du khách. Thẻ cần xác minh nằm trong hàng đợi khuyến nghị.
       </p>
+
+      {knowledgeStats ? (
+        <section aria-label="Tổng quan tri thức đã xuất bản" className="mt-7 grid gap-3 sm:grid-cols-3">
+          <div className="rounded-2xl border border-[#1f5f46] bg-[#edf7ef] p-4">
+            <p className="text-sm font-semibold text-[#4f625a]">Đã xuất bản</p>
+            <p className="mt-2 text-3xl font-semibold text-[#17342c]">{knowledgeStats.published}</p>
+            <p className="mt-1 text-sm text-[#4f625a]">Sẵn sàng hiển thị trong thư viện.</p>
+          </div>
+          <div className="rounded-2xl border border-[#d8c9ad] bg-white/75 p-4">
+            <p className="text-sm font-semibold text-[#4f625a]">Đã vào chỉ mục AI</p>
+            <p className="mt-2 text-3xl font-semibold text-[#17342c]">{knowledgeStats.indexed}</p>
+            <p className="mt-1 text-sm text-[#4f625a]">Có thể được Trợ lý AI truy xuất.</p>
+          </div>
+          <div className="rounded-2xl border border-[#d8c9ad] bg-white/75 p-4">
+            <p className="text-sm font-semibold text-[#4f625a]">Chờ lập chỉ mục</p>
+            <p className="mt-2 text-3xl font-semibold text-[#17342c]">{knowledgeStats.pendingIndexing}</p>
+            <p className="mt-1 text-sm text-[#4f625a]">Worker cần đồng bộ hoặc kiểm tra bằng chứng.</p>
+          </div>
+        </section>
+      ) : null}
 
       <form className="mt-8 rounded-[1.5rem] border border-[#d8c9ad] bg-white/75 p-4 shadow-[0_12px_30px_rgba(41,33,18,0.08)] sm:p-5" action="/admin/knowledge/approved">
         <label className="text-sm font-semibold uppercase tracking-[0.18em] text-[#8c4f13]" htmlFor="approved-knowledge-search">
