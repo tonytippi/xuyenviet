@@ -1990,6 +1990,8 @@ export const assistantProvenanceWithdrawalBackfillState = pgTable(
   {
     contractKey: text("contract_key").primaryKey(),
     cutoverAt: timestamp("cutover_at", { mode: "date" }).notNull(),
+    oldWritersQuiescedAt: timestamp("old_writers_quiesced_at", { mode: "date" }).notNull(),
+    oldWritersAdmission: text("old_writers_admission").notNull(),
     cursorCreatedAt: timestamp("cursor_created_at", { mode: "date" }),
     cursorId: text("cursor_id"),
     completedAt: timestamp("completed_at", { mode: "date" }),
@@ -1998,6 +2000,7 @@ export const assistantProvenanceWithdrawalBackfillState = pgTable(
   },
   (state) => [
     check("assistant_provenance_withdrawal_backfill_state_key_check", sql`${state.contractKey} = 'v1'`),
+    check("assistant_provenance_withdrawal_backfill_state_admission_check", sql`${state.oldWritersAdmission} = 'old_terminal_evaluation_writers_quiesced_v1'`),
     check("assistant_provenance_withdrawal_backfill_state_cursor_check", sql`(${state.cursorCreatedAt} is null and ${state.cursorId} is null) or (${state.cursorCreatedAt} is not null and ${state.cursorId} is not null)`),
     check("assistant_provenance_withdrawal_backfill_state_failure_check", sql`${state.failureCode} is null or ${state.failureCode} in ('unclassifiable_anchor', 'owner_relation_unresolved')`),
     check("assistant_provenance_withdrawal_backfill_state_terminal_check", sql`(${state.completedAt} is null or (${state.failedAt} is null and ${state.failureCode} is null)) and ((${state.failedAt} is null and ${state.failureCode} is null) or (${state.failedAt} is not null and ${state.failureCode} is not null))`),

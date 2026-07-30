@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { beforeEach, describe, expect, test } from "vitest";
 
 import { assistantProvenanceWithdrawalBackfillState, assistantResponseProvenance, auditEvents, conversations, knowledgeCardEvidence, knowledgeCardSearchDocuments, knowledgeCards, knowledgeIndexDirtyMarkers, knowledgeCardSources, knowledgeRecommendations, knowledgeSourceSuggestions, messages, sourceCaptureVersions, sources, users } from "@/db/schema";
@@ -20,7 +20,10 @@ async function provenance(id: string, snapshot: Record<string, unknown>, created
   const [conversation] = await testDb.insert(conversations).values({ userId: "operator" }).returning({ id: conversations.id });
   const [question] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "operator", role: "user", content: "Question" }).returning({ id: messages.id });
   const [answer] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "operator", role: "assistant", content: "Answer" }).returning({ id: messages.id });
-  await testDb.insert(assistantResponseProvenance).values({ id, userId: "operator", conversationId: conversation.id, userMessageId: question.id, assistantMessageId: answer.id, sourceCategory: "knowledge", sourceReferenceId: sourceReference?.id ?? null, sourceReferenceType: sourceReference?.type ?? null, rank: 1, verificationStatus: "verified", usedInPrompt: true, citedInAnswer: false, sourceSnapshot: snapshot, createdAt });
+  await testDb.transaction(async (transaction) => {
+    await transaction.execute(sql`select set_config('xuyenviet.provenance_writer_contract', 'v1', true)`);
+    await transaction.insert(assistantResponseProvenance).values({ id, userId: "operator", conversationId: conversation.id, userMessageId: question.id, assistantMessageId: answer.id, sourceCategory: "knowledge", sourceReferenceId: sourceReference?.id ?? null, sourceReferenceType: sourceReference?.type ?? null, rank: 1, verificationStatus: "verified", usedInPrompt: true, citedInAnswer: false, sourceSnapshot: snapshot, createdAt });
+  });
 }
 
 function knowledgeInsertionRow(sourceReferenceId: string | null, sourceReferenceType: string | null, sourceSnapshot: Record<string, unknown>) {
@@ -31,7 +34,7 @@ describe("knowledge source removal", () => {
   beforeEach(async () => {
     await resetTestDatabase();
     await testDb.insert(users).values({ id: "operator", email: "operator@example.com" });
-    await testDb.insert(assistantProvenanceWithdrawalBackfillState).values({ contractKey: "v1", cutoverAt: new Date(), completedAt: new Date() });
+    await testDb.insert(assistantProvenanceWithdrawalBackfillState).values({ contractKey: "v1", cutoverAt: new Date(), oldWritersQuiescedAt: new Date(), oldWritersAdmission: "old_terminal_evaluation_writers_quiesced_v1", completedAt: new Date() });
   });
 
   test("withdraws evidence, suppresses unsupported cards, disables projections, and tombstones payloads atomically", async () => {

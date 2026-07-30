@@ -5,7 +5,11 @@ import { schema, users } from "@/db/schema";
 
 import { getTestDatabaseUrl } from "./env-file";
 
-const testSql = postgres(getTestDatabaseUrl(), { max: 1 });
+const testDatabaseUrl = new URL(getTestDatabaseUrl());
+// The fixture connection represents the coordinated v1 writer. Production
+// connections never receive this test-only admission parameter.
+testDatabaseUrl.searchParams.set("options", "-c xuyenviet.provenance_writer_contract=v1");
+const testSql = postgres(testDatabaseUrl.toString(), { max: 1 });
 
 export const testDb = drizzle(testSql, { schema });
 

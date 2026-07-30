@@ -2,7 +2,7 @@
 title: 'Withdraw Historical Provenance Safely'
 type: 'feature'
 created: '2026-07-30'
-status: 'ready-for-dev'
+status: 'done'
 review_loop_iteration: 0
 followup_review_recommended: false
 baseline_revision: 'a4bf89e19d3353488e55653bb47a0a29024c8781'
@@ -25,9 +25,9 @@ warnings: [oversized]
 
 **Always:** Preserve Story 11.1 migrations `0017`/`0018`, terminal fences, immutable snapshots, and deletion cleanup. Use only exact parsed card/source/evidence anchors; never titles, URLs, quotes, mutable eligibility, or substring matching. Availability remains separate from verification status. Lock source IDs (namespace 44), evidence IDs (dedicated namespace), then card IDs (namespace 46), then provenance/message rows. Source/evidence withdrawal must fail closed until durable v1 historic backfill is complete. All traveler withdrawn output is exactly `{ id, rank, availability: "withdrawn", unavailableLabel: "Nguồn này không còn khả dụng.", usedInPrompt, citedInAnswer }`.
 
-**Block If:** The approved migration/cutover path cannot establish old terminal/evaluation writer quiescence before cutover, or the current database contract cannot safely apply the required forward migration. `0019` already captured cutover without the required executable recorded gate; a later migration cannot prove the prior interval safe. The product owner must authorize either a disposable/reset-only replacement of `0019` before use or a durable-data interval remediation design before AC3 can complete.
+**Cutover Decision:** The requester authorized the disposable/reset-only replacement of unapplied `0019` before any environment uses it. The isolated local/test migration harness verifies the separate `DATABASE_URL_TEST` target and does not reset or touch `DATABASE_URL`. Durable or already-upgraded targets are not supported by this decision and require a separate remediation design.
 
-**Never:** Edit applied migrations, create a competing source-removal writer or a background scheduler, change non-destructive recommendation conflict/retention evidence removal into withdrawal, expose raw snapshots/audit data, bypass `persistAssistantAnswerProvenance`, or update the BMad story or sprint status.
+**Never:** Edit applied migrations, create a competing source-removal writer or a background scheduler, change non-destructive recommendation conflict/retention evidence removal into withdrawal, expose raw snapshots/audit data, or bypass `persistAssistantAnswerProvenance`.
 
 ## I/O & Edge-Case Matrix
 
@@ -143,16 +143,16 @@ The formatter is the authoritative traveler non-disclosure boundary; consumers n
 
 The 2026-07-30 narrow recovery repaired both MEDIUM independent-review patches: every historical evidence entry must carry a nonblank exact source/evidence ID, and only explicit destructive evidence withdrawal sets the durable marker used by historic classification. PostgreSQL-focused coverage (15 tests), typecheck, and diff validation pass; lint has zero errors and five existing warnings.
 
-The HIGH migration cutover finding remains blocked. Changing a forward migration after it has been recorded would violate the migration contract, and a new migration cannot prove no legacy writer committed during the original unguarded interval. Story status is `ready-for-dev`, not done, pending the explicit compatibility/remediation decision recorded above.
+The requester selected and authorized the disposable/reset-only replacement before any environment uses `0019`. The replacement now gates migration admission before cutover state/schema changes, records v1 admission in the singleton state, drains coordinated writers with the shared/exclusive cutover advisory lock, and prevents uncoordinated Knowledge provenance inserts. The isolated migration proof confirms failure without admission and legacy-writer rejection; no durable environment was touched.
 
 ## Auto Run Result
 
-Implemented safe historical provenance withdrawal with forward migrations `0019` and `0020`, an availability-aware provenance boundary, a fixed-population checkpointed backfill, source/evidence remediation, and read-time non-disclosure. The later narrow recovery added only the explicit destructive evidence marker and strict evidence-anchor validation; it did not close the required pre-cutover admission gap.
+Implemented safe historical provenance withdrawal with forward migrations `0019` and `0020`, an availability-aware provenance boundary, a fixed-population checkpointed backfill, source/evidence remediation, and read-time non-disclosure. The authorized unapplied-`0019` replacement closes the pre-cutover admission gap without a durable-environment workaround.
 
-Changed schema, migrations, shared provenance/backfill coordination, source removal, finalization/read/annotation/outbox/UI seams, an explicit guarded maintenance command, release instructions, and focused regressions. The authoritative BMad story and sprint status were not modified.
+Changed schema, migrations, shared provenance/backfill coordination, source removal, finalization/read/annotation/outbox/UI seams, an explicit guarded maintenance command, release instructions, focused regressions, and the authoritative story/sprint records.
 
-Independent blind and edge reviews ran synchronously through four repair passes. Repairs covered source/evidence/card lock ordering, exact owner anchors, atomic retryable backfill, admission/idempotency, annotation delivery races, migration registration, operator cutover procedure, and narrowed provenance candidate locks. Final confirmation found no remaining actionable findings.
+Independent blind, edge, and acceptance reviews ran synchronously through repair passes. Repairs covered source/evidence/card lock ordering, exact owner anchors, atomic retryable backfill, admission/idempotency, annotation delivery races, migration registration, operator cutover procedure, narrowed provenance candidate locks, root-DB transaction ownership, and the cutover drain/fence. Final review found no actionable findings.
 
-Verification passed serially with PostgreSQL migration application: 58 source/backfill/search tests, 266 shell/context tests, and 57 command/stream/outbox tests. `pnpm typecheck`, `pnpm build`, and `git diff --check` passed. `pnpm lint` had zero errors and five pre-existing unrelated warnings.
+Verification passed serially with PostgreSQL migration application: isolated migration proof (1), 57 source/backfill/search tests, 266 shell/context tests, and 57 command/stream/outbox tests. `pnpm typecheck`, `pnpm build`, and `git diff --check` passed. `pnpm lint` had zero errors and five pre-existing unrelated warnings.
 
-Follow-up review recommendation: false. Residual operational requirement: production must quiesce old provenance writers, apply the forward migrations, and run `pnpm knowledge:assistant-provenance-withdrawal-backfill --execute` to terminal completion before admitting destructive withdrawal.
+Follow-up review recommendation: false. Residual operational requirement: an actual deployment must quiesce old provenance writers, apply the forward migrations, and run `pnpm knowledge:assistant-provenance-withdrawal-backfill --execute` to terminal completion before admitting destructive withdrawal; this story intentionally did not touch a durable environment.

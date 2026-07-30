@@ -216,7 +216,7 @@ describe("knowledge draft review", () => {
     await createUser("removed-source-approve-operator", ["operator"]);
     authMock.mockResolvedValue({ user: { id: "removed-source-approve-operator", email: "removed-source-approve-operator@example.com" } });
     const { draft, source } = await createDraft("removed-source-approve-operator");
-    await testDb.insert(assistantProvenanceWithdrawalBackfillState).values({ contractKey: "v1", cutoverAt: new Date(), completedAt: new Date() });
+    await testDb.insert(assistantProvenanceWithdrawalBackfillState).values({ contractKey: "v1", cutoverAt: new Date(), oldWritersQuiescedAt: new Date(), oldWritersAdmission: "old_terminal_evaluation_writers_quiesced_v1", completedAt: new Date() });
     await removeKnowledgeSource({ sourceId: source.id, reason: "withdrawn", actor: { userId: "removed-source-approve-operator", email: "removed-source-approve-operator@example.com" } }, testDb);
     const { approveKnowledgeDraft } = await import("@/features/knowledge/review");
 

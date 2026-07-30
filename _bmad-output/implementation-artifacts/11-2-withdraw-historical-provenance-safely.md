@@ -1,6 +1,6 @@
 # Story 11.2: Withdraw Historical Provenance Safely
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -181,6 +181,10 @@ gpt-5.6-terra-review
 - 2026-07-30 narrow recovery repaired both independent-review MEDIUM patches. The v1 anchor classifier now rejects every `sourceSnapshot.evidence[]` object without a nonblank exact `sourceId` or `evidenceId`, even when a card or another evidence item is valid; a PostgreSQL backfill regression proves it persists `unclassifiable_anchor`. Evidence now records a bounded `withdrawalReason` only when the destructive source/evidence commands remove it, and historic classification treats a removed evidence ID as withdrawn only with that marker; a retention-style removed-evidence regression remains available.
 - The independent-review HIGH cutover finding remains blocked by an authoritative migration-history decision. `0019` has already captured `cutoverAt` without the required executable recorded legacy-writer admission gate. A new forward migration can reject future legacy inserts but cannot prove whether an old writer committed an available row in the already-open interval from `0019.cutoverAt` to the historic scan, so it cannot satisfy AC3. The story forbids editing applied `0019`; choose either (a) an explicitly authorized disposable/reset-only compatibility path that replaces `0019` before any environment uses it, or (b) an approved durable-data remediation contract that identifies and safely reclassifies every potential interval row before destructive withdrawal. Do not mark Story 11.2 done or admit destructive withdrawal until that decision is made and implemented.
 - Recovery verification: `pnpm vitest run tests/knowledge-source-removal.test.ts` passed (15 tests); `pnpm typecheck` passed; `pnpm lint` completed with 0 errors and the existing five unrelated warnings; `git diff --check` passed.
+- 2026-07-30 authorized cutover decision: the requester explicitly authorized the disposable/reset-only path for this story. Repository preflight confirmed the Vitest harness owns a separate local/test-named `DATABASE_URL_TEST`; no `DATABASE_URL` reset, migration, backfill, or other external/durable database action was performed. `0019` was still unapplied and was therefore replaced in place before any environment uses it. Durable/upgraded environments remain unsupported by this decision and require a separate remediation design.
+- 2026-07-30 final AC3 repair: `0019` now requires `xuyenviet.provenance_old_writers_quiesced=v1` before any schema/cutover state change, takes the existing provenance-cutover advisory lock exclusively, locks the provenance table, records the bounded quiescence admission with the single database `transaction_timestamp()` cutover, and installs a Knowledge-provenance trigger rejecting uncoordinated legacy inserts. The sole coordinated persistence boundary is transaction-owned for root callers, takes the matching shared cutover lock, and sets the transaction-local writer contract before insertion; the migration drain/table fence therefore prevents old terminal/evaluation writers from creating an unscanned available row.
+- Migration-backed PostgreSQL coverage proves the ungated migration rolls back before state creation, accepted v1 admission is durably recorded with cutover time, and an unadmitted legacy Knowledge insert fails. Final serial verification passed: migration proof (1), source/removal/search (57), shell/context/answer-context (266), and command/stream/outbox (57). `pnpm typecheck`, `pnpm build`, and `git diff --check` passed; `pnpm lint` had zero errors and the five existing unrelated warnings.
+- Final independent review ran synchronously after repair. Blind Hunter and Edge Case Hunter found no actionable findings; the local acceptance audit confirmed AC3 and the authorized reset-only scope. The earlier review's root-DB transaction and migration-drain concerns were repaired before this pass.
 
 ### File List
 
@@ -193,3 +197,8 @@ gpt-5.6-terra-review
 - `drizzle/migrations/0021_mark_destructive_evidence_withdrawals.sql`
 - `drizzle/migrations/meta/_journal.json`
 - `tests/knowledge-source-removal.test.ts`
+- `drizzle/migrations/0019_withdraw_historical_assistant_provenance.sql`
+- `packages/database/src/provenance.ts`
+- `tests/global-setup.ts`
+- `tests/helpers/db.ts`
+- `tests/provenance-cutover-migration.test.ts`

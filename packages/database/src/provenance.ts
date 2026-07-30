@@ -1,3 +1,5 @@
+import { sql } from "drizzle-orm";
+
 import { toStateAwareKnowledgeBundleItem, type StateAwareKnowledgeBundleItem } from "./approved-knowledge";
 import { classifyAssistantProvenanceRowsForInsertion } from "./assistant-provenance-withdrawal";
 import { getDb } from "./client";
@@ -60,7 +62,25 @@ export async function persistAssistantAnswerProvenance(db: ProvenanceDb, input: 
   sourceBundle: ContextPrioritySourceBundle;
   promptUsage?: PromptUsageLedger;
 }) {
+  // This boundary must own a transaction even for root-DB callers: its writer
+  // admission, locks, classification, and insert must share one session.
+  return db.transaction((transaction) => persistAssistantAnswerProvenanceInTransaction(transaction, input));
+}
+
+async function persistAssistantAnswerProvenanceInTransaction(db: Exclude<ProvenanceDb, Database>, input: {
+  userId: string;
+  conversationId: string;
+  userMessageId: string;
+  assistantMessageId: string;
+  tripAnswerContextSnapshotId?: string | null;
+  sourceBundle: ContextPrioritySourceBundle;
+  promptUsage?: PromptUsageLedger;
+}) {
   const { userId, conversationId, userMessageId, assistantMessageId, tripAnswerContextSnapshotId, sourceBundle, promptUsage } = input;
+
+  // The migration takes this same key exclusively. It drains coordinated
+  // finalization before cutover while its table lock fences legacy inserts.
+  await db.execute(sql`select pg_advisory_xact_lock_shared(918040112)`);
 
   await db.insert(assistantRetrievalDecisions).values({
     userId,
@@ -87,6 +107,9 @@ export async function persistAssistantAnswerProvenance(db: ProvenanceDb, input: 
 
   if (rows.length > 0) {
     await classifyAssistantProvenanceRowsForInsertion(db, rows);
+    // The migration trigger rejects legacy writers. This transaction-local flag is
+    // set only at the sole coordinated insertion boundary.
+    await db.execute(sql`select set_config('xuyenviet.provenance_writer_contract', 'v1', true)`);
     const insertedRows = await db.insert(assistantResponseProvenance).values(rows).returning();
     return formatAssistantMessageProvenance(insertedRows);
   }
