@@ -146,4 +146,20 @@ describe("planning API read policy", () => {
     expect(JSON.stringify(detail)).not.toContain("secret");
     expect(JSON.stringify(detail)).not.toContain("rawMaterial");
   });
+
+  test("keeps required assistant prose when optional stored enrichment is invalid", async () => {
+    await testDb.insert(users).values({ id: "planning-safe-answer", email: "planning-safe-answer@example.com" });
+    const [conversation] = await testDb.insert(conversations).values({ userId: "planning-safe-answer" }).returning();
+    const [assistant] = await testDb.insert(messages).values({
+      userId: "planning-safe-answer",
+      conversationId: conversation.id,
+      role: "assistant",
+      content: "Câu trả lời vẫn dùng được.",
+      answerAnnotations: [{ id: "invalid-source", start: 0, end: 3, text: "Câu", type: "source", detail: { type: "source", label: "Câu", provenanceIds: ["missing"] } }],
+    }).returning();
+
+    const detail = await createPostgresPlanningReadRepository().loadOwnedAnswerDetail("planning-safe-answer", conversation.id, assistant.id);
+
+    expect(detail).toEqual({ conversationId: conversation.id, assistantMessageId: assistant.id, content: "Câu trả lời vẫn dùng được.", provenance: [], annotations: [] });
+  });
 });

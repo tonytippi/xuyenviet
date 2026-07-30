@@ -127,22 +127,26 @@ export function createPostgresPlanningReadRepository(): PlanningReadRepository {
         .innerJoin(conversations, and(eq(conversations.id, messages.conversationId), eq(conversations.userId, userId)))
         .where(and(eq(messages.id, assistantMessageId), eq(messages.conversationId, conversationId), eq(messages.userId, userId), eq(messages.role, "assistant"))).limit(1);
       if (!message) return null;
-      const rows = await db.select({ id: assistantResponseProvenance.id, sourceCategory: assistantResponseProvenance.sourceCategory, rank: assistantResponseProvenance.rank, retrievalScore: assistantResponseProvenance.retrievalScore, sourceType: assistantResponseProvenance.sourceType, verificationStatus: assistantResponseProvenance.verificationStatus, availability: assistantResponseProvenance.availability, usedInPrompt: assistantResponseProvenance.usedInPrompt, citedInAnswer: assistantResponseProvenance.citedInAnswer, sourceSnapshot: assistantResponseProvenance.sourceSnapshot })
-        .from(assistantResponseProvenance).where(and(eq(assistantResponseProvenance.userId, userId), eq(assistantResponseProvenance.conversationId, conversationId), eq(assistantResponseProvenance.assistantMessageId, assistantMessageId)));
-      const provenance = formatAssistantMessageProvenance(rows).map(serializePlanningProvenance);
-      const annotations = await resolvePlanningAnnotationCapabilities({
-        annotations: sanitizeStoredPlanningAnnotations({ answerText: message.content, annotations: message.answerAnnotations, provenance }),
-        hasCurrentPendingProposal: async () => {
-          const proposals = await db.select({ id: tripChangeProposals.id, expiresAt: tripChangeProposals.expiresAt })
-            .from(tripChangeProposals)
-            .innerJoin(conversations, and(eq(conversations.tripProjectId, tripChangeProposals.tripProjectId), eq(conversations.id, conversationId), eq(conversations.userId, userId)))
-            .where(and(eq(tripChangeProposals.userId, userId), eq(tripChangeProposals.status, "pending"), eq(tripChangeProposals.sourceAssistantMessageId, assistantMessageId)));
-          return proposals.length === 1 && (!proposals[0].expiresAt || proposals[0].expiresAt.getTime() > Date.now());
-        },
-      });
-      const response = parsePlanningAnswerDetailResponse({ detail: { conversationId, assistantMessageId: message.id, content: message.content, provenance, annotations } });
-      if (!response?.detail) throw new Error("Planning detail serialization exceeded the safe response contract.");
-      return response.detail;
+      const safeAnswer = parsePlanningAnswerDetailResponse({ detail: { conversationId, assistantMessageId: message.id, content: message.content, provenance: [], annotations: [] } });
+      if (!safeAnswer?.detail) throw new Error("Planning detail serialization exceeded the safe response contract.");
+      try {
+        const rows = await db.select({ id: assistantResponseProvenance.id, sourceCategory: assistantResponseProvenance.sourceCategory, rank: assistantResponseProvenance.rank, retrievalScore: assistantResponseProvenance.retrievalScore, sourceType: assistantResponseProvenance.sourceType, verificationStatus: assistantResponseProvenance.verificationStatus, availability: assistantResponseProvenance.availability, usedInPrompt: assistantResponseProvenance.usedInPrompt, citedInAnswer: assistantResponseProvenance.citedInAnswer, sourceSnapshot: assistantResponseProvenance.sourceSnapshot })
+          .from(assistantResponseProvenance).where(and(eq(assistantResponseProvenance.userId, userId), eq(assistantResponseProvenance.conversationId, conversationId), eq(assistantResponseProvenance.assistantMessageId, assistantMessageId)));
+        const provenance = formatAssistantMessageProvenance(rows).map(serializePlanningProvenance);
+        const annotations = await resolvePlanningAnnotationCapabilities({
+          annotations: sanitizeStoredPlanningAnnotations({ answerText: message.content, annotations: message.answerAnnotations, provenance }),
+          hasCurrentPendingProposal: async () => {
+            const proposals = await db.select({ id: tripChangeProposals.id, expiresAt: tripChangeProposals.expiresAt })
+              .from(tripChangeProposals)
+              .innerJoin(conversations, and(eq(conversations.tripProjectId, tripChangeProposals.tripProjectId), eq(conversations.id, conversationId), eq(conversations.userId, userId)))
+              .where(and(eq(tripChangeProposals.userId, userId), eq(tripChangeProposals.status, "pending"), eq(tripChangeProposals.sourceAssistantMessageId, assistantMessageId)));
+            return proposals.length === 1 && (!proposals[0].expiresAt || proposals[0].expiresAt.getTime() > Date.now());
+          },
+        });
+        return parsePlanningAnswerDetailResponse({ detail: { conversationId, assistantMessageId: message.id, content: message.content, provenance, annotations } })?.detail ?? safeAnswer.detail;
+      } catch {
+        return safeAnswer.detail;
+      }
     },
   };
 }

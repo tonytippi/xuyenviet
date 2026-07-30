@@ -27,6 +27,8 @@ type AiAskPageProps = {
   }>;
 };
 
+const assistantDetailConcurrency = 4;
+
 function getFirstParam(value: string | string[] | undefined) {
   if (Array.isArray(value)) {
     return value.find((item) => item.trim());
@@ -71,7 +73,7 @@ function hasCanonicalParam(value: string | string[] | undefined, expected: strin
 async function loadSelectedAssistantDetails(conversation: Awaited<ReturnType<typeof getOwnedConversationShell>> | Awaited<ReturnType<typeof getOwnedConversation>>, apiEnabled: boolean) {
   if (!conversation) return conversation;
 
-  const messages = await Promise.all(conversation.messages.map(async (message) => {
+  const messages = await mapWithConcurrency(conversation.messages, assistantDetailConcurrency, async (message) => {
     if (message.role !== "assistant") return message;
     const detail = apiEnabled
       ? await loadSelectedAnswerDetail({
@@ -98,9 +100,22 @@ async function loadSelectedAssistantDetails(conversation: Awaited<ReturnType<typ
     return detail.detail
       ? { ...message, content: detail.detail.content, provenance: detail.detail.provenance as typeof message.provenance, annotations: detail.detail.annotations as typeof message.annotations }
       : apiEnabled ? { ...message, provenance: [], annotations: [] } : message;
-  }));
+  });
 
   return { ...conversation, messages };
+}
+
+async function mapWithConcurrency<T, R>(items: readonly T[], limit: number, mapper: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    for (;;) {
+      const index = nextIndex++;
+      if (index >= items.length) return;
+      results[index] = await mapper(items[index]!);
+    }
+  }));
+  return results;
 }
 
 function applyCurrentPlanningContext<T extends { id: string; origin: string | null; destination: string | null; startDate: string | null; endDate: string | null }>(project: T, context: TripAnswerContextResponse | null): T {

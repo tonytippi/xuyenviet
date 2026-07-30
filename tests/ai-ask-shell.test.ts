@@ -178,6 +178,7 @@ describe("AI Ask authenticated shell", () => {
     vi.resetModules();
     vi.clearAllMocks();
     delete process.env.AI_GATEWAY_TIMEOUT_MS;
+    delete process.env.XV_PLANNING_READ_API_ENABLED;
   });
 
   test("renders the authenticated empty AI Ask shell contract", async () => {
@@ -228,7 +229,8 @@ describe("AI Ask authenticated shell", () => {
     expect(html).not.toContain("source-chip");
   });
 
-  test("renders a completed answer with supplemental safe optional-work states", async () => {
+  test("preserves completed prose when API detail enrichment is unavailable", async () => {
+    vi.stubEnv("XV_PLANNING_READ_API_ENABLED", "true");
     await createTestUser("user-1");
     const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
     const [assistant] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "assistant", content: "Câu trả lời đã hoàn tất." }).returning({ id: messages.id });
@@ -1477,7 +1479,7 @@ describe("AI Ask conversation data layer", () => {
     });
   });
 
-  test("keeps API shells free of assistant content and enrichment", async () => {
+  test("keeps API shells free of enrichment while retaining persisted assistant prose", async () => {
     await createTestUser("user-1");
     vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }) }));
     const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
@@ -1490,7 +1492,15 @@ describe("AI Ask conversation data layer", () => {
     const shellAssistant = shell?.messages.find((message) => message.id === assistant.id);
 
     expect(shell?.messages.find((message) => message.role === "user")?.content).toBe("Đi Huế?");
-    expect(shellAssistant).toMatchObject({ content: undefined, provenance: [], annotations: [] });
+    expect(shellAssistant).toMatchObject({ content: "Câu trả lời đã hoàn tất.", provenance: [], annotations: [] });
+  });
+
+  test("bounds API detail fan-out for assistant history", () => {
+    const source = readFileSync("src/app/ai-ask/page.tsx", "utf8");
+
+    expect(source).toContain("const assistantDetailConcurrency = 4;");
+    expect(source).toContain("mapWithConcurrency(conversation.messages, assistantDetailConcurrency");
+    expect(source).toContain("Array.from({ length: Math.min(limit, items.length) }");
   });
 
   test("loads ordered assistant provenance for owned conversation history only", async () => {

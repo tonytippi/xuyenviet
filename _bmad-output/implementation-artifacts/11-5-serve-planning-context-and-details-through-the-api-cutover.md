@@ -152,7 +152,16 @@ gpt-5.6-terra-review
 - Ultimate context-engine analysis completed - comprehensive developer guide created.
 - Validation passed before implementation: canonical/current versus immutable/historic read semantics, strict safe DTOs, principal-derived ownership, read-time withdrawal, annotation sanitization, current capability derivation, single-owner BFF cutover, legacy-read retirement boundary, and verification layers are complete and traceable.
 - No production code, migration, test execution, deployment, or non-story artifact was modified by this story-creation workflow.
+- 2026-07-30 independent review of `5d3909c5a5e1ac7415979908431505aac5aea96f..935217f4f8cfc93e223e87e75079ee66bb159ae2` completed synchronously with Blind Hunter, Edge Case Hunter, and Acceptance Auditor. Four actionable patches remain: API-mode detail failure blanks completed assistant prose; an invalid optional detail enrichment can fail the entire API read instead of preserving prose; guarded controller coverage omits a valid foreign-principal non-disclosure request; and page detail loading launches unbounded concurrent BFF requests for assistant-history messages. AC1 passes; AC2 and AC3 are partial. No code changes were made during review.
+- 2026-07-30 repaired only the four independent-review findings. API shells retain persisted completed assistant prose when the selected API detail request is unavailable, while provenance and annotations remain empty and no legacy detail request is made. PostgreSQL detail projection now falls back to a contract-validated prose-only detail when optional provenance/annotation enrichment is invalid or unavailable. Guarded controller coverage uses a valid foreign principal and observes the same null response. Page detail BFF work is bounded to four concurrent requests. Focused serial tests: 168 passed; typecheck and build passed; lint had zero errors and five pre-existing unrelated warnings; `git diff --check` passed. Status is ready-for-dev, not done.
 
 ### File List
 
 - `_bmad-output/implementation-artifacts/11-5-serve-planning-context-and-details-through-the-api-cutover.md`
+- `_bmad-output/implementation-artifacts/sprint-status.yaml`
+- `src/app/ai-ask/page.tsx`
+- `src/features/chat-trips/conversations.ts`
+- `packages/database/src/index.ts`
+- `tests/ai-ask-shell.test.ts`
+- `tests/api-platform-contract.test.ts`
+- `tests/planning-read.test.ts`

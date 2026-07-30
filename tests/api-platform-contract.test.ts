@@ -31,7 +31,7 @@ beforeEach(async () => {
     "xuyenviet-web-bff": { issuer: "xuyenviet-web-bff", active },
     "xuyenviet-admin-bff": { issuer: "xuyenviet-admin-bff", active: admin },
   } });
-  const identities: ApiIdentityRepository = { async getSession(sessionId) { return sessionId === "session-1" ? { userId: "user-1", expires: new Date(Date.now() + 60_000), authorizationVersion: 1 } : null; } };
+  const identities: ApiIdentityRepository = { async getSession(sessionId) { return sessionId === "session-1" ? { userId: "user-1", expires: new Date(Date.now() + 60_000), authorizationVersion: 1 } : sessionId === "session-2" ? { userId: "user-2", expires: new Date(Date.now() + 60_000), authorizationVersion: 1 } : null; } };
   const summaries: ConversationSummaryRepository = { async listOwnedConversationSummaryRows(userId) { return rows[userId] ?? []; } };
   const planningReads: PlanningReadRepository = {
     async loadOwnedPlanningContext(userId, tripProjectId) { return userId === "user-1" && tripProjectId === "project-1" ? { version: 1, hasProjectScope: true, tripProjectId, aggregateVersion: 2, primaryConversationId: "conversation-a", anchors: [], planItems: [], constraints: null, currentConversationFacts: [], conflicts: [] } : null; },
@@ -95,6 +95,7 @@ describe("API platform contracts", () => {
     await request(app.getHttpServer()).get("/v1/conversations/conversation-a/answers/foreign-answer").set("Authorization", `Bearer ${await tokenFor()}`).expect(200, { detail: null });
     await request(app.getHttpServer()).get("/v1/conversations/missing/answers/answer-1").set("Authorization", `Bearer ${await tokenFor()}`).expect(200, { detail: null });
     await request(app.getHttpServer()).get("/v1/conversations/%20bad/answers/answer-1").set("Authorization", `Bearer ${await tokenFor()}`).expect(200, { detail: null });
+    await request(app.getHttpServer()).get("/v1/conversations/conversation-a/answers/answer-1").set("Authorization", `Bearer ${await tokenFor("user-2", "session-2")}`).expect(200, { detail: null });
     const openApi = await request(app.getHttpServer()).get("/openapi.json").expect(200);
     expect(openApi.body.paths["/v1/conversations/planning-context/{tripProjectId}"].get.security).toEqual([{ bearerAuth: [] }]);
     expect(openApi.body.paths["/v1/conversations/planning-context/{tripProjectId}"].get.responses["503"]).toEqual({ $ref: "#/components/responses/SafeError" });
@@ -136,10 +137,10 @@ function asJwk(key: JsonWebKey, kid: string): Jwk {
   return { ...key, kty: "EC", crv: "P-256", kid };
 }
 
-async function tokenFor() {
+async function tokenFor(userId = "user-1", sessionId = "session-1") {
   const now = Math.floor(Date.now() / 1000);
-  return new SignJWT({ sid: "session-1", roles: ["traveler"], rv: 1, jti: crypto.randomUUID() })
-    .setProtectedHeader({ alg: "ES256", kid: active.kid }).setSubject("user-1").setIssuer("xuyenviet-web-bff").setAudience(apiAudience)
+  return new SignJWT({ sid: sessionId, roles: ["traveler"], rv: 1, jti: crypto.randomUUID() })
+    .setProtectedHeader({ alg: "ES256", kid: active.kid }).setSubject(userId).setIssuer("xuyenviet-web-bff").setAudience(apiAudience)
     .setIssuedAt(now).setNotBefore(now).setExpirationTime(now + 60)
     .sign(await importJWK(active.privateKey, "ES256"));
 }
