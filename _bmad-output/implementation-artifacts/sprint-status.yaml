@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-07-30 (Story 11.1 final bounded repair complete and verified.)
+# last_updated: 2026-07-30 (Story 11.2 creation and validation complete.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-07-30 (Story 11.1 final bounded repair complete and verified.)
+last_updated: 2026-07-30 (Story 11.2 creation and validation complete.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -219,7 +219,7 @@ development_status:
   # 2026-07-30: Second and final unattended independent review of 2847c3d87585033af95edc86c6f3d817ba976a43..bb29086b27042b816f800cf2f5b7ca004484bc3d completed synchronously with Blind Hunter, Edge Case Hunter, and Acceptance Auditor. BLOCKED: MEDIUM patch at packages/database/src/source-bundle.ts:516,566. The renderer ledger marks every factual knowledge card prompt-used even though buildApprovedKnowledgePromptSection can omit later cards at its 2,400-character cap; provenance can therefore claim usedInPrompt=true for content absent from the final prompt. AC1/AC2 pass, AC3 partial, scope pass. Repair must use an explicit knowledge render ledger, account for omitted cards, and add cap coverage. No application code changed during review.
   # 2026-07-30: Final permitted repair completed only the knowledge cap evidence patch. The knowledge renderer now returns an explicit capped rendered-card ledger and omitted-card ledger; source-bundle provenance uses only rendered card IDs, so omitted factual cards persist with usedInPrompt=false. PostgreSQL-backed cap regression passed. Verification: tests/answer-context.test.ts (97 passed), typecheck, build, and diff check passed; lint had zero errors and five pre-existing unrelated warnings. Story is done.
   11-1-publish-canonical-trip-answer-context-snapshots: done
-  11-2-withdraw-historical-provenance-safely: backlog
+  11-2-withdraw-historical-provenance-safely: ready-for-dev
   11-3-validate-persisted-answer-annotations: backlog
   11-4-bind-annotation-details-and-actions-to-current-ownership: backlog
   11-5-serve-planning-context-and-details-through-the-api-cutover: backlog
