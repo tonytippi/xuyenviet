@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-07-30 (Story 11.2 creation and validation complete.)
+# last_updated: 2026-07-30 (Story 11.3 creation and validation complete.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-07-30 (Story 11.2 creation and validation complete.)
+last_updated: 2026-07-30 (Story 11.3 creation and validation complete.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -223,7 +223,7 @@ development_status:
   # 2026-07-30: Narrow recovery repaired the two independent-review MEDIUM patches only. Historical evidence entries now fail closed unless each has a nonblank exact sourceId or evidenceId; a removed evidence row becomes historic withdrawal evidence only when the destructive source/evidence command recorded its bounded withdrawalReason, preserving conflict-resolution and retention removals. PostgreSQL focused suite: 15 tests passed; typecheck and diff check passed; lint: 0 errors and 5 existing warnings. HIGH AC3 remains blocked: 0019 already captured cutoverAt without an executable recorded old-writer admission gate. A new migration cannot prove the existing unguarded interval safe; choose an authorized disposable/reset-only 0019 replacement before use or a durable-data interval remediation design. Status is ready-for-dev, not done; destructive withdrawal remains blocked.
   # 2026-07-30: User-authorized disposable/reset-only recovery replaced unapplied 0019 before any environment used it. Repository preflight confirmed the isolated DATABASE_URL_TEST harness; no external/durable database was touched. The migration now fails closed without v1 old terminal/evaluation writer quiescence admission, records that admission with cutoverAt, drains coordinated writers through the shared/exclusive cutover lock, and rejects uncoordinated legacy Knowledge provenance inserts. Serial PostgreSQL verification passed: migration proof (1), source/search (57), shell/context (266), command/stream/outbox (57); typecheck/build/diff check passed; lint had 0 errors and five existing unrelated warnings. Final Blind Hunter, Edge Case Hunter, and local Acceptance Auditor found no actionable findings. Status synchronized to done.
   11-2-withdraw-historical-provenance-safely: done
-  11-3-validate-persisted-answer-annotations: backlog
+  11-3-validate-persisted-answer-annotations: ready-for-dev
   11-4-bind-annotation-details-and-actions-to-current-ownership: backlog
   11-5-serve-planning-context-and-details-through-the-api-cutover: backlog
   epic-11-retrospective: optional
