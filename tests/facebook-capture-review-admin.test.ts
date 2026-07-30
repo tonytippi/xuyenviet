@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { facebookCaptureReviews, knowledgeCards, knowledgeCardSources, knowledgeExtractionJobs, knowledgeIngestionCandidates, knowledgeIngestionJobs, rawSourceMaterial, sourceCaptureVersions, sources, userRoles, users, type UserRole } from "@/db/schema";
+import { facebookCaptureReviews, knowledgeCards, knowledgeCardSources, knowledgeExtractionJobs, knowledgeIngestionCandidates, knowledgeIngestionJobs, knowledgeRecommendations, rawSourceMaterial, sourceCaptureVersions, sources, userRoles, users, type UserRole } from "@/db/schema";
 import { ensureFacebookCaptureReviewForCapturedSource, markFacebookCaptureReviewStatus } from "@/features/knowledge/facebook-capture-review";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
@@ -270,6 +270,35 @@ describe("admin Facebook capture review helpers", () => {
     expect(html).toContain("Nội dung trùng bài viết gốc");
     expect(html).toContain("Không có bằng chứng");
     expect(html).not.toContain("Candidate active.");
+  });
+
+  test("detail translates relation condition mismatch reasons", async () => {
+    authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
+    const review = await createCapturedFacebookSource({ id: "condition-mismatch", rawText: "Quảng Bình đến Huế có ba tuyến với thời gian ước tính khác nhau." });
+    await testDb.insert(knowledgeIngestionJobs).values({ id: "condition-mismatch-job", sourceId: review.sourceId, captureVersionId: review.captureVersionId!, submittedByUserId: "operator-user", submittedByEmail: "operator-user@example.com", protocolVersion: 2, stage: "queued", nextRunAt: new Date() });
+    await testDb.insert(knowledgeIngestionCandidates).values({ ingestionJobId: "condition-mismatch-job", sourceId: review.sourceId, captureVersionId: review.captureVersionId!, fingerprint: "e".repeat(64), type: "route_note", title: "Thời gian ba tuyến", summary: "Thời gian ước tính khác nhau.", locationName: "Huế", routeSegment: "Quảng Bình – Huế", conditions: ["thời gian thay đổi theo giao thông"], freshnessSensitive: true, spanStart: 0, spanEnd: 1, extractionPromptVersion: "test", stage: "review_recommended", stageVersion: 2, outcomeReasonCode: "attach_condition_mismatch" });
+
+    const { default: FacebookCaptureReviewDetailPage } = await import("@/app/admin/knowledge/facebook-captures/[reviewId]/page");
+    const html = renderToStaticMarkup(await FacebookCaptureReviewDetailPage({ params: Promise.resolve({ reviewId: review.id }) }));
+
+    expect(html).toContain("Điều kiện không khớp để gắn bằng chứng");
+    expect(html).toContain("điều kiện áp dụng không giống nhau");
+  });
+
+  test("candidate links to its open recommendation instead of the approved-only detail page", async () => {
+    authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
+    const review = await createCapturedFacebookSource({ id: "candidate-recommendation-link", rawText: "Quảng Bình đến Huế có ba tuyến với thời gian ước tính khác nhau." });
+    await testDb.insert(knowledgeIngestionJobs).values({ id: "candidate-recommendation-link-job", sourceId: review.sourceId, captureVersionId: review.captureVersionId!, submittedByUserId: "operator-user", submittedByEmail: "operator-user@example.com", protocolVersion: 2, stage: "queued", nextRunAt: new Date() });
+    await testDb.insert(knowledgeCards).values({ id: "review-needed-card", status: "approved", needsReview: true, type: "route_note", title: "Thời gian ba tuyến", summary: "Thời gian ước tính khác nhau.", locationName: "Huế", routeSegment: "Quảng Bình – Huế", confidence: "community", aiPromptVersion: "test", executorSystem: "system-knowledge-pipeline" });
+    await testDb.insert(knowledgeRecommendations).values({ id: "open-card-recommendation", knowledgeCardId: "review-needed-card", contentVersion: 1, evidenceSetRevision: 1, reason: "missing_context", priority: 50 });
+    await testDb.insert(knowledgeIngestionCandidates).values({ ingestionJobId: "candidate-recommendation-link-job", sourceId: review.sourceId, captureVersionId: review.captureVersionId!, fingerprint: "f".repeat(64), type: "route_note", title: "Thời gian ba tuyến", summary: "Thời gian ước tính khác nhau.", locationName: "Huế", routeSegment: "Quảng Bình – Huế", conditions: ["thời gian thay đổi theo giao thông"], freshnessSensitive: true, spanStart: 0, spanEnd: 1, extractionPromptVersion: "test", stage: "review_recommended", stageVersion: 2, knowledgeCardId: "review-needed-card" });
+
+    const { default: FacebookCaptureReviewDetailPage } = await import("@/app/admin/knowledge/facebook-captures/[reviewId]/page");
+    const html = renderToStaticMarkup(await FacebookCaptureReviewDetailPage({ params: Promise.resolve({ reviewId: review.id }) }));
+
+    expect(html).toContain("Mở xử lý đề xuất");
+    expect(html).toContain("/admin/knowledge/recommendations/open-card-recommendation");
+    expect(html).not.toContain("/admin/knowledge/approved/review-needed-card");
   });
 
   test("detail reconstructs safe legacy evidence-mismatch content from the protected discovery completion", async () => {

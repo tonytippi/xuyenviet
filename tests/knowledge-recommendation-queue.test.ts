@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test } from "vitest";
 
-import { auditEvents, knowledgeCardEvidence, knowledgeCardSearchDocuments, knowledgeCardSources, knowledgeCards, knowledgeIndexDirtyMarkers, knowledgeRecommendations, knowledgeSamplingCohortMembers, knowledgeSamplingPolicies, sources, users } from "@/db/schema";
+import { auditEvents, knowledgeCardEvidence, knowledgeCardSearchDocuments, knowledgeCardSources, knowledgeCards, knowledgeIndexDirtyMarkers, knowledgeIngestionCandidates, knowledgeIngestionJobs, knowledgeRecommendations, knowledgeSamplingCohortMembers, knowledgeSamplingPolicies, sources, users } from "@/db/schema";
 import { getKnowledgeRecommendationDetail, listKnowledgeRecommendations, resolveKnowledgeRecommendation, scheduleKnowledgeRecommendation, shouldSampleKnowledgeCard } from "@/features/knowledge/recommendations";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
@@ -267,6 +267,8 @@ describe("knowledge recommendation queue", () => {
     await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: "card", sourceId: "source", supportLevel: "supporting" });
     const capture = await seedSourceCaptureVersion({ sourceId: "source", captureKind: "pasted_text", rawText: "RAW_CAPTURE_TEXT_MUST_NOT_LEAK. Bãi đỗ xe có mái che tại Huế.", rawMetadata: { provider_marker: "PROVIDER_MARKER_MUST_NOT_LEAK", checkpoint_marker: "CHECKPOINT_MARKER_MUST_NOT_LEAK" } });
     await seedKnowledgeCardEvidence({ cardId: "card", sourceId: "source", captureVersionId: capture.id, quoteText: "Bãi đỗ xe có mái che tại Huế." });
+    await testDb.insert(knowledgeIngestionJobs).values({ id: "candidate-job", sourceId: "source", captureVersionId: capture.id, submittedByUserId: "author", submittedByEmail: "author@example.com", protocolVersion: 2, stage: "review_recommended" });
+    await testDb.insert(knowledgeIngestionCandidates).values({ id: "candidate", ingestionJobId: "candidate-job", sourceId: "source", captureVersionId: capture.id, fingerprint: "a".repeat(64), type: "place", title: "Điểm dừng có mái che", summary: "Có mái che tại Huế.", locationName: "Huế", conditions: ["Theo nguồn cộng đồng."], freshnessSensitive: false, practicalDetails: { tips: ["Chỉ nên dừng khi thời tiết thuận lợi."] }, spanStart: 0, spanEnd: 1, extractionPromptVersion: "test", stage: "review_recommended", stageVersion: 2, outcomeReasonCode: "attach_condition_mismatch", judgeDecision: "verify_first", judgmentSummary: "Cần kiểm tra trước khi xuất bản.", knowledgeCardId: "card" });
     await scheduleKnowledgeRecommendation({ cardId: "card", contentVersion: 1, evidenceSetRevision: 1, reason: "weak_evidence" }, testDb);
     const [recommendation] = await testDb.select().from(knowledgeRecommendations);
 
@@ -278,6 +280,9 @@ describe("knowledge recommendation queue", () => {
     expect(projection).not.toContain("CHECKPOINT_MARKER_MUST_NOT_LEAK");
     expect(detail?.evidence).toEqual([expect.objectContaining({ quoteText: "Bãi đỗ xe có mái che tại Huế." })]);
     expect(Object.keys(detail?.evidence[0] ?? {})).not.toContain("captureVersionId");
+    expect(detail).toMatchObject({ card: { type: "place", locationName: "Huế", freshnessSensitive: false } });
+    expect(detail?.candidate).toMatchObject({ id: "candidate", title: "Điểm dừng có mái che", outcomeReasonCode: "attach_condition_mismatch", judgeDecision: "verify_first", practicalDetails: { tips: ["Chỉ nên dừng khi thời tiết thuận lợi."] } });
+    expect(detail?.evidence).toEqual([expect.objectContaining({ sourceLabel: "Safe source", sourceKind: "pasted_text", facebookReviewId: null })]);
     await expect(testDb.select().from(knowledgeCardEvidence)).resolves.toHaveLength(1);
     await expect(testDb.select().from(knowledgeCardSearchDocuments)).resolves.toEqual([]);
   });

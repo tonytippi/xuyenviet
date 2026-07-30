@@ -48,13 +48,32 @@ const candidateReasonDetails: Record<string, string> = {
   relation_ambiguous: "Bằng chứng đủ điều kiện, nhưng hệ thống không thể xác định an toàn mục trích xuất nên gắn vào hay tạo quan hệ với thẻ tri thức nào.",
   relation_invalid: "Bộ đánh giá quan hệ yêu cầu tạo mới kèm một thẻ đích, là cấu trúc không hợp lệ nên mục trích xuất được giữ lại để vận hành kiểm tra.",
   stale_relation_target: "Thẻ tri thức đích đã thay đổi hoặc không còn phù hợp trong lúc hệ thống xử lý. Mục trích xuất được giữ lại để tránh gắn bằng chứng sai.",
-  attach_condition_mismatch: "Điều kiện của mục trích xuất không khớp thẻ tri thức đích nên hệ thống không gắn bằng chứng vào thẻ đó.",
+  attach_condition_mismatch: "Hệ thống nhận diện cùng loại và cùng phạm vi, nhưng điều kiện áp dụng không giống nhau nên không gắn bằng chứng vào thẻ có sẵn. Thẻ mới được giữ riêng để vận hành kiểm tra, tránh dùng bằng chứng về một điều kiện để củng cố thông tin của điều kiện khác.",
   conflict_condition_mismatch: "Điều kiện của mục trích xuất không khớp thẻ tri thức xung đột nên hệ thống không tạo xung đột trên thẻ đó.",
 };
 
 const candidateReasonLabels: Record<string, string> = {
+  invalid_discovery_candidate: "Mục trích xuất không hợp lệ",
+  candidate_invalid_structure: "Cấu trúc mục trích xuất không hợp lệ",
+  candidate_missing_required_fields: "Thiếu thông tin bắt buộc",
+  candidate_sensitive_content: "Có thông tin nhạy cảm",
   candidate_unsafe_raw_overlap: "Nội dung trùng bài viết gốc",
+  candidate_evidence_mismatch: "Trích dẫn không khớp bài viết",
+  candidate_insufficient_travel_context: "Thiếu ngữ cảnh du lịch",
   judge_evidence_not_grounded: "Không tìm thấy bằng chứng trong bài viết",
+  judge_suppressed: "Không đủ điều kiện xuất bản",
+  judge_below_quality_threshold: "Chất lượng chưa đạt ngưỡng",
+  stale_or_deleted_capture: "Nội dung nguồn đã thay đổi hoặc bị xóa",
+  judge_model_unavailable: "Chưa có mô hình đánh giá phù hợp",
+  judge_model_not_independent: "Mô hình đánh giá không độc lập",
+  judge_provider_failed: "Dịch vụ đánh giá gặp lỗi",
+  relation_provider_failed: "Dịch vụ đối chiếu thẻ gặp lỗi",
+  relation_ambiguous: "Không xác định được thẻ liên quan",
+  relation_invalid: "Quan hệ thẻ không hợp lệ",
+  stale_relation_target: "Thẻ đích đã thay đổi hoặc không còn phù hợp",
+  attach_condition_mismatch: "Điều kiện không khớp để gắn bằng chứng",
+  conflict_condition_mismatch: "Điều kiện không khớp để tạo xung đột",
+  retry_exhausted: "Đã hết số lần thử lại",
 };
 
 const candidateStageLabels: Record<string, string> = {
@@ -209,7 +228,7 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
               {candidate.outcomeReasonCode === "judge_below_quality_threshold" && candidate.scores ? <JudgmentScoreBreakdown scores={candidate.scores} /> : null}
               {isRejectedQuoteDiagnostic(candidate) ? <p className="mt-2 rounded-lg border border-[#d8c9ad] bg-white/70 p-2 leading-6 text-[#4f625a]">Trích dẫn AI bị từ chối: {candidate.rejectedQuoteText}</p> : null}
               {candidate.outcomeReasonCode && candidateReasonDetails[candidate.outcomeReasonCode] ? <p className="mt-2 rounded-lg border border-[#d8c9ad] bg-white/70 p-2 text-[#4f625a]">Diễn giải: {candidateReasonDetails[candidate.outcomeReasonCode]}</p> : null}
-              {candidate.knowledgeCardId ? <Link className="mt-2 inline-block text-[#1f5f46] underline" href={`/admin/knowledge/approved/${encodeURIComponent(candidate.knowledgeCardId)}`}>Mở thẻ tri thức</Link> : null}
+               {candidate.openRecommendationId ? <Link className="mt-2 inline-block text-[#1f5f46] underline" href={`/admin/knowledge/recommendations/${encodeURIComponent(candidate.openRecommendationId)}`}>Mở xử lý đề xuất</Link> : candidate.knowledgeCardId && candidate.stage === "published" ? <Link className="mt-2 inline-block text-[#1f5f46] underline" href={`/admin/knowledge/approved/${encodeURIComponent(candidate.knowledgeCardId)}`}>Mở thẻ tri thức đã duyệt</Link> : null}
             </div>)}
           </div>
         </section>
