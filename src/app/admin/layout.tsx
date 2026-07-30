@@ -10,6 +10,7 @@ type AdminLayoutProps = {
 
 const adminNavItems = [
   { href: "/admin", label: "Tổng quan", eyebrow: "Command" },
+  { href: "/admin/guides", label: "Hướng dẫn", eyebrow: "Operator" },
   { href: "/admin/users", label: "Người dùng", eyebrow: "Access" },
   { href: "/admin/ai-gateway", label: "AI Gateway", eyebrow: "Models & cost" },
   { href: "/admin/knowledge/intake", label: "Nạp nguồn", eyebrow: "Intake" },
@@ -91,11 +92,6 @@ export default async function AdminLayout({ children }: AdminLayoutProps) {
               </Link>
             ))}
           </nav>
-
-          <div className="relative mt-6 hidden rounded-3xl border border-[#e5bd82]/20 bg-[#e5bd82]/10 p-4 lg:block">
-            <p className="text-sm font-semibold text-[#e5bd82]">Phiên vận hành</p>
-            <p className="mt-2 text-sm leading-6 text-[#b9c9c1]">Quyền được xác thực server-side từ PostgreSQL trước khi render dashboard.</p>
-          </div>
 
           <form action={signOutCurrentUser} className="relative mt-6 hidden lg:block">
             <button
