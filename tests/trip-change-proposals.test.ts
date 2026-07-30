@@ -868,6 +868,22 @@ describe("Story 11.4 annotation action binding DB-backed tests", () => {
     await expectNoAnnotationActionMutation(fixture.proposal.id);
   });
 
+  test("public action boundary applies its one current four-field capability", async () => {
+    const fixture = await setupBoundProposal();
+    const { executeAnnotationAction } = await loadAnnotationActionsAs();
+
+    await expect(executeAnnotationAction({
+      conversationId: fixture.conversation.id,
+      assistantMessageId: fixture.assistant.id,
+      annotationId: fixture.annotationId,
+      command: "trip_change_proposal.apply",
+    })).resolves.toEqual({ success: true, aggregateVersion: 2, proposalStatus: "applied" });
+
+    await expect(testDb.select({ state: tripPlanItems.state, version: tripPlanItems.version }).from(tripPlanItems).where(eq(tripPlanItems.id, "binding-leg"))).resolves.toEqual([{ state: "confirmed", version: 2 }]);
+    await expect(testDb.select({ status: tripChangeProposals.status }).from(tripChangeProposals).where(eq(tripChangeProposals.id, fixture.proposal.id))).resolves.toEqual([{ status: "applied" }]);
+    await expect(testDb.select({ operationClass: tripPlanChangeHistory.operationClass }).from(tripPlanChangeHistory).where(eq(tripPlanChangeHistory.proposalId, fixture.proposal.id))).resolves.toEqual([{ operationClass: "apply" }]);
+  });
+
   test("public action boundary rejects cross-user and cross-conversation bindings without mutation", async () => {
     const fixture = await setupBoundProposal();
     const ownerActions = await loadAnnotationActionsAs();

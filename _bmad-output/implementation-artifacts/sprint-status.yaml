@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-07-30 (Story 11.4 independent-review repairs verified; status synchronized to ready-for-dev.)
+# last_updated: 2026-07-30 (Story 11.4 final bounded repair verified; status synchronized to done.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-07-30 (Story 11.4 independent-review repairs verified; status synchronized to ready-for-dev.)
+last_updated: 2026-07-30 (Story 11.4 final bounded repair verified; status synchronized to done.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -230,7 +230,9 @@ development_status:
   11-3-validate-persisted-answer-annotations: done
   # 2026-07-30: Initial unattended review was blocked because the supplied end SHA was mistyped; that block is superseded by the verified narrow-recovery range below.
   # 2026-07-30: Narrow recovery found three MEDIUM patches. Repair complete: capability-less legacy/stale/withdrawn/invalid actions are ordinary text; annotation execution has a synchronous ref guard; direct PostgreSQL-backed `executeAnnotationAction` coverage proves strict input, exact-one source-message lookup, ownership/conversation isolation, stale/deleted capability, proposal-ID injection rejection, and no mutation on rejection. Verified serially: trip-change-proposals 80 passed, ai-ask-shell 154 passed, typecheck/build/diff check passed; lint passed with 5 pre-existing warnings. Keep ready-for-dev, not done.
-  11-4-bind-annotation-details-and-actions-to-current-ownership: ready-for-dev
+  # 2026-07-30: Second and final unattended independent review of exact range 615ef9da17c81da1f6202562afc252f6d26d9088..d6d82e3 completed synchronously. Blind Hunter and Edge Case Hunter found no actionable findings; Acceptance Auditor found two MEDIUM patches: required public `executeAnnotationAction` success/delegation proof is absent (tests cover only rejected inputs/states), and story/sprint tracking was stale/inconsistent with the generated spec. AC1/AC3 and scope pass; AC2 is partial pending a valid four-field apply or dismiss delegation/mutation regression. Serial DATABASE_URL_TEST verification passed: 199 annotation/context/shell, 80 proposal, 62 outbox/command/stream tests; typecheck/build/diff check passed; lint 0 errors and 5 pre-existing warnings. No code, test, or commit changed during review.
+  # 2026-07-30: Final bounded repair added PostgreSQL-backed valid four-field `executeAnnotationAction` apply proof. It resolves the sole permitted current capability, delegates to the existing command, returns the allowed success result, and persists the plan-item, proposal, and history mutations. Required serial DATABASE_URL_TEST verification passed: 199 annotation/context/shell, 81 proposal, and 62 outbox/command/stream tests; typecheck/build/diff check passed; lint 0 errors and 5 pre-existing warnings. The final independent-review patch is repaired; status synchronized to done.
+  11-4-bind-annotation-details-and-actions-to-current-ownership: done
   11-5-serve-planning-context-and-details-through-the-api-cutover: backlog
   epic-11-retrospective: optional
 
