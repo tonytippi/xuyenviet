@@ -191,10 +191,12 @@ describe("approved knowledge cards", () => {
     await createUser("lifecycle-operator", ["operator"]);
     authMock.mockResolvedValue({ user: { id: "lifecycle-operator", email: "lifecycle-operator@example.com" } });
     const source = await createSource("lifecycle-operator");
-    const approved = await createCard("lifecycle-operator", { id: "approved-visible", status: "approved", needsReview: false });
+    const activeState = { status: "approved" as const, publicationState: "active" as const, knowledgeState: "uncertain" as const, reviewState: "reviewed" as const, verificationState: "not_required" as const, needsReview: false };
+    const approved = await createCard("lifecycle-operator", { id: "approved-visible", ...activeState });
     const archived = await createCard("lifecycle-operator", { id: "archived-hidden", status: "archived", needsReview: false });
     const rejected = await createCard("lifecycle-operator", { id: "rejected-hidden", status: "rejected", needsReview: false });
-    const orphaned = await createCard("lifecycle-operator", { id: "approved-orphan-hidden", status: "approved", needsReview: false });
+    const suppressed = await createCard("lifecycle-operator", { id: "suppressed-verification-hidden", status: "approved", publicationState: "suppressed", knowledgeState: "uncertain", reviewState: "reviewed", verificationState: "required", needsReview: false });
+    const orphaned = await createCard("lifecycle-operator", { id: "approved-orphan-hidden", ...activeState });
     const inconsistent = await createCard("lifecycle-operator", { id: "approved-still-needs-review-hidden", status: "approved", needsReview: true });
     await testDb.insert(knowledgeCardSources).values([
       { knowledgeCardId: approved.id, sourceId: source.id, supportLevel: "primary" },
@@ -207,9 +209,11 @@ describe("approved knowledge cards", () => {
     const { getApprovedKnowledgeIndexStatuses, listApprovedKnowledgeCardsWithIndexStatus } = await import("@/features/knowledge/review");
 
     await expect(listApprovedKnowledgeCards()).resolves.toEqual(expect.arrayContaining([expect.objectContaining({ id: approved.id }), expect.objectContaining({ id: orphaned.id })]));
+    await expect(listApprovedKnowledgeCards()).resolves.not.toEqual(expect.arrayContaining([expect.objectContaining({ id: suppressed.id })]));
     await expect(getApprovedKnowledgeCard(approved.id)).resolves.toMatchObject({ id: approved.id, status: "approved" });
     await expect(getApprovedKnowledgeCard(archived.id)).resolves.toBeNull();
     await expect(getApprovedKnowledgeCard(rejected.id)).resolves.toBeNull();
+    await expect(getApprovedKnowledgeCard(suppressed.id)).resolves.toBeNull();
     await expect(getApprovedKnowledgeCard(orphaned.id)).resolves.toMatchObject({ id: orphaned.id, sources: [] });
     await expect(getApprovedKnowledgeCard(inconsistent.id)).resolves.toBeNull();
     const cards = await listApprovedKnowledgeCardsWithIndexStatus();
@@ -278,7 +282,7 @@ describe("approved knowledge cards", () => {
     await createUser("screenshot-operator", ["operator"]);
     authMock.mockResolvedValue({ user: { id: "screenshot-operator", email: "screenshot-operator@example.com" } });
     const source = await createSource("screenshot-operator", { id: "raw-file-source", kind: "screenshot", label: "Ảnh chụp màn hình" });
-    const card = await createCard("screenshot-operator", { id: "approved-screenshot-card", status: "approved", needsReview: false, confidence: "unverified" });
+    const card = await createCard("screenshot-operator", { id: "approved-screenshot-card", status: "approved", publicationState: "active", knowledgeState: "uncertain", reviewState: "reviewed", verificationState: "not_required", needsReview: false, confidence: "unverified" });
     await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: card.id, sourceId: source.id, supportLevel: "primary" });
     const { getApprovedKnowledgeCard } = await import("@/features/knowledge/review");
 

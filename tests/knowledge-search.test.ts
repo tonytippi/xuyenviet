@@ -74,6 +74,24 @@ describe("knowledge card state-model retrieval safety", () => {
     expect(JSON.stringify(results)).not.toContain("Nội dung nguồn chỉ dành cho vận hành");
   });
 
+  test("ignores Vietnamese filler words so a location query does not match unrelated cards", async () => {
+    await createUser("relevance-operator", ["operator"]);
+    const hueCard = await createApprovedCardWithSource("relevance-operator", "hue-relevance-card");
+    const unrelatedCard = await createApprovedCardWithSource("relevance-operator", "unrelated-relevance-card");
+    await testDb.update(knowledgeCards).set({ title: "Điểm dừng ở Quy Nhơn", locationName: "Quy Nhơn", routeSegment: null, summary: "Các điểm dừng ven biển." }).where(eq(knowledgeCards.id, unrelatedCard.id));
+
+    for (const card of [hueCard, unrelatedCard]) {
+      const sourceId = `${card.id}-source`;
+      const capture = await seedSourceCaptureVersion({ sourceId, captureKind: "url", rawText: `Bằng chứng cho ${card.id}.` });
+      await seedKnowledgeCardEvidence({ cardId: card.id, sourceId, captureVersionId: capture.id, quoteText: `Bằng chứng cho ${card.id}.` });
+      await enqueueAndProcessIndexWork(card.id);
+    }
+
+    await expect((await import("@/features/knowledge/search")).searchApprovedKnowledge("Các điểm ở Huế")).resolves.toEqual([
+      expect.objectContaining({ id: hueCard.id, locationName: "Huế" }),
+    ]);
+  });
+
   test.each(["copied_post", "pasted_text", "screenshot"] as const)("does not index or retrieve evidence captured from a %s", async (kind) => {
     await createUser(`${kind}-evidence-operator`, ["operator"]);
     const card = await createApprovedCardWithSource(`${kind}-evidence-operator`, `${kind}-evidence-card`);

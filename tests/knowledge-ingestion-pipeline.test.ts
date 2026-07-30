@@ -101,6 +101,24 @@ describe("knowledge ingestion pipeline", () => {
     expect(messages[0]?.content).toContain("Do not turn stop labels alone into stop-level candidates");
   });
 
+  test("uses Facebook evidence for fact-only retrieval without making it traveler-visible", async () => {
+    await testDb.update(sources).set({ kind: "facebook", url: "https://facebook.com/groups/xuyenviet/posts/source", canonicalUrl: "https://facebook.com/groups/xuyenviet/posts/source", sourceType: "community" }).where(eq(sources.id, "source"));
+    const rawText = "Đèo Hải Vân có điểm dừng ngắm cảnh an toàn vào ban ngày.";
+    await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "facebook", rawText, metadata: { kind: "facebook_operator", captureMethod: "playwright_operator_browser", capturedAt: "2026-07-22T00:00:00.000Z", sourceUrl: "https://facebook.com/groups/xuyenviet/posts/source", finalUrl: "https://facebook.com/groups/xuyenviet/posts/source" }, capturedAt: new Date("2026-07-22T00:00:00.000Z") });
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ model: "extract-model", choices: [{ message: { content: JSON.stringify({ candidates: [candidate(rawText)] }) } }] }), { status: 200 }))
+      .mockResolvedValueOnce(batchGroundingResponse([{ candidateId: 0, quote: rawText }]));
+
+    const discovery = await claimNextKnowledgeIngestionJob({ workerId: "facebook-discovery", now: new Date(Date.now() + 1_000) }, testDb);
+    if (!discovery) throw new Error("expected discovery claim");
+    await runKnowledgeIngestionPipeline(discovery, testDb);
+    const candidateClaim = await claimNextKnowledgeIngestionCandidate({ workerId: "facebook-candidate", now: new Date(Date.now() + 2_000) }, testDb);
+    if (!candidateClaim) throw new Error("expected candidate claim");
+    await runKnowledgeIngestionCandidatePipeline(candidateClaim, testDb);
+
+    await expect(testDb.select({ displayPolicy: knowledgeCardEvidence.displayPolicy }).from(knowledgeCardEvidence)).resolves.toEqual([{ displayPolicy: "fact_only" }]);
+  });
+
   test("v2 persists a route and its scoped place observation from a rich itinerary", async () => {
     const routeQuote = "Ngày 1 đi từ Hà Nội đến Quảng Bình, ngày 2 đến Đà Nẵng.";
     const placeQuote = "Tại Quảng Bình, Suối Nước Moọc có chỗ đậu xe gần lối vào.";

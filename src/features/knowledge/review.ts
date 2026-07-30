@@ -251,7 +251,7 @@ export async function listApprovedKnowledgeCards(): Promise<ApprovedKnowledgeCar
     .from(knowledgeCards)
     .leftJoin(knowledgeCardSources, eq(knowledgeCardSources.knowledgeCardId, knowledgeCards.id))
     .leftJoin(sources, eq(sources.id, knowledgeCardSources.sourceId))
-    .where(and(eq(knowledgeCards.status, "approved"), eq(knowledgeCards.needsReview, false)))
+    .where(and(eq(knowledgeCards.status, "approved"), eq(knowledgeCards.publicationState, "active"), eq(knowledgeCards.needsReview, false)))
     .orderBy(desc(knowledgeCards.updatedAt));
 
   return groupApprovedRows(rows);
@@ -311,7 +311,7 @@ export async function getApprovedKnowledgeCard(cardId: string): Promise<Approved
     .from(knowledgeCards)
     .leftJoin(knowledgeCardSources, eq(knowledgeCardSources.knowledgeCardId, knowledgeCards.id))
     .leftJoin(sources, eq(sources.id, knowledgeCardSources.sourceId))
-    .where(and(eq(knowledgeCards.id, normalizedCardId), eq(knowledgeCards.status, "approved"), eq(knowledgeCards.needsReview, false)));
+    .where(and(eq(knowledgeCards.id, normalizedCardId), eq(knowledgeCards.status, "approved"), eq(knowledgeCards.publicationState, "active"), eq(knowledgeCards.needsReview, false)));
 
   const card = groupApprovedRows(rows)[0];
   return card ?? null;

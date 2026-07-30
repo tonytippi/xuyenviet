@@ -50,6 +50,13 @@
       "when": 1785427200000,
       "tag": "0006_candidate_raw_overlap_reason",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1785513600000,
+      "tag": "0007_facebook_evidence_fact_only",
+      "breakpoints": true
     }
   ]
 }

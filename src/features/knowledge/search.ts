@@ -19,6 +19,9 @@ const maxPracticalDetailKeyLength = 60;
 const maxPracticalDetailValuesPerEntry = 10;
 const maxOrderedStops = 40;
 const maxPracticalDetailValueLength = 500;
+const VietnameseSearchStopWords = new Set([
+  "các", "cái", "con", "của", "đã", "đang", "để", "điểm", "được", "gì", "hay", "khi", "là", "một", "nào", "những", "ở", "rất", "tại", "theo", "thì", "và", "về", "với",
+]);
 
 type KnowledgeSearchDb = ReturnType<typeof getDb>;
 
@@ -631,10 +634,10 @@ function normalizeSearchLimit(limit: number | undefined) {
 
 function getSearchTerms(normalizedQuery: string) {
   const rawTerms = normalizedQuery.split(" ").filter(Boolean);
-  const significantTerms = rawTerms.filter((term) => term.length > 2);
-  const selectedTerms = Array.from(new Set([...significantTerms, ...rawTerms])).slice(0, 12);
+  const meaningfulTerms = rawTerms.filter((term) => term.length > 2 && !VietnameseSearchStopWords.has(term));
+  const selectedTerms = Array.from(new Set(meaningfulTerms)).slice(0, 12);
 
-  return selectedTerms.length > 0 ? selectedTerms : rawTerms.slice(0, 12);
+  return selectedTerms.length > 0 ? selectedTerms : rawTerms.filter((term) => term.length > 2).slice(0, 12);
 }
 
 function scoreSearchDocument(searchableText: string, terms: string[]) {
