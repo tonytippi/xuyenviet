@@ -6,7 +6,7 @@ import { and, asc, desc, eq, gt, lte, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { disableStaleKnowledgeSearchProjection, enqueueKnowledgeIndexWork } from "@/features/knowledge/indexing-queue";
 import { getCurrentValidEvidenceFencesForReadiness } from "@/features/knowledge/readiness-evidence";
-import { facebookCaptureReviews, knowledgeCardEvidence, knowledgeCards, knowledgeIngestionCandidates, knowledgeRecommendations, knowledgeSamplingCandidateLedger, knowledgeSamplingCohortMembers, knowledgeSamplingDispositionReasonValues, knowledgeSamplingPolicies, knowledgeVerifyFirstSamplingObligations, sources, type KnowledgeRecommendationAction, type KnowledgeRecommendationReason, type KnowledgeSamplingDispositionReason } from "@/db/schema";
+import { facebookCaptureReviews, knowledgeCardEvidence, knowledgeCards, knowledgeIngestionCandidates, knowledgeIngestionJobs, knowledgeRecommendations, knowledgeSamplingCandidateLedger, knowledgeSamplingCohortMembers, knowledgeSamplingDispositionReasonValues, knowledgeSamplingPolicies, knowledgeVerifyFirstSamplingObligations, sources, type KnowledgeRecommendationAction, type KnowledgeRecommendationReason, type KnowledgeSamplingDispositionReason } from "@/db/schema";
 import { recordAuditEvent } from "@/features/audit/events";
 import { type SystemAuditActorId } from "@/features/audit/actors";
 import { getCorridorBucketLabel } from "@/features/knowledge/corridor";
@@ -273,6 +273,7 @@ export async function resolveKnowledgeRecommendation(input: { recommendationId: 
     };
     await tx.update(knowledgeCards).set(next).where(eq(knowledgeCards.id, card.id));
     await tx.update(knowledgeRecommendations).set({ status: "resolved", resolution, samplingDispositionReason: samplingDisposition?.reason ?? null, samplingRationale: samplingDisposition?.rationale ?? null, resolvedByUserId: input.actor.userId, resolvedAt: new Date(), executorSystem: null, updatedAt: new Date() }).where(eq(knowledgeRecommendations.id, recommendation.id));
+    if (input.action === "verify") await publishVerifiedIngestionCandidates(tx, card.id);
     if (material) await tx.update(knowledgeRecommendations).set({ status: "superseded", resolution: "accepted", resolvedByUserId: input.actor.userId, resolvedAt: new Date(), executorSystem: null, updatedAt: new Date() }).where(and(eq(knowledgeRecommendations.knowledgeCardId, card.id), sql`${knowledgeRecommendations.status} in ('open', 'in_review')`, sql`${knowledgeRecommendations.id} <> ${recommendation.id}`));
     const auditSummary = input.action === "resolve_relation"
       ? `Resolved ${recommendation.reason} recommendation with resolve_relation${hasRemainingSupport ? "" : " without reactivation because supporting evidence is insufficient"}. Final card contentVersion=${next.contentVersion}, evidenceSetRevision=${next.evidenceSetRevision}, publicationState=${next.publicationState}.`
@@ -289,6 +290,13 @@ export async function resolveKnowledgeRecommendation(input: { recommendationId: 
     }
     return input.action === "resolve_relation" && !hasRemainingSupport ? { status: "insufficient_support" as const, cardId: card.id } : { status: "resolved" as const, cardId: card.id };
   });
+}
+
+async function publishVerifiedIngestionCandidates(tx: Transaction, cardId: string) {
+  const candidates = await tx.update(knowledgeIngestionCandidates).set({ stage: "published", stageVersion: sql`${knowledgeIngestionCandidates.stageVersion} + 1`, updatedAt: new Date() }).where(and(eq(knowledgeIngestionCandidates.knowledgeCardId, cardId), eq(knowledgeIngestionCandidates.stage, "verify_first"))).returning({ ingestionJobId: knowledgeIngestionCandidates.ingestionJobId });
+  for (const candidate of candidates) {
+    await tx.update(knowledgeIngestionJobs).set({ stage: sql`case when ${knowledgeIngestionJobs.verifyFirstCandidateCount} = 1 then 'published' else 'verify_first' end`, stageVersion: sql`${knowledgeIngestionJobs.stageVersion} + 1`, publishedCandidateCount: sql`${knowledgeIngestionJobs.publishedCandidateCount} + 1`, verifyFirstCandidateCount: sql`${knowledgeIngestionJobs.verifyFirstCandidateCount} - 1`, updatedAt: new Date() }).where(and(eq(knowledgeIngestionJobs.id, candidate.ingestionJobId), sql`${knowledgeIngestionJobs.verifyFirstCandidateCount} > 0`));
+  }
 }
 
 async function escalateSamplingCohort(tx: Transaction, policyId: string, actor: RecommendationActor) {

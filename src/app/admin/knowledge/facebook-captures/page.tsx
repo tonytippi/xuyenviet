@@ -33,6 +33,12 @@ const ingestionStageLabels: Record<KnowledgeIngestionStage, string> = {
   failed: "Xử lý thất bại",
 } as const;
 
+const ingestionStageGuidance: Partial<Record<KnowledgeIngestionStage, string>> = {
+  review_recommended: "Có mục tri thức cần vận hành kiểm tra trước khi quyết định sử dụng.",
+  verify_first: "Có mục tri thức chưa đủ điều kiện sử dụng; mở chi tiết để xem và xác minh bằng chứng.",
+  failed: "Mở chi tiết để xem lỗi và chạy lại khi phù hợp.",
+};
+
 function formatDate(value: Date | string | null) {
   if (!value) {
     return "Chưa có";
@@ -112,15 +118,9 @@ export default async function FacebookCaptureReviewQueuePage({ searchParams }: F
                 </Link>
               </div>
 
-               <div className="mt-5 rounded-2xl border border-[#8fb59f] bg-[#edf7ef] p-3 text-sm leading-6 text-[#1f5f46]">
-                 <span className="font-semibold">Trạng thái chính: </span>
-                  {review.ingestionJob ? `Xử lý chính: ${ingestionStageLabels[review.ingestionJob.stage]}.` : review.captureOperation === "recapture_pending" ? "Nội dung đang chờ thu thập lại; chưa có tác vụ xử lý cho phiên bản hiện tại." : "Nội dung đang chờ tạo tác vụ xử lý chính."}
-               </div>
-
-               <div className="mt-4 rounded-2xl border border-[#d8c9ad] bg-[#fbf7ed] p-3 text-sm leading-6 text-[#4f625a]">
-                   <span className="font-semibold text-[#17342c]">Duyệt/thu thập lại: </span>
-                   {review.status === "needs_review" ? "Cần duyệt theo luồng cũ" : review.status}
-               </div>
+                <div className="mt-5 rounded-2xl border border-[#8fb59f] bg-[#edf7ef] p-3 text-sm leading-6 text-[#1f5f46]">
+                  {review.ingestionJob ? <><span className="font-semibold">Trạng thái xử lý: </span>{ingestionStageLabels[review.ingestionJob.stage]}.{ingestionStageGuidance[review.ingestionJob.stage] ? <p className="mt-1 text-[#4f625a]">{ingestionStageGuidance[review.ingestionJob.stage]}</p> : null}</> : review.captureOperation === "recapture_pending" ? "Nội dung đang chờ thu thập lại; chưa có tác vụ xử lý cho phiên bản hiện tại." : "Nội dung đã thu thập đang chờ tạo tác vụ xử lý chính."}
+                </div>
 
               <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
                 <div className="rounded-2xl bg-[#fbf7ed] p-3">

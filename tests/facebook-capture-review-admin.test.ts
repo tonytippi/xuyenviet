@@ -224,6 +224,34 @@ describe("admin Facebook capture review helpers", () => {
     expect(parseFacebookCaptureQueueFilter("unexpected-status")).toBe("in_progress");
   });
 
+  test("queue describes the current verification action without legacy review status", async () => {
+    authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
+    const review = await createCapturedFacebookSource({ id: "queue-verification-guidance", rawText: "Cần xác minh thông tin trước khi sử dụng." });
+    await testDb.insert(knowledgeIngestionJobs).values({ id: "queue-verification-guidance-job", sourceId: review.sourceId, captureVersionId: review.captureVersionId!, submittedByUserId: "operator-user", submittedByEmail: "operator-user@example.com", stage: "verify_first" });
+
+    const { default: FacebookCaptureReviewQueuePage } = await import("@/app/admin/knowledge/facebook-captures/page");
+    const html = renderToStaticMarkup(await FacebookCaptureReviewQueuePage({ searchParams: Promise.resolve({ status: "needs_attention" }) }));
+
+    expect(html).toContain("Trạng thái xử lý: </span>Cần xác minh trước.");
+    expect(html).toContain("mở chi tiết để xem và xác minh bằng chứng");
+    expect(html).not.toContain("Duyệt/thu thập lại");
+    expect(html).not.toContain("Cần duyệt theo luồng cũ");
+  });
+
+  test("detail explains malformed discovery JSON and offers a current-pipeline rerun", async () => {
+    authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
+    const review = await createCapturedFacebookSource({ id: "malformed-discovery-json", rawText: "Nội dung cần xử lý lại." });
+    await testDb.insert(knowledgeIngestionJobs).values({ id: "malformed-discovery-json-job", sourceId: review.sourceId, captureVersionId: review.captureVersionId!, submittedByUserId: "operator-user", submittedByEmail: "operator-user@example.com", protocolVersion: 2, stage: "failed", attemptCount: 3, maxAttempts: 3, lastErrorCode: "retry_exhausted", rawDiscoveryResponse: '{"candidates":[}]' });
+
+    const { default: FacebookCaptureReviewDetailPage } = await import("@/app/admin/knowledge/facebook-captures/[reviewId]/page");
+    const html = renderToStaticMarkup(await FacebookCaptureReviewDetailPage({ params: Promise.resolve({ reviewId: review.id }) }));
+
+    expect(html).toContain("Không thể xử lý nội dung đã thu thập");
+    expect(html).toContain("Quy trình đã thử lại tối đa nhưng phản hồi AI không có cấu trúc hợp lệ");
+    expect(html).toContain("Phản hồi này không phải JSON hợp lệ");
+    expect(html).toContain("Chạy lại quy trình hiện hành");
+  });
+
   test("v1 parent lifecycle is visible without v2 candidate controls", async () => {
     authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
     const review = await createCapturedFacebookSource({ id: "v1-job", rawText: "Historical capture." });
@@ -299,6 +327,38 @@ describe("admin Facebook capture review helpers", () => {
     expect(html).toContain("Mở xử lý đề xuất");
     expect(html).toContain("/admin/knowledge/recommendations/open-card-recommendation");
     expect(html).not.toContain("/admin/knowledge/approved/review-needed-card");
+  });
+
+  test("verify-first candidates provide one batch approval action for their verification recommendations", async () => {
+    authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
+    const review = await createCapturedFacebookSource({ id: "verify-first-candidate-action", rawText: "Điểm dừng cần vận hành xác minh trước khi xuất bản." });
+    await testDb.insert(knowledgeIngestionJobs).values({ id: "verify-first-candidate-action-job", sourceId: review.sourceId, captureVersionId: review.captureVersionId!, submittedByUserId: "operator-user", submittedByEmail: "operator-user@example.com", protocolVersion: 2, stage: "verify_first", nextRunAt: new Date() });
+    await testDb.insert(knowledgeCards).values({ id: "verify-first-candidate-card", status: "approved", needsReview: true, publicationState: "suppressed", knowledgeState: "uncertain", reviewState: "ai_recommended", verificationState: "required", type: "place", title: "Điểm dừng cần xác minh", summary: "Thông tin nguồn cộng đồng.", locationName: "Huế", confidence: "community", aiPromptVersion: "test", executorSystem: "system-knowledge-pipeline" });
+    await testDb.insert(knowledgeRecommendations).values({ id: "verify-first-candidate-recommendation", knowledgeCardId: "verify-first-candidate-card", contentVersion: 1, evidenceSetRevision: 1, reason: "verification", priority: 2 });
+    await testDb.insert(knowledgeIngestionCandidates).values({ ingestionJobId: "verify-first-candidate-action-job", sourceId: review.sourceId, captureVersionId: review.captureVersionId!, fingerprint: "8".repeat(64), type: "place", title: "Điểm dừng cần xác minh", summary: "Thông tin nguồn cộng đồng.", locationName: "Huế", conditions: [], freshnessSensitive: false, spanStart: 0, spanEnd: 1, extractionPromptVersion: "test", stage: "verify_first", stageVersion: 2, knowledgeCardId: "verify-first-candidate-card" });
+
+    const { default: FacebookCaptureReviewDetailPage } = await import("@/app/admin/knowledge/facebook-captures/[reviewId]/page");
+    const html = renderToStaticMarkup(await FacebookCaptureReviewDetailPage({ params: Promise.resolve({ reviewId: review.id }) }));
+
+    expect(html).toContain("Duyệt tất cả mục cần xác minh (1)");
+    expect(html).toContain('name="approval" value="verify-first-candidate-recommendation:1:1"');
+    expect(html).not.toContain("Duyệt cần xác minh");
+  });
+
+  test("suppressed candidates do not link to unrelated or stale open recommendations", async () => {
+    authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
+    const review = await createCapturedFacebookSource({ id: "suppressed-candidate-link", rawText: "Khách sạn có bãi đỗ xe rộng và gần trạm sạc." });
+    await testDb.insert(knowledgeIngestionJobs).values({ id: "suppressed-candidate-link-job", sourceId: review.sourceId, captureVersionId: review.captureVersionId!, submittedByUserId: "operator-user", submittedByEmail: "operator-user@example.com", protocolVersion: 2, stage: "queued", nextRunAt: new Date() });
+    await testDb.insert(knowledgeCards).values({ id: "suppressed-candidate-card", status: "approved", needsReview: true, type: "hotel_area", title: "Khách sạn MT Ngô Quyền", summary: "Có bãi đỗ xe.", locationName: "Đà Nẵng", confidence: "community", aiPromptVersion: "test", executorSystem: "system-knowledge-pipeline", contentVersion: 2, evidenceSetRevision: 2 });
+    await testDb.insert(knowledgeRecommendations).values({ id: "stale-open-recommendation", knowledgeCardId: "suppressed-candidate-card", contentVersion: 1, evidenceSetRevision: 1, reason: "verification", priority: 2 });
+    await testDb.insert(knowledgeIngestionCandidates).values({ ingestionJobId: "suppressed-candidate-link-job", sourceId: review.sourceId, captureVersionId: review.captureVersionId!, fingerprint: "9".repeat(64), type: "hotel_area", title: "Khách sạn MT Ngô Quyền có bãi đỗ rộng và gần trạm sạc", summary: "Có bãi đỗ xe rộng và gần trạm sạc.", locationName: "Đà Nẵng", conditions: [], freshnessSensitive: false, spanStart: 0, spanEnd: 1, extractionPromptVersion: "test", stage: "suppressed", stageVersion: 2, knowledgeCardId: "suppressed-candidate-card" });
+
+    const { default: FacebookCaptureReviewDetailPage } = await import("@/app/admin/knowledge/facebook-captures/[reviewId]/page");
+    const html = renderToStaticMarkup(await FacebookCaptureReviewDetailPage({ params: Promise.resolve({ reviewId: review.id }) }));
+
+    expect(html).toContain("Khách sạn MT Ngô Quyền có bãi đỗ rộng và gần trạm sạc");
+    expect(html).not.toContain("/admin/knowledge/recommendations/stale-open-recommendation");
+    expect(html).not.toContain("Mở xử lý đề xuất");
   });
 
   test("detail reconstructs safe legacy evidence-mismatch content from the protected discovery completion", async () => {

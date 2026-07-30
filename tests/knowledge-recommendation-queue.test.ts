@@ -262,6 +262,20 @@ describe("knowledge recommendation queue", () => {
     await expect(testDb.select().from(knowledgeSamplingCohortMembers).where(eq(knowledgeSamplingCohortMembers.knowledgeCardId, "card"))).resolves.toEqual([]);
   });
 
+  test("publishes linked verify-first candidates when verification is resolved from the recommendation", async () => {
+    await testDb.update(knowledgeCards).set({ publicationState: "suppressed", knowledgeState: "uncertain", reviewState: "ai_recommended", verificationState: "required", needsReview: true }).where(eq(knowledgeCards.id, "card"));
+    await testDb.insert(sources).values({ id: "source", kind: "pasted_text", label: "Safe source", sourceType: "curated", verificationStatus: "unverified", official: false, partner: false, submittedByUserId: "author" });
+    const capture = await seedSourceCaptureVersion({ sourceId: "source", captureKind: "pasted_text", rawText: "Bãi đỗ xe có mái che tại Huế." });
+    await testDb.insert(knowledgeIngestionJobs).values({ id: "verify-sync-job", sourceId: "source", captureVersionId: capture.id, submittedByUserId: "author", submittedByEmail: "author@example.com", protocolVersion: 2, stage: "verify_first", discoveredCandidateCount: 1, terminalCandidateCount: 1, verifyFirstCandidateCount: 1 });
+    await testDb.insert(knowledgeIngestionCandidates).values({ id: "verify-sync-candidate", ingestionJobId: "verify-sync-job", sourceId: "source", captureVersionId: capture.id, fingerprint: "b".repeat(64), type: "place", title: "Điểm dừng có mái che", summary: "Có mái che tại Huế.", locationName: "Huế", conditions: [], freshnessSensitive: false, spanStart: 0, spanEnd: 1, extractionPromptVersion: "test", stage: "verify_first", stageVersion: 2, knowledgeCardId: "card" });
+    await scheduleKnowledgeRecommendation({ cardId: "card", contentVersion: 1, evidenceSetRevision: 1, reason: "verification", policy: "verify_first" }, testDb);
+    const [recommendation] = await testDb.select().from(knowledgeRecommendations).where(eq(knowledgeRecommendations.reason, "verification"));
+
+    await expect(resolveKnowledgeRecommendation({ recommendationId: recommendation!.id, expectedContentVersion: 1, expectedEvidenceSetRevision: 1, action: "verify", actor: { userId: "operator", email: "operator@example.com" } }, testDb)).resolves.toMatchObject({ status: "resolved" });
+    await expect(testDb.select({ stage: knowledgeIngestionCandidates.stage }).from(knowledgeIngestionCandidates).where(eq(knowledgeIngestionCandidates.id, "verify-sync-candidate"))).resolves.toEqual([{ stage: "published" }]);
+    await expect(testDb.select({ stage: knowledgeIngestionJobs.stage, publishedCandidateCount: knowledgeIngestionJobs.publishedCandidateCount, verifyFirstCandidateCount: knowledgeIngestionJobs.verifyFirstCandidateCount }).from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, "verify-sync-job"))).resolves.toEqual([{ stage: "published", publishedCandidateCount: 1, verifyFirstCandidateCount: 0 }]);
+  });
+
   test("returns safe recommendation list and detail projections", async () => {
     await testDb.insert(sources).values({ id: "source", kind: "pasted_text", label: "Safe source", sourceType: "curated", verificationStatus: "unverified", official: false, partner: false, submittedByUserId: "author" });
     await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: "card", sourceId: "source", supportLevel: "supporting" });

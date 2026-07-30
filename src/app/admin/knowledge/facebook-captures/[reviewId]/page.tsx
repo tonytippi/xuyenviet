@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 
 import { type FacebookCaptureReviewStatus } from "@/db/schema";
-import { requestFacebookCaptureRecaptureForm, rerunFacebookCanonicalIngestionForm } from "@/features/knowledge/actions";
+import { requestFacebookCaptureRecaptureForm, rerunFacebookCanonicalIngestionForm, verifyFacebookCaptureCandidatesForm } from "@/features/knowledge/actions";
 import { getAdminFacebookCaptureReviewDetail, getFacebookCaptureQueueFilterForStage } from "@/features/knowledge/facebook-capture-review-admin";
 
 type FacebookCaptureReviewDetailPageProps = {
@@ -98,6 +98,13 @@ const candidateStageClasses: Record<string, string> = {
   failed: "border-[#d99a93] bg-[#fff0ee] text-[#9b2f29]",
 };
 
+const ingestionFailureDetails: Record<string, string> = {
+  retry_exhausted: "Quy trình đã thử lại tối đa nhưng phản hồi AI không có cấu trúc hợp lệ. Chạy lại để yêu cầu một phản hồi mới từ quy trình hiện hành.",
+  invalid_discovery_response: "Phản hồi AI không có cấu trúc hợp lệ nên chưa thể trích xuất các mục tri thức.",
+  provider_failed: "Dịch vụ AI không trả về phản hồi có thể dùng được.",
+  judge_provider_failed: "Dịch vụ đánh giá bằng chứng không trả về phản hồi có thể dùng được.",
+};
+
 const knowledgeCardStatusLabels: Record<string, string> = {
   approved: "Đã phê duyệt",
   draft: "Bản nháp",
@@ -162,6 +169,8 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
   const recaptureStatus = getSearchParam(query.recaptureStatus);
   const ingestionRerun = getSearchParam(query.ingestionRerun) === "1";
   const ingestionRerunError = getSearchParam(query.ingestionRerunError) === "1";
+  const verifyCandidatesApproved = Number(getSearchParam(query.verifyCandidatesApproved)) || 0;
+  const verifyCandidatesUnavailable = Number(getSearchParam(query.verifyCandidatesUnavailable)) || 0;
   const canRerunIngestion = review.ingestionJob?.protocolVersion === 2;
   const candidateStage = getSearchParam(query.candidateStage);
   const candidateReason = getSearchParam(query.candidateReason);
@@ -169,6 +178,7 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
   const candidates = v2IngestionJob?.candidates.filter((candidate) => (!candidateStage || candidate.stage === candidateStage) && (!candidateReason || candidate.outcomeReasonCode === candidateReason)) ?? [];
   const candidateStages = v2IngestionJob ? [...new Set(v2IngestionJob.candidates.map((candidate) => candidate.stage))] : [];
   const candidateReasons = v2IngestionJob ? [...new Set(v2IngestionJob.candidates.flatMap((candidate) => candidate.outcomeReasonCode ? [candidate.outcomeReasonCode] : []))] : [];
+  const verifiableCandidates = v2IngestionJob?.candidates.filter((candidate) => candidate.stage === "verify_first" && candidate.openRecommendationId && candidate.openRecommendationContentVersion !== null && candidate.openRecommendationEvidenceSetRevision !== null) ?? [];
 
   return (
     <div>
@@ -181,7 +191,7 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
          Nội dung này chỉ dành cho vận hành. Hệ thống tự xử lý nội dung đã thu thập; chỉ kết quả đủ điều kiện mới có thể dùng để trả lời khách.
       </p>
 
-      {(rejected || rejectError || rejectStatus || reopened || reopenError || reopenStatus || recaptureRequested || recaptureError || recaptureStatus || ingestionRerun || ingestionRerunError) && (
+      {(rejected || rejectError || rejectStatus || reopened || reopenError || reopenStatus || recaptureRequested || recaptureError || recaptureStatus || ingestionRerun || ingestionRerunError || verifyCandidatesApproved > 0 || verifyCandidatesUnavailable > 0) && (
         <section className="mt-6 rounded-2xl border border-[#d8c9ad] bg-white/80 p-4 text-sm leading-6 text-[#17342c]">
            {rejected ? <p>Đã từ chối nội dung đã thu thập. Nội dung này không còn nằm trong hàng đợi cần xử lý và chưa tạo thẻ tri thức.</p> : null}
            {rejectError ? <p>Lý do từ chối không an toàn hoặc nội dung đã thu thập này không thể từ chối.</p> : null}
@@ -192,8 +202,10 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
            {recaptureRequested ? <p>Đã đưa nội dung này về hàng đợi thu thập lại. Chạy công cụ thu thập Facebook để lấy văn bản mới rồi quay lại duyệt.</p> : null}
            {recaptureError ? <p>Lý do thu thập lại không an toàn hoặc nội dung này không thể thu thập lại.</p> : null}
              {recaptureStatus ? <p>Nội dung này không thể thu thập lại ({recaptureStatus}). Kiểm tra trạng thái duyệt và các thẻ đã liên kết.</p> : null}
-             {ingestionRerun ? <p>Đã đưa tác vụ xử lý chính vào hàng đợi chạy lại theo quy trình hiện hành, với cùng phiên bản nội dung đã thu thập.</p> : null}
-             {ingestionRerunError ? <p>Tác vụ xử lý chính hiện không thể chạy lại. Kiểm tra tác vụ phiên bản 2 và phiên bản nội dung đã thu thập hiện tại.</p> : null}
+              {ingestionRerun ? <p>Đã đưa tác vụ xử lý chính vào hàng đợi chạy lại theo quy trình hiện hành, với cùng phiên bản nội dung đã thu thập.</p> : null}
+              {ingestionRerunError ? <p>Tác vụ xử lý chính hiện không thể chạy lại. Kiểm tra tác vụ phiên bản 2 và phiên bản nội dung đã thu thập hiện tại.</p> : null}
+              {verifyCandidatesApproved > 0 ? <p>Đã xác minh và xuất bản {verifyCandidatesApproved} thẻ tri thức.</p> : null}
+              {verifyCandidatesUnavailable > 0 ? <p>{verifyCandidatesUnavailable} mục không thể duyệt vì trạng thái hoặc phiên bản thẻ đã thay đổi. Tải lại trang và kiểm tra lại.</p> : null}
         </section>
       )}
 
@@ -207,10 +219,16 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
           ) : <p className="mt-1">{review.rawText?.trim() ? "Đang chờ xử lý" : "Đang chờ thu thập lại"}</p>}
        </section>
 
+      {review.ingestionJob?.stage === "failed" ? <section className="mt-4 rounded-2xl border border-[#d99a93] bg-[#fff0ee] p-4 text-sm leading-6 text-[#9b2f29]">
+        <p className="font-semibold">Không thể xử lý nội dung đã thu thập</p>
+        <p className="mt-1">{ingestionFailureDetails[review.ingestionJob.lastErrorCode ?? ""] ?? "Quy trình xử lý đã dừng. Mở lại quy trình hiện hành để thử xử lý văn bản đã thu thập."}</p>
+      </section> : null}
+
       {v2IngestionJob ? (
         <section className="mt-6 rounded-2xl border border-[#d8c9ad] bg-white/75 p-4 text-sm text-[#17342c]">
-          <p className="font-semibold">Các mục trích xuất an toàn</p>
-          <p className="mt-1 text-[#4f625a]">Màu trạng thái: xanh lá đã xuất bản, đỏ không xuất bản/lỗi, vàng cần kiểm tra, tím cần xác minh, xanh dương đang xử lý.</p>
+           <p className="font-semibold">Các mục trích xuất an toàn</p>
+           <p className="mt-1 text-[#4f625a]">Màu trạng thái: xanh lá đã xuất bản, đỏ không xuất bản/lỗi, vàng cần kiểm tra, tím cần xác minh, xanh dương đang xử lý.</p>
+           {verifiableCandidates.length > 0 ? <form action={verifyFacebookCaptureCandidatesForm} className="mt-4 rounded-xl border border-[#8fb59f] bg-[#edf7ef] p-3"><input name="reviewId" type="hidden" value={review.id} />{verifiableCandidates.map((candidate) => <input key={candidate.id} name="approval" type="hidden" value={`${candidate.openRecommendationId}:${candidate.openRecommendationContentVersion}:${candidate.openRecommendationEvidenceSetRevision}`} />)}<p className="text-sm leading-6 text-[#17342c]">Duyệt và xuất bản {verifiableCandidates.length} mục đang cần xác minh. Thao tác này ghi audit log cho từng thẻ.</p><button className="mt-3 min-h-10 rounded-lg bg-[#1f5f46] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[#194d39] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]" type="submit">Duyệt tất cả mục cần xác minh ({verifiableCandidates.length})</button></form> : null}
           {v2IngestionJob.candidateHasMore ? <p className="mt-1 text-[#4f625a]">Hiển thị {v2IngestionJob.candidates.length}/{v2IngestionJob.candidateTotalCount} mục gần nhất theo thứ tự xử lý.</p> : null}
           <div className="mt-3 flex flex-wrap gap-2">
             <FilterLink active={!candidateStage && !candidateReason} href={`/admin/knowledge/facebook-captures/${encodeURIComponent(reviewId)}`}>Tất cả ({v2IngestionJob.candidates.length})</FilterLink>
@@ -228,13 +246,13 @@ export default async function FacebookCaptureReviewDetailPage({ params, searchPa
               {candidate.outcomeReasonCode === "judge_below_quality_threshold" && candidate.scores ? <JudgmentScoreBreakdown scores={candidate.scores} /> : null}
               {isRejectedQuoteDiagnostic(candidate) ? <p className="mt-2 rounded-lg border border-[#d8c9ad] bg-white/70 p-2 leading-6 text-[#4f625a]">Trích dẫn AI bị từ chối: {candidate.rejectedQuoteText}</p> : null}
               {candidate.outcomeReasonCode && candidateReasonDetails[candidate.outcomeReasonCode] ? <p className="mt-2 rounded-lg border border-[#d8c9ad] bg-white/70 p-2 text-[#4f625a]">Diễn giải: {candidateReasonDetails[candidate.outcomeReasonCode]}</p> : null}
-               {candidate.openRecommendationId ? <Link className="mt-2 inline-block text-[#1f5f46] underline" href={`/admin/knowledge/recommendations/${encodeURIComponent(candidate.openRecommendationId)}`}>Mở xử lý đề xuất</Link> : candidate.knowledgeCardId && candidate.stage === "published" ? <Link className="mt-2 inline-block text-[#1f5f46] underline" href={`/admin/knowledge/approved/${encodeURIComponent(candidate.knowledgeCardId)}`}>Mở thẻ tri thức đã duyệt</Link> : null}
+                {candidate.openRecommendationId ? <Link className={candidate.stage === "verify_first" ? "mt-3 inline-flex min-h-10 items-center text-sm font-semibold text-[#1f5f46] underline" : "mt-3 inline-flex min-h-10 items-center rounded-lg bg-[#1f5f46] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[#194d39] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]"} href={`/admin/knowledge/recommendations/${encodeURIComponent(candidate.openRecommendationId)}`}>{candidate.stage === "verify_first" ? "Xem chi tiết trước khi duyệt" : "Mở xử lý đề xuất"}</Link> : candidate.knowledgeCardId && candidate.stage === "published" ? <Link className="mt-2 inline-block text-[#1f5f46] underline" href={`/admin/knowledge/approved/${encodeURIComponent(candidate.knowledgeCardId)}`}>Mở thẻ tri thức đã duyệt</Link> : null}
             </div>)}
           </div>
         </section>
       ) : null}
 
-       {review.ingestionJob?.rawDiscoveryResponse ? <section className="mt-6 rounded-[1.5rem] border border-[#d99a93] bg-[#fff0ee] p-5 sm:p-6"><h2 className="text-2xl font-semibold tracking-[-0.03em] text-[#9b2f29]">Phản hồi thô từ bước phát hiện của AI</h2><p className="mt-3 text-sm leading-6 text-[#9b2f29]">Chỉ quản trị viên được xem dữ liệu phản hồi này để chẩn đoán lỗi. JSON hợp lệ được thụt lề để dễ đọc; dữ liệu có thể chứa lại nội dung bài Facebook, không dùng làm bằng chứng hoặc hiển thị cho khách.</p><pre className="mt-5 max-h-[36rem] overflow-auto whitespace-pre-wrap break-words rounded-2xl border border-[#d99a93] bg-white/75 p-5 text-sm leading-6 text-[#17342c]">{formatJsonForDisplay(review.ingestionJob.rawDiscoveryResponse)}</pre></section> : null}
+        {review.ingestionJob?.rawDiscoveryResponse ? <section className="mt-6 rounded-[1.5rem] border border-[#d99a93] bg-[#fff0ee] p-5 sm:p-6"><h2 className="text-2xl font-semibold tracking-[-0.03em] text-[#9b2f29]">Phản hồi thô từ bước phát hiện của AI</h2><p className="mt-3 text-sm leading-6 text-[#9b2f29]">Chỉ quản trị viên được xem dữ liệu phản hồi này để chẩn đoán lỗi. {isValidJson(review.ingestionJob.rawDiscoveryResponse) ? "JSON hợp lệ được thụt lề để dễ đọc." : "Phản hồi này không phải JSON hợp lệ; chạy lại quy trình hiện hành để tạo phản hồi mới."} Dữ liệu có thể chứa lại nội dung bài Facebook, không dùng làm bằng chứng hoặc hiển thị cho khách.</p><pre className="mt-5 max-h-[36rem] overflow-auto whitespace-pre-wrap break-words rounded-2xl border border-[#d99a93] bg-white/75 p-5 text-sm leading-6 text-[#17342c]">{formatJsonForDisplay(review.ingestionJob.rawDiscoveryResponse)}</pre></section> : null}
 
       <section className="mt-8 rounded-[1.5rem] border border-[#d8c9ad] bg-[#f4ead7] p-5 sm:p-6">
         <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#8c4f13]">Nguồn Facebook/cộng đồng, chưa xác minh</p>
@@ -349,6 +367,15 @@ function formatJsonForDisplay(value: string) {
     return JSON.stringify(JSON.parse(value), null, 2);
   } catch {
     return value;
+  }
+}
+
+function isValidJson(value: string) {
+  try {
+    JSON.parse(value);
+    return true;
+  } catch {
+    return false;
   }
 }
 

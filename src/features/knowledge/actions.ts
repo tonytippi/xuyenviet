@@ -1,10 +1,10 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { facebookCaptureReviews, knowledgeIngestionJobs, sources, type FacebookCaptureReviewStatus } from "@/db/schema";
+import { facebookCaptureReviews, knowledgeIngestionCandidates, knowledgeIngestionJobs, knowledgeRecommendations, sources, type FacebookCaptureReviewStatus } from "@/db/schema";
 import { sourceKnowledgeDraftExtractionPromptVersion } from "@/features/ai/prompts";
 import { AdminAuthorizationError, requireAdminSession } from "@/server/auth";
 import { runAuditedAdminMutation } from "@/server/mutations";
@@ -703,6 +703,51 @@ export async function resolveKnowledgeRecommendationForm(formData: FormData) {
   }
 
   redirect(`/admin/knowledge/recommendations/${encodeURIComponent(recommendationId)}?${error ? `error=${encodeURIComponent(error)}` : "resolved=1"}`);
+}
+
+export async function verifyFacebookCaptureCandidatesForm(formData: FormData) {
+  const session = await requireAdminSession();
+  const reviewId = getOptionalFormString(formData, "reviewId") ?? "";
+  const requestedApprovals = formData.getAll("approval").flatMap((value) => {
+    if (typeof value !== "string") return [];
+    const [recommendationId, contentVersion, evidenceSetRevision] = value.split(":");
+    const parsedContentVersion = Number(contentVersion);
+    const parsedEvidenceSetRevision = Number(evidenceSetRevision);
+    return recommendationId && Number.isInteger(parsedContentVersion) && Number.isInteger(parsedEvidenceSetRevision) ? [{ recommendationId, contentVersion: parsedContentVersion, evidenceSetRevision: parsedEvidenceSetRevision }] : [];
+  });
+  const approvals = [...new Map(requestedApprovals.map((approval) => [approval.recommendationId, approval])).values()];
+  let approved = 0;
+  let unavailable = 0;
+
+  try {
+    if (!reviewId || approvals.length === 0) throw new Error("invalid_request");
+    const requestedRecommendationIds = [...new Set(approvals.map((approval) => approval.recommendationId))];
+    const candidates = await getDb().select({ recommendationId: knowledgeRecommendations.id })
+      .from(facebookCaptureReviews)
+      .innerJoin(knowledgeIngestionJobs, eq(knowledgeIngestionJobs.captureVersionId, facebookCaptureReviews.captureVersionId))
+      .innerJoin(knowledgeIngestionCandidates, eq(knowledgeIngestionCandidates.ingestionJobId, knowledgeIngestionJobs.id))
+      .innerJoin(knowledgeRecommendations, eq(knowledgeRecommendations.knowledgeCardId, knowledgeIngestionCandidates.knowledgeCardId))
+      .where(and(eq(facebookCaptureReviews.id, reviewId), inArray(knowledgeRecommendations.id, requestedRecommendationIds), eq(knowledgeIngestionCandidates.stage, "verify_first"), eq(knowledgeRecommendations.reason, "verification"), inArray(knowledgeRecommendations.status, ["open", "in_review"])));
+    const candidateByRecommendationId = new Map(candidates.map((candidate) => [candidate.recommendationId, candidate]));
+    for (const approval of approvals) {
+      const candidate = candidateByRecommendationId.get(approval.recommendationId);
+      if (!candidate) {
+        unavailable += 1;
+        continue;
+      }
+      const result = await resolveKnowledgeRecommendation({ recommendationId: approval.recommendationId, expectedContentVersion: approval.contentVersion, expectedEvidenceSetRevision: approval.evidenceSetRevision, action: "verify", actor: { userId: session.userId, email: session.email } });
+      if (result.status !== "resolved") {
+        unavailable += 1;
+        continue;
+      }
+      approved += 1;
+    }
+  } catch (caught) {
+    if (caught instanceof AdminAuthorizationError || (caught instanceof Error && caught.name === "AdminAuthorizationError")) throw caught;
+    unavailable = approvals.length || 1;
+  }
+
+  redirect(getFacebookCaptureRedirectPath(reviewId, { verifyCandidatesApproved: approved ? String(approved) : undefined, verifyCandidatesUnavailable: unavailable ? String(unavailable) : undefined }));
 }
 
 function getOptionalFormString(formData: FormData, key: string) {
