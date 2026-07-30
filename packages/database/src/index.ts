@@ -7,6 +7,7 @@ export * from "./ai-ask-stream-execution";
 export * from "./answer-context";
 export * from "./answer-freshness";
 export * from "./approved-knowledge";
+export * from "./assistant-provenance-withdrawal";
 export * from "./actors";
 export * from "./client";
 export * from "./domain-outbox";

@@ -21,7 +21,8 @@
     "knowledge:extraction-worker": "node --conditions react-server --import tsx scripts/knowledge-extraction-worker.ts",
     "knowledge:ingestion-worker": "node --conditions react-server --import tsx scripts/knowledge-ingestion-worker.ts",
     "knowledge:indexing-worker": "node --conditions react-server --import tsx scripts/knowledge-indexing-worker.ts",
-    "knowledge:source-retention": "node --conditions react-server --import tsx scripts/knowledge-source-retention.ts"
+    "knowledge:source-retention": "node --conditions react-server --import tsx scripts/knowledge-source-retention.ts",
+    "knowledge:assistant-provenance-withdrawal-backfill": "node --import tsx scripts/assistant-provenance-withdrawal-backfill.ts"
   },
   "dependencies": {
     "@auth/drizzle-adapter": "^1.11.2",

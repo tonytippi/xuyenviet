@@ -117,6 +117,9 @@ export type AssistantProvenanceSourceCategory = (typeof assistantProvenanceSourc
 export const assistantProvenanceVerificationStatusValues = ["unverified", "verified"] as const;
 export type AssistantProvenanceVerificationStatus = (typeof assistantProvenanceVerificationStatusValues)[number];
 
+export const assistantProvenanceAvailabilityValues = ["available", "withdrawn"] as const;
+export type AssistantProvenanceAvailability = (typeof assistantProvenanceAvailabilityValues)[number];
+
 export const answerUsefulnessRatingValues = ["useful", "not_useful"] as const;
 export type AnswerUsefulnessRating = (typeof answerUsefulnessRatingValues)[number];
 
@@ -1940,6 +1943,9 @@ export const assistantResponseProvenance = pgTable(
     retrievalScore: real("retrieval_score"),
     sourceType: text("source_type"),
     verificationStatus: text("verification_status").$type<AssistantProvenanceVerificationStatus>().notNull(),
+    availability: text("availability").$type<AssistantProvenanceAvailability>().default("available").notNull(),
+    withdrawnAt: timestamp("withdrawn_at", { mode: "date" }),
+    withdrawalReason: text("withdrawal_reason").$type<SourceRemovalReason>(),
     usedInPrompt: boolean("used_in_prompt").default(true).notNull(),
     citedInAnswer: boolean("cited_in_answer").default(false).notNull(),
     sourceSnapshot: jsonb("source_snapshot").$type<Record<string, unknown>>().default({}).notNull(),
@@ -1964,12 +1970,34 @@ export const assistantResponseProvenance = pgTable(
     uniqueIndex("assistant_response_provenance_assistant_rank_idx").on(provenance.assistantMessageId, provenance.rank),
     index("assistant_response_provenance_conversation_created_at_idx").on(provenance.conversationId, provenance.createdAt),
     index("assistant_response_provenance_source_reference_idx").on(provenance.sourceReferenceType, provenance.sourceReferenceId),
+    index("assistant_response_provenance_created_id_idx").on(provenance.createdAt, provenance.id),
     check("assistant_response_provenance_category_check", sql`${provenance.sourceCategory} in ('trip_context', 'chat_context', 'knowledge', 'web', 'general')`),
     check("assistant_response_provenance_verification_check", sql`${provenance.verificationStatus} in ('unverified', 'verified')`),
+    check("assistant_response_provenance_availability_check", sql`${provenance.availability} in ('available', 'withdrawn')`),
+    check("assistant_response_provenance_withdrawal_shape_check", sql`(${provenance.availability} = 'available' and ${provenance.withdrawnAt} is null and ${provenance.withdrawalReason} is null) or (${provenance.availability} = 'withdrawn' and ${provenance.withdrawnAt} is not null and ${provenance.withdrawalReason} in ('withdrawn', 'inaccessible', 'removed'))`),
     check("assistant_response_provenance_rank_check", sql`${provenance.rank} > 0`),
     check("assistant_response_provenance_score_check", sql`${provenance.retrievalScore} is null or ${provenance.retrievalScore} >= 0`),
     check("assistant_response_provenance_snapshot_object_check", sql`jsonb_typeof(${provenance.sourceSnapshot}) = 'object'`),
     check("assistant_response_provenance_reference_pair_check", sql`(${provenance.sourceReferenceId} is null and ${provenance.sourceReferenceType} is null) or (${provenance.sourceReferenceId} is not null and ${provenance.sourceReferenceType} is not null)`),
+  ],
+);
+
+export const assistantProvenanceWithdrawalBackfillState = pgTable(
+  "assistant_provenance_withdrawal_backfill_state",
+  {
+    contractKey: text("contract_key").primaryKey(),
+    cutoverAt: timestamp("cutover_at", { mode: "date" }).notNull(),
+    cursorCreatedAt: timestamp("cursor_created_at", { mode: "date" }),
+    cursorId: text("cursor_id"),
+    completedAt: timestamp("completed_at", { mode: "date" }),
+    failedAt: timestamp("failed_at", { mode: "date" }),
+    failureCode: text("failure_code"),
+  },
+  (state) => [
+    check("assistant_provenance_withdrawal_backfill_state_key_check", sql`${state.contractKey} = 'v1'`),
+    check("assistant_provenance_withdrawal_backfill_state_cursor_check", sql`(${state.cursorCreatedAt} is null and ${state.cursorId} is null) or (${state.cursorCreatedAt} is not null and ${state.cursorId} is not null)`),
+    check("assistant_provenance_withdrawal_backfill_state_failure_check", sql`${state.failureCode} is null or ${state.failureCode} in ('unclassifiable_anchor', 'owner_relation_unresolved')`),
+    check("assistant_provenance_withdrawal_backfill_state_terminal_check", sql`(${state.completedAt} is null or (${state.failedAt} is null and ${state.failureCode} is null)) and ((${state.failedAt} is null and ${state.failureCode} is null) or (${state.failedAt} is not null and ${state.failureCode} is not null))`),
   ],
 );
 
@@ -2201,6 +2229,7 @@ export const schema = {
   webSearchResults,
   assistantRetrievalDecisions,
   assistantResponseProvenance,
+  assistantProvenanceWithdrawalBackfillState,
   answerUsefulnessFeedback,
   publicMvpEvaluationPromptSets,
   publicMvpEvaluationRuns,

@@ -147,6 +147,7 @@ export async function generateEvaluationAiAskAnswer({
       .select({
         id: assistantResponseProvenance.id,
         sourceCategory: assistantResponseProvenance.sourceCategory,
+        availability: assistantResponseProvenance.availability,
         usedInPrompt: assistantResponseProvenance.usedInPrompt,
         sourceSnapshot: assistantResponseProvenance.sourceSnapshot,
       })

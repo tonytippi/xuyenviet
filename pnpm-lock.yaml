@@ -163,6 +163,9 @@ importers:
       '@xuyenviet/domain':
         specifier: workspace:*
         version: link:../domain
+      drizzle-orm:
+        specifier: ^0.44.5
+        version: 0.44.7(@neondatabase/serverless@1.1.0)(postgres@3.4.9)
       postgres:
         specifier: ^3.4.9
         version: 3.4.9

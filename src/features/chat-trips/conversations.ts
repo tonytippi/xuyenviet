@@ -69,6 +69,7 @@ export async function getOwnedConversation(conversationId: string) {
       retrievalScore: assistantResponseProvenance.retrievalScore,
       sourceType: assistantResponseProvenance.sourceType,
       verificationStatus: assistantResponseProvenance.verificationStatus,
+      availability: assistantResponseProvenance.availability,
       usedInPrompt: assistantResponseProvenance.usedInPrompt,
       citedInAnswer: assistantResponseProvenance.citedInAnswer,
       sourceSnapshot: assistantResponseProvenance.sourceSnapshot,

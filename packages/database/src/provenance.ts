@@ -1,4 +1,6 @@
 import { toStateAwareKnowledgeBundleItem, type StateAwareKnowledgeBundleItem } from "./approved-knowledge";
+import { classifyAssistantProvenanceRowsForInsertion } from "./assistant-provenance-withdrawal";
+import { getDb } from "./client";
 import { assistantResponseProvenance, assistantRetrievalDecisions, type AssistantProvenanceSourceCategory } from "./schema";
 import type { ContextPrioritySourceBundle, PromptUsageLedger } from "./source-bundle";
 
@@ -6,18 +8,17 @@ const maxSnapshotStringLength = 500;
 const maxSnapshotArrayItems = 5;
 const maxSnapshotDepth = 4;
 
-type ProvenanceDb = {
-  insert(table: typeof assistantRetrievalDecisions): { values(value: typeof assistantRetrievalDecisions.$inferInsert): Promise<unknown> };
-  insert(table: typeof assistantResponseProvenance): { values(value: Array<typeof assistantResponseProvenance.$inferInsert>): { returning(): Promise<Array<typeof assistantResponseProvenance.$inferSelect>> } };
-};
+type Database = ReturnType<typeof getDb>;
+export type ProvenanceDb = Database | (Parameters<Database["transaction"]>[0] extends (transaction: infer T) => unknown ? T : never);
 
 type AssistantProvenanceRow = Pick<typeof assistantResponseProvenance.$inferSelect,
   "id" | "sourceCategory" | "rank" | "retrievalScore" | "sourceType" | "verificationStatus" | "usedInPrompt" | "citedInAnswer" | "sourceSnapshot"
->;
+> & { availability?: "available" | "withdrawn" };
 
-export type AssistantMessageProvenanceItem = {
+export type AvailableAssistantMessageProvenanceItem = {
   id: string;
   rank: number;
+  availability?: "available";
   sourceCategory: AssistantProvenanceSourceCategory;
   title: string;
   sourceType: string | null;
@@ -39,6 +40,15 @@ export type AssistantMessageProvenanceItem = {
     url: string | null;
     quote: string | null;
   }>;
+};
+
+export type AssistantMessageProvenanceItem = AvailableAssistantMessageProvenanceItem | {
+  id: string;
+  rank: number;
+  availability: "withdrawn";
+  unavailableLabel: "Nguồn này không còn khả dụng.";
+  usedInPrompt: boolean;
+  citedInAnswer: boolean;
 };
 
 export async function persistAssistantAnswerProvenance(db: ProvenanceDb, input: {
@@ -76,6 +86,7 @@ export async function persistAssistantAnswerProvenance(db: ProvenanceDb, input: 
   const rows = buildProvenanceRows({ userId, conversationId, userMessageId, assistantMessageId, tripAnswerContextSnapshotId, sourceBundle, promptUsage });
 
   if (rows.length > 0) {
+    await classifyAssistantProvenanceRowsForInsertion(db, rows);
     const insertedRows = await db.insert(assistantResponseProvenance).values(rows).returning();
     return formatAssistantMessageProvenance(insertedRows);
   }
@@ -88,10 +99,14 @@ export function formatAssistantMessageProvenance(rows: AssistantProvenanceRow[])
     .slice()
     .sort((left, right) => left.rank - right.rank)
     .map((row) => {
+      if (row.availability === "withdrawn") {
+        return { id: row.id, rank: row.rank, availability: "withdrawn" as const, unavailableLabel: "Nguồn này không còn khả dụng." as const, usedInPrompt: row.usedInPrompt, citedInAnswer: row.citedInAnswer };
+      }
       const snapshot = isRecord(row.sourceSnapshot) ? row.sourceSnapshot : {};
       return {
         id: row.id,
         rank: row.rank,
+        availability: "available" as const,
         sourceCategory: row.sourceCategory,
         title: getSourceTitle(row.sourceCategory, snapshot),
         sourceType: getOptionalString(snapshot.sourceType) ?? row.sourceType,
@@ -355,7 +370,7 @@ function isFacebookHost(hostname: string) {
   return normalized === "facebook.com" || normalized.endsWith(".facebook.com") || normalized === "fb.com" || normalized.endsWith(".fb.com") || normalized === "fb.me" || normalized.endsWith(".fb.me") || normalized === "fb.watch" || normalized.endsWith(".fb.watch");
 }
 
-function getKnowledgeState(value: unknown): AssistantMessageProvenanceItem["knowledgeState"] {
+function getKnowledgeState(value: unknown): AvailableAssistantMessageProvenanceItem["knowledgeState"] {
   if (value === "verified_fact") {
     return "confirmed";
   }
@@ -363,7 +378,7 @@ function getKnowledgeState(value: unknown): AssistantMessageProvenanceItem["know
   return value === "community_observation" || value === "community_pattern" || value === "conditional" || value === "uncertain" || value === "conflicted" || value === "confirmed" || value === "superseded" ? value : null;
 }
 
-function getVerificationState(value: unknown): AssistantMessageProvenanceItem["verificationState"] {
+function getVerificationState(value: unknown): AvailableAssistantMessageProvenanceItem["verificationState"] {
   if (value === "verified") {
     return "corroborated";
   }
@@ -371,7 +386,7 @@ function getVerificationState(value: unknown): AssistantMessageProvenanceItem["v
   return value === "not_required" || value === "required" || value === "corroborated" || value === "failed" ? value : null;
 }
 
-function getUsePolicy(value: unknown): AssistantMessageProvenanceItem["usePolicy"] {
+function getUsePolicy(value: unknown): AvailableAssistantMessageProvenanceItem["usePolicy"] {
   return value === "contextual_use" || value === "caveat_only" || value === "do_not_use" ? value : null;
 }
 
@@ -379,7 +394,7 @@ function getBoundedStrings(value: unknown) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0).slice(0, maxSnapshotArrayItems).map((item) => item.slice(0, maxSnapshotStringLength)) : [];
 }
 
-function getTravelerEvidence(value: unknown): AssistantMessageProvenanceItem["evidence"] {
+function getTravelerEvidence(value: unknown): AvailableAssistantMessageProvenanceItem["evidence"] {
   if (!Array.isArray(value)) {
     return [];
   }

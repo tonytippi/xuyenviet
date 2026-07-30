@@ -134,6 +134,20 @@
       "when": 1785338400000,
       "tag": "0018_delete_trip_answer_context_snapshots_with_project",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1785338500000,
+      "tag": "0019_withdraw_historical_assistant_provenance",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1785338600000,
+      "tag": "0020_assistant_provenance_withdrawal_backfill_state_terminal",
+      "breakpoints": true
     }
   ]
 }

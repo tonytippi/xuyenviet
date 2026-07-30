@@ -67,6 +67,21 @@ const provenance: AssistantMessageProvenanceItem[] = [
 ];
 
 describe("answer annotation validation", () => {
+  test("omits descriptors with withdrawn provenance while retaining source-free local guidance", () => {
+    const answerText = "Nguồn cũ không còn dùng được. Hãy kiểm tra lại.";
+    const warningText = "Hãy kiểm tra lại.";
+    const withdrawn: AssistantMessageProvenanceItem = { id: "withdrawn", rank: 1, availability: "withdrawn", unavailableLabel: "Nguồn này không còn khả dụng.", usedInPrompt: true, citedInAnswer: false };
+    const annotations = sanitizeStoredAnswerAnnotations({
+      answerText,
+      provenance: [withdrawn],
+      annotations: [
+        { id: "source", start: 0, end: 8, text: "Nguồn cũ", type: "source", detail: { type: "source", label: "Nguồn cũ", provenanceIds: ["withdrawn"], owner: { table: "assistant_response_provenance", id: "withdrawn" } } },
+        { id: "warning", start: answerText.indexOf(warningText), end: answerText.length, text: warningText, type: "warning", detail: { type: "warning", label: warningText, provenanceIds: [] } },
+      ],
+    });
+    expect(annotations.map((annotation) => annotation.id)).toEqual(["warning"]);
+  });
+
   test("accepts valid knowledge, web, context, and general reasoning annotations", () => {
     const answerText = "Nên dùng Bãi đỗ chính thức Huế. Giá xem Nguồn web cập nhật. Đi cùng trẻ nhỏ nên nghỉ nhiều hơn. Đây là suy luận tổng quát.";
     const proposals: AnswerAnnotationProposal[] = [

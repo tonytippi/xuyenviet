@@ -9,7 +9,7 @@ import { formatTripProjectLabel } from "@/features/chat-trips/labels";
 import { answerUsefulnessCommentMaxLength, countAnswerUsefulnessCommentCharacters, type AnswerUsefulnessFeedbackSummary } from "@/features/feedback/types";
 import type { AnswerUsefulnessRating } from "@/db/schema";
 import type { AnswerAnnotation } from "@/features/ai/answer-annotations";
-import type { AssistantMessageProvenanceItem } from "@/features/retrieval/provenance";
+import type { AssistantMessageProvenanceItem, AvailableAssistantMessageProvenanceItem } from "@/features/retrieval/provenance";
 import type { TripWorkspaceReadModel } from "@/features/chat-trips/trip-home";
 import { tripChangeProposalLabels } from "@/features/chat-trips/trip-home-labels";
 import { TripWorkspacePanel } from "@/features/ai/trip-workspace-panel";
@@ -41,7 +41,7 @@ export type AnswerEntityDescriptor = {
   label: string;
   section?: string;
   summary?: string;
-  sourceCategory?: AssistantMessageProvenanceItem["sourceCategory"];
+  sourceCategory?: AvailableAssistantMessageProvenanceItem["sourceCategory"];
   owner?: {
     table: string;
     id: string;
@@ -503,7 +503,7 @@ function getAnnotationClassName(annotation: AnswerAnnotation) {
 }
 
 export function AssistantProvenanceBlock({ provenance, selectedEntityId, detailPanelIds, onSelectEntity }: { provenance?: AssistantMessageProvenanceItem[]; selectedEntityId?: string; detailPanelIds?: string; onSelectEntity?: (entity: AnswerEntityDescriptor, trigger: HTMLElement) => void }) {
-  const visibleItems = provenance?.filter((item) => item.usedInPrompt || item.sourceCategory === "general") ?? [];
+  const visibleItems = provenance?.filter((item): item is AvailableAssistantMessageProvenanceItem | Extract<AssistantMessageProvenanceItem, { availability: "withdrawn" }> => item.availability === "withdrawn" || (item.usedInPrompt || item.sourceCategory === "general")) ?? [];
 
   if (visibleItems.length === 0) {
     return null;
@@ -514,6 +514,9 @@ export function AssistantProvenanceBlock({ provenance, selectedEntityId, detailP
       <h3 className="text-sm font-bold uppercase tracking-[0.12em] text-[#8c4f13]">Nguồn và độ tin cậy</h3>
       <ul className="mt-3 space-y-3">
         {visibleItems.map((item) => {
+          if (item.availability === "withdrawn") {
+            return <li className="rounded-xl border border-[#eadfc8] bg-white/80 p-3 text-sm leading-6 text-[#4f625a]" key={item.id}>{item.unavailableLabel}</li>;
+          }
           const isSelected = selectedEntityId === item.id;
           const hasActionBlockedProvenance = isActionBlockedProvenance(item);
           const detailActionLabel = item.sourceCategory === "general" ? "Xem chi tiết suy luận AI" : hasActionBlockedProvenance || item.freshnessSensitive ? "Xem chi tiết cảnh báo" : "Xem chi tiết nguồn";
@@ -2406,7 +2409,7 @@ function validateSelectedImage(image: File | null) {
   return null;
 }
 
-function formatProvenanceCategory(item: AssistantMessageProvenanceItem) {
+function formatProvenanceCategory(item: AvailableAssistantMessageProvenanceItem) {
   if (item.sourceCategory === "knowledge") {
     return "XuyenViet";
   }
@@ -2426,7 +2429,7 @@ function formatProvenanceCategory(item: AssistantMessageProvenanceItem) {
   return "Suy luận";
 }
 
-function createProvenanceAnswerEntityDescriptor(item: AssistantMessageProvenanceItem): AnswerEntityDescriptor {
+function createProvenanceAnswerEntityDescriptor(item: AvailableAssistantMessageProvenanceItem): AnswerEntityDescriptor {
   const hasActionBlockedProvenance = isActionBlockedProvenance(item);
   const detail: Record<string, string> = {
     "Loại": formatProvenanceCategory(item),
@@ -2473,7 +2476,7 @@ function createProvenanceAnswerEntityDescriptor(item: AssistantMessageProvenance
   };
 }
 
-function getTrustLabels(item: AssistantMessageProvenanceItem) {
+function getTrustLabels(item: AvailableAssistantMessageProvenanceItem) {
   const labels: string[] = [];
 
   if (item.knowledgeState === "community_observation") labels.push("Quan sát cộng đồng");
@@ -2487,7 +2490,7 @@ function getTrustLabels(item: AssistantMessageProvenanceItem) {
   return labels;
 }
 
-function isActionBlockedProvenance(item: AssistantMessageProvenanceItem) {
+function isActionBlockedProvenance(item: AvailableAssistantMessageProvenanceItem) {
   return item.usePolicy === "do_not_use" || item.verificationState === "failed" || item.knowledgeState === "conflicted" || item.knowledgeState === "superseded";
 }
 
@@ -2522,7 +2525,7 @@ function getAnswerEntityIcon(type: AnswerEntityDescriptor["type"]) {
   return SourceIcon;
 }
 
-function formatProvenanceSourceType(item: AssistantMessageProvenanceItem) {
+function formatProvenanceSourceType(item: AvailableAssistantMessageProvenanceItem) {
   const sourceType = item.sourceType?.toLocaleLowerCase("vi-VN") ?? null;
 
   if (item.sourceCategory === "web") {

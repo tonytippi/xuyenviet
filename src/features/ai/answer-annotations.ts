@@ -1,7 +1,7 @@
 import "server-only";
 
 import { completeInitialAiAskAnswer } from "@/features/ai/gateway";
-import type { AssistantMessageProvenanceItem } from "@/features/retrieval/provenance";
+import type { AssistantMessageProvenanceItem, AvailableAssistantMessageProvenanceItem } from "@/features/retrieval/provenance";
 
 export type AnswerAnnotationType = "source" | "warning" | "trip_fact" | "action" | "place" | "hotel_area" | "route_segment" | "cost";
 
@@ -28,7 +28,7 @@ export type AnswerAnnotationDetailDescriptor = {
   label: string;
   section?: string;
   summary?: string;
-  sourceCategory?: AssistantMessageProvenanceItem["sourceCategory"];
+  sourceCategory?: AvailableAssistantMessageProvenanceItem["sourceCategory"];
   owner?: {
     table: "assistant_response_provenance";
     id: string;
@@ -82,6 +82,9 @@ export function validateAnswerAnnotations(input: {
     const matchedProvenance = provenanceIds.map((id) => provenanceById.get(id)).filter((item): item is AssistantMessageProvenanceItem => Boolean(item));
 
     if (provenanceIds.length !== matchedProvenance.length) {
+      continue;
+    }
+    if (matchedProvenance.some((item) => item.availability === "withdrawn")) {
       continue;
     }
 
@@ -240,18 +243,22 @@ export function buildAnswerAnnotationDetail(input: {
 }): AnswerAnnotationDetailDescriptor | null {
   const primary = input.provenance[0];
 
-  if (!primary && input.type !== "action") {
+  if (!primary && input.type !== "action" && input.type !== "warning" && input.type !== "trip_fact") {
     return null;
   }
 
   if (!primary) {
     return {
-      type: "action",
+      type: input.type,
       label: input.text,
-      section: "Gợi ý hành động",
-      summary: "Đây là gợi ý trong câu trả lời, không phải thao tác có thể thực hiện.",
-      quickFacts: [{ label: "Trạng thái", value: "Chưa có thao tác được xác minh" }],
+      section: input.type === "action" ? "Gợi ý hành động" : "Lưu ý trong câu trả lời",
+      summary: input.type === "action" ? "Đây là gợi ý trong câu trả lời, không phải thao tác có thể thực hiện." : "Đây là lưu ý cục bộ trong câu trả lời, không phải chi tiết từ nguồn.",
+      quickFacts: [{ label: "Trạng thái", value: input.type === "action" ? "Chưa có thao tác được xác minh" : "Không gắn với nguồn" }],
     };
+  }
+
+  if (primary.availability === "withdrawn" || input.provenance.some((item) => item.availability === "withdrawn")) {
+    return null;
   }
 
   const type = input.type;
@@ -319,10 +326,10 @@ export function parseAnswerAnnotationProposals(content: string): AnswerAnnotatio
 }
 
 function getAnnotationProposalProvenance(provenance: AssistantMessageProvenanceItem[]) {
-  return provenance.filter((item) => item.usedInPrompt && item.sourceCategory !== "general");
+  return provenance.filter((item): item is Extract<AssistantMessageProvenanceItem, { availability: "available" }> => item.availability === "available" && item.usedInPrompt && item.sourceCategory !== "general");
 }
 
-function buildAnnotationProposalMessages({ answerText, provenance }: { answerText: string; provenance: AssistantMessageProvenanceItem[] }) {
+function buildAnnotationProposalMessages({ answerText, provenance }: { answerText: string; provenance: AvailableAssistantMessageProvenanceItem[] }) {
   const handles = provenance
     .map((item) => ({
       id: item.id,
@@ -361,7 +368,7 @@ function parseJson(content: string) {
   }
 }
 
-function formatAnnotationSourceType(item: AssistantMessageProvenanceItem) {
+function formatAnnotationSourceType(item: AvailableAssistantMessageProvenanceItem) {
   if (item.sourceCategory === "web") {
     return "Web chưa xác minh";
   }
@@ -387,7 +394,8 @@ function sanitizeDetailDescriptor(value: unknown, annotationType: AnswerAnnotati
   }
 
   const provenanceIds = sanitizeProvenanceIds(value.provenanceIds, provenanceById);
-  if (!provenanceIds || (annotationType !== "action" && provenanceIds.length === 0)) {
+  const mayBeSourceFree = annotationType === "action" || annotationType === "warning" || annotationType === "trip_fact";
+  if (!provenanceIds || (!mayBeSourceFree && provenanceIds.length === 0)) {
     return null;
   }
 
@@ -419,6 +427,10 @@ function sanitizeProvenanceIds(value: unknown, provenanceById: Map<string, Assis
   }
 
   if (!Array.isArray(value) || value.some((id) => typeof id !== "string") || new Set(value).size !== value.length || value.some((id) => !provenanceById.has(id))) {
+    return null;
+  }
+
+  if (value.some((id) => provenanceById.get(id)?.availability === "withdrawn")) {
     return null;
   }
 
@@ -486,7 +498,7 @@ function compareStoredAnnotations(left: unknown, right: unknown) {
   return leftStart - rightStart || leftEnd - rightEnd;
 }
 
-function getDescriptorSummary(type: AnswerAnnotationType, sourceCategory: AssistantMessageProvenanceItem["sourceCategory"]) {
+function getDescriptorSummary(type: AnswerAnnotationType, sourceCategory: AvailableAssistantMessageProvenanceItem["sourceCategory"]) {
   if (type === "place") return "Địa điểm này được liên kết với cơ sở đã lưu của câu trả lời.";
   if (type === "hotel_area") return "Khu lưu trú này cần được kiểm tra lại theo nhu cầu và thời điểm đi.";
   if (type === "route_segment") return "Chặng đường này được mô tả từ cơ sở đã lưu, không phải chỉ đường trực tiếp.";

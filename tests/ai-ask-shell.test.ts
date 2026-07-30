@@ -1401,8 +1401,9 @@ describe("AI Ask conversation data layer", () => {
     const result = await getOwnedConversation(conversation.id);
     const assistant = result?.messages.find((message) => message.role === "assistant");
 
-    expect(assistant?.provenance.map((item) => item.title)).toEqual(["Nguồn duyệt Huế", "Web Huế"]);
-    expect(assistant?.provenance.map((item) => item.sourceCategory)).toEqual(["knowledge", "web"]);
+    const available = assistant?.provenance.filter((item): item is Extract<typeof item, { availability?: "available" }> => item.availability !== "withdrawn") ?? [];
+    expect(available.map((item) => item.title)).toEqual(["Nguồn duyệt Huế", "Web Huế"]);
+    expect(available.map((item) => item.sourceCategory)).toEqual(["knowledge", "web"]);
     expect(JSON.stringify(result)).not.toContain("Nguồn riêng user-2");
   });
 

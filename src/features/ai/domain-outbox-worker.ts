@@ -84,9 +84,11 @@ async function loadFinalStateInTransaction(transaction: Transaction, envelope: A
   const [conversation] = await transaction.select({ lifecycleVersion: conversations.lifecycleVersion, tripProjectId: conversations.tripProjectId }).from(conversations).where(and(eq(conversations.id, envelope.conversationId), eq(conversations.userId, envelope.userId))).limit(1).for("update");
   const [command] = await transaction.select({ status: aiAskCommands.status, conversationId: aiAskCommands.conversationId, tripProjectId: aiAskCommands.tripProjectId, userMessageId: aiAskCommands.userMessageId, assistantMessageId: aiAskCommands.assistantMessageId, conversationLifecycleVersion: aiAskCommands.conversationLifecycleVersion, tripProjectAggregateVersion: aiAskCommands.tripProjectAggregateVersion, normalizedQuestion: aiAskCommands.normalizedQuestion }).from(aiAskCommands).where(and(eq(aiAskCommands.id, envelope.commandId), eq(aiAskCommands.userId, envelope.userId))).limit(1).for("update");
   if (!command || !conversation || !project && envelope.tripProjectId || command.status !== "completed" || command.conversationId !== envelope.conversationId || command.tripProjectId !== (envelope.tripProjectId ?? null) || command.assistantMessageId !== envelope.assistantMessageId || command.userMessageId !== envelope.userMessageId || command.conversationLifecycleVersion !== envelope.conversationLifecycleVersion || command.tripProjectAggregateVersion !== (envelope.tripProjectAggregateVersion ?? null) || conversation.lifecycleVersion !== envelope.conversationLifecycleVersion || conversation.tripProjectId !== (envelope.tripProjectId ?? null) || project?.aggregateVersion !== envelope.tripProjectAggregateVersion) return null;
+  // Withdrawal locks provenance before its owning message. Keep final delivery in
+  // that same order so delayed annotation cannot deadlock with a withdrawal.
+  const provenance = await transaction.select({ id: assistantResponseProvenance.id, sourceCategory: assistantResponseProvenance.sourceCategory, rank: assistantResponseProvenance.rank, retrievalScore: assistantResponseProvenance.retrievalScore, sourceType: assistantResponseProvenance.sourceType, verificationStatus: assistantResponseProvenance.verificationStatus, availability: assistantResponseProvenance.availability, usedInPrompt: assistantResponseProvenance.usedInPrompt, citedInAnswer: assistantResponseProvenance.citedInAnswer, sourceSnapshot: assistantResponseProvenance.sourceSnapshot }).from(assistantResponseProvenance).where(and(eq(assistantResponseProvenance.userId, envelope.userId), eq(assistantResponseProvenance.conversationId, envelope.conversationId), eq(assistantResponseProvenance.userMessageId, envelope.userMessageId!), eq(assistantResponseProvenance.assistantMessageId, envelope.assistantMessageId!))).for("update");
   const [assistant] = await transaction.select({ content: messages.content }).from(messages).where(and(eq(messages.id, envelope.assistantMessageId!), eq(messages.userId, envelope.userId), eq(messages.conversationId, envelope.conversationId), eq(messages.role, "assistant"))).limit(1).for("update");
   if (!assistant) return null;
-  const provenance = await transaction.select({ id: assistantResponseProvenance.id, sourceCategory: assistantResponseProvenance.sourceCategory, rank: assistantResponseProvenance.rank, retrievalScore: assistantResponseProvenance.retrievalScore, sourceType: assistantResponseProvenance.sourceType, verificationStatus: assistantResponseProvenance.verificationStatus, usedInPrompt: assistantResponseProvenance.usedInPrompt, citedInAnswer: assistantResponseProvenance.citedInAnswer, sourceSnapshot: assistantResponseProvenance.sourceSnapshot }).from(assistantResponseProvenance).where(and(eq(assistantResponseProvenance.userId, envelope.userId), eq(assistantResponseProvenance.conversationId, envelope.conversationId), eq(assistantResponseProvenance.userMessageId, envelope.userMessageId!), eq(assistantResponseProvenance.assistantMessageId, envelope.assistantMessageId!))).for("update");
   return { ...assistant, question: command.normalizedQuestion, provenance };
 }
 
@@ -97,14 +99,17 @@ async function annotate(claim: DomainOutboxClaim, envelope: AiAskOutboxEnvelope,
   if (model && !await readFinalState(envelope)) return "fenced_out";
   const annotationResult = model ? await buildValidatedAnswerAnnotationsResult({ answerText, provenance: formatted, model: model.gatewayModelName }) : { kind: "annotations" as const, annotations: [] };
   if (annotationResult.kind === "provider_failed") return { kind: "retryable", code: "annotation_provider_failed" };
-  const annotations = sanitizeStoredAnswerAnnotations({ answerText, annotations: annotationResult.annotations, provenance: formatted });
   return getDb().transaction(async (transaction) => {
     const current = await loadFinalStateInTransaction(transaction, envelope);
     if (!current || current.content !== answerText) return "fenced_out";
+    // The provider result is stale by design. Format and sanitize under the final
+    // locks so a withdrawal cannot recreate a source-backed descriptor.
+    const currentProvenance = formatAssistantMessageProvenance(current.provenance);
+    const currentAnnotations = sanitizeStoredAnswerAnnotations({ answerText, annotations: annotationResult.annotations, provenance: currentProvenance });
     const completion = await completeDomainOutboxClaimInTransaction(transaction, claim, async () => {
       const [effect] = await transaction.insert(domainOutboxEffects).values({ outboxEventId: claim.id, effectType: "answer_annotation" }).onConflictDoNothing().returning({ id: domainOutboxEffects.id });
       if (effect) {
-        await transaction.update(messages).set({ answerAnnotations: annotations }).where(and(eq(messages.id, envelope.assistantMessageId!), eq(messages.content, answerText)));
+        await transaction.update(messages).set({ answerAnnotations: currentAnnotations }).where(and(eq(messages.id, envelope.assistantMessageId!), eq(messages.content, answerText)));
         if (annotationResult.usage) {
           await writeAiUsageEvent(transaction, {
             initiatedByUserId: envelope.userId,

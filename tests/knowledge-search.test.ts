@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { knowledgeCardEvidence, knowledgeCardSearchDocuments, knowledgeCards, knowledgeCardSources, knowledgeIndexDirtyMarkers, rawSourceMaterial, sourceCaptureVersions, sources, userRoles, users, type UserRole } from "@/db/schema";
+import { assistantProvenanceWithdrawalBackfillState, knowledgeCardEvidence, knowledgeCardSearchDocuments, knowledgeCards, knowledgeCardSources, knowledgeIndexDirtyMarkers, rawSourceMaterial, sourceCaptureVersions, sources, userRoles, users, type UserRole } from "@/db/schema";
 
 import { testDb } from "./helpers/db";
 import { seedKnowledgeCardEvidence, seedSourceCaptureVersion } from "./helpers/source-captures";
@@ -476,6 +476,7 @@ describe("knowledge card state-model retrieval safety", () => {
     if (!claim) throw new Error("Expected indexing claim");
     const { removeKnowledgeSource } = await import("@/features/knowledge/source-removal");
 
+    await testDb.insert(assistantProvenanceWithdrawalBackfillState).values({ contractKey: "v1", cutoverAt: new Date(), completedAt: new Date() });
     await removeKnowledgeSource({ sourceId: `${card.id}-source`, reason: "withdrawn", actor: { userId: "withdrawal-race-operator", email: "withdrawal-race-operator@example.com" } }, testDb);
     const result = await (await import("@/features/knowledge/search")).projectClaimedKnowledgeIndexWork(claim, testDb);
 

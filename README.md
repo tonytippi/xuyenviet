@@ -126,6 +126,7 @@ pnpm knowledge:ingestion-worker
 pnpm knowledge:ingestion-worker --once
 pnpm knowledge:indexing-worker
 pnpm knowledge:indexing-worker --once
+pnpm knowledge:assistant-provenance-withdrawal-backfill --execute
 ```
 
 `facebook:capture` reads queued Facebook source links from PostgreSQL and saves visible captured text for later operator review. See `docs/runbooks/facebook-capture.md` for its current production-scheduling blockers and recovery procedure.
@@ -137,6 +138,15 @@ Capture commands use two databases: `DATABASE_URL` is the application database r
 `knowledge:ingestion-worker` runs the canonical source-version ingestion pipeline outside the request path. It recovers expired fenced jobs, processes queued jobs continuously, and waits for `KNOWLEDGE_INGESTION_WORKER_POLL_MS` when no work is available. Use `--once` only for local/debug runs; production must run the `knowledge-ingestion` supervised service.
 
 `knowledge:indexing-worker` continuously indexes approved, source-linked knowledge cards into active search documents for AI Ask retrieval. Use `--once` to backfill the next batch locally/debug. Tune polling with `KNOWLEDGE_INDEXING_WORKER_POLL_MS` and batch size with `KNOWLEDGE_INDEXING_WORKER_BATCH_SIZE`.
+
+### Assistant provenance withdrawal backfill release procedure
+
+`knowledge:assistant-provenance-withdrawal-backfill` is an explicit, one-time operator maintenance command. It is not a scheduled worker. It refuses to run without `--execute`, processes bounded batches of 1 through 500 rows, and continues synchronously until it reaches a terminal `completed` or `failed` result. Its output contains only the terminal status, batch count, scanned count, and safe failure code when applicable.
+
+1. Put the deployment into a quiescent maintenance window. Stop the application and all workers that can create assistant provenance or withdraw sources/evidence. Do not deploy or run competing operator maintenance while the command is active.
+2. Run `pnpm knowledge:assistant-provenance-withdrawal-backfill --execute`. Use `--batch-size=1..500` only to bound each transaction. Do not interrupt a progressing run.
+3. If it reports `failed`, keep the deployment quiescent, repair the data indicated by its safe failure code through the operator workflow, then rerun with `--execute --retry-failed`. Do not release traffic while the state is failed.
+4. Release the application and workers only after the command reports `completed`. The command is safe to invoke again after completion and reports zero new work.
 
 ## Public launch safety
 
