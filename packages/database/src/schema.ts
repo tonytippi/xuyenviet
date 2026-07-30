@@ -1374,6 +1374,7 @@ export const knowledgeCardEvidence = pgTable(
     supportLevel: text("support_level").$type<KnowledgeSourceSupport>().default("supporting").notNull(),
     displayPolicy: text("display_policy").$type<KnowledgeEvidenceDisplayPolicy>().default("fact_only").notNull(),
     state: text("state").$type<KnowledgeEvidenceState>().default("active").notNull(),
+    withdrawalReason: text("withdrawal_reason").$type<SourceRemovalReason>(),
     independenceKey: text("independence_key").notNull(),
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
   },
@@ -1397,6 +1398,8 @@ export const knowledgeCardEvidence = pgTable(
     check("knowledge_card_evidence_support_check", sql`${evidence.supportLevel} in ('primary', 'supporting', 'conflicting')`),
     check("knowledge_card_evidence_display_policy_check", sql`${evidence.displayPolicy} in ('fact_only', 'traveler_visible', 'operator_only')`),
     check("knowledge_card_evidence_state_check", sql`${evidence.state} in ('active', 'removed')`),
+    check("knowledge_card_evidence_withdrawal_reason_check", sql`${evidence.withdrawalReason} is null or ${evidence.withdrawalReason} in ('withdrawn', 'inaccessible', 'removed')`),
+    check("knowledge_card_evidence_withdrawal_shape_check", sql`${evidence.state} = 'removed' or ${evidence.withdrawalReason} is null`),
     check("knowledge_card_evidence_independence_key_check", sql`length(btrim(${evidence.independenceKey})) between 1 and 160`),
   ],
 );

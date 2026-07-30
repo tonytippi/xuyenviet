@@ -139,6 +139,7 @@ export function extractHistoricalAnchors(row: Pick<typeof assistantResponseProve
   if (snapshot.evidence !== undefined && !Array.isArray(snapshot.evidence)) return null;
   for (const evidence of Array.isArray(snapshot.evidence) ? snapshot.evidence : []) {
     if (!isRecord(evidence)) return null;
+    if (!nonblank(evidence.sourceId) && !nonblank(evidence.evidenceId)) return null;
     if (nonblank(evidence.sourceId)) sourceIds.push(evidence.sourceId);
     if (nonblank(evidence.evidenceId)) evidenceIds.push(evidence.evidenceId);
   }
@@ -156,7 +157,7 @@ async function currentWithdrawalAnchors(db: WithdrawalDb, anchors: ProvenanceWit
   const evidenceIds = normalized(anchors.evidenceIds);
   const cardIds = normalized(anchors.cardIds);
   const withdrawnSources = sourceIds.length ? await db.select({ id: sources.id }).from(sources).where(and(inArray(sources.id, sourceIds), eq(sources.eligibility, "withdrawn"))) : [];
-  const removedEvidence = evidenceIds.length ? await db.select({ id: knowledgeCardEvidence.id, sourceId: knowledgeCardEvidence.sourceId, cardId: knowledgeCardEvidence.knowledgeCardId }).from(knowledgeCardEvidence).where(and(inArray(knowledgeCardEvidence.id, evidenceIds), eq(knowledgeCardEvidence.state, "removed"))) : [];
+  const removedEvidence = evidenceIds.length ? await db.select({ id: knowledgeCardEvidence.id, sourceId: knowledgeCardEvidence.sourceId, cardId: knowledgeCardEvidence.knowledgeCardId }).from(knowledgeCardEvidence).where(and(inArray(knowledgeCardEvidence.id, evidenceIds), eq(knowledgeCardEvidence.state, "removed"), inArray(knowledgeCardEvidence.withdrawalReason, ["withdrawn", "inaccessible", "removed"]))) : [];
   // A withdrawn source invalidates every direct evidence anchor it owns. Returning
   // those IDs preserves evidence-first matching without broad source-only matches.
   const sourceEvidence = withdrawnSources.length ? await db.select({ id: knowledgeCardEvidence.id, sourceId: knowledgeCardEvidence.sourceId }).from(knowledgeCardEvidence).where(inArray(knowledgeCardEvidence.sourceId, withdrawnSources.map((row) => row.id))) : [];

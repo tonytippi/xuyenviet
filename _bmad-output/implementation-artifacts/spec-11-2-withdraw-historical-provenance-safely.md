@@ -2,7 +2,7 @@
 title: 'Withdraw Historical Provenance Safely'
 type: 'feature'
 created: '2026-07-30'
-status: 'done'
+status: 'ready-for-dev'
 review_loop_iteration: 0
 followup_review_recommended: false
 baseline_revision: 'a4bf89e19d3353488e55653bb47a0a29024c8781'
@@ -25,7 +25,7 @@ warnings: [oversized]
 
 **Always:** Preserve Story 11.1 migrations `0017`/`0018`, terminal fences, immutable snapshots, and deletion cleanup. Use only exact parsed card/source/evidence anchors; never titles, URLs, quotes, mutable eligibility, or substring matching. Availability remains separate from verification status. Lock source IDs (namespace 44), evidence IDs (dedicated namespace), then card IDs (namespace 46), then provenance/message rows. Source/evidence withdrawal must fail closed until durable v1 historic backfill is complete. All traveler withdrawn output is exactly `{ id, rank, availability: "withdrawn", unavailableLabel: "Nguồn này không còn khả dụng.", usedInPrompt, citedInAnswer }`.
 
-**Block If:** The approved migration/cutover path cannot establish old terminal/evaluation writer quiescence before cutover, or the current database contract cannot safely apply the required forward migration.
+**Block If:** The approved migration/cutover path cannot establish old terminal/evaluation writer quiescence before cutover, or the current database contract cannot safely apply the required forward migration. `0019` already captured cutover without the required executable recorded gate; a later migration cannot prove the prior interval safe. The product owner must authorize either a disposable/reset-only replacement of `0019` before use or a durable-data interval remediation design before AC3 can complete.
 
 **Never:** Edit applied migrations, create a competing source-removal writer or a background scheduler, change non-destructive recommendation conflict/retention evidence removal into withdrawal, expose raw snapshots/audit data, bypass `persistAssistantAnswerProvenance`, or update the BMad story or sprint status.
 
@@ -139,9 +139,15 @@ The formatter is the authoritative traveler non-disclosure boundary; consumers n
 - addressed_findings:
   - none
 
+## Recovery Status
+
+The 2026-07-30 narrow recovery repaired both MEDIUM independent-review patches: every historical evidence entry must carry a nonblank exact source/evidence ID, and only explicit destructive evidence withdrawal sets the durable marker used by historic classification. PostgreSQL-focused coverage (15 tests), typecheck, and diff validation pass; lint has zero errors and five existing warnings.
+
+The HIGH migration cutover finding remains blocked. Changing a forward migration after it has been recorded would violate the migration contract, and a new migration cannot prove no legacy writer committed during the original unguarded interval. Story status is `ready-for-dev`, not done, pending the explicit compatibility/remediation decision recorded above.
+
 ## Auto Run Result
 
-Implemented safe historical provenance withdrawal with forward migrations `0019` and `0020`, an availability-aware provenance boundary, a fixed-population checkpointed backfill, source/evidence remediation, and read-time non-disclosure.
+Implemented safe historical provenance withdrawal with forward migrations `0019` and `0020`, an availability-aware provenance boundary, a fixed-population checkpointed backfill, source/evidence remediation, and read-time non-disclosure. The later narrow recovery added only the explicit destructive evidence marker and strict evidence-anchor validation; it did not close the required pre-cutover admission gap.
 
 Changed schema, migrations, shared provenance/backfill coordination, source removal, finalization/read/annotation/outbox/UI seams, an explicit guarded maintenance command, release instructions, and focused regressions. The authoritative BMad story and sprint status were not modified.
 

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, test } from "vitest";
 
 import { assistantProvenanceWithdrawalBackfillState, assistantResponseProvenance, auditEvents, conversations, knowledgeCardEvidence, knowledgeCardSearchDocuments, knowledgeCards, knowledgeIndexDirtyMarkers, knowledgeCardSources, knowledgeRecommendations, knowledgeSourceSuggestions, messages, sourceCaptureVersions, sources, users } from "@/db/schema";
 import { removeKnowledgeSource, withdrawKnowledgeEvidence } from "@/features/knowledge/source-removal";
-import { backfillHistoricalAssistantProvenanceWithdrawal, classifyAssistantProvenanceRowsForInsertion, ProvenanceWithdrawalBackfillError } from "../packages/database/src/assistant-provenance-withdrawal";
+import { backfillHistoricalAssistantProvenanceWithdrawal, classifyAssistantProvenanceRowsForInsertion, extractHistoricalAnchors, ProvenanceWithdrawalBackfillError } from "../packages/database/src/assistant-provenance-withdrawal";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
 import { seedKnowledgeCardEvidence, seedSourceCaptureVersion } from "./helpers/source-captures";
@@ -145,6 +145,31 @@ describe("knowledge source removal", () => {
     await expect(backfillHistoricalAssistantProvenanceWithdrawal({ batchSize: 1 }, testDb)).resolves.toEqual({ status: "failed", failureCode: "unclassifiable_anchor" });
     await testDb.update(assistantResponseProvenance).set({ sourceSnapshot: { knowledgeCardId: "missing-card" } }).where(eq(assistantResponseProvenance.id, "malformed-after-valid"));
     await expect(backfillHistoricalAssistantProvenanceWithdrawal({ batchSize: 1, retryFailed: true }, testDb)).resolves.toEqual({ status: "progressed", scannedCount: 1 });
+  });
+
+  test("fails closed when any evidence object lacks an exact anchor despite a valid card anchor", async () => {
+    await source("malformed-evidence-source"); await card("malformed-evidence-card");
+    await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: "malformed-evidence-card", sourceId: "malformed-evidence-source", supportLevel: "primary" });
+    const capture = await seedSourceCaptureVersion({ sourceId: "malformed-evidence-source", captureKind: "url", rawText: "Malformed evidence anchor." });
+    await seedKnowledgeCardEvidence({ cardId: "malformed-evidence-card", sourceId: "malformed-evidence-source", captureVersionId: capture.id, quoteText: "Malformed evidence anchor." });
+    await provenance("malformed-evidence-anchor", { knowledgeCardId: "malformed-evidence-card", evidence: [{}] });
+    await testDb.update(assistantProvenanceWithdrawalBackfillState).set({ cutoverAt: new Date("2026-07-02T00:00:00.000Z"), completedAt: null }).where(eq(assistantProvenanceWithdrawalBackfillState.contractKey, "v1"));
+
+    expect(extractHistoricalAnchors({ sourceReferenceId: "malformed-evidence-card", sourceReferenceType: "knowledge_card", sourceSnapshot: { knowledgeCardId: "malformed-evidence-card", evidence: [{}] } })).toBeNull();
+    await expect(backfillHistoricalAssistantProvenanceWithdrawal({}, testDb)).resolves.toEqual({ status: "failed", failureCode: "unclassifiable_anchor" });
+  });
+
+  test("does not treat non-destructive removed evidence as historic withdrawal", async () => {
+    await source("retained-source"); await card("retained-card");
+    await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: "retained-card", sourceId: "retained-source", supportLevel: "primary" });
+    const capture = await seedSourceCaptureVersion({ sourceId: "retained-source", captureKind: "url", rawText: "Retention trim." });
+    const evidence = await seedKnowledgeCardEvidence({ cardId: "retained-card", sourceId: "retained-source", captureVersionId: capture.id, quoteText: "Retention trim." });
+    await provenance("retained-provenance", { knowledgeCardId: "retained-card", evidence: [{ evidenceId: evidence.id, sourceId: "retained-source" }] });
+    await testDb.update(knowledgeCardEvidence).set({ state: "removed" }).where(eq(knowledgeCardEvidence.id, evidence.id));
+    await testDb.update(assistantProvenanceWithdrawalBackfillState).set({ cutoverAt: new Date("2026-07-02T00:00:00.000Z"), completedAt: null }).where(eq(assistantProvenanceWithdrawalBackfillState.contractKey, "v1"));
+
+    await expect(backfillHistoricalAssistantProvenanceWithdrawal({}, testDb)).resolves.toEqual({ status: "progressed", scannedCount: 1 });
+    await expect(testDb.select({ availability: assistantResponseProvenance.availability }).from(assistantResponseProvenance).where(eq(assistantResponseProvenance.id, "retained-provenance"))).resolves.toEqual([{ availability: "available" }]);
   });
 
   test("rejects malformed, anchorless, and unresolved new knowledge provenance before insertion", async () => {

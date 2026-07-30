@@ -51,7 +51,7 @@ export async function removeKnowledgeSource(
 
     await tx.update(sources).set({ eligibility: "withdrawn", removalReason: input.reason, removedByUserId: input.actor.userId, removalCompletedAt: now, currentCaptureVersionId: null }).where(eq(sources.id, sourceId));
     const activeEvidenceIds = lockedEvidence.filter((item) => item.state === "active").map((item) => item.id);
-    if (activeEvidenceIds.length > 0) await tx.update(knowledgeCardEvidence).set({ state: "removed" }).where(inArray(knowledgeCardEvidence.id, activeEvidenceIds));
+    if (activeEvidenceIds.length > 0) await tx.update(knowledgeCardEvidence).set({ state: "removed", withdrawalReason: input.reason }).where(inArray(knowledgeCardEvidence.id, activeEvidenceIds));
 
     for (const cardId of cardIds) {
       const remaining = await tx.select({ independenceKey: knowledgeCardEvidence.independenceKey }).from(knowledgeCardEvidence)
@@ -103,7 +103,7 @@ export async function withdrawKnowledgeEvidence(
     await tx.select({ id: knowledgeRecommendations.id }).from(knowledgeRecommendations).where(and(eq(knowledgeRecommendations.knowledgeCardId, evidence.cardId), inArray(knowledgeRecommendations.status, ["open", "in_review"]))).orderBy(knowledgeRecommendations.id).for("update");
     const remediation = await withdrawAssistantProvenance(tx, { sourceIds: [evidence.sourceId], evidenceIds: [evidence.id], cardIds: [evidence.cardId] }, input.reason);
     if (evidence.state === "removed") return { status: "already_completed" as const, evidenceId, provenanceCount: remediation.provenanceCount };
-    await tx.update(knowledgeCardEvidence).set({ state: "removed" }).where(eq(knowledgeCardEvidence.id, evidence.id));
+    await tx.update(knowledgeCardEvidence).set({ state: "removed", withdrawalReason: input.reason }).where(eq(knowledgeCardEvidence.id, evidence.id));
     const now = new Date();
     const remaining = await tx.select({ independenceKey: knowledgeCardEvidence.independenceKey }).from(knowledgeCardEvidence)
       .innerJoin(sources, and(eq(sources.id, knowledgeCardEvidence.sourceId), eq(sources.eligibility, "eligible")))
