@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-07-30 (Story 11.3 independent-review patches repaired; follow-up review pending.)
+# last_updated: 2026-07-30 (Story 11.3 final bounded repair and required verification passed; status synchronized to done.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-07-30 (Story 11.3 independent-review patches repaired; follow-up review pending.)
+last_updated: 2026-07-30 (Story 11.3 final bounded repair and required verification passed; status synchronized to done.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -225,7 +225,9 @@ development_status:
   11-2-withdraw-historical-provenance-safely: done
   # 2026-07-30: Unattended independent review of d96a20feb699a047bbdfb5dd9ab7a820dce35621..ae6814d30ce646dc93fef0a93183d075d443b0e6 completed synchronously with Blind Hunter, Edge Case Hunter, and Acceptance Auditor. BLOCKED with three MEDIUM patches: provider prompt advertises newly rejected action annotations; an explicitly empty quote bypasses the exact-slice quote check; and focused coverage omits required post-provider stale-content and provenance-withdrawal-before-final-lock races. AC1 and AC2 are otherwise satisfied; AC3 and scope are satisfied. `git diff --check` passed. Acceptance evidence reports focused tests, typecheck, lint, and build passing, but the separate prescribed domain-outbox/command/stream suite was not run. No implementation changes were made during review.
   # 2026-07-30: Repaired only the three S11.3 independent-review patches. The provider prompt excludes new `action` annotations, defined empty quotes fail exact-slice validation, and controlled provider-return races prove stale final content and withdrawn provenance leave no annotations or source detail while preserving the completed answer. Focused follow-up review remains required; the story is not done.
-  11-3-validate-persisted-answer-annotations: ready-for-dev
+  # 2026-07-30: Second and final unattended independent review of d96a20feb699a047bbdfb5dd9ab7a820dce35621..d870ab3 ran Blind Hunter, Edge Case Hunter, and Acceptance Auditor synchronously. Edge Case Hunter was clean; no layer failed. BLOCKED with four patches: (1) controlled content/withdrawal race mutations occur before, rather than after, provider return and therefore miss the final-lock window; (2) owned-history sanitizer regressions for malformed/overlapping/duplicate/message-unscoped stored JSON are missing; (3) required provenance rejection cases are not covered for every source-backed descriptor type; and (4) the prescribed shell, outbox/command/stream, typecheck, lint, and build verification is not recorded. AC1 implementation passes; AC2/AC3 proof is partial; scope passes. No code changes were made during review.
+  # 2026-07-30: Final bounded repair closed exactly those four proof patches. Controlled post-provider-return and pre-final-lock content/withdrawal races suppress durable annotations; owner-scoped persisted-history JSON regressions fail closed while preserving prose; all five source-backed types reject empty, duplicate, unknown, unavailable, and cross-scope-looking provenance IDs. Required serial verification passed: 194 focused annotation/context/shell tests; 57 outbox/command/stream tests; typecheck; lint (0 errors, 5 pre-existing warnings); build; and diff check. Status synchronized to done; no subsequent story started.
+  11-3-validate-persisted-answer-annotations: done
   11-4-bind-annotation-details-and-actions-to-current-ownership: backlog
   11-5-serve-planning-context-and-details-through-the-api-cutover: backlog
   epic-11-retrospective: optional

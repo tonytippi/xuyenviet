@@ -200,6 +200,19 @@ describe("answer annotation validation", () => {
     expect(sanitizeStoredAnswerAnnotations({ answerText, provenance: [provenance[0]], annotations: [{ ...valid, start: -1 }, valid] })).toEqual([]);
   });
 
+  test.each(["source", "place", "hotel_area", "route_segment", "cost"] as const)("rejects empty, duplicate, unknown, unavailable, and cross-scope-looking provenance IDs for %s descriptors", (type) => {
+    const answerText = "Huế";
+    const available = provenance[0];
+    const unavailable: AssistantMessageProvenanceItem = { id: "withdrawn-provenance", rank: 2, availability: "withdrawn", unavailableLabel: "Nguồn này không còn khả dụng.", usedInPrompt: true, citedInAnswer: false };
+    const proposal = (id: string, provenanceIds: string[]): AnswerAnnotationProposal => ({ id, start: 0, end: answerText.length, quote: answerText, type, provenanceIds });
+
+    expect(validateAnswerAnnotations({ answerText, provenance: [available, unavailable], proposals: [proposal("empty", [])] })).toEqual([]);
+    expect(validateAnswerAnnotations({ answerText, provenance: [available, unavailable], proposals: [proposal("duplicate", [available.id, available.id])] })).toEqual([]);
+    expect(validateAnswerAnnotations({ answerText, provenance: [available, unavailable], proposals: [proposal("unknown", ["unknown-provenance"])] })).toEqual([]);
+    expect(validateAnswerAnnotations({ answerText, provenance: [available, unavailable], proposals: [proposal("unavailable", [unavailable.id])] })).toEqual([]);
+    expect(validateAnswerAnnotations({ answerText, provenance: [available, unavailable], proposals: [proposal("cross-scope", ["other-user-other-conversation-other-message"])] })).toEqual([]);
+  });
+
   test("preserves compatible legacy source warnings and bounds provenance-derived quick facts", () => {
     const answerText = "Nguồn web cập nhật";
     const legacy = {

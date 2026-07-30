@@ -1468,6 +1468,45 @@ describe("AI Ask conversation data layer", () => {
     await expect(testDb.select({ answerAnnotations: messages.answerAnnotations }).from(messages).where(eq(messages.id, assistant.id))).resolves.toEqual([{ answerAnnotations: [] }]);
   });
 
+  test.each([
+    ["malformed", [null]],
+    ["overlapping", [
+      { id: "first", start: 0, end: 4, text: "Nên ", type: "source", detail: { type: "source", label: "untrusted", owner: { table: "assistant_response_provenance", id: "owned" }, provenanceIds: ["owned"] } },
+      { id: "second", start: 2, end: 8, text: "n đi n", type: "source", detail: { type: "source", label: "untrusted", owner: { table: "assistant_response_provenance", id: "owned" }, provenanceIds: ["owned"] } },
+    ]],
+    ["duplicate", [
+      { id: "same", start: 0, end: 4, text: "Nên ", type: "source", detail: { type: "source", label: "untrusted", owner: { table: "assistant_response_provenance", id: "owned" }, provenanceIds: ["owned"] } },
+      { id: "same", start: 8, end: 13, text: "nhẹ.", type: "source", detail: { type: "source", label: "untrusted", owner: { table: "assistant_response_provenance", id: "owned" }, provenanceIds: ["owned"] } },
+    ]],
+    ["message-unscoped", [{ id: "foreign", start: 0, end: 4, text: "Nên ", type: "source", detail: { type: "source", label: "untrusted", owner: { table: "assistant_response_provenance", id: "other-message" }, provenanceIds: ["other-message"] } }]],
+  ])("suppresses %s stored annotations on owner-scoped history reads while retaining prose", async (_case, answerAnnotations) => {
+    await createTestUser("user-1");
+    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }) }));
+    const content = "Nên đi nhẹ.";
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
+    const [userMessage] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "user", content: "Đi Huế?" }).returning({ id: messages.id });
+    const [assistant] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "assistant", content, answerAnnotations: answerAnnotations as Record<string, unknown>[] }).returning({ id: messages.id });
+    await testDb.insert(assistantResponseProvenance).values([
+      { id: "owned", userId: "user-1", conversationId: conversation.id, userMessageId: userMessage.id, assistantMessageId: assistant.id, sourceCategory: "knowledge", rank: 1, verificationStatus: "verified", usedInPrompt: true, citedInAnswer: false, sourceSnapshot: { title: "Nguồn sở hữu", url: "https://owned.example", fact: "quick fact" } },
+      { id: "other-message", userId: "user-1", conversationId: conversation.id, userMessageId: userMessage.id, assistantMessageId: userMessage.id, sourceCategory: "knowledge", rank: 2, verificationStatus: "verified", usedInPrompt: true, citedInAnswer: false, sourceSnapshot: { title: "Nguồn sai message", url: "https://foreign.example", fact: "foreign quick fact" } },
+    ]);
+    vi.doMock("@/db/client", () => ({ getDb: () => testDb }));
+    const { getOwnedConversation } = await import("@/features/chat-trips/conversations");
+
+    const loaded = await getOwnedConversation(conversation.id);
+    const loadedAssistant = loaded?.messages.find((message) => message.id === assistant.id);
+    const { AssistantMessageContent } = await import("@/features/ai/ai-ask-composer");
+    const html = renderToStaticMarkup(createElement(AssistantMessageContent, { content: loadedAssistant?.content ?? "", annotations: loadedAssistant?.annotations ?? [] }));
+
+    expect(loadedAssistant?.content).toBe(content);
+    expect(loadedAssistant?.annotations).toEqual([]);
+    expect(html).toContain(content);
+    expect(html).not.toContain("Mở chi tiết annotation");
+    expect(html).not.toContain("https://owned.example");
+    expect(html).not.toContain("https://foreign.example");
+    expect(html).not.toContain("quick fact");
+  });
+
   test("returns null for conversations owned by another user", async () => {
     await createTestUser("user-1");
     await createTestUser("user-2");

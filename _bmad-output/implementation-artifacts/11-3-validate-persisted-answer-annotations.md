@@ -1,6 +1,6 @@
 # Story 11.3: Validate Persisted Answer Annotations
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -162,15 +162,32 @@ gpt-5.6-terra-review
 - PATCH S11.3-R3 [MEDIUM]: `tests/chat-trip-context-extraction.test.ts:666-757` does not prove the required post-provider races. Add controlled provider-return tests that change final assistant content and withdraw referenced provenance before the final locked write, then assert no annotation/detail persists while the completed answer remains unchanged.
 - Review evidence: `git diff --check d96a20f..ae6814d` passed. The acceptance layer reports focused `answer-annotations`, context-extraction, and shell coverage plus typecheck/lint/build passing; it did not run the separate prescribed domain-outbox/command/stream suite. A local combined focused invocation did not complete within the review window after database migration startup, so no additional test result is claimed.
 
+- 2026-07-30: Second and final unattended independent review of `d96a20feb699a047bbdfb5dd9ab7a820dce35621..d870ab3` completed synchronously with Blind Hunter, Edge Case Hunter, and Acceptance Auditor. `git diff --check` passed. Edge Case Hunter completed cleanly; no layer failed.
+- Status: in-progress. Four actionable patch findings remain; no implementation changes were made during review.
+- PATCH S11.3-R2-1 [MEDIUM]: `tests/chat-trip-context-extraction.test.ts:730` changes final state inside the annotation-provider mock before its response returns. It does not exercise the required interval after provider return and before the final locked write. Gate the provider response, mutate final content and withdrawn provenance after the provider resolves, then release final persistence and assert fencing/sanitization.
+- PATCH S11.3-R2-2 [MEDIUM]: `tests/ai-ask-shell.test.ts:618-675,1451-1469` does not prove the owner-scoped historical-read sanitizer rejects malformed, overlapping, duplicate, or assistant-message-unscoped stored annotations at `getOwnedConversation`. Add persisted-JSON regressions that retain ordinary answer text while rendering no annotation, detail, URL, or quick fact.
+- PATCH S11.3-R2-3 [LOW]: `tests/answer-annotations.test.ts:177-201` concentrates source-backed provenance rejection on `place`. Add empty, duplicate, unknown, unavailable, and cross-scope-looking provenance-ID rejection coverage for each required `source`, `place`, `hotel_area`, `route_segment`, and `cost` descriptor type.
+- PATCH S11.3-R2-4 [MEDIUM]: The record at `:169` reports only two focused suites. Run and record the remaining prescribed serial checks: `tests/ai-ask-shell.test.ts`; `tests/domain-outbox.test.ts`, `tests/ai-ask-commands.test.ts`, and `tests/ai-ask-stream-execution.test.ts`; `pnpm typecheck`; `pnpm lint`; and `pnpm build`.
+- Review verdict: AC1 implementation passes. AC2 and AC3 implementation paths pass but their required proof is partial. Scope passes. The story must remain in-progress until all four patches are repaired and independently reviewed.
+
 ### Repair Record
 
 - 2026-07-30: Repaired only independent-review patches S11.3-R1 through S11.3-R3. The provider contract no longer offers new `action` annotations; `action` remains accepted only through the existing narrow persisted legacy-read sanitizer. Defined quotes, including `""`, must match the exact UTF-16 final-text slice.
 - Added controlled post-provider-return PostgreSQL coverage: a final-content change is fenced without overwriting the completed content, and a provenance withdrawal is re-sanitized to no persisted annotation. Both paths retain a completed answer with an empty persisted annotation list.
 - Focused serial verification passed: `pnpm vitest run tests/answer-annotations.test.ts tests/chat-trip-context-extraction.test.ts` (2 files, 39 tests). Repair commit: `7b15df77346f28308715ee8d75713b96c44ceb01`.
 - Status returned to `ready-for-dev` pending the required follow-up independent review. This repair does not mark the story done or start another story.
+- 2026-07-30: Final bounded repair completed only the four remaining independent-review patches S11.3-R2-1 through S11.3-R2-4. A test-only outbox seam now gates precisely after the annotation provider resolves and before final locked persistence; controlled content mutation and provenance withdrawal prove no annotation persists and the post-mutation completed answer remains unchanged by annotation delivery.
+- Owner-scoped `getOwnedConversation` coverage proves malformed, overlapping, duplicate, and assistant-message-unscoped persisted JSON retains answer prose while suppressing annotations, derived details, URLs, and quick facts. Stored overlap detection fails closed for otherwise valid stored descriptors.
+- Source-backed validation coverage now rejects empty, duplicate, unknown, unavailable, and cross-scope-looking provenance IDs for `source`, `place`, `hotel_area`, `route_segment`, and `cost`.
+- Required serial verification passed: `pnpm vitest run tests/answer-annotations.test.ts tests/chat-trip-context-extraction.test.ts tests/ai-ask-shell.test.ts --maxWorkers=1 --no-file-parallelism` (3 files, 194 tests); `pnpm vitest run tests/domain-outbox.test.ts tests/ai-ask-commands.test.ts tests/ai-ask-stream-execution.test.ts --maxWorkers=1 --no-file-parallelism` (3 files, 57 tests); `pnpm typecheck`; `pnpm lint` (0 errors, 5 pre-existing warnings); `pnpm build`; and `git diff --check`.
+- All final bounded repairs and verification passed. Status synchronized to `done`; no subsequent story was started.
 
 ### File List
 
 - `_bmad-output/implementation-artifacts/11-3-validate-persisted-answer-annotations.md`
 - `src/features/ai/answer-annotations.ts`
 - `tests/chat-trip-context-extraction.test.ts`
+- `tests/answer-annotations.test.ts`
+- `tests/ai-ask-shell.test.ts`
+- `src/features/ai/domain-outbox-worker.ts`
+- `src/features/ai/answer-annotations.ts`

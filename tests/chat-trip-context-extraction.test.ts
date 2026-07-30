@@ -5,7 +5,7 @@ import { aiAskCommands, aiGatewayModels, aiUsageEvents, assistantResponseProvena
 
 import { testDb } from "./helpers/db";
 import { acquireAiAskCommand } from "@/features/ai/ai-ask-commands";
-import { processAiAskDomainOutboxBatch } from "@/features/ai/domain-outbox-worker";
+import { processAiAskDomainOutboxBatch, setDomainOutboxWorkerTestDependencies } from "@/features/ai/domain-outbox-worker";
 import { issueCsrfToken } from "@/server/csrf";
 
 const legacyBffTransport = {
@@ -93,6 +93,7 @@ async function completedAnswerSnapshot() {
 describe("chat/trip context extraction", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
+    setDomainOutboxWorkerTestDependencies(undefined);
   });
 
   beforeEach(() => {
@@ -707,7 +708,7 @@ describe("chat/trip context extraction", () => {
   });
 
   test.each([
-    ["final assistant content changes", async (assistantId: string, provenanceId: string) => {
+    ["final assistant content changes", async (assistantId: string) => {
       await testDb.update(messages).set({ content: "Huế đã được cập nhật." }).where(eq(messages.id, assistantId));
     }],
     ["referenced provenance is withdrawn", async (_assistantId: string, provenanceId: string) => {
@@ -718,7 +719,14 @@ describe("chat/trip context extraction", () => {
     await createModel({ id: "answer-model", gatewayModelName: "cx/answer", purpose: "ai_ask_initial_answer", supportsExtraction: false, supportsStreaming: true });
     let assistantId = "";
     let provenanceId = "";
-    let contentAfterProviderReturn = "";
+    let releaseFinalPersistence: (() => void) | undefined;
+    const finalPersistenceGate = new Promise<void>((resolve) => {
+      releaseFinalPersistence = resolve;
+    });
+    let providerResponseResolved: (() => void) | undefined;
+    const providerResponse = new Promise<void>((resolve) => {
+      providerResponseResolved = resolve;
+    });
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body)) as { stream?: boolean; messages?: Array<{ content: string }> };
       if (body.stream) return new Response([
@@ -727,9 +735,6 @@ describe("chat/trip context extraction", () => {
         "data: [DONE]\n\n",
       ].join(""), { status: 200, headers: { "content-type": "text/event-stream" } });
       if (body.messages?.[0]?.content.includes("annotation nội bộ")) {
-        await changeFinalState(assistantId, provenanceId);
-        const [assistant] = await testDb.select({ content: messages.content }).from(messages).where(eq(messages.id, assistantId));
-        contentAfterProviderReturn = assistant?.content ?? "";
         return new Response(JSON.stringify({ model: "cx/answer", choices: [{ message: { content: JSON.stringify({ annotations: [{ id: "hue", start: 0, end: 3, quote: "Huế", type: "source", provenanceIds: [provenanceId] }] }) } }], usage: { prompt_tokens: 7, completion_tokens: 3, total_tokens: 10 } }), { status: 200, headers: { "x-request-id": "annotation-race", "content-type": "application/json" } });
       }
       throw new Error("Unexpected provider call");
@@ -750,8 +755,22 @@ describe("chat/trip context extraction", () => {
     await testDb.update(domainOutbox).set({ availableAt: new Date("2099-01-01T00:00:00.000Z") }).where(eq(domainOutbox.eventType, "ai_ask.context_extraction.v1"));
     await testDb.update(domainOutbox).set({ availableAt: new Date("2020-01-01T00:00:00.000Z") }).where(eq(domainOutbox.eventType, "ai_ask.answer_annotation.v1"));
 
-    await expect(processAiAskDomainOutboxBatch({ workerId: "annotation-provider-return-race-worker" })).resolves.toEqual({ kind: "processed", count: 1 });
-    await expect(testDb.select({ content: messages.content, answerAnnotations: messages.answerAnnotations }).from(messages).where(eq(messages.id, assistant.id))).resolves.toEqual([{ content: contentAfterProviderReturn, answerAnnotations: [] }]);
+    setDomainOutboxWorkerTestDependencies({
+      afterAnnotationProviderResponse: async () => {
+        providerResponseResolved?.();
+        await finalPersistenceGate;
+      },
+    });
+    const delivery = processAiAskDomainOutboxBatch({ workerId: "annotation-provider-return-race-worker" });
+    await providerResponse;
+    await changeFinalState(assistantId, provenanceId);
+    const [contentAfterMutation] = await testDb.select({ content: messages.content }).from(messages).where(eq(messages.id, assistant.id));
+    releaseFinalPersistence?.();
+
+    await expect(delivery).resolves.toEqual({ kind: "processed", count: 1 });
+    const [finalAssistant] = await testDb.select({ content: messages.content, answerAnnotations: messages.answerAnnotations }).from(messages).where(eq(messages.id, assistant.id));
+    expect(finalAssistant?.answerAnnotations).toEqual([]);
+    expect(finalAssistant?.content).toBe(contentAfterMutation?.content);
     await expect(testDb.select({ status: aiAskCommands.status }).from(aiAskCommands).where(eq(aiAskCommands.assistantMessageId, assistant.id))).resolves.toEqual([{ status: "completed" }]);
   });
 

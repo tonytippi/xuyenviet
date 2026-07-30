@@ -128,6 +128,13 @@ export function sanitizeStoredAnswerAnnotations(input: {
   const accepted: AnswerAnnotation[] = [];
   const seenIds = new Set<string>();
   const duplicateIds = findDuplicateIds(input.annotations.map((item) => isRecord(item) ? item.id : undefined));
+  const ranges = input.annotations
+    .filter((item): item is StoredAnnotationRange => isValidStoredAnnotationRange(item, input.answerText, duplicateIds, provenanceById))
+    .sort(compareStoredAnnotations);
+
+  if (ranges.some((item, index) => index > 0 && (item.start as number) < (ranges[index - 1].end as number))) {
+    return [];
+  }
 
   for (const item of input.annotations.slice().sort(compareStoredAnnotations)) {
     if (accepted.length >= maxAnnotationProposals) {
@@ -534,6 +541,26 @@ function compareStoredAnnotations(left: unknown, right: unknown) {
   const leftEnd = isRecord(left) && typeof left.end === "number" ? left.end : Number.MAX_SAFE_INTEGER;
   const rightEnd = isRecord(right) && typeof right.end === "number" ? right.end : Number.MAX_SAFE_INTEGER;
   return leftStart - rightStart || leftEnd - rightEnd;
+}
+
+type StoredAnnotationRange = Record<string, unknown> & { start: number; end: number };
+
+function isValidStoredAnnotationRange(item: unknown, answerText: string, duplicateIds: Set<string>, provenanceById: Map<string, AssistantMessageProvenanceItem>): item is StoredAnnotationRange {
+  return isRecord(item)
+    && typeof item.id === "string"
+    && !duplicateIds.has(item.id)
+    && typeof item.start === "number"
+    && typeof item.end === "number"
+    && Number.isInteger(item.start)
+    && Number.isInteger(item.end)
+    && item.start >= 0
+    && item.end > item.start
+    && item.end <= answerText.length
+    && typeof item.text === "string"
+    && answerText.slice(item.start, item.end) === item.text
+    && typeof item.type === "string"
+    && allowedTypes.has(item.type as AnswerAnnotationType)
+    && Boolean(sanitizeDetailDescriptor(item.detail, item.type as AnswerAnnotationType, item.text, provenanceById));
 }
 
 function getDescriptorSummary(type: AnswerAnnotationType, sourceCategory: AvailableAssistantMessageProvenanceItem["sourceCategory"]) {

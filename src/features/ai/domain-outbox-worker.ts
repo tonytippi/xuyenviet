@@ -17,6 +17,12 @@ import { aiAskInitialAnswerPromptVersion, aiAskInitialAnswerPurpose } from "@/fe
 type Transaction = Parameters<ReturnType<typeof getDb>["transaction"]>[0] extends (transaction: infer T) => unknown ? T : never;
 type DeliveryOutcome = "completed" | "fenced_out" | "invalid" | { kind: "retryable"; code: string } | "retry_scheduled";
 
+let testDependencies: { afterAnnotationProviderResponse?: () => Promise<void> | void } | undefined;
+
+export function setDomainOutboxWorkerTestDependencies(dependencies: typeof testDependencies) {
+  testDependencies = dependencies;
+}
+
 export type DomainOutboxWorkerResult = { kind: "processed"; count: number } | { kind: "no_work" } | { kind: "error"; count: number };
 
 // This is deliberately a bounded library seam. Deployment and scheduling remain
@@ -99,6 +105,7 @@ async function annotate(claim: DomainOutboxClaim, envelope: AiAskOutboxEnvelope,
   if (model && !await readFinalState(envelope)) return "fenced_out";
   const annotationResult = model ? await buildValidatedAnswerAnnotationsResult({ answerText, provenance: formatted, model: model.gatewayModelName }) : { kind: "annotations" as const, annotations: [] };
   if (annotationResult.kind === "provider_failed") return { kind: "retryable", code: "annotation_provider_failed" };
+  await testDependencies?.afterAnnotationProviderResponse?.();
   return getDb().transaction(async (transaction) => {
     const current = await loadFinalStateInTransaction(transaction, envelope);
     if (!current || current.content !== answerText) return "fenced_out";
