@@ -656,34 +656,34 @@ function buildReadiness({
   const checks = [
     {
       key: "active_evidence_grounded_cards",
-      label: "Ít nhất 100 thẻ hành lang Hà Nội - TP.HCM đang active, có evidence hợp lệ",
+      label: "Ít nhất 100 thẻ hành lang Hà Nội - TP.HCM đang hoạt động, có bằng chứng hợp lệ",
       passed: coverage.isComplete,
       current: coverage.activeEvidenceGroundedCards,
       target: coverage.targetActiveCards,
       missing: coverage.remainingActiveCards,
-      message: coverage.isComplete ? `${coverage.activeEvidenceGroundedCards}/${coverage.targetActiveCards} thẻ hiện hành đủ điều kiện.` : `Còn thiếu ${coverage.remainingActiveCards} thẻ hiện hành có evidence hợp lệ; phê duyệt lịch sử không được tính.`,
+      message: coverage.isComplete ? `${coverage.activeEvidenceGroundedCards}/${coverage.targetActiveCards} thẻ hiện hành đủ điều kiện.` : `Còn thiếu ${coverage.remainingActiveCards} thẻ hiện hành có bằng chứng hợp lệ; phê duyệt lịch sử không được tính.`,
     },
     {
       key: "current_corpus_work",
-      label: "Không còn review hoặc xác minh chưa xử lý trong corpus hiện hành",
+      label: "Không còn duyệt hoặc xác minh chưa xử lý trong tập dữ liệu hiện hành",
       passed: coverage.pendingReviewCards === 0 && coverage.pendingVerificationCards === 0,
       current: coverage.pendingReviewCards + coverage.pendingVerificationCards,
       target: 0,
       missing: coverage.pendingReviewCards + coverage.pendingVerificationCards,
-      message: coverage.pendingReviewCards || coverage.pendingVerificationCards ? `Còn ${coverage.pendingReviewCards} review và ${coverage.pendingVerificationCards} xác minh cần xử lý.` : "Không còn review hoặc xác minh hiện hành chưa xử lý.",
+      message: coverage.pendingReviewCards || coverage.pendingVerificationCards ? `Còn ${coverage.pendingReviewCards} mục cần duyệt và ${coverage.pendingVerificationCards} mục cần xác minh.` : "Không còn mục duyệt hoặc xác minh hiện hành chưa xử lý.",
     },
     {
       key: "sampling_enrollment_and_disposition",
-      label: "Sampling có proof sealed, disposition hoàn chỉnh và không có cohort rủi ro cao",
+      label: "Lấy mẫu có bằng chứng đã chốt, kết quả xử lý hoàn chỉnh và không có nhóm rủi ro cao",
       passed: samplingEvidence.complete,
       current: samplingEvidence.failed + samplingEvidence.pending + samplingEvidence.incompletePolicies + samplingEvidence.highSeverity,
       target: 0,
       missing: samplingEvidence.failed + samplingEvidence.pending + samplingEvidence.incompletePolicies + samplingEvidence.highSeverity,
-      message: samplingEvidence.complete ? `Sampling cohort và nghĩa vụ verify-first có proof đầy đủ.${samplingEvidence.zeroApplicablePolicies > 0 ? ` ${samplingEvidence.zeroApplicablePolicies} policy ngoài hành lang có zero-applicable, không dùng làm bằng chứng pass cho corpus.` : ""}` : `Sampling bị chặn: ${samplingEvidence.incompletePolicies} cohort thiếu proof, ${samplingEvidence.pending} pending, ${samplingEvidence.failed} failed, ${samplingEvidence.highSeverity} cohort rủi ro cao.${samplingEvidence.zeroApplicablePolicies > 0 ? ` ${samplingEvidence.zeroApplicablePolicies} policy ngoài hành lang là zero-applicable.` : ""}`,
+      message: samplingEvidence.complete ? `Nhóm lấy mẫu và nghĩa vụ xác minh trước khi sử dụng có đủ bằng chứng.${samplingEvidence.zeroApplicablePolicies > 0 ? ` ${samplingEvidence.zeroApplicablePolicies} chính sách ngoài hành lang không có mục áp dụng, nên không được dùng làm bằng chứng đạt cho tập dữ liệu.` : ""}` : `Lấy mẫu bị chặn: ${samplingEvidence.incompletePolicies} nhóm thiếu bằng chứng, ${samplingEvidence.pending} mục đang chờ, ${samplingEvidence.failed} mục không đạt, ${samplingEvidence.highSeverity} nhóm rủi ro cao.${samplingEvidence.zeroApplicablePolicies > 0 ? ` ${samplingEvidence.zeroApplicablePolicies} chính sách ngoài hành lang không có mục áp dụng.` : ""}`,
     },
     {
       key: "current_evaluation_evidence",
-      label: "Một run eval hiện hành đủ sáu scenario, snapshot và sáu rubric score",
+      label: "Một lượt đánh giá hiện hành đủ sáu kịch bản, bản ghi và sáu tiêu chí chấm điểm",
       passed: readinessEvaluation.complete && readinessEvaluation.highSeverity === 0,
       current: readinessEvaluation.highSeverity,
       target: 0,
@@ -692,36 +692,36 @@ function buildReadiness({
     },
     {
       key: "usefulness_feedback_sample",
-      label: "Tối thiểu 10 phản hồi usefulness cho magic-moment, ít nhất 7 useful",
+      label: "Tối thiểu 10 phản hồi về tính hữu ích cho khoảnh khắc đặc biệt, ít nhất 7 phản hồi hữu ích",
       passed: magicMomentFeedback.total >= 10 && magicMomentFeedback.useful >= 7,
       current: magicMomentFeedback.useful,
       target: 7,
       missing: Math.max(0, 10 - magicMomentFeedback.total, 7 - magicMomentFeedback.useful),
       message:
         magicMomentFeedback.total >= 10
-          ? `${magicMomentFeedback.useful}/${magicMomentFeedback.total} phản hồi magic-moment useful.`
-          : `Cần thêm ${Math.max(0, 10 - magicMomentFeedback.total)} phản hồi usefulness cho magic-moment.`,
+          ? `${magicMomentFeedback.useful}/${magicMomentFeedback.total} phản hồi về khoảnh khắc đặc biệt là hữu ích.`
+          : `Cần thêm ${Math.max(0, 10 - magicMomentFeedback.total)} phản hồi về tính hữu ích cho khoảnh khắc đặc biệt.`,
     },
     {
       key: "magic_moment_scored",
-      label: "Magic-moment có kết quả chấm điểm đạt trung bình 7/10",
+      label: "Khoảnh khắc đặc biệt có kết quả chấm điểm trung bình đạt 7/10",
       passed: magicMomentAverage !== null && magicMomentAverage >= 7,
       current: magicMomentAverage ?? 0,
       target: 7,
       missing: magicMomentAverage === null ? 1 : 0,
-      message: magicMomentAverage === null ? "Chưa có kết quả magic-moment được chấm điểm." : `Điểm trung bình magic-moment ${formatNumber(magicMomentAverage)}/10.`,
+      message: magicMomentAverage === null ? "Chưa có kết quả khoảnh khắc đặc biệt được chấm điểm." : `Điểm trung bình khoảnh khắc đặc biệt là ${formatNumber(magicMomentAverage)}/10.`,
     },
     {
       key: "generic_comparison_sample",
-      label: "Tối thiểu 10 kết quả eval, không quá 2 bị đánh dấu ngang ChatGPT chung",
+      label: "Tối thiểu 10 kết quả đánh giá, không quá 2 bị đánh dấu ngang trợ lý AI phổ thông",
       passed: completeScoredRows.length >= 10 && completeScoredRows.filter((row) => row.noBetterThanGenericFlag).length <= 2,
       current: completeScoredRows.filter((row) => row.noBetterThanGenericFlag).length,
       target: 2,
       missing: Math.max(0, 10 - completeScoredRows.length),
       message:
         completeScoredRows.length >= 10
-          ? `${completeScoredRows.filter((row) => row.noBetterThanGenericFlag).length}/${completeScoredRows.length} kết quả bị gắn cờ generic.`
-          : `Cần thêm ${Math.max(0, 10 - completeScoredRows.length)} kết quả eval được chấm điểm đầy đủ.`,
+          ? `${completeScoredRows.filter((row) => row.noBetterThanGenericFlag).length}/${completeScoredRows.length} kết quả bị gắn cờ không tốt hơn trợ lý AI phổ thông.`
+          : `Cần thêm ${Math.max(0, 10 - completeScoredRows.length)} kết quả đánh giá được chấm điểm đầy đủ.`,
     },
   ];
   const missingSignals = checks.filter((check) => !check.passed).map((check) => check.message);
@@ -754,9 +754,9 @@ export async function getCurrentReadinessEvaluationEvidence(db: QualityDashboard
     if (!complete) continue;
     const highSeverity = results.filter((result) => result.staleWithdrawnSourceExposureFlag || result.rawEvidenceLeakageFlag || !result.conflictedKnowledgeExcludedFlag).length;
     const qualityGaps = results.filter((result) => result.unsupportedCommunityWordingFlag || result.requiredCaveatOmittedFlag || result.unsupportedClaimFlag || !result.fallbackVerificationGuidanceMetFlag).length;
-    return { complete: true, runId: run.id, highSeverity, qualityGaps, resultRows: results, scoreRows: scores, message: highSeverity ? `${highSeverity} lỗi publication-policy severity cao trong run eval hiện hành.` : qualityGaps ? `${qualityGaps} quality gap eval hiện hành cần khắc phục theo baseline.` : "Run eval hiện hành đủ evidence và không có lỗi severity cao." };
+    return { complete: true, runId: run.id, highSeverity, qualityGaps, resultRows: results, scoreRows: scores, message: highSeverity ? `${highSeverity} lỗi chính sách xuất bản ở mức nghiêm trọng trong lượt đánh giá hiện hành.` : qualityGaps ? `${qualityGaps} khoảng trống chất lượng trong lượt đánh giá hiện hành cần được khắc phục theo mức cơ sở.` : "Lượt đánh giá hiện hành có đủ bằng chứng và không có lỗi nghiêm trọng." };
   }
-  return { complete: false, runId: null, highSeverity: 0, qualityGaps: 0, resultRows: [], scoreRows: [], message: "Chưa có một run eval hiện hành đầy đủ sáu scenario, snapshot và rubric score; readiness bị chặn." };
+  return { complete: false, runId: null, highSeverity: 0, qualityGaps: 0, resultRows: [], scoreRows: [], message: "Chưa có một lượt đánh giá hiện hành đầy đủ sáu kịch bản, bản ghi và tiêu chí chấm điểm; mức sẵn sàng bị chặn." };
 }
 
 function average(values: number[]) {

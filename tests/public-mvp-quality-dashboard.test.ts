@@ -289,8 +289,8 @@ describe("public MVP quality dashboard", () => {
     expect(dashboard.evaluation.averageScore).toBeCloseTo(7.3, 1);
     expect(dashboard.evaluation.counterMetrics).toEqual({ unsupportedClaims: 1, missingUncertainty: 1, noBetterThanGeneric: 1 });
     expect(dashboard.readiness.status).toBe("not_ready");
-    expect(dashboard.readiness.missingSignals).toContain("Cần thêm 10 phản hồi usefulness cho magic-moment.");
-    expect(dashboard.readiness.missingSignals).toContain("Chưa có một run eval hiện hành đầy đủ sáu scenario, snapshot và rubric score; readiness bị chặn.");
+    expect(dashboard.readiness.missingSignals).toContain("Cần thêm 10 phản hồi về tính hữu ích cho khoảnh khắc đặc biệt.");
+    expect(dashboard.readiness.missingSignals).toContain("Chưa có một lượt đánh giá hiện hành đầy đủ sáu kịch bản, bản ghi và tiêu chí chấm điểm; mức sẵn sàng bị chặn.");
     expect(dashboard.recentResults[0].retrieval.available).toBe(true);
     expect(dashboard.recentResults[0].provenance.knowledge).toBe(true);
     expect(dashboard.recentResults[0].provenance.web).toBe(true);
@@ -350,7 +350,7 @@ describe("public MVP quality dashboard", () => {
     if (!dashboard.success) return;
     expect(dashboard.feedback.total).toBe(0);
     expect(dashboard.readiness.status).toBe("not_ready");
-    expect(dashboard.readiness.missingSignals).toContain("Cần thêm 10 phản hồi usefulness cho magic-moment.");
+    expect(dashboard.readiness.missingSignals).toContain("Cần thêm 10 phản hồi về tính hữu ích cho khoảnh khắc đặc biệt.");
     expect(dashboard.recentResults[0].retrieval.available).toBe(false);
     expect(dashboard.recentResults[0].likelyIssues).toContain("retrieval_decision_unavailable");
   });
@@ -374,7 +374,7 @@ describe("public MVP quality dashboard", () => {
     expect(withoutLinkedFeedback.success ? withoutLinkedFeedback.readiness.status : null).toBe("not_ready");
     expect(withoutLinkedFeedback.success ? withoutLinkedFeedback.readiness : null).toEqual(withLinkedFeedback.success ? withLinkedFeedback.readiness : null);
     expect(withLinkedFeedback.success ? withLinkedFeedback.readiness.status : null).toBe("not_ready");
-    expect(withLinkedFeedback.success ? withLinkedFeedback.readiness.missingSignals : []).toContain("Còn thiếu 100 thẻ hiện hành có evidence hợp lệ; phê duyệt lịch sử không được tính.");
+    expect(withLinkedFeedback.success ? withLinkedFeedback.readiness.missingSignals : []).toContain("Còn thiếu 100 thẻ hiện hành có bằng chứng hợp lệ; phê duyệt lịch sử không được tính.");
   });
 
   test("does not report provenance categories that were stored but not used or cited", async () => {
