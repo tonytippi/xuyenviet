@@ -153,6 +153,23 @@ gpt-5.6-terra-review
 - Validation passed before implementation: final UTF-16 range semantics, exact persisted-text validation, scoped available-provenance eligibility, source-free local guidance limits, two-pass untrusted-input sanitization, outbox fencing/idempotency, withdrawn dependency suppression, owner-safe history reads, and persisted-only rendering are complete and traceable.
 - No production code, migration, test execution, deployment, or non-story artifact was modified by this story-creation workflow.
 
+### Independent Review Record
+
+- 2026-07-30: Unattended independent review of `d96a20feb699a047bbdfb5dd9ab7a820dce35621..ae6814d30ce646dc93fef0a93183d075d443b0e6` completed synchronously with Blind Hunter, Edge Case Hunter, and Acceptance Auditor.
+- Status: in-progress. Three actionable patch findings remain; no implementation changes were made during review.
+- PATCH S11.3-R1 [MEDIUM]: `src/features/ai/answer-annotations.ts:357` advertises provider-created `action` annotations even though `validateAnswerAnnotations` rejects every new `action` at `:66`. Remove `action` from the provider contract and retain it only for the narrow persisted legacy compatibility read path.
+- PATCH S11.3-R2 [MEDIUM]: `src/features/ai/answer-annotations.ts:76` treats an explicitly supplied empty `quote` as absent because it uses truthiness. Require every defined `quote`, including `""`, to equal the final-text slice so a mismatched provider proposal cannot pass the exact-slice boundary.
+- PATCH S11.3-R3 [MEDIUM]: `tests/chat-trip-context-extraction.test.ts:666-757` does not prove the required post-provider races. Add controlled provider-return tests that change final assistant content and withdraw referenced provenance before the final locked write, then assert no annotation/detail persists while the completed answer remains unchanged.
+- Review evidence: `git diff --check d96a20f..ae6814d` passed. The acceptance layer reports focused `answer-annotations`, context-extraction, and shell coverage plus typecheck/lint/build passing; it did not run the separate prescribed domain-outbox/command/stream suite. A local combined focused invocation did not complete within the review window after database migration startup, so no additional test result is claimed.
+
+### Repair Record
+
+- 2026-07-30: Repaired only independent-review patches S11.3-R1 through S11.3-R3. The provider contract no longer offers new `action` annotations; `action` remains accepted only through the existing narrow persisted legacy-read sanitizer. Defined quotes, including `""`, must match the exact UTF-16 final-text slice.
+- Added controlled post-provider-return PostgreSQL coverage: a final-content change is fenced without overwriting the completed content, and a provenance withdrawal is re-sanitized to no persisted annotation. Both paths retain a completed answer with an empty persisted annotation list.
+- Status returned to `ready-for-dev` pending the required follow-up independent review. This repair does not mark the story done or start another story.
+
 ### File List
 
 - `_bmad-output/implementation-artifacts/11-3-validate-persisted-answer-annotations.md`
+- `src/features/ai/answer-annotations.ts`
+- `tests/chat-trip-context-extraction.test.ts`

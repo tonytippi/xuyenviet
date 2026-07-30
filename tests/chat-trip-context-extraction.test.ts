@@ -706,6 +706,55 @@ describe("chat/trip context extraction", () => {
     await expect(completedAnswerSnapshot()).resolves.toEqual(terminalSnapshot);
   });
 
+  test.each([
+    ["final assistant content changes", async (assistantId: string, provenanceId: string) => {
+      await testDb.update(messages).set({ content: "Huế đã được cập nhật." }).where(eq(messages.id, assistantId));
+    }],
+    ["referenced provenance is withdrawn", async (_assistantId: string, provenanceId: string) => {
+      await testDb.update(assistantResponseProvenance).set({ availability: "withdrawn", withdrawnAt: new Date(), withdrawalReason: "withdrawn", sourceSnapshot: { unavailable: true } }).where(eq(assistantResponseProvenance.id, provenanceId));
+    }],
+  ])("does not persist annotations when %s after the provider returns", async (_scenario, changeFinalState) => {
+    await createTestUser("user-1");
+    await createModel({ id: "answer-model", gatewayModelName: "cx/answer", purpose: "ai_ask_initial_answer", supportsExtraction: false, supportsStreaming: true });
+    let assistantId = "";
+    let provenanceId = "";
+    let contentAfterProviderReturn = "";
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { stream?: boolean; messages?: Array<{ content: string }> };
+      if (body.stream) return new Response([
+        'data: {"model":"cx/answer","choices":[{"delta":{"content":"Huế"}}]}\n\n',
+        'data: {"choices":[{"finish_reason":"stop"}]}\n\n',
+        "data: [DONE]\n\n",
+      ].join(""), { status: 200, headers: { "content-type": "text/event-stream" } });
+      if (body.messages?.[0]?.content.includes("annotation nội bộ")) {
+        await changeFinalState(assistantId, provenanceId);
+        const [assistant] = await testDb.select({ content: messages.content }).from(messages).where(eq(messages.id, assistantId));
+        contentAfterProviderReturn = assistant?.content ?? "";
+        return new Response(JSON.stringify({ model: "cx/answer", choices: [{ message: { content: JSON.stringify({ annotations: [{ id: "hue", start: 0, end: 3, quote: "Huế", type: "source", provenanceIds: [provenanceId] }] }) } }], usage: { prompt_tokens: 7, completion_tokens: 3, total_tokens: 10 } }), { status: 200, headers: { "x-request-id": "annotation-race", "content-type": "application/json" } });
+      }
+      throw new Error("Unexpected provider call");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }) }));
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+    const formData = new FormData();
+    formData.set("question", "Đi Huế.");
+    await (await POST(createAiAskStreamRequest(formData, "annotation-provider-return-race") as never)).text();
+    const [assistant] = await testDb.select({ id: messages.id }).from(messages).where(eq(messages.role, "assistant"));
+    if (!assistant) throw new Error("Expected finalized assistant message");
+    assistantId = assistant.id;
+    const [provenance] = await testDb.select({ id: assistantResponseProvenance.id }).from(assistantResponseProvenance).where(eq(assistantResponseProvenance.assistantMessageId, assistant.id));
+    if (!provenance) throw new Error("Expected assistant provenance");
+    provenanceId = provenance.id;
+    await testDb.update(assistantResponseProvenance).set({ sourceCategory: "knowledge", sourceType: "knowledge_card", verificationStatus: "verified", usedInPrompt: true, sourceSnapshot: { title: "Huế" } }).where(eq(assistantResponseProvenance.id, provenance.id));
+    await testDb.update(domainOutbox).set({ availableAt: new Date("2099-01-01T00:00:00.000Z") }).where(eq(domainOutbox.eventType, "ai_ask.context_extraction.v1"));
+    await testDb.update(domainOutbox).set({ availableAt: new Date("2020-01-01T00:00:00.000Z") }).where(eq(domainOutbox.eventType, "ai_ask.answer_annotation.v1"));
+
+    await expect(processAiAskDomainOutboxBatch({ workerId: "annotation-provider-return-race-worker" })).resolves.toEqual({ kind: "processed", count: 1 });
+    await expect(testDb.select({ content: messages.content, answerAnnotations: messages.answerAnnotations }).from(messages).where(eq(messages.id, assistant.id))).resolves.toEqual([{ content: contentAfterProviderReturn, answerAnnotations: [] }]);
+    await expect(testDb.select({ status: aiAskCommands.status }).from(aiAskCommands).where(eq(aiAskCommands.assistantMessageId, assistant.id))).resolves.toEqual([{ status: "completed" }]);
+  });
+
   test("delivers annotation and proposal effects with one success usage each across redelivery", async () => {
     await createTestUser("user-1");
     const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế" }).returning({ id: tripProjects.id });

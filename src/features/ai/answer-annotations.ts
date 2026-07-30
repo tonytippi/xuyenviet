@@ -73,7 +73,7 @@ export function validateAnswerAnnotations(input: {
 
     const text = input.answerText.slice(proposal.start, proposal.end);
 
-    if (!text.trim() || (proposal.quote && proposal.quote !== text)) {
+    if (!text.trim() || (proposal.quote !== undefined && proposal.quote !== text)) {
       continue;
     }
 
@@ -354,7 +354,7 @@ function buildAnnotationProposalMessages({ answerText, provenance }: { answerTex
         "Chỉ trả về JSON hợp lệ dạng {\"annotations\":[...]}. Không markdown, không giải thích.",
         "Mỗi annotation gồm id, start, end, quote, type, provenanceIds.",
         "start/end là offset UTF-16 trong answerText cuối cùng. quote phải khớp chính xác đoạn chữ đó.",
-        "type chỉ là source, warning, trip_fact, action, place, hotel_area, route_segment, hoặc cost.",
+        "type chỉ là source, warning, trip_fact, place, hotel_area, route_segment, hoặc cost.",
         "Chỉ dùng provenanceIds có trong danh sách handles. Không tự tạo URL, nhãn nguồn, metadata, hoặc chi tiết hiển thị.",
         "Nếu không có cụm đáng mở chi tiết hoặc không chắc offset, trả {\"annotations\":[]}.",
       ].join("\n"),

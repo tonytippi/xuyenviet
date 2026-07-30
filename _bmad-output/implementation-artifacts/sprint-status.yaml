@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-07-30 (Story 11.3 creation and validation complete.)
+# last_updated: 2026-07-30 (Story 11.3 independent-review patches repaired; follow-up review pending.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-07-30 (Story 11.3 creation and validation complete.)
+last_updated: 2026-07-30 (Story 11.3 independent-review patches repaired; follow-up review pending.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -223,6 +223,8 @@ development_status:
   # 2026-07-30: Narrow recovery repaired the two independent-review MEDIUM patches only. Historical evidence entries now fail closed unless each has a nonblank exact sourceId or evidenceId; a removed evidence row becomes historic withdrawal evidence only when the destructive source/evidence command recorded its bounded withdrawalReason, preserving conflict-resolution and retention removals. PostgreSQL focused suite: 15 tests passed; typecheck and diff check passed; lint: 0 errors and 5 existing warnings. HIGH AC3 remains blocked: 0019 already captured cutoverAt without an executable recorded old-writer admission gate. A new migration cannot prove the existing unguarded interval safe; choose an authorized disposable/reset-only 0019 replacement before use or a durable-data interval remediation design. Status is ready-for-dev, not done; destructive withdrawal remains blocked.
   # 2026-07-30: User-authorized disposable/reset-only recovery replaced unapplied 0019 before any environment used it. Repository preflight confirmed the isolated DATABASE_URL_TEST harness; no external/durable database was touched. The migration now fails closed without v1 old terminal/evaluation writer quiescence admission, records that admission with cutoverAt, drains coordinated writers through the shared/exclusive cutover lock, and rejects uncoordinated legacy Knowledge provenance inserts. Serial PostgreSQL verification passed: migration proof (1), source/search (57), shell/context (266), command/stream/outbox (57); typecheck/build/diff check passed; lint had 0 errors and five existing unrelated warnings. Final Blind Hunter, Edge Case Hunter, and local Acceptance Auditor found no actionable findings. Status synchronized to done.
   11-2-withdraw-historical-provenance-safely: done
+  # 2026-07-30: Unattended independent review of d96a20feb699a047bbdfb5dd9ab7a820dce35621..ae6814d30ce646dc93fef0a93183d075d443b0e6 completed synchronously with Blind Hunter, Edge Case Hunter, and Acceptance Auditor. BLOCKED with three MEDIUM patches: provider prompt advertises newly rejected action annotations; an explicitly empty quote bypasses the exact-slice quote check; and focused coverage omits required post-provider stale-content and provenance-withdrawal-before-final-lock races. AC1 and AC2 are otherwise satisfied; AC3 and scope are satisfied. `git diff --check` passed. Acceptance evidence reports focused tests, typecheck, lint, and build passing, but the separate prescribed domain-outbox/command/stream suite was not run. No implementation changes were made during review.
+  # 2026-07-30: Repaired only the three S11.3 independent-review patches. The provider prompt excludes new `action` annotations, defined empty quotes fail exact-slice validation, and controlled provider-return races prove stale final content and withdrawn provenance leave no annotations or source detail while preserving the completed answer. Focused follow-up review remains required; the story is not done.
   11-3-validate-persisted-answer-annotations: ready-for-dev
   11-4-bind-annotation-details-and-actions-to-current-ownership: backlog
   11-5-serve-planning-context-and-details-through-the-api-cutover: backlog
