@@ -136,6 +136,7 @@ describe("answer annotation validation", () => {
     const proposals = parseAnswerAnnotationProposals(JSON.stringify({
       annotations: [
         { id: "valid", start: 0, end: 3, quote: "Huế", type: "source", provenanceIds: ["prov-knowledge", 123] },
+        { id: "bad-quote", start: 0, end: 3, quote: 123, type: "source", provenanceIds: ["prov-knowledge"] },
         { id: "missing-range", type: "source", provenanceIds: ["prov-knowledge"] },
         "bad",
       ],

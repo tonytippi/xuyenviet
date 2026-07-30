@@ -86,6 +86,15 @@ warnings: []
   - `[medium]` `[patch]` Calculated provider duplicate IDs before proposal-shape filtering and rejected all new provider `action` descriptors, preserving strict duplicate semantics and Story 11.4 action ownership.
   - `[medium]` `[patch]` Added focused malformed, duplicate, oversized, and source-backed-action regressions.
 
+### 2026-07-30 — Post-commit review pass
+- intent_gap: 0
+- bad_spec: 0
+- patch: 1 (high 0, medium 1, low 0)
+- defer: 0
+- reject: 0
+- addressed_findings:
+  - `[medium]` `[patch]` Rejected non-string provider `quote` fields instead of silently dropping them before the exact-slice validation boundary.
+
 ## Auto Run Result
 
 **Summary:** Hardened the existing persisted annotation contract without adding a parallel store, resolver, browser parser, action capability, schema, or transport. Proposal, persisted-read, and client display validation now fail closed for hostile duplicate, oversized, malformed, or source-free action input; valid source-backed details remain formatter- and scope-derived.
@@ -97,7 +106,7 @@ warnings: []
 - `tests/chat-trip-context-extraction.test.ts` -- updates outbox fixture to use allowed local warning guidance.
 - `tests/ai-ask-shell.test.ts` -- adds duplicate/malformed display defense coverage.
 
-**Review:** Synchronous Blind Hunter and Edge Case Hunter passes produced four repaired contract-boundary findings. The final review repair was rechecked by both layers; no residual intent gap, bad-spec issue, defer item, or unaddressed finding remains. A follow-up review is recommended because the repair pass hardened several security/data-integrity input boundaries.
+**Review:** Synchronous Blind Hunter and Edge Case Hunter passes produced five repaired contract-boundary findings. The final review repair was rechecked by both layers; no residual intent gap, bad-spec issue, defer item, or unaddressed finding remains. A follow-up review is recommended because the repair pass hardened several security/data-integrity input boundaries.
 
 **Verification:**
 - `pnpm vitest run tests/answer-annotations.test.ts tests/chat-trip-context-extraction.test.ts tests/ai-ask-shell.test.ts --no-file-parallelism` -- passed, 183 tests.

@@ -314,7 +314,7 @@ export function parseAnswerAnnotationProposals(content: string): AnswerAnnotatio
 
   const duplicateIds = findDuplicateIds(payload.annotations.map(getProposalId));
   for (const item of payload.annotations) {
-    if (!isRecord(item) || typeof item.id !== "string" || duplicateIds.has(item.id) || typeof item.start !== "number" || typeof item.end !== "number" || typeof item.type !== "string" || (item.provenanceIds !== undefined && (!Array.isArray(item.provenanceIds) || item.provenanceIds.some((id) => typeof id !== "string")))) {
+    if (!isRecord(item) || typeof item.id !== "string" || duplicateIds.has(item.id) || typeof item.start !== "number" || typeof item.end !== "number" || typeof item.type !== "string" || (item.quote !== undefined && typeof item.quote !== "string") || (item.provenanceIds !== undefined && (!Array.isArray(item.provenanceIds) || item.provenanceIds.some((id) => typeof id !== "string")))) {
       continue;
     }
 
