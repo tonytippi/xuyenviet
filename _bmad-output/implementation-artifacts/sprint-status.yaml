@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-07-30 (Story 11.4 created and validated; status synchronized to ready-for-dev.)
+# last_updated: 2026-07-30 (Story 11.4 independent-review repairs verified; status synchronized to ready-for-dev.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-07-30 (Story 11.4 created and validated; status synchronized to ready-for-dev.)
+last_updated: 2026-07-30 (Story 11.4 independent-review repairs verified; status synchronized to ready-for-dev.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -228,6 +228,8 @@ development_status:
   # 2026-07-30: Second and final unattended independent review of d96a20feb699a047bbdfb5dd9ab7a820dce35621..d870ab3 ran Blind Hunter, Edge Case Hunter, and Acceptance Auditor synchronously. Edge Case Hunter was clean; no layer failed. BLOCKED with four patches: (1) controlled content/withdrawal race mutations occur before, rather than after, provider return and therefore miss the final-lock window; (2) owned-history sanitizer regressions for malformed/overlapping/duplicate/message-unscoped stored JSON are missing; (3) required provenance rejection cases are not covered for every source-backed descriptor type; and (4) the prescribed shell, outbox/command/stream, typecheck, lint, and build verification is not recorded. AC1 implementation passes; AC2/AC3 proof is partial; scope passes. No code changes were made during review.
   # 2026-07-30: Final bounded repair closed exactly those four proof patches. Controlled post-provider-return and pre-final-lock content/withdrawal races suppress durable annotations; owner-scoped persisted-history JSON regressions fail closed while preserving prose; all five source-backed types reject empty, duplicate, unknown, unavailable, and cross-scope-looking provenance IDs. Required serial verification passed: 194 focused annotation/context/shell tests; 57 outbox/command/stream tests; typecheck; lint (0 errors, 5 pre-existing warnings); build; and diff check. Status synchronized to done; no subsequent story started.
   11-3-validate-persisted-answer-annotations: done
+  # 2026-07-30: Initial unattended review was blocked because the supplied end SHA was mistyped; that block is superseded by the verified narrow-recovery range below.
+  # 2026-07-30: Narrow recovery found three MEDIUM patches. Repair complete: capability-less legacy/stale/withdrawn/invalid actions are ordinary text; annotation execution has a synchronous ref guard; direct PostgreSQL-backed `executeAnnotationAction` coverage proves strict input, exact-one source-message lookup, ownership/conversation isolation, stale/deleted capability, proposal-ID injection rejection, and no mutation on rejection. Verified serially: trip-change-proposals 80 passed, ai-ask-shell 154 passed, typecheck/build/diff check passed; lint passed with 5 pre-existing warnings. Keep ready-for-dev, not done.
   11-4-bind-annotation-details-and-actions-to-current-ownership: ready-for-dev
   11-5-serve-planning-context-and-details-through-the-api-cutover: backlog
   epic-11-retrospective: optional

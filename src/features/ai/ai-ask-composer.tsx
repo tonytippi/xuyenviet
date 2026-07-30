@@ -428,6 +428,14 @@ function AnnotatedAnswerText({ messageId, displayConversationId, content, annota
       parts.push(content.slice(cursor, annotation.start));
     }
 
+    // Persisted actions are historic intent, not browser authority. Only the
+    // owner-scoped read model may make one interactive by resolving a capability.
+    if (annotation.type === "action" && !annotation.detail.capability?.available) {
+      parts.push(annotation.text);
+      cursor = annotation.end;
+      continue;
+    }
+
     const entity = createAnnotationAnswerEntityDescriptor(annotation, messageId, displayConversationId);
     const isSelected = Boolean(selectedEntityId && (entity.provenanceIds?.[0] === selectedEntityId || entity.annotationId === selectedEntityId));
 
@@ -751,6 +759,7 @@ export function AiAskComposer({
   // checked and mutated synchronously before any await so the second click is
   // blocked immediately.
   const proposalInFlightRef = useRef<Set<string>>(new Set());
+  const annotationActionInFlightRef = useRef(false);
   const [createProjectState, createProjectFormAction, isCreatingProject] = useActionState<CreateTripProjectFormState | undefined, FormData>(
     createTripProjectAction ?? noOpCreateTripProjectAction,
     undefined,
@@ -1489,7 +1498,8 @@ export function AiAskComposer({
   }
 
   async function handleExecuteAnnotationAction(entity: AnswerEntityDescriptor) {
-    if (annotationActionPending || !executeAnnotationAction || !entity.displayConversationId || !entity.assistantMessageId || !entity.annotationId || !entity.capability) return;
+    if (annotationActionInFlightRef.current || annotationActionPending || !executeAnnotationAction || !entity.displayConversationId || !entity.assistantMessageId || !entity.annotationId || !entity.capability) return;
+    annotationActionInFlightRef.current = true;
     setAnnotationActionPending(true);
     setStatus("Đang cập nhật đề xuất...");
     try {
@@ -1502,6 +1512,7 @@ export function AiAskComposer({
     } catch {
       setStatus("Không thể cập nhật đề xuất lúc này. Vui lòng thử lại.");
     } finally {
+      annotationActionInFlightRef.current = false;
       setAnnotationActionPending(false);
     }
   }

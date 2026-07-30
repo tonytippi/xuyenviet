@@ -781,11 +781,12 @@ describe("AI Ask authenticated shell", () => {
     const html = await renderAuthenticatedAiAskShell({ conversationId: conversation.id });
 
     expect(html).toContain("Mở chi tiết annotation: Bãi đỗ chính thức Huế");
-    expect(html).toContain("Mở chi tiết annotation: Kiểm tra chỗ đỗ");
+    expect(html).toContain("Kiểm tra chỗ đỗ trước khi đi.");
+    expect(html).not.toContain("Mở chi tiết annotation: Kiểm tra chỗ đỗ");
     expect(html).not.toContain("Giải thích");
   });
 
-  test("renders annotation ranges in headings and does not mark provenance-less actions selected by default", async () => {
+  test("renders annotation ranges in headings while leaving capability-less actions as ordinary text", async () => {
     const { AssistantMessageContent } = await import("@/features/ai/ai-ask-composer");
     const content = "Nguồn và độ tin cậy\nBước tiếp theo";
     const annotations: AnswerAnnotation[] = [
@@ -803,7 +804,8 @@ describe("AI Ask authenticated shell", () => {
     const html = renderToStaticMarkup(createElement(AssistantMessageContent, { content, annotations }));
 
     expect(html).toContain("Mở chi tiết annotation: Nguồn và độ tin cậy");
-    expect(html).toContain("Mở chi tiết annotation: Bước tiếp theo");
+    expect(html).not.toContain("Mở chi tiết annotation: Bước tiếp theo");
+    expect(html).toContain("Bước tiếp theo");
     expect(html).not.toContain('aria-pressed="true"');
   });
 
@@ -860,6 +862,25 @@ describe("AI Ask authenticated shell", () => {
     expect(resolved).toContain("Áp dụng đề xuất");
     expect(unresolved).not.toContain("Áp dụng đề xuất");
     expect(resolved).not.toContain("proposalId");
+  });
+
+  test("renders capability-less persisted actions as ordinary answer text", async () => {
+    const { AssistantMessageContent } = await import("@/features/ai/ai-ask-composer");
+    const content = "Áp dụng đề xuất này.";
+    const annotations = [{
+      id: "legacy-action",
+      start: 0,
+      end: 7,
+      text: "Áp dụng",
+      type: "action" as const,
+      detail: { type: "action" as const, label: "Áp dụng" },
+    }];
+
+    const html = renderToStaticMarkup(createElement(AssistantMessageContent, { content, annotations }));
+
+    expect(html).toContain(content);
+    expect(html).not.toContain("Mở chi tiết annotation");
+    expect(html).not.toContain("<button");
   });
 
   test("omits annotation execute controls on both historic-review detail surfaces", async () => {

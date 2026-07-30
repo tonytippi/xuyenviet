@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { auditEvents, conversations, messages, tripChangeProposals, tripPlanChangeHistory, tripPlanItems, tripProjects, users } from "@/db/schema";
@@ -842,6 +842,71 @@ describe("Story 11.4 annotation action binding DB-backed tests", () => {
 
     await expect(testDb.select({ status: tripChangeProposals.status }).from(tripChangeProposals).where(eq(tripChangeProposals.id, fixture.proposal.id))).resolves.toEqual([{ status: "expired" }]);
     await expect(testDb.select({ operationClass: tripPlanChangeHistory.operationClass }).from(tripPlanChangeHistory).where(eq(tripPlanChangeHistory.proposalId, fixture.proposal.id))).resolves.toEqual([{ operationClass: "expire" }]);
+  });
+
+  async function loadAnnotationActionsAs(userId = "binding-owner") {
+    vi.resetModules();
+    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId, email: `${userId}@example.com` }) }));
+    vi.doMock("next/navigation", () => ({ redirect: vi.fn() }));
+    return await import("@/features/chat-trips/actions");
+  }
+
+  async function expectNoAnnotationActionMutation(proposalId: string) {
+    await expect(testDb.select({ state: tripPlanItems.state, version: tripPlanItems.version }).from(tripPlanItems).where(eq(tripPlanItems.id, "binding-leg"))).resolves.toEqual([{ state: "planned", version: 1 }]);
+    await expect(testDb.select({ status: tripChangeProposals.status }).from(tripChangeProposals).where(eq(tripChangeProposals.id, proposalId))).resolves.toEqual([{ status: "pending" }]);
+    await expect(testDb.select().from(tripPlanChangeHistory).where(eq(tripPlanChangeHistory.proposalId, proposalId))).resolves.toHaveLength(0);
+  }
+
+  test("public action boundary rejects malformed and additional browser input without mutation", async () => {
+    const fixture = await setupBoundProposal();
+    const { executeAnnotationAction } = await loadAnnotationActionsAs();
+    const validInput = { conversationId: fixture.conversation.id, assistantMessageId: fixture.assistant.id, annotationId: fixture.annotationId, command: "trip_change_proposal.apply" as const };
+
+    await expect(executeAnnotationAction({ ...validInput, proposalId: fixture.proposal.id } as never)).resolves.toMatchObject({ success: false, reason: "not_found" });
+    await expect(executeAnnotationAction({ ...validInput, command: "unknown" } as never)).resolves.toMatchObject({ success: false, reason: "not_found" });
+    await expect(executeAnnotationAction({ ...validInput, annotationId: " " })).resolves.toMatchObject({ success: false, reason: "not_found" });
+    await expectNoAnnotationActionMutation(fixture.proposal.id);
+  });
+
+  test("public action boundary rejects cross-user and cross-conversation bindings without mutation", async () => {
+    const fixture = await setupBoundProposal();
+    const ownerActions = await loadAnnotationActionsAs();
+    const [otherConversation] = await testDb.insert(conversations).values({ id: "binding-owner-other-conversation", userId: "binding-owner", tripProjectId: "binding-project" }).returning({ id: conversations.id });
+
+    await expect(ownerActions.executeAnnotationAction({ conversationId: otherConversation.id, assistantMessageId: fixture.assistant.id, annotationId: fixture.annotationId, command: "trip_change_proposal.apply" })).resolves.toMatchObject({ success: false, reason: "not_found" });
+    const otherActions = await loadAnnotationActionsAs("binding-other");
+    await expect(otherActions.executeAnnotationAction({ conversationId: fixture.conversation.id, assistantMessageId: fixture.assistant.id, annotationId: fixture.annotationId, command: "trip_change_proposal.apply" })).resolves.toMatchObject({ success: false, reason: "not_found" });
+    await expectNoAnnotationActionMutation(fixture.proposal.id);
+  });
+
+  test("public action boundary requires exactly one pending source-message proposal", async () => {
+    const fixture = await setupBoundProposal();
+    const { executeAnnotationAction } = await loadAnnotationActionsAs();
+    const input = { conversationId: fixture.conversation.id, assistantMessageId: fixture.assistant.id, annotationId: fixture.annotationId, command: "trip_change_proposal.apply" as const };
+
+    await testDb.delete(tripChangeProposals).where(eq(tripChangeProposals.id, fixture.proposal.id));
+    await expect(executeAnnotationAction(input)).resolves.toMatchObject({ success: false, reason: "not_found" });
+    await testDb.insert(tripChangeProposals).values({
+      id: "binding-matching-one", tripProjectId: "binding-project", userId: "binding-owner", creatorClass: "ai_orchestration", status: "pending", rationale: "Một", operations: [{ kind: "change-item-state", itemId: "binding-leg", state: "confirmed" }], expectedAggregateVersion: 1, expectedItemVersions: { "binding-leg": 1 }, sourceAssistantMessageId: fixture.assistant.id,
+    });
+    await testDb.insert(tripChangeProposals).values({
+      id: "binding-matching-two", tripProjectId: "binding-project", userId: "binding-owner", creatorClass: "ai_orchestration", status: "pending", rationale: "Hai", operations: [{ kind: "change-item-state", itemId: "binding-leg", state: "confirmed" }], expectedAggregateVersion: 1, expectedItemVersions: { "binding-leg": 1 }, sourceAssistantMessageId: fixture.assistant.id,
+    });
+    await expect(executeAnnotationAction(input)).resolves.toMatchObject({ success: false, reason: "not_found" });
+    await expect(testDb.select({ state: tripPlanItems.state, version: tripPlanItems.version }).from(tripPlanItems).where(eq(tripPlanItems.id, "binding-leg"))).resolves.toEqual([{ state: "planned", version: 1 }]);
+    await expect(testDb.select().from(tripPlanChangeHistory).where(inArray(tripPlanChangeHistory.proposalId, ["binding-matching-one", "binding-matching-two"]))).resolves.toHaveLength(0);
+  });
+
+  test("public action boundary fails closed for stale or deleted resolved capability", async () => {
+    const fixture = await setupBoundProposal();
+    const { executeAnnotationAction } = await loadAnnotationActionsAs();
+    const input = { conversationId: fixture.conversation.id, assistantMessageId: fixture.assistant.id, annotationId: fixture.annotationId, command: "trip_change_proposal.apply" as const };
+
+    await testDb.update(tripChangeProposals).set({ expiresAt: new Date(Date.now() - 1) }).where(eq(tripChangeProposals.id, fixture.proposal.id));
+    await expect(executeAnnotationAction(input)).resolves.toMatchObject({ success: false, reason: "not_found" });
+    await testDb.update(messages).set({ answerAnnotations: [] }).where(eq(messages.id, fixture.assistant.id));
+    await expect(executeAnnotationAction(input)).resolves.toMatchObject({ success: false, reason: "not_found" });
+    await expectNoAnnotationActionMutation(fixture.proposal.id);
   });
 });
 
