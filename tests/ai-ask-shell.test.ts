@@ -1477,6 +1477,22 @@ describe("AI Ask conversation data layer", () => {
     });
   });
 
+  test("keeps API shells free of assistant content and enrichment", async () => {
+    await createTestUser("user-1");
+    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }) }));
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
+    await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "user", content: "Đi Huế?" });
+    const [assistant] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "assistant", content: "Câu trả lời đã hoàn tất.", answerAnnotations: [{ id: "unread", start: 0, end: 3, text: "Câu", type: "warning", detail: { type: "warning", label: "Câu" } }] }).returning({ id: messages.id });
+    vi.doMock("@/db/client", () => ({ getDb: () => testDb }));
+    const { getOwnedConversationShell } = await import("@/features/chat-trips/conversations");
+
+    const shell = await getOwnedConversationShell(conversation.id);
+    const shellAssistant = shell?.messages.find((message) => message.id === assistant.id);
+
+    expect(shell?.messages.find((message) => message.role === "user")?.content).toBe("Đi Huế?");
+    expect(shellAssistant).toMatchObject({ content: undefined, provenance: [], annotations: [] });
+  });
+
   test("loads ordered assistant provenance for owned conversation history only", async () => {
     await createTestUser("user-1");
     await createTestUser("user-2");
