@@ -46,16 +46,18 @@ export async function persistAssistantAnswerProvenance(db: ProvenanceDb, input: 
   conversationId: string;
   userMessageId: string;
   assistantMessageId: string;
+  tripAnswerContextSnapshotId?: string | null;
   sourceBundle: ContextPrioritySourceBundle;
   promptSection: string;
 }) {
-  const { userId, conversationId, userMessageId, assistantMessageId, sourceBundle, promptSection } = input;
+  const { userId, conversationId, userMessageId, assistantMessageId, tripAnswerContextSnapshotId, sourceBundle, promptSection } = input;
 
   await db.insert(assistantRetrievalDecisions).values({
     userId,
     conversationId,
     userMessageId,
     assistantMessageId,
+    tripAnswerContextSnapshotId: tripAnswerContextSnapshotId ?? null,
     approvedKnowledgeCandidateCount: sourceBundle.retrievalDecision.approvedKnowledgeCandidateCount,
     approvedKnowledgeSelectedCount: sourceBundle.retrievalDecision.approvedKnowledgeSelectedCount,
     approvedKnowledgeTargetCount: sourceBundle.retrievalDecision.approvedKnowledgeTargetCount,
@@ -71,7 +73,7 @@ export async function persistAssistantAnswerProvenance(db: ProvenanceDb, input: 
     knowledgePolicySnapshot: sourceBundle.retrievalDecision.knowledgePolicySummary ?? null,
   });
 
-  const rows = buildProvenanceRows({ userId, conversationId, userMessageId, assistantMessageId, sourceBundle, promptSection });
+  const rows = buildProvenanceRows({ userId, conversationId, userMessageId, assistantMessageId, tripAnswerContextSnapshotId, sourceBundle, promptSection });
 
   if (rows.length > 0) {
     const insertedRows = await db.insert(assistantResponseProvenance).values(rows).returning();
@@ -115,6 +117,7 @@ function buildProvenanceRows({
   conversationId,
   userMessageId,
   assistantMessageId,
+  tripAnswerContextSnapshotId,
   sourceBundle,
   promptSection,
 }: {
@@ -122,6 +125,7 @@ function buildProvenanceRows({
   conversationId: string;
   userMessageId: string;
   assistantMessageId: string;
+  tripAnswerContextSnapshotId?: string | null;
   sourceBundle: ContextPrioritySourceBundle;
   promptSection: string;
 }) {
@@ -129,11 +133,11 @@ function buildProvenanceRows({
   let rank = 1;
 
   for (const fact of sourceBundle.chatTripContext.tripProjectFacts) {
-    rows.push(createRow({ userId, conversationId, userMessageId, assistantMessageId, rank: rank++, sourceCategory: "trip_context", verificationStatus: "verified", sourceType: fact.field, usedInPrompt: promptSection.includes(`${fact.field}: ${formatPromptValue(fact.value)}`), sourceSnapshot: { field: fact.field, source: fact.source } }));
+    rows.push(createRow({ userId, conversationId, userMessageId, assistantMessageId, tripAnswerContextSnapshotId, rank: rank++, sourceCategory: "trip_context", verificationStatus: "verified", sourceType: fact.field, usedInPrompt: promptSection.includes(`${fact.field}: ${formatPromptValue(fact.value)}`), sourceSnapshot: { field: fact.field, source: fact.source } }));
   }
 
   for (const fact of sourceBundle.chatTripContext.chatFacts) {
-    rows.push(createRow({ userId, conversationId, userMessageId, assistantMessageId, rank: rank++, sourceCategory: "chat_context", verificationStatus: "verified", sourceType: fact.field, usedInPrompt: promptSection.includes(`${fact.field}: ${formatPromptValue(fact.value)}`), sourceSnapshot: { field: fact.field, source: fact.source } }));
+    rows.push(createRow({ userId, conversationId, userMessageId, assistantMessageId, tripAnswerContextSnapshotId, rank: rank++, sourceCategory: "chat_context", verificationStatus: "verified", sourceType: fact.field, usedInPrompt: promptSection.includes(`${fact.field}: ${formatPromptValue(fact.value)}`), sourceSnapshot: { field: fact.field, source: fact.source } }));
   }
 
   for (const knowledge of sourceBundle.knowledge) {
@@ -143,6 +147,7 @@ function buildProvenanceRows({
       conversationId,
       userMessageId,
       assistantMessageId,
+      tripAnswerContextSnapshotId,
       rank: rank++,
       sourceCategory: "knowledge",
       sourceReferenceId: result.cardId,
@@ -161,6 +166,7 @@ function buildProvenanceRows({
       conversationId,
       userMessageId,
       assistantMessageId,
+      tripAnswerContextSnapshotId,
       rank: rank++,
       sourceCategory: "web",
       sourceReferenceId: result.persistedId ?? null,
@@ -189,6 +195,7 @@ function buildProvenanceRows({
       conversationId,
       userMessageId,
       assistantMessageId,
+      tripAnswerContextSnapshotId,
       rank: rank++,
       sourceCategory: "general",
       sourceType: "general_reasoning",
@@ -238,6 +245,7 @@ function createRow(input: {
   conversationId: string;
   userMessageId: string;
   assistantMessageId: string;
+  tripAnswerContextSnapshotId?: string | null;
   sourceCategory: AssistantProvenanceSourceCategory;
   sourceReferenceId?: string | null;
   sourceReferenceType?: string | null;
@@ -253,6 +261,7 @@ function createRow(input: {
     conversationId: input.conversationId,
     userMessageId: input.userMessageId,
     assistantMessageId: input.assistantMessageId,
+    tripAnswerContextSnapshotId: input.tripAnswerContextSnapshotId ?? null,
     sourceCategory: input.sourceCategory,
     sourceReferenceId: input.sourceReferenceId ?? null,
     sourceReferenceType: input.sourceReferenceType ?? null,

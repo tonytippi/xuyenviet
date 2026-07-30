@@ -9,13 +9,14 @@ import { streamInitialAiAskAnswer } from "./gateway";
 import { getAiGatewayPricingSnapshot, selectActiveAiGatewayModel } from "./models";
 import { aiAskInitialAnswerPromptVersion, aiAskInitialAnswerPurpose, buildAiAskMessages } from "./prompts";
 import { persistAssistantAnswerProvenance, type AssistantMessageProvenanceItem } from "./provenance";
-import { conversations, messages } from "./schema";
-import { assembleContextPrioritySourceBundle, buildSourceBundlePromptSection } from "./source-bundle";
+import { conversations, messages, tripAnswerContextSnapshots } from "./schema";
+import { assembleContextPrioritySourceBundle, renderSourceBundlePromptSection } from "./source-bundle";
 import { writeAiUsageEvent } from "./usage";
 
 type AiAskStreamTestDependencies = {
   assembleContextPrioritySourceBundle: typeof assembleContextPrioritySourceBundle;
-  buildSourceBundlePromptSection: typeof buildSourceBundlePromptSection;
+  renderSourceBundlePromptSection: typeof renderSourceBundlePromptSection;
+  buildSourceBundlePromptSection?: (bundle: Awaited<ReturnType<typeof assembleContextPrioritySourceBundle>>) => string;
 };
 
 const aiAskStreamTestDependenciesKey = Symbol.for("xuyenviet.aiAskStreamTestDependencies");
@@ -26,7 +27,7 @@ export function setAiAskStreamTestDependencies(dependencies: Partial<AiAskStream
 
 function getAiAskStreamDependencies(): AiAskStreamTestDependencies {
   const overrides = (globalThis as typeof globalThis & { [aiAskStreamTestDependenciesKey]?: Partial<AiAskStreamTestDependencies> })[aiAskStreamTestDependenciesKey];
-  return { assembleContextPrioritySourceBundle, buildSourceBundlePromptSection, ...overrides };
+  return { assembleContextPrioritySourceBundle, renderSourceBundlePromptSection, ...overrides };
 }
 
 type StreamEvent =
@@ -169,7 +170,10 @@ async function streamAnswer({
       webSearchUsageContext: { userId: session.userId, conversationId: saved.conversationId, userMessageId: saved.userMessage.id, tripProjectId: tripProjectId ?? null },
       abortSignal,
     });
-    const contextSection = dependencies.buildSourceBundlePromptSection(sourceBundle);
+    const renderedSourceBundle = dependencies.buildSourceBundlePromptSection
+      ? { section: dependencies.buildSourceBundlePromptSection(sourceBundle), tripContext: { version: 1 as const, aggregateVersion: null, included: [], excluded: [], conflicts: [], serialization: "{}", promptDigest: "0".repeat(64) } }
+      : dependencies.renderSourceBundlePromptSection(sourceBundle);
+    const contextSection = renderedSourceBundle.section;
     const gatewayMessages = buildAiAskMessages({ question, history: saved.history, contextSection });
     const finalGatewayMessages = imageDataUrl ? attachImageToFinalUserMessage(gatewayMessages, imageDataUrl) : gatewayMessages;
     const finalPolicyValidationRequired = requiresAiAskAnswerFinalization(sourceBundle);
@@ -267,11 +271,25 @@ async function streamAnswer({
 
         await transaction.update(conversations).set({ updatedAt: new Date() }).where(eq(conversations.id, fencedCommand.conversationId));
 
+        const [snapshot] = await transaction.insert(tripAnswerContextSnapshots).values({
+          userId: fencedCommand.userId,
+          conversationId: fencedCommand.conversationId,
+          assistantMessageId: assistantMessage.id,
+          contextVersion: renderedSourceBundle.tripContext.version,
+          aggregateVersion: renderedSourceBundle.tripContext.aggregateVersion,
+          includedReferences: renderedSourceBundle.tripContext.included,
+          excludedReferences: renderedSourceBundle.tripContext.excluded,
+          conflicts: renderedSourceBundle.tripContext.conflicts,
+          serialization: renderedSourceBundle.tripContext.serialization,
+          promptDigest: renderedSourceBundle.tripContext.promptDigest,
+        }).returning({ id: tripAnswerContextSnapshots.id });
+
         const provenance = await persistAssistantAnswerProvenance(transaction, {
           userId: fencedCommand.userId,
           conversationId: fencedCommand.conversationId,
           userMessageId: fencedCommand.userMessageId,
           assistantMessageId: assistantMessage.id,
+          tripAnswerContextSnapshotId: snapshot.id,
           sourceBundle,
           promptSection: contextSection,
         });
@@ -283,6 +301,7 @@ async function streamAnswer({
           conversationId: fencedCommand.conversationId,
           userMessageId: fencedCommand.userMessageId,
           assistantMessageId: assistantMessage.id,
+          tripAnswerContextSnapshotId: snapshot.id,
           purpose: aiAskInitialAnswerPurpose,
           provider: gatewayResult.provider,
           model: gatewayResult.model,
@@ -299,7 +318,7 @@ async function streamAnswer({
           providerRequestId: gatewayResult.requestMetadata.providerRequestId,
         });
         const completed = { id: assistantMessage.id, content: assistantContent.content, provenance };
-        return { assistantMessageId: assistantMessage.id, result: { type: "done" as const, conversationId: fencedCommand.conversationId, userMessage: savedTurn.userMessage, assistantMessage: completed }, completed };
+        return { assistantMessageId: assistantMessage.id, tripAnswerContextSnapshotId: snapshot.id, result: { type: "done" as const, conversationId: fencedCommand.conversationId, userMessage: savedTurn.userMessage, assistantMessage: completed }, completed };
       });
 
       if (!("discarded" in finalization)) {

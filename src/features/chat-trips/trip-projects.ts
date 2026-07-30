@@ -1,9 +1,9 @@
 import "server-only";
 
-import { and, asc, count, desc, eq, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { chatContext, conversations, messages, tripChangeProposals, tripPlanItems, tripProjectConstraints, tripProjects, type TripPlanAnchorRole, type TripPlanItemKind, type TripPlanItemState, type TripPlanItemType } from "@/db/schema";
+import { chatContext, conversations, messages, tripAnswerContextSnapshots, tripChangeProposals, tripPlanItems, tripProjectConstraints, tripProjects, type TripPlanAnchorRole, type TripPlanItemKind, type TripPlanItemState, type TripPlanItemType } from "@/db/schema";
 import { recordAuditEvent } from "@/features/audit/events";
 import { toUserAuditActor } from "@/features/audit/actors";
 import { buildTripWorkspaceReadModelWithConstraints, type ConstraintsProjection, type PendingProposalFocusInput, type PlanHistoryEntryView, type TimelineGroup, type TripHomeFocus, type TripPlanItemProjection } from "@/features/chat-trips/trip-home";
@@ -439,11 +439,16 @@ export async function deleteOwnedTripProject(tripProjectId: string): Promise<Del
       const linkedConversations = await transaction.select({ id: conversations.id }).from(conversations).where(and(eq(conversations.tripProjectId, project.id), eq(conversations.userId, session.userId))).orderBy(asc(conversations.id)).for("update");
       await discardAiAskCommandsForDeletedConversations(transaction, session.userId, linkedConversations.map((conversation) => conversation.id));
       await transaction.update(conversations).set({ lifecycleVersion: sql`${conversations.lifecycleVersion} + 1`, updatedAt: new Date() }).where(and(eq(conversations.tripProjectId, project.id), eq(conversations.userId, session.userId)));
-      // The project deletion promise includes every linked conversation. Their owned dependent
-      // records cascade through the conversation foreign-key graph before the project is removed.
-      await transaction
-        .delete(conversations)
-        .where(and(eq(conversations.tripProjectId, project.id), eq(conversations.userId, session.userId)));
+      // Preserve independent historical chats, but remove immutable evidence that
+      // contains deleted project state before unlinking the conversations.
+       const linkedConversationIds = linkedConversations.map((conversation) => conversation.id);
+       if (linkedConversationIds.length > 0) {
+         await transaction.delete(tripAnswerContextSnapshots).where(and(eq(tripAnswerContextSnapshots.userId, session.userId), inArray(tripAnswerContextSnapshots.conversationId, linkedConversationIds)));
+       }
+       // This composite FK includes trip_project_id, so project-scoped context
+       // must leave before its conversation is detached from the project.
+       await transaction.delete(chatContext).where(and(eq(chatContext.tripProjectId, project.id), eq(chatContext.userId, session.userId)));
+       await transaction.update(conversations).set({ tripProjectId: null, updatedAt: new Date() }).where(and(eq(conversations.tripProjectId, project.id), eq(conversations.userId, session.userId)));
 
       const deletedRows = await transaction
         .delete(tripProjects)
@@ -467,7 +472,7 @@ export async function deleteOwnedTripProject(tripProjectId: string): Promise<Del
           constraintCount: constraintCount?.count ?? 0,
           proposalCount: proposalCount?.count ?? 0,
         }),
-        afterSummary: JSON.stringify({ deleted: true, linkedConversationsDeleted: true }),
+        afterSummary: JSON.stringify({ deleted: true, linkedConversationsUnlinked: true }),
       }, transaction);
 
       return { success: true };

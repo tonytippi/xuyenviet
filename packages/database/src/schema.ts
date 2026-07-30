@@ -969,6 +969,7 @@ export const aiAskCommands = pgTable(
     tripProjectAggregateVersion: integer("trip_project_aggregate_version"),
     userMessageId: text("user_message_id"),
     assistantMessageId: text("assistant_message_id"),
+    tripAnswerContextSnapshotId: text("trip_answer_context_snapshot_id"),
     terminalResult: jsonb("terminal_result").$type<Record<string, unknown>>(),
     expiresAt: timestamp("expires_at", { mode: "date" }).notNull(),
     terminalAt: timestamp("terminal_at", { mode: "date" }),
@@ -1011,6 +1012,45 @@ export const aiAskCommands = pgTable(
     check("ai_ask_commands_terminal_shape_check", sql`(${command.status} = 'pending' and ${command.terminalAt} is null and ${command.terminalResult} is null) or (${command.status} in ('completed', 'failed', 'aborted') and ${command.terminalResult} is not null and ${command.terminalAt} is not null) or (${command.status} = 'discarded' and ${command.terminalResult} is not null and ${command.terminalAt} is not null and ${command.assistantMessageId} is null)`),
     check("ai_ask_commands_fence_shape_check", sql`${command.conversationId} is null or ${command.conversationLifecycleVersion} >= 1`),
     check("ai_ask_commands_project_fence_shape_check", sql`${command.tripProjectId} is null or ${command.tripProjectAggregateVersion} >= 1`),
+    check("ai_ask_commands_snapshot_terminal_check", sql`${command.tripAnswerContextSnapshotId} is null or (${command.status} = 'completed' and ${command.assistantMessageId} is not null)`),
+  ],
+);
+
+// Immutable answer-generation evidence. It cascades with the answer/conversation so
+// retained command metadata cannot reconstitute deleted project or chat content.
+export const tripAnswerContextSnapshots = pgTable(
+  "trip_answer_context_snapshots",
+  {
+    id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    conversationId: text("conversation_id").notNull().references(() => conversations.id, { onDelete: "cascade" }),
+    assistantMessageId: text("assistant_message_id").notNull().references(() => messages.id, { onDelete: "cascade" }),
+    contextVersion: integer("context_version").notNull(),
+    aggregateVersion: integer("aggregate_version"),
+    includedReferences: jsonb("included_references").$type<Array<Record<string, unknown>>>().default([]).notNull(),
+    excludedReferences: jsonb("excluded_references").$type<Array<Record<string, unknown>>>().default([]).notNull(),
+    conflicts: jsonb("conflicts").$type<Array<Record<string, unknown>>>().default([]).notNull(),
+    serialization: text("serialization").notNull(),
+    promptDigest: text("prompt_digest").notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (snapshot) => [
+    uniqueIndex("trip_answer_context_snapshots_assistant_message_idx").on(snapshot.assistantMessageId),
+    uniqueIndex("trip_answer_context_snapshots_owner_message_idx").on(snapshot.id, snapshot.userId, snapshot.conversationId, snapshot.assistantMessageId),
+    foreignKey({
+      columns: [snapshot.conversationId, snapshot.userId],
+      foreignColumns: [conversations.id, conversations.userId],
+      name: "trip_answer_context_snapshots_conversation_owner_fk",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [snapshot.assistantMessageId, snapshot.conversationId, snapshot.userId],
+      foreignColumns: [messages.id, messages.conversationId, messages.userId],
+      name: "trip_answer_context_snapshots_assistant_message_owner_fk",
+    }).onDelete("cascade"),
+    index("trip_answer_context_snapshots_conversation_created_idx").on(snapshot.conversationId, snapshot.createdAt),
+    check("trip_answer_context_snapshots_version_check", sql`${snapshot.contextVersion} = 1 and (${snapshot.aggregateVersion} is null or ${snapshot.aggregateVersion} >= 1)`),
+    check("trip_answer_context_snapshots_refs_check", sql`jsonb_typeof(${snapshot.includedReferences}) = 'array' and jsonb_typeof(${snapshot.excludedReferences}) = 'array' and jsonb_typeof(${snapshot.conflicts}) = 'array'`),
+    check("trip_answer_context_snapshots_bounds_check", sql`octet_length(${snapshot.serialization}) <= 32768 and ${snapshot.promptDigest} ~ '^[a-f0-9]{64}$'`),
   ],
 );
 
@@ -1700,6 +1740,7 @@ export const aiUsageEvents = pgTable(
     conversationId: text("conversation_id").references(() => conversations.id, { onDelete: "set null" }),
     userMessageId: text("user_message_id").references(() => messages.id, { onDelete: "set null" }),
     assistantMessageId: text("assistant_message_id").references(() => messages.id, { onDelete: "set null" }),
+    tripAnswerContextSnapshotId: text("trip_answer_context_snapshot_id").references(() => tripAnswerContextSnapshots.id, { onDelete: "set null" }),
     purpose: text("purpose").notNull(),
     provider: text("provider").notNull(),
     model: text("model").notNull(),
@@ -1827,6 +1868,7 @@ export const assistantRetrievalDecisions = pgTable(
     conversationId: text("conversation_id").notNull(),
     userMessageId: text("user_message_id").notNull(),
     assistantMessageId: text("assistant_message_id").notNull(),
+    tripAnswerContextSnapshotId: text("trip_answer_context_snapshot_id").references(() => tripAnswerContextSnapshots.id, { onDelete: "set null" }),
     approvedKnowledgeCandidateCount: integer("approved_knowledge_candidate_count").notNull(),
     approvedKnowledgeSelectedCount: integer("approved_knowledge_selected_count").notNull(),
     approvedKnowledgeTargetCount: integer("approved_knowledge_target_count").notNull(),
@@ -1883,6 +1925,7 @@ export const assistantResponseProvenance = pgTable(
     conversationId: text("conversation_id").notNull(),
     userMessageId: text("user_message_id").notNull(),
     assistantMessageId: text("assistant_message_id").notNull(),
+    tripAnswerContextSnapshotId: text("trip_answer_context_snapshot_id").references(() => tripAnswerContextSnapshots.id, { onDelete: "set null" }),
     sourceCategory: text("source_category").$type<AssistantProvenanceSourceCategory>().notNull(),
     sourceReferenceId: text("source_reference_id"),
     sourceReferenceType: text("source_reference_type"),
@@ -2041,6 +2084,7 @@ export const publicMvpEvaluationResults = pgTable(
     retrievalDecisionId: text("retrieval_decision_id").references(() => assistantRetrievalDecisions.id, { onDelete: "set null" }),
     provenanceId: text("provenance_id").references(() => assistantResponseProvenance.id, { onDelete: "set null" }),
     usageEventId: text("usage_event_id").references(() => aiUsageEvents.id, { onDelete: "set null" }),
+    tripAnswerContextSnapshotId: text("trip_answer_context_snapshot_id").references(() => tripAnswerContextSnapshots.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
   },
   (result) => [

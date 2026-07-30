@@ -230,7 +230,7 @@ export async function readOwnedCompletedAiAskConsumerStatuses(userId: string, as
   return [...statuses.values()].slice(0, acceptedAssistantMessageIds.length * aiAskConsumerStatusCategories.length);
 }
 
-export async function finalizeAiAskCommand<T extends { result: AiAskTerminalResult; assistantMessageId: string }>(commandId: string, persist: (transaction: Transaction, command: { userId: string; conversationId: string; tripProjectId: string | null; userMessageId: string }) => Promise<T>): Promise<T | { result: AiAskTerminalResult; discarded: true }> {
+export async function finalizeAiAskCommand<T extends { result: AiAskTerminalResult; assistantMessageId: string; tripAnswerContextSnapshotId?: string | null }>(commandId: string, persist: (transaction: Transaction, command: { userId: string; conversationId: string; tripProjectId: string | null; userMessageId: string }) => Promise<T>): Promise<T | { result: AiAskTerminalResult; discarded: true }> {
   return getDb().transaction(async (transaction) => {
     const [unlocked] = await transaction.select().from(aiAskCommands).where(eq(aiAskCommands.id, commandId)).limit(1);
     if (!unlocked) throw new Error("AI Ask command was not found.");
@@ -251,12 +251,12 @@ export async function finalizeAiAskCommand<T extends { result: AiAskTerminalResu
       : [];
     if (!conversation || !command.userMessageId || conversation.lifecycleVersion !== command.conversationLifecycleVersion || (command.tripProjectId !== null && (!project || project.aggregateVersion !== command.tripProjectAggregateVersion))) {
       const result = refreshRequiredResult(conversation?.id);
-      await transaction.update(aiAskCommands).set({ status: "discarded", terminalResult: result, terminalAt: new Date(), assistantMessageId: null, userMessageId: null, conversationId: null, tripProjectId: null, conversationLifecycleVersion: null, tripProjectAggregateVersion: null, normalizedQuestion: "[discarded]", attachmentMetadata: null, updatedAt: new Date() }).where(and(eq(aiAskCommands.id, command.id), eq(aiAskCommands.status, "pending")));
+      await transaction.update(aiAskCommands).set({ status: "discarded", terminalResult: result, terminalAt: new Date(), assistantMessageId: null, userMessageId: null, conversationId: null, tripProjectId: null, conversationLifecycleVersion: null, tripProjectAggregateVersion: null, tripAnswerContextSnapshotId: null, normalizedQuestion: "[discarded]", attachmentMetadata: null, updatedAt: new Date() }).where(and(eq(aiAskCommands.id, command.id), eq(aiAskCommands.status, "pending")));
       return { result, discarded: true };
     }
 
     const completed = await persist(transaction, { userId: command.userId, conversationId: conversation.id, tripProjectId: command.tripProjectId, userMessageId: command.userMessageId });
-    await transaction.update(aiAskCommands).set({ status: "completed", terminalResult: completed.result, assistantMessageId: completed.assistantMessageId, terminalAt: new Date(), updatedAt: new Date() }).where(and(eq(aiAskCommands.id, command.id), eq(aiAskCommands.status, "pending")));
+    await transaction.update(aiAskCommands).set({ status: "completed", terminalResult: completed.result, assistantMessageId: completed.assistantMessageId, tripAnswerContextSnapshotId: completed.tripAnswerContextSnapshotId ?? null, terminalAt: new Date(), updatedAt: new Date() }).where(and(eq(aiAskCommands.id, command.id), eq(aiAskCommands.status, "pending")));
     const envelope = {
       version: 1 as const,
       commandId: command.id,
@@ -277,7 +277,7 @@ export async function discardAiAskCommandsForDeletedConversations(transaction: T
   if (conversationIds.length === 0) return;
   const commands = await transaction.select({ id: aiAskCommands.id }).from(aiAskCommands).where(and(eq(aiAskCommands.userId, userId), inArray(aiAskCommands.conversationId, conversationIds))).orderBy(asc(aiAskCommands.id)).for("update");
   if (commands.length === 0) return;
-  await transaction.update(aiAskCommands).set({ status: "discarded", terminalResult: refreshRequiredResult(), terminalAt: new Date(), assistantMessageId: null, userMessageId: null, conversationId: null, tripProjectId: null, conversationLifecycleVersion: null, tripProjectAggregateVersion: null, normalizedQuestion: "[discarded]", attachmentMetadata: null, updatedAt: new Date() }).where(inArray(aiAskCommands.id, commands.map((command) => command.id)));
+  await transaction.update(aiAskCommands).set({ status: "discarded", terminalResult: refreshRequiredResult(), terminalAt: new Date(), assistantMessageId: null, userMessageId: null, conversationId: null, tripProjectId: null, conversationLifecycleVersion: null, tripProjectAggregateVersion: null, tripAnswerContextSnapshotId: null, normalizedQuestion: "[discarded]", attachmentMetadata: null, updatedAt: new Date() }).where(inArray(aiAskCommands.id, commands.map((command) => command.id)));
 }
 
 function refreshRequiredResult(conversationId?: string): AiAskTerminalResult {

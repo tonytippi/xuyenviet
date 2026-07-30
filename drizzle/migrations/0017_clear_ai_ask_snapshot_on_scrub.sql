@@ -37,7 +37,3 @@ BEGIN
   RETURN OLD;
 END;
 $$;
---> statement-breakpoint
-CREATE TRIGGER "messages_scrub_retained_ai_ask_commands"
-BEFORE DELETE ON "messages"
-FOR EACH ROW EXECUTE FUNCTION "scrub_retained_ai_ask_commands_for_deleted_scope"();

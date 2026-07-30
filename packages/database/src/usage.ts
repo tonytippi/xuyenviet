@@ -15,6 +15,7 @@ export type WriteAiUsageEventInput = {
   conversationId?: string | null;
   userMessageId?: string | null;
   assistantMessageId?: string | null;
+  tripAnswerContextSnapshotId?: string | null;
   purpose: string;
   provider: string;
   model: string;
@@ -54,6 +55,7 @@ export async function writeAiUsageEvent(db: UsageEventDb, input: WriteAiUsageEve
     conversationId: input.conversationId ?? null,
     userMessageId: input.userMessageId ?? null,
     assistantMessageId: input.assistantMessageId ?? null,
+    tripAnswerContextSnapshotId: input.tripAnswerContextSnapshotId ?? null,
     purpose: input.purpose,
     provider: input.provider,
     model: input.model,

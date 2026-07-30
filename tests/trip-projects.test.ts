@@ -1,7 +1,7 @@
 import { asc, eq, sql } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { aiUsageEvents, answerUsefulnessFeedback, assistantResponseProvenance, assistantRetrievalDecisions, auditEvents, chatContext, conversations, messageImageAttachments, messages, tripChangeProposals, tripPlanItems, tripProjectConstraints, tripProjects, users, webSearchResults } from "@/db/schema";
+import { aiAskCommands, aiUsageEvents, answerUsefulnessFeedback, assistantResponseProvenance, assistantRetrievalDecisions, auditEvents, chatContext, conversations, messageImageAttachments, messages, tripAnswerContextSnapshots, tripChangeProposals, tripPlanItems, tripProjectConstraints, tripProjects, users, webSearchResults } from "@/db/schema";
 
 import { testDb } from "./helpers/db";
 
@@ -209,6 +209,32 @@ describe("Trip project helpers", () => {
       value: "Đà Nẵng bí mật",
       confidence: 90,
     });
+    const [snapshot] = await testDb.insert(tripAnswerContextSnapshots).values({
+      userId: "user-1",
+      conversationId: conversation.id,
+      assistantMessageId: assistantMessage.id,
+      contextVersion: 1,
+      aggregateVersion: 1,
+      serialization: JSON.stringify({ primaryConversationId: conversation.id }),
+      promptDigest: "a".repeat(64),
+    }).returning({ id: tripAnswerContextSnapshots.id });
+    await testDb.insert(aiAskCommands).values({
+      userId: "user-1",
+      scopeKind: "trip_project",
+      scopeId: project.id,
+      idempotencyKey: "project_delete_snapshot",
+      requestDigest: "b".repeat(64),
+      normalizedQuestion: "Xóa dự án",
+      selectedScopeDigest: "c".repeat(64),
+      status: "completed",
+      conversationId: conversation.id,
+      tripProjectId: project.id,
+      assistantMessageId: assistantMessage.id,
+      tripAnswerContextSnapshotId: snapshot.id,
+      terminalAt: new Date(),
+      terminalResult: { type: "done" },
+      expiresAt: new Date(Date.now() + 60_000),
+    });
     vi.doMock("@/server/auth", () => ({
       getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }),
     }));
@@ -217,6 +243,8 @@ describe("Trip project helpers", () => {
     await expect(deleteOwnedTripProject(project.id)).resolves.toEqual({ success: true });
     await expect(testDb.select().from(tripProjects)).resolves.toHaveLength(0);
     await expect(testDb.select().from(chatContext)).resolves.toHaveLength(0);
+    await expect(testDb.select().from(tripAnswerContextSnapshots)).resolves.toHaveLength(0);
+    await expect(testDb.select({ status: aiAskCommands.status, tripAnswerContextSnapshotId: aiAskCommands.tripAnswerContextSnapshotId }).from(aiAskCommands)).resolves.toEqual([{ status: "discarded", tripAnswerContextSnapshotId: null }]);
     const savedConversations = await testDb.select().from(conversations).where(eq(conversations.id, conversation.id));
     const savedMessages = await testDb.select().from(messages).where(eq(messages.conversationId, conversation.id));
     const attachments = await testDb.select().from(messageImageAttachments).where(eq(messageImageAttachments.conversationId, conversation.id));
@@ -227,18 +255,18 @@ describe("Trip project helpers", () => {
     const [usage] = await testDb.select().from(aiUsageEvents);
     const [audit] = await testDb.select().from(auditEvents);
 
-    expect(savedConversations).toHaveLength(0);
-    expect(savedMessages).toHaveLength(0);
-    expect(attachments).toHaveLength(0);
-    expect(retrieval).toHaveLength(0);
-    expect(provenance).toHaveLength(0);
-    expect(feedback).toHaveLength(0);
-    expect(searchRows).toHaveLength(0);
-    expect(usage).toMatchObject({ conversationId: null, userMessageId: null, assistantMessageId: null });
+    expect(savedConversations).toEqual([expect.objectContaining({ id: conversation.id, tripProjectId: null })]);
+    expect(savedMessages).toHaveLength(2);
+    expect(attachments).toHaveLength(1);
+    expect(retrieval).toHaveLength(1);
+    expect(provenance).toHaveLength(1);
+    expect(feedback).toHaveLength(1);
+    expect(searchRows).toHaveLength(1);
+    expect(usage).toMatchObject({ tripProjectId: null, conversationId: conversation.id, userMessageId: message.id, assistantMessageId: assistantMessage.id });
     expect(audit).toMatchObject({ actorUserId: "user-1", operation: "delete", targetType: "trip_project", targetId: project.id });
     expect(audit.beforeSummary).toContain('"linkedConversationCount":1');
     expect(audit.beforeSummary).toContain('"chatContextCount":1');
-    expect(audit.afterSummary).toContain("linkedConversationsDeleted");
+    expect(audit.afterSummary).toContain("linkedConversationsUnlinked");
     expect(audit.beforeSummary).not.toContain("Đà Nẵng bí mật");
     expect(audit.beforeSummary).not.toContain("Gia đình thích biển");
   });

@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 
-import { aiAskCommands, conversations, domainOutbox, messages, schema, tripProjects, users } from "@/db/schema";
+import { aiAskCommands, conversations, domainOutbox, messages, schema, tripAnswerContextSnapshots, tripProjects, users } from "@/db/schema";
 import { acquireAiAskCommand, aiAskRefreshRequiredMessage, discardAiAskCommandsForDeletedConversations, finalizeAiAskCommand, maxAiAskConsumerStatusMessageIds, readAiAskCommandTerminalResult, readOwnedCompletedAiAskConsumerStatuses, terminalizeAiAskCommand, terminalResultsEqual, validateAiAskIdempotencyKey } from "@/features/ai/ai-ask-commands";
 
 import { testDb } from "./helpers/db";
@@ -228,9 +228,19 @@ describe("AI Ask command ledger", () => {
     }
 
     const sourceMessage = await createCompletedProposalFixture("message");
+    const [messageSnapshot] = await testDb.insert(tripAnswerContextSnapshots).values({
+      userId: "owner",
+      conversationId: sourceMessage.conversation.id,
+      assistantMessageId: sourceMessage.assistant.id,
+      contextVersion: 1,
+      aggregateVersion: 1,
+      serialization: "{}",
+      promptDigest: "a".repeat(64),
+    }).returning({ id: tripAnswerContextSnapshots.id });
+    await testDb.update(aiAskCommands).set({ tripAnswerContextSnapshotId: messageSnapshot.id }).where(eq(aiAskCommands.id, sourceMessage.command.id));
     await testDb.delete(messages).where(eq(messages.id, sourceMessage.assistant.id));
     await expect(readOwnedCompletedAiAskConsumerStatuses("owner", [sourceMessage.assistant.id])).resolves.toEqual([]);
-    await expect(testDb.select({ status: aiAskCommands.status, assistantMessageId: aiAskCommands.assistantMessageId }).from(aiAskCommands).where(eq(aiAskCommands.id, sourceMessage.command.id))).resolves.toEqual([{ status: "discarded", assistantMessageId: null }]);
+    await expect(testDb.select({ status: aiAskCommands.status, assistantMessageId: aiAskCommands.assistantMessageId, tripAnswerContextSnapshotId: aiAskCommands.tripAnswerContextSnapshotId }).from(aiAskCommands).where(eq(aiAskCommands.id, sourceMessage.command.id))).resolves.toEqual([{ status: "discarded", assistantMessageId: null, tripAnswerContextSnapshotId: null }]);
 
     const sourceConversation = await createCompletedProposalFixture("conversation");
     await testDb.delete(conversations).where(eq(conversations.id, sourceConversation.conversation.id));

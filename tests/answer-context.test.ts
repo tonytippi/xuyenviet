@@ -1563,6 +1563,53 @@ describe("answer context assembly", () => {
     expect(section.indexOf("Kiến thức ưu tiên")).toBeLessThan(section.indexOf("Web fallback"));
   });
 
+  test("source bundle records only rendered references and bounds primary conversation serialization", async () => {
+    const { renderSourceBundlePromptSection } = await import("@/features/retrieval/source-bundle");
+    const rendered = renderSourceBundlePromptSection(createSourceBundle({
+      tripAnswerContext: {
+        version: 1,
+        hasProjectScope: true,
+        tripProjectId: "project",
+        aggregateVersion: 2,
+        primaryConversationId: "primary-conversation",
+        anchors: [{ field: "destination", value: "Huế", source: "trip_project" }],
+        planItems: [{ id: "plan-1", version: 1, kind: "leg", anchorRole: null, type: "transport", state: "planned", label: "Đi Huế", ordinal: 0, parentItemId: null }],
+        constraints: null,
+        currentConversationFacts: [{ field: "budget", value: "10 triệu", source: "conversation" }],
+        conflicts: [],
+      },
+      chatTripContext: {
+        tripProjectFacts: [{ field: "destination", value: "Huế", source: "trip_project" }],
+        chatFacts: [{ field: "budget", value: "10 triệu", source: "conversation" }],
+        conflicts: [],
+      },
+    }));
+
+    expect(rendered.tripContext.included).toEqual([
+      { kind: "anchor", id: "destination", version: null },
+      { kind: "plan_item", id: "plan-1", version: 1 },
+      { kind: "conversation_fact", id: "budget", version: null },
+    ]);
+    expect(rendered.tripContext.excluded).toEqual([]);
+    expect(JSON.parse(rendered.tripContext.serialization)).toMatchObject({ primaryConversationId: "primary-conversation" });
+  });
+
+  test("source bundle shares its 30-fact budget and bounds serialized primary conversation ID", async () => {
+    const { renderSourceBundlePromptSection } = await import("@/features/retrieval/source-bundle");
+    const projectFacts = Array.from({ length: 30 }, (_, index) => ({ field: "notes" as const, value: `project-${index}`, source: "trip_project" as const }));
+    const rendered = renderSourceBundlePromptSection(createSourceBundle({
+      tripAnswerContext: {
+        version: 1, hasProjectScope: true, tripProjectId: "project", aggregateVersion: 1, primaryConversationId: "p".repeat(200),
+        anchors: projectFacts, planItems: [], constraints: null, currentConversationFacts: [{ field: "budget", value: "chat-budget", source: "conversation" }], conflicts: [],
+      },
+      chatTripContext: { tripProjectFacts: projectFacts, chatFacts: [{ field: "budget", value: "chat-budget", source: "conversation" }], conflicts: [] },
+    }));
+
+    expect(rendered.tripContext.included).toHaveLength(30);
+    expect(rendered.tripContext.excluded).toEqual([{ kind: "conversation_fact", id: "budget", version: null, reason: "prompt_cap" }]);
+    expect(JSON.parse(rendered.tripContext.serialization).primaryConversationId).toHaveLength(160);
+  });
+
   test("knowledge provenance is unverified when projected evidence is unverified", async () => {
     await createTestUser("user-1");
     const { conversation, message } = await createConversationWithUserMessage({ userId: "user-1" });

@@ -3,13 +3,13 @@ import "server-only";
 import { eq } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { assistantResponseProvenance, assistantRetrievalDecisions, conversations, messages } from "@/db/schema";
+import { assistantResponseProvenance, assistantRetrievalDecisions, conversations, messages, tripAnswerContextSnapshots } from "@/db/schema";
 import { ensureAiAskFreshnessWarning } from "@/features/ai/answer-freshness";
 import { completeInitialAiAskAnswer, type AiGatewayExtractionResult } from "@/features/ai/gateway";
 import { getAiGatewayPricingSnapshot, selectActiveAiGatewayModel, type SelectedAiGatewayModel } from "@/features/ai/models";
 import { aiAskInitialAnswerPromptVersion, aiAskInitialAnswerPurpose, buildAiAskMessages } from "@/features/ai/prompts";
 import { persistAssistantAnswerProvenance } from "@/features/retrieval/provenance";
-import { assembleContextPrioritySourceBundle, buildSourceBundlePromptSection } from "@/features/retrieval/source-bundle";
+import { assembleContextPrioritySourceBundle, renderSourceBundlePromptSection } from "@/features/retrieval/source-bundle";
 import { writeAiUsageEvent } from "@/features/audit/usage";
 
 export type EvaluationAiAskAnswer = {
@@ -28,6 +28,7 @@ export type EvaluationAiAskAnswer = {
     warnings: string[];
   } | null;
   usageEventId: string | null;
+  tripAnswerContextSnapshotId?: string | null;
   modelVersion: string;
 };
 
@@ -73,7 +74,8 @@ export async function generateEvaluationAiAskAnswer({
     evaluationFixtureCardIds: knowledgeCardIds,
     abortSignal,
   });
-  const contextSection = buildSourceBundlePromptSection(sourceBundle);
+  const renderedSourceBundle = renderSourceBundlePromptSection(sourceBundle);
+  const contextSection = renderedSourceBundle.section;
   const gatewayResult = await completeInitialAiAskAnswer({ model: aiAskModel.gatewayModelName, messages: buildAiAskMessages({ question, history: [], contextSection }) });
   const pricingSnapshot = getAiGatewayPricingSnapshot(aiAskModel);
 
@@ -107,11 +109,25 @@ export async function generateEvaluationAiAskAnswer({
 
     await transaction.update(conversations).set({ updatedAt: new Date() }).where(eq(conversations.id, saved.conversationId));
 
+    const [snapshot] = await transaction.insert(tripAnswerContextSnapshots).values({
+      userId,
+      conversationId: saved.conversationId,
+      assistantMessageId: assistantMessage.id,
+      contextVersion: renderedSourceBundle.tripContext.version,
+      aggregateVersion: renderedSourceBundle.tripContext.aggregateVersion,
+      includedReferences: renderedSourceBundle.tripContext.included,
+      excludedReferences: renderedSourceBundle.tripContext.excluded,
+      conflicts: renderedSourceBundle.tripContext.conflicts,
+      serialization: renderedSourceBundle.tripContext.serialization,
+      promptDigest: renderedSourceBundle.tripContext.promptDigest,
+    }).returning({ id: tripAnswerContextSnapshots.id });
+
     const provenance = await persistAssistantAnswerProvenance(transaction, {
       userId,
       conversationId: saved.conversationId,
       userMessageId: saved.userMessageId,
       assistantMessageId: assistantMessage.id,
+      tripAnswerContextSnapshotId: snapshot.id,
       sourceBundle,
       promptSection: contextSection,
     });
@@ -142,6 +158,7 @@ export async function generateEvaluationAiAskAnswer({
       conversationId: saved.conversationId,
       userMessageId: saved.userMessageId,
       assistantMessageId: assistantMessage.id,
+      tripAnswerContextSnapshotId: snapshot.id,
       purpose: aiAskInitialAnswerPurpose,
       provider: gatewayResult.provider,
       model: gatewayResult.model,
@@ -178,6 +195,7 @@ export async function generateEvaluationAiAskAnswer({
             }
           : null,
         usageEventId,
+        tripAnswerContextSnapshotId: snapshot.id,
         modelVersion: aiAskModel.gatewayModelName,
       },
     };
