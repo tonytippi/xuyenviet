@@ -118,6 +118,26 @@ export async function getOwnedConversation(conversationId: string, establishedSe
   };
 }
 
+/** API cutover selection read; Story 11.4 actions retain the full read above. */
+export async function getOwnedConversationShell(conversationId: string): Promise<Awaited<ReturnType<typeof getOwnedConversation>>> {
+  const session = await getAuthenticatedSession();
+  if (!session) return null;
+  const [conversation] = await getDb().select({ id: conversations.id, userId: conversations.userId, tripProjectId: conversations.tripProjectId, createdAt: conversations.createdAt, updatedAt: conversations.updatedAt }).from(conversations).where(and(eq(conversations.id, conversationId), eq(conversations.userId, session.userId))).limit(1);
+  if (!conversation) return null;
+  // The API detail owns all planning enrichment. CASE prevents this shell query
+  // from reading assistant prose while retaining user-authored history content.
+  const conversationMessages = await getDb().select({ id: messages.id, role: messages.role, userContent: sql<string | null>`case when ${messages.role} = 'user' then ${messages.content} else null end`, createdAt: messages.createdAt }).from(messages).where(and(eq(messages.conversationId, conversation.id), eq(messages.userId, session.userId))).orderBy(asc(messages.createdAt), asc(messages.id));
+  const attachments = await getDb().select({ id: messageImageAttachments.id, messageId: messageImageAttachments.messageId, originalFileName: messageImageAttachments.originalFileName, mimeType: messageImageAttachments.mimeType, byteSize: messageImageAttachments.byteSize }).from(messageImageAttachments).where(and(eq(messageImageAttachments.conversationId, conversation.id), eq(messageImageAttachments.userId, session.userId))).orderBy(asc(messageImageAttachments.createdAt), asc(messageImageAttachments.id));
+  const attachmentsByMessageId = new Map<string, typeof attachments>();
+  for (const attachment of attachments) attachmentsByMessageId.set(attachment.messageId, [...(attachmentsByMessageId.get(attachment.messageId) ?? []), attachment]);
+  const feedbackRows = await getDb().select({ assistantMessageId: answerUsefulnessFeedback.assistantMessageId, rating: answerUsefulnessFeedback.rating, comment: answerUsefulnessFeedback.comment, updatedAt: answerUsefulnessFeedback.updatedAt }).from(answerUsefulnessFeedback).where(and(eq(answerUsefulnessFeedback.conversationId, conversation.id), eq(answerUsefulnessFeedback.userId, session.userId)));
+  const feedbackByMessageId = new Map(feedbackRows.map((row) => [row.assistantMessageId, { rating: row.rating, comment: row.comment, updatedAt: row.updatedAt }]));
+  return {
+    ...conversation,
+    messages: conversationMessages.map(({ userContent, ...message }) => ({ ...message, content: message.role === "user" ? userContent : undefined, imageAttachments: attachmentsByMessageId.get(message.id) ?? [], provenance: [], annotations: [], feedback: message.role === "assistant" ? feedbackByMessageId.get(message.id) ?? null : null })),
+  } as unknown as Awaited<ReturnType<typeof getOwnedConversation>>;
+}
+
 async function resolveAnnotationCapabilities(input: { conversationId: string; tripProjectId: string; userId: string; assistantMessageId: string; annotations: ReturnType<typeof sanitizeStoredAnswerAnnotations> }) {
   const actionAnnotations = input.annotations.filter((annotation) => annotation.type === "action" && annotation.detail.action);
   if (actionAnnotations.length === 0) return input.annotations;

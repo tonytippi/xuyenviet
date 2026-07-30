@@ -3,7 +3,7 @@ import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
 
 import { parseBffCredentialConfig } from "@xuyenviet/config";
-import { createPostgresAiAskStreamExecutionPort, createPostgresApiIdentityRepository, createPostgresConversationSummaryRepository, createPostgresReleaseSchemaVersionRepository } from "@xuyenviet/database";
+import { createPostgresAiAskStreamExecutionPort, createPostgresApiIdentityRepository, createPostgresConversationSummaryRepository, createPostgresPlanningReadRepository, createPostgresReleaseSchemaVersionRepository } from "@xuyenviet/database";
 import { createAiAskStreamExecution } from "@xuyenviet/domain";
 
 import { createApiModule } from "./app.module";
@@ -14,6 +14,7 @@ async function bootstrap() {
   const aiAskExecution = createAiAskStreamExecution(createPostgresAiAskStreamExecutionPort(databaseUrl));
   const app = await NestFactory.create(createApiModule(config, createPostgresApiIdentityRepository(databaseUrl), {
     conversationSummaries: createPostgresConversationSummaryRepository(databaseUrl),
+    planningReads: createPostgresPlanningReadRepository(),
     schemaVersions: createPostgresReleaseSchemaVersionRepository(databaseUrl),
     aiAskExecution,
   }));

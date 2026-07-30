@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { apiAudience } from "@xuyenviet/contracts";
 import { createBffCredentialConfig, type BffCredentialConfig, type Jwk } from "@xuyenviet/config";
 import type { ApiIdentityRepository, ConversationSummaryRepository, ReleaseSchemaVersionRepository } from "@xuyenviet/database";
-import type { AiAskStreamExecution } from "@xuyenviet/domain";
+import type { AiAskStreamExecution, PlanningReadRepository } from "@xuyenviet/domain";
 import { createApiModule } from "../apps/api/src/app.module";
 import { apiCompatibleSchemaVersion } from "../apps/api/src/release-schema";
 
@@ -33,12 +33,16 @@ beforeEach(async () => {
   } });
   const identities: ApiIdentityRepository = { async getSession(sessionId) { return sessionId === "session-1" ? { userId: "user-1", expires: new Date(Date.now() + 60_000), authorizationVersion: 1 } : null; } };
   const summaries: ConversationSummaryRepository = { async listOwnedConversationSummaryRows(userId) { return rows[userId] ?? []; } };
+  const planningReads: PlanningReadRepository = {
+    async loadOwnedPlanningContext(userId, tripProjectId) { return userId === "user-1" && tripProjectId === "project-1" ? { version: 1, hasProjectScope: true, tripProjectId, aggregateVersion: 2, primaryConversationId: "conversation-a", anchors: [], planItems: [], constraints: null, currentConversationFacts: [], conflicts: [] } : null; },
+    async loadOwnedAnswerDetail(userId, conversationId, assistantMessageId) { return userId === "user-1" && conversationId === "conversation-a" && assistantMessageId === "answer-1" ? { conversationId, assistantMessageId, content: "Nội dung đã hoàn tất.", provenance: [{ id: "withdrawn", rank: 1, availability: "withdrawn", unavailableLabel: "Nguồn này không còn khả dụng.", usedInPrompt: true, citedInAnswer: false }], annotations: [] } : null; },
+  };
   const versions: ReleaseSchemaVersionRepository = {
     async hasCompatibleSchemaVersion(version) { return ready && version === apiCompatibleSchemaVersion; },
     async recordSchemaVersion() {},
   };
   const aiAskExecution: AiAskStreamExecution = { async *execute() { yield new Uint8Array([123, 34, 116, 121, 112, 101, 34, 58, 34, 112, 114, 101, 112, 97, 114, 105, 110, 103, 34, 125, 10]); yield new Uint8Array([123, 34, 116, 121, 112, 101, 34, 58, 34, 100, 111, 110, 101, 34, 125, 10]); } };
-  const ApiModule = createApiModule(config, identities, { conversationSummaries: summaries, schemaVersions: versions, aiAskExecution });
+  const ApiModule = createApiModule(config, identities, { conversationSummaries: summaries, planningReads, schemaVersions: versions, aiAskExecution });
   @Module({ imports: [ApiModule] })
   class TestModule {}
   app = await NestFactory.create(TestModule, { logger: false });
@@ -72,6 +76,38 @@ describe("API platform contracts", () => {
       { id: "conversation-a", updatedAt: "2026-07-01T00:00:00.000Z", preview: "Hội thoại mới" },
     ] });
     expect(JSON.stringify(response.body)).not.toContain("conversation-other");
+  });
+
+  test("serves only safe owner-scoped planning context and historic details", async () => {
+    const noBearerContext = await request(app.getHttpServer()).get("/v1/conversations/planning-context/project-1").set({ Origin: "https://web.xuyenviet.vn", Cookie: "authjs.session-token=browser-cookie" }).expect(401);
+    expect(noBearerContext.headers["access-control-allow-origin"]).toBeUndefined();
+    const noBearerDetail = await request(app.getHttpServer()).get("/v1/conversations/conversation-a/answers/answer-1").set({ Origin: "https://web.xuyenviet.vn", Cookie: "authjs.session-token=browser-cookie" }).expect(401);
+    expect(noBearerDetail.headers["access-control-allow-origin"]).toBeUndefined();
+    const context = await request(app.getHttpServer()).get("/v1/conversations/planning-context/project-1").set("Authorization", `Bearer ${await tokenFor()}`).expect(200);
+    expect(context.body.context).toMatchObject({ version: 1, tripProjectId: "project-1", aggregateVersion: 2 });
+    await request(app.getHttpServer()).get("/v1/conversations/planning-context/foreign-project").set("Authorization", `Bearer ${await tokenFor()}`).expect(200, { context: null });
+    await request(app.getHttpServer()).get("/v1/conversations/planning-context/%20bad").set("Authorization", `Bearer ${await tokenFor()}`).expect(200, { context: null });
+    const detail = await request(app.getHttpServer()).get("/v1/conversations/conversation-a/answers/answer-1").set("Authorization", `Bearer ${await tokenFor()}`).expect(200);
+    expect(detail.body.detail).toMatchObject({ content: "Nội dung đã hoàn tất.", provenance: [{ availability: "withdrawn", unavailableLabel: "Nguồn này không còn khả dụng." }] });
+    expect(detail.body.detail).not.toHaveProperty("sourceSnapshot");
+    expect(detail.body.detail).not.toHaveProperty("providerPayload");
+    expect(detail.body.detail).not.toHaveProperty("rawSourceMaterial");
+    await request(app.getHttpServer()).get("/v1/conversations/conversation-a/answers/foreign-answer").set("Authorization", `Bearer ${await tokenFor()}`).expect(200, { detail: null });
+    await request(app.getHttpServer()).get("/v1/conversations/missing/answers/answer-1").set("Authorization", `Bearer ${await tokenFor()}`).expect(200, { detail: null });
+    await request(app.getHttpServer()).get("/v1/conversations/%20bad/answers/answer-1").set("Authorization", `Bearer ${await tokenFor()}`).expect(200, { detail: null });
+    const openApi = await request(app.getHttpServer()).get("/openapi.json").expect(200);
+    expect(openApi.body.paths["/v1/conversations/planning-context/{tripProjectId}"].get.security).toEqual([{ bearerAuth: [] }]);
+    expect(openApi.body.paths["/v1/conversations/planning-context/{tripProjectId}"].get.responses["503"]).toEqual({ $ref: "#/components/responses/SafeError" });
+    expect(openApi.body.paths["/v1/conversations/{conversationId}/answers/{assistantMessageId}"].get.responses["503"]).toEqual({ $ref: "#/components/responses/SafeError" });
+    expect(openApi.body.components.schemas.PlanningContext.properties.context).toEqual({ oneOf: [{ type: "object", nullable: true, enum: [null] }, { $ref: "#/components/schemas/TripAnswerContext" }], description: "Missing and foreign ownership are both null." });
+    expect(openApi.body.components.schemas.PlanningAnswerDetail.properties.detail).toEqual({ oneOf: [{ type: "object", nullable: true, enum: [null] }, { $ref: "#/components/schemas/AnswerDetail" }], description: "Missing and foreign ownership are both null; never includes snapshots, provider payloads, or raw source material." });
+    expect(openApi.body.components.schemas.UnavailableProvenance.additionalProperties).toBe(false);
+    expect(openApi.body.components.schemas.AnswerDetail.properties.provenance.maxItems).toBe(100);
+    expect(openApi.body.components.schemas.AnswerDetail.properties.annotations.maxItems).toBe(20);
+    expect(openApi.body.components.schemas.AnnotationDetail.additionalProperties).toBe(false);
+    expect(openApi.body.components.schemas.ContextConstraints.properties.values.$ref).toBe("#/components/schemas/PlanningJsonObject0");
+    expect(openApi.body.components.schemas.TripAnswerContext.properties.constraints).toEqual({ oneOf: [{ type: "object", nullable: true, enum: [null] }, { $ref: "#/components/schemas/ContextConstraints" }] });
+    expect(openApi.body.components.schemas.PlanningJsonScalar).toEqual({ oneOf: [{ type: "object", nullable: true, enum: [null] }, { type: "boolean" }, { type: "number" }, { type: "string", maxLength: 500 }] });
   });
 
   test("streams the execution owner's raw NDJSON bytes through the authenticated versioned API", async () => {

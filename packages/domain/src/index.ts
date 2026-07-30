@@ -1,8 +1,16 @@
-import { conversationSummaryLimit, type AiAskStreamEvent, type AiAskStreamInput, type ConversationSummary, type RequestPrincipal } from "@xuyenviet/contracts";
+import { conversationSummaryLimit, type AiAskStreamEvent, type AiAskStreamInput, type ConversationSummary, type PlanningAnswerDetailResponse, type RequestPrincipal, type TripAnswerContextResponse } from "@xuyenviet/contracts";
 
 export type ConversationSummaryRepository = {
   listOwnedConversationSummaryRows(userId: string, limit: number): Promise<Array<{ id: string; updatedAt: Date; messageContent: string | null }>>;
 };
+
+/** Owner scope is supplied by the authenticated adapter, never by an API caller. */
+export type PlanningReadRepository = {
+  loadOwnedPlanningContext(userId: string, tripProjectId: string): Promise<TripAnswerContextResponse | null>;
+  loadOwnedAnswerDetail(userId: string, conversationId: string, assistantMessageId: string): Promise<PlanningAnswerDetailResponse["detail"]>;
+};
+
+export * from "./planning-detail";
 
 const newConversationPreview = "Hội thoại mới";
 const previewMaxLength = 60;

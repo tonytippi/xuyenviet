@@ -1,5 +1,10 @@
 import postgres from "postgres";
-import type { AiAskStreamExecutionPort } from "@xuyenviet/domain";
+import { resolvePlanningAnnotationCapabilities, sanitizeStoredPlanningAnnotations, type AiAskStreamExecutionPort, type PlanningReadRepository } from "@xuyenviet/domain";
+import { and, eq } from "drizzle-orm";
+import { loadAnswerContext } from "./answer-context";
+import { formatAssistantMessageProvenance } from "./provenance";
+import { assistantResponseProvenance, conversations, messages, tripChangeProposals, tripProjects } from "./schema";
+import { parsePlanningAnswerDetailResponse, type PlanningJsonValue, type PlanningProvenance, type TripAnswerContextResponse } from "@xuyenviet/contracts";
 import { createAiAskStreamExecutionPort } from "./ai-ask-stream-execution";
 
 export * from "./ai-ask-commands";
@@ -104,4 +109,71 @@ export function createPostgresApiIdentityRepository(databaseUrl: string): ApiIde
 
 export function createPostgresAiAskStreamExecutionPort(_databaseUrl: string): AiAskStreamExecutionPort {
   return createAiAskStreamExecutionPort();
+}
+
+export function createPostgresPlanningReadRepository(): PlanningReadRepository {
+  return {
+    async loadOwnedPlanningContext(userId, tripProjectId) {
+      const db = (await import("./client")).getDb();
+      const [project] = await db.select({ id: tripProjects.id, primaryConversationId: tripProjects.primaryConversationId }).from(tripProjects).where(and(eq(tripProjects.id, tripProjectId), eq(tripProjects.userId, userId))).limit(1);
+      if (!project?.primaryConversationId) return null;
+      const context = await loadAnswerContext({ userId, conversationId: project.primaryConversationId, tripProjectId });
+      if (context.tripProjectId !== tripProjectId) return null;
+      return serializeTripAnswerContext(context);
+    },
+    async loadOwnedAnswerDetail(userId, conversationId, assistantMessageId) {
+      const db = (await import("./client")).getDb();
+      const [message] = await db.select({ id: messages.id, content: messages.content, answerAnnotations: messages.answerAnnotations }).from(messages)
+        .innerJoin(conversations, and(eq(conversations.id, messages.conversationId), eq(conversations.userId, userId)))
+        .where(and(eq(messages.id, assistantMessageId), eq(messages.conversationId, conversationId), eq(messages.userId, userId), eq(messages.role, "assistant"))).limit(1);
+      if (!message) return null;
+      const rows = await db.select({ id: assistantResponseProvenance.id, sourceCategory: assistantResponseProvenance.sourceCategory, rank: assistantResponseProvenance.rank, retrievalScore: assistantResponseProvenance.retrievalScore, sourceType: assistantResponseProvenance.sourceType, verificationStatus: assistantResponseProvenance.verificationStatus, availability: assistantResponseProvenance.availability, usedInPrompt: assistantResponseProvenance.usedInPrompt, citedInAnswer: assistantResponseProvenance.citedInAnswer, sourceSnapshot: assistantResponseProvenance.sourceSnapshot })
+        .from(assistantResponseProvenance).where(and(eq(assistantResponseProvenance.userId, userId), eq(assistantResponseProvenance.conversationId, conversationId), eq(assistantResponseProvenance.assistantMessageId, assistantMessageId)));
+      const provenance = formatAssistantMessageProvenance(rows).map(serializePlanningProvenance);
+      const annotations = await resolvePlanningAnnotationCapabilities({
+        annotations: sanitizeStoredPlanningAnnotations({ answerText: message.content, annotations: message.answerAnnotations, provenance }),
+        hasCurrentPendingProposal: async () => {
+          const proposals = await db.select({ id: tripChangeProposals.id, expiresAt: tripChangeProposals.expiresAt })
+            .from(tripChangeProposals)
+            .innerJoin(conversations, and(eq(conversations.tripProjectId, tripChangeProposals.tripProjectId), eq(conversations.id, conversationId), eq(conversations.userId, userId)))
+            .where(and(eq(tripChangeProposals.userId, userId), eq(tripChangeProposals.status, "pending"), eq(tripChangeProposals.sourceAssistantMessageId, assistantMessageId)));
+          return proposals.length === 1 && (!proposals[0].expiresAt || proposals[0].expiresAt.getTime() > Date.now());
+        },
+      });
+      const response = parsePlanningAnswerDetailResponse({ detail: { conversationId, assistantMessageId: message.id, content: message.content, provenance, annotations } });
+      if (!response?.detail) throw new Error("Planning detail serialization exceeded the safe response contract.");
+      return response.detail;
+    },
+  };
+}
+
+export function serializeTripAnswerContext(context: Awaited<ReturnType<typeof loadAnswerContext>>): TripAnswerContextResponse {
+  const { version, tripProjectId, aggregateVersion, primaryConversationId, anchors, planItems, constraints, currentConversationFacts } = context;
+  if (version !== 1 || tripProjectId === undefined || aggregateVersion === undefined || primaryConversationId === undefined || !anchors || !planItems || constraints === undefined || !currentConversationFacts) throw new Error("Canonical planning context metadata is unavailable.");
+  return { version, hasProjectScope: context.hasProjectScope, tripProjectId, aggregateVersion, primaryConversationId, anchors, planItems, constraints: constraints ? { version: constraints.version, values: serializePlanningJsonObject(constraints.values) } : null, currentConversationFacts, conflicts: context.conflicts.map((item) => ({ field: item.field, canonicalValue: item.canonicalValue ?? item.projectValue, lowerPriorityValue: item.lowerPriorityValue ?? item.conversationValue, source: item.source ?? "conversation_chat", priority: "lower" as const, material: true as const })) };
+}
+
+function serializePlanningProvenance(item: ReturnType<typeof formatAssistantMessageProvenance>[number]): PlanningProvenance {
+  if (item.availability === "withdrawn") {
+    return { id: item.id, rank: item.rank, availability: item.availability, unavailableLabel: item.unavailableLabel, usedInPrompt: item.usedInPrompt, citedInAnswer: item.citedInAnswer } as const;
+  }
+  return { id: item.id, rank: item.rank, availability: "available", sourceCategory: item.sourceCategory, title: item.title, sourceType: item.sourceType, url: item.url, checkedAt: canonicalUtcTimestamp(item.checkedAt), confidenceLabel: item.confidenceLabel, verificationStatus: item.verificationStatus, usedInPrompt: item.usedInPrompt, citedInAnswer: item.citedInAnswer, retrievalScore: item.retrievalScore, freshnessSensitive: item.freshnessSensitive };
+}
+
+function canonicalUtcTimestamp(value: string | null) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
+function serializePlanningJsonObject(value: Record<string, unknown>, depth = 0): Record<string, PlanningJsonValue> {
+  if (depth > 4 || Object.keys(value).length > 24) throw new Error("Canonical planning constraints exceed the safe response bounds.");
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, serializePlanningJsonValue(item, depth + 1)]));
+}
+function serializePlanningJsonValue(value: unknown, depth: number): PlanningJsonValue {
+  if (value === null || typeof value === "boolean" || typeof value === "number" && Number.isFinite(value) || typeof value === "string" && value.length <= 500) return value;
+  if (depth > 4) throw new Error("Canonical planning constraints exceed the safe response bounds.");
+  if (Array.isArray(value) && value.length <= 12) return value.map((item) => serializePlanningJsonValue(item, depth + 1));
+  if (value && typeof value === "object" && !Array.isArray(value)) return serializePlanningJsonObject(value as Record<string, unknown>, depth);
+  throw new Error("Canonical planning constraints contain an unsafe response value.");
 }
