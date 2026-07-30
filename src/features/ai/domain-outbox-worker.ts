@@ -4,7 +4,7 @@ import { and, eq } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
 import { aiAskCommands, assistantResponseProvenance, conversations, domainOutboxEffects, messages, tripProjects } from "@/db/schema";
-import { buildValidatedAnswerAnnotationsResult, sanitizeStoredAnswerAnnotations } from "@/features/ai/answer-annotations";
+import { buildValidatedAnswerAnnotationsResult, sanitizeStoredAnswerAnnotations, tripChangeProposalActionAnnotationIds, tripChangeProposalActionAnnotationIdSet } from "@/features/ai/answer-annotations";
 import { claimDueDomainOutboxEvents, completeDomainOutboxClaimInTransaction, failDomainOutboxClaimInTransaction, failDomainOutboxEvent, finalizeDomainOutboxClaimInTransaction, hasActiveDomainOutboxClaim, parseAiAskOutboxEnvelope, type AiAskOutboxEnvelope, type DomainOutboxClaim } from "@/features/ai/domain-outbox";
 import { getAiGatewayPricingSnapshot, selectActiveAiGatewayModel } from "@/features/ai/models";
 import { writeAiUsageEvent } from "@/features/audit/usage";
@@ -24,6 +24,51 @@ export function setDomainOutboxWorkerTestDependencies(dependencies: typeof testD
 }
 
 export type DomainOutboxWorkerResult = { kind: "processed"; count: number } | { kind: "no_work" } | { kind: "error"; count: number };
+
+export function findAvailableActionMarkerRange(answerText: string, annotations: ReturnType<typeof sanitizeStoredAnswerAnnotations>) {
+  for (let start = 0; start < answerText.length;) {
+    const codePoint = answerText.codePointAt(start);
+    const end = start + (codePoint !== undefined && codePoint > 0xffff ? 2 : 1);
+    if (!annotations.some((annotation) => start < annotation.end && end > annotation.start)) return { start, end };
+    start = end;
+  }
+  return null;
+}
+
+export function appendTripChangeProposalActionAnnotation(input: {
+  answerText: string;
+  annotations: ReturnType<typeof sanitizeStoredAnswerAnnotations>;
+}) {
+  // Provider/persisted records never own feature marker IDs. Pick the pair that
+  // evicts the fewest descriptors, then the earliest code-point ranges.
+  const descriptors = input.annotations.filter((annotation) => !tripChangeProposalActionAnnotationIdSet.has(annotation.id));
+  const ranges: Array<{ start: number; end: number }> = [];
+  for (let start = 0; start < input.answerText.length;) {
+    const codePoint = input.answerText.codePointAt(start);
+    const end = start + (codePoint !== undefined && codePoint > 0xffff ? 2 : 1);
+    ranges.push({ start, end });
+    start = end;
+  }
+  let selected: { ranges: Array<{ start: number; end: number }>; evictions: Set<number> } | null = null;
+  for (let first = 0; first < ranges.length; first += 1) {
+    for (let second = first + 1; second < ranges.length; second += 1) {
+      const markers = [ranges[first], ranges[second]];
+      const evictions = new Set(descriptors.flatMap((annotation, index) => markers.some((marker) => marker.start < annotation.end && marker.end > annotation.start) ? [index] : []));
+      if (!selected || evictions.size < selected.evictions.size) selected = { ranges: markers, evictions };
+    }
+  }
+  if (!selected) return descriptors.slice(0, 18);
+  const retained = descriptors.filter((_, index) => !selected.evictions.has(index)).slice(0, 18);
+  const actions = selected.ranges.map((marker, index) => {
+    const text = input.answerText.slice(marker.start, marker.end);
+    const command = index === 0 ? "trip_change_proposal.apply" as const : "trip_change_proposal.dismiss" as const;
+    return {
+      id: tripChangeProposalActionAnnotationIds[index], start: marker.start, end: marker.end, text, type: "action" as const,
+      detail: { type: "action" as const, label: text, action: { command, label: text, arguments: {}, anchor: "trip-change-proposal-action.v1" as const } },
+    };
+  });
+  return [...retained, ...actions].sort((left, right) => left.start - right.start || left.end - right.end);
+}
 
 // This is deliberately a bounded library seam. Deployment and scheduling remain
 // separate operational work; callers may invoke one batch for local/test use.
@@ -93,7 +138,7 @@ async function loadFinalStateInTransaction(transaction: Transaction, envelope: A
   // Withdrawal locks provenance before its owning message. Keep final delivery in
   // that same order so delayed annotation cannot deadlock with a withdrawal.
   const provenance = await transaction.select({ id: assistantResponseProvenance.id, sourceCategory: assistantResponseProvenance.sourceCategory, rank: assistantResponseProvenance.rank, retrievalScore: assistantResponseProvenance.retrievalScore, sourceType: assistantResponseProvenance.sourceType, verificationStatus: assistantResponseProvenance.verificationStatus, availability: assistantResponseProvenance.availability, usedInPrompt: assistantResponseProvenance.usedInPrompt, citedInAnswer: assistantResponseProvenance.citedInAnswer, sourceSnapshot: assistantResponseProvenance.sourceSnapshot }).from(assistantResponseProvenance).where(and(eq(assistantResponseProvenance.userId, envelope.userId), eq(assistantResponseProvenance.conversationId, envelope.conversationId), eq(assistantResponseProvenance.userMessageId, envelope.userMessageId!), eq(assistantResponseProvenance.assistantMessageId, envelope.assistantMessageId!))).for("update");
-  const [assistant] = await transaction.select({ content: messages.content }).from(messages).where(and(eq(messages.id, envelope.assistantMessageId!), eq(messages.userId, envelope.userId), eq(messages.conversationId, envelope.conversationId), eq(messages.role, "assistant"))).limit(1).for("update");
+  const [assistant] = await transaction.select({ content: messages.content, answerAnnotations: messages.answerAnnotations }).from(messages).where(and(eq(messages.id, envelope.assistantMessageId!), eq(messages.userId, envelope.userId), eq(messages.conversationId, envelope.conversationId), eq(messages.role, "assistant"))).limit(1).for("update");
   if (!assistant) return null;
   return { ...assistant, question: command.normalizedQuestion, provenance };
 }
@@ -112,7 +157,15 @@ async function annotate(claim: DomainOutboxClaim, envelope: AiAskOutboxEnvelope,
     // The provider result is stale by design. Format and sanitize under the final
     // locks so a withdrawal cannot recreate a source-backed descriptor.
     const currentProvenance = formatAssistantMessageProvenance(current.provenance);
-    const currentAnnotations = sanitizeStoredAnswerAnnotations({ answerText, annotations: annotationResult.annotations, provenance: currentProvenance });
+    const existingForwardActions = sanitizeStoredAnswerAnnotations({ answerText, annotations: current.answerAnnotations, provenance: currentProvenance })
+      .filter((annotation) => tripChangeProposalActionAnnotationIdSet.has(annotation.id) && annotation.type === "action" && annotation.detail.action);
+    const providerAnnotations = annotationResult.annotations
+      .filter((annotation) => !tripChangeProposalActionAnnotationIdSet.has(annotation.id))
+      .filter((annotation) => !existingForwardActions.some((action) => annotation.start < action.end && annotation.end > action.start))
+      // A forward action occupies one of the persisted annotation slots. Keep it
+      // intact if annotation delivery runs after proposal action attachment.
+      .slice(0, 18);
+    const currentAnnotations = sanitizeStoredAnswerAnnotations({ answerText, annotations: [...existingForwardActions, ...providerAnnotations], provenance: currentProvenance });
     const completion = await completeDomainOutboxClaimInTransaction(transaction, claim, async () => {
       const [effect] = await transaction.insert(domainOutboxEffects).values({ outboxEventId: claim.id, effectType: "answer_annotation" }).onConflictDoNothing().returning({ id: domainOutboxEffects.id });
       if (effect) {
@@ -189,6 +242,20 @@ async function propose(claim: DomainOutboxClaim, envelope: AiAskOutboxEnvelope, 
       const [effect] = await transaction.insert(domainOutboxEffects).values({ outboxEventId: claim.id, effectType: "trip_proposal_draft" }).onConflictDoNothing().returning({ id: domainOutboxEffects.id });
       if (!effect) return { value: undefined };
       const saved = await persistAiTripChangeProposalDraftInTransaction(transaction, session, { tripProjectId: envelope.tripProjectId!, expectedAggregateVersion: draft.expectedAggregateVersion, expectedItemVersions: draft.expectedItemVersions, operations: draft.operations, rationale: draft.rationale, alternatives: draft.alternatives, orderingPreconditions: draft.orderingPreconditions, expiresAt: draft.expiresAt ? new Date(draft.expiresAt) : null, sourceAssistantMessageId: envelope.assistantMessageId });
+      if (saved.success) {
+        const current = await loadFinalStateInTransaction(transaction, envelope);
+        if (!current) return { value: undefined, terminalCode: "proposal_persistence_rejected" };
+        const annotations = sanitizeStoredAnswerAnnotations({ answerText: current.content, annotations: current.answerAnnotations, provenance: formatAssistantMessageProvenance(current.provenance) });
+        const next = appendTripChangeProposalActionAnnotation({ answerText: current.content, annotations });
+        if (tripChangeProposalActionAnnotationIds.every((id) => next.some((annotation) => annotation.id === id))) {
+          const stored = sanitizeStoredAnswerAnnotations({
+            answerText: current.content,
+            provenance: formatAssistantMessageProvenance(current.provenance),
+            annotations: next,
+          });
+          await transaction.update(messages).set({ answerAnnotations: stored }).where(and(eq(messages.id, envelope.assistantMessageId!), eq(messages.content, current.content)));
+        }
+      }
       await writeTripChangeProposalDraftUsageInTransaction(transaction, { session, tripProjectId: envelope.tripProjectId!, draft });
       return { value: undefined, terminalCode: saved.success ? undefined : saved.reason === "invalid" ? "invalid_gateway_response" : "proposal_persistence_rejected" };
     });

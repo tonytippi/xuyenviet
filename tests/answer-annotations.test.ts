@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { buildAnswerAnnotationDetail, parseAnswerAnnotationProposals, sanitizeStoredAnswerAnnotations, validateAnswerAnnotations, type AnswerAnnotationProposal } from "@/features/ai/answer-annotations";
+import { buildAnswerAnnotationDetail, parseAnswerAnnotationProposals, sanitizeStoredAnswerAnnotations, tripChangeProposalApplyAnnotationId, validateAnswerAnnotations, type AnswerAnnotationProposal } from "@/features/ai/answer-annotations";
 import type { AssistantMessageProvenanceItem } from "@/features/retrieval/provenance";
 
 const provenance: AssistantMessageProvenanceItem[] = [
@@ -259,6 +259,26 @@ describe("answer annotation validation", () => {
     expect(annotations).toEqual([expect.objectContaining({ id: "legacy-action", detail: expect.objectContaining({ summary: "Đây là gợi ý trong câu trả lời, không phải thao tác có thể thực hiện.", quickFacts: [{ label: "Trạng thái", value: "Chưa có thao tác được xác minh" }] }) })]);
     expect(JSON.stringify(annotations)).not.toContain("Giải thích");
     expect(sanitizeStoredAnswerAnnotations({ answerText, annotations: [{ ...legacy, detail: { ...legacy.detail, provenanceIds: ["prov-knowledge"] } }], provenance })).toEqual([]);
+  });
+
+  test("accepts only registered forward actions with an answer-anchored label and empty arguments", () => {
+    const answerText = "Bước tiếp theo";
+    const annotation = {
+      id: tripChangeProposalApplyAnnotationId,
+      start: 0,
+      end: answerText.length,
+      text: answerText,
+      type: "action",
+      detail: { type: "action", label: answerText, action: { command: "trip_change_proposal.apply", label: answerText, arguments: {}, anchor: "trip-change-proposal-action.v1" } },
+    };
+    const sanitize = (value: unknown) => sanitizeStoredAnswerAnnotations({ answerText, annotations: [value], provenance: [] });
+
+    expect(sanitize(annotation)).toEqual([expect.objectContaining({ detail: expect.objectContaining({ action: { command: "trip_change_proposal.apply", label: answerText, arguments: {}, anchor: "trip-change-proposal-action.v1" } }) })]);
+    expect(sanitize({ ...annotation, detail: { ...annotation.detail, action: { ...annotation.detail.action, command: "proposal.apply" } } })).toEqual([]);
+    expect(sanitize({ ...annotation, detail: { ...annotation.detail, action: { ...annotation.detail.action, label: "Áp dụng" } } })).toEqual([]);
+    expect(sanitize({ ...annotation, detail: { ...annotation.detail, action: { ...annotation.detail.action, arguments: { proposalId: "attacker-selected" } } } })).toEqual([]);
+    expect(sanitize({ ...annotation, detail: { ...annotation.detail, action: { command: "trip_change_proposal.apply", label: answerText, arguments: {} } } })).toEqual([]);
+    expect(sanitize({ ...annotation, detail: { ...annotation.detail, proposalId: "attacker-selected" } })).toEqual([]);
   });
 
   test("accepts only canonical provenance-free warning and trip fact guidance", () => {

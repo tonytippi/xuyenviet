@@ -5,7 +5,7 @@ import { signOutCurrentUser } from "@/features/auth/actions";
 import { normalizePublicAskDraft } from "@/features/auth/redirects";
 import { getOwnedConversation, listOwnedConversations } from "@/features/chat-trips/conversations";
 import { loadOwnedConversationSummaries } from "@/features/chat-trips/conversation-summary-loader";
-import { applyTripChangeProposalAction, createTripProjectFromForm, deleteConversationAction, deleteTripProjectAction, dismissTripChangeProposalAction } from "@/features/chat-trips/actions";
+import { applyTripChangeProposalAction, createTripProjectFromForm, deleteConversationAction, deleteTripProjectAction, dismissTripChangeProposalAction, executeAnnotationAction } from "@/features/chat-trips/actions";
 import { getOwnedTripProjectSummary, listOwnedTripProjects } from "@/features/chat-trips/trip-projects";
 import { saveAnswerUsefulnessFeedbackAction } from "@/features/feedback/actions";
 import { selectActiveAiGatewayModel } from "@/features/ai/models";
@@ -220,6 +220,7 @@ export default async function AiAskPage({ searchParams }: AiAskPageProps) {
             deleteTripProjectAction={deleteTripProjectAction}
             applyTripChangeProposalAction={applyTripChangeProposalAction}
             dismissTripChangeProposalAction={dismissTripChangeProposalAction}
+            executeAnnotationAction={executeAnnotationAction}
             saveAnswerUsefulnessFeedbackAction={saveAnswerUsefulnessFeedbackAction}
             signOutAction={signOutCurrentUser}
       />

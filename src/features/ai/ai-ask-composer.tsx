@@ -8,7 +8,7 @@ import { ConversationList, type ChatSessionSummary } from "@/features/chat-trips
 import { formatTripProjectLabel } from "@/features/chat-trips/labels";
 import { answerUsefulnessCommentMaxLength, countAnswerUsefulnessCommentCharacters, type AnswerUsefulnessFeedbackSummary } from "@/features/feedback/types";
 import type { AnswerUsefulnessRating } from "@/db/schema";
-import type { AnswerAnnotation } from "@/features/ai/answer-annotations";
+import type { AnswerAnnotation, AnswerAnnotationActionCapability } from "@/features/ai/answer-annotations";
 import type { AssistantMessageProvenanceItem, AvailableAssistantMessageProvenanceItem } from "@/features/retrieval/provenance";
 import type { TripWorkspaceReadModel } from "@/features/chat-trips/trip-home";
 import { tripChangeProposalLabels } from "@/features/chat-trips/trip-home-labels";
@@ -49,6 +49,10 @@ export type AnswerEntityDescriptor = {
   detail?: Record<string, string>;
   quickFacts?: Array<{ label: string; value: string }>;
   provenanceIds?: string[];
+  annotationId?: string;
+  assistantMessageId?: string;
+  displayConversationId?: string;
+  capability?: AnswerAnnotationActionCapability;
 };
 
 type TripProjectSummary = {
@@ -109,7 +113,8 @@ type DeleteTripProjectAction = (tripProjectId: string) => Promise<{ success: boo
 // retryable "transient-error" outcome that keeps the action buttons enabled,
 // distinct from the permanent refresh-required outcome that hides them.
 type ApplyTripChangeProposalAction = (input: { tripProjectId: string; proposalId: string }) => Promise<{ success: boolean; reason?: "refresh_required" | "not_found" | "expired" | "transient"; aggregateVersion?: number; proposalStatus?: "applied"; error?: string }>;
-type DismissTripChangeProposalAction = (input: { tripProjectId: string; proposalId: string }) => Promise<{ success: boolean; reason?: "not_found" | "transient"; proposalStatus?: "dismissed"; error?: string }>;
+type DismissTripChangeProposalAction = (input: { tripProjectId: string; proposalId: string }) => Promise<{ success: boolean; reason?: "not_found" | "expired" | "transient"; proposalStatus?: "dismissed"; error?: string }>;
+type ExecuteAnnotationAction = (input: { conversationId: string; assistantMessageId: string; annotationId: string; command: "trip_change_proposal.apply" | "trip_change_proposal.dismiss" }) => Promise<{ success: boolean; reason?: "refresh_required" | "not_found" | "expired" | "transient"; error?: string }>;
 type SaveAnswerUsefulnessFeedbackAction = (input: { assistantMessageId: string; rating: AnswerUsefulnessRating; comment?: string | null }) => Promise<{ success: boolean; feedback?: AnswerUsefulnessFeedbackSummary; reason?: "unauthenticated" | "not_found" | "invalid_target" | "invalid_input" | "invalid_rating" | "comment_too_long" | "failed" }>;
 type SignOutAction = () => Promise<void>;
 
@@ -170,6 +175,7 @@ type AiAskComposerProps = {
   deleteTripProjectAction?: DeleteTripProjectAction;
   applyTripChangeProposalAction?: ApplyTripChangeProposalAction;
   dismissTripChangeProposalAction?: DismissTripChangeProposalAction;
+  executeAnnotationAction?: ExecuteAnnotationAction;
   saveAnswerUsefulnessFeedbackAction?: SaveAnswerUsefulnessFeedbackAction;
   signOutAction?: SignOutAction;
 };
@@ -368,13 +374,13 @@ function splitAssistantContent(content: string) {
   }).filter((section) => section.heading || section.body);
 }
 
-export function AssistantMessageContent({ messageId, content, annotations, selectedEntityId, detailPanelIds, onSelectEntity }: { messageId?: string; content: string; annotations?: AnswerAnnotation[]; selectedEntityId?: string; detailPanelIds?: string; onSelectEntity?: (entity: AnswerEntityDescriptor, trigger: HTMLElement) => void }) {
+export function AssistantMessageContent({ messageId, displayConversationId, content, annotations, selectedEntityId, detailPanelIds, onSelectEntity }: { messageId?: string; displayConversationId?: string; content: string; annotations?: AnswerAnnotation[]; selectedEntityId?: string; detailPanelIds?: string; onSelectEntity?: (entity: AnswerEntityDescriptor, trigger: HTMLElement) => void }) {
   const sections = splitAssistantContent(content);
   const navigableSections = messageId ? sections.filter((section) => section.heading) : [];
   const safeAnnotations = normalizeDisplayAnnotations(content, annotations);
 
   if (sections.length <= 1 && !sections[0]?.heading) {
-    return <p className="whitespace-pre-wrap text-base leading-7"><AnnotatedAnswerText content={content} annotations={safeAnnotations} selectedEntityId={selectedEntityId} detailPanelIds={detailPanelIds} onSelectEntity={onSelectEntity} /></p>;
+    return <p className="whitespace-pre-wrap text-base leading-7"><AnnotatedAnswerText messageId={messageId} displayConversationId={displayConversationId} content={content} annotations={safeAnnotations} selectedEntityId={selectedEntityId} detailPanelIds={detailPanelIds} onSelectEntity={onSelectEntity} /></p>;
   }
 
   return (
@@ -398,8 +404,8 @@ export function AssistantMessageContent({ messageId, content, annotations, selec
 
         return (
           <section className="rounded-2xl border border-[#eadfc8] bg-white/70 p-4" id={section.heading && messageId ? `answer-${messageId}-section-${navigableSections.indexOf(section)}` : undefined} key={`${section.heading || "intro"}-${index}`}>
-            {section.heading ? <h3 className="text-sm font-bold uppercase tracking-[0.12em] text-[#1f5f46]"><AnnotatedAnswerText content={section.heading} annotations={headingAnnotations} selectedEntityId={selectedEntityId} detailPanelIds={detailPanelIds} onSelectEntity={onSelectEntity} /></h3> : null}
-            {section.body ? <p className="mt-2 whitespace-pre-wrap text-base leading-7"><AnnotatedAnswerText content={section.body} annotations={sectionAnnotations} selectedEntityId={selectedEntityId} detailPanelIds={detailPanelIds} onSelectEntity={onSelectEntity} /></p> : null}
+            {section.heading ? <h3 className="text-sm font-bold uppercase tracking-[0.12em] text-[#1f5f46]"><AnnotatedAnswerText messageId={messageId} displayConversationId={displayConversationId} content={section.heading} annotations={headingAnnotations} selectedEntityId={selectedEntityId} detailPanelIds={detailPanelIds} onSelectEntity={onSelectEntity} /></h3> : null}
+            {section.body ? <p className="mt-2 whitespace-pre-wrap text-base leading-7"><AnnotatedAnswerText messageId={messageId} displayConversationId={displayConversationId} content={section.body} annotations={sectionAnnotations} selectedEntityId={selectedEntityId} detailPanelIds={detailPanelIds} onSelectEntity={onSelectEntity} /></p> : null}
           </section>
         );
       })}
@@ -407,7 +413,7 @@ export function AssistantMessageContent({ messageId, content, annotations, selec
   );
 }
 
-function AnnotatedAnswerText({ content, annotations, selectedEntityId, detailPanelIds, onSelectEntity }: { content: string; annotations?: AnswerAnnotation[]; selectedEntityId?: string; detailPanelIds?: string; onSelectEntity?: (entity: AnswerEntityDescriptor, trigger: HTMLElement) => void }) {
+function AnnotatedAnswerText({ messageId, displayConversationId, content, annotations, selectedEntityId, detailPanelIds, onSelectEntity }: { messageId?: string; displayConversationId?: string; content: string; annotations?: AnswerAnnotation[]; selectedEntityId?: string; detailPanelIds?: string; onSelectEntity?: (entity: AnswerEntityDescriptor, trigger: HTMLElement) => void }) {
   const validAnnotations = normalizeDisplayAnnotations(content, annotations);
 
   if (validAnnotations.length === 0) {
@@ -422,8 +428,8 @@ function AnnotatedAnswerText({ content, annotations, selectedEntityId, detailPan
       parts.push(content.slice(cursor, annotation.start));
     }
 
-    const entity = createAnnotationAnswerEntityDescriptor(annotation);
-    const isSelected = Boolean(selectedEntityId && entity.provenanceIds?.[0] && selectedEntityId === entity.provenanceIds[0]);
+    const entity = createAnnotationAnswerEntityDescriptor(annotation, messageId, displayConversationId);
+    const isSelected = Boolean(selectedEntityId && (entity.provenanceIds?.[0] === selectedEntityId || entity.annotationId === selectedEntityId));
 
     parts.push(
       <button
@@ -499,7 +505,7 @@ function getDisplayAnnotationId(value: unknown) {
     : undefined;
 }
 
-function createAnnotationAnswerEntityDescriptor(annotation: AnswerAnnotation): AnswerEntityDescriptor {
+function createAnnotationAnswerEntityDescriptor(annotation: AnswerAnnotation, assistantMessageId?: string, displayConversationId?: string): AnswerEntityDescriptor {
   return {
     type: annotation.detail.type,
     label: annotation.detail.label,
@@ -510,6 +516,10 @@ function createAnnotationAnswerEntityDescriptor(annotation: AnswerAnnotation): A
     detail: annotation.detail.detail,
     quickFacts: annotation.detail.quickFacts,
     provenanceIds: annotation.detail.provenanceIds,
+    annotationId: annotation.id,
+    assistantMessageId,
+    displayConversationId,
+    capability: annotation.detail.capability,
   };
 }
 
@@ -601,7 +611,7 @@ export function AssistantProvenanceBlock({ provenance, selectedEntityId, detailP
   );
 }
 
-export function AnswerDetailPanel({ selectedEntity, panelId, panelRef, onClose }: { selectedEntity: AnswerEntityDescriptor | null; panelId?: string; panelRef?: RefObject<HTMLDivElement | null>; onClose: () => void }) {
+export function AnswerDetailPanel({ selectedEntity, panelId, panelRef, onClose, onExecuteAction, actionPending = false, actionsEnabled = true }: { selectedEntity: AnswerEntityDescriptor | null; panelId?: string; panelRef?: RefObject<HTMLDivElement | null>; onClose: () => void; onExecuteAction?: (entity: AnswerEntityDescriptor) => void; actionPending?: boolean; actionsEnabled?: boolean }) {
   if (!selectedEntity) {
     return (
       <div className="flex flex-1 flex-col justify-center gap-4 py-8" id={panelId} ref={panelRef} tabIndex={-1}>
@@ -658,6 +668,8 @@ export function AnswerDetailPanel({ selectedEntity, panelId, panelRef, onClose }
         </section>
       ) : null}
 
+      {actionsEnabled && selectedEntity.capability && onExecuteAction ? <button className="min-h-11 rounded-xl bg-[#1f5f46] px-4 py-2 text-sm font-semibold text-white focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45 disabled:cursor-not-allowed disabled:opacity-60" disabled={actionPending} onClick={() => onExecuteAction(selectedEntity)} type="button">{actionPending ? "Đang cập nhật..." : selectedEntity.capability.command === "trip_change_proposal.apply" ? "Áp dụng đề xuất" : "Giữ kế hoạch hiện tại"}</button> : null}
+
       {selectedEntity.provenanceIds && selectedEntity.provenanceIds.length > 0 ? (
         <section className="rounded-2xl border border-[#eadfc8] bg-[#fff8ec] p-4 text-sm leading-6 text-[#6f3f12]" aria-label="Cơ sở gợi ý">
           <h4 className="text-sm font-bold uppercase tracking-[0.12em] text-[#8c4f13]">Cơ sở gợi ý</h4>
@@ -698,6 +710,7 @@ export function AiAskComposer({
   deleteTripProjectAction,
   applyTripChangeProposalAction,
   dismissTripChangeProposalAction,
+  executeAnnotationAction,
   saveAnswerUsefulnessFeedbackAction,
   signOutAction,
 }: AiAskComposerProps) {
@@ -722,6 +735,7 @@ export function AiAskComposer({
   const [deletingTripProjectId, setDeletingTripProjectId] = useState<string | null>(null);
   const [feedbackPendingMessageId, setFeedbackPendingMessageId] = useState<string | null>(null);
   const [selectedAnswerEntity, setSelectedAnswerEntity] = useState<AnswerEntityDescriptor | null>(null);
+  const [annotationActionPending, setAnnotationActionPending] = useState(false);
   const [isDesktopViewport, setIsDesktopViewport] = useState(false);
   const [isWorkspaceSheetOpen, setWorkspaceSheetOpen] = useState(false);
   const [isSidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -773,7 +787,7 @@ export function AiAskComposer({
   const mobileAnswerDetailPanelId = "ai-ask-selected-answer-detail-mobile";
   const desktopAnswerDetailPanelId = "ai-ask-selected-answer-detail-desktop";
   const answerDetailPanelIds = `${mobileAnswerDetailPanelId} ${desktopAnswerDetailPanelId}`;
-  const selectedAnswerEntityId = selectedAnswerEntity?.provenanceIds?.[0];
+  const selectedAnswerEntityId = selectedAnswerEntity?.provenanceIds?.[0] ?? selectedAnswerEntity?.annotationId;
   const activeWorkspaceTitle = selectedTripProject
     ? formatTripProjectLabel(selectedTripProject)
     : conversationId
@@ -1474,6 +1488,24 @@ export function AiAskComposer({
     textareaRef.current?.focus();
   }
 
+  async function handleExecuteAnnotationAction(entity: AnswerEntityDescriptor) {
+    if (annotationActionPending || !executeAnnotationAction || !entity.displayConversationId || !entity.assistantMessageId || !entity.annotationId || !entity.capability) return;
+    setAnnotationActionPending(true);
+    setStatus("Đang cập nhật đề xuất...");
+    try {
+      const result = await executeAnnotationAction({ conversationId: entity.displayConversationId, assistantMessageId: entity.assistantMessageId, annotationId: entity.annotationId, command: entity.capability.command });
+      setStatus(result.success ? "Đã cập nhật đề xuất. Đang làm mới kế hoạch." : result.error ?? "Đề xuất không còn khả dụng.");
+      if (result.success) {
+        closeAnswerDetailPanel();
+        router.refresh();
+      }
+    } catch {
+      setStatus("Không thể cập nhật đề xuất lúc này. Vui lòng thử lại.");
+    } finally {
+      setAnnotationActionPending(false);
+    }
+  }
+
   function handleSelectTripProject(projectId: string) {
     if (isPending) {
       setStatus("Vui lòng chờ câu trả lời hiện tại hoàn tất trước khi đổi dự án chuyến đi.");
@@ -1960,7 +1992,7 @@ export function AiAskComposer({
                   </p>
                   {message.role === "assistant" ? (
                     <>
-                      <AssistantMessageContent messageId={message.id} content={message.content} annotations={message.annotations} selectedEntityId={selectedAnswerEntityId} detailPanelIds={answerDetailPanelIds} onSelectEntity={handleSelectAnswerEntity} />
+                       <AssistantMessageContent messageId={message.id} displayConversationId={isHistoricReview ? historyConversation?.id : conversationId} content={message.content} annotations={message.annotations} selectedEntityId={selectedAnswerEntityId} detailPanelIds={answerDetailPanelIds} onSelectEntity={handleSelectAnswerEntity} />
                       <AiAskConsumerStatusNotice statuses={message.consumerStatuses} />
                       <AssistantProvenanceBlock provenance={message.provenance} selectedEntityId={selectedAnswerEntityId} detailPanelIds={answerDetailPanelIds} onSelectEntity={handleSelectAnswerEntity} />
                       {saveAnswerUsefulnessFeedbackAction ? (
@@ -2153,7 +2185,7 @@ export function AiAskComposer({
               className="absolute inset-0 bg-[#17342c]/40"
             />
             <section className="absolute bottom-0 left-0 right-0 max-h-[82vh] overflow-y-auto rounded-t-[1.5rem] border border-[#d8c9ad] bg-[linear-gradient(180deg,#fffdf8_0%,#ffffff_42%,#f7fbf8_100%)] p-4 text-[#17342c] shadow-[0_-24px_80px_rgba(41,33,18,0.24)]" aria-label="Chi tiết nguồn hoặc cảnh báo đã chọn">
-              <AnswerDetailPanel selectedEntity={selectedAnswerEntity} panelId={mobileAnswerDetailPanelId} panelRef={mobileAnswerDetailPanelRef} onClose={closeAnswerDetailPanel} />
+              <AnswerDetailPanel selectedEntity={selectedAnswerEntity} panelId={mobileAnswerDetailPanelId} panelRef={mobileAnswerDetailPanelRef} onClose={closeAnswerDetailPanel} onExecuteAction={executeAnnotationAction ? handleExecuteAnnotationAction : undefined} actionPending={annotationActionPending} actionsEnabled={!isHistoricReview} />
             </section>
           </div>
         ) : null}
@@ -2257,7 +2289,7 @@ export function AiAskComposer({
             </div>
             <BrandMark className="size-10 shrink-0" />
           </div>
-          <AnswerDetailPanel selectedEntity={selectedAnswerEntity} panelId={desktopAnswerDetailPanelId} panelRef={desktopAnswerDetailPanelRef} onClose={closeAnswerDetailPanel} />
+          <AnswerDetailPanel selectedEntity={selectedAnswerEntity} panelId={desktopAnswerDetailPanelId} panelRef={desktopAnswerDetailPanelRef} onClose={closeAnswerDetailPanel} onExecuteAction={executeAnnotationAction ? handleExecuteAnnotationAction : undefined} actionPending={annotationActionPending} actionsEnabled={!isHistoricReview} />
         </aside>
       ) : null}
 

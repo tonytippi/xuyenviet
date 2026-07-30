@@ -3,11 +3,10 @@
 import { redirect } from "next/navigation";
 
 import { deleteOwnedConversation } from "@/features/chat-trips/conversations";
-import {
-  applyApprovedTripChange,
-  dismissTripChangeProposal,
-} from "@/features/chat-trips/trip-change-proposals";
+import { isTripChangeProposalActionAnnotation } from "@/features/ai/answer-annotations";
+import { applyApprovedTripChange, dismissTripChangeProposal } from "@/features/chat-trips/trip-change-proposals";
 import { createTripProject, deleteOwnedTripProject } from "@/features/chat-trips/trip-projects";
+import { getAuthenticatedSession } from "@/server/auth";
 
 export type CreateTripProjectFormState = { error?: string };
 export type DeleteConversationActionState = { success: boolean; error?: string; reason?: "not_found" };
@@ -30,10 +29,48 @@ export type ApplyTripChangeProposalActionState = {
 
 export type DismissTripChangeProposalActionState = {
   success: boolean;
-  reason?: "not_found" | "transient";
+  reason?: "not_found" | "expired" | "transient";
   proposalStatus?: "dismissed";
   error?: string;
 };
+export type AnnotationActionState = ApplyTripChangeProposalActionState | DismissTripChangeProposalActionState;
+
+export async function executeAnnotationAction(input: { conversationId: string; assistantMessageId: string; annotationId: string; command: "trip_change_proposal.apply" | "trip_change_proposal.dismiss" }): Promise<AnnotationActionState> {
+  // Authenticate at the server-action boundary before reading any owned state.
+  const session = await getAuthenticatedSession();
+  if (!session) redirect("/sign-in?next=/ai-ask");
+  if (!isValidAnnotationActionInput(input)) {
+    return { success: false, reason: "not_found", error: "Đề xuất không còn khả dụng." };
+  }
+  const { getOwnedConversation } = await import("@/features/chat-trips/conversations");
+  const conversation = await getOwnedConversation(input.conversationId, session);
+  const message = conversation?.messages.find((candidate) => candidate.id === input.assistantMessageId && candidate.role === "assistant");
+  const annotation = message?.annotations.find((candidate) => candidate.id === input.annotationId);
+  const capability = annotation?.detail.capability;
+  if (!conversation || !conversation.tripProjectId || !capability || capability.command !== input.command) {
+    return { success: false, reason: "not_found", error: "Đề xuất không còn khả dụng." };
+  }
+  // The proposal ID is resolved only from the authenticated, current owner scope.
+  const { getDb } = await import("@/db/client");
+  const { and, eq } = await import("drizzle-orm");
+  const { tripChangeProposals } = await import("@/db/schema");
+  const matches = await getDb().select({ id: tripChangeProposals.id }).from(tripChangeProposals).where(and(eq(tripChangeProposals.tripProjectId, conversation.tripProjectId), eq(tripChangeProposals.userId, session.userId), eq(tripChangeProposals.status, "pending"), eq(tripChangeProposals.sourceAssistantMessageId, input.assistantMessageId)));
+  if (matches.length !== 1 || !isTripChangeProposalActionAnnotation(input.annotationId, input.command)) return { success: false, reason: "not_found", error: "Đề xuất không còn khả dụng." };
+  const binding = { conversationId: input.conversationId, assistantMessageId: input.assistantMessageId, annotationId: input.annotationId, command: input.command };
+  if (input.command === "trip_change_proposal.apply") return applyTripChangeProposalAction({ tripProjectId: conversation.tripProjectId, proposalId: matches[0].id, requiredSourceAssistantMessageId: input.assistantMessageId, annotationBinding: binding });
+  return dismissTripChangeProposalAction({ tripProjectId: conversation.tripProjectId, proposalId: matches[0].id, requiredSourceAssistantMessageId: input.assistantMessageId, annotationBinding: binding });
+}
+
+function isValidAnnotationActionInput(input: unknown): input is { conversationId: string; assistantMessageId: string; annotationId: string; command: "trip_change_proposal.apply" | "trip_change_proposal.dismiss" } {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return false;
+  const value = input as Record<string, unknown>;
+  return Object.keys(value).length === 4
+    && Object.keys(value).every((key) => key === "conversationId" || key === "assistantMessageId" || key === "annotationId" || key === "command")
+    && typeof value.conversationId === "string" && Boolean(value.conversationId.trim())
+    && typeof value.assistantMessageId === "string" && Boolean(value.assistantMessageId.trim())
+    && typeof value.annotationId === "string" && Boolean(value.annotationId.trim())
+    && (value.command === "trip_change_proposal.apply" || value.command === "trip_change_proposal.dismiss");
+}
 
 const stringFieldNames = ["title", "origin", "destination", "startDate", "endDate", "travelers", "notes"] as const;
 
@@ -115,7 +152,7 @@ export async function deleteTripProjectAction(tripProjectId: string): Promise<De
 // kept OUTSIDE the try so Next.js' redirect throw is not swallowed as a
 // transient error.
 export async function applyTripChangeProposalAction(
-  input: { tripProjectId: string; proposalId: string },
+  input: { tripProjectId: string; proposalId: string; requiredSourceAssistantMessageId?: string; annotationBinding?: import("@/features/chat-trips/trip-change-proposals").AnnotationActionBinding },
 ): Promise<ApplyTripChangeProposalActionState> {
   let result: Awaited<ReturnType<typeof applyApprovedTripChange>>;
   try {
@@ -151,7 +188,7 @@ export async function applyTripChangeProposalAction(
 // them and return a typed `transient` result so the client can retry instead of
 // the permanent refresh-required outcome.
 export async function dismissTripChangeProposalAction(
-  input: { tripProjectId: string; proposalId: string },
+  input: { tripProjectId: string; proposalId: string; requiredSourceAssistantMessageId?: string; annotationBinding?: import("@/features/chat-trips/trip-change-proposals").AnnotationActionBinding },
 ): Promise<DismissTripChangeProposalActionState> {
   let result: Awaited<ReturnType<typeof dismissTripChangeProposal>>;
   try {
@@ -173,5 +210,5 @@ export async function dismissTripChangeProposalAction(
     return { success: true, proposalStatus: "dismissed" };
   }
 
-  return { success: false, reason: "not_found", error: "Đề xuất không còn khả dụng." };
+  return { success: false, reason: result.reason === "expired" ? "expired" : "not_found", error: "Đề xuất không còn khả dụng." };
 }

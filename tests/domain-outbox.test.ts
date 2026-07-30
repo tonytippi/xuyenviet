@@ -6,7 +6,8 @@ import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import { aiAskCommands, aiUsageEvents, assistantResponseProvenance, conversations, domainOutbox, domainOutboxEffects, messages, schema, tripProjects, users } from "@/db/schema";
 import { acquireAiAskCommand, finalizeAiAskCommand } from "@/features/ai/ai-ask-commands";
 import { acknowledgeDomainOutboxEvent, aiAskOutboxDedupeKey, claimDueDomainOutboxEvents, completeDomainOutboxClaimInTransaction, enqueueAiAskFollowUpInTransaction, failDomainOutboxClaimInTransaction, failDomainOutboxEvent, getDomainOutboxBatchSize, getDomainOutboxLeaseMs, parseAiAskOutboxEnvelope, retryDelayMs } from "@/features/ai/domain-outbox";
-import { processAiAskDomainOutboxBatch } from "@/features/ai/domain-outbox-worker";
+import { appendTripChangeProposalActionAnnotation, findAvailableActionMarkerRange, processAiAskDomainOutboxBatch } from "@/features/ai/domain-outbox-worker";
+import { tripChangeProposalActionAnnotationIds } from "@/features/ai/answer-annotations";
 
 import { testDb } from "./helpers/db";
 
@@ -57,6 +58,68 @@ async function createCompletedCommandSnapshot() {
 }
 
 describe("AI Ask domain outbox contract", () => {
+  test("chooses the first deterministic free final-answer marker when provider annotations occupy the final marker", () => {
+    const answer = "Đề xuất";
+    const annotations = [{ id: "provider", start: 1, end: answer.length, text: answer.slice(1), type: "warning" as const, detail: { type: "warning" as const, label: answer.slice(1) } }];
+
+    expect(findAvailableActionMarkerRange(answer, annotations)).toEqual({ start: 0, end: 1 });
+    expect(findAvailableActionMarkerRange(answer, [{ ...annotations[0], start: 0, end: answer.length, text: answer }])).toBeNull();
+  });
+
+  test("selects astral markers on UTF-16 code point boundaries", () => {
+    const answer = "🚗Đề xuất";
+
+    expect(findAvailableActionMarkerRange(answer, [])).toEqual({ start: 0, end: 2 });
+    expect(findAvailableActionMarkerRange(answer, [{ id: "occupied", start: 0, end: 2, text: "🚗", type: "warning", detail: { type: "warning", label: "🚗" } }])).toEqual({ start: 2, end: 3 });
+  });
+
+  test("evicts provider descriptors to reserve two action slots when 20 valid provider annotations already exist", () => {
+    const answerText = "01234567890123456789X";
+    const providerAnnotations = Array.from({ length: 20 }, (_, index) => ({
+      id: `provider-${index}`,
+      start: index,
+      end: index + 1,
+      text: answerText.slice(index, index + 1),
+      type: "warning" as const,
+      detail: { type: "warning" as const, label: answerText.slice(index, index + 1) },
+    }));
+
+    const attached = appendTripChangeProposalActionAnnotation({ answerText, annotations: providerAnnotations });
+
+    expect(attached).toHaveLength(20);
+    expect(attached.filter((annotation) => annotation.type === "warning")).toHaveLength(18);
+    expect(attached.filter((annotation) => annotation.type === "action")).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: tripChangeProposalActionAnnotationIds[0], detail: expect.objectContaining({ action: expect.objectContaining({ command: "trip_change_proposal.apply", arguments: {} }) }) }),
+      expect.objectContaining({ id: tripChangeProposalActionAnnotationIds[1], detail: expect.objectContaining({ action: expect.objectContaining({ command: "trip_change_proposal.dismiss", arguments: {} }) }) }),
+    ]));
+  });
+
+  test("evicts enough provider descriptors when they cover every answer code point", () => {
+    const answerText = "🚗AB";
+    const providerAnnotations = [
+      { id: "provider-all", start: 0, end: answerText.length, text: answerText, type: "warning" as const, detail: { type: "warning" as const, label: answerText } },
+    ];
+
+    const attached = appendTripChangeProposalActionAnnotation({ answerText, annotations: providerAnnotations });
+
+    expect(attached).toHaveLength(2);
+    expect(attached.map((annotation) => [annotation.id, annotation.start, annotation.end])).toEqual([
+      [tripChangeProposalActionAnnotationIds[0], 0, 2],
+      [tripChangeProposalActionAnnotationIds[1], 2, 3],
+    ]);
+  });
+
+  test("discards hostile provider marker IDs before attaching both feature actions", () => {
+    const answerText = "ABC";
+    const attached = appendTripChangeProposalActionAnnotation({
+      answerText,
+      annotations: tripChangeProposalActionAnnotationIds.map((id, index) => ({ id, start: index, end: index + 1, text: answerText.slice(index, index + 1), type: "warning" as const, detail: { type: "warning" as const, label: answerText.slice(index, index + 1) } })),
+    });
+
+    expect(attached).toHaveLength(2);
+    expect(attached.map((annotation) => annotation.id)).toEqual(tripChangeProposalActionAnnotationIds);
+  });
+
   test("accepts only the exact context v1 ID-and-fence envelope", () => {
     expect(parseAiAskOutboxEnvelope(base, "ai_ask.context_extraction.v1")).toEqual(base);
     expect(parseAiAskOutboxEnvelope({ ...base, question: "unsafe" }, "ai_ask.context_extraction.v1")).toBeNull();

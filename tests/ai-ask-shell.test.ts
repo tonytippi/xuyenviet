@@ -844,6 +844,38 @@ describe("AI Ask authenticated shell", () => {
     expect(html).not.toContain("operator");
   });
 
+  test("renders an action control only for a server-resolved capability", async () => {
+    const { AnswerDetailPanel } = await import("@/features/ai/ai-ask-composer");
+    const actionEntity: AnswerEntityDescriptor = {
+      type: "action",
+      label: "Bước tiếp theo",
+      annotationId: "annotation-1",
+      assistantMessageId: "assistant-1",
+      capability: { command: "trip_change_proposal.apply", label: "Bước tiếp theo", available: true },
+    };
+
+    const resolved = renderToStaticMarkup(createElement(AnswerDetailPanel, { selectedEntity: actionEntity, onClose: () => undefined, onExecuteAction: () => undefined }));
+    const unresolved = renderToStaticMarkup(createElement(AnswerDetailPanel, { selectedEntity: { ...actionEntity, capability: undefined }, onClose: () => undefined, onExecuteAction: () => undefined }));
+
+    expect(resolved).toContain("Áp dụng đề xuất");
+    expect(unresolved).not.toContain("Áp dụng đề xuất");
+    expect(resolved).not.toContain("proposalId");
+  });
+
+  test("omits annotation execute controls on both historic-review detail surfaces", async () => {
+    const { AnswerDetailPanel } = await import("@/features/ai/ai-ask-composer");
+    const actionEntity: AnswerEntityDescriptor = {
+      type: "action", label: "Bước tiếp theo", annotationId: "annotation-1", assistantMessageId: "assistant-1",
+      capability: { command: "trip_change_proposal.apply", label: "Bước tiếp theo", available: true },
+    };
+
+    const mobile = renderToStaticMarkup(createElement(AnswerDetailPanel, { selectedEntity: actionEntity, onClose: () => undefined, onExecuteAction: () => undefined, actionsEnabled: false }));
+    const desktop = renderToStaticMarkup(createElement(AnswerDetailPanel, { selectedEntity: actionEntity, onClose: () => undefined, onExecuteAction: () => undefined, actionsEnabled: false }));
+
+    expect(mobile).not.toContain("Áp dụng đề xuất");
+    expect(desktop).not.toContain("Áp dụng đề xuất");
+  });
+
   test("keeps caveat-only policy in bounded provenance detail quick facts", () => {
     const source = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
     const policyStart = source.indexOf('if (item.usePolicy === "caveat_only")');
@@ -961,6 +993,10 @@ describe("AI Ask authenticated shell", () => {
     expect(html).toContain("Hội thoại cũ cần xem lại");
     expect(html).toContain("Tiếp tục trong hội thoại chính");
     expect(html).not.toContain('id="ai-ask-question"');
+
+    const composerSource = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
+    expect(composerSource).toContain("displayConversationId={isHistoricReview ? historyConversation?.id : conversationId}");
+    expect(composerSource).toContain("conversationId: entity.displayConversationId");
   });
 
   test("redirects to ordinary chat when opening another user's trip project", async () => {
@@ -1466,6 +1502,20 @@ describe("AI Ask conversation data layer", () => {
     expect(loaded?.messages.find((message) => message.id === assistant.id)?.annotations).toEqual([]);
     expect(fetchMock).not.toHaveBeenCalled();
     await expect(testDb.select({ answerAnnotations: messages.answerAnnotations }).from(messages).where(eq(messages.id, assistant.id))).resolves.toEqual([{ answerAnnotations: [] }]);
+  });
+
+  test("does not resolve a capability for an expired pending proposal", async () => {
+    await createTestUser("user-1");
+    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }) }));
+    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế" }).returning({ id: tripProjects.id });
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id }).returning({ id: conversations.id });
+    const [assistant] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "assistant", content: "Đề xuất", answerAnnotations: [{ id: "trip-change-proposal-apply", start: 0, end: 1, text: "Đ", type: "action", detail: { type: "action", label: "Đ", action: { command: "trip_change_proposal.apply", label: "Đ", arguments: {}, anchor: "trip-change-proposal-action.v1" } } }] }).returning({ id: messages.id });
+    await testDb.insert(tripChangeProposals).values({ id: "expired-proposal", tripProjectId: project.id, userId: "user-1", creatorClass: "ai_orchestration", status: "pending", rationale: "Đã hết hạn.", operations: [{ kind: "change-item-state", itemId: "expired-leg", state: "confirmed" }], expectedAggregateVersion: 1, sourceAssistantMessageId: assistant.id, expiresAt: new Date(Date.now() - 1_000) });
+    const { getOwnedConversation } = await import("@/features/chat-trips/conversations");
+
+    const loaded = await getOwnedConversation(conversation.id);
+
+    expect(loaded?.messages.find((message) => message.id === assistant.id)?.annotations[0]?.detail.capability).toBeUndefined();
   });
 
   test.each([
@@ -3022,7 +3072,7 @@ describe("AI Ask streaming route", () => {
 
       // The typed result states include the transient reason.
       expect(actionsSource).toContain('"refresh_required" | "not_found" | "expired" | "transient"');
-      expect(actionsSource).toContain('"not_found" | "transient"');
+      expect(actionsSource).toContain('"not_found" | "expired" | "transient"');
       // Both actions wrap the library call in try/catch and return transient.
       expect(actionsSource).toContain("try {\n    result = await applyApprovedTripChange(input);");
       expect(actionsSource).toContain('return { success: false, reason: "transient"');
@@ -3036,7 +3086,7 @@ describe("AI Ask streaming route", () => {
 
       // The composer action types include the transient reason.
       expect(composerSource).toContain('"refresh_required" | "not_found" | "expired" | "transient"');
-      expect(composerSource).toContain('"not_found" | "transient"');
+      expect(composerSource).toContain('"not_found" | "expired" | "transient"');
       // The transient reason maps to the retryable transient-error outcome.
       expect(composerSource).toContain('result.reason === "transient"');
       expect(composerSource).toContain('"transient-error"');

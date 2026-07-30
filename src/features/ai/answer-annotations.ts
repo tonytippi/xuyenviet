@@ -36,11 +36,33 @@ export type AnswerAnnotationDetailDescriptor = {
   detail?: Record<string, string>;
   quickFacts?: Array<{ label: string; value: string }>;
   provenanceIds?: string[];
+  action?: AnswerAnnotationAction;
+  capability?: AnswerAnnotationActionCapability;
 };
+
+export type AnswerAnnotationActionCommand = "trip_change_proposal.apply" | "trip_change_proposal.dismiss";
+export type AnswerAnnotationAction = { command: AnswerAnnotationActionCommand; label: string; arguments: Record<string, never>; anchor?: "trip-change-proposal-action.v1" };
+export type AnswerAnnotationActionCapability = { command: AnswerAnnotationActionCommand; label: string; available: true };
+
+// These fixed markers identify feature-owned actions within one assistant
+// message. Proposal identity is deliberately resolved server-side from scope.
+export const tripChangeProposalApplyAnnotationId = "trip-change-proposal-apply";
+export const tripChangeProposalDismissAnnotationId = "trip-change-proposal-dismiss";
+export const tripChangeProposalActionAnnotationIds = [
+  tripChangeProposalApplyAnnotationId,
+  tripChangeProposalDismissAnnotationId,
+] as const;
+export const tripChangeProposalActionAnnotationIdSet = new Set<string>(tripChangeProposalActionAnnotationIds);
+
+export function isTripChangeProposalActionAnnotation(id: string, command: AnswerAnnotationActionCommand) {
+  return (id === tripChangeProposalApplyAnnotationId && command === "trip_change_proposal.apply")
+    || (id === tripChangeProposalDismissAnnotationId && command === "trip_change_proposal.dismiss");
+}
+
 
 const allowedTypes = new Set<AnswerAnnotationType>(["source", "warning", "trip_fact", "action", "place", "hotel_area", "route_segment", "cost"]);
 const entityTypes = new Set<AnswerAnnotationType>(["place", "hotel_area", "route_segment", "cost"]);
-const detailDescriptorKeys = new Set(["type", "label", "section", "summary", "sourceCategory", "owner", "detail", "quickFacts", "provenanceIds"]);
+const detailDescriptorKeys = new Set(["type", "label", "section", "summary", "sourceCategory", "owner", "detail", "quickFacts", "provenanceIds", "action"]);
 const safeDetailLabels = new Set(["Loại", "Độ tin cậy", "Trạng thái", "URL", "Ngày kiểm tra", "Độ mới", "Nhãn nguồn"]);
 const safeQuickFactLabels = new Set([...safeDetailLabels, "Địa điểm", "Khu vực", "Chặng đường", "Chi phí"]);
 const maxAnnotationProposals = 20;
@@ -156,6 +178,9 @@ export function sanitizeStoredAnswerAnnotations(input: {
 
     const detail = sanitizeDetailDescriptor(item.detail, item.type as AnswerAnnotationType, item.text, provenanceById);
     if (!detail) {
+      continue;
+    }
+    if (detail.action && !isTripChangeProposalActionAnnotation(item.id, detail.action.command)) {
       continue;
     }
 
@@ -407,6 +432,10 @@ function sanitizeDetailDescriptor(value: unknown, annotationType: AnswerAnnotati
   }
 
   if (annotationType === "action") {
+    const action = sanitizeForwardActionDescriptor(value, text);
+    if (action) {
+      return { type: "action", label: text, section: "Gợi ý hành động", summary: "Thao tác này chỉ khả dụng khi đề xuất hiện tại vẫn thuộc kế hoạch của bạn.", action };
+    }
     return isLegacyActionDescriptor(value, annotationType) ? buildLegacyActionDetail(text) : null;
   }
 
@@ -443,6 +472,17 @@ function sanitizeDetailDescriptor(value: unknown, annotationType: AnswerAnnotati
   }
 
   return trusted;
+}
+
+function sanitizeForwardActionDescriptor(value: Record<string, unknown>, text: string): AnswerAnnotationAction | null {
+  if (value.type !== "action" || value.label !== text || Object.keys(value).some((key) => key !== "type" && key !== "label" && key !== "action")) {
+    return null;
+  }
+  const action = value.action;
+  if (!isRecord(action) || Object.keys(action).some((key) => key !== "command" && key !== "label" && key !== "arguments" && key !== "anchor") || (action.command !== "trip_change_proposal.apply" && action.command !== "trip_change_proposal.dismiss") || action.label !== text || !isRecord(action.arguments) || Object.keys(action.arguments).length !== 0 || action.anchor !== "trip-change-proposal-action.v1") {
+    return null;
+  }
+  return { command: action.command, label: action.label, arguments: {}, anchor: "trip-change-proposal-action.v1" };
 }
 
 function isLocalGuidanceType(type: AnswerAnnotationType) {
@@ -560,7 +600,10 @@ function isValidStoredAnnotationRange(item: unknown, answerText: string, duplica
     && answerText.slice(item.start, item.end) === item.text
     && typeof item.type === "string"
     && allowedTypes.has(item.type as AnswerAnnotationType)
-    && Boolean(sanitizeDetailDescriptor(item.detail, item.type as AnswerAnnotationType, item.text, provenanceById));
+    && (() => {
+      const detail = sanitizeDetailDescriptor(item.detail, item.type as AnswerAnnotationType, item.text, provenanceById);
+      return Boolean(detail && (!detail.action || isTripChangeProposalActionAnnotation(item.id, detail.action.command)));
+    })();
 }
 
 function getDescriptorSummary(type: AnswerAnnotationType, sourceCategory: AvailableAssistantMessageProvenanceItem["sourceCategory"]) {
