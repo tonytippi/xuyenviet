@@ -52,12 +52,18 @@ export function validateAnswerAnnotations(input: {
   proposals: AnswerAnnotationProposal[];
   provenance: AssistantMessageProvenanceItem[];
 }): AnswerAnnotation[] {
+  if (!Array.isArray(input.proposals) || input.proposals.length > maxAnnotationProposals) {
+    return [];
+  }
+
   const provenanceById = new Map(input.provenance.map((item) => [item.id, item]));
+  const proposals = input.proposals.filter(isAnswerAnnotationProposal);
+  const duplicateIds = findDuplicateIds(input.proposals.map(getProposalId));
   const seenIds = new Set<string>();
   const accepted: AnswerAnnotation[] = [];
 
-  for (const proposal of input.proposals.slice().sort((left, right) => left.start - right.start || left.end - right.end)) {
-    if (!proposal.id || seenIds.has(proposal.id) || !allowedTypes.has(proposal.type)) {
+  for (const proposal of proposals.slice().sort((left, right) => left.start - right.start || left.end - right.end)) {
+    if (!proposal.id || duplicateIds.has(proposal.id) || seenIds.has(proposal.id) || proposal.type === "action" || !allowedTypes.has(proposal.type)) {
       continue;
     }
 
@@ -88,6 +94,10 @@ export function validateAnswerAnnotations(input: {
       continue;
     }
 
+    if (provenanceIds.length === 0 && !isLocalGuidanceType(proposal.type)) {
+      continue;
+    }
+
     const detail = buildAnswerAnnotationDetail({ type: proposal.type, text, provenance: matchedProvenance });
 
     if (!detail) {
@@ -110,22 +120,14 @@ export function sanitizeStoredAnswerAnnotations(input: {
   if (!Array.isArray(input.annotations)) {
     return [];
   }
+  if (input.annotations.length > maxAnnotationProposals) {
+    return [];
+  }
 
   const provenanceById = new Map(input.provenance.map((item) => [item.id, item]));
   const accepted: AnswerAnnotation[] = [];
   const seenIds = new Set<string>();
-  const duplicateIds = new Set<string>();
-  const allIds = new Set<string>();
-
-  for (const item of input.annotations) {
-    if (!isRecord(item) || typeof item.id !== "string") {
-      continue;
-    }
-    if (allIds.has(item.id)) {
-      duplicateIds.add(item.id);
-    }
-    allIds.add(item.id);
-  }
+  const duplicateIds = findDuplicateIds(input.annotations.map((item) => isRecord(item) ? item.id : undefined));
 
   for (const item of input.annotations.slice().sort(compareStoredAnnotations)) {
     if (accepted.length >= maxAnnotationProposals) {
@@ -243,7 +245,7 @@ export function buildAnswerAnnotationDetail(input: {
 }): AnswerAnnotationDetailDescriptor | null {
   const primary = input.provenance[0];
 
-  if (!primary && input.type !== "action" && input.type !== "warning" && input.type !== "trip_fact") {
+  if (!primary && !isLocalGuidanceType(input.type)) {
     return null;
   }
 
@@ -251,9 +253,8 @@ export function buildAnswerAnnotationDetail(input: {
     return {
       type: input.type,
       label: input.text,
-      section: input.type === "action" ? "Gợi ý hành động" : "Lưu ý trong câu trả lời",
-      summary: input.type === "action" ? "Đây là gợi ý trong câu trả lời, không phải thao tác có thể thực hiện." : "Đây là lưu ý cục bộ trong câu trả lời, không phải chi tiết từ nguồn.",
-      quickFacts: [{ label: "Trạng thái", value: input.type === "action" ? "Chưa có thao tác được xác minh" : "Không gắn với nguồn" }],
+      section: "Lưu ý trong câu trả lời",
+      summary: "Đây là lưu ý cục bộ trong câu trả lời, không phải chi tiết từ nguồn.",
     };
   }
 
@@ -307,8 +308,13 @@ export function parseAnswerAnnotationProposals(content: string): AnswerAnnotatio
 
   const proposals: AnswerAnnotationProposal[] = [];
 
-  for (const item of payload.annotations.slice(0, maxAnnotationProposals)) {
-    if (!isRecord(item) || typeof item.id !== "string" || typeof item.start !== "number" || typeof item.end !== "number" || typeof item.type !== "string") {
+  if (payload.annotations.length > maxAnnotationProposals) {
+    return [];
+  }
+
+  const duplicateIds = findDuplicateIds(payload.annotations.map(getProposalId));
+  for (const item of payload.annotations) {
+    if (!isRecord(item) || typeof item.id !== "string" || duplicateIds.has(item.id) || typeof item.start !== "number" || typeof item.end !== "number" || typeof item.type !== "string" || (item.provenanceIds !== undefined && (!Array.isArray(item.provenanceIds) || item.provenanceIds.some((id) => typeof id !== "string")))) {
       continue;
     }
 
@@ -318,7 +324,7 @@ export function parseAnswerAnnotationProposals(content: string): AnswerAnnotatio
       end: item.end,
       quote: typeof item.quote === "string" ? item.quote : undefined,
       type: item.type as AnswerAnnotationType,
-      provenanceIds: Array.isArray(item.provenanceIds) ? item.provenanceIds.filter((id): id is string => typeof id === "string") : undefined,
+      provenanceIds: item.provenanceIds as string[] | undefined,
     });
   }
 
@@ -389,13 +395,24 @@ function formatAnnotationSourceType(item: AvailableAssistantMessageProvenanceIte
 }
 
 function sanitizeDetailDescriptor(value: unknown, annotationType: AnswerAnnotationType, text: string, provenanceById: Map<string, AssistantMessageProvenanceItem>): AnswerAnnotationDetailDescriptor | null {
-  if (!isRecord(value) || !isCompatibleStoredDetailType(value.type, annotationType) || typeof value.label !== "string" || Object.keys(value).some((key) => !detailDescriptorKeys.has(key)) || (!hasSafeStoredDisplayFields(value) && !isLegacyActionDescriptor(value, annotationType))) {
+  if (!isRecord(value) || !isCompatibleStoredDetailType(value.type, annotationType) || typeof value.label !== "string" || Object.keys(value).some((key) => !detailDescriptorKeys.has(key))) {
+    return null;
+  }
+
+  if (annotationType === "action") {
+    return isLegacyActionDescriptor(value, annotationType) ? buildLegacyActionDetail(text) : null;
+  }
+
+  if (!hasSafeStoredDisplayFields(value)) {
     return null;
   }
 
   const provenanceIds = sanitizeProvenanceIds(value.provenanceIds, provenanceById);
-  const mayBeSourceFree = annotationType === "action" || annotationType === "warning" || annotationType === "trip_fact";
-  if (!provenanceIds || (!mayBeSourceFree && provenanceIds.length === 0)) {
+  if (!provenanceIds || (provenanceIds.length === 0 && !isLocalGuidanceType(annotationType))) {
+    return null;
+  }
+
+  if (provenanceIds.length === 0 && !isCanonicalLocalGuidanceDescriptor(value, annotationType)) {
     return null;
   }
 
@@ -419,6 +436,27 @@ function sanitizeDetailDescriptor(value: unknown, annotationType: AnswerAnnotati
   }
 
   return trusted;
+}
+
+function isLocalGuidanceType(type: AnswerAnnotationType) {
+  return type === "warning" || type === "trip_fact";
+}
+
+function isCanonicalLocalGuidanceDescriptor(value: Record<string, unknown>, annotationType: AnswerAnnotationType) {
+  return isLocalGuidanceType(annotationType)
+    && value.type === annotationType
+    && typeof value.label === "string"
+    && Object.keys(value).every((key) => key === "type" || key === "label");
+}
+
+function buildLegacyActionDetail(text: string): AnswerAnnotationDetailDescriptor {
+  return {
+    type: "action",
+    label: text,
+    section: "Gợi ý hành động",
+    summary: "Đây là gợi ý trong câu trả lời, không phải thao tác có thể thực hiện.",
+    quickFacts: [{ label: "Trạng thái", value: "Chưa có thao tác được xác minh" }],
+  };
 }
 
 function sanitizeProvenanceIds(value: unknown, provenanceById: Map<string, AssistantMessageProvenanceItem>) {
@@ -509,4 +547,31 @@ function getDescriptorSummary(type: AnswerAnnotationType, sourceCategory: Availa
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isAnswerAnnotationProposal(value: unknown): value is AnswerAnnotationProposal {
+  return isRecord(value)
+    && typeof value.id === "string"
+    && typeof value.start === "number"
+    && typeof value.end === "number"
+    && typeof value.type === "string"
+    && (value.quote === undefined || typeof value.quote === "string")
+    && (value.provenanceIds === undefined || (Array.isArray(value.provenanceIds) && value.provenanceIds.every((id) => typeof id === "string")));
+}
+
+function getProposalId(value: unknown) {
+  return isRecord(value) ? value.id : undefined;
+}
+
+function findDuplicateIds(values: unknown[]) {
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+    if (seen.has(value)) duplicates.add(value);
+    seen.add(value);
+  }
+
+  return duplicates;
 }

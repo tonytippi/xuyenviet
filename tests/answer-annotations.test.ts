@@ -76,7 +76,7 @@ describe("answer annotation validation", () => {
       provenance: [withdrawn],
       annotations: [
         { id: "source", start: 0, end: 8, text: "Nguồn cũ", type: "source", detail: { type: "source", label: "Nguồn cũ", provenanceIds: ["withdrawn"], owner: { table: "assistant_response_provenance", id: "withdrawn" } } },
-        { id: "warning", start: answerText.indexOf(warningText), end: answerText.length, text: warningText, type: "warning", detail: { type: "warning", label: warningText, provenanceIds: [] } },
+        { id: "warning", start: answerText.indexOf(warningText), end: answerText.length, text: warningText, type: "warning", detail: { type: "warning", label: warningText } },
       ],
     });
     expect(annotations.map((annotation) => annotation.id)).toEqual(["warning"]);
@@ -100,7 +100,7 @@ describe("answer annotation validation", () => {
     expect(annotations[3].detail).toMatchObject({ sourceCategory: "general" });
   });
 
-  test("drops invalid offsets, mismatched quotes, duplicates, overlaps, malformed type, and unknown provenance", () => {
+  test("drops invalid offsets, mismatched quotes, duplicate IDs everywhere, overlaps, malformed type, and unknown provenance", () => {
     const answerText = "Bãi đỗ chính thức Huế cần kiểm tra lại.";
     const valid = makeProposal("valid", answerText, "Bãi đỗ chính thức Huế", "source", ["prov-knowledge"]);
     const annotations = validateAnswerAnnotations({
@@ -117,8 +117,7 @@ describe("answer annotation validation", () => {
       ],
     });
 
-    expect(annotations).toHaveLength(1);
-    expect(annotations[0]).toMatchObject({ id: "valid", text: "Bãi đỗ chính thức Huế" });
+    expect(annotations).toEqual([]);
   });
 
   test("builds detail from safe provenance fields only", () => {
@@ -133,7 +132,7 @@ describe("answer annotation validation", () => {
     expect(JSON.stringify(detail)).not.toMatch(/sourceSnapshot|providerScore|raw_source_material|operatorOnly|snippet/);
   });
 
-  test("parses only bounded structured annotation proposal JSON", () => {
+  test("parses only bounded, fully structured annotation proposal JSON", () => {
     const proposals = parseAnswerAnnotationProposals(JSON.stringify({
       annotations: [
         { id: "valid", start: 0, end: 3, quote: "Huế", type: "source", provenanceIds: ["prov-knowledge", 123] },
@@ -142,11 +141,12 @@ describe("answer annotation validation", () => {
       ],
     }));
 
-    expect(proposals).toEqual([{ id: "valid", start: 0, end: 3, quote: "Huế", type: "source", provenanceIds: ["prov-knowledge"] }]);
+    expect(proposals).toEqual([]);
     expect(parseAnswerAnnotationProposals("not json")).toEqual([]);
+    expect(parseAnswerAnnotationProposals(JSON.stringify({ annotations: Array.from({ length: 21 }, (_, index) => ({ id: String(index), start: 0, end: 1, type: "warning" })) }))).toEqual([]);
   });
 
-  test("uses UTF-16 ranges and supports every persisted descriptor type", () => {
+  test("uses UTF-16 ranges, exclusive ends, and supports source-backed descriptor types", () => {
     const answerText = "🚗 Huế | khu ven sông | chặng Đà Nẵng - Huế | 500.000đ | nguồn | cảnh báo | gia đình | bước tiếp";
     const proposals: AnswerAnnotationProposal[] = [
       makeProposal("place", answerText, "Huế", "place", ["prov-knowledge"]),
@@ -156,14 +156,16 @@ describe("answer annotation validation", () => {
       makeProposal("source", answerText, "nguồn", "source", ["prov-knowledge"]),
       makeProposal("warning", answerText, "cảnh báo", "warning", ["prov-web"]),
       makeProposal("fact", answerText, "gia đình", "trip_fact", ["prov-context"]),
-      makeProposal("action", answerText, "bước tiếp", "action", []),
+      makeProposal("warning-local", answerText, "cảnh báo", "warning", []),
+      makeProposal("fact-local", answerText, "gia đình", "trip_fact", []),
     ];
 
     const annotations = validateAnswerAnnotations({ answerText, proposals, provenance });
 
-    expect(annotations.map((annotation) => annotation.type)).toEqual(["place", "hotel_area", "route_segment", "cost", "source", "warning", "trip_fact", "action"]);
+    expect(annotations.map((annotation) => annotation.type)).toEqual(["place", "hotel_area", "route_segment", "cost", "source", "warning", "trip_fact"]);
     expect(annotations[0]).toMatchObject({ start: answerText.indexOf("Huế"), text: "Huế" });
     expect(annotations.filter((annotation) => annotation.type === "place" || annotation.type === "hotel_area" || annotation.type === "route_segment" || annotation.type === "cost").every((annotation) => annotation.detail.owner?.id === "prov-knowledge")).toBe(true);
+    expect(annotations.filter((annotation) => annotation.detail.provenanceIds === undefined).every((annotation) => annotation.type === "warning" || annotation.type === "trip_fact")).toBe(true);
   });
 
   test("rejects persisted descriptors with cross-message provenance, unsafe fields, duplicate provenance, or unbounded quick facts", () => {
@@ -238,6 +240,72 @@ describe("answer annotation validation", () => {
     expect(annotations).toEqual([expect.objectContaining({ id: "legacy-action", detail: expect.objectContaining({ summary: "Đây là gợi ý trong câu trả lời, không phải thao tác có thể thực hiện.", quickFacts: [{ label: "Trạng thái", value: "Chưa có thao tác được xác minh" }] }) })]);
     expect(JSON.stringify(annotations)).not.toContain("Giải thích");
     expect(sanitizeStoredAnswerAnnotations({ answerText, annotations: [{ ...legacy, detail: { ...legacy.detail, provenanceIds: ["prov-knowledge"] } }], provenance })).toEqual([]);
+  });
+
+  test("accepts only canonical provenance-free warning and trip fact guidance", () => {
+    const answerText = "Lưu ý thời tiết. Đi cùng gia đình.";
+    const warning = "Lưu ý thời tiết";
+    const tripFact = "Đi cùng gia đình";
+    const annotations = sanitizeStoredAnswerAnnotations({
+      answerText,
+      provenance: [],
+      annotations: [
+        { id: "warning", start: 0, end: warning.length, text: warning, type: "warning", detail: { type: "warning", label: "untrusted" } },
+        { id: "fact", start: answerText.indexOf(tripFact), end: answerText.length - 1, text: tripFact, type: "trip_fact", detail: { type: "trip_fact", label: "untrusted" } },
+        { id: "unsafe", start: 0, end: warning.length, text: warning, type: "warning", detail: { type: "warning", label: warning, quickFacts: [] } },
+      ],
+    });
+
+    expect(annotations).toEqual([
+      expect.objectContaining({ id: "warning", detail: { type: "warning", label: warning, section: "Lưu ý trong câu trả lời", summary: "Đây là lưu ý cục bộ trong câu trả lời, không phải chi tiết từ nguồn." } }),
+      expect.objectContaining({ id: "fact", detail: { type: "trip_fact", label: tripFact, section: "Lưu ý trong câu trả lời", summary: "Đây là lưu ý cục bộ trong câu trả lời, không phải chi tiết từ nguồn." } }),
+    ]);
+    expect(JSON.stringify(annotations)).not.toMatch(/provenanceIds|sourceCategory|quickFacts|URL/);
+  });
+
+  test("keeps final-text boundary ranges and combining text exact", () => {
+    const answerText = "🚗 e\u0301 Huế";
+    const annotations = validateAnswerAnnotations({
+      answerText,
+      provenance,
+      proposals: [
+        { id: "first", start: 0, end: 2, quote: "🚗", type: "warning", provenanceIds: [] },
+        { id: "last", start: 3, end: answerText.length, quote: "e\u0301 Huế", type: "source", provenanceIds: ["prov-knowledge"] },
+      ],
+    });
+
+    expect(annotations).toEqual([
+      expect.objectContaining({ id: "first", start: 0, end: 2, text: "🚗" }),
+      expect.objectContaining({ id: "last", start: 3, end: answerText.length, text: "e\u0301 Huế" }),
+    ]);
+    expect(validateAnswerAnnotations({ answerText, provenance, proposals: Array.from({ length: 21 }, (_, index) => ({ id: String(index), start: 0, end: 2, quote: "🚗", type: "warning" })) })).toEqual([]);
+  });
+
+  test("fails closed for malformed direct proposals and oversized persisted JSON", () => {
+    const answerText = "Huế phù hợp.";
+    const valid = makeProposal("valid", answerText, "Huế", "source", ["prov-knowledge"]);
+
+    expect(validateAnswerAnnotations({ answerText, provenance, proposals: [null, { ...valid, id: "malformed", provenanceIds: "prov-knowledge" }, valid] as never })).toEqual([expect.objectContaining({ id: "valid" })]);
+    expect(validateAnswerAnnotations({ answerText, provenance, proposals: [{ ...valid, provenanceIds: "prov-knowledge" }, valid] as never })).toEqual([]);
+    expect(validateAnswerAnnotations({ answerText, provenance, proposals: [{ ...valid, type: "action" }] })).toEqual([]);
+    expect(parseAnswerAnnotationProposals(JSON.stringify({
+      annotations: [
+        { id: "duplicate", start: 0, end: 3, type: "source", provenanceIds: ["prov-knowledge"] },
+        { id: "duplicate", start: 0, end: 3, type: "source", provenanceIds: ["prov-knowledge", 1] },
+      ],
+    }))).toEqual([]);
+    expect(sanitizeStoredAnswerAnnotations({
+      answerText,
+      provenance,
+      annotations: Array.from({ length: 21 }, (_, index) => ({
+        id: `stored-${index}`,
+        start: 0,
+        end: 3,
+        text: "Huế",
+        type: "source",
+        detail: buildAnswerAnnotationDetail({ type: "source", text: "Huế", provenance: [provenance[0]] }),
+      })),
+    })).toEqual([]);
   });
 });
 

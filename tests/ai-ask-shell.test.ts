@@ -634,6 +634,47 @@ describe("AI Ask authenticated shell", () => {
     expect(html).not.toContain("Mở chi tiết annotation: kiểm tra");
   });
 
+  test("suppresses every duplicate display ID even when the ranges are separated", async () => {
+    const { AssistantMessageContent } = await import("@/features/ai/ai-ask-composer");
+    const content = "Nên dừng ở Huế và kiểm tra giá tại Huế.";
+    const annotations: AnswerAnnotation[] = [
+      makeAnnotation("duplicate", content, "Huế", "source", "knowledge-1", "source"),
+      { ...makeAnnotation("other", content, "giá", "warning", "web-1", "warning"), id: "duplicate", start: content.lastIndexOf("Huế"), end: content.length, text: "Huế" },
+    ];
+
+    const html = renderToStaticMarkup(createElement(AssistantMessageContent, { content, annotations }));
+
+    expect(html).toContain(content);
+    expect(html).not.toContain("Mở chi tiết annotation");
+  });
+
+  test("ignores malformed display annotations without hiding sectioned answer text", async () => {
+    const { AssistantMessageContent } = await import("@/features/ai/ai-ask-composer");
+    const content = "Kế hoạch:\nĐi Huế sớm.";
+
+    const html = renderToStaticMarkup(createElement(AssistantMessageContent, {
+      content,
+      annotations: [null, "bad"] as never,
+    }));
+
+    expect(html).toContain("Kế hoạch");
+    expect(html).toContain("Đi Huế sớm.");
+    expect(html).not.toContain("Mở chi tiết annotation");
+  });
+
+  test("suppresses a valid display annotation with a malformed duplicate ID", async () => {
+    const { AssistantMessageContent } = await import("@/features/ai/ai-ask-composer");
+    const content = "Huế phù hợp.";
+
+    const html = renderToStaticMarkup(createElement(AssistantMessageContent, {
+      content,
+      annotations: [makeAnnotation("duplicate", content, "Huế", "source", "knowledge-1", "source"), { id: "duplicate" }] as never,
+    }));
+
+    expect(html).toContain("Huế phù hợp.");
+    expect(html).not.toContain("Mở chi tiết annotation");
+  });
+
   test("keeps unannotated assistant answers readable with fallback provenance available", async () => {
     const { AssistantMessageContent } = await import("@/features/ai/ai-ask-composer");
     const html = renderToStaticMarkup(createElement(AssistantMessageContent, { content: "Kế hoạch gợi ý:\nNên đi nhẹ." }));

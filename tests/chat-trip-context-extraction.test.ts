@@ -719,7 +719,7 @@ describe("chat/trip context extraction", () => {
         "data: [DONE]\n\n",
       ].join(""), { status: 200, headers: { "content-type": "text/event-stream" } });
       if (body.messages?.[0]?.content.includes("annotation nội bộ")) {
-        return new Response(JSON.stringify({ model: "cx/answer", choices: [{ message: { content: JSON.stringify({ annotations: [{ id: "hue", start: 0, end: 3, quote: "Huế", type: "action", provenanceIds: [] }] }) } }], usage: { prompt_tokens: 7, completion_tokens: 3, total_tokens: 10 } }), { status: 200, headers: { "x-request-id": "annotation-request", "content-type": "application/json" } });
+        return new Response(JSON.stringify({ model: "cx/answer", choices: [{ message: { content: JSON.stringify({ annotations: [{ id: "hue", start: 0, end: 3, quote: "Huế", type: "warning", provenanceIds: [] }] }) } }], usage: { prompt_tokens: 7, completion_tokens: 3, total_tokens: 10 } }), { status: 200, headers: { "x-request-id": "annotation-request", "content-type": "application/json" } });
       }
       return new Response(JSON.stringify({ model: "cx/proposal", choices: [{ message: { content: JSON.stringify({ rationale: "Thêm điểm đến Huế.", operations: [{ kind: "create-item", item: { kind: "anchor", anchorRole: "destination", type: null, state: "idea", label: "Huế" }, ordinal: 0 }], alternatives: [], ordering_preconditions: null }) } }], usage: { prompt_tokens: 11, completion_tokens: 5, total_tokens: 16 } }), { status: 200, headers: { "x-request-id": "proposal-request", "content-type": "application/json" } });
     });

@@ -371,9 +371,10 @@ function splitAssistantContent(content: string) {
 export function AssistantMessageContent({ messageId, content, annotations, selectedEntityId, detailPanelIds, onSelectEntity }: { messageId?: string; content: string; annotations?: AnswerAnnotation[]; selectedEntityId?: string; detailPanelIds?: string; onSelectEntity?: (entity: AnswerEntityDescriptor, trigger: HTMLElement) => void }) {
   const sections = splitAssistantContent(content);
   const navigableSections = messageId ? sections.filter((section) => section.heading) : [];
+  const safeAnnotations = normalizeDisplayAnnotations(content, annotations);
 
   if (sections.length <= 1 && !sections[0]?.heading) {
-    return <p className="whitespace-pre-wrap text-base leading-7"><AnnotatedAnswerText content={content} annotations={annotations} selectedEntityId={selectedEntityId} detailPanelIds={detailPanelIds} onSelectEntity={onSelectEntity} /></p>;
+    return <p className="whitespace-pre-wrap text-base leading-7"><AnnotatedAnswerText content={content} annotations={safeAnnotations} selectedEntityId={selectedEntityId} detailPanelIds={detailPanelIds} onSelectEntity={onSelectEntity} /></p>;
   }
 
   return (
@@ -392,8 +393,8 @@ export function AssistantMessageContent({ messageId, content, annotations, selec
         </nav>
       ) : null}
       {sections.map((section, index) => {
-        const headingAnnotations = section.heading && section.headingStart !== undefined && section.headingEnd !== undefined ? annotations?.filter((annotation) => annotation.start >= section.headingStart! && annotation.end <= section.headingEnd!).map((annotation) => ({ ...annotation, start: annotation.start - section.headingStart!, end: annotation.end - section.headingStart! })) : [];
-        const sectionAnnotations = section.bodyStart >= 0 && section.bodyEnd >= 0 ? annotations?.filter((annotation) => annotation.start >= section.bodyStart && annotation.end <= section.bodyEnd).map((annotation) => ({ ...annotation, start: annotation.start - section.bodyStart, end: annotation.end - section.bodyStart })) : [];
+        const headingAnnotations = section.heading && section.headingStart !== undefined && section.headingEnd !== undefined ? safeAnnotations.filter((annotation) => annotation.start >= section.headingStart! && annotation.end <= section.headingEnd!).map((annotation) => ({ ...annotation, start: annotation.start - section.headingStart!, end: annotation.end - section.headingStart! })) : [];
+        const sectionAnnotations = section.bodyStart >= 0 && section.bodyEnd >= 0 ? safeAnnotations.filter((annotation) => annotation.start >= section.bodyStart && annotation.end <= section.bodyEnd).map((annotation) => ({ ...annotation, start: annotation.start - section.bodyStart, end: annotation.end - section.bodyStart })) : [];
 
         return (
           <section className="rounded-2xl border border-[#eadfc8] bg-white/70 p-4" id={section.heading && messageId ? `answer-${messageId}-section-${navigableSections.indexOf(section)}` : undefined} key={`${section.heading || "intro"}-${index}`}>
@@ -451,9 +452,21 @@ function AnnotatedAnswerText({ content, annotations, selectedEntityId, detailPan
 function normalizeDisplayAnnotations(content: string, annotations?: AnswerAnnotation[]) {
   const accepted: AnswerAnnotation[] = [];
   const seenIds = new Set<string>();
+  const duplicateIds = new Set<string>();
+  const input = Array.isArray(annotations) ? annotations : [];
+  const candidates = input.filter(isDisplayAnnotation);
 
-  for (const annotation of (annotations ?? []).slice().sort((left, right) => left.start - right.start || left.end - right.end)) {
-    if (!annotation.id || seenIds.has(annotation.id) || !annotation.detail || !Number.isInteger(annotation.start) || !Number.isInteger(annotation.end)) {
+  for (const annotation of input) {
+    const id = getDisplayAnnotationId(annotation);
+    if (!id) continue;
+    if (seenIds.has(id)) duplicateIds.add(id);
+    seenIds.add(id);
+  }
+
+  seenIds.clear();
+
+  for (const annotation of candidates.slice().sort((left, right) => left.start - right.start || left.end - right.end)) {
+    if (!annotation.id || duplicateIds.has(annotation.id) || seenIds.has(annotation.id) || !annotation.detail || !Number.isInteger(annotation.start) || !Number.isInteger(annotation.end)) {
       continue;
     }
 
@@ -470,6 +483,20 @@ function normalizeDisplayAnnotations(content: string, annotations?: AnswerAnnota
   }
 
   return accepted;
+}
+
+function isDisplayAnnotation(value: unknown): value is AnswerAnnotation {
+  return Boolean(value)
+    && typeof value === "object"
+    && typeof (value as AnswerAnnotation).id === "string"
+    && typeof (value as AnswerAnnotation).start === "number"
+    && typeof (value as AnswerAnnotation).end === "number";
+}
+
+function getDisplayAnnotationId(value: unknown) {
+  return value && typeof value === "object" && typeof (value as AnswerAnnotation).id === "string"
+    ? (value as AnswerAnnotation).id
+    : undefined;
 }
 
 function createAnnotationAnswerEntityDescriptor(annotation: AnswerAnnotation): AnswerEntityDescriptor {
