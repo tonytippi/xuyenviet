@@ -262,6 +262,30 @@ describe("knowledge recommendation queue", () => {
     await expect(testDb.select().from(knowledgeSamplingCohortMembers).where(eq(knowledgeSamplingCohortMembers.knowledgeCardId, "card"))).resolves.toEqual([]);
   });
 
+  test("lets an operator promote a current corridor verification into seed coverage", async () => {
+    await testDb.update(knowledgeCards).set({ publicationState: "suppressed", knowledgeState: "uncertain", reviewState: "ai_recommended", verificationState: "required", needsReview: true }).where(eq(knowledgeCards.id, "card"));
+    await testDb.insert(sources).values({ id: "source", kind: "facebook", url: "https://facebook.com/groups/xuyenviet/posts/coverage", canonicalUrl: "https://facebook.com/groups/xuyenviet/posts/coverage", label: "Community post", sourceType: "community", verificationStatus: "unverified", official: false, partner: false, submittedByUserId: "author" });
+    await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: "card", sourceId: "source", supportLevel: "supporting" });
+    const capture = await seedSourceCaptureVersion({ sourceId: "source", captureKind: "facebook", rawText: "Bãi đỗ xe có mái che tại Huế." });
+    await seedKnowledgeCardEvidence({ cardId: "card", sourceId: "source", captureVersionId: capture.id, quoteText: "Bãi đỗ xe có mái che tại Huế." });
+    await scheduleKnowledgeRecommendation({ cardId: "card", contentVersion: 1, evidenceSetRevision: 1, reason: "verification", policy: "verify_first" }, testDb);
+    const [recommendation] = await testDb.select().from(knowledgeRecommendations);
+
+    await expect(resolveKnowledgeRecommendation({ recommendationId: recommendation!.id, expectedContentVersion: 1, expectedEvidenceSetRevision: 1, action: "promote", actor: { userId: "operator", email: "operator@example.com" } }, testDb)).resolves.toMatchObject({ status: "resolved", cardId: "card" });
+    await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, "card"))).resolves.toMatchObject([{ publicationState: "active", knowledgeState: "community_observation", verificationState: "corroborated", reviewState: "reviewed", needsReview: false, contentVersion: 2 }]);
+    await expect(testDb.select().from(knowledgeRecommendations).where(eq(knowledgeRecommendations.id, recommendation!.id))).resolves.toMatchObject([{ status: "resolved", resolution: "verified" }]);
+    await expect(testDb.select({ afterSummary: auditEvents.afterSummary }).from(auditEvents).where(eq(auditEvents.targetId, recommendation!.id))).resolves.toEqual([{ afterSummary: "Promoted verified knowledge recommendation to a community observation." }]);
+  });
+
+  test("does not promote a verification outside the seed corridor", async () => {
+    await testDb.update(knowledgeCards).set({ locationName: "Đà Lạt", publicationState: "suppressed", knowledgeState: "uncertain", reviewState: "ai_recommended", verificationState: "required", needsReview: true }).where(eq(knowledgeCards.id, "card"));
+    await scheduleKnowledgeRecommendation({ cardId: "card", contentVersion: 1, evidenceSetRevision: 1, reason: "verification", policy: "verify_first" }, testDb);
+    const [recommendation] = await testDb.select().from(knowledgeRecommendations);
+
+    await expect(resolveKnowledgeRecommendation({ recommendationId: recommendation!.id, expectedContentVersion: 1, expectedEvidenceSetRevision: 1, action: "promote", actor: { userId: "operator", email: "operator@example.com" } }, testDb)).resolves.toEqual({ status: "invalid_action" });
+    await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, "card"))).resolves.toMatchObject([{ publicationState: "suppressed", knowledgeState: "uncertain", contentVersion: 1 }]);
+  });
+
   test("publishes linked verify-first candidates when verification is resolved from the recommendation", async () => {
     await testDb.update(knowledgeCards).set({ publicationState: "suppressed", knowledgeState: "uncertain", reviewState: "ai_recommended", verificationState: "required", needsReview: true }).where(eq(knowledgeCards.id, "card"));
     await testDb.insert(sources).values({ id: "source", kind: "pasted_text", label: "Safe source", sourceType: "curated", verificationStatus: "unverified", official: false, partner: false, submittedByUserId: "author" });

@@ -1,12 +1,12 @@
 import "server-only";
 
 import { createHash } from "node:crypto";
-import { and, asc, count, desc, eq, gt, inArray, lte, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, inArray, isNull, lte, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
 import { disableStaleKnowledgeSearchProjection, enqueueKnowledgeIndexWork } from "@/features/knowledge/indexing-queue";
 import { getCurrentValidEvidenceFencesForReadiness } from "@/features/knowledge/readiness-evidence";
-import { facebookCaptureReviews, knowledgeCardEvidence, knowledgeCards, knowledgeIngestionCandidates, knowledgeIngestionJobs, knowledgeRecommendations, knowledgeSamplingCandidateLedger, knowledgeSamplingCohortMembers, knowledgeSamplingDispositionReasonValues, knowledgeSamplingPolicies, knowledgeVerifyFirstSamplingObligations, sources, type KnowledgeRecommendationAction, type KnowledgeRecommendationReason, type KnowledgeSamplingDispositionReason } from "@/db/schema";
+import { facebookCaptureReviews, knowledgeCardEvidence, knowledgeCards, knowledgeIngestionCandidates, knowledgeIngestionJobs, knowledgeRecommendations, knowledgeSamplingCandidateLedger, knowledgeSamplingCohortMembers, knowledgeSamplingDispositionReasonValues, knowledgeSamplingPolicies, knowledgeVerifyFirstSamplingObligations, sourceCaptureVersions, sources, type KnowledgeRecommendationAction, type KnowledgeRecommendationReason, type KnowledgeSamplingDispositionReason } from "@/db/schema";
 import { recordAuditEvent } from "@/features/audit/events";
 import { type SystemAuditActorId } from "@/features/audit/actors";
 import { getCorridorBucketLabel } from "@/features/knowledge/corridor";
@@ -246,7 +246,7 @@ export async function resolveKnowledgeRecommendation(input: { recommendationId: 
     if (input.action === "sampling_fail" && input.highSeverity && recommendation.policyId) await lockSamplingPolicyBoundary(tx);
     const [card] = await tx.select().from(knowledgeCards).where(eq(knowledgeCards.id, recommendation.knowledgeCardId)).limit(1).for("update");
     if (!card || card.contentVersion !== input.expectedContentVersion || card.evidenceSetRevision !== input.expectedEvidenceSetRevision || card.contentVersion !== recommendation.contentVersion || card.evidenceSetRevision !== recommendation.evidenceSetRevision) return { status: "stale" as const };
-    if (card.verificationState === "failed" && ["restore", "verify", "resolve_relation"].includes(input.action)) return { status: "invalid_action" as const };
+    if (card.verificationState === "failed" && ["restore", "verify", "promote", "resolve_relation"].includes(input.action)) return { status: "invalid_action" as const };
     if (card.verificationState === "required" && input.action === "restore") return { status: "invalid_action" as const };
     if (input.action === "edit" && input.editSummary?.trim() && recommendation.reason !== "verification") {
       const evidence = await tx.select({ quoteText: knowledgeCardEvidence.quoteText }).from(knowledgeCardEvidence).where(and(eq(knowledgeCardEvidence.knowledgeCardId, card.id), eq(knowledgeCardEvidence.state, "active"), eq(knowledgeCardEvidence.supportLevel, "supporting"))).limit(4);
@@ -261,6 +261,11 @@ export async function resolveKnowledgeRecommendation(input: { recommendationId: 
       const operatorOverride = recommendation.reason === "verification";
       if (!validVerificationTarget || (!operatorOverride && !corroborated) || (recommendation.reason === "conflict" ? card.knowledgeState !== "conflicted" : !["uncertain", "community_pattern", "conflicted"].includes(card.knowledgeState))) return { status: recommendation.reason === "conflict" ? "invalid_verification" as const : "invalid_action" as const };
     }
+    if (input.action === "promote") {
+      if (recommendation.reason !== "verification" || card.status !== "approved" || card.publicationState !== "suppressed" || card.knowledgeState !== "uncertain" || card.reviewState !== "ai_recommended" || card.verificationState !== "required" || !card.needsReview || !getCorridorBucketLabel(card.routeSegment, card.locationName) || !card.title.trim() || !card.summary.trim()) return { status: "invalid_action" as const };
+      const [validEvidence] = await tx.select({ id: knowledgeCardEvidence.id }).from(knowledgeCardEvidence).innerJoin(sources, eq(sources.id, knowledgeCardEvidence.sourceId)).innerJoin(sourceCaptureVersions, and(eq(sourceCaptureVersions.id, knowledgeCardEvidence.captureVersionId), eq(sourceCaptureVersions.sourceId, knowledgeCardEvidence.sourceId), eq(sources.currentCaptureVersionId, knowledgeCardEvidence.captureVersionId))).where(and(eq(knowledgeCardEvidence.knowledgeCardId, card.id), eq(knowledgeCardEvidence.state, "active"), sql`${knowledgeCardEvidence.supportLevel} in ('primary', 'supporting')`, sql`${knowledgeCardEvidence.displayPolicy} in ('fact_only', 'traveler_visible')`, eq(sources.eligibility, "eligible"), sql`${sources.kind} = ${sourceCaptureVersions.captureKind} and ${sources.kind} in ('url', 'facebook', 'youtube')`, isNull(sourceCaptureVersions.payloadDeletedAt), sql`${sourceCaptureVersions.rawText} is not null`, sql`substring(${sourceCaptureVersions.rawText} from ${knowledgeCardEvidence.spanStart} + 1 for ${knowledgeCardEvidence.spanEnd} - ${knowledgeCardEvidence.spanStart}) = ${knowledgeCardEvidence.quoteText}`)).limit(1);
+      if (!validEvidence) return { status: "invalid_action" as const };
+    }
     let removedConflictCount = 0;
     let hasRemainingSupport = true;
     if (input.action === "resolve_relation") {
@@ -273,13 +278,13 @@ export async function resolveKnowledgeRecommendation(input: { recommendationId: 
       hasRemainingSupport = new Set(support.map((item) => item.independenceKey)).size > 0;
     }
     const resolution = resolutionFor(input.action);
-    const material = input.action === "edit" || input.action === "suppress" || input.action === "restore" || input.action === "verify" || input.action === "resolve_relation" || input.action === "sampling_fail";
+    const material = input.action === "edit" || input.action === "suppress" || input.action === "restore" || input.action === "verify" || input.action === "promote" || input.action === "resolve_relation" || input.action === "sampling_fail";
     const preservesRequiredVerification = card.verificationState === "required" && (input.action === "edit" || verificationNeedsFollowUp);
     const next = {
       summary: input.action === "edit" && input.editSummary?.trim() ? input.editSummary.trim().slice(0, 1200) : card.summary,
-      publicationState: input.action === "suppress" || input.action === "sampling_fail" || preservesRequiredVerification ? "suppressed" as const : input.action === "restore" || input.action === "resolve_relation" && hasRemainingSupport || input.action === "verify" ? "active" as const : card.publicationState,
-      knowledgeState: input.action === "resolve_relation" ? hasRemainingSupport ? "community_observation" as const : "uncertain" as const : card.knowledgeState,
-      verificationState: input.action === "verify" ? "corroborated" as const : input.action === "sampling_fail" ? "failed" as const : card.verificationState,
+      publicationState: input.action === "suppress" || input.action === "sampling_fail" || preservesRequiredVerification ? "suppressed" as const : input.action === "restore" || input.action === "resolve_relation" && hasRemainingSupport || input.action === "verify" || input.action === "promote" ? "active" as const : card.publicationState,
+      knowledgeState: input.action === "promote" ? "community_observation" as const : input.action === "resolve_relation" ? hasRemainingSupport ? "community_observation" as const : "uncertain" as const : card.knowledgeState,
+      verificationState: input.action === "verify" || input.action === "promote" ? "corroborated" as const : input.action === "sampling_fail" ? "failed" as const : card.verificationState,
       reviewState: input.action === "resolve_relation" && !hasRemainingSupport || preservesRequiredVerification || input.action === "edit" && recommendation.reason === "verification" ? "ai_recommended" as const : "reviewed" as const,
       needsReview: input.action === "resolve_relation" && !hasRemainingSupport || preservesRequiredVerification || input.action === "edit" && recommendation.reason === "verification",
       contentVersion: material ? card.contentVersion + 1 : card.contentVersion,
@@ -288,13 +293,13 @@ export async function resolveKnowledgeRecommendation(input: { recommendationId: 
     };
     await tx.update(knowledgeCards).set(next).where(eq(knowledgeCards.id, card.id));
     await tx.update(knowledgeRecommendations).set({ status: "resolved", resolution, samplingDispositionReason: samplingDisposition?.reason ?? null, samplingRationale: samplingDisposition?.rationale ?? null, resolvedByUserId: input.actor.userId, resolvedAt: new Date(), executorSystem: null, updatedAt: new Date() }).where(eq(knowledgeRecommendations.id, recommendation.id));
-    if (input.action === "verify") await publishVerifiedIngestionCandidates(tx, card.id);
+    if (input.action === "verify" || input.action === "promote") await publishVerifiedIngestionCandidates(tx, card.id);
     if (material) await tx.update(knowledgeRecommendations).set({ status: "superseded", resolution: "accepted", resolvedByUserId: input.actor.userId, resolvedAt: new Date(), executorSystem: null, updatedAt: new Date() }).where(and(eq(knowledgeRecommendations.knowledgeCardId, card.id), sql`${knowledgeRecommendations.status} in ('open', 'in_review')`, sql`${knowledgeRecommendations.id} <> ${recommendation.id}`));
     const auditSummary = input.action === "resolve_relation"
       ? `Resolved ${recommendation.reason} recommendation with resolve_relation${hasRemainingSupport ? "" : " without reactivation because supporting evidence is insufficient"}. Final card contentVersion=${next.contentVersion}, evidenceSetRevision=${next.evidenceSetRevision}, publicationState=${next.publicationState}.`
       : input.action === "sampling_pass" || input.action === "sampling_fail"
         ? `Resolved sampling recommendation with ${input.action}; disposition=${samplingDisposition!.reason}${input.highSeverity ? "; high_severity=true" : ""}.`
-        : `Resolved ${recommendation.reason} recommendation with ${input.action}.`;
+        : input.action === "promote" ? "Promoted verified knowledge recommendation to a community observation." : `Resolved ${recommendation.reason} recommendation with ${input.action}.`;
     await recordAuditEvent({ actor: { kind: "user", ...input.actor }, operation: "update", targetType: "knowledge_recommendation", targetId: recommendation.id, afterSummary: auditSummary }, tx);
     await enqueueKnowledgeIndexWork(tx, { cardId: card.id, contentVersion: next.contentVersion, evidenceSetRevision: next.evidenceSetRevision, reason: `recommendation:${input.action}` });
     if (next.publicationState !== "active" || next.verificationState === "failed") await disableStaleKnowledgeSearchProjection(tx, card.id, next.contentVersion);
@@ -336,9 +341,9 @@ export async function lockSamplingPolicyBoundary(db: Transaction) {
 }
 
 function priorityFor(reason: KnowledgeRecommendationReason) { return ({ risk: 1, verification: 2, conflict: 3, weak_evidence: 4, freshness: 5, relation: 6, duplicate_risk: 7, missing_context: 8, sampling: 9 })[reason]; }
-function resolutionFor(action: KnowledgeRecommendationAction) { return ({ accept_wording: "accepted", edit: "edited", suppress: "suppressed", restore: "restored", verify: "verified", resolve_relation: "relation_resolved", sampling_pass: "sampling_passed", sampling_fail: "sampling_failed" })[action] as "accepted" | "edited" | "suppressed" | "restored" | "verified" | "relation_resolved" | "sampling_passed" | "sampling_failed"; }
+function resolutionFor(action: KnowledgeRecommendationAction) { return ({ accept_wording: "accepted", edit: "edited", suppress: "suppressed", restore: "restored", verify: "verified", promote: "verified", resolve_relation: "relation_resolved", sampling_pass: "sampling_passed", sampling_fail: "sampling_failed" })[action] as "accepted" | "edited" | "suppressed" | "restored" | "verified" | "relation_resolved" | "sampling_passed" | "sampling_failed"; }
 function isCompatibleResolution(reason: KnowledgeRecommendationReason, action: KnowledgeRecommendationAction) {
-  if (reason === "verification") return ["edit", "suppress", "verify"].includes(action);
+  if (reason === "verification") return ["edit", "suppress", "verify", "promote"].includes(action);
   if (reason === "sampling") return ["sampling_pass", "sampling_fail", "suppress"].includes(action);
   if (reason === "conflict" || reason === "relation" || reason === "missing_context") return ["verify", "resolve_relation", "suppress", "edit"].includes(action);
   return ["accept_wording", "edit", "suppress", "restore"].includes(action);

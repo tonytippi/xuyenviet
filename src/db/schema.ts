@@ -153,7 +153,7 @@ export type KnowledgeRecommendationStatus = (typeof knowledgeRecommendationStatu
 export const knowledgeRecommendationReasonValues = ["risk", "weak_evidence", "freshness", "conflict", "duplicate_risk", "missing_context", "verification", "relation", "sampling"] as const;
 export type KnowledgeRecommendationReason = (typeof knowledgeRecommendationReasonValues)[number];
 
-export const knowledgeRecommendationActionValues = ["accept_wording", "edit", "suppress", "restore", "verify", "resolve_relation", "sampling_pass", "sampling_fail"] as const;
+export const knowledgeRecommendationActionValues = ["accept_wording", "edit", "suppress", "restore", "verify", "promote", "resolve_relation", "sampling_pass", "sampling_fail"] as const;
 export type KnowledgeRecommendationAction = (typeof knowledgeRecommendationActionValues)[number];
 
 export const knowledgeRecommendationResolutionValues = ["accepted", "edited", "suppressed", "restored", "verified", "relation_resolved", "sampling_passed", "sampling_failed"] as const;

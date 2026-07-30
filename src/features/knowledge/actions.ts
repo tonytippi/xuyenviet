@@ -709,11 +709,15 @@ export async function verifyKnowledgeRecommendationFromQueueForm(formData: FormD
   return resolveVerificationRecommendationFromQueue(formData, "verify");
 }
 
+export async function promoteKnowledgeRecommendationFromQueueForm(formData: FormData) {
+  return resolveVerificationRecommendationFromQueue(formData, "promote");
+}
+
 export async function suppressKnowledgeRecommendationFromQueueForm(formData: FormData) {
   return resolveVerificationRecommendationFromQueue(formData, "suppress");
 }
 
-async function resolveVerificationRecommendationFromQueue(formData: FormData, action: "verify" | "suppress") {
+async function resolveVerificationRecommendationFromQueue(formData: FormData, action: "verify" | "promote" | "suppress") {
   const session = await requireAdminSession();
   const recommendationId = getOptionalFormString(formData, "recommendationId") ?? "";
   const contentVersion = Number(getOptionalFormString(formData, "contentVersion"));
