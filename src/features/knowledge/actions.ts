@@ -705,6 +705,41 @@ export async function resolveKnowledgeRecommendationForm(formData: FormData) {
   redirect(`/admin/knowledge/recommendations/${encodeURIComponent(recommendationId)}?${error ? `error=${encodeURIComponent(error)}` : "resolved=1"}`);
 }
 
+export async function verifyKnowledgeRecommendationFromQueueForm(formData: FormData) {
+  return resolveVerificationRecommendationFromQueue(formData, "verify");
+}
+
+export async function suppressKnowledgeRecommendationFromQueueForm(formData: FormData) {
+  return resolveVerificationRecommendationFromQueue(formData, "suppress");
+}
+
+async function resolveVerificationRecommendationFromQueue(formData: FormData, action: "verify" | "suppress") {
+  const session = await requireAdminSession();
+  const recommendationId = getOptionalFormString(formData, "recommendationId") ?? "";
+  const contentVersion = Number(getOptionalFormString(formData, "contentVersion"));
+  const evidenceSetRevision = Number(getOptionalFormString(formData, "evidenceSetRevision"));
+  const requestedPage = Number(getOptionalFormString(formData, "page"));
+  const page = Number.isSafeInteger(requestedPage) ? Math.max(1, requestedPage) : 1;
+  const reason = getOptionalFormString(formData, "reason");
+  let error = "";
+
+  try {
+    if (!Number.isInteger(contentVersion) || !Number.isInteger(evidenceSetRevision)) throw new Error("invalid_resolution");
+    const [recommendation] = await getDb().select({ reason: knowledgeRecommendations.reason }).from(knowledgeRecommendations).where(eq(knowledgeRecommendations.id, recommendationId)).limit(1);
+    if (recommendation?.reason !== "verification") throw new Error("invalid_resolution");
+    const result = await resolveKnowledgeRecommendation({ recommendationId, expectedContentVersion: contentVersion, expectedEvidenceSetRevision: evidenceSetRevision, action, actor: { userId: session.userId, email: session.email } });
+    if (result.status !== "resolved") error = result.status;
+  } catch (caught) {
+    if (caught instanceof AdminAuthorizationError || (caught instanceof Error && caught.name === "AdminAuthorizationError")) throw caught;
+    error = "not_resolved";
+  }
+
+  const query = new URLSearchParams({ page: String(page) });
+  if (reason) query.set("reason", reason);
+  if (error) query.set("error", error);
+  redirect(`/admin/knowledge/recommendations?${query.toString()}`);
+}
+
 export async function verifyFacebookCaptureCandidatesForm(formData: FormData) {
   const session = await requireAdminSession();
   const reviewId = getOptionalFormString(formData, "reviewId") ?? "";

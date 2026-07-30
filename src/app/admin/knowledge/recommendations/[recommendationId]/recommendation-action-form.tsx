@@ -6,7 +6,7 @@ import { resolveKnowledgeRecommendationForm } from "@/features/knowledge/actions
 
 const actionLabels: Record<string, string> = {
   verify: "Xác nhận và xuất bản",
-  edit: "Sửa fact",
+  edit: "Sửa nội dung",
   suppress: "Không xuất bản",
   resolve_relation: "Xác nhận quan hệ thẻ",
   accept_wording: "Chấp nhận cách diễn đạt",
@@ -50,7 +50,7 @@ export function RecommendationActionForm({ recommendationId, contentVersion, evi
         </label>)}
       </div>
     </fieldset>
-    {isEdit ? <label className="grid gap-2 font-semibold">Fact đã chỉnh sửa<textarea className="min-h-24 rounded-xl border border-[#d8c9ad] p-3" name="editSummary" placeholder="Chỉ giữ các thông tin được bằng chứng bên trên hỗ trợ." required /></label> : null}
+    {isEdit ? <label className="grid gap-2 font-semibold">Nội dung đã chỉnh sửa<textarea className="min-h-24 rounded-xl border border-[#d8c9ad] p-3" name="editSummary" placeholder="Chỉ giữ các thông tin được bằng chứng bên trên hỗ trợ." required /></label> : null}
     {isSampling ? <>
       <label className="grid gap-2 font-semibold">Kết quả lấy mẫu
         <select className="min-h-11 rounded-xl border border-[#d8c9ad] px-3" name="samplingDispositionReason" required>

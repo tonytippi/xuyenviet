@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test } from "vitest";
 
 import { auditEvents, knowledgeCardEvidence, knowledgeCardSearchDocuments, knowledgeCardSources, knowledgeCards, knowledgeIndexDirtyMarkers, knowledgeIngestionCandidates, knowledgeIngestionJobs, knowledgeRecommendations, knowledgeSamplingCohortMembers, knowledgeSamplingPolicies, sources, users } from "@/db/schema";
-import { getKnowledgeRecommendationDetail, listKnowledgeRecommendations, resolveKnowledgeRecommendation, scheduleKnowledgeRecommendation, shouldSampleKnowledgeCard } from "@/features/knowledge/recommendations";
+import { getKnowledgeRecommendationDetail, getKnowledgeRecommendationWorkStatusCounts, listKnowledgeRecommendations, resolveKnowledgeRecommendation, scheduleKnowledgeRecommendation, shouldSampleKnowledgeCard } from "@/features/knowledge/recommendations";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
 import { seedKnowledgeCardEvidence, seedSourceCaptureVersion } from "./helpers/source-captures";
@@ -299,6 +299,28 @@ describe("knowledge recommendation queue", () => {
     expect(detail?.evidence).toEqual([expect.objectContaining({ sourceLabel: "Safe source", sourceKind: "pasted_text", facebookReviewId: null })]);
     await expect(testDb.select().from(knowledgeCardEvidence)).resolves.toHaveLength(1);
     await expect(testDb.select().from(knowledgeCardSearchDocuments)).resolves.toEqual([]);
+  });
+
+  test("filters recommendations by operator work status and includes completed results", async () => {
+    await scheduleKnowledgeRecommendation({ cardId: "card", contentVersion: 1, evidenceSetRevision: 1, reason: "risk" }, testDb);
+    await scheduleKnowledgeRecommendation({ cardId: "card", contentVersion: 1, evidenceSetRevision: 1, reason: "freshness" }, testDb);
+    await scheduleKnowledgeRecommendation({ cardId: "card", contentVersion: 1, evidenceSetRevision: 1, reason: "sampling" }, testDb);
+    const recommendations = await testDb.select().from(knowledgeRecommendations).orderBy(knowledgeRecommendations.reason);
+    const completed = recommendations.find((recommendation) => recommendation.reason === "freshness");
+    const inactive = recommendations.find((recommendation) => recommendation.reason === "sampling");
+    if (!completed || !inactive) throw new Error("expected recommendations");
+    const now = new Date();
+    await testDb.update(knowledgeRecommendations).set({ status: "in_review", updatedAt: now }).where(eq(knowledgeRecommendations.reason, "risk"));
+    await testDb.update(knowledgeRecommendations).set({ status: "resolved", resolution: "verified", resolvedByUserId: "operator", resolvedAt: now, updatedAt: now }).where(eq(knowledgeRecommendations.id, completed.id));
+    await testDb.update(knowledgeRecommendations).set({ status: "superseded", resolution: "accepted", resolvedByUserId: "operator", resolvedAt: now, updatedAt: now }).where(eq(knowledgeRecommendations.id, inactive.id));
+
+    await expect(listKnowledgeRecommendations({}, testDb)).resolves.toMatchObject([{ reason: "risk", status: "in_review", resolution: null }]);
+    await expect(listKnowledgeRecommendations({ reason: "risk" }, testDb)).resolves.toMatchObject([{ reason: "risk", status: "in_review" }]);
+    await expect(listKnowledgeRecommendations({ workStatus: "completed" }, testDb)).resolves.toMatchObject([{ reason: "freshness", status: "resolved", resolution: "verified" }]);
+    await expect(listKnowledgeRecommendations({ workStatus: "completed", reason: "freshness" }, testDb)).resolves.toMatchObject([{ reason: "freshness", status: "resolved" }]);
+    await expect(listKnowledgeRecommendations({ workStatus: "inactive" }, testDb)).resolves.toMatchObject([{ reason: "sampling", status: "superseded", resolution: "accepted" }]);
+    await expect(listKnowledgeRecommendations({ workStatus: "inactive", reason: "sampling" }, testDb)).resolves.toMatchObject([{ reason: "sampling", status: "superseded" }]);
+    await expect(getKnowledgeRecommendationWorkStatusCounts(testDb)).resolves.toEqual({ actionable: 1, completed: 1, inactive: 1 });
   });
 
   test("contains high-severity sampling escalation within its policy cohort", async () => {

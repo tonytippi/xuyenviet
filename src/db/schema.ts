@@ -1333,6 +1333,7 @@ export const knowledgeRecommendations = pgTable(
   (recommendation) => [
     uniqueIndex("knowledge_recommendations_open_version_reason_idx").on(recommendation.knowledgeCardId, recommendation.contentVersion, recommendation.evidenceSetRevision, recommendation.reason).where(sql`${recommendation.status} in ('open', 'in_review')`),
     index("knowledge_recommendations_open_queue_idx").on(recommendation.status, recommendation.priority, recommendation.createdAt).where(sql`${recommendation.status} in ('open', 'in_review')`),
+    index("knowledge_recommendations_status_queue_idx").on(recommendation.status, recommendation.priority, recommendation.createdAt),
     index("knowledge_recommendations_card_version_idx").on(recommendation.knowledgeCardId, recommendation.contentVersion, recommendation.evidenceSetRevision),
     index("knowledge_recommendations_executor_system_created_at_idx").on(recommendation.executorSystem, recommendation.createdAt),
     index("knowledge_recommendations_policy_sampling_diagnostics_idx").on(recommendation.policyId, recommendation.reason, recommendation.knowledgeCardId, recommendation.contentVersion, recommendation.evidenceSetRevision, recommendation.resolvedAt.desc(), recommendation.updatedAt.desc(), recommendation.id.desc()),

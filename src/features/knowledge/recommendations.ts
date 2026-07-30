@@ -1,7 +1,7 @@
 import "server-only";
 
 import { createHash } from "node:crypto";
-import { and, asc, desc, eq, gt, lte, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, inArray, lte, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
 import { disableStaleKnowledgeSearchProjection, enqueueKnowledgeIndexWork } from "@/features/knowledge/indexing-queue";
@@ -23,6 +23,7 @@ export type RecommendationActor = { userId: string; email: string };
 export type KnowledgeRecommendationListItem = {
   id: string;
   status: string;
+  resolution: string | null;
   reason: string;
   priority: number;
   contentVersion: number;
@@ -31,11 +32,25 @@ export type KnowledgeRecommendationListItem = {
   card: Pick<typeof knowledgeCards.$inferSelect, "id" | "title" | "summary" | "conditions" | "publicationState" | "knowledgeState" | "reviewState" | "verificationState" | "contentVersion" | "evidenceSetRevision">;
 };
 
-export async function listKnowledgeRecommendations(input: { status?: "open" | "in_review" | "resolved" | "superseded"; page?: number; reason?: KnowledgeRecommendationReason } = {}, db: RecommendationDb = getDb()) {
+export const knowledgeRecommendationWorkStatusValues = ["actionable", "completed", "inactive"] as const;
+export type KnowledgeRecommendationWorkStatus = (typeof knowledgeRecommendationWorkStatusValues)[number];
+
+export async function getKnowledgeRecommendationWorkStatusCounts(db: RecommendationDb = getDb()) {
+  const rows = await db.select({ status: knowledgeRecommendations.status, count: count() }).from(knowledgeRecommendations).groupBy(knowledgeRecommendations.status);
+  return rows.reduce<Record<KnowledgeRecommendationWorkStatus, number>>((counts, row) => {
+    if (row.status === "open" || row.status === "in_review") counts.actionable += row.count;
+    if (row.status === "resolved") counts.completed += row.count;
+    if (row.status === "superseded") counts.inactive += row.count;
+    return counts;
+  }, { actionable: 0, completed: 0, inactive: 0 });
+}
+
+export async function listKnowledgeRecommendations(input: { workStatus?: KnowledgeRecommendationWorkStatus; page?: number; reason?: KnowledgeRecommendationReason } = {}, db: RecommendationDb = getDb()) {
   const page = Math.max(1, Math.trunc(input.page ?? 1));
-  const where = and(input.status ? eq(knowledgeRecommendations.status, input.status) : sql`${knowledgeRecommendations.status} in ('open', 'in_review')`, input.reason ? eq(knowledgeRecommendations.reason, input.reason) : undefined);
+  const statuses = input.workStatus === "completed" ? ["resolved"] as const : input.workStatus === "inactive" ? ["superseded"] as const : ["open", "in_review"] as const;
+  const where = and(inArray(knowledgeRecommendations.status, statuses), input.reason ? eq(knowledgeRecommendations.reason, input.reason) : undefined);
   return db.select({
-    id: knowledgeRecommendations.id, status: knowledgeRecommendations.status, reason: knowledgeRecommendations.reason, priority: knowledgeRecommendations.priority,
+    id: knowledgeRecommendations.id, status: knowledgeRecommendations.status, resolution: knowledgeRecommendations.resolution, reason: knowledgeRecommendations.reason, priority: knowledgeRecommendations.priority,
     contentVersion: knowledgeRecommendations.contentVersion, evidenceSetRevision: knowledgeRecommendations.evidenceSetRevision, createdAt: knowledgeRecommendations.createdAt,
     card: { id: knowledgeCards.id, title: knowledgeCards.title, summary: knowledgeCards.summary, conditions: knowledgeCards.conditions, publicationState: knowledgeCards.publicationState, knowledgeState: knowledgeCards.knowledgeState, reviewState: knowledgeCards.reviewState, verificationState: knowledgeCards.verificationState, contentVersion: knowledgeCards.contentVersion, evidenceSetRevision: knowledgeCards.evidenceSetRevision },
   }).from(knowledgeRecommendations).innerJoin(knowledgeCards, eq(knowledgeCards.id, knowledgeRecommendations.knowledgeCardId)).where(where).orderBy(asc(knowledgeRecommendations.priority), asc(knowledgeRecommendations.createdAt)).limit(25).offset((page - 1) * 25) as Promise<KnowledgeRecommendationListItem[]>;
