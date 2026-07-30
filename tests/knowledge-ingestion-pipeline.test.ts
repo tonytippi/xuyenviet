@@ -163,6 +163,19 @@ describe("knowledge ingestion pipeline", () => {
     await expect(testDb.select({ stage: knowledgeIngestionCandidates.stage, practicalDetails: knowledgeIngestionCandidates.practicalDetails }).from(knowledgeIngestionCandidates).where(eq(knowledgeIngestionCandidates.captureVersionId, capture.id))).resolves.toEqual([{ stage: "relating", practicalDetails: { tips: [shortTip] } }]);
   });
 
+  test("v2 ignores empty practical detail arrays", async () => {
+    const rawText = "Đèo Hải Vân có điểm dừng ngắm cảnh an toàn vào ban ngày.";
+    const capture = await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText, metadata: { kind: "submitted" } });
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ model: "extract-model", choices: [{ message: { content: JSON.stringify({ candidates: [candidate(rawText, { practical_details: { tips: ["Dừng lại ban ngày"], cost_notes: [] } })] }) } }] }), { status: 200 }))
+      .mockResolvedValueOnce(batchGroundingResponse([{ candidateId: 0, quote: rawText }]));
+    const claim = await claimNextKnowledgeIngestionJob({ workerId: "v2-empty-practical-detail", now: new Date(Date.now() + 1_000) }, testDb);
+    if (!claim) throw new Error("expected discovery claim");
+    await runKnowledgeIngestionPipeline(claim, testDb);
+
+    await expect(testDb.select({ stage: knowledgeIngestionCandidates.stage, practicalDetails: knowledgeIngestionCandidates.practicalDetails }).from(knowledgeIngestionCandidates).where(eq(knowledgeIngestionCandidates.captureVersionId, capture.id))).resolves.toEqual([{ stage: "relating", practicalDetails: { tips: ["Dừng lại ban ngày"] } }]);
+  });
+
   test.each([
     ["missing practical payload", { practical_details: undefined, tags: undefined }, "candidate_invalid_structure"],
     ["malformed practical payload", { practical_details: [] }, "candidate_invalid_structure"],

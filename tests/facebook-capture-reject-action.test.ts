@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { aiGatewayModels, aiUsageEvents, auditEvents, facebookCaptureReviews, knowledgeCards, knowledgeIngestionCandidates, knowledgeIngestionJobs, rawSourceMaterial, sourceCaptureVersions, sources, userRoles, users, type UserRole } from "@/db/schema";
+import { aiGatewayModels, aiUsageEvents, auditEvents, facebookCaptureReviews, knowledgeCardEvidence, knowledgeCards, knowledgeCardSources, knowledgeIngestionCandidates, knowledgeIngestionJobs, rawSourceMaterial, sourceCaptureVersions, sources, userRoles, users, type UserRole } from "@/db/schema";
 import { ensureFacebookCaptureReviewForCapturedSource, listFacebookCaptureReviews, markFacebookCaptureReviewStatus } from "@/features/knowledge/facebook-capture-review";
 import { listQueuedFacebookSources } from "@/features/knowledge/facebook-capture";
 
@@ -132,7 +132,7 @@ describe("Facebook capture reject and reopen actions", () => {
     await expect(testDb.select().from(facebookCaptureReviews).where(eq(facebookCaptureReviews.id, review.id))).resolves.toMatchObject([{ status: "needs_review" }]);
   });
 
-  test("operator can re-run an active v2 canonical job without changing the capture or canonical cards", async () => {
+  test("operator rerun supersedes cards supported only by the replayed capture", async () => {
     authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
     const review = await createCapturedFacebookReview({ id: "retry-canonical", rawText: "Raw Facebook text with a safe travel fact." });
     if (!review.captureVersionId) throw new Error("Expected capture version");
@@ -140,6 +140,8 @@ describe("Facebook capture reject and reopen actions", () => {
     await testDb.insert(knowledgeIngestionJobs).values({ id: "retry-canonical-job", sourceId: review.sourceId, captureVersionId: review.captureVersionId, submittedByUserId: "operator-user", submittedByEmail: "operator-user@example.com", protocolVersion: 2, stage: "queued", stageVersion: 2, attemptCount: 1, maxAttempts: 3, nextRunAt: new Date(), discoveredCandidateCount: 1, terminalCandidateCount: 0, rawDiscoveryResponse: "{\"candidates\":[]}", claimedBy: "worker", claimedAt: new Date(), leaseExpiresAt: new Date(Date.now() + 60_000), fencingToken: "a".repeat(64) });
     await testDb.insert(knowledgeIngestionCandidates).values({ ingestionJobId: "retry-canonical-job", sourceId: review.sourceId, captureVersionId: review.captureVersionId, fingerprint: "a".repeat(64), type: "general_travel_tip", title: "Candidate extraction rejected", summary: "Rejected during structural validation.", conditions: [], freshnessSensitive: false, spanStart: 0, spanEnd: 1, extractionModelId: "model", extractionPromptVersion: "prompt", stage: "queued", stageVersion: 1, claimedBy: "worker", claimedAt: new Date(), leaseExpiresAt: new Date(Date.now() + 60_000), fencingToken: "b".repeat(64) });
     await testDb.insert(knowledgeCards).values({ id: "existing-card", status: "approved", type: "place", title: "Canonical card remains", summary: "Created by an earlier candidate.", locationName: "Đà Nẵng", conditions: [], confidence: "community", freshnessSensitive: false, aiPromptVersion: "old", createdByUserId: "operator-user" });
+    await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: "existing-card", sourceId: review.sourceId });
+    await testDb.insert(knowledgeCardEvidence).values({ knowledgeCardId: "existing-card", sourceId: review.sourceId, captureVersionId: review.captureVersionId, quoteText: "Raw Facebook text", spanStart: 0, spanEnd: 17, observedAt: new Date(), capturedAt: new Date(), supportLevel: "supporting", displayPolicy: "operator_only", state: "active", independenceKey: review.sourceId });
     const { rerunFacebookCanonicalIngestionForm } = await import("@/features/knowledge/actions");
 
     await expect(rerunFacebookCanonicalIngestionForm(formData({ reviewId: review.id }))).rejects.toThrow(/NEXT_REDIRECT:.*ingestionRerun=1/);
@@ -147,6 +149,6 @@ describe("Facebook capture reject and reopen actions", () => {
     await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, "retry-canonical-job"))).resolves.toMatchObject([{ stage: "queued", stageVersion: 3, attemptCount: 0, discoveredCandidateCount: 0, terminalCandidateCount: 0, requeueReasonCode: "operator_rerun_current_pipeline", rawDiscoveryResponse: null, claimedBy: null, fencingToken: null }]);
     await expect(testDb.select().from(knowledgeIngestionCandidates).where(eq(knowledgeIngestionCandidates.ingestionJobId, "retry-canonical-job"))).resolves.toEqual([]);
     await expect(testDb.select().from(sourceCaptureVersions).where(eq(sourceCaptureVersions.id, review.captureVersionId))).resolves.toMatchObject([{ rawText: "Raw Facebook text with a safe travel fact." }]);
-    await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, "existing-card"))).resolves.toHaveLength(1);
+    await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, "existing-card"))).resolves.toMatchObject([{ publicationState: "suppressed", knowledgeState: "superseded", needsReview: false }]);
   });
 });

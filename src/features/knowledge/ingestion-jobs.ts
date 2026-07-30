@@ -2,10 +2,10 @@ import "server-only";
 
 import { randomBytes, randomUUID } from "node:crypto";
 
-import { and, asc, eq, gt, isNull, lte, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, lte, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { knowledgeIngestionCandidates, knowledgeIngestionJobs, knowledgeCardTypeValues, sourceCaptureVersions, sources, users } from "@/db/schema";
+import { knowledgeCardEvidence, knowledgeCardSearchDocuments, knowledgeCardSources, knowledgeCards, knowledgeIngestionCandidates, knowledgeIngestionJobs, knowledgeRecommendations, knowledgeCardTypeValues, sourceCaptureVersions, sources, users } from "@/db/schema";
 
 type IngestionJobDb = Pick<ReturnType<typeof getDb>, "select" | "insert" | "update" | "delete" | "execute" | "transaction">;
 type Stage = typeof knowledgeIngestionJobs.$inferSelect.stage;
@@ -57,9 +57,31 @@ export async function rerunKnowledgeIngestionJob(input: { jobId: string; sourceI
   const now = input.now ?? new Date();
   const [job] = await db.select({ id: knowledgeIngestionJobs.id, protocolVersion: knowledgeIngestionJobs.protocolVersion, stage: knowledgeIngestionJobs.stage, stageVersion: knowledgeIngestionJobs.stageVersion }).from(knowledgeIngestionJobs).where(and(eq(knowledgeIngestionJobs.id, input.jobId), eq(knowledgeIngestionJobs.sourceId, input.sourceId), eq(knowledgeIngestionJobs.captureVersionId, input.captureVersionId))).limit(1).for("update");
   if (!job || job.protocolVersion !== 2) return null;
+  await supersedeCaptureOnlyCards(input, db, now);
   await db.delete(knowledgeIngestionCandidates).where(eq(knowledgeIngestionCandidates.ingestionJobId, job.id));
   const [rerun] = await db.update(knowledgeIngestionJobs).set({ stage: "queued", discoveredCandidateCount: 0, terminalCandidateCount: 0, publishedCandidateCount: 0, suppressedCandidateCount: 0, reviewRecommendedCandidateCount: 0, verifyFirstCandidateCount: 0, failedCandidateCount: 0, invalidCandidateCount: 0, stageVersion: sql`${knowledgeIngestionJobs.stageVersion} + 1`, attemptCount: 0, nextRunAt: now, lastErrorCode: null, requeueReasonCode: "operator_rerun_current_pipeline", rawDiscoveryResponse: null, checkpoint: null, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, updatedAt: now }).where(and(eq(knowledgeIngestionJobs.id, job.id), eq(knowledgeIngestionJobs.stage, job.stage), eq(knowledgeIngestionJobs.stageVersion, job.stageVersion))).returning({ id: knowledgeIngestionJobs.id });
   return rerun ?? null;
+}
+
+async function supersedeCaptureOnlyCards(input: { sourceId: string; captureVersionId: string }, db: IngestionJobDb, now: Date) {
+  const cards = await db.select({ id: knowledgeCards.id }).from(knowledgeCards)
+    .innerJoin(knowledgeCardSources, eq(knowledgeCardSources.knowledgeCardId, knowledgeCards.id))
+    .innerJoin(knowledgeCardEvidence, eq(knowledgeCardEvidence.knowledgeCardId, knowledgeCards.id))
+    .where(and(
+      eq(knowledgeCardSources.sourceId, input.sourceId),
+      eq(knowledgeCardEvidence.sourceId, input.sourceId),
+      eq(knowledgeCardEvidence.captureVersionId, input.captureVersionId),
+      eq(knowledgeCardEvidence.state, "active"),
+      sql`not exists (select 1 from knowledge_card_sources other_source where other_source.knowledge_card_id = ${knowledgeCards.id} and other_source.source_id <> ${input.sourceId})`,
+      sql`not exists (select 1 from knowledge_card_evidence other_evidence where other_evidence.knowledge_card_id = ${knowledgeCards.id} and other_evidence.state = 'active' and (other_evidence.source_id <> ${input.sourceId} or other_evidence.capture_version_id <> ${input.captureVersionId}))`,
+    ))
+    .for("update");
+  const cardIds = [...new Set(cards.map((card) => card.id))];
+  if (cardIds.length === 0) return;
+
+  await db.update(knowledgeCards).set({ publicationState: "suppressed", knowledgeState: "superseded", reviewState: "ai_recommended", needsReview: false, contentVersion: sql`${knowledgeCards.contentVersion} + 1`, updatedAt: now }).where(inArray(knowledgeCards.id, cardIds));
+  await db.update(knowledgeRecommendations).set({ status: "superseded", resolution: "accepted", resolvedAt: now, executorSystem: "system-knowledge-pipeline", updatedAt: now }).where(and(inArray(knowledgeRecommendations.knowledgeCardId, cardIds), inArray(knowledgeRecommendations.status, ["open", "in_review"])));
+  await db.update(knowledgeCardSearchDocuments).set({ status: "disabled", disabledAt: now, updatedAt: now }).where(and(inArray(knowledgeCardSearchDocuments.knowledgeCardId, cardIds), eq(knowledgeCardSearchDocuments.status, "active")));
 }
 
 export async function claimNextKnowledgeIngestionCandidate(input: { workerId: string; now?: Date }, db: IngestionJobDb = getDb()): Promise<KnowledgeIngestionCandidateClaim | null> {

@@ -18,6 +18,7 @@ export function normalizePracticalDetails(value: unknown): PracticalDetails | nu
     const safeKey = bounded(key, 60);
     const safeValue = normalizeDetailValue(safeKey, detailValue);
     if (!safeKey || safeValue === null) return null;
+    if (Array.isArray(safeValue) && safeValue.length === 0) continue;
     details[safeKey] = safeValue;
   }
   return details;
@@ -72,6 +73,7 @@ export function mergeTags(target: unknown, incoming: string[]) {
 function normalizeDetailValue(key: string | null, value: unknown): string | string[] | null {
   if (typeof value === "string") return bounded(value, maxDetailStringLength);
   if (!Array.isArray(value) || value.length > (key === "ordered_stops" ? maxOrderedStops : maxDetailArrayItems)) return null;
+  if (value.length === 0) return [];
   const values = value.map((item) => key === "ordered_stops" ? normalizeOrderedStop(item) : bounded(item, maxDetailStringLength));
   return values.length > 0 && values.every((item): item is string => item !== null) ? values : null;
 }
