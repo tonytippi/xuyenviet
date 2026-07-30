@@ -136,7 +136,6 @@ describe("answer annotation validation", () => {
     const proposals = parseAnswerAnnotationProposals(JSON.stringify({
       annotations: [
         { id: "valid", start: 0, end: 3, quote: "Huế", type: "source", provenanceIds: ["prov-knowledge", 123] },
-        { id: "bad-quote", start: 0, end: 3, quote: 123, type: "source", provenanceIds: ["prov-knowledge"] },
         { id: "missing-range", type: "source", provenanceIds: ["prov-knowledge"] },
         "bad",
       ],
@@ -144,6 +143,12 @@ describe("answer annotation validation", () => {
 
     expect(proposals).toEqual([]);
     expect(parseAnswerAnnotationProposals("not json")).toEqual([]);
+    expect(parseAnswerAnnotationProposals(JSON.stringify({
+      annotations: [
+        { id: "bad-quote", start: 0, end: 3, quote: 123, type: "source", provenanceIds: ["prov-knowledge"] },
+        { id: "valid-quote", start: 0, end: 3, quote: "Huế", type: "source", provenanceIds: ["prov-knowledge"] },
+      ],
+    }))).toEqual([{ id: "valid-quote", start: 0, end: 3, quote: "Huế", type: "source", provenanceIds: ["prov-knowledge"] }]);
     expect(parseAnswerAnnotationProposals(JSON.stringify({ annotations: Array.from({ length: 21 }, (_, index) => ({ id: String(index), start: 0, end: 1, type: "warning" })) }))).toEqual([]);
   });
 

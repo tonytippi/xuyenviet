@@ -94,6 +94,7 @@ warnings: []
 - reject: 0
 - addressed_findings:
   - `[medium]` `[patch]` Rejected non-string provider `quote` fields instead of silently dropping them before the exact-slice validation boundary.
+  - `[low]` `[patch]` Isolated the non-string quote parser regression from unrelated malformed fields so the quote boundary is directly proved.
 
 ## Auto Run Result
 
