@@ -1,6 +1,6 @@
 import { toStateAwareKnowledgeBundleItem, type StateAwareKnowledgeBundleItem } from "./approved-knowledge";
 import { assistantResponseProvenance, assistantRetrievalDecisions, type AssistantProvenanceSourceCategory } from "./schema";
-import type { ContextPrioritySourceBundle } from "./source-bundle";
+import type { ContextPrioritySourceBundle, PromptUsageLedger } from "./source-bundle";
 
 const maxSnapshotStringLength = 500;
 const maxSnapshotArrayItems = 5;
@@ -48,9 +48,9 @@ export async function persistAssistantAnswerProvenance(db: ProvenanceDb, input: 
   assistantMessageId: string;
   tripAnswerContextSnapshotId?: string | null;
   sourceBundle: ContextPrioritySourceBundle;
-  promptSection: string;
+  promptUsage?: PromptUsageLedger;
 }) {
-  const { userId, conversationId, userMessageId, assistantMessageId, tripAnswerContextSnapshotId, sourceBundle, promptSection } = input;
+  const { userId, conversationId, userMessageId, assistantMessageId, tripAnswerContextSnapshotId, sourceBundle, promptUsage } = input;
 
   await db.insert(assistantRetrievalDecisions).values({
     userId,
@@ -73,7 +73,7 @@ export async function persistAssistantAnswerProvenance(db: ProvenanceDb, input: 
     knowledgePolicySnapshot: sourceBundle.retrievalDecision.knowledgePolicySummary ?? null,
   });
 
-  const rows = buildProvenanceRows({ userId, conversationId, userMessageId, assistantMessageId, tripAnswerContextSnapshotId, sourceBundle, promptSection });
+  const rows = buildProvenanceRows({ userId, conversationId, userMessageId, assistantMessageId, tripAnswerContextSnapshotId, sourceBundle, promptUsage });
 
   if (rows.length > 0) {
     const insertedRows = await db.insert(assistantResponseProvenance).values(rows).returning();
@@ -119,7 +119,7 @@ function buildProvenanceRows({
   assistantMessageId,
   tripAnswerContextSnapshotId,
   sourceBundle,
-  promptSection,
+  promptUsage,
 }: {
   userId: string;
   conversationId: string;
@@ -127,17 +127,17 @@ function buildProvenanceRows({
   assistantMessageId: string;
   tripAnswerContextSnapshotId?: string | null;
   sourceBundle: ContextPrioritySourceBundle;
-  promptSection: string;
+  promptUsage?: PromptUsageLedger;
 }) {
   const rows: Array<typeof assistantResponseProvenance.$inferInsert> = [];
   let rank = 1;
 
-  for (const fact of sourceBundle.chatTripContext.tripProjectFacts) {
-    rows.push(createRow({ userId, conversationId, userMessageId, assistantMessageId, tripAnswerContextSnapshotId, rank: rank++, sourceCategory: "trip_context", verificationStatus: "verified", sourceType: fact.field, usedInPrompt: promptSection.includes(`${fact.field}: ${formatPromptValue(fact.value)}`), sourceSnapshot: { field: fact.field, source: fact.source } }));
+  for (const [index, fact] of sourceBundle.chatTripContext.tripProjectFacts.entries()) {
+    rows.push(createRow({ userId, conversationId, userMessageId, assistantMessageId, tripAnswerContextSnapshotId, rank: rank++, sourceCategory: "trip_context", verificationStatus: "verified", sourceType: fact.field, usedInPrompt: promptUsage?.tripProjectFactIndexes.includes(index) ?? false, sourceSnapshot: { field: fact.field, source: fact.source } }));
   }
 
-  for (const fact of sourceBundle.chatTripContext.chatFacts) {
-    rows.push(createRow({ userId, conversationId, userMessageId, assistantMessageId, tripAnswerContextSnapshotId, rank: rank++, sourceCategory: "chat_context", verificationStatus: "verified", sourceType: fact.field, usedInPrompt: promptSection.includes(`${fact.field}: ${formatPromptValue(fact.value)}`), sourceSnapshot: { field: fact.field, source: fact.source } }));
+  for (const [index, fact] of sourceBundle.chatTripContext.chatFacts.entries()) {
+    rows.push(createRow({ userId, conversationId, userMessageId, assistantMessageId, tripAnswerContextSnapshotId, rank: rank++, sourceCategory: "chat_context", verificationStatus: "verified", sourceType: fact.field, usedInPrompt: promptUsage?.chatFactIndexes.includes(index) ?? false, sourceSnapshot: { field: fact.field, source: fact.source } }));
   }
 
   for (const knowledge of sourceBundle.knowledge) {
@@ -155,7 +155,7 @@ function buildProvenanceRows({
       retrievalScore: result.score,
       sourceType: result.type,
         verificationStatus: result.verificationState === "required" || result.evidence.some((evidence) => evidence.verificationStatus === "unverified") ? "unverified" : "verified",
-      usedInPrompt: promptSection.includes(`cardId=${formatPromptValue(result.cardId)}`),
+      usedInPrompt: promptUsage?.knowledgeCardIds.includes(result.cardId) ?? false,
       sourceSnapshot: buildStateAwareKnowledgeSnapshot(result),
     }));
   }
@@ -174,7 +174,7 @@ function buildProvenanceRows({
       retrievalScore: result.providerScore,
       sourceType: result.sourceType,
       verificationStatus: "unverified",
-      usedInPrompt: promptSection.includes(`url=${formatPromptValue(result.url, 300)}`) || promptSection.includes(`title=${formatPromptValue(result.title, 180)}`),
+      usedInPrompt: promptUsage?.webRanks.includes(result.rank) ?? false,
       sourceSnapshot: {
         title: getSafeWebTitle(result.title),
         url: getSafeTravelerUrl(result.url),
@@ -200,7 +200,7 @@ function buildProvenanceRows({
       sourceCategory: "general",
       sourceType: "general_reasoning",
       verificationStatus: "unverified",
-      usedInPrompt: promptSection.includes("Suy luận tổng quát"),
+      usedInPrompt: promptUsage?.generalReasoningUsed ?? false,
       sourceSnapshot: { available: true, note: "General AI reasoning may be used only after prioritized context/source data." },
     }));
   }
@@ -273,20 +273,6 @@ function createRow(input: {
     citedInAnswer: false,
     sourceSnapshot: boundSnapshot(input.sourceSnapshot),
   };
-}
-
-function formatPromptValue(value: string, maxLength = 280) {
-  return JSON.stringify(clip(value, maxLength));
-}
-
-function clip(value: string, maxLength: number) {
-  const normalized = value.replace(/\s+/g, " ").trim();
-
-  if (normalized.length <= maxLength) {
-    return normalized;
-  }
-
-  return `${normalized.slice(0, maxLength - 1).trim()}…`;
 }
 
 function formatDateSnapshot(value: Date) {

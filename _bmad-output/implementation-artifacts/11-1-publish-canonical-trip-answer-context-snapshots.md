@@ -165,3 +165,43 @@ gpt-5.6-terra-review
 ### File List
 
 - `_bmad-output/implementation-artifacts/11-1-publish-canonical-trip-answer-context-snapshots.md`
+
+## Independent Code Review
+
+### Review Metadata
+
+- Date: 2026-07-30
+- Range: `2847c3d87585033af95edc86c6f3d817ba976a43..8d10523284c05be574f8f6630f2154c87c682b7c`
+- Result: blocked; five actionable patch findings remain.
+- Review layers: Blind Hunter, Edge Case Hunter, and Acceptance Auditor all completed synchronously.
+
+### Actionable Findings
+
+1. **[HIGH][patch] Preserve prior Trip Project deletion behavior.** `src/features/chat-trips/trip-projects.ts:441-451` now unlinks linked conversations rather than deleting them. Their retained messages and answer-side records can preserve content that had been associated with the deleted Trip Project. Restore the established conversation deletion/scrubbing behavior or obtain an explicit, authoritative privacy/product decision before retaining those histories.
+2. **[HIGH][patch] Enforce snapshot deletion for every Trip Project delete path.** `drizzle/migrations/0015_trip_answer_context_snapshots.sql:1-27` and `drizzle/migrations/0017_clear_ai_ask_snapshot_on_scrub.sql:1-39` do not associate snapshots with the source Trip Project or delete them from the project-delete trigger. A direct database/admin project deletion can detach conversations while leaving a snapshot serialization containing the deleted structured state. Add database-enforced project-deletion cleanup.
+3. **[MEDIUM][patch] Do not modify applied migration `0013`.** `drizzle/migrations/0013_scrub_retained_ai_ask_commands_on_message_delete.sql:1-43` now refers to `trip_answer_context_snapshot_id`, which is added only in later migration `0016`. Restore the historical migration and retain the new trigger behavior in forward-only migrations, so fresh and upgraded schema histories are reproducible.
+4. **[MEDIUM][patch] Replace substring prompt-usage inference with the render ledger.** `packages/database/src/provenance.ts:135-203` continues to set `usedInPrompt` through `promptSection.includes(...)`. This is explicitly prohibited by AC3 and can create false positives. Thread explicit selected-reference metadata from `renderSourceBundlePromptSection` into provenance persistence.
+5. **[MEDIUM][patch] Add execution-level immutable snapshot regression coverage.** The range has renderer and direct-row tests but no `tests/ai-ask-stream-execution.test.ts` coverage proving the completed stream persists the exact post-compaction section/digest/references and links command, provenance, usage, and evaluation to it; stale fence and deletion races also need proof that no partial snapshot or successful terminal state remains.
+
+### Triage Notes
+
+- **Dismissed:** Edge Case Hunter suggested a typed conflict for conversation chat disagreement with structured constraints. `chat_context` has no constraint-field mapping in the v1 contract, so this is not a reachable field-level precedence path from the supplied diff.
+- **Deferred:** none.
+
+### Review Evidence
+
+- Blind Hunter completed with findings 1-3.
+- Edge Case Hunter completed with the deletion retention finding and one dismissed constraint suggestion.
+- Acceptance Auditor found AC1 and AC2 satisfied; AC3 partial because prompt-usage evidence remains substring-based; scope failed on deletion retention; it identified findings 1, 4, and 5.
+- Review-layer focused verification reported 310 PostgreSQL tests across the requested suites passing; `pnpm typecheck`, `pnpm build`, and requested-range `git diff --check` passed; `pnpm lint` passed with five pre-existing warnings.
+
+### Independent Review Repair
+
+- Date: 2026-07-30
+- Scope: repaired only the five actionable independent-review findings.
+- Restored project deletion to delete linked conversations and their dependent content instead of unlinking retained histories.
+- Added forward-only migration `0018_delete_trip_answer_context_snapshots_with_project` and schema ownership so direct Trip Project deletion cascades snapshots; restored applied migration `0013` and retained snapshot-reference scrubbing in forward migration `0017`.
+- Replaced prompt substring inference with an explicit renderer-owned usage ledger passed into provenance persistence.
+- Added execution-level persistence coverage for exact rendered snapshot evidence, command/provenance/usage links, and aggregate/deletion fence races with no partial terminal records.
+- Verification: serial focused PostgreSQL matrix (7 files, 288 passed), `pnpm typecheck`, `pnpm build`, and `git diff --check` passed. `pnpm lint` had zero errors and five pre-existing unrelated warnings.
+- Status intentionally returned to `ready-for-dev`; the story is not marked done pending follow-up independent review.

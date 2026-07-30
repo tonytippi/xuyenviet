@@ -127,6 +127,13 @@
       "when": 1785338300000,
       "tag": "0017_clear_ai_ask_snapshot_on_scrub",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1785338400000,
+      "tag": "0018_delete_trip_answer_context_snapshots_with_project",
+      "breakpoints": true
     }
   ]
 }

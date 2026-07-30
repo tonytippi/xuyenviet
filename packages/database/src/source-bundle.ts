@@ -494,7 +494,8 @@ function normalizeForMatch(value: string) {
 
 export type TripContextReference = { kind: "anchor" | "plan_item" | "constraint" | "conversation_fact"; id: string; version: number | null };
 export type TripContextExclusion = TripContextReference & { reason: "prompt_cap" | "not_rendered" | "snapshot_bound" };
-export type RenderedSourceBundle = { section: string; tripContext: { version: 1; aggregateVersion: number | null; included: TripContextReference[]; excluded: TripContextExclusion[]; conflicts: TripAnswerContext["conflicts"]; serialization: string; promptDigest: string } };
+export type PromptUsageLedger = { tripProjectFactIndexes: number[]; chatFactIndexes: number[]; knowledgeCardIds: string[]; webRanks: number[]; generalReasoningUsed: boolean };
+export type RenderedSourceBundle = { section: string; tripContext: { version: 1; aggregateVersion: number | null; included: TripContextReference[]; excluded: TripContextExclusion[]; conflicts: TripAnswerContext["conflicts"]; serialization: string; promptDigest: string }; promptUsage: PromptUsageLedger };
 
 export function renderSourceBundlePromptSection(bundle: ContextPrioritySourceBundle): RenderedSourceBundle {
   const lines = [
@@ -521,14 +522,15 @@ export function renderSourceBundlePromptSection(bundle: ContextPrioritySourceBun
 
   const section = lines.join("\n");
 
-  if (section.length <= maxSourceBundleSectionLength) return buildRenderedSourceBundle(bundle, section, maxContextFacts);
+  if (section.length <= maxSourceBundleSectionLength) return buildRenderedSourceBundle(bundle, section, { contextLimit: maxContextFacts, knowledge: bundle.knowledge.filter(isFactualItineraryPremise), web: bundle.web.slice(0, maxWebResultsInPrompt) });
   const compacted = buildCompactedSourceBundlePromptSection(bundle);
-  return buildRenderedSourceBundle(bundle, compacted.section, compacted.contextLimit);
+  return buildRenderedSourceBundle(bundle, compacted.section, compacted);
 }
 
 export function buildSourceBundlePromptSection(bundle: ContextPrioritySourceBundle) { return renderSourceBundlePromptSection(bundle).section; }
 
-function buildRenderedSourceBundle(bundle: ContextPrioritySourceBundle, section: string, contextLimit: number): RenderedSourceBundle {
+function buildRenderedSourceBundle(bundle: ContextPrioritySourceBundle, section: string, selection: { contextLimit: number; knowledge: KnowledgeSearchResult[]; web: NormalizedWebSearchResult[] }): RenderedSourceBundle {
+  const { contextLimit } = selection;
   const context = bundle.tripAnswerContext ?? { version: 1 as const, hasProjectScope: false, tripProjectId: null, aggregateVersion: null, primaryConversationId: null, anchors: bundle.chatTripContext.tripProjectFacts, planItems: [], constraints: null, currentConversationFacts: bundle.chatTripContext.chatFacts, conflicts: bundle.chatTripContext.conflicts };
   const references: TripContextReference[] = [
     ...context.anchors.map((fact) => ({ kind: "anchor" as const, id: fact.field, version: null })),
@@ -555,7 +557,30 @@ function buildRenderedSourceBundle(bundle: ContextPrioritySourceBundle, section:
     return { field: conflict.field, canonicalValue, lowerPriorityValue, projectValue: canonicalValue, conversationValue: lowerPriorityValue, source: conflict.source ?? "conversation_chat", priority: conflict.priority ?? "lower", material: conflict.material ?? true };
   });
   const serialization = boundSnapshotSerialization({ version: context.version, aggregateVersion: context.aggregateVersion, primaryConversationId: boundSnapshotId(context.primaryConversationId), anchors: context.anchors, planItems: context.planItems, constraints: context.constraints, currentConversationFacts: context.currentConversationFacts, conflicts });
-  return { section, tripContext: { version: 1, aggregateVersion: context.aggregateVersion, included, excluded, conflicts, serialization, promptDigest: createHash("sha256").update(section).digest("hex") } };
+  return {
+    section,
+    tripContext: { version: 1, aggregateVersion: context.aggregateVersion, included, excluded, conflicts, serialization, promptDigest: createHash("sha256").update(section).digest("hex") },
+    promptUsage: {
+      tripProjectFactIndexes: selectedFactIndexes(bundle.chatTripContext.tripProjectFacts, renderedTripFacts),
+      chatFactIndexes: selectedFactIndexes(bundle.chatTripContext.chatFacts, renderedChatFacts),
+      knowledgeCardIds: selection.knowledge.map((item) => item.id),
+      webRanks: selection.web.map((item) => item.rank),
+      generalReasoningUsed: true,
+    },
+  };
+}
+
+function selectedFactIndexes(facts: AnswerContextFact[], rendered: AnswerContextFact[]) {
+  const indexes: number[] = [];
+  const consumed = new Set<number>();
+  for (const renderedFact of rendered) {
+    const index = facts.findIndex((fact, candidate) => !consumed.has(candidate) && fact.field === renderedFact.field && fact.value === renderedFact.value && fact.source === renderedFact.source);
+    if (index >= 0) {
+      consumed.add(index);
+      indexes.push(index);
+    }
+  }
+  return indexes;
 }
 
 function appendStructuredTripContext(lines: string[], context: TripAnswerContext | undefined, limit = maxContextFacts) {
@@ -564,7 +589,7 @@ function appendStructuredTripContext(lines: string[], context: TripAnswerContext
   for (const item of context.planItems.slice(0, limit)) lines.push(`- planItem=${JSON.stringify(item.id)} version=${item.version} kind=${item.kind} anchorRole=${JSON.stringify(item.anchorRole)} type=${JSON.stringify(item.type)} state=${item.state} label=${formatPromptValue(item.label, 160)} ordinal=${item.ordinal} parentItemId=${JSON.stringify(item.parentItemId)}`);
 }
 
-function buildCompactedSourceBundlePromptSection(bundle: ContextPrioritySourceBundle): { section: string; contextLimit: number } {
+function buildCompactedSourceBundlePromptSection(bundle: ContextPrioritySourceBundle): { section: string; contextLimit: number; knowledge: KnowledgeSearchResult[]; web: NormalizedWebSearchResult[] } {
   const lines = [
     "Gói nguồn ưu tiên cho AI Ask",
     "BEGIN_CONTEXT_PRIORITY_SOURCE_BUNDLE",
@@ -589,11 +614,11 @@ function buildCompactedSourceBundlePromptSection(bundle: ContextPrioritySourceBu
 
   const section = lines.join("\n");
   return section.length <= maxSourceBundleSectionLength
-    ? { section, contextLimit: 10 }
+    ? { section, contextLimit: 10, knowledge: bundle.knowledge.filter(isFactualItineraryPremise).slice(0, 1), web: bundle.web.slice(0, 2) }
     : buildMinimalSourceBundlePromptSection(bundle);
 }
 
-function buildMinimalSourceBundlePromptSection(bundle: ContextPrioritySourceBundle): { section: string; contextLimit: number } {
+function buildMinimalSourceBundlePromptSection(bundle: ContextPrioritySourceBundle): { section: string; contextLimit: number; knowledge: KnowledgeSearchResult[]; web: NormalizedWebSearchResult[] } {
   const lines = [
     "Gói nguồn ưu tiên cho AI Ask",
     "BEGIN_CONTEXT_PRIORITY_SOURCE_BUNDLE",
@@ -616,7 +641,8 @@ function buildMinimalSourceBundlePromptSection(bundle: ContextPrioritySourceBund
   const footer = "\n5. Suy luận tổng quát: chỉ dùng sau các nguồn trên; phải nói rõ khi câu trả lời chỉ là gợi ý tổng quát.\nEND_CONTEXT_PRIORITY_SOURCE_BUNDLE";
   const withWeb = [...lines];
   appendWebSection(withWeb, bundle.web.slice(0, 1), bundle.warnings);
-  if (`${withWeb.join("\n")}${footer}`.length <= maxSourceBundleSectionLength) {
+  const includesWeb = `${withWeb.join("\n")}${footer}`.length <= maxSourceBundleSectionLength;
+  if (includesWeb) {
     lines.push(...withWeb.slice(lines.length));
   }
   lines.push("5. Suy luận tổng quát: chỉ dùng sau các nguồn trên; phải nói rõ khi câu trả lời chỉ là gợi ý tổng quát.");
@@ -624,7 +650,7 @@ function buildMinimalSourceBundlePromptSection(bundle: ContextPrioritySourceBund
 
   const section = lines.join("\n");
   if (section.length <= maxSourceBundleSectionLength) {
-    return { section, contextLimit: 1 };
+    return { section, contextLimit: 1, knowledge: bundle.knowledge.filter(isFactualItineraryPremise).slice(0, 1), web: includesWeb ? bundle.web.slice(0, 1) : [] };
   }
 
   // Do not truncate arbitrary text: re-render a deterministic essential variant
@@ -640,7 +666,7 @@ function buildMinimalSourceBundlePromptSection(bundle: ContextPrioritySourceBund
   appendWarningSection(essential, bundle.warnings);
   essential.push("5. Suy luận tổng quát: chỉ dùng sau các nguồn trên; phải nói rõ khi câu trả lời chỉ là gợi ý tổng quát.");
   essential.push("END_CONTEXT_PRIORITY_SOURCE_BUNDLE");
-  return { section: essential.join("\n"), contextLimit: 0 };
+  return { section: essential.join("\n"), contextLimit: 0, knowledge: [], web: [] };
 }
 
 function appendRetrievalDecisionSection(lines: string[], decision: RetrievalDecision) {

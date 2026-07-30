@@ -171,7 +171,7 @@ async function streamAnswer({
       abortSignal,
     });
     const renderedSourceBundle = dependencies.buildSourceBundlePromptSection
-      ? { section: dependencies.buildSourceBundlePromptSection(sourceBundle), tripContext: { version: 1 as const, aggregateVersion: null, included: [], excluded: [], conflicts: [], serialization: "{}", promptDigest: "0".repeat(64) } }
+      ? { section: dependencies.buildSourceBundlePromptSection(sourceBundle), tripContext: { version: 1 as const, aggregateVersion: null, included: [], excluded: [], conflicts: [], serialization: "{}", promptDigest: "0".repeat(64) }, promptUsage: { tripProjectFactIndexes: [], chatFactIndexes: [], knowledgeCardIds: [], webRanks: [], generalReasoningUsed: false } }
       : dependencies.renderSourceBundlePromptSection(sourceBundle);
     const contextSection = renderedSourceBundle.section;
     const gatewayMessages = buildAiAskMessages({ question, history: saved.history, contextSection });
@@ -275,6 +275,7 @@ async function streamAnswer({
           userId: fencedCommand.userId,
           conversationId: fencedCommand.conversationId,
           assistantMessageId: assistantMessage.id,
+          tripProjectId: fencedCommand.tripProjectId,
           contextVersion: renderedSourceBundle.tripContext.version,
           aggregateVersion: renderedSourceBundle.tripContext.aggregateVersion,
           includedReferences: renderedSourceBundle.tripContext.included,
@@ -291,7 +292,7 @@ async function streamAnswer({
           assistantMessageId: assistantMessage.id,
           tripAnswerContextSnapshotId: snapshot.id,
           sourceBundle,
-          promptSection: contextSection,
+          promptUsage: renderedSourceBundle.promptUsage,
         });
 
         await writeAiUsageEvent(transaction, {

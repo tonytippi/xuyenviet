@@ -1420,7 +1420,7 @@ describe("answer context assembly", () => {
       conversationId: conversation.id,
       userMessageId: message.id,
       assistantMessageId: assistantMessage.id,
-      promptSection: section,
+      promptUsage: { tripProjectFactIndexes: [], chatFactIndexes: [], knowledgeCardIds: [knowledge.id], webRanks: [], generalReasoningUsed: false },
       sourceBundle: createSourceBundle({ knowledge: [knowledge] }),
     });
     const [row] = await testDb.select().from(assistantResponseProvenance).where(eq(assistantResponseProvenance.sourceReferenceId, "state-aware-card"));
@@ -1462,7 +1462,7 @@ describe("answer context assembly", () => {
       conversationId: conversation.id,
       userMessageId: message.id,
       assistantMessageId: assistantMessage.id,
-      promptSection: section,
+      promptUsage: { tripProjectFactIndexes: [], chatFactIndexes: [], knowledgeCardIds: [knowledge.id], webRanks: [], generalReasoningUsed: false },
       sourceBundle: createSourceBundle({ knowledge: [knowledge] }),
     });
     const [row] = await testDb.select().from(assistantResponseProvenance).where(eq(assistantResponseProvenance.sourceReferenceId, knowledge.id));
@@ -1505,7 +1505,7 @@ describe("answer context assembly", () => {
       conversationId: conversation.id,
       userMessageId: message.id,
       assistantMessageId: assistantMessage.id,
-      promptSection: section,
+      promptUsage: { tripProjectFactIndexes: [], chatFactIndexes: [], knowledgeCardIds: [knowledge.id], webRanks: [], generalReasoningUsed: false },
       sourceBundle: createSourceBundle({ knowledge: [knowledge] }),
     });
     const [row] = await testDb.select().from(assistantResponseProvenance).where(eq(assistantResponseProvenance.sourceReferenceId, knowledge.id));
@@ -1614,20 +1614,17 @@ describe("answer context assembly", () => {
     await createTestUser("user-1");
     const { conversation, message } = await createConversationWithUserMessage({ userId: "user-1" });
     const [assistantMessage] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "assistant", content: "Gợi ý cần kiểm tra." }).returning({ id: messages.id });
-    const { buildApprovedKnowledgePromptSection } = await import("@/features/retrieval/approved-knowledge");
     const { persistAssistantAnswerProvenance } = await import("@/features/retrieval/provenance");
     const knowledge = makeKnowledgeResult("unverified-evidence-card", "Quan sát cộng đồng", {
       verificationState: "not_required",
       evidence: [{ evidenceId: "unverified-evidence", sourceId: "community-source", supportLevel: "primary", displayPolicy: "fact_only", sourceLabel: "Nguồn cộng đồng", sourceType: "community", verificationStatus: "unverified", official: false, partner: false, collectedDate: null, observedAt: "2026-07-10T00:00:00.000Z", url: null, quote: null }],
     });
-    const section = buildApprovedKnowledgePromptSection([knowledge]);
-
     await persistAssistantAnswerProvenance(testDb, {
       userId: "user-1",
       conversationId: conversation.id,
       userMessageId: message.id,
       assistantMessageId: assistantMessage.id,
-      promptSection: section,
+      promptUsage: { tripProjectFactIndexes: [], chatFactIndexes: [], knowledgeCardIds: [knowledge.id], webRanks: [], generalReasoningUsed: false },
       sourceBundle: createSourceBundle({ knowledge: [knowledge] }),
     });
     const [row] = await testDb.select().from(assistantResponseProvenance).where(eq(assistantResponseProvenance.sourceReferenceId, knowledge.id));
@@ -2284,7 +2281,7 @@ describe("answer context assembly", () => {
       conversationId: conversation.id,
       userMessageId: message.id,
       assistantMessageId: assistantMessage.id,
-      promptSection: 'url="https://example.com/price"',
+      promptUsage: { tripProjectFactIndexes: [], chatFactIndexes: [], knowledgeCardIds: [], webRanks: [1], generalReasoningUsed: false },
       sourceBundle: createSourceBundle({
         retrievalDecision: {
           approvedKnowledgeCandidateCount: 0,

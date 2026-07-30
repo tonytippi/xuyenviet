@@ -18,7 +18,6 @@ BEGIN
     "trip_project_aggregate_version" = NULL,
     "user_message_id" = NULL,
     "assistant_message_id" = NULL,
-    "trip_answer_context_snapshot_id" = NULL,
     "normalized_question" = '[discarded]',
     "attachment_metadata" = NULL,
     "updated_at" = CURRENT_TIMESTAMP

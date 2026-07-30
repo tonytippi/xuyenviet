@@ -148,16 +148,28 @@ describe("Trip project helpers", () => {
     await expect(testDb.update(tripProjects).set({ primaryConversationId: wrongOwner.id }).where(eq(tripProjects.id, project.id))).rejects.toThrow();
   });
 
-  test("deleting a trip project detaches related conversations without clearing ownership", async () => {
+  test("direct database project deletion detaches conversations and cascades project snapshots", async () => {
     await createTestUser("user-1");
     const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Hà Giang" }).returning({ id: tripProjects.id });
     const [conversation] = await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id }).returning({ id: conversations.id });
+    const [assistantMessage] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "assistant", content: "Ngữ cảnh riêng tư." }).returning({ id: messages.id });
     await testDb.update(tripProjects).set({ primaryConversationId: conversation.id }).where(eq(tripProjects.id, project.id));
+    await testDb.insert(tripAnswerContextSnapshots).values({
+      userId: "user-1",
+      conversationId: conversation.id,
+      assistantMessageId: assistantMessage.id,
+      tripProjectId: project.id,
+      contextVersion: 1,
+      aggregateVersion: 1,
+      serialization: JSON.stringify({ destination: "Không được giữ lại" }),
+      promptDigest: "a".repeat(64),
+    });
 
     await testDb.delete(tripProjects).where(eq(tripProjects.id, project.id));
     const [savedConversation] = await testDb.select().from(conversations).where(eq(conversations.id, conversation.id));
 
     expect(savedConversation).toMatchObject({ id: conversation.id, userId: "user-1", tripProjectId: null });
+    await expect(testDb.select().from(tripAnswerContextSnapshots)).resolves.toEqual([]);
   });
 
   test("returns unauthenticated and does not delete a trip project without a session", async () => {
@@ -213,6 +225,7 @@ describe("Trip project helpers", () => {
       userId: "user-1",
       conversationId: conversation.id,
       assistantMessageId: assistantMessage.id,
+      tripProjectId: project.id,
       contextVersion: 1,
       aggregateVersion: 1,
       serialization: JSON.stringify({ primaryConversationId: conversation.id }),
@@ -255,18 +268,18 @@ describe("Trip project helpers", () => {
     const [usage] = await testDb.select().from(aiUsageEvents);
     const [audit] = await testDb.select().from(auditEvents);
 
-    expect(savedConversations).toEqual([expect.objectContaining({ id: conversation.id, tripProjectId: null })]);
-    expect(savedMessages).toHaveLength(2);
-    expect(attachments).toHaveLength(1);
-    expect(retrieval).toHaveLength(1);
-    expect(provenance).toHaveLength(1);
-    expect(feedback).toHaveLength(1);
-    expect(searchRows).toHaveLength(1);
-    expect(usage).toMatchObject({ tripProjectId: null, conversationId: conversation.id, userMessageId: message.id, assistantMessageId: assistantMessage.id });
+    expect(savedConversations).toEqual([]);
+    expect(savedMessages).toEqual([]);
+    expect(attachments).toEqual([]);
+    expect(retrieval).toEqual([]);
+    expect(provenance).toEqual([]);
+    expect(feedback).toEqual([]);
+    expect(searchRows).toEqual([]);
+    expect(usage).toMatchObject({ tripProjectId: null, conversationId: null, userMessageId: null, assistantMessageId: null });
     expect(audit).toMatchObject({ actorUserId: "user-1", operation: "delete", targetType: "trip_project", targetId: project.id });
     expect(audit.beforeSummary).toContain('"linkedConversationCount":1');
     expect(audit.beforeSummary).toContain('"chatContextCount":1');
-    expect(audit.afterSummary).toContain("linkedConversationsUnlinked");
+    expect(audit.afterSummary).toContain("linkedConversationsDeleted");
     expect(audit.beforeSummary).not.toContain("Đà Nẵng bí mật");
     expect(audit.beforeSummary).not.toContain("Gia đình thích biển");
   });

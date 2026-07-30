@@ -129,7 +129,7 @@ export async function generateEvaluationAiAskAnswer({
       assistantMessageId: assistantMessage.id,
       tripAnswerContextSnapshotId: snapshot.id,
       sourceBundle,
-      promptSection: contextSection,
+      promptUsage: renderedSourceBundle.promptUsage,
     });
     const [retrievalDecision] = await transaction
       .select({
