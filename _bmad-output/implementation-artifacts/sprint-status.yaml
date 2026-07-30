@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-07-29 (Final-final Story 10.5 framing repairs verified and synchronized; Epic 10 remains done.)
+# last_updated: 2026-07-30 (Story 11.1 context created and validated.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-07-29 (Final-final Story 10.5 framing repairs verified and synchronized; Epic 10 remains done.)
+last_updated: 2026-07-30 (Story 11.1 context created and validated.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -214,7 +214,7 @@ development_status:
   epic-10-retrospective: optional
 
   epic-11: backlog
-  11-1-publish-canonical-trip-answer-context-snapshots: backlog
+  11-1-publish-canonical-trip-answer-context-snapshots: ready-for-dev
   11-2-withdraw-historical-provenance-safely: backlog
   11-3-validate-persisted-answer-annotations: backlog
   11-4-bind-annotation-details-and-actions-to-current-ownership: backlog
