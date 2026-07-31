@@ -1,30 +1,47 @@
 import { claimNextKnowledgeIngestionCandidate, claimNextKnowledgeIngestionJob, recoverKnowledgeIngestionJobs } from "./ingestion-jobs";
 import { runKnowledgeIngestionCandidatePipeline, runKnowledgeIngestionPipeline } from "./ingestion-pipeline";
+import type { WorkerPollObservation } from "@xuyenviet/contracts";
 
 const defaultPollIntervalMs = 5_000;
 
 export async function processNextKnowledgeIngestionJob(workerId: string) {
-  await recoverKnowledgeIngestionJobs();
+  const recovery = await recoverKnowledgeIngestionJobs();
   const candidate = await claimNextKnowledgeIngestionCandidate({ workerId });
-  if (candidate) return runKnowledgeIngestionCandidatePipeline(candidate);
+  if (candidate) {
+    const result = await runKnowledgeIngestionCandidatePipeline(candidate);
+    return { result, observation: ingestionObservation(result ? "success" : "contended", candidate, recovery) };
+  }
   const claim = await claimNextKnowledgeIngestionJob({ workerId });
-  return claim ? runKnowledgeIngestionPipeline(claim) : null;
+  if (!claim) return { result: null, observation: ingestionObservation("no_work", undefined, recovery) };
+  const result = await runKnowledgeIngestionPipeline(claim);
+  return { result, observation: ingestionObservation(result?.outcome === "failed" ? "failure" : result ? "success" : "contended", claim, recovery) };
 }
 
-export async function runKnowledgeIngestionWorkerLoop(options: { once?: boolean; workerId?: string; pollIntervalMs?: number; signal?: AbortSignal; onPollComplete?: () => void | Promise<void> } = {}) {
+export async function runKnowledgeIngestionWorkerLoop(options: { once?: boolean; workerId?: string; pollIntervalMs?: number; signal?: AbortSignal; onPollComplete?: () => void | Promise<void>; onObservation?: (observation: WorkerPollObservation) => void | Promise<void> } = {}) {
   const workerId = options.workerId ?? `knowledge-ingestion-worker-${process.pid}`;
   const pollIntervalMs = options.pollIntervalMs ?? getWorkerPollIntervalMs();
 
   while (!options.signal?.aborted) {
     if (options.signal?.aborted) break;
     const result = await processNextKnowledgeIngestionJob(workerId);
+    try { await options.onObservation?.(result.observation); } catch {}
     await options.onPollComplete?.();
 
-    if (options.once) return result;
-    if (!result) await sleep(pollIntervalMs, options.signal);
+    if (options.once) return result.result;
+    if (!result.result) await sleep(pollIntervalMs, options.signal);
   }
 
   return { status: "stopped" as const };
+}
+
+function ingestionObservation(resultCode: WorkerPollObservation["resultCode"], claim: { jobId: string; candidateId?: string; attemptCount: number; claimedAt: Date; nextRunAt: Date } | undefined, recovery?: { recovered: number; exhausted: number }): WorkerPollObservation {
+  const recoveryCount = (recovery?.recovered ?? 0) + (recovery?.exhausted ?? 0);
+  return {
+    capability: "knowledge.ingestion", resultCode,
+    ...(claim ? { durableId: claim.candidateId ?? claim.jobId, retryCount: claim.attemptCount, jobLagMs: Math.max(0, claim.claimedAt.getTime() - claim.nextRunAt.getTime()) } : {}),
+    leaseRecovery: recoveryCount ? "recovered" : "none",
+    ...(recoveryCount ? { leaseRecoveryCount: recoveryCount } : {}),
+  };
 }
 
 function getWorkerPollIntervalMs() {

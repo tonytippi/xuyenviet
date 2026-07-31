@@ -1,17 +1,20 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 
 import { eq } from "drizzle-orm";
 import { describe, expect, test } from "vitest";
+import { schemaCompatibilityDeclarations, type OperationalTelemetryEvent } from "@xuyenviet/contracts";
 
-import { aiGatewayModels, conversations, domainOutbox, domainOutboxEffects, knowledgeIngestionJobs, messages, sourceCaptureVersions, sources } from "@/db/schema";
+import { aiGatewayModels, conversations, domainOutbox, domainOutboxEffects, knowledgeIngestionJobs, messages, releaseSchemaVersions, sourceCaptureVersions, sources } from "@/db/schema";
 import { acquireAiAskCommand, finalizeAiAskCommand } from "@/features/ai/ai-ask-commands";
 import { hashCaptureText } from "@/features/knowledge/source-captures";
 
 import { WorkerRuntime, createChildProcessAdapters } from "../apps/worker/src/runtime";
 import { resetTestDatabase, seedTestOperator, testDb } from "./helpers/db";
+import { getTestDatabaseUrl } from "./helpers/env-file";
 
 const root = resolve(import.meta.dirname, "..");
 const adapters = ["extraction", "ingestion", "indexing", "outbox"];
@@ -33,17 +36,35 @@ function buildWorker() {
   workerBuilt = true;
 }
 
-function runCompiledAdapter(adapter: "ingestion" | "outbox", workerId: string) {
-  execFileSync("node", [
-    `apps/worker/dist/adapters/${adapter}.mjs`,
-    adapter,
-    "--once",
-    `--worker-id=${workerId}`,
-  ], {
-    cwd: root,
-    env: { ...process.env, DATABASE_URL: process.env.DATABASE_URL_TEST },
-    stdio: "inherit",
-    timeout: 30_000,
+function runCompiledAdapter(adapter: "ingestion" | "outbox", workerId: string): Promise<OperationalTelemetryEvent[]> {
+  const directory = mkdtempSync(join(root, ".worker-telemetry-"));
+  const outputPath = join(directory, "events.jsonl");
+  try {
+    const output = spawnSync("node", [`apps/worker/dist/adapters/${adapter}.mjs`, adapter, "--once", `--worker-id=${workerId}`], {
+      cwd: root,
+      env: { ...process.env, DATABASE_URL: getTestDatabaseUrl(), NODE_ENV: "test", NODE_OPTIONS: undefined, VITEST: undefined, XV_WORKER_TELEMETRY_FILE: outputPath },
+      encoding: "utf8",
+      timeout: 30_000,
+    });
+    if (output.error || output.status !== 0) throw new Error(`Compiled ${adapter} adapter failed (exit ${output.status ?? "unknown"}): stdout=${output.stdout.trim()} stderr=${output.stderr.trim()}`);
+    if (!existsSync(outputPath)) {
+      throw new Error(`Compiled ${adapter} adapter emitted no telemetry file (exit ${output.status ?? "unknown"}): stdout=${output.stdout.trim()} stderr=${output.stderr.trim()}`);
+    }
+    const captured = readFileSync(outputPath, "utf8");
+    return Promise.resolve(captured.split("\n").filter(Boolean).map((line) => JSON.parse(line) as OperationalTelemetryEvent));
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+function expectCompiledWorkerEvent(events: OperationalTelemetryEvent[], expected: Partial<OperationalTelemetryEvent>) {
+  expect(events).toHaveLength(1);
+  expect(events[0]).toMatchObject({
+    capability: "knowledge.ingestion",
+    principalClass: "system",
+    latencyMs: expect.any(Number),
+    correlationId: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f-]{27}$/),
+    ...expected,
   });
 }
 
@@ -131,7 +152,7 @@ describe("compiled worker adapters", () => {
         `--worker-id=boundary-${adapter}`,
       ], {
         cwd: root,
-        env: { ...process.env, DATABASE_URL: process.env.DATABASE_URL_TEST },
+        env: { ...process.env, DATABASE_URL: getTestDatabaseUrl() },
         stdio: "inherit",
         timeout: 30_000,
       });
@@ -145,8 +166,8 @@ describe("compiled worker adapters", () => {
     const annotation = await seedCompletedAiAskAnnotation();
     buildWorker();
 
-    runCompiledAdapter("ingestion", "compiled-ingestion-worker");
-    runCompiledAdapter("outbox", "compiled-outbox-worker");
+    await runCompiledAdapter("ingestion", "compiled-ingestion-worker");
+    await runCompiledAdapter("outbox", "compiled-outbox-worker");
 
     await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, ingestion.id))).resolves.toMatchObject([
       { stage: "suppressed", attemptCount: 1, claimedBy: null, fencingToken: null, lastErrorCode: "insufficient_travel_context" },
@@ -162,6 +183,7 @@ describe("compiled worker adapters", () => {
   test.runIf(Boolean(process.env.DATABASE_URL_TEST))("drains real child adapters without claiming new work and recovers an interrupted lease", async () => {
     await resetTestDatabase();
     await seedTestOperator();
+    await testDb.insert(releaseSchemaVersions).values({ version: schemaCompatibilityDeclarations.worker.maximumVersion });
     const first = await seedIngestionJob("drain-first", "Điểm dừng trên đèo Hải Vân có bãi đỗ xe an toàn.");
     await testDb.update(knowledgeIngestionJobs).set({ protocolVersion: 2 }).where(eq(knowledgeIngestionJobs.id, first.id));
     await testDb.insert(aiGatewayModels).values({
@@ -192,6 +214,11 @@ describe("compiled worker adapters", () => {
       await runtime.start();
       await requestReceived;
       await waitFor(async () => (await testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, first.id)))[0]?.claimedBy !== null);
+      const duplicatePollerEvents = await runCompiledAdapter("ingestion", "duplicate-poller-worker");
+      expectCompiledWorkerEvent(duplicatePollerEvents, {
+        resultCode: "no_work",
+        leaseRecovery: "none",
+      });
       const second = await seedIngestionJob("drain-second");
 
       await runtime.drain();
@@ -206,20 +233,32 @@ describe("compiled worker adapters", () => {
       const expiredAt = new Date(Date.now() - 2_000);
       await testDb.update(knowledgeIngestionJobs).set({ claimedAt: new Date(expiredAt.getTime() - 1), leaseExpiresAt: expiredAt }).where(eq(knowledgeIngestionJobs.id, first.id));
       await testDb.delete(aiGatewayModels).where(eq(aiGatewayModels.id, "drain-extraction-model"));
-      runCompiledAdapter("ingestion", "recovery-worker");
+      const recoveryEvents = await runCompiledAdapter("ingestion", "recovery-worker");
 
       await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, first.id))).resolves.toMatchObject([
         { stage: "queued", attemptCount: 1, claimedBy: null, fencingToken: null, requeueReasonCode: "lease_expired" },
       ]);
+      expectCompiledWorkerEvent(recoveryEvents, {
+        resultCode: "success",
+        leaseRecovery: "recovered",
+        leaseRecoveryCount: 1,
+      });
       await testDb.update(knowledgeIngestionJobs).set({ nextRunAt: new Date(0) }).where(eq(knowledgeIngestionJobs.id, first.id));
-      runCompiledAdapter("ingestion", "recovery-worker");
+      const retryEvents = await runCompiledAdapter("ingestion", "recovery-worker");
       await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, first.id))).resolves.toMatchObject([
         { stage: "failed", attemptCount: 2, lastErrorCode: "model_unavailable", claimedBy: null, fencingToken: null },
       ]);
+      expectCompiledWorkerEvent(retryEvents, {
+        resultCode: "failure",
+        durableId: first.id,
+        retryCount: 2,
+        jobLagMs: expect.any(Number),
+        leaseRecovery: "none",
+      });
     } finally {
       if (previousGatewayUrl === undefined) delete process.env.AI_GATEWAY_BASE_URL;
       else process.env.AI_GATEWAY_BASE_URL = previousGatewayUrl;
       await new Promise<void>((resolve) => gateway.close(() => resolve()));
     }
-  });
+  }, 15_000);
 });

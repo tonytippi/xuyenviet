@@ -43,6 +43,142 @@ export type ConversationSummaryListResponse = { summaries: ConversationSummary[]
 export type ApiVersionResponse = { version: "v1"; conversationSummaryLimit: number };
 export type HealthResponse = { status: "ok" };
 
+export type SchemaWorkload = "web" | "api" | "worker" | "migration" | "admin";
+export type SchemaCompatibilityDeclaration = { workload: SchemaWorkload; minimumVersion: string; maximumVersion: string };
+export type ParsedSchemaVersion = { year: number; month: number; day: number; revision: bigint };
+
+const schemaWorkloads = new Set<SchemaWorkload>(["web", "api", "worker", "migration", "admin"]);
+const releaseSchemaVersion = "20260728.1";
+
+// Ranges are intentionally declared outside any application runtime so every
+// deployable workload applies the same release-recorded schema policy.
+export const schemaCompatibilityDeclarations: Record<SchemaWorkload, SchemaCompatibilityDeclaration> = {
+  web: { workload: "web", minimumVersion: releaseSchemaVersion, maximumVersion: releaseSchemaVersion },
+  api: { workload: "api", minimumVersion: releaseSchemaVersion, maximumVersion: releaseSchemaVersion },
+  worker: { workload: "worker", minimumVersion: releaseSchemaVersion, maximumVersion: releaseSchemaVersion },
+  migration: { workload: "migration", minimumVersion: releaseSchemaVersion, maximumVersion: releaseSchemaVersion },
+  admin: { workload: "admin", minimumVersion: releaseSchemaVersion, maximumVersion: releaseSchemaVersion },
+};
+
+export type SchemaAdmission = { compatible: true } | { compatible: false };
+
+// Workloads receive persisted rows, not a locally inferred migration version.
+// Cardinality is part of admission so every deployment boundary fails closed alike.
+export function evaluateSchemaAdmission(declaration: SchemaCompatibilityDeclaration, persistedRows: readonly { version: unknown }[]): SchemaAdmission {
+  return persistedRows.length === 1 && isSchemaCompatible(declaration, persistedRows[0]?.version)
+    ? { compatible: true }
+    : { compatible: false };
+}
+
+export type SchemaCompatibilityConsumer = { declaration: SchemaCompatibilityDeclaration; admits(rows: readonly { version: unknown }[]): boolean };
+
+export function createSchemaCompatibilityConsumer(declaration: SchemaCompatibilityDeclaration): SchemaCompatibilityConsumer {
+  return { declaration, admits: (rows) => evaluateSchemaAdmission(declaration, rows).compatible };
+}
+
+// Story 13.1 imports this boundary into its own runtime rather than duplicating
+// release-record evaluation or implying that an admin deployment exists today.
+export const futureAdminSchemaCompatibilityConsumer = createSchemaCompatibilityConsumer(schemaCompatibilityDeclarations.admin);
+
+export function parseSchemaVersion(value: unknown): ParsedSchemaVersion | null {
+  if (typeof value !== "string") return null;
+  const match = /^(\d{4})(\d{2})(\d{2})\.(0|[1-9]\d*)$/.exec(value);
+  if (!match) return null;
+  const [, yearText, monthText, dayText, revisionText] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const revision = BigInt(revisionText);
+  return isGregorianDate(year, month, day)
+    ? { year, month, day, revision }
+    : null;
+}
+
+export function compareSchemaVersions(left: ParsedSchemaVersion, right: ParsedSchemaVersion): number {
+  for (const key of ["year", "month", "day"] as const) if (left[key] !== right[key]) return left[key] < right[key] ? -1 : 1;
+  if (left.revision !== right.revision) return left.revision < right.revision ? -1 : 1;
+  return 0;
+}
+
+export function isSchemaCompatible(declaration: SchemaCompatibilityDeclaration, persistedVersion: unknown): boolean {
+  if (!declaration || typeof declaration !== "object" || !schemaWorkloads.has(declaration.workload)) return false;
+  const minimum = parseSchemaVersion(declaration.minimumVersion);
+  const maximum = parseSchemaVersion(declaration.maximumVersion);
+  const current = parseSchemaVersion(persistedVersion);
+  return Boolean(minimum && maximum && current && compareSchemaVersions(minimum, maximum) <= 0 && compareSchemaVersions(current, minimum) >= 0 && compareSchemaVersions(current, maximum) <= 0);
+}
+
+export function correlationId(value?: string | null): string {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(value) ? value : crypto.randomUUID();
+}
+
+export type OperationalTelemetryEvent = {
+  correlationId: string;
+  capability: string;
+  principalClass: "user" | "system" | "anonymous";
+  resultCode: string;
+  latencyMs: number;
+  durableId?: string;
+  jobLagMs?: number;
+  retryCount?: number;
+  leaseRecovery?: "none" | "recovered" | "contended";
+  leaseRecoveryCount?: number;
+  providerRequestId?: string;
+};
+export type OperationalTelemetrySink = { emit(event: OperationalTelemetryEvent): void | Promise<void> };
+
+export type WorkerPollObservation = {
+  capability: "knowledge.extraction" | "knowledge.ingestion" | "knowledge.indexing" | "ai_ask.outbox";
+  resultCode: "success" | "no_work" | "retry" | "failure" | "contended";
+  durableId?: string;
+  jobLagMs?: number;
+  retryCount?: number;
+  leaseRecovery?: "none" | "recovered" | "contended";
+  leaseRecoveryCount?: number;
+};
+
+const telemetryCapabilities = new Set(["ai_ask.stream", "ai_ask.provider", "knowledge.extraction", "knowledge.ingestion", "knowledge.indexing", "ai_ask.outbox", "worker.startup", "worker.schema", "worker.drain", "worker.restart"]);
+const telemetryResultCodes = new Set(["success", "failure", "no_work", "retry", "schema_incompatible", "draining", "restarted", "recovered", "contended"]);
+
+export function emitOperationalTelemetry(sink: OperationalTelemetrySink | undefined, event: OperationalTelemetryEvent): void {
+  if (!sink || !isOperationalTelemetryEvent(event)) return;
+  try { Promise.resolve(sink.emit(event)).catch(() => undefined); } catch { /* Telemetry must not change the operation result. */ }
+}
+
+export function isOperationalTelemetryEvent(event: unknown): event is OperationalTelemetryEvent {
+  if (!event || typeof event !== "object") return false;
+  const candidate = event as OperationalTelemetryEvent;
+  const allowedKeys = new Set(["correlationId", "capability", "principalClass", "resultCode", "latencyMs", "durableId", "jobLagMs", "retryCount", "leaseRecovery", "leaseRecoveryCount", "providerRequestId"]);
+  const userCapability = candidate.capability === "ai_ask.stream" || candidate.capability === "ai_ask.provider";
+  return Object.keys(candidate).every((key) => allowedKeys.has(key))
+    && /^[A-Za-z0-9_-]{1,128}$/.test(candidate.correlationId)
+    && telemetryCapabilities.has(candidate.capability)
+    && telemetryResultCodes.has(candidate.resultCode)
+    && (candidate.principalClass === "user" ? userCapability : candidate.principalClass === "system" && !userCapability)
+    && Number.isInteger(candidate.latencyMs) && candidate.latencyMs >= 0 && candidate.latencyMs <= 86_400_000
+    && (candidate.durableId === undefined || /^[A-Za-z0-9_-]{1,128}$/.test(candidate.durableId))
+    && (candidate.jobLagMs === undefined || Number.isInteger(candidate.jobLagMs) && candidate.jobLagMs >= 0 && candidate.jobLagMs <= 31_536_000_000)
+    && (candidate.retryCount === undefined || Number.isInteger(candidate.retryCount) && candidate.retryCount >= 0 && candidate.retryCount <= 10_000)
+    && (candidate.leaseRecovery === undefined || ["none", "recovered", "contended"].includes(candidate.leaseRecovery))
+    && (candidate.leaseRecoveryCount === undefined || Number.isInteger(candidate.leaseRecoveryCount) && candidate.leaseRecoveryCount >= 0 && candidate.leaseRecoveryCount <= 10_000)
+    && (candidate.leaseRecoveryCount === undefined || candidate.leaseRecovery === "recovered")
+    && (candidate.providerRequestId === undefined || /^[A-Za-z0-9_-]{1,128}$/.test(candidate.providerRequestId));
+}
+
+export const consoleOperationalTelemetrySink: OperationalTelemetrySink = {
+  emit(event) {
+    return new Promise<void>((resolve, reject) => {
+      process.stdout.write(`operational_telemetry ${JSON.stringify(event)}\n`, (error) => error ? reject(error) : resolve());
+    });
+  },
+};
+
+function isGregorianDate(year: number, month: number, day: number) {
+  if (month < 1 || month > 12 || day < 1) return false;
+  const days = [31, year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return day <= days[month - 1]!;
+}
+
 export const planningContextPlanItemLimit = 60;
 export const planningDetailProvenanceLimit = 100;
 export const planningDetailAnnotationLimit = 20;

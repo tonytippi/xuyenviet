@@ -32,11 +32,17 @@ export function getDb() {
   return db;
 }
 
+export async function closeDatabaseClient() {
+  const existing = globalState[databaseClientKey] as DatabaseClient | undefined;
+  if (!existing) return;
+  delete globalState[databaseClientKey];
+  await existing.db.$client.end({ timeout: 5 });
+}
+
 /** Test-only teardown is keyed so it cannot close a client for another URL. */
 export async function resetDatabaseClientForTests(databaseUrl: string) {
   const existing = globalState[databaseClientKey] as DatabaseClient | undefined;
   if (!existing || existing.databaseUrl !== databaseUrl) return false;
-  delete globalState[databaseClientKey];
-  await existing.db.$client.end({ timeout: 5 });
+  await closeDatabaseClient();
   return true;
 }

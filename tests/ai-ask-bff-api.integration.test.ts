@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { eq } from "drizzle-orm";
 
 import { createBffCredentialConfig, createBffTransportConfig, type BffCredentialConfig, type Jwk } from "@xuyenviet/config";
-import { apiAudience } from "@xuyenviet/contracts";
+import { apiAudience, type OperationalTelemetryEvent, type OperationalTelemetrySink } from "@xuyenviet/contracts";
 import { createPostgresAiAskStreamExecutionPort, createPostgresApiIdentityRepository } from "@xuyenviet/database";
 import { createAiAskStreamExecution, type AiAskStreamExecution } from "@xuyenviet/domain";
 import { aiAskCommands, aiGatewayModels, aiUsageEvents, assistantResponseProvenance, conversations, domainOutbox, domainOutboxEffects, messages, sessions, users } from "@/db/schema";
@@ -13,7 +13,7 @@ import { processAiAskDomainOutboxBatch } from "@/features/ai/domain-outbox-worke
 import { issueCsrfToken } from "@/server/csrf";
 
 import { createApiModule } from "../apps/api/src/app.module";
-import { apiCompatibleSchemaVersion } from "../apps/api/src/release-schema";
+import { apiSchemaCompatibility } from "../apps/api/src/release-schema";
 import { getTestDatabaseUrl } from "./helpers/env-file";
 import { resetTestDatabase, testDb } from "./helpers/db";
 
@@ -32,6 +32,8 @@ let forwardedCredential: string | undefined;
 let gatewayFails = false;
 let gatewayGate: Promise<void> | undefined;
 let apiRequestCancelled = false;
+let telemetryEvents: OperationalTelemetryEvent[];
+const telemetry: OperationalTelemetrySink = { emit(event) { telemetryEvents.push(event); } };
 
 beforeEach(async () => {
   await resetTestDatabase();
@@ -69,6 +71,7 @@ afterEach(async () => {
   gatewayFails = false;
   gatewayGate = undefined;
   apiRequestCancelled = false;
+  telemetryEvents = [];
   vi.resetModules();
   delete process.env.XV_WEB_BFF_ACTIVE_KID;
   delete process.env.XV_WEB_BFF_ACTIVE_JWK;
@@ -121,7 +124,7 @@ describe("AI Ask enabled BFF to API integration", () => {
 
   test("persists one completed turn atomically and replays its durable terminal through the enabled BFF/API composition", async () => {
     await insertStreamingModel();
-    await startApi(createAiAskStreamExecution(createPostgresAiAskStreamExecutionPort(getTestDatabaseUrl())));
+    await startApi(createAiAskStreamExecution(createPostgresAiAskStreamExecutionPort(getTestDatabaseUrl(), telemetry)));
     await loadEnabledRoute();
 
     const first = await postBffRequest("persist_request_1", "persisted_idempotency_key");
@@ -148,7 +151,7 @@ describe("AI Ask enabled BFF to API integration", () => {
   test("persists and replays the provider-failure terminal through the enabled BFF/API composition", async () => {
     await insertStreamingModel();
     gatewayFails = true;
-    await startApi(createAiAskStreamExecution(createPostgresAiAskStreamExecutionPort(getTestDatabaseUrl())));
+    await startApi(createAiAskStreamExecution(createPostgresAiAskStreamExecutionPort(getTestDatabaseUrl(), telemetry)));
     await loadEnabledRoute();
 
     const first = await postBffRequest("failure_request_1", "failure_idempotency_key");
@@ -163,13 +166,18 @@ describe("AI Ask enabled BFF to API integration", () => {
       expect.objectContaining({ status: "failed", terminalResult: terminal, assistantMessageId: null }),
     ]);
     await expect(testDb.select({ role: messages.role }).from(messages)).resolves.toEqual([{ role: "user" }]);
+    expect(telemetryEvents).toEqual(expect.arrayContaining([
+      expect.objectContaining({ correlationId: "failure_request_1", capability: "ai_ask.provider", principalClass: "user", resultCode: "failure" }),
+      expect.objectContaining({ correlationId: "failure_request_1", capability: "ai_ask.stream", principalClass: "user", resultCode: "failure" }),
+    ]));
+    expect(JSON.stringify(telemetryEvents)).not.toMatch(/Đi Huế|Bearer|cookie|authorization|postgres/i);
   });
 
   test("propagates caller abort through BFF, Nest, and the provider stream", async () => {
     await insertStreamingModel();
     let releaseGateway!: () => void;
     gatewayGate = new Promise<void>((resolve) => { releaseGateway = resolve; });
-    await startApi(createAiAskStreamExecution(createPostgresAiAskStreamExecutionPort(getTestDatabaseUrl())));
+    await startApi(createAiAskStreamExecution(createPostgresAiAskStreamExecutionPort(getTestDatabaseUrl(), telemetry)));
     await loadEnabledRoute();
     const response = await postBffRequest("abort_request_1", "abort_idempotency_key");
 
@@ -186,7 +194,7 @@ describe("AI Ask enabled BFF to API integration", () => {
     await insertStreamingModel();
     let releaseGateway!: () => void;
     gatewayGate = new Promise<void>((resolve) => { releaseGateway = resolve; });
-    await startApi(createAiAskStreamExecution(createPostgresAiAskStreamExecutionPort(getTestDatabaseUrl())));
+    await startApi(createAiAskStreamExecution(createPostgresAiAskStreamExecutionPort(getTestDatabaseUrl(), telemetry)));
     await loadEnabledRoute();
     const response = await postBffRequest("stale_request_1", "stale_idempotency_key");
     await vi.waitFor(async () => expect((await testDb.select({ id: conversations.id }).from(conversations))[0]).toBeDefined());
@@ -205,7 +213,7 @@ describe("AI Ask enabled BFF to API integration", () => {
   test("records a context-dispatch provider failure atomically while preserving the permitted terminal replay", async () => {
     await insertStreamingModel();
     await insertExtractionModel();
-    await startApi(createAiAskStreamExecution(createPostgresAiAskStreamExecutionPort(getTestDatabaseUrl())));
+    await startApi(createAiAskStreamExecution(createPostgresAiAskStreamExecutionPort(getTestDatabaseUrl(), telemetry)));
     await loadEnabledRoute();
     const first = await postBffRequest("context_failure_1", "context_failure_key");
     const terminal = ndjson(await first.text()).at(-1);
@@ -334,8 +342,8 @@ async function postBffRequest(requestId: string, idempotencyKey = "valid_idempot
 
 async function startApi(execution: AiAskStreamExecution) {
   const summaries = { async listOwnedConversationSummaryRows() { return []; } };
-  const versions = { async hasCompatibleSchemaVersion(version: string) { return version === apiCompatibleSchemaVersion; }, async recordSchemaVersion() {} };
-  const ApiModule = createApiModule(credentialConfig, createPostgresApiIdentityRepository(getTestDatabaseUrl()), { conversationSummaries: summaries, schemaVersions: versions, aiAskExecution: execution });
+  const versions = { async hasCompatibleSchemaVersion(declaration: typeof apiSchemaCompatibility) { return declaration === apiSchemaCompatibility; }, async recordSchemaVersion() {} };
+  const ApiModule = createApiModule(credentialConfig, createPostgresApiIdentityRepository(getTestDatabaseUrl()), { conversationSummaries: summaries, schemaVersions: versions, aiAskExecution: execution, telemetry });
   @Module({ imports: [ApiModule] })
   class TestApiModule {}
   app = await NestFactory.create(TestApiModule, { logger: false });

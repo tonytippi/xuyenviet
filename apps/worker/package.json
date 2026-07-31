@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "postgres": "^3.4.9",
+    "@xuyenviet/contracts": "workspace:*",
     "@xuyenviet/worker-domain": "workspace:*"
   },
   "devDependencies": {

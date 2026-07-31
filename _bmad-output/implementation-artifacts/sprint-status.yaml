@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-07-31 (Story 12.1 bmad-dev-auto implementation blocked by forbidden compiled adapter dependencies; Epic 12 remains in progress.)
+# last_updated: 2026-07-31 (Story 12.2 completed; Epic 12 remains in progress pending Story 12.3.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-07-31 (Story 12.1 bmad-dev-auto implementation blocked by forbidden compiled adapter dependencies; Epic 12 remains in progress.)
+last_updated: 2026-07-31 (Story 12.2 completed; Epic 12 remains in progress pending Story 12.3.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -248,7 +248,8 @@ development_status:
   epic-12: in-progress
   # 2026-07-31: bmad-dev-auto completed after user-authorized Worker-safe domain extraction and synchronous Blind Hunter, Edge Case Hunter, and Acceptance Auditor review/repair cycles. Compiled adapters exclude root src, Next.js, Auth.js, server-only, src/app, and server-action code; persisted compiled ingestion/outbox success, drain/no-new-claim, stale-lease recovery, and bounded expiry CLI idempotency are covered. Serial focused suite: 8 files, 89 tests. typecheck, build, diff check, compose rendering, and Docker Worker image passed; lint has 0 errors and 5 pre-existing unrelated warnings.
   12-1-bootstrap-the-dedicated-worker-and-bounded-sweep-runtime: done
-  12-2-verify-worker-operations-telemetry-and-schema-compatibility: backlog
+  # 2026-07-31: Story 12.2 completed. Shared compatibility admission gates web/API/Worker readiness; Worker-safe telemetry observes bounded durable lag, retry, recovery, safe IDs, and fresh correlation IDs. The compiled `NODE_ENV=test` workspace-local JSONL transport proves duplicate-poller `SKIP LOCKED`, recovery, terminal failure, and drain behavior without changing production output. Serial DATABASE_URL_TEST verification passed: 12 files, 108 tests; repaired focused serial suite: 5 files, 60 tests. lint had 0 errors and 5 pre-existing warnings; post-build typecheck, build, Compose rendering, Worker image, and diff check passed. Final synchronous BMad Blind Hunter, Edge Case Hunter, and Acceptance Auditor review/repair loop is clean. Deployed monitoring, Railway, legacy-loop retirement, and Story 12.3 overlap policy remain out of scope.
+  12-2-verify-worker-operations-telemetry-and-schema-compatibility: done
   12-3-gate-schema-changes-for-overlapping-runtimes: backlog
   epic-12-retrospective: optional
 

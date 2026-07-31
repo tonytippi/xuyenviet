@@ -1,17 +1,18 @@
 import { BadRequestException, Controller, Headers, Inject, InternalServerErrorException, Post, Req, Res } from "@nestjs/common";
 
-import { aiAskMaxMultipartBodySize, parseAiAskStreamInput, type RequestPrincipal } from "@xuyenviet/contracts";
+import { consoleOperationalTelemetrySink, emitOperationalTelemetry, aiAskMaxMultipartBodySize, parseAiAskStreamInput, type OperationalTelemetrySink, type RequestPrincipal } from "@xuyenviet/contracts";
 import { AiAskAdmissionValidationError, type AiAskStreamExecution } from "@xuyenviet/domain";
 
 import { Principal } from "../auth/principal.decorator";
 
 export const AI_ASK_STREAM_EXECUTION = Symbol("AI_ASK_STREAM_EXECUTION");
+export const OPERATIONAL_TELEMETRY_SINK = Symbol("OPERATIONAL_TELEMETRY_SINK");
 const safeStreamFailure = new TextEncoder().encode('{"type":"error","errorMessage":"Không thể hoàn tất luồng trả lời lúc này. Hãy thử lại sau."}\n');
 const maxIncompleteNdjsonRecordBytes = 1024 * 1024;
 
 @Controller("v1/ai-ask")
 export class AiAskController {
-  constructor(@Inject(AI_ASK_STREAM_EXECUTION) private readonly execution: AiAskStreamExecution) {}
+  constructor(@Inject(AI_ASK_STREAM_EXECUTION) private readonly execution: AiAskStreamExecution, @Inject(OPERATIONAL_TELEMETRY_SINK) private readonly telemetry: OperationalTelemetrySink = consoleOperationalTelemetrySink) {}
 
   @Post("stream")
   async stream(
@@ -20,6 +21,8 @@ export class AiAskController {
     @Req() request: ApiRequest,
     @Res() response: ApiResponse,
   ): Promise<void> {
+    const startedAt = Date.now();
+    let resultCode: "success" | "failure" = "failure";
     const raw = await readBoundedRequest(request);
     const multipart = parseMultipart(headerValue(request.headers["content-type"]), raw);
     const parsed = parseAiAskStreamInput({ question: multipart.question, ...multipart, idempotencyKey });
@@ -63,6 +66,7 @@ export class AiAskController {
           }
           if (frame.terminal || frame.inProgress) {
             terminalSent = true;
+            resultCode = frame.resultCode;
             break;
           }
         }
@@ -70,6 +74,7 @@ export class AiAskController {
         if (abort.signal.aborted || response.writableEnded) break;
         next = await iterator.next();
       }
+      if (!terminalSent) resultCode = "failure";
     } catch (error) {
       // Validation failures happened before the protocol began. Once it has begun,
       // only the retained NDJSON terminal shape is legal on this connection.
@@ -85,11 +90,15 @@ export class AiAskController {
       request.removeListener("aborted", onAborted);
       response.removeListener("close", onResponseClose);
       if (!response.writableEnded) response.end();
+      emitOperationalTelemetry(this.telemetry, {
+        correlationId: request.requestId!, capability: "ai_ask.stream", principalClass: "user", resultCode,
+        latencyMs: Math.min(Date.now() - startedAt, 86_400_000),
+      });
     }
   }
 }
 
-function createNdjsonFramer(): { push(bytes: Uint8Array): Array<{ bytes: Uint8Array; terminal: boolean; inProgress: boolean; validPrefix: "preparing" | "delta" | undefined }> } {
+function createNdjsonFramer(): { push(bytes: Uint8Array): Array<{ bytes: Uint8Array; terminal: boolean; inProgress: boolean; resultCode: "success" | "failure"; validPrefix: "preparing" | "delta" | undefined }> } {
   let buffered = new Uint8Array();
   const decoder = new TextDecoder("utf-8", { fatal: true });
   return {
@@ -97,14 +106,14 @@ function createNdjsonFramer(): { push(bytes: Uint8Array): Array<{ bytes: Uint8Ar
       const combined = new Uint8Array(buffered.byteLength + bytes.byteLength);
       combined.set(buffered);
       combined.set(bytes, buffered.byteLength);
-      const frames: Array<{ bytes: Uint8Array; terminal: boolean; inProgress: boolean; validPrefix: "preparing" | "delta" | undefined }> = [];
+      const frames: Array<{ bytes: Uint8Array; terminal: boolean; inProgress: boolean; resultCode: "success" | "failure"; validPrefix: "preparing" | "delta" | undefined }> = [];
       let start = 0;
       for (let index = 0; index < combined.byteLength; index += 1) {
         if (combined[index] !== 10) continue;
         const frame = combined.slice(start, index + 1);
         // Inspect only fully framed records. Frames themselves remain unmodified.
         const record = ndjsonRecord(frame, decoder);
-        frames.push({ bytes: frame, terminal: record.terminal && !record.inProgress, inProgress: record.inProgress, validPrefix: record.validPrefix });
+        frames.push({ bytes: frame, terminal: record.terminal && !record.inProgress, inProgress: record.inProgress, resultCode: record.resultCode, validPrefix: record.validPrefix });
         start = index + 1;
         if (record.terminal) {
           buffered = new Uint8Array();
@@ -120,10 +129,10 @@ function createNdjsonFramer(): { push(bytes: Uint8Array): Array<{ bytes: Uint8Ar
   };
 }
 
-function ndjsonRecord(bytes: Uint8Array, decoder: TextDecoder): { terminal: boolean; inProgress: boolean; validPrefix: "preparing" | "delta" | undefined } {
+function ndjsonRecord(bytes: Uint8Array, decoder: TextDecoder): { terminal: boolean; inProgress: boolean; resultCode: "success" | "failure"; validPrefix: "preparing" | "delta" | undefined } {
   try {
     const record: unknown = JSON.parse(decoder.decode(bytes));
-    if (typeof record !== "object" || record === null || Array.isArray(record)) return { terminal: false, inProgress: false, validPrefix: undefined };
+    if (typeof record !== "object" || record === null || Array.isArray(record)) return { terminal: false, inProgress: false, resultCode: "failure", validPrefix: undefined };
     const value = record as Record<string, unknown>;
     const type = typeof value.type === "string" ? value.type : undefined;
     const keys = Object.keys(value);
@@ -139,9 +148,9 @@ function ndjsonRecord(bytes: Uint8Array, decoder: TextDecoder): { terminal: bool
     const inProgress = type === "in_progress" && keys.every((key) => ["type", "conversationId", "userMessage"].includes(key)) && (value.conversationId === undefined || typeof value.conversationId === "string") && (value.userMessage === undefined || validMessage);
     const terminal = inProgress || type === "done" && keys.every((key) => ["type", "conversationId", "userMessage", "assistantMessage"].includes(key)) && typeof value.conversationId === "string" && validMessage && validAssistant
       || type === "error" && keys.every((key) => ["type", "code", "conversationId", "userMessage", "errorMessage"].includes(key)) && typeof value.errorMessage === "string" && (value.code === undefined || value.code === "refresh_required") && (value.conversationId === undefined || typeof value.conversationId === "string") && (value.userMessage === undefined || validMessage);
-    return { terminal, inProgress, validPrefix };
+    return { terminal, inProgress, resultCode: type === "done" ? "success" : "failure", validPrefix };
   } catch {
-    return { terminal: false, inProgress: false, validPrefix: undefined };
+    return { terminal: false, inProgress: false, resultCode: "failure", validPrefix: undefined };
   }
 }
 

@@ -88,7 +88,7 @@ Do not use `pnpm db:reset` for test verification: Vitest owns only `DATABASE_URL
 
 ## Server deployment
 
-Docker Compose runs the web application and one dedicated Worker service. PostgreSQL remains external and must be reachable through the `DATABASE_URL` set in the deployment environment file. Run migrations before starting any workload that claims durable work.
+Docker Compose runs the web application and one dedicated Worker service. PostgreSQL remains external and must be reachable through the `DATABASE_URL` set in the deployment environment file. Run migrations before starting any workload that claims durable work. The migration release job records schema only after Drizzle succeeds; web, API, and Worker readiness fail closed for a missing, malformed, duplicated, or incompatible release record.
 
 1. Create a production environment file, for example `production.env`, from `.env.example`. Set `APP_ENV="production"`, a TLS-enabled non-localhost `DATABASE_URL` required by the selected Postgres provider, `AUTH_URL` to the public HTTPS Cloudflare Tunnel hostname, and real provider/authentication secrets.
 2. Run migrations once for each release that includes database changes:
@@ -132,7 +132,7 @@ pnpm knowledge:assistant-provenance-withdrawal-backfill --execute
 
 Capture commands use two databases: `DATABASE_URL` is the application database reached through the protected operator tunnel, while `CAPTURE_CACHE_DATABASE_URL` is a separate local PostgreSQL archive. Run `pnpm capture-cache:migrate` once before capture. The commands fail closed if either URL is invalid, the targets are the same, or the archive schema is absent. Back up the local archive with encrypted, tested restores; it contains durable validated capture artifacts and is required to replay after an application database reset. Never commit either URL, Gemini keys, browser profiles, or backups.
 
-`pnpm worker` is the sole continuous owner for extraction, canonical ingestion, indexing, and AI Ask domain-outbox delivery. The legacy `knowledge:*worker` commands remain local/debug one-poll adapters only and must not be deployed alongside it. The Worker invokes feature-owned work paths without changing their PostgreSQL claim, lease, fencing, CAS, or idempotency protocols.
+`pnpm worker` is the sole continuous owner for extraction, canonical ingestion, indexing, and AI Ask domain-outbox delivery. The legacy `knowledge:*worker` commands remain local/debug one-poll adapters only and must not be deployed alongside it. The Worker invokes feature-owned work paths without changing their PostgreSQL claim, lease, fencing, CAS, or idempotency protocols. See [`docs/runbooks/worker-operations.md`](docs/runbooks/worker-operations.md) for schema admission, safe telemetry, lifecycle checks, and repository proof.
 
 `pnpm trip-proposal-expiry --once` is a finite scheduled-maintenance command. A scheduler may launch exactly this command, never a perpetual proposal-expiry process. It rejects every argument other than `--once`; source-retention and provenance-withdrawal commands remain explicit operator operations, and Facebook/YouTube capture remains external operator-controlled work.
 

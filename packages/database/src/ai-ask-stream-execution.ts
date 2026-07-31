@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { AiAskAdmissionValidationError, type AiAskStreamAdmission, type AiAskStreamExecutionPort } from "@xuyenviet/domain";
-import type { AiAskStreamInput, RequestPrincipal } from "@xuyenviet/contracts";
+import { consoleOperationalTelemetrySink, emitOperationalTelemetry, type AiAskStreamInput, type OperationalTelemetrySink, type RequestPrincipal } from "@xuyenviet/contracts";
 
 import { acquireAiAskCommand, finalizeAiAskCommand, readAiAskCommandTerminalResult, terminalizeAiAskCommand } from "./ai-ask-commands";
 import { ensureAiAskFreshnessWarning, requiresAiAskAnswerFinalization } from "./answer-freshness";
@@ -40,9 +40,9 @@ type StreamEvent =
 type AuthenticatedSession = { userId: string; email: string };
 
 /** The HTTP adapters share this port; persistence remains in the original fenced command closure below. */
-export function createAiAskStreamExecutionPort(): AiAskStreamExecutionPort {
+export function createAiAskStreamExecutionPort(telemetry: OperationalTelemetrySink = consoleOperationalTelemetrySink): AiAskStreamExecutionPort {
   return {
-    async admit(input: AiAskStreamInput, principal: RequestPrincipal, _correlationId: string, signal: AbortSignal): Promise<AiAskStreamAdmission> {
+    async admit(input: AiAskStreamInput, principal: RequestPrincipal, correlationId: string, signal: AbortSignal): Promise<AiAskStreamAdmission> {
       const acquisition = await acquireAiAskCommand({
         userId: principal.userId,
         idempotencyKey: input.idempotencyKey,
@@ -68,7 +68,7 @@ export function createAiAskStreamExecutionPort(): AiAskStreamExecutionPort {
         return { kind: "admitted", execution: eventsFromTerminal(acquisition.commandId, "failed", result) };
       }
       const imageDataUrl = input.image ? `data:${input.image.mimeType};base64,${Buffer.from(input.image.bytes).toString("base64")}` : null;
-      return { kind: "admitted", execution: streamEvents({ abortSignal: signal, session: { userId: principal.userId, email: "" }, question: acquisition.question, tripProjectId: acquisition.tripProjectId ?? undefined, imageDataUrl, selectedModel, command: acquisition }) };
+      return { kind: "admitted", execution: streamEvents({ abortSignal: signal, session: { userId: principal.userId, email: "" }, question: acquisition.question, tripProjectId: acquisition.tripProjectId ?? undefined, imageDataUrl, selectedModel, command: acquisition, correlationId, telemetry }) };
     },
   };
 }
@@ -137,6 +137,8 @@ async function streamAnswer({
   imageDataUrl,
   selectedModel,
   command,
+  correlationId,
+  telemetry,
 }: {
   sink: { emit(event: StreamEvent): Promise<void>; close(): void };
   abortSignal: AbortSignal;
@@ -146,6 +148,8 @@ async function streamAnswer({
   imageDataUrl: string | null;
   selectedModel: NonNullable<Awaited<ReturnType<typeof selectActiveAiGatewayModel>>>;
   command: Extract<Awaited<ReturnType<typeof acquireAiAskCommand>>, { kind: "admitted" }>;
+  correlationId: string;
+  telemetry: OperationalTelemetrySink;
 }) {
   const db = getDb();
   const dependencies = getAiAskStreamDependencies();
@@ -188,6 +192,7 @@ async function streamAnswer({
     });
 
     if (!gatewayResult.ok) {
+      emitAiAskTelemetry(telemetry, correlationId, command.commandId, "failure", gatewayResult.latencyMs, gatewayResult.requestMetadata.providerRequestId ?? undefined);
       await writeAiUsageEvent(db, {
         initiatedByUserId: session.userId,
         executorSystem: "system-ai-orchestration",
@@ -220,6 +225,7 @@ async function streamAnswer({
     }
 
     if (abortSignal.aborted) {
+      emitAiAskTelemetry(telemetry, correlationId, command.commandId, "failure", gatewayResult.latencyMs, gatewayResult.requestMetadata.providerRequestId ?? undefined);
       await writeAiUsageEvent(db, {
         initiatedByUserId: session.userId,
         executorSystem: "system-ai-orchestration",
@@ -322,12 +328,14 @@ async function streamAnswer({
         return { assistantMessageId: assistantMessage.id, tripAnswerContextSnapshotId: snapshot.id, result: { type: "done" as const, conversationId: fencedCommand.conversationId, userMessage: savedTurn.userMessage, assistantMessage: completed }, completed };
       });
 
-      if (!("discarded" in finalization)) {
+    if (!("discarded" in finalization)) {
           await sink.emit(await readAiAskCommandTerminalResult(command.commandId) as StreamEvent);
     } else {
        await sink.emit(finalization.result as StreamEvent);
     }
+    emitAiAskTelemetry(telemetry, correlationId, command.commandId, "success", gatewayResult.latencyMs, gatewayResult.requestMetadata.providerRequestId ?? undefined);
   } catch {
+    emitAiAskTelemetry(telemetry, correlationId, command.commandId, "failure", 0);
     console.error("AI Ask stream answer failed", {
       conversationId: saved?.conversationId,
       userMessageId: saved?.userMessage?.id,
@@ -347,6 +355,10 @@ async function streamAnswer({
       // The client may have already closed the stream.
     }
   }
+}
+
+function emitAiAskTelemetry(sink: OperationalTelemetrySink, correlationId: string, commandId: string, resultCode: "success" | "failure", latencyMs: number, providerRequestId?: string, capability = "ai_ask.provider") {
+  emitOperationalTelemetry(sink, { correlationId, capability, principalClass: "user", resultCode, latencyMs: Math.min(Math.max(0, Math.trunc(latencyMs)), 86_400_000), durableId: commandId, ...(providerRequestId ? { providerRequestId } : {}) });
 }
 
 function attachImageToFinalUserMessage(messagesForGateway: ReturnType<typeof buildAiAskMessages>, imageDataUrl: string) {

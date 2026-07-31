@@ -11,6 +11,7 @@ import { extractChatTripContextForOutbox } from "../chat-trips/context-extractio
 import { persistAiTripChangeProposalDraftInTransaction } from "../chat-trips/trip-change-proposals";
 import { formatAssistantMessageProvenance } from "../retrieval/provenance";
 import { aiAskInitialAnswerPromptVersion, aiAskInitialAnswerPurpose } from "./prompts";
+import type { WorkerPollObservation } from "@xuyenviet/contracts";
 
 type Transaction = Parameters<ReturnType<typeof getDb>["transaction"]>[0] extends (transaction: infer T) => unknown ? T : never;
 type DeliveryOutcome = "completed" | "fenced_out" | "invalid" | { kind: "retryable"; code: string } | "retry_scheduled";
@@ -70,15 +71,19 @@ export function appendTripChangeProposalActionAnnotation(input: {
 
 // This is deliberately a bounded library seam. Deployment and scheduling remain
 // separate operational work; callers may invoke one batch for local/test use.
-export async function processAiAskDomainOutboxBatch(input: { workerId: string; batchSize?: number; leaseMs?: number }): Promise<DomainOutboxWorkerResult> {
+export async function processAiAskDomainOutboxBatch(input: { workerId: string; batchSize?: number; leaseMs?: number; onObservation?: (observation: WorkerPollObservation) => void | Promise<void> }): Promise<DomainOutboxWorkerResult> {
   const claims = await claimDueDomainOutboxEvents(input);
-  if (claims.length === 0) return { kind: "no_work" };
+  if (claims.length === 0) {
+    try { await input.onObservation?.({ capability: "ai_ask.outbox", resultCode: "no_work", leaseRecovery: "none" }); } catch {}
+    return { kind: "no_work" };
+  }
   let failures = 0;
+  let terminalFailures = 0;
   for (const claim of claims) {
     try {
       const outcome = await deliverClaim(claim);
       if (outcome === "fenced_out") await completeFencedOutClaim(claim);
-      if (outcome === "invalid") await failDomainOutboxEvent({ ...claim, code: "invalid_envelope", retryable: false });
+      if (outcome === "invalid") { terminalFailures += 1; await failDomainOutboxEvent({ ...claim, code: "invalid_envelope", retryable: false }); }
       if (typeof outcome === "object") {
         failures += 1;
         await failDomainOutboxEvent({ ...claim, code: outcome.code, retryable: true });
@@ -88,6 +93,13 @@ export async function processAiAskDomainOutboxBatch(input: { workerId: string; b
       await failDomainOutboxEvent({ ...claim, code: "consumer_failed", retryable: true });
     }
   }
+  const primary = claims[0]!;
+  const recovered = claims.filter((claim) => claim.reclaimedLease).length;
+  try { await input.onObservation?.({
+    capability: "ai_ask.outbox", resultCode: failures ? "retry" : terminalFailures ? "failure" : "success", durableId: primary.id,
+    retryCount: primary.attemptCount, jobLagMs: Math.max(0, primary.claimedAt.getTime() - primary.availableAt.getTime()),
+    leaseRecovery: recovered ? "recovered" : "none", ...(recovered ? { leaseRecoveryCount: recovered } : {}),
+  }); } catch {}
   return failures ? { kind: "error", count: claims.length } : { kind: "processed", count: claims.length };
 }
 

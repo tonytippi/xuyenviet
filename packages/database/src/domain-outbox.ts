@@ -33,6 +33,9 @@ export type DomainOutboxClaim = {
   leaseExpiresAt: Date;
   payload: unknown;
   attemptCount: number;
+  claimedAt: Date;
+  availableAt: Date;
+  reclaimedLease: boolean;
   aggregateType: string;
   aggregateId: string;
   conversationId: string;
@@ -109,7 +112,7 @@ export async function claimDueDomainOutboxEvents(input: { workerId: string; batc
   if (batchSize === null || leaseMs === null || !Number.isInteger(batchSize) || batchSize < 1 || batchSize > 50 || !Number.isInteger(leaseMs) || leaseMs < 10 * 60_000 || leaseMs > 60 * 60_000) return [];
   const now = input.now ?? new Date();
   return db.transaction(async (transaction) => {
-      const due = await transaction.select({ id: domainOutbox.id, eventVersion: domainOutbox.eventVersion }).from(domainOutbox)
+      const due = await transaction.select({ id: domainOutbox.id, eventVersion: domainOutbox.eventVersion, status: domainOutbox.status }).from(domainOutbox)
       .where(or(and(eq(domainOutbox.status, "pending"), lte(domainOutbox.availableAt, now)), and(eq(domainOutbox.status, "processing"), lte(domainOutbox.leaseExpiresAt, now))))
       .orderBy(asc(domainOutbox.availableAt), asc(domainOutbox.createdAt), asc(domainOutbox.id)).limit(batchSize).for("update", { skipLocked: true });
     const claims: DomainOutboxClaim[] = [];
@@ -118,7 +121,7 @@ export async function claimDueDomainOutboxEvents(input: { workerId: string; batc
       const leaseExpiresAt = new Date(now.getTime() + leaseMs);
       const [claimed] = await transaction.update(domainOutbox).set({ status: "processing", claimedBy: workerId, claimedAt: now, leaseExpiresAt, fencingToken: token, attemptCount: sql`${domainOutbox.attemptCount} + 1`, lastErrorCode: null, updatedAt: now })
         .where(and(eq(domainOutbox.id, dueEvent.id), eq(domainOutbox.eventVersion, dueEvent.eventVersion), or(and(eq(domainOutbox.status, "pending"), lte(domainOutbox.availableAt, now)), and(eq(domainOutbox.status, "processing"), lte(domainOutbox.leaseExpiresAt, now))), sql`${domainOutbox.attemptCount} < ${domainOutbox.maxAttempts}`)).returning();
-      if (claimed) claims.push({ id: claimed.id, eventType: claimed.eventType, eventVersion: claimed.eventVersion, originatingCommandId: claimed.originatingCommandId, userId: claimed.userId, fencingToken: token, leaseExpiresAt, payload: claimed.payload, attemptCount: claimed.attemptCount, aggregateType: claimed.aggregateType, aggregateId: claimed.aggregateId, conversationId: claimed.conversationId, tripProjectId: claimed.tripProjectId, userMessageId: claimed.userMessageId, assistantMessageId: claimed.assistantMessageId, conversationLifecycleVersion: claimed.conversationLifecycleVersion, tripProjectAggregateVersion: claimed.tripProjectAggregateVersion });
+      if (claimed) claims.push({ id: claimed.id, eventType: claimed.eventType, eventVersion: claimed.eventVersion, originatingCommandId: claimed.originatingCommandId, userId: claimed.userId, fencingToken: token, leaseExpiresAt, payload: claimed.payload, attemptCount: claimed.attemptCount, claimedAt: claimed.claimedAt!, availableAt: claimed.availableAt, reclaimedLease: dueEvent.status === "processing", aggregateType: claimed.aggregateType, aggregateId: claimed.aggregateId, conversationId: claimed.conversationId, tripProjectId: claimed.tripProjectId, userMessageId: claimed.userMessageId, assistantMessageId: claimed.assistantMessageId, conversationLifecycleVersion: claimed.conversationLifecycleVersion, tripProjectAggregateVersion: claimed.tripProjectAggregateVersion });
     }
     // Corrupt rows or a lease reclaimed after its final permitted attempt must not
     // remain claimable forever. This uses the same locked due-row transaction.

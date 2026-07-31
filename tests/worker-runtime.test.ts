@@ -31,8 +31,9 @@ describe("WorkerRuntime", () => {
       adapter("knowledge-ingestion", async () => undefined),
       adapter("knowledge-indexing", async () => undefined),
       adapter("ai-ask-outbox", async () => undefined),
-    ], async () => undefined);
+    ], async () => undefined, 3002, async () => true);
     await runtime.start();
+    await new Promise((resolve) => setTimeout(resolve, 0));
     const base = `http://127.0.0.1:${runtime.healthPort}`;
     expect((await request(`${base}/health/live`)).status).toBe(200);
     expect((await request(`${base}/health/ready`)).body).toEqual({ status: "not_ready", reason: "loop_uninitialized" });
@@ -43,7 +44,7 @@ describe("WorkerRuntime", () => {
   });
 
   it("remains live but not ready when configuration dependencies fail", async () => {
-    const runtime = new WorkerRuntime(config, [], async () => { throw new Error("database url must not leak"); });
+    const runtime = new WorkerRuntime(config, [], async () => { throw new Error("database url must not leak"); }, 3002, async () => true);
     await runtime.start();
     const base = `http://127.0.0.1:${runtime.healthPort}`;
     expect((await request(`${base}/health/live`)).status).toBe(200);
@@ -78,7 +79,7 @@ describe("WorkerRuntime", () => {
       await new Promise((resolve) => setTimeout(resolve, 1));
       concurrentProbes -= 1;
       if (probes === 1) throw new Error("temporarily unavailable");
-    });
+    }, 3002, async () => true);
     await runtime.start();
     const base = `http://127.0.0.1:${runtime.healthPort}`;
     await new Promise((resolve) => setTimeout(resolve, 15));
@@ -97,8 +98,9 @@ describe("WorkerRuntime", () => {
       adapter("knowledge-ingestion", async () => undefined),
       adapter("knowledge-indexing", async () => undefined),
       adapter("ai-ask-outbox", async () => undefined),
-    ], async () => undefined);
+    ], async () => undefined, 3002, async () => true);
     await runtime.start();
+    await vi.waitFor(() => expect(calls).toBe(1));
     const base = `http://127.0.0.1:${runtime.healthPort}`;
     const draining = runtime.drain();
     expect((await request(`${base}/health/ready`)).body).toEqual({ status: "not_ready", reason: "draining" });
@@ -116,8 +118,9 @@ describe("WorkerRuntime", () => {
       adapter("knowledge-ingestion", async () => undefined),
       adapter("knowledge-indexing", async () => undefined),
       adapter("ai-ask-outbox", async () => undefined),
-    ], async () => undefined);
+    ], async () => undefined, 3002, async () => true);
     await runtime.start();
+    await new Promise((resolve) => setTimeout(resolve, 0));
     await runtime.drain();
     expect(forceStopped).toBe(true);
   });
@@ -125,6 +128,68 @@ describe("WorkerRuntime", () => {
   it("validates worker configuration without exposing the database URL", () => {
     expect(() => readWorkerConfig({ DATABASE_URL: "not-a-url" })).toThrow("Worker configuration is invalid.");
     expect(readWorkerConfig({ DATABASE_URL: "postgresql://worker:secret@localhost:5432/xuyenviet", WORKER_PORT: "3002" }).port).toBe(3002);
+  });
+
+  it("blocks every adapter until schema compatibility succeeds and stops future admissions when it is lost", async () => {
+    let compatible = false;
+    let calls = 0;
+    const runtime = new WorkerRuntime({ ...config, pollIntervalMs: 5 }, [
+      adapter("knowledge-extraction", async () => { calls += 1; }),
+      adapter("knowledge-ingestion", async () => { calls += 1; }),
+      adapter("knowledge-indexing", async () => { calls += 1; }),
+      adapter("ai-ask-outbox", async () => { calls += 1; }),
+    ], async () => undefined, 3002, async () => compatible);
+    await runtime.start();
+    const base = `http://127.0.0.1:${runtime.healthPort}`;
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    expect((await request(`${base}/health/ready`)).body).toEqual({ status: "not_ready", reason: "schema_incompatible" });
+    expect(calls).toBe(0);
+    compatible = true;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(calls).toBeGreaterThanOrEqual(4);
+    compatible = false;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect((await request(`${base}/health/ready`)).body).toEqual({ status: "not_ready", reason: "schema_incompatible" });
+    const callsAfterLoss = calls;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(calls).toBe(callsAfterLoss);
+    await runtime.drain();
+  });
+
+  it("emits fresh safe lifecycle correlation IDs without allowing a failing sink to affect readiness", async () => {
+    const events: unknown[] = [];
+    const runtime = new WorkerRuntime(config, [], async () => undefined, 3002, async () => false, { emit(event) { events.push(event); throw new Error("sink unavailable"); } });
+    await runtime.start();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ capability: "worker.startup", principalClass: "system", resultCode: "success", correlationId: expect.stringMatching(/^[A-Za-z0-9_-]{1,128}$/) }),
+      expect.objectContaining({ capability: "worker.schema", resultCode: "schema_incompatible", correlationId: expect.stringMatching(/^[A-Za-z0-9_-]{1,128}$/) }),
+    ]));
+    expect(new Set((events as Array<{ correlationId: string }>).map((event) => event.correlationId)).size).toBe(events.length);
+    await runtime.drain();
+    expect(events).toEqual(expect.arrayContaining([expect.objectContaining({ capability: "worker.drain", resultCode: "draining" })]));
+  });
+
+  it("does not double-admit an active adapter when compatibility is restored", async () => {
+    let compatible = true;
+    let starts = 0;
+    let release!: () => void;
+    const running = new Promise<void>((resolve) => { release = resolve; });
+    const runtime = new WorkerRuntime({ ...config, pollIntervalMs: 5 }, [
+      adapter("knowledge-extraction", async () => { starts += 1; await running; }),
+      adapter("knowledge-ingestion", async () => undefined),
+      adapter("knowledge-indexing", async () => undefined),
+      adapter("ai-ask-outbox", async () => undefined),
+    ], async () => undefined, 3002, async () => compatible);
+    await runtime.start();
+    await vi.waitFor(() => expect(starts).toBe(1));
+    compatible = false;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    compatible = true;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(starts).toBe(1);
+    release();
+    await runtime.drain();
   });
 
   it("waits for one graceful drain when SIGTERM and SIGINT arrive together", async () => {

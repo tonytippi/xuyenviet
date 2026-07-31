@@ -4,7 +4,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { loadAnswerContext } from "./answer-context";
 import { formatAssistantMessageProvenance } from "./provenance";
 import { assistantResponseProvenance, conversations, messages, tripChangeProposals, tripProjects } from "./schema";
-import { parsePlanningAnswerDetailResponse, planningDetailProvenanceLimit, type PlanningJsonValue, type PlanningProvenance, type TripAnswerContextResponse } from "@xuyenviet/contracts";
+import { evaluateSchemaAdmission, parsePlanningAnswerDetailResponse, planningDetailProvenanceLimit, type PlanningJsonValue, type PlanningProvenance, type SchemaCompatibilityDeclaration, type TripAnswerContextResponse } from "@xuyenviet/contracts";
 import { createAiAskStreamExecutionPort } from "./ai-ask-stream-execution";
 
 export * from "./ai-ask-commands";
@@ -42,8 +42,9 @@ export interface ApiIdentityRepository {
 
 export type StoredConversationSummaryRow = { id: string; updatedAt: Date; messageContent: string | null };
 export type ReleaseSchemaVersionRepository = {
-  hasCompatibleSchemaVersion(version: string): Promise<boolean>;
+  hasCompatibleSchemaVersion(declaration: SchemaCompatibilityDeclaration): Promise<boolean>;
   recordSchemaVersion(version: string): Promise<void>;
+  close?(): Promise<void>;
 };
 export interface ConversationSummaryRepository {
   listOwnedConversationSummaryRows(userId: string, limit: number): Promise<StoredConversationSummaryRow[]>;
@@ -79,8 +80,8 @@ export function createPostgresReleaseSchemaVersionRepository(databaseUrl: string
   const sql = postgres(databaseUrl, { max: 1 });
   return {
     async hasCompatibleSchemaVersion(version) {
-      const rows = await sql<{ version: string }[]>`select version from release_schema_versions order by recorded_at desc limit 1`;
-      return rows[0]?.version === version;
+      const rows = await sql<{ version: string }[]>`select version from release_schema_versions`;
+      return evaluateSchemaAdmission(version, rows).compatible;
     },
     async recordSchemaVersion(version) {
       await sql.begin(async (transaction) => {
@@ -89,6 +90,7 @@ export function createPostgresReleaseSchemaVersionRepository(databaseUrl: string
         await transaction`insert into release_schema_versions (version) values (${version})`;
       });
     },
+    async close() { await sql.end({ timeout: 5 }); },
   };
 }
 
@@ -107,8 +109,8 @@ export function createPostgresApiIdentityRepository(databaseUrl: string): ApiIde
   };
 }
 
-export function createPostgresAiAskStreamExecutionPort(_databaseUrl: string): AiAskStreamExecutionPort {
-  return createAiAskStreamExecutionPort();
+export function createPostgresAiAskStreamExecutionPort(_databaseUrl: string, telemetry?: import("@xuyenviet/contracts").OperationalTelemetrySink): AiAskStreamExecutionPort {
+  return createAiAskStreamExecutionPort(telemetry);
 }
 
 export function createPostgresPlanningReadRepository(): PlanningReadRepository {

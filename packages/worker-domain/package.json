@@ -15,6 +15,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@xuyenviet/contracts": "workspace:*",
     "@xuyenviet/database": "workspace:*",
     "@xuyenviet/domain": "workspace:*",
     "drizzle-orm": "^0.44.5"

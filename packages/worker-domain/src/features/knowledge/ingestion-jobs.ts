@@ -21,9 +21,9 @@ const terminalStages = ["published", "suppressed", "review_recommended", "verify
 
 export class KnowledgeIngestionJobError extends Error { constructor(message: string) { super(message); this.name = "KnowledgeIngestionJobError"; } }
 export type KnowledgeIngestionJobStatus = { id: string; sourceId: string; captureVersionId: string; stage: Stage; stageVersion: number; attemptCount: number; maxAttempts: number; nextRunAt: Date; lastErrorCode: string | null; requeueReasonCode: string | null; claimedBy: string | null; claimedAt: Date | null; leaseExpiresAt: Date | null; expired: boolean; createdAt: Date; updatedAt: Date };
-export type KnowledgeIngestionClaim = { jobId: string; sourceId: string; captureVersionId: string; protocolVersion: 1 | 2; stage: NonterminalIngestionStage; stageVersion: number; attemptCount: number; leaseExpiresAt: Date; fencingToken: string; checkpoint: KnowledgeIngestionCheckpoint | null };
+export type KnowledgeIngestionClaim = { jobId: string; sourceId: string; captureVersionId: string; protocolVersion: 1 | 2; stage: NonterminalIngestionStage; stageVersion: number; attemptCount: number; claimedAt: Date; nextRunAt: Date; leaseExpiresAt: Date; fencingToken: string; checkpoint: KnowledgeIngestionCheckpoint | null };
 export type KnowledgeIngestionStageCommit = { jobId: string; expectedStage: NonterminalIngestionStage; expectedStageVersion: number; fencingToken: string; nextStage: Stage; checkpoint?: KnowledgeIngestionCheckpoint; lastErrorCode?: string | null; now?: Date };
-export type KnowledgeIngestionCandidateClaim = { candidateId: string; jobId: string; sourceId: string; captureVersionId: string; stage: "queued" | "judging" | "relating"; stageVersion: number; fencingToken: string; leaseExpiresAt: Date };
+export type KnowledgeIngestionCandidateClaim = { candidateId: string; jobId: string; sourceId: string; captureVersionId: string; stage: "queued" | "judging" | "relating"; stageVersion: number; attemptCount: number; claimedAt: Date; nextRunAt: Date; fencingToken: string; leaseExpiresAt: Date };
 
 export async function ensureIngestionJobForCaptureVersion(db: IngestionJobDb, input: { sourceId: string; captureVersionId: string }) {
   const sourceId = input.sourceId.trim(); const captureVersionId = input.captureVersionId.trim();
@@ -54,7 +54,7 @@ export async function claimNextKnowledgeIngestionCandidate(input: { workerId: st
     if (!rows[0]) return null;
     const [row] = await tx.update(knowledgeIngestionCandidates).set({ claimedBy: workerId, claimedAt: now, leaseExpiresAt, fencingToken, attemptCount: sql`${knowledgeIngestionCandidates.attemptCount} + 1`, updatedAt: now }).where(and(eq(knowledgeIngestionCandidates.id, rows[0].id), isNull(knowledgeIngestionCandidates.claimedBy), sql`exists (select 1 from knowledge_ingestion_jobs j where j.id = ${knowledgeIngestionCandidates.ingestionJobId} and j.source_id = ${knowledgeIngestionCandidates.sourceId} and j.capture_version_id = ${knowledgeIngestionCandidates.captureVersionId} and j.protocol_version = 2)`)).returning();
     if (!row || !["queued", "judging", "relating"].includes(row.stage)) return null;
-    return { candidateId: row.id, jobId: row.ingestionJobId, sourceId: row.sourceId, captureVersionId: row.captureVersionId, stage: row.stage as KnowledgeIngestionCandidateClaim["stage"], stageVersion: row.stageVersion, fencingToken, leaseExpiresAt: row.leaseExpiresAt as Date };
+    return { candidateId: row.id, jobId: row.ingestionJobId, sourceId: row.sourceId, captureVersionId: row.captureVersionId, stage: row.stage as KnowledgeIngestionCandidateClaim["stage"], stageVersion: row.stageVersion, attemptCount: row.attemptCount, claimedAt: row.claimedAt as Date, nextRunAt: row.nextRunAt, fencingToken, leaseExpiresAt: row.leaseExpiresAt as Date };
   });
 }
 
@@ -113,7 +113,7 @@ export async function claimNextKnowledgeIngestionJob(input: { workerId: string; 
     const [claimed] = await tx.update(knowledgeIngestionJobs).set({ claimedBy: workerId, claimedAt: now, leaseExpiresAt, fencingToken, attemptCount: sql`${knowledgeIngestionJobs.attemptCount} + 1`, requeueReasonCode: null, updatedAt: now }).where(and(eq(knowledgeIngestionJobs.id, rows[0].id), isNull(knowledgeIngestionJobs.claimedBy), lte(knowledgeIngestionJobs.nextRunAt, now), sql`${knowledgeIngestionJobs.attemptCount} < ${knowledgeIngestionJobs.maxAttempts}`)).returning();
     if (!claimed || isTerminalStage(claimed.stage)) return null;
     const checkpoint = parseCheckpoint(claimed.checkpoint);
-    return { jobId: claimed.id, sourceId: claimed.sourceId, captureVersionId: claimed.captureVersionId, protocolVersion: claimed.protocolVersion as 1 | 2, stage: claimed.stage, stageVersion: claimed.stageVersion, attemptCount: claimed.attemptCount, leaseExpiresAt: claimed.leaseExpiresAt as Date, fencingToken, checkpoint };
+    return { jobId: claimed.id, sourceId: claimed.sourceId, captureVersionId: claimed.captureVersionId, protocolVersion: claimed.protocolVersion as 1 | 2, stage: claimed.stage, stageVersion: claimed.stageVersion, attemptCount: claimed.attemptCount, claimedAt: claimed.claimedAt as Date, nextRunAt: claimed.nextRunAt, leaseExpiresAt: claimed.leaseExpiresAt as Date, fencingToken, checkpoint };
   });
 }
 

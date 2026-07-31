@@ -159,6 +159,9 @@ importers:
 
   apps/worker:
     dependencies:
+      '@xuyenviet/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@xuyenviet/worker-domain':
         specifier: workspace:*
         version: link:../../packages/worker-domain
@@ -179,6 +182,9 @@ importers:
 
   packages/database:
     dependencies:
+      '@xuyenviet/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@xuyenviet/domain':
         specifier: workspace:*
         version: link:../domain
@@ -197,6 +203,9 @@ importers:
 
   packages/worker-domain:
     dependencies:
+      '@xuyenviet/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@xuyenviet/database':
         specifier: workspace:*
         version: link:../database

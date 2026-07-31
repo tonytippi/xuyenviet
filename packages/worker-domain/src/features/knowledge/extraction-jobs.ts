@@ -16,6 +16,7 @@ import { markFacebookCaptureReviewStatus, markFacebookCaptureReviewStatusInTrans
 import { approveKnowledgeDraftBatchForSystemInTransaction } from "./review-approval-core";
 import { createSystemAuditActor } from "../audit/actors";
 import { recordAuditEvent } from "../audit/events";
+import type { WorkerPollObservation } from "@xuyenviet/contracts";
 
 type ExtractionJobDb = ReturnType<typeof getDb>;
 
@@ -117,18 +118,20 @@ export async function processNextKnowledgeExtractionJob(options: { workerId?: st
   const job = await claimNextKnowledgeExtractionJob(options, db);
 
   if (!job) {
-    return { status: "no_job" as const, recoveredFailures: recovery.failures };
+    return { status: "no_job" as const, recoveredFailures: recovery.failures, observation: extractionObservation("no_work", undefined, recovery) };
   }
 
-  return { ...(await processKnowledgeExtractionJob(job.id, db)), recoveredFailures: recovery.failures };
+  const result = await processKnowledgeExtractionJob(job.id, db);
+  return { ...result, recoveredFailures: recovery.failures, observation: extractionObservation(result.status === "failed" ? "retry" : result.status === "not_processable" ? "contended" : "success", job, recovery) };
 }
 
-export async function runKnowledgeExtractionWorkerLoop(options: { once?: boolean; workerId?: string; pollIntervalMs?: number; signal?: AbortSignal } = {}) {
+export async function runKnowledgeExtractionWorkerLoop(options: { once?: boolean; workerId?: string; pollIntervalMs?: number; signal?: AbortSignal; onObservation?: (observation: WorkerPollObservation) => void | Promise<void> } = {}) {
   const pollIntervalMs = options.pollIntervalMs ?? getWorkerPollIntervalMs();
 
   while (!options.signal?.aborted) {
     if (options.signal?.aborted) break;
     const result = await processNextKnowledgeExtractionJob({ workerId: options.workerId });
+    await observe(options.onObservation, result.observation);
 
     for (const failure of result.recoveredFailures) {
       console.warn("Knowledge extraction job failed", failure);
@@ -139,7 +142,9 @@ export async function runKnowledgeExtractionWorkerLoop(options: { once?: boolean
     }
 
     if (options.once) {
-      return result;
+      const { observation, ...legacyResult } = result;
+      void observation;
+      return legacyResult;
     }
 
     if (result.status === "no_job") {
@@ -149,6 +154,18 @@ export async function runKnowledgeExtractionWorkerLoop(options: { once?: boolean
 
   return { status: "stopped" as const };
 }
+
+function extractionObservation(resultCode: WorkerPollObservation["resultCode"], job?: Pick<typeof knowledgeExtractionJobs.$inferSelect, "id" | "lockedAt" | "nextRunAt" | "attemptCount"> | null, recovery?: { recoveredCount: number; failedCount: number }): WorkerPollObservation {
+  const recoveryCount = (recovery?.recoveredCount ?? 0) + (recovery?.failedCount ?? 0);
+  return {
+    capability: "knowledge.extraction", resultCode,
+    ...(job ? { durableId: job.id, retryCount: job.attemptCount, jobLagMs: Math.max(0, (job.lockedAt?.getTime() ?? 0) - job.nextRunAt.getTime()) } : {}),
+    leaseRecovery: recoveryCount ? "recovered" : "none",
+    ...(recoveryCount ? { leaseRecoveryCount: recoveryCount } : {}),
+  };
+}
+
+async function observe(callback: ((observation: WorkerPollObservation) => void | Promise<void>) | undefined, observation: WorkerPollObservation) { try { await callback?.(observation); } catch {} }
 
 async function claimNextKnowledgeExtractionJob(options: { workerId?: string; now?: Date }, db: ExtractionJobDb) {
   const workerId = options.workerId ?? "knowledge-extraction-worker";
