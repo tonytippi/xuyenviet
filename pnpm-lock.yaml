@@ -28,6 +28,9 @@ importers:
       '@nestjs/platform-express':
         specifier: ^11.1.28
         version: 11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.28)
+      '@xuyenviet/worker-domain':
+        specifier: workspace:*
+        version: link:packages/worker-domain
       drizzle-orm:
         specifier: ^0.44.5
         version: 0.44.7(@neondatabase/serverless@1.1.0)(postgres@3.4.9)
@@ -154,6 +157,22 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
+  apps/worker:
+    dependencies:
+      '@xuyenviet/worker-domain':
+        specifier: workspace:*
+        version: link:../../packages/worker-domain
+      postgres:
+        specifier: ^3.4.9
+        version: 3.4.9
+    devDependencies:
+      esbuild:
+        specifier: ^0.28.1
+        version: 0.28.1
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
   packages/config: {}
 
   packages/contracts: {}
@@ -175,6 +194,22 @@ importers:
       '@xuyenviet/contracts':
         specifier: workspace:*
         version: link:../contracts
+
+  packages/worker-domain:
+    dependencies:
+      '@xuyenviet/database':
+        specifier: workspace:*
+        version: link:../database
+      '@xuyenviet/domain':
+        specifier: workspace:*
+        version: link:../domain
+      drizzle-orm:
+        specifier: ^0.44.5
+        version: 0.44.7(@neondatabase/serverless@1.1.0)(postgres@3.4.9)
+    devDependencies:
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
 
 packages:
 

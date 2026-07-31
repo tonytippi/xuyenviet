@@ -1,0 +1,25 @@
+{
+  "name": "@xuyenviet/worker-domain",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./adapters": "./src/adapters.ts",
+    "./features/ai/domain-outbox-worker": "./src/features/ai/domain-outbox-worker.ts",
+    "./features/knowledge/extraction-jobs": "./src/features/knowledge/extraction-jobs.ts",
+    "./features/knowledge/indexing-worker": "./src/features/knowledge/indexing-worker.ts",
+    "./features/knowledge/ingestion-worker": "./src/features/knowledge/ingestion-worker.ts",
+    "./features/chat-trips/trip-proposal-expiry-worker": "./src/features/chat-trips/trip-proposal-expiry-worker.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@xuyenviet/database": "workspace:*",
+    "@xuyenviet/domain": "workspace:*",
+    "drizzle-orm": "^0.44.5"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  }
+}

@@ -9,6 +9,11 @@ export default defineConfig({
   resolve: {
     alias: {
       "server-only": resolve(__dirname, "tests/mocks/server-only.ts"),
+      "@xuyenviet/config": resolve(__dirname, "packages/config/src/index.ts"),
+      "@xuyenviet/contracts": resolve(__dirname, "packages/contracts/src/index.ts"),
+      "@xuyenviet/database": resolve(__dirname, "packages/database/src/index.ts"),
+      "@xuyenviet/domain": resolve(__dirname, "packages/domain/src/index.ts"),
+      "@xuyenviet/worker-domain": resolve(__dirname, "packages/worker-domain/src/index.ts"),
     },
   },
   test: {

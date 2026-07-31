@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-07-30 (Epic 11 compacted-conflict ledger repair complete; Epic 11 synchronized to done.)
+# last_updated: 2026-07-31 (Story 12.1 bmad-dev-auto implementation blocked by forbidden compiled adapter dependencies; Epic 12 remains in progress.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-07-30 (Epic 11 compacted-conflict ledger repair complete; Epic 11 synchronized to done.)
+last_updated: 2026-07-31 (Story 12.1 bmad-dev-auto implementation blocked by forbidden compiled adapter dependencies; Epic 12 remains in progress.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -245,8 +245,9 @@ development_status:
   11-5-serve-planning-context-and-details-through-the-api-cutover: done
   epic-11-retrospective: optional
 
-  epic-12: backlog
-  12-1-bootstrap-the-dedicated-worker-and-bounded-sweep-runtime: backlog
+  epic-12: in-progress
+  # 2026-07-31: bmad-dev-auto completed after user-authorized Worker-safe domain extraction and synchronous Blind Hunter, Edge Case Hunter, and Acceptance Auditor review/repair cycles. Compiled adapters exclude root src, Next.js, Auth.js, server-only, src/app, and server-action code; persisted compiled ingestion/outbox success, drain/no-new-claim, stale-lease recovery, and bounded expiry CLI idempotency are covered. Serial focused suite: 8 files, 89 tests. typecheck, build, diff check, compose rendering, and Docker Worker image passed; lint has 0 errors and 5 pre-existing unrelated warnings.
+  12-1-bootstrap-the-dedicated-worker-and-bounded-sweep-runtime: done
   12-2-verify-worker-operations-telemetry-and-schema-compatibility: backlog
   12-3-gate-schema-changes-for-overlapping-runtimes: backlog
   epic-12-retrospective: optional

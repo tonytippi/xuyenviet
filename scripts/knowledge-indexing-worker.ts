@@ -6,20 +6,17 @@ type WorkerOptions = {
   batchSize?: number;
 };
 
-function parseOptions(argv: string[]): WorkerOptions {
-  const once = argv.includes("--once");
-  const batchSizeArg = argv.find((arg) => arg.startsWith("--batch-size="));
-  const batchSize = batchSizeArg ? Number(batchSizeArg.slice("--batch-size=".length)) : undefined;
+export function parseKnowledgeIndexingWorkerArguments(argv: string[]): WorkerOptions {
+  if (argv.length !== 1 || argv[0] !== "--once") throw new Error("Usage: knowledge:indexing-worker --once");
 
   return {
-    once,
-    batchSize: Number.isFinite(batchSize) ? batchSize : undefined,
+    once: true,
   };
 }
 
 async function main() {
   loadWorkerEnv();
-  const options = parseOptions(process.argv.slice(2));
+  const options = parseKnowledgeIndexingWorkerArguments(process.argv.slice(2));
   const controller = new AbortController();
   const stop = () => controller.abort();
 
@@ -28,6 +25,7 @@ async function main() {
 
   const result = await runApprovedKnowledgeIndexingWorkerLoop({ once: options.once, batchSize: options.batchSize, signal: controller.signal });
   console.log("Knowledge indexing worker stopped", result);
+  process.exitCode = 0;
 }
 
 function loadWorkerEnv() {

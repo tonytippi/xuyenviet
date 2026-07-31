@@ -806,7 +806,7 @@ export async function persistAiTripChangeProposalDraft(
 // atomically. Browser commands continue through the authenticated wrapper.
 export async function persistAiTripChangeProposalDraftInTransaction(
   transaction: Transaction,
-  session: { userId: string; email: string },
+  owner: { userId: string },
   input: PersistAiTripChangeProposalDraftInput,
   expiresAtValidatedAt?: number,
 ): Promise<PersistAiTripChangeProposalDraftResult> {
@@ -820,7 +820,7 @@ export async function persistAiTripChangeProposalDraftInTransaction(
       const [project] = await transaction
         .select({ aggregateVersion: tripProjects.aggregateVersion })
         .from(tripProjects)
-        .where(and(eq(tripProjects.id, input.tripProjectId), eq(tripProjects.userId, session.userId)))
+        .where(and(eq(tripProjects.id, input.tripProjectId), eq(tripProjects.userId, owner.userId)))
         .limit(1)
         .for("update");
 
@@ -853,7 +853,7 @@ export async function persistAiTripChangeProposalDraftInTransaction(
           accommodationPlaceAreaLabel: tripPlanItems.accommodationPlaceAreaLabel,
         })
         .from(tripPlanItems)
-        .where(and(eq(tripPlanItems.tripProjectId, input.tripProjectId), eq(tripPlanItems.userId, session.userId)));
+        .where(and(eq(tripPlanItems.tripProjectId, input.tripProjectId), eq(tripPlanItems.userId, owner.userId)));
 
       const knownItems: KnownPlanItem[] = knownItemRows.map((row) => ({
         id: row.id,
@@ -881,7 +881,7 @@ export async function persistAiTripChangeProposalDraftInTransaction(
         .insert(tripChangeProposals)
         .values({
           tripProjectId: input.tripProjectId,
-          userId: session.userId,
+          userId: owner.userId,
           creatorClass: "ai_orchestration",
           status: "pending",
           rationale,
@@ -905,7 +905,7 @@ export async function persistAiTripChangeProposalDraftInTransaction(
 
       await recordAuditEvent(
         {
-          actor: toUserAuditActor({ userId: session.userId, email: session.email }),
+          actor: createSystemAuditActor("system-ai-orchestration"),
           operation: "create",
           targetType: "trip_change_proposal",
           targetId: inserted.id,

@@ -26,41 +26,20 @@ services:
         required: true
     profiles: ["migrate"]
 
-  knowledge-extractor:
+  worker:
     build:
       context: .
       target: worker
-    command: ["node", "--conditions", "react-server", "--import", "tsx", "scripts/knowledge-extraction-worker.ts"]
     env_file:
       - path: ${ENV_FILE:-.env}
         required: true
     restart: unless-stopped
     init: true
-
-  knowledge-ingestion:
-    build:
-      context: .
-      target: worker
-    command: ["node", "--conditions", "react-server", "--import", "tsx", "scripts/knowledge-ingestion-worker.ts", "--worker-id=knowledge-ingestion-compose"]
-    env_file:
-      - path: ${ENV_FILE:-.env}
-        required: true
-    restart: unless-stopped
-    init: true
+    ports:
+      - "127.0.0.1:3002:3002"
     healthcheck:
-      test: ["CMD", "node", "--import", "tsx", "scripts/knowledge-ingestion-worker-healthcheck.ts"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3002/health/ready').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 15s
       timeout: 5s
       retries: 3
       start_period: 60s
-
-  knowledge-indexing:
-    build:
-      context: .
-      target: worker
-    command: ["node", "--conditions", "react-server", "--import", "tsx", "scripts/knowledge-indexing-worker.ts"]
-    env_file:
-      - path: ${ENV_FILE:-.env}
-        required: true
-    restart: unless-stopped
-    init: true

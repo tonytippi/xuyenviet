@@ -1,0 +1,177 @@
+import { createServer, type Server } from "node:http";
+import { spawn, type ChildProcess } from "node:child_process";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import type { Socket } from "node:net";
+
+import postgres from "postgres";
+
+const adapterNames = ["knowledge-extraction", "knowledge-ingestion", "knowledge-indexing", "ai-ask-outbox"] as const;
+type AdapterName = (typeof adapterNames)[number];
+
+export type WorkerConfig = { databaseUrl: string; port: number; gracefulShutdownMs: number; pollIntervalMs: number };
+export type WorkerAdapter = { name: AdapterName; run: (signal: AbortSignal) => Promise<void>; forceStop?: () => void };
+
+export function readWorkerConfig(environment: { DATABASE_URL?: string; WORKER_PORT?: string; WORKER_GRACEFUL_SHUTDOWN_MS?: string; WORKER_SUPERVISOR_POLL_MS?: string } = process.env as { DATABASE_URL?: string; WORKER_PORT?: string; WORKER_GRACEFUL_SHUTDOWN_MS?: string; WORKER_SUPERVISOR_POLL_MS?: string }): WorkerConfig {
+  const databaseUrl = environment.DATABASE_URL;
+  if (!databaseUrl || !isPostgresUrl(databaseUrl)) throw new Error("Worker configuration is invalid.");
+  return {
+    databaseUrl,
+    port: boundedInteger(environment.WORKER_PORT, 3002, 1, 65535),
+    gracefulShutdownMs: boundedInteger(environment.WORKER_GRACEFUL_SHUTDOWN_MS, 30_000, 1_000, 120_000),
+    pollIntervalMs: boundedInteger(environment.WORKER_SUPERVISOR_POLL_MS, 5_000, 1_000, 60_000),
+  };
+}
+
+// These are independently compiled adapter entrypoints. The supervisor never
+// executes root TypeScript through tsx, so its lifecycle surface stays isolated.
+export function createChildProcessAdapters(root = resolve(fileURLToPath(new URL("../../..", import.meta.url)))): WorkerAdapter[] {
+  return [
+    childAdapter("knowledge-extraction", ["node", "apps/worker/dist/adapters/extraction.mjs", "extraction", "--once", `--worker-id=worker-extraction-${process.pid}`], root),
+    childAdapter("knowledge-ingestion", ["node", "apps/worker/dist/adapters/ingestion.mjs", "ingestion", "--once", `--worker-id=worker-ingestion-${process.pid}`], root),
+    childAdapter("knowledge-indexing", ["node", "apps/worker/dist/adapters/indexing.mjs", "indexing", "--once", `--worker-id=worker-indexing-${process.pid}`], root),
+    childAdapter("ai-ask-outbox", ["node", "apps/worker/dist/adapters/outbox.mjs", "outbox", "--once", `--worker-id=worker-outbox-${process.pid}`], root),
+  ];
+}
+
+export class WorkerRuntime {
+  private readonly states = new Map<AdapterName, "uninitialized" | "ready" | "failed" | "stopped">();
+  private readonly controller = new AbortController();
+  private server: Server | undefined;
+  private readonly sockets = new Set<Socket>();
+  private draining = false;
+  private databaseReady = false;
+  private running = new Set<Promise<void>>();
+
+  constructor(private readonly config: WorkerConfig | undefined, private readonly adapters: WorkerAdapter[], private readonly probeDatabase: () => Promise<void> = () => config ? probePostgres(config.databaseUrl) : Promise.reject(new Error("invalid configuration")), private readonly healthPortFallback = 3002) {
+    for (const adapter of adapters) this.states.set(adapter.name, "uninitialized");
+  }
+
+  async start() {
+    this.server = createServer((request, response) => this.respondHealth(request.url, response));
+    this.server.on("connection", (socket) => { this.sockets.add(socket); socket.once("close", () => this.sockets.delete(socket)); });
+    await new Promise<void>((resolve, reject) => this.server!.once("error", reject).listen(this.config?.port ?? this.healthPortFallback, "0.0.0.0", resolve));
+    if (!this.config) return;
+    void this.probeUntilReady();
+  }
+
+  async drain() {
+    if (this.draining) return;
+    this.draining = true;
+    this.controller.abort();
+    const completed = await Promise.race([
+      Promise.allSettled([...this.running]),
+      new Promise<"deadline">((resolve) => setTimeout(() => resolve("deadline"), this.config?.gracefulShutdownMs ?? 1_000)),
+    ]);
+    if (completed === "deadline") {
+      for (const adapter of this.adapters) adapter.forceStop?.();
+      await Promise.allSettled([...this.running]);
+    }
+    for (const socket of this.sockets) socket.destroy();
+    await new Promise<void>((resolve) => this.server?.close(() => resolve()) ?? resolve());
+  }
+
+  get ready() {
+    return Boolean(this.config) && !this.draining && this.databaseReady && this.adapters.length === adapterNames.length && this.adapters.every((adapter) => this.states.get(adapter.name) === "ready");
+  }
+
+  get healthPort() {
+    const address = this.server?.address();
+    return address && typeof address !== "string" ? address.port : undefined;
+  }
+
+  private admit(adapter: WorkerAdapter) {
+    if (this.draining) return;
+    const task = adapter.run(this.controller.signal)
+      .then(() => { this.states.set(adapter.name, "ready"); })
+      .catch(() => { this.states.set(adapter.name, "failed"); })
+      .finally(() => {
+        this.running.delete(task);
+        if (!this.draining) setTimeout(() => this.admit(adapter), this.config!.pollIntervalMs);
+      });
+    this.running.add(task);
+  }
+
+  private respondHealth(url: string | undefined, response: import("node:http").ServerResponse) {
+    if (url === "/health/live") return this.json(response, 200, { status: "ok" });
+    if (url === "/health/ready") return this.json(response, this.ready ? 200 : 503, this.ready ? { status: "ok" } : { status: "not_ready", reason: this.readyReason() });
+    this.json(response, 404, { status: "not_found" });
+  }
+
+  private readyReason() {
+    if (this.draining) return "draining";
+    if (!this.config) return "configuration_invalid";
+    if (!this.databaseReady) return "database_unavailable";
+    if ([...this.states.values()].some((state) => state === "failed")) return "loop_failed";
+    return "loop_uninitialized";
+  }
+
+  private async probeUntilReady() {
+    while (!this.draining) {
+      try {
+        await this.probeDatabase();
+        if (this.draining) return;
+        if (!this.databaseReady) {
+          this.databaseReady = true;
+          for (const adapter of this.adapters) this.admit(adapter);
+        }
+      } catch {
+        this.databaseReady = false;
+      }
+      await sleep(this.config!.pollIntervalMs, this.controller.signal);
+    }
+  }
+
+  private json(response: import("node:http").ServerResponse, status: number, body: object) {
+    response.writeHead(status, { "content-type": "application/json" });
+    response.end(JSON.stringify(body));
+  }
+}
+
+function childAdapter(name: AdapterName, [command, ...args]: string[], cwd: string): WorkerAdapter {
+  let child: ChildProcess | undefined;
+  return {
+    name,
+    run: (signal) => runChild(command, args, cwd, signal, (process) => { child = process; }),
+    forceStop: () => child?.kill("SIGKILL"),
+  };
+}
+
+function runChild(command: string, args: string[], cwd: string, signal: AbortSignal, onSpawn: (child: ChildProcess) => void) {
+  return new Promise<void>((resolve, reject) => {
+    const child: ChildProcess = spawn(command, args, { cwd, env: process.env, stdio: "inherit" });
+    onSpawn(child);
+    const stop = () => child.kill("SIGTERM");
+    signal.addEventListener("abort", stop, { once: true });
+    child.once("error", reject);
+    child.once("exit", (code) => {
+      signal.removeEventListener("abort", stop);
+      if (signal.aborted || code === 0) resolve();
+      else reject(new Error("Worker adapter exited."));
+    });
+  });
+}
+
+function sleep(ms: number, signal: AbortSignal) {
+  return new Promise<void>((resolve) => {
+    if (signal.aborted) return resolve();
+    const timer = setTimeout(resolve, ms);
+    signal.addEventListener("abort", () => { clearTimeout(timer); resolve(); }, { once: true });
+  });
+}
+
+async function probePostgres(databaseUrl: string) {
+  const sql = postgres(databaseUrl, { max: 1, connect_timeout: 5 });
+  try { await sql`select 1`; } finally { await sql.end({ timeout: 5 }); }
+}
+
+function boundedInteger(value: string | undefined, fallback: number, min: number, max: number) {
+  if (value === undefined || value === "") return fallback;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < min || parsed > max) throw new Error("Worker configuration is invalid.");
+  return parsed;
+}
+
+function isPostgresUrl(value: string) {
+  try { const url = new URL(value); return ["postgres:", "postgresql:"].includes(url.protocol) && Boolean(url.hostname) && url.pathname !== "/"; } catch { return false; }
+}

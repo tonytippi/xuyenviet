@@ -14,6 +14,13 @@ WORKDIR /app
 FROM base AS deps
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/api/package.json ./apps/api/package.json
+COPY apps/worker/package.json ./apps/worker/package.json
+COPY packages/config/package.json ./packages/config/package.json
+COPY packages/contracts/package.json ./packages/contracts/package.json
+COPY packages/database/package.json ./packages/database/package.json
+COPY packages/domain/package.json ./packages/domain/package.json
+COPY packages/worker-domain/package.json ./packages/worker-domain/package.json
 COPY patches ./patches
 RUN pnpm install --frozen-lockfile
 
@@ -25,6 +32,13 @@ RUN pnpm build
 FROM base AS production-deps
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/api/package.json ./apps/api/package.json
+COPY apps/worker/package.json ./apps/worker/package.json
+COPY packages/config/package.json ./packages/config/package.json
+COPY packages/contracts/package.json ./packages/contracts/package.json
+COPY packages/database/package.json ./packages/database/package.json
+COPY packages/domain/package.json ./packages/domain/package.json
+COPY packages/worker-domain/package.json ./packages/worker-domain/package.json
 COPY patches ./patches
 RUN pnpm install --frozen-lockfile --prod
 
@@ -70,12 +84,17 @@ COPY . .
 
 CMD ["pnpm", "db:migrate"]
 
-FROM deps AS worker
+FROM build AS worker
 
 ENV NODE_ENV=production
+ENV WORKER_PORT=3002
 
 RUN groupadd --system nextjs && useradd --system --gid nextjs nextjs
 
 COPY --chown=nextjs:nextjs . .
 
+EXPOSE 3002
+
 USER nextjs
+
+CMD ["pnpm", "worker"]

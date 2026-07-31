@@ -6,7 +6,6 @@ import { buildTripChangeProposalDraftMessages, tripChangeProposalDraftPromptVers
 import { readOwnedTripProjectAggregateForProposalDraft } from "@/features/chat-trips/trip-projects";
 import { aiUsagePurposes } from "@/features/usage/constants";
 import { writeAiUsageEvent } from "@/features/audit/usage";
-import type { AuthenticatedSession } from "@/server/auth";
 import { getDb } from "@/db/client";
 
 type Transaction = Parameters<ReturnType<typeof getDb>["transaction"]>[0] extends (transaction: infer T) => unknown ? T : never;
@@ -61,20 +60,23 @@ export type UntrustedTripChangeProposalDraft = {
   pricingSnapshot?: ReturnType<typeof getAiGatewayPricingSnapshot>;
 };
 
+/** Durable outbox ownership is supplied from its validated envelope, not a session. */
+export type TripProposalOwner = { userId: string };
+
 export async function draftTripChangeProposal({
-  session,
+  owner,
   tripProjectId,
   question,
   abortSignal,
   beforeProviderCall,
 }: {
-  session: AuthenticatedSession;
+  owner: TripProposalOwner;
   tripProjectId: string;
   question: string;
   abortSignal?: AbortSignal;
   beforeProviderCall?: () => Promise<boolean>;
 }): Promise<UntrustedTripChangeProposalDraft> {
-  const aggregate = await readOwnedTripProjectAggregateForProposalDraft(tripProjectId, session);
+  const aggregate = await readOwnedTripProjectAggregateForProposalDraft(tripProjectId, owner);
 
   if (!aggregate) {
     return { ok: false, reason: "no_project" };
@@ -187,13 +189,13 @@ export async function draftTripChangeProposal({
 }
 
 export async function writeTripChangeProposalDraftUsageInTransaction(transaction: Transaction, input: {
-  session: AuthenticatedSession;
+  owner: TripProposalOwner;
   tripProjectId: string;
   draft: UntrustedTripChangeProposalDraft;
 }) {
   if (!input.draft.usage || !input.draft.aiGatewayModelId || !input.draft.pricingSnapshot) return;
   await writeAiUsageEvent(transaction, {
-    initiatedByUserId: input.session.userId,
+    initiatedByUserId: input.owner.userId,
     executorSystem: "system-ai-orchestration",
     tripProjectId: input.tripProjectId,
     purpose: tripChangeProposalDraftPurpose,
