@@ -183,7 +183,9 @@ describe("compiled worker adapters", () => {
   test.runIf(Boolean(process.env.DATABASE_URL_TEST))("drains real child adapters without claiming new work and recovers an interrupted lease", async () => {
     await resetTestDatabase();
     await seedTestOperator();
-    await testDb.insert(releaseSchemaVersions).values({ version: schemaCompatibilityDeclarations.worker.maximumVersion });
+    // This compiled-runtime proof intentionally has no deployment policy
+    // projection, so it must use the policy-free pre-overlap release.
+    await testDb.insert(releaseSchemaVersions).values({ version: schemaCompatibilityDeclarations.worker.minimumVersion });
     const first = await seedIngestionJob("drain-first", "Điểm dừng trên đèo Hải Vân có bãi đỗ xe an toàn.");
     await testDb.update(knowledgeIngestionJobs).set({ protocolVersion: 2 }).where(eq(knowledgeIngestionJobs.id, first.id));
     await testDb.insert(aiGatewayModels).values({

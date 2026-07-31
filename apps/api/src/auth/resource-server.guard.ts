@@ -7,7 +7,7 @@ import { type BffCredentialConfig } from "@xuyenviet/config";
 import { type ApiIdentityRepository, type ReleaseSchemaVersionRepository } from "@xuyenviet/database";
 
 import { PUBLIC_ROUTE } from "./public-route.decorator";
-import { API_CONFIGURATION_VALID, isApiReady, RELEASE_SCHEMA_VERSION_REPOSITORY } from "../release-schema";
+import { API_CONFIGURATION_VALID, API_RELEASE_PHASE_POLICY, isApiReady, RELEASE_SCHEMA_VERSION_REPOSITORY } from "../release-schema";
 
 type RequestWithPrincipal = { headers: { authorization?: string; "x-request-id"?: string | string[] }; requestId?: string; principal?: RequestPrincipal };
 export const BFF_CREDENTIAL_CONFIG = Symbol("BFF_CREDENTIAL_CONFIG");
@@ -21,6 +21,7 @@ export class ResourceServerGuard implements CanActivate {
     private readonly reflector: Reflector,
     @Optional() @Inject(RELEASE_SCHEMA_VERSION_REPOSITORY) private readonly schemaVersions?: ReleaseSchemaVersionRepository,
     @Optional() @Inject(API_CONFIGURATION_VALID) private readonly configValid?: boolean,
+    @Optional() @Inject(API_RELEASE_PHASE_POLICY) private readonly releasePhasePolicy?: import("@xuyenviet/contracts").SchemaReleasePhasePolicy | null,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -68,7 +69,7 @@ export class ResourceServerGuard implements CanActivate {
       }
       throw unauthorized(request);
     }
-    if (this.schemaVersions && !await isApiReady({ configValid: this.configValid ?? false, repository: this.schemaVersions })) {
+    if (this.schemaVersions && !await isApiReady({ configValid: this.configValid ?? false, repository: this.schemaVersions, releasePhasePolicy: this.releasePhasePolicy })) {
       throw new ServiceUnavailableException({ code: "internal_error" });
     }
     return true;

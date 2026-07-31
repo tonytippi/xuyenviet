@@ -6,6 +6,7 @@ export type ApiSchemaMigrationDependencies = {
   runDrizzleMigration(): Promise<void>;
   releaseSchemaVersions: Pick<ReleaseSchemaVersionRepository, "recordSchemaVersion">;
   migrationVersion: string;
+  preflight(): Promise<void>;
 };
 
 // Recording is deliberately sequenced after Drizzle. The release record remains
@@ -15,6 +16,7 @@ export async function runApiSchemaMigration(dependencies: ApiSchemaMigrationDepe
   try {
     await dependencies.acquireMigrationLock();
     locked = true;
+    await dependencies.preflight();
     await dependencies.runDrizzleMigration();
     await dependencies.releaseSchemaVersions.recordSchemaVersion(dependencies.migrationVersion);
   } finally {

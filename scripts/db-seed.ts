@@ -1,132 +1,34 @@
-import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 
-import {
-  aiGatewayModels,
-  rawSourceMaterial,
-  sources,
-  users,
-} from "../src/db/schema";
-import { getDatabaseUrl } from "./db-env";
-import { loadFacebookSeedUrls } from "./facebook-seed-urls";
-import { loadYoutubeSeedUrls } from "./youtube-seed-urls";
+import { assertDisposableLocalDatabaseUrl, databaseNameFromResolvedIdentity, getDatabaseUrl, isProtectedDatabaseName, isResolvedDatabaseTargetIdentity, resolveDatabaseTargetIdentity, type DestructiveResetEnvironment } from "./db-env";
+import { seedDatabase } from "./db-seed-data";
 
-const databaseUrl = getDatabaseUrl();
-const client = postgres(databaseUrl, { max: 1 });
-const db = drizzle(client);
-const facebookSources = loadFacebookSeedUrls().map((source) => ({
-  id: source.id,
-  kind: "facebook" as const,
-  url: source.url,
-  label: source.label,
-  publisher: "Facebook",
-  collectedDate: "2026-07-01",
-  sourceType: "community" as const,
-  verificationStatus: "unverified" as const,
-  official: false,
-  partner: false,
-  submittedByUserId: "seed-fixture-operator-user",
-}));
-const youtubeSources = loadYoutubeSeedUrls().map((source) => ({
-  id: source.id,
-  kind: "youtube" as const,
-  url: source.url,
-  canonicalUrl: source.url,
-  label: source.label,
-  publisher: "YouTube",
-  collectedDate: "2026-07-01",
-  sourceType: "community" as const,
-  verificationStatus: "unverified" as const,
-  official: false,
-  partner: false,
-  submittedByUserId: "seed-fixture-operator-user",
-}));
-const seedSources = [...facebookSources, ...youtubeSources];
-
-async function main() {
-  await db.insert(users).values([
-    {
-      id: "seed-fixture-operator-user",
-      name: "Seed Fixture Operator",
-      email: "fixture-operator@xuyenviet.local",
-    },
-  ]).onConflictDoNothing();
-
-  await db.insert(aiGatewayModels).values([
-    {
-      id: "seed-model-answer",
-      gatewayModelName: "cx/gpt-5.6-luna",
-      displayLabel: "GPT 5.6 Luna",
-      purpose: "ai_ask_initial_answer",
-      active: true,
-      defaultForPurpose: true,
-      supportsTextInput: true,
-      supportsStreaming: true,
-      pricingCurrency: "USD",
-      inputTokenPriceMicros: 400,
-      outputTokenPriceMicros: 1600,
-      pricingVersion: "seed",
-    },
-    {
-      id: "seed-model-extraction",
-      gatewayModelName: "cx/gpt-5.6-luna",
-      displayLabel: "GPT 5.6 Luna Extraction",
-      purpose: "extraction",
-      active: true,
-      defaultForPurpose: true,
-      supportsTextInput: true,
-      supportsExtraction: true,
-      pricingCurrency: "USD",
-      inputTokenPriceMicros: 400,
-      outputTokenPriceMicros: 1600,
-      pricingVersion: "seed",
-    },
-    {
-      id: "seed-model-embeddings",
-      gatewayModelName: "fireworks/nomic-ai/nomic-embed-text-v1.5",
-      displayLabel: "Nomic Embed Text v1.5",
-      purpose: "embeddings",
-      active: true,
-      defaultForPurpose: true,
-      supportsTextInput: true,
-      supportsEmbeddings: true,
-      pricingCurrency: "USD",
-      inputTokenPriceMicros: 20,
-      pricingVersion: "seed",
-    },
-    {
-      id: "seed-model-evaluation",
-      gatewayModelName: "cx/gpt-5.6-luna",
-      displayLabel: "GPT 5.6 Luna Evaluation",
-      purpose: "evaluation",
-      active: true,
-      defaultForPurpose: true,
-      supportsTextInput: true,
-      supportsEvaluation: true,
-      pricingCurrency: "USD",
-      inputTokenPriceMicros: 400,
-      outputTokenPriceMicros: 1600,
-      pricingVersion: "seed",
-    },
-  ]).onConflictDoNothing();
-
-  await db.insert(sources).values(seedSources).onConflictDoNothing();
-
-  await db.insert(rawSourceMaterial).values(seedSources.map((source) => ({
-    id: source.id.replace("source", "raw"),
-    sourceId: source.id,
-    rawMetadata: { sourceUrl: source.url },
-  }))).onConflictDoNothing();
-
+export async function runDisposableDatabaseSeed(databaseUrl: string, environment: DestructiveResetEnvironment & Record<string, string | undefined> = process.env as DestructiveResetEnvironment & Record<string, string | undefined>, dependencies: { seed?(sql: postgres.Sql): Promise<void> } = {}) {
+  assertDisposableLocalDatabaseUrl(databaseUrl, environment);
+  if (environment.DATABASE_URL !== undefined && environment.DATABASE_URL !== databaseUrl) throw new Error("Refusing destructive seed when supplied DATABASE_URL differs from the selected target.");
+  const sql = postgres(databaseUrl, { max: 1 });
+  try {
+    await seedVerifiedConnection(sql, environment.DB_RESET_EXPECTED_TARGET_IDENTITY, dependencies.seed ?? seedDatabase);
+  } finally { await sql.end(); }
 }
 
-main()
-  .then(async () => {
-    await client.end();
-    console.log("Seed data inserted.");
-  })
-  .catch(async (error) => {
-    await client.end();
-    console.error(error);
-    process.exit(1);
+export async function seedVerifiedConnection(sql: postgres.Sql, expectedIdentity: string | undefined, seed: (sql: postgres.Sql) => Promise<void> = seedDatabase): Promise<void> {
+  // Identity and first insert share this session so a URL/DNS target swap cannot
+  // turn a successful preflight into writes against another server.
+  const resolvedIdentity = await resolveDatabaseTargetIdentity(sql);
+  if (!isResolvedDatabaseTargetIdentity(resolvedIdentity) || resolvedIdentity !== expectedIdentity) throw new Error("Refusing destructive seed because the resolved target does not match the operator confirmation.");
+  if (isProtectedDatabaseName(databaseNameFromResolvedIdentity(resolvedIdentity))) throw new Error("Refusing to seed a protected database.");
+  await seed(sql);
+}
+
+async function main() {
+  await runDisposableDatabaseSeed(getDatabaseUrl());
+  console.log("Seed data inserted.");
+}
+
+if (process.argv[1]?.endsWith("db-seed.ts")) {
+  main().catch(() => {
+    console.error("Database seed failed before completion.");
+    process.exitCode = 1;
   });
+}

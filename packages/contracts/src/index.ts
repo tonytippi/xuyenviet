@@ -48,19 +48,89 @@ export type SchemaCompatibilityDeclaration = { workload: SchemaWorkload; minimum
 export type ParsedSchemaVersion = { year: number; month: number; day: number; revision: bigint };
 
 const schemaWorkloads = new Set<SchemaWorkload>(["web", "api", "worker", "migration", "admin"]);
-const releaseSchemaVersion = "20260728.1";
+const currentReleaseSchemaVersion = "20260728.1";
+const overlappingReleaseSchemaVersion = "20260729.1";
 
 // Ranges are intentionally declared outside any application runtime so every
 // deployable workload applies the same release-recorded schema policy.
 export const schemaCompatibilityDeclarations: Record<SchemaWorkload, SchemaCompatibilityDeclaration> = {
-  web: { workload: "web", minimumVersion: releaseSchemaVersion, maximumVersion: releaseSchemaVersion },
-  api: { workload: "api", minimumVersion: releaseSchemaVersion, maximumVersion: releaseSchemaVersion },
-  worker: { workload: "worker", minimumVersion: releaseSchemaVersion, maximumVersion: releaseSchemaVersion },
-  migration: { workload: "migration", minimumVersion: releaseSchemaVersion, maximumVersion: releaseSchemaVersion },
-  admin: { workload: "admin", minimumVersion: releaseSchemaVersion, maximumVersion: releaseSchemaVersion },
+  web: { workload: "web", minimumVersion: currentReleaseSchemaVersion, maximumVersion: overlappingReleaseSchemaVersion },
+  api: { workload: "api", minimumVersion: currentReleaseSchemaVersion, maximumVersion: overlappingReleaseSchemaVersion },
+  worker: { workload: "worker", minimumVersion: currentReleaseSchemaVersion, maximumVersion: overlappingReleaseSchemaVersion },
+  migration: { workload: "migration", minimumVersion: currentReleaseSchemaVersion, maximumVersion: overlappingReleaseSchemaVersion },
+  admin: { workload: "admin", minimumVersion: currentReleaseSchemaVersion, maximumVersion: overlappingReleaseSchemaVersion },
 };
 
 export type SchemaAdmission = { compatible: true } | { compatible: false };
+
+// This is a reviewed release artifact projection, supplied at deployment as
+// process configuration. It is intentionally not the raw matrix: approval and
+// target information never enter workload processes or health output.
+// This is a deployment projection of one reviewed, checked-in matrix.  The
+// digest prevents a release ID from being reused with changed matrix content.
+export type SchemaReleasePhasePolicy = {
+  releaseId: string;
+  matrixPath: string;
+  matrixDigest: string;
+  target: SchemaReleaseMatrix["target"];
+  phase: SchemaReleasePhase;
+  workloads: Record<SchemaWorkload, SchemaCompatibilityDeclaration>;
+};
+
+export function parseSchemaReleasePhasePolicy(value: unknown): SchemaReleasePhasePolicy | null {
+  if (!isRecord(value) || !hasExactKeys(value, ["releaseId", "matrixPath", "matrixDigest", "target", "phase", "workloads"]) || !isBoundedReleaseText(value.releaseId, 128) || !/^[A-Za-z0-9._-]{1,255}\.json$/.test(value.matrixPath as string) || !/^[a-f0-9]{64}$/.test(value.matrixDigest as string) || !isReleaseTarget(value.target) || !["expand", "migrate", "contract"].includes(value.phase as string) || !isRecord(value.workloads) || Object.keys(value.workloads).length !== schemaWorkloads.size) return null;
+  const workloads = value.workloads;
+  return [...schemaWorkloads].every((workload) => isSchemaCompatibilityDeclaration(workloads[workload], workload))
+    ? value as SchemaReleasePhasePolicy
+    : null;
+}
+
+export function admitsSchemaReleasePhasePolicy(policy: SchemaReleasePhasePolicy | null | undefined, workload: SchemaWorkload, rows: readonly { version: unknown }[], resolvedTargetIdentity?: unknown): boolean {
+  // A pre-overlap binary is the only deliberately policy-free admission path.
+  // Once the persisted record reaches the overlap target, a bound projection is
+  // mandatory for every traffic and worker boundary.
+  if (policy === undefined) return rows.length === 1 && rows[0]?.version === currentReleaseSchemaVersion;
+  return policy !== null && policy.target.resolvedIdentity === resolvedTargetIdentity
+    && evaluateSchemaAdmission(policy.workloads[workload], rows).compatible;
+}
+
+export const schemaReleaseDispositions = ["clean_break_disposable", "expand_migrate_contract"] as const;
+export type SchemaReleaseDisposition = (typeof schemaReleaseDispositions)[number];
+export type SchemaReleasePhase = "expand" | "migrate" | "contract";
+export type SchemaReleaseMatrix = {
+  releaseId: string;
+  disposition: "expand_migrate_contract";
+  target: { environment: "test" | "staging" | "production"; identityClass: "test" | "durable" | "protected" | "operational"; resolvedIdentity: string };
+  approval: { approved: true; reference: string };
+  currentVersion: string;
+  targetVersion: string;
+  // Parsing is intentionally broader than execution: db:migrate selects only
+  // migrate operations, while a separately approved contract can be reviewed.
+  operation: { phase: SchemaReleasePhase; durableRewrite: boolean };
+  persistentObjects: Array<{ name: string; interpretation: string }>;
+  phases: Record<SchemaReleasePhase, { workloads: Record<SchemaWorkload, SchemaCompatibilityDeclaration> }>;
+  // Static declarations describe all runtime schemas. This separately attested
+  // inventory describes only owners that can actually overlap this release.
+  activeOwnerInventory: { attested: true; owners: Array<{ id: string; ownerType: "workload" | "capability"; workload?: SchemaWorkload; capability?: string; runtimeWorkload?: SchemaWorkload; role: "reader" | "writer"; oldRepresentation: string; schemaVersion: string; effectiveState: "active" | "deployable"; deploymentEvidence: string; declaration: SchemaCompatibilityDeclaration }> };
+  expandEvidence: Record<string, string>;
+  rolloutOrder: Array<string | "verify-expand" | "migrate">;
+  migrationJob: { version: string; lock: "918_040_004" };
+  migrationPlan: { disposition: "forward_only"; pending: Array<{ id: string; digest: string }> };
+  traffic: { writerOwnerId: string; dualWrite: false; readOnlyShadow: boolean };
+  rollback: { legacyOwnerId: string; legacyBinaryRelease: string };
+  verification: string[];
+  contract: { destructiveCleanup: boolean; oldOwners: Array<{ id: string; oldRepresentation: string; schemaVersion: string; retired: boolean; retirementEvidence?: string }>; cleanupConstraints?: { expandedSchemaRetainedUntilRetirement: true; noDestructiveRollback: true; forwardOnly: true } };
+  dataRewrite?: { approvedRunbook: string; idempotent: true; batchingAndResumption: true; validation: string; failureHandling: string; nonDestructiveRecovery: string };
+};
+
+export type SchemaReleaseGateInput = {
+  disposition: SchemaReleaseDisposition;
+  matrix: unknown;
+  phase: SchemaReleasePhase;
+  migrationVersion: string;
+  persistedRows: readonly { version: unknown }[];
+  target: { environment: unknown; identityClass: unknown; resolvedIdentity: unknown };
+};
 
 // Workloads receive persisted rows, not a locally inferred migration version.
 // Cardinality is part of admission so every deployment boundary fails closed alike.
@@ -107,6 +177,151 @@ export function isSchemaCompatible(declaration: SchemaCompatibilityDeclaration, 
   const current = parseSchemaVersion(persistedVersion);
   return Boolean(minimum && maximum && current && compareSchemaVersions(minimum, maximum) <= 0 && compareSchemaVersions(current, minimum) >= 0 && compareSchemaVersions(current, maximum) <= 0);
 }
+
+// This parser is the single release-plan boundary. It deliberately returns no
+// diagnostics because callers must not expose target or approval details.
+export function parseSchemaReleaseMatrix(value: unknown): SchemaReleaseMatrix | null {
+  if (!isRecord(value) || !hasOnlyReleaseKeys(value, ["releaseId", "disposition", "target", "approval", "currentVersion", "targetVersion", "operation", "persistentObjects", "phases", "activeOwnerInventory", "expandEvidence", "rolloutOrder", "migrationJob", "migrationPlan", "traffic", "rollback", "verification", "contract", "dataRewrite"], ["dataRewrite"])) return null;
+  if (!isBoundedReleaseText(value.releaseId, 128) || value.disposition !== "expand_migrate_contract" || !isReleaseTarget(value.target) || !isReleaseApproval(value.approval) || !isSchemaVersion(value.currentVersion) || !isSchemaVersion(value.targetVersion) || compareSchemaVersions(parseSchemaVersion(value.currentVersion)!, parseSchemaVersion(value.targetVersion)!) >= 0) return null;
+  if (!isOperation(value.operation) || !Array.isArray(value.persistentObjects) || value.persistentObjects.length === 0 || !value.persistentObjects.every((item) => isRecord(item) && hasExactKeys(item, ["name", "interpretation"]) && isBoundedReleaseText(item.name, 160) && isBoundedReleaseText(item.interpretation, 500))) return null;
+  if (!isReleasePhases(value.phases) || !isActiveOwnerInventory(value.activeOwnerInventory, value.currentVersion, value.targetVersion) || !hasExpandEvidence(value.expandEvidence, value.activeOwnerInventory) || !hasFullRolloutOrder(value.rolloutOrder, value.activeOwnerInventory)) return null;
+  if (!isRecord(value.migrationJob) || !hasExactKeys(value.migrationJob, ["version", "lock"]) || value.migrationJob.version !== value.targetVersion || value.migrationJob.lock !== "918_040_004") return null;
+  if (!isMigrationPlan(value.migrationPlan)) return null;
+  if (!isTraffic(value.traffic) || !isRollback(value.rollback)) return null;
+  if (!Array.isArray(value.verification) || value.verification.length === 0 || !value.verification.every((item) => isBoundedReleaseText(item, 500))) return null;
+  if (!isContract(value.contract) || !hasCompleteRetirementEvidence(value.contract, value.activeOwnerInventory)) return null;
+  const operation = value.operation as { phase: SchemaReleasePhase; durableRewrite: boolean };
+  if ((operation.durableRewrite && !isDataRewritePlan(value.dataRewrite)) || (!operation.durableRewrite && value.dataRewrite !== undefined)) return null;
+  if (!hasPhaseCompatibleOverlap(value as SchemaReleaseMatrix) || !hasAd32Ownership(value as SchemaReleaseMatrix) || !hasDeployedMigrationDeclaration(value as SchemaReleaseMatrix) || !hasExpandBeforeMigration(value as SchemaReleaseMatrix) || !hasSafeContractCleanup(value as SchemaReleaseMatrix)) return null;
+  return value as SchemaReleaseMatrix;
+}
+
+export function validatesSchemaReleasePhasePolicy(policy: SchemaReleasePhasePolicy | null, matrix: unknown, matrixDigest: string): policy is SchemaReleasePhasePolicy {
+  const approved = parseSchemaReleaseMatrix(matrix);
+  return Boolean(policy && approved && policy.matrixDigest === matrixDigest && policy.releaseId === approved.releaseId
+    && policy.matrixPath.endsWith(".json") && policy.phase === approved.operation.phase
+    && policy.target.environment === approved.target.environment && policy.target.identityClass === approved.target.identityClass && policy.target.resolvedIdentity === approved.target.resolvedIdentity
+    && JSON.stringify(policy.workloads) === JSON.stringify(approved.phases[policy.phase].workloads));
+}
+
+export function admitsSchemaReleaseGate(input: SchemaReleaseGateInput): boolean {
+  if (input.disposition !== "expand_migrate_contract") return false;
+  const matrix = parseSchemaReleaseMatrix(input.matrix);
+  if (!matrix || input.phase !== "migrate" || matrix.operation.phase !== "migrate" || matrix.contract.destructiveCleanup || input.migrationVersion !== matrix.targetVersion) return false;
+  if (matrix.target.environment !== input.target.environment || matrix.target.identityClass !== input.target.identityClass || matrix.target.resolvedIdentity !== input.target.resolvedIdentity) return false;
+  const hasRecordedCurrentVersion = input.persistedRows.length === 1 && input.persistedRows[0]?.version === matrix.currentVersion;
+  // The test-only initial proof starts before migration 0003 creates the sole
+  // release ledger. Production-like targets retain the strict one-row gate.
+  const isApprovedTestBootstrap = matrix.target.environment === "test" && matrix.target.identityClass === "test"
+    && input.persistedRows.length === 0 && matrix.migrationPlan.pending.some((entry) => entry.id === "0003_release_schema_versions");
+  if (!hasRecordedCurrentVersion && !isApprovedTestBootstrap) return false;
+  const migration = matrix.phases.migrate.workloads.migration;
+  return isSchemaCompatible(migration, matrix.currentVersion) && matrix.migrationJob.version === matrix.targetVersion;
+}
+
+function isSchemaVersion(value: unknown): value is string { return parseSchemaVersion(value) !== null; }
+function isBoundedReleaseText(value: unknown, maximum: number): value is string { return typeof value === "string" && value.trim() === value && value.length > 0 && value.length <= maximum; }
+function hasExactKeys(value: Record<string, unknown>, keys: string[]): boolean { return Object.keys(value).every((key) => keys.includes(key)) && keys.every((key) => key in value); }
+function hasOnlyReleaseKeys(value: Record<string, unknown>, keys: string[], optional: string[]): boolean { return Object.keys(value).every((key) => keys.includes(key)) && keys.filter((key) => !optional.includes(key)).every((key) => key in value); }
+function isReleaseTarget(value: unknown): boolean { return isRecord(value) && hasExactKeys(value, ["environment", "identityClass", "resolvedIdentity"]) && ["test", "staging", "production"].includes(value.environment as string) && ["test", "durable", "protected", "operational"].includes(value.identityClass as string) && /^database=[A-Za-z0-9_-]{1,128};host=[A-Za-z0-9:.\[\]-]{1,255};port=[0-9]{1,5}$/.test(value.resolvedIdentity as string); }
+function isReleaseApproval(value: unknown): boolean { return isRecord(value) && hasExactKeys(value, ["approved", "reference"]) && value.approved === true && isBoundedReleaseText(value.reference, 160); }
+function isReleasePhases(value: unknown): boolean { return isRecord(value) && hasExactKeys(value, ["expand", "migrate", "contract"]) && (["expand", "migrate", "contract"] as const).every((phase) => isReleasePhase(value[phase])); }
+function isReleasePhase(value: unknown): boolean {
+  if (!isRecord(value) || !hasExactKeys(value, ["workloads"]) || !isRecord(value.workloads) || schemaWorkloads.size !== Object.keys(value.workloads).length) return false;
+  const workloads = value.workloads;
+  return [...schemaWorkloads].every((workload) => isSchemaCompatibilityDeclaration(workloads[workload], workload));
+}
+function isOperation(value: unknown): boolean { return isRecord(value) && hasExactKeys(value, ["phase", "durableRewrite"]) && ["expand", "migrate", "contract"].includes(value.phase as string) && typeof value.durableRewrite === "boolean"; }
+function isMigrationPlan(value: unknown): boolean { return isRecord(value) && hasExactKeys(value, ["disposition", "pending"]) && value.disposition === "forward_only" && Array.isArray(value.pending) && value.pending.every((entry) => isRecord(entry) && hasExactKeys(entry, ["id", "digest"]) && /^[0-9]{4}_[A-Za-z0-9_]+$/.test(entry.id as string) && /^[a-f0-9]{64}$/.test(entry.digest as string)) && new Set(value.pending.map((entry) => (entry as { id: string }).id)).size === value.pending.length; }
+function isSchemaCompatibilityDeclaration(value: unknown, workload: SchemaWorkload): boolean { return isRecord(value) && hasExactKeys(value, ["workload", "minimumVersion", "maximumVersion"]) && value.workload === workload && isSchemaCompatible(value as SchemaCompatibilityDeclaration, value.minimumVersion); }
+function isActiveOwnerInventory(value: unknown, currentVersion: string, targetVersion: string): value is SchemaReleaseMatrix["activeOwnerInventory"] {
+  if (!isRecord(value) || !hasExactKeys(value, ["attested", "owners"]) || value.attested !== true || !Array.isArray(value.owners) || value.owners.length === 0) return false;
+  const owners = value.owners;
+  return new Set(owners.map((owner) => isRecord(owner) ? owner.id : "")).size === owners.length && owners.some((owner) => isRecord(owner) && owner.ownerType === "workload" && owner.workload === "migration") && owners.every((owner) => isActiveOwner(owner, currentVersion, targetVersion));
+}
+function isActiveOwner(value: unknown, currentVersion: string, targetVersion: string): boolean {
+  if (!isRecord(value) || !hasOnlyReleaseKeys(value, ["id", "ownerType", "workload", "capability", "runtimeWorkload", "role", "oldRepresentation", "schemaVersion", "effectiveState", "deploymentEvidence", "declaration"], ["workload", "capability", "runtimeWorkload"]) || !isBoundedReleaseText(value.id, 160) || !["reader", "writer"].includes(value.role as string) || !isBoundedReleaseText(value.oldRepresentation, 500) || !isSchemaVersion(value.schemaVersion) || !["active", "deployable"].includes(value.effectiveState as string) || !isBoundedReleaseText(value.deploymentEvidence, 500)) return false;
+  const ownerType = value.ownerType;
+  if (ownerType === "workload" && (!schemaWorkloads.has(value.workload as SchemaWorkload) || value.capability !== undefined || value.runtimeWorkload !== undefined)) return false;
+  if (ownerType === "capability" && (value.workload !== undefined || !isBoundedReleaseText(value.capability, 160) || !schemaWorkloads.has(value.runtimeWorkload as SchemaWorkload))) return false;
+  const workload = ownerType === "workload" ? value.workload as SchemaWorkload : value.runtimeWorkload as SchemaWorkload;
+  return isSchemaCompatibilityDeclaration(value.declaration, workload) && value.schemaVersion === currentVersion && isSchemaCompatible(value.declaration as SchemaCompatibilityDeclaration, currentVersion) && isSchemaCompatible(value.declaration as SchemaCompatibilityDeclaration, targetVersion);
+}
+function activeOwnerIds(inventory: SchemaReleaseMatrix["activeOwnerInventory"]): string[] { return inventory.owners.map((owner) => owner.id); }
+function hasFullRolloutOrder(value: unknown, inventory: SchemaReleaseMatrix["activeOwnerInventory"]): value is SchemaReleaseMatrix["rolloutOrder"] {
+  const ownerIds = activeOwnerIds(inventory);
+  if (!Array.isArray(value) || value.length !== ownerIds.length + 2 || value[value.length - 1] !== "migrate" || value[value.length - 2] !== "verify-expand") return false;
+  const ordered = value.slice(0, -2);
+  return ordered.every((ownerId) => ownerIds.includes(ownerId as string)) && new Set(ordered).size === ownerIds.length;
+}
+function hasPhaseCompatibleOverlap(matrix: SchemaReleaseMatrix): boolean {
+  return [...schemaWorkloads].every((workload) => {
+    const expand = matrix.phases.expand.workloads[workload];
+    const migrate = matrix.phases.migrate.workloads[workload];
+    const contract = matrix.phases.contract.workloads[workload];
+    return isSchemaCompatible(expand, matrix.currentVersion) && isSchemaCompatible(expand, matrix.targetVersion)
+      && isSchemaCompatible(migrate, matrix.currentVersion) && isSchemaCompatible(migrate, matrix.targetVersion)
+      && isSchemaCompatible(contract, matrix.targetVersion)
+      && (!matrix.contract.destructiveCleanup || !isSchemaCompatible(contract, matrix.currentVersion));
+  });
+}
+function isTraffic(value: unknown): boolean { return isRecord(value) && hasExactKeys(value, ["writerOwnerId", "dualWrite", "readOnlyShadow"]) && isBoundedReleaseText(value.writerOwnerId, 160) && value.dualWrite === false && typeof value.readOnlyShadow === "boolean"; }
+function isRollback(value: unknown): boolean { return isRecord(value) && hasExactKeys(value, ["legacyOwnerId", "legacyBinaryRelease"]) && isBoundedReleaseText(value.legacyOwnerId, 160) && isBoundedReleaseText(value.legacyBinaryRelease, 160); }
+function isContract(value: unknown): value is SchemaReleaseMatrix["contract"] { return isRecord(value) && hasOnlyReleaseKeys(value, ["destructiveCleanup", "oldOwners", "cleanupConstraints"], ["cleanupConstraints"]) && typeof value.destructiveCleanup === "boolean" && Array.isArray(value.oldOwners) && value.oldOwners.length > 0 && value.oldOwners.every((owner) => isOldOwner(owner)) && (value.cleanupConstraints === undefined || isCleanupConstraints(value.cleanupConstraints)); }
+function hasCompleteRetirementEvidence(contract: SchemaReleaseMatrix["contract"], inventory: SchemaReleaseMatrix["activeOwnerInventory"]): boolean {
+  if (contract.oldOwners.length !== inventory.owners.length || new Set(contract.oldOwners.map((owner) => owner.id)).size !== inventory.owners.length) return false;
+  return inventory.owners.every((activeOwner) => {
+    const owner = contract.oldOwners.find((item) => item.id === activeOwner.id);
+    return owner?.oldRepresentation === activeOwner.oldRepresentation && owner.schemaVersion === activeOwner.schemaVersion
+      && (!contract.destructiveCleanup || owner.retired === true && isBoundedReleaseText(owner.retirementEvidence, 500));
+  });
+}
+function isOldOwner(value: unknown): boolean {
+  return isRecord(value)
+    && hasOnlyReleaseKeys(value, ["id", "oldRepresentation", "schemaVersion", "retired", "retirementEvidence"], ["retirementEvidence"])
+    && isBoundedReleaseText(value.id, 160)
+    && isBoundedReleaseText(value.oldRepresentation, 500)
+    && isSchemaVersion(value.schemaVersion)
+    && typeof value.retired === "boolean"
+    && (value.retirementEvidence === undefined || isBoundedReleaseText(value.retirementEvidence, 500));
+}
+function hasAd32Ownership(matrix: SchemaReleaseMatrix): boolean {
+  const writer = matrix.activeOwnerInventory.owners.find((owner) => owner.id === matrix.traffic.writerOwnerId);
+  const legacy = matrix.activeOwnerInventory.owners.find((owner) => owner.id === matrix.rollback.legacyOwnerId);
+  const selectedWriters = matrix.activeOwnerInventory.owners.filter((owner) => owner.role === "writer" && owner.effectiveState === "active" && isCutoverWriter(owner));
+  return selectedWriters.length === 1
+    && writer === selectedWriters[0]
+    && Boolean(legacy && legacy.role === "writer" && legacy.effectiveState === "active" && isCutoverWriter(legacy) && legacy.oldRepresentation === matrix.rollback.legacyBinaryRelease && isSchemaCompatible(legacy.declaration, matrix.targetVersion));
+}
+function effectiveOwnerWorkload(owner: SchemaReleaseMatrix["activeOwnerInventory"]["owners"][number]): SchemaWorkload { return owner.ownerType === "workload" ? owner.workload! : owner.runtimeWorkload!; }
+function isCutoverWriter(owner: SchemaReleaseMatrix["activeOwnerInventory"]["owners"][number]): boolean { const workload = effectiveOwnerWorkload(owner); return workload !== "worker" && workload !== "migration"; }
+function hasExpandBeforeMigration(matrix: SchemaReleaseMatrix): boolean {
+  const verificationIndex = matrix.rolloutOrder.indexOf("verify-expand");
+  const migrationIndex = matrix.rolloutOrder.indexOf("migrate");
+  const owners = matrix.activeOwnerInventory.owners;
+  return verificationIndex === owners.length && migrationIndex === verificationIndex + 1
+    && owners.every((owner) => {
+      const declaration = matrix.phases.expand.workloads[effectiveOwnerWorkload(owner)];
+      return isBoundedReleaseText(matrix.expandEvidence[owner.id], 500)
+        && isSchemaCompatible(declaration, owner.schemaVersion)
+        && isSchemaCompatible(declaration, matrix.targetVersion);
+    });
+}
+function hasExpandEvidence(value: unknown, inventory: SchemaReleaseMatrix["activeOwnerInventory"]): value is SchemaReleaseMatrix["expandEvidence"] { const ownerIds = activeOwnerIds(inventory); return isRecord(value) && ownerIds.length === Object.keys(value).length && ownerIds.every((ownerId) => isBoundedReleaseText(value[ownerId], 500)); }
+function hasSafeContractCleanup(matrix: SchemaReleaseMatrix): boolean {
+  if (matrix.operation.phase !== "contract") return !matrix.contract.destructiveCleanup;
+  if (!matrix.contract.destructiveCleanup) return true;
+  const constraints = matrix.contract.cleanupConstraints;
+  return hasCompleteRetirementEvidence(matrix.contract, matrix.activeOwnerInventory)
+    && Boolean(constraints?.expandedSchemaRetainedUntilRetirement && constraints.noDestructiveRollback && constraints.forwardOnly);
+}
+function isCleanupConstraints(value: unknown): boolean { return isRecord(value) && hasExactKeys(value, ["expandedSchemaRetainedUntilRetirement", "noDestructiveRollback", "forwardOnly"]) && value.expandedSchemaRetainedUntilRetirement === true && value.noDestructiveRollback === true && value.forwardOnly === true; }
+function hasDeployedMigrationDeclaration(matrix: SchemaReleaseMatrix): boolean {
+  const declared = matrix.phases.migrate.workloads.migration;
+  const deployed = schemaCompatibilityDeclarations.migration;
+  return declared.workload === deployed.workload && declared.minimumVersion === deployed.minimumVersion && declared.maximumVersion === deployed.maximumVersion;
+}
+function isDataRewritePlan(value: unknown): boolean { return isRecord(value) && hasExactKeys(value, ["approvedRunbook", "idempotent", "batchingAndResumption", "validation", "failureHandling", "nonDestructiveRecovery"]) && isBoundedReleaseText(value.approvedRunbook, 500) && value.idempotent === true && value.batchingAndResumption === true && [value.validation, value.failureHandling, value.nonDestructiveRecovery].every((item) => isBoundedReleaseText(item, 500)); }
 
 export function correlationId(value?: string | null): string {
   return typeof value === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(value) ? value : crypto.randomUUID();

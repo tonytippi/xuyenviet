@@ -25,4 +25,6 @@ async function main() {
   await runtime.start();
 }
 
-main().catch(() => process.exit(1));
+if (process.argv[1]?.endsWith("main.ts") || process.argv[1]?.endsWith("main.mjs")) {
+  main().catch(() => process.exit(1));
+}

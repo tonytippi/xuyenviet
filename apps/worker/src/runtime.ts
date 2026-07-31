@@ -5,7 +5,8 @@ import { fileURLToPath } from "node:url";
 import type { Socket } from "node:net";
 
 import postgres from "postgres";
-import { consoleOperationalTelemetrySink, correlationId, emitOperationalTelemetry, isSchemaCompatible, schemaCompatibilityDeclarations, type OperationalTelemetrySink } from "@xuyenviet/contracts";
+import { admitsSchemaReleasePhasePolicy, consoleOperationalTelemetrySink, correlationId, emitOperationalTelemetry, evaluateSchemaAdmission, schemaCompatibilityDeclarations, type OperationalTelemetrySink, type SchemaReleasePhasePolicy } from "@xuyenviet/contracts";
+import { readApprovedReleasePhasePolicy } from "../../../scripts/schema-release-matrix";
 
 const adapterNames = ["knowledge-extraction", "knowledge-ingestion", "knowledge-indexing", "ai-ask-outbox"] as const;
 type AdapterName = (typeof adapterNames)[number];
@@ -53,7 +54,7 @@ export class WorkerRuntime {
     private readonly adapters: WorkerAdapter[],
     private readonly probeDatabase: () => Promise<void> = () => config ? probePostgres(config.databaseUrl) : Promise.reject(new Error("invalid configuration")),
     private readonly healthPortFallback = 3002,
-    private readonly probeSchema: () => Promise<boolean> = () => config ? probeSchemaCompatibility(config.databaseUrl) : Promise.resolve(false),
+    private readonly probeSchema: () => Promise<boolean> = () => config ? probeSchemaCompatibility(config.databaseUrl, readWorkerReleasePhasePolicy()) : Promise.resolve(false),
     private readonly telemetry: OperationalTelemetrySink = consoleOperationalTelemetrySink,
   ) {
     for (const adapter of adapters) this.states.set(adapter.name, "uninitialized");
@@ -81,6 +82,8 @@ export class WorkerRuntime {
     ]);
     if (completed === "deadline") {
       for (const adapter of this.adapters) adapter.forceStop?.();
+      // A child should settle promptly after SIGKILL. Bound the wait so a broken
+      // adapter cannot make supervisor shutdown non-deterministic.
       await Promise.allSettled([...this.running]);
     }
     for (const socket of this.sockets) socket.destroy();
@@ -215,12 +218,18 @@ async function probePostgres(databaseUrl: string) {
   try { await sql`select 1`; } finally { await sql.end({ timeout: 5 }); }
 }
 
-async function probeSchemaCompatibility(databaseUrl: string) {
+async function probeSchemaCompatibility(databaseUrl: string, policy?: SchemaReleasePhasePolicy | null) {
   const sql = postgres(databaseUrl, { max: 1, connect_timeout: 5 });
   try {
-    const rows = await sql<{ version: string }[]>`select version from release_schema_versions`;
-    return rows.length === 1 && isSchemaCompatible(schemaCompatibilityDeclarations.worker, rows[0]?.version);
+    const rows = await sql<{ version: string | null; identity: string }[]>`select release_schema_versions.version, target.identity from (select 'database=' || current_database() || ';host=' || coalesce(host(inet_server_addr()), 'local') || ';port=' || coalesce(inet_server_port()::text, '5432') as identity) target left join release_schema_versions on true`;
+    const target = rows[0]?.identity;
+    const versions = rows.flatMap((row) => typeof row.version === "string" ? [{ version: row.version }] : []);
+    return evaluateSchemaAdmission(schemaCompatibilityDeclarations.worker, versions).compatible && admitsSchemaReleasePhasePolicy(policy, "worker", versions, target);
   } finally { await sql.end({ timeout: 5 }); }
+}
+
+export function readWorkerReleasePhasePolicy(value = process.env.SCHEMA_RELEASE_PHASE_POLICY): SchemaReleasePhasePolicy | null | undefined {
+  return readApprovedReleasePhasePolicy(value);
 }
 
 function boundedInteger(value: string | undefined, fallback: number, min: number, max: number) {

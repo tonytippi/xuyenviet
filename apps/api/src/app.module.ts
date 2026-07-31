@@ -14,12 +14,12 @@ import { SafeApiExceptionFilter } from "./safe-api-exception.filter";
 import { ConversationsController, CONVERSATION_SUMMARY_REPOSITORY, PLANNING_READ_REPOSITORY } from "./conversations/conversations.controller";
 import { HealthController } from "./health/health.controller";
 import { OpenApiController } from "./openapi.controller";
-import { API_CONFIGURATION_VALID, RELEASE_SCHEMA_VERSION_REPOSITORY } from "./release-schema";
+import { API_CONFIGURATION_VALID, API_RELEASE_PHASE_POLICY, RELEASE_SCHEMA_VERSION_REPOSITORY } from "./release-schema";
 import { VersionController } from "./version/version.controller";
 import { AiAskController, AI_ASK_STREAM_EXECUTION, OPERATIONAL_TELEMETRY_SINK } from "./ai-ask/ai-ask.controller";
 import type { AiAskStreamExecution } from "@xuyenviet/domain";
 
-export function createApiModule(config: BffCredentialConfig, identities: ApiIdentityRepository, dependencies?: { conversationSummaries: ConversationSummaryRepository; planningReads?: PlanningReadRepository; schemaVersions: ReleaseSchemaVersionRepository; aiAskExecution?: AiAskStreamExecution; telemetry?: OperationalTelemetrySink; configValid?: boolean }) {
+export function createApiModule(config: BffCredentialConfig, identities: ApiIdentityRepository, dependencies?: { conversationSummaries: ConversationSummaryRepository; planningReads?: PlanningReadRepository; schemaVersions: ReleaseSchemaVersionRepository; aiAskExecution?: AiAskStreamExecution; telemetry?: OperationalTelemetrySink; configValid?: boolean; releasePhasePolicy?: import("@xuyenviet/contracts").SchemaReleasePhasePolicy | null }) {
   @Module({
     controllers: dependencies ? [HealthController, VersionController, ConversationsController, OpenApiController, ...(dependencies.aiAskExecution ? [AiAskController] : [])] : [],
     providers: [
@@ -30,6 +30,7 @@ export function createApiModule(config: BffCredentialConfig, identities: ApiIden
          { provide: PLANNING_READ_REPOSITORY, useValue: dependencies.planningReads ?? unavailablePlanningReads },
         { provide: RELEASE_SCHEMA_VERSION_REPOSITORY, useValue: dependencies.schemaVersions },
          { provide: API_CONFIGURATION_VALID, useValue: dependencies.configValid ?? true },
+         { provide: API_RELEASE_PHASE_POLICY, useValue: dependencies.releasePhasePolicy },
          { provide: OPERATIONAL_TELEMETRY_SINK, useValue: dependencies.telemetry ?? consoleOperationalTelemetrySink },
         ...(dependencies.aiAskExecution ? [{ provide: AI_ASK_STREAM_EXECUTION, useValue: dependencies.aiAskExecution }] : []),
       ] : []),

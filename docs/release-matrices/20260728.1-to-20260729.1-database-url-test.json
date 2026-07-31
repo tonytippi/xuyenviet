@@ -1,0 +1,59 @@
+{
+  "releaseId": "schema-20260728.1-to-20260729.1-database-url-test",
+  "disposition": "expand_migrate_contract",
+  "target": { "environment": "test", "identityClass": "test", "resolvedIdentity": "database=xuyenviet_test;host=127.0.0.1;port=5432" },
+  "approval": { "approved": true, "reference": "user-approved-isolated-database-url-test-release-matrix-12.3" },
+  "currentVersion": "20260728.1",
+  "targetVersion": "20260729.1",
+  "operation": { "phase": "migrate", "durableRewrite": false },
+  "persistentObjects": [{ "name": "release_schema_versions", "interpretation": "One recorded deployed schema version; expanded representation remains rollback-compatible." }],
+  "phases": {
+    "expand": { "workloads": { "web": { "workload": "web", "minimumVersion": "20260728.1", "maximumVersion": "20260729.1" }, "api": { "workload": "api", "minimumVersion": "20260728.1", "maximumVersion": "20260729.1" }, "worker": { "workload": "worker", "minimumVersion": "20260728.1", "maximumVersion": "20260729.1" }, "migration": { "workload": "migration", "minimumVersion": "20260728.1", "maximumVersion": "20260729.1" }, "admin": { "workload": "admin", "minimumVersion": "20260728.1", "maximumVersion": "20260729.1" } } },
+    "migrate": { "workloads": { "web": { "workload": "web", "minimumVersion": "20260728.1", "maximumVersion": "20260729.1" }, "api": { "workload": "api", "minimumVersion": "20260728.1", "maximumVersion": "20260729.1" }, "worker": { "workload": "worker", "minimumVersion": "20260728.1", "maximumVersion": "20260729.1" }, "migration": { "workload": "migration", "minimumVersion": "20260728.1", "maximumVersion": "20260729.1" }, "admin": { "workload": "admin", "minimumVersion": "20260728.1", "maximumVersion": "20260729.1" } } },
+    "contract": { "workloads": { "web": { "workload": "web", "minimumVersion": "20260729.1", "maximumVersion": "20260729.1" }, "api": { "workload": "api", "minimumVersion": "20260729.1", "maximumVersion": "20260729.1" }, "worker": { "workload": "worker", "minimumVersion": "20260729.1", "maximumVersion": "20260729.1" }, "migration": { "workload": "migration", "minimumVersion": "20260729.1", "maximumVersion": "20260729.1" }, "admin": { "workload": "admin", "minimumVersion": "20260729.1", "maximumVersion": "20260729.1" } } }
+  },
+  "activeOwnerInventory": { "attested": true, "owners": [
+    { "id": "web-expanded", "ownerType": "workload", "workload": "web", "role": "reader", "oldRepresentation": "web-expand-20260729.1", "schemaVersion": "20260728.1", "effectiveState": "active", "deploymentEvidence": "Isolated test expanded web declaration verified.", "declaration": { "workload": "web", "minimumVersion": "20260728.1", "maximumVersion": "20260729.1" } },
+    { "id": "api-expanded", "ownerType": "workload", "workload": "api", "role": "reader", "oldRepresentation": "api-expand-20260729.1", "schemaVersion": "20260728.1", "effectiveState": "active", "deploymentEvidence": "Isolated test expanded API declaration verified.", "declaration": { "workload": "api", "minimumVersion": "20260728.1", "maximumVersion": "20260729.1" } },
+    { "id": "worker-expanded", "ownerType": "workload", "workload": "worker", "role": "reader", "oldRepresentation": "worker-expand-20260729.1", "schemaVersion": "20260728.1", "effectiveState": "active", "deploymentEvidence": "Isolated test expanded Worker declaration verified.", "declaration": { "workload": "worker", "minimumVersion": "20260728.1", "maximumVersion": "20260729.1" } },
+    { "id": "migration-expanded", "ownerType": "workload", "workload": "migration", "role": "reader", "oldRepresentation": "migration-expand-20260729.1", "schemaVersion": "20260728.1", "effectiveState": "deployable", "deploymentEvidence": "Isolated test migration workload verified.", "declaration": { "workload": "migration", "minimumVersion": "20260728.1", "maximumVersion": "20260729.1" } },
+    { "id": "api-request-write", "ownerType": "capability", "capability": "api.request-write", "runtimeWorkload": "api", "role": "writer", "oldRepresentation": "api-request-write-expand-20260729.1", "schemaVersion": "20260728.1", "effectiveState": "active", "deploymentEvidence": "Isolated test API request writer verified.", "declaration": { "workload": "api", "minimumVersion": "20260728.1", "maximumVersion": "20260729.1" } }
+  ] },
+  "expandEvidence": { "web-expanded": "Isolated test expanded web declaration verified.", "api-expanded": "Isolated test expanded API declaration verified.", "worker-expanded": "Isolated test expanded Worker declaration verified.", "migration-expanded": "Isolated test migration workload verified.", "api-request-write": "Isolated test API request writer verified." },
+  "rolloutOrder": ["web-expanded", "api-expanded", "worker-expanded", "migration-expanded", "api-request-write", "verify-expand", "migrate"],
+  "migrationJob": { "version": "20260729.1", "lock": "918_040_004" },
+  "migrationPlan": { "disposition": "forward_only", "pending": [
+    { "id": "0000_baseline", "digest": "b407e1fbbe21c5a9588a6e530ec60e81de75880ca4048d353d6fa4fa0239a22a" },
+    { "id": "0001_user_authorization_version", "digest": "1ee8d2a482d15d5ebbe4029b9c99b23b1fd528afacf35362ac25b2e517b4ab64" },
+    { "id": "0002_system_admin_bootstrap_actor", "digest": "21d9276b9be70899e204dad143eac57a70c9e2c0556a1e985a537423e1454497" },
+    { "id": "0003_release_schema_versions", "digest": "3ea86af3f29c5306bc1430da195849db85cbb3d71e321d31017323d6c3bd30cf" },
+    { "id": "0004_flowery_sir_ram", "digest": "c47de917859dad9dfd3189ebdc7fdfaa9847b05e28749f1a374376e8aced5619" },
+    { "id": "0005_rich_dreaming_celestial", "digest": "b7b52e17c9d5c3757d04487af4c24db45aa4ab945e12d94c63b745ead31c0120" },
+    { "id": "0006_owner_scoped_ai_ask_command_references", "digest": "a4f22269fa0f2a9ee033c0341db66d18bb973b9f4459e12e3148fa5f96e6b6ef" },
+    { "id": "0007_married_agent_zero", "digest": "5543b8967b17768521c901b1ef37001fb34e7c97eb86c223f9da1233eef034a0" },
+    { "id": "0008_stable_ai_ask_terminal_projection", "digest": "6535ab237a7c1cc7df199a2d3d20a717dcc0b7fcec13c18f128d6736145481f9" },
+    { "id": "0009_fence_terminal_ai_ask_persistence", "digest": "db742401b9ed56a9c0c8d4634f800c4a79593c69d935ab0f357a9e7a7a219725" },
+    { "id": "0010_scrub_retained_ai_ask_commands_on_delete", "digest": "d517f2542e5f7b13cac5cfbd686a6cd6531b04743382e2266eb0b01e4a5939be" },
+    { "id": "0011_ai_ask_domain_outbox", "digest": "dd12fdb76f3d4c7792922b4bf64f70b2895c2732d4c299a260404a86d9c8f94b" },
+    { "id": "0012_require_domain_outbox_failure_code", "digest": "6d7d2546200f332145d2b32ae4ae5c34faf5a0549ff07a973024d595fb72560c" },
+    { "id": "0013_scrub_retained_ai_ask_commands_on_message_delete", "digest": "5abde86baa045df7abad15d455a08c203753b0b21b87594707958ea4e0776c1b" },
+    { "id": "0014_preserve_conversation_owner_on_project_delete", "digest": "f3e2f2d41f89df165d87c3fa5388317add2a6f717d82bb884733e7a4be651819" },
+    { "id": "0015_trip_answer_context_snapshots", "digest": "b83a20653f5de9f4fb2cb78c542549dc1f5864d4864b57a7cd431830abbc2dd9" },
+    { "id": "0016_harden_trip_answer_context_snapshot_references", "digest": "7d79f2490ca94af39f7c909544c38d2e19fa02fa49b351c4d2d4b829a9269acf" },
+    { "id": "0017_clear_ai_ask_snapshot_on_scrub", "digest": "d8e71669b14cc1517c33cb2fc78b6ef7302efa8fd1d95a2b5eb223b94d4b5efa" },
+    { "id": "0018_delete_trip_answer_context_snapshots_with_project", "digest": "ad6b285b82901e3c5df78991a35b1ac2440a534b21b3666f55730f3531915159" },
+    { "id": "0019_withdraw_historical_assistant_provenance", "digest": "53b8f8c9308ecb47b4b1d1a13313584bcce281a984117172fb28976c60808226" },
+    { "id": "0020_assistant_provenance_withdrawal_backfill_state_terminal", "digest": "4ad00a652abb097846fe720f43ad6bb38fc742edeb9ddb1e84e75410aac040a7" },
+    { "id": "0021_mark_destructive_evidence_withdrawals", "digest": "c6e21d305d4dbf74844b6fe44df291d6f8007c09af421530346a82ba7bb3e6db" }
+  ] },
+  "traffic": { "writerOwnerId": "api-request-write", "dualWrite": false, "readOnlyShadow": false },
+  "rollback": { "legacyOwnerId": "api-request-write", "legacyBinaryRelease": "api-request-write-expand-20260729.1" },
+  "verification": ["Preflight resolved DATABASE_URL_TEST identity read-only before migration. This approval is limited to the isolated test target."],
+  "contract": { "destructiveCleanup": false, "oldOwners": [
+    { "id": "web-expanded", "oldRepresentation": "web-expand-20260729.1", "schemaVersion": "20260728.1", "retired": false },
+    { "id": "api-expanded", "oldRepresentation": "api-expand-20260729.1", "schemaVersion": "20260728.1", "retired": false },
+    { "id": "worker-expanded", "oldRepresentation": "worker-expand-20260729.1", "schemaVersion": "20260728.1", "retired": false },
+    { "id": "migration-expanded", "oldRepresentation": "migration-expand-20260729.1", "schemaVersion": "20260728.1", "retired": false },
+    { "id": "api-request-write", "oldRepresentation": "api-request-write-expand-20260729.1", "schemaVersion": "20260728.1", "retired": false }
+  ] }
+}

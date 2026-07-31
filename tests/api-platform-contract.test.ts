@@ -38,7 +38,7 @@ beforeEach(async () => {
     async loadOwnedAnswerDetail(userId, conversationId, assistantMessageId) { return userId === "user-1" && conversationId === "conversation-a" && assistantMessageId === "answer-1" ? { conversationId, assistantMessageId, content: "Nội dung đã hoàn tất.", provenance: [{ id: "withdrawn", rank: 1, availability: "withdrawn", unavailableLabel: "Nguồn này không còn khả dụng.", usedInPrompt: true, citedInAnswer: false }], annotations: [] } : null; },
   };
   const versions: ReleaseSchemaVersionRepository = {
-    async hasCompatibleSchemaVersion(declaration) { return ready && declaration === apiSchemaCompatibility; },
+    async hasCompatibleSchemaVersion(declaration) { return ready && declaration.workload === apiSchemaCompatibility.workload && declaration.minimumVersion === apiSchemaCompatibility.minimumVersion && declaration.maximumVersion === "20260728.1"; },
     async recordSchemaVersion() {},
   };
   const aiAskExecution: AiAskStreamExecution = { async *execute() { yield new Uint8Array([123, 34, 116, 121, 112, 101, 34, 58, 34, 112, 114, 101, 112, 97, 114, 105, 110, 103, 34, 125, 10]); yield new Uint8Array([123, 34, 116, 121, 112, 101, 34, 58, 34, 100, 111, 110, 101, 34, 125, 10]); } };

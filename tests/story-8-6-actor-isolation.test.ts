@@ -4,6 +4,7 @@ import { join } from "node:path";
 import ts from "typescript";
 
 import { eq, inArray, sql } from "drizzle-orm";
+import postgres from "postgres";
 import { beforeEach, describe, expect, test } from "vitest";
 
 import {
@@ -24,25 +25,45 @@ import {
 } from "@/features/audit/actors";
 import { recordAuditEvent } from "@/features/audit/events";
 
+import { resolveDatabaseTargetIdentity } from "../scripts/db-env";
 import { testDb } from "./helpers/db";
 import { getTestDatabaseUrl } from "./helpers/env-file";
 
 const catalogIds = systemAuditActorCatalog.map(({ id }) => id);
 const testDatabaseUrl = getTestDatabaseUrl();
 
-describe("Story 8.6 actor isolation", () => {
+async function resolveTestDatabaseIdentity(): Promise<string> {
+  const sql = postgres(testDatabaseUrl, { max: 1 });
+  try {
+    return await resolveDatabaseTargetIdentity(sql);
+  } finally {
+    await sql.end();
+  }
+}
+
+describe.sequential("Story 8.6 actor isolation", () => {
   beforeEach(async () => {
     await testDb.execute(sql.raw("drop schema public cascade; drop schema drizzle cascade; create schema public"));
+    const migrationDatabaseUrl = new URL(testDatabaseUrl);
+    migrationDatabaseUrl.searchParams.set("options", "-c xuyenviet.provenance_old_writers_quiesced=v1");
     execFileSync("pnpm", ["exec", "drizzle-kit", "migrate"], {
       cwd: process.cwd(),
       // Migration must target the isolated database, never the development URL.
-      env: { ...process.env, APP_ENV: "local", DATABASE_URL: testDatabaseUrl },
+      env: { ...process.env, APP_ENV: "local", DATABASE_URL: migrationDatabaseUrl.toString() },
       stdio: "inherit",
     });
+    const expectedIdentity = await resolveTestDatabaseIdentity();
     execFileSync("pnpm", ["exec", "tsx", "scripts/db-seed.ts"], {
       cwd: process.cwd(),
       // Keep the disposable integration database explicit even under Vitest remapping.
-      env: { ...process.env, APP_ENV: "local", DATABASE_URL: testDatabaseUrl },
+      env: {
+        ...process.env,
+        APP_ENV: "local",
+        DATABASE_URL: testDatabaseUrl,
+        DB_RESET_DISPOSABLE_CONFIRMATION: "confirm-disposable-reset",
+        DB_RESET_NO_RUNTIME_OVERLAP: "confirm-no-runtime-overlap",
+        DB_RESET_EXPECTED_TARGET_IDENTITY: expectedIdentity,
+      },
       stdio: "inherit",
     });
   });

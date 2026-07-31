@@ -7,6 +7,7 @@ import { createPostgresAiAskStreamExecutionPort, createPostgresApiIdentityReposi
 import { createAiAskStreamExecution } from "@xuyenviet/domain";
 
 import { createApiModule } from "./app.module";
+import { readApiReleasePhasePolicy } from "./release-schema";
 
 async function bootstrap() {
   const config = parseBffCredentialConfig(JSON.parse(required("XV_BFF_CREDENTIAL_CONFIG")));
@@ -16,6 +17,7 @@ async function bootstrap() {
     conversationSummaries: createPostgresConversationSummaryRepository(databaseUrl),
     planningReads: createPostgresPlanningReadRepository(),
     schemaVersions: createPostgresReleaseSchemaVersionRepository(databaseUrl),
+    releasePhasePolicy: readApiReleasePhasePolicy(),
     aiAskExecution,
   }));
   await app.listen(Number(process.env.PORT ?? 3001));

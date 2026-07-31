@@ -342,7 +342,7 @@ async function postBffRequest(requestId: string, idempotencyKey = "valid_idempot
 
 async function startApi(execution: AiAskStreamExecution) {
   const summaries = { async listOwnedConversationSummaryRows() { return []; } };
-  const versions = { async hasCompatibleSchemaVersion(declaration: typeof apiSchemaCompatibility) { return declaration === apiSchemaCompatibility; }, async recordSchemaVersion() {} };
+  const versions = { async hasCompatibleSchemaVersion(declaration: typeof apiSchemaCompatibility) { return declaration.workload === apiSchemaCompatibility.workload && declaration.minimumVersion === apiSchemaCompatibility.minimumVersion && declaration.maximumVersion === "20260728.1"; }, async recordSchemaVersion() {} };
   const ApiModule = createApiModule(credentialConfig, createPostgresApiIdentityRepository(getTestDatabaseUrl()), { conversationSummaries: summaries, schemaVersions: versions, aiAskExecution: execution, telemetry });
   @Module({ imports: [ApiModule] })
   class TestApiModule {}

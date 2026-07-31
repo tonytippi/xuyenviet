@@ -43,6 +43,8 @@ export interface ApiIdentityRepository {
 export type StoredConversationSummaryRow = { id: string; updatedAt: Date; messageContent: string | null };
 export type ReleaseSchemaVersionRepository = {
   hasCompatibleSchemaVersion(declaration: SchemaCompatibilityDeclaration): Promise<boolean>;
+  getResolvedTargetIdentity?(): Promise<string>;
+  readSchemaAdmission?(): Promise<{ rows: Array<{ version: string }>; resolvedTargetIdentity: string }>;
   recordSchemaVersion(version: string): Promise<void>;
   close?(): Promise<void>;
 };
@@ -82,6 +84,17 @@ export function createPostgresReleaseSchemaVersionRepository(databaseUrl: string
     async hasCompatibleSchemaVersion(version) {
       const rows = await sql<{ version: string }[]>`select version from release_schema_versions`;
       return evaluateSchemaAdmission(version, rows).compatible;
+    },
+    async getResolvedTargetIdentity() {
+      const [target] = await sql<{ identity: string }[]>`select 'database=' || current_database() || ';host=' || coalesce(host(inet_server_addr()), 'local') || ';port=' || coalesce(inet_server_port()::text, '5432') as identity`;
+      if (!target?.identity) throw new Error("Could not resolve database target identity.");
+      return target.identity;
+    },
+    async readSchemaAdmission() {
+      const rows = await sql<{ version: string | null; identity: string }[]>`select release_schema_versions.version, target.identity from (select 'database=' || current_database() || ';host=' || coalesce(host(inet_server_addr()), 'local') || ';port=' || coalesce(inet_server_port()::text, '5432') as identity) target left join release_schema_versions on true`;
+      const identity = rows[0]?.identity;
+      if (typeof identity !== "string") throw new Error("Could not resolve database target identity.");
+      return { rows: rows.flatMap((row) => typeof row.version === "string" ? [{ version: row.version }] : []), resolvedTargetIdentity: identity };
     },
     async recordSchemaVersion(version) {
       await sql.begin(async (transaction) => {
