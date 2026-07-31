@@ -3,8 +3,7 @@ import "server-only";
 import { and, desc, eq, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { sourceCaptureVersions, sources } from "@/db/schema";
-import { getActiveKnowledgeExtractionJobForSource } from "@/features/knowledge/extraction-jobs";
+import { knowledgeIngestionJobs, sourceCaptureVersions, sources } from "@/db/schema";
 import { getExistingCardsForCaptureSource } from "@/features/knowledge/facebook-capture-review";
 import { parseStoredYoutubeEvidence } from "@/features/knowledge/youtube-capture";
 import { requireAdminSession } from "@/server/auth";
@@ -28,6 +27,7 @@ type YoutubeCaptureRow = {
   model: string | null;
   promptVersion: string | null;
   evidenceCount: string | null;
+  ingestionJob: { id: string; stage: typeof knowledgeIngestionJobs.$inferSelect.stage; attemptCount: number; maxAttempts: number; updatedAt: Date } | null;
 };
 
 export async function listAdminYoutubeCaptureReviews(input: { limit?: number; offset?: number } = {}) {
@@ -36,7 +36,8 @@ export async function listAdminYoutubeCaptureReviews(input: { limit?: number; of
   const rows = await db
     .select(youtubeCaptureSelection)
     .from(sources)
-     .innerJoin(sourceCaptureVersions, eq(sourceCaptureVersions.id, sources.currentCaptureVersionId))
+    .innerJoin(sourceCaptureVersions, eq(sourceCaptureVersions.id, sources.currentCaptureVersionId))
+    .leftJoin(knowledgeIngestionJobs, eq(knowledgeIngestionJobs.captureVersionId, sourceCaptureVersions.id))
     .where(eq(sources.kind, "youtube"))
     .orderBy(desc(sources.createdAt));
 
@@ -51,7 +52,8 @@ export async function countAdminYoutubeCaptureReviews() {
   const rows = await db
     .select(youtubeCaptureSelection)
     .from(sources)
-     .innerJoin(sourceCaptureVersions, eq(sourceCaptureVersions.id, sources.currentCaptureVersionId))
+    .innerJoin(sourceCaptureVersions, eq(sourceCaptureVersions.id, sources.currentCaptureVersionId))
+    .leftJoin(knowledgeIngestionJobs, eq(knowledgeIngestionJobs.captureVersionId, sourceCaptureVersions.id))
     .where(eq(sources.kind, "youtube"));
 
   return (await hydrateCapturedRows(db, rows)).length;
@@ -66,7 +68,8 @@ export async function getAdminYoutubeCaptureReviewDetail(sourceId: string) {
   const [row] = await db
     .select(youtubeCaptureSelection)
     .from(sources)
-     .innerJoin(sourceCaptureVersions, eq(sourceCaptureVersions.id, sources.currentCaptureVersionId))
+    .innerJoin(sourceCaptureVersions, eq(sourceCaptureVersions.id, sources.currentCaptureVersionId))
+    .leftJoin(knowledgeIngestionJobs, eq(knowledgeIngestionJobs.captureVersionId, sourceCaptureVersions.id))
     .where(and(eq(sources.id, normalizedSourceId), eq(sources.kind, "youtube")))
     .limit(1);
 
@@ -100,7 +103,14 @@ const youtubeCaptureSelection = {
    capturedAt: sql<string | null>`${sourceCaptureVersions.rawMetadata}->>'capturedAt'`,
    model: sql<string | null>`${sourceCaptureVersions.rawMetadata}->>'model'`,
    promptVersion: sql<string | null>`${sourceCaptureVersions.rawMetadata}->>'promptVersion'`,
-   evidenceCount: sql<string | null>`${sourceCaptureVersions.rawMetadata}->>'evidenceCount'`,
+  evidenceCount: sql<string | null>`${sourceCaptureVersions.rawMetadata}->>'evidenceCount'`,
+  ingestionJob: {
+    id: knowledgeIngestionJobs.id,
+    stage: knowledgeIngestionJobs.stage,
+    attemptCount: knowledgeIngestionJobs.attemptCount,
+    maxAttempts: knowledgeIngestionJobs.maxAttempts,
+    updatedAt: knowledgeIngestionJobs.updatedAt,
+  },
 };
 
 async function hydrateCapturedRows(db: ReturnType<typeof getDb>, rows: YoutubeCaptureRow[]) {
@@ -126,7 +136,7 @@ async function hydrateCapturedRows(db: ReturnType<typeof getDb>, rows: YoutubeCa
         evidenceCount: evidence.length,
         evidence,
         existingCards: await getExistingCardsForCaptureSource(db, row.sourceId),
-        activeExtractionJob: await getActiveKnowledgeExtractionJobForSource(db, row.sourceId),
+        ingestionJob: row.ingestionJob?.id ? row.ingestionJob : null,
       }];
     }),
   ).then((items) => items.flat());

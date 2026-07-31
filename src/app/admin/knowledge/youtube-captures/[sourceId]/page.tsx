@@ -1,8 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { sourceKnowledgeDraftExtractionPromptVersion } from "@/features/ai/prompts";
-import { extractKnowledgeDraftsFromYoutubeCaptureForm } from "@/features/knowledge/actions";
 import { getAdminYoutubeCaptureReviewDetail } from "@/features/knowledge/youtube-capture-review-admin";
 import { knowledgeCardStatusLabels, knowledgeCardTypeLabels, sourceTypeLabels, verificationStatusLabels } from "@/features/knowledge/display-labels";
 
@@ -12,12 +10,10 @@ type YoutubeCaptureDetailPageProps = {
 };
 
 export default async function YoutubeCaptureDetailPage({ params, searchParams }: YoutubeCaptureDetailPageProps) {
-  const [{ sourceId }, query] = await Promise.all([params, searchParams]);
+  const [{ sourceId }] = await Promise.all([params, searchParams]);
   const capture = await getAdminYoutubeCaptureReviewDetail(sourceId);
   if (!capture) notFound();
 
-  const hasExtractionCards = capture.existingCards.some((card) => card.aiPromptVersion === sourceKnowledgeDraftExtractionPromptVersion);
-  const canExtract = !capture.activeExtractionJob && !hasExtractionCards;
 
   return (
     <div>
@@ -26,9 +22,7 @@ export default async function YoutubeCaptureDetailPage({ params, searchParams }:
       <h1 className="mt-4 max-w-3xl text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">{capture.sourceLabel}</h1>
       <p className="mt-5 max-w-2xl text-lg leading-8 text-[#4f625a]">Bằng chứng này chỉ dành cho vận hành. Hãy kiểm tra nội dung, mốc thời gian, độ tin cậy và thời điểm cần cập nhật trước khi tạo bản nháp; bản nháp vẫn cần phê duyệt riêng trước khi dùng cho du khách.</p>
 
-      {(query.extractQueued || query.alreadyExtracted || query.extractError) && <section className="mt-6 rounded-2xl border border-[#d8c9ad] bg-white/80 p-4 text-sm leading-6 text-[#17342c]">{query.extractQueued && <p>Yêu cầu trích xuất đã được đưa vào hàng đợi. Bạn có thể quay lại sau để xem bản nháp.{query.jobId ? ` Job: ${query.jobId}.` : null}</p>}{query.alreadyExtracted && <p>Video này đã có thẻ được trích xuất. Kiểm tra các thẻ liên kết thay vì trích xuất lại.</p>}{query.extractError && <p>{query.extractError}</p>}</section>}
-
-      {capture.activeExtractionJob && <section className="mt-6 rounded-2xl border border-[#8fb59f] bg-[#edf7ef] p-4 text-sm leading-6 text-[#17342c]"><p className="font-semibold">Đang trích xuất bằng AI</p><p className="mt-1">Không cần bấm lại; hệ thống sẽ cập nhật khi hoàn tất.</p><p className="mt-1 text-[#4f625a]">Job {capture.activeExtractionJob.id} · {capture.activeExtractionJob.mode} · {capture.activeExtractionJob.status} · lần thử {capture.activeExtractionJob.attemptCount}/{capture.activeExtractionJob.maxAttempts}</p></section>}
+      <section className="mt-6 rounded-2xl border border-[#8fb59f] bg-[#edf7ef] p-4 text-sm leading-6 text-[#17342c]"><p className="font-semibold">Trạng thái xử lý tri thức</p><p className="mt-1">{capture.ingestionJob ? formatIngestionStage(capture.ingestionJob.stage) : "Đang chờ tạo tác vụ xử lý chính."}</p>{capture.ingestionJob ? <p className="mt-1 text-[#4f625a]">Job {capture.ingestionJob.id} · lần thử {capture.ingestionJob.attemptCount}/{capture.ingestionJob.maxAttempts}</p> : null}</section>
 
       <section className="mt-8 rounded-[1.5rem] border border-[#d8c9ad] bg-[#f4ead7] p-5 sm:p-6">
         <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#8c4f13]">Nguồn YouTube/cộng đồng, chưa xác minh</p>
@@ -50,7 +44,7 @@ export default async function YoutubeCaptureDetailPage({ params, searchParams }:
 
       <section className="mt-8 rounded-[1.5rem] border border-[#d8c9ad] bg-white/75 p-5 sm:p-6"><h2 className="text-2xl font-semibold tracking-[-0.03em] text-[#17342c]">Thẻ tri thức đã liên kết</h2><div className="mt-4 grid gap-3">{capture.existingCards.length === 0 ? <p className="rounded-2xl bg-[#fbf7ed] p-3 text-[#4f625a]">Chưa có thẻ nháp hoặc đã phê duyệt liên kết với video này.</p> : capture.existingCards.map((card) => <div key={card.id} className="rounded-2xl border border-[#d8c9ad] bg-[#fbf7ed] p-4 text-sm text-[#4f625a]">{card.status === "approved" || card.status === "draft" ? <Link className="font-semibold text-[#17342c] underline underline-offset-4" href={card.status === "approved" ? `/admin/knowledge/approved/${encodeURIComponent(card.id)}` : `/admin/knowledge/drafts/${encodeURIComponent(card.id)}`}>{card.title}</Link> : <p className="font-semibold text-[#17342c]">{card.title}</p>}<p className="mt-1">{knowledgeCardTypeLabels[card.type] ?? card.type} · {knowledgeCardStatusLabels[card.status] ?? card.status} · phiên bản chỉ dẫn AI: {card.aiPromptVersion}</p></div>)}</div></section>
 
-      <section className="mt-8 rounded-[1.5rem] border border-[#d8c9ad] bg-[#fbf7ed] p-5 sm:p-6"><h2 className="text-2xl font-semibold tracking-[-0.03em] text-[#17342c]">Hành động vận hành</h2>{canExtract ? <div className="mt-4 rounded-2xl border border-[#d8c9ad] bg-white/75 p-4"><p className="text-sm font-semibold text-[#17342c]">AI sẽ tạo thẻ nháp để bạn duyệt. Chưa có thẻ nào được phê duyệt hoặc dùng cho câu trả lời của khách.</p><form action={extractKnowledgeDraftsFromYoutubeCaptureForm} className="mt-4"><input name="sourceId" type="hidden" value={capture.sourceId} /><button className="min-h-12 rounded-2xl bg-[#1f5f46] px-5 py-3 font-semibold text-white transition hover:bg-[#194d39] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]" type="submit">Trích xuất bản nháp</button></form></div> : <p className="mt-4 rounded-2xl border border-[#d8c9ad] bg-white/75 p-4 text-sm leading-6 text-[#4f625a]">{capture.activeExtractionJob ? "Video này đang được trích xuất bằng AI. Không cần bấm lại." : "Video này đã có thẻ liên kết. Kiểm tra bản nháp hoặc thẻ đã duyệt thay vì trích xuất lại."}</p>}</section>
+      <section className="mt-8 rounded-[1.5rem] border border-[#d8c9ad] bg-[#fbf7ed] p-5 sm:p-6"><h2 className="text-2xl font-semibold tracking-[-0.03em] text-[#17342c]">Xử lý tự động</h2><p className="mt-4 rounded-2xl border border-[#d8c9ad] bg-white/75 p-4 text-sm leading-6 text-[#4f625a]">Video đã capture được tự động đưa vào quy trình tri thức chính. Quy trình này có thể tạo mục cần kiểm tra hoặc thẻ tri thức theo chính sách; không tạo bản nháp qua một hàng đợi riêng.</p></section>
     </div>
   );
 }
@@ -58,3 +52,4 @@ export default async function YoutubeCaptureDetailPage({ params, searchParams }:
 function Info({ label, value }: { label: string; value: string }) { return <div className="rounded-2xl bg-white/70 p-3"><dt className="font-semibold text-[#17342c]">{label}</dt><dd className="mt-1 break-words text-[#4f625a]">{value}</dd></div>; }
 function formatDate(value: string) { return new Date(value).toLocaleString("vi-VN", { dateStyle: "medium", timeStyle: "short" }); }
 function formatTimestamp(seconds: number) { return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`; }
+function formatIngestionStage(value: string) { return ({ queued: "Đang chờ xử lý", triaging: "Đang sàng lọc", extracting: "Đang trích xuất", judging: "Đang đánh giá", relating: "Đang đối chiếu", published: "Đã xuất bản", suppressed: "Không dùng", review_recommended: "Cần kiểm tra", verify_first: "Cần xác minh", failed: "Xử lý thất bại" })[value] ?? value; }

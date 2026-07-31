@@ -3,7 +3,7 @@ import "server-only";
 import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { knowledgeCardEvidence, knowledgeCards, knowledgeCardSources, knowledgeCardTypeValues, knowledgeRecommendations, knowledgeSeedBatchItems, knowledgeSeedBatches, knowledgeSourceSuggestions, sourceCaptureVersions, sources, type KnowledgeCardType, type KnowledgeRecommendationReason, type KnowledgeSeedBatchItemStatus, type KnowledgeSuggestionAction } from "@/db/schema";
+import { knowledgeCardEvidence, knowledgeCards, knowledgeCardSources, knowledgeCardTypeValues, knowledgeRecommendations, knowledgeSeedBatchItems, knowledgeSeedBatches, knowledgeSourceSuggestions, rawSourceMaterial, sourceCaptureVersions, sources, type KnowledgeCardType, type KnowledgeRecommendationReason, type KnowledgeSeedBatchItemStatus, type KnowledgeSuggestionAction } from "@/db/schema";
 import { evaluateKnowledgeTravelerPolicy } from "@/features/knowledge/state";
 import { getCorridorBucketLabel, getCorridorBuckets } from "@/features/knowledge/corridor";
 import { recordAuditEvent } from "@/features/audit/events";
@@ -138,9 +138,11 @@ export async function submitKnowledgeSeedUrlBatch(input: BatchSeedUrlIntakeInput
         .values({ ...normalized.source, submittedByUserId: session.userId })
         .returning({ id: sources.id });
 
-       if (normalized.capture.rawText) {
-         await appendSourceCaptureVersion(transaction, { sourceId: source.id, captureKind: normalized.source.kind, rawText: normalized.capture.rawText, metadata: normalized.capture.metadata, file: normalized.capture.file ?? undefined });
-       }
+       await transaction.insert(rawSourceMaterial).values({ sourceId: source.id, rawMetadata: normalized.capture.metadata });
+
+        if (normalized.capture.rawText) {
+          await appendSourceCaptureVersion(transaction, { sourceId: source.id, captureKind: normalized.source.kind, rawText: normalized.capture.rawText, metadata: normalized.capture.metadata, file: normalized.capture.file ?? undefined });
+        }
       await transaction.insert(knowledgeSeedBatchItems).values({
         batchId: batch.id,
         lineNumber: line.lineNumber,

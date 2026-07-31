@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 import { listRecentKnowledgeSeedBatches } from "@/features/knowledge/batch-intake";
-import { extractKnowledgeDraftsFromSourceForm, removeKnowledgeSourceForm } from "@/features/knowledge/actions";
+import { removeKnowledgeSourceForm } from "@/features/knowledge/actions";
 import { listKnowledgeUrlSources } from "@/features/knowledge/sources";
 import { seedBatchItemStatusLabels } from "@/features/knowledge/display-labels";
 
@@ -18,9 +18,6 @@ type KnowledgeIntakePageProps = {
     batchTotal?: string;
     success?: string;
     sourceId?: string;
-    extractError?: string;
-    extractQueued?: string;
-    jobId?: string;
     removeError?: string;
     sourceRemoved?: string;
   }>;
@@ -43,16 +40,6 @@ export default async function KnowledgeIntakePage({ searchParams }: KnowledgeInt
       {params.error || params.batchError ? (
         <p className="mt-6 rounded-2xl border border-[#d99a93] bg-[#fff0ee] px-4 py-3 font-semibold text-[#9b2f29]" role="alert">
           {params.error ?? params.batchError}
-        </p>
-      ) : null}
-      {params.extractError ? (
-        <p className="mt-6 rounded-2xl border border-[#d99a93] bg-[#fff0ee] px-4 py-3 font-semibold text-[#9b2f29]" role="alert">
-          {params.extractError}
-        </p>
-      ) : null}
-      {params.extractQueued ? (
-        <p className="mt-6 rounded-2xl border border-[#8fb59f] bg-[#edf7ef] px-4 py-3 font-semibold text-[#1f5f46]" role="status">
-          Yêu cầu trích xuất đã được đưa vào hàng đợi. Bạn có thể quay lại sau để xem bản nháp.{params.jobId ? ` Job: ${params.jobId}.` : null}
         </p>
       ) : null}
       {params.removeError ? <p className="mt-6 rounded-2xl border border-[#d99a93] bg-[#fff0ee] px-4 py-3 font-semibold text-[#9b2f29]" role="alert">{params.removeError}</p> : null}
@@ -87,7 +74,6 @@ export default async function KnowledgeIntakePage({ searchParams }: KnowledgeInt
                   <th className="px-3 py-2 font-semibold">Tiêu đề</th>
                   <th className="px-3 py-2 font-semibold">Loại</th>
                   <th className="px-3 py-2 font-semibold">Capture</th>
-                  <th className="px-3 py-2 font-semibold">Extract</th>
                   <th className="px-3 py-2 font-semibold">Trạng thái</th>
                   <th className="px-3 py-2 font-semibold">Ngày thêm</th>
                 </tr>
@@ -113,23 +99,6 @@ export default async function KnowledgeIntakePage({ searchParams }: KnowledgeInt
                         </Link>
                       ) : (
                         getCaptureLabel(source.kind)
-                      )}
-                    </td>
-                    <td className="px-3 py-3 text-[#4f625a]">
-                      {source.activeExtractionJob ? (
-                        <div className="space-y-1">
-                          <p className="font-semibold text-[#1f5f46]">Đang trích xuất bằng AI</p>
-                          <p className="text-xs">{source.activeExtractionJob.status} · {source.activeExtractionJob.mode}</p>
-                        </div>
-                      ) : source.linkedKnowledgeCardCount === 0 && source.kind === "url" ? (
-                        <form action={extractKnowledgeDraftsFromSourceForm}>
-                          <input name="sourceId" type="hidden" value={source.id} />
-                          <button className="rounded-xl bg-[#1f5f46] px-3 py-2 text-sm font-semibold text-white transition hover:bg-[#194d39] focus:outline-none focus:ring-4 focus:ring-[#8fb59f]" type="submit">
-                            Trích xuất bản nháp
-                          </button>
-                        </form>
-                      ) : (
-                        getExtractionLabel(source.linkedKnowledgeCardCount, source.facebookCaptureStatus)
                       )}
                     </td>
                     <td className="px-3 py-3 text-[#4f625a]">
@@ -229,12 +198,4 @@ function isSensitiveQueryParam(key: string) {
 
 function getCaptureLabel(kind: string) {
   return kind === "facebook" ? "Chưa thu thập" : "Không áp dụng";
-}
-
-function getExtractionLabel(linkedKnowledgeCardCount: number, facebookCaptureStatus: string | null) {
-  if (linkedKnowledgeCardCount > 0 || facebookCaptureStatus === "extracted" || facebookCaptureStatus === "extracted_approved") {
-    return "Đã trích xuất";
-  }
-
-  return "Chưa trích xuất";
 }

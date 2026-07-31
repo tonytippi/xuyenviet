@@ -62,11 +62,9 @@ Community posts may identify small homestays or accommodation experiences absent
 
 ## Operational Status
 
-The current public-MVP readiness report is **no-go** for production scheduled Facebook capture:
+The canonical `knowledge:ingestion-worker` is the only supported post-capture processing worker. Local Compose supervises the canonical `knowledge-ingestion` service and the indexing service. The checked-in Compose file still contains a legacy extraction service pending cutover removal; it is not a supported routine path. Deployment evidence for every target environment must still be recorded before relying on unattended capture or ingestion there.
 
-- The canonical `knowledge:ingestion-worker` has no evidenced continuously supervised deployment. The Compose `knowledge-extractor` service is a legacy worker and is not proof that canonical ingestion is running.
-
-Do not enable unattended production scheduling or rely on automatic ingestion until the canonical ingestion-worker deployment gap has a completed deployment record. Process access is controlled by the deployment environment, not per-run CLI identity.
+Do not use `knowledge:extraction-worker` as a routine production worker. It is legacy compatibility only and cannot process new capture versions without an explicitly approved, time-bounded recovery procedure. Process access is controlled by the deployment environment, not per-run CLI identity.
 
 ## System Executor
 
@@ -111,7 +109,7 @@ Production scheduling should decide explicitly where this browser profile lives 
 7. Operators use risk/sampling-driven recommendations to inspect or resolve weak evidence, high-risk claims, conflicts, verification needs, or quality samples. A `verify_first` recommendation makes the operator the final decision: they may revise the fact freely, publish it with the available validated evidence, or suppress it. This action is version-fenced and audited. The Facebook capture review queue remains an operator-only inspection/recapture surface; raw material is not traveler-ready merely because it was captured.
 8. Only policy-eligible active knowledge cards with valid current evidence can enter traveler retrieval. Automation keeps high-risk material out of retrieval as `verify_first`; an authorized operator may publish it after review. A one-source operator-authorized publication does not imply a corroborated community pattern. Conflicted claims cannot support factual itinerary premises.
 
-The canonical ingestion worker is not the Playwright capture process. Deploy and supervise `knowledge:ingestion-worker` separately before relying on automatic ingestion; the current Compose configuration still runs the legacy extraction worker and indexing worker only.
+The canonical ingestion worker is not the Playwright capture process. Deploy and supervise `knowledge:ingestion-worker` separately before relying on automatic ingestion. The normal worker topology is `knowledge-ingestion` plus `knowledge-indexing`; legacy extraction is not part of the routine topology.
 
 ## Pacing And Safety Stops
 
@@ -142,7 +140,7 @@ If captured text is incomplete or corrupted, use the admin review detail page `R
 
 If production flush fails after archive admission, rerun the same command. It reuses the archived artifact rather than opening Facebook again. Do not delete the artifact while recovering; inspect the safe source/import outcome and restore the production database through the normal process if required.
 
-If canonical ingestion fails, correlate its `knowledge_ingestion_jobs` row with the worker warning by job ID, source ID, and capture-version ID. The admin capture detail page shows the latest raw discovery completion and candidate-level rejection reason for the job. This payload is admin-only diagnostic material, may repeat captured post text, and must not be copied into logs, archive artifacts, evidence, or traveler-facing content. Legacy Facebook review/extraction failures may still use `knowledge_extraction_jobs` and a Facebook review ID. Investigate the source only in the operator review workflow, never from worker logs.
+If canonical ingestion fails, correlate its `knowledge_ingestion_jobs` row with the worker warning by job ID, source ID, and capture-version ID. The admin capture detail page shows the latest raw discovery completion and candidate-level rejection reason for the job. This payload is admin-only diagnostic material, may repeat captured post text, and must not be copied into logs, archive artifacts, evidence, or traveler-facing content. A legacy `knowledge_extraction_jobs` record is historical compatibility data only; it must not override or duplicate the canonical job. Investigate the source only in the operator review workflow, never from worker logs.
 
 For a `verify_first` candidate, open **Admin -> Khuyến nghị AI**, select the `verification` recommendation, and choose **Xác nhận và xuất bản**, **Sửa và giữ chờ xác nhận**, or **Không xuất bản**. Do not use the Facebook capture detail page to publish a candidate directly. The confirmation route retains the bounded evidence already attached to the card and records the operator action; it does not require a second source.
 

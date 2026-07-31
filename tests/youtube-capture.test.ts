@@ -26,6 +26,22 @@ describe("YouTube capture", () => {
     expect((await listQueuedYoutubeSources(testDb, { limit: 10 })).map((source) => source.sourceId)).toEqual(["queued"]);
   });
 
+  test("queues an Intake YouTube source when its raw metadata is null", async () => {
+    await createSource("intake");
+
+    await expect(listQueuedYoutubeSources(testDb, { limit: 10 })).resolves.toMatchObject([
+      { sourceId: "intake", rawMetadata: null },
+    ]);
+  });
+
+  test("queues a legacy Intake YouTube source without source material", async () => {
+    await testDb.insert(sources).values({ id: "legacy-intake", kind: "youtube", url: "https://www.youtube.com/watch?v=abcDEF12345", canonicalUrl: null, label: "YouTube video", sourceType: "community", verificationStatus: "unverified", official: false, partner: false, submittedByUserId: actor.userId });
+
+    await expect(listQueuedYoutubeSources(testDb, { limit: 10 })).resolves.toMatchObject([
+      { sourceId: "legacy-intake", rawMaterialId: null },
+    ]);
+  });
+
   test("persists bounded evidence and a content-free audit summary", async () => {
     await createSource("queued");
     await expect(saveYoutubeEvidence(testDb, { sourceId: "queued", evidence: parseYoutubeEvidence({ evidence }), metadata: { captureMethod: "gemini_youtube_url", capturedAt: "2026-07-17T00:00:00.000Z", sourceUrl: "https://www.youtube.com/watch?v=abcDEF12345", model: "gemini-3.5-flash", mediaResolution: "MEDIA_RESOLUTION_LOW", promptVersion: "youtube-evidence-v1", evidenceCount: 1, latencyMs: 2000, promptTokens: 150000, outputTokens: 7500, totalTokens: 157500, importActorId: "legacy-import-user" } as never, title: "Hành trình qua Phan Thiết" })).resolves.toMatchObject({ status: "updated" });

@@ -1,7 +1,7 @@
 import { eq, sql } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { auditEvents, knowledgeCardSources, knowledgeCards, knowledgeRecommendations, knowledgeSeedBatchItems, knowledgeSeedBatches, knowledgeSourceSuggestions, sourceCaptureVersions, sources, userRoles, users, type KnowledgeCardType, type UserRole } from "@/db/schema";
+import { auditEvents, knowledgeCardSources, knowledgeCards, knowledgeRecommendations, knowledgeSeedBatchItems, knowledgeSeedBatches, knowledgeSourceSuggestions, rawSourceMaterial, sourceCaptureVersions, sources, userRoles, users, type KnowledgeCardType, type UserRole } from "@/db/schema";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
 import { seedKnowledgeCardEvidence, seedSourceCaptureVersion } from "./helpers/source-captures";
@@ -86,6 +86,14 @@ describe("knowledge batch source intake", () => {
     ]);
     await expect(testDb.select().from(knowledgeSeedBatchItems)).resolves.toMatchObject([
       { canonicalUrl: "https://www.youtube.com/watch?v=abcDEF12345", status: "pending" },
+    ]);
+    await expect(testDb.select({ sourceId: rawSourceMaterial.sourceId, metadata: rawSourceMaterial.rawMetadata }).from(rawSourceMaterial)).resolves.toEqual([
+      { sourceId: expect.any(String), metadata: { kind: "submitted" } },
+    ]);
+
+    const { listQueuedYoutubeSources } = await import("@/features/knowledge/youtube-capture");
+    await expect(listQueuedYoutubeSources(testDb)).resolves.toMatchObject([
+      { url: "https://www.youtube.com/watch?v=abcDEF12345" },
     ]);
   });
 

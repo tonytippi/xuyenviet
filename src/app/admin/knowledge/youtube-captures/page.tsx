@@ -44,7 +44,7 @@ export default async function YoutubeCaptureQueuePage({ searchParams }: YoutubeC
                 <Info label="Bằng chứng hợp lệ" value={`${capture.evidenceCount} mục · ${Array.from(new Set(capture.evidence.map((item) => item.category))).join(", ")}`} />
                 <Info label="Thời điểm thu thập" value={capture.capturedAt ? formatDate(capture.capturedAt) : formatDate(capture.createdAt)} />
                 <Info label="Cách thu thập" value={[capture.captureMethod, capture.model].filter(Boolean).join(" · ") || "Chưa có"} />
-                <Info label="Thẻ đã liên kết" value={capture.activeExtractionJob ? `Đang trích xuất · ${capture.activeExtractionJob.status}` : capture.existingCards.length ? `${capture.existingCards.length} thẻ` : "Chưa có"} />
+                <Info label="Xử lý tri thức" value={capture.ingestionJob ? formatIngestionStage(capture.ingestionJob.stage) : "Đang chờ tạo tác vụ"} />
               </dl>
             </article>
           ))
@@ -58,5 +58,6 @@ export default async function YoutubeCaptureQueuePage({ searchParams }: YoutubeC
 
 function Info({ label, value }: { label: string; value: string }) { return <div className="rounded-2xl bg-[#fbf7ed] p-3"><dt className="font-semibold text-[#17342c]">{label}</dt><dd className="mt-1 break-words text-[#4f625a]">{value}</dd></div>; }
 function formatDate(value: Date | string) { return new Date(value).toLocaleString("vi-VN", { dateStyle: "medium", timeStyle: "short" }); }
+function formatIngestionStage(value: string) { return ({ queued: "Đang chờ xử lý", triaging: "Đang sàng lọc", extracting: "Đang trích xuất", judging: "Đang đánh giá", relating: "Đang đối chiếu", published: "Đã xuất bản", suppressed: "Không dùng", review_recommended: "Cần kiểm tra", verify_first: "Cần xác minh", failed: "Xử lý thất bại" })[value] ?? value; }
 function parsePage(value: string | undefined) { const page = Number.parseInt(value ?? "1", 10); return Number.isSafeInteger(page) && page > 0 ? Math.min(page, 10_000) : 1; }
 function pageHref(page: number) { return `/admin/knowledge/youtube-captures?page=${page}`; }

@@ -213,7 +213,7 @@ async function main() {
       try {
         const resourceIdentity = youtubeResourceIdentity(url);
         if (!resourceIdentity) throw new Error("youtube_video_url_required");
-        const model = getEnvValue("GEMINI_YOUTUBE_MODEL") ?? "gemini-3.5-flash";
+        const model = getEnvValue("GEMINI_YOUTUBE_MODEL") ?? "gemini-3.6-flash";
         const mediaResolution = getYoutubeMediaResolution();
         const captureMethodVersion = youtubeCaptureMethodVersion(mediaResolution);
         const reuseKey = captureReuseKey({ provider: "youtube", resourceIdentity, captureMethodVersion, payloadSchemaVersion: YOUTUBE_CAPTURE_PAYLOAD_SCHEMA_VERSION, promptVersion: youtubeEvidencePromptVersion, model, mediaResolution });

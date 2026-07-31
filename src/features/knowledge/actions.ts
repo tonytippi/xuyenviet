@@ -16,7 +16,6 @@ import {
   type KnowledgeDraftExtractionPreProviderGuard,
 } from "./extraction";
 import { getAdminFacebookCaptureReviewExtractionTarget } from "./facebook-capture-review-admin";
-import { getAdminYoutubeCaptureExtractionTarget } from "./youtube-capture-review-admin";
 import { enqueueKnowledgeExtractionJob } from "./extraction-jobs";
 import { markFacebookCaptureReviewStatus, markFacebookCaptureReviewStatusInTransaction, reopenFacebookCaptureForRecapture, requestFacebookCaptureRecapture, type FacebookCaptureReviewActor } from "./facebook-capture-review";
 import {
@@ -284,120 +283,6 @@ export async function approveKnowledgeDraftForm(formData: FormData) {
   redirect(`/admin/knowledge/drafts?approved=${encodeURIComponent(draftId)}`);
 }
 
-export async function extractKnowledgeDraftsFromSourceForm(formData: FormData) {
-  const session = await requireAdminSession();
-  let result: Awaited<ReturnType<typeof enqueueKnowledgeExtractionJob>> | null = null;
-  let failureMessage: string | null = null;
-
-  try {
-    result = await enqueueKnowledgeExtractionJob({ sourceId: getOptionalFormString(formData, "sourceId") ?? "", mode: "extract_only", actor: { userId: session.userId, email: session.email } });
-  } catch (error) {
-    if (error instanceof AdminAuthorizationError || (error instanceof Error && error.name === "AdminAuthorizationError")) {
-      throw error;
-    }
-
-    failureMessage = isKnowledgeExtractionError(error) && error instanceof Error ? error.message : "Không thể trích xuất bản nháp từ nguồn này.";
-  }
-
-  if (failureMessage) {
-    redirect(`/admin/knowledge/intake?extractError=${encodeURIComponent(failureMessage)}`);
-  }
-
-  redirect(`/admin/knowledge/intake?extractQueued=1&jobId=${encodeURIComponent(result?.job.id ?? "")}`);
-}
-
-export async function extractKnowledgeDraftsFromFacebookCaptureForm(formData: FormData) {
-  const reviewId = getOptionalFormString(formData, "reviewId") ?? "";
-  let redirectPath = getFacebookCaptureRedirectPath(reviewId, { extractError: "Không thể trích xuất capture này." });
-  let target: Awaited<ReturnType<typeof getAdminFacebookCaptureReviewExtractionTarget>> | null = null;
-
-  try {
-    target = await getAdminFacebookCaptureReviewExtractionTarget(reviewId);
-
-    if (!target) {
-      redirectPath = getFacebookCaptureRedirectPath(reviewId, { extractError: "Không tìm thấy capture cần trích xuất." });
-    } else if (target.existingCards.some((card) => card.aiPromptVersion === sourceKnowledgeDraftExtractionPromptVersion)) {
-      redirectPath = getFacebookCaptureRedirectPath(target.id, { alreadyExtracted: "1", existingCards: String(target.existingCards.length) });
-    } else if (target.status !== "needs_review" && target.status !== "extraction_failed") {
-      redirectPath = getFacebookCaptureRedirectPath(target.id, { extractStatus: target.status, existingCards: String(target.existingCards.length) });
-    } else if (target.sourceKind !== "facebook" || target.sourceType !== "community" || !target.rawText?.trim()) {
-      redirectPath = getFacebookCaptureRedirectPath(target.id, { extractError: "Capture này không đủ điều kiện trích xuất bản nháp." });
-    } else {
-      const queued = await enqueueKnowledgeExtractionJob({ sourceId: target.sourceId, facebookCaptureReviewId: target.id, mode: "extract_only", actor: target.actor });
-      redirectPath = getFacebookCaptureRedirectPath(target.id, queued.status === "already_active" ? { extractQueued: "1", jobId: queued.job.id, activeJob: "1" } : { extractQueued: "1", jobId: queued.job.id });
-    }
-  } catch (error) {
-    if (error instanceof AdminAuthorizationError || (error instanceof Error && error.name === "AdminAuthorizationError")) {
-      throw error;
-    }
-
-    if (isKnowledgeExtractionError(error) && error instanceof Error) {
-      const code = "code" in error && typeof error.code === "string" ? error.code : "unknown";
-      if (code === "already_extracted") {
-        const existingCards = target?.existingCards.length ?? 0;
-        redirectPath = getFacebookCaptureRedirectPath(target?.id ?? reviewId, { alreadyExtracted: "1", existingCards: String(existingCards) });
-      } else {
-        let failureStatus = "not_updated";
-
-        if (target?.status === "needs_review") {
-          const statusResult = await markFacebookCaptureExtractionFailed({
-            reviewId: target.id,
-            actor: target.actor,
-            extractionError: `Extraction failed: ${code}`,
-          });
-          failureStatus = statusResult.status;
-        }
-
-        redirectPath = getFacebookCaptureRedirectPath(target?.id ?? reviewId, { extractError: "Không thể trích xuất capture này.", errorCode: code, failureStatus });
-      }
-    } else {
-      let failureStatus = "not_updated";
-
-      if (target?.status === "needs_review") {
-        const statusResult = await markFacebookCaptureExtractionFailed({
-          reviewId: target.id,
-          actor: target.actor,
-          extractionError: "Extraction failed: unknown",
-        });
-        failureStatus = statusResult.status;
-      }
-
-      redirectPath = getFacebookCaptureRedirectPath(target?.id ?? reviewId, { extractError: "Không thể trích xuất capture này.", failureStatus });
-    }
-  }
-
-  redirect(redirectPath);
-}
-
-export async function extractKnowledgeDraftsFromYoutubeCaptureForm(formData: FormData) {
-  await requireAdminSession();
-  const sourceId = getOptionalFormString(formData, "sourceId") ?? "";
-  let redirectPath = getYoutubeCaptureRedirectPath(sourceId, { extractError: "Không thể trích xuất video này." });
-
-  try {
-    const target = await getAdminYoutubeCaptureExtractionTarget(sourceId);
-
-    if (!target) {
-      redirectPath = getYoutubeCaptureRedirectPath(sourceId, { extractError: "Không tìm thấy video YouTube đã capture hợp lệ." });
-    } else if (target.existingCards.some((card) => card.aiPromptVersion === sourceKnowledgeDraftExtractionPromptVersion)) {
-      redirectPath = getYoutubeCaptureRedirectPath(target.sourceId, { alreadyExtracted: "1", existingCards: String(target.existingCards.length) });
-    } else {
-      const queued = await enqueueKnowledgeExtractionJob({ sourceId: target.sourceId, mode: "extract_only", actor: target.actor });
-      redirectPath = getYoutubeCaptureRedirectPath(target.sourceId, queued.status === "already_active" ? { extractQueued: "1", jobId: queued.job.id, activeJob: "1" } : { extractQueued: "1", jobId: queued.job.id });
-    }
-  } catch (error) {
-    if (error instanceof AdminAuthorizationError || (error instanceof Error && error.name === "AdminAuthorizationError")) {
-      throw error;
-    }
-
-    if (isKnowledgeExtractionError(error) && error instanceof Error && "code" in error && error.code === "already_extracted") {
-      redirectPath = getYoutubeCaptureRedirectPath(sourceId, { alreadyExtracted: "1" });
-    }
-  }
-
-  redirect(redirectPath);
-}
-
 export async function rejectFacebookCaptureReviewForm(formData: FormData) {
   const session = await requireAdminSession();
   const actor: FacebookCaptureReviewActor = { userId: session.userId, email: session.email };
@@ -476,7 +361,8 @@ export async function requestFacebookCaptureRecaptureForm(formData: FormData) {
   redirect(redirectPath);
 }
 
-export async function extractAndApproveFacebookCaptureDraftsForm(formData: FormData) {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+async function extractAndApproveFacebookCaptureDraftsForm(formData: FormData) {
   const session = await requireAdminSession();
 
   const reviewId = getOptionalFormString(formData, "reviewId") ?? "";
@@ -806,18 +692,6 @@ function getFacebookCaptureRedirectPath(reviewId: string, params: Record<string,
 
   const query = searchParams.toString();
   return `/admin/knowledge/facebook-captures/${pathReviewId}${query ? `?${query}` : ""}`;
-}
-
-function getYoutubeCaptureRedirectPath(sourceId: string, params: Record<string, string | undefined>) {
-  const pathSourceId = encodeURIComponent(sourceId || "unknown");
-  const searchParams = new URLSearchParams();
-
-  for (const [key, value] of Object.entries(params)) {
-    if (value) searchParams.set(key, value);
-  }
-
-  const query = searchParams.toString();
-  return `/admin/knowledge/youtube-captures/${pathSourceId}${query ? `?${query}` : ""}`;
 }
 
 function getFacebookCaptureQueueRedirectPath(detailPath: string) {

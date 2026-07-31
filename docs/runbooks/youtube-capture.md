@@ -8,7 +8,7 @@ The current command captures individual videos that have already been submitted 
 
 AI-first periodic discovery and automatic capture are proposed only. See [AI-First YouTube Discovery](../proposals/ai-first-youtube-discovery.md); that proposal is outside the active MVP scope and does not authorize operation or implementation.
 
-Readable capture creates an immutable capture version and one canonical ingestion job. Its processing requires a separately scheduled and supervised ingestion worker; capture itself does not publish traveler-ready knowledge.
+Readable capture creates an immutable capture version and one canonical ingestion job. Its processing requires a separately scheduled and supervised `knowledge:ingestion-worker`; capture itself does not publish traveler-ready knowledge. Do not enqueue a legacy extraction job for a captured video.
 
 ## Setup
 

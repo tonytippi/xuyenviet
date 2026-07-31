@@ -2,7 +2,7 @@
 title: XuyenViet AI Travel Information MVP Architecture Spine
 status: final
 created: 2026-07-04
-updated: 2026-07-26
+updated: 2026-07-31
 altitude: project MVP
 source_prd: ../../prds/prd-xuyenviet-2026-07-04/prd.md
 source_ux: ../../ux-designs/ux-xuyenviet-2026-07-05/EXPERIENCE.md
@@ -36,8 +36,13 @@ flowchart LR
   TripPlan[Trip Planning Aggregate] --> DB
   Retrieval --> DB
   Knowledge --> DB
-  Capture[Operator Facebook Capture Tool] --> Knowledge
-  Capture --> DB
+  FacebookCapture[Facebook Capture Tool] --> CaptureVersion[Immutable Capture Version]
+  YoutubeCapture[YouTube Capture Tool] --> CaptureVersion
+  CaptureVersion --> IngestionJob[Canonical Ingestion Job]
+  IngestionJob --> IngestionWorker[Knowledge Ingestion Worker]
+  IngestionWorker --> Knowledge
+  Knowledge --> IndexingWorker[Knowledge Indexing Worker]
+  CaptureVersion --> DB
   Auth --> DB
   Chat --> DB
   Search --> Tavily[Tavily Seed Provider]
@@ -285,7 +290,7 @@ Prevents: relying on unmanaged local infrastructure for public MVP traffic.
 
 Rule: Provider-specific features must stay behind config/adapters until deployment and database provider are confirmed.
 
-Rule: Production deployment includes a separately supervised Node worker runtime for knowledge extraction and knowledge-search indexing. Worker processes use PostgreSQL job/index state, expose operational logs and health/restart supervision, and are not run inside request-serving serverless executions.
+Rule: Production deployment includes separately supervised Node runtimes for canonical knowledge ingestion and knowledge-search indexing. Worker processes use PostgreSQL job/index state, expose operational logs and health/restart supervision, and are not run inside request-serving serverless executions. Legacy extraction is not a routine production worker.
 
 Seed: Vercel-compatible Next.js request deployment plus hosted Postgres and a compatible worker process host. Final providers remain deferred. [ASSUMPTION]
 
@@ -529,6 +534,18 @@ Rule: This development-stage change is a clean-break schema migration. Update or
 
 Rule: Audit owns the exported `AuditActor` union, system catalog, session conversion, validation, and write helpers. No feature directly inserts `audit_events`, `trip_plan_change_history`, or `ai_usage_events`; owning modules call the typed Audit/Usage boundary. Tests or lint enforcement reject bypassing these helpers. Tests cover permitted and rejected shapes, worker attribution, requester preservation, clean-database migration and seed output, and the inability to authenticate or role-assign a system actor.
 
+### AD-32: Canonical Ingestion Is The Only Post-Capture Pipeline
+
+Binds: Facebook and YouTube capture handoff, source-version processing, background worker topology, operator actions, and legacy extraction retirement.
+
+Prevents: one immutable capture version entering competing extraction/publication queues, legacy auto-approval bypassing canonical validation/judgment/relation gates, or operators treating a capture-review state as processing authority.
+
+Rule: Every readable Facebook or YouTube capture atomically appends one immutable `source_capture_versions` row and ensures exactly one canonical `knowledge_ingestion_jobs` row for that version. `knowledge:ingestion-worker` is the only supported worker that may turn a new capture version into candidates, cards, recommendations, or publication outcomes.
+
+Rule: New UI actions, server actions, scripts, and scheduled services must not enqueue `knowledge_extraction_jobs` for a capture version. `knowledge_extraction_jobs` and `knowledge:extraction-worker` are historical compatibility only, disabled in the routine production topology. A time-bounded migration/recovery exception requires an explicit operator-approved procedure, reconciliation against the canonical job, and no auto-approval of cards from that capture version.
+
+Rule: `source_capture_versions` are immutable content-hashed capture identities. A source's current-capture pointer selects the version eligible for processing; a canonical ingestion job references that exact version. Capture review queues are operator inspection/recapture surfaces, not a second processing authority.
+
 ## Shared Data Contracts
 
 Frontend shell state contract:
@@ -576,7 +593,7 @@ Core persisted entities:
 - `trip_projects`, `conversations`, `messages`, `chat_context`, `assistant_response_provenance`
 - `trip_project_constraints`, `trip_plan_items`, `trip_change_proposals`, `trip_plan_change_history`
 - `context_embeddings`
-- `sources`, `raw_source_material`, `knowledge_ingestion_jobs`, `knowledge_cards`, `knowledge_card_evidence`, `knowledge_card_relations`, `knowledge_review_recommendations`, `knowledge_card_search_documents`
+- `sources`, `raw_source_material`, `source_capture_versions`, `knowledge_ingestion_jobs`, `knowledge_cards`, `knowledge_card_evidence`, `knowledge_card_relations`, `knowledge_review_recommendations`, `knowledge_card_search_documents`
 - `ai_gateway_models`, `web_search_results`, `ai_usage_events`, `feedback`, `eval_runs`, `audit_events`
 
 AI usage event minimum fields: nullable real initiating-user ID, required execution actor, conversation ID when applicable, trip project ID when applicable, message ID when applicable, purpose, provider, model, prompt version when applicable, request timestamp, latency, success/failure status, provider usage metadata when available, and estimated cost fields when configured. User-facing/admin roster metrics aggregate the initiating-user field only; system execution metrics use the actor catalog.
@@ -595,9 +612,10 @@ Canonical source linkage:
 
 - `sources`: source kind, URL/canonical URL, label, publisher, collected/checked date, source type, verification status, official/partner flags
 - `raw_source_material`: source ID, raw text or file metadata, raw metadata JSON, operator-only flag
+- `source_capture_versions`: immutable source ID/version sequence, content hash, bounded operator-only material, safe capture metadata, capture executor/time, and source current-capture pointer relationship
 - `knowledge_card_evidence`: card ID, source ID, bounded quote/span, observed/captured time, conditions, support level, display policy, evidence state, and deactivation reason when inactive
 - `knowledge_card_relations`: source candidate/card relation as `duplicate | supporting | conflicting | superseding | conditionally_compatible`, with safe current decision metadata
-- `knowledge_ingestion_jobs`: source capture version, current stage/outcome, safe retry/failure metadata, submitted-by provenance, and prompt/model references
+- `knowledge_ingestion_jobs`: one canonical row per source capture version, current stage/outcome, safe retry/failure metadata, submitted-by provenance, and prompt/model references
 - `knowledge_card_sources`: compatibility linkage derived from current effective evidence until the existing schema is migrated; it is not sufficient for traveler evidence policy on its own
 - Embedding rows: owner table, owner ID, content hash, embedding model, embedding status as `active | stale | disabled`, owner status snapshot, created/disabled timestamps
 
@@ -651,7 +669,7 @@ The five PRD beta prompts are the initial required prompt set: magic-moment fami
 Production must have:
 
 - Separate production database and secrets.
-- Separately supervised Node worker processes for extraction and knowledge-search indexing, with restart/health monitoring and logs distinct from request-serving Next.js runtime.
+- Separately supervised Node worker processes for canonical ingestion and knowledge-search indexing, with restart/health monitoring and logs distinct from request-serving Next.js runtime. Legacy extraction is disabled except for an explicitly approved, time-bounded compatibility recovery.
 - Server-side auth and role enforcement for protected personalization/admin capabilities.
 - Audit trail for operator/admin mutations.
 - Logging for model provider, search provider, latency, failures, and answer provenance IDs.
