@@ -18,6 +18,9 @@ export type UserRoleGovernanceTransactionPort = {
   recordRoleAudit(input: { actorUserId: string; actorEmail: string; targetUserId: string; role: ManagedUserRole; operation: UserRoleOperation }): Promise<void>;
 };
 
+/** Expected command policy rejections are safe to report as client-correctable input. */
+export class UserRoleGovernancePolicyError extends Error {}
+
 /** The port owns no persistence policy; its database adapter preserves the role transaction invariant. */
 export async function listGovernedUsers(port: UserRoleGovernancePort, input: { cursor: AdminUserRosterCursor | null; search: string }) {
   return port.listUsers(input);
@@ -25,7 +28,7 @@ export async function listGovernedUsers(port: UserRoleGovernancePort, input: { c
 
 export async function changeGovernedUserRole(port: UserRoleGovernancePort, principal: RequestPrincipal, input: { targetUserId: string; role: ManagedUserRole; operation: UserRoleOperation }): Promise<UserRoleCommandResult> {
   if (!input.targetUserId.trim() || (input.role !== "operator" && input.role !== "admin") || (input.operation !== "grant" && input.operation !== "revoke")) {
-    throw new Error("Role governance input is invalid.");
+    throw new UserRoleGovernancePolicyError("Role governance input is invalid.");
   }
   return port.withinRoleGovernanceTransaction(async (transaction) => {
     await transaction.lockRoleGovernance();
@@ -36,7 +39,7 @@ export async function changeGovernedUserRole(port: UserRoleGovernancePort, princ
     if (input.operation === "revoke" && input.role === "admin") {
       const administrators = await transaction.listAdministratorUserIds();
       if (administrators.length === 1 && administrators[0] === input.targetUserId) {
-        throw new Error("Cannot revoke the final administrator role.");
+        throw new UserRoleGovernancePolicyError("Cannot revoke the final administrator role.");
       }
     }
 

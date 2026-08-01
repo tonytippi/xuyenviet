@@ -4,13 +4,18 @@ import { correlationId, parseAdminUserRosterPage, parseAdminUserRosterQuery, par
 
 import { executeAdminBffMutation, executeAdminBffRead } from "./bff-adapter";
 
+export function parseExpectedAdminUserRosterPage(value: unknown, search: string) {
+  const page = parseAdminUserRosterPage(value);
+  return page?.search === search ? page : null;
+}
+
 export async function readAdminUsers(request: Request, search: unknown, cursor: unknown) {
   const query = parseAdminUserRosterQuery({ ...(search === undefined ? {} : { search }), ...(cursor === undefined ? {} : { cursor }) });
   if (!query) return invalidInput(request.headers);
   const parameters = new URLSearchParams();
   if (query.search) parameters.set("search", query.search);
   if (query.cursor) parameters.set("cursor", query.cursor);
-  return executeAdminBffRead({ request, capability: "admin.role.governance", path: `/v1/admin/users?${parameters.toString()}`, parseResult: parseAdminUserRosterPage });
+  return executeAdminBffRead({ request, capability: "admin.role.governance", path: `/v1/admin/users?${parameters.toString()}`, parseResult: (value) => parseExpectedAdminUserRosterPage(value, query.search) });
 }
 
 export async function mutateAdminUserRole(request: Request & { cookies: { get(name: string): { value: string } | undefined } }, userId: unknown, role: unknown, operation: unknown) {

@@ -1,7 +1,7 @@
-import { BadRequestException, Body, Controller, Delete, Get, HttpCode, HttpStatus, Inject, Param, Post, Query, Req } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Delete, Get, HttpCode, HttpStatus, Inject, Param, Post, Query, Req, ServiceUnavailableException } from "@nestjs/common";
 
 import { managedUserRoles, parseAdminUserRosterCursor, parseAdminUserRosterQuery, parseUserRoleCommand, type RequestPrincipal } from "@xuyenviet/contracts";
-import { changeGovernedUserRole, listGovernedUsers, type UserRoleGovernancePort } from "@xuyenviet/domain";
+import { changeGovernedUserRole, listGovernedUsers, type UserRoleGovernancePort, UserRoleGovernancePolicyError } from "@xuyenviet/domain";
 
 import { RequiresAdminCapability } from "../auth/admin-capability.decorator";
 
@@ -27,7 +27,11 @@ export class AdminUsersController {
   async list(@Query() query: Record<string, unknown>) {
     const parsed = parseAdminUserRosterQuery(query);
     if (!parsed) throw invalid();
-    return listGovernedUsers(this.governance, { cursor: parsed.cursor ? parseAdminUserRosterCursor(parsed.cursor) : null, search: parsed.search });
+    try {
+      return await listGovernedUsers(this.governance, { cursor: parsed.cursor ? parseAdminUserRosterCursor(parsed.cursor) : null, search: parsed.search });
+    } catch {
+      throw new ServiceUnavailableException({ code: "internal_error" });
+    }
   }
 
   @Post(":userId/roles")
@@ -45,12 +49,13 @@ export class AdminUsersController {
   private async change(principal: RequestPrincipal | undefined, userId: string, role: string, operation: "grant" | "revoke") {
     const input = parseUserRoleCommand({ targetUserId: userId, role, operation });
     if (!input) throw invalid();
+    if (!principal) throw new ServiceUnavailableException({ code: "internal_error" });
     try {
-      if (!principal) throw invalid();
       return await changeGovernedUserRole(this.governance, principal, input);
     } catch (error) {
-      if (error instanceof BadRequestException) throw error;
-      throw new BadRequestException({ code: "validation_error" });
+      if (error instanceof UserRoleGovernancePolicyError) throw invalid();
+      // Transaction, persistence, and audit failures are retryable internals, not browser validation faults.
+      throw new ServiceUnavailableException({ code: "internal_error" });
     }
   }
 }

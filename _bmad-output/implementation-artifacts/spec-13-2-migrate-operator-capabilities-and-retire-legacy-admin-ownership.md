@@ -3,9 +3,9 @@ title: 'Migrate Operator Capabilities and Retire Legacy Admin Ownership'
 type: 'feature'
 created: '2026-08-01'
 status: 'done'
-review_loop_iteration: 1
+review_loop_iteration: 0
 followup_review_recommended: false
-baseline_revision: '98e110e'
+baseline_revision: '3e821a7'
 context:
   - '/home/sonnh/projects/xuyenviet/_bmad-output/project-context.md'
   - '/home/sonnh/projects/xuyenviet/_bmad-output/implementation-artifacts/13-2-migrate-operator-capabilities-and-retire-legacy-admin-ownership.md'
@@ -113,6 +113,18 @@ warnings: [oversized]
   - `[medium] [patch]` Added strict route body validation, OpenAPI/runtime status alignment, actual BFF route coverage, and PostgreSQL nullable tuple cursor regression coverage.
   - `[medium] [patch]` Prevented stale search/page and post-mutation responses from overwriting current roster state; cancellation during credential minting cannot invoke the private API.
 
+### 2026-08-01 — Epic 13 repair review passes
+- intent_gap: 0
+- bad_spec: 0
+- patch: 10 (medium 10)
+- defer: 0
+- reject: 0
+- addressed_findings:
+  - `[medium] [patch]` Classified only typed user-role policy failures as validation errors; unexpected list, transaction, persistence, audit, dependency HTTP, and absent-principal failures now return redacted retryable `503 internal_error` responses.
+  - `[medium] [patch]` Parsed and correlated role-command responses before projection, kept `changed: false` state unchanged, then reconciled from the canonical roster without overwriting a failed refresh.
+  - `[medium] [patch]` Bound roster API results to the normalized requested search and serialized UI role commands/search paging to prevent stale out-of-order state projection.
+  - `[medium] [patch]` Added controller, Nest integration, command-parser, roster-projection, no-op, and response-echo regressions.
+
 ## Design Notes
 
 The existing role command is the authority because its transaction includes an advisory lock, target-role lock, final-admin check, changed-only version increment, and audit write. Controllers must call it through a domain port, not copy any Drizzle or policy code. The roster needs an opaque encoding of the full declared ordering tuple so the page cannot silently become offset pagination or a split read owner.
@@ -132,7 +144,8 @@ The existing role command is the authority because its transaction includes an a
 ## Auto Run Result
 
 - Status: done.
-- Implemented the single-owner exact-admin roster and role-governance cutover through `apps/admin` BFF and `/v1/admin/users`; retired only the matching root `/admin/users` route, direct roster, role actions, and navigation.
-- Final synchronous Blind Hunter, Edge Case Hunter, and Acceptance Auditor reviews found no actionable local findings after bounded repairs.
-- Verification passed: serial four-file persistence/API/BFF suite (62 tests), `pnpm lint` (0 errors; 5 pre-existing unrelated warnings), `pnpm typecheck`, `pnpm build`, and `git diff --check`.
+- Repaired API error classification so only explicit user-role policy errors become `400 validation_error`; unexpected roster, transaction, persistence, audit, dependency, and adapter-invariant failures produce a redacted retryable `503 internal_error` envelope.
+- Repaired the admin roster to parse/correlate command results, avoid projecting no-op `changed: false` grants, reconcile them from the canonical roster, bind roster results to the requested search, and serialize mutations/search paging against stale projections.
+- Final synchronous Blind Hunter, Edge Case Hunter, and Acceptance Auditor review layers found no actionable local findings after bounded repairs.
+- Verification passed: serial four-file persistence/API/BFF suite (66 tests), `pnpm lint` (0 errors; 5 pre-existing unrelated warnings), `pnpm typecheck`, `pnpm build`, and `git diff --check`.
 - Residual risk: deployment-owned staging proof remains required for private routing, selected-owner execution, exact-admin/operator denial, OAuth/session/version behavior, safe responses, and rollback selection. It is recorded in `../docs/release-matrices/20260801.1-admin-user-role-governance-cutover.md`.

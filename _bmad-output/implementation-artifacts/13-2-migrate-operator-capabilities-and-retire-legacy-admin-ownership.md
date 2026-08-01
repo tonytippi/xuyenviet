@@ -1,6 +1,6 @@
 # Story 13.2: Migrate Operator Capabilities and Retire Legacy Admin Ownership
 
-Status: in-progress
+Status: done
 
 ## Story
 
@@ -153,6 +153,7 @@ gpt-5.6-terra
 - 2026-08-01 completed the fixed exact-admin user-roster/grant/revoke cutover. `@xuyenviet/domain` owns the command policy; `@xuyenviet/database` supplies PostgreSQL ports; `/v1/admin/users` plus `apps/admin` BFF/UI is the sole local transport owner.
 - The matching root `/admin/users` route, direct roster module, role Server Actions, and navigation entry are retired. No direct admin database/domain-mutation path, browser bearer credential, legacy proxy, CORS, or dual writer was added.
 - Final synchronous Blind Hunter, Edge Case Hunter, and Acceptance Auditor passes found no actionable local findings after bounded repairs. Required staging evidence remains explicitly recorded in `docs/release-matrices/20260801.1-admin-user-role-governance-cutover.md`.
+- 2026-08-01 Epic 13 repair loop completed: typed policy failures alone map to `400 validation_error`; unexpected roster/transaction/persistence/audit/dependency/adapter failures return redacted retryable `503 internal_error`. The admin roster now validates response echoes, preserves no-op `changed: false` state pending canonical reconciliation, binds roster pages to the requested search, and serializes mutations/search paging. Final synchronous Blind Hunter, Edge Case Hunter, and Acceptance Auditor layers found no actionable findings. Serial focused suite passed 66 tests; lint (0 errors, 5 pre-existing unrelated warnings), typecheck, build, and diff check passed.
 
 ### File List
 
@@ -182,3 +183,4 @@ gpt-5.6-terra
 - `tests/api-request-principal.integration.test.ts`
 - `tests/story-13-1-final-repair.test.ts`
 - `docs/release-matrices/20260801.1-admin-user-role-governance-cutover.md`
+- `apps/admin/server/users.ts`

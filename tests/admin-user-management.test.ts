@@ -1,18 +1,20 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { BadRequestException } from "@nestjs/common";
+import { BadRequestException, ServiceUnavailableException } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import { NextRequest } from "next/server";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { apiAudience, encodeAdminUserRosterCursor, parseAdminUserRosterCursor, parseAdminUserRosterPage, parseAdminUserRosterQuery, parseUserRoleCommand, parseUserRoleCommandResult } from "@xuyenviet/contracts";
 import { createBffTransportConfig } from "@xuyenviet/config";
+import { UserRoleGovernancePolicyError } from "@xuyenviet/domain";
 import { AdminUsersController } from "../apps/api/src/admin/admin-users.controller";
 import { AdminCapabilityGuard } from "../apps/api/src/auth/admin-capability.guard";
 import { adminCsrfCookieName } from "../apps/admin/server/cookies";
 import { issueAdminCsrfToken } from "../apps/admin/server/csrf";
 import { executeAdminBffMutation, executeAdminBffRead } from "../apps/admin/server/bff-adapter";
-import { adminBffResponse } from "../apps/admin/server/users";
+import { adminBffResponse, parseExpectedAdminUserRosterPage } from "../apps/admin/server/users";
+import { parseExpectedUserRoleCommand, projectUserRoleCommand } from "../apps/admin/app/users/user-roster";
 
 const transport = createBffTransportConfig({
   privateApiUrl: new URL(`https://${apiAudience}`),
@@ -38,6 +40,10 @@ describe("admin user-role governance cutover", () => {
   test("accepts only safe roster projections", () => {
     expect(parseAdminUserRosterPage({ items: [{ id: "u", name: null, email: null, image: null, emailVerified: null, roles: ["admin"], usage: { aiRequestCount: "0", inputTokens: "0", outputTokens: "0" } }], nextCursor: null, search: "" })).not.toBeNull();
     expect(parseAdminUserRosterPage({ items: [{ id: "u", email: "private@example.com" }], nextCursor: null, search: "" })).toBeNull();
+    const page = { items: [], nextCursor: null, search: "Nguyen" };
+    expect(parseExpectedAdminUserRosterPage(page, "Nguyen")).toEqual(page);
+    expect(parseExpectedAdminUserRosterPage(page, "")).toBeNull();
+    expect(parseExpectedAdminUserRosterPage({ ...page, search: "" }, "Nguyen")).toBeNull();
   });
 
   test("retires the matching legacy route, query, commands, and navigation", () => {
@@ -70,6 +76,22 @@ describe("admin user-role governance cutover", () => {
     expect(governance.withinRoleGovernanceTransaction).toHaveBeenCalledOnce();
     await expect(controller.revoke("", "admin", { principal: undefined })).rejects.toBeInstanceOf(BadRequestException);
     expect(governance.withinRoleGovernanceTransaction).toHaveBeenCalledOnce();
+  });
+
+  test("controller maps only explicit role policy errors to validation", async () => {
+    const principal = { userId: "admin", sessionId: "session", roles: ["admin" as const], authorizationVersion: 1, issuer: "xuyenviet-admin-bff" as const, tokenId: "token" };
+    const governance = { listUsers: vi.fn(), withinRoleGovernanceTransaction: vi.fn()
+      .mockRejectedValueOnce(new UserRoleGovernancePolicyError("Cannot revoke the final administrator role."))
+      .mockRejectedValueOnce(new Error("audit insert failed: private database detail")) };
+    const controller = new AdminUsersController(governance);
+
+    await expect(controller.revoke("target", "admin", { principal })).rejects.toBeInstanceOf(BadRequestException);
+    await expect(controller.grant("target", { role: "operator" } as never, { principal })).rejects.toBeInstanceOf(ServiceUnavailableException);
+    governance.withinRoleGovernanceTransaction.mockRejectedValueOnce(new BadRequestException({ code: "validation_error" }));
+    await expect(controller.grant("target", { role: "operator" } as never, { principal })).rejects.toBeInstanceOf(ServiceUnavailableException);
+    governance.listUsers.mockRejectedValueOnce(new BadRequestException({ code: "validation_error" }));
+    await expect(controller.list({ search: "An" })).rejects.toBeInstanceOf(ServiceUnavailableException);
+    await expect(controller.grant("target", { role: "operator" } as never, { principal: undefined })).rejects.toBeInstanceOf(ServiceUnavailableException);
   });
 
   test("BFF rejects malformed roster and role input without credential minting or private requests", async () => {
@@ -147,19 +169,34 @@ describe("admin user-role governance cutover", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  test("user roster aborts and generation-guards stale search or load-more responses, including after a mutation", () => {
+  test("user roster parses command results and does not project stale no-op grants", () => {
     const source = readFileSync(join(process.cwd(), "apps/admin/app/users/user-roster.tsx"), "utf8");
     expect(source).toContain("rosterRequest.current?.abort()");
     expect(source).toContain("signal: controller.signal");
     expect(source).toContain("generation !== rosterGeneration.current");
     expect(source).toContain("generation === rosterGeneration.current && !controller.signal.aborted");
-    const mutationSucceeded = source.indexOf('if (!response.ok || !result || typeof result !== "object") throw new Error("mutation failed");');
+    expect(source).toContain("parseUserRoleCommandResult(value)");
+    expect(source).toContain("projectUserRoleCommand(current, command)");
+    expect(source).toContain("parseExpectedUserRoleCommand(result, { targetUserId: userId, role, operation })");
+    expect(source).toContain("if (mutationInFlight.current) return;");
+    expect(source).toContain("if (!command.changed && !await load(null, page.search)) return;");
+    expect(source).toContain("disabled={busy !== null || loadingPage}");
+    expect(source).toContain("disabled={loadingPage || busy !== null}");
+    const mutationSucceeded = source.indexOf('if (!command) throw new Error("mutation failed");');
     const invalidateGeneration = source.indexOf("++rosterGeneration.current", mutationSucceeded);
-    const abortRoster = source.indexOf("rosterRequest.current?.abort()", mutationSucceeded);
+    const abortRoster = source.indexOf("rosterRequest.current?.abort()", invalidateGeneration);
     const updateRoles = source.indexOf("setPage((current) =>", mutationSucceeded);
     expect(invalidateGeneration).toBeGreaterThan(mutationSucceeded);
     expect(abortRoster).toBeGreaterThan(invalidateGeneration);
     expect(updateRoles).toBeGreaterThan(abortRoster);
+
+    const page = { items: [{ id: "user", name: null, email: null, image: null, emailVerified: null, roles: ["admin" as const], usage: { aiRequestCount: "0", inputTokens: "0", outputTokens: "0" } }], nextCursor: null, search: "" };
+    expect(parseExpectedUserRoleCommand({ targetUserId: "user", role: "operator", operation: "grant", changed: false }, { targetUserId: "user", role: "operator", operation: "grant" })).toMatchObject({ changed: false });
+    expect(parseExpectedUserRoleCommand({ targetUserId: "other", role: "operator", operation: "grant", changed: true }, { targetUserId: "user", role: "operator", operation: "grant" })).toBeNull();
+    expect(parseExpectedUserRoleCommand({ targetUserId: "user", role: "admin", operation: "grant", changed: true }, { targetUserId: "user", role: "operator", operation: "grant" })).toBeNull();
+    expect(parseExpectedUserRoleCommand({ targetUserId: "user", role: "operator", operation: "revoke", changed: true }, { targetUserId: "user", role: "operator", operation: "grant" })).toBeNull();
+    expect(projectUserRoleCommand(page, { targetUserId: "user", role: "operator", operation: "grant", changed: false })).toBe(page);
+    expect(projectUserRoleCommand(page, { targetUserId: "user", role: "operator", operation: "grant", changed: true }).items[0]?.roles).toEqual(["admin", "operator"]);
   });
 
   test("user BFF routes project exact-admin data, authorization denial, and safe responses", async () => {

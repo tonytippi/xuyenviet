@@ -286,9 +286,12 @@ development_status:
   # independent admin identity, credential, private transport, CSRF, isolation,
   # and readiness boundary required for this fixed user-role governance cutover.
   # 2026-08-01: bmad-dev-auto completed the fixed exact-admin user-role cutover. Final synchronous Blind Hunter, Edge Case Hunter, and Acceptance Auditor reviews found no actionable local findings after bounded repairs. Serial persistence/API/BFF verification passed 62 tests; lint (0 errors, 5 pre-existing warnings), typecheck, build, and diff check passed. Private routing, selected-owner deployment, OAuth/session/version, safe-response, and rollback proof remain named external staging evidence in the Story 13.2 cutover inventory.
-  # Epic 13 review found two follow-up repairs: persistence errors are misclassified
-  # as validation errors, and stale no-op grants can append a duplicate UI role.
-  13-2-migrate-operator-capabilities-and-retire-legacy-admin-ownership: in-progress
+  # 2026-08-01: Epic 13 repair loop completed. Typed policy failures alone map to
+  # validation; unexpected API/BFF failures are redacted retryable responses. The
+  # roster validates command/search echoes, reconciles no-op results, and serializes
+  # mutation/search state. Final synchronous review was clean; 66 focused tests,
+  # typecheck, build, and diff check passed. Lint had 0 errors and 5 existing warnings.
+  13-2-migrate-operator-capabilities-and-retire-legacy-admin-ownership: done
   epic-13-retrospective: optional
 
   epic-14: backlog

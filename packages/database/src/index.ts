@@ -1,6 +1,6 @@
 import postgres from "postgres";
 import { createHmac, randomUUID } from "node:crypto";
-import { resolvePlanningAnnotationCapabilities, sanitizeStoredPlanningAnnotations, type AiAskStreamExecutionPort, type PlanningReadRepository, type UserRoleGovernancePort, type UserRoleGovernanceTransactionPort } from "@xuyenviet/domain";
+import { resolvePlanningAnnotationCapabilities, sanitizeStoredPlanningAnnotations, type AiAskStreamExecutionPort, type PlanningReadRepository, type UserRoleGovernancePort, type UserRoleGovernanceTransactionPort, UserRoleGovernancePolicyError } from "@xuyenviet/domain";
 import { and, asc, eq } from "drizzle-orm";
 import { loadAnswerContext } from "./answer-context";
 import { formatAssistantMessageProvenance } from "./provenance";
@@ -220,13 +220,13 @@ function createPostgresUserRoleGovernanceTransactionPort(transaction: postgres.T
       const actors = await transaction<Array<{ id: string; email: string | null; authorizationVersion: number }>>`select id, email, authorization_version as "authorizationVersion" from users where id = ${principal.userId} for update`;
       const actor = actors[0];
       const roles = await transaction`select 1 from user_roles where user_id = ${principal.userId} and role = 'admin' for update`;
-      if (!actor?.email || !roles.length) throw new Error("Exact administrator access is required for role changes.");
-      if (actor.authorizationVersion !== principal.authorizationVersion) throw new Error("Request principal is stale.");
+      if (!actor?.email || !roles.length) throw new UserRoleGovernancePolicyError("Exact administrator access is required for role changes.");
+      if (actor.authorizationVersion !== principal.authorizationVersion) throw new UserRoleGovernancePolicyError("Request principal is stale.");
       return { userId: actor.id, email: actor.email };
     },
     async requireTargetUser(userId) {
       const targets = await transaction`select id from users where id = ${userId} for update`;
-      if (!targets.length) throw new Error("User not found.");
+      if (!targets.length) throw new UserRoleGovernancePolicyError("User not found.");
     },
     async lockTargetRoles(userId) { await transaction`select role from user_roles where user_id = ${userId} for update`; },
     async listAdministratorUserIds() { return (await transaction<Array<{ user_id: string }>>`select user_id from user_roles where role = 'admin' for update`).map((row) => row.user_id); },

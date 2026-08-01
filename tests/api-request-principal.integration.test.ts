@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers as NestHeaders, INestApplication, Module, Post, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Headers as NestHeaders, INestApplication, Module, Post, UseGuards } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import { exportJWK, generateKeyPair, importJWK, SignJWT } from "jose";
 import { createHmac } from "node:crypto";
@@ -213,6 +213,30 @@ describe("API request principals", () => {
       .set("Authorization", admin)
       .expect(200, { targetUserId: "target", role: "operator", operation: "revoke", changed: true });
     expect(userRoleGovernance.withinRoleGovernanceTransaction).toHaveBeenCalledTimes(2);
+  });
+
+  test("projects unexpected user-role transaction failures as a redacted retryable response", async () => {
+    userRoleGovernance.withinRoleGovernanceTransaction.mockRejectedValueOnce(new Error("audit insert failed: database password secret"));
+    const response = await request(app.getHttpServer())
+      .post("/v1/admin/users/target/roles")
+      .set({ Authorization: `Bearer ${await tokenFor(config, "xuyenviet-admin-bff", { roles: ["admin"] })}`, Origin: "https://admin.xuyenviet.vn", "X-Request-Id": "role_audit_failure" })
+      .send({ role: "operator" })
+      .expect(503);
+
+    expect(response.headers["access-control-allow-origin"]).toBeUndefined();
+    expect(response.body).toEqual({ code: "internal_error", message: "Không thể xử lý yêu cầu.", requestId: "role_audit_failure" });
+    expect(response.text).not.toContain("database password");
+  });
+
+  test("projects unexpected user-roster persistence failures as a redacted retryable response", async () => {
+    userRoleGovernance.listUsers.mockRejectedValueOnce(new BadRequestException({ code: "validation_error" }));
+    const response = await request(app.getHttpServer())
+      .get("/v1/admin/users")
+      .set({ Authorization: `Bearer ${await tokenFor(config, "xuyenviet-admin-bff", { roles: ["admin"] })}`, Origin: "https://admin.xuyenviet.vn", "X-Request-Id": "roster_persistence_failure" })
+      .expect(503);
+
+    expect(response.headers["access-control-allow-origin"]).toBeUndefined();
+    expect(response.body).toEqual({ code: "internal_error", message: "Không thể xử lý yêu cầu.", requestId: "roster_persistence_failure" });
   });
 
   test("redacts unexpected protected API exceptions with the canonical request ID", async () => {
