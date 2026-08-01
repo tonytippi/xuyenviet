@@ -6,6 +6,7 @@ status: 'done'
 review_loop_iteration: 0
 followup_review_recommended: false
 baseline_revision: '3e821a7'
+final_revision: '55360fc'
 context:
   - '/home/sonnh/projects/xuyenviet/_bmad-output/project-context.md'
   - '/home/sonnh/projects/xuyenviet/_bmad-output/implementation-artifacts/13-2-migrate-operator-capabilities-and-retire-legacy-admin-ownership.md'
