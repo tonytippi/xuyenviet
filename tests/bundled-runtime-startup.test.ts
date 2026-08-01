@@ -68,6 +68,7 @@ describe("bundled workload startup", () => {
         DATABASE_URL: databaseUrl,
         SCHEMA_RELEASE_MATRIX_DIRECTORY: deployedMatrixDirectory,
         SCHEMA_RELEASE_PHASE_POLICY: policy,
+        XV_ADMIN_IDENTITY_HANDOFF_SERVICE_TOKEN: "bundled-runtime-admin-identity-service-token",
       };
 
       expect(readApprovedSchemaReleasePhasePolicy(policy, deployedMatrixDirectory)).not.toBeNull();
@@ -157,6 +158,7 @@ async function expectLive(port: number, child: ChildProcess & { output?: () => s
 
 async function expectStatus(port: number, path: string, expectedStatus: number, child: ChildProcess & { output?: () => string }, state: string) {
   const deadline = Date.now() + 10_000;
+  let lastStatus: number | undefined;
   while (Date.now() < deadline) {
     try {
       const status = await new Promise<number>((resolve, reject) => get(`http://127.0.0.1:${port}${path}`, (response) => {
@@ -164,21 +166,22 @@ async function expectStatus(port: number, path: string, expectedStatus: number, 
         response.once("end", () => resolve(response.statusCode ?? 0));
       }).once("error", reject));
       if (status === expectedStatus) return;
+      lastStatus = status;
     } catch {}
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  throw new Error(`Runtime did not become ${state} on port ${port}: ${child.output?.() ?? "no output"}`);
+  throw new Error(`Runtime did not become ${state} on port ${port} (last status ${lastStatus ?? "unavailable"}): ${child.output?.() ?? "no output"}`);
 }
 
 function credentialConfig() {
-  const publicKey = generateKeyPairSync("ec", { namedCurve: "P-256" }).publicKey.export({ format: "jwk" });
-  const key = { ...publicKey, kid: "bundle-test", kty: "EC", crv: "P-256" };
+  const webKey = { ...generateKeyPairSync("ec", { namedCurve: "P-256" }).publicKey.export({ format: "jwk" }), kid: "bundle-web-test", kty: "EC", crv: "P-256" };
+  const adminKey = { ...generateKeyPairSync("ec", { namedCurve: "P-256" }).publicKey.export({ format: "jwk" }), kid: "bundle-admin-test", kty: "EC", crv: "P-256" };
   return {
     audience: "api.railway.internal",
     maxLifetimeSeconds: 60,
     issuers: {
-      "xuyenviet-web-bff": { issuer: "xuyenviet-web-bff", active: { kid: "bundle-test", key } },
-      "xuyenviet-admin-bff": { issuer: "xuyenviet-admin-bff", active: { kid: "bundle-test", key } },
+      "xuyenviet-web-bff": { issuer: "xuyenviet-web-bff", active: { kid: "bundle-web-test", key: webKey } },
+      "xuyenviet-admin-bff": { issuer: "xuyenviet-admin-bff", active: { kid: "bundle-admin-test", key: adminKey } },
     },
   };
 }

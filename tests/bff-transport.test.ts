@@ -8,6 +8,10 @@ import { executeProtectedBffMutation } from "@/server/protected-bff-adapter";
 const config = createBffTransportConfig({ privateApiUrl: new URL("https://api.railway.internal"), bffOrigin: "https://web.xuyenviet.vn", csrfSigningSecret: "a".repeat(32), csrfLifetimeSeconds: 300, requestTimeoutMs: 100 });
 
 describe("private BFF transport", () => {
+  test("rejects explicit non-default private API ports", () => {
+    expect(() => createBffTransportConfig({ privateApiUrl: new URL("https://api.railway.internal:444"), bffOrigin: "https://web.xuyenviet.vn", csrfSigningSecret: "a".repeat(32), csrfLifetimeSeconds: 300, requestTimeoutMs: 100 })).toThrow("Invalid BFF transport configuration.");
+  });
+
   test("rejects bad CSRF and invalid DTOs before credential minting or private API invocation", async () => {
     const mintCredential = vi.fn(); const fetcher = vi.fn();
     const invalidCsrf = await adapter({ mintCredential, fetcher, origin: "https://foreign.example", rawInput: { title: "valid" } });

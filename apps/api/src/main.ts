@@ -13,11 +13,12 @@ async function bootstrap() {
   const config = parseBffCredentialConfig(JSON.parse(required("XV_BFF_CREDENTIAL_CONFIG")));
   const databaseUrl = required("DATABASE_URL");
   const aiAskExecution = createAiAskStreamExecution(createPostgresAiAskStreamExecutionPort(databaseUrl));
-  const app = await NestFactory.create(createApiModule(config, createPostgresApiIdentityRepository(databaseUrl), {
+  const app = await NestFactory.create(createApiModule(config, createPostgresApiIdentityRepository(databaseUrl, required("XV_ADMIN_SESSION_LOOKUP_KEY")), {
     conversationSummaries: createPostgresConversationSummaryRepository(databaseUrl),
     planningReads: createPostgresPlanningReadRepository(),
     schemaVersions: createPostgresReleaseSchemaVersionRepository(databaseUrl),
     releasePhasePolicy: readApiReleasePhasePolicy(),
+    adminIdentityServiceToken: required("XV_ADMIN_IDENTITY_HANDOFF_SERVICE_TOKEN"),
     aiAskExecution,
   }));
   await app.listen(Number(process.env.PORT ?? 3001));

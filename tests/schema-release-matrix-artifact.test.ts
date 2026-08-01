@@ -35,4 +35,19 @@ describe("schema release matrix artifacts", () => {
     expect(admitsSchemaReleasePhasePolicy(undefined, "web", [{ version: "20260728.1" }])).toBe(true);
     expect(admitsSchemaReleasePhasePolicy(undefined, "web", [{ version: "20260729.1" }])).toBe(false);
   });
+
+  it("records the admin migrations and owner as isolated-test-only evidence", () => {
+    const matrix = readReleaseMatrixArtifact("20260728.1-to-20260729.1-database-url-test.json") as {
+      target: { environment: string }; activeOwnerInventory: { owners: Array<{ id: string; workload?: string; deploymentEvidence: string }> };
+      migrationPlan: { pending: Array<{ id: string; digest: string }> }; verification: string[];
+    };
+    expect(matrix.target.environment).toBe("test");
+    expect(matrix.activeOwnerInventory.owners).toContainEqual(expect.objectContaining({ id: "admin-expanded", workload: "admin" }));
+    expect(matrix.migrationPlan.pending).toEqual(expect.arrayContaining([
+      { id: "0022_admin_oauth_transactions", digest: "1c68335f936d02df7cc71596d16e8e73ac4eebd193195a9025a6be508efea84f" },
+      { id: "0023_separate_admin_sessions", digest: "74af35894fe545dd68e10f9ea0a9db34e3e575da7e5a40bc67f0fdb683a7eee6" },
+      { id: "0024_hash_admin_session_lookup", digest: "ce58d64c36975e2d4af84b1e88daaff1c410609903c014beb83cbc91cf9d5a9d" },
+    ]));
+    expect(matrix.verification.join(" ")).toContain("not staging approval");
+  });
 });

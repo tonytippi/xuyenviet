@@ -50,7 +50,9 @@ export class ResourceServerGuard implements CanActivate {
       const claims = validateClaims(payload);
       let session;
       try {
-        session = await this.identities.getSession(claims.sid);
+        session = claims.iss === "xuyenviet-admin-bff"
+          ? await this.adminSession(claims.sid)
+          : await this.identities.getSession(claims.sid);
       } catch {
         throw new IdentityUnavailableError();
       }
@@ -75,6 +77,11 @@ export class ResourceServerGuard implements CanActivate {
       throw new ServiceUnavailableException({ code: "internal_error" });
     }
     return true;
+  }
+
+  private async adminSession(sessionId: string) {
+    if (!this.identities.getAdminSession) throw new IdentityUnavailableError();
+    return this.identities.getAdminSession(sessionId);
   }
 }
 
@@ -112,7 +119,7 @@ function validateClaims(payload: JWTPayload): InternalCredentialClaims {
     typeof payload.jti !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[4][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(payload.jti) ||
     !isBffIssuer(payload.iss) || payload.aud !== apiAudience ||
     typeof payload.iat !== "number" || typeof payload.nbf !== "number" || typeof payload.exp !== "number" ||
-    payload.iat > now || payload.nbf > now || payload.exp - payload.iat > 300
+    payload.iat > now || payload.nbf > now || payload.exp <= now || payload.exp - payload.iat > 300
   ) {
     throw new Error("invalid claims");
   }

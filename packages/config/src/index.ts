@@ -22,6 +22,18 @@ export type WebBffSigningConfig = {
   issuer: "xuyenviet-web-bff";
   active: { kid: string; publicKey: Jwk; privateKey: Jwk };
 };
+export type AdminBffSigningConfig = {
+  audience: typeof apiAudience;
+  maxLifetimeSeconds: number;
+  issuer: "xuyenviet-admin-bff";
+  active: { kid: string; publicKey: Jwk; privateKey: Jwk };
+};
+export type AdminBffConfig = {
+  transport: BffTransportConfig;
+  signing: AdminBffSigningConfig;
+  handoffUrl: string;
+  handoffServiceToken: string;
+};
 export type BffTransportConfig = {
   readonly privateApiUrl: string;
   readonly bffOrigin: string;
@@ -70,7 +82,7 @@ export function isPlanningReadApiEnabled(environment: { APP_ENV?: string; XV_PLA
 
 export function createBffTransportConfig(input: Omit<BffTransportConfig, "privateApiUrl"> & { privateApiUrl: URL }): BffTransportConfig {
   if (
-    !(input.privateApiUrl instanceof URL) || input.privateApiUrl.protocol !== "https:" || input.privateApiUrl.hostname !== apiAudience || input.privateApiUrl.username || input.privateApiUrl.password ||
+    !(input.privateApiUrl instanceof URL) || input.privateApiUrl.protocol !== "https:" || input.privateApiUrl.hostname !== apiAudience || input.privateApiUrl.port || input.privateApiUrl.username || input.privateApiUrl.password ||
     !isValidBffCsrfConfig(input) ||
     !Number.isInteger(input.requestTimeoutMs) || input.requestTimeoutMs < 100 || input.requestTimeoutMs > 30_000
   ) throw new Error("Invalid BFF transport configuration.");
@@ -140,6 +152,11 @@ export function createBffCredentialConfig(input: BffCredentialConfig): BffCreden
       throw new Error("Invalid BFF previous verification key.");
     }
   }
+  const webKeys = verifierKeys(input.issuers["xuyenviet-web-bff"]);
+  const adminKeys = verifierKeys(input.issuers["xuyenviet-admin-bff"]);
+  if (webKeys.some((webKey) => adminKeys.some((adminKey) => webKey.kid === adminKey.kid || samePublicKey(webKey.key, adminKey.key)))) {
+    throw new Error("BFF issuer verification keys must be isolated.");
+  }
   return input;
 }
 
@@ -159,8 +176,46 @@ export function createWebBffSigningConfig(input: WebBffSigningConfig): WebBffSig
   return input;
 }
 
+export function createAdminBffSigningConfig(input: AdminBffSigningConfig): AdminBffSigningConfig {
+  if (
+    input.audience !== apiAudience || !isCredentialLifetime(input.maxLifetimeSeconds) || input.issuer !== "xuyenviet-admin-bff" ||
+    !isVerificationKey({ kid: input.active.kid, key: input.active.publicKey }) || !isPrivateEs256Key(input.active.privateKey) ||
+    input.active.publicKey.kid !== input.active.kid || input.active.privateKey.kid !== input.active.kid ||
+    !privateKeyMatchesPublicKey(input.active.privateKey, input.active.publicKey)
+  ) throw new Error("Invalid admin BFF signing configuration.");
+  return input;
+}
+
+export function getAdminBffConfig(environment: NodeJS.ProcessEnv = process.env): AdminBffConfig {
+  const transport = createBffTransportConfig({
+    privateApiUrl: requiredUrl(environment.XV_ADMIN_PRIVATE_API_URL),
+    bffOrigin: requiredExactHttpsOrigin(environment.XV_ADMIN_BFF_ORIGIN),
+    csrfSigningSecret: requiredValue(environment.XV_ADMIN_BFF_CSRF_SIGNING_SECRET),
+    csrfLifetimeSeconds: requiredInteger(environment.XV_ADMIN_BFF_CSRF_LIFETIME_SECONDS),
+    requestTimeoutMs: requiredInteger(environment.XV_ADMIN_BFF_REQUEST_TIMEOUT_MS),
+  });
+  const handoffUrl = requiredUrl(environment.XV_ADMIN_IDENTITY_HANDOFF_URL);
+  if (handoffUrl.protocol !== "https:" || handoffUrl.hostname !== apiAudience || handoffUrl.port || handoffUrl.username || handoffUrl.password) throw new Error("Invalid admin identity handoff configuration.");
+  return {
+    transport,
+    signing: createAdminBffSigningConfig({ audience: apiAudience, maxLifetimeSeconds: 300, issuer: "xuyenviet-admin-bff", active: {
+      kid: requiredValue(environment.XV_ADMIN_BFF_ACTIVE_KID), publicKey: parsePrivateOrPublicJwk(requiredValue(environment.XV_ADMIN_BFF_ACTIVE_JWK), false), privateKey: parsePrivateOrPublicJwk(requiredValue(environment.XV_ADMIN_BFF_ACTIVE_PRIVATE_JWK), true),
+    } }),
+    handoffUrl: handoffUrl.href,
+    handoffServiceToken: requiredValue(environment.XV_ADMIN_IDENTITY_HANDOFF_SERVICE_TOKEN),
+  };
+}
+
 function isVerificationKey(key: VerificationKey): boolean {
   return Boolean(key.kid) && key.key.kid === key.kid && isPublicEs256Key(key.key);
+}
+
+function verifierKeys(config: IssuerCredentialConfig): VerificationKey[] {
+  return config.previous ? [config.active, config.previous] : [config.active];
+}
+
+function samePublicKey(left: Jwk, right: Jwk): boolean {
+  return left.kty === right.kty && left.crv === right.crv && left.x === right.x && left.y === right.y;
 }
 
 function isPublicEs256Key(key: Jwk): boolean {
@@ -219,6 +274,14 @@ function requiredInteger(value: string | undefined): number {
   const parsed = Number(value);
   if (!Number.isInteger(parsed)) throw new Error("Invalid BFF transport configuration.");
   return parsed;
+}
+
+function parsePrivateOrPublicJwk(value: string, privateKey: boolean): Jwk {
+  try {
+    const key = JSON.parse(value) as Jwk;
+    if (privateKey ? !isPrivateEs256Key(key) : !isPublicEs256Key(key)) throw new Error("invalid key");
+    return key;
+  } catch { throw new Error("Invalid admin BFF signing configuration."); }
 }
 
 function isExactHttpsOrigin(value: string): boolean {

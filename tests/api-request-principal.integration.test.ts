@@ -1,6 +1,8 @@
 import { Body, Controller, Get, Headers as NestHeaders, INestApplication, Module, Post, UseGuards } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import { exportJWK, generateKeyPair, importJWK, SignJWT } from "jose";
+import { createHmac } from "node:crypto";
+import { eq } from "drizzle-orm";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
@@ -12,7 +14,7 @@ import { Principal } from "../apps/api/src/auth/principal.decorator";
 import { ResourceServerGuard } from "../apps/api/src/auth/resource-server.guard";
 import { getTestDatabaseUrl } from "./helpers/env-file";
 import { resetTestDatabase, testDb } from "./helpers/db";
-import { sessions, userRoles, users } from "@/db/schema";
+import { accounts, adminSessions, sessions, userRoles, users } from "@/db/schema";
 import type { RequestPrincipal } from "@xuyenviet/contracts";
 import { issueCsrfToken } from "@/server/csrf";
 import { executeProtectedBffMutation } from "@/server/protected-bff-adapter";
@@ -80,6 +82,7 @@ beforeEach(async () => {
   await resetTestDatabase();
   await testDb.insert(users).values({ id: "user-1", email: "user-1@example.com" });
   await testDb.insert(sessions).values({ sessionToken: "session-1", userId: "user-1", expires: new Date(Date.now() + 86_400_000) });
+  await testDb.insert(adminSessions).values({ sessionLookupHash: adminSessionLookupHash("session-1"), userId: "user-1", expires: new Date(Date.now() + 86_400_000) });
   const web = await keySet("web-active");
   webPrevious = await keySet("web-previous");
   adminActive = await keySet("admin-active");
@@ -97,7 +100,7 @@ afterEach(async () => {
 describe("API request principals", () => {
   test("allows a current principal", async () => {
     const token = await tokenFor(config, "xuyenviet-web-bff");
-    expect(await createPostgresApiIdentityRepository(getTestDatabaseUrl()).getSession("session-1")).toEqual({
+    expect(await createPostgresApiIdentityRepository(getTestDatabaseUrl(), "a".repeat(32)).getSession("session-1")).toEqual({
       userId: "user-1",
       expires: expect.any(Date),
       authorizationVersion: 1,
@@ -135,6 +138,28 @@ describe("API request principals", () => {
     expect(controller().calls).toBe(0);
   });
 
+  test("enforces the declared admin workspace capability through Nest route metadata before returning its bounded result", async () => {
+    const operatorToken = await tokenFor(config, "xuyenviet-admin-bff", { roles: ["operator"] });
+    await testDb.insert(userRoles).values({ userId: "user-1", role: "operator" });
+    await request(app.getHttpServer()).get("/v1/admin/workspace").set("Authorization", `Bearer ${operatorToken}`).expect(200, { ready: true });
+
+    const denied = await request(app.getHttpServer())
+      .get("/v1/admin/workspace")
+      .set({ Authorization: `Bearer ${await tokenFor(config, "xuyenviet-admin-bff", { roles: ["traveler"] })}`, Cookie: "__Host-xuyenviet-admin-session=root-cookie" })
+      .expect(403);
+    expect(denied.body).toEqual({ code: "forbidden", message: "Bạn không có quyền thực hiện thao tác này.", requestId: expect.any(String) });
+    expect(denied.text).not.toContain("root-cookie");
+
+    await request(app.getHttpServer())
+      .get("/v1/admin/workspace")
+      .set("Authorization", `Bearer ${await tokenFor(config, "xuyenviet-web-bff", { roles: ["operator"] })}`)
+      .expect(403);
+    expect(controller().calls).toBe(0);
+
+    const cookieOnly = await request(app.getHttpServer()).get("/v1/admin/workspace").set("Cookie", "__Host-xuyenviet-admin-session=root-cookie").expect(401);
+    expect(cookieOnly.body).toEqual({ code: "unauthorized", message: "Không được phép truy cập.", requestId: expect.any(String) });
+  });
+
   test("redacts unexpected protected API exceptions with the canonical request ID", async () => {
     const token = await tokenFor(config, "xuyenviet-web-bff");
     const response = await request(app.getHttpServer())
@@ -156,6 +181,34 @@ describe("API request principals", () => {
       .expect(400);
 
     expect(response.body).toEqual({ code: "validation_error", message: "Dữ liệu yêu cầu không hợp lệ.", requestId: "parser_failure", violations: [] });
+  });
+
+  test("validates every admin identity route through Nest before controller work", async () => {
+    const routes = [
+      ["/internal/admin-identity/handoff", {}],
+      ["/internal/admin-identity/oauth/start", {}],
+      ["/internal/admin-identity/oauth/callback", {}],
+      ["/internal/admin-identity/revoke", {}],
+      ["/internal/admin-identity/readiness", {}],
+    ] as const;
+    for (const [path, body] of routes) {
+      const response = await request(app.getHttpServer()).post(path).set("Authorization", "Bearer identity-service").send(body).expect(400);
+      expect(response.body).toEqual({ code: "validation_error", message: "Dữ liệu yêu cầu không hợp lệ.", requestId: expect.any(String), violations: [] });
+    }
+  });
+
+  test("stores only an HMAC session lookup value and resolves and revokes the presented bearer ID", async () => {
+    await testDb.insert(accounts).values({ userId: "user-1", type: "oauth", provider: "google", providerAccountId: "google-user-1" });
+    await testDb.insert(userRoles).values({ userId: "user-1", role: "operator" });
+    const repository = createPostgresApiIdentityRepository(getTestDatabaseUrl(), "a".repeat(32));
+    const sessionId = await repository.createAdminSessionForGoogleAccount("google-user-1", new Date(Date.now() + 60_000));
+    if (!sessionId) throw new Error("Expected an admin session.");
+    const [stored] = await testDb.select().from(adminSessions).where(eq(adminSessions.userId, "user-1"));
+    expect(stored?.sessionLookupHash).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(stored?.sessionLookupHash).not.toContain(sessionId);
+    await expect(repository.resolveAdminHandoff(sessionId, "user-1")).resolves.toMatchObject({ sessionId, subject: "user-1" });
+    await repository.revokeAdminSession(sessionId);
+    await expect(repository.resolveAdminHandoff(sessionId, "user-1")).resolves.toBeNull();
   });
 
   test("executes protected BFF mutations over HTTP with CSRF ordering, canonical correlation, declared idempotency, and safe error projection", async () => {
@@ -231,6 +284,11 @@ describe("API request principals", () => {
     await rejected(await tokenFor(config, "xuyenviet-web-bff", {}, adminActive));
   });
 
+  test("rejects an admin credential when only a traveler session exists", async () => {
+    await testDb.delete(adminSessions);
+    await rejected(await tokenFor(config, "xuyenviet-admin-bff"));
+  });
+
   test("rejects already minted credentials after role grants and revokes change authorization version", async () => {
     await testDb.insert(users).values({ id: "admin-1", email: "admin-1@example.com" });
     await testDb.insert(userRoles).values({ userId: "admin-1", role: "admin" });
@@ -249,11 +307,19 @@ describe("API request principals", () => {
 });
 
 async function startApp() {
-  const ApiModule = createApiModule(config, createPostgresApiIdentityRepository(getTestDatabaseUrl()));
+  const ApiModule = createApiModule(config, createPostgresApiIdentityRepository(getTestDatabaseUrl(), "a".repeat(32)), {
+    conversationSummaries: { async listOwnedConversationSummaryRows() { return []; } },
+    schemaVersions: { async hasCompatibleSchemaVersion() { return true; }, async recordSchemaVersion() {} },
+    adminIdentityServiceToken: "identity-service",
+  });
   @Module({ imports: [ApiModule], controllers: [IdentityTestController] })
   class TestApiModule {}
   app = await NestFactory.create(TestApiModule, { logger: ["error"] });
   await app.init();
+}
+
+function adminSessionLookupHash(sessionId: string) {
+  return createHmac("sha256", "a".repeat(32)).update(sessionId).digest("base64url");
 }
 
 async function restartApp() {

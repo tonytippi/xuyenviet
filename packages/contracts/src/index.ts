@@ -27,6 +27,27 @@ export type RequestPrincipal = {
   tokenId: string;
 };
 
+export const adminCapabilities = ["admin.workspace.read", "admin.role.governance", "admin.ai-model-catalog.write"] as const;
+export type AdminCapability = (typeof adminCapabilities)[number];
+
+/** This declaration is shared by the BFF admission check and API controllers. */
+export function permitsAdminCapability(roles: readonly RequestRole[], capability: AdminCapability): boolean {
+  if (capability === "admin.workspace.read") return roles.includes("operator") || roles.includes("admin");
+  return roles.includes("admin");
+}
+
+export type AdminIdentityHandoff = {
+  subject: string;
+  sessionId: string;
+  authorizationVersion: number;
+  roles: RequestRole[];
+};
+
+export type AdminIdentityHandoffRequest = { sessionId: string; subject?: string };
+export type AdminIdentityHandoffResponse = { identity: AdminIdentityHandoff };
+export type AdminReadinessRequest = { declaration: SchemaCompatibilityDeclaration };
+export type AdminReadinessResponse = { ready: boolean };
+
 export type SafeFieldViolation = { field: string; code: string; message: string };
 export const safeApiErrorCodes = ["unauthorized", "forbidden", "validation_error", "csrf_invalid", "request_timeout", "internal_error"] as const;
 export type SafeApiErrorCode = (typeof safeApiErrorCodes)[number];

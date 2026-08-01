@@ -1,6 +1,6 @@
 # Story 13.1: Establish the Separately Deployed Admin BFF Application
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -29,37 +29,37 @@ Required failure-mode proof: valid sign-in; host-only cookie isolation; root-coo
 
 ## Tasks / Subtasks
 
-- [ ] Implement the approved admin identity handoff before creating a deployable app (AC: 1, 2)
-  - [ ] Use the API Identity boundary as the trusted OAuth/session authority and private service-authenticated handoff endpoint; keep the admin BFF as the host-only cookie owner and isolated admin credential signer.
-  - [ ] Add the required failure-mode tests in **Approved Identity Handoff**, including malformed/replayed OAuth state and handoff failure before credential minting.
-  - [ ] Do not copy `src/auth.ts`, `src/server/bff-session-token.ts`, or `src/server/bff-credentials.ts` into the admin app: all currently verify sessions/roles against Drizzle and are therefore incompatible with the no-direct-database requirement.
-  - [ ] Reuse the existing API resource-server model: bounded ES256 credentials, issuer `xuyenviet-admin-bff`, audience `api.railway.internal`, only allowlisted claims, and API-side session/authorization-version verification. Admin private signing material is isolated from the web issuer; API receives public verification material only.
-  - [ ] If the gate cannot be satisfied, leave the story in `backlog` and open an architecture decision. Do not grant the admin runtime database credentials or loosen the browser/API boundary to make progress.
+- [x] Implement the approved admin identity handoff before creating a deployable app (AC: 1, 2)
+  - [x] Use the API Identity boundary as the trusted OAuth/session authority and private service-authenticated handoff endpoint; keep the admin BFF as the host-only cookie owner and isolated admin credential signer.
+  - [x] Add the required failure-mode tests in **Approved Identity Handoff**, including malformed/replayed OAuth state and handoff failure before credential minting.
+  - [x] Do not copy `src/auth.ts`, `src/server/bff-session-token.ts`, or `src/server/bff-credentials.ts` into the admin app: all currently verify sessions/roles against Drizzle and are therefore incompatible with the no-direct-database requirement.
+  - [x] Reuse the existing API resource-server model: bounded ES256 credentials, issuer `xuyenviet-admin-bff`, audience `api.railway.internal`, only allowlisted claims, and API-side session/authorization-version verification. Admin private signing material is isolated from the web issuer; API receives public verification material only.
+- [x] The approved gate is satisfied without granting the admin runtime database credentials or loosening the browser/API boundary.
 
-- [ ] Create a separately buildable, deployable admin Next.js BFF runtime (AC: 1)
-  - [ ] Add `apps/admin` as its own Next.js application with its own package metadata, TypeScript configuration, root layout, sign-in/callback routes, protected landing route, and Vietnamese-first operator shell. It must not import root `src/*` aliases, root Next app modules, Drizzle/database packages, domain mutation modules, or files marked `"use server"`.
-  - [ ] Give the admin app a distinct host-only Auth.js cookie name, callback/sign-in paths, and origin for `admin.xuyenviet.app`; never set a `.xuyenviet.app` cookie domain or share `xuyenviet.session-token` with traveler web.
-  - [ ] Keep the browser-to-admin interaction session/cookie based. The admin BFF alone mints the short-lived internal credential and calls `https://api.railway.internal`; do not expose internal tokens, JWKs, private API URLs, database URLs, provider credentials, raw API errors, or operator-only data to browser JavaScript.
-  - [ ] Provide admin-local BFF API adapters that preserve the existing request ID, abort/timeout, origin, Fetch Metadata, signed double-submit CSRF, bounded DTO projection, safe error mapping, and declared-only idempotency-key rules. Generalize shared config only where both web and admin genuinely need it; do not make the generic adapter a domain owner.
+- [x] Create a separately buildable, deployable admin Next.js BFF runtime (AC: 1)
+  - [x] Add `apps/admin` as its own Next.js application with its own package metadata, TypeScript configuration, root layout, sign-in/callback routes, protected landing route, and Vietnamese-first operator shell. It must not import root `src/*` aliases, root Next app modules, Drizzle/database packages, domain mutation modules, or files marked `"use server"`.
+  - [x] Give the admin app a distinct host-only Auth.js cookie name, callback/sign-in paths, and origin for `admin.xuyenviet.app`; never set a `.xuyenviet.app` cookie domain or share `xuyenviet.session-token` with traveler web.
+  - [x] Keep the browser-to-admin interaction session/cookie based. The admin BFF alone mints the short-lived internal credential and calls `https://api.railway.internal`; do not expose internal tokens, JWKs, private API URLs, database URLs, provider credentials, raw API errors, or operator-only data to browser JavaScript.
+  - [x] Provide admin-local BFF API adapters that preserve the existing request ID, abort/timeout, origin, Fetch Metadata, signed double-submit CSRF, bounded DTO projection, safe error mapping, and declared-only idempotency-key rules. Generalize shared config only where both web and admin genuinely need it; do not make the generic adapter a domain owner.
 
-- [ ] Enforce server-side operator access and API authorization alignment (AC: 2)
-  - [ ] The admin shell and every BFF route must deny unauthenticated users and users without `operator` or `admin` before a protected API call, read, navigation response, or mutation is performed. Exact `admin` remains required for role governance and AI model catalog changes.
-  - [ ] Add an explicit API capability-authorization seam. `ResourceServerGuard` authenticates and normalizes a principal but does not authorize individual operator capabilities; controllers/use cases must enforce the same role matrix server-side, independent of admin UI checks.
-  - [ ] Preserve private API properties: bearer-only API requests, no cookie parsing in Nest, no direct-browser API path, no CORS allow-origin response, and safe error envelopes only.
+- [x] Enforce server-side operator access and API authorization alignment (AC: 2)
+  - [x] The admin shell and every BFF route must deny unauthenticated users and users without `operator` or `admin` before a protected API call, read, navigation response, or mutation is performed. Exact `admin` remains required for role governance and AI model catalog changes.
+  - [x] Add an explicit API capability-authorization seam. `ResourceServerGuard` authenticates and normalizes a principal but does not authorize individual operator capabilities; controllers/use cases must enforce the same role matrix server-side, independent of admin UI checks.
+  - [x] Preserve private API properties: bearer-only API requests, no cookie parsing in Nest, no direct-browser API path, no CORS allow-origin response, and safe error envelopes only.
 
-- [ ] Add independent readiness, build, and release boundaries (AC: 1)
-  - [ ] Implement `/api/health` liveness/readiness in `apps/admin`, reusing `schemaCompatibilityDeclarations.admin`, `futureAdminSchemaCompatibilityConsumer`, approved release-policy parsing, and the fail-closed one-row release admission semantics. Do not duplicate release-version evaluation or expose schema/matrix/target data in health output.
-  - [ ] Add an `admin-runner` Docker target and, if Compose remains supported, a separate admin service/health check. Include deployment-owned `docs/release-matrices` and set `SCHEMA_RELEASE_MATRIX_DIRECTORY`; preserve the independent API/web/Worker targets.
-  - [ ] Update root build/typecheck orchestration to include admin without merging its start/release lifecycle into traveler web. Keep `pnpm-lock.yaml` authoritative.
-  - [ ] Document independent Railway service selection, private API route, migration-before-traffic dependency, readiness probe, OAuth callback/redirect configuration, host-only cookie behavior, required least-privilege environment variables, and the fact that staging/private-network evidence must be collected outside repository tests.
+- [x] Add independent readiness, build, and release boundaries (AC: 1)
+  - [x] Implement `/api/health` liveness/readiness in `apps/admin`, reusing `schemaCompatibilityDeclarations.admin`, `futureAdminSchemaCompatibilityConsumer`, approved release-policy parsing, and the fail-closed one-row release admission semantics. Do not duplicate release-version evaluation or expose schema/matrix/target data in health output.
+  - [x] Add an `admin-runner` Docker target and, if Compose remains supported, a separate admin service/health check. Include deployment-owned `docs/release-matrices` and set `SCHEMA_RELEASE_MATRIX_DIRECTORY`; preserve the independent API/web/Worker targets.
+  - [x] Update root build/typecheck orchestration to include admin without merging its start/release lifecycle into traveler web. Keep `pnpm-lock.yaml` authoritative.
+  - [x] Document independent Railway service selection, private API route, migration-before-traffic dependency, readiness probe, OAuth callback/redirect configuration, host-only cookie behavior, required least-privilege environment variables, and the fact that staging/private-network evidence must be collected outside repository tests.
 
-- [ ] Prove boundary and denial behavior (AC: 1, 2)
-  - [ ] Add tests for distinct admin session/CSRF cookie namespaces and callback origin; prove root traveler cookie values cannot authenticate admin and no cookie has a parent-domain scope.
-  - [ ] Add credential tests for admin issuer acceptance, web/admin signing-key isolation, exact claim/lifetime limits, revoked/expired session rejection, and authorization-version invalidation after role changes.
-  - [ ] Add BFF/API integration coverage proving traveler/anonymous requests are denied at both layers before protected data or navigation is returned; prove exact-admin-only capabilities reject an operator.
-  - [ ] Add static/import and runtime tests proving admin has no database credential/import path, browser output contains no API credential/session token/private JWK, and private API calls carry only bearer/request-ID/allowed DTO headers.
-  - [ ] Add admin readiness/build/container tests for malformed config, invalid/missing release policy, unavailable/incompatible release state, and a successful compatible admin runtime. Preserve existing web/API/Worker tests.
-  - [ ] Run focused tests plus `pnpm lint`, `pnpm typecheck`, `pnpm build`, relevant Docker/Compose checks, and `git diff --check`. Record exact commands and external staging blockers in the Dev Agent Record.
+- [x] Prove boundary and denial behavior (AC: 1, 2)
+  - [x] Add tests for distinct admin session/CSRF cookie namespaces and callback origin; prove root traveler cookie values cannot authenticate admin and no cookie has a parent-domain scope.
+  - [x] Add credential tests for admin issuer acceptance, web/admin signing-key isolation, exact claim/lifetime limits, revoked/expired session rejection, and authorization-version invalidation after role changes.
+  - [x] Add BFF/API integration coverage proving traveler/anonymous requests are denied at both layers before protected data or navigation is returned; prove exact-admin-only capabilities reject an operator.
+  - [x] Add static/import and runtime tests proving admin has no database credential/import path, browser output contains no API credential/session token/private JWK, and private API calls carry only bearer/request-ID/allowed DTO headers.
+  - [x] Add admin readiness/build/container tests for malformed config, invalid/missing release policy, unavailable/incompatible release state, and a successful compatible admin runtime. Preserve existing web/API/Worker tests.
+  - [x] Run focused tests plus `pnpm lint`, `pnpm typecheck`, `pnpm build`, relevant Docker/Compose checks, and `git diff --check`. Record exact commands and external staging blockers in the Dev Agent Record.
 
 ## Dev Notes
 
@@ -125,18 +125,34 @@ Required failure-mode proof: valid sign-in; host-only cookie isolation; root-coo
 
 gpt-5.6-terra
 
-### Debug Log References
+### Implementation and Acceptance Evidence
 
-- Story preparation and validation only. No application code, dependency, deployment, database, test, or external environment action was performed.
+- `apps/admin` is an independently buildable Next.js BFF. Its host-only `__Host-xuyenviet-admin-*` cookies, private API handoff, isolated ES256 signer, CSRF checks, safe BFF transport, and health route are covered by the Story 13.1 focused suite.
+- API Identity owns OAuth transactions, PKCE verifier, Google exchange, opaque session creation, live session handoff, and revocation. The `/oauth/start` callback validator now requires the exact `https://admin.xuyenviet.app` origin, rejects URL credentials and non-default ports, and permits only `/api/auth/callback` without query or fragment.
+- API capability authorization is separate from credential authentication; the focused suite proves operator denial for an exact-admin capability before handler work.
+- The admin Docker target and Compose profile are present, root build/typecheck include the admin workspace, and documentation records the Railway/private-network/least-privilege boundary.
 
-### Completion Notes List
+### Review Outcome
 
-- Ultimate context engine analysis completed - comprehensive developer guide created.
-- Created from Epic 13 requirements, separated-admin proposal, project context, completed Epic 12 release-admission patterns, current root admin/auth/BFF/API code, tests, Docker topology, sprint status, and recent Git history.
-- Key prerequisite recorded: the current Auth.js and BFF minting implementations require Drizzle/database access and cannot be reused by the separate no-database admin runtime unchanged.
-- 2026-08-01 validation correction: story status changed to `backlog` because identity handoff is a prerequisite security decision, not an implementation-time choice.
-- 2026-08-01 approval: API Identity owns Google OAuth state/code exchange and the authoritative admin-session repository; `apps/admin` owns only its host-only opaque cookie and isolated admin credential signer. The decision includes required failure-mode coverage and revalidates the story for development.
+- Synchronous final repair review found the OAuth callback validator previously accepted credential-bearing URLs because it compared only protocol and hostname. The validator now compares `url.origin` to the exact production origin and additionally rejects non-empty URL credentials.
+- Focused regression coverage rejects username-only, username/password, and non-default-port callback URLs before any OAuth transaction is created. No additional findings were identified in the repaired scope.
+- Final critical repair replaced interface/inline identity request bodies with concrete SafeValidationPipe DTOs and added Nest HTTP validation coverage for every identity endpoint. Admin sessions now persist only an API-keyed HMAC lookup value; the migration invalidates existing sessions because their opaque bearer values cannot be safely transformed. Identity OAuth, handoff, and revocation fail closed while release admission is unavailable or incompatible. Admin private API and handoff configuration reject explicit non-default ports.
+- Final synchronous Blind Hunter, Edge Case Hunter, and Acceptance Auditor review completed with no actionable local findings. External staging evidence remains explicitly deferred to deployment owners.
 
-### File List
+### Verification
 
-- `_bmad-output/implementation-artifacts/13-1-establish-the-separately-deployed-admin-bff-application.md`
+- PASS: `pnpm vitest run tests/story-13-1-final-repair.test.ts` - 1 file and 16 tests passed. The suite applies local test migrations through its established global setup.
+- PASS: `pnpm lint` - completed with 0 errors and 5 pre-existing unused-variable warnings in unrelated test files.
+- PASS: `pnpm build` - web, admin, API, and Worker builds completed successfully.
+- PASS: `pnpm typecheck` - completed successfully after `pnpm build` regenerated stale root `.next/types` files. The first run before build failed only because TypeScript included missing stale generated root Next type files.
+- PASS: `docker build --target admin-runner -t xuyenviet-admin-runner:story-13-1 .` - completed successfully.
+- PASS: `WEB_ENV_FILE=.web.env.example API_ENV_FILE=.api.env.example WORKER_ENV_FILE=.worker.env.example ADMIN_ENV_FILE=.admin.env.example docker compose --profile admin config --quiet` - completed successfully. The default command remains intentionally blocked when local `.admin.env` is absent.
+- PASS: `git diff --check` - no whitespace errors.
+- PASS: `pnpm vitest run tests/admin-identity-routes.test.ts tests/story-13-1-final-repair.test.ts tests/api-request-principal.integration.test.ts tests/bff-transport.test.ts tests/schema-release-matrix-artifact.test.ts` - 5 files and 81 tests passed, including actual Nest route validation, HMAC-only session persistence/functional revocation, release-admission denial, and private/handoff port rejection.
+
+### External Staging Evidence Still Required
+
+- Deployment owner must select the Railway `admin-runner` target, provision the separate admin service, and retain the private `https://api.railway.internal` route without public browser access.
+- Deployment owner must run the migration-before-traffic release process and retain evidence of admin and API readiness probes after deployment.
+- Deployment owner must configure DNS/TLS for `admin.xuyenviet.app` and register the exact Google redirect URI `https://admin.xuyenviet.app/api/auth/callback`.
+- Deployment owner must demonstrate staging sign-in, host-only cookie isolation, private handoff connectivity, logout/revocation, and denied traveler/anonymous access using deployment secrets and live identity state. These cannot be proven from repository tests or local Compose.

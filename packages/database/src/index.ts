@@ -1,10 +1,11 @@
 import postgres from "postgres";
+import { createHmac, randomUUID } from "node:crypto";
 import { resolvePlanningAnnotationCapabilities, sanitizeStoredPlanningAnnotations, type AiAskStreamExecutionPort, type PlanningReadRepository } from "@xuyenviet/domain";
 import { and, asc, eq } from "drizzle-orm";
 import { loadAnswerContext } from "./answer-context";
 import { formatAssistantMessageProvenance } from "./provenance";
 import { assistantResponseProvenance, conversations, messages, tripChangeProposals, tripProjects } from "./schema";
-import { evaluateSchemaAdmission, parsePlanningAnswerDetailResponse, planningDetailProvenanceLimit, type PlanningJsonValue, type PlanningProvenance, type SchemaCompatibilityDeclaration, type TripAnswerContextResponse } from "@xuyenviet/contracts";
+import { evaluateSchemaAdmission, parsePlanningAnswerDetailResponse, planningDetailProvenanceLimit, type AdminIdentityHandoff, type PlanningJsonValue, type PlanningProvenance, type RequestRole, type SchemaCompatibilityDeclaration, type TripAnswerContextResponse } from "@xuyenviet/contracts";
 import { createAiAskStreamExecutionPort } from "./ai-ask-stream-execution";
 
 export * from "./ai-ask-commands";
@@ -38,7 +39,19 @@ export type ApiIdentityRecord = {
 
 export interface ApiIdentityRepository {
   getSession(sessionId: string): Promise<ApiIdentityRecord | null>;
+  getAdminSession?(sessionId: string): Promise<ApiIdentityRecord | null>;
 }
+
+export interface AdminIdentityRepository extends ApiIdentityRepository {
+  resolveAdminHandoff(sessionId: string, subject?: string): Promise<AdminIdentityHandoff | null>;
+  revokeAdminSession(sessionId: string): Promise<void>;
+  purgeExpiredAdminOAuthTransactions(limit: number): Promise<void>;
+  createAdminOAuthTransaction(transaction: AdminOAuthTransaction): Promise<void>;
+  consumeAdminOAuthTransaction(id: string, state: string): Promise<AdminOAuthTransaction | null>;
+  resolveAdminRolesForGoogleAccount(providerAccountId: string): Promise<RequestRole[] | null>;
+  createAdminSessionForGoogleAccount(providerAccountId: string, expires: Date): Promise<string | null>;
+}
+export type AdminOAuthTransaction = { id: string; state: string; codeVerifier: string; callbackUrl: string; expires: Date };
 
 export type StoredConversationSummaryRow = { id: string; updatedAt: Date; messageContent: string | null };
 export type ReleaseSchemaVersionRepository = {
@@ -107,8 +120,10 @@ export function createPostgresReleaseSchemaVersionRepository(databaseUrl: string
   };
 }
 
-export function createPostgresApiIdentityRepository(databaseUrl: string): ApiIdentityRepository {
+export function createPostgresApiIdentityRepository(databaseUrl: string, adminSessionLookupKey: string): AdminIdentityRepository {
+  if (adminSessionLookupKey.length < 32) throw new Error("Admin session lookup key is invalid.");
   const sql = postgres(databaseUrl, { max: 1 });
+  const lookupHash = (sessionId: string) => createHmac("sha256", adminSessionLookupKey).update(sessionId).digest("base64url");
   return {
     async getSession(sessionId) {
       const rows = await sql<ApiIdentityRecord[]>`
@@ -118,6 +133,53 @@ export function createPostgresApiIdentityRepository(databaseUrl: string): ApiIde
         limit 1
       `;
       return rows[0] ?? null;
+    },
+    async getAdminSession(sessionId) {
+      const rows = await sql<ApiIdentityRecord[]>`
+        select admin_sessions.user_id as "userId", admin_sessions.expires, users.authorization_version as "authorizationVersion"
+        from admin_sessions join users on users.id = admin_sessions.user_id
+        where admin_sessions.session_lookup_hash = ${lookupHash(sessionId)} and admin_sessions.revoked_at is null
+        limit 1
+      `;
+      return rows[0] ?? null;
+    },
+    async resolveAdminHandoff(sessionId, subject) {
+      const rows = await sql<Array<{ userId: string; expires: Date; authorizationVersion: number; role: RequestRole }>>`
+        select admin_sessions.user_id as "userId", admin_sessions.expires, users.authorization_version as "authorizationVersion", user_roles.role
+        from admin_sessions join users on users.id = admin_sessions.user_id join user_roles on user_roles.user_id = users.id
+        where admin_sessions.session_lookup_hash = ${lookupHash(sessionId)} and admin_sessions.revoked_at is null
+      `;
+      if (!rows.length || rows[0]!.expires <= new Date() || subject !== undefined && rows[0]!.userId !== subject) return null;
+      const roles = [...new Set(rows.map((row) => row.role))].sort();
+      if (!roles.includes("operator") && !roles.includes("admin")) return null;
+      return { subject: rows[0]!.userId, sessionId, authorizationVersion: rows[0]!.authorizationVersion, roles };
+    },
+    async revokeAdminSession(sessionId) { await sql`update admin_sessions set revoked_at = now() where session_lookup_hash = ${lookupHash(sessionId)} and revoked_at is null`; },
+    async purgeExpiredAdminOAuthTransactions(limit) {
+      await sql`delete from admin_oauth_transactions where id in (select id from admin_oauth_transactions where expires <= now() order by expires asc limit ${limit})`;
+    },
+    async createAdminOAuthTransaction(transaction) {
+      await sql`insert into admin_oauth_transactions (id, state, code_verifier, callback_url, expires) values (${transaction.id}, ${transaction.state}, ${transaction.codeVerifier}, ${transaction.callbackUrl}, ${transaction.expires})`;
+    },
+    async consumeAdminOAuthTransaction(id, state) {
+      const rows = await sql<AdminOAuthTransaction[]>`delete from admin_oauth_transactions where id = ${id} and state = ${state} and expires > now() returning id, state, code_verifier as "codeVerifier", callback_url as "callbackUrl", expires`;
+      return rows[0] ?? null;
+    },
+    async resolveAdminRolesForGoogleAccount(providerAccountId) {
+      const rows = await sql<{ role: RequestRole }[]>`
+        select user_roles.role
+        from accounts join user_roles on user_roles.user_id = accounts.user_id
+        where accounts.provider = 'google' and accounts.provider_account_id = ${providerAccountId}
+      `;
+      return rows.length ? [...new Set(rows.map((row) => row.role))].sort() : null;
+    },
+    async createAdminSessionForGoogleAccount(providerAccountId, expires) {
+      const users = await sql<{ userId: string }[]>`select user_id as "userId" from accounts where provider = 'google' and provider_account_id = ${providerAccountId} limit 1`;
+      const userId = users[0]?.userId;
+      if (!userId) return null;
+      const sessionId = randomUUID();
+      await sql`insert into admin_sessions (session_lookup_hash, user_id, expires) values (${lookupHash(sessionId)}, ${userId}, ${expires})`;
+      return sessionId;
     },
   };
 }

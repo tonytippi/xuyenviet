@@ -274,7 +274,8 @@ development_status:
   # cookies plus its isolated credential signer and has no database access. Story 13.2
   # cannot start until Story 13.1 is done.
   epic-13: in-progress
-  13-1-establish-the-separately-deployed-admin-bff-application: ready-for-dev
+  # 2026-08-01: bmad-dev-auto completed implementation, bounded repair loops, and final synchronous Blind Hunter, Edge Case Hunter, and Acceptance Auditor review with no actionable local findings. Focused 5-file verification passed 81 tests; lint (0 errors, 5 pre-existing warnings), typecheck, clean build, admin container build, split-env Compose rendering, and diff check passed. Railway/private-network/OAuth/DNS/migration-readiness staging proof remains deployment-owned and is recorded in Story 13.1.
+  13-1-establish-the-separately-deployed-admin-bff-application: done
   13-2-migrate-operator-capabilities-and-retire-legacy-admin-ownership: backlog
   epic-13-retrospective: optional
 

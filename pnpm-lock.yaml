@@ -65,6 +65,9 @@ importers:
       '@eslint/eslintrc':
         specifier: ^3.3.1
         version: 3.3.5
+      '@next/eslint-plugin-next':
+        specifier: ^15.3.5
+        version: 15.5.20
       '@tailwindcss/postcss':
         specifier: ^4.1.11
         version: 4.3.2
@@ -95,6 +98,9 @@ importers:
       eslint-config-next:
         specifier: ^15.3.5
         version: 15.5.20(eslint@9.39.4(jiti@2.7.0))(typescript@5.9.3)
+      eslint-plugin-react-hooks:
+        specifier: ^5.2.0
+        version: 5.2.0(eslint@9.39.4(jiti@2.7.0))
       playwright:
         specifier: ^1.61.1
         version: 1.61.1
@@ -116,6 +122,37 @@ importers:
       vitest:
         specifier: ^4.1.10
         version: 4.1.10(@types/node@22.20.0)(@vitest/coverage-v8@4.1.10)(vite@8.1.3(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.0))
+
+  apps/admin:
+    dependencies:
+      '@xuyenviet/config':
+        specifier: workspace:*
+        version: link:../../packages/config
+      '@xuyenviet/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      jose:
+        specifier: ^6.2.3
+        version: 6.2.3
+      next:
+        specifier: ^15.3.5
+        version: 15.5.20(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      react:
+        specifier: ^19.1.0
+        version: 19.2.7
+      react-dom:
+        specifier: ^19.1.0
+        version: 19.2.7(react@19.2.7)
+    devDependencies:
+      eslint:
+        specifier: ^9.30.1
+        version: 9.39.4(jiti@2.7.0)
+      eslint-plugin-react-hooks:
+        specifier: ^5.2.0
+        version: 5.2.0(eslint@9.39.4(jiti@2.7.0))
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
 
   apps/api:
     dependencies:

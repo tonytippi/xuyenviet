@@ -17,10 +17,11 @@
     { "id": "api-expanded", "ownerType": "workload", "workload": "api", "role": "reader", "oldRepresentation": "api-expand-20260729.1", "schemaVersion": "20260728.1", "effectiveState": "active", "deploymentEvidence": "Isolated test expanded API declaration verified.", "declaration": { "workload": "api", "minimumVersion": "20260728.1", "maximumVersion": "20260729.1" } },
     { "id": "worker-expanded", "ownerType": "workload", "workload": "worker", "role": "reader", "oldRepresentation": "worker-expand-20260729.1", "schemaVersion": "20260728.1", "effectiveState": "active", "deploymentEvidence": "Isolated test expanded Worker declaration verified.", "declaration": { "workload": "worker", "minimumVersion": "20260728.1", "maximumVersion": "20260729.1" } },
     { "id": "migration-expanded", "ownerType": "workload", "workload": "migration", "role": "reader", "oldRepresentation": "migration-expand-20260729.1", "schemaVersion": "20260728.1", "effectiveState": "deployable", "deploymentEvidence": "Isolated test migration workload verified.", "declaration": { "workload": "migration", "minimumVersion": "20260728.1", "maximumVersion": "20260729.1" } },
+    { "id": "admin-expanded", "ownerType": "workload", "workload": "admin", "role": "reader", "oldRepresentation": "admin-bff-expand-20260729.1", "schemaVersion": "20260728.1", "effectiveState": "deployable", "deploymentEvidence": "Isolated test admin BFF build and schema declaration verified; this is not staging or OAuth approval.", "declaration": { "workload": "admin", "minimumVersion": "20260728.1", "maximumVersion": "20260729.1" } },
     { "id": "api-request-write", "ownerType": "capability", "capability": "api.request-write", "runtimeWorkload": "api", "role": "writer", "oldRepresentation": "api-request-write-expand-20260729.1", "schemaVersion": "20260728.1", "effectiveState": "active", "deploymentEvidence": "Isolated test API request writer verified.", "declaration": { "workload": "api", "minimumVersion": "20260728.1", "maximumVersion": "20260729.1" } }
   ] },
-  "expandEvidence": { "web-expanded": "Isolated test expanded web declaration verified.", "api-expanded": "Isolated test expanded API declaration verified.", "worker-expanded": "Isolated test expanded Worker declaration verified.", "migration-expanded": "Isolated test migration workload verified.", "api-request-write": "Isolated test API request writer verified." },
-  "rolloutOrder": ["web-expanded", "api-expanded", "worker-expanded", "migration-expanded", "api-request-write", "verify-expand", "migrate"],
+  "expandEvidence": { "web-expanded": "Isolated test expanded web declaration verified.", "api-expanded": "Isolated test expanded API declaration verified.", "worker-expanded": "Isolated test expanded Worker declaration verified.", "migration-expanded": "Isolated test migration workload verified.", "admin-expanded": "Isolated test admin BFF build and schema declaration verified; this is not staging or OAuth approval.", "api-request-write": "Isolated test API request writer verified." },
+  "rolloutOrder": ["web-expanded", "api-expanded", "worker-expanded", "migration-expanded", "admin-expanded", "api-request-write", "verify-expand", "migrate"],
   "migrationJob": { "version": "20260729.1", "lock": "918_040_004" },
   "migrationPlan": { "disposition": "forward_only", "pending": [
     { "id": "0000_baseline", "digest": "b407e1fbbe21c5a9588a6e530ec60e81de75880ca4048d353d6fa4fa0239a22a" },
@@ -44,16 +45,20 @@
     { "id": "0018_delete_trip_answer_context_snapshots_with_project", "digest": "ad6b285b82901e3c5df78991a35b1ac2440a534b21b3666f55730f3531915159" },
     { "id": "0019_withdraw_historical_assistant_provenance", "digest": "53b8f8c9308ecb47b4b1d1a13313584bcce281a984117172fb28976c60808226" },
     { "id": "0020_assistant_provenance_withdrawal_backfill_state_terminal", "digest": "4ad00a652abb097846fe720f43ad6bb38fc742edeb9ddb1e84e75410aac040a7" },
-    { "id": "0021_mark_destructive_evidence_withdrawals", "digest": "c6e21d305d4dbf74844b6fe44df291d6f8007c09af421530346a82ba7bb3e6db" }
+    { "id": "0021_mark_destructive_evidence_withdrawals", "digest": "c6e21d305d4dbf74844b6fe44df291d6f8007c09af421530346a82ba7bb3e6db" },
+    { "id": "0022_admin_oauth_transactions", "digest": "1c68335f936d02df7cc71596d16e8e73ac4eebd193195a9025a6be508efea84f" },
+    { "id": "0023_separate_admin_sessions", "digest": "74af35894fe545dd68e10f9ea0a9db34e3e575da7e5a40bc67f0fdb683a7eee6" },
+    { "id": "0024_hash_admin_session_lookup", "digest": "ce58d64c36975e2d4af84b1e88daaff1c410609903c014beb83cbc91cf9d5a9d" }
   ] },
   "traffic": { "writerOwnerId": "api-request-write", "dualWrite": false, "readOnlyShadow": false },
   "rollback": { "legacyOwnerId": "api-request-write", "legacyBinaryRelease": "api-request-write-expand-20260729.1" },
-  "verification": ["Preflight resolved DATABASE_URL_TEST identity read-only before migration. This approval is limited to the isolated test target."],
+  "verification": ["Preflight resolved DATABASE_URL_TEST identity read-only before migration. 0022_admin_oauth_transactions SHA-256=1c68335f936d02df7cc71596d16e8e73ac4eebd193195a9025a6be508efea84f, 0023_separate_admin_sessions SHA-256=74af35894fe545dd68e10f9ea0a9db34e3e575da7e5a40bc67f0fdb683a7eee6, and 0024_hash_admin_session_lookup SHA-256=ce58d64c36975e2d4af84b1e88daaff1c410609903c014beb83cbc91cf9d5a9d match the checked-in migration files. This approval is limited to the isolated test target and is not staging approval."],
   "contract": { "destructiveCleanup": false, "oldOwners": [
     { "id": "web-expanded", "oldRepresentation": "web-expand-20260729.1", "schemaVersion": "20260728.1", "retired": false },
     { "id": "api-expanded", "oldRepresentation": "api-expand-20260729.1", "schemaVersion": "20260728.1", "retired": false },
     { "id": "worker-expanded", "oldRepresentation": "worker-expand-20260729.1", "schemaVersion": "20260728.1", "retired": false },
     { "id": "migration-expanded", "oldRepresentation": "migration-expand-20260729.1", "schemaVersion": "20260728.1", "retired": false },
+    { "id": "admin-expanded", "oldRepresentation": "admin-bff-expand-20260729.1", "schemaVersion": "20260728.1", "retired": false },
     { "id": "api-request-write", "oldRepresentation": "api-request-write-expand-20260729.1", "schemaVersion": "20260728.1", "retired": false }
   ] }
 }

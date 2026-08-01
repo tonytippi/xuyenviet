@@ -8,6 +8,9 @@ import type { ApiIdentityRepository, ConversationSummaryRepository, ReleaseSchem
 import type { PlanningReadRepository } from "@xuyenviet/domain";
 
 import { API_IDENTITY_REPOSITORY, BFF_CREDENTIAL_CONFIG, ResourceServerGuard } from "./auth/resource-server.guard";
+import { AdminCapabilityGuard } from "./auth/admin-capability.guard";
+import { AdminIdentityController, ADMIN_IDENTITY_SERVICE_TOKEN } from "./auth/admin-identity.controller";
+import { AdminWorkspaceController } from "./admin-workspace/admin-workspace.controller";
 import { RequestIdMiddleware } from "./common/request-id.middleware";
 import { SafeValidationPipe } from "./common/safe-validation.pipe";
 import { SafeApiExceptionFilter } from "./safe-api-exception.filter";
@@ -19,12 +22,13 @@ import { VersionController } from "./version/version.controller";
 import { AiAskController, AI_ASK_STREAM_EXECUTION, OPERATIONAL_TELEMETRY_SINK } from "./ai-ask/ai-ask.controller";
 import type { AiAskStreamExecution } from "@xuyenviet/domain";
 
-export function createApiModule(config: BffCredentialConfig, identities: ApiIdentityRepository, dependencies?: { conversationSummaries: ConversationSummaryRepository; planningReads?: PlanningReadRepository; schemaVersions: ReleaseSchemaVersionRepository; aiAskExecution?: AiAskStreamExecution; telemetry?: OperationalTelemetrySink; configValid?: boolean; releasePhasePolicy?: import("@xuyenviet/contracts").SchemaReleasePhasePolicy | null }) {
+export function createApiModule(config: BffCredentialConfig, identities: ApiIdentityRepository, dependencies?: { conversationSummaries: ConversationSummaryRepository; planningReads?: PlanningReadRepository; schemaVersions: ReleaseSchemaVersionRepository; aiAskExecution?: AiAskStreamExecution; telemetry?: OperationalTelemetrySink; configValid?: boolean; releasePhasePolicy?: import("@xuyenviet/contracts").SchemaReleasePhasePolicy | null; adminIdentityServiceToken?: string }) {
   @Module({
-    controllers: dependencies ? [HealthController, VersionController, ConversationsController, OpenApiController, ...(dependencies.aiAskExecution ? [AiAskController] : [])] : [],
+    controllers: [...(dependencies ? [HealthController, VersionController, ConversationsController, OpenApiController, AdminIdentityController, ...(dependencies.aiAskExecution ? [AiAskController] : [])] : []), AdminWorkspaceController],
     providers: [
       { provide: BFF_CREDENTIAL_CONFIG, useValue: config },
-      { provide: API_IDENTITY_REPOSITORY, useValue: identities },
+       { provide: API_IDENTITY_REPOSITORY, useValue: identities },
+       { provide: ADMIN_IDENTITY_SERVICE_TOKEN, useValue: dependencies?.adminIdentityServiceToken },
       ...(dependencies ? [
          { provide: CONVERSATION_SUMMARY_REPOSITORY, useValue: dependencies.conversationSummaries },
          { provide: PLANNING_READ_REPOSITORY, useValue: dependencies.planningReads ?? unavailablePlanningReads },
@@ -34,10 +38,12 @@ export function createApiModule(config: BffCredentialConfig, identities: ApiIden
          { provide: OPERATIONAL_TELEMETRY_SINK, useValue: dependencies.telemetry ?? consoleOperationalTelemetrySink },
         ...(dependencies.aiAskExecution ? [{ provide: AI_ASK_STREAM_EXECUTION, useValue: dependencies.aiAskExecution }] : []),
       ] : []),
-      ResourceServerGuard,
+       ResourceServerGuard,
+       AdminCapabilityGuard,
       RequestIdMiddleware,
       SafeValidationPipe,
-      { provide: APP_GUARD, useExisting: ResourceServerGuard },
+       { provide: APP_GUARD, useExisting: ResourceServerGuard },
+       { provide: APP_GUARD, useExisting: AdminCapabilityGuard },
       { provide: APP_PIPE, useClass: SafeValidationPipe },
       { provide: APP_FILTER, useClass: SafeApiExceptionFilter },
     ],
