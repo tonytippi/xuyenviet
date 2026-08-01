@@ -84,25 +84,31 @@ export async function processAiAskDomainOutboxBatch(input: { workerId: string; b
   }
   const dispositions: WorkerPollObservation[] = claimTerminalFailures.map((event) => ({ capability: "ai_ask.outbox", resultCode: "failure", durableId: event.id, retryCount: event.attemptCount, leaseRecovery: event.reclaimedLease ? "recovered" : "none", ...(event.reclaimedLease ? { leaseRecoveryCount: 1 } : {}) }));
   for (const claim of claims) {
-    let resultCode: "success" | "retry" | "failure" = "success";
+    let resultCode: "success" | "retry" | "failure" | "contended" = "success";
     try {
       const outcome = await deliverClaim(claim);
-      if (outcome === "fenced_out") await completeFencedOutClaim(claim);
+      if (outcome === "fenced_out") {
+        await completeFencedOutClaim(claim);
+        resultCode = "contended";
+      }
       if (outcome === "retry_scheduled") resultCode = "retry";
       if (outcome === "terminal_failure") resultCode = "failure";
       if (outcome === "invalid") {
         const persisted = await failDomainOutboxEvent({ ...claim, code: "invalid_envelope", retryable: false });
         if (persisted?.status === "failed") resultCode = "failure";
+        if (!persisted) resultCode = "contended";
       }
       if (typeof outcome === "object") {
         const persisted = await failDomainOutboxEvent({ ...claim, code: outcome.code, retryable: true });
         if (persisted?.status === "pending") resultCode = "retry";
         if (persisted?.status === "failed") resultCode = "failure";
+        if (!persisted) resultCode = "contended";
       }
     } catch {
       const persisted = await failDomainOutboxEvent({ ...claim, code: "consumer_failed", retryable: true });
       if (persisted?.status === "pending") resultCode = "retry";
       if (persisted?.status === "failed") resultCode = "failure";
+      if (!persisted) resultCode = "contended";
     }
     dispositions.push(observationFor(claim, resultCode));
   }
@@ -110,7 +116,7 @@ export async function processAiAskDomainOutboxBatch(input: { workerId: string; b
   return dispositions.some((observation) => observation.resultCode === "retry") ? { kind: "error", count: dispositions.length } : { kind: "processed", count: dispositions.length };
 }
 
-function observationFor(claim: DomainOutboxClaim, resultCode: "success" | "retry" | "failure"): WorkerPollObservation {
+function observationFor(claim: DomainOutboxClaim, resultCode: "success" | "retry" | "failure" | "contended"): WorkerPollObservation {
   return { capability: "ai_ask.outbox", resultCode, durableId: claim.id, retryCount: claim.attemptCount, jobLagMs: Math.max(0, claim.claimedAt.getTime() - claim.availableAt.getTime()), leaseRecovery: claim.reclaimedLease ? "recovered" : "none", ...(claim.reclaimedLease ? { leaseRecoveryCount: 1 } : {}) };
 }
 

@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
@@ -8,7 +8,7 @@ import { eq } from "drizzle-orm";
 import { describe, expect, test } from "vitest";
 import { schemaCompatibilityDeclarations, type OperationalTelemetryEvent } from "@xuyenviet/contracts";
 
-import { aiGatewayModels, conversations, domainOutbox, domainOutboxEffects, knowledgeIngestionJobs, messages, releaseSchemaVersions, sourceCaptureVersions, sources } from "@/db/schema";
+import { aiAskCommands, aiGatewayModels, conversations, domainOutbox, domainOutboxEffects, knowledgeCards, knowledgeExtractionJobs, knowledgeIndexDirtyMarkers, knowledgeIngestionCandidates, knowledgeIngestionJobs, messages, releaseSchemaVersions, sourceCaptureVersions, sources } from "@/db/schema";
 import { acquireAiAskCommand, finalizeAiAskCommand } from "@/features/ai/ai-ask-commands";
 import { hashCaptureText } from "@/features/knowledge/source-captures";
 
@@ -36,22 +36,28 @@ function buildWorker() {
   workerBuilt = true;
 }
 
-function runCompiledAdapter(adapter: "ingestion" | "outbox", workerId: string): Promise<OperationalTelemetryEvent[]> {
+async function runCompiledAdapter(adapter: "extraction" | "ingestion" | "indexing" | "outbox", workerId: string, environment: Record<string, string | undefined> = {}): Promise<OperationalTelemetryEvent[]> {
   const directory = mkdtempSync(join(root, ".worker-telemetry-"));
   const outputPath = join(directory, "events.jsonl");
   try {
-    const output = spawnSync("node", [`apps/worker/dist/adapters/${adapter}.mjs`, adapter, "--once", `--worker-id=${workerId}`], {
-      cwd: root,
-      env: { ...process.env, DATABASE_URL: getTestDatabaseUrl(), NODE_ENV: "test", NODE_OPTIONS: undefined, VITEST: undefined, XV_WORKER_TELEMETRY_FILE: outputPath },
-      encoding: "utf8",
-      timeout: 30_000,
+    const output = await new Promise<{ status: number | null; stdout: string; stderr: string }>((resolve, reject) => {
+      const child = spawn("node", [`apps/worker/dist/adapters/${adapter}.mjs`, adapter, "--once", `--worker-id=${workerId}`], {
+        cwd: root,
+        env: { ...process.env, ...environment, DATABASE_URL: getTestDatabaseUrl(), NODE_ENV: "test", NODE_OPTIONS: undefined, VITEST: undefined, XV_WORKER_TELEMETRY_FILE: outputPath },
+      });
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (chunk) => { stdout += String(chunk); });
+      child.stderr.on("data", (chunk) => { stderr += String(chunk); });
+      child.once("error", reject);
+      child.once("close", (status) => resolve({ status, stdout, stderr }));
     });
-    if (output.error || output.status !== 0) throw new Error(`Compiled ${adapter} adapter failed (exit ${output.status ?? "unknown"}): stdout=${output.stdout.trim()} stderr=${output.stderr.trim()}`);
+    if (output.status !== 0) throw new Error(`Compiled ${adapter} adapter failed (exit ${output.status ?? "unknown"}): stdout=${output.stdout.trim()} stderr=${output.stderr.trim()}`);
     if (!existsSync(outputPath)) {
       throw new Error(`Compiled ${adapter} adapter emitted no telemetry file (exit ${output.status ?? "unknown"}): stdout=${output.stdout.trim()} stderr=${output.stderr.trim()}`);
     }
     const captured = readFileSync(outputPath, "utf8");
-    return Promise.resolve(captured.split("\n").filter(Boolean).map((line) => JSON.parse(line) as OperationalTelemetryEvent));
+    return captured.split("\n").filter(Boolean).map((line) => JSON.parse(line) as OperationalTelemetryEvent);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -60,12 +66,20 @@ function runCompiledAdapter(adapter: "ingestion" | "outbox", workerId: string): 
 function expectCompiledWorkerEvent(events: OperationalTelemetryEvent[], expected: Partial<OperationalTelemetryEvent>) {
   expect(events).toHaveLength(1);
   expect(events[0]).toMatchObject({
-    capability: "knowledge.ingestion",
+    capability: expect.any(String),
     principalClass: "system",
     latencyMs: expect.any(Number),
     correlationId: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f-]{27}$/),
     ...expected,
   });
+}
+
+async function seedExtractionJob(id: string) {
+  await testDb.insert(sources).values({ id: `${id}-source`, kind: "pasted_text", label: `Extraction source ${id}`, sourceType: "curated", verificationStatus: "unverified", submittedByUserId: "operator" });
+  await testDb.insert(sourceCaptureVersions).values({ id: `${id}-capture`, sourceId: `${id}-source`, versionSequence: 1, captureKind: "pasted_text", rawText: "Nguồn trích xuất có nội dung.", contentHash: hashCaptureText("Nguồn trích xuất có nội dung."), capturedAt: new Date() });
+  await testDb.update(sources).set({ currentCaptureVersionId: `${id}-capture` }).where(eq(sources.id, `${id}-source`));
+  const [job] = await testDb.insert(knowledgeExtractionJobs).values({ id, sourceId: `${id}-source`, captureVersionId: `${id}-capture`, mode: "extract_only", status: "queued", nextRunAt: new Date(0), createdByUserId: "operator", createdByEmail: "operator@example.com" }).returning();
+  return job;
 }
 
 async function seedIngestionJob(id: string, rawText = "Tôi nghĩ cảnh rất đẹp.") {
@@ -178,6 +192,63 @@ describe("compiled worker adapters", () => {
     await expect(testDb.select().from(domainOutboxEffects).where(eq(domainOutboxEffects.outboxEventId, annotation.id))).resolves.toMatchObject([
       { effectType: "answer_annotation" },
     ]);
+  });
+
+  test.runIf(Boolean(process.env.DATABASE_URL_TEST))("emits persisted terminal, retry, contention, and exhaustion dispositions through compiled adapters", async () => {
+    await resetTestDatabase();
+    await seedTestOperator();
+    buildWorker();
+
+    const extraction = await seedExtractionJob("compiled-terminal-extraction");
+    const extractionEvents = await runCompiledAdapter("extraction", "compiled-terminal-extraction-worker");
+    expectCompiledWorkerEvent(extractionEvents, { capability: "knowledge.extraction", resultCode: "failure", durableId: extraction.id });
+    await expect(testDb.select().from(knowledgeExtractionJobs).where(eq(knowledgeExtractionJobs.id, extraction.id))).resolves.toMatchObject([{ status: "failed", lastErrorCode: "model_unavailable" }]);
+
+    const retryExtraction = await seedExtractionJob("compiled-retry-extraction");
+    await testDb.insert(aiGatewayModels).values({ id: "compiled-retry-extraction-model", gatewayModelName: "compiled-retry-extraction-model", displayLabel: "Compiled retry extraction model", purpose: "extraction", active: true, defaultForPurpose: true, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000, pricingEffectiveAt: new Date("2026-01-01T00:00:00.000Z") });
+    const retryGateway = createServer((_, response) => { response.writeHead(503).end(); });
+    await new Promise<void>((resolve, reject) => retryGateway.once("error", reject).listen(0, "127.0.0.1", resolve));
+    const retryAddress = retryGateway.address();
+    if (!retryAddress || typeof retryAddress === "string") throw new Error("Expected retry gateway address");
+    try {
+      const retryExtractionEvents = await runCompiledAdapter("extraction", "compiled-retry-extraction-worker", { AI_GATEWAY_BASE_URL: `http://127.0.0.1:${retryAddress.port}`, AI_GATEWAY_API_KEY: "test-key" });
+      expectCompiledWorkerEvent(retryExtractionEvents, { capability: "knowledge.extraction", resultCode: "retry", durableId: retryExtraction.id });
+    await expect(testDb.select().from(knowledgeExtractionJobs).where(eq(knowledgeExtractionJobs.id, retryExtraction.id))).resolves.toMatchObject([{ status: "queued", lastErrorCode: "provider_failed", lockedBy: null }]);
+    } finally {
+      await new Promise<void>((resolve) => retryGateway.close(() => resolve()));
+    }
+
+    const staleExtraction = await seedExtractionJob("compiled-stale-extraction");
+    await testDb.update(knowledgeExtractionJobs).set({ status: "running", attemptCount: 3, maxAttempts: 3, lockedBy: "dead-worker", lockedAt: new Date(0), startedAt: new Date(0) }).where(eq(knowledgeExtractionJobs.id, staleExtraction.id));
+    const staleExtractionEvents = await runCompiledAdapter("extraction", "compiled-stale-extraction-worker");
+    expectCompiledWorkerEvent(staleExtractionEvents, { capability: "knowledge.extraction", resultCode: "failure", leaseRecovery: "recovered" });
+    await expect(testDb.select().from(knowledgeExtractionJobs).where(eq(knowledgeExtractionJobs.id, staleExtraction.id))).resolves.toMatchObject([{ status: "failed", lastErrorCode: "stale_max_attempts" }]);
+
+    const ingestion = await seedIngestionJob("compiled-terminal-candidate");
+    await testDb.update(knowledgeIngestionJobs).set({ protocolVersion: 2, discoveryComplete: true, discoveredCandidateCount: 1 }).where(eq(knowledgeIngestionJobs.id, ingestion.id));
+    await testDb.insert(aiGatewayModels).values({ id: "compiled-candidate-extraction-model", gatewayModelName: "compiled-candidate-extraction-model", displayLabel: "Compiled candidate extraction model", purpose: "extraction", active: false, defaultForPurpose: false, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000, pricingEffectiveAt: new Date("2026-01-01T00:00:00.000Z") });
+    const [candidate] = await testDb.insert(knowledgeIngestionCandidates).values({ ingestionJobId: ingestion.id, sourceId: ingestion.sourceId, captureVersionId: ingestion.captureVersionId, fingerprint: "compiled-terminal-candidate", type: "general_travel_tip", title: "Candidate", summary: "Candidate summary", conditions: [], freshnessSensitive: false, spanStart: 0, spanEnd: 1, extractionModelId: "compiled-candidate-extraction-model", extractionPromptVersion: "test", stage: "queued", nextRunAt: new Date(0) }).returning();
+    const candidateEvents = await runCompiledAdapter("ingestion", "compiled-terminal-candidate-worker");
+    expectCompiledWorkerEvent(candidateEvents, { capability: "knowledge.ingestion", resultCode: "failure", durableId: candidate.id });
+    await expect(testDb.select().from(knowledgeIngestionCandidates).where(eq(knowledgeIngestionCandidates.id, candidate.id))).resolves.toMatchObject([{ stage: "failed", outcomeReasonCode: "judge_model_unavailable" }]);
+
+    const recoveryIngestion = await seedIngestionJob("compiled-exhausted-ingestion");
+    await testDb.update(knowledgeIngestionJobs).set({ attemptCount: 3, maxAttempts: 3, claimedBy: "dead-worker", claimedAt: new Date(0), leaseExpiresAt: new Date(1), fencingToken: "b".repeat(64) }).where(eq(knowledgeIngestionJobs.id, recoveryIngestion.id));
+    const recoveryIngestionEvents = await runCompiledAdapter("ingestion", "compiled-exhausted-ingestion-worker");
+    expectCompiledWorkerEvent(recoveryIngestionEvents, { capability: "knowledge.ingestion", resultCode: "failure", leaseRecovery: "recovered" });
+    await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, recoveryIngestion.id))).resolves.toMatchObject([{ stage: "failed", lastErrorCode: "retry_exhausted" }]);
+
+    await testDb.insert(knowledgeCards).values({ id: "compiled-exhausted-card", type: "place", title: "Exhausted indexing card", summary: "Indexing recovery fixture.", aiPromptVersion: "test", createdByUserId: "operator" });
+    await testDb.insert(knowledgeIndexDirtyMarkers).values({ id: "compiled-exhausted-index", knowledgeCardId: "compiled-exhausted-card", contentVersion: 1, evidenceSetRevision: 1, reason: "test", status: "claimed", attemptCount: 3, maxAttempts: 3, claimedBy: "dead-worker", claimedAt: new Date(0), leaseExpiresAt: new Date(0), fencingToken: "a".repeat(64), nextRunAt: new Date(0) });
+    const indexingEvents = await runCompiledAdapter("indexing", "compiled-exhausted-index-worker");
+    expectCompiledWorkerEvent(indexingEvents, { capability: "knowledge.indexing", resultCode: "failure", leaseRecovery: "recovered" });
+    await expect(testDb.select().from(knowledgeIndexDirtyMarkers).where(eq(knowledgeIndexDirtyMarkers.id, "compiled-exhausted-index"))).resolves.toMatchObject([{ status: "failed", failureCode: "retry_exhausted" }]);
+
+    const annotation = await seedCompletedAiAskAnnotation();
+    await testDb.update(aiAskCommands).set({ status: "failed" }).where(eq(aiAskCommands.id, annotation.originatingCommandId));
+    const outboxEvents = await runCompiledAdapter("outbox", "compiled-fenced-outbox-worker");
+    expectCompiledWorkerEvent(outboxEvents, { capability: "ai_ask.outbox", resultCode: "contended", durableId: annotation.id });
+    await expect(testDb.select().from(domainOutboxEffects).where(eq(domainOutboxEffects.outboxEventId, annotation.id))).resolves.toMatchObject([{ effectType: "fenced_out" }]);
   });
 
   test.runIf(Boolean(process.env.DATABASE_URL_TEST))("drains real child adapters without claiming new work and recovers an interrupted lease", async () => {

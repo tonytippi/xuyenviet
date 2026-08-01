@@ -37,38 +37,46 @@ export async function claimNextKnowledgeIndexWork(input: { workerId: string }, d
 }
 
 export async function recoverExpiredKnowledgeIndexWork(db: Pick<KnowledgeIndexingDb, "update"> = getDb()) {
+  return (await recoverExpiredKnowledgeIndexWorkDetailed(db)).length;
+}
+
+async function recoverExpiredKnowledgeIndexWorkDetailed(db: Pick<KnowledgeIndexingDb, "update"> = getDb()) {
   const executor = createSystemAuditActor("system-knowledge-pipeline");
-  const rows = await db.update(knowledgeIndexDirtyMarkers).set({ status: sql`case when ${knowledgeIndexDirtyMarkers.attemptCount} >= ${knowledgeIndexDirtyMarkers.maxAttempts} then 'failed' else 'pending' end`, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, nextRunAt: sql`clock_timestamp()`, failureCode: sql`case when ${knowledgeIndexDirtyMarkers.attemptCount} >= ${knowledgeIndexDirtyMarkers.maxAttempts} then 'retry_exhausted' else null end`, failureReason: sql`case when ${knowledgeIndexDirtyMarkers.attemptCount} >= ${knowledgeIndexDirtyMarkers.maxAttempts} then 'Retry limit reached.' else null end`, executorSystem: executor.system, updatedAt: sql`clock_timestamp()` }).where(and(eq(knowledgeIndexDirtyMarkers.status, "claimed"), lte(knowledgeIndexDirtyMarkers.leaseExpiresAt, sql`clock_timestamp()`))).returning({ id: knowledgeIndexDirtyMarkers.id });
-  return rows.length;
+  return db.update(knowledgeIndexDirtyMarkers).set({ status: sql`case when ${knowledgeIndexDirtyMarkers.attemptCount} >= ${knowledgeIndexDirtyMarkers.maxAttempts} then 'failed' else 'pending' end`, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, nextRunAt: sql`clock_timestamp()`, failureCode: sql`case when ${knowledgeIndexDirtyMarkers.attemptCount} >= ${knowledgeIndexDirtyMarkers.maxAttempts} then 'retry_exhausted' else null end`, failureReason: sql`case when ${knowledgeIndexDirtyMarkers.attemptCount} >= ${knowledgeIndexDirtyMarkers.maxAttempts} then 'Retry limit reached.' else null end`, executorSystem: executor.system, updatedAt: sql`clock_timestamp()` }).where(and(eq(knowledgeIndexDirtyMarkers.status, "claimed"), lte(knowledgeIndexDirtyMarkers.leaseExpiresAt, sql`clock_timestamp()`))).returning({ id: knowledgeIndexDirtyMarkers.id, status: knowledgeIndexDirtyMarkers.status });
 }
 
 async function processNextApprovedKnowledgeIndexingBatchObserved(options: { batchSize?: number; workerId?: string } = {}, db: KnowledgeIndexingDb = getDb()): Promise<KnowledgeIndexingWorkerResult & { observation: WorkerPollObservation }> {
   const workerId = options.workerId ?? `knowledge-indexer-${process.pid}`;
-  const recoveredBeforeClaim = await recoverExpiredKnowledgeIndexWork(db);
+  const recoveredBeforeClaim = await recoverExpiredKnowledgeIndexWorkDetailed(db);
   const claims: KnowledgeIndexingClaim[] = [];
   for (let index = 0; index < normalizeBatchSize(options.batchSize); index += 1) {
     const claim = await claimNextKnowledgeIndexWork({ workerId }, db);
     if (!claim) break;
     claims.push(claim);
   }
-  if (!claims.length) return { status: "no_job", indexedCount: 0, skippedCount: 0, cardIds: [], observation: { capability: "knowledge.indexing", resultCode: "no_work", leaseRecovery: recoveredBeforeClaim ? "recovered" : "none", ...(recoveredBeforeClaim ? { leaseRecoveryCount: recoveredBeforeClaim } : {}) } };
+  if (!claims.length) return { status: "no_job", indexedCount: 0, skippedCount: 0, cardIds: [], observation: { capability: "knowledge.indexing", resultCode: recoveredBeforeClaim.some((row) => row.status === "failed") ? "failure" : "no_work", leaseRecovery: recoveredBeforeClaim.length ? "recovered" : "none", ...(recoveredBeforeClaim.length ? { leaseRecoveryCount: recoveredBeforeClaim.length } : {}) } };
   let indexedCount = 0;
   let skippedCount = 0;
+  let disposition: WorkerPollObservation["resultCode"] = recoveredBeforeClaim.some((row) => row.status === "failed") ? "failure" : "success";
   for (const claim of claims) {
     try {
       const result = await projectClaimedKnowledgeIndexWork(claim, db);
       const completed = await completeKnowledgeIndexWork(claim, result.outcome, db);
       if (completed && result.indexed) indexedCount += 1;
       else skippedCount += 1;
+      if ((result.outcome === "lost_claim" || !completed) && disposition === "success") disposition = "contended";
     } catch {
-      await retryKnowledgeIndexWork(claim, "projection_failed", db);
+      const retry = await retryKnowledgeIndexWorkDisposition(claim, "projection_failed", db);
       skippedCount += 1;
+      if (retry === "failed") disposition = "failure";
+      else if (retry === "pending" && disposition !== "failure") disposition = "retry";
+      else if (!retry && disposition === "success") disposition = "contended";
     }
   }
   const primary = claims[0]!;
-  const recoveryCount = recoveredBeforeClaim + claims.reduce((total, claim) => total + claim.leaseRecoveryCount, 0);
+  const recoveryCount = recoveredBeforeClaim.length + claims.reduce((total, claim) => total + claim.leaseRecoveryCount, 0);
   return { status: "indexed", indexedCount, skippedCount, cardIds: claims.map((claim) => claim.cardId), observation: {
-    capability: "knowledge.indexing", resultCode: skippedCount ? "retry" : "success", durableId: primary.markerId,
+    capability: "knowledge.indexing", resultCode: disposition, durableId: primary.markerId,
     retryCount: primary.attemptCount, jobLagMs: Math.max(0, primary.claimedAt.getTime() - primary.nextRunAt.getTime()),
     leaseRecovery: recoveryCount ? "recovered" : "none", ...(recoveryCount ? { leaseRecoveryCount: recoveryCount } : {}),
   } };
@@ -88,9 +96,13 @@ export async function completeKnowledgeIndexWork(claim: KnowledgeIndexingClaim, 
 }
 
 export async function retryKnowledgeIndexWork(claim: KnowledgeIndexingClaim, failureCode: string, db: Pick<KnowledgeIndexingDb, "update"> = getDb()) {
+  return Boolean(await retryKnowledgeIndexWorkDisposition(claim, failureCode, db));
+}
+
+async function retryKnowledgeIndexWorkDisposition(claim: KnowledgeIndexingClaim, failureCode: string, db: Pick<KnowledgeIndexingDb, "update"> = getDb()) {
   const executor = createSystemAuditActor("system-knowledge-pipeline");
-  const [retried] = await db.update(knowledgeIndexDirtyMarkers).set({ status: sql`case when ${knowledgeIndexDirtyMarkers.attemptCount} >= ${knowledgeIndexDirtyMarkers.maxAttempts} then 'failed' else 'pending' end`, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, nextRunAt: sql`clock_timestamp() + interval '4 minutes'`, failureCode, failureReason: "Projection worker failed; retry is scheduled.", executorSystem: executor.system, updatedAt: sql`clock_timestamp()` }).where(and(eq(knowledgeIndexDirtyMarkers.id, claim.markerId), eq(knowledgeIndexDirtyMarkers.status, "claimed"), eq(knowledgeIndexDirtyMarkers.fencingToken, claim.fencingToken), sql`${knowledgeIndexDirtyMarkers.leaseExpiresAt} > clock_timestamp()`)).returning({ id: knowledgeIndexDirtyMarkers.id });
-  return Boolean(retried);
+  const [retried] = await db.update(knowledgeIndexDirtyMarkers).set({ status: sql`case when ${knowledgeIndexDirtyMarkers.attemptCount} >= ${knowledgeIndexDirtyMarkers.maxAttempts} then 'failed' else 'pending' end`, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, nextRunAt: sql`clock_timestamp() + interval '4 minutes'`, failureCode, failureReason: "Projection worker failed; retry is scheduled.", executorSystem: executor.system, updatedAt: sql`clock_timestamp()` }).where(and(eq(knowledgeIndexDirtyMarkers.id, claim.markerId), eq(knowledgeIndexDirtyMarkers.status, "claimed"), eq(knowledgeIndexDirtyMarkers.fencingToken, claim.fencingToken), sql`${knowledgeIndexDirtyMarkers.leaseExpiresAt} > clock_timestamp()`)).returning({ status: knowledgeIndexDirtyMarkers.status });
+  return retried?.status ?? null;
 }
 
 export async function backfillKnowledgeIndexWork(input: { cursor?: string; batchSize?: number; now?: Date } = {}, db: KnowledgeIndexingDb = getDb()) {

@@ -118,11 +118,11 @@ export async function processNextKnowledgeExtractionJob(options: { workerId?: st
   const job = await claimNextKnowledgeExtractionJob(options, db);
 
   if (!job) {
-    return { status: "no_job" as const, recoveredFailures: recovery.failures, observation: extractionObservation("no_work", undefined, recovery) };
+    return { status: "no_job" as const, recoveredFailures: recovery.failures, observation: extractionObservation(recovery.failedCount ? "failure" : "no_work", undefined, recovery) };
   }
 
   const result = await processKnowledgeExtractionJob(job.id, db);
-  return { ...result, recoveredFailures: recovery.failures, observation: extractionObservation(result.status === "failed" ? "retry" : result.status === "not_processable" ? "contended" : "success", job, recovery) };
+  return { ...result, recoveredFailures: recovery.failures, observation: extractionObservation(recovery.failedCount ? "failure" : result.status === "failed" ? result.disposition : result.status === "not_processable" ? "contended" : "success", job, recovery) };
 }
 
 export async function runKnowledgeExtractionWorkerLoop(options: { once?: boolean; workerId?: string; pollIntervalMs?: number; signal?: AbortSignal; onObservation?: (observation: WorkerPollObservation) => void | Promise<void> } = {}) {
@@ -217,7 +217,7 @@ export async function processKnowledgeExtractionJob(jobId: string, db = getDb())
 
   try {
     if (job.resultDraftIds && job.resultDraftIds.length > 0) {
-      await finalizeExistingDrafts(job, workerActor, db);
+      if (!await finalizeExistingDrafts(job, workerActor, db)) return { status: "not_processable" as const };
     } else {
         const result = await extractKnowledgeDraftsFromSourceAsActor(job.sourceId, requester, {
           captureVersionId: job.captureVersionId,
@@ -227,13 +227,13 @@ export async function processKnowledgeExtractionJob(jobId: string, db = getDb())
       });
 
       await db.update(knowledgeExtractionJobs).set({ resultDraftIds: result.draftIds, resultDraftCount: result.draftCount, updatedAt: new Date() }).where(eq(knowledgeExtractionJobs.id, job.id));
-      await finalizeJobSuccess(job, result, workerActor, db);
+      if (!await finalizeJobSuccess(job, result, workerActor, db)) return { status: "not_processable" as const };
     }
 
     return { status: "processed" as const, jobId: job.id };
   } catch (error) {
     const failure = await handleJobFailure(job, error, db);
-    return failure ? { status: "failed" as const, jobId: job.id, failure } : { status: "not_processable" as const };
+    return failure ? { status: "failed" as const, jobId: job.id, failure, disposition: failure.outcome === "queued" ? "retry" as const : "failure" as const } : { status: "not_processable" as const };
   }
 }
 
@@ -241,7 +241,7 @@ async function finalizeExistingDrafts(job: typeof knowledgeExtractionJobs.$infer
   const draftIds = job.resultDraftIds ?? [];
   await assertJobDraftIdsBelongToSource(db, job.sourceId, draftIds, job.resultDraftCount);
   const result = { sourceId: job.sourceId, draftIds, draftCount: draftIds.length };
-  await finalizeJobSuccess(job, result, workerActor, db);
+  return finalizeJobSuccess(job, result, workerActor, db);
 }
 
 async function finalizeJobSuccess(
@@ -250,11 +250,11 @@ async function finalizeJobSuccess(
   workerActor: ReturnType<typeof createSystemAuditActor>,
   db: ExtractionJobDb,
 ) {
-  if (!job.lockedAt || !job.lockedBy) return;
+  if (!job.lockedAt || !job.lockedBy) return false;
   const lockedAt = job.lockedAt;
   const lockedBy = job.lockedBy;
 
-  await db.transaction(async (transaction) => {
+  return db.transaction(async (transaction) => {
     const [lease] = await transaction
       .select({ id: knowledgeExtractionJobs.id })
       .from(knowledgeExtractionJobs)
@@ -267,7 +267,7 @@ async function finalizeJobSuccess(
       .limit(1)
       .for("update");
 
-    if (!lease) return;
+    if (!lease) return false;
 
     await assertJobDraftIdsBelongToSource(transaction, job.sourceId, result.draftIds, result.draftCount);
 
@@ -306,6 +306,7 @@ async function finalizeJobSuccess(
       ))
       .returning({ id: knowledgeExtractionJobs.id });
     if (succeeded) await recordExtractionJobTransitionAudit(transaction, job.id, "succeeded");
+    return Boolean(succeeded);
   });
 }
 

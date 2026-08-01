@@ -9,12 +9,21 @@ export async function processNextKnowledgeIngestionJob(workerId: string) {
   const candidate = await claimNextKnowledgeIngestionCandidate({ workerId });
   if (candidate) {
     const result = await runKnowledgeIngestionCandidatePipeline(candidate);
-    return { result, observation: ingestionObservation(result ? "success" : "contended", candidate, recovery) };
+    return { result, observation: ingestionObservation(recovery.exhausted ? "failure" : candidateDisposition(result), candidate, recovery) };
   }
   const claim = await claimNextKnowledgeIngestionJob({ workerId });
-  if (!claim) return { result: null, observation: ingestionObservation("no_work", undefined, recovery) };
+  if (!claim) return { result: null, observation: ingestionObservation(recovery.exhausted ? "failure" : "no_work", undefined, recovery) };
   const result = await runKnowledgeIngestionPipeline(claim);
-  return { result, observation: ingestionObservation(result?.outcome === "failed" ? "failure" : result ? "success" : "contended", claim, recovery) };
+  return { result, observation: ingestionObservation(recovery.exhausted ? "failure" : result?.outcome === "failed" ? "failure" : result?.outcome === "retry" ? "retry" : result ? "success" : "contended", claim, recovery) };
+}
+
+function candidateDisposition(result: Awaited<ReturnType<typeof runKnowledgeIngestionCandidatePipeline>>): WorkerPollObservation["resultCode"] {
+  if (!result) return "contended";
+  if ("stage" in result) {
+    if (result.stage === "failed") return "failure";
+    return ["queued", "judging", "relating"].includes(result.stage) ? "retry" : "success";
+  }
+  return "success";
 }
 
 export async function runKnowledgeIngestionWorkerLoop(options: { once?: boolean; workerId?: string; pollIntervalMs?: number; signal?: AbortSignal; onPollComplete?: () => void | Promise<void>; onObservation?: (observation: WorkerPollObservation) => void | Promise<void> } = {}) {

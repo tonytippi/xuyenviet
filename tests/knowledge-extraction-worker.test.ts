@@ -287,7 +287,7 @@ describe("knowledge extraction worker jobs", () => {
       return callback(testDb as never);
     });
 
-    await expect(processKnowledgeExtractionJob(job.id, testDb)).resolves.toMatchObject({ status: "processed" });
+    await expect(processKnowledgeExtractionJob(job.id, testDb)).resolves.toMatchObject({ status: "not_processable" });
     await expect(testDb.select().from(knowledgeExtractionJobs).where(eq(knowledgeExtractionJobs.id, job.id))).resolves.toMatchObject([{ status: "running", lockedAt: new Date("2026-07-14T00:20:00.000Z"), lockedBy: "reused-worker-id" }]);
     await expect(testDb.select().from(auditEvents).where(eq(auditEvents.targetId, job.id))).resolves.toEqual([]);
     transaction.mockRestore();
