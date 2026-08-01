@@ -275,12 +275,16 @@ development_status:
   # cannot start until Story 13.1 is done.
   epic-13: in-progress
   # 2026-08-01: bmad-dev-auto completed implementation, bounded repair loops, and final synchronous Blind Hunter, Edge Case Hunter, and Acceptance Auditor review with no actionable local findings. Focused 5-file verification passed 81 tests; lint (0 errors, 5 pre-existing warnings), typecheck, clean build, admin container build, split-env Compose rendering, and diff check passed. Railway/private-network/OAuth/DNS/migration-readiness staging proof remains deployment-owned and is recorded in Story 13.1.
-  13-1-establish-the-separately-deployed-admin-bff-application: done
+  # Epic 13 review found a HIGH policy-free release-admission fail-open in the
+  # identity boundary. Repair and follow-up review are required.
+  13-1-establish-the-separately-deployed-admin-bff-application: in-progress
   # Story 13.1 completed in 8b50b2ab43e7f22175132af4f4ab614adbed8067 with the
   # independent admin identity, credential, private transport, CSRF, isolation,
   # and readiness boundary required for this fixed user-role governance cutover.
   # 2026-08-01: bmad-dev-auto completed the fixed exact-admin user-role cutover. Final synchronous Blind Hunter, Edge Case Hunter, and Acceptance Auditor reviews found no actionable local findings after bounded repairs. Serial persistence/API/BFF verification passed 62 tests; lint (0 errors, 5 pre-existing warnings), typecheck, build, and diff check passed. Private routing, selected-owner deployment, OAuth/session/version, safe-response, and rollback proof remain named external staging evidence in the Story 13.2 cutover inventory.
-  13-2-migrate-operator-capabilities-and-retire-legacy-admin-ownership: done
+  # Epic 13 review found two follow-up repairs: persistence errors are misclassified
+  # as validation errors, and stale no-op grants can append a duplicate UI role.
+  13-2-migrate-operator-capabilities-and-retire-legacy-admin-ownership: in-progress
   epic-13-retrospective: optional
 
   epic-14: backlog

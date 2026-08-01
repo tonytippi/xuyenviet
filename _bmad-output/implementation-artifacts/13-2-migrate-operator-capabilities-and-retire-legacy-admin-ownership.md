@@ -1,6 +1,6 @@
 # Story 13.2: Migrate Operator Capabilities and Retire Legacy Admin Ownership
 
-Status: done
+Status: in-progress
 
 ## Story
 
@@ -144,6 +144,7 @@ gpt-5.6-terra
 
 ### Completion Notes List
 
+- Epic 13 completion review found two follow-up defects: unexpected persistence/transaction errors in `apps/api/src/admin/admin-users.controller.ts` are incorrectly projected as `400 validation_error`, and a stale roster can append a duplicate role after a no-op `changed: false` command response. Keep this story in progress until both are repaired with regressions and follow-up review is clean.
 - Ultimate context engine analysis completed - comprehensive developer guide created.
 - Created from the Epic 13 source, separated-admin proposal, Story 13.1 prerequisite analysis, current legacy root admin inventory, API/BFF/security patterns, completed release/cutover work, test conventions, sprint status, and recent Git history.
 - Scope remains capability-by-capability: no generic proxy, no dual writer, and no claim of full legacy or public-launch retirement before verified evidence exists.

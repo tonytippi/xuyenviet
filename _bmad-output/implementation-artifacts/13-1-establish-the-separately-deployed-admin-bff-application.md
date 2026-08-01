@@ -1,6 +1,6 @@
 # Story 13.1: Establish the Separately Deployed Admin BFF Application
 
-Status: done
+Status: in-progress
 
 ## Story
 
@@ -134,6 +134,7 @@ gpt-5.6-terra
 
 ### Review Outcome
 
+- Epic 13 completion review found a HIGH release-admission defect in `apps/api/src/auth/admin-identity.controller.ts`: when `SCHEMA_RELEASE_PHASE_POLICY` was absent, the admin declaration admitted `20260729.1`, while the API request boundary correctly admits only `20260728.1` without a bound policy. Keep this story in progress until identity admission pins policy-free maximum version to `20260728.1`, regression coverage proves rejection at `20260729.1`, and follow-up review verifies fail-closed alignment.
 - Synchronous final repair review found the OAuth callback validator previously accepted credential-bearing URLs because it compared only protocol and hostname. The validator now compares `url.origin` to the exact production origin and additionally rejects non-empty URL credentials.
 - Focused regression coverage rejects username-only, username/password, and non-default-port callback URLs before any OAuth transaction is created. No additional findings were identified in the repaired scope.
 - Final critical repair replaced interface/inline identity request bodies with concrete SafeValidationPipe DTOs and added Nest HTTP validation coverage for every identity endpoint. Admin sessions now persist only an API-keyed HMAC lookup value; the migration invalidates existing sessions because their opaque bearer values cannot be safely transformed. Identity OAuth, handoff, and revocation fail closed while release admission is unavailable or incompatible. Admin private API and handoff configuration reject explicit non-default ports.
