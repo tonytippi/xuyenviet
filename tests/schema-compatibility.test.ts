@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { admitsSchemaReleaseGate, compareSchemaVersions, createSchemaCompatibilityConsumer, futureAdminSchemaCompatibilityConsumer, isSchemaCompatible, parseSchemaReleaseMatrix, parseSchemaVersion, schemaCompatibilityDeclarations, type SchemaReleaseMatrix } from "@xuyenviet/contracts";
+import { admitsSchemaReleaseGate, compareSchemaVersions, createSchemaCompatibilityConsumer, futureAdminSchemaCompatibilityConsumer, isSchemaCompatible, parseSchemaReleaseMatrix, parseSchemaReleasePhasePolicy, parseSchemaVersion, schemaCompatibilityDeclarations, validatesSchemaReleasePhasePolicy, type SchemaReleaseMatrix } from "@xuyenviet/contracts";
 import { createPostgresReleaseSchemaVersionRepository } from "@xuyenviet/database";
 import { releaseSchemaVersions } from "@/db/schema";
 import { resetTestDatabase, testDb } from "./helpers/db";
@@ -64,6 +64,28 @@ describe("schema compatibility contract", () => {
       async readSchemaAdmission() { return { rows: [{ version: "20260729.1" }], resolvedTargetIdentity: "database=other;host=10.0.0.1;port=5432" }; },
       async recordSchemaVersion() {},
     } })).resolves.toBe(false);
+  });
+
+  it("validates phase policy declarations independent of JSON object key order", () => {
+    const parsedMatrix = parseSchemaReleaseMatrix(releaseMatrix)!;
+    const reversedWorkloads = Object.fromEntries(
+      Object.entries(parsedMatrix.phases.migrate.workloads).reverse(),
+    );
+    const policy = parseSchemaReleasePhasePolicy({
+      target: parsedMatrix.target,
+      workloads: reversedWorkloads,
+      phase: "migrate",
+      matrixDigest: "a".repeat(64),
+      matrixPath: "20260728.1-to-20260729.1.json",
+      releaseId: parsedMatrix.releaseId,
+    });
+
+    expect(policy).not.toBeNull();
+    expect(validatesSchemaReleasePhasePolicy(policy, parsedMatrix, "a".repeat(64))).toBe(true);
+
+    const alteredPolicy = structuredClone(policy!);
+    alteredPolicy.workloads.api.minimumVersion = "20260729.1";
+    expect(validatesSchemaReleasePhasePolicy(alteredPolicy, parsedMatrix, "a".repeat(64))).toBe(false);
   });
 
   it("validates an approved overlap matrix and admits only its pre-migration release", () => {

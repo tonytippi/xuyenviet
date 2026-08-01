@@ -85,6 +85,12 @@ export function parseSchemaReleasePhasePolicy(value: unknown): SchemaReleasePhas
     : null;
 }
 
+/**
+ * Runtime workloads resolve release artifacts only from this explicit deployment
+ * path. This deliberately avoids source-tree and process-working-directory
+ * assumptions after application bundles have been produced.
+ */
+
 export function admitsSchemaReleasePhasePolicy(policy: SchemaReleasePhasePolicy | null | undefined, workload: SchemaWorkload, rows: readonly { version: unknown }[], resolvedTargetIdentity?: unknown): boolean {
   // A pre-overlap binary is the only deliberately policy-free admission path.
   // Once the persisted record reaches the overlap target, a bound projection is
@@ -178,6 +184,7 @@ export function isSchemaCompatible(declaration: SchemaCompatibilityDeclaration, 
   return Boolean(minimum && maximum && current && compareSchemaVersions(minimum, maximum) <= 0 && compareSchemaVersions(current, minimum) >= 0 && compareSchemaVersions(current, maximum) <= 0);
 }
 
+
 // This parser is the single release-plan boundary. It deliberately returns no
 // diagnostics because callers must not expose target or approval details.
 export function parseSchemaReleaseMatrix(value: unknown): SchemaReleaseMatrix | null {
@@ -201,7 +208,7 @@ export function validatesSchemaReleasePhasePolicy(policy: SchemaReleasePhasePoli
   return Boolean(policy && approved && policy.matrixDigest === matrixDigest && policy.releaseId === approved.releaseId
     && policy.matrixPath.endsWith(".json") && policy.phase === approved.operation.phase
     && policy.target.environment === approved.target.environment && policy.target.identityClass === approved.target.identityClass && policy.target.resolvedIdentity === approved.target.resolvedIdentity
-    && JSON.stringify(policy.workloads) === JSON.stringify(approved.phases[policy.phase].workloads));
+    && hasSameSchemaCompatibilityDeclarations(policy.workloads, approved.phases[policy.phase].workloads));
 }
 
 export function admitsSchemaReleaseGate(input: SchemaReleaseGateInput): boolean {
@@ -234,6 +241,15 @@ function isReleasePhase(value: unknown): boolean {
 function isOperation(value: unknown): boolean { return isRecord(value) && hasExactKeys(value, ["phase", "durableRewrite"]) && ["expand", "migrate", "contract"].includes(value.phase as string) && typeof value.durableRewrite === "boolean"; }
 function isMigrationPlan(value: unknown): boolean { return isRecord(value) && hasExactKeys(value, ["disposition", "pending"]) && value.disposition === "forward_only" && Array.isArray(value.pending) && value.pending.every((entry) => isRecord(entry) && hasExactKeys(entry, ["id", "digest"]) && /^[0-9]{4}_[A-Za-z0-9_]+$/.test(entry.id as string) && /^[a-f0-9]{64}$/.test(entry.digest as string)) && new Set(value.pending.map((entry) => (entry as { id: string }).id)).size === value.pending.length; }
 function isSchemaCompatibilityDeclaration(value: unknown, workload: SchemaWorkload): boolean { return isRecord(value) && hasExactKeys(value, ["workload", "minimumVersion", "maximumVersion"]) && value.workload === workload && isSchemaCompatible(value as SchemaCompatibilityDeclaration, value.minimumVersion); }
+function hasSameSchemaCompatibilityDeclarations(left: Record<SchemaWorkload, SchemaCompatibilityDeclaration>, right: Record<SchemaWorkload, SchemaCompatibilityDeclaration>): boolean {
+  return [...schemaWorkloads].every((workload) => {
+    const leftDeclaration = left[workload];
+    const rightDeclaration = right[workload];
+    return leftDeclaration.workload === rightDeclaration.workload
+      && leftDeclaration.minimumVersion === rightDeclaration.minimumVersion
+      && leftDeclaration.maximumVersion === rightDeclaration.maximumVersion;
+  });
+}
 function isActiveOwnerInventory(value: unknown, currentVersion: string, targetVersion: string): value is SchemaReleaseMatrix["activeOwnerInventory"] {
   if (!isRecord(value) || !hasExactKeys(value, ["attested", "owners"]) || value.attested !== true || !Array.isArray(value.owners) || value.owners.length === 0) return false;
   const owners = value.owners;

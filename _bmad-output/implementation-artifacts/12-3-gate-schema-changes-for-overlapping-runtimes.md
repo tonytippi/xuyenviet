@@ -167,6 +167,7 @@ gpt-5.6-terra-review
 - Validation passed after an independent checklist re-check of target preflight, matrix completeness, migration sequencing, runtime admission, rollback safety, Worker boundaries, prior-story learnings, scope boundaries, and serial PostgreSQL test requirements.
 - Initial verification was blocked pending the approved, checked-in `DATABASE_URL_TEST` migration matrix. That approval and the required successful isolated CLI migration proof are now complete; no development/staging/production reset, migration, seed, deployment, or destructive rollback was executed.
 - 2026-07-31: User-approved bounded recovery completed. Fresh test bootstrap now reaches Drizzle before the release ledger exists and records only after success; reset and migration share an identity-verified maintenance-database advisory lock; API, web, and Worker phase admission binds a single live schema/identity observation to the approved matrix; and forced Worker drain waits for child exit deterministically. The approved `DATABASE_URL_TEST` matrix was recreated from scratch, migrated successfully, and verified to contain exactly one `20260729.1` release record. Final Blind Hunter, Edge Case Hunter, and Acceptance reviews were repaired to clean.
+- 2026-08-01: Targeted Epic 12 repair canonicalized phase-policy declaration comparison by workload and fields, independent of JSON key order. The checked-in matrix is now an unattested, explicitly unapproved template with no owner, deployment, or verification assertions and is rejected by parsing, migration admission, and runtime policy loading until an operator supplies actual approved evidence. Regressions cover reordered equivalent declarations and a changed declaration rejection. Final synchronous blocking review is clean.
 
 ### Auto Run Result
 
@@ -176,6 +177,7 @@ Status: done
 - The approved fresh `DATABASE_URL_TEST` migration proof passed and recorded exactly one `20260729.1` release version.
 - Final bounded recovery repaired fresh-ledger bootstrap, common verified maintenance-database locking, atomic API/web/Worker live schema-and-identity admission, compiled Worker drain, runtime matrix artifact resolution, and policy-free API overlap admission.
 - Final serial verification passed 70 focused tests. Lint has zero errors and five existing unrelated warnings; build, typecheck, Compose rendering, and diff whitespace checks passed. Final synchronous review repairs are clean.
+- Targeted repair verification: serial focused suite (10 files, 71 tests), `pnpm lint` (0 errors, 5 existing warnings), `pnpm typecheck`, `pnpm build`, `docker compose config`, and `git diff --check` passed. An initial concurrent test/build execution raced over the shared `DATABASE_URL_TEST` reset target; the required serial rerun passed.
 
 ### File List
 
