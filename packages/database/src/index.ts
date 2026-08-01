@@ -1,11 +1,11 @@
 import postgres from "postgres";
 import { createHmac, randomUUID } from "node:crypto";
-import { resolvePlanningAnnotationCapabilities, sanitizeStoredPlanningAnnotations, type AiAskStreamExecutionPort, type PlanningReadRepository } from "@xuyenviet/domain";
+import { resolvePlanningAnnotationCapabilities, sanitizeStoredPlanningAnnotations, type AiAskStreamExecutionPort, type PlanningReadRepository, type UserRoleGovernancePort, type UserRoleGovernanceTransactionPort } from "@xuyenviet/domain";
 import { and, asc, eq } from "drizzle-orm";
 import { loadAnswerContext } from "./answer-context";
 import { formatAssistantMessageProvenance } from "./provenance";
 import { assistantResponseProvenance, conversations, messages, tripChangeProposals, tripProjects } from "./schema";
-import { evaluateSchemaAdmission, parsePlanningAnswerDetailResponse, planningDetailProvenanceLimit, type AdminIdentityHandoff, type PlanningJsonValue, type PlanningProvenance, type RequestRole, type SchemaCompatibilityDeclaration, type TripAnswerContextResponse } from "@xuyenviet/contracts";
+import { adminUserRosterPageSize, encodeAdminUserRosterCursor, evaluateSchemaAdmission, parsePlanningAnswerDetailResponse, planningDetailProvenanceLimit, type AdminIdentityHandoff, type PlanningJsonValue, type PlanningProvenance, type RequestRole, type SchemaCompatibilityDeclaration, type TripAnswerContextResponse } from "@xuyenviet/contracts";
 import { createAiAskStreamExecutionPort } from "./ai-ask-stream-execution";
 
 export * from "./ai-ask-commands";
@@ -186,6 +186,57 @@ export function createPostgresApiIdentityRepository(databaseUrl: string, adminSe
 
 export function createPostgresAiAskStreamExecutionPort(_databaseUrl: string, telemetry?: import("@xuyenviet/contracts").OperationalTelemetrySink): AiAskStreamExecutionPort {
   return createAiAskStreamExecutionPort(telemetry);
+}
+
+export function createPostgresUserRoleGovernancePort(databaseUrl: string): UserRoleGovernancePort {
+  const sql = postgres(databaseUrl, { max: 1 });
+  return {
+    async listUsers({ cursor, search }) {
+      const pattern = `%${search.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_")}%`;
+      const rows = await sql<Array<{ id: string; name: string | null; email: string | null; image: string | null; emailVerified: Date | null; roles: RequestRole[]; aiRequestCount: string; inputTokens: string; outputTokens: string }>>`
+        select u.id, u.name, u.email, u.image, u.email_verified as "emailVerified", roles.roles,
+          usage."aiRequestCount", usage."inputTokens", usage."outputTokens"
+        from users u
+        cross join lateral (select coalesce(array_agg(role order by role), '{}') as roles from user_roles where user_id = u.id) roles
+        cross join lateral (select count(id)::text as "aiRequestCount", coalesce(sum(prompt_tokens), 0)::text as "inputTokens", coalesce(sum(completion_tokens), 0)::text as "outputTokens" from ai_usage_events where initiated_by_user_id = u.id) usage
+        where (${search} = '' or u.name ilike ${pattern} escape '\\' or u.email ilike ${pattern} escape '\\')
+          and (${cursor?.id ?? null}::text is null or (${cursor?.name ?? null}::text is null and u.name is not null) or (u.name is not distinct from ${cursor?.name ?? null}::text and ((${cursor?.email ?? null}::text is null and u.email is not null) or (u.email is not distinct from ${cursor?.email ?? null}::text and u.id > ${cursor?.id ?? ''}) or (${cursor?.email ?? null}::text is not null and u.email is not null and u.email > ${cursor?.email ?? null}::text))) or (${cursor?.name ?? null}::text is not null and u.name is not null and u.name > ${cursor?.name ?? null}::text))
+        order by u.name nulls first, u.email nulls first, u.id limit ${adminUserRosterPageSize + 1}
+      `;
+      const page = rows.slice(0, adminUserRosterPageSize);
+      const next = rows.length > adminUserRosterPageSize ? page.at(-1) : undefined;
+      return { items: page.map((row) => ({ id: row.id, name: row.name, email: row.email, image: row.image, emailVerified: row.emailVerified?.toISOString() ?? null, roles: row.roles, usage: { aiRequestCount: row.aiRequestCount, inputTokens: row.inputTokens, outputTokens: row.outputTokens } })), nextCursor: next ? encodeAdminUserRosterCursor({ id: next.id, name: next.name, email: next.email }) : null, search };
+    },
+    async withinRoleGovernanceTransaction(operation) {
+      return sql.begin(async (transaction) => operation(createPostgresUserRoleGovernanceTransactionPort(transaction))) as Promise<Awaited<ReturnType<typeof operation>>>;
+    },
+  };
+}
+
+function createPostgresUserRoleGovernanceTransactionPort(transaction: postgres.TransactionSql): UserRoleGovernanceTransactionPort {
+  return {
+    async lockRoleGovernance() { await transaction`select pg_advisory_xact_lock(727556452)`; },
+    async loadLiveExactAdmin(principal) {
+      const actors = await transaction<Array<{ id: string; email: string | null; authorizationVersion: number }>>`select id, email, authorization_version as "authorizationVersion" from users where id = ${principal.userId} for update`;
+      const actor = actors[0];
+      const roles = await transaction`select 1 from user_roles where user_id = ${principal.userId} and role = 'admin' for update`;
+      if (!actor?.email || !roles.length) throw new Error("Exact administrator access is required for role changes.");
+      if (actor.authorizationVersion !== principal.authorizationVersion) throw new Error("Request principal is stale.");
+      return { userId: actor.id, email: actor.email };
+    },
+    async requireTargetUser(userId) {
+      const targets = await transaction`select id from users where id = ${userId} for update`;
+      if (!targets.length) throw new Error("User not found.");
+    },
+    async lockTargetRoles(userId) { await transaction`select role from user_roles where user_id = ${userId} for update`; },
+    async listAdministratorUserIds() { return (await transaction<Array<{ user_id: string }>>`select user_id from user_roles where role = 'admin' for update`).map((row) => row.user_id); },
+    async grantRole(userId, role) { return (await transaction`insert into user_roles (user_id, role) values (${userId}, ${role}) on conflict do nothing returning user_id`).length > 0; },
+    async revokeRole(userId, role) { return (await transaction`delete from user_roles where user_id = ${userId} and role = ${role} returning user_id`).length > 0; },
+    async incrementAuthorizationVersion(userId) { await transaction`update users set authorization_version = authorization_version + 1 where id = ${userId}`; },
+    async recordRoleAudit({ actorUserId, actorEmail, targetUserId, role, operation }) {
+      await transaction`insert into audit_events (id, actor_user_id, actor_email, actor_class, operation, target_type, target_id, before_summary, after_summary) values (${randomUUID()}, ${actorUserId}, ${actorEmail}, 'user', 'update', 'user_role', ${targetUserId}, ${operation === "revoke" ? JSON.stringify({ role }) : null}, ${operation === "grant" ? JSON.stringify({ role }) : null})`;
+    },
+  };
 }
 
 export function createPostgresPlanningReadRepository(): PlanningReadRepository {

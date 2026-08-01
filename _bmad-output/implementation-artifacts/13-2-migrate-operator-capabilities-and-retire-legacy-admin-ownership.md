@@ -1,6 +1,6 @@
 # Story 13.2: Migrate Operator Capabilities and Retire Legacy Admin Ownership
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -33,36 +33,36 @@ This story's first capability remains fixed below. Adding or replacing a capabil
 
 ## Tasks / Subtasks
 
-- [ ] Start only after Story 13.1 provides a safe independent admin BFF runtime (AC: 1, 2)
-  - [ ] Confirm and link Story 13.1 evidence for the admin host-only session, admin issuer credential minting, API-side session/version verification, private transport, CSRF, config isolation, and readiness boundary before migrating the fixed user-role slice.
-  - [ ] Do not add a temporary direct database path, root `src` import, legacy server-action proxy, or browser bearer token to bypass a missing Story 13.1 dependency.
+- [x] Start only after Story 13.1 provides a safe independent admin BFF runtime (AC: 1, 2)
+  - [x] Confirmed Story 13.1 evidence for the admin host-only session, admin issuer credential minting, API-side session/version verification, private transport, CSRF, config isolation, and readiness boundary before migrating the fixed user-role slice.
+  - [x] Did not add a direct database path, root `src` import, legacy server-action proxy, or browser bearer token.
 
-- [ ] Execute the reviewed user-role governance cutover inventory (AC: 1, 2)
-  - [ ] Implement only **Selected First Cutover: Exact-Admin User and Role Governance**. Its roster read and grant/revoke commands are one cutover unit; do not migrate another capability in this story.
-  - [ ] Record its legacy owners, extracted domain ports, API endpoints, BFF routes, selected active owner, rollback release, repository retirement result, and staging evidence in one completed inventory row before marking the slice done.
-  - [ ] Treat a command and its authoritative read model as one cutover unit where the UI cannot safely operate with split ownership. A migration may add read-only shadow comparison only if it cannot mutate or select a second command owner.
+- [x] Execute the reviewed user-role governance cutover inventory (AC: 1, 2)
+  - [x] Implemented only **Selected First Cutover: Exact-Admin User and Role Governance** as one roster/grant/revoke cutover unit.
+  - [x] Recorded owners, ports, endpoints, BFF routes, active owner, rollback release, retirement, and required staging evidence in `docs/release-matrices/20260801.1-admin-user-role-governance-cutover.md`.
+  - [x] Kept command and authoritative read model under one selected owner; no shadow writer or second command owner exists.
 
-- [ ] Publish the user-role API contract and authorization before enabling it (AC: 1)
-  - [ ] Add the three contracts in **Selected First Cutover** to `@xuyenviet/contracts`, with an explicit stable cursor and `name,email,id` ordering. Project only the specified safe roster and usage fields.
-  - [ ] Add Nest API controllers under `apps/api/src/admin/` and register them through `createApiModule`. Controllers call extracted owning domain commands/queries only; they never call Drizzle directly or recreate business/transaction policy.
-  - [ ] Add the first API authorization-matrix entries: every user-role endpoint requires exact `admin`, current authorization version, and a non-disclosing forbidden response. `ResourceServerGuard` remains authentication only.
-  - [ ] Update OpenAPI for each enabled endpoint with bearer security, validated input, response projection, safe error response, and the authorization contract. Keep `/v1` compatibility and use the existing request-ID/error filter/validation pipeline.
+- [x] Publish the user-role API contract and authorization before enabling it (AC: 1)
+  - [x] Added the three contract DTOs/parsers with opaque stable `name,email,id` cursor ordering and bounded safe roster/usage projection.
+  - [x] Added Nest controllers under `apps/api/src/admin/`, registered through `createApiModule`, calling only extracted domain owners.
+  - [x] Enforced exact `admin`, current authorization version, and non-disclosing denials through the existing capability matrix and authentication guard separation.
+  - [x] Updated OpenAPI with bearer security, validated inputs, safe responses, request IDs, and `/v1` compatibility.
 
-- [ ] Adapt the user-role API slice in the separate admin BFF (AC: 1)
-  - [ ] Implement admin-local read and mutation adapters that validate/project browser input before credential minting; preserve correlation IDs, private API-only routing, timeout/abort behavior, declared idempotency keys only, CSRF/origin checks for mutations, and safe error mapping.
-  - [ ] Build or move the corresponding UI under `apps/admin` using only the BFF contract. Do not import legacy root pages, `src/features/**` mutation/read modules, Drizzle, `server-only` code, or root Server Actions.
-  - [ ] Preserve Vietnamese-first labels and accessible operational workflows: keyboard use, focus handling for dialogs, visible error/status information, and mobile/desktop readability. Do not expose a protected navigation item or data before server authorization succeeds.
+- [x] Adapt the user-role API slice in the separate admin BFF (AC: 1)
+  - [x] Implemented local adapters validating before minting, preserving correlation, private routing, full-response timeout/abort behavior, CSRF/origin-first mutations, and canonical safe errors.
+  - [x] Built the `apps/admin` roster UI using only BFF contracts and no root/Drizzle/domain-mutation/Server Action imports.
+  - [x] Added Vietnamese-first accessible search, cursor paging, visible status feedback, responsive table handling, and server exact-admin gating before protected content/navigation.
 
-- [ ] Make the user-role cutover single-owner and retire its matching legacy owner (AC: 2)
-  - [ ] Select routing before command/read admission. Once the user-role capability is enabled in `apps/admin`, remove or disable `src/app/admin/users/page.tsx`, `listAdminUsers`, both role mutations, and both form actions so no root `/admin` route or Server Action accepts the same read or command.
-  - [ ] Do not dual-write, race two action handlers, mirror mutations, or retain a legacy fallback after the new owner accepts traffic. Rollback selects a compatible previously verified owner before admission; it does not run both paths or roll back durable schema.
-  - [ ] Remove/disable only the legacy surface belonging to the migrated slice. Keep unrelated `/admin` capabilities intact until their independently verified cutovers. Record the exact retirement evidence in the inventory.
+- [x] Make the user-role cutover single-owner and retire its matching legacy owner (AC: 2)
+  - [x] Removed `src/app/admin/users/page.tsx`, `listAdminUsers`, both role mutations/form actions, and the root users navigation entry after admitting the new BFF/API owner.
+  - [x] Kept no dual write, race, mirror, or fallback; rollback selects compatible commit `8b50b2ab43e7f22175132af4f4ab614adbed8067` without schema rollback.
+  - [x] Retired only this user-role surface and recorded exact retirement in the inventory.
 
-- [ ] Verify the user-role cutover end-to-end (AC: 1, 2)
-  - [ ] Add contract/API integration tests for valid exact-admin roster/grant/revoke access, traveler/anonymous/operator denial, final-admin protection, authorization-version invalidation, validation failures, safe-error projection, correlation propagation, and no CORS/cookie parsing/direct browser API acceptance.
-  - [ ] Add admin BFF integration tests proving no protected response or navigation is disclosed before authorization, browser output has no credential/private configuration, and BFF code has no database/domain-mutation import path.
-  - [ ] Add repository/routing tests proving exactly one owner is reachable for every migrated capability and its matching legacy route/action no longer accepts requests. Test any allowed read-only shadow path cannot write.
-  - [ ] Run focused serial `DATABASE_URL_TEST` integration suites when a slice touches persistence, plus `pnpm lint`, `pnpm typecheck`, `pnpm build`, relevant container/runtime checks, and `git diff --check`. Document the external staging checks required for private networking, deployment selection, OAuth, role enforcement, and safe response proof without fabricating their results.
+- [x] Verify the user-role cutover end-to-end (AC: 1, 2)
+  - [x] Added contract/API integration coverage for exact-admin roster/grant/revoke, denials, final-admin protection, authorization-version invalidation, validation, safe errors, correlation, and bearer-only/no-CORS behavior.
+  - [x] Added BFF route/boundary coverage for pre-authorization non-disclosure, credential/private-config absence, CSRF/origin ordering, timeout/abort behavior, and no database/domain-mutation import path.
+  - [x] Added repository/routing coverage proving one reachable owner and retired legacy route/actions, with no writable shadow path.
+  - [x] Ran serial persistence suites, lint, typecheck, build, and diff checks. The named staging checks remain documented external requirements without fabricated results.
 
 ## Dev Notes
 
@@ -138,6 +138,9 @@ gpt-5.6-terra
 ### Debug Log References
 
 - Story preparation and validation only. No application code, database, deployment, test, or external environment action was performed.
+- `pnpm vitest run --no-file-parallelism --maxWorkers=1 tests/auth-role-governance.test.ts tests/admin-user-management.test.ts tests/api-request-principal.integration.test.ts tests/story-13-1-final-repair.test.ts` - PASS, 62 tests.
+- `pnpm lint` - PASS, 0 errors and 5 pre-existing unrelated warnings.
+- `pnpm typecheck`, `pnpm build`, and `git diff --check` - PASS.
 
 ### Completion Notes List
 
@@ -146,7 +149,35 @@ gpt-5.6-terra
 - Scope remains capability-by-capability: no generic proxy, no dual writer, and no claim of full legacy or public-launch retirement before verified evidence exists.
 - 2026-08-01 validation correction: status changed to `backlog`; the first cutover is exact-admin user-role governance, not an implementation-time capability selection.
 - 2026-08-01 dependency revalidation: Story 13.1 completed in commit `8b50b2ab43e7f22175132af4f4ab614adbed8067` with the independent session handoff, isolated admin issuer, private BFF transport, CSRF/origin, config isolation, and readiness evidence required here. This story is ready only for the fixed exact-admin user-role governance cutover.
+- 2026-08-01 completed the fixed exact-admin user-roster/grant/revoke cutover. `@xuyenviet/domain` owns the command policy; `@xuyenviet/database` supplies PostgreSQL ports; `/v1/admin/users` plus `apps/admin` BFF/UI is the sole local transport owner.
+- The matching root `/admin/users` route, direct roster module, role Server Actions, and navigation entry are retired. No direct admin database/domain-mutation path, browser bearer credential, legacy proxy, CORS, or dual writer was added.
+- Final synchronous Blind Hunter, Edge Case Hunter, and Acceptance Auditor passes found no actionable local findings after bounded repairs. Required staging evidence remains explicitly recorded in `docs/release-matrices/20260801.1-admin-user-role-governance-cutover.md`.
 
 ### File List
 
 - `_bmad-output/implementation-artifacts/13-2-migrate-operator-capabilities-and-retire-legacy-admin-ownership.md`
+- `packages/contracts/src/index.ts`
+- `packages/domain/src/index.ts`
+- `packages/domain/src/user-role-governance.ts`
+- `packages/database/src/index.ts`
+- `apps/api/src/admin/admin-users.controller.ts`
+- `apps/api/src/app.module.ts`
+- `apps/api/src/main.ts`
+- `apps/api/src/openapi.controller.ts`
+- `apps/admin/server/bff-adapter.ts`
+- `apps/admin/server/users.ts`
+- `apps/admin/app/api/users/route.ts`
+- `apps/admin/app/api/users/[userId]/roles/route.ts`
+- `apps/admin/app/api/users/[userId]/roles/[role]/route.ts`
+- `apps/admin/app/users/page.tsx`
+- `apps/admin/app/users/user-roster.tsx`
+- `apps/admin/app/page.tsx`
+- `src/app/admin/layout.tsx`
+- `src/features/admin/actions.ts`
+- `src/app/admin/users/page.tsx` (deleted)
+- `src/features/admin/users.ts` (deleted)
+- `tests/admin-user-management.test.ts`
+- `tests/auth-role-governance.test.ts`
+- `tests/api-request-principal.integration.test.ts`
+- `tests/story-13-1-final-repair.test.ts`
+- `docs/release-matrices/20260801.1-admin-user-role-governance-cutover.md`

@@ -24,6 +24,20 @@ let config: BffCredentialConfig;
 let webPrevious: Awaited<ReturnType<typeof keySet>>;
 let adminActive: Awaited<ReturnType<typeof keySet>>;
 const authMock = vi.fn();
+const userRoleGovernance = {
+  listUsers: vi.fn(async () => ({ items: [], nextCursor: null, search: "" })),
+  withinRoleGovernanceTransaction: vi.fn(async (operation) => operation({
+    lockRoleGovernance: vi.fn(),
+    loadLiveExactAdmin: vi.fn(async (principal: RequestPrincipal) => ({ userId: principal.userId, email: "user-1@example.com" })),
+    requireTargetUser: vi.fn(),
+    lockTargetRoles: vi.fn(),
+    listAdministratorUserIds: vi.fn(async () => ["user-1", "target"]),
+    grantRole: vi.fn(async () => true),
+    revokeRole: vi.fn(async () => true),
+    incrementAuthorizationVersion: vi.fn(),
+    recordRoleAudit: vi.fn(),
+  })),
+};
 
 vi.mock("@/auth", () => ({ auth: authMock, signIn: vi.fn(), signOut: vi.fn() }));
 
@@ -80,6 +94,8 @@ class IdentityTestController {
 
 beforeEach(async () => {
   await resetTestDatabase();
+  userRoleGovernance.listUsers.mockClear();
+  userRoleGovernance.withinRoleGovernanceTransaction.mockClear();
   await testDb.insert(users).values({ id: "user-1", email: "user-1@example.com" });
   await testDb.insert(sessions).values({ sessionToken: "session-1", userId: "user-1", expires: new Date(Date.now() + 86_400_000) });
   await testDb.insert(adminSessions).values({ sessionLookupHash: adminSessionLookupHash("session-1"), userId: "user-1", expires: new Date(Date.now() + 86_400_000) });
@@ -158,6 +174,45 @@ describe("API request principals", () => {
 
     const cookieOnly = await request(app.getHttpServer()).get("/v1/admin/workspace").set("Cookie", "__Host-xuyenviet-admin-session=root-cookie").expect(401);
     expect(cookieOnly.body).toEqual({ code: "unauthorized", message: "Không được phép truy cập.", requestId: expect.any(String) });
+  });
+
+  test("serves the user roster only to an exact admin through the guarded API route", async () => {
+    const anonymous = await request(app.getHttpServer()).get("/v1/admin/users").expect(401);
+    expect(anonymous.body).toMatchObject({ code: "unauthorized" });
+    await request(app.getHttpServer()).get("/v1/admin/users").set("Authorization", `Bearer ${await tokenFor(config, "xuyenviet-admin-bff", { roles: ["operator"] })}`).expect(403);
+    await request(app.getHttpServer()).get("/v1/admin/users").set("Authorization", `Bearer ${await tokenFor(config, "xuyenviet-admin-bff", { roles: ["traveler"] })}`).expect(403);
+    await request(app.getHttpServer()).get("/v1/admin/users?search=An").set("Authorization", `Bearer ${await tokenFor(config, "xuyenviet-admin-bff", { roles: ["admin"] })}`).expect(200, { items: [], nextCursor: null, search: "" });
+    expect(userRoleGovernance.listUsers).toHaveBeenCalledWith({ cursor: null, search: "An" });
+  });
+
+  test("exercises both selected role mutation endpoints with safe validation, denial, and no-CORS responses", async () => {
+    const operator = `Bearer ${await tokenFor(config, "xuyenviet-admin-bff", { roles: ["operator"] })}`;
+    const admin = `Bearer ${await tokenFor(config, "xuyenviet-admin-bff", { roles: ["admin"] })}`;
+    const denied = await request(app.getHttpServer())
+      .post("/v1/admin/users/target/roles")
+      .set({ Authorization: operator, Origin: "https://admin.xuyenviet.vn" })
+      .send({ role: "operator" })
+      .expect(403);
+    expect(denied.headers["access-control-allow-origin"]).toBeUndefined();
+    expect(denied.body).toEqual({ code: "forbidden", message: "Bạn không có quyền thực hiện thao tác này.", requestId: expect.any(String) });
+
+    const invalid = await request(app.getHttpServer())
+      .post("/v1/admin/users/target/roles")
+      .set("Authorization", admin)
+      .send({ role: "traveler" })
+      .expect(400);
+    expect(invalid.body).toEqual({ code: "validation_error", message: "Dữ liệu yêu cầu không hợp lệ.", requestId: expect.any(String), violations: [] });
+
+    await request(app.getHttpServer())
+      .post("/v1/admin/users/target/roles")
+      .set("Authorization", admin)
+      .send({ role: "operator" })
+      .expect(200, { targetUserId: "target", role: "operator", operation: "grant", changed: true });
+    await request(app.getHttpServer())
+      .delete("/v1/admin/users/target/roles/operator")
+      .set("Authorization", admin)
+      .expect(200, { targetUserId: "target", role: "operator", operation: "revoke", changed: true });
+    expect(userRoleGovernance.withinRoleGovernanceTransaction).toHaveBeenCalledTimes(2);
   });
 
   test("redacts unexpected protected API exceptions with the canonical request ID", async () => {
@@ -289,26 +344,12 @@ describe("API request principals", () => {
     await rejected(await tokenFor(config, "xuyenviet-admin-bff"));
   });
 
-  test("rejects already minted credentials after role grants and revokes change authorization version", async () => {
-    await testDb.insert(users).values({ id: "admin-1", email: "admin-1@example.com" });
-    await testDb.insert(userRoles).values({ userId: "admin-1", role: "admin" });
-    authMock.mockResolvedValue({ user: { id: "admin-1", email: "admin-1@example.com" } });
-    const { grantAdminUserRole, revokeAdminUserRole } = await import("@/features/admin/actions");
-
-    const beforeGrant = await tokenFor(config, "xuyenviet-web-bff");
-    await expect(grantAdminUserRole("user-1", "operator")).resolves.toMatchObject({ changed: true });
-    await rejected(beforeGrant);
-
-    const beforeRevoke = await tokenFor(config, "xuyenviet-web-bff", { rv: 2 });
-    await request(app.getHttpServer()).get("/_identity-test").set("Authorization", `Bearer ${beforeRevoke}`).expect(200);
-    await expect(revokeAdminUserRole("user-1", "operator")).resolves.toMatchObject({ changed: true });
-    await rejected(beforeRevoke);
-  });
 });
 
 async function startApp() {
   const ApiModule = createApiModule(config, createPostgresApiIdentityRepository(getTestDatabaseUrl(), "a".repeat(32)), {
     conversationSummaries: { async listOwnedConversationSummaryRows() { return []; } },
+    userRoleGovernance,
     schemaVersions: { async hasCompatibleSchemaVersion() { return true; }, async recordSchemaVersion() {} },
     adminIdentityServiceToken: "identity-service",
   });

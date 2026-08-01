@@ -170,7 +170,7 @@ describe("Story 13.1 BFF and API denial proofs", () => {
   test("adapter rejects origin, Fetch Metadata, and CSRF before minting, forwards only allowed headers, and redacts failures", async () => {
     const token = issueAdminCsrfToken(transport);
     const mintCredential = vi.fn(async () => "internal-credential");
-    const fetcher = vi.fn(async () => new Response(JSON.stringify({ accepted: true }), { status: 200 }));
+    const fetcher = vi.fn(async (_url: URL | RequestInfo, init?: RequestInit) => new Response(JSON.stringify({ accepted: true }), { status: 200, headers: { "x-request-id": (init?.headers as Record<string, string>)["x-request-id"] } }));
     const request = (headers: Record<string, string>) => ({ headers: new Headers(headers), cookies: { get: (name: string) => name === adminCsrfCookieName ? { value: token } : undefined } });
     for (const headers of [
       { origin: "https://foreign.example", "sec-fetch-site": "same-origin", "X-XuyenViet-Admin-CSRF": token },

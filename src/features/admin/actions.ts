@@ -2,12 +2,7 @@
 
 import { and, eq, ne } from "drizzle-orm";
 
-import type { RequestPrincipal } from "@xuyenviet/contracts";
-
-import { getDb } from "@/db/client";
-import { aiGatewayModels, users, type AiGatewayModelPurpose } from "@/db/schema";
-import { changeUserRole, type ManagedUserRole, type UserRoleDeltaResult } from "@/features/auth/role-governance";
-import { requireExactAdminSession } from "@/server/auth";
+import { aiGatewayModels, type AiGatewayModelPurpose } from "@/db/schema";
 import { runAuditedAdminMutation, runAuditedExactAdminMutation } from "@/server/mutations";
 
 type AiGatewayModelMutationInput = {
@@ -180,21 +175,6 @@ export async function setDefaultAiGatewayModel(modelId: string) {
   });
 }
 
-export async function grantAdminUserRole(targetUserId: string, role: ManagedUserRole): Promise<UserRoleDeltaResult> {
-  return changeUserRole(await getActionPrincipal(), { targetUserId, role, operation: "grant" });
-}
-
-export async function revokeAdminUserRole(targetUserId: string, role: ManagedUserRole): Promise<UserRoleDeltaResult> {
-  return changeUserRole(await getActionPrincipal(), { targetUserId, role, operation: "revoke" });
-}
-
-export async function grantAdminUserRoleForm(formData: FormData) {
-  await grantAdminUserRole(getFormString(formData, "userId"), getFormString(formData, "role") as ManagedUserRole);
-}
-
-export async function revokeAdminUserRoleForm(formData: FormData) {
-  await revokeAdminUserRole(getFormString(formData, "userId"), getFormString(formData, "role") as ManagedUserRole);
-}
 
 function normalizeAiGatewayModelInput(input: AiGatewayModelMutationInput): typeof aiGatewayModels.$inferInsert {
   return {
@@ -252,33 +232,6 @@ function normalizePartialAiGatewayModelInput(input: Partial<AiGatewayModelMutati
 
 function normalizeId(id: string) {
   return normalizeRequiredString(id, "AI Gateway model id");
-}
-
-function getFormString(formData: FormData, key: string) {
-  const value = formData.get(key);
-  return typeof value === "string" ? value : "";
-}
-
-async function getActionPrincipal(): Promise<RequestPrincipal> {
-  const session = await requireExactAdminSession();
-  const [identity] = await getDb()
-    .select({ authorizationVersion: users.authorizationVersion })
-    .from(users)
-    .where(eq(users.id, session.userId))
-    .limit(1);
-
-  if (!identity) {
-    throw new Error("Authenticated user not found.");
-  }
-
-  return {
-    userId: session.userId,
-    sessionId: "next-server-action",
-    roles: [],
-    authorizationVersion: identity.authorizationVersion,
-    issuer: "xuyenviet-web-bff",
-    tokenId: "next-server-action",
-  };
 }
 
 function normalizeRequiredString(value: string, label: string) {

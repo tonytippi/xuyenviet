@@ -58,6 +58,77 @@ export type SafeApiError = {
   violations?: SafeFieldViolation[];
 };
 
+export const adminUserRosterPageSize = 25;
+export const adminUserRosterSearchMaxLength = 120;
+export const managedUserRoles = ["operator", "admin"] as const;
+export type ManagedUserRole = (typeof managedUserRoles)[number];
+export type UserRoleOperation = "grant" | "revoke";
+export type AdminUserRosterCursor = { name: string | null; email: string | null; id: string };
+export type AdminUserRosterItem = { id: string; name: string | null; email: string | null; image: string | null; emailVerified: string | null; roles: RequestRole[]; usage: { aiRequestCount: string; inputTokens: string; outputTokens: string } };
+export type AdminUserRosterPage = { items: AdminUserRosterItem[]; nextCursor: string | null; search: string };
+export type UserRoleCommandResult = { targetUserId: string; role: ManagedUserRole; operation: UserRoleOperation; changed: boolean };
+
+export function parseAdminUserRosterQuery(value: unknown): { cursor: string | null; search: string } | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const query = value as Record<string, unknown>;
+  if (Object.keys(query).some((key) => key !== "cursor" && key !== "search")) return null;
+  const search = query.search === undefined ? "" : typeof query.search === "string" ? query.search.trim() : null;
+  const cursor = query.cursor === undefined || query.cursor === "" ? null : typeof query.cursor === "string" ? query.cursor : null;
+  return search === null || search.length > adminUserRosterSearchMaxLength || cursor !== null && !parseAdminUserRosterCursor(cursor) ? null : { cursor, search };
+}
+
+export function encodeAdminUserRosterCursor(cursor: AdminUserRosterCursor): string {
+  return Buffer.from(JSON.stringify(cursor)).toString("base64url");
+}
+
+export function parseAdminUserRosterCursor(value: unknown): AdminUserRosterCursor | null {
+  if (typeof value !== "string" || value.length < 4 || value.length > 512) return null;
+  try {
+    const parsed: unknown = JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    const cursor = parsed as Record<string, unknown>;
+    return Object.keys(cursor).length === 3 && typeof cursor.id === "string" && cursor.id.length > 0 && cursor.id.length <= 128
+      && (typeof cursor.name === "string" && cursor.name.length <= 512 || cursor.name === null)
+      && (typeof cursor.email === "string" && cursor.email.length <= 512 || cursor.email === null)
+      ? { id: cursor.id, name: cursor.name as string | null, email: cursor.email as string | null }
+      : null;
+  } catch { return null; }
+}
+
+export function parseUserRoleCommand(value: unknown): { targetUserId: string; role: ManagedUserRole; operation: UserRoleOperation } | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const input = value as Record<string, unknown>;
+  return Object.keys(input).sort().join(",") === "operation,role,targetUserId" && typeof input.targetUserId === "string" && input.targetUserId.trim().length > 0 && input.targetUserId.trim().length <= 128
+    && (managedUserRoles as readonly string[]).includes(input.role as string) && (input.operation === "grant" || input.operation === "revoke")
+    ? { targetUserId: input.targetUserId.trim(), role: input.role as ManagedUserRole, operation: input.operation } : null;
+}
+
+export function parseUserRoleCommandResult(value: unknown): UserRoleCommandResult | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const result = value as Record<string, unknown>;
+  if (Object.keys(result).sort().join(",") !== "changed,operation,role,targetUserId" || typeof result.changed !== "boolean") return null;
+  const parsed = parseUserRoleCommand({ targetUserId: result.targetUserId, role: result.role, operation: result.operation });
+  return parsed ? { ...parsed, changed: result.changed } : null;
+}
+
+export function parseAdminUserRosterPage(value: unknown): AdminUserRosterPage | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const page = value as Record<string, unknown>;
+  if (Object.keys(page).sort().join(",") !== "items,nextCursor,search" || !Array.isArray(page.items) || page.items.length > adminUserRosterPageSize || typeof page.search !== "string" || page.search.length > adminUserRosterSearchMaxLength || page.nextCursor !== null && !parseAdminUserRosterCursor(page.nextCursor)) return null;
+  const items = page.items.map((item): AdminUserRosterItem | null => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return null;
+    const user = item as Record<string, unknown>;
+    const usage = user.usage;
+    return Object.keys(user).sort().join(",") === "email,emailVerified,id,image,name,roles,usage" && typeof user.id === "string" && user.id.length > 0 && user.id.length <= 128
+      && (typeof user.name === "string" && user.name.length <= 512 || user.name === null) && (typeof user.email === "string" && user.email.length <= 512 || user.email === null)
+      && (typeof user.image === "string" && user.image.length <= 2_000 || user.image === null) && (typeof user.emailVerified === "string" || user.emailVerified === null)
+      && Array.isArray(user.roles) && user.roles.every(isRequestRole) && usage && typeof usage === "object" && !Array.isArray(usage)
+      && typeof (usage as Record<string, unknown>).aiRequestCount === "string" && typeof (usage as Record<string, unknown>).inputTokens === "string" && typeof (usage as Record<string, unknown>).outputTokens === "string"
+      ? user as AdminUserRosterItem : null;
+  });
+  return items.some((item) => item === null) ? null : { items: items as AdminUserRosterItem[], nextCursor: page.nextCursor as string | null, search: page.search };
+}
+
 export const conversationSummaryLimit = 100;
 export type ConversationSummary = { id: string; updatedAt: string; preview: string };
 export type ConversationSummaryListResponse = { summaries: ConversationSummary[] };

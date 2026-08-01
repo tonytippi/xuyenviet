@@ -11,6 +11,7 @@ export type PlanningReadRepository = {
 };
 
 export * from "./planning-detail";
+export * from "./user-role-governance";
 
 const newConversationPreview = "Hội thoại mới";
 const previewMaxLength = 60;
