@@ -47,6 +47,7 @@ export type KnowledgeUrlSourceListItem = Pick<typeof sources.$inferSelect, "id" 
   displayTitle: string;
   facebookCaptureReviewId: string | null;
   facebookCaptureStatus: FacebookCaptureReviewStatus | null;
+  hasCurrentYoutubeCapture: boolean;
   linkedKnowledgeCardCount: number;
 };
 
@@ -117,6 +118,7 @@ export async function listKnowledgeUrlSources(): Promise<KnowledgeUrlSourceListI
       publisher: sources.publisher,
       eligibility: sources.eligibility,
       removalReason: sources.removalReason,
+      currentCaptureVersionId: sources.currentCaptureVersionId,
       createdAt: sources.createdAt,
     })
     .from(sources)
@@ -165,6 +167,7 @@ export async function listKnowledgeUrlSources(): Promise<KnowledgeUrlSourceListI
       displayTitle: firstCardTitleBySourceId.get(source.id) ?? metadataTitle ?? capturedTextTitle ?? source.label,
       facebookCaptureReviewId: review?.id ?? null,
       facebookCaptureStatus: review?.status ?? null,
+      hasCurrentYoutubeCapture: source.kind === "youtube" && source.currentCaptureVersionId !== null,
       linkedKnowledgeCardCount: cardCountsBySourceId.get(source.id) ?? 0,
     };
   });

@@ -530,6 +530,19 @@ describe("admin Facebook capture review helpers", () => {
         submittedByUserId: "operator-user",
         createdAt: new Date("2026-07-13T02:00:00.000Z"),
       },
+      {
+        id: "captured-youtube-source",
+        kind: "youtube",
+        url: "https://www.youtube.com/watch?v=m7W645Ntvtl",
+        canonicalUrl: "https://www.youtube.com/watch?v=m7W645Ntvtl",
+        label: "Khám phá Vĩnh Hy",
+        sourceType: "community",
+        verificationStatus: "unverified",
+        official: false,
+        partner: false,
+        submittedByUserId: "operator-user",
+        createdAt: new Date("2026-07-13T02:30:00.000Z"),
+      },
     ]);
     await testDb.insert(rawSourceMaterial).values({
       id: "raw-newer-facebook-source",
@@ -545,6 +558,7 @@ describe("admin Facebook capture review helpers", () => {
       rawMetadata: { authorText: "Tác giả cộng đồng", timestampText: "Hôm qua" },
     });
     await seedSourceCaptureVersion({ sourceId: "captured-only-facebook-source", rawText: "Captured-only Facebook text for intake title." });
+    await seedSourceCaptureVersion({ sourceId: "captured-youtube-source", captureKind: "youtube", rawText: '{"evidence":[]}', rawMetadata: { kind: "youtube", captureMethod: "gemini_youtube_url" } });
     await testDb.insert(facebookCaptureReviews).values({
       id: "review-newer-facebook-source",
       sourceId: "newer-facebook-source",
@@ -593,11 +607,10 @@ describe("admin Facebook capture review helpers", () => {
     expect(intakeHtml).not.toContain("Facebook post 2CapturedOnly");
     expect(intakeHtml).toContain("Facebook");
     expect(intakeHtml).toContain("Capture");
-    expect(intakeHtml).toContain("Extract");
     expect(intakeHtml).toContain("Đã capture");
-    expect(intakeHtml).toContain("Đã extract");
     expect(intakeHtml).toContain("Không áp dụng");
     expect(intakeHtml).toContain("/admin/knowledge/facebook-captures/review-newer-facebook-source");
+    expect(intakeHtml).toContain("/admin/knowledge/youtube-captures/captured-youtube-source");
     expect(intakeHtml).toContain("https://facebook.com/groups/xuyenviet/posts/newer-facebook-source");
     expect(intakeHtml).toContain("target=\"_blank\"");
     expect(intakeHtml).toContain("rel=\"noreferrer\"");

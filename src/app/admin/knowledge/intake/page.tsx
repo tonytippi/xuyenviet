@@ -97,6 +97,10 @@ export default async function KnowledgeIntakePage({ searchParams }: KnowledgeInt
                         <Link className="font-semibold text-[#1f5f46] underline underline-offset-4" href={`/admin/knowledge/facebook-captures/${encodeURIComponent(source.facebookCaptureReviewId)}`}>
                           Đã capture
                         </Link>
+                      ) : source.hasCurrentYoutubeCapture ? (
+                        <Link className="font-semibold text-[#1f5f46] underline underline-offset-4" href={`/admin/knowledge/youtube-captures/${encodeURIComponent(source.id)}`}>
+                          Đã capture
+                        </Link>
                       ) : (
                         getCaptureLabel(source.kind)
                       )}
@@ -197,5 +201,5 @@ function isSensitiveQueryParam(key: string) {
 }
 
 function getCaptureLabel(kind: string) {
-  return kind === "facebook" ? "Chưa thu thập" : "Không áp dụng";
+  return kind === "facebook" || kind === "youtube" ? "Chưa thu thập" : "Không áp dụng";
 }
