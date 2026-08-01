@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-08-01 (Story 12.2 recovery-attribution repair verified; Epic 12 remains in progress for Story 12.3.)
+# last_updated: 2026-08-01 (Epic 13 validation corrected: Story 13.1 awaits an approved identity handoff; Story 13.2 awaits Story 13.1 and has a fixed user-role cutover.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-08-01 (Story 12.2 recovery-attribution repair verified; Epic 12 remains in progress for Story 12.3.)
+last_updated: 2026-08-01 (Epic 13 validation corrected: Story 13.1 awaits an approved identity handoff; Story 13.2 awaits Story 13.1 and has a fixed user-role cutover.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -269,6 +269,8 @@ development_status:
   12-3-gate-schema-changes-for-overlapping-runtimes: done
   epic-12-retrospective: optional
 
+  # Story 13.1 awaits a reviewed no-database identity handoff. Story 13.2
+  # cannot start until Story 13.1 is done.
   epic-13: backlog
   13-1-establish-the-separately-deployed-admin-bff-application: backlog
   13-2-migrate-operator-capabilities-and-retire-legacy-admin-ownership: backlog
