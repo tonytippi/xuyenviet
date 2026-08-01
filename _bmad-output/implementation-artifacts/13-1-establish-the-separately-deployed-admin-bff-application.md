@@ -1,6 +1,6 @@
 # Story 13.1: Establish the Separately Deployed Admin BFF Application
 
-Status: backlog
+Status: ready-for-dev
 
 ## Story
 
@@ -13,17 +13,25 @@ so that operator releases and access controls are separate from traveler present
 1. **Given** the admin application is deployed to staging, **when** an operator signs in through its host-only session, **then** it uses the admin BFF issuer and private API connectivity with no browser credential or database credential, **and** its independent build, release, health, OAuth callback, and least-privilege configuration are documented.
 2. **Given** a normal traveler accesses the admin application or API capability, **when** authorization is evaluated, **then** the request is denied server-side without disclosing protected data or navigation, **and** the same API authorization matrix governs the admin BFF and controllers.
 
-## Readiness Gate
+## Approved Identity Handoff
 
-Do not begin this story until a reviewed admin identity-handoff decision specifies its complete server-side flow: Google callback handling; the authority that creates, stores, and validates the admin host-only session; session identifier lookup; credential-mint authorization; issuer/key ownership and rotation; logout, expiry, revocation, and authorization-version invalidation; CSRF/origin enforcement; and least-privilege environment ownership.
+**Approved 2026-08-01.** The API Identity boundary owns the Google OAuth transaction, the authoritative admin-session store, and session validation. `apps/admin` owns the host-only browser cookie and the `xuyenviet-admin-bff` credential signer, but never has database access.
 
-The design must preserve the no-direct-database boundary: `apps/admin` has neither `DATABASE_URL` nor database imports, while the API still validates `sid` and `rv` against its identity repository. The existing root Auth.js and web credential minter both query Drizzle, so they cannot be copied into admin. Until this decision and its failure-mode test plan are approved, keep the story in `backlog`; do not scaffold an admin sign-in flow, share the root cookie, use a browser secret, or grant database access.
+1. Admin sign-in and callback routes are thin server-side adapters. They forward OAuth start/callback data only to a private, service-authenticated API Identity handoff endpoint. The API owns OAuth state, PKCE verifier, Google code exchange, user/account resolution, and role lookup; the admin runtime never receives provider tokens.
+2. After a successful callback, API Identity creates a random opaque admin session, persists only its protected server-side representation, and returns the opaque session identifier to the admin BFF over the private channel. The admin response sets it only as a distinct `__Host-` cookie for `admin.xuyenviet.app` (`Secure`, `HttpOnly`, `Path=/`, no `Domain` attribute). OAuth transaction cookies are similarly host-only and are removed after the callback.
+3. For every protected admin BFF request, `apps/admin` sends the opaque session identifier only through the private service-authenticated handoff channel. API Identity resolves the session and fails closed unless it is live, belongs to the requested subject, is unrevoked/unexpired, and has current authorization-version and `operator` or `admin` authority. It returns only the allowlisted subject, session reference, current authorization version, and roles required for credential minting.
+4. Only after a successful handoff, the admin BFF mints a five-minute, non-refreshable ES256 credential with issuer `xuyenviet-admin-bff`, audience `api.railway.internal`, bounded allowlisted claims, random token ID, and its isolated active signing key. The private key is an admin-only environment secret; API receives only active plus one bounded previous public verification key. Web and admin keys, issuers, cookies, CSRF secrets, OAuth redirects, and service identities are separate.
+5. API resource-server validation remains authoritative: it verifies signature, `kid`, issuer, audience, time bounds, token ID, `sid`, and `rv`, then resolves the live session and current authorization version from its identity repository before creating `RequestPrincipal`. Exact-admin capabilities re-check `admin` server-side. Logout/revocation invalidates the stored session; any role change increments authorization version, invalidating already minted credentials.
+6. Admin BFF unsafe cookie-authenticated routes perform exact admin-origin, Fetch Metadata, and signed double-submit CSRF validation before handoff, minting, or API invocation. API remains bearer-only, does not parse browser cookies, and sends no CORS allow-origin response.
+7. Least privilege is mandatory: `apps/admin` receives Google public client/callback configuration, its own session/CSRF/signing material, private API URL, and identity-handoff service authentication only. It receives neither `DATABASE_URL`, database credentials, root web secrets/cookies, API private verification material, nor raw provider tokens. API Identity alone owns database and Google client-secret access.
+
+Required failure-mode proof: valid sign-in; host-only cookie isolation; root-cookie rejection; malformed/replayed OAuth state rejection; expired/revoked session rejection; logout; role-change authorization-version invalidation; unavailable/invalid handoff rejection before minting; web/admin signer and issuer isolation; CSRF/origin rejection before handoff; browser non-disclosure; API identity-store unavailability; and no admin database import or credential path.
 
 ## Tasks / Subtasks
 
-- [ ] Satisfy the admin identity-handoff entry gate before creating a deployable app (AC: 1, 2)
-  - [ ] Obtain approval for the concrete flow named in **Readiness Gate**, including its trusted session authority and the endpoint or service boundary through which admin validates the session without direct database access.
-  - [ ] Define tests for valid sign-in, host-only cookie isolation, root-cookie rejection, expired/revoked session rejection, logout, role-change authorization-version invalidation, signer/key isolation, browser non-disclosure, and API identity-store unavailability.
+- [ ] Implement the approved admin identity handoff before creating a deployable app (AC: 1, 2)
+  - [ ] Use the API Identity boundary as the trusted OAuth/session authority and private service-authenticated handoff endpoint; keep the admin BFF as the host-only cookie owner and isolated admin credential signer.
+  - [ ] Add the required failure-mode tests in **Approved Identity Handoff**, including malformed/replayed OAuth state and handoff failure before credential minting.
   - [ ] Do not copy `src/auth.ts`, `src/server/bff-session-token.ts`, or `src/server/bff-credentials.ts` into the admin app: all currently verify sessions/roles against Drizzle and are therefore incompatible with the no-direct-database requirement.
   - [ ] Reuse the existing API resource-server model: bounded ES256 credentials, issuer `xuyenviet-admin-bff`, audience `api.railway.internal`, only allowlisted claims, and API-side session/authorization-version verification. Admin private signing material is isolated from the web issuer; API receives public verification material only.
   - [ ] If the gate cannot be satisfied, leave the story in `backlog` and open an architecture decision. Do not grant the admin runtime database credentials or loosen the browser/API boundary to make progress.
@@ -109,7 +117,7 @@ The design must preserve the no-direct-database boundary: `apps/admin` has neith
 
 ### Validation Outcome
 
-**BLOCKED - not ready for development.** The no-database admin identity/session and credential-minting design is a mandatory unresolved security decision. Revalidate only after the entry-gate decision and named failure-mode tests are approved.
+**PASS - ready for development.** The approved API Identity handoff keeps OAuth/session authority and database access outside `apps/admin`, while the admin BFF retains an isolated host-only browser boundary and credential signer. The required fail-closed identity, key-isolation, revocation, CSRF, and non-disclosure tests are explicit.
 
 ## Dev Agent Record
 
@@ -127,6 +135,7 @@ gpt-5.6-terra
 - Created from Epic 13 requirements, separated-admin proposal, project context, completed Epic 12 release-admission patterns, current root admin/auth/BFF/API code, tests, Docker topology, sprint status, and recent Git history.
 - Key prerequisite recorded: the current Auth.js and BFF minting implementations require Drizzle/database access and cannot be reused by the separate no-database admin runtime unchanged.
 - 2026-08-01 validation correction: story status changed to `backlog` because identity handoff is a prerequisite security decision, not an implementation-time choice.
+- 2026-08-01 approval: API Identity owns Google OAuth state/code exchange and the authoritative admin-session repository; `apps/admin` owns only its host-only opaque cookie and isolated admin credential signer. The decision includes required failure-mode coverage and revalidates the story for development.
 
 ### File List
 

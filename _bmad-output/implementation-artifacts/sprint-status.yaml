@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-08-01 (Epic 13 validation corrected: Story 13.1 awaits an approved identity handoff; Story 13.2 awaits Story 13.1 and has a fixed user-role cutover.)
+# last_updated: 2026-08-01 (Epic 13.1 identity handoff approved: API Identity owns OAuth/session validation; admin retains host-only cookie and isolated credential signer.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-08-01 (Epic 13 validation corrected: Story 13.1 awaits an approved identity handoff; Story 13.2 awaits Story 13.1 and has a fixed user-role cutover.)
+last_updated: 2026-08-01 (Epic 13.1 identity handoff approved: API Identity owns OAuth/session validation; admin retains host-only cookie and isolated credential signer.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -269,10 +269,12 @@ development_status:
   12-3-gate-schema-changes-for-overlapping-runtimes: done
   epic-12-retrospective: optional
 
-  # Story 13.1 awaits a reviewed no-database identity handoff. Story 13.2
+  # Story 13.1 approved identity handoff: API Identity owns OAuth state/code exchange
+  # and the authoritative admin-session repository; apps/admin owns host-only opaque
+  # cookies plus its isolated credential signer and has no database access. Story 13.2
   # cannot start until Story 13.1 is done.
-  epic-13: backlog
-  13-1-establish-the-separately-deployed-admin-bff-application: backlog
+  epic-13: in-progress
+  13-1-establish-the-separately-deployed-admin-bff-application: ready-for-dev
   13-2-migrate-operator-capabilities-and-retire-legacy-admin-ownership: backlog
   epic-13-retrospective: optional
 
