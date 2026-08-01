@@ -1,6 +1,6 @@
 # Story 13.2: Migrate Operator Capabilities and Retire Legacy Admin Ownership
 
-Status: backlog
+Status: ready-for-dev
 
 ## Story
 
@@ -15,7 +15,9 @@ so that legacy `/admin` no longer owns domain transport or mutations.
 
 ## Readiness Gate
 
-Do not begin this story until Story 13.1 is `done` and links evidence for its independent admin session, credential minting, private transport, CSRF, configuration-isolation, and readiness boundaries. This story's first capability is fixed below; adding or replacing a capability requires a separately reviewed story rather than an implementation-time decision.
+**Satisfied 2026-08-01.** Story 13.1 is `done` in both its authoritative record and `sprint-status.yaml` at commit `8b50b2ab43e7f22175132af4f4ab614adbed8067`. It provides the independent `apps/admin` host-only opaque session, API-owned OAuth/session handoff, isolated `xuyenviet-admin-bff` credential minting, private API transport, signed double-submit CSRF/origin enforcement, no-database configuration isolation, schema-release admission, and independent admin health/runtime boundaries.
+
+This story's first capability remains fixed below. Adding or replacing a capability requires a separately reviewed story rather than an implementation-time decision. Preserve the completed Story 13.1 boundary: do not add a database path, root `src` import, legacy server-action proxy, browser bearer token, shared web/admin issuer key, or new admin session behavior to deliver the user-role cutover.
 
 ## Selected First Cutover: Exact-Admin User and Role Governance
 
@@ -125,7 +127,7 @@ Do not begin this story until Story 13.1 is `done` and links evidence for its in
 
 ### Validation Outcome
 
-**BLOCKED - not ready for development.** Story 13.1 must first deliver the verified independent admin BFF boundary. This story then has one fixed exact-admin user-role governance slice with explicit API, ownership, retirement, rollback, and evidence requirements; revalidate before setting it to `ready-for-dev`.
+**PASS - ready for development.** Story 13.1 now provides the verified independent admin BFF boundary. This story retains one fixed exact-admin user-role governance slice with explicit API, ownership, retirement, rollback, and evidence requirements.
 
 ## Dev Agent Record
 
@@ -143,6 +145,7 @@ gpt-5.6-terra
 - Created from the Epic 13 source, separated-admin proposal, Story 13.1 prerequisite analysis, current legacy root admin inventory, API/BFF/security patterns, completed release/cutover work, test conventions, sprint status, and recent Git history.
 - Scope remains capability-by-capability: no generic proxy, no dual writer, and no claim of full legacy or public-launch retirement before verified evidence exists.
 - 2026-08-01 validation correction: status changed to `backlog`; the first cutover is exact-admin user-role governance, not an implementation-time capability selection.
+- 2026-08-01 dependency revalidation: Story 13.1 completed in commit `8b50b2ab43e7f22175132af4f4ab614adbed8067` with the independent session handoff, isolated admin issuer, private BFF transport, CSRF/origin, config isolation, and readiness evidence required here. This story is ready only for the fixed exact-admin user-role governance cutover.
 
 ### File List
 
