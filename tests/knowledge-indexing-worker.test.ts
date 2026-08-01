@@ -1,6 +1,8 @@
 import { eq, sql } from "drizzle-orm";
 import { describe, expect, test, vi } from "vitest";
 
+import * as workerDatabase from "@xuyenviet/database";
+import type { WorkerPollObservation } from "@xuyenviet/contracts";
 import { knowledgeCardSearchDocuments, knowledgeCards, knowledgeCardSources, knowledgeIndexBackfillState, knowledgeIndexDirtyMarkers, sources, users } from "@/db/schema";
 import { backfillKnowledgeIndexWork, claimNextKnowledgeIndexWork, completeKnowledgeIndexWork, processNextApprovedKnowledgeIndexingBatch, recoverExpiredKnowledgeIndexWork, runApprovedKnowledgeIndexingWorkerLoop, runKnowledgeIndexBackfill } from "@/features/knowledge/indexing-worker";
 import { projectClaimedKnowledgeIndexWork } from "@/features/knowledge/search";
@@ -98,6 +100,50 @@ describe("versioned knowledge indexing work", () => {
 
     await expect(projectClaimedKnowledgeIndexWork(claim, testDb)).resolves.toMatchObject({ indexed: true });
     await expect(testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, "executor-attribution"))).resolves.toMatchObject([{ executorSystem: "system-knowledge-pipeline" }]);
+  });
+
+  test("emits each indexing marker's persisted outcome without attributing a later retry to the first marker", async () => {
+    await createMarker("indexing-telemetry-success");
+    await createMarker("indexing-telemetry-retry");
+    await testDb.update(knowledgeIndexDirtyMarkers).set({ nextRunAt: new Date(1) }).where(eq(knowledgeIndexDirtyMarkers.knowledgeCardId, "indexing-telemetry-retry"));
+    const markers = await testDb.select({ id: knowledgeIndexDirtyMarkers.id, cardId: knowledgeIndexDirtyMarkers.knowledgeCardId }).from(knowledgeIndexDirtyMarkers).where(sql`${knowledgeIndexDirtyMarkers.knowledgeCardId} in ('indexing-telemetry-success', 'indexing-telemetry-retry')`);
+    const markerIdFor = (cardId: string) => markers.find((marker) => marker.cardId === cardId)?.id;
+    const project = workerDatabase.projectClaimedKnowledgeIndexWork;
+    const projection = vi.spyOn(workerDatabase, "projectClaimedKnowledgeIndexWork").mockImplementation(async (claim, db) => {
+      if (claim.cardId === "indexing-telemetry-retry") throw new Error("projection unavailable");
+      return project(claim, db);
+    });
+    const observations: WorkerPollObservation[] = [];
+
+    try {
+      await runApprovedKnowledgeIndexingWorkerLoop({ once: true, batchSize: 2, workerId: "indexing-telemetry-worker", onObservation(observation) { observations.push(observation); } });
+    } finally {
+      projection.mockRestore();
+    }
+
+    expect(observations).toEqual([
+      expect.objectContaining({ capability: "knowledge.indexing", resultCode: "success", durableId: markerIdFor("indexing-telemetry-success"), retryCount: 1 }),
+      expect.objectContaining({ capability: "knowledge.indexing", resultCode: "retry", durableId: markerIdFor("indexing-telemetry-retry"), retryCount: 1 }),
+    ]);
+  });
+
+  test("emits recovered indexing markers separately from a newly claimed marker", async () => {
+    await createMarker("indexing-telemetry-pending");
+    await createMarker("indexing-telemetry-recovered-a");
+    await createMarker("indexing-telemetry-recovered-b");
+    const markers = await testDb.select({ id: knowledgeIndexDirtyMarkers.id, cardId: knowledgeIndexDirtyMarkers.knowledgeCardId }).from(knowledgeIndexDirtyMarkers).where(sql`${knowledgeIndexDirtyMarkers.knowledgeCardId} in ('indexing-telemetry-pending', 'indexing-telemetry-recovered-a', 'indexing-telemetry-recovered-b')`);
+    const markerIdFor = (cardId: string) => markers.find((marker) => marker.cardId === cardId)?.id;
+    await testDb.update(knowledgeIndexDirtyMarkers).set({ status: "claimed", attemptCount: 1, claimedBy: "stale-indexer", claimedAt: new Date(0), leaseExpiresAt: new Date(1), fencingToken: "a".repeat(64) }).where(eq(knowledgeIndexDirtyMarkers.knowledgeCardId, "indexing-telemetry-recovered-a"));
+    await testDb.update(knowledgeIndexDirtyMarkers).set({ status: "claimed", attemptCount: 2, maxAttempts: 2, claimedBy: "stale-indexer", claimedAt: new Date(0), leaseExpiresAt: new Date(1), fencingToken: "b".repeat(64) }).where(eq(knowledgeIndexDirtyMarkers.knowledgeCardId, "indexing-telemetry-recovered-b"));
+    const observations: WorkerPollObservation[] = [];
+
+    await runApprovedKnowledgeIndexingWorkerLoop({ once: true, batchSize: 1, workerId: "indexing-recovery-telemetry-worker", onObservation(observation) { observations.push(observation); } });
+
+    expect(observations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ resultCode: "retry", durableId: markerIdFor("indexing-telemetry-recovered-a"), retryCount: 1, leaseRecovery: "recovered", leaseRecoveryCount: 1 }),
+      expect.objectContaining({ resultCode: "failure", durableId: markerIdFor("indexing-telemetry-recovered-b"), retryCount: 2, leaseRecovery: "recovered", leaseRecoveryCount: 1 }),
+      expect.objectContaining({ resultCode: "success", durableId: markerIdFor("indexing-telemetry-pending"), leaseRecovery: "none" }),
+    ]));
   });
 
   test("rejects a non-catalog indexing executor at the persistence boundary", async () => {
