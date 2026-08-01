@@ -19,10 +19,21 @@ reference only; this workflow is the authoritative coordinator.
   empty, and successful `herdr --help`, `herdr pane --help`, and `herdr agent
   --help`. A clean tree includes untracked files.
 - Verify the installed syntax for `herdr pane split`, `herdr agent start`,
-  `herdr agent prompt`, `herdr agent wait`, `herdr agent read`, and `herdr pane
-  close` before the first Herdr mutation.
+  `herdr agent prompt`, `herdr agent wait`, `herdr agent get`, `herdr agent
+  explain`, `herdr pane read`, `herdr pane process-info`, and `herdr pane close`
+  before the first Herdr mutation.
+- Check `herdr integration status` before launching a worker. The OpenCode
+  integration is the preferred lifecycle authority; if it is absent or inactive,
+  record that screen-manifest detection is a degraded fallback and use the
+  pane-liveness checks below. Do not silently install a global integration.
 - Work strictly sequentially against this checkout. Never start a worker for the
   next stage until the current worker's report and affected files are verified.
+- Keep the coordinator loop active without user intervention. While an epic is
+  runnable, the coordinator must autonomously poll, reconcile worker output,
+  verify artifacts, perform the bounded report/recovery actions, and launch the
+  next permitted stage. A quiet, idle, exited, malformed-report, or timed-out
+  worker is operational evidence to handle, never a reason to return control to
+  the user while a safe next action exists.
 - Use an explicit pane ID returned by `herdr pane split`, `--cwd "$PWD"`, and
   `--no-focus`. Never target the caller's or a human's pane. Retain at most two
   panes created by this run and close only pane IDs recorded by this run.
@@ -44,22 +55,105 @@ reference only; this workflow is the authoritative coordinator.
 
 ## Herdr Procedure
 
-For each worker, create a new sibling pane, start a uniquely named OpenCode
-agent, submit its stage prompt, then wait and inspect its terminal output:
+For each worker, create a new sibling pane, retain its returned pane ID as
+`worker_pane_id`, start a uniquely named OpenCode agent, and submit the stage
+prompt. The pane ID remains the diagnostic handle even after the agent exits;
+the agent name does not.
+
+Herdr observes the worker's foreground OpenCode process, not subagents that
+OpenCode starts internally. Every worker prompt that permits subagents must
+therefore require that they are synchronous/blocking: the worker must join and
+evaluate every child before returning its own result, and must never print the
+final Chief-of-Staff report while any child is running. The final report is the
+preferred machine-checkable completion transport, not a reason for the
+coordinator to wait indefinitely. Lifecycle states are solely signals to inspect
+the worker pane and decide the next action.
 
 ```bash
 herdr pane split --current --direction right --cwd "$PWD" --no-focus
 herdr agent start <unique-name> --kind opencode --pane <returned-pane-id>
-herdr agent prompt <unique-name> "<stage-prompt>"
-herdr agent wait <unique-name> --until idle --until done --until blocked --until unknown --timeout 1800000
-herdr agent read <unique-name> --source recent-unwrapped --lines 300
+herdr agent prompt <unique-name> "<stage-prompt>" --wait \
+  --until idle --until done --until blocked --timeout 120000
+herdr pane read <returned-pane-id> --source recent-unwrapped --lines 300
 ```
 
-`idle` is only a lifecycle signal. On `idle`, read the output; if the required
-report is absent or says review subagents are still running, wait for the same
-worker again. On `blocked`, `unknown`, or timeout, read the worker output and
-the relevant artifacts before considering recovery. Do not ask a worker merely
-to reprint output while its result is still pending.
+Never issue one long `agent wait`: waits have no default timeout and a long
+timeout makes an orchestrator unable to distinguish a slow worker from a stale
+lifecycle signal. The initial `agent prompt --wait` must use a short bounded
+window (120 seconds). If it returns `agent_prompt_stalled`, `timeout`, or a
+server error, immediately inspect, in this order:
+
+```bash
+herdr agent get <unique-name>
+herdr agent explain <unique-name>
+herdr pane process-info --pane <worker-pane-id>
+herdr pane read <worker-pane-id> --source recent-unwrapped --lines 300
+```
+
+If `agent get` reports a live working agent, wait again for at most 120 seconds:
+
+```bash
+herdr agent wait <unique-name> --until idle --until done --until blocked \
+  --timeout 120000
+```
+
+Then repeat the inspection. Continue this bounded polling only while the process
+is live and the stage's overall deadline remains. If the agent command returns
+`agent_not_running`, the name can no longer be used: inspect the retained pane
+with `pane process-info` and `pane read`, then verify the required artifacts,
+report, git state, and sprint entry. Treat an exited worker with a complete,
+independently verified report as a completed stage; treat any other exit as a
+failed stage eligible for one recovery worker.
+
+`idle` and `unknown` are lifecycle observations, not completion evidence. On
+every lifecycle result or timeout, run this reconciliation loop before deciding
+to wait again:
+
+```bash
+herdr pane process-info --pane <worker-pane-id>
+herdr pane read <worker-pane-id> --source recent-unwrapped --lines 300
+```
+
+Classify the actual pane output together with process liveness:
+
+- If output explicitly says a subagent, review layer, command, or required task
+  is still running or pending, and the worker process is live, keep polling its
+  output on a bounded interval. Do not use `agent wait` after `idle`, because it
+  returns immediately for the already-idle state and would spin.
+- If output contains the complete report, parse it and perform the normal
+  independent verification.
+- If output gives a substantive final result but the report is absent or
+  malformed, first verify the stage's objective artifacts, git state, tests,
+  and sprint entry. If they show the stage is complete and no child is reported
+  as running, send one non-mutating report-transport prompt to the same live
+  worker: `Your prior stage result appears complete. Do not edit, test, commit,
+  synchronize, or start subagents. Print only a complete
+  --- CHIEF-OF-STAFF-REPORT --- block for that completed result.` Then wait at
+  most 120 seconds and re-read the pane once.
+- If output neither establishes progress nor a completed result, or the live
+  worker does not answer the one report-transport prompt within its bounded
+  window, treat the stage as failed and use the one recovery worker. Do not keep
+  waiting merely because the pane remains `idle`.
+- If the process has exited, apply the exited-worker rules above immediately;
+  do not wait for a report marker.
+
+For an in-progress live worker, retain the latest pane snapshot, pause for a
+short bounded interval, then re-read it:
+
+```bash
+sleep 15
+herdr pane process-info --pane <worker-pane-id>
+herdr pane read <worker-pane-id> --source recent-unwrapped --lines 300
+```
+
+Compare the new snapshot with the retained one. A changed snapshot or explicit
+in-progress output is evidence to continue; an unchanged idle pane is not. Stop
+the polling loop after 120 seconds without new or explicit in-progress evidence,
+then run the failed-stage recovery path rather than waiting indefinitely.
+Continue only while output shows in-progress work, the process is live, and the
+stage deadline remains. On `blocked`, read the pane and relevant artifacts before
+recovery. Use `agent explain` evidence to diagnose a fallback or misclassified
+OpenCode state; do not treat it as proof that the work succeeded.
 
 Every mutating worker must end with this complete report as its final substantive
 output:
@@ -222,8 +316,15 @@ same completion conditions afterward. Never use recovery to start a different
 story, absorb unrelated changes, invent approval, bypass a required review, or
 force a status transition.
 
-Escalate after the recovery fails, authoritative artifacts conflict, credentials
-or an external dependency are unavailable, a destructive operation is required,
-or a decision-needed/high-risk review finding cannot be resolved from the story.
-Report the evidence, safe options, and the exact decision needed. On success,
-close every pane recorded by this run one at a time.
+After every successful verification or recovery, immediately select and execute
+the next permitted stage for the same epic. Do not pause to summarize progress,
+request confirmation, or wait for the user merely because a worker completed,
+went idle, exited, or produced an incomplete report. Continue until the epic is
+done or one of the escalation conditions below is evidenced.
+
+Escalate only after the one recovery attempt fails, authoritative artifacts
+conflict, credentials or an external dependency are unavailable, a destructive
+operation is required, or a decision-needed/high-risk review finding cannot be
+resolved from the story. Report the evidence, safe options, and the exact
+decision needed. On success, close every pane recorded by this run one at a
+time.
