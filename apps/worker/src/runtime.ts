@@ -82,9 +82,8 @@ export class WorkerRuntime {
     ]);
     if (completed === "deadline") {
       for (const adapter of this.adapters) adapter.forceStop?.();
-      // A child should settle promptly after SIGKILL. Bound the wait so a broken
-      // adapter cannot make supervisor shutdown non-deterministic.
-      await Promise.allSettled([...this.running]);
+      // Do not await forced work: a broken adapter must not defeat the graceful
+      // deadline. Its persisted lease or stale-recovery protocol owns recovery.
     }
     for (const socket of this.sockets) socket.destroy();
     await new Promise<void>((resolve) => this.server?.close(() => resolve()) ?? resolve());

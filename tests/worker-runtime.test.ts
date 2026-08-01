@@ -127,13 +127,16 @@ describe("WorkerRuntime", () => {
   });
 
   it("returns from drain at the deadline even if a forced adapter never settles", async () => {
-    let finish!: () => void;
+    let started = false;
+    const forceStop = vi.fn();
     const runtime = new WorkerRuntime({ ...config, gracefulShutdownMs: 5 }, [
-      { name: "knowledge-extraction", run: async () => new Promise<void>((resolve) => { finish = resolve; }), forceStop: () => finish() },
+      { name: "knowledge-extraction", run: async () => { started = true; await new Promise<void>(() => undefined); }, forceStop },
       adapter("knowledge-ingestion", async () => undefined), adapter("knowledge-indexing", async () => undefined), adapter("ai-ask-outbox", async () => undefined),
     ], async () => undefined, 3002, async () => true);
     await runtime.start();
+    await vi.waitFor(() => expect(started).toBe(true));
     await expect(runtime.drain()).resolves.toBeUndefined();
+    expect(forceStop).toHaveBeenCalledTimes(1);
   });
 
   it("validates worker configuration without exposing the database URL", () => {
