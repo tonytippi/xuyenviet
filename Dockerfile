@@ -66,11 +66,13 @@ FROM base AS api-runner
 
 ENV NODE_ENV=production
 ENV PORT=3001
+ENV SCHEMA_RELEASE_MATRIX_DIRECTORY=/app/docs/release-matrices
 
 RUN groupadd --system api && useradd --system --gid api api
 
 COPY --chown=api:api --from=production-deps /app/node_modules ./node_modules
 COPY --chown=api:api --from=build /app/apps/api/dist ./apps/api/dist
+COPY --chown=api:api --from=build /app/docs/release-matrices ./docs/release-matrices
 
 EXPOSE 3001
 
@@ -88,6 +90,7 @@ FROM build AS worker
 
 ENV NODE_ENV=production
 ENV WORKER_PORT=3002
+ENV SCHEMA_RELEASE_MATRIX_DIRECTORY=/app/docs/release-matrices
 
 RUN groupadd --system nextjs && useradd --system --gid nextjs nextjs
 

@@ -5,8 +5,8 @@ import { fileURLToPath } from "node:url";
 import type { Socket } from "node:net";
 
 import postgres from "postgres";
+import { readApprovedSchemaReleasePhasePolicy } from "@xuyenviet/config";
 import { admitsSchemaReleasePhasePolicy, consoleOperationalTelemetrySink, correlationId, emitOperationalTelemetry, evaluateSchemaAdmission, schemaCompatibilityDeclarations, type OperationalTelemetrySink, type SchemaReleasePhasePolicy } from "@xuyenviet/contracts";
-import { readApprovedReleasePhasePolicy } from "../../../scripts/schema-release-matrix";
 
 const adapterNames = ["knowledge-extraction", "knowledge-ingestion", "knowledge-indexing", "ai-ask-outbox"] as const;
 type AdapterName = (typeof adapterNames)[number];
@@ -228,7 +228,7 @@ async function probeSchemaCompatibility(databaseUrl: string, policy?: SchemaRele
 }
 
 export function readWorkerReleasePhasePolicy(value = process.env.SCHEMA_RELEASE_PHASE_POLICY): SchemaReleasePhasePolicy | null | undefined {
-  return readApprovedReleasePhasePolicy(value);
+  return readApprovedSchemaReleasePhasePolicy(value);
 }
 
 function boundedInteger(value: string | undefined, fallback: number, min: number, max: number) {

@@ -18,7 +18,9 @@ export class ResourceServerGuard implements CanActivate {
   constructor(
     @Inject(BFF_CREDENTIAL_CONFIG) private readonly config: BffCredentialConfig,
     @Inject(API_IDENTITY_REPOSITORY) private readonly identities: ApiIdentityRepository,
-    private readonly reflector: Reflector,
+    // esbuild does not preserve constructor metadata for this external Nest
+    // dependency in the bundled API entrypoint, so keep the token explicit.
+    @Inject(Reflector) private readonly reflector: Reflector,
     @Optional() @Inject(RELEASE_SCHEMA_VERSION_REPOSITORY) private readonly schemaVersions?: ReleaseSchemaVersionRepository,
     @Optional() @Inject(API_CONFIGURATION_VALID) private readonly configValid?: boolean,
     @Optional() @Inject(API_RELEASE_PHASE_POLICY) private readonly releasePhasePolicy?: import("@xuyenviet/contracts").SchemaReleasePhasePolicy | null,

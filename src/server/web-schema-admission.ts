@@ -1,5 +1,5 @@
+import { readApprovedSchemaReleasePhasePolicy } from "@xuyenviet/config";
 import { admitsSchemaReleasePhasePolicy, createSchemaCompatibilityConsumer, schemaCompatibilityDeclarations, type SchemaReleasePhasePolicy } from "@xuyenviet/contracts";
-import { readApprovedReleasePhasePolicy } from "../../scripts/schema-release-matrix";
 
 export async function isWebDeploymentReady(dependencies: {
   assertEnvironment: () => void;
@@ -21,5 +21,5 @@ export async function isWebDeploymentReady(dependencies: {
 }
 
 export function readWebReleasePhasePolicy(value = process.env.SCHEMA_RELEASE_PHASE_POLICY): SchemaReleasePhasePolicy | null | undefined {
-  return readApprovedReleasePhasePolicy(value);
+  return readApprovedSchemaReleasePhasePolicy(value);
 }

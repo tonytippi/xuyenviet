@@ -1,6 +1,6 @@
 import type { ReleaseSchemaVersionRepository } from "@xuyenviet/database";
+import { readApprovedSchemaReleasePhasePolicy } from "@xuyenviet/config";
 import { evaluateSchemaAdmission, schemaCompatibilityDeclarations, type SchemaReleasePhasePolicy } from "@xuyenviet/contracts";
-import { readApprovedReleasePhasePolicy } from "../../../scripts/schema-release-matrix";
 
 export const apiSchemaCompatibility = schemaCompatibilityDeclarations.api;
 export const apiCompatibleSchemaVersion = apiSchemaCompatibility.maximumVersion;
@@ -29,5 +29,5 @@ export async function isApiReady(input: { configValid: boolean; repository: Rele
 }
 
 export function readApiReleasePhasePolicy(value = process.env.SCHEMA_RELEASE_PHASE_POLICY): SchemaReleasePhasePolicy | null | undefined {
-  return readApprovedReleasePhasePolicy(value);
+  return readApprovedSchemaReleasePhasePolicy(value);
 }

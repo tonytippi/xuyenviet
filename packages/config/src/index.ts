@@ -1,6 +1,8 @@
-import { createPrivateKey, createPublicKey, type JsonWebKey as NodeJsonWebKey } from "node:crypto";
+import { createHash, createPrivateKey, createPublicKey, type JsonWebKey as NodeJsonWebKey } from "node:crypto";
+import { realpathSync, readFileSync } from "node:fs";
+import { relative, resolve, sep } from "node:path";
 
-import { apiAudience, bffIssuers, type BffIssuer } from "@xuyenviet/contracts";
+import { apiAudience, bffIssuers, parseSchemaReleasePhasePolicy, validatesSchemaReleasePhasePolicy, type BffIssuer, type SchemaReleasePhasePolicy } from "@xuyenviet/contracts";
 
 export type Jwk = JsonWebKey & { kty: "EC"; crv: "P-256"; kid?: string };
 export type VerificationKey = { kid: string; key: Jwk; verificationEndsAt?: Date };
@@ -28,6 +30,27 @@ export type BffTransportConfig = {
   readonly requestTimeoutMs: number;
 };
 export type BffCsrfConfig = Pick<BffTransportConfig, "bffOrigin" | "csrfSigningSecret" | "csrfLifetimeSeconds">;
+
+/** Runtime release artifacts must be supplied from a deployment-owned directory. */
+export function readApprovedSchemaReleasePhasePolicy(
+  value = process.env.SCHEMA_RELEASE_PHASE_POLICY,
+  matrixDirectory = process.env.SCHEMA_RELEASE_MATRIX_DIRECTORY,
+): SchemaReleasePhasePolicy | null | undefined {
+  if (!value) return undefined;
+  if (!matrixDirectory) return null;
+  try {
+    const policy = parseSchemaReleasePhasePolicy(JSON.parse(value));
+    if (!policy || !/^[A-Za-z0-9._-]{1,255}\.json$/.test(policy.matrixPath)) return null;
+    const directory = realpathSync(matrixDirectory);
+    const artifactPath = realpathSync(resolve(directory, policy.matrixPath));
+    const path = relative(directory, artifactPath);
+    if (path === "" || path === ".." || path.startsWith(`..${sep}`) || path.startsWith("/")) return null;
+    const source = readFileSync(artifactPath);
+    return validatesSchemaReleasePhasePolicy(policy, JSON.parse(source.toString("utf8")), createHash("sha256").update(source).digest("hex")) ? policy : null;
+  } catch {
+    return null;
+  }
+}
 
 export function isAiAskApiEnabled(environment: { APP_ENV?: string; XV_AI_ASK_API_ENABLED?: string } = process.env as unknown as { APP_ENV?: string; XV_AI_ASK_API_ENABLED?: string }): boolean {
   const value = environment.XV_AI_ASK_API_ENABLED;

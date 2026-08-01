@@ -159,6 +159,9 @@ importers:
 
   apps/worker:
     dependencies:
+      '@xuyenviet/config':
+        specifier: workspace:*
+        version: link:../../packages/config
       '@xuyenviet/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
