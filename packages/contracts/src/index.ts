@@ -396,11 +396,22 @@ export function isOperationalTelemetryEvent(event: unknown): event is Operationa
     && (candidate.providerRequestId === undefined || /^[A-Za-z0-9_-]{1,128}$/.test(candidate.providerRequestId));
 }
 
+let consoleTelemetryBlocked = false;
+// stdout reports async write failures as stream errors even when a write
+// callback receives the error. Console telemetry is strictly best-effort.
+process.stdout.on("error", () => process.emitWarning("Operational telemetry stdout is unavailable."));
+
 export const consoleOperationalTelemetrySink: OperationalTelemetrySink = {
   emit(event) {
-    return new Promise<void>((resolve, reject) => {
-      process.stdout.write(`operational_telemetry ${JSON.stringify(event)}\n`, (error) => error ? reject(error) : resolve());
-    });
+    // Never queue telemetry behind a blocked stdout consumer. Dropping these
+    // best-effort events preserves the domain operation and bounds memory use.
+    if (consoleTelemetryBlocked) return;
+    try {
+      if (!process.stdout.write(`operational_telemetry ${JSON.stringify(event)}\n`, () => undefined)) {
+        consoleTelemetryBlocked = true;
+        process.stdout.once("drain", () => { consoleTelemetryBlocked = false; });
+      }
+    } catch { /* Telemetry must not change the operation result. */ }
   },
 };
 

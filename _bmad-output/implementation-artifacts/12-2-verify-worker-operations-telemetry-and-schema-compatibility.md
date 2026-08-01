@@ -53,6 +53,11 @@ so that a replacement loop cannot silently lose work or run against an incompati
 
 ## Dev Notes
 
+### Review Findings
+
+- [x] [Review][Patch] Package release artifacts for the production web runner [Dockerfile:53] — The Next runner copies neither `docs/release-matrices` nor sets `SCHEMA_RELEASE_MATRIX_DIRECTORY`, so web readiness fails closed after the persisted overlap version requires an approved phase policy. Ship the deployment-owned matrix directory and configure the runner, then verify web readiness from a copied bundle outside the repository.
+- [x] [Review][Patch] Bound console telemetry under stdout backpressure [packages/contracts/src/index.ts:402] — `process.stdout.write()` may return `false`; unawaited writes then accumulate an unbounded buffer/callback queue under a blocked consumer. Drop/coalesce while blocked or use a bounded non-blocking queue so telemetry cannot exhaust process memory.
+
 ### Scope and Outcome
 
 - This story completes repository-level compatibility admission and observable Worker cutover behavior. It does not implement Story 12.3's approved durable-data expand-migrate-contract matrix, migration-job release gate, or non-destructive rollback plan.
@@ -184,7 +189,13 @@ gpt-5.6-terra-review
 - Test isolation note: two independent PostgreSQL Vitest commands run concurrently interfered through the shared reset database, causing fixture deletion and a Worker schema-gate timeout. The same suites pass when run as one `--maxWorkers=1 --no-file-parallelism` command. Do not split database-reset verification commands concurrently.
 - Verification 2026-07-31: serial `DATABASE_URL_TEST` matrix passed: 12 files, 108 tests. Focused repaired telemetry/protocol serial matrix passed: 5 files, 60 tests. `pnpm lint` completed with 0 errors and 5 pre-existing warnings; post-build `pnpm typecheck`, `pnpm build`, `docker compose config`, Worker Docker target build, and `git diff --check` passed.
 - BMad code review 2026-07-31: initial Blind Hunter, Edge Case Hunter, and Acceptance Auditor findings covering production transport exposure, sink blocking, result classification, public indexing result shape, and evidence recording were repaired. Final follow-up review found no unresolved code findings; the exact 12-file evidence command was reconciled in the Worker operations runbook. Story is approved complete; no deployed monitoring, on-call, Railway, public-launch, or legacy-loop-retirement evidence is claimed.
+- 2026-08-01 final Epic 12 review repair: the production web runner now packages `docs/release-matrices` and declares `/app/docs/release-matrices`; direct copied-bundle verification starts Next from an unrelated cwd and reaches the schema-gated web health boundary. Console telemetry drops events while stdout is backpressured, consumes asynchronous stdout failures without affecting domain outcomes, and emits a process warning for that operational condition. Final serial verification passed: `pnpm vitest run tests/operational-telemetry.test.ts tests/bundled-runtime-startup.test.ts --maxWorkers=1 --no-file-parallelism` (2 files, 8 tests), `pnpm lint` (0 errors, 5 pre-existing warnings), `pnpm typecheck`, and `git diff --check`; `docker build --target runner -t xuyenviet-web-12-2-review .` passed. Final synchronous review found no actionable findings.
 
 ### File List
 
-- Story 12.2 implementation files, tests, runbook, and BMad records listed by `git diff --name-only` at completion.
+- `Dockerfile`
+- `packages/contracts/src/index.ts`
+- `tests/bundled-runtime-startup.test.ts`
+- `tests/operational-telemetry.test.ts`
+- `_bmad-output/implementation-artifacts/12-2-verify-worker-operations-telemetry-and-schema-compatibility.md`
+- `_bmad-output/implementation-artifacts/sprint-status.yaml`

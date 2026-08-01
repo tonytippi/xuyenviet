@@ -22,7 +22,7 @@ afterEach(async () => {
 });
 
 describe("bundled workload startup", () => {
-  it("starts the API and Worker outside the repository with an approved matrix policy", async () => {
+  it("starts API, Worker, and web bundles outside the repository with deployment-owned release artifacts", async () => {
     const deployment = await mkdtemp(resolve(tmpdir(), "xuyenviet-bundle-"));
     try {
       const matrixPath = "20260728.1-to-20260729.1.json";
@@ -33,8 +33,10 @@ describe("bundled workload startup", () => {
       await Promise.all([
         cp(resolve(root, "apps/api/dist"), resolve(deployment, "apps/api/dist"), { recursive: true }),
         cp(resolve(root, "apps/worker/dist"), resolve(deployment, "apps/worker/dist"), { recursive: true }),
+        cp(resolve(root, ".next"), resolve(deployment, ".next"), { recursive: true }),
         // Materialize dependencies so workspace symlinks cannot reach checkout source.
         cp(resolve(root, "node_modules"), resolve(deployment, "node_modules"), { recursive: true, dereference: true }),
+        cp(resolve(root, "package.json"), resolve(deployment, "package.json")),
       ]);
       const parsed = JSON.parse(matrix.toString("utf8"));
       await writeFile(resolve(deployedMatrixDirectory, matrixPath), matrix);
@@ -48,6 +50,7 @@ describe("bundled workload startup", () => {
       });
       const apiPort = await freePort();
       const workerPort = await freePort();
+      const webPort = await freePort();
       const common = {
         ...process.env,
         DATABASE_URL: "postgresql://runtime:runtime@127.0.0.1:1/xuyenviet",
@@ -60,9 +63,11 @@ describe("bundled workload startup", () => {
         XV_BFF_CREDENTIAL_CONFIG: JSON.stringify(credentialConfig()),
       });
       const worker = launch([resolve(deployment, "apps/worker/dist/main.mjs")], cwd, { ...common, WORKER_PORT: String(workerPort) });
+      const web = launch([resolve(deployment, "node_modules/next/dist/bin/next"), "start", deployment], cwd, { ...common, PORT: String(webPort), HOSTNAME: "127.0.0.1" });
 
       await expectLive(apiPort, api);
       await expectLive(workerPort, worker);
+      await expectStatus(webPort, "/api/health", 503, web, "web health endpoint");
     } finally {
       await rm(deployment, { recursive: true, force: true });
     }

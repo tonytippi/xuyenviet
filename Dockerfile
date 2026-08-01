@@ -47,11 +47,13 @@ FROM base AS runner
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
+ENV SCHEMA_RELEASE_MATRIX_DIRECTORY=/app/docs/release-matrices
 
 RUN groupadd --system nextjs && useradd --system --gid nextjs nextjs
 
 COPY --chown=nextjs:nextjs --from=production-deps /app/node_modules ./node_modules
 COPY --chown=nextjs:nextjs --from=build /app/.next ./.next
+COPY --chown=nextjs:nextjs --from=build /app/docs/release-matrices ./docs/release-matrices
 COPY --chown=nextjs:nextjs package.json ./
 
 EXPOSE 3000

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 
-import { correlationId, emitOperationalTelemetry, isOperationalTelemetryEvent, type OperationalTelemetryEvent } from "@xuyenviet/contracts";
+import { consoleOperationalTelemetrySink, correlationId, emitOperationalTelemetry, isOperationalTelemetryEvent, type OperationalTelemetryEvent } from "@xuyenviet/contracts";
 import { runWorkerAdapter } from "../packages/worker-domain/src/adapters";
 import { processAiAskDomainOutboxBatch } from "../packages/worker-domain/src/features/ai/domain-outbox-worker";
 import { conversations, domainOutbox } from "@/db/schema";
@@ -69,6 +69,37 @@ describe("operational telemetry contract", () => {
       telemetry: { emit() { throw new Error("sink unavailable"); } },
       runPoll: async () => ({ capability: "ai_ask.outbox", resultCode: "success", durableId: "outbox_1", retryCount: 2, jobLagMs: 4, leaseRecovery: "recovered", leaseRecoveryCount: 1 }),
     })).resolves.toMatchObject({ durableId: "outbox_1", resultCode: "success" });
+  });
+
+  it("drops console telemetry while stdout is backpressured without changing the caller result", () => {
+    const write = vi.spyOn(process.stdout, "write").mockReturnValueOnce(false).mockReturnValue(true);
+    const event = { correlationId: "console_telemetry_1", capability: "worker.startup" as const, principalClass: "system" as const, resultCode: "success" as const, latencyMs: 1 };
+    try {
+      expect(consoleOperationalTelemetrySink.emit(event)).toBeUndefined();
+      expect(consoleOperationalTelemetrySink.emit(event)).toBeUndefined();
+      expect(write).toHaveBeenCalledTimes(1);
+
+      process.stdout.emit("drain");
+      expect(consoleOperationalTelemetrySink.emit(event)).toBeUndefined();
+      expect(write).toHaveBeenCalledTimes(2);
+    } finally {
+      process.stdout.emit("drain");
+      write.mockRestore();
+    }
+  });
+
+  it("absorbs asynchronous stdout errors without changing the caller result", () => {
+    const write = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
+    const event = { correlationId: "console_telemetry_error_1", capability: "worker.startup" as const, principalClass: "system" as const, resultCode: "success" as const, latencyMs: 1 };
+    try {
+      expect(consoleOperationalTelemetrySink.emit(event)).toBeUndefined();
+      expect(() => process.stdout.emit("error", new Error("stdout unavailable"))).not.toThrow();
+      expect(emitWarning).toHaveBeenCalledWith("Operational telemetry stdout is unavailable.");
+    } finally {
+      emitWarning.mockRestore();
+      write.mockRestore();
+    }
   });
 
   it.runIf(Boolean(process.env.DATABASE_URL_TEST))("observes an expired outbox lease from its claimed durable protocol facts", async () => {
