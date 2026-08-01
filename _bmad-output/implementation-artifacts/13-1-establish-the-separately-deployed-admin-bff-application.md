@@ -1,6 +1,6 @@
 # Story 13.1: Establish the Separately Deployed Admin BFF Application
 
-Status: done
+Status: in-progress
 
 ## Story
 
@@ -134,6 +134,7 @@ gpt-5.6-terra
 
 ### Review Outcome
 
+- The one permitted post-repair Epic 13 review completed all synchronous layers and found one remaining MEDIUM patch in `apps/api/src/auth/admin-identity.controller.ts:113-118`: Google token/UserInfo upstream 5xx or overload responses are projected as `UnauthorizedException` rather than a redacted retryable `503 internal_error`. Invalid OAuth credentials and malformed provider responses remain denial cases. The bounded Epic rerun has been consumed; retain this story as in progress pending an explicitly authorized additional repair/review cycle.
 - 2026-08-01 repair loop: policy-free Admin Identity admission now derives its maximum schema version from the shared API policy-free declaration, pinning it to `20260728.1`. The actual identity handoff regression admits `20260728.1` and fails closed with a safe 503 at `20260729.1` when `SCHEMA_RELEASE_PHASE_POLICY` is absent.
 - 2026-08-01 synchronous repair review: Blind Hunter, Edge Case Hunter, and Acceptance Auditor each completed. No actionable local findings remained. Story 13.2 was not modified.
 - Epic 13 completion review found a HIGH release-admission defect in `apps/api/src/auth/admin-identity.controller.ts`: when `SCHEMA_RELEASE_PHASE_POLICY` was absent, the admin declaration admitted `20260729.1`, while the API request boundary correctly admits only `20260728.1` without a bound policy. Keep this story in progress until identity admission pins policy-free maximum version to `20260728.1`, regression coverage proves rejection at `20260729.1`, and follow-up review verifies fail-closed alignment.
