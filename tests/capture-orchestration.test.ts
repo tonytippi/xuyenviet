@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 
-import { captureCacheFirst, flushCachedArtifact } from "@/features/knowledge/capture-orchestration";
+import { CaptureImportError, captureCacheFirst, flushCachedArtifact } from "@/features/knowledge/capture-orchestration";
+import { SourceCaptureValidationError } from "@/features/knowledge/source-captures";
 
 const artifact = { id: "artifact-1" } as never;
 
@@ -27,8 +28,21 @@ describe("capture cache import orchestration", () => {
       importCommitted: async () => false,
       flush: async () => { calls.push("flush"); throw new Error("connection reset"); },
       finishImport: async (_token, _owner, outcome) => { calls.push(`finish:${outcome}`); },
-    })).rejects.toThrow("production_flush_ambiguous");
+    })).rejects.toThrow("capture_import_flush_failed");
     expect(calls).toEqual(["flush", "finish:retryable"]);
+  });
+
+  test("preserves safe validation and PostgreSQL codes from a production flush", async () => {
+    const input = { artifact, sourceId: "source-1", prepareImport: async () => ({ correlationToken: "stable-token", outcome: "awaiting_flush" as const, ownsLease: true, leaseOwner: "runner-1" }), importCommitted: async () => false, finishImport: async () => undefined };
+    await expect(flushCachedArtifact({ ...input, flush: async () => { throw new SourceCaptureValidationError("raw provider response must not leak"); } })).rejects.toThrow("capture_import_flush_validation_failed");
+    await expect(flushCachedArtifact({ ...input, flush: async () => { throw new SourceCaptureValidationError("Capture metadata field model is unsafe."); } })).rejects.toThrow("capture_import_flush_metadata_failed");
+    await expect(flushCachedArtifact({ ...input, flush: async () => { throw new SourceCaptureValidationError("Captured readable material exceeds the 120000-character limit."); } })).rejects.toThrow("capture_import_flush_evidence_failed");
+    await expect(flushCachedArtifact({ ...input, flush: async () => { const error = new Error("detail must not leak") as Error & { code: string }; error.code = "23514"; throw error; } })).rejects.toThrow("capture_import_flush_postgres_23514");
+  });
+
+  test("reports a safe stage when checking an existing production import fails", async () => {
+    await expect(flushCachedArtifact({ artifact, sourceId: "source-1", prepareImport: async () => ({ correlationToken: "stable-token", outcome: "awaiting_flush", ownsLease: true, leaseOwner: "runner-1" }), importCommitted: async () => { throw new Error("database credentials must not leak"); }, flush: async () => "updated", finishImport: async () => undefined })).rejects.toBeInstanceOf(CaptureImportError);
+    await expect(flushCachedArtifact({ artifact, sourceId: "source-1", prepareImport: async () => ({ correlationToken: "stable-token", outcome: "awaiting_flush", ownsLease: true, leaseOwner: "runner-1" }), importCommitted: async () => { throw new Error("database credentials must not leak"); }, flush: async () => "updated", finishImport: async () => undefined })).rejects.toThrow("capture_import_commit_check_failed");
   });
 
   test("records terminal guarded-write outcomes per target while preserving the artifact", async () => {

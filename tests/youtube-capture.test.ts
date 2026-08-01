@@ -2,8 +2,9 @@ import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test } from "vitest";
 
 import { auditEvents, knowledgeCardSearchDocuments, knowledgeCardSources, knowledgeCards, knowledgeIndexDirtyMarkers, knowledgeIngestionJobs, rawSourceMaterial, sourceCaptureVersions, sources, users } from "@/db/schema";
+import { validateSafeCaptureMetadata } from "@/features/knowledge/source-captures";
 import { listQueuedYoutubeSources, maxYoutubeEvidenceItemsPerVideo, maxYoutubeEvidenceItemsPerWindow, parseYoutubeEvidence, recordYoutubeCaptureFailure, saveYoutubeEvidence, serializeYoutubeEvidence } from "@/features/knowledge/youtube-capture";
-import { getYoutubeMediaResolution, mergeYoutubeWindowEvidence, normalizeYoutubeWindowTimestamps, parseCachedYoutubePayload, parseCachedYoutubeSegmentPayload, parseYoutubeDuration, requestYoutubeEvidence, requestYoutubeTitle, retainedYoutubeEvidenceItemsPerWindow, youtubeWindows } from "../scripts/youtube-capture";
+import { captureFailureCode, captureFailureReason, getYoutubeMediaResolution, mergeYoutubeWindowEvidence, normalizeYoutubeWindowTimestamps, parseCachedYoutubePayload, parseCachedYoutubeSegmentPayload, parseYoutubeDuration, requestYoutubeEvidence, requestYoutubeTitle, retainedYoutubeEvidenceItemsPerWindow, youtubeWindows } from "../scripts/youtube-capture";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
 import { seedSourceCaptureVersion } from "./helpers/source-captures";
@@ -24,6 +25,13 @@ describe("YouTube capture", () => {
     await createSource("queued");
     await createSource("captured", "Existing evidence");
     expect((await listQueuedYoutubeSources(testDb, { limit: 10 })).map((source) => source.sourceId)).toEqual(["queued"]);
+  });
+
+  test("does not queue a withdrawn YouTube source", async () => {
+    await createSource("withdrawn");
+    await testDb.update(sources).set({ eligibility: "withdrawn", removalReason: "withdrawn", removedByUserId: actor.userId, removalCompletedAt: new Date() }).where(eq(sources.id, "withdrawn"));
+
+    await expect(listQueuedYoutubeSources(testDb, { sourceId: "withdrawn" })).resolves.toEqual([]);
   });
 
   test("queues an Intake YouTube source when its raw metadata is null", async () => {
@@ -54,6 +62,12 @@ describe("YouTube capture", () => {
     expect(audit).toMatchObject({ actorClass: "system", actorUserId: null, actorEmail: null, actorSystem: "system-youtube-capture" });
     expect(audit.afterSummary).not.toContain("NovaWorld");
     expect(audit.afterSummary).toContain("evidenceCount: 1");
+  });
+
+  test("accepts complete YouTube cache-import metadata", () => {
+    expect(() => validateSafeCaptureMetadata("youtube", {
+      kind: "youtube", captureMethod: "gemini_youtube_url", capturedAt: "2026-08-01T00:00:00.000Z", sourceUrl: "https://www.youtube.com/watch?v=abcDEF12345", model: "gemini-3.6-flash", mediaResolution: "MEDIA_RESOLUTION_LOW", promptVersion: "youtube-evidence-v1", evidenceCount: 1, latencyMs: 1, videoDurationSeconds: 3600, windowStartSeconds: 0, windowEndSeconds: 1800, windowCount: 2, captureOrigin: "cache", captureArtifactId: "d965610e-cf1b-4bcd-8199-c7934176bc44", importedAt: "2026-08-01T00:00:01.000Z", importCorrelationToken: "996eb5a9-9f3a-4ee6-958b-8bba49ba1d26", payloadSchemaVersion: "youtube-capture-v1", promptTokens: 100, outputTokens: 20, totalTokens: 120,
+    })).not.toThrow();
   });
 
   test("invalidates linked search projections when a YouTube title changes", async () => {
@@ -112,6 +126,17 @@ describe("YouTube capture", () => {
     const fetchMock = async () => new Response(JSON.stringify({ error: { status: "INVALID_ARGUMENT", message: "Invalid file URI; api_key=provider-secret; Authorization: Bearer provider-token" } }), { status: 400 });
 
     await expect(requestYoutubeEvidence("https://www.youtube.com/watch?v=abcDEF12345", "secret-key", "gemini-3.5-flash", { startOffsetSeconds: 0, endOffsetSeconds: 30 }, undefined, fetchMock)).rejects.toMatchObject({ message: "gemini_http_400", diagnostic: "INVALID_ARGUMENT" });
+  });
+
+  test("preserves safe network diagnostics in capture failures", () => {
+    expect(captureFailureCode(new Error("youtube_data_network_error"))).toBe("youtube_data_network_error");
+    expect(captureFailureCode(new Error("gemini_network_error"))).toBe("gemini_network_error");
+    expect(captureFailureCode(new Error("capture_import_flush_failed"))).toBe("capture_import_flush_failed");
+    expect(captureFailureCode(new Error("capture_import_flush_validation_failed"))).toBe("capture_import_flush_validation_failed");
+    expect(captureFailureCode(new Error("capture_import_flush_metadata_failed"))).toBe("capture_import_flush_metadata_failed");
+    expect(captureFailureCode(new Error("capture_import_flush_postgres_23514"))).toBe("capture_import_flush_postgres_23514");
+    expect(captureFailureCode(new Error("provider response included api_key=secret"))).toBe("capture_failed");
+    expect(captureFailureReason(new Error("provider response included api_key=secret"), "duration_lookup")).toBe("youtube_duration_lookup_failed");
   });
 
   test("normalizes Gemini absolute timestamps to their requested window", () => {

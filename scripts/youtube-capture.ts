@@ -39,20 +39,26 @@ export async function requestYoutubeEvidence(url: string, apiKey: string, model:
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 180_000);
       try {
-        const response = await fetchImpl(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
-          method: "POST",
-          headers: { "content-type": "application/json", "x-goog-api-key": apiKey },
-          signal: controller.signal,
-          body: JSON.stringify({
-            contents: [{
-              parts: [
-                { file_data: { file_uri: url, mime_type: "video/mp4" }, video_metadata: { start_offset: `${window.startOffsetSeconds}s`, end_offset: `${window.endOffsetSeconds}s` } },
-                { text: prompt },
-              ],
-            }],
-            generationConfig: { responseMimeType: "application/json", temperature: 0, mediaResolution },
-          }),
-        });
+        let response: Response;
+        try {
+          response = await fetchImpl(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+            method: "POST",
+            headers: { "content-type": "application/json", "x-goog-api-key": apiKey },
+            signal: controller.signal,
+            body: JSON.stringify({
+              contents: [{
+                parts: [
+                  { file_data: { file_uri: url, mime_type: "video/mp4" }, video_metadata: { start_offset: `${window.startOffsetSeconds}s`, end_offset: `${window.endOffsetSeconds}s` } },
+                  { text: prompt },
+                ],
+              }],
+              generationConfig: { responseMimeType: "application/json", temperature: 0, mediaResolution },
+            }),
+          });
+        } catch (error) {
+          if (error instanceof Error && error.name === "AbortError") throw error;
+          throw new Error("gemini_network_error");
+        }
         if (!response.ok) {
           const error = new GeminiRequestError(`gemini_http_${response.status}`, await readGeminiErrorDiagnostic(response));
           if (attempt < geminiRetryDelaysMs.length && isRetryableGeminiError(error)) {
@@ -61,10 +67,11 @@ export async function requestYoutubeEvidence(url: string, apiKey: string, model:
           }
           throw error;
         }
-        const payload = await response.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>; usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number } };
+        const payload = await response.json().catch(() => { throw new Error("gemini_invalid_json"); }) as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>; usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number } };
         const text = payload.candidates?.[0]?.content?.parts?.find((part) => typeof part.text === "string")?.text;
         if (!text) throw new Error("gemini_empty_response");
-        const evidence = normalizeYoutubeWindowTimestamps(parseYoutubeEvidence(JSON.parse(text) as unknown, maxYoutubeEvidenceItemsPerWindow), window);
+        const responseValue = JSON.parse(text) as unknown;
+        const evidence = normalizeYoutubeWindowTimestamps(parseYoutubeEvidence(responseValue, maxYoutubeEvidenceItemsPerWindow), window);
         return { evidence, latencyMs: Date.now() - startedAt, usage: payload.usageMetadata };
       } finally {
         clearTimeout(timeout);
@@ -72,6 +79,7 @@ export async function requestYoutubeEvidence(url: string, apiKey: string, model:
     }
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") throw new Error("gemini_timeout");
+    if (error instanceof SyntaxError) throw new Error("gemini_invalid_json");
     throw error;
   }
 }
@@ -132,9 +140,14 @@ export function mergeYoutubeWindowEvidence(windows: Array<{ window: YoutubeWindo
 }
 
 async function requestYoutubeDuration(videoId: string, apiKey: string, fetchImpl = fetch) {
-  const response = await fetchImpl(`https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id=${encodeURIComponent(videoId)}&key=${encodeURIComponent(apiKey)}`);
+  let response: Response;
+  try {
+    response = await fetchImpl(`https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id=${encodeURIComponent(videoId)}&key=${encodeURIComponent(apiKey)}`);
+  } catch {
+    throw new Error("youtube_data_network_error");
+  }
   if (!response.ok) throw new Error(response.status === 403 ? "youtube_data_api_access_required" : `youtube_data_http_${response.status}`);
-  const payload = await response.json() as { items?: Array<{ contentDetails?: { duration?: unknown } }> };
+  const payload = await response.json().catch(() => { throw new Error("youtube_data_invalid_response"); }) as { items?: Array<{ contentDetails?: { duration?: unknown } }> };
   const duration = parseYoutubeDuration(payload.items?.[0]?.contentDetails?.duration);
   if (!duration) throw new Error("youtube_duration_unavailable");
   return duration;
@@ -222,25 +235,33 @@ async function main() {
     for (const source of queued) {
       const startedAt = Date.now();
       const url = source.canonicalUrl ?? source.url;
+      let stage = "setup";
       console.log(`${source.sourceId}: capture started ${url ?? "youtube_url_unavailable"}`);
       if (!url || !/^https:\/\/www\.youtube\.com\/watch\?v=[A-Za-z0-9_-]{6,20}$/.test(url)) { await recordYoutubeCaptureFailure(db, { sourceId: source.sourceId, reason: "youtube_video_url_required" }); console.log(`${source.sourceId}: finished youtube_video_url_required (${formatDuration(startedAt)})`); continue; }
       try {
+        stage = "resource_identity";
         const resourceIdentity = youtubeResourceIdentity(url);
         if (!resourceIdentity) throw new Error("youtube_video_url_required");
+        stage = "configuration";
         const model = getEnvValue("GEMINI_YOUTUBE_MODEL") ?? "gemini-3.6-flash";
         const mediaResolution = getYoutubeMediaResolution();
         const captureMethodVersion = youtubeCaptureMethodVersion(mediaResolution);
         const reuseKey = captureReuseKey({ provider: "youtube", resourceIdentity, captureMethodVersion, payloadSchemaVersion: YOUTUBE_CAPTURE_PAYLOAD_SCHEMA_VERSION, promptVersion: youtubeEvidencePromptVersion, model, mediaResolution });
+        stage = "aggregate_cache_lookup";
         const cached = await findReusableArtifact(cacheClient, reuseKey);
         if (cached) {
+          stage = "aggregate_cache_parse";
           const payload = parseCachedYoutubePayload(cached.payload);
+          stage = "title_lookup";
           const title = await requestYoutubeTitle(url);
+          stage = "cached_import";
           const result = await flushCachedArtifact({ artifact: cached, sourceId: source.sourceId, prepareImport: () => prepareImport(cacheClient, cached.id, source.sourceId), importCommitted: (correlationToken) => findYoutubeCaptureImportByCorrelationToken(db, { sourceId: source.sourceId, correlationToken }), flush: (correlationToken) => saveYoutubeEvidence(db, { sourceId: source.sourceId, evidence: payload.evidence, metadata: { ...payload.metadata, captureMethod: "gemini_youtube_url", capturedAt: cached.capturedAt, sourceUrl: url, model, mediaResolution, promptVersion: youtubeEvidencePromptVersion, evidenceCount: payload.evidence.length, captureOrigin: "cache", captureArtifactId: cached.id, importedAt: new Date().toISOString(), importCorrelationToken: correlationToken, payloadSchemaVersion: YOUTUBE_CAPTURE_PAYLOAD_SCHEMA_VERSION }, title }).then((value) => value.status), finishImport: (correlationToken, leaseOwner, outcome) => finishImport(cacheClient, cached.id, source.sourceId, correlationToken, leaseOwner, outcome) });
           console.log(`${source.sourceId}: finished ${result} (${formatDuration(startedAt)})`);
           continue;
         }
         const videoId = youtubeVideoId(url);
         if (!videoId) throw new Error("youtube_video_url_required");
+        stage = "duration_lookup";
         const durationApiKey = getEnvValue("YOUTUBE_DATA_API_KEY") ?? getEnvValue("GEMINI_API_KEY");
         if (!durationApiKey) throw new Error("YOUTUBE_DATA_API_KEY is required to determine YouTube video duration.");
         const durationSeconds = await requestYoutubeDuration(videoId, durationApiKey);
@@ -250,13 +271,16 @@ async function main() {
         for (const [index, window] of youtubeWindows(durationSeconds).entries()) {
           const segmentResourceIdentity = youtubeWindowResourceIdentity(resourceIdentity, window.startOffsetSeconds, window.endOffsetSeconds);
           const segmentReuseKey = captureReuseKey({ provider: "youtube", resourceIdentity: segmentResourceIdentity, captureMethodVersion: segmentCaptureMethodVersion, payloadSchemaVersion: YOUTUBE_CAPTURE_PAYLOAD_SCHEMA_VERSION, promptVersion: youtubeEvidencePromptVersion, model, mediaResolution });
+          stage = `segment_${index + 1}_cache_lookup`;
           const cachedSegment = await findReusableArtifact(cacheClient, segmentReuseKey);
           if (cachedSegment) {
+            stage = `segment_${index + 1}_cache_parse`;
             const segment = parseCachedYoutubeSegmentPayload(cachedSegment.payload);
             if (segment.window.startOffsetSeconds === window.startOffsetSeconds && segment.window.endOffsetSeconds === window.endOffsetSeconds) { segments.push(segment); continue; }
           }
           if (!apiKey) throw new Error("GEMINI_API_KEY is required for youtube:capture cache misses.");
           let result;
+          stage = `segment_${index + 1}_capture`;
           try { result = await requestYoutubeEvidence(url, apiKey, model, window, mediaResolution); } catch (error) { throw new YoutubeSegmentError(index + 1, error instanceof GeminiRequestError ? error.diagnostic : null, error); }
           const capturedAt = new Date().toISOString();
           await admitArtifact(cacheClient, { provider: "youtube", reuseKey: segmentReuseKey, resourceIdentity: segmentResourceIdentity, captureMethodVersion: segmentCaptureMethodVersion, payloadSchemaVersion: YOUTUBE_CAPTURE_PAYLOAD_SCHEMA_VERSION, promptVersion: youtubeEvidencePromptVersion, model, payload: { evidence: result.evidence, window, metadata: sanitizeYoutubeMetadata({ captureMethod: "gemini_youtube_url", capturedAt, sourceUrl: url, model, mediaResolution, promptVersion: youtubeEvidencePromptVersion, evidenceCount: result.evidence.length, latencyMs: result.latencyMs, promptTokens: result.usage?.promptTokenCount, outputTokens: result.usage?.candidatesTokenCount, totalTokens: result.usage?.totalTokenCount, videoDurationSeconds: durationSeconds, windowStartSeconds: window.startOffsetSeconds, windowEndSeconds: window.endOffsetSeconds }) }, metadata: { captureOrigin: "live" }, capturedAt });
@@ -265,14 +289,17 @@ async function main() {
         const evidence = mergeYoutubeWindowEvidence(segments);
         if (!evidence.length) { await recordYoutubeCaptureFailure(db, { sourceId: source.sourceId, reason: "no_travel_evidence" }); console.log(`${source.sourceId}: finished no_travel_evidence (${formatDuration(startedAt)})`); continue; }
         if (!options.yes && !(await confirm(source.sourceId, evidence.length))) { console.log(`${source.sourceId}: finished skipped (${formatDuration(startedAt)})`); continue; }
+        stage = "title_lookup";
         const title = await requestYoutubeTitle(url);
         const capturedAt = new Date().toISOString();
         const latencyMs = segments.reduce((total, segment) => total + segment.latencyMs, 0);
+        stage = "aggregate_cache_write";
         const artifact = await admitArtifact(cacheClient, { provider: "youtube", reuseKey, resourceIdentity, captureMethodVersion, payloadSchemaVersion: YOUTUBE_CAPTURE_PAYLOAD_SCHEMA_VERSION, promptVersion: youtubeEvidencePromptVersion, model, payload: { evidence, metadata: sanitizeYoutubeMetadata({ captureMethod: "gemini_youtube_url", capturedAt, sourceUrl: url, model, mediaResolution, promptVersion: youtubeEvidencePromptVersion, evidenceCount: evidence.length, latencyMs, videoDurationSeconds: durationSeconds, windowCount: segments.length }) }, metadata: { captureOrigin: "live" }, capturedAt });
+        stage = "production_import";
         const saved = await flushCachedArtifact({ artifact, sourceId: source.sourceId, prepareImport: () => prepareImport(cacheClient, artifact.id, source.sourceId), importCommitted: (correlationToken) => findYoutubeCaptureImportByCorrelationToken(db, { sourceId: source.sourceId, correlationToken }), flush: (correlationToken) => saveYoutubeEvidence(db, { sourceId: source.sourceId, evidence, metadata: { captureMethod: "gemini_youtube_url", capturedAt, sourceUrl: url, model, mediaResolution, promptVersion: youtubeEvidencePromptVersion, evidenceCount: evidence.length, latencyMs, videoDurationSeconds: durationSeconds, windowCount: segments.length, captureOrigin: "live", captureArtifactId: artifact.id, importedAt: new Date().toISOString(), importCorrelationToken: correlationToken, payloadSchemaVersion: YOUTUBE_CAPTURE_PAYLOAD_SCHEMA_VERSION }, title }).then((value) => value.status), finishImport: (correlationToken, leaseOwner, outcome) => finishImport(cacheClient, artifact.id, source.sourceId, correlationToken, leaseOwner, outcome) });
         console.log(`${source.sourceId}: finished ${saved} (${formatDuration(startedAt)})`);
       } catch (error) {
-        const reason = error instanceof YoutubeSegmentError ? error.message : captureFailureCode(error);
+        const reason = error instanceof YoutubeSegmentError ? error.message : captureFailureReason(error, stage);
         await recordYoutubeCaptureFailure(db, { sourceId: source.sourceId, reason });
         console.log(`${source.sourceId}: finished ${reason.replace(/[^a-z0-9_.:-]+/gi, "_").slice(0, 120)} (${formatDuration(startedAt)})`);
         if (error instanceof GeminiRequestError && error.diagnostic) console.error(`${source.sourceId}: Gemini diagnostic status: ${error.diagnostic}`);
@@ -298,15 +325,20 @@ function isRetryableGeminiError(error: GeminiRequestError) {
   return /^(?:gemini_http_(?:429|500|502|503|504))$/.test(error.message) || error.diagnostic === "UNAVAILABLE" || error.diagnostic === "INTERNAL" || error.diagnostic === "DEADLINE_EXCEEDED";
 }
 
-function captureFailureCode(error: unknown) {
+export function captureFailureCode(error: unknown) {
   const message = error instanceof Error ? error.message : "";
   const safeCodes = [
     /^gemini_http_\d+$/,
-    /^gemini_(?:timeout|empty_response|invalid_json|evidence_limit_exceeded|invalid_evidence_item_\d+_[a-z_]+|window_timestamp_out_of_range)$/,
-    /^youtube_(?:video_url_required|duration_invalid|duration_unavailable|data_http_\d+|data_api_access_required)$/,
+    /^gemini_(?:timeout|network_error|empty_response|invalid_json|evidence_limit_exceeded|invalid_evidence_item_\d+_[a-z_]+|window_timestamp_out_of_range)$/,
+    /^youtube_(?:video_url_required|duration_invalid|duration_unavailable|data_http_\d+|data_api_access_required|data_network_error|data_invalid_response)$/,
     /^(?:GEMINI_API_KEY|YOUTUBE_DATA_API_KEY|GEMINI_YOUTUBE_MEDIA_RESOLUTION) is required/,
-    /^capture_(?:artifact_payload_too_large|failed)$/,
+    /^(?:capture_(?:artifact_payload_too_large|failed|import_(?:prepare|commit_check|finish)_failed|import_flush_(?:validation_failed|metadata_failed|evidence_failed|source_failed|ingestion_job_failed|timeout|postgres_[0-9a-z]{5}|failed))|production_flush_ambiguous)$/,
   ];
   if (safeCodes.some((pattern) => pattern.test(message))) return message.startsWith("GEMINI_") || message.startsWith("YOUTUBE_") ? "capture_configuration_error" : message;
   return "capture_failed";
+}
+
+export function captureFailureReason(error: unknown, stage: string) {
+  const code = captureFailureCode(error);
+  return code === "capture_failed" ? `youtube_${stage}_failed` : code;
 }

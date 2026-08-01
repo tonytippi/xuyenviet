@@ -63,7 +63,7 @@ const maxExcerptLength = 240;
 const maxConditionLength = 400;
 
 function queuedCondition() {
-  return and(isNull(sources.currentCaptureVersionId), sql`coalesce(${rawSourceMaterial.rawMetadata}->>'duplicateSourceId', '') = ''`);
+  return and(eq(sources.eligibility, "eligible"), isNull(sources.currentCaptureVersionId), sql`coalesce(${rawSourceMaterial.rawMetadata}->>'duplicateSourceId', '') = ''`);
 }
 
 export async function listQueuedYoutubeSources(db: YoutubeCaptureDb, input: { sourceId?: string; limit?: number } = {}): Promise<QueuedYoutubeSource[]> {

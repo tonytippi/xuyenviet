@@ -1,12 +1,12 @@
 import "server-only";
 
 import { createHash } from "node:crypto";
-import { and, asc, count, desc, eq, gt, inArray, isNull, lte, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, inArray, lte, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
 import { disableStaleKnowledgeSearchProjection, enqueueKnowledgeIndexWork } from "@/features/knowledge/indexing-queue";
 import { getCurrentValidEvidenceFencesForReadiness } from "@/features/knowledge/readiness-evidence";
-import { facebookCaptureReviews, knowledgeCardEvidence, knowledgeCards, knowledgeIngestionCandidates, knowledgeIngestionJobs, knowledgeRecommendations, knowledgeSamplingCandidateLedger, knowledgeSamplingCohortMembers, knowledgeSamplingDispositionReasonValues, knowledgeSamplingPolicies, knowledgeVerifyFirstSamplingObligations, sourceCaptureVersions, sources, type KnowledgeRecommendationAction, type KnowledgeRecommendationReason, type KnowledgeSamplingDispositionReason } from "@/db/schema";
+import { facebookCaptureReviews, knowledgeCardEvidence, knowledgeCards, knowledgeIngestionCandidates, knowledgeIngestionJobs, knowledgeRecommendations, knowledgeSamplingCandidateLedger, knowledgeSamplingCohortMembers, knowledgeSamplingDispositionReasonValues, knowledgeSamplingPolicies, knowledgeVerifyFirstSamplingObligations, sources, type KnowledgeRecommendationAction, type KnowledgeRecommendationReason, type KnowledgeSamplingDispositionReason } from "@/db/schema";
 import { recordAuditEvent } from "@/features/audit/events";
 import { type SystemAuditActorId } from "@/features/audit/actors";
 import { getCorridorBucketLabel } from "@/features/knowledge/corridor";
@@ -49,11 +49,12 @@ export async function listKnowledgeRecommendations(input: { workStatus?: Knowled
   const page = Math.max(1, Math.trunc(input.page ?? 1));
   const statuses = input.workStatus === "completed" ? ["resolved"] as const : input.workStatus === "inactive" ? ["superseded"] as const : ["open", "in_review"] as const;
   const where = and(inArray(knowledgeRecommendations.status, statuses), input.reason ? eq(knowledgeRecommendations.reason, input.reason) : undefined);
-  return db.select({
+  const recommendations = await db.select({
     id: knowledgeRecommendations.id, status: knowledgeRecommendations.status, resolution: knowledgeRecommendations.resolution, reason: knowledgeRecommendations.reason, priority: knowledgeRecommendations.priority,
     contentVersion: knowledgeRecommendations.contentVersion, evidenceSetRevision: knowledgeRecommendations.evidenceSetRevision, createdAt: knowledgeRecommendations.createdAt,
     card: { id: knowledgeCards.id, title: knowledgeCards.title, summary: knowledgeCards.summary, conditions: knowledgeCards.conditions, publicationState: knowledgeCards.publicationState, knowledgeState: knowledgeCards.knowledgeState, reviewState: knowledgeCards.reviewState, verificationState: knowledgeCards.verificationState, contentVersion: knowledgeCards.contentVersion, evidenceSetRevision: knowledgeCards.evidenceSetRevision },
-  }).from(knowledgeRecommendations).innerJoin(knowledgeCards, eq(knowledgeCards.id, knowledgeRecommendations.knowledgeCardId)).where(where).orderBy(asc(knowledgeRecommendations.priority), asc(knowledgeRecommendations.createdAt)).limit(25).offset((page - 1) * 25) as Promise<KnowledgeRecommendationListItem[]>;
+  }).from(knowledgeRecommendations).innerJoin(knowledgeCards, eq(knowledgeCards.id, knowledgeRecommendations.knowledgeCardId)).where(where).orderBy(asc(knowledgeRecommendations.priority), asc(knowledgeRecommendations.createdAt)).limit(25).offset((page - 1) * 25);
+  return recommendations as KnowledgeRecommendationListItem[];
 }
 
 export async function getKnowledgeRecommendationDetail(recommendationId: string, db: RecommendationDb = getDb()) {
@@ -262,9 +263,7 @@ export async function resolveKnowledgeRecommendation(input: { recommendationId: 
       if (!validVerificationTarget || (!operatorOverride && !corroborated) || (recommendation.reason === "conflict" ? card.knowledgeState !== "conflicted" : !["uncertain", "community_pattern", "conflicted"].includes(card.knowledgeState))) return { status: recommendation.reason === "conflict" ? "invalid_verification" as const : "invalid_action" as const };
     }
     if (input.action === "promote") {
-      if (recommendation.reason !== "verification" || card.status !== "approved" || card.publicationState !== "suppressed" || card.knowledgeState !== "uncertain" || card.reviewState !== "ai_recommended" || card.verificationState !== "required" || !card.needsReview || !getCorridorBucketLabel(card.routeSegment, card.locationName) || !card.title.trim() || !card.summary.trim()) return { status: "invalid_action" as const };
-      const [validEvidence] = await tx.select({ id: knowledgeCardEvidence.id }).from(knowledgeCardEvidence).innerJoin(sources, eq(sources.id, knowledgeCardEvidence.sourceId)).innerJoin(sourceCaptureVersions, and(eq(sourceCaptureVersions.id, knowledgeCardEvidence.captureVersionId), eq(sourceCaptureVersions.sourceId, knowledgeCardEvidence.sourceId), eq(sources.currentCaptureVersionId, knowledgeCardEvidence.captureVersionId))).where(and(eq(knowledgeCardEvidence.knowledgeCardId, card.id), eq(knowledgeCardEvidence.state, "active"), sql`${knowledgeCardEvidence.supportLevel} in ('primary', 'supporting')`, sql`${knowledgeCardEvidence.displayPolicy} in ('fact_only', 'traveler_visible')`, eq(sources.eligibility, "eligible"), sql`${sources.kind} = ${sourceCaptureVersions.captureKind} and ${sources.kind} in ('url', 'facebook', 'youtube')`, isNull(sourceCaptureVersions.payloadDeletedAt), sql`${sourceCaptureVersions.rawText} is not null`, sql`substring(${sourceCaptureVersions.rawText} from ${knowledgeCardEvidence.spanStart} + 1 for ${knowledgeCardEvidence.spanEnd} - ${knowledgeCardEvidence.spanStart}) = ${knowledgeCardEvidence.quoteText}`)).limit(1);
-      if (!validEvidence) return { status: "invalid_action" as const };
+      if (recommendation.reason !== "verification" || card.status !== "approved" || card.publicationState !== "suppressed" || card.knowledgeState !== "uncertain" || card.reviewState !== "ai_recommended" || card.verificationState !== "required" || !card.needsReview || !card.title.trim() || !card.summary.trim()) return { status: "invalid_action" as const };
     }
     let removedConflictCount = 0;
     let hasRemainingSupport = true;

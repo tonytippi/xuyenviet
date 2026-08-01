@@ -12,7 +12,6 @@ import { ensureIngestionJobForCaptureVersion } from "@/features/knowledge/ingest
 
 const submittedKinds = new Set<SourceKind>(["url", "copied_post", "pasted_text", "screenshot"]);
 const unsafeMetadataKey = /cookie|token|password|local_?storage|html|hidden|profile|provider|secret/i;
-const maxMetadataEntries = 16;
 const maxMetadataKeyLength = 48;
 const maxMetadataValueLength = 500;
 
@@ -47,7 +46,7 @@ export function validateSafeCaptureMetadata(captureKind: SourceKind, value: Safe
 
   const metadata = value;
   const allowed = allowedMetadataKeys(metadata.kind);
-  if (Object.keys(metadata).length > maxMetadataEntries || Object.keys(metadata).some((key) => !allowed.has(key) || key.length > maxMetadataKeyLength)) {
+  if (Object.keys(metadata).some((key) => !allowed.has(key) || key.length > maxMetadataKeyLength)) {
     throw new SourceCaptureValidationError("Capture metadata contains unsupported or unsafe fields.");
   }
   if ((metadata.kind === "facebook_operator" && captureKind !== "facebook") || (metadata.kind === "youtube" && captureKind !== "youtube") || (metadata.kind === "submitted" && !submittedKinds.has(captureKind))) {

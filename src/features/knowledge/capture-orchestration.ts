@@ -2,6 +2,12 @@ import type { CaptureArtifact } from "./capture-cache";
 
 export type FlushStatus = "updated" | "not_queued" | "no_longer_queued" | "duplicate";
 
+export class CaptureImportError extends Error {
+  constructor(stage: "prepare" | "commit_check" | "flush" | "finish", reason?: string) {
+    super(`capture_import_${stage}_${reason ?? "failed"}`);
+  }
+}
+
 export async function flushCachedArtifact(input: {
   artifact: CaptureArtifact;
   sourceId: string;
@@ -10,26 +16,69 @@ export async function flushCachedArtifact(input: {
   flush: (correlationToken: string) => Promise<FlushStatus>;
   finishImport: (correlationToken: string, leaseOwner: string, outcome: "imported" | "terminal" | "retryable") => Promise<void>;
 }) {
-  const attempt = await input.prepareImport();
+  let attempt;
+  try {
+    attempt = await input.prepareImport();
+  } catch {
+    throw new CaptureImportError("prepare");
+  }
   if (!attempt.ownsLease) {
-    if (await input.importCommitted(attempt.correlationToken)) return "imported" as const;
+    try {
+      if (await input.importCommitted(attempt.correlationToken)) return "imported" as const;
+    } catch {
+      throw new CaptureImportError("commit_check");
+    }
     return "in_progress" as const;
   }
   if (attempt.outcome === "awaiting_flush" || attempt.outcome === "retryable") {
-    if (await input.importCommitted(attempt.correlationToken)) {
-      await input.finishImport(attempt.correlationToken, attempt.leaseOwner!, "imported");
-      return "imported" as const;
+    let committed: boolean;
+    try {
+      committed = await input.importCommitted(attempt.correlationToken);
+    } catch {
+      throw new CaptureImportError("commit_check");
+    }
+    if (committed) {
+      try {
+        await input.finishImport(attempt.correlationToken, attempt.leaseOwner!, "imported");
+        return "imported" as const;
+      } catch {
+        throw new CaptureImportError("finish");
+      }
     }
   }
+  let status: FlushStatus;
   try {
-    const status = await input.flush(attempt.correlationToken);
-    const outcome = status === "updated" ? "imported" : "terminal";
-    await input.finishImport(attempt.correlationToken, attempt.leaseOwner!, outcome);
-    return status;
-  } catch {
-    await input.finishImport(attempt.correlationToken, attempt.leaseOwner!, "retryable");
-    throw new Error("production_flush_ambiguous");
+    status = await input.flush(attempt.correlationToken);
+  } catch (error) {
+    try {
+      await input.finishImport(attempt.correlationToken, attempt.leaseOwner!, "retryable");
+    } catch {
+      throw new CaptureImportError("finish");
+    }
+    throw new CaptureImportError("flush", safeImportFailureReason(error));
   }
+  const outcome = status === "updated" ? "imported" : "terminal";
+  try {
+    await input.finishImport(attempt.correlationToken, attempt.leaseOwner!, outcome);
+  } catch {
+    throw new CaptureImportError("finish");
+  }
+  return status;
+}
+
+function safeImportFailureReason(error: unknown) {
+  if (error instanceof Error && error.name === "SourceCaptureValidationError") return safeValidationFailureReason(error.message);
+  if (error instanceof Error && error.name === "KnowledgeIngestionJobError") return "ingestion_job_failed";
+  if (error instanceof Error && error.name === "AbortError") return "timeout";
+  const code = error && typeof error === "object" && "code" in error && typeof error.code === "string" ? error.code : null;
+  return code && /^[0-9A-Z]{5}$/.test(code) ? `postgres_${code.toLowerCase()}` : "failed";
+}
+
+function safeValidationFailureReason(message: string) {
+  if (/^Capture metadata /i.test(message)) return "metadata_failed";
+  if (/^Captured readable material /i.test(message)) return "evidence_failed";
+  if (/^Source (does not exist|is no longer eligible)/i.test(message)) return "source_failed";
+  return "validation_failed";
 }
 
 export async function captureCacheFirst<TArtifact>(input: {

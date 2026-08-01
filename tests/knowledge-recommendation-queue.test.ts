@@ -277,13 +277,13 @@ describe("knowledge recommendation queue", () => {
     await expect(testDb.select({ afterSummary: auditEvents.afterSummary }).from(auditEvents).where(eq(auditEvents.targetId, recommendation!.id))).resolves.toEqual([{ afterSummary: "Promoted verified knowledge recommendation to a community observation." }]);
   });
 
-  test("does not promote a verification outside the seed corridor", async () => {
+  test("lets an operator promote a verification outside the seed corridor during bootstrap", async () => {
     await testDb.update(knowledgeCards).set({ locationName: "Đà Lạt", publicationState: "suppressed", knowledgeState: "uncertain", reviewState: "ai_recommended", verificationState: "required", needsReview: true }).where(eq(knowledgeCards.id, "card"));
     await scheduleKnowledgeRecommendation({ cardId: "card", contentVersion: 1, evidenceSetRevision: 1, reason: "verification", policy: "verify_first" }, testDb);
     const [recommendation] = await testDb.select().from(knowledgeRecommendations);
 
-    await expect(resolveKnowledgeRecommendation({ recommendationId: recommendation!.id, expectedContentVersion: 1, expectedEvidenceSetRevision: 1, action: "promote", actor: { userId: "operator", email: "operator@example.com" } }, testDb)).resolves.toEqual({ status: "invalid_action" });
-    await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, "card"))).resolves.toMatchObject([{ publicationState: "suppressed", knowledgeState: "uncertain", contentVersion: 1 }]);
+    await expect(resolveKnowledgeRecommendation({ recommendationId: recommendation!.id, expectedContentVersion: 1, expectedEvidenceSetRevision: 1, action: "promote", actor: { userId: "operator", email: "operator@example.com" } }, testDb)).resolves.toMatchObject({ status: "resolved" });
+    await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, "card"))).resolves.toMatchObject([{ publicationState: "active", knowledgeState: "community_observation", contentVersion: 2 }]);
   });
 
   test("publishes linked verify-first candidates when verification is resolved from the recommendation", async () => {
