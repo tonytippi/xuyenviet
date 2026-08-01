@@ -5,6 +5,7 @@ created: '2026-08-01'
 status: 'done'
 review_loop_iteration: 0
 followup_review_recommended: false
+final_revision: '7f0b20a'
 baseline_revision: 'd301013'
 context:
   - '/home/sonnh/projects/xuyenviet/_bmad-output/project-context.md'
