@@ -372,28 +372,59 @@ const telemetryCapabilities = new Set(["ai_ask.stream", "ai_ask.provider", "know
 const telemetryResultCodes = new Set(["success", "failure", "no_work", "retry", "schema_incompatible", "draining", "restarted", "recovered", "contended"]);
 
 export function emitOperationalTelemetry(sink: OperationalTelemetrySink | undefined, event: OperationalTelemetryEvent): void {
-  if (!sink || !isOperationalTelemetryEvent(event)) return;
-  try { Promise.resolve(sink.emit(event)).catch(() => undefined); } catch { /* Telemetry must not change the operation result. */ }
+  try {
+    const normalized = normalizeOperationalTelemetryEvent(event);
+    if (!sink || !normalized) return;
+    Promise.resolve(sink.emit(normalized)).catch(() => undefined);
+  } catch { /* Telemetry must not change the operation result. */ }
 }
 
 export function isOperationalTelemetryEvent(event: unknown): event is OperationalTelemetryEvent {
-  if (!event || typeof event !== "object") return false;
-  const candidate = event as OperationalTelemetryEvent;
+  try { return normalizeOperationalTelemetryEvent(event) !== null; } catch { return false; }
+}
+
+function normalizeOperationalTelemetryEvent(event: unknown): OperationalTelemetryEvent | null {
+  if (!event || typeof event !== "object") return null;
+  const descriptors = Object.getOwnPropertyDescriptors(event);
   const allowedKeys = new Set(["correlationId", "capability", "principalClass", "resultCode", "latencyMs", "durableId", "jobLagMs", "retryCount", "leaseRecovery", "leaseRecoveryCount", "providerRequestId"]);
-  const userCapability = candidate.capability === "ai_ask.stream" || candidate.capability === "ai_ask.provider";
-  return Object.keys(candidate).every((key) => allowedKeys.has(key))
-    && /^[A-Za-z0-9_-]{1,128}$/.test(candidate.correlationId)
-    && telemetryCapabilities.has(candidate.capability)
-    && telemetryResultCodes.has(candidate.resultCode)
-    && (candidate.principalClass === "user" ? userCapability : candidate.principalClass === "system" && !userCapability)
-    && Number.isInteger(candidate.latencyMs) && candidate.latencyMs >= 0 && candidate.latencyMs <= 86_400_000
-    && (candidate.durableId === undefined || /^[A-Za-z0-9_-]{1,128}$/.test(candidate.durableId))
-    && (candidate.jobLagMs === undefined || Number.isInteger(candidate.jobLagMs) && candidate.jobLagMs >= 0 && candidate.jobLagMs <= 31_536_000_000)
-    && (candidate.retryCount === undefined || Number.isInteger(candidate.retryCount) && candidate.retryCount >= 0 && candidate.retryCount <= 10_000)
-    && (candidate.leaseRecovery === undefined || ["none", "recovered", "contended"].includes(candidate.leaseRecovery))
-    && (candidate.leaseRecoveryCount === undefined || Number.isInteger(candidate.leaseRecoveryCount) && candidate.leaseRecoveryCount >= 0 && candidate.leaseRecoveryCount <= 10_000)
-    && (candidate.leaseRecoveryCount === undefined || candidate.leaseRecovery === "recovered")
-    && (candidate.providerRequestId === undefined || /^[A-Za-z0-9_-]{1,128}$/.test(candidate.providerRequestId));
+  if (!Object.keys(descriptors).every((key) => allowedKeys.has(key))) return null;
+  const values = Object.assign(Object.create(null), ...Object.entries(descriptors).map(([key, descriptor]) => ({ [key]: "value" in descriptor ? descriptor.value : undefined })));
+  const candidateCorrelationId = values.correlationId;
+  const capability = values.capability;
+  const principalClass = values.principalClass;
+  const resultCode = values.resultCode;
+  const latencyMs = values.latencyMs;
+  const durableId = values.durableId;
+  const jobLagMs = values.jobLagMs;
+  const retryCount = values.retryCount;
+  const leaseRecovery = values.leaseRecovery;
+  const leaseRecoveryCount = values.leaseRecoveryCount;
+  const providerRequestId = values.providerRequestId;
+  const userCapability = capability === "ai_ask.stream" || capability === "ai_ask.provider";
+  const valid = Object.values(descriptors).every((descriptor) => "value" in descriptor)
+    && isTelemetryText(candidateCorrelationId)
+    && typeof capability === "string" && telemetryCapabilities.has(capability)
+    && typeof resultCode === "string" && telemetryResultCodes.has(resultCode)
+    && (principalClass === "user" ? userCapability : principalClass === "system" && !userCapability)
+    && Number.isInteger(latencyMs) && latencyMs >= 0 && latencyMs <= 86_400_000
+    && (durableId === undefined || isTelemetryText(durableId))
+    && (jobLagMs === undefined || Number.isInteger(jobLagMs) && jobLagMs >= 0 && jobLagMs <= 31_536_000_000)
+    && (retryCount === undefined || Number.isInteger(retryCount) && retryCount >= 0 && retryCount <= 10_000)
+    && (leaseRecovery === undefined || ["none", "recovered", "contended"].includes(leaseRecovery))
+    && (leaseRecoveryCount === undefined || Number.isInteger(leaseRecoveryCount) && leaseRecoveryCount >= 0 && leaseRecoveryCount <= 10_000)
+    && (leaseRecoveryCount === undefined || leaseRecovery === "recovered")
+    && (providerRequestId === undefined || isTelemetryText(providerRequestId));
+  if (!valid) return null;
+  // Do not pass caller-owned objects to a sink. A prototype toJSON or later
+  // mutation must not influence the bounded object that is serialized.
+  return Object.assign(Object.create(null), { correlationId: candidateCorrelationId, capability, principalClass, resultCode, latencyMs },
+    durableId === undefined ? {} : { durableId }, jobLagMs === undefined ? {} : { jobLagMs }, retryCount === undefined ? {} : { retryCount },
+    leaseRecovery === undefined ? {} : { leaseRecovery }, leaseRecoveryCount === undefined ? {} : { leaseRecoveryCount }, providerRequestId === undefined ? {} : { providerRequestId },
+  ) as OperationalTelemetryEvent;
+}
+
+function isTelemetryText(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(value);
 }
 
 let consoleTelemetryBlocked = false;
@@ -403,11 +434,14 @@ process.stdout.on("error", () => process.emitWarning("Operational telemetry stdo
 
 export const consoleOperationalTelemetrySink: OperationalTelemetrySink = {
   emit(event) {
+    let normalized: OperationalTelemetryEvent | null;
+    try { normalized = normalizeOperationalTelemetryEvent(event); } catch { return; }
+    if (!normalized) return;
     // Never queue telemetry behind a blocked stdout consumer. Dropping these
     // best-effort events preserves the domain operation and bounds memory use.
     if (consoleTelemetryBlocked) return;
     try {
-      if (!process.stdout.write(`operational_telemetry ${JSON.stringify(event)}\n`, () => undefined)) {
+      if (!process.stdout.write(`operational_telemetry ${JSON.stringify(normalized)}\n`, () => undefined)) {
         consoleTelemetryBlocked = true;
         process.stdout.once("drain", () => { consoleTelemetryBlocked = false; });
       }

@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-08-01 (Final Story 12.3 repair reviewed clean; Epic 12 done.)
+# last_updated: 2026-08-01 (Story 12.2 closure repair verified and completed; Epic 12 is done.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-08-01 (Final Story 12.3 repair reviewed clean; Epic 12 done.)
+last_updated: 2026-08-01 (Story 12.2 closure repair verified and completed; Epic 12 is done.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -253,6 +253,7 @@ development_status:
   # 2026-07-31: Story 12.2 completed. Shared compatibility admission gates web/API/Worker readiness; Worker-safe telemetry observes bounded durable lag, retry, recovery, safe IDs, and fresh correlation IDs. The compiled `NODE_ENV=test` workspace-local JSONL transport proves duplicate-poller `SKIP LOCKED`, recovery, terminal failure, and drain behavior without changing production output. Serial DATABASE_URL_TEST verification passed: 12 files, 108 tests; repaired focused serial suite: 5 files, 60 tests. lint had 0 errors and 5 pre-existing warnings; post-build typecheck, build, Compose rendering, Worker image, and diff check passed. Final synchronous BMad Blind Hunter, Edge Case Hunter, and Acceptance Auditor review/repair loop is clean. Deployed monitoring, Railway, legacy-loop retirement, and Story 12.3 overlap policy remain out of scope.
   # 2026-07-31 final Epic 12 review: bundled API/Worker matrix path resolution blocks startup; targeted repair required.
   # 2026-08-01 final Story 12.2 repair: the web runner packages deployment-owned release matrices and declares its runtime directory; copied Next bundle startup from an unrelated cwd reaches the schema-gated health boundary. Console telemetry drops under stdout backpressure, contains asynchronous stdout failures, and reports the condition as a warning without altering domain results. Serial focused verification passed (2 files, 8 tests); lint had 0 errors and 5 existing warnings; typecheck, diff check, and the web runner Docker build passed. Final synchronous review is clean. Story 12.3 remains independently in-progress.
+  # 2026-08-01 closure completion: the retained authority tests mock the actual Worker-safe relative domain-outbox dependency and invoke @xuyenviet/worker-domain. Both fences hold: the provider does not run after revalidation and annotation effects do not persist after fencing. Serial retained verification passed (1 file, 27 tests); serial telemetry/outbox verification passed (2 files, 41 tests); typecheck and diff check passed; lint had 0 errors and 5 existing warnings. Final synchronous review found no actionable findings. Story 12.2 is done; Stories 12.1 and 12.3 are already done, so Epic 12 remains done.
   12-2-verify-worker-operations-telemetry-and-schema-compatibility: done
   # 2026-07-31: User-approved bounded recovery repaired fresh-ledger bootstrap, identity-verified common maintenance-database advisory locking, atomic live database identity admission for API/web/Worker, and deterministic compiled Worker drain. The approved isolated DATABASE_URL_TEST matrix migrated a fresh target successfully and recorded exactly one 20260729.1 release version. Final synchronous Blind Hunter, Edge Case Hunter, and Acceptance review repairs are clean. Serial focused verification passed 70 tests; lint has zero errors and five existing unrelated warnings; build, typecheck, Compose rendering, and diff check passed. No development/staging/production reset, migration, seed, or deployment ran. All Epic 12 stories (12.1, 12.2, 12.3) are confirmed done.
   # 2026-08-01 targeted Story 12.3 repair: workload-keyed phase-policy equality is key-order-independent and rejects changed declarations. The checked-in matrix is an unattested, unapproved template with no owner, deployment, or verification claims and fails closed in parser, migration gate, and runtime policy loading.

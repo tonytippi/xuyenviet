@@ -36,6 +36,54 @@ describe("operational telemetry contract", () => {
     expect(isOperationalTelemetryEvent({ correlationId: requestId, capability: "ai_ask.stream", principalClass: "user", resultCode: "success", latencyMs: 1, authorization: "Bearer secret" })).toBe(false);
   });
 
+  it("serializes a fresh allowlisted DTO instead of a caller prototype", () => {
+    const write = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    const event = Object.assign(Object.create({ toJSON() { throw new Error("caller serialization must not run"); } }), {
+      correlationId: "prototype_telemetry_1", capability: "worker.startup", principalClass: "system", resultCode: "success", latencyMs: 1,
+    });
+    try {
+      expect(() => emitOperationalTelemetry(consoleOperationalTelemetrySink, event)).not.toThrow();
+      expect(write).toHaveBeenCalledWith("operational_telemetry {\"correlationId\":\"prototype_telemetry_1\",\"capability\":\"worker.startup\",\"principalClass\":\"system\",\"resultCode\":\"success\",\"latencyMs\":1}\n", expect.any(Function));
+    } finally {
+      write.mockRestore();
+    }
+  });
+
+  it("rejects coercible identifier objects before they reach a telemetry sink", () => {
+    const emit = vi.fn();
+    const hostileId = Object.assign(Object.create({ toJSON() { throw new Error("caller serialization must not run"); } }), { toString() { return "safe_id"; } });
+    emitOperationalTelemetry({ emit }, { correlationId: hostileId, capability: "worker.startup", principalClass: "system", resultCode: "success", latencyMs: 1 } as unknown as OperationalTelemetryEvent);
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it("rejects throwing telemetry accessors without changing the caller result", () => {
+    const emit = vi.fn();
+    const event = Object.defineProperty({}, "correlationId", { enumerable: true, get() { throw new Error("accessor must not run"); } });
+    expect(() => emitOperationalTelemetry({ emit }, event as OperationalTelemetryEvent)).not.toThrow();
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it("rejects hostile telemetry proxies without changing the caller result", () => {
+    const emit = vi.fn();
+    const event = new Proxy({}, { ownKeys() { throw new Error("proxy must not run"); } });
+    expect(() => emitOperationalTelemetry({ emit }, event as OperationalTelemetryEvent)).not.toThrow();
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it("does not inherit a polluted global toJSON while serializing telemetry", () => {
+    const write = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    const objectPrototype = Object.prototype as typeof Object.prototype & { toJSON?: () => unknown };
+    const original = objectPrototype.toJSON;
+    objectPrototype.toJSON = () => { throw new Error("global serialization must not run"); };
+    try {
+      expect(() => emitOperationalTelemetry(consoleOperationalTelemetrySink, { correlationId: "null_prototype_1", capability: "worker.startup", principalClass: "system", resultCode: "success", latencyMs: 1 })).not.toThrow();
+    } finally {
+      if (original === undefined) delete objectPrototype.toJSON;
+      else objectPrototype.toJSON = original;
+      write.mockRestore();
+    }
+  });
+
   it("emits exact safe worker observations with a fresh UUID per poll", async () => {
     const events: OperationalTelemetryEvent[] = [];
     const observation = { capability: "ai_ask.outbox" as const, resultCode: "no_work" as const, leaseRecovery: "none" as const };
@@ -120,5 +168,27 @@ describe("operational telemetry contract", () => {
       jobLagMs: expect.any(Number), leaseRecovery: "recovered", leaseRecoveryCount: 1,
     })]);
     expect(observations.every(isOperationalTelemetryEvent)).toBe(true);
+  });
+
+  it.runIf(Boolean(process.env.DATABASE_URL_TEST))("reports claim-time retry exhaustion as terminal failure telemetry", async () => {
+    await resetTestDatabase();
+    await seedTestOperator();
+    const [conversation] = await testDb.insert(conversations).values({ id: "telemetry_exhausted_conversation_1", userId: "operator" }).returning();
+    const command = await acquireAiAskCommand({ userId: "operator", idempotencyKey: "telemetry_exhausted_outbox_key_1", question: "Telemetry exhaustion", conversationId: conversation!.id });
+    if (command.kind !== "admitted") throw new Error("Expected command admission");
+    const [event] = await testDb.select().from(domainOutbox);
+    await testDb.update(domainOutbox).set({ status: "processing", attemptCount: 1, maxAttempts: 1, claimedAt: new Date(Date.now() - 2_000), leaseExpiresAt: new Date(Date.now() - 1_000), claimedBy: "stale-worker", fencingToken: "a".repeat(64) }).where(eq(domainOutbox.id, event!.id));
+    const observations: OperationalTelemetryEvent[] = [];
+    await expect(processAiAskDomainOutboxBatch({ workerId: "telemetry-worker", onObservation(observation) { observations.push({ correlationId: "worker_exhausted_1", principalClass: "system", latencyMs: 1, ...observation }); } })).resolves.toEqual({ kind: "processed", count: 1 });
+    expect(observations).toEqual([expect.objectContaining({ capability: "ai_ask.outbox", resultCode: "failure", durableId: event!.id, retryCount: 1 })]);
+  });
+
+  it("reports a persisted outbox retry as retry telemetry", async () => {
+    const events: OperationalTelemetryEvent[] = [];
+    await runWorkerAdapter(["outbox", "--once", "--worker-id=telemetry-test-worker"], {
+      telemetry: { emit(event) { events.push(event); } },
+      runPoll: async () => ({ capability: "ai_ask.outbox", resultCode: "retry", durableId: "outbox_retry_1", retryCount: 1, leaseRecovery: "none" }),
+    });
+    expect(events).toEqual([expect.objectContaining({ capability: "ai_ask.outbox", resultCode: "retry", durableId: "outbox_retry_1", retryCount: 1 })]);
   });
 });

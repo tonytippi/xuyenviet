@@ -15,13 +15,13 @@ export function parseWorkerArguments(argv: string[]) {
   return { kind: argv[0] as "extraction" | "ingestion" | "indexing" | "outbox", workerId };
 }
 
-export async function runWorkerAdapter(argv: string[], options: { telemetry?: OperationalTelemetrySink; runPoll?: (kind: "extraction" | "ingestion" | "indexing" | "outbox", workerId: string) => Promise<WorkerPollObservation> } = {}) {
+export async function runWorkerAdapter(argv: string[], options: { telemetry?: OperationalTelemetrySink; runPoll?: (kind: "extraction" | "ingestion" | "indexing" | "outbox", workerId: string) => Promise<WorkerPollObservation | WorkerPollObservation[]> } = {}) {
   const { kind, workerId } = parseWorkerArguments(argv);
   const startedAt = Date.now();
   try {
     const observation = options.runPoll ? await options.runPoll(kind, workerId) : await runPoll(kind, workerId);
-    emitPoll(options.telemetry, observation, startedAt);
-    return observation;
+    for (const item of Array.isArray(observation) ? observation : [observation]) emitPoll(options.telemetry, item, startedAt);
+    return Array.isArray(observation) ? observation.at(-1)! : observation;
   } catch (error) {
     emitPoll(options.telemetry, { capability: capabilityFor(kind), resultCode: "failure" }, startedAt);
     throw error;
@@ -41,17 +41,17 @@ function emitPoll(sink: OperationalTelemetrySink | undefined, observation: Worke
   emitOperationalTelemetry(sink, event);
 }
 
-async function runPoll(kind: "extraction" | "ingestion" | "indexing" | "outbox", workerId: string): Promise<WorkerPollObservation> {
+async function runPoll(kind: "extraction" | "ingestion" | "indexing" | "outbox", workerId: string): Promise<WorkerPollObservation | WorkerPollObservation[]> {
   // Each feature owns its observation and derives it while its claim/recovery
   // facts are still available. This adapter only selects the continuous loop.
-  let observation: WorkerPollObservation | undefined;
-  const observe = (value: WorkerPollObservation) => { observation = value; };
+  const observations: WorkerPollObservation[] = [];
+  const observe = (value: WorkerPollObservation) => { observations.push(value); };
   if (kind === "extraction") await runKnowledgeExtractionWorkerLoop({ once: true, workerId, onObservation: observe });
   else if (kind === "ingestion") await runKnowledgeIngestionWorkerLoop({ once: true, workerId, onObservation: observe });
   else if (kind === "indexing") await runApprovedKnowledgeIndexingWorkerLoop({ once: true, workerId, onObservation: observe });
   else await processAiAskDomainOutboxBatch({ workerId, onObservation: observe });
-  if (!observation) throw new Error("Worker poll completed without an observation.");
-  return observation;
+  if (!observations.length) throw new Error("Worker poll completed without an observation.");
+  return observations.length === 1 ? observations[0]! : observations;
 }
 
 function capabilityFor(kind: "extraction" | "ingestion" | "indexing" | "outbox"): WorkerPollObservation["capability"] {

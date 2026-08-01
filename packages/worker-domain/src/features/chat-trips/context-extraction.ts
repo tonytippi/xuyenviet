@@ -187,17 +187,17 @@ export async function extractChatTripContextForOutbox(input: { claim: DomainOutb
   const result = await completeExtraction({ model: selectedModel.gatewayModelName, messages: buildChatContextExtractionMessages({ question: message.content, history, projectScopeAvailable: Boolean(envelope.tripProjectId) }) });
   if (!result.ok) {
     const released = await db.transaction(async (transaction) => {
-      if (!await validOutboxContextState(transaction, envelope, true)) return false;
-      return Boolean(await failDomainOutboxClaimInTransaction(transaction, { ...claim, code: "context_provider_failed", retryable: true }, async () => {
+      if (!await validOutboxContextState(transaction, envelope, true)) return null;
+      return failDomainOutboxClaimInTransaction(transaction, { ...claim, code: "context_provider_failed", retryable: true }, async () => {
         await writeAiUsageEvent(transaction, {
           initiatedByUserId: envelope.userId, executorSystem: "system-ai-orchestration", tripProjectId: envelope.tripProjectId,
           conversationId: envelope.conversationId, userMessageId: envelope.userMessageId, purpose: chatContextExtractionPurpose,
           provider: result.provider, model: result.model, aiGatewayModelId: selectedModel.id, promptVersion: chatContextExtractionPromptVersion,
           status: "failure", latencyMs: result.latencyMs, pricingSnapshot: getAiGatewayPricingSnapshot(selectedModel), errorCode: result.errorCode,
         });
-      }));
+      });
     });
-    return released ? "retry_scheduled" as const : "fenced_out" as const;
+    return released?.status === "pending" ? "retry_scheduled" as const : released?.status === "failed" ? "terminal_failure" as const : "fenced_out" as const;
   }
   const facts = parseAllowedFacts(result.content, Boolean(envelope.tripProjectId), message.content);
   return completeOutboxContextEffect(claim, envelope, facts, {

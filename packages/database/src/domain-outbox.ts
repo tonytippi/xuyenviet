@@ -104,19 +104,20 @@ export function getDomainOutboxBatchSize(value = process.env.AI_ASK_OUTBOX_BATCH
   return Number.isInteger(parsed) && parsed >= 1 && parsed <= 50 ? parsed : null;
 }
 
-export async function claimDueDomainOutboxEvents(input: { workerId: string; batchSize?: number; leaseMs?: number; now?: Date }, db = getDb()): Promise<DomainOutboxClaim[]> {
+export async function claimDueDomainOutboxEvents(input: { workerId: string; batchSize?: number; leaseMs?: number; now?: Date; onTerminalFailure?: (events: Array<Pick<DomainOutboxClaim, "id" | "attemptCount" | "reclaimedLease">>) => void }, db = getDb()): Promise<DomainOutboxClaim[]> {
   const workerId = input.workerId.trim();
   if (!workerIdPattern.test(workerId)) return [];
   const batchSize = input.batchSize ?? getDomainOutboxBatchSize();
   const leaseMs = input.leaseMs ?? getDomainOutboxLeaseMs();
   if (batchSize === null || leaseMs === null || !Number.isInteger(batchSize) || batchSize < 1 || batchSize > 50 || !Number.isInteger(leaseMs) || leaseMs < 10 * 60_000 || leaseMs > 60 * 60_000) return [];
   const now = input.now ?? new Date();
-  return db.transaction(async (transaction) => {
+  const claimResult = await db.transaction(async (transaction) => {
       const due = await transaction.select({ id: domainOutbox.id, eventVersion: domainOutbox.eventVersion, status: domainOutbox.status }).from(domainOutbox)
       .where(or(and(eq(domainOutbox.status, "pending"), lte(domainOutbox.availableAt, now)), and(eq(domainOutbox.status, "processing"), lte(domainOutbox.leaseExpiresAt, now))))
       .orderBy(asc(domainOutbox.availableAt), asc(domainOutbox.createdAt), asc(domainOutbox.id)).limit(batchSize).for("update", { skipLocked: true });
     const claims: DomainOutboxClaim[] = [];
-    for (const dueEvent of due) {
+    const terminalFailures: Array<Pick<DomainOutboxClaim, "id" | "attemptCount" | "reclaimedLease">> = [];
+      for (const dueEvent of due) {
       const token = randomBytes(32).toString("hex");
       const leaseExpiresAt = new Date(now.getTime() + leaseMs);
       const [claimed] = await transaction.update(domainOutbox).set({ status: "processing", claimedBy: workerId, claimedAt: now, leaseExpiresAt, fencingToken: token, attemptCount: sql`${domainOutbox.attemptCount} + 1`, lastErrorCode: null, updatedAt: now })
@@ -126,12 +127,14 @@ export async function claimDueDomainOutboxEvents(input: { workerId: string; batc
     // Corrupt rows or a lease reclaimed after its final permitted attempt must not
     // remain claimable forever. This uses the same locked due-row transaction.
     for (const dueEvent of due) {
-      const [terminalized] = await transaction.update(domainOutbox).set({ status: "failed", lastErrorCode: "retry_exhausted", failureCode: "retry_exhausted", failedAt: now, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, updatedAt: now })
+      const [exhausted] = await transaction.update(domainOutbox).set({ status: "failed", lastErrorCode: "retry_exhausted", failureCode: "retry_exhausted", failedAt: now, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, updatedAt: now })
         .where(and(eq(domainOutbox.id, dueEvent.id), eq(domainOutbox.eventVersion, dueEvent.eventVersion), sql`${domainOutbox.attemptCount} >= ${domainOutbox.maxAttempts}`, or(and(eq(domainOutbox.status, "pending"), lte(domainOutbox.availableAt, now)), and(eq(domainOutbox.status, "processing"), lte(domainOutbox.leaseExpiresAt, now))))).returning();
-      if (terminalized) logTerminalFailure(terminalized, "retry_exhausted");
-    }
-    return claims;
-  });
+      if (exhausted) { logTerminalFailure(exhausted, "retry_exhausted"); terminalFailures.push({ id: exhausted.id, attemptCount: exhausted.attemptCount, reclaimedLease: dueEvent.status === "processing" }); }
+      }
+    return { claims, terminalFailures };
+    });
+  if (claimResult.terminalFailures.length) { try { input.onTerminalFailure?.(claimResult.terminalFailures); } catch {} }
+  return claimResult.claims;
 }
 
 export function retryDelayMs(attempt: number, random = Math.random) {
@@ -181,18 +184,21 @@ export async function completeDomainOutboxClaimInTransaction<T>(transaction: Tra
 // Some provider results become terminal only after a local persistence attempt.
 // Keep that attempt, its durable effect, and the terminal claim disposition in
 // the one transaction that owns the active claim.
-export async function finalizeDomainOutboxClaimInTransaction<T>(transaction: Transaction, claim: Pick<DomainOutboxClaim, "id" | "fencingToken" | "eventVersion">, write: () => Promise<{ value: T; terminalCode?: string }>, now = new Date()): Promise<{ completed: true; value: T } | { completed: false }> {
+export async function finalizeDomainOutboxClaimInTransaction<T>(transaction: Transaction, claim: Pick<DomainOutboxClaim, "id" | "fencingToken" | "eventVersion">, write: () => Promise<{ value: T; terminalCode?: string }>, now = new Date()): Promise<{ completed: true; value: T; terminal: boolean } | { completed: false }> {
   const [active] = await transaction.select({ id: domainOutbox.id }).from(domainOutbox)
     .where(activeClaimPredicate(claim.id, claim.fencingToken, claim.eventVersion)).limit(1).for("update");
   if (!active) return { completed: false };
   const result = await write();
-  if (!result.terminalCode) return completeDomainOutboxClaimInTransaction(transaction, claim, async () => result.value, now);
+  if (!result.terminalCode) {
+    const completion = await completeDomainOutboxClaimInTransaction(transaction, claim, async () => result.value, now);
+    return completion.completed ? { ...completion, terminal: false } : completion;
+  }
   if (!safeCodePattern.test(result.terminalCode)) throw new Error("Invalid terminal domain outbox code.");
   const [failed] = await transaction.update(domainOutbox).set({ status: "failed", lastErrorCode: result.terminalCode, failureCode: result.terminalCode, failedAt: now, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, updatedAt: now })
     .where(activeClaimPredicate(claim.id, claim.fencingToken, claim.eventVersion)).returning();
   if (!failed) throw new Error("Active domain outbox claim was lost during terminalization.");
   logTerminalFailure(failed, result.terminalCode);
-  return { completed: true, value: result.value };
+  return { completed: true, value: result.value, terminal: true };
 }
 
 export async function failDomainOutboxEvent(input: { id: string; fencingToken: string; eventVersion: number; code: string; retryable: boolean; now?: Date; random?: () => number }, db = getDb()) {

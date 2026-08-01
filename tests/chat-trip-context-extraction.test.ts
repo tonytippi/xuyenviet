@@ -624,14 +624,14 @@ describe("chat/trip context extraction", () => {
     await testDb.update(domainOutbox).set({ availableAt: new Date("2099-01-01T00:00:00.000Z") }).where(eq(domainOutbox.eventType, "ai_ask.answer_annotation.v1"));
     await testDb.update(domainOutbox).set({ availableAt: new Date("2020-01-01T00:00:00.000Z") }).where(eq(domainOutbox.eventType, "ai_ask.context_extraction.v1"));
 
-    await expect(processAiAskDomainOutboxBatch({ workerId: "context-failure-worker" })).resolves.toEqual({ kind: "processed", count: 1 });
+    await expect(processAiAskDomainOutboxBatch({ workerId: "context-failure-worker" })).resolves.toEqual({ kind: "error", count: 1 });
     const [event] = await testDb.select({ status: domainOutbox.status, lastErrorCode: domainOutbox.lastErrorCode }).from(domainOutbox).where(eq(domainOutbox.eventType, "ai_ask.context_extraction.v1"));
     expect(event).toMatchObject({ status: "pending", lastErrorCode: "context_provider_failed" });
     await expect(completedAnswerSnapshot()).resolves.toEqual(terminalSnapshot);
     await expect(testDb.select({ status: aiUsageEvents.status, errorCode: aiUsageEvents.errorCode }).from(aiUsageEvents).where(eq(aiUsageEvents.purpose, "extraction"))).resolves.toEqual([{ status: "failure", errorCode: "gateway_http_error" }]);
 
     await testDb.update(domainOutbox).set({ maxAttempts: 1, availableAt: new Date("2020-01-01T00:00:00.000Z") }).where(eq(domainOutbox.eventType, "ai_ask.context_extraction.v1"));
-    await expect(processAiAskDomainOutboxBatch({ workerId: "context-failure-worker" })).resolves.toEqual({ kind: "no_work" });
+    await expect(processAiAskDomainOutboxBatch({ workerId: "context-failure-worker" })).resolves.toEqual({ kind: "processed", count: 1 });
     await expect(testDb.select({ status: domainOutbox.status, failureCode: domainOutbox.failureCode }).from(domainOutbox).where(eq(domainOutbox.eventType, "ai_ask.context_extraction.v1"))).resolves.toEqual([{ status: "failed", failureCode: "retry_exhausted" }]);
     await expect(completedAnswerSnapshot()).resolves.toEqual(terminalSnapshot);
     await expect(testDb.select().from(aiUsageEvents).where(eq(aiUsageEvents.purpose, "extraction"))).resolves.toHaveLength(1);
@@ -646,8 +646,8 @@ describe("chat/trip context extraction", () => {
     const fetchMock = mockExtractionResponse({ facts: [] });
 
     vi.resetModules();
-    vi.doMock("@/features/ai/domain-outbox", async (importOriginal) => {
-      const actual = await importOriginal<typeof import("@/features/ai/domain-outbox")>();
+    vi.doMock("../packages/worker-domain/src/features/ai/domain-outbox", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("../packages/worker-domain/src/features/ai/domain-outbox")>();
       return {
         ...actual,
         hasActiveDomainOutboxClaim: async (...args: Parameters<typeof actual.hasActiveDomainOutboxClaim>) => {
@@ -657,7 +657,7 @@ describe("chat/trip context extraction", () => {
         },
       };
     });
-    const { processAiAskDomainOutboxBatch: processIsolatedBatch } = await import("@/features/ai/domain-outbox-worker");
+    const { processAiAskDomainOutboxBatch: processIsolatedBatch } = await import("@xuyenviet/worker-domain");
 
     await expect(processIsolatedBatch({ workerId: "context-revalidation-worker" })).resolves.toEqual({ kind: "processed", count: 1 });
     expect(fetchMock).not.toHaveBeenCalled();
@@ -688,8 +688,8 @@ describe("chat/trip context extraction", () => {
     const callsBeforeDelivery = fetchMock.mock.calls.length;
 
     vi.resetModules();
-    vi.doMock("@/features/ai/domain-outbox", async (importOriginal) => {
-      const actual = await importOriginal<typeof import("@/features/ai/domain-outbox")>();
+    vi.doMock("../packages/worker-domain/src/features/ai/domain-outbox", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("../packages/worker-domain/src/features/ai/domain-outbox")>();
       return {
         ...actual,
         hasActiveDomainOutboxClaim: async (...args: Parameters<typeof actual.hasActiveDomainOutboxClaim>) => {
@@ -699,7 +699,7 @@ describe("chat/trip context extraction", () => {
         },
       };
     });
-    const { processAiAskDomainOutboxBatch: processIsolatedBatch } = await import("@/features/ai/domain-outbox-worker");
+    const { processAiAskDomainOutboxBatch: processIsolatedBatch } = await import("@xuyenviet/worker-domain");
 
     await expect(processIsolatedBatch({ workerId: "annotation-revalidation-worker" })).resolves.toEqual({ kind: "processed", count: 1 });
     expect(fetchMock).toHaveBeenCalledTimes(callsBeforeDelivery);

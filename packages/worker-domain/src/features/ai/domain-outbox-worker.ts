@@ -14,7 +14,7 @@ import { aiAskInitialAnswerPromptVersion, aiAskInitialAnswerPurpose } from "./pr
 import type { WorkerPollObservation } from "@xuyenviet/contracts";
 
 type Transaction = Parameters<ReturnType<typeof getDb>["transaction"]>[0] extends (transaction: infer T) => unknown ? T : never;
-type DeliveryOutcome = "completed" | "fenced_out" | "invalid" | { kind: "retryable"; code: string } | "retry_scheduled";
+type DeliveryOutcome = "completed" | "fenced_out" | "invalid" | { kind: "retryable"; code: string } | "retry_scheduled" | "terminal_failure";
 
 let testDependencies: { afterAnnotationProviderResponse?: () => Promise<void> | void } | undefined;
 
@@ -72,35 +72,46 @@ export function appendTripChangeProposalActionAnnotation(input: {
 // This is deliberately a bounded library seam. Deployment and scheduling remain
 // separate operational work; callers may invoke one batch for local/test use.
 export async function processAiAskDomainOutboxBatch(input: { workerId: string; batchSize?: number; leaseMs?: number; onObservation?: (observation: WorkerPollObservation) => void | Promise<void> }): Promise<DomainOutboxWorkerResult> {
-  const claims = await claimDueDomainOutboxEvents(input);
+  const claimTerminalFailures: Array<{ id: string; attemptCount: number; reclaimedLease: boolean }> = [];
+  const claims = await claimDueDomainOutboxEvents({ ...input, onTerminalFailure(events) { claimTerminalFailures.push(...events); } });
   if (claims.length === 0) {
+    if (claimTerminalFailures.length) {
+      for (const terminal of claimTerminalFailures) { try { await input.onObservation?.({ capability: "ai_ask.outbox", resultCode: "failure", durableId: terminal.id, retryCount: terminal.attemptCount, leaseRecovery: terminal.reclaimedLease ? "recovered" : "none", ...(terminal.reclaimedLease ? { leaseRecoveryCount: 1 } : {}) }); } catch {} }
+      return { kind: "processed", count: claimTerminalFailures.length };
+    }
     try { await input.onObservation?.({ capability: "ai_ask.outbox", resultCode: "no_work", leaseRecovery: "none" }); } catch {}
     return { kind: "no_work" };
   }
-  let failures = 0;
-  let terminalFailures = 0;
+  const dispositions: WorkerPollObservation[] = claimTerminalFailures.map((event) => ({ capability: "ai_ask.outbox", resultCode: "failure", durableId: event.id, retryCount: event.attemptCount, leaseRecovery: event.reclaimedLease ? "recovered" : "none", ...(event.reclaimedLease ? { leaseRecoveryCount: 1 } : {}) }));
   for (const claim of claims) {
+    let resultCode: "success" | "retry" | "failure" = "success";
     try {
       const outcome = await deliverClaim(claim);
       if (outcome === "fenced_out") await completeFencedOutClaim(claim);
-      if (outcome === "invalid") { terminalFailures += 1; await failDomainOutboxEvent({ ...claim, code: "invalid_envelope", retryable: false }); }
+      if (outcome === "retry_scheduled") resultCode = "retry";
+      if (outcome === "terminal_failure") resultCode = "failure";
+      if (outcome === "invalid") {
+        const persisted = await failDomainOutboxEvent({ ...claim, code: "invalid_envelope", retryable: false });
+        if (persisted?.status === "failed") resultCode = "failure";
+      }
       if (typeof outcome === "object") {
-        failures += 1;
-        await failDomainOutboxEvent({ ...claim, code: outcome.code, retryable: true });
+        const persisted = await failDomainOutboxEvent({ ...claim, code: outcome.code, retryable: true });
+        if (persisted?.status === "pending") resultCode = "retry";
+        if (persisted?.status === "failed") resultCode = "failure";
       }
     } catch {
-      failures += 1;
-      await failDomainOutboxEvent({ ...claim, code: "consumer_failed", retryable: true });
+      const persisted = await failDomainOutboxEvent({ ...claim, code: "consumer_failed", retryable: true });
+      if (persisted?.status === "pending") resultCode = "retry";
+      if (persisted?.status === "failed") resultCode = "failure";
     }
+    dispositions.push(observationFor(claim, resultCode));
   }
-  const primary = claims[0]!;
-  const recovered = claims.filter((claim) => claim.reclaimedLease).length;
-  try { await input.onObservation?.({
-    capability: "ai_ask.outbox", resultCode: failures ? "retry" : terminalFailures ? "failure" : "success", durableId: primary.id,
-    retryCount: primary.attemptCount, jobLagMs: Math.max(0, primary.claimedAt.getTime() - primary.availableAt.getTime()),
-    leaseRecovery: recovered ? "recovered" : "none", ...(recovered ? { leaseRecoveryCount: recovered } : {}),
-  }); } catch {}
-  return failures ? { kind: "error", count: claims.length } : { kind: "processed", count: claims.length };
+  for (const observation of dispositions) { try { await input.onObservation?.(observation); } catch {} }
+  return dispositions.some((observation) => observation.resultCode === "retry") ? { kind: "error", count: dispositions.length } : { kind: "processed", count: dispositions.length };
+}
+
+function observationFor(claim: DomainOutboxClaim, resultCode: "success" | "retry" | "failure"): WorkerPollObservation {
+  return { capability: "ai_ask.outbox", resultCode, durableId: claim.id, retryCount: claim.attemptCount, jobLagMs: Math.max(0, claim.claimedAt.getTime() - claim.availableAt.getTime()), leaseRecovery: claim.reclaimedLease ? "recovered" : "none", ...(claim.reclaimedLease ? { leaseRecoveryCount: 1 } : {}) };
 }
 
 // Fencing is an expected terminal disposition, not an operational failure. The
@@ -224,26 +235,26 @@ async function propose(claim: DomainOutboxClaim, envelope: AiAskOutboxEnvelope, 
   });
   if (!draft.ok && draft.reason === "gateway_failed") {
     const released = await getDb().transaction(async (transaction) => {
-      if (!await loadFinalStateInTransaction(transaction, envelope)) return false;
+      if (!await loadFinalStateInTransaction(transaction, envelope)) return null;
       // A later reclaim represents a new provider call. This guarded transaction
       // records this call's failure usage exactly once before releasing the claim.
-      return Boolean(await failDomainOutboxClaimInTransaction(transaction, { ...claim, code: "proposal_gateway_failed", retryable: true }, async () => {
+      return failDomainOutboxClaimInTransaction(transaction, { ...claim, code: "proposal_gateway_failed", retryable: true }, async () => {
         await writeTripChangeProposalDraftUsageInTransaction(transaction, { owner, tripProjectId: envelope.tripProjectId!, draft });
-      }));
+      });
     });
-    return released ? "retry_scheduled" : "fenced_out";
+    return persistedFailureOutcome(released);
   }
   if (!draft.ok && (draft.reason === "no_project" || draft.reason === "no_model")) return "fenced_out";
   if (!draft.ok && draft.reason === "parse_failed") {
     const terminalized = await getDb().transaction(async (transaction) => {
-      if (!await loadFinalStateInTransaction(transaction, envelope)) return false;
+      if (!await loadFinalStateInTransaction(transaction, envelope)) return null;
       // The parsed response was billable even though it is unusable. The active
       // claim guard commits that usage before atomically terminalizing the event.
-      return Boolean(await failDomainOutboxClaimInTransaction(transaction, { ...claim, code: "invalid_gateway_response", retryable: false }, async () => {
+      return failDomainOutboxClaimInTransaction(transaction, { ...claim, code: "invalid_gateway_response", retryable: false }, async () => {
         await writeTripChangeProposalDraftUsageInTransaction(transaction, { owner, tripProjectId: envelope.tripProjectId!, draft });
-      }));
+      });
     });
-    return terminalized ? "retry_scheduled" : "fenced_out";
+    return persistedFailureOutcome(terminalized);
   }
   if (!draft.ok) return "invalid";
   return getDb().transaction(async (transaction) => {
@@ -269,6 +280,10 @@ async function propose(claim: DomainOutboxClaim, envelope: AiAskOutboxEnvelope, 
       await writeTripChangeProposalDraftUsageInTransaction(transaction, { owner, tripProjectId: envelope.tripProjectId!, draft });
       return { value: undefined, terminalCode: saved.success ? undefined : saved.reason === "invalid" ? "invalid_gateway_response" : "proposal_persistence_rejected" };
     });
-    return completion.completed ? "completed" : "fenced_out";
+    return completion.completed ? completion.terminal ? "terminal_failure" : "completed" : "fenced_out";
   });
+}
+
+function persistedFailureOutcome(persisted: Awaited<ReturnType<typeof failDomainOutboxClaimInTransaction>>) {
+  return persisted?.status === "pending" ? "retry_scheduled" as const : persisted?.status === "failed" ? "terminal_failure" as const : "fenced_out" as const;
 }

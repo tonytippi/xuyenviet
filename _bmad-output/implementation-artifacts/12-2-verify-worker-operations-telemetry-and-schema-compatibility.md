@@ -190,6 +190,7 @@ gpt-5.6-terra-review
 - Verification 2026-07-31: serial `DATABASE_URL_TEST` matrix passed: 12 files, 108 tests. Focused repaired telemetry/protocol serial matrix passed: 5 files, 60 tests. `pnpm lint` completed with 0 errors and 5 pre-existing warnings; post-build `pnpm typecheck`, `pnpm build`, `docker compose config`, Worker Docker target build, and `git diff --check` passed.
 - BMad code review 2026-07-31: initial Blind Hunter, Edge Case Hunter, and Acceptance Auditor findings covering production transport exposure, sink blocking, result classification, public indexing result shape, and evidence recording were repaired. Final follow-up review found no unresolved code findings; the exact 12-file evidence command was reconciled in the Worker operations runbook. Story is approved complete; no deployed monitoring, on-call, Railway, public-launch, or legacy-loop-retirement evidence is claimed.
 - 2026-08-01 final Epic 12 review repair: the production web runner now packages `docs/release-matrices` and declares `/app/docs/release-matrices`; direct copied-bundle verification starts Next from an unrelated cwd and reaches the schema-gated web health boundary. Console telemetry drops events while stdout is backpressured, consumes asynchronous stdout failures without affecting domain outcomes, and emits a process warning for that operational condition. Final serial verification passed: `pnpm vitest run tests/operational-telemetry.test.ts tests/bundled-runtime-startup.test.ts --maxWorkers=1 --no-file-parallelism` (2 files, 8 tests), `pnpm lint` (0 errors, 5 pre-existing warnings), `pnpm typecheck`, and `git diff --check`; `docker build --target runner -t xuyenviet-web-12-2-review .` passed. Final synchronous review found no actionable findings.
+- 2026-08-01 closure completion: persisted outbox retries, claim-time retry exhaustion, and proposal persistence terminal failures emit truthful per-row retry/failure telemetry through the compiled adapter. Telemetry snapshots own primitive data descriptors into a null-prototype allowlisted DTO before a sink receives it; hostile prototype/global `toJSON`, coercible identifiers, getters, and proxies cannot alter the caller or serialized output. The retained authority-revalidation tests now mock the actual Worker-safe relative `domain-outbox` dependency and invoke `@xuyenviet/worker-domain`, preserving the real fences: provider calls do not run after the fence and annotation effects do not persist after the fence. Serial `pnpm vitest run tests/chat-trip-context-extraction.test.ts --maxWorkers=1 --no-file-parallelism` passed (1 file, 27 tests); serial `pnpm vitest run tests/operational-telemetry.test.ts tests/domain-outbox.test.ts --maxWorkers=1 --no-file-parallelism` passed (2 files, 41 tests). `pnpm typecheck` passed; `pnpm lint` had 0 errors and 5 pre-existing warnings; `git diff --check` passed. Final synchronous review found no actionable findings. Story is complete; no Story 12.3 code changed.
 
 ### File List
 
@@ -197,5 +198,10 @@ gpt-5.6-terra-review
 - `packages/contracts/src/index.ts`
 - `tests/bundled-runtime-startup.test.ts`
 - `tests/operational-telemetry.test.ts`
+- `packages/database/src/domain-outbox.ts`
+- `packages/worker-domain/src/adapters.ts`
+- `packages/worker-domain/src/features/ai/domain-outbox-worker.ts`
+- `packages/worker-domain/src/features/chat-trips/context-extraction.ts`
+- `tests/chat-trip-context-extraction.test.ts`
 - `_bmad-output/implementation-artifacts/12-2-verify-worker-operations-telemetry-and-schema-compatibility.md`
 - `_bmad-output/implementation-artifacts/sprint-status.yaml`
