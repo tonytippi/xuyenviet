@@ -49,6 +49,10 @@ so that rollout or rollback never destroys durable product data.
 
 ## Dev Notes
 
+### Review Findings
+
+- [x] [Review][Patch] Prove bundled runtimes validate an approved release artifact [tests/bundled-runtime-startup.test.ts:28] — The detached deployment regression materializes an approved digest-bound fixture, proves API/web/Worker readiness at the overlap version, and proves missing or valid-but-digest-tampered artifacts remain non-ready.
+
 ### Scope and Outcome
 
 - This story supplies the release-policy and repository-level enforcement missing after Stories 12.1 and 12.2: clean-break admission only for confirmed disposable, non-overlapping targets; otherwise an approved expand-migrate-contract compatibility matrix and migration-job gate.
@@ -168,6 +172,7 @@ gpt-5.6-terra-review
 - Initial verification was blocked pending the approved, checked-in `DATABASE_URL_TEST` migration matrix. That approval and the required successful isolated CLI migration proof are now complete; no development/staging/production reset, migration, seed, deployment, or destructive rollback was executed.
 - 2026-07-31: User-approved bounded recovery completed. Fresh test bootstrap now reaches Drizzle before the release ledger exists and records only after success; reset and migration share an identity-verified maintenance-database advisory lock; API, web, and Worker phase admission binds a single live schema/identity observation to the approved matrix; and forced Worker drain waits for child exit deterministically. The approved `DATABASE_URL_TEST` matrix was recreated from scratch, migrated successfully, and verified to contain exactly one `20260729.1` release record. Final Blind Hunter, Edge Case Hunter, and Acceptance reviews were repaired to clean.
 - 2026-08-01: Targeted Epic 12 repair canonicalized phase-policy declaration comparison by workload and fields, independent of JSON key order. The checked-in matrix is now an unattested, explicitly unapproved template with no owner, deployment, or verification assertions and is rejected by parsing, migration admission, and runtime policy loading until an operator supplies actual approved evidence. Regressions cover reordered equivalent declarations and a changed declaration rejection. Final synchronous blocking review is clean.
+- 2026-08-01: Final Story 12.3 repair materialized an approved, SHA-256-bound overlap matrix in a detached deployment directory against the isolated `DATABASE_URL_TEST` ledger. Built API, web, and Worker boundaries admit the persisted overlap version only with that artifact; missing and structurally valid but digest-tampered artifacts stay non-ready. The test restores the original release ledger and awaits all spawned runtimes before cleanup. Final synchronous Blind Hunter, Edge Case Hunter, and Acceptance Auditor review is clean.
 
 ### Auto Run Result
 
@@ -212,3 +217,4 @@ Status: done
 - `tests/api-platform-contract.test.ts`
 - `tests/story-8-5-clean-break.test.ts`
 - `tests/story-8-6-actor-isolation.test.ts`
+- `tests/bundled-runtime-startup.test.ts`
