@@ -7,6 +7,7 @@ import { assertDisposableLocalDatabaseUrl } from "../scripts/db-env";
 import { assertMaintenanceTargetIdentity, databaseNameForReset, runDisposableDatabaseReset } from "../scripts/db-reset";
 import { runDisposableDatabaseSeed, seedVerifiedConnection } from "../scripts/db-seed";
 import { runApiSchemaMigration } from "../scripts/migrate-api-schema-runner";
+import { withTargetMigrationLock } from "../scripts/migrate-api-schema";
 import { getTestDatabaseUrl } from "./helpers/env-file";
 
 const sensitiveReleaseInput = {
@@ -225,22 +226,29 @@ describe("schema release gates", () => {
     expect(steps).toEqual(["lock", "recreate", "drizzle", "record", "seed", "unlock"]);
   });
 
-  it.runIf(Boolean(process.env.DATABASE_URL_TEST))("serializes reset and migration through the same real PostgreSQL lock database", async () => {
-    const maintenanceUrl = new URL(getTestDatabaseUrl());
+  it.runIf(Boolean(process.env.DATABASE_URL_TEST))("serializes legacy and current migration runners in the target database lock namespace", async () => {
+    const targetUrl = getTestDatabaseUrl();
+    const legacyRunnerLock = postgres(targetUrl, { max: 1 });
+    const currentRunnerLock = postgres(targetUrl, { max: 1 });
+    const maintenanceUrl = new URL(targetUrl);
     maintenanceUrl.pathname = "/postgres";
-    const resetLock = postgres(maintenanceUrl.toString(), { max: 1 });
-    const migrationLock = postgres(maintenanceUrl.toString(), { max: 1 });
+    const maintenanceLock = postgres(maintenanceUrl.toString(), { max: 1 });
     try {
-      await resetLock`select pg_advisory_lock(918_040_004)`;
-      const [contended] = await migrationLock<{ acquired: boolean }[]>`select pg_try_advisory_lock(918_040_004) as acquired`;
-      expect(contended?.acquired).toBe(false);
-      await resetLock`select pg_advisory_unlock(918_040_004)`;
-      const [acquired] = await migrationLock<{ acquired: boolean }[]>`select pg_try_advisory_lock(918_040_004) as acquired`;
-      expect(acquired?.acquired).toBe(true);
-      await migrationLock`select pg_advisory_unlock(918_040_004)`;
+      await legacyRunnerLock`select pg_advisory_lock(918_040_004)`;
+      let currentRunnerEntered = false;
+      const currentRunner = withTargetMigrationLock(currentRunnerLock, async () => { currentRunnerEntered = true; });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(currentRunnerEntered).toBe(false);
+      const [maintenanceAcquired] = await maintenanceLock<{ acquired: boolean }[]>`select pg_try_advisory_lock(918_040_004) as acquired`;
+      expect(maintenanceAcquired?.acquired).toBe(true);
+      await maintenanceLock`select pg_advisory_unlock(918_040_004)`;
+      await legacyRunnerLock`select pg_advisory_unlock(918_040_004)`;
+      await currentRunner;
+      expect(currentRunnerEntered).toBe(true);
     } finally {
-      await resetLock.end();
-      await migrationLock.end();
+      await legacyRunnerLock.end();
+      await currentRunnerLock.end();
+      await maintenanceLock.end();
     }
   });
 

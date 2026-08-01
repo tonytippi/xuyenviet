@@ -136,16 +136,26 @@ async function migrateDisposableTarget(databaseUrl: string, expectedIdentity: st
 async function withResetReleaseLock(databaseUrl: string, expectedIdentity: string, action: () => Promise<void>): Promise<void> {
   const maintenanceUrl = new URL(databaseUrl);
   maintenanceUrl.pathname = "/postgres";
-  const sql = postgres(maintenanceUrl.toString(), { max: 1 });
-  let locked = false;
+  const targetSql = postgres(databaseUrl, { max: 1 });
+  const maintenanceSql = postgres(maintenanceUrl.toString(), { max: 1 });
+  let targetLocked = false;
+  let maintenanceLocked = false;
   try {
-    await assertMaintenanceTargetIdentity(sql, expectedIdentity);
-    await sql`select pg_advisory_lock(${releaseLock})`;
-    locked = true;
+    if (await resolveDatabaseTargetIdentity(targetSql) !== expectedIdentity) throw new Error("Refusing destructive reset because the resolved target does not match the operator confirmation.");
+    // Acquire target then maintenance, the only lock order used by reset. DROP
+    // DATABASE necessarily terminates targetSql and releases its lock, so reset
+    // relies on its explicit no-runtime-overlap confirmation after recreation.
+    await targetSql`select pg_advisory_lock(${releaseLock})`;
+    targetLocked = true;
+    await assertMaintenanceTargetIdentity(maintenanceSql, expectedIdentity);
+    await maintenanceSql`select pg_advisory_lock(${releaseLock})`;
+    maintenanceLocked = true;
     await action();
   } finally {
-    if (locked) await sql`select pg_advisory_unlock(${releaseLock})`.catch(() => undefined);
-    await sql.end();
+    if (maintenanceLocked) await maintenanceSql`select pg_advisory_unlock(${releaseLock})`.catch(() => undefined);
+    await maintenanceSql.end();
+    if (targetLocked) await targetSql`select pg_advisory_unlock(${releaseLock})`.catch(() => undefined);
+    await targetSql.end();
   }
 }
 
@@ -162,8 +172,6 @@ async function recordSchemaVersion(databaseUrl: string, version: string): Promis
   const sql = postgres(databaseUrl, { max: 1 });
   try {
     await sql.begin(async (transaction) => {
-      // The maintenance session already holds the reset lifecycle lock. Taking
-      // it again on this separate writer session would self-deadlock.
       await transaction`delete from release_schema_versions`;
       await transaction`insert into release_schema_versions (version) values (${version})`;
     });
