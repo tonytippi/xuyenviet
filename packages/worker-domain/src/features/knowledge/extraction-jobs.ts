@@ -118,11 +118,13 @@ export async function processNextKnowledgeExtractionJob(options: { workerId?: st
   const job = await claimNextKnowledgeExtractionJob(options, db);
 
   if (!job) {
-    return { status: "no_job" as const, recoveredFailures: recovery.failures, observation: extractionObservation(recovery.failedCount ? "failure" : "no_work", undefined, recovery) };
+    const observations = recovery.observations.length ? recovery.observations : [extractionObservation("no_work")];
+    return { status: "no_job" as const, recoveredFailures: recovery.failures, observations, observation: observations.at(-1)! };
   }
 
   const result = await processKnowledgeExtractionJob(job.id, db);
-  return { ...result, recoveredFailures: recovery.failures, observation: extractionObservation(recovery.failedCount ? "failure" : result.status === "failed" ? result.disposition : result.status === "not_processable" ? "contended" : "success", job, recovery) };
+  const observation = extractionObservation(result.status === "failed" ? result.disposition : result.status === "not_processable" ? "contended" : "success", job);
+  return { ...result, recoveredFailures: recovery.failures, observations: [...recovery.observations, observation], observation };
 }
 
 export async function runKnowledgeExtractionWorkerLoop(options: { once?: boolean; workerId?: string; pollIntervalMs?: number; signal?: AbortSignal; onObservation?: (observation: WorkerPollObservation) => void | Promise<void> } = {}) {
@@ -131,7 +133,9 @@ export async function runKnowledgeExtractionWorkerLoop(options: { once?: boolean
   while (!options.signal?.aborted) {
     if (options.signal?.aborted) break;
     const result = await processNextKnowledgeExtractionJob({ workerId: options.workerId });
-    await observe(options.onObservation, result.observation);
+    for (const observation of result.observations) {
+      await observe(options.onObservation, observation);
+    }
 
     for (const failure of result.recoveredFailures) {
       console.warn("Knowledge extraction job failed", failure);
@@ -155,13 +159,12 @@ export async function runKnowledgeExtractionWorkerLoop(options: { once?: boolean
   return { status: "stopped" as const };
 }
 
-function extractionObservation(resultCode: WorkerPollObservation["resultCode"], job?: Pick<typeof knowledgeExtractionJobs.$inferSelect, "id" | "lockedAt" | "nextRunAt" | "attemptCount"> | null, recovery?: { recoveredCount: number; failedCount: number }): WorkerPollObservation {
-  const recoveryCount = (recovery?.recoveredCount ?? 0) + (recovery?.failedCount ?? 0);
+function extractionObservation(resultCode: WorkerPollObservation["resultCode"], job?: Pick<typeof knowledgeExtractionJobs.$inferSelect, "id" | "lockedAt" | "nextRunAt" | "attemptCount"> | null, recovered = false): WorkerPollObservation {
   return {
     capability: "knowledge.extraction", resultCode,
     ...(job ? { durableId: job.id, retryCount: job.attemptCount, jobLagMs: Math.max(0, (job.lockedAt?.getTime() ?? 0) - job.nextRunAt.getTime()) } : {}),
-    leaseRecovery: recoveryCount ? "recovered" : "none",
-    ...(recoveryCount ? { leaseRecoveryCount: recoveryCount } : {}),
+    leaseRecovery: recovered ? "recovered" : "none",
+    ...(recovered ? { leaseRecoveryCount: 1 } : {}),
   };
 }
 
@@ -398,7 +401,7 @@ export async function recoverStaleKnowledgeExtractionJobs(options: { now?: Date;
       .update(knowledgeExtractionJobs)
       .set({ status: "queued", lockedAt: null, lockedBy: null, nextRunAt: now, updatedAt: now })
       .where(and(eq(knowledgeExtractionJobs.status, "running"), isNotNull(knowledgeExtractionJobs.lockedAt), lte(knowledgeExtractionJobs.lockedAt, staleBefore), sql`${knowledgeExtractionJobs.attemptCount} < ${knowledgeExtractionJobs.maxAttempts}`))
-      .returning({ id: knowledgeExtractionJobs.id });
+      .returning({ id: knowledgeExtractionJobs.id, attemptCount: knowledgeExtractionJobs.attemptCount });
     for (const transition of transitions) await recordExtractionJobTransitionAudit(transaction, transition.id, "stale_requeued");
     return transitions;
   });
@@ -408,6 +411,10 @@ export async function recoverStaleKnowledgeExtractionJobs(options: { now?: Date;
     failedCount: failedRows.length,
     jobIds: rows.map((row) => row.id),
     failures: failedRows.map((row) => toJobFailureLog(row, { code: "stale_max_attempts", detail: undefined, message: "Extraction failed: stale_max_attempts" }, false, "failed")),
+    observations: [
+      ...failedRows.map((row) => extractionObservation("failure", { id: row.id, lockedAt: null, nextRunAt: now, attemptCount: row.attemptCount }, true)),
+      ...rows.map((row) => extractionObservation("retry", { id: row.id, lockedAt: null, nextRunAt: now, attemptCount: row.attemptCount }, true)),
+    ],
   };
 }
 

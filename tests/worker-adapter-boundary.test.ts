@@ -64,14 +64,13 @@ async function runCompiledAdapter(adapter: "extraction" | "ingestion" | "indexin
 }
 
 function expectCompiledWorkerEvent(events: OperationalTelemetryEvent[], expected: Partial<OperationalTelemetryEvent>) {
-  expect(events).toHaveLength(1);
-  expect(events[0]).toMatchObject({
+  expect(events).toEqual(expect.arrayContaining([expect.objectContaining({
     capability: expect.any(String),
     principalClass: "system",
     latencyMs: expect.any(Number),
     correlationId: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f-]{27}$/),
     ...expected,
-  });
+  })]));
 }
 
 async function seedExtractionJob(id: string) {
@@ -221,7 +220,7 @@ describe("compiled worker adapters", () => {
     const staleExtraction = await seedExtractionJob("compiled-stale-extraction");
     await testDb.update(knowledgeExtractionJobs).set({ status: "running", attemptCount: 3, maxAttempts: 3, lockedBy: "dead-worker", lockedAt: new Date(0), startedAt: new Date(0) }).where(eq(knowledgeExtractionJobs.id, staleExtraction.id));
     const staleExtractionEvents = await runCompiledAdapter("extraction", "compiled-stale-extraction-worker");
-    expectCompiledWorkerEvent(staleExtractionEvents, { capability: "knowledge.extraction", resultCode: "failure", leaseRecovery: "recovered" });
+    expectCompiledWorkerEvent(staleExtractionEvents, { capability: "knowledge.extraction", resultCode: "failure", durableId: staleExtraction.id, leaseRecovery: "recovered", leaseRecoveryCount: 1 });
     await expect(testDb.select().from(knowledgeExtractionJobs).where(eq(knowledgeExtractionJobs.id, staleExtraction.id))).resolves.toMatchObject([{ status: "failed", lastErrorCode: "stale_max_attempts" }]);
 
     const ingestion = await seedIngestionJob("compiled-terminal-candidate");
@@ -235,7 +234,7 @@ describe("compiled worker adapters", () => {
     const recoveryIngestion = await seedIngestionJob("compiled-exhausted-ingestion");
     await testDb.update(knowledgeIngestionJobs).set({ attemptCount: 3, maxAttempts: 3, claimedBy: "dead-worker", claimedAt: new Date(0), leaseExpiresAt: new Date(1), fencingToken: "b".repeat(64) }).where(eq(knowledgeIngestionJobs.id, recoveryIngestion.id));
     const recoveryIngestionEvents = await runCompiledAdapter("ingestion", "compiled-exhausted-ingestion-worker");
-    expectCompiledWorkerEvent(recoveryIngestionEvents, { capability: "knowledge.ingestion", resultCode: "failure", leaseRecovery: "recovered" });
+    expectCompiledWorkerEvent(recoveryIngestionEvents, { capability: "knowledge.ingestion", resultCode: "failure", durableId: recoveryIngestion.id, leaseRecovery: "recovered", leaseRecoveryCount: 1 });
     await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, recoveryIngestion.id))).resolves.toMatchObject([{ stage: "failed", lastErrorCode: "retry_exhausted" }]);
 
     await testDb.insert(knowledgeCards).values({ id: "compiled-exhausted-card", type: "place", title: "Exhausted indexing card", summary: "Indexing recovery fixture.", aiPromptVersion: "test", createdByUserId: "operator" });
@@ -312,9 +311,15 @@ describe("compiled worker adapters", () => {
         { stage: "queued", attemptCount: 1, claimedBy: null, fencingToken: null, requeueReasonCode: "lease_expired" },
       ]);
       expectCompiledWorkerEvent(recoveryEvents, {
-        resultCode: "success",
+        resultCode: "retry",
+        durableId: first.id,
         leaseRecovery: "recovered",
         leaseRecoveryCount: 1,
+      });
+      expectCompiledWorkerEvent(recoveryEvents, {
+        resultCode: "success",
+        durableId: second.id,
+        leaseRecovery: "none",
       });
       await testDb.update(knowledgeIngestionJobs).set({ nextRunAt: new Date(0) }).where(eq(knowledgeIngestionJobs.id, first.id));
       const retryEvents = await runCompiledAdapter("ingestion", "recovery-worker");

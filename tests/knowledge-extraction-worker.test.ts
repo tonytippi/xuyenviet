@@ -134,6 +134,25 @@ describe("knowledge extraction worker jobs", () => {
     expect(warn).toHaveBeenCalledWith("Knowledge extraction job failed", expect.objectContaining({ jobId: job.id, sourceId: review.sourceId, facebookCaptureReviewId: review.id, mode: "extract_only", attemptCount: 3, maxAttempts: 3, code: "stale_max_attempts", retryable: false, outcome: "failed" }));
   });
 
+  test("emits separate stale terminal and newly claimed retry observations in one serial poll", async () => {
+    await createExtractionModel();
+    const staleReview = await createCapturedFacebookReview("mixed-stale-terminal");
+    const claimedReview = await createCapturedFacebookReview("mixed-new-retry");
+    const [stale] = await testDb.insert(knowledgeExtractionJobs).values({ sourceId: staleReview.sourceId, facebookCaptureReviewId: staleReview.id, mode: "extract_only", status: "running", attemptCount: 3, maxAttempts: 3, lockedAt: new Date(Date.now() - 20 * 60_000), lockedBy: "dead-worker", startedAt: new Date(Date.now() - 20 * 60_000), createdByUserId: "operator-user", createdByEmail: "operator-user@example.com" }).returning();
+    const [claimed] = await testDb.insert(knowledgeExtractionJobs).values({ sourceId: claimedReview.sourceId, facebookCaptureReviewId: claimedReview.id, mode: "extract_only", status: "queued", nextRunAt: new Date(0), createdByUserId: "operator-user", createdByEmail: "operator-user@example.com" }).returning();
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(null, { status: 503 }));
+    const observations: Array<{ resultCode: string; durableId?: string; leaseRecovery?: string; retryCount?: number }> = [];
+
+    await expect(runKnowledgeExtractionWorkerLoop({ once: true, workerId: "mixed-observation-worker", onObservation(observation) { observations.push(observation); } })).resolves.toMatchObject({ status: "failed", jobId: claimed.id });
+
+    expect(observations).toEqual([
+      expect.objectContaining({ resultCode: "failure", durableId: stale.id, retryCount: 3, leaseRecovery: "recovered", leaseRecoveryCount: 1 }),
+      expect.objectContaining({ resultCode: "retry", durableId: claimed.id, retryCount: 1, leaseRecovery: "none" }),
+    ]);
+    await expect(testDb.select().from(knowledgeExtractionJobs).where(eq(knowledgeExtractionJobs.id, stale.id))).resolves.toMatchObject([{ status: "failed", lastErrorCode: "stale_max_attempts" }]);
+    await expect(testDb.select().from(knowledgeExtractionJobs).where(eq(knowledgeExtractionJobs.id, claimed.id))).resolves.toMatchObject([{ status: "queued", attemptCount: 1, lastErrorCode: "provider_failed" }]);
+  });
+
   test("source intake list exposes active async extraction job state", async () => {
     authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
     await createUrlSource("url-active-job");

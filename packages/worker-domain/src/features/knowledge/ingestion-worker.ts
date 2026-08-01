@@ -6,15 +6,24 @@ const defaultPollIntervalMs = 5_000;
 
 export async function processNextKnowledgeIngestionJob(workerId: string) {
   const recovery = await recoverKnowledgeIngestionJobs();
+  const recoveryObservations = [
+    ...recovery.exhaustedRows.map((row) => ingestionObservation("failure", { jobId: row.id, attemptCount: row.attemptCount, claimedAt: new Date(0), nextRunAt: new Date(0) }, true)),
+    ...recovery.recoveredRows.map((row) => ingestionObservation("retry", { jobId: row.id, attemptCount: row.attemptCount, claimedAt: new Date(0), nextRunAt: new Date(0) }, true)),
+  ];
   const candidate = await claimNextKnowledgeIngestionCandidate({ workerId });
   if (candidate) {
     const result = await runKnowledgeIngestionCandidatePipeline(candidate);
-    return { result, observation: ingestionObservation(recovery.exhausted ? "failure" : candidateDisposition(result), candidate, recovery) };
+    const observation = ingestionObservation(candidateDisposition(result), candidate);
+    return { result, observations: [...recoveryObservations, observation], observation };
   }
   const claim = await claimNextKnowledgeIngestionJob({ workerId });
-  if (!claim) return { result: null, observation: ingestionObservation(recovery.exhausted ? "failure" : "no_work", undefined, recovery) };
+  if (!claim) {
+    const observations = recoveryObservations.length ? recoveryObservations : [ingestionObservation("no_work")];
+    return { result: null, observations, observation: observations.at(-1)! };
+  }
   const result = await runKnowledgeIngestionPipeline(claim);
-  return { result, observation: ingestionObservation(recovery.exhausted ? "failure" : result?.outcome === "failed" ? "failure" : result?.outcome === "retry" ? "retry" : result ? "success" : "contended", claim, recovery) };
+  const observation = ingestionObservation(result?.outcome === "failed" ? "failure" : result?.outcome === "retry" ? "retry" : result ? "success" : "contended", claim);
+  return { result, observations: [...recoveryObservations, observation], observation };
 }
 
 function candidateDisposition(result: Awaited<ReturnType<typeof runKnowledgeIngestionCandidatePipeline>>): WorkerPollObservation["resultCode"] {
@@ -33,7 +42,9 @@ export async function runKnowledgeIngestionWorkerLoop(options: { once?: boolean;
   while (!options.signal?.aborted) {
     if (options.signal?.aborted) break;
     const result = await processNextKnowledgeIngestionJob(workerId);
-    try { await options.onObservation?.(result.observation); } catch {}
+    for (const observation of result.observations) {
+      try { await options.onObservation?.(observation); } catch {}
+    }
     await options.onPollComplete?.();
 
     if (options.once) return result.result;
@@ -43,13 +54,12 @@ export async function runKnowledgeIngestionWorkerLoop(options: { once?: boolean;
   return { status: "stopped" as const };
 }
 
-function ingestionObservation(resultCode: WorkerPollObservation["resultCode"], claim: { jobId: string; candidateId?: string; attemptCount: number; claimedAt: Date; nextRunAt: Date } | undefined, recovery?: { recovered: number; exhausted: number }): WorkerPollObservation {
-  const recoveryCount = (recovery?.recovered ?? 0) + (recovery?.exhausted ?? 0);
+function ingestionObservation(resultCode: WorkerPollObservation["resultCode"], claim?: { jobId: string; candidateId?: string; attemptCount: number; claimedAt: Date; nextRunAt: Date }, recovered = false): WorkerPollObservation {
   return {
     capability: "knowledge.ingestion", resultCode,
     ...(claim ? { durableId: claim.candidateId ?? claim.jobId, retryCount: claim.attemptCount, jobLagMs: Math.max(0, claim.claimedAt.getTime() - claim.nextRunAt.getTime()) } : {}),
-    leaseRecovery: recoveryCount ? "recovered" : "none",
-    ...(recoveryCount ? { leaseRecoveryCount: recoveryCount } : {}),
+    leaseRecovery: recovered ? "recovered" : "none",
+    ...(recovered ? { leaseRecoveryCount: 1 } : {}),
   };
 }
 

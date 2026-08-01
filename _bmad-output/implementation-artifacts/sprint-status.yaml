@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-08-01 (Final Story 12.3 migration-lock repair verified; Epic 12 is done.)
+# last_updated: 2026-08-01 (Story 12.2 recovery-attribution repair verified; Epic 12 remains in progress for Story 12.3.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-08-01 (Final Story 12.3 migration-lock repair verified; Epic 12 is done.)
+last_updated: 2026-08-01 (Story 12.2 recovery-attribution repair verified; Epic 12 remains in progress for Story 12.3.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -245,7 +245,7 @@ development_status:
   11-5-serve-planning-context-and-details-through-the-api-cutover: done
   epic-11-retrospective: optional
 
-  epic-12: done
+  epic-12: in-progress
   # 2026-07-31: bmad-dev-auto completed after user-authorized Worker-safe domain extraction and synchronous Blind Hunter, Edge Case Hunter, and Acceptance Auditor review/repair cycles. Compiled adapters exclude root src, Next.js, Auth.js, server-only, src/app, and server-action code; persisted compiled ingestion/outbox success, drain/no-new-claim, stale-lease recovery, and bounded expiry CLI idempotency are covered. Serial focused suite: 8 files, 89 tests. typecheck, build, diff check, compose rendering, and Docker Worker image passed; lint has 0 errors and 5 pre-existing unrelated warnings.
   # 2026-08-01 targeted Epic 12 repair: a forced non-settling adapter can no longer block bounded Worker drain. Serial Worker/protocol verification passed (8 files, 94 tests), retaining real compiled ingestion no-new-claim and persisted lease-recovery proof; typecheck, build, and diff check passed; lint had 0 errors and 5 pre-existing warnings. Final Epic review found that a throwing forceStop still aborts drain before remaining forced stops and teardown; repair and follow-up review are required.
   # 2026-08-01 final Story 12.1 repair: drain isolates each throwing forceStop, continues sibling forced stops, and always tears down health sockets/server. Concurrent drain callers share completion and a graceful drain clears its deadline timer. Worker runtime/adapter/CLI verification passed (3 files, 24 tests); typecheck, Worker build, and diff check passed. Broader retained indexing fixtures remain blocked by their pre-existing missing index-worker-user FK setup. Final synchronous review is clean.
@@ -257,13 +257,16 @@ development_status:
   # 2026-08-01 final telemetry closure repair: guarded persisted Worker outcomes now emit retry only for durable requeues, failure only for terminalization, and contended only for lost/fenced claims. Serial DATABASE_URL_TEST matrix passed 7 files and 125 tests; typecheck and diff check passed; lint had 0 errors and 5 pre-existing warnings. Final synchronous review found no actionable correctness issues. Story 12.3 remains independently in-progress.
   # 2026-08-01 final Epic 12 closure review of a66bfa4..56adb4d found one remaining Story 12.2 telemetry correctness patch: a multi-marker indexing batch emits the aggregate resultCode with claims[0]'s durableId/retry metadata, so a later marker's retry/failure/contended outcome can be attributed falsely to a successful first marker. Target-database migration-lock interoperability and all other reviewed closure repairs are verified.
   # 2026-08-01 final Story 12.2 closure repair: indexing emits a separate observation for every claimed or recovered marker, preserving each marker's result code, durable ID, retry count, lag, and recovery disposition. Mixed success/retry and recovered retry/exhausted-failure regressions prove outcomes are never assigned to a different marker. Serial focused Worker verification passed 3 files and 29 tests; typecheck and diff check passed; lint had 0 errors and 5 existing warnings. Final synchronous review found no actionable findings. Stories 12.1 and 12.3 are confirmed done; Epic 12 is done.
+  # 2026-08-01 final Epic 12 closure review of a66bfa4..f0a886c ran Blind Hunter, Edge Case Hunter, and Acceptance Auditor synchronously. BLOCKED: extraction and ingestion can emit a recovered record's terminal failure against a separate newly claimed record's durable ID; each feature must emit per-record recovery observations and retain the claimed record's own persisted disposition. Story 12.2 returns to in-progress pending repair and serial mixed recovery-plus-claim regressions.
+  # 2026-08-01 final Story 12.2 closure repair: extraction and ingestion emit each recovered durable row separately, then preserve every newly claimed record's persisted result code and ID. Serial PostgreSQL verification passed 4 files and 52 tests, including mixed recovery-plus-new-claim and compiled-adapter coverage; typecheck and diff check passed; lint had 0 errors and 5 pre-existing warnings. Final synchronous review found no actionable findings. Story 12.3 remains in-progress, so Epic 12 remains in-progress.
   12-2-verify-worker-operations-telemetry-and-schema-compatibility: done
   # 2026-07-31: User-approved bounded recovery repaired fresh-ledger bootstrap, identity-verified common maintenance-database advisory locking, atomic live database identity admission for API/web/Worker, and deterministic compiled Worker drain. The approved isolated DATABASE_URL_TEST matrix migrated a fresh target successfully and recorded exactly one 20260729.1 release version. Final synchronous Blind Hunter, Edge Case Hunter, and Acceptance review repairs are clean. Serial focused verification passed 70 tests; lint has zero errors and five existing unrelated warnings; build, typecheck, Compose rendering, and diff check passed. No development/staging/production reset, migration, seed, or deployment ran. All Epic 12 stories (12.1, 12.2, 12.3) are confirmed done.
   # 2026-08-01 targeted Story 12.3 repair: workload-keyed phase-policy equality is key-order-independent and rejects changed declarations. The checked-in matrix is an unattested, unapproved template with no owner, deployment, or verification claims and fails closed in parser, migration gate, and runtime policy loading.
   # 2026-08-01 final Story 12.3 repair: detached built API/web/Worker deployments admit persisted overlap version 20260729.1 only through a materialized approved SHA-256-bound matrix. Missing and structurally valid digest-tampered artifacts leave all three boundaries non-ready. The serial test restores the isolated release ledger and waits for child termination. Serial focused verification passed 10 files and 72 tests; lint had 0 errors and 5 existing unrelated warnings; typecheck, build, Compose rendering, and diff checks passed. Final synchronous Blind Hunter, Edge Case Hunter, and Acceptance Auditor review is clean. Stories 12.1, 12.2, and 12.3 are confirmed done.
   # 2026-08-01 final Epic 12 closure review of a66bfa4..884fdd7: the release advisory lock moved from the target database to the maintenance database, losing interoperability with the established target-database lock namespace. No code was modified during review.
   # 2026-08-01 final closure repair: db:migrate holds advisory lock 918_040_004 in the application target database, restoring serialization with legacy runners. Disposable reset coordinates target then maintenance before target destruction and relies on its explicit no-runtime-overlap prerequisite after database recreation. Serial DATABASE_URL_TEST migration/lock regressions passed (2 files, 33 tests); typecheck and diff check passed; lint had 0 errors and 5 pre-existing warnings. Final synchronous review is clean. All Epic 12 stories are confirmed done.
-  12-3-gate-schema-changes-for-overlapping-runtimes: done
+  # 2026-08-01 final Epic 12 closure review of a66bfa4..f0a886c ran Blind Hunter, Edge Case Hunter, and Acceptance Auditor synchronously. BLOCKED: db:reset loses its target-database advisory lock when DROP DATABASE terminates the target session, while a concurrent db:migrate can acquire the recreated target lock before reset migration, release recording, or seed completes. Story 12.3 returns to in-progress pending post-recreation target lock coordination and a concurrent reset/migrator regression.
+  12-3-gate-schema-changes-for-overlapping-runtimes: in-progress
   epic-12-retrospective: optional
 
   epic-13: backlog

@@ -213,6 +213,27 @@ describe("canonical knowledge ingestion jobs", () => {
     await expect(commitKnowledgeIngestionStage({ jobId: first.jobId, expectedStage: "triaging", expectedStageVersion: 2, fencingToken: first.fencingToken, nextStage: "extracting", checkpoint: { version: 1, completedStage: "extracting", candidate: { type: "place", title: "Title", summary: "Summary", locationName: "Place", routeSegment: null, conditions: [], freshnessSensitive: false, spanStart: 0, spanEnd: 1, modelId: "extract", modelGatewayName: "extract-model", promptVersion: "v1" } }, now: expiredAt }, testDb)).resolves.toBeNull();
   });
 
+  test("emits separate exhausted recovery and newly claimed terminal observations in one serial poll", async () => {
+    await createSource("mixed-recovery");
+    await createSource("mixed-claim");
+    const recoveredCapture = await appendReadableCapture("mixed-recovery");
+    const claimedCapture = await appendReadableCapture("mixed-claim");
+    const [recovered] = await testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.captureVersionId, recoveredCapture.id));
+    const [claimed] = await testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.captureVersionId, claimedCapture.id));
+    await testDb.update(knowledgeIngestionJobs).set({ attemptCount: 3, maxAttempts: 3, claimedBy: "dead-worker", claimedAt: new Date(0), leaseExpiresAt: new Date(1), fencingToken: "a".repeat(64) }).where(eq(knowledgeIngestionJobs.id, recovered!.id));
+    await testDb.update(knowledgeIngestionJobs).set({ nextRunAt: new Date(0) }).where(eq(knowledgeIngestionJobs.id, claimed!.id));
+    const observations: Array<{ resultCode: string; durableId?: string; leaseRecovery?: string; retryCount?: number }> = [];
+
+    await expect(runKnowledgeIngestionWorkerLoop({ once: true, workerId: "mixed-observation-worker", onObservation(observation) { observations.push(observation); } })).resolves.toMatchObject({ jobId: claimed!.id, outcome: "failed" });
+
+    expect(observations).toEqual([
+      expect.objectContaining({ resultCode: "failure", durableId: recovered!.id, retryCount: 3, leaseRecovery: "recovered", leaseRecoveryCount: 1 }),
+      expect.objectContaining({ resultCode: "failure", durableId: claimed!.id, retryCount: 1, leaseRecovery: "none" }),
+    ]);
+    await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, recovered!.id))).resolves.toMatchObject([{ stage: "failed", lastErrorCode: "retry_exhausted" }]);
+    await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, claimed!.id))).resolves.toMatchObject([{ stage: "failed", attemptCount: 1, lastErrorCode: "model_unavailable" }]);
+  });
+
   test("clears checkpoints for terminal and exhausted jobs without exposing them in status", async () => {
     await createSource("checkpoint");
     const capture = await appendReadableCapture("checkpoint", "Checkpoint RAW_CAPTURE_MARKER");
