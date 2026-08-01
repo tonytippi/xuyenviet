@@ -80,6 +80,15 @@ warnings: [oversized, multiple-goals]
 - addressed_findings:
   - Final Blind Hunter, Edge Case Hunter, and Acceptance Auditor pass found no actionable local findings after bounded security repairs.
 
+### 2026-08-01 — Policy-Free Admission Repair Review
+- intent_gap: 0
+- bad_spec: 0
+- patch: 0
+- defer: 0
+- reject: 0
+- addressed_findings:
+  - none
+
 ## Design Notes
 
 The existing root Auth.js and credential modules are intentionally unsuitable because they query Drizzle directly. Do not extract their database behavior. Generalize only neutral validation/cryptographic/transport policy. Admin readiness must obtain a private API allow/deny admission result because database-backed web readiness is forbidden in the admin workload.
@@ -154,3 +163,11 @@ The existing root Auth.js and credential modules are intentionally unsuitable be
 ### External Evidence Still Required
 
 - Railway service selection, private-network reachability, migration-before-traffic execution, admin DNS, Google redirect registration, staging readiness probe, and least-privilege secret provisioning are deployment-owned actions and were not claimed or performed locally.
+
+## Auto Run Result
+
+- Summary: Repaired policy-free API Identity release admission so identity operations share the API's `20260728.1` ceiling and reject `20260729.1` without `SCHEMA_RELEASE_PHASE_POLICY`.
+- Files changed: `apps/api/src/release-schema.ts` centralizes the API policy-free compatibility declaration; `apps/api/src/auth/admin-identity.controller.ts` derives the admin policy-free declaration from that ceiling; `tests/story-13-1-final-repair.test.ts` proves handoff admission and rejection.
+- Review: Blind Hunter, Edge Case Hunter, and Acceptance Auditor completed with no actionable findings; no deferred or rejected findings.
+- Verification: Focused identity and schema tests, typecheck, lint, build, and `git diff --check` passed. Lint retained five pre-existing unrelated warnings.
+- Residual risks: Deployment-owned Railway/private-network/OAuth/DNS/migration-readiness evidence remains required as previously recorded.

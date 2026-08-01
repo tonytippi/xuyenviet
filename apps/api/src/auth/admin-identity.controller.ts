@@ -6,10 +6,16 @@ import type { AdminIdentityRepository, ApiIdentityRepository, ReleaseSchemaVersi
 
 import { API_IDENTITY_REPOSITORY } from "./resource-server.guard";
 import { PublicRoute } from "./public-route.decorator";
-import { API_CONFIGURATION_VALID, API_RELEASE_PHASE_POLICY, RELEASE_SCHEMA_VERSION_REPOSITORY } from "../release-schema";
+import { API_CONFIGURATION_VALID, API_RELEASE_PHASE_POLICY, RELEASE_SCHEMA_VERSION_REPOSITORY, policyFreeApiSchemaCompatibility } from "../release-schema";
 
 export const ADMIN_IDENTITY_SERVICE_TOKEN = Symbol("ADMIN_IDENTITY_SERVICE_TOKEN");
 const adminOAuthTransactionPurgeLimit = 100;
+// Policy-free traffic is limited to the pre-overlap release, matching the API
+// request boundary. The broader admin declaration applies only with a policy.
+const policyFreeAdminSchemaCompatibility: SchemaCompatibilityDeclaration = {
+  ...futureAdminSchemaCompatibilityConsumer.declaration,
+  maximumVersion: policyFreeApiSchemaCompatibility.maximumVersion,
+};
 
 export class AdminIdentityHandoffDto {
   constructor(readonly sessionId: string, readonly subject?: string) {}
@@ -171,7 +177,7 @@ export async function isAdminReady(input: { configValid: boolean; repository: Re
   if (!input.configValid || !sameDeclaration(input.declaration, futureAdminSchemaCompatibilityConsumer.declaration)) return false;
   try {
     if (input.releasePhasePolicy === null) return false;
-    if (input.releasePhasePolicy === undefined) return await input.repository.hasCompatibleSchemaVersion(futureAdminSchemaCompatibilityConsumer.declaration);
+    if (input.releasePhasePolicy === undefined) return await input.repository.hasCompatibleSchemaVersion(policyFreeAdminSchemaCompatibility);
     if (!input.repository.readSchemaAdmission) return false;
     const admission = await input.repository.readSchemaAdmission();
     const declared = input.releasePhasePolicy.workloads.admin;

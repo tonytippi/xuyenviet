@@ -275,9 +275,13 @@ development_status:
   # cannot start until Story 13.1 is done.
   epic-13: in-progress
   # 2026-08-01: bmad-dev-auto completed implementation, bounded repair loops, and final synchronous Blind Hunter, Edge Case Hunter, and Acceptance Auditor review with no actionable local findings. Focused 5-file verification passed 81 tests; lint (0 errors, 5 pre-existing warnings), typecheck, clean build, admin container build, split-env Compose rendering, and diff check passed. Railway/private-network/OAuth/DNS/migration-readiness staging proof remains deployment-owned and is recorded in Story 13.1.
-  # Epic 13 review found a HIGH policy-free release-admission fail-open in the
-  # identity boundary. Repair and follow-up review are required.
-  13-1-establish-the-separately-deployed-admin-bff-application: in-progress
+  # 2026-08-01: bmad-dev-auto repair aligned policy-free Admin Identity
+  # admission with the API's shared 20260728.1 ceiling. The real handoff gate
+  # admits 20260728.1 and fails closed at 20260729.1 without release policy;
+  # synchronous Blind Hunter, Edge Case Hunter, and Acceptance Auditor review
+  # found no actionable findings. Focused tests, typecheck, lint, build, and
+  # diff check passed. Story 13.2 remains unchanged and in progress.
+  13-1-establish-the-separately-deployed-admin-bff-application: done
   # Story 13.1 completed in 8b50b2ab43e7f22175132af4f4ab614adbed8067 with the
   # independent admin identity, credential, private transport, CSRF, isolation,
   # and readiness boundary required for this fixed user-role governance cutover.

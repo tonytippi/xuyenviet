@@ -1,6 +1,6 @@
 # Story 13.1: Establish the Separately Deployed Admin BFF Application
 
-Status: in-progress
+Status: done
 
 ## Story
 
@@ -134,6 +134,8 @@ gpt-5.6-terra
 
 ### Review Outcome
 
+- 2026-08-01 repair loop: policy-free Admin Identity admission now derives its maximum schema version from the shared API policy-free declaration, pinning it to `20260728.1`. The actual identity handoff regression admits `20260728.1` and fails closed with a safe 503 at `20260729.1` when `SCHEMA_RELEASE_PHASE_POLICY` is absent.
+- 2026-08-01 synchronous repair review: Blind Hunter, Edge Case Hunter, and Acceptance Auditor each completed. No actionable local findings remained. Story 13.2 was not modified.
 - Epic 13 completion review found a HIGH release-admission defect in `apps/api/src/auth/admin-identity.controller.ts`: when `SCHEMA_RELEASE_PHASE_POLICY` was absent, the admin declaration admitted `20260729.1`, while the API request boundary correctly admits only `20260728.1` without a bound policy. Keep this story in progress until identity admission pins policy-free maximum version to `20260728.1`, regression coverage proves rejection at `20260729.1`, and follow-up review verifies fail-closed alignment.
 - Synchronous final repair review found the OAuth callback validator previously accepted credential-bearing URLs because it compared only protocol and hostname. The validator now compares `url.origin` to the exact production origin and additionally rejects non-empty URL credentials.
 - Focused regression coverage rejects username-only, username/password, and non-default-port callback URLs before any OAuth transaction is created. No additional findings were identified in the repaired scope.
@@ -142,6 +144,12 @@ gpt-5.6-terra
 
 ### Verification
 
+- PASS: `pnpm vitest run tests/story-13-1-final-repair.test.ts tests/admin-identity-routes.test.ts` - 2 files and 21 tests passed, including policy-free identity handoff admission at `20260728.1` and fail-closed rejection at `20260729.1`.
+- PASS: `pnpm vitest run tests/schema-compatibility.test.ts` - 1 file and 11 tests passed.
+- PASS: `pnpm typecheck` - completed successfully.
+- PASS WITH PRE-EXISTING WARNINGS: `pnpm lint` - 0 errors and 5 existing unused-variable warnings in unrelated test files.
+- PASS: `pnpm build` - web, admin, API, and Worker builds completed successfully.
+- PASS: `git diff --check` - no whitespace errors.
 - PASS: `pnpm vitest run tests/story-13-1-final-repair.test.ts` - 1 file and 16 tests passed. The suite applies local test migrations through its established global setup.
 - PASS: `pnpm lint` - completed with 0 errors and 5 pre-existing unused-variable warnings in unrelated test files.
 - PASS: `pnpm build` - web, admin, API, and Worker builds completed successfully.

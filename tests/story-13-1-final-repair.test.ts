@@ -107,6 +107,22 @@ describe("Story 13.1 final identity proofs", () => {
     expect(identities.revokeAdminSession).not.toHaveBeenCalled();
   });
 
+  test("policy-free identity admission accepts 20260728.1 and rejects 20260729.1", async () => {
+    const identities = {
+      resolveAdminHandoff: vi.fn(async () => ({ subject: "operator", sessionId: "opaque", authorizationVersion: 1, roles: ["operator"] })),
+      revokeAdminSession: vi.fn(), purgeExpiredAdminOAuthTransactions: vi.fn(), createAdminOAuthTransaction: vi.fn(), consumeAdminOAuthTransaction: vi.fn(), createAdminSessionForGoogleAccount: vi.fn(),
+    };
+    for (const [version, admitted] of [["20260728.1", true], ["20260729.1", false]] as const) {
+      const hasCompatibleSchemaVersion = vi.fn(async (declaration: { minimumVersion: string; maximumVersion: string }) =>
+        version === "20260728.1" && declaration.minimumVersion === "20260728.1" && declaration.maximumVersion === "20260728.1");
+      const controller = identityController(identities, { hasCompatibleSchemaVersion });
+      const handoff = controller.handoff("Bearer service", { sessionId: "opaque" });
+      if (admitted) await expect(handoff).resolves.toMatchObject({ identity: { sessionId: "opaque" } });
+      else await expect(handoff).rejects.toMatchObject({ status: 503 });
+      expect(hasCompatibleSchemaVersion).toHaveBeenCalledWith({ ...futureAdminSchemaCompatibilityConsumer.declaration, maximumVersion: "20260728.1" });
+    }
+  });
+
   test("rejection of expired, revoked, logged-out, or authorization-version-changed sessions is delegated to live identity state", async () => {
     const states: Record<string, AdminIdentityHandoff | null> = {
       live: { subject: "operator", sessionId: "live", authorizationVersion: 1, roles: ["operator"] },
@@ -210,7 +226,7 @@ describe("Story 13.1 BFF and API denial proofs", () => {
     await expect(identityController({}, { hasCompatibleSchemaVersion: vi.fn(async () => false) }, true).readiness("Bearer service", { declaration: futureAdminSchemaCompatibilityConsumer.declaration })).resolves.toEqual({ ready: false });
     const compatible = { hasCompatibleSchemaVersion: vi.fn(async () => true) };
     await expect(identityController({}, compatible, true).readiness("Bearer service", { declaration: futureAdminSchemaCompatibilityConsumer.declaration })).resolves.toEqual({ ready: true });
-    expect(compatible.hasCompatibleSchemaVersion).toHaveBeenCalledWith(futureAdminSchemaCompatibilityConsumer.declaration);
+    expect(compatible.hasCompatibleSchemaVersion).toHaveBeenCalledWith({ ...futureAdminSchemaCompatibilityConsumer.declaration, maximumVersion: "20260728.1" });
     await expect(identityController({}, compatible, true).readiness("Bearer service", { declaration: schemaCompatibilityDeclarations.api })).resolves.toEqual({ ready: false });
 
     const incompatibleAdminPolicy = {
