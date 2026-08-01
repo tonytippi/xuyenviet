@@ -22,7 +22,7 @@ warnings: []
 
 ## Boundaries & Constraints
 
-**Always:** Fail closed before a destructive action or version-record mutation; accept a clean break only for explicitly confirmed, local, resolved disposable targets with no runtime overlap; validate durable/overlap releases through an approved expand-migrate-contract matrix; run forward Drizzle under lock before recording one target version; keep rollback traffic/code-only and keep runtime readiness on the shared contracts evaluator.
+**Always:** Fail closed before a destructive action or version-record mutation; accept a clean break only for explicitly confirmed, local, resolved disposable targets with no runtime overlap; validate durable/overlap releases through an approved expand-migrate-contract matrix; run forward Drizzle under lock before recording one target version; keep rollback traffic/code-only and keep runtime readiness on the shared contracts evaluator. `db:reset` is disposable local/test maintenance and is not an overlapping-runtime release path.
 
 **Block If:** A required release decision cannot be represented safely by the repository contract or requires a durable target mutation, external deployment evidence, a schema down migration, or an unapproved data rewrite.
 
@@ -101,4 +101,4 @@ The matrix is repository release input, not deployed state. It must contain all 
 
 Status: done
 
-The approved isolated matrix binds the dedicated `DATABASE_URL_TEST` target and the 22 reviewed pending migration digests. A fresh isolated database successfully completed serial `pnpm db:migrate` and recorded exactly one `20260729.1` version. Final recovery bound reset/migration locking to the verified maintenance target, made API/web/Worker schema and identity admission atomic, and retained deterministic compiled Worker drain coverage. Synchronous review repairs are complete; no non-test reset, migration, seed, or deployment was performed.
+The approved isolated matrix binds the dedicated `DATABASE_URL_TEST` target and the 22 reviewed pending migration digests. A fresh isolated database successfully completed serial `pnpm db:migrate` and recorded exactly one `20260729.1` version. Final recovery restored target-scoped migration-lock interoperability, made API/web/Worker schema and identity admission atomic, and retained deterministic compiled Worker drain coverage. The product owner confirmed that `db:reset` remains disposable local/test maintenance, outside the overlapping-runtime release protocol; no cross-recreation runtime-admission fence is required by this story. Synchronous review repairs are complete; no non-test reset, migration, seed, or deployment was performed.
