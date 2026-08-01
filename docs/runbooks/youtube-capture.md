@@ -30,9 +30,9 @@ The command accepts only canonical individual videos. It gets each public durati
 
 Channels, playlists, malformed URLs, unavailable videos, provider failures, invalid model JSON, and videos with no reliable travel evidence leave raw material unchanged and record only a safe audit outcome. These failures do not create traveler-ready knowledge. Valid evidence is handled by the canonical Knowledge pipeline, whose risk-based review recommendations are separate from capture.
 
-Windowed capture uses a new cache payload schema. Earlier whole-video YouTube artifacts remain in the archive for retention but are not replayed by this command.
+Windowed capture accepts Gemini timestamps relative to the requested window as well as the requested full-video offsets, normalizing both to video-relative offsets before storage. Mixed or out-of-window timestamps fail closed. Earlier whole-video YouTube artifacts remain in the archive for retention but are not replayed by this command.
 
-For Gemini HTTP failures, the command writes Gemini's structured error status to standard error. Provider error messages are not logged, saved to the database, or stored in the capture archive.
+The command retries transient Gemini `429` and `5xx` failures twice with short backoff before recording a failure. For Gemini HTTP failures, it writes Gemini's structured error status to standard error. Provider error messages are not logged, saved to the database, or stored in the capture archive.
 
 To inspect a failure, query `audit_events` through the exact `DATABASE_URL` environment used by the capture process (process environment takes precedence over `.env.local`):
 

@@ -15,7 +15,8 @@ type Options = { sourceId?: string; limit?: number; yes: boolean };
 export const youtubeEvidencePromptVersion = "youtube-evidence-v1";
 export const youtubeWindowSeconds = 30 * 60;
 export const retainedYoutubeEvidenceItemsPerWindow = 10;
-const prompt = `Analyze this public YouTube video window as a Vietnam road-trip research source. Return JSON only: {"evidence":[{"category":"road_condition|route|toll|fuel|charging|rest_stop|parking|accommodation|food|attraction|safety|weather|cost","claim_vi":"Vietnamese factual claim (non-empty, max 500 chars)","evidence_type":"spoken|on_screen|both","timestamp_start_seconds":0,"timestamp_end_seconds":0,"confidence":"high|medium|low","freshness_sensitive":true,"evidence_excerpt":"non-empty excerpt, max 240 chars","uncertainty_or_condition":null}]}. Every evidence item must include every key exactly as shown. Use only the listed enum values. Timestamps must be non-negative integer seconds relative to the full video, not the requested window, and must fall within the requested window. End must not precede start. uncertainty_or_condition must be null or a non-empty string under 400 characters. Extract at most ${maxYoutubeEvidenceItemsPerWindow} items. Include only explicitly spoken or clearly shown facts. Do not infer missing facts or return a transcript. Return {"evidence":[]} if no reliable travel evidence exists.`;
+const geminiRetryDelaysMs = [1_000, 2_000];
+const prompt = `Analyze this public YouTube video window as a Vietnam road-trip research source. Return JSON only: {"evidence":[{"category":"road_condition|route|toll|fuel|charging|rest_stop|parking|accommodation|food|attraction|safety|weather|cost","claim_vi":"Vietnamese factual claim (non-empty, max 500 chars)","evidence_type":"spoken|on_screen|both","timestamp_start_seconds":0,"timestamp_end_seconds":0,"confidence":"high|medium|low","freshness_sensitive":true,"evidence_excerpt":"non-empty excerpt, max 240 chars","uncertainty_or_condition":null}]}. Every evidence item must include every key exactly as shown. Use only the listed enum values. Timestamps must be non-negative integer seconds relative to the full video and fall within the requested window. If the API constrains you to report clip-relative timestamps, use offsets relative to the requested window for every item; never mix timestamp conventions. End must not precede start. uncertainty_or_condition must be null or a non-empty string under 400 characters. Extract at most ${maxYoutubeEvidenceItemsPerWindow} items. Include only explicitly spoken or clearly shown facts. Do not infer missing facts or return a transcript. Return {"evidence":[]} if no reliable travel evidence exists.`;
 type GeminiMediaResolution = "MEDIA_RESOLUTION_LOW" | "MEDIA_RESOLUTION_MEDIUM" | "MEDIA_RESOLUTION_HIGH";
 const defaultMediaResolution: GeminiMediaResolution = "MEDIA_RESOLUTION_LOW";
 
@@ -33,34 +34,45 @@ class YoutubeSegmentError extends Error {
 
 export async function requestYoutubeEvidence(url: string, apiKey: string, model: string, window: YoutubeWindow, mediaResolution: GeminiMediaResolution = defaultMediaResolution, fetchImpl = fetch) {
   const startedAt = Date.now();
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 180_000);
   try {
-    const response = await fetchImpl(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
-      method: "POST",
-      headers: { "content-type": "application/json", "x-goog-api-key": apiKey },
-      signal: controller.signal,
-      body: JSON.stringify({
-        contents: [{
-          parts: [
-            { file_data: { file_uri: url, mime_type: "video/mp4" }, video_metadata: { start_offset: `${window.startOffsetSeconds}s`, end_offset: `${window.endOffsetSeconds}s` } },
-            { text: prompt },
-          ],
-        }],
-        generationConfig: { responseMimeType: "application/json", temperature: 0, mediaResolution },
-      }),
-    });
-    if (!response.ok) throw new GeminiRequestError(`gemini_http_${response.status}`, await readGeminiErrorDiagnostic(response));
-    const payload = await response.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>; usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number } };
-    const text = payload.candidates?.[0]?.content?.parts?.find((part) => typeof part.text === "string")?.text;
-    if (!text) throw new Error("gemini_empty_response");
-    const evidence = normalizeYoutubeWindowTimestamps(parseYoutubeEvidence(JSON.parse(text) as unknown, maxYoutubeEvidenceItemsPerWindow), window);
-    return { evidence, latencyMs: Date.now() - startedAt, usage: payload.usageMetadata };
+    for (let attempt = 0; ; attempt += 1) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 180_000);
+      try {
+        const response = await fetchImpl(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-goog-api-key": apiKey },
+          signal: controller.signal,
+          body: JSON.stringify({
+            contents: [{
+              parts: [
+                { file_data: { file_uri: url, mime_type: "video/mp4" }, video_metadata: { start_offset: `${window.startOffsetSeconds}s`, end_offset: `${window.endOffsetSeconds}s` } },
+                { text: prompt },
+              ],
+            }],
+            generationConfig: { responseMimeType: "application/json", temperature: 0, mediaResolution },
+          }),
+        });
+        if (!response.ok) {
+          const error = new GeminiRequestError(`gemini_http_${response.status}`, await readGeminiErrorDiagnostic(response));
+          if (attempt < geminiRetryDelaysMs.length && isRetryableGeminiError(error)) {
+            await new Promise((resolve) => setTimeout(resolve, geminiRetryDelaysMs[attempt]));
+            continue;
+          }
+          throw error;
+        }
+        const payload = await response.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>; usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number } };
+        const text = payload.candidates?.[0]?.content?.parts?.find((part) => typeof part.text === "string")?.text;
+        if (!text) throw new Error("gemini_empty_response");
+        const evidence = normalizeYoutubeWindowTimestamps(parseYoutubeEvidence(JSON.parse(text) as unknown, maxYoutubeEvidenceItemsPerWindow), window);
+        return { evidence, latencyMs: Date.now() - startedAt, usage: payload.usageMetadata };
+      } finally {
+        clearTimeout(timeout);
+      }
+    }
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") throw new Error("gemini_timeout");
     throw error;
-  } finally {
-    clearTimeout(timeout);
   }
 }
 
@@ -71,6 +83,8 @@ export function normalizeYoutubeWindowTimestamps(evidence: YoutubeEvidence[], wi
   if (evidence.every((item) => item.timestamp_start_seconds >= window.startOffsetSeconds && item.timestamp_end_seconds <= window.endOffsetSeconds)) {
     return evidence.map((item) => ({ ...item, timestamp_start_seconds: item.timestamp_start_seconds - window.startOffsetSeconds, timestamp_end_seconds: item.timestamp_end_seconds - window.startOffsetSeconds }));
   }
+  const windowDurationSeconds = window.endOffsetSeconds - window.startOffsetSeconds;
+  if (evidence.every((item) => item.timestamp_end_seconds <= windowDurationSeconds)) return evidence;
   throw new Error("gemini_window_timestamp_out_of_range");
 }
 
@@ -278,6 +292,10 @@ async function readGeminiErrorDiagnostic(response: Response) {
   const payload = await response.json().catch(() => null) as { error?: { status?: unknown; message?: unknown } } | null;
   const status = typeof payload?.error?.status === "string" ? payload.error.status : null;
   return status && new Set(["INVALID_ARGUMENT", "FAILED_PRECONDITION", "OUT_OF_RANGE", "RESOURCE_EXHAUSTED", "UNAUTHENTICATED", "PERMISSION_DENIED", "NOT_FOUND", "INTERNAL", "UNAVAILABLE", "DEADLINE_EXCEEDED"]).has(status) ? status : null;
+}
+
+function isRetryableGeminiError(error: GeminiRequestError) {
+  return /^(?:gemini_http_(?:429|500|502|503|504))$/.test(error.message) || error.diagnostic === "UNAVAILABLE" || error.diagnostic === "INTERNAL" || error.diagnostic === "DEADLINE_EXCEEDED";
 }
 
 function captureFailureCode(error: unknown) {

@@ -118,8 +118,15 @@ describe("YouTube capture", () => {
     const window = { startOffsetSeconds: 7200, endOffsetSeconds: 9000 };
     const item = parseYoutubeEvidence({ evidence })[0];
     expect(normalizeYoutubeWindowTimestamps([{ ...item, timestamp_start_seconds: 7260, timestamp_end_seconds: 7290 }], window)).toMatchObject([{ timestamp_start_seconds: 60, timestamp_end_seconds: 90 }]);
-    expect(() => normalizeYoutubeWindowTimestamps([{ ...item, timestamp_start_seconds: 60, timestamp_end_seconds: 90 }], window)).toThrow("gemini_window_timestamp_out_of_range");
-    expect(() => normalizeYoutubeWindowTimestamps([{ ...item, timestamp_start_seconds: 1790, timestamp_end_seconds: 1800 }], window)).toThrow("gemini_window_timestamp_out_of_range");
+    expect(() => normalizeYoutubeWindowTimestamps([{ ...item, timestamp_start_seconds: 1799, timestamp_end_seconds: 1801 }], window)).toThrow("gemini_window_timestamp_out_of_range");
+  });
+
+  test("accepts Gemini timestamps relative to a requested window", () => {
+    const window = { startOffsetSeconds: 1800, endOffsetSeconds: 3600 };
+    const item = parseYoutubeEvidence({ evidence })[0];
+
+    expect(normalizeYoutubeWindowTimestamps([{ ...item, timestamp_start_seconds: 60, timestamp_end_seconds: 90 }], window)).toMatchObject([{ timestamp_start_seconds: 60, timestamp_end_seconds: 90 }]);
+    expect(() => normalizeYoutubeWindowTimestamps([{ ...item, timestamp_start_seconds: 60, timestamp_end_seconds: 3601 }], window)).toThrow("gemini_window_timestamp_out_of_range");
   });
 
   test("uses only supported configured media resolutions", () => {
