@@ -139,6 +139,53 @@ describe("WorkerRuntime", () => {
     expect(forceStop).toHaveBeenCalledTimes(1);
   });
 
+  it("continues forced stops and closes health when an adapter force stop throws", async () => {
+    let extractionStarted = false;
+    let ingestionStarted = false;
+    const throwingForceStop = vi.fn(() => { throw new Error("force stop failed"); });
+    const remainingForceStop = vi.fn();
+    const neverSettles = () => new Promise<void>(() => undefined);
+    const runtime = new WorkerRuntime({ ...config, gracefulShutdownMs: 5 }, [
+      { name: "knowledge-extraction", run: async () => { extractionStarted = true; await neverSettles(); }, forceStop: throwingForceStop },
+      { name: "knowledge-ingestion", run: async () => { ingestionStarted = true; await neverSettles(); }, forceStop: remainingForceStop },
+      adapter("knowledge-indexing", async () => undefined),
+      adapter("ai-ask-outbox", async () => undefined),
+    ], async () => undefined, 3002, async () => true);
+    await runtime.start();
+    await vi.waitFor(() => expect(extractionStarted && ingestionStarted).toBe(true));
+    const healthUrl = `http://127.0.0.1:${runtime.healthPort}/health/live`;
+
+    await expect(runtime.drain()).resolves.toBeUndefined();
+
+    expect(throwingForceStop).toHaveBeenCalledTimes(1);
+    expect(remainingForceStop).toHaveBeenCalledTimes(1);
+    await expect(request(healthUrl)).rejects.toThrow();
+  });
+
+  it("makes concurrent callers wait for the same graceful drain", async () => {
+    let started = false;
+    let finish!: () => void;
+    const running = new Promise<void>((resolve) => { finish = resolve; });
+    const runtime = new WorkerRuntime(config, [
+      { name: "knowledge-extraction", run: async () => { started = true; await running; } },
+      adapter("knowledge-ingestion", async () => undefined),
+      adapter("knowledge-indexing", async () => undefined),
+      adapter("ai-ask-outbox", async () => undefined),
+    ], async () => undefined, 3002, async () => true);
+    await runtime.start();
+    await vi.waitFor(() => expect(started).toBe(true));
+
+    const firstDrain = runtime.drain();
+    const secondDrain = runtime.drain();
+    let secondCompleted = false;
+    void secondDrain.then(() => { secondCompleted = true; });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(secondCompleted).toBe(false);
+
+    finish();
+    await Promise.all([firstDrain, secondDrain]);
+  });
+
   it("validates worker configuration without exposing the database URL", () => {
     expect(() => readWorkerConfig({ DATABASE_URL: "not-a-url" })).toThrow("Worker configuration is invalid.");
     expect(readWorkerConfig({ DATABASE_URL: "postgresql://worker:secret@localhost:5432/xuyenviet", WORKER_PORT: "3002" }).port).toBe(3002);

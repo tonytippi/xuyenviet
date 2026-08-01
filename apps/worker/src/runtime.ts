@@ -45,6 +45,7 @@ export class WorkerRuntime {
   private databaseReady = false;
   private schemaReady = false;
   private schemaEpoch = 0;
+  private drainPromise: Promise<void> | undefined;
   private running = new Set<Promise<void>>();
   private readonly activeAdapters = new Set<AdapterName>();
   private readonly scheduledAdapters = new Map<AdapterName, ReturnType<typeof setTimeout>>();
@@ -69,19 +70,32 @@ export class WorkerRuntime {
     void this.probeUntilReady();
   }
 
-  async drain() {
-    if (this.draining) return;
+  drain() {
+    if (this.drainPromise) return this.drainPromise;
+    this.drainPromise = this.drainInternal();
+    return this.drainPromise;
+  }
+
+  private async drainInternal() {
     this.draining = true;
     this.emit("worker.drain", "draining", Date.now());
     this.controller.abort();
     for (const timer of this.scheduledAdapters.values()) clearTimeout(timer);
     this.scheduledAdapters.clear();
+    let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
     const completed = await Promise.race([
       Promise.allSettled([...this.running]),
-      new Promise<"deadline">((resolve) => setTimeout(() => resolve("deadline"), this.config?.gracefulShutdownMs ?? 1_000)),
+      new Promise<"deadline">((resolve) => { deadlineTimer = setTimeout(() => resolve("deadline"), this.config?.gracefulShutdownMs ?? 1_000); }),
     ]);
+    if (deadlineTimer) clearTimeout(deadlineTimer);
     if (completed === "deadline") {
-      for (const adapter of this.adapters) adapter.forceStop?.();
+      for (const adapter of this.adapters) {
+        try {
+          adapter.forceStop?.();
+        } catch {
+          // A broken adapter cannot prevent sibling termination or health teardown.
+        }
+      }
       // Do not await forced work: a broken adapter must not defeat the graceful
       // deadline. Its persisted lease or stale-recovery protocol owns recovery.
     }

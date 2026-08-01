@@ -49,6 +49,10 @@ so that background work remains independently supervised and does not rely on re
 
 ## Dev Notes
 
+### Review Findings
+
+- [x] [Review][Patch] Isolate forced adapter-stop failures [apps/worker/src/runtime.ts:84] — `drain()` isolates each synchronous `forceStop()` failure, continues all remaining forced stops, and completes health socket/server teardown. Regression holds two adapters open, makes the first force-stop throw, verifies the next forced stop runs, and proves health closure.
+
 ### Scope and Outcome
 
 - This story delivers the local/repository bootstrap for an independently supervised dedicated Worker and bounded one-shot sweep entrypoints. It does not claim a completed Railway staging deployment, public-launch operations, dashboards, alert routing, or external evidence.
@@ -175,6 +179,7 @@ gpt-5.6-terra-review
 - 2026-07-31 serial verification passed: `pnpm vitest run --maxWorkers=1 --no-file-parallelism tests/worker-adapter-boundary.test.ts tests/worker-runtime.test.ts tests/worker-cli.test.ts tests/knowledge-extraction-worker.test.ts tests/knowledge-ingestion-jobs.test.ts tests/knowledge-indexing-worker.test.ts tests/domain-outbox.test.ts tests/trip-proposal-expiry-worker.test.ts` (8 files, 89 tests), `pnpm typecheck`, `pnpm build`, `git diff --check`, `docker compose config`, and `docker build --target worker -t xuyenviet-worker-story-12-1-review .`. `pnpm lint` had zero errors and five pre-existing unrelated warnings.
 - Story completed. Deployed operations, compatibility admission, telemetry, and legacy-retirement evidence remain explicitly owned by Stories 12.2/12.3 and Epic 14.
 - 2026-08-01 targeted Epic 12 review repair: `drain()` no longer awaits an adapter after its graceful deadline and forced stop, so a non-settling adapter cannot block deterministic supervisor shutdown. The focused serial Worker/protocol suite passed (8 files, 94 tests), including the real compiled ingestion drain/no-new-claim and persisted lease-recovery proof; `pnpm typecheck`, `pnpm build`, and `git diff --check` passed. `pnpm lint` had zero errors and five pre-existing unrelated warnings. Synchronous Blind Hunter, Edge Case Hunter, and Acceptance Auditor reviews found no actionable Story 12.1 findings.
+- 2026-08-01 final Epic 12 repair: `drain()` now isolates synchronous `forceStop()` failures, continues sibling stops, and completes health teardown. Concurrent callers share the same drain completion, and the graceful-deadline timer is cleared after graceful completion. Focused Worker runtime/adapter/CLI verification passed (3 files, 24 tests); `pnpm typecheck`, Worker build, and `git diff --check` passed. The broader retained 8-file suite is blocked by pre-existing `knowledge-indexing-worker` fixture failures because `index-worker-user` is absent from `users`; no Story 12.1 code was changed for that unrelated fixture. Follow-up synchronous reviews found no actionable Story 12.1 findings.
 
 ### File List
 
