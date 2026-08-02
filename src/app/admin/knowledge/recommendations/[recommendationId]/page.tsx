@@ -32,7 +32,7 @@ function formatPracticalDetail(value: unknown) {
 }
 
 function actionsFor(reason: string) {
-  if (reason === "verification") return ["verify", "edit", "suppress"];
+  if (reason === "verification") return ["verify", "promote", "edit", "suppress"];
   if (reason === "sampling") return ["sampling_pass", "sampling_fail", "suppress"];
   if (reason === "conflict" || reason === "relation" || reason === "missing_context") return ["verify", "resolve_relation", "edit", "suppress"];
   return ["accept_wording", "edit", "suppress", "restore"];
@@ -51,7 +51,7 @@ export default async function KnowledgeRecommendationPage({ params, searchParams
     <p className="mt-6 text-sm font-semibold uppercase tracking-[0.2em] text-[#8c4f13]">Khuyến nghị: {recommendationReasonLabels[recommendation.reason] ?? recommendation.reason}</p>
     <h1 className="mt-3 text-4xl font-semibold text-[#17342c]">{recommendation.card.title}</h1>
     <p className="mt-4 text-lg leading-8 text-[#4f625a]">Phiên bản đã khuyến nghị: nội dung {recommendation.contentVersion}, tập bằng chứng {recommendation.evidenceSetRevision}. Hiện tại: {recommendation.card.contentVersion}/{recommendation.card.evidenceSetRevision}. {stale ? "Khuyến nghị đã cũ, không thể xử lý." : ""}</p>
-    {recommendation.reason === "verification" ? <p className="mt-4 rounded-xl border border-[#8fb59f] bg-[#edf7ef] p-4 text-sm leading-6 text-[#17342c]">Bạn là điểm phê duyệt cuối: chọn <strong>Xác nhận và xuất bản</strong> để xuất bản ngay cả khi chỉ có một nguồn. Có thể sửa nội dung tự do trước khi lưu; hệ thống vẫn ghi nhật ký kiểm toán, phiên bản nội dung và giữ bằng chứng hiện có.</p> : null}
+    {recommendation.reason === "verification" ? <p className="mt-4 rounded-xl border border-[#8fb59f] bg-[#edf7ef] p-4 text-sm leading-6 text-[#17342c]">Bạn là điểm phê duyệt cuối: chọn <strong>Xác nhận và xuất bản</strong> để xuất bản ngay cả khi chỉ có một nguồn, hoặc <strong>Xuất bản thành ghi nhận cộng đồng</strong> để phân loại nội dung theo nguồn cộng đồng. Có thể sửa nội dung tự do trước khi lưu; hệ thống vẫn ghi nhật ký kiểm toán, phiên bản nội dung và giữ bằng chứng hiện có.</p> : null}
     {notice.error ? <p className="mt-5 rounded-xl bg-[#f4ead7] p-4">Không thể xử lý: {notice.error}</p> : null}
     {notice.resolved ? <p className="mt-5 rounded-xl bg-[#edf7ef] p-4">Đã xử lý an toàn.</p> : null}
     {recommendation.candidate ? <section className="mt-7 rounded-2xl border border-[#d8c9ad] bg-[#f4ead7] p-5">
