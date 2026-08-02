@@ -286,6 +286,52 @@ describe("knowledge recommendation queue", () => {
     await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, "card"))).resolves.toMatchObject([{ publicationState: "active", knowledgeState: "community_observation", contentVersion: 2 }]);
   });
 
+  test("does not create a successor verification recommendation after suppression", async () => {
+    await testDb.update(knowledgeCards).set({ publicationState: "suppressed", knowledgeState: "uncertain", reviewState: "ai_recommended", verificationState: "required", needsReview: true }).where(eq(knowledgeCards.id, "card"));
+    await scheduleKnowledgeRecommendation({ cardId: "card", contentVersion: 1, evidenceSetRevision: 1, reason: "verification", policy: "verify_first" }, testDb);
+    const [recommendation] = await testDb.select().from(knowledgeRecommendations);
+
+    await expect(resolveKnowledgeRecommendation({ recommendationId: recommendation!.id, expectedContentVersion: 1, expectedEvidenceSetRevision: 1, action: "suppress", actor: { userId: "operator", email: "operator@example.com" } }, testDb)).resolves.toMatchObject({ status: "resolved" });
+    await expect(testDb.select().from(knowledgeRecommendations).where(eq(knowledgeRecommendations.status, "open"))).resolves.toEqual([]);
+  });
+
+  test("promotes a legacy contradictory verification successor", async () => {
+    await testDb.update(knowledgeCards).set({ publicationState: "suppressed", knowledgeState: "uncertain", reviewState: "reviewed", verificationState: "required", needsReview: false }).where(eq(knowledgeCards.id, "card"));
+    await scheduleKnowledgeRecommendation({ cardId: "card", contentVersion: 1, evidenceSetRevision: 1, reason: "verification" }, testDb);
+    const [recommendation] = await testDb.select().from(knowledgeRecommendations);
+
+    await expect(resolveKnowledgeRecommendation({ recommendationId: recommendation!.id, expectedContentVersion: 1, expectedEvidenceSetRevision: 1, action: "promote", actor: { userId: "operator", email: "operator@example.com" } }, testDb)).resolves.toMatchObject({ status: "resolved", cardId: "card" });
+    await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, "card"))).resolves.toMatchObject([{ publicationState: "active", knowledgeState: "community_observation", verificationState: "corroborated", reviewState: "reviewed", needsReview: false, contentVersion: 2 }]);
+  });
+
+  test("resolves an open verification recommendation when the card was already verified", async () => {
+    await testDb.update(knowledgeCards).set({ publicationState: "active", knowledgeState: "community_observation", reviewState: "reviewed", verificationState: "corroborated", needsReview: false }).where(eq(knowledgeCards.id, "card"));
+    await scheduleKnowledgeRecommendation({ cardId: "card", contentVersion: 1, evidenceSetRevision: 1, reason: "verification" }, testDb);
+    const [recommendation] = await testDb.select().from(knowledgeRecommendations);
+
+    await expect(resolveKnowledgeRecommendation({ recommendationId: recommendation!.id, expectedContentVersion: 1, expectedEvidenceSetRevision: 1, action: "verify", actor: { userId: "operator", email: "operator@example.com" } }, testDb)).resolves.toMatchObject({ status: "resolved", cardId: "card" });
+    await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, "card"))).resolves.toMatchObject([{ publicationState: "active", knowledgeState: "community_observation", verificationState: "corroborated", contentVersion: 1 }]);
+    await expect(testDb.select().from(knowledgeRecommendations).where(eq(knowledgeRecommendations.id, recommendation!.id))).resolves.toMatchObject([{ status: "resolved", resolution: "verified", resolvedByUserId: "operator" }]);
+    await expect(testDb.select({ afterSummary: auditEvents.afterSummary }).from(auditEvents).where(eq(auditEvents.targetId, recommendation!.id))).resolves.toEqual([{ afterSummary: "Resolved an already-verified knowledge recommendation without changing the card." }]);
+  });
+
+  test("resolves an open promotion recommendation when the card was already promoted", async () => {
+    await testDb.update(knowledgeCards).set({ publicationState: "active", knowledgeState: "community_observation", reviewState: "reviewed", verificationState: "corroborated", needsReview: false }).where(eq(knowledgeCards.id, "card"));
+    await scheduleKnowledgeRecommendation({ cardId: "card", contentVersion: 1, evidenceSetRevision: 1, reason: "verification" }, testDb);
+    const [recommendation] = await testDb.select().from(knowledgeRecommendations);
+
+    await expect(resolveKnowledgeRecommendation({ recommendationId: recommendation!.id, expectedContentVersion: 1, expectedEvidenceSetRevision: 1, action: "promote", actor: { userId: "operator", email: "operator@example.com" } }, testDb)).resolves.toMatchObject({ status: "resolved", cardId: "card" });
+    await expect(testDb.select().from(knowledgeRecommendations).where(eq(knowledgeRecommendations.id, recommendation!.id))).resolves.toMatchObject([{ status: "resolved", resolution: "verified", resolvedByUserId: "operator" }]);
+  });
+
+  test("does not create verify-first work for an already verified card", async () => {
+    await testDb.update(knowledgeCards).set({ publicationState: "active", knowledgeState: "community_observation", reviewState: "reviewed", verificationState: "corroborated", needsReview: false }).where(eq(knowledgeCards.id, "card"));
+
+    await scheduleKnowledgeRecommendation({ cardId: "card", contentVersion: 1, evidenceSetRevision: 1, reason: "verification", policy: "verify_first" }, testDb);
+
+    await expect(testDb.select().from(knowledgeRecommendations)).resolves.toEqual([]);
+  });
+
   test("publishes linked verify-first candidates when verification is resolved from the recommendation", async () => {
     await testDb.update(knowledgeCards).set({ publicationState: "suppressed", knowledgeState: "uncertain", reviewState: "ai_recommended", verificationState: "required", needsReview: true }).where(eq(knowledgeCards.id, "card"));
     await testDb.insert(sources).values({ id: "source", kind: "pasted_text", label: "Safe source", sourceType: "curated", verificationStatus: "unverified", official: false, partner: false, submittedByUserId: "author" });
@@ -394,6 +440,7 @@ describe("knowledge recommendation queue", () => {
     const starts = new Date("2026-07-22T00:00:00.000Z");
     const now = new Date("2026-07-23T00:00:00.000Z");
     await testDb.insert(knowledgeSamplingPolicies).values({ windowStartsAt: starts, windowEndsAt: new Date("2026-08-19T00:00:00.000Z"), samplingPercent: 100, cohortKey: "initial:2026-07-22", suppressedAt: starts });
+    await testDb.update(knowledgeCards).set({ publicationState: "suppressed", knowledgeState: "uncertain", reviewState: "ai_recommended", verificationState: "required", needsReview: true }).where(eq(knowledgeCards.id, "card"));
     await scheduleKnowledgeRecommendation({ cardId: "card", contentVersion: 1, evidenceSetRevision: 1, reason: "sampling", policy: "verify_first", now }, testDb);
     await expect(testDb.select({ policyId: knowledgeRecommendations.policyId }).from(knowledgeRecommendations)).resolves.toHaveLength(1);
     const policies = await testDb.select().from(knowledgeSamplingPolicies).orderBy(knowledgeSamplingPolicies.cohortKey);

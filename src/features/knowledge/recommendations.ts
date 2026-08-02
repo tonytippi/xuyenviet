@@ -209,6 +209,20 @@ async function scheduleKnowledgeRecommendationInTransaction(input: { cardId: str
     }
   }
   const priority = input.priority ?? priorityFor(input.reason);
+  if (input.policy === "verify_first") {
+    const [verificationTarget] = await db.select({ id: knowledgeCards.id }).from(knowledgeCards).where(and(
+      eq(knowledgeCards.id, input.cardId),
+      eq(knowledgeCards.contentVersion, input.contentVersion),
+      eq(knowledgeCards.evidenceSetRevision, input.evidenceSetRevision),
+      eq(knowledgeCards.status, "approved"),
+      eq(knowledgeCards.publicationState, "suppressed"),
+      eq(knowledgeCards.reviewState, "ai_recommended"),
+      eq(knowledgeCards.verificationState, "required"),
+      eq(knowledgeCards.needsReview, true),
+      inArray(knowledgeCards.knowledgeState, ["uncertain", "community_pattern"]),
+    )).limit(1).for("update");
+    if (!verificationTarget) return;
+  }
   if (input.supersedeStale || input.supersedeStaleBy) {
     await db.update(knowledgeRecommendations).set({ status: "superseded", resolution: "accepted", resolvedByUserId: input.supersedeStaleBy?.userId ?? null, resolvedAt: now, executorSystem: input.supersedeStaleBy ? null : input.executorSystem ?? null, updatedAt: now }).where(and(
       eq(knowledgeRecommendations.knowledgeCardId, input.cardId),
@@ -247,6 +261,13 @@ export async function resolveKnowledgeRecommendation(input: { recommendationId: 
     if (input.action === "sampling_fail" && input.highSeverity && recommendation.policyId) await lockSamplingPolicyBoundary(tx);
     const [card] = await tx.select().from(knowledgeCards).where(eq(knowledgeCards.id, recommendation.knowledgeCardId)).limit(1).for("update");
     if (!card || card.contentVersion !== input.expectedContentVersion || card.evidenceSetRevision !== input.expectedEvidenceSetRevision || card.contentVersion !== recommendation.contentVersion || card.evidenceSetRevision !== recommendation.evidenceSetRevision) return { status: "stale" as const };
+    const alreadyVerified = (input.action === "verify" || input.action === "promote") && card.status === "approved" && card.publicationState === "active" && card.reviewState === "reviewed" && card.verificationState === "corroborated" && !card.needsReview;
+    if (alreadyVerified) {
+      await tx.update(knowledgeRecommendations).set({ status: "resolved", resolution: "verified", resolvedByUserId: input.actor.userId, resolvedAt: new Date(), executorSystem: null, updatedAt: new Date() }).where(eq(knowledgeRecommendations.id, recommendation.id));
+      await publishVerifiedIngestionCandidates(tx, card.id);
+      await recordAuditEvent({ actor: { kind: "user", ...input.actor }, operation: "update", targetType: "knowledge_recommendation", targetId: recommendation.id, afterSummary: "Resolved an already-verified knowledge recommendation without changing the card." }, tx);
+      return { status: "resolved" as const, cardId: card.id };
+    }
     if (card.verificationState === "failed" && ["restore", "verify", "promote", "resolve_relation"].includes(input.action)) return { status: "invalid_action" as const };
     if (card.verificationState === "required" && input.action === "restore") return { status: "invalid_action" as const };
     if (input.action === "edit" && input.editSummary?.trim() && recommendation.reason !== "verification") {
@@ -257,13 +278,13 @@ export async function resolveKnowledgeRecommendation(input: { recommendationId: 
     const verificationNeedsFollowUp = input.action === "verify" && ["conflict", "relation", "missing_context"].includes(recommendation.reason);
     if (input.action === "verify") {
       const evidence = await tx.select({ independenceKey: knowledgeCardEvidence.independenceKey }).from(knowledgeCardEvidence).where(and(eq(knowledgeCardEvidence.knowledgeCardId, card.id), eq(knowledgeCardEvidence.state, "active"), eq(knowledgeCardEvidence.supportLevel, "supporting")));
-      const validVerificationTarget = card.status === "approved" && card.publicationState === "suppressed" && card.reviewState === "ai_recommended" && card.verificationState === "required" && card.needsReview;
+      const validVerificationTarget = isVerificationPublicationTarget(card);
       const corroborated = new Set(evidence.map((item) => item.independenceKey)).size >= 2;
       const operatorOverride = recommendation.reason === "verification";
       if (!validVerificationTarget || (!operatorOverride && !corroborated) || (recommendation.reason === "conflict" ? card.knowledgeState !== "conflicted" : !["uncertain", "community_pattern", "conflicted"].includes(card.knowledgeState))) return { status: recommendation.reason === "conflict" ? "invalid_verification" as const : "invalid_action" as const };
     }
     if (input.action === "promote") {
-      if (recommendation.reason !== "verification" || card.status !== "approved" || card.publicationState !== "suppressed" || card.knowledgeState !== "uncertain" || card.reviewState !== "ai_recommended" || card.verificationState !== "required" || !card.needsReview || !card.title.trim() || !card.summary.trim()) return { status: "invalid_action" as const };
+      if (recommendation.reason !== "verification" || card.knowledgeState !== "uncertain" || !isVerificationPublicationTarget(card) || !card.title.trim() || !card.summary.trim()) return { status: "invalid_action" as const };
     }
     let removedConflictCount = 0;
     let hasRemainingSupport = true;
@@ -303,7 +324,7 @@ export async function resolveKnowledgeRecommendation(input: { recommendationId: 
     await enqueueKnowledgeIndexWork(tx, { cardId: card.id, contentVersion: next.contentVersion, evidenceSetRevision: next.evidenceSetRevision, reason: `recommendation:${input.action}` });
     if (next.publicationState !== "active" || next.verificationState === "failed") await disableStaleKnowledgeSearchProjection(tx, card.id, next.contentVersion);
     if (input.action === "sampling_fail" && input.highSeverity && recommendation.policyId) await escalateSamplingCohort(tx, recommendation.policyId, input.actor);
-    if (material && (input.action === "resolve_relation" && !hasRemainingSupport || preservesRequiredVerification || input.action === "edit" && recommendation.reason === "verification" || input.action !== "resolve_relation" && input.action !== "verify")) {
+    if (material && (input.action === "resolve_relation" && !hasRemainingSupport || preservesRequiredVerification || input.action === "edit" && recommendation.reason === "verification" || input.action !== "resolve_relation" && input.action !== "verify" && input.action !== "suppress")) {
       const reason = input.action === "resolve_relation" && !hasRemainingSupport ? "weak_evidence" : input.action === "sampling_fail" ? "risk" : recommendation.reason;
       await scheduleKnowledgeRecommendation({ cardId: card.id, contentVersion: next.contentVersion, evidenceSetRevision: next.evidenceSetRevision, reason, priority: priorityFor(reason) }, tx);
     }
@@ -340,6 +361,12 @@ export async function lockSamplingPolicyBoundary(db: Transaction) {
 }
 
 function priorityFor(reason: KnowledgeRecommendationReason) { return ({ risk: 1, verification: 2, conflict: 3, weak_evidence: 4, freshness: 5, relation: 6, duplicate_risk: 7, missing_context: 8, sampling: 9 })[reason]; }
+function isVerificationPublicationTarget(card: Pick<typeof knowledgeCards.$inferSelect, "status" | "publicationState" | "knowledgeState" | "reviewState" | "verificationState" | "needsReview">) {
+  const workflowReady = card.reviewState === "ai_recommended" && card.needsReview;
+  // A prior suppression could leave a successor recommendation with this contradictory pair.
+  const legacySuccessor = card.reviewState === "reviewed" && !card.needsReview;
+  return card.status === "approved" && card.publicationState === "suppressed" && card.verificationState === "required" && (workflowReady || legacySuccessor);
+}
 function resolutionFor(action: KnowledgeRecommendationAction) { return ({ accept_wording: "accepted", edit: "edited", suppress: "suppressed", restore: "restored", verify: "verified", promote: "verified", resolve_relation: "relation_resolved", sampling_pass: "sampling_passed", sampling_fail: "sampling_failed" })[action] as "accepted" | "edited" | "suppressed" | "restored" | "verified" | "relation_resolved" | "sampling_passed" | "sampling_failed"; }
 function isCompatibleResolution(reason: KnowledgeRecommendationReason, action: KnowledgeRecommendationAction) {
   if (reason === "verification") return ["edit", "suppress", "verify", "promote"].includes(action);

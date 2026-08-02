@@ -6,6 +6,7 @@ import { resolveKnowledgeRecommendationForm } from "@/features/knowledge/actions
 
 const actionLabels: Record<string, string> = {
   verify: "Xác nhận và xuất bản",
+  promote: "Xuất bản thành ghi nhận cộng đồng",
   edit: "Sửa nội dung",
   suppress: "Không xuất bản",
   resolve_relation: "Xác nhận quan hệ thẻ",
