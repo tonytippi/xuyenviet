@@ -33,6 +33,19 @@ After BMad is verified, call `bmad-help` when starting a new session or when wor
 
 Analyze user requirements, delegate tasks to appropriate sub-agents when useful, and keep implementation aligned with the project direction.
 
+## Simplicity And Deployability
+
+Favor the smallest solution that fully satisfies the stated requirement and existing acceptance criteria. Do not add abstraction, configurability, extensibility, infrastructure, dependencies, or architecture for hypothetical future needs.
+
+- Start by identifying the minimal change to the existing codebase; reuse established patterns and dependencies before introducing new ones.
+- Prefer a direct implementation in the current module over a new service, package, layer, schema, queue, feature flag, or deployment component unless there is a concrete present requirement.
+- Treat operational cost as a first-class constraint: avoid changes that require new environment variables, external services, migrations, workers, scheduled jobs, deployment steps, or monitoring unless they are essential to the requested behavior.
+- Do not over-research or enumerate speculative alternatives for a straightforward task. Time-box investigation and proceed with the simplest well-supported option.
+- Keep the scope focused on the request. Do not bundle refactors, cleanup, performance work, or edge cases that do not affect the requested outcome.
+- Before adding a dependency or operational component, state the immediate requirement it solves and why the existing stack cannot solve it more simply. If that justification is absent, do not add it.
+- When more than one solution is correct, choose the one with fewer moving parts, lower deployment risk, and a smaller test surface.
+- Validate the changed behavior with the narrowest relevant checks first; run broader verification only when the change or project rules require it.
+
 Document significant product and engineering work through BMad artifacts before implementation:
 
 - PRD
