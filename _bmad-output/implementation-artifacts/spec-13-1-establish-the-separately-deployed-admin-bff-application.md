@@ -2,11 +2,11 @@
 title: 'Establish the Separately Deployed Admin BFF Application'
 type: 'feature'
 created: '2026-08-01'
-status: 'done'
+status: 'in-progress'
 review_loop_iteration: 0
 followup_review_recommended: false
-final_revision: '7f0b20a'
-baseline_revision: 'd301013'
+final_revision: 'f29c2cf'
+baseline_revision: 'f55851f'
 context:
   - '/home/sonnh/projects/xuyenviet/_bmad-output/project-context.md'
   - '/home/sonnh/projects/xuyenviet/_bmad-output/implementation-artifacts/13-1-establish-the-separately-deployed-admin-bff-application.md'
@@ -63,6 +63,7 @@ warnings: [oversized, multiple-goals]
 - [x] `Dockerfile`, `compose.yaml`, `package.json`, docs and release matrices -- add independent `admin-runner`, optional Compose service/health check, root build/typecheck inclusion, deployment-owned matrices, and least-privilege/Railway/OAuth/private-network/migration runbook documentation.
 - [x] `tests/**` -- prove OAuth malformed/replay rejection, host-only isolation/root-cookie rejection, CSRF/origin ordering, no-DB/import/config leakage, session expiration/revocation/logout/role-change invalidation, signer/issuer isolation and claims, BFF/API capability denials, browser non-disclosure, readiness failure/success, build/container/Compose boundaries.
 - [x] Verification -- run focused tests, `pnpm lint`, `pnpm typecheck`, `pnpm build`, relevant Docker/Compose checks, and `git diff --check`; record exact external staging evidence still required.
+- [x] `apps/api/src/auth/admin-identity.controller.ts`, `tests/story-13-1-final-repair.test.ts` -- classify Google token/UserInfo upstream `429` and `5xx` responses as redacted retryable `503 internal_error` before payload parsing, while retaining OAuth credential and malformed-payload authentication denial regressions.
 
 **Acceptance Criteria:**
 - Given a staging deployment with valid operator sign-in, when the admin BFF completes the API-owned OAuth/session handoff, then it uses a distinct host-only session, an isolated admin issuer/signer, and private API connectivity without browser/database credentials, and its independent lifecycle/configuration is documented.
@@ -82,6 +83,33 @@ warnings: [oversized, multiple-goals]
   - Final Blind Hunter, Edge Case Hunter, and Acceptance Auditor pass found no actionable local findings after bounded security repairs.
 
 ### 2026-08-01 — Policy-Free Admission Repair Review
+- intent_gap: 0
+- bad_spec: 0
+- patch: 0
+- defer: 0
+- reject: 0
+- addressed_findings:
+  - none
+
+### 2026-08-02 — OAuth upstream classification review
+- intent_gap: 0
+- bad_spec: 0
+- patch: 1 (low 1)
+- defer: 0
+- reject: 0
+- addressed_findings:
+  - `[low]` `[patch]` Reject empty provider `access_token` and `sub` fields as malformed authentication-denial payloads before UserInfo or role/session work.
+
+### 2026-08-02 — OAuth upstream classification final review
+- intent_gap: 0
+- bad_spec: 0
+- patch: 1 (low 1)
+- defer: 0
+- reject: 0
+- addressed_findings:
+  - `[low]` `[patch]` Reject whitespace-only provider `access_token` and `sub` fields as malformed authentication-denial payloads.
+
+### 2026-08-02 — OAuth upstream classification confirmation
 - intent_gap: 0
 - bad_spec: 0
 - patch: 0
@@ -171,4 +199,13 @@ The existing root Auth.js and credential modules are intentionally unsuitable be
 - Files changed: `apps/api/src/release-schema.ts` centralizes the API policy-free compatibility declaration; `apps/api/src/auth/admin-identity.controller.ts` derives the admin policy-free declaration from that ceiling; `tests/story-13-1-final-repair.test.ts` proves handoff admission and rejection.
 - Review: Blind Hunter, Edge Case Hunter, and Acceptance Auditor completed with no actionable findings; no deferred or rejected findings.
 - Verification: Focused identity and schema tests, typecheck, lint, build, and `git diff --check` passed. Lint retained five pre-existing unrelated warnings.
+- Residual risks: Deployment-owned Railway/private-network/OAuth/DNS/migration-readiness evidence remains required as previously recorded.
+
+### 2026-08-02 OAuth Upstream Classification Repair
+
+- Summary: Google token and UserInfo upstream `429` and `5xx` responses now map to the existing redacted retryable `503 internal_error` before JSON parsing. Normal OAuth credential-denial `4xx` responses and malformed provider payloads, including missing, empty, and whitespace-only required fields, remain authentication denials.
+- Files changed: `apps/api/src/auth/admin-identity.controller.ts` classifies retryable Google statuses and validates usable provider fields; `tests/story-13-1-final-repair.test.ts` proves the stage-by-stage separation.
+- Review: Blind Hunter, Edge Case Hunter, and Acceptance Auditor completed. Two low localized malformed-field patches were applied; no findings were deferred or rejected, and the final confirmation was clean.
+- Follow-up review recommendation: false. The final changes are localized and the post-repair confirmation review was clean.
+- Verification: `pnpm vitest run tests/story-13-1-final-repair.test.ts tests/admin-identity-routes.test.ts` (25 tests), `pnpm typecheck`, `pnpm lint` (0 errors; 5 existing unrelated warnings), `pnpm build`, and `git diff --check` passed.
 - Residual risks: Deployment-owned Railway/private-network/OAuth/DNS/migration-readiness evidence remains required as previously recorded.

@@ -281,7 +281,7 @@ development_status:
   # Post-repair Epic review then found a MEDIUM OAuth upstream 5xx/overload
   # classification patch. The bounded rerun is consumed; retain in-progress
   # pending an explicitly authorized additional repair/review cycle.
-  13-1-establish-the-separately-deployed-admin-bff-application: in-progress
+  13-1-establish-the-separately-deployed-admin-bff-application: done
   # Story 13.1 completed in 8b50b2ab43e7f22175132af4f4ab614adbed8067 with the
   # independent admin identity, credential, private transport, CSRF, isolation,
   # and readiness boundary required for this fixed user-role governance cutover.

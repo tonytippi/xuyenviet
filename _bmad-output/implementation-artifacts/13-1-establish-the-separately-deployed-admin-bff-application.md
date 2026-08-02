@@ -1,6 +1,6 @@
 # Story 13.1: Establish the Separately Deployed Admin BFF Application
 
-Status: in-progress
+Status: done
 
 ## Story
 
@@ -142,6 +142,7 @@ gpt-5.6-terra
 - Focused regression coverage rejects username-only, username/password, and non-default-port callback URLs before any OAuth transaction is created. No additional findings were identified in the repaired scope.
 - Final critical repair replaced interface/inline identity request bodies with concrete SafeValidationPipe DTOs and added Nest HTTP validation coverage for every identity endpoint. Admin sessions now persist only an API-keyed HMAC lookup value; the migration invalidates existing sessions because their opaque bearer values cannot be safely transformed. Identity OAuth, handoff, and revocation fail closed while release admission is unavailable or incompatible. Admin private API and handoff configuration reject explicit non-default ports.
 - Final synchronous Blind Hunter, Edge Case Hunter, and Acceptance Auditor review completed with no actionable local findings. External staging evidence remains explicitly deferred to deployment owners.
+- 2026-08-02 authorized bmad-dev-auto repair: Google token and UserInfo `429`/`5xx` responses now fail as the existing redacted retryable `503 internal_error` before provider-body parsing. Credential-denial `4xx` responses, and missing, empty, or whitespace-only `access_token`/`sub` payload fields, remain authentication denials. Synchronous Blind Hunter, Edge Case Hunter, and Acceptance Auditor review completed after two localized malformed-payload repairs with no actionable findings. Story 13.2 was not modified.
 
 ### Verification
 
@@ -159,6 +160,11 @@ gpt-5.6-terra
 - PASS: `WEB_ENV_FILE=.web.env.example API_ENV_FILE=.api.env.example WORKER_ENV_FILE=.worker.env.example ADMIN_ENV_FILE=.admin.env.example docker compose --profile admin config --quiet` - completed successfully. The default command remains intentionally blocked when local `.admin.env` is absent.
 - PASS: `git diff --check` - no whitespace errors.
 - PASS: `pnpm vitest run tests/admin-identity-routes.test.ts tests/story-13-1-final-repair.test.ts tests/api-request-principal.integration.test.ts tests/bff-transport.test.ts tests/schema-release-matrix-artifact.test.ts` - 5 files and 81 tests passed, including actual Nest route validation, HMAC-only session persistence/functional revocation, release-admission denial, and private/handoff port rejection.
+- PASS: `pnpm vitest run tests/story-13-1-final-repair.test.ts tests/admin-identity-routes.test.ts` - 2 files and 25 tests passed, including token/UserInfo `429`, `500`, and `503` redacted retryable failures plus `400`, `401`, `403`, `408`, missing, empty, and whitespace-only credential/provider-field denials.
+- PASS: `pnpm typecheck` - completed successfully after the build regenerated stale root Next type files.
+- PASS WITH PRE-EXISTING WARNINGS: `pnpm lint` - 0 errors and 5 existing unused-variable warnings in unrelated test files.
+- PASS: `pnpm build` - web, admin, API, and Worker builds completed successfully.
+- PASS: `git diff --check` - no whitespace errors.
 
 ### External Staging Evidence Still Required
 
