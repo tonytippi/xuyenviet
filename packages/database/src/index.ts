@@ -48,6 +48,7 @@ export interface AdminIdentityRepository extends ApiIdentityRepository {
   purgeExpiredAdminOAuthTransactions(limit: number): Promise<void>;
   createAdminOAuthTransaction(transaction: AdminOAuthTransaction): Promise<void>;
   consumeAdminOAuthTransaction(id: string, state: string): Promise<AdminOAuthTransaction | null>;
+  provisionConfiguredAdminRoleForGoogleAccount(providerAccountId: string, email: string): Promise<void>;
   resolveAdminRolesForGoogleAccount(providerAccountId: string): Promise<RequestRole[] | null>;
   createAdminSessionForGoogleAccount(providerAccountId: string, expires: Date): Promise<string | null>;
 }
@@ -164,6 +165,28 @@ export function createPostgresApiIdentityRepository(databaseUrl: string, adminSe
     async consumeAdminOAuthTransaction(id, state) {
       const rows = await sql<AdminOAuthTransaction[]>`delete from admin_oauth_transactions where id = ${id} and state = ${state} and expires > now() returning id, state, code_verifier as "codeVerifier", callback_url as "callbackUrl", expires`;
       return rows[0] ?? null;
+    },
+    async provisionConfiguredAdminRoleForGoogleAccount(providerAccountId, email) {
+      await sql.begin(async (transaction) => {
+        const accounts = await transaction<{ userId: string }[]>`
+          select users.id as "userId"
+          from accounts join users on users.id = accounts.user_id
+          where accounts.provider = 'google' and accounts.provider_account_id = ${providerAccountId}
+          limit 1
+          for update
+        `;
+        let userId = accounts[0]?.userId;
+        if (!userId) {
+          const users = await transaction<{ id: string }[]>`insert into users (id, email) values (${randomUUID()}, ${email}) on conflict (email) do update set email = excluded.email returning id`;
+          userId = users[0]?.id;
+          if (!userId) throw new Error("Google account user could not be created.");
+          await transaction`insert into accounts (user_id, type, provider, provider_account_id) values (${userId}, 'oauth', 'google', ${providerAccountId}) on conflict do nothing`;
+        }
+        const users = await transaction<{ email: string | null }[]>`select email from users where id = ${userId} for update`;
+        if (users[0]?.email?.trim().toLowerCase() !== email) return;
+        const granted = await transaction`insert into user_roles (user_id, role) values (${userId}, 'admin') on conflict do nothing returning user_id`;
+        if (granted.length) await transaction`update users set authorization_version = authorization_version + 1 where id = ${userId}`;
+      });
     },
     async resolveAdminRolesForGoogleAccount(providerAccountId) {
       const rows = await sql<{ role: RequestRole }[]>`

@@ -5,7 +5,7 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 
 import { schema } from "../src/db/schema";
-import { admitArtifact, assertCaptureCacheReady, findReusableArtifact, finishImport, prepareImport } from "../src/features/knowledge/capture-cache";
+import { admitArtifact, assertCaptureCacheReady, findReusableArtifact, findReusableArtifactAcrossModels, finishImport, prepareImport } from "../src/features/knowledge/capture-cache";
 import { flushCachedArtifact } from "../src/features/knowledge/capture-orchestration";
 import { YOUTUBE_CAPTURE_PAYLOAD_SCHEMA_VERSION, captureReuseKey, youtubeCaptureMethodVersion, youtubeResourceIdentity, youtubeVideoId, youtubeWindowResourceIdentity } from "../src/features/knowledge/capture-identity";
 import { findYoutubeCaptureImportByCorrelationToken, listQueuedYoutubeSources, maxYoutubeEvidenceItemsPerVideo, maxYoutubeEvidenceItemsPerWindow, parseYoutubeEvidence, recordYoutubeCaptureFailure, sanitizeYoutubeMetadata, saveYoutubeEvidence, type YoutubeEvidence } from "../src/features/knowledge/youtube-capture";
@@ -16,6 +16,7 @@ export const youtubeEvidencePromptVersion = "youtube-evidence-v1";
 export const youtubeWindowSeconds = 30 * 60;
 export const retainedYoutubeEvidenceItemsPerWindow = 10;
 const geminiRetryDelaysMs = [1_000, 2_000];
+const youtubeCaptureProgressIntervalMs = 30_000;
 const prompt = `Analyze this public YouTube video window as a Vietnam road-trip research source. Return JSON only: {"evidence":[{"category":"road_condition|route|toll|fuel|charging|rest_stop|parking|accommodation|food|attraction|safety|weather|cost","claim_vi":"Vietnamese factual claim (non-empty, max 500 chars)","evidence_type":"spoken|on_screen|both","timestamp_start_seconds":0,"timestamp_end_seconds":0,"confidence":"high|medium|low","freshness_sensitive":true,"evidence_excerpt":"non-empty excerpt, max 240 chars","uncertainty_or_condition":null}]}. Every evidence item must include every key exactly as shown. Use only the listed enum values. Timestamps must be non-negative integer seconds relative to the full video and fall within the requested window. If the API constrains you to report clip-relative timestamps, use offsets relative to the requested window for every item; never mix timestamp conventions. End must not precede start. uncertainty_or_condition must be null or a non-empty string under 400 characters. Extract at most ${maxYoutubeEvidenceItemsPerWindow} items. Include only explicitly spoken or clearly shown facts. Do not infer missing facts or return a transcript. Return {"evidence":[]} if no reliable travel evidence exists.`;
 type GeminiMediaResolution = "MEDIA_RESOLUTION_LOW" | "MEDIA_RESOLUTION_MEDIUM" | "MEDIA_RESOLUTION_HIGH";
 const defaultMediaResolution: GeminiMediaResolution = "MEDIA_RESOLUTION_LOW";
@@ -216,6 +217,10 @@ function formatDuration(startedAt: number) {
   return `${((Date.now() - startedAt) / 1000).toFixed(1)}s`;
 }
 
+function formatYoutubeWindow(window: YoutubeWindow) {
+  return `${Math.floor(window.startOffsetSeconds / 60)}-${Math.ceil(window.endOffsetSeconds / 60)}m`;
+}
+
 export function getYoutubeMediaResolution(value = getEnvValue("GEMINI_YOUTUBE_MEDIA_RESOLUTION")): GeminiMediaResolution {
   if (!value) return defaultMediaResolution;
   if (value === "MEDIA_RESOLUTION_LOW" || value === "MEDIA_RESOLUTION_MEDIUM" || value === "MEDIA_RESOLUTION_HIGH") return value;
@@ -266,22 +271,41 @@ async function main() {
         if (!durationApiKey) throw new Error("YOUTUBE_DATA_API_KEY is required to determine YouTube video duration.");
         const durationSeconds = await requestYoutubeDuration(videoId, durationApiKey);
         const segmentCaptureMethodVersion = youtubeCaptureMethodVersion(mediaResolution, "segment");
+        const windows = youtubeWindows(durationSeconds);
         const segments: YoutubeSegment[] = [];
         const apiKey = getEnvValue("GEMINI_API_KEY");
-        for (const [index, window] of youtubeWindows(durationSeconds).entries()) {
+        console.log(`${source.sourceId}: video duration ${Math.ceil(durationSeconds / 60)}m; processing ${windows.length} 30-minute segment(s) sequentially.`);
+        for (const [index, window] of windows.entries()) {
           const segmentResourceIdentity = youtubeWindowResourceIdentity(resourceIdentity, window.startOffsetSeconds, window.endOffsetSeconds);
           const segmentReuseKey = captureReuseKey({ provider: "youtube", resourceIdentity: segmentResourceIdentity, captureMethodVersion: segmentCaptureMethodVersion, payloadSchemaVersion: YOUTUBE_CAPTURE_PAYLOAD_SCHEMA_VERSION, promptVersion: youtubeEvidencePromptVersion, model, mediaResolution });
           stage = `segment_${index + 1}_cache_lookup`;
-          const cachedSegment = await findReusableArtifact(cacheClient, segmentReuseKey);
+          const cachedSegment = await findReusableArtifact(cacheClient, segmentReuseKey)
+            ?? await findReusableArtifactAcrossModels(cacheClient, { provider: "youtube", resourceIdentity: segmentResourceIdentity, captureMethodVersion: segmentCaptureMethodVersion, payloadSchemaVersion: YOUTUBE_CAPTURE_PAYLOAD_SCHEMA_VERSION, promptVersion: youtubeEvidencePromptVersion });
           if (cachedSegment) {
             stage = `segment_${index + 1}_cache_parse`;
             const segment = parseCachedYoutubeSegmentPayload(cachedSegment.payload);
-            if (segment.window.startOffsetSeconds === window.startOffsetSeconds && segment.window.endOffsetSeconds === window.endOffsetSeconds) { segments.push(segment); continue; }
+            if (segment.window.startOffsetSeconds === window.startOffsetSeconds && segment.window.endOffsetSeconds === window.endOffsetSeconds) {
+              segments.push(segment);
+              console.log(`${source.sourceId}: segment ${index + 1}/${windows.length} (${formatYoutubeWindow(window)}) cache hit${cachedSegment.model === model ? "" : ` from ${cachedSegment.model ?? "unknown model"}`} (${segment.evidence.length} evidence item(s)).`);
+              continue;
+            }
           }
           if (!apiKey) throw new Error("GEMINI_API_KEY is required for youtube:capture cache misses.");
           let result;
           stage = `segment_${index + 1}_capture`;
-          try { result = await requestYoutubeEvidence(url, apiKey, model, window, mediaResolution); } catch (error) { throw new YoutubeSegmentError(index + 1, error instanceof GeminiRequestError ? error.diagnostic : null, error); }
+          const segmentStartedAt = Date.now();
+          console.log(`${source.sourceId}: segment ${index + 1}/${windows.length} (${formatYoutubeWindow(window)}) Gemini capture started.`);
+          const progress = setInterval(() => {
+            console.log(`${source.sourceId}: segment ${index + 1}/${windows.length} still waiting for Gemini (${formatDuration(segmentStartedAt)} elapsed).`);
+          }, youtubeCaptureProgressIntervalMs);
+          try {
+            result = await requestYoutubeEvidence(url, apiKey, model, window, mediaResolution);
+          } catch (error) {
+            throw new YoutubeSegmentError(index + 1, error instanceof GeminiRequestError ? error.diagnostic : null, error);
+          } finally {
+            clearInterval(progress);
+          }
+          console.log(`${source.sourceId}: segment ${index + 1}/${windows.length} completed with ${result.evidence.length} evidence item(s) (${formatDuration(segmentStartedAt)}).`);
           const capturedAt = new Date().toISOString();
           await admitArtifact(cacheClient, { provider: "youtube", reuseKey: segmentReuseKey, resourceIdentity: segmentResourceIdentity, captureMethodVersion: segmentCaptureMethodVersion, payloadSchemaVersion: YOUTUBE_CAPTURE_PAYLOAD_SCHEMA_VERSION, promptVersion: youtubeEvidencePromptVersion, model, payload: { evidence: result.evidence, window, metadata: sanitizeYoutubeMetadata({ captureMethod: "gemini_youtube_url", capturedAt, sourceUrl: url, model, mediaResolution, promptVersion: youtubeEvidencePromptVersion, evidenceCount: result.evidence.length, latencyMs: result.latencyMs, promptTokens: result.usage?.promptTokenCount, outputTokens: result.usage?.candidatesTokenCount, totalTokens: result.usage?.totalTokenCount, videoDurationSeconds: durationSeconds, windowStartSeconds: window.startOffsetSeconds, windowEndSeconds: window.endOffsetSeconds }) }, metadata: { captureOrigin: "live" }, capturedAt });
           segments.push({ evidence: result.evidence, window, latencyMs: result.latencyMs });

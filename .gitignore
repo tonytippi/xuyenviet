@@ -21,6 +21,9 @@ coverage/
 
 .env*
 !.env.example
+!apps/api/.env.example
+!apps/admin/.env.example
+!apps/worker/.env.example
 
 *.log
 *.tsbuildinfo

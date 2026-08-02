@@ -27,6 +27,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   delete process.env.XV_ADMIN_GOOGLE_CLIENT_ID;
   delete process.env.XV_ADMIN_GOOGLE_CLIENT_SECRET;
+  delete process.env.ADMIN_EMAIL;
 });
 
 describe("Story 13.1 final identity proofs", () => {
@@ -37,6 +38,7 @@ describe("Story 13.1 final identity proofs", () => {
     let consumed = false;
     const identities = {
       consumeAdminOAuthTransaction: vi.fn(async (id: string, state: string) => id === transaction.id && state === transaction.state && !consumed ? (consumed = true, transaction) : null),
+      provisionConfiguredAdminRoleForGoogleAccount: vi.fn(),
       resolveAdminRolesForGoogleAccount: vi.fn(async () => ["operator"]),
       createAdminSessionForGoogleAccount: vi.fn(async () => "opaque-admin-session"),
       resolveAdminHandoff: vi.fn(), revokeAdminSession: vi.fn(), purgeExpiredAdminOAuthTransactions: vi.fn(), createAdminOAuthTransaction: vi.fn(),
@@ -48,11 +50,26 @@ describe("Story 13.1 final identity proofs", () => {
 
     vi.stubGlobal("fetch", vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "provider-token" }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ sub: "google-subject" }), { status: 200 })));
+      .mockResolvedValueOnce(new Response(JSON.stringify({ sub: "google-subject", email: "operator@example.com" }), { status: 200 })));
     await expect(controller.completeOAuth("Bearer service", { code: "code", state: "expected", transactionId: "tx" })).resolves.toEqual({ sessionId: "opaque-admin-session" });
+    expect(identities.provisionConfiguredAdminRoleForGoogleAccount).not.toHaveBeenCalled();
     expect(identities.createAdminSessionForGoogleAccount).toHaveBeenCalledWith("google-subject", expect.any(Date));
     expect(vi.mocked(fetch).mock.calls.every(([, init]) => init?.signal instanceof AbortSignal)).toBe(true);
     await expect(controller.completeOAuth("Bearer service", { code: "code", state: "expected", transactionId: "tx" })).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  test("provisions the configured admin before resolving Admin OAuth roles", async () => {
+    process.env.XV_ADMIN_GOOGLE_CLIENT_ID = "client";
+    process.env.XV_ADMIN_GOOGLE_CLIENT_SECRET = "secret";
+    process.env.ADMIN_EMAIL = " Admin@Example.com ";
+    const identities = { ...oauthIdentities(), provisionConfiguredAdminRoleForGoogleAccount: vi.fn() };
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "provider-token" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ sub: "google-subject", email: "admin@example.com" }), { status: 200 })));
+
+    await expect(identityController(identities).completeOAuth("Bearer service", { code: "code", state: "state", transactionId: "tx" })).resolves.toEqual({ sessionId: "session" });
+    expect(identities.provisionConfiguredAdminRoleForGoogleAccount).toHaveBeenCalledWith("google-subject", "admin@example.com");
+    expect(identities.resolveAdminRolesForGoogleAccount).toHaveBeenCalledAfter(identities.provisionConfiguredAdminRoleForGoogleAccount);
   });
 
   test("OAuth callback resolves roles and rejects travelers before creating an admin session", async () => {
@@ -60,13 +77,14 @@ describe("Story 13.1 final identity proofs", () => {
     process.env.XV_ADMIN_GOOGLE_CLIENT_SECRET = "secret";
     const identities = {
       consumeAdminOAuthTransaction: vi.fn(async () => ({ id: "tx", state: "state", codeVerifier: "verifier", callbackUrl: "https://admin.xuyenviet.app/api/auth/callback", expires: new Date(Date.now() + 60_000) })),
+      provisionConfiguredAdminRoleForGoogleAccount: vi.fn(),
       resolveAdminRolesForGoogleAccount: vi.fn(async () => ["traveler"]),
       createAdminSessionForGoogleAccount: vi.fn(async () => "must-not-exist"),
       resolveAdminHandoff: vi.fn(), revokeAdminSession: vi.fn(), purgeExpiredAdminOAuthTransactions: vi.fn(), createAdminOAuthTransaction: vi.fn(),
     };
     vi.stubGlobal("fetch", vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "provider-token" }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ sub: "traveler-subject" }), { status: 200 })));
+      .mockResolvedValueOnce(new Response(JSON.stringify({ sub: "traveler-subject", email: "traveler@example.com" }), { status: 200 })));
     await expect(identityController(identities).completeOAuth("Bearer service", { code: "code", state: "state", transactionId: "tx" })).rejects.toBeInstanceOf(UnauthorizedException);
     expect(identities.resolveAdminRolesForGoogleAccount).toHaveBeenCalledWith("traveler-subject");
     expect(identities.createAdminSessionForGoogleAccount).not.toHaveBeenCalled();

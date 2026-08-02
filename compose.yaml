@@ -22,7 +22,7 @@ services:
       context: .
       target: migrator
     env_file:
-      - path: ${API_ENV_FILE:-.api.env}
+      - path: ${API_ENV_FILE:-apps/api/.env.local}
         required: true
     profiles: ["migrate"]
 
@@ -31,7 +31,7 @@ services:
       context: .
       target: worker
     env_file:
-      - path: ${WORKER_ENV_FILE:-.worker.env}
+      - path: ${WORKER_ENV_FILE:-apps/worker/.env.local}
         required: true
     restart: unless-stopped
     init: true
@@ -51,7 +51,7 @@ services:
       context: .
       target: api-runner
     env_file:
-      - path: ${API_ENV_FILE:-.api.env}
+      - path: ${API_ENV_FILE:-apps/api/.env.local}
         required: true
     restart: unless-stopped
     init: true
@@ -67,7 +67,7 @@ services:
       context: .
       target: admin-runner
     env_file:
-      - path: ${ADMIN_ENV_FILE:-.admin.env}
+      - path: ${ADMIN_ENV_FILE:-apps/admin/.env.local}
         required: true
     depends_on:
       api:

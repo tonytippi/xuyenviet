@@ -32,7 +32,12 @@ XUYENVIET should become a practical AI trip companion for people traveling throu
 
 ## Local development
 
-This repository now contains the public MVP web app foundation.
+This repository is a pnpm workspace with four independently runnable workloads:
+
+- traveler web: the root Next.js application on port `3000`
+- private API: `apps/api`, a NestJS application on port `3001`
+- worker: `apps/worker` on port `3002`
+- admin BFF: `apps/admin`, a separate Next.js application on port `3003`
 
 Requirements:
 
@@ -48,6 +53,88 @@ pnpm install
 cp .env.example .env.local
 pnpm dev
 ```
+
+`pnpm dev` starts only the traveler web application. It does not start the Nest API, Worker, or admin BFF. The traveler web can continue to use its legacy local routes until the relevant API cutover flag is enabled.
+
+Run the local workloads through the root shortcuts:
+
+```bash
+pnpm api dev
+pnpm admin dev
+pnpm worker
+```
+
+API and admin run in watch mode. Worker builds once and then starts because its supervisor executes independently bundled child adapters; rerun `pnpm worker` after changing Worker code.
+
+### Local admin Google sign-in
+
+Local admin sign-in uses an explicit loopback-only transport mode. It is enabled only when both `apps/api/.env.local` and `apps/admin/.env.local` set `APP_ENV="local"` and `XV_ADMIN_LOCAL_TRANSPORT="true"`. This mode permits only `http://localhost:3003` for the admin BFF and `http://127.0.0.1:3001` for the API. It uses non-`Secure`, non-`__Host-` cookies scoped to localhost and bypasses only deployment schema-release admission for the local database; database-backed identity and role checks remain required. Staging and production retain the HTTPS/private-network/`__Host-` and schema-release requirements.
+
+1. In the Google OAuth client configured as `XV_ADMIN_GOOGLE_CLIENT_ID`, add this authorized redirect URI exactly:
+
+   ```text
+   http://localhost:3003/api/auth/callback
+   ```
+
+2. Start the API and admin in separate terminals:
+
+   ```bash
+   pnpm api dev
+   pnpm admin dev
+   ```
+
+3. Ensure the Google account is represented in the local database and has the `operator` or `admin` role. To bootstrap the first local administrator after the account exists, set `INITIAL_ADMIN_EMAIL` for the command and run:
+
+   ```bash
+   INITIAL_ADMIN_EMAIL="you@example.com" pnpm bootstrap:initial-admin
+   ```
+
+4. If the local database predates the admin OAuth migrations and is disposable, stop all local runtimes and reset it with:
+
+   ```bash
+   pnpm db:reset:local
+   ```
+
+   This command is intentionally pinned to the local `xuyenviet` database at `127.0.0.1:5432`; it drops the database, runs all Drizzle migrations, records the schema version, and seeds it. Do not use it to preserve local data or against another database target.
+
+5. Open `http://localhost:3003/sign-in`.
+
+### Run the Nest API locally
+
+The API is a separate process and requires an API-only environment file. Do not give this file to the web, worker, or admin processes.
+
+1. Create `apps/api/.env.local` from `apps/api/.env.example`, then add the API runtime variables below from the deployment secret store or an approved local-development secret set.
+2. Set `DATABASE_URL`, `XV_BFF_CREDENTIAL_CONFIG`, `XV_ADMIN_SESSION_LOOKUP_KEY`, and `XV_ADMIN_IDENTITY_HANDOFF_SERVICE_TOKEN`.
+3. Set `XV_ADMIN_GOOGLE_CLIENT_ID` and `XV_ADMIN_GOOGLE_CLIENT_SECRET` if exercising the admin identity endpoints.
+4. Build and start the API:
+
+```bash
+pnpm --filter @xuyenviet/api build
+pnpm api dev
+```
+
+The API listens on `PORT`, defaulting to `3001`. It is a private BFF resource server, not a browser-facing service. `XV_BFF_CREDENTIAL_CONFIG` contains the public ES256 verification configuration for both `xuyenviet-web-bff` and `xuyenviet-admin-bff`; it must not contain either BFF private signing key. `XV_ADMIN_SESSION_LOOKUP_KEY` and `XV_ADMIN_IDENTITY_HANDOFF_SERVICE_TOKEN` are API secrets.
+
+Use these endpoints to verify a local API process:
+
+```bash
+curl http://127.0.0.1:3001/health/live
+curl http://127.0.0.1:3001/openapi.json
+```
+
+`GET /health/ready` additionally requires valid API configuration, database connectivity, and a compatible schema-release record. Run `pnpm db:migrate` against the intended `DATABASE_URL` before treating an API instance as ready.
+
+### Other local workloads
+
+```bash
+# Build and run the continuous worker.
+pnpm worker
+
+# Build and run the separate admin BFF.
+pnpm admin dev
+```
+
+The worker reads `apps/worker/.env.local`, which should be created from `apps/worker/.env.example`. It receives `DATABASE_URL` and only the provider credentials needed by its assigned loops. It does not have a watch-mode runtime: `pnpm worker` builds the supervisor and child adapters, then starts them. Rerun `pnpm worker` after changing Worker code. The admin BFF reads `apps/admin/.env.local`, which should be created from `apps/admin/.env.example`; it must not receive `DATABASE_URL`, traveler Auth.js secrets, API Google credentials, or BFF verification private keys. The admin OAuth flow requires Railway private HTTPS and its registered callback, so a local process is useful for build and route checks, not end-to-end sign-in validation.
 
 Quality checks:
 
@@ -88,22 +175,30 @@ Do not use `pnpm db:reset` for test verification: Vitest owns only `DATABASE_URL
 
 ## Server deployment
 
-Docker Compose runs the web application and one dedicated Worker service. PostgreSQL remains external and must be reachable through the `DATABASE_URL` set in the deployment environment file. Run migrations before starting any workload that claims durable work. The migration release job records schema only after Drizzle succeeds; web, API, and Worker readiness fail closed for a missing, malformed, duplicated, or incompatible release record.
+Docker Compose builds four separate workloads: traveler web (`app`), Nest API (`api`), Worker (`worker`), and the optional admin BFF (`admin`). PostgreSQL remains external. Run migrations before starting a workload that claims durable work or serves API traffic. The migration release job records schema only after Drizzle succeeds; web, API, Worker, and admin readiness fail closed for a missing, malformed, duplicated, or incompatible release record.
 
-1. Create a production environment file, for example `production.env`, from `.env.example`. Set `APP_ENV="production"`, a TLS-enabled non-localhost `DATABASE_URL` required by the selected Postgres provider, `AUTH_URL` to the public HTTPS Cloudflare Tunnel hostname, and real provider/authentication secrets.
+1. Create separate deployment environment files from `.env.example`: `.web.env`, `.api.env`, `.worker.env`, and `.admin.env`. Set `APP_ENV="production"`, a TLS-enabled non-localhost `DATABASE_URL` only for workloads that require it, and real provider/authentication secrets. Apply least privilege as described below; never pass the combined template to a workload. Compose defaults to the local API and admin files only when these overrides are omitted.
 2. Run migrations once for each release that includes database changes:
 
    ```bash
-   ENV_FILE=production.env docker compose --profile migrate run --rm migrate
+   API_ENV_FILE=.api.env docker compose --profile migrate run --rm migrate
    ```
 
-3. Build and start the application:
+3. Build and start traveler web, API, and Worker:
 
    ```bash
-   ENV_FILE=production.env docker compose up -d --build
+   WEB_ENV_FILE=.web.env API_ENV_FILE=.api.env WORKER_ENV_FILE=.worker.env docker compose up -d --build app api worker
    ```
 
-The application binds to `127.0.0.1:3000` only. Configure the Cloudflare Tunnel origin as `http://localhost:3000`; no public inbound port needs to be exposed by the server. The Worker listens on container port `3002`, published by Compose only on host loopback; `GET /health/live` is process liveness and `GET /health/ready` requires valid configuration, PostgreSQL, and all assigned loops to be poll-eligible. On `SIGTERM` or `SIGINT`, it becomes non-ready before it stops admitting new polls, then allows in-flight work to settle through the feature-owned durable protocol. Use the same `ENV_FILE` value with `docker compose logs -f app`, `docker compose logs -f worker`, and `docker compose down`.
+4. Build the admin image or run its Compose validation profile when needed:
+
+   ```bash
+   WEB_ENV_FILE=.web.env API_ENV_FILE=.api.env WORKER_ENV_FILE=.worker.env ADMIN_ENV_FILE=.admin.env docker compose --profile admin up -d --build admin
+   ```
+
+Compose binds traveler web to `127.0.0.1:8000`, Worker to `127.0.0.1:3002`, and admin to `127.0.0.1:8003`; the API has no host-published port. Its Compose healthcheck uses `GET /health/live` on its internal port `3001`. Configure the public tunnel origin to the traveler web service, for example `http://localhost:8000`; do not expose the private API to the browser or public internet. The Compose `admin` profile remains syntax/build validation only because Compose cannot reproduce Railway private HTTPS or the registered OAuth callback environment.
+
+The Worker `GET /health/live` endpoint is process liveness and `GET /health/ready` requires valid configuration, PostgreSQL, and all assigned loops to be poll-eligible. On `SIGTERM` or `SIGINT`, it becomes non-ready before it stops admitting new polls, then allows in-flight work to settle through the feature-owned durable protocol. Pass the same `*_ENV_FILE` variables to `docker compose logs -f app`, `docker compose logs -f api`, `docker compose logs -f worker`, and `docker compose down`.
 
 Database scripts:
 

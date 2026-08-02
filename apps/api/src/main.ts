@@ -1,5 +1,9 @@
 import "reflect-metadata";
 
+import { existsSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { loadEnvFile } from "node:process";
 import { NestFactory } from "@nestjs/core";
 
 import { parseBffCredentialConfig } from "@xuyenviet/config";
@@ -8,6 +12,8 @@ import { createAiAskStreamExecution } from "@xuyenviet/domain";
 
 import { createApiModule } from "./app.module";
 import { readApiReleasePhasePolicy } from "./release-schema";
+
+loadLocalEnvironment();
 
 async function bootstrap() {
   const config = parseBffCredentialConfig(JSON.parse(required("XV_BFF_CREDENTIAL_CONFIG")));
@@ -23,6 +29,12 @@ async function bootstrap() {
     aiAskExecution,
   }));
   await app.listen(Number(process.env.PORT ?? 3001));
+}
+
+function loadLocalEnvironment() {
+  const sourceDirectory = dirname(fileURLToPath(import.meta.url));
+  const environmentFile = resolve(sourceDirectory, "..", ".env.local");
+  if (existsSync(environmentFile)) loadEnvFile(environmentFile);
 }
 
 function required(name: string) {

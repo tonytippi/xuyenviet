@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "dev": "tsx watch src/main.ts",
     "build": "esbuild src/main.ts --bundle --platform=node --format=esm --target=node20 --external:@nestjs/* --external:jose --external:postgres --external:reflect-metadata --external:rxjs --outfile=dist/main.mjs",
     "start": "node dist/main.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"

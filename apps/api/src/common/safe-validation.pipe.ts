@@ -8,15 +8,21 @@ export type SafeRequestDto<T> = {
 
 @Injectable()
 export class SafeValidationPipe implements PipeTransform {
+  constructor(private readonly explicitDto?: Type<unknown> & Partial<SafeRequestDto<unknown>>) {}
+
   transform(value: unknown, metadata: ArgumentMetadata) {
     if (metadata.type !== "body") return value;
-    const dto = metadata.metatype as (Type<unknown> & Partial<SafeRequestDto<unknown>>) | undefined;
-    if (!dto || typeof dto.parse !== "function") {
+    const dto = this.explicitDto ?? metadata.metatype as (Type<unknown> & Partial<SafeRequestDto<unknown>>) | undefined;
+    // esbuild erases parameter metadata for some bundled controller methods.
+    // Those methods install an explicit SafeValidationPipe at the parameter.
+    if (!this.explicitDto && (!dto || dto === Object)) return value;
+    const parser = dto as Type<unknown> & SafeRequestDto<unknown>;
+    if (typeof parser.parse !== "function") {
       throw invalid();
     }
     let result: ReturnType<SafeRequestDto<unknown>["parse"]>;
     try {
-      result = dto.parse(value);
+      result = parser.parse(value);
     } catch {
       throw invalid();
     }

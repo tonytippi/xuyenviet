@@ -127,6 +127,9 @@ async function migrateDisposableTarget(databaseUrl: string, expectedIdentity: st
   const sql = postgres(databaseUrl, { max: 1 });
   try {
     if (await resolveDatabaseTargetIdentity(sql) !== expectedIdentity) throw new Error("Refusing destructive reset because the resolved target does not match the operator confirmation.");
+    // Reset has already confirmed no runtime overlap for this disposable target.
+    // Migration 0019 requires this admission on the same connection it migrates.
+    await sql`select set_config('xuyenviet.provenance_old_writers_quiesced', 'v1', false)`;
     await migrate(drizzle(sql), { migrationsFolder: "drizzle/migrations" });
   } finally {
     await sql.end();
@@ -185,8 +188,9 @@ async function main() {
 }
 
 if (process.argv[1]?.endsWith("db-reset.ts")) {
-  main().catch(() => {
-    console.error("Database reset failed before completion.");
+  main().catch((error: unknown) => {
+    const reason = error instanceof Error ? error.message : "unknown failure";
+    console.error(`Database reset failed before completion: ${reason}`);
     process.exitCode = 1;
   });
 }

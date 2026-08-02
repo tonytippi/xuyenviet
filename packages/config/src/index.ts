@@ -187,15 +187,20 @@ export function createAdminBffSigningConfig(input: AdminBffSigningConfig): Admin
 }
 
 export function getAdminBffConfig(environment: NodeJS.ProcessEnv = process.env): AdminBffConfig {
-  const transport = createBffTransportConfig({
-    privateApiUrl: requiredUrl(environment.XV_ADMIN_PRIVATE_API_URL),
-    bffOrigin: requiredExactHttpsOrigin(environment.XV_ADMIN_BFF_ORIGIN),
+  const privateApiUrl = requiredUrl(environment.XV_ADMIN_PRIVATE_API_URL);
+  const transportInput = {
+    privateApiUrl,
+    bffOrigin: requiredValue(environment.XV_ADMIN_BFF_ORIGIN),
     csrfSigningSecret: requiredValue(environment.XV_ADMIN_BFF_CSRF_SIGNING_SECRET),
     csrfLifetimeSeconds: requiredInteger(environment.XV_ADMIN_BFF_CSRF_LIFETIME_SECONDS),
     requestTimeoutMs: requiredInteger(environment.XV_ADMIN_BFF_REQUEST_TIMEOUT_MS),
-  });
+  };
+  const localTransport = isLocalAdminTransport(environment);
+  const transport = localTransport
+    ? createLocalAdminBffTransportConfig(transportInput)
+    : createBffTransportConfig({ ...transportInput, bffOrigin: requiredExactHttpsOrigin(environment.XV_ADMIN_BFF_ORIGIN) });
   const handoffUrl = requiredUrl(environment.XV_ADMIN_IDENTITY_HANDOFF_URL);
-  if (handoffUrl.protocol !== "https:" || handoffUrl.hostname !== apiAudience || handoffUrl.port || handoffUrl.username || handoffUrl.password) throw new Error("Invalid admin identity handoff configuration.");
+  if (localTransport ? !isLocalApiUrl(handoffUrl) : handoffUrl.protocol !== "https:" || handoffUrl.hostname !== apiAudience || handoffUrl.port || handoffUrl.username || handoffUrl.password) throw new Error("Invalid admin identity handoff configuration.");
   return {
     transport,
     signing: createAdminBffSigningConfig({ audience: apiAudience, maxLifetimeSeconds: 300, issuer: "xuyenviet-admin-bff", active: {
@@ -204,6 +209,21 @@ export function getAdminBffConfig(environment: NodeJS.ProcessEnv = process.env):
     handoffUrl: handoffUrl.href,
     handoffServiceToken: requiredValue(environment.XV_ADMIN_IDENTITY_HANDOFF_SERVICE_TOKEN),
   };
+}
+
+export function isLocalAdminTransport(environment: NodeJS.ProcessEnv = process.env): boolean {
+  return environment.APP_ENV === "local" && environment.XV_ADMIN_LOCAL_TRANSPORT === "true";
+}
+
+function createLocalAdminBffTransportConfig(input: Omit<BffTransportConfig, "privateApiUrl"> & { privateApiUrl: URL }): BffTransportConfig {
+  if (!isLocalApiUrl(input.privateApiUrl) || input.bffOrigin !== "http://localhost:3003" || !isValidBffCsrfConfig({ ...input, bffOrigin: "https://placeholder.invalid" }) || !Number.isInteger(input.requestTimeoutMs) || input.requestTimeoutMs < 100 || input.requestTimeoutMs > 30_000) {
+    throw new Error("Invalid local admin BFF transport configuration.");
+  }
+  return Object.freeze({ ...input, privateApiUrl: input.privateApiUrl.href });
+}
+
+function isLocalApiUrl(url: URL): boolean {
+  return url.protocol === "http:" && url.hostname === "127.0.0.1" && url.port === "3001" && !url.username && !url.password;
 }
 
 function isVerificationKey(key: VerificationKey): boolean {

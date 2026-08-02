@@ -3,7 +3,8 @@ import NextAuth, { customFetch } from "next-auth";
 import Google from "next-auth/providers/google";
 
 import { getDb } from "@/db/client";
-import { accounts, sessions, users, verificationTokens } from "@/db/schema";
+import { accounts, sessions, userRoles, users, verificationTokens } from "@/db/schema";
+import { sql } from "drizzle-orm";
 import { captureFirstTouchReferralAttribution } from "@/features/referrals/attribution";
 import { assertProductionLaunchEnv } from "@/server/env";
 
@@ -45,6 +46,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth(() => ({
   },
   events: {
     async signIn({ user, isNewUser }) {
+      const configuredAdminEmail = normalizedEmail(process.env.ADMIN_EMAIL);
+      if (user.id && configuredAdminEmail && normalizedEmail(user.email) === configuredAdminEmail) {
+        const granted = await getDb().insert(userRoles).values({ userId: user.id, role: "admin" }).onConflictDoNothing().returning({ userId: userRoles.userId });
+        if (granted.length) await getDb().update(users).set({ authorizationVersion: sql`${users.authorizationVersion} + 1` }).where(sql`${users.id} = ${user.id}`);
+      }
       if (isNewUser && user.id) {
         await captureFirstTouchReferralAttribution(user.id);
       }
@@ -107,6 +113,10 @@ async function authDebugFetch(input: RequestInfo | URL, init?: RequestInit) {
 
 function isAuthDebugEnabled() {
   return process.env.AUTH_DEBUG === "true";
+}
+
+function normalizedEmail(value: string | null | undefined) {
+  return value?.trim().toLowerCase() || null;
 }
 
 function getDebugRequest(input: RequestInfo | URL, init?: RequestInit) {

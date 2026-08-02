@@ -1,4 +1,10 @@
 import { createChildProcessAdapters, readWorkerConfig, WorkerRuntime } from "./runtime";
+import { existsSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { loadEnvFile } from "node:process";
+import { fileURLToPath } from "node:url";
+
+loadLocalEnvironment();
 
 export function installShutdownHandlers(
   runtime: Pick<WorkerRuntime, "drain">,
@@ -23,6 +29,12 @@ async function main() {
   const runtime = new WorkerRuntime(config, config ? createChildProcessAdapters() : [], undefined, Number.isInteger(safePort) && safePort >= 1 && safePort <= 65535 ? safePort : 3002);
   installShutdownHandlers(runtime);
   await runtime.start();
+}
+
+function loadLocalEnvironment() {
+  const sourceDirectory = dirname(fileURLToPath(import.meta.url));
+  const environmentFile = resolve(sourceDirectory, "..", ".env.local");
+  if (existsSync(environmentFile)) loadEnvFile(environmentFile);
 }
 
 if (process.argv[1]?.endsWith("main.ts") || process.argv[1]?.endsWith("main.mjs")) {

@@ -54,6 +54,11 @@ export async function findReusableArtifact(sql: CacheSql, reuseKey: string): Pro
   return row && isArtifactContentValid(row.payload, String(row.content_hash)) ? rowToArtifact(row) : null;
 }
 
+export async function findReusableArtifactAcrossModels(sql: CacheSql, input: Pick<CaptureArtifact, "provider" | "resourceIdentity" | "captureMethodVersion" | "payloadSchemaVersion"> & { promptVersion: string }): Promise<CaptureArtifact | null> {
+  const [row] = await sql`select id, provider, reuse_key, resource_identity, capture_method_version, payload_schema_version, prompt_version, model, payload, metadata, content_hash, captured_at from capture_artifacts where provider = ${input.provider} and resource_identity = ${input.resourceIdentity} and capture_method_version = ${input.captureMethodVersion} and payload_schema_version = ${input.payloadSchemaVersion} and prompt_version = ${input.promptVersion} and superseded_at is null order by captured_at desc, created_at desc limit 1`;
+  return row && isArtifactContentValid(row.payload, String(row.content_hash)) ? rowToArtifact(row) : null;
+}
+
 export async function findArtifactByAlias(sql: CacheSql, input: {
   provider: CaptureArtifact["provider"];
   aliasUrl: string;

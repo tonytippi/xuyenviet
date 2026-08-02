@@ -39,6 +39,28 @@ describe("admin identity routes", () => {
     expect(() => getAdminBffConfig({ ...environment, XV_ADMIN_IDENTITY_HANDOFF_URL: `https://${apiAudience}:444` })).toThrow("Invalid admin identity handoff configuration.");
   });
 
+  test("permits only the explicit local loopback admin transport", async () => {
+    const key = await keySet("admin-key");
+    const environment: NodeJS.ProcessEnv = {
+      APP_ENV: "local",
+      XV_ADMIN_LOCAL_TRANSPORT: "true",
+      XV_ADMIN_PRIVATE_API_URL: "http://127.0.0.1:3001",
+      XV_ADMIN_BFF_ORIGIN: "http://localhost:3003",
+      XV_ADMIN_BFF_CSRF_SIGNING_SECRET: "a".repeat(32),
+      XV_ADMIN_BFF_CSRF_LIFETIME_SECONDS: "300",
+      XV_ADMIN_BFF_REQUEST_TIMEOUT_MS: "100",
+      XV_ADMIN_IDENTITY_HANDOFF_URL: "http://127.0.0.1:3001",
+      XV_ADMIN_IDENTITY_HANDOFF_SERVICE_TOKEN: "service",
+      XV_ADMIN_BFF_ACTIVE_KID: "admin-key",
+      XV_ADMIN_BFF_ACTIVE_JWK: JSON.stringify(key.publicKey),
+      XV_ADMIN_BFF_ACTIVE_PRIVATE_JWK: JSON.stringify(key.privateKey),
+    };
+    const { getAdminBffConfig } = await vi.importActual<typeof import("@xuyenviet/config")>("@xuyenviet/config");
+    expect(getAdminBffConfig(environment).transport).toMatchObject({ privateApiUrl: "http://127.0.0.1:3001/", bffOrigin: "http://localhost:3003" });
+    expect(() => getAdminBffConfig({ ...environment, XV_ADMIN_PRIVATE_API_URL: "http://localhost:3001" })).toThrow("Invalid local admin BFF transport configuration.");
+    expect(() => getAdminBffConfig({ ...environment, APP_ENV: "production" })).toThrow("Invalid BFF transport configuration.");
+  });
+
   test("mints only bounded admin claims with its isolated signing key and ignores traveler cookies", async () => {
     const admin = await keySet("admin-key");
     const web = await keySet("web-key");
@@ -71,6 +93,36 @@ describe("admin identity routes", () => {
     expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe("https://foreign.example/sign-in");
     expect(completeOAuthCallback).not.toHaveBeenCalled();
+    delete process.env.XV_ADMIN_BFF_ORIGIN;
+  });
+
+  test("local callback reads the local OAuth transaction cookie", async () => {
+    const completeOAuthCallback = vi.fn().mockResolvedValue("local-admin-session");
+    vi.doMock("../apps/admin/server/identity", () => ({ completeOAuthCallback }));
+    process.env.APP_ENV = "local";
+    process.env.XV_ADMIN_LOCAL_TRANSPORT = "true";
+    process.env.XV_ADMIN_BFF_ORIGIN = "http://localhost:3003";
+    const { NextRequest } = await import("next/server");
+    const { GET } = await import("../apps/admin/app/api/auth/callback/route");
+    const response = await GET(new NextRequest("http://localhost:3003/api/auth/callback?code=code&state=state", { headers: { cookie: "xv-local-admin-oauth=local-transaction" } }));
+    expect(completeOAuthCallback).toHaveBeenCalledWith("code", "state", "local-transaction");
+    expect(response.headers.get("location")).toBe("http://localhost:3003/");
+    expect(response.headers.getSetCookie()).toEqual(expect.arrayContaining([expect.stringContaining("xv-local-admin-session=local-admin-session")]));
+    delete process.env.APP_ENV;
+    delete process.env.XV_ADMIN_LOCAL_TRANSPORT;
+    delete process.env.XV_ADMIN_BFF_ORIGIN;
+  });
+
+  test("callback returns a terminal denial instead of restarting OAuth", async () => {
+    const completeOAuthCallback = vi.fn().mockResolvedValue(null);
+    vi.doMock("../apps/admin/server/identity", () => ({ completeOAuthCallback }));
+    process.env.XV_ADMIN_BFF_ORIGIN = "https://admin.xuyenviet.app";
+    const { NextRequest } = await import("next/server");
+    const { GET } = await import("../apps/admin/app/api/auth/callback/route");
+    const response = await GET(new NextRequest("https://admin.xuyenviet.app/api/auth/callback?code=code&state=state", { headers: { cookie: "__Host-xuyenviet-admin-oauth=transaction" } }));
+    expect(response.status).toBe(401);
+    expect(response.headers.get("location")).toBeNull();
+    await expect(response.json()).resolves.toMatchObject({ code: "unauthorized" });
     delete process.env.XV_ADMIN_BFF_ORIGIN;
   });
 });

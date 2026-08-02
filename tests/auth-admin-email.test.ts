@@ -51,12 +51,21 @@ describe("sign-in events", () => {
     authMocks.nextAuthConfigFactory = undefined;
   });
 
-  test("does not grant roles when ADMIN_EMAIL matches", async () => {
+  test("grants admin when ADMIN_EMAIL matches", async () => {
     process.env.ADMIN_EMAIL = " Admin@Example.com ";
     await testDb.insert(users).values({ id: "admin-user", email: "admin@example.com" });
     const signIn = await getSignInEvent();
 
     await signIn({ user: { id: "admin-user", email: "admin@example.com" }, isNewUser: false });
+
+    await expect(testDb.select().from(userRoles)).resolves.toEqual([{ userId: "admin-user", role: "admin" }]);
+  });
+
+  test("does not grant a role when ADMIN_EMAIL is absent", async () => {
+    await testDb.insert(users).values({ id: "unconfigured-user", email: "admin@example.com" });
+    const signIn = await getSignInEvent();
+
+    await signIn({ user: { id: "unconfigured-user", email: "admin@example.com" }, isNewUser: false });
 
     await expect(testDb.select().from(userRoles)).resolves.toEqual([]);
   });
