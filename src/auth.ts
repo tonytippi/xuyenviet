@@ -3,7 +3,7 @@ import NextAuth, { customFetch } from "next-auth";
 import Google from "next-auth/providers/google";
 
 import { getDb } from "@/db/client";
-import { accounts, sessions, userRoles, users, verificationTokens } from "@/db/schema";
+import { accounts, sessions, users, verificationTokens } from "@/db/schema";
 import { captureFirstTouchReferralAttribution } from "@/features/referrals/attribution";
 import { assertProductionLaunchEnv } from "@/server/env";
 
@@ -18,6 +18,17 @@ export const { handlers, auth, signIn, signOut } = NextAuth(() => ({
   providers: [Google({ [customFetch]: authDebugFetch })],
   session: {
     strategy: "database",
+  },
+  cookies: {
+    sessionToken: {
+      name: "xuyenviet.session-token",
+      options: {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        secure: process.env.NODE_ENV === "production",
+      },
+    },
   },
   pages: {
     signIn: "/sign-in",
@@ -37,34 +48,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth(() => ({
       if (isNewUser && user.id) {
         await captureFirstTouchReferralAttribution(user.id);
       }
-
-      await provisionConfiguredAdminRoles(user.id, user.email);
     },
   },
 }));
-
-async function provisionConfiguredAdminRoles(userId: string | undefined, email: string | null | undefined) {
-  const adminEmail = normalizeEmail(process.env.ADMIN_EMAIL);
-  const signedInEmail = normalizeEmail(email);
-
-  if (!userId || !adminEmail || signedInEmail !== adminEmail) {
-    return;
-  }
-
-  await getDb()
-    .insert(userRoles)
-    .values([
-      { userId, role: "admin" },
-      { userId, role: "operator" },
-    ])
-    .onConflictDoNothing({ target: [userRoles.userId, userRoles.role] });
-}
-
-function normalizeEmail(email: string | null | undefined) {
-  const normalized = email?.trim().toLowerCase();
-
-  return normalized || undefined;
-}
 
 function assertAuthEnvironment() {
   assertProductionLaunchEnv();

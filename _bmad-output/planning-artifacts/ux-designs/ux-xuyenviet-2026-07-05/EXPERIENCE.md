@@ -8,7 +8,7 @@ sources:
   - ../../prds/prd-xuyenviet-2026-07-04/prd.md
   - ../../architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md
   - ../../epics.md
-  - ../../implementation-readiness-report-2026-07-21.md
+  - ../../implementation-readiness-report-2026-07-28.md
 ---
 
 # XuyenViet — Experience Spine
@@ -17,7 +17,7 @@ sources:
 
 ## Foundation
 
-Responsive web app for consumer MVP. Primary runtime assumption: Next.js App Router, React, shadcn/ui, Tailwind, and PostgreSQL-backed auth/session data as defined by architecture. `DESIGN.md` is the visual identity reference; this document owns information architecture, behavior, states, flows, accessibility, and interaction contracts.
+Responsive web app for consumer MVP. Next.js App Router is the traveler/admin presentation and BFF runtime; NestJS owns protected domain API and worker transport. React, shadcn/ui, Tailwind, and PostgreSQL-backed auth/session data follow the architecture. `DESIGN.md` is the visual identity reference; this document owns information architecture, behavior, states, flows, accessibility, and interaction contracts.
 
 The traveler experience uses four canonical states: a logged-out public homepage with a sign-in-gated ask box, a logged-in empty state with a left sidebar plus centered greeting/composer, an active AI Ask workspace with left history/projects, center answer, and right contextual detail panel, and a Trip Project workspace with Trip Home, structured plan, and its primary conversation. Their visual references are [`home-logged-out.html`](./mockups/home-logged-out.html), [`home-logged-in-empty.html`](./mockups/home-logged-in-empty.html), [`three-panel-chat-map.html`](./mockups/three-panel-chat-map.html), and [`trip-project-workspace.html`](./mockups/trip-project-workspace.html). `DESIGN.md` and this experience spine win on conflict with the static mockups.
 
@@ -156,6 +156,10 @@ Behavioral patterns. Visual specs live in `DESIGN.md.Components`.
 | First AI Ask empty | Logged-in empty chat | Left sidebar visible, compact top bar and center greeting/composer visible, icon-led starter cards visible, no right detail panel. |
 | Sending message | AI Ask | Pending state in chat, composer disabled or guarded against duplicate submit. |
 | Streaming AI response | AI Ask | Answer text may appear progressively after source/context preparation. Keep composer guarded, expose stop/retry only if implementation supports safe cancellation, and announce completion through `aria-live`. |
+| Stream retry or reconnect | AI Ask | Reuse the original idempotency key and restore the persisted in-progress or terminal command state. Do not submit a second AI request solely because the connection was ambiguous. |
+| Planning state changed during answer | AI Ask | When final persistence returns `refresh_required`, remove pending partial treatment and show `Kế hoạch hoặc cuộc trò chuyện đã thay đổi. Hãy làm mới rồi hỏi lại.` Do not present partial text as a saved answer. |
+| Post-answer processing delayed or failed | AI Ask | Keep the completed answer intact. Show only a compact, non-blocking pending or recoverable status for context extraction, annotations, or proposal drafting; it never changes the completed answer into a failure. |
+| API-safe failure | AI Ask/admin | Project stable safe error codes to Vietnamese recovery copy. Never reveal provider payloads, tokens, SQL, stack traces, or internal transport diagnostics. |
 | Long AI response | AI Ask | Progress copy after delay: `Mình đang kiểm tra ngữ cảnh và nguồn phù hợp...` Do not imply completion. |
 | Image attached to prompt | AI Ask | Reveal a compact thumbnail/file row with an icon-only remove action, type/size validation, and accessible label. Do not upload or submit unsupported images to the provider. |
 | Image input rejected | AI Ask | Reveal the allowed file types/size beside the validation error and keep the user's text draft intact. No provider call is made. Do not reserve idle composer space for this explanation. |

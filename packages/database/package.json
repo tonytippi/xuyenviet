@@ -1,0 +1,11 @@
+{
+  "name": "@xuyenviet/database",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@xuyenviet/contracts": "workspace:*",
+    "@xuyenviet/domain": "workspace:*",
+    "drizzle-orm": "^0.44.5",
+    "postgres": "^3.4.9"
+  }
+}

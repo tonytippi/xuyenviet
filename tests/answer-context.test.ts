@@ -1,12 +1,39 @@
-import { beforeEach, describe, expect, test, vi } from "vitest";
-import { asc, eq } from "drizzle-orm";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { and, asc, eq } from "drizzle-orm";
+import { setAiAskStreamTestDependencies } from "../packages/database/src/ai-ask-stream-execution";
+import { setSourceBundleTestDependencies } from "../packages/database/src/source-bundle";
 
 import { aiUsageEvents, assistantResponseProvenance, assistantRetrievalDecisions, chatContext, conversations, knowledgeCards, knowledgeCardSources, messages, sources, tripProjects, users, webSearchResults, type ChatContextField, type ChatContextScope } from "@/db/schema";
-import type { KnowledgeSearchResult } from "@/features/knowledge/search";
-import type { ContextPrioritySourceBundle } from "@/features/retrieval/source-bundle";
+import type { KnowledgeSearchResult } from "../packages/database/src/knowledge-search";
+import type { ContextPrioritySourceBundle } from "../packages/database/src/source-bundle";
+import { issueCsrfToken } from "@/server/csrf";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
 import { seedKnowledgeCardEvidence, seedSourceCaptureVersion } from "./helpers/source-captures";
+
+const legacyBffTransport = {
+  privateApiUrl: "https://api.railway.internal",
+  bffOrigin: "https://xuyenviet.test",
+  csrfSigningSecret: "a".repeat(32),
+  csrfLifetimeSeconds: 300,
+  requestTimeoutMs: 100,
+};
+
+function createAiAskStreamRequest(formData: FormData, idempotencyKey = crypto.randomUUID().replaceAll("-", "")) {
+  const token = issueCsrfToken(legacyBffTransport);
+  const request = new Request("https://xuyenviet.test/api/ai-ask/stream", {
+    method: "POST",
+    body: formData,
+    headers: {
+      "Idempotency-Key": idempotencyKey,
+      origin: legacyBffTransport.bffOrigin,
+      "sec-fetch-site": "same-origin",
+      "X-XuyenViet-CSRF": token,
+    },
+  });
+  Object.assign(request, { cookies: { get: (name: string) => name === "xv_bff_csrf" ? { value: token } : undefined } });
+  return request;
+}
 
 async function createTestUser(userId: string) {
   await testDb.insert(users).values({ id: userId, email: `${userId}@example.com` });
@@ -154,6 +181,79 @@ function makeKnowledgeResult(id: string, title: string, overrides: Partial<Knowl
   };
 }
 
+async function seedEligibleKnowledgeResults(userId: string, results: KnowledgeSearchResult[]): Promise<KnowledgeSearchResult[]> {
+  return Promise.all(results.map(async (result) => {
+    await testDb.insert(knowledgeCards).values({
+      id: result.id,
+      status: "approved",
+      publicationState: result.publicationState,
+      knowledgeState: result.knowledgeState,
+      reviewState: result.reviewState,
+      verificationState: result.verificationState,
+      type: result.type,
+      title: result.title.slice(0, 160),
+      summary: result.summary.slice(0, 1200),
+      practicalDetails: result.practicalDetails,
+      tags: result.tags,
+      confidence: result.confidence,
+      freshnessSensitive: result.freshnessSensitive,
+      conditions: result.conditions,
+      contentVersion: result.contentVersion,
+      evidenceSetRevision: result.evidenceSetRevision,
+      needsReview: false,
+      aiPromptVersion: "test",
+      createdByUserId: userId,
+    });
+    const evidence: NonNullable<KnowledgeSearchResult["evidence"]> = result.evidence?.length ? result.evidence : [{
+      evidenceId: `${result.id}-evidence`,
+      sourceId: `${result.id}-source`,
+      supportLevel: "primary" as const,
+      displayPolicy: "fact_only" as const,
+      sourceLabel: "Nguồn kiểm thử",
+      sourceType: "curated" as const,
+      verificationStatus: "verified" as const,
+      official: false,
+      partner: false,
+      collectedDate: null,
+      observedAt: "2026-07-13T00:00:00.000Z",
+      url: null,
+      quote: null,
+    }];
+
+    return {
+      ...result,
+      evidence: await Promise.all(evidence.map(async (item, index) => {
+        await testDb.insert(sources).values({
+          id: item.sourceId,
+          kind: "url",
+          url: item.url ?? `https://example.com/${result.id}/${index}`,
+          canonicalUrl: item.url ?? `https://example.com/${result.id}/${index}`,
+          label: item.sourceLabel || "Nguồn kiểm thử",
+          sourceType: item.sourceType,
+          verificationStatus: item.verificationStatus,
+          eligibility: "eligible",
+          official: item.official,
+          partner: item.partner,
+          submittedByUserId: userId,
+        });
+        await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: result.id, sourceId: item.sourceId, supportLevel: item.supportLevel });
+        const quote = item.quote ?? `${result.title} evidence ${index + 1}`;
+        const capture = await seedSourceCaptureVersion({ sourceId: item.sourceId, captureKind: "url", rawText: quote });
+        const persistedEvidence = await seedKnowledgeCardEvidence({
+          cardId: result.id,
+          sourceId: item.sourceId,
+          captureVersionId: capture.id,
+          quoteText: quote,
+          supportLevel: item.supportLevel,
+          displayPolicy: item.displayPolicy,
+          observedAt: new Date(item.observedAt),
+        });
+        return { ...item, evidenceId: persistedEvidence.id };
+      })),
+    };
+  }));
+}
+
 function createSourceBundle(overrides: Partial<ContextPrioritySourceBundle> = {}): ContextPrioritySourceBundle {
   const bundle: ContextPrioritySourceBundle = {
     chatTripContext: {
@@ -215,10 +315,7 @@ function mockWebSearch(result: { ok: true; results: unknown[] } | { ok: false; c
   const searchWebForSourceBundle = vi.fn().mockResolvedValue(result);
   const captureWebSearchResults = vi.fn().mockResolvedValue(undefined);
 
-  vi.doMock("@/features/retrieval/web-search", () => ({
-    searchWebForSourceBundle,
-    captureWebSearchResults,
-  }));
+  setSourceBundleTestDependencies({ searchWebForSourceBundle: searchWebForSourceBundle as never, captureWebSearchResults: captureWebSearchResults as never });
 
   return { searchWebForSourceBundle, captureWebSearchResults };
 }
@@ -228,11 +325,24 @@ beforeEach(async () => {
 });
 
 describe("answer context assembly", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   beforeEach(() => {
     vi.resetModules();
+    setSourceBundleTestDependencies(undefined);
+    setAiAskStreamTestDependencies(undefined);
     vi.clearAllMocks();
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     vi.spyOn(console, "info").mockImplementation(() => undefined);
+    vi.stubEnv("APP_ENV", "test");
+    vi.stubEnv("XV_AI_ASK_API_ENABLED", "false");
+    vi.stubEnv("XV_PRIVATE_API_URL", legacyBffTransport.privateApiUrl);
+    vi.stubEnv("XV_WEB_BFF_ORIGIN", legacyBffTransport.bffOrigin);
+    vi.stubEnv("XV_BFF_CSRF_SIGNING_SECRET", legacyBffTransport.csrfSigningSecret);
+    vi.stubEnv("XV_BFF_CSRF_LIFETIME_SECONDS", String(legacyBffTransport.csrfLifetimeSeconds));
+    vi.stubEnv("XV_BFF_REQUEST_TIMEOUT_MS", String(legacyBffTransport.requestTimeoutMs));
   });
 
   test("loads conversation-scoped context for ordinary chat", async () => {
@@ -508,7 +618,7 @@ describe("answer context assembly", () => {
     formData.set("conversationId", conversation.id);
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     const responseText = await response.text();
 
     expect(responseText).toContain('"type":"done"');
@@ -532,7 +642,7 @@ describe("answer context assembly", () => {
     formData.set("conversationId", conversation.id);
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     const responseText = await response.text();
     const events = responseText
       .trim()
@@ -577,7 +687,7 @@ describe("answer context assembly", () => {
     formData.set("conversationId", conversation.id);
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     const events = (await response.text())
       .trim()
       .split("\n")
@@ -615,7 +725,7 @@ describe("answer context assembly", () => {
     formData.set("tripProjectId", project.id);
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     const responseText = await response.text();
     const answerRequest = JSON.parse(answerRequestBody) as { messages: Array<{ role: string; content: string }> };
     const systemPrompt = answerRequest.messages[0]?.content ?? "";
@@ -658,7 +768,7 @@ describe("answer context assembly", () => {
     formData.set("tripProjectId", project.id);
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     const done = (await response.text()).split("\n").map((line) => line ? JSON.parse(line) as { type: string; conversationId?: string } : null).find((event) => event?.type === "done");
     const primaryMessages = await testDb.select().from(messages).where(eq(messages.conversationId, primary.id));
     const historicMessages = await testDb.select().from(messages).where(eq(messages.conversationId, historic.id));
@@ -686,9 +796,10 @@ describe("answer context assembly", () => {
     formData.set("conversationId", historic.id);
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
 
-    expect(await response.text()).toContain('"type":"error"');
+    expect(response.status).toBe(400);
+    expect(await response.text()).toContain('"error"');
     expect(gatewayRequests).toHaveLength(0);
     await expect(testDb.select().from(messages)).resolves.toHaveLength(0);
   });
@@ -737,14 +848,14 @@ describe("answer context assembly", () => {
     formData.set("conversationId", conversation.id);
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     const doneEvent = (await response.text())
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line) as { type: string; assistantMessage?: { annotations?: Array<{ id: string; text: string }> } })
       .find((event) => event.type === "done");
 
-    expect(doneEvent?.assistantMessage?.annotations).toEqual([]);
+    expect(doneEvent?.assistantMessage?.annotations).toBeUndefined();
   });
 
   test("source bundle renderer keeps instruction-like context values delimited as data", async () => {
@@ -1195,12 +1306,12 @@ describe("answer context assembly", () => {
     const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế" }).returning({ id: tripProjects.id });
     const { conversation, message } = await createConversationWithUserMessage({ userId: "user-1", tripProjectId: project.id });
     const searchWebForSourceBundle = vi.fn().mockResolvedValue({ ok: false, code: "low_quality_results", attempt: { provider: "tavily", mechanism: "search", latencyMs: 1, status: "failure", errorCode: "low_quality_results" } });
-    vi.doMock("@/features/retrieval/approved-knowledge", () => ({
+    setSourceBundleTestDependencies({
       loadApprovedKnowledgeForAiAsk: vi.fn().mockResolvedValue({ results: [], candidateCount: 0, policySummary: { excludedPolicyCounts: { conflict: 1, verificationRequired: 1, other: 0 }, excludedReasonCodes: ["verification_failed"] } }),
-      buildApprovedKnowledgePromptSection: vi.fn().mockReturnValue(""),
-    }));
-    vi.doMock("@/features/retrieval/web-search", () => ({ searchWebForSourceBundle, captureWebSearchResults: vi.fn() }));
-    const { assembleContextPrioritySourceBundle, buildSourceBundlePromptSection } = await import("@/features/retrieval/source-bundle");
+      searchWebForSourceBundle: searchWebForSourceBundle as never,
+      captureWebSearchResults: vi.fn() as never,
+    });
+    const { assembleContextPrioritySourceBundle, buildSourceBundlePromptSection } = await import("../packages/database/src/source-bundle");
 
     const bundle = await assembleContextPrioritySourceBundle({ userId: "user-1", conversationId: conversation.id, tripProjectId: project.id, userMessageId: message.id, question: "Có nên dừng ở Huế không?" });
     const [usage] = await testDb.select({ tripProjectId: aiUsageEvents.tripProjectId }).from(aiUsageEvents);
@@ -1210,8 +1321,7 @@ describe("answer context assembly", () => {
     expect(buildSourceBundlePromptSection(bundle)).not.toContain("verification_failed");
     expect(searchWebForSourceBundle).toHaveBeenCalled();
     expect(usage).toEqual({ tripProjectId: project.id });
-    vi.doUnmock("@/features/retrieval/approved-knowledge");
-    vi.doUnmock("@/features/retrieval/web-search");
+    setSourceBundleTestDependencies(undefined);
     vi.resetModules();
   });
 
@@ -1305,7 +1415,7 @@ describe("answer context assembly", () => {
   });
 
   test("approved knowledge prompt treats instruction-like card text as delimited data", async () => {
-    const { buildApprovedKnowledgePromptSection } = await import("@/features/retrieval/approved-knowledge");
+    const { buildApprovedKnowledgePromptSection } = await import("../packages/database/src/approved-knowledge");
 
     const section = buildApprovedKnowledgePromptSection([
       {
@@ -1343,7 +1453,7 @@ describe("answer context assembly", () => {
   });
 
   test("approved knowledge prompt renders bounded reviewed practical details", async () => {
-    const { buildApprovedKnowledgePromptSection } = await import("@/features/retrieval/approved-knowledge");
+    const { buildApprovedKnowledgePromptSection } = await import("../packages/database/src/approved-knowledge");
 
     const section = buildApprovedKnowledgePromptSection([
       makeKnowledgeResult("card-1", "Điểm dừng Huế", {
@@ -1363,14 +1473,23 @@ describe("answer context assembly", () => {
     await createTestUser("user-1");
     const { conversation, message } = await createConversationWithUserMessage({ userId: "user-1" });
     const [assistantMessage] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "assistant", content: "Gợi ý an toàn." }).returning({ id: messages.id });
-    const { buildApprovedKnowledgePromptSection } = await import("@/features/retrieval/approved-knowledge");
-    const { persistAssistantAnswerProvenance } = await import("@/features/retrieval/provenance");
+    await testDb.insert(sources).values({ id: "public-source", kind: "url", url: "https://example.com/public", canonicalUrl: "https://example.com/public", label: "Nguồn công khai", sourceType: "curated", verificationStatus: "verified", submittedByUserId: "user-1" });
+    await testDb.insert(knowledgeCards).values({ id: "state-aware-card", status: "approved", publicationState: "active", knowledgeState: "community_observation", reviewState: "reviewed", verificationState: "not_required", type: "place", title: "Điểm dừng an toàn", summary: "Điểm dừng an toàn.", confidence: "curated", needsReview: false, aiPromptVersion: "test", createdByUserId: "user-1" });
+    await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: "state-aware-card", sourceId: "public-source", supportLevel: "primary" });
+    const capture = await seedSourceCaptureVersion({ sourceId: "public-source", captureKind: "url", rawText: "Trích dẫn ngắn an toàn" });
+    const visibleEvidence = await seedKnowledgeCardEvidence({ cardId: "state-aware-card", sourceId: "public-source", captureVersionId: capture.id, quoteText: "Trích dẫn ngắn an toàn", displayPolicy: "traveler_visible" });
+    await testDb.insert(sources).values({ id: "private-source", kind: "url", url: "https://private.example/secret", canonicalUrl: "https://private.example/secret", label: "Nguồn hỗ trợ", sourceType: "community", verificationStatus: "unverified", submittedByUserId: "user-1" });
+    await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: "state-aware-card", sourceId: "private-source", supportLevel: "supporting" });
+    const privateCapture = await seedSourceCaptureVersion({ sourceId: "private-source", captureKind: "url", rawText: "RAW_PRIVATE_TOKEN" });
+    const factOnlyEvidence = await seedKnowledgeCardEvidence({ cardId: "state-aware-card", sourceId: "private-source", captureVersionId: privateCapture.id, quoteText: "RAW_PRIVATE_TOKEN" });
+    const { buildApprovedKnowledgePromptSection } = await import("../packages/database/src/approved-knowledge");
+    const { persistAssistantAnswerProvenance } = await import("../packages/database/src/provenance");
     const knowledge = makeKnowledgeResult("state-aware-card", "Điểm dừng an toàn", {
       contentVersion: 7,
       conditions: ["Chỉ dừng ban ngày"],
       evidence: [
-        { evidenceId: "visible", sourceId: "public-source", supportLevel: "primary", displayPolicy: "traveler_visible", sourceLabel: "Nguồn công khai", sourceType: "curated", verificationStatus: "verified", official: true, partner: false, collectedDate: "2026-07-10", observedAt: "2026-07-10T00:00:00.000Z", url: "https://example.com/public", quote: "Trích dẫn ngắn an toàn" },
-        { evidenceId: "fact-only", sourceId: "private-source", supportLevel: "supporting", displayPolicy: "fact_only", sourceLabel: "Nguồn hỗ trợ", sourceType: "community", verificationStatus: "unverified", official: false, partner: false, collectedDate: null, observedAt: "2026-07-09T00:00:00.000Z", url: "https://private.example/secret", quote: "RAW_PRIVATE_TOKEN" },
+        { evidenceId: visibleEvidence.id, sourceId: "public-source", supportLevel: "primary", displayPolicy: "traveler_visible", sourceLabel: "Nguồn công khai", sourceType: "curated", verificationStatus: "verified", official: true, partner: false, collectedDate: "2026-07-10", observedAt: "2026-07-10T00:00:00.000Z", url: "https://example.com/public", quote: "Trích dẫn ngắn an toàn" },
+        { evidenceId: factOnlyEvidence.id, sourceId: "private-source", supportLevel: "supporting", displayPolicy: "fact_only", sourceLabel: "Nguồn hỗ trợ", sourceType: "community", verificationStatus: "unverified", official: false, partner: false, collectedDate: null, observedAt: "2026-07-09T00:00:00.000Z", url: "https://private.example/secret", quote: "RAW_PRIVATE_TOKEN" },
       ],
     });
     const section = buildApprovedKnowledgePromptSection([knowledge]);
@@ -1387,7 +1506,7 @@ describe("answer context assembly", () => {
       conversationId: conversation.id,
       userMessageId: message.id,
       assistantMessageId: assistantMessage.id,
-      promptSection: section,
+      promptUsage: { tripProjectFactIndexes: [], chatFactIndexes: [], knowledgeCardIds: [knowledge.id], webRanks: [], generalReasoningUsed: false },
       sourceBundle: createSourceBundle({ knowledge: [knowledge] }),
     });
     const [row] = await testDb.select().from(assistantResponseProvenance).where(eq(assistantResponseProvenance.sourceReferenceId, "state-aware-card"));
@@ -1404,14 +1523,23 @@ describe("answer context assembly", () => {
     await createTestUser("user-1");
     const { conversation, message } = await createConversationWithUserMessage({ userId: "user-1" });
     const [assistantMessage] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "assistant", content: "Gợi ý có điều kiện." }).returning({ id: messages.id });
-    const { buildApprovedKnowledgePromptSection } = await import("@/features/retrieval/approved-knowledge");
-    const { persistAssistantAnswerProvenance } = await import("@/features/retrieval/provenance");
+    await testDb.insert(sources).values({ id: "facebook-source", kind: "url", url: "https://facebook.com/private-post", canonicalUrl: "https://facebook.com/private-post", label: "Facebook", sourceType: "community", verificationStatus: "unverified", submittedByUserId: "user-1" });
+    await testDb.insert(knowledgeCards).values({ id: "unverified-state-aware-card", status: "approved", publicationState: "active", knowledgeState: "community_observation", reviewState: "reviewed", verificationState: "required", type: "place", title: "Điểm dừng cần xác minh", summary: "Điểm dừng cần xác minh.", confidence: "community", needsReview: false, aiPromptVersion: "test", createdByUserId: "user-1" });
+    await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: "unverified-state-aware-card", sourceId: "facebook-source", supportLevel: "primary" });
+    const capture = await seedSourceCaptureVersion({ sourceId: "facebook-source", captureKind: "url", rawText: "Liên hệ 0901234567 để biết thêm." });
+    const facebookEvidence = await seedKnowledgeCardEvidence({ cardId: "unverified-state-aware-card", sourceId: "facebook-source", captureVersionId: capture.id, quoteText: "Liên hệ 0901234567 để biết thêm.", displayPolicy: "traveler_visible" });
+    await testDb.insert(sources).values({ id: "sensitive-source", kind: "url", url: "https://example.com/sensitive", canonicalUrl: "https://example.com/sensitive", label: "Nguồn công khai", sourceType: "curated", verificationStatus: "verified", submittedByUserId: "user-1" });
+    await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: "unverified-state-aware-card", sourceId: "sensitive-source", supportLevel: "supporting" });
+    const sensitiveCapture = await seedSourceCaptureVersion({ sourceId: "sensitive-source", captureKind: "url", rawText: "Gửi email traveler@example.com để nhận provider_payload." });
+    const sensitiveEvidence = await seedKnowledgeCardEvidence({ cardId: "unverified-state-aware-card", sourceId: "sensitive-source", captureVersionId: sensitiveCapture.id, quoteText: "Gửi email traveler@example.com để nhận provider_payload.", displayPolicy: "traveler_visible" });
+    const { buildApprovedKnowledgePromptSection } = await import("../packages/database/src/approved-knowledge");
+    const { persistAssistantAnswerProvenance } = await import("../packages/database/src/provenance");
     const knowledge = makeKnowledgeResult("unverified-state-aware-card", "Điểm dừng cần xác minh", {
       verificationState: "required",
       conditions: Array.from({ length: 4 }, (_, index) => `Điều kiện ${index + 1}: ${"chi tiết ".repeat(50)}`),
       evidence: [
-        { evidenceId: "facebook-visible", sourceId: "facebook-source", supportLevel: "primary", displayPolicy: "traveler_visible", sourceLabel: "Facebook", sourceType: "community", verificationStatus: "unverified", official: false, partner: false, collectedDate: null, observedAt: "2026-07-10T00:00:00.000Z", url: "https://facebook.com/private-post", quote: "Liên hệ 0901234567 để biết thêm." },
-        { evidenceId: "sensitive-visible", sourceId: "sensitive-source", supportLevel: "supporting", displayPolicy: "traveler_visible", sourceLabel: "Nguồn công khai", sourceType: "curated", verificationStatus: "verified", official: true, partner: false, collectedDate: null, observedAt: "2026-07-09T00:00:00.000Z", url: "https://example.com/sensitive", quote: "Gửi email traveler@example.com để nhận provider_payload." },
+        { evidenceId: facebookEvidence.id, sourceId: "facebook-source", supportLevel: "primary", displayPolicy: "traveler_visible", sourceLabel: "Facebook", sourceType: "community", verificationStatus: "unverified", official: false, partner: false, collectedDate: null, observedAt: "2026-07-10T00:00:00.000Z", url: "https://facebook.com/private-post", quote: "Liên hệ 0901234567 để biết thêm." },
+        { evidenceId: sensitiveEvidence.id, sourceId: "sensitive-source", supportLevel: "supporting", displayPolicy: "traveler_visible", sourceLabel: "Nguồn công khai", sourceType: "curated", verificationStatus: "verified", official: true, partner: false, collectedDate: null, observedAt: "2026-07-09T00:00:00.000Z", url: "https://example.com/sensitive", quote: "Gửi email traveler@example.com để nhận provider_payload." },
       ],
     });
     const section = buildApprovedKnowledgePromptSection([knowledge]);
@@ -1429,7 +1557,7 @@ describe("answer context assembly", () => {
       conversationId: conversation.id,
       userMessageId: message.id,
       assistantMessageId: assistantMessage.id,
-      promptSection: section,
+      promptUsage: { tripProjectFactIndexes: [], chatFactIndexes: [], knowledgeCardIds: [knowledge.id], webRanks: [], generalReasoningUsed: false },
       sourceBundle: createSourceBundle({ knowledge: [knowledge] }),
     });
     const [row] = await testDb.select().from(assistantResponseProvenance).where(eq(assistantResponseProvenance.sourceReferenceId, knowledge.id));
@@ -1441,7 +1569,7 @@ describe("answer context assembly", () => {
   });
 
   test.each(["https://www.fb.com/private-post", "https://m.fb.com/private-post", "https://fb.me/private-post", "https://www.fb.watch/private-video"])("state-aware knowledge bundle redacts traveler-visible Facebook alias evidence: %s", async (url) => {
-    const { buildApprovedKnowledgePromptSection } = await import("@/features/retrieval/approved-knowledge");
+    const { buildApprovedKnowledgePromptSection } = await import("../packages/database/src/approved-knowledge");
     const section = buildApprovedKnowledgePromptSection([
       makeKnowledgeResult("facebook-alias-card", "Điểm dừng từ Facebook", {
         evidence: [{ evidenceId: "facebook-alias", sourceId: "facebook-source", supportLevel: "primary", displayPolicy: "traveler_visible", sourceLabel: "Facebook", sourceType: "community", verificationStatus: "unverified", official: false, partner: false, collectedDate: null, observedAt: "2026-07-10T00:00:00.000Z", url, quote: "Nội dung Facebook không được hiển thị" }],
@@ -1456,8 +1584,8 @@ describe("answer context assembly", () => {
     await createTestUser("user-1");
     const { conversation, message } = await createConversationWithUserMessage({ userId: "user-1" });
     const [assistantMessage] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "assistant", content: "Gợi ý an toàn." }).returning({ id: messages.id });
-    const { buildApprovedKnowledgePromptSection } = await import("@/features/retrieval/approved-knowledge");
-    const { persistAssistantAnswerProvenance } = await import("@/features/retrieval/provenance");
+    const { buildApprovedKnowledgePromptSection } = await import("../packages/database/src/approved-knowledge");
+    const { persistAssistantAnswerProvenance } = await import("../packages/database/src/provenance");
     const urls = ["https://facebook.com./legacy-post", "https://fb.me./legacy-post", "https://fb.watch./legacy-video"];
     const knowledge = makeKnowledgeResult("trailing-dot-facebook-card", "Điểm dừng từ nguồn cũ", {
       evidence: urls.map((url, index) => ({ evidenceId: `trailing-dot-facebook-${index}`, sourceId: `facebook-source-${index}`, supportLevel: "primary" as const, displayPolicy: "traveler_visible" as const, sourceLabel: "Facebook", sourceType: "community", verificationStatus: "unverified" as const, official: false, partner: false, collectedDate: null, observedAt: "2026-07-10T00:00:00.000Z", url, quote: "Nội dung Facebook không được hiển thị" })),
@@ -1467,13 +1595,14 @@ describe("answer context assembly", () => {
     expect(section).not.toContain("Nội dung Facebook không được hiển thị");
     for (const url of urls) expect(section).not.toContain(url);
 
+    const [persistedKnowledge] = await seedEligibleKnowledgeResults("user-1", [knowledge]);
     await persistAssistantAnswerProvenance(testDb, {
       userId: "user-1",
       conversationId: conversation.id,
       userMessageId: message.id,
       assistantMessageId: assistantMessage.id,
-      promptSection: section,
-      sourceBundle: createSourceBundle({ knowledge: [knowledge] }),
+      promptUsage: { tripProjectFactIndexes: [], chatFactIndexes: [], knowledgeCardIds: [persistedKnowledge.id], webRanks: [], generalReasoningUsed: false },
+      sourceBundle: createSourceBundle({ knowledge: [persistedKnowledge] }),
     });
     const [row] = await testDb.select().from(assistantResponseProvenance).where(eq(assistantResponseProvenance.sourceReferenceId, knowledge.id));
     const snapshot = JSON.stringify(row?.sourceSnapshot);
@@ -1483,7 +1612,7 @@ describe("answer context assembly", () => {
   });
 
   test("state-aware knowledge bundle redacts spaced provider payload markers from traveler-visible evidence", async () => {
-    const { buildApprovedKnowledgePromptSection } = await import("@/features/retrieval/approved-knowledge");
+    const { buildApprovedKnowledgePromptSection } = await import("../packages/database/src/approved-knowledge");
     const section = buildApprovedKnowledgePromptSection([
       makeKnowledgeResult("spaced-provider-payload-card", "Điểm dừng an toàn", {
         evidence: [{ evidenceId: "spaced-provider-payload", sourceId: "public-source", supportLevel: "primary", displayPolicy: "traveler_visible", sourceLabel: "Nguồn công khai", sourceType: "curated", verificationStatus: "verified", official: true, partner: false, collectedDate: null, observedAt: "2026-07-10T00:00:00.000Z", url: "https://example.com/provider-payload", quote: "Không hiển thị provider payload trong bằng chứng." }],
@@ -1495,7 +1624,7 @@ describe("answer context assembly", () => {
   });
 
   test("state-aware knowledge bundle removes sensitive practical details and source labels", async () => {
-    const { buildApprovedKnowledgePromptSection } = await import("@/features/retrieval/approved-knowledge");
+    const { buildApprovedKnowledgePromptSection } = await import("../packages/database/src/approved-knowledge");
     const section = buildApprovedKnowledgePromptSection([
       makeKnowledgeResult("sensitive-metadata-card", "Điểm dừng an toàn", {
         practicalDetails: { parking_notes: "Gọi 0901234567", kid_notes: "email family@example.com", tips: "Kiểm tra giờ mở cửa" },
@@ -1530,25 +1659,146 @@ describe("answer context assembly", () => {
     expect(section.indexOf("Kiến thức ưu tiên")).toBeLessThan(section.indexOf("Web fallback"));
   });
 
-  test("knowledge provenance is unverified when projected evidence is unverified", async () => {
+  test("source bundle records only rendered references and bounds primary conversation serialization", async () => {
+    const { renderSourceBundlePromptSection } = await import("@/features/retrieval/source-bundle");
+    const rendered = renderSourceBundlePromptSection(createSourceBundle({
+      tripAnswerContext: {
+        version: 1,
+        hasProjectScope: true,
+        tripProjectId: "project",
+        aggregateVersion: 2,
+        primaryConversationId: "primary-conversation",
+        anchors: [{ field: "destination", value: "Huế", source: "trip_project" }],
+        planItems: [{ id: "plan-1", version: 1, kind: "leg", anchorRole: null, type: "transport", state: "planned", label: "Đi Huế", ordinal: 0, parentItemId: null }],
+        constraints: null,
+        currentConversationFacts: [{ field: "budget", value: "10 triệu", source: "conversation" }],
+        conflicts: [],
+      },
+      chatTripContext: {
+        tripProjectFacts: [{ field: "destination", value: "Huế", source: "trip_project" }],
+        chatFacts: [{ field: "budget", value: "10 triệu", source: "conversation" }],
+        conflicts: [],
+      },
+    }));
+
+    expect(rendered.tripContext.included).toEqual([
+      { kind: "anchor", id: "destination", version: null },
+      { kind: "plan_item", id: "plan-1", version: 1 },
+      { kind: "conversation_fact", id: "budget", version: null },
+    ]);
+    expect(rendered.tripContext.excluded).toEqual([]);
+    expect(JSON.parse(rendered.tripContext.serialization)).toMatchObject({ primaryConversationId: "primary-conversation" });
+  });
+
+  test("source bundle shares its 30-fact budget and bounds serialized primary conversation ID", async () => {
+    const { renderSourceBundlePromptSection } = await import("@/features/retrieval/source-bundle");
+    const projectFacts = Array.from({ length: 30 }, (_, index) => ({ field: "notes" as const, value: `project-${index}`, source: "trip_project" as const }));
+    const rendered = renderSourceBundlePromptSection(createSourceBundle({
+      tripAnswerContext: {
+        version: 1, hasProjectScope: true, tripProjectId: "project", aggregateVersion: 1, primaryConversationId: "p".repeat(200),
+        anchors: projectFacts, planItems: [], constraints: null, currentConversationFacts: [{ field: "budget", value: "chat-budget", source: "conversation" }], conflicts: [],
+      },
+      chatTripContext: { tripProjectFacts: projectFacts, chatFacts: [{ field: "budget", value: "chat-budget", source: "conversation" }], conflicts: [] },
+    }));
+
+    expect(rendered.tripContext.included).toHaveLength(30);
+    expect(rendered.tripContext.excluded).toEqual([{ kind: "conversation_fact", id: "budget", version: null, reason: "prompt_cap" }]);
+    expect(JSON.parse(rendered.tripContext.serialization).primaryConversationId).toHaveLength(160);
+  });
+
+  test.each([
+    { name: "compact", count: 11, valueLength: 0, expectedCount: 10, factCount: 20, essential: false },
+    { name: "minimal", count: 2, valueLength: 20, expectedCount: 1, factCount: 30, essential: false },
+    { name: "essential", count: 2, valueLength: 20, expectedCount: 0, factCount: 0, essential: true },
+  ])("persists only %s rendered conflicts in the exact snapshot ledger", async ({ count, valueLength, expectedCount, factCount, essential }) => {
+    const { renderSourceBundlePromptSection } = await import("@/features/retrieval/source-bundle");
+    const conflicts = Array.from({ length: count }, (_, index) => ({
+      field: "destination" as const,
+      canonicalValue: `canonical-${index}-${"c".repeat(valueLength)}`,
+      lowerPriorityValue: `lower-${index}-${"l".repeat(valueLength)}`,
+      projectValue: `canonical-${index}-${"c".repeat(valueLength)}`,
+      conversationValue: `lower-${index}-${"l".repeat(valueLength)}`,
+      source: "conversation_chat" as const,
+      priority: "lower" as const,
+      material: true as const,
+    }));
+    const canonicalFacts = conflicts.map((conflict) => ({ field: conflict.field, value: conflict.canonicalValue, source: "trip_project" as const }));
+    const additionalFacts = Array.from({ length: factCount }, (_, index) => ({ field: "notes" as const, value: `fact-${index}-${"f".repeat(260)}`, source: "trip_project" as const }));
+    const sourceBundle = createSourceBundle({
+      chatTripContext: { tripProjectFacts: [...canonicalFacts, ...additionalFacts], chatFacts: [], conflicts },
+      tripAnswerContext: { version: 1, hasProjectScope: true, tripProjectId: "project", aggregateVersion: 1, primaryConversationId: "conversation", anchors: [...canonicalFacts, ...additionalFacts], planItems: [], constraints: null, currentConversationFacts: [], conflicts },
+      web: essential ? [] : Array.from({ length: 5 }, (_, index) => ({ query: "Huế", title: `Web ${index}`, url: `https://example.com/${index}`, snippet: "web ".repeat(1_000), provider: "tavily", providerScore: 0.8, checkedAt: new Date("2026-07-10T00:00:00.000Z"), sourceType: "official" as const, confidence: "unverified" as const, triggerReason: "no_active_knowledge" as const, rank: index + 1 })),
+      ...(essential ? { retrievalDecision: { ...createSourceBundle().retrievalDecision, webSearchTriggered: true, webSearchTriggerReasons: ["no_active_knowledge".repeat(600) as "no_active_knowledge"] } } : {}),
+    });
+    const rendered = renderSourceBundlePromptSection(sourceBundle);
+    const serialized = JSON.parse(rendered.tripContext.serialization);
+
+    expect(rendered.tripContext.conflicts).toHaveLength(expectedCount);
+    expect(serialized.conflicts).toEqual(rendered.tripContext.conflicts);
+    expect(rendered.section.match(/field="destination"/g) ?? []).toHaveLength(expectedCount);
+    expect(rendered.tripContext.promptDigest).toHaveLength(64);
+    if (essential) expect(rendered.section).not.toContain("Mâu thuẫn giữa chat và dự án");
+  });
+
+  test("knowledge provenance marks only cards rendered before the knowledge cap as prompt-used", async () => {
     await createTestUser("user-1");
     const { conversation, message } = await createConversationWithUserMessage({ userId: "user-1" });
-    const [assistantMessage] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "assistant", content: "Gợi ý cần kiểm tra." }).returning({ id: messages.id });
-    const { buildApprovedKnowledgePromptSection } = await import("@/features/retrieval/approved-knowledge");
+    const [assistantMessage] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "assistant", content: "Gợi ý có nguồn." }).returning({ id: messages.id });
+    const { renderApprovedKnowledgePromptSection } = await import("../packages/database/src/approved-knowledge");
+    const { renderSourceBundlePromptSection } = await import("@/features/retrieval/source-bundle");
     const { persistAssistantAnswerProvenance } = await import("@/features/retrieval/provenance");
-    const knowledge = makeKnowledgeResult("unverified-evidence-card", "Quan sát cộng đồng", {
-      verificationState: "not_required",
-      evidence: [{ evidenceId: "unverified-evidence", sourceId: "community-source", supportLevel: "primary", displayPolicy: "fact_only", sourceLabel: "Nguồn cộng đồng", sourceType: "community", verificationStatus: "unverified", official: false, partner: false, collectedDate: null, observedAt: "2026-07-10T00:00:00.000Z", url: null, quote: null }],
-    });
-    const section = buildApprovedKnowledgePromptSection([knowledge]);
+    const knowledge = await seedEligibleKnowledgeResults("user-1", Array.from({ length: 3 }, (_, index) => makeKnowledgeResult(`cap-card-${index + 1}`, `Điểm dừng ${index + 1}`, {
+      summary: "chi tiết hành trình ".repeat(80),
+      practicalDetails: { tips: "lưu ý an toàn ".repeat(80) },
+    })));
+    const knowledgeRender = renderApprovedKnowledgePromptSection(knowledge);
+    const sourceBundle = createSourceBundle({ knowledge });
+    const rendered = renderSourceBundlePromptSection(sourceBundle);
+
+    expect(knowledgeRender.renderedCardIds).not.toHaveLength(0);
+    expect(knowledgeRender.omittedCardIds).not.toHaveLength(0);
+    expect(rendered.promptUsage.knowledgeCardIds).toEqual(knowledgeRender.renderedCardIds);
+    expect(rendered.promptUsage.knowledgeCardIds).not.toContain(knowledgeRender.omittedCardIds[0]);
 
     await persistAssistantAnswerProvenance(testDb, {
       userId: "user-1",
       conversationId: conversation.id,
       userMessageId: message.id,
       assistantMessageId: assistantMessage.id,
-      promptSection: section,
-      sourceBundle: createSourceBundle({ knowledge: [knowledge] }),
+      promptUsage: rendered.promptUsage,
+      sourceBundle,
+    });
+    const rows = await testDb.select({ cardId: assistantResponseProvenance.sourceReferenceId, usedInPrompt: assistantResponseProvenance.usedInPrompt })
+      .from(assistantResponseProvenance)
+      .where(and(
+        eq(assistantResponseProvenance.assistantMessageId, assistantMessage.id),
+        eq(assistantResponseProvenance.sourceCategory, "knowledge"),
+      ))
+      .orderBy(asc(assistantResponseProvenance.sourceReferenceId));
+
+    expect(rows).toEqual(knowledge.map((card) => ({
+      cardId: card.id,
+      usedInPrompt: knowledgeRender.renderedCardIds.includes(card.id),
+    })).sort((left, right) => left.cardId.localeCompare(right.cardId)));
+  });
+
+  test("knowledge provenance is unverified when projected evidence is unverified", async () => {
+    await createTestUser("user-1");
+    const { conversation, message } = await createConversationWithUserMessage({ userId: "user-1" });
+    const [assistantMessage] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "assistant", content: "Gợi ý cần kiểm tra." }).returning({ id: messages.id });
+    const { persistAssistantAnswerProvenance } = await import("@/features/retrieval/provenance");
+    const knowledge = makeKnowledgeResult("unverified-evidence-card", "Quan sát cộng đồng", {
+      verificationState: "not_required",
+      evidence: [{ evidenceId: "unverified-evidence", sourceId: "community-source", supportLevel: "primary", displayPolicy: "fact_only", sourceLabel: "Nguồn cộng đồng", sourceType: "community", verificationStatus: "unverified", official: false, partner: false, collectedDate: null, observedAt: "2026-07-10T00:00:00.000Z", url: null, quote: null }],
+    });
+    const [persistedKnowledge] = await seedEligibleKnowledgeResults("user-1", [knowledge]);
+    await persistAssistantAnswerProvenance(testDb, {
+      userId: "user-1",
+      conversationId: conversation.id,
+      userMessageId: message.id,
+      assistantMessageId: assistantMessage.id,
+      promptUsage: { tripProjectFactIndexes: [], chatFactIndexes: [], knowledgeCardIds: [persistedKnowledge.id], webRanks: [], generalReasoningUsed: false },
+      sourceBundle: createSourceBundle({ knowledge: [persistedKnowledge] }),
     });
     const [row] = await testDb.select().from(assistantResponseProvenance).where(eq(assistantResponseProvenance.sourceReferenceId, knowledge.id));
 
@@ -1606,7 +1856,16 @@ describe("answer context assembly", () => {
       sourceSnapshot: { title: "Nguồn web", url: "https://traveler:secret@example.com/private" },
     }]);
 
-    expect(item?.url).toBeNull();
+    expect(item && item.availability !== "withdrawn" ? item.url : null).toBeNull();
+  });
+
+  test("formats withdrawn provenance as the exact unavailable projection", async () => {
+    const { formatAssistantMessageProvenance } = await import("@/features/retrieval/provenance");
+    const [item] = formatAssistantMessageProvenance([{
+      id: "withdrawn-provenance", sourceCategory: "knowledge", rank: 1, retrievalScore: null, sourceType: "curated", verificationStatus: "verified", availability: "withdrawn", usedInPrompt: true, citedInAnswer: false,
+      sourceSnapshot: { title: "Không được lộ", url: "https://example.com/secret", evidence: [{ quote: "Không được lộ" }] },
+    }]);
+    expect(item).toEqual({ id: "withdrawn-provenance", rank: 1, availability: "withdrawn", unavailableLabel: "Nguồn này không còn khả dụng.", usedInPrompt: true, citedInAnswer: false });
   });
 
   test("keeps persisted and historical state vocabulary and rejects Facebook aliases and unsafe legacy evidence", async () => {
@@ -1667,7 +1926,7 @@ describe("answer context assembly", () => {
 
     expect(item).toMatchObject({ knowledgeState: "conditional", verificationState: "corroborated" });
     expect(confirmedItem).toMatchObject({ knowledgeState: "confirmed", verificationState: "corroborated" });
-    expect(item?.evidence).toEqual([{ sourceLabel: "Nguồn an toàn", sourceType: "curated", url: "https://example.com/public", quote: "Trích dẫn an toàn" }]);
+    expect(item && item.availability !== "withdrawn" ? item.evidence : []).toEqual([{ sourceLabel: "Nguồn an toàn", sourceType: "curated", url: "https://example.com/public", quote: "Trích dẫn an toàn" }]);
     expect(historicalItem).toMatchObject({ knowledgeState: "confirmed", verificationState: "corroborated", evidence: [] });
     expect(JSON.stringify(item)).not.toContain("fb.me");
     expect(JSON.stringify(item)).not.toContain("0901234567");
@@ -1678,7 +1937,7 @@ describe("answer context assembly", () => {
   });
 
   test("source bundle priority contract names active state-aware knowledge", async () => {
-    vi.doUnmock("@/features/retrieval/approved-knowledge");
+    vi.doUnmock("/home/sonnh/projects/xuyenviet/packages/database/src/approved-knowledge.ts");
     vi.resetModules();
     const { buildSourceBundlePromptSection } = await import("@/features/retrieval/source-bundle");
 
@@ -1890,13 +2149,14 @@ describe("answer context assembly", () => {
     await createTestUser("user-1");
     await seedAnswerModel();
     const { conversation } = await createConversationWithUserMessage({ userId: "user-1" });
+    const [knowledge] = await seedEligibleKnowledgeResults("user-1", [makeKnowledgeResult("required", "Điểm dừng cần xác minh", { verificationState: "required", policy: "caveat_only" })]);
     const sourceBundle = createSourceBundle({
-      knowledge: [makeKnowledgeResult("required", "Điểm dừng cần xác minh", { verificationState: "required", policy: "caveat_only" })],
+      knowledge: [knowledge],
     });
-    vi.doMock("@/features/retrieval/source-bundle", () => ({
+    setAiAskStreamTestDependencies({
       assembleContextPrioritySourceBundle: vi.fn().mockResolvedValue(sourceBundle),
       buildSourceBundlePromptSection: vi.fn().mockReturnValue("Gói nguồn kiểm tra"),
-    }));
+    });
     mockStreamingGateway(() => undefined);
     mockRouteAuth();
 
@@ -1904,9 +2164,8 @@ describe("answer context assembly", () => {
     formData.set("question", "Có nên chốt điểm dừng này không?");
     formData.set("conversationId", conversation.id);
     const { POST } = await import("@/app/api/ai-ask/stream/route");
-    vi.doUnmock("@/features/retrieval/source-bundle");
 
-    const events = (await (await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never)).text())
+    const events = (await (await POST(createAiAskStreamRequest(formData) as never)).text())
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line) as { type: string; content?: string; assistantMessage?: { content?: string } });
@@ -1921,16 +2180,16 @@ describe("answer context assembly", () => {
   test("stream route fails closed for caveat-only Vietnamese itinerary recommendations", async () => {
     await createTestUser("user-1");
     await seedAnswerModel();
+    const [knowledge] = await seedEligibleKnowledgeResults("user-1", [makeKnowledgeResult("required", "Điểm dừng cần xác minh", { verificationState: "required", policy: "caveat_only" })]);
     const sourceBundle = createSourceBundle({
-      knowledge: [makeKnowledgeResult("required", "Điểm dừng cần xác minh", { verificationState: "required", policy: "caveat_only" })],
+      knowledge: [knowledge],
     });
-    vi.doMock("@/features/retrieval/source-bundle", () => ({
+    setAiAskStreamTestDependencies({
       assembleContextPrioritySourceBundle: vi.fn().mockResolvedValue(sourceBundle),
       buildSourceBundlePromptSection: vi.fn().mockReturnValue("Gói nguồn kiểm tra"),
-    }));
+    });
     mockRouteAuth();
     const { POST } = await import("@/app/api/ai-ask/stream/route");
-    vi.doUnmock("@/features/retrieval/source-bundle");
 
     for (const answerContent of [
       "Nên ghé điểm này.",
@@ -1947,7 +2206,7 @@ describe("answer context assembly", () => {
       formData.set("question", "Có nên đi không?");
       formData.set("conversationId", conversation.id);
 
-      const events = (await (await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never)).text())
+      const events = (await (await POST(createAiAskStreamRequest(formData) as never)).text())
         .trim()
         .split("\n")
         .map((line) => JSON.parse(line) as { type: string; content?: string; assistantMessage?: { content?: string } });
@@ -1965,16 +2224,17 @@ describe("answer context assembly", () => {
     await createTestUser("user-1");
     await seedAnswerModel();
     const { conversation } = await createConversationWithUserMessage({ userId: "user-1" });
+    const [knowledge] = await seedEligibleKnowledgeResults("user-1", [makeKnowledgeResult("conditional", "Đường vào điểm dừng", {
+      knowledgeState: "conditional",
+      conditions: ["Chỉ đi khi trời khô", "Không đi sau mưa lớn"],
+    })]);
     const sourceBundle = createSourceBundle({
-      knowledge: [makeKnowledgeResult("conditional", "Đường vào điểm dừng", {
-        knowledgeState: "conditional",
-        conditions: ["Chỉ đi khi trời khô", "Không đi sau mưa lớn"],
-      })],
+      knowledge: [knowledge],
     });
-    vi.doMock("@/features/retrieval/source-bundle", () => ({
+    setAiAskStreamTestDependencies({
       assembleContextPrioritySourceBundle: vi.fn().mockResolvedValue(sourceBundle),
       buildSourceBundlePromptSection: vi.fn().mockReturnValue("Gói nguồn kiểm tra"),
-    }));
+    });
     mockStreamingGateway(() => undefined);
     mockRouteAuth();
 
@@ -1982,9 +2242,8 @@ describe("answer context assembly", () => {
     formData.set("question", "Có thể đi đường này không?");
     formData.set("conversationId", conversation.id);
     const { POST } = await import("@/app/api/ai-ask/stream/route");
-    vi.doUnmock("@/features/retrieval/source-bundle");
 
-    const events = (await (await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never)).text())
+    const events = (await (await POST(createAiAskStreamRequest(formData) as never)).text())
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line) as { type: string; content?: string; assistantMessage?: { content?: string } });
@@ -2012,7 +2271,7 @@ describe("answer context assembly", () => {
     formData.set("question", "Tư vấn lịch trình rất chung chung");
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     const responseText = await response.text();
 
     expect(responseText).toContain('"type":"done"');
@@ -2054,7 +2313,7 @@ describe("answer context assembly", () => {
     formData.set("conversationId", conversation.id);
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     const responseText = await response.text();
     const systemPrompt = (JSON.parse(answerRequestBody) as { messages: Array<{ content: string }> }).messages[0]?.content ?? "";
 
@@ -2099,7 +2358,7 @@ describe("answer context assembly", () => {
     formData.set("conversationId", conversation.id);
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     const events = (await response.text())
       .trim()
       .split("\n")
@@ -2149,7 +2408,7 @@ describe("answer context assembly", () => {
     formData.set("tripProjectId", project.id);
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     const responseText = await response.text();
     const savedMessages = await testDb.select().from(messages).orderBy(asc(messages.createdAt), asc(messages.id));
     const decisions = await testDb.select().from(assistantRetrievalDecisions);
@@ -2207,7 +2466,7 @@ describe("answer context assembly", () => {
       conversationId: conversation.id,
       userMessageId: message.id,
       assistantMessageId: assistantMessage.id,
-      promptSection: 'url="https://example.com/price"',
+      promptUsage: { tripProjectFactIndexes: [], chatFactIndexes: [], knowledgeCardIds: [], webRanks: [1], generalReasoningUsed: false },
       sourceBundle: createSourceBundle({
         retrievalDecision: {
           approvedKnowledgeCandidateCount: 0,
@@ -2303,15 +2562,12 @@ describe("answer context assembly", () => {
     const { conversation, message } = await createConversationWithUserMessage({ userId: "user-1" });
     const knowledge = [makeKnowledgeResult("card-1", "A"), makeKnowledgeResult("card-2", "B"), makeKnowledgeResult("card-3", "C")];
     const searchWebForSourceBundle = vi.fn();
-    vi.doMock("@/features/retrieval/approved-knowledge", () => ({
+    setSourceBundleTestDependencies({
       loadApprovedKnowledgeForAiAsk: vi.fn().mockResolvedValue({ results: knowledge, candidateCount: knowledge.length }),
-      buildApprovedKnowledgePromptSection: vi.fn().mockReturnValue("BEGIN_APPROVED_KNOWLEDGE_DATA\nEND_APPROVED_KNOWLEDGE_DATA"),
-    }));
-    vi.doMock("@/features/retrieval/web-search", () => ({
-      searchWebForSourceBundle,
-      captureWebSearchResults: vi.fn(),
-    }));
-    const { assembleContextPrioritySourceBundle } = await import("@/features/retrieval/source-bundle");
+      searchWebForSourceBundle: searchWebForSourceBundle as never,
+      captureWebSearchResults: vi.fn() as never,
+    });
+    const { assembleContextPrioritySourceBundle } = await import("../packages/database/src/source-bundle");
 
     const bundle = await assembleContextPrioritySourceBundle({
       userId: "user-1",
@@ -2333,15 +2589,12 @@ describe("answer context assembly", () => {
     const searchWebForSourceBundle = vi.fn();
     const abortController = new AbortController();
     abortController.abort();
-    vi.doMock("@/features/retrieval/approved-knowledge", () => ({
+    setSourceBundleTestDependencies({
       loadApprovedKnowledgeForAiAsk: vi.fn().mockResolvedValue({ results: [], candidateCount: 0 }),
-      buildApprovedKnowledgePromptSection: vi.fn().mockReturnValue(""),
-    }));
-    vi.doMock("@/features/retrieval/web-search", () => ({
-      searchWebForSourceBundle,
-      captureWebSearchResults: vi.fn(),
-    }));
-    const { assembleContextPrioritySourceBundle } = await import("@/features/retrieval/source-bundle");
+      searchWebForSourceBundle: searchWebForSourceBundle as never,
+      captureWebSearchResults: vi.fn() as never,
+    });
+    const { assembleContextPrioritySourceBundle } = await import("../packages/database/src/source-bundle");
 
     const bundle = await assembleContextPrioritySourceBundle({
       userId: "user-1",
@@ -2367,16 +2620,13 @@ describe("answer context assembly", () => {
     });
     mockRouteAuth();
     mockWebSearch({ ok: false, code: "provider_request_failed" });
-    vi.doMock("@/features/retrieval/approved-knowledge", () => ({
-      loadApprovedKnowledgeForAiAsk: vi.fn().mockRejectedValue(new Error("retrieval unavailable")),
-      buildApprovedKnowledgePromptSection: vi.fn(),
-    }));
+    setSourceBundleTestDependencies({ loadApprovedKnowledgeForAiAsk: vi.fn().mockRejectedValue(new Error("retrieval unavailable")) });
 
     const formData = new FormData();
     formData.set("question", "Có bãi đỗ nào ở Huế không?");
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     const responseText = await response.text();
 
     expect(responseText).toContain('"type":"done"');
@@ -2469,17 +2719,14 @@ describe("answer context assembly", () => {
     vi.doMock("@/server/auth", () => ({
       getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }),
     }));
-    vi.doMock("@/features/chat-trips/answer-context", () => ({
-      loadAnswerContext: vi.fn().mockRejectedValue(new Error("db down")),
-      buildAnswerContextPromptSection: vi.fn().mockReturnValue(""),
-    }));
+    setSourceBundleTestDependencies({ loadAnswerContext: vi.fn().mockRejectedValue(new Error("db down")) });
     mockWebSearch({ ok: false, code: "low_quality_results" });
 
     const formData = new FormData();
     formData.set("question", "Đi Huế 5 ngày?");
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     const responseText = await response.text();
 
     expect(responseText).toContain('"type":"done"');

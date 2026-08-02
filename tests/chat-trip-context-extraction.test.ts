@@ -1,9 +1,36 @@
-import { asc, sql } from "drizzle-orm";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { aiGatewayModels, aiUsageEvents, auditEvents, chatContext, conversations, messages, tripProjects, users } from "@/db/schema";
+import { aiAskCommands, aiGatewayModels, aiUsageEvents, assistantResponseProvenance, auditEvents, chatContext, conversations, domainOutbox, domainOutboxEffects, messages, tripChangeProposals, tripProjects, users } from "@/db/schema";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
+import { acquireAiAskCommand } from "@/features/ai/ai-ask-commands";
+import { processAiAskDomainOutboxBatch, setDomainOutboxWorkerTestDependencies } from "@/features/ai/domain-outbox-worker";
+import { issueCsrfToken } from "@/server/csrf";
+
+const legacyBffTransport = {
+  privateApiUrl: "https://api.railway.internal",
+  bffOrigin: "https://xuyenviet.test",
+  csrfSigningSecret: "a".repeat(32),
+  csrfLifetimeSeconds: 300,
+  requestTimeoutMs: 100,
+};
+
+function createAiAskStreamRequest(formData: FormData, idempotencyKey = crypto.randomUUID().replaceAll("-", "")) {
+  const token = issueCsrfToken(legacyBffTransport);
+  const request = new Request("https://xuyenviet.test/api/ai-ask/stream", {
+    method: "POST",
+    body: formData,
+    headers: {
+      "Idempotency-Key": idempotencyKey,
+      origin: legacyBffTransport.bffOrigin,
+      "sec-fetch-site": "same-origin",
+      "X-XuyenViet-CSRF": token,
+    },
+  });
+  Object.assign(request, { cookies: { get: (name: string) => name === "xv_bff_csrf" ? { value: token } : undefined } });
+  return request;
+}
 
 async function createTestUser(userId: string) {
   await testDb.insert(users).values({ id: userId, email: `${userId}@example.com` });
@@ -54,16 +81,37 @@ function mockExtractionResponse(content: unknown) {
   return fetchMock;
 }
 
+async function completedAnswerSnapshot() {
+  return {
+    command: await testDb.select({ status: aiAskCommands.status, terminalResult: aiAskCommands.terminalResult, terminalAt: aiAskCommands.terminalAt }).from(aiAskCommands).where(eq(aiAskCommands.status, "completed")),
+    assistants: await testDb.select({ id: messages.id, content: messages.content }).from(messages).where(eq(messages.role, "assistant")),
+    provenance: await testDb.select({ id: assistantResponseProvenance.id, sourceSnapshot: assistantResponseProvenance.sourceSnapshot }).from(assistantResponseProvenance),
+    initialUsage: await testDb.select({ id: aiUsageEvents.id, status: aiUsageEvents.status, purpose: aiUsageEvents.purpose }).from(aiUsageEvents).where(and(eq(aiUsageEvents.purpose, "ai_ask_initial_answer"), isNull(aiUsageEvents.providerRequestId))),
+  };
+}
+
 beforeEach(async () => {
   await resetTestDatabase();
 });
 
 describe("chat/trip context extraction", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    setDomainOutboxWorkerTestDependencies(undefined);
+  });
+
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
     vi.spyOn(console, "info").mockImplementation(() => undefined);
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.stubEnv("APP_ENV", "test");
+    vi.stubEnv("XV_AI_ASK_API_ENABLED", "false");
+    vi.stubEnv("XV_PRIVATE_API_URL", legacyBffTransport.privateApiUrl);
+    vi.stubEnv("XV_WEB_BFF_ORIGIN", legacyBffTransport.bffOrigin);
+    vi.stubEnv("XV_BFF_CSRF_SIGNING_SECRET", legacyBffTransport.csrfSigningSecret);
+    vi.stubEnv("XV_BFF_CSRF_LIFETIME_SECONDS", String(legacyBffTransport.csrfLifetimeSeconds));
+    vi.stubEnv("XV_BFF_REQUEST_TIMEOUT_MS", String(legacyBffTransport.requestTimeoutMs));
   });
 
   test("stores allowed facts as conversation-scoped context for ordinary chat", async () => {
@@ -443,7 +491,7 @@ describe("chat/trip context extraction", () => {
     await expect(testDb.select().from(chatContext)).resolves.toHaveLength(0);
   });
 
-  test("stream route triggers extraction only after validated message persistence", async () => {
+  test("stream route commits durable follow-up events without invoking extraction", async () => {
     await createTestUser("user-1");
     await createModel({ id: "extract-model", gatewayModelName: "cx/extract" });
     await createModel({ id: "answer-model", gatewayModelName: "cx/answer", purpose: "ai_ask_initial_answer", supportsExtraction: false, supportsStreaming: true });
@@ -461,11 +509,6 @@ describe("chat/trip context extraction", () => {
       ].join(""), { status: 200, headers: { "content-type": "text/event-stream" } });
     });
     vi.stubGlobal("fetch", fetchMock);
-    vi.doMock("next/server", () => ({
-      after: (callback: () => Promise<void> | void) => {
-        void Promise.resolve(callback()).catch(() => undefined);
-      },
-    }));
     vi.doMock("@/server/auth", () => ({
       getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }),
     }));
@@ -473,36 +516,70 @@ describe("chat/trip context extraction", () => {
     formData.set("question", "Tôi muốn đi Huế 5 ngày.");
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     const responseText = await response.text();
 
     expect(responseText).toContain('"type":"done"');
-    expect(fetchMock.mock.calls.some(([, init]) => JSON.parse(String(init?.body))?.stream === false)).toBe(true);
-    await vi.waitFor(async () => {
-      await expect(testDb.select().from(chatContext)).resolves.toMatchObject([{ field: "destination", value: "Huế", scope: "conversation" }]);
-    });
-    await vi.waitFor(async () => {
-      const usage = await testDb.select().from(aiUsageEvents).orderBy(asc(aiUsageEvents.purpose));
-      expect(usage).toEqual(expect.arrayContaining([
-        expect.objectContaining({ purpose: "ai_ask_initial_answer", status: "success" }),
-        expect.objectContaining({ purpose: "extraction", status: "success" }),
-      ]));
-    });
+    expect(fetchMock.mock.calls.some((call) => {
+      const init = Reflect.get(call, "1") as RequestInit | undefined;
+      return JSON.parse(String(init?.body))?.stream === false;
+    })).toBe(false);
+    await expect(testDb.select({ role: messages.role }).from(messages).orderBy(asc(messages.createdAt))).resolves.toEqual([
+      { role: "user" },
+      { role: "assistant" },
+    ]);
+    expect(fetchMock.mock.calls.some(([, init]) => JSON.parse(String(init?.body))?.stream === false)).toBe(false);
+    await expect(testDb.select({ eventType: domainOutbox.eventType }).from(domainOutbox).orderBy(asc(domainOutbox.eventType))).resolves.toEqual([
+      { eventType: "ai_ask.answer_annotation.v1" },
+      { eventType: "ai_ask.context_extraction.v1" },
+    ]);
+    await expect(testDb.select().from(chatContext)).resolves.toHaveLength(0);
   });
 
-  test("stream route does not delay final answer event for slow extraction", async () => {
+  test("stream route does not schedule extraction when finalization discards a stale fence", async () => {
     await createTestUser("user-1");
     await createModel({ id: "extract-model", gatewayModelName: "cx/extract" });
     await createModel({ id: "answer-model", gatewayModelName: "cx/answer", purpose: "ai_ask_initial_answer", supportsExtraction: false, supportsStreaming: true });
-    let resolveExtraction: (response: Response) => void = () => undefined;
-    const extractionResponse = new Promise<Response>((resolve) => {
-      resolveExtraction = resolve;
+    const fetchMock = vi.fn(async () => new Response([
+      'data: {"model":"cx/answer","choices":[{"delta":{"content":"Nên đi 5 ngày."}}]}\n\n',
+      'data: {"choices":[{"finish_reason":"stop"}]}\n\n',
+      "data: [DONE]\n\n",
+    ].join(""), { status: 200, headers: { "content-type": "text/event-stream" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }),
+    }));
+    const formData = new FormData();
+    formData.set("question", "Tôi muốn đi Huế 5 ngày.");
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+
+    const response = await POST(createAiAskStreamRequest(formData) as never);
+    await vi.waitFor(async () => {
+      const [conversation] = await testDb.select({ id: conversations.id }).from(conversations);
+      expect(conversation).toBeDefined();
+      await testDb.update(conversations).set({ lifecycleVersion: 2 }).where(eq(conversations.id, conversation!.id));
     });
+    const responseText = await response.text();
+
+    expect(responseText).toContain('"type":"error"');
+    expect(responseText).toContain('"code":"refresh_required"');
+    expect(fetchMock.mock.calls.some((call) => {
+      const init = Reflect.get(call, "1") as RequestInit | undefined;
+      return JSON.parse(String(init?.body))?.stream === false;
+    })).toBe(false);
+    await expect(testDb.select().from(domainOutbox)).resolves.toHaveLength(1);
+    await expect(testDb.select().from(chatContext)).resolves.toHaveLength(0);
+  });
+
+  test("stream route sends done without waiting for an extraction consumer", async () => {
+    await createTestUser("user-1");
+    await createModel({ id: "extract-model", gatewayModelName: "cx/extract" });
+    await createModel({ id: "answer-model", gatewayModelName: "cx/answer", purpose: "ai_ask_initial_answer", supportsExtraction: false, supportsStreaming: true });
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body)) as { stream?: boolean };
 
       if (body.stream === false) {
-        return extractionResponse;
+        throw new Error("The route must not invoke extraction.");
       }
 
       return new Response([
@@ -512,11 +589,6 @@ describe("chat/trip context extraction", () => {
       ].join(""), { status: 200, headers: { "content-type": "text/event-stream" } });
     });
     vi.stubGlobal("fetch", fetchMock);
-    vi.doMock("next/server", () => ({
-      after: (callback: () => Promise<void> | void) => {
-        void Promise.resolve(callback()).catch(() => undefined);
-      },
-    }));
     vi.doMock("@/server/auth", () => ({
       getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }),
     }));
@@ -524,16 +596,267 @@ describe("chat/trip context extraction", () => {
     formData.set("question", "Tôi muốn đi Huế 5 ngày.");
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     const responseText = await response.text();
 
     expect(responseText).toContain('"type":"done"');
     await expect(testDb.select().from(chatContext)).resolves.toHaveLength(0);
+    expect(fetchMock.mock.calls.some(([, init]) => JSON.parse(String(init?.body))?.stream === false)).toBe(false);
+  });
 
-    resolveExtraction(new Response(JSON.stringify({ model: "cx/extract", choices: [{ message: { content: JSON.stringify({ facts: [{ field: "destination", value: "Huế", scope: "conversation" }] }) } }] }), { status: 200 }));
-    await vi.waitFor(async () => {
-      await expect(testDb.select().from(chatContext)).resolves.toHaveLength(1);
+  test("atomically records one context provider failure usage before releasing the retry", async () => {
+    await createTestUser("user-1");
+    await createModel({ id: "extract-model", gatewayModelName: "cx/extract" });
+    await createModel({ id: "answer-model", gatewayModelName: "cx/answer", purpose: "ai_ask_initial_answer", supportsExtraction: false, supportsStreaming: true });
+    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { stream?: boolean };
+      if (body.stream === false) return new Response("unavailable", { status: 503 });
+      return new Response([
+        'data: {"model":"cx/answer","choices":[{"delta":{"content":"Xong."}}]}\n\n',
+        'data: {"choices":[{"finish_reason":"stop"}]}\n\n',
+        "data: [DONE]\n\n",
+      ].join(""), { status: 200, headers: { "content-type": "text/event-stream" } });
+    }));
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }),
+    }));
+    const formData = new FormData();
+    formData.set("question", "Tôi muốn đi Huế 5 ngày.");
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+    await (await POST(createAiAskStreamRequest(formData) as never)).text();
+    const terminalSnapshot = await completedAnswerSnapshot();
+    await testDb.update(domainOutbox).set({ availableAt: new Date("2099-01-01T00:00:00.000Z") }).where(eq(domainOutbox.eventType, "ai_ask.answer_annotation.v1"));
+    await testDb.update(domainOutbox).set({ availableAt: new Date("2020-01-01T00:00:00.000Z") }).where(eq(domainOutbox.eventType, "ai_ask.context_extraction.v1"));
+
+    await expect(processAiAskDomainOutboxBatch({ workerId: "context-failure-worker" })).resolves.toEqual({ kind: "error", count: 1 });
+    const [event] = await testDb.select({ status: domainOutbox.status, lastErrorCode: domainOutbox.lastErrorCode }).from(domainOutbox).where(eq(domainOutbox.eventType, "ai_ask.context_extraction.v1"));
+    expect(event).toMatchObject({ status: "pending", lastErrorCode: "context_provider_failed" });
+    await expect(completedAnswerSnapshot()).resolves.toEqual(terminalSnapshot);
+    await expect(testDb.select({ status: aiUsageEvents.status, errorCode: aiUsageEvents.errorCode }).from(aiUsageEvents).where(eq(aiUsageEvents.purpose, "extraction"))).resolves.toEqual([{ status: "failure", errorCode: "gateway_http_error" }]);
+
+    await testDb.update(domainOutbox).set({ maxAttempts: 1, availableAt: new Date("2020-01-01T00:00:00.000Z") }).where(eq(domainOutbox.eventType, "ai_ask.context_extraction.v1"));
+    await expect(processAiAskDomainOutboxBatch({ workerId: "context-failure-worker" })).resolves.toEqual({ kind: "processed", count: 1 });
+    await expect(testDb.select({ status: domainOutbox.status, failureCode: domainOutbox.failureCode }).from(domainOutbox).where(eq(domainOutbox.eventType, "ai_ask.context_extraction.v1"))).resolves.toEqual([{ status: "failed", failureCode: "retry_exhausted" }]);
+    await expect(completedAnswerSnapshot()).resolves.toEqual(terminalSnapshot);
+    await expect(testDb.select().from(aiUsageEvents).where(eq(aiUsageEvents.purpose, "extraction"))).resolves.toHaveLength(1);
+  });
+
+  test("revalidates context authority after its active claim check and before the provider call", async () => {
+    await createTestUser("user-1");
+    await createModel({ id: "extract-model", gatewayModelName: "cx/extract" });
+    const admitted = await acquireAiAskCommand({ userId: "user-1", idempotencyKey: "context-revalidation-race", question: "Tôi đi Huế." });
+    if (admitted.kind !== "admitted") throw new Error("Expected command admission");
+    await testDb.update(domainOutbox).set({ availableAt: new Date("2020-01-01T00:00:00.000Z") });
+    const fetchMock = mockExtractionResponse({ facts: [] });
+
+    vi.resetModules();
+    vi.doMock("../packages/worker-domain/src/features/ai/domain-outbox", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("../packages/worker-domain/src/features/ai/domain-outbox")>();
+      return {
+        ...actual,
+        hasActiveDomainOutboxClaim: async (...args: Parameters<typeof actual.hasActiveDomainOutboxClaim>) => {
+          const active = await actual.hasActiveDomainOutboxClaim(...args);
+          await testDb.update(conversations).set({ lifecycleVersion: 2 }).where(eq(conversations.id, admitted.conversationId));
+          return active;
+        },
+      };
     });
+    const { processAiAskDomainOutboxBatch: processIsolatedBatch } = await import("@xuyenviet/worker-domain");
+
+    await expect(processIsolatedBatch({ workerId: "context-revalidation-worker" })).resolves.toEqual({ kind: "processed", count: 1 });
+    expect(fetchMock).not.toHaveBeenCalled();
+    await expect(testDb.select({ effectType: domainOutboxEffects.effectType }).from(domainOutboxEffects)).resolves.toEqual([{ effectType: "fenced_out" }]);
+  });
+
+  test("revalidates annotation authority after its active claim check and before the provider call", async () => {
+    await createTestUser("user-1");
+    await createModel({ id: "answer-model", gatewayModelName: "cx/answer", purpose: "ai_ask_initial_answer", supportsExtraction: false, supportsStreaming: true });
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { stream?: boolean };
+      if (!body.stream) throw new Error("The annotation provider must not be called.");
+      return new Response([
+        'data: {"model":"cx/answer","choices":[{"delta":{"content":"Huế"}}]}\n\n',
+        'data: {"choices":[{"finish_reason":"stop"}]}\n\n',
+        "data: [DONE]\n\n",
+      ].join(""), { status: 200, headers: { "content-type": "text/event-stream" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }) }));
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+    const formData = new FormData();
+    formData.set("question", "Đi Huế.");
+    await (await POST(createAiAskStreamRequest(formData, "annotation-revalidation-race") as never)).text();
+    const terminalSnapshot = await completedAnswerSnapshot();
+    await testDb.update(domainOutbox).set({ availableAt: new Date("2099-01-01T00:00:00.000Z") }).where(eq(domainOutbox.eventType, "ai_ask.context_extraction.v1"));
+    await testDb.update(domainOutbox).set({ availableAt: new Date("2020-01-01T00:00:00.000Z") }).where(eq(domainOutbox.eventType, "ai_ask.answer_annotation.v1"));
+    const callsBeforeDelivery = fetchMock.mock.calls.length;
+
+    vi.resetModules();
+    vi.doMock("../packages/worker-domain/src/features/ai/domain-outbox", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("../packages/worker-domain/src/features/ai/domain-outbox")>();
+      return {
+        ...actual,
+        hasActiveDomainOutboxClaim: async (...args: Parameters<typeof actual.hasActiveDomainOutboxClaim>) => {
+          const active = await actual.hasActiveDomainOutboxClaim(...args);
+          await testDb.update(conversations).set({ lifecycleVersion: 2 });
+          return active;
+        },
+      };
+    });
+    const { processAiAskDomainOutboxBatch: processIsolatedBatch } = await import("@xuyenviet/worker-domain");
+
+    await expect(processIsolatedBatch({ workerId: "annotation-revalidation-worker" })).resolves.toEqual({ kind: "processed", count: 1 });
+    expect(fetchMock).toHaveBeenCalledTimes(callsBeforeDelivery);
+    await expect(testDb.select({ effectType: domainOutboxEffects.effectType }).from(domainOutboxEffects)).resolves.toEqual([{ effectType: "fenced_out" }]);
+    await expect(completedAnswerSnapshot()).resolves.toEqual(terminalSnapshot);
+  });
+
+  test.each([
+    ["final assistant content changes", async (assistantId: string) => {
+      await testDb.update(messages).set({ content: "Huế đã được cập nhật." }).where(eq(messages.id, assistantId));
+    }],
+    ["referenced provenance is withdrawn", async (_assistantId: string, provenanceId: string) => {
+      await testDb.update(assistantResponseProvenance).set({ availability: "withdrawn", withdrawnAt: new Date(), withdrawalReason: "withdrawn", sourceSnapshot: { unavailable: true } }).where(eq(assistantResponseProvenance.id, provenanceId));
+    }],
+  ])("does not persist annotations when %s after the provider returns", async (_scenario, changeFinalState) => {
+    await createTestUser("user-1");
+    await createModel({ id: "answer-model", gatewayModelName: "cx/answer", purpose: "ai_ask_initial_answer", supportsExtraction: false, supportsStreaming: true });
+    let assistantId = "";
+    let provenanceId = "";
+    let releaseFinalPersistence: (() => void) | undefined;
+    const finalPersistenceGate = new Promise<void>((resolve) => {
+      releaseFinalPersistence = resolve;
+    });
+    let providerResponseResolved: (() => void) | undefined;
+    const providerResponse = new Promise<void>((resolve) => {
+      providerResponseResolved = resolve;
+    });
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { stream?: boolean; messages?: Array<{ content: string }> };
+      if (body.stream) return new Response([
+        'data: {"model":"cx/answer","choices":[{"delta":{"content":"Huế"}}]}\n\n',
+        'data: {"choices":[{"finish_reason":"stop"}]}\n\n',
+        "data: [DONE]\n\n",
+      ].join(""), { status: 200, headers: { "content-type": "text/event-stream" } });
+      if (body.messages?.[0]?.content.includes("annotation nội bộ")) {
+        return new Response(JSON.stringify({ model: "cx/answer", choices: [{ message: { content: JSON.stringify({ annotations: [{ id: "hue", start: 0, end: 3, quote: "Huế", type: "source", provenanceIds: [provenanceId] }] }) } }], usage: { prompt_tokens: 7, completion_tokens: 3, total_tokens: 10 } }), { status: 200, headers: { "x-request-id": "annotation-race", "content-type": "application/json" } });
+      }
+      throw new Error("Unexpected provider call");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }) }));
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+    const formData = new FormData();
+    formData.set("question", "Đi Huế.");
+    await (await POST(createAiAskStreamRequest(formData, "annotation-provider-return-race") as never)).text();
+    const [assistant] = await testDb.select({ id: messages.id }).from(messages).where(eq(messages.role, "assistant"));
+    if (!assistant) throw new Error("Expected finalized assistant message");
+    assistantId = assistant.id;
+    const [provenance] = await testDb.select({ id: assistantResponseProvenance.id }).from(assistantResponseProvenance).where(eq(assistantResponseProvenance.assistantMessageId, assistant.id));
+    if (!provenance) throw new Error("Expected assistant provenance");
+    provenanceId = provenance.id;
+    await testDb.update(assistantResponseProvenance).set({ sourceCategory: "knowledge", sourceType: "knowledge_card", verificationStatus: "verified", usedInPrompt: true, sourceSnapshot: { title: "Huế" } }).where(eq(assistantResponseProvenance.id, provenance.id));
+    await testDb.update(domainOutbox).set({ availableAt: new Date("2099-01-01T00:00:00.000Z") }).where(eq(domainOutbox.eventType, "ai_ask.context_extraction.v1"));
+    await testDb.update(domainOutbox).set({ availableAt: new Date("2020-01-01T00:00:00.000Z") }).where(eq(domainOutbox.eventType, "ai_ask.answer_annotation.v1"));
+
+    setDomainOutboxWorkerTestDependencies({
+      afterAnnotationProviderResponse: async () => {
+        providerResponseResolved?.();
+        await finalPersistenceGate;
+      },
+    });
+    const delivery = processAiAskDomainOutboxBatch({ workerId: "annotation-provider-return-race-worker" });
+    await providerResponse;
+    await changeFinalState(assistantId, provenanceId);
+    const [contentAfterMutation] = await testDb.select({ content: messages.content }).from(messages).where(eq(messages.id, assistant.id));
+    releaseFinalPersistence?.();
+
+    await expect(delivery).resolves.toEqual({ kind: "processed", count: 1 });
+    const [finalAssistant] = await testDb.select({ content: messages.content, answerAnnotations: messages.answerAnnotations }).from(messages).where(eq(messages.id, assistant.id));
+    expect(finalAssistant?.answerAnnotations).toEqual([]);
+    expect(finalAssistant?.content).toBe(contentAfterMutation?.content);
+    await expect(testDb.select({ status: aiAskCommands.status }).from(aiAskCommands).where(eq(aiAskCommands.assistantMessageId, assistant.id))).resolves.toEqual([{ status: "completed" }]);
+  });
+
+  test("delivers annotation and proposal effects with one success usage each across redelivery", async () => {
+    await createTestUser("user-1");
+    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế" }).returning({ id: tripProjects.id });
+    await createModel({ id: "answer-model", gatewayModelName: "cx/answer", purpose: "ai_ask_initial_answer", supportsExtraction: false, supportsStreaming: true });
+    await createModel({ id: "proposal-model", gatewayModelName: "cx/proposal" });
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { stream?: boolean; messages?: Array<{ content: string }> };
+      if (body.stream) return new Response([
+        'data: {"model":"cx/answer","choices":[{"delta":{"content":"Huế"}}]}\n\n',
+        'data: {"choices":[{"finish_reason":"stop"}]}\n\n',
+        "data: [DONE]\n\n",
+      ].join(""), { status: 200, headers: { "content-type": "text/event-stream" } });
+      if (body.messages?.[0]?.content.includes("annotation nội bộ")) {
+        return new Response(JSON.stringify({ model: "cx/answer", choices: [{ message: { content: JSON.stringify({ annotations: [{ id: "hue", start: 0, end: 3, quote: "Huế", type: "warning", provenanceIds: [] }] }) } }], usage: { prompt_tokens: 7, completion_tokens: 3, total_tokens: 10 } }), { status: 200, headers: { "x-request-id": "annotation-request", "content-type": "application/json" } });
+      }
+      return new Response(JSON.stringify({ model: "cx/proposal", choices: [{ message: { content: JSON.stringify({ rationale: "Thêm điểm đến Huế.", operations: [{ kind: "create-item", item: { kind: "anchor", anchorRole: "destination", type: null, state: "idea", label: "Huế" }, ordinal: 0 }], alternatives: [], ordering_preconditions: null }) } }], usage: { prompt_tokens: 11, completion_tokens: 5, total_tokens: 16 } }), { status: 200, headers: { "x-request-id": "proposal-request", "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }) }));
+    const formData = new FormData();
+    formData.set("question", "Lên kế hoạch Huế.");
+    formData.set("tripProjectId", project.id);
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+
+    await (await POST(createAiAskStreamRequest(formData) as never)).text();
+    const [assistant] = await testDb.select({ id: messages.id, conversationId: messages.conversationId }).from(messages).where(eq(messages.role, "assistant"));
+    const [userMessage] = await testDb.select({ id: messages.id }).from(messages).where(eq(messages.role, "user"));
+    if (!assistant || !userMessage) throw new Error("Expected finalized messages");
+    const [provenance] = await testDb.select({ id: assistantResponseProvenance.id }).from(assistantResponseProvenance).where(eq(assistantResponseProvenance.assistantMessageId, assistant.id));
+    if (!provenance) throw new Error("Expected assistant provenance");
+    await testDb.update(assistantResponseProvenance).set({ sourceCategory: "knowledge", sourceType: "knowledge_card", verificationStatus: "verified", usedInPrompt: true, sourceSnapshot: { title: "Huế" } }).where(eq(assistantResponseProvenance.id, provenance.id));
+    const terminalSnapshot = await completedAnswerSnapshot();
+    await testDb.update(domainOutbox).set({ availableAt: new Date("2099-01-01T00:00:00.000Z") }).where(eq(domainOutbox.eventType, "ai_ask.context_extraction.v1"));
+    await testDb.update(domainOutbox).set({ availableAt: new Date("2020-01-01T00:00:00.000Z") }).where(inArray(domainOutbox.eventType, ["ai_ask.answer_annotation.v1", "ai_ask.trip_proposal_draft.v1"]));
+
+    await expect(processAiAskDomainOutboxBatch({ workerId: "final-delivery-worker", batchSize: 2 })).resolves.toEqual({ kind: "processed", count: 2 });
+    await expect(testDb.select({ purpose: aiUsageEvents.purpose, status: aiUsageEvents.status, providerRequestId: aiUsageEvents.providerRequestId }).from(aiUsageEvents).where(inArray(aiUsageEvents.purpose, ["ai_ask_initial_answer", "trip_proposal_draft"])).orderBy(asc(aiUsageEvents.providerRequestId))).resolves.toEqual([
+      { purpose: "ai_ask_initial_answer", status: "success", providerRequestId: "annotation-request" },
+      { purpose: "trip_proposal_draft", status: "success", providerRequestId: "proposal-request" },
+      { purpose: "ai_ask_initial_answer", status: "success", providerRequestId: null },
+    ]);
+    await expect(testDb.select().from(tripChangeProposals)).resolves.toHaveLength(1);
+
+    await testDb.update(domainOutbox).set({ status: "pending", completedAt: null, availableAt: new Date("2020-01-01T00:00:00.000Z") }).where(inArray(domainOutbox.eventType, ["ai_ask.answer_annotation.v1", "ai_ask.trip_proposal_draft.v1"]));
+    await expect(processAiAskDomainOutboxBatch({ workerId: "redelivery-worker", batchSize: 2 })).resolves.toEqual({ kind: "processed", count: 2 });
+    await expect(testDb.select().from(domainOutboxEffects).where(inArray(domainOutboxEffects.effectType, ["answer_annotation", "trip_proposal_draft"]))).resolves.toHaveLength(2);
+    await expect(testDb.select().from(aiUsageEvents).where(inArray(aiUsageEvents.purpose, ["ai_ask_initial_answer", "trip_proposal_draft"]))).resolves.toHaveLength(3);
+    await expect(testDb.select().from(tripChangeProposals)).resolves.toHaveLength(1);
+    await expect(completedAnswerSnapshot()).resolves.toEqual(terminalSnapshot);
+  });
+
+  test("does not deliver final effects after deleting the assistant message fences out the outbox rows", async () => {
+    await createTestUser("user-1");
+    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế" }).returning({ id: tripProjects.id });
+    await createModel({ id: "answer-model", gatewayModelName: "cx/answer", purpose: "ai_ask_initial_answer", supportsExtraction: false, supportsStreaming: true });
+    const fetchMock = vi.fn(async () => new Response([
+      'data: {"model":"cx/answer","choices":[{"delta":{"content":"Huế"}}]}\n\n',
+      'data: {"choices":[{"finish_reason":"stop"}]}\n\n',
+      "data: [DONE]\n\n",
+    ].join(""), { status: 200, headers: { "content-type": "text/event-stream" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }) }));
+    const formData = new FormData();
+    formData.set("question", "Lên kế hoạch Huế.");
+    formData.set("tripProjectId", project.id);
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+
+    await (await POST(createAiAskStreamRequest(formData) as never)).text();
+    const [assistant] = await testDb.select({ id: messages.id }).from(messages).where(eq(messages.role, "assistant"));
+    if (!assistant) throw new Error("Expected finalized assistant message");
+    await testDb.update(domainOutbox).set({ availableAt: new Date("2099-01-01T00:00:00.000Z") }).where(eq(domainOutbox.eventType, "ai_ask.context_extraction.v1"));
+    await testDb.delete(messages).where(eq(messages.id, assistant.id));
+    const callsBeforeDelivery = fetchMock.mock.calls.length;
+
+    await expect(processAiAskDomainOutboxBatch({ workerId: "deleted-final-worker" })).resolves.toEqual({ kind: "no_work" });
+    expect(fetchMock).toHaveBeenCalledTimes(callsBeforeDelivery);
+    await expect(testDb.select().from(domainOutboxEffects)).resolves.toHaveLength(0);
+    await expect(testDb.select().from(aiUsageEvents).where(eq(aiUsageEvents.purpose, "trip_proposal_draft"))).resolves.toHaveLength(0);
+    await expect(testDb.select().from(tripChangeProposals)).resolves.toHaveLength(0);
   });
 
   test("stream route rejects cross-user project before extraction provider calls", async () => {
@@ -557,7 +880,7 @@ describe("chat/trip context extraction", () => {
     formData.set("tripProjectId", otherProject.id);
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
 
     expect(response.status).toBe(400);
     expect(fetchMock).not.toHaveBeenCalled();

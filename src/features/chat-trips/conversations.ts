@@ -1,32 +1,25 @@
 import "server-only";
 
-import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { listOwnedConversationSummaries, resolvePlanningAnnotationCapabilities, sanitizeStoredPlanningAnnotations, type OwnedConversationSummary } from "@xuyenviet/domain";
 
 import { getDb } from "@/db/client";
-import { aiUsageEvents, answerUsefulnessFeedback, assistantResponseProvenance, chatContext, conversations, messageImageAttachments, messages, tripProjects } from "@/db/schema";
+import { aiUsageEvents, answerUsefulnessFeedback, assistantResponseProvenance, chatContext, conversations, messageImageAttachments, messages, tripChangeProposals, tripProjects } from "@/db/schema";
 import { recordAuditEvent } from "@/features/audit/events";
 import { toUserAuditActor } from "@/features/audit/actors";
-import { buildValidatedAnswerAnnotations, sanitizeStoredAnswerAnnotations } from "@/features/ai/answer-annotations";
-import { selectActiveAiGatewayModel } from "@/features/ai/models";
 import { formatAssistantMessageProvenance } from "@/features/retrieval/provenance";
 import { getAuthenticatedSession } from "@/server/auth";
+import { discardAiAskCommandsForDeletedConversations } from "@/features/ai/ai-ask-commands";
 
-const newConversationPreview = "Hội thoại mới";
-const previewMaxLength = 60;
-
-export type OwnedConversationSummary = {
-  id: string;
-  updatedAt: Date;
-  preview: string;
-};
+export type { OwnedConversationSummary } from "@xuyenviet/domain";
 
 export type DeleteOwnedConversationResult = {
   success: boolean;
   reason?: "unauthenticated" | "not_found" | "failed";
 };
 
-export async function getOwnedConversation(conversationId: string) {
-  const session = await getAuthenticatedSession();
+export async function getOwnedConversation(conversationId: string, establishedSession?: NonNullable<Awaited<ReturnType<typeof getAuthenticatedSession>>>) {
+  const session = establishedSession ?? await getAuthenticatedSession();
 
   if (!session) {
     return null;
@@ -75,6 +68,7 @@ export async function getOwnedConversation(conversationId: string) {
       retrievalScore: assistantResponseProvenance.retrievalScore,
       sourceType: assistantResponseProvenance.sourceType,
       verificationStatus: assistantResponseProvenance.verificationStatus,
+      availability: assistantResponseProvenance.availability,
       usedInPrompt: assistantResponseProvenance.usedInPrompt,
       citedInAnswer: assistantResponseProvenance.citedInAnswer,
       sourceSnapshot: assistantResponseProvenance.sourceSnapshot,
@@ -102,29 +96,12 @@ export async function getOwnedConversation(conversationId: string) {
     .orderBy(asc(answerUsefulnessFeedback.assistantMessageId));
 
   const feedbackByMessageId = new Map(feedbackRows.map((row) => [row.assistantMessageId, { rating: row.rating, comment: row.comment, updatedAt: row.updatedAt }]));
-  const shouldBackfillAnnotations = conversationMessages.some((message) => message.role === "assistant" && message.answerAnnotations.length === 0 && (provenanceByMessageId.get(message.id)?.length ?? 0) > 0);
-  const backfillModel = shouldBackfillAnnotations ? await selectActiveAiGatewayModel({ purpose: "ai_ask_initial_answer", requiredCapabilities: { textInput: true } }) : null;
   const messagesWithAnnotations = await Promise.all(conversationMessages.map(async (message) => {
     const provenance = message.role === "assistant" ? provenanceByMessageId.get(message.id) ?? [] : [];
-    const storedAnnotations = message.role === "assistant" ? sanitizeStoredAnswerAnnotations({ answerText: message.content, annotations: message.answerAnnotations, provenance }) : [];
-    let annotations = storedAnnotations;
-
-    if (message.role === "assistant" && annotations.length === 0 && provenance.length > 0 && backfillModel) {
-      annotations = sanitizeStoredAnswerAnnotations({
-        answerText: message.content,
-        annotations: await buildValidatedAnswerAnnotations({ answerText: message.content, provenance, model: backfillModel.gatewayModelName }),
-        provenance,
-      });
-
-      if (annotations.length > 0) {
-        try {
-          await getDb().update(messages).set({ answerAnnotations: annotations }).where(eq(messages.id, message.id));
-        } catch (error) {
-          console.error("Failed to backfill answer annotations.", { assistantMessageId: message.id, error });
-        }
-      }
-    }
-
+    const storedAnnotations = message.role === "assistant" ? sanitizeStoredPlanningAnnotations({ answerText: message.content, annotations: message.answerAnnotations, provenance }) : [];
+    const annotations = conversation.tripProjectId
+      ? await resolveAnnotationCapabilities({ conversationId: conversation.id, tripProjectId: conversation.tripProjectId, userId: session.userId, assistantMessageId: message.id, annotations: storedAnnotations })
+      : storedAnnotations;
     return {
       ...message,
       imageAttachments: attachmentsByMessageId.get(message.id) ?? [],
@@ -140,6 +117,38 @@ export async function getOwnedConversation(conversationId: string) {
   };
 }
 
+/** API cutover selection read; Story 11.4 actions retain the full read above. */
+export async function getOwnedConversationShell(conversationId: string): Promise<Awaited<ReturnType<typeof getOwnedConversation>>> {
+  const session = await getAuthenticatedSession();
+  if (!session) return null;
+  const [conversation] = await getDb().select({ id: conversations.id, userId: conversations.userId, tripProjectId: conversations.tripProjectId, createdAt: conversations.createdAt, updatedAt: conversations.updatedAt }).from(conversations).where(and(eq(conversations.id, conversationId), eq(conversations.userId, session.userId))).limit(1);
+  if (!conversation) return null;
+  // The API detail owns planning enrichment. The shell retains persisted prose so
+  // a failed optional detail request cannot blank a completed assistant answer.
+  const conversationMessages = await getDb().select({ id: messages.id, role: messages.role, content: messages.content, createdAt: messages.createdAt }).from(messages).where(and(eq(messages.conversationId, conversation.id), eq(messages.userId, session.userId))).orderBy(asc(messages.createdAt), asc(messages.id));
+  const attachments = await getDb().select({ id: messageImageAttachments.id, messageId: messageImageAttachments.messageId, originalFileName: messageImageAttachments.originalFileName, mimeType: messageImageAttachments.mimeType, byteSize: messageImageAttachments.byteSize }).from(messageImageAttachments).where(and(eq(messageImageAttachments.conversationId, conversation.id), eq(messageImageAttachments.userId, session.userId))).orderBy(asc(messageImageAttachments.createdAt), asc(messageImageAttachments.id));
+  const attachmentsByMessageId = new Map<string, typeof attachments>();
+  for (const attachment of attachments) attachmentsByMessageId.set(attachment.messageId, [...(attachmentsByMessageId.get(attachment.messageId) ?? []), attachment]);
+  const feedbackRows = await getDb().select({ assistantMessageId: answerUsefulnessFeedback.assistantMessageId, rating: answerUsefulnessFeedback.rating, comment: answerUsefulnessFeedback.comment, updatedAt: answerUsefulnessFeedback.updatedAt }).from(answerUsefulnessFeedback).where(and(eq(answerUsefulnessFeedback.conversationId, conversation.id), eq(answerUsefulnessFeedback.userId, session.userId)));
+  const feedbackByMessageId = new Map(feedbackRows.map((row) => [row.assistantMessageId, { rating: row.rating, comment: row.comment, updatedAt: row.updatedAt }]));
+  return {
+    ...conversation,
+    messages: conversationMessages.map((message) => ({ ...message, imageAttachments: attachmentsByMessageId.get(message.id) ?? [], provenance: [], annotations: [], feedback: message.role === "assistant" ? feedbackByMessageId.get(message.id) ?? null : null })),
+  } as unknown as Awaited<ReturnType<typeof getOwnedConversation>>;
+}
+
+async function resolveAnnotationCapabilities(input: { conversationId: string; tripProjectId: string; userId: string; assistantMessageId: string; annotations: ReturnType<typeof sanitizeStoredPlanningAnnotations> }) {
+  return resolvePlanningAnnotationCapabilities({
+    annotations: input.annotations,
+    hasCurrentPendingProposal: async () => {
+      const proposals = await getDb().select({ id: tripChangeProposals.id, expiresAt: tripChangeProposals.expiresAt })
+        .from(tripChangeProposals)
+        .where(and(eq(tripChangeProposals.tripProjectId, input.tripProjectId), eq(tripChangeProposals.userId, input.userId), eq(tripChangeProposals.status, "pending"), eq(tripChangeProposals.sourceAssistantMessageId, input.assistantMessageId)));
+      return proposals.length === 1 && (!proposals[0].expiresAt || proposals[0].expiresAt.getTime() > Date.now());
+    },
+  });
+}
+
 export async function listOwnedConversations(): Promise<OwnedConversationSummary[] | null> {
   const session = await getAuthenticatedSession();
 
@@ -147,37 +156,24 @@ export async function listOwnedConversations(): Promise<OwnedConversationSummary
     return null;
   }
 
-  const rows = await getDb()
-    .select({
-      id: conversations.id,
-      updatedAt: conversations.updatedAt,
-      messageContent: messages.content,
-    })
-    .from(conversations)
-    .leftJoin(
-      messages,
-      and(
-        eq(messages.conversationId, conversations.id),
-        eq(messages.userId, session.userId),
-        eq(messages.role, "user"),
-      ),
-    )
-    .where(and(eq(conversations.userId, session.userId), isNull(conversations.tripProjectId)))
-    .orderBy(desc(conversations.updatedAt), desc(conversations.id), asc(messages.createdAt), asc(messages.id));
+  return listOwnedConversationSummaries({
+    async listOwnedConversationSummaryRows(userId, limit) {
+      const selected = await getDb().select({ id: conversations.id, updatedAt: conversations.updatedAt }).from(conversations)
+        .where(and(eq(conversations.userId, userId), sql`${conversations.tripProjectId} is null`))
+        .orderBy(desc(conversations.updatedAt), desc(conversations.id))
+        .limit(limit);
+      if (selected.length === 0) return [];
 
-  const seenConversationIds = new Set<string>();
-  const summaries: OwnedConversationSummary[] = [];
-
-  for (const row of rows) {
-    if (seenConversationIds.has(row.id)) {
-      continue;
-    }
-
-    seenConversationIds.add(row.id);
-    summaries.push({ id: row.id, updatedAt: row.updatedAt, preview: formatPreview(row.messageContent) });
-  }
-
-  return summaries;
+      const firstMessages = await getDb().selectDistinctOn([messages.conversationId], {
+        conversationId: messages.conversationId,
+        content: messages.content,
+      }).from(messages)
+        .where(and(inArray(messages.conversationId, selected.map((conversation) => conversation.id)), eq(messages.userId, userId), eq(messages.role, "user")))
+        .orderBy(messages.conversationId, asc(messages.createdAt), asc(messages.id));
+      const previews = new Map(firstMessages.map((message) => [message.conversationId, message.content]));
+      return selected.map((conversation) => ({ ...conversation, messageContent: previews.get(conversation.id) ?? null }));
+    },
+  }, session.userId);
 }
 
 export async function deleteOwnedConversation(conversationId: string): Promise<DeleteOwnedConversationResult> {
@@ -204,7 +200,8 @@ export async function deleteOwnedConversation(conversationId: string): Promise<D
           if (!replacement) return { success: false, reason: "not_found" };
           const [next] = await transaction.select({ id: conversations.id }).from(conversations).where(and(eq(conversations.userId, session.userId), eq(conversations.tripProjectId, project.id), sql`${conversations.id} <> ${initial.id}`)).orderBy(desc(conversations.updatedAt), desc(conversations.id)).limit(1);
           const replacementPrimary = next ?? await transaction.insert(conversations).values({ userId: session.userId, tripProjectId: project.id }).returning({ id: conversations.id });
-          await transaction.update(tripProjects).set({ primaryConversationId: replacementPrimary.id }).where(eq(tripProjects.id, project.id));
+          await transaction.update(conversations).set({ lifecycleVersion: sql`${conversations.lifecycleVersion} + 1`, updatedAt: new Date() }).where(eq(conversations.id, replacementPrimary.id));
+          await transaction.update(tripProjects).set({ primaryConversationId: replacementPrimary.id, aggregateVersion: sql`${tripProjects.aggregateVersion} + 1`, updatedAt: new Date() }).where(eq(tripProjects.id, project.id));
         }
       }
 
@@ -218,6 +215,9 @@ export async function deleteOwnedConversation(conversationId: string): Promise<D
       if (!conversation) {
         return { success: false, reason: "not_found" };
       }
+
+      await discardAiAskCommandsForDeletedConversations(transaction, session.userId, [conversation.id]);
+      await transaction.update(conversations).set({ lifecycleVersion: sql`${conversations.lifecycleVersion} + 1`, updatedAt: new Date() }).where(eq(conversations.id, conversation.id));
 
       const conversationMessages = await transaction.select({ id: messages.id }).from(messages).where(and(eq(messages.conversationId, conversation.id), eq(messages.userId, session.userId)));
       const attachments = await transaction.select({ id: messageImageAttachments.id }).from(messageImageAttachments).where(and(eq(messageImageAttachments.conversationId, conversation.id), eq(messageImageAttachments.userId, session.userId)));
@@ -255,18 +255,4 @@ export async function deleteOwnedConversation(conversationId: string): Promise<D
     console.error("Failed to delete owned conversation.", { conversationId, userId: session.userId, error });
     return { success: false, reason: "failed" };
   }
-}
-
-function formatPreview(content: string | null): string {
-  if (!content) {
-    return newConversationPreview;
-  }
-
-  const trimmed = content.trim();
-
-  if (trimmed.length <= previewMaxLength) {
-    return trimmed;
-  }
-
-  return `${trimmed.slice(0, previewMaxLength).trimEnd()}…`;
 }

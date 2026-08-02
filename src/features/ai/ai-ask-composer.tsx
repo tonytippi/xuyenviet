@@ -2,35 +2,23 @@
 
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { useActionState, useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
+import { useActionState, useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
 
 import { ConversationList, type ChatSessionSummary } from "@/features/chat-trips/conversation-list";
 import { formatTripProjectLabel } from "@/features/chat-trips/labels";
 import { answerUsefulnessCommentMaxLength, countAnswerUsefulnessCommentCharacters, type AnswerUsefulnessFeedbackSummary } from "@/features/feedback/types";
 import type { AnswerUsefulnessRating } from "@/db/schema";
-import type { AnswerAnnotation } from "@/features/ai/answer-annotations";
-import type { AssistantMessageProvenanceItem } from "@/features/retrieval/provenance";
+import type { AnswerAnnotation, AnswerAnnotationActionCapability } from "@/features/ai/answer-annotations";
+import type { AssistantMessageProvenanceItem, AvailableAssistantMessageProvenanceItem } from "@/features/retrieval/provenance";
 import type { TripWorkspaceReadModel } from "@/features/chat-trips/trip-home";
 import { tripChangeProposalLabels } from "@/features/chat-trips/trip-home-labels";
 import { TripWorkspacePanel } from "@/features/ai/trip-workspace-panel";
-import { TripProposalReviewCard, type TripProposalTerminalOutcome } from "@/features/ai/trip-proposal-review-card";
 import { BrandMark } from "@/components/ui/brand-mark";
 import { AccountIcon, AttachmentIcon, ChatIcon, CloseIcon, CostIcon, HotelAreaIcon, LoadingIcon, MenuIcon, NewChatIcon, PlaceIcon, ProjectIcon, RouteSegmentIcon, SendIcon, SourceIcon } from "@/components/ui/icons";
 
 const maxQuestionLength = 2_000;
 const maxImageByteSize = 5 * 1024 * 1024;
 const previewMaxLength = 60;
-
-type ProposalDoneSummary = {
-  proposalId: string;
-  rationale: string;
-  affectedItems: Array<{ itemId: string; kind: string; label: string; change: string }>;
-  beforeAfter: Array<{ operation: string; before: string | null; after: string | null }>;
-  alternatives: Array<{ summary: string }>;
-  hasAlternatives: boolean;
-  expiresAt: Date | string | null;
-  status: string;
-};
 
 type DisplayMessage = {
   id: string;
@@ -45,7 +33,7 @@ type DisplayMessage = {
   provenance?: AssistantMessageProvenanceItem[];
   annotations?: AnswerAnnotation[];
   feedback?: AnswerUsefulnessFeedbackSummary | null;
-  proposal?: ProposalDoneSummary;
+  consumerStatuses?: Array<{ category: "context_extraction" | "answer_annotation" | "trip_proposal_draft"; state: "pending" | "failed" }>;
 };
 
 export type AnswerEntityDescriptor = {
@@ -53,7 +41,7 @@ export type AnswerEntityDescriptor = {
   label: string;
   section?: string;
   summary?: string;
-  sourceCategory?: AssistantMessageProvenanceItem["sourceCategory"];
+  sourceCategory?: AvailableAssistantMessageProvenanceItem["sourceCategory"];
   owner?: {
     table: string;
     id: string;
@@ -61,6 +49,10 @@ export type AnswerEntityDescriptor = {
   detail?: Record<string, string>;
   quickFacts?: Array<{ label: string; value: string }>;
   provenanceIds?: string[];
+  annotationId?: string;
+  assistantMessageId?: string;
+  displayConversationId?: string;
+  capability?: AnswerAnnotationActionCapability;
 };
 
 type TripProjectSummary = {
@@ -76,6 +68,39 @@ type TripProjectSummary = {
 
 type CreateTripProjectFormState = { error?: string };
 
+export type IdempotentAiAskSubmission = {
+  payloadFingerprint: string;
+  key: string;
+  requestScope: {
+    conversationId?: string;
+    tripProjectId?: string;
+  };
+  adoptedConversationId?: string;
+};
+
+export function getIdempotentAiAskSubmission({
+  previous,
+  payloadFingerprint,
+  conversationId,
+  tripProjectId,
+  createKey,
+}: {
+  previous: IdempotentAiAskSubmission | null;
+  payloadFingerprint: string;
+  conversationId?: string;
+  tripProjectId?: string;
+  createKey: () => string;
+}): IdempotentAiAskSubmission {
+  const keepsOriginalScope = previous?.requestScope.conversationId === conversationId
+    || (!previous?.requestScope.conversationId && previous?.adoptedConversationId === conversationId);
+
+  if (previous && previous.payloadFingerprint === payloadFingerprint && previous.requestScope.tripProjectId === tripProjectId && keepsOriginalScope) {
+    return previous;
+  }
+
+  return { payloadFingerprint, key: createKey(), requestScope: { conversationId, tripProjectId } };
+}
+
 type CreateTripProjectAction = (
   state: CreateTripProjectFormState | undefined,
   formData: FormData,
@@ -88,7 +113,8 @@ type DeleteTripProjectAction = (tripProjectId: string) => Promise<{ success: boo
 // retryable "transient-error" outcome that keeps the action buttons enabled,
 // distinct from the permanent refresh-required outcome that hides them.
 type ApplyTripChangeProposalAction = (input: { tripProjectId: string; proposalId: string }) => Promise<{ success: boolean; reason?: "refresh_required" | "not_found" | "expired" | "transient"; aggregateVersion?: number; proposalStatus?: "applied"; error?: string }>;
-type DismissTripChangeProposalAction = (input: { tripProjectId: string; proposalId: string }) => Promise<{ success: boolean; reason?: "not_found" | "transient"; proposalStatus?: "dismissed"; error?: string }>;
+type DismissTripChangeProposalAction = (input: { tripProjectId: string; proposalId: string }) => Promise<{ success: boolean; reason?: "not_found" | "expired" | "transient"; proposalStatus?: "dismissed"; error?: string }>;
+type ExecuteAnnotationAction = (input: { conversationId: string; assistantMessageId: string; annotationId: string; command: "trip_change_proposal.apply" | "trip_change_proposal.dismiss" }) => Promise<{ success: boolean; reason?: "refresh_required" | "not_found" | "expired" | "transient"; error?: string }>;
 type SaveAnswerUsefulnessFeedbackAction = (input: { assistantMessageId: string; rating: AnswerUsefulnessRating; comment?: string | null }) => Promise<{ success: boolean; feedback?: AnswerUsefulnessFeedbackSummary; reason?: "unauthenticated" | "not_found" | "invalid_target" | "invalid_input" | "invalid_rating" | "comment_too_long" | "failed" }>;
 type SignOutAction = () => Promise<void>;
 
@@ -149,6 +175,7 @@ type AiAskComposerProps = {
   deleteTripProjectAction?: DeleteTripProjectAction;
   applyTripChangeProposalAction?: ApplyTripChangeProposalAction;
   dismissTripChangeProposalAction?: DismissTripChangeProposalAction;
+  executeAnnotationAction?: ExecuteAnnotationAction;
   saveAnswerUsefulnessFeedbackAction?: SaveAnswerUsefulnessFeedbackAction;
   signOutAction?: SignOutAction;
 };
@@ -230,6 +257,47 @@ function AnswerUsefulnessFeedbackControl({
   );
 }
 
+function AiAskConsumerStatusNotice({ statuses }: { statuses?: DisplayMessage["consumerStatuses"] }) {
+  const labels = {
+    context_extraction: "ngữ cảnh kế hoạch",
+    answer_annotation: "chi tiết tham khảo",
+    trip_proposal_draft: "bản nháp đề xuất chuyến đi",
+  };
+  const sortedStatuses = [...(statuses ?? [])].sort((left, right) => left.category.localeCompare(right.category) || left.state.localeCompare(right.state));
+  const pending = sortedStatuses.filter((status) => status.state === "pending").map((status) => labels[status.category]);
+  const failed = sortedStatuses.filter((status) => status.state === "failed").map((status) => labels[status.category]);
+  const notice = [
+    pending.length > 0 ? `Đang chuẩn bị thêm ${pending.join(", ")} tuỳ chọn. Câu trả lời này đã sẵn sàng để bạn sử dụng.` : null,
+    failed.length > 0 ? `Chưa thể chuẩn bị thêm ${failed.join(", ")} tuỳ chọn. Câu trả lời đã hoàn tất vẫn sẵn sàng để bạn sử dụng.` : null,
+  ].filter(Boolean).join(" ");
+  const statusKey = sortedStatuses.map((status) => `${status.category}:${status.state}`).join(",");
+  const previousStatusKeyRef = useRef<string | undefined>(undefined);
+  const [announcedNotice, setAnnouncedNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (previousStatusKeyRef.current === undefined) {
+      previousStatusKeyRef.current = statusKey;
+      return;
+    }
+    if (previousStatusKeyRef.current !== statusKey) {
+      previousStatusKeyRef.current = statusKey;
+      setAnnouncedNotice(notice || "Các chi tiết lập kế hoạch tuỳ chọn đã được cập nhật.");
+    }
+  }, [notice, statusKey]);
+
+  return (
+    <>
+      <p aria-live="polite" className="sr-only">{announcedNotice}</p>
+      {notice ? (
+        <section aria-label="Trạng thái chi tiết lập kế hoạch tuỳ chọn" className="mt-4 space-y-2">
+          {pending.length > 0 ? <p className="rounded-xl border border-[#d8c9ad] bg-[#fff8ec] px-3 py-2 text-sm leading-6 text-[#6f3f12]">Đang chuẩn bị thêm {pending.join(", ")} tuỳ chọn. Câu trả lời này đã sẵn sàng để bạn sử dụng.</p> : null}
+          {failed.length > 0 ? <p className="rounded-xl border border-[#f0c8a0] bg-[#fff7ed] px-3 py-2 text-sm leading-6 text-[#6f3f12]">Chưa thể chuẩn bị thêm {failed.join(", ")} tuỳ chọn. Câu trả lời đã hoàn tất vẫn sẵn sàng để bạn sử dụng.</p> : null}
+        </section>
+      ) : null}
+    </>
+  );
+}
+
 function getUnansweredUserMessageIds(messages: DisplayMessage[]) {
   const unansweredIds: string[] = [];
 
@@ -306,12 +374,13 @@ function splitAssistantContent(content: string) {
   }).filter((section) => section.heading || section.body);
 }
 
-export function AssistantMessageContent({ messageId, content, annotations, selectedEntityId, detailPanelIds, onSelectEntity }: { messageId?: string; content: string; annotations?: AnswerAnnotation[]; selectedEntityId?: string; detailPanelIds?: string; onSelectEntity?: (entity: AnswerEntityDescriptor, trigger: HTMLElement) => void }) {
+export function AssistantMessageContent({ messageId, displayConversationId, content, annotations, selectedEntityId, detailPanelIds, onSelectEntity }: { messageId?: string; displayConversationId?: string; content: string; annotations?: AnswerAnnotation[]; selectedEntityId?: string; detailPanelIds?: string; onSelectEntity?: (entity: AnswerEntityDescriptor, trigger: HTMLElement) => void }) {
   const sections = splitAssistantContent(content);
   const navigableSections = messageId ? sections.filter((section) => section.heading) : [];
+  const safeAnnotations = normalizeDisplayAnnotations(content, annotations);
 
   if (sections.length <= 1 && !sections[0]?.heading) {
-    return <p className="whitespace-pre-wrap text-base leading-7"><AnnotatedAnswerText content={content} annotations={annotations} selectedEntityId={selectedEntityId} detailPanelIds={detailPanelIds} onSelectEntity={onSelectEntity} /></p>;
+    return <p className="whitespace-pre-wrap text-base leading-7"><AnnotatedAnswerText messageId={messageId} displayConversationId={displayConversationId} content={content} annotations={safeAnnotations} selectedEntityId={selectedEntityId} detailPanelIds={detailPanelIds} onSelectEntity={onSelectEntity} /></p>;
   }
 
   return (
@@ -330,13 +399,13 @@ export function AssistantMessageContent({ messageId, content, annotations, selec
         </nav>
       ) : null}
       {sections.map((section, index) => {
-        const headingAnnotations = section.heading && section.headingStart !== undefined && section.headingEnd !== undefined ? annotations?.filter((annotation) => annotation.start >= section.headingStart! && annotation.end <= section.headingEnd!).map((annotation) => ({ ...annotation, start: annotation.start - section.headingStart!, end: annotation.end - section.headingStart! })) : [];
-        const sectionAnnotations = section.bodyStart >= 0 && section.bodyEnd >= 0 ? annotations?.filter((annotation) => annotation.start >= section.bodyStart && annotation.end <= section.bodyEnd).map((annotation) => ({ ...annotation, start: annotation.start - section.bodyStart, end: annotation.end - section.bodyStart })) : [];
+        const headingAnnotations = section.heading && section.headingStart !== undefined && section.headingEnd !== undefined ? safeAnnotations.filter((annotation) => annotation.start >= section.headingStart! && annotation.end <= section.headingEnd!).map((annotation) => ({ ...annotation, start: annotation.start - section.headingStart!, end: annotation.end - section.headingStart! })) : [];
+        const sectionAnnotations = section.bodyStart >= 0 && section.bodyEnd >= 0 ? safeAnnotations.filter((annotation) => annotation.start >= section.bodyStart && annotation.end <= section.bodyEnd).map((annotation) => ({ ...annotation, start: annotation.start - section.bodyStart, end: annotation.end - section.bodyStart })) : [];
 
         return (
           <section className="rounded-2xl border border-[#eadfc8] bg-white/70 p-4" id={section.heading && messageId ? `answer-${messageId}-section-${navigableSections.indexOf(section)}` : undefined} key={`${section.heading || "intro"}-${index}`}>
-            {section.heading ? <h3 className="text-sm font-bold uppercase tracking-[0.12em] text-[#1f5f46]"><AnnotatedAnswerText content={section.heading} annotations={headingAnnotations} selectedEntityId={selectedEntityId} detailPanelIds={detailPanelIds} onSelectEntity={onSelectEntity} /></h3> : null}
-            {section.body ? <p className="mt-2 whitespace-pre-wrap text-base leading-7"><AnnotatedAnswerText content={section.body} annotations={sectionAnnotations} selectedEntityId={selectedEntityId} detailPanelIds={detailPanelIds} onSelectEntity={onSelectEntity} /></p> : null}
+            {section.heading ? <h3 className="text-sm font-bold uppercase tracking-[0.12em] text-[#1f5f46]"><AnnotatedAnswerText messageId={messageId} displayConversationId={displayConversationId} content={section.heading} annotations={headingAnnotations} selectedEntityId={selectedEntityId} detailPanelIds={detailPanelIds} onSelectEntity={onSelectEntity} /></h3> : null}
+            {section.body ? <p className="mt-2 whitespace-pre-wrap text-base leading-7"><AnnotatedAnswerText messageId={messageId} displayConversationId={displayConversationId} content={section.body} annotations={sectionAnnotations} selectedEntityId={selectedEntityId} detailPanelIds={detailPanelIds} onSelectEntity={onSelectEntity} /></p> : null}
           </section>
         );
       })}
@@ -344,7 +413,7 @@ export function AssistantMessageContent({ messageId, content, annotations, selec
   );
 }
 
-function AnnotatedAnswerText({ content, annotations, selectedEntityId, detailPanelIds, onSelectEntity }: { content: string; annotations?: AnswerAnnotation[]; selectedEntityId?: string; detailPanelIds?: string; onSelectEntity?: (entity: AnswerEntityDescriptor, trigger: HTMLElement) => void }) {
+function AnnotatedAnswerText({ messageId, displayConversationId, content, annotations, selectedEntityId, detailPanelIds, onSelectEntity }: { messageId?: string; displayConversationId?: string; content: string; annotations?: AnswerAnnotation[]; selectedEntityId?: string; detailPanelIds?: string; onSelectEntity?: (entity: AnswerEntityDescriptor, trigger: HTMLElement) => void }) {
   const validAnnotations = normalizeDisplayAnnotations(content, annotations);
 
   if (validAnnotations.length === 0) {
@@ -359,8 +428,16 @@ function AnnotatedAnswerText({ content, annotations, selectedEntityId, detailPan
       parts.push(content.slice(cursor, annotation.start));
     }
 
-    const entity = createAnnotationAnswerEntityDescriptor(annotation);
-    const isSelected = Boolean(selectedEntityId && entity.provenanceIds?.[0] && selectedEntityId === entity.provenanceIds[0]);
+    // Persisted actions are historic intent, not browser authority. Only the
+    // owner-scoped read model may make one interactive by resolving a capability.
+    if (annotation.type === "action" && !annotation.detail.capability?.available) {
+      parts.push(annotation.text);
+      cursor = annotation.end;
+      continue;
+    }
+
+    const entity = createAnnotationAnswerEntityDescriptor(annotation, messageId, displayConversationId);
+    const isSelected = Boolean(selectedEntityId && (entity.provenanceIds?.[0] === selectedEntityId || entity.annotationId === selectedEntityId));
 
     parts.push(
       <button
@@ -389,9 +466,21 @@ function AnnotatedAnswerText({ content, annotations, selectedEntityId, detailPan
 function normalizeDisplayAnnotations(content: string, annotations?: AnswerAnnotation[]) {
   const accepted: AnswerAnnotation[] = [];
   const seenIds = new Set<string>();
+  const duplicateIds = new Set<string>();
+  const input = Array.isArray(annotations) ? annotations : [];
+  const candidates = input.filter(isDisplayAnnotation);
 
-  for (const annotation of (annotations ?? []).slice().sort((left, right) => left.start - right.start || left.end - right.end)) {
-    if (!annotation.id || seenIds.has(annotation.id) || !annotation.detail || !Number.isInteger(annotation.start) || !Number.isInteger(annotation.end)) {
+  for (const annotation of input) {
+    const id = getDisplayAnnotationId(annotation);
+    if (!id) continue;
+    if (seenIds.has(id)) duplicateIds.add(id);
+    seenIds.add(id);
+  }
+
+  seenIds.clear();
+
+  for (const annotation of candidates.slice().sort((left, right) => left.start - right.start || left.end - right.end)) {
+    if (!annotation.id || duplicateIds.has(annotation.id) || seenIds.has(annotation.id) || !annotation.detail || !Number.isInteger(annotation.start) || !Number.isInteger(annotation.end)) {
       continue;
     }
 
@@ -410,7 +499,21 @@ function normalizeDisplayAnnotations(content: string, annotations?: AnswerAnnota
   return accepted;
 }
 
-function createAnnotationAnswerEntityDescriptor(annotation: AnswerAnnotation): AnswerEntityDescriptor {
+function isDisplayAnnotation(value: unknown): value is AnswerAnnotation {
+  return Boolean(value)
+    && typeof value === "object"
+    && typeof (value as AnswerAnnotation).id === "string"
+    && typeof (value as AnswerAnnotation).start === "number"
+    && typeof (value as AnswerAnnotation).end === "number";
+}
+
+function getDisplayAnnotationId(value: unknown) {
+  return value && typeof value === "object" && typeof (value as AnswerAnnotation).id === "string"
+    ? (value as AnswerAnnotation).id
+    : undefined;
+}
+
+function createAnnotationAnswerEntityDescriptor(annotation: AnswerAnnotation, assistantMessageId?: string, displayConversationId?: string): AnswerEntityDescriptor {
   return {
     type: annotation.detail.type,
     label: annotation.detail.label,
@@ -421,6 +524,10 @@ function createAnnotationAnswerEntityDescriptor(annotation: AnswerAnnotation): A
     detail: annotation.detail.detail,
     quickFacts: annotation.detail.quickFacts,
     provenanceIds: annotation.detail.provenanceIds,
+    annotationId: annotation.id,
+    assistantMessageId,
+    displayConversationId,
+    capability: annotation.detail.capability,
   };
 }
 
@@ -441,7 +548,7 @@ function getAnnotationClassName(annotation: AnswerAnnotation) {
 }
 
 export function AssistantProvenanceBlock({ provenance, selectedEntityId, detailPanelIds, onSelectEntity }: { provenance?: AssistantMessageProvenanceItem[]; selectedEntityId?: string; detailPanelIds?: string; onSelectEntity?: (entity: AnswerEntityDescriptor, trigger: HTMLElement) => void }) {
-  const visibleItems = provenance?.filter((item) => item.usedInPrompt || item.sourceCategory === "general") ?? [];
+  const visibleItems = provenance?.filter((item): item is AvailableAssistantMessageProvenanceItem | Extract<AssistantMessageProvenanceItem, { availability: "withdrawn" }> => item.availability === "withdrawn" || (item.usedInPrompt || item.sourceCategory === "general")) ?? [];
 
   if (visibleItems.length === 0) {
     return null;
@@ -452,6 +559,9 @@ export function AssistantProvenanceBlock({ provenance, selectedEntityId, detailP
       <h3 className="text-sm font-bold uppercase tracking-[0.12em] text-[#8c4f13]">Nguồn và độ tin cậy</h3>
       <ul className="mt-3 space-y-3">
         {visibleItems.map((item) => {
+          if (item.availability === "withdrawn") {
+            return <li className="rounded-xl border border-[#eadfc8] bg-white/80 p-3 text-sm leading-6 text-[#4f625a]" key={item.id}>{item.unavailableLabel}</li>;
+          }
           const isSelected = selectedEntityId === item.id;
           const hasActionBlockedProvenance = isActionBlockedProvenance(item);
           const detailActionLabel = item.sourceCategory === "general" ? "Xem chi tiết suy luận AI" : hasActionBlockedProvenance || item.freshnessSensitive ? "Xem chi tiết cảnh báo" : "Xem chi tiết nguồn";
@@ -509,7 +619,7 @@ export function AssistantProvenanceBlock({ provenance, selectedEntityId, detailP
   );
 }
 
-export function AnswerDetailPanel({ selectedEntity, panelId, panelRef, onClose }: { selectedEntity: AnswerEntityDescriptor | null; panelId?: string; panelRef?: RefObject<HTMLDivElement | null>; onClose: () => void }) {
+export function AnswerDetailPanel({ selectedEntity, panelId, panelRef, onClose, onExecuteAction, actionPending = false, actionsEnabled = true }: { selectedEntity: AnswerEntityDescriptor | null; panelId?: string; panelRef?: RefObject<HTMLDivElement | null>; onClose: () => void; onExecuteAction?: (entity: AnswerEntityDescriptor) => void; actionPending?: boolean; actionsEnabled?: boolean }) {
   if (!selectedEntity) {
     return (
       <div className="flex flex-1 flex-col justify-center gap-4 py-8" id={panelId} ref={panelRef} tabIndex={-1}>
@@ -566,6 +676,8 @@ export function AnswerDetailPanel({ selectedEntity, panelId, panelRef, onClose }
         </section>
       ) : null}
 
+      {actionsEnabled && selectedEntity.capability && onExecuteAction ? <button className="min-h-11 rounded-xl bg-[#1f5f46] px-4 py-2 text-sm font-semibold text-white focus:outline-none focus:ring-4 focus:ring-[#8fb59f]/45 disabled:cursor-not-allowed disabled:opacity-60" disabled={actionPending} onClick={() => onExecuteAction(selectedEntity)} type="button">{actionPending ? "Đang cập nhật..." : selectedEntity.capability.command === "trip_change_proposal.apply" ? "Áp dụng đề xuất" : "Giữ kế hoạch hiện tại"}</button> : null}
+
       {selectedEntity.provenanceIds && selectedEntity.provenanceIds.length > 0 ? (
         <section className="rounded-2xl border border-[#eadfc8] bg-[#fff8ec] p-4 text-sm leading-6 text-[#6f3f12]" aria-label="Cơ sở gợi ý">
           <h4 className="text-sm font-bold uppercase tracking-[0.12em] text-[#8c4f13]">Cơ sở gợi ý</h4>
@@ -576,84 +688,6 @@ export function AnswerDetailPanel({ selectedEntity, panelId, panelRef, onClose }
           </div>
         </section>
       ) : null}
-    </div>
-  );
-}
-
-function AnswerProposalCard({
-  proposal,
-  onApply,
-  onDismiss,
-  onRefresh,
-  isPending,
-  pendingAction,
-  terminalOutcome,
-  registerOrigin,
-}: {
-  proposal: ProposalDoneSummary;
-  onApply?: () => void;
-  onDismiss?: () => void;
-  onRefresh?: () => void;
-  isPending?: boolean;
-  pendingAction?: "apply" | "dismiss";
-  terminalOutcome?: TripProposalTerminalOutcome | null;
-  // P13: accept proposalId so the parent can pass a stable useCallback.
-  registerOrigin?: (proposalId: string, element: HTMLDivElement | null) => void;
-}) {
-  const wrapperRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    // Story 7.4 (EXPERIENCE.md interaction primitives): move focus to the
-    // proposal heading when a proposal card appears in the answer surface so
-    // screen-reader and keyboard users land on the review affordance. The
-    // terminal-result focus return to the originating answer card is wired in
-    // 7.5 (focusOriginAfterTerminal) alongside the apply/dismiss handlers.
-    const heading = wrapperRef.current?.querySelector<HTMLHeadingElement>("[tabindex='-1']");
-    heading?.focus();
-  }, [proposal.proposalId]);
-
-  useEffect(() => {
-    if (registerOrigin) registerOrigin(proposal.proposalId, wrapperRef.current);
-    return () => {
-      if (registerOrigin) registerOrigin(proposal.proposalId, null);
-    };
-  }, [registerOrigin, proposal.proposalId]);
-
-  const expiresAt = proposal.expiresAt instanceof Date ? proposal.expiresAt : proposal.expiresAt ? new Date(proposal.expiresAt) : null;
-  const alternatives = Array.isArray(proposal.alternatives) ? proposal.alternatives : [];
-  const focusInput = {
-    id: proposal.proposalId,
-    expiresAt: expiresAt && !Number.isNaN(expiresAt.getTime()) ? expiresAt : null,
-    createdAt: new Date(),
-    rationale: proposal.rationale,
-    status: proposal.status as "pending" | "applied" | "dismissed" | "expired",
-    affectedItems: proposal.affectedItems.map((item) => ({
-      itemId: item.itemId,
-      kind: item.kind as "anchor" | "leg" | "activity",
-      label: item.label,
-      change: item.change as "create" | "update" | "remove" | "reorder" | "change-state" | "upsert-constraints",
-    })),
-    beforeAfter: proposal.beforeAfter,
-    alternatives,
-    // Story 7.4 review finding 4: the answer-surface card must offer "Xem phương
-    // án khác" when alternatives are supplied, consistent with the workspace
-    // panel. Prefer the explicit hasAlternatives flag from the done payload, fall
-    // back to deriving from the alternatives array.
-    hasAlternatives: Boolean(proposal.hasAlternatives ?? alternatives.length > 0),
-  };
-
-  return (
-    <div ref={wrapperRef} className="mt-4" data-story="7.4">
-      <TripProposalReviewCard
-        idPrefix="answer-"
-        proposal={focusInput}
-        now={new Date()}
-        onApply={onApply}
-        onDismiss={onDismiss}
-        onRefresh={onRefresh}
-        isPending={isPending}
-        pendingAction={pendingAction}
-        terminalOutcome={terminalOutcome ?? null}
-      />
     </div>
   );
 }
@@ -684,6 +718,7 @@ export function AiAskComposer({
   deleteTripProjectAction,
   applyTripChangeProposalAction,
   dismissTripChangeProposalAction,
+  executeAnnotationAction,
   saveAnswerUsefulnessFeedbackAction,
   signOutAction,
 }: AiAskComposerProps) {
@@ -708,6 +743,7 @@ export function AiAskComposer({
   const [deletingTripProjectId, setDeletingTripProjectId] = useState<string | null>(null);
   const [feedbackPendingMessageId, setFeedbackPendingMessageId] = useState<string | null>(null);
   const [selectedAnswerEntity, setSelectedAnswerEntity] = useState<AnswerEntityDescriptor | null>(null);
+  const [annotationActionPending, setAnnotationActionPending] = useState(false);
   const [isDesktopViewport, setIsDesktopViewport] = useState(false);
   const [isWorkspaceSheetOpen, setWorkspaceSheetOpen] = useState(false);
   const [isSidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -715,21 +751,15 @@ export function AiAskComposer({
   // sheet so only one aria-modal dialog is open at a time.
   const [isPlanHistorySheetOpen, setPlanHistorySheetOpen] = useState(false);
   const planHistorySheetPanelRef = useRef<HTMLDivElement>(null);
-  // Story 7.5: per-proposal pending action and terminal outcome state for the
-  // workspace panel + answer-surface proposal cards. Keyed by proposal id.
+  // Story 7.5: per-proposal pending action and terminal outcome state for the workspace panel.
   const [proposalPending, setProposalPending] = useState<Record<string, { action: "apply" | "dismiss" } | undefined>>({});
   const [proposalTerminalOutcome, setProposalTerminalOutcome] = useState<Record<string, "applied" | "dismissed" | "expired" | "refresh-required" | "transient-error" | null>>({});
-  const proposalApplyOriginRef = useRef<Record<string, HTMLElement | null>>({});
   // Q4: synchronous in-flight dedup set. proposalPending is React state, so two
   // clicks in the same render cycle both pass the state guard. This ref is
   // checked and mutated synchronously before any await so the second click is
   // blocked immediately.
   const proposalInFlightRef = useRef<Set<string>>(new Set());
-  // P13: stable callback identity so the AnswerProposalCard effect does not
-  // re-run every render (which could clear and reset the origin ref).
-  const registerProposalOrigin = useCallback((proposalId: string, element: HTMLDivElement | null) => {
-    proposalApplyOriginRef.current[proposalId] = element;
-  }, []);
+  const annotationActionInFlightRef = useRef(false);
   const [createProjectState, createProjectFormAction, isCreatingProject] = useActionState<CreateTripProjectFormState | undefined, FormData>(
     createTripProjectAction ?? noOpCreateTripProjectAction,
     undefined,
@@ -746,6 +776,7 @@ export function AiAskComposer({
   const isSubmittingRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const activeRequestIdRef = useRef(0);
+  const idempotencyKeyRef = useRef<IdempotentAiAskSubmission | null>(null);
   const deletingConversationIdRef = useRef<string | null>(null);
   const deletingTripProjectIdRef = useRef<string | null>(null);
   const sessionSheetTriggerRef = useRef<HTMLButtonElement>(null);
@@ -765,7 +796,7 @@ export function AiAskComposer({
   const mobileAnswerDetailPanelId = "ai-ask-selected-answer-detail-mobile";
   const desktopAnswerDetailPanelId = "ai-ask-selected-answer-detail-desktop";
   const answerDetailPanelIds = `${mobileAnswerDetailPanelId} ${desktopAnswerDetailPanelId}`;
-  const selectedAnswerEntityId = selectedAnswerEntity?.provenanceIds?.[0];
+  const selectedAnswerEntityId = selectedAnswerEntity?.provenanceIds?.[0] ?? selectedAnswerEntity?.annotationId;
   const activeWorkspaceTitle = selectedTripProject
     ? formatTripProjectLabel(selectedTripProject)
     : conversationId
@@ -1138,10 +1169,22 @@ export function AiAskComposer({
     setStatus(selectedImage ? "Đang kiểm tra ảnh và chuẩn bị luồng trả lời..." : "Đang gửi câu hỏi và chuẩn bị luồng trả lời...");
 
     try {
-      const hadConversation = Boolean(conversationId || messages.length > 0);
       const controller = new AbortController();
       abortControllerRef.current = controller;
-      const result = await submitAiAskStream({ question: trimmedQuestion, conversationId, tripProjectId: activeTripProjectId, image: selectedImage, signal: controller.signal, onPreparing: () => {
+      const imageDigest = selectedImage ? await digestFileForIdempotency(selectedImage) : "";
+      const payloadFingerprint = `${trimmedQuestion}\u0000${activeTripProjectId ?? ""}\u0000${selectedImage?.name ?? ""}\u0000${selectedImage?.type ?? ""}\u0000${selectedImage?.size ?? ""}\u0000${imageDigest}`;
+      const submission = getIdempotentAiAskSubmission({
+        previous: idempotencyKeyRef.current,
+        payloadFingerprint,
+        conversationId,
+        tripProjectId: activeTripProjectId,
+        createKey: () => crypto.randomUUID().replaceAll("-", ""),
+      });
+      idempotencyKeyRef.current = submission;
+      const hadConversation = Boolean(submission.requestScope.conversationId || messages.length > 0);
+      // Adoption updates the UI selection only; a retained logical submission must
+      // keep its original scope so its idempotency key resolves the same command.
+      const result = await submitAiAskStream({ question: trimmedQuestion, conversationId: submission.requestScope.conversationId, tripProjectId: submission.requestScope.tripProjectId, image: selectedImage, idempotencyKey: submission.key, signal: controller.signal, onPreparing: () => {
         if (activeRequestIdRef.current === requestId) {
           setIsPreparing(true);
           setStatus("Trợ lý đang chuẩn bị ngữ cảnh cho câu hỏi của bạn.");
@@ -1159,17 +1202,44 @@ export function AiAskComposer({
         return;
       }
 
+      if (result.status === "in-progress") {
+        if (result.conversationId) {
+          const newConversationId = result.conversationId;
+          submission.adoptedConversationId = newConversationId;
+          setConversationId(newConversationId);
+          if (!hadConversation) {
+            setSessions((currentSessions) => [summarizeSession(newConversationId, trimmedQuestion), ...currentSessions]);
+          } else {
+            setSessions((currentSessions) => moveSessionToTop(currentSessions, newConversationId));
+          }
+          reconcileSelection(newConversationId, activeTripProjectId);
+        }
+        setStatus("Yêu cầu này vẫn đang được xử lý. Hãy chờ kết quả hoàn tất.");
+        setRecoveryMessage("Yêu cầu đang xử lý. Hãy chờ một lát trước khi gửi lại.");
+        return;
+      }
+
       if (result.status === "answer-failed") {
         const failedUserMessage = result.userMessage;
 
+        if (result.code === "refresh_required") {
+          setStreamingContent("");
+          setFailedQuestionIds([]);
+          setSelectedAnswerEntity(null);
+          answerEntityTriggerRef.current = null;
+          setStatus(result.errorMessage);
+          setRecoveryMessage("Kế hoạch hoặc hội thoại đã thay đổi. Đã bỏ phần trả lời tạm thời và làm mới dữ liệu hiện tại.");
+          reconcileSelection(conversationId, activeTripProjectId);
+          return;
+        }
         if (result.conversationId && failedUserMessage) {
           const newConversationId = result.conversationId;
+          submission.adoptedConversationId = newConversationId;
           setConversationId(newConversationId);
-          setFailedQuestionIds((currentIds) => [...currentIds, failedUserMessage.id]);
-          setMessages((currentMessages) => [
-            ...currentMessages,
+          setFailedQuestionIds((currentIds) => currentIds.includes(failedUserMessage.id) ? currentIds : [...currentIds, failedUserMessage.id]);
+          setMessages((currentMessages) => appendMessagesWithoutDuplicateIds(currentMessages, [
             { id: failedUserMessage.id, role: "user", content: failedUserMessage.content },
-          ]);
+          ]));
           if (!hadConversation) {
             setSessions((currentSessions) => [summarizeSession(newConversationId, trimmedQuestion), ...currentSessions]);
           } else {
@@ -1188,13 +1258,13 @@ export function AiAskComposer({
       }
 
       setConversationId(result.conversationId);
-      setMessages((currentMessages) => [
-        ...currentMessages,
+      setMessages((currentMessages) => appendMessagesWithoutDuplicateIds(currentMessages, [
         { id: result.userMessage.id, role: "user", content: result.userMessage.content },
-        { id: result.assistantMessage.id, role: "assistant", content: result.assistantMessage.content, provenance: result.assistantMessage.provenance, annotations: result.assistantMessage.annotations, proposal: result.proposal },
-      ]);
+        { id: result.assistantMessage.id, role: "assistant", content: result.assistantMessage.content, provenance: result.assistantMessage.provenance, annotations: result.assistantMessage.annotations },
+      ]));
       setQuestion("");
       setSelectedImage(null);
+      idempotencyKeyRef.current = null;
       setStatus(hadConversation ? "Đã cập nhật hội thoại của bạn." : "Đã tạo câu trả lời đầu tiên cho chuyến đi của bạn.");
       if (!hadConversation) {
         setSessions((currentSessions) => [summarizeSession(result.conversationId, trimmedQuestion), ...currentSessions]);
@@ -1427,6 +1497,26 @@ export function AiAskComposer({
     textareaRef.current?.focus();
   }
 
+  async function handleExecuteAnnotationAction(entity: AnswerEntityDescriptor) {
+    if (annotationActionInFlightRef.current || annotationActionPending || !executeAnnotationAction || !entity.displayConversationId || !entity.assistantMessageId || !entity.annotationId || !entity.capability) return;
+    annotationActionInFlightRef.current = true;
+    setAnnotationActionPending(true);
+    setStatus("Đang cập nhật đề xuất...");
+    try {
+      const result = await executeAnnotationAction({ conversationId: entity.displayConversationId, assistantMessageId: entity.assistantMessageId, annotationId: entity.annotationId, command: entity.capability.command });
+      setStatus(result.success ? "Đã cập nhật đề xuất. Đang làm mới kế hoạch." : result.error ?? "Đề xuất không còn khả dụng.");
+      if (result.success) {
+        closeAnswerDetailPanel();
+        router.refresh();
+      }
+    } catch {
+      setStatus("Không thể cập nhật đề xuất lúc này. Vui lòng thử lại.");
+    } finally {
+      annotationActionInFlightRef.current = false;
+      setAnnotationActionPending(false);
+    }
+  }
+
   function handleSelectTripProject(projectId: string) {
     if (isPending) {
       setStatus("Vui lòng chờ câu trả lời hiện tại hoàn tất trước khi đổi dự án chuyến đi.");
@@ -1534,25 +1624,15 @@ export function AiAskComposer({
     // any await.
     if (proposalInFlightRef.current.has(proposalId)) return;
     proposalInFlightRef.current.add(proposalId);
-    const origin = proposalApplyOriginRef.current[proposalId] ?? null;
     setProposalPending((current) => ({ ...current, [proposalId]: { action: "apply" } }));
     setStatus("Đang áp dụng đề xuất...");
     try {
       const result = await applyTripChangeProposalAction({ tripProjectId: activeTripProjectId, proposalId });
       if (result.success) {
-        // Update the in-memory proposal status so the answer-surface card
-        // re-renders as terminal immediately, then reconcile from persisted state.
-        setMessages((currentMessages) => currentMessages.map((message) => (
-          message.proposal && message.proposal.proposalId === proposalId
-            ? { ...message, proposal: { ...message.proposal, status: "applied" } }
-            : message
-        )));
         setProposalTerminalOutcome((current) => ({ ...current, [proposalId]: "applied" }));
         setStatus("Đã áp dụng đề xuất. Đang làm mới kế hoạch.");
         router.refresh();
-        // Move focus back to the originating answer card heading (answer
-        // surface) or the Trip Home focus card heading (workspace panel).
-        focusOriginAfterTerminal(origin);
+        focusOriginAfterTerminal(null);
       } else if (result.reason === "transient") {
         // Q3: retryable transient failure — keep the action buttons enabled so
         // the owner can try again. Do NOT use the permanent refresh-required
@@ -1593,21 +1673,15 @@ export function AiAskComposer({
     // both call the dismiss action.
     if (proposalInFlightRef.current.has(proposalId)) return;
     proposalInFlightRef.current.add(proposalId);
-    const origin = proposalApplyOriginRef.current[proposalId] ?? null;
     setProposalPending((current) => ({ ...current, [proposalId]: { action: "dismiss" } }));
     setStatus("Đang giữ kế hoạch...");
     try {
       const result = await dismissTripChangeProposalAction({ tripProjectId: activeTripProjectId, proposalId });
       if (result.success) {
-        setMessages((currentMessages) => currentMessages.map((message) => (
-          message.proposal && message.proposal.proposalId === proposalId
-            ? { ...message, proposal: { ...message.proposal, status: "dismissed" } }
-            : message
-        )));
         setProposalTerminalOutcome((current) => ({ ...current, [proposalId]: "dismissed" }));
         setStatus("Đã giữ kế hoạch. Đang làm mới.");
         router.refresh();
-        focusOriginAfterTerminal(origin);
+        focusOriginAfterTerminal(null);
       } else if (result.reason === "transient") {
         // Q3: retryable transient failure — keep the action buttons enabled.
         setProposalTerminalOutcome((current) => ({ ...current, [proposalId]: "transient-error" }));
@@ -1914,7 +1988,7 @@ export function AiAskComposer({
 
         <div className="space-y-5">
           {displayedMessages.length > 0 ? (
-            <section aria-label="Lịch sử hội thoại" aria-live="polite" className="mx-auto max-w-[760px] space-y-4">
+            <section aria-label="Lịch sử hội thoại" className="mx-auto max-w-[760px] space-y-4">
               {displayedMessages.map((message) => (
                 <article
                   className={
@@ -1929,20 +2003,9 @@ export function AiAskComposer({
                   </p>
                   {message.role === "assistant" ? (
                     <>
-                      <AssistantMessageContent messageId={message.id} content={message.content} annotations={message.annotations} selectedEntityId={selectedAnswerEntityId} detailPanelIds={answerDetailPanelIds} onSelectEntity={handleSelectAnswerEntity} />
+                       <AssistantMessageContent messageId={message.id} displayConversationId={isHistoricReview ? historyConversation?.id : conversationId} content={message.content} annotations={message.annotations} selectedEntityId={selectedAnswerEntityId} detailPanelIds={answerDetailPanelIds} onSelectEntity={handleSelectAnswerEntity} />
+                      <AiAskConsumerStatusNotice statuses={message.consumerStatuses} />
                       <AssistantProvenanceBlock provenance={message.provenance} selectedEntityId={selectedAnswerEntityId} detailPanelIds={answerDetailPanelIds} onSelectEntity={handleSelectAnswerEntity} />
-                      {message.proposal ? (
-                        <AnswerProposalCard
-                          proposal={message.proposal}
-                          onApply={applyTripChangeProposalAction && activeTripProjectId ? () => handleApplyProposal(message.proposal!.proposalId) : undefined}
-                          onDismiss={dismissTripChangeProposalAction && activeTripProjectId ? () => handleDismissProposal(message.proposal!.proposalId) : undefined}
-                          onRefresh={activeTripProjectId ? () => handleRefreshProposal(message.proposal!.proposalId) : undefined}
-                          isPending={Boolean(proposalPending[message.proposal.proposalId])}
-                          pendingAction={proposalPending[message.proposal.proposalId]?.action}
-                          terminalOutcome={proposalTerminalOutcome[message.proposal.proposalId] ?? null}
-                          registerOrigin={registerProposalOrigin}
-                        />
-                      ) : null}
                       {saveAnswerUsefulnessFeedbackAction ? (
                         <AnswerUsefulnessFeedbackControl
                           feedback={message.feedback}
@@ -2133,7 +2196,7 @@ export function AiAskComposer({
               className="absolute inset-0 bg-[#17342c]/40"
             />
             <section className="absolute bottom-0 left-0 right-0 max-h-[82vh] overflow-y-auto rounded-t-[1.5rem] border border-[#d8c9ad] bg-[linear-gradient(180deg,#fffdf8_0%,#ffffff_42%,#f7fbf8_100%)] p-4 text-[#17342c] shadow-[0_-24px_80px_rgba(41,33,18,0.24)]" aria-label="Chi tiết nguồn hoặc cảnh báo đã chọn">
-              <AnswerDetailPanel selectedEntity={selectedAnswerEntity} panelId={mobileAnswerDetailPanelId} panelRef={mobileAnswerDetailPanelRef} onClose={closeAnswerDetailPanel} />
+              <AnswerDetailPanel selectedEntity={selectedAnswerEntity} panelId={mobileAnswerDetailPanelId} panelRef={mobileAnswerDetailPanelRef} onClose={closeAnswerDetailPanel} onExecuteAction={executeAnnotationAction ? handleExecuteAnnotationAction : undefined} actionPending={annotationActionPending} actionsEnabled={!isHistoricReview} />
             </section>
           </div>
         ) : null}
@@ -2237,7 +2300,7 @@ export function AiAskComposer({
             </div>
             <BrandMark className="size-10 shrink-0" />
           </div>
-          <AnswerDetailPanel selectedEntity={selectedAnswerEntity} panelId={desktopAnswerDetailPanelId} panelRef={desktopAnswerDetailPanelRef} onClose={closeAnswerDetailPanel} />
+          <AnswerDetailPanel selectedEntity={selectedAnswerEntity} panelId={desktopAnswerDetailPanelId} panelRef={desktopAnswerDetailPanelRef} onClose={closeAnswerDetailPanel} onExecuteAction={executeAnnotationAction ? handleExecuteAnnotationAction : undefined} actionPending={annotationActionPending} actionsEnabled={!isHistoricReview} />
         </aside>
       ) : null}
 
@@ -2272,19 +2335,34 @@ type StreamResult = {
   conversationId: string;
   userMessage: DisplayMessage;
   assistantMessage: DisplayMessage;
-  proposal?: ProposalDoneSummary;
+} | {
+  status: "in-progress";
+  conversationId?: string;
+  userMessage?: DisplayMessage;
 } | {
   status: "answer-failed";
+  code?: "refresh_required";
   conversationId?: string;
   userMessage?: DisplayMessage;
   errorMessage: string;
 };
+
+function appendMessagesWithoutDuplicateIds(currentMessages: DisplayMessage[], additions: DisplayMessage[]) {
+  const existingIds = new Set(currentMessages.map((message) => message.id));
+  return [...currentMessages, ...additions.filter((message) => !existingIds.has(message.id))];
+}
+
+async function digestFileForIdempotency(file: File) {
+  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
 
 async function submitAiAskStream({
   question,
   conversationId,
   tripProjectId,
   image,
+  idempotencyKey,
   signal,
   onPreparing,
   onDelta,
@@ -2293,18 +2371,14 @@ async function submitAiAskStream({
   conversationId?: string;
   tripProjectId?: string;
   image: File | null;
+  idempotencyKey: string;
   signal?: AbortSignal;
   onPreparing: () => void;
   onDelta: (content: string) => void;
 }): Promise<StreamResult> {
-  const formData = new FormData();
+  const formData = buildAiAskStreamFormData({ question, conversationId, tripProjectId, image });
 
-  formData.set("question", question);
-  if (conversationId) formData.set("conversationId", conversationId);
-  if (tripProjectId) formData.set("tripProjectId", tripProjectId);
-  if (image) formData.set("image", image);
-
-  const response = await fetch("/api/ai-ask/stream", { method: "POST", body: formData, signal });
+  const response = await fetch("/api/ai-ask/stream", { method: "POST", body: formData, signal, headers: { "Idempotency-Key": idempotencyKey } });
 
   if (!response.ok || !response.body) {
     const payload = await response.json().catch(() => null) as { error?: string } | null;
@@ -2342,12 +2416,16 @@ async function submitAiAskStream({
         onDelta(event.content);
       }
 
+      if (event.type === "in_progress") {
+        terminalResult = { status: "in-progress", conversationId: event.conversationId, userMessage: event.userMessage };
+      }
+
       if (event.type === "done" && event.conversationId && event.userMessage && event.assistantMessage) {
-        terminalResult = { status: "answer-created", conversationId: event.conversationId, userMessage: event.userMessage, assistantMessage: event.assistantMessage, proposal: event.proposal };
+        terminalResult = { status: "answer-created", conversationId: event.conversationId, userMessage: event.userMessage, assistantMessage: event.assistantMessage };
       }
 
       if (event.type === "error" && terminalResult?.status !== "answer-created") {
-        terminalResult = { status: "answer-failed", conversationId: event.conversationId, userMessage: event.userMessage, errorMessage: event.errorMessage ?? "Mình chưa tạo được câu trả lời lúc này." };
+        terminalResult = { status: "answer-failed", code: event.code, conversationId: event.conversationId, userMessage: event.userMessage, errorMessage: event.errorMessage ?? "Mình chưa tạo được câu trả lời lúc này." };
       }
     }
 
@@ -2357,9 +2435,29 @@ async function submitAiAskStream({
   return terminalResult ?? { status: "answer-failed", errorMessage: "Luồng trả lời kết thúc trước khi lưu câu trả lời hoàn chỉnh." };
 }
 
+export function buildAiAskStreamFormData({
+  question,
+  conversationId,
+  tripProjectId,
+  image,
+}: {
+  question: string;
+  conversationId?: string;
+  tripProjectId?: string;
+  image: File | null;
+}) {
+  const formData = new FormData();
+
+  formData.set("question", question);
+  if (conversationId) formData.set("conversationId", conversationId);
+  if (tripProjectId) formData.set("tripProjectId", tripProjectId);
+  if (image) formData.set("image", image);
+  return formData;
+}
+
 function parseStreamEvent(line: string) {
   try {
-    return JSON.parse(line) as { type: string; content?: string; conversationId?: string; userMessage?: DisplayMessage; assistantMessage?: DisplayMessage; errorMessage?: string; proposal?: ProposalDoneSummary };
+    return JSON.parse(line) as { type: string; code?: "refresh_required"; content?: string; conversationId?: string; userMessage?: DisplayMessage; assistantMessage?: DisplayMessage; errorMessage?: string };
   } catch {
     return null;
   }
@@ -2381,7 +2479,7 @@ function validateSelectedImage(image: File | null) {
   return null;
 }
 
-function formatProvenanceCategory(item: AssistantMessageProvenanceItem) {
+function formatProvenanceCategory(item: AvailableAssistantMessageProvenanceItem) {
   if (item.sourceCategory === "knowledge") {
     return "XuyenViet";
   }
@@ -2401,7 +2499,7 @@ function formatProvenanceCategory(item: AssistantMessageProvenanceItem) {
   return "Suy luận";
 }
 
-function createProvenanceAnswerEntityDescriptor(item: AssistantMessageProvenanceItem): AnswerEntityDescriptor {
+function createProvenanceAnswerEntityDescriptor(item: AvailableAssistantMessageProvenanceItem): AnswerEntityDescriptor {
   const hasActionBlockedProvenance = isActionBlockedProvenance(item);
   const detail: Record<string, string> = {
     "Loại": formatProvenanceCategory(item),
@@ -2448,7 +2546,7 @@ function createProvenanceAnswerEntityDescriptor(item: AssistantMessageProvenance
   };
 }
 
-function getTrustLabels(item: AssistantMessageProvenanceItem) {
+function getTrustLabels(item: AvailableAssistantMessageProvenanceItem) {
   const labels: string[] = [];
 
   if (item.knowledgeState === "community_observation") labels.push("Quan sát cộng đồng");
@@ -2462,7 +2560,7 @@ function getTrustLabels(item: AssistantMessageProvenanceItem) {
   return labels;
 }
 
-function isActionBlockedProvenance(item: AssistantMessageProvenanceItem) {
+function isActionBlockedProvenance(item: AvailableAssistantMessageProvenanceItem) {
   return item.usePolicy === "do_not_use" || item.verificationState === "failed" || item.knowledgeState === "conflicted" || item.knowledgeState === "superseded";
 }
 
@@ -2497,7 +2595,7 @@ function getAnswerEntityIcon(type: AnswerEntityDescriptor["type"]) {
   return SourceIcon;
 }
 
-function formatProvenanceSourceType(item: AssistantMessageProvenanceItem) {
+function formatProvenanceSourceType(item: AvailableAssistantMessageProvenanceItem) {
   const sourceType = item.sourceType?.toLocaleLowerCase("vi-VN") ?? null;
 
   if (item.sourceCategory === "web") {

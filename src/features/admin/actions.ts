@@ -2,7 +2,7 @@
 
 import { and, eq, ne } from "drizzle-orm";
 
-import { aiGatewayModels, userRoles, users, type AiGatewayModelPurpose, type UserRole } from "@/db/schema";
+import { aiGatewayModels, type AiGatewayModelPurpose } from "@/db/schema";
 import { runAuditedAdminMutation, runAuditedExactAdminMutation } from "@/server/mutations";
 
 type AiGatewayModelMutationInput = {
@@ -175,69 +175,6 @@ export async function setDefaultAiGatewayModel(modelId: string) {
   });
 }
 
-type ManagedUserRole = Extract<UserRole, "operator" | "admin">;
-
-type UserRoleDeltaResult = {
-  changed: boolean;
-  targetUserId: string;
-  role: ManagedUserRole;
-  operation: "grant" | "revoke";
-};
-
-export async function grantAdminUserRole(targetUserId: string, role: ManagedUserRole): Promise<UserRoleDeltaResult> {
-  const id = normalizeManagedUserId(targetUserId);
-  const managedRole = normalizeManagedRole(role);
-
-  return runAuditedExactAdminMutation({
-    audit: (result) => result.changed ? roleDeltaAudit(result) : undefined,
-    action: async (_session, transaction) => {
-      const [target] = await transaction.select({ id: users.id }).from(users).where(eq(users.id, id)).limit(1);
-
-      if (!target) {
-        throw new Error("User not found.");
-      }
-
-      const inserted = await transaction.insert(userRoles).values({ userId: id, role: managedRole }).onConflictDoNothing().returning({ userId: userRoles.userId });
-      return { changed: inserted.length > 0, targetUserId: id, role: managedRole, operation: "grant" };
-    },
-  });
-}
-
-export async function revokeAdminUserRole(targetUserId: string, role: ManagedUserRole): Promise<UserRoleDeltaResult> {
-  const id = normalizeManagedUserId(targetUserId);
-  const managedRole = normalizeManagedRole(role);
-
-  return runAuditedExactAdminMutation({
-    audit: (result) => result.changed ? roleDeltaAudit(result) : undefined,
-    action: async (_session, transaction) => {
-      const [target] = await transaction.select({ id: users.id }).from(users).where(eq(users.id, id)).limit(1);
-
-      if (!target) {
-        throw new Error("User not found.");
-      }
-
-      if (managedRole === "admin") {
-        const administrators = await transaction.select({ userId: userRoles.userId }).from(userRoles).where(eq(userRoles.role, "admin")).for("update");
-        const targetIsAdministrator = administrators.some((administrator) => administrator.userId === id);
-
-        if (targetIsAdministrator && administrators.length === 1) {
-          throw new Error("Cannot revoke the final administrator role.");
-        }
-      }
-
-      const removed = await transaction.delete(userRoles).where(and(eq(userRoles.userId, id), eq(userRoles.role, managedRole))).returning({ userId: userRoles.userId });
-      return { changed: removed.length > 0, targetUserId: id, role: managedRole, operation: "revoke" };
-    },
-  });
-}
-
-export async function grantAdminUserRoleForm(formData: FormData) {
-  await grantAdminUserRole(getFormString(formData, "userId"), getFormString(formData, "role") as ManagedUserRole);
-}
-
-export async function revokeAdminUserRoleForm(formData: FormData) {
-  await revokeAdminUserRole(getFormString(formData, "userId"), getFormString(formData, "role") as ManagedUserRole);
-}
 
 function normalizeAiGatewayModelInput(input: AiGatewayModelMutationInput): typeof aiGatewayModels.$inferInsert {
   return {
@@ -295,33 +232,6 @@ function normalizePartialAiGatewayModelInput(input: Partial<AiGatewayModelMutati
 
 function normalizeId(id: string) {
   return normalizeRequiredString(id, "AI Gateway model id");
-}
-
-function normalizeManagedUserId(id: string) {
-  return normalizeRequiredString(id, "User id");
-}
-
-function normalizeManagedRole(role: string): ManagedUserRole {
-  if (role !== "operator" && role !== "admin") {
-    throw new Error("Role must be operator or admin.");
-  }
-
-  return role;
-}
-
-function getFormString(formData: FormData, key: string) {
-  const value = formData.get(key);
-  return typeof value === "string" ? value : "";
-}
-
-function roleDeltaAudit(result: UserRoleDeltaResult) {
-  const summary = JSON.stringify({ role: result.role });
-  return {
-    operation: "update" as const,
-    targetType: "user_role",
-    targetId: result.targetUserId,
-    ...(result.operation === "grant" ? { afterSummary: summary } : { beforeSummary: summary }),
-  };
 }
 
 function normalizeRequiredString(value: string, label: string) {

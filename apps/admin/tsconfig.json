@@ -1,0 +1,5 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": { "rootDir": "../..", "noEmit": true, "incremental": false, "plugins": [{ "name": "next" }] },
+  "include": ["**/*.ts", "**/*.tsx", ".next/types/**/*.ts", "../../packages/config/src/**/*.ts", "../../packages/contracts/src/**/*.ts"]
+}

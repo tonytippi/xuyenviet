@@ -99,6 +99,21 @@ describe("AI Ask owned conversation listing", () => {
     expect(summaries[0].preview.endsWith("…")).toBe(true);
     expect(summaries[0].preview.length).toBeLessThanOrEqual(61);
   });
+
+  test("does not omit later conversations when an earlier one has many user messages", async () => {
+    await createTestUser("user-1");
+    const [recent] = await testDb.insert(conversations).values({ userId: "user-1", updatedAt: new Date("2026-07-02T00:00:00.000Z") }).returning({ id: conversations.id });
+    const [older] = await testDb.insert(conversations).values({ userId: "user-1", updatedAt: new Date("2026-07-01T00:00:00.000Z") }).returning({ id: conversations.id });
+    await testDb.insert(messages).values(Array.from({ length: 2_001 }, (_, index) => ({ conversationId: recent.id, userId: "user-1", role: "user" as const, content: `Câu hỏi ${index}` })));
+    await testDb.insert(messages).values({ conversationId: older.id, userId: "user-1", role: "user", content: "Vẫn phải xuất hiện" });
+    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }) }));
+    const { listOwnedConversations } = await import("@/features/chat-trips/conversations");
+
+    await expect(listOwnedConversations()).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: recent.id, preview: expect.stringMatching(/^Câu hỏi \d+$/) }),
+      expect.objectContaining({ id: older.id, preview: "Vẫn phải xuất hiện" }),
+    ]));
+  });
 });
 
 describe("AI Ask owned conversation deletion", () => {

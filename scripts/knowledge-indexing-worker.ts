@@ -6,20 +6,17 @@ type WorkerOptions = {
   batchSize?: number;
 };
 
-function parseOptions(argv: string[]): WorkerOptions {
-  const once = argv.includes("--once");
-  const batchSizeArg = argv.find((arg) => arg.startsWith("--batch-size="));
-  const batchSize = batchSizeArg ? Number(batchSizeArg.slice("--batch-size=".length)) : undefined;
+export function parseKnowledgeIndexingWorkerArguments(argv: string[]): WorkerOptions {
+  if (argv.length !== 1 || argv[0] !== "--once") throw new Error("Usage: knowledge:indexing-worker --once");
 
   return {
-    once,
-    batchSize: Number.isFinite(batchSize) ? batchSize : undefined,
+    once: true,
   };
 }
 
 async function main() {
   loadWorkerEnv();
-  const options = parseOptions(process.argv.slice(2));
+  const options = parseKnowledgeIndexingWorkerArguments(process.argv.slice(2));
   const controller = new AbortController();
   const stop = () => controller.abort();
 
@@ -30,13 +27,13 @@ async function main() {
     once: options.once,
     batchSize: options.batchSize,
     signal: controller.signal,
-    onWorkClaimed: (claims) => console.log("Knowledge indexing worker processing", claims.map((claim) => ({ markerId: claim.markerId, cardId: claim.cardId, contentVersion: claim.contentVersion }))),
-    onWorkComplete: (work) => {
-      if (work.status === "indexed") console.log("Knowledge indexing worker completed batch", { indexedCount: work.indexedCount, skippedCount: work.skippedCount, cardIds: work.cardIds });
-      else if (options.once) console.log("Knowledge indexing worker found no work");
+    onObservation: (observation) => {
+      if (observation.resultCode === "no_work" && options.once) console.log("Knowledge indexing worker found no work");
+      else console.log("Knowledge indexing worker observation", observation);
     },
   });
   console.log("Knowledge indexing worker stopped", result);
+  process.exitCode = 0;
 }
 
 function loadWorkerEnv() {

@@ -11,6 +11,7 @@ opencode.jsonc
 
 node_modules/
 .next/
+**/.next/
 .playwright/
 .vercel/
 out/

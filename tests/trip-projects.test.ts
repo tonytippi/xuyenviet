@@ -1,7 +1,7 @@
 import { asc, eq, sql } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { aiUsageEvents, answerUsefulnessFeedback, assistantResponseProvenance, assistantRetrievalDecisions, auditEvents, chatContext, conversations, messageImageAttachments, messages, tripChangeProposals, tripPlanItems, tripProjectConstraints, tripProjects, users, webSearchResults } from "@/db/schema";
+import { aiAskCommands, aiUsageEvents, answerUsefulnessFeedback, assistantResponseProvenance, assistantRetrievalDecisions, auditEvents, chatContext, conversations, messageImageAttachments, messages, tripAnswerContextSnapshots, tripChangeProposals, tripPlanItems, tripProjectConstraints, tripProjects, users, webSearchResults } from "@/db/schema";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
 
@@ -108,7 +108,7 @@ describe("Trip project helpers", () => {
     expect(summary?.historicChats).toEqual([]);
   });
 
-  test("resolves one deterministic primary without changing the aggregate version", async () => {
+  test("resolves one deterministic primary and advances fences only for the primary-link mutation", async () => {
     await createTestUser("user-1");
     const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Hà Giang" }).returning();
     await testDb.insert(conversations).values({ id: "older", userId: "user-1", tripProjectId: project.id, updatedAt: new Date("2026-07-01T00:00:00.000Z") });
@@ -119,7 +119,9 @@ describe("Trip project helpers", () => {
     await expect(resolveOwnedPrimaryConversation(project.id)).resolves.toMatchObject({ id: "newer" });
     await expect(resolveOwnedPrimaryConversation(project.id)).resolves.toMatchObject({ id: "newer" });
     const [savedProject] = await testDb.select().from(tripProjects).where(eq(tripProjects.id, project.id));
-    expect(savedProject).toMatchObject({ primaryConversationId: "newer", aggregateVersion: 1 });
+    const [savedPrimary] = await testDb.select().from(conversations).where(eq(conversations.id, "newer"));
+    expect(savedProject).toMatchObject({ primaryConversationId: "newer", aggregateVersion: 2 });
+    expect(savedPrimary.lifecycleVersion).toBe(2);
   });
 
   test("serializes concurrent first primary resolution without duplicate conversations", async () => {
@@ -134,7 +136,7 @@ describe("Trip project helpers", () => {
 
     expect(new Set(resolved.map((conversation) => conversation?.id)).size).toBe(1);
     expect(rows).toHaveLength(1);
-    expect(savedProject).toMatchObject({ primaryConversationId: rows[0].id, aggregateVersion: 1 });
+    expect(savedProject).toMatchObject({ primaryConversationId: rows[0].id, aggregateVersion: 2 });
   });
 
   test("database pointer rejects cross-project and cross-owner conversations", async () => {
@@ -150,16 +152,28 @@ describe("Trip project helpers", () => {
     await expect(testDb.update(tripProjects).set({ primaryConversationId: wrongOwner.id }).where(eq(tripProjects.id, project.id))).rejects.toThrow();
   });
 
-  test("deleting a trip project detaches related conversations without clearing ownership", async () => {
+  test("direct database project deletion detaches conversations and cascades project snapshots", async () => {
     await createTestUser("user-1");
     const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Hà Giang" }).returning({ id: tripProjects.id });
     const [conversation] = await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id }).returning({ id: conversations.id });
+    const [assistantMessage] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "assistant", content: "Ngữ cảnh riêng tư." }).returning({ id: messages.id });
     await testDb.update(tripProjects).set({ primaryConversationId: conversation.id }).where(eq(tripProjects.id, project.id));
+    await testDb.insert(tripAnswerContextSnapshots).values({
+      userId: "user-1",
+      conversationId: conversation.id,
+      assistantMessageId: assistantMessage.id,
+      tripProjectId: project.id,
+      contextVersion: 1,
+      aggregateVersion: 1,
+      serialization: JSON.stringify({ destination: "Không được giữ lại" }),
+      promptDigest: "a".repeat(64),
+    });
 
     await testDb.delete(tripProjects).where(eq(tripProjects.id, project.id));
     const [savedConversation] = await testDb.select().from(conversations).where(eq(conversations.id, conversation.id));
 
     expect(savedConversation).toMatchObject({ id: conversation.id, userId: "user-1", tripProjectId: null });
+    await expect(testDb.select().from(tripAnswerContextSnapshots)).resolves.toEqual([]);
   });
 
   test("returns unauthenticated and does not delete a trip project without a session", async () => {
@@ -211,6 +225,33 @@ describe("Trip project helpers", () => {
       value: "Đà Nẵng bí mật",
       confidence: 90,
     });
+    const [snapshot] = await testDb.insert(tripAnswerContextSnapshots).values({
+      userId: "user-1",
+      conversationId: conversation.id,
+      assistantMessageId: assistantMessage.id,
+      tripProjectId: project.id,
+      contextVersion: 1,
+      aggregateVersion: 1,
+      serialization: JSON.stringify({ primaryConversationId: conversation.id }),
+      promptDigest: "a".repeat(64),
+    }).returning({ id: tripAnswerContextSnapshots.id });
+    await testDb.insert(aiAskCommands).values({
+      userId: "user-1",
+      scopeKind: "trip_project",
+      scopeId: project.id,
+      idempotencyKey: "project_delete_snapshot",
+      requestDigest: "b".repeat(64),
+      normalizedQuestion: "Xóa dự án",
+      selectedScopeDigest: "c".repeat(64),
+      status: "completed",
+      conversationId: conversation.id,
+      tripProjectId: project.id,
+      assistantMessageId: assistantMessage.id,
+      tripAnswerContextSnapshotId: snapshot.id,
+      terminalAt: new Date(),
+      terminalResult: { type: "done" },
+      expiresAt: new Date(Date.now() + 60_000),
+    });
     vi.doMock("@/server/auth", () => ({
       getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }),
     }));
@@ -219,6 +260,8 @@ describe("Trip project helpers", () => {
     await expect(deleteOwnedTripProject(project.id)).resolves.toEqual({ success: true });
     await expect(testDb.select().from(tripProjects)).resolves.toHaveLength(0);
     await expect(testDb.select().from(chatContext)).resolves.toHaveLength(0);
+    await expect(testDb.select().from(tripAnswerContextSnapshots)).resolves.toHaveLength(0);
+    await expect(testDb.select({ status: aiAskCommands.status, tripAnswerContextSnapshotId: aiAskCommands.tripAnswerContextSnapshotId }).from(aiAskCommands)).resolves.toEqual([{ status: "discarded", tripAnswerContextSnapshotId: null }]);
     const savedConversations = await testDb.select().from(conversations).where(eq(conversations.id, conversation.id));
     const savedMessages = await testDb.select().from(messages).where(eq(messages.conversationId, conversation.id));
     const attachments = await testDb.select().from(messageImageAttachments).where(eq(messageImageAttachments.conversationId, conversation.id));
@@ -229,14 +272,14 @@ describe("Trip project helpers", () => {
     const [usage] = await testDb.select().from(aiUsageEvents);
     const [audit] = await testDb.select().from(auditEvents);
 
-    expect(savedConversations).toHaveLength(0);
-    expect(savedMessages).toHaveLength(0);
-    expect(attachments).toHaveLength(0);
-    expect(retrieval).toHaveLength(0);
-    expect(provenance).toHaveLength(0);
-    expect(feedback).toHaveLength(0);
-    expect(searchRows).toHaveLength(0);
-    expect(usage).toMatchObject({ conversationId: null, userMessageId: null, assistantMessageId: null });
+    expect(savedConversations).toEqual([]);
+    expect(savedMessages).toEqual([]);
+    expect(attachments).toEqual([]);
+    expect(retrieval).toEqual([]);
+    expect(provenance).toEqual([]);
+    expect(feedback).toEqual([]);
+    expect(searchRows).toEqual([]);
+    expect(usage).toMatchObject({ tripProjectId: null, conversationId: null, userMessageId: null, assistantMessageId: null });
     expect(audit).toMatchObject({ actorUserId: "user-1", operation: "delete", targetType: "trip_project", targetId: project.id });
     expect(audit.beforeSummary).toContain('"linkedConversationCount":1');
     expect(audit.beforeSummary).toContain('"chatContextCount":1');
@@ -429,8 +472,8 @@ describe("Trip project helpers", () => {
     expect(summary?.planItems.map((item) => item.label)).toEqual(["Hà Nội", "Chạy xe Hà Nội - Huế", "Khách sạn Huế"]);
     expect(summary?.constraints).toMatchObject({ adultCount: 2, childCount: 1, vehicleType: "car", drivingToleranceHours: 4, budgetCurrency: "VND", budgetMinVnd: 5_000_000, budgetMaxVnd: 10_000_000, preferenceTags: ["Thiên nhiên", "Văn hoá"] });
     expect(summary?.tripHome.kind).toBe("confirmed-item-gap");
-    // Read-only: aggregate version, item versions, and constraints version must not change.
-    expect(savedProject.aggregateVersion).toBe(1);
+    // Resolving the initially unlinked primary is the one intentional aggregate mutation.
+    expect(savedProject.aggregateVersion).toBe(2);
     expect(savedPlanItems.every((item) => item.version === 1)).toBe(true);
     expect(savedConstraints.version).toBe(1);
   });
@@ -481,16 +524,19 @@ describe("Trip project helpers", () => {
     const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế" }).returning({ id: tripProjects.id });
     await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id });
     vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }) }));
-    const { getOwnedTripProjectSummary } = await import("@/features/chat-trips/trip-projects");
+    const { getOwnedTripProjectSummary, resolveOwnedPrimaryConversation } = await import("@/features/chat-trips/trip-projects");
 
+    await resolveOwnedPrimaryConversation(project.id);
     const auditsBefore = await testDb.select().from(auditEvents);
+    const [projectBefore] = await testDb.select().from(tripProjects).where(eq(tripProjects.id, project.id));
     await getOwnedTripProjectSummary(project.id);
     await getOwnedTripProjectSummary(project.id);
     const auditsAfter = await testDb.select().from(auditEvents);
     const [savedProject] = await testDb.select().from(tripProjects).where(eq(tripProjects.id, project.id));
 
     expect(auditsAfter).toHaveLength(auditsBefore.length);
-    expect(savedProject.aggregateVersion).toBe(1);
+    expect(projectBefore.aggregateVersion).toBe(2);
+    expect(savedProject.aggregateVersion).toBe(projectBefore.aggregateVersion);
   });
 
   test("getOwnedTripProjectSummary feeds real pending proposals into the workspace read model", async () => {

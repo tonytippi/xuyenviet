@@ -88,7 +88,7 @@ Do not use `pnpm db:reset` for test verification: Vitest owns only `DATABASE_URL
 
 ## Server deployment
 
-Docker Compose runs the web application plus the long-running legacy extraction, canonical ingestion, and indexing workers. PostgreSQL remains external and must be reachable through the `DATABASE_URL` set in the deployment environment file.
+Docker Compose runs the web application and one dedicated Worker service. PostgreSQL remains external and must be reachable through the `DATABASE_URL` set in the deployment environment file. Run migrations before starting any workload that claims durable work. The migration release job records schema only after Drizzle succeeds; web, API, and Worker readiness fail closed for a missing, malformed, duplicated, or incompatible release record.
 
 1. Create a production environment file, for example `production.env`, from `.env.example`. Set `APP_ENV="production"`, a TLS-enabled non-localhost `DATABASE_URL` required by the selected Postgres provider, `AUTH_URL` to the public HTTPS Cloudflare Tunnel hostname, and real provider/authentication secrets.
 2. Run migrations once for each release that includes database changes:
@@ -103,7 +103,7 @@ Docker Compose runs the web application plus the long-running legacy extraction,
    ENV_FILE=production.env docker compose up -d --build
    ```
 
-The application binds to `127.0.0.1:3000` only. Configure the Cloudflare Tunnel origin as `http://localhost:3000`; no public inbound port needs to be exposed by the server. The container readiness check at `/api/health` validates its production environment and external database connection. The `knowledge-extractor`, `knowledge-ingestion`, and `knowledge-indexing` services run continuously and restart independently. Use the same `ENV_FILE` value with `docker compose logs -f app`, `docker compose logs -f knowledge-ingestion`, and `docker compose down`.
+The application binds to `127.0.0.1:3000` only. Configure the Cloudflare Tunnel origin as `http://localhost:3000`; no public inbound port needs to be exposed by the server. The Worker listens on container port `3002`, published by Compose only on host loopback; `GET /health/live` is process liveness and `GET /health/ready` requires valid configuration, PostgreSQL, and all assigned loops to be poll-eligible. On `SIGTERM` or `SIGINT`, it becomes non-ready before it stops admitting new polls, then allows in-flight work to settle through the feature-owned durable protocol. Use the same `ENV_FILE` value with `docker compose logs -f app`, `docker compose logs -f worker`, and `docker compose down`.
 
 Database scripts:
 
@@ -120,23 +120,38 @@ Operations scripts:
 pnpm facebook:capture --limit 5
 pnpm youtube:capture --limit 5
 pnpm capture-cache:migrate
-pnpm knowledge:extraction-worker
-pnpm knowledge:extraction-worker --once
-pnpm knowledge:ingestion-worker
-pnpm knowledge:ingestion-worker --once
-pnpm knowledge:indexing-worker
+pnpm knowledge:extraction-worker --once --worker-id=debug-extraction
+pnpm knowledge:ingestion-worker --once --worker-id=debug-ingestion
 pnpm knowledge:indexing-worker --once
+pnpm worker
+pnpm trip-proposal-expiry --once
+pnpm knowledge:assistant-provenance-withdrawal-backfill --execute
 ```
 
 `facebook:capture` reads queued Facebook source links from PostgreSQL and saves visible captured text for later operator review. See `docs/runbooks/facebook-capture.md` for its current production-scheduling blockers and recovery procedure.
 
 Capture commands use two databases: `DATABASE_URL` is the application database reached through the protected operator tunnel, while `CAPTURE_CACHE_DATABASE_URL` is a separate local PostgreSQL archive. Run `pnpm capture-cache:migrate` once before capture. The commands fail closed if either URL is invalid, the targets are the same, or the archive schema is absent. Back up the local archive with encrypted, tested restores; it contains durable validated capture artifacts and is required to replay after an application database reset. Never commit either URL, Gemini keys, browser profiles, or backups.
 
-`knowledge:extraction-worker` runs queued AI knowledge extraction jobs outside the admin request path. Use the default long-running mode for production worker processes, or `--once` for local/debug runs. The worker uses PostgreSQL job state, retries transient provider failures, and requeues stale `running` jobs after `KNOWLEDGE_EXTRACTION_WORKER_STALE_MS`.
+`pnpm worker` is the sole continuous owner for extraction, canonical ingestion, indexing, and AI Ask domain-outbox delivery. The legacy `knowledge:*worker` commands remain local/debug one-poll adapters only and must not be deployed alongside it. The Worker invokes feature-owned work paths without changing their PostgreSQL claim, lease, fencing, CAS, or idempotency protocols. See [`docs/runbooks/worker-operations.md`](docs/runbooks/worker-operations.md) for schema admission, safe telemetry, lifecycle checks, and repository proof.
 
-`knowledge:ingestion-worker` runs the canonical source-version ingestion pipeline outside the request path. It recovers expired fenced jobs, processes queued jobs continuously, and waits for `KNOWLEDGE_INGESTION_WORKER_POLL_MS` when no work is available. Use `--once` only for local/debug runs; production must run the `knowledge-ingestion` supervised service.
+`pnpm trip-proposal-expiry --once` is a finite scheduled-maintenance command. A scheduler may launch exactly this command, never a perpetual proposal-expiry process. It rejects every argument other than `--once`; source-retention and provenance-withdrawal commands remain explicit operator operations, and Facebook/YouTube capture remains external operator-controlled work.
 
-`knowledge:indexing-worker` continuously indexes approved, source-linked knowledge cards into active search documents for AI Ask retrieval. Use `--once` to backfill the next batch locally/debug. Tune polling with `KNOWLEDGE_INDEXING_WORKER_POLL_MS` and batch size with `KNOWLEDGE_INDEXING_WORKER_BATCH_SIZE`.
+### Separate admin BFF
+
+`apps/admin` is an independent Next.js BFF deployment for `admin.xuyenviet.app`, not a second database or domain runtime. Railway must select Docker target `admin-runner`, use its own service/release lifecycle and readiness probe `GET /api/health`, and connect to `https://api.railway.internal` only through Railway private networking. Run the migration job before allowing either API or admin traffic. The Compose `admin` profile is syntax/build validation only: Compose does not alias `api.railway.internal` to its plaintext API service, and it does not provide Railway private HTTPS or a local OAuth callback environment. It must not be treated as a functional local admin/API or end-to-end admin sign-in proof.
+
+The API service owns Google OAuth client credentials, OAuth state/PKCE/code exchange, persistent opaque sessions, role checks, and release admission. Compose reads separate `.web.env`, `.worker.env`, `.api.env`, and `.admin.env` files. The admin service gets only its isolated ES256 private signing key, host origin, signed CSRF secret, private API URL, and service authentication token. `XV_ADMIN_GOOGLE_CLIENT_ID` and `XV_ADMIN_GOOGLE_CLIENT_SECRET` are API-only. Web and Worker receive no admin signer, CSRF, or handoff values; API receives public BFF verification material, Google credentials, and the handoff token but no admin private key or CSRF secret. Do not give the admin service `DATABASE_URL`, `AUTH_GOOGLE_SECRET`, traveler Auth.js cookies/secrets, provider tokens, or API verification private keys. Configure Google with the exact `https://admin.xuyenviet.app/api/auth/callback` redirect URI; the callback adapter forwards only its code/state to API Identity.
+
+Admin browser session cookies use `__Host-` names with `Secure`, `HttpOnly`, `SameSite=Strict`, and `Path=/`, and deliberately have no `Domain` attribute. The short-lived OAuth transaction cookie is also host-only but `SameSite=Lax` so Google can return through a top-level callback. An unauthenticated `GET /api/auth/csrf` issues only the distinct signed double-submit CSRF token; it never exposes session or identity data. They are not interchangeable with traveler cookies. Staging DNS, Railway private networking, Google redirect registration, migration completion, and readiness-probe evidence must be collected by deployment owners outside repository tests; this repository makes no staging deployment claim.
+
+### Assistant provenance withdrawal backfill release procedure
+
+`knowledge:assistant-provenance-withdrawal-backfill` is an explicit, one-time operator maintenance command. It is not a scheduled worker. It refuses to run without `--execute`, processes bounded batches of 1 through 500 rows, and continues synchronously until it reaches a terminal `completed` or `failed` result. Its output contains only the terminal status, batch count, scanned count, and safe failure code when applicable.
+
+1. Put the deployment into a quiescent maintenance window. Stop the application and all workers that can create assistant provenance or withdraw sources/evidence. Do not deploy or run competing operator maintenance while the command is active.
+2. Run `pnpm knowledge:assistant-provenance-withdrawal-backfill --execute`. Use `--batch-size=1..500` only to bound each transaction. Do not interrupt a progressing run.
+3. If it reports `failed`, keep the deployment quiescent, repair the data indicated by its safe failure code through the operator workflow, then rerun with `--execute --retry-failed`. Do not release traffic while the state is failed.
+4. Release the application and workers only after the command reports `completed`. The command is safe to invoke again after completion and reports zero new work.
 
 ## Public launch safety
 

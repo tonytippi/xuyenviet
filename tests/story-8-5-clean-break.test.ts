@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 
 import { eq, inArray, like } from "drizzle-orm";
+import postgres from "postgres";
 import { beforeEach, describe, expect, test } from "vitest";
 
 import {
@@ -17,6 +18,7 @@ import {
 } from "@/db/schema";
 import { recordAuditEvent } from "@/features/audit/events";
 
+import { resolveDatabaseTargetIdentity } from "../scripts/db-env";
 import { resetTestDatabase, testDb } from "./helpers/db";
 import { getTestDatabaseUrl } from "./helpers/env-file";
 
@@ -28,13 +30,30 @@ const reservedUserIds = [
 ];
 const testDatabaseUrl = getTestDatabaseUrl();
 
+async function resolveTestDatabaseIdentity(): Promise<string> {
+  const sql = postgres(testDatabaseUrl, { max: 1 });
+  try {
+    return await resolveDatabaseTargetIdentity(sql);
+  } finally {
+    await sql.end();
+  }
+}
+
 describe("Story 8.5 clean-break seed", () => {
   beforeEach(async () => {
     await resetTestDatabase();
+    const expectedIdentity = await resolveTestDatabaseIdentity();
     execFileSync("pnpm", ["exec", "tsx", "scripts/db-seed.ts"], {
       cwd: process.cwd(),
       // The seed subprocess must not inherit Vitest's DATABASE_URL remapping.
-      env: { ...process.env, APP_ENV: "local", DATABASE_URL: testDatabaseUrl },
+      env: {
+        ...process.env,
+        APP_ENV: "local",
+        DATABASE_URL: testDatabaseUrl,
+        DB_RESET_DISPOSABLE_CONFIRMATION: "confirm-disposable-reset",
+        DB_RESET_NO_RUNTIME_OVERLAP: "confirm-no-runtime-overlap",
+        DB_RESET_EXPECTED_TARGET_IDENTITY: expectedIdentity,
+      },
       stdio: "inherit",
     });
   });

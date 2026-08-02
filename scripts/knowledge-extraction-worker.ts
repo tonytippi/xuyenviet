@@ -6,19 +6,21 @@ type WorkerOptions = {
   workerId: string;
 };
 
-function parseOptions(argv: string[]): WorkerOptions {
-  const once = argv.includes("--once");
-  const workerIdArg = argv.find((arg) => arg.startsWith("--worker-id="));
+export function parseKnowledgeExtractionWorkerArguments(argv: string[]): WorkerOptions {
+  if (argv.length !== 2 || argv[0] !== "--once" || !argv[1].startsWith("--worker-id=")) throw new Error("Usage: knowledge:extraction-worker --once --worker-id=<safe-id>");
+  const workerIdArg = argv[1];
+  const workerId = workerIdArg.slice("--worker-id=".length);
+  if (!/^[a-zA-Z0-9_.:-]{1,160}$/.test(workerId)) throw new Error("Worker ID is invalid.");
 
   return {
-    once,
-    workerId: workerIdArg?.slice("--worker-id=".length) || `knowledge-extraction-worker-${process.pid}`,
+    once: true,
+    workerId,
   };
 }
 
 async function main() {
   loadWorkerEnv();
-  const options = parseOptions(process.argv.slice(2));
+  const options = parseKnowledgeExtractionWorkerArguments(process.argv.slice(2));
   const controller = new AbortController();
   const stop = () => controller.abort();
 
@@ -27,6 +29,7 @@ async function main() {
 
   const result = await runKnowledgeExtractionWorkerLoop({ once: options.once, workerId: options.workerId, signal: controller.signal });
   console.log("Knowledge extraction worker stopped", result);
+  process.exitCode = 0;
 }
 
 function loadWorkerEnv() {

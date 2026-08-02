@@ -86,6 +86,7 @@ describe("Story 7.5 trip-proposal-expiry-worker", () => {
     expect(rows[0]?.status).toBe("expired");
   });
 
+
   test("concurrent workers do not double-process the same row (FOR UPDATE SKIP LOCKED)", async () => {
     await createTestUser("worker-user-4");
     const past = new Date("2026-01-01T00:00:00.000Z");

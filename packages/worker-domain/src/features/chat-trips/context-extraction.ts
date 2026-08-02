@@ -1,0 +1,435 @@
+import { and, asc, eq } from "drizzle-orm";
+
+import { getDb } from "@xuyenviet/database";
+import { aiAskCommands, chatContext, chatContextFieldValues, conversations, domainOutboxEffects, messages, tripProjects, type ChatContextField, type ChatContextScope } from "@xuyenviet/database";
+import { completeDomainOutboxClaimInTransaction, failDomainOutboxClaimInTransaction, hasActiveDomainOutboxClaim, type AiAskOutboxEnvelope, type DomainOutboxClaim } from "../ai/domain-outbox";
+import { completeExtraction } from "../ai/gateway";
+import { getAiGatewayPricingSnapshot } from "../ai/models";
+import { selectActiveAiGatewayModel } from "../ai/models";
+import { buildChatContextExtractionMessages, chatContextExtractionPromptVersion, chatContextExtractionPurpose } from "../ai/prompts";
+import { recordAuditEvent } from "../audit/events";
+import { toUserAuditActor } from "../audit/actors";
+import { writeAiUsageEvent, type WriteAiUsageEventInput } from "../audit/usage";
+
+type PromptHistoryMessage = { role: "user" | "assistant"; content: string };
+
+type ExtractChatTripContextInput = {
+  session: { userId: string; email: string };
+  conversationId: string;
+  tripProjectId?: string;
+  userMessage: { id: string; content: string };
+  history: PromptHistoryMessage[];
+  abortSignal?: AbortSignal;
+};
+
+type Transaction = Parameters<ReturnType<typeof getDb>["transaction"]>[0] extends (transaction: infer T) => unknown ? T : never;
+
+const allowedContextFields = new Set<string>(chatContextFieldValues);
+const maxContextValueLength = 500;
+const sensitivePatterns = [
+  /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i,
+  /(?:\+?84|0)(?:[\s().-]*\d){8,12}\b/,
+  /\b(?:cccd|cmnd|passport|hộ chiếu|can cuoc|căn cước|id card|visa)\b/i,
+  /\b(?:credit card|thẻ tín dụng|số thẻ|cvv|otp|password|mật khẩu|token|api key)\b/i,
+  /\b(?:dị ứng|tiểu đường|huyết áp|bệnh|medical|medicine|thuốc)\b/i,
+  /\b(?:địa chỉ nhà|home address|street address)\b/i,
+];
+const childNamePattern = /\b(?:con|bé|trẻ|child|kid)\s+(?:(?:tôi|mình|của tôi|của mình|cua toi|cua minh)\s+)?(?:(?:tên|named|name is)\s+)?[\p{L}]{2,30}(?:\s+[\p{L}]{2,30}){0,2}(?:\s+(?:\d{1,2}\s*tuổi|years? old|yo))?\b/iu;
+const unrelatedPersonalPatterns = [
+  /\b(?:vợ|chồng|bạn gái|bạn trai|wife|husband|girlfriend|boyfriend)\s+(?:[A-ZÀ-Ỹ][\p{L}]{1,30}(?:\s+[A-ZÀ-Ỹ][\p{L}]{1,30})?|(?:tên|named|name is)\s+[^,.\n]{2,80})/iu,
+  /\b(?:làm ở|works at|company|công ty)\s+[^,.\n]{2,80}/i,
+];
+
+export async function extractChatTripContext(input: ExtractChatTripContextInput) {
+  const db = getDb();
+  const [conversation] = await db
+    .select({ id: conversations.id, tripProjectId: conversations.tripProjectId })
+    .from(conversations)
+    .where(and(eq(conversations.id, input.conversationId), eq(conversations.userId, input.session.userId)))
+    .limit(1);
+
+  if (!conversation || conversation.tripProjectId !== (input.tripProjectId ?? null)) {
+    return { attemptedProviderCall: false, persistedFacts: 0 };
+  }
+
+  const [sourceMessage] = await db
+    .select({ id: messages.id })
+    .from(messages)
+    .where(and(eq(messages.id, input.userMessage.id), eq(messages.conversationId, input.conversationId), eq(messages.userId, input.session.userId), eq(messages.role, "user")))
+    .limit(1);
+
+  if (!sourceMessage) {
+    return { attemptedProviderCall: false, persistedFacts: 0 };
+  }
+
+  const selectedModel = await selectActiveAiGatewayModel({
+    purpose: chatContextExtractionPurpose,
+    requiredCapabilities: { textInput: true, extraction: true },
+  });
+
+  if (!selectedModel) {
+    return { attemptedProviderCall: false, persistedFacts: 0 };
+  }
+
+  const extractionMessages = buildChatContextExtractionMessages({
+    question: input.userMessage.content,
+    history: input.history,
+    projectScopeAvailable: Boolean(input.tripProjectId),
+  });
+  const pricingSnapshot = getAiGatewayPricingSnapshot(selectedModel);
+  const extractionResult = await completeExtraction({ model: selectedModel.gatewayModelName, messages: extractionMessages, abortSignal: input.abortSignal });
+
+  if (!extractionResult.ok) {
+    await recordExtractionUsage(db, {
+      initiatedByUserId: input.session.userId,
+      executorSystem: "system-ai-orchestration",
+      tripProjectId: input.tripProjectId,
+      conversationId: input.conversationId,
+      userMessageId: input.userMessage.id,
+      purpose: chatContextExtractionPurpose,
+      provider: extractionResult.provider,
+      model: extractionResult.model,
+      aiGatewayModelId: selectedModel.id,
+      promptVersion: chatContextExtractionPromptVersion,
+      status: "failure",
+      latencyMs: extractionResult.latencyMs,
+      pricingSnapshot,
+      errorCode: extractionResult.errorCode,
+    });
+
+    return { attemptedProviderCall: true, persistedFacts: 0 };
+  }
+
+  const facts = parseAllowedFacts(extractionResult.content, Boolean(input.tripProjectId), input.userMessage.content);
+
+  await recordExtractionUsage(db, {
+    initiatedByUserId: input.session.userId,
+    executorSystem: "system-ai-orchestration",
+    tripProjectId: input.tripProjectId,
+    conversationId: input.conversationId,
+    userMessageId: input.userMessage.id,
+    purpose: chatContextExtractionPurpose,
+    provider: extractionResult.provider,
+    model: extractionResult.model,
+    aiGatewayModelId: selectedModel.id,
+    promptVersion: chatContextExtractionPromptVersion,
+    status: "success",
+    latencyMs: extractionResult.latencyMs,
+    promptTokens: extractionResult.usage.promptTokens,
+    completionTokens: extractionResult.usage.completionTokens,
+    totalTokens: extractionResult.usage.totalTokens,
+    cachedPromptTokens: extractionResult.usage.cachedPromptTokens,
+    cacheWritePromptTokens: extractionResult.usage.cacheWritePromptTokens,
+    pricingSnapshot,
+  });
+
+  if (facts.length === 0) {
+    return { attemptedProviderCall: true, persistedFacts: 0 };
+  }
+
+  await db.transaction(async (transaction) => {
+    await transaction.insert(chatContext).values(facts.map((fact) => ({
+      userId: input.session.userId,
+      conversationId: input.conversationId,
+      tripProjectId: fact.scope === "trip_project" ? input.tripProjectId ?? null : null,
+      sourceMessageId: input.userMessage.id,
+      field: fact.field,
+      value: fact.value,
+      scope: fact.scope,
+      confidence: fact.confidence,
+    })));
+
+    await recordAuditEvent({
+      actor: toUserAuditActor({ userId: input.session.userId, email: input.session.email }),
+      operation: "create",
+      targetType: "chat_context",
+      targetId: input.userMessage.id,
+      afterSummary: JSON.stringify({
+        conversationId: input.conversationId,
+        tripProjectId: input.tripProjectId ?? null,
+        sourceMessageId: input.userMessage.id,
+        persistedFacts: facts.length,
+        conversationScopedFacts: facts.filter((fact) => fact.scope === "conversation").length,
+        tripProjectScopedFacts: facts.filter((fact) => fact.scope === "trip_project").length,
+        fields: facts.map((fact) => fact.field),
+      }),
+    }, transaction);
+  });
+
+  console.info("Chat context extraction persisted", {
+    userId: input.session.userId,
+    conversationId: input.conversationId,
+    sourceMessageId: input.userMessage.id,
+    projectScoped: Boolean(input.tripProjectId),
+    persistedFacts: facts.length,
+    fields: facts.map((fact) => fact.field),
+  });
+
+  return { attemptedProviderCall: true, persistedFacts: facts.length };
+}
+
+// The outbox consumer owns claim/effect coordination while Chat/Trips retains
+// ownership of context, usage, and audit writes.
+export async function extractChatTripContextForOutbox(input: { claim: DomainOutboxClaim; envelope: AiAskOutboxEnvelope }) {
+  const { claim, envelope } = input;
+  if (!envelope.userMessageId || !await validOutboxContextState(getDb(), envelope, false)) return "fenced_out" as const;
+  const db = getDb();
+  const [message] = await db.select({ content: messages.content }).from(messages).where(and(eq(messages.id, envelope.userMessageId), eq(messages.userId, envelope.userId), eq(messages.conversationId, envelope.conversationId), eq(messages.role, "user"))).limit(1);
+  if (!message) return "fenced_out" as const;
+  const selectedModel = await selectActiveAiGatewayModel({ purpose: chatContextExtractionPurpose, requiredCapabilities: { textInput: true, extraction: true } });
+  if (!selectedModel) return completeOutboxContextEffect(claim, envelope, [], null, "context_extraction");
+  const conversationMessages = await db.select({ id: messages.id, role: messages.role, content: messages.content }).from(messages).where(and(eq(messages.userId, envelope.userId), eq(messages.conversationId, envelope.conversationId))).orderBy(asc(messages.createdAt), asc(messages.id));
+  const sourceIndex = conversationMessages.findIndex((row) => row.id === envelope.userMessageId);
+  if (sourceIndex < 0) return "fenced_out" as const;
+  const history = conversationMessages.slice(0, sourceIndex).map(({ role, content }) => ({ role, content }));
+  if (!await hasActiveDomainOutboxClaim(claim)) return "fenced_out" as const;
+  if (!await validOutboxContextState(db, envelope, false)) return "fenced_out" as const;
+  const result = await completeExtraction({ model: selectedModel.gatewayModelName, messages: buildChatContextExtractionMessages({ question: message.content, history, projectScopeAvailable: Boolean(envelope.tripProjectId) }) });
+  if (!result.ok) {
+    const released = await db.transaction(async (transaction) => {
+      if (!await validOutboxContextState(transaction, envelope, true)) return null;
+      return failDomainOutboxClaimInTransaction(transaction, { ...claim, code: "context_provider_failed", retryable: true }, async () => {
+        await writeAiUsageEvent(transaction, {
+          initiatedByUserId: envelope.userId, executorSystem: "system-ai-orchestration", tripProjectId: envelope.tripProjectId,
+          conversationId: envelope.conversationId, userMessageId: envelope.userMessageId, purpose: chatContextExtractionPurpose,
+          provider: result.provider, model: result.model, aiGatewayModelId: selectedModel.id, promptVersion: chatContextExtractionPromptVersion,
+          status: "failure", latencyMs: result.latencyMs, pricingSnapshot: getAiGatewayPricingSnapshot(selectedModel), errorCode: result.errorCode,
+        });
+      });
+    });
+    return released?.status === "pending" ? "retry_scheduled" as const : released?.status === "failed" ? "terminal_failure" as const : "fenced_out" as const;
+  }
+  const facts = parseAllowedFacts(result.content, Boolean(envelope.tripProjectId), message.content);
+  return completeOutboxContextEffect(claim, envelope, facts, {
+    initiatedByUserId: envelope.userId, executorSystem: "system-ai-orchestration", tripProjectId: envelope.tripProjectId,
+    conversationId: envelope.conversationId, userMessageId: envelope.userMessageId, purpose: chatContextExtractionPurpose,
+    provider: result.provider, model: result.model, aiGatewayModelId: selectedModel.id, promptVersion: chatContextExtractionPromptVersion,
+    status: "success", latencyMs: result.latencyMs, promptTokens: result.usage.promptTokens, completionTokens: result.usage.completionTokens,
+    totalTokens: result.usage.totalTokens, cachedPromptTokens: result.usage.cachedPromptTokens, cacheWritePromptTokens: result.usage.cacheWritePromptTokens,
+    pricingSnapshot: getAiGatewayPricingSnapshot(selectedModel),
+  }, "context_extraction");
+}
+
+async function completeOutboxContextEffect(claim: DomainOutboxClaim, envelope: AiAskOutboxEnvelope, facts: Array<{ field: ChatContextField; value: string; scope: ChatContextScope; confidence: number | null }>, usage: WriteAiUsageEventInput | null, effectType: "context_extraction") {
+  return getDb().transaction(async (transaction) => {
+    if (!await validOutboxContextState(transaction, envelope, true)) return "fenced_out" as const;
+    const completion = await completeDomainOutboxClaimInTransaction(transaction, claim, async () => {
+      const [effect] = await transaction.insert(domainOutboxEffects).values({ outboxEventId: claim.id, effectType }).onConflictDoNothing().returning({ id: domainOutboxEffects.id });
+      if (effect) {
+        if (facts.length) await transaction.insert(chatContext).values(facts.map((fact) => ({ userId: envelope.userId, conversationId: envelope.conversationId, tripProjectId: fact.scope === "trip_project" ? envelope.tripProjectId ?? null : null, sourceMessageId: envelope.userMessageId!, field: fact.field, value: fact.value, scope: fact.scope, confidence: fact.confidence })));
+        if (usage) await writeAiUsageEvent(transaction, usage);
+        await recordAuditEvent({ actor: toUserAuditActor({ userId: envelope.userId, email: "outbox@system" }), operation: "create", targetType: "chat_context", targetId: envelope.userMessageId!, afterSummary: JSON.stringify({ conversationId: envelope.conversationId, tripProjectId: envelope.tripProjectId ?? null, sourceMessageId: envelope.userMessageId, persistedFacts: facts.length }) }, transaction);
+      }
+    });
+    return completion.completed ? "completed" as const : "fenced_out" as const;
+  });
+}
+
+async function validOutboxContextState(db: ReturnType<typeof getDb> | Transaction, envelope: AiAskOutboxEnvelope, lock: boolean) {
+  const projectQuery = envelope.tripProjectId
+    ? db.select({ id: tripProjects.id, aggregateVersion: tripProjects.aggregateVersion }).from(tripProjects).where(and(eq(tripProjects.id, envelope.tripProjectId), eq(tripProjects.userId, envelope.userId))).limit(1)
+    : null;
+  const [project] = projectQuery ? lock ? await projectQuery.for("update") : await projectQuery : [];
+  const conversationQuery = db.select({ id: conversations.id, tripProjectId: conversations.tripProjectId, lifecycleVersion: conversations.lifecycleVersion }).from(conversations).where(and(eq(conversations.id, envelope.conversationId), eq(conversations.userId, envelope.userId))).limit(1);
+  const [conversation] = lock ? await conversationQuery.for("update") : await conversationQuery;
+  const commandQuery = db.select({ id: aiAskCommands.id, conversationId: aiAskCommands.conversationId, tripProjectId: aiAskCommands.tripProjectId, userMessageId: aiAskCommands.userMessageId, conversationLifecycleVersion: aiAskCommands.conversationLifecycleVersion, tripProjectAggregateVersion: aiAskCommands.tripProjectAggregateVersion }).from(aiAskCommands).where(and(eq(aiAskCommands.id, envelope.commandId), eq(aiAskCommands.userId, envelope.userId))).limit(1);
+  const [command] = lock ? await commandQuery.for("update") : await commandQuery;
+  const sourceQuery = db.select({ id: messages.id }).from(messages).where(and(eq(messages.id, envelope.userMessageId!), eq(messages.userId, envelope.userId), eq(messages.conversationId, envelope.conversationId), eq(messages.role, "user"))).limit(1);
+  const [source] = lock ? await sourceQuery.for("update") : await sourceQuery;
+  return Boolean(source && command && conversation && (!envelope.tripProjectId || project) && command.conversationId === envelope.conversationId && command.tripProjectId === (envelope.tripProjectId ?? null) && command.userMessageId === envelope.userMessageId && command.conversationLifecycleVersion === envelope.conversationLifecycleVersion && command.tripProjectAggregateVersion === (envelope.tripProjectAggregateVersion ?? null) && conversation.lifecycleVersion === envelope.conversationLifecycleVersion && conversation.tripProjectId === (envelope.tripProjectId ?? null) && project?.aggregateVersion === envelope.tripProjectAggregateVersion);
+}
+
+function parseAllowedFacts(content: string, projectScopeAvailable: boolean, latestUserMessage: string) {
+  const payload = parseJsonObject(content);
+
+  if (!payload || !Array.isArray(payload.facts)) {
+    console.warn("Chat context extraction returned malformed JSON or missing facts array");
+    return [];
+  }
+
+  const facts: Array<{ field: ChatContextField; value: string; scope: ChatContextScope; confidence: number | null }> = [];
+  const seen = new Set<string>();
+  const vagueCorrectionValue = getVagueCorrectionValue(latestUserMessage);
+  const hasCorrectionFieldTarget = mentionsCorrectionFieldTarget(latestUserMessage);
+
+  for (const fact of payload.facts) {
+    if (!isRecord(fact) || typeof fact.field !== "string") {
+      console.warn("Chat context extraction fact rejected for invalid shape", { field: fact?.field });
+      continue;
+    }
+
+    if (!allowedContextFields.has(fact.field)) {
+      console.warn("Chat context extraction fact rejected for unknown field", { field: fact.field });
+      continue;
+    }
+
+    if (!hasCorrectionFieldTarget && isVagueCorrectionGuess(vagueCorrectionValue, fact.value)) {
+      console.warn("Chat context extraction fact rejected for vague correction", { field: fact.field });
+      continue;
+    }
+
+    const coercedValue = coerceFactValue(fact.value);
+
+    if (coercedValue === null) {
+      console.warn("Chat context extraction fact rejected for non-coercible value", { field: fact.field });
+      continue;
+    }
+
+    if (containsSensitiveData(coercedValue)) {
+      console.warn("Chat context extraction fact rejected for sensitive data", { field: fact.field });
+      continue;
+    }
+
+    const value = sanitizeContextValue(coercedValue);
+
+    if (!value) {
+      console.warn("Chat context extraction fact rejected for blank value", { field: fact.field });
+      continue;
+    }
+
+    if (fact.scope !== "trip_project" && fact.scope !== "conversation") {
+      console.warn("Chat context extraction fact rejected for unsupported scope", { field: fact.field, scope: fact.scope });
+      continue;
+    }
+
+    const requestedScope = fact.scope;
+    const scope: ChatContextScope = requestedScope === "trip_project" && projectScopeAvailable ? "trip_project" : "conversation";
+
+    const dedupKey = `${fact.field}:${scope}`;
+    if (seen.has(dedupKey)) {
+      continue;
+    }
+    seen.add(dedupKey);
+
+    facts.push({
+      field: fact.field as ChatContextField,
+      value,
+      scope,
+      confidence: normalizeConfidence(fact.confidence),
+    });
+  }
+
+  return facts;
+}
+
+function parseJsonObject(content: string) {
+  const stripped = content.trim().replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "").trim();
+
+  try {
+    const parsed = JSON.parse(stripped) as unknown;
+
+    return isRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function sanitizeContextValue(value: string) {
+  const trimmed = value
+    .replace(/[\u0000-\u001f\u007f\u00ad\u0600-\u0605\u200b-\u200f\u2028-\u202e\u2060-\u2064\ufeff\ufff9-\ufffb]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return trimmed.slice(0, maxContextValueLength);
+}
+
+function coerceFactValue(value: unknown): string | null {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+
+  if (Array.isArray(value) && value.every((item) => typeof item === "string" || (typeof item === "number" && Number.isFinite(item)))) {
+    return value.map(String).join(", ");
+  }
+
+  return null;
+}
+
+async function recordExtractionUsage(db: ReturnType<typeof getDb>, event: WriteAiUsageEventInput) {
+  try {
+    await writeAiUsageEvent(db, event);
+  } catch (error) {
+    console.warn("Chat context extraction usage event could not be recorded", {
+      conversationId: event.conversationId,
+      userMessageId: event.userMessageId,
+      status: event.status,
+      error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
+    });
+  }
+}
+
+function containsSensitiveData(value: string) {
+  return childNamePattern.test(value) || sensitivePatterns.some((pattern) => pattern.test(value)) || unrelatedPersonalPatterns.some((pattern) => pattern.test(value));
+}
+
+function normalizeConfidence(value: unknown) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return null;
+  }
+
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function getVagueCorrectionValue(message: string) {
+  const normalized = normalizeCorrectionText(message);
+  const match = normalized.match(/(?:sua|doi|thay|y toi la|actually)(?:\s+\S+){0,4}?\s+(?:thanh|to|is)\s+([^,.!?\n]{1,80})/i);
+
+  return match?.[1]?.trim() ?? null;
+}
+
+function isVagueCorrectionGuess(vagueCorrectionValue: string | null, factValue: unknown) {
+  if (!vagueCorrectionValue) {
+    return false;
+  }
+
+  const normalizedCorrectionValue = stripCorrectionValueFiller(normalizeCorrectionText(vagueCorrectionValue));
+  const normalizedFactValue = normalizeCorrectionText(coerceFactValue(factValue) ?? "");
+
+  return Boolean(normalizedCorrectionValue && normalizedFactValue && (normalizedFactValue.includes(normalizedCorrectionValue) || normalizedCorrectionValue.includes(normalizedFactValue)));
+}
+
+function stripCorrectionValueFiller(value: string) {
+  return value.replace(/\b(?:nhe|nha|a|di|vao|cho minh|giup minh)\b/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function mentionsCorrectionFieldTarget(message: string) {
+  const normalized = normalizeCorrectionText(message);
+  const targetPatterns = [
+    /\b(?:diem den|destination|den)\b/,
+    /\b(?:diem xuat phat|origin|tu)\b/,
+    /\b(?:ngay di|ngay ve|start|end|date|ngay)\b/,
+    /\b(?:thoi luong|duration|may ngay)\b/,
+    /\b(?:nguoi lon|adults?)\b/,
+    /\b(?:tre em|children|con|be|tuoi)\b/,
+    /\b(?:ngan sach|budget|trieu)\b/,
+    /\b(?:khach san|hotel)\b/,
+    /\b(?:driving|xe|vehicle|ev|o to|oto)\b/,
+    /\b(?:an|food|mon|am thuc)\b/,
+    /\b(?:hoat dong|activity|choi)\b/,
+    /\b(?:lich trinh|itinerary|rang buoc)\b/,
+    /\b(?:tranh|avoid)\b/,
+    /\b(?:da di|prior|truoc day)\b/,
+    /\b(?:ghi chu|note)\b/,
+  ];
+
+  return targetPatterns.some((pattern) => pattern.test(normalized));
+}
+
+function normalizeCorrectionText(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "d")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}

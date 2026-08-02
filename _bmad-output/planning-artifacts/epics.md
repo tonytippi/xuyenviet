@@ -12,6 +12,10 @@ stepsCompleted:
   - step-02-ad-31-epic-design
   - step-03-ad-31-story-generation
   - step-04-ad-31-final-validation
+  - step-01-architecture-delta-2026-07-28-requirements-extraction
+  - step-02-architecture-delta-2026-07-28-epic-design
+  - step-03-architecture-delta-2026-07-28-story-generation
+  - step-04-architecture-delta-2026-07-28-final-validation
 inputDocuments:
   - _bmad-output/planning-artifacts/prds/prd-xuyenviet-2026-07-04/prd.md
   - _bmad-output/planning-artifacts/prds/prd-xuyenviet-2026-07-04/addendum.md
@@ -113,6 +117,16 @@ FR-47: Record authenticated AI usage with user/context, purpose, model/provider,
 FR-48: Capture valid sign-in referral attribution without rewards, rankings, payouts, or credits.
 FR-49: Manage AI Gateway model records with name, purpose, capabilities, active status, and input/output/cache pricing.
 FR-50: Estimate usage cost from configured pricing and available provider token metadata without billing behavior.
+FR-51: Expose versioned domain API contracts for traveler web, operator app, and future mobile clients without client dependence on Next.js internals or Auth.js session serialization.
+FR-52: Keep the traveler browser behind the Next.js BFF; do not give it an internal API credential or allow it to call the private domain API directly.
+FR-53: Provide a separately deployed operator/admin application with its own origin and release lifecycle that uses the protected API without database credentials or direct domain imports.
+FR-54: Authorize every protected API read and command with a domain-neutral request principal mapped from short-lived, audience-scoped BFF credentials.
+FR-55: Provide a stable API error contract with machine-readable code, safe message, request/correlation ID, and applicable safe field violations without sensitive internals.
+FR-56: Document versioned health/version and protected-capability API contracts, including validation, authorization, ownership, pagination/stable ordering, and streaming semantics where applicable.
+FR-57: Run continuous background work in a dedicated worker runtime and bounded sweeps as scheduled one-shot commands using existing PostgreSQL job, claim, lease, fencing, and idempotency protocols.
+FR-58: Preserve one writer per aggregate command during migration; route each request to exactly one transport owner and never dual-write product state.
+FR-59: Move AI Ask streaming to the versioned API while preserving `preparing`, `delta`, `done`, and `error` NDJSON events, abort behavior, and atomic terminal persistence.
+FR-60: Retire legacy Next.js domain route handlers, server-action writers, and the legacy `/admin` operational surface before public launch.
 
 ### NonFunctional Requirements
 
@@ -127,6 +141,13 @@ NFR-8: Run Facebook capture only as an operator-controlled operations tool, not 
 NFR-9: Keep active AI-extracted claims auditable through decision, evidence, source, state, and review history.
 NFR-10: Trip Project reads and mutations, including primary-conversation access, structured plan data, proposals, and history, remain owner-scoped until a separately approved collaboration model exists.
 NFR-11: Applying a Trip Change Proposal validates the proposal belongs to the selected Trip Project, is still applicable, and is authorized for the owner before writing an auditable change.
+NFR-12: API, worker, traveler web, operator app, and migration workloads deploy independently to staging with least-privilege configuration and health contracts; migrations run before dependent traffic.
+NFR-13: Liveness verifies process operation; readiness verifies assigned configuration, database, and critical dependencies. Worker shutdown stops claims and safely completes or releases leased work.
+NFR-14: Correlation IDs and safe structured telemetry cover BFF, API, worker, and provider operations, including capability, principal class, result, latency, and safe operational identifiers.
+NFR-15: Web/admin-to-API and database traffic remain private; staging and production use isolated credentials, databases, OAuth configuration, API audiences, and observability projects.
+NFR-16: Use clean-break migrations only while data is disposable; durable or overlapping runtimes require approved expand-migrate-contract plans and non-destructive schema rollback behavior.
+NFR-17: Before retiring a legacy worker loop, its replacement dashboard and runbook demonstrate stable lag, retry, lease recovery, duplicate-poller, and restart behavior.
+NFR-18: Before public launch, approve Railway ownership, domains/DNS/CSP/OAuth callbacks, secrets, backup/restore, monitoring, alerting, and on-call; pass connection-pool, AI-stream concurrency, and backup-restore tests.
 
 ### Additional Requirements
 
@@ -193,6 +214,19 @@ UX-DR21: Conversation/project selection is server-loaded and URL-owned; only dra
 UX-DR22: Traveler/admin/public surfaces target WCAG 2.2 AA keyboard, focus, live-region, color-independent, modal, and mobile behavior.
 UX-DR23: Admin knowledge workflows stay separate, structured, explicit, and desktop-optimized for dense review.
 UX-DR24: Referral attribution is silent and introduces no reward/credit/ranking/payout UI.
+
+### Architecture Delta Requirements (2026-07-28)
+
+- ADR-32-1: Web and admin BFFs mint distinct ES256, five-minute, `api.railway.internal` audience credentials only after validating their host-only Auth.js sessions; Nest creates `RequestPrincipal` only after signature, issuer, audience, clock, token ID, live session, subject, and authorization-version validation.
+- ADR-32-2: `user_roles` is authoritative. A one-shot audited `INITIAL_ADMIN_EMAIL` bootstrap may create the first admin only when none exists; subsequent role changes are Admin domain commands that audit, increment authorization version, and cannot revoke the last active admin.
+- ADR-32-3: The private API is bearer-only and sends no CORS allow-origin response. Browsers never call it; BFF cookie-authenticated mutations retain CSRF protection. BFF key rotation supports only active plus bounded previous `kid` verification.
+- ADR-32-4: AI Ask owns a 24-hour, scope-unique command ledger keyed by owner, conversation or Trip Project scope, and an `Idempotency-Key` of 16-128 URL-safe ASCII characters. Reused keys with a changed normalized-payload digest fail safely; identical pending and terminal commands return their persisted state without another provider call.
+- ADR-32-5: AI Ask command creation captures conversation lifecycle and Trip Project aggregate fences under owner locks. Final message, provenance, usage, source-bundle, annotation, and proposal effects persist atomically only while the captured fence holds; a failed fence produces a safe `discarded`/`refresh_required` terminal result and no visible partial state.
+- ADR-32-6: Durable follow-up work uses a PostgreSQL transactional `domain_outbox` with versioned bounded payloads, deterministic dedupe, `FOR UPDATE SKIP LOCKED` leasing/fencing, compare-and-swap acknowledgement, bounded retry, safe terminal failures, and owner-fence validation before every write.
+- ADR-32-7: AI Ask queues context extraction after user-turn persistence, annotation enrichment after terminal assistant/provenance persistence, and proposal drafting after terminal assistant persistence. Consumer delay or failure never changes a completed AI Ask command into a failed command.
+- ADR-32-8: Chat/Trips exclusively publishes `TripAnswerContext v1` at a Trip Project aggregate version. Structured anchors, plan items, and constraints are canonical; legacy project fields cannot override them, and lower-priority chat conflicts become typed entries. Source bundles retain ordered inclusion/exclusion, conflicts, deterministic serialization, and the final prompt-section SHA-256 digest.
+- ADR-32-9: Source withdrawal marks linked assistant provenance unavailable, redacts traveler-safe snapshots, invalidates dependent annotations, and is idempotent. Traveler read models show only a localized unavailable marker for withdrawn provenance; source removal fails closed until historical provenance can be backfilled and safely redacted.
+- ADR-32-10: Persisted answer descriptors use validated UTF-16 ranges and provenance ownership. Source-backed descriptor types require same-message, same-conversation, same-user provenance; answer-local warnings/trip facts may omit provenance only when non-navigable and source-free; owner-context actions derive targets server-side.
 
 ### FR Coverage Map
 
@@ -277,6 +311,19 @@ FR-48: Epic 1 - Silent referral attribution.
 FR-49: Epic 4 - Managed AI Gateway model records.
 FR-50: Epic 4 - Internal cost estimation.
 
+### Architecture Delta Coverage Map (2026-07-28)
+
+ADR-32-1: Epic 9 - Private BFF-to-API identity and request-principal validation.
+ADR-32-2: Epic 9 - Authoritative roles, initial-admin bootstrap, and safe role changes.
+ADR-32-3: Epic 9 - Private bearer-only API and BFF security boundary.
+ADR-32-4: Epic 10 - Idempotent AI Ask command handling.
+ADR-32-5: Epic 10 - Fenced terminal AI Ask persistence.
+ADR-32-6: Epic 10 - Durable asynchronous AI Ask follow-up work.
+ADR-32-7: Epic 10 - Ordered, non-retroactive AI Ask consumers.
+ADR-32-8: Epic 11 - Canonical TripAnswerContext and auditable source bundles.
+ADR-32-9: Epic 11 - Withdrawn provenance safety for historic traveler answers.
+ADR-32-10: Epic 11 - Validated, provenance-safe answer annotations.
+
 ## Epic List
 
 ### Epic 1: Trusted Entry And Planning Workspace Access
@@ -342,6 +389,30 @@ Operators and travelers can trust that automated work is attributed to a first-c
 **Architecture requirements covered:** AD-31-1, AD-31-2, AD-31-3, AD-31-4, AD-31-5, AD-31-6, AD-31-7, AD-31-8, AD-31-9, AD-31-10.
 
 **Implementation notes:** This is a cross-cutting clean-break development migration. Audit owns actor construction, validation, catalog metadata, and typed writes. All worker and automated paths preserve real-user requester/submitter provenance separately from their cataloged system executor. Do not add a compatibility/backfill path unless durable data exists before implementation, in which case stop and replace this epic with an expand-migrate-contract design.
+
+### Epic 9: Trusted Private API Foundation
+
+Travelers and operators use BFFs that call documented, protected `/v1` APIs with validated principals and safe responses, without exposing browser credentials or relying on Next.js sessions as API authorization.
+
+**FRs covered:** FR-51, FR-52, FR-54, FR-55, FR-56. **NFRs covered:** NFR-14, NFR-15.
+
+**Implementation notes:** Implement in order: 9.1 establishes the web credential/principal, session-token resolver, issuer isolation, and shared safe-error contract; 9.2 governs bootstrap and role changes; 9.3 consumes verified 9.1 primitives for BFF transport/CSRF; 9.4 consumes verified 9.1-9.3 primitives for one protected read. Do not begin a dependent story before its prerequisite story has passed its integration coverage. The separate admin BFF remains later deployment work; this epic configures its future issuer/verifier isolation without sharing root-web cookies.
+
+### Epic 10: Reliable AI Ask API Cutover
+
+Travelers use AI Ask through the BFF and versioned API without duplicate provider work or stale final answers, while durable follow-up work never changes a completed result.
+
+**FRs covered:** FR-58, FR-59; supports FR-51, FR-54, FR-55, FR-56. **NFRs covered:** NFR-13, NFR-14.
+
+**Implementation notes:** This epic owns the 24-hour command ledger, normalized request digest, owner fences, terminal atomicity, outbox protocol, ordered consumers, Nest `POST /v1/ai-ask/stream`, BFF forwarding, byte-stable NDJSON tests, and retirement of the matching legacy AI Ask writer.
+
+### Epic 11: Explainable, Withdrawable Planning Context
+
+Travelers receive answers whose structured Trip Project context and selectable details are traceable and safe over time: the assistant uses the canonical plan state, exposes only validated detail annotations, and removes withdrawn source details from historic answers without revealing stale content.
+
+**FRs covered:** FR-51, FR-54, FR-55, FR-56, FR-58. **NFRs covered:** NFR-2, NFR-3, NFR-4, NFR-10, NFR-11, NFR-14.
+
+**Implementation notes:** Chat/Trips owns `TripAnswerContext v1` and its precedence/conflict contract. AI orchestration stores immutable source-bundle snapshots. Knowledge source removal backfills and withdraws affected provenance before hiding source material. Each migrated read capability uses the API/BFF path and retires its matching legacy owner.
 
 ## Epic 1: Trusted Entry And Planning Workspace Access
 
@@ -1219,3 +1290,478 @@ So that attribution stays correct as Audit, workers, and user-facing reporting e
 **When** repository and data checks inspect reserved IDs, invalid-domain system emails, and seed output
 **Then** no fake-user creation/reference path remains outside the documented system catalog and architecture/proposal documentation
 **And** verification records the clean database result without relying on legacy backfill behavior.
+
+## Epic 9: Trusted Private API Foundation
+
+Travelers and operators use BFFs that call documented, protected `/v1` APIs with validated principals and safe responses, without exposing browser credentials or relying on Next.js sessions as API authorization.
+
+### Story 9.1: Establish BFF Credentials and API Request Principals
+
+As a traveler or operator,
+I want my BFF-authenticated request to become a validated private API principal,
+So that API authorization does not trust browser cookies or expose an internal credential to the browser.
+
+**Acceptance Criteria:**
+
+**Given** a web or admin BFF has validated its own host-only Auth.js session
+**When** it calls the private API
+**Then** it mints an ES256 JWT with its issuer (`xuyenviet-web-bff` or `xuyenviet-admin-bff`), audience `api.railway.internal`, stable user subject, session ID, sorted roles, authorization version, `jti`, `kid`, and a maximum five-minute lifetime
+**And** it includes no email, cookie, provider token, or unrestricted claims and never returns the credential to the browser.
+
+**Given** Nest receives a protected request
+**When** its resource-server guard creates a `RequestPrincipal`
+**Then** it verifies the issuer-specific ES256 key, known `kid`, exact issuer/audience, clock bounds, unique token ID, active unexpired session matching subject/session ID, and current authorization version
+**And** invalid signature, claim, session, or authorization-version requests fail through the safe API error envelope without entering a domain use case.
+
+**Given** an active BFF signing key rotates
+**When** the API validates credentials during the bounded overlap
+**Then** it accepts only the active key and one previous verification-only key for the matching issuer
+**And** unknown, expired-overlap, or cross-issuer keys are rejected.
+
+### Story 9.2: Govern Initial Administration and Role Changes
+
+As a deployment operator and administrator,
+I want administration to be explicitly bootstrapped and role changes to be auditable,
+So that environment configuration, callbacks, and direct data edits cannot silently grant privileges.
+
+**Acceptance Criteria:**
+
+**Given** no active administrator exists and `INITIAL_ADMIN_EMAIL` names an existing authenticated real user
+**When** the one-shot deployment bootstrap runs
+**Then** it normalizes the email, grants only the `admin` role through the Auth/Admin command, increments that user's authorization version, and writes an audit event
+**And** it fails without mutation when an admin already exists, the user is absent, or the command runs again.
+
+**Given** an authenticated administrator changes a user's `operator` or `admin` role
+**When** the Auth/Admin domain command commits
+**Then** it locks the affected role rows, authorizes the caller, writes an actor-correct audit event, and increments the target user's authorization version in the same transaction
+**And** it rejects removal of the last active administrator.
+
+**Given** sign-in callbacks, environment-email matching, or direct database mutation attempt to grant a role
+**When** repository and integration checks run
+**Then** no such alternative grant path is available
+**And** `user_roles` remains the sole authorization authority.
+
+### Story 9.3: Enforce the Private BFF Transport Boundary
+
+As a traveler or operator,
+I want protected actions to stay behind the appropriate BFF,
+So that browser-originated requests cannot bypass CSRF and API authorization controls.
+
+**Acceptance Criteria:**
+
+**Given** a capability-specific BFF mutation adapter receives a cookie-authenticated web or admin request
+**When** it accepts the request
+**Then** it applies its CSRF validation, validates and projects input, mints or forwards only a valid BFF credential, and maps the API safe error envelope to the presentation response
+**And** it forwards correlation ID, timeout/abort behavior, and `Idempotency-Key` where applicable.
+
+**Given** any browser-originated request reaches the private API directly
+**When** it lacks a valid BFF bearer credential
+**Then** the API rejects it without interpreting Auth.js cookies or browser session serialization
+**And** it emits no CORS allow-origin response.
+
+**Given** protected capability, health/version, and authorization failures are documented
+**When** API contract checks run
+**Then** protected controllers accept only a normalized `RequestPrincipal` and return the stable `code`, safe `message`, `requestId`, and applicable safe field violations
+**And** no controller exposes stack traces, SQL errors, cookies, or token contents.
+
+### Story 9.4: Publish Versioned API Contracts and Migrate a Protected Read
+
+As a traveler or operator,
+I want one protected capability to work end to end through a documented API and BFF,
+So that the API-first boundary is proven by behavior rather than only by credentials.
+
+**Acceptance Criteria:**
+
+**Given** the API service is deployed
+**When** a caller requests `/health/live`, `/health/ready`, `/v1/version`, or the selected protected read capability
+**Then** OpenAPI documents the versioned endpoint, validation, authorization, ownership scope, safe errors, and stable list ordering or cursor pagination when applicable
+**And** contract tests verify the documented responses and error envelope.
+
+**Given** a traveler or operator opens the selected capability through its BFF
+**When** the BFF validates its host-only session and calls the private API
+**Then** the browser receives only the presentation response and never an internal credential
+**And** a direct browser request is denied without CORS authorization or session interpretation.
+
+**Given** the selected capability is cut over
+**When** its migration flag routes a request
+**Then** exactly one transport owner accepts the read or command
+**And** local contract and routing tests prove no legacy/API dual write or divergent ownership path exists
+**And** Epic 14 Story 14.2 owns deployed selected-owner, migration-ordering, rollback, and legacy-retirement evidence.
+
+## Epic 10: Reliable AI Ask API Cutover
+
+Travelers can safely send or retry an AI Ask request without duplicate provider work, duplicate messages, or a stale answer being saved after they alter or delete the selected conversation or Trip Project. Follow-up enrichment continues durably without changing the result of an already completed answer.
+
+### Story 10.1: Make AI Ask Commands Idempotent
+
+As a traveler,
+I want retries of the same AI Ask request to be safe,
+So that network uncertainty cannot create duplicate turns, provider calls, or assistant answers.
+
+**Acceptance Criteria:**
+
+**Given** an authenticated AI Ask request has a 16-128 character URL-safe ASCII `Idempotency-Key`
+**When** AI Orchestration accepts a new command for a conversation or selected Trip Project scope
+**Then** it creates `ai_ask_commands` uniquely by user, scope kind, scope ID, and key with the normalized question, attachment metadata, selected scope SHA-256 digest, command status, message references, terminal result, and 24-hour expiry
+**And** an unscoped new conversation receives a command-generated scope ID only after command creation.
+
+**Given** the owner retries the same scope/key with an identical normalized digest
+**When** the original command is pending
+**Then** the API returns persisted conversation/message identifiers and `in_progress` without another provider call
+**And** when terminal it returns the persisted terminal result without another user turn, assistant message, provenance, or provider call.
+
+**Given** the same scope/key has a different normalized digest or the key format is invalid
+**When** the request is validated
+**Then** it returns safe `idempotency_key_reused` or validation failure before persisting a turn or calling a provider
+**And** command expiry allows a later request only through a new command/key according to the retention policy.
+
+### Story 10.2: Fence Terminal AI Ask Persistence
+
+As a traveler,
+I want an answer to be saved only while its selected planning state is still valid,
+So that a deletion or changed Trip Project cannot leave a stale assistant result visible.
+
+**Acceptance Criteria:**
+
+**Given** AI Orchestration creates an AI Ask command
+**When** it locks the owner-scoped conversation and selected Trip Project
+**Then** it captures the conversation `lifecycle_version` and applicable Trip Project `aggregate_version` on the command before persisting the user turn
+**And** conversation deletion, project deletion, project link/primary-conversation changes, and TripAnswerContext-changing aggregate commands increment their relevant fence.
+
+**Given** provider streaming completes
+**When** final assistant content, retrieval decision, provenance, usage, and source-bundle snapshot are persisted
+**Then** one transaction verifies the captured owner fences and writes all final state only if they still match
+**And** partial stream tokens remain transient client state and never imply a completed persisted message.
+
+**Given** a final fence no longer matches
+**When** terminalization occurs
+**Then** the command becomes `discarded`, emits one safe `error` terminal event with `refresh_required`, and creates no visible assistant message, provenance, successful usage event, annotation, or proposal
+**And** the NDJSON sequence remains `preparing`, zero or more `delta`, then exactly one `done` or `error` with request and persisted identifiers where present.
+
+### Story 10.3: Dispatch AI Ask Follow-Up Work Through a Transactional Outbox
+
+As a traveler,
+I want post-answer planning work to complete reliably after my answer is saved,
+So that temporary worker interruption cannot silently lose context extraction, annotations, or proposal drafting.
+
+**Acceptance Criteria:**
+
+**Given** an originating command commits durable follow-up work
+**When** it writes `domain_outbox`
+**Then** the same transaction stores versioned event type, aggregate/resource ID, expected owner fence, deterministic dedupe key, safe bounded payload, status, attempts, availability time, lease/fencing state, and safe terminal failure code
+**And** duplicate dispatch for the originating command is harmless by the unique dedupe key.
+
+**Given** a worker claims pending outbox work
+**When** it processes an event
+**Then** it uses `FOR UPDATE SKIP LOCKED`, lease expiry, fencing token, expected version, and compare-and-swap acknowledgement
+**And** it validates the expected owner fence before every write, retries with bounded exponential backoff, and records an alertable safe terminal failure after exhaustion.
+
+**Given** an AI Ask user turn, terminal answer, or terminal answer for a Trip Project persists
+**When** durable work is enqueued
+**Then** context extraction is enqueued only after user-turn persistence, annotation enrichment only after terminal assistant/provenance persistence, and proposal drafting only after terminal assistant persistence
+**And** no `after()` callback, fire-and-forget promise, or dead-letter replay bypasses the owning domain command.
+
+### Story 10.4: Preserve Completed AI Ask Results While Consumers Run
+
+As a traveler,
+I want a completed answer to remain trustworthy even if its optional follow-up work is delayed or fails,
+So that background processing does not rewrite the result I already received.
+
+**Acceptance Criteria:**
+
+**Given** a terminal AI Ask command has completed successfully
+**When** context extraction, annotation enrichment, or proposal drafting is delayed, retried, fenced out, or terminally fails
+**Then** the command and terminal assistant/provenance/usage result remain completed and unchanged
+**And** the owning read model exposes only the relevant pending or safe failed consumer status.
+
+**Given** a follow-up consumer attempts a write
+**When** its owner fence, dedupe key, or lease fencing token is stale
+**Then** it makes no mutation and records a safe operational outcome
+**And** duplicate worker delivery cannot attach duplicate annotations, context updates, or proposals.
+
+**Given** a browser reconnects after an ambiguous stream disconnect
+**When** the BFF checks the AI Ask command using the original key
+**Then** it reads the persisted command/conversation state rather than creating a new command with a different key
+**And** it reconciles the URL-owned server shell with the resulting terminal or in-progress state.
+
+### Story 10.5: Cut AI Ask Streaming to the Versioned API
+
+As a traveler,
+I want AI Ask streaming to use the protected API through my BFF,
+So that I retain the same responsive chat experience while the domain transport has one reliable owner.
+
+**Acceptance Criteria:**
+
+**Given** an authenticated BFF request has a valid idempotency key
+**When** it calls `POST /v1/ai-ask/stream`
+**Then** Nest owns the stream and the BFF forwards request correlation ID, timeout, abort, and NDJSON without exposing its credential to the browser
+**And** the event sequence is byte-for-byte compatible with `preparing`, zero or more `delta`, then exactly one `done` or `error`.
+
+**Given** the browser aborts, the provider fails, or context-extraction dispatch fails
+**When** the command terminalizes
+**Then** provider work is stopped when possible and terminal assistant content, provenance, and usage are either persisted atomically or absent
+**And** the BFF projects only safe retry or `refresh_required` recovery behavior.
+
+**Given** the API stream passes protocol and integration tests
+**When** the AI Ask transport cutover is enabled for a capability scope
+**Then** the matching legacy Next.js route/server-action writer no longer accepts that scope
+**And** cutover verification proves exactly one transport owner.
+
+## Epic 11: Explainable, Withdrawable Planning Context
+
+Travelers receive answers whose structured Trip Project context and selectable details are traceable and safe over time: the assistant uses the canonical plan state, exposes only validated detail annotations, and removes withdrawn source details from historic answers without revealing stale content.
+
+### Story 11.1: Publish Canonical TripAnswerContext Snapshots
+
+As a traveler,
+I want AI Ask to use my confirmed structured trip state ahead of stale chat details,
+So that planning answers and proposals are based on the Trip Project I actually control.
+
+**Acceptance Criteria:**
+
+**Given** AI Ask reads an owned selected Trip Project
+**When** Chat/Trips produces `TripAnswerContext v1`
+**Then** it captures the Trip Project aggregate version, stable anchors, ordered plan items, structured constraints, primary-conversation ID, and bounded current-conversation facts
+**And** it includes no raw transcript, provider data, hidden proposal, dynamic/deferred domain data, or another module's mutable aggregate.
+
+**Given** structured state, legacy project fields, project-scoped chat context, and conversation-scoped chat context disagree
+**When** the context is assembled
+**Then** structured anchors, plan items, and `trip_project_constraints` are canonical, legacy fields are migration-only aliases that cannot override them, and project chat supplements only absent structured fields
+**And** a material lower-priority conflict is a typed context entry that allows the answer to ask a concise clarification while proposal drafting uses canonical structured state only.
+
+**Given** a source bundle includes Trip Project context
+**When** it is persisted for generation
+**Then** it records the context version, aggregate version, ordered included field/item identifiers and versions, typed conflicts, deterministic bounded serialization, selected-but-compacted exclusions with reasons, and final prompt-section SHA-256 digest
+**And** provenance, usage, and evaluation reference that immutable source-bundle snapshot.
+
+### Story 11.2: Withdraw Historical Provenance Safely
+
+As a traveler,
+I want removed or withdrawn sources to disappear from past answer details,
+So that old links, quotes, and derived facts are not presented as still usable.
+
+**Acceptance Criteria:**
+
+**Given** Knowledge removes or withdraws a source or evidence record
+**When** its retryable source-removal command commits
+**Then** it identifies linked assistant provenance by source, evidence, and card references; marks each row `withdrawn` with timestamp and safe reason; redacts traveler URL, quote, and quick-fact snapshot fields; and invalidates dependent annotations
+**And** the transaction is idempotent and audit records only safe identifiers/counts.
+
+**Given** a traveler opens provenance or a detail view for a withdrawn row
+**When** the read model renders it
+**Then** it returns only a localized unavailable marker with no source URL, quote, derived fact, or executable action
+**And** an annotation whose final required provenance row is withdrawn is omitted while an independently valid answer-local annotation remains available.
+
+**Given** historic answers predate the withdrawal contract
+**When** source-removal cutover is prepared
+**Then** a backfill safely identifies and redacts their provenance before source hiding/deletion is enabled
+**And** a source-removal command fails closed rather than deleting evidence if any affected answer cannot be safely identified and redacted.
+
+### Story 11.3: Validate Persisted Answer Annotations
+
+As a traveler,
+I want selectable answer details to correspond to real, safe sources or my current planning context,
+So that the interface never invents links, source claims, or cross-user details from answer prose.
+
+**Acceptance Criteria:**
+
+**Given** post-answer enrichment creates a descriptor for final persisted assistant text
+**When** annotation validation runs
+**Then** each range has integer zero-based UTF-16 `{ start, end, text }` values with `0 <= start < end <= content.length`, exclusive `end`, exact `content.slice(start, end)` equality, and no overlap
+**And** invalid, stale, duplicate, or text-mismatched descriptors are rejected before persistence and rendering.
+
+**Given** a `source`, `place`, `hotel_area`, `route_segment`, or `cost` descriptor
+**When** it is persisted
+**Then** it has one or more unique provenance rows owned by the same assistant message, conversation, and user
+**And** unknown, cross-message, cross-conversation, cross-user, raw/operator-only, or inferred-source references are rejected.
+
+**Given** a `warning` or `trip_fact` has no provenance reference
+**When** validation accepts it
+**Then** it represents only answer-local guidance or owner context, contains no source-derived quick fact/action, and is non-navigable
+**And** the client renders persisted descriptors only and never parses or re-matches Vietnamese answer prose.
+
+### Story 11.4: Bind Annotation Details and Actions to Current Ownership
+
+As a traveler,
+I want source details and planning actions to stay safe after the answer was generated,
+So that an old annotation cannot expose withdrawn data or mutate a resource I no longer own.
+
+**Acceptance Criteria:**
+
+**Given** a persisted descriptor exposes detail fields
+**When** its safe detail projection is built
+**Then** it uses only title, type, location name, route segment, confidence, freshness flag, source type, verification status, checked date, and safe HTTP URL
+**And** it supplies at most six trimmed `{ label, value }` quick facts of at most 160 characters each, never arbitrary `source_snapshot` JSON, raw source material, provider payload, or operator-only metadata.
+
+**Given** a descriptor offers an action
+**When** its owning read model resolves it for the current user
+**Then** the persisted action has a registered command, answer-anchored/safe label, and descriptive arguments only while the server derives the current descriptor-bound executable target and capability set
+**And** the command validates typed input, authorization, ownership, and that binding before mutation.
+
+**Given** an action is source-backed or owner-context-only
+**When** descriptor validation runs
+**Then** source-backed actions require valid provenance and owner-context actions may omit provenance only when their server command derives the target from selected owner-scoped route state
+**And** unknown commands, client-derived routes, label-only behavior, arbitrary persisted target IDs, and action resolution after provenance withdrawal are rejected.
+
+### Story 11.5: Serve Planning Context and Details Through the API Cutover
+
+As a traveler,
+I want my selected trip context, answer details, and withdrawn-source behavior to remain correct through the API,
+So that moving read paths does not expose stale, cross-user, or legacy-derived information.
+
+**Acceptance Criteria:**
+
+**Given** a BFF requests a selected Trip Project context, answer detail, or provenance read model
+**When** the API resolves the request principal and ownership scope
+**Then** it returns only the owning user's canonical TripAnswerContext, safe detail projection, or localized unavailable marker
+**And** its OpenAPI contract documents authorization, ownership, stable errors, and pagination/order where applicable.
+
+**Given** a source is withdrawn or a descriptor is invalidated
+**When** a migrated API read is requested
+**Then** it applies current availability at read time and never returns withdrawn URL, quote, quick fact, action, raw material, or cross-user data
+**And** tests cover historic backfill, ownership denial, and stale descriptor rejection.
+
+**Given** each planning-context read is cut over
+**When** its route is enabled in staging
+**Then** only the API/BFF path owns that read behavior
+**And** the matching legacy transport owner is retired after safe verification.
+
+## Epic 12: Operable Worker and Migration Runtime
+
+Background work runs in a separately deployable, observable, schema-compatible worker runtime so travelers and operators receive reliable outcomes without request-serving processes claiming jobs.
+
+### Story 12.1: Bootstrap the Dedicated Worker and Bounded Sweep Runtime
+
+As a product operator,
+I want continuous jobs and scheduled sweeps to run in the correct runtime,
+So that background work remains independently supervised and does not rely on request-serving processes.
+
+**Acceptance Criteria:**
+
+**Given** a continuous worker loop or bounded maintenance sweep is configured
+**When** it is deployed
+**Then** continuous work runs only in the dedicated worker service and scheduled work runs only as an explicit bounded `--once` command
+**And** neither path uses in-memory coordination or bypasses PostgreSQL claim, lease, fencing, and idempotency protocols.
+
+**Given** the worker receives startup or shutdown
+**When** health endpoints are queried or shutdown begins
+**Then** `/health/live` reports process liveness and `/health/ready` verifies assigned configuration, database, and loop readiness
+**And** shutdown stops new claims and safely completes or releases in-progress work according to persisted leases.
+
+### Story 12.2: Verify Worker Operations, Telemetry, and Schema Compatibility
+
+As a deployment operator,
+I want worker cutovers to have observable and compatible operational behavior,
+So that a replacement loop cannot silently lose work or run against an incompatible schema.
+
+**Acceptance Criteria:**
+
+**Given** a worker, API, web, or admin workload starts in staging
+**When** it checks the deployed schema version
+**Then** it becomes ready only within its declared compatibility range
+**And** a non-compatible worker claims no jobs and a non-compatible request workload receives no traffic.
+
+**Given** retries, duplicate pollers, restarts, lease expiry, and graceful shutdown are exercised
+**When** operational tests and dashboards run
+**Then** telemetry includes correlation ID, capability, principal class, safe result code, latency, job lag, retry, and lease recovery
+**And** the replacement loop has a runbook and evidence for stable lag, retry, duplicate-poller, restart, and recovery behavior before its legacy loop is retired.
+
+### Story 12.3: Gate Schema Changes for Overlapping Runtimes
+
+As a release operator,
+I want schema changes to be compatible with deployed workload versions,
+So that rollout or rollback never destroys durable product data.
+
+**Acceptance Criteria:**
+
+**Given** data is disposable and no runtime overlap exists
+**When** a clean-break migration is proposed
+**Then** its disposable-target precondition is verified before execution
+**And** a durable or protected target fails closed.
+
+**Given** staging/public data is durable or runtimes overlap
+**When** a schema change is released
+**Then** an approved expand-migrate-contract compatibility matrix and migration-job gate exist before dependent workloads receive traffic
+**And** rollback changes traffic or compatible code without destructive schema rollback.
+
+## Epic 13: Separate Operator Application Cutover
+
+Operators use a separately deployed admin application with its own origin and release lifecycle, protected by the same API boundary and without direct database access.
+
+### Story 13.1: Establish the Separately Deployed Admin BFF Application
+
+As an operator,
+I want a dedicated admin application that securely reaches protected capabilities,
+So that operator releases and access controls are separate from traveler presentation.
+
+**Acceptance Criteria:**
+
+**Given** the admin application is deployed to staging
+**When** an operator signs in through its host-only session
+**Then** it uses the admin BFF issuer and private API connectivity with no browser credential or database credential
+**And** its independent build, release, health, OAuth callback, and least-privilege configuration are documented.
+
+**Given** a normal traveler accesses the admin application or API capability
+**When** authorization is evaluated
+**Then** the request is denied server-side without disclosing protected data or navigation
+**And** the same API authorization matrix governs the admin BFF and controllers.
+
+### Story 13.2: Migrate Operator Capabilities and Retire Legacy Admin Ownership
+
+As an operator,
+I want knowledge and operational workflows to remain available through the separate admin application,
+So that legacy `/admin` no longer owns domain transport or mutations.
+
+**Acceptance Criteria:**
+
+**Given** an operator capability is selected for migration
+**When** its API contract, authorization, BFF adaptation, and safe error handling are verified
+**Then** the separate admin application provides the capability without importing domain mutation code or using direct database access
+**And** staging tests prove ownership scope, role enforcement, private networking, and safe responses.
+
+**Given** a migrated operator capability is enabled
+**When** requests are routed
+**Then** exactly one transport owner accepts its command or read
+**And** the matching legacy `/admin` route/server-action owner is retired rather than dual-written.
+
+## Epic 14: Public Launch Cutover and Operational Evidence
+
+Every public domain capability has one transport owner, and public launch is supported by approved operational, recovery, and ownership evidence rather than informal prerequisites.
+
+### Story 14.1: Inventory and Retire Legacy Domain Transport Owners
+
+As a release operator,
+I want every public capability to have exactly one verified transport owner,
+So that migration cannot duplicate writes or leave unsupported legacy paths exposed.
+
+**Acceptance Criteria:**
+
+**Given** the API/BFF migration inventory is reviewed
+**When** each capability is classified
+**Then** it records API contract, BFF adapter, aggregate owner, legacy owner, cutover state, rollback route, and verification evidence
+**And** no capability routes to two writers or dual-writes messages, assistant answers, provenance, usage, trip state, knowledge state, or another aggregate.
+
+**Given** all selected traveler and operator capabilities have stable cutovers
+**When** public-launch transport verification runs
+**Then** legacy Next.js domain route handlers, server-action writers, and legacy `/admin` operational transport are removed or disabled
+**And** repository, deployed-route, and integration checks prove presentation-only Next.js behavior has no domain transport ownership.
+
+### Story 14.2: Produce the Public Launch Evidence Gate
+
+As a product owner,
+I want launch prerequisites to have named owners and evidence-backed dispositions,
+So that public readiness is explicit about completed proof, accepted risk, and blockers.
+
+**Acceptance Criteria:**
+
+**Given** launch evidence is assessed
+**When** the gate is produced
+**Then** OAuth/admin/referral smoke, private networking, migration ordering, worker health, connection-pool and AI-stream concurrency, backup restore, monitoring, alerting, on-call, provider privacy, and search/provider readiness each have an owner, evidence link, and `complete`, `accepted_risk`, or `blocked` status
+**And** unresolved product, legal, provider, or operations decisions identify owner, due date, and launch impact.
+
+**And** each completed capability cutover records deployed API workload selection, private route/probe evidence, migration-before-traffic order, selected-owner execution, response-equivalence or approved risk, rollback proof, and legacy-owner retirement disposition.
+
+**Given** a mandatory launch item is unowned or lacks evidence/disposition
+**When** launch readiness is calculated
+**Then** Epic 14 returns blocked or no-go
+**And** it never reports public readiness from implementation counts alone.

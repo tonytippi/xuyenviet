@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { auditEvents, knowledgeCards, knowledgeCardSources, sources, userRoles, users, type KnowledgeConfidence, type UserRole } from "@/db/schema";
+import { assistantProvenanceWithdrawalBackfillState, auditEvents, knowledgeCards, knowledgeCardSources, sources, userRoles, users, type KnowledgeConfidence, type UserRole } from "@/db/schema";
 import { removeKnowledgeSource } from "@/features/knowledge/source-removal";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
@@ -217,6 +217,7 @@ describe("knowledge draft review", () => {
     await createUser("removed-source-approve-operator", ["operator"]);
     authMock.mockResolvedValue({ user: { id: "removed-source-approve-operator", email: "removed-source-approve-operator@example.com" } });
     const { draft, source } = await createDraft("removed-source-approve-operator");
+    await testDb.insert(assistantProvenanceWithdrawalBackfillState).values({ contractKey: "v1", cutoverAt: new Date(), oldWritersQuiescedAt: new Date(), oldWritersAdmission: "old_terminal_evaluation_writers_quiesced_v1", completedAt: new Date() });
     await removeKnowledgeSource({ sourceId: source.id, reason: "withdrawn", actor: { userId: "removed-source-approve-operator", email: "removed-source-approve-operator@example.com" } }, testDb);
     const { approveKnowledgeDraft } = await import("@/features/knowledge/review");
 

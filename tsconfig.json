@@ -11,6 +11,8 @@
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
     "jsx": "preserve",
     "incremental": true,
     "tsBuildInfoFile": ".cache/tsconfig.tsbuildinfo",
@@ -20,9 +22,16 @@
       }
     ],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@xuyenviet/contracts": ["./packages/contracts/src/index.ts"],
+      "@xuyenviet/config": ["./packages/config/src/index.ts"],
+      "@xuyenviet/database": ["./packages/database/src/index.ts"],
+      "@xuyenviet/domain": ["./packages/domain/src/index.ts"],
+      "@xuyenviet/worker-domain": ["./packages/worker-domain/src/index.ts"],
+      "@xuyenviet/worker-domain/*": ["./packages/worker-domain/src/*"],
+      "@worker/*": ["./packages/worker-domain/src/*"]
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules"]
+  "exclude": ["node_modules", "packages/worker-domain"]
 }

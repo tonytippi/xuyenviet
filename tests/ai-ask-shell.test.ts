@@ -2,9 +2,13 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { createElement } from "react";
 import { readFileSync } from "node:fs";
 import { asc, eq } from "drizzle-orm";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { drizzle } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { aiGatewayModels, aiUsageEvents, answerUsefulnessFeedback, assistantResponseProvenance, assistantRetrievalDecisions, conversations, messageImageAttachments, messages, tripChangeProposals, tripPlanChangeHistory, tripPlanItems, tripProjectConstraints, tripProjects, users } from "@/db/schema";
+import { setSourceBundleTestDependencies } from "../packages/database/src/source-bundle";
+import { issueCsrfToken } from "@/server/csrf";
+import { aiAskCommands, aiGatewayModels, aiUsageEvents, answerUsefulnessFeedback, assistantResponseProvenance, assistantRetrievalDecisions, conversations, domainOutbox, messageImageAttachments, messages, schema, tripChangeProposals, tripPlanChangeHistory, tripPlanItems, tripProjectConstraints, tripProjects, users } from "@/db/schema";
 import type { AnswerAnnotation } from "@/features/ai/answer-annotations";
 import type { AnswerEntityDescriptor } from "@/features/ai/ai-ask-composer";
 import { TripProposalReviewCard } from "@/features/ai/trip-proposal-review-card";
@@ -59,6 +63,34 @@ async function countUsageEvents() {
 
 function findUsageEvent(rows: Array<typeof aiUsageEvents.$inferSelect>, purpose: string, provider?: string) {
   return rows.find((row) => row.purpose === purpose && (!provider || row.provider === provider));
+}
+
+const legacyBffTransport = {
+  privateApiUrl: "https://api.railway.internal",
+  bffOrigin: "https://xuyenviet.test",
+  csrfSigningSecret: "a".repeat(32),
+  csrfLifetimeSeconds: 300,
+  requestTimeoutMs: 100,
+};
+
+function withValidCsrfRequest(request: Request) {
+  const token = issueCsrfToken(legacyBffTransport);
+  request.headers.set("origin", legacyBffTransport.bffOrigin);
+  request.headers.set("sec-fetch-site", "same-origin");
+  request.headers.set("X-XuyenViet-CSRF", token);
+  Object.assign(request, { cookies: { get: (name: string) => name === "xv_bff_csrf" ? { value: token } : undefined } });
+  return request;
+}
+
+function createAiAskStreamRequest(formData: FormData, idempotencyKey: string | undefined = crypto.randomUUID().replaceAll("-", ""), signal?: AbortSignal) {
+  const headers = new Headers();
+  if (idempotencyKey) headers.set("Idempotency-Key", idempotencyKey);
+  return withValidCsrfRequest(new Request("https://xuyenviet.test/api/ai-ask/stream", {
+    method: "POST",
+    body: formData,
+    headers,
+    signal,
+  }));
 }
 
 async function renderAuthenticatedAiAskShell(searchParams: Record<string, string> = {}, roles: string[] = []) {
@@ -150,6 +182,7 @@ describe("AI Ask authenticated shell", () => {
     vi.resetModules();
     vi.clearAllMocks();
     delete process.env.AI_GATEWAY_TIMEOUT_MS;
+    delete process.env.XV_PLANNING_READ_API_ENABLED;
   });
 
   test("renders the authenticated empty AI Ask shell contract", async () => {
@@ -162,13 +195,13 @@ describe("AI Ask authenticated shell", () => {
     expect(html).toContain("Tài khoản và quyền riêng tư");
     expect(html).toContain("Tìm hiểu thêm về quyền riêng tư");
     expect(html).toContain("Mình sẽ đi đâu?");
-    expect(html).toContain("Bắt đầu bằng một câu hỏi tự nhiên");
-    expect(html).toContain("Hà Nội đi Đà Nẵng 7 ngày cùng gia đình");
+    expect(html).toContain("Tạo dự án khi bạn muốn gom kế hoạch cho một chuyến đi.");
+    expect(html).toContain("Hà Nội → Huế trong 5 ngày");
     expect(html).toContain("Lên route");
     expect(html).toContain("Tìm nơi ở");
     expect(html).toContain("Điểm dừng");
     expect(html).toContain("Kiểm tra nguồn");
-    expect(html).toContain("Lưu trữ hội thoại");
+    expect(html).toContain("Trò chuyện");
     expect(html).toContain("Câu hỏi của bạn");
     expect(html).toContain("Gửi câu hỏi");
     expect(html).not.toContain("Gợi ý câu hỏi</h2>");
@@ -198,6 +231,74 @@ describe("AI Ask authenticated shell", () => {
     expect(html).not.toContain("Chưa có chi tiết được chọn");
     expect(html).not.toContain("Bảng chi tiết đã chọn");
     expect(html).not.toContain("source-chip");
+  });
+
+  test("preserves completed prose when API detail enrichment is unavailable", async () => {
+    vi.stubEnv("XV_PLANNING_READ_API_ENABLED", "true");
+    await createTestUser("user-1");
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
+    const [assistant] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "assistant", content: "Câu trả lời đã hoàn tất." }).returning({ id: messages.id });
+    const [command] = await testDb.insert(aiAskCommands).values({ userId: "user-1", scopeKind: "conversation", scopeId: conversation.id, idempotencyKey: "shell_consumer_status", requestDigest: "a".repeat(64), normalizedQuestion: "Đi Huế", selectedScopeDigest: "b".repeat(64), status: "completed", conversationId: conversation.id, assistantMessageId: assistant.id, terminalAt: new Date(), terminalResult: { type: "done" }, expiresAt: new Date(Date.now() + 60_000) }).returning({ id: aiAskCommands.id });
+    await testDb.insert(domainOutbox).values([
+      { originatingCommandId: command.id, eventType: "ai_ask.context_extraction.v1", eventVersion: 1, aggregateType: "ai_ask_command", aggregateId: command.id, userId: "user-1", conversationId: conversation.id, conversationLifecycleVersion: 1, dedupeKey: "shell-status-context", payload: {}, status: "pending" },
+      { originatingCommandId: command.id, eventType: "ai_ask.answer_annotation.v1", eventVersion: 1, aggregateType: "ai_ask_command", aggregateId: command.id, userId: "user-1", conversationId: conversation.id, assistantMessageId: assistant.id, conversationLifecycleVersion: 1, dedupeKey: "shell-status-annotation", payload: {}, status: "failed", failureCode: "provider_internal", lastErrorCode: "provider_internal", failedAt: new Date() },
+    ]);
+
+    const html = await renderAuthenticatedAiAskShell({ conversationId: conversation.id });
+
+    expect(html).toContain("Câu trả lời đã hoàn tất.");
+    expect(html).toContain("Đang chuẩn bị thêm ngữ cảnh kế hoạch tuỳ chọn");
+    expect(html).toContain("Chưa thể chuẩn bị thêm chi tiết tham khảo tuỳ chọn");
+    expect(html).toContain("Câu trả lời đã hoàn tất vẫn sẵn sàng để bạn sử dụng.");
+    expect(html).not.toContain("provider_internal");
+  });
+
+  test("keeps consumer notices visible while reserving polite announcements for later status changes", () => {
+    const source = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
+
+    expect(source).toContain('const sortedStatuses = [...(statuses ?? [])].sort((left, right) => left.category.localeCompare(right.category) || left.state.localeCompare(right.state));');
+    expect(source).toContain('const statusKey = sortedStatuses.map((status) => `${status.category}:${status.state}`).join(",");');
+    expect(source).toContain("const previousStatusKeyRef = useRef<string | undefined>(undefined);");
+    expect(source).toContain("if (previousStatusKeyRef.current === undefined)");
+    expect(source).toContain('setAnnouncedNotice(notice || "Các chi tiết lập kế hoạch tuỳ chọn đã được cập nhật.");');
+    expect(source).toContain('<p aria-live="polite" className="sr-only">{announcedNotice}</p>');
+    expect(source).toContain('<section aria-label="Lịch sử hội thoại" className="mx-auto max-w-[760px] space-y-4">');
+    expect(source).not.toContain('<section aria-label="Lịch sử hội thoại" aria-live="polite"');
+  });
+
+  test("refreshes the server projection after a completed terminal answer without polling", () => {
+    const source = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
+    const completionStart = source.indexOf("setConversationId(result.conversationId);");
+    const completionEnd = source.indexOf("} catch (error)", completionStart);
+    const completion = source.slice(completionStart, completionEnd);
+
+    expect(completion).toContain("reconcileSelection(result.conversationId, activeTripProjectId);");
+    expect(source).toContain("router.refresh();");
+    expect(source).not.toContain("setInterval(");
+    expect(source).not.toContain("domain-outbox-worker");
+  });
+
+  test("does not render consumer indicators for completed or fenced work, foreign owners, or projectless proposals", async () => {
+    await createTestUser("user-1");
+    await createTestUser("user-2");
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
+    const [assistant] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "assistant", content: "Câu trả lời vẫn dùng được." }).returning({ id: messages.id });
+    const [command] = await testDb.insert(aiAskCommands).values({ userId: "user-1", scopeKind: "conversation", scopeId: conversation.id, idempotencyKey: "shell_suppressed_status", requestDigest: "a".repeat(64), normalizedQuestion: "Đi Huế", selectedScopeDigest: "b".repeat(64), status: "completed", conversationId: conversation.id, assistantMessageId: assistant.id, terminalAt: new Date(), terminalResult: { type: "done" }, expiresAt: new Date(Date.now() + 60_000) }).returning({ id: aiAskCommands.id });
+    const [foreignConversation] = await testDb.insert(conversations).values({ userId: "user-2" }).returning({ id: conversations.id });
+    const [foreignAssistant] = await testDb.insert(messages).values({ conversationId: foreignConversation.id, userId: "user-2", role: "assistant", content: "Không thuộc phiên này." }).returning({ id: messages.id });
+    const [foreignCommand] = await testDb.insert(aiAskCommands).values({ userId: "user-2", scopeKind: "conversation", scopeId: foreignConversation.id, idempotencyKey: "shell_foreign_status", requestDigest: "c".repeat(64), normalizedQuestion: "Đi Đà Nẵng", selectedScopeDigest: "d".repeat(64), status: "completed", conversationId: foreignConversation.id, assistantMessageId: foreignAssistant.id, terminalAt: new Date(), terminalResult: { type: "done" }, expiresAt: new Date(Date.now() + 60_000) }).returning({ id: aiAskCommands.id });
+    await testDb.insert(domainOutbox).values([
+      { originatingCommandId: command.id, eventType: "ai_ask.context_extraction.v1", eventVersion: 1, aggregateType: "ai_ask_command", aggregateId: command.id, userId: "user-1", conversationId: conversation.id, assistantMessageId: assistant.id, conversationLifecycleVersion: 1, dedupeKey: "shell-completed-fenced", payload: {}, status: "completed", completedAt: new Date() },
+      { originatingCommandId: command.id, eventType: "ai_ask.trip_proposal_draft.v1", eventVersion: 1, aggregateType: "ai_ask_command", aggregateId: command.id, userId: "user-1", conversationId: conversation.id, assistantMessageId: assistant.id, conversationLifecycleVersion: 1, dedupeKey: "shell-projectless-proposal", payload: {}, status: "pending" },
+      { originatingCommandId: foreignCommand.id, eventType: "ai_ask.answer_annotation.v1", eventVersion: 1, aggregateType: "ai_ask_command", aggregateId: foreignCommand.id, userId: "user-2", conversationId: foreignConversation.id, assistantMessageId: foreignAssistant.id, conversationLifecycleVersion: 1, dedupeKey: "shell-foreign-failed", payload: {}, status: "failed", failureCode: "provider_internal", lastErrorCode: "provider_internal", failedAt: new Date() },
+    ]);
+
+    const html = await renderAuthenticatedAiAskShell({ conversationId: conversation.id });
+
+    expect(html).toContain("Câu trả lời vẫn dùng được.");
+    expect(html).not.toContain("Đang chuẩn bị thêm ngữ cảnh kế hoạch tuỳ chọn");
+    expect(html).not.toContain("Chưa thể chuẩn bị thêm chi tiết tham khảo tuỳ chọn");
+    expect(html).not.toContain("provider_internal");
   });
 
   test("renders assistant answer usefulness feedback controls and persisted state", async () => {
@@ -539,6 +640,47 @@ describe("AI Ask authenticated shell", () => {
     expect(html).not.toContain("Mở chi tiết annotation: kiểm tra");
   });
 
+  test("suppresses every duplicate display ID even when the ranges are separated", async () => {
+    const { AssistantMessageContent } = await import("@/features/ai/ai-ask-composer");
+    const content = "Nên dừng ở Huế và kiểm tra giá tại Huế.";
+    const annotations: AnswerAnnotation[] = [
+      makeAnnotation("duplicate", content, "Huế", "source", "knowledge-1", "source"),
+      { ...makeAnnotation("other", content, "giá", "warning", "web-1", "warning"), id: "duplicate", start: content.lastIndexOf("Huế"), end: content.length, text: "Huế" },
+    ];
+
+    const html = renderToStaticMarkup(createElement(AssistantMessageContent, { content, annotations }));
+
+    expect(html).toContain(content);
+    expect(html).not.toContain("Mở chi tiết annotation");
+  });
+
+  test("ignores malformed display annotations without hiding sectioned answer text", async () => {
+    const { AssistantMessageContent } = await import("@/features/ai/ai-ask-composer");
+    const content = "Kế hoạch:\nĐi Huế sớm.";
+
+    const html = renderToStaticMarkup(createElement(AssistantMessageContent, {
+      content,
+      annotations: [null, "bad"] as never,
+    }));
+
+    expect(html).toContain("Kế hoạch");
+    expect(html).toContain("Đi Huế sớm.");
+    expect(html).not.toContain("Mở chi tiết annotation");
+  });
+
+  test("suppresses a valid display annotation with a malformed duplicate ID", async () => {
+    const { AssistantMessageContent } = await import("@/features/ai/ai-ask-composer");
+    const content = "Huế phù hợp.";
+
+    const html = renderToStaticMarkup(createElement(AssistantMessageContent, {
+      content,
+      annotations: [makeAnnotation("duplicate", content, "Huế", "source", "knowledge-1", "source"), { id: "duplicate" }] as never,
+    }));
+
+    expect(html).toContain("Huế phù hợp.");
+    expect(html).not.toContain("Mở chi tiết annotation");
+  });
+
   test("keeps unannotated assistant answers readable with fallback provenance available", async () => {
     const { AssistantMessageContent } = await import("@/features/ai/ai-ask-composer");
     const html = renderToStaticMarkup(createElement(AssistantMessageContent, { content: "Kế hoạch gợi ý:\nNên đi nhẹ." }));
@@ -645,11 +787,12 @@ describe("AI Ask authenticated shell", () => {
     const html = await renderAuthenticatedAiAskShell({ conversationId: conversation.id });
 
     expect(html).toContain("Mở chi tiết annotation: Bãi đỗ chính thức Huế");
-    expect(html).toContain("Mở chi tiết annotation: Kiểm tra chỗ đỗ");
+    expect(html).toContain("Kiểm tra chỗ đỗ trước khi đi.");
+    expect(html).not.toContain("Mở chi tiết annotation: Kiểm tra chỗ đỗ");
     expect(html).not.toContain("Giải thích");
   });
 
-  test("renders annotation ranges in headings and does not mark provenance-less actions selected by default", async () => {
+  test("renders annotation ranges in headings while leaving capability-less actions as ordinary text", async () => {
     const { AssistantMessageContent } = await import("@/features/ai/ai-ask-composer");
     const content = "Nguồn và độ tin cậy\nBước tiếp theo";
     const annotations: AnswerAnnotation[] = [
@@ -667,7 +810,8 @@ describe("AI Ask authenticated shell", () => {
     const html = renderToStaticMarkup(createElement(AssistantMessageContent, { content, annotations }));
 
     expect(html).toContain("Mở chi tiết annotation: Nguồn và độ tin cậy");
-    expect(html).toContain("Mở chi tiết annotation: Bước tiếp theo");
+    expect(html).not.toContain("Mở chi tiết annotation: Bước tiếp theo");
+    expect(html).toContain("Bước tiếp theo");
     expect(html).not.toContain('aria-pressed="true"');
   });
 
@@ -706,6 +850,57 @@ describe("AI Ask authenticated shell", () => {
     expect(html).not.toContain("raw_source_material");
     expect(html).not.toContain("providerScore");
     expect(html).not.toContain("operator");
+  });
+
+  test("renders an action control only for a server-resolved capability", async () => {
+    const { AnswerDetailPanel } = await import("@/features/ai/ai-ask-composer");
+    const actionEntity: AnswerEntityDescriptor = {
+      type: "action",
+      label: "Bước tiếp theo",
+      annotationId: "annotation-1",
+      assistantMessageId: "assistant-1",
+      capability: { command: "trip_change_proposal.apply", label: "Bước tiếp theo", available: true },
+    };
+
+    const resolved = renderToStaticMarkup(createElement(AnswerDetailPanel, { selectedEntity: actionEntity, onClose: () => undefined, onExecuteAction: () => undefined }));
+    const unresolved = renderToStaticMarkup(createElement(AnswerDetailPanel, { selectedEntity: { ...actionEntity, capability: undefined }, onClose: () => undefined, onExecuteAction: () => undefined }));
+
+    expect(resolved).toContain("Áp dụng đề xuất");
+    expect(unresolved).not.toContain("Áp dụng đề xuất");
+    expect(resolved).not.toContain("proposalId");
+  });
+
+  test("renders capability-less persisted actions as ordinary answer text", async () => {
+    const { AssistantMessageContent } = await import("@/features/ai/ai-ask-composer");
+    const content = "Áp dụng đề xuất này.";
+    const annotations = [{
+      id: "legacy-action",
+      start: 0,
+      end: 7,
+      text: "Áp dụng",
+      type: "action" as const,
+      detail: { type: "action" as const, label: "Áp dụng" },
+    }];
+
+    const html = renderToStaticMarkup(createElement(AssistantMessageContent, { content, annotations }));
+
+    expect(html).toContain(content);
+    expect(html).not.toContain("Mở chi tiết annotation");
+    expect(html).not.toContain("<button");
+  });
+
+  test("omits annotation execute controls on both historic-review detail surfaces", async () => {
+    const { AnswerDetailPanel } = await import("@/features/ai/ai-ask-composer");
+    const actionEntity: AnswerEntityDescriptor = {
+      type: "action", label: "Bước tiếp theo", annotationId: "annotation-1", assistantMessageId: "assistant-1",
+      capability: { command: "trip_change_proposal.apply", label: "Bước tiếp theo", available: true },
+    };
+
+    const mobile = renderToStaticMarkup(createElement(AnswerDetailPanel, { selectedEntity: actionEntity, onClose: () => undefined, onExecuteAction: () => undefined, actionsEnabled: false }));
+    const desktop = renderToStaticMarkup(createElement(AnswerDetailPanel, { selectedEntity: actionEntity, onClose: () => undefined, onExecuteAction: () => undefined, actionsEnabled: false }));
+
+    expect(mobile).not.toContain("Áp dụng đề xuất");
+    expect(desktop).not.toContain("Áp dụng đề xuất");
   });
 
   test("keeps caveat-only policy in bounded provenance detail quick facts", () => {
@@ -792,7 +987,7 @@ describe("AI Ask authenticated shell", () => {
     vi.resetModules();
     const html = await renderAuthenticatedAiAskShell(canonicalParams);
 
-    expect(html).toContain("Phạm vi lập kế hoạch");
+    expect(html).toContain("Quản lý chuyến đi");
     expect(html).toContain("Dự án: Đà Nẵng gia đình (Hà Nội → Đà Nẵng)");
     expect(html).toContain("Tạo dự án chuyến đi mới");
     expect(html).not.toContain("Dự án riêng user-2");
@@ -825,6 +1020,10 @@ describe("AI Ask authenticated shell", () => {
     expect(html).toContain("Hội thoại cũ cần xem lại");
     expect(html).toContain("Tiếp tục trong hội thoại chính");
     expect(html).not.toContain('id="ai-ask-question"');
+
+    const composerSource = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
+    expect(composerSource).toContain("displayConversationId={isHistoricReview ? historyConversation?.id : conversationId}");
+    expect(composerSource).toContain("conversationId: entity.displayConversationId");
   });
 
   test("redirects to ordinary chat when opening another user's trip project", async () => {
@@ -906,6 +1105,32 @@ describe("AI Ask structured answer rendering", () => {
     expect(source).toContain("setIsPreparing(true);\n        setStreamingContent");
   });
 
+  test("composer clears speculative assistant state and refreshes the URL-owned shell on refresh_required", () => {
+    const source = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
+
+    expect(source).toContain('if (result.code === "refresh_required")');
+    expect(source).toContain('setStreamingContent("");');
+    expect(source).toContain("reconcileSelection(conversationId, activeTripProjectId);");
+  });
+
+  test("stream route completes from the fenced projection without inline follow-up work", () => {
+    const routeSource = readFileSync("src/app/api/ai-ask/stream/route.ts", "utf8");
+    const executionSource = readFileSync("packages/database/src/ai-ask-stream-execution.ts", "utf8");
+    const finalizationStart = executionSource.indexOf("const finalization = await finalizeAiAskCommand");
+
+    expect(routeSource).toContain("createPostgresAiAskStreamExecutionPort");
+    expect(routeSource).toContain("createAiAskStreamExecution");
+    expect(routeSource).not.toContain("finalizeAiAskCommand");
+    expect(routeSource).not.toContain("readAiAskCommandTerminalResult");
+    expect(routeSource).not.toContain("after(");
+    expect(routeSource).not.toContain("extractChatTripContext");
+    expect(routeSource).not.toContain("buildValidatedAnswerAnnotations");
+    expect(routeSource).not.toContain("draftTripChangeProposal");
+    expect(routeSource).not.toContain("persistAiTripChangeProposalDraft");
+    expect(finalizationStart).toBeGreaterThan(-1);
+    expect(executionSource.slice(finalizationStart)).toContain("readAiAskCommandTerminalResult");
+  });
+
   test("composer source accepts removable validated traveler images", () => {
     const source = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
 
@@ -935,11 +1160,44 @@ describe("AI Ask structured answer rendering", () => {
     const source = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
 
     expect(source).toContain("getUnansweredUserMessageIds(initialMessages)");
-    expect(source).toContain("setFailedQuestionIds((currentIds) => [...currentIds, failedUserMessage.id])");
+    expect(source).toContain("setFailedQuestionIds((currentIds) => currentIds.includes(failedUserMessage.id) ? currentIds : [...currentIds, failedUserMessage.id])");
     expect(source).toContain("Chưa có câu trả lời trợ lý nào được lưu cho lượt này");
     expect(source).toContain("Trợ lý chưa tạo được câu trả lời cho lượt này");
     expect(source).not.toContain("clientAssistant");
     expect(source).not.toContain("optimisticAssistant");
+  });
+
+  test("retries an adopted unscoped request without a conversationId and scopes changed payloads to it", async () => {
+    const { buildAiAskStreamFormData, getIdempotentAiAskSubmission } = await import("@/features/ai/ai-ask-composer");
+    const first = getIdempotentAiAskSubmission({
+      previous: null,
+      payloadFingerprint: "Hà Nội đi Huế?",
+      conversationId: undefined,
+      tripProjectId: undefined,
+      createKey: () => "first-key",
+    });
+
+    // A pending replay reports the server-created conversation before its answer is terminal.
+    first.adoptedConversationId = "server-created-conversation";
+    const retry = getIdempotentAiAskSubmission({
+      previous: first,
+      payloadFingerprint: "Hà Nội đi Huế?",
+      conversationId: "server-created-conversation",
+      tripProjectId: undefined,
+      createKey: () => "second-key",
+    });
+    const newRequest = getIdempotentAiAskSubmission({
+      previous: retry,
+      payloadFingerprint: "Hà Nội đi Đà Nẵng?",
+      conversationId: "server-created-conversation",
+      tripProjectId: undefined,
+      createKey: () => "third-key",
+    });
+
+    expect(retry).toMatchObject({ key: "first-key", requestScope: { conversationId: undefined, tripProjectId: undefined } });
+    expect(newRequest).toMatchObject({ key: "third-key", requestScope: { conversationId: "server-created-conversation", tripProjectId: undefined } });
+    expect(buildAiAskStreamFormData({ question: "Hà Nội đi Huế?", ...retry.requestScope, image: null }).has("conversationId")).toBe(false);
+    expect(buildAiAskStreamFormData({ question: "Hà Nội đi Đà Nẵng?", ...newRequest.requestScope, image: null }).get("conversationId")).toBe("server-created-conversation");
   });
 
   test("renders answer-scoped navigation and uncertainty sections without source chips", async () => {
@@ -1225,6 +1483,30 @@ describe("AI Ask conversation data layer", () => {
     });
   });
 
+  test("keeps API shells free of enrichment while retaining persisted assistant prose", async () => {
+    await createTestUser("user-1");
+    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }) }));
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
+    await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "user", content: "Đi Huế?" });
+    const [assistant] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "assistant", content: "Câu trả lời đã hoàn tất.", answerAnnotations: [{ id: "unread", start: 0, end: 3, text: "Câu", type: "warning", detail: { type: "warning", label: "Câu" } }] }).returning({ id: messages.id });
+    vi.doMock("@/db/client", () => ({ getDb: () => testDb }));
+    const { getOwnedConversationShell } = await import("@/features/chat-trips/conversations");
+
+    const shell = await getOwnedConversationShell(conversation.id);
+    const shellAssistant = shell?.messages.find((message) => message.id === assistant.id);
+
+    expect(shell?.messages.find((message) => message.role === "user")?.content).toBe("Đi Huế?");
+    expect(shellAssistant).toMatchObject({ content: "Câu trả lời đã hoàn tất.", provenance: [], annotations: [] });
+  });
+
+  test("bounds API detail fan-out for assistant history", () => {
+    const source = readFileSync("src/app/ai-ask/page.tsx", "utf8");
+
+    expect(source).toContain("const assistantDetailConcurrency = 4;");
+    expect(source).toContain("mapWithConcurrency(conversation.messages, assistantDetailConcurrency");
+    expect(source).toContain("Array.from({ length: Math.min(limit, items.length) }");
+  });
+
   test("loads ordered assistant provenance for owned conversation history only", async () => {
     await createTestUser("user-1");
     await createTestUser("user-2");
@@ -1247,9 +1529,83 @@ describe("AI Ask conversation data layer", () => {
     const result = await getOwnedConversation(conversation.id);
     const assistant = result?.messages.find((message) => message.role === "assistant");
 
-    expect(assistant?.provenance.map((item) => item.title)).toEqual(["Nguồn duyệt Huế", "Web Huế"]);
-    expect(assistant?.provenance.map((item) => item.sourceCategory)).toEqual(["knowledge", "web"]);
+    const available = assistant?.provenance.filter((item): item is Extract<typeof item, { availability?: "available" }> => item.availability !== "withdrawn") ?? [];
+    expect(available.map((item) => item.title)).toEqual(["Nguồn duyệt Huế", "Web Huế"]);
+    expect(available.map((item) => item.sourceCategory)).toEqual(["knowledge", "web"]);
     expect(JSON.stringify(result)).not.toContain("Nguồn riêng user-2");
+  });
+
+  test("reads stored annotations without provider calls or persistence backfill", async () => {
+    await createTestUser("user-1");
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }),
+    }));
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
+    const [userMessage] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "user", content: "Đi Huế?" }).returning({ id: messages.id });
+    const [assistant] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "assistant", content: "Nên đi nhẹ." }).returning({ id: messages.id });
+    await testDb.insert(assistantResponseProvenance).values({ userId: "user-1", conversationId: conversation.id, userMessageId: userMessage.id, assistantMessageId: assistant.id, sourceCategory: "knowledge", rank: 1, verificationStatus: "verified", usedInPrompt: true, citedInAnswer: false, sourceSnapshot: { title: "Nguồn Huế" } });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const { getOwnedConversation } = await import("@/features/chat-trips/conversations");
+
+    const loaded = await getOwnedConversation(conversation.id);
+
+    expect(loaded?.messages.find((message) => message.id === assistant.id)?.annotations).toEqual([]);
+    expect(fetchMock).not.toHaveBeenCalled();
+    await expect(testDb.select({ answerAnnotations: messages.answerAnnotations }).from(messages).where(eq(messages.id, assistant.id))).resolves.toEqual([{ answerAnnotations: [] }]);
+  });
+
+  test("does not resolve a capability for an expired pending proposal", async () => {
+    await createTestUser("user-1");
+    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }) }));
+    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế" }).returning({ id: tripProjects.id });
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id }).returning({ id: conversations.id });
+    const [assistant] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "assistant", content: "Đề xuất", answerAnnotations: [{ id: "trip-change-proposal-apply", start: 0, end: 1, text: "Đ", type: "action", detail: { type: "action", label: "Đ", action: { command: "trip_change_proposal.apply", label: "Đ", arguments: {}, anchor: "trip-change-proposal-action.v1" } } }] }).returning({ id: messages.id });
+    await testDb.insert(tripChangeProposals).values({ id: "expired-proposal", tripProjectId: project.id, userId: "user-1", creatorClass: "ai_orchestration", status: "pending", rationale: "Đã hết hạn.", operations: [{ kind: "change-item-state", itemId: "expired-leg", state: "confirmed" }], expectedAggregateVersion: 1, sourceAssistantMessageId: assistant.id, expiresAt: new Date(Date.now() - 1_000) });
+    const { getOwnedConversation } = await import("@/features/chat-trips/conversations");
+
+    const loaded = await getOwnedConversation(conversation.id);
+
+    expect(loaded?.messages.find((message) => message.id === assistant.id)?.annotations[0]?.detail.capability).toBeUndefined();
+  });
+
+  test.each([
+    ["malformed", [null]],
+    ["overlapping", [
+      { id: "first", start: 0, end: 4, text: "Nên ", type: "source", detail: { type: "source", label: "untrusted", owner: { table: "assistant_response_provenance", id: "owned" }, provenanceIds: ["owned"] } },
+      { id: "second", start: 2, end: 8, text: "n đi n", type: "source", detail: { type: "source", label: "untrusted", owner: { table: "assistant_response_provenance", id: "owned" }, provenanceIds: ["owned"] } },
+    ]],
+    ["duplicate", [
+      { id: "same", start: 0, end: 4, text: "Nên ", type: "source", detail: { type: "source", label: "untrusted", owner: { table: "assistant_response_provenance", id: "owned" }, provenanceIds: ["owned"] } },
+      { id: "same", start: 8, end: 13, text: "nhẹ.", type: "source", detail: { type: "source", label: "untrusted", owner: { table: "assistant_response_provenance", id: "owned" }, provenanceIds: ["owned"] } },
+    ]],
+    ["message-unscoped", [{ id: "foreign", start: 0, end: 4, text: "Nên ", type: "source", detail: { type: "source", label: "untrusted", owner: { table: "assistant_response_provenance", id: "other-message" }, provenanceIds: ["other-message"] } }]],
+  ])("suppresses %s stored annotations on owner-scoped history reads while retaining prose", async (_case, answerAnnotations) => {
+    await createTestUser("user-1");
+    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }) }));
+    const content = "Nên đi nhẹ.";
+    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1" }).returning({ id: conversations.id });
+    const [userMessage] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "user", content: "Đi Huế?" }).returning({ id: messages.id });
+    const [assistant] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "assistant", content, answerAnnotations: answerAnnotations as Record<string, unknown>[] }).returning({ id: messages.id });
+    await testDb.insert(assistantResponseProvenance).values([
+      { id: "owned", userId: "user-1", conversationId: conversation.id, userMessageId: userMessage.id, assistantMessageId: assistant.id, sourceCategory: "knowledge", rank: 1, verificationStatus: "verified", usedInPrompt: true, citedInAnswer: false, sourceSnapshot: { title: "Nguồn sở hữu", url: "https://owned.example", fact: "quick fact" } },
+      { id: "other-message", userId: "user-1", conversationId: conversation.id, userMessageId: userMessage.id, assistantMessageId: userMessage.id, sourceCategory: "knowledge", rank: 2, verificationStatus: "verified", usedInPrompt: true, citedInAnswer: false, sourceSnapshot: { title: "Nguồn sai message", url: "https://foreign.example", fact: "foreign quick fact" } },
+    ]);
+    vi.doMock("@/db/client", () => ({ getDb: () => testDb }));
+    const { getOwnedConversation } = await import("@/features/chat-trips/conversations");
+
+    const loaded = await getOwnedConversation(conversation.id);
+    const loadedAssistant = loaded?.messages.find((message) => message.id === assistant.id);
+    const { AssistantMessageContent } = await import("@/features/ai/ai-ask-composer");
+    const html = renderToStaticMarkup(createElement(AssistantMessageContent, { content: loadedAssistant?.content ?? "", annotations: loadedAssistant?.annotations ?? [] }));
+
+    expect(loadedAssistant?.content).toBe(content);
+    expect(loadedAssistant?.annotations).toEqual([]);
+    expect(html).toContain(content);
+    expect(html).not.toContain("Mở chi tiết annotation");
+    expect(html).not.toContain("https://owned.example");
+    expect(html).not.toContain("https://foreign.example");
+    expect(html).not.toContain("quick fact");
   });
 
   test("returns null for conversations owned by another user", async () => {
@@ -1266,23 +1622,36 @@ describe("AI Ask conversation data layer", () => {
 });
 
 describe("AI Ask streaming route", () => {
+  afterEach(() => {
+    vi.doUnmock("/home/sonnh/projects/xuyenviet/packages/database/src/provenance.ts");
+    vi.unstubAllEnvs();
+    setSourceBundleTestDependencies(undefined);
+  });
+
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
+    vi.stubEnv("APP_ENV", "test");
+    vi.stubEnv("XV_AI_ASK_API_ENABLED", "false");
+    vi.stubEnv("XV_PRIVATE_API_URL", legacyBffTransport.privateApiUrl);
+    vi.stubEnv("XV_WEB_BFF_ORIGIN", legacyBffTransport.bffOrigin);
+    vi.stubEnv("XV_BFF_CSRF_SIGNING_SECRET", legacyBffTransport.csrfSigningSecret);
+    vi.stubEnv("XV_BFF_CSRF_LIFETIME_SECONDS", String(legacyBffTransport.csrfLifetimeSeconds));
+    vi.stubEnv("XV_BFF_REQUEST_TIMEOUT_MS", String(legacyBffTransport.requestTimeoutMs));
     delete process.env.AI_GATEWAY_TIMEOUT_MS;
     vi.doMock("next/server", () => ({
       after: (callback: () => Promise<void> | void) => {
         void Promise.resolve(callback()).catch(() => undefined);
       },
     }));
-    vi.doMock("@/features/retrieval/web-search", () => ({
+    setSourceBundleTestDependencies({
       searchWebForSourceBundle: vi.fn().mockResolvedValue({
         ok: false,
         code: "low_quality_results",
         attempt: { provider: "tavily", mechanism: "search", latencyMs: 12, status: "failure", errorCode: "low_quality_results" },
-      }),
-      captureWebSearchResults: vi.fn().mockResolvedValue(undefined),
-    }));
+      }) as never,
+      captureWebSearchResults: vi.fn().mockResolvedValue(undefined) as never,
+    });
   });
 
   test("rejects empty stream questions before persistence or provider calls", async () => {
@@ -1296,10 +1665,30 @@ describe("AI Ask streaming route", () => {
     formData.set("question", "   ");
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
 
     expect(response.status).toBe(400);
     expect(await response.text()).not.toContain('"type":"preparing"');
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(await countConversations()).toBe(0);
+    expect(await countMessages()).toBe(0);
+    expect(await countUsageEvents()).toBe(0);
+  });
+
+  test("rejects a missing Idempotency-Key before persistence or provider calls", async () => {
+    await createTestUser("user-1");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
+    }));
+    const formData = new FormData();
+    formData.set("question", "Hà Nội đi Đà Nẵng?");
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+
+    const response = await POST(createAiAskStreamRequest(formData, "") as never);
+
+    expect(response.status).toBe(400);
     expect(fetchMock).not.toHaveBeenCalled();
     expect(await countConversations()).toBe(0);
     expect(await countMessages()).toBe(0);
@@ -1317,7 +1706,7 @@ describe("AI Ask streaming route", () => {
     formData.set("question", "a".repeat(2_001));
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
 
     expect(response.status).toBe(400);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -1336,7 +1725,7 @@ describe("AI Ask streaming route", () => {
     formData.set("question", "Hà Nội đi Đà Nẵng?");
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
 
     expect(response.status).toBe(401);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -1345,7 +1734,7 @@ describe("AI Ask streaming route", () => {
     expect(await countUsageEvents()).toBe(0);
   });
 
-  test("rejects text submissions when no streaming-capable model is configured before side effects", async () => {
+  test("terminalizes text submissions when no streaming-capable model is configured", async () => {
     await createTestUser("user-1");
     await createDefaultAiAskModel({ supportsStreaming: false });
     const fetchMock = vi.fn();
@@ -1357,12 +1746,15 @@ describe("AI Ask streaming route", () => {
     formData.set("question", "Hà Nội đi Huế?");
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
 
-    expect(response.status).toBe(409);
+    expect(response.status).toBe(200);
+    const events = (await response.text()).trim().split("\n").map((line) => JSON.parse(line));
+    expect(events).toHaveLength(2);
+    expect(events.map((event) => event.type)).toEqual(["preparing", "error"]);
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(await countConversations()).toBe(0);
-    expect(await countMessages()).toBe(0);
+    expect(await countConversations()).toBe(1);
+    expect(await countMessages()).toBe(1);
     expect(await countUsageEvents()).toBe(0);
   });
 
@@ -1370,7 +1762,8 @@ describe("AI Ask streaming route", () => {
     await createTestUser("user-1");
     await createDefaultAiAskModel({ id: "ai-ask-500-model", gatewayModelName: "cx/gpt-5.5-500", supportsStreaming: true });
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status: 500 })));
+    const fetchMock = vi.fn().mockResolvedValue(new Response("{}", { status: 500 }));
+    vi.stubGlobal("fetch", fetchMock);
     vi.doMock("@/server/auth", () => ({
       getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
     }));
@@ -1378,7 +1771,8 @@ describe("AI Ask streaming route", () => {
     formData.set("question", "Hà Nội đi Đà Nẵng?");
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const idempotencyKey = "gateway_failure_key_123";
+    const response = await POST(createAiAskStreamRequest(formData, idempotencyKey) as never);
     const body = await response.text();
     const savedMessages = await testDb.select().from(messages).orderBy(asc(messages.createdAt), asc(messages.id));
     const savedUsageEvents = await testDb.select().from(aiUsageEvents);
@@ -1388,6 +1782,119 @@ describe("AI Ask streaming route", () => {
     expect(savedUsageEvents).toHaveLength(2);
     expect(findUsageEvent(savedUsageEvents, "web_search_fallback", "tavily")).toMatchObject({ status: "failure", model: "search", errorCode: "low_quality_results" });
     expect(findUsageEvent(savedUsageEvents, "ai_ask_initial_answer", "ai_gateway")).toMatchObject({ status: "failure", errorCode: "gateway_http_error", model: "cx/gpt-5.5-500", aiGatewayModelId: "ai-ask-500-model" });
+
+    const replay = await POST(createAiAskStreamRequest(formData, idempotencyKey) as never);
+    expect(await replay.text()).toContain('"type":"error"');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(await countMessages()).toBe(1);
+  });
+
+  test("invokes the gateway once for concurrent first delivery and returns in_progress to the loser", async () => {
+    await createTestUser("user-1");
+    await createDefaultAiAskModel({ supportsStreaming: true });
+    const sql = postgres(process.env.DATABASE_URL!, { max: 2 });
+    const routeDb = drizzle(sql, { schema });
+    let releaseGateway!: (response: Response) => void;
+    let signalGatewayStarted!: () => void;
+    const gatewayResponse = new Promise<Response>((resolve) => { releaseGateway = resolve; });
+    const gatewayStarted = new Promise<void>((resolve) => { signalGatewayStarted = resolve; });
+    const fetchMock = vi.fn(() => {
+      signalGatewayStarted();
+      return gatewayResponse;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.doMock("@/db/client", () => ({ getDb: () => routeDb }));
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
+    }));
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+    const idempotencyKey = "concurrent_route_key_123";
+    const firstFormData = new FormData();
+    firstFormData.set("question", "Đi Huế thế nào?");
+    const secondFormData = new FormData();
+    secondFormData.set("question", "Đi Huế thế nào?");
+
+    try {
+      const first = await POST(createAiAskStreamRequest(firstFormData, idempotencyKey) as never);
+      await gatewayStarted;
+      const second = await POST(createAiAskStreamRequest(secondFormData, idempotencyKey) as never);
+
+      expect(await second.text()).toContain('"type":"in_progress"');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      releaseGateway(new Response([
+        'data: {"choices":[{"delta":{"content":"Nên đi nhẹ."}}]}\n\n',
+        'data: {"choices":[{"finish_reason":"stop"}]}\n\n',
+        "data: [DONE]\n\n",
+      ].join(""), { status: 200, headers: { "content-type": "text/event-stream" } }));
+      expect(await first.text()).toContain('"type":"done"');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      await sql.end();
+      vi.doUnmock("@/db/client");
+    }
+  });
+
+  test("replays a caller-abort terminal result without another provider call", async () => {
+    await createTestUser("user-1");
+    await createDefaultAiAskModel({ supportsStreaming: true });
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      if (init?.signal?.aborted) {
+        reject(new DOMException("Aborted", "AbortError"));
+        return;
+      }
+      init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
+    }));
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+    const idempotencyKey = "caller_abort_key_123";
+    const controller = new AbortController();
+    const formData = new FormData();
+    formData.set("question", "Đi Phú Yên 4 ngày?");
+
+    const response = await POST(createAiAskStreamRequest(formData, idempotencyKey, controller.signal) as never);
+    controller.abort();
+    const body = await response.text();
+    const replay = await POST(createAiAskStreamRequest(formData, idempotencyKey) as never);
+
+    expect(body).toContain('"type":"error"');
+    expect(await replay.text()).toContain('"type":"error"');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(await countMessages()).toBe(1);
+  });
+
+  test("replays final persistence failure without another provider call", async () => {
+    await createTestUser("user-1");
+    await createDefaultAiAskModel({ supportsStreaming: true });
+    const fetchMock = vi.fn().mockResolvedValue(new Response([
+      'data: {"choices":[{"delta":{"content":"Nên đi nhẹ."}}]}\n\n',
+      'data: {"choices":[{"finish_reason":"stop"}]}\n\n',
+      "data: [DONE]\n\n",
+    ].join(""), { status: 200, headers: { "content-type": "text/event-stream" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.doMock("/home/sonnh/projects/xuyenviet/packages/database/src/provenance.ts", async () => {
+      const actual = await vi.importActual<typeof import("@xuyenviet/database")>("/home/sonnh/projects/xuyenviet/packages/database/src/provenance.ts");
+      return { ...actual, persistAssistantAnswerProvenance: vi.fn().mockRejectedValue(new Error("persistence unavailable")) };
+    });
+    vi.doMock("@/server/auth", () => ({
+      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "tony@example.com" }),
+    }));
+    const { POST } = await import("@/app/api/ai-ask/stream/route");
+    const idempotencyKey = "persistence_failure_key_123";
+    const formData = new FormData();
+    formData.set("question", "Đi Huế thế nào?");
+
+    const response = await POST(createAiAskStreamRequest(formData, idempotencyKey) as never);
+    const body = await response.text();
+    const replay = await POST(createAiAskStreamRequest(formData, idempotencyKey) as never);
+
+    expect(body).toContain('"type":"error"');
+    expect(await replay.text()).toContain('"type":"error"');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(await countMessages()).toBe(1);
   });
 
   test("records failed usage and creates no assistant message when the gateway network call fails", async () => {
@@ -1402,7 +1909,7 @@ describe("AI Ask streaming route", () => {
     formData.set("question", "Đi Phú Yên 4 ngày?");
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     const body = await response.text();
     const savedMessages = await testDb.select().from(messages);
     const savedUsageEvents = await testDb.select().from(aiUsageEvents);
@@ -1423,11 +1930,11 @@ describe("AI Ask streaming route", () => {
     }));
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", {
+    const response = await POST(withValidCsrfRequest(new Request("https://xuyenviet.test/api/ai-ask/stream", {
       method: "POST",
       body: "not-a-valid-multipart-body",
       headers: { "content-type": "multipart/form-data; boundary=bad" },
-    }) as never);
+    })) as never);
 
     expect(response.status).toBe(400);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -1460,7 +1967,7 @@ describe("AI Ask streaming route", () => {
     formData.set("conversationId", conversation.id);
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     const body = await response.text();
     const savedMessages = await testDb.select().from(messages).where(eq(messages.conversationId, conversation.id)).orderBy(asc(messages.createdAt), asc(messages.id));
     const gatewayMessages = getGatewayRequestMessages(fetchMock, 0);
@@ -1499,11 +2006,12 @@ describe("AI Ask streaming route", () => {
     formData.set("conversationId", conversation.id);
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     const body = await response.text();
 
+    expect(response.status).toBe(400);
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(body).toContain('{"type":"error"');
+    expect(body).toContain('"error"');
     expect(await countMessages()).toBe(1);
     expect(await countUsageEvents()).toBe(0);
   });
@@ -1526,7 +2034,7 @@ describe("AI Ask streaming route", () => {
     formData.set("tripProjectId", project.id);
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     await response.text();
     const savedConversations = await testDb.select().from(conversations);
 
@@ -1551,7 +2059,7 @@ describe("AI Ask streaming route", () => {
     formData.set("tripProjectId", otherProject.id);
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
 
     expect(response.status).toBe(400);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -1578,11 +2086,11 @@ describe("AI Ask streaming route", () => {
     formData.set("tripProjectId", projectB.id);
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     const body = await response.text();
 
-    expect(response.status).toBe(200);
-    expect(body).toContain('{"type":"error"');
+    expect(response.status).toBe(400);
+    expect(body).toContain('"error"');
     expect(fetchMock).not.toHaveBeenCalled();
     expect(await countMessages()).toBe(1);
     expect(await countUsageEvents()).toBe(0);
@@ -1604,11 +2112,11 @@ describe("AI Ask streaming route", () => {
     formData.set("conversationId", conversation.id);
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     const body = await response.text();
 
-    expect(response.status).toBe(200);
-    expect(body).toContain('{"type":"error"');
+    expect(response.status).toBe(400);
+    expect(body).toContain('"error"');
     expect(fetchMock).not.toHaveBeenCalled();
     expect(await countMessages()).toBe(1);
     expect(await countUsageEvents()).toBe(0);
@@ -1639,7 +2147,7 @@ describe("AI Ask streaming route", () => {
     formData.set("tripProjectId", project.id);
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     await response.text();
     const savedConversation = (await testDb.select().from(conversations).where(eq(conversations.id, conversation.id)))[0];
     const savedMessages = await testDb.select().from(messages).where(eq(messages.conversationId, conversation.id)).orderBy(asc(messages.createdAt), asc(messages.id));
@@ -1679,7 +2187,7 @@ describe("AI Ask streaming route", () => {
     formData.set("question", "Đi Quy Nhơn 3 ngày?");
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     await response.text();
     const requestBody = JSON.parse(String(fetchMock.mock.calls[0][1].body)) as { max_tokens?: number; stream?: boolean };
 
@@ -1705,7 +2213,7 @@ describe("AI Ask streaming route", () => {
     formData.set("question", "Kể cho tôi nghe lịch trình chi tiết 30 ngày?");
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     const body = await response.text();
     const savedMessages = await testDb.select().from(messages).orderBy(asc(messages.createdAt), asc(messages.id));
     const savedUsageEvents = await testDb.select().from(aiUsageEvents);
@@ -1724,7 +2232,7 @@ describe("AI Ask streaming route", () => {
   test("records safe Tavily success usage during AI Ask without raw web content in usage rows", async () => {
     await createTestUser("user-1");
     await createDefaultAiAskModel({ supportsStreaming: true });
-    vi.doMock("@/features/retrieval/web-search", () => ({
+    setSourceBundleTestDependencies({
       searchWebForSourceBundle: vi.fn().mockResolvedValue({
         ok: true,
         attempt: { provider: "tavily", mechanism: "search", latencyMs: 34, status: "success", errorCode: null },
@@ -1741,9 +2249,9 @@ describe("AI Ask streaming route", () => {
           triggerReason: "freshness_sensitive_request",
           rank: 1,
         }],
-      }),
-      captureWebSearchResults: vi.fn().mockResolvedValue(undefined),
-    }));
+      }) as never,
+      captureWebSearchResults: vi.fn().mockResolvedValue(undefined) as never,
+    });
     const fetchMock = vi.fn().mockResolvedValue(new Response([
       'data: {"choices":[{"delta":{"content":"Cần kiểm tra nguồn chính thức."}}]}\n\n',
       'data: {"choices":[{"finish_reason":"stop"}]}\n\n',
@@ -1757,7 +2265,7 @@ describe("AI Ask streaming route", () => {
     formData.set("question", "Giá vé Huế hiện tại?");
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     await response.text();
     const savedUsageEvents = await testDb.select().from(aiUsageEvents);
     const webUsage = findUsageEvent(savedUsageEvents, "web_search_fallback", "tavily");
@@ -1798,7 +2306,7 @@ describe("AI Ask streaming route", () => {
     formData.set("question", "Đi Tây Bắc 3 ngày?");
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     const body = await response.text();
     const savedMessages = await testDb.select().from(messages).orderBy(asc(messages.createdAt), asc(messages.id));
 
@@ -1825,7 +2333,7 @@ describe("AI Ask streaming route", () => {
     formData.set("question", "Đi Hà Giang?");
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     const body = await response.text();
     const savedMessages = await testDb.select().from(messages).orderBy(asc(messages.createdAt), asc(messages.id));
 
@@ -1858,7 +2366,7 @@ describe("AI Ask streaming route", () => {
     formData.set("image", new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3])], "ha-giang.png", { type: "image/png" }));
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     const body = await response.text();
     const savedMessages = await testDb.select().from(messages).orderBy(asc(messages.createdAt), asc(messages.id));
     const savedAttachments = await testDb.select().from(messageImageAttachments);
@@ -1916,7 +2424,7 @@ describe("AI Ask streaming route", () => {
     formData.set("question", "Đi Hà Giang thế nào?");
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     const body = await response.text();
     const savedMessages = await testDb.select().from(messages).orderBy(asc(messages.createdAt), asc(messages.id));
     const savedUsageEvents = await testDb.select().from(aiUsageEvents);
@@ -1945,7 +2453,7 @@ describe("AI Ask streaming route", () => {
     formData.set("question", "Đi Hà Giang thế nào?");
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
     await response.text();
     const savedMessages = await testDb.select().from(messages);
     const savedUsageEvents = await testDb.select().from(aiUsageEvents);
@@ -1969,7 +2477,7 @@ describe("AI Ask streaming route", () => {
     formData.set("image", new File([new Uint8Array([1])], "note.txt", { type: "text/plain" }));
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
 
     expect(response.status).toBe(400);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -1991,7 +2499,7 @@ describe("AI Ask streaming route", () => {
     formData.set("image", new File([], "empty.png", { type: "image/png" }));
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
 
     expect(response.status).toBe(400);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -2009,11 +2517,11 @@ describe("AI Ask streaming route", () => {
     }));
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", {
+    const response = await POST(withValidCsrfRequest(new Request("https://xuyenviet.test/api/ai-ask/stream", {
       method: "POST",
       body: "oversized",
       headers: { "content-length": String(7 * 1024 * 1024) },
-    }) as never);
+    })) as never);
 
     expect(response.status).toBe(413);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -2035,7 +2543,7 @@ describe("AI Ask streaming route", () => {
     formData.set("image", new File([new Uint8Array([1, 2, 3])], "fake.png", { type: "image/png" }));
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
 
     expect(response.status).toBe(400);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -2057,12 +2565,13 @@ describe("AI Ask streaming route", () => {
     formData.set("image", new File([new Uint8Array([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50])], "road.webp", { type: "image/webp" }));
     const { POST } = await import("@/app/api/ai-ask/stream/route");
 
-    const response = await POST(new Request("https://xuyenviet.test/api/ai-ask/stream", { method: "POST", body: formData }) as never);
+    const response = await POST(createAiAskStreamRequest(formData) as never);
 
-    expect(response.status).toBe(409);
+    expect(response.status).toBe(200);
+    await response.text();
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(await countConversations()).toBe(0);
-    expect(await countMessages()).toBe(0);
+    expect(await countConversations()).toBe(1);
+    expect(await countMessages()).toBe(1);
     expect(await countUsageEvents()).toBe(0);
   });
 
@@ -2399,35 +2908,20 @@ describe("AI Ask streaming route", () => {
     });
   });
 
-  describe("proposal done payload reconciliation and shell integration", () => {
-    test("composer source accepts the proposal summary from the done event and renders an answer-surface proposal card", () => {
+  describe("proposal shell integration", () => {
+    test("composer does not accept consumer proposal output from a done event", () => {
       const composerSource = readFileSync("src/features/ai/ai-ask-composer.tsx", "utf8");
 
-      expect(composerSource).toContain("proposal?: ProposalDoneSummary");
-      expect(composerSource).toContain("event.proposal");
-      expect(composerSource).toContain("AnswerProposalCard");
-      expect(composerSource).toContain("TripProposalReviewCard");
+      expect(composerSource).not.toContain("proposal?: ProposalDoneSummary");
+      expect(composerSource).not.toContain("event.proposal");
     });
 
-    test("stream route wires proposal drafting before done and records trip_proposal_draft usage", () => {
+    test("stream route does not draft or persist proposals before sending done", () => {
       const routeSource = readFileSync("src/app/api/ai-ask/stream/route.ts", "utf8");
 
-      expect(routeSource).toContain("draftTripChangeProposal");
-      expect(routeSource).toContain("persistAiTripChangeProposalDraft");
-      expect(routeSource).toContain("recordTripChangeProposalDraftUsage");
-      expect(routeSource).toContain("proposal: proposalSummary");
-      // The trip_proposal_draft purpose label lives in usage constants and is applied
-      // inside recordTripChangeProposalDraftUsage; verify the constants module exports it.
-      const constantsSource = readFileSync("src/features/usage/constants.ts", "utf8");
-      expect(constantsSource).toContain("trip_proposal_draft");
-    });
-
-    test("stream route sends done without a proposal on drafting failure and never breaks the answer", () => {
-      const routeSource = readFileSync("src/app/api/ai-ask/stream/route.ts", "utf8");
-      // The draftAndPersistProposal helper returns undefined on any failure path,
-      // and the done event is sent with proposal: undefined (omitted) in that case.
-      expect(routeSource).toContain("return undefined");
-      expect(routeSource).toMatch(/proposal: proposalSummary/);
+      expect(routeSource).not.toContain("draftTripChangeProposal");
+      expect(routeSource).not.toContain("persistAiTripChangeProposalDraft");
+      expect(routeSource).not.toContain("proposal:");
     });
   });
 
@@ -2629,7 +3123,7 @@ describe("AI Ask streaming route", () => {
 
       // The typed result states include the transient reason.
       expect(actionsSource).toContain('"refresh_required" | "not_found" | "expired" | "transient"');
-      expect(actionsSource).toContain('"not_found" | "transient"');
+      expect(actionsSource).toContain('"not_found" | "expired" | "transient"');
       // Both actions wrap the library call in try/catch and return transient.
       expect(actionsSource).toContain("try {\n    result = await applyApprovedTripChange(input);");
       expect(actionsSource).toContain('return { success: false, reason: "transient"');
@@ -2643,7 +3137,7 @@ describe("AI Ask streaming route", () => {
 
       // The composer action types include the transient reason.
       expect(composerSource).toContain('"refresh_required" | "not_found" | "expired" | "transient"');
-      expect(composerSource).toContain('"not_found" | "transient"');
+      expect(composerSource).toContain('"not_found" | "expired" | "transient"');
       // The transient reason maps to the retryable transient-error outcome.
       expect(composerSource).toContain('result.reason === "transient"');
       expect(composerSource).toContain('"transient-error"');

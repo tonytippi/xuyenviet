@@ -317,6 +317,7 @@ async function runSinglePrompt({
           retrievalDecisionId: generatedAnswer.answer.retrievalDecisionId,
           provenanceId: generatedAnswer.answer.provenanceId,
           usageEventId: output.usageEventId ?? generatedAnswer.answer.usageEventId,
+          tripAnswerContextSnapshotId: generatedAnswer.answer.tripAnswerContextSnapshotId,
         })
         .returning();
 

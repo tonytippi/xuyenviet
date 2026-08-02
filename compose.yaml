@@ -4,7 +4,7 @@ services:
       context: .
       target: runner
     env_file:
-      - path: ${ENV_FILE:-.env}
+      - path: ${WEB_ENV_FILE:-.web.env}
         required: true
     ports:
       - "127.0.0.1:8000:3000"
@@ -22,45 +22,66 @@ services:
       context: .
       target: migrator
     env_file:
-      - path: ${ENV_FILE:-.env}
+      - path: ${API_ENV_FILE:-.api.env}
         required: true
     profiles: ["migrate"]
 
-  knowledge-extractor:
+  worker:
     build:
       context: .
       target: worker
-    command: ["node", "--conditions", "react-server", "--import", "tsx", "scripts/knowledge-extraction-worker.ts"]
     env_file:
-      - path: ${ENV_FILE:-.env}
+      - path: ${WORKER_ENV_FILE:-.worker.env}
         required: true
     restart: unless-stopped
     init: true
-
-  knowledge-ingestion:
-    build:
-      context: .
-      target: worker
-    command: ["node", "--conditions", "react-server", "--import", "tsx", "scripts/knowledge-ingestion-worker.ts", "--worker-id=knowledge-ingestion-compose"]
-    env_file:
-      - path: ${ENV_FILE:-.env}
-        required: true
-    restart: unless-stopped
-    init: true
+    ports:
+      - "127.0.0.1:3002:3002"
     healthcheck:
-      test: ["CMD", "node", "--import", "tsx", "scripts/knowledge-ingestion-worker-healthcheck.ts"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3002/health/ready').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 15s
       timeout: 5s
       retries: 3
       start_period: 60s
 
-  knowledge-indexing:
+  # Compose exposes only plaintext service DNS. Railway's private HTTPS endpoint
+  # is intentionally not aliased here.
+  api:
     build:
       context: .
-      target: worker
-    command: ["node", "--conditions", "react-server", "--import", "tsx", "scripts/knowledge-indexing-worker.ts"]
+      target: api-runner
     env_file:
-      - path: ${ENV_FILE:-.env}
+      - path: ${API_ENV_FILE:-.api.env}
         required: true
     restart: unless-stopped
     init: true
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health/live').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  admin:
+    build:
+      context: .
+      target: admin-runner
+    env_file:
+      - path: ${ADMIN_ENV_FILE:-.admin.env}
+        required: true
+    depends_on:
+      api:
+        condition: service_started
+    ports:
+      - "127.0.0.1:8003:3003"
+    restart: unless-stopped
+    init: true
+    profiles: ["admin"]
+    # Syntax/build validation only: this profile cannot supply Railway private
+    # HTTPS or a local OAuth callback environment for the admin BFF.
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3003/api/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s

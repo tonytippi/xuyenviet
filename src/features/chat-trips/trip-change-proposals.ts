@@ -3,8 +3,13 @@ import "server-only";
 import { and, asc, desc, eq, isNotNull, lte } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
+import { isTripChangeProposalActionAnnotation, sanitizeStoredAnswerAnnotations, type AnswerAnnotationActionCommand } from "@/features/ai/answer-annotations";
+import { formatAssistantMessageProvenance } from "@/features/retrieval/provenance";
 import {
   tripChangeProposals,
+  assistantResponseProvenance,
+  conversations,
+  messages,
   tripPlanChangeHistory,
   tripPlanItems,
   tripProjectConstraints,
@@ -764,9 +769,7 @@ export async function persistAiTripChangeProposalDraft(
   const session = await getAuthenticatedSession();
   if (!session) return { success: false, reason: "unauthenticated" };
 
-  const rationaleResult = normalizeRationale(input.rationale);
-  if (!rationaleResult.ok) return { success: false, reason: "invalid" };
-  const rationale = rationaleResult.value;
+  if (!normalizeRationale(input.rationale).ok) return { success: false, reason: "invalid" };
 
   const alternatives = normalizeAlternatives(input.alternatives);
   if (alternatives === "invalid") return { success: false, reason: "invalid" };
@@ -786,11 +789,38 @@ export async function persistAiTripChangeProposalDraft(
   }
 
   try {
-    return await getDb().transaction(async (transaction) => {
+    const expiresAtValidatedAt = Date.now();
+    return await getDb().transaction(async (transaction) => persistAiTripChangeProposalDraftInTransaction(transaction, session, input, expiresAtValidatedAt));
+  } catch (error) {
+    console.error("Failed to persist AI trip change proposal draft.", {
+      tripProjectId: input.tripProjectId,
+      userId: session.userId,
+      error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
+    });
+    return { success: false, reason: "invalid" };
+  }
+}
+
+// Worker callers supply an already-authorized owner and transaction so their
+// outbox effect, aggregate validation, proposal, and acknowledgement can commit
+// atomically. Browser commands continue through the authenticated wrapper.
+export async function persistAiTripChangeProposalDraftInTransaction(
+  transaction: Transaction,
+  owner: { userId: string },
+  input: PersistAiTripChangeProposalDraftInput,
+  expiresAtValidatedAt?: number,
+): Promise<PersistAiTripChangeProposalDraftResult> {
+  const rationaleResult = normalizeRationale(input.rationale);
+  if (!rationaleResult.ok) return { success: false, reason: "invalid" };
+  const rationale = rationaleResult.value;
+  const alternatives = normalizeAlternatives(input.alternatives);
+  if (alternatives === "invalid" || !Number.isInteger(input.expectedAggregateVersion) || input.expectedAggregateVersion < 1) return { success: false, reason: "invalid" };
+  const expiryValidationTime = expiresAtValidatedAt ?? Date.now();
+  if (input.expiresAt !== null && input.expiresAt !== undefined && (!(input.expiresAt instanceof Date) || Number.isNaN(input.expiresAt.getTime()) || input.expiresAt.getTime() <= expiryValidationTime)) return { success: false, reason: "invalid" };
       const [project] = await transaction
         .select({ aggregateVersion: tripProjects.aggregateVersion })
         .from(tripProjects)
-        .where(and(eq(tripProjects.id, input.tripProjectId), eq(tripProjects.userId, session.userId)))
+        .where(and(eq(tripProjects.id, input.tripProjectId), eq(tripProjects.userId, owner.userId)))
         .limit(1)
         .for("update");
 
@@ -823,7 +853,7 @@ export async function persistAiTripChangeProposalDraft(
           accommodationPlaceAreaLabel: tripPlanItems.accommodationPlaceAreaLabel,
         })
         .from(tripPlanItems)
-        .where(and(eq(tripPlanItems.tripProjectId, input.tripProjectId), eq(tripPlanItems.userId, session.userId)));
+        .where(and(eq(tripPlanItems.tripProjectId, input.tripProjectId), eq(tripPlanItems.userId, owner.userId)));
 
       const knownItems: KnownPlanItem[] = knownItemRows.map((row) => ({
         id: row.id,
@@ -851,7 +881,7 @@ export async function persistAiTripChangeProposalDraft(
         .insert(tripChangeProposals)
         .values({
           tripProjectId: input.tripProjectId,
-          userId: session.userId,
+          userId: owner.userId,
           creatorClass: "ai_orchestration",
           status: "pending",
           rationale,
@@ -875,7 +905,7 @@ export async function persistAiTripChangeProposalDraft(
 
       await recordAuditEvent(
         {
-          actor: toUserAuditActor({ userId: session.userId, email: session.email }),
+          actor: createSystemAuditActor("system-ai-orchestration"),
           operation: "create",
           targetType: "trip_change_proposal",
           targetId: inserted.id,
@@ -891,15 +921,6 @@ export async function persistAiTripChangeProposalDraft(
 
       const summary = toOwnedSummary(inserted, input.tripProjectId, valid, knownItems);
       return { success: true, proposal: summary };
-    });
-  } catch (error) {
-    console.error("Failed to persist AI trip change proposal draft.", {
-      tripProjectId: input.tripProjectId,
-      userId: session.userId,
-      error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
-    });
-    return { success: false, reason: "invalid" };
-  }
 }
 
 export async function listPendingProposalsForTripProject(
@@ -1277,6 +1298,8 @@ function boundBeforeAfterSummary(entries: TripChangeProposalBeforeAfterSummary[]
 export type ApplyApprovedTripChangeInput = {
   tripProjectId: string;
   proposalId: string;
+  requiredSourceAssistantMessageId?: string;
+  annotationBinding?: AnnotationActionBinding;
 };
 
 export type ApplyApprovedTripChangeResult =
@@ -1286,11 +1309,20 @@ export type ApplyApprovedTripChangeResult =
 export type DismissTripChangeProposalInput = {
   tripProjectId: string;
   proposalId: string;
+  requiredSourceAssistantMessageId?: string;
+  annotationBinding?: AnnotationActionBinding;
+};
+
+export type AnnotationActionBinding = {
+  conversationId: string;
+  assistantMessageId: string;
+  annotationId: string;
+  command: AnswerAnnotationActionCommand;
 };
 
 export type DismissTripChangeProposalResult =
   | { success: true; proposal: OwnedTripChangeProposalSummary }
-  | { success: false; reason: "unauthenticated" | "not_found" };
+  | { success: false; reason: "unauthenticated" | "not_found" | "expired" };
 
 export type ExpireTripChangeProposalInput = {
   tripProjectId: string;
@@ -1313,6 +1345,52 @@ export type TripPlanChangeHistoryRow = {
   affectedItemReferences: TripChangeProposalAffectedItemRef[];
   safeBeforeAfterSummary: TripChangeProposalBeforeAfterSummary[];
 };
+
+async function hasCurrentAnnotationActionBinding(
+  transaction: Transaction,
+  userId: string,
+  tripProjectId: string,
+  proposalId: string,
+  binding: AnnotationActionBinding,
+) {
+  if (!isTripChangeProposalActionAnnotation(binding.annotationId, binding.command)) return false;
+  // Keep the global withdrawal/delivery lock order: provenance, then message.
+  // Locking the message first can deadlock with provenance withdrawal.
+  const provenance = await transaction
+    .select({
+      id: assistantResponseProvenance.id,
+      sourceCategory: assistantResponseProvenance.sourceCategory,
+      rank: assistantResponseProvenance.rank,
+      retrievalScore: assistantResponseProvenance.retrievalScore,
+      sourceType: assistantResponseProvenance.sourceType,
+      verificationStatus: assistantResponseProvenance.verificationStatus,
+      availability: assistantResponseProvenance.availability,
+      usedInPrompt: assistantResponseProvenance.usedInPrompt,
+      citedInAnswer: assistantResponseProvenance.citedInAnswer,
+      sourceSnapshot: assistantResponseProvenance.sourceSnapshot,
+    })
+    .from(assistantResponseProvenance)
+    .where(and(eq(assistantResponseProvenance.assistantMessageId, binding.assistantMessageId), eq(assistantResponseProvenance.userId, userId), eq(assistantResponseProvenance.conversationId, binding.conversationId)))
+    .for("update");
+  const [message] = await transaction
+    .select({ content: messages.content, answerAnnotations: messages.answerAnnotations })
+    .from(messages)
+    .innerJoin(conversations, eq(conversations.id, messages.conversationId))
+    .where(and(
+      eq(messages.id, binding.assistantMessageId),
+      eq(messages.conversationId, binding.conversationId),
+      eq(messages.userId, userId),
+      eq(messages.role, "assistant"),
+      eq(conversations.userId, userId),
+      eq(conversations.tripProjectId, tripProjectId),
+    ))
+    .limit(1)
+    .for("update");
+  if (!message) return false;
+  const annotation = sanitizeStoredAnswerAnnotations({ answerText: message.content, annotations: message.answerAnnotations, provenance: formatAssistantMessageProvenance(provenance) })
+    .find((candidate) => candidate.id === binding.annotationId);
+  return annotation?.detail.action?.command === binding.command;
+}
 
 const maxPlanHistoryPreview = 20;
 
@@ -1359,11 +1437,17 @@ export async function applyApprovedTripChange(
         .where(and(
           eq(tripChangeProposals.id, input.proposalId),
           eq(tripChangeProposals.tripProjectId, input.tripProjectId),
-          eq(tripChangeProposals.userId, session.userId),
+           eq(tripChangeProposals.userId, session.userId),
+           ...(input.requiredSourceAssistantMessageId ? [eq(tripChangeProposals.sourceAssistantMessageId, input.requiredSourceAssistantMessageId)] : []),
+           ...(input.annotationBinding ? [eq(tripChangeProposals.sourceAssistantMessageId, input.annotationBinding.assistantMessageId)] : []),
         ))
         .limit(1)
         .for("update");
       if (!proposalRow) return { success: false, reason: "not_found" } as const;
+
+      if (input.annotationBinding && !await hasCurrentAnnotationActionBinding(transaction, session.userId, input.tripProjectId, input.proposalId, input.annotationBinding)) {
+        return { success: false, reason: "not_found" } as const;
+      }
 
       // Idempotent re-apply: an already-terminal proposal is no-longer-applicable.
       if (proposalRow.status !== "pending") return { success: false, reason: "not_found" } as const;
@@ -1947,17 +2031,38 @@ export async function dismissTripChangeProposal(
         .where(and(
           eq(tripChangeProposals.id, input.proposalId),
           eq(tripChangeProposals.tripProjectId, input.tripProjectId),
-          eq(tripChangeProposals.userId, session.userId),
+           eq(tripChangeProposals.userId, session.userId),
+           ...(input.requiredSourceAssistantMessageId ? [eq(tripChangeProposals.sourceAssistantMessageId, input.requiredSourceAssistantMessageId)] : []),
+           ...(input.annotationBinding ? [eq(tripChangeProposals.sourceAssistantMessageId, input.annotationBinding.assistantMessageId)] : []),
         ))
         .limit(1)
         .for("update");
       if (!row) return { success: false, reason: "not_found" } as const;
 
-      // Idempotent: already-terminal proposals return the current summary
-      // WITHOUT writing a second history row.
+      // Annotation commands fail closed rather than inheriting dismiss's generic
+      // idempotent terminal success behavior.
       if (row.status !== "pending") {
+        if (input.annotationBinding) return { success: false, reason: "not_found" } as const;
         const knownItems = await loadKnownItemsForSummary(input.tripProjectId, session.userId);
         return { success: true, proposal: toOwnedSummary(row, input.tripProjectId, row.operations, knownItems) } as const;
+      }
+
+      if (input.annotationBinding && !await hasCurrentAnnotationActionBinding(transaction, session.userId, input.tripProjectId, input.proposalId, input.annotationBinding)) {
+        return { success: false, reason: "not_found" } as const;
+      }
+
+      // Annotation actions are only valid while their proposal remains pending.
+      // Recheck after both the proposal and bound message are locked so expiry
+      // cannot race this terminal mutation. Direct workspace dismiss remains
+      // intentionally idempotent for backward-compatible user behavior.
+      const now = new Date();
+      if (input.annotationBinding && row.expiresAt && row.expiresAt.getTime() <= now.getTime()) {
+        await expireTripChangeProposalInTransaction(transaction, {
+          tripProjectId: input.tripProjectId,
+          proposalId: input.proposalId,
+          now,
+        });
+        return { success: false, reason: "expired" } as const;
       }
 
       const terminalTimestamp = new Date();
