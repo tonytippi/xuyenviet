@@ -1,9 +1,10 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { and, eq, inArray } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { sources, type FacebookCaptureReviewStatus } from "@/db/schema";
+import { facebookCaptureReviews, knowledgeIngestionCandidates, knowledgeIngestionJobs, knowledgeRecommendations, sources, type FacebookCaptureReviewStatus } from "@/db/schema";
 import { sourceKnowledgeDraftExtractionPromptVersion } from "@/features/ai/prompts";
 import { AdminAuthorizationError, requireAdminSession } from "@/server/auth";
 import { runAuditedAdminMutation } from "@/server/mutations";
@@ -15,7 +16,6 @@ import {
   type KnowledgeDraftExtractionPreProviderGuard,
 } from "./extraction";
 import { getAdminFacebookCaptureReviewExtractionTarget } from "./facebook-capture-review-admin";
-import { getAdminYoutubeCaptureExtractionTarget } from "./youtube-capture-review-admin";
 import { enqueueKnowledgeExtractionJob } from "./extraction-jobs";
 import { markFacebookCaptureReviewStatus, markFacebookCaptureReviewStatusInTransaction, reopenFacebookCaptureForRecapture, requestFacebookCaptureRecapture, type FacebookCaptureReviewActor } from "./facebook-capture-review";
 import {
@@ -28,6 +28,7 @@ import {
 } from "./review";
 import { isSourceValidationError, normalizeTravelSourceInput, type TravelSourceInput } from "./sources";
 import { appendSourceCaptureVersion } from "./source-captures";
+import { rerunKnowledgeIngestionJob } from "./ingestion-jobs";
 import { isKnowledgeSuggestionError, suggestKnowledgeFromSourceUrl as suggestKnowledgeFromSourceUrlService } from "./suggestions";
 import { resolveKnowledgeRecommendation } from "./recommendations";
 import { sealClosedKnowledgeSamplingPolicyForAdmin } from "./sampling-maintenance";
@@ -177,6 +178,31 @@ export async function markFacebookCaptureReviewStatusAsAdmin(input: {
   return markFacebookCaptureReviewStatus(getDb(), { ...input, actor });
 }
 
+export async function rerunFacebookCanonicalIngestionForm(formData: FormData) {
+  const reviewId = getOptionalFormString(formData, "reviewId") ?? "";
+  let status: "rerun" | "not_rerunnable" = "not_rerunnable";
+
+  try {
+    status = await runAuditedAdminMutation({
+        audit: {
+          operation: "update",
+          targetType: "knowledge_ingestion_job",
+          afterSummary: "Operator re-ran Facebook canonical ingestion with the current pipeline.",
+        },
+        action: async (_session, transaction) => {
+          const [review] = await transaction.select({ sourceId: facebookCaptureReviews.sourceId, captureVersionId: facebookCaptureReviews.captureVersionId, ingestionJobId: knowledgeIngestionJobs.id }).from(facebookCaptureReviews).innerJoin(knowledgeIngestionJobs, eq(knowledgeIngestionJobs.captureVersionId, facebookCaptureReviews.captureVersionId)).where(eq(facebookCaptureReviews.id, reviewId)).limit(1);
+        if (!review?.captureVersionId) return "not_rerunnable" as const;
+        const rerun = await rerunKnowledgeIngestionJob({ jobId: review.ingestionJobId, sourceId: review.sourceId, captureVersionId: review.captureVersionId }, transaction);
+        return rerun ? "rerun" as const : "not_rerunnable" as const;
+      },
+    });
+  } catch (error) {
+    if (error instanceof AdminAuthorizationError || (error instanceof Error && error.name === "AdminAuthorizationError")) throw error;
+  }
+
+  redirect(getFacebookCaptureRedirectPath(reviewId, status === "rerun" ? { ingestionRerun: "1" } : { ingestionRerunError: "1" }));
+}
+
 export async function updateKnowledgeDraftForm(formData: FormData) {
   const draftId = getOptionalFormString(formData, "draftId") ?? "";
   let failureMessage: string | null = null;
@@ -257,120 +283,6 @@ export async function approveKnowledgeDraftForm(formData: FormData) {
   redirect(`/admin/knowledge/drafts?approved=${encodeURIComponent(draftId)}`);
 }
 
-export async function extractKnowledgeDraftsFromSourceForm(formData: FormData) {
-  const session = await requireAdminSession();
-  let result: Awaited<ReturnType<typeof enqueueKnowledgeExtractionJob>> | null = null;
-  let failureMessage: string | null = null;
-
-  try {
-    result = await enqueueKnowledgeExtractionJob({ sourceId: getOptionalFormString(formData, "sourceId") ?? "", mode: "extract_only", actor: { userId: session.userId, email: session.email } });
-  } catch (error) {
-    if (error instanceof AdminAuthorizationError || (error instanceof Error && error.name === "AdminAuthorizationError")) {
-      throw error;
-    }
-
-    failureMessage = isKnowledgeExtractionError(error) && error instanceof Error ? error.message : "Không thể trích xuất bản nháp từ nguồn này.";
-  }
-
-  if (failureMessage) {
-    redirect(`/admin/knowledge/intake?extractError=${encodeURIComponent(failureMessage)}`);
-  }
-
-  redirect(`/admin/knowledge/intake?extractQueued=1&jobId=${encodeURIComponent(result?.job.id ?? "")}`);
-}
-
-export async function extractKnowledgeDraftsFromFacebookCaptureForm(formData: FormData) {
-  const reviewId = getOptionalFormString(formData, "reviewId") ?? "";
-  let redirectPath = getFacebookCaptureRedirectPath(reviewId, { extractError: "Không thể trích xuất capture này." });
-  let target: Awaited<ReturnType<typeof getAdminFacebookCaptureReviewExtractionTarget>> | null = null;
-
-  try {
-    target = await getAdminFacebookCaptureReviewExtractionTarget(reviewId);
-
-    if (!target) {
-      redirectPath = getFacebookCaptureRedirectPath(reviewId, { extractError: "Không tìm thấy capture cần trích xuất." });
-    } else if (target.existingCards.some((card) => card.aiPromptVersion === sourceKnowledgeDraftExtractionPromptVersion)) {
-      redirectPath = getFacebookCaptureRedirectPath(target.id, { alreadyExtracted: "1", existingCards: String(target.existingCards.length) });
-    } else if (target.status !== "needs_review" && target.status !== "extraction_failed") {
-      redirectPath = getFacebookCaptureRedirectPath(target.id, { extractStatus: target.status, existingCards: String(target.existingCards.length) });
-    } else if (target.sourceKind !== "facebook" || target.sourceType !== "community" || !target.rawText?.trim()) {
-      redirectPath = getFacebookCaptureRedirectPath(target.id, { extractError: "Capture này không đủ điều kiện trích xuất bản nháp." });
-    } else {
-      const queued = await enqueueKnowledgeExtractionJob({ sourceId: target.sourceId, facebookCaptureReviewId: target.id, mode: "extract_only", actor: target.actor });
-      redirectPath = getFacebookCaptureRedirectPath(target.id, queued.status === "already_active" ? { extractQueued: "1", jobId: queued.job.id, activeJob: "1" } : { extractQueued: "1", jobId: queued.job.id });
-    }
-  } catch (error) {
-    if (error instanceof AdminAuthorizationError || (error instanceof Error && error.name === "AdminAuthorizationError")) {
-      throw error;
-    }
-
-    if (isKnowledgeExtractionError(error) && error instanceof Error) {
-      const code = "code" in error && typeof error.code === "string" ? error.code : "unknown";
-      if (code === "already_extracted") {
-        const existingCards = target?.existingCards.length ?? 0;
-        redirectPath = getFacebookCaptureRedirectPath(target?.id ?? reviewId, { alreadyExtracted: "1", existingCards: String(existingCards) });
-      } else {
-        let failureStatus = "not_updated";
-
-        if (target?.status === "needs_review") {
-          const statusResult = await markFacebookCaptureExtractionFailed({
-            reviewId: target.id,
-            actor: target.actor,
-            extractionError: `Extraction failed: ${code}`,
-          });
-          failureStatus = statusResult.status;
-        }
-
-        redirectPath = getFacebookCaptureRedirectPath(target?.id ?? reviewId, { extractError: "Không thể trích xuất capture này.", errorCode: code, failureStatus });
-      }
-    } else {
-      let failureStatus = "not_updated";
-
-      if (target?.status === "needs_review") {
-        const statusResult = await markFacebookCaptureExtractionFailed({
-          reviewId: target.id,
-          actor: target.actor,
-          extractionError: "Extraction failed: unknown",
-        });
-        failureStatus = statusResult.status;
-      }
-
-      redirectPath = getFacebookCaptureRedirectPath(target?.id ?? reviewId, { extractError: "Không thể trích xuất capture này.", failureStatus });
-    }
-  }
-
-  redirect(redirectPath);
-}
-
-export async function extractKnowledgeDraftsFromYoutubeCaptureForm(formData: FormData) {
-  await requireAdminSession();
-  const sourceId = getOptionalFormString(formData, "sourceId") ?? "";
-  let redirectPath = getYoutubeCaptureRedirectPath(sourceId, { extractError: "Không thể trích xuất video này." });
-
-  try {
-    const target = await getAdminYoutubeCaptureExtractionTarget(sourceId);
-
-    if (!target) {
-      redirectPath = getYoutubeCaptureRedirectPath(sourceId, { extractError: "Không tìm thấy video YouTube đã capture hợp lệ." });
-    } else if (target.existingCards.some((card) => card.aiPromptVersion === sourceKnowledgeDraftExtractionPromptVersion)) {
-      redirectPath = getYoutubeCaptureRedirectPath(target.sourceId, { alreadyExtracted: "1", existingCards: String(target.existingCards.length) });
-    } else {
-      const queued = await enqueueKnowledgeExtractionJob({ sourceId: target.sourceId, mode: "extract_only", actor: target.actor });
-      redirectPath = getYoutubeCaptureRedirectPath(target.sourceId, queued.status === "already_active" ? { extractQueued: "1", jobId: queued.job.id, activeJob: "1" } : { extractQueued: "1", jobId: queued.job.id });
-    }
-  } catch (error) {
-    if (error instanceof AdminAuthorizationError || (error instanceof Error && error.name === "AdminAuthorizationError")) {
-      throw error;
-    }
-
-    if (isKnowledgeExtractionError(error) && error instanceof Error && "code" in error && error.code === "already_extracted") {
-      redirectPath = getYoutubeCaptureRedirectPath(sourceId, { alreadyExtracted: "1" });
-    }
-  }
-
-  redirect(redirectPath);
-}
-
 export async function rejectFacebookCaptureReviewForm(formData: FormData) {
   const session = await requireAdminSession();
   const actor: FacebookCaptureReviewActor = { userId: session.userId, email: session.email };
@@ -449,7 +361,8 @@ export async function requestFacebookCaptureRecaptureForm(formData: FormData) {
   redirect(redirectPath);
 }
 
-export async function extractAndApproveFacebookCaptureDraftsForm(formData: FormData) {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+async function extractAndApproveFacebookCaptureDraftsForm(formData: FormData) {
   const session = await requireAdminSession();
 
   const reviewId = getOptionalFormString(formData, "reviewId") ?? "";
@@ -678,6 +591,90 @@ export async function resolveKnowledgeRecommendationForm(formData: FormData) {
   redirect(`/admin/knowledge/recommendations/${encodeURIComponent(recommendationId)}?${error ? `error=${encodeURIComponent(error)}` : "resolved=1"}`);
 }
 
+export async function verifyKnowledgeRecommendationFromQueueForm(formData: FormData) {
+  return resolveVerificationRecommendationFromQueue(formData, "verify");
+}
+
+export async function promoteKnowledgeRecommendationFromQueueForm(formData: FormData) {
+  return resolveVerificationRecommendationFromQueue(formData, "promote");
+}
+
+export async function suppressKnowledgeRecommendationFromQueueForm(formData: FormData) {
+  return resolveVerificationRecommendationFromQueue(formData, "suppress");
+}
+
+async function resolveVerificationRecommendationFromQueue(formData: FormData, action: "verify" | "promote" | "suppress") {
+  const session = await requireAdminSession();
+  const recommendationId = getOptionalFormString(formData, "recommendationId") ?? "";
+  const contentVersion = Number(getOptionalFormString(formData, "contentVersion"));
+  const evidenceSetRevision = Number(getOptionalFormString(formData, "evidenceSetRevision"));
+  const requestedPage = Number(getOptionalFormString(formData, "page"));
+  const page = Number.isSafeInteger(requestedPage) ? Math.max(1, requestedPage) : 1;
+  const reason = getOptionalFormString(formData, "reason");
+  let error = "";
+
+  try {
+    if (!Number.isInteger(contentVersion) || !Number.isInteger(evidenceSetRevision)) throw new Error("invalid_resolution");
+    const [recommendation] = await getDb().select({ reason: knowledgeRecommendations.reason }).from(knowledgeRecommendations).where(eq(knowledgeRecommendations.id, recommendationId)).limit(1);
+    if (recommendation?.reason !== "verification") throw new Error("invalid_resolution");
+    const result = await resolveKnowledgeRecommendation({ recommendationId, expectedContentVersion: contentVersion, expectedEvidenceSetRevision: evidenceSetRevision, action, actor: { userId: session.userId, email: session.email } });
+    if (result.status !== "resolved") error = result.status;
+  } catch (caught) {
+    if (caught instanceof AdminAuthorizationError || (caught instanceof Error && caught.name === "AdminAuthorizationError")) throw caught;
+    error = "not_resolved";
+  }
+
+  const query = new URLSearchParams({ page: String(page) });
+  if (reason) query.set("reason", reason);
+  if (error) query.set("error", error);
+  redirect(`/admin/knowledge/recommendations?${query.toString()}`);
+}
+
+export async function verifyFacebookCaptureCandidatesForm(formData: FormData) {
+  const session = await requireAdminSession();
+  const reviewId = getOptionalFormString(formData, "reviewId") ?? "";
+  const requestedApprovals = formData.getAll("approval").flatMap((value) => {
+    if (typeof value !== "string") return [];
+    const [recommendationId, contentVersion, evidenceSetRevision] = value.split(":");
+    const parsedContentVersion = Number(contentVersion);
+    const parsedEvidenceSetRevision = Number(evidenceSetRevision);
+    return recommendationId && Number.isInteger(parsedContentVersion) && Number.isInteger(parsedEvidenceSetRevision) ? [{ recommendationId, contentVersion: parsedContentVersion, evidenceSetRevision: parsedEvidenceSetRevision }] : [];
+  });
+  const approvals = [...new Map(requestedApprovals.map((approval) => [approval.recommendationId, approval])).values()];
+  let approved = 0;
+  let unavailable = 0;
+
+  try {
+    if (!reviewId || approvals.length === 0) throw new Error("invalid_request");
+    const requestedRecommendationIds = [...new Set(approvals.map((approval) => approval.recommendationId))];
+    const candidates = await getDb().select({ recommendationId: knowledgeRecommendations.id })
+      .from(facebookCaptureReviews)
+      .innerJoin(knowledgeIngestionJobs, eq(knowledgeIngestionJobs.captureVersionId, facebookCaptureReviews.captureVersionId))
+      .innerJoin(knowledgeIngestionCandidates, eq(knowledgeIngestionCandidates.ingestionJobId, knowledgeIngestionJobs.id))
+      .innerJoin(knowledgeRecommendations, eq(knowledgeRecommendations.knowledgeCardId, knowledgeIngestionCandidates.knowledgeCardId))
+      .where(and(eq(facebookCaptureReviews.id, reviewId), inArray(knowledgeRecommendations.id, requestedRecommendationIds), eq(knowledgeIngestionCandidates.stage, "verify_first"), eq(knowledgeRecommendations.reason, "verification"), inArray(knowledgeRecommendations.status, ["open", "in_review"])));
+    const candidateByRecommendationId = new Map(candidates.map((candidate) => [candidate.recommendationId, candidate]));
+    for (const approval of approvals) {
+      const candidate = candidateByRecommendationId.get(approval.recommendationId);
+      if (!candidate) {
+        unavailable += 1;
+        continue;
+      }
+      const result = await resolveKnowledgeRecommendation({ recommendationId: approval.recommendationId, expectedContentVersion: approval.contentVersion, expectedEvidenceSetRevision: approval.evidenceSetRevision, action: "verify", actor: { userId: session.userId, email: session.email } });
+      if (result.status !== "resolved") {
+        unavailable += 1;
+        continue;
+      }
+      approved += 1;
+    }
+  } catch (caught) {
+    if (caught instanceof AdminAuthorizationError || (caught instanceof Error && caught.name === "AdminAuthorizationError")) throw caught;
+    unavailable = approvals.length || 1;
+  }
+
+  redirect(getFacebookCaptureRedirectPath(reviewId, { verifyCandidatesApproved: approved ? String(approved) : undefined, verifyCandidatesUnavailable: unavailable ? String(unavailable) : undefined }));
+}
+
 function getOptionalFormString(formData: FormData, key: string) {
   const value = formData.get(key);
   return typeof value === "string" ? value.trim() || null : null;
@@ -695,18 +692,6 @@ function getFacebookCaptureRedirectPath(reviewId: string, params: Record<string,
 
   const query = searchParams.toString();
   return `/admin/knowledge/facebook-captures/${pathReviewId}${query ? `?${query}` : ""}`;
-}
-
-function getYoutubeCaptureRedirectPath(sourceId: string, params: Record<string, string | undefined>) {
-  const pathSourceId = encodeURIComponent(sourceId || "unknown");
-  const searchParams = new URLSearchParams();
-
-  for (const [key, value] of Object.entries(params)) {
-    if (value) searchParams.set(key, value);
-  }
-
-  const query = searchParams.toString();
-  return `/admin/knowledge/youtube-captures/${pathSourceId}${query ? `?${query}` : ""}`;
 }
 
 function getFacebookCaptureQueueRedirectPath(detailPath: string) {

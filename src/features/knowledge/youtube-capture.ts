@@ -13,7 +13,7 @@ export type QueuedYoutubeSource = {
   sourceId: string;
   url: string | null;
   canonicalUrl: string | null;
-  rawMaterialId: string;
+  rawMaterialId: string | null;
   rawMetadata: Record<string, unknown> | null;
 };
 
@@ -63,7 +63,7 @@ const maxExcerptLength = 240;
 const maxConditionLength = 400;
 
 function queuedCondition() {
-  return and(isNull(sources.currentCaptureVersionId), sql`${rawSourceMaterial.rawMetadata}->>'duplicateSourceId' is null`);
+  return and(eq(sources.eligibility, "eligible"), isNull(sources.currentCaptureVersionId), sql`coalesce(${rawSourceMaterial.rawMetadata}->>'duplicateSourceId', '') = ''`);
 }
 
 export async function listQueuedYoutubeSources(db: YoutubeCaptureDb, input: { sourceId?: string; limit?: number } = {}): Promise<QueuedYoutubeSource[]> {
@@ -71,7 +71,7 @@ export async function listQueuedYoutubeSources(db: YoutubeCaptureDb, input: { so
   return db
     .select({ sourceId: sources.id, url: sources.url, canonicalUrl: sources.canonicalUrl, rawMaterialId: rawSourceMaterial.id, rawMetadata: rawSourceMaterial.rawMetadata })
     .from(sources)
-    .innerJoin(rawSourceMaterial, eq(rawSourceMaterial.sourceId, sources.id))
+    .leftJoin(rawSourceMaterial, eq(rawSourceMaterial.sourceId, sources.id))
     .where(and(eq(sources.kind, "youtube"), queuedCondition(), input.sourceId ? eq(sources.id, input.sourceId) : undefined))
     .orderBy(asc(sources.createdAt))
     .limit(limit);
@@ -104,6 +104,8 @@ export function serializeYoutubeEvidence(evidence: YoutubeEvidence[]) {
 export async function saveYoutubeEvidence(db: YoutubeCaptureDb, input: { sourceId: string; evidence: YoutubeEvidence[]; metadata: SafeYoutubeCaptureMetadata; title?: string | null; now?: Date }) {
   const rawText = serializeYoutubeEvidence(input.evidence);
   return db.transaction(async (transaction) => {
+    // Intake sources created before capture material became mandatory need a material row before capture.
+    await transaction.insert(rawSourceMaterial).values({ sourceId: input.sourceId, rawMetadata: { kind: "submitted" } }).onConflictDoNothing();
     const linkedCards = await transaction.select({ id: knowledgeCards.id }).from(knowledgeCardSources).innerJoin(knowledgeCards, eq(knowledgeCards.id, knowledgeCardSources.knowledgeCardId)).where(eq(knowledgeCardSources.sourceId, input.sourceId)).orderBy(asc(knowledgeCards.id));
     for (const card of linkedCards) {
       await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${card.id}, 46))`);

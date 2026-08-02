@@ -35,7 +35,7 @@ function candidateDisposition(result: Awaited<ReturnType<typeof runKnowledgeInge
   return "success";
 }
 
-export async function runKnowledgeIngestionWorkerLoop(options: { once?: boolean; workerId?: string; pollIntervalMs?: number; signal?: AbortSignal; onPollComplete?: () => void | Promise<void>; onObservation?: (observation: WorkerPollObservation) => void | Promise<void> } = {}) {
+export async function runKnowledgeIngestionWorkerLoop(options: { once?: boolean; workerId?: string; pollIntervalMs?: number; signal?: AbortSignal; onIdle?: (pollIntervalMs: number) => void | Promise<void>; onPollComplete?: () => void | Promise<void>; onObservation?: (observation: WorkerPollObservation) => void | Promise<void> } = {}) {
   const workerId = options.workerId ?? `knowledge-ingestion-worker-${process.pid}`;
   const pollIntervalMs = options.pollIntervalMs ?? getWorkerPollIntervalMs();
 
@@ -48,7 +48,10 @@ export async function runKnowledgeIngestionWorkerLoop(options: { once?: boolean;
     await options.onPollComplete?.();
 
     if (options.once) return result.result;
-    if (!result.result) await sleep(pollIntervalMs, options.signal);
+    if (!result.result) {
+      await options.onIdle?.(pollIntervalMs);
+      await sleep(pollIntervalMs, options.signal);
+    }
   }
 
   return { status: "stopped" as const };

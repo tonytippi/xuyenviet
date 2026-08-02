@@ -2,7 +2,7 @@
 title: XuyenViet AI Travel Information MVP PRD
 status: final
 created: 2026-07-04
-updated: 2026-07-28
+updated: 2026-07-30
 ---
 
 # XuyenViet AI Travel Information MVP PRD
@@ -21,8 +21,6 @@ The MVP is not a complete travel marketplace, booking product, Google Maps repla
 - Turn an approved trip direction into a user-controlled, structured road-trip plan rather than leaving important decisions only in chat history.
 - Build an AI-first knowledge collection workflow that turns raw travel information into evidence-grounded provisional knowledge, while routing only risky or uncertain claims to operators.
 - Make AI answers source-aware, confidence-aware, and explicit when information may be outdated or incomplete.
-- Establish a versioned, API-first delivery boundary that lets the traveler web, a separately deployed operator app, and a future mobile client use the same product capabilities without duplicating domain policy.
-- Run background work in an observable, independently supervised runtime while preserving the product's existing PostgreSQL-backed safety and idempotency guarantees.
 
 ## 3. Non-Goals
 
@@ -121,11 +119,11 @@ Internal owner or future small operations team member who collects travel inform
 2. Operator pastes a source URL, raw text, copied post content, or image/screenshot.
 3. If the source is a Facebook URL without readable text, the source remains queued for operator-assisted capture.
 4. Operator runs the controlled capture tool against queued Facebook URLs and confirms the extracted visible text before it is stored as operator-only raw source material.
-5. AI triages the source and discovers every independently useful, evidence-grounded atomic claim without treating the number of accepted claims as a quota.
-6. Each candidate claim is independently validated, evaluated for quality, freshness, risk, duplicates, and conflicts, then receives its own publication, review, verification, or suppression outcome.
+5. AI triages the source and discovers every independently useful scoped atomic candidate without treating the number of candidates as a quota. Discovery is optimized for recall; an independent grounding-and-judgment step selects exact source evidence before any candidate can become knowledge.
+6. Each candidate claim is independently grounded, validated, evaluated for quality, freshness, risk, duplicates, and conflicts, then receives its own publication, review, verification, or suppression outcome.
 7. Claims that meet the active-publication policy become available for AI retrieval as provisional community knowledge with conditions and uncertainty wording.
 8. AI creates a prioritized review recommendation only for claims that are risky, weakly evidenced, freshness-sensitive, duplicated, or conflicting.
-9. Operator may review, revise, suppress, archive, or request verification for recommended claims; review is not required for every active claim.
+9. Operator may review, revise, suppress, archive, or request verification for recommended claims; review is not required for every active claim. For a `verify_first` recommendation, an authorized operator is the final publication decision and may revise the fact or publish it with its available validated evidence.
 
 ### UJ-3: Traveler Turns A Direction Into A Confirmed Trip Plan
 
@@ -178,6 +176,7 @@ Internal owner or future small operations team member who collects travel inform
 - FR-18: Each knowledge card shall include title, type, location or route segment, summary, source, collected date, confidence level, tags, and freshness-sensitive flag.
 - FR-18A: Each AI-extracted community claim shall preserve a short evidence quote, validated source-text span, source link when available, capture date, observed date when known, and identified conditions before it can be active for retrieval.
 - FR-18B: The system shall not retain or expose personally identifying or sensitive content in traveler-visible facts or evidence quotes.
+- FR-18C: Knowledge cards shall preserve validated, bounded practical details needed for traveler guidance. A `route_note` may preserve `ordered_stops` in source order, including intentional repeated stops.
 - FR-19: Knowledge card types shall include place, food, hotel area, activity, service, route note, warning, cost note, parking, EV charging, kid-friendly tip, discount/promotion, and general travel tip.
 - FR-20: Operators shall be able to create, edit, approve, and archive knowledge cards.
 - FR-21: Knowledge cards with an `active` publication state shall be used for normal AI retrieval. Operator approval is optional and must not be a prerequisite when an AI-extracted community claim meets the active-publication policy.
@@ -191,18 +190,21 @@ Internal owner or future small operations team member who collects travel inform
 - FR-23: Operators shall be able to submit raw source material as URL, raw text, copied post content, or image/screenshot.
 - FR-23A: The system shall support queued Facebook URLs whose visible post content can be captured later by an operator-run browser automation tool.
 - FR-23B: Facebook capture automation shall populate operator-only raw source material only after operator-visible content is extracted and confirmed; it shall not store browser credentials, cookies, tokens, local storage, full HTML dumps, or hidden page data.
-- FR-24: The system shall use AI to triage submitted source material, extract structured claims, and validate each claim against a source-text evidence span.
+- FR-23C: For each immutable Facebook capture version, the operator capture queue shall use the canonical ingestion-job stage as its primary status, filter, count, and ordering signal. Nonterminal, failed, review-recommended, and `verify_first` jobs shall be attention work; published and suppressed jobs shall appear only in explicit history views. Recapture status and legacy extraction records shall remain secondary operational or historical signals and shall not override canonical job status.
+- FR-24: The system shall use AI to triage submitted source material, discover structured scoped candidates, and use an independent grounding judge to validate each publishable claim against an exact source-text evidence span.
 - FR-24A: The system shall classify AI-triaged sources as rejected, context-only, candidate, or verify-first, and shall retain decision reasons for audit and quality evaluation.
 - FR-24B: The system shall use an independent AI evaluation step to decide whether an extracted claim should become active, be suppressed, or receive a review recommendation; the extractor shall not be the sole publication decision-maker.
 - FR-24C: The system shall discover and process every independently useful atomic claim supported by a submitted immutable source version; it shall not discard otherwise qualifying claims merely because a source contains many claims or a prior sibling claim was accepted.
 - FR-24D: The system shall give each discovered candidate an independent, auditable terminal outcome and shall complete a source ingestion only after discovery and its candidate work have terminalized. A source may complete successfully when no candidate is published.
 - FR-24E: When a newer source capture supersedes an earlier immutable version, work from the earlier version shall not create, attach, conflict with, or otherwise mutate active knowledge. Historical ingestion behavior shall remain intelligible when newer ingestion capabilities are introduced.
+- FR-24F: For a source describing an itinerary, the system shall preserve a route note's source-order stop sequence, including intentional repeats, and shall extract each independently useful scoped observation about a named place, venue, or route option as a sibling candidate. Bare stop labels alone shall not become knowledge-card candidates.
 - FR-25: The system shall make a claim searchable without human approval only when it has validated evidence, sufficient travel specificity and actionability, no sensitive content, no high commercial/spam risk, and no unresolved high-risk conflict.
-- FR-25A: The system shall create a risk-prioritized operator review recommendation, not a mandatory approval gate, for claims with safety impact, changing operational facts, weak evidence, unresolved conflict, material duplicate risk, or missing context.
-- FR-25B: The system shall support random quality sampling of active, unreviewed claims so operators can measure false-positive publication without delaying the normal ingestion flow. The initial sampling rate shall be 15% for the first four weeks and 100% for `verify_first` claims.
+- FR-25A: The system shall create a risk-prioritized operator review recommendation, not a mandatory approval gate, for claims with safety impact, changing operational facts, weak evidence, unresolved conflict, material duplicate risk, or missing context. Every actionable review, verification, relation/conflict, and sampling recommendation shall bind to the card's exact content and evidence-set versions. A `verify_first` recommendation gives an authorized operator the final right to revise, publish, or suppress the card with its available validated evidence; the override must retain audit history and a version fence. A stale recommendation resolution shall make no card, evidence, audit, dirty-marker, or search-projection mutation; a material successful resolution shall create a new version-bound recommendation when policy requires it.
+- FR-25B: The system shall support random quality sampling of active, unreviewed claims so operators can measure false-positive publication without delaying the normal ingestion flow. The initial sampling rate shall be 15% for the first four weeks and 100% for `verify_first` claims. When a quality-sampling review identifies a high-severity publication failure, the system shall record the disposition and apply an auditable, cohort-scoped containment action: increase sampling for the affected cohort or safely suppress/de-index its current affected cards while creating version-bound follow-up work. Unrelated cohorts shall remain unchanged.
 - FR-26: The system shall support confidence labels such as unverified, community, curated, partner, or official. [ASSUMPTION: exact label names can be refined during UX/architecture.]
 - FR-27: The system shall allow operators to mark facts as freshness-sensitive when they involve price, schedule, availability, road condition, opening hours, weather, or service status.
 - FR-28: The system shall support a minimum public-MVP seed set of 100 active knowledge cards across the Hanoi-to-HCMC corridor. [ASSUMPTION: 100 is enough to test retrieval quality while remaining feasible for initial public launch.]
+- FR-28A: Authorized operators shall have an aggregate-only seed-coverage report that counts only active Hanoi-to-HCMC cards with complete retrieval metadata and valid bounded evidence from eligible retained sources. It shall show taxonomy and route/location gaps, including zero-count buckets; distinguish countable community observations or patterns from caveat-only material; and surface current review, verification, source, and recommendation work without exposing raw capture content, URLs, quotes, provider payloads, or removal internals.
 
 ### 8.5 Retrieval, Web Search, And Answer Grounding
 
@@ -233,24 +235,14 @@ Internal owner or future small operations team member who collects travel inform
 - FR-44: The system shall support at least one admin/operator account for initial knowledge management.
 - FR-45: The system shall allow future expansion to multiple operators without redesigning the knowledge workflow.
 - FR-45A: The operator capture-review surface shall show safe aggregate and candidate-level ingestion outcomes sufficient to diagnose a source without exposing raw provider output, raw captured text, quotes outside approved evidence storage, or internal execution secrets.
+- FR-45B: Exact administrators shall be able to view a paginated user roster limited to name, email, avatar, verification state, and roles; grant or revoke only `operator` and `admin` roles; and receive an audit record for each role delta. Operators shall not access the roster or role mutations, and the system shall prevent removal of the final administrator or an administrator's own final admin role.
+- FR-45C: The exact-admin user roster shall show each displayed user's lifetime persisted AI-event count and prompt and completion token totals. It shall include successful and failed events, treat null token values as zero, aggregate only the paginated roster user IDs, and expose neither prompts nor provider payloads; it shall not introduce quotas, credits, billing, or traveler/operator access.
 - FR-46: The system shall capture a simple usefulness rating for AI answers during the public MVP.
 - FR-47: The system shall record AI usage events for authenticated AI requests, including user, conversation or trip context when applicable, AI purpose, provider/model, timestamp, and available usage/cost metadata.
 - FR-48: The system shall capture referral attribution when a new user signs in or registers through a valid referral link, without calculating rewards, ranking, payout, or credit conversion in MVP.
 - FR-49: The system shall manage AI Gateway model records with gateway model name, intended purpose, supported input/output capabilities, active status, and input/output/cache pricing metadata.
+- FR-49A: Exact administrators shall be able to create, update, set one eligible active default per purpose, and archive AI Gateway model records without deletion. Each pricing snapshot shall store currency, version, effective timestamp, and non-negative input, output, and cache prices per fixed 1,000,000 tokens using exact integer micros. Archived records shall not be defaults, and credentials and provider payloads shall not be exposed.
 - FR-50: The system shall use configured model pricing metadata to estimate AI usage cost when provider usage token metadata is available, without creating credit balance or billing behavior in MVP.
-
-### 8.8 API, Runtime, And Deployment Boundary
-
-- FR-51: The system shall expose versioned domain API contracts that support the traveler web, the operator app, and a future mobile client without making those clients depend on Next.js server actions, route-handler internals, or Auth.js session serialization.
-- FR-52: The system shall keep the traveler browser behind its Next.js BFF during the initial web phase; the browser shall not receive an internal API credential or call the private domain API directly.
-- FR-53: The system shall provide a separately deployed operator/admin application with its own origin and release lifecycle. It shall use the same protected API boundary as other clients and shall not receive direct database credentials or import domain mutation code.
-- FR-54: The system shall authorize every protected API read and command using a domain-neutral request principal. Web and admin BFF callers shall map their authenticated sessions to short-lived, audience-scoped internal credentials; a future mobile identity flow shall map to the same principal without changing domain ownership or authorization policy.
-- FR-55: The system shall provide a stable API error contract with a machine-readable code, safe message, request/correlation ID, and safe field violations when applicable. It shall not expose stack traces, SQL errors, raw provider payloads, raw evidence, or operator-only state.
-- FR-56: The system shall provide documented API contracts for health/version and protected capabilities, including validation, authorization, ownership scope, pagination and stable ordering where list behavior applies, and AI streaming semantics where applicable.
-- FR-57: The system shall run continuous background work in a dedicated worker runtime and shall run only bounded, short-lived sweeps through scheduled one-shot commands. Workers shall use the existing PostgreSQL job/claim/lease/fencing/idempotency protocols rather than in-memory coordination.
-- FR-58: The system shall preserve a single writer for each aggregate command during migration. A capability cutover shall route a request to exactly one transport owner and shall not dual-write user messages, assistant messages, provenance, usage, trip state, or knowledge state.
-- FR-59: The system shall move AI Ask streaming to the versioned API while retaining the existing NDJSON event contract of `preparing`, `delta`, `done`, and `error`; cancellation shall stop provider work when possible, and terminal assistant content, provenance, and usage shall persist atomically.
-- FR-60: The system shall retire legacy Next.js domain route handlers, server-action writers, and the legacy `/admin` operational surface before public launch. Presentation-only Next.js behavior may remain, but it shall not own domain transport or mutation policy.
 
 ## 9. Non-Functional Requirements
 
@@ -264,15 +256,9 @@ Internal owner or future small operations team member who collects travel inform
 - NFR-8: Browser automation for Facebook capture shall run as an operator-controlled operations tool, not as public request-path app logic or unattended mass crawling.
 - NFR-9: Active AI-extracted claims shall remain auditable through their publication decision, evidence, source, state, and review history.
 - NFR-9A: Source ingestion shall make bounded progress through large source material without imposing a maximum accepted-fact quota. Retry, interruption, duplicate delivery, and supersession shall not duplicate candidates or permit obsolete work to change canonical knowledge.
+- NFR-9B: When a source is withdrawn, inaccessible, or removed, the system shall atomically retire its traveler-eligible evidence, re-evaluate every dependent card against remaining eligible support, and disable any now-ineligible search projection before completion. Retrieval shall recheck current card, evidence, source, and capture eligibility and fail closed while indexing catches up.
 - NFR-10: Trip Project reads and mutations, including primary-conversation access, structured plan data, proposals, and history, shall remain owner-scoped until a separately approved collaboration model exists.
 - NFR-11: Applying a Trip Change Proposal shall validate the proposal belongs to the selected Trip Project, is still applicable, and is authorized for the owner before writing an auditable change.
-- NFR-12: API, worker, traveler web, operator app, and migration workloads shall be independently deployable to staging with separate least-privilege configuration and health contracts. Database migrations shall run once before dependent workloads receive traffic.
-- NFR-13: Liveness shall verify that a process can run; readiness shall verify the configuration, database, and critical dependencies needed to receive its assigned traffic or work. Worker shutdown shall stop new claims and safely complete or release in-progress work according to the persisted lease protocol.
-- NFR-14: The system shall propagate a correlation ID across BFF, API, worker, and provider operations where applicable, and emit safe structured telemetry for capability, principal class, result code, latency, job lag/retry/lease recovery, and aggregate identifier only when safe.
-- NFR-15: Private web/admin-to-API traffic and database traffic shall not require public endpoints. Staging and production shall use isolated credentials, databases, OAuth configuration, API audiences, and observability projects.
-- NFR-16: Development may use clean-break migrations while data is disposable; once staging or public data is durable or old and new runtimes can overlap, schema changes shall use an approved expand-migrate-contract plan. Rollback shall revert traffic or compatible code, not destructively roll back persisted schema.
-- NFR-17: Before a legacy worker loop is retired, its operational dashboard and runbook shall demonstrate stable lag, retry, lease-recovery, duplicate-poller, and restart behavior for that loop.
-- NFR-18: Before public launch, the deployment operator shall approve ownership for Railway services, domains, DNS/CSP/OAuth callback configuration, secrets, backup/restore, monitoring, alerting, and on-call response. The launch topology shall have passed database connection-pool and AI-stream-concurrency load tests plus a backup-restore test.
 
 ## 10. MVP Product Contracts
 
@@ -301,15 +287,15 @@ Internal owner or future small operations team member who collects travel inform
 - A claim may be active immediately only if an independent AI judge validates the evidence span, travel relevance, specificity, actionability, safety/PII policy, and absence of unresolved high-risk conflict.
 - Initial active-publication thresholds shall require travel relevance >= 0.75, extractability >= 0.70, evidence grounding >= 0.90, specificity >= 0.65, actionability >= 0.65, first-hand likelihood >= 0.55, and spam/commercial risk <= 0.25, in addition to the hard gates. The numeric scores inform the decision but shall not override failed code validation of the evidence span or privacy policy.
 - `community_pattern` may be used when multiple independent community evidence records support a materially consistent observation. `conditional` may be used only when the answer includes its material condition. `uncertain` may be used only as a caveat. `conflicted` may not support a factual recommendation. `superseded` may not be retrieved.
-- Claims about road closures or conditions, safety, EV charging status, prices, opening hours, availability, booking policy, and promotions are freshness-sensitive. They require AI-recommended review or verification and may be used only as conditional caveats until corroborated; they may not be expressed as confirmed facts without corroboration appropriate to the claim.
+- Claims about road closures or conditions, safety, EV charging status, prices, opening hours, availability, booking policy, and promotions are freshness-sensitive. Automation must route grounded claims in these categories to `verify_first`, not auto-publish or discard them solely for missing the normal auto-publication score threshold. They remain non-retrievable while pending. An authorized operator may revise and publish a `verify_first` card as the final operational decision; this records an operator-authorized publication with its available evidence and does not imply multi-source corroboration or a `community_pattern` state.
 - A high-risk conflict shall immediately de-index the claim or downgrade it to `uncertain` until resolved; this transition shall not wait for operator review.
 - A source quote and direct link are evidence for operator audit by default. Facebook-derived evidence shall default to `operator_only`; traveler-visible display is permitted only when the source is accessible, the quote is short and relevant, and it contains no personally identifying or sensitive material.
 - Raw captured Facebook text shall be operator-only. A source with no active or reviewable claim shall be deleted after 180 days; a source supporting an active claim shall be re-evaluated and its traveler-visible evidence removed if the source is withdrawn, inaccessible, or subject to a removal request.
-- Operators may review any claim, but the normal ingestion path shall not block on operator review. The system shall prioritize review recommendations by likely traveler impact and evidence/risk signals.
-- A source ingestion is a source-level traversal, not a single-claim decision: it must cover the source through bounded deterministic portions and seek every independently useful claim whose supporting evidence belongs to that portion. Request-size limits protect operations only; they do not limit the number of qualifying claims.
-- Each candidate from the same source has its own evidence validation, independent judgment, relation decision, publication/review/verification/suppression outcome, and safe audit summary. The parent source reports aggregate outcomes and may succeed even when all candidates are suppressed or invalid.
+- Operators may review any claim, but the normal ingestion path shall not block on operator review. The system shall prioritize review recommendations by likely traveler impact and evidence/risk signals. Each actionable review, verification, relation/conflict, and sampling recommendation is bound to exact card content and evidence-set versions; resolving stale work must have no mutation side effects. A high-severity sampling failure triggers an auditable containment action limited to its affected cohort: increased sampling or safe suppression/de-indexing of current affected cards with version-bound follow-up work.
+- A text-source ingestion is a source-level traversal, not a single-claim decision: one bounded request covers the complete immutable text capture and seeks every independently useful scoped candidate. Request-size limits protect operations only; they do not limit the number of qualifying claims.
+- Each candidate from the same source has its own exact evidence validation, independent batch grounding/judgment result, relation decision, publication/review/verification/suppression outcome, and safe audit summary. The parent source reports aggregate outcomes and may succeed even when all candidates are suppressed or invalid.
 - A newer immutable capture version invalidates older in-flight work before it can change canonical facts or evidence. Existing historical ingestion records remain interpretable when the ingestion protocol evolves; the system shall not fabricate candidate-level history or reinterpret legacy outcomes.
-- The operator review surface may expose bounded aggregate and candidate-level safe outcomes for diagnosis. It shall never expose raw provider payloads, captured raw text, unapproved quotes, checkpoint internals, or execution-fencing data.
+- The operator review surface may expose bounded aggregate and candidate-level safe outcomes for diagnosis. It shall never expose raw provider payloads, captured raw text, unapproved quotes, checkpoint internals, or execution-fencing data. As a narrowly scoped diagnostic exception, an exact administrator may inspect the latest successful canonical-ingestion discovery completion, capped at 1 MiB, alongside deterministic candidate rejection reasons. This exception never permits storage or display of provider HTTP envelopes, errors, prompts, credentials, raw captured text, unapproved quotes, checkpoints, or fencing data; it is never traveler-facing or emitted in worker logs.
 
 ### 10.4 Web Search Fallback Contract
 
@@ -342,6 +328,7 @@ Counter-metrics: track hallucinated unsupported claims, claims whose evidence sp
 - AI model pricing metadata is used for internal cost estimation only; MVP shall not expose credit balances, charge users, or block requests for insufficient funds.
 - Usage cost estimates must identify the model pricing record or pricing version used when available.
 - Cache pricing, if supported by the Gateway/provider, must be tracked separately from ordinary input and output pricing.
+- AI Gateway pricing snapshots use one fixed unit of 1,000,000 tokens and exact integer micros, with currency, version, and effective timestamp, so a cost estimate can identify the applicable price record without floating-point ambiguity.
 - Referral attribution capture stores who referred a new user and the referral code or campaign used when available.
 - MVP referral attribution does not create reward liability, payout entitlement, ranking status, or credit conversion.
 
@@ -416,15 +403,6 @@ The public MVP should focus on the Hanoi-to-HCMC road-trip corridor. Initial kno
 - AC-22: When AI suggests a persistent trip change, the owner sees a structured proposal and no persistent plan mutation occurs until that owner explicitly applies it.
 - AC-23: Applying, dismissing, or expiring a proposal produces an owner-visible, actor/timestamped history and cannot affect another owner's trip.
 - AC-24: Trip Home deterministically shows a pending unexpired proposal, then a defined confirmed-item gap, then the next dated `planned` or `confirmed` leg, or preparation when no such leg exists; it provides access to the primary conversation and never represents `confirmed` as a booking/provider validation.
-- AC-25: In staging, traveler web, separate admin app, API, worker, and migration job deploy independently; health/readiness, private service connectivity, isolated environment configuration, and migration ordering are verified.
-- AC-26: A protected API read model accepts a valid BFF-derived principal and rejects invalid expiry, issuer, audience, session validity, or role-version conditions without exposing sensitive details.
-- AC-27: The API publishes versioned OpenAPI documentation and returns the stable safe error envelope for validation, authorization, ownership, and internal-failure cases.
-- AC-28: `POST /v1/ai-ask/stream` passes byte-for-byte NDJSON protocol tests for event order and terminal states; client abort, provider failure, and context-extraction dispatch failure do not leave incorrect completed assistant/provenance/usage state.
-- AC-29: Every migrated worker loop passes graceful shutdown and duplicate-poller/restart tests while preserving its existing claim predicate, lease, fencing token, idempotency, and `FOR UPDATE SKIP LOCKED` behavior where applicable.
-- AC-30: Before public launch, all operational workflows are available through the separate admin app, no admin app has direct database access, and no legacy Next.js domain route handler or server action remains a public transport owner.
-- AC-31: Before a legacy worker entrypoint is retired, a runbook and dashboard show stable lag, retry, lease-recovery, duplicate-poller, and restart behavior for the replacement worker loop.
-- AC-32: Before public launch, responsible owners approve Railway service, domain/DNS/CSP/OAuth callback, secret, backup/restore, monitoring, alerting, and on-call configuration; database connection-pool and AI stream concurrency load tests and a backup-restore test pass with recorded results.
-- AC-33: When durable staging/public data or overlapping runtime versions require it, the released schema change has an approved expand-migrate-contract compatibility matrix and migration-job gate; traffic/code rollback keeps the persisted schema intact.
 
 ## 14. Risks
 
@@ -438,9 +416,6 @@ The public MVP should focus on the Hanoi-to-HCMC road-trip corridor. Initial kno
 - R-8: AI-first publication can amplify poor extraction or evaluation decisions if retrieval guardrails, quality sampling, and suppression workflows are weak.
 - R-9: AI-generated itinerary changes could create false commitments or erase user intent if proposal confirmation, ownership, and version/conflict checks are incomplete.
 - R-10: Migrating existing linked conversations to one primary conversation could hide or detach historic context if migration and fallback access are not verified.
-- R-11: A flawed web-BFF-to-API identity boundary could accept stale, replayed, incorrectly scoped, or role-inaccurate requests.
-- R-12: A streaming or worker-runtime cutover could violate atomic answer persistence, cancellation, job lease, or duplicate-delivery guarantees that currently protect user and knowledge state.
-- R-13: Separate workload deployment can fail through misconfigured private networking, migration ordering, OAuth callback/session isolation, health checks, or insufficient operational ownership.
 
 ## 15. Open Questions
 
@@ -451,5 +426,3 @@ The public MVP should focus on the Hanoi-to-HCMC road-trip corridor. Initial kno
 - OQ-5: Should AI-generated image output become an MVP workflow, or remain deferred until after text/image-input planning is validated?
 - OQ-6: What legal/content-reuse policy permits retention and traveler-visible display of short Facebook-derived evidence quotes and source links?
 - OQ-8: Resolved in the architecture: a proposal created from an earlier chat request fails safely when the owner has applied a newer conflicting proposal, and the user can request a refreshed proposal in chat.
-- OQ-9: Which maintained authorization-server implementation will provide the future Nest-hosted OAuth/OIDC flow for mobile, and what issuer/key-rotation/revocation policy will it use?
-- OQ-10: Before staging topology and public launch, who owns Railway service configuration, domain/DNS/CSP/callback configuration, secrets, backup/restore testing, monitoring, alerting, and on-call response?

@@ -2,8 +2,9 @@ import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test } from "vitest";
 
 import { auditEvents, knowledgeCardSearchDocuments, knowledgeCardSources, knowledgeCards, knowledgeIndexDirtyMarkers, knowledgeIngestionJobs, rawSourceMaterial, sourceCaptureVersions, sources, users } from "@/db/schema";
+import { validateSafeCaptureMetadata } from "@/features/knowledge/source-captures";
 import { listQueuedYoutubeSources, maxYoutubeEvidenceItemsPerVideo, maxYoutubeEvidenceItemsPerWindow, parseYoutubeEvidence, recordYoutubeCaptureFailure, saveYoutubeEvidence, serializeYoutubeEvidence } from "@/features/knowledge/youtube-capture";
-import { getYoutubeMediaResolution, mergeYoutubeWindowEvidence, normalizeYoutubeWindowTimestamps, parseCachedYoutubePayload, parseCachedYoutubeSegmentPayload, parseYoutubeDuration, requestYoutubeEvidence, requestYoutubeTitle, retainedYoutubeEvidenceItemsPerWindow, youtubeWindows } from "../scripts/youtube-capture";
+import { captureFailureCode, captureFailureReason, getYoutubeMediaResolution, mergeYoutubeWindowEvidence, normalizeYoutubeWindowTimestamps, parseCachedYoutubePayload, parseCachedYoutubeSegmentPayload, parseYoutubeDuration, requestYoutubeEvidence, requestYoutubeTitle, retainedYoutubeEvidenceItemsPerWindow, youtubeWindows } from "../scripts/youtube-capture";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
 import { seedSourceCaptureVersion } from "./helpers/source-captures";
@@ -26,6 +27,29 @@ describe("YouTube capture", () => {
     expect((await listQueuedYoutubeSources(testDb, { limit: 10 })).map((source) => source.sourceId)).toEqual(["queued"]);
   });
 
+  test("does not queue a withdrawn YouTube source", async () => {
+    await createSource("withdrawn");
+    await testDb.update(sources).set({ eligibility: "withdrawn", removalReason: "withdrawn", removedByUserId: actor.userId, removalCompletedAt: new Date() }).where(eq(sources.id, "withdrawn"));
+
+    await expect(listQueuedYoutubeSources(testDb, { sourceId: "withdrawn" })).resolves.toEqual([]);
+  });
+
+  test("queues an Intake YouTube source when its raw metadata is null", async () => {
+    await createSource("intake");
+
+    await expect(listQueuedYoutubeSources(testDb, { limit: 10 })).resolves.toMatchObject([
+      { sourceId: "intake", rawMetadata: null },
+    ]);
+  });
+
+  test("queues a legacy Intake YouTube source without source material", async () => {
+    await testDb.insert(sources).values({ id: "legacy-intake", kind: "youtube", url: "https://www.youtube.com/watch?v=abcDEF12345", canonicalUrl: null, label: "YouTube video", sourceType: "community", verificationStatus: "unverified", official: false, partner: false, submittedByUserId: actor.userId });
+
+    await expect(listQueuedYoutubeSources(testDb, { limit: 10 })).resolves.toMatchObject([
+      { sourceId: "legacy-intake", rawMaterialId: null },
+    ]);
+  });
+
   test("persists bounded evidence and a content-free audit summary", async () => {
     await createSource("queued");
     await expect(saveYoutubeEvidence(testDb, { sourceId: "queued", evidence: parseYoutubeEvidence({ evidence }), metadata: { captureMethod: "gemini_youtube_url", capturedAt: "2026-07-17T00:00:00.000Z", sourceUrl: "https://www.youtube.com/watch?v=abcDEF12345", model: "gemini-3.5-flash", mediaResolution: "MEDIA_RESOLUTION_LOW", promptVersion: "youtube-evidence-v1", evidenceCount: 1, latencyMs: 2000, promptTokens: 150000, outputTokens: 7500, totalTokens: 157500, importActorId: "legacy-import-user" } as never, title: "Hành trình qua Phan Thiết" })).resolves.toMatchObject({ status: "updated" });
@@ -38,6 +62,12 @@ describe("YouTube capture", () => {
     expect(audit).toMatchObject({ actorClass: "system", actorUserId: null, actorEmail: null, actorSystem: "system-youtube-capture" });
     expect(audit.afterSummary).not.toContain("NovaWorld");
     expect(audit.afterSummary).toContain("evidenceCount: 1");
+  });
+
+  test("accepts complete YouTube cache-import metadata", () => {
+    expect(() => validateSafeCaptureMetadata("youtube", {
+      kind: "youtube", captureMethod: "gemini_youtube_url", capturedAt: "2026-08-01T00:00:00.000Z", sourceUrl: "https://www.youtube.com/watch?v=abcDEF12345", model: "gemini-3.6-flash", mediaResolution: "MEDIA_RESOLUTION_LOW", promptVersion: "youtube-evidence-v1", evidenceCount: 1, latencyMs: 1, videoDurationSeconds: 3600, windowStartSeconds: 0, windowEndSeconds: 1800, windowCount: 2, captureOrigin: "cache", captureArtifactId: "d965610e-cf1b-4bcd-8199-c7934176bc44", importedAt: "2026-08-01T00:00:01.000Z", importCorrelationToken: "996eb5a9-9f3a-4ee6-958b-8bba49ba1d26", payloadSchemaVersion: "youtube-capture-v1", promptTokens: 100, outputTokens: 20, totalTokens: 120,
+    })).not.toThrow();
   });
 
   test("invalidates linked search projections when a YouTube title changes", async () => {
@@ -98,12 +128,30 @@ describe("YouTube capture", () => {
     await expect(requestYoutubeEvidence("https://www.youtube.com/watch?v=abcDEF12345", "secret-key", "gemini-3.5-flash", { startOffsetSeconds: 0, endOffsetSeconds: 30 }, undefined, fetchMock)).rejects.toMatchObject({ message: "gemini_http_400", diagnostic: "INVALID_ARGUMENT" });
   });
 
+  test("preserves safe network diagnostics in capture failures", () => {
+    expect(captureFailureCode(new Error("youtube_data_network_error"))).toBe("youtube_data_network_error");
+    expect(captureFailureCode(new Error("gemini_network_error"))).toBe("gemini_network_error");
+    expect(captureFailureCode(new Error("capture_import_flush_failed"))).toBe("capture_import_flush_failed");
+    expect(captureFailureCode(new Error("capture_import_flush_validation_failed"))).toBe("capture_import_flush_validation_failed");
+    expect(captureFailureCode(new Error("capture_import_flush_metadata_failed"))).toBe("capture_import_flush_metadata_failed");
+    expect(captureFailureCode(new Error("capture_import_flush_postgres_23514"))).toBe("capture_import_flush_postgres_23514");
+    expect(captureFailureCode(new Error("provider response included api_key=secret"))).toBe("capture_failed");
+    expect(captureFailureReason(new Error("provider response included api_key=secret"), "duration_lookup")).toBe("youtube_duration_lookup_failed");
+  });
+
   test("normalizes Gemini absolute timestamps to their requested window", () => {
     const window = { startOffsetSeconds: 7200, endOffsetSeconds: 9000 };
     const item = parseYoutubeEvidence({ evidence })[0];
     expect(normalizeYoutubeWindowTimestamps([{ ...item, timestamp_start_seconds: 7260, timestamp_end_seconds: 7290 }], window)).toMatchObject([{ timestamp_start_seconds: 60, timestamp_end_seconds: 90 }]);
-    expect(() => normalizeYoutubeWindowTimestamps([{ ...item, timestamp_start_seconds: 60, timestamp_end_seconds: 90 }], window)).toThrow("gemini_window_timestamp_out_of_range");
-    expect(() => normalizeYoutubeWindowTimestamps([{ ...item, timestamp_start_seconds: 1790, timestamp_end_seconds: 1800 }], window)).toThrow("gemini_window_timestamp_out_of_range");
+    expect(() => normalizeYoutubeWindowTimestamps([{ ...item, timestamp_start_seconds: 1799, timestamp_end_seconds: 1801 }], window)).toThrow("gemini_window_timestamp_out_of_range");
+  });
+
+  test("accepts Gemini timestamps relative to a requested window", () => {
+    const window = { startOffsetSeconds: 1800, endOffsetSeconds: 3600 };
+    const item = parseYoutubeEvidence({ evidence })[0];
+
+    expect(normalizeYoutubeWindowTimestamps([{ ...item, timestamp_start_seconds: 60, timestamp_end_seconds: 90 }], window)).toMatchObject([{ timestamp_start_seconds: 60, timestamp_end_seconds: 90 }]);
+    expect(() => normalizeYoutubeWindowTimestamps([{ ...item, timestamp_start_seconds: 60, timestamp_end_seconds: 3601 }], window)).toThrow("gemini_window_timestamp_out_of_range");
   });
 
   test("uses only supported configured media resolutions", () => {

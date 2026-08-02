@@ -15,6 +15,7 @@
     "emitDecoratorMetadata": true,
     "jsx": "preserve",
     "incremental": true,
+    "tsBuildInfoFile": ".cache/tsconfig.tsbuildinfo",
     "plugins": [
       {
         "name": "next"

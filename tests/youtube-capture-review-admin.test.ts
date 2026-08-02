@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { knowledgeCards, knowledgeCardSources, knowledgeExtractionJobs, rawSourceMaterial, sourceCaptureVersions, sources, userRoles, users, type UserRole } from "@/db/schema";
+import { rawSourceMaterial, sourceCaptureVersions, sources, userRoles, users, type UserRole } from "@/db/schema";
 import { serializeYoutubeEvidence, type YoutubeEvidence } from "@/features/knowledge/youtube-capture";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
@@ -23,8 +23,6 @@ async function createYoutubeCapture(input: { id: string; rawText?: string | null
   await testDb.insert(rawSourceMaterial).values({ id: `raw-${input.id}`, sourceId: input.id });
   await seedSourceCaptureVersion({ sourceId: input.id, captureKind: "youtube", rawText: input.rawText ?? serializeYoutubeEvidence(evidence), rawMetadata: { kind: "youtube", captureMethod: input.captureMethod ?? "gemini_youtube_url", capturedAt: "2026-07-17T08:00:00.000Z", model: "gemini-test", promptVersion: "youtube-evidence-v1", providerPayload: "secret-provider-payload" } });
 }
-
-function formData(values: Record<string, string>) { const data = new FormData(); for (const [key, value] of Object.entries(values)) data.set(key, value); return data; }
 
 describe("admin YouTube capture review", () => {
   beforeEach(async () => { authMock.mockReset(); await resetTestDatabase(); await createUser("operator-user", ["operator"]); });
@@ -69,35 +67,18 @@ describe("admin YouTube capture review", () => {
     expect(JSON.stringify(detail)).not.toContain("password");
   });
 
-  test("renders parsed evidence and queues only an eligible source", async () => {
+  test("renders parsed evidence and the canonical ingestion status", async () => {
     authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
     await createYoutubeCapture({ id: "reviewable" });
     const { default: YoutubeCaptureDetailPage } = await import("@/app/admin/knowledge/youtube-captures/[sourceId]/page");
     const detail = await YoutubeCaptureDetailPage({ params: Promise.resolve({ sourceId: "reviewable" }), searchParams: Promise.resolve({}) });
     const html = renderToStaticMarkup(detail);
 
-    expect(html).toContain("Evidence đã capture");
+    expect(html).toContain("Bằng chứng đã thu thập");
     expect(html).toContain(evidence[0].claim_vi);
-    expect(html).toContain("Trích xuất bản nháp");
+    expect(html).toContain("Trạng thái xử lý tri thức");
+    expect(html).toContain("Đang chờ tạo tác vụ xử lý chính.");
+    expect(html).not.toContain("Trích xuất bản nháp");
     expect(html).not.toContain("secret-provider-payload");
-
-    const { extractKnowledgeDraftsFromYoutubeCaptureForm } = await import("@/features/knowledge/actions");
-    await expect(extractKnowledgeDraftsFromYoutubeCaptureForm(formData({ sourceId: "reviewable" }))).rejects.toThrow(/NEXT_REDIRECT:.*extractQueued=1/);
-    await expect(testDb.select().from(knowledgeExtractionJobs)).resolves.toMatchObject([{ sourceId: "reviewable", mode: "extract_only", status: "queued" }]);
-  });
-
-  test("blocks extraction for a non-YouTube source and existing extracted cards", async () => {
-    authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
-    await createYoutubeCapture({ id: "existing" });
-    await testDb.insert(knowledgeCards).values({ id: "existing-card", status: "draft", type: "route_note", title: "Existing card", routeSegment: "Huế - Đà Nẵng", summary: "Existing extracted draft", confidence: "unverified", aiPromptVersion: "source_knowledge_draft_extraction_v1", createdByUserId: "operator-user" });
-    await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: "existing-card", sourceId: "existing" });
-    await testDb.insert(sources).values({ id: "facebook-source", kind: "facebook", url: "https://facebook.com/post", canonicalUrl: "https://facebook.com/post", label: "Facebook", sourceType: "community", verificationStatus: "unverified", official: false, partner: false, submittedByUserId: "operator-user" });
-    await testDb.insert(rawSourceMaterial).values({ id: "raw-facebook-source", sourceId: "facebook-source" });
-    await seedSourceCaptureVersion({ sourceId: "facebook-source", captureKind: "facebook", rawText: serializeYoutubeEvidence(evidence), rawMetadata: { kind: "facebook_operator", captureMethod: "playwright_operator_browser", capturedAt: "2026-07-17T08:00:00.000Z", sourceUrl: "https://facebook.com/post", finalUrl: "https://facebook.com/post" } });
-
-    const { extractKnowledgeDraftsFromYoutubeCaptureForm } = await import("@/features/knowledge/actions");
-    await expect(extractKnowledgeDraftsFromYoutubeCaptureForm(formData({ sourceId: "existing" }))).rejects.toThrow(/NEXT_REDIRECT:.*alreadyExtracted=1/);
-    await expect(extractKnowledgeDraftsFromYoutubeCaptureForm(formData({ sourceId: "facebook-source" }))).rejects.toThrow(/NEXT_REDIRECT:.*extractError/);
-    await expect(testDb.select().from(knowledgeExtractionJobs)).resolves.toHaveLength(0);
   });
 });

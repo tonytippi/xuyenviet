@@ -224,7 +224,7 @@ describe("compiled worker adapters", () => {
     await expect(testDb.select().from(knowledgeExtractionJobs).where(eq(knowledgeExtractionJobs.id, staleExtraction.id))).resolves.toMatchObject([{ status: "failed", lastErrorCode: "stale_max_attempts" }]);
 
     const ingestion = await seedIngestionJob("compiled-terminal-candidate");
-    await testDb.update(knowledgeIngestionJobs).set({ protocolVersion: 2, discoveryComplete: true, discoveredCandidateCount: 1 }).where(eq(knowledgeIngestionJobs.id, ingestion.id));
+    await testDb.update(knowledgeIngestionJobs).set({ protocolVersion: 2, discoveredCandidateCount: 1 }).where(eq(knowledgeIngestionJobs.id, ingestion.id));
     await testDb.insert(aiGatewayModels).values({ id: "compiled-candidate-extraction-model", gatewayModelName: "compiled-candidate-extraction-model", displayLabel: "Compiled candidate extraction model", purpose: "extraction", active: false, defaultForPurpose: false, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000, pricingEffectiveAt: new Date("2026-01-01T00:00:00.000Z") });
     const [candidate] = await testDb.insert(knowledgeIngestionCandidates).values({ ingestionJobId: ingestion.id, sourceId: ingestion.sourceId, captureVersionId: ingestion.captureVersionId, fingerprint: "compiled-terminal-candidate", type: "general_travel_tip", title: "Candidate", summary: "Candidate summary", conditions: [], freshnessSensitive: false, spanStart: 0, spanEnd: 1, extractionModelId: "compiled-candidate-extraction-model", extractionPromptVersion: "test", stage: "queued", nextRunAt: new Date(0) }).returning();
     const candidateEvents = await runCompiledAdapter("ingestion", "compiled-terminal-candidate-worker");

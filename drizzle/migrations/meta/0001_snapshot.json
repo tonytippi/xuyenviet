@@ -1,5 +1,5 @@
 {
-  "id": "90ac2ee1-1a3d-4637-ac56-cbca74feaed0",
+  "id": "46c86395-5810-4fa4-9a07-f9793e43ca96",
   "prevId": "588a63a1-53e2-41bb-b4d6-3967e72cdd8f",
   "version": "7",
   "dialect": "postgresql",
@@ -4778,27 +4778,6 @@
           "notNull": true,
           "default": 1
         },
-        "discovery_cursor": {
-          "name": "discovery_cursor",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "discovery_window_size": {
-          "name": "discovery_window_size",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 8000
-        },
-        "discovery_complete": {
-          "name": "discovery_complete",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
         "discovered_candidate_count": {
           "name": "discovered_candidate_count",
           "type": "integer",
@@ -5096,14 +5075,6 @@
         "knowledge_ingestion_jobs_protocol_version_check": {
           "name": "knowledge_ingestion_jobs_protocol_version_check",
           "value": "\"knowledge_ingestion_jobs\".\"protocol_version\" in (1, 2)"
-        },
-        "knowledge_ingestion_jobs_discovery_cursor_check": {
-          "name": "knowledge_ingestion_jobs_discovery_cursor_check",
-          "value": "\"knowledge_ingestion_jobs\".\"discovery_cursor\" >= 0"
-        },
-        "knowledge_ingestion_jobs_discovery_window_size_check": {
-          "name": "knowledge_ingestion_jobs_discovery_window_size_check",
-          "value": "\"knowledge_ingestion_jobs\".\"discovery_window_size\" between 500 and 8000"
         },
         "knowledge_ingestion_jobs_candidate_counts_check": {
           "name": "knowledge_ingestion_jobs_candidate_counts_check",
@@ -10152,13 +10123,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
-        },
-        "authorization_version": {
-          "name": "authorization_version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 1
         }
       },
       "indexes": {},
@@ -10177,7 +10141,7 @@
       "checkConstraints": {
         "users_no_system_executor_id_check": {
           "name": "users_no_system_executor_id_check",
-          "value": "\"users\".\"id\" not in ('system-ai-orchestration', 'system-knowledge-pipeline', 'system-trip-planning', 'system-facebook-capture', 'system-youtube-capture', 'system-admin-bootstrap')"
+          "value": "\"users\".\"id\" not in ('system-ai-orchestration', 'system-knowledge-pipeline', 'system-trip-planning', 'system-facebook-capture', 'system-youtube-capture')"
         }
       },
       "isRLSEnabled": false

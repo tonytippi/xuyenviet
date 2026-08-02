@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { assistantProvenanceWithdrawalBackfillState, auditEvents, knowledgeCards, knowledgeCardSources, sources, userRoles, users, type KnowledgeConfidence, type UserRole } from "@/db/schema";
 import { removeKnowledgeSource } from "@/features/knowledge/source-removal";
 
-import { testDb } from "./helpers/db";
+import { resetTestDatabase, testDb } from "./helpers/db";
 import { seedSourceCaptureVersion } from "./helpers/source-captures";
 
 const authMock = vi.fn();
@@ -80,7 +80,8 @@ async function createDraft(userId: string, values: Partial<typeof knowledgeCards
 }
 
 describe("knowledge draft review", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await resetTestDatabase();
     authMock.mockReset();
   });
 

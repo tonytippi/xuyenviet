@@ -106,6 +106,14 @@ const knowledgePipelineJudgmentSystemPrompt = [
   "High-risk road, safety, EV, price, hours, availability, booking, or promotion facts must be verify_first. Never upgrade evidence or invent facts.",
 ].join("\n");
 
+const knowledgePipelineBatchGroundingJudgmentSystemPrompt = [
+  "Independently ground and judge every supplied road-trip candidate against the complete immutable source capture.",
+  "Return strict JSON only: {results:[...]}. Return exactly one result for each supplied candidate id.",
+  "Each result requires candidate_id, decision (publish, review_recommended, verify_first, or suppress), summary, relevance, extractability, evidence_grounding, specificity, actionability, first_hand_likelihood, spam_commercial_risk, and evidence {quote_text} or evidence:null.",
+  "When evidence is present, quote_text must be one exact contiguous substring from source_text. Never use ellipses to join separate passages and never paraphrase evidence.",
+  "If the candidate is not supported by an exact source passage, return evidence:null and decision:suppress. High-risk facts must be verify_first when grounded.",
+].join("\n");
+
 const knowledgePipelineRelationJudgmentSystemPrompt = [
   "Independently decide the relationship between one candidate and supplied eligible knowledge cards. Candidates may be active cards or suppressed verification-required canonical cards awaiting corroboration.",
   "Return strict JSON only: action (attach, create, conflict, or ambiguous), optional target_card_id, and a concise Vietnamese summary.",
@@ -321,8 +329,12 @@ export function buildKnowledgePipelineExtractionMessages(input: { source: Record
   return [{ role: "system" as const, content: knowledgePipelineExtractionSystemPrompt }, { role: "user" as const, content: JSON.stringify({ source_metadata: input.source, source_text: input.rawText }) }];
 }
 
-export function buildKnowledgePipelineMultiFactExtractionMessages(input: { source: Record<string, unknown>; rawText: string; sourceOffset: number; coreStart: number; coreEnd: number }) {
-  return [{ role: "system" as const, content: knowledgePipelineMultiFactExtractionSystemPrompt }, { role: "user" as const, content: JSON.stringify({ source_metadata: input.source, source_text: input.rawText, source_offset: input.sourceOffset, core_range: { start: input.coreStart, end: input.coreEnd }, expected_output: { candidates: [] } }) }];
+export function buildKnowledgePipelineMultiFactExtractionMessages(input: { source: Record<string, unknown>; rawText: string }) {
+  return [{ role: "system" as const, content: knowledgePipelineMultiFactExtractionSystemPrompt }, { role: "user" as const, content: JSON.stringify({ source_metadata: input.source, source_text: input.rawText, extraction_contract: { allowed_types: ["place", "food", "hotel_area", "activity", "service", "route_note", "warning", "cost_note", "parking", "ev_charging", "kid_friendly_tip", "discount_promotion", "general_travel_tip"], require_at_least_one_scope_field: true, optimize_for_semantic_recall: true, include_scoped_firsthand_community_observations: true, defer_grounding_quality_and_publication_to_judgment: true, evidence_hint_optional: true, practical_details_and_tags_required: true }, expected_output: { candidates: [{ type: "route_note", title: "Tiêu đề ngắn", summary: "Tóm tắt quan sát có điều kiện", location_name: null, route_segment: "Chặng đường có tên", conditions: [], freshness_sensitive: true, practical_details: { ordered_stops: ["Hà Nội", "Huế", "Đà Nẵng", "Huế"] }, tags: ["road-trip", "coastal"], evidence_hint: { quote_text: "Gợi ý evidence nếu hữu ích" } }] } }) }];
+}
+
+export function buildKnowledgePipelineBatchGroundingJudgmentMessages(input: { rawText: string; candidates: Array<Record<string, unknown>> }) {
+  return [{ role: "system" as const, content: knowledgePipelineBatchGroundingJudgmentSystemPrompt }, { role: "user" as const, content: JSON.stringify({ source_text: input.rawText, candidates: input.candidates }) }];
 }
 
 export function buildKnowledgePipelineJudgmentMessages(input: { candidate: Record<string, unknown>; evidence: { quoteText: string; spanStart: number; spanEnd: number } }) {

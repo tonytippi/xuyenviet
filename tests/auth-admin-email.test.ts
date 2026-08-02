@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { userRoles, users } from "@/db/schema";
 
-import { testDb } from "./helpers/db";
+import { resetTestDatabase, testDb } from "./helpers/db";
 
 type SignInEvent = (message: { user: { id?: string; email?: string | null }; isNewUser?: boolean }) => Promise<void>;
 
@@ -42,6 +42,9 @@ async function getSignInEvent() {
 }
 
 describe("sign-in events", () => {
+  beforeEach(async () => {
+    await resetTestDatabase();
+  });
   beforeEach(() => {
     delete process.env.ADMIN_EMAIL;
     authMocks.captureFirstTouchReferralAttribution.mockReset();

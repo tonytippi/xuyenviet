@@ -1,5 +1,5 @@
 import { eq, sql } from "drizzle-orm";
-import { describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import * as workerDatabase from "@xuyenviet/database";
 import type { WorkerPollObservation } from "@xuyenviet/contracts";
@@ -7,7 +7,7 @@ import { knowledgeCardSearchDocuments, knowledgeCards, knowledgeCardSources, kno
 import { backfillKnowledgeIndexWork, claimNextKnowledgeIndexWork, completeKnowledgeIndexWork, processNextApprovedKnowledgeIndexingBatch, recoverExpiredKnowledgeIndexWork, runApprovedKnowledgeIndexingWorkerLoop, runKnowledgeIndexBackfill } from "@/features/knowledge/indexing-worker";
 import { projectClaimedKnowledgeIndexWork } from "@/features/knowledge/search";
 import { enqueueKnowledgeIndexWork } from "@/features/knowledge/indexing-queue";
-import { testDb } from "./helpers/db";
+import { resetTestDatabase, testDb } from "./helpers/db";
 import { seedKnowledgeCardEvidence, seedSourceCaptureVersion } from "./helpers/source-captures";
 
 async function createMarker(id: string) {
@@ -15,6 +15,10 @@ async function createMarker(id: string) {
   await testDb.insert(knowledgeCards).values({ id, type: "place", title: "Điểm dừng", locationName: "Huế", summary: "Tóm tắt an toàn.", aiPromptVersion: "test", createdByUserId: "index-worker-user" });
   await testDb.insert(knowledgeIndexDirtyMarkers).values({ knowledgeCardId: id, contentVersion: 1, evidenceSetRevision: 1, reason: "test", nextRunAt: new Date(0) });
 }
+
+beforeEach(async () => {
+  await resetTestDatabase();
+});
 
 async function makeMarkerProjectable(id: string) {
   await createMarker(id);
@@ -53,6 +57,15 @@ describe("versioned knowledge indexing work", () => {
       controller.abort();
       removeEventListener.mockRestore();
     }
+  });
+
+  test("reports idle polling before the worker sleeps", async () => {
+    const controller = new AbortController();
+    const onIdle = vi.fn(() => controller.abort());
+
+    await expect(runApprovedKnowledgeIndexingWorkerLoop({ workerId: "idle-worker", pollIntervalMs: 10, signal: controller.signal, onIdle })).resolves.toEqual({ status: "stopped" });
+
+    expect(onIdle).toHaveBeenCalledWith(10);
   });
 
   test("reclaims an expired lease with a new fence and rejects the old worker completion", async () => {

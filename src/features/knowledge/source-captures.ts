@@ -12,7 +12,6 @@ import { ensureIngestionJobForCaptureVersion } from "@/features/knowledge/ingest
 
 const submittedKinds = new Set<SourceKind>(["url", "copied_post", "pasted_text", "screenshot"]);
 const unsafeMetadataKey = /cookie|token|password|local_?storage|html|hidden|profile|provider|secret/i;
-const maxMetadataEntries = 16;
 const maxMetadataKeyLength = 48;
 const maxMetadataValueLength = 500;
 
@@ -47,7 +46,7 @@ export function validateSafeCaptureMetadata(captureKind: SourceKind, value: Safe
 
   const metadata = value;
   const allowed = allowedMetadataKeys(metadata.kind);
-  if (Object.keys(metadata).length > maxMetadataEntries || Object.keys(metadata).some((key) => !allowed.has(key) || key.length > maxMetadataKeyLength)) {
+  if (Object.keys(metadata).some((key) => !allowed.has(key) || key.length > maxMetadataKeyLength)) {
     throw new SourceCaptureValidationError("Capture metadata contains unsupported or unsafe fields.");
   }
   if ((metadata.kind === "facebook_operator" && captureKind !== "facebook") || (metadata.kind === "youtube" && captureKind !== "youtube") || (metadata.kind === "submitted" && !submittedKinds.has(captureKind))) {
@@ -187,9 +186,10 @@ export async function retainExpiredFacebookCaptureVersions(
       if (!current || await hasRetentionBlocker(transaction, version.sourceId, version.id)) return "blocked" as const;
       if (input.dryRun) return "would_tombstone" as const;
 
-       const [updated] = await transaction.update(sourceCaptureVersions).set({ rawText: null, fileName: null, mimeType: null, byteSize: null, storageKey: null, rawMetadata: null, payloadDeletedAt: now }).where(and(eq(sourceCaptureVersions.id, version.id), isNull(sourceCaptureVersions.payloadDeletedAt))).returning({ id: sourceCaptureVersions.id });
-       if (!updated) return "skip" as const;
-       // Legacy material was copied into the first immutable capture version.
+        const [updated] = await transaction.update(sourceCaptureVersions).set({ rawText: null, fileName: null, mimeType: null, byteSize: null, storageKey: null, rawMetadata: null, payloadDeletedAt: now }).where(and(eq(sourceCaptureVersions.id, version.id), isNull(sourceCaptureVersions.payloadDeletedAt))).returning({ id: sourceCaptureVersions.id });
+        if (!updated) return "skip" as const;
+        await transaction.update(knowledgeIngestionJobs).set({ rawDiscoveryResponse: null, updatedAt: now }).where(eq(knowledgeIngestionJobs.captureVersionId, version.id));
+        // Legacy material was copied into the first immutable capture version.
        if (version.versionSequence === 1) {
          await transaction.update(rawSourceMaterial).set({ rawText: null, fileName: null, mimeType: null, byteSize: null, storageKey: null, rawMetadata: null }).where(eq(rawSourceMaterial.sourceId, version.sourceId));
        }

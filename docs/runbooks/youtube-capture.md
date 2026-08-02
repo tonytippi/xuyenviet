@@ -8,7 +8,7 @@ The current command captures individual videos that have already been submitted 
 
 AI-first periodic discovery and automatic capture are proposed only. See [AI-First YouTube Discovery](../proposals/ai-first-youtube-discovery.md); that proposal is outside the active MVP scope and does not authorize operation or implementation.
 
-Readable capture creates an immutable capture version and one canonical ingestion job. Its processing requires a separately scheduled and supervised ingestion worker; capture itself does not publish traveler-ready knowledge.
+Readable capture creates an immutable capture version and one canonical ingestion job. Its processing requires a separately scheduled and supervised `knowledge:ingestion-worker`; capture itself does not publish traveler-ready knowledge. Do not enqueue a legacy extraction job for a captured video.
 
 ## Setup
 
@@ -30,9 +30,9 @@ The command accepts only canonical individual videos. It gets each public durati
 
 Channels, playlists, malformed URLs, unavailable videos, provider failures, invalid model JSON, and videos with no reliable travel evidence leave raw material unchanged and record only a safe audit outcome. These failures do not create traveler-ready knowledge. Valid evidence is handled by the canonical Knowledge pipeline, whose risk-based review recommendations are separate from capture.
 
-Windowed capture uses a new cache payload schema. Earlier whole-video YouTube artifacts remain in the archive for retention but are not replayed by this command.
+Windowed capture accepts Gemini timestamps relative to the requested window as well as the requested full-video offsets, normalizing both to video-relative offsets before storage. Mixed or out-of-window timestamps fail closed. Earlier whole-video YouTube artifacts remain in the archive for retention but are not replayed by this command.
 
-For Gemini HTTP failures, the command writes Gemini's structured error status to standard error. Provider error messages are not logged, saved to the database, or stored in the capture archive.
+The command retries transient Gemini `429` and `5xx` failures twice with short backoff before recording a failure. For Gemini HTTP failures, it writes Gemini's structured error status to standard error. Provider error messages are not logged, saved to the database, or stored in the capture archive.
 
 To inspect a failure, query `audit_events` through the exact `DATABASE_URL` environment used by the capture process (process environment takes precedence over `.env.local`):
 
@@ -52,6 +52,6 @@ YouTube Data API v3 does not provide third-party transcript retrieval. Caption m
 
 - Gemini output is bounded evidence, never a requested or stored transcript.
 - Raw evidence is operator-only. A video candidate or raw capture never enters traveler retrieval directly.
-- Only policy-eligible active knowledge cards with valid current evidence may enter traveler retrieval. High-risk claims remain verification-required and caveat-only until corroborated; conflicted claims cannot support factual itinerary premises. Operator review is risk- and sampling-driven under the canonical Knowledge policy, not a general capture prerequisite.
+- Only policy-eligible active knowledge cards with valid current evidence may enter traveler retrieval. Automation routes grounded high-risk claims to `verify_first` and keeps them out of retrieval pending review; an authorized operator may revise or publish the card with its available validated evidence. A one-source operator-authorized publication does not imply a corroborated community pattern. Conflicted claims cannot support factual itinerary premises. Operator review is risk- and sampling-driven under the canonical Knowledge policy, not a general capture prerequisite.
 - No Playwright, browser automation, undocumented YouTube APIs, YouTube credentials, media download, HTML, provider payload, raw prompt/response log, or third-party transcript scraping is allowed.
 - Back up the local archive using encrypted storage and tested restores. It is production-critical until managed infrastructure replaces it. A production write failure is recovered by rerunning the command: the stored artifact is retried without another Gemini call.

@@ -1,7 +1,8 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { aiGatewayModels, aiUsageEvents, auditEvents, knowledgeCardEvidence, knowledgeCardSearchDocuments, knowledgeCards, knowledgeCardSources, knowledgeIndexDirtyMarkers, knowledgeIngestionCandidates, knowledgeIngestionJobs, knowledgeRecommendations, knowledgeSamplingCohortMembers, sourceCaptureVersions, sources, users } from "@/db/schema";
+import { buildKnowledgePipelineMultiFactExtractionMessages } from "@/features/ai/prompts";
 import { claimNextKnowledgeIngestionCandidate, claimNextKnowledgeIngestionJob, commitKnowledgeIngestionStage, recoverKnowledgeIngestionJobs } from "@/features/knowledge/ingestion-jobs";
 import { runKnowledgeIngestionCandidatePipeline, runKnowledgeIngestionPipeline } from "@/features/knowledge/ingestion-pipeline";
 import { appendSourceCaptureVersion } from "@/features/knowledge/source-captures";
@@ -35,6 +36,10 @@ describe("knowledge ingestion pipeline", () => {
     return new Response(JSON.stringify({ model: "judge-model", choices: [{ message: { content: JSON.stringify({ decision, summary: "Bằng chứng rõ và hữu ích.", relevance: .9, extractability: .9, evidence_grounding: .95, specificity: .8, actionability: .8, first_hand_likelihood: .7, spam_commercial_risk: .1, ...overrides }) } }] }), { status: 200 });
   }
 
+  function batchGroundingResponse(results: Array<{ candidateId: number; quote: string | null; decision?: "publish" | "review_recommended" | "verify_first" | "suppress"; scores?: Record<string, number> }>) {
+    return new Response(JSON.stringify({ model: "judge-model", choices: [{ message: { content: JSON.stringify({ results: results.map(({ candidateId, quote, decision = "publish", scores = {} }) => ({ candidate_id: String(candidateId), decision: quote ? decision : "suppress", summary: quote ? "Bằng chứng rõ và hữu ích." : "Không tìm được bằng chứng nguyên văn.", relevance: quote ? .9 : .2, extractability: quote ? .9 : .2, evidence_grounding: quote ? .95 : 0, specificity: quote ? .8 : .2, actionability: quote ? .8 : .2, first_hand_likelihood: quote ? .7 : .2, spam_commercial_risk: .1, ...scores, evidence: quote ? { quote_text: quote } : null })) }) } }] }), { status: 200 });
+  }
+
   async function claimFor(rawText: string, sourceId = "source") {
     const capture = await appendSourceCaptureVersion(testDb, { sourceId, captureKind: "pasted_text", rawText, metadata: { kind: "submitted" }, capturedAt: new Date("2026-07-22T00:00:00.000Z") });
     await testDb.update(knowledgeIngestionJobs).set({ protocolVersion: 1 }).where(eq(knowledgeIngestionJobs.captureVersionId, capture.id));
@@ -45,7 +50,7 @@ describe("knowledge ingestion pipeline", () => {
 
   function candidate(rawText: string, overrides: Record<string, unknown> = {}) {
     const quote = rawText;
-    return { type: "place", title: "Điểm ngắm cảnh đèo Hải Vân", summary: "Có điểm dừng ngắm cảnh phù hợp ban ngày.", location_name: "Đèo Hải Vân", conditions: ["ban ngày"], freshness_sensitive: false, evidence: { quote_text: quote, span_start: 0, span_end: Array.from(rawText).length }, ...overrides };
+    return { type: "place", title: "Điểm ngắm cảnh đèo Hải Vân", summary: "Có điểm dừng ngắm cảnh phù hợp ban ngày.", location_name: "Đèo Hải Vân", conditions: ["ban ngày"], freshness_sensitive: false, practical_details: {}, tags: [], evidence: { quote_text: quote, span_start: 0, span_end: Array.from(rawText).length }, ...overrides };
   }
 
   test("v2 discovers all window-owned candidates and records mixed independent outcomes", async () => {
@@ -53,13 +58,9 @@ describe("knowledge ingestion pipeline", () => {
     const capture = await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText, metadata: { kind: "submitted" }, capturedAt: new Date("2026-07-22T00:00:00.000Z") });
     const firstQuote = "Đèo Hải Vân có điểm dừng ngắm cảnh an toàn vào ban ngày.";
     const secondQuote = "Trạm sạc tại Đà Nẵng đang hoạt động.";
-    const secondStart = rawText.indexOf(secondQuote);
     vi.mocked(fetch)
-      .mockResolvedValueOnce(new Response(JSON.stringify({ model: "extract-model", choices: [{ message: { content: JSON.stringify({ candidates: [candidate(rawText, { evidence: { quote_text: firstQuote, span_start: 0, span_end: Array.from(firstQuote).length } }), candidate(rawText, { type: "ev_charging", title: "Trạm sạc Đà Nẵng", summary: "Trạm sạc đang hoạt động.", location_name: "Đà Nẵng", evidence: { quote_text: secondQuote, span_start: secondStart, span_end: secondStart + Array.from(secondQuote).length } })] }) } }] }), { status: 200 }))
-      .mockResolvedValueOnce(judgmentResponse("publish"))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ model: "judge-model", choices: [{ message: { content: JSON.stringify({ action: "create", target_card_id: null, summary: "Khác biệt." }) } }] }), { status: 200 }))
-      .mockResolvedValueOnce(judgmentResponse("publish"))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ model: "judge-model", choices: [{ message: { content: JSON.stringify({ action: "create", target_card_id: null, summary: "Khác biệt." }) } }] }), { status: 200 }));
+      .mockResolvedValueOnce(new Response(JSON.stringify({ model: "extract-model", choices: [{ message: { content: JSON.stringify({ candidates: [candidate(rawText, { practical_details: { tips: ["Dừng lại ban ngày"], parking_notes: ["Có chỗ đậu xe"] }, tags: ["hai-van", "canh-deo", "hai-van"] }), candidate(rawText, { type: "ev_charging", title: "Trạm sạc Đà Nẵng", summary: "Trạm sạc đang hoạt động.", location_name: "Đà Nẵng" })] }) } }] }), { status: 200 }))
+      .mockResolvedValueOnce(batchGroundingResponse([{ candidateId: 0, quote: firstQuote }, { candidateId: 1, quote: secondQuote }]));
     const discovery = await claimNextKnowledgeIngestionJob({ workerId: "v2-discovery", now: new Date(Date.now() + 1_000) }, testDb);
     if (!discovery) throw new Error("expected discovery claim");
     await runKnowledgeIngestionPipeline(discovery, testDb);
@@ -72,23 +73,327 @@ describe("knowledge ingestion pipeline", () => {
       if (!claim) throw new Error(`expected candidate claim for ${queuedCandidate.id}`);
       await runKnowledgeIngestionCandidatePipeline(claim, testDb);
     }
-    const [queuedJob] = await testDb.select({ nextRunAt: knowledgeIngestionJobs.nextRunAt }).from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.captureVersionId, capture.id));
-    if (!queuedJob) throw new Error("expected queued ingestion job");
-    const completion = await claimNextKnowledgeIngestionJob({ workerId: "v2-complete", now: new Date(queuedJob.nextRunAt.getTime() + 1_000) }, testDb);
-    if (!completion) throw new Error("expected completion claim");
-    await runKnowledgeIngestionPipeline(completion, testDb);
-    await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.captureVersionId, capture.id))).resolves.toMatchObject([{ protocolVersion: 2, discoveryComplete: true, discoveredCandidateCount: 2, terminalCandidateCount: 2, publishedCandidateCount: 1, verifyFirstCandidateCount: 1, stage: "published" }]);
+    await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.captureVersionId, capture.id))).resolves.toMatchObject([{ protocolVersion: 2, discoveredCandidateCount: 2, terminalCandidateCount: 2, publishedCandidateCount: 1, verifyFirstCandidateCount: 1, stage: "published" }]);
+    await expect(testDb.select({ practicalDetails: knowledgeIngestionCandidates.practicalDetails, tags: knowledgeIngestionCandidates.tags }).from(knowledgeIngestionCandidates).where(eq(knowledgeIngestionCandidates.captureVersionId, capture.id))).resolves.toEqual(expect.arrayContaining([expect.objectContaining({ practicalDetails: { tips: ["Dừng lại ban ngày"], parking_notes: ["Có chỗ đậu xe"] }, tags: ["hai-van", "canh-deo"] })]));
+    await expect(testDb.select({ practicalDetails: knowledgeCards.practicalDetails, tags: knowledgeCards.tags }).from(knowledgeCards).where(eq(knowledgeCards.locationName, "Đèo Hải Vân"))).resolves.toEqual([expect.objectContaining({ practicalDetails: { tips: ["Dừng lại ban ngày"], parking_notes: ["Có chỗ đậu xe"] }, tags: ["hai-van", "canh-deo"] })]);
+  });
+
+  test("v2 retains one ordered route candidate with source-order repeats", async () => {
+    const rawText = "Từ Hà Nội đi Huế, Đà Nẵng rồi quay lại Huế.";
+    const capture = await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText, metadata: { kind: "submitted" }, capturedAt: new Date("2026-07-22T00:00:00.000Z") });
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ model: "extract-model", choices: [{ message: { content: JSON.stringify({ candidates: [candidate(rawText, { type: "route_note", title: "Tuyến Hà Nội - Huế", summary: "Tuyến dừng theo thứ tự được ghi nhận.", location_name: null, route_segment: "Hà Nội - Huế", practical_details: { ordered_stops: ["1. Hà Nội", "Huế", "Đà Nẵng", "Huế"] }, tags: ["road-trip"] })] }) } }] }), { status: 200 }))
+      .mockResolvedValueOnce(batchGroundingResponse([{ candidateId: 0, quote: rawText }]));
+    const claim = await claimNextKnowledgeIngestionJob({ workerId: "v2-route", now: new Date(Date.now() + 1_000) }, testDb);
+    if (!claim) throw new Error("expected discovery claim");
+    await runKnowledgeIngestionPipeline(claim, testDb);
+    await expect(testDb.select({ type: knowledgeIngestionCandidates.type, practicalDetails: knowledgeIngestionCandidates.practicalDetails }).from(knowledgeIngestionCandidates).where(eq(knowledgeIngestionCandidates.captureVersionId, capture.id))).resolves.toEqual([{ type: "route_note", practicalDetails: { ordered_stops: ["Hà Nội", "Huế", "Đà Nẵng", "Huế"] } }]);
+  });
+
+  test("v2 extraction contract retains independently useful place observations alongside an itinerary", () => {
+    const messages = buildKnowledgePipelineMultiFactExtractionMessages({
+      source: { id: "source", kind: "facebook", label: "Community post", sourceType: "community", verificationStatus: "unverified", official: false, partner: false },
+      rawText: "Lịch trình có các điểm dừng và lưu ý riêng tại từng địa điểm.",
+    });
+
+    expect(messages[0]?.content).toContain("return the route_note plus a separate candidate for each such observation");
+    expect(messages[0]?.content).toContain("Do not hide those observations inside the route_note practical_details");
+    expect(messages[0]?.content).toContain("Do not turn stop labels alone into stop-level candidates");
+  });
+
+  test("uses Facebook evidence for fact-only retrieval without making it traveler-visible", async () => {
+    await testDb.update(sources).set({ kind: "facebook", url: "https://facebook.com/groups/xuyenviet/posts/source", canonicalUrl: "https://facebook.com/groups/xuyenviet/posts/source", sourceType: "community" }).where(eq(sources.id, "source"));
+    const rawText = "Đèo Hải Vân có điểm dừng ngắm cảnh an toàn vào ban ngày.";
+    await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "facebook", rawText, metadata: { kind: "facebook_operator", captureMethod: "playwright_operator_browser", capturedAt: "2026-07-22T00:00:00.000Z", sourceUrl: "https://facebook.com/groups/xuyenviet/posts/source", finalUrl: "https://facebook.com/groups/xuyenviet/posts/source" }, capturedAt: new Date("2026-07-22T00:00:00.000Z") });
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ model: "extract-model", choices: [{ message: { content: JSON.stringify({ candidates: [candidate(rawText)] }) } }] }), { status: 200 }))
+      .mockResolvedValueOnce(batchGroundingResponse([{ candidateId: 0, quote: rawText }]));
+
+    const discovery = await claimNextKnowledgeIngestionJob({ workerId: "facebook-discovery", now: new Date(Date.now() + 1_000) }, testDb);
+    if (!discovery) throw new Error("expected discovery claim");
+    await runKnowledgeIngestionPipeline(discovery, testDb);
+    const candidateClaim = await claimNextKnowledgeIngestionCandidate({ workerId: "facebook-candidate", now: new Date(Date.now() + 2_000) }, testDb);
+    if (!candidateClaim) throw new Error("expected candidate claim");
+    await runKnowledgeIngestionCandidatePipeline(candidateClaim, testDb);
+
+    await expect(testDb.select({ displayPolicy: knowledgeCardEvidence.displayPolicy }).from(knowledgeCardEvidence)).resolves.toEqual([{ displayPolicy: "fact_only" }]);
+  });
+
+  test("v2 persists a route and its scoped place observation from a rich itinerary", async () => {
+    const routeQuote = "Ngày 1 đi từ Hà Nội đến Quảng Bình, ngày 2 đến Đà Nẵng.";
+    const placeQuote = "Tại Quảng Bình, Suối Nước Moọc có chỗ đậu xe gần lối vào.";
+    const rawText = `${routeQuote} ${placeQuote}`;
+    const capture = await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText, metadata: { kind: "submitted" }, capturedAt: new Date("2026-07-22T00:00:00.000Z") });
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ model: "extract-model", choices: [{ message: { content: JSON.stringify({ candidates: [
+        candidate(rawText, { type: "route_note", title: "Tuyến Hà Nội - Đà Nẵng", summary: "Lộ trình đi qua Quảng Bình.", location_name: null, route_segment: "Hà Nội - Quảng Bình - Đà Nẵng", practical_details: { ordered_stops: ["Hà Nội", "Quảng Bình", "Đà Nẵng"] }, tags: ["road-trip"], evidence: { quote_text: routeQuote } }),
+        candidate(rawText, { type: "parking", title: "Đỗ xe gần Suối Nước Moọc", summary: "Có chỗ đậu xe gần lối vào Suối Nước Moọc.", location_name: "Suối Nước Moọc, Quảng Bình", practical_details: { parking_notes: ["Kiểm tra chỗ đậu xe trước khi đến."] }, tags: ["parking"], evidence: { quote_text: placeQuote } }),
+      ] }) } }] }), { status: 200 }))
+      .mockResolvedValueOnce(batchGroundingResponse([{ candidateId: 0, quote: routeQuote }, { candidateId: 1, quote: placeQuote }]));
+    const claim = await claimNextKnowledgeIngestionJob({ workerId: "v2-rich-itinerary", now: new Date(Date.now() + 1_000) }, testDb);
+    if (!claim) throw new Error("expected discovery claim");
+    await runKnowledgeIngestionPipeline(claim, testDb);
+
+    await expect(testDb.select({ type: knowledgeIngestionCandidates.type, locationName: knowledgeIngestionCandidates.locationName, practicalDetails: knowledgeIngestionCandidates.practicalDetails }).from(knowledgeIngestionCandidates).where(eq(knowledgeIngestionCandidates.captureVersionId, capture.id)).orderBy(knowledgeIngestionCandidates.createdAt)).resolves.toEqual([
+      { type: "route_note", locationName: null, practicalDetails: { ordered_stops: ["Hà Nội", "Quảng Bình", "Đà Nẵng"] } },
+      { type: "parking", locationName: "Suối Nước Moọc, Quảng Bình", practicalDetails: { parking_notes: ["Kiểm tra chỗ đậu xe trước khi đến."] } },
+    ]);
+  });
+
+  test("v2 rejects substantial copied prose details", async () => {
+    const copiedTip = "Mẹo nguyên văn dài này không được sao chép sang thẻ tri thức vì có thể tái tạo nội dung trải nghiệm riêng của tác giả. ".repeat(2);
+    const rawText = `Điểm dừng ven biển dài này là một tên địa danh hợp lệ cho lịch trình. ${copiedTip}`;
+    const capture = await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText, metadata: { kind: "submitted" } });
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ model: "extract-model", choices: [{ message: { content: JSON.stringify({ candidates: [
+        candidate(rawText, { type: "route_note", title: "Tuyến ven biển", location_name: null, route_segment: "Tuyến ven biển", practical_details: { ordered_stops: ["Điểm dừng ven biển dài này"], tips: [copiedTip] }, tags: [] }),
+      ] }) } }] }), { status: 200 }))
+      .mockResolvedValueOnce(batchGroundingResponse([]));
+    const claim = await claimNextKnowledgeIngestionJob({ workerId: "v2-stop-overlap", now: new Date(Date.now() + 1_000) }, testDb);
+    if (!claim) throw new Error("expected discovery claim");
+    await runKnowledgeIngestionPipeline(claim, testDb);
+    await expect(testDb.select({ stage: knowledgeIngestionCandidates.stage, outcomeReasonCode: knowledgeIngestionCandidates.outcomeReasonCode }).from(knowledgeIngestionCandidates).where(eq(knowledgeIngestionCandidates.captureVersionId, capture.id))).resolves.toEqual([{ stage: "suppressed", outcomeReasonCode: "candidate_unsafe_raw_overlap" }]);
+  });
+
+  test("v2 retains a route candidate when only ordered stop labels overlap its source", async () => {
+    const rawText = "Điểm dừng ven biển dài này là một tên địa danh hợp lệ cho lịch trình.";
+    const capture = await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText, metadata: { kind: "submitted" } });
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ model: "extract-model", choices: [{ message: { content: JSON.stringify({ candidates: [candidate(rawText, { type: "route_note", title: "Tuyến ven biển", location_name: null, route_segment: "Tuyến ven biển", practical_details: { ordered_stops: ["Điểm dừng ven biển dài này"] }, tags: [] })] }) } }] }), { status: 200 }))
+      .mockResolvedValueOnce(batchGroundingResponse([{ candidateId: 0, quote: rawText }]));
+    const claim = await claimNextKnowledgeIngestionJob({ workerId: "v2-stop-label", now: new Date(Date.now() + 1_000) }, testDb);
+    if (!claim) throw new Error("expected discovery claim");
+    await runKnowledgeIngestionPipeline(claim, testDb);
+    await expect(testDb.select({ stage: knowledgeIngestionCandidates.stage, practicalDetails: knowledgeIngestionCandidates.practicalDetails }).from(knowledgeIngestionCandidates).where(eq(knowledgeIngestionCandidates.captureVersionId, capture.id))).resolves.toEqual([{ stage: "relating", practicalDetails: { ordered_stops: ["Điểm dừng ven biển dài này"] } }]);
+  });
+
+  test("v2 retains a short source-grounded practical detail", async () => {
+    const shortTip = "Dừng lại ban ngày để ngắm cảnh.";
+    const rawText = `Đèo Hải Vân: ${shortTip}`;
+    const capture = await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText, metadata: { kind: "submitted" } });
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ model: "extract-model", choices: [{ message: { content: JSON.stringify({ candidates: [candidate(rawText, { practical_details: { tips: [shortTip] } })] }) } }] }), { status: 200 }))
+      .mockResolvedValueOnce(batchGroundingResponse([{ candidateId: 0, quote: shortTip }]));
+    const claim = await claimNextKnowledgeIngestionJob({ workerId: "v2-short-overlap", now: new Date(Date.now() + 1_000) }, testDb);
+    if (!claim) throw new Error("expected discovery claim");
+    await runKnowledgeIngestionPipeline(claim, testDb);
+
+    await expect(testDb.select({ stage: knowledgeIngestionCandidates.stage, practicalDetails: knowledgeIngestionCandidates.practicalDetails }).from(knowledgeIngestionCandidates).where(eq(knowledgeIngestionCandidates.captureVersionId, capture.id))).resolves.toEqual([{ stage: "relating", practicalDetails: { tips: [shortTip] } }]);
+  });
+
+  test("v2 ignores empty practical detail arrays", async () => {
+    const rawText = "Đèo Hải Vân có điểm dừng ngắm cảnh an toàn vào ban ngày.";
+    const capture = await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText, metadata: { kind: "submitted" } });
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ model: "extract-model", choices: [{ message: { content: JSON.stringify({ candidates: [candidate(rawText, { practical_details: { tips: ["Dừng lại ban ngày"], cost_notes: [] } })] }) } }] }), { status: 200 }))
+      .mockResolvedValueOnce(batchGroundingResponse([{ candidateId: 0, quote: rawText }]));
+    const claim = await claimNextKnowledgeIngestionJob({ workerId: "v2-empty-practical-detail", now: new Date(Date.now() + 1_000) }, testDb);
+    if (!claim) throw new Error("expected discovery claim");
+    await runKnowledgeIngestionPipeline(claim, testDb);
+
+    await expect(testDb.select({ stage: knowledgeIngestionCandidates.stage, practicalDetails: knowledgeIngestionCandidates.practicalDetails }).from(knowledgeIngestionCandidates).where(eq(knowledgeIngestionCandidates.captureVersionId, capture.id))).resolves.toEqual([{ stage: "relating", practicalDetails: { tips: ["Dừng lại ban ngày"] } }]);
+  });
+
+  test.each([
+    ["missing practical payload", { practical_details: undefined, tags: undefined }, "candidate_invalid_structure"],
+    ["malformed practical payload", { practical_details: [] }, "candidate_invalid_structure"],
+    ["malformed tags", { practical_details: {}, tags: "route" }, "candidate_invalid_structure"],
+    ["contact in practical detail", { practical_details: { booking_contact: "0901234567" }, tags: [] }, "candidate_sensitive_content"],
+  ])("v2 suppresses %s before persistence", async (_label, override, outcomeReasonCode) => {
+    const rawText = "Đèo Hải Vân có điểm dừng ngắm cảnh an toàn vào ban ngày.";
+    const capture = await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText, metadata: { kind: "submitted" } });
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ model: "extract-model", choices: [{ message: { content: JSON.stringify({ candidates: [candidate(rawText, override)] }) } }] }), { status: 200 }))
+      .mockResolvedValueOnce(batchGroundingResponse([]));
+    const claim = await claimNextKnowledgeIngestionJob({ workerId: "v2-invalid-practical", now: new Date(Date.now() + 1_000) }, testDb);
+    if (!claim) throw new Error("expected discovery claim");
+    await runKnowledgeIngestionPipeline(claim, testDb);
+    await expect(testDb.select({ stage: knowledgeIngestionCandidates.stage, outcomeReasonCode: knowledgeIngestionCandidates.outcomeReasonCode }).from(knowledgeIngestionCandidates).where(eq(knowledgeIngestionCandidates.captureVersionId, capture.id))).resolves.toEqual([{ stage: "suppressed", outcomeReasonCode }]);
+  });
+
+  test("v2 attach merges practical details and indexes the final card version", async () => {
+    await testDb.insert(knowledgeCards).values({ id: "existing-route", status: "approved", publicationState: "active", knowledgeState: "community_observation", reviewState: "reviewed", verificationState: "not_required", type: "place", title: "Điểm dừng Đà Nẵng", summary: "Điểm dừng có các lưu ý thực tế.", locationName: "Đà Nẵng", conditions: [], practicalDetails: { tips: ["Dừng nghỉ hợp lý"] }, tags: ["road-trip"], confidence: "community", freshnessSensitive: false, needsReview: false, aiPromptVersion: "test", createdByUserId: "operator" });
+    const rawText = "Điểm dừng Đà Nẵng có chỗ nghỉ phù hợp cho hành trình.";
+    await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText, metadata: { kind: "submitted" }, capturedAt: new Date("2026-07-22T00:00:00.000Z") });
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ model: "extract-model", choices: [{ message: { content: JSON.stringify({ candidates: [candidate(rawText, { type: "place", title: "Điểm dừng Đà Nẵng", summary: "Điểm dừng bổ sung lưu ý đậu xe.", location_name: "Đà Nẵng", conditions: [], practical_details: { tips: ["Dừng nghỉ hợp lý", "Nghỉ trước khi lái tiếp"], parking_notes: ["Kiểm tra chỗ đậu xe"] }, tags: ["road-trip", "coastal"] })] }) } }] }), { status: 200 }))
+      .mockResolvedValueOnce(batchGroundingResponse([{ candidateId: 0, quote: rawText }]));
+    const discovery = await claimNextKnowledgeIngestionJob({ workerId: "v2-attach-discovery", now: new Date(Date.now() + 1_000) }, testDb);
+    if (!discovery) throw new Error("expected discovery claim");
+    await runKnowledgeIngestionPipeline(discovery, testDb);
+    const candidateClaim = await claimNextKnowledgeIngestionCandidate({ workerId: "v2-attach-candidate", now: new Date(Date.now() + 2_000) }, testDb);
+    if (!candidateClaim) throw new Error("expected candidate claim");
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ model: "judge-model", choices: [{ message: { content: JSON.stringify({ action: "attach", target_card_id: "existing-route", summary: "Cùng tuyến." }) } }] }), { status: 200 }));
+
+    await expect(runKnowledgeIngestionCandidatePipeline(candidateClaim, testDb)).resolves.toMatchObject({ outcome: "published", cardId: "existing-route" });
+    await expect(testDb.select({ practicalDetails: knowledgeCards.practicalDetails, tags: knowledgeCards.tags, contentVersion: knowledgeCards.contentVersion, evidenceSetRevision: knowledgeCards.evidenceSetRevision }).from(knowledgeCards).where(eq(knowledgeCards.id, "existing-route"))).resolves.toEqual([{ practicalDetails: { tips: ["Dừng nghỉ hợp lý", "Nghỉ trước khi lái tiếp"], parking_notes: ["Kiểm tra chỗ đậu xe"] }, tags: ["road-trip", "coastal"], contentVersion: 3, evidenceSetRevision: 2 }]);
+    await expect(testDb.select({ contentVersion: knowledgeIndexDirtyMarkers.contentVersion }).from(knowledgeIndexDirtyMarkers).where(eq(knowledgeIndexDirtyMarkers.knowledgeCardId, "existing-route"))).resolves.toEqual(expect.arrayContaining([{ contentVersion: 3 }]));
+  });
+
+  test("v2 conflict keeps target practical details and tags unchanged", async () => {
+    await testDb.insert(knowledgeCards).values({ id: "conflicting-route", status: "approved", publicationState: "active", knowledgeState: "community_observation", reviewState: "reviewed", verificationState: "not_required", type: "place", title: "Điểm dừng Đà Nẵng", summary: "Điểm dừng hiện có.", locationName: "Đà Nẵng", conditions: [], practicalDetails: { tips: ["Dừng nghỉ"] }, tags: ["original"], confidence: "community", freshnessSensitive: false, needsReview: false, aiPromptVersion: "test", createdByUserId: "operator" });
+    const rawText = "Điểm dừng Đà Nẵng có thông tin khác với ghi nhận cũ.";
+    await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText, metadata: { kind: "submitted" }, capturedAt: new Date("2026-07-22T00:00:00.000Z") });
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ model: "extract-model", choices: [{ message: { content: JSON.stringify({ candidates: [candidate(rawText, { type: "place", title: "Điểm dừng Đà Nẵng", summary: "Thông tin điểm dừng khác với ghi nhận cũ.", location_name: "Đà Nẵng", conditions: [], practical_details: { warnings: ["Cần kiểm tra lại"] }, tags: ["replacement"] })] }) } }] }), { status: 200 }))
+      .mockResolvedValueOnce(batchGroundingResponse([{ candidateId: 0, quote: rawText }]));
+    const discovery = await claimNextKnowledgeIngestionJob({ workerId: "v2-conflict-discovery", now: new Date(Date.now() + 1_000) }, testDb);
+    if (!discovery) throw new Error("expected discovery claim");
+    await runKnowledgeIngestionPipeline(discovery, testDb);
+    const candidateClaim = await claimNextKnowledgeIngestionCandidate({ workerId: "v2-conflict-candidate", now: new Date(Date.now() + 2_000) }, testDb);
+    if (!candidateClaim) throw new Error("expected candidate claim");
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ model: "judge-model", choices: [{ message: { content: JSON.stringify({ action: "conflict", target_card_id: "conflicting-route", summary: "Mâu thuẫn tuyến." }) } }] }), { status: 200 }));
+
+    await expect(runKnowledgeIngestionCandidatePipeline(candidateClaim, testDb)).resolves.toMatchObject({ outcome: "review_recommended", cardId: "conflicting-route" });
+    await expect(testDb.select({ practicalDetails: knowledgeCards.practicalDetails, tags: knowledgeCards.tags }).from(knowledgeCards).where(eq(knowledgeCards.id, "conflicting-route"))).resolves.toEqual([{ practicalDetails: { tips: ["Dừng nghỉ"] }, tags: ["original"] }]);
+  });
+
+  test("discovers a long text capture in one request while preserving exact evidence and invalid siblings", async () => {
+    const prefix = `☎ 0901234567 ${"a".repeat(19_900)}`;
+    const quote = "Đèo Hải Vân có điểm dừng ngắm cảnh an toàn vào ban ngày.";
+    const rawText = `${prefix}${quote}`;
+    const capture = await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText, metadata: { kind: "submitted" }, capturedAt: new Date("2026-07-22T00:00:00.000Z") });
+    const start = Array.from(prefix).length;
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ model: "extract-model", choices: [{ message: { content: JSON.stringify({ candidates: [candidate(rawText), candidate(rawText, { title: "Trích dẫn lỗi" })] }) } }] }), { status: 200 }))
+      .mockResolvedValueOnce(batchGroundingResponse([{ candidateId: 0, quote }, { candidateId: 1, quote: null }]));
+
+    const discovery = await claimNextKnowledgeIngestionJob({ workerId: "single-pass-discovery", now: new Date(Date.now() + 1_000) }, testDb);
+    if (!discovery) throw new Error("expected discovery claim");
+    await runKnowledgeIngestionPipeline(discovery, testDb);
+
+    const request = JSON.parse(String(vi.mocked(fetch).mock.calls[0]?.[1]?.body)) as { max_tokens?: number; messages: Array<{ content: string }> };
+    expect(request.max_tokens).toBeUndefined();
+    expect(request.messages[1]?.content).toContain("**********");
+    expect(request.messages[1]?.content).toContain(quote);
+    expect(request.messages[1]?.content).not.toContain("source_offset");
+    expect(request.messages[1]?.content).not.toContain("core_range");
+    expect(request.messages[1]?.content).not.toContain("span_start");
+    expect(request.messages[1]?.content).not.toContain("span_end");
+    expect(request.messages[0]?.content).toContain("Never invent a type such as trip_overview");
+    expect(request.messages[0]?.content).toContain("Optimize for recall");
+    expect(request.messages[0]?.content).toContain("at least one non-null scope field");
+    expect(request.messages[0]?.content).toContain("duration, distance, driving difficulty, delay, incident");
+    expect(request.messages[0]?.content).toContain("Do not require independent corroboration at extraction time");
+    expect(request.messages[1]?.content).toContain("optimize_for_semantic_recall");
+    expect(request.messages[1]?.content).toContain("defer_grounding_quality_and_publication_to_judgment");
+    expect(request.messages[1]?.content).toContain("evidence_hint_optional");
+    const candidates = await testDb.select().from(knowledgeIngestionCandidates).where(eq(knowledgeIngestionCandidates.captureVersionId, capture.id));
+    expect(candidates).toEqual(expect.arrayContaining([expect.objectContaining({ stage: "relating", spanStart: start, spanEnd: start + Array.from(quote).length }), expect.objectContaining({ title: "Trích dẫn lỗi", stage: "suppressed", outcomeReasonCode: "judge_evidence_not_grounded" })]));
+    await expect(testDb.select({ rawDiscoveryResponse: knowledgeIngestionJobs.rawDiscoveryResponse }).from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.captureVersionId, capture.id))).resolves.toMatchObject([{ rawDiscoveryResponse: expect.stringContaining("Trích dẫn lỗi") }]);
+
+    const [queuedCandidate] = await testDb.select({ nextRunAt: knowledgeIngestionCandidates.nextRunAt }).from(knowledgeIngestionCandidates).where(and(eq(knowledgeIngestionCandidates.captureVersionId, capture.id), eq(knowledgeIngestionCandidates.stage, "relating")));
+    if (!queuedCandidate) throw new Error("expected queued candidate");
+    const candidateClaim = await claimNextKnowledgeIngestionCandidate({ workerId: "single-pass-candidate", now: new Date(queuedCandidate.nextRunAt.getTime() + 1_000) }, testDb);
+    if (!candidateClaim) throw new Error("expected candidate claim");
+    await runKnowledgeIngestionCandidatePipeline(candidateClaim, testDb);
+    await expect(testDb.select().from(knowledgeCardEvidence).where(eq(knowledgeCardEvidence.captureVersionId, capture.id))).resolves.toMatchObject([{ quoteText: quote, spanStart: start, spanEnd: start + Array.from(quote).length }]);
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
+
+  test("records a specific judge suppression reason instead of a generic terminal reason", async () => {
+    const rawText = "Đèo Hải Vân có điểm dừng ngắm cảnh an toàn vào ban ngày.";
+    const capture = await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText, metadata: { kind: "submitted" }, capturedAt: new Date("2026-07-22T00:00:00.000Z") });
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ model: "extract-model", choices: [{ message: { content: JSON.stringify({ candidates: [candidate(rawText)] }) } }] }), { status: 200 }))
+      .mockResolvedValueOnce(batchGroundingResponse([{ candidateId: 0, quote: rawText, decision: "suppress" }]));
+
+    const discovery = await claimNextKnowledgeIngestionJob({ workerId: "judge-suppression", now: new Date(Date.now() + 1_000) }, testDb);
+    if (!discovery) throw new Error("expected discovery claim");
+    await runKnowledgeIngestionPipeline(discovery, testDb);
+
+    await expect(testDb.select({ stage: knowledgeIngestionCandidates.stage, outcomeReasonCode: knowledgeIngestionCandidates.outcomeReasonCode, judgeDecision: knowledgeIngestionCandidates.judgeDecision }).from(knowledgeIngestionCandidates).where(eq(knowledgeIngestionCandidates.captureVersionId, capture.id))).resolves.toEqual([{ stage: "suppressed", outcomeReasonCode: "judge_suppressed", judgeDecision: "suppress" }]);
   });
 
   test("v2 discovery overlap dedupe counts only inserted candidates", async () => {
     const rawText = "Đèo Hải Vân có điểm dừng ngắm cảnh an toàn vào ban ngày.";
     const capture = await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText, metadata: { kind: "submitted" } });
     const payload = new Response(JSON.stringify({ model: "extract-model", choices: [{ message: { content: JSON.stringify({ candidates: [candidate(rawText), candidate(rawText)] }) } }] }), { status: 200 });
-    vi.mocked(fetch).mockResolvedValueOnce(payload);
+    vi.mocked(fetch).mockResolvedValueOnce(payload).mockResolvedValueOnce(batchGroundingResponse([{ candidateId: 0, quote: rawText }]));
     const claim = await claimNextKnowledgeIngestionJob({ workerId: "v2-dedupe", now: new Date(Date.now() + 1_000) }, testDb);
     if (!claim) throw new Error("expected discovery claim");
     await runKnowledgeIngestionPipeline(claim, testDb);
     await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.captureVersionId, capture.id))).resolves.toMatchObject([{ discoveredCandidateCount: 1 }]);
+  });
+
+  test("v2 redacts contact details before discovery while preserving offsets for safe evidence", async () => {
+    const rawText = "Gọi 0901234567 để đặt phòng. Đèo Hải Vân có điểm dừng ngắm cảnh an toàn vào ban ngày.";
+    const safeQuote = "Đèo Hải Vân có điểm dừng ngắm cảnh an toàn vào ban ngày.";
+    const start = rawText.indexOf("Đèo");
+    const capture = await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText, metadata: { kind: "submitted" }, capturedAt: new Date("2026-07-22T00:00:00.000Z") });
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ model: "extract-model", choices: [{ message: { content: JSON.stringify({ candidates: [candidate(rawText, { evidence: { quote_text: safeQuote } })] }) } }] }), { status: 200 }))
+      .mockResolvedValueOnce(batchGroundingResponse([{ candidateId: 0, quote: safeQuote }]));
+
+    const discovery = await claimNextKnowledgeIngestionJob({ workerId: "v2-redaction", now: new Date(Date.now() + 1_000) }, testDb);
+    if (!discovery) throw new Error("expected discovery claim");
+    await runKnowledgeIngestionPipeline(discovery, testDb);
+
+    const request = JSON.parse(String(vi.mocked(fetch).mock.calls[0]?.[1]?.body)) as { messages: Array<{ content: string }> };
+    expect(request.messages[1]?.content).not.toContain("0901234567");
+    expect(request.messages[1]?.content).toContain("**********");
+
+    const [queuedCandidate] = await testDb.select({ nextRunAt: knowledgeIngestionCandidates.nextRunAt }).from(knowledgeIngestionCandidates).where(eq(knowledgeIngestionCandidates.captureVersionId, capture.id));
+    if (!queuedCandidate) throw new Error("expected queued candidate");
+    const candidateClaim = await claimNextKnowledgeIngestionCandidate({ workerId: "v2-redaction-candidate", now: new Date(queuedCandidate.nextRunAt.getTime() + 1_000) }, testDb);
+    if (!candidateClaim) throw new Error("expected candidate claim");
+    await runKnowledgeIngestionCandidatePipeline(candidateClaim, testDb);
+
+    await expect(testDb.select().from(knowledgeCardEvidence).where(eq(knowledgeCardEvidence.captureVersionId, capture.id))).resolves.toMatchObject([{ quoteText: safeQuote, spanStart: start }]);
+  });
+
+  test("defers safe subjective candidate quality to the independent judge", async () => {
+    const rawText = "Đèo Hải Vân rất đẹp và đáng đi.";
+    const capture = await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText, metadata: { kind: "submitted" }, capturedAt: new Date("2026-07-22T00:00:00.000Z") });
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ model: "extract-model", choices: [{ message: { content: JSON.stringify({ candidates: [candidate(rawText, { title: "Đèo Hải Vân rất đẹp", summary: "Rất đẹp và đáng đi.", evidence: { quote_text: rawText } })] }) } }] }), { status: 200 }))
+      .mockResolvedValueOnce(batchGroundingResponse([{ candidateId: 0, quote: rawText }]));
+
+    const discovery = await claimNextKnowledgeIngestionJob({ workerId: "v2-policy-diagnostic", now: new Date(Date.now() + 1_000) }, testDb);
+    if (!discovery) throw new Error("expected discovery claim");
+    await runKnowledgeIngestionPipeline(discovery, testDb);
+
+    await expect(testDb.select({ title: knowledgeIngestionCandidates.title, summary: knowledgeIngestionCandidates.summary, locationName: knowledgeIngestionCandidates.locationName, stage: knowledgeIngestionCandidates.stage, outcomeReasonCode: knowledgeIngestionCandidates.outcomeReasonCode }).from(knowledgeIngestionCandidates).where(eq(knowledgeIngestionCandidates.captureVersionId, capture.id))).resolves.toEqual([{ title: "Đèo Hải Vân rất đẹp", summary: "Rất đẹp và đáng đi.", locationName: "Đèo Hải Vân", stage: "relating", outcomeReasonCode: null }]);
+  });
+
+  test("normalizes weather observations and keeps scoped fee facts for independent judgment", async () => {
+    const weatherQuote = "Trời mưa nên nhóm không săn được mây.";
+    const feeQuote = "Vé vào thác là 20k/ng.";
+    const rawText = `${weatherQuote} ${feeQuote}`;
+    const capture = await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText, metadata: { kind: "submitted" }, capturedAt: new Date("2026-07-22T00:00:00.000Z") });
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ model: "extract-model", choices: [{ message: { content: JSON.stringify({ candidates: [
+        candidate(rawText, { type: "weather", title: "Mưa làm lỡ săn mây", summary: "Mưa khiến nhóm không săn được mây.", location_name: "View Siêu Chill, Măng Đen", evidence: { quote_text: weatherQuote } }),
+        candidate(rawText, { type: "cost_note", title: "Vé vào thác", summary: "Vé vào thác được ghi là 20.000 đồng mỗi người.", location_name: "Thác Pa Sỹ, Măng Đen", evidence: { quote_text: feeQuote }, freshness_sensitive: true }),
+      ] }) } }] })))
+      .mockResolvedValueOnce(batchGroundingResponse([{ candidateId: 0, quote: weatherQuote }, { candidateId: 1, quote: feeQuote }]));
+
+    const discovery = await claimNextKnowledgeIngestionJob({ workerId: "v2-weather-and-fee", now: new Date(Date.now() + 1_000) }, testDb);
+    if (!discovery) throw new Error("expected discovery claim");
+    await runKnowledgeIngestionPipeline(discovery, testDb);
+
+    await expect(testDb.select({ type: knowledgeIngestionCandidates.type, title: knowledgeIngestionCandidates.title, stage: knowledgeIngestionCandidates.stage, outcomeReasonCode: knowledgeIngestionCandidates.outcomeReasonCode }).from(knowledgeIngestionCandidates).where(eq(knowledgeIngestionCandidates.captureVersionId, capture.id))).resolves.toEqual([
+      { type: "warning", title: "Mưa làm lỡ săn mây", stage: "relating", outcomeReasonCode: null },
+      { type: "cost_note", title: "Vé vào thác", stage: "relating", outcomeReasonCode: null },
+    ]);
+  });
+
+  test("routes grounded price facts to verification even below the publish-quality threshold", async () => {
+    const quote = "Xe lên Mũi Điện giá 50.000 đồng/người/chiều.";
+    const capture = await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText: quote, metadata: { kind: "submitted" }, capturedAt: new Date("2026-07-22T00:00:00.000Z") });
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ model: "extract-model", choices: [{ message: { content: JSON.stringify({ candidates: [candidate(quote, { type: "cost_note", title: "Giá xe lên Mũi Điện", summary: "Chi phí xe chở lên Mũi Điện được ghi là 50.000 đồng/người/chiều.", location_name: "Mũi Điện, Phú Yên", conditions: ["mức giá tại thời điểm chuyến đi"], freshness_sensitive: true })] }) } }] }), { status: 200 }))
+      .mockResolvedValueOnce(batchGroundingResponse([{ candidateId: 0, quote, scores: { relevance: .69 } }]));
+    const discovery = await claimNextKnowledgeIngestionJob({ workerId: "price-verification", now: new Date(Date.now() + 1_000) }, testDb);
+    if (!discovery) throw new Error("expected discovery claim");
+    await runKnowledgeIngestionPipeline(discovery, testDb);
+
+    const [candidateRow] = await testDb.select({ id: knowledgeIngestionCandidates.id, stage: knowledgeIngestionCandidates.stage, outcomeReasonCode: knowledgeIngestionCandidates.outcomeReasonCode }).from(knowledgeIngestionCandidates).where(eq(knowledgeIngestionCandidates.captureVersionId, capture.id));
+    expect(candidateRow).toMatchObject({ stage: "relating", outcomeReasonCode: null });
+    if (!candidateRow) throw new Error("expected price candidate");
+    const candidateClaim = await claimNextKnowledgeIngestionCandidate({ workerId: "price-verification-candidate", now: new Date(Date.now() + 2_000) }, testDb);
+    if (!candidateClaim) throw new Error("expected price candidate claim");
+    await expect(runKnowledgeIngestionCandidatePipeline(candidateClaim, testDb)).resolves.toMatchObject({ outcome: "verify_first" });
   });
 
   test("publishes only after independent extraction and judgment with exact evidence", async () => {

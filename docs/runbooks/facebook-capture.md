@@ -9,7 +9,7 @@ The Facebook capture script is an operator-controlled operations tool. It reads 
 - `DATABASE_URL` is the protected-tunnel/private-network production application database. Use a least-privilege capture role where practical.
 - `CAPTURE_CACHE_DATABASE_URL` is a separate local PostgreSQL archive. It must never point to the application database.
 - Initialize it explicitly: `pnpm capture-cache:migrate`. Capture commands never create or migrate it automatically.
-- Archive artifacts retain bounded text, safe metadata, identity/version fields, and per-source import state. They never retain cookies, profile data, HTML, network bodies, tokens, prompts, provider responses, or error bodies.
+- Archive artifacts retain bounded text, safe metadata, identity/version fields, and per-source import state. They never retain cookies, profile data, HTML, network bodies, tokens, prompts, provider responses, or error bodies. Canonical ingestion separately retains its latest raw model completion on the protected application database for admin-only debugging; it is not part of the archive.
 - Back up the local archive on encrypted storage, retain encrypted backups with named key custody and restore authority, and periodically verify restore/replay. Follow local retention/deletion and operator offboarding procedures. Do not back up `.playwright/facebook-profile` as archive data.
 
 ## Install
@@ -62,11 +62,9 @@ Community posts may identify small homestays or accommodation experiences absent
 
 ## Operational Status
 
-The current public-MVP readiness report is **no-go** for production scheduled Facebook capture:
+The canonical `knowledge:ingestion-worker` is the only supported post-capture processing worker. Local Compose supervises the canonical `knowledge-ingestion` service and the indexing service. The checked-in Compose file still contains a legacy extraction service pending cutover removal; it is not a supported routine path. Deployment evidence for every target environment must still be recorded before relying on unattended capture or ingestion there.
 
-- The canonical `knowledge:ingestion-worker` has no evidenced continuously supervised deployment. The Compose `knowledge-extractor` service is a legacy worker and is not proof that canonical ingestion is running.
-
-Do not enable unattended production scheduling or rely on automatic ingestion until the canonical ingestion-worker deployment gap has a completed deployment record. Process access is controlled by the deployment environment, not per-run CLI identity.
+Do not use `knowledge:extraction-worker` as a routine production worker. It is legacy compatibility only and cannot process new capture versions without an explicitly approved, time-bounded recovery procedure. Process access is controlled by the deployment environment, not per-run CLI identity.
 
 ## System Executor
 
@@ -108,10 +106,10 @@ Production scheduling should decide explicitly where this browser profile lives 
 4. Capture may queue up to 20 unique linked Facebook post/share URLs from the captured post as bounded candidates for a later run. Links that already match a stored canonical source URL are skipped. Candidate links must still pass queue/admission policy before capture; this does not browse feeds, recursively crawl Facebook, or open linked posts in the same run.
 5. Capture appends an immutable capture version, atomically creates its canonical ingestion job, and creates or updates the Facebook review record used for legacy/manual inspection and recapture controls.
 6. The separately supervised canonical ingestion worker processes readable capture versions through triage, extraction, independent judgment, and relation/conflict handling. The capture script itself does not call the ingestion model inline.
-7. Operators use risk/sampling-driven recommendations to inspect or resolve weak evidence, high-risk claims, conflicts, verification needs, or quality samples. The Facebook capture review queue remains an operator-only inspection/recapture surface; raw material is not traveler-ready merely because it was captured.
-8. Only policy-eligible active knowledge cards with valid current evidence can enter traveler retrieval. High-risk material remains caveat-only until corroborated; conflicted claims cannot support factual itinerary premises.
+7. Operators use risk/sampling-driven recommendations to inspect or resolve weak evidence, high-risk claims, conflicts, verification needs, or quality samples. A `verify_first` recommendation makes the operator the final decision: they may revise the fact freely, publish it with the available validated evidence, or suppress it. This action is version-fenced and audited. The Facebook capture review queue remains an operator-only inspection/recapture surface; raw material is not traveler-ready merely because it was captured.
+8. Only policy-eligible active knowledge cards with valid current evidence can enter traveler retrieval. Automation keeps high-risk material out of retrieval as `verify_first`; an authorized operator may publish it after review. A one-source operator-authorized publication does not imply a corroborated community pattern. Conflicted claims cannot support factual itinerary premises.
 
-The canonical ingestion worker is not the Playwright capture process. Deploy and supervise `knowledge:ingestion-worker` separately before relying on automatic ingestion; the current Compose configuration still runs the legacy extraction worker and indexing worker only.
+The canonical ingestion worker is not the Playwright capture process. Deploy and supervise `knowledge:ingestion-worker` separately before relying on automatic ingestion. The normal worker topology is `knowledge-ingestion` plus `knowledge-indexing`; legacy extraction is not part of the routine topology.
 
 ## Pacing And Safety Stops
 
@@ -142,6 +140,8 @@ If captured text is incomplete or corrupted, use the admin review detail page `R
 
 If production flush fails after archive admission, rerun the same command. It reuses the archived artifact rather than opening Facebook again. Do not delete the artifact while recovering; inspect the safe source/import outcome and restore the production database through the normal process if required.
 
-If canonical ingestion fails, correlate its `knowledge_ingestion_jobs` row with the worker warning by job ID, source ID, and capture-version ID. Legacy Facebook review/extraction failures may still use `knowledge_extraction_jobs` and a Facebook review ID. These records contain only safe error code/detail and attempt metadata; investigate the source only in the operator review workflow, never from worker logs.
+If canonical ingestion fails, correlate its `knowledge_ingestion_jobs` row with the worker warning by job ID, source ID, and capture-version ID. The admin capture detail page shows the latest raw discovery completion and candidate-level rejection reason for the job. This payload is admin-only diagnostic material, may repeat captured post text, and must not be copied into logs, archive artifacts, evidence, or traveler-facing content. A legacy `knowledge_extraction_jobs` record is historical compatibility data only; it must not override or duplicate the canonical job. Investigate the source only in the operator review workflow, never from worker logs.
+
+For a `verify_first` candidate, open **Admin -> Khuyến nghị AI**, select the `verification` recommendation, and choose **Xác nhận và xuất bản**, **Sửa và giữ chờ xác nhận**, or **Không xuất bản**. Do not use the Facebook capture detail page to publish a candidate directly. The confirmation route retains the bounded evidence already attached to the card and records the operator action; it does not require a second source.
 
 Capture metadata includes diagnostics that identify the selected rendered/DOM text path. It never stores or caches HTML, GraphQL, or other network response bodies.

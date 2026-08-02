@@ -1,14 +1,6 @@
-import { afterAll, beforeEach, vi } from "vitest";
-
-import { getTestDatabaseUrl } from "./helpers/env-file";
-import { closeTestDatabase, resetTestDatabase } from "./helpers/db";
-
-const testDatabaseUrl = getTestDatabaseUrl();
-const applicationDatabaseUrl = process.env.DATABASE_URL;
+import { beforeEach, vi } from "vitest";
 
 process.env.APP_ENV = "local";
-process.env.TEST_APPLICATION_DATABASE_URL = applicationDatabaseUrl;
-process.env.DATABASE_URL = testDatabaseUrl;
 process.env.AUTH_SECRET = "test-secret";
 process.env.AUTH_URL = "http://localhost:3000";
 process.env.AUTH_GOOGLE_ID = "test-google-client-id";
@@ -24,7 +16,7 @@ vi.stubGlobal(
   }),
 );
 
-beforeEach(async () => {
+beforeEach(() => {
   vi.doMock("next/navigation", () => {
     const router = {
       push: vi.fn(),
@@ -44,9 +36,4 @@ beforeEach(async () => {
   });
   vi.resetModules();
   vi.clearAllMocks();
-  await resetTestDatabase();
-});
-
-afterAll(async () => {
-  await closeTestDatabase();
 });

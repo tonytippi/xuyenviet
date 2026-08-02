@@ -4,7 +4,7 @@ import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
 import { disableStaleKnowledgeSearchProjection, enqueueKnowledgeIndexWork } from "@/features/knowledge/indexing-queue";
-import { knowledgeCardEvidence, knowledgeCardSources, knowledgeCards, knowledgeRecommendations, knowledgeSourceSuggestions, rawSourceMaterial, sourceCaptureVersions, sources, type SourceRemovalReason } from "@/db/schema";
+import { knowledgeCardEvidence, knowledgeCardSources, knowledgeCards, knowledgeIngestionJobs, knowledgeRecommendations, knowledgeSourceSuggestions, rawSourceMaterial, sourceCaptureVersions, sources, type SourceRemovalReason } from "@/db/schema";
 import { recordAuditEvent } from "@/features/audit/events";
 import { createUserAuditActor } from "@/features/audit/actors";
 import { lockAssistantProvenanceWithdrawalAnchors, requireCompletedAssistantProvenanceWithdrawalBackfill, withdrawAssistantProvenance } from "@/features/retrieval/provenance";
@@ -78,6 +78,7 @@ export async function removeKnowledgeSource(
     }
 
     await tx.update(sourceCaptureVersions).set({ rawText: null, fileName: null, mimeType: null, byteSize: null, storageKey: null, rawMetadata: null, payloadDeletedAt: now }).where(and(eq(sourceCaptureVersions.sourceId, sourceId), isNull(sourceCaptureVersions.payloadDeletedAt)));
+    await tx.update(knowledgeIngestionJobs).set({ rawDiscoveryResponse: null, updatedAt: now }).where(eq(knowledgeIngestionJobs.sourceId, sourceId));
     await tx.update(rawSourceMaterial).set({ rawText: null, fileName: null, mimeType: null, byteSize: null, storageKey: null, rawMetadata: null }).where(eq(rawSourceMaterial.sourceId, sourceId));
     await tx.delete(knowledgeSourceSuggestions).where(eq(knowledgeSourceSuggestions.sourceId, sourceId));
     await recordAuditEvent({ actor: createUserAuditActor({ userId: input.actor.userId, email: input.actor.email.trim().toLowerCase() }), operation: "archive", targetType: "knowledge_source_removal", targetId: sourceId, afterSummary: `Source removal completed; reason=${input.reason}; affectedCardCount=${cardIds.length}; provenanceCount=${remediation.provenanceCount}.` }, tx);

@@ -3,7 +3,7 @@ import "server-only";
 import { desc, eq, inArray } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { facebookCaptureReviews, knowledgeCards, knowledgeCardSources, knowledgeExtractionJobs, sourceCaptureVersions, sources, type FacebookCaptureReviewStatus, type KnowledgeExtractionJobMode, type KnowledgeExtractionJobStatus, type SourceKind, type SourceType } from "@/db/schema";
+import { facebookCaptureReviews, knowledgeCards, knowledgeCardSources, sourceCaptureVersions, sources, type FacebookCaptureReviewStatus, type SourceKind, type SourceType } from "@/db/schema";
 import { requireAdminSession } from "@/server/auth";
 
 const maxRawTextLength = 20_000;
@@ -47,8 +47,8 @@ export type KnowledgeUrlSourceListItem = Pick<typeof sources.$inferSelect, "id" 
   displayTitle: string;
   facebookCaptureReviewId: string | null;
   facebookCaptureStatus: FacebookCaptureReviewStatus | null;
+  hasCurrentYoutubeCapture: boolean;
   linkedKnowledgeCardCount: number;
-  activeExtractionJob: { id: string; mode: KnowledgeExtractionJobMode; status: Extract<KnowledgeExtractionJobStatus, "queued" | "running"> } | null;
 };
 
 export class SourceValidationError extends Error {
@@ -118,6 +118,7 @@ export async function listKnowledgeUrlSources(): Promise<KnowledgeUrlSourceListI
       publisher: sources.publisher,
       eligibility: sources.eligibility,
       removalReason: sources.removalReason,
+      currentCaptureVersionId: sources.currentCaptureVersionId,
       createdAt: sources.createdAt,
     })
     .from(sources)
@@ -146,18 +147,9 @@ export async function listKnowledgeUrlSources(): Promise<KnowledgeUrlSourceListI
     .innerJoin(knowledgeCards, eq(knowledgeCards.id, knowledgeCardSources.knowledgeCardId))
     .where(inArray(knowledgeCardSources.sourceId, sourceIds))
     .orderBy(desc(knowledgeCards.updatedAt));
-  const activeJobRows = await db
-    .select({ id: knowledgeExtractionJobs.id, sourceId: knowledgeExtractionJobs.sourceId, mode: knowledgeExtractionJobs.mode, status: knowledgeExtractionJobs.status })
-    .from(knowledgeExtractionJobs)
-    .where(inArray(knowledgeExtractionJobs.sourceId, sourceIds));
   const reviewsBySourceId = new Map(reviewRows.map((review) => [review.sourceId, review]));
   const cardCountsBySourceId = new Map<string, number>();
   const firstCardTitleBySourceId = new Map<string, string>();
-  const activeJobsBySourceId = new Map(
-    activeJobRows
-      .filter((job): job is typeof job & { status: "queued" | "running" } => job.status === "queued" || job.status === "running")
-      .map((job) => [job.sourceId, { id: job.id, mode: job.mode, status: job.status }]),
-  );
 
   for (const row of cardRows) {
     cardCountsBySourceId.set(row.sourceId, (cardCountsBySourceId.get(row.sourceId) ?? 0) + 1);
@@ -175,8 +167,8 @@ export async function listKnowledgeUrlSources(): Promise<KnowledgeUrlSourceListI
       displayTitle: firstCardTitleBySourceId.get(source.id) ?? metadataTitle ?? capturedTextTitle ?? source.label,
       facebookCaptureReviewId: review?.id ?? null,
       facebookCaptureStatus: review?.status ?? null,
+      hasCurrentYoutubeCapture: source.kind === "youtube" && source.currentCaptureVersionId !== null,
       linkedKnowledgeCardCount: cardCountsBySourceId.get(source.id) ?? 0,
-      activeExtractionJob: activeJobsBySourceId.get(source.id) ?? null,
     };
   });
 }

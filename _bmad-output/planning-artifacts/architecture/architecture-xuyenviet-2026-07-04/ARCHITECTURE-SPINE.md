@@ -2,7 +2,7 @@
 title: XuyenViet AI Travel Information MVP Architecture Spine
 status: final
 created: 2026-07-04
-updated: 2026-07-28
+updated: 2026-07-31
 altitude: project MVP
 source_prd: ../../prds/prd-xuyenviet-2026-07-04/prd.md
 source_ux: ../../ux-designs/ux-xuyenviet-2026-07-05/EXPERIENCE.md
@@ -12,42 +12,57 @@ source_ux: ../../ux-designs/ux-xuyenviet-2026-07-05/EXPERIENCE.md
 
 ## Paradigm
 
-API-first modular monolith, DB-owned retrieval, provenance-first AI orchestration.
+Modular monolith, DB-owned retrieval, provenance-first AI orchestration.
 
-The MVP ships one domain/data plane with separately deployable presentation, API, and worker runtimes. Product modules stay inside the modular monolith; AI answer generation is a controlled orchestration pipeline, not free-form model use.
+The MVP ships one coherent web application and one owned data plane. Product modules stay separated by server-side boundaries, but not by deployable services. AI answer generation is a controlled orchestration pipeline, not free-form model use.
 
 ## System Shape
 
 ```mermaid
 flowchart LR
-  Traveler[Traveler Browser] --> Web[Next.js Traveler BFF]
-  Operator[Operator Browser] --> Admin[Next.js Admin BFF]
-  Web -->|private token| API[NestJS API /v1]
-  Admin -->|private token| API
-  API --> Domain[Domain Use Cases]
-  Worker[NestJS Worker] --> Domain
-  Domain --> DB[(Railway PostgreSQL)]
-  Domain --> AIGateway[AI Gateway]
-  Domain --> Search[Web Search Adapter]
-  Capture[Operator Capture Runtime] --> Domain
-  API --> OpenAPI[OpenAPI]
+  Traveler[Traveler] --> Web[Next.js Web App]
+  Operator[Operator/Admin] --> Web
+  Web --> Auth[Auth + Roles]
+  Web --> Chat[AI Ask]
+  Web --> Admin[Knowledge Admin]
+  Chat --> Orchestrator[AI Orchestrator]
+  Admin --> Knowledge[Knowledge Workflow]
+  Orchestrator --> ChatContext[Chat + Trip Context]
+  Orchestrator --> Retrieval[Retrieval]
+  Orchestrator --> Search[Web Search Adapter]
+  Orchestrator --> AIGateway[OpenAI-Compatible AI Gateway Adapter]
+  Knowledge --> AIGateway
+  ChatContext --> DB[(PostgreSQL + pgvector)]
+  TripPlan[Trip Planning Aggregate] --> DB
+  Retrieval --> DB
+  Knowledge --> DB
+  FacebookCapture[Facebook Capture Tool] --> CaptureVersion[Immutable Capture Version]
+  YoutubeCapture[YouTube Capture Tool] --> CaptureVersion
+  CaptureVersion --> IngestionJob[Canonical Ingestion Job]
+  IngestionJob --> IngestionWorker[Knowledge Ingestion Worker]
+  IngestionWorker --> Knowledge
+  Knowledge --> IndexingWorker[Knowledge Indexing Worker]
+  CaptureVersion --> DB
+  Auth --> DB
+  Chat --> DB
+  Search --> Tavily[Tavily Seed Provider]
 ```
 
 ## Adopted Decisions
 
-### AD-1: API-First Modular Monolith Runtime [ADOPTED; supersedes Next-only runtime]
+### AD-1: MVP Runtime Is A Next.js Modular Monolith
 
-Binds: NestJS API/worker runtime, Next.js traveler BFF, separately deployed Next.js admin BFF, pnpm workspace boundaries, and one shared domain/data plane.
+Binds: UI, route handlers, server actions, admin, chat, retrieval orchestration, and beta operations live in one TypeScript application.
 
-Prevents: a Next-only domain boundary, duplicated web/admin/mobile policy, a big-bang rewrite, or premature microservices.
+Prevents: independent chat/admin/retrieval implementations choosing incompatible service contracts or release paths.
 
-Rule: The system is one modular monolith with NestJS as the domain API and background-execution owner; it is not a microservice, database-per-service, event-bus, or queue-platform split.
+Rule: Build feature modules with server-side interfaces; do not split into services for MVP.
 
-Rule: Use a pnpm workspace with `apps/api`, `apps/worker`, `apps/admin`, and eventually `apps/web`. Keep the root traveler app until it is actually moved; extract `database`, `domain`, `contracts`, or `config` packages only when more than one runtime needs them.
+Rule: Keep the repository as a root-level Next.js app for the MVP. Do not move to an `apps/web` or multi-app workspace structure for future mobile support unless a later architecture or correct-course decision explicitly approves that restructure.
 
-Rule: Nest API/worker may import only extracted workspace packages. They must not import `src/app`, `next/*`, `next-auth`, `server-only`, or modules marked `"use server"`.
+Rule: Treat a future mobile app as a new client channel over stable server/API boundaries, not a reason to extract shared packages or change deployable shape during the web MVP.
 
-Seed: Next.js 15 App Router remains the traveler/admin presentation runtime; NestJS is introduced for API and worker bootstraps.
+Seed: create-next-app TypeScript, App Router, React Server Components where useful, route handlers/server actions for mutations.
 
 ### AD-2: PostgreSQL Owns Product State And Retrieval State
 
@@ -67,23 +82,15 @@ Prevents: ad hoc SQL drift across AI Ask, admin, retrieval, and evaluation work.
 
 Rule: All persistent tables and indexes are introduced through migrations; raw SQL is allowed only inside reviewed migration/query helpers for pgvector/full-text operations.
 
-### AD-4: Identity Maps Into A Domain-Neutral Request Principal [ADOPTED; supersedes session-only authorization]
+### AD-4: Auth Is Public Sign-In Plus Google OAuth And Server-Side Roles
 
-Binds: public Google sign-in, Auth.js browser sessions, web/admin BFF internal tokens, Nest resource-server verification, and future mobile identity.
+Binds: public sign-in access, required Google OAuth before AI Ask, and server-side role checks for admin/operator capabilities.
 
-Prevents: Nest depending on Auth.js cookie/session serialization, browser-held internal credentials, shared host-wide session cookies, or a mobile API tied to Next.js.
+Prevents: client-only authorization, separate admin auth, or accidental operator access for normal travelers.
 
-Rule: Web and admin retain separate host-only Auth.js session cookies and callback configuration. Each BFF validates its session, then resolves the exact host-specific Auth.js database-session token from the server request and verifies its user/expiry binding before minting a short-lived, audience-scoped internal credential only for `api.railway.internal`; that credential never reaches a browser or public API. The API never receives or parses the browser cookie.
+Rule: Public entry/sign-in routes may be reachable without an allowlist; AI Ask routes and actions require an authenticated session; every admin/operator route/action validates session and role before reading or mutating protected data.
 
-Rule: The web and admin BFFs issue ES256 JWTs from separate per-environment private keys. Issuers are exactly `xuyenviet-web-bff` and `xuyenviet-admin-bff`; audience is exactly `api.railway.internal`; the API receives only their configured public keys. A credential has `sub` (stable `users.id`), `sid` (Auth.js session token identifier), `roles` (sorted roles), `rv` (authorization version), `jti`, `iss`, `aud`, `iat`, `nbf`, and `exp`; no email, browser cookie, provider token, or unrestricted claims are included.
-
-Rule: BFF credentials have a five-minute maximum lifetime and are minted only after the BFF validates the host-only Auth.js session. The Nest resource server verifies ES256 signature against the issuer-specific public key, exact issuer/audience, clock bounds, a cryptographically random nonblank `jti`, active unexpired session matching `sid` and `sub`, and current user authorization version matching `rv` before creating `RequestPrincipal`. `jti` is a token identity, not a replay ledger; session and authorization-version checks provide revocation. Logout deletes or expires the session, so further API calls fail on the session lookup; role changes increment the user's authorization version in the same transaction.
-
-Rule: `user_roles` is the authorization authority. Initial administration is bootstrapped only by an auditable, one-shot deployment command using `INITIAL_ADMIN_EMAIL`; the command fails if an admin already exists, finds a real user with a linked Auth.js account by normalized email, assigns `admin`, increments authorization version, and records the cataloged `system-admin-bootstrap` execution actor. The bootstrap context may invoke only this first-admin command and is disabled after a successful commit. Thereafter only an admin-authorized Auth/Admin domain command may grant or revoke `operator` or `admin`; it locks affected role rows, records the real caller audit transition, increments the target authorization version, and cannot revoke the last active admin. Sign-in callbacks, environment-email matching, repository scripts, and application runtime paths outside this command cannot grant roles. Privileged migration/DBA credentials are a trusted deployment control plane, not an application authorization path; they are isolated from request-serving runtimes and every role repair through them requires an auditable runbook.
-
-Rule: The private API accepts bearer credentials only and sends no CORS allow-origin response. Browser requests never call it. For every cookie-authenticated unsafe BFF route, CSRF validation requires the exact BFF `Origin`, an allowed same-site Fetch Metadata value when supplied, and a signed double-submit token: a host-only, `Secure`, `SameSite=Strict`, `Path=/` CSRF cookie must match the `X-XuyenViet-CSRF` header in constant time and pass signature/expiry validation. Validation occurs before credential minting or API invocation; server actions retain their framework origin protection and must not bypass this policy when adapted to a route. The BFF forwards only validated body data and a bearer credential. BFF signing keys rotate through an active `kid` plus one previous verification-only key, each configured with an explicit verification end time; the API accepts the previous key only before that time and rejects unknown or cross-issuer keys.
-
-Rule: Future mobile OAuth/OIDC uses a maintained Nest-hosted authorization-server integration and a distinct issuer. Both internal BFF and mobile credentials normalize to the same `RequestPrincipal` and stable `users.id`; domain API contracts and ownership policy do not depend on either token format.
+Seed: Auth.js Google OAuth with PostgreSQL-backed sessions/accounts. [ASSUMPTION]
 
 ### AD-5: Feature Ownership Boundaries Are Explicit
 
@@ -91,13 +98,13 @@ Binds: module ownership to these domains: Auth, Chat/Trips, Knowledge, Retrieval
 
 Prevents: circular ownership of chat/trip context, knowledge cards, sources, and answer provenance.
 
-Rule: Clients and runtime adapters call exported domain use cases/read models. Feature modules do not reach into another module's tables except through exported domain interfaces or query helpers.
+Rule: UI components call their feature's server entrypoints; feature modules do not reach into another module's tables except through exported server functions or query helpers.
 
 ```mermaid
 flowchart TB
-  Adapters[Next BFF / Nest Controllers / Worker Loops]
-  Adapters --> Chat
-  Adapters --> Admin
+  UI[Routes + Components]
+  UI --> Chat
+  UI --> Admin
   Chat --> Orchestration
   Admin --> Knowledge
   Orchestration --> ChatTrips[Chat/Trips]
@@ -112,19 +119,13 @@ flowchart TB
   Chat --> Feedback
 ```
 
-### AD-6: Domain Use Cases Own Mutations, Authorization, And Audit [ADOPTED; supersedes Next mutation ownership]
+### AD-6: Mutations Are Server-Side And Audited
 
-Binds: transactions, authorization policy, audit actors, aggregate commands, and all transport adapters.
+Binds: chat/trip changes, knowledge approval, card edits, source edits, feedback, and deletion actions to authenticated server-side mutation paths with audit context.
 
-Prevents: controllers, Next server actions, worker loops, or AI providers directly writing domain state or implementing divergent authorization rules.
+Prevents: client-side writes, unaudited operator edits, or AI directly persisting sensitive state.
 
-Rule: Each domain use case receives only domain input plus `RequestPrincipal` or `SystemExecutionContext`; it owns authorization, transaction scope, AuditActor mapping, and auditable mutation. It must not accept `Request`, `Response`, `FormData`, Auth.js session objects, redirects, revalidation callbacks, or Next background callbacks.
-
-Rule: `SystemExecutionContext` is capability-scoped to a cataloged executor and named job/command, carries only the resource identifiers claimed by that job, and cannot bypass owner/tenant predicates for user-owned aggregates. Every privileged system command declares its allowed capability and validates its job/resource binding before mutation.
-
-Rule: Every protected API command has an API-level authorization matrix naming its principal class, required role/scope, ownership predicate, role-freshness requirement, and safe error projection. Controllers and domain use cases use the same matrix; admin BFF navigation is not authorization.
-
-Rule: Nest controllers, Next BFF/temporary server-action adapters, and worker loops adapt input/output only. Page redirects/revalidation remain in Next adapters; API response projection remains in controllers. Every mutation records actor, target, operation, timestamp, and relevant before/after summary where appropriate.
+Rule: Every mutation records actor, target, operation, timestamp, and relevant before/after summary where appropriate.
 
 Rule: Each mutable aggregate has one owning command module: Chat/Trips owns conversations, messages, trip projects, chat/trip context, chat/trip embeddings, and user-owned deletion of chats/trips; Knowledge owns source material, ingestion jobs, cards, card evidence, review/verification recommendations, relations, and search-index dirty markers; Search owns web results; AI Orchestration owns assistant response provenance; Usage owns append-only AI usage events; Referrals owns referral codes and referral attribution; Feedback/Eval owns feedback and eval runs; Audit owns meaningful state-transition and operator-action events.
 
@@ -144,15 +145,15 @@ Rule: An extracted candidate is an operational artifact only. After deterministi
 
 Rule: `knowledge_cards` own the current normalized fact, conditions, confidence, freshness risk, a monotonic `content_version`, current judge summary, and separate `publication_state`, `knowledge_state`, `review_state`, and `verification_state`.
 
-Rule: `publication_state` is `active | suppressed | archived`. `knowledge_state` is `community_observation | community_pattern | conditional | uncertain | conflicted | confirmed | superseded`. `review_state` is `none | ai_recommended | in_review | reviewed`. `verification_state` is `not_required | required | corroborated | failed`.
+Rule: `publication_state` is `active | suppressed | archived`. `knowledge_state` is `community_observation | community_pattern | conditional | uncertain | conflicted | confirmed | superseded`. `review_state` is `none | ai_recommended | in_review | reviewed`. `verification_state` is `not_required | required | corroborated | failed`. An operator-authorized `verify_first` publication may be active with its available validated evidence and `verification_state = corroborated`; this records the operator decision, not multi-source corroboration or a `community_pattern` upgrade.
 
-Rule: Only `active` cards may be retrieved. `superseded`, `suppressed`, and `archived` cards are not retrievable. `uncertain` cards are caveat-only. `conflicted` cards cannot support a factual itinerary recommendation. `required` verification is caveat-only until corroborated and never makes a card `confirmed` by itself.
+Rule: Only `active` cards may be retrieved. `superseded`, `suppressed`, and `archived` cards are not retrievable. `uncertain` cards are caveat-only. `conflicted` cards cannot support a factual itinerary recommendation. `required` verification is caveat-only until corroborated by independent evidence or resolved through the authorized `verification` recommendation; neither path makes a card `confirmed` by itself.
 
 Rule: Every card has one or more current `knowledge_card_evidence` records. Evidence contains only a bounded validated quote/span, source reference, observed/captured time, conditions, support level, display policy, and active/inactive/removed state. Raw source material remains operator-only and never enters traveler source bundles.
 
 Rule: A card may be active without operator review only when code validates its evidence span and privacy policy and the independent judge meets the PRD hard gates and thresholds. Operator approval records review; it is not a publication prerequisite.
 
-Rule: Every evidence record stores a deterministic `independence_key`: the normalized canonical source identity for a directly authored source, or the known original source identity when the capture is a repost/share. `community_pattern` requires at least two active supporting evidence records with distinct independence keys. Freshness-sensitive road, safety, EV, price, hours, availability, booking, and promotion claims automatically set `verification_state = required` and `review_state = ai_recommended`; until corroborated, they are conditional caveats only.
+Rule: Every evidence record stores a deterministic `independence_key`: the normalized canonical source identity for a directly authored source, or the known original source identity when the capture is a repost/share. `community_pattern` requires at least two active supporting evidence records with distinct independence keys. Freshness-sensitive road, safety, EV, price, hours, availability, booking, and promotion claims automatically set `verification_state = required` and `review_state = ai_recommended`; automation retains them in `verify_first` rather than auto-publishing. An authorized operator may revise and publish that card as the final operational decision, with a version-fenced audit, without upgrading it to `community_pattern`.
 
 ### AD-7A: Facebook Capture Is Operator-Controlled And Raw-Material Only
 
@@ -273,43 +274,37 @@ Rule: Deletion may retain minimal non-content audit metadata for operational int
 
 Rule: New tables that store chat/project-derived retrievable content must define what happens when the owning chat or trip project is deleted.
 
-### AD-14: Environments, Private Networking, And Secrets Are Isolated [ADOPTED; supersedes generic environment seed]
+### AD-14: Environments And Secrets Stay Separate
 
 Binds: dev, staging, and production to separate databases, secrets, OAuth config, and search/AI API keys.
 
 Prevents: test data, public users, admin rights, and provider credentials from mixing.
 
-Rule: Development, staging, and production use separate databases, credentials, OAuth configuration, API audiences, and observability projects. Public sign-in needs no allowlist; AI Ask needs authenticated Google identity; admin operations need Google identity plus server-side role checks. Local/dev bypasses must not be deployable defaults.
+Rule: Public sign-in must not require an allowlist; AI Ask and authenticated personalization require Google OAuth; admin/operator access requires Google OAuth plus role check. Local/dev bypasses must not be deployable defaults.
 
-Rule: Web/admin BFFs call the API only via `api.railway.internal`; database connections are internal workload credentials only. `api.xuyenviet.app` is reserved for future approved public/mobile access, not exposed during the web-BFF phase.
+### AD-15: Deployment Seed Is Serverless-Friendly, Provider Not Yet Final
 
-### AD-15: Railway Deploys Independently Gated Workloads [ADOPTED; supersedes serverless-provider seed]
+Binds: implementation to a hosted serverless-friendly Next.js runtime and hosted PostgreSQL with pgvector.
 
-Binds: Railway service topology, build/start isolation, migration ordering, health contracts, and workload privileges.
+Prevents: relying on unmanaged local infrastructure for public MVP traffic.
 
-Prevents: admin direct database access, public browser-to-API traffic before identity is ready, schema races, or background work in request-serving runtimes.
+Rule: Provider-specific features must stay behind config/adapters until deployment and database provider are confirmed.
 
-Rule: Railway is the initial deployment target for `web`, `admin`, `api`, `worker`, and one migration release job, with Railway PostgreSQL as the shared data plane. Each workload has a distinct build/start command, health contract, least-privilege secrets, and independently deployable staging service.
+Rule: Production deployment includes separately supervised Node runtimes for canonical knowledge ingestion and knowledge-search indexing. Worker processes use PostgreSQL job/index state, expose operational logs and health/restart supervision, and are not run inside request-serving serverless executions. Legacy extraction is not a routine production worker.
 
-Rule: The migration job runs once and succeeds before workloads requiring the new schema receive traffic. Development keeps Drizzle migrations forward-only and may clean-break disposable data; once durable data or overlapping runtimes exist, releases require expand-migrate-contract, compatibility matrix, explicit approval for durable-data reinterpretation, and traffic/code rollback only.
+Seed: Vercel-compatible Next.js request deployment plus hosted Postgres and a compatible worker process host. Final providers remain deferred. [ASSUMPTION]
 
-Rule: `/health/live` proves process liveness. `/health/ready` proves validated configuration, database, and critical dependencies required for assigned traffic/work. Worker readiness also reflects loop state; shutdown stops new claims and completes or lease-expires in-flight work safely.
-
-### AD-16: Nest Owns Source-Bundled NDJSON AI Ask Streaming [ADOPTED; supersedes Next route transport]
+### AD-16: Streaming Starts After Context Assembly
 
 Binds: chat streaming to the moment after retrieval/search context and provenance ledger inputs are assembled.
 
 Prevents: partial AI answers that cannot satisfy source/confidence display requirements.
 
-Rule: `POST /v1/ai-ask/stream` is Nest transport and preserves NDJSON `preparing`, `delta`, `done`, and `error` events. The traveler BFF forwards the protocol, request correlation ID, timeout, and abort without changing browser UX.
+Rule: Long-running extraction and embedding may run as background tasks with status; user answers must not stream before the orchestrator knows which source categories were used.
 
-Rule: The BFF sends a required `Idempotency-Key` header containing 16-128 URL-safe ASCII characters. AI Orchestration owns `ai_ask_commands`, uniquely keyed by `(user_id, scope_kind, scope_id, idempotency_key)`, where scope is the existing conversation ID or selected Trip Project ID; a new unscoped conversation uses a command-generated scope ID returned only after command creation. The row stores a SHA-256 digest of normalized question, attachment metadata, and selected scope, command status, user/assistant message IDs when created, terminal result, and expiry. The same key with a different digest returns `idempotency_key_reused`; a pending identical command returns its persisted conversation/message IDs and `in_progress`; a terminal identical command returns its persisted terminal result without another provider call. Keys and terminal command metadata retain for 24 hours.
+Rule: During streaming, partial assistant tokens are transient UI state. The final assistant message, retrieval decision, provenance rows, and usage events are persisted through the orchestrator; the UI must reconcile to persisted final content after completion.
 
-Rule: Events are strictly ordered `preparing`, zero or more `delta`, then exactly one `done` or `error`; each contains the request ID and terminal events identify persisted command/message IDs when present. Reconnection/replay is deferred: after an ambiguous disconnect the BFF reads the command/conversation state using the same key and never creates a new command by retrying with a different key.
-
-Rule: Conversations carry a monotonic `lifecycle_version`; Trip Projects use `aggregate_version`. Command creation captures `{ conversation_id, conversation_lifecycle_version, trip_project_id?, trip_project_aggregate_version? }` after locking owner rows. Conversation/project deletion, project link or primary-conversation changes, and aggregate changes that alter TripAnswerContext increment their corresponding version. Final assistant/provenance/usage persistence conditionally verifies that exact fence in one transaction. A failed fence marks the command terminal `discarded` and sends a safe `error` with `refresh_required`; it creates no visible assistant response, provenance, usage success event, annotations, or proposal.
-
-Rule: Extracted AI orchestration validates the command, persists the user turn and command fence, builds the source bundle, streams the provider, and atomically persists final assistant content, retrieval decision, provenance, usage, and source-bundle snapshot only when the fence still holds. Partial tokens are transient UI state only. Proposal drafting is a separately durable command and its output may be attached only after it validates the same or a newer Trip Project aggregate fence.
+Rule: If streaming fails before finalization, the app shows a recoverable failure state and must not create a misleading completed assistant message.
 
 Seed latency target: first visible answer within 5 seconds without web search and within 10 seconds with web search. [ASSUMPTION]
 
@@ -365,7 +360,7 @@ Prevents: UI teams independently parsing Vietnamese answer prose to create links
 
 Rule: Selectable answer annotations are best-effort post-answer enrichment. Their descriptors are validated against persisted assistant-message text and stored provenance/retrieval/source-bundle snapshots before storage and rendering.
 
-Rule: A descriptor type is `source | warning | trip_fact | action | place | hotel_area | route_segment | cost`. `source`, `place`, `hotel_area`, `route_segment`, and `cost` require one or more owning provenance-row references. `warning` and `trip_fact` may omit provenance only when they represent answer-local guidance or owner context, contain no source-derived quick facts or actions, and render as non-navigable text. `action` requires provenance when it acts on source-backed state; an owner-context action may omit provenance but its server command must derive the current target from the selected owner-scoped route state.
+Rule: A descriptor type is `source | warning | trip_fact | action | place | hotel_area | route_segment | cost`. It includes a display label, answer text range or section, source category, one or more owning provenance-row references where applicable, and bounded traveler-safe display metadata.
 
 Rule: Every annotated range uses `{ start, end, text }`, where `start` and `end` are zero-based UTF-16 code-unit offsets into the final persisted assistant-message content, `end` is exclusive, and `text` exactly equals `content.slice(start, end)`. Ranges require integer bounds `0 <= start < end <= content.length`; the validator rejects overlapping ranges and any mismatch after persistence/backfill. The client renders persisted offsets only and never normalizes, re-searches, or re-matches Vietnamese prose to recover an entity.
 
@@ -437,11 +432,9 @@ Binds: source triage, extraction, independent judging, relation matching, retrie
 
 Prevents: separate queues re-running completed AI stages, disagreeing about the source lifecycle, or leaving operators unable to identify the current outcome.
 
-Rule: Knowledge owns one source-traversal ingestion job for each immutable source capture version. It advances bounded deterministic portions using a persisted cursor/checkpoint, discovers every structurally valid candidate in each portion, and completes only after every discovered candidate terminalizes. A source-level outcome summarizes candidate outcomes; it never replaces their individual auditable outcomes. A retry resumes the failed source or candidate stage and preserves completed-stage outputs only for short operational retention.
+Rule: Knowledge owns one stateful ingestion job for each source capture version. For v2 text ingestion, discovery submits the complete immutable redacted capture once and persists scoped semantic candidates; one independent batch grounding-and-judgment call returns exactly one exact-contiguous quote or `evidence:null` for every candidate. The server derives Unicode code-point spans and only grounded candidates enter relation work. Its stages are `queued -> triaging -> extracting -> judging -> relating`, with terminal outcomes `published | suppressed | review_recommended | verify_first | failed`. A retry resumes the failed stage and preserves completed-stage outputs only for short operational retention.
 
-Rule: Every candidate has a deterministic source-version-local idempotency key and its own `published | suppressed | review_recommended | verify_first | failed` terminal outcome. Candidate terminalization atomically maps to the corresponding card/evidence publication, review, verification, and retrieval-safe transition; source completion may succeed even when no candidate is active.
-
-Rule: Recapture creates a new current capture version and ingestion job, atomically marks prior capture work superseded, and never overwrites completed-job provenance. Before candidate creation, evidence attachment, conflict relation, or card mutation, a worker verifies that its capture is still current and not removed/superseded. Obsolete work terminalizes safely without changing canonical knowledge. The ingestion job records submitted-by provenance, while automation mutations use the `system-knowledge-pipeline` service actor.
+Rule: Recapture creates a new source capture version and ingestion job. It never overwrites a completed job's provenance. The ingestion job records the submitted-by provenance, while automation mutations use the `system-knowledge-pipeline` service actor.
 
 Rule: Workers claim a stage transactionally with `FOR UPDATE SKIP LOCKED`, a lease/fencing token, and expected job stage/version. Every stage result and card mutation uses compare-and-swap against that token and expected card/content version. Stale or duplicate workers cannot publish, attach evidence, or overwrite a later decision.
 
@@ -456,8 +449,6 @@ Rule: Knowledge transitions card publication/knowledge/review/verification state
 Rule: High-risk conflict or source withdrawal immediately downgrades the card to `uncertain` or suppresses it, according to safe-use policy, without waiting for review. Retrieval re-checks current owner-row eligibility before every source-bundle inclusion, so index lag cannot re-enable an ineligible card.
 
 Rule: Source removal is a retryable Knowledge command. Before deleting or hiding a source/capture artifact, it locks every dependent evidence/card, marks evidence removed and traveler-invisible, re-evaluates each card from remaining active evidence, applies downgrade/suppression and projection disablement, then records a concise removal audit. Partial work resumes idempotently from the removal command state.
-
-Rule: Source removal or withdrawal also invalidates traveler-visible historical provenance snapshots, annotation descriptors, and source-detail read models that reference removed evidence. Historic answers retain only a safe withdrawn/unavailable marker; they cannot display removed quotes, URLs, or derived quick facts.
 
 ### AD-27: Evidence Accumulates Selectively; Relations Do Not Auto-Merge Facts
 
@@ -479,7 +470,7 @@ Rule: Cards retain current states, `content_version`, current judge summary, and
 
 Rule: `system-knowledge-pipeline` is the actor for automated triage, judging, relation, publication, conflict, and indexing mutations. The source submitter remains provenance and is linked to the source/job; they are not represented as the actor for automated decisions.
 
-Rule: A review recommendation references the card `content_version`, active evidence-set revision, and recommended action. Resolving it is compare-and-swap against those references; a changed card automatically receives a new recommendation rather than inheriting `reviewed` from an earlier version.
+Rule: A review recommendation references the card `content_version`, active evidence-set revision, and recommended action. Resolving it is compare-and-swap against those references; a changed card automatically receives a new recommendation rather than inheriting `reviewed` from an earlier version. A `verification` recommendation grants an authorized operator the final decision to freely revise, publish, or suppress the card; this exception is audit-recorded and does not relax automated evidence validation or other recommendation types.
 
 Rule: Quality sampling creates card-version-bound review recommendations for 15% of auto-active cards during the first four weeks and 100% of `verify_first` outcomes. Sampling resolution records pass/fail reason codes and raises sampling or suppresses the affected policy cohort when a high-severity failure occurs.
 
@@ -531,7 +522,7 @@ Rule: Every actor-taking server API accepts the domain union `AuditActor`. A `us
 
 Rule: `audit_events` and `trip_plan_change_history` use the same user-or-system XOR persistence shape. A user row requires `actor_class = 'user'`, a non-null user FK, and email snapshot where the table retains one; it has no system ID. A system row requires `actor_class = 'system'`, a nonblank cataloged system ID, and null user/email fields. Database checks enforce both shapes; application validation rejects invalid shapes before writes.
 
-Rule: System IDs are immutable execution-class identifiers, not display labels. The initial catalog is `system-ai-orchestration`, `system-knowledge-pipeline`, `system-trip-planning`, `system-facebook-capture`, `system-youtube-capture`, and `system-admin-bootstrap`; labels are server-owned catalog metadata. Canonical source-version ingestion, legacy extraction, and knowledge indexing use `system-knowledge-pipeline`; proposal expiry uses `system-trip-planning`; capture uses its corresponding Facebook or YouTube ID; synchronous authenticated model calls use `system-ai-orchestration`; the one-shot first-admin deployment command uses `system-admin-bootstrap`. `system-youtube-capture` is never created by seed data.
+Rule: System IDs are immutable execution-class identifiers, not display labels. The initial catalog is `system-ai-orchestration`, `system-knowledge-pipeline`, `system-trip-planning`, `system-facebook-capture`, and `system-youtube-capture`; labels are server-owned catalog metadata. Canonical source-version ingestion, legacy extraction, and knowledge indexing use `system-knowledge-pipeline`; proposal expiry uses `system-trip-planning`; capture uses its corresponding Facebook or YouTube ID; synchronous authenticated model calls use `system-ai-orchestration`. `system-youtube-capture` is never created by seed data.
 
 Rule: A field denoting ownership, requester, submitter, reviewer, approver, referral, session, or conversation remains a real-user FK and rejects system actors. A field denoting autonomous execution, creation, update, resolution, capture, or model invocation persists a required system executor ID. `sources.submitted_by_user_id` is always a real person: a source discovered by Facebook/YouTube capture inherits the originating source's submitter and stores source lineage; the capture system is executor only. A background job preserves the human requester/submitting user separately from the worker executor.
 
@@ -543,79 +534,17 @@ Rule: This development-stage change is a clean-break schema migration. Update or
 
 Rule: Audit owns the exported `AuditActor` union, system catalog, session conversion, validation, and write helpers. No feature directly inserts `audit_events`, `trip_plan_change_history`, or `ai_usage_events`; owning modules call the typed Audit/Usage boundary. Tests or lint enforcement reject bypassing these helpers. Tests cover permitted and rejected shapes, worker attribution, requester preservation, clean-database migration and seed output, and the inability to authenticate or role-assign a system actor.
 
-### AD-32: Capability Cutovers Have One Writer And Compatible Rollback [ADOPTED]
+### AD-32: Canonical Ingestion Is The Only Post-Capture Pipeline
 
-Binds: migration sequence, routing switches, legacy transport retirement, schema compatibility, and each capability's test/rollback gate.
+Binds: Facebook and YouTube capture handoff, source-version processing, background worker topology, operator actions, and legacy extraction retirement.
 
-Prevents: Next and Nest paths dual-writing an aggregate, rollback after a new path has accepted a request, or legacy compatibility layers accumulating into public launch.
+Prevents: one immutable capture version entering competing extraction/publication queues, legacy auto-approval bypassing canonical validation/judgment/relation gates, or operators treating a capture-review state as processing authority.
 
-Rule: Each capability publishes its API contract, authorization matrix, integration tests, rollback switch, and one transport owner before cutover. During transition, a legacy Next adapter may call an extracted domain use case, but it must not remain a separate public domain writer.
+Rule: Every readable Facebook or YouTube capture atomically appends one immutable `source_capture_versions` row and ensures exactly one canonical `knowledge_ingestion_jobs` row for that version. `knowledge:ingestion-worker` is the only supported worker that may turn a new capture version into candidates, cards, recommendations, or publication outcomes.
 
-Rule: A request is routed to either the legacy transport or the API before either path accepts it. Shadow verification may compare safe read-only outcomes in development/staging; it must never dual-write messages, assistant responses, provenance, usage, trip state, knowledge state, or another aggregate command.
+Rule: New UI actions, server actions, scripts, and scheduled services must not enqueue `knowledge_extraction_jobs` for a capture version. `knowledge_extraction_jobs` and `knowledge:extraction-worker` are historical compatibility only, disabled in the routine production topology. A time-bounded migration/recovery exception requires an explicit operator-approved procedure, reconciliation against the canonical job, and no auto-approval of cards from that capture version.
 
-Rule: Rollback changes request routing or compatible code before a new owner accepts the request. It never destructively rolls back schema. The legacy writer is removed after stable cutover; before public launch, no Next route handler/server action remains a domain transport owner and legacy `/admin` is retired.
-
-### AD-33: Releases Declare Schema Compatibility And Workload Admission [ADOPTED]
-
-Binds: migration job, independently deployed workloads, worker job claims, and staging/public rollback.
-
-Prevents: a service receiving traffic or claiming work against an incompatible schema, or two independent deployments inferring different release order.
-
-Rule: Every release declares its supported schema range and workload compatibility. The migration job holds the release migration lock, records the resulting schema version, and completes before a workload that requires that version can become ready or receive traffic/work.
-
-Rule: API, web, admin, and worker readiness validate the deployed schema version against their declared compatibility range. A non-compatible worker remains unready and does not claim jobs; a non-compatible request workload remains out of traffic. When durable data or old/new runtime overlap exists, the release includes an approved expand-migrate-contract compatibility matrix.
-
-Rule: Each public-launch transport owner is listed in a cutover inventory with its replacement API contract, authorization matrix, routing switch, rollback evidence, and removal proof. The inventory must be empty of legacy Next domain owners before launch.
-
-### AD-34: Durable Work Uses A PostgreSQL Transactional Outbox
-
-Binds: context extraction, annotation enrichment, proposal drafting, worker dispatch, retry behavior, and delivery fencing.
-
-Prevents: `after()` callbacks, fire-and-forget promises, or independently shaped worker jobs losing work or applying stale writes.
-
-Rule: The originating domain transaction writes a versioned `domain_outbox` row with event type, aggregate/resource ID, expected owner fence, deterministic dedupe key, safe bounded payload, status, attempt count, available-at, lease/fencing token, and terminal failure code. The unique dedupe key is defined by the originating command and makes duplicate dispatch harmless.
-
-Rule: The dedicated worker claims outbox rows with `FOR UPDATE SKIP LOCKED`, lease expiry, fencing token, and compare-and-swap acknowledgement. A consumer validates the expected owner fence before every write, is idempotent by dedupe key, and marks success only with its resulting state transaction. Retry uses bounded exponential backoff; exhausted jobs become `failed` with a safe reason and alert signal. No MVP dead-letter replay tool bypasses the owning domain command.
-
-Rule: AI Ask atomically enqueues context extraction only after user-turn persistence, annotation enrichment only after terminal assistant/provenance persistence, and proposal drafting only after terminal assistant persistence. Failure or delay of those jobs cannot change a terminal AI Ask command from completed to failed, and each consumer exposes its own pending/failed state through an owning read model.
-
-### AD-35: Chat/Trips Publishes A Versioned TripAnswerContext
-
-Binds: AI Ask trip context, plan/constraint precedence, source bundle serialization, proposal drafting, and evaluation.
-
-Prevents: AI Orchestration, Chat/Trips, and legacy chat-context readers constructing incompatible versions of a selected Trip Project.
-
-Rule: Chat/Trips exclusively exposes `TripAnswerContext v1`, captured with the Trip Project aggregate version. It contains stable project anchors, ordered plan items, structured constraints, primary-conversation ID, and bounded current conversation facts. It serializes no raw transcript, provider data, hidden proposal, or dynamic/deferred domain data.
-
-Rule: Within `TripAnswerContext`, structured anchors, plan items, and `trip_project_constraints` are canonical. Legacy `trip_projects` fields are migration-only aliases of those structured fields and must not override them. Project-scoped `chat_context` may supplement only fields absent from structured state; conversation-scoped `chat_context` is lower priority and becomes a typed conflict entry when it differs from canonical project state. AI answers use canonical state and may ask a concise clarification for a material conflict; proposal drafting uses canonical structured state only.
-
-Rule: The source bundle stores the `TripAnswerContext` version, aggregate version, ordered included field/item identifiers and versions, conflict list, deterministic bounded serialization, and SHA-256 digest of the final prompt section. AI Orchestration, provenance, usage, and evaluation reference this immutable source-bundle snapshot; selected but compacted-out items are recorded with an exclusion reason and are never represented as model input.
-
-### AD-36: Provenance Withdrawal Is First-Class And Read-Time Safe
-
-Binds: source removal, evidence withdrawal, historical answer provenance, annotations, detail projections, and traveler rendering.
-
-Prevents: a safe source removal leaving an old URL, quote, quick fact, or annotation visible through a persisted answer snapshot.
-
-Rule: `assistant_response_provenance` has an availability state `available | withdrawn`, withdrawn timestamp, and safe withdrawal reason. Source removal transactionally identifies linked provenance rows by evidence/source/card references, marks them withdrawn, removes traveler-visible snapshot URL/quote/quick facts, and invalidates annotations that reference them. The operation is idempotent and records only safe counts/identifiers in audit state.
-
-Rule: Traveler provenance and detail read models always apply current availability at read time. A withdrawn item renders only a localized unavailable marker with no source URL, quote, derived fact, or executable action. An annotation whose last required provenance reference is withdrawn is omitted; an answer-local annotation remains only when it satisfies AD-20 without provenance.
-
-Rule: Existing historical provenance is backfilled before source-removal cutover. Until backfill completes, a source-removal command fails closed for any answer whose provenance cannot be safely identified and redacted; it must not delete source evidence while an unsafe traveler snapshot remains.
-
-### AD-37: API Foundation Has One Shared Platform Contract [ADOPTED]
-
-Binds: BFF/API safe errors, CSRF, credential rotation configuration, readiness admission, and the first protected-read cutover.
-
-Prevents: security primitives being redefined by each capability, a Nest controller importing root Next data modules, and a routing switch leaving two public transport owners.
-
-Rule: The workspace `contracts` package owns the stable API safe-error DTO of `code`, localized-safe `message`, `requestId`, and optional bounded field violations. Nest's global exception boundary emits it for every API error, including authentication rejection; BFF adapters map only this DTO to presentation responses. No layer serializes token material, cookies, stack traces, SQL, provider payloads, raw evidence, or private configuration.
-
-Rule: The workspace `config` package validates per-issuer active and previous verification keys, prior-key verification end time, private API base URL, BFF origin, and migration/cutover configuration before a workload becomes ready. The API foundation owns a minimal Drizzle-backed `release_schema_versions` record plus a checked-in compatibility declaration for every workload. Its migration command holds the advisory migration lock, records the applied schema version, and readiness compares that version with the workload declaration before traffic. Liveness remains process-only.
-
-Rule: A shared `database` package owns Drizzle schema/client construction and a shared `domain` package owns extracted feature read models/use cases. Nest imports only these extracted packages; root Next adapters obtain sessions and call the same exported read model/use case. The first conversation-summary contract is an unpaginated bounded list for the MVP, ordered by `updatedAt DESC, id DESC`, with `updatedAt` serialized as an ISO-8601 UTC string. Adding pagination later requires an explicit contract version or compatible cursor fields.
-
-Rule: The first protected-read routing switch is the validated boolean `XV_CONVERSATION_SUMMARY_API_ENABLED`, defaulting false outside an explicitly enabled development/staging/production deployment. The root BFF chooses the legacy or API transport before invoking either. Development/staging may run a safe read-only comparison after the selected response is produced, tagged with the correlation ID; it cannot alter the browser response or invoke a second public owner. Rollback sets the switch false before API acceptance, and the legacy transport is removed only after documented staging evidence shows selected-owner execution, contract equivalence, and rollback success.
+Rule: `source_capture_versions` are immutable content-hashed capture identities. A source's current-capture pointer selects the version eligible for processing; a canonical ingestion job references that exact version. Capture review queues are operator inspection/recapture surfaces, not a second processing authority.
 
 ## Shared Data Contracts
 
@@ -632,9 +561,9 @@ Selectable answer entity descriptor minimum fields:
 - `range`: `{ start, end, text }` using AD-20 zero-based UTF-16, exclusive-end semantics against the final persisted assistant message
 - `section`: answer section identifier when available
 - `sourceCategory`: `trip_context | chat_context | knowledge | web | general` when applicable
-- `owner`: safe reference to the owning provenance row/snapshot when AD-20 requires provenance
+- `owner`: safe reference to the owning provenance row/snapshot; entity descriptors require one or more provenance-row references
 - `detail`: bounded traveler-safe summary and at most six `{ label, value }` quick facts from the AD-20 safe-provenance allowlist, with each field anchored to the answer text or linked safe projection
-- `provenance`: stored provenance row IDs and safe source snapshot references when AD-20 requires provenance; otherwise an empty list
+- `provenance`: stored provenance row IDs and safe source snapshot references; entity descriptors require non-empty provenance IDs
 - `action`: optional registered `{ command, label, arguments }` object resolved and authorized by its owning server module; never a client-derived route or label-only behavior
 
 Detail panel payloads are read models. They are not persisted as separate product state.
@@ -661,10 +590,10 @@ Core persisted entities:
 
 - `users`, `accounts`, `sessions`, `roles`
 - `referral_codes`, `referral_attributions`
-- `trip_projects`, `conversations`, `messages`, `chat_context`, `TripAnswerContext` snapshots, `ai_ask_commands`, `domain_outbox`, `assistant_response_provenance`
+- `trip_projects`, `conversations`, `messages`, `chat_context`, `assistant_response_provenance`
 - `trip_project_constraints`, `trip_plan_items`, `trip_change_proposals`, `trip_plan_change_history`
 - `context_embeddings`
-- `sources`, `raw_source_material`, `knowledge_ingestion_jobs`, `knowledge_cards`, `knowledge_card_evidence`, `knowledge_card_relations`, `knowledge_review_recommendations`, `knowledge_card_search_documents`
+- `sources`, `raw_source_material`, `source_capture_versions`, `knowledge_ingestion_jobs`, `knowledge_cards`, `knowledge_card_evidence`, `knowledge_card_relations`, `knowledge_review_recommendations`, `knowledge_card_search_documents`
 - `ai_gateway_models`, `web_search_results`, `ai_usage_events`, `feedback`, `eval_runs`, `audit_events`
 
 AI usage event minimum fields: nullable real initiating-user ID, required execution actor, conversation ID when applicable, trip project ID when applicable, message ID when applicable, purpose, provider, model, prompt version when applicable, request timestamp, latency, success/failure status, provider usage metadata when available, and estimated cost fields when configured. User-facing/admin roster metrics aggregate the initiating-user field only; system execution metrics use the actor catalog.
@@ -683,11 +612,11 @@ Canonical source linkage:
 
 - `sources`: source kind, URL/canonical URL, label, publisher, collected/checked date, source type, verification status, official/partner flags
 - `raw_source_material`: source ID, raw text or file metadata, raw metadata JSON, operator-only flag
+- `source_capture_versions`: immutable source ID/version sequence, content hash, bounded operator-only material, safe capture metadata, capture executor/time, and source current-capture pointer relationship
 - `knowledge_card_evidence`: card ID, source ID, bounded quote/span, observed/captured time, conditions, support level, display policy, evidence state, and deactivation reason when inactive
 - `knowledge_card_relations`: source candidate/card relation as `duplicate | supporting | conflicting | superseding | conditionally_compatible`, with safe current decision metadata
-- `knowledge_ingestion_jobs`: source capture version, current stage/outcome, safe retry/failure metadata, submitted-by provenance, and prompt/model references
-- `knowledge_ingestion_candidates`: source capture version, deterministic candidate idempotency key, bounded source portion/checkpoint, independent stage/outcome, card/evidence relation, expected capture/currentness fence, and safe audit summary
-- `knowledge_card_sources`: transitional compatibility linkage derived from current effective evidence; only Knowledge writes it, Retrieval must not use it as authority, and it is removed when the evidence migration no longer has callers
+- `knowledge_ingestion_jobs`: one canonical row per source capture version, current stage/outcome, safe retry/failure metadata, submitted-by provenance, and prompt/model references
+- `knowledge_card_sources`: compatibility linkage derived from current effective evidence until the existing schema is migrated; it is not sufficient for traveler evidence policy on its own
 - Embedding rows: owner table, owner ID, content hash, embedding model, embedding status as `active | stale | disabled`, owner status snapshot, created/disabled timestamps
 
 Retrieval must join embeddings/search documents back to current owner rows and filter current publication, knowledge, verification, evidence, and source-safe state. Suppressed, archived, or superseded cards must have no active retrievable projections. Updating retrievable text marks previous projections stale or disabled in the same transaction before a new version becomes active.
@@ -701,10 +630,6 @@ Multimodal provider rule: Image inputs passed to the Gateway must be validated f
 Trip Planning minimum persisted contract:
 
 - `trip_projects`: owner ID, current aggregate version, nullable migration-only `primary_conversation_id` constrained to a same-owner linked conversation, and existing project metadata.
-- `conversations`: owner ID, optional Trip Project linkage, monotonic lifecycle version, and timestamps.
-- `ai_ask_commands`: owner/scope, idempotency key and normalized payload digest, captured conversation/project fence, user/assistant message references, source-bundle snapshot reference, lifecycle/terminal result, and 24-hour expiry.
-- `domain_outbox`: originating domain, versioned event type, aggregate/resource ID, expected fence, deterministic dedupe key, safe payload, retry/lease/fencing state, and terminal safe failure code.
-- `assistant_response_provenance`: source-bundle snapshot reference plus availability/withdrawal state and safe withdrawal metadata; snapshots never remain traveler-visible after linked source withdrawal.
 - `trip_project_constraints`: Trip Project ID, owner ID, one structured constraint record with travelers/children, vehicle or EV needs, driving tolerance, budget range, preferences, avoid-list values, monotonic version, and created/updated timestamps. It contains no actual expenses, payment data, or provider-derived state.
 - `trip_plan_items`: Trip Project ID, owner ID, kind, discriminated anchor role or leg/activity type, same-project parent only for an activity under a leg, required same-project alternative target for `backup` and null alternative target otherwise, `idea | planned | confirmed | backup` state, ordinal unique within `(trip_project_id, parent_item_id)`, bounded user-confirmed label/notes, optional planned date/time, monotonic version, and created/updated timestamps. It contains no provider snapshot, booking credential/reference, exact GPS history, or dynamic weather/route result.
 - `trip_change_proposals`: Trip Project ID, owner ID, creator class, `pending | applied | dismissed | expired` status, bounded rationale, typed operation list, expected aggregate and affected-item version fences, ordering/parent preconditions when applicable, optional expiry, and terminal timestamp. Proposal operations identify only the target item and permitted structured-field changes; they do not embed executable SQL, arbitrary routes, or provider/model payloads.
@@ -716,7 +641,7 @@ Trip Planning deletion rule: deleting an owned Trip Project cascades or transact
 
 Retrieval returns a normalized source bundle:
 
-- `chat_trip_context`: versioned `TripAnswerContext` plus current chat session context used, conflict entries, included/excluded item references, and source-bundle digest
+- `chat_trip_context`: selected trip project context and current chat session context used
 - `knowledge`: active cards with IDs, titles, summaries, conditions, current knowledge/verification state, confidence, safe current evidence/source metadata, freshness flags, and scores
 - `web`: external results with URL, title, snippet/content, checkedAt, provider score, and `unverified` confidence
 - `general`: explicit marker when model reasoning fills gaps without source grounding
@@ -743,26 +668,19 @@ The five PRD beta prompts are the initial required prompt set: magic-moment fami
 
 Production must have:
 
-- Railway `web`, `admin`, `api`, `worker`, and migration workloads independently verified in staging with private service discovery, build/start commands, health/readiness, isolated environment configuration, and migration ordering.
-- Separate staging/production databases, secrets, OAuth callback configuration, API audiences, and observability projects.
-- Server-side API authorization and role enforcement for protected capabilities, with API resource-server token verification independent of Auth.js session parsing.
-- A thin BFF API client that forwards/generates correlation IDs, mints the AD-4 BFF credential, maps typed safe errors, preserves `Idempotency-Key`, and forwards timeout/abort behavior. No generated SDK is required.
-- API `/v1` OpenAPI for health/version and protected contracts, a global validation boundary, and a stable safe error envelope of `code`, `message`, `requestId`, and optional safe field violations.
-- Per-issuer signing/verification configuration with active/previous `kid` and bounded previous-key verification, host-specific database-session resolution at the BFF, and a shared CSRF guard for unsafe cookie-authenticated BFF routes.
-- A role-bootstrap deployment context limited to the first-admin command, isolated migration/runtime database credentials, and documented/audited privileged role-repair operations.
-- Dedicated Nest worker loops that retain PostgreSQL claim predicates, leases, fencing tokens, `FOR UPDATE SKIP LOCKED`, idempotency, and existing system actors. Railway Cron invokes only bounded `--once` sweep commands; Facebook and YouTube capture remain operator-controlled external runtimes.
-- Graceful shutdown and duplicate-poller/restart tests, lag/retry/lease-recovery metrics, and a restart runbook for every migrated worker before retiring its legacy entrypoint.
-- Correlation IDs across BFF, API, worker, and provider calls when applicable; structured logs capture capability, principal class, safe aggregate identifier, latency, and result code.
+- Separate production database and secrets.
+- Separately supervised Node worker processes for canonical ingestion and knowledge-search indexing, with restart/health monitoring and logs distinct from request-serving Next.js runtime. Legacy extraction is disabled except for an explicitly approved, time-bounded compatibility recovery.
+- Server-side auth and role enforcement for protected personalization/admin capabilities.
 - Audit trail for operator/admin mutations.
 - Logging for model provider, search provider, latency, failures, and answer provenance IDs.
 - User-owned deletion path for chat sessions and trip projects.
-- Named ownership and approved configuration for Railway services, domains/DNS/CSP/callbacks, secrets, backup/restore, monitoring, alerts, and on-call before public launch; database-pool and AI-stream concurrency load tests plus backup restore test pass before launch.
+- Backup/restore path for PostgreSQL before public user onboarding.
 - Facebook capture, if enabled, must run from an operator-controlled operations environment with a separate local browser profile and no stored Facebook credentials in application secrets or the database.
 - A verified clean database migration for system actors: actor-shape validation, repository search showing no reserved-user creation path, and no non-human rows from `db:seed`.
 
 ## Deferred
 
-- Railway service ownership, domains/DNS/CSP/callback values, secret allocation, backup/restore runbook, monitoring/alert thresholds, and on-call policy, pending their required pre-staging/public-launch operational decision.
+- Final deployment provider and hosted PostgreSQL provider.
 - Legal review of Facebook content reuse before traveler-visible quote/link display or broad group discovery.
 - Dedicated self-service privacy dashboard beyond chat/trip deletion.
 - Google Maps integration.
@@ -770,6 +688,6 @@ Production must have:
 - Dedicated map canvas or map provider integration for answer entities.
 - AI-generated image output until a concrete traveler or operator workflow is approved.
 - Public submissions, credit wallets, payment deposits, reward balances, referral reward calculations, ranking multipliers, reward-to-credit conversion, booking transactions, affiliate automation, and partner transaction flows.
-- Mobile app channel and its maintained Nest-hosted OAuth/OIDC authorization-server integration.
-- Public `api.xuyenviet.app` exposure until a mobile/public integration has an approved identity flow.
+- Mobile app channel.
+- Service decomposition.
 - Postgres full-text ranking and pgvector/hybrid retrieval for AI Ask, until indexed lexical retrieval and provenance behavior are stable enough to upgrade behind the Retrieval module.

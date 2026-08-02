@@ -81,6 +81,13 @@ For brownfield understanding or missing docs, use:
 - `bmad-generate-project-context` to create lean LLM project context.
 - `bmad-index-docs` to index documentation.
 
+## Test Execution Boundaries
+
+- Use `pnpm test:unit` for infrastructure-free tests. Unit tests must not require `DATABASE_URL`, `DATABASE_URL_TEST`, Drizzle migration, or a PostgreSQL connection.
+- Use `pnpm test:integration` for tests that read or mutate PostgreSQL. Integration setup owns `DATABASE_URL_TEST` validation, test-database migration, and connection cleanup.
+- A database integration test that depends on clean tables must explicitly call `resetTestDatabase()` in its own setup. Do not restore a global reset hook that truncates the database for every Vitest test.
+- Integration tests share one physical test database and must remain serial. Do not enable integration file parallelism or multiple workers unless the suite first gets worker-isolated schemas or databases.
+
 ## Skills
 
 Project BMad skills are installed under:

@@ -309,7 +309,7 @@ export async function lockSamplingPolicyBoundary(db: Transaction) {
 }
 
 function priorityFor(reason: KnowledgeRecommendationReason) { return ({ risk: 1, verification: 2, conflict: 3, weak_evidence: 4, freshness: 5, relation: 6, duplicate_risk: 7, missing_context: 8, sampling: 9 })[reason]; }
-function resolutionFor(action: KnowledgeRecommendationAction) { return ({ accept_wording: "accepted", edit: "edited", suppress: "suppressed", restore: "restored", verify: "verified", resolve_relation: "relation_resolved", sampling_pass: "sampling_passed", sampling_fail: "sampling_failed" })[action] as "accepted" | "edited" | "suppressed" | "restored" | "verified" | "relation_resolved" | "sampling_passed" | "sampling_failed"; }
+function resolutionFor(action: KnowledgeRecommendationAction) { return ({ accept_wording: "accepted", edit: "edited", promote: "accepted", suppress: "suppressed", restore: "restored", verify: "verified", resolve_relation: "relation_resolved", sampling_pass: "sampling_passed", sampling_fail: "sampling_failed" })[action] as "accepted" | "edited" | "suppressed" | "restored" | "verified" | "relation_resolved" | "sampling_passed" | "sampling_failed"; }
 function isCompatibleResolution(reason: KnowledgeRecommendationReason, action: KnowledgeRecommendationAction) {
   if (reason === "verification") return ["edit", "suppress", "verify"].includes(action);
   if (reason === "sampling") return ["sampling_pass", "sampling_fail", "suppress"].includes(action);

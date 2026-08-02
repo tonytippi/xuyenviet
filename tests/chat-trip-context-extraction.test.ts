@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { aiAskCommands, aiGatewayModels, aiUsageEvents, assistantResponseProvenance, auditEvents, chatContext, conversations, domainOutbox, domainOutboxEffects, messages, tripChangeProposals, tripProjects, users } from "@/db/schema";
 
-import { testDb } from "./helpers/db";
+import { resetTestDatabase, testDb } from "./helpers/db";
 import { acquireAiAskCommand } from "@/features/ai/ai-ask-commands";
 import { processAiAskDomainOutboxBatch, setDomainOutboxWorkerTestDependencies } from "@/features/ai/domain-outbox-worker";
 import { issueCsrfToken } from "@/server/csrf";
@@ -89,6 +89,10 @@ async function completedAnswerSnapshot() {
     initialUsage: await testDb.select({ id: aiUsageEvents.id, status: aiUsageEvents.status, purpose: aiUsageEvents.purpose }).from(aiUsageEvents).where(and(eq(aiUsageEvents.purpose, "ai_ask_initial_answer"), isNull(aiUsageEvents.providerRequestId))),
   };
 }
+
+beforeEach(async () => {
+  await resetTestDatabase();
+});
 
 describe("chat/trip context extraction", () => {
   afterEach(() => {

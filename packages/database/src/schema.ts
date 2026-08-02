@@ -165,7 +165,7 @@ export type KnowledgeRecommendationStatus = (typeof knowledgeRecommendationStatu
 export const knowledgeRecommendationReasonValues = ["risk", "weak_evidence", "freshness", "conflict", "duplicate_risk", "missing_context", "verification", "relation", "sampling"] as const;
 export type KnowledgeRecommendationReason = (typeof knowledgeRecommendationReasonValues)[number];
 
-export const knowledgeRecommendationActionValues = ["accept_wording", "edit", "suppress", "restore", "verify", "resolve_relation", "sampling_pass", "sampling_fail"] as const;
+export const knowledgeRecommendationActionValues = ["accept_wording", "edit", "promote", "suppress", "restore", "verify", "resolve_relation", "sampling_pass", "sampling_fail"] as const;
 export type KnowledgeRecommendationAction = (typeof knowledgeRecommendationActionValues)[number];
 
 export const knowledgeRecommendationResolutionValues = ["accepted", "edited", "suppressed", "restored", "verified", "relation_resolved", "sampling_passed", "sampling_failed"] as const;
@@ -583,9 +583,7 @@ export const knowledgeIngestionJobs = pgTable(
     submittedByEmail: text("submitted_by_email").notNull(),
     stage: text("stage").$type<KnowledgeIngestionStage>().default("queued").notNull(),
     protocolVersion: integer("protocol_version").default(1).notNull(),
-    discoveryCursor: integer("discovery_cursor").default(0).notNull(),
-    discoveryWindowSize: integer("discovery_window_size").default(8_000).notNull(),
-    discoveryComplete: boolean("discovery_complete").default(false).notNull(),
+    rawDiscoveryResponse: text("raw_discovery_response"),
     discoveredCandidateCount: integer("discovered_candidate_count").default(0).notNull(),
     terminalCandidateCount: integer("terminal_candidate_count").default(0).notNull(),
     publishedCandidateCount: integer("published_candidate_count").default(0).notNull(),
@@ -621,8 +619,7 @@ export const knowledgeIngestionJobs = pgTable(
     }).onDelete("restrict"),
     check("knowledge_ingestion_jobs_stage_check", sql`${job.stage} in ('queued', 'triaging', 'extracting', 'judging', 'relating', 'published', 'suppressed', 'review_recommended', 'verify_first', 'failed')`),
     check("knowledge_ingestion_jobs_protocol_version_check", sql`${job.protocolVersion} in (1, 2)`),
-    check("knowledge_ingestion_jobs_discovery_cursor_check", sql`${job.discoveryCursor} >= 0`),
-    check("knowledge_ingestion_jobs_discovery_window_size_check", sql`${job.discoveryWindowSize} between 500 and 8000`),
+    check("knowledge_ingestion_jobs_raw_discovery_response_check", sql`${job.rawDiscoveryResponse} is null or (octet_length(${job.rawDiscoveryResponse}) > 0 and octet_length(${job.rawDiscoveryResponse}) <= 1048576)`),
     check("knowledge_ingestion_jobs_candidate_counts_check", sql`${job.discoveredCandidateCount} >= 0 and ${job.terminalCandidateCount} >= 0 and ${job.terminalCandidateCount} <= ${job.discoveredCandidateCount} and ${job.publishedCandidateCount} >= 0 and ${job.suppressedCandidateCount} >= 0 and ${job.reviewRecommendedCandidateCount} >= 0 and ${job.verifyFirstCandidateCount} >= 0 and ${job.failedCandidateCount} >= 0 and ${job.invalidCandidateCount} >= 0 and ${job.publishedCandidateCount} + ${job.suppressedCandidateCount} + ${job.reviewRecommendedCandidateCount} + ${job.verifyFirstCandidateCount} + ${job.failedCandidateCount} = ${job.terminalCandidateCount}`),
     check("knowledge_ingestion_jobs_stage_version_check", sql`${job.stageVersion} >= 1`),
     check("knowledge_ingestion_jobs_attempt_count_check", sql`${job.attemptCount} >= 0 and ${job.attemptCount} <= ${job.maxAttempts}`),
@@ -653,6 +650,8 @@ export const knowledgeIngestionCandidates = pgTable(
     routeSegment: text("route_segment"),
     conditions: jsonb("conditions").$type<string[]>().default([]).notNull(),
     freshnessSensitive: boolean("freshness_sensitive").default(false).notNull(),
+    practicalDetails: jsonb("practical_details").$type<Record<string, unknown>>().default({}).notNull(),
+    tags: jsonb("tags").$type<string[]>().default([]).notNull(),
     spanStart: integer("span_start").notNull(),
     spanEnd: integer("span_end").notNull(),
     extractionModelId: text("extraction_model_id").references(() => aiGatewayModels.id, { onDelete: "set null" }),
@@ -667,6 +666,7 @@ export const knowledgeIngestionCandidates = pgTable(
     leaseExpiresAt: timestamp("lease_expires_at", { mode: "date" }),
     fencingToken: text("fencing_token"),
     outcomeReasonCode: text("outcome_reason_code"),
+    judgeDecision: text("judge_decision"),
     judgmentSummary: text("judgment_summary"),
     scores: jsonb("scores").$type<Record<string, number>>(),
     knowledgeCardId: text("knowledge_card_id").references(() => knowledgeCards.id, { onDelete: "set null" }),
@@ -683,9 +683,12 @@ export const knowledgeIngestionCandidates = pgTable(
     check("knowledge_ingestion_candidates_span_check", sql`${candidate.spanStart} >= 0 and ${candidate.spanEnd} > ${candidate.spanStart}`),
     check("knowledge_ingestion_candidates_safe_text_check", sql`length(btrim(${candidate.title})) between 1 and 160 and length(btrim(${candidate.summary})) between 1 and 1200 and length(btrim(${candidate.extractionPromptVersion})) between 1 and 160`),
     check("knowledge_ingestion_candidates_conditions_check", sql`jsonb_typeof(${candidate.conditions}) = 'array'`),
+    check("knowledge_ingestion_candidates_practical_details_check", sql`jsonb_typeof(${candidate.practicalDetails}) = 'object'`),
+    check("knowledge_ingestion_candidates_tags_check", sql`jsonb_typeof(${candidate.tags}) = 'array'`),
     check("knowledge_ingestion_candidates_attempt_check", sql`${candidate.attemptCount} >= 0 and ${candidate.attemptCount} <= ${candidate.maxAttempts} and ${candidate.maxAttempts} between 1 and 10`),
     check("knowledge_ingestion_candidates_claim_shape_check", sql`(${candidate.claimedBy} is null and ${candidate.claimedAt} is null and ${candidate.leaseExpiresAt} is null and ${candidate.fencingToken} is null) or (${candidate.claimedBy} is not null and ${candidate.claimedAt} is not null and ${candidate.leaseExpiresAt} > ${candidate.claimedAt} and ${candidate.fencingToken} ~ '^[a-f0-9]{64}$')`),
-    check("knowledge_ingestion_candidates_outcome_reason_code_check", sql`${candidate.outcomeReasonCode} is null or ${candidate.outcomeReasonCode} in ('candidate_terminalized', 'invalid_discovery_candidate', 'stale_or_deleted_capture', 'judge_model_unavailable', 'judge_model_not_independent', 'judge_provider_failed', 'relation_provider_failed', 'relation_ambiguous', 'relation_invalid', 'stale_relation_target', 'attach_condition_mismatch', 'conflict_condition_mismatch', 'retry_exhausted')`),
+    check("knowledge_ingestion_candidates_outcome_reason_code_check", sql`${candidate.outcomeReasonCode} is null or ${candidate.outcomeReasonCode} in ('invalid_discovery_candidate', 'candidate_invalid_structure', 'candidate_missing_required_fields', 'candidate_sensitive_content', 'candidate_unsafe_raw_overlap', 'candidate_evidence_mismatch', 'candidate_insufficient_travel_context', 'judge_evidence_not_grounded', 'judge_suppressed', 'judge_below_quality_threshold', 'stale_or_deleted_capture', 'judge_model_unavailable', 'judge_model_not_independent', 'judge_provider_failed', 'relation_provider_failed', 'relation_ambiguous', 'relation_invalid', 'stale_relation_target', 'attach_condition_mismatch', 'conflict_condition_mismatch', 'retry_exhausted')`),
+    check("knowledge_ingestion_candidates_judge_decision_check", sql`${candidate.judgeDecision} is null or ${candidate.judgeDecision} in ('publish', 'review_recommended', 'verify_first', 'suppress')`),
   ],
 );
 

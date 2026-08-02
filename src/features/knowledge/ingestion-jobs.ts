@@ -2,12 +2,12 @@ import "server-only";
 
 import { randomBytes, randomUUID } from "node:crypto";
 
-import { and, asc, eq, gt, isNull, lte, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, lte, sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { knowledgeIngestionCandidates, knowledgeIngestionJobs, knowledgeCardTypeValues, sourceCaptureVersions, sources, users } from "@/db/schema";
+import { knowledgeCardEvidence, knowledgeCardSearchDocuments, knowledgeCardSources, knowledgeCards, knowledgeIngestionCandidates, knowledgeIngestionJobs, knowledgeRecommendations, knowledgeCardTypeValues, sourceCaptureVersions, sources, users } from "@/db/schema";
 
-type IngestionJobDb = Pick<ReturnType<typeof getDb>, "select" | "insert" | "update" | "execute" | "transaction">;
+type IngestionJobDb = Pick<ReturnType<typeof getDb>, "select" | "insert" | "update" | "delete" | "execute" | "transaction">;
 type Stage = typeof knowledgeIngestionJobs.$inferSelect.stage;
 export type NonterminalIngestionStage = Exclude<Stage, "published" | "suppressed" | "review_recommended" | "verify_first" | "failed">;
 type CheckpointCandidate = { type: (typeof knowledgeCardTypeValues)[number]; title: string; summary: string; locationName: string | null; routeSegment: string | null; conditions: string[]; freshnessSensitive: boolean; spanStart: number; spanEnd: number; modelId: string; modelGatewayName: string; promptVersion: string };
@@ -19,6 +19,8 @@ const defaultMaxAttempts = 3;
 const defaultLeaseMs = 15 * 60_000;
 const minLeaseMs = 10 * 60_000;
 const maxLeaseMs = 60 * 60_000;
+const gatewayRetryBaseMs = 5_000;
+const gatewayRetryMaxMs = 30_000;
 const terminalStages = ["published", "suppressed", "review_recommended", "verify_first", "failed"] as const;
 
 export class KnowledgeIngestionJobError extends Error { constructor(message: string) { super(message); this.name = "KnowledgeIngestionJobError"; } }
@@ -47,12 +49,47 @@ export async function ensureIngestionJobForCaptureVersion(db: IngestionJobDb, in
   return existing;
 }
 
+/**
+ * Replays immutable capture text through the current pipeline. Deleting operational
+ * candidates and advancing the parent fence makes any in-flight worker harmless.
+ */
+export async function rerunKnowledgeIngestionJob(input: { jobId: string; sourceId: string; captureVersionId: string; now?: Date }, db: IngestionJobDb = getDb()) {
+  const now = input.now ?? new Date();
+  const [job] = await db.select({ id: knowledgeIngestionJobs.id, protocolVersion: knowledgeIngestionJobs.protocolVersion, stage: knowledgeIngestionJobs.stage, stageVersion: knowledgeIngestionJobs.stageVersion }).from(knowledgeIngestionJobs).where(and(eq(knowledgeIngestionJobs.id, input.jobId), eq(knowledgeIngestionJobs.sourceId, input.sourceId), eq(knowledgeIngestionJobs.captureVersionId, input.captureVersionId))).limit(1).for("update");
+  if (!job || job.protocolVersion !== 2) return null;
+  await supersedeCaptureOnlyCards(input, db, now);
+  await db.delete(knowledgeIngestionCandidates).where(eq(knowledgeIngestionCandidates.ingestionJobId, job.id));
+  const [rerun] = await db.update(knowledgeIngestionJobs).set({ stage: "queued", discoveredCandidateCount: 0, terminalCandidateCount: 0, publishedCandidateCount: 0, suppressedCandidateCount: 0, reviewRecommendedCandidateCount: 0, verifyFirstCandidateCount: 0, failedCandidateCount: 0, invalidCandidateCount: 0, stageVersion: sql`${knowledgeIngestionJobs.stageVersion} + 1`, attemptCount: 0, nextRunAt: now, lastErrorCode: null, requeueReasonCode: "operator_rerun_current_pipeline", rawDiscoveryResponse: null, checkpoint: null, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, updatedAt: now }).where(and(eq(knowledgeIngestionJobs.id, job.id), eq(knowledgeIngestionJobs.stage, job.stage), eq(knowledgeIngestionJobs.stageVersion, job.stageVersion))).returning({ id: knowledgeIngestionJobs.id });
+  return rerun ?? null;
+}
+
+async function supersedeCaptureOnlyCards(input: { sourceId: string; captureVersionId: string }, db: IngestionJobDb, now: Date) {
+  const cards = await db.select({ id: knowledgeCards.id }).from(knowledgeCards)
+    .innerJoin(knowledgeCardSources, eq(knowledgeCardSources.knowledgeCardId, knowledgeCards.id))
+    .innerJoin(knowledgeCardEvidence, eq(knowledgeCardEvidence.knowledgeCardId, knowledgeCards.id))
+    .where(and(
+      eq(knowledgeCardSources.sourceId, input.sourceId),
+      eq(knowledgeCardEvidence.sourceId, input.sourceId),
+      eq(knowledgeCardEvidence.captureVersionId, input.captureVersionId),
+      eq(knowledgeCardEvidence.state, "active"),
+      sql`not exists (select 1 from knowledge_card_sources other_source where other_source.knowledge_card_id = ${knowledgeCards.id} and other_source.source_id <> ${input.sourceId})`,
+      sql`not exists (select 1 from knowledge_card_evidence other_evidence where other_evidence.knowledge_card_id = ${knowledgeCards.id} and other_evidence.state = 'active' and (other_evidence.source_id <> ${input.sourceId} or other_evidence.capture_version_id <> ${input.captureVersionId}))`,
+    ))
+    .for("update");
+  const cardIds = [...new Set(cards.map((card) => card.id))];
+  if (cardIds.length === 0) return;
+
+  await db.update(knowledgeCards).set({ publicationState: "suppressed", knowledgeState: "superseded", reviewState: "ai_recommended", needsReview: false, contentVersion: sql`${knowledgeCards.contentVersion} + 1`, updatedAt: now }).where(inArray(knowledgeCards.id, cardIds));
+  await db.update(knowledgeRecommendations).set({ status: "superseded", resolution: "accepted", resolvedAt: now, executorSystem: "system-knowledge-pipeline", updatedAt: now }).where(and(inArray(knowledgeRecommendations.knowledgeCardId, cardIds), inArray(knowledgeRecommendations.status, ["open", "in_review"])));
+  await db.update(knowledgeCardSearchDocuments).set({ status: "disabled", disabledAt: now, updatedAt: now }).where(and(inArray(knowledgeCardSearchDocuments.knowledgeCardId, cardIds), eq(knowledgeCardSearchDocuments.status, "active")));
+}
+
 export async function claimNextKnowledgeIngestionCandidate(input: { workerId: string; now?: Date }, db: IngestionJobDb = getDb()): Promise<KnowledgeIngestionCandidateClaim | null> {
   const workerId = input.workerId.trim();
   if (!/^[a-zA-Z0-9_.:-]{1,160}$/.test(workerId)) throw new KnowledgeIngestionJobError("Worker ID is invalid.");
   const now = input.now ?? new Date(); const leaseExpiresAt = new Date(now.getTime() + getClaimLeaseMs()); const fencingToken = randomBytes(32).toString("hex");
   return db.transaction(async (tx) => {
-    const rows = await tx.execute(sql`select c.id from knowledge_ingestion_candidates c join knowledge_ingestion_jobs j on j.id = c.ingestion_job_id and j.source_id = c.source_id and j.capture_version_id = c.capture_version_id where j.protocol_version = 2 and c.stage in ('queued', 'judging', 'relating') and c.claimed_by is null and c.next_run_at <= timezone('UTC', ${now.toISOString()}::timestamptz) and c.attempt_count < c.max_attempts order by c.next_run_at asc, c.created_at asc for update skip locked limit 1`) as Array<{ id: string }>;
+    const rows = await tx.execute(sql`select c.id from knowledge_ingestion_candidates c join knowledge_ingestion_jobs j on j.id = c.ingestion_job_id and j.source_id = c.source_id and j.capture_version_id = c.capture_version_id where j.protocol_version = 2 and c.stage in ('queued', 'judging', 'relating') and c.claimed_by is null and c.next_run_at <= ${now.toISOString()}::timestamptz and c.attempt_count < c.max_attempts order by c.next_run_at asc, c.created_at asc for update skip locked limit 1`) as Array<{ id: string }>;
     if (!rows[0]) return null;
     const [row] = await tx.update(knowledgeIngestionCandidates).set({ claimedBy: workerId, claimedAt: now, leaseExpiresAt, fencingToken, attemptCount: sql`${knowledgeIngestionCandidates.attemptCount} + 1`, updatedAt: now }).where(and(eq(knowledgeIngestionCandidates.id, rows[0].id), isNull(knowledgeIngestionCandidates.claimedBy), sql`exists (select 1 from knowledge_ingestion_jobs j where j.id = ${knowledgeIngestionCandidates.ingestionJobId} and j.source_id = ${knowledgeIngestionCandidates.sourceId} and j.capture_version_id = ${knowledgeIngestionCandidates.captureVersionId} and j.protocol_version = 2)`)).returning();
     if (!row || !["queued", "judging", "relating"].includes(row.stage)) return null;
@@ -73,7 +110,7 @@ export async function terminalizeKnowledgeIngestionCandidate(input: { candidateI
 }
 
 export async function finalizeV2Parent(db: Pick<IngestionJobDb, "update" | "execute">, jobId: string, now = new Date()) {
-  await db.execute(sql`update knowledge_ingestion_jobs set stage = case when failed_candidate_count > 0 then 'failed' when published_candidate_count > 0 then 'published' when verify_first_candidate_count > 0 then 'verify_first' when review_recommended_candidate_count > 0 then 'review_recommended' else 'suppressed' end, stage_version = stage_version + 1, claimed_by = null, claimed_at = null, lease_expires_at = null, fencing_token = null, updated_at = ${now.toISOString()}::timestamptz where id = ${jobId} and protocol_version = 2 and discovery_complete = true and terminal_candidate_count = discovered_candidate_count and stage = 'queued'`);
+  await db.execute(sql`update knowledge_ingestion_jobs set stage = case when failed_candidate_count > 0 then 'failed' when published_candidate_count > 0 then 'published' when verify_first_candidate_count > 0 then 'verify_first' when review_recommended_candidate_count > 0 then 'review_recommended' else 'suppressed' end, stage_version = stage_version + 1, claimed_by = null, claimed_at = null, lease_expires_at = null, fencing_token = null, updated_at = ${now.toISOString()}::timestamptz where id = ${jobId} and protocol_version = 2 and terminal_candidate_count = discovered_candidate_count and stage = 'queued'`);
 }
 
 /** Invalidates expired fences before a recovered stage can be claimed. */
@@ -110,7 +147,7 @@ export async function claimNextKnowledgeIngestionJob(input: { workerId: string; 
   const now = input.now ?? new Date(); const leaseExpiresAt = new Date(now.getTime() + getClaimLeaseMs()); const fencingToken = randomBytes(32).toString("hex");
   return db.transaction(async (tx) => {
     const version = input.expectedStageVersion === undefined ? sql`` : sql`and stage_version = ${input.expectedStageVersion}`;
-    const rows = await tx.execute(sql`select id from knowledge_ingestion_jobs where stage not in ('published', 'suppressed', 'review_recommended', 'verify_first', 'failed') and (stage = 'queued' or checkpoint is not null) and next_run_at <= timezone('UTC', ${now.toISOString()}::timestamptz) and attempt_count < max_attempts and claimed_by is null and not (protocol_version = 2 and discovery_complete = true and terminal_candidate_count < discovered_candidate_count) ${version} order by next_run_at asc, created_at asc for update skip locked limit 1`) as Array<{ id: string }>;
+    const rows = await tx.execute(sql`select id from knowledge_ingestion_jobs where stage not in ('published', 'suppressed', 'review_recommended', 'verify_first', 'failed') and (stage = 'queued' or checkpoint is not null) and next_run_at <= ${now.toISOString()}::timestamptz and attempt_count < max_attempts and claimed_by is null and not (protocol_version = 2 and discovered_candidate_count > terminal_candidate_count) ${version} order by next_run_at asc, created_at asc for update skip locked limit 1`) as Array<{ id: string }>;
     if (!rows[0]) return null;
     const [claimed] = await tx.update(knowledgeIngestionJobs).set({ claimedBy: workerId, claimedAt: now, leaseExpiresAt, fencingToken, attemptCount: sql`${knowledgeIngestionJobs.attemptCount} + 1`, requeueReasonCode: null, updatedAt: now }).where(and(eq(knowledgeIngestionJobs.id, rows[0].id), isNull(knowledgeIngestionJobs.claimedBy), lte(knowledgeIngestionJobs.nextRunAt, now), sql`${knowledgeIngestionJobs.attemptCount} < ${knowledgeIngestionJobs.maxAttempts}`)).returning();
     if (!claimed || isTerminalStage(claimed.stage)) return null;
@@ -134,7 +171,7 @@ export async function commitKnowledgeIngestionStage(input: KnowledgeIngestionSta
 
 /** Releases a retryable failure without replaying preceding checkpointed stages. */
 export async function retryKnowledgeIngestionStage(input: { jobId: string; expectedStage: NonterminalIngestionStage; expectedStageVersion: number; fencingToken: string; errorCode: string; now?: Date }, db: IngestionJobDb = getDb()) {
-  const now = input.now ?? new Date(); const retryAt = new Date(now.getTime() + Math.min(60_000 * 2 ** Math.max(0, input.expectedStageVersion - 1), 15 * 60_000)).toISOString();
+  const now = input.now ?? new Date(); const retryAt = new Date(now.getTime() + retryDelayMs(input.errorCode, input.expectedStageVersion)).toISOString();
   const [row] = await db.update(knowledgeIngestionJobs).set({ stage: sql`case when ${knowledgeIngestionJobs.attemptCount} >= ${knowledgeIngestionJobs.maxAttempts} then 'failed' else ${knowledgeIngestionJobs.stage} end`, stageVersion: sql`case when ${knowledgeIngestionJobs.attemptCount} >= ${knowledgeIngestionJobs.maxAttempts} then ${knowledgeIngestionJobs.stageVersion} + 1 else ${knowledgeIngestionJobs.stageVersion} end`, checkpoint: sql`case when ${knowledgeIngestionJobs.attemptCount} >= ${knowledgeIngestionJobs.maxAttempts} then null else ${knowledgeIngestionJobs.checkpoint} end`, lastErrorCode: sql`case when ${knowledgeIngestionJobs.attemptCount} >= ${knowledgeIngestionJobs.maxAttempts} then 'retry_exhausted' else ${input.errorCode} end`, requeueReasonCode: sql`case when ${knowledgeIngestionJobs.attemptCount} >= ${knowledgeIngestionJobs.maxAttempts} then 'retry_exhausted' else 'retryable_stage_failure' end`, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, nextRunAt: sql`case when ${knowledgeIngestionJobs.attemptCount} >= ${knowledgeIngestionJobs.maxAttempts} then ${knowledgeIngestionJobs.nextRunAt} else ${retryAt} end`, updatedAt: now }).where(and(eq(knowledgeIngestionJobs.id, input.jobId), eq(knowledgeIngestionJobs.stage, input.expectedStage), eq(knowledgeIngestionJobs.stageVersion, input.expectedStageVersion), eq(knowledgeIngestionJobs.fencingToken, input.fencingToken), gt(knowledgeIngestionJobs.leaseExpiresAt, now))).returning();
   return row ?? null;
 }
@@ -159,6 +196,12 @@ function parseCheckpointJudgment(value: unknown): CheckpointJudgment | null { co
 function parseCheckpointRelation(value: unknown): CheckpointRelation | null { const keys = ["action", "targetCardId", "summary"]; if (!isRecord(value) || !hasOnlyKeys(value, keys) || !["attach", "create", "conflict"].includes(String(value.action)) || !safeText(value.summary, 1000) || (value.targetCardId !== null && !bounded(value.targetCardId, 160)) || (["attach", "conflict"].includes(String(value.action)) && !value.targetCardId)) return null; return { action: value.action as CheckpointRelation["action"], targetCardId: value.targetCardId as string | null, summary: value.summary as string }; }
 function isCheckpointForStage(checkpoint: KnowledgeIngestionCheckpoint, stage: NonterminalIngestionStage) { return (stage === "queued" && checkpoint.completedStage === "triaging") || (stage === "triaging" && checkpoint.completedStage === "extracting") || (stage === "extracting" && checkpoint.completedStage === "judging") || (stage === "judging" && checkpoint.completedStage === "relating"); }
 function normalizeLeaseMs(value: string | undefined) { if (!value) return defaultLeaseMs; const parsed = Number(value); return Number.isFinite(parsed) ? Math.min(Math.max(Math.trunc(parsed), minLeaseMs), maxLeaseMs) : defaultLeaseMs; }
+function retryDelayMs(errorCode: string, stageVersion: number) {
+  const exponent = Math.max(0, stageVersion - 1);
+  return errorCode.endsWith("provider_failed")
+    ? Math.min(gatewayRetryBaseMs * 2 ** exponent, gatewayRetryMaxMs)
+    : Math.min(60_000 * 2 ** exponent, 15 * 60_000);
+}
 function isTerminalStage(stage: Stage): stage is (typeof terminalStages)[number] { return terminalStages.includes(stage as (typeof terminalStages)[number]); }
 function isAllowedStageTransition(from: NonterminalIngestionStage, to: Stage) { if (isTerminalStage(to)) return true; return (from === "queued" && to === "triaging") || (from === "triaging" && to === "extracting") || (from === "extracting" && to === "judging") || (from === "judging" && to === "relating"); }
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }

@@ -16,7 +16,7 @@ import type { PendingProposalFocusInput } from "@/features/chat-trips/trip-home"
 import { tripChangeProposalLabels } from "@/features/chat-trips/trip-home-labels";
 import type { AssistantMessageProvenanceItem } from "@/features/retrieval/provenance";
 
-import { testDb } from "./helpers/db";
+import { resetTestDatabase, testDb } from "./helpers/db";
 
 async function createTestUser(userId: string) {
   await testDb.insert(users).values({ id: userId, email: `${userId}@example.com` });
@@ -172,6 +172,10 @@ function makeAnnotation(id: string, content: string, text: string, type: AnswerA
     },
   };
 }
+
+beforeEach(async () => {
+  await resetTestDatabase();
+});
 
 describe("AI Ask authenticated shell", () => {
   beforeEach(() => {

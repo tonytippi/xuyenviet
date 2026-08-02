@@ -23,7 +23,15 @@ async function main() {
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
 
-  const result = await runApprovedKnowledgeIndexingWorkerLoop({ once: options.once, batchSize: options.batchSize, signal: controller.signal });
+  const result = await runApprovedKnowledgeIndexingWorkerLoop({
+    once: options.once,
+    batchSize: options.batchSize,
+    signal: controller.signal,
+    onObservation: (observation) => {
+      if (observation.resultCode === "no_work" && options.once) console.log("Knowledge indexing worker found no work");
+      else console.log("Knowledge indexing worker observation", observation);
+    },
+  });
   console.log("Knowledge indexing worker stopped", result);
   process.exitCode = 0;
 }

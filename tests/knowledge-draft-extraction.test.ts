@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { aiGatewayModels, aiUsageEvents, auditEvents, knowledgeCards, knowledgeCardSources, sources, userRoles, users, type UserRole } from "@/db/schema";
 import { buildSourceKnowledgeDraftExtractionMessages, buildSourceKnowledgeSuggestionMessages } from "@/features/ai/prompts";
 
-import { testDb } from "./helpers/db";
+import { resetTestDatabase, testDb } from "./helpers/db";
 import { seedSourceCaptureVersion } from "./helpers/source-captures";
 
 const authMock = vi.fn();
@@ -109,7 +109,8 @@ function mockGatewayJson(content: string, usage = { prompt_tokens: 120, completi
 const orderedStops = Array.from({ length: 32 }, (_, index) => `Điểm dừng ${index + 1}`);
 
 describe("knowledge draft extraction", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await resetTestDatabase();
     authMock.mockReset();
   });
 

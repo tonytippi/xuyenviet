@@ -1,6 +1,12 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
+import { resetTestDatabase } from "./helpers/db";
+
+beforeEach(async () => {
+  await resetTestDatabase();
+});
+
 const authMock = vi.fn();
 
 vi.mock("@/auth", () => ({

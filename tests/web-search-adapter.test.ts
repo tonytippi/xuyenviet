@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { conversations, messages, users, webSearchResults } from "@/db/schema";
 
-import { testDb } from "./helpers/db";
+import { resetTestDatabase, testDb } from "./helpers/db";
 
 async function seedTurn() {
   await testDb.insert(users).values({ id: "web-user", email: "web-user@example.com" });
@@ -12,6 +12,10 @@ async function seedTurn() {
 
   return { conversationId: conversation.id, userMessageId: message.id };
 }
+
+beforeEach(async () => {
+  await resetTestDatabase();
+});
 
 describe("web search adapter", () => {
   beforeEach(() => {

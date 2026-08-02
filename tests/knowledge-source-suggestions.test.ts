@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { aiGatewayModels, aiUsageEvents, auditEvents, knowledgeCards, knowledgeCardSources, knowledgeSourceSuggestions, sources, userRoles, users, type UserRole } from "@/db/schema";
 
-import { testDb } from "./helpers/db";
+import { resetTestDatabase, testDb } from "./helpers/db";
 import { seedSourceCaptureVersion } from "./helpers/source-captures";
 
 const authMock = vi.fn();
@@ -97,7 +97,8 @@ function mockGatewayJson(content: string, usage = { prompt_tokens: 130, completi
 }
 
 describe("knowledge source suggestions", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await resetTestDatabase();
     authMock.mockReset();
   });
 

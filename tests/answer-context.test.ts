@@ -8,7 +8,7 @@ import type { KnowledgeSearchResult } from "../packages/database/src/knowledge-s
 import type { ContextPrioritySourceBundle } from "../packages/database/src/source-bundle";
 import { issueCsrfToken } from "@/server/csrf";
 
-import { testDb } from "./helpers/db";
+import { resetTestDatabase, testDb } from "./helpers/db";
 import { seedKnowledgeCardEvidence, seedSourceCaptureVersion } from "./helpers/source-captures";
 
 const legacyBffTransport = {
@@ -319,6 +319,10 @@ function mockWebSearch(result: { ok: true; results: unknown[] } | { ok: false; c
 
   return { searchWebForSourceBundle, captureWebSearchResults };
 }
+
+beforeEach(async () => {
+  await resetTestDatabase();
+});
 
 describe("answer context assembly", () => {
   afterEach(() => {
