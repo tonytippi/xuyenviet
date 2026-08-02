@@ -273,7 +273,14 @@ development_status:
   # and the authoritative admin-session repository; apps/admin owns host-only opaque
   # cookies plus its isolated credential signer and has no database access. Story 13.2
   # cannot start until Story 13.1 is done.
-  epic-13: in-progress
+  # 2026-08-01: Explicitly authorized final Epic 13 review of d301013..0fd1cb8
+  # completed Blind Hunter, Edge Case Hunter, and Acceptance Auditor synchronously
+  # with no actionable local findings. OAuth 429/5xx classification, release
+  # admission, identity/session/issuer isolation, private transport, exact-admin
+  # authorization, and selected-owner retirement were verified. Parallel test DB
+  # reset contention was environmental; isolated serial validation passed. External
+  # staging evidence remains deployment-owned.
+  epic-13: done
   # 2026-08-01: bmad-dev-auto completed implementation, bounded repair loops, and final synchronous Blind Hunter, Edge Case Hunter, and Acceptance Auditor review with no actionable local findings. Focused 5-file verification passed 81 tests; lint (0 errors, 5 pre-existing warnings), typecheck, clean build, admin container build, split-env Compose rendering, and diff check passed. Railway/private-network/OAuth/DNS/migration-readiness staging proof remains deployment-owned and is recorded in Story 13.1.
   # 2026-08-01: bmad-dev-auto repair aligned policy-free Admin Identity
   # admission with the API's shared 20260728.1 ceiling. The real handoff gate
