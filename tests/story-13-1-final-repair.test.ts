@@ -1,4 +1,4 @@
-import { ForbiddenException, UnauthorizedException } from "@nestjs/common";
+import { ForbiddenException, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -70,6 +70,38 @@ describe("Story 13.1 final identity proofs", () => {
     await expect(identityController(identities).completeOAuth("Bearer service", { code: "code", state: "state", transactionId: "tx" })).rejects.toBeInstanceOf(UnauthorizedException);
     expect(identities.resolveAdminRolesForGoogleAccount).toHaveBeenCalledWith("traveler-subject");
     expect(identities.createAdminSessionForGoogleAccount).not.toHaveBeenCalled();
+  });
+
+  test.each(["token", "userinfo"] as const)("classifies empty and non-JSON retryable Google %s responses as redacted 503s before parsing", async (stage) => {
+    process.env.XV_ADMIN_GOOGLE_CLIENT_ID = "client";
+    process.env.XV_ADMIN_GOOGLE_CLIENT_SECRET = "secret";
+    for (const [status, body] of [[429, ""], [500, "overloaded"], [503, "not json"]] as const) {
+      const identities = oauthIdentities();
+      vi.stubGlobal("fetch", vi.fn(stage === "token"
+        ? async () => new Response(body, { status })
+        : vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "provider-token" }), { status: 200 })).mockResolvedValueOnce(new Response(body, { status }))));
+      await expect(identityController(identities).completeOAuth("Bearer service", { code: "code", state: "state", transactionId: "tx" })).rejects.toSatisfy((error: unknown) =>
+        error instanceof ServiceUnavailableException && Boolean(error.getResponse()) && JSON.stringify(error.getResponse()) === JSON.stringify({ code: "internal_error" }));
+      expect(identities.resolveAdminRolesForGoogleAccount).not.toHaveBeenCalled();
+    }
+  });
+
+  test.each(["token", "userinfo"] as const)("preserves OAuth %s 4xx and malformed success responses as authentication denials", async (stage) => {
+    process.env.XV_ADMIN_GOOGLE_CLIENT_ID = "client";
+    process.env.XV_ADMIN_GOOGLE_CLIENT_SECRET = "secret";
+    for (const response of [
+      ...[400, 401, 403, 408].map((status) => new Response("invalid", { status })),
+      new Response(JSON.stringify({}), { status: 200 }),
+      new Response(JSON.stringify(stage === "token" ? { access_token: "" } : { sub: "" }), { status: 200 }),
+      new Response(JSON.stringify(stage === "token" ? { access_token: "   " } : { sub: "   " }), { status: 200 }),
+    ]) {
+      const identities = oauthIdentities();
+      vi.stubGlobal("fetch", vi.fn(stage === "token"
+        ? async () => response
+        : vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "provider-token" }), { status: 200 })).mockResolvedValueOnce(response)));
+      await expect(identityController(identities).completeOAuth("Bearer service", { code: "code", state: "state", transactionId: "tx" })).rejects.toBeInstanceOf(UnauthorizedException);
+      expect(identities.resolveAdminRolesForGoogleAccount).not.toHaveBeenCalled();
+    }
   });
 
   test("uses a host-only Lax transaction cookie and issues a distinct non-HttpOnly CSRF token cookie", () => {
@@ -291,6 +323,15 @@ describe("Story 13.1 BFF and API denial proofs", () => {
 
 function identityController(identities: Record<string, unknown>, schemaVersions: Record<string, unknown> = { hasCompatibleSchemaVersion: async () => true }, configValid = true, policy: undefined | null = undefined) {
   return new AdminIdentityController({ resolveAdminRolesForGoogleAccount: async () => ["operator"], ...identities } as never, "service", schemaVersions as never, configValid, policy);
+}
+
+function oauthIdentities() {
+  return {
+    consumeAdminOAuthTransaction: vi.fn(async () => ({ id: "tx", state: "state", codeVerifier: "verifier", callbackUrl: "https://admin.xuyenviet.app/api/auth/callback", expires: new Date(Date.now() + 60_000) })),
+    resolveAdminRolesForGoogleAccount: vi.fn(async () => ["operator"]),
+    createAdminSessionForGoogleAccount: vi.fn(async () => "session"),
+    resolveAdminHandoff: vi.fn(), revokeAdminSession: vi.fn(), purgeExpiredAdminOAuthTransactions: vi.fn(), createAdminOAuthTransaction: vi.fn(),
+  };
 }
 
 function files(path: string): string[] {

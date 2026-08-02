@@ -111,15 +111,17 @@ export class AdminIdentityController {
       const transaction = await this.identities.consumeAdminOAuthTransaction(body.transactionId, body.state);
       if (!transaction) throw new OAuthStateDeniedError();
       const tokenResponse = await googleRequest("https://oauth2.googleapis.com/token", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ code: body.code, client_id: this.google.clientId, client_secret: this.google.clientSecret, redirect_uri: transaction.callbackUrl, grant_type: "authorization_code", code_verifier: transaction.codeVerifier }) });
+      if (isRetryableGoogleResponse(tokenResponse)) throw new ServiceUnavailableException({ code: "internal_error" });
       const token: unknown = await tokenResponse.json().catch(() => null);
-      if (!tokenResponse.ok || !token || typeof token !== "object" || typeof (token as { access_token?: unknown }).access_token !== "string") throw this.denied();
+      if (!tokenResponse.ok || !token || typeof token !== "object" || !isNonEmptyString((token as { access_token?: unknown }).access_token)) throw this.denied();
       const profileResponse = await googleRequest("https://openidconnect.googleapis.com/v1/userinfo", { headers: { authorization: `Bearer ${(token as { access_token: string }).access_token}` } });
-       const profile: unknown = await profileResponse.json().catch(() => null);
-       if (!profileResponse.ok || !profile || typeof profile !== "object" || typeof (profile as { sub?: unknown }).sub !== "string") throw this.denied();
-       const subject = (profile as { sub: string }).sub;
-       const roles = await this.identities.resolveAdminRolesForGoogleAccount(subject);
-       if (!roles || !permitsAdminCapability(roles, "admin.workspace.read")) throw this.denied();
-       const sessionId = await this.identities.createAdminSessionForGoogleAccount(subject, new Date(Date.now() + 8 * 60 * 60_000));
+      if (isRetryableGoogleResponse(profileResponse)) throw new ServiceUnavailableException({ code: "internal_error" });
+      const profile: unknown = await profileResponse.json().catch(() => null);
+      if (!profileResponse.ok || !profile || typeof profile !== "object" || !isNonEmptyString((profile as { sub?: unknown }).sub)) throw this.denied();
+      const subject = (profile as { sub: string }).sub;
+      const roles = await this.identities.resolveAdminRolesForGoogleAccount(subject);
+      if (!roles || !permitsAdminCapability(roles, "admin.workspace.read")) throw this.denied();
+      const sessionId = await this.identities.createAdminSessionForGoogleAccount(subject, new Date(Date.now() + 8 * 60 * 60_000));
       if (!sessionId) throw this.denied();
       return { sessionId };
     } catch (error) {
@@ -200,6 +202,8 @@ class OAuthStateDeniedError extends Error {}
 function isUnauthorized(error: unknown): error is UnauthorizedException {
   return error instanceof UnauthorizedException || (typeof error === "object" && error !== null && "getStatus" in error && typeof error.getStatus === "function" && error.getStatus() === HttpStatus.UNAUTHORIZED);
 }
+function isRetryableGoogleResponse(response: Response): boolean { return response.status === HttpStatus.TOO_MANY_REQUESTS || response.status >= HttpStatus.INTERNAL_SERVER_ERROR; }
+function isNonEmptyString(value: unknown): value is string { return typeof value === "string" && value.trim().length > 0; }
 function validSessionId(value: unknown): value is string { return typeof value === "string" && value.length > 0 && value.length <= 256 && value.trim() === value; }
 function isAdminIdentityRepository(value: ApiIdentityRepository): value is AdminIdentityRepository { return "resolveAdminHandoff" in value && "revokeAdminSession" in value && "purgeExpiredAdminOAuthTransactions" in value; }
 function isAdminCallbackUrl(value: string): boolean { try { const url = new URL(value); return url.origin === "https://admin.xuyenviet.app" && !url.username && !url.password && url.pathname === "/api/auth/callback" && !url.search && !url.hash; } catch { return false; } }
