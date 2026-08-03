@@ -4,7 +4,7 @@
 
 ## Goal
 
-Make traveler web and the separate admin application presentation-only clients of the versioned NestJS API. NestJS becomes the sole owner of Google OAuth, opaque browser sessions, CSRF admission, request-principal construction, and migrated domain transport, eliminating the duplicate Auth.js/BFF/root-backend ownership that blocks a safe, maintainable launch.
+Make traveler web and the separately deployed admin application presentation-only clients of the versioned NestJS API. NestJS becomes the sole Google OAuth, opaque browser-session, CSRF, request-principal, and migrated domain-transport owner. This eliminates duplicated Auth.js, BFF, root database, and legacy admin ownership while preserving protected product behavior and producing the operational evidence required before public launch.
 
 ## Stories
 
@@ -17,38 +17,38 @@ Make traveler web and the separate admin application presentation-only clients o
 
 ## Requirements & Constraints
 
-- Browser clients call documented `/v1` NestJS APIs directly using only NestJS-managed secure session cookies. They never receive database credentials, internal service credentials, browser tokens, BFF credentials, or domain writers.
-- NestJS authorizes every protected read and command from a live opaque server-side session and current authorization state, producing the existing domain-neutral `RequestPrincipal` before controller or domain logic runs.
-- OAuth callback admission requires a valid, non-expired, one-time transaction and redirects only to allowlisted application URLs. Safe responses must not reveal provider tokens, cookie values, session IDs, signing material, or internal error details.
-- Sessions use a 30-day sliding expiry and renew only when fewer than seven days remain. Logout revokes the server session and clears its cookie; role changes and account invalidation invalidate prior authorization through current authorization/session checks.
-- State-changing browser requests require an explicit allowed origin and valid session-bound CSRF proof. Credentialed CORS is never wildcarded and must not expose authentication internals.
-- Preserve versioned API contracts, OpenAPI, validation, owner-scoped authorization, safe errors with correlation IDs and safe field violations, stable ordering/pagination where applicable, and documented session/CSRF admission semantics.
-- AI Ask keeps its direct API NDJSON contract: `preparing`, `delta`, `done`, and `error`, abort handling, and atomic terminal persistence. No BFF proxy or legacy fallback remains for a migrated scope.
-- Every aggregate command has exactly one transport writer. A migration may compare reads only outside production; it must never dual-write or affect the selected browser response.
-- The cutover is approved as a clean break: legacy Auth.js sessions are not adopted, and users authenticate once through NestJS after deployment. If durable or overlapping data invalidates clean-break assumptions, an approved expand-migrate-contract plan is required instead.
-- Keep PostgreSQL as the product, job, and session state plane and Drizzle as migration owner. Preserve worker claim, lease, fencing, idempotency, and isolation protocols.
-- No new Next.js route handler, server action, BFF credential/client, transport selector, shadow read, or direct database access may become a domain capability owner. Root traveler and admin applications contain UI, rendering, and typed direct API clients only after their cutovers.
+- Browser clients call documented `/v1` NestJS APIs directly with NestJS-managed secure session cookies only. They never receive database credentials, internal service credentials, BFF credentials, provider tokens, session IDs, or signing material.
+- Protected reads and commands must be authorized with a current, domain-neutral `RequestPrincipal`; requests that are missing, expired, revoked, malformed, cross-origin, stale, or unauthorized must fail through the safe API envelope before domain logic runs.
+- API errors must provide a machine-readable code, safe message, correlation/request ID, and applicable safe field violations without sensitive implementation details. Versioned health, version, protected capability, validation, ownership, stable-ordering, pagination, streaming, and browser-session/CSRF contracts must be documented.
+- Preserve exactly one writer for every aggregate command during each cutover. A migrated capability is incomplete until the browser or admin client uses the direct API, authorization and ownership integration coverage exists, and the matching Next.js route handler, server action, BFF adapter, or direct database writer is removed. Never dual-write product state or retain a legacy fallback.
+- Preserve AI Ask NDJSON `preparing`, `delta`, `done`, and `error` events, abort behavior, and atomic terminal persistence. Direct-stream retry/reconnect reuses the original idempotency key rather than submitting ambiguous work again.
+- Story 14.2 includes the traveler commands rendered by the AI Ask shell: conversation/trip creation and deletion, proposal apply/dismiss including annotation-bound actions, answer usefulness feedback, and visible referral attribution. Preserve owner-scoped deletion, proposal locks/fences/expiry/audit/history, annotation binding, and feedback semantics.
+- Authenticated product behavior remains unchanged: Google login gates AI Ask; public entry remains reachable; admin access requires current role authorization; referral attribution remains silent; existing legacy Auth.js sessions are not adopted, so users reauthenticate once through NestJS.
+- The separate admin application must use protected direct APIs and retain its independent origin and release lifecycle. Root `/admin` routes and actions are retired only after replacement workflows are live.
+- API, worker, traveler web, admin app, and migration workloads remain independently deployable with least-privilege configuration and health contracts. Staging/production isolate credentials, databases, OAuth configuration, and observability. Migrations run before dependent traffic.
+- Public launch requires direct-API topology, OAuth/session, CSRF/origin, one-writer, rollback, worker readiness, monitoring, backup/restore, and AI-stream concurrency evidence. Clean-break schema changes are allowed only while data is disposable; durable or overlapping data requires an approved expand-migrate-contract plan.
 
 ## Technical Decisions
 
-- NestJS is the sole Google OAuth and browser-session authority. Its secure opaque session cookie is `HttpOnly`, `Secure`, host-only where deployment permits, `Path=/`, and `SameSite=Lax` by default.
-- Cookie parsing and session implementation are transport concerns only. Controllers and domain policy consume `RequestPrincipal`, never cookie data or Auth.js serialization.
-- Use same-site ingress for the initial cutover: traveler `/v1/*` and `/auth/*` route to NestJS while remaining routes go to the traveler presentation app. The ingress terminates/routs traffic only; it contains no authentication or domain behavior and is not a BFF. The separately deployed admin origin uses the direct API through the allowlisted origin policy.
-- Maintain the modular-monolith boundaries: domain policy/use cases in `@xuyenviet/domain`, PostgreSQL repositories/migrations in `@xuyenviet/database`, schemas in `@xuyenviet/contracts`, and HTTP adapters in `apps/api`. `apps/api`, `apps/worker`, and `apps/admin` must not import root `src/` business/domain code.
-- A capability is complete only when its presentation client uses NestJS directly, it has one command writer, API integration coverage proves authorization and ownership, and its matching Next route/server action/BFF adapter/direct-database owner is removed in the same story.
-- Root `/admin` workflows move to the separately deployed `apps/admin` and protected `/v1/admin` APIs. Auth.js, BFF runtime/configuration, legacy Next transport, root domain writers, and legacy `/admin` retire only after an inventory proves no live capability owner remains.
-- Record safe correlation telemetry for session admission, API, Worker, and provider activity, including capability, principal class, result, latency, and safe operational identifiers.
+- NestJS is the only Google OAuth and browser-session authority. It resolves an opaque session ID from an HttpOnly, secure, host-only-where-possible cookie into a `RequestPrincipal` only after verifying session expiry/revocation, user state, current roles, and authorization version. Controllers and domain code consume the principal, never cookie data or Auth.js serialization.
+- Browser sessions use a 30-day sliding window and renew only on an admitted active request within the final seven days. Logout revokes the server-side session and clears its cookie; role changes or account invalidation invalidate prior authorization state.
+- State-changing browser requests require session-bound CSRF proof and explicitly allowlisted origins. Credentialed CORS never uses a wildcard. Same-site ingress routes traveler `/v1/*` and `/auth/*` traffic to NestJS, performs transport only, and is not a BFF.
+- The root Next.js traveler application and `apps/admin` contain UI, route rendering, and typed API clients only after a capability cutover. New domain policy/use cases belong in `@xuyenviet/domain`, PostgreSQL repositories in `@xuyenviet/database`, request/response schemas in `@xuyenviet/contracts`, and HTTP adapters in `apps/api`.
+- Do not add Next.js domain route handlers, server-action writers, BFF credentials or clients, transport selectors, shadow reads, or direct database access as new capability owners. `apps/api`, `apps/worker`, and `apps/admin` must not import root `src/` business/domain code.
+- Existing API, Worker, shared contracts/domain/database, safe errors, correlation, ownership checks, command idempotency, aggregate fences, outbox dispatch, and worker isolation remain mandatory foundations. Worker behavior continues to use PostgreSQL job, claim, lease, fencing, and idempotency protocols.
 
 ## UX & Interaction Patterns
 
-- Preserve Vietnamese sign-in, sign-out, session-expiry, AI Ask reconnect, and safe-error recovery behavior while replacing server-side session resolution with direct API session/read clients.
-- Unauthenticated, expired, revoked, malformed, cross-origin, and unauthorized requests recover through safe API responses without exposing OAuth, session, CSRF, provider, or database details.
-- Existing visual, responsive, accessibility, ownership, and shell-state requirements remain valid; this epic changes session and transport ownership, not product interaction scope.
+- Keep the Vietnamese public sign-in path, protected-route gate, post-auth continuation, account sign-out, and silent referral experience. OAuth failures and session expiry/revocation use safe recovery copy and expose no provider, session, CSRF, transport, database, or internal error details.
+- Preserve the responsive AI Ask shell and all existing traveler workspace behavior through direct APIs. Keep owner-scoped command interactions and accessible destructive confirmations intact.
+- Streamed answers remain visibly pending until final persistence, announce progress/completion through `aria-live`, retain the draft on recoverable failure, and never imply a partial response was saved. `refresh_required` clears pending treatment and asks the traveler to refresh rather than showing a saved partial answer.
+- Project stable API safe errors to Vietnamese recovery copy. Do not reveal tokens, provider payloads, SQL, stack traces, or internal diagnostics.
 
 ## Cross-Story Dependencies
 
-- Story 14.1 is the prerequisite for every direct browser API request. Complete it before Stories 14.2-14.4.
-- Migrate vertical capabilities in order: AI Ask and traveler shell reads (14.2), traveler commands (14.3), then remaining admin workflows (14.4). Delete matching legacy/BFF owners with each slice.
-- Story 14.5 follows the capability cutovers and requires an inventory proving zero remaining live legacy transport owners.
-- Story 14.6 follows the cutover and validates ingress/origin/cookie/CSRF topology, migration-before-traffic, one-writer and retirement inventory, rollback, OAuth smoke, Worker readiness, monitoring, backup/restore, and connection-pool and AI-stream concurrency evidence.
-- Completed Epics 9-13 remain evidence of internal API, Worker, and separate-admin foundations only. Their Auth.js/BFF transport decisions are superseded by the approved 2026-08-03 direct API course correction and are not direct-browser implementation evidence.
+- Story 14.1 is the prerequisite for all direct browser requests and establishes the OAuth, session, CSRF, origin, and principal boundary.
+- Story 14.2 depends on Story 14.1 and performs the atomic traveler AI Ask, shell-read, and currently rendered command cutover; it retires traveler Auth.js only after inventory confirms no traveler caller remains. Root admin and `apps/admin` paths stay out of this slice.
+- Story 14.3 follows the authenticated traveler baseline to migrate any remaining traveler command slices and remove their root writers.
+- Story 14.4 completes the separate admin direct-API migration and retires matching root `/admin` owners.
+- Story 14.5 can remove remaining Auth.js, BFF, and legacy transport only after all capability inventories prove no live owner remains.
+- Story 14.6 follows the completed cutovers and owns deployment topology, migration ordering, rollback, legacy-retirement, worker, and operations evidence. Historical Epics 9-13 remain foundation evidence only; their BFF/Auth.js transport decisions are superseded and do not satisfy direct-browser requirements.

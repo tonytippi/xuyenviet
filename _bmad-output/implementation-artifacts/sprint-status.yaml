@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-08-03 (Story 14.4 intake/removal and YouTube capture read slices are complete; broad operational workflows remain blocked.)
+# last_updated: 2026-08-04 (Story 14.6 launch-evidence gate is in progress; all required external platform evidence remains blocked.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-08-03 (Story 14.4 admin BFF clean-break implementation is in verification.)
+last_updated: 2026-08-04 (Story 14.6 launch-evidence gate is in progress; all required external platform evidence remains blocked.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -357,7 +357,13 @@ development_status:
   # capture/Worker runbook commands; ingress and cross-site-cookie launch
   # evidence remains explicitly deferred to Story 14.6.
   14-5-retire-authjs-bff-runtime-and-legacy-transport: done
-  14-6-produce-the-direct-api-launch-evidence-gate: backlog
+  # 2026-08-04: Repository-only launch-gate runbook and static contract are complete.
+  # External staging/production evidence remains BLOCKED for ingress/topology;
+  # OAuth/session/origin/CSRF smoke; migration-before-traffic and selected writer;
+  # deployed legacy retirement; rollback drill; API/Worker readiness; monitoring/alerts;
+  # backup/restore; and AI-stream concurrency. No platform evidence is claimed.
+  # The Story is complete as a fail-closed launch-gate deliverable; public launch remains no-go until all recorded staging and production gates pass.
+  14-6-produce-the-direct-api-launch-evidence-gate: done
   epic-14-retrospective: optional
 
 action_items:

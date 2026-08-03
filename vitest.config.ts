@@ -13,6 +13,7 @@ const unitTests = [
   "tests/admin-facebook-capture-contract.test.ts",
   "tests/knowledge-state.test.ts",
   "tests/admin-operator-guide.test.ts",
+  "tests/direct-api-launch-evidence.test.ts",
   "tests/traveler-ui-foundation.test.ts",
   "tests/legacy-auth-retirement.test.ts",
   "tests/trip-home.test.ts",
