@@ -50,19 +50,19 @@ flowchart LR
 
 ## Adopted Decisions
 
-### AD-1: MVP Runtime Is A Next.js Modular Monolith
+### AD-1: MVP Runtime Is A Modular Monolith With Presentation-Only Next.js Apps
 
-Binds: UI, route handlers, server actions, admin, chat, retrieval orchestration, and beta operations live in one TypeScript application.
+Binds: traveler/admin presentation, NestJS domain API, Worker runtime, and shared TypeScript domain/database/contracts packages to one coherent modular monolith and PostgreSQL data plane.
 
 Prevents: independent chat/admin/retrieval implementations choosing incompatible service contracts or release paths.
 
 Rule: Build feature modules with server-side interfaces; do not split into services for MVP.
 
-Rule: Keep the repository as a root-level Next.js app for the MVP. Do not move to an `apps/web` or multi-app workspace structure for future mobile support unless a later architecture or correct-course decision explicitly approves that restructure.
+Rule: Root Next.js remains the traveler presentation application. It must not own domain route handlers, server-action writers, database access, Auth.js sessions, or BFF transport after the direct API cutover.
 
 Rule: Treat a future mobile app as a new client channel over stable server/API boundaries, not a reason to extract shared packages or change deployable shape during the web MVP.
 
-Seed: create-next-app TypeScript, App Router, React Server Components where useful, route handlers/server actions for mutations.
+Seed: Next.js App Router presentation clients, NestJS versioned API, dedicated Worker, and typed direct API clients.
 
 ### AD-2: PostgreSQL Owns Product State And Retrieval State
 
@@ -82,7 +82,7 @@ Prevents: ad hoc SQL drift across AI Ask, admin, retrieval, and evaluation work.
 
 Rule: All persistent tables and indexes are introduced through migrations; raw SQL is allowed only inside reviewed migration/query helpers for pgvector/full-text operations.
 
-### AD-4: Auth Is Public Sign-In Plus Google OAuth And Server-Side Roles
+### AD-4: NestJS Auth Is Public Sign-In Plus Google OAuth And Server-Side Roles
 
 Binds: public sign-in access, required Google OAuth before AI Ask, and server-side role checks for admin/operator capabilities.
 
@@ -90,7 +90,7 @@ Prevents: client-only authorization, separate admin auth, or accidental operator
 
 Rule: Public entry/sign-in routes may be reachable without an allowlist; AI Ask routes and actions require an authenticated session; every admin/operator route/action validates session and role before reading or mutating protected data.
 
-Seed: Auth.js Google OAuth with PostgreSQL-backed sessions/accounts. [ASSUMPTION]
+Rule: NestJS owns Google OAuth, opaque PostgreSQL session lifecycle, cookie issuance/revocation, CSRF validation, and current-principal resolution. Browser session cookies are secure, HttpOnly, host-only where deployment permits, and never contain a JWT, user ID, role, provider token, or database credential.
 
 ### AD-5: Feature Ownership Boundaries Are Explicit
 
@@ -545,6 +545,20 @@ Rule: Every readable Facebook or YouTube capture atomically appends one immutabl
 Rule: New UI actions, server actions, scripts, and scheduled services must not enqueue `knowledge_extraction_jobs` for a capture version. `knowledge_extraction_jobs` and `knowledge:extraction-worker` are historical compatibility only, disabled in the routine production topology. A time-bounded migration/recovery exception requires an explicit operator-approved procedure, reconciliation against the canonical job, and no auto-approval of cards from that capture version.
 
 Rule: `source_capture_versions` are immutable content-hashed capture identities. A source's current-capture pointer selects the version eligible for processing; a canonical ingestion job references that exact version. Capture review queues are operator inspection/recapture surfaces, not a second processing authority.
+
+### AD-33: Direct Browser API And NestJS-Owned Session Authority
+
+Binds: browser authentication, direct API admission, session lifecycle, CSRF, browser-origin policy, request principal construction, and legacy BFF/Auth.js retirement.
+
+Prevents: a second authentication authority in Next.js, browser-specific BFF credentials, domain code coupled to cookie parsing, browser token storage, and a capability retaining parallel Next/BFF/API writers.
+
+Rule: NestJS is the sole Google OAuth and browser-session authority. It resolves a valid opaque session ID from an HttpOnly secure cookie into a current `RequestPrincipal` only after checking session expiry/revocation, user state, current roles, and authorization version. Domain policy and controllers consume that principal, never cookie data or Auth.js serialization.
+
+Rule: Browser session expiry uses a 30-day sliding window. NestJS renews a valid active session only within the last seven days of that window. Logout revokes the session and clears its cookie. The approved cutover is a clean break: existing Auth.js sessions are not adopted, so users authenticate once after deployment.
+
+Rule: Browser mutations require NestJS CSRF admission. Browser origins are explicitly allowlisted, credentialed CORS never uses a wildcard, and same-site ingress routes traveler `/v1/*` and `/auth/*` traffic to NestJS. The ingress contains no authentication or domain behavior and is not a BFF.
+
+Rule: A capability is direct-API complete only when its presentation client calls NestJS, it has one command writer, and its matching Next route/server action/BFF adapter/direct database owner is removed in the same cutover. Read-only parity comparison may run only outside production and never changes the selected response or writes state.
 
 ## Shared Data Contracts
 

@@ -2,7 +2,7 @@
 title: XuyenViet AI Travel Information MVP PRD
 status: final
 created: 2026-07-04
-updated: 2026-07-30
+updated: 2026-08-03
 ---
 
 # XuyenViet AI Travel Information MVP PRD
@@ -243,6 +243,16 @@ Internal owner or future small operations team member who collects travel inform
 - FR-49: The system shall manage AI Gateway model records with gateway model name, intended purpose, supported input/output capabilities, active status, and input/output/cache pricing metadata.
 - FR-49A: Exact administrators shall be able to create, update, set one eligible active default per purpose, and archive AI Gateway model records without deletion. Each pricing snapshot shall store currency, version, effective timestamp, and non-negative input, output, and cache prices per fixed 1,000,000 tokens using exact integer micros. Archived records shall not be defaults, and credentials and provider payloads shall not be exposed.
 - FR-50: The system shall use configured model pricing metadata to estimate AI usage cost when provider usage token metadata is available, without creating credit balance or billing behavior in MVP.
+- FR-51: The system shall expose versioned domain API contracts for traveler web, operator app, and future mobile clients without client dependence on Next.js internals or Auth.js session serialization.
+- FR-52: Traveler and operator browser clients shall call documented versioned NestJS APIs directly using only NestJS-managed secure session cookies; they shall receive neither database credentials nor internal service credentials.
+- FR-53: The system shall provide a separately deployed operator/admin application with its own origin and release lifecycle that uses the protected API without database credentials or direct domain imports.
+- FR-54: NestJS shall authorize every protected API read and command with a domain-neutral request principal resolved from a live opaque server-side session and current authorization state.
+- FR-55: The system shall provide a stable API error contract with machine-readable code, safe message, request/correlation ID, and applicable safe field violations without sensitive internals.
+- FR-56: The system shall document versioned health/version and protected-capability API contracts, including validation, authorization, ownership, pagination/stable ordering, streaming semantics where applicable, and browser-session/CSRF admission requirements.
+- FR-57: The system shall run continuous background work in a dedicated worker runtime and bounded sweeps as scheduled one-shot commands using existing PostgreSQL job, claim, lease, fencing, and idempotency protocols.
+- FR-58: The system shall preserve one writer per aggregate command during migration; route each request to exactly one transport owner and never dual-write product state.
+- FR-59: The system shall move AI Ask streaming to the versioned API while preserving `preparing`, `delta`, `done`, and `error` NDJSON events, abort behavior, and atomic terminal persistence.
+- FR-60: The system shall retire Auth.js, legacy Next.js domain route handlers, server-action writers, BFF transport, and the legacy `/admin` operational surface before public launch.
 
 ## 9. Non-Functional Requirements
 
@@ -258,6 +268,13 @@ Internal owner or future small operations team member who collects travel inform
 - NFR-9A: Source ingestion shall make bounded progress through large source material without imposing a maximum accepted-fact quota. Retry, interruption, duplicate delivery, and supersession shall not duplicate candidates or permit obsolete work to change canonical knowledge.
 - NFR-9B: When a source is withdrawn, inaccessible, or removed, the system shall atomically retire its traveler-eligible evidence, re-evaluate every dependent card against remaining eligible support, and disable any now-ineligible search projection before completion. Retrieval shall recheck current card, evidence, source, and capture eligibility and fail closed while indexing catches up.
 - NFR-10: Trip Project reads and mutations, including primary-conversation access, structured plan data, proposals, and history, shall remain owner-scoped until a separately approved collaboration model exists.
+- NFR-12: API, worker, traveler web, operator app, and migration workloads deploy independently to staging with least-privilege configuration and health contracts; migrations run before dependent traffic.
+- NFR-13: Liveness verifies process operation; readiness verifies assigned configuration, database, and critical dependencies. Worker shutdown stops claims and safely completes or releases leased work.
+- NFR-14: Correlation IDs and safe structured telemetry cover browser session admission, API, worker, and provider operations, including capability, principal class, result, latency, and safe operational identifiers.
+- NFR-15: Browser-to-API and database traffic remain private and origin-controlled; staging and production use isolated credentials, databases, OAuth configuration, and observability projects.
+- NFR-16: Use clean-break migrations only while data is disposable; durable or overlapping runtimes require approved expand-migrate-contract plans and non-destructive schema rollback behavior.
+- NFR-17: Before retiring a legacy worker loop, its replacement dashboard and runbook demonstrate stable lag, retry, lease recovery, duplicate-poller, and restart behavior.
+- NFR-18: Before public launch, approve Railway ownership, domains/DNS/CSP/OAuth callbacks, secrets, backup/restore, monitoring, alerting, and on-call; pass connection-pool, AI-stream concurrency, and backup-restore tests.
 - NFR-11: Applying a Trip Change Proposal shall validate the proposal belongs to the selected Trip Project, is still applicable, and is authorized for the owner before writing an auditable change.
 
 ## 10. MVP Product Contracts

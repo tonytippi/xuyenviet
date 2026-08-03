@@ -25,14 +25,14 @@ _This file contains critical rules and patterns that AI agents must follow when 
 ## Technology Stack & Versions
 
 - Package manager: pnpm 10.26.2. Use pnpm scripts and keep `pnpm-lock.yaml` authoritative.
-- Runtime/app: Next.js 15.3.5 App Router in a root-level `src/` project.
+- Runtime/apps: Next.js 15.3.5 presentation apps at root `src/` and `apps/admin`, NestJS API at `apps/api`, and Worker at `apps/worker`.
 - UI: React 19.1.0 and React DOM 19.1.0.
 - Language: TypeScript 5.8.3 with `strict: true`, `allowJs: false`, `moduleResolution: "bundler"`, and `@/* -> ./src/*`.
 - Styling: Tailwind CSS 4.1.11 through `@tailwindcss/postcss`; global tokens live in `src/app/globals.css`.
 - Linting: ESLint 9.30.1 flat config, extending `next/core-web-vitals` and `next/typescript`.
 - Data: PostgreSQL is the owned product/retrieval data plane; Drizzle ORM 0.44.5 and Drizzle Kit 0.31.4 own schema and migrations.
 - DB driver: `@neondatabase/serverless` 1.0.2 is installed; keep provider-specific behavior behind config/adapters until hosting is final.
-- Server boundaries: use `server-only` 0.0.1 for server-only auth, mutation, data, AI, retrieval, and admin helpers.
+- Server boundaries: NestJS owns OAuth, opaque browser sessions, direct API admission, and domain HTTP transport. `server-only` is permitted only for Next presentation concerns, never as a new domain/auth/data owner.
 - Quality scripts: `pnpm lint`, `pnpm typecheck`, and `pnpm build` are the baseline checks.
 
 ## Critical Implementation Rules
@@ -50,10 +50,9 @@ _This file contains critical rules and patterns that AI agents must follow when 
 ### Framework-Specific Rules
 
 - Use Next.js App Router conventions under `src/app/`. Prefer server components by default; add `"use client"` only when browser interactivity requires it.
-- Public routes may render without auth, but AI Ask and admin/operator routes/actions must resolve auth server-side before reading or mutating protected data.
+- Public routes may render without auth. Protected data and mutations are authorized by NestJS through `RequestPrincipal`; Next.js UI uses typed direct API clients and contains no domain writer.
 - UI and route handlers should call feature-owned server entrypoints, not mutate another module's aggregate directly.
-- Keep the MVP as one Next.js modular monolith. Do not split chat, admin, retrieval, auth, or AI orchestration into separate services.
-- Keep the current root-level Next.js project structure for the web MVP. Do not introduce an `apps/web` monorepo layout, `packages/*` extraction, or shared workspace setup for future mobile support unless a later architecture or correct-course decision explicitly approves that restructure.
+- Keep the MVP as one modular monolith with presentation apps, NestJS API, Worker, and existing shared packages. Do not add independently deployed domain services or new shared packages without a current need.
 - Preserve Vietnamese-first UX. User-facing copy should use Vietnamese diacritics, `html lang="vi"`, and readable mobile/desktop layouts.
 - Preserve current visual direction unless a UX story changes it: map-paper utility feel, route green, guide amber, no generic travel gradients, no map-first UI.
 - Do not add booking, payments, rewards, credits, Google Maps, affiliate, partner transaction, or referral reward UI. These are PRD non-goals for MVP.
@@ -74,8 +73,7 @@ _This file contains critical rules and patterns that AI agents must follow when 
 ### Code Quality & Style Rules
 
 - Keep app code under `src/`; keep BMad artifacts under `_bmad-output/` and do not move planning/implementation documents into app folders.
-- Use feature folders as ownership boundaries: `auth`, `chat-trips`, `admin`, `knowledge`, `retrieval`, `search`, `ai`, `usage`, `referrals`, `audit`, and `feedback`.
-- Add code in the owning feature/module first. Shared helpers belong in `src/server/` only when they are truly cross-cutting and server-only.
+- Use existing workspace ownership boundaries: API HTTP/auth in `apps/api`, policies/use cases in `packages/domain`, PostgreSQL repositories in `packages/database`, contracts in `packages/contracts`, Worker adapters in `apps/worker`/`packages/worker-domain`, and UI in root `src` or `apps/admin`.
 - Keep comments rare and useful. Explain architectural or security constraints, not obvious assignments.
 - Keep public copy Vietnamese-first. Do not strip diacritics.
 - Preserve accessibility basics: keyboard focus, readable contrast, visible labels, mobile widths, and no color-only status communication.
@@ -95,7 +93,7 @@ _This file contains critical rules and patterns that AI agents must follow when 
 
 ### Critical Don't-Miss Rules
 
-- Do not implement Google OAuth before the Auth.js story owns it. Story 1.2 may gate routes and present sign-in entry, but Story 1.3 owns real Google Login.
+- Do not add Auth.js, BFF credentials, Next route-handler domain ownership, server-action writers, or direct database imports to presentation applications. Story 14.1 owns NestJS Google OAuth and opaque browser sessions.
 - Do not make AI calls for unauthenticated users, invalid submissions, or blocked routes. No conversation, context, retrieval, usage, or provider call should be created in those paths.
 - Do not treat web search, Facebook, copied posts, or image-derived facts as approved knowledge. They remain unverified until operator approval.
 - Do not expose `raw_source_material`, operator-only notes, provider payloads, secrets, or admin controls to normal travelers.

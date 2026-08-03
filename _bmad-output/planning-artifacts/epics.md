@@ -118,15 +118,15 @@ FR-48: Capture valid sign-in referral attribution without rewards, rankings, pay
 FR-49: Manage AI Gateway model records with name, purpose, capabilities, active status, and input/output/cache pricing.
 FR-50: Estimate usage cost from configured pricing and available provider token metadata without billing behavior.
 FR-51: Expose versioned domain API contracts for traveler web, operator app, and future mobile clients without client dependence on Next.js internals or Auth.js session serialization.
-FR-52: Keep the traveler browser behind the Next.js BFF; do not give it an internal API credential or allow it to call the private domain API directly.
+FR-52: Let traveler and operator browser clients call documented versioned NestJS APIs directly using only NestJS-managed secure session cookies; never give them database credentials or internal service credentials.
 FR-53: Provide a separately deployed operator/admin application with its own origin and release lifecycle that uses the protected API without database credentials or direct domain imports.
-FR-54: Authorize every protected API read and command with a domain-neutral request principal mapped from short-lived, audience-scoped BFF credentials.
+FR-54: Authorize every protected API read and command with a domain-neutral request principal resolved by NestJS from a live opaque server-side session and current authorization state.
 FR-55: Provide a stable API error contract with machine-readable code, safe message, request/correlation ID, and applicable safe field violations without sensitive internals.
 FR-56: Document versioned health/version and protected-capability API contracts, including validation, authorization, ownership, pagination/stable ordering, and streaming semantics where applicable.
 FR-57: Run continuous background work in a dedicated worker runtime and bounded sweeps as scheduled one-shot commands using existing PostgreSQL job, claim, lease, fencing, and idempotency protocols.
 FR-58: Preserve one writer per aggregate command during migration; route each request to exactly one transport owner and never dual-write product state.
 FR-59: Move AI Ask streaming to the versioned API while preserving `preparing`, `delta`, `done`, and `error` NDJSON events, abort behavior, and atomic terminal persistence.
-FR-60: Retire legacy Next.js domain route handlers, server-action writers, and the legacy `/admin` operational surface before public launch.
+FR-60: Retire Auth.js, BFF transport, legacy Next.js domain route handlers, server-action writers, and the legacy `/admin` operational surface before public launch.
 
 ### NonFunctional Requirements
 
@@ -143,8 +143,8 @@ NFR-10: Trip Project reads and mutations, including primary-conversation access,
 NFR-11: Applying a Trip Change Proposal validates the proposal belongs to the selected Trip Project, is still applicable, and is authorized for the owner before writing an auditable change.
 NFR-12: API, worker, traveler web, operator app, and migration workloads deploy independently to staging with least-privilege configuration and health contracts; migrations run before dependent traffic.
 NFR-13: Liveness verifies process operation; readiness verifies assigned configuration, database, and critical dependencies. Worker shutdown stops claims and safely completes or releases leased work.
-NFR-14: Correlation IDs and safe structured telemetry cover BFF, API, worker, and provider operations, including capability, principal class, result, latency, and safe operational identifiers.
-NFR-15: Web/admin-to-API and database traffic remain private; staging and production use isolated credentials, databases, OAuth configuration, API audiences, and observability projects.
+NFR-14: Correlation IDs and safe structured telemetry cover browser session admission, API, worker, and provider operations, including capability, principal class, result, latency, and safe operational identifiers.
+NFR-15: Browser-to-API and database traffic remain private and origin-controlled; staging and production use isolated credentials, databases, OAuth configuration, and observability projects.
 NFR-16: Use clean-break migrations only while data is disposable; durable or overlapping runtimes require approved expand-migrate-contract plans and non-destructive schema rollback behavior.
 NFR-17: Before retiring a legacy worker loop, its replacement dashboard and runbook demonstrate stable lag, retry, lease recovery, duplicate-poller, and restart behavior.
 NFR-18: Before public launch, approve Railway ownership, domains/DNS/CSP/OAuth callbacks, secrets, backup/restore, monitoring, alerting, and on-call; pass connection-pool, AI-stream concurrency, and backup-restore tests.
@@ -217,9 +217,9 @@ UX-DR24: Referral attribution is silent and introduces no reward/credit/ranking/
 
 ### Architecture Delta Requirements (2026-07-28)
 
-- ADR-32-1: Web and admin BFFs mint distinct ES256, five-minute, `api.railway.internal` audience credentials only after validating their host-only Auth.js sessions; Nest creates `RequestPrincipal` only after signature, issuer, audience, clock, token ID, live session, subject, and authorization-version validation.
+- ADR-33: NestJS owns Google OAuth, opaque PostgreSQL sessions, session cookie lifecycle, CSRF validation, allowed browser origins, and `RequestPrincipal` normalization. Browser applications contain no BFF credential, Auth.js session authority, or domain writer.
 - ADR-32-2: `user_roles` is authoritative. A one-shot audited `INITIAL_ADMIN_EMAIL` bootstrap may create the first admin only when none exists; subsequent role changes are Admin domain commands that audit, increment authorization version, and cannot revoke the last active admin.
-- ADR-32-3: The private API is bearer-only and sends no CORS allow-origin response. Browsers never call it; BFF cookie-authenticated mutations retain CSRF protection. BFF key rotation supports only active plus bounded previous `kid` verification.
+- ADR-33-1: Browser requests call NestJS directly using a secure HttpOnly opaque session cookie. NestJS validates expiry, revocation, user state, current roles, authorization version, CSRF for mutations, and an explicit credentialed-origin policy before dispatching a principal.
 - ADR-32-4: AI Ask owns a 24-hour, scope-unique command ledger keyed by owner, conversation or Trip Project scope, and an `Idempotency-Key` of 16-128 URL-safe ASCII characters. Reused keys with a changed normalized-payload digest fail safely; identical pending and terminal commands return their persisted state without another provider call.
 - ADR-32-5: AI Ask command creation captures conversation lifecycle and Trip Project aggregate fences under owner locks. Final message, provenance, usage, source-bundle, annotation, and proposal effects persist atomically only while the captured fence holds; a failed fence produces a safe `discarded`/`refresh_required` terminal result and no visible partial state.
 - ADR-32-6: Durable follow-up work uses a PostgreSQL transactional `domain_outbox` with versioned bounded payloads, deterministic dedupe, `FOR UPDATE SKIP LOCKED` leasing/fencing, compare-and-swap acknowledgement, bounded retry, safe terminal failures, and owner-fence validation before every write.
@@ -313,9 +313,9 @@ FR-50: Epic 4 - Internal cost estimation.
 
 ### Architecture Delta Coverage Map (2026-07-28)
 
-ADR-32-1: Epic 9 - Private BFF-to-API identity and request-principal validation.
+ADR-33: Epic 14 - Direct browser authentication/session authority and principal validation.
 ADR-32-2: Epic 9 - Authoritative roles, initial-admin bootstrap, and safe role changes.
-ADR-32-3: Epic 9 - Private bearer-only API and BFF security boundary.
+ADR-33-1: Epic 14 - Direct browser API security boundary.
 ADR-32-4: Epic 10 - Idempotent AI Ask command handling.
 ADR-32-5: Epic 10 - Fenced terminal AI Ask persistence.
 ADR-32-6: Epic 10 - Durable asynchronous AI Ask follow-up work.
@@ -1386,7 +1386,7 @@ So that the API-first boundary is proven by behavior rather than only by credent
 **When** its migration flag routes a request
 **Then** exactly one transport owner accepts the read or command
 **And** local contract and routing tests prove no legacy/API dual write or divergent ownership path exists
-**And** Epic 14 Story 14.2 owns deployed selected-owner, migration-ordering, rollback, and legacy-retirement evidence.
+**And** Epic 14 Story 14.6 owns deployed selected-owner, migration-ordering, rollback, and legacy-retirement evidence.
 
 ## Epic 10: Reliable AI Ask API Cutover
 
@@ -1724,44 +1724,73 @@ So that legacy `/admin` no longer owns domain transport or mutations.
 **Then** exactly one transport owner accepts its command or read
 **And** the matching legacy `/admin` route/server-action owner is retired rather than dual-written.
 
-## Epic 14: Public Launch Cutover and Operational Evidence
+## Epic 14: Direct API Consolidation and Legacy Retirement
 
-Every public domain capability has one transport owner, and public launch is supported by approved operational, recovery, and ownership evidence rather than informal prerequisites.
+Traveler web and the separate admin application become presentation-only clients of a direct NestJS API. NestJS owns Google OAuth, opaque browser sessions, CSRF, request-principal construction, and every migrated domain transport; Auth.js, BFF transport, root direct database owners, and legacy admin routes are removed only after their replacement is live.
 
-### Story 14.1: Inventory and Retire Legacy Domain Transport Owners
+**FRs covered:** FR-51, FR-52, FR-53, FR-54, FR-55, FR-56, FR-58, FR-59, FR-60. **NFRs covered:** NFR-12, NFR-13, NFR-14, NFR-15, NFR-16, NFR-17, NFR-18. **Architecture requirements covered:** ADR-33, ADR-33-1.
+
+**Historical boundary:** Completed Epics 9-13 prove internal API, Worker, and separate-admin foundations. Their BFF/Auth.js transport decisions are superseded by the approved 2026-08-03 direct API course correction and are not direct-browser implementation evidence.
+
+### Story 14.1: Establish NestJS Google OAuth, Opaque Browser Sessions, and Direct API Admission
+
+As a traveler or operator,
+I want NestJS to manage my Google sign-in and long-lived secure browser session,
+So that web and PWA clients can call protected APIs directly without Auth.js or a BFF.
+
+**Acceptance Criteria:**
+
+**Given** an unauthenticated traveler or authorized operator starts Google sign-in through NestJS
+**When** Google returns a valid callback bound to a non-expired, one-time OAuth transaction
+**Then** NestJS resolves or creates the real user/account, creates one opaque PostgreSQL session, sets only a secure HttpOnly session cookie, and redirects to an allowlisted application URL
+**And** the response exposes no provider token, cookie value, session ID, BFF credential, signing material, or internal error detail.
+
+**Given** a direct browser request reaches a protected `/v1` capability
+**When** its session cookie identifies a live non-revoked session whose user authorization version and roles are current
+**Then** NestJS creates the existing domain-neutral `RequestPrincipal` before the controller/use case runs
+**And** expired, revoked, missing, stale, malformed, cross-origin, or unauthorized requests fail through the safe API envelope without entering domain logic.
+
+**Given** a valid active browser session has less than seven days before expiry
+**When** it reaches an admitted protected API request
+**Then** NestJS renews its opaque session to a 30-day expiry and refreshes only its secure HttpOnly cookie
+**And** a logout revokes the server-side session and clears the cookie, while role change or account invalidation makes prior authorization state unusable.
+
+**Given** a browser invokes a state-changing `/v1` request
+**When** its Origin and CSRF admission are evaluated
+**Then** NestJS accepts only explicit configured browser origins with a valid session-bound CSRF proof
+**And** credentialed CORS never uses a wildcard or exposes session/auth internals.
+
+**Given** the direct-auth cutover is released
+**When** a user has only a legacy Auth.js session
+**Then** the session is not adopted and the user safely authenticates once through NestJS
+**And** no new Auth.js session is created after the NestJS flow is enabled.
+
+### Story 14.2: Cut AI Ask and Traveler Shell Reads to Direct API
+
+As a traveler,
+I want the planning shell and AI Ask stream to call NestJS directly,
+So that their browser transport has one owner without BFF forwarding or legacy fallback.
+
+### Story 14.3: Move Traveler Commands and Remove Root Domain Writers
+
+As a traveler,
+I want trip, conversation, proposal, feedback, and referral commands served by one API owner,
+So that no Next.js server action or direct database path can duplicate product state.
+
+### Story 14.4: Complete Admin Direct API Ownership
+
+As an operator,
+I want all operational workflows in the separate admin application through direct protected APIs,
+So that root `/admin` no longer owns a domain read or mutation.
+
+### Story 14.5: Retire Auth.js, BFF Runtime, and Legacy Transport
 
 As a release operator,
-I want every public capability to have exactly one verified transport owner,
-So that migration cannot duplicate writes or leave unsupported legacy paths exposed.
+I want an inventory-backed removal of obsolete Auth.js/BFF and root backend code,
+So that no unsupported ownership path survives the consolidation.
 
-**Acceptance Criteria:**
-
-**Given** the API/BFF migration inventory is reviewed
-**When** each capability is classified
-**Then** it records API contract, BFF adapter, aggregate owner, legacy owner, cutover state, rollback route, and verification evidence
-**And** no capability routes to two writers or dual-writes messages, assistant answers, provenance, usage, trip state, knowledge state, or another aggregate.
-
-**Given** all selected traveler and operator capabilities have stable cutovers
-**When** public-launch transport verification runs
-**Then** legacy Next.js domain route handlers, server-action writers, and legacy `/admin` operational transport are removed or disabled
-**And** repository, deployed-route, and integration checks prove presentation-only Next.js behavior has no domain transport ownership.
-
-### Story 14.2: Produce the Public Launch Evidence Gate
+### Story 14.6: Produce the Direct API Launch Evidence Gate
 
 As a product owner,
-I want launch prerequisites to have named owners and evidence-backed dispositions,
-So that public readiness is explicit about completed proof, accepted risk, and blockers.
-
-**Acceptance Criteria:**
-
-**Given** launch evidence is assessed
-**When** the gate is produced
-**Then** OAuth/admin/referral smoke, private networking, migration ordering, worker health, connection-pool and AI-stream concurrency, backup restore, monitoring, alerting, on-call, provider privacy, and search/provider readiness each have an owner, evidence link, and `complete`, `accepted_risk`, or `blocked` status
-**And** unresolved product, legal, provider, or operations decisions identify owner, due date, and launch impact.
-
-**And** each completed capability cutover records deployed API workload selection, private route/probe evidence, migration-before-traffic order, selected-owner execution, response-equivalence or approved risk, rollback proof, and legacy-owner retirement disposition.
-
-**Given** a mandatory launch item is unowned or lacks evidence/disposition
-**When** launch readiness is calculated
-**Then** Epic 14 returns blocked or no-go
-**And** it never reports public readiness from implementation counts alone.
+I want direct API deployment, one-writer, OAuth/session, rollback, Worker, and operations evidence to be explicit,
+So that public readiness is based on proof rather than completed-story counts.

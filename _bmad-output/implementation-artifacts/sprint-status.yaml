@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-08-01 (Epic 13.1 identity handoff approved: API Identity owns OAuth/session validation; admin retains host-only cookie and isolated credential signer.)
+# last_updated: 2026-08-03 (Direct API/session course correction approved; Story 14.1 is ready for development.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-08-01 (Epic 13.1 identity handoff approved: API Identity owns OAuth/session validation; admin retains host-only cookie and isolated credential signer.)
+last_updated: 2026-08-03 (Direct API/session course correction approved; Story 14.1 is ready for development.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -301,9 +301,16 @@ development_status:
   13-2-migrate-operator-capabilities-and-retire-legacy-admin-ownership: done
   epic-13-retrospective: optional
 
-  epic-14: backlog
-  14-1-inventory-and-retire-legacy-domain-transport-owners: backlog
-  14-2-produce-the-public-launch-evidence-gate: backlog
+  # 2026-08-03: Direct API/session course correction approved. BFF/Auth.js
+  # decisions in completed Epics 9-13 remain historical evidence only.
+  # Epic 14 owns NestJS direct browser API consolidation and retirement.
+  epic-14: in-progress
+  14-1-establish-nestjs-google-oauth-opaque-browser-sessions-and-direct-api-admission: ready-for-dev
+  14-2-cut-ai-ask-and-traveler-shell-reads-to-direct-api: backlog
+  14-3-move-traveler-commands-and-remove-root-domain-writers: backlog
+  14-4-complete-admin-direct-api-ownership: backlog
+  14-5-retire-authjs-bff-runtime-and-legacy-transport: backlog
+  14-6-produce-the-direct-api-launch-evidence-gate: backlog
   epic-14-retrospective: optional
 
 action_items:
