@@ -32,9 +32,12 @@ export function DirectShellLoader({ initialQuestion, conversationId, historyConv
   if (!state.shell) return <main className="grid min-h-screen place-items-center px-5 text-center"><div><p className="text-[#17342c]">{state.expired ? "Phiên đăng nhập đã hết hạn." : "Không thể tải hành trình lúc này."}</p><a className="mt-4 inline-block rounded-xl bg-[#1f5f46] px-4 py-3 font-semibold text-white" href="/sign-in?next=/ai-ask">Đăng nhập lại</a></div></main>;
   const conversation = state.shell.shell.conversation;
   async function logout() {
-    await directLogout();
-    setState({ loading: false, expired: true, summaries: [] });
-    window.location.replace("/sign-in");
+    try {
+      await directLogout();
+    } finally {
+      setState({ loading: false, expired: true, summaries: [] });
+      window.location.replace("/sign-in");
+    }
   }
   return <main className="min-h-screen bg-white text-[#17342c]"><h1 className="sr-only">Hỏi trợ lý chuyến đi Việt Nam</h1><AiAskComposer initialQuestion={initialQuestion} initialConversationId={conversation?.id} initialMessages={state.messages ?? conversation?.messages ?? []} initialSessions={state.summaries} selectedTripProject={state.shell.shell.tripProject} historyConversation={state.historyConversation} planningContext={state.planningContext} createTripProjectAction={async (_previous, formData) => {
     const text = (name: string) => { const value = formData.get(name); return typeof value === "string" ? value : null; };

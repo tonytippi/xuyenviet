@@ -1,12 +1,13 @@
 import { INestApplication, Module } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import { exportJWK, generateKeyPair, importJWK, SignJWT } from "jose";
+import { createHmac } from "node:crypto";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import { apiAudience } from "@xuyenviet/contracts";
 import { createBffCredentialConfig, type BffCredentialConfig, type Jwk } from "@xuyenviet/config";
-import type { ApiIdentityRepository, ConversationSummaryRepository, ReleaseSchemaVersionRepository, TravelerShellRepository } from "@xuyenviet/database";
+import type { BrowserIdentityRepository, ConversationSummaryRepository, ReleaseSchemaVersionRepository, TravelerShellRepository } from "@xuyenviet/database";
 import type { AiAskStreamExecution, PlanningReadRepository, TravelerCommandPort } from "@xuyenviet/domain";
 import { createApiModule } from "../apps/api/src/app.module";
 import { apiSchemaCompatibility } from "../apps/api/src/release-schema";
@@ -15,6 +16,8 @@ let app: INestApplication;
 let config: BffCredentialConfig;
 let active: Awaited<ReturnType<typeof keySet>>;
 let ready = true;
+const browserAuth = { googleClientId: "client", googleClientSecret: "secret", callbackUrl: "https://web.xuyenviet.vn/auth/google/callback", allowedOrigins: ["https://web.xuyenviet.vn"], allowedReturnUrls: ["https://web.xuyenviet.vn/ai-ask"], sessionLookupKey: "b".repeat(32), csrfKey: "c".repeat(32), oauthTransactionProtectionKey: "d".repeat(32), cookieName: "__Host-xuyenviet-session" } as const;
+const browserSessionId = "b".repeat(64);
 const rows: Record<string, Awaited<ReturnType<ConversationSummaryRepository["listOwnedConversationSummaryRows"]>>> = {
   "user-1": [
     { id: "conversation-b", updatedAt: new Date("2026-07-02T00:00:00.000Z"), messageContent: "Đi Huế" },
@@ -31,7 +34,18 @@ beforeEach(async () => {
     "xuyenviet-web-bff": { issuer: "xuyenviet-web-bff", active },
     "xuyenviet-admin-bff": { issuer: "xuyenviet-admin-bff", active: admin },
   } });
-  const identities: ApiIdentityRepository = { async getSession(sessionId) { return sessionId === "session-1" ? { userId: "user-1", expires: new Date(Date.now() + 60_000), authorizationVersion: 1 } : sessionId === "session-2" ? { userId: "user-2", expires: new Date(Date.now() + 60_000), authorizationVersion: 1 } : null; } };
+  const identities: BrowserIdentityRepository = {
+    async getSession(sessionId) { return sessionId === "session-1" ? { userId: "user-1", expires: new Date(Date.now() + 60_000), authorizationVersion: 1 } : sessionId === "session-2" ? { userId: "user-2", expires: new Date(Date.now() + 60_000), authorizationVersion: 1 } : null; },
+    async getBrowserSession(sessionId) { return sessionId === browserSessionId ? { userId: "user-1", sessionId, expires: new Date(Date.now() + 60_000), authorizationVersion: 1, roles: ["traveler"], csrfHash: createHmac("sha256", browserAuth.csrfKey).update(`${sessionId}.browser-csrf`).digest("base64url") } : null; },
+    async getBrowserLogoutCsrfHash() { return null; },
+    async createBrowserOAuthTransaction() {},
+    async consumeBrowserOAuthTransaction() { return null; },
+    async createBrowserSession() {},
+    async purgeExpiredBrowserOAuthTransactions() {},
+    async renewBrowserSession() { return true; },
+    async resolveOrCreateBrowserGoogleUser() { return { userId: "user-1", authorizationVersion: 1 }; },
+    async revokeBrowserSession() {},
+  };
   const summaries: ConversationSummaryRepository = { async listOwnedConversationSummaryRows(userId) { return rows[userId] ?? []; } };
   const planningReads: PlanningReadRepository = {
     async loadOwnedPlanningContext(userId, tripProjectId) { return (userId === "user-1" && tripProjectId === "project-1") || (userId === "user-2" && tripProjectId === "foreign-project") ? { version: 1, hasProjectScope: true, tripProjectId, aggregateVersion: 2, primaryConversationId: userId === "user-1" ? "conversation-a" : "conversation-other", anchors: [], planItems: [], constraints: null, currentConversationFacts: [], conflicts: [] } : null; },
@@ -52,7 +66,7 @@ beforeEach(async () => {
     async dismissTripChangeProposal(userId, input) { return userId === "user-1" && input.proposalId === "proposal-1" ? { success: true, proposalStatus: "dismissed" } : { success: false, reason: "not_found" }; },
     async executeAnnotationProposalAction(userId, input) { return userId === "user-1" && input.annotationId === "trip-change-proposal-apply" ? { success: true, aggregateVersion: 3, proposalStatus: "applied" } : { success: false, reason: "not_found" }; },
   };
-  const ApiModule = createApiModule(config, identities, { conversationSummaries: summaries, travelerShells, planningReads, travelerCommands, schemaVersions: versions, aiAskExecution });
+  const ApiModule = createApiModule(config, identities, { conversationSummaries: summaries, travelerShells, planningReads, travelerCommands, schemaVersions: versions, aiAskExecution, browserAuth });
   @Module({ imports: [ApiModule] })
   class TestModule {}
   app = await NestFactory.create(TestModule, { logger: false });
@@ -161,6 +175,20 @@ describe("API platform contracts", () => {
     await request(app.getHttpServer()).delete("/v1/conversations/conversation-a").set(authorization).expect(200, { success: true });
     await request(app.getHttpServer()).delete("/v1/trip-projects/foreign").set(authorization).expect(200, { success: false, reason: "not_found" });
     await request(app.getHttpServer()).post("/v1/answer-usefulness-feedback").set(authorization).send({ assistantMessageId: "answer-1", rating: "useful", comment: "Rõ ràng" }).expect(201, { success: true, feedback: { rating: "useful", comment: "Rõ ràng", updatedAt: "2026-08-03T00:00:00.000Z" } });
+  });
+
+  test("admits every traveler command only through an exact-origin browser session and CSRF proof", async () => {
+    const browser = { Cookie: `${browserAuth.cookieName}=${browserSessionId}`, Origin: browserAuth.allowedOrigins[0], "X-XuyenViet-CSRF": "browser-csrf" };
+    const rejected = { Cookie: browser.Cookie, Origin: "https://foreign.example", "X-XuyenViet-CSRF": "browser-csrf" };
+    await request(app.getHttpServer()).post("/v1/trip-projects").set(rejected).send({ title: "Huế cuối tuần" }).expect(403);
+    await request(app.getHttpServer()).post("/v1/trip-projects").set(browser).send({ title: "Huế cuối tuần" }).expect(201);
+    await request(app.getHttpServer()).delete("/v1/conversations/conversation-a").set(browser).expect(200, { success: true });
+    await request(app.getHttpServer()).delete("/v1/trip-projects/foreign").set(browser).expect(200, { success: false, reason: "not_found" });
+    await request(app.getHttpServer()).post("/v1/answer-usefulness-feedback").set(browser).send({ assistantMessageId: "answer-1", rating: "useful" }).expect(201);
+    await request(app.getHttpServer()).post("/v1/trip-change-proposals/apply").set(browser).send({ tripProjectId: "project-1", proposalId: "proposal-1" }).expect(201, { success: true, aggregateVersion: 3, proposalStatus: "applied" });
+    await request(app.getHttpServer()).post("/v1/trip-change-proposals/dismiss").set(browser).send({ tripProjectId: "project-1", proposalId: "proposal-1" }).expect(201, { success: true, proposalStatus: "dismissed" });
+    await request(app.getHttpServer()).post("/v1/trip-change-proposals/annotation-action").set(browser).send({ conversationId: "conversation-a", assistantMessageId: "answer-1", annotationId: "trip-change-proposal-apply", command: "trip_change_proposal.apply" }).expect(201, { success: true, aggregateVersion: 3, proposalStatus: "applied" });
+    await request(app.getHttpServer()).post("/v1/trip-projects").set({ Cookie: browser.Cookie, Origin: browser.Origin, "X-XuyenViet-CSRF": "wrong" }).send({ title: "Huế cuối tuần" }).expect(403);
   });
 });
 

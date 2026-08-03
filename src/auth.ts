@@ -5,7 +5,6 @@ import Google from "next-auth/providers/google";
 import { getDb } from "@/db/client";
 import { accounts, sessions, userRoles, users, verificationTokens } from "@/db/schema";
 import { sql } from "drizzle-orm";
-import { captureFirstTouchReferralAttribution } from "@/features/referrals/attribution";
 import { assertProductionLaunchEnv } from "@/server/env";
 
 export const { handlers, auth, signIn, signOut } = NextAuth(() => ({
@@ -36,6 +35,19 @@ export const { handlers, auth, signIn, signOut } = NextAuth(() => ({
     error: "/sign-in",
   },
   callbacks: {
+    async signIn({ user }) {
+      const configuredAdminEmail = normalizedEmail(process.env.ADMIN_EMAIL);
+      if (user.email && configuredAdminEmail && normalizedEmail(user.email) === configuredAdminEmail) {
+        return true;
+      }
+
+      if (!user.id) {
+        return false;
+      }
+
+      const [role] = await getDb().select({ userId: userRoles.userId }).from(userRoles).where(sql`${userRoles.userId} = ${user.id} and ${userRoles.role} in ('admin', 'operator')`).limit(1);
+      return Boolean(role);
+    },
     session({ session, user }) {
       if (session.user) {
         session.user.id = user.id;
@@ -51,9 +63,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth(() => ({
         const granted = await getDb().insert(userRoles).values({ userId: user.id, role: "admin" }).onConflictDoNothing().returning({ userId: userRoles.userId });
         if (granted.length) await getDb().update(users).set({ authorizationVersion: sql`${users.authorizationVersion} + 1` }).where(sql`${users.id} = ${user.id}`);
       }
-      if (isNewUser && user.id) {
-        await captureFirstTouchReferralAttribution(user.id);
-      }
+      void isNewUser;
     },
   },
 }));

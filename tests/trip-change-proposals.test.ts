@@ -3,7 +3,7 @@ import postgres from "postgres";
 import { afterAll, beforeEach, describe, expect, test } from "vitest";
 
 import { applyTripChangeProposal, dismissTripChangeProposal, executeAnnotationProposalAction, expireTripChangeProposal, validatePlanReferencesRules } from "@xuyenviet/database";
-import { auditEvents, conversations, messages, tripChangeProposals, tripPlanChangeHistory, tripPlanItems, tripProjects, users } from "@/db/schema";
+import { auditEvents, conversations, messages, tripChangeProposals, tripPlanChangeHistory, tripPlanItems, tripProjectConstraints, tripProjects, users } from "@/db/schema";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
 
@@ -74,6 +74,20 @@ describe("package proposal commands", () => {
     await expect(testDb.select().from(auditEvents)).resolves.toHaveLength(0);
   });
 
+  test("applies sequential constraint updates with advancing constraint and aggregate versions", async () => {
+    await fixture();
+    await testDb.update(tripChangeProposals).set({
+      operations: [
+        { kind: "upsert-constraints", constraints: { adultCount: 2 } },
+        { kind: "upsert-constraints", constraints: { adultCount: 3 } },
+      ],
+    }).where(eq(tripChangeProposals.id, "proposal"));
+
+    const result = await applyTripChangeProposal("owner", { tripProjectId: "project", proposalId: "proposal" });
+    expect(result).toMatchObject({ success: true, aggregateVersion: 3 });
+    await expect(testDb.select({ adultCount: tripProjectConstraints.adultCount, version: tripProjectConstraints.version }).from(tripProjectConstraints).where(eq(tripProjectConstraints.tripProjectId, "project"))).resolves.toEqual([{ adultCount: 3, version: 2 }]);
+  });
+
   test("does not disclose or mutate another owner's pending proposal", async () => {
     await fixture();
 
@@ -125,6 +139,19 @@ describe("package proposal commands", () => {
     await expect(testDb.select({ status: tripChangeProposals.status }).from(tripChangeProposals).where(eq(tripChangeProposals.id, "proposal"))).resolves.toEqual([{ status: "applied" }]);
     await expect(testDb.select({ state: tripPlanItems.state, version: tripPlanItems.version }).from(tripPlanItems).where(eq(tripPlanItems.id, "leg"))).resolves.toEqual([{ state: "confirmed", version: 2 }]);
     await expect(testDb.select({ operationClass: tripPlanChangeHistory.operationClass }).from(tripPlanChangeHistory).where(eq(tripPlanChangeHistory.proposalId, "proposal"))).resolves.toEqual([{ operationClass: "apply" }]);
+  });
+
+  test("serializes concurrent apply and dismiss without a deadlock", async () => {
+    await fixture();
+
+    const outcomes = await Promise.allSettled([
+      applyTripChangeProposal("owner", { tripProjectId: "project", proposalId: "proposal" }),
+      dismissTripChangeProposal("owner", { tripProjectId: "project", proposalId: "proposal" }),
+    ]);
+
+    expect(outcomes.every((outcome) => outcome.status === "fulfilled")).toBe(true);
+    await expect(testDb.select({ status: tripChangeProposals.status }).from(tripChangeProposals).where(eq(tripChangeProposals.id, "proposal"))).resolves.toSatisfy((rows) => ["applied", "dismissed"].includes(rows[0]?.status ?? ""));
+    await expect(testDb.select().from(tripPlanChangeHistory).where(eq(tripPlanChangeHistory.proposalId, "proposal"))).resolves.toHaveLength(1);
   });
 
   test("blocks apply while another connection holds the aggregate row lock", async () => {

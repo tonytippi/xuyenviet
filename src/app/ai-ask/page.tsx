@@ -11,19 +11,15 @@ type AiAskPageProps = {
   }>;
 };
 
-function getFirstParam(value: string | string[] | undefined) {
-  if (Array.isArray(value)) {
-    return value.find((item) => item.trim());
-  }
-
-  return value;
+function getSingleParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? undefined : value;
 }
 
 export default async function AiAskPage({ searchParams }: AiAskPageProps) {
   const params = await searchParams;
-  const publicDraft = normalizePublicAskDraft(getFirstParam(params?.draft));
-  const requestedConversationId = getFirstParam(params?.conversationId)?.trim();
-  const requestedTripProjectId = getFirstParam(params?.tripProjectId)?.trim();
-  const historyConversationId = getFirstParam(params?.historyConversationId)?.trim();
+  const publicDraft = normalizePublicAskDraft(getSingleParam(params?.draft));
+  const requestedConversationId = getSingleParam(params?.conversationId)?.trim();
+  const requestedTripProjectId = getSingleParam(params?.tripProjectId)?.trim();
+  const historyConversationId = getSingleParam(params?.historyConversationId)?.trim();
   return <DirectShellLoader initialQuestion={publicDraft} conversationId={requestedConversationId} historyConversationId={historyConversationId} tripProjectId={requestedTripProjectId} />;
 }

@@ -2,7 +2,7 @@
 title: 'Atomic traveler direct API cutover and Auth.js retirement'
 type: 'feature'
 created: '2026-08-03'
-status: 'in-review'
+status: 'done'
 baseline_revision: '5620c5598ee35a385a61886dd7706abbc519a901'
 review_loop_iteration: 0
 followup_review_recommended: false
@@ -100,3 +100,16 @@ Blocking condition: Referral/OAuth is now Nest-owned, but traveler command and f
 - 2026-08-03 final continuation verification: `pnpm typecheck` passed; `pnpm exec vitest run tests/api-platform-contract.test.ts tests/ai-ask-direct-api.test.ts tests/local-direct-transport.test.ts` passed (3 files, 14 tests); `git diff --check` passed. The remaining root Auth.js inventory is confined to the proposal aggregate and unrelated preserved admin/BFF runtime paths. The traveler aggregate remains the explicit blocking condition.
 - 2026-08-03 authorized extraction completed: proposal terminal commands, plan-item transaction primitives, audit/history writers, reference validation, and annotation binding now have package-owned PostgreSQL implementations. Nest exposes admitted apply/dismiss/annotation endpoints; direct shell loads a bounded owner-scoped workspace and reloads it after terminal commands. `src/features/chat-trips/actions.ts` is deleted, while the retained root auth action is used only by root admin. Package modules do not import root `src/`.
 - 2026-08-03 verification: `pnpm typecheck` passed; focused direct/API/package suite passed 28 tests across six files, including direct shell parsing, proposal command contracts, owner isolation, atomic rollback, expiry, fences, history/audit, and PostgreSQL lock contention; `git diff --check` passed. Full `pnpm test:unit`, `pnpm test:integration`, lint, and build remain final review verification work.
+
+### Review Findings
+
+- [x] [Review][Patch] Root NextAuth handler and referral event remain a traveler-capable OAuth path [src/app/api/auth/[...nextauth]/route.ts:1] — root Auth.js remains only for retained root-admin/BFF compatibility, rejects non-admin sign-in, and no longer captures traveler referrals.
+- [x] [Review][Patch] Root feedback server-action writer remains live [src/features/feedback/actions.ts:1] — removed the unused traveler server action, its Auth.js principal lookup, root database writer, and its retired tests.
+- [x] [Review][Patch] Logout failure retains the traveler shell [src/features/chat-trips/direct-shell-loader.tsx:34] — local shell state is now cleared and navigation occurs in `finally`.
+- [x] [Review][Patch] Repeated protected shell selectors choose an arbitrary value [src/app/ai-ask/page.tsx:14] — repeated values are rejected as invalid selectors.
+- [x] [Review][Patch] Terminal proposal actions use inconsistent row-lock order [packages/database/src/traveler-proposal-commands.ts:32] — dismiss now locks the owned project before the proposal; concurrent terminal-action regression added.
+- [x] [Review][Patch] Multiple constraint upserts cannot apply sequentially [packages/database/src/traveler-proposal-commands.ts:46] — constraints operations run before generic item resolution and carry their expected version forward; sequential-upsert regression added.
+- [x] [Review][Patch] Reorder audit events lost their affected-item count [packages/database/src/trip-plan-commands.ts:116] — restored `afterSummary.count` for reorder audits.
+- [x] [Review][Patch] Browser-session admission is not tested for migrated commands [tests/api-platform-contract.test.ts:157] — added opaque browser-session command coverage for valid/invalid Origin and CSRF across every migrated command endpoint.
+
+- 2026-08-03 review repair verification: `pnpm typecheck` passed; serial `tests/trip-change-proposals.test.ts` (12 tests) and `tests/api-request-principal.integration.test.ts` (28 tests) passed; focused direct/API contract suite passed 17 tests; `pnpm lint` has 0 errors and 5 existing unrelated warnings; `git diff --check` passed.

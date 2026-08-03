@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-08-03 (Story 14.2 traveler command extraction is in progress; direct create/delete/feedback is implemented, proposal aggregate extraction remains.)
+# last_updated: 2026-08-03 (Story 14.2 atomic traveler direct API cutover review repairs are complete.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-08-03 (Story 14.2 traveler command extraction is in progress; direct create/delete/feedback is implemented, proposal aggregate extraction remains.)
+last_updated: 2026-08-03 (Story 14.2 atomic traveler direct API cutover review repairs are complete.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -339,7 +339,8 @@ development_status:
   # the independent root-admin path only. Focused package/API/direct-shell suite
   # passed 28 tests with typecheck and diff validation. Full-suite/lint/build review
   # remains before final story completion; deployment evidence remains Story 14.6.
-  14-2-cut-ai-ask-and-traveler-shell-reads-to-direct-api: review
+  # 2026-08-03: BMad review repair completed. Root Auth.js remains restricted to preserved admin/BFF callers and no longer handles traveler referrals; root traveler feedback writer is removed. Direct logout clears local state on failure, repeated protected selectors fail closed, proposal terminal actions share project-first locking, sequential constraints updates advance correctly, reorder audit counts are retained, and browser-session Origin/CSRF command coverage was added. Serial command/auth integration (12 + 28), focused direct/API (17), typecheck, lint (0 errors; 5 existing warnings), and diff check passed.
+  14-2-cut-ai-ask-and-traveler-shell-reads-to-direct-api: done
   14-3-move-traveler-commands-and-remove-root-domain-writers: backlog
   14-4-complete-admin-direct-api-ownership: backlog
   14-5-retire-authjs-bff-runtime-and-legacy-transport: backlog
