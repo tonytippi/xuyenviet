@@ -262,25 +262,7 @@ export const sessions = pgTable("sessions", {
   expires: timestamp("expires", { mode: "date" }).notNull(),
 });
 
-// Admin browser sessions are deliberately not Auth.js traveler sessions. The
-// API Identity boundary owns this separate namespace and revocation lifecycle.
-export const adminSessions = pgTable("admin_sessions", {
-  // This is an HMAC lookup value, never the browser bearer session ID.
-  sessionLookupHash: text("session_lookup_hash").primaryKey(),
-  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  expires: timestamp("expires", { mode: "date" }).notNull(),
-  revokedAt: timestamp("revoked_at", { mode: "date" }),
-}, (session) => [index("admin_sessions_live_user_idx").on(session.userId, session.expires)]);
-
-export const adminOAuthTransactions = pgTable("admin_oauth_transactions", {
-  id: text("id").primaryKey(),
-  state: text("state").notNull().unique(),
-  codeVerifier: text("code_verifier").notNull(),
-  callbackUrl: text("callback_url").notNull(),
-  expires: timestamp("expires", { mode: "date" }).notNull(),
-});
-
-// This namespace is intentionally separate from Auth.js `sessions` and admin sessions.
+// This namespace is intentionally separate from legacy Auth.js sessions.
 export const browserSessions = pgTable("browser_sessions", {
   sessionLookupHash: text("session_lookup_hash").primaryKey(),
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),

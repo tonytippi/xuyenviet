@@ -35,9 +35,9 @@ XUYENVIET should become a practical AI trip companion for people traveling throu
 This repository is a pnpm workspace with four independently runnable workloads:
 
 - traveler web: the root Next.js application on port `3000`
-- private API: `apps/api`, a NestJS application on port `3001`
+- public HTTPS API: `apps/api`, a NestJS application on port `3001`
 - worker: `apps/worker` on port `3002`
-- admin BFF: `apps/admin`, a separate Next.js application on port `3003`
+- admin presentation: `apps/admin`, a separate Next.js application on port `3003`
 
 Requirements:
 
@@ -54,7 +54,7 @@ cp .env.example .env.local
 pnpm dev
 ```
 
-`pnpm dev` starts only the traveler web application. It does not start the Nest API, Worker, or admin BFF. The traveler web can continue to use its legacy local routes until the relevant API cutover flag is enabled.
+`pnpm dev` starts only the traveler web application. It does not start the Nest API, Worker, or admin presentation application.
 
 Run the local workloads through the root shortcuts:
 
@@ -66,46 +66,31 @@ pnpm worker
 
 API and admin run in watch mode. Worker builds once and then starts because its supervisor executes independently bundled child adapters; rerun `pnpm worker` after changing Worker code.
 
-### Local admin Google sign-in
+### Admin Google sign-in
 
-Local admin sign-in uses an explicit loopback-only transport mode. It is enabled only when both `apps/api/.env.local` and `apps/admin/.env.local` set `APP_ENV="local"` and `XV_ADMIN_LOCAL_TRANSPORT="true"`. This mode permits only `http://localhost:3003` for the admin BFF and `http://127.0.0.1:3001` for the API. It uses non-`Secure`, non-`__Host-` cookies scoped to localhost and bypasses only deployment schema-release admission for the local database; database-backed identity and role checks remain required. Staging and production retain the HTTPS/private-network/`__Host-` and schema-release requirements.
+The public HTTPS Nest API owns Google OAuth, the opaque `__Host-xuyenviet-session` cookie, and CSRF. Configure Google with the API-host callback in `XV_BROWSER_GOOGLE_CALLBACK_URL`, for example `https://api.xuyenviet.app/auth/google/callback`. `apps/admin` starts OAuth at that API and supplies only exact, configured admin return URLs.
 
-1. In the Google OAuth client configured as `XV_ADMIN_GOOGLE_CLIENT_ID`, add this authorized redirect URI exactly:
-
-   ```text
-   http://localhost:3003/api/auth/callback
-   ```
-
-2. Start the API and admin in separate terminals:
+1. Start the API and admin in separate terminals:
 
    ```bash
    pnpm api dev
    pnpm admin dev
    ```
 
-3. Ensure the Google account is represented in the local database and has the `operator` or `admin` role. To bootstrap the first local administrator after the account exists, set `INITIAL_ADMIN_EMAIL` for the command and run:
+2. Ensure the Google account is represented in the local database and has the `operator` or `admin` role. To bootstrap the first local administrator after the account exists, set `INITIAL_ADMIN_EMAIL` for the command and run:
 
    ```bash
    INITIAL_ADMIN_EMAIL="you@example.com" pnpm bootstrap:initial-admin
    ```
 
-4. If the local database predates the admin OAuth migrations and is disposable, stop all local runtimes and reset it with:
-
-   ```bash
-   pnpm db:reset:local
-   ```
-
-   This command is intentionally pinned to the local `xuyenviet` database at `127.0.0.1:5432`; it drops the database, runs all Drizzle migrations, records the schema version, and seeds it. Do not use it to preserve local data or against another database target.
-
-5. Open `http://localhost:3003/sign-in`.
+3. Open an admin page such as `http://localhost:3003/`; an unauthenticated direct API call begins OAuth.
 
 ### Run the Nest API locally
 
 The API is a separate process and requires an API-only environment file. Do not give this file to the web, worker, or admin processes.
 
 1. Create `apps/api/.env.local` from `apps/api/.env.example`, then add the API runtime variables below from the deployment secret store or an approved local-development secret set.
-2. Set `DATABASE_URL`, `XV_BFF_CREDENTIAL_CONFIG`, `XV_ADMIN_SESSION_LOOKUP_KEY`, and `XV_ADMIN_IDENTITY_HANDOFF_SERVICE_TOKEN`.
-3. Set `XV_ADMIN_GOOGLE_CLIENT_ID` and `XV_ADMIN_GOOGLE_CLIENT_SECRET` if exercising the admin identity endpoints.
+2. Set `DATABASE_URL`, `XV_BFF_CREDENTIAL_CONFIG`, and the `XV_BROWSER_*` OAuth/session/CSRF variables.
 4. Build and start the API:
 
 ```bash
@@ -113,7 +98,7 @@ pnpm --filter @xuyenviet/api build
 pnpm api dev
 ```
 
-The API listens on `PORT`, defaulting to `3001`. It is a private BFF resource server, not a browser-facing service. `XV_BFF_CREDENTIAL_CONFIG` contains the public ES256 verification configuration for both `xuyenviet-web-bff` and `xuyenviet-admin-bff`; it must not contain either BFF private signing key. `XV_ADMIN_SESSION_LOOKUP_KEY` and `XV_ADMIN_IDENTITY_HANDOFF_SERVICE_TOKEN` are API secrets.
+The API listens on `PORT`, defaulting to `3001`. It is browser-facing over public HTTPS with credentialed CORS restricted to the exact origins in `XV_BROWSER_ALLOWED_ORIGINS`. `XV_BFF_CREDENTIAL_CONFIG` contains only the retained web BFF public ES256 verification configuration. Never use wildcard or prefix origins/return URLs.
 
 Use these endpoints to verify a local API process:
 
@@ -130,11 +115,11 @@ curl http://127.0.0.1:3001/openapi.json
 # Build and run the continuous worker.
 pnpm worker
 
-# Build and run the separate admin BFF.
+# Build and run the separate admin presentation application.
 pnpm admin dev
 ```
 
-The worker reads `apps/worker/.env.local`, which should be created from `apps/worker/.env.example`. It receives `DATABASE_URL` and only the provider credentials needed by its assigned loops. It does not have a watch-mode runtime: `pnpm worker` builds the supervisor and child adapters, then starts them. Rerun `pnpm worker` after changing Worker code. The admin BFF reads `apps/admin/.env.local`, which should be created from `apps/admin/.env.example`; it must not receive `DATABASE_URL`, traveler Auth.js secrets, API Google credentials, or BFF verification private keys. The admin OAuth flow requires Railway private HTTPS and its registered callback, so a local process is useful for build and route checks, not end-to-end sign-in validation.
+The worker reads `apps/worker/.env.local`, which should be created from `apps/worker/.env.example`. It receives `DATABASE_URL` and only the provider credentials needed by its assigned loops. The admin application reads `apps/admin/.env.local` and needs only `NEXT_PUBLIC_API_ORIGIN`; it must not receive database, Auth.js, OAuth, BFF, bearer, or private-service secrets.
 
 Quality checks:
 
@@ -175,7 +160,7 @@ Do not use `pnpm db:reset` for test verification: Vitest owns only `DATABASE_URL
 
 ## Server deployment
 
-Docker Compose builds four separate workloads: traveler web (`app`), Nest API (`api`), Worker (`worker`), and the optional admin BFF (`admin`). PostgreSQL remains external. Run migrations before starting a workload that claims durable work or serves API traffic. The migration release job records schema only after Drizzle succeeds; web, API, Worker, and admin readiness fail closed for a missing, malformed, duplicated, or incompatible release record.
+Docker Compose builds four separate workloads: traveler web (`app`), public Nest API (`api`), Worker (`worker`), and the optional admin presentation application (`admin`). PostgreSQL remains external. Run migrations before starting a workload that claims durable work or serves API traffic.
 
 1. Create separate deployment environment files from `.env.example`: `.web.env`, `.api.env`, `.worker.env`, and `.admin.env`. Set `APP_ENV="production"`, a TLS-enabled non-localhost `DATABASE_URL` only for workloads that require it, and real provider/authentication secrets. Apply least privilege as described below; never pass the combined template to a workload. Compose defaults to the local API and admin files only when these overrides are omitted.
 2. Run migrations once for each release that includes database changes:
@@ -196,7 +181,7 @@ Docker Compose builds four separate workloads: traveler web (`app`), Nest API (`
    WEB_ENV_FILE=.web.env API_ENV_FILE=.api.env WORKER_ENV_FILE=.worker.env ADMIN_ENV_FILE=.admin.env docker compose --profile admin up -d --build admin
    ```
 
-Compose binds traveler web to `127.0.0.1:8000`, Worker to `127.0.0.1:3002`, and admin to `127.0.0.1:8003`; the API has no host-published port. Its Compose healthcheck uses `GET /health/live` on its internal port `3001`. Configure the public tunnel origin to the traveler web service, for example `http://localhost:8000`; do not expose the private API to the browser or public internet. The Compose `admin` profile remains syntax/build validation only because Compose cannot reproduce Railway private HTTPS or the registered OAuth callback environment.
+Compose binds traveler web to `127.0.0.1:8000`, Worker to `127.0.0.1:3002`, and admin to `127.0.0.1:8003`; the API has no host-published port. Its Compose healthcheck uses `GET /health/live` on its internal port `3001`. In deployment, publish the API over HTTPS and restrict credentialed CORS to exact browser origins; Google must redirect to the API-host callback, not an admin route.
 
 The Worker `GET /health/live` endpoint is process liveness and `GET /health/ready` requires valid configuration, PostgreSQL, and all assigned loops to be poll-eligible. On `SIGTERM` or `SIGINT`, it becomes non-ready before it stops admitting new polls, then allows in-flight work to settle through the feature-owned durable protocol. Pass the same `*_ENV_FILE` variables to `docker compose logs -f app`, `docker compose logs -f api`, `docker compose logs -f worker`, and `docker compose down`.
 
@@ -231,13 +216,11 @@ Capture commands use two databases: `DATABASE_URL` is the application database r
 
 `pnpm trip-proposal-expiry --once` is a finite scheduled-maintenance command. A scheduler may launch exactly this command, never a perpetual proposal-expiry process. It rejects every argument other than `--once`; source-retention and provenance-withdrawal commands remain explicit operator operations, and Facebook/YouTube capture remains external operator-controlled work.
 
-### Separate admin BFF
+### Admin Direct Browser API
 
-`apps/admin` is an independent Next.js BFF deployment for `admin.xuyenviet.app`, not a second database or domain runtime. Railway must select Docker target `admin-runner`, use its own service/release lifecycle and readiness probe `GET /api/health`, and connect to `https://api.railway.internal` only through Railway private networking. Run the migration job before allowing either API or admin traffic. The Compose `admin` profile is syntax/build validation only: Compose does not alias `api.railway.internal` to its plaintext API service, and it does not provide Railway private HTTPS or a local OAuth callback environment. It must not be treated as a functional local admin/API or end-to-end admin sign-in proof.
+`apps/admin` is an independent Next.js presentation deployment for `admin.xuyenviet.app`, not a BFF or domain runtime. It needs only `NEXT_PUBLIC_API_ORIGIN` and calls Nest with `credentials: "include"`. Its `GET /api/health` route is static process health only and never proxies identity or credentials.
 
-The API service owns Google OAuth client credentials, OAuth state/PKCE/code exchange, persistent opaque sessions, role checks, and release admission. Compose reads separate `.web.env`, `.worker.env`, `.api.env`, and `.admin.env` files. The admin service gets only its isolated ES256 private signing key, host origin, signed CSRF secret, private API URL, and service authentication token. `XV_ADMIN_GOOGLE_CLIENT_ID` and `XV_ADMIN_GOOGLE_CLIENT_SECRET` are API-only. Web and Worker receive no admin signer, CSRF, or handoff values; API receives public BFF verification material, Google credentials, and the handoff token but no admin private key or CSRF secret. Do not give the admin service `DATABASE_URL`, `AUTH_GOOGLE_SECRET`, traveler Auth.js cookies/secrets, provider tokens, or API verification private keys. Configure Google with the exact `https://admin.xuyenviet.app/api/auth/callback` redirect URI; the callback adapter forwards only its code/state to API Identity.
-
-Admin browser session cookies use `__Host-` names with `Secure`, `HttpOnly`, `SameSite=Strict`, and `Path=/`, and deliberately have no `Domain` attribute. The short-lived OAuth transaction cookie is also host-only but `SameSite=Lax` so Google can return through a top-level callback. An unauthenticated `GET /api/auth/csrf` issues only the distinct signed double-submit CSRF token; it never exposes session or identity data. They are not interchangeable with traveler cookies. Staging DNS, Railway private networking, Google redirect registration, migration completion, and readiness-probe evidence must be collected by deployment owners outside repository tests; this repository makes no staging deployment claim.
+The public API owns Google OAuth, state/PKCE, opaque browser sessions, role checks, and CSRF. Configure Google with the exact API callback from `XV_BROWSER_GOOGLE_CALLBACK_URL`, for example `https://api.xuyenviet.app/auth/google/callback`. Set `XV_BROWSER_ALLOWED_ORIGINS` to exact public HTTPS browser origins and enumerate every allowed return URL in `XV_BROWSER_ALLOWED_RETURN_URLS`; no wildcard or path-prefix entries are accepted. The admin application must not receive database, Auth.js, provider, BFF signer, bearer, or private-service credentials.
 
 ### Assistant provenance withdrawal backfill release procedure
 

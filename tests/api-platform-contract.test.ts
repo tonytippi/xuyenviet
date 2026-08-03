@@ -29,10 +29,8 @@ const rows: Record<string, Awaited<ReturnType<ConversationSummaryRepository["lis
 beforeEach(async () => {
   ready = true;
   active = await keySet("web-active");
-  const admin = await keySet("admin-active");
   config = createBffCredentialConfig({ audience: apiAudience, maxLifetimeSeconds: 300, issuers: {
     "xuyenviet-web-bff": { issuer: "xuyenviet-web-bff", active },
-    "xuyenviet-admin-bff": { issuer: "xuyenviet-admin-bff", active: admin },
   } });
   const identities: BrowserIdentityRepository = {
     async getSession(sessionId) { return sessionId === "session-1" ? { userId: "user-1", expires: new Date(Date.now() + 60_000), authorizationVersion: 1 } : sessionId === "session-2" ? { userId: "user-2", expires: new Date(Date.now() + 60_000), authorizationVersion: 1 } : null; },

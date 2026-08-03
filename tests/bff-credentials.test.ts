@@ -6,20 +6,19 @@ import { createBffCredentialConfig, createWebBffSigningConfig, parseBffCredentia
 import { BffCredentialError, mintWebBffCredential } from "@/server/bff-credentials";
 import { sessions, userRoles, users } from "@/db/schema";
 
-import { testDb } from "./helpers/db";
+import { resetTestDatabase, testDb } from "./helpers/db";
 
 let config: BffCredentialConfig;
 let webSigningConfig: WebBffSigningConfig;
 
 beforeEach(async () => {
+  await resetTestDatabase();
   const web = await keySet("web-active");
-  const admin = await keySet("admin-active");
   config = createBffCredentialConfig({
     audience: apiAudience,
     maxLifetimeSeconds: 300,
     issuers: {
       "xuyenviet-web-bff": { issuer: "xuyenviet-web-bff", active: web },
-      "xuyenviet-admin-bff": { issuer: "xuyenviet-admin-bff", active: admin },
     },
   });
   webSigningConfig = createWebBffSigningConfig({
@@ -123,24 +122,6 @@ describe("web BFF credentials", () => {
       ...webSigningConfig,
       active: { ...webSigningConfig.active, privateKey: { ...webSigningConfig.active.privateKey, x: "wrong" } },
     })).toThrow("Invalid web BFF signing configuration.");
-  });
-
-  test("rejects verifier keys and IDs shared across web and admin issuers", async () => {
-    const web = config.issuers["xuyenviet-web-bff"];
-    const admin = config.issuers["xuyenviet-admin-bff"];
-    const previous = await keySet("web-previous");
-    const expiration = new Date(Date.now() + 60_000);
-    const cases: BffCredentialConfig["issuers"][] = [
-      { "xuyenviet-web-bff": { ...web, active: admin.active }, "xuyenviet-admin-bff": admin },
-      { "xuyenviet-web-bff": { ...web, previous: { ...admin.active, verificationEndsAt: expiration } }, "xuyenviet-admin-bff": admin },
-      { "xuyenviet-web-bff": web, "xuyenviet-admin-bff": { ...admin, previous: { ...web.active, verificationEndsAt: expiration } } },
-      { "xuyenviet-web-bff": { ...web, previous: { kid: previous.kid, key: previous.key, verificationEndsAt: expiration } }, "xuyenviet-admin-bff": { ...admin, active: { kid: "admin-shared", key: { ...previous.key, kid: "admin-shared" } } } },
-      { "xuyenviet-web-bff": { ...web, previous: { kid: previous.kid, key: previous.key, verificationEndsAt: expiration } }, "xuyenviet-admin-bff": { ...admin, previous: { kid: "admin-previous", key: { ...previous.key, kid: "admin-previous" }, verificationEndsAt: expiration } } },
-    ];
-
-    for (const issuers of cases) {
-      expect(() => createBffCredentialConfig({ ...config, issuers })).toThrow("BFF issuer verification keys must be isolated.");
-    }
   });
 
   test("rejects non-integer lifetimes and JWKs that cannot be imported", () => {

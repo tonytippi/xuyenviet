@@ -9,7 +9,6 @@ import { sourceKnowledgeDraftExtractionPromptVersion } from "@/features/ai/promp
 import { AdminAuthorizationError, requireAdminSession } from "@/server/auth";
 import { runAuditedAdminMutation } from "@/server/mutations";
 
-import { isKnowledgeBatchIntakeError, submitKnowledgeSeedUrlBatch as submitKnowledgeSeedUrlBatchService } from "./batch-intake";
 import {
   extractKnowledgeDraftsFromSource as extractKnowledgeDraftsFromSourceService,
   isKnowledgeExtractionError,
@@ -17,7 +16,7 @@ import {
 } from "./extraction";
 import { getAdminFacebookCaptureReviewExtractionTarget } from "./facebook-capture-review-admin";
 import { enqueueKnowledgeExtractionJob } from "./extraction-jobs";
-import { markFacebookCaptureReviewStatus, markFacebookCaptureReviewStatusInTransaction, reopenFacebookCaptureForRecapture, requestFacebookCaptureRecapture, type FacebookCaptureReviewActor } from "./facebook-capture-review";
+import { markFacebookCaptureReviewStatus, markFacebookCaptureReviewStatusInTransaction, reopenFacebookCaptureForRecapture, type FacebookCaptureReviewActor } from "./facebook-capture-review";
 import {
   approveKnowledgeDraftBatchInTransaction,
   approveKnowledgeDraft as approveKnowledgeDraftService,
@@ -28,11 +27,8 @@ import {
 } from "./review";
 import { isSourceValidationError, normalizeTravelSourceInput, type TravelSourceInput } from "./sources";
 import { appendSourceCaptureVersion } from "./source-captures";
-import { rerunKnowledgeIngestionJob } from "./ingestion-jobs";
 import { isKnowledgeSuggestionError, suggestKnowledgeFromSourceUrl as suggestKnowledgeFromSourceUrlService } from "./suggestions";
 import { resolveKnowledgeRecommendation } from "./recommendations";
-import { sealClosedKnowledgeSamplingPolicyForAdmin } from "./sampling-maintenance";
-import { removeKnowledgeSource, SourceRemovalError } from "./source-removal";
 
 export type SafeSourceResult = Pick<
   typeof sources.$inferSelect,
@@ -83,31 +79,6 @@ export async function submitTravelSourceForAiReading(input: TravelSourceInput): 
 
 export async function extractKnowledgeDraftsFromSource(sourceId: string, options: { preProviderGuard?: KnowledgeDraftExtractionPreProviderGuard } = {}) {
   return extractKnowledgeDraftsFromSourceService(sourceId, options);
-}
-
-export async function removeKnowledgeSourceForm(formData: FormData) {
-  const session = await requireAdminSession();
-  const sourceId = getOptionalFormString(formData, "sourceId") ?? "";
-  const reason = getOptionalFormString(formData, "reason");
-  let result: Awaited<ReturnType<typeof removeKnowledgeSource>> | null = null;
-  let error: string | null = null;
-
-  try {
-    if (reason !== "withdrawn" && reason !== "inaccessible" && reason !== "removed") throw new SourceRemovalError("Lý do gỡ nguồn không hợp lệ.");
-    result = await removeKnowledgeSource({ sourceId, reason, actor: { userId: session.userId, email: session.email } });
-  } catch (cause) {
-    if (cause instanceof AdminAuthorizationError || (cause instanceof Error && cause.name === "AdminAuthorizationError")) throw cause;
-    error = cause instanceof SourceRemovalError ? "Không thể gỡ nguồn này." : "Không thể hoàn tất thao tác gỡ nguồn.";
-  }
-
-  if (error) redirect(`/admin/knowledge/intake?removeError=${encodeURIComponent(error)}`);
-  redirect(`/admin/knowledge/intake?sourceRemoved=${encodeURIComponent(result?.status === "already_completed" ? "already" : "completed")}`);
-}
-
-export async function sealClosedKnowledgeSamplingPolicyForm(formData: FormData) {
-  const policyId = getOptionalFormString(formData, "policyId");
-  if (policyId) await sealClosedKnowledgeSamplingPolicyForAdmin(policyId);
-  redirect("/admin/knowledge/progress");
 }
 
 async function markFacebookCaptureExtractionFailed(input: { reviewId: string; actor: FacebookCaptureReviewActor; extractionError: string }) {
@@ -162,9 +133,6 @@ export async function suggestKnowledgeFromSourceUrl(sourceId: string) {
   return suggestKnowledgeFromSourceUrlService(sourceId);
 }
 
-export async function submitKnowledgeSeedUrlBatch(input: Parameters<typeof submitKnowledgeSeedUrlBatchService>[0]) {
-  return submitKnowledgeSeedUrlBatchService(input);
-}
 
 export async function markFacebookCaptureReviewStatusAsAdmin(input: {
   reviewId: string;
@@ -178,30 +146,6 @@ export async function markFacebookCaptureReviewStatusAsAdmin(input: {
   return markFacebookCaptureReviewStatus(getDb(), { ...input, actor });
 }
 
-export async function rerunFacebookCanonicalIngestionForm(formData: FormData) {
-  const reviewId = getOptionalFormString(formData, "reviewId") ?? "";
-  let status: "rerun" | "not_rerunnable" = "not_rerunnable";
-
-  try {
-    status = await runAuditedAdminMutation({
-        audit: {
-          operation: "update",
-          targetType: "knowledge_ingestion_job",
-          afterSummary: "Operator re-ran Facebook canonical ingestion with the current pipeline.",
-        },
-        action: async (_session, transaction) => {
-          const [review] = await transaction.select({ sourceId: facebookCaptureReviews.sourceId, captureVersionId: facebookCaptureReviews.captureVersionId, ingestionJobId: knowledgeIngestionJobs.id }).from(facebookCaptureReviews).innerJoin(knowledgeIngestionJobs, eq(knowledgeIngestionJobs.captureVersionId, facebookCaptureReviews.captureVersionId)).where(eq(facebookCaptureReviews.id, reviewId)).limit(1);
-        if (!review?.captureVersionId) return "not_rerunnable" as const;
-        const rerun = await rerunKnowledgeIngestionJob({ jobId: review.ingestionJobId, sourceId: review.sourceId, captureVersionId: review.captureVersionId }, transaction);
-        return rerun ? "rerun" as const : "not_rerunnable" as const;
-      },
-    });
-  } catch (error) {
-    if (error instanceof AdminAuthorizationError || (error instanceof Error && error.name === "AdminAuthorizationError")) throw error;
-  }
-
-  redirect(getFacebookCaptureRedirectPath(reviewId, status === "rerun" ? { ingestionRerun: "1" } : { ingestionRerunError: "1" }));
-}
 
 export async function updateKnowledgeDraftForm(formData: FormData) {
   const draftId = getOptionalFormString(formData, "draftId") ?? "";
@@ -335,31 +279,6 @@ export async function reopenFacebookCaptureForRecaptureForm(formData: FormData) 
   redirect(redirectPath);
 }
 
-export async function requestFacebookCaptureRecaptureForm(formData: FormData) {
-  const session = await requireAdminSession();
-  const actor: FacebookCaptureReviewActor = { userId: session.userId, email: session.email };
-  const reviewId = getOptionalFormString(formData, "reviewId") ?? "";
-  const reason = getOptionalFormString(formData, "recaptureReason") ?? "Recapture requested by operator";
-  let redirectPath = getFacebookCaptureRedirectPath(reviewId, { recaptureError: "Không thể đưa capture này về hàng đợi recapture." });
-
-  try {
-    const statusResult = await requestFacebookCaptureRecapture(getDb(), { reviewId, actor, reason });
-
-    if (statusResult.status === "updated") {
-      redirectPath = getFacebookCaptureRedirectPath(statusResult.review.id, { recaptureRequested: "1" });
-    } else {
-      redirectPath = getFacebookCaptureRedirectPath(reviewId, { recaptureStatus: statusResult.status });
-    }
-  } catch (error) {
-    if (error instanceof AdminAuthorizationError || (error instanceof Error && error.name === "AdminAuthorizationError")) {
-      throw error;
-    }
-
-    redirectPath = getFacebookCaptureRedirectPath(reviewId, { recaptureError: "Lý do recapture không an toàn hoặc capture này không thể recapture." });
-  }
-
-  redirect(redirectPath);
-}
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function extractAndApproveFacebookCaptureDraftsForm(formData: FormData) {
@@ -538,38 +457,6 @@ export async function submitTravelSourceForm(formData: FormData) {
   redirect(`/admin/knowledge/intake?success=1&sourceId=${encodeURIComponent(source?.id ?? "")}`);
 }
 
-export async function submitKnowledgeSeedUrlBatchForm(formData: FormData) {
-  let result: Awaited<ReturnType<typeof submitKnowledgeSeedUrlBatch>> | null = null;
-  let failureMessage: string | null = null;
-
-  try {
-    result = await submitKnowledgeSeedUrlBatch({
-      urls: getOptionalFormString(formData, "batchUrls") ?? "",
-      label: getOptionalFormString(formData, "batchLabel"),
-      publisher: getOptionalFormString(formData, "batchPublisher"),
-      collectedDate: getOptionalFormString(formData, "batchCollectedDate"),
-    });
-  } catch (error) {
-    if (error instanceof AdminAuthorizationError || (error instanceof Error && error.name === "AdminAuthorizationError")) {
-      throw error;
-    }
-
-    failureMessage = isKnowledgeBatchIntakeError(error) && error instanceof Error ? error.message : "Không thể nạp batch URL. Vui lòng kiểm tra lại dữ liệu.";
-  }
-
-  if (failureMessage) {
-    redirect(`/admin/knowledge/intake?batchError=${encodeURIComponent(failureMessage)}`);
-  }
-
-  if (!result) {
-    redirect(`/admin/knowledge/intake?batchError=${encodeURIComponent("Không thể nạp batch URL. Vui lòng thử lại.")}`);
-  }
-
-  redirect(
-    `/admin/knowledge/intake?batchId=${encodeURIComponent(result.batchId)}&batchTotal=${result.totalItems}&batchPending=${result.pendingCount}&batchFailed=${result.failedCount}&batchDuplicate=${result.duplicateCount}`,
-  );
-}
-
 export async function resolveKnowledgeRecommendationForm(formData: FormData) {
   const session = await requireAdminSession();
   const recommendationId = getOptionalFormString(formData, "recommendationId") ?? "";
@@ -691,7 +578,7 @@ function getFacebookCaptureRedirectPath(reviewId: string, params: Record<string,
   }
 
   const query = searchParams.toString();
-  return `/admin/knowledge/facebook-captures/${pathReviewId}${query ? `?${query}` : ""}`;
+  return `https://admin.xuyenviet.app/knowledge/facebook-captures/${pathReviewId}${query ? `?${query}` : ""}`;
 }
 
 function getFacebookCaptureQueueRedirectPath(detailPath: string) {
@@ -703,5 +590,5 @@ function getFacebookCaptureQueueRedirectPath(detailPath: string) {
     if (value) params.set(key, value);
   }
 
-  return `/admin/knowledge/facebook-captures?${params.toString()}`;
+  return `https://admin.xuyenviet.app/knowledge/facebook-captures?${params.toString()}`;
 }

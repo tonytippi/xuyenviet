@@ -14,12 +14,12 @@ import { resetTestDatabase, testDb } from "./helpers/db";
 
 let app: INestApplication;
 let config: BffCredentialConfig;
-const browserAuth = { googleClientId: "client", googleClientSecret: "secret", callbackUrl: "https://web.xuyenviet.vn/auth/google/callback", allowedOrigins: ["https://web.xuyenviet.vn"], allowedReturnUrls: ["https://web.xuyenviet.vn/trips"], sessionLookupKey: "b".repeat(32), csrfKey: "c".repeat(32), oauthTransactionProtectionKey: "d".repeat(32), cookieName: "__Host-xuyenviet-session" } as const;
+const browserAuth = { googleClientId: "client", googleClientSecret: "secret", callbackUrl: "https://api.xuyenviet.app/auth/google/callback", allowedOrigins: ["https://web.xuyenviet.vn", "https://admin.xuyenviet.app"], allowedReturnUrls: ["https://web.xuyenviet.vn/trips", "https://admin.xuyenviet.app/", "https://admin.xuyenviet.app/knowledge/facebook-captures"], sessionLookupKey: "b".repeat(32), csrfKey: "c".repeat(32), oauthTransactionProtectionKey: "d".repeat(32), cookieName: "__Host-xuyenviet-session" } as const;
 
 beforeEach(async () => {
   await resetTestDatabase();
-  const active = await keySet("web-active"); const admin = await keySet("admin-active");
-  config = createBffCredentialConfig({ audience: apiAudience, maxLifetimeSeconds: 300, issuers: { "xuyenviet-web-bff": { issuer: "xuyenviet-web-bff", active }, "xuyenviet-admin-bff": { issuer: "xuyenviet-admin-bff", active: admin } } });
+  const active = await keySet("web-active");
+  config = createBffCredentialConfig({ audience: apiAudience, maxLifetimeSeconds: 300, issuers: { "xuyenviet-web-bff": { issuer: "xuyenviet-web-bff", active } } });
   const ApiModule = createApiModule(config, browserRepository(), { conversationSummaries: { async listOwnedConversationSummaryRows() { return []; } }, schemaVersions: { async hasCompatibleSchemaVersion() { return true; }, async recordSchemaVersion() {} }, browserAuth });
   @Module({ imports: [ApiModule] })
   class TestModule {}
@@ -51,6 +51,11 @@ describe("browser Google identity callback", () => {
       { XV_BROWSER_ALLOWED_RETURN_URLS: "https://web.xuyenviet.vn:443/trips" },
       { XV_BROWSER_ALLOWED_RETURN_URLS: "https://web.xuyenviet.vn/trips", XV_BROWSER_GOOGLE_CALLBACK_URL: "https://other.xuyenviet.vn/auth/google/callback" },
     ]) expect(() => getBrowserAuthConfig({ ...environment, ...invalid })).toThrow("Invalid browser authentication configuration.");
+  });
+
+  test("allows configured static admin returns and rejects dynamic detail returns", async () => {
+    await request(app.getHttpServer()).get("/auth/google").query({ returnUrl: "https://admin.xuyenviet.app/knowledge/facebook-captures" }).expect(302);
+    await request(app.getHttpServer()).get("/auth/google").query({ returnUrl: "https://admin.xuyenviet.app/knowledge/facebook-captures/detail-1" }).expect(401);
   });
 
   test("does not resolve or link a Google profile whose email is not verified", async () => {
@@ -279,7 +284,7 @@ async function startBrowserApp(schemaReady = true) {
 
 function randomTransactionId() { return crypto.randomUUID(); }
 
-function browserRepository() { return createPostgresApiIdentityRepository(getTestDatabaseUrl(), "a".repeat(32), browserAuth.sessionLookupKey, browserAuth.oauthTransactionProtectionKey); }
+function browserRepository() { return createPostgresApiIdentityRepository(getTestDatabaseUrl(), browserAuth.sessionLookupKey, browserAuth.oauthTransactionProtectionKey); }
 
 function callback(id: string, state: string) { return request(app.getHttpServer()).get(`/auth/google/callback?code=code&state=${id}.${state}`).set("Cookie", `__Host-xuyenviet-browser-oauth=${id}`); }
 

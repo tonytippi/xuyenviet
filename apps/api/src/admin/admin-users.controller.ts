@@ -3,7 +3,7 @@ import { BadRequestException, Body, Controller, Delete, Get, HttpCode, HttpStatu
 import { managedUserRoles, parseAdminUserRosterCursor, parseAdminUserRosterQuery, parseUserRoleCommand, type RequestPrincipal } from "@xuyenviet/contracts";
 import { changeGovernedUserRole, listGovernedUsers, type UserRoleGovernancePort, UserRoleGovernancePolicyError } from "@xuyenviet/domain";
 
-import { RequiresAdminCapability } from "../auth/admin-capability.decorator";
+import { AllowsAdminBrowserSession, RequiresAdminCapability } from "../auth/admin-capability.decorator";
 
 export const USER_ROLE_GOVERNANCE_PORT = Symbol("USER_ROLE_GOVERNANCE_PORT");
 
@@ -20,6 +20,7 @@ class UserRoleBody {
 
 @Controller("v1/admin/users")
 @RequiresAdminCapability("admin.role.governance")
+@AllowsAdminBrowserSession()
 export class AdminUsersController {
   constructor(@Inject(USER_ROLE_GOVERNANCE_PORT) private readonly governance: UserRoleGovernancePort) {}
 

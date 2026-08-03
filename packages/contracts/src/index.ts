@@ -1,4 +1,4 @@
-export const bffIssuers = ["xuyenviet-web-bff", "xuyenviet-admin-bff"] as const;
+export const bffIssuers = ["xuyenviet-web-bff"] as const;
 export type BffIssuer = (typeof bffIssuers)[number];
 
 export const apiAudience = "api.railway.internal" as const;
@@ -29,26 +29,273 @@ export type RequestPrincipal = {
   tokenId?: string;
 };
 
-export const adminCapabilities = ["admin.workspace.read", "admin.role.governance", "admin.ai-model-catalog.write"] as const;
+export const adminCapabilities = ["admin.workspace.read", "admin.role.governance", "admin.ai-model-catalog.write", "admin.knowledge.write"] as const;
 export type AdminCapability = (typeof adminCapabilities)[number];
 
 /** This declaration is shared by the BFF admission check and API controllers. */
 export function permitsAdminCapability(roles: readonly RequestRole[], capability: AdminCapability): boolean {
-  if (capability === "admin.workspace.read") return roles.includes("operator") || roles.includes("admin");
+  if (capability === "admin.workspace.read" || capability === "admin.knowledge.write") return roles.includes("operator") || roles.includes("admin");
   return roles.includes("admin");
 }
 
-export type AdminIdentityHandoff = {
-  subject: string;
-  sessionId: string;
-  authorizationVersion: number;
-  roles: RequestRole[];
+export type AdminOverviewCoverage = {
+  targetActiveCards: number;
+  activeEvidenceGroundedCards: number;
+  remainingActiveCards: number;
+  isComplete: boolean;
+  activeCommunityObservations: number;
+  activeCommunityPatterns: number;
+  caveatOnlyHighRiskCards: number;
+  pendingReviewCards: number;
+  pendingVerificationCards: number;
+  actionableWork: Array<{ kind: "recommendation"; reason: string; priority: number; count: number } | { kind: "source_intake"; reason: "create" | "update" | "conflict"; priority: null; count: number }>;
+  byType: Array<{ type: string; count: number }>;
+  byRouteOrLocation: Array<{ routeOrLocation: string; count: number }>;
 };
 
-export type AdminIdentityHandoffRequest = { sessionId: string; subject?: string };
-export type AdminIdentityHandoffResponse = { identity: AdminIdentityHandoff };
-export type AdminReadinessRequest = { declaration: SchemaCompatibilityDeclaration };
-export type AdminReadinessResponse = { ready: boolean };
+/** Aggregate-only operational projection. It intentionally contains no source or card material. */
+export type AdminOverview = {
+  sourcesReadyForProcessing: number;
+  processingJobs: number;
+  failedProcessingJobs: number;
+  draftsAwaitingReview: number;
+  openRecommendations: number;
+  activeKnowledgeCards: number;
+  coverage: AdminOverviewCoverage;
+};
+
+export const adminQualityRanges = ["7d", "30d", "90d", "all"] as const;
+export const adminQualityPromptTypes = ["magic_moment_family_trip", "sparse_data", "freshness_sensitive", "service_activity", "route_logistics"] as const;
+export type AdminQualityPromptType = (typeof adminQualityPromptTypes)[number];
+export type AdminQualityQuery = { promptType: AdminQualityPromptType | "all"; range: (typeof adminQualityRanges)[number] };
+export type AdminQualityDashboard = {
+  filters: { promptType: AdminQualityQuery["promptType"]; range: AdminQualityQuery["range"]; since: string | null };
+  feedback: { total: number; useful: number; notUseful: number; usefulRate: number | null };
+  evaluation: { totalResults: number; scoredResults: number; failedResults: number; averageScore: number | null; averageByDimension: Record<string, number | null>; counterMetrics: { unsupportedClaims: number; missingUncertainty: number; noBetterThanGeneric: number } };
+  readiness: { status: "ready" | "not_ready"; checks: Array<{ key: string; label: string; passed: boolean; current: number; target: number; missing: number; message: string }>; missingSignals: string[]; diagnostics: { zeroCountTypes: string[]; zeroCountRoutes: string[]; evaluationQualityGaps: number } };
+  recentResults: Array<{ promptType: AdminQualityPromptType; status: string; createdAt: string; averageScore: number | null; flags: Record<string, boolean>; likelyIssues: string[] }>;
+  policySignals: Record<string, unknown>;
+};
+
+export function parseAdminQualityQuery(value: unknown): AdminQualityQuery | null {
+  if (!isRecord(value) || Object.keys(value).some((key) => key !== "promptType" && key !== "range")) return null;
+  const promptType = value.promptType === undefined ? "all" : value.promptType;
+  const range = value.range === undefined ? "30d" : value.range;
+  return (promptType === "all" || adminQualityPromptTypes.includes(promptType as AdminQualityPromptType)) && adminQualityRanges.includes(range as AdminQualityQuery["range"]) ? { promptType: promptType as AdminQualityQuery["promptType"], range: range as AdminQualityQuery["range"] } : null;
+}
+
+/** Quality is aggregate-only: reject unexpected keys and any non-ISO timestamps. */
+export function parseAdminQualityDashboard(value: unknown): AdminQualityDashboard | null {
+  if (!isRecord(value) || !hasExactKeys(value, ["filters", "feedback", "evaluation", "readiness", "recentResults", "policySignals"])) return null;
+  const filters = value.filters;
+  const feedback = value.feedback;
+  const evaluation = value.evaluation;
+  const readiness = value.readiness;
+  if (!isRecord(filters) || !hasExactKeys(filters, ["promptType", "range", "since"]) || !parseAdminQualityQuery({ promptType: filters.promptType, range: filters.range }) || !isRecord(feedback) || !hasExactKeys(feedback, ["total", "useful", "notUseful", "usefulRate"]) || !isRecord(evaluation) || !hasExactKeys(evaluation, ["totalResults", "scoredResults", "failedResults", "averageScore", "averageByDimension", "counterMetrics"]) || !isRecord(readiness) || !hasExactKeys(readiness, ["status", "checks", "missingSignals", "diagnostics"]) || !Array.isArray(value.recentResults) || value.recentResults.length > 10 || !isRecord(value.policySignals)) return null;
+  const nonNegative = (item: unknown) => Number.isSafeInteger(item) && (item as number) >= 0;
+  if (![feedback.total, feedback.useful, feedback.notUseful, evaluation.totalResults, evaluation.scoredResults, evaluation.failedResults].every(nonNegative) || !(feedback.usefulRate === null || typeof feedback.usefulRate === "number") || !(evaluation.averageScore === null || typeof evaluation.averageScore === "number")) return null;
+  const since = filters.since;
+  if (!(since === null || isoTimestamp(since)) || !value.recentResults.every(isAdminQualityRecentResult) || containsAdminQualityInternalDetail(value.policySignals)) return null;
+  return value as AdminQualityDashboard;
+}
+
+function isAdminQualityRecentResult(value: unknown): boolean {
+  return isRecord(value) && hasExactKeys(value, ["promptType", "status", "createdAt", "averageScore", "flags", "likelyIssues"])
+    && adminQualityPromptTypes.includes(value.promptType as AdminQualityPromptType)
+    && typeof value.status === "string" && value.status.length <= 64
+    && isoTimestamp(value.createdAt)
+    && (value.averageScore === null || typeof value.averageScore === "number")
+    && isRecord(value.flags) && Object.values(value.flags).every((flag) => typeof flag === "boolean")
+    && Array.isArray(value.likelyIssues) && value.likelyIssues.every((issue) => typeof issue === "string" && issue.length <= 160);
+}
+
+function containsAdminQualityInternalDetail(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(containsAdminQualityInternalDetail);
+  if (!isRecord(value)) return false;
+  return Object.entries(value).some(([key, item]) => ["id", "runId", "resultId", "assistantMessageId", "retrievalDecisionId", "provenanceId", "comment", "comments", "detail", "details"].includes(key) || containsAdminQualityInternalDetail(item));
+}
+
+export const adminKnowledgeClosedSamplingPolicyLimit = 100;
+export type AdminKnowledgeClosedSamplingPolicy = { id: string; cohortKey: string; enrollmentSealedAt: string | null };
+export type AdminKnowledgeSamplingPolicySealResult = { status: "sealed"; candidateCount: number; selectedCount: number } | { status: "incomplete" } | { status: "unavailable" };
+/** Coverage is aggregate-only; policy identifiers are included solely to issue a seal command. */
+export type AdminKnowledgeCoverage = { progress: AdminOverviewCoverage; closedSamplingPolicies: AdminKnowledgeClosedSamplingPolicy[] };
+
+export function parseAdminKnowledgeCoverage(value: unknown): AdminKnowledgeCoverage | null {
+  if (!isRecord(value) || !hasExactKeys(value, ["progress", "closedSamplingPolicies"]) || !Array.isArray(value.closedSamplingPolicies) || value.closedSamplingPolicies.length > adminKnowledgeClosedSamplingPolicyLimit) return null;
+  const progress = parseAdminOverview({ sourcesReadyForProcessing: 0, processingJobs: 0, failedProcessingJobs: 0, draftsAwaitingReview: 0, openRecommendations: 0, activeKnowledgeCards: 0, coverage: value.progress })?.coverage;
+  return progress && [progress.targetActiveCards, progress.activeEvidenceGroundedCards, progress.remainingActiveCards, progress.activeCommunityObservations, progress.activeCommunityPatterns, progress.caveatOnlyHighRiskCards, progress.pendingReviewCards, progress.pendingVerificationCards].every(Number.isSafeInteger) && progress.actionableWork.length <= 1_000 && progress.byType.length <= 100 && progress.byRouteOrLocation.length <= 100 && value.closedSamplingPolicies.every((policy) => isRecord(policy) && hasExactKeys(policy, ["id", "cohortKey", "enrollmentSealedAt"]) && identifier(policy.id) && boundedText(policy.cohortKey, 160) && (policy.enrollmentSealedAt === null || isoTimestamp(policy.enrollmentSealedAt))) ? { progress, closedSamplingPolicies: value.closedSamplingPolicies as AdminKnowledgeClosedSamplingPolicy[] } : null;
+}
+export function parseAdminKnowledgeSamplingPolicySealResult(value: unknown): AdminKnowledgeSamplingPolicySealResult | null {
+  if (!isRecord(value) || !("status" in value)) return null;
+  if (hasExactKeys(value, ["status", "candidateCount", "selectedCount"]) && value.status === "sealed" && Number.isInteger(value.candidateCount) && (value.candidateCount as number) >= 0 && Number.isInteger(value.selectedCount) && (value.selectedCount as number) >= 0 && (value.selectedCount as number) <= (value.candidateCount as number)) return value as AdminKnowledgeSamplingPolicySealResult;
+  return hasExactKeys(value, ["status"]) && (value.status === "incomplete" || value.status === "unavailable") ? value as AdminKnowledgeSamplingPolicySealResult : null;
+}
+
+export const adminKnowledgeIntakeSourceLimit = 100;
+export const adminFacebookCapturePageSize = 25;
+export const adminFacebookCaptureMaxPage = 200;
+export const adminFacebookCaptureQueueStatuses = ["in_progress", "needs_attention", "failed", "published", "suppressed"] as const;
+export type AdminFacebookCaptureQueueStatus = (typeof adminFacebookCaptureQueueStatuses)[number];
+export type AdminFacebookCaptureOperationState = "awaiting_ingestion_job" | "recapture_pending";
+export type AdminFacebookCaptureJob = { stage: "queued" | "triaging" | "extracting" | "judging" | "relating" | "published" | "suppressed" | "review_recommended" | "verify_first" | "failed"; protocolVersion: 1 | 2; updatedAt: string; lastErrorCode: string | null; discoveredCandidateCount: number; terminalCandidateCount: number; failedCandidateCount: number };
+export type AdminFacebookCapture = { id: string; sourceLabel: string; displayUrl: string | null; reviewStatus: "needs_review" | "rejected" | "extracted" | "extracted_approved" | "extraction_failed"; capturedAt: string | null; captureMethod: string | null; groupName: string | null; authorText: string | null; postCreatedAt: string | null; updatedAt: string; ingestionJob: AdminFacebookCaptureJob | null; operationState: AdminFacebookCaptureOperationState | null };
+export type AdminFacebookCaptureQueue = { status: AdminFacebookCaptureQueueStatus; page: number; pageSize: number; totalCount: number; counts: Record<AdminFacebookCaptureQueueStatus, number>; items: AdminFacebookCapture[] };
+export type AdminFacebookCaptureDetail = AdminFacebookCapture & { canRecapture: boolean; canRerunIngestion: boolean };
+export type AdminFacebookCaptureCommandResult = { status: "updated" | "not_found" | "not_rerunnable" | "invalid_transition" | "already_extracted" | "stale_review" };
+
+export function parseAdminFacebookCaptureQueueQuery(value: unknown): { status: AdminFacebookCaptureQueueStatus; page: number } | null {
+  if (!isRecord(value) || Object.keys(value).some((key) => key !== "status" && key !== "page")) return null;
+  const status = value.status === undefined ? "in_progress" : value.status;
+  const page = value.page === undefined ? 1 : Number(value.page);
+  return adminFacebookCaptureQueueStatuses.includes(status as AdminFacebookCaptureQueueStatus) && Number.isInteger(page) && page >= 1 && page <= adminFacebookCaptureMaxPage ? { status: status as AdminFacebookCaptureQueueStatus, page } : null;
+}
+export function parseAdminFacebookCaptureRecaptureRequest(value: unknown): { reason: string } | null { return isRecord(value) && hasExactKeys(value, ["reason"]) && typeof value.reason === "string" && value.reason.trim() === value.reason && value.reason.length >= 1 && value.reason.length <= 500 && !/[\r\n\u0000]/.test(value.reason) ? { reason: value.reason } : null; }
+export function parseAdminFacebookCaptureCommandResult(value: unknown): AdminFacebookCaptureCommandResult | null { return isRecord(value) && hasExactKeys(value, ["status"]) && ["updated", "not_found", "not_rerunnable", "invalid_transition", "already_extracted", "stale_review"].includes(value.status as string) ? value as AdminFacebookCaptureCommandResult : null; }
+export function parseAdminFacebookCaptureQueue(value: unknown): AdminFacebookCaptureQueue | null {
+  if (!isRecord(value) || !hasExactKeys(value, ["status", "page", "pageSize", "totalCount", "counts", "items"]) || !adminFacebookCaptureQueueStatuses.includes(value.status as AdminFacebookCaptureQueueStatus) || !Number.isInteger(value.page) || !Number.isInteger(value.pageSize) || value.pageSize !== adminFacebookCapturePageSize || !Number.isInteger(value.totalCount) || (value.totalCount as number) < 0 || !isRecord(value.counts) || !Array.isArray(value.items) || value.items.length > adminFacebookCapturePageSize) return null;
+  const counts = value.counts as Record<string, unknown>;
+  return adminFacebookCaptureQueueStatuses.every((status) => Number.isInteger(counts[status]) && (counts[status] as number) >= 0) && value.items.every(isAdminFacebookCapture) ? value as AdminFacebookCaptureQueue : null;
+}
+export function parseAdminFacebookCaptureDetail(value: unknown): AdminFacebookCaptureDetail | null { if (!isRecord(value) || !hasExactKeys(value, ["id", "sourceLabel", "displayUrl", "reviewStatus", "capturedAt", "captureMethod", "groupName", "authorText", "postCreatedAt", "updatedAt", "ingestionJob", "operationState", "canRecapture", "canRerunIngestion"]) || typeof value.canRecapture !== "boolean" || typeof value.canRerunIngestion !== "boolean") return null; const { canRecapture: _canRecapture, canRerunIngestion: _canRerunIngestion, ...capture } = value; return isAdminFacebookCapture(capture) ? value as AdminFacebookCaptureDetail : null; }
+function isAdminFacebookCapture(value: unknown): value is AdminFacebookCapture {
+  if (!isRecord(value) || !hasExactKeys(value, ["id", "sourceLabel", "displayUrl", "reviewStatus", "capturedAt", "captureMethod", "groupName", "authorText", "postCreatedAt", "updatedAt", "ingestionJob", "operationState"]) || typeof value.id !== "string" || value.id.length < 1 || value.id.length > 128 || typeof value.sourceLabel !== "string" || value.sourceLabel.length > 500 || !["displayUrl", "capturedAt", "captureMethod", "groupName", "authorText", "postCreatedAt"].every((key) => typeof value[key] === "string" || value[key] === null) || !["needs_review", "rejected", "extracted", "extracted_approved", "extraction_failed"].includes(value.reviewStatus as string) || typeof value.updatedAt !== "string" || ![null, "awaiting_ingestion_job", "recapture_pending"].includes(value.operationState as null)) return false;
+  const job = value.ingestionJob;
+  return job === null || isRecord(job) && hasExactKeys(job, ["stage", "protocolVersion", "updatedAt", "lastErrorCode", "discoveredCandidateCount", "terminalCandidateCount", "failedCandidateCount"]) && ["queued", "triaging", "extracting", "judging", "relating", "published", "suppressed", "review_recommended", "verify_first", "failed"].includes(job.stage as string) && (job.protocolVersion === 1 || job.protocolVersion === 2) && typeof job.updatedAt === "string" && (typeof job.lastErrorCode === "string" || job.lastErrorCode === null) && [job.discoveredCandidateCount, job.terminalCandidateCount, job.failedCandidateCount].every((count) => Number.isInteger(count) && (count as number) >= 0);
+}
+export const adminYoutubeCapturePageSize = 25;
+export const adminYoutubeCaptureMaxPage = 200;
+export const adminYoutubeEvidenceCategories = ["road_condition", "route", "toll", "fuel", "charging", "rest_stop", "parking", "accommodation", "food", "attraction", "safety", "weather", "cost"] as const;
+export type AdminYoutubeEvidenceCategory = (typeof adminYoutubeEvidenceCategories)[number];
+export type AdminYoutubeCaptureEvidence = { category: AdminYoutubeEvidenceCategory; claim: string; evidenceType: "spoken" | "on_screen" | "both"; timestampStartSeconds: number; timestampEndSeconds: number; confidence: "high" | "medium" | "low"; freshnessSensitive: boolean; excerpt: string; uncertaintyOrCondition: string | null };
+export type AdminYoutubeCaptureIngestionJob = { stage: "queued" | "triaging" | "extracting" | "judging" | "relating" | "published" | "suppressed" | "review_recommended" | "verify_first" | "failed"; updatedAt: string };
+export type AdminYoutubeCapture = { sourceId: string; sourceLabel: string; displayUrl: string | null; createdAt: string; capturedAt: string | null; captureMethod: "gemini_youtube_url"; model: string | null; promptVersion: string | null; evidenceCount: number; ingestionJob: AdminYoutubeCaptureIngestionJob | null };
+export type AdminYoutubeCaptureQueue = { page: number; pageSize: number; totalCount: number; items: AdminYoutubeCapture[] };
+export type AdminYoutubeCaptureDetail = AdminYoutubeCapture & { evidence: AdminYoutubeCaptureEvidence[] };
+
+export function parseAdminYoutubeCaptureQueueQuery(value: unknown): { page: number } | null {
+  if (!isRecord(value) || Object.keys(value).some((key) => key !== "page")) return null;
+  const page = value.page === undefined ? 1 : Number(value.page);
+  return Number.isInteger(page) && page >= 1 && page <= adminYoutubeCaptureMaxPage ? { page } : null;
+}
+export function parseAdminYoutubeCaptureQueue(value: unknown): AdminYoutubeCaptureQueue | null {
+  if (!isRecord(value) || !hasExactKeys(value, ["page", "pageSize", "totalCount", "items"]) || !Number.isInteger(value.page) || (value.page as number) < 1 || (value.page as number) > adminYoutubeCaptureMaxPage || value.pageSize !== adminYoutubeCapturePageSize || !Number.isInteger(value.totalCount) || (value.totalCount as number) < 0 || !Array.isArray(value.items) || value.items.length > adminYoutubeCapturePageSize || !value.items.every(isAdminYoutubeCapture)) return null;
+  return value as AdminYoutubeCaptureQueue;
+}
+export function parseAdminYoutubeCaptureDetail(value: unknown): AdminYoutubeCaptureDetail | null {
+  if (!isRecord(value) || !hasExactKeys(value, ["sourceId", "sourceLabel", "displayUrl", "createdAt", "capturedAt", "captureMethod", "model", "promptVersion", "evidenceCount", "ingestionJob", "evidence"]) || !Array.isArray(value.evidence) || value.evidence.length < 1 || value.evidence.length > 80) return null;
+  const { evidence, ...capture } = value;
+  return isAdminYoutubeCapture(capture) && evidence.every(isAdminYoutubeCaptureEvidence) ? value as AdminYoutubeCaptureDetail : null;
+}
+function isAdminYoutubeCapture(value: unknown): value is AdminYoutubeCapture {
+  if (!isRecord(value) || !hasExactKeys(value, ["sourceId", "sourceLabel", "displayUrl", "createdAt", "capturedAt", "captureMethod", "model", "promptVersion", "evidenceCount", "ingestionJob"]) || !identifier(value.sourceId) || !boundedText(value.sourceLabel, 500) || !isoTimestamp(value.createdAt) || value.captureMethod !== "gemini_youtube_url" || !["displayUrl", "capturedAt", "model", "promptVersion"].every((key) => value[key] === null || typeof value[key] === "string") || !Number.isInteger(value.evidenceCount) || (value.evidenceCount as number) < 1 || (value.evidenceCount as number) > 80) return false;
+  if (typeof value.displayUrl === "string" && value.displayUrl.length > 500 || typeof value.capturedAt === "string" && !isoTimestamp(value.capturedAt) || typeof value.model === "string" && !boundedText(value.model, 160) || typeof value.promptVersion === "string" && !boundedText(value.promptVersion, 160)) return false;
+  const job = value.ingestionJob;
+  return job === null || isRecord(job) && hasExactKeys(job, ["stage", "updatedAt"]) && ["queued", "triaging", "extracting", "judging", "relating", "published", "suppressed", "review_recommended", "verify_first", "failed"].includes(job.stage as string) && isoTimestamp(job.updatedAt);
+}
+function isAdminYoutubeCaptureEvidence(value: unknown): value is AdminYoutubeCaptureEvidence {
+  return isRecord(value) && hasExactKeys(value, ["category", "claim", "evidenceType", "timestampStartSeconds", "timestampEndSeconds", "confidence", "freshnessSensitive", "excerpt", "uncertaintyOrCondition"])
+    && adminYoutubeEvidenceCategories.includes(value.category as AdminYoutubeEvidenceCategory) && boundedText(value.claim, 500) && ["spoken", "on_screen", "both"].includes(value.evidenceType as string) && Number.isInteger(value.timestampStartSeconds) && (value.timestampStartSeconds as number) >= 0 && Number.isInteger(value.timestampEndSeconds) && (value.timestampEndSeconds as number) >= (value.timestampStartSeconds as number) && ["high", "medium", "low"].includes(value.confidence as string) && typeof value.freshnessSensitive === "boolean" && boundedText(value.excerpt, 240) && (value.uncertaintyOrCondition === null || boundedText(value.uncertaintyOrCondition, 400));
+}
+function boundedText(value: unknown, maximum: number): value is string { return typeof value === "string" && value.trim() === value && value.length > 0 && value.length <= maximum; }
+function isoTimestamp(value: unknown): value is string { return typeof value === "string" && value.length <= 100 && !Number.isNaN(Date.parse(value)); }
+export const adminKnowledgeIntakeBatchLimit = 5;
+export const adminKnowledgeSeedBatchUrlLimit = 50;
+export const adminKnowledgeSeedBatchItemLimit = 50;
+export const adminKnowledgeSeedStatuses = ["pending", "reading", "extracted", "needs_review", "approved", "failed", "duplicate", "rejected"] as const;
+export type AdminKnowledgeSeedStatus = (typeof adminKnowledgeSeedStatuses)[number];
+export type AdminKnowledgeIntakeSource = { id: string; displayUrl: string | null; displayTitle: string; kind: "url" | "facebook" | "youtube"; eligibility: "eligible" | "withdrawn"; removalReason: "withdrawn" | "inaccessible" | "removed" | null; createdAt: string };
+export type AdminKnowledgeSeedBatchItem = { lineNumber: number; status: AdminKnowledgeSeedStatus; displayUrl: string | null; errorSummary: string | null };
+export type AdminKnowledgeSeedBatch = { id: string; label: string | null; createdAt: string; counts: Record<AdminKnowledgeSeedStatus, number>; items: AdminKnowledgeSeedBatchItem[] };
+export type AdminKnowledgeIntake = { sources: AdminKnowledgeIntakeSource[]; recentBatches: AdminKnowledgeSeedBatch[] };
+export type AdminKnowledgeSeedBatchRequest = { urls: string[]; label?: string | null; publisher?: string | null; collectedDate?: string | null };
+export type AdminKnowledgeSeedBatchResponse = { batchId: string; totalItems: number; pendingCount: number; failedCount: number; duplicateCount: number };
+export type AdminKnowledgeSourceRemovalRequest = { reason: "withdrawn" | "inaccessible" | "removed" };
+export type AdminKnowledgeSourceRemovalResponse = { status: "completed" | "already_completed"; sourceId: string; changedCardCount: number };
+
+export function parseAdminKnowledgeSeedBatchRequest(value: unknown): AdminKnowledgeSeedBatchRequest | null {
+  if (!isRecord(value) || !hasExactKeys(value, ["urls", "label", "publisher", "collectedDate"].filter((key) => key in value))) return null;
+  if (!Array.isArray(value.urls) || value.urls.length < 1 || value.urls.length > adminKnowledgeSeedBatchUrlLimit || !value.urls.every((url) => typeof url === "string" && url.trim() === url && url.length > 0 && url.length <= 2048)) return null;
+  const optional = (item: unknown, length: number) => item === undefined || item === null || typeof item === "string" && item.trim() === item && item.length > 0 && item.length <= length && !/[\r\n]/.test(item);
+  return optional(value.label, 160) && optional(value.publisher, 160) && (value.collectedDate === undefined || value.collectedDate === null || typeof value.collectedDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.collectedDate) && !Number.isNaN(Date.parse(value.collectedDate))) ? value as AdminKnowledgeSeedBatchRequest : null;
+}
+export function parseAdminKnowledgeSourceRemovalRequest(value: unknown): AdminKnowledgeSourceRemovalRequest | null { return isRecord(value) && hasExactKeys(value, ["reason"]) && ["withdrawn", "inaccessible", "removed"].includes(value.reason as string) ? value as AdminKnowledgeSourceRemovalRequest : null; }
+export function parseAdminKnowledgeSeedBatchResponse(value: unknown): AdminKnowledgeSeedBatchResponse | null { return isRecord(value) && hasExactKeys(value, ["batchId", "totalItems", "pendingCount", "failedCount", "duplicateCount"]) && typeof value.batchId === "string" && value.batchId.length > 0 && [value.totalItems, value.pendingCount, value.failedCount, value.duplicateCount].every((count) => Number.isInteger(count) && (count as number) >= 0) ? value as AdminKnowledgeSeedBatchResponse : null; }
+export function parseAdminKnowledgeSourceRemovalResponse(value: unknown): AdminKnowledgeSourceRemovalResponse | null { return isRecord(value) && hasExactKeys(value, ["status", "sourceId", "changedCardCount"]) && (value.status === "completed" || value.status === "already_completed") && typeof value.sourceId === "string" && value.sourceId.length > 0 && Number.isInteger(value.changedCardCount) && (value.changedCardCount as number) >= 0 ? value as AdminKnowledgeSourceRemovalResponse : null; }
+export function parseAdminKnowledgeIntake(value: unknown): AdminKnowledgeIntake | null {
+  if (!isRecord(value) || !hasExactKeys(value, ["sources", "recentBatches"]) || !Array.isArray(value.sources) || value.sources.length > adminKnowledgeIntakeSourceLimit || !Array.isArray(value.recentBatches) || value.recentBatches.length > adminKnowledgeIntakeBatchLimit) return null;
+  const statuses = adminKnowledgeSeedStatuses as readonly string[];
+  const validItem = (item: unknown) => isRecord(item) && hasExactKeys(item, ["lineNumber", "status", "displayUrl", "errorSummary"]) && Number.isInteger(item.lineNumber) && (item.lineNumber as number) > 0 && statuses.includes(item.status as string) && (typeof item.displayUrl === "string" || item.displayUrl === null) && (typeof item.errorSummary === "string" || item.errorSummary === null);
+  const validBatch = (batch: unknown) => {
+    if (!isRecord(batch) || !hasExactKeys(batch, ["id", "label", "createdAt", "counts", "items"]) || typeof batch.id !== "string" || (typeof batch.label !== "string" && batch.label !== null) || typeof batch.createdAt !== "string" || !isRecord(batch.counts) || Object.keys(batch.counts).length !== statuses.length || !Array.isArray(batch.items) || batch.items.length > adminKnowledgeSeedBatchItemLimit) return false;
+    const counts = batch.counts as Record<string, unknown>;
+    return statuses.every((status) => Number.isInteger(counts[status]) && (counts[status] as number) >= 0) && batch.items.every(validItem);
+  };
+  const validSource = (source: unknown) => isRecord(source) && hasExactKeys(source, ["id", "displayUrl", "displayTitle", "kind", "eligibility", "removalReason", "createdAt"]) && typeof source.id === "string" && (typeof source.displayUrl === "string" || source.displayUrl === null) && typeof source.displayTitle === "string" && ["url", "facebook", "youtube"].includes(source.kind as string) && ["eligible", "withdrawn"].includes(source.eligibility as string) && (source.removalReason === null || ["withdrawn", "inaccessible", "removed"].includes(source.removalReason as string)) && typeof source.createdAt === "string";
+  return value.sources.every(validSource) && value.recentBatches.every(validBatch) ? value as AdminKnowledgeIntake : null;
+}
+
+export type AdminKnowledgeDraft = { id: string; type: string; title: string; locationName: string | null; routeSegment: string | null; summary: string; practicalDetails: Record<string, string | string[]>; tags: string[]; confidence: string; freshnessSensitive: boolean; needsReview: boolean; updatedAt: string; createdAt: string; sources: Array<{ id: string; label: string; kind: string; sourceType: string; verificationStatus: string; supportLevel: string; publisher: string | null; collectedDate: string | null; official: boolean; partner: boolean }>; suggestion: { action: string; beforeSummary: string | null; afterSummary: string | null; conflictSummary: string | null; rationale: string | null; targetCard: { id: string; title: string } | null } | null };
+export type AdminKnowledgeDraftResult = { draftId: string };
+export type AdminKnowledgeRecommendationResult = { status: "resolved" | "stale" | "unavailable" | "invalid_action" | "invalid_edit" | "invalid_sampling_reason" | "invalid_evidence" | "invalid_verification" | "insufficient_support"; cardId?: string };
+const reviewId = (value: unknown) => identifier(value);
+const safeString = (value: unknown, maximum: number, nullable = false) => typeof value === "string" && value.trim() === value && value.length > 0 && value.length <= maximum || nullable && value === null;
+function safeDetails(value: unknown) { return isRecord(value) && Object.keys(value).length <= 20 && Object.entries(value).every(([key, item]) => safeString(key, 60) && (safeString(item, 500) || Array.isArray(item) && item.length <= 40 && item.every((entry) => safeString(entry, 500)))); }
+function safeSource(value: unknown) { return isRecord(value) && hasExactKeys(value, ["id", "label", "kind", "sourceType", "verificationStatus", "supportLevel", "publisher", "collectedDate", "official", "partner"]) && reviewId(value.id) && safeString(value.label, 160) && ["kind", "sourceType", "verificationStatus", "supportLevel"].every((key) => safeString(value[key], 80)) && safeString(value.publisher, 160, true) && safeString(value.collectedDate, 32, true) && typeof value.official === "boolean" && typeof value.partner === "boolean"; }
+function safeDraft(value: unknown): value is AdminKnowledgeDraft { if (!isRecord(value) || !hasExactKeys(value, ["id", "type", "title", "locationName", "routeSegment", "summary", "practicalDetails", "tags", "confidence", "freshnessSensitive", "needsReview", "updatedAt", "createdAt", "sources", "suggestion"]) || !reviewId(value.id) || !safeString(value.type, 80) || !safeString(value.title, 160) || !safeString(value.locationName, 160, true) || !safeString(value.routeSegment, 160, true) || !safeString(value.summary, 1200) || !safeDetails(value.practicalDetails) || !Array.isArray(value.tags) || value.tags.length > 12 || !value.tags.every((tag) => safeString(tag, 40)) || !safeString(value.confidence, 80) || typeof value.freshnessSensitive !== "boolean" || typeof value.needsReview !== "boolean" || !isoTimestamp(value.updatedAt) || !isoTimestamp(value.createdAt) || !Array.isArray(value.sources) || !value.sources.every(safeSource)) return false; const suggestion = value.suggestion; return suggestion === null || isRecord(suggestion) && hasExactKeys(suggestion, ["action", "beforeSummary", "afterSummary", "conflictSummary", "rationale", "targetCard"]) && safeString(suggestion.action, 80) && ["beforeSummary", "afterSummary", "conflictSummary", "rationale"].every((key) => safeString(suggestion[key], 1200, true)) && (suggestion.targetCard === null || isRecord(suggestion.targetCard) && hasExactKeys(suggestion.targetCard, ["id", "title"]) && reviewId(suggestion.targetCard.id) && safeString(suggestion.targetCard.title, 160)); }
+export function parseAdminKnowledgeDraftList(value: unknown) { return isRecord(value) && hasExactKeys(value, ["items"]) && Array.isArray(value.items) && value.items.length <= 200 && value.items.every(safeDraft) ? value as { items: AdminKnowledgeDraft[] } : null; }
+export function parseAdminKnowledgeDraft(value: unknown) { return safeDraft(value) ? value : null; }
+export function parseAdminKnowledgeDraftUpdate(value: unknown) { return isRecord(value) && hasExactKeys(value, ["type", "title", "locationName", "routeSegment", "summary", "practicalDetails", "tags", "confidence", "freshnessSensitive"]) && safeString(value.type, 80) && safeString(value.title, 160) && safeString(value.locationName, 160, true) && safeString(value.routeSegment, 160, true) && safeString(value.summary, 1200) && safeDetails(value.practicalDetails) && Array.isArray(value.tags) && value.tags.length <= 12 && value.tags.every((tag) => safeString(tag, 40)) && safeString(value.confidence, 80) && typeof value.freshnessSensitive === "boolean" ? value : null; }
+export function parseAdminKnowledgeDraftResult(value: unknown) { return isRecord(value) && hasExactKeys(value, ["draftId"]) && reviewId(value.draftId) ? value as AdminKnowledgeDraftResult : null; }
+export function parseAdminKnowledgeDraftApprove(value: unknown) { return isRecord(value) && hasExactKeys(value, ["expectedUpdatedAt"]) && (value.expectedUpdatedAt === null || isoTimestamp(value.expectedUpdatedAt)) ? value as { expectedUpdatedAt: string | null } : null; }
+export function parseAdminKnowledgeDraftBatchApprove(value: unknown) { return isRecord(value) && hasExactKeys(value, ["draftIds"]) && Array.isArray(value.draftIds) && value.draftIds.length >= 1 && value.draftIds.length <= 50 && value.draftIds.every(reviewId) ? value as { draftIds: string[] } : null; }
+export function parseAdminKnowledgeDraftBatchResult(value: unknown) { return isRecord(value) && hasExactKeys(value, ["draftIds"]) && Array.isArray(value.draftIds) && value.draftIds.length <= 50 && value.draftIds.every(reviewId) ? value as { draftIds: string[] } : null; }
+export function parseAdminKnowledgeApprovedQuery(value: unknown) { return isRecord(value) && Object.keys(value).every((key) => key === "q") && (value.q === undefined || typeof value.q === "string" && value.q.trim() === value.q && value.q.length >= 1 && value.q.length <= 240 && !/[\r\n\u0000]/.test(value.q)) ? { q: value.q as string | undefined } : null; }
+export function parseAdminKnowledgeApprovedList(value: unknown) { return isRecord(value) && hasExactKeys(value, ["candidateCount", "items"]) && Number.isInteger(value.candidateCount) && (value.candidateCount as number) >= 0 && Array.isArray(value.items) && value.items.length <= 200 && value.items.every((item) => isRecord(item) && Object.keys(item).every((key) => key === "indexStatus" || ["id", "type", "title", "locationName", "routeSegment", "summary", "practicalDetails", "tags", "confidence", "freshnessSensitive", "needsReview", "updatedAt", "createdAt", "sources"].includes(key)) && reviewId(item.id) && safeString(item.type, 80) && safeString(item.title, 160) && safeString(item.locationName, 160, true) && safeString(item.routeSegment, 160, true) && safeString(item.summary, 1200) && safeDetails(item.practicalDetails) && Array.isArray(item.tags) && item.tags.length <= 12 && item.tags.every((tag) => safeString(tag, 40)) && safeString(item.confidence, 80) && typeof item.freshnessSensitive === "boolean" && typeof item.needsReview === "boolean" && isoTimestamp(item.updatedAt) && isoTimestamp(item.createdAt) && Array.isArray(item.sources) && item.sources.every(safeSource) && (item.indexStatus === null || isRecord(item.indexStatus) && hasExactKeys(item.indexStatus, ["state", "label", "documentStatus", "indexedAt"]) && safeString(item.indexStatus.state, 80) && safeString(item.indexStatus.label, 160) && safeString(item.indexStatus.documentStatus, 80, true) && (item.indexStatus.indexedAt === null || isoTimestamp(item.indexStatus.indexedAt)))) ? value as { candidateCount: number; items: Array<Omit<AdminKnowledgeDraft, "suggestion"> & { indexStatus: { state: string; label: string; documentStatus: string | null; indexedAt: string | null } | null }> } : null; }
+export function parseAdminKnowledgeRecommendationListQuery(value: unknown) { return isRecord(value) && Object.keys(value).every((key) => ["workStatus", "reason", "page"].includes(key)) && (value.workStatus === undefined || ["actionable", "completed", "inactive"].includes(value.workStatus as string)) && (value.reason === undefined || ["risk", "weak_evidence", "freshness", "conflict", "duplicate_risk", "missing_context", "verification", "relation", "sampling"].includes(value.reason as string)) && (value.page === undefined || Number.isInteger(Number(value.page)) && Number(value.page) >= 1 && Number(value.page) <= 200) ? { ...(value.workStatus === undefined ? {} : { workStatus: value.workStatus }), ...(value.reason === undefined ? {} : { reason: value.reason }), ...(value.page === undefined ? {} : { page: Number(value.page) }) } : null; }
+function safeRecommendation(value: unknown) { if (!isRecord(value) || !hasExactKeys(value, ["id", "status", "resolution", "reason", "priority", "contentVersion", "evidenceSetRevision", "createdAt", "card"]) || !isRecord(value.card)) return false; const card = value.card; return reviewId(value.id) && safeString(value.status, 80) && safeString(value.resolution, 80, true) && safeString(value.reason, 80) && Number.isInteger(value.priority) && (value.priority as number) >= 1 && (value.priority as number) <= 100 && Number.isInteger(value.contentVersion) && (value.contentVersion as number) >= 1 && Number.isInteger(value.evidenceSetRevision) && (value.evidenceSetRevision as number) >= 1 && isoTimestamp(value.createdAt) && Object.keys(card).every((key) => ["id", "title", "summary", "publicationState", "knowledgeState", "reviewState", "verificationState", "type", "locationName", "routeSegment", "tags", "freshnessSensitive"].includes(key)) && reviewId(card.id) && safeString(card.title, 160) && safeString(card.summary, 1200) && ["publicationState", "knowledgeState", "reviewState", "verificationState"].every((key) => safeString(card[key], 80)); }
+export function parseAdminKnowledgeRecommendationList(value: unknown) { return isRecord(value) && hasExactKeys(value, ["items", "counts"]) && Array.isArray(value.items) && value.items.length <= 25 && value.items.every(safeRecommendation) && isRecord(value.counts) && hasExactKeys(value.counts, ["actionable", "completed", "inactive"]) && [value.counts.actionable, value.counts.completed, value.counts.inactive].every((item) => Number.isInteger(item) && (item as number) >= 0) ? value as { items: unknown[]; counts: { actionable: number; completed: number; inactive: number } } : null; }
+export function parseAdminKnowledgeRecommendationDetail(value: unknown) { if (!safeRecommendation(value) || !isRecord(value) || !hasExactKeys(value, ["id", "status", "resolution", "reason", "priority", "contentVersion", "evidenceSetRevision", "createdAt", "card", "evidence"]) || !Array.isArray(value.evidence) || value.evidence.length > 4) return null; return value.evidence.every((item: unknown) => isRecord(item) && hasExactKeys(item, ["quote", "conditions", "supportLevel", "displayPolicy", "capturedAt", "sourceLabel", "sourceKind", "facebookReviewId"]) && safeString(item.quote, 500) && Array.isArray(item.conditions) && item.conditions.length <= 10 && item.conditions.every((condition: unknown) => safeString(condition, 160)) && safeString(item.supportLevel, 80) && safeString(item.displayPolicy, 80) && isoTimestamp(item.capturedAt) && safeString(item.sourceLabel, 160) && safeString(item.sourceKind, 80) && (item.facebookReviewId === null || reviewId(item.facebookReviewId))) ? value : null; }
+export function parseAdminKnowledgeRecommendationResolve(value: unknown) { if (!isRecord(value) || !["expectedContentVersion", "expectedEvidenceSetRevision", "action"].every((key) => key in value) || Object.keys(value).some((key) => !["expectedContentVersion", "expectedEvidenceSetRevision", "action", "editSummary", "samplingDispositionReason", "samplingRationale", "highSeverity"].includes(key))) return null; return Number.isInteger(value.expectedContentVersion) && (value.expectedContentVersion as number) >= 1 && Number.isInteger(value.expectedEvidenceSetRevision) && (value.expectedEvidenceSetRevision as number) >= 1 && ["accept_wording", "edit", "suppress", "restore", "verify", "promote", "resolve_relation", "sampling_pass", "sampling_fail"].includes(value.action as string) && (value.editSummary === undefined || safeString(value.editSummary, 1200)) && (value.samplingDispositionReason === undefined || safeString(value.samplingDispositionReason, 80)) && (value.samplingRationale === undefined || safeString(value.samplingRationale, 500)) && (value.highSeverity === undefined || typeof value.highSeverity === "boolean") ? value : null; }
+export function parseAdminKnowledgeRecommendationResult(value: unknown) { return isRecord(value) && Object.keys(value).every((key) => key === "status" || key === "cardId") && ["resolved", "stale", "unavailable", "invalid_action", "invalid_edit", "invalid_sampling_reason", "invalid_evidence", "invalid_verification", "insufficient_support"].includes(value.status as string) && (value.cardId === undefined || reviewId(value.cardId)) ? value as AdminKnowledgeRecommendationResult : null; }
+
+export function parseAdminOverview(value: unknown): AdminOverview | null {
+  if (!isRecord(value) || !hasExactKeys(value, ["sourcesReadyForProcessing", "processingJobs", "failedProcessingJobs", "draftsAwaitingReview", "openRecommendations", "activeKnowledgeCards", "coverage"])) return null;
+  const count = (item: unknown) => Number.isInteger(item) && (item as number) >= 0;
+  const coverage = value.coverage;
+  return count(value.sourcesReadyForProcessing) && count(value.processingJobs) && count(value.failedProcessingJobs) && count(value.draftsAwaitingReview) && count(value.openRecommendations) && count(value.activeKnowledgeCards)
+    && isRecord(coverage) && hasExactKeys(coverage, ["targetActiveCards", "activeEvidenceGroundedCards", "remainingActiveCards", "isComplete", "activeCommunityObservations", "activeCommunityPatterns", "caveatOnlyHighRiskCards", "pendingReviewCards", "pendingVerificationCards", "actionableWork", "byType", "byRouteOrLocation"])
+    && count(coverage.targetActiveCards) && count(coverage.activeEvidenceGroundedCards) && count(coverage.remainingActiveCards) && typeof coverage.isComplete === "boolean" && count(coverage.activeCommunityObservations) && count(coverage.activeCommunityPatterns) && count(coverage.caveatOnlyHighRiskCards) && count(coverage.pendingReviewCards) && count(coverage.pendingVerificationCards)
+    && Array.isArray(coverage.actionableWork) && coverage.actionableWork.every((item) => isRecord(item) && hasExactKeys(item, ["kind", "reason", "priority", "count"]) && (item.kind === "recommendation" && typeof item.reason === "string" && count(item.priority) || item.kind === "source_intake" && ["create", "update", "conflict"].includes(item.reason as string) && item.priority === null) && count(item.count))
+    && Array.isArray(coverage.byType) && coverage.byType.every((item) => isRecord(item) && hasExactKeys(item, ["type", "count"]) && typeof item.type === "string" && count(item.count))
+    && Array.isArray(coverage.byRouteOrLocation) && coverage.byRouteOrLocation.every((item) => isRecord(item) && hasExactKeys(item, ["routeOrLocation", "count"]) && typeof item.routeOrLocation === "string" && count(item.count))
+    ? value as AdminOverview
+    : null;
+}
+
+export const aiGatewayModelPurposes = ["ai_ask_initial_answer", "extraction", "embeddings", "evaluation"] as const;
+export type AiGatewayModelPurpose = (typeof aiGatewayModelPurposes)[number];
+export type AdminAiGatewayModel = { id: string; gatewayModelName: string; displayLabel: string; purpose: AiGatewayModelPurpose; active: boolean; defaultForPurpose: boolean; supportsTextInput: boolean; supportsImageInput: boolean; supportsImageOutput: boolean; supportsEmbeddings: boolean; supportsExtraction: boolean; supportsEvaluation: boolean; supportsStreaming: boolean; supportsCachePricing: boolean; pricingCurrency: string | null; inputTokenPriceMicros: number | null; outputTokenPriceMicros: number | null; cacheReadTokenPriceMicros: number | null; cacheWriteTokenPriceMicros: number | null; pricingUnitTokens: number; pricingVersion: string | null; pricingEffectiveAt: string };
+export type AdminAiGatewayModelInput = Omit<AdminAiGatewayModel, "id">;
+export type AdminAiGatewayModelUpdate = Partial<AdminAiGatewayModelInput>;
+
+export function parseAdminAiGatewayModelInput(value: unknown, partial = false): AdminAiGatewayModelInput | AdminAiGatewayModelUpdate | null {
+  if (!isRecord(value)) return null;
+  const keys = ["gatewayModelName", "displayLabel", "purpose", "active", "defaultForPurpose", "supportsTextInput", "supportsImageInput", "supportsImageOutput", "supportsEmbeddings", "supportsExtraction", "supportsEvaluation", "supportsStreaming", "supportsCachePricing", "pricingCurrency", "inputTokenPriceMicros", "outputTokenPriceMicros", "cacheReadTokenPriceMicros", "cacheWriteTokenPriceMicros", "pricingUnitTokens", "pricingVersion", "pricingEffectiveAt"];
+  if (!Object.keys(value).every((key) => keys.includes(key)) || partial && Object.keys(value).length === 0 || !partial && !keys.every((key) => key in value)) return null;
+  const text = (item: unknown, maximum: number, nullable = false) => typeof item === "string" && item.trim() === item && item.length > 0 && item.length <= maximum ? item : nullable && item === null ? null : undefined;
+  const integer = (item: unknown, nullable = false) => Number.isInteger(item) && (item as number) >= 0 && (item as number) <= 2_147_483_647 ? item as number : nullable && item === null ? null : undefined;
+  const parsed: Record<string, unknown> = {};
+  for (const key of Object.keys(value)) parsed[key] = value[key];
+  if ("gatewayModelName" in parsed && text(parsed.gatewayModelName, 500) === undefined || "displayLabel" in parsed && text(parsed.displayLabel, 500) === undefined || "purpose" in parsed && !(aiGatewayModelPurposes as readonly string[]).includes(parsed.purpose as string) || ["active", "defaultForPurpose", "supportsTextInput", "supportsImageInput", "supportsImageOutput", "supportsEmbeddings", "supportsExtraction", "supportsEvaluation", "supportsStreaming", "supportsCachePricing"].some((key) => key in parsed && typeof parsed[key] !== "boolean") || ["inputTokenPriceMicros", "outputTokenPriceMicros", "cacheReadTokenPriceMicros", "cacheWriteTokenPriceMicros"].some((key) => key in parsed && integer(parsed[key], true) === undefined) || "pricingUnitTokens" in parsed && (!Number.isInteger(parsed.pricingUnitTokens) || (parsed.pricingUnitTokens as number) <= 0 || (parsed.pricingUnitTokens as number) > 2_147_483_647) || "pricingCurrency" in parsed && text(parsed.pricingCurrency, 16, true) === undefined || "pricingVersion" in parsed && text(parsed.pricingVersion, 500, true) === undefined || "pricingEffectiveAt" in parsed && (typeof parsed.pricingEffectiveAt !== "string" || Number.isNaN(Date.parse(parsed.pricingEffectiveAt)))) return null;
+  return parsed as AdminAiGatewayModelInput | AdminAiGatewayModelUpdate;
+}
+
+export function parseAdminAiGatewayModel(value: unknown): AdminAiGatewayModel | null {
+  if (!isRecord(value) || Object.keys(value).sort().join(",") !== "active,cacheReadTokenPriceMicros,cacheWriteTokenPriceMicros,defaultForPurpose,displayLabel,gatewayModelName,id,inputTokenPriceMicros,outputTokenPriceMicros,pricingCurrency,pricingEffectiveAt,pricingUnitTokens,pricingVersion,purpose,supportsCachePricing,supportsEmbeddings,supportsEvaluation,supportsExtraction,supportsImageInput,supportsImageOutput,supportsStreaming,supportsTextInput") return null;
+  const { id, ...input } = value;
+  return typeof id === "string" && id.length > 0 && parseAdminAiGatewayModelInput(input) ? value as AdminAiGatewayModel : null;
+}
 
 export type SafeFieldViolation = { field: string; code: string; message: string };
 export const safeApiErrorCodes = ["unauthorized", "forbidden", "validation_error", "csrf_invalid", "request_timeout", "internal_error"] as const;
@@ -303,10 +550,6 @@ export type SchemaCompatibilityConsumer = { declaration: SchemaCompatibilityDecl
 export function createSchemaCompatibilityConsumer(declaration: SchemaCompatibilityDeclaration): SchemaCompatibilityConsumer {
   return { declaration, admits: (rows) => evaluateSchemaAdmission(declaration, rows).compatible };
 }
-
-// Story 13.1 imports this boundary into its own runtime rather than duplicating
-// release-record evaluation or implying that an admin deployment exists today.
-export const futureAdminSchemaCompatibilityConsumer = createSchemaCompatibilityConsumer(schemaCompatibilityDeclarations.admin);
 
 export function parseSchemaVersion(value: unknown): ParsedSchemaVersion | null {
   if (typeof value !== "string") return null;

@@ -1,0 +1,1 @@
+import { RecommendationQueue } from "../../review-client"; export default async function Page({ params }: { params: Promise<{ id: string }> }) { return <RecommendationQueue id={(await params).id} />; }

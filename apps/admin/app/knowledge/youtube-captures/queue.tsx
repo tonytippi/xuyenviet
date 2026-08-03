@@ -1,0 +1,14 @@
+"use client";
+import Link from "next/link";
+import { useEffect, useState } from "react";
+import { parseAdminYoutubeCaptureQueue, type AdminYoutubeCaptureQueue } from "@xuyenviet/contracts";
+
+function origin() { const value = process.env.NEXT_PUBLIC_API_ORIGIN; if (!value) throw new Error("NEXT_PUBLIC_API_ORIGIN is required."); return value; }
+function signIn() { window.location.assign(`${origin()}/auth/google?${new URLSearchParams({ returnUrl: `${window.location.origin}/knowledge/youtube-captures` })}`); }
+export function YoutubeCaptureQueue() {
+  const [queue, setQueue] = useState<AdminYoutubeCaptureQueue | null>(null); const [page, setPage] = useState(1); const [message, setMessage] = useState("");
+  async function load(nextPage = page) { const response = await fetch(`${origin()}/v1/admin/knowledge/youtube-captures?${new URLSearchParams({ page: String(nextPage) })}`, { credentials: "include", headers: { "x-request-id": crypto.randomUUID() }, cache: "no-store" }); if (response.status === 401) { signIn(); return; } const parsed = parseAdminYoutubeCaptureQueue(await response.json().catch(() => null)); if (!response.ok || !parsed) throw new Error("unsafe response"); setQueue(parsed); }
+  useEffect(() => { void load().catch(() => setMessage("Không thể tải hàng đợi YouTube.")); // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page]);
+  return <main className="mx-auto max-w-6xl p-4 text-slate-900 sm:p-8"><p className="text-sm font-semibold text-emerald-800">YOUTUBE CAPTURES</p><h1 className="mt-2 text-3xl font-bold">Hàng đợi bằng chứng YouTube</h1><p className="mt-3 text-slate-600">Chỉ hiển thị bằng chứng có cấu trúc và metadata đã làm sạch. Không có thao tác thu thập hoặc chạy lại tại đây.</p><p className="mt-3" role="status">{message}</p><div className="mt-6 grid gap-3">{queue?.items.map((item) => <article className="rounded-xl border p-4" key={item.sourceId}><div className="flex items-start justify-between gap-4"><div><strong>{item.sourceLabel}</strong><p className="mt-1 break-all text-sm text-slate-600">{item.displayUrl ?? "URL không có sẵn"}</p><p className="mt-1 text-sm">{item.evidenceCount} bằng chứng · {item.ingestionJob?.stage ?? "Đang chờ tạo tác vụ xử lý"}</p></div><Link className="rounded bg-emerald-800 px-3 py-2 text-white" href={`/knowledge/youtube-captures/${encodeURIComponent(item.sourceId)}`}>Chi tiết</Link></div></article>)}</div>{queue && <div className="mt-6 flex gap-3"><button className="rounded border px-3 py-2 disabled:opacity-40" disabled={page === 1} onClick={() => setPage(page - 1)} type="button">Trang trước</button><span className="py-2">Trang {page}</span><button className="rounded border px-3 py-2 disabled:opacity-40" disabled={page * queue.pageSize >= queue.totalCount} onClick={() => setPage(page + 1)} type="button">Trang sau</button></div>}</main>;
+}

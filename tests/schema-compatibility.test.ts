@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { admitsSchemaReleaseGate, compareSchemaVersions, createSchemaCompatibilityConsumer, futureAdminSchemaCompatibilityConsumer, isSchemaCompatible, parseSchemaReleaseMatrix, parseSchemaReleasePhasePolicy, parseSchemaVersion, schemaCompatibilityDeclarations, validatesSchemaReleasePhasePolicy, type SchemaReleaseMatrix } from "@xuyenviet/contracts";
+import { admitsSchemaReleaseGate, compareSchemaVersions, createSchemaCompatibilityConsumer, isSchemaCompatible, parseSchemaReleaseMatrix, parseSchemaReleasePhasePolicy, parseSchemaVersion, schemaCompatibilityDeclarations, validatesSchemaReleasePhasePolicy, type SchemaReleaseMatrix } from "@xuyenviet/contracts";
 import { createPostgresReleaseSchemaVersionRepository } from "@xuyenviet/database";
 import { releaseSchemaVersions } from "@/db/schema";
 import { resetTestDatabase, testDb } from "./helpers/db";
@@ -52,8 +52,6 @@ describe("schema compatibility contract", () => {
     expect(web.admits([])).toBe(false);
     expect(web.admits([{ version: "bad" }])).toBe(false);
     expect(web.admits([{ version: "20260728.1" }, { version: "20260728.1" }])).toBe(false);
-    expect(futureAdminSchemaCompatibilityConsumer.admits([{ version: "20260728.1" }])).toBe(true);
-    expect(futureAdminSchemaCompatibilityConsumer.admits([{ version: "20260730.1" }])).toBe(false);
   });
 
   it("fails API admission closed when its live database identity differs from the approved phase policy", async () => {

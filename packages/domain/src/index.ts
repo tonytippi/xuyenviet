@@ -23,6 +23,15 @@ export type TravelerCommandPort = {
 
 export * from "./planning-detail";
 export * from "./user-role-governance";
+export * from "./admin-ai-model-catalog";
+export * from "./admin-overview";
+export * from "./admin-knowledge-intake";
+export * from "./admin-facebook-capture";
+export * from "./admin-youtube-capture";
+export * from "./knowledge-review";
+export * from "./admin-knowledge-coverage";
+export * from "./evaluation-scenarios";
+export * from "./admin-quality";
 
 const newConversationPreview = "Hội thoại mới";
 const previewMaxLength = 60;

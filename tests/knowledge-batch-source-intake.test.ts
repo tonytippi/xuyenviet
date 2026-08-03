@@ -31,7 +31,7 @@ describe("knowledge batch source intake", () => {
   test("operator batch intake persists valid URLs and failed invalid rows without rollback", async () => {
     await createUser("batch-operator", ["operator"]);
     authMock.mockResolvedValue({ user: { id: "batch-operator", email: "batch-operator@example.com" } });
-    const { submitKnowledgeSeedUrlBatch } = await import("@/features/knowledge/actions");
+    const { submitKnowledgeSeedUrlBatch } = await import("@/features/knowledge/batch-intake");
 
     const result = await submitKnowledgeSeedUrlBatch({
       urls: "https://example.com/a?utm_source=x&keep=1\nnot-a-url\nhttps://fb.watch/post?fbclid=abc",
@@ -59,7 +59,7 @@ describe("knowledge batch source intake", () => {
   test("canonical duplicates within one batch create one source and a duplicate item", async () => {
     await createUser("duplicate-operator", ["operator"]);
     authMock.mockResolvedValue({ user: { id: "duplicate-operator", email: "duplicate-operator@example.com" } });
-    const { submitKnowledgeSeedUrlBatch } = await import("@/features/knowledge/actions");
+    const { submitKnowledgeSeedUrlBatch } = await import("@/features/knowledge/batch-intake");
 
     const result = await submitKnowledgeSeedUrlBatch({ urls: "https://example.com/a?utm_campaign=x&b=2\nhttps://example.com/a?b=2" });
 
@@ -76,7 +76,7 @@ describe("knowledge batch source intake", () => {
   test("batch intake accepts and canonicalizes individual YouTube videos", async () => {
     await createUser("youtube-operator", ["operator"]);
     authMock.mockResolvedValue({ user: { id: "youtube-operator", email: "youtube-operator@example.com" } });
-    const { submitKnowledgeSeedUrlBatch } = await import("@/features/knowledge/actions");
+    const { submitKnowledgeSeedUrlBatch } = await import("@/features/knowledge/batch-intake");
 
     const result = await submitKnowledgeSeedUrlBatch({ urls: "https://youtu.be/abcDEF12345?si=tracking" });
 
@@ -158,6 +158,20 @@ describe("knowledge batch source intake", () => {
     expect(persistedItems.map((item) => item.status)).toEqual(["needs_review", "needs_review", "duplicate"]);
   });
 
+  test("direct API intake list derives and persists linked card status from an initially pending item", async () => {
+    await createUser("api-status-operator", ["operator"]);
+    const { createPostgresAdminKnowledgeIntakePort } = await import("@xuyenviet/database");
+    const intake = createPostgresAdminKnowledgeIntakePort();
+
+    await intake.submitBatch({ userId: "api-status-operator", sessionId: "session", roles: ["operator"], authorizationVersion: 1, transport: "browser_session" }, { urls: ["https://example.com/direct-api-status"], label: "Seed miền Trung" });
+    const [item] = await testDb.select().from(knowledgeSeedBatchItems);
+    await testDb.insert(knowledgeCards).values({ id: "direct-api-status-card", status: "draft", type: "place", title: "Điểm dừng cần duyệt", locationName: "Đà Nẵng", summary: "Bản nháp cần vận hành duyệt.", confidence: "unverified", aiPromptVersion: "test", createdByUserId: "api-status-operator" });
+    await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: "direct-api-status-card", sourceId: item!.sourceId!, supportLevel: "primary" });
+
+    await expect(intake.list()).resolves.toMatchObject({ sources: [{ displayTitle: "example.com" }], recentBatches: [{ items: [{ lineNumber: 1, status: "needs_review" }], counts: { needs_review: 1, pending: 0 } }] });
+    await expect(testDb.select({ status: knowledgeSeedBatchItems.status }).from(knowledgeSeedBatchItems)).resolves.toEqual([{ status: "needs_review" }]);
+  });
+
   test("recent batch listing marks captured YouTube evidence as reading", async () => {
     await createUser("youtube-status-operator", ["operator"]);
     authMock.mockResolvedValue({ user: { id: "youtube-status-operator", email: "youtube-status-operator@example.com" } });
@@ -193,7 +207,7 @@ describe("knowledge batch source intake", () => {
   test("batch intake handles carriage-return lines and oversized URLs as item failures", async () => {
     await createUser("edge-operator", ["operator"]);
     authMock.mockResolvedValue({ user: { id: "edge-operator", email: "edge-operator@example.com" } });
-    const { submitKnowledgeSeedUrlBatch } = await import("@/features/knowledge/actions");
+    const { submitKnowledgeSeedUrlBatch } = await import("@/features/knowledge/batch-intake");
     const oversizedUrl = `https://example.com/${"x".repeat(2050)}`;
 
     const result = await submitKnowledgeSeedUrlBatch({ urls: `https://example.com/a\r${oversizedUrl}` });
@@ -211,7 +225,7 @@ describe("knowledge batch source intake", () => {
   test("traveler is denied before parsing, validation, inserts, or audit", async () => {
     await createUser("batch-traveler", ["traveler"]);
     authMock.mockResolvedValue({ user: { id: "batch-traveler", email: "batch-traveler@example.com" } });
-    const { submitKnowledgeSeedUrlBatch } = await import("@/features/knowledge/actions");
+    const { submitKnowledgeSeedUrlBatch } = await import("@/features/knowledge/batch-intake");
 
     await expect(submitKnowledgeSeedUrlBatch({ urls: "not-a-url" })).rejects.toMatchObject({ name: "AdminAuthorizationError" });
     await expect(testDb.select().from(knowledgeSeedBatches)).resolves.toHaveLength(0);
@@ -353,7 +367,7 @@ describe("knowledge batch source intake", () => {
   test("batch cap fails closed with no side effects", async () => {
     await createUser("cap-operator", ["operator"]);
     authMock.mockResolvedValue({ user: { id: "cap-operator", email: "cap-operator@example.com" } });
-    const { submitKnowledgeSeedUrlBatch } = await import("@/features/knowledge/actions");
+    const { submitKnowledgeSeedUrlBatch } = await import("@/features/knowledge/batch-intake");
     const urls = Array.from({ length: 51 }, (_, index) => `https://example.com/${index}`).join("\n");
 
     await expect(submitKnowledgeSeedUrlBatch({ urls })).rejects.toThrow("tối đa 50 URL");

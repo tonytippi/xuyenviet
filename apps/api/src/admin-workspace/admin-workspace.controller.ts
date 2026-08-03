@@ -1,9 +1,10 @@
 import { Controller, Get } from "@nestjs/common";
 
-import { RequiresAdminCapability } from "../auth/admin-capability.decorator";
+import { AllowsAdminBrowserSession, RequiresAdminCapability } from "../auth/admin-capability.decorator";
 
-/** A non-disclosing BFF bootstrap capability; legacy admin capabilities remain untouched. */
+/** A non-disclosing direct-browser workspace admission check. */
 @Controller("v1/admin/workspace")
+@AllowsAdminBrowserSession()
 export class AdminWorkspaceController {
   @Get()
   @RequiresAdminCapability("admin.workspace.read")

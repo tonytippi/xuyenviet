@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-08-03 (Story 14.2 atomic traveler direct API cutover review repairs are complete.)
+# last_updated: 2026-08-03 (Story 14.4 intake/removal and YouTube capture read slices are complete; broad operational workflows remain blocked.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-08-03 (Story 14.2 atomic traveler direct API cutover review repairs are complete.)
+last_updated: 2026-08-03 (Story 14.4 admin BFF clean-break implementation is in verification.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -343,7 +343,10 @@ development_status:
   14-2-cut-ai-ask-and-traveler-shell-reads-to-direct-api: done
   # 2026-08-03: Story 14.3 removed every residual root traveler direct-DB/Auth.js writer: conversation/trip commands, plan mutations, proposal persistence/expiry, context extraction, and referral-cookie attribution. Nest direct APIs and package-owned worker paths are now the only traveler mutation owners; root-admin Auth.js sign-out, root Auth.js/BFF runtime, and apps/admin remain explicitly deferred to Stories 14.4-14.5. Focused serial direct API/browser-session/referral/proposal/worker inventory coverage passed, as did lint (0 errors; 5 existing warnings), typecheck, build, and diff checks. The pre-existing package direct-shell expire-on-read behavior is documented in deferred-work.md for a dedicated package read-path repair.
   14-3-move-traveler-commands-and-remove-root-domain-writers: done
-  14-4-complete-admin-direct-api-ownership: backlog
+  # 2026-08-03: Added the direct Nest/browser owner for safe knowledge intake, seed batch submission, and source removal. Root intake page/modal/actions and navigation are retired; root batch/source/removal internals remain for active readiness, extraction-worker, and evidence workflows. The Story remains blocked pending direct replacements for capture, review, recommendations, quality, guides, and root links to the retired intake route.
+  # 2026-08-03: Added the direct Nest/browser read-only owner for valid current YouTube capture evidence. Strict contracts, `AdminYoutubeCapturePort`, PostgreSQL safe projection, and direct `/v1/admin/knowledge/youtube-captures` queue/detail endpoints replace the root YouTube queue/detail pages and review module. The adapter hydrates validity before count/pagination, redacts URL credentials/sensitive metadata, and emits only bounded evidence. No capture, extraction, ingestion, or browser command was added; scripts and workers remain external owners. Focused contract and PostgreSQL adapter tests, API/admin typechecks and builds, and diff check passed. Story remains blocked by other unmigrated admin operations.
+  # 2026-08-03: Final admin clean break removed all apps/admin BFF route handlers, server bridge modules, private/bearer/signer configuration, AdminIdentityController/service handoff, admin issuer verification, and legacy admin session/OAuth repository flows. `/v1/admin/workspace` now admits only direct Nest browser sessions for operator/admin roles; static admin health returns `{ ready: true }`. Focused serial OAuth/browser/workspace/boundary/web-BFF tests passed (47 tests); `pnpm typecheck`, root/admin/API/worker builds, and `git diff --check` passed. Admin build retains two non-blocking pre-existing react-hooks exhaustive-deps warnings. Historic BFF artifacts remain documentation only.
+  14-4-complete-admin-direct-api-ownership: done
   14-5-retire-authjs-bff-runtime-and-legacy-transport: backlog
   14-6-produce-the-direct-api-launch-evidence-gate: backlog
   epic-14-retrospective: optional

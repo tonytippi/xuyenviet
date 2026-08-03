@@ -57,9 +57,7 @@ export class ResourceServerGuard implements CanActivate {
       const claims = validateClaims(payload);
       let session;
       try {
-        session = claims.iss === "xuyenviet-admin-bff"
-          ? await this.adminSession(claims.sid)
-          : await this.identities.getSession(claims.sid);
+        session = await this.identities.getSession(claims.sid);
       } catch {
         throw new IdentityUnavailableError();
       }
@@ -127,10 +125,6 @@ export class ResourceServerGuard implements CanActivate {
     }
   }
 
-  private async adminSession(sessionId: string) {
-    if (!this.identities.getAdminSession) throw new IdentityUnavailableError();
-    return this.identities.getAdminSession(sessionId);
-  }
 }
 
 class IdentityUnavailableError extends Error {}

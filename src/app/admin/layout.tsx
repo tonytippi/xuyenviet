@@ -10,16 +10,13 @@ type AdminLayoutProps = {
 
 const adminNavItems = [
   { href: "/admin", label: "Tổng quan", eyebrow: "Command" },
-  { href: "/admin/guides", label: "Hướng dẫn", eyebrow: "Operator" },
-  { href: "/admin/ai-gateway", label: "AI Gateway", eyebrow: "Models & cost" },
-  { href: "/admin/knowledge/intake", label: "Nạp nguồn", eyebrow: "Intake" },
-  { href: "/admin/knowledge/facebook-captures", label: "Capture Facebook", eyebrow: "Queue" },
-  { href: "/admin/knowledge/youtube-captures", label: "Capture YouTube", eyebrow: "Queue" },
-  { href: "/admin/knowledge/drafts", label: "Duyệt nháp", eyebrow: "Review" },
-  { href: "/admin/knowledge/recommendations", label: "Khuyến nghị AI", eyebrow: "Ops queue" },
-  { href: "/admin/knowledge/approved", label: "Tri thức duyệt", eyebrow: "Library" },
-  { href: "/admin/knowledge/progress", label: "Seed 100 mục", eyebrow: "Progress" },
-  { href: "/admin/quality", label: "Chất lượng MVP", eyebrow: "Signals" },
+  { href: "https://admin.xuyenviet.app/guides", label: "Hướng dẫn", eyebrow: "Operator" },
+  { href: process.env.NEXT_PUBLIC_ADMIN_ORIGIN ? `${process.env.NEXT_PUBLIC_ADMIN_ORIGIN}/knowledge/facebook-captures` : "/knowledge/facebook-captures", label: "Capture Facebook", eyebrow: "Queue" },
+  { href: "https://admin.xuyenviet.app/knowledge/youtube-captures", label: "Capture YouTube", eyebrow: "Queue" },
+  { href: "https://admin.xuyenviet.app/knowledge/drafts", label: "Duyệt nháp", eyebrow: "Review" },
+  { href: "https://admin.xuyenviet.app/knowledge/recommendations", label: "Khuyến nghị AI", eyebrow: "Ops queue" },
+  { href: "https://admin.xuyenviet.app/knowledge/approved", label: "Tri thức duyệt", eyebrow: "Library" },
+  { href: "https://admin.xuyenviet.app/knowledge/progress", label: "Seed 100 mục", eyebrow: "Progress" },
 ];
 
 export default async function AdminLayout({ children }: AdminLayoutProps) {

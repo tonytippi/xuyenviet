@@ -7,7 +7,7 @@ import { loadEnvFile } from "node:process";
 import { NestFactory } from "@nestjs/core";
 
 import { getBrowserAuthConfig, parseBffCredentialConfig } from "@xuyenviet/config";
-import { createPostgresAiAskStreamExecutionPort, createPostgresApiIdentityRepository, createPostgresConversationSummaryRepository, createPostgresPlanningReadRepository, createPostgresReleaseSchemaVersionRepository, createPostgresTravelerCommandPort, createPostgresTravelerShellRepository, createPostgresUserRoleGovernancePort } from "@xuyenviet/database";
+import { createPostgresAdminAiModelCatalogPort, createPostgresAdminFacebookCapturePort, createPostgresAdminKnowledgeCoveragePort, createPostgresAdminKnowledgeIntakePort, createPostgresAdminKnowledgeReviewPort, createPostgresAdminOverviewPort, createPostgresAdminQualityDashboardPort, createPostgresAdminYoutubeCapturePort, createPostgresAiAskStreamExecutionPort, createPostgresApiIdentityRepository, createPostgresConversationSummaryRepository, createPostgresPlanningReadRepository, createPostgresReleaseSchemaVersionRepository, createPostgresTravelerCommandPort, createPostgresTravelerShellRepository, createPostgresUserRoleGovernancePort } from "@xuyenviet/database";
 import { createAiAskStreamExecution } from "@xuyenviet/domain";
 
 import { createApiModule } from "./app.module";
@@ -21,15 +21,22 @@ async function bootstrap() {
   const databaseUrl = required("DATABASE_URL");
   const aiAskExecution = createAiAskStreamExecution(createPostgresAiAskStreamExecutionPort(databaseUrl));
   const browserAuth = getBrowserAuthConfig();
-  const app = await NestFactory.create(createApiModule(config, createPostgresApiIdentityRepository(databaseUrl, required("XV_ADMIN_SESSION_LOOKUP_KEY"), browserAuth.sessionLookupKey, browserAuth.oauthTransactionProtectionKey), {
+  const app = await NestFactory.create(createApiModule(config, createPostgresApiIdentityRepository(databaseUrl, browserAuth.sessionLookupKey, browserAuth.oauthTransactionProtectionKey), {
     conversationSummaries: createPostgresConversationSummaryRepository(databaseUrl),
     travelerShells: createPostgresTravelerShellRepository(),
     travelerCommands: createPostgresTravelerCommandPort(),
     planningReads: createPostgresPlanningReadRepository(),
     userRoleGovernance: createPostgresUserRoleGovernancePort(databaseUrl),
+    adminAiModelCatalog: createPostgresAdminAiModelCatalogPort(databaseUrl),
+    adminOverview: createPostgresAdminOverviewPort(),
+    adminQuality: createPostgresAdminQualityDashboardPort(),
+    adminKnowledgeIntake: createPostgresAdminKnowledgeIntakePort(),
+    adminKnowledgeReview: createPostgresAdminKnowledgeReviewPort(),
+    adminKnowledgeCoverage: createPostgresAdminKnowledgeCoveragePort(),
+    adminFacebookCaptures: createPostgresAdminFacebookCapturePort(),
+    adminYoutubeCaptures: createPostgresAdminYoutubeCapturePort(),
     schemaVersions: createPostgresReleaseSchemaVersionRepository(databaseUrl),
     releasePhasePolicy: readApiReleasePhasePolicy(),
-    adminIdentityServiceToken: required("XV_ADMIN_IDENTITY_HANDOFF_SERVICE_TOKEN"),
     aiAskExecution,
     browserAuth,
   }));

@@ -1,33 +1,15 @@
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { describe, expect, test } from "vitest";
 
 import { permitsAdminCapability } from "@xuyenviet/contracts";
 
-import { adminCsrfCookieName, adminSessionCookie, adminSessionCookieName, adminTransactionCookie, adminTransactionCookieName } from "../apps/admin/server/cookies";
-
-describe("separate admin boundary", () => {
-  afterEach(() => vi.unstubAllEnvs());
-
-  test("uses distinct host-only admin cookie namespaces", () => {
-    expect(adminSessionCookieName).toBe("__Host-xuyenviet-admin-session");
-    expect(adminTransactionCookieName).toBe("__Host-xuyenviet-admin-oauth");
-    expect(adminCsrfCookieName).toBe("__Host-xuyenviet-admin-csrf");
-    expect(adminSessionCookie("opaque")).toEqual(expect.objectContaining({ name: adminSessionCookieName, secure: true, httpOnly: true, sameSite: "strict", path: "/" }));
-    expect(adminSessionCookie("opaque")).not.toHaveProperty("domain");
-    expect(adminTransactionCookie("transaction")).toEqual(expect.objectContaining({ name: adminTransactionCookieName, secure: true, httpOnly: true, sameSite: "lax", path: "/" }));
-    expect(adminTransactionCookie("transaction")).not.toHaveProperty("domain");
-    expect(adminSessionCookieName).not.toContain("xuyenviet.session-token");
-  });
-
-  test("uses localhost-only cookie names without Secure in explicit local transport mode", async () => {
-    vi.stubEnv("APP_ENV", "local");
-    vi.stubEnv("XV_ADMIN_LOCAL_TRANSPORT", "true");
-    vi.resetModules();
-    const cookies = await import("../apps/admin/server/cookies");
-    expect(cookies.adminSessionCookieName).toBe("xv-local-admin-session");
-    expect(cookies.adminTransactionCookieName).toBe("xv-local-admin-oauth");
-    expect(cookies.adminCsrfCookieName).toBe("xv-local-admin-csrf");
-    expect(cookies.adminSessionCookie("opaque")).toMatchObject({ secure: false, httpOnly: true, sameSite: "strict" });
-    expect(cookies.adminTransactionCookie("transaction")).toMatchObject({ secure: false, httpOnly: true, sameSite: "lax" });
+describe("direct admin browser boundary", () => {
+  test("has no BFF routes, server bridge, credentials, or private API imports", () => {
+    for (const path of ["apps/admin/app/api/workspace/route.ts", "apps/admin/app/api/auth/callback/route.ts", "apps/admin/app/api/auth/csrf/route.ts", "apps/admin/app/api/auth/logout/route.ts", "apps/admin/app/sign-in/route.ts", "apps/admin/server/bff-adapter.ts", "apps/admin/server/identity.ts", "apps/admin/server/csrf.ts", "apps/admin/server/cookies.ts"]) expect(existsSync(join(process.cwd(), path))).toBe(false);
+    const sources = ["apps/admin/.env.example", "apps/admin/package.json", "apps/admin/next.config.ts", "apps/admin/app/api/health/route.ts"].map((path) => readFileSync(join(process.cwd(), path), "utf8")).join("\n");
+    expect(sources).not.toMatch(/XV_ADMIN_|xuyenviet-admin-bff|api\.railway\.internal|Bearer|@xuyenviet\/config|jose/);
+    expect(sources).toContain("NEXT_PUBLIC_API_ORIGIN");
   });
 
   test("uses the same declared capability matrix at the BFF and API seam", () => {

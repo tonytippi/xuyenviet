@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test } from "vitest";
 
 import { auditEvents, knowledgeCardEvidence, knowledgeCardSearchDocuments, knowledgeCardSources, knowledgeCards, knowledgeIndexDirtyMarkers, knowledgeIngestionCandidates, knowledgeIngestionJobs, knowledgeRecommendations, knowledgeSamplingCohortMembers, knowledgeSamplingPolicies, sources, users } from "@/db/schema";
-import { getKnowledgeRecommendationDetail, getKnowledgeRecommendationWorkStatusCounts, listKnowledgeRecommendations, resolveKnowledgeRecommendation, scheduleKnowledgeRecommendation, shouldSampleKnowledgeCard } from "@/features/knowledge/recommendations";
+import { getKnowledgeRecommendationDetail, getKnowledgeRecommendationWorkStatusCounts, listKnowledgeRecommendations, resolveKnowledgeRecommendation, scheduleKnowledgeRecommendation, shouldSampleKnowledgeCard } from "@xuyenviet/database";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
 import { seedKnowledgeCardEvidence, seedSourceCaptureVersion } from "./helpers/source-captures";

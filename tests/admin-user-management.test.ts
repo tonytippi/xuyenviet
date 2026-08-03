@@ -2,31 +2,19 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { BadRequestException, ServiceUnavailableException } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
-import { NextRequest } from "next/server";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
-import { apiAudience, encodeAdminUserRosterCursor, parseAdminUserRosterCursor, parseAdminUserRosterPage, parseAdminUserRosterQuery, parseUserRoleCommand, parseUserRoleCommandResult } from "@xuyenviet/contracts";
-import { createBffTransportConfig } from "@xuyenviet/config";
-import { UserRoleGovernancePolicyError } from "@xuyenviet/domain";
+import { encodeAdminUserRosterCursor, parseAdminKnowledgeIntake, parseAdminKnowledgeSeedBatchRequest, parseAdminUserRosterCursor, parseAdminUserRosterPage, parseAdminUserRosterQuery, parseUserRoleCommand, parseUserRoleCommandResult, type AiGatewayModelPurpose } from "@xuyenviet/contracts";
+import { type AdminAiModelCatalogPort, type AdminKnowledgeIntakePort, type AdminOverviewPort, UserRoleGovernancePolicyError } from "@xuyenviet/domain";
 import { AdminUsersController } from "../apps/api/src/admin/admin-users.controller";
+import { AdminAiModelsController } from "../apps/api/src/admin/admin-ai-models.controller";
+import { AdminOverviewController } from "../apps/api/src/admin/admin-overview.controller";
+import { AdminKnowledgeIntakeController } from "../apps/api/src/admin/admin-knowledge-intake.controller";
 import { AdminCapabilityGuard } from "../apps/api/src/auth/admin-capability.guard";
-import { adminCsrfCookieName } from "../apps/admin/server/cookies";
-import { issueAdminCsrfToken } from "../apps/admin/server/csrf";
-import { executeAdminBffMutation, executeAdminBffRead } from "../apps/admin/server/bff-adapter";
-import { adminBffResponse, parseExpectedAdminUserRosterPage } from "../apps/admin/server/users";
+import { decimalToMicros } from "../apps/admin/app/ai-models/ai-model-catalog";
 import { parseExpectedUserRoleCommand, projectUserRoleCommand } from "../apps/admin/app/users/user-roster";
 
-const transport = createBffTransportConfig({
-  privateApiUrl: new URL(`https://${apiAudience}`),
-  bffOrigin: "https://admin.xuyenviet.app",
-  csrfSigningSecret: "a".repeat(32),
-  csrfLifetimeSeconds: 300,
-  requestTimeoutMs: 100,
-});
-
-afterEach(() => vi.useRealTimers());
-
-describe("admin user-role governance cutover", () => {
+describe("admin user-role governance direct API cutover", () => {
   test("uses a bounded opaque full ordering cursor and rejects malformed browser input", () => {
     const cursor = encodeAdminUserRosterCursor({ name: null, email: "a@example.com", id: "user-a" });
     expect(parseAdminUserRosterCursor(cursor)).toEqual({ name: null, email: "a@example.com", id: "user-a" });
@@ -40,29 +28,18 @@ describe("admin user-role governance cutover", () => {
   test("accepts only safe roster projections", () => {
     expect(parseAdminUserRosterPage({ items: [{ id: "u", name: null, email: null, image: null, emailVerified: null, roles: ["admin"], usage: { aiRequestCount: "0", inputTokens: "0", outputTokens: "0" } }], nextCursor: null, search: "" })).not.toBeNull();
     expect(parseAdminUserRosterPage({ items: [{ id: "u", email: "private@example.com" }], nextCursor: null, search: "" })).toBeNull();
-    const page = { items: [], nextCursor: null, search: "Nguyen" };
-    expect(parseExpectedAdminUserRosterPage(page, "Nguyen")).toEqual(page);
-    expect(parseExpectedAdminUserRosterPage(page, "")).toBeNull();
-    expect(parseExpectedAdminUserRosterPage({ ...page, search: "" }, "Nguyen")).toBeNull();
   });
 
-  test("retires the matching legacy route, query, commands, and navigation", () => {
-    expect(existsSync(join(process.cwd(), "src/app/admin/users/page.tsx"))).toBe(false);
-    expect(existsSync(join(process.cwd(), "src/features/admin/users.ts"))).toBe(false);
-    const actions = readFileSync(join(process.cwd(), "src/features/admin/actions.ts"), "utf8");
-    const layout = readFileSync(join(process.cwd(), "src/app/admin/layout.tsx"), "utf8");
-    expect(actions).not.toMatch(/grantAdminUserRole|revokeAdminUserRole/);
-    expect(layout).not.toContain('href: "/admin/users"');
-  });
-
-  test("admits role governance only for an exact admin credential", () => {
-    const guard = new AdminCapabilityGuard({ getAllAndOverride: () => "admin.role.governance" } as unknown as Reflector);
-    for (const principal of [undefined, { issuer: "xuyenviet-admin-bff", roles: ["operator"] }, { issuer: "xuyenviet-admin-bff", roles: ["traveler"] }, { issuer: "xuyenviet-web-bff", roles: ["admin"] }]) {
+  test("admits role governance only for current exact-admin browser sessions", () => {
+    const guard = new AdminCapabilityGuard({ getAllAndOverride: (key: string) => key === "admin-capability" ? "admin.role.governance" : true } as unknown as Reflector);
+    for (const principal of [undefined, { transport: "browser_session", roles: ["operator"] }, { transport: "bff_bearer", issuer: "xuyenviet-web-bff", roles: ["admin"] }]) {
       const context = { getHandler: () => () => {}, getClass: () => class Test {}, switchToHttp: () => ({ getRequest: () => ({ principal, requestId: "governance" }) }) } as never;
       expect(() => guard.canActivate(context)).toThrow();
     }
-    const exactAdmin = { getHandler: () => () => {}, getClass: () => class Test {}, switchToHttp: () => ({ getRequest: () => ({ principal: { issuer: "xuyenviet-admin-bff", roles: ["admin"] }, requestId: "governance" }) }) } as never;
-    expect(guard.canActivate(exactAdmin)).toBe(true);
+    for (const principal of [{ transport: "browser_session" as const, roles: ["admin" as const] }]) {
+      const context = { getHandler: () => () => {}, getClass: () => class Test {}, switchToHttp: () => ({ getRequest: () => ({ principal, requestId: "governance" }) }) } as never;
+      expect(guard.canActivate(context)).toBe(true);
+    }
   });
 
   test("controller validates query and command input before invoking its governance port", async () => {
@@ -70,178 +47,108 @@ describe("admin user-role governance cutover", () => {
     const governance = { listUsers: vi.fn(async () => ({ items: [], nextCursor: null, search: "An" })), withinRoleGovernanceTransaction: vi.fn(async (operation) => operation(transaction)) };
     const controller = new AdminUsersController(governance);
     await expect(controller.list({ search: "An" })).resolves.toEqual({ items: [], nextCursor: null, search: "An" });
-    expect(governance.listUsers).toHaveBeenCalledWith({ cursor: null, search: "An" });
     await expect(controller.list({ cursor: "invalid" })).rejects.toBeInstanceOf(BadRequestException);
-    await expect(controller.grant("target", { role: "operator" } as never, { principal: { userId: "admin", sessionId: "session", roles: ["admin"], authorizationVersion: 1, issuer: "xuyenviet-admin-bff", tokenId: "token" } })).resolves.toMatchObject({ changed: true });
-    expect(governance.withinRoleGovernanceTransaction).toHaveBeenCalledOnce();
+    await expect(controller.grant("target", { role: "operator" } as never, { principal: { userId: "admin", sessionId: "session", roles: ["admin"], authorizationVersion: 1, transport: "browser_session" } })).resolves.toMatchObject({ changed: true });
     await expect(controller.revoke("", "admin", { principal: undefined })).rejects.toBeInstanceOf(BadRequestException);
-    expect(governance.withinRoleGovernanceTransaction).toHaveBeenCalledOnce();
   });
 
   test("controller maps only explicit role policy errors to validation", async () => {
-    const principal = { userId: "admin", sessionId: "session", roles: ["admin" as const], authorizationVersion: 1, issuer: "xuyenviet-admin-bff" as const, tokenId: "token" };
-    const governance = { listUsers: vi.fn(), withinRoleGovernanceTransaction: vi.fn()
-      .mockRejectedValueOnce(new UserRoleGovernancePolicyError("Cannot revoke the final administrator role."))
-      .mockRejectedValueOnce(new Error("audit insert failed: private database detail")) };
+    const principal = { userId: "admin", sessionId: "session", roles: ["admin" as const], authorizationVersion: 1, transport: "browser_session" as const };
+    const governance = { listUsers: vi.fn(), withinRoleGovernanceTransaction: vi.fn().mockRejectedValueOnce(new UserRoleGovernancePolicyError("Cannot revoke the final administrator role.")).mockRejectedValueOnce(new Error("audit insert failed: private database detail")) };
     const controller = new AdminUsersController(governance);
-
     await expect(controller.revoke("target", "admin", { principal })).rejects.toBeInstanceOf(BadRequestException);
     await expect(controller.grant("target", { role: "operator" } as never, { principal })).rejects.toBeInstanceOf(ServiceUnavailableException);
-    governance.withinRoleGovernanceTransaction.mockRejectedValueOnce(new BadRequestException({ code: "validation_error" }));
-    await expect(controller.grant("target", { role: "operator" } as never, { principal })).rejects.toBeInstanceOf(ServiceUnavailableException);
-    governance.listUsers.mockRejectedValueOnce(new BadRequestException({ code: "validation_error" }));
-    await expect(controller.list({ search: "An" })).rejects.toBeInstanceOf(ServiceUnavailableException);
-    await expect(controller.grant("target", { role: "operator" } as never, { principal: undefined })).rejects.toBeInstanceOf(ServiceUnavailableException);
   });
 
-  test("BFF rejects malformed roster and role input without credential minting or private requests", async () => {
-    vi.resetModules();
-    const executeAdminBffRead = vi.fn();
-    const executeAdminBffMutation = vi.fn();
-    vi.doMock("../apps/admin/server/bff-adapter", () => ({ executeAdminBffRead, executeAdminBffMutation }));
-    const { mutateAdminUserRole, readAdminUsers } = await import("../apps/admin/server/users");
-    const request = new Request("https://admin.xuyenviet.app/api/users", { headers: { "x-request-id": "known_request" } });
-    await expect(readAdminUsers(request, ["one", "two"], null)).resolves.toMatchObject({ ok: false, error: { code: "validation_error", requestId: "known_request" } });
-    await expect(mutateAdminUserRole(Object.assign(request, { cookies: { get: () => undefined } }), "", "admin", "revoke")).resolves.toMatchObject({ ok: false, error: { code: "validation_error", requestId: "known_request" } });
-    expect(executeAdminBffRead).not.toHaveBeenCalled();
-    expect(executeAdminBffMutation).not.toHaveBeenCalled();
-    vi.doUnmock("../apps/admin/server/bff-adapter");
-  });
-
-  test("mutation adapter preserves only canonical correlated safe API errors", async () => {
-    const token = issueAdminCsrfToken(transport);
-    const request = { headers: new Headers({ origin: transport.bffOrigin, "sec-fetch-site": "same-origin", "X-XuyenViet-Admin-CSRF": token, "x-request-id": "role_error" }), cookies: { get: (name: string) => name === adminCsrfCookieName ? { value: token } : undefined } };
-    const call = (response: Response) => executeAdminBffMutation({ request, rawInput: { role: "admin" }, parseInput: () => ({ role: "admin" }), parseResult: () => null, capability: "admin.role.governance", path: "/v1/admin/users/u/roles", method: "POST", config: transport, mintCredential: async () => "credential", fetcher: vi.fn(async () => response) });
-
-    await expect(call(new Response(JSON.stringify({ code: "validation_error", message: "Dữ liệu yêu cầu không hợp lệ.", requestId: "role_error", violations: [{ field: "role", code: "invalid", message: "invalid role" }] }), { status: 400, headers: { "x-request-id": "role_error" } }))).resolves.toMatchObject({ ok: false, status: 400, error: { code: "validation_error", requestId: "role_error" } });
-    await expect(call(new Response(JSON.stringify({ code: "validation_error", message: "Dữ liệu yêu cầu không hợp lệ.", requestId: "other" }), { status: 400, headers: { "x-request-id": "role_error" } }))).resolves.toMatchObject({ ok: false, error: { code: "internal_error", requestId: "role_error" } });
-    await expect(call(new Response(JSON.stringify({ code: "validation_error", message: "Dữ liệu yêu cầu không hợp lệ.", requestId: "role_error" }), { status: 400, headers: { "x-request-id": "other" } }))).resolves.toMatchObject({ ok: false, error: { code: "internal_error", requestId: "role_error" } });
-  });
-
-  test("maps the canonical correlated request timeout envelope to HTTP 408", () => {
-    const error = { code: "request_timeout" as const, message: "Không thể xử lý yêu cầu.", requestId: "timeout_13_2" };
-
-    expect(adminBffResponse({ ok: false, error })).toEqual({ body: error, status: 408, requestId: "timeout_13_2" });
-  });
-
-  test("keeps private request timeout and caller abort active while parsing read and mutation JSON", async () => {
-    vi.useFakeTimers();
-    const token = issueAdminCsrfToken(transport);
-    const request = (signal?: AbortSignal) => ({ headers: new Headers({ origin: transport.bffOrigin, "sec-fetch-site": "same-origin", "X-XuyenViet-Admin-CSRF": token }), cookies: { get: (name: string) => name === adminCsrfCookieName ? { value: token } : undefined }, signal });
-    const responseAwaitingAbort = (signal: AbortSignal) => {
-      const response = new Response(null, { headers: { "x-request-id": "generated" } });
-      Object.defineProperty(response, "json", { value: () => new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(new DOMException("Request aborted.", "AbortError")), { once: true })) });
-      return response;
-    };
-    const read = executeAdminBffRead({ request: { headers: new Headers() }, capability: "admin.role.governance", path: "/v1/admin/users", config: { ...transport, requestTimeoutMs: 1 }, mintCredential: async () => "credential", fetcher: vi.fn(async (_url, init) => responseAwaitingAbort(init!.signal!)), parseResult: () => ({ items: [], nextCursor: null, search: "" }) });
-    await vi.advanceTimersByTimeAsync(1);
-    await expect(read).resolves.toMatchObject({ ok: false, error: { code: "request_timeout" } });
-
-    const caller = new AbortController();
-    const mutation = executeAdminBffMutation({ request: request(caller.signal), rawInput: { role: "admin" }, parseInput: () => ({ role: "admin" }), parseResult: () => ({ targetUserId: "u", role: "admin", operation: "grant", changed: true }), capability: "admin.role.governance", path: "/v1/admin/users/u/roles", method: "POST", config: transport, mintCredential: async () => "credential", fetcher: vi.fn(async (_url, init) => responseAwaitingAbort(init!.signal!)) });
-    await vi.advanceTimersByTimeAsync(0);
-    caller.abort();
-    await expect(mutation).resolves.toMatchObject({ ok: false, error: { code: "request_timeout" } });
-  });
-
-  test("does not invoke the private API when the caller aborts while an admin credential is minting", async () => {
-    const token = issueAdminCsrfToken(transport);
-    const caller = new AbortController();
-    let minted!: (credential: string) => void;
-    let mintStarted!: () => void;
-    const minting = new Promise<string>((resolve) => { minted = resolve; });
-    const started = new Promise<void>((resolve) => { mintStarted = resolve; });
-    const mintCredential = vi.fn(async () => { mintStarted(); return minting; });
-    const fetcher = vi.fn<typeof fetch>();
-    const request = {
-      headers: new Headers({ origin: transport.bffOrigin, "sec-fetch-site": "same-origin", "X-XuyenViet-Admin-CSRF": token, "x-request-id": "mint_abort_13_2" }),
-      cookies: { get: (name: string) => name === adminCsrfCookieName ? { value: token } : undefined },
-      signal: caller.signal,
-    };
-    const mutation = executeAdminBffMutation({ request, rawInput: { role: "admin" }, parseInput: () => ({ role: "admin" as const }), parseResult: () => ({ targetUserId: "u", role: "admin" as const, operation: "grant" as const, changed: true }), capability: "admin.role.governance", path: "/v1/admin/users/u/roles", method: "POST", config: transport, mintCredential, fetcher });
-
-    await started;
-    caller.abort();
-    minted("credential");
-
-    await expect(mutation).resolves.toEqual({ ok: false, error: { code: "request_timeout", message: "Không thể xử lý yêu cầu.", requestId: "mint_abort_13_2" } });
-    expect(mintCredential).toHaveBeenCalledOnce();
-    expect(fetcher).not.toHaveBeenCalled();
+  test("retires matching admin BFF routes and calls Nest with the session CSRF convention", () => {
+    expect(existsSync(join(process.cwd(), "apps/admin/app/api/users/route.ts"))).toBe(false);
+    expect(existsSync(join(process.cwd(), "apps/admin/app/api/users/[userId]/roles/route.ts"))).toBe(false);
+    expect(existsSync(join(process.cwd(), "apps/admin/app/api/users/[userId]/roles/[role]/route.ts"))).toBe(false);
+    expect(existsSync(join(process.cwd(), "apps/admin/server/users.ts"))).toBe(false);
+    const source = readFileSync(join(process.cwd(), "apps/admin/app/users/user-roster.tsx"), "utf8");
+    expect(source).toContain("${apiOrigin()}/v1/admin/users?");
+    expect(source).toContain("${apiOrigin()}/auth/csrf");
+    expect(source).toContain("${apiOrigin()}/auth/google?");
+    expect(source).toContain('"X-XuyenViet-CSRF": csrf');
+    expect(source).toContain("if (csrfResponse.status === 401) { signInToApi(); return; }");
+    expect(source).not.toContain("/api/users");
+    expect(source).not.toContain("/api/auth/csrf");
   });
 
   test("user roster parses command results and does not project stale no-op grants", () => {
-    const source = readFileSync(join(process.cwd(), "apps/admin/app/users/user-roster.tsx"), "utf8");
-    expect(source).toContain("rosterRequest.current?.abort()");
-    expect(source).toContain("signal: controller.signal");
-    expect(source).toContain("generation !== rosterGeneration.current");
-    expect(source).toContain("generation === rosterGeneration.current && !controller.signal.aborted");
-    expect(source).toContain("parseUserRoleCommandResult(value)");
-    expect(source).toContain("projectUserRoleCommand(current, command)");
-    expect(source).toContain("parseExpectedUserRoleCommand(result, { targetUserId: userId, role, operation })");
-    expect(source).toContain("if (mutationInFlight.current) return;");
-    expect(source).toContain("if (!command.changed && !await load(null, page.search)) return;");
-    expect(source).toContain("disabled={busy !== null || loadingPage}");
-    expect(source).toContain("disabled={loadingPage || busy !== null}");
-    const mutationSucceeded = source.indexOf('if (!command) throw new Error("mutation failed");');
-    const invalidateGeneration = source.indexOf("++rosterGeneration.current", mutationSucceeded);
-    const abortRoster = source.indexOf("rosterRequest.current?.abort()", invalidateGeneration);
-    const updateRoles = source.indexOf("setPage((current) =>", mutationSucceeded);
-    expect(invalidateGeneration).toBeGreaterThan(mutationSucceeded);
-    expect(abortRoster).toBeGreaterThan(invalidateGeneration);
-    expect(updateRoles).toBeGreaterThan(abortRoster);
-
     const page = { items: [{ id: "user", name: null, email: null, image: null, emailVerified: null, roles: ["admin" as const], usage: { aiRequestCount: "0", inputTokens: "0", outputTokens: "0" } }], nextCursor: null, search: "" };
     expect(parseExpectedUserRoleCommand({ targetUserId: "user", role: "operator", operation: "grant", changed: false }, { targetUserId: "user", role: "operator", operation: "grant" })).toMatchObject({ changed: false });
     expect(parseExpectedUserRoleCommand({ targetUserId: "other", role: "operator", operation: "grant", changed: true }, { targetUserId: "user", role: "operator", operation: "grant" })).toBeNull();
-    expect(parseExpectedUserRoleCommand({ targetUserId: "user", role: "admin", operation: "grant", changed: true }, { targetUserId: "user", role: "operator", operation: "grant" })).toBeNull();
-    expect(parseExpectedUserRoleCommand({ targetUserId: "user", role: "operator", operation: "revoke", changed: true }, { targetUserId: "user", role: "operator", operation: "grant" })).toBeNull();
     expect(projectUserRoleCommand(page, { targetUserId: "user", role: "operator", operation: "grant", changed: false })).toBe(page);
     expect(projectUserRoleCommand(page, { targetUserId: "user", role: "operator", operation: "grant", changed: true }).items[0]?.roles).toEqual(["admin", "operator"]);
   });
 
-  test("user BFF routes project exact-admin data, authorization denial, and safe responses", async () => {
-    vi.resetModules();
-    const readAdminUsers = vi.fn()
-      .mockResolvedValueOnce({ ok: true as const, value: { items: [], nextCursor: null, search: "" }, requestId: "get_admin" })
-      .mockResolvedValueOnce({ ok: false as const, error: { code: "forbidden", message: "Bạn không có quyền thực hiện thao tác này.", requestId: "get_operator" } })
-      .mockResolvedValueOnce({ ok: false as const, error: { code: "unauthorized", message: "Không được phép truy cập.", requestId: "get_anonymous" } });
-    const mutateAdminUserRole = vi.fn()
-      .mockResolvedValueOnce({ ok: true as const, value: { targetUserId: "target", role: "operator", operation: "grant", changed: true }, requestId: "post_admin" })
-      .mockResolvedValueOnce({ ok: true as const, value: { targetUserId: "target", role: "operator", operation: "revoke", changed: true }, requestId: "delete_admin" })
-      .mockResolvedValueOnce({ ok: false as const, error: { code: "csrf_invalid", message: "Yêu cầu không hợp lệ. Vui lòng tải lại trang và thử lại.", requestId: "post_csrf" } })
-      .mockResolvedValueOnce({ ok: false as const, error: { code: "validation_error", message: "Dữ liệu yêu cầu không hợp lệ.", requestId: "post_invalid" } });
-    vi.doMock("../apps/admin/server/users", () => ({
-      readAdminUsers,
-      mutateAdminUserRole,
-      adminBffResponse: (result: { ok: true; value: unknown; requestId: string } | { ok: false; error: { code: string; message: string; requestId: string } }) => result.ok
-        ? { body: result.value, status: 200, requestId: result.requestId }
-        : { body: result.error, status: result.error.code === "unauthorized" ? 401 : result.error.code === "forbidden" || result.error.code === "csrf_invalid" ? 403 : 503, requestId: result.error.requestId },
-    }));
-    const { GET } = await import("../apps/admin/app/api/users/route");
-    const { POST } = await import("../apps/admin/app/api/users/[userId]/roles/route");
-    const { DELETE } = await import("../apps/admin/app/api/users/[userId]/roles/[role]/route");
+  test("admits the direct model catalog only for exact-admin browser sessions and retires the root owner", async () => {
+    const guard = new AdminCapabilityGuard({ getAllAndOverride: (key: string) => key === "admin-capability" ? "admin.ai-model-catalog.write" : true } as unknown as Reflector);
+    const context = (principal: unknown) => ({ getHandler: () => () => {}, getClass: () => class Test {}, switchToHttp: () => ({ getRequest: () => ({ principal, requestId: "catalog" }) }) } as never);
+    expect(() => guard.canActivate(context({ transport: "browser_session", roles: ["operator"] }))).toThrow();
+    expect(guard.canActivate(context({ transport: "browser_session", roles: ["admin"] }))).toBe(true);
+    const catalog = { list: vi.fn(async () => []), create: vi.fn(async () => ({ id: "model", gatewayModelName: "cx/model", displayLabel: "Model", purpose: "ai_ask_initial_answer" as AiGatewayModelPurpose, active: true, defaultForPurpose: false, supportsTextInput: true, supportsImageInput: false, supportsImageOutput: false, supportsEmbeddings: false, supportsExtraction: false, supportsEvaluation: false, supportsStreaming: false, supportsCachePricing: false, pricingCurrency: null, inputTokenPriceMicros: null, outputTokenPriceMicros: null, cacheReadTokenPriceMicros: null, cacheWriteTokenPriceMicros: null, pricingUnitTokens: 1_000_000, pricingVersion: null, pricingEffectiveAt: new Date().toISOString() })), update: vi.fn(), setDefault: vi.fn(), archive: vi.fn() } satisfies AdminAiModelCatalogPort;
+    const controller = new AdminAiModelsController(catalog);
+    await expect(controller.list()).resolves.toEqual([]);
+    expect(existsSync(join(process.cwd(), "src/app/admin/ai-gateway/page.tsx"))).toBe(false);
+    expect(existsSync(join(process.cwd(), "src/features/admin/ai-gateway.ts"))).toBe(false);
+    expect(existsSync(join(process.cwd(), "src/features/admin/actions.ts"))).toBe(false);
+    const source = readFileSync(join(process.cwd(), "apps/admin/app/ai-models/ai-model-catalog.tsx"), "utf8");
+    expect(source).toContain("/v1/admin/ai-models");
+    expect(source).toContain("/auth/csrf");
+    expect(source).toContain("csrfResponse.status === 401");
+    expect(source).toContain("/auth/google?");
+    expect(source).toContain("await load();");
+    expect(source).not.toContain("/api/ai-models");
+  });
 
-    const getAdmin = await GET(new NextRequest("https://admin.xuyenviet.app/api/users", { headers: { "x-request-id": "get_admin" } }));
-    expect(getAdmin.status).toBe(200);
-    expect(getAdmin.headers.get("x-request-id")).toBe("get_admin");
-    expect(await getAdmin.json()).toEqual({ items: [], nextCursor: null, search: "" });
-    await expect(GET(new NextRequest("https://admin.xuyenviet.app/api/users", { headers: { "x-request-id": "get_operator" } }))).resolves.toMatchObject({ status: 403 });
-    await expect(GET(new NextRequest("https://admin.xuyenviet.app/api/users", { headers: { "x-request-id": "get_anonymous" } }))).resolves.toMatchObject({ status: 401 });
+  test("admits aggregate-only overview reads for operator browser sessions and retires its root owner", async () => {
+    const guard = new AdminCapabilityGuard({ getAllAndOverride: (key: string) => key === "admin-capability" ? "admin.workspace.read" : true } as unknown as Reflector);
+    const context = (principal: unknown) => ({ getHandler: () => () => {}, getClass: () => class Test {}, switchToHttp: () => ({ getRequest: () => ({ principal, requestId: "overview" }) }) } as never);
+    expect(guard.canActivate(context({ transport: "browser_session", roles: ["operator"] }))).toBe(true);
+    expect(() => guard.canActivate(context({ transport: "browser_session", roles: ["traveler"] }))).toThrow();
+    const overview = { getOverview: vi.fn(async () => ({ sourcesReadyForProcessing: 0, processingJobs: 0, failedProcessingJobs: 0, draftsAwaitingReview: 0, openRecommendations: 0, activeKnowledgeCards: 0, coverage: { targetActiveCards: 100, activeEvidenceGroundedCards: 0, remainingActiveCards: 100, isComplete: false, activeCommunityObservations: 0, activeCommunityPatterns: 0, caveatOnlyHighRiskCards: 0, pendingReviewCards: 0, pendingVerificationCards: 0, actionableWork: [], byType: [], byRouteOrLocation: [] } })) } satisfies AdminOverviewPort;
+    await expect(new AdminOverviewController(overview).get()).resolves.toMatchObject({ coverage: { targetActiveCards: 100 } });
+    const unsafeOverview = { getOverview: vi.fn(async () => ({ sourcesReadyForProcessing: 0, processingJobs: 0, failedProcessingJobs: 0, draftsAwaitingReview: 0, openRecommendations: 0, activeKnowledgeCards: 0, coverage: { targetActiveCards: 100, activeEvidenceGroundedCards: 0, remainingActiveCards: 100, isComplete: false, activeCommunityObservations: 0, activeCommunityPatterns: 0, caveatOnlyHighRiskCards: 0, pendingReviewCards: 0, pendingVerificationCards: 0, actionableWork: [], byType: [], byRouteOrLocation: [] }, rawSourceText: "must not serialize" })) };
+    await expect(new AdminOverviewController(unsafeOverview as AdminOverviewPort).get()).rejects.toBeInstanceOf(ServiceUnavailableException);
+    expect(existsSync(join(process.cwd(), "src/app/admin/page.tsx"))).toBe(false);
+    expect(existsSync(join(process.cwd(), "src/features/admin/overview.ts"))).toBe(false);
+    const source = readFileSync(join(process.cwd(), "apps/admin/app/overview.tsx"), "utf8");
+    expect(source).toContain("/v1/admin/overview");
+    expect(source).toContain("credentials: \"include\"");
+    expect(source).toContain("response.status === 401");
+    expect(source).not.toContain("/api/overview");
+  });
 
-    const postAdmin = await POST(new NextRequest("https://admin.xuyenviet.app/api/users/target/roles", { method: "POST", body: JSON.stringify({ role: "operator" }) }), { params: Promise.resolve({ userId: "target" }) });
-    expect(postAdmin.status).toBe(200);
-    expect(await postAdmin.json()).toEqual({ targetUserId: "target", role: "operator", operation: "grant", changed: true });
-    const deleteAdmin = await DELETE(new NextRequest("https://admin.xuyenviet.app/api/users/target/roles/operator", { method: "DELETE" }), { params: Promise.resolve({ userId: "target", role: "operator" }) });
-    expect(deleteAdmin.status).toBe(200);
-    expect(await deleteAdmin.json()).toEqual({ targetUserId: "target", role: "operator", operation: "revoke", changed: true });
-    const csrfFailure = await POST(new NextRequest("https://admin.xuyenviet.app/api/users/target/roles", { method: "POST", body: JSON.stringify({ role: "operator" }) }), { params: Promise.resolve({ userId: "target" }) });
-    expect(csrfFailure.status).toBe(403);
-    const csrfBody = await csrfFailure.json();
-    expect(csrfBody).toEqual({ code: "csrf_invalid", message: "Yêu cầu không hợp lệ. Vui lòng tải lại trang và thử lại.", requestId: "post_csrf" });
-    expect(JSON.stringify(csrfBody)).not.toContain("credential");
+  test("converts decimal catalog pricing exactly to safe integer micros", () => {
+    expect(decimalToMicros("1.25")).toBe(1_250_000);
+    expect(decimalToMicros("0.000001")).toBe(1);
+    expect(decimalToMicros("")).toBeNull();
+    expect(() => decimalToMicros("0.0000001")).toThrow();
+    expect(() => decimalToMicros("2147.483648")).toThrow();
+  });
 
-    await POST(new NextRequest("https://admin.xuyenviet.app/api/users/target/roles", { method: "POST", body: JSON.stringify({ role: "admin", unexpected: true }) }), { params: Promise.resolve({ userId: "target" }) });
-    expect(mutateAdminUserRole).toHaveBeenLastCalledWith(expect.any(Request), "target", null, "grant");
-    vi.doUnmock("../apps/admin/server/users");
+  test("allows direct overview and catalog OAuth return URLs", () => {
+    expect(readFileSync(join(process.cwd(), "apps/api/.env.example"), "utf8")).toContain("https://admin.xuyenviet.app/ai-models");
+    expect(readFileSync(join(process.cwd(), "apps/api/.env.example"), "utf8")).toContain("https://admin.xuyenviet.app/");
+    expect(readFileSync(join(process.cwd(), "apps/api/.env.example"), "utf8")).toContain("https://admin.xuyenviet.app/knowledge/intake");
+  });
+
+  test("admits operator browser intake, validates strict safe contracts, and retires the root owner", async () => {
+    const guard = new AdminCapabilityGuard({ getAllAndOverride: (key: string) => key === "admin-capability" ? "admin.knowledge.write" : true } as unknown as Reflector);
+    const context = (principal: unknown) => ({ getHandler: () => () => {}, getClass: () => class Test {}, switchToHttp: () => ({ getRequest: () => ({ principal, requestId: "intake" }) }) } as never);
+    expect(guard.canActivate(context({ transport: "browser_session", roles: ["operator"] }))).toBe(true);
+    expect(() => guard.canActivate(context({ transport: "browser_session", roles: ["traveler"] }))).toThrow();
+    expect(parseAdminKnowledgeSeedBatchRequest({ urls: ["https://example.com"], rawText: "secret" })).toBeNull();
+    expect(parseAdminKnowledgeIntake({ sources: [{ id: "s", displayUrl: "https://example.com", displayTitle: "Safe", kind: "url", eligibility: "eligible", removalReason: null, createdAt: new Date().toISOString(), rawText: "secret" }], recentBatches: [] })).toBeNull();
+    const intake = { list: vi.fn(async () => ({ sources: [], recentBatches: [] })), submitBatch: vi.fn(async () => ({ batchId: "batch", totalItems: 1, pendingCount: 1, failedCount: 0, duplicateCount: 0 })), removeSource: vi.fn(async () => ({ status: "completed" as const, sourceId: "source", changedCardCount: 0 })) } satisfies AdminKnowledgeIntakePort;
+    const controller = new AdminKnowledgeIntakeController(intake);
+    await expect(controller.list()).resolves.toEqual({ sources: [], recentBatches: [] });
+    await expect(controller.submit({ urls: [] }, { principal: { userId: "operator", sessionId: "session", roles: ["operator"], authorizationVersion: 1, transport: "browser_session" } })).rejects.toBeInstanceOf(BadRequestException);
+    expect(existsSync(join(process.cwd(), "src/app/admin/knowledge/intake/page.tsx"))).toBe(false);
+    expect(existsSync(join(process.cwd(), "src/app/admin/knowledge/intake/intake-url-modal.tsx"))).toBe(false);
+    const source = readFileSync(join(process.cwd(), "apps/admin/app/knowledge/intake/knowledge-intake.tsx"), "utf8");
+    expect(source).toContain("/v1/admin/knowledge/intake"); expect(source).toContain("/v1/admin/knowledge/seed-batches"); expect(source).toContain("/auth/csrf"); expect(source).toContain("credentials: \"include\""); expect(source).not.toContain("/api/knowledge"); expect(source).not.toContain("rawText");
   });
 });

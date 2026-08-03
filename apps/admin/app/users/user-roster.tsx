@@ -2,7 +2,17 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { parseUserRoleCommandResult, type AdminUserRosterPage, type ManagedUserRole, type UserRoleCommandResult } from "@xuyenviet/contracts";
+import { parseAdminUserRosterPage, parseSafeApiError, parseUserRoleCommandResult, type AdminUserRosterPage, type ManagedUserRole, type UserRoleCommandResult } from "@xuyenviet/contracts";
+
+function apiOrigin() {
+  const origin = process.env.NEXT_PUBLIC_API_ORIGIN;
+  if (!origin) throw new Error("NEXT_PUBLIC_API_ORIGIN is required.");
+  return origin;
+}
+
+function signInToApi() {
+  window.location.assign(`${apiOrigin()}/auth/google?${new URLSearchParams({ returnUrl: `${window.location.origin}/users` })}`);
+}
 
 export function projectUserRoleCommand(page: AdminUserRosterPage, command: UserRoleCommandResult): AdminUserRosterPage {
   if (!command.changed) return page;
@@ -22,17 +32,18 @@ export function parseExpectedUserRoleCommand(value: unknown, expected: Omit<User
   return command && command.targetUserId === expected.targetUserId && command.role === expected.role && command.operation === expected.operation ? command : null;
 }
 
-export function UserRoster({ initialPage }: { initialPage: AdminUserRosterPage }) {
-  const [page, setPage] = useState(initialPage);
+export function UserRoster() {
+  const [page, setPage] = useState<AdminUserRosterPage | null>(null);
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
-  const [search, setSearch] = useState(initialPage.search);
+  const [search, setSearch] = useState("");
   const [loadingPage, setLoadingPage] = useState(false);
   const rosterRequest = useRef<AbortController | null>(null);
   const rosterGeneration = useRef(0);
   const mutationInFlight = useRef(false);
 
   useEffect(() => () => rosterRequest.current?.abort(), []);
+  useEffect(() => { void load(null, ""); }, []);
 
   async function load(cursor: string | null, nextSearch: string) {
     const generation = ++rosterGeneration.current;
@@ -45,13 +56,14 @@ export function UserRoster({ initialPage }: { initialPage: AdminUserRosterPage }
       const parameters = new URLSearchParams();
       if (nextSearch.trim()) parameters.set("search", nextSearch.trim());
       if (cursor) parameters.set("cursor", cursor);
-      const response = await fetch(`/api/users?${parameters.toString()}`, { credentials: "same-origin", signal: controller.signal });
+      const response = await fetch(`${apiOrigin()}/v1/admin/users?${parameters.toString()}`, { credentials: "include", headers: { "x-request-id": crypto.randomUUID() }, signal: controller.signal });
       const result: unknown = await response.json().catch(() => null);
       if (generation !== rosterGeneration.current) return false;
-      if (!response.ok || !result || typeof result !== "object") throw new Error("roster unavailable");
-      const nextPage = result as AdminUserRosterPage;
+      if (response.status === 401) { signInToApi(); return false; }
+      const nextPage = parseAdminUserRosterPage(result);
+      if (!response.ok || !nextPage) throw new Error(parseSafeApiError(result)?.code ?? "roster unavailable");
       setPage((current) => cursor
-        ? { ...nextPage, items: [...current.items, ...nextPage.items.filter((item) => !current.items.some((existing) => existing.id === item.id))] }
+        ? current && { ...nextPage, items: [...current.items, ...nextPage.items.filter((item) => !current.items.some((existing) => existing.id === item.id))] }
         : nextPage);
       return true;
     } catch {
@@ -71,11 +83,12 @@ export function UserRoster({ initialPage }: { initialPage: AdminUserRosterPage }
     setBusy(`${userId}:${role}`);
     setStatus("");
     try {
-      const csrfResponse = await fetch("/api/auth/csrf", { credentials: "same-origin", cache: "no-store" });
+      const csrfResponse = await fetch(`${apiOrigin()}/auth/csrf`, { credentials: "include", headers: { "x-request-id": crypto.randomUUID() }, cache: "no-store" });
+      if (csrfResponse.status === 401) { signInToApi(); return; }
       const csrfBody: unknown = await csrfResponse.json().catch(() => null);
-      const csrf = csrfBody && typeof csrfBody === "object" && typeof (csrfBody as { token?: unknown }).token === "string" ? (csrfBody as { token: string }).token : null;
+      const csrf = csrfBody && typeof csrfBody === "object" && typeof (csrfBody as { csrfToken?: unknown }).csrfToken === "string" ? (csrfBody as { csrfToken: string }).csrfToken : null;
       if (!csrfResponse.ok || !csrf) throw new Error("csrf unavailable");
-      const response = await fetch(operation === "grant" ? `/api/users/${encodeURIComponent(userId)}/roles` : `/api/users/${encodeURIComponent(userId)}/roles/${role}`, { method: operation === "grant" ? "POST" : "DELETE", credentials: "same-origin", headers: { "content-type": "application/json", "X-XuyenViet-Admin-CSRF": csrf }, ...(operation === "grant" ? { body: JSON.stringify({ role }) } : {}) });
+      const response = await fetch(operation === "grant" ? `${apiOrigin()}/v1/admin/users/${encodeURIComponent(userId)}/roles` : `${apiOrigin()}/v1/admin/users/${encodeURIComponent(userId)}/roles/${role}`, { method: operation === "grant" ? "POST" : "DELETE", credentials: "include", headers: { "content-type": "application/json", "X-XuyenViet-CSRF": csrf, "x-request-id": crypto.randomUUID() }, ...(operation === "grant" ? { body: JSON.stringify({ role }) } : {}) });
         const result: unknown = await response.json().catch(() => null);
         const command = response.ok ? parseExpectedUserRoleCommand(result, { targetUserId: userId, role, operation }) : null;
         if (!command) throw new Error("mutation failed");
@@ -84,8 +97,8 @@ export function UserRoster({ initialPage }: { initialPage: AdminUserRosterPage }
        rosterRequest.current?.abort();
         rosterRequest.current = null;
         setLoadingPage(false);
-        setPage((current) => projectUserRoleCommand(current, command));
-        if (!command.changed && !await load(null, page.search)) return;
+        setPage((current) => current ? projectUserRoleCommand(current, command) : current);
+        if (!command.changed && !await load(null, page?.search ?? search)) return;
       setStatus("Đã cập nhật quyền người dùng.");
     } catch {
       setStatus("Không thể cập nhật quyền. Vui lòng tải lại trang và thử lại.");
@@ -103,7 +116,7 @@ export function UserRoster({ initialPage }: { initialPage: AdminUserRosterPage }
       <input className="min-w-0 flex-1 rounded border px-3 py-2" id="user-search" name="search" onChange={(event) => setSearch(event.target.value)} placeholder="Tìm theo tên hoặc email" type="search" value={search} />
       <button className="rounded border px-3 py-2 disabled:opacity-50" disabled={loadingPage || busy !== null} type="submit">Tìm kiếm</button>
     </form>
-    <section className="mt-6 overflow-x-auto rounded-xl border"><table className="min-w-full text-left"><thead><tr><th className="p-3">Người dùng</th><th className="p-3">Vai trò</th><th className="p-3">Sử dụng AI</th><th className="p-3">Thao tác</th></tr></thead><tbody>{page.items.map((user) => <tr className="border-t" key={user.id}><td className="p-3"><strong>{user.name || "Chưa đặt tên"}</strong><br /><span>{user.email || "Không có email"}</span></td><td className="p-3">{user.roles.join(", ") || "traveler"}</td><td className="p-3">{user.usage.aiRequestCount} yêu cầu</td><td className="p-3"><div className="flex gap-2">{(["operator", "admin"] as const).map((role) => <button className="rounded border px-2 py-1 disabled:opacity-50" disabled={busy !== null || loadingPage} key={role} onClick={() => void change(user.id, role, user.roles.includes(role) ? "revoke" : "grant")}>{user.roles.includes(role) ? `Thu hồi ${role}` : `Cấp ${role}`}</button>)}</div></td></tr>)}</tbody></table></section>
-    {page.nextCursor ? <div className="mt-4"><button className="rounded border px-3 py-2 disabled:opacity-50" disabled={loadingPage || busy !== null} onClick={() => void load(page.nextCursor, page.search)} type="button">Tải thêm người dùng</button></div> : null}
+    <section className="mt-6 overflow-x-auto rounded-xl border"><table className="min-w-full text-left"><thead><tr><th className="p-3">Người dùng</th><th className="p-3">Vai trò</th><th className="p-3">Sử dụng AI</th><th className="p-3">Thao tác</th></tr></thead><tbody>{page?.items.map((user) => <tr className="border-t" key={user.id}><td className="p-3"><strong>{user.name || "Chưa đặt tên"}</strong><br /><span>{user.email || "Không có email"}</span></td><td className="p-3">{user.roles.join(", ") || "traveler"}</td><td className="p-3">{user.usage.aiRequestCount} yêu cầu</td><td className="p-3"><div className="flex gap-2">{(["operator", "admin"] as const).map((role) => <button className="rounded border px-2 py-1 disabled:opacity-50" disabled={busy !== null || loadingPage} key={role} onClick={() => void change(user.id, role, user.roles.includes(role) ? "revoke" : "grant")}>{user.roles.includes(role) ? `Thu hồi ${role}` : `Cấp ${role}`}</button>)}</div></td></tr>)}</tbody></table></section>
+    {page?.nextCursor ? <div className="mt-4"><button className="rounded border px-3 py-2 disabled:opacity-50" disabled={loadingPage || busy !== null} onClick={() => void load(page.nextCursor, page.search)} type="button">Tải thêm người dùng</button></div> : null}
   </main>;
 }

@@ -1,11 +1,11 @@
 import postgres from "postgres";
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
-import { resolvePlanningAnnotationCapabilities, sanitizeStoredPlanningAnnotations, type AiAskStreamExecutionPort, type PlanningReadRepository, type UserRoleGovernancePort, type UserRoleGovernanceTransactionPort, UserRoleGovernancePolicyError } from "@xuyenviet/domain";
+import { resolvePlanningAnnotationCapabilities, sanitizeStoredPlanningAnnotations, type AdminAiModelCatalogPort, type AiAskStreamExecutionPort, type PlanningReadRepository, type UserRoleGovernancePort, type UserRoleGovernanceTransactionPort, UserRoleGovernancePolicyError, AdminAiModelCatalogPolicyError } from "@xuyenviet/domain";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { loadAnswerContext } from "./answer-context";
 import { formatAssistantMessageProvenance } from "./provenance";
 import { answerUsefulnessFeedback, assistantResponseProvenance, conversations, messages, tripChangeProposals, tripPlanChangeHistory, tripPlanItems, tripProjectConstraints, tripProjects, users } from "./schema";
-import { adminUserRosterPageSize, encodeAdminUserRosterCursor, evaluateSchemaAdmission, parsePlanningAnswerDetailResponse, planningDetailProvenanceLimit, type AdminIdentityHandoff, type PlanningJsonValue, type PlanningProvenance, type RequestRole, type SchemaCompatibilityDeclaration, type TravelerShellProjection, type TripAnswerContextResponse } from "@xuyenviet/contracts";
+import { adminUserRosterPageSize, encodeAdminUserRosterCursor, evaluateSchemaAdmission, parsePlanningAnswerDetailResponse, planningDetailProvenanceLimit, type AdminAiGatewayModel, type AdminAiGatewayModelInput, type AdminAiGatewayModelUpdate, type PlanningJsonValue, type PlanningProvenance, type RequestPrincipal, type RequestRole, type SchemaCompatibilityDeclaration, type TravelerShellProjection, type TripAnswerContextResponse } from "@xuyenviet/contracts";
 import { createAiAskStreamExecutionPort } from "./ai-ask-stream-execution";
 import { discardAiAskCommandsForDeletedConversations } from "./ai-ask-commands";
 import { recordAuditEvent } from "./audit-writers";
@@ -27,6 +27,10 @@ export * from "./domain-outbox";
 export * from "./gateway";
 export * from "./knowledge-search";
 export * from "./knowledge-indexing-queue";
+export * from "./knowledge-corridor";
+export * from "./knowledge-draft-review";
+export * from "./knowledge-readiness-evidence";
+export * from "./knowledge-recommendations";
 export * from "./knowledge-state";
 export * from "./models";
 export * from "./prompts";
@@ -37,6 +41,13 @@ export * from "./usage";
 export * from "./usage-constants";
 export * from "./usage-events";
 export * from "./web-search";
+export * from "./admin-overview";
+export * from "./admin-quality";
+export * from "./admin-knowledge-intake";
+export * from "./admin-facebook-capture";
+export * from "./admin-youtube-capture";
+export * from "./admin-knowledge-review";
+export * from "./admin-knowledge-coverage";
 export * from "./trip-plan-commands";
 export * from "./plan-references";
 export * from "./traveler-proposal-commands";
@@ -49,7 +60,6 @@ export type ApiIdentityRecord = {
 
 export interface ApiIdentityRepository {
   getSession(sessionId: string): Promise<ApiIdentityRecord | null>;
-  getAdminSession?(sessionId: string): Promise<ApiIdentityRecord | null>;
 }
 export type BrowserIdentity = ApiIdentityRecord & { roles: RequestRole[]; csrfHash: string; sessionId: string };
 export type BrowserOAuthTransaction = { id: string; state: string; codeVerifier: string; returnUrl: string; referralCode?: string | null; expires: Date };
@@ -65,18 +75,6 @@ export interface BrowserIdentityRepository extends ApiIdentityRepository {
   renewBrowserSession(sessionId: string, expires: Date): Promise<boolean>;
   revokeBrowserSession(sessionId: string): Promise<void>;
 }
-
-export interface AdminIdentityRepository extends ApiIdentityRepository {
-  resolveAdminHandoff(sessionId: string, subject?: string): Promise<AdminIdentityHandoff | null>;
-  revokeAdminSession(sessionId: string): Promise<void>;
-  purgeExpiredAdminOAuthTransactions(limit: number): Promise<void>;
-  createAdminOAuthTransaction(transaction: AdminOAuthTransaction): Promise<void>;
-  consumeAdminOAuthTransaction(id: string, state: string): Promise<AdminOAuthTransaction | null>;
-  provisionConfiguredAdminRoleForGoogleAccount(providerAccountId: string, email: string): Promise<void>;
-  resolveAdminRolesForGoogleAccount(providerAccountId: string): Promise<RequestRole[] | null>;
-  createAdminSessionForGoogleAccount(providerAccountId: string, expires: Date): Promise<string | null>;
-}
-export type AdminOAuthTransaction = { id: string; state: string; codeVerifier: string; callbackUrl: string; expires: Date };
 
 export type StoredConversationSummaryRow = { id: string; updatedAt: Date; messageContent: string | null };
 export type ReleaseSchemaVersionRepository = {
@@ -293,11 +291,9 @@ export function createPostgresReleaseSchemaVersionRepository(databaseUrl: string
   };
 }
 
-export function createPostgresApiIdentityRepository(databaseUrl: string, adminSessionLookupKey: string, browserSessionLookupKey = adminSessionLookupKey, browserOAuthTransactionProtectionKey?: string): AdminIdentityRepository & BrowserIdentityRepository {
-  if (adminSessionLookupKey.length < 32) throw new Error("Admin session lookup key is invalid.");
+export function createPostgresApiIdentityRepository(databaseUrl: string, browserSessionLookupKey: string, browserOAuthTransactionProtectionKey?: string): BrowserIdentityRepository {
   if (browserOAuthTransactionProtectionKey !== undefined && browserOAuthTransactionProtectionKey.length < 32) throw new Error("Browser OAuth transaction protection key is invalid.");
   const sql = postgres(databaseUrl, { max: 1 });
-  const lookupHash = (sessionId: string) => createHmac("sha256", adminSessionLookupKey).update(sessionId).digest("base64url");
   const browserLookupHash = (sessionId: string) => createHmac("sha256", browserSessionLookupKey).update(sessionId).digest("base64url");
   const oauthTransactionProtection = browserOAuthTransactionProtectionKey ? createBrowserOAuthTransactionProtection(browserOAuthTransactionProtectionKey) : null;
   return {
@@ -309,75 +305,6 @@ export function createPostgresApiIdentityRepository(databaseUrl: string, adminSe
         limit 1
       `;
       return rows[0] ?? null;
-    },
-    async getAdminSession(sessionId) {
-      const rows = await sql<ApiIdentityRecord[]>`
-        select admin_sessions.user_id as "userId", admin_sessions.expires, users.authorization_version as "authorizationVersion"
-        from admin_sessions join users on users.id = admin_sessions.user_id
-        where admin_sessions.session_lookup_hash = ${lookupHash(sessionId)} and admin_sessions.revoked_at is null
-        limit 1
-      `;
-      return rows[0] ?? null;
-    },
-    async resolveAdminHandoff(sessionId, subject) {
-      const rows = await sql<Array<{ userId: string; expires: Date; authorizationVersion: number; role: RequestRole }>>`
-        select admin_sessions.user_id as "userId", admin_sessions.expires, users.authorization_version as "authorizationVersion", user_roles.role
-        from admin_sessions join users on users.id = admin_sessions.user_id join user_roles on user_roles.user_id = users.id
-        where admin_sessions.session_lookup_hash = ${lookupHash(sessionId)} and admin_sessions.revoked_at is null
-      `;
-      if (!rows.length || rows[0]!.expires <= new Date() || subject !== undefined && rows[0]!.userId !== subject) return null;
-      const roles = [...new Set(rows.map((row) => row.role))].sort();
-      if (!roles.includes("operator") && !roles.includes("admin")) return null;
-      return { subject: rows[0]!.userId, sessionId, authorizationVersion: rows[0]!.authorizationVersion, roles };
-    },
-    async revokeAdminSession(sessionId) { await sql`update admin_sessions set revoked_at = now() where session_lookup_hash = ${lookupHash(sessionId)} and revoked_at is null`; },
-    async purgeExpiredAdminOAuthTransactions(limit) {
-      await sql`delete from admin_oauth_transactions where id in (select id from admin_oauth_transactions where expires <= now() order by expires asc limit ${limit})`;
-    },
-    async createAdminOAuthTransaction(transaction) {
-      await sql`insert into admin_oauth_transactions (id, state, code_verifier, callback_url, expires) values (${transaction.id}, ${transaction.state}, ${transaction.codeVerifier}, ${transaction.callbackUrl}, ${transaction.expires})`;
-    },
-    async consumeAdminOAuthTransaction(id, state) {
-      const rows = await sql<AdminOAuthTransaction[]>`delete from admin_oauth_transactions where id = ${id} and state = ${state} and expires > now() returning id, state, code_verifier as "codeVerifier", callback_url as "callbackUrl", expires`;
-      return rows[0] ?? null;
-    },
-    async provisionConfiguredAdminRoleForGoogleAccount(providerAccountId, email) {
-      await sql.begin(async (transaction) => {
-        const accounts = await transaction<{ userId: string }[]>`
-          select users.id as "userId"
-          from accounts join users on users.id = accounts.user_id
-          where accounts.provider = 'google' and accounts.provider_account_id = ${providerAccountId}
-          limit 1
-          for update
-        `;
-        let userId = accounts[0]?.userId;
-        if (!userId) {
-          const users = await transaction<{ id: string }[]>`insert into users (id, email) values (${randomUUID()}, ${email}) on conflict (email) do update set email = excluded.email returning id`;
-          userId = users[0]?.id;
-          if (!userId) throw new Error("Google account user could not be created.");
-          await transaction`insert into accounts (user_id, type, provider, provider_account_id) values (${userId}, 'oauth', 'google', ${providerAccountId}) on conflict do nothing`;
-        }
-        const users = await transaction<{ email: string | null }[]>`select email from users where id = ${userId} for update`;
-        if (users[0]?.email?.trim().toLowerCase() !== email) return;
-        const granted = await transaction`insert into user_roles (user_id, role) values (${userId}, 'admin') on conflict do nothing returning user_id`;
-        if (granted.length) await transaction`update users set authorization_version = authorization_version + 1 where id = ${userId}`;
-      });
-    },
-    async resolveAdminRolesForGoogleAccount(providerAccountId) {
-      const rows = await sql<{ role: RequestRole }[]>`
-        select user_roles.role
-        from accounts join user_roles on user_roles.user_id = accounts.user_id
-        where accounts.provider = 'google' and accounts.provider_account_id = ${providerAccountId}
-      `;
-      return rows.length ? [...new Set(rows.map((row) => row.role))].sort() : null;
-    },
-    async createAdminSessionForGoogleAccount(providerAccountId, expires) {
-      const users = await sql<{ userId: string }[]>`select user_id as "userId" from accounts where provider = 'google' and provider_account_id = ${providerAccountId} limit 1`;
-      const userId = users[0]?.userId;
-      if (!userId) return null;
-      const sessionId = randomUUID();
-      await sql`insert into admin_sessions (session_lookup_hash, user_id, expires) values (${lookupHash(sessionId)}, ${userId}, ${expires})`;
-      return sessionId;
     },
     async purgeExpiredBrowserOAuthTransactions(limit) {
       await sql`delete from browser_oauth_transactions where id in (select id from browser_oauth_transactions where expires <= now() order by expires asc limit ${limit})`;
@@ -490,6 +417,37 @@ export function createPostgresUserRoleGovernancePort(databaseUrl: string): UserR
     },
   };
 }
+
+export function createPostgresAdminAiModelCatalogPort(databaseUrl: string): AdminAiModelCatalogPort {
+  const sql = postgres(databaseUrl, { max: 1 });
+  return {
+    async list() { return (await sql<ModelRow[]>`select id, gateway_model_name as "gatewayModelName", display_label as "displayLabel", purpose, active, default_for_purpose as "defaultForPurpose", supports_text_input as "supportsTextInput", supports_image_input as "supportsImageInput", supports_image_output as "supportsImageOutput", supports_embeddings as "supportsEmbeddings", supports_extraction as "supportsExtraction", supports_evaluation as "supportsEvaluation", supports_streaming as "supportsStreaming", supports_cache_pricing as "supportsCachePricing", pricing_currency as "pricingCurrency", input_token_price_micros as "inputTokenPriceMicros", output_token_price_micros as "outputTokenPriceMicros", cache_read_token_price_micros as "cacheReadTokenPriceMicros", cache_write_token_price_micros as "cacheWriteTokenPriceMicros", pricing_unit_tokens as "pricingUnitTokens", pricing_version as "pricingVersion", pricing_effective_at as "pricingEffectiveAt" from ai_gateway_models order by purpose asc, active desc, default_for_purpose desc, display_label asc, gateway_model_name asc`).map(serializeModel); },
+    async create(principal, input) { return sql.begin(async (transaction) => {
+      const actor = await exactAdminActor(transaction, principal);
+      if (input.defaultForPurpose) await transaction`update ai_gateway_models set default_for_purpose = false, updated_at = now() where purpose = ${input.purpose}`;
+      const rows = await transaction<ModelRow[]>`insert into ai_gateway_models (id, gateway_model_name, display_label, purpose, active, default_for_purpose, supports_text_input, supports_image_input, supports_image_output, supports_embeddings, supports_extraction, supports_evaluation, supports_streaming, supports_cache_pricing, pricing_currency, input_token_price_micros, output_token_price_micros, cache_read_token_price_micros, cache_write_token_price_micros, pricing_unit_tokens, pricing_version, pricing_effective_at) values (${randomUUID()}, ${input.gatewayModelName}, ${input.displayLabel}, ${input.purpose}, ${input.active}, ${input.defaultForPurpose}, ${input.supportsTextInput}, ${input.supportsImageInput}, ${input.supportsImageOutput}, ${input.supportsEmbeddings}, ${input.supportsExtraction}, ${input.supportsEvaluation}, ${input.supportsStreaming}, ${input.supportsCachePricing}, ${input.pricingCurrency}, ${input.inputTokenPriceMicros}, ${input.outputTokenPriceMicros}, ${input.cacheReadTokenPriceMicros}, ${input.cacheWriteTokenPriceMicros}, ${input.pricingUnitTokens}, ${input.pricingVersion}, ${new Date(input.pricingEffectiveAt)}) returning id, gateway_model_name as "gatewayModelName", display_label as "displayLabel", purpose, active, default_for_purpose as "defaultForPurpose", supports_text_input as "supportsTextInput", supports_image_input as "supportsImageInput", supports_image_output as "supportsImageOutput", supports_embeddings as "supportsEmbeddings", supports_extraction as "supportsExtraction", supports_evaluation as "supportsEvaluation", supports_streaming as "supportsStreaming", supports_cache_pricing as "supportsCachePricing", pricing_currency as "pricingCurrency", input_token_price_micros as "inputTokenPriceMicros", output_token_price_micros as "outputTokenPriceMicros", cache_read_token_price_micros as "cacheReadTokenPriceMicros", cache_write_token_price_micros as "cacheWriteTokenPriceMicros", pricing_unit_tokens as "pricingUnitTokens", pricing_version as "pricingVersion", pricing_effective_at as "pricingEffectiveAt"`;
+      if (!rows[0]) throw new Error("AI Gateway model creation failed.");
+      await catalogAudit(transaction, actor, "create", rows[0].id, input);
+      return serializeModel(rows[0]);
+    }); },
+    async update(principal, id, input) { return sql.begin(async (transaction) => {
+      const actor = await exactAdminActor(transaction, principal); const existing = await loadModelForUpdate(transaction, id); const next = { ...serializeModel(existing), ...input } as AdminAiGatewayModel;
+      validateCompleteModel(next);
+      if (next.defaultForPurpose) await transaction`update ai_gateway_models set default_for_purpose = false, updated_at = now() where purpose = ${next.purpose} and id <> ${id}`;
+      const rows = await transaction<ModelRow[]>`update ai_gateway_models set gateway_model_name = ${next.gatewayModelName}, display_label = ${next.displayLabel}, purpose = ${next.purpose}, active = ${next.active}, default_for_purpose = ${next.defaultForPurpose}, supports_text_input = ${next.supportsTextInput}, supports_image_input = ${next.supportsImageInput}, supports_image_output = ${next.supportsImageOutput}, supports_embeddings = ${next.supportsEmbeddings}, supports_extraction = ${next.supportsExtraction}, supports_evaluation = ${next.supportsEvaluation}, supports_streaming = ${next.supportsStreaming}, supports_cache_pricing = ${next.supportsCachePricing}, pricing_currency = ${next.pricingCurrency}, input_token_price_micros = ${next.inputTokenPriceMicros}, output_token_price_micros = ${next.outputTokenPriceMicros}, cache_read_token_price_micros = ${next.cacheReadTokenPriceMicros}, cache_write_token_price_micros = ${next.cacheWriteTokenPriceMicros}, pricing_unit_tokens = ${next.pricingUnitTokens}, pricing_version = ${next.pricingVersion}, pricing_effective_at = ${new Date(next.pricingEffectiveAt)}, updated_at = now() where id = ${id} returning id, gateway_model_name as "gatewayModelName", display_label as "displayLabel", purpose, active, default_for_purpose as "defaultForPurpose", supports_text_input as "supportsTextInput", supports_image_input as "supportsImageInput", supports_image_output as "supportsImageOutput", supports_embeddings as "supportsEmbeddings", supports_extraction as "supportsExtraction", supports_evaluation as "supportsEvaluation", supports_streaming as "supportsStreaming", supports_cache_pricing as "supportsCachePricing", pricing_currency as "pricingCurrency", input_token_price_micros as "inputTokenPriceMicros", output_token_price_micros as "outputTokenPriceMicros", cache_read_token_price_micros as "cacheReadTokenPriceMicros", cache_write_token_price_micros as "cacheWriteTokenPriceMicros", pricing_unit_tokens as "pricingUnitTokens", pricing_version as "pricingVersion", pricing_effective_at as "pricingEffectiveAt"`;
+      await catalogAudit(transaction, actor, "update", id, input); return serializeModel(rows[0]!);
+    }); },
+    async setDefault(principal, id) { return sql.begin(async (transaction) => { const actor = await exactAdminActor(transaction, principal); const existing = await loadModelForUpdate(transaction, id); const next = { ...serializeModel(existing), defaultForPurpose: true }; validateCompleteModel(next); await transaction`update ai_gateway_models set default_for_purpose = false, updated_at = now() where purpose = ${next.purpose}`; const rows = await transaction<ModelRow[]>`update ai_gateway_models set default_for_purpose = true, updated_at = now() where id = ${id} returning id, gateway_model_name as "gatewayModelName", display_label as "displayLabel", purpose, active, default_for_purpose as "defaultForPurpose", supports_text_input as "supportsTextInput", supports_image_input as "supportsImageInput", supports_image_output as "supportsImageOutput", supports_embeddings as "supportsEmbeddings", supports_extraction as "supportsExtraction", supports_evaluation as "supportsEvaluation", supports_streaming as "supportsStreaming", supports_cache_pricing as "supportsCachePricing", pricing_currency as "pricingCurrency", input_token_price_micros as "inputTokenPriceMicros", output_token_price_micros as "outputTokenPriceMicros", cache_read_token_price_micros as "cacheReadTokenPriceMicros", cache_write_token_price_micros as "cacheWriteTokenPriceMicros", pricing_unit_tokens as "pricingUnitTokens", pricing_version as "pricingVersion", pricing_effective_at as "pricingEffectiveAt"`; await catalogAudit(transaction, actor, "update", id, { defaultForPurpose: true }); return serializeModel(rows[0]!); }); },
+    async archive(principal, id) { return sql.begin(async (transaction) => { const actor = await exactAdminActor(transaction, principal); await loadModelForUpdate(transaction, id); const rows = await transaction<ModelRow[]>`update ai_gateway_models set active = false, default_for_purpose = false, updated_at = now() where id = ${id} returning id, gateway_model_name as "gatewayModelName", display_label as "displayLabel", purpose, active, default_for_purpose as "defaultForPurpose", supports_text_input as "supportsTextInput", supports_image_input as "supportsImageInput", supports_image_output as "supportsImageOutput", supports_embeddings as "supportsEmbeddings", supports_extraction as "supportsExtraction", supports_evaluation as "supportsEvaluation", supports_streaming as "supportsStreaming", supports_cache_pricing as "supportsCachePricing", pricing_currency as "pricingCurrency", input_token_price_micros as "inputTokenPriceMicros", output_token_price_micros as "outputTokenPriceMicros", cache_read_token_price_micros as "cacheReadTokenPriceMicros", cache_write_token_price_micros as "cacheWriteTokenPriceMicros", pricing_unit_tokens as "pricingUnitTokens", pricing_version as "pricingVersion", pricing_effective_at as "pricingEffectiveAt"`; await catalogAudit(transaction, actor, "archive", id, {}); return serializeModel(rows[0]!); }); },
+  };
+}
+
+type ModelRow = Omit<AdminAiGatewayModel, "pricingEffectiveAt"> & { pricingEffectiveAt: Date };
+function serializeModel(row: ModelRow): AdminAiGatewayModel { return { ...row, pricingEffectiveAt: row.pricingEffectiveAt.toISOString() }; }
+async function exactAdminActor(transaction: postgres.TransactionSql, principal: RequestPrincipal) { const rows = await transaction<Array<{ id: string; email: string | null; authorizationVersion: number }>>`select id, email, authorization_version as "authorizationVersion" from users where id = ${principal.userId} for update`; const roles = await transaction`select 1 from user_roles where user_id = ${principal.userId} and role = 'admin' for update`; const actor = rows[0]; if (!actor?.email || !roles.length || actor.authorizationVersion !== principal.authorizationVersion) throw new AdminAiModelCatalogPolicyError("Exact administrator access is required."); return actor; }
+async function loadModelForUpdate(transaction: postgres.TransactionSql, id: string) { const rows = await transaction<ModelRow[]>`select id, gateway_model_name as "gatewayModelName", display_label as "displayLabel", purpose, active, default_for_purpose as "defaultForPurpose", supports_text_input as "supportsTextInput", supports_image_input as "supportsImageInput", supports_image_output as "supportsImageOutput", supports_embeddings as "supportsEmbeddings", supports_extraction as "supportsExtraction", supports_evaluation as "supportsEvaluation", supports_streaming as "supportsStreaming", supports_cache_pricing as "supportsCachePricing", pricing_currency as "pricingCurrency", input_token_price_micros as "inputTokenPriceMicros", output_token_price_micros as "outputTokenPriceMicros", cache_read_token_price_micros as "cacheReadTokenPriceMicros", cache_write_token_price_micros as "cacheWriteTokenPriceMicros", pricing_unit_tokens as "pricingUnitTokens", pricing_version as "pricingVersion", pricing_effective_at as "pricingEffectiveAt" from ai_gateway_models where id = ${id} for update`; if (!rows[0]) throw new AdminAiModelCatalogPolicyError("AI Gateway model not found."); return rows[0]; }
+function validateCompleteModel(model: AdminAiGatewayModel) { if (!model.active && model.defaultForPurpose) throw new AdminAiModelCatalogPolicyError("Default AI Gateway model must be active."); const priced = [model.inputTokenPriceMicros, model.outputTokenPriceMicros, model.cacheReadTokenPriceMicros, model.cacheWriteTokenPriceMicros].some((value) => value !== null); if (priced && !model.pricingCurrency) throw new AdminAiModelCatalogPolicyError("Pricing currency is required when any token price is configured."); if (!model.defaultForPurpose) return; if (model.purpose === "ai_ask_initial_answer" && !model.supportsTextInput) throw new AdminAiModelCatalogPolicyError("Default AI Ask model must support text input."); if (model.purpose === "extraction" && (!model.supportsTextInput || !model.supportsExtraction)) throw new AdminAiModelCatalogPolicyError("Default extraction model must support text input and extraction."); if (model.purpose === "embeddings" && !model.supportsEmbeddings) throw new AdminAiModelCatalogPolicyError("Default embeddings model must support embeddings."); if (model.purpose === "evaluation" && (!model.supportsTextInput || !model.supportsEvaluation)) throw new AdminAiModelCatalogPolicyError("Default evaluation model must support text input and evaluation."); }
+async function catalogAudit(transaction: postgres.TransactionSql, actor: { id: string; email: string | null }, operation: "create" | "update" | "archive", id: string, values: unknown) { await transaction`insert into audit_events (id, actor_user_id, actor_email, actor_class, operation, target_type, target_id, after_summary) values (${randomUUID()}, ${actor.id}, ${actor.email!}, 'user', ${operation}, 'ai_gateway_model', ${id}, ${JSON.stringify(values)})`; }
 
 function createPostgresUserRoleGovernanceTransactionPort(transaction: postgres.TransactionSql): UserRoleGovernanceTransactionPort {
   return {

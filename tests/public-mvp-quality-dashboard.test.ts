@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { eq } from "drizzle-orm";
+import { BadRequestException, ServiceUnavailableException } from "@nestjs/common";
+import { parseAdminQualityDashboard, parseAdminQualityQuery } from "@xuyenviet/contracts";
+import { getAdminOverviewCoverage, getAdminQualityDashboard, getCurrentReadinessEvaluationEvidence, getPublicMvpSamplingReadinessEvidence, enrollmentDigest } from "@xuyenviet/database";
+import { publicMvpEvaluationPromptSetVersion, publicMvpEvaluationScenarios, type AdminQualityPort } from "@xuyenviet/domain";
+import { AdminQualityController } from "../apps/api/src/admin/admin-quality.controller";
 
 import {
   answerUsefulnessFeedback,
@@ -32,13 +37,6 @@ import {
 import { resetTestDatabase, testDb } from "./helpers/db";
 import { seedKnowledgeCardEvidence, seedSourceCaptureVersion } from "./helpers/source-captures";
 
-const sessionWithRolesMock = vi.fn();
-
-vi.mock("@/server/auth", () => ({
-  getAuthenticatedSessionWithRoles: sessionWithRolesMock,
-  hasAdminAccess: (roles: UserRole[]) => roles.includes("admin") || roles.includes("operator"),
-}));
-
 const scoreDimensions = ["user_context_use", "practical_specificity", "source_grounding", "uncertainty_handling", "family_awareness", "vietnamese_clarity"] as const satisfies readonly PublicMvpEvaluationScoreDimension[];
 
 async function createUser(userId: string, roles: UserRole[] = []) {
@@ -47,10 +45,6 @@ async function createUser(userId: string, roles: UserRole[] = []) {
   if (roles.length > 0) {
     await testDb.insert(userRoles).values(roles.map((role) => ({ userId, role })));
   }
-}
-
-async function mockSession(userId: string | null, roles: UserRole[] = []) {
-  sessionWithRolesMock.mockResolvedValue(userId ? { userId, email: `${userId}@example.com`, roles } : null);
 }
 
 async function seedAssistantAnswer(userId: string) {
@@ -178,7 +172,6 @@ async function seedPolicySnapshot(resultId: string) {
 }
 
 async function seedCanonicalEvaluationRun(input: { userId: string; completedAt: Date; omitScenario?: string; missingScoreScenario?: string; highSeverity?: boolean; qualityGap?: boolean; answerModelVersion?: string }) {
-  const { publicMvpEvaluationPromptSetVersion, publicMvpEvaluationScenarios } = await import("@/features/feedback/evaluation");
   const [promptSet] = await testDb.insert(publicMvpEvaluationPromptSets).values({ version: publicMvpEvaluationPromptSetVersion, rubricVersion: "epic_6_quality_rubric_ai_first_v2" }).onConflictDoNothing().returning();
   const persistedPromptSet = promptSet ?? (await testDb.select().from(publicMvpEvaluationPromptSets).where(eq(publicMvpEvaluationPromptSets.version, publicMvpEvaluationPromptSetVersion)))[0];
   if (!persistedPromptSet) throw new Error("expected prompt set");
@@ -255,109 +248,88 @@ beforeEach(async () => {
 });
 
 describe("public MVP quality dashboard", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  test("rejects unauthenticated and traveler access before returning aggregates", async () => {
-    await createUser("traveler", ["traveler"]);
-    await mockSession(null);
-    const { getPublicMvpQualityDashboard } = await import("@/features/feedback/quality-dashboard");
-
-    await expect(getPublicMvpQualityDashboard({ db: testDb })).resolves.toEqual({ success: false, reason: "unauthorized" });
-
-    await mockSession("traveler", ["traveler"]);
-    await expect(getPublicMvpQualityDashboard({ db: testDb })).resolves.toEqual({ success: false, reason: "unauthorized" });
-  });
-
   test("aggregates feedback, scores, counter metrics, readiness, and safe diagnostics", async () => {
     await createUser("admin", ["admin"]);
-    await mockSession("admin", ["admin"]);
     await seedFeedback("admin", 10, 8);
     await seedEvaluationResult({ userId: "admin", promptType: "magic_moment_family_trip", score: 9 });
     await seedEvaluationResult({ userId: "admin", promptType: "freshness_sensitive", score: 7, flags: { missingUncertainty: true } });
     await seedEvaluationResult({ userId: "admin", promptType: "service_activity", score: 6, flags: { unsupportedClaim: true, noBetterThanGeneric: true } });
-    const { getPublicMvpQualityDashboard } = await import("@/features/feedback/quality-dashboard");
+    const dashboard = await getAdminQualityDashboard({ db: testDb, range: "all" });
 
-    const dashboard = await getPublicMvpQualityDashboard({ db: testDb, range: "all" });
-
-    expect(dashboard.success).toBe(true);
-    if (!dashboard.success) return;
     expect(dashboard.feedback).toMatchObject({ total: 10, useful: 8, notUseful: 2, usefulRate: 0.8 });
-    expect(dashboard.feedback.recentComments).toEqual(["Rất hữu ích cho gia đình, không chứa raw source."]);
+    expect(dashboard.feedback).not.toHaveProperty("recentComments");
     expect(dashboard.evaluation).toMatchObject({ totalResults: 3, scoredResults: 3, failedResults: 0 });
     expect(dashboard.evaluation.averageScore).toBeCloseTo(7.3, 1);
     expect(dashboard.evaluation.counterMetrics).toEqual({ unsupportedClaims: 1, missingUncertainty: 1, noBetterThanGeneric: 1 });
     expect(dashboard.readiness.status).toBe("not_ready");
     expect(dashboard.readiness.missingSignals).toContain("Cần thêm 10 phản hồi về tính hữu ích cho khoảnh khắc đặc biệt.");
     expect(dashboard.readiness.missingSignals).toContain("Chưa có một lượt đánh giá hiện hành đầy đủ sáu kịch bản, bản ghi và tiêu chí chấm điểm; mức sẵn sàng bị chặn.");
-    expect(dashboard.recentResults[0].retrieval.available).toBe(true);
-    expect(dashboard.recentResults[0].provenance.knowledge).toBe(true);
-    expect(dashboard.recentResults[0].provenance.web).toBe(true);
-    expect(JSON.stringify(dashboard)).not.toMatch(/Safe stored answer text|raw_source_material|providerPayload|operatorOnlyNotes/);
+    expect(dashboard.recentResults[0]).not.toHaveProperty("id");
+    expect(dashboard.recentResults[0]).not.toHaveProperty("retrieval");
+    expect(JSON.stringify(dashboard)).not.toMatch(/Safe stored answer text|Rất hữu ích|raw_source_material|providerPayload|operatorOnlyNotes/);
+  });
+
+  test("accepts only the direct aggregate-only contract and maps invalid port projections to a redacted failure", async () => {
+    const dashboard = await getAdminQualityDashboard({ db: testDb, range: "all" });
+    const controller = new AdminQualityController({ getQuality: vi.fn(async () => dashboard) } satisfies AdminQualityPort);
+
+    expect(parseAdminQualityQuery({})).toEqual({ promptType: "all", range: "30d" });
+    expect(parseAdminQualityQuery({ range: "all", raw: "internal" })).toBeNull();
+    expect(parseAdminQualityDashboard(dashboard)).toEqual(dashboard);
+    expect(parseAdminQualityDashboard({ ...dashboard, feedback: { ...dashboard.feedback, comments: ["private"] } })).toBeNull();
+    expect(parseAdminQualityDashboard({ ...dashboard, recentResults: [{ ...dashboard.recentResults[0], id: "internal-result" }] })).toBeNull();
+    expect(parseAdminQualityDashboard({ ...dashboard, policySignals: { ...dashboard.policySignals, details: { rawEvidence: "private" } } })).toBeNull();
+    await expect(controller.get({})).resolves.toEqual(dashboard);
+    await expect(controller.get({ raw: "internal" })).rejects.toBeInstanceOf(BadRequestException);
+    await expect(new AdminQualityController({ getQuality: vi.fn(async () => ({ ...dashboard, recentResults: [{ ...dashboard.recentResults[0], runId: "internal-run" }] })) } as AdminQualityPort).get({})).rejects.toSatisfy((error: unknown) => error instanceof ServiceUnavailableException && JSON.stringify(error.getResponse()) === JSON.stringify({ code: "internal_error" }));
   });
 
   test("filters evaluation and linked feedback by prompt type and falls back from invalid filters", async () => {
     await createUser("operator", ["operator"]);
-    await mockSession("operator", ["operator"]);
     const magicMomentResult = await seedEvaluationResult({ userId: "operator", promptType: "magic_moment_family_trip", score: 9 });
     const routeResult = await seedEvaluationResult({ userId: "operator", promptType: "route_logistics", score: 5, flags: { noBetterThanGeneric: true } });
     await seedFeedbackForAssistantMessage("operator", magicMomentResult.conversationId, magicMomentResult.assistantMessageId ?? "", "useful");
     await seedFeedbackForAssistantMessage("operator", routeResult.conversationId, routeResult.assistantMessageId ?? "", "not_useful");
-    const { getPublicMvpQualityDashboard } = await import("@/features/feedback/quality-dashboard");
+    const filtered = await getAdminQualityDashboard({ db: testDb, promptType: "route_logistics", range: "all" });
+    const fallback = await getAdminQualityDashboard({ db: testDb, promptType: "bad", range: "bad" });
 
-    const filtered = await getPublicMvpQualityDashboard({ db: testDb, promptType: "route_logistics", range: "all" });
-    const fallback = await getPublicMvpQualityDashboard({ db: testDb, promptType: "bad", range: "bad" });
-
-    expect(filtered.success ? filtered.filters.promptType : null).toBe("route_logistics");
-    expect(filtered.success ? filtered.evaluation.totalResults : null).toBe(1);
-    expect(filtered.success ? filtered.evaluation.averageScore : null).toBe(5);
-    expect(filtered.success ? filtered.feedback : null).toMatchObject({ total: 1, useful: 0, notUseful: 1 });
-    expect(fallback.success ? fallback.filters : null).toMatchObject({ promptType: "all", range: "30d" });
+    expect(filtered.filters.promptType).toBe("route_logistics");
+    expect(filtered.evaluation.totalResults).toBe(1);
+    expect(filtered.evaluation.averageScore).toBe(5);
+    expect(filtered.feedback).toMatchObject({ total: 1, useful: 0, notUseful: 1 });
+    expect(fallback.filters).toMatchObject({ promptType: "all", range: "30d" });
   });
 
   test("applies time-range filters to feedback, evaluation, recent diagnostics, and readiness", async () => {
     await createUser("admin", ["admin"]);
-    await mockSession("admin", ["admin"]);
     const oldDate = new Date(Date.now() - 45 * 24 * 60 * 60 * 1000);
     await seedFeedback("admin", 1, 1, oldDate);
     await seedEvaluationResult({ userId: "admin", promptType: "magic_moment_family_trip", score: 9, createdAt: oldDate });
     await seedFeedback("admin", 1, 0);
     await seedEvaluationResult({ userId: "admin", promptType: "route_logistics", score: 5 });
-    const { getPublicMvpQualityDashboard } = await import("@/features/feedback/quality-dashboard");
+    const dashboard = await getAdminQualityDashboard({ db: testDb, range: "7d" });
 
-    const dashboard = await getPublicMvpQualityDashboard({ db: testDb, range: "7d" });
-
-    expect(dashboard.success).toBe(true);
-    if (!dashboard.success) return;
     expect(dashboard.feedback).toMatchObject({ total: 1, useful: 0, notUseful: 1 });
     expect(dashboard.evaluation).toMatchObject({ totalResults: 1, scoredResults: 1 });
     expect(dashboard.recentResults).toHaveLength(1);
     expect(dashboard.recentResults[0].promptType).toBe("route_logistics");
-    const allRange = await getPublicMvpQualityDashboard({ db: testDb, range: "all" });
-    expect(dashboard.readiness).toEqual(allRange.success ? allRange.readiness : null);
+    const allRange = await getAdminQualityDashboard({ db: testDb, range: "all" });
+    expect(dashboard.readiness).toEqual(allRange.readiness);
   });
 
-  test("reports missing signals and unavailable retrieval/provenance links explicitly", async () => {
+  test("reports missing signals without exposing unavailable retrieval/provenance details", async () => {
     await createUser("admin", ["admin"]);
-    await mockSession("admin", ["admin"]);
     await seedEvaluationResult({ userId: "admin", promptType: "sparse_data", score: 6, flags: { noBetterThanGeneric: true }, withRetrieval: false });
-    const { getPublicMvpQualityDashboard } = await import("@/features/feedback/quality-dashboard");
+    const dashboard = await getAdminQualityDashboard({ db: testDb, range: "all" });
 
-    const dashboard = await getPublicMvpQualityDashboard({ db: testDb, range: "all" });
-
-    expect(dashboard.success).toBe(true);
-    if (!dashboard.success) return;
     expect(dashboard.feedback.total).toBe(0);
     expect(dashboard.readiness.status).toBe("not_ready");
     expect(dashboard.readiness.missingSignals).toContain("Cần thêm 10 phản hồi về tính hữu ích cho khoảnh khắc đặc biệt.");
-    expect(dashboard.recentResults[0].retrieval.available).toBe(false);
     expect(dashboard.recentResults[0].likelyIssues).toContain("retrieval_decision_unavailable");
   });
 
   test("requires magic-moment-linked feedback for readiness instead of global feedback", async () => {
     await createUser("admin", ["admin"]);
-    await mockSession("admin", ["admin"]);
     await seedFeedback("admin", 10, 10);
     const magicMomentResults = [];
 
@@ -366,30 +338,21 @@ describe("public MVP quality dashboard", () => {
     }
 
     await seedFeedbackForAssistantMessages("admin", magicMomentResults, 7);
-    const { getPublicMvpQualityDashboard } = await import("@/features/feedback/quality-dashboard");
+    const withoutLinkedFeedback = await getAdminQualityDashboard({ db: testDb, range: "all", promptType: "route_logistics" });
+    const withLinkedFeedback = await getAdminQualityDashboard({ db: testDb, range: "all" });
 
-    const withoutLinkedFeedback = await getPublicMvpQualityDashboard({ db: testDb, range: "all", promptType: "route_logistics" });
-    const withLinkedFeedback = await getPublicMvpQualityDashboard({ db: testDb, range: "all" });
-
-    expect(withoutLinkedFeedback.success ? withoutLinkedFeedback.readiness.status : null).toBe("not_ready");
-    expect(withoutLinkedFeedback.success ? withoutLinkedFeedback.readiness : null).toEqual(withLinkedFeedback.success ? withLinkedFeedback.readiness : null);
-    expect(withLinkedFeedback.success ? withLinkedFeedback.readiness.status : null).toBe("not_ready");
-    expect(withLinkedFeedback.success ? withLinkedFeedback.readiness.missingSignals : []).toContain("Còn thiếu 100 thẻ hiện hành có bằng chứng hợp lệ; phê duyệt lịch sử không được tính.");
+    expect(withoutLinkedFeedback.readiness.status).toBe("not_ready");
+    expect(withoutLinkedFeedback.readiness).toEqual(withLinkedFeedback.readiness);
+    expect(withLinkedFeedback.readiness.status).toBe("not_ready");
+    expect(withLinkedFeedback.readiness.missingSignals).toContain("Còn thiếu 100 thẻ hiện hành có bằng chứng hợp lệ; phê duyệt lịch sử không được tính.");
   });
 
-  test("does not report provenance categories that were stored but not used or cited", async () => {
+  test("does not project provenance categories even when source evidence exists", async () => {
     await createUser("admin", ["admin"]);
-    await mockSession("admin", ["admin"]);
     await seedEvaluationResult({ userId: "admin", promptType: "service_activity", score: 6, flags: { unsupportedClaim: true }, provenanceUsed: false });
-    const { getPublicMvpQualityDashboard } = await import("@/features/feedback/quality-dashboard");
+    const dashboard = await getAdminQualityDashboard({ db: testDb, range: "all" });
 
-    const dashboard = await getPublicMvpQualityDashboard({ db: testDb, range: "all" });
-
-    expect(dashboard.success).toBe(true);
-    if (!dashboard.success) return;
-    expect(dashboard.recentResults[0].provenance.knowledge).toBe(false);
-    expect(dashboard.recentResults[0].provenance.web).toBe(false);
-    expect(dashboard.recentResults[0].provenance.chat_context).toBe(false);
+    expect(dashboard.recentResults[0]).not.toHaveProperty("provenance");
     expect(dashboard.recentResults[0].likelyIssues).toContain("unsupported_without_source_signal");
     expect(dashboard.recentResults[0].likelyIssues).toContain("provenance_unavailable");
   });
@@ -397,7 +360,6 @@ describe("public MVP quality dashboard", () => {
   test("projects bounded policy failures and version-fenced sampling cohorts without raw content", async () => {
     await createUser("admin", ["admin"]);
     await createUser("author");
-    await mockSession("admin", ["admin"]);
     const result = await seedEvaluationResult({
       userId: "admin",
       promptType: "freshness_sensitive",
@@ -427,12 +389,8 @@ describe("public MVP quality dashboard", () => {
       { knowledgeCardId: "sampled", contentVersion: 2, evidenceSetRevision: 2, status: "resolved", reason: "sampling", priority: 50, policyId: policy.id, resolution: "sampling_passed", samplingDispositionReason: "confirmed", resolvedByUserId: "admin", resolvedAt: new Date() },
       { knowledgeCardId: "verify-first", contentVersion: 1, evidenceSetRevision: 1, status: "open", reason: "verification", priority: 50, policyId: policy.id },
     ]);
-    const { getPublicMvpQualityDashboard } = await import("@/features/feedback/quality-dashboard");
+    const dashboard = await getAdminQualityDashboard({ db: testDb, promptType: "route_logistics", range: "all" });
 
-    const dashboard = await getPublicMvpQualityDashboard({ db: testDb, promptType: "route_logistics", range: "all" });
-
-    expect(dashboard.success).toBe(true);
-    if (!dashboard.success) return;
     expect(dashboard.policySignals.evaluation.scope).toBe("filtered_evaluations");
     expect(dashboard.policySignals.evaluation.totalResults).toBe(0);
     expect(dashboard.policySignals.sampling.scope).toBe("all_sampling_policies");
@@ -442,15 +400,13 @@ describe("public MVP quality dashboard", () => {
       { samplingOutcome: "failed", category: "current_warning", recommendedSafeAction: "suppress_or_escalate" },
       { samplingOutcome: "unselected", category: "current_place", recommendedSafeAction: "suppress_or_escalate" },
     ]);
-    const evaluationDashboard = await getPublicMvpQualityDashboard({ db: testDb, range: "all" });
-    expect(evaluationDashboard.success).toBe(true);
-    if (!evaluationDashboard.success) return;
+    const evaluationDashboard = await getAdminQualityDashboard({ db: testDb, range: "all" });
     expect(evaluationDashboard.policySignals.evaluation).toMatchObject({
       totalResults: 1,
       evidenceGroundingFailures: 1,
       caveatViolations: 1,
       verificationFailures: 1,
-      diagnostics: [{ promptType: "freshness_sensitive", modelVersion: "cx/ai-ask", category: "community_observation", severity: "unavailable", recommendedSafeAction: "suppress_or_escalate" }],
+      diagnostics: [{ promptType: "freshness_sensitive", category: "community_observation", severity: "unavailable", recommendedSafeAction: "suppress_or_escalate" }],
     });
     expect(JSON.stringify(dashboard)).not.toMatch(/Safe stored answer text|SAMPLING_RATIONALE_MUST_NOT_LEAK|safe-card|sourceSnapshot|providerPayload|raw_source_material/);
     expect(dashboard.policySignals.sampling.members.every((member) => !("knowledgeCardId" in member))).toBe(true);
@@ -459,7 +415,6 @@ describe("public MVP quality dashboard", () => {
   test("fails closed for missing snapshots and pending sampling while selecting the latest fenced disposition deterministically", async () => {
     await createUser("admin", ["admin"]);
     await createUser("author");
-    await mockSession("admin", ["admin"]);
     await seedEvaluationResult({ userId: "admin", promptType: "service_activity", flags: { unsupportedClaim: true } });
     await testDb.insert(knowledgeCards).values([
       { id: "deterministic", status: "approved", publicationState: "active", knowledgeState: "community_observation", reviewState: "reviewed", verificationState: "not_required", type: "service", title: "Safe deterministic card", summary: "Safe summary", confidence: "community", needsReview: false, aiPromptVersion: "test", createdByUserId: "author" },
@@ -475,12 +430,8 @@ describe("public MVP quality dashboard", () => {
       { knowledgeCardId: "deterministic", contentVersion: 1, evidenceSetRevision: 1, status: "resolved", reason: "sampling", priority: 50, policyId: policy.id, resolution: "sampling_failed", samplingDispositionReason: "safety_risk", resolvedByUserId: "admin", resolvedAt: new Date("2026-07-25T02:00:00.000Z"), updatedAt: new Date("2026-07-25T02:00:00.000Z") },
       { knowledgeCardId: "pending", contentVersion: 1, evidenceSetRevision: 1, status: "open", reason: "sampling", priority: 50, policyId: policy.id },
     ]);
-    const { getPublicMvpQualityDashboard } = await import("@/features/feedback/quality-dashboard");
+    const dashboard = await getAdminQualityDashboard({ db: testDb, range: "all" });
 
-    const dashboard = await getPublicMvpQualityDashboard({ db: testDb, range: "all" });
-
-    expect(dashboard.success).toBe(true);
-    if (!dashboard.success) return;
     expect(dashboard.policySignals.evaluation.missingSignal).toBe(true);
     expect(dashboard.policySignals.sampling).toMatchObject({ sampledPassed: 0, sampledFailed: 1, pendingMembers: 1, unselectedMembers: 0, verificationRequiredCurrentCards: 1, missingSignal: true });
     expect(dashboard.policySignals.sampling.members).toMatchObject([
@@ -492,7 +443,6 @@ describe("public MVP quality dashboard", () => {
   test("reserves bounded diagnostics for actionable cohorts and excludes verification recommendations from sampling outcomes", async () => {
     await createUser("admin", ["admin"]);
     await createUser("author");
-    await mockSession("admin", ["admin"]);
     const activeCards = Array.from({ length: 51 }, (_, index) => ({
       id: `active-${String(index).padStart(2, "0")}`,
       status: "approved" as const,
@@ -521,12 +471,8 @@ describe("public MVP quality dashboard", () => {
       { policyId: "z-suppressed", knowledgeCardId: "actionable", contentVersion: 1, evidenceSetRevision: 1 },
     ]);
     await testDb.insert(knowledgeRecommendations).values({ knowledgeCardId: "actionable", contentVersion: 1, evidenceSetRevision: 1, status: "open", reason: "verification", priority: 50, policyId: "z-suppressed" });
-    const { getPublicMvpQualityDashboard } = await import("@/features/feedback/quality-dashboard");
+    const dashboard = await getAdminQualityDashboard({ db: testDb, range: "all" });
 
-    const dashboard = await getPublicMvpQualityDashboard({ db: testDb, range: "all" });
-
-    expect(dashboard.success).toBe(true);
-    if (!dashboard.success) return;
     expect(dashboard.policySignals.cohorts).toMatchObject([
       { cohortKey: "suppressed:2026-07-26", state: "suppressed", recommendedSafeAction: "suppress_or_escalate" },
       { cohortKey: "active:2026-07-26", state: "active", recommendedSafeAction: "stricter_sampling" },
@@ -538,40 +484,34 @@ describe("public MVP quality dashboard", () => {
 
   test("fails readiness for 99 active cards and accepts the 100-card corpus threshold", async () => {
     await createUser("threshold-admin", ["admin"]);
-    await mockSession("threshold-admin", ["admin"]);
-    const { getActiveEvidenceGroundedSeedCoverageForReadiness } = await import("@/features/knowledge/batch-intake");
     for (let index = 0; index < 100; index += 1) {
       await seedSamplingFence({ id: `threshold-${index}`, userId: "threshold-admin" });
     }
     await testDb.update(knowledgeCards).set({ publicationState: "suppressed" }).where(eq(knowledgeCards.id, "threshold-99"));
-    await expect(getActiveEvidenceGroundedSeedCoverageForReadiness(testDb)).resolves.toMatchObject({ activeEvidenceGroundedCards: 99, remainingActiveCards: 1, isComplete: false });
+    await expect(getAdminOverviewCoverage(testDb)).resolves.toMatchObject({ activeEvidenceGroundedCards: 99, remainingActiveCards: 1, isComplete: false });
     await testDb.update(knowledgeCards).set({ publicationState: "active" }).where(eq(knowledgeCards.id, "threshold-99"));
-    await expect(getActiveEvidenceGroundedSeedCoverageForReadiness(testDb)).resolves.toMatchObject({ activeEvidenceGroundedCards: 100, remainingActiveCards: 0, isComplete: true });
+    await expect(getAdminOverviewCoverage(testDb)).resolves.toMatchObject({ activeEvidenceGroundedCards: 100, remainingActiveCards: 0, isComplete: true });
     const capture = await seedSourceCaptureVersion({ id: "replacement-capture", sourceId: "source-threshold-0", captureKind: "url", rawText: "Replacement evidence." , versionSequence: 2 });
-    await expect(getActiveEvidenceGroundedSeedCoverageForReadiness(testDb)).resolves.toMatchObject({ activeEvidenceGroundedCards: 99, remainingActiveCards: 1, isComplete: false });
+    await expect(getAdminOverviewCoverage(testDb)).resolves.toMatchObject({ activeEvidenceGroundedCards: 99, remainingActiveCards: 1, isComplete: false });
     await testDb.update(knowledgeCardEvidence).set({ captureVersionId: capture.id, quoteText: "Replacement evidence.", spanEnd: "Replacement evidence.".length }).where(eq(knowledgeCardEvidence.knowledgeCardId, "threshold-0"));
-    await expect(getActiveEvidenceGroundedSeedCoverageForReadiness(testDb)).resolves.toMatchObject({ activeEvidenceGroundedCards: 100, isComplete: true });
+    await expect(getAdminOverviewCoverage(testDb)).resolves.toMatchObject({ activeEvidenceGroundedCards: 100, isComplete: true });
   });
 
   test("keeps readiness corpus-wide across dashboard filters and includes suppressed unresolved work", async () => {
     await createUser("diagnostic-admin", ["admin"]);
-    await mockSession("diagnostic-admin", ["admin"]);
     await seedSamplingFence({ id: "suppressed-remediation", userId: "diagnostic-admin", publicationState: "suppressed" });
-    const { getActiveEvidenceGroundedSeedCoverageForReadiness } = await import("@/features/knowledge/batch-intake");
-    const { getPublicMvpQualityDashboard } = await import("@/features/feedback/quality-dashboard");
 
-    await expect(getActiveEvidenceGroundedSeedCoverageForReadiness(testDb)).resolves.toMatchObject({ pendingReviewCards: 1, pendingVerificationCards: 1 });
+    await expect(getAdminOverviewCoverage(testDb)).resolves.toMatchObject({ pendingReviewCards: 1, pendingVerificationCards: 1 });
     const [all, filtered] = await Promise.all([
-      getPublicMvpQualityDashboard({ db: testDb, range: "all" }),
-      getPublicMvpQualityDashboard({ db: testDb, promptType: "route_logistics", range: "7d" }),
+      getAdminQualityDashboard({ db: testDb, range: "all" }),
+      getAdminQualityDashboard({ db: testDb, promptType: "route_logistics", range: "7d" }),
     ]);
-    expect(all.success && filtered.success ? filtered.readiness : null).toEqual(all.success ? all.readiness : null);
+    expect(filtered.readiness).toEqual(all.readiness);
   });
 
   test("keeps a fully non-corridor policy diagnostic but never treats it as corridor readiness proof", async () => {
     await createUser("outside-admin", ["admin"]);
     const outside = await seedSamplingFence({ id: "outside-fence", userId: "outside-admin" });
-    const { enrollmentDigest, getPublicMvpSamplingReadinessEvidence } = await import("@/features/knowledge/recommendations");
     const [policy] = await testDb.insert(knowledgeSamplingPolicies).values({ cohortKey: "outside-policy", windowStartsAt: new Date("2026-01-01"), windowEndsAt: new Date("2026-01-29"), samplingPercent: 15, suppressedAt: new Date(), enrollmentCandidateCount: 1, enrollmentSelectedCount: 1, enrollmentDigest: enrollmentDigest(["outside-fence:1:1::true:true"]), enrollmentSealedAt: new Date() }).returning();
     await testDb.insert(knowledgeSamplingCandidateLedger).values({ terminalIngestionJobId: outside.jobId, policyId: policy.id, knowledgeCardId: "outside-fence", contentVersion: 1, evidenceSetRevision: 1, corridorBucket: "", outsideCorridor: true, selectedForSampling: true });
     await testDb.insert(knowledgeSamplingCohortMembers).values({ policyId: policy.id, knowledgeCardId: "outside-fence", contentVersion: 1, evidenceSetRevision: 1, corridorBucket: null, outsideCorridor: true, selectedForSampling: true });
@@ -582,7 +522,6 @@ describe("public MVP quality dashboard", () => {
 
   test("selects only the newest complete canonical evaluation run and distinguishes high from non-high gaps", async () => {
     await createUser("selector-admin", ["admin"]);
-    const { getCurrentReadinessEvaluationEvidence } = await import("@/features/feedback/quality-dashboard");
     const older = await seedCanonicalEvaluationRun({ userId: "selector-admin", completedAt: new Date("2026-01-01") });
     const incomplete = await seedCanonicalEvaluationRun({ userId: "selector-admin", completedAt: new Date("2026-01-02"), omitScenario: "web_fallback_unavailable" });
     const incompleteScores = await seedCanonicalEvaluationRun({ userId: "selector-admin", completedAt: new Date("2026-01-03"), missingScoreScenario: "community_observation" });
@@ -597,7 +536,6 @@ describe("public MVP quality dashboard", () => {
 
   test("accepts a coherent AI Ask model distinct from the evaluator and rejects mixed answer models", async () => {
     await createUser("model-fence-admin", ["admin"]);
-    const { getCurrentReadinessEvaluationEvidence } = await import("@/features/feedback/quality-dashboard");
     const run = await seedCanonicalEvaluationRun({ userId: "model-fence-admin", completedAt: new Date("2026-01-11"), answerModelVersion: "cx/ai-ask" });
 
     await expect(getCurrentReadinessEvaluationEvidence(testDb)).resolves.toMatchObject({ complete: true, runId: run.id });
@@ -609,8 +547,6 @@ describe("public MVP quality dashboard", () => {
 
   test("fails closed when a canonical run contains a result from another prompt set", async () => {
     await createUser("mixed-prompt-set-admin", ["admin"]);
-    const { publicMvpEvaluationPromptSetVersion } = await import("@/features/feedback/evaluation");
-    const { getCurrentReadinessEvaluationEvidence } = await import("@/features/feedback/quality-dashboard");
     const run = await seedCanonicalEvaluationRun({ userId: "mixed-prompt-set-admin", completedAt: new Date("2026-01-10") });
     const [otherPromptSet] = await testDb.insert(publicMvpEvaluationPromptSets).values({ version: `${publicMvpEvaluationPromptSetVersion}-other`, rubricVersion: "test" }).returning();
     await testDb.update(publicMvpEvaluationResults).set({ promptSetId: otherPromptSet!.id, promptSetVersion: otherPromptSet!.version }).where(eq(publicMvpEvaluationResults.runId, run.id));
@@ -620,16 +556,11 @@ describe("public MVP quality dashboard", () => {
 
   test("uses only the newest canonical run for baseline checks and keeps non-high gaps diagnostic", async () => {
     await createUser("baseline-admin", ["admin"]);
-    await mockSession("baseline-admin", ["admin"]);
     const older = await seedCanonicalEvaluationRun({ userId: "baseline-admin", completedAt: new Date("2026-01-01") });
     const newer = await seedCanonicalEvaluationRun({ userId: "baseline-admin", completedAt: new Date("2026-01-02"), qualityGap: true });
     await testDb.update(publicMvpEvaluationResults).set({ noBetterThanGenericFlag: true }).where(eq(publicMvpEvaluationResults.runId, older.id));
-    const { getPublicMvpQualityDashboard } = await import("@/features/feedback/quality-dashboard");
+    const dashboard = await getAdminQualityDashboard({ db: testDb, range: "all" });
 
-    const dashboard = await getPublicMvpQualityDashboard({ db: testDb, range: "all" });
-
-    expect(dashboard.success).toBe(true);
-    if (!dashboard.success) return;
     expect(dashboard.readiness.checks.find((check) => check.key === "generic_comparison_sample")).toMatchObject({ current: 0 });
     expect(dashboard.readiness.checks.find((check) => check.key === "evaluation_quality_gaps")).toBeUndefined();
     expect(dashboard.readiness.diagnostics.evaluationQualityGaps).toBe(1);
@@ -666,7 +597,6 @@ describe("public MVP quality dashboard", () => {
     await createUser("fence-admin", ["admin"]);
     const selected = await seedSamplingFence({ id: "selected-fence", userId: "fence-admin" });
     const verifyFirst = await seedSamplingFence({ id: "verify-fence", userId: "fence-admin", publicationState: "suppressed" });
-    const { enrollmentDigest, getPublicMvpSamplingReadinessEvidence } = await import("@/features/knowledge/recommendations");
     const [policy] = await testDb.insert(knowledgeSamplingPolicies).values({ cohortKey: "fence-policy", windowStartsAt: new Date("2026-01-01"), windowEndsAt: new Date("2026-01-29"), samplingPercent: 15, enrollmentCandidateCount: 1, enrollmentSelectedCount: 1, enrollmentDigest: enrollmentDigest([enrollmentEntry("selected-fence")]), enrollmentSealedAt: new Date() }).returning();
     await testDb.insert(knowledgeSamplingCandidateLedger).values({ terminalIngestionJobId: selected.jobId, policyId: policy.id, knowledgeCardId: "selected-fence", contentVersion: selected.contentVersion, evidenceSetRevision: selected.evidenceSetRevision, corridorBucket: "Huế", outsideCorridor: false, selectedForSampling: true });
     await testDb.insert(knowledgeSamplingCohortMembers).values({ policyId: policy.id, knowledgeCardId: "selected-fence", contentVersion: selected.contentVersion, evidenceSetRevision: selected.evidenceSetRevision, corridorBucket: "Huế", outsideCorridor: false, selectedForSampling: true });
@@ -696,7 +626,6 @@ describe("public MVP quality dashboard", () => {
     await createUser("proof-admin", ["admin"]);
     const selected = await seedSamplingFence({ id: "proof-selected", userId: "proof-admin" });
     const verifyFirst = await seedSamplingFence({ id: "proof-verify", userId: "proof-admin", publicationState: "suppressed" });
-    const { enrollmentDigest, getPublicMvpSamplingReadinessEvidence } = await import("@/features/knowledge/recommendations");
     const [policy] = await testDb.insert(knowledgeSamplingPolicies).values({ cohortKey: "proof-policy", windowStartsAt: new Date("2026-02-01"), windowEndsAt: new Date("2026-03-01"), samplingPercent: 15, enrollmentCandidateCount: 1, enrollmentSelectedCount: 1, enrollmentDigest: enrollmentDigest([enrollmentEntry("proof-selected")]), enrollmentSealedAt: new Date() }).returning();
     await testDb.insert(knowledgeSamplingCandidateLedger).values({ terminalIngestionJobId: selected.jobId, policyId: policy.id, knowledgeCardId: "proof-selected", contentVersion: 1, evidenceSetRevision: 1, corridorBucket: "Huế", outsideCorridor: false, selectedForSampling: true });
     await testDb.insert(knowledgeSamplingCohortMembers).values({ policyId: policy.id, knowledgeCardId: "proof-selected", contentVersion: 1, evidenceSetRevision: 1, corridorBucket: "Huế", outsideCorridor: false, selectedForSampling: true });

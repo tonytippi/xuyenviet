@@ -1,0 +1,9 @@
+import { describe, expect, it } from "vitest";
+import { parseAdminYoutubeCaptureDetail, parseAdminYoutubeCaptureQueue, parseAdminYoutubeCaptureQueueQuery } from "@xuyenviet/contracts";
+
+const capture = { sourceId: "source-1", sourceLabel: "Video", displayUrl: "https://youtube.com/watch?v=1", createdAt: "2026-08-03T00:00:00.000Z", capturedAt: null, captureMethod: "gemini_youtube_url" as const, model: null, promptVersion: null, evidenceCount: 1, ingestionJob: null };
+const evidence = { category: "route" as const, claim: "Route claim", evidenceType: "spoken" as const, timestampStartSeconds: 0, timestampEndSeconds: 10, confidence: "medium" as const, freshnessSensitive: false, excerpt: "Short excerpt", uncertaintyOrCondition: null };
+describe("admin YouTube capture direct contract", () => {
+  it("bounds queue input and rejects unknown query fields", () => { expect(parseAdminYoutubeCaptureQueueQuery({ page: "2" })).toEqual({ page: 2 }); expect(parseAdminYoutubeCaptureQueueQuery({ page: "201" })).toBeNull(); expect(parseAdminYoutubeCaptureQueueQuery({ page: "1", raw: "no" })).toBeNull(); });
+  it("rejects every raw or operational internal field", () => { const queue = { page: 1, pageSize: 25, totalCount: 1, items: [capture] }; expect(parseAdminYoutubeCaptureQueue(queue)).toEqual(queue); expect(parseAdminYoutubeCaptureQueue({ ...queue, rawText: "secret" })).toBeNull(); expect(parseAdminYoutubeCaptureQueue({ ...queue, items: [{ ...capture, rawMetadata: {} }] })).toBeNull(); expect(parseAdminYoutubeCaptureDetail({ ...capture, evidence: [evidence], transcript: "secret" })).toBeNull(); expect(parseAdminYoutubeCaptureDetail({ ...capture, evidence: [{ ...evidence, providerResponse: "secret" }] })).toBeNull(); expect(parseAdminYoutubeCaptureDetail({ ...capture, evidence: [evidence], ingestionJob: { stage: "queued", updatedAt: "2026-08-03T00:00:00.000Z", leaseExpiresAt: "secret" } })).toBeNull(); });
+});

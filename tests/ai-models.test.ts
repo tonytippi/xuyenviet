@@ -2,10 +2,16 @@ import { eq, sql } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { aiGatewayModels, auditEvents, userRoles, users, type UserRole } from "@/db/schema";
+import { createPostgresAdminAiModelCatalogPort } from "@xuyenviet/database";
+import { archiveAdminAiGatewayModel, createAdminAiGatewayModel, setDefaultAdminAiGatewayModel, updateAdminAiGatewayModel } from "@xuyenviet/domain";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
+import { getTestDatabaseUrl } from "./helpers/env-file";
 
 const authMock = vi.fn();
+const catalog = createPostgresAdminAiModelCatalogPort(getTestDatabaseUrl());
+const principal = (userId: string) => ({ userId, sessionId: "session", roles: ["admin" as const], authorizationVersion: 1, transport: "browser_session" as const });
+const catalogInput = (input: Partial<import("@xuyenviet/contracts").AdminAiGatewayModelInput>) => ({ gatewayModelName: "cx/default", displayLabel: "Default model", purpose: "ai_ask_initial_answer" as const, active: true, defaultForPurpose: false, supportsTextInput: false, supportsImageInput: false, supportsImageOutput: false, supportsEmbeddings: false, supportsExtraction: false, supportsEvaluation: false, supportsStreaming: false, supportsCachePricing: false, pricingCurrency: null, inputTokenPriceMicros: null, outputTokenPriceMicros: null, cacheReadTokenPriceMicros: null, cacheWriteTokenPriceMicros: null, pricingUnitTokens: 1_000_000, pricingVersion: null, pricingEffectiveAt: new Date().toISOString(), ...input });
 
 beforeEach(async () => {
   await resetTestDatabase();
@@ -199,12 +205,10 @@ describe("AI Gateway model catalog", () => {
     await expect(createModel({ id: "default-2", gatewayModelName: "cx/default-2", defaultForPurpose: true })).rejects.toThrow();
   });
 
-  test("admin/operator actions create, set default, archive, and audit catalog mutations", async () => {
-    await createUser("operator-user", ["operator"]);
+  test("exact-admin commands create, set default, archive, and audit catalog mutations", async () => {
+    await createUser("operator-user", ["admin"]);
     authMock.mockResolvedValue({ user: { id: "operator-user", email: "operator-user@example.com" } });
-    const { archiveAiGatewayModel, createAiGatewayModel, setDefaultAiGatewayModel } = await import("@/features/admin/actions");
-
-    const created = await createAiGatewayModel({
+    const created = await createAdminAiGatewayModel(catalog, principal("operator-user"), catalogInput({
       gatewayModelName: "cx/admin-model",
       displayLabel: "Admin model",
       purpose: "ai_ask_initial_answer",
@@ -213,9 +217,9 @@ describe("AI Gateway model catalog", () => {
       pricingCurrency: "USD",
       inputTokenPriceMicros: 1,
       outputTokenPriceMicros: 2,
-    });
-    await setDefaultAiGatewayModel(created.id);
-    await archiveAiGatewayModel(created.id);
+    }));
+    await setDefaultAdminAiGatewayModel(catalog, principal("operator-user"), created.id);
+    await archiveAdminAiGatewayModel(catalog, principal("operator-user"), created.id);
 
     await expect(testDb.select().from(aiGatewayModels).where(eq(aiGatewayModels.id, created.id))).resolves.toMatchObject([
       { active: false, defaultForPurpose: false },
@@ -228,9 +232,7 @@ describe("AI Gateway model catalog", () => {
     authMock.mockResolvedValue({ user: { id: "admin-user", email: "admin-user@example.com" } });
     const existingEvaluationDefault = await createModel({ id: "eval-default", gatewayModelName: "cx/eval-default", purpose: "evaluation", supportsEvaluation: true, defaultForPurpose: true });
     const chatDefault = await createModel({ id: "chat-default", gatewayModelName: "cx/chat-default", defaultForPurpose: true });
-    const { updateAiGatewayModel } = await import("@/features/admin/actions");
-
-    await updateAiGatewayModel(chatDefault.id, { purpose: "evaluation", supportsEvaluation: true });
+    await updateAdminAiGatewayModel(catalog, principal("admin-user"), chatDefault.id, { purpose: "evaluation", supportsEvaluation: true });
 
     await expect(testDb.select().from(aiGatewayModels).where(eq(aiGatewayModels.id, existingEvaluationDefault.id))).resolves.toMatchObject([
       { defaultForPurpose: false },
@@ -238,53 +240,47 @@ describe("AI Gateway model catalog", () => {
     await expect(testDb.select().from(aiGatewayModels).where(eq(aiGatewayModels.id, chatDefault.id))).resolves.toMatchObject([
       { purpose: "evaluation", defaultForPurpose: true, active: true },
     ]);
-    await expect(updateAiGatewayModel(chatDefault.id, { active: false })).rejects.toThrow("Default AI Gateway model must be active.");
-    await expect(updateAiGatewayModel(chatDefault.id, { active: false, defaultForPurpose: false })).resolves.toMatchObject({ active: false, defaultForPurpose: false });
+    await expect(updateAdminAiGatewayModel(catalog, principal("admin-user"), chatDefault.id, { active: false })).rejects.toThrow("Default AI Gateway model must be active.");
+    await expect(updateAdminAiGatewayModel(catalog, principal("admin-user"), chatDefault.id, { active: false, defaultForPurpose: false })).resolves.toMatchObject({ active: false, defaultForPurpose: false });
   });
 
   test("admin actions reject default models without purpose-required capabilities", async () => {
     await createUser("admin-capability-user", ["admin"]);
     authMock.mockResolvedValue({ user: { id: "admin-capability-user", email: "admin-capability-user@example.com" } });
     const model = await createModel({ id: "capability-model", gatewayModelName: "cx/capability", defaultForPurpose: false, supportsTextInput: false });
-    const { createAiGatewayModel, setDefaultAiGatewayModel } = await import("@/features/admin/actions");
-
     await expect(
-      createAiGatewayModel({
+      createAdminAiGatewayModel(catalog, principal("admin-capability-user"), catalogInput({
         gatewayModelName: "cx/no-text-default",
         displayLabel: "No text default",
         purpose: "ai_ask_initial_answer",
         defaultForPurpose: true,
         supportsTextInput: false,
-      }),
+      })),
     ).rejects.toThrow("Default AI Ask model must support text input.");
-    await expect(setDefaultAiGatewayModel(model.id)).rejects.toThrow("Default AI Ask model must support text input.");
+    await expect(setDefaultAdminAiGatewayModel(catalog, principal("admin-capability-user"), model.id)).rejects.toThrow("Default AI Ask model must support text input.");
   });
 
   test("admin actions reject token prices without a currency", async () => {
     await createUser("admin-pricing-user", ["admin"]);
     authMock.mockResolvedValue({ user: { id: "admin-pricing-user", email: "admin-pricing-user@example.com" } });
-    const { createAiGatewayModel } = await import("@/features/admin/actions");
-
     await expect(
-      createAiGatewayModel({
+      createAdminAiGatewayModel(catalog, principal("admin-pricing-user"), catalogInput({
         gatewayModelName: "cx/no-currency",
         displayLabel: "No currency",
         purpose: "ai_ask_initial_answer",
         supportsTextInput: true,
         pricingCurrency: null,
         inputTokenPriceMicros: 1,
-      }),
+      })),
     ).rejects.toThrow("Pricing currency is required when any token price is configured.");
   });
 
   test("traveler is denied before model catalog mutation side effects", async () => {
     await createUser("traveler-user", ["traveler"]);
     authMock.mockResolvedValue({ user: { id: "traveler-user", email: "traveler-user@example.com" } });
-    const { createAiGatewayModel } = await import("@/features/admin/actions");
-
     await expect(
-      createAiGatewayModel({ gatewayModelName: "cx/denied", displayLabel: "Denied", purpose: "ai_ask_initial_answer", supportsTextInput: true }),
-    ).rejects.toMatchObject({ name: "AdminAuthorizationError" });
+      createAdminAiGatewayModel(catalog, { ...principal("traveler-user"), roles: ["traveler"] }, catalogInput({ gatewayModelName: "cx/denied", displayLabel: "Denied", supportsTextInput: true })),
+    ).rejects.toThrow("Exact administrator access is required.");
     await expect(testDb.select().from(aiGatewayModels).where(eq(aiGatewayModels.gatewayModelName, "cx/denied"))).resolves.toHaveLength(0);
     await expect(testDb.select().from(auditEvents)).resolves.toHaveLength(0);
   });

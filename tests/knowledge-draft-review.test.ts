@@ -142,6 +142,30 @@ describe("knowledge draft review", () => {
     expect(audits[0]?.afterSummary).not.toContain("0901234567");
   });
 
+  test("package-owned review mutation preserves the review lifecycle without a root adapter", async () => {
+    await createUser("package-review-operator", ["operator"]);
+    const { draft } = await createDraft("package-review-operator");
+    const { updateKnowledgeDraft } = await import("@xuyenviet/database");
+
+    await updateKnowledgeDraft(draft.id, {
+      type: "warning",
+      title: "Cảnh báo package-owned",
+      locationName: "Huế",
+      summary: "Bản nháp được cập nhật bởi implementation package canonical.",
+      practicalDetails: {},
+      tags: ["package"],
+      confidence: "community",
+      freshnessSensitive: false,
+    }, { userId: "package-review-operator", email: "package-review-operator@example.com" });
+
+    await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, draft.id))).resolves.toMatchObject([
+      { status: "draft", publicationState: "suppressed", knowledgeState: "uncertain", reviewState: "ai_recommended", verificationState: "not_required", needsReview: true, title: "Cảnh báo package-owned" },
+    ]);
+    await expect(testDb.select().from(auditEvents).where(eq(auditEvents.targetId, draft.id))).resolves.toMatchObject([
+      { operation: "update", targetType: "knowledge_draft" },
+    ]);
+  });
+
   test("verified curated source allows curated confidence but not partner or official", async () => {
     await createUser("curated-reviewer", ["operator"]);
     authMock.mockResolvedValue({ user: { id: "curated-reviewer", email: "curated-reviewer@example.com" } });

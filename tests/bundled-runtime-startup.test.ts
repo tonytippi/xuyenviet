@@ -68,7 +68,6 @@ describe("bundled workload startup", () => {
         DATABASE_URL: databaseUrl,
         SCHEMA_RELEASE_MATRIX_DIRECTORY: deployedMatrixDirectory,
         SCHEMA_RELEASE_PHASE_POLICY: policy,
-        XV_ADMIN_IDENTITY_HANDOFF_SERVICE_TOKEN: "bundled-runtime-admin-identity-service-token",
       };
 
       expect(readApprovedSchemaReleasePhasePolicy(policy, deployedMatrixDirectory)).not.toBeNull();
@@ -175,13 +174,11 @@ async function expectStatus(port: number, path: string, expectedStatus: number, 
 
 function credentialConfig() {
   const webKey = { ...generateKeyPairSync("ec", { namedCurve: "P-256" }).publicKey.export({ format: "jwk" }), kid: "bundle-web-test", kty: "EC", crv: "P-256" };
-  const adminKey = { ...generateKeyPairSync("ec", { namedCurve: "P-256" }).publicKey.export({ format: "jwk" }), kid: "bundle-admin-test", kty: "EC", crv: "P-256" };
   return {
     audience: "api.railway.internal",
     maxLifetimeSeconds: 60,
     issuers: {
       "xuyenviet-web-bff": { issuer: "xuyenviet-web-bff", active: { kid: "bundle-web-test", key: webKey } },
-      "xuyenviet-admin-bff": { issuer: "xuyenviet-admin-bff", active: { kid: "bundle-admin-test", key: adminKey } },
     },
   };
 }

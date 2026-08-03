@@ -10,9 +10,6 @@ export const API_RELEASE_PHASE_POLICY = Symbol("API_RELEASE_PHASE_POLICY");
 
 export async function isApiReady(input: { configValid: boolean; repository: ReleaseSchemaVersionRepository; releasePhasePolicy?: SchemaReleasePhasePolicy | null }): Promise<boolean> {
   if (!input.configValid) return false;
-  // Local admin OAuth uses a developer database that may not carry deployment
-  // release records. This does not bypass database-backed identity or roles.
-  if (process.env.APP_ENV === "local" && process.env.XV_ADMIN_LOCAL_TRANSPORT === "true") return true;
   try {
     // The repository remains the schema authority. Policy is a further static
     // release admission constraint and therefore reads the same row.
