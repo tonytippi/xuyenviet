@@ -13,6 +13,7 @@ import type { AssistantMessageProvenanceItem, AvailableAssistantMessageProvenanc
 import type { TripWorkspaceReadModel } from "@/features/chat-trips/trip-home";
 import { tripChangeProposalLabels } from "@/features/chat-trips/trip-home-labels";
 import { TripWorkspacePanel } from "@/features/ai/trip-workspace-panel";
+import { DirectApiError, submitDirectAiAskStream } from "@/features/ai/direct-api-client";
 import { BrandMark } from "@/components/ui/brand-mark";
 import { AccountIcon, AttachmentIcon, ChatIcon, CloseIcon, CostIcon, HotelAreaIcon, LoadingIcon, MenuIcon, NewChatIcon, PlaceIcon, ProjectIcon, RouteSegmentIcon, SendIcon, SourceIcon } from "@/components/ui/icons";
 
@@ -20,7 +21,7 @@ const maxQuestionLength = 2_000;
 const maxImageByteSize = 5 * 1024 * 1024;
 const previewMaxLength = 60;
 
-type DisplayMessage = {
+export type DisplayMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
@@ -164,6 +165,7 @@ type AiAskComposerProps = {
   initialTripProjects?: TripProjectSummary[];
   selectedTripProject?: TripProjectSummary | null;
   historyConversation?: { id: string; messages: DisplayMessage[] } | null;
+  planningContext?: { hasProjectScope: boolean } | null;
   tripWorkspace?: TripWorkspaceReadModel | null;
   supportsImageInput?: boolean;
   userEmail?: string;
@@ -707,6 +709,7 @@ export function AiAskComposer({
   initialTripProjects = emptyTripProjects,
   selectedTripProject = null,
   historyConversation = null,
+  planningContext = null,
   tripWorkspace = null,
   supportsImageInput = false,
   userEmail,
@@ -1274,6 +1277,11 @@ export function AiAskComposer({
       reconcileSelection(result.conversationId, activeTripProjectId);
     } catch (error) {
       if (activeRequestIdRef.current === requestId && !(error instanceof DOMException && error.name === "AbortError")) {
+        if (error instanceof DirectApiError && ["unauthorized", "forbidden", "csrf_invalid"].includes(error.code ?? "")) {
+          setStatus("Phiên đăng nhập đã hết hạn. Hãy đăng nhập lại để tiếp tục.");
+          setRecoveryMessage("Phiên đăng nhập hoặc xác thực bảo mật đã hết hạn. Hãy đăng nhập lại, không gửi lại yêu cầu cũ.");
+          return;
+        }
         setStatus("Không thể gửi câu hỏi lúc này. Hãy kiểm tra đăng nhập và thử lại. Nội dung vẫn còn trong ô nhập.");
         setRecoveryMessage("Không thể gửi yêu cầu. Nội dung của bạn vẫn còn trong ô nhập để thử lại.");
       }
@@ -1748,6 +1756,7 @@ export function AiAskComposer({
               ? "Tin nhắn mới sẽ vào hội thoại chính."
               : "Tạo dự án khi bạn muốn gom kế hoạch cho một chuyến đi."}
           </p>
+          {planningContext?.hasProjectScope ? <p className="mt-2 text-sm text-[#4f625a]">Ngữ cảnh kế hoạch đã được tải cho dự án này.</p> : null}
           {selectedTripProject ? <p className="mt-2 text-sm font-semibold text-[#1f5f46]">Lịch sử trao đổi: chọn một hội thoại bên trên để xem lại mà không tạo nhánh soạn tin mới.</p> : null}
         </div>
         <label className="flex flex-col gap-2 text-sm font-semibold text-[#17342c]">
@@ -2376,60 +2385,27 @@ async function submitAiAskStream({
   onPreparing: () => void;
   onDelta: (content: string) => void;
 }): Promise<StreamResult> {
-  const formData = buildAiAskStreamFormData({ question, conversationId, tripProjectId, image });
-
-  const response = await fetch("/api/ai-ask/stream", { method: "POST", body: formData, signal, headers: { "Idempotency-Key": idempotencyKey } });
-
-  if (!response.ok || !response.body) {
-    const payload = await response.json().catch(() => null) as { error?: string } | null;
-
-    return { status: "answer-failed", errorMessage: payload?.error ?? "Mình chưa tạo được câu trả lời lúc này." };
+  let events;
+  try {
+    events = await submitDirectAiAskStream({ question, conversationId, tripProjectId, image, idempotencyKey, signal, onPreparing, onDelta });
+  } catch (error) {
+    if (error instanceof DirectApiError) throw error;
+    return { status: "answer-failed", errorMessage: error instanceof Error ? error.message : "Mình chưa tạo được câu trả lời lúc này." };
   }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffered = "";
   let terminalResult: StreamResult | null = null;
-
-  while (true) {
-    const { value, done } = await reader.read();
-    buffered += decoder.decode(value, { stream: !done });
-    const lines = buffered.split("\n");
-    buffered = lines.pop() ?? "";
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-
-      const event = parseStreamEvent(trimmed);
-
-      if (!event) {
-        terminalResult ??= { status: "answer-failed", errorMessage: "Luồng trả lời bị gián đoạn trước khi hoàn tất." };
-        continue;
-      }
-
-      if (event.type === "preparing") {
-        onPreparing();
-      }
-
-      if (event.type === "delta" && event.content) {
-        onDelta(event.content);
-      }
+  for (const event of events) {
 
       if (event.type === "in_progress") {
-        terminalResult = { status: "in-progress", conversationId: event.conversationId, userMessage: event.userMessage };
+        terminalResult = { status: "in-progress", conversationId: event.conversationId, userMessage: event.userMessage ? { ...event.userMessage, role: "user" } : undefined };
       }
 
       if (event.type === "done" && event.conversationId && event.userMessage && event.assistantMessage) {
-        terminalResult = { status: "answer-created", conversationId: event.conversationId, userMessage: event.userMessage, assistantMessage: event.assistantMessage };
+        terminalResult = { status: "answer-created", conversationId: event.conversationId, userMessage: { ...event.userMessage, role: "user" }, assistantMessage: { id: event.assistantMessage.id, content: event.assistantMessage.content, role: "assistant" } };
       }
 
       if (event.type === "error" && terminalResult?.status !== "answer-created") {
-        terminalResult = { status: "answer-failed", code: event.code, conversationId: event.conversationId, userMessage: event.userMessage, errorMessage: event.errorMessage ?? "Mình chưa tạo được câu trả lời lúc này." };
+        terminalResult = { status: "answer-failed", code: event.code, conversationId: event.conversationId, userMessage: event.userMessage ? { ...event.userMessage, role: "user" } : undefined, errorMessage: event.errorMessage ?? "Mình chưa tạo được câu trả lời lúc này." };
       }
-    }
-
-    if (done) break;
   }
 
   return terminalResult ?? { status: "answer-failed", errorMessage: "Luồng trả lời kết thúc trước khi lưu câu trả lời hoàn chỉnh." };
@@ -2455,13 +2431,6 @@ export function buildAiAskStreamFormData({
   return formData;
 }
 
-function parseStreamEvent(line: string) {
-  try {
-    return JSON.parse(line) as { type: string; code?: "refresh_required"; content?: string; conversationId?: string; userMessage?: DisplayMessage; assistantMessage?: DisplayMessage; errorMessage?: string };
-  } catch {
-    return null;
-  }
-}
 
 function validateSelectedImage(image: File | null) {
   if (!image) {

@@ -1,11 +1,11 @@
 import postgres from "postgres";
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
 import { resolvePlanningAnnotationCapabilities, sanitizeStoredPlanningAnnotations, type AiAskStreamExecutionPort, type PlanningReadRepository, type UserRoleGovernancePort, type UserRoleGovernanceTransactionPort, UserRoleGovernancePolicyError } from "@xuyenviet/domain";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { loadAnswerContext } from "./answer-context";
 import { formatAssistantMessageProvenance } from "./provenance";
 import { assistantResponseProvenance, conversations, messages, tripChangeProposals, tripProjects } from "./schema";
-import { adminUserRosterPageSize, encodeAdminUserRosterCursor, evaluateSchemaAdmission, parsePlanningAnswerDetailResponse, planningDetailProvenanceLimit, type AdminIdentityHandoff, type PlanningJsonValue, type PlanningProvenance, type RequestRole, type SchemaCompatibilityDeclaration, type TripAnswerContextResponse } from "@xuyenviet/contracts";
+import { adminUserRosterPageSize, encodeAdminUserRosterCursor, evaluateSchemaAdmission, parsePlanningAnswerDetailResponse, planningDetailProvenanceLimit, type AdminIdentityHandoff, type PlanningJsonValue, type PlanningProvenance, type RequestRole, type SchemaCompatibilityDeclaration, type TravelerShellProjection, type TripAnswerContextResponse } from "@xuyenviet/contracts";
 import { createAiAskStreamExecutionPort } from "./ai-ask-stream-execution";
 
 export * from "./ai-ask-commands";
@@ -79,6 +79,9 @@ export type ReleaseSchemaVersionRepository = {
 export interface ConversationSummaryRepository {
   listOwnedConversationSummaryRows(userId: string, limit: number): Promise<StoredConversationSummaryRow[]>;
 }
+export interface TravelerShellRepository {
+  loadOwnedTravelerShell(userId: string, conversationId?: string, tripProjectId?: string): Promise<TravelerShellProjection>;
+}
 
 export function createPostgresConversationSummaryRepository(databaseUrl: string): ConversationSummaryRepository {
   const sql = postgres(databaseUrl, { max: 1 });
@@ -102,6 +105,26 @@ export function createPostgresConversationSummaryRepository(databaseUrl: string)
         ) preview on true
         order by selected.updated_at desc, selected.id desc
       `;
+    },
+  };
+}
+
+export function createPostgresTravelerShellRepository(): TravelerShellRepository {
+  return {
+    async loadOwnedTravelerShell(userId, conversationId, tripProjectId) {
+      const db = (await import("./client")).getDb();
+      const [project] = tripProjectId ? await db.select({ id: tripProjects.id, title: tripProjects.title, origin: tripProjects.origin, destination: tripProjects.destination, startDate: tripProjects.startDate, endDate: tripProjects.endDate, travelers: tripProjects.travelers, primaryConversationId: tripProjects.primaryConversationId }).from(tripProjects).where(and(eq(tripProjects.id, tripProjectId), eq(tripProjects.userId, userId))).limit(1) : [];
+      const selectedConversationId = project?.primaryConversationId ?? conversationId;
+      const [conversation] = selectedConversationId ? await db.select({ id: conversations.id, tripProjectId: conversations.tripProjectId }).from(conversations).where(and(eq(conversations.id, selectedConversationId), eq(conversations.userId, userId))).limit(1) : [];
+      if (project && (!conversation || conversation.tripProjectId !== project.id)) return { conversation: null, tripProject: null };
+      // The API contract exposes at most 200 messages. Select the latest window
+      // first, then restore chronological order for the rendered conversation.
+      const recentMessages = conversation ? await db.select({ id: messages.id, role: messages.role, content: messages.content, createdAt: messages.createdAt }).from(messages).where(and(eq(messages.conversationId, conversation.id), eq(messages.userId, userId))).orderBy(desc(messages.createdAt), desc(messages.id)).limit(200) : [];
+      const ownedMessages = recentMessages.reverse();
+      return {
+        conversation: conversation ? { ...conversation, messages: ownedMessages.map((message) => ({ ...message, content: message.content ?? "" })) } : null,
+        tripProject: project ? project : null,
+      };
     },
   };
 }

@@ -1,7 +1,6 @@
 import Link from "next/link";
 
 import { BrandMark } from "@/components/ui/brand-mark";
-import { signInWithGoogle } from "@/features/auth/actions";
 import { normalizePublicAskDraft } from "@/features/auth/redirects";
 
 type SignInPageProps = {
@@ -27,6 +26,7 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
   const nextPath = requestedNextPath === "/ai-ask" || requestedNextPath === "/admin" ? requestedNextPath : undefined;
   const referralCode = getFirstParam(params?.ref);
   const publicDraft = normalizePublicAskDraft(getFirstParam(params?.draft));
+  const travelerReturnUrl = `${nextPath ?? "/ai-ask"}${referralCode || publicDraft ? `?${new URLSearchParams({ ...(referralCode ? { ref: referralCode } : {}), ...(publicDraft ? { draft: publicDraft } : {}) }).toString()}` : ""}`;
   const hasAuthError = Boolean(getFirstParam(params?.error));
   const gateMessage = nextPath === "/admin" ? "Đăng nhập để vào khu vực quản trị." : "Đăng nhập để tiếp tục với XuyenViet.";
 
@@ -61,17 +61,11 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
               Đăng nhập chưa hoàn tất. Vui lòng thử lại.
             </p>
           ) : null}
-          <form action={signInWithGoogle}>
-            <input name="next" type="hidden" value={nextPath ?? "/ai-ask"} />
-            {referralCode ? <input name="ref" type="hidden" value={referralCode} /> : null}
-            {publicDraft ? <input name="draft" type="hidden" value={publicDraft} /> : null}
-            <button
+          <a href={`/auth/google?returnUrl=${encodeURIComponent(travelerReturnUrl)}`}
               className="min-h-12 w-full rounded-xl bg-[#202020] px-5 py-4 text-center text-base font-medium text-white transition hover:bg-[#383838] active:translate-y-px"
-              type="submit"
             >
               Tiếp tục với Google
-            </button>
-          </form>
+          </a>
           <p className="text-center text-xs leading-5 text-[#858585]">
             Chúng tôi chỉ dùng tài khoản Google để bảo vệ và đồng bộ hành trình của bạn.
           </p>

@@ -73,22 +73,6 @@ export function readApprovedSchemaReleasePhasePolicy(
   }
 }
 
-export function isAiAskApiEnabled(environment: { APP_ENV?: string; XV_AI_ASK_API_ENABLED?: string } = process.env as unknown as { APP_ENV?: string; XV_AI_ASK_API_ENABLED?: string }): boolean {
-  const value = environment.XV_AI_ASK_API_ENABLED;
-  if (value === undefined || value === "" || value === "false") return false;
-  if (value !== "true" || !["local", "development", "test", "staging", "production"].includes(environment.APP_ENV ?? "development")) {
-    throw new Error("Invalid AI Ask API cutover configuration.");
-  }
-  return true;
-}
-
-export function isPlanningReadApiEnabled(environment: { APP_ENV?: string; XV_PLANNING_READ_API_ENABLED?: string } = process.env as unknown as { APP_ENV?: string; XV_PLANNING_READ_API_ENABLED?: string }): boolean {
-  const value = environment.XV_PLANNING_READ_API_ENABLED;
-  if (value === undefined || value === "" || value === "false") return false;
-  if (value !== "true" || !["local", "development", "test", "staging", "production"].includes(environment.APP_ENV ?? "development")) throw new Error("Invalid planning-read API cutover configuration.");
-  return true;
-}
-
 export function createBffTransportConfig(input: Omit<BffTransportConfig, "privateApiUrl"> & { privateApiUrl: URL }): BffTransportConfig {
   if (
     !(input.privateApiUrl instanceof URL) || input.privateApiUrl.protocol !== "https:" || input.privateApiUrl.hostname !== apiAudience || input.privateApiUrl.port || input.privateApiUrl.username || input.privateApiUrl.password ||

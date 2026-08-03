@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import { apiAudience } from "@xuyenviet/contracts";
 import { createBffCredentialConfig, type BffCredentialConfig, type Jwk } from "@xuyenviet/config";
-import type { ApiIdentityRepository, ConversationSummaryRepository, ReleaseSchemaVersionRepository } from "@xuyenviet/database";
+import type { ApiIdentityRepository, ConversationSummaryRepository, ReleaseSchemaVersionRepository, TravelerShellRepository } from "@xuyenviet/database";
 import type { AiAskStreamExecution, PlanningReadRepository } from "@xuyenviet/domain";
 import { createApiModule } from "../apps/api/src/app.module";
 import { apiSchemaCompatibility } from "../apps/api/src/release-schema";
@@ -37,12 +37,13 @@ beforeEach(async () => {
     async loadOwnedPlanningContext(userId, tripProjectId) { return (userId === "user-1" && tripProjectId === "project-1") || (userId === "user-2" && tripProjectId === "foreign-project") ? { version: 1, hasProjectScope: true, tripProjectId, aggregateVersion: 2, primaryConversationId: userId === "user-1" ? "conversation-a" : "conversation-other", anchors: [], planItems: [], constraints: null, currentConversationFacts: [], conflicts: [] } : null; },
     async loadOwnedAnswerDetail(userId, conversationId, assistantMessageId) { return userId === "user-1" && conversationId === "conversation-a" && assistantMessageId === "answer-1" ? { conversationId, assistantMessageId, content: "Nội dung đã hoàn tất.", provenance: [{ id: "withdrawn", rank: 1, availability: "withdrawn", unavailableLabel: "Nguồn này không còn khả dụng.", usedInPrompt: true, citedInAnswer: false }], annotations: [] } : null; },
   };
+  const travelerShells: TravelerShellRepository = { async loadOwnedTravelerShell(userId, conversationId, tripProjectId) { return userId === "user-1" && (conversationId === "conversation-a" || tripProjectId === "project-1") ? { conversation: { id: "conversation-a", tripProjectId: null, messages: [{ id: "message-1", role: "assistant", content: "Nội dung đã hoàn tất." }] }, tripProject: null } : { conversation: null, tripProject: null }; } };
   const versions: ReleaseSchemaVersionRepository = {
     async hasCompatibleSchemaVersion(declaration) { return ready && declaration.workload === apiSchemaCompatibility.workload && declaration.minimumVersion === apiSchemaCompatibility.minimumVersion && declaration.maximumVersion === "20260728.1"; },
     async recordSchemaVersion() {},
   };
   const aiAskExecution: AiAskStreamExecution = { async *execute() { yield new Uint8Array([123, 34, 116, 121, 112, 101, 34, 58, 34, 112, 114, 101, 112, 97, 114, 105, 110, 103, 34, 125, 10]); yield new Uint8Array([123, 34, 116, 121, 112, 101, 34, 58, 34, 100, 111, 110, 101, 34, 125, 10]); } };
-  const ApiModule = createApiModule(config, identities, { conversationSummaries: summaries, planningReads, schemaVersions: versions, aiAskExecution });
+  const ApiModule = createApiModule(config, identities, { conversationSummaries: summaries, travelerShells, planningReads, schemaVersions: versions, aiAskExecution });
   @Module({ imports: [ApiModule] })
   class TestModule {}
   app = await NestFactory.create(TestModule, { logger: false });
@@ -120,6 +121,13 @@ describe("API platform contracts", () => {
     expect(openApi.body.components.schemas.ContextConstraints.properties.values.$ref).toBe("#/components/schemas/PlanningJsonObject0");
     expect(openApi.body.components.schemas.TripAnswerContext.properties.constraints).toEqual({ oneOf: [{ type: "object", nullable: true, enum: [null] }, { $ref: "#/components/schemas/ContextConstraints" }] });
     expect(openApi.body.components.schemas.PlanningJsonScalar).toEqual({ oneOf: [{ type: "object", nullable: true, enum: [null] }, { type: "boolean" }, { type: "number" }, { type: "string", maxLength: 500 }] });
+  });
+
+  test("serves the owner-scoped direct traveler shell projection", async () => {
+    const shell = await request(app.getHttpServer()).get("/v1/conversations/shell?conversationId=conversation-a").set("Authorization", `Bearer ${await tokenFor()}`).expect(200);
+    expect(shell.body).toEqual({ shell: { conversation: { id: "conversation-a", tripProjectId: null, messages: [{ id: "message-1", role: "assistant", content: "Nội dung đã hoàn tất." }] }, tripProject: null } });
+    await request(app.getHttpServer()).get("/v1/conversations/shell?conversationId=foreign-conversation").set("Authorization", `Bearer ${await tokenFor()}`).expect(200, { shell: { conversation: null, tripProject: null } });
+    await request(app.getHttpServer()).get("/v1/conversations/shell?conversationId=history-conversation").set("Authorization", `Bearer ${await tokenFor()}`).expect(200, { shell: { conversation: null, tripProject: null } });
   });
 
   test("streams the execution owner's raw NDJSON bytes through the authenticated versioned API", async () => {

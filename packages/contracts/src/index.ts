@@ -134,6 +134,12 @@ export function parseAdminUserRosterPage(value: unknown): AdminUserRosterPage | 
 export const conversationSummaryLimit = 100;
 export type ConversationSummary = { id: string; updatedAt: string; preview: string };
 export type ConversationSummaryListResponse = { summaries: ConversationSummary[] };
+export type TravelerShellMessage = { id: string; role: "user" | "assistant"; content: string };
+export type TravelerShellProjection = {
+  conversation: { id: string; tripProjectId: string | null; messages: TravelerShellMessage[] } | null;
+  tripProject: { id: string; title: string; origin: string | null; destination: string | null; startDate: string | null; endDate: string | null; travelers: string | null; primaryConversationId: string | null } | null;
+};
+export type TravelerShellResponse = { shell: TravelerShellProjection };
 export type ApiVersionResponse = { version: "v1"; conversationSummaryLimit: number };
 export type HealthResponse = { status: "ok" };
 
@@ -662,6 +668,16 @@ export function parseConversationSummaryListResponse(value: unknown): Conversati
   const summaries = (value as { summaries: unknown[] }).summaries;
   if (summaries.length > conversationSummaryLimit || !summaries.every(isConversationSummary)) return null;
   return { summaries: summaries as ConversationSummary[] };
+}
+
+export function parseTravelerShellResponse(value: unknown): TravelerShellResponse | null {
+  if (!hasOnlyKeys(value, ["shell"]) || !hasOnlyKeys(value.shell, ["conversation", "tripProject"])) return null;
+  const shell = value.shell;
+  const conversation = shell.conversation;
+  const tripProject = shell.tripProject;
+  if (conversation !== null && (!hasOnlyKeys(conversation, ["id", "tripProjectId", "messages"]) || !isIdentifier(conversation.id) || !isNullableIdentifier(conversation.tripProjectId) || !Array.isArray(conversation.messages) || conversation.messages.length > 200 || !conversation.messages.every((message) => hasOnlyKeys(message, ["id", "role", "content"]) && isIdentifier(message.id) && (message.role === "user" || message.role === "assistant") && typeof message.content === "string" && message.content.length <= 20_000))) return null;
+  if (tripProject !== null && (!hasOnlyKeys(tripProject, ["id", "title", "origin", "destination", "startDate", "endDate", "travelers", "primaryConversationId"]) || !isIdentifier(tripProject.id) || !isBoundedString(tripProject.title, 200) || ![tripProject.origin, tripProject.destination, tripProject.startDate, tripProject.endDate, tripProject.travelers].every((item) => item === null || typeof item === "string" && item.length <= 500) || !isNullableIdentifier(tripProject.primaryConversationId))) return null;
+  return { shell: { conversation: conversation as TravelerShellProjection["conversation"], tripProject: tripProject as TravelerShellProjection["tripProject"] } };
 }
 
 export function parsePlanningContextResponse(value: unknown): PlanningContextResponse | null {

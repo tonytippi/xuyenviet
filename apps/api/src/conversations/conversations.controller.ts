@@ -1,8 +1,8 @@
-import { Controller, Get, Inject, Param } from "@nestjs/common";
+import { Controller, Get, Inject, Param, Query } from "@nestjs/common";
 
-import { type ConversationSummaryListResponse, type PlanningAnswerDetailResponse, type PlanningContextResponse } from "@xuyenviet/contracts";
+import { type ConversationSummaryListResponse, type PlanningAnswerDetailResponse, type PlanningContextResponse, type TravelerShellResponse } from "@xuyenviet/contracts";
 import { listOwnedConversationSummaries, serializeConversationSummaries } from "@xuyenviet/domain";
-import type { ConversationSummaryRepository } from "@xuyenviet/database";
+import type { ConversationSummaryRepository, TravelerShellRepository } from "@xuyenviet/database";
 import type { PlanningReadRepository } from "@xuyenviet/domain";
 
 import { Principal } from "../auth/principal.decorator";
@@ -10,14 +10,20 @@ import type { RequestPrincipal } from "@xuyenviet/contracts";
 
 export const CONVERSATION_SUMMARY_REPOSITORY = Symbol("CONVERSATION_SUMMARY_REPOSITORY");
 export const PLANNING_READ_REPOSITORY = Symbol("PLANNING_READ_REPOSITORY");
+export const TRAVELER_SHELL_REPOSITORY = Symbol("TRAVELER_SHELL_REPOSITORY");
 
 @Controller("v1/conversations")
 export class ConversationsController {
-  constructor(@Inject(CONVERSATION_SUMMARY_REPOSITORY) private readonly repository: ConversationSummaryRepository, @Inject(PLANNING_READ_REPOSITORY) private readonly planning: PlanningReadRepository) {}
+  constructor(@Inject(CONVERSATION_SUMMARY_REPOSITORY) private readonly repository: ConversationSummaryRepository, @Inject(PLANNING_READ_REPOSITORY) private readonly planning: PlanningReadRepository, @Inject(TRAVELER_SHELL_REPOSITORY) private readonly shell: TravelerShellRepository) {}
 
   @Get("summaries")
   async list(@Principal() principal: RequestPrincipal): Promise<ConversationSummaryListResponse> {
     return { summaries: serializeConversationSummaries(await listOwnedConversationSummaries(this.repository, principal.userId)) };
+  }
+
+  @Get("shell")
+  async travelerShell(@Principal() principal: RequestPrincipal, @Query("conversationId") conversationId: string | undefined, @Query("tripProjectId") tripProjectId: string | undefined): Promise<TravelerShellResponse> {
+    return { shell: await this.shell.loadOwnedTravelerShell(principal.userId, validOptionalIdentifier(conversationId), validOptionalIdentifier(tripProjectId)) };
   }
 
   @Get("planning-context/:tripProjectId")
@@ -32,3 +38,4 @@ export class ConversationsController {
 }
 
 function validIdentifier(value: string) { return value.length > 0 && value.length <= 128 && value.trim() === value; }
+function validOptionalIdentifier(value: string | undefined) { return value && validIdentifier(value) ? value : undefined; }

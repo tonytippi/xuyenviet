@@ -7,7 +7,7 @@ import { loadEnvFile } from "node:process";
 import { NestFactory } from "@nestjs/core";
 
 import { getBrowserAuthConfig, parseBffCredentialConfig } from "@xuyenviet/config";
-import { createPostgresAiAskStreamExecutionPort, createPostgresApiIdentityRepository, createPostgresConversationSummaryRepository, createPostgresPlanningReadRepository, createPostgresReleaseSchemaVersionRepository, createPostgresUserRoleGovernancePort } from "@xuyenviet/database";
+import { createPostgresAiAskStreamExecutionPort, createPostgresApiIdentityRepository, createPostgresConversationSummaryRepository, createPostgresPlanningReadRepository, createPostgresReleaseSchemaVersionRepository, createPostgresTravelerShellRepository, createPostgresUserRoleGovernancePort } from "@xuyenviet/database";
 import { createAiAskStreamExecution } from "@xuyenviet/domain";
 
 import { createApiModule } from "./app.module";
@@ -23,6 +23,7 @@ async function bootstrap() {
   const browserAuth = getBrowserAuthConfig();
   const app = await NestFactory.create(createApiModule(config, createPostgresApiIdentityRepository(databaseUrl, required("XV_ADMIN_SESSION_LOOKUP_KEY"), browserAuth.sessionLookupKey, browserAuth.oauthTransactionProtectionKey), {
     conversationSummaries: createPostgresConversationSummaryRepository(databaseUrl),
+    travelerShells: createPostgresTravelerShellRepository(),
     planningReads: createPostgresPlanningReadRepository(),
     userRoleGovernance: createPostgresUserRoleGovernancePort(databaseUrl),
     schemaVersions: createPostgresReleaseSchemaVersionRepository(databaseUrl),
