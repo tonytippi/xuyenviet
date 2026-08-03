@@ -23,8 +23,10 @@ export type RequestPrincipal = {
   sessionId: string;
   roles: RequestRole[];
   authorizationVersion: number;
-  issuer: BffIssuer;
-  tokenId: string;
+  /** Set only by an admission boundary; legacy domain callers remain BFF-shaped. */
+  transport?: "bff_bearer" | "browser_session";
+  issuer?: BffIssuer;
+  tokenId?: string;
 };
 
 export const adminCapabilities = ["admin.workspace.read", "admin.role.governance", "admin.ai-model-catalog.write"] as const;

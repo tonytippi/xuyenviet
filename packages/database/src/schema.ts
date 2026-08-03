@@ -280,6 +280,24 @@ export const adminOAuthTransactions = pgTable("admin_oauth_transactions", {
   expires: timestamp("expires", { mode: "date" }).notNull(),
 });
 
+// This namespace is intentionally separate from Auth.js `sessions` and admin sessions.
+export const browserSessions = pgTable("browser_sessions", {
+  sessionLookupHash: text("session_lookup_hash").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  csrfHash: text("csrf_hash").notNull(),
+  authorizationVersion: integer("authorization_version").notNull(),
+  expires: timestamp("expires", { mode: "date" }).notNull(),
+  revokedAt: timestamp("revoked_at", { mode: "date" }),
+}, (session) => [index("browser_sessions_live_user_idx").on(session.userId, session.expires)]);
+
+export const browserOAuthTransactions = pgTable("browser_oauth_transactions", {
+  id: text("id").primaryKey(),
+  stateHash: text("state_hash").notNull().unique(),
+  codeVerifierCiphertext: text("code_verifier_ciphertext").notNull(),
+  returnUrl: text("return_url").notNull(),
+  expires: timestamp("expires", { mode: "date" }).notNull(),
+}, (transaction) => [index("browser_oauth_transactions_expires_idx").on(transaction.expires)]);
+
 export const releaseSchemaVersions = pgTable("release_schema_versions", {
   version: text("version").primaryKey(),
   recordedAt: timestamp("recorded_at", { mode: "date" }).defaultNow().notNull(),

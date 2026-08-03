@@ -61,8 +61,17 @@ describe("API platform contracts", () => {
     expect(notReady.body).toMatchObject({ code: "internal_error", requestId: expect.any(String) });
     await request(app.getHttpServer()).get("/v1/version").expect(200, { version: "v1", conversationSummaryLimit: 100 });
     const openApi = await request(app.getHttpServer()).get("/openapi.json").expect(200);
-    expect(openApi.body.paths["/v1/conversations/summaries"].get.security).toEqual([{ bearerAuth: [] }]);
+    expect(openApi.body.paths["/v1/conversations/summaries"].get.security).toEqual([{ bearerAuth: [] }, { browserSession: [] }]);
     expect(openApi.body.paths["/v1/conversations/summaries"].get.summary).toContain("updatedAt DESC");
+    expect(openApi.body.paths["/v1/conversations/summaries"].get.summary).toContain("retained BFF bearer path");
+    expect(openApi.body.paths["/v1/ai-ask/stream"].post.security).toEqual([{ bearerAuth: [] }, { browserSession: [] }]);
+    const csrfHeader = { name: "X-XuyenViet-CSRF", in: "header", required: false, description: "Required for browser-session mutations; not used by the retained bearer path.", schema: { type: "string", pattern: "^[A-Za-z0-9_-]{43}$" } };
+    expect(openApi.body.paths["/v1/ai-ask/stream"].post.parameters).toEqual([csrfHeader]);
+    expect(openApi.body.paths["/auth/logout"].post.parameters).toEqual([csrfHeader]);
+    expect(openApi.body.paths["/v1/admin/workspace"].get.security).toEqual([{ bearerAuth: [] }]);
+    expect(openApi.body.components.securitySchemes.bearerAuth.description).toContain("not retired");
+    expect(openApi.body.paths["/auth/google"].get.summary).toContain("host-only secure HttpOnly SameSite=Lax transaction cookie");
+    expect(openApi.body.paths["/auth/google/callback"].get.summary).toContain("match the state transaction ID before one-time consumption");
   });
 
   test("requires a bearer, ignores browser cookies, emits no CORS, and returns owner-scoped ISO summaries", async () => {
@@ -98,7 +107,8 @@ describe("API platform contracts", () => {
     await request(app.getHttpServer()).get("/v1/conversations/%20bad/answers/answer-1").set("Authorization", `Bearer ${await tokenFor()}`).expect(200, { detail: null });
     await request(app.getHttpServer()).get("/v1/conversations/conversation-a/answers/answer-1").set("Authorization", `Bearer ${await tokenFor("user-2", "session-2")}`).expect(200, { detail: null });
     const openApi = await request(app.getHttpServer()).get("/openapi.json").expect(200);
-    expect(openApi.body.paths["/v1/conversations/planning-context/{tripProjectId}"].get.security).toEqual([{ bearerAuth: [] }]);
+    expect(openApi.body.paths["/v1/conversations/planning-context/{tripProjectId}"].get.security).toEqual([{ bearerAuth: [] }, { browserSession: [] }]);
+    expect(openApi.body.paths["/v1/conversations/{conversationId}/answers/{assistantMessageId}"].get.security).toEqual([{ bearerAuth: [] }, { browserSession: [] }]);
     expect(openApi.body.paths["/v1/conversations/planning-context/{tripProjectId}"].get.responses["503"]).toEqual({ $ref: "#/components/responses/SafeError" });
     expect(openApi.body.paths["/v1/conversations/{conversationId}/answers/{assistantMessageId}"].get.responses["503"]).toEqual({ $ref: "#/components/responses/SafeError" });
     expect(openApi.body.components.schemas.PlanningContext.properties.context).toEqual({ oneOf: [{ type: "object", nullable: true, enum: [null] }, { $ref: "#/components/schemas/TripAnswerContext" }], description: "Missing and foreign ownership are both null." });

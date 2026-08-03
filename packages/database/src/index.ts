@@ -1,5 +1,5 @@
 import postgres from "postgres";
-import { createHmac, randomUUID } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
 import { resolvePlanningAnnotationCapabilities, sanitizeStoredPlanningAnnotations, type AiAskStreamExecutionPort, type PlanningReadRepository, type UserRoleGovernancePort, type UserRoleGovernanceTransactionPort, UserRoleGovernancePolicyError } from "@xuyenviet/domain";
 import { and, asc, eq } from "drizzle-orm";
 import { loadAnswerContext } from "./answer-context";
@@ -40,6 +40,20 @@ export type ApiIdentityRecord = {
 export interface ApiIdentityRepository {
   getSession(sessionId: string): Promise<ApiIdentityRecord | null>;
   getAdminSession?(sessionId: string): Promise<ApiIdentityRecord | null>;
+}
+export type BrowserIdentity = ApiIdentityRecord & { roles: RequestRole[]; csrfHash: string; sessionId: string };
+export type BrowserOAuthTransaction = { id: string; state: string; codeVerifier: string; returnUrl: string; expires: Date };
+export class BrowserGoogleAccountConflictError extends Error {}
+export interface BrowserIdentityRepository extends ApiIdentityRepository {
+  purgeExpiredBrowserOAuthTransactions(limit: number): Promise<void>;
+  createBrowserOAuthTransaction(transaction: BrowserOAuthTransaction): Promise<void>;
+  consumeBrowserOAuthTransaction(id: string, state: string): Promise<BrowserOAuthTransaction | null>;
+  resolveOrCreateBrowserGoogleUser(subject: string, email: string, name: string | null, image: string | null): Promise<{ userId: string; authorizationVersion: number }>;
+  createBrowserSession(userId: string, sessionId: string, csrfHash: string, authorizationVersion: number, expires: Date): Promise<void>;
+  getBrowserSession(sessionId: string): Promise<BrowserIdentity | null>;
+  getBrowserLogoutCsrfHash(sessionId: string): Promise<string | null>;
+  renewBrowserSession(sessionId: string, expires: Date): Promise<boolean>;
+  revokeBrowserSession(sessionId: string): Promise<void>;
 }
 
 export interface AdminIdentityRepository extends ApiIdentityRepository {
@@ -121,10 +135,13 @@ export function createPostgresReleaseSchemaVersionRepository(databaseUrl: string
   };
 }
 
-export function createPostgresApiIdentityRepository(databaseUrl: string, adminSessionLookupKey: string): AdminIdentityRepository {
+export function createPostgresApiIdentityRepository(databaseUrl: string, adminSessionLookupKey: string, browserSessionLookupKey = adminSessionLookupKey, browserOAuthTransactionProtectionKey?: string): AdminIdentityRepository & BrowserIdentityRepository {
   if (adminSessionLookupKey.length < 32) throw new Error("Admin session lookup key is invalid.");
+  if (browserOAuthTransactionProtectionKey !== undefined && browserOAuthTransactionProtectionKey.length < 32) throw new Error("Browser OAuth transaction protection key is invalid.");
   const sql = postgres(databaseUrl, { max: 1 });
   const lookupHash = (sessionId: string) => createHmac("sha256", adminSessionLookupKey).update(sessionId).digest("base64url");
+  const browserLookupHash = (sessionId: string) => createHmac("sha256", browserSessionLookupKey).update(sessionId).digest("base64url");
+  const oauthTransactionProtection = browserOAuthTransactionProtectionKey ? createBrowserOAuthTransactionProtection(browserOAuthTransactionProtectionKey) : null;
   return {
     async getSession(sessionId) {
       const rows = await sql<ApiIdentityRecord[]>`
@@ -203,6 +220,72 @@ export function createPostgresApiIdentityRepository(databaseUrl: string, adminSe
       const sessionId = randomUUID();
       await sql`insert into admin_sessions (session_lookup_hash, user_id, expires) values (${lookupHash(sessionId)}, ${userId}, ${expires})`;
       return sessionId;
+    },
+    async purgeExpiredBrowserOAuthTransactions(limit) {
+      await sql`delete from browser_oauth_transactions where id in (select id from browser_oauth_transactions where expires <= now() order by expires asc limit ${limit})`;
+    },
+    async createBrowserOAuthTransaction(transaction) {
+      if (!oauthTransactionProtection) throw new Error("Browser OAuth transaction protection is unavailable.");
+      await sql`insert into browser_oauth_transactions (id, state_hash, code_verifier_ciphertext, return_url, expires) values (${transaction.id}, ${oauthTransactionProtection.stateHash(transaction.state)}, ${oauthTransactionProtection.encrypt(transaction.id, transaction.codeVerifier)}, ${transaction.returnUrl}, ${transaction.expires})`;
+    },
+    async consumeBrowserOAuthTransaction(id, state) {
+      if (!oauthTransactionProtection) throw new Error("Browser OAuth transaction protection is unavailable.");
+      const rows = await sql<Array<Omit<BrowserOAuthTransaction, "state" | "codeVerifier"> & { codeVerifierCiphertext: string }>>`delete from browser_oauth_transactions where id = ${id} and state_hash = ${oauthTransactionProtection.stateHash(state)} and expires > now() returning id, code_verifier_ciphertext as "codeVerifierCiphertext", return_url as "returnUrl", expires`;
+      const row = rows[0];
+      return row ? { ...row, state, codeVerifier: oauthTransactionProtection.decrypt(row.id, row.codeVerifierCiphertext) } : null;
+    },
+    async resolveOrCreateBrowserGoogleUser(subject, email, name, image) {
+      const rows = await sql.begin(async (transaction) => {
+        const existing = await transaction<{ userId: string; authorizationVersion: number }[]>`select users.id as "userId", users.authorization_version as "authorizationVersion" from accounts join users on users.id = accounts.user_id where accounts.provider = 'google' and accounts.provider_account_id = ${subject} limit 1 for update`;
+        if (existing[0]) {
+          const roles = await transaction`select role from user_roles where user_id = ${existing[0].userId} for update`;
+          if (roles.length) return existing;
+          const granted = await transaction`insert into user_roles (user_id, role) values (${existing[0].userId}, 'traveler') on conflict do nothing returning user_id`;
+          if (!granted.length) return existing;
+          return await transaction<{ userId: string; authorizationVersion: number }[]>`update users set authorization_version = authorization_version + 1 where id = ${existing[0].userId} returning id as "userId", authorization_version as "authorizationVersion"`;
+        }
+        const users = await transaction<{ id: string; authorizationVersion: number }[]>`insert into users (id, email, name, image, email_verified) values (${randomUUID()}, ${email}, ${name}, ${image}, now()) on conflict (email) do update set name = coalesce(excluded.name, users.name), image = coalesce(excluded.image, users.image) returning id, authorization_version as "authorizationVersion"`;
+        const userId = users[0]!.id;
+        const linkedGoogleAccount = await transaction<{ providerAccountId: string }[]>`select provider_account_id as "providerAccountId" from accounts where user_id = ${userId} and provider = 'google' limit 1 for update`;
+        if (linkedGoogleAccount[0] && linkedGoogleAccount[0].providerAccountId !== subject) throw new BrowserGoogleAccountConflictError();
+        if (!linkedGoogleAccount[0]) await transaction`insert into accounts (user_id, type, provider, provider_account_id) values (${userId}, 'oauth', 'google', ${subject})`;
+        await transaction`insert into user_roles (user_id, role) values (${userId}, 'traveler') on conflict do nothing`;
+        return [{ userId, authorizationVersion: users[0]!.authorizationVersion }];
+      });
+      return rows[0]!;
+    },
+    async createBrowserSession(userId, sessionId, csrfHash, authorizationVersion, expires) { await sql`insert into browser_sessions (session_lookup_hash, user_id, csrf_hash, authorization_version, expires) values (${browserLookupHash(sessionId)}, ${userId}, ${csrfHash}, ${authorizationVersion}, ${expires})`; },
+    async getBrowserSession(sessionId) {
+      const rows = await sql<Array<BrowserIdentity>>`select browser_sessions.user_id as "userId", browser_sessions.csrf_hash as "csrfHash", browser_sessions.expires, browser_sessions.authorization_version as "authorizationVersion", coalesce(array_agg(user_roles.role order by user_roles.role) filter (where user_roles.role is not null), '{}') as roles from browser_sessions join users on users.id = browser_sessions.user_id left join user_roles on user_roles.user_id = users.id where browser_sessions.session_lookup_hash = ${browserLookupHash(sessionId)} and browser_sessions.revoked_at is null and browser_sessions.authorization_version = users.authorization_version group by browser_sessions.user_id, browser_sessions.csrf_hash, browser_sessions.expires, browser_sessions.authorization_version`;
+      return rows[0] ? { ...rows[0], sessionId } : null;
+    },
+    async getBrowserLogoutCsrfHash(sessionId) {
+      const rows = await sql<{ csrfHash: string }[]>`select csrf_hash as "csrfHash" from browser_sessions where session_lookup_hash = ${browserLookupHash(sessionId)} limit 1`;
+      return rows[0]?.csrfHash ?? null;
+    },
+    async renewBrowserSession(sessionId, expires) { return (await sql`update browser_sessions set expires = ${expires} where session_lookup_hash = ${browserLookupHash(sessionId)} and revoked_at is null and expires > now() returning session_lookup_hash`).length === 1; },
+    async revokeBrowserSession(sessionId) { await sql`update browser_sessions set revoked_at = now() where session_lookup_hash = ${browserLookupHash(sessionId)} and revoked_at is null`; },
+  };
+}
+
+function createBrowserOAuthTransactionProtection(secret: string) {
+  const encryptionKey = createHash("sha256").update(`browser-oauth-transaction-encryption.${secret}`).digest();
+  const stateKey = createHash("sha256").update(`browser-oauth-transaction-state.${secret}`).digest();
+  return {
+    stateHash(state: string) { return createHmac("sha256", stateKey).update(state).digest("base64url"); },
+    encrypt(id: string, value: string) {
+      const iv = randomBytes(12);
+      const cipher = createCipheriv("aes-256-gcm", encryptionKey, iv);
+      cipher.setAAD(Buffer.from(id));
+      return Buffer.concat([iv, cipher.update(value, "utf8"), cipher.final(), cipher.getAuthTag()]).toString("base64url");
+    },
+    decrypt(id: string, value: string) {
+      const bytes = Buffer.from(value, "base64url");
+      if (bytes.length < 29) throw new Error("Browser OAuth transaction ciphertext is invalid.");
+      const decipher = createDecipheriv("aes-256-gcm", encryptionKey, bytes.subarray(0, 12));
+      decipher.setAAD(Buffer.from(id));
+      decipher.setAuthTag(bytes.subarray(-16));
+      return Buffer.concat([decipher.update(bytes.subarray(12, -16)), decipher.final()]).toString("utf8");
     },
   };
 }

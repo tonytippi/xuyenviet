@@ -42,6 +42,15 @@ export type BffTransportConfig = {
   readonly requestTimeoutMs: number;
 };
 export type BffCsrfConfig = Pick<BffTransportConfig, "bffOrigin" | "csrfSigningSecret" | "csrfLifetimeSeconds">;
+export type BrowserAuthConfig = { googleClientId: string; googleClientSecret: string; callbackUrl: string; allowedOrigins: readonly string[]; allowedReturnUrls: readonly string[]; sessionLookupKey: string; csrfKey: string; oauthTransactionProtectionKey: string; cookieName: string };
+export function getBrowserAuthConfig(environment: NodeJS.ProcessEnv = process.env): BrowserAuthConfig {
+  const origins = requiredOrigins(environment.XV_BROWSER_ALLOWED_ORIGINS);
+  const callbackUrl = requiredUrl(environment.XV_BROWSER_GOOGLE_CALLBACK_URL);
+  if (callbackUrl.protocol !== "https:" || !origins.includes(callbackUrl.origin)) throw new Error("Invalid browser authentication configuration.");
+  const config = { googleClientId: requiredBrowserValue(environment.XV_BROWSER_GOOGLE_CLIENT_ID), googleClientSecret: requiredBrowserValue(environment.XV_BROWSER_GOOGLE_CLIENT_SECRET), callbackUrl: callbackUrl.href, allowedOrigins: origins, allowedReturnUrls: requiredReturnUrls(environment.XV_BROWSER_ALLOWED_RETURN_URLS), sessionLookupKey: requiredBrowserValue(environment.XV_BROWSER_SESSION_LOOKUP_KEY), csrfKey: requiredBrowserValue(environment.XV_BROWSER_CSRF_KEY), oauthTransactionProtectionKey: requiredBrowserValue(environment.XV_BROWSER_OAUTH_TRANSACTION_PROTECTION_KEY), cookieName: "__Host-xuyenviet-session" };
+  if (config.sessionLookupKey.length < 32 || config.csrfKey.length < 32 || config.oauthTransactionProtectionKey.length < 32 || config.oauthTransactionProtectionKey === config.sessionLookupKey || config.oauthTransactionProtectionKey === config.csrfKey || !config.allowedReturnUrls.every((url) => origins.includes(new URL(url).origin))) throw new Error("Invalid browser authentication configuration.");
+  return Object.freeze(config);
+}
 
 /** Runtime release artifacts must be supplied from a deployment-owned directory. */
 export function readApprovedSchemaReleasePhasePolicy(
@@ -279,6 +288,13 @@ function requiredValue(value: string | undefined): string {
   if (!value?.trim()) throw new Error("Invalid BFF transport configuration.");
   return value;
 }
+function requiredBrowserValue(value: string | undefined): string { if (!value?.trim()) throw new Error("Invalid browser authentication configuration."); return value; }
+function requiredOrigins(value: string | undefined): string[] { const origins = value?.split(",").map((item) => item.trim()).filter(Boolean) ?? []; if (!origins.length || new Set(origins).size !== origins.length || !origins.every(isExactHttpsOrigin)) throw new Error("Invalid browser authentication configuration."); return origins; }
+function requiredReturnUrls(value: string | undefined): string[] {
+  const urls = value?.split(",").map((item) => item.trim()).filter(Boolean) ?? [];
+  if (!urls.length || new Set(urls).size !== urls.length || !urls.every(isCanonicalHttpsReturnUrl)) throw new Error("Invalid browser authentication configuration.");
+  return urls;
+}
 
 function requiredUrl(value: string | undefined): URL {
   try { return new URL(requiredValue(value)); } catch { throw new Error("Invalid BFF transport configuration."); }
@@ -306,6 +322,10 @@ function parsePrivateOrPublicJwk(value: string, privateKey: boolean): Jwk {
 
 function isExactHttpsOrigin(value: string): boolean {
   try { const url = new URL(value); return url.protocol === "https:" && url.origin === value; } catch { return false; }
+}
+
+function isCanonicalHttpsReturnUrl(value: string): boolean {
+  try { const url = new URL(value); return url.protocol === "https:" && !url.username && !url.password && !url.hash && url.href === value; } catch { return false; }
 }
 
 function isValidBffCsrfConfig(input: BffCsrfConfig): boolean {

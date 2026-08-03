@@ -8,21 +8,24 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { apiAudience } from "@xuyenviet/contracts";
 import { createBffCredentialConfig, createBffTransportConfig, type BffCredentialConfig, type Jwk } from "@xuyenviet/config";
-import { createPostgresApiIdentityRepository } from "@xuyenviet/database";
+import { createPostgresApiIdentityRepository, type ApiIdentityRepository, type BrowserIdentityRepository } from "@xuyenviet/database";
 import { createApiModule } from "../apps/api/src/app.module";
 import { Principal } from "../apps/api/src/auth/principal.decorator";
 import { ResourceServerGuard } from "../apps/api/src/auth/resource-server.guard";
+import { credentialedBrowserCors } from "../apps/api/src/browser-cors";
 import { getTestDatabaseUrl } from "./helpers/env-file";
 import { resetTestDatabase, testDb } from "./helpers/db";
-import { accounts, adminSessions, sessions, userRoles, users } from "@/db/schema";
+import { accounts, adminSessions, browserSessions, sessions, userRoles, users } from "@/db/schema";
 import type { RequestPrincipal } from "@xuyenviet/contracts";
 import { issueCsrfToken } from "@/server/csrf";
+import { csrfHash, csrfNonce } from "../apps/api/src/auth/browser-auth";
 import { executeProtectedBffMutation } from "@/server/protected-bff-adapter";
 
 let app: INestApplication;
 let config: BffCredentialConfig;
 let webPrevious: Awaited<ReturnType<typeof keySet>>;
 let adminActive: Awaited<ReturnType<typeof keySet>>;
+const browserAuth = { googleClientId: "client", googleClientSecret: "secret", callbackUrl: "https://web.xuyenviet.vn/auth/google/callback", allowedOrigins: ["https://web.xuyenviet.vn"], allowedReturnUrls: ["https://web.xuyenviet.vn/trips"], sessionLookupKey: "b".repeat(32), csrfKey: "c".repeat(32), oauthTransactionProtectionKey: "d".repeat(32), cookieName: "__Host-xuyenviet-session" } as const;
 const authMock = vi.fn();
 const userRoleGovernance = {
   listUsers: vi.fn(async () => ({ items: [], nextCursor: null, search: "" })),
@@ -68,6 +71,13 @@ class IdentityTestController {
   getPrincipal(@Principal() principal: RequestPrincipal) {
     this.calls += 1;
     return { userId: principal.userId };
+  }
+
+  @Get("roles")
+  @UseGuards(ResourceServerGuard)
+  getRoles(@Principal() principal: RequestPrincipal) {
+    this.calls += 1;
+    return { roles: principal.roles };
   }
 
   @Get("failure")
@@ -151,6 +161,178 @@ describe("API request principals", () => {
 
     expect(response.headers["access-control-allow-origin"]).toBeUndefined();
     expect(response.body).toEqual({ code: "unauthorized", message: "Không được phép truy cập.", requestId: expect.any(String) });
+    expect(controller().calls).toBe(0);
+  });
+
+  test("admits only a current exact-origin opaque browser session and rejects legacy cookies before controller execution", async () => {
+    const repository = createPostgresApiIdentityRepository(getTestDatabaseUrl(), "a".repeat(32), browserAuth.sessionLookupKey);
+    const sessionId = "b".repeat(64); const csrf = "c".repeat(43);
+    await testDb.insert(userRoles).values({ userId: "user-1", role: "traveler" });
+    await repository.createBrowserSession("user-1", sessionId, csrfHash(browserAuth, sessionId, csrf), 1, new Date(Date.now() + 60_000));
+    const [stored] = await testDb.select().from(browserSessions);
+    expect(stored?.sessionLookupHash).not.toContain(sessionId);
+    expect((await repository.getBrowserSession(sessionId))?.userId).toBe("user-1");
+    await restartApp(true);
+    await request(app.getHttpServer()).get("/_identity-test").set({ Cookie: `${browserAuth.cookieName}=${sessionId}`, Origin: browserAuth.allowedOrigins[0] }).expect(200, { userId: "user-1" });
+    expect(controller().calls).toBe(1);
+    controller().calls = 0;
+    await request(app.getHttpServer()).get("/_identity-test").set("Cookie", "authjs.session-token=legacy-cookie").expect(401);
+    expect(controller().calls).toBe(0);
+    await testDb.delete(userRoles).where(eq(userRoles.userId, "user-1"));
+    await rejectedBrowser(sessionId);
+  });
+
+  test("rejects every malformed Authorization credential instead of falling back to a valid browser session", async () => {
+    const repository = createPostgresApiIdentityRepository(getTestDatabaseUrl(), "a".repeat(32), browserAuth.sessionLookupKey);
+    const sessionId = "l".repeat(64); const csrf = csrfNonce(browserAuth, sessionId);
+    await testDb.insert(userRoles).values({ userId: "user-1", role: "traveler" });
+    await repository.createBrowserSession("user-1", sessionId, csrfHash(browserAuth, sessionId, csrf), 1, new Date(Date.now() + 60_000));
+    await restartApp(true);
+    const cookie = `${browserAuth.cookieName}=${sessionId}`;
+
+    for (const authorization of ["Basic browser-cookie", "Bearer malformed token"]) {
+      await request(app.getHttpServer()).get("/_identity-test").set({ Authorization: authorization, Cookie: cookie, Origin: browserAuth.allowedOrigins[0] }).expect(401);
+      expect(controller().calls).toBe(0);
+    }
+  });
+
+  test("admits an operator-only browser session to generic routes while capability guards still deny it", async () => {
+    const repository = createPostgresApiIdentityRepository(getTestDatabaseUrl(), "a".repeat(32), browserAuth.sessionLookupKey);
+    const sessionId = "m".repeat(64); const csrf = csrfNonce(browserAuth, sessionId);
+    await testDb.insert(userRoles).values({ userId: "user-1", role: "operator" });
+    await repository.createBrowserSession("user-1", sessionId, csrfHash(browserAuth, sessionId, csrf), 1, new Date(Date.now() + 60_000));
+    await restartApp(true);
+    const cookie = `${browserAuth.cookieName}=${sessionId}`;
+
+    await request(app.getHttpServer()).get("/_identity-test/roles").set({ Cookie: cookie, Origin: browserAuth.allowedOrigins[0] }).expect(200, { roles: ["operator"] });
+    await request(app.getHttpServer()).get("/v1/admin/workspace").set({ Cookie: cookie, Origin: browserAuth.allowedOrigins[0] }).expect(403);
+  });
+
+  test("permits no-Origin browser safe reads but requires an exact allowed Origin for CSRF bootstrap and mutations", async () => {
+    const repository = createPostgresApiIdentityRepository(getTestDatabaseUrl(), "a".repeat(32), browserAuth.sessionLookupKey);
+    const sessionId = "h".repeat(64); const csrf = csrfNonce(browserAuth, sessionId);
+    await testDb.insert(userRoles).values({ userId: "user-1", role: "traveler" });
+    await repository.createBrowserSession("user-1", sessionId, csrfHash(browserAuth, sessionId, csrf), 1, new Date(Date.now() + 60_000));
+    await restartApp(true);
+    const cookie = `${browserAuth.cookieName}=${sessionId}`;
+
+    await request(app.getHttpServer()).get("/_identity-test").set({ Cookie: cookie, Origin: "https://foreign.example" }).expect(403).expect(({ body }) => expect(body.code).toBe("forbidden"));
+    expect(controller().calls).toBe(0);
+    await request(app.getHttpServer()).get("/_identity-test").set("Cookie", cookie).expect(200, { userId: "user-1" });
+    expect(controller().calls).toBe(1);
+    await request(app.getHttpServer()).get("/auth/csrf").set("Cookie", cookie).expect(401);
+    await request(app.getHttpServer()).post("/_identity-test/protected-mutation").set({ Cookie: cookie, "X-XuyenViet-CSRF": csrf }).send({ title: "valid" }).expect(403).expect(({ body }) => expect(body.code).toBe("forbidden"));
+    expect(controller().protectedMutationCalls).toBe(0);
+  });
+
+  test("requires schema readiness before browser admission reaches a controller", async () => {
+    const repository = createPostgresApiIdentityRepository(getTestDatabaseUrl(), "a".repeat(32), browserAuth.sessionLookupKey);
+    const sessionId = "j".repeat(64); const csrf = csrfNonce(browserAuth, sessionId);
+    await testDb.insert(userRoles).values({ userId: "user-1", role: "traveler" });
+    await repository.createBrowserSession("user-1", sessionId, csrfHash(browserAuth, sessionId, csrf), 1, new Date(Date.now() + 60_000));
+    await app.close();
+    await startApp(true, repository, false);
+
+    await request(app.getHttpServer()).get("/_identity-test").set({ Cookie: `${browserAuth.cookieName}=${sessionId}`, Origin: browserAuth.allowedOrigins[0] }).expect(503).expect(({ body }) => expect(body.code).toBe("internal_error"));
+    expect(controller().calls).toBe(0);
+  });
+
+  test("returns only the session-bound CSRF nonce to an admitted same-origin browser session", async () => {
+    const repository = createPostgresApiIdentityRepository(getTestDatabaseUrl(), "a".repeat(32), browserAuth.sessionLookupKey);
+    const sessionId = "f".repeat(64); const csrf = csrfNonce(browserAuth, sessionId);
+    await testDb.insert(userRoles).values({ userId: "user-1", role: "traveler" });
+    await repository.createBrowserSession("user-1", sessionId, csrfHash(browserAuth, sessionId, csrf), 1, new Date(Date.now() + 60_000));
+    await restartApp(true);
+    const cookie = `${browserAuth.cookieName}=${sessionId}`;
+
+    const response = await request(app.getHttpServer()).get("/auth/csrf").set({ Cookie: cookie, Origin: browserAuth.allowedOrigins[0] }).expect(200);
+    expect(response.body).toEqual({ csrfToken: csrf });
+    expect(Object.keys(response.body)).toEqual(["csrfToken"]);
+    expect(response.text).not.toContain(sessionId);
+    expect(response.text).not.toContain("Bearer");
+
+    await request(app.getHttpServer()).get("/auth/csrf").expect(401);
+    await request(app.getHttpServer()).get("/auth/csrf").set({ Authorization: `Bearer ${await tokenFor(config, "xuyenviet-web-bff")}`, Cookie: cookie, Origin: browserAuth.allowedOrigins[0] }).expect(401);
+    await request(app.getHttpServer()).get("/auth/csrf").set({ Cookie: cookie, Origin: "https://foreign.example" }).expect(403).expect(({ body }) => expect(body.code).toBe("forbidden"));
+    await request(app.getHttpServer()).get("/auth/csrf").set({ Cookie: "authjs.session-token=legacy-cookie", Origin: browserAuth.allowedOrigins[0] }).expect(401);
+    await repository.revokeBrowserSession(sessionId);
+    await request(app.getHttpServer()).get("/auth/csrf").set({ Cookie: cookie, Origin: browserAuth.allowedOrigins[0] }).expect(401);
+    const expiredSessionId = "g".repeat(64); const expiredCsrf = csrfNonce(browserAuth, expiredSessionId);
+    await repository.createBrowserSession("user-1", expiredSessionId, csrfHash(browserAuth, expiredSessionId, expiredCsrf), 1, new Date(Date.now() - 1));
+    await request(app.getHttpServer()).get("/auth/csrf").set({ Cookie: `${browserAuth.cookieName}=${expiredSessionId}`, Origin: browserAuth.allowedOrigins[0] }).expect(401);
+  });
+
+  test("requires exact origin and a session-bound CSRF proof for browser mutations, renews only inside seven days, and revokes logout", async () => {
+    const repository = createPostgresApiIdentityRepository(getTestDatabaseUrl(), "a".repeat(32), browserAuth.sessionLookupKey);
+    const sessionId = "d".repeat(64); const csrf = "e".repeat(43);
+    await testDb.insert(userRoles).values({ userId: "user-1", role: "traveler" });
+    await repository.createBrowserSession("user-1", sessionId, csrfHash(browserAuth, sessionId, csrf), 1, new Date(Date.now() + 6 * 24 * 60 * 60_000));
+    await restartApp(true);
+    const cookie = `${browserAuth.cookieName}=${sessionId}`;
+    const browserRead = await request(app.getHttpServer()).get("/_identity-test").set({ Cookie: cookie, Origin: browserAuth.allowedOrigins[0] }).expect(200);
+    expect(browserRead.headers["set-cookie"]).toEqual([expect.stringMatching(/__Host-xuyenviet-session=.*HttpOnly.*Secure.*SameSite=Lax/)]);
+    expect((await repository.getBrowserSession(sessionId))?.expires.getTime()).toBeGreaterThan(Date.now() + 29 * 24 * 60 * 60_000);
+    await request(app.getHttpServer()).post("/_identity-test/protected-mutation").set({ Cookie: cookie, Origin: "https://foreign.example", "X-XuyenViet-CSRF": csrf }).send({ title: "valid" }).expect(403).expect(({ body }) => expect(body.code).toBe("forbidden"));
+    expect(controller().protectedMutationCalls).toBe(0);
+    await request(app.getHttpServer()).post("/_identity-test/protected-mutation").set({ Cookie: cookie, "X-XuyenViet-CSRF": csrf }).send({ title: "valid" }).expect(403).expect(({ body }) => expect(body.code).toBe("forbidden"));
+    expect(controller().protectedMutationCalls).toBe(0);
+    await request(app.getHttpServer()).post("/_identity-test/protected-mutation").set({ Cookie: cookie, Origin: browserAuth.allowedOrigins[0], "X-XuyenViet-CSRF": "wrong" }).send({ title: "valid" }).expect(403).expect(({ body }) => expect(body.code).toBe("csrf_invalid"));
+    await request(app.getHttpServer()).post("/_identity-test/protected-mutation").set({ Cookie: cookie, Origin: browserAuth.allowedOrigins[0], "X-XuyenViet-CSRF": csrf }).send({ title: "valid" }).expect(201);
+    const renewed = await repository.getBrowserSession(sessionId);
+    expect(renewed?.expires.getTime()).toBeGreaterThan(Date.now() + 29 * 24 * 60 * 60_000);
+    await request(app.getHttpServer()).post("/auth/logout").set({ Cookie: cookie, Origin: browserAuth.allowedOrigins[0], "X-XuyenViet-CSRF": csrf }).expect(204).expect("set-cookie", /__Host-xuyenviet-session=;/);
+    await request(app.getHttpServer()).post("/auth/logout").set({ Cookie: cookie, Origin: browserAuth.allowedOrigins[0], "X-XuyenViet-CSRF": csrf }).expect(204).expect("set-cookie", /__Host-xuyenviet-session=;/);
+    await rejectedBrowser(sessionId);
+    await request(app.getHttpServer()).post("/auth/logout").set({ Cookie: cookie, Origin: "https://foreign.example", "X-XuyenViet-CSRF": csrf }).expect(403).expect(({ headers }) => expect(headers["set-cookie"]).toBeUndefined());
+    await request(app.getHttpServer()).post("/auth/logout").set({ Cookie: cookie, Origin: browserAuth.allowedOrigins[0], "X-XuyenViet-CSRF": "wrong" }).expect(403).expect(({ headers }) => expect(headers["set-cookie"]).toBeUndefined());
+    const unknownSessionId = "n".repeat(64);
+    await request(app.getHttpServer()).post("/auth/logout").set({ Cookie: `${browserAuth.cookieName}=${unknownSessionId}`, Origin: browserAuth.allowedOrigins[0], "X-XuyenViet-CSRF": csrfNonce(browserAuth, unknownSessionId) }).expect(204).expect("set-cookie", /__Host-xuyenviet-session=;/);
+    controller().calls = 0;
+    await request(app.getHttpServer()).get("/_identity-test").set({ Cookie: `${browserAuth.cookieName}=${unknownSessionId}`, Origin: browserAuth.allowedOrigins[0] }).expect(401);
+    expect(controller().calls).toBe(0);
+  });
+
+  test("projects logout persistence failures as a safe retryable response", async () => {
+    const repository = createPostgresApiIdentityRepository(getTestDatabaseUrl(), "a".repeat(32), browserAuth.sessionLookupKey);
+    const sessionId = "k".repeat(64); const csrf = csrfNonce(browserAuth, sessionId);
+    await testDb.insert(userRoles).values({ userId: "user-1", role: "traveler" });
+    await repository.createBrowserSession("user-1", sessionId, csrfHash(browserAuth, sessionId, csrf), 1, new Date(Date.now() + 60_000));
+    await app.close();
+    const unavailableLogout: BrowserIdentityRepository = { ...repository, revokeBrowserSession: async () => { throw new Error("database unavailable"); } };
+    await startApp(true, unavailableLogout);
+
+    const response = await request(app.getHttpServer()).post("/auth/logout").set({ Cookie: `${browserAuth.cookieName}=${sessionId}`, Origin: browserAuth.allowedOrigins[0], "X-XuyenViet-CSRF": csrf, "X-Request-Id": "logout_failure" }).expect(503);
+    expect(response.body).toEqual({ code: "internal_error", message: "Không thể xử lý yêu cầu.", requestId: "logout_failure" });
+  });
+
+  test("allows only the direct AI Ask browser preflight header contract", async () => {
+    await app.close();
+    await startApp(true);
+
+    const response = await request(app.getHttpServer()).options("/v1/ai-ask/stream").set({ Origin: browserAuth.allowedOrigins[0], "Access-Control-Request-Method": "POST", "Access-Control-Request-Headers": "content-type, x-xuyenviet-csrf, x-request-id, idempotency-key, authorization, x-arbitrary-header" }).expect(204);
+    expect(response.headers["access-control-allow-origin"]).toBe(browserAuth.allowedOrigins[0]);
+    expect(response.headers["access-control-allow-headers"]).toBe("content-type,x-xuyenviet-csrf,x-request-id,idempotency-key");
+    await request(app.getHttpServer()).options("/v1/ai-ask/stream").set({ Origin: "https://foreign.example", "Access-Control-Request-Method": "POST" }).expect(({ headers }) => expect(headers["access-control-allow-origin"]).toBeUndefined());
+  });
+
+  test("returns a safe retryable failure when browser session lookup or renewal is unavailable", async () => {
+    const repository = createPostgresApiIdentityRepository(getTestDatabaseUrl(), "a".repeat(32), browserAuth.sessionLookupKey);
+    const sessionId = "i".repeat(64); const csrf = csrfNonce(browserAuth, sessionId);
+    await testDb.insert(userRoles).values({ userId: "user-1", role: "traveler" });
+    await repository.createBrowserSession("user-1", sessionId, csrfHash(browserAuth, sessionId, csrf), 1, new Date(Date.now() + 6 * 24 * 60 * 60_000));
+    const unavailableLookup: BrowserIdentityRepository = { ...repository, getBrowserSession: async () => { throw new Error("database unavailable"); } };
+    await app.close();
+    await startApp(true, unavailableLookup);
+    const cookie = `${browserAuth.cookieName}=${sessionId}`;
+    const lookupFailure = await request(app.getHttpServer()).get("/_identity-test").set({ Cookie: cookie, Origin: browserAuth.allowedOrigins[0], "X-Request-Id": "lookup_failure" }).expect(503);
+    expect(lookupFailure.body).toEqual({ code: "internal_error", message: "Không thể xử lý yêu cầu.", requestId: "lookup_failure" });
+    expect(controller().calls).toBe(0);
+
+    const unavailableRenewal: BrowserIdentityRepository = { ...repository, renewBrowserSession: async () => { throw new Error("database unavailable"); } };
+    await app.close();
+    await startApp(true, unavailableRenewal);
+    const renewalFailure = await request(app.getHttpServer()).get("/_identity-test").set({ Cookie: cookie, Origin: browserAuth.allowedOrigins[0], "X-Request-Id": "renewal_failure" }).expect(503);
+    expect(renewalFailure.body).toEqual({ code: "internal_error", message: "Không thể xử lý yêu cầu.", requestId: "renewal_failure" });
     expect(controller().calls).toBe(0);
   });
 
@@ -370,16 +552,19 @@ describe("API request principals", () => {
 
 });
 
-async function startApp() {
-  const ApiModule = createApiModule(config, createPostgresApiIdentityRepository(getTestDatabaseUrl(), "a".repeat(32)), {
+async function startApp(withBrowserAuth = false, identities: ApiIdentityRepository = createPostgresApiIdentityRepository(getTestDatabaseUrl(), "a".repeat(32), withBrowserAuth ? browserAuth.sessionLookupKey : undefined), schemaReady = true) {
+  const ApiModule = createApiModule(config, identities, {
     conversationSummaries: { async listOwnedConversationSummaryRows() { return []; } },
     userRoleGovernance,
-    schemaVersions: { async hasCompatibleSchemaVersion() { return true; }, async recordSchemaVersion() {} },
+    schemaVersions: { async hasCompatibleSchemaVersion() { return schemaReady; }, async recordSchemaVersion() {} },
+    aiAskExecution: { async *execute() {} },
     adminIdentityServiceToken: "identity-service",
+    ...(withBrowserAuth ? { browserAuth } : {}),
   });
   @Module({ imports: [ApiModule], controllers: [IdentityTestController] })
   class TestApiModule {}
   app = await NestFactory.create(TestApiModule, { logger: ["error"] });
+  if (withBrowserAuth) app.enableCors(credentialedBrowserCors(browserAuth.allowedOrigins));
   await app.init();
 }
 
@@ -387,9 +572,15 @@ function adminSessionLookupHash(sessionId: string) {
   return createHmac("sha256", "a".repeat(32)).update(sessionId).digest("base64url");
 }
 
-async function restartApp() {
+async function restartApp(withBrowserAuth = false) {
   await app.close();
-  await startApp();
+  await startApp(withBrowserAuth);
+}
+
+async function rejectedBrowser(sessionId: string) {
+  controller().calls = 0;
+  await request(app.getHttpServer()).get("/_identity-test").set({ Cookie: `${browserAuth.cookieName}=${sessionId}`, Origin: browserAuth.allowedOrigins[0] }).expect(401);
+  expect(controller().calls).toBe(0);
 }
 
 function controller() {

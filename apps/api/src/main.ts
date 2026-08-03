@@ -6,11 +6,12 @@ import { fileURLToPath } from "node:url";
 import { loadEnvFile } from "node:process";
 import { NestFactory } from "@nestjs/core";
 
-import { parseBffCredentialConfig } from "@xuyenviet/config";
+import { getBrowserAuthConfig, parseBffCredentialConfig } from "@xuyenviet/config";
 import { createPostgresAiAskStreamExecutionPort, createPostgresApiIdentityRepository, createPostgresConversationSummaryRepository, createPostgresPlanningReadRepository, createPostgresReleaseSchemaVersionRepository, createPostgresUserRoleGovernancePort } from "@xuyenviet/database";
 import { createAiAskStreamExecution } from "@xuyenviet/domain";
 
 import { createApiModule } from "./app.module";
+import { credentialedBrowserCors } from "./browser-cors";
 import { readApiReleasePhasePolicy } from "./release-schema";
 
 loadLocalEnvironment();
@@ -19,7 +20,8 @@ async function bootstrap() {
   const config = parseBffCredentialConfig(JSON.parse(required("XV_BFF_CREDENTIAL_CONFIG")));
   const databaseUrl = required("DATABASE_URL");
   const aiAskExecution = createAiAskStreamExecution(createPostgresAiAskStreamExecutionPort(databaseUrl));
-  const app = await NestFactory.create(createApiModule(config, createPostgresApiIdentityRepository(databaseUrl, required("XV_ADMIN_SESSION_LOOKUP_KEY")), {
+  const browserAuth = getBrowserAuthConfig();
+  const app = await NestFactory.create(createApiModule(config, createPostgresApiIdentityRepository(databaseUrl, required("XV_ADMIN_SESSION_LOOKUP_KEY"), browserAuth.sessionLookupKey, browserAuth.oauthTransactionProtectionKey), {
     conversationSummaries: createPostgresConversationSummaryRepository(databaseUrl),
     planningReads: createPostgresPlanningReadRepository(),
     userRoleGovernance: createPostgresUserRoleGovernancePort(databaseUrl),
@@ -27,7 +29,9 @@ async function bootstrap() {
     releasePhasePolicy: readApiReleasePhasePolicy(),
     adminIdentityServiceToken: required("XV_ADMIN_IDENTITY_HANDOFF_SERVICE_TOKEN"),
     aiAskExecution,
+    browserAuth,
   }));
+  app.enableCors(credentialedBrowserCors(browserAuth.allowedOrigins));
   await app.listen(Number(process.env.PORT ?? 3001));
 }
 

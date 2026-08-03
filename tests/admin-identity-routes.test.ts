@@ -42,6 +42,7 @@ describe("admin identity routes", () => {
   test("permits only the explicit local loopback admin transport", async () => {
     const key = await keySet("admin-key");
     const environment: NodeJS.ProcessEnv = {
+      NODE_ENV: "test",
       APP_ENV: "local",
       XV_ADMIN_LOCAL_TRANSPORT: "true",
       XV_ADMIN_PRIVATE_API_URL: "http://127.0.0.1:3001",

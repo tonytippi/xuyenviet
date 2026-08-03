@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, type ArgumentMetadata, type PipeTransform, type Type } from "@nestjs/common";
+import { BadRequestException, Injectable, Optional, type ArgumentMetadata, type PipeTransform, type Type } from "@nestjs/common";
 
 import type { SafeFieldViolation } from "@xuyenviet/contracts";
 
@@ -8,7 +8,7 @@ export type SafeRequestDto<T> = {
 
 @Injectable()
 export class SafeValidationPipe implements PipeTransform {
-  constructor(private readonly explicitDto?: Type<unknown> & Partial<SafeRequestDto<unknown>>) {}
+  constructor(@Optional() private readonly explicitDto?: Type<unknown> & Partial<SafeRequestDto<unknown>>) {}
 
   transform(value: unknown, metadata: ArgumentMetadata) {
     if (metadata.type !== "body") return value;

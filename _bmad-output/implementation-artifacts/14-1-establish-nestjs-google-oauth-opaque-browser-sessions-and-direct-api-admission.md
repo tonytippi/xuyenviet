@@ -30,7 +30,7 @@ so that web and PWA clients can call protected APIs directly without Auth.js or 
 ## Acceptance Criteria
 
 1. **Google authorization initiation and callback**
-   - Given an unauthenticated visitor starts sign-in through NestJS, when Google returns a valid callback tied to a non-expired, single-use OAuth transaction, NestJS resolves or creates the real Google user/account, creates an opaque browser session, sets only its secure HttpOnly cookie, and redirects to an allowlisted presentation URL.
+    - Given an unauthenticated visitor starts sign-in through NestJS, when Google returns a valid callback tied to a non-expired, single-use OAuth transaction and the initiating browser's OAuth transaction cookie matches its transaction ID, NestJS resolves or creates the real Google user/account, creates an opaque browser session, sets its secure HttpOnly cookie, and redirects to an allowlisted presentation URL.
    - OAuth transaction state is high entropy, expires in at most ten minutes, is consumed atomically, and is not reusable.
    - Callback/start errors return a safe sign-in failure/redirect or safe API response and never disclose provider tokens, session values, client secret, database details, or stack traces.
 
@@ -110,6 +110,7 @@ so that web and PWA clients can call protected APIs directly without Auth.js or 
 
 - OAuth callback return URLs must be a static allowlist, not arbitrary request input.
 - Validate OAuth state before exchanging a code; consume state once; enforce a short expiry; use PKCE if Google flow is browser public-client capable.
+- Start sets a distinct host-only secure HttpOnly SameSite=Lax transaction cookie containing only the opaque transaction ID. Callback must require it to match the parsed state transaction ID before consuming persistence and must clear it on both successful and failed callbacks.
 - Cookie values, OAuth codes, verifier/state values, provider responses, client secrets, and session IDs must never appear in logs, safe error envelopes, OpenAPI examples, telemetry, or browser JSON bodies.
 - Never use `localStorage` or a readable cookie for session credentials.
 - Do not accept an Auth.js cookie, an unverified `x-user-*` header, or browser-provided roles as authentication.

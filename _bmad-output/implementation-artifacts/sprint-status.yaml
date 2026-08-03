@@ -305,7 +305,8 @@ development_status:
   # decisions in completed Epics 9-13 remain historical evidence only.
   # Epic 14 owns NestJS direct browser API consolidation and retirement.
   epic-14: in-progress
-  14-1-establish-nestjs-google-oauth-opaque-browser-sessions-and-direct-api-admission: ready-for-dev
+  # 2026-08-03: Completed Nest-owned Google OAuth, encrypted one-time transactions, opaque browser sessions, direct request-principal admission, session-bound CSRF, exact CORS, renewal, and idempotent logout. Serial direct-auth integration coverage, root typecheck, build, and diff checks passed; lint has only existing unrelated warnings. Final adversarial and edge-case closure reviews found no high or medium findings.
+  14-1-establish-nestjs-google-oauth-opaque-browser-sessions-and-direct-api-admission: done
   14-2-cut-ai-ask-and-traveler-shell-reads-to-direct-api: backlog
   14-3-move-traveler-commands-and-remove-root-domain-writers: backlog
   14-4-complete-admin-direct-api-ownership: backlog

@@ -14,7 +14,7 @@ export class AdminCapabilityGuard implements CanActivate {
     const capability = this.reflector.getAllAndOverride<AdminCapability>(ADMIN_CAPABILITY, [context.getHandler(), context.getClass()]);
     if (!capability) return true;
     const request = context.switchToHttp().getRequest<{ principal?: RequestPrincipal; requestId?: string }>();
-    if (request.principal?.issuer !== "xuyenviet-admin-bff" || !permitsAdminCapability(request.principal.roles, capability)) {
+    if (request.principal?.transport !== "bff_bearer" || request.principal.issuer !== "xuyenviet-admin-bff" || !permitsAdminCapability(request.principal.roles, capability)) {
       throw new ForbiddenException({ code: "forbidden", message: "Bạn không có quyền thực hiện thao tác này.", requestId: request.requestId ?? crypto.randomUUID() });
     }
     return true;
