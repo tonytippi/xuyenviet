@@ -341,7 +341,8 @@ development_status:
   # remains before final story completion; deployment evidence remains Story 14.6.
   # 2026-08-03: BMad review repair completed. Root Auth.js remains restricted to preserved admin/BFF callers and no longer handles traveler referrals; root traveler feedback writer is removed. Direct logout clears local state on failure, repeated protected selectors fail closed, proposal terminal actions share project-first locking, sequential constraints updates advance correctly, reorder audit counts are retained, and browser-session Origin/CSRF command coverage was added. Serial command/auth integration (12 + 28), focused direct/API (17), typecheck, lint (0 errors; 5 existing warnings), and diff check passed.
   14-2-cut-ai-ask-and-traveler-shell-reads-to-direct-api: done
-  14-3-move-traveler-commands-and-remove-root-domain-writers: backlog
+  # 2026-08-03: Story 14.3 removed every residual root traveler direct-DB/Auth.js writer: conversation/trip commands, plan mutations, proposal persistence/expiry, context extraction, and referral-cookie attribution. Nest direct APIs and package-owned worker paths are now the only traveler mutation owners; root-admin Auth.js sign-out, root Auth.js/BFF runtime, and apps/admin remain explicitly deferred to Stories 14.4-14.5. Focused serial direct API/browser-session/referral/proposal/worker inventory coverage passed, as did lint (0 errors; 5 existing warnings), typecheck, build, and diff checks. The pre-existing package direct-shell expire-on-read behavior is documented in deferred-work.md for a dedicated package read-path repair.
+  14-3-move-traveler-commands-and-remove-root-domain-writers: done
   14-4-complete-admin-direct-api-ownership: backlog
   14-5-retire-authjs-bff-runtime-and-legacy-transport: backlog
   14-6-produce-the-direct-api-launch-evidence-gate: backlog

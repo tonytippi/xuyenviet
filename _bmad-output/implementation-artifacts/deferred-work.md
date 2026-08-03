@@ -131,3 +131,6 @@
 - source_spec: `spec-9-1-establish-bff-credentials-and-api-request-principals.md`
   summary: Increment users.authorizationVersion transactionally for every role grant or revoke.
   evidence: Story 9.1 validates the JWT role snapshot against persisted authorization version but intentionally preserves the existing ADMIN_EMAIL provisioner and introduces no role-governance command. Story 9.2 owns the role mutation boundary that must invalidate stale credentials.
+- source_spec: `spec-14-3-move-traveler-commands-and-remove-root-domain-writers.md`
+  summary: Make the package-owned direct traveler shell projection exclude elapsed pending proposals without calling the expiry writer during reads.
+  evidence: `packages/database/src/index.ts` currently calls `expireTripChangeProposalInTransaction` while loading the direct Nest conversation shell, which writes status, history, and audit data from a read path; this behavior predates Story 14.3's root writer removals.

@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, asc, desc, eq, isNotNull, lte } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNull, or } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
 import {
@@ -16,28 +16,18 @@ import {
   type TripPlanItemState,
   type TripPlanItemType,
 } from "@/db/schema";
-import { recordAuditEvent } from "@/features/audit/events";
-import { createSystemAuditActor, getSystemAuditActorLabel } from "@/features/audit/actors";
+import { getSystemAuditActorLabel } from "@/features/audit/actors";
 import { tripPlanItemStateLabels } from "@/features/chat-trips/trip-home-labels";
 import { validatePlanReferencesRules, type PlanItemReference } from "@/features/chat-trips/plan-references";
 import { getAuthenticatedSession } from "@/server/auth";
-import { expireTripChangeProposal as expireTripChangeProposalCommand } from "@xuyenviet/database";
 
-// Story 7.4: Chat/Trips owns the Trip Change Proposal command/read boundary.
-// AI Orchestration produces an untrusted draft; this module is the only
-// persistence path. Story 7.5 ADDS the terminal proposal commands
-// (apply/dismiss/expire), expire-on-read wiring, and the plan history read.
-// No plan state is mutated by the 7.4 draft path; only apply mutates plan
-// state, and only inside one locked transaction.
+// Root proposal helpers are read-only. The package-owned traveler command
+// modules persist, apply, dismiss, and expire proposals.
 
-type Transaction = Parameters<ReturnType<typeof getDb>["transaction"]>[0] extends (transaction: infer T) => unknown ? T : never;
-
-const maxRationaleLength = 500;
 const maxLabelLength = 160;
 const maxNotesLength = 1_000;
 const maxAlternativeSummaryLength = 280;
 const maxOperations = 20;
-const maxAlternatives = 5;
 const validAffectedItemChanges: readonly TripChangeProposalAffectedItemRef["change"][] = [
   "create",
   "update",
@@ -175,22 +165,6 @@ export type OwnedTripChangeProposalSummary = {
   // additively so the 7.4 draft path and read model remain unchanged.
   terminalTimestamp?: Date | null;
 };
-
-export type PersistAiTripChangeProposalDraftInput = {
-  tripProjectId: string;
-  expectedAggregateVersion: number;
-  expectedItemVersions?: Record<string, number> | null;
-  operations: unknown;
-  rationale: string;
-  alternatives?: unknown;
-  orderingPreconditions?: unknown;
-  expiresAt?: Date | null;
-  sourceAssistantMessageId?: string | null;
-};
-
-export type PersistAiTripChangeProposalDraftResult =
-  | { success: true; proposal: OwnedTripChangeProposalSummary }
-  | { success: false; reason: "unauthenticated" | "not_found" | "invalid" | "refresh_required" };
 
 export function validateProposalOperations(
   operations: unknown,
@@ -715,178 +689,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-export async function persistAiTripChangeProposalDraft(
-  input: PersistAiTripChangeProposalDraftInput,
-): Promise<PersistAiTripChangeProposalDraftResult> {
-  const session = await getAuthenticatedSession();
-  if (!session) return { success: false, reason: "unauthenticated" };
-
-  if (!normalizeRationale(input.rationale).ok) return { success: false, reason: "invalid" };
-
-  const alternatives = normalizeAlternatives(input.alternatives);
-  if (alternatives === "invalid") return { success: false, reason: "invalid" };
-
-  if (!Number.isInteger(input.expectedAggregateVersion) || input.expectedAggregateVersion < 1) {
-    return { success: false, reason: "invalid" };
-  }
-
-  // E7R2-F4: a past-date (or present) expires_at would be dead-on-arrival —
-  // expire-on-read on first view flips the proposal to expired before the
-  // owner ever sees it as pending. Reject any non-null expires_at that is not
-  // strictly in the future. Invalid date objects (NaN) are also rejected.
-  if (input.expiresAt !== null && input.expiresAt !== undefined) {
-    if (!(input.expiresAt instanceof Date) || Number.isNaN(input.expiresAt.getTime()) || input.expiresAt.getTime() <= Date.now()) {
-      return { success: false, reason: "invalid" };
-    }
-  }
-
-  try {
-    const expiresAtValidatedAt = Date.now();
-    return await getDb().transaction(async (transaction) => persistAiTripChangeProposalDraftInTransaction(transaction, session, input, expiresAtValidatedAt));
-  } catch (error) {
-    console.error("Failed to persist AI trip change proposal draft.", {
-      tripProjectId: input.tripProjectId,
-      userId: session.userId,
-      error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
-    });
-    return { success: false, reason: "invalid" };
-  }
-}
-
-// Worker callers supply an already-authorized owner and transaction so their
-// outbox effect, aggregate validation, proposal, and acknowledgement can commit
-// atomically. Browser commands continue through the authenticated wrapper.
-export async function persistAiTripChangeProposalDraftInTransaction(
-  transaction: Transaction,
-  owner: { userId: string },
-  input: PersistAiTripChangeProposalDraftInput,
-  expiresAtValidatedAt?: number,
-): Promise<PersistAiTripChangeProposalDraftResult> {
-  const rationaleResult = normalizeRationale(input.rationale);
-  if (!rationaleResult.ok) return { success: false, reason: "invalid" };
-  const rationale = rationaleResult.value;
-  const alternatives = normalizeAlternatives(input.alternatives);
-  if (alternatives === "invalid" || !Number.isInteger(input.expectedAggregateVersion) || input.expectedAggregateVersion < 1) return { success: false, reason: "invalid" };
-  const expiryValidationTime = expiresAtValidatedAt ?? Date.now();
-  if (input.expiresAt !== null && input.expiresAt !== undefined && (!(input.expiresAt instanceof Date) || Number.isNaN(input.expiresAt.getTime()) || input.expiresAt.getTime() <= expiryValidationTime)) return { success: false, reason: "invalid" };
-      const [project] = await transaction
-        .select({ aggregateVersion: tripProjects.aggregateVersion })
-        .from(tripProjects)
-        .where(and(eq(tripProjects.id, input.tripProjectId), eq(tripProjects.userId, owner.userId)))
-        .limit(1)
-        .for("update");
-
-      if (!project) return { success: false, reason: "not_found" };
-      if (project.aggregateVersion !== input.expectedAggregateVersion) {
-        return { success: false, reason: "refresh_required" };
-      }
-
-      // Validate operations against the current aggregate before persisting.
-      // The dev judges omission of interdependent operations unsafe in 7.4, so
-      // any rejected operation rejects the whole draft (no proposal row written).
-      // Load the full projection (label/ordinal/notes/plannedAt/transport/
-      // accommodation) so the owner-facing summary can derive real affected items
-      // and before/after impact (Story 7.4 review findings 2 and 3).
-      const knownItemRows = await transaction
-        .select({
-          id: tripPlanItems.id,
-          kind: tripPlanItems.kind,
-          anchorRole: tripPlanItems.anchorRole,
-          type: tripPlanItems.type,
-          state: tripPlanItems.state,
-          parentItemId: tripPlanItems.parentItemId,
-          backupTargetItemId: tripPlanItems.backupTargetItemId,
-          label: tripPlanItems.label,
-          ordinal: tripPlanItems.ordinal,
-          notes: tripPlanItems.notes,
-          plannedAt: tripPlanItems.plannedAt,
-          transportOriginLabel: tripPlanItems.transportOriginLabel,
-          transportDestinationLabel: tripPlanItems.transportDestinationLabel,
-          accommodationPlaceAreaLabel: tripPlanItems.accommodationPlaceAreaLabel,
-        })
-        .from(tripPlanItems)
-        .where(and(eq(tripPlanItems.tripProjectId, input.tripProjectId), eq(tripPlanItems.userId, owner.userId)));
-
-      const knownItems: KnownPlanItem[] = knownItemRows.map((row) => ({
-        id: row.id,
-        kind: row.kind,
-        anchorRole: row.anchorRole,
-        type: row.type,
-        state: row.state,
-        parentItemId: row.parentItemId,
-        backupTargetItemId: row.backupTargetItemId,
-        label: row.label,
-        ordinal: row.ordinal,
-        notes: row.notes,
-        plannedAt: row.plannedAt ? row.plannedAt.toISOString() : null,
-        transportOriginLabel: row.transportOriginLabel,
-        transportDestinationLabel: row.transportDestinationLabel,
-        accommodationPlaceAreaLabel: row.accommodationPlaceAreaLabel,
-      }));
-
-      const { valid, rejected } = validateProposalOperations(input.operations, { knownItems, tripProjectId: input.tripProjectId });
-      if (rejected.length > 0 || valid.length === 0) {
-        return { success: false, reason: "invalid" };
-      }
-
-      const [inserted] = await transaction
-        .insert(tripChangeProposals)
-        .values({
-          tripProjectId: input.tripProjectId,
-          userId: owner.userId,
-          creatorClass: "ai_orchestration",
-          status: "pending",
-          rationale,
-          operations: valid as unknown as Record<string, unknown>,
-          expectedAggregateVersion: input.expectedAggregateVersion,
-          expectedItemVersions: (input.expectedItemVersions ?? null) as Record<string, number> | null,
-          orderingPreconditions: (input.orderingPreconditions ?? null) as Record<string, unknown> | null,
-          alternatives: alternatives as unknown as Record<string, unknown> | null,
-          expiresAt: input.expiresAt ?? null,
-          sourceAssistantMessageId: input.sourceAssistantMessageId ?? null,
-        })
-        .returning({
-          id: tripChangeProposals.id,
-          status: tripChangeProposals.status,
-          rationale: tripChangeProposals.rationale,
-          operations: tripChangeProposals.operations,
-          alternatives: tripChangeProposals.alternatives,
-          expiresAt: tripChangeProposals.expiresAt,
-          createdAt: tripChangeProposals.createdAt,
-        });
-
-      await recordAuditEvent(
-        {
-          actor: createSystemAuditActor("system-ai-orchestration"),
-          operation: "create",
-          targetType: "trip_change_proposal",
-          targetId: inserted.id,
-          afterSummary: JSON.stringify({
-            tripProjectId: input.tripProjectId,
-            proposalId: inserted.id,
-            status: inserted.status,
-            expectedAggregateVersion: input.expectedAggregateVersion,
-          }),
-        },
-        transaction,
-      );
-
-      const summary = toOwnedSummary(inserted, input.tripProjectId, valid, knownItems);
-      return { success: true, proposal: summary };
-}
-
 export async function listPendingProposalsForTripProject(
   tripProjectId: string,
 ): Promise<OwnedTripChangeProposalSummary[] | null> {
   const session = await getAuthenticatedSession();
   if (!session) return null;
-
-  // Story 7.5: expire-on-read. Before returning the pending list, expire every
-  // elapsed pending proposal in its own fenced transaction so Trip Home focus
-  // and the workspace panel never treat an elapsed proposal as pending. The
-  // expire command is idempotent and runs in its own transaction; the read is
-  // NOT nested inside the expire transaction (avoid holding locks across reads).
-  await expireElapsedPendingProposals(tripProjectId, session.userId, new Date());
+  const now = new Date();
 
   const rows = await getDb()
     .select({
@@ -904,6 +712,7 @@ export async function listPendingProposalsForTripProject(
       eq(tripChangeProposals.tripProjectId, tripProjectId),
       eq(tripChangeProposals.userId, session.userId),
       eq(tripChangeProposals.status, "pending"),
+      or(isNull(tripChangeProposals.expiresAt), gt(tripChangeProposals.expiresAt, now)),
     ))
     .orderBy(asc(tripChangeProposals.createdAt), asc(tripChangeProposals.id));
 
@@ -925,11 +734,6 @@ export async function getProposalForOwnerReview(
   const session = await getAuthenticatedSession();
   if (!session) return null;
 
-  // Story 7.5: expire-on-read. If this specific proposal is elapsed and still
-  // pending, expire it before returning so the review card renders the expired
-  // state instead of a stale pending state.
-  await expireElapsedPendingProposals(tripProjectId, session.userId, new Date(), proposalId);
-
   const [row] = await getDb()
     .select({
       id: tripChangeProposals.id,
@@ -946,49 +750,14 @@ export async function getProposalForOwnerReview(
       eq(tripChangeProposals.id, proposalId),
       eq(tripChangeProposals.tripProjectId, tripProjectId),
       eq(tripChangeProposals.userId, session.userId),
+      eq(tripChangeProposals.status, "pending"),
+      or(isNull(tripChangeProposals.expiresAt), gt(tripChangeProposals.expiresAt, new Date())),
     ))
     .limit(1);
 
   if (!row) return null;
   const knownItems = await loadKnownItemsForSummary(tripProjectId, session.userId);
   return toOwnedSummary(row, tripProjectId, row.operations, knownItems);
-}
-
-// Story 7.5: expire every elapsed pending proposal for the owner scope in its
-// own fenced transaction. When `proposalId` is supplied, only that proposal is
-// considered (used by getProposalForOwnerReview). The read is NOT nested inside
-// the expire transaction. Owner scope is enforced via the (tripProjectId,
-// userId) predicate inside expireTripChangeProposal.
-async function expireElapsedPendingProposals(tripProjectId: string, userId: string, now: Date, proposalId?: string) {
-  const rows = await getDb()
-    .select({ id: tripChangeProposals.id })
-    .from(tripChangeProposals)
-    .where(and(
-      eq(tripChangeProposals.tripProjectId, tripProjectId),
-      eq(tripChangeProposals.userId, userId),
-      eq(tripChangeProposals.status, "pending"),
-      isNotNull(tripChangeProposals.expiresAt),
-      lte(tripChangeProposals.expiresAt, now),
-      ...(proposalId ? [eq(tripChangeProposals.id, proposalId)] : []),
-    ));
-  for (const row of rows) {
-    // Q1: expire-on-read is a best-effort side effect. P11 made
-    // expireTripChangeProposal re-throw transient DB errors so the worker can
-    // retry; the read path must NOT inherit that throw — a momentary DB blip
-    // during expire would fail the user's entire pending-proposals/proposal-
-    // review read (Trip Home / workspace panel error). Wrap each call so a
-    // transient expire error is logged and skipped; the next read retries
-    // expire, and the pending filter below still drops any row that did expire.
-    try {
-      await expireTripChangeProposalCommand({ tripProjectId, proposalId: row.id, now });
-    } catch (error) {
-      console.error("Transient error expiring elapsed pending proposal on read; skipping.", {
-        tripProjectId,
-        proposalId: row.id,
-        error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
-      });
-    }
-  }
 }
 
 async function loadKnownItemsForSummary(tripProjectId: string, userId: string): Promise<KnownPlanItem[]> {
@@ -1027,30 +796,6 @@ async function loadKnownItemsForSummary(tripProjectId: string, userId: string): 
     transportDestinationLabel: row.transportDestinationLabel,
     accommodationPlaceAreaLabel: row.accommodationPlaceAreaLabel,
   }));
-}
-
-function normalizeRationale(value: unknown): { ok: true; value: string } | { ok: false } {
-  if (typeof value !== "string") return { ok: false };
-  const trimmed = value.trim();
-  if (!trimmed || trimmed.length > maxRationaleLength || /[\r\n]/.test(trimmed)) return { ok: false };
-  if (containsUnsafeContent(trimmed)) return { ok: false };
-  return { ok: true, value: trimmed };
-}
-
-function normalizeAlternatives(value: unknown): unknown[] | null | "invalid" {
-  if (value === null || value === undefined) return null;
-  if (!Array.isArray(value) || value.length > maxAlternatives) return "invalid";
-  const normalized: TripChangeProposalAlternativeSummary[] = [];
-  for (const entry of value) {
-    if (!isRecord(entry)) return "invalid";
-    const summary = entry.summary;
-    if (typeof summary !== "string") return "invalid";
-    const trimmed = summary.trim();
-    if (!trimmed || trimmed.length > maxAlternativeSummaryLength || /[\r\n]/.test(trimmed)) return "invalid";
-    if (containsUnsafeContent(trimmed)) return "invalid";
-    normalized.push({ summary: trimmed });
-  }
-  return normalized;
 }
 
 function toOwnedSummary(

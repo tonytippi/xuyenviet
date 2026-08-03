@@ -1,9 +1,10 @@
 import { eq } from "drizzle-orm";
 import postgres from "postgres";
-import { afterAll, beforeEach, describe, expect, test } from "vitest";
+import { afterAll, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { applyTripChangeProposal, dismissTripChangeProposal, executeAnnotationProposalAction, expireTripChangeProposal, validatePlanReferencesRules } from "@xuyenviet/database";
 import { auditEvents, conversations, messages, tripChangeProposals, tripPlanChangeHistory, tripPlanItems, tripProjectConstraints, tripProjects, users } from "@/db/schema";
+import { persistAiTripChangeProposalDraftInTransaction, validateProposalOperations } from "../packages/worker-domain/src/features/chat-trips/trip-change-proposals";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
 
@@ -41,6 +42,82 @@ async function holdProjectLock(projectId: string) {
 }
 
 describe("package proposal commands", () => {
+  test("rejects malformed proposal operations without throwing", () => {
+    const knownItems = [
+      { id: "leg", kind: "leg" as const, anchorRole: null, type: "transport" as const, state: "backup" as const, label: "Hà Nội đến Huế", notes: null, plannedAt: null, ordinal: 0, parentItemId: null, backupTargetItemId: "activity", transportOriginLabel: null, transportDestinationLabel: null, accommodationPlaceAreaLabel: null },
+      { id: "activity", kind: "activity" as const, anchorRole: null, type: "visit" as const, state: "planned" as const, label: "Đại Nội", notes: null, plannedAt: null, ordinal: 1, parentItemId: "leg", backupTargetItemId: null, transportOriginLabel: null, transportDestinationLabel: null, accommodationPlaceAreaLabel: null },
+    ];
+    const validate = (operations: unknown) => validateProposalOperations(operations, { knownItems, tripProjectId: "project" });
+
+    expect(validate([{ kind: "create-item", ordinal: 0, item: { kind: "invalid", state: "planned", label: "Điểm dừng" } }]).rejected).toHaveLength(1);
+    expect(validate([{ kind: "create-item", ordinal: 0, item: { kind: "leg", type: "transport", state: "invalid", label: "Điểm dừng" } }]).rejected).toHaveLength(1);
+    expect(validate([{ kind: "update-item", itemId: "leg", changes: { state: "invalid" } }]).rejected).toHaveLength(1);
+    expect(validate([{ kind: "update-item", itemId: "leg", changes: { notes: 123 } }]).rejected).toHaveLength(1);
+    expect(validate([{ kind: "update-item", itemId: "leg", changes: {} }]).rejected).toHaveLength(1);
+    expect(validate([{ kind: "update-item", itemId: "leg", changes: { label: "https://unsafe.example" } }]).rejected).toHaveLength(1);
+    expect(validate([{ kind: "update-item", itemId: "leg", changes: { notes: "Dòng một\nDòng hai" } }]).rejected).toHaveLength(1);
+    expect(validate([{ kind: "update-item", itemId: "leg", changes: { transportOriginLabel: "https://unsafe.example" } }]).rejected).toHaveLength(1);
+    expect(validate([{ kind: "update-item", itemId: "leg", changes: { transportDestinationLabel: "Dòng một\nDòng hai" } }]).rejected).toHaveLength(1);
+    expect(validate([{ kind: "update-item", itemId: "activity", changes: { accommodationPlaceAreaLabel: "https://unsafe.example" } }]).rejected).toHaveLength(1);
+    expect(() => validate([{ kind: "change-item-state", itemId: "other-project-item", state: "planned" }])).not.toThrow();
+    expect(validate([{ kind: "change-item-state", itemId: "other-project-item", state: "planned" }]).rejected).toHaveLength(1);
+    expect(validate([{ kind: "change-item-state", itemId: "leg", state: "backup", backupTargetItemId: "leg" }]).rejected).toHaveLength(1);
+    expect(validate([{ kind: "change-item-state", itemId: "leg", state: "backup", backupTargetItemId: "activity" }, { kind: "change-item-state", itemId: "activity", state: "backup", backupTargetItemId: "leg" }]).rejected).toHaveLength(1);
+    expect(validate([{ kind: "remove-item", itemId: "leg" }]).rejected).toHaveLength(1);
+  });
+
+  test("rejects operations and references targeting an item removed earlier while allowing valid removal", () => {
+    const knownItems = [
+      { id: "leg", kind: "leg" as const, anchorRole: null, type: "transport" as const, state: "planned" as const, label: "Hà Nội đến Huế", notes: null, plannedAt: null, ordinal: 0, parentItemId: null, backupTargetItemId: null, transportOriginLabel: null, transportDestinationLabel: null, accommodationPlaceAreaLabel: null },
+      { id: "activity", kind: "activity" as const, anchorRole: null, type: "visit" as const, state: "planned" as const, label: "Đại Nội", notes: null, plannedAt: null, ordinal: 1, parentItemId: "leg", backupTargetItemId: null, transportOriginLabel: null, transportDestinationLabel: null, accommodationPlaceAreaLabel: null },
+    ];
+    const validate = (operations: unknown) => validateProposalOperations(operations, { knownItems, tripProjectId: "project" });
+    const validateWithBackup = (operations: unknown) => validateProposalOperations(operations, {
+      knownItems: [{ ...knownItems[0], state: "backup", backupTargetItemId: "activity" }, knownItems[1]],
+      tripProjectId: "project",
+    });
+
+    expect(validate([{ kind: "remove-item", itemId: "activity" }, { kind: "update-item", itemId: "activity", changes: { label: "Đại Nội mới" } }]).rejected).toEqual([{ index: 1, reason: "item references unknown or cross-project item" }]);
+    expect(validate([{ kind: "remove-item", itemId: "activity" }, { kind: "reorder-item", itemId: "activity", ordinal: 0 }]).rejected).toEqual([{ index: 1, reason: "item references unknown or cross-project item" }]);
+    expect(validate([{ kind: "remove-item", itemId: "activity" }, { kind: "change-item-state", itemId: "activity", state: "confirmed" }]).rejected).toEqual([{ index: 1, reason: "item references unknown or cross-project item" }]);
+    expect(validate([{ kind: "remove-item", itemId: "activity" }, { kind: "change-item-state", itemId: "leg", state: "backup", backupTargetItemId: "activity" }]).rejected).toEqual([{ index: 1, reason: "change-item-state invalid" }]);
+    expect(validate([{ kind: "remove-item", itemId: "leg" }, { kind: "reorder-item", itemId: "activity", parentItemId: null, ordinal: 0 }]).rejected).toEqual([{ index: 0, reason: "remove-item references surviving item" }]);
+    expect(validateWithBackup([{ kind: "remove-item", itemId: "activity" }, { kind: "change-item-state", itemId: "leg", state: "planned" }]).rejected).toEqual([{ index: 0, reason: "remove-item references surviving item" }]);
+    expect(validateWithBackup([{ kind: "change-item-state", itemId: "leg", state: "planned" }, { kind: "remove-item", itemId: "activity" }])).toEqual({ valid: [{ kind: "change-item-state", itemId: "leg", state: "planned", backupTargetItemId: null }, { kind: "remove-item", itemId: "activity" }], rejected: [] });
+    expect(validate([{ kind: "change-item-state", itemId: "leg", state: "planned" }, { kind: "remove-item", itemId: "activity" }])).toEqual({ valid: [{ kind: "change-item-state", itemId: "leg", state: "planned", backupTargetItemId: null }, { kind: "remove-item", itemId: "activity" }], rejected: [] });
+  });
+
+  test("rejects removing a parent after creating its child", () => {
+    const knownItems = [
+      { id: "leg", kind: "leg" as const, anchorRole: null, type: "transport" as const, state: "planned" as const, label: "Hà Nội đến Huế", notes: null, plannedAt: null, ordinal: 0, parentItemId: null, backupTargetItemId: null, transportOriginLabel: null, transportDestinationLabel: null, accommodationPlaceAreaLabel: null },
+    ];
+
+    expect(validateProposalOperations([
+      { kind: "create-item", parentItemId: "leg", ordinal: 0, item: { kind: "activity", type: "visit", state: "planned", label: "Đại Nội" } },
+      { kind: "remove-item", itemId: "leg" },
+    ], { knownItems, tripProjectId: "project" }).rejected).toEqual([{ index: 1, reason: "remove-item references surviving item" }]);
+  });
+
+  test("excludes elapsed pending proposals from owner review without mutation", async () => {
+    await fixture();
+    await testDb.update(tripChangeProposals).set({ expiresAt: new Date(Date.now() - 1_000) }).where(eq(tripChangeProposals.id, "proposal"));
+    vi.resetModules();
+    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "owner", email: "owner@example.com" }) }));
+    const { getProposalForOwnerReview } = await import("@/features/chat-trips/trip-change-proposals");
+
+    await expect(getProposalForOwnerReview("project", "proposal")).resolves.toBeNull();
+    await expect(testDb.select({ status: tripChangeProposals.status, terminalTimestamp: tripChangeProposals.terminalTimestamp }).from(tripChangeProposals).where(eq(tripChangeProposals.id, "proposal"))).resolves.toEqual([{ status: "pending", terminalTimestamp: null }]);
+  });
+
+  test("rejects unsafe rationale and alternative summaries before proposal persistence", async () => {
+    await fixture();
+    const input = { tripProjectId: "project", expectedAggregateVersion: 1, operations: [{ kind: "change-item-state", itemId: "leg", state: "confirmed" }], rationale: "Xác nhận chặng" };
+
+    await expect(testDb.transaction((transaction) => persistAiTripChangeProposalDraftInTransaction(transaction, { userId: "owner" }, { ...input, rationale: "https://unsafe.example" }))).resolves.toEqual({ success: false, reason: "invalid" });
+    await expect(testDb.transaction((transaction) => persistAiTripChangeProposalDraftInTransaction(transaction, { userId: "owner" }, { ...input, alternatives: [{ summary: "Dòng một\nDòng hai" }] }))).resolves.toEqual({ success: false, reason: "invalid" });
+    await expect(testDb.select().from(tripChangeProposals)).resolves.toHaveLength(1);
+  });
+
   test("enforces owner isolation and atomically applies a pending proposal", async () => {
     await fixture();
     await expect(applyTripChangeProposal("other", { tripProjectId: "project", proposalId: "proposal" })).resolves.toEqual({ success: false, reason: "not_found" });

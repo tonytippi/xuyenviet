@@ -1,7 +1,7 @@
 import { asc, eq, sql } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { aiAskCommands, aiUsageEvents, answerUsefulnessFeedback, assistantResponseProvenance, assistantRetrievalDecisions, auditEvents, chatContext, conversations, messageImageAttachments, messages, tripAnswerContextSnapshots, tripChangeProposals, tripPlanItems, tripProjectConstraints, tripProjects, users, webSearchResults } from "@/db/schema";
+import { auditEvents, conversations, messages, tripAnswerContextSnapshots, tripChangeProposals, tripPlanItems, tripProjectConstraints, tripProjects, users } from "@/db/schema";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
 
@@ -17,54 +17,6 @@ describe("Trip project helpers", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
-  });
-
-  test("throws a safe error when unauthenticated create is attempted", async () => {
-    vi.doMock("@/server/auth", () => ({
-      getAuthenticatedSession: vi.fn().mockResolvedValue(null),
-    }));
-    const { createTripProject } = await import("@/features/chat-trips/trip-projects");
-
-    await expect(createTripProject({ title: "Đà Nẵng" })).rejects.toThrow("Authentication required");
-    await expect(testDb.select().from(tripProjects)).resolves.toHaveLength(0);
-  });
-
-  test("creates an owned trip project with trimmed fields and an audit event", async () => {
-    await createTestUser("user-1");
-    vi.doMock("@/server/auth", () => ({
-      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }),
-    }));
-    const { createTripProject } = await import("@/features/chat-trips/trip-projects");
-
-    const project = await createTripProject({
-      title: "  Đà Nẵng 7 ngày  ",
-      origin: " Hà Nội ",
-      destination: " Đà Nẵng ",
-      startDate: " 2026-08-01 ",
-      endDate: " ",
-      travelers: " 2 người lớn ",
-      notes: "  Đi chậm  ",
-    });
-    const audits = await testDb.select().from(auditEvents);
-
-    expect(project).toMatchObject({ title: "Đà Nẵng 7 ngày", origin: "Hà Nội", destination: "Đà Nẵng", startDate: "2026-08-01", endDate: null, travelers: "2 người lớn", notes: "Đi chậm" });
-    expect(audits).toHaveLength(1);
-    expect(audits[0]).toMatchObject({ actorUserId: "user-1", actorEmail: "user-1@example.com", operation: "create", targetType: "trip_project", targetId: project.id });
-    expect(audits[0].afterSummary).toContain("titleLength");
-    expect(audits[0].afterSummary).not.toContain("Đà Nẵng 7 ngày");
-    expect(audits[0].afterSummary).not.toContain("Hà Nội");
-    expect(audits[0].afterSummary).not.toContain("2026-08-01");
-  });
-
-  test("rejects blank project titles before insert", async () => {
-    await createTestUser("user-1");
-    vi.doMock("@/server/auth", () => ({
-      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }),
-    }));
-    const { createTripProject } = await import("@/features/chat-trips/trip-projects");
-
-    await expect(createTripProject({ title: "   " })).rejects.toThrow("Trip project title is required");
-    await expect(testDb.select().from(tripProjects)).resolves.toHaveLength(0);
   });
 
   test("lists and reads only projects owned by the authenticated user", async () => {
@@ -108,37 +60,6 @@ describe("Trip project helpers", () => {
     expect(summary?.historicChats).toEqual([]);
   });
 
-  test("resolves one deterministic primary and advances fences only for the primary-link mutation", async () => {
-    await createTestUser("user-1");
-    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Hà Giang" }).returning();
-    await testDb.insert(conversations).values({ id: "older", userId: "user-1", tripProjectId: project.id, updatedAt: new Date("2026-07-01T00:00:00.000Z") });
-    await testDb.insert(conversations).values({ id: "newer", userId: "user-1", tripProjectId: project.id, updatedAt: new Date("2026-07-02T00:00:00.000Z") });
-    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }) }));
-    const { resolveOwnedPrimaryConversation } = await import("@/features/chat-trips/trip-projects");
-
-    await expect(resolveOwnedPrimaryConversation(project.id)).resolves.toMatchObject({ id: "newer" });
-    await expect(resolveOwnedPrimaryConversation(project.id)).resolves.toMatchObject({ id: "newer" });
-    const [savedProject] = await testDb.select().from(tripProjects).where(eq(tripProjects.id, project.id));
-    const [savedPrimary] = await testDb.select().from(conversations).where(eq(conversations.id, "newer"));
-    expect(savedProject).toMatchObject({ primaryConversationId: "newer", aggregateVersion: 2 });
-    expect(savedPrimary.lifecycleVersion).toBe(2);
-  });
-
-  test("serializes concurrent first primary resolution without duplicate conversations", async () => {
-    await createTestUser("user-1");
-    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Concurrent Huế" }).returning();
-    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }) }));
-    const { resolveOwnedPrimaryConversation } = await import("@/features/chat-trips/trip-projects");
-
-    const resolved = await Promise.all(Array.from({ length: 8 }, () => resolveOwnedPrimaryConversation(project.id)));
-    const rows = await testDb.select().from(conversations).where(eq(conversations.tripProjectId, project.id));
-    const [savedProject] = await testDb.select().from(tripProjects).where(eq(tripProjects.id, project.id));
-
-    expect(new Set(resolved.map((conversation) => conversation?.id)).size).toBe(1);
-    expect(rows).toHaveLength(1);
-    expect(savedProject).toMatchObject({ primaryConversationId: rows[0].id, aggregateVersion: 2 });
-  });
-
   test("database pointer rejects cross-project and cross-owner conversations", async () => {
     await createTestUser("user-1");
     await createTestUser("user-2");
@@ -174,197 +95,6 @@ describe("Trip project helpers", () => {
 
     expect(savedConversation).toMatchObject({ id: conversation.id, userId: "user-1", tripProjectId: null });
     await expect(testDb.select().from(tripAnswerContextSnapshots)).resolves.toEqual([]);
-  });
-
-  test("returns unauthenticated and does not delete a trip project without a session", async () => {
-    await createTestUser("user-1");
-    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế" }).returning({ id: tripProjects.id });
-    vi.doMock("@/server/auth", () => ({
-      getAuthenticatedSession: vi.fn().mockResolvedValue(null),
-    }));
-    const { deleteOwnedTripProject } = await import("@/features/chat-trips/trip-projects");
-
-    await expect(deleteOwnedTripProject(project.id)).resolves.toEqual({ success: false, reason: "unauthenticated" });
-    await expect(testDb.select().from(tripProjects)).resolves.toHaveLength(1);
-    await expect(testDb.select().from(auditEvents)).resolves.toHaveLength(0);
-  });
-
-  test("returns not_found and does not delete another user's trip project", async () => {
-    await createTestUser("user-1");
-    await createTestUser("user-2");
-    const [project] = await testDb.insert(tripProjects).values({ userId: "user-2", title: "Riêng tư user-2" }).returning({ id: tripProjects.id });
-    vi.doMock("@/server/auth", () => ({
-      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }),
-    }));
-    const { deleteOwnedTripProject } = await import("@/features/chat-trips/trip-projects");
-
-    await expect(deleteOwnedTripProject(project.id)).resolves.toEqual({ success: false, reason: "not_found" });
-    await expect(testDb.select().from(tripProjects)).resolves.toHaveLength(1);
-    await expect(testDb.select().from(auditEvents)).resolves.toHaveLength(0);
-  });
-
-  test("deletes an owned trip project, its linked chats, and project context with an auditable summary", async () => {
-    await createTestUser("user-1");
-    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Đà Nẵng bí mật", notes: "Không ghi vào audit" }).returning({ id: tripProjects.id });
-    const [conversation] = await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id }).returning({ id: conversations.id });
-    const [message] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "user", content: "Gia đình thích biển" }).returning({ id: messages.id });
-    const [assistantMessage] = await testDb.insert(messages).values({ conversationId: conversation.id, userId: "user-1", role: "assistant", content: "Nên đi biển." }).returning({ id: messages.id });
-    await testDb.insert(messageImageAttachments).values({ conversationId: conversation.id, messageId: message.id, userId: "user-1", mimeType: "image/png", byteSize: 12 });
-    await testDb.insert(aiUsageEvents).values({ initiatedByUserId: "user-1", executorSystem: "system-ai-orchestration", tripProjectId: project.id, conversationId: conversation.id, userMessageId: message.id, assistantMessageId: assistantMessage.id, purpose: "ai_ask_initial_answer", provider: "ai_gateway", model: "test", promptVersion: "test", status: "success" });
-    await testDb.insert(assistantRetrievalDecisions).values({ userId: "user-1", conversationId: conversation.id, userMessageId: message.id, assistantMessageId: assistantMessage.id, approvedKnowledgeCandidateCount: 1, approvedKnowledgeSelectedCount: 1, approvedKnowledgeTargetCount: 1, approvedKnowledgeRelevanceThreshold: 1, broadPlanningQuestion: false, freshnessRequired: false, conflictDetected: false, webSearchTriggered: false, webSearchTriggerReasons: [], generalReasoningUsed: true, warnings: [] });
-    await testDb.insert(assistantResponseProvenance).values({ userId: "user-1", conversationId: conversation.id, userMessageId: message.id, assistantMessageId: assistantMessage.id, sourceCategory: "general", rank: 1, verificationStatus: "unverified", usedInPrompt: true, citedInAnswer: false, sourceSnapshot: {} });
-    await testDb.insert(answerUsefulnessFeedback).values({ userId: "user-1", conversationId: conversation.id, assistantMessageId: assistantMessage.id, rating: "useful" });
-    await testDb.insert(webSearchResults).values({ userId: "user-1", conversationId: conversation.id, userMessageId: message.id, query: "Đà Nẵng", title: "Nguồn", url: "https://example.com", snippet: "Thông tin", provider: "test", checkedAt: new Date(), sourceType: "general", confidence: "unverified", triggerReason: "no_approved_knowledge", rank: 1 });
-    await testDb.insert(chatContext).values({
-      userId: "user-1",
-      conversationId: conversation.id,
-      tripProjectId: project.id,
-      sourceMessageId: message.id,
-      field: "destination",
-      scope: "trip_project",
-      value: "Đà Nẵng bí mật",
-      confidence: 90,
-    });
-    const [snapshot] = await testDb.insert(tripAnswerContextSnapshots).values({
-      userId: "user-1",
-      conversationId: conversation.id,
-      assistantMessageId: assistantMessage.id,
-      tripProjectId: project.id,
-      contextVersion: 1,
-      aggregateVersion: 1,
-      serialization: JSON.stringify({ primaryConversationId: conversation.id }),
-      promptDigest: "a".repeat(64),
-    }).returning({ id: tripAnswerContextSnapshots.id });
-    await testDb.insert(aiAskCommands).values({
-      userId: "user-1",
-      scopeKind: "trip_project",
-      scopeId: project.id,
-      idempotencyKey: "project_delete_snapshot",
-      requestDigest: "b".repeat(64),
-      normalizedQuestion: "Xóa dự án",
-      selectedScopeDigest: "c".repeat(64),
-      status: "completed",
-      conversationId: conversation.id,
-      tripProjectId: project.id,
-      assistantMessageId: assistantMessage.id,
-      tripAnswerContextSnapshotId: snapshot.id,
-      terminalAt: new Date(),
-      terminalResult: { type: "done" },
-      expiresAt: new Date(Date.now() + 60_000),
-    });
-    vi.doMock("@/server/auth", () => ({
-      getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }),
-    }));
-    const { deleteOwnedTripProject } = await import("@/features/chat-trips/trip-projects");
-
-    await expect(deleteOwnedTripProject(project.id)).resolves.toEqual({ success: true });
-    await expect(testDb.select().from(tripProjects)).resolves.toHaveLength(0);
-    await expect(testDb.select().from(chatContext)).resolves.toHaveLength(0);
-    await expect(testDb.select().from(tripAnswerContextSnapshots)).resolves.toHaveLength(0);
-    await expect(testDb.select({ status: aiAskCommands.status, tripAnswerContextSnapshotId: aiAskCommands.tripAnswerContextSnapshotId }).from(aiAskCommands)).resolves.toEqual([{ status: "discarded", tripAnswerContextSnapshotId: null }]);
-    const savedConversations = await testDb.select().from(conversations).where(eq(conversations.id, conversation.id));
-    const savedMessages = await testDb.select().from(messages).where(eq(messages.conversationId, conversation.id));
-    const attachments = await testDb.select().from(messageImageAttachments).where(eq(messageImageAttachments.conversationId, conversation.id));
-    const retrieval = await testDb.select().from(assistantRetrievalDecisions).where(eq(assistantRetrievalDecisions.conversationId, conversation.id));
-    const provenance = await testDb.select().from(assistantResponseProvenance).where(eq(assistantResponseProvenance.conversationId, conversation.id));
-    const feedback = await testDb.select().from(answerUsefulnessFeedback).where(eq(answerUsefulnessFeedback.conversationId, conversation.id));
-    const searchRows = await testDb.select().from(webSearchResults).where(eq(webSearchResults.conversationId, conversation.id));
-    const [usage] = await testDb.select().from(aiUsageEvents);
-    const [audit] = await testDb.select().from(auditEvents);
-
-    expect(savedConversations).toEqual([]);
-    expect(savedMessages).toEqual([]);
-    expect(attachments).toEqual([]);
-    expect(retrieval).toEqual([]);
-    expect(provenance).toEqual([]);
-    expect(feedback).toEqual([]);
-    expect(searchRows).toEqual([]);
-    expect(usage).toMatchObject({ tripProjectId: null, conversationId: null, userMessageId: null, assistantMessageId: null });
-    expect(audit).toMatchObject({ actorUserId: "user-1", operation: "delete", targetType: "trip_project", targetId: project.id });
-    expect(audit.beforeSummary).toContain('"linkedConversationCount":1');
-    expect(audit.beforeSummary).toContain('"chatContextCount":1');
-    expect(audit.afterSummary).toContain("linkedConversationsDeleted");
-    expect(audit.beforeSummary).not.toContain("Đà Nẵng bí mật");
-    expect(audit.beforeSummary).not.toContain("Gia đình thích biển");
-  });
-
-  test("creates versioned plan items only for the authenticated owner and writes content-free audits", async () => {
-    await createTestUser("user-1");
-    await createTestUser("user-2");
-    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Quảng Bình" }).returning({ id: tripProjects.id });
-    const [otherProject] = await testDb.insert(tripProjects).values({ userId: "user-2", title: "Riêng tư" }).returning({ id: tripProjects.id });
-    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }) }));
-    const { createInternalTripPlanItem } = await import("@/features/chat-trips/trip-projects");
-
-    const result = await createInternalTripPlanItem(project.id, 1, { kind: "leg", type: "transport", state: "planned", label: "  Chạy xe bí mật  ", ordinal: 0, transportOriginLabel: "Hà Nội", transportDestinationLabel: "Phong Nha" });
-    const denied = await createInternalTripPlanItem(otherProject.id, 1, { kind: "leg", type: "transport", state: "planned", label: "Không được tạo", ordinal: 0 });
-    const [savedProject] = await testDb.select().from(tripProjects).where(eq(tripProjects.id, project.id));
-    const [item] = await testDb.select().from(tripPlanItems);
-    const audits = await testDb.select().from(auditEvents).where(eq(auditEvents.targetType, "trip_plan_item"));
-
-    expect(result).toMatchObject({ success: true, aggregateVersion: 2 });
-    expect(denied).toEqual({ success: false, reason: "not_found" });
-    expect(savedProject.aggregateVersion).toBe(2);
-    expect(item).toMatchObject({ version: 1, label: "Chạy xe bí mật", userId: "user-1" });
-    expect(audits).toHaveLength(1);
-    expect(audits[0].afterSummary).not.toContain("bí mật");
-    expect(audits[0]).toMatchObject({ actorUserId: "user-1", operation: "create" });
-  });
-
-  test("rejects stale, invalid, and cross-project aggregate writes without partial state", async () => {
-    await createTestUser("user-1");
-    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Hà Giang" }).returning({ id: tripProjects.id });
-    const [other] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Sa Pa" }).returning({ id: tripProjects.id });
-    const [otherItem] = await testDb.insert(tripPlanItems).values({ tripProjectId: other.id, userId: "user-1", kind: "leg", type: "transport", state: "idea", label: "Khác", ordinal: 0 }).returning({ id: tripPlanItems.id });
-    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }) }));
-    const { createInternalTripPlanItem } = await import("@/features/chat-trips/trip-projects");
-
-    await expect(createInternalTripPlanItem(project.id, 2, { kind: "anchor", anchorRole: "origin", state: "idea", label: "Hà Nội", ordinal: 0 })).resolves.toEqual({ success: false, reason: "refresh_required" });
-    await expect(createInternalTripPlanItem(project.id, 1, { kind: "activity", type: "visit", state: "idea", label: "Sai cha", ordinal: 0, parentItemId: otherItem.id })).resolves.toEqual({ success: false, reason: "invalid" });
-    await expect(testDb.select().from(tripPlanItems).where(eq(tripPlanItems.tripProjectId, project.id))).resolves.toHaveLength(0);
-    await expect(testDb.select().from(auditEvents).where(eq(auditEvents.targetType, "trip_plan_item"))).resolves.toHaveLength(0);
-  });
-
-  test("persists one versioned allowlisted constraints record and cascades structured state on project deletion", async () => {
-    await createTestUser("user-1");
-    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Đà Lạt" }).returning({ id: tripProjects.id });
-    await testDb.insert(tripPlanItems).values({ tripProjectId: project.id, userId: "user-1", kind: "anchor", anchorRole: "origin", state: "confirmed", label: "Hà Nội", ordinal: 0 });
-    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }) }));
-    const { deleteOwnedTripProject, upsertInternalTripProjectConstraints } = await import("@/features/chat-trips/trip-projects");
-
-    await expect(upsertInternalTripProjectConstraints(project.id, 1, null, { adultCount: 2, childCount: 1, vehicleType: "ev", evChargingNeed: "required", budgetCurrency: "VND", budgetMinVnd: 1_000_000, budgetMaxVnd: 2_000_000, preferenceTags: ["nature"] })).resolves.toMatchObject({ success: true, aggregateVersion: 2 });
-    await expect(upsertInternalTripProjectConstraints(project.id, 2, 1, { adultCount: 2, unknown: "sensitive" } as never)).resolves.toEqual({ success: false, reason: "invalid" });
-    const [constraints] = await testDb.select().from(tripProjectConstraints);
-    expect(constraints).toMatchObject({ version: 1, adultCount: 2, evChargingNeed: "required" });
-    await expect(deleteOwnedTripProject(project.id)).resolves.toEqual({ success: true });
-    await expect(testDb.select().from(tripPlanItems)).resolves.toHaveLength(0);
-    await expect(testDb.select().from(tripProjectConstraints)).resolves.toHaveLength(0);
-  });
-
-  test("rejects malformed or sensitive constraints before creating rows, audits, or partial updates", async () => {
-    await createTestUser("user-1");
-    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Quy Nhơn" }).returning({ id: tripProjects.id });
-    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }) }));
-    const { upsertInternalTripProjectConstraints } = await import("@/features/chat-trips/trip-projects");
-
-    await expect(upsertInternalTripProjectConstraints(project.id, 1, null, { adultCount: 2, children: false } as never)).resolves.toEqual({ success: false, reason: "invalid" });
-    await expect(upsertInternalTripProjectConstraints(project.id, 1, null, { adultCount: 2, children: [{ ageMin: 4, ageMax: 6, comfortTags: [], preferenceTags: [], fullName: "Sensitive child" }] } as never)).resolves.toEqual({ success: false, reason: "invalid" });
-    await expect(testDb.select().from(tripProjectConstraints)).resolves.toHaveLength(0);
-    await expect(testDb.select().from(auditEvents).where(eq(auditEvents.targetType, "trip_project_constraints"))).resolves.toHaveLength(0);
-
-    await expect(upsertInternalTripProjectConstraints(project.id, 1, null, { adultCount: 2, preferenceTags: ["nature"] })).resolves.toMatchObject({ success: true, aggregateVersion: 2 });
-    const [before] = await testDb.select().from(tripProjectConstraints);
-    const [beforeProject] = await testDb.select().from(tripProjects).where(eq(tripProjects.id, project.id));
-    const auditsBefore = await testDb.select().from(auditEvents).where(eq(auditEvents.targetType, "trip_project_constraints"));
-
-    await expect(upsertInternalTripProjectConstraints(project.id, 2, 1, { adultCount: 3, vehicleType: "truck" } as never)).resolves.toEqual({ success: false, reason: "invalid" });
-    const [after] = await testDb.select().from(tripProjectConstraints);
-    const [afterProject] = await testDb.select().from(tripProjects).where(eq(tripProjects.id, project.id));
-    const auditsAfter = await testDb.select().from(auditEvents).where(eq(auditEvents.targetType, "trip_project_constraints"));
-
-    expect(after).toMatchObject({ tripProjectId: before.tripProjectId, userId: before.userId, version: 1, adultCount: 2, preferenceTags: ["nature"] });
-    expect(afterProject.aggregateVersion).toBe(beforeProject.aggregateVersion);
-    expect(auditsAfter).toHaveLength(auditsBefore.length);
   });
 
   test("enforces aggregate database checks, owner FKs, and null-inclusive ordinal uniqueness", async () => {
@@ -413,32 +143,6 @@ describe("Trip project helpers", () => {
     await expect(testDb.select().from(tripPlanItems).where(eq(tripPlanItems.id, "unresolved-activity"))).resolves.toHaveLength(0);
   });
 
-  test("updates, reorders, and deletes plan items with row and aggregate version fences", async () => {
-    await createTestUser("user-1");
-    const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Ninh Bình" }).returning({ id: tripProjects.id });
-    const [first] = await testDb.insert(tripPlanItems).values({ tripProjectId: project.id, userId: "user-1", kind: "leg", type: "transport", state: "idea", label: "Xe", ordinal: 0 }).returning();
-    const [second] = await testDb.insert(tripPlanItems).values({ tripProjectId: project.id, userId: "user-1", kind: "leg", type: "visit", state: "idea", label: "Thăm", ordinal: 1 }).returning();
-    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }) }));
-    const { deleteInternalTripPlanItem, reorderInternalTripPlanItem, updateInternalTripPlanItem } = await import("@/features/chat-trips/trip-projects");
-
-    await expect(updateInternalTripPlanItem(project.id, 1, first.id, 1, { kind: "leg", type: "transport", state: "confirmed", label: "  Xe mới  ", ordinal: 0, transportOriginLabel: "Hà Nội", transportDestinationLabel: "Ninh Bình" })).resolves.toMatchObject({ success: true, aggregateVersion: 2 });
-    await expect(updateInternalTripPlanItem(project.id, 2, first.id, 1, { kind: "leg", type: "transport", state: "idea", label: "Stale", ordinal: 0 })).resolves.toEqual({ success: false, reason: "refresh_required" });
-    await expect(reorderInternalTripPlanItem(project.id, 2, { itemId: second.id, expectedItemVersion: 1, ordinal: 0, expectedChangedItemVersions: { [first.id]: 2, [second.id]: 1 } })).resolves.toMatchObject({ success: true, aggregateVersion: 3 });
-    const rows = await testDb.select().from(tripPlanItems).where(eq(tripPlanItems.tripProjectId, project.id));
-    const savedFirst = rows.find((row) => row.id === first.id)!;
-    const savedSecond = rows.find((row) => row.id === second.id)!;
-    expect([savedFirst.ordinal, savedSecond.ordinal].sort()).toEqual([0, 1]);
-    expect(savedFirst.version).toBe(3);
-    expect(savedSecond.version).toBe(2);
-    await expect(deleteInternalTripPlanItem(project.id, 3, second.id, 1)).resolves.toEqual({ success: false, reason: "refresh_required" });
-    await expect(deleteInternalTripPlanItem(project.id, 3, second.id, 2)).resolves.toMatchObject({ success: true, aggregateVersion: 4 });
-    const [savedProject] = await testDb.select().from(tripProjects).where(eq(tripProjects.id, project.id));
-    const mutationAudits = await testDb.select().from(auditEvents);
-    expect(savedProject.aggregateVersion).toBe(4);
-    expect(mutationAudits).toHaveLength(3);
-    expect(mutationAudits.every((audit) => !audit.afterSummary?.includes("Xe mới"))).toBe(true);
-  });
-
   test("getOwnedTripProjectSummary returns the workspace read model with plan items, constraints, and Trip Home focus for the owner", async () => {
     await createTestUser("user-1");
     const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế", origin: "Hà Nội", destination: "Huế", startDate: "2026-08-01", endDate: "2026-08-05", travelers: "2 người lớn" }).returning({ id: tripProjects.id });
@@ -472,8 +176,7 @@ describe("Trip project helpers", () => {
     expect(summary?.planItems.map((item) => item.label)).toEqual(["Hà Nội", "Chạy xe Hà Nội - Huế", "Khách sạn Huế"]);
     expect(summary?.constraints).toMatchObject({ adultCount: 2, childCount: 1, vehicleType: "car", drivingToleranceHours: 4, budgetCurrency: "VND", budgetMinVnd: 5_000_000, budgetMaxVnd: 10_000_000, preferenceTags: ["Thiên nhiên", "Văn hoá"] });
     expect(summary?.tripHome.kind).toBe("confirmed-item-gap");
-    // Resolving the initially unlinked primary is the one intentional aggregate mutation.
-    expect(savedProject.aggregateVersion).toBe(2);
+    expect(savedProject.aggregateVersion).toBe(1);
     expect(savedPlanItems.every((item) => item.version === 1)).toBe(true);
     expect(savedConstraints.version).toBe(1);
   });
@@ -524,9 +227,7 @@ describe("Trip project helpers", () => {
     const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế" }).returning({ id: tripProjects.id });
     await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id });
     vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }) }));
-    const { getOwnedTripProjectSummary, resolveOwnedPrimaryConversation } = await import("@/features/chat-trips/trip-projects");
-
-    await resolveOwnedPrimaryConversation(project.id);
+    const { getOwnedTripProjectSummary } = await import("@/features/chat-trips/trip-projects");
     const auditsBefore = await testDb.select().from(auditEvents);
     const [projectBefore] = await testDb.select().from(tripProjects).where(eq(tripProjects.id, project.id));
     await getOwnedTripProjectSummary(project.id);
@@ -535,7 +236,7 @@ describe("Trip project helpers", () => {
     const [savedProject] = await testDb.select().from(tripProjects).where(eq(tripProjects.id, project.id));
 
     expect(auditsAfter).toHaveLength(auditsBefore.length);
-    expect(projectBefore.aggregateVersion).toBe(2);
+    expect(projectBefore.aggregateVersion).toBe(1);
     expect(savedProject.aggregateVersion).toBe(projectBefore.aggregateVersion);
   });
 
@@ -566,360 +267,29 @@ describe("Trip project helpers", () => {
     expect(summary?.tripHome.kind).toBe("pending-proposal-with-expiry");
   });
 
-  test("deleting a trip project cascades to its proposals and the audit beforeSummary reports the proposal count", async () => {
+  test("getOwnedTripProjectSummary excludes elapsed pending proposals without mutating them", async () => {
     await createTestUser("user-1");
     const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế" }).returning({ id: tripProjects.id });
     await testDb.insert(conversations).values({ userId: "user-1", tripProjectId: project.id });
-    await testDb.insert(tripPlanItems).values({ id: "leg-1", tripProjectId: project.id, userId: "user-1", kind: "leg", type: "transport", state: "idea", label: "Chạy xe", ordinal: 0, version: 1 });
-    await testDb.insert(tripChangeProposals).values({
+    const [proposal] = await testDb.insert(tripChangeProposals).values({
       tripProjectId: project.id,
       userId: "user-1",
       creatorClass: "ai_orchestration",
       status: "pending",
-      rationale: "Đề xuất sẽ xoá theo dự án.",
-      operations: [{ kind: "change-item-state", itemId: "leg-1", state: "confirmed" }],
+      rationale: "Đề xuất đã quá hạn.",
+      operations: [{ kind: "upsert-constraints", constraints: { adultCount: 2 } }],
       expectedAggregateVersion: 1,
-    });
+      expiresAt: new Date(Date.now() - 1_000),
+    }).returning({ id: tripChangeProposals.id });
     vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "user-1", email: "user-1@example.com" }) }));
-    const { deleteOwnedTripProject } = await import("@/features/chat-trips/trip-projects");
+    const { getOwnedTripProjectSummary } = await import("@/features/chat-trips/trip-projects");
 
-    await expect(deleteOwnedTripProject(project.id)).resolves.toEqual({ success: true });
-    await expect(testDb.select().from(tripChangeProposals)).resolves.toHaveLength(0);
-    const [audit] = await testDb.select().from(auditEvents).where(eq(auditEvents.targetType, "trip_project"));
-    expect(audit.beforeSummary).toContain('"proposalCount":1');
-  });
-});
+    const summary = await getOwnedTripProjectSummary(project.id);
+    const [savedProposal] = await testDb.select({ status: tripChangeProposals.status, terminalTimestamp: tripChangeProposals.terminalTimestamp }).from(tripChangeProposals).where(eq(tripChangeProposals.id, proposal.id));
 
-describe("Story 7.5 *InTransaction helpers and changeInternalTripPlanItemStateInTransaction", () => {
-  beforeEach(() => {
-    vi.resetModules();
-    vi.clearAllMocks();
+    expect(summary?.pendingProposals).toEqual([]);
+    expect(summary?.tripHome.kind).toBe("preparation");
+    expect(savedProposal).toEqual({ status: "pending", terminalTimestamp: null });
   });
 
-  test("changeInternalTripPlanItemStateInTransaction advances item + aggregate version and writes only the state field", async () => {
-    await createTestUser("state-user-1");
-    const [project] = await testDb.insert(tripProjects).values({ userId: "state-user-1", title: "Huế", aggregateVersion: 1 }).returning({ id: tripProjects.id });
-    const [leg] = await testDb.insert(tripPlanItems).values({ tripProjectId: project.id, userId: "state-user-1", kind: "leg", type: "transport", state: "idea", label: "Chạy xe", ordinal: 0, transportOriginLabel: "Hà Nội", transportDestinationLabel: "Huế" }).returning();
-    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "state-user-1", email: "state-user-1@example.com" }) }));
-    const { getDb } = await import("@/db/client");
-    const { changeInternalTripPlanItemStateInTransaction } = await import("@/features/chat-trips/trip-projects");
-
-    const result = await getDb().transaction((transaction) => changeInternalTripPlanItemStateInTransaction(transaction, { userId: "state-user-1", email: "state-user-1@example.com" }, project.id, 1, leg.id, 1, "confirmed", null));
-
-    expect(result).toMatchObject({ success: true, aggregateVersion: 2 });
-    const [savedItem] = await testDb.select().from(tripPlanItems).where(eq(tripPlanItems.id, leg.id));
-    const [savedProject] = await testDb.select().from(tripProjects).where(eq(tripProjects.id, project.id));
-    expect(savedItem.state).toBe("confirmed");
-    expect(savedItem.version).toBe(2);
-    expect(savedProject.aggregateVersion).toBe(2);
-    // A state-only change must not touch label/notes/ordinal/transport fields.
-    expect(savedItem.label).toBe("Chạy xe");
-    expect(savedItem.ordinal).toBe(0);
-    expect(savedItem.transportOriginLabel).toBe("Hà Nội");
-    expect(savedItem.transportDestinationLabel).toBe("Huế");
-  });
-
-  test("changeInternalTripPlanItemStateInTransaction validates backup-state/backup-target consistency and rejects a cycle", async () => {
-    await createTestUser("state-user-2");
-    const [project] = await testDb.insert(tripProjects).values({ userId: "state-user-2", title: "Huế", aggregateVersion: 1 }).returning({ id: tripProjects.id });
-    const [legA] = await testDb.insert(tripPlanItems).values({ id: "state-leg-a", tripProjectId: project.id, userId: "state-user-2", kind: "leg", type: "transport", state: "planned", label: "A", ordinal: 0 }).returning();
-    const [legB] = await testDb.insert(tripPlanItems).values({ id: "state-leg-b", tripProjectId: project.id, userId: "state-user-2", kind: "leg", type: "transport", state: "planned", label: "B", ordinal: 1 }).returning();
-    const { getDb } = await import("@/db/client");
-    const { changeInternalTripPlanItemStateInTransaction } = await import("@/features/chat-trips/trip-projects");
-
-    // Setting state to backup requires a backup target.
-    const noTarget = await getDb().transaction((transaction) => changeInternalTripPlanItemStateInTransaction(transaction, { userId: "state-user-2", email: "state-user-2@example.com" }, project.id, 1, legA.id, 1, "backup", null));
-    expect(noTarget).toEqual({ success: false, reason: "invalid" });
-
-    // A valid backup target succeeds (aggregate is still 1 because the noTarget
-    // call returned invalid before locking/advancing).
-    const valid = await getDb().transaction((transaction) => changeInternalTripPlanItemStateInTransaction(transaction, { userId: "state-user-2", email: "state-user-2@example.com" }, project.id, 1, legA.id, 1, "backup", legB.id));
-    expect(valid).toMatchObject({ success: true, aggregateVersion: 2 });
-
-    // A backup target pointing at the item itself is rejected (no self-cycle).
-    const selfCycle = await getDb().transaction((transaction) => changeInternalTripPlanItemStateInTransaction(transaction, { userId: "state-user-2", email: "state-user-2@example.com" }, project.id, 2, legB.id, 1, "backup", legB.id));
-    expect(selfCycle).toEqual({ success: false, reason: "invalid" });
-  });
-
-  test("the public *InternalTripPlanItem wrappers still behave identically after the *InTransaction refactor", async () => {
-    await createTestUser("refactor-user-1");
-    const [project] = await testDb.insert(tripProjects).values({ userId: "refactor-user-1", title: "Ninh Bình", aggregateVersion: 1 }).returning({ id: tripProjects.id });
-    const [first] = await testDb.insert(tripPlanItems).values({ tripProjectId: project.id, userId: "refactor-user-1", kind: "leg", type: "transport", state: "idea", label: "Xe", ordinal: 0 }).returning();
-    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "refactor-user-1", email: "refactor-user-1@example.com" }) }));
-    const { createInternalTripPlanItem, updateInternalTripPlanItem, deleteInternalTripPlanItem } = await import("@/features/chat-trips/trip-projects");
-
-    // create advances the aggregate and returns the new item id.
-    const created = await createInternalTripPlanItem(project.id, 1, { kind: "leg", type: "visit", state: "idea", label: "Thăm", ordinal: 1 });
-    expect(created).toMatchObject({ success: true, aggregateVersion: 2 });
-
-    // update with the correct fence succeeds; stale fence fails.
-    const updated = await updateInternalTripPlanItem(project.id, 2, first.id, 1, { kind: "leg", type: "transport", state: "confirmed", label: "Xe mới", ordinal: 0 });
-    expect(updated).toMatchObject({ success: true, aggregateVersion: 3 });
-    const stale = await updateInternalTripPlanItem(project.id, 3, first.id, 1, { kind: "leg", type: "transport", state: "idea", label: "Stale", ordinal: 0 });
-    expect(stale).toEqual({ success: false, reason: "refresh_required" });
-
-    // delete with the correct fence succeeds.
-    const deleted = await deleteInternalTripPlanItem(project.id, 3, first.id, 2);
-    expect(deleted).toMatchObject({ success: true, aggregateVersion: 4 });
-    const [savedProject] = await testDb.select().from(tripProjects).where(eq(tripProjects.id, project.id));
-    expect(savedProject.aggregateVersion).toBe(4);
-  });
-});
-
-// Story 7.6 AC1 Task 3+4: Invalid item relationships, stale versions on all
-// mutating commands, backup references/cycles, and ordering-scope uniqueness.
-// These tests fill gaps not already covered by the 7.1–7.5 suites.
-describe("Story 7.6 AC1 invalid relationships, stale versions, backup refs, ordering", () => {
-  beforeEach(() => {
-    vi.resetModules();
-    vi.clearAllMocks();
-  });
-
-  test("3.1 createInternalTripPlanItem rejects cross-project parent, nonexistent parent, and a real existing non-leg parent for an activity", async () => {
-    await createTestUser("safety-rel-user");
-    const [projectA] = await testDb.insert(tripProjects).values({ userId: "safety-rel-user", title: "Huế", aggregateVersion: 1 }).returning({ id: tripProjects.id });
-    const [projectB] = await testDb.insert(tripProjects).values({ userId: "safety-rel-user", title: "Đà Nẵng", aggregateVersion: 1 }).returning({ id: tripProjects.id });
-    await testDb.insert(tripPlanItems).values({ id: "rel-leg-a", tripProjectId: projectA.id, userId: "safety-rel-user", kind: "leg", type: "transport", state: "planned", label: "Chạy xe A", ordinal: 0 });
-    const [legB] = await testDb.insert(tripPlanItems).values({ id: "rel-leg-b", tripProjectId: projectB.id, userId: "safety-rel-user", kind: "leg", type: "transport", state: "planned", label: "Chạy xe B", ordinal: 0 }).returning();
-    // F3: a real existing NON-LEG parent (an anchor) in projectA. This exercises
-    // the `parent.kind !== "leg"` branch (plan-references.ts:43), not the
-    // `!parent` branch (:41) that a nonexistent id hits.
-    const [anchorA] = await testDb.insert(tripPlanItems).values({ id: "rel-anchor-a", tripProjectId: projectA.id, userId: "safety-rel-user", kind: "anchor", anchorRole: "origin", type: null, state: "idea", label: "Hà Nội", ordinal: 1 }).returning();
-    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "safety-rel-user", email: "safety-rel-user@example.com" }) }));
-    const { createInternalTripPlanItem } = await import("@/features/chat-trips/trip-projects");
-
-    // Cross-project parent: activity in projectA with parentItemId from projectB.
-    await expect(createInternalTripPlanItem(projectA.id, 1, { kind: "activity", type: "visit", state: "idea", label: "Sai cha", ordinal: 2, parentItemId: legB.id })).resolves.toEqual({ success: false, reason: "invalid" });
-    // Nonexistent parent: hits the `!parent` branch (plan-references.ts:41).
-    await expect(createInternalTripPlanItem(projectA.id, 1, { kind: "activity", type: "visit", state: "idea", label: "Sai cha", ordinal: 3, parentItemId: "nonexistent" })).resolves.toEqual({ success: false, reason: "invalid" });
-    // F3: real existing non-leg parent (anchor) — hits the `parent.kind !== "leg"` branch (:43).
-    await expect(createInternalTripPlanItem(projectA.id, 1, { kind: "activity", type: "visit", state: "idea", label: "Sai cha", ordinal: 4, parentItemId: anchorA.id })).resolves.toEqual({ success: false, reason: "invalid" });
-    // No partial state: only the seeded leg and anchor exist in projectA.
-    await expect(testDb.select().from(tripPlanItems).where(eq(tripPlanItems.tripProjectId, projectA.id))).resolves.toHaveLength(2);
-  });
-
-  test("3.1 createInternalTripPlanItem rejects a backup target that is cross-project or missing (validatePlanReferencesRules :48-50)", async () => {
-    await createTestUser("safety-bkrel-user");
-    const [projectA] = await testDb.insert(tripProjects).values({ userId: "safety-bkrel-user", title: "Huế", aggregateVersion: 1 }).returning({ id: tripProjects.id });
-    const [projectB] = await testDb.insert(tripProjects).values({ userId: "safety-bkrel-user", title: "Đà Lạt", aggregateVersion: 1 }).returning({ id: tripProjects.id });
-    const [legB] = await testDb.insert(tripPlanItems).values({ id: "bkrel-leg-b", tripProjectId: projectB.id, userId: "safety-bkrel-user", kind: "leg", type: "transport", state: "planned", label: "B", ordinal: 0 }).returning();
-    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "safety-bkrel-user", email: "safety-bkrel-user@example.com" }) }));
-    const { createInternalTripPlanItem } = await import("@/features/chat-trips/trip-projects");
-
-    // F4: cross-project backup target — target exists but in projectB, so it is
-    // absent from projectA's knownItems → rejected by the same-project rule.
-    await expect(createInternalTripPlanItem(projectA.id, 1, { kind: "leg", type: "transport", state: "backup", label: "Phương án B", ordinal: 0, backupTargetItemId: legB.id })).resolves.toEqual({ success: false, reason: "invalid" });
-    // F4: missing backup target — target id does not exist in the project.
-    await expect(createInternalTripPlanItem(projectA.id, 1, { kind: "leg", type: "transport", state: "backup", label: "Phương án B", ordinal: 0, backupTargetItemId: "missing-target" })).resolves.toEqual({ success: false, reason: "invalid" });
-    // No partial state.
-    await expect(testDb.select().from(tripPlanItems).where(eq(tripPlanItems.tripProjectId, projectA.id))).resolves.toHaveLength(0);
-  });
-
-  test("3.1 updateInternalTripPlanItem rejects a backup cycle A→B, B→A (validatePlanReferencesRules cycle walk :51-58)", async () => {
-    await createTestUser("safety-cyc-user");
-    const [project] = await testDb.insert(tripProjects).values({ userId: "safety-cyc-user", title: "Hội An", aggregateVersion: 1 }).returning({ id: tripProjects.id });
-    const [legA] = await testDb.insert(tripPlanItems).values({ id: "cyc-leg-a", tripProjectId: project.id, userId: "safety-cyc-user", kind: "leg", type: "transport", state: "planned", label: "A", ordinal: 0 }).returning();
-    const [legB] = await testDb.insert(tripPlanItems).values({ id: "cyc-leg-b", tripProjectId: project.id, userId: "safety-cyc-user", kind: "leg", type: "transport", state: "planned", label: "B", ordinal: 1 }).returning();
-    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "safety-cyc-user", email: "safety-cyc-user@example.com" }) }));
-    const { updateInternalTripPlanItem } = await import("@/features/chat-trips/trip-projects");
-
-    // A becomes a backup targeting B (valid).
-    await expect(updateInternalTripPlanItem(project.id, 1, legA.id, 1, { kind: "leg", type: "transport", state: "backup", label: "A", ordinal: 0, backupTargetItemId: legB.id })).resolves.toMatchObject({ success: true });
-
-    // F4: B now targeting A forms a cycle A→B→A. The cycle walk (:51-58) must
-    // reject it; no partial write (B stays planned, not backup).
-    await expect(updateInternalTripPlanItem(project.id, 2, legB.id, 1, { kind: "leg", type: "transport", state: "backup", label: "B", ordinal: 1, backupTargetItemId: legA.id })).resolves.toEqual({ success: false, reason: "invalid" });
-    const [savedB] = await testDb.select().from(tripPlanItems).where(eq(tripPlanItems.id, legB.id));
-    expect(savedB.state).toBe("planned");
-    expect(savedB.backupTargetItemId).toBeNull();
-  });
-
-  test("3.2 stale aggregate version on update and delete returns refresh_required and applies nothing", async () => {
-    await createTestUser("safety-stale-user");
-    const [project] = await testDb.insert(tripProjects).values({ userId: "safety-stale-user", title: "Hà Giang", aggregateVersion: 1 }).returning({ id: tripProjects.id });
-    const [item] = await testDb.insert(tripPlanItems).values({ id: "stale-leg", tripProjectId: project.id, userId: "safety-stale-user", kind: "leg", type: "transport", state: "idea", label: "Chạy xe", ordinal: 0 }).returning();
-    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "safety-stale-user", email: "safety-stale-user@example.com" }) }));
-    const { updateInternalTripPlanItem, deleteInternalTripPlanItem, upsertInternalTripProjectConstraints } = await import("@/features/chat-trips/trip-projects");
-
-    // Stale aggregate on update.
-    await expect(updateInternalTripPlanItem(project.id, 99, item.id, 1, { kind: "leg", type: "transport", state: "confirmed", label: "Stale", ordinal: 0 })).resolves.toEqual({ success: false, reason: "refresh_required" });
-    // Stale aggregate on delete.
-    await expect(deleteInternalTripPlanItem(project.id, 99, item.id, 1)).resolves.toEqual({ success: false, reason: "refresh_required" });
-    // Stale aggregate on constraints.
-    await expect(upsertInternalTripProjectConstraints(project.id, 99, null, { adultCount: 2 })).resolves.toEqual({ success: false, reason: "refresh_required" });
-
-    // Aggregate version unchanged.
-    const [savedProject] = await testDb.select().from(tripProjects).where(eq(tripProjects.id, project.id));
-    expect(savedProject.aggregateVersion).toBe(1);
-    // Item unchanged.
-    const [savedItem] = await testDb.select().from(tripPlanItems).where(eq(tripPlanItems.id, item.id));
-    expect(savedItem.state).toBe("idea");
-    expect(savedItem.version).toBe(1);
-  });
-
-  test("3.3 stale item version on update and delete returns refresh_required and applies nothing", async () => {
-    await createTestUser("safety-iv-user");
-    const [project] = await testDb.insert(tripProjects).values({ userId: "safety-iv-user", title: "Sapa", aggregateVersion: 1 }).returning({ id: tripProjects.id });
-    const [item] = await testDb.insert(tripPlanItems).values({ id: "iv-leg", tripProjectId: project.id, userId: "safety-iv-user", kind: "leg", type: "transport", state: "idea", label: "Chạy xe", ordinal: 0 }).returning();
-    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "safety-iv-user", email: "safety-iv-user@example.com" }) }));
-    const { updateInternalTripPlanItem, deleteInternalTripPlanItem } = await import("@/features/chat-trips/trip-projects");
-
-    // Correct aggregate but stale item version.
-    await expect(updateInternalTripPlanItem(project.id, 1, item.id, 99, { kind: "leg", type: "transport", state: "confirmed", label: "Stale item", ordinal: 0 })).resolves.toEqual({ success: false, reason: "refresh_required" });
-    await expect(deleteInternalTripPlanItem(project.id, 1, item.id, 99)).resolves.toEqual({ success: false, reason: "refresh_required" });
-
-    // Item unchanged.
-    const [savedItem] = await testDb.select().from(tripPlanItems).where(eq(tripPlanItems.id, item.id));
-    expect(savedItem.state).toBe("idea");
-    expect(savedItem.version).toBe(1);
-  });
-
-  test("3.2 stale aggregate version on reorder returns refresh_required and applies nothing (reorder has a version fence)", async () => {
-    // F5: AC 3.2 says "every mutating command." reorderInternalTripPlanItem
-    // locks the aggregate and checks expectedAggregateVersion; a stale aggregate
-    // must return refresh_required before any renumber/ordinal write.
-    await createTestUser("safety-stale-reorder-user");
-    const [project] = await testDb.insert(tripProjects).values({ userId: "safety-stale-reorder-user", title: "Hà Giang", aggregateVersion: 1 }).returning({ id: tripProjects.id });
-    const [item] = await testDb.insert(tripPlanItems).values({ id: "stale-reorder-leg", tripProjectId: project.id, userId: "safety-stale-reorder-user", kind: "leg", type: "transport", state: "idea", label: "Chạy xe", ordinal: 0 }).returning();
-    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "safety-stale-reorder-user", email: "safety-stale-reorder-user@example.com" }) }));
-    const { reorderInternalTripPlanItem } = await import("@/features/chat-trips/trip-projects");
-
-    // Stale aggregate (actual 1, expected 99) → refresh_required, no renumber.
-    await expect(reorderInternalTripPlanItem(project.id, 99, { itemId: item.id, expectedItemVersion: 1, ordinal: 0, expectedChangedItemVersions: { [item.id]: 1 } })).resolves.toEqual({ success: false, reason: "refresh_required" });
-
-    // Aggregate version unchanged, item unchanged.
-    const [savedProject] = await testDb.select().from(tripProjects).where(eq(tripProjects.id, project.id));
-    expect(savedProject.aggregateVersion).toBe(1);
-    const [savedItem] = await testDb.select().from(tripPlanItems).where(eq(tripPlanItems.id, item.id));
-    expect(savedItem.ordinal).toBe(0);
-    expect(savedItem.version).toBe(1);
-  });
-
-  test("3.2 stale item version on reorder returns refresh_required and applies nothing (moved-item fence)", async () => {
-    // Second review: AC 3.2 says "stale aggregate OR ITEM VERSION on every
-    // mutating command." reorder has TWO distinct item-version fences:
-    // item.version !== input.expectedItemVersion (the moved item, :636) and the
-    // expectedChangedItemVersions mismatch (:646). The aggregate test above
-    // passes a CORRECT item version, so only the aggregate fence fires. This
-    // test exercises the moved-item fence with a correct aggregate + correct
-    // changed-item-versions but a STALE expectedItemVersion, so the :636 fence
-    // fires and :646 is not reached.
-    await createTestUser("safety-stale-iv-reorder-user");
-    const [project] = await testDb.insert(tripProjects).values({ userId: "safety-stale-iv-reorder-user", title: "Hà Giang", aggregateVersion: 1 }).returning({ id: tripProjects.id });
-    await testDb.insert(tripPlanItems).values({ id: "stale-iv-a", tripProjectId: project.id, userId: "safety-stale-iv-reorder-user", kind: "leg", type: "transport", state: "idea", label: "A", ordinal: 0, version: 1 });
-    await testDb.insert(tripPlanItems).values({ id: "stale-iv-b", tripProjectId: project.id, userId: "safety-stale-iv-reorder-user", kind: "leg", type: "visit", state: "idea", label: "B", ordinal: 1, version: 1 });
-    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "safety-stale-iv-reorder-user", email: "safety-stale-iv-reorder-user@example.com" }) }));
-    const { reorderInternalTripPlanItem } = await import("@/features/chat-trips/trip-projects");
-
-    // Correct aggregate + correct changed-item-versions, STALE moved-item version (99 vs 1).
-    await expect(reorderInternalTripPlanItem(project.id, 1, { itemId: "stale-iv-a", expectedItemVersion: 99, ordinal: 1, expectedChangedItemVersions: { "stale-iv-a": 1, "stale-iv-b": 1 } })).resolves.toEqual({ success: false, reason: "refresh_required" });
-
-    // No renumber, versions unchanged, aggregate unchanged.
-    const items = await testDb.select({ id: tripPlanItems.id, ordinal: tripPlanItems.ordinal, version: tripPlanItems.version }).from(tripPlanItems).where(eq(tripPlanItems.tripProjectId, project.id));
-    expect(items.sort((a, b) => a.ordinal - b.ordinal)).toEqual([
-      { id: "stale-iv-a", ordinal: 0, version: 1 },
-      { id: "stale-iv-b", ordinal: 1, version: 1 },
-    ]);
-    const [savedProject] = await testDb.select().from(tripProjects).where(eq(tripProjects.id, project.id));
-    expect(savedProject.aggregateVersion).toBe(1);
-  });
-
-  test("3.2 stale changed-item-versions on reorder returns refresh_required and applies nothing (changed-item-versions fence)", async () => {
-    // Exercise the SECOND reorder item-version fence: the moved-item fence
-    // passes (expectedItemVersion matches) but expectedChangedItemVersions
-    // carries a wrong version for a sibling in the affected scope, so the
-    // fence at trip-projects.ts:646 fires. A regression deleting that fence
-    // would not be caught by the aggregate or moved-item tests.
-    await createTestUser("safety-stale-civ-reorder-user");
-    const [project] = await testDb.insert(tripProjects).values({ userId: "safety-stale-civ-reorder-user", title: "Đà Lạt", aggregateVersion: 1 }).returning({ id: tripProjects.id });
-    await testDb.insert(tripPlanItems).values({ id: "stale-civ-a", tripProjectId: project.id, userId: "safety-stale-civ-reorder-user", kind: "leg", type: "transport", state: "idea", label: "A", ordinal: 0, version: 1 });
-    await testDb.insert(tripPlanItems).values({ id: "stale-civ-b", tripProjectId: project.id, userId: "safety-stale-civ-reorder-user", kind: "leg", type: "visit", state: "idea", label: "B", ordinal: 1, version: 1 });
-    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "safety-stale-civ-reorder-user", email: "safety-stale-civ-reorder-user@example.com" }) }));
-    const { reorderInternalTripPlanItem } = await import("@/features/chat-trips/trip-projects");
-
-    // Correct aggregate + correct moved-item version, STALE changed-item-versions (a: 99 vs 1).
-    await expect(reorderInternalTripPlanItem(project.id, 1, { itemId: "stale-civ-a", expectedItemVersion: 1, ordinal: 1, expectedChangedItemVersions: { "stale-civ-a": 99, "stale-civ-b": 1 } })).resolves.toEqual({ success: false, reason: "refresh_required" });
-
-    const items = await testDb.select({ id: tripPlanItems.id, ordinal: tripPlanItems.ordinal, version: tripPlanItems.version }).from(tripPlanItems).where(eq(tripPlanItems.tripProjectId, project.id));
-    expect(items.sort((a, b) => a.ordinal - b.ordinal)).toEqual([
-      { id: "stale-civ-a", ordinal: 0, version: 1 },
-      { id: "stale-civ-b", ordinal: 1, version: 1 },
-    ]);
-    const [savedProject] = await testDb.select().from(tripProjects).where(eq(tripProjects.id, project.id));
-    expect(savedProject.aggregateVersion).toBe(1);
-  });
-
-  test("3.3 backup state without a same-project backupTargetItemId is rejected by the DB check constraint", async () => {
-    await createTestUser("safety-bk-user");
-    const [project] = await testDb.insert(tripProjects).values({ userId: "safety-bk-user", title: "Hội An", aggregateVersion: 1 }).returning({ id: tripProjects.id });
-    // The DB check constraint (trip_plan_items_backup_check) enforces that
-    // backup state requires a non-null backupTargetItemId and vice versa.
-    // Third-review fix: assert the specific check-violation SQLSTATE 23514 and
-    // constraint name on BOTH cases (matching F17's precision for the
-    // duplicate-ordinal test). The second case now uses a REAL existing item as
-    // the target so the FK constraint does not fire — only the check constraint
-    // catches "non-backup state WITH a backupTargetItemId" (the prior test used
-    // a nonexistent target, so the FK 23503 caught it regardless of the check).
-    await testDb.insert(tripPlanItems).values({ id: "bk-real-leg", tripProjectId: project.id, userId: "safety-bk-user", kind: "leg", type: "transport", state: "planned", label: "Chặng thực", ordinal: 0, version: 1 });
-
-    // Case 1: backup state WITHOUT a backupTargetItemId → null target means no
-    // FK can fire, so only the check constraint catches it (non-vacuous).
-    try {
-      await testDb.insert(tripPlanItems).values({ id: "bk-no-target", tripProjectId: project.id, userId: "safety-bk-user", kind: "leg", type: "transport", state: "backup", label: "Phương án B", ordinal: 1 });
-      throw new Error("expected backup-without-target insert to be rejected");
-    } catch (error) {
-      const cause = (error as { cause?: { code?: string; constraint_name?: string } }).cause;
-      expect(cause?.code).toBe("23514");
-      expect(cause?.constraint_name).toBe("trip_plan_items_backup_check");
-    }
-
-    // Case 2: non-backup state (idea) WITH a backupTargetItemId pointing to a
-    // REAL existing item → the FK does NOT fire (target exists), so only the
-    // check constraint catches "non-backup state with non-null target."
-    try {
-      await testDb.insert(tripPlanItems).values({ id: "idea-with-target", tripProjectId: project.id, userId: "safety-bk-user", kind: "leg", type: "transport", state: "idea", label: "Ý tưởng", ordinal: 2, backupTargetItemId: "bk-real-leg" });
-      throw new Error("expected idea-with-target insert to be rejected");
-    } catch (error) {
-      const cause = (error as { cause?: { code?: string; constraint_name?: string } }).cause;
-      expect(cause?.code).toBe("23514");
-      expect(cause?.constraint_name).toBe("trip_plan_items_backup_check");
-    }
-  });
-
-  test("4.1 ordinals remain unique within (trip_project_id, parent_item_id) after create and remove", async () => {
-    await createTestUser("safety-ord-user");
-    const [project] = await testDb.insert(tripProjects).values({ userId: "safety-ord-user", title: "Cần Thơ", aggregateVersion: 1 }).returning({ id: tripProjects.id });
-    vi.doMock("@/server/auth", () => ({ getAuthenticatedSession: vi.fn().mockResolvedValue({ userId: "safety-ord-user", email: "safety-ord-user@example.com" }) }));
-    const { createInternalTripPlanItem, deleteInternalTripPlanItem } = await import("@/features/chat-trips/trip-projects");
-
-    // Create two root items with ordinals 0 and 1.
-    await expect(createInternalTripPlanItem(project.id, 1, { kind: "leg", type: "transport", state: "idea", label: "A", ordinal: 0 })).resolves.toMatchObject({ success: true, aggregateVersion: 2 });
-    await expect(createInternalTripPlanItem(project.id, 2, { kind: "leg", type: "visit", state: "idea", label: "B", ordinal: 1 })).resolves.toMatchObject({ success: true, aggregateVersion: 3 });
-
-    // F17: duplicate root ordinal 0 is rejected specifically by the
-    // (trip_project_id, parent_item_id, ordinal) unique index, not by any DB
-    // error (NOT NULL/FK/etc.). Drizzle wraps the Postgres error in `.cause`,
-    // so assert the unique-violation SQLSTATE 23505 and the root-ordinal index
-    // name there — a different constraint regression cannot satisfy this.
-    try {
-      await createInternalTripPlanItem(project.id, 3, { kind: "leg", type: "food", state: "idea", label: "C", ordinal: 0 });
-      throw new Error("expected duplicate root ordinal insert to be rejected");
-    } catch (error) {
-      const cause = (error as { cause?: { code?: string; constraint_name?: string } }).cause;
-      expect(cause?.code).toBe("23505");
-      expect(cause?.constraint_name).toBe("trip_plan_items_root_ordinal_idx");
-    }
-
-    // No partial state: only the two original items exist.
-    const items = await testDb.select().from(tripPlanItems).where(eq(tripPlanItems.tripProjectId, project.id));
-    expect(items).toHaveLength(2);
-
-    // Delete item with ordinal 0 — ordinal 1 is still unique.
-    const itemA = items.find((i) => i.ordinal === 0);
-    expect(itemA).toBeDefined();
-    await expect(deleteInternalTripPlanItem(project.id, 3, itemA!.id, 1)).resolves.toMatchObject({ success: true });
-
-    // Now ordinal 0 is free again.
-    await expect(createInternalTripPlanItem(project.id, 4, { kind: "leg", type: "food", state: "idea", label: "C2", ordinal: 0 })).resolves.toMatchObject({ success: true });
-  });
 });

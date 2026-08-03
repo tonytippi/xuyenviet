@@ -10,6 +10,7 @@ export type PlanItemReference = {
   id: string;
   kind: string;
   tripProjectId?: string;
+  parentItemId?: string | null;
   backupTargetItemId: string | null;
 };
 

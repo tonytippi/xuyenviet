@@ -4,19 +4,11 @@ import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { listOwnedConversationSummaries, resolvePlanningAnnotationCapabilities, sanitizeStoredPlanningAnnotations, type OwnedConversationSummary } from "@xuyenviet/domain";
 
 import { getDb } from "@/db/client";
-import { aiUsageEvents, answerUsefulnessFeedback, assistantResponseProvenance, chatContext, conversations, messageImageAttachments, messages, tripChangeProposals, tripProjects } from "@/db/schema";
-import { recordAuditEvent } from "@/features/audit/events";
-import { toUserAuditActor } from "@/features/audit/actors";
+import { answerUsefulnessFeedback, assistantResponseProvenance, conversations, messageImageAttachments, messages, tripChangeProposals } from "@/db/schema";
 import { formatAssistantMessageProvenance } from "@/features/retrieval/provenance";
 import { getAuthenticatedSession } from "@/server/auth";
-import { discardAiAskCommandsForDeletedConversations } from "@/features/ai/ai-ask-commands";
 
 export type { OwnedConversationSummary } from "@xuyenviet/domain";
-
-export type DeleteOwnedConversationResult = {
-  success: boolean;
-  reason?: "unauthenticated" | "not_found" | "failed";
-};
 
 export async function getOwnedConversation(conversationId: string, establishedSession?: NonNullable<Awaited<ReturnType<typeof getAuthenticatedSession>>>) {
   const session = establishedSession ?? await getAuthenticatedSession();
@@ -174,85 +166,4 @@ export async function listOwnedConversations(): Promise<OwnedConversationSummary
       return selected.map((conversation) => ({ ...conversation, messageContent: previews.get(conversation.id) ?? null }));
     },
   }, session.userId);
-}
-
-export async function deleteOwnedConversation(conversationId: string): Promise<DeleteOwnedConversationResult> {
-  const session = await getAuthenticatedSession();
-
-  if (!session) {
-    return { success: false, reason: "unauthenticated" };
-  }
-
-  try {
-    return await getDb().transaction(async (transaction) => {
-      const [initial] = await transaction
-        .select({ id: conversations.id, tripProjectId: conversations.tripProjectId })
-        .from(conversations)
-        .where(and(eq(conversations.id, conversationId), eq(conversations.userId, session.userId)))
-        .limit(1);
-
-      if (!initial) return { success: false, reason: "not_found" };
-
-      if (initial.tripProjectId) {
-        const [project] = await transaction.select({ id: tripProjects.id, primaryConversationId: tripProjects.primaryConversationId }).from(tripProjects).where(and(eq(tripProjects.id, initial.tripProjectId), eq(tripProjects.userId, session.userId))).limit(1).for("update");
-        if (project?.primaryConversationId === initial.id) {
-          const [replacement] = await transaction.select({ id: conversations.id, updatedAt: conversations.updatedAt }).from(conversations).where(and(eq(conversations.userId, session.userId), eq(conversations.tripProjectId, project.id), eq(conversations.id, initial.id))).limit(1).for("update");
-          if (!replacement) return { success: false, reason: "not_found" };
-          const [next] = await transaction.select({ id: conversations.id }).from(conversations).where(and(eq(conversations.userId, session.userId), eq(conversations.tripProjectId, project.id), sql`${conversations.id} <> ${initial.id}`)).orderBy(desc(conversations.updatedAt), desc(conversations.id)).limit(1);
-          const replacementPrimary = next ?? await transaction.insert(conversations).values({ userId: session.userId, tripProjectId: project.id }).returning({ id: conversations.id });
-          await transaction.update(conversations).set({ lifecycleVersion: sql`${conversations.lifecycleVersion} + 1`, updatedAt: new Date() }).where(eq(conversations.id, replacementPrimary.id));
-          await transaction.update(tripProjects).set({ primaryConversationId: replacementPrimary.id, aggregateVersion: sql`${tripProjects.aggregateVersion} + 1`, updatedAt: new Date() }).where(eq(tripProjects.id, project.id));
-        }
-      }
-
-      const [conversation] = await transaction
-        .select({ id: conversations.id, tripProjectId: conversations.tripProjectId })
-        .from(conversations)
-        .where(and(eq(conversations.id, conversationId), eq(conversations.userId, session.userId)))
-        .limit(1)
-        .for("update");
-
-      if (!conversation) {
-        return { success: false, reason: "not_found" };
-      }
-
-      await discardAiAskCommandsForDeletedConversations(transaction, session.userId, [conversation.id]);
-      await transaction.update(conversations).set({ lifecycleVersion: sql`${conversations.lifecycleVersion} + 1`, updatedAt: new Date() }).where(eq(conversations.id, conversation.id));
-
-      const conversationMessages = await transaction.select({ id: messages.id }).from(messages).where(and(eq(messages.conversationId, conversation.id), eq(messages.userId, session.userId)));
-      const attachments = await transaction.select({ id: messageImageAttachments.id }).from(messageImageAttachments).where(and(eq(messageImageAttachments.conversationId, conversation.id), eq(messageImageAttachments.userId, session.userId)));
-      const contextRows = await transaction.select({ id: chatContext.id }).from(chatContext).where(and(eq(chatContext.conversationId, conversation.id), eq(chatContext.userId, session.userId)));
-      const usageEvents = await transaction.select({ id: aiUsageEvents.id }).from(aiUsageEvents).where(eq(aiUsageEvents.conversationId, conversation.id));
-
-      const deletedRows = await transaction
-        .delete(conversations)
-        .where(and(eq(conversations.id, conversation.id), eq(conversations.userId, session.userId)))
-        .returning({ id: conversations.id });
-
-      if (deletedRows.length !== 1) {
-        return { success: false, reason: "not_found" };
-      }
-
-      await recordAuditEvent({
-        actor: toUserAuditActor({ userId: session.userId, email: session.email }),
-        operation: "delete",
-        targetType: "conversation",
-        targetId: conversation.id,
-        beforeSummary: JSON.stringify({
-          conversationId: conversation.id,
-          tripProjectId: conversation.tripProjectId,
-          messageCount: conversationMessages.length,
-          imageAttachmentCount: attachments.length,
-          chatContextCount: contextRows.length,
-          aiUsageEventCount: usageEvents.length,
-        }),
-        afterSummary: JSON.stringify({ deleted: true }),
-      }, transaction);
-
-      return { success: true };
-    });
-  } catch (error) {
-    console.error("Failed to delete owned conversation.", { conversationId, userId: session.userId, error });
-    return { success: false, reason: "failed" };
-  }
 }

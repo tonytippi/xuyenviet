@@ -15,8 +15,8 @@ type Transaction = Parameters<ReturnType<typeof getDb>["transaction"]>[0] extend
 // (readOwnedTripProjectAggregateForProposalDraft), builds the prompt, calls the
 // AI Gateway with a schema-validated JSON contract, parses the result, and
 // returns an UNTRUSTED typed draft. This module persists nothing and writes no
-// tables; persistence is delegated to persistAiTripChangeProposalDraft. It does
-// not import Chat/Trips-owned tables directly (AD-29/AD-30 ownership boundary).
+// tables; the package-owned worker command persists approved drafts. It does not
+// import Chat/Trips-owned tables directly (AD-29/AD-30 ownership boundary).
 
 const tripChangeProposalDraftPurpose = aiUsagePurposes.tripChangeProposalDraft;
 
