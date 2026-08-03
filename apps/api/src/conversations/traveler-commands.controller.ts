@@ -1,10 +1,10 @@
-import { Body, Controller, Delete, HttpCode, Inject, Param, Post, UsePipes } from "@nestjs/common";
+import { Body, Controller, Delete, HttpCode, Inject, Param, Post } from "@nestjs/common";
 
-import { parseCreateTripProjectCommand, parseSaveAnswerUsefulnessFeedbackCommand, type CreateTripProjectCommand, type CreateTripProjectResult, type DeleteOwnedResourceResult, type RequestPrincipal, type SaveAnswerUsefulnessFeedbackCommand, type SaveAnswerUsefulnessFeedbackResult } from "@xuyenviet/contracts";
+import { parseAnnotationProposalActionCommand, parseCreateTripProjectCommand, parseSaveAnswerUsefulnessFeedbackCommand, parseTripChangeProposalCommand, type AnnotationProposalActionCommand, type AnnotationProposalActionResult, type ApplyTripChangeProposalResult, type CreateTripProjectCommand, type CreateTripProjectResult, type DeleteOwnedResourceResult, type DismissTripChangeProposalResult, type RequestPrincipal, type SaveAnswerUsefulnessFeedbackCommand, type SaveAnswerUsefulnessFeedbackResult, type TripChangeProposalCommand } from "@xuyenviet/contracts";
 import type { TravelerCommandPort } from "@xuyenviet/domain";
 
 import { Principal } from "../auth/principal.decorator";
-import { SafeValidationPipe, type SafeRequestDto } from "../common/safe-validation.pipe";
+import { SafeValidationPipe } from "../common/safe-validation.pipe";
 
 export const TRAVELER_COMMAND_PORT = Symbol("TRAVELER_COMMAND_PORT");
 
@@ -14,6 +14,8 @@ class CreateTripProjectDto {
 class SaveAnswerUsefulnessFeedbackDto {
   static parse(value: unknown) { const parsed = parseSaveAnswerUsefulnessFeedbackCommand(value); return parsed ? { ok: true as const, value: parsed } : { ok: false as const }; }
 }
+class TripChangeProposalDto { static parse(value: unknown) { const parsed = parseTripChangeProposalCommand(value); return parsed ? { ok: true as const, value: parsed } : { ok: false as const }; } }
+class AnnotationProposalActionDto { static parse(value: unknown) { const parsed = parseAnnotationProposalActionCommand(value); return parsed ? { ok: true as const, value: parsed } : { ok: false as const }; } }
 
 @Controller("v1")
 export class TravelerCommandsController {
@@ -40,6 +42,15 @@ export class TravelerCommandsController {
   async saveFeedback(@Principal() principal: RequestPrincipal, @Body(new SafeValidationPipe(SaveAnswerUsefulnessFeedbackDto)) input: SaveAnswerUsefulnessFeedbackCommand): Promise<SaveAnswerUsefulnessFeedbackResult> {
     return this.commands.saveAnswerUsefulnessFeedback(principal.userId, input);
   }
+
+  @Post("trip-change-proposals/apply")
+  async applyTripChangeProposal(@Principal() principal: RequestPrincipal, @Body(new SafeValidationPipe(TripChangeProposalDto)) input: TripChangeProposalCommand): Promise<ApplyTripChangeProposalResult> { return this.commands.applyTripChangeProposal(principal.userId, input); }
+
+  @Post("trip-change-proposals/dismiss")
+  async dismissTripChangeProposal(@Principal() principal: RequestPrincipal, @Body(new SafeValidationPipe(TripChangeProposalDto)) input: TripChangeProposalCommand): Promise<DismissTripChangeProposalResult> { return this.commands.dismissTripChangeProposal(principal.userId, input); }
+
+  @Post("trip-change-proposals/annotation-action")
+  async executeAnnotationProposalAction(@Principal() principal: RequestPrincipal, @Body(new SafeValidationPipe(AnnotationProposalActionDto)) input: AnnotationProposalActionCommand): Promise<AnnotationProposalActionResult> { return this.commands.executeAnnotationProposalAction(principal.userId, input); }
 
 
 }

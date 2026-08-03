@@ -8,9 +8,18 @@ import { recordAuditEvent } from "@/features/audit/events";
 import { toUserAuditActor } from "@/features/audit/actors";
 import { buildTripWorkspaceReadModelWithConstraints, type ConstraintsProjection, type PendingProposalFocusInput, type PlanHistoryEntryView, type TimelineGroup, type TripHomeFocus, type TripPlanItemProjection } from "@/features/chat-trips/trip-home";
 import { formatPlanHistoryRow, listPlanHistoryForTripProject, listPendingProposalsForTripProject, type OwnedTripChangeProposalSummary } from "@/features/chat-trips/trip-change-proposals";
-import { validatePlanReferencesRules } from "@/features/chat-trips/plan-references";
 import { getAuthenticatedSession } from "@/server/auth";
 import { discardAiAskCommandsForDeletedConversations } from "@/features/ai/ai-ask-commands";
+import {
+  changeInternalTripPlanItemStateInTransaction as changeInternalTripPlanItemStateInDatabase,
+  createTripPlanItemInTransaction as createTripPlanItemInDatabase,
+  deleteTripPlanItemInTransaction as deleteTripPlanItemInDatabase,
+  normalizeConstraints as normalizeDatabaseConstraints,
+  normalizePlanItem as normalizeDatabasePlanItem,
+  reorderTripPlanItemInTransaction as reorderTripPlanItemInDatabase,
+  updateTripPlanItemInTransaction as updateTripPlanItemInDatabase,
+  upsertInternalTripProjectConstraintsInTransaction as upsertInternalTripProjectConstraintsInDatabase,
+} from "@xuyenviet/database";
 
 import { formatTripProjectLabel } from "./labels";
 
@@ -509,15 +518,7 @@ export async function createTripPlanItemInTransaction(
   expectedAggregateVersion: number,
   values: ReturnType<typeof normalizePlanItem>,
 ): Promise<AggregateMutationResult> {
-  const [project] = await transaction.select({ version: tripProjects.aggregateVersion }).from(tripProjects).where(and(eq(tripProjects.id, tripProjectId), eq(tripProjects.userId, session.userId))).limit(1).for("update");
-  if (!project) return { success: false, reason: "not_found" };
-  if (project.version !== expectedAggregateVersion) return { success: false, reason: "refresh_required" };
-  await validatePlanReferences(transaction, tripProjectId, session.userId, values);
-  const [item] = await transaction.insert(tripPlanItems).values({ tripProjectId, userId: session.userId, ...values }).returning({ id: tripPlanItems.id });
-  const nextVersion = project.version + 1;
-  await transaction.update(tripProjects).set({ aggregateVersion: nextVersion, updatedAt: new Date() }).where(and(eq(tripProjects.id, tripProjectId), eq(tripProjects.userId, session.userId)));
-  await recordAuditEvent({ actor: toUserAuditActor({ userId: session.userId, email: session.email }), operation: "create", targetType: "trip_plan_item", targetId: item.id, afterSummary: JSON.stringify({ tripProjectId, aggregateVersion: nextVersion }) }, transaction);
-  return { success: true, aggregateVersion: nextVersion, itemId: item.id };
+  return createTripPlanItemInDatabase(transaction, session, tripProjectId, expectedAggregateVersion, values);
 }
 
 export async function upsertInternalTripProjectConstraints(tripProjectId: string, expectedAggregateVersion: number, expectedConstraintsVersion: number | null, input: InternalConstraintsInput): Promise<AggregateMutationResult> {
@@ -541,18 +542,7 @@ export async function upsertInternalTripProjectConstraintsInTransaction(
   expectedConstraintsVersion: number | null,
   values: ReturnType<typeof normalizeConstraints>,
 ): Promise<AggregateMutationResult> {
-  const [project] = await transaction.select({ version: tripProjects.aggregateVersion }).from(tripProjects).where(and(eq(tripProjects.id, tripProjectId), eq(tripProjects.userId, session.userId))).limit(1).for("update");
-  if (!project) return { success: false, reason: "not_found" };
-  if (project.version !== expectedAggregateVersion) return { success: false, reason: "refresh_required" };
-  const [existing] = await transaction.select({ version: tripProjectConstraints.version }).from(tripProjectConstraints).where(and(eq(tripProjectConstraints.tripProjectId, tripProjectId), eq(tripProjectConstraints.userId, session.userId))).limit(1);
-  if (existing && existing.version !== expectedConstraintsVersion) return { success: false, reason: "refresh_required" };
-  if (!existing && expectedConstraintsVersion !== null) return { success: false, reason: "refresh_required" };
-  if (existing) await transaction.update(tripProjectConstraints).set({ ...values, version: existing.version + 1, updatedAt: new Date() }).where(and(eq(tripProjectConstraints.tripProjectId, tripProjectId), eq(tripProjectConstraints.userId, session.userId)));
-  else await transaction.insert(tripProjectConstraints).values({ tripProjectId, userId: session.userId, ...values });
-  const nextVersion = project.version + 1;
-  await transaction.update(tripProjects).set({ aggregateVersion: nextVersion, updatedAt: new Date() }).where(and(eq(tripProjects.id, tripProjectId), eq(tripProjects.userId, session.userId)));
-  await recordAuditEvent({ actor: toUserAuditActor({ userId: session.userId, email: session.email }), operation: existing ? "update" : "create", targetType: "trip_project_constraints", targetId: tripProjectId, afterSummary: JSON.stringify({ tripProjectId, aggregateVersion: nextVersion }) }, transaction);
-  return { success: true, aggregateVersion: nextVersion };
+  return upsertInternalTripProjectConstraintsInDatabase(transaction, session, tripProjectId, expectedAggregateVersion, expectedConstraintsVersion, values);
 }
 
 export async function updateInternalTripPlanItem(tripProjectId: string, expectedAggregateVersion: number, itemId: string, expectedItemVersion: number, input: InternalPlanItemInput): Promise<AggregateMutationResult> {
@@ -577,16 +567,7 @@ export async function updateTripPlanItemInTransaction(
   expectedItemVersion: number,
   values: ReturnType<typeof normalizePlanItem>,
 ): Promise<AggregateMutationResult> {
-  const project = await lockAggregate(transaction, tripProjectId, session.userId, expectedAggregateVersion);
-  if (!project.success) return project;
-  const [item] = await transaction.select().from(tripPlanItems).where(and(eq(tripPlanItems.id, itemId), eq(tripPlanItems.tripProjectId, tripProjectId), eq(tripPlanItems.userId, session.userId))).limit(1);
-  if (!item) return { success: false, reason: "not_found" };
-  if (item.version !== expectedItemVersion) return { success: false, reason: "refresh_required" };
-  await validatePlanReferences(transaction, tripProjectId, session.userId, values, itemId);
-  await transaction.update(tripPlanItems).set({ ...values, version: item.version + 1, updatedAt: new Date() }).where(eq(tripPlanItems.id, itemId));
-  const aggregateVersion = await advanceAggregate(transaction, tripProjectId, session.userId, project.version);
-  await recordAggregateAudit(transaction, session, "update", "trip_plan_item", itemId, tripProjectId, aggregateVersion);
-  return { success: true, aggregateVersion, itemId };
+  return updateTripPlanItemInDatabase(transaction, session, tripProjectId, expectedAggregateVersion, itemId, expectedItemVersion, values);
 }
 
 export async function deleteInternalTripPlanItem(tripProjectId: string, expectedAggregateVersion: number, itemId: string, expectedItemVersion: number): Promise<AggregateMutationResult> {
@@ -604,18 +585,7 @@ export async function deleteTripPlanItemInTransaction(
   itemId: string,
   expectedItemVersion: number,
 ): Promise<AggregateMutationResult> {
-  const project = await lockAggregate(transaction, tripProjectId, session.userId, expectedAggregateVersion);
-  if (!project.success) return project;
-  const [item] = await transaction.select({ version: tripPlanItems.version }).from(tripPlanItems).where(and(eq(tripPlanItems.id, itemId), eq(tripPlanItems.tripProjectId, tripProjectId), eq(tripPlanItems.userId, session.userId))).limit(1);
-  if (!item) return { success: false, reason: "not_found" };
-  if (item.version !== expectedItemVersion) return { success: false, reason: "refresh_required" };
-  const [dependent] = await transaction.select({ id: tripPlanItems.id }).from(tripPlanItems).where(and(eq(tripPlanItems.tripProjectId, tripProjectId), eq(tripPlanItems.userId, session.userId), eq(tripPlanItems.parentItemId, itemId))).limit(1);
-  const [backup] = await transaction.select({ id: tripPlanItems.id }).from(tripPlanItems).where(and(eq(tripPlanItems.tripProjectId, tripProjectId), eq(tripPlanItems.userId, session.userId), eq(tripPlanItems.backupTargetItemId, itemId))).limit(1);
-  if (dependent || backup) return { success: false, reason: "invalid" };
-  await transaction.delete(tripPlanItems).where(eq(tripPlanItems.id, itemId));
-  const aggregateVersion = await advanceAggregate(transaction, tripProjectId, session.userId, project.version);
-  await recordAggregateAudit(transaction, session, "delete", "trip_plan_item", itemId, tripProjectId, aggregateVersion);
-  return { success: true, aggregateVersion, itemId };
+  return deleteTripPlanItemInDatabase(transaction, session, tripProjectId, expectedAggregateVersion, itemId, expectedItemVersion);
 }
 
 export async function reorderInternalTripPlanItem(tripProjectId: string, expectedAggregateVersion: number, input: InternalReorderInput): Promise<AggregateMutationResult> {
@@ -638,41 +608,14 @@ export async function reorderTripPlanItemInTransaction(
   expectedAggregateVersion: number,
   input: InternalReorderInput,
 ): Promise<AggregateMutationResult> {
-  if (!Number.isInteger(input.ordinal) || input.ordinal < 0) throw new Error("Invalid trip plan ordinal.");
-  const project = await lockAggregate(transaction, tripProjectId, session.userId, expectedAggregateVersion);
-  if (!project.success) return project;
-  const rows = await transaction.select().from(tripPlanItems).where(and(eq(tripPlanItems.tripProjectId, tripProjectId), eq(tripPlanItems.userId, session.userId))).for("update");
-  const item = rows.find((row) => row.id === input.itemId);
-  if (!item) return { success: false, reason: "not_found" };
-  if (item.version !== input.expectedItemVersion) return { success: false, reason: "refresh_required" };
-  const nextParentId = input.parentItemId ?? null;
-  const candidate = normalizePlanItem({ kind: item.kind, anchorRole: item.anchorRole, type: item.type, state: item.state, label: item.label, notes: item.notes, plannedAt: item.plannedAt, ordinal: input.ordinal, parentItemId: nextParentId, backupTargetItemId: item.backupTargetItemId, transportOriginLabel: item.transportOriginLabel, transportDestinationLabel: item.transportDestinationLabel, accommodationPlaceAreaLabel: item.accommodationPlaceAreaLabel });
-  await validatePlanReferences(transaction, tripProjectId, session.userId, candidate, item.id);
-  const sameScope = (row: typeof item, parentId: string | null) => row.parentItemId === parentId;
-  const oldScope = rows.filter((row) => sameScope(row, item.parentItemId) && row.id !== item.id).sort((a, b) => a.ordinal - b.ordinal);
-  const newScope = item.parentItemId === nextParentId ? oldScope : rows.filter((row) => sameScope(row, nextParentId)).sort((a, b) => a.ordinal - b.ordinal);
-  const destination = Math.min(input.ordinal, newScope.length);
-  const reordered = item.parentItemId === nextParentId ? oldScope : [...oldScope, ...newScope];
-  const changedIds = new Set([...reordered.map((row) => row.id), item.id]);
-  if (Object.keys(input.expectedChangedItemVersions).length !== changedIds.size || [...changedIds].some((id) => input.expectedChangedItemVersions[id] !== rows.find((row) => row.id === id)?.version)) return { success: false, reason: "refresh_required" };
-  // Move affected rows out of their unique ordinal scopes before writing their final sequence.
-  const temporaryOrdinalStart = Math.max(...rows.map((row) => row.ordinal)) + rows.length + 1;
-  for (const [index, row] of [...reordered, item].entries()) await transaction.update(tripPlanItems).set({ ordinal: temporaryOrdinalStart + index }).where(eq(tripPlanItems.id, row.id));
-  const destinationRows = newScope.slice(); destinationRows.splice(destination, 0, item);
-  const sourceRows = item.parentItemId === nextParentId ? destinationRows : oldScope;
-  for (const [ordinal, row] of destinationRows.entries()) await transaction.update(tripPlanItems).set({ parentItemId: nextParentId, ordinal, version: row.version + 1, updatedAt: new Date() }).where(eq(tripPlanItems.id, row.id));
-  if (item.parentItemId !== nextParentId) for (const [ordinal, row] of sourceRows.entries()) await transaction.update(tripPlanItems).set({ ordinal, version: row.version + 1, updatedAt: new Date() }).where(eq(tripPlanItems.id, row.id));
-  const aggregateVersion = await advanceAggregate(transaction, tripProjectId, session.userId, project.version);
-  await recordAggregateAudit(transaction, session, "update", "trip_plan_item_reorder", item.id, tripProjectId, aggregateVersion, changedIds.size);
-  return { success: true, aggregateVersion, itemId: item.id };
+  return reorderTripPlanItemInDatabase(transaction, session, tripProjectId, expectedAggregateVersion, input);
 }
 
 // Story 7.5: a dedicated state-only change primitive so a `change-item-state`
 // operation does not require reconstructing the full InternalPlanItemInput
 // shape. A state-only change must not touch label/notes/ordinal/plannedAt/
 // transport/accommodation fields. Validates the backup-state/backup-target
-// consistency and the same-project/no-cycle backup rule via the shared
-// validatePlanReferencesRules helper (no inline reimplementation).
+// consistency through the database command implementation.
 export async function changeInternalTripPlanItemStateInTransaction(
   transaction: Transaction,
   session: { userId: string; email: string },
@@ -683,35 +626,7 @@ export async function changeInternalTripPlanItemStateInTransaction(
   nextState: TripPlanItemState,
   backupTargetItemId: string | null,
 ): Promise<AggregateMutationResult> {
-  if ((nextState === "backup") !== (backupTargetItemId !== null)) return { success: false, reason: "invalid" };
-  const project = await lockAggregate(transaction, tripProjectId, session.userId, expectedAggregateVersion);
-  if (!project.success) return project;
-  const [item] = await transaction.select().from(tripPlanItems).where(and(eq(tripPlanItems.id, itemId), eq(tripPlanItems.tripProjectId, tripProjectId), eq(tripPlanItems.userId, session.userId))).limit(1);
-  if (!item) return { success: false, reason: "not_found" };
-  if (item.version !== expectedItemVersion) return { success: false, reason: "refresh_required" };
-  // Reuse the shared same-project/no-cycle rules for a backup target that is new
-  // for this item (Story 7.4 review finding 9). Load every plan item in the
-  // project once so the cycle walk is exact.
-  if (backupTargetItemId !== null && backupTargetItemId !== item.backupTargetItemId) {
-    const referenceRows = await transaction
-      .select({ id: tripPlanItems.id, kind: tripPlanItems.kind, tripProjectId: tripPlanItems.tripProjectId, backupTargetItemId: tripPlanItems.backupTargetItemId })
-      .from(tripPlanItems)
-      .where(and(eq(tripPlanItems.tripProjectId, tripProjectId), eq(tripPlanItems.userId, session.userId)));
-    const refError = validatePlanReferencesRules(
-      tripProjectId,
-      { kind: item.kind, parentItemId: item.parentItemId, backupTargetItemId },
-      referenceRows,
-      itemId,
-    );
-    if (refError) return { success: false, reason: "invalid" };
-  }
-  await transaction
-    .update(tripPlanItems)
-    .set({ state: nextState, backupTargetItemId, version: item.version + 1, updatedAt: new Date() })
-    .where(eq(tripPlanItems.id, itemId));
-  const aggregateVersion = await advanceAggregate(transaction, tripProjectId, session.userId, project.version);
-  await recordAggregateAudit(transaction, session, "update", "trip_plan_item", itemId, tripProjectId, aggregateVersion);
-  return { success: true, aggregateVersion, itemId };
+  return changeInternalTripPlanItemStateInDatabase(transaction, session, tripProjectId, expectedAggregateVersion, itemId, expectedItemVersion, nextState, backupTargetItemId);
 }
 
 async function getOwnedTripProjectForSession(session: { userId: string }, tripProjectId: string) {
@@ -797,81 +712,14 @@ function normalizeTripDate(value: string | null | undefined) {
 // values to the *InTransaction helpers (which accept ReturnType<typeof
 // normalizePlanItem> / normalizeConstraints directly).
 export function normalizePlanItem(input: InternalPlanItemInput) {
-  const label = normalizeRequiredSingleLine(input.label, 160, "plan item label");
-  const notes = normalizeNullableSingleLine(input.notes, 1_000, "plan item notes");
-  const transportOriginLabel = normalizeNullableSingleLine(input.transportOriginLabel, 160, "transport origin");
-  const transportDestinationLabel = normalizeNullableSingleLine(input.transportDestinationLabel, 160, "transport destination");
-  const accommodationPlaceAreaLabel = normalizeNullableSingleLine(input.accommodationPlaceAreaLabel, 160, "accommodation area");
-  const isAnchor = input.kind === "anchor";
-  const validAnchorRoles: TripPlanAnchorRole[] = ["origin", "destination", "region", "required_stop", "accommodation"];
-  const validTypes: TripPlanItemType[] = ["transport", "visit", "food", "rest", "accommodation"];
-  if ((isAnchor && (!input.anchorRole || !validAnchorRoles.includes(input.anchorRole) || input.type)) || (!isAnchor && (!input.type || !validTypes.includes(input.type) || input.anchorRole))) throw new Error("Invalid trip plan discriminator.");
-  if (!Number.isInteger(input.ordinal) || input.ordinal < 0) throw new Error("Invalid trip plan ordinal.");
-  if ((input.state === "backup") !== Boolean(input.backupTargetItemId)) throw new Error("Invalid trip plan backup target.");
-  if (input.type !== "transport" && (transportOriginLabel || transportDestinationLabel)) throw new Error("Invalid trip plan transport location.");
-  if (input.type !== "accommodation" && accommodationPlaceAreaLabel) throw new Error("Invalid trip plan accommodation location.");
-  return { ...input, label, notes, transportOriginLabel, transportDestinationLabel, accommodationPlaceAreaLabel, anchorRole: input.anchorRole ?? null, type: input.type ?? null, parentItemId: input.parentItemId ?? null, backupTargetItemId: input.backupTargetItemId ?? null, plannedAt: input.plannedAt ?? null };
-}
-
-async function lockAggregate(transaction: Transaction, tripProjectId: string, userId: string, expectedAggregateVersion: number): Promise<{ success: true; version: number } | Extract<AggregateMutationResult, { success: false }>> {
-  const [project] = await transaction.select({ version: tripProjects.aggregateVersion }).from(tripProjects).where(and(eq(tripProjects.id, tripProjectId), eq(tripProjects.userId, userId))).limit(1).for("update");
-  if (!project) return { success: false, reason: "not_found" };
-  if (project.version !== expectedAggregateVersion) return { success: false, reason: "refresh_required" };
-  return { success: true, version: project.version };
-}
-
-async function advanceAggregate(transaction: Transaction, tripProjectId: string, userId: string, version: number) {
-  const aggregateVersion = version + 1;
-  await transaction.update(tripProjects).set({ aggregateVersion, updatedAt: new Date() }).where(and(eq(tripProjects.id, tripProjectId), eq(tripProjects.userId, userId)));
-  return aggregateVersion;
-}
-
-async function recordAggregateAudit(transaction: Transaction, actor: { userId: string; email: string }, operation: "create" | "update" | "delete", targetType: string, targetId: string, tripProjectId: string, aggregateVersion: number, count?: number) {
-  await recordAuditEvent({ actor: toUserAuditActor({ userId: actor.userId, email: actor.email }), operation, targetType, targetId, afterSummary: JSON.stringify({ tripProjectId, aggregateVersion, ...(count === undefined ? {} : { count }) }) }, transaction);
-}
-
-async function validatePlanReferences(transaction: Transaction, tripProjectId: string, userId: string, values: ReturnType<typeof normalizePlanItem>, itemId?: string) {
-  // Load every plan item in the project once and delegate the same-project
-  // parent/backup/no-cycle rules to the pure shared helper in plan-references.ts.
-  // This keeps the DB-backed command path and the proposal validator (which uses
-  // already-loaded knownItems) on the exact same rule set, avoiding divergence
-  // (Story 7.4 review finding 9).
-  const rows = await transaction
-    .select({ id: tripPlanItems.id, kind: tripPlanItems.kind, tripProjectId: tripPlanItems.tripProjectId, backupTargetItemId: tripPlanItems.backupTargetItemId })
-    .from(tripPlanItems)
-    .where(and(eq(tripPlanItems.tripProjectId, tripProjectId), eq(tripPlanItems.userId, userId)));
-  const error = validatePlanReferencesRules(tripProjectId, { kind: values.kind, parentItemId: values.parentItemId, backupTargetItemId: values.backupTargetItemId }, rows, itemId);
-  if (error) throw new Error(error);
+  return normalizeDatabasePlanItem(input);
 }
 
 // Story 7.5: exported so the apply orchestrator can normalize a proposal's
 // constraints draft before delegating to upsertInternalTripProjectConstraintsInTransaction.
 export function normalizeConstraints(input: unknown) {
-  const allowed = new Set(["adultCount", "childCount", "children", "vehicleType", "evChargingNeed", "drivingToleranceHours", "budgetCurrency", "budgetMinVnd", "budgetMaxVnd", "preferenceTags", "avoidItems"]);
-  if (!isPlainRecord(input) || Object.keys(input).some((key) => !allowed.has(key))) throw new Error("Invalid trip constraints fields.");
-  const values = input as InternalConstraintsInput;
-  const adultCount = values.adultCount ?? null; const childCount = values.childCount ?? null;
-  if (!Number.isInteger(adultCount ?? 0) || !Number.isInteger(childCount ?? 0) || (adultCount === null && childCount === null) || (adultCount ?? 0) + (childCount ?? 0) < 1 || (adultCount ?? 0) + (childCount ?? 0) > 20) throw new Error("Invalid trip constraints travelers.");
-  if (values.vehicleType !== null && values.vehicleType !== undefined && !["car", "motorcycle", "ev"].includes(values.vehicleType)) throw new Error("Invalid trip constraints vehicle.");
-  if (values.evChargingNeed !== null && values.evChargingNeed !== undefined && (!["none", "preferred", "required"].includes(values.evChargingNeed) || values.vehicleType !== "ev")) throw new Error("Invalid trip constraints EV need.");
-  if (values.drivingToleranceHours !== null && values.drivingToleranceHours !== undefined && (!Number.isInteger(values.drivingToleranceHours) || values.drivingToleranceHours < 1 || values.drivingToleranceHours > 12)) throw new Error("Invalid trip constraints driving tolerance.");
-  const hasBudget = values.budgetMinVnd !== null && values.budgetMinVnd !== undefined || values.budgetMaxVnd !== null && values.budgetMaxVnd !== undefined || values.budgetCurrency !== null && values.budgetCurrency !== undefined;
-  if (hasBudget && (values.budgetCurrency !== "VND" || !Number.isInteger(values.budgetMinVnd) || !Number.isInteger(values.budgetMaxVnd) || values.budgetMinVnd! < 0 || values.budgetMaxVnd! < values.budgetMinVnd! || values.budgetMaxVnd! > 1_000_000_000)) throw new Error("Invalid trip constraints budget.");
-  const childComfortTags = new Set(["car_seat", "stroller", "nap_breaks", "short_drive_blocks", "quiet_time"]);
-  const childPreferenceTags = new Set(["animals", "beach", "culture", "food", "nature", "outdoor", "playground"]);
-  const preferenceTags = new Set(["beach", "culture", "family_friendly", "food", "nature", "quiet", "road_trip", "scenic_route"]);
-  if (values.children !== null && values.children !== undefined && (!Array.isArray(values.children) || values.children.length > 10 || values.children.some((child) => !isChildConstraint(child, childComfortTags, childPreferenceTags)))) throw new Error("Invalid trip constraints children.");
-  if (values.preferenceTags !== null && values.preferenceTags !== undefined && (!Array.isArray(values.preferenceTags) || values.preferenceTags.length > 20 || new Set(values.preferenceTags).size !== values.preferenceTags.length || values.preferenceTags.some((tag) => !preferenceTags.has(tag)))) throw new Error("Invalid trip constraints preferences.");
-  if (values.avoidItems !== null && values.avoidItems !== undefined && (!Array.isArray(values.avoidItems) || values.avoidItems.length > 20 || values.avoidItems.some((item) => !isAvoidItem(item)))) throw new Error("Invalid trip constraints avoid items.");
-  return { adultCount, childCount, children: values.children ?? null, vehicleType: values.vehicleType ?? null, evChargingNeed: values.evChargingNeed ?? null, drivingToleranceHours: values.drivingToleranceHours ?? null, budgetCurrency: values.budgetCurrency ?? null, budgetMinVnd: values.budgetMinVnd ?? null, budgetMaxVnd: values.budgetMaxVnd ?? null, preferenceTags: values.preferenceTags ?? null, avoidItems: values.avoidItems ?? null };
+  return normalizeDatabaseConstraints(input);
 }
-
-function normalizeRequiredSingleLine(value: string, maxLength: number, field: string) { const normalized = normalizeNullableSingleLine(value, maxLength, field); if (!normalized) throw new Error(`Invalid trip plan ${field}.`); return normalized; }
-function normalizeNullableSingleLine(value: string | null | undefined, maxLength: number, field: string) { if (value === null || value === undefined) return null; const normalized = value.trim(); if (!normalized || normalized.length > maxLength || /[\r\n]/.test(normalized)) throw new Error(`Invalid trip plan ${field}.`); return normalized; }
-function isPlainRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype; }
-function isChildConstraint(value: unknown, comfortTags: Set<string>, preferenceTags: Set<string>): value is { ageMin: number; ageMax: number; comfortTags: string[]; preferenceTags: string[] } { if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).sort().join(",") !== "ageMax,ageMin,comfortTags,preferenceTags") return false; const child = value as { ageMin?: unknown; ageMax?: unknown; comfortTags?: unknown; preferenceTags?: unknown }; return Number.isInteger(child.ageMin) && Number.isInteger(child.ageMax) && (child.ageMin as number) >= 0 && (child.ageMax as number) <= 17 && (child.ageMin as number) <= (child.ageMax as number) && isTagArray(child.comfortTags, comfortTags, 6) && isTagArray(child.preferenceTags, preferenceTags, 6); }
-function isTagArray(value: unknown, allowed: Set<string>, maxLength: number): value is string[] { return Array.isArray(value) && value.length <= maxLength && new Set(value).size === value.length && value.every((tag) => typeof tag === "string" && allowed.has(tag)); }
-function isAvoidItem(value: unknown): boolean { if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).sort().join(",") !== "category,label") return false; const item = value as { category?: unknown; label?: unknown }; return (item.category === "place" || item.category === "activity") && typeof item.label === "string" && item.label.trim().length > 0 && item.label.trim().length <= 120 && !/[\r\n]/.test(item.label); }
 
 function formatTripProjectAuditSummary(project: Pick<OwnedTripProjectSummary, "title" | "origin" | "destination" | "startDate" | "endDate" | "travelers" | "notes">) {
   return JSON.stringify({

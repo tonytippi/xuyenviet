@@ -1,12 +1,15 @@
 import postgres from "postgres";
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
 import { resolvePlanningAnnotationCapabilities, sanitizeStoredPlanningAnnotations, type AiAskStreamExecutionPort, type PlanningReadRepository, type UserRoleGovernancePort, type UserRoleGovernanceTransactionPort, UserRoleGovernancePolicyError } from "@xuyenviet/domain";
-import { and, asc, count, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { loadAnswerContext } from "./answer-context";
 import { formatAssistantMessageProvenance } from "./provenance";
-import { aiUsageEvents, answerUsefulnessFeedback, assistantResponseProvenance, chatContext, conversations, messageImageAttachments, messages, tripChangeProposals, tripProjectConstraints, tripProjects } from "./schema";
+import { answerUsefulnessFeedback, assistantResponseProvenance, conversations, messages, tripChangeProposals, tripPlanChangeHistory, tripPlanItems, tripProjectConstraints, tripProjects, users } from "./schema";
 import { adminUserRosterPageSize, encodeAdminUserRosterCursor, evaluateSchemaAdmission, parsePlanningAnswerDetailResponse, planningDetailProvenanceLimit, type AdminIdentityHandoff, type PlanningJsonValue, type PlanningProvenance, type RequestRole, type SchemaCompatibilityDeclaration, type TravelerShellProjection, type TripAnswerContextResponse } from "@xuyenviet/contracts";
 import { createAiAskStreamExecutionPort } from "./ai-ask-stream-execution";
+import { discardAiAskCommandsForDeletedConversations } from "./ai-ask-commands";
+import { recordAuditEvent } from "./audit-writers";
+import { toUserAuditActor } from "./actors";
 import type { TravelerCommandPort } from "@xuyenviet/domain";
 
 const answerUsefulnessCommentMaxLength = 500;
@@ -17,6 +20,7 @@ export * from "./answer-context";
 export * from "./answer-freshness";
 export * from "./approved-knowledge";
 export * from "./assistant-provenance-withdrawal";
+export * from "./audit-writers";
 export * from "./actors";
 export * from "./client";
 export * from "./domain-outbox";
@@ -33,6 +37,9 @@ export * from "./usage";
 export * from "./usage-constants";
 export * from "./usage-events";
 export * from "./web-search";
+export * from "./trip-plan-commands";
+export * from "./plan-references";
+export * from "./traveler-proposal-commands";
 
 export type ApiIdentityRecord = {
   userId: string;
@@ -119,14 +126,26 @@ export function createPostgresTravelerShellRepository(): TravelerShellRepository
       const [project] = tripProjectId ? await db.select({ id: tripProjects.id, title: tripProjects.title, origin: tripProjects.origin, destination: tripProjects.destination, startDate: tripProjects.startDate, endDate: tripProjects.endDate, travelers: tripProjects.travelers, primaryConversationId: tripProjects.primaryConversationId }).from(tripProjects).where(and(eq(tripProjects.id, tripProjectId), eq(tripProjects.userId, userId))).limit(1) : [];
       const selectedConversationId = project?.primaryConversationId ?? conversationId;
       const [conversation] = selectedConversationId ? await db.select({ id: conversations.id, tripProjectId: conversations.tripProjectId }).from(conversations).where(and(eq(conversations.id, selectedConversationId), eq(conversations.userId, userId))).limit(1) : [];
-      if (project && (!conversation || conversation.tripProjectId !== project.id)) return { conversation: null, tripProject: null };
+      if (project && (!conversation || conversation.tripProjectId !== project.id)) return { conversation: null, tripProject: null, workspace: null };
       // The API contract exposes at most 200 messages. Select the latest window
       // first, then restore chronological order for the rendered conversation.
       const recentMessages = conversation ? await db.select({ id: messages.id, role: messages.role, content: messages.content, createdAt: messages.createdAt }).from(messages).where(and(eq(messages.conversationId, conversation.id), eq(messages.userId, userId))).orderBy(desc(messages.createdAt), desc(messages.id)).limit(200) : [];
       const ownedMessages = recentMessages.reverse();
+      if (project) await db.transaction(async (transaction) => {
+        const elapsed = await transaction.select({ id: tripChangeProposals.id }).from(tripChangeProposals).where(and(eq(tripChangeProposals.tripProjectId, project.id), eq(tripChangeProposals.userId, userId), eq(tripChangeProposals.status, "pending"), sql`${tripChangeProposals.expiresAt} is not null and ${tripChangeProposals.expiresAt} <= now()`));
+        const { expireTripChangeProposalInTransaction } = await import("./traveler-proposal-commands");
+        for (const proposal of elapsed) await expireTripChangeProposalInTransaction(transaction, { tripProjectId: project.id, proposalId: proposal.id });
+      });
+      const proposalRows = project ? await db.select({ id: tripChangeProposals.id, rationale: tripChangeProposals.rationale, expiresAt: tripChangeProposals.expiresAt, createdAt: tripChangeProposals.createdAt, operations: tripChangeProposals.operations, alternatives: tripChangeProposals.alternatives }).from(tripChangeProposals).where(and(eq(tripChangeProposals.tripProjectId, project.id), eq(tripChangeProposals.userId, userId), eq(tripChangeProposals.status, "pending"), sql`(${tripChangeProposals.expiresAt} is null or ${tripChangeProposals.expiresAt} > now())`)).orderBy(asc(tripChangeProposals.createdAt), asc(tripChangeProposals.id)).limit(20) : [];
+      const items = project ? await db.select({ id: tripPlanItems.id, kind: tripPlanItems.kind, anchorRole: tripPlanItems.anchorRole, type: tripPlanItems.type, label: tripPlanItems.label, notes: tripPlanItems.notes, ordinal: tripPlanItems.ordinal, state: tripPlanItems.state, plannedAt: tripPlanItems.plannedAt, parentItemId: tripPlanItems.parentItemId, transportOriginLabel: tripPlanItems.transportOriginLabel, transportDestinationLabel: tripPlanItems.transportDestinationLabel, accommodationPlaceAreaLabel: tripPlanItems.accommodationPlaceAreaLabel, createdAt: tripPlanItems.createdAt }).from(tripPlanItems).where(and(eq(tripPlanItems.tripProjectId, project.id), eq(tripPlanItems.userId, userId))).orderBy(asc(tripPlanItems.ordinal), asc(tripPlanItems.id)).limit(60) : [];
+      const pendingProposals = proposalRows.map((proposal) => projectPendingProposal(proposal, items));
+      const first = pendingProposals.filter((proposal) => !proposal.expiresAt || new Date(proposal.expiresAt).getTime() > Date.now()).sort((left, right) => (left.expiresAt ?? left.createdAt).localeCompare(right.expiresAt ?? right.createdAt))[0];
+      const [constraint] = project ? await db.select().from(tripProjectConstraints).where(and(eq(tripProjectConstraints.tripProjectId, project.id), eq(tripProjectConstraints.userId, userId))).limit(1) : [];
+      const history = project ? await db.select({ proposalId: tripPlanChangeHistory.proposalId, operationClass: tripPlanChangeHistory.operationClass, actorClass: tripPlanChangeHistory.actorClass, actorSystem: tripPlanChangeHistory.actorSystem, affected: tripPlanChangeHistory.affectedItemReferences, summary: tripPlanChangeHistory.safeBeforeAfterSummary, createdAt: tripPlanChangeHistory.createdAt }).from(tripPlanChangeHistory).where(and(eq(tripPlanChangeHistory.tripProjectId, project.id), eq(tripPlanChangeHistory.userId, userId))).orderBy(desc(tripPlanChangeHistory.createdAt)).limit(20) : [];
       return {
         conversation: conversation ? { ...conversation, messages: ownedMessages.map((message) => ({ ...message, content: message.content ?? "" })) } : null,
         tripProject: project ? project : null,
+        workspace: project ? { focus: first ? { kind: first.expiresAt ? "pending-proposal-with-expiry" : "pending-proposal", proposalId: first.id, reason: first.rationale ?? "Có đề xuất thay đổi kế hoạch", sortKey: `0|${first.id}` } : { kind: "preparation", reason: "Chuẩn bị cho chuyến đi", sortKey: "5|" }, timelineGroups: [{ dateDivider: null, legId: null, entries: items.map((item) => ({ id: item.id, kind: item.kind, anchorRole: item.anchorRole, type: item.type, state: item.state, stateLabel: item.state, typeLabel: item.type ?? item.kind, label: item.label, plannedAt: item.plannedAt?.toISOString() ?? null, timeContext: item.plannedAt?.toISOString() ?? null, placeContext: item.type === "transport" ? [item.transportOriginLabel, item.transportDestinationLabel].filter(Boolean).join(" → ").slice(0, 500) || null : item.accommodationPlaceAreaLabel?.slice(0, 500) ?? null, notesPreview: item.notes?.slice(0, 80) ?? null, parentItemId: item.parentItemId, ordinal: item.ordinal, depth: item.parentItemId ? 1 : 0 })) }], constraints: constraint ? { adultCount: constraint.adultCount, childCount: constraint.childCount, childrenSummary: workspaceChildren(constraint.children), vehicleType: constraint.vehicleType === "car" || constraint.vehicleType === "motorcycle" || constraint.vehicleType === "ev" ? constraint.vehicleType : null, evChargingNeed: constraint.evChargingNeed === "none" || constraint.evChargingNeed === "preferred" || constraint.evChargingNeed === "required" ? constraint.evChargingNeed : null, drivingToleranceHours: constraint.drivingToleranceHours, budgetCurrency: constraint.budgetCurrency === "VND" ? "VND" : null, budgetMinVnd: constraint.budgetMinVnd, budgetMaxVnd: constraint.budgetMaxVnd, preferenceTags: workspacePreferenceTags(constraint.preferenceTags), avoidItems: workspaceAvoidItems(constraint.avoidItems) } : null, planHistory: history.map((row) => ({ proposalId: row.proposalId, operationLabel: row.operationClass, actorLabel: row.actorClass === "system" ? "Hệ thống" : "Bạn", timestampLabel: row.createdAt.toISOString(), affectedItemLabels: workspaceHistoryLabels(row.affected), beforeAfter: isHistoryEntries(row.summary) })), pendingProposals } : null,
       };
     },
   };
@@ -150,8 +169,10 @@ export function createPostgresTravelerCommandPort(): TravelerCommandPort {
       if (!title || title.length > 160 || [startDate, endDate, origin, destination, travelers, notes].some((value) => value === undefined) || startDate && (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || Number.isNaN(Date.parse(startDate))) || endDate && (!/^\d{4}-\d{2}-\d{2}$/.test(endDate) || Number.isNaN(Date.parse(endDate))) || startDate && endDate && startDate > endDate) return { success: false, reason: "invalid_input" };
       try {
         const project = await (await import("./client")).getDb().transaction(async (transaction) => {
+          const [actor] = await transaction.select({ email: users.email }).from(users).where(eq(users.id, userId)).limit(1);
+          if (!actor?.email) throw new Error("Audit actor unavailable.");
           const [created] = await transaction.insert(tripProjects).values({ userId, title, origin, destination, startDate, endDate, travelers, notes }).returning();
-          await transaction.insert((await import("./schema")).auditEvents).values({ id: randomUUID(), actorUserId: userId, actorClass: "user", operation: "create", targetType: "trip_project", targetId: created!.id, afterSummary: JSON.stringify({ id: created!.id, title }) });
+          await recordAuditEvent({ actor: toUserAuditActor({ userId, email: actor.email }), operation: "create", targetType: "trip_project", targetId: created!.id, afterSummary: JSON.stringify({ titleLength: created!.title.length, hasOrigin: Boolean(created!.origin), hasDestination: Boolean(created!.destination), hasStartDate: Boolean(created!.startDate), hasEndDate: Boolean(created!.endDate), hasTravelers: Boolean(created!.travelers), hasNotes: Boolean(created!.notes) }) }, transaction);
           return created!;
         });
         return { success: true, project: { id: project.id, title: project.title, origin: project.origin, destination: project.destination, startDate: project.startDate, endDate: project.endDate, travelers: project.travelers, notes: project.notes, updatedAt: project.updatedAt.toISOString() } };
@@ -161,21 +182,23 @@ export function createPostgresTravelerCommandPort(): TravelerCommandPort {
       if (!validTravelerIdentifier(conversationId)) return { success: false, reason: "not_found" };
       try {
         return await (await import("./client")).getDb().transaction(async (transaction) => {
-          const [conversation] = await transaction.select({ id: conversations.id, tripProjectId: conversations.tripProjectId }).from(conversations).where(and(eq(conversations.id, conversationId), eq(conversations.userId, userId))).limit(1).for("update");
+           const [actor] = await transaction.select({ email: users.email }).from(users).where(eq(users.id, userId)).limit(1); if (!actor?.email) throw new Error("Audit actor unavailable.");
+           const [conversation] = await transaction.select({ id: conversations.id, tripProjectId: conversations.tripProjectId }).from(conversations).where(and(eq(conversations.id, conversationId), eq(conversations.userId, userId))).limit(1).for("update");
           if (!conversation) return { success: false, reason: "not_found" } as const;
-          if (conversation.tripProjectId) {
+           if (conversation.tripProjectId) {
             const [project] = await transaction.select({ id: tripProjects.id, primaryConversationId: tripProjects.primaryConversationId }).from(tripProjects).where(and(eq(tripProjects.id, conversation.tripProjectId), eq(tripProjects.userId, userId))).limit(1).for("update");
             if (project?.primaryConversationId === conversation.id) {
               const [next] = await transaction.select({ id: conversations.id }).from(conversations).where(and(eq(conversations.tripProjectId, project.id), eq(conversations.userId, userId), sql`${conversations.id} <> ${conversation.id}`)).orderBy(desc(conversations.updatedAt), desc(conversations.id)).limit(1);
               const replacement = next ?? (await transaction.insert(conversations).values({ userId, tripProjectId: project.id }).returning({ id: conversations.id }))[0]!;
               await transaction.update(conversations).set({ lifecycleVersion: sql`${conversations.lifecycleVersion} + 1`, updatedAt: new Date() }).where(eq(conversations.id, replacement.id));
               await transaction.update(tripProjects).set({ primaryConversationId: replacement.id, aggregateVersion: sql`${tripProjects.aggregateVersion} + 1`, updatedAt: new Date() }).where(eq(tripProjects.id, project.id));
-            }
-          }
-          await transaction.update(conversations).set({ lifecycleVersion: sql`${conversations.lifecycleVersion} + 1`, updatedAt: new Date() }).where(eq(conversations.id, conversation.id));
+             }
+           }
+           await discardAiAskCommandsForDeletedConversations(transaction, userId, [conversation.id]);
+           await transaction.update(conversations).set({ lifecycleVersion: sql`${conversations.lifecycleVersion} + 1`, updatedAt: new Date() }).where(eq(conversations.id, conversation.id));
           const deleted = await transaction.delete(conversations).where(and(eq(conversations.id, conversation.id), eq(conversations.userId, userId))).returning({ id: conversations.id });
           if (deleted.length !== 1) return { success: false, reason: "not_found" } as const;
-          await transaction.insert((await import("./schema")).auditEvents).values({ id: randomUUID(), actorUserId: userId, actorClass: "user", operation: "delete", targetType: "conversation", targetId: conversation.id, afterSummary: JSON.stringify({ deleted: true }) });
+           await recordAuditEvent({ actor: toUserAuditActor({ userId, email: actor.email }), operation: "delete", targetType: "conversation", targetId: conversation.id, afterSummary: JSON.stringify({ deleted: true }) }, transaction);
           return { success: true } as const;
         });
       } catch { return { success: false, reason: "failed" }; }
@@ -184,15 +207,18 @@ export function createPostgresTravelerCommandPort(): TravelerCommandPort {
       if (!validTravelerIdentifier(tripProjectId)) return { success: false, reason: "not_found" };
       try {
         return await (await import("./client")).getDb().transaction(async (transaction) => {
+          const [actor] = await transaction.select({ email: users.email }).from(users).where(eq(users.id, userId)).limit(1); if (!actor?.email) throw new Error("Audit actor unavailable.");
           const [project] = await transaction.select({ id: tripProjects.id }).from(tripProjects).where(and(eq(tripProjects.id, tripProjectId), eq(tripProjects.userId, userId))).limit(1).for("update");
           if (!project) return { success: false, reason: "not_found" } as const;
-          const [linkedConversationCount] = await transaction.select({ count: count() }).from(conversations).where(and(eq(conversations.tripProjectId, project.id), eq(conversations.userId, userId)));
+          const linkedConversations = await transaction.select({ id: conversations.id }).from(conversations).where(and(eq(conversations.tripProjectId, project.id), eq(conversations.userId, userId))).for("update");
+          const linkedConversationCount = linkedConversations.length;
           await transaction.update(tripProjects).set({ primaryConversationId: null, aggregateVersion: sql`${tripProjects.aggregateVersion} + 1`, updatedAt: new Date() }).where(eq(tripProjects.id, project.id));
           await transaction.update(conversations).set({ lifecycleVersion: sql`${conversations.lifecycleVersion} + 1`, updatedAt: new Date() }).where(and(eq(conversations.tripProjectId, project.id), eq(conversations.userId, userId)));
+          await discardAiAskCommandsForDeletedConversations(transaction, userId, linkedConversations.map((conversation) => conversation.id));
           await transaction.delete(conversations).where(and(eq(conversations.tripProjectId, project.id), eq(conversations.userId, userId)));
           const deleted = await transaction.delete(tripProjects).where(and(eq(tripProjects.id, project.id), eq(tripProjects.userId, userId))).returning({ id: tripProjects.id });
           if (deleted.length !== 1) return { success: false, reason: "not_found" } as const;
-          await transaction.insert((await import("./schema")).auditEvents).values({ id: randomUUID(), actorUserId: userId, actorClass: "user", operation: "delete", targetType: "trip_project", targetId: project.id, afterSummary: JSON.stringify({ deleted: true, linkedConversationCount: linkedConversationCount?.count ?? 0 }) });
+           await recordAuditEvent({ actor: toUserAuditActor({ userId, email: actor.email }), operation: "delete", targetType: "trip_project", targetId: project.id, afterSummary: JSON.stringify({ deleted: true, linkedConversationCount }) }, transaction);
           return { success: true } as const;
         });
       } catch { return { success: false, reason: "failed" }; }
@@ -210,10 +236,33 @@ export function createPostgresTravelerCommandPort(): TravelerCommandPort {
         });
       } catch { return { success: false, reason: "failed" }; }
     },
+    async applyTripChangeProposal(userId, input) {
+      try { const result = await import("./traveler-proposal-commands").then(({ applyTripChangeProposal }) => applyTripChangeProposal(userId, input)); return result.success ? { success: true, aggregateVersion: result.aggregateVersion, proposalStatus: "applied" } : result; } catch { return { success: false, reason: "failed" }; }
+    },
+    async dismissTripChangeProposal(userId, input) {
+      try { const result = await import("./traveler-proposal-commands").then(({ dismissTripChangeProposal }) => dismissTripChangeProposal(userId, input)); return result.success ? { success: true, proposalStatus: "dismissed" } : result; } catch { return { success: false, reason: "failed" }; }
+    },
+    async executeAnnotationProposalAction(userId, input) {
+      try { const result = await import("./traveler-proposal-commands").then(({ executeAnnotationProposalAction }) => executeAnnotationProposalAction(userId, input)); return result.success ? "aggregateVersion" in result ? { success: true, aggregateVersion: result.aggregateVersion as number, proposalStatus: "applied" } : { success: true, proposalStatus: "dismissed" } : result; } catch { return { success: false, reason: "failed" }; }
+    },
   };
 }
 
 function validTravelerIdentifier(value: string) { return value.length > 0 && value.length <= 128 && value.trim() === value; }
+
+function projectPendingProposal(proposal: { id: string; rationale: string; expiresAt: Date | null; createdAt: Date; operations: unknown; alternatives: unknown }, items: Array<{ id: string; kind: "anchor" | "leg" | "activity"; label: string; ordinal: number; state: string }>) {
+  const byId = new Map(items.map((item) => [item.id, item])); const operations = Array.isArray(proposal.operations) ? proposal.operations : [];
+  const affectedItems: Array<{ itemId: string; kind: "anchor" | "leg" | "activity"; label: string; change: "create" | "update" | "remove" | "reorder" | "change-state" | "upsert-constraints" }> = [];
+  const beforeAfter: Array<{ operation: string; before: string | null; after: string | null }> = [];
+  for (const raw of operations.slice(0, 20)) { if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue; const op = raw as Record<string, unknown>; const item = typeof op.itemId === "string" ? byId.get(op.itemId) : undefined; if (op.kind === "create-item" && op.item && typeof op.item === "object" && !Array.isArray(op.item)) { const draft = op.item as Record<string, unknown>; if (typeof draft.label === "string" && (draft.kind === "anchor" || draft.kind === "leg" || draft.kind === "activity")) { affectedItems.push({ itemId: "(mới)", kind: draft.kind, label: draft.label.slice(0, 160), change: "create" }); beforeAfter.push({ operation: "Tạo mục mới", before: null, after: draft.label.slice(0, 160) }); } } else if (op.kind === "upsert-constraints") { affectedItems.push({ itemId: "constraints", kind: "activity", label: "Ràng buộc", change: "upsert-constraints" }); beforeAfter.push({ operation: "Cập nhật ràng buộc", before: null, after: null }); } else if (item && typeof op.kind === "string") { const change = op.kind === "update-item" ? "update" : op.kind === "remove-item" ? "remove" : op.kind === "reorder-item" ? "reorder" : op.kind === "change-item-state" ? "change-state" : null; if (!change) continue; affectedItems.push({ itemId: item.id, kind: item.kind, label: item.label, change }); beforeAfter.push({ operation: change === "remove" ? "Xoá mục" : change === "reorder" ? `Sắp xếp lại · ${item.label}` : change === "change-state" ? `Đổi trạng thái · ${item.label}` : `Cập nhật · ${item.label}`, before: change === "reorder" ? `vị trí ${item.ordinal}` : change === "remove" ? item.label : change === "change-state" ? item.state : null, after: change === "reorder" && typeof op.ordinal === "number" ? `vị trí ${op.ordinal}` : change === "change-state" && typeof op.state === "string" ? op.state : null }); } }
+  const alternatives = Array.isArray(proposal.alternatives) ? proposal.alternatives.flatMap((entry) => entry && typeof entry === "object" && !Array.isArray(entry) && typeof (entry as Record<string, unknown>).summary === "string" ? [{ summary: ((entry as Record<string, unknown>).summary as string).slice(0, 280) }] : []).slice(0, 5) : [];
+  return { id: proposal.id, expiresAt: proposal.expiresAt?.toISOString() ?? null, createdAt: proposal.createdAt.toISOString(), rationale: proposal.rationale, status: "pending" as const, affectedItems, beforeAfter, alternatives, hasAlternatives: alternatives.length > 0 };
+}
+function isHistoryEntries(value: unknown): Array<{ operation: string; before: string | null; after: string | null }> { const entries: unknown[] = value && typeof value === "object" && !Array.isArray(value) && Array.isArray((value as Record<string, unknown>).entries) ? (value as Record<string, unknown>).entries as unknown[] : []; const text = (item: unknown, maximum: number) => typeof item === "string" ? item.trim().slice(0, maximum) || null : null; return entries.slice(0, 20).flatMap((entry: unknown) => { if (!entry || typeof entry !== "object" || Array.isArray(entry)) return []; const item = entry as Record<string, unknown>; const operation = text(item.operation, 500); return operation ? [{ operation, before: text(item.before, 1_000), after: text(item.after, 1_000) }] : []; }); }
+function workspaceHistoryLabels(value: unknown): string[] { return Array.isArray(value) ? value.slice(0, 20).flatMap((item) => item && typeof item === "object" && !Array.isArray(item) && typeof (item as Record<string, unknown>).label === "string" ? [((item as Record<string, unknown>).label as string).trim().slice(0, 160)].filter(Boolean) : []) : []; }
+function workspaceChildren(value: unknown): Array<{ ageRange: string | null; comfortTags: string[]; preferenceTags: string[] }> { return Array.isArray(value) ? value.slice(0, 10).flatMap((child) => { if (!child || typeof child !== "object" || Array.isArray(child)) return []; const item = child as Record<string, unknown>; if (!Number.isInteger(item.ageMin) || !Number.isInteger(item.ageMax) || (item.ageMin as number) < 0 || (item.ageMax as number) > 17 || (item.ageMin as number) > (item.ageMax as number)) return []; const tags = (tags: unknown) => Array.isArray(tags) ? tags.slice(0, 6).flatMap((tag) => typeof tag === "string" && tag.trim() === tag && tag.length > 0 && tag.length <= 160 ? [tag] : []) : []; const ageMin = item.ageMin as number; const ageMax = item.ageMax as number; return [{ ageRange: ageMin === ageMax ? `${ageMin} tuổi` : `${ageMin}-${ageMax} tuổi`, comfortTags: tags(item.comfortTags), preferenceTags: tags(item.preferenceTags) }]; }) : []; }
+function workspacePreferenceTags(value: unknown): string[] { return Array.isArray(value) ? value.slice(0, 20).flatMap((tag) => typeof tag === "string" && tag.trim() === tag && tag.length > 0 && tag.length <= 160 ? [tag] : []) : []; }
+function workspaceAvoidItems(value: unknown): Array<{ category: "place" | "activity"; label: string }> { return Array.isArray(value) ? value.slice(0, 20).flatMap((item) => { if (!item || typeof item !== "object" || Array.isArray(item)) return []; const entry = item as Record<string, unknown>; return (entry.category === "place" || entry.category === "activity") && typeof entry.label === "string" && entry.label.trim() === entry.label && entry.label.length > 0 && entry.label.length <= 120 ? [{ category: entry.category, label: entry.label }] : []; }) : []; }
 
 export function createPostgresReleaseSchemaVersionRepository(databaseUrl: string): ReleaseSchemaVersionRepository {
   const sql = postgres(databaseUrl, { max: 1 });

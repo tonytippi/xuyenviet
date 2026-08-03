@@ -3,7 +3,7 @@ import "server-only";
 import { sql } from "drizzle-orm";
 
 import { getDb } from "@/db/client";
-import { expireTripChangeProposalInTransaction } from "@/features/chat-trips/trip-change-proposals";
+import { expireTripChangeProposalInTransaction } from "@xuyenviet/database";
 
 // Story 7.5: the scheduled expiry worker for elapsed pending Trip Change
 // Proposals. Library code only — no long-running process entrypoint,

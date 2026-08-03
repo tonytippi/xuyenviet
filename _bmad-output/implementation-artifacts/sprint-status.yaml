@@ -330,7 +330,16 @@ development_status:
   # provenance. No duplicate endpoint/writer was retained. Story is blocked pending a
   # complete package extraction of that aggregate; root `/admin` and `apps/admin` remain
   # unchanged and deployment evidence remains Story 14.6.
-  14-2-cut-ai-ask-and-traveler-shell-reads-to-direct-api: in-progress
+  # 2026-08-03: Authorized atomic traveler cutover extracted proposal terminal
+  # commands, plan-item transaction primitives, audit/history writers, annotation
+  # binding, and direct workspace projection into shared contracts/domain/database
+  # ownership. Nest now admits direct create/delete/feedback/apply/dismiss/annotation
+  # commands; the direct shell validates projections strictly and reloads after
+  # terminal commands. Root traveler actions.ts is deleted; retained root Auth.js is
+  # the independent root-admin path only. Focused package/API/direct-shell suite
+  # passed 28 tests with typecheck and diff validation. Full-suite/lint/build review
+  # remains before final story completion; deployment evidence remains Story 14.6.
+  14-2-cut-ai-ask-and-traveler-shell-reads-to-direct-api: review
   14-3-move-traveler-commands-and-remove-root-domain-writers: backlog
   14-4-complete-admin-direct-api-ownership: backlog
   14-5-retire-authjs-bff-runtime-and-legacy-transport: backlog

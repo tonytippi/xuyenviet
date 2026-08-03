@@ -1,6 +1,6 @@
 "use client";
 
-import { parseConversationSummaryListResponse, parseCreateTripProjectCommand, parsePlanningAnswerDetailResponse, parsePlanningContextResponse, parseSafeApiError, parseSaveAnswerUsefulnessFeedbackCommand, parseTravelerShellResponse, type AiAskStreamEvent, type CreateTripProjectCommand, type PlanningAnswerDetailResponse, type PlanningContextResponse, type TravelerShellResponse } from "@xuyenviet/contracts";
+import { parseAnnotationProposalActionCommand, parseAnnotationProposalActionResult, parseApplyTripChangeProposalResult, parseConversationSummaryListResponse, parseCreateTripProjectCommand, parseCreateTripProjectResult, parseDeleteOwnedResourceResult, parseDismissTripChangeProposalResult, parsePlanningAnswerDetailResponse, parsePlanningContextResponse, parseSafeApiError, parseSaveAnswerUsefulnessFeedbackCommand, parseSaveAnswerUsefulnessFeedbackResult, parseTravelerShellResponse, parseTripChangeProposalCommand, type AiAskStreamEvent, type AnnotationProposalActionCommand, type CreateTripProjectCommand, type PlanningAnswerDetailResponse, type PlanningContextResponse, type TripChangeProposalCommand, type TravelerShellResponse } from "@xuyenviet/contracts";
 
 let csrfToken: string | null = null;
 
@@ -60,36 +60,49 @@ async function directCommand<T>(path: string, method: "POST" | "DELETE", body?: 
   return payload as T;
 }
 
-function isDeleteResult(value: unknown): value is { success: boolean; reason?: "not_found" | "failed" } {
-  return Boolean(value) && typeof value === "object" && (value as { success?: unknown }).success === true || Boolean(value) && typeof value === "object" && (value as { success?: unknown }).success === false && (["not_found", "failed"] as unknown[]).includes((value as { reason?: unknown }).reason);
-}
-
 export async function createDirectTripProject(input: CreateTripProjectCommand) {
   const command = parseCreateTripProjectCommand(input);
   if (!command) return { success: false as const, reason: "invalid_input" as const };
   const result = await directCommand<unknown>("/v1/trip-projects", "POST", command);
-  if (!result || typeof result !== "object" || ![true, false].includes((result as { success?: unknown }).success as boolean)) throw new DirectApiError();
-  return result as { success: boolean; reason?: "invalid_input" | "failed"; project?: { id: string } };
+  const parsed = parseCreateTripProjectResult(result); if (!parsed) throw new DirectApiError(); return parsed;
 }
 
 export async function deleteDirectConversation(conversationId: string) {
   const result = await directCommand<unknown>(`/v1/conversations/${encodeURIComponent(conversationId)}`, "DELETE");
-  if (!isDeleteResult(result)) throw new DirectApiError();
-  return result;
+  const parsed = parseDeleteOwnedResourceResult(result); if (!parsed) throw new DirectApiError(); return parsed;
 }
 
 export async function deleteDirectTripProject(tripProjectId: string) {
   const result = await directCommand<unknown>(`/v1/trip-projects/${encodeURIComponent(tripProjectId)}`, "DELETE");
-  if (!isDeleteResult(result)) throw new DirectApiError();
-  return result;
+  const parsed = parseDeleteOwnedResourceResult(result); if (!parsed) throw new DirectApiError(); return parsed;
 }
 
 export async function saveDirectAnswerUsefulnessFeedback(input: { assistantMessageId: string; rating: "useful" | "not_useful"; comment?: string | null }) {
   const command = parseSaveAnswerUsefulnessFeedbackCommand(input);
   if (!command) return { success: false as const, reason: "invalid_input" as const };
   const result = await directCommand<unknown>("/v1/answer-usefulness-feedback", "POST", command);
-  if (!result || typeof result !== "object" || typeof (result as { success?: unknown }).success !== "boolean") throw new DirectApiError();
-  return result as { success: boolean; feedback?: { rating: "useful" | "not_useful"; comment: string | null; updatedAt: string }; reason?: "not_found" | "invalid_target" | "invalid_input" | "invalid_rating" | "comment_too_long" | "failed" };
+  const parsed = parseSaveAnswerUsefulnessFeedbackResult(result); if (!parsed) throw new DirectApiError(); return parsed;
+}
+
+export async function applyDirectTripChangeProposal(input: TripChangeProposalCommand) {
+  const command = parseTripChangeProposalCommand(input);
+  if (!command) return { success: false as const, reason: "not_found" as const };
+  const result = await directCommand<unknown>("/v1/trip-change-proposals/apply", "POST", command);
+  const parsed = parseApplyTripChangeProposalResult(result); if (!parsed) throw new DirectApiError(); return parsed;
+}
+
+export async function dismissDirectTripChangeProposal(input: TripChangeProposalCommand) {
+  const command = parseTripChangeProposalCommand(input);
+  if (!command) return { success: false as const, reason: "not_found" as const };
+  const result = await directCommand<unknown>("/v1/trip-change-proposals/dismiss", "POST", command);
+  const parsed = parseDismissTripChangeProposalResult(result); if (!parsed) throw new DirectApiError(); return parsed;
+}
+
+export async function executeDirectAnnotationProposalAction(input: AnnotationProposalActionCommand) {
+  const command = parseAnnotationProposalActionCommand(input);
+  if (!command) return { success: false as const, reason: "not_found" as const };
+  const result = await directCommand<unknown>("/v1/trip-change-proposals/annotation-action", "POST", command);
+  const parsed = parseAnnotationProposalActionResult(result); if (!parsed) throw new DirectApiError(); return parsed;
 }
 
 

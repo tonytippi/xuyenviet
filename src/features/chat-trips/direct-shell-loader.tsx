@@ -3,10 +3,11 @@
 import { useEffect, useState } from "react";
 
 import { AiAskComposer, type DisplayMessage } from "@/features/ai/ai-ask-composer";
-import { DirectApiError, createDirectTripProject, deleteDirectConversation, deleteDirectTripProject, directLogout, loadAnswerDetail, loadConversationSummaries, loadPlanningContext, loadTravelerShell, saveDirectAnswerUsefulnessFeedback } from "@/features/ai/direct-api-client";
+import { DirectApiError, applyDirectTripChangeProposal, createDirectTripProject, deleteDirectConversation, deleteDirectTripProject, directLogout, dismissDirectTripChangeProposal, executeDirectAnnotationProposalAction, loadAnswerDetail, loadConversationSummaries, loadPlanningContext, loadTravelerShell, saveDirectAnswerUsefulnessFeedback } from "@/features/ai/direct-api-client";
 
 export function DirectShellLoader({ initialQuestion, conversationId, historyConversationId, tripProjectId }: { initialQuestion?: string; conversationId?: string; historyConversationId?: string; tripProjectId?: string }) {
   const [state, setState] = useState<{ loading: boolean; expired: boolean; shell?: Awaited<ReturnType<typeof loadTravelerShell>>; messages?: DisplayMessage[]; historyConversation?: { id: string; messages: DisplayMessage[] } | null; planningContext?: Awaited<ReturnType<typeof loadPlanningContext>>["context"]; summaries: Awaited<ReturnType<typeof loadConversationSummaries>> }>({ loading: true, expired: false, summaries: [] });
+  const [refreshGeneration, setRefreshGeneration] = useState(0);
   useEffect(() => {
     let active = true;
     void Promise.all([loadTravelerShell(conversationId, tripProjectId), loadConversationSummaries(), historyConversationId ? loadTravelerShell(historyConversationId) : Promise.resolve(undefined)]).then(async ([shell, summaries, historyShell]) => {
@@ -26,7 +27,7 @@ export function DirectShellLoader({ initialQuestion, conversationId, historyConv
       if (active) setState({ loading: false, expired: false, shell, messages: conversation?.messages, historyConversation, planningContext, summaries });
     }).catch((error: DirectApiError) => { if (active) setState({ loading: false, expired: error.code === "unauthorized" || error.code === "forbidden", summaries: [] }); });
     return () => { active = false; };
-  }, [conversationId, historyConversationId, tripProjectId]);
+  }, [conversationId, historyConversationId, tripProjectId, refreshGeneration]);
   if (state.loading) return <main className="grid min-h-screen place-items-center text-[#4f625a]"><p>Đang tải hành trình của bạn...</p></main>;
   if (!state.shell) return <main className="grid min-h-screen place-items-center px-5 text-center"><div><p className="text-[#17342c]">{state.expired ? "Phiên đăng nhập đã hết hạn." : "Không thể tải hành trình lúc này."}</p><a className="mt-4 inline-block rounded-xl bg-[#1f5f46] px-4 py-3 font-semibold text-white" href="/sign-in?next=/ai-ask">Đăng nhập lại</a></div></main>;
   const conversation = state.shell.shell.conversation;
@@ -49,8 +50,19 @@ export function DirectShellLoader({ initialQuestion, conversationId, historyConv
   }} deleteTripProjectAction={async (id) => {
     const result = await deleteDirectTripProject(id);
     return result.success ? { success: true } : { success: false, ...(result.reason === "not_found" ? { reason: "not_found" as const } : { error: "Không thể xoá dự án chuyến đi lúc này. Vui lòng thử lại." }) };
-  }} saveAnswerUsefulnessFeedbackAction={async (input) => {
+   }} applyTripChangeProposalAction={async (input) => {
+     try { const result = await applyDirectTripChangeProposal(input); if (result.success) setRefreshGeneration((value) => value + 1); return result.success ? result : result.reason === "refresh_required" ? { success: false, reason: "refresh_required" as const, error: "Kế hoạch đã thay đổi — vui lòng làm mới đề xuất." } : { success: false, reason: result.reason === "expired" ? "expired" as const : "not_found" as const, error: "Đề xuất không còn khả dụng." }; } catch { return { success: false, reason: "transient" as const, error: "Lỗi tạm thời — vui lòng thử lại." }; }
+   }} dismissTripChangeProposalAction={async (input) => {
+     try { const result = await dismissDirectTripChangeProposal(input); if (result.success) setRefreshGeneration((value) => value + 1); return result.success ? result : { success: false, reason: result.reason === "expired" ? "expired" as const : "not_found" as const, error: "Đề xuất không còn khả dụng." }; } catch { return { success: false, reason: "transient" as const, error: "Lỗi tạm thời — vui lòng thử lại." }; }
+   }} tripWorkspace={state.shell.shell.workspace ? { ...state.shell.shell.workspace, focus: state.shell.shell.workspace.focus.kind === "preparation" ? state.shell.shell.workspace.focus : { ...state.shell.shell.workspace.focus, proposalId: state.shell.shell.workspace.focus.proposalId! }, timelineGroups: state.shell.shell.workspace.timelineGroups.map((group) => ({ ...group, entries: group.entries.map((entry) => ({ ...entry, plannedAt: entry.plannedAt ? new Date(entry.plannedAt) : null })) })), planHistory: state.shell.shell.workspace.planHistory, pendingProposals: state.shell.shell.workspace.pendingProposals.map((proposal) => ({ ...proposal, createdAt: new Date(proposal.createdAt), expiresAt: proposal.expiresAt ? new Date(proposal.expiresAt) : null })) } as import("@/features/chat-trips/trip-home").TripWorkspaceReadModel : null} executeAnnotationAction={async (input) => {
+     try {
+       const result = await executeDirectAnnotationProposalAction(input as Parameters<typeof executeDirectAnnotationProposalAction>[0]);
+       if (result.success) { setRefreshGeneration((value) => value + 1); return result.proposalStatus === "applied" ? { success: true, aggregateVersion: result.aggregateVersion, proposalStatus: "applied" as const } : { success: true, proposalStatus: "dismissed" as const }; }
+       if (result.reason === "refresh_required") return { success: false, reason: "refresh_required" as const, error: "Kế hoạch đã thay đổi — vui lòng làm mới đề xuất." };
+       return { success: false, reason: result.reason === "expired" ? "expired" as const : "not_found" as const, error: "Đề xuất không còn khả dụng." };
+     } catch { return { success: false, reason: "transient" as const, error: "Lỗi tạm thời — vui lòng thử lại." }; }
+   }} saveAnswerUsefulnessFeedbackAction={async (input) => {
     const result = await saveDirectAnswerUsefulnessFeedback(input);
-    return result.success && result.feedback ? { success: true, feedback: { ...result.feedback, updatedAt: new Date(result.feedback.updatedAt) } } : { success: false, reason: result.reason };
+     return result.success ? { success: true, feedback: { ...result.feedback, updatedAt: new Date(result.feedback.updatedAt) } } : { success: false, reason: result.reason };
   }} signOutAction={logout} /></main>;
 }

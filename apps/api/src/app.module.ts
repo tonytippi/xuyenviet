@@ -67,4 +67,4 @@ const unavailablePlanningReads: PlanningReadRepository = {
   async loadOwnedPlanningContext() { return null; },
   async loadOwnedAnswerDetail() { return null; },
 };
-const unavailableTravelerShells: TravelerShellRepository = { async loadOwnedTravelerShell() { return { conversation: null, tripProject: null }; } };
+const unavailableTravelerShells: TravelerShellRepository = { async loadOwnedTravelerShell() { return { conversation: null, tripProject: null, workspace: null }; } };

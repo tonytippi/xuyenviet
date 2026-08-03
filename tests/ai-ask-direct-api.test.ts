@@ -6,10 +6,20 @@ describe("direct traveler API client", () => {
   afterEach(() => { vi.unstubAllGlobals(); });
 
   test("uses relative cookie-authenticated shell reads", async () => {
-    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ shell: { conversation: null, tripProject: null } }), { status: 200 }));
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ shell: { conversation: null, tripProject: null, workspace: null } }), { status: 200 }));
     vi.stubGlobal("fetch", fetch);
-    await expect(loadTravelerShell("conversation-1")).resolves.toEqual({ shell: { conversation: null, tripProject: null } });
+    await expect(loadTravelerShell("conversation-1")).resolves.toEqual({ shell: { conversation: null, tripProject: null, workspace: null } });
     expect(fetch).toHaveBeenCalledWith("/v1/conversations/shell?conversationId=conversation-1", expect.objectContaining({ credentials: "include" }));
+  });
+
+  test("accepts a non-null production workspace shell", async () => {
+    const workspace = { focus: { kind: "pending-proposal-with-expiry", proposalId: "proposal-1", reason: "Chờ xác nhận", sortKey: "0|proposal-1" }, timelineGroups: [{ dateDivider: "2026-08-03", legId: "leg-1", entries: [{ id: "leg-1", kind: "leg", anchorRole: null, type: "transport", state: "planned", stateLabel: "Đã lên kế hoạch", typeLabel: "Di chuyển", label: "Hà Nội đến Huế", plannedAt: "2026-08-03T08:00:00.000Z", timeContext: "08:00", placeContext: "Hà Nội → Huế", notesPreview: null, parentItemId: null, ordinal: 0, depth: 0 }] }], constraints: { adultCount: 2, childCount: 1, childrenSummary: [{ ageRange: "6 tuổi", comfortTags: ["Ghế ngồi ô tô"], preferenceTags: ["Biển"] }], vehicleType: "car", evChargingNeed: null, drivingToleranceHours: 8, budgetCurrency: "VND", budgetMinVnd: 1000000, budgetMaxVnd: 5000000, preferenceTags: ["Ẩm thực"], avoidItems: [{ category: "activity", label: "Leo núi" }] }, planHistory: [{ proposalId: "proposal-old", operationLabel: "apply", actorLabel: "Người dùng", timestampLabel: "2026-08-02T08:00:00.000Z", affectedItemLabels: ["Hà Nội đến Huế"], beforeAfter: [{ operation: "Cập nhật", before: "A", after: "B" }] }], pendingProposals: [{ id: "proposal-1", expiresAt: "2026-08-04T08:00:00.000Z", createdAt: "2026-08-03T08:00:00.000Z", rationale: "Chờ xác nhận", status: "pending", affectedItems: [{ itemId: "(mới)", kind: "leg", label: "Hà Nội đến Huế", change: "create" }], beforeAfter: [{ operation: "Tạo mục mới", before: null, after: "Hà Nội đến Huế" }], alternatives: [{ summary: "Đi tàu" }], hasAlternatives: true }] };
+    const shell = { conversation: { id: "conversation-1", tripProjectId: "project-1", messages: [{ id: "message-1", role: "assistant", content: "Đã chuẩn bị." }] }, tripProject: { id: "project-1", title: "Hà Nội đến Huế", origin: "Hà Nội", destination: "Huế", startDate: "2026-08-03", endDate: "2026-08-05", travelers: "3 người", primaryConversationId: "conversation-1" }, workspace };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ shell }), { status: 200 })));
+    await expect(loadTravelerShell(undefined, "project-1")).resolves.toEqual({ shell });
+    workspace.pendingProposals[0]!.affectedItems[0]!.change = "update";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ shell }), { status: 200 })));
+    await expect(loadTravelerShell(undefined, "project-1")).rejects.toThrow();
   });
 
   test("obtains CSRF only for a direct stream mutation and preserves NDJSON events", async () => {

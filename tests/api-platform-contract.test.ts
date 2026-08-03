@@ -37,7 +37,7 @@ beforeEach(async () => {
     async loadOwnedPlanningContext(userId, tripProjectId) { return (userId === "user-1" && tripProjectId === "project-1") || (userId === "user-2" && tripProjectId === "foreign-project") ? { version: 1, hasProjectScope: true, tripProjectId, aggregateVersion: 2, primaryConversationId: userId === "user-1" ? "conversation-a" : "conversation-other", anchors: [], planItems: [], constraints: null, currentConversationFacts: [], conflicts: [] } : null; },
     async loadOwnedAnswerDetail(userId, conversationId, assistantMessageId) { return userId === "user-1" && conversationId === "conversation-a" && assistantMessageId === "answer-1" ? { conversationId, assistantMessageId, content: "Nội dung đã hoàn tất.", provenance: [{ id: "withdrawn", rank: 1, availability: "withdrawn", unavailableLabel: "Nguồn này không còn khả dụng.", usedInPrompt: true, citedInAnswer: false }], annotations: [] } : null; },
   };
-  const travelerShells: TravelerShellRepository = { async loadOwnedTravelerShell(userId, conversationId, tripProjectId) { return userId === "user-1" && (conversationId === "conversation-a" || tripProjectId === "project-1") ? { conversation: { id: "conversation-a", tripProjectId: null, messages: [{ id: "message-1", role: "assistant", content: "Nội dung đã hoàn tất." }] }, tripProject: null } : { conversation: null, tripProject: null }; } };
+  const travelerShells: TravelerShellRepository = { async loadOwnedTravelerShell(userId, conversationId, tripProjectId) { return userId === "user-1" && (conversationId === "conversation-a" || tripProjectId === "project-1") ? { conversation: { id: "conversation-a", tripProjectId: null, messages: [{ id: "message-1", role: "assistant", content: "Nội dung đã hoàn tất." }] }, tripProject: null, workspace: null } : { conversation: null, tripProject: null, workspace: null }; } };
   const versions: ReleaseSchemaVersionRepository = {
     async hasCompatibleSchemaVersion(declaration) { return ready && declaration.workload === apiSchemaCompatibility.workload && declaration.minimumVersion === apiSchemaCompatibility.minimumVersion && declaration.maximumVersion === "20260728.1"; },
     async recordSchemaVersion() {},
@@ -48,6 +48,9 @@ beforeEach(async () => {
     async deleteConversation(userId, id) { return userId === "user-1" && id === "conversation-a" ? { success: true } : { success: false, reason: "not_found" }; },
     async deleteTripProject(userId, id) { return userId === "user-1" && id === "project-1" ? { success: true } : { success: false, reason: "not_found" }; },
     async saveAnswerUsefulnessFeedback(userId, input) { return userId === "user-1" && input.assistantMessageId === "answer-1" ? { success: true, feedback: { rating: input.rating, comment: input.comment?.trim() || null, updatedAt: "2026-08-03T00:00:00.000Z" } } : { success: false, reason: "not_found" }; },
+    async applyTripChangeProposal(userId, input) { return userId === "user-1" && input.proposalId === "proposal-1" ? { success: true, aggregateVersion: 3, proposalStatus: "applied" } : { success: false, reason: "not_found" }; },
+    async dismissTripChangeProposal(userId, input) { return userId === "user-1" && input.proposalId === "proposal-1" ? { success: true, proposalStatus: "dismissed" } : { success: false, reason: "not_found" }; },
+    async executeAnnotationProposalAction(userId, input) { return userId === "user-1" && input.annotationId === "trip-change-proposal-apply" ? { success: true, aggregateVersion: 3, proposalStatus: "applied" } : { success: false, reason: "not_found" }; },
   };
   const ApiModule = createApiModule(config, identities, { conversationSummaries: summaries, travelerShells, planningReads, travelerCommands, schemaVersions: versions, aiAskExecution });
   @Module({ imports: [ApiModule] })
@@ -131,9 +134,9 @@ describe("API platform contracts", () => {
 
   test("serves the owner-scoped direct traveler shell projection", async () => {
     const shell = await request(app.getHttpServer()).get("/v1/conversations/shell?conversationId=conversation-a").set("Authorization", `Bearer ${await tokenFor()}`).expect(200);
-    expect(shell.body).toEqual({ shell: { conversation: { id: "conversation-a", tripProjectId: null, messages: [{ id: "message-1", role: "assistant", content: "Nội dung đã hoàn tất." }] }, tripProject: null } });
-    await request(app.getHttpServer()).get("/v1/conversations/shell?conversationId=foreign-conversation").set("Authorization", `Bearer ${await tokenFor()}`).expect(200, { shell: { conversation: null, tripProject: null } });
-    await request(app.getHttpServer()).get("/v1/conversations/shell?conversationId=history-conversation").set("Authorization", `Bearer ${await tokenFor()}`).expect(200, { shell: { conversation: null, tripProject: null } });
+    expect(shell.body).toEqual({ shell: { conversation: { id: "conversation-a", tripProjectId: null, messages: [{ id: "message-1", role: "assistant", content: "Nội dung đã hoàn tất." }] }, tripProject: null, workspace: null } });
+    await request(app.getHttpServer()).get("/v1/conversations/shell?conversationId=foreign-conversation").set("Authorization", `Bearer ${await tokenFor()}`).expect(200, { shell: { conversation: null, tripProject: null, workspace: null } });
+    await request(app.getHttpServer()).get("/v1/conversations/shell?conversationId=history-conversation").set("Authorization", `Bearer ${await tokenFor()}`).expect(200, { shell: { conversation: null, tripProject: null, workspace: null } });
   });
 
   test("streams the execution owner's raw NDJSON bytes through the authenticated versioned API", async () => {

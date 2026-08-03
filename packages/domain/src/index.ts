@@ -1,4 +1,4 @@
-import { conversationSummaryLimit, type AiAskStreamEvent, type AiAskStreamInput, type ConversationSummary, type CreateTripProjectCommand, type CreateTripProjectResult, type DeleteOwnedResourceResult, type PlanningAnswerDetailResponse, type RequestPrincipal, type SaveAnswerUsefulnessFeedbackCommand, type SaveAnswerUsefulnessFeedbackResult, type TripAnswerContextResponse } from "@xuyenviet/contracts";
+import { conversationSummaryLimit, type AiAskStreamEvent, type AiAskStreamInput, type AnnotationProposalActionCommand, type AnnotationProposalActionResult, type ApplyTripChangeProposalResult, type ConversationSummary, type CreateTripProjectCommand, type CreateTripProjectResult, type DeleteOwnedResourceResult, type DismissTripChangeProposalResult, type PlanningAnswerDetailResponse, type RequestPrincipal, type SaveAnswerUsefulnessFeedbackCommand, type SaveAnswerUsefulnessFeedbackResult, type TripAnswerContextResponse, type TripChangeProposalCommand } from "@xuyenviet/contracts";
 
 export type ConversationSummaryRepository = {
   listOwnedConversationSummaryRows(userId: string, limit: number): Promise<Array<{ id: string; updatedAt: Date; messageContent: string | null }>>;
@@ -16,6 +16,9 @@ export type TravelerCommandPort = {
   deleteConversation(userId: string, conversationId: string): Promise<DeleteOwnedResourceResult>;
   deleteTripProject(userId: string, tripProjectId: string): Promise<DeleteOwnedResourceResult>;
   saveAnswerUsefulnessFeedback(userId: string, input: SaveAnswerUsefulnessFeedbackCommand): Promise<SaveAnswerUsefulnessFeedbackResult>;
+  applyTripChangeProposal(userId: string, input: TripChangeProposalCommand): Promise<ApplyTripChangeProposalResult>;
+  dismissTripChangeProposal(userId: string, input: TripChangeProposalCommand): Promise<DismissTripChangeProposalResult>;
+  executeAnnotationProposalAction(userId: string, input: AnnotationProposalActionCommand): Promise<AnnotationProposalActionResult>;
 };
 
 export * from "./planning-detail";

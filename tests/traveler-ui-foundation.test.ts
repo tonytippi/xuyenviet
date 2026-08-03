@@ -53,4 +53,5 @@ describe("traveler UI foundation", () => {
 
     expect(renderToStaticMarkup(createElement(icons.SendIcon))).toContain('aria-hidden="true"');
   });
+
 });
