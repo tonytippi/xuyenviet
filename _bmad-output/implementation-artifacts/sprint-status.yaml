@@ -347,7 +347,16 @@ development_status:
   # 2026-08-03: Added the direct Nest/browser read-only owner for valid current YouTube capture evidence. Strict contracts, `AdminYoutubeCapturePort`, PostgreSQL safe projection, and direct `/v1/admin/knowledge/youtube-captures` queue/detail endpoints replace the root YouTube queue/detail pages and review module. The adapter hydrates validity before count/pagination, redacts URL credentials/sensitive metadata, and emits only bounded evidence. No capture, extraction, ingestion, or browser command was added; scripts and workers remain external owners. Focused contract and PostgreSQL adapter tests, API/admin typechecks and builds, and diff check passed. Story remains blocked by other unmigrated admin operations.
   # 2026-08-03: Final admin clean break removed all apps/admin BFF route handlers, server bridge modules, private/bearer/signer configuration, AdminIdentityController/service handoff, admin issuer verification, and legacy admin session/OAuth repository flows. `/v1/admin/workspace` now admits only direct Nest browser sessions for operator/admin roles; static admin health returns `{ ready: true }`. Focused serial OAuth/browser/workspace/boundary/web-BFF tests passed (47 tests); `pnpm typecheck`, root/admin/API/worker builds, and `git diff --check` passed. Admin build retains two non-blocking pre-existing react-hooks exhaustive-deps warnings. Historic BFF artifacts remain documentation only.
   14-4-complete-admin-direct-api-ownership: done
-  14-5-retire-authjs-bff-runtime-and-legacy-transport: backlog
+  # 2026-08-03: Retired root Auth.js, BFF routes/helpers/credentials, bearer
+  # principal admission, root /admin, legacy root server-action writers, and
+  # direct root database readiness. Nest is browser-session-only and retains
+  # exact Origin/CSRF/OAuth admission. Historical Auth.js session rows are
+  # intentionally retained without migration or deletion. Local unit, serial
+  # integration, lint, typecheck, build, and diff checks are recorded in the
+  # Story 14.5 spec. Review repaired bearer-plus-cookie ambiguity and stale
+  # capture/Worker runbook commands; ingress and cross-site-cookie launch
+  # evidence remains explicitly deferred to Story 14.6.
+  14-5-retire-authjs-bff-runtime-and-legacy-transport: done
   14-6-produce-the-direct-api-launch-evidence-gate: backlog
   epic-14-retrospective: optional
 

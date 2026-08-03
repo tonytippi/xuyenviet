@@ -17,8 +17,7 @@ export class AdminCapabilityGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<{ principal?: RequestPrincipal; requestId?: string }>();
     if (
       !request.principal ||
-      request.principal.transport !== "browser_session" ||
-      !allowsBrowserSession ||
+       !allowsBrowserSession ||
       !permitsAdminCapability(request.principal.roles, capability)
     ) {
       throw new ForbiddenException({ code: "forbidden", message: "Bạn không có quyền thực hiện thao tác này.", requestId: request.requestId ?? crypto.randomUUID() });

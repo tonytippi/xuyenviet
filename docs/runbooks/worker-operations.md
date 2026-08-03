@@ -2,7 +2,7 @@
 
 ## Admission And Health
 
-Run the migration release job before routing traffic or starting `pnpm worker`. It records the sole authoritative `release_schema_versions` row after Drizzle migrations succeed. Web, API, and Worker readiness require that one canonical version to be inside the workload's declared compatibility range.
+Run the migration release job before routing traffic or starting the bundled Worker with `pnpm worker`. The root command builds and starts `@xuyenviet/worker`, which supervises the `knowledge-extraction`, `knowledge-ingestion`, `knowledge-indexing`, and `ai-ask-outbox` adapters. It records the sole authoritative `release_schema_versions` row after Drizzle migrations succeed. Web, API, and Worker readiness require that one canonical version to be inside the workload's declared compatibility range.
 
 - `GET /health/live` proves only that the Worker process runs.
 - `GET /health/ready` requires configuration, PostgreSQL, schema compatibility, and all four loop states. It returns only safe reasons, including `schema_incompatible`.
@@ -37,7 +37,7 @@ For duplicate-poller symptoms, inspect the second poll's `no_work` or `contended
 Before retiring a legacy loop, retain evidence of stable lag, retry behavior, duplicate-poller contention, controlled restart/drain, and lease-expiry recovery. This repository provides local proof only; Epic 14 owns deployed dashboards, alert routing, on-call, Railway evidence, and final legacy retirement.
 
 ```sh
-DATABASE_URL_TEST=... pnpm vitest run tests/schema-compatibility.test.ts tests/web-schema-compatibility.test.ts tests/operational-telemetry.test.ts tests/worker-runtime.test.ts tests/worker-adapter-boundary.test.ts tests/knowledge-extraction-worker.test.ts tests/knowledge-ingestion-jobs.test.ts tests/knowledge-indexing-worker.test.ts tests/domain-outbox.test.ts tests/trip-proposal-expiry-worker.test.ts tests/api-platform-contract.test.ts tests/ai-ask-bff-api.integration.test.ts --maxWorkers=1 --no-file-parallelism
+DATABASE_URL_TEST=... pnpm vitest run tests/schema-compatibility.test.ts tests/web-schema-compatibility.test.ts tests/operational-telemetry.test.ts tests/worker-runtime.test.ts tests/worker-adapter-boundary.test.ts tests/knowledge-extraction-worker.test.ts tests/knowledge-ingestion-jobs.test.ts tests/knowledge-indexing-worker.test.ts tests/domain-outbox.test.ts tests/trip-proposal-expiry-worker.test.ts tests/api-platform-contract.test.ts --maxWorkers=1 --no-file-parallelism
 ```
 
 Repository evidence, recorded 2026-07-31: the serial `DATABASE_URL_TEST` matrix completed with 12 files and 108 tests, including compiled duplicate-poller `SKIP LOCKED` evidence, persisted retry/lag, drain/no-new-claim, and lease recovery. This is local repository proof only. Retain the release command output with the release record; deployed panel and alert evidence remains Epic 14 work.

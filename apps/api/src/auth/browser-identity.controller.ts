@@ -83,7 +83,7 @@ export class BrowserIdentityController {
   csrf(@Headers("cookie") cookie: string | undefined, @Headers("origin") origin: string | undefined, @Principal() principal: RequestPrincipal) {
     const config = this.requiredConfig();
     const sessionId = cookieValue(cookie, config.cookieName);
-    if (!origin || !config.allowedOrigins.includes(origin) || !sessionId || principal.transport !== "browser_session" || principal.sessionId !== sessionId) throw this.denied();
+    if (!origin || !config.allowedOrigins.includes(origin) || !sessionId || principal.sessionId !== sessionId) throw this.denied();
     return { csrfToken: csrfNonce(config, sessionId) };
   }
 
@@ -91,7 +91,7 @@ export class BrowserIdentityController {
   @IdempotentBrowserLogout()
   async logout(@Headers("cookie") cookie: string | undefined, @Principal() principal: RequestPrincipal, @Res() response: CookieResponse): Promise<void> {
     const config = this.requiredConfig(); const sessionId = cookieValue(cookie, config.cookieName);
-    if (!sessionId || principal.transport !== "browser_session" || principal.sessionId !== sessionId) throw this.denied();
+    if (!sessionId || principal.sessionId !== sessionId) throw this.denied();
     try {
       await this.identities.revokeBrowserSession(sessionId);
     } catch {

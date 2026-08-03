@@ -1,38 +1,17 @@
-export const bffIssuers = ["xuyenviet-web-bff"] as const;
-export type BffIssuer = (typeof bffIssuers)[number];
-
-export const apiAudience = "api.railway.internal" as const;
 export const requestRoles = ["traveler", "operator", "admin"] as const;
 export type RequestRole = (typeof requestRoles)[number];
-
-export type InternalCredentialClaims = {
-  sub: string;
-  sid: string;
-  roles: RequestRole[];
-  rv: number;
-  jti: string;
-  iss: BffIssuer;
-  aud: typeof apiAudience;
-  iat: number;
-  nbf: number;
-  exp: number;
-};
 
 export type RequestPrincipal = {
   userId: string;
   sessionId: string;
   roles: RequestRole[];
   authorizationVersion: number;
-  /** Set only by an admission boundary; legacy domain callers remain BFF-shaped. */
-  transport?: "bff_bearer" | "browser_session";
-  issuer?: BffIssuer;
-  tokenId?: string;
 };
 
 export const adminCapabilities = ["admin.workspace.read", "admin.role.governance", "admin.ai-model-catalog.write", "admin.knowledge.write"] as const;
 export type AdminCapability = (typeof adminCapabilities)[number];
 
-/** This declaration is shared by the BFF admission check and API controllers. */
+/** Shared role policy used by API controllers and domain ports. */
 export function permitsAdminCapability(roles: readonly RequestRole[], capability: AdminCapability): boolean {
   if (capability === "admin.workspace.read" || capability === "admin.knowledge.write") return roles.includes("operator") || roles.includes("admin");
   return roles.includes("admin");
@@ -1072,9 +1051,6 @@ function isUtcIsoTimestamp(value: string): boolean {
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString() === value;
 }
 
-export function isBffIssuer(value: unknown): value is BffIssuer {
-  return typeof value === "string" && (bffIssuers as readonly string[]).includes(value);
-}
 
 export function isRequestRole(value: unknown): value is RequestRole {
   return typeof value === "string" && (requestRoles as readonly string[]).includes(value);

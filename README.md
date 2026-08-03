@@ -77,11 +77,7 @@ The public HTTPS Nest API owns Google OAuth, the opaque `__Host-xuyenviet-sessio
    pnpm admin dev
    ```
 
-2. Ensure the Google account is represented in the local database and has the `operator` or `admin` role. To bootstrap the first local administrator after the account exists, set `INITIAL_ADMIN_EMAIL` for the command and run:
-
-   ```bash
-   INITIAL_ADMIN_EMAIL="you@example.com" pnpm bootstrap:initial-admin
-   ```
+2. Ensure the Google account is represented in the local database and has the `operator` or `admin` role.
 
 3. Open an admin page such as `http://localhost:3003/`; an unauthenticated direct API call begins OAuth.
 
@@ -90,7 +86,7 @@ The public HTTPS Nest API owns Google OAuth, the opaque `__Host-xuyenviet-sessio
 The API is a separate process and requires an API-only environment file. Do not give this file to the web, worker, or admin processes.
 
 1. Create `apps/api/.env.local` from `apps/api/.env.example`, then add the API runtime variables below from the deployment secret store or an approved local-development secret set.
-2. Set `DATABASE_URL`, `XV_BFF_CREDENTIAL_CONFIG`, and the `XV_BROWSER_*` OAuth/session/CSRF variables.
+2. Set `DATABASE_URL` and the `XV_BROWSER_*` OAuth/session/CSRF variables.
 4. Build and start the API:
 
 ```bash
@@ -98,7 +94,7 @@ pnpm --filter @xuyenviet/api build
 pnpm api dev
 ```
 
-The API listens on `PORT`, defaulting to `3001`. It is browser-facing over public HTTPS with credentialed CORS restricted to the exact origins in `XV_BROWSER_ALLOWED_ORIGINS`. `XV_BFF_CREDENTIAL_CONFIG` contains only the retained web BFF public ES256 verification configuration. Never use wildcard or prefix origins/return URLs.
+The API listens on `PORT`, defaulting to `3001`. It is browser-facing over public HTTPS with credentialed CORS restricted to the exact origins in `XV_BROWSER_ALLOWED_ORIGINS`. Never use wildcard or prefix origins/return URLs.
 
 Use these endpoints to verify a local API process:
 
@@ -119,7 +115,7 @@ pnpm worker
 pnpm admin dev
 ```
 
-The worker reads `apps/worker/.env.local`, which should be created from `apps/worker/.env.example`. It receives `DATABASE_URL` and only the provider credentials needed by its assigned loops. The admin application reads `apps/admin/.env.local` and needs only `NEXT_PUBLIC_API_ORIGIN`; it must not receive database, Auth.js, OAuth, BFF, bearer, or private-service secrets.
+The worker reads `apps/worker/.env.local`, which should be created from `apps/worker/.env.example`. It receives `DATABASE_URL` and only the provider credentials needed by its assigned loops. The admin application reads `apps/admin/.env.local` and needs only `NEXT_PUBLIC_API_ORIGIN`; it must not receive database, OAuth, bearer, or private-service secrets.
 
 Quality checks:
 
@@ -194,33 +190,23 @@ pnpm db:migrate
 
 `db:generate` and `db:migrate` use `drizzle.config.ts` and `DATABASE_URL`. The repository starts from the consolidated `0000_baseline` migration; all subsequent schema changes must be forward-only migrations.
 
-Operations scripts:
+Worker operations:
 
 ```bash
-pnpm facebook:capture --limit 5
-pnpm youtube:capture --limit 5
-pnpm capture-cache:migrate
-pnpm knowledge:extraction-worker --once --worker-id=debug-extraction
-pnpm knowledge:ingestion-worker --once --worker-id=debug-ingestion
-pnpm knowledge:indexing-worker --once
 pnpm worker
 pnpm trip-proposal-expiry --once
 pnpm knowledge:assistant-provenance-withdrawal-backfill --execute
 ```
 
-`facebook:capture` reads queued Facebook source links from PostgreSQL and saves visible captured text for later operator review. See `docs/runbooks/facebook-capture.md` for its current production-scheduling blockers and recovery procedure.
-
-Capture commands use two databases: `DATABASE_URL` is the application database reached through the protected operator tunnel, while `CAPTURE_CACHE_DATABASE_URL` is a separate local PostgreSQL archive. Run `pnpm capture-cache:migrate` once before capture. The commands fail closed if either URL is invalid, the targets are the same, or the archive schema is absent. Back up the local archive with encrypted, tested restores; it contains durable validated capture artifacts and is required to replay after an application database reset. Never commit either URL, Gemini keys, browser profiles, or backups.
-
-`pnpm worker` is the sole continuous owner for extraction, canonical ingestion, indexing, and AI Ask domain-outbox delivery. The legacy `knowledge:*worker` commands remain local/debug one-poll adapters only and must not be deployed alongside it. The Worker invokes feature-owned work paths without changing their PostgreSQL claim, lease, fencing, CAS, or idempotency protocols. See [`docs/runbooks/worker-operations.md`](docs/runbooks/worker-operations.md) for schema admission, safe telemetry, lifecycle checks, and repository proof.
+`pnpm worker` is the sole continuous owner for extraction, canonical ingestion, indexing, and AI Ask domain-outbox delivery. The Worker invokes package-owned work paths without changing their PostgreSQL claim, lease, fencing, CAS, or idempotency protocols. See [`docs/runbooks/worker-operations.md`](docs/runbooks/worker-operations.md) for schema admission, safe telemetry, lifecycle checks, and repository proof.
 
 `pnpm trip-proposal-expiry --once` is a finite scheduled-maintenance command. A scheduler may launch exactly this command, never a perpetual proposal-expiry process. It rejects every argument other than `--once`; source-retention and provenance-withdrawal commands remain explicit operator operations, and Facebook/YouTube capture remains external operator-controlled work.
 
 ### Admin Direct Browser API
 
-`apps/admin` is an independent Next.js presentation deployment for `admin.xuyenviet.app`, not a BFF or domain runtime. It needs only `NEXT_PUBLIC_API_ORIGIN` and calls Nest with `credentials: "include"`. Its `GET /api/health` route is static process health only and never proxies identity or credentials.
+`apps/admin` is an independent Next.js presentation deployment for `admin.xuyenviet.app`, not a domain runtime. It needs only `NEXT_PUBLIC_API_ORIGIN` and calls Nest with `credentials: "include"`. Its `GET /api/health` route is static process health only and never proxies identity or credentials.
 
-The public API owns Google OAuth, state/PKCE, opaque browser sessions, role checks, and CSRF. Configure Google with the exact API callback from `XV_BROWSER_GOOGLE_CALLBACK_URL`, for example `https://api.xuyenviet.app/auth/google/callback`. Set `XV_BROWSER_ALLOWED_ORIGINS` to exact public HTTPS browser origins and enumerate every allowed return URL in `XV_BROWSER_ALLOWED_RETURN_URLS`; no wildcard or path-prefix entries are accepted. The admin application must not receive database, Auth.js, provider, BFF signer, bearer, or private-service credentials.
+The public API owns Google OAuth, state/PKCE, opaque browser sessions, role checks, and CSRF. Configure Google with the exact API callback from `XV_BROWSER_GOOGLE_CALLBACK_URL`, for example `https://api.xuyenviet.app/auth/google/callback`. Set `XV_BROWSER_ALLOWED_ORIGINS` to exact public HTTPS browser origins and enumerate every allowed return URL in `XV_BROWSER_ALLOWED_RETURN_URLS`; no wildcard or path-prefix entries are accepted. The admin application must not receive database, OAuth provider, bearer, or private-service credentials.
 
 ### Assistant provenance withdrawal backfill release procedure
 
@@ -236,9 +222,9 @@ The public API owns Google OAuth, state/PKCE, opaque browser sessions, role chec
 Before public user onboarding, verify each environment separately:
 
 - `APP_ENV` is set to `local`, `staging`, or `production`; staging and production do not share databases, OAuth clients, provider keys, or secret stores.
-- Production `DATABASE_URL`, `AUTH_SECRET`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, `AUTH_URL`, `AI_GATEWAY_BASE_URL`, `AI_GATEWAY_API_KEY`, and `TAVILY_API_KEY` are real values, not `.env.example` placeholders.
+- Production `DATABASE_URL`, `XV_BROWSER_GOOGLE_CLIENT_ID`, `XV_BROWSER_GOOGLE_CLIENT_SECRET`, `XV_BROWSER_SESSION_LOOKUP_KEY`, `XV_BROWSER_CSRF_KEY`, `XV_BROWSER_OAUTH_TRANSACTION_PROTECTION_KEY`, `AI_GATEWAY_BASE_URL`, `AI_GATEWAY_API_KEY`, and `TAVILY_API_KEY` are real values, not `.env.example` placeholders.
 - Production database URLs do not point to localhost or a shared development database.
-- Google OAuth callback URLs are configured for the deployed host, including `/api/auth/callback/google`.
+- Google OAuth callback URLs are configured for the deployed API host, including `/auth/google/callback`.
 - At least one initial admin/operator user role is created in PostgreSQL before operator workflows are needed.
 - AI Gateway, search provider, and any model/provider privacy settings are checked so project data is not used for provider training where configurable.
 - PostgreSQL backup and restore expectations are documented for the chosen hosted database, including who can restore and how restore is verified.

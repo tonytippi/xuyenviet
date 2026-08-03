@@ -334,7 +334,7 @@ describe("AI Ask API adapter", () => {
 });
 
 function principal(): RequestPrincipal {
-  return { userId: "user-1", sessionId: "session-1", roles: ["traveler"], authorizationVersion: 1, issuer: "xuyenviet-web-bff", tokenId: "token-1" };
+  return { userId: "user-1", sessionId: "session-1", roles: ["traveler"], authorizationVersion: 1 };
 }
 
 function concatenate(chunks: Uint8Array[]) {

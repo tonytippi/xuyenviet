@@ -172,7 +172,7 @@ async function collectIterator(iterator: AsyncIterator<unknown>) {
 }
 
 function principal() {
-  return { userId: "user-1", sessionId: "session-1", roles: ["traveler" as const], authorizationVersion: 1, issuer: "xuyenviet-web-bff" as const, tokenId: "token-1" };
+  return { userId: "user-1", sessionId: "session-1", roles: ["traveler" as const], authorizationVersion: 1 };
 }
 
 function concatenate(chunks: Uint8Array[]) {

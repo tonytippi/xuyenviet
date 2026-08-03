@@ -134,3 +134,9 @@
 - source_spec: `spec-14-3-move-traveler-commands-and-remove-root-domain-writers.md`
   summary: Make the package-owned direct traveler shell projection exclude elapsed pending proposals without calling the expiry writer during reads.
   evidence: `packages/database/src/index.ts` currently calls `expireTripChangeProposalInTransaction` while loading the direct Nest conversation shell, which writes status, history, and audit data from a read path; this behavior predates Story 14.3's root writer removals.
+- source_spec: `spec-14-5-retire-authjs-bff-runtime-and-legacy-transport.md`
+  summary: Prove and configure the public ingress topology that routes traveler `/v1/*` and `/auth/*` traffic to Nest before launch.
+  evidence: Story 14.5 removes obsolete Next routes; the current Compose-facing traveler path does not establish the production ingress mapping, which is explicitly deployment evidence owned by Story 14.6.
+- source_spec: `spec-14-5-retire-authjs-bff-runtime-and-legacy-transport.md`
+  summary: Prove the API/session cookie policy for any deployed cross-site traveler-to-API topology.
+  evidence: Browser sessions use SameSite=Lax by the approved same-site ingress design; a cross-site deployment needs explicit cookie and credentialed-fetch evidence, which Story 14.6 owns.

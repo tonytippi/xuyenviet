@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 
 describe("traveler writer inventory", () => {
-  test("removes root traveler writers while retaining the root-admin Auth.js sign-out boundary", () => {
+  test("removes root traveler and root-admin writers", () => {
     expect(existsSync(projectPath("src/features/referrals/attribution.ts"))).toBe(false);
     expect(existsSync(projectPath("src/features/chat-trips/trip-proposal-expiry-worker.ts"))).toBe(false);
     expect(existsSync(projectPath("src/features/chat-trips/context-extraction.ts"))).toBe(false);
@@ -20,43 +20,15 @@ describe("traveler writer inventory", () => {
     expect(travelerSources).not.toContain("@/features/auth/actions");
     expect(travelerSources).not.toContain("@/features/referrals/attribution");
 
-    const rootTravelerModules = [
+    const retiredRootOwners = [
       "src/features/chat-trips/conversations.ts",
       "src/features/chat-trips/trip-projects.ts",
       "src/features/chat-trips/trip-change-proposals.ts",
-    ].map(readProjectSource);
-    const retiredRootCommands = [
-      "deleteOwnedConversation",
-      "createTripProject",
-      "deleteOwnedTripProject",
-      "resolveOwnedPrimaryConversation",
-      "createInternalTripPlanItem",
-      "createTripPlanItemInTransaction",
-      "upsertInternalTripProjectConstraints",
-      "upsertInternalTripProjectConstraintsInTransaction",
-      "updateInternalTripPlanItem",
-      "updateTripPlanItemInTransaction",
-      "deleteInternalTripPlanItem",
-      "deleteTripPlanItemInTransaction",
-      "reorderInternalTripPlanItem",
-      "reorderTripPlanItemInTransaction",
-      "changeInternalTripPlanItemStateInTransaction",
-      "persistAiTripChangeProposalDraft",
-      "persistAiTripChangeProposalDraftInTransaction",
-      "processNextExpiredTripChangeProposal",
-      "runTripChangeProposalExpiryWorkerLoop",
+      "src/app/admin/layout.tsx",
+      "src/server/auth.ts",
+      "src/server/mutations.ts",
     ];
-    for (const source of rootTravelerModules) {
-      expect(source).not.toMatch(/\.(?:insert|update|delete)\s*\(/);
-      expect(source).not.toContain(".transaction(");
-      for (const command of retiredRootCommands) expect(source).not.toContain(`function ${command}`);
-    }
-
-    const adminLayout = readProjectSource("src/app/admin/layout.tsx");
-    const authActions = readProjectSource("src/features/auth/actions.ts");
-    expect(adminLayout).toContain("signOutCurrentUser");
-    expect(authActions).toContain("signOutCurrentUser");
-    expect(authActions).not.toContain("signInWithGoogle");
+    for (const owner of retiredRootOwners) expect(existsSync(projectPath(owner))).toBe(false);
   });
 
   test("keeps worker entrypoints independent of retired root traveler writers", () => {

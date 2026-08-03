@@ -2,12 +2,12 @@ import "reflect-metadata";
 
 import { MiddlewareConsumer, Module, type NestModule } from "@nestjs/common";
 import { APP_FILTER, APP_GUARD, APP_PIPE } from "@nestjs/core";
-import type { BffCredentialConfig, BrowserAuthConfig } from "@xuyenviet/config";
+import type { BrowserAuthConfig } from "@xuyenviet/config";
 import { consoleOperationalTelemetrySink, type OperationalTelemetrySink } from "@xuyenviet/contracts";
 import type { ApiIdentityRepository, ConversationSummaryRepository, ReleaseSchemaVersionRepository, TravelerShellRepository } from "@xuyenviet/database";
 import type { AdminAiModelCatalogPort, AdminFacebookCapturePort, AdminKnowledgeCoveragePort, AdminKnowledgeIntakePort, AdminKnowledgeReviewPort, AdminOverviewPort, AdminQualityPort, AdminYoutubeCapturePort, PlanningReadRepository, TravelerCommandPort, UserRoleGovernancePort } from "@xuyenviet/domain";
 
-import { API_IDENTITY_REPOSITORY, BFF_CREDENTIAL_CONFIG, ResourceServerGuard } from "./auth/resource-server.guard";
+import { API_IDENTITY_REPOSITORY, ResourceServerGuard } from "./auth/resource-server.guard";
 import { AdminCapabilityGuard } from "./auth/admin-capability.guard";
 import { BrowserIdentityController } from "./auth/browser-identity.controller";
 import { BROWSER_AUTH_CONFIG } from "./auth/browser-auth";
@@ -33,12 +33,11 @@ import { VersionController } from "./version/version.controller";
 import { AiAskController, AI_ASK_STREAM_EXECUTION, OPERATIONAL_TELEMETRY_SINK } from "./ai-ask/ai-ask.controller";
 import type { AiAskStreamExecution } from "@xuyenviet/domain";
 
-export function createApiModule(config: BffCredentialConfig, identities: ApiIdentityRepository, dependencies?: { conversationSummaries: ConversationSummaryRepository; travelerShells?: TravelerShellRepository; planningReads?: PlanningReadRepository; travelerCommands?: TravelerCommandPort; userRoleGovernance?: UserRoleGovernancePort; adminAiModelCatalog?: AdminAiModelCatalogPort; adminOverview?: AdminOverviewPort; adminQuality?: AdminQualityPort; adminKnowledgeIntake?: AdminKnowledgeIntakePort; adminKnowledgeReview?: AdminKnowledgeReviewPort; adminKnowledgeCoverage?: AdminKnowledgeCoveragePort; adminFacebookCaptures?: AdminFacebookCapturePort; adminYoutubeCaptures?: AdminYoutubeCapturePort; schemaVersions: ReleaseSchemaVersionRepository; aiAskExecution?: AiAskStreamExecution; telemetry?: OperationalTelemetrySink; configValid?: boolean; releasePhasePolicy?: import("@xuyenviet/contracts").SchemaReleasePhasePolicy | null; browserAuth?: BrowserAuthConfig }) {
+export function createApiModule(identities: ApiIdentityRepository, dependencies?: { conversationSummaries: ConversationSummaryRepository; travelerShells?: TravelerShellRepository; planningReads?: PlanningReadRepository; travelerCommands?: TravelerCommandPort; userRoleGovernance?: UserRoleGovernancePort; adminAiModelCatalog?: AdminAiModelCatalogPort; adminOverview?: AdminOverviewPort; adminQuality?: AdminQualityPort; adminKnowledgeIntake?: AdminKnowledgeIntakePort; adminKnowledgeReview?: AdminKnowledgeReviewPort; adminKnowledgeCoverage?: AdminKnowledgeCoveragePort; adminFacebookCaptures?: AdminFacebookCapturePort; adminYoutubeCaptures?: AdminYoutubeCapturePort; schemaVersions: ReleaseSchemaVersionRepository; aiAskExecution?: AiAskStreamExecution; telemetry?: OperationalTelemetrySink; configValid?: boolean; releasePhasePolicy?: import("@xuyenviet/contracts").SchemaReleasePhasePolicy | null; browserAuth?: BrowserAuthConfig }) {
   @Module({
      controllers: [...(dependencies ? [HealthController, VersionController, ConversationsController, OpenApiController, BrowserIdentityController, ...(dependencies.travelerCommands ? [TravelerCommandsController] : []), ...(dependencies.aiAskExecution ? [AiAskController] : []), ...(dependencies.userRoleGovernance ? [AdminUsersController] : []), ...(dependencies.adminAiModelCatalog ? [AdminAiModelsController] : []), ...(dependencies.adminOverview ? [AdminOverviewController] : []), ...(dependencies.adminQuality ? [AdminQualityController] : []), ...(dependencies.adminKnowledgeIntake ? [AdminKnowledgeIntakeController] : []), ...(dependencies.adminKnowledgeReview ? [AdminKnowledgeReviewController] : []), ...(dependencies.adminKnowledgeCoverage ? [AdminKnowledgeCoverageController] : []), ...(dependencies.adminFacebookCaptures ? [AdminFacebookCapturesController] : []), ...(dependencies.adminYoutubeCaptures ? [AdminYoutubeCapturesController] : [])] : []), AdminWorkspaceController],
     providers: [
-      { provide: BFF_CREDENTIAL_CONFIG, useValue: config },
-       { provide: API_IDENTITY_REPOSITORY, useValue: identities },
+        { provide: API_IDENTITY_REPOSITORY, useValue: identities },
        { provide: BROWSER_AUTH_CONFIG, useValue: { config: dependencies?.browserAuth } },
       ...(dependencies ? [
          { provide: CONVERSATION_SUMMARY_REPOSITORY, useValue: dependencies.conversationSummaries },
@@ -69,7 +68,7 @@ export function createApiModule(config: BffCredentialConfig, identities: ApiIden
        { provide: APP_PIPE, useValue: new SafeValidationPipe() },
       { provide: APP_FILTER, useClass: SafeApiExceptionFilter },
     ],
-    exports: [BFF_CREDENTIAL_CONFIG, API_IDENTITY_REPOSITORY, BROWSER_AUTH_CONFIG, ResourceServerGuard],
+    exports: [API_IDENTITY_REPOSITORY, BROWSER_AUTH_CONFIG, ResourceServerGuard],
   })
   class ApiModule implements NestModule {
     configure(consumer: MiddlewareConsumer) { consumer.apply(RequestIdMiddleware).forRoutes("*"); }

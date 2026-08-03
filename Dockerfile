@@ -22,7 +22,6 @@ COPY packages/contracts/package.json ./packages/contracts/package.json
 COPY packages/database/package.json ./packages/database/package.json
 COPY packages/domain/package.json ./packages/domain/package.json
 COPY packages/worker-domain/package.json ./packages/worker-domain/package.json
-COPY patches ./patches
 RUN pnpm install --frozen-lockfile
 
 FROM deps AS build
@@ -41,7 +40,6 @@ COPY packages/contracts/package.json ./packages/contracts/package.json
 COPY packages/database/package.json ./packages/database/package.json
 COPY packages/domain/package.json ./packages/domain/package.json
 COPY packages/worker-domain/package.json ./packages/worker-domain/package.json
-COPY patches ./patches
 RUN pnpm install --frozen-lockfile --prod
 
 FROM base AS runner
@@ -64,8 +62,8 @@ USER nextjs
 
 CMD ["node_modules/.bin/next", "start"]
 
-# Railway deploys the Nest API separately from the Next BFF. Select this target
-# for the private API service so its build output and port are not coupled to web.
+# Railway deploys the Nest API separately from the traveler presentation app.
+# Select this target for the browser-facing API service.
 FROM base AS api-runner
 
 ENV NODE_ENV=production
@@ -84,8 +82,8 @@ USER api
 
 CMD ["node", "apps/api/dist/main.mjs"]
 
-# Admin is a separate Railway service. It intentionally copies neither the web
-# bundle nor any database package/output, and receives only BFF-specific secrets.
+# Admin is a separate Railway presentation service. It intentionally copies
+# neither the traveler bundle nor any database package/output.
 FROM base AS admin-runner
 
 ENV NODE_ENV=production

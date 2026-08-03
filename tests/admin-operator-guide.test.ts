@@ -1,16 +1,14 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 import { describe, expect, test } from "vitest";
 
 const readSource = (path: string) => readFileSync(path, "utf8");
 
 describe("admin operator guide", () => {
-  test("exposes the Vietnamese guide hub through the deployed admin navigation", () => {
-    const layout = readSource("src/app/admin/layout.tsx");
+  test("exposes the Vietnamese guide hub only through the deployed admin application", () => {
     const guide = readSource("apps/admin/app/guides/page.tsx");
 
-    expect(layout).toContain('href: "https://admin.xuyenviet.app/guides"');
-    expect(layout).toContain('label: "Hướng dẫn"');
+    expect(existsSync("src/app/admin/layout.tsx")).toBe(false);
     expect(guide).toContain('href: "/guides/data-flow"');
     expect(guide).toContain("truy xuất và phần ngữ cảnh đưa vào prompt");
     expect(guide).toContain('href: "/guides/data-states"');

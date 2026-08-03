@@ -23,12 +23,12 @@ function getFirstParam(value: string | string[] | undefined) {
 export default async function SignInPage({ searchParams }: SignInPageProps) {
   const params = await searchParams;
   const requestedNextPath = getFirstParam(params?.next);
-  const nextPath = requestedNextPath === "/ai-ask" || requestedNextPath === "/admin" ? requestedNextPath : undefined;
+  const nextPath = requestedNextPath === "/ai-ask" ? requestedNextPath : undefined;
   const referralCode = getFirstParam(params?.ref);
   const publicDraft = normalizePublicAskDraft(getFirstParam(params?.draft));
   const travelerReturnUrl = `${nextPath ?? "/ai-ask"}${referralCode || publicDraft ? `?${new URLSearchParams({ ...(referralCode ? { ref: referralCode } : {}), ...(publicDraft ? { draft: publicDraft } : {}) }).toString()}` : ""}`;
   const hasAuthError = Boolean(getFirstParam(params?.error));
-  const gateMessage = nextPath === "/admin" ? "Đăng nhập để vào khu vực quản trị." : "Đăng nhập để tiếp tục với XuyenViet.";
+  const gateMessage = "Đăng nhập để tiếp tục với XuyenViet.";
 
   return (
     <main className="grid min-h-[100dvh] place-items-center bg-white px-5 py-6">

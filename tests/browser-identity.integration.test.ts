@@ -1,11 +1,9 @@
 import { INestApplication, Module } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
-import { exportJWK, generateKeyPair } from "jose";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { apiAudience } from "@xuyenviet/contracts";
-import { createBffCredentialConfig, getBrowserAuthConfig, type BffCredentialConfig, type Jwk } from "@xuyenviet/config";
+import { getBrowserAuthConfig } from "@xuyenviet/config";
 import { createPostgresApiIdentityRepository } from "@xuyenviet/database";
 import { createApiModule } from "../apps/api/src/app.module";
 import { getTestDatabaseUrl } from "./helpers/env-file";
@@ -13,14 +11,11 @@ import { accounts, browserOAuthTransactions, browserSessions, referralAttributio
 import { resetTestDatabase, testDb } from "./helpers/db";
 
 let app: INestApplication;
-let config: BffCredentialConfig;
 const browserAuth = { googleClientId: "client", googleClientSecret: "secret", callbackUrl: "https://api.xuyenviet.app/auth/google/callback", allowedOrigins: ["https://web.xuyenviet.vn", "https://admin.xuyenviet.app"], allowedReturnUrls: ["https://web.xuyenviet.vn/trips", "https://admin.xuyenviet.app/", "https://admin.xuyenviet.app/knowledge/facebook-captures"], sessionLookupKey: "b".repeat(32), csrfKey: "c".repeat(32), oauthTransactionProtectionKey: "d".repeat(32), cookieName: "__Host-xuyenviet-session" } as const;
 
 beforeEach(async () => {
   await resetTestDatabase();
-  const active = await keySet("web-active");
-  config = createBffCredentialConfig({ audience: apiAudience, maxLifetimeSeconds: 300, issuers: { "xuyenviet-web-bff": { issuer: "xuyenviet-web-bff", active } } });
-  const ApiModule = createApiModule(config, browserRepository(), { conversationSummaries: { async listOwnedConversationSummaryRows() { return []; } }, schemaVersions: { async hasCompatibleSchemaVersion() { return true; }, async recordSchemaVersion() {} }, browserAuth });
+  const ApiModule = createApiModule(browserRepository(), { conversationSummaries: { async listOwnedConversationSummaryRows() { return []; } }, schemaVersions: { async hasCompatibleSchemaVersion() { return true; }, async recordSchemaVersion() {} }, browserAuth });
   @Module({ imports: [ApiModule] })
   class TestModule {}
   app = await NestFactory.create(TestModule, { logger: false });
@@ -275,7 +270,7 @@ describe("browser Google identity callback", () => {
 });
 
 async function startBrowserApp(schemaReady = true) {
-  const ApiModule = createApiModule(config, browserRepository(), { conversationSummaries: { async listOwnedConversationSummaryRows() { return []; } }, schemaVersions: { async hasCompatibleSchemaVersion() { return schemaReady; }, async recordSchemaVersion() {} }, browserAuth });
+  const ApiModule = createApiModule(browserRepository(), { conversationSummaries: { async listOwnedConversationSummaryRows() { return []; } }, schemaVersions: { async hasCompatibleSchemaVersion() { return schemaReady; }, async recordSchemaVersion() {} }, browserAuth });
   @Module({ imports: [ApiModule] })
   class TestModule {}
   app = await NestFactory.create(TestModule, { logger: false });
@@ -289,13 +284,3 @@ function browserRepository() { return createPostgresApiIdentityRepository(getTes
 function callback(id: string, state: string) { return request(app.getHttpServer()).get(`/auth/google/callback?code=code&state=${id}.${state}`).set("Cookie", `__Host-xuyenviet-browser-oauth=${id}`); }
 
 function cookies(response: request.Response): string[] { const value = response.headers["set-cookie"]; return Array.isArray(value) ? value : value ? [value] : []; }
-
-async function keySet(kid: string) {
-  const { publicKey, privateKey } = await generateKeyPair("ES256", { extractable: true });
-  return { kid, key: asJwk(await exportJWK(publicKey), kid), privateKey: asJwk(await exportJWK(privateKey), kid) };
-}
-
-function asJwk(key: JsonWebKey, kid: string): Jwk {
-  if (key.kty !== "EC" || key.crv !== "P-256") throw new Error("Expected an ES256 key.");
-  return { ...key, kty: "EC", crv: "P-256", kid };
-}

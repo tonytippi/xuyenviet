@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { loadEnvFile } from "node:process";
 import { NestFactory } from "@nestjs/core";
 
-import { getBrowserAuthConfig, parseBffCredentialConfig } from "@xuyenviet/config";
+import { getBrowserAuthConfig } from "@xuyenviet/config";
 import { createPostgresAdminAiModelCatalogPort, createPostgresAdminFacebookCapturePort, createPostgresAdminKnowledgeCoveragePort, createPostgresAdminKnowledgeIntakePort, createPostgresAdminKnowledgeReviewPort, createPostgresAdminOverviewPort, createPostgresAdminQualityDashboardPort, createPostgresAdminYoutubeCapturePort, createPostgresAiAskStreamExecutionPort, createPostgresApiIdentityRepository, createPostgresConversationSummaryRepository, createPostgresPlanningReadRepository, createPostgresReleaseSchemaVersionRepository, createPostgresTravelerCommandPort, createPostgresTravelerShellRepository, createPostgresUserRoleGovernancePort } from "@xuyenviet/database";
 import { createAiAskStreamExecution } from "@xuyenviet/domain";
 
@@ -17,11 +17,10 @@ import { readApiReleasePhasePolicy } from "./release-schema";
 loadLocalEnvironment();
 
 async function bootstrap() {
-  const config = parseBffCredentialConfig(JSON.parse(required("XV_BFF_CREDENTIAL_CONFIG")));
   const databaseUrl = required("DATABASE_URL");
   const aiAskExecution = createAiAskStreamExecution(createPostgresAiAskStreamExecutionPort(databaseUrl));
   const browserAuth = getBrowserAuthConfig();
-  const app = await NestFactory.create(createApiModule(config, createPostgresApiIdentityRepository(databaseUrl, browserAuth.sessionLookupKey, browserAuth.oauthTransactionProtectionKey), {
+  const app = await NestFactory.create(createApiModule(createPostgresApiIdentityRepository(databaseUrl, browserAuth.sessionLookupKey, browserAuth.oauthTransactionProtectionKey), {
     conversationSummaries: createPostgresConversationSummaryRepository(databaseUrl),
     travelerShells: createPostgresTravelerShellRepository(),
     travelerCommands: createPostgresTravelerCommandPort(),

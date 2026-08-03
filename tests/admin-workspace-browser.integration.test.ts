@@ -1,11 +1,8 @@
 import { INestApplication, Module } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
-import { exportJWK, generateKeyPair } from "jose";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
-import { apiAudience } from "@xuyenviet/contracts";
-import { createBffCredentialConfig, type Jwk } from "@xuyenviet/config";
 import { createPostgresApiIdentityRepository } from "@xuyenviet/database";
 import { createApiModule } from "../apps/api/src/app.module";
 import { csrfHash, csrfNonce } from "../apps/api/src/auth/browser-auth";
@@ -18,11 +15,8 @@ let app: INestApplication;
 
 beforeEach(async () => {
   await resetTestDatabase();
-  const { publicKey } = await generateKeyPair("ES256", { extractable: true });
-  const key = { ...(await exportJWK(publicKey)), kty: "EC", crv: "P-256", kid: "web" } as Jwk;
-  const config = createBffCredentialConfig({ audience: apiAudience, maxLifetimeSeconds: 300, issuers: { "xuyenviet-web-bff": { issuer: "xuyenviet-web-bff", active: { kid: "web", key } } } });
   const identities = createPostgresApiIdentityRepository(getTestDatabaseUrl(), browserAuth.sessionLookupKey, browserAuth.oauthTransactionProtectionKey);
-  const ApiModule = createApiModule(config, identities, { conversationSummaries: { async listOwnedConversationSummaryRows() { return []; } }, schemaVersions: { async hasCompatibleSchemaVersion() { return true; }, async recordSchemaVersion() {} }, browserAuth });
+  const ApiModule = createApiModule(identities, { conversationSummaries: { async listOwnedConversationSummaryRows() { return []; } }, schemaVersions: { async hasCompatibleSchemaVersion() { return true; }, async recordSchemaVersion() {} }, browserAuth });
   @Module({ imports: [ApiModule] }) class TestModule {}
   app = await NestFactory.create(TestModule, { logger: false });
   await app.init();
@@ -40,6 +34,8 @@ describe("admin workspace direct browser admission", () => {
     const cookie = `${browserAuth.cookieName}=${sessionId}`;
     await request(app.getHttpServer()).get("/v1/admin/workspace").set({ Cookie: cookie, Origin: "https://admin.xuyenviet.app" }).expect(200, { ready: true });
     await request(app.getHttpServer()).get("/v1/admin/workspace").set("Authorization", "Bearer malformed-admin-bff").expect(401);
+    const response = await request(app.getHttpServer()).get("/v1/admin/workspace").set({ Cookie: cookie, Authorization: "Bearer malformed-admin-bff", Origin: "https://admin.xuyenviet.app" }).expect(401);
+    expect(response.body).toMatchObject({ code: "unauthorized", message: "Không được phép truy cập." });
   });
 
   test("rejects travelers, foreign origins, and missing CSRF for browser mutations", async () => {
