@@ -295,6 +295,7 @@ export const browserOAuthTransactions = pgTable("browser_oauth_transactions", {
   stateHash: text("state_hash").notNull().unique(),
   codeVerifierCiphertext: text("code_verifier_ciphertext").notNull(),
   returnUrl: text("return_url").notNull(),
+  referralCode: text("referral_code"),
   expires: timestamp("expires", { mode: "date" }).notNull(),
 }, (transaction) => [index("browser_oauth_transactions_expires_idx").on(transaction.expires)]);
 

@@ -140,6 +140,28 @@ export type TravelerShellProjection = {
   tripProject: { id: string; title: string; origin: string | null; destination: string | null; startDate: string | null; endDate: string | null; travelers: string | null; primaryConversationId: string | null } | null;
 };
 export type TravelerShellResponse = { shell: TravelerShellProjection };
+export type TravelerCommandFailure = "not_found" | "invalid_input" | "invalid_target" | "invalid_rating" | "comment_too_long" | "failed";
+export type CreateTripProjectCommand = { title: string; origin?: string | null; destination?: string | null; startDate?: string | null; endDate?: string | null; travelers?: string | null; notes?: string | null };
+export type DeleteOwnedResourceResult = { success: true } | { success: false; reason: "not_found" | "failed" };
+export type CreateTripProjectResult = { success: true; project: { id: string; title: string; origin: string | null; destination: string | null; startDate: string | null; endDate: string | null; travelers: string | null; notes: string | null; updatedAt: string } } | { success: false; reason: "invalid_input" | "failed" };
+export type SaveAnswerUsefulnessFeedbackCommand = { assistantMessageId: string; rating: "useful" | "not_useful"; comment?: string | null };
+export type SaveAnswerUsefulnessFeedbackResult = { success: true; feedback: { rating: "useful" | "not_useful"; comment: string | null; updatedAt: string } } | { success: false; reason: TravelerCommandFailure };
+export function parseCreateTripProjectCommand(value: unknown): CreateTripProjectCommand | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const input = value as Record<string, unknown>;
+  if (!Object.keys(input).every((key) => ["title", "origin", "destination", "startDate", "endDate", "travelers", "notes"].includes(key)) || typeof input.title !== "string") return null;
+  const optional = ["origin", "destination", "startDate", "endDate", "travelers", "notes"] as const;
+  if (optional.some((key) => input[key] !== undefined && input[key] !== null && typeof input[key] !== "string")) return null;
+  return { title: input.title, ...Object.fromEntries(optional.filter((key) => input[key] !== undefined).map((key) => [key, input[key] as string | null])) };
+}
+
+export function parseSaveAnswerUsefulnessFeedbackCommand(value: unknown): SaveAnswerUsefulnessFeedbackCommand | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const input = value as Record<string, unknown>;
+  return Object.keys(input).every((key) => ["assistantMessageId", "rating", "comment"].includes(key)) && typeof input.assistantMessageId === "string" && input.assistantMessageId.trim().length > 0 && input.assistantMessageId.length <= 128 && (input.rating === "useful" || input.rating === "not_useful") && (input.comment === undefined || input.comment === null || typeof input.comment === "string")
+    ? { assistantMessageId: input.assistantMessageId, rating: input.rating, ...(input.comment === undefined ? {} : { comment: input.comment }) } : null;
+}
+
 export type ApiVersionResponse = { version: "v1"; conversationSummaryLimit: number };
 export type HealthResponse = { status: "ok" };
 

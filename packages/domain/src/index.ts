@@ -1,4 +1,4 @@
-import { conversationSummaryLimit, type AiAskStreamEvent, type AiAskStreamInput, type ConversationSummary, type PlanningAnswerDetailResponse, type RequestPrincipal, type TripAnswerContextResponse } from "@xuyenviet/contracts";
+import { conversationSummaryLimit, type AiAskStreamEvent, type AiAskStreamInput, type ConversationSummary, type CreateTripProjectCommand, type CreateTripProjectResult, type DeleteOwnedResourceResult, type PlanningAnswerDetailResponse, type RequestPrincipal, type SaveAnswerUsefulnessFeedbackCommand, type SaveAnswerUsefulnessFeedbackResult, type TripAnswerContextResponse } from "@xuyenviet/contracts";
 
 export type ConversationSummaryRepository = {
   listOwnedConversationSummaryRows(userId: string, limit: number): Promise<Array<{ id: string; updatedAt: Date; messageContent: string | null }>>;
@@ -8,6 +8,14 @@ export type ConversationSummaryRepository = {
 export type PlanningReadRepository = {
   loadOwnedPlanningContext(userId: string, tripProjectId: string): Promise<TripAnswerContextResponse | null>;
   loadOwnedAnswerDetail(userId: string, conversationId: string, assistantMessageId: string): Promise<PlanningAnswerDetailResponse["detail"]>;
+};
+
+/** The HTTP adapter supplies the admitted principal; this port never reads a cookie. */
+export type TravelerCommandPort = {
+  createTripProject(userId: string, input: CreateTripProjectCommand): Promise<CreateTripProjectResult>;
+  deleteConversation(userId: string, conversationId: string): Promise<DeleteOwnedResourceResult>;
+  deleteTripProject(userId: string, tripProjectId: string): Promise<DeleteOwnedResourceResult>;
+  saveAnswerUsefulnessFeedback(userId: string, input: SaveAnswerUsefulnessFeedbackCommand): Promise<SaveAnswerUsefulnessFeedbackResult>;
 };
 
 export * from "./planning-detail";

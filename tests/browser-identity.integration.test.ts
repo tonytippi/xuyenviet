@@ -9,7 +9,7 @@ import { createBffCredentialConfig, getBrowserAuthConfig, type BffCredentialConf
 import { createPostgresApiIdentityRepository } from "@xuyenviet/database";
 import { createApiModule } from "../apps/api/src/app.module";
 import { getTestDatabaseUrl } from "./helpers/env-file";
-import { accounts, browserOAuthTransactions, browserSessions, userRoles, users } from "@/db/schema";
+import { accounts, browserOAuthTransactions, browserSessions, referralAttributions, referralCodes, userRoles, users } from "@/db/schema";
 import { resetTestDatabase, testDb } from "./helpers/db";
 
 let app: INestApplication;
@@ -113,6 +113,27 @@ describe("browser Google identity callback", () => {
     expect(cookie).toMatch(new RegExp(`^__Host-xuyenviet-browser-oauth=${transactionId}; Path=/; Expires=.+; HttpOnly; Secure; SameSite=Lax$`));
     expect(cookie).not.toContain(location.searchParams.get("state")!);
     expect(cookie).not.toContain("code_challenge");
+  });
+
+  test("binds one valid referral first touch to the consumed browser OAuth transaction", async () => {
+    await testDb.insert(users).values({ id: "referrer", email: "referrer@example.com" });
+    const [code] = await testDb.insert(referralCodes).values({ code: "ROAD-2026", referrerUserId: "referrer" }).returning({ id: referralCodes.id });
+    const start = await request(app.getHttpServer()).get("/auth/google?returnUrl=https://web.xuyenviet.vn/trips&ref=road-2026").expect(302);
+    const state = new URL(start.headers.location!).searchParams.get("state")!;
+    const [id, nonce] = state.split(".");
+    expect(await testDb.select({ referralCode: browserOAuthTransactions.referralCode }).from(browserOAuthTransactions)).toEqual([{ referralCode: "ROAD-2026" }]);
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "provider-token" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ sub: "referred-google-user", email: "referred@example.com", email_verified: true }), { status: 200 })));
+
+    await callback(id!, nonce!).expect(302);
+    expect(await testDb.select().from(referralAttributions)).toEqual([expect.objectContaining({ referralCodeId: code!.id, referrerUserId: "referrer" })]);
+    expect(await testDb.select().from(browserOAuthTransactions)).toEqual([]);
+  });
+
+  test("does not retain malformed referral input in a browser OAuth transaction", async () => {
+    await request(app.getHttpServer()).get("/auth/google?returnUrl=https://web.xuyenviet.vn/trips&ref=not a referral").expect(302);
+    expect(await testDb.select({ referralCode: browserOAuthTransactions.referralCode }).from(browserOAuthTransactions)).toEqual([{ referralCode: null }]);
   });
 
   test("rejects a valid state callback without or with a mismatching transaction cookie before user, account, or session creation", async () => {

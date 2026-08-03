@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { AiAskComposer, type DisplayMessage } from "@/features/ai/ai-ask-composer";
-import { DirectApiError, directLogout, loadAnswerDetail, loadConversationSummaries, loadPlanningContext, loadTravelerShell } from "@/features/ai/direct-api-client";
+import { DirectApiError, createDirectTripProject, deleteDirectConversation, deleteDirectTripProject, directLogout, loadAnswerDetail, loadConversationSummaries, loadPlanningContext, loadTravelerShell, saveDirectAnswerUsefulnessFeedback } from "@/features/ai/direct-api-client";
 
 export function DirectShellLoader({ initialQuestion, conversationId, historyConversationId, tripProjectId }: { initialQuestion?: string; conversationId?: string; historyConversationId?: string; tripProjectId?: string }) {
   const [state, setState] = useState<{ loading: boolean; expired: boolean; shell?: Awaited<ReturnType<typeof loadTravelerShell>>; messages?: DisplayMessage[]; historyConversation?: { id: string; messages: DisplayMessage[] } | null; planningContext?: Awaited<ReturnType<typeof loadPlanningContext>>["context"]; summaries: Awaited<ReturnType<typeof loadConversationSummaries>> }>({ loading: true, expired: false, summaries: [] });
@@ -35,5 +35,22 @@ export function DirectShellLoader({ initialQuestion, conversationId, historyConv
     setState({ loading: false, expired: true, summaries: [] });
     window.location.replace("/sign-in");
   }
-  return <main className="min-h-screen bg-white text-[#17342c]"><h1 className="sr-only">Hỏi trợ lý chuyến đi Việt Nam</h1><AiAskComposer initialQuestion={initialQuestion} initialConversationId={conversation?.id} initialMessages={state.messages ?? conversation?.messages ?? []} initialSessions={state.summaries} selectedTripProject={state.shell.shell.tripProject} historyConversation={state.historyConversation} planningContext={state.planningContext} signOutAction={logout} /></main>;
+  return <main className="min-h-screen bg-white text-[#17342c]"><h1 className="sr-only">Hỏi trợ lý chuyến đi Việt Nam</h1><AiAskComposer initialQuestion={initialQuestion} initialConversationId={conversation?.id} initialMessages={state.messages ?? conversation?.messages ?? []} initialSessions={state.summaries} selectedTripProject={state.shell.shell.tripProject} historyConversation={state.historyConversation} planningContext={state.planningContext} createTripProjectAction={async (_previous, formData) => {
+    const text = (name: string) => { const value = formData.get(name); return typeof value === "string" ? value : null; };
+    const title = text("title");
+    if (title === null) return { error: "Dữ liệu dự án không hợp lệ. Vui lòng gửi lại bằng biểu mẫu." };
+    const result = await createDirectTripProject({ title, origin: text("origin"), destination: text("destination"), startDate: text("startDate"), endDate: text("endDate"), travelers: text("travelers"), notes: text("notes") });
+    if (!result.success) return { error: "Không thể tạo dự án chuyến đi. Vui lòng kiểm tra tên dự án và các trường ngày (định dạng YYYY-MM-DD)." };
+    window.location.assign(`/ai-ask?tripProjectId=${encodeURIComponent(result.project!.id)}`);
+    return undefined;
+  }} deleteConversationAction={async (id) => {
+    const result = await deleteDirectConversation(id);
+    return result.success ? { success: true } : { success: false, ...(result.reason === "not_found" ? { reason: "not_found" as const } : { error: "Không thể xoá cuộc trò chuyện lúc này. Vui lòng thử lại." }) };
+  }} deleteTripProjectAction={async (id) => {
+    const result = await deleteDirectTripProject(id);
+    return result.success ? { success: true } : { success: false, ...(result.reason === "not_found" ? { reason: "not_found" as const } : { error: "Không thể xoá dự án chuyến đi lúc này. Vui lòng thử lại." }) };
+  }} saveAnswerUsefulnessFeedbackAction={async (input) => {
+    const result = await saveDirectAnswerUsefulnessFeedback(input);
+    return result.success && result.feedback ? { success: true, feedback: { ...result.feedback, updatedAt: new Date(result.feedback.updatedAt) } } : { success: false, reason: result.reason };
+  }} signOutAction={logout} /></main>;
 }

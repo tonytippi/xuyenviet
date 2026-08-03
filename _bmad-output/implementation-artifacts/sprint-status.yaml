@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-08-03 (Direct API/session course correction approved; Story 14.1 is ready for development.)
+# last_updated: 2026-08-03 (Story 14.2 traveler command extraction is in progress; direct create/delete/feedback is implemented, proposal aggregate extraction remains.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-08-03 (Direct API/session course correction approved; Story 14.1 is ready for development.)
+last_updated: 2026-08-03 (Story 14.2 traveler command extraction is in progress; direct create/delete/feedback is implemented, proposal aggregate extraction remains.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -311,6 +311,25 @@ development_status:
   # 2026-08-03: User approved atomic traveler direct-API/Auth.js-retirement scope after the
   # original read-only cutover exposed a two-owner command contradiction. Replacement spec:
   # spec-14-2-atomic-traveler-direct-api-cutover.md.
+  # 2026-08-03: Partial implementation completed local development-only `/v1/*` and
+  # `/auth/*` same-origin forwarding plus strict direct-stream terminal validation.
+  # Focused 8-test integration run, typecheck, and diff check passed; lint has 0 errors
+  # and 5 existing unrelated warnings. Nest OAuth now captures a normalized referral
+  # first touch in its one-time transaction and persists attribution atomically with
+  # Google-user resolution (22 focused browser-identity tests pass). Story remains
+  # in-progress: Nest has no extracted traveler command/feedback ports or controllers,
+  # while root server actions remain the only writers. Do not retire those actions/Auth.js
+  # before equivalent transaction-preserving Nest ownership exists. Root `/admin` and
+  # `apps/admin` were not modified; deployed ingress evidence remains Story 14.6.
+  # 2026-08-03 continuation moved trip-project creation, conversation/project deletion,
+  # and usefulness feedback to strict shared TravelerCommandPort contracts, PostgreSQL
+  # adapters, admitted Nest direct endpoints, and relative direct-shell clients. Focused
+  # API/direct-client tests (14), typecheck, and diff check pass. Proposal apply/dismiss
+  # and annotation actions remain the sole root traveler aggregate: their locked
+  # transaction still owns plan-item primitives, expiry, history/audit, and annotation
+  # provenance. No duplicate endpoint/writer was retained. Story is blocked pending a
+  # complete package extraction of that aggregate; root `/admin` and `apps/admin` remain
+  # unchanged and deployment evidence remains Story 14.6.
   14-2-cut-ai-ask-and-traveler-shell-reads-to-direct-api: in-progress
   14-3-move-traveler-commands-and-remove-root-domain-writers: backlog
   14-4-complete-admin-direct-api-ownership: backlog

@@ -32,7 +32,7 @@ export class BrowserIdentityController {
 
   @Get("google")
   @PublicRoute()
-  async start(@Query("returnUrl") returnUrl: string | undefined, @Res() response: CookieResponse): Promise<void> {
+  async start(@Query("returnUrl") returnUrl: string | undefined, @Query("ref") ref: string | undefined, @Res() response: CookieResponse): Promise<void> {
     const config = this.requiredConfig();
     await this.assertAdmitted();
     const allowedReturnUrl = validReturnUrl(returnUrl, config) ? returnUrl! : null;
@@ -41,7 +41,7 @@ export class BrowserIdentityController {
     try {
       await this.identities.purgeExpiredBrowserOAuthTransactions(browserOAuthTransactionPurgeLimit);
       const expires = new Date(Date.now() + browserOAuthTransactionLifetimeMs);
-      await this.identities.createBrowserOAuthTransaction({ id, state, codeVerifier: verifier, returnUrl: allowedReturnUrl, expires });
+       await this.identities.createBrowserOAuthTransaction({ id, state, codeVerifier: verifier, returnUrl: allowedReturnUrl, referralCode: normalizeReferralCode(ref), expires });
       setTransactionCookie(response, id, expires);
       const query = new URLSearchParams({ client_id: config.googleClientId, redirect_uri: config.callbackUrl, response_type: "code", scope: "openid email profile", state: `${id}.${state}`, code_challenge: createHash("sha256").update(verifier).digest("base64url"), code_challenge_method: "S256" });
       response.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${query}`);
@@ -68,7 +68,7 @@ export class BrowserIdentityController {
        if (isRetryableGoogleResponse(profileResponse)) throw new ServiceUnavailableException({ code: "internal_error" });
       const profile = await profileResponse.json().catch(() => null) as { sub?: unknown; email?: unknown; email_verified?: unknown; name?: unknown; picture?: unknown } | null;
       if (!profileResponse.ok || !nonEmpty(profile?.sub) || !nonEmpty(profile?.email) || profile.email_verified !== true) throw this.denied();
-      const user = await this.identities.resolveOrCreateBrowserGoogleUser(profile.sub, profile.email.trim().toLowerCase(), stringOrNull(profile.name), stringOrNull(profile.picture));
+       const user = await this.identities.resolveOrCreateBrowserGoogleUser(profile.sub, profile.email.trim().toLowerCase(), stringOrNull(profile.name), stringOrNull(profile.picture), transaction.referralCode ?? null);
       const sessionId = randomBytes(48).toString("base64url"); const csrfToken = csrfNonce(config, sessionId); const expires = new Date(Date.now() + sessionLifetimeMs);
       await this.identities.createBrowserSession(user.userId, sessionId, csrfHash(config, sessionId, csrfToken), user.authorizationVersion, expires);
       setSessionCookie(response, config, sessionId, expires);
@@ -112,5 +112,6 @@ function validReturnUrl(value: string | undefined, config: BrowserAuthConfig): b
 function parseState(value: string | undefined): { id: string; state: string } | null { const match = /^([0-9a-f-]{36})\.([A-Za-z0-9_-]{32,128})$/i.exec(value ?? ""); return match ? { id: match[1]!, state: match[2]! } : null; }
 function nonEmpty(value: unknown): value is string { return typeof value === "string" && value.trim().length > 0; }
 function stringOrNull(value: unknown): string | null { return typeof value === "string" && value.trim() ? value.trim().slice(0, 512) : null; }
+function normalizeReferralCode(value: string | undefined): string | null { const code = value?.trim().toUpperCase(); return code && /^[A-Z0-9][A-Z0-9_-]{1,63}$/.test(code) ? code : null; }
 function isRetryableGoogleResponse(response: Response): boolean { return response.status === 429 || response.status >= 500; }
 async function googleRequest(url: string, init: RequestInit): Promise<Response> { const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), 5_000); try { return await fetch(url, { ...init, signal: controller.signal }); } finally { clearTimeout(timeout); } }

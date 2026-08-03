@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { apiAudience } from "@xuyenviet/contracts";
 import { createBffCredentialConfig, type BffCredentialConfig, type Jwk } from "@xuyenviet/config";
 import type { ApiIdentityRepository, ConversationSummaryRepository, ReleaseSchemaVersionRepository, TravelerShellRepository } from "@xuyenviet/database";
-import type { AiAskStreamExecution, PlanningReadRepository } from "@xuyenviet/domain";
+import type { AiAskStreamExecution, PlanningReadRepository, TravelerCommandPort } from "@xuyenviet/domain";
 import { createApiModule } from "../apps/api/src/app.module";
 import { apiSchemaCompatibility } from "../apps/api/src/release-schema";
 
@@ -43,7 +43,13 @@ beforeEach(async () => {
     async recordSchemaVersion() {},
   };
   const aiAskExecution: AiAskStreamExecution = { async *execute() { yield new Uint8Array([123, 34, 116, 121, 112, 101, 34, 58, 34, 112, 114, 101, 112, 97, 114, 105, 110, 103, 34, 125, 10]); yield new Uint8Array([123, 34, 116, 121, 112, 101, 34, 58, 34, 100, 111, 110, 101, 34, 125, 10]); } };
-  const ApiModule = createApiModule(config, identities, { conversationSummaries: summaries, travelerShells, planningReads, schemaVersions: versions, aiAskExecution });
+  const travelerCommands: TravelerCommandPort = {
+    async createTripProject(userId, input) { return userId === "user-1" ? { success: true, project: { id: "project-created", title: input.title.trim(), origin: null, destination: null, startDate: null, endDate: null, travelers: null, notes: null, updatedAt: "2026-08-03T00:00:00.000Z" } } : { success: false, reason: "failed" }; },
+    async deleteConversation(userId, id) { return userId === "user-1" && id === "conversation-a" ? { success: true } : { success: false, reason: "not_found" }; },
+    async deleteTripProject(userId, id) { return userId === "user-1" && id === "project-1" ? { success: true } : { success: false, reason: "not_found" }; },
+    async saveAnswerUsefulnessFeedback(userId, input) { return userId === "user-1" && input.assistantMessageId === "answer-1" ? { success: true, feedback: { rating: input.rating, comment: input.comment?.trim() || null, updatedAt: "2026-08-03T00:00:00.000Z" } } : { success: false, reason: "not_found" }; },
+  };
+  const ApiModule = createApiModule(config, identities, { conversationSummaries: summaries, travelerShells, planningReads, travelerCommands, schemaVersions: versions, aiAskExecution });
   @Module({ imports: [ApiModule] })
   class TestModule {}
   app = await NestFactory.create(TestModule, { logger: false });
@@ -143,6 +149,15 @@ describe("API platform contracts", () => {
 
     expect(response.headers["content-type"]).toContain("application/x-ndjson");
     expect(response.text).toBe('{"type":"preparing"}\n{"type":"done"}\n');
+  });
+
+  test("admits traveler commands through the single API port and rejects malformed input before the port", async () => {
+    const authorization = { Authorization: `Bearer ${await tokenFor()}` };
+    await request(app.getHttpServer()).post("/v1/trip-projects").set(authorization).send({ title: "Huế cuối tuần" }).expect(201, { success: true, project: { id: "project-created", title: "Huế cuối tuần", origin: null, destination: null, startDate: null, endDate: null, travelers: null, notes: null, updatedAt: "2026-08-03T00:00:00.000Z" } });
+    await request(app.getHttpServer()).post("/v1/trip-projects").set(authorization).send({ title: "ok", extra: true }).expect(400);
+    await request(app.getHttpServer()).delete("/v1/conversations/conversation-a").set(authorization).expect(200, { success: true });
+    await request(app.getHttpServer()).delete("/v1/trip-projects/foreign").set(authorization).expect(200, { success: false, reason: "not_found" });
+    await request(app.getHttpServer()).post("/v1/answer-usefulness-feedback").set(authorization).send({ assistantMessageId: "answer-1", rating: "useful", comment: "Rõ ràng" }).expect(201, { success: true, feedback: { rating: "useful", comment: "Rõ ràng", updatedAt: "2026-08-03T00:00:00.000Z" } });
   });
 });
 

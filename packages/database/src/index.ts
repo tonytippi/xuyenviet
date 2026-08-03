@@ -1,12 +1,15 @@
 import postgres from "postgres";
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
 import { resolvePlanningAnnotationCapabilities, sanitizeStoredPlanningAnnotations, type AiAskStreamExecutionPort, type PlanningReadRepository, type UserRoleGovernancePort, type UserRoleGovernanceTransactionPort, UserRoleGovernancePolicyError } from "@xuyenviet/domain";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, count, desc, eq, sql } from "drizzle-orm";
 import { loadAnswerContext } from "./answer-context";
 import { formatAssistantMessageProvenance } from "./provenance";
-import { assistantResponseProvenance, conversations, messages, tripChangeProposals, tripProjects } from "./schema";
+import { aiUsageEvents, answerUsefulnessFeedback, assistantResponseProvenance, chatContext, conversations, messageImageAttachments, messages, tripChangeProposals, tripProjectConstraints, tripProjects } from "./schema";
 import { adminUserRosterPageSize, encodeAdminUserRosterCursor, evaluateSchemaAdmission, parsePlanningAnswerDetailResponse, planningDetailProvenanceLimit, type AdminIdentityHandoff, type PlanningJsonValue, type PlanningProvenance, type RequestRole, type SchemaCompatibilityDeclaration, type TravelerShellProjection, type TripAnswerContextResponse } from "@xuyenviet/contracts";
 import { createAiAskStreamExecutionPort } from "./ai-ask-stream-execution";
+import type { TravelerCommandPort } from "@xuyenviet/domain";
+
+const answerUsefulnessCommentMaxLength = 500;
 
 export * from "./ai-ask-commands";
 export * from "./ai-ask-stream-execution";
@@ -42,13 +45,13 @@ export interface ApiIdentityRepository {
   getAdminSession?(sessionId: string): Promise<ApiIdentityRecord | null>;
 }
 export type BrowserIdentity = ApiIdentityRecord & { roles: RequestRole[]; csrfHash: string; sessionId: string };
-export type BrowserOAuthTransaction = { id: string; state: string; codeVerifier: string; returnUrl: string; expires: Date };
+export type BrowserOAuthTransaction = { id: string; state: string; codeVerifier: string; returnUrl: string; referralCode?: string | null; expires: Date };
 export class BrowserGoogleAccountConflictError extends Error {}
 export interface BrowserIdentityRepository extends ApiIdentityRepository {
   purgeExpiredBrowserOAuthTransactions(limit: number): Promise<void>;
   createBrowserOAuthTransaction(transaction: BrowserOAuthTransaction): Promise<void>;
   consumeBrowserOAuthTransaction(id: string, state: string): Promise<BrowserOAuthTransaction | null>;
-  resolveOrCreateBrowserGoogleUser(subject: string, email: string, name: string | null, image: string | null): Promise<{ userId: string; authorizationVersion: number }>;
+  resolveOrCreateBrowserGoogleUser(subject: string, email: string, name: string | null, image: string | null, referralCode: string | null): Promise<{ userId: string; authorizationVersion: number }>;
   createBrowserSession(userId: string, sessionId: string, csrfHash: string, authorizationVersion: number, expires: Date): Promise<void>;
   getBrowserSession(sessionId: string): Promise<BrowserIdentity | null>;
   getBrowserLogoutCsrfHash(sessionId: string): Promise<string | null>;
@@ -128,6 +131,89 @@ export function createPostgresTravelerShellRepository(): TravelerShellRepository
     },
   };
 }
+
+export function createPostgresTravelerCommandPort(): TravelerCommandPort {
+  return {
+    async createTripProject(userId, input) {
+      const title = input.title.trim();
+      const optional = (value: string | null | undefined, max: number) => {
+        const normalized = value?.trim();
+        if (!normalized) return null;
+        return normalized.length <= max ? normalized : undefined;
+      };
+      const startDate = optional(input.startDate, 10);
+      const endDate = optional(input.endDate, 10);
+      const origin = optional(input.origin, 500);
+      const destination = optional(input.destination, 500);
+      const travelers = optional(input.travelers, 500);
+      const notes = optional(input.notes, 2_000);
+      if (!title || title.length > 160 || [startDate, endDate, origin, destination, travelers, notes].some((value) => value === undefined) || startDate && (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || Number.isNaN(Date.parse(startDate))) || endDate && (!/^\d{4}-\d{2}-\d{2}$/.test(endDate) || Number.isNaN(Date.parse(endDate))) || startDate && endDate && startDate > endDate) return { success: false, reason: "invalid_input" };
+      try {
+        const project = await (await import("./client")).getDb().transaction(async (transaction) => {
+          const [created] = await transaction.insert(tripProjects).values({ userId, title, origin, destination, startDate, endDate, travelers, notes }).returning();
+          await transaction.insert((await import("./schema")).auditEvents).values({ id: randomUUID(), actorUserId: userId, actorClass: "user", operation: "create", targetType: "trip_project", targetId: created!.id, afterSummary: JSON.stringify({ id: created!.id, title }) });
+          return created!;
+        });
+        return { success: true, project: { id: project.id, title: project.title, origin: project.origin, destination: project.destination, startDate: project.startDate, endDate: project.endDate, travelers: project.travelers, notes: project.notes, updatedAt: project.updatedAt.toISOString() } };
+      } catch { return { success: false, reason: "failed" }; }
+    },
+    async deleteConversation(userId, conversationId) {
+      if (!validTravelerIdentifier(conversationId)) return { success: false, reason: "not_found" };
+      try {
+        return await (await import("./client")).getDb().transaction(async (transaction) => {
+          const [conversation] = await transaction.select({ id: conversations.id, tripProjectId: conversations.tripProjectId }).from(conversations).where(and(eq(conversations.id, conversationId), eq(conversations.userId, userId))).limit(1).for("update");
+          if (!conversation) return { success: false, reason: "not_found" } as const;
+          if (conversation.tripProjectId) {
+            const [project] = await transaction.select({ id: tripProjects.id, primaryConversationId: tripProjects.primaryConversationId }).from(tripProjects).where(and(eq(tripProjects.id, conversation.tripProjectId), eq(tripProjects.userId, userId))).limit(1).for("update");
+            if (project?.primaryConversationId === conversation.id) {
+              const [next] = await transaction.select({ id: conversations.id }).from(conversations).where(and(eq(conversations.tripProjectId, project.id), eq(conversations.userId, userId), sql`${conversations.id} <> ${conversation.id}`)).orderBy(desc(conversations.updatedAt), desc(conversations.id)).limit(1);
+              const replacement = next ?? (await transaction.insert(conversations).values({ userId, tripProjectId: project.id }).returning({ id: conversations.id }))[0]!;
+              await transaction.update(conversations).set({ lifecycleVersion: sql`${conversations.lifecycleVersion} + 1`, updatedAt: new Date() }).where(eq(conversations.id, replacement.id));
+              await transaction.update(tripProjects).set({ primaryConversationId: replacement.id, aggregateVersion: sql`${tripProjects.aggregateVersion} + 1`, updatedAt: new Date() }).where(eq(tripProjects.id, project.id));
+            }
+          }
+          await transaction.update(conversations).set({ lifecycleVersion: sql`${conversations.lifecycleVersion} + 1`, updatedAt: new Date() }).where(eq(conversations.id, conversation.id));
+          const deleted = await transaction.delete(conversations).where(and(eq(conversations.id, conversation.id), eq(conversations.userId, userId))).returning({ id: conversations.id });
+          if (deleted.length !== 1) return { success: false, reason: "not_found" } as const;
+          await transaction.insert((await import("./schema")).auditEvents).values({ id: randomUUID(), actorUserId: userId, actorClass: "user", operation: "delete", targetType: "conversation", targetId: conversation.id, afterSummary: JSON.stringify({ deleted: true }) });
+          return { success: true } as const;
+        });
+      } catch { return { success: false, reason: "failed" }; }
+    },
+    async deleteTripProject(userId, tripProjectId) {
+      if (!validTravelerIdentifier(tripProjectId)) return { success: false, reason: "not_found" };
+      try {
+        return await (await import("./client")).getDb().transaction(async (transaction) => {
+          const [project] = await transaction.select({ id: tripProjects.id }).from(tripProjects).where(and(eq(tripProjects.id, tripProjectId), eq(tripProjects.userId, userId))).limit(1).for("update");
+          if (!project) return { success: false, reason: "not_found" } as const;
+          const [linkedConversationCount] = await transaction.select({ count: count() }).from(conversations).where(and(eq(conversations.tripProjectId, project.id), eq(conversations.userId, userId)));
+          await transaction.update(tripProjects).set({ primaryConversationId: null, aggregateVersion: sql`${tripProjects.aggregateVersion} + 1`, updatedAt: new Date() }).where(eq(tripProjects.id, project.id));
+          await transaction.update(conversations).set({ lifecycleVersion: sql`${conversations.lifecycleVersion} + 1`, updatedAt: new Date() }).where(and(eq(conversations.tripProjectId, project.id), eq(conversations.userId, userId)));
+          await transaction.delete(conversations).where(and(eq(conversations.tripProjectId, project.id), eq(conversations.userId, userId)));
+          const deleted = await transaction.delete(tripProjects).where(and(eq(tripProjects.id, project.id), eq(tripProjects.userId, userId))).returning({ id: tripProjects.id });
+          if (deleted.length !== 1) return { success: false, reason: "not_found" } as const;
+          await transaction.insert((await import("./schema")).auditEvents).values({ id: randomUUID(), actorUserId: userId, actorClass: "user", operation: "delete", targetType: "trip_project", targetId: project.id, afterSummary: JSON.stringify({ deleted: true, linkedConversationCount: linkedConversationCount?.count ?? 0 }) });
+          return { success: true } as const;
+        });
+      } catch { return { success: false, reason: "failed" }; }
+    },
+    async saveAnswerUsefulnessFeedback(userId, input) {
+      const comment = input.comment?.trim() || null;
+      if (comment && Array.from(comment).length > answerUsefulnessCommentMaxLength) return { success: false, reason: "comment_too_long" };
+      try {
+        return await (await import("./client")).getDb().transaction(async (transaction) => {
+          const [message] = await transaction.select({ id: messages.id, conversationId: messages.conversationId, role: messages.role }).from(messages).where(and(eq(messages.id, input.assistantMessageId), eq(messages.userId, userId))).limit(1).for("update");
+          if (!message) return { success: false, reason: "not_found" } as const;
+          if (message.role !== "assistant") return { success: false, reason: "invalid_target" } as const;
+          const [feedback] = await transaction.insert(answerUsefulnessFeedback).values({ userId, conversationId: message.conversationId, assistantMessageId: message.id, rating: input.rating, comment }).onConflictDoUpdate({ target: [answerUsefulnessFeedback.assistantMessageId, answerUsefulnessFeedback.userId], set: { rating: input.rating, comment, updatedAt: sql`now()` } }).returning({ rating: answerUsefulnessFeedback.rating, comment: answerUsefulnessFeedback.comment, updatedAt: answerUsefulnessFeedback.updatedAt });
+          return { success: true, feedback: { rating: feedback!.rating, comment: feedback!.comment, updatedAt: feedback!.updatedAt.toISOString() } } as const;
+        });
+      } catch { return { success: false, reason: "failed" }; }
+    },
+  };
+}
+
+function validTravelerIdentifier(value: string) { return value.length > 0 && value.length <= 128 && value.trim() === value; }
 
 export function createPostgresReleaseSchemaVersionRepository(databaseUrl: string): ReleaseSchemaVersionRepository {
   const sql = postgres(databaseUrl, { max: 1 });
@@ -249,23 +335,28 @@ export function createPostgresApiIdentityRepository(databaseUrl: string, adminSe
     },
     async createBrowserOAuthTransaction(transaction) {
       if (!oauthTransactionProtection) throw new Error("Browser OAuth transaction protection is unavailable.");
-      await sql`insert into browser_oauth_transactions (id, state_hash, code_verifier_ciphertext, return_url, expires) values (${transaction.id}, ${oauthTransactionProtection.stateHash(transaction.state)}, ${oauthTransactionProtection.encrypt(transaction.id, transaction.codeVerifier)}, ${transaction.returnUrl}, ${transaction.expires})`;
+      await sql`insert into browser_oauth_transactions (id, state_hash, code_verifier_ciphertext, return_url, referral_code, expires) values (${transaction.id}, ${oauthTransactionProtection.stateHash(transaction.state)}, ${oauthTransactionProtection.encrypt(transaction.id, transaction.codeVerifier)}, ${transaction.returnUrl}, ${transaction.referralCode ?? null}, ${transaction.expires})`;
     },
     async consumeBrowserOAuthTransaction(id, state) {
       if (!oauthTransactionProtection) throw new Error("Browser OAuth transaction protection is unavailable.");
-      const rows = await sql<Array<Omit<BrowserOAuthTransaction, "state" | "codeVerifier"> & { codeVerifierCiphertext: string }>>`delete from browser_oauth_transactions where id = ${id} and state_hash = ${oauthTransactionProtection.stateHash(state)} and expires > now() returning id, code_verifier_ciphertext as "codeVerifierCiphertext", return_url as "returnUrl", expires`;
+      const rows = await sql<Array<Omit<BrowserOAuthTransaction, "state" | "codeVerifier"> & { codeVerifierCiphertext: string }>>`delete from browser_oauth_transactions where id = ${id} and state_hash = ${oauthTransactionProtection.stateHash(state)} and expires > now() returning id, code_verifier_ciphertext as "codeVerifierCiphertext", return_url as "returnUrl", referral_code as "referralCode", expires`;
       const row = rows[0];
-      return row ? { ...row, state, codeVerifier: oauthTransactionProtection.decrypt(row.id, row.codeVerifierCiphertext) } : null;
+      return row ? { ...row, referralCode: row.referralCode ?? null, state, codeVerifier: oauthTransactionProtection.decrypt(row.id, row.codeVerifierCiphertext) } : null;
     },
-    async resolveOrCreateBrowserGoogleUser(subject, email, name, image) {
+    async resolveOrCreateBrowserGoogleUser(subject, email, name, image, referralCode) {
       const rows = await sql.begin(async (transaction) => {
         const existing = await transaction<{ userId: string; authorizationVersion: number }[]>`select users.id as "userId", users.authorization_version as "authorizationVersion" from accounts join users on users.id = accounts.user_id where accounts.provider = 'google' and accounts.provider_account_id = ${subject} limit 1 for update`;
         if (existing[0]) {
           const roles = await transaction`select role from user_roles where user_id = ${existing[0].userId} for update`;
-          if (roles.length) return existing;
+          if (roles.length) {
+            await captureReferralAttribution(transaction, existing[0].userId, referralCode);
+            return existing;
+          }
           const granted = await transaction`insert into user_roles (user_id, role) values (${existing[0].userId}, 'traveler') on conflict do nothing returning user_id`;
           if (!granted.length) return existing;
-          return await transaction<{ userId: string; authorizationVersion: number }[]>`update users set authorization_version = authorization_version + 1 where id = ${existing[0].userId} returning id as "userId", authorization_version as "authorizationVersion"`;
+          const resolved = await transaction<{ userId: string; authorizationVersion: number }[]>`update users set authorization_version = authorization_version + 1 where id = ${existing[0].userId} returning id as "userId", authorization_version as "authorizationVersion"`;
+          await captureReferralAttribution(transaction, resolved[0]!.userId, referralCode);
+          return resolved;
         }
         const users = await transaction<{ id: string; authorizationVersion: number }[]>`insert into users (id, email, name, image, email_verified) values (${randomUUID()}, ${email}, ${name}, ${image}, now()) on conflict (email) do update set name = coalesce(excluded.name, users.name), image = coalesce(excluded.image, users.image) returning id, authorization_version as "authorizationVersion"`;
         const userId = users[0]!.id;
@@ -273,6 +364,7 @@ export function createPostgresApiIdentityRepository(databaseUrl: string, adminSe
         if (linkedGoogleAccount[0] && linkedGoogleAccount[0].providerAccountId !== subject) throw new BrowserGoogleAccountConflictError();
         if (!linkedGoogleAccount[0]) await transaction`insert into accounts (user_id, type, provider, provider_account_id) values (${userId}, 'oauth', 'google', ${subject})`;
         await transaction`insert into user_roles (user_id, role) values (${userId}, 'traveler') on conflict do nothing`;
+        await captureReferralAttribution(transaction, userId, referralCode);
         return [{ userId, authorizationVersion: users[0]!.authorizationVersion }];
       });
       return rows[0]!;
@@ -289,6 +381,14 @@ export function createPostgresApiIdentityRepository(databaseUrl: string, adminSe
     async renewBrowserSession(sessionId, expires) { return (await sql`update browser_sessions set expires = ${expires} where session_lookup_hash = ${browserLookupHash(sessionId)} and revoked_at is null and expires > now() returning session_lookup_hash`).length === 1; },
     async revokeBrowserSession(sessionId) { await sql`update browser_sessions set revoked_at = now() where session_lookup_hash = ${browserLookupHash(sessionId)} and revoked_at is null`; },
   };
+}
+
+async function captureReferralAttribution(transaction: postgres.TransactionSql, userId: string, referralCode: string | null) {
+  if (!referralCode) return;
+  const codes = await transaction<{ id: string; referrerUserId: string | null }[]>`select id, referrer_user_id as "referrerUserId" from referral_codes where code = ${referralCode} and active = true limit 1 for key share`;
+  const code = codes[0];
+  if (!code || code.referrerUserId === userId) return;
+  await transaction`insert into referral_attributions (id, user_id, referral_code_id, referrer_user_id) values (${randomUUID()}, ${userId}, ${code.id}, ${code.referrerUserId}) on conflict (user_id) do nothing`;
 }
 
 function createBrowserOAuthTransactionProtection(secret: string) {

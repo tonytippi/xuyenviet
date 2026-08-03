@@ -61,7 +61,7 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
               Đăng nhập chưa hoàn tất. Vui lòng thử lại.
             </p>
           ) : null}
-          <a href={`/auth/google?returnUrl=${encodeURIComponent(travelerReturnUrl)}`}
+          <a href={`/auth/google?returnUrl=${encodeURIComponent(travelerReturnUrl)}${referralCode ? `&ref=${encodeURIComponent(referralCode)}` : ""}`}
               className="min-h-12 w-full rounded-xl bg-[#202020] px-5 py-4 text-center text-base font-medium text-white transition hover:bg-[#383838] active:translate-y-px"
             >
               Tiếp tục với Google

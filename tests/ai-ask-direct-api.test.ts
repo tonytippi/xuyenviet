@@ -30,7 +30,7 @@ describe("direct traveler API client", () => {
       async start(controller) {
         controller.enqueue(encoder.encode('{"type":"preparing"}\n{"type":"delta","content":"Xin"}\n'));
         await secondChunk;
-        controller.enqueue(encoder.encode('{"type":"delta","content":" chào"}\n'));
+        controller.enqueue(encoder.encode('{"type":"delta","content":" chào"}\n{"type":"done","conversationId":"conversation-1","userMessage":{"id":"user-1","content":"Đi đâu?"},"assistantMessage":{"id":"assistant-1","content":"Đi Huế."}}\n'));
         controller.close();
       },
     });
@@ -40,7 +40,7 @@ describe("direct traveler API client", () => {
     const submission = submitDirectAiAskStream({ question: "Đi đâu?", image: null, idempotencyKey: "a".repeat(16), onPreparing: () => received.push("preparing"), onDelta: (content) => received.push(content) });
     await vi.waitFor(() => expect(received).toEqual(["preparing", "Xin"]));
     releaseSecondChunk();
-    await expect(submission).resolves.toMatchObject([{ type: "preparing" }, { type: "delta", content: "Xin" }, { type: "delta", content: " chào" }]);
+    await expect(submission).resolves.toMatchObject([{ type: "preparing" }, { type: "delta", content: "Xin" }, { type: "delta", content: " chào" }, { type: "done" }]);
     expect(received).toEqual(["preparing", "Xin", " chào"]);
   });
 
@@ -50,5 +50,19 @@ describe("direct traveler API client", () => {
     const onDelta = vi.fn();
     await expect(submitDirectAiAskStream({ question: "Đi đâu?", image: null, idempotencyKey: "a".repeat(16), onPreparing: () => undefined, onDelta })).rejects.toThrow("Luồng trả lời bị gián đoạn trước khi hoàn tất.");
     expect(onDelta).not.toHaveBeenCalled();
+  });
+
+  test("requires one preparing prefix and one terminal event", async () => {
+    const fetch = vi.fn().mockResolvedValueOnce(new Response('{"type":"preparing"}\n{"type":"done","conversationId":"conversation-1","userMessage":{"id":"user-1","content":"Đi đâu?"},"assistantMessage":{"id":"assistant-1","content":"Đi Huế."}}\n{"type":"delta","content":" muộn"}\n', { status: 200 }));
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(submitDirectAiAskStream({ question: "Đi đâu?", image: null, idempotencyKey: "a".repeat(16), onPreparing: () => undefined, onDelta: () => undefined })).rejects.toThrow("Luồng trả lời bị gián đoạn trước khi hoàn tất.");
+  });
+
+  test("rejects an unterminated stream after a valid prefix", async () => {
+    const fetch = vi.fn().mockResolvedValueOnce(new Response('{"type":"preparing"}\n{"type":"delta","content":"Đi Huế"}\n', { status: 200 }));
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(submitDirectAiAskStream({ question: "Đi đâu?", image: null, idempotencyKey: "a".repeat(16), onPreparing: () => undefined, onDelta: () => undefined })).rejects.toThrow("Luồng trả lời bị gián đoạn trước khi hoàn tất.");
   });
 });

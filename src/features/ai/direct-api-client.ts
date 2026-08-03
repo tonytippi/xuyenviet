@@ -1,6 +1,6 @@
 "use client";
 
-import { parseConversationSummaryListResponse, parsePlanningAnswerDetailResponse, parsePlanningContextResponse, parseSafeApiError, parseTravelerShellResponse, type AiAskStreamEvent, type PlanningAnswerDetailResponse, type PlanningContextResponse, type TravelerShellResponse } from "@xuyenviet/contracts";
+import { parseConversationSummaryListResponse, parseCreateTripProjectCommand, parsePlanningAnswerDetailResponse, parsePlanningContextResponse, parseSafeApiError, parseSaveAnswerUsefulnessFeedbackCommand, parseTravelerShellResponse, type AiAskStreamEvent, type CreateTripProjectCommand, type PlanningAnswerDetailResponse, type PlanningContextResponse, type TravelerShellResponse } from "@xuyenviet/contracts";
 
 let csrfToken: string | null = null;
 
@@ -49,6 +49,50 @@ async function getCsrfToken() {
   return csrfToken;
 }
 
+async function directCommand<T>(path: string, method: "POST" | "DELETE", body?: unknown): Promise<T> {
+  const token = await getCsrfToken();
+  const response = await fetch(path, { method, credentials: "include", headers: { "Content-Type": "application/json", "X-XuyenViet-CSRF": token, "x-request-id": crypto.randomUUID() }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+  const payload = await readJson(response);
+  if (!response.ok) {
+    const error = parseSafeApiError(payload);
+    throw new DirectApiError(error?.code, error?.message);
+  }
+  return payload as T;
+}
+
+function isDeleteResult(value: unknown): value is { success: boolean; reason?: "not_found" | "failed" } {
+  return Boolean(value) && typeof value === "object" && (value as { success?: unknown }).success === true || Boolean(value) && typeof value === "object" && (value as { success?: unknown }).success === false && (["not_found", "failed"] as unknown[]).includes((value as { reason?: unknown }).reason);
+}
+
+export async function createDirectTripProject(input: CreateTripProjectCommand) {
+  const command = parseCreateTripProjectCommand(input);
+  if (!command) return { success: false as const, reason: "invalid_input" as const };
+  const result = await directCommand<unknown>("/v1/trip-projects", "POST", command);
+  if (!result || typeof result !== "object" || ![true, false].includes((result as { success?: unknown }).success as boolean)) throw new DirectApiError();
+  return result as { success: boolean; reason?: "invalid_input" | "failed"; project?: { id: string } };
+}
+
+export async function deleteDirectConversation(conversationId: string) {
+  const result = await directCommand<unknown>(`/v1/conversations/${encodeURIComponent(conversationId)}`, "DELETE");
+  if (!isDeleteResult(result)) throw new DirectApiError();
+  return result;
+}
+
+export async function deleteDirectTripProject(tripProjectId: string) {
+  const result = await directCommand<unknown>(`/v1/trip-projects/${encodeURIComponent(tripProjectId)}`, "DELETE");
+  if (!isDeleteResult(result)) throw new DirectApiError();
+  return result;
+}
+
+export async function saveDirectAnswerUsefulnessFeedback(input: { assistantMessageId: string; rating: "useful" | "not_useful"; comment?: string | null }) {
+  const command = parseSaveAnswerUsefulnessFeedbackCommand(input);
+  if (!command) return { success: false as const, reason: "invalid_input" as const };
+  const result = await directCommand<unknown>("/v1/answer-usefulness-feedback", "POST", command);
+  if (!result || typeof result !== "object" || typeof (result as { success?: unknown }).success !== "boolean") throw new DirectApiError();
+  return result as { success: boolean; feedback?: { rating: "useful" | "not_useful"; comment: string | null; updatedAt: string }; reason?: "not_found" | "invalid_target" | "invalid_input" | "invalid_rating" | "comment_too_long" | "failed" };
+}
+
+
 export async function directLogout() {
   const token = await getCsrfToken();
   const response = await fetch("/auth/logout", { method: "POST", credentials: "include", headers: { "X-XuyenViet-CSRF": token } });
@@ -69,6 +113,7 @@ export async function submitDirectAiAskStream(input: { question: string; convers
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffered = "";
+  let phase: "initial" | "streaming" | "terminal" = "initial";
   while (true) {
     const { value, done } = await reader.read();
     buffered += decoder.decode(value, { stream: !done });
@@ -78,6 +123,10 @@ export async function submitDirectAiAskStream(input: { question: string; convers
       if (!line.trim()) continue;
       const event = parseAiAskStreamEvent(line);
       if (!event) throw new DirectApiError(undefined, "Luồng trả lời bị gián đoạn trước khi hoàn tất.");
+      if (phase === "terminal" || event.type === "preparing" && phase !== "initial" || event.type === "delta" && phase !== "streaming" || (event.type === "done" || event.type === "error" || event.type === "in_progress") && phase !== "streaming") {
+        throw new DirectApiError(undefined, "Luồng trả lời bị gián đoạn trước khi hoàn tất.");
+      }
+      phase = event.type === "preparing" || event.type === "delta" ? "streaming" : "terminal";
       events.push(event);
       if (event.type === "preparing") input.onPreparing();
       if (event.type === "delta") input.onDelta(event.content);
@@ -85,6 +134,7 @@ export async function submitDirectAiAskStream(input: { question: string; convers
     if (done) break;
   }
   if (buffered.trim()) throw new DirectApiError(undefined, "Luồng trả lời bị gián đoạn trước khi hoàn tất.");
+  if (phase !== "terminal") throw new DirectApiError(undefined, "Luồng trả lời bị gián đoạn trước khi hoàn tất.");
   return events;
 }
 
