@@ -1321,23 +1321,6 @@ export const knowledgeCards = pgTable(
   ],
 );
 
-export const knowledgeCardStateMigrationReports = pgTable(
-  "knowledge_card_state_migration_reports",
-  {
-    id: text("id")
-      .primaryKey()
-      .$defaultFn(() => crypto.randomUUID()),
-    reason: text("reason").notNull(),
-    cardCount: integer("card_count").notNull(),
-    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
-  },
-  (report) => [
-    uniqueIndex("knowledge_card_state_migration_reports_reason_idx").on(report.reason),
-    check("knowledge_card_state_migration_reports_reason_check", sql`length(btrim(${report.reason})) between 1 and 160`),
-    check("knowledge_card_state_migration_reports_count_check", sql`${report.cardCount} >= 0`),
-  ],
-);
-
 export const knowledgeCardSources = pgTable(
   "knowledge_card_sources",
   {
@@ -1406,23 +1389,6 @@ export const knowledgeCardEvidence = pgTable(
     check("knowledge_card_evidence_withdrawal_reason_check", sql`${evidence.withdrawalReason} is null or ${evidence.withdrawalReason} in ('withdrawn', 'inaccessible', 'removed')`),
     check("knowledge_card_evidence_withdrawal_shape_check", sql`${evidence.state} = 'removed' or ${evidence.withdrawalReason} is null`),
     check("knowledge_card_evidence_independence_key_check", sql`length(btrim(${evidence.independenceKey})) between 1 and 160`),
-  ],
-);
-
-export const knowledgeEvidenceBackfillReports = pgTable(
-  "knowledge_evidence_backfill_reports",
-  {
-    id: text("id")
-      .primaryKey()
-      .$defaultFn(() => crypto.randomUUID()),
-    reason: text("reason").notNull(),
-    cardCount: integer("card_count").notNull(),
-    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
-  },
-  (report) => [
-    uniqueIndex("knowledge_evidence_backfill_reports_reason_idx").on(report.reason),
-    check("knowledge_evidence_backfill_reports_reason_check", sql`length(btrim(${report.reason})) between 1 and 160`),
-    check("knowledge_evidence_backfill_reports_count_check", sql`${report.cardCount} >= 0`),
   ],
 );
 
