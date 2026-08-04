@@ -11,10 +11,10 @@ describe("traveler writer inventory", () => {
     expect(existsSync(projectPath("src/features/chat-trips/context-extraction.ts"))).toBe(false);
 
     const travelerSources = [
-      "src/app/ai-ask/page.tsx",
-      "src/app/sign-in/page.tsx",
-      "src/features/chat-trips/direct-shell-loader.tsx",
-      "src/features/ai/direct-api-client.ts",
+       "apps/web/src/app/ai-ask/page.tsx",
+       "apps/web/src/app/sign-in/page.tsx",
+       "apps/web/src/features/chat-trips/direct-shell-loader.tsx",
+       "apps/web/src/features/ai/direct-api-client.ts",
     ].map(readProjectSource).join("\n");
 
     expect(travelerSources).not.toContain("@/features/auth/actions");

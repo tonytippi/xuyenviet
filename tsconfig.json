@@ -16,11 +16,6 @@
     "jsx": "preserve",
     "incremental": true,
     "tsBuildInfoFile": ".cache/tsconfig.tsbuildinfo",
-    "plugins": [
-      {
-        "name": "next"
-      }
-    ],
     "paths": {
       "@/*": ["./src/*"],
       "@xuyenviet/contracts": ["./packages/contracts/src/index.ts"],
@@ -32,6 +27,6 @@
       "@worker/*": ["./packages/worker-domain/src/*"]
     }
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules", "packages/worker-domain"]
+  "include": ["**/*.ts", "**/*.tsx"],
+  "exclude": ["node_modules", "apps/admin", "apps/web", "packages/worker-domain"]
 }

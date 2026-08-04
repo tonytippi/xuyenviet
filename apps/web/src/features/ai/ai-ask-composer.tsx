@@ -6,11 +6,7 @@ import { useActionState, useEffect, useRef, useState, type ChangeEvent, type For
 
 import { ConversationList, type ChatSessionSummary } from "@/features/chat-trips/conversation-list";
 import { formatTripProjectLabel } from "@/features/chat-trips/labels";
-import { answerUsefulnessCommentMaxLength, countAnswerUsefulnessCommentCharacters, type AnswerUsefulnessFeedbackSummary } from "@/features/feedback/types";
-import type { AnswerUsefulnessRating } from "@/db/schema";
-import type { AnswerAnnotation, AnswerAnnotationActionCapability } from "@/features/ai/answer-annotations";
-import type { AssistantMessageProvenanceItem, AvailableAssistantMessageProvenanceItem } from "@/features/retrieval/provenance";
-import type { TripWorkspaceReadModel } from "@/features/chat-trips/trip-home";
+import { answerUsefulnessCommentMaxLength, countAnswerUsefulnessCommentCharacters, type AnswerAnnotation, type AnswerAnnotationActionCapability, type AnswerUsefulnessFeedbackSummary, type AnswerUsefulnessRating, type AssistantMessageProvenanceItem, type AvailableAssistantMessageProvenanceItem, type TripWorkspaceReadModel } from "@/features/chat-trips/types";
 import { tripChangeProposalLabels } from "@/features/chat-trips/trip-home-labels";
 import { TripWorkspacePanel } from "@/features/ai/trip-workspace-panel";
 import { DirectApiError, submitDirectAiAskStream } from "@/features/ai/direct-api-client";

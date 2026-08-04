@@ -1,4 +1,4 @@
-import type { PendingProposalAffectedItemRef, PendingProposalFocusInput } from "@/features/chat-trips/trip-home";
+import type { PendingProposalAffectedItemRef, PendingProposalFocusInput } from "@/features/chat-trips/types";
 import { tripChangeProposalLabels } from "@/features/chat-trips/trip-home-labels";
 
 // Story 7.5: the card stays presentational and data-free. The composer owns

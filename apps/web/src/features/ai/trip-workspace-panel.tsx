@@ -1,4 +1,4 @@
-import type { TripWorkspaceReadModel } from "@/features/chat-trips/trip-home";
+import type { TripWorkspaceReadModel } from "@/features/chat-trips/types";
 import { formatTripProjectLabel } from "@/features/chat-trips/labels";
 import { tripChangeProposalLabels, tripHomeFocusKindLabels, tripHomeFocusNextActions, tripPlanAnchorRoleLabels } from "@/features/chat-trips/trip-home-labels";
 import { TripProposalReviewCard, type TripProposalTerminalOutcome } from "@/features/ai/trip-proposal-review-card";

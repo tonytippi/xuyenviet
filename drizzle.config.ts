@@ -65,7 +65,7 @@ const databaseUrl = getDatabaseUrl();
 assertProductionDatabaseUrl(databaseUrl);
 
 export default defineConfig({
-  schema: "./src/db/schema.ts",
+  schema: "./packages/database/src/schema.ts",
   out: "./drizzle/migrations",
   dialect: "postgresql",
   dbCredentials: {

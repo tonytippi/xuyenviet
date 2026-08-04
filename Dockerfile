@@ -16,6 +16,7 @@ FROM base AS deps
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/api/package.json ./apps/api/package.json
 COPY apps/admin/package.json ./apps/admin/package.json
+COPY apps/web/package.json ./apps/web/package.json
 COPY apps/worker/package.json ./apps/worker/package.json
 COPY packages/config/package.json ./packages/config/package.json
 COPY packages/contracts/package.json ./packages/contracts/package.json
@@ -34,6 +35,7 @@ FROM base AS production-deps
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/api/package.json ./apps/api/package.json
 COPY apps/admin/package.json ./apps/admin/package.json
+COPY apps/web/package.json ./apps/web/package.json
 COPY apps/worker/package.json ./apps/worker/package.json
 COPY packages/config/package.json ./packages/config/package.json
 COPY packages/contracts/package.json ./packages/contracts/package.json
@@ -52,15 +54,15 @@ ENV SCHEMA_RELEASE_MATRIX_DIRECTORY=/app/docs/release-matrices
 RUN groupadd --system nextjs && useradd --system --gid nextjs nextjs
 
 COPY --chown=nextjs:nextjs --from=production-deps /app/node_modules ./node_modules
-COPY --chown=nextjs:nextjs --from=build /app/.next ./.next
+COPY --chown=nextjs:nextjs --from=build /app/apps/web/.next/standalone ./
+COPY --chown=nextjs:nextjs --from=build /app/apps/web/.next/static ./apps/web/.next/static
 COPY --chown=nextjs:nextjs --from=build /app/docs/release-matrices ./docs/release-matrices
-COPY --chown=nextjs:nextjs package.json ./
 
 EXPOSE 3000
 
 USER nextjs
 
-CMD ["node_modules/.bin/next", "start"]
+CMD ["node", "apps/web/server.js"]
 
 # Railway deploys the Nest API separately from the traveler presentation app.
 # Select this target for the browser-facing API service.

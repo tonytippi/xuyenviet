@@ -1,0 +1,17 @@
+{
+  "name": "@xuyenviet/web",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --port 3000",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@xuyenviet/contracts": "workspace:*",
+    "next": "^15.3.5",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": { "eslint": "^9.30.1", "eslint-plugin-react-hooks": "^5.2.0", "typescript": "^5.8.3" }
+}

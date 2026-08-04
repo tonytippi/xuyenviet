@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import nextConfig from "../next.config";
+import nextConfig from "../apps/web/next.config";
 
 describe("local direct API transport", () => {
   afterEach(() => { vi.unstubAllEnvs(); });

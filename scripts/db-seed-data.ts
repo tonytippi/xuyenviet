@@ -1,7 +1,7 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import type postgres from "postgres";
 
-import { aiGatewayModels, rawSourceMaterial, sources, users } from "../src/db/schema";
+import { aiGatewayModels, rawSourceMaterial, sources, users } from "@xuyenviet/database";
 import { loadFacebookSeedUrls } from "./facebook-seed-urls";
 import { loadYoutubeSeedUrls } from "./youtube-seed-urls";
 

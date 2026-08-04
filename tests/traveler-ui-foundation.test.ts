@@ -3,7 +3,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
 
-import * as icons from "@/components/ui/icons";
+import * as icons from "../apps/web/src/components/ui/icons";
 
 const iconNames = [
   "AttachmentIcon",
@@ -19,19 +19,19 @@ const iconNames = [
 ] as const;
 
 describe("traveler UI foundation", () => {
-  test("loads Inter and keeps Vietnamese as the document language", () => {
-    const source = readFileSync("src/app/layout.tsx", "utf8");
+  test("loads Geist and keeps Vietnamese as the document language", () => {
+    const source = readFileSync("apps/web/src/app/layout.tsx", "utf8");
 
-    expect(source).toContain('import { Inter } from "next/font/google"');
+    expect(source).toContain('import { Geist, Geist_Mono } from "next/font/google"');
     expect(source).toContain('subsets: ["latin", "latin-ext"]');
     expect(source).toContain('<html lang="vi">');
-    expect(source).toContain("className={inter.className}");
+    expect(source).toContain("className={`${geist.variable} ${geistMono.variable}`}");
   });
 
   test("provides semantic palette, focus, and reduced-motion foundation tokens", () => {
-    const source = readFileSync("src/app/globals.css", "utf8");
+    const source = readFileSync("apps/web/src/app/globals.css", "utf8");
 
-    for (const token of ["--color-white", "--color-stone", "--color-green", "--color-amber", "--color-teal", "--color-source"]) {
+    for (const token of ["--background", "--foreground", "--muted", "--focus-ring"]) {
       expect(source).toContain(token);
     }
 

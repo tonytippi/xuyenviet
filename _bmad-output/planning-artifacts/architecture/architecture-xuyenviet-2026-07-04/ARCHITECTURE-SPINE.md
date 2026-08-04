@@ -58,7 +58,7 @@ Prevents: independent chat/admin/retrieval implementations choosing incompatible
 
 Rule: Build feature modules with server-side interfaces; do not split into services for MVP.
 
-Rule: Root Next.js remains the traveler presentation application. It must not own domain route handlers, server-action writers, database access, Auth.js sessions, or BFF transport after the direct API cutover.
+Rule: `apps/web` is the traveler presentation application. It must not own domain route handlers, server-action writers, database access, Auth.js sessions, or BFF transport after the direct API cutover.
 
 Rule: Treat a future mobile app as a new client channel over stable server/API boundaries, not a reason to extract shared packages or change deployable shape during the web MVP.
 

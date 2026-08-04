@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { loadTravelerShell, submitDirectAiAskStream } from "@/features/ai/direct-api-client";
+import { loadTravelerShell, submitDirectAiAskStream } from "../apps/web/src/features/ai/direct-api-client";
 
 describe("direct traveler API client", () => {
   afterEach(() => { vi.unstubAllGlobals(); });
