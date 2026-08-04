@@ -16,6 +16,10 @@ stepsCompleted:
   - step-02-architecture-delta-2026-07-28-epic-design
   - step-03-architecture-delta-2026-07-28-story-generation
   - step-04-architecture-delta-2026-07-28-final-validation
+  - step-01-knowledge-lifecycle-normalization-2026-08-04-requirements-extraction
+  - step-02-knowledge-lifecycle-normalization-2026-08-04-epic-design
+  - step-03-knowledge-lifecycle-normalization-2026-08-04-story-generation
+  - step-04-knowledge-lifecycle-normalization-2026-08-04-final-validation
 inputDocuments:
   - _bmad-output/planning-artifacts/prds/prd-xuyenviet-2026-07-04/prd.md
   - _bmad-output/planning-artifacts/prds/prd-xuyenviet-2026-07-04/addendum.md
@@ -25,6 +29,7 @@ inputDocuments:
   - _bmad-output/planning-artifacts/ux-designs/ux-xuyenviet-2026-07-05/EXPERIENCE.md
   - _bmad-output/project-context.md
   - _bmad-output/planning-artifacts/proposal-eliminate-fake-system-users-with-audit-actors.md
+  - docs/proposals/knowledge-lifecycle-normalization.md
 ---
 
 # xuyenviet - Epic Breakdown
@@ -73,9 +78,10 @@ FR-19: Support the defined knowledge-card taxonomy.
 FR-20: Let operators create, edit, approve, and archive cards.
 FR-21: Retrieve cards in active publication state; qualifying AI-extracted community claims do not require operator approval.
 FR-22: Preserve inspectable source provenance.
-FR-22A: Track card knowledge state: confirmed, community pattern, conditional, uncertain, conflicted, or superseded.
-FR-22B: Track review state separately from publication state.
-FR-22C: Exclude suppressed, archived, and superseded cards from normal retrieval.
+FR-22A: Give each knowledge card exactly one workflow lifecycle state: draft, pending_operator, active, suppressed, archived, or rejected.
+FR-22B: Track domain classification separately as community_observation, community_pattern, conditional, or conflicted; do not use workflow concepts as classifications.
+FR-22C: Track verification requirement separately as none, operator_required, or failed; derive corroboration from eligible independent evidence and record human decisions in work resolution/audit history.
+FR-22D: Exclude every card other than an evidence-eligible active card from normal retrieval; pending_operator is never traveler retrievable.
 FR-23: Accept operator source submissions as URL, raw text, copied post, or image/screenshot.
 FR-23A: Queue unreadable Facebook URLs for later operator-run capture.
 FR-23B: Capture only confirmed, operator-only visible Facebook material without browser credentials, cookies, tokens, local storage, full HTML, or hidden data.
@@ -83,11 +89,11 @@ FR-24: AI-triage source material, extract structured claims, and validate each a
 FR-24A: Classify triaged sources as rejected, context-only, candidate, or verify-first and retain decision reasons.
 FR-24B: Use an independent AI judge, separate from extraction, for publication/suppression/review decisions.
 FR-24C: Discover and process every independently useful atomic claim from a submitted immutable source version without an accepted-fact quota.
-FR-24D: Give each discovered candidate an independent auditable terminal outcome and complete source ingestion only after candidate work terminalizes.
+FR-24D: Give each discovered candidate an independent, immutable completed AI disposition/reason or a failed outcome with no business disposition; complete source ingestion only after discovery is terminal and every candidate is completed or failed, while retaining idempotent observability counters only.
 FR-24E: Prevent work for an earlier superseded capture version from mutating active knowledge while preserving intelligible historical ingestion behavior.
 FR-25: Make claims searchable without human approval only when evidence, specificity, actionability, privacy, commercial-risk, and conflict policy pass.
 FR-25A: Create risk-prioritized review recommendations, not mandatory approval gates, for risky, weak, conflicting, duplicate, or context-missing claims.
-FR-25B: Quality-sample 15% of auto-active claims for the first four weeks and 100% of verify-first claims.
+FR-25B: Quality-sample 15% of auto-active claims for the first four weeks; create one immutable, non-actionable sampling obligation for every needs_operator candidate; record exact cohorts before high-severity containment and either open fenced risk work for remediable cards or suppress/de-index unsafe cards.
 FR-26: Support the fixed MVP confidence labels: unverified, community, curated, partner, official.
 FR-27: Mark changing price, schedule, availability, road, hours, weather, or service facts as freshness-sensitive.
 FR-28: Reach a seed set of 100 active, evidence-grounded Hanoi-to-HCMC knowledge cards.
@@ -145,7 +151,7 @@ NFR-12: API, worker, traveler web, operator app, and migration workloads deploy 
 NFR-13: Liveness verifies process operation; readiness verifies assigned configuration, database, and critical dependencies. Worker shutdown stops claims and safely completes or releases leased work.
 NFR-14: Correlation IDs and safe structured telemetry cover browser session admission, API, worker, and provider operations, including capability, principal class, result, latency, and safe operational identifiers.
 NFR-15: Browser-to-API and database traffic remain private and origin-controlled; staging and production use isolated credentials, databases, OAuth configuration, and observability projects.
-NFR-16: Use clean-break migrations only while data is disposable; durable or overlapping runtimes require approved expand-migrate-contract plans and non-destructive schema rollback behavior.
+NFR-16: The current lifecycle normalization uses a clean-break migration, reset, and reseed only while all targets are disposable; if durable shared or customer data exists before shipping, stop and use an approved expand-migrate-contract plan.
 NFR-17: Before retiring a legacy worker loop, its replacement dashboard and runbook demonstrate stable lag, retry, lease recovery, duplicate-poller, and restart behavior.
 NFR-18: Before public launch, approve Railway ownership, domains/DNS/CSP/OAuth callbacks, secrets, backup/restore, monitoring, alerting, and on-call; pass connection-pool, AI-stream concurrency, and backup-restore tests.
 
@@ -165,6 +171,19 @@ NFR-18: Before public launch, approve Railway ownership, domains/DNS/CSP/OAuth c
 - Use Tavily behind a provider adapter provisionally; prefer official/provider sources and fail closed with a verification recommendation when search fails or is low confidence.
 - Supervise separate Node workers for knowledge ingestion/indexing; keep logs, health/restart supervision, backup/restore, and public launch privacy checks operationally ready.
 - Preserve no-credit/no-payment/no-reward MVP boundaries and defer maps, mobile, service decomposition, vector/hybrid ranking, and broad Facebook discovery pending explicit decisions.
+
+### Knowledge Lifecycle Normalization Requirements (2026-08-04)
+
+- KLN-1: Replace legacy overlapping knowledge state fields with one card `lifecycle_state`, separate domain classification and verification requirement, target-shaped job/candidate/recommendation records, and `knowledge_sampling_obligations`.
+- KLN-2: Enforce row-local lifecycle and candidate-outcome rules with checks, candidate completed-outcome immutability with a database trigger, and per-card-version open-work cardinality with partial unique indexes.
+- KLN-3: Implement `transitionKnowledgeCard` as the only production writer of knowledge lifecycle, verification requirement, actionable recommendation state, candidate-card association, lifecycle audit, and lifecycle-caused search invalidation; it returns typed `resolved`, `stale`, or `invalid` outcomes under version fences and locks.
+- KLN-4: Keep Worker ownership of continuous ingestion, conflict, index, and sampling-selection loops; allow the authenticated API to execute authorized operator decisions synchronously; keep `apps/admin` presentation-only and prohibit API job claims/ingestion loops.
+- KLN-5: Require eligible active supporting evidence with validated span, source/capture eligibility, and retrieval metadata for active cards; atomically disable projection and re-evaluate/suppress a card when it loses final eligible support.
+- KLN-6: Model jobs as technical execution only, with terminal discovery plus terminal candidate processing before completion and transactional idempotent counters that never determine lifecycle or retrieval.
+- KLN-7: Preserve completed candidate AI disposition/reason as immutable, prevent failed candidates from holding business dispositions, and retain candidate decisions when later operator work resolves.
+- KLN-8: Separate actionable recommendations from immutable sampling obligations; implement version-fenced primary/sampling work, exact high-severity cohort persistence, and containment with risk requeue or suppression without successor work.
+- KLN-9: Update retrieval, search indexing, source removal, API contracts, safe admin read models, seeds, fixtures, and tests to use only the target representation after reset/reseed; remove legacy runtime paths without a backfill, dual-write, or compatibility layer.
+- KLN-10: Cover every transition-matrix trigger and forbidden transition, constraints, stale/concurrent work, mixed jobs, source withdrawal, sampling containment, atomic audit/index effects, API authorization, and direct-admin contracts with appropriately scoped unit/integration tests.
 
 ### Architecture Decision Requirements
 
@@ -324,6 +343,31 @@ ADR-32-8: Epic 11 - Canonical TripAnswerContext and auditable source bundles.
 ADR-32-9: Epic 11 - Withdrawn provenance safety for historic traveler answers.
 ADR-32-10: Epic 11 - Validated, provenance-safe answer annotations.
 
+### Knowledge Lifecycle Normalization Coverage Map (2026-08-04)
+
+KLN-1: Epic 15 - Target schema, contracts, migration, reset, seeds, and fixtures.
+KLN-2: Epic 15 - Database lifecycle invariants and completed-candidate immutability.
+KLN-3: Epic 15 - Version-fenced transactional lifecycle command.
+KLN-4: Epic 15 - Worker/API/admin ownership enforcement.
+KLN-5: Epic 15 - Evidence-safe activation, retrieval, and source removal.
+KLN-6: Epic 15 - Technical job completion and idempotent candidate counters.
+KLN-7: Epic 15 - Immutable candidate AI outcomes.
+KLN-8: Epic 15 - Actionable work, sampling obligations, and containment.
+KLN-9: Epic 15 - Target-only retrieval, contracts, admin views, and fixtures.
+KLN-10: Epic 15 - Lifecycle transition-matrix verification.
+FR-22A: Epic 15 - One card workflow lifecycle.
+FR-22B: Epic 15 - Domain classification separated from workflow.
+FR-22C: Epic 15 - Independent verification requirement and derived corroboration.
+FR-22D: Epic 15 - Evidence-eligible active-only retrieval.
+FR-24D: Epic 15 - Immutable terminal candidate outcomes and technical job completion.
+FR-25A: Epic 15 - Fenced actionable operator work and stale-work safety.
+FR-25B: Epic 15 - Sampling obligations and cohort-scoped containment.
+FR-29: Epic 15 - Active-evidence retrieval guard.
+NFR-9: Epic 15 - Auditable lifecycle, outcome, evidence, and work history.
+NFR-9A: Epic 15 - Idempotent source processing and mixed-outcome job semantics.
+NFR-9B: Epic 15 - Atomic source withdrawal and fail-closed retrieval.
+NFR-16: Epic 15 - Disposable-target clean-break migration/reset/reseed.
+
 ## Epic List
 
 ### Epic 1: Trusted Entry And Planning Workspace Access
@@ -413,6 +457,14 @@ Travelers receive answers whose structured Trip Project context and selectable d
 **FRs covered:** FR-51, FR-54, FR-55, FR-56, FR-58. **NFRs covered:** NFR-2, NFR-3, NFR-4, NFR-10, NFR-11, NFR-14.
 
 **Implementation notes:** Chat/Trips owns `TripAnswerContext v1` and its precedence/conflict contract. AI orchestration stores immutable source-bundle snapshots. Knowledge source removal backfills and withdraws affected provenance before hiding source material. Each migrated read capability uses the API/BFF path and retires its matching legacy owner.
+
+### Epic 15: Trustworthy Knowledge Lifecycle Cutover
+
+Operators can safely manage evidence-grounded community knowledge through one unambiguous lifecycle, while travelers retrieve only active cards that retain eligible support and the Worker/API each retain their correct responsibilities.
+
+**Requirements covered:** KLN-1 through KLN-10; FR-22A, FR-22B, FR-22C, FR-22D, FR-24D, FR-25A, FR-25B, FR-29, NFR-9, NFR-9A, NFR-9B, and NFR-16.
+
+**Implementation notes:** This is a disposable-target clean break: one forward-only target migration followed by reset/reseed, with no backfill, dual write, compatibility runtime path, release matrix, or legacy fixture. It depends on the direct NestJS API boundary from Epic 14 but preserves its session, CSRF, origin, and safe-error behavior. The Worker remains the sole continuous execution owner; API commands synchronously resolve authorized operator decisions only, and `apps/admin` remains presentation-only. Epic 3 stories are historical baseline and must not be reinterpreted as this target lifecycle contract.
 
 ## Epic 1: Trusted Entry And Planning Workspace Access
 
@@ -1794,3 +1846,198 @@ So that no unsupported ownership path survives the consolidation.
 As a product owner,
 I want direct API deployment, one-writer, OAuth/session, rollback, Worker, and operations evidence to be explicit,
 So that public readiness is based on proof rather than completed-story counts.
+
+## Epic 15: Trustworthy Knowledge Lifecycle Cutover
+
+Operators can safely manage evidence-grounded community knowledge through one unambiguous lifecycle, while travelers retrieve only active cards that retain eligible support and the Worker/API each retain their correct responsibilities.
+
+### Story 15.1: Establish the Target Lifecycle Schema
+
+As a knowledge operator,
+I want all persisted Knowledge records to use one target lifecycle contract,
+So that contradictory legacy state combinations cannot exist.
+
+**Acceptance Criteria:**
+
+**Given** the current development target is disposable
+**When** the lifecycle migration is applied and the database is reset/reseeded
+**Then** legacy lifecycle fields are replaced with target-only card lifecycle, classification, verification, job, candidate, recommendation, and sampling-obligation fields
+**And** no backfill, dual-write, compatibility runtime path, or legacy fixture remains.
+
+**Given** target schema writes occur
+**When** card, candidate, and recommendation data is persisted
+**Then** database checks enforce lifecycle/retrieval rules and candidate disposition/reason nullability
+**And** partial unique indexes permit at most one open primary item and one open sampling item for a card content/evidence fence.
+
+**Given** a candidate has completed
+**When** any write attempts to alter its AI disposition or reason
+**Then** a database trigger rejects the write
+**And** failed candidates cannot persist a business disposition or reason.
+
+**Given** API/domain contracts, seeds, and fixtures are loaded
+**When** they represent Knowledge data
+**Then** they use the target shape only
+**And** Drizzle schema validation and migration checks pass.
+
+### Story 15.2: Complete Candidate Processing and Technical Job Accounting
+
+As an operator,
+I want ingestion jobs to report technical progress and candidate outcomes accurately,
+So that mixed candidate outcomes do not misrepresent a source's processing state.
+
+**Acceptance Criteria:**
+
+**Given** a Worker discovers candidates from an immutable capture
+**When** candidate processing reaches a terminal outcome
+**Then** completed candidates persist an immutable non-null `apply`, `needs_operator`, or `discard` disposition and reason
+**And** failed candidates persist no business disposition or reason.
+
+**Given** discovery has not terminalized or any persisted candidate remains queued/processing
+**When** the job attempts to become `completed`
+**Then** the transition is rejected
+**And** its technical status remains non-terminal.
+
+**Given** discovery is terminal and every candidate is completed or failed
+**When** the Worker completes the job under its existing lease/fence protocol
+**Then** it records only `completed` technical status
+**And** `candidateCount`, `completedCandidateCount`, `failedCandidateCount`, and `needsOperatorCandidateCount` match transactional idempotent projections.
+
+**Given** retry, duplicate delivery, or a newer capture occurs
+**When** stale work attempts a candidate/job mutation
+**Then** existing lease, fencing, and version checks reject it
+**And** no active card or candidate outcome is changed by obsolete work.
+
+### Story 15.3: Centralize Version-Fenced Lifecycle Transitions
+
+As an operator,
+I want valid lifecycle decisions to apply atomically through one command,
+So that card state, actionable work, audits, and search eligibility never diverge.
+
+**Acceptance Criteria:**
+
+**Given** a Worker, API operator command, source-removal command, or sampling containment needs a lifecycle mutation
+**When** it invokes `transitionKnowledgeCard` with trigger, actor, expected fences, and transaction
+**Then** the command locks the required rows and returns typed `resolved`, `stale`, or `invalid` results
+**And** no production code directly writes card lifecycle, verification requirement, or recommendation lifecycle state outside this boundary.
+
+**Given** a low-risk candidate completes with eligible supporting evidence
+**When** the command resolves the transition
+**Then** the card becomes `active` with verification requirement `none`
+**And** it writes required audit/index-dirty effects atomically.
+
+**Given** a verify-first candidate, conflict, or new evidence for a suppressed card requires operator action
+**When** the command resolves the transition
+**Then** the card becomes `pending_operator`
+**And** exactly one same-fence primary recommendation is open with the appropriate type.
+
+**Given** an operator publishes, suppresses, edits/requeues, archives, or restores a card
+**When** the command performs the transition
+**Then** it follows the approved transition matrix, supersedes/resolves work correctly, and applies required version fences
+**And** a stale or superseded item cannot mutate a card, evidence, audit event, dirty marker, or search projection.
+
+### Story 15.4: Enforce Evidence-Safe Retrieval and Source Removal
+
+As a traveler,
+I want only supported current knowledge used in answers,
+So that withdrawn or unsupported facts cannot remain available through stale projections.
+
+**Acceptance Criteria:**
+
+**Given** a card is considered for activation or retrieval
+**When** its active supporting evidence lacks validated span, source/capture eligibility, or required retrieval metadata
+**Then** the card cannot become or remain traveler-retrievable
+**And** retrieval fails closed even if an old search document exists.
+
+**Given** a card loses its final eligible active supporting evidence
+**When** evidence is removed, invalidated, or its source becomes ineligible
+**Then** the lifecycle command atomically disables its projection and transitions it according to the matrix
+**And** pending follow-up work exists only where the selected target state permits it.
+
+**Given** a source is withdrawn, inaccessible, or subject to removal
+**When** the retryable source-removal command runs
+**Then** it locks dependent evidence/cards, removes traveler eligibility immediately, and re-evaluates every affected card
+**And** it completes only after no removed evidence remains traveler eligible.
+
+**Given** the indexing Worker processes dirty records
+**When** it rebuilds or disables a projection
+**Then** it remains idempotent by card/version
+**And** indexing delay cannot re-enable prohibited content.
+
+### Story 15.5: Separate Actionable Work from Quality Sampling
+
+As a knowledge operator,
+I want review work and quality-control obligations modeled separately,
+So that sampling measures quality without becoming an accidental publication gate.
+
+**Acceptance Criteria:**
+
+**Given** a completed candidate has `needs_operator` disposition
+**When** its lifecycle transition is committed
+**Then** exactly one immutable sampling-obligation record is created
+**And** that obligation is not an actionable recommendation and does not block later publication.
+
+**Given** an active card version is selected for quality review
+**When** sampling work opens
+**Then** it is one fenced `sampling` recommendation for that active version
+**And** it cannot coexist with prohibited primary work or alter the candidate's original AI disposition.
+
+**Given** a high-severity sampling failure is identified
+**When** containment begins
+**Then** the exact policy cohort definition and affected card/version membership are persisted before any lifecycle mutation
+**And** each remediable card moves to `pending_operator` with one fenced `risk` item, while unsafe cards are suppressed/de-indexed without successor work.
+
+**Given** sampling containment affects a cohort
+**When** it completes
+**Then** unrelated cohorts and card versions remain unchanged
+**And** all resolutions, supersessions, audits, and projections are atomic and version-fenced.
+
+### Story 15.6: Deliver Target-Shaped Operator Knowledge Views
+
+As an operator,
+I want clear Knowledge API responses and admin screens,
+So that I can diagnose ingestion and resolve work without conflating technical processing with fact workflow.
+
+**Acceptance Criteria:**
+
+**Given** an authorized operator reads `/v1/admin/knowledge/*`
+**When** the API serializes jobs, candidates, cards, and work
+**Then** it exposes technical job status/counters, candidate processing/disposition/reason, card lifecycle/classification/verification, and work type/status/resolution as separate fields
+**And** it does not expose raw capture text, raw provider output, unapproved quotes, checkpoints, fence values, credentials, or other execution secrets.
+
+**Given** a browser operator uses `apps/admin`
+**When** it renders review, ingestion, or sampling information and submits a resolution
+**Then** it calls documented direct NestJS APIs with existing credential/CSRF/safe-error behavior
+**And** it does not import database code, domain lifecycle commands, or add a BFF/server proxy.
+
+**Given** an ingestion job has mixed candidate results
+**When** the operator views it
+**Then** the UI presents its technical status and safe aggregate/candidate outcomes without a rolled-up publication label
+**And** candidate outcomes remain intelligible independently of later operator decisions.
+
+### Story 15.7: Prove the Lifecycle Transition Matrix
+
+As a product owner,
+I want executable evidence that the lifecycle contract rejects invalid states and races,
+So that the clean-break migration remains safe as the pipeline evolves.
+
+**Acceptance Criteria:**
+
+**Given** the target schema and command boundary exist
+**When** unit and serial integration suites run
+**Then** they cover every allowed and forbidden transition in the lifecycle matrix
+**And** they prove card/work cardinality, candidate immutability, technical job completion, active-evidence eligibility, and target-only fixture validity.
+
+**Given** stale, concurrent, duplicate, superseded, source-withdrawal, and sampling-containment scenarios
+**When** tests exercise them
+**Then** only valid same-fence transitions persist
+**And** card, evidence, audit, recommendation, and index effects are atomic or absent together.
+
+**Given** protected API and direct-admin integration paths
+**When** authorization and contract tests run
+**Then** only authorized principals can resolve operator work
+**And** Worker-only ingestion/job claim behavior cannot execute in an API request.
+
+**Given** the epic is complete
+**When** verification runs
+**Then** focused tests, `pnpm test:unit`, `pnpm test:integration`, `pnpm lint`, `pnpm typecheck`, `pnpm build`, and `pnpm exec drizzle-kit check` are run
+**And** any environmental blocker is recorded exactly in the implementation artifact.
