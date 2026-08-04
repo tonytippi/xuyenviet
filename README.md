@@ -50,7 +50,7 @@ Setup:
 
 ```bash
 pnpm install
-cp .env.example .env.local
+cp apps/web/.env.example apps/web/.env.local
 pnpm dev
 ```
 
@@ -68,7 +68,7 @@ API and admin run in watch mode. Worker builds once and then starts because its 
 
 ### Admin Google sign-in
 
-The public HTTPS Nest API owns Google OAuth, the opaque `__Host-xuyenviet-session` cookie, and CSRF. Configure Google with the API-host callback in `XV_BROWSER_GOOGLE_CALLBACK_URL`, for example `https://api.xuyenviet.app/auth/google/callback`. `apps/admin` starts OAuth at that API and supplies only exact, configured admin return URLs.
+The public Nest API owns Google OAuth, opaque browser sessions, and CSRF. Deployment uses HTTPS and the `__Host-xuyenviet-session` cookie; `APP_ENV=local` permits exact HTTP loopback origins only. Configure Google with the API-host callback in `XV_BROWSER_GOOGLE_CALLBACK_URL`, for example `https://api.xuyenviet.app/auth/google/callback`. `apps/admin` starts OAuth at that API and supplies only exact, configured admin return URLs.
 
 1. Start the API and admin in separate terminals:
 
@@ -94,7 +94,7 @@ pnpm --filter @xuyenviet/api build
 pnpm api dev
 ```
 
-The API listens on `PORT`, defaulting to `3001`. It is browser-facing over public HTTPS with credentialed CORS restricted to the exact origins in `XV_BROWSER_ALLOWED_ORIGINS`. Never use wildcard or prefix origins/return URLs.
+The API listens on `PORT`, defaulting to `3001`. Deployment is browser-facing over public HTTPS with credentialed CORS restricted to exact origins in `XV_BROWSER_ALLOWED_ORIGINS`. Local development may instead use exact HTTP loopback origins and admits the local API schema compatibility range without a deployment release policy. Never use wildcard or prefix origins/return URLs.
 
 Use these endpoints to verify a local API process:
 

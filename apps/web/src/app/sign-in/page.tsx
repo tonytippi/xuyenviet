@@ -1,7 +1,8 @@
 import Link from "next/link";
+import { headers } from "next/headers";
 
 import { BrandMark } from "@/components/ui/brand-mark";
-import { normalizePublicAskDraft } from "@/features/auth/redirects";
+import { getApiReturnUrl, normalizePublicAskDraft } from "@/features/auth/redirects";
 
 type SignInPageProps = {
   searchParams?: Promise<{
@@ -22,11 +23,14 @@ function getFirstParam(value: string | string[] | undefined) {
 
 export default async function SignInPage({ searchParams }: SignInPageProps) {
   const params = await searchParams;
+  const requestHeaders = await headers();
   const requestedNextPath = getFirstParam(params?.next);
   const nextPath = requestedNextPath === "/ai-ask" ? requestedNextPath : undefined;
   const referralCode = getFirstParam(params?.ref);
   const publicDraft = normalizePublicAskDraft(getFirstParam(params?.draft));
   const travelerReturnUrl = `${nextPath ?? "/ai-ask"}${referralCode || publicDraft ? `?${new URLSearchParams({ ...(referralCode ? { ref: referralCode } : {}), ...(publicDraft ? { draft: publicDraft } : {}) }).toString()}` : ""}`;
+  const origin = `${requestHeaders.get("x-forwarded-proto") ?? "http"}://${requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host")}`;
+  const apiReturnUrl = getApiReturnUrl(origin, travelerReturnUrl);
   const hasAuthError = Boolean(getFirstParam(params?.error));
   const gateMessage = "Đăng nhập để tiếp tục với XuyenViet.";
 
@@ -61,7 +65,7 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
               Đăng nhập chưa hoàn tất. Vui lòng thử lại.
             </p>
           ) : null}
-          <a href={`/auth/google?returnUrl=${encodeURIComponent(travelerReturnUrl)}${referralCode ? `&ref=${encodeURIComponent(referralCode)}` : ""}`}
+          <a href={`/auth/google?returnUrl=${encodeURIComponent(apiReturnUrl)}${referralCode ? `&ref=${encodeURIComponent(referralCode)}` : ""}`}
               className="min-h-12 w-full rounded-xl bg-[#202020] px-5 py-4 text-center text-base font-medium text-white transition hover:bg-[#383838] active:translate-y-px"
             >
               Tiếp tục với Google

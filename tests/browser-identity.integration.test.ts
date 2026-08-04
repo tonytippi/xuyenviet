@@ -48,6 +48,27 @@ describe("browser Google identity callback", () => {
     ]) expect(() => getBrowserAuthConfig({ ...environment, ...invalid })).toThrow("Invalid browser authentication configuration.");
   });
 
+  test("permits HTTP only for exact local loopback origins", () => {
+    const environment: NodeJS.ProcessEnv = {
+      APP_ENV: "local",
+      XV_BROWSER_GOOGLE_CLIENT_ID: "client",
+      XV_BROWSER_GOOGLE_CLIENT_SECRET: "secret",
+      XV_BROWSER_GOOGLE_CALLBACK_URL: "http://localhost:3001/auth/google/callback",
+      XV_BROWSER_ALLOWED_ORIGINS: "http://localhost:3000,http://localhost:3001",
+      XV_BROWSER_ALLOWED_RETURN_URLS: "http://localhost:3000/",
+      XV_BROWSER_SESSION_LOOKUP_KEY: "a".repeat(32),
+      XV_BROWSER_CSRF_KEY: "b".repeat(32),
+      XV_BROWSER_OAUTH_TRANSACTION_PROTECTION_KEY: "c".repeat(32),
+    };
+
+    expect(getBrowserAuthConfig(environment).cookieName).toBe("xuyenviet-session");
+    for (const invalid of [
+      { APP_ENV: "production" },
+      { XV_BROWSER_ALLOWED_ORIGINS: "http://localhost:3000,http://example.test" },
+      { XV_BROWSER_GOOGLE_CALLBACK_URL: "http://example.test/auth/google/callback", XV_BROWSER_ALLOWED_ORIGINS: "http://example.test" },
+    ]) expect(() => getBrowserAuthConfig({ ...environment, ...invalid })).toThrow("Invalid browser authentication configuration.");
+  });
+
   test("allows configured static admin returns and rejects dynamic detail returns", async () => {
     await request(app.getHttpServer()).get("/auth/google").query({ returnUrl: "https://admin.xuyenviet.app/knowledge/facebook-captures" }).expect(302);
     await request(app.getHttpServer()).get("/auth/google").query({ returnUrl: "https://admin.xuyenviet.app/knowledge/facebook-captures/detail-1" }).expect(401);

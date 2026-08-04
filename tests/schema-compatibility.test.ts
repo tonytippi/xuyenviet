@@ -64,6 +64,18 @@ describe("schema compatibility contract", () => {
     } })).resolves.toBe(false);
   });
 
+  it("admits the API compatibility range without a release policy only for local development", async () => {
+    const repository = {
+      async hasCompatibleSchemaVersion(declaration: { maximumVersion: string }) { return declaration.maximumVersion === "20260729.1"; },
+      async getResolvedTargetIdentity() { return "database=xuyenviet;host=127.0.0.1;port=5432"; },
+      async readSchemaAdmission() { return { rows: [{ version: "20260729.1" }], resolvedTargetIdentity: "database=xuyenviet;host=127.0.0.1;port=5432" }; },
+      async recordSchemaVersion() {},
+    };
+
+    await expect(isApiReady({ configValid: true, repository, environment: { APP_ENV: "local" } })).resolves.toBe(true);
+    await expect(isApiReady({ configValid: true, repository, environment: { APP_ENV: "production" } })).resolves.toBe(false);
+  });
+
   it("validates phase policy declarations independent of JSON object key order", () => {
     const parsedMatrix = parseSchemaReleaseMatrix(releaseMatrix)!;
     const reversedWorkloads = Object.fromEntries(

@@ -25,3 +25,7 @@ export function getSafeRedirectPath(value: FormDataEntryValue | null, params?: {
 
   return "/ai-ask";
 }
+
+export function getApiReturnUrl(origin: string, path: string) {
+  return new URL(path, origin).href;
+}

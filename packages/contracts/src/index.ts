@@ -804,7 +804,8 @@ function isTelemetryText(value: unknown): value is string {
 let consoleTelemetryBlocked = false;
 // stdout reports async write failures as stream errors even when a write
 // callback receives the error. Console telemetry is strictly best-effort.
-process.stdout.on("error", () => process.emitWarning("Operational telemetry stdout is unavailable."));
+const telemetryStdout = typeof process !== "undefined" ? process.stdout : undefined;
+telemetryStdout?.on("error", () => process.emitWarning("Operational telemetry stdout is unavailable."));
 
 export const consoleOperationalTelemetrySink: OperationalTelemetrySink = {
   emit(event) {
@@ -815,9 +816,9 @@ export const consoleOperationalTelemetrySink: OperationalTelemetrySink = {
     // best-effort events preserves the domain operation and bounds memory use.
     if (consoleTelemetryBlocked) return;
     try {
-      if (!process.stdout.write(`operational_telemetry ${JSON.stringify(normalized)}\n`, () => undefined)) {
+      if (!telemetryStdout || !telemetryStdout.write(`operational_telemetry ${JSON.stringify(normalized)}\n`, () => undefined)) {
         consoleTelemetryBlocked = true;
-        process.stdout.once("drain", () => { consoleTelemetryBlocked = false; });
+        telemetryStdout?.once("drain", () => { consoleTelemetryBlocked = false; });
       }
     } catch { /* Telemetry must not change the operation result. */ }
   },

@@ -8,13 +8,14 @@ export const RELEASE_SCHEMA_VERSION_REPOSITORY = Symbol("RELEASE_SCHEMA_VERSION_
 export const API_CONFIGURATION_VALID = Symbol("API_CONFIGURATION_VALID");
 export const API_RELEASE_PHASE_POLICY = Symbol("API_RELEASE_PHASE_POLICY");
 
-export async function isApiReady(input: { configValid: boolean; repository: ReleaseSchemaVersionRepository; releasePhasePolicy?: SchemaReleasePhasePolicy | null }): Promise<boolean> {
+export async function isApiReady(input: { configValid: boolean; repository: ReleaseSchemaVersionRepository; releasePhasePolicy?: SchemaReleasePhasePolicy | null; environment?: NodeJS.ProcessEnv }): Promise<boolean> {
   if (!input.configValid) return false;
   try {
     // The repository remains the schema authority. Policy is a further static
     // release admission constraint and therefore reads the same row.
     if (input.releasePhasePolicy === null) return false;
     if (input.releasePhasePolicy === undefined) {
+      if ((input.environment ?? process.env).APP_ENV === "local") return await input.repository.hasCompatibleSchemaVersion(apiSchemaCompatibility);
       return await input.repository.hasCompatibleSchemaVersion(policyFreeApiSchemaCompatibility);
     }
     if (!input.repository.readSchemaAdmission) return false;

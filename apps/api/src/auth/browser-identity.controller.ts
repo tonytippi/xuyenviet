@@ -15,7 +15,6 @@ import type { ReleaseSchemaVersionRepository } from "@xuyenviet/database";
 
 const sessionLifetimeMs = 30 * 24 * 60 * 60_000;
 const browserOAuthTransactionPurgeLimit = 100;
-const browserOAuthTransactionCookieName = "__Host-xuyenviet-browser-oauth";
 const browserOAuthTransactionLifetimeMs = 10 * 60_000;
 type CookieOptions = { httpOnly: boolean; secure: boolean; sameSite: "lax"; path: string };
 type CookieResponse = { redirect(url: string): void; cookie(name: string, value: string, options: CookieOptions & { expires: Date }): void; clearCookie(name: string, options: CookieOptions): { status(code: number): { send(): void } }; json(value: unknown): void };
@@ -42,7 +41,7 @@ export class BrowserIdentityController {
       await this.identities.purgeExpiredBrowserOAuthTransactions(browserOAuthTransactionPurgeLimit);
       const expires = new Date(Date.now() + browserOAuthTransactionLifetimeMs);
        await this.identities.createBrowserOAuthTransaction({ id, state, codeVerifier: verifier, returnUrl: allowedReturnUrl, referralCode: normalizeReferralCode(ref), expires });
-      setTransactionCookie(response, id, expires);
+      setTransactionCookie(response, config, id, expires);
       const query = new URLSearchParams({ client_id: config.googleClientId, redirect_uri: config.callbackUrl, response_type: "code", scope: "openid email profile", state: `${id}.${state}`, code_challenge: createHash("sha256").update(verifier).digest("base64url"), code_challenge_method: "S256" });
       response.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${query}`);
     } catch { throw new ServiceUnavailableException({ code: "internal_error" }); }
@@ -51,11 +50,11 @@ export class BrowserIdentityController {
   @Get("google/callback")
   @PublicRoute()
   async callback(@Query("code") code: string | undefined, @Query("state") suppliedState: string | undefined, @Headers("cookie") cookie: string | undefined, @Res() response: CookieResponse): Promise<void> {
-    clearTransactionCookie(response);
     const config = this.requiredConfig();
+    clearTransactionCookie(response, config);
     await this.assertAdmitted();
     const parsed = parseState(suppliedState);
-    const transactionId = cookieValue(cookie, browserOAuthTransactionCookieName);
+    const transactionId = cookieValue(cookie, transactionCookieName(config));
     if (!code || !parsed || transactionId !== parsed.id) throw this.denied();
     try {
        const transaction = await this.identities.consumeBrowserOAuthTransaction(parsed.id, parsed.state);
@@ -105,9 +104,11 @@ export class BrowserIdentityController {
   private denied() { return new UnauthorizedException({ code: "unauthorized" }); }
 }
 
-function setSessionCookie(response: CookieResponse, config: BrowserAuthConfig, value: string, expires: Date) { response.cookie(config.cookieName, value, { httpOnly: true, secure: true, sameSite: "lax", path: "/", expires }); }
-function setTransactionCookie(response: CookieResponse, transactionId: string, expires: Date) { response.cookie(browserOAuthTransactionCookieName, transactionId, { httpOnly: true, secure: true, sameSite: "lax", path: "/", expires }); }
-function clearTransactionCookie(response: CookieResponse) { response.clearCookie(browserOAuthTransactionCookieName, { httpOnly: true, secure: true, sameSite: "lax", path: "/" }); }
+function setSessionCookie(response: CookieResponse, config: BrowserAuthConfig, value: string, expires: Date) { response.cookie(config.cookieName, value, { httpOnly: true, secure: secureCookie(config), sameSite: "lax", path: "/", expires }); }
+function setTransactionCookie(response: CookieResponse, config: BrowserAuthConfig, transactionId: string, expires: Date) { response.cookie(transactionCookieName(config), transactionId, { httpOnly: true, secure: secureCookie(config), sameSite: "lax", path: "/", expires }); }
+function clearTransactionCookie(response: CookieResponse, config: BrowserAuthConfig) { response.clearCookie(transactionCookieName(config), { httpOnly: true, secure: secureCookie(config), sameSite: "lax", path: "/" }); }
+function secureCookie(config: BrowserAuthConfig) { return new URL(config.callbackUrl).protocol === "https:"; }
+function transactionCookieName(config: BrowserAuthConfig) { return secureCookie(config) ? "__Host-xuyenviet-browser-oauth" : "xuyenviet-browser-oauth"; }
 function validReturnUrl(value: string | undefined, config: BrowserAuthConfig): boolean { return value !== undefined && config.allowedReturnUrls.includes(value); }
 function parseState(value: string | undefined): { id: string; state: string } | null { const match = /^([0-9a-f-]{36})\.([A-Za-z0-9_-]{32,128})$/i.exec(value ?? ""); return match ? { id: match[1]!, state: match[2]! } : null; }
 function nonEmpty(value: unknown): value is string { return typeof value === "string" && value.trim().length > 0; }

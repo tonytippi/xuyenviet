@@ -62,7 +62,7 @@ export class ResourceServerGuard implements CanActivate {
       if (identity.expires.getTime() - Date.now() < 7 * 24 * 60 * 60_000) {
         const expires = new Date(Date.now() + 30 * 24 * 60 * 60_000);
         if (!await (this.identities as BrowserIdentityRepository).renewBrowserSession(sessionId, expires)) throw new Error("stale identity");
-        request.res?.cookie(config.cookieName, sessionId, { httpOnly: true, secure: true, sameSite: "lax", path: "/", expires });
+        request.res?.cookie(config.cookieName, sessionId, { httpOnly: true, secure: new URL(config.callbackUrl).protocol === "https:", sameSite: "lax", path: "/", expires });
       }
     } catch (error) {
       if (error instanceof ForbiddenException) throw error;
