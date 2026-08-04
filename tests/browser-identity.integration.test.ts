@@ -51,6 +51,7 @@ describe("browser Google identity callback", () => {
   test("permits HTTP only for exact local loopback origins", () => {
     const environment: NodeJS.ProcessEnv = {
       APP_ENV: "local",
+      NODE_ENV: "test",
       XV_BROWSER_GOOGLE_CLIENT_ID: "client",
       XV_BROWSER_GOOGLE_CLIENT_SECRET: "secret",
       XV_BROWSER_GOOGLE_CALLBACK_URL: "http://localhost:3001/auth/google/callback",

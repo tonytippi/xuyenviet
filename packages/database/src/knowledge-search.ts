@@ -45,7 +45,7 @@ export type KnowledgeSearchEvidence = {
 
 export type KnowledgeSearchResult = Pick<
   typeof knowledgeCards.$inferSelect,
-  "id" | "type" | "title" | "locationName" | "routeSegment" | "summary" | "practicalDetails" | "tags" | "confidence" | "freshnessSensitive" | "publicationState" | "knowledgeState" | "reviewState" | "verificationState" | "conditions" | "contentVersion" | "evidenceSetRevision" | "updatedAt" | "createdAt"
+  "id" | "type" | "title" | "locationName" | "routeSegment" | "summary" | "practicalDetails" | "tags" | "confidence" | "freshnessSensitive" | "lifecycleState" | "knowledgeState" | "verificationRequirement" | "conditions" | "contentVersion" | "evidenceSetRevision" | "updatedAt" | "createdAt"
 > & {
   score: number;
   policy: Exclude<KnowledgeTravelerPolicy, "exclude">;
@@ -205,7 +205,7 @@ async function searchApprovedKnowledgeInternal(query: string | null | undefined,
       .where(
         and(
           eq(knowledgeCardSearchDocuments.status, "active"),
-          eq(knowledgeCards.publicationState, "active"),
+          eq(knowledgeCards.lifecycleState, "active"),
           eq(knowledgeCardSearchDocuments.contentVersion, knowledgeCards.contentVersion),
           ...(cardIds ? [inArray(knowledgeCardSearchDocuments.knowledgeCardId, cardIds)] : []),
           or(...terms.map((term) => ilike(knowledgeCardSearchDocuments.searchableText, `%${escapeLikePattern(term)}%`))),
@@ -273,16 +273,15 @@ async function loadEligibleApprovedCard(db: Pick<KnowledgeSearchDb, "select">, c
 async function loadApprovedKnowledgeCandidate(db: Pick<KnowledgeSearchDb, "select">, cardId: string, allowEvaluationFixture = false): Promise<{
   card: Omit<KnowledgeSearchResult, "score"> | null;
   contentVersion: number | null;
-  exclusion: { knowledgeState: string; verificationState: string; reasons: KnowledgeTravelerPolicyReason[] } | null;
+  exclusion: { knowledgeState: string; verificationRequirement: string; reasons: KnowledgeTravelerPolicyReason[] } | null;
 }> {
   const rows = await db
     .select({
       card: {
         id: knowledgeCards.id,
-        publicationState: knowledgeCards.publicationState,
+        lifecycleState: knowledgeCards.lifecycleState,
         knowledgeState: knowledgeCards.knowledgeState,
-        reviewState: knowledgeCards.reviewState,
-        verificationState: knowledgeCards.verificationState,
+        verificationRequirement: knowledgeCards.verificationRequirement,
         type: knowledgeCards.type,
         title: knowledgeCards.title,
         locationName: knowledgeCards.locationName,
@@ -324,8 +323,8 @@ async function loadApprovedKnowledgeCandidate(db: Pick<KnowledgeSearchDb, "selec
   const evidence = await loadActiveSupportingEvidence(db, cardId);
   const validatedSourceIds = new Set(evidence?.rows.map((row) => row.sourceId));
   const validatedSources = grouped?.sources.filter((source) => validatedSourceIds.has(source.id)) ?? [];
-  const evaluationFixture = allowEvaluationFixture && card?.publicationState === "suppressed" && card.aiPromptVersion === "public_mvp_evaluation_fixture_v1";
-  const policyCard = evaluationFixture ? { ...card!, publicationState: "active" as const } : card;
+  const evaluationFixture = allowEvaluationFixture && card?.lifecycleState === "suppressed" && card.aiPromptVersion === "public_mvp_evaluation_fixture_v1";
+  const policyCard = evaluationFixture ? { ...card!, lifecycleState: "active" as const } : card;
   const evaluation = policyCard && evidence
     ? evaluateKnowledgeTravelerPolicy({ ...policyCard, ...evidence })
     : { policy: "exclude" as const, reasons: ["missing_traveler_safe_evidence" as const] };
@@ -333,14 +332,14 @@ async function loadApprovedKnowledgeCandidate(db: Pick<KnowledgeSearchDb, "selec
     return {
       card: null,
       contentVersion: card?.contentVersion ?? null,
-      exclusion: card ? { knowledgeState: card.knowledgeState, verificationState: card.verificationState, reasons: evaluation.reasons } : null,
+      exclusion: card ? { knowledgeState: card.knowledgeState, verificationRequirement: card.verificationRequirement, reasons: evaluation.reasons } : null,
     };
   }
 
   return {
     card: {
       ...grouped,
-      ...(evaluationFixture ? { publicationState: "active" as const } : {}),
+      ...(evaluationFixture ? { lifecycleState: "active" as const } : {}),
       policy: evaluation.policy,
       policyReasons: evaluation.reasons,
       sources: validatedSources,
@@ -355,10 +354,10 @@ function emptyKnowledgeSearchPolicySummary(): KnowledgeSearchPolicySummary {
   return { excludedPolicyCounts: { conflict: 0, verificationRequired: 0, other: 0 }, excludedReasonCodes: [] };
 }
 
-function recordExcludedCandidatePolicy(summary: KnowledgeSearchPolicySummary, exclusion: { knowledgeState: string; verificationState: string; reasons: KnowledgeTravelerPolicyReason[] }) {
+function recordExcludedCandidatePolicy(summary: KnowledgeSearchPolicySummary, exclusion: { knowledgeState: string; verificationRequirement: string; reasons: KnowledgeTravelerPolicyReason[] }) {
   if (exclusion.knowledgeState === "conflicted") {
     summary.excludedPolicyCounts.conflict += 1;
-  } else if (exclusion.verificationState === "required" || exclusion.verificationState === "failed") {
+  } else if (exclusion.verificationRequirement === "operator_required" || exclusion.verificationRequirement === "failed") {
     summary.excludedPolicyCounts.verificationRequired += 1;
   } else {
     summary.excludedPolicyCounts.other += 1;
@@ -487,7 +486,7 @@ function groupSearchRows(
   return Array.from(cards.values());
 }
 
-type KnowledgeCardStateForSearch = Pick<typeof knowledgeCards.$inferSelect, "publicationState" | "knowledgeState" | "reviewState" | "verificationState" | "conditions" | "contentVersion" | "evidenceSetRevision">;
+type KnowledgeCardStateForSearch = Pick<typeof knowledgeCards.$inferSelect, "lifecycleState" | "knowledgeState" | "verificationRequirement" | "conditions" | "contentVersion" | "evidenceSetRevision">;
 
 function toSearchResult(card: KnowledgeSearchCardSnapshot): Omit<KnowledgeSearchResult, "score" | "policy" | "policyReasons"> {
   return {
@@ -501,10 +500,9 @@ function toSearchResult(card: KnowledgeSearchCardSnapshot): Omit<KnowledgeSearch
     tags: card.tags,
     confidence: card.confidence,
     freshnessSensitive: card.freshnessSensitive,
-    publicationState: card.publicationState,
+    lifecycleState: card.lifecycleState,
     knowledgeState: card.knowledgeState,
-    reviewState: card.reviewState,
-    verificationState: card.verificationState,
+    verificationRequirement: card.verificationRequirement,
     conditions: card.conditions,
     contentVersion: card.contentVersion,
     evidenceSetRevision: card.evidenceSetRevision,

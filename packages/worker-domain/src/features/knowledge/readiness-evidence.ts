@@ -11,7 +11,7 @@ export async function getCurrentValidEvidenceFencesForReadiness(db: ReadinessEvi
       knowledgeCardId: knowledgeCards.id,
       contentVersion: knowledgeCards.contentVersion,
       evidenceSetRevision: knowledgeCards.evidenceSetRevision,
-      publicationState: knowledgeCards.publicationState,
+      lifecycleState: knowledgeCards.lifecycleState,
     })
     .from(knowledgeCards)
     .innerJoin(knowledgeCardEvidence, and(eq(knowledgeCardEvidence.knowledgeCardId, knowledgeCards.id), eq(knowledgeCardEvidence.state, "active")))
@@ -26,5 +26,5 @@ export async function getCurrentValidEvidenceFencesForReadiness(db: ReadinessEvi
       sql`substring(${sourceCaptureVersions.rawText} from ${knowledgeCardEvidence.spanStart} + 1 for ${knowledgeCardEvidence.spanEnd} - ${knowledgeCardEvidence.spanStart}) = ${knowledgeCardEvidence.quoteText}`,
     ));
 
-  return new Map(rows.map((row) => [`${row.knowledgeCardId}:${row.contentVersion}:${row.evidenceSetRevision}`, row.publicationState]));
+  return new Map(rows.map((row) => [`${row.knowledgeCardId}:${row.contentVersion}:${row.evidenceSetRevision}`, row.lifecycleState]));
 }

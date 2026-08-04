@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import * as workerDatabase from "@xuyenviet/database";
 import type { WorkerPollObservation } from "@xuyenviet/contracts";
-import { knowledgeCardSearchDocuments, knowledgeCards, knowledgeCardSources, knowledgeIndexBackfillState, knowledgeIndexDirtyMarkers, sources, users } from "@/db/schema";
+import { knowledgeCardSearchDocuments, knowledgeCards, knowledgeCardSources, knowledgeIndexBackfillState, knowledgeIndexDirtyMarkers, sources, userRoles, users } from "@/db/schema";
 import { backfillKnowledgeIndexWork, claimNextKnowledgeIndexWork, completeKnowledgeIndexWork, processNextApprovedKnowledgeIndexingBatch, recoverExpiredKnowledgeIndexWork, runApprovedKnowledgeIndexingWorkerLoop, runKnowledgeIndexBackfill } from "@/features/knowledge/indexing-worker";
 import { projectClaimedKnowledgeIndexWork } from "@/features/knowledge/search";
 import { enqueueKnowledgeIndexWork } from "@/features/knowledge/indexing-queue";
@@ -12,7 +12,8 @@ import { seedKnowledgeCardEvidence, seedSourceCaptureVersion } from "./helpers/s
 
 async function createMarker(id: string) {
   await testDb.insert(users).values({ id: "index-worker-user", email: "index-worker@example.com" }).onConflictDoNothing();
-  await testDb.insert(knowledgeCards).values({ id, type: "place", title: "Điểm dừng", locationName: "Huế", summary: "Tóm tắt an toàn.", aiPromptVersion: "test", createdByUserId: "index-worker-user" });
+  await testDb.insert(userRoles).values({ userId: "index-worker-user", role: "operator" }).onConflictDoNothing();
+  await testDb.insert(knowledgeCards).values({ id, lifecycleState: "draft", knowledgeState: "community_observation", verificationRequirement: "none", type: "place", title: "Điểm dừng", locationName: "Huế", summary: "Tóm tắt an toàn.", aiPromptVersion: "test", createdByUserId: "index-worker-user" });
   await testDb.insert(knowledgeIndexDirtyMarkers).values({ knowledgeCardId: id, contentVersion: 1, evidenceSetRevision: 1, reason: "test", nextRunAt: new Date(0) });
 }
 
@@ -22,8 +23,8 @@ beforeEach(async () => {
 
 async function makeMarkerProjectable(id: string) {
   await createMarker(id);
-  await testDb.update(knowledgeCards).set({ status: "approved", publicationState: "active", knowledgeState: "uncertain", reviewState: "reviewed", verificationState: "not_required", needsReview: false }).where(eq(knowledgeCards.id, id));
-  await testDb.insert(sources).values({ id: `${id}-source`, kind: "url", url: `https://example.com/${id}`, canonicalUrl: `https://example.com/${id}`, label: "Nguồn chuẩn hóa", sourceType: "curated", verificationStatus: "verified", submittedByUserId: "index-worker-user" });
+  await testDb.update(knowledgeCards).set({ lifecycleState: "active", knowledgeState: "community_observation", verificationRequirement: "none" }).where(eq(knowledgeCards.id, id));
+  await testDb.insert(sources).values({ id: `${id}-source`, kind: "url", url: `https://example.com/${id}`, canonicalUrl: `https://example.com/${id}`, label: "Nguồn chuẩn hóa", sourceType: "curated", verificationStatus: "verified", eligibility: "eligible", submittedByUserId: "index-worker-user" });
   await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: id, sourceId: `${id}-source`, supportLevel: "primary" });
   const capture = await seedSourceCaptureVersion({ sourceId: `${id}-source`, captureKind: "url", rawText: "Bằng chứng có thể lập chỉ mục." });
   await seedKnowledgeCardEvidence({ cardId: id, sourceId: `${id}-source`, captureVersionId: capture.id, quoteText: "Bằng chứng có thể lập chỉ mục." });

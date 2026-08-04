@@ -1,6 +1,6 @@
 # Story 15.1: Establish the Target Lifecycle Schema
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -70,7 +70,30 @@ gpt-5.6-terra
 ### Completion Notes List
 
 - Ultimate context engine analysis completed - comprehensive developer guide created.
+- 2026-08-04: Started the target-only schema cutover. `knowledge_cards`, ingestion jobs, ingestion candidates, recommendations, and sampling obligations now have target declarations; the legacy sampling ledger, verify-first obligation table, card-state migration report, and evidence-backfill report declarations were removed.
+- 2026-08-04: Added forward-only migration `0038_target_knowledge_lifecycle.sql` and its journal entry. It drops legacy lifecycle fields/tables, declares target row-local checks, creates both target partial unique indexes, and installs the completed-candidate AI-decision immutability trigger.
+- 2026-08-04: `pnpm exec drizzle-kit check` passed and `git diff --check` passed.
+- 2026-08-04: `pnpm typecheck` failed. The clean-break schema correctly exposes broad required follow-up work: existing production modules and integration tests still reference removed card lifecycle fields, job/candidate stages, recommendation reasons/legacy sampling fields, and legacy sampling tables. These consumers must be rewritten to target-only shapes before the Story can be completed; compatibility aliases were not added.
+- 2026-08-04: No migration, reset, or reseed was run. The exact disposable-local preflight is not demonstrably satisfied: the active shell contains none of `APP_ENV`, `DATABASE_URL`, `DB_RESET_DISPOSABLE_CONFIRMATION`, `DB_RESET_NO_RUNTIME_OVERLAP`, or `DB_RESET_EXPECTED_TARGET_IDENTITY`, so the required resolved database identity and no-runtime-overlap confirmation cannot be verified. This is a fail-closed destructive-action blocker.
+- 2026-08-04: The target schema declaration attempt was restored after the clean break exposed unconverted production, contract, seed, fixture, and integration-test consumers. The forward migration remains as a proposed artifact only; no aliases, fallback reads, reset, migration, or reseed were added. The story remains in progress pending one coordinated target-only rewrite and an explicitly authorized disposable-target preflight.
+- 2026-08-04: Review repair: migration 0038 explicitly replaces the baseline job terminal-claim, recommendation resolution/resolved-shape constraints, and legacy open queue index with target definitions. PostgreSQL coverage now proves target recommendation resolution/resolved-row shapes, and the recommendation resolver rejects work-type-incompatible resolutions. The baseline report-table drops are correct because those tables are baseline-owned and absent from the target schema. Expired candidate recovery remains deferred to Story 15.2.
+- 2026-08-04: Updated the digest-pinned migration admission test for the reviewed 0038 SQL revision. Pending verification includes clean reset/reseed of confirmed development and test targets, focused serial Story 15.1 suites, typecheck, and Drizzle metadata validation.
+- 2026-08-04: Operator reconfirmed the exact disposable local target and required ignored `.env` safeguards. Reapplied the target Drizzle declarations for lifecycle cards, technical ingestion jobs, immutable candidate decisions, target recommendation work, and sampling obligations to match migration `0038_target_knowledge_lifecycle.sql`.
+- 2026-08-04: `pnpm exec drizzle-kit check` and `git diff --check` pass. `pnpm typecheck` cannot pass yet: all retired lifecycle columns now correctly fail across active production consumers (`packages/database`, `packages/contracts`, and `packages/worker-domain`) and legacy integration fixtures. The ingestion pipeline/recommendation resolver still implements retired business stages and Story 15.3 cross-table transitions, so it cannot be converted mechanically without a coordinated rewrite. No aliases, fallbacks, reset, migration, or reseed were used. The required reset is deferred until target-only compilation succeeds.
+- 2026-08-04: Completed coordinated target-only conversion across database, Worker, contracts, seeds, fixtures, and integration tests. The confirmed disposable development and test databases were recreated from the final migration and seeded. The final serial Story 15.1 suite passed 89 tests across 9 files; typecheck, Drizzle check, and diff check pass. Independent review repaired inherited legacy job/recommendation constraints and indexes in migration 0038, and added target resolution-shape coverage. Expired processing-candidate recovery is deferred to Story 15.2.
 
 ### File List
 
 - _bmad-output/implementation-artifacts/15-1-establish-the-target-lifecycle-schema.md
+- _bmad-output/implementation-artifacts/sprint-status.yaml
+- drizzle/migrations/0038_target_knowledge_lifecycle.sql
+- drizzle/migrations/meta/_journal.json
+- packages/database/src/schema.ts
+- packages/database/src/knowledge-*.ts
+- packages/database/src/admin-*.ts
+- packages/database/src/{answer-freshness,approved-knowledge,provenance,source-bundle}.ts
+- packages/contracts/src/index.ts
+- packages/worker-domain/src/features/knowledge/*.ts
+- tests/*knowledge*.test.ts
+- tests/{browser-identity.integration,contracts-browser-compatibility,drizzle-migration-plan,facebook-capture-review,facebook-capture,schema-compatibility,worker-adapter-boundary}.test.ts
+- docs/proposals/knowledge-lifecycle-normalization.md

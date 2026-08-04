@@ -386,7 +386,9 @@ describe("Facebook capture queue", () => {
 
     await testDb.insert(knowledgeCards).values({
       id: "handoff-draft",
-      status: "draft",
+      lifecycleState: "draft",
+      knowledgeState: "community_observation",
+      verificationRequirement: "none",
       type: "route_note",
       title: "Chia chặng Đồng Hới cho gia đình",
       summary: "Đồng Hới có thể là điểm nghỉ phù hợp cho gia đình tự lái.",

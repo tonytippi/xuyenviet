@@ -72,8 +72,8 @@ describe("schema compatibility contract", () => {
       async recordSchemaVersion() {},
     };
 
-    await expect(isApiReady({ configValid: true, repository, environment: { APP_ENV: "local" } })).resolves.toBe(true);
-    await expect(isApiReady({ configValid: true, repository, environment: { APP_ENV: "production" } })).resolves.toBe(false);
+    await expect(isApiReady({ configValid: true, repository, environment: { APP_ENV: "local", NODE_ENV: "test" } })).resolves.toBe(true);
+    await expect(isApiReady({ configValid: true, repository, environment: { APP_ENV: "production", NODE_ENV: "test" } })).resolves.toBe(false);
   });
 
   it("validates phase policy declarations independent of JSON object key order", () => {

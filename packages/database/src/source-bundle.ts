@@ -48,7 +48,7 @@ export type WebSearchTriggerReason =
 
 export type SafeKnowledgePolicySummary = {
   selectedCardIds: string[];
-  selectedPolicies?: Array<{ cardId: string; contentVersion: number; knowledgeState: string; verificationState: string; usePolicy: KnowledgeSearchResult["policy"] }>;
+  selectedPolicies?: Array<{ cardId: string; contentVersion: number; knowledgeState: string; verificationRequirement: string; usePolicy: KnowledgeSearchResult["policy"] }>;
   selectedPolicyCounts: { contextualUse: number; caveatOnly: number };
   excludedPolicyCounts: { conflict: number; verificationRequired: number; other: number };
   excludedReasonCodes: string[];
@@ -308,7 +308,7 @@ export function decideWebSearchFallback({
       cardId: result.id,
       contentVersion: result.contentVersion,
       knowledgeState: result.knowledgeState,
-      verificationState: result.verificationState,
+      verificationRequirement: result.verificationRequirement,
       usePolicy: result.policy,
     })),
     selectedPolicyCounts: {
@@ -342,7 +342,7 @@ export function decideWebSearchFallback({
 
   if (knowledgePolicySummary.excludedPolicyCounts.conflict > 0) reasons.push("excluded_conflict_candidate");
   if (knowledgePolicySummary.excludedPolicyCounts.verificationRequired > 0) reasons.push("excluded_verification_required_candidate");
-  if (knowledge.some((result) => result.policy === "caveat_only" || result.knowledgeState === "uncertain" || result.verificationState === "required")) {
+  if (knowledge.some((result) => result.policy === "caveat_only" || result.verificationRequirement === "operator_required")) {
     reasons.push("selected_knowledge_requires_verification");
   }
 
@@ -843,10 +843,9 @@ function appendKnowledgeSection(lines: string[], knowledge: KnowledgeSearchResul
 }
 
 function isFactualItineraryPremise(item: KnowledgeSearchResult) {
-  return item.publicationState === "active"
+  return item.lifecycleState === "active"
     && item.knowledgeState !== "conflicted"
-    && item.knowledgeState !== "superseded"
-    && item.verificationState !== "failed";
+    && item.verificationRequirement !== "failed";
 }
 
 const allowedContextFields = new Set<AnswerContextFact["field"]>([

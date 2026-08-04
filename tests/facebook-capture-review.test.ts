@@ -416,7 +416,7 @@ describe("Facebook capture review state", () => {
     await createSource({ id: "direct-recapture-extracted", rawText: "Captured text already has extraction cards." });
     const ensured = await ensureFacebookCaptureReviewForCapturedSource(testDb, { sourceId: "direct-recapture-extracted", rawSourceMaterialId: "raw-direct-recapture-extracted" });
     if (ensured.status !== "created") throw new Error("test setup failed");
-    await testDb.insert(knowledgeCards).values({ id: "direct-recapture-card", status: "draft", type: "route_note", title: "Existing extraction", routeSegment: "Huế - Đà Nẵng", summary: "Existing extracted card.", confidence: "community", aiPromptVersion: sourceKnowledgeDraftExtractionPromptVersion, createdByUserId: "operator-user" });
+    await testDb.insert(knowledgeCards).values({ id: "direct-recapture-card", lifecycleState: "draft", knowledgeState: "community_observation", verificationRequirement: "none", type: "route_note", title: "Existing extraction", routeSegment: "Huế - Đà Nẵng", summary: "Existing extracted card.", confidence: "community", aiPromptVersion: sourceKnowledgeDraftExtractionPromptVersion, createdByUserId: "operator-user" });
     await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: "direct-recapture-card", sourceId: "direct-recapture-extracted" });
 
     await expect(
@@ -434,7 +434,7 @@ describe("Facebook capture review state", () => {
     await createSource({ id: "already-extracted", rawText: "Captured text" });
     const ensured = await ensureFacebookCaptureReviewForCapturedSource(testDb, { sourceId: "already-extracted", rawSourceMaterialId: "raw-already-extracted", now: new Date("2026-07-13T00:00:00.000Z") });
     if (ensured.status !== "created") throw new Error("test setup failed");
-    await testDb.insert(knowledgeCards).values({ id: "manual-draft", status: "draft", type: "route_note", title: "Manual draft", routeSegment: "Huế - Đà Nẵng", summary: "Existing summary", confidence: "community", aiPromptVersion: "manual_test_prompt", createdByUserId: "operator-user" });
+    await testDb.insert(knowledgeCards).values({ id: "manual-draft", lifecycleState: "draft", knowledgeState: "community_observation", verificationRequirement: "none", type: "route_note", title: "Manual draft", routeSegment: "Huế - Đà Nẵng", summary: "Existing summary", confidence: "community", aiPromptVersion: "manual_test_prompt", createdByUserId: "operator-user" });
     await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: "manual-draft", sourceId: "already-extracted" });
 
     await expect(
@@ -445,7 +445,7 @@ describe("Facebook capture review state", () => {
       }),
     ).resolves.toMatchObject({ status: "missing_extracted_cards" });
 
-    await testDb.insert(knowledgeCards).values({ id: "existing-draft", status: "draft", type: "route_note", title: "Existing draft", routeSegment: "Huế - Đà Nẵng", summary: "Existing summary", confidence: "community", aiPromptVersion: sourceKnowledgeDraftExtractionPromptVersion, createdByUserId: "operator-user" });
+    await testDb.insert(knowledgeCards).values({ id: "existing-draft", lifecycleState: "draft", knowledgeState: "community_observation", verificationRequirement: "none", type: "route_note", title: "Existing draft", routeSegment: "Huế - Đà Nẵng", summary: "Existing summary", confidence: "community", aiPromptVersion: sourceKnowledgeDraftExtractionPromptVersion, createdByUserId: "operator-user" });
     await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: "existing-draft", sourceId: "already-extracted" });
 
     await expect(
@@ -458,8 +458,8 @@ describe("Facebook capture review state", () => {
     ).resolves.toMatchObject({ status: "updated", review: { status: "extracted" } });
     await expect(getExistingCardsForCaptureSource(testDb, "already-extracted")).resolves.toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ id: "existing-draft", status: "draft", aiPromptVersion: sourceKnowledgeDraftExtractionPromptVersion }),
-        expect.objectContaining({ id: "manual-draft", status: "draft", aiPromptVersion: "manual_test_prompt" }),
+        expect.objectContaining({ id: "existing-draft", lifecycleState: "draft", aiPromptVersion: sourceKnowledgeDraftExtractionPromptVersion }),
+        expect.objectContaining({ id: "manual-draft", lifecycleState: "draft", aiPromptVersion: "manual_test_prompt" }),
       ]),
     );
   });

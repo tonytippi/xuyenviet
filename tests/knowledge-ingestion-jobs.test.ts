@@ -1,293 +1,80 @@
 import { eq, sql } from "drizzle-orm";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test } from "vitest";
 
-import { knowledgeIngestionCandidates, knowledgeIngestionJobs, sourceCaptureVersions, sources, users } from "@/db/schema";
-import { claimNextKnowledgeIngestionJob, commitKnowledgeIngestionStage, ensureIngestionJobForCaptureVersion, listKnowledgeIngestionJobStatuses, recoverKnowledgeIngestionJobs, retryKnowledgeIngestionStage } from "@/features/knowledge/ingestion-jobs";
-import { runKnowledgeIngestionWorkerLoop } from "@/features/knowledge/ingestion-worker";
-import { appendSourceCaptureVersion, hashCaptureText } from "@/features/knowledge/source-captures";
+import { knowledgeIngestionCandidates, knowledgeIngestionJobs, sources, userRoles } from "@/db/schema";
+import { claimNextKnowledgeIngestionJob, ensureIngestionJobForCaptureVersion } from "@/features/knowledge/ingestion-jobs";
+import { appendSourceCaptureVersion } from "@/features/knowledge/source-captures";
 
 import { resetTestDatabase, seedTestOperator, testDb } from "./helpers/db";
 
-async function createSource(id: string, submitterId = "operator") {
-  await testDb.insert(sources).values({ id, kind: "pasted_text", label: `Source ${id}`, sourceType: "curated", verificationStatus: "unverified", official: false, partner: false, submittedByUserId: submitterId });
+async function createJob(id = "source") {
+  await testDb.insert(sources).values({ id, kind: "pasted_text", label: `Source ${id}`, sourceType: "curated", verificationStatus: "unverified", official: false, partner: false, eligibility: "eligible", submittedByUserId: "operator" });
+  const capture = await appendSourceCaptureVersion(testDb, { sourceId: id, captureKind: "pasted_text", rawText: "Đèo Hải Vân có điểm dừng ngắm cảnh.", metadata: { kind: "submitted" } });
+  const [job] = await testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.captureVersionId, capture.id));
+  if (!job) throw new Error("expected ingestion job");
+  return { capture, job };
 }
 
-async function appendReadableCapture(sourceId: string, rawText = "Đèo Hải Vân có điểm dừng ngắm cảnh.") {
-  return appendSourceCaptureVersion(testDb, {
-    sourceId,
-    captureKind: "pasted_text",
-    rawText,
-    metadata: { kind: "submitted" },
-    capturedAt: new Date("2026-07-22T00:00:00.000Z"),
-  });
+function candidateValues(jobId: string, captureVersionId: string, overrides: Record<string, unknown> = {}) {
+  return { id: crypto.randomUUID(), ingestionJobId: jobId, sourceId: "source", captureVersionId, fingerprint: crypto.randomUUID(), type: "place" as const, title: "Điểm dừng", summary: "Có điểm dừng phù hợp.", conditions: [], spanStart: 0, spanEnd: 1, extractionPromptVersion: "test", ...overrides };
 }
 
-describe("canonical knowledge ingestion jobs", () => {
+async function rejectionMessage(promise: Promise<unknown>) {
+  try {
+    await promise;
+  } catch (error) {
+    let current: unknown = error;
+    while (current instanceof Error) {
+      if (current.message.includes("Completed candidate AI decision is immutable")) return current.message;
+      current = current.cause;
+    }
+  }
+  throw new Error("Expected candidate decision immutability rejection");
+}
+
+describe("target knowledge ingestion jobs", () => {
   beforeEach(async () => {
     await resetTestDatabase();
     await seedTestOperator();
+    await testDb.insert(userRoles).values({ userId: "operator", role: "operator" });
   });
 
-  test("creates exactly one queued job with immutable submitter provenance for a readable capture", async () => {
-    await createSource("source-one");
-    const capture = await appendReadableCapture("source-one");
+  test("creates and claims one queued technical job without legacy stages", async () => {
+    const { capture } = await createJob();
 
-    await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.captureVersionId, capture.id))).resolves.toMatchObject([
-      { sourceId: "source-one", captureVersionId: capture.id, submittedByUserId: "operator", submittedByEmail: "operator@example.com", protocolVersion: 2, stage: "queued", stageVersion: 1, attemptCount: 0, maxAttempts: 3, claimedBy: null, fencingToken: null },
-    ]);
-    await expect(ensureIngestionJobForCaptureVersion(testDb, { sourceId: "source-one", captureVersionId: capture.id })).resolves.toMatchObject({ captureVersionId: capture.id, submittedByEmail: "operator@example.com" });
-    await expect(testDb.select().from(knowledgeIngestionJobs)).resolves.toHaveLength(1);
-  });
-
-  test("keeps an existing v1 row unchanged while new capture jobs select v2", async () => {
-    await createSource("legacy-source");
-    await testDb.insert(sourceCaptureVersions).values({ id: "legacy-capture", sourceId: "legacy-source", versionSequence: 1, captureKind: "pasted_text", rawText: "Legacy capture.", contentHash: hashCaptureText("Legacy capture."), capturedAt: new Date() });
-    await testDb.insert(knowledgeIngestionJobs).values({ id: "legacy-job", sourceId: "legacy-source", captureVersionId: "legacy-capture", submittedByUserId: "operator", submittedByEmail: "operator@example.com", protocolVersion: 1 });
-    await expect(ensureIngestionJobForCaptureVersion(testDb, { sourceId: "legacy-source", captureVersionId: "legacy-capture" })).resolves.toMatchObject({ id: "legacy-job", protocolVersion: 1 });
-    expect(await testDb.select().from(knowledgeIngestionCandidates)).toEqual([]);
-  });
-
-  test("keeps the canonical worker loop available for supervised execution and supports a one-shot no-work check", async () => {
-    await expect(runKnowledgeIngestionWorkerLoop({ once: true, workerId: "supervised-worker" })).resolves.toBeNull();
-  });
-
-  test("reports a heartbeat only after a database poll completes", async () => {
-    const onPollComplete = vi.fn();
-
-    await expect(runKnowledgeIngestionWorkerLoop({ once: true, workerId: "heartbeat-worker", onPollComplete })).resolves.toBeNull();
-
-    expect(onPollComplete).toHaveBeenCalledTimes(1);
-  });
-
-  test("reports idle polling before the worker sleeps", async () => {
-    const controller = new AbortController();
-    const onIdle = vi.fn(() => controller.abort());
-
-    await expect(runKnowledgeIngestionWorkerLoop({ workerId: "idle-worker", pollIntervalMs: 10, signal: controller.signal, onIdle })).resolves.toEqual({ status: "stopped" });
-
-    expect(onIdle).toHaveBeenCalledWith(10);
-  });
-
-  test("removes the idle poll abort listener when the timeout completes", async () => {
-    const controller = new AbortController();
-    const originalRemoveEventListener = controller.signal.removeEventListener.bind(controller.signal);
-    let shutdownStarted = false;
-    let removedOnTimeout = false;
-    const removeEventListener = vi.spyOn(controller.signal, "removeEventListener").mockImplementation((...args) => {
-      const result = originalRemoveEventListener(...args);
-      if (!shutdownStarted) {
-        removedOnTimeout = true;
-        controller.abort();
-      }
-      return result;
-    });
-    const fallbackShutdown = setTimeout(() => {
-      shutdownStarted = true;
-      controller.abort();
-    }, 1_000);
-
-    try {
-      await expect(runKnowledgeIngestionWorkerLoop({ workerId: "listener-cleanup-worker", pollIntervalMs: 10, signal: controller.signal })).resolves.toEqual({ status: "stopped" });
-      expect(removeEventListener).toHaveBeenCalledWith("abort", expect.any(Function));
-      expect(removedOnTimeout).toBe(true);
-    } finally {
-      clearTimeout(fallbackShutdown);
-      controller.abort();
-      removeEventListener.mockRestore();
-    }
-  });
-
-  test("creates exactly one canonical job when concurrent callers ensure an unqueued readable capture", async () => {
-    await createSource("concurrent-ensure");
-    await testDb.insert(sourceCaptureVersions).values({ id: "concurrent-ensure-version", sourceId: "concurrent-ensure", versionSequence: 1, captureKind: "pasted_text", rawText: "Readable capture without queued work.", contentHash: hashCaptureText("Readable capture without queued work."), capturedAt: new Date() });
-
-    const jobs = await Promise.all([
-      ensureIngestionJobForCaptureVersion(testDb, { sourceId: "concurrent-ensure", captureVersionId: "concurrent-ensure-version" }),
-      ensureIngestionJobForCaptureVersion(testDb, { sourceId: "concurrent-ensure", captureVersionId: "concurrent-ensure-version" }),
-    ]);
-
-    expect(jobs).toEqual(expect.arrayContaining([expect.objectContaining({ submittedByEmail: "operator@example.com" })]));
-    await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.captureVersionId, "concurrent-ensure-version"))).resolves.toMatchObject([
-      { sourceId: "concurrent-ensure", submittedByUserId: "operator", submittedByEmail: "operator@example.com" },
-    ]);
-  });
-
-  test("preserves prior provenance when a source is recaptured", async () => {
-    await createSource("recaptured");
-    const first = await appendReadableCapture("recaptured", "Phiên bản đầu tiên.");
-    await testDb.update(users).set({ email: "changed@example.com" }).where(eq(users.id, "operator"));
-    const second = await appendReadableCapture("recaptured", "Phiên bản tái thu thập.");
-
-    const jobs = await testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.sourceId, "recaptured")).orderBy(knowledgeIngestionJobs.createdAt);
-    expect(jobs).toHaveLength(2);
-    expect(jobs.map((job) => job.captureVersionId).sort()).toEqual([first.id, second.id].sort());
-    expect(jobs.map((job) => job.submittedByEmail).sort()).toEqual(["changed@example.com", "operator@example.com"]);
-  });
-
-  test("serializes concurrent capture appends so the current pointer is the last committed version", async () => {
-    await createSource("concurrent-captures");
-    const [first, second] = await Promise.all([
-      appendReadableCapture("concurrent-captures", "Phiên bản đồng thời một."),
-      appendReadableCapture("concurrent-captures", "Phiên bản đồng thời hai."),
-    ]);
-
-    const captures = await testDb.select().from(sourceCaptureVersions).where(eq(sourceCaptureVersions.sourceId, "concurrent-captures")).orderBy(sourceCaptureVersions.versionSequence);
-    const [source] = await testDb.select().from(sources).where(eq(sources.id, "concurrent-captures"));
-    expect(captures.map((capture) => capture.versionSequence)).toEqual([1, 2]);
-    expect(source?.currentCaptureVersionId).toBe(captures[1]?.id);
-    expect([first.id, second.id]).toContain(source?.currentCaptureVersionId);
-  });
-
-  test("claims a due queued job once with a bounded opaque fence and does not advance its stage", async () => {
-    await createSource("claimable");
-    await appendReadableCapture("claimable");
-    const now = new Date(Date.now() + 1_000);
-
-    const claims = await Promise.all([
-      claimNextKnowledgeIngestionJob({ workerId: "worker-a", expectedStageVersion: 1, now }, testDb),
-      claimNextKnowledgeIngestionJob({ workerId: "worker-b", expectedStageVersion: 1, now }, testDb),
-    ]);
-    const winner = claims.filter((claim) => claim !== null);
-    expect(winner).toHaveLength(1);
-    expect(winner[0]).toMatchObject({ stage: "queued", stageVersion: 1, attemptCount: 1 });
-    expect(winner[0]?.fencingToken).toMatch(/^[a-f0-9]{64}$/);
-    expect(winner[0]?.leaseExpiresAt.getTime()).toBeGreaterThan(now.getTime());
-
-    const [job] = await testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, winner[0]?.jobId ?? "")).limit(1);
-    expect(job).toMatchObject({ stage: "queued", stageVersion: 1, attemptCount: 1 });
-  });
-
-  test("does not claim exhausted jobs or silently reclaim expired claims", async () => {
-    await createSource("exhausted");
-    const capture = await appendReadableCapture("exhausted");
-    const now = new Date("2026-07-22T01:00:00.000Z");
-    await testDb.update(knowledgeIngestionJobs).set({ attemptCount: 3 }).where(eq(knowledgeIngestionJobs.captureVersionId, capture.id));
-    const [exhaustedBefore] = await testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.captureVersionId, capture.id));
-    await expect(claimNextKnowledgeIngestionJob({ workerId: "worker", expectedStageVersion: 1, now }, testDb)).resolves.toBeNull();
-    const [exhaustedAfter] = await testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.captureVersionId, capture.id));
-    expect(exhaustedAfter).toEqual(exhaustedBefore);
-
-    await testDb.update(knowledgeIngestionJobs).set({ attemptCount: 0, claimedBy: "old-worker", claimedAt: new Date("2026-07-22T00:00:00.000Z"), leaseExpiresAt: new Date("2026-07-22T00:15:00.000Z"), fencingToken: "a".repeat(64) }).where(eq(knowledgeIngestionJobs.captureVersionId, capture.id));
-    await expect(claimNextKnowledgeIngestionJob({ workerId: "new-worker", expectedStageVersion: 1, now }, testDb)).resolves.toBeNull();
-    await expect(listKnowledgeIngestionJobStatuses(testDb, now)).resolves.toMatchObject([{ captureVersionId: capture.id, claimedBy: "old-worker", expired: true }]);
-  });
-
-  test("enforces source-version ownership and claim-shape constraints", async () => {
-    await createSource("constraint-source");
-    await createSource("wrong-source");
-    const capture = await appendReadableCapture("constraint-source");
-
-    await expect(testDb.execute(sql`insert into knowledge_ingestion_jobs (id, source_id, capture_version_id, submitted_by_user_id, submitted_by_email, stage) values ('wrong-source-job', 'wrong-source', ${capture.id}, 'operator', 'operator@example.com', 'queued')`)).rejects.toThrow();
-    await expect(testDb.execute(sql`insert into knowledge_ingestion_jobs (id, source_id, capture_version_id, submitted_by_user_id, submitted_by_email, stage, stage_version) values ('invalid-stage-job', 'constraint-source', ${capture.id}, 'operator', 'operator@example.com', 'not_a_stage', 0)`)).rejects.toThrow();
-    await testDb.insert(sourceCaptureVersions).values([
-      { id: "constraint-retry", sourceId: "constraint-source", versionSequence: 2, captureKind: "pasted_text", rawText: "Retry constraint.", contentHash: hashCaptureText("Retry constraint."), capturedAt: new Date() },
-      { id: "constraint-claim", sourceId: "constraint-source", versionSequence: 3, captureKind: "pasted_text", rawText: "Claim constraint.", contentHash: hashCaptureText("Claim constraint."), capturedAt: new Date() },
-      { id: "constraint-terminal", sourceId: "constraint-source", versionSequence: 4, captureKind: "pasted_text", rawText: "Terminal constraint.", contentHash: hashCaptureText("Terminal constraint."), capturedAt: new Date() },
-    ]);
-    await expect(testDb.execute(sql`insert into knowledge_ingestion_jobs (id, source_id, capture_version_id, submitted_by_user_id, submitted_by_email, attempt_count) values ('invalid-retry-job', 'constraint-source', 'constraint-retry', 'operator', 'operator@example.com', -1)`)).rejects.toThrow();
-    await expect(testDb.execute(sql`insert into knowledge_ingestion_jobs (id, source_id, capture_version_id, submitted_by_user_id, submitted_by_email, claimed_by) values ('invalid-claim-job', 'constraint-source', 'constraint-claim', 'operator', 'operator@example.com', 'worker')`)).rejects.toThrow();
-    await expect(testDb.execute(sql`insert into knowledge_ingestion_jobs (id, source_id, capture_version_id, submitted_by_user_id, submitted_by_email, stage, claimed_by, claimed_at, lease_expires_at, fencing_token) values ('invalid-terminal-job', 'constraint-source', 'constraint-terminal', 'operator', 'operator@example.com', 'published', 'worker', now(), now() + interval '1 minute', ${"a".repeat(64)})`)).rejects.toThrow();
-
-    await testDb.update(knowledgeIngestionJobs).set({ stage: "triaging", stageVersion: 2 }).where(eq(knowledgeIngestionJobs.captureVersionId, capture.id));
-    const staleClaim = await claimNextKnowledgeIngestionJob({ workerId: "worker", expectedStageVersion: 2, now: new Date("2026-07-22T23:00:00.000Z") }, testDb);
-    expect(staleClaim).toBeNull();
-  });
-
-  test("rejects unreadable and mismatched versions and exposes no raw payload or fence in the operator projection", async () => {
-    await createSource("private-source");
-    await createSource("other-source");
-    await testDb.insert(sourceCaptureVersions).values({ id: "unreadable", sourceId: "private-source", versionSequence: 1, captureKind: "pasted_text", rawText: null, contentHash: hashCaptureText("not stored"), capturedAt: new Date() });
-    await expect(ensureIngestionJobForCaptureVersion(testDb, { sourceId: "private-source", captureVersionId: "unreadable" })).rejects.toThrow("not readable");
-
-    const capture = await appendReadableCapture("private-source", "RAW_CAPTURE_MARKER");
-    await expect(ensureIngestionJobForCaptureVersion(testDb, { sourceId: "other-source", captureVersionId: capture.id })).rejects.toThrow("not readable");
-    const claim = await claimNextKnowledgeIngestionJob({ workerId: "safe-worker", expectedStageVersion: 1 }, testDb);
-    expect(claim).not.toBeNull();
-    const status = await listKnowledgeIngestionJobStatuses(testDb);
-    expect(JSON.stringify(status)).not.toContain("RAW_CAPTURE_MARKER");
-    expect(JSON.stringify(status)).not.toContain(claim?.fencingToken ?? "");
-  });
-
-  test("recovers an expired fenced stage without permitting its old fence to commit", async () => {
-    await createSource("recovery");
-    await appendReadableCapture("recovery");
-    const claimedAt = new Date(Date.now() + 1_000);
-    const first = await claimNextKnowledgeIngestionJob({ workerId: "old-worker", now: claimedAt }, testDb);
-    if (!first) throw new Error("expected claim");
-    await commitKnowledgeIngestionStage({ jobId: first.jobId, expectedStage: "queued", expectedStageVersion: first.stageVersion, fencingToken: first.fencingToken, nextStage: "triaging", checkpoint: { version: 1, completedStage: "triaging", passed: true }, now: claimedAt }, testDb);
-    const expiredAt = new Date(first.leaseExpiresAt.getTime() + 1);
-    await expect(recoverKnowledgeIngestionJobs(testDb, expiredAt)).resolves.toMatchObject({ recovered: 1 });
-    const second = await claimNextKnowledgeIngestionJob({ workerId: "new-worker", now: expiredAt }, testDb);
-    expect(second).toMatchObject({ stage: "triaging", checkpoint: { completedStage: "triaging" } });
-    await expect(commitKnowledgeIngestionStage({ jobId: first.jobId, expectedStage: "triaging", expectedStageVersion: 2, fencingToken: first.fencingToken, nextStage: "extracting", checkpoint: { version: 1, completedStage: "extracting", candidate: { type: "place", title: "Title", summary: "Summary", locationName: "Place", routeSegment: null, conditions: [], freshnessSensitive: false, spanStart: 0, spanEnd: 1, modelId: "extract", modelGatewayName: "extract-model", promptVersion: "v1" } }, now: expiredAt }, testDb)).resolves.toBeNull();
-  });
-
-  test("emits separate exhausted recovery and newly claimed terminal observations in one serial poll", async () => {
-    await createSource("mixed-recovery");
-    await createSource("mixed-claim");
-    const recoveredCapture = await appendReadableCapture("mixed-recovery");
-    const claimedCapture = await appendReadableCapture("mixed-claim");
-    const [recovered] = await testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.captureVersionId, recoveredCapture.id));
-    const [claimed] = await testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.captureVersionId, claimedCapture.id));
-    await testDb.update(knowledgeIngestionJobs).set({ attemptCount: 3, maxAttempts: 3, claimedBy: "dead-worker", claimedAt: new Date(0), leaseExpiresAt: new Date(1), fencingToken: "a".repeat(64) }).where(eq(knowledgeIngestionJobs.id, recovered!.id));
-    await testDb.update(knowledgeIngestionJobs).set({ nextRunAt: new Date(0) }).where(eq(knowledgeIngestionJobs.id, claimed!.id));
-    const observations: Array<{ resultCode: string; durableId?: string; leaseRecovery?: string; retryCount?: number }> = [];
-
-    await expect(runKnowledgeIngestionWorkerLoop({ once: true, workerId: "mixed-observation-worker", onObservation(observation) { observations.push(observation); } })).resolves.toMatchObject({ jobId: claimed!.id, outcome: "failed" });
-
-    expect(observations).toEqual([
-      expect.objectContaining({ resultCode: "failure", durableId: recovered!.id, retryCount: 3, leaseRecovery: "recovered", leaseRecoveryCount: 1 }),
-      expect.objectContaining({ resultCode: "failure", durableId: claimed!.id, retryCount: 1, leaseRecovery: "none" }),
-    ]);
-    await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, recovered!.id))).resolves.toMatchObject([{ stage: "failed", lastErrorCode: "retry_exhausted" }]);
-    await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, claimed!.id))).resolves.toMatchObject([{ stage: "failed", attemptCount: 1, lastErrorCode: "model_unavailable" }]);
-  });
-
-  test("clears checkpoints for terminal and exhausted jobs without exposing them in status", async () => {
-    await createSource("checkpoint");
-    const capture = await appendReadableCapture("checkpoint", "Checkpoint RAW_CAPTURE_MARKER");
+    await expect(ensureIngestionJobForCaptureVersion(testDb, { sourceId: "source", captureVersionId: capture.id })).resolves.toMatchObject({ captureVersionId: capture.id, status: "queued", discoveryTerminal: false, candidateCount: 0, completedCandidateCount: 0, needsOperatorCandidateCount: 0, failedCandidateCount: 0 });
     const claim = await claimNextKnowledgeIngestionJob({ workerId: "worker", now: new Date(Date.now() + 1_000) }, testDb);
-    if (!claim) throw new Error("expected claim");
-    await commitKnowledgeIngestionStage({ jobId: claim.jobId, expectedStage: "queued", expectedStageVersion: 1, fencingToken: claim.fencingToken, nextStage: "suppressed", now: new Date(Date.now() + 2_000) }, testDb);
-    await expect(testDb.select({ checkpoint: knowledgeIngestionJobs.checkpoint }).from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.captureVersionId, capture.id))).resolves.toEqual([{ checkpoint: null }]);
-    expect(JSON.stringify(await listKnowledgeIngestionJobStatuses(testDb))).not.toContain("RAW_CAPTURE_MARKER");
+    expect(claim).toMatchObject({ status: "running", attemptCount: 1 });
+    await expect(testDb.select({ status: knowledgeIngestionJobs.status }).from(knowledgeIngestionJobs)).resolves.toEqual([{ status: "running" }]);
   });
 
-  test("rejects protected or unknown checkpoint fields and terminalizes an exhausted retry with a new version", async () => {
-    await createSource("checkpoint-validation");
-    await appendReadableCapture("checkpoint-validation");
-    const claim = await claimNextKnowledgeIngestionJob({ workerId: "worker", now: new Date(Date.now() + 1_000) }, testDb);
-    if (!claim) throw new Error("expected claim");
-    const candidate = { type: "place" as const, title: "Title", summary: "Summary", locationName: "Place", routeSegment: null, conditions: [], freshnessSensitive: false, spanStart: 0, spanEnd: 1, modelId: "extract", modelGatewayName: "extract-model", promptVersion: "v1", providerPayload: "secret" };
-    await expect(commitKnowledgeIngestionStage({ jobId: claim.jobId, expectedStage: "queued", expectedStageVersion: 1, fencingToken: claim.fencingToken, nextStage: "triaging", checkpoint: { version: 1, completedStage: "triaging", passed: true, candidate } as never }, testDb)).rejects.toThrow("Checkpoint is invalid");
-    await testDb.update(knowledgeIngestionJobs).set({ attemptCount: 3 }).where(eq(knowledgeIngestionJobs.id, claim.jobId));
-    await expect(retryKnowledgeIngestionStage({ jobId: claim.jobId, expectedStage: "queued", expectedStageVersion: 1, fencingToken: claim.fencingToken, errorCode: "provider_failed" }, testDb)).resolves.toMatchObject({ stage: "failed", stageVersion: 2, checkpoint: null, lastErrorCode: "retry_exhausted" });
+  test("enforces target candidate completion and failed decision shapes", async () => {
+    const { capture, job } = await createJob();
+
+    const invalidCompletedCandidate = candidateValues(job.id, capture.id);
+    await expect(testDb.execute(sql`
+      insert into knowledge_ingestion_candidates (
+        id, ingestion_job_id, source_id, capture_version_id, fingerprint, type, title, summary,
+        conditions, span_start, span_end, extraction_prompt_version,
+        processing_status, ai_disposition, outcome_reason_code
+      ) values (
+        ${invalidCompletedCandidate.id}, ${job.id}, 'source', ${capture.id}, ${invalidCompletedCandidate.fingerprint},
+        'place', 'Điểm dừng', 'Có điểm dừng phù hợp.', '[]'::jsonb, 0, 1, 'test',
+        'completed', 'invalid_disposition', 'applied'
+      )
+    `)).rejects.toThrow();
+    const failedCandidate = candidateValues(job.id, capture.id);
+    await testDb.insert(knowledgeIngestionCandidates).values(failedCandidate);
+    await expect(testDb.update(knowledgeIngestionCandidates).set({ processingStatus: "failed", aiDisposition: "discard", outcomeReasonCode: "policy_rejected" }).where(eq(knowledgeIngestionCandidates.id, failedCandidate.id))).rejects.toThrow();
+    await expect(testDb.insert(knowledgeIngestionCandidates).values(candidateValues(job.id, capture.id, { processingStatus: "completed", aiDisposition: "apply", outcomeReasonCode: "applied" }))).resolves.toBeDefined();
   });
 
-  test("retries AI gateway failures quickly without changing the longer pipeline retry backoff", async () => {
-    await createSource("gateway-retry");
-    await appendReadableCapture("gateway-retry");
-    const now = new Date(Date.now() + 1_000);
-    const gatewayClaim = await claimNextKnowledgeIngestionJob({ workerId: "gateway-worker", now }, testDb);
-    if (!gatewayClaim) throw new Error("expected gateway claim");
+  test("rejects later AI disposition or reason changes after candidate completion", async () => {
+    const { capture, job } = await createJob();
+    const candidate = candidateValues(job.id, capture.id, { processingStatus: "completed", aiDisposition: "needs_operator", outcomeReasonCode: "verification_required" });
+    await testDb.insert(knowledgeIngestionCandidates).values(candidate);
 
-    const gatewayRetryAt = new Date(now.getTime() + 5_000);
-    await expect(retryKnowledgeIngestionStage({ jobId: gatewayClaim.jobId, expectedStage: "queued", expectedStageVersion: 1, fencingToken: gatewayClaim.fencingToken, errorCode: "judge_provider_failed", now }, testDb)).resolves.toMatchObject({ stage: "queued", nextRunAt: gatewayRetryAt });
-
-    const retryClaim = await claimNextKnowledgeIngestionJob({ workerId: "pipeline-worker", now: gatewayRetryAt }, testDb);
-    if (!retryClaim) throw new Error("expected retry claim");
-    const pipelineRetryAt = new Date(gatewayRetryAt.getTime() + 60_000);
-    await expect(retryKnowledgeIngestionStage({ jobId: retryClaim.jobId, expectedStage: "queued", expectedStageVersion: 1, fencingToken: retryClaim.fencingToken, errorCode: "invalid_checkpoint", now: gatewayRetryAt }, testDb)).resolves.toMatchObject({ stage: "queued", nextRunAt: pipelineRetryAt });
+    await expect(rejectionMessage(testDb.execute(sql`update knowledge_ingestion_candidates set ai_disposition = 'discard' where id = ${candidate.id}`))).resolves.toContain("Completed candidate AI decision is immutable");
+    await expect(rejectionMessage(testDb.execute(sql`update knowledge_ingestion_candidates set outcome_reason_code = 'weak_evidence' where id = ${candidate.id}`))).resolves.toContain("Completed candidate AI decision is immutable");
   });
-
-  test("rejects PII in durable judgment and relation checkpoint summaries", async () => {
-    await createSource("checkpoint-pii");
-    await appendReadableCapture("checkpoint-pii");
-    const claim = await claimNextKnowledgeIngestionJob({ workerId: "worker", now: new Date(Date.now() + 1_000) }, testDb);
-    if (!claim) throw new Error("expected claim");
-    const candidate = { type: "place" as const, title: "Title", summary: "Summary", locationName: "Place", routeSegment: null, conditions: [], freshnessSensitive: false, spanStart: 0, spanEnd: 1, modelId: "extract", modelGatewayName: "extract-model", promptVersion: "v1" };
-    const checkpoint = { version: 1 as const, completedStage: "judging" as const, candidate, judgment: { decision: "publish" as const, summary: "Liên hệ person@example.com", relevance: .9, extractability: .9, evidenceGrounding: .9, specificity: .9, actionability: .9, firstHandLikelihood: .9, spamCommercialRisk: .1 } };
-    await expect(commitKnowledgeIngestionStage({ jobId: claim.jobId, expectedStage: "queued", expectedStageVersion: 1, fencingToken: claim.fencingToken, nextStage: "suppressed", checkpoint }, testDb)).rejects.toThrow("Checkpoint is invalid");
-  });
-
 });

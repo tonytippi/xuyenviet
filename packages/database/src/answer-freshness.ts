@@ -2,7 +2,7 @@ import type { assembleContextPrioritySourceBundle } from "./source-bundle";
 
 export function ensureAiAskFreshnessWarning(content: string, sourceBundle: Awaited<ReturnType<typeof assembleContextPrioritySourceBundle>>) {
   const freshnessWarningRequired = sourceBundle.retrievalDecision.freshnessRequired || sourceBundle.web.some((source) => isFreshnessSensitiveWebTrigger(source.triggerReason));
-  const caveatOnlyKnowledge = sourceBundle.knowledge.filter((item) => item.policy === "caveat_only" || item.knowledgeState === "uncertain" || item.verificationState === "required");
+  const caveatOnlyKnowledge = sourceBundle.knowledge.filter((item) => item.policy === "caveat_only" || item.verificationRequirement === "operator_required");
   const conditionalKnowledge = sourceBundle.knowledge.filter((item) => item.policy === "contextual_use" && item.knowledgeState === "conditional" && item.conditions.length > 0);
   const caveatWarningRequired = caveatOnlyKnowledge.length > 0;
   const externalVerificationRequired = sourceBundle.retrievalDecision.webSearchTriggered
@@ -76,7 +76,7 @@ export function requiresAiAskAnswerFinalization(sourceBundle: Awaited<ReturnType
   return sourceBundle.warnings.includes("web_search_load_failed")
     || sourceBundle.warnings.includes("web_search_low_quality")
     || (sourceBundle.web.length > 0 && sourceBundle.retrievalDecision.webSearchTriggerReasons.some(requiresWebFallbackVerificationGuidance))
-    || sourceBundle.knowledge.some((item) => item.policy === "caveat_only" || item.knowledgeState === "uncertain" || item.verificationState === "required" || (item.policy === "contextual_use" && item.knowledgeState === "conditional" && item.conditions.length > 0));
+    || sourceBundle.knowledge.some((item) => item.policy === "caveat_only" || item.verificationRequirement === "operator_required" || (item.policy === "contextual_use" && item.knowledgeState === "conditional" && item.conditions.length > 0));
 }
 
 function requiresWebFallbackVerificationGuidance(reason: string) {

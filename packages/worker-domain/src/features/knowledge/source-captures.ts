@@ -188,7 +188,6 @@ export async function retainExpiredFacebookCaptureVersions(
 
         const [updated] = await transaction.update(sourceCaptureVersions).set({ rawText: null, fileName: null, mimeType: null, byteSize: null, storageKey: null, rawMetadata: null, payloadDeletedAt: now }).where(and(eq(sourceCaptureVersions.id, version.id), isNull(sourceCaptureVersions.payloadDeletedAt))).returning({ id: sourceCaptureVersions.id });
         if (!updated) return "skip" as const;
-        await transaction.update(knowledgeIngestionJobs).set({ rawDiscoveryResponse: null, updatedAt: now }).where(eq(knowledgeIngestionJobs.captureVersionId, version.id));
         // Legacy material was copied into the first immutable capture version.
        if (version.versionSequence === 1) {
          await transaction.update(rawSourceMaterial).set({ rawText: null, fileName: null, mimeType: null, byteSize: null, storageKey: null, rawMetadata: null }).where(eq(rawSourceMaterial.sourceId, version.sourceId));
@@ -204,13 +203,13 @@ export async function retainExpiredFacebookCaptureVersions(
 }
 
 async function hasRetentionBlocker(db: Pick<ReturnType<typeof getDb>, "select">, sourceId: string, versionId: string) {
-  const [card] = await db.select({ id: knowledgeCards.id }).from(knowledgeCardEvidence).innerJoin(knowledgeCards, eq(knowledgeCards.id, knowledgeCardEvidence.knowledgeCardId)).where(and(eq(knowledgeCardEvidence.sourceId, sourceId), eq(knowledgeCardEvidence.captureVersionId, versionId), eq(knowledgeCardEvidence.state, "active"), sql`(${knowledgeCards.publicationState} = 'active' or ${knowledgeCards.reviewState} in ('ai_recommended', 'in_review'))`)).limit(1);
+  const [card] = await db.select({ id: knowledgeCards.id }).from(knowledgeCardEvidence).innerJoin(knowledgeCards, eq(knowledgeCards.id, knowledgeCardEvidence.knowledgeCardId)).where(and(eq(knowledgeCardEvidence.sourceId, sourceId), eq(knowledgeCardEvidence.captureVersionId, versionId), eq(knowledgeCardEvidence.state, "active"), sql`${knowledgeCards.lifecycleState} in ('active', 'pending_operator')`)).limit(1);
   if (card) return true;
   const [review] = await db.select({ id: facebookCaptureReviews.id }).from(facebookCaptureReviews).where(and(eq(facebookCaptureReviews.captureVersionId, versionId), inArray(facebookCaptureReviews.status, ["needs_review", "extraction_failed"]))).limit(1);
   if (review) return true;
   const [job] = await db.select({ id: knowledgeExtractionJobs.id }).from(knowledgeExtractionJobs).where(and(eq(knowledgeExtractionJobs.captureVersionId, versionId), inArray(knowledgeExtractionJobs.status, ["queued", "running"]))).limit(1);
   if (job) return true;
-  const [ingestionJob] = await db.select({ id: knowledgeIngestionJobs.id }).from(knowledgeIngestionJobs).where(and(eq(knowledgeIngestionJobs.captureVersionId, versionId), inArray(knowledgeIngestionJobs.stage, ["queued", "triaging", "extracting", "judging", "relating"]))).limit(1);
+  const [ingestionJob] = await db.select({ id: knowledgeIngestionJobs.id }).from(knowledgeIngestionJobs).where(and(eq(knowledgeIngestionJobs.captureVersionId, versionId), inArray(knowledgeIngestionJobs.status, ["queued", "running"]))).limit(1);
   if (ingestionJob) return true;
   const [unknownJob] = await db.select({ id: knowledgeExtractionJobs.id }).from(knowledgeExtractionJobs).where(and(eq(knowledgeExtractionJobs.sourceId, sourceId), isNull(knowledgeExtractionJobs.captureVersionId), inArray(knowledgeExtractionJobs.status, ["queued", "running"]))).limit(1);
   if (unknownJob) return true;

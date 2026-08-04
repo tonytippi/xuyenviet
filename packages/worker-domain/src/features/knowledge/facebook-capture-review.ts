@@ -190,7 +190,7 @@ export async function getExistingCardsForCaptureSource(db: FacebookCaptureReview
   return db
     .select({
       id: knowledgeCards.id,
-      status: knowledgeCards.status,
+      lifecycleState: knowledgeCards.lifecycleState,
       title: knowledgeCards.title,
       type: knowledgeCards.type,
       aiPromptVersion: knowledgeCards.aiPromptVersion,

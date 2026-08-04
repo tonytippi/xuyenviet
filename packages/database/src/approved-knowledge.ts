@@ -20,7 +20,7 @@ export type StateAwareKnowledgeBundleItem = {
   confidence: string;
   freshnessSensitive: boolean;
   knowledgeState: string;
-  verificationState: string;
+  verificationRequirement: string;
   usePolicy: KnowledgeSearchResult["policy"];
   practicalDetails: Record<string, string | string[]>;
   evidence: KnowledgeSearchEvidence[];
@@ -48,7 +48,7 @@ export function toStateAwareKnowledgeBundleItem(result: KnowledgeSearchResult): 
     confidence: clip(result.confidence),
     freshnessSensitive: result.freshnessSensitive,
     knowledgeState: result.knowledgeState,
-    verificationState: result.verificationState,
+    verificationRequirement: result.verificationRequirement,
     usePolicy: result.policy,
     practicalDetails: projectPracticalDetails(result.practicalDetails),
     evidence: (result.evidence ?? []).slice(0, maxEvidencePerCard).map((evidence) => {
@@ -110,13 +110,13 @@ function renderStateAwareKnowledgePromptSection(items: StateAwareKnowledgeBundle
 }
 
 function isFactualItineraryPremise(item: StateAwareKnowledgeBundleItem) {
-  return item.knowledgeState !== "conflicted" && item.knowledgeState !== "superseded" && item.verificationState !== "failed";
+  return item.knowledgeState !== "conflicted" && item.verificationRequirement !== "failed";
 }
 
 function formatKnowledgeItem(index: number, item: StateAwareKnowledgeBundleItem) {
   const lines = [
     `${index}. cardId=${formatPromptValue(item.cardId)}; contentVersion=${item.contentVersion}; fact=${formatPromptValue(item.fact)}; type=${formatPromptValue(item.type)}`,
-    `summary=${formatPromptValue(item.summary)}; confidence=${formatPromptValue(item.confidence)}; freshnessSensitive=${item.freshnessSensitive}; knowledgeState=${formatPromptValue(item.knowledgeState)}; verificationState=${formatPromptValue(item.verificationState)}; usePolicy=${formatPromptValue(item.usePolicy)}`,
+    `summary=${formatPromptValue(item.summary)}; confidence=${formatPromptValue(item.confidence)}; freshnessSensitive=${item.freshnessSensitive}; knowledgeState=${formatPromptValue(item.knowledgeState)}; verificationRequirement=${formatPromptValue(item.verificationRequirement)}; usePolicy=${formatPromptValue(item.usePolicy)}`,
   ];
   lines.push(`policyInstruction=${formatPromptValue(getPolicyInstruction(item))}`);
   const location = [item.locationName ? `location=${formatPromptValue(item.locationName)}` : null, item.routeSegment ? `route=${formatPromptValue(item.routeSegment)}` : null].filter(Boolean).join("; ");

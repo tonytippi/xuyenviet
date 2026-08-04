@@ -32,8 +32,6 @@ export type AvailableAssistantMessageProvenanceItem = {
   citedInAnswer: boolean;
   retrievalScore: number | null;
   freshnessSensitive: boolean;
-  knowledgeState?: "community_observation" | "community_pattern" | "conditional" | "uncertain" | "conflicted" | "confirmed" | "superseded" | null;
-  verificationState?: "not_required" | "required" | "corroborated" | "failed" | null;
   usePolicy?: "contextual_use" | "caveat_only" | "do_not_use" | null;
   conditions?: string[];
   evidence?: Array<{
@@ -141,8 +139,6 @@ export function formatAssistantMessageProvenance(rows: AssistantProvenanceRow[])
         citedInAnswer: row.citedInAnswer,
         retrievalScore: row.retrievalScore,
         freshnessSensitive: snapshot.freshnessSensitive === true || isFreshnessSensitiveWebTrigger(snapshot.triggerReason),
-        knowledgeState: getKnowledgeState(snapshot.knowledgeState),
-        verificationState: getVerificationState(snapshot.verificationState),
         usePolicy: getUsePolicy(snapshot.usePolicy),
         conditions: getBoundedStrings(snapshot.conditions),
         evidence: getTravelerEvidence(snapshot.evidence),
@@ -192,7 +188,7 @@ function buildProvenanceRows({
       sourceReferenceType: "knowledge_card",
       retrievalScore: result.score,
       sourceType: result.type,
-        verificationStatus: result.verificationState === "required" || result.evidence.some((evidence) => evidence.verificationStatus === "unverified") ? "unverified" : "verified",
+        verificationStatus: result.verificationRequirement === "operator_required" || result.evidence.some((evidence) => evidence.verificationStatus === "unverified") ? "unverified" : "verified",
       usedInPrompt: promptUsage?.knowledgeCardIds.includes(result.cardId) ?? false,
       sourceSnapshot: buildStateAwareKnowledgeSnapshot(result),
     }));
@@ -258,8 +254,6 @@ function buildStateAwareKnowledgeSnapshot(result: StateAwareKnowledgeBundleItem)
     conditions: result.conditions,
     confidence: result.confidence,
     freshnessSensitive: result.freshnessSensitive,
-    knowledgeState: result.knowledgeState,
-    verificationState: result.verificationState,
     usePolicy: result.usePolicy,
     evidence: result.evidence.map((evidence) => ({
       evidenceId: evidence.evidenceId,
@@ -391,22 +385,6 @@ function getSafeWebTitle(value: string) {
 function isFacebookHost(hostname: string) {
   const normalized = hostname.toLowerCase().replace(/\.+$/, "");
   return normalized === "facebook.com" || normalized.endsWith(".facebook.com") || normalized === "fb.com" || normalized.endsWith(".fb.com") || normalized === "fb.me" || normalized.endsWith(".fb.me") || normalized === "fb.watch" || normalized.endsWith(".fb.watch");
-}
-
-function getKnowledgeState(value: unknown): AvailableAssistantMessageProvenanceItem["knowledgeState"] {
-  if (value === "verified_fact") {
-    return "confirmed";
-  }
-
-  return value === "community_observation" || value === "community_pattern" || value === "conditional" || value === "uncertain" || value === "conflicted" || value === "confirmed" || value === "superseded" ? value : null;
-}
-
-function getVerificationState(value: unknown): AvailableAssistantMessageProvenanceItem["verificationState"] {
-  if (value === "verified") {
-    return "corroborated";
-  }
-
-  return value === "not_required" || value === "required" || value === "corroborated" || value === "failed" ? value : null;
 }
 
 function getUsePolicy(value: unknown): AvailableAssistantMessageProvenanceItem["usePolicy"] {

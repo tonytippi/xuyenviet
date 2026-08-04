@@ -140,3 +140,6 @@
 - source_spec: `spec-14-5-retire-authjs-bff-runtime-and-legacy-transport.md`
   summary: Prove the API/session cookie policy for any deployed cross-site traveler-to-API topology.
   evidence: Browser sessions use SameSite=Lax by the approved same-site ingress design; a cross-site deployment needs explicit cookie and credentialed-fetch evidence, which Story 14.6 owns.
+- source_spec: `spec-15-1-establish-target-lifecycle-schema.md`
+  summary: Recover expired processing candidates so they become claimable or terminal without blocking job completion.
+  evidence: Story 15.1 establishes target candidate processing states and preserves worker lease fields, but expiry recovery is technical job/candidate behavior explicitly owned by Story 15.2.

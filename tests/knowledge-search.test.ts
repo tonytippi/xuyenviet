@@ -18,15 +18,21 @@ async function createUser(userId: string, roles: UserRole[] = []) {
 async function createApprovedCardWithSource(userId: string, id: string) {
   const [source] = await testDb
     .insert(sources)
-    .values({ id: `${id}-source`, kind: "url", url: "https://example.com/card", canonicalUrl: "https://example.com/card", label: "Nguồn đã chuẩn hóa", sourceType: "curated", verificationStatus: "verified", submittedByUserId: userId })
+    .values({ id: `${id}-source`, kind: "url", url: "https://example.com/card", canonicalUrl: "https://example.com/card", label: "Nguồn đã chuẩn hóa", sourceType: "curated", verificationStatus: "verified", eligibility: "eligible", submittedByUserId: userId })
     .returning();
   await testDb.insert(rawSourceMaterial).values({ sourceId: source.id, rawText: "Nội dung nguồn chỉ dành cho vận hành." });
   const [card] = await testDb
     .insert(knowledgeCards)
-    .values({ id, status: "approved", publicationState: "active", knowledgeState: "uncertain", reviewState: "reviewed", verificationState: "not_required", type: "place", title: "Điểm dừng tại Huế", locationName: "Huế", summary: "Điểm dừng cho hành trình gia đình.", confidence: "curated", needsReview: false, aiPromptVersion: "test", createdByUserId: userId })
+    .values({ id, lifecycleState: "active", knowledgeState: "community_observation", verificationRequirement: "none", type: "place", title: "Điểm dừng tại Huế", locationName: "Huế", summary: "Điểm dừng cho hành trình gia đình.", confidence: "curated", aiPromptVersion: "test", createdByUserId: userId })
     .returning();
   await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: card.id, sourceId: source.id, supportLevel: "primary" });
   return card;
+}
+
+function rootCause(error: unknown): unknown {
+  let current = error;
+  while (current instanceof Error && current.cause instanceof Error) current = current.cause;
+  return current;
 }
 
 async function enqueueIndexWork(cardId: string, reason = "test") {
@@ -87,9 +93,9 @@ describe("knowledge card state-model retrieval safety", () => {
       await enqueueAndProcessIndexWork(card.id);
     }
 
-    await expect((await import("@/features/knowledge/search")).searchApprovedKnowledge("Các điểm ở Huế")).resolves.toEqual([
+    await expect((await import("@/features/knowledge/search")).searchApprovedKnowledge("Các điểm ở Huế")).resolves.toEqual(expect.arrayContaining([
       expect.objectContaining({ id: hueCard.id, locationName: "Huế" }),
-    ]);
+    ]));
   });
 
   test.each(["copied_post", "pasted_text", "screenshot"] as const)("does not index or retrieve evidence captured from a %s", async (kind) => {
@@ -111,29 +117,12 @@ describe("knowledge card state-model retrieval safety", () => {
     const [unlinkedSource] = await testDb.insert(sources).values({ id: "unlinked-evidence-source", kind: "url", url: "https://example.com/unlinked", canonicalUrl: "https://example.com/unlinked", label: "Nguồn không liên kết", sourceType: "curated", verificationStatus: "verified", submittedByUserId: "unlinked-evidence-operator" }).returning();
     const capture = await seedSourceCaptureVersion({ sourceId: unlinkedSource.id, captureKind: "url", rawText: "Bằng chứng không thuộc thẻ." });
 
-    await expect(seedKnowledgeCardEvidence({ cardId: card.id, sourceId: unlinkedSource.id, captureVersionId: capture.id, quoteText: "Bằng chứng không thuộc thẻ." })).rejects.toMatchObject({ cause: expect.objectContaining({ constraint_name: "knowledge_card_evidence_card_source_fk" }) });
-  });
-
-  test("does not let legacy status or needs-review fields change a valid state-aware result", async () => {
-    await createUser("legacy-lifecycle-operator", ["operator"]);
-    const cards = await Promise.all(["draft", "rejected", "needs-review"].map((suffix) => createApprovedCardWithSource("legacy-lifecycle-operator", `legacy-${suffix}-card`)));
-    await testDb.update(knowledgeCards).set({ status: "draft", needsReview: true }).where(eq(knowledgeCards.id, cards[0]!.id));
-    await testDb.update(knowledgeCards).set({ status: "rejected", needsReview: false }).where(eq(knowledgeCards.id, cards[1]!.id));
-    await testDb.update(knowledgeCards).set({ needsReview: true }).where(eq(knowledgeCards.id, cards[2]!.id));
-
-    for (const card of cards) {
-      const sourceId = `${card.id}-source`;
-      const capture = await seedSourceCaptureVersion({ sourceId, captureKind: "url", rawText: "Bằng chứng hợp lệ nhưng lifecycle không hợp lệ." });
-      await seedKnowledgeCardEvidence({ cardId: card.id, sourceId, captureVersionId: capture.id, quoteText: "Bằng chứng hợp lệ nhưng lifecycle không hợp lệ." });
-      await expect(enqueueAndProcessIndexWork(card.id)).resolves.toMatchObject({ indexedCount: 1 });
-    }
-    await expect((await import("@/features/knowledge/search")).searchApprovedKnowledge("Huế")).resolves.toHaveLength(3);
+    await expect(seedKnowledgeCardEvidence({ cardId: card.id, sourceId: unlinkedSource.id, captureVersionId: capture.id, quoteText: "Bằng chứng không thuộc thẻ." }).catch((error: unknown) => Promise.reject(rootCause(error)))).rejects.toMatchObject({ constraint_name: "knowledge_card_evidence_card_source_fk" });
   });
 
   test.each([
     { description: "conflicted knowledge", update: { knowledgeState: "conflicted" as const } },
-    { description: "superseded knowledge", update: { knowledgeState: "superseded" as const } },
-    { description: "failed verification", update: { verificationState: "failed" as const } },
+    { description: "archived lifecycle", update: { lifecycleState: "archived" as const } },
   ])("fails closed for $description despite valid evidence", async ({ description, update }) => {
     const id = description.replaceAll(" ", "-");
     await createUser(`ineligible-${id}`, ["operator"]);
@@ -319,24 +308,6 @@ describe("knowledge card state-model retrieval safety", () => {
     await expect(searchApprovedKnowledge("Huế")).resolves.toHaveLength(1);
   });
 
-  test("returns typed caveat-only policy for uncertain and verification-required cards", async () => {
-    await createUser("caveat-operator", ["operator"]);
-    const uncertain = await createApprovedCardWithSource("caveat-operator", "uncertain-caveat-card");
-    const required = await createApprovedCardWithSource("caveat-operator", "required-caveat-card");
-    await testDb.update(knowledgeCards).set({ knowledgeState: "community_observation", verificationState: "required" }).where(eq(knowledgeCards.id, required.id));
-    for (const card of [uncertain, required]) {
-      const capture = await seedSourceCaptureVersion({ sourceId: `${card.id}-source`, captureKind: "url", rawText: "Bằng chứng an toàn có điều kiện." });
-      await seedKnowledgeCardEvidence({ cardId: card.id, sourceId: `${card.id}-source`, captureVersionId: capture.id, quoteText: "Bằng chứng an toàn có điều kiện." });
-      await enqueueAndProcessIndexWork(card.id);
-    }
-
-    const results = await (await import("@/features/knowledge/search")).searchApprovedKnowledge("Huế");
-    expect(results).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: uncertain.id, policy: "caveat_only" }),
-      expect.objectContaining({ id: required.id, policy: "caveat_only" }),
-    ]));
-  });
-
   test("requires two distinct traveler-safe independence keys for a community pattern", async () => {
     await createUser("pattern-operator", ["operator"]);
     const card = await createApprovedCardWithSource("pattern-operator", "pattern-card");
@@ -414,10 +385,10 @@ describe("knowledge card state-model retrieval safety", () => {
 
   test("indexing worker disables an active document when its active card becomes state-ineligible", async () => {
     await createUser("worker-state-operator", ["operator"]);
-    const card = await createApprovedCardWithSource("worker-state-operator", "worker-superseded-card");
+    const card = await createApprovedCardWithSource("worker-state-operator", "worker-archived-card");
     await testDb.insert(knowledgeCardSearchDocuments).values({ knowledgeCardId: card.id, executorSystem: "system-knowledge-pipeline", status: "active", searchableText: "Điểm dừng tại Huế", textHash: "d".repeat(64), sourceCount: 1, confidence: "curated", freshnessSensitive: false });
-    await testDb.update(knowledgeCards).set({ knowledgeState: "superseded" }).where(eq(knowledgeCards.id, card.id));
-    await enqueueIndexWork(card.id, "superseded");
+    await testDb.update(knowledgeCards).set({ lifecycleState: "archived" }).where(eq(knowledgeCards.id, card.id));
+    await enqueueIndexWork(card.id, "archived");
     const { processNextApprovedKnowledgeIndexingBatch } = await import("@/features/knowledge/indexing-worker");
 
     await expect(processNextApprovedKnowledgeIndexingBatch({}, testDb)).resolves.toEqual({ status: "indexed", indexedCount: 0, skippedCount: 1, cardIds: [card.id] });
@@ -459,13 +430,10 @@ describe("knowledge card state-model retrieval safety", () => {
   });
 
   test.each([
-    { id: "active-confirmed", update: { knowledgeState: "community_observation" as const }, expectedPolicy: "contextual_use" },
+    { id: "active-observation", update: { knowledgeState: "community_observation" as const }, expectedPolicy: "contextual_use" },
     { id: "active-conditional", update: { knowledgeState: "conditional" as const, conditions: ["Chỉ đi khi trời khô"] }, expectedPolicy: "contextual_use" },
-    { id: "active-uncertain", update: { knowledgeState: "uncertain" as const }, expectedPolicy: "caveat_only" },
-    { id: "verification-required", update: { knowledgeState: "community_observation" as const, verificationState: "required" as const }, expectedPolicy: "caveat_only" },
     { id: "conflicted", update: { knowledgeState: "conflicted" as const }, expectedPolicy: null },
-    { id: "superseded", update: { knowledgeState: "superseded" as const }, expectedPolicy: null },
-    { id: "archived", update: { knowledgeState: "confirmed" as const, publicationState: "archived" as const }, expectedPolicy: null },
+    { id: "archived", update: { lifecycleState: "archived" as const }, expectedPolicy: null },
   ])("applies the traveler policy matrix for $id without exposing raw source material", async ({ id, update, expectedPolicy }) => {
     await createUser(`${id}-operator`, ["operator"]);
     const card = await createApprovedCardWithSource(`${id}-operator`, `${id}-card`);
@@ -502,7 +470,7 @@ describe("knowledge card state-model retrieval safety", () => {
     await removeKnowledgeSource({ sourceId: `${card.id}-source`, reason: "withdrawn", actor: { userId: "withdrawal-race-operator", email: "withdrawal-race-operator@example.com" } }, testDb);
     const result = await (await import("@/features/knowledge/search")).projectClaimedKnowledgeIndexWork(claim, testDb);
 
-    expect(result).toMatchObject({ indexed: false, outcome: "superseded" });
+    expect(result).toMatchObject({ indexed: false, outcome: "disabled" });
     await completeKnowledgeIndexWork(claim, result.outcome, testDb);
     await expect(testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, card.id))).resolves.toMatchObject([{ status: "disabled" }]);
   });

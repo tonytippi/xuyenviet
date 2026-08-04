@@ -55,20 +55,14 @@ export type SourceEligibility = (typeof sourceEligibilityValues)[number];
 export const sourceRemovalReasonValues = ["withdrawn", "inaccessible", "removed"] as const;
 export type SourceRemovalReason = (typeof sourceRemovalReasonValues)[number];
 
-export const knowledgeCardStatusValues = ["draft", "approved", "archived", "rejected", "duplicate", "no_action"] as const;
-export type KnowledgeCardStatus = (typeof knowledgeCardStatusValues)[number];
+export const knowledgeLifecycleStateValues = ["draft", "pending_operator", "active", "suppressed", "archived", "rejected"] as const;
+export type KnowledgeLifecycleState = (typeof knowledgeLifecycleStateValues)[number];
 
-export const knowledgePublicationStateValues = ["active", "suppressed", "archived"] as const;
-export type KnowledgePublicationState = (typeof knowledgePublicationStateValues)[number];
-
-export const knowledgeStateValues = ["community_observation", "community_pattern", "conditional", "uncertain", "conflicted", "confirmed", "superseded"] as const;
+export const knowledgeStateValues = ["community_observation", "community_pattern", "conditional", "conflicted"] as const;
 export type KnowledgeState = (typeof knowledgeStateValues)[number];
 
-export const knowledgeReviewStateValues = ["none", "ai_recommended", "in_review", "reviewed"] as const;
-export type KnowledgeReviewState = (typeof knowledgeReviewStateValues)[number];
-
-export const knowledgeVerificationStateValues = ["not_required", "required", "corroborated", "failed"] as const;
-export type KnowledgeVerificationState = (typeof knowledgeVerificationStateValues)[number];
+export const knowledgeVerificationRequirementValues = ["none", "operator_required", "failed"] as const;
+export type KnowledgeVerificationRequirement = (typeof knowledgeVerificationRequirementValues)[number];
 
 export const knowledgeCardTypeValues = [
   "place",
@@ -153,22 +147,28 @@ export type KnowledgeExtractionJobMode = (typeof knowledgeExtractionJobModeValue
 export const knowledgeExtractionJobStatusValues = ["queued", "running", "succeeded", "failed", "cancelled"] as const;
 export type KnowledgeExtractionJobStatus = (typeof knowledgeExtractionJobStatusValues)[number];
 
-export const knowledgeIngestionStageValues = ["queued", "triaging", "extracting", "judging", "relating", "published", "suppressed", "review_recommended", "verify_first", "failed"] as const;
-export type KnowledgeIngestionStage = (typeof knowledgeIngestionStageValues)[number];
+export const knowledgeIngestionJobStatusValues = ["queued", "running", "completed", "failed"] as const;
+export type KnowledgeIngestionJobStatus = (typeof knowledgeIngestionJobStatusValues)[number];
 
-export const knowledgeIngestionCandidateStageValues = ["queued", "judging", "relating", "published", "suppressed", "review_recommended", "verify_first", "failed"] as const;
-export type KnowledgeIngestionCandidateStage = (typeof knowledgeIngestionCandidateStageValues)[number];
+export const knowledgeIngestionCandidateProcessingStatusValues = ["queued", "processing", "completed", "failed"] as const;
+export type KnowledgeIngestionCandidateProcessingStatus = (typeof knowledgeIngestionCandidateProcessingStatusValues)[number];
 
-export const knowledgeRecommendationStatusValues = ["open", "in_review", "resolved", "superseded"] as const;
+export const knowledgeIngestionCandidateDispositionValues = ["apply", "needs_operator", "discard"] as const;
+export type KnowledgeIngestionCandidateDisposition = (typeof knowledgeIngestionCandidateDispositionValues)[number];
+
+export const knowledgeIngestionCandidateOutcomeReasonCodeValues = ["applied", "verification_required", "weak_evidence", "relation_ambiguous", "missing_context", "conflict", "stale_capture", "policy_rejected"] as const;
+export type KnowledgeIngestionCandidateOutcomeReasonCode = (typeof knowledgeIngestionCandidateOutcomeReasonCodeValues)[number];
+
+export const knowledgeRecommendationStatusValues = ["open", "resolved", "superseded"] as const;
 export type KnowledgeRecommendationStatus = (typeof knowledgeRecommendationStatusValues)[number];
 
-export const knowledgeRecommendationReasonValues = ["risk", "weak_evidence", "freshness", "conflict", "duplicate_risk", "missing_context", "verification", "relation", "sampling"] as const;
-export type KnowledgeRecommendationReason = (typeof knowledgeRecommendationReasonValues)[number];
+export const knowledgeRecommendationWorkTypeValues = ["verification", "relation", "risk", "missing_context", "sampling"] as const;
+export type KnowledgeRecommendationWorkType = (typeof knowledgeRecommendationWorkTypeValues)[number];
 
 export const knowledgeRecommendationActionValues = ["accept_wording", "edit", "promote", "suppress", "restore", "verify", "resolve_relation", "sampling_pass", "sampling_fail"] as const;
 export type KnowledgeRecommendationAction = (typeof knowledgeRecommendationActionValues)[number];
 
-export const knowledgeRecommendationResolutionValues = ["accepted", "edited", "suppressed", "restored", "verified", "relation_resolved", "sampling_passed", "sampling_failed"] as const;
+export const knowledgeRecommendationResolutionValues = ["published_operator_confirmed", "published_community_observation", "suppressed", "edited_and_requeued", "relation_resolved", "sampling_passed", "sampling_failed"] as const;
 export type KnowledgeRecommendationResolution = (typeof knowledgeRecommendationResolutionValues)[number];
 
 export const knowledgeSamplingDispositionReasonValues = ["confirmed", "minor_issue", "insufficient_evidence", "stale_or_changed", "material_error", "safety_risk"] as const;
@@ -582,18 +582,12 @@ export const knowledgeIngestionJobs = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),
     submittedByEmail: text("submitted_by_email").notNull(),
-    stage: text("stage").$type<KnowledgeIngestionStage>().default("queued").notNull(),
-    protocolVersion: integer("protocol_version").default(1).notNull(),
-    rawDiscoveryResponse: text("raw_discovery_response"),
-    discoveredCandidateCount: integer("discovered_candidate_count").default(0).notNull(),
-    terminalCandidateCount: integer("terminal_candidate_count").default(0).notNull(),
-    publishedCandidateCount: integer("published_candidate_count").default(0).notNull(),
-    suppressedCandidateCount: integer("suppressed_candidate_count").default(0).notNull(),
-    reviewRecommendedCandidateCount: integer("review_recommended_candidate_count").default(0).notNull(),
-    verifyFirstCandidateCount: integer("verify_first_candidate_count").default(0).notNull(),
+    status: text("status").$type<KnowledgeIngestionJobStatus>().default("queued").notNull(),
+    discoveryTerminal: boolean("discovery_terminal").default(false).notNull(),
+    candidateCount: integer("candidate_count").default(0).notNull(),
+    completedCandidateCount: integer("completed_candidate_count").default(0).notNull(),
+    needsOperatorCandidateCount: integer("needs_operator_candidate_count").default(0).notNull(),
     failedCandidateCount: integer("failed_candidate_count").default(0).notNull(),
-    invalidCandidateCount: integer("invalid_candidate_count").default(0).notNull(),
-    stageVersion: integer("stage_version").default(1).notNull(),
     attemptCount: integer("attempt_count").default(0).notNull(),
     maxAttempts: integer("max_attempts").default(3).notNull(),
     nextRunAt: timestamp("next_run_at", { mode: "date" }).defaultNow().notNull(),
@@ -610,7 +604,7 @@ export const knowledgeIngestionJobs = pgTable(
   (job) => [
     uniqueIndex("knowledge_ingestion_jobs_capture_version_id_idx").on(job.captureVersionId),
     uniqueIndex("knowledge_ingestion_jobs_id_source_capture_idx").on(job.id, job.sourceId, job.captureVersionId),
-    index("knowledge_ingestion_jobs_claim_queue_idx").on(job.stage, job.nextRunAt, job.createdAt),
+    index("knowledge_ingestion_jobs_claim_queue_idx").on(job.status, job.nextRunAt, job.createdAt),
     index("knowledge_ingestion_jobs_lease_expiry_idx").on(job.leaseExpiresAt).where(sql`${job.leaseExpiresAt} is not null`),
     index("knowledge_ingestion_jobs_source_id_idx").on(job.sourceId),
     foreignKey({
@@ -618,11 +612,8 @@ export const knowledgeIngestionJobs = pgTable(
       foreignColumns: [sourceCaptureVersions.id, sourceCaptureVersions.sourceId],
       name: "knowledge_ingestion_jobs_capture_version_source_fk",
     }).onDelete("restrict"),
-    check("knowledge_ingestion_jobs_stage_check", sql`${job.stage} in ('queued', 'triaging', 'extracting', 'judging', 'relating', 'published', 'suppressed', 'review_recommended', 'verify_first', 'failed')`),
-    check("knowledge_ingestion_jobs_protocol_version_check", sql`${job.protocolVersion} in (1, 2)`),
-    check("knowledge_ingestion_jobs_raw_discovery_response_check", sql`${job.rawDiscoveryResponse} is null or (octet_length(${job.rawDiscoveryResponse}) > 0 and octet_length(${job.rawDiscoveryResponse}) <= 1048576)`),
-    check("knowledge_ingestion_jobs_candidate_counts_check", sql`${job.discoveredCandidateCount} >= 0 and ${job.terminalCandidateCount} >= 0 and ${job.terminalCandidateCount} <= ${job.discoveredCandidateCount} and ${job.publishedCandidateCount} >= 0 and ${job.suppressedCandidateCount} >= 0 and ${job.reviewRecommendedCandidateCount} >= 0 and ${job.verifyFirstCandidateCount} >= 0 and ${job.failedCandidateCount} >= 0 and ${job.invalidCandidateCount} >= 0 and ${job.publishedCandidateCount} + ${job.suppressedCandidateCount} + ${job.reviewRecommendedCandidateCount} + ${job.verifyFirstCandidateCount} + ${job.failedCandidateCount} = ${job.terminalCandidateCount}`),
-    check("knowledge_ingestion_jobs_stage_version_check", sql`${job.stageVersion} >= 1`),
+    check("knowledge_ingestion_jobs_status_check", sql`${job.status} in ('queued', 'running', 'completed', 'failed')`),
+    check("knowledge_ingestion_jobs_candidate_counts_check", sql`${job.candidateCount} >= 0 and ${job.completedCandidateCount} >= 0 and ${job.completedCandidateCount} <= ${job.candidateCount} and ${job.failedCandidateCount} >= 0 and ${job.failedCandidateCount} <= ${job.candidateCount} and ${job.needsOperatorCandidateCount} >= 0 and ${job.needsOperatorCandidateCount} <= ${job.completedCandidateCount}`),
     check("knowledge_ingestion_jobs_attempt_count_check", sql`${job.attemptCount} >= 0 and ${job.attemptCount} <= ${job.maxAttempts}`),
     check("knowledge_ingestion_jobs_max_attempts_check", sql`${job.maxAttempts} between 1 and 10`),
     check("knowledge_ingestion_jobs_submitter_email_check", sql`length(btrim(${job.submittedByEmail})) between 1 and 320`),
@@ -630,8 +621,7 @@ export const knowledgeIngestionJobs = pgTable(
     check("knowledge_ingestion_jobs_requeue_reason_code_check", sql`${job.requeueReasonCode} is null or ${job.requeueReasonCode} ~ '^[a-z0-9_:-]{1,120}$'`),
     check("knowledge_ingestion_jobs_checkpoint_shape_check", sql`${job.checkpoint} is null or (jsonb_typeof(${job.checkpoint}) = 'object' and octet_length(${job.checkpoint}::text) <= 8192)`),
     check("knowledge_ingestion_jobs_claim_shape_check", sql`(${job.claimedBy} is null and ${job.claimedAt} is null and ${job.leaseExpiresAt} is null and ${job.fencingToken} is null) or (${job.claimedBy} is not null and length(btrim(${job.claimedBy})) between 1 and 160 and ${job.claimedAt} is not null and ${job.leaseExpiresAt} > ${job.claimedAt} and ${job.fencingToken} ~ '^[a-f0-9]{64}$')`),
-    check("knowledge_ingestion_jobs_terminal_claim_check", sql`${job.stage} not in ('published', 'suppressed', 'review_recommended', 'verify_first', 'failed') or (${job.claimedBy} is null and ${job.claimedAt} is null and ${job.leaseExpiresAt} is null and ${job.fencingToken} is null)`),
-    check("knowledge_ingestion_jobs_terminal_checkpoint_check", sql`${job.stage} not in ('published', 'suppressed', 'review_recommended', 'verify_first', 'failed') or ${job.checkpoint} is null`),
+    check("knowledge_ingestion_jobs_terminal_claim_check", sql`${job.status} not in ('completed', 'failed') or (${job.claimedBy} is null and ${job.claimedAt} is null and ${job.leaseExpiresAt} is null and ${job.fencingToken} is null)`),
   ],
 );
 
@@ -657,8 +647,8 @@ export const knowledgeIngestionCandidates = pgTable(
     spanEnd: integer("span_end").notNull(),
     extractionModelId: text("extraction_model_id").references(() => aiGatewayModels.id, { onDelete: "set null" }),
     extractionPromptVersion: text("extraction_prompt_version").notNull(),
-    stage: text("stage").$type<KnowledgeIngestionCandidateStage>().default("queued").notNull(),
-    stageVersion: integer("stage_version").default(1).notNull(),
+    processingStatus: text("processing_status").$type<KnowledgeIngestionCandidateProcessingStatus>().default("queued").notNull(),
+    aiDisposition: text("ai_disposition").$type<KnowledgeIngestionCandidateDisposition>(),
     attemptCount: integer("attempt_count").default(0).notNull(),
     maxAttempts: integer("max_attempts").default(3).notNull(),
     nextRunAt: timestamp("next_run_at", { mode: "date" }).defaultNow().notNull(),
@@ -667,7 +657,6 @@ export const knowledgeIngestionCandidates = pgTable(
     leaseExpiresAt: timestamp("lease_expires_at", { mode: "date" }),
     fencingToken: text("fencing_token"),
     outcomeReasonCode: text("outcome_reason_code"),
-    judgeDecision: text("judge_decision"),
     judgmentSummary: text("judgment_summary"),
     scores: jsonb("scores").$type<Record<string, number>>(),
     knowledgeCardId: text("knowledge_card_id").references(() => knowledgeCards.id, { onDelete: "set null" }),
@@ -676,11 +665,11 @@ export const knowledgeIngestionCandidates = pgTable(
   },
   (candidate) => [
     uniqueIndex("knowledge_ingestion_candidates_job_fingerprint_idx").on(candidate.ingestionJobId, candidate.fingerprint),
-    index("knowledge_ingestion_candidates_claim_queue_idx").on(candidate.stage, candidate.nextRunAt, candidate.createdAt),
-    index("knowledge_ingestion_candidates_parent_stage_idx").on(candidate.ingestionJobId, candidate.stage),
+    index("knowledge_ingestion_candidates_claim_queue_idx").on(candidate.processingStatus, candidate.nextRunAt, candidate.createdAt),
+    index("knowledge_ingestion_candidates_parent_processing_status_idx").on(candidate.ingestionJobId, candidate.processingStatus),
     index("knowledge_ingestion_candidates_capture_span_idx").on(candidate.captureVersionId, candidate.spanStart),
     foreignKey({ columns: [candidate.ingestionJobId, candidate.sourceId, candidate.captureVersionId], foreignColumns: [knowledgeIngestionJobs.id, knowledgeIngestionJobs.sourceId, knowledgeIngestionJobs.captureVersionId], name: "knowledge_ingestion_candidates_parent_capture_fk" }).onDelete("cascade"),
-    check("knowledge_ingestion_candidates_stage_check", sql`${candidate.stage} in ('queued', 'judging', 'relating', 'published', 'suppressed', 'review_recommended', 'verify_first', 'failed')`),
+    check("knowledge_ingestion_candidates_processing_status_check", sql`${candidate.processingStatus} in ('queued', 'processing', 'completed', 'failed')`),
     check("knowledge_ingestion_candidates_span_check", sql`${candidate.spanStart} >= 0 and ${candidate.spanEnd} > ${candidate.spanStart}`),
     check("knowledge_ingestion_candidates_safe_text_check", sql`length(btrim(${candidate.title})) between 1 and 160 and length(btrim(${candidate.summary})) between 1 and 1200 and length(btrim(${candidate.extractionPromptVersion})) between 1 and 160`),
     check("knowledge_ingestion_candidates_conditions_check", sql`jsonb_typeof(${candidate.conditions}) = 'array'`),
@@ -688,8 +677,7 @@ export const knowledgeIngestionCandidates = pgTable(
     check("knowledge_ingestion_candidates_tags_check", sql`jsonb_typeof(${candidate.tags}) = 'array'`),
     check("knowledge_ingestion_candidates_attempt_check", sql`${candidate.attemptCount} >= 0 and ${candidate.attemptCount} <= ${candidate.maxAttempts} and ${candidate.maxAttempts} between 1 and 10`),
     check("knowledge_ingestion_candidates_claim_shape_check", sql`(${candidate.claimedBy} is null and ${candidate.claimedAt} is null and ${candidate.leaseExpiresAt} is null and ${candidate.fencingToken} is null) or (${candidate.claimedBy} is not null and ${candidate.claimedAt} is not null and ${candidate.leaseExpiresAt} > ${candidate.claimedAt} and ${candidate.fencingToken} ~ '^[a-f0-9]{64}$')`),
-    check("knowledge_ingestion_candidates_outcome_reason_code_check", sql`${candidate.outcomeReasonCode} is null or ${candidate.outcomeReasonCode} in ('invalid_discovery_candidate', 'candidate_invalid_structure', 'candidate_missing_required_fields', 'candidate_sensitive_content', 'candidate_unsafe_raw_overlap', 'candidate_evidence_mismatch', 'candidate_insufficient_travel_context', 'judge_evidence_not_grounded', 'judge_suppressed', 'judge_below_quality_threshold', 'stale_or_deleted_capture', 'judge_model_unavailable', 'judge_model_not_independent', 'judge_provider_failed', 'relation_provider_failed', 'relation_ambiguous', 'relation_invalid', 'stale_relation_target', 'attach_condition_mismatch', 'conflict_condition_mismatch', 'retry_exhausted')`),
-    check("knowledge_ingestion_candidates_judge_decision_check", sql`${candidate.judgeDecision} is null or ${candidate.judgeDecision} in ('publish', 'review_recommended', 'verify_first', 'suppress')`),
+    check("knowledge_ingestion_candidates_decision_shape_check", sql`(${candidate.processingStatus} = 'completed' and ${candidate.aiDisposition} is not null and ${candidate.aiDisposition} in ('apply', 'needs_operator', 'discard') and ${candidate.outcomeReasonCode} is not null and ${candidate.outcomeReasonCode} in ('applied', 'verification_required', 'weak_evidence', 'relation_ambiguous', 'missing_context', 'conflict', 'stale_capture', 'policy_rejected') and length(btrim(${candidate.outcomeReasonCode})) > 0) or (${candidate.processingStatus} in ('queued', 'processing', 'failed') and ${candidate.aiDisposition} is null and ${candidate.outcomeReasonCode} is null)`),
   ],
 );
 
@@ -1280,11 +1268,9 @@ export const knowledgeCards = pgTable(
     id: text("id")
       .primaryKey()
       .$defaultFn(() => crypto.randomUUID()),
-    status: text("status").$type<KnowledgeCardStatus>().default("draft").notNull(),
-    publicationState: text("publication_state").$type<KnowledgePublicationState>().default("suppressed").notNull(),
-    knowledgeState: text("knowledge_state").$type<KnowledgeState>().default("uncertain").notNull(),
-    reviewState: text("review_state").$type<KnowledgeReviewState>().default("ai_recommended").notNull(),
-    verificationState: text("verification_state").$type<KnowledgeVerificationState>().default("not_required").notNull(),
+    lifecycleState: text("lifecycle_state").$type<KnowledgeLifecycleState>().default("draft").notNull(),
+    knowledgeState: text("knowledge_state").$type<KnowledgeState>().default("community_observation").notNull(),
+    verificationRequirement: text("verification_requirement").$type<KnowledgeVerificationRequirement>().default("none").notNull(),
     contentVersion: integer("content_version").default(1).notNull(),
     evidenceSetRevision: integer("evidence_set_revision").default(1).notNull(),
     conditions: jsonb("conditions").$type<string[]>().default([]).notNull(),
@@ -1298,7 +1284,6 @@ export const knowledgeCards = pgTable(
     tags: jsonb("tags").$type<string[]>().default([]).notNull(),
     confidence: text("confidence").$type<KnowledgeConfidence>().default("unverified").notNull(),
     freshnessSensitive: boolean("freshness_sensitive").default(false).notNull(),
-    needsReview: boolean("needs_review").default(true).notNull(),
     aiPromptVersion: text("ai_prompt_version").notNull(),
     aiGatewayModelId: text("ai_gateway_model_id").references(() => aiGatewayModels.id, { onDelete: "set null" }),
     createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "restrict" }),
@@ -1307,17 +1292,16 @@ export const knowledgeCards = pgTable(
     updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
   },
   (card) => [
-    index("knowledge_cards_status_created_at_idx").on(card.status, card.createdAt),
-    index("knowledge_cards_publication_state_idx").on(card.publicationState, card.updatedAt),
-    index("knowledge_cards_type_status_idx").on(card.type, card.status),
+    index("knowledge_cards_lifecycle_state_created_at_idx").on(card.lifecycleState, card.createdAt),
+    index("knowledge_cards_lifecycle_state_idx").on(card.lifecycleState, card.updatedAt),
+    index("knowledge_cards_type_lifecycle_state_idx").on(card.type, card.lifecycleState),
     index("knowledge_cards_confidence_idx").on(card.confidence),
     index("knowledge_cards_created_by_user_id_idx").on(card.createdByUserId),
     index("knowledge_cards_executor_system_updated_at_idx").on(card.executorSystem, card.updatedAt),
-    check("knowledge_cards_status_check", sql`${card.status} in ('draft', 'approved', 'archived', 'rejected', 'duplicate', 'no_action')`),
-    check("knowledge_cards_publication_state_check", sql`${card.publicationState} in ('active', 'suppressed', 'archived')`),
-    check("knowledge_cards_knowledge_state_check", sql`${card.knowledgeState} in ('community_observation', 'community_pattern', 'conditional', 'uncertain', 'conflicted', 'confirmed', 'superseded')`),
-    check("knowledge_cards_review_state_check", sql`${card.reviewState} in ('none', 'ai_recommended', 'in_review', 'reviewed')`),
-    check("knowledge_cards_verification_state_check", sql`${card.verificationState} in ('not_required', 'required', 'corroborated', 'failed')`),
+    check("knowledge_cards_lifecycle_state_check", sql`${card.lifecycleState} in ('draft', 'pending_operator', 'active', 'suppressed', 'archived', 'rejected')`),
+    check("knowledge_cards_knowledge_state_check", sql`${card.knowledgeState} in ('community_observation', 'community_pattern', 'conditional', 'conflicted')`),
+    check("knowledge_cards_verification_requirement_check", sql`${card.verificationRequirement} in ('none', 'operator_required', 'failed')`),
+    check("knowledge_cards_active_verification_check", sql`${card.lifecycleState} <> 'active' or ${card.verificationRequirement} = 'none'`),
     check("knowledge_cards_content_version_check", sql`${card.contentVersion} >= 1`),
     check("knowledge_cards_evidence_set_revision_check", sql`${card.evidenceSetRevision} >= 1`),
     check("knowledge_cards_conditions_array_check", sql`jsonb_typeof(${card.conditions}) = 'array'`),
@@ -1334,7 +1318,6 @@ export const knowledgeCards = pgTable(
     check("knowledge_cards_details_object_check", sql`jsonb_typeof(${card.practicalDetails}) = 'object'`),
     check("knowledge_cards_tags_array_check", sql`jsonb_typeof(${card.tags}) = 'array'`),
     check("knowledge_cards_executor_shape_check", sql`${card.createdByUserId} is not null or (${card.executorSystem} is not null and length(btrim(${card.executorSystem})) between 1 and 160)`),
-    check("knowledge_cards_draft_review_check", sql`${card.status} <> 'draft' or ${card.needsReview} = true`),
   ],
 );
 
@@ -1539,83 +1522,51 @@ export const knowledgeRecommendations = pgTable(
     contentVersion: integer("content_version").notNull(),
     evidenceSetRevision: integer("evidence_set_revision").notNull(),
     status: text("status").$type<KnowledgeRecommendationStatus>().default("open").notNull(),
-    reason: text("reason").$type<KnowledgeRecommendationReason>().notNull(),
+    workType: text("work_type").$type<KnowledgeRecommendationWorkType>().notNull(),
     priority: integer("priority").notNull(),
     policyId: text("policy_id").references(() => knowledgeSamplingPolicies.id, { onDelete: "restrict" }),
     policySnapshot: jsonb("policy_snapshot").$type<Record<string, unknown>>().default({}).notNull(),
-    requiredForSampling: boolean("required_for_sampling").default(false).notNull(),
     executorSystem: text("executor_system"),
     resolution: text("resolution").$type<KnowledgeRecommendationResolution>(),
-    samplingDispositionReason: text("sampling_disposition_reason").$type<KnowledgeSamplingDispositionReason>(),
-    samplingRationale: text("sampling_rationale"),
     resolvedByUserId: text("resolved_by_user_id").references(() => users.id, { onDelete: "restrict" }),
     resolvedAt: timestamp("resolved_at", { mode: "date" }),
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
   },
   (recommendation) => [
-    uniqueIndex("knowledge_recommendations_open_version_reason_idx").on(recommendation.knowledgeCardId, recommendation.contentVersion, recommendation.evidenceSetRevision, recommendation.reason).where(sql`${recommendation.status} in ('open', 'in_review')`),
-    index("knowledge_recommendations_open_queue_idx").on(recommendation.status, recommendation.priority, recommendation.createdAt).where(sql`${recommendation.status} in ('open', 'in_review')`),
+    uniqueIndex("knowledge_open_operator_work_per_version").on(recommendation.knowledgeCardId, recommendation.contentVersion, recommendation.evidenceSetRevision, recommendation.workType).where(sql`${recommendation.status} = 'open'`),
+    uniqueIndex("knowledge_open_primary_work_per_card_version").on(recommendation.knowledgeCardId, recommendation.contentVersion, recommendation.evidenceSetRevision).where(sql`${recommendation.status} = 'open' and ${recommendation.workType} in ('verification', 'relation', 'risk', 'missing_context')`),
+    index("knowledge_recommendations_open_queue_idx").on(recommendation.status, recommendation.priority, recommendation.createdAt).where(sql`${recommendation.status} = 'open'`),
     index("knowledge_recommendations_card_version_idx").on(recommendation.knowledgeCardId, recommendation.contentVersion, recommendation.evidenceSetRevision),
     index("knowledge_recommendations_executor_system_created_at_idx").on(recommendation.executorSystem, recommendation.createdAt),
-    index("knowledge_recommendations_policy_sampling_diagnostics_idx").on(recommendation.policyId, recommendation.reason, recommendation.knowledgeCardId, recommendation.contentVersion, recommendation.evidenceSetRevision, recommendation.resolvedAt.desc(), recommendation.updatedAt.desc(), recommendation.id.desc()),
+    index("knowledge_recommendations_policy_sampling_diagnostics_idx").on(recommendation.policyId, recommendation.workType, recommendation.knowledgeCardId, recommendation.contentVersion, recommendation.evidenceSetRevision, recommendation.resolvedAt.desc(), recommendation.updatedAt.desc(), recommendation.id.desc()),
     check("knowledge_recommendations_versions_check", sql`${recommendation.contentVersion} >= 1 and ${recommendation.evidenceSetRevision} >= 1`),
-    check("knowledge_recommendations_status_check", sql`${recommendation.status} in ('open', 'in_review', 'resolved', 'superseded')`),
-    check("knowledge_recommendations_reason_check", sql`${recommendation.reason} in ('risk', 'weak_evidence', 'freshness', 'conflict', 'duplicate_risk', 'missing_context', 'verification', 'relation', 'sampling')`),
+    check("knowledge_recommendations_status_check", sql`${recommendation.status} in ('open', 'resolved', 'superseded')`),
+    check("knowledge_recommendations_work_type_check", sql`${recommendation.workType} in ('verification', 'relation', 'risk', 'missing_context', 'sampling')`),
     check("knowledge_recommendations_priority_check", sql`${recommendation.priority} between 1 and 100`),
     check("knowledge_recommendations_policy_snapshot_check", sql`jsonb_typeof(${recommendation.policySnapshot}) = 'object' and octet_length(${recommendation.policySnapshot}::text) <= 1024`),
-    check("knowledge_recommendations_required_sampling_check", sql`${recommendation.requiredForSampling} = false or ${recommendation.reason} = 'sampling'`),
     check("knowledge_recommendations_executor_system_check", sql`${recommendation.executorSystem} is null or length(btrim(${recommendation.executorSystem})) between 1 and 160`),
-    check("knowledge_recommendations_resolution_check", sql`${recommendation.resolution} is null or ${recommendation.resolution} in ('accepted', 'edited', 'suppressed', 'restored', 'verified', 'relation_resolved', 'sampling_passed', 'sampling_failed')`),
-    check("knowledge_recommendations_sampling_reason_check", sql`${recommendation.samplingDispositionReason} is null or ${recommendation.samplingDispositionReason} in ('confirmed', 'minor_issue', 'insufficient_evidence', 'stale_or_changed', 'material_error', 'safety_risk')`),
-    check("knowledge_recommendations_sampling_rationale_check", sql`${recommendation.samplingRationale} is null or length(btrim(${recommendation.samplingRationale})) between 1 and 500`),
-    check("knowledge_recommendations_sampling_disposition_shape_check", sql`(${recommendation.resolution} in ('sampling_passed', 'sampling_failed') and ${recommendation.samplingDispositionReason} is not null) or (${recommendation.resolution} is null or ${recommendation.resolution} not in ('sampling_passed', 'sampling_failed')) and ${recommendation.samplingDispositionReason} is null and ${recommendation.samplingRationale} is null`),
-    check("knowledge_recommendations_resolved_shape_check", sql`(${recommendation.status} in ('open', 'in_review') and ${recommendation.resolution} is null and ${recommendation.resolvedByUserId} is null and ${recommendation.resolvedAt} is null) or (${recommendation.status} in ('resolved', 'superseded') and ${recommendation.resolution} is not null and ${recommendation.resolvedByUserId} is not null and ${recommendation.executorSystem} is null and ${recommendation.resolvedAt} is not null) or (${recommendation.status} = 'superseded' and ${recommendation.resolution} is not null and ${recommendation.resolvedByUserId} is null and ${recommendation.executorSystem} is not null and length(btrim(${recommendation.executorSystem})) between 1 and 160 and ${recommendation.resolvedAt} is not null)`),
+    check("knowledge_recommendations_resolution_check", sql`${recommendation.resolution} is null or ${recommendation.resolution} in ('published_operator_confirmed', 'published_community_observation', 'suppressed', 'edited_and_requeued', 'relation_resolved', 'sampling_passed', 'sampling_failed')`),
+    check("knowledge_recommendations_resolved_shape_check", sql`(${recommendation.status} = 'open' and ${recommendation.resolution} is null and ${recommendation.resolvedByUserId} is null and ${recommendation.resolvedAt} is null) or (${recommendation.status} in ('resolved', 'superseded') and ${recommendation.resolution} is not null and ${recommendation.resolvedAt} is not null)`),
   ],
 );
 
-export const knowledgeSamplingCandidateLedger = pgTable(
-  "knowledge_sampling_candidate_ledger",
+export const knowledgeSamplingObligations = pgTable(
+  "knowledge_sampling_obligations",
   {
     id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
-    terminalIngestionJobId: text("terminal_ingestion_job_id").notNull().references(() => knowledgeIngestionJobs.id, { onDelete: "restrict" }),
-    policyId: text("policy_id").notNull().references(() => knowledgeSamplingPolicies.id, { onDelete: "restrict" }),
-    knowledgeCardId: text("knowledge_card_id").notNull().references(() => knowledgeCards.id, { onDelete: "restrict" }),
+    candidateId: text("candidate_id").notNull().references(() => knowledgeIngestionCandidates.id, { onDelete: "restrict" }),
+    knowledgeCardId: text("knowledge_card_id").references(() => knowledgeCards.id, { onDelete: "restrict" }),
     contentVersion: integer("content_version").notNull(),
     evidenceSetRevision: integer("evidence_set_revision").notNull(),
-    corridorBucket: text("corridor_bucket").notNull(),
-    outsideCorridor: boolean("outside_corridor").notNull(),
-    selectedForSampling: boolean("selected_for_sampling").notNull(),
-    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
-  },
-  (entry) => [
-    uniqueIndex("knowledge_sampling_candidate_ledger_terminal_fence_idx").on(entry.terminalIngestionJobId, entry.knowledgeCardId, entry.contentVersion, entry.evidenceSetRevision),
-    uniqueIndex("knowledge_sampling_candidate_ledger_policy_fence_idx").on(entry.policyId, entry.knowledgeCardId, entry.contentVersion, entry.evidenceSetRevision),
-    index("knowledge_sampling_candidate_ledger_policy_idx").on(entry.policyId),
-    check("knowledge_sampling_candidate_ledger_versions_check", sql`${entry.contentVersion} >= 1 and ${entry.evidenceSetRevision} >= 1`),
-    check("knowledge_sampling_candidate_ledger_corridor_shape_check", sql`(${entry.corridorBucket} <> '' and ${entry.outsideCorridor} = false) or (${entry.corridorBucket} = '' and ${entry.outsideCorridor} = true)`),
-  ],
-);
-
-export const knowledgeVerifyFirstSamplingObligations = pgTable(
-  "knowledge_verify_first_sampling_obligations",
-  {
-    id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
-    terminalIngestionJobId: text("terminal_ingestion_job_id").notNull().references(() => knowledgeIngestionJobs.id, { onDelete: "restrict" }),
-    policyId: text("policy_id").notNull().references(() => knowledgeSamplingPolicies.id, { onDelete: "restrict" }),
-    knowledgeCardId: text("knowledge_card_id").notNull().references(() => knowledgeCards.id, { onDelete: "restrict" }),
-    contentVersion: integer("content_version").notNull(),
-    evidenceSetRevision: integer("evidence_set_revision").notNull(),
-    corridorBucket: text("corridor_bucket").notNull(),
-    outsideCorridor: boolean("outside_corridor").notNull(),
+    samplingDisposition: text("sampling_disposition").$type<Extract<KnowledgeRecommendationResolution, "sampling_passed" | "sampling_failed">>(),
+    sampledAt: timestamp("sampled_at", { mode: "date" }),
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
   },
   (obligation) => [
-    uniqueIndex("knowledge_verify_first_sampling_obligations_terminal_fence_idx").on(obligation.terminalIngestionJobId, obligation.knowledgeCardId, obligation.contentVersion, obligation.evidenceSetRevision),
-    uniqueIndex("knowledge_verify_first_sampling_obligations_policy_fence_idx").on(obligation.policyId, obligation.knowledgeCardId, obligation.contentVersion, obligation.evidenceSetRevision),
-    index("knowledge_verify_first_sampling_obligations_policy_idx").on(obligation.policyId),
-    check("knowledge_verify_first_sampling_obligations_versions_check", sql`${obligation.contentVersion} >= 1 and ${obligation.evidenceSetRevision} >= 1`),
-    check("knowledge_verify_first_sampling_obligations_corridor_shape_check", sql`(${obligation.corridorBucket} <> '' and ${obligation.outsideCorridor} = false) or (${obligation.corridorBucket} = '' and ${obligation.outsideCorridor} = true)`),
+    uniqueIndex("knowledge_sampling_obligations_candidate_fence_idx").on(obligation.candidateId, obligation.contentVersion, obligation.evidenceSetRevision),
+    check("knowledge_sampling_obligations_versions_check", sql`${obligation.contentVersion} >= 1 and ${obligation.evidenceSetRevision} >= 1`),
+    check("knowledge_sampling_obligations_disposition_shape_check", sql`(${obligation.samplingDisposition} is null and ${obligation.sampledAt} is null) or (${obligation.samplingDisposition} in ('sampling_passed', 'sampling_failed') and ${obligation.sampledAt} is not null)`),
   ],
 );
 
@@ -2233,8 +2184,7 @@ export const schema = {
   knowledgeCardSearchDocuments,
   knowledgeSamplingPolicies,
   knowledgeSamplingCohortMembers,
-  knowledgeSamplingCandidateLedger,
-  knowledgeVerifyFirstSamplingObligations,
+  knowledgeSamplingObligations,
   knowledgeRecommendations,
   knowledgeIndexDirtyMarkers,
   knowledgeIndexBackfillState,

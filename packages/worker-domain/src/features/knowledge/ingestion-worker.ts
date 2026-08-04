@@ -28,11 +28,7 @@ export async function processNextKnowledgeIngestionJob(workerId: string) {
 
 function candidateDisposition(result: Awaited<ReturnType<typeof runKnowledgeIngestionCandidatePipeline>>): WorkerPollObservation["resultCode"] {
   if (!result) return "contended";
-  if ("stage" in result) {
-    if (result.stage === "failed") return "failure";
-    return ["queued", "judging", "relating"].includes(result.stage) ? "retry" : "success";
-  }
-  return "success";
+  return "processingStatus" in result && result.processingStatus === "failed" ? "failure" : "success";
 }
 
 export async function runKnowledgeIngestionWorkerLoop(options: { once?: boolean; workerId?: string; pollIntervalMs?: number; signal?: AbortSignal; onIdle?: (pollIntervalMs: number) => void | Promise<void>; onPollComplete?: () => void | Promise<void>; onObservation?: (observation: WorkerPollObservation) => void | Promise<void> } = {}) {

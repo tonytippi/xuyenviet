@@ -65,16 +65,13 @@ async function approveKnowledgeDraftForActorInTransaction(transaction: ReviewMut
   const [updatedDraft] = await transaction
     .update(knowledgeCards)
     .set({
-      status: "approved",
-      publicationState: "active",
-      knowledgeState: "uncertain",
-      reviewState: "reviewed",
-      verificationState: "not_required",
-      needsReview: false,
+        lifecycleState: "active",
+        knowledgeState: "community_observation",
+        verificationRequirement: "none",
       contentVersion: sql`${knowledgeCards.contentVersion} + 1`,
       updatedAt: new Date(),
     })
-    .where(and(eq(knowledgeCards.id, draftId), eq(knowledgeCards.status, "draft"), eq(knowledgeCards.needsReview, true)))
+    .where(and(eq(knowledgeCards.id, draftId), eq(knowledgeCards.lifecycleState, "draft")))
     .returning({ id: knowledgeCards.id, contentVersion: knowledgeCards.contentVersion, evidenceSetRevision: knowledgeCards.evidenceSetRevision });
 
   if (!updatedDraft) {
@@ -87,8 +84,8 @@ async function approveKnowledgeDraftForActorInTransaction(transaction: ReviewMut
     operation: "approve",
     targetType: "knowledge_draft",
     targetId: draftId,
-    beforeSummary: `Draft before mutation: status=${draft.card.status}; type=${draft.card.type}; confidence=${draft.card.confidence}; needsReview=${draft.card.needsReview}; freshnessSensitive=${draft.card.freshnessSensitive}.`,
-    afterSummary: `Operator approved legacy draft state: status=approved; publicationState=active; knowledgeState=uncertain; retrieval remains blocked until bounded evidence exists; linkedSources=${draft.sources.length}.`,
+    beforeSummary: `Draft before mutation: lifecycleState=${draft.card.lifecycleState}; type=${draft.card.type}; confidence=${draft.card.confidence}; freshnessSensitive=${draft.card.freshnessSensitive}.`,
+    afterSummary: `Operator activated a draft card; lifecycleState=active; verificationRequirement=none; linkedSources=${draft.sources.length}.`,
   }, transaction);
 
   return { draftId };
@@ -106,7 +103,7 @@ async function loadReviewableDraft(db: Pick<ReviewDb, "select">, draftId: string
     throw new KnowledgeDraftApprovalCoreError("Không tìm thấy bản nháp cần duyệt.", "invalid_draft");
   }
 
-  if (draft.card.status !== "draft" || !draft.card.needsReview) {
+  if (draft.card.lifecycleState !== "draft") {
     throw new KnowledgeDraftApprovalCoreError("Bản nháp này không còn trong trạng thái cần duyệt.", "not_reviewable");
   }
 

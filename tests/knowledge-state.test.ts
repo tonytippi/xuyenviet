@@ -3,12 +3,11 @@ import { describe, expect, test } from "vitest";
 import { evaluateKnowledgeTravelerPolicy } from "@/features/knowledge/state";
 
 describe("knowledge traveler policy", () => {
-  test("identifies a known but unsupported knowledge state", () => {
+  test("identifies an invalid target knowledge classification", () => {
     expect(evaluateKnowledgeTravelerPolicy({
-      publicationState: "active",
-      knowledgeState: "confirmed",
-      reviewState: "reviewed",
-      verificationState: "not_required",
+      lifecycleState: "active",
+      knowledgeState: "unknown" as never,
+      verificationRequirement: "none",
       title: "Điểm dừng đã xác nhận",
       summary: "Thông tin có đủ metadata an toàn cho traveler.",
       locationName: "Huế",
@@ -17,16 +16,15 @@ describe("knowledge traveler policy", () => {
       activeTravelerSafeIndependenceKeyCount: 1,
     })).toEqual({
       policy: "exclude",
-      reasons: ["unsupported_knowledge_state"],
+      reasons: ["invalid_knowledge_state", "unsupported_knowledge_state"],
     });
   });
 
   test("excludes conditional knowledge without at least one bounded condition", () => {
     expect(evaluateKnowledgeTravelerPolicy({
-      publicationState: "active",
+      lifecycleState: "active",
       knowledgeState: "conditional",
-      reviewState: "reviewed",
-      verificationState: "not_required",
+      verificationRequirement: "none",
       title: "Điểm dừng theo điều kiện",
       summary: "Thông tin có đủ metadata an toàn cho traveler.",
       locationName: "Huế",

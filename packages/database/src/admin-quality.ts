@@ -281,7 +281,7 @@ async function buildPolicySignals({
       }
 
       const fenceCondition = or(...memberFences);
-      const baseConditions = and(eq(knowledgeRecommendations.policyId, policyId), eq(knowledgeRecommendations.reason, "sampling"), fenceCondition);
+      const baseConditions = and(eq(knowledgeRecommendations.policyId, policyId), eq(knowledgeRecommendations.workType, "sampling"), fenceCondition);
       const fields = { policyId: knowledgeRecommendations.policyId, knowledgeCardId: knowledgeRecommendations.knowledgeCardId, contentVersion: knowledgeRecommendations.contentVersion, evidenceSetRevision: knowledgeRecommendations.evidenceSetRevision, status: knowledgeRecommendations.status, resolution: knowledgeRecommendations.resolution, resolvedAt: knowledgeRecommendations.resolvedAt, updatedAt: knowledgeRecommendations.updatedAt, id: knowledgeRecommendations.id };
       const [resolved, selected] = await Promise.all([
         db
@@ -309,13 +309,13 @@ async function buildPolicySignals({
           .select({ count: sql<number>`count(distinct ${knowledgeRecommendations.knowledgeCardId})` })
           .from(knowledgeRecommendations)
           .innerJoin(knowledgeCards, eq(knowledgeCards.id, knowledgeRecommendations.knowledgeCardId))
-          .where(and(eq(knowledgeRecommendations.reason, "verification"), inArray(knowledgeRecommendations.policyId, policyIds), inArray(knowledgeCards.verificationState, ["required", "failed"]), ...(memberCardIds.length > 0 ? [notInArray(knowledgeRecommendations.knowledgeCardId, memberCardIds)] : [])))
+          .where(and(eq(knowledgeRecommendations.workType, "verification"), inArray(knowledgeRecommendations.policyId, policyIds), inArray(knowledgeCards.verificationRequirement, ["operator_required", "failed"]), ...(memberCardIds.length > 0 ? [notInArray(knowledgeRecommendations.knowledgeCardId, memberCardIds)] : [])))
       : [{ count: 0 }];
   const policyCardIds = [...new Set(memberCardIds)];
   const cards =
     policyCardIds.length > 0
       ? await db
-          .select({ id: knowledgeCards.id, type: knowledgeCards.type, verificationState: knowledgeCards.verificationState })
+          .select({ id: knowledgeCards.id, type: knowledgeCards.type, verificationRequirement: knowledgeCards.verificationRequirement })
           .from(knowledgeCards)
           .where(inArray(knowledgeCards.id, policyCardIds))
           .orderBy(asc(knowledgeCards.id))
@@ -369,8 +369,8 @@ async function buildPolicySignals({
       pendingMembers: memberOutcomes.filter((member) => member.outcome === "pending").length,
       unselectedMembers: memberOutcomes.filter((member) => member.outcome === "unselected").length,
       verificationRequiredCurrentCards: Number(verificationRequiredCards.count) + policyCardIds.filter((cardId) => {
-        const verificationState = cardsById.get(cardId)?.verificationState;
-        return verificationState === "required" || verificationState === "failed";
+        const verificationRequirement = cardsById.get(cardId)?.verificationRequirement;
+        return verificationRequirement === "operator_required" || verificationRequirement === "failed";
       }).length,
       escalatedCohorts: policies.filter((policy) => policy.escalatedAt).length,
       suppressedCohorts: policies.filter((policy) => policy.suppressedAt).length,
