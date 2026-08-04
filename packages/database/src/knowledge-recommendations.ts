@@ -1,7 +1,8 @@
 import { and, asc, count, eq, inArray } from "drizzle-orm";
 
 import { getDb } from "./client";
-import { knowledgeCardEvidence, knowledgeCards, knowledgeRecommendations, type KnowledgeRecommendationWorkType } from "./schema";
+import { transitionKnowledgeCard } from "./knowledge-lifecycle";
+import { knowledgeCardEvidence, knowledgeCards, knowledgeRecommendations, type KnowledgeRecommendationAction, type KnowledgeRecommendationWorkType } from "./schema";
 
 type RecommendationDb = ReturnType<typeof getDb>;
 
@@ -50,9 +51,24 @@ export async function getKnowledgeRecommendationDetail(recommendationId: string,
   return { ...recommendation, evidence };
 }
 
-/** Story 15.3 owns cross-table lifecycle transitions; this boundary intentionally does not mutate them. */
-export async function resolveKnowledgeRecommendation(_input: unknown, _db: RecommendationDb = getDb()) {
-  return { status: "unavailable" as const };
+export async function resolveKnowledgeRecommendation(input: { recommendationId: string; expectedContentVersion: number; expectedEvidenceSetRevision: number; action?: KnowledgeRecommendationAction; resolution?: "published_operator_confirmed" | "published_community_observation" | "suppressed" | "edited_and_requeued" | "relation_resolved" | "sampling_passed" | "sampling_failed"; actor: { userId: string; email: string } }, db: RecommendationDb = getDb()) {
+  const resolution = input.action ? actionResolution(input.action) : input.resolution;
+  if (!resolution && input.action !== "restore") return { status: "invalid_action" as const };
+  if (input.action === "restore") {
+    const restored = await transitionKnowledgeCard({ actor: { kind: "user", userId: input.actor.userId, email: input.actor.email }, fences: { contentVersion: input.expectedContentVersion, evidenceSetRevision: input.expectedEvidenceSetRevision, recommendationId: input.recommendationId }, trigger: { kind: "restore", recommendationId: input.recommendationId } }, db);
+    return restored.status === "resolved" ? { status: "resolved" as const, cardId: restored.cardId } : restored.status === "stale" ? { status: "stale" as const } : { status: "invalid_action" as const };
+  }
+  const result = await transitionKnowledgeCard({
+    actor: { kind: "user", userId: input.actor.userId, email: input.actor.email },
+    fences: { contentVersion: input.expectedContentVersion, evidenceSetRevision: input.expectedEvidenceSetRevision, recommendationId: input.recommendationId },
+    trigger: { kind: "operator_resolution", recommendationId: input.recommendationId, resolution: resolution! },
+  }, db);
+  return result.status === "resolved" ? { status: "resolved" as const, cardId: result.cardId } : result.status === "stale" ? { status: "stale" as const } : { status: "invalid_action" as const };
+}
+
+function actionResolution(action: KnowledgeRecommendationAction) {
+  if (action === "restore") return undefined;
+  return ({ accept_wording: "published_operator_confirmed", edit: "edited_and_requeued", suppress: "suppressed", verify: "published_operator_confirmed", promote: "published_community_observation", resolve_relation: "relation_resolved", sampling_pass: "sampling_passed", sampling_fail: "sampling_failed" } as const)[action];
 }
 
 export async function sealClosedKnowledgeSamplingPolicy(_policyId: string) { return { status: "unavailable" as const }; }

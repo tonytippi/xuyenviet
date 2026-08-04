@@ -1,11 +1,9 @@
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
-import { getDb } from "@xuyenviet/database";
+import { getDb, transitionKnowledgeCardInTransaction, validateKnowledgeDraftApprovalInTransaction as validateDatabaseKnowledgeDraftApproval } from "@xuyenviet/database";
 import { knowledgeCards, knowledgeCardSources, knowledgeSourceSuggestions, sourceCaptureVersions, sources } from "@xuyenviet/database";
-import { recordAuditEvent } from "../audit/events";
 import { createSystemAuditActor, toUserAuditActor, type SystemAuditActorId } from "../audit/actors";
-import { enqueueKnowledgeIndexWork } from "./indexing-queue";
 
 type ReviewDb = ReturnType<typeof getDb>;
 type ReviewMutationDb = Pick<ReviewDb, "select" | "update" | "insert" | "execute">;
@@ -50,43 +48,17 @@ export async function approveKnowledgeDraftBatchForSystemInTransaction(transacti
   return { draftIds: approvedDraftIds };
 }
 
+export async function validateKnowledgeDraftApprovalInTransaction(transaction: ReviewMutationDb, draftId: string) {
+  return validateDatabaseKnowledgeDraftApproval(transaction, draftId);
+}
+
 async function approveKnowledgeDraftForActorInTransaction(transaction: ReviewMutationDb, actor: { userId: string; email: string } | null, draftId: string, executorSystem?: SystemAuditActorId) {
-  const sourceSnapshot = await loadReviewableDraft(transaction, draftId);
-  for (const source of sourceSnapshot.sources.sort((left, right) => left.id.localeCompare(right.id))) {
-    await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${source.id}, 44))`);
-  }
-  await transaction.select({ id: knowledgeCards.id }).from(knowledgeCards).where(eq(knowledgeCards.id, draftId)).limit(1).for("update");
-  const draft = await loadReviewableDraft(transaction, draftId);
-  await assertEligibleDraftSources(transaction, draft.sources.map((source) => source.id));
-  assertApprovalReady(draft.card);
-  const rawLeakCorpus = await loadRawLeakCorpusForSources(transaction, draft.sources.map((source) => source.id));
-  rejectUnsafeCardFields({ title: draft.card.title, locationName: draft.card.locationName, routeSegment: draft.card.routeSegment, summary: draft.card.summary, tags: draft.card.tags, practicalDetails: draft.card.practicalDetails }, rawLeakCorpus);
+  await validateKnowledgeDraftApprovalInTransaction(transaction, draftId);
 
-  const [updatedDraft] = await transaction
-    .update(knowledgeCards)
-    .set({
-        lifecycleState: "active",
-        knowledgeState: "community_observation",
-        verificationRequirement: "none",
-      contentVersion: sql`${knowledgeCards.contentVersion} + 1`,
-      updatedAt: new Date(),
-    })
-    .where(and(eq(knowledgeCards.id, draftId), eq(knowledgeCards.lifecycleState, "draft")))
-    .returning({ id: knowledgeCards.id, contentVersion: knowledgeCards.contentVersion, evidenceSetRevision: knowledgeCards.evidenceSetRevision });
-
-  if (!updatedDraft) {
+  const result = await transitionKnowledgeCardInTransaction(transaction as any, { actor: executorSystem ? createSystemAuditActor(executorSystem) : toUserAuditActor(actor!), fences: {}, trigger: { kind: "draft_publish", cardId: draftId } });
+  if (result.status !== "resolved") {
     throw new KnowledgeDraftApprovalCoreError("Bản nháp này không còn trong trạng thái cần duyệt.", "not_reviewable");
   }
-  await enqueueKnowledgeIndexWork(transaction, { cardId: draftId, contentVersion: updatedDraft.contentVersion, evidenceSetRevision: updatedDraft.evidenceSetRevision, reason: "draft_approval" });
-
-  await recordAuditEvent({
-    actor: executorSystem ? createSystemAuditActor(executorSystem) : toUserAuditActor(actor!),
-    operation: "approve",
-    targetType: "knowledge_draft",
-    targetId: draftId,
-    beforeSummary: `Draft before mutation: lifecycleState=${draft.card.lifecycleState}; type=${draft.card.type}; confidence=${draft.card.confidence}; freshnessSensitive=${draft.card.freshnessSensitive}.`,
-    afterSummary: `Operator activated a draft card; lifecycleState=active; verificationRequirement=none; linkedSources=${draft.sources.length}.`,
-  }, transaction);
 
   return { draftId };
 }

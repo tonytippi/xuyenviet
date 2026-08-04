@@ -29,6 +29,7 @@ export * from "./admin-knowledge-intake";
 export * from "./admin-facebook-capture";
 export * from "./admin-youtube-capture";
 export * from "./knowledge-review";
+export * from "./knowledge-lifecycle";
 export * from "./admin-knowledge-coverage";
 export * from "./evaluation-scenarios";
 export * from "./admin-quality";

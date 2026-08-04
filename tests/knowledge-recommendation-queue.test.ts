@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, test } from "vitest";
 import { knowledgeCards, knowledgeIngestionCandidates, knowledgeIngestionJobs, knowledgeRecommendations, knowledgeSamplingObligations, sources } from "@/db/schema";
 import { resolveKnowledgeRecommendation, scheduleKnowledgeRecommendation } from "@/features/knowledge/recommendations";
 import { appendSourceCaptureVersion } from "@/features/knowledge/source-captures";
+import { resolveKnowledgeRecommendation as resolveDatabaseKnowledgeRecommendation } from "@xuyenviet/database";
 
 import { resetTestDatabase, seedTestOperator, testDb } from "./helpers/db";
 
@@ -58,5 +59,13 @@ describe("target knowledge recommendation queue", () => {
     if (!recommendation) throw new Error("expected recommendation");
 
     await expect(resolveKnowledgeRecommendation({ recommendationId: recommendation.id, expectedContentVersion: 1, expectedEvidenceSetRevision: 1, resolution: "sampling_passed", actor: { userId: "operator", email: "operator@example.com" } }, testDb)).resolves.toEqual({ status: "invalid" });
+  });
+
+  test("resolves admin work through the central lifecycle transition", async () => {
+    await scheduleKnowledgeRecommendation({ cardId: "card", contentVersion: 1, evidenceSetRevision: 1, workType: "verification" }, testDb);
+    const [recommendation] = await testDb.select().from(knowledgeRecommendations);
+    await expect(resolveDatabaseKnowledgeRecommendation({ recommendationId: recommendation!.id, expectedContentVersion: 1, expectedEvidenceSetRevision: 1, action: "verify", actor: { userId: "operator", email: "operator@example.com" } }, testDb)).resolves.toEqual({ status: "resolved", cardId: "card" });
+    await expect(testDb.select().from(knowledgeRecommendations)).resolves.toMatchObject([{ status: "resolved", resolution: "published_operator_confirmed" }]);
+    await expect(testDb.select().from(knowledgeCards)).resolves.toMatchObject([{ lifecycleState: "active", contentVersion: 2 }]);
   });
 });

@@ -1,6 +1,6 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 
-import { getDb, knowledgeCardEvidence, knowledgeCards, knowledgeRecommendations, type KnowledgeRecommendationResolution, type KnowledgeRecommendationWorkType } from "@xuyenviet/database";
+import { getDb, knowledgeCardEvidence, knowledgeCards, knowledgeRecommendations, transitionKnowledgeCard, type KnowledgeRecommendationResolution, type KnowledgeRecommendationWorkType } from "@xuyenviet/database";
 import { type SystemAuditActorId } from "../audit/actors";
 
 type RecommendationDb = ReturnType<typeof getDb>;
@@ -31,19 +31,13 @@ export async function getKnowledgeRecommendationDetail(recommendationId: string,
 }
 
 export async function scheduleKnowledgeRecommendation(input: { cardId: string; contentVersion: number; evidenceSetRevision: number; workType: KnowledgeRecommendationWorkType; priority?: number; policyId?: string; policySnapshot?: Record<string, unknown>; executorSystem?: SystemAuditActorId }, db: RecommendationDb | Transaction = getDb()) {
-  return db.transaction(async (tx) => {
-    const priority = input.priority ?? priorityFor(input.workType);
-    await tx.insert(knowledgeRecommendations).values({ knowledgeCardId: input.cardId, contentVersion: input.contentVersion, evidenceSetRevision: input.evidenceSetRevision, workType: input.workType, priority, policyId: input.policyId ?? null, policySnapshot: input.policySnapshot ?? {}, executorSystem: input.executorSystem ?? null }).onConflictDoNothing();
-  });
+  return transitionKnowledgeCard({ actor: { kind: "system", system: input.executorSystem ?? "system-knowledge-pipeline" }, fences: { contentVersion: input.contentVersion, evidenceSetRevision: input.evidenceSetRevision }, trigger: { kind: "open_work", cardId: input.cardId, workType: input.workType, policyId: input.policyId, policySnapshot: input.policySnapshot } }, db as RecommendationDb);
 }
 
 export async function resolveKnowledgeRecommendation(input: { recommendationId: string; expectedContentVersion: number; expectedEvidenceSetRevision: number; resolution: KnowledgeRecommendationResolution; actor: RecommendationActor }, db: RecommendationDb = getDb()) {
-  return db.transaction(async (tx) => {
-    const [recommendation] = await tx.select({ workType: knowledgeRecommendations.workType }).from(knowledgeRecommendations).where(eq(knowledgeRecommendations.id, input.recommendationId)).limit(1);
-    if (!recommendation || !resolutionMatchesWorkType(recommendation.workType, input.resolution)) return { status: "invalid" as const };
-    const [updated] = await tx.update(knowledgeRecommendations).set({ status: "resolved", resolution: input.resolution, resolvedByUserId: input.actor.userId, resolvedAt: new Date(), executorSystem: null, updatedAt: new Date() }).where(and(eq(knowledgeRecommendations.id, input.recommendationId), eq(knowledgeRecommendations.status, "open"), eq(knowledgeRecommendations.contentVersion, input.expectedContentVersion), eq(knowledgeRecommendations.evidenceSetRevision, input.expectedEvidenceSetRevision))).returning({ knowledgeCardId: knowledgeRecommendations.knowledgeCardId });
-    return updated ? { status: "resolved" as const, cardId: updated.knowledgeCardId } : { status: "stale" as const };
-  });
+  const [recommendation] = await db.select({ workType: knowledgeRecommendations.workType }).from(knowledgeRecommendations).where(eq(knowledgeRecommendations.id, input.recommendationId)).limit(1);
+  if (!recommendation || !resolutionMatchesWorkType(recommendation.workType, input.resolution)) return { status: "invalid" as const };
+  return transitionKnowledgeCard({ actor: { kind: "user", userId: input.actor.userId, email: input.actor.email }, fences: { contentVersion: input.expectedContentVersion, evidenceSetRevision: input.expectedEvidenceSetRevision, recommendationId: input.recommendationId }, trigger: { kind: "operator_resolution", recommendationId: input.recommendationId, resolution: input.resolution } }, db);
 }
 
 function resolutionMatchesWorkType(workType: KnowledgeRecommendationWorkType, resolution: KnowledgeRecommendationResolution) {

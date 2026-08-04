@@ -1,11 +1,10 @@
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
-import { knowledgeCardSources, knowledgeCards, rawSourceMaterial, schema, sourceCaptureVersions, sources } from "@xuyenviet/database";
+import { knowledgeCardSources, knowledgeCards, rawSourceMaterial, schema, sourceCaptureVersions, sources, transitionKnowledgeCardInTransaction } from "@xuyenviet/database";
 import { recordAuditEvent } from "../audit/events";
 import { createSystemAuditActor } from "../audit/actors";
 import { appendSourceCaptureVersion, type YoutubeCaptureMetadata } from "./source-captures";
-import { disableStaleKnowledgeSearchProjection, enqueueKnowledgeIndexWork } from "./indexing-queue";
 
 export type YoutubeCaptureDb = PostgresJsDatabase<typeof schema>;
 
@@ -132,10 +131,7 @@ export async function saveYoutubeEvidence(db: YoutubeCaptureDb, input: { sourceI
     if (input.title) {
       await transaction.update(sources).set({ label: input.title }).where(eq(sources.id, input.sourceId));
       for (const card of linkedCards) {
-        const [updated] = await transaction.update(knowledgeCards).set({ contentVersion: sql`${knowledgeCards.contentVersion} + 1`, updatedAt: input.now ?? new Date() }).where(eq(knowledgeCards.id, card.id)).returning({ contentVersion: knowledgeCards.contentVersion, evidenceSetRevision: knowledgeCards.evidenceSetRevision });
-        if (!updated) continue;
-        await enqueueKnowledgeIndexWork(transaction, { cardId: card.id, contentVersion: updated.contentVersion, evidenceSetRevision: updated.evidenceSetRevision, reason: "source_label" });
-        await disableStaleKnowledgeSearchProjection(transaction, card.id, updated.contentVersion, input.now ?? new Date());
+        await transitionKnowledgeCardInTransaction(transaction, { actor: createSystemAuditActor("system-youtube-capture"), fences: {}, trigger: { kind: "content_refresh", cardId: card.id, reason: "source_label" } });
       }
     }
 

@@ -2,7 +2,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 
 import { and, asc, eq, gt, isNull, lte, sql } from "drizzle-orm";
 
-import { getDb, knowledgeIngestionCandidates, knowledgeIngestionJobs, sourceCaptureVersions, sources, users, type KnowledgeIngestionCandidateDisposition, type KnowledgeIngestionCandidateOutcomeReasonCode } from "@xuyenviet/database";
+import { getDb, knowledgeIngestionCandidates, knowledgeIngestionJobs, sourceCaptureVersions, sources, users } from "@xuyenviet/database";
 
 type IngestionJobDb = Pick<ReturnType<typeof getDb>, "select" | "insert" | "update" | "execute" | "transaction">;
 
@@ -65,23 +65,12 @@ export async function claimNextKnowledgeIngestionCandidate(input: { workerId: st
   });
 }
 
-export async function completeKnowledgeIngestionCandidate(input: { candidateId: string; fencingToken: string; disposition: KnowledgeIngestionCandidateDisposition; outcomeReasonCode: KnowledgeIngestionCandidateOutcomeReasonCode; cardId?: string; judgmentSummary?: string; scores?: Record<string, number>; now?: Date }, db: IngestionJobDb = getDb()) {
-  const now = input.now ?? new Date();
-  return db.transaction(async (tx) => {
-    const [candidate] = await tx.update(knowledgeIngestionCandidates).set({ processingStatus: "completed", aiDisposition: input.disposition, outcomeReasonCode: input.outcomeReasonCode, knowledgeCardId: input.cardId ?? null, judgmentSummary: input.judgmentSummary ?? null, scores: input.scores ?? null, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, updatedAt: now }).where(and(eq(knowledgeIngestionCandidates.id, input.candidateId), eq(knowledgeIngestionCandidates.processingStatus, "processing"), eq(knowledgeIngestionCandidates.fencingToken, input.fencingToken), gt(knowledgeIngestionCandidates.leaseExpiresAt, now))).returning({ ingestionJobId: knowledgeIngestionCandidates.ingestionJobId });
-    if (!candidate) return null;
-    await tx.update(knowledgeIngestionJobs).set({ candidateCount: sql`(select count(*)::int from knowledge_ingestion_candidates where ingestion_job_id = ${candidate.ingestionJobId})`, completedCandidateCount: sql`${knowledgeIngestionJobs.completedCandidateCount} + 1`, needsOperatorCandidateCount: input.disposition === "needs_operator" ? sql`${knowledgeIngestionJobs.needsOperatorCandidateCount} + 1` : undefined, updatedAt: now }).where(eq(knowledgeIngestionJobs.id, candidate.ingestionJobId));
-    await finalizeKnowledgeIngestionJob(tx, candidate.ingestionJobId, now);
-    return candidate;
-  });
-}
-
 export async function failKnowledgeIngestionCandidate(input: { candidateId: string; fencingToken: string; errorCode: string; now?: Date }, db: IngestionJobDb = getDb()) {
   const now = input.now ?? new Date();
   return db.transaction(async (tx) => {
     const [candidate] = await tx.update(knowledgeIngestionCandidates).set({ processingStatus: "failed", aiDisposition: null, outcomeReasonCode: null, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, updatedAt: now }).where(and(eq(knowledgeIngestionCandidates.id, input.candidateId), eq(knowledgeIngestionCandidates.processingStatus, "processing"), eq(knowledgeIngestionCandidates.fencingToken, input.fencingToken), gt(knowledgeIngestionCandidates.leaseExpiresAt, now))).returning({ ingestionJobId: knowledgeIngestionCandidates.ingestionJobId });
     if (!candidate) return null;
-    await tx.update(knowledgeIngestionJobs).set({ failedCandidateCount: sql`${knowledgeIngestionJobs.failedCandidateCount} + 1`, lastErrorCode: input.errorCode, updatedAt: now }).where(eq(knowledgeIngestionJobs.id, candidate.ingestionJobId));
+    await tx.update(knowledgeIngestionJobs).set({ candidateCount: sql`(select count(*)::int from knowledge_ingestion_candidates where ingestion_job_id = ${candidate.ingestionJobId})`, failedCandidateCount: sql`${knowledgeIngestionJobs.failedCandidateCount} + 1`, lastErrorCode: input.errorCode, updatedAt: now }).where(eq(knowledgeIngestionJobs.id, candidate.ingestionJobId));
     await finalizeKnowledgeIngestionJob(tx, candidate.ingestionJobId, now);
     return candidate;
   });

@@ -2,7 +2,7 @@ import "server-only";
 
 import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 
-import { getDb } from "@xuyenviet/database";
+import { getDb, transitionKnowledgeCardInTransaction } from "@xuyenviet/database";
 import { knowledgeCardEvidence, knowledgeCardSources, knowledgeCards, knowledgeIngestionJobs, knowledgeRecommendations, knowledgeSourceSuggestions, rawSourceMaterial, sourceCaptureVersions, sources, type SourceRemovalReason } from "@xuyenviet/database";
 import { recordAuditEvent } from "../audit/events";
 import { createUserAuditActor } from "../audit/actors";
@@ -48,8 +48,7 @@ export async function removeKnowledgeSource(
     await tx.update(sources).set({ eligibility: "withdrawn", removalReason: input.reason, removedByUserId: input.actor.userId, removalCompletedAt: now, currentCaptureVersionId: null }).where(eq(sources.id, sourceId));
     const activeEvidenceIds = lockedEvidence.filter((item) => item.state === "active").map((item) => item.id);
     if (activeEvidenceIds.length > 0) await tx.update(knowledgeCardEvidence).set({ state: "removed", withdrawalReason: input.reason }).where(inArray(knowledgeCardEvidence.id, activeEvidenceIds));
-
-    // Story 15.3 owns card lifecycle, recommendation, and projection transitions.
+    for (const cardId of cardIds) await transitionKnowledgeCardInTransaction(tx, { actor: createUserAuditActor({ userId: input.actor.userId, email: input.actor.email.trim().toLowerCase() }), fences: {}, trigger: { kind: "support_loss", cardId, reason: "source_withdrawn" } });
 
     await tx.update(sourceCaptureVersions).set({ rawText: null, fileName: null, mimeType: null, byteSize: null, storageKey: null, rawMetadata: null, payloadDeletedAt: now }).where(and(eq(sourceCaptureVersions.sourceId, sourceId), isNull(sourceCaptureVersions.payloadDeletedAt)));
     await tx.update(rawSourceMaterial).set({ rawText: null, fileName: null, mimeType: null, byteSize: null, storageKey: null, rawMetadata: null }).where(eq(rawSourceMaterial.sourceId, sourceId));
@@ -78,6 +77,7 @@ export async function withdrawKnowledgeEvidence(
     if (evidence.state === "removed") return { status: "already_completed" as const, evidenceId, provenanceCount: remediation.provenanceCount };
     await tx.update(knowledgeCardEvidence).set({ state: "removed", withdrawalReason: input.reason }).where(eq(knowledgeCardEvidence.id, evidence.id));
     const now = new Date();
+    await transitionKnowledgeCardInTransaction(tx, { actor: createUserAuditActor({ userId: input.actor.userId, email: input.actor.email.trim().toLowerCase() }), fences: {}, trigger: { kind: "support_loss", cardId: evidence.cardId, reason: "evidence_withdrawn" } });
     await recordAuditEvent({ actor: createUserAuditActor({ userId: input.actor.userId, email: input.actor.email.trim().toLowerCase() }), operation: "archive", targetType: "knowledge_evidence_withdrawal", targetId: evidence.id, afterSummary: `Evidence withdrawal completed; sourceId=${evidence.sourceId}; cardId=${evidence.cardId}; reason=${input.reason}; provenanceCount=${remediation.provenanceCount}.` }, tx);
     return { status: "completed" as const, evidenceId, provenanceCount: remediation.provenanceCount };
   });

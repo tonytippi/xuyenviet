@@ -1,7 +1,8 @@
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 
-import { getDb, knowledgeIngestionCandidates, knowledgeIngestionJobs, sourceCaptureVersions, sources } from "@xuyenviet/database";
-import { completeKnowledgeIngestionCandidate, failKnowledgeIngestionCandidate, finalizeKnowledgeIngestionJob, type KnowledgeIngestionCandidateClaim, type KnowledgeIngestionClaim } from "./ingestion-jobs";
+import type { KnowledgeRelationFact } from "@xuyenviet/domain";
+import { completeExtraction, getDb, knowledgeCards, knowledgeIngestionCandidates, knowledgeIngestionJobs, selectActiveAiGatewayModel, sourceKnowledgeSuggestionPurpose, sourceCaptureVersions, sources, transitionKnowledgeCard } from "@xuyenviet/database";
+import { failKnowledgeIngestionCandidate, finalizeKnowledgeIngestionJob, type KnowledgeIngestionCandidateClaim, type KnowledgeIngestionClaim } from "./ingestion-jobs";
 
 type PipelineDb = ReturnType<typeof getDb>;
 
@@ -19,11 +20,49 @@ export async function runKnowledgeIngestionPipeline(claim: KnowledgeIngestionCla
   });
 }
 
-/** Candidate processing records an immutable AI outcome but does not mutate card lifecycle. */
-export async function runKnowledgeIngestionCandidatePipeline(claim: KnowledgeIngestionCandidateClaim, db: PipelineDb = getDb()) {
-  const [candidate] = await db.select({ id: knowledgeIngestionCandidates.id, captureVersionId: knowledgeIngestionCandidates.captureVersionId }).from(knowledgeIngestionCandidates).where(and(eq(knowledgeIngestionCandidates.id, claim.candidateId), eq(knowledgeIngestionCandidates.ingestionJobId, claim.jobId), eq(knowledgeIngestionCandidates.processingStatus, "processing"), eq(knowledgeIngestionCandidates.fencingToken, claim.fencingToken))).limit(1);
+/** The system supplies a bounded relation context; the lifecycle command owns persistence. */
+export type CandidateRelationDecision = Readonly<{ disposition: "apply" | "needs_operator"; outcomeReasonCode: "applied" | "verification_required" | "relation_ambiguous" | "missing_context" | "conflict"; relation: KnowledgeRelationFact }>;
+export type CandidateRelationDecider = (input: { candidate: { id: string; type: string; title: string; summary: string }; shortlist: Array<{ id: string; title: string; summary: string }> }) => Promise<CandidateRelationDecision>;
+
+export async function runKnowledgeIngestionCandidatePipeline(claim: KnowledgeIngestionCandidateClaim, db: PipelineDb = getDb(), decideRelation?: CandidateRelationDecider) {
+  const [candidate] = await db.select({ id: knowledgeIngestionCandidates.id, captureVersionId: knowledgeIngestionCandidates.captureVersionId, type: knowledgeIngestionCandidates.type, title: knowledgeIngestionCandidates.title, summary: knowledgeIngestionCandidates.summary }).from(knowledgeIngestionCandidates).where(and(eq(knowledgeIngestionCandidates.id, claim.candidateId), eq(knowledgeIngestionCandidates.ingestionJobId, claim.jobId), eq(knowledgeIngestionCandidates.processingStatus, "processing"), eq(knowledgeIngestionCandidates.fencingToken, claim.fencingToken))).limit(1);
   if (!candidate) return null;
   const [capture] = await db.select({ id: sourceCaptureVersions.id }).from(sourceCaptureVersions).innerJoin(sources, eq(sources.id, sourceCaptureVersions.sourceId)).where(and(eq(sourceCaptureVersions.id, candidate.captureVersionId), eq(sources.currentCaptureVersionId, candidate.captureVersionId), eq(sources.eligibility, "eligible"), isNull(sourceCaptureVersions.payloadDeletedAt))).limit(1);
   if (!capture) return failKnowledgeIngestionCandidate({ candidateId: claim.candidateId, fencingToken: claim.fencingToken, errorCode: "stale_capture" }, db);
-  return completeKnowledgeIngestionCandidate({ candidateId: claim.candidateId, fencingToken: claim.fencingToken, disposition: "needs_operator", outcomeReasonCode: "missing_context" }, db);
+  const shortlist = await db.select({ id: knowledgeCards.id, title: knowledgeCards.title, summary: knowledgeCards.summary }).from(knowledgeCards).where(and(eq(knowledgeCards.type, candidate.type), inArray(knowledgeCards.lifecycleState, ["draft", "pending_operator", "active"]))).orderBy(asc(knowledgeCards.id)).limit(20);
+  let decision: CandidateRelationDecision;
+  try {
+    decision = decideRelation ? await decideRelation({ candidate: { id: candidate.id, type: candidate.type, title: candidate.title, summary: candidate.summary }, shortlist }) : await decideCandidateRelation({ candidate: { id: candidate.id, type: candidate.type, title: candidate.title, summary: candidate.summary }, shortlist }, db);
+  } catch {
+    return failKnowledgeIngestionCandidate({ candidateId: claim.candidateId, fencingToken: claim.fencingToken, errorCode: "relation_decision_failed" }, db);
+  }
+  const transition = await transitionKnowledgeCard({
+    actor: { kind: "system", system: "system-knowledge-pipeline" },
+    fences: { candidateFencingToken: claim.fencingToken },
+    trigger: {
+      kind: "candidate_relation",
+      candidateId: claim.candidateId,
+      ...decision,
+    },
+  }, db);
+  return transition.status === "invalid"
+    ? failKnowledgeIngestionCandidate({ candidateId: claim.candidateId, fencingToken: claim.fencingToken, errorCode: "invalid_relation" }, db)
+    : transition;
+}
+
+async function decideCandidateRelation(input: Parameters<CandidateRelationDecider>[0], db: PipelineDb): Promise<CandidateRelationDecision> {
+  const model = await selectActiveAiGatewayModel({ purpose: sourceKnowledgeSuggestionPurpose, requiredCapabilities: { textInput: true, extraction: true }, db });
+  if (!model) throw new Error("relation_model_unavailable");
+  const result = await completeExtraction({ model: model.gatewayModelName, messages: [{ role: "system", content: "Return strict JSON only: {kind,rationale,target_card_id?}. kind is attach, create, conflict, or ambiguous. target_card_id is required only for attach/conflict and must be one of shortlist ids. Do not invent ids." }, { role: "user", content: JSON.stringify({ candidate: input.candidate, shortlist: input.shortlist }) }] });
+  if (!result.ok) throw new Error(result.errorCode);
+  const value = JSON.parse(result.content) as Record<string, unknown>;
+  const rationale = typeof value.rationale === "string" ? value.rationale.trim() : "";
+  const kind = typeof value.kind === "string" ? value.kind : "";
+  const shortlistCardIds = input.shortlist.map((card) => card.id);
+  if (!rationale || !["attach", "create", "conflict", "ambiguous"].includes(String(kind))) throw new Error("invalid_relation_output");
+  if (kind === "create") return { disposition: "apply", outcomeReasonCode: "applied", relation: { kind: "create", rationale } };
+  if (kind === "ambiguous") return { disposition: "needs_operator", outcomeReasonCode: "relation_ambiguous", relation: { kind: "ambiguous", rationale, shortlistCardIds } };
+  const targetCardId = typeof value.target_card_id === "string" ? value.target_card_id : "";
+  if (!shortlistCardIds.includes(targetCardId)) throw new Error("invalid_relation_target");
+  return kind === "conflict" ? { disposition: "needs_operator", outcomeReasonCode: "conflict", relation: { kind: "conflict", rationale, targetCardId, shortlistCardIds } } : { disposition: "apply", outcomeReasonCode: "applied", relation: { kind: "attach", rationale, targetCardId, shortlistCardIds } };
 }
