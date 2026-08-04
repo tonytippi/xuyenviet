@@ -2,9 +2,12 @@ export type AuditActor =
   | Readonly<{ kind: "user"; userId: string; email: string }>
   | Readonly<{ kind: "system"; system: "system-ai-orchestration" | "system-knowledge-pipeline" | "system-trip-planning" | "system-facebook-capture" | "system-youtube-capture" | "system-admin-bootstrap" }>;
 
-export type KnowledgeLifecycleFence = Readonly<{
-  contentVersion?: number;
-  evidenceSetRevision?: number;
+export type KnowledgeVersionFence = Readonly<{
+  contentVersion: number;
+  evidenceSetRevision: number;
+}>;
+
+export type KnowledgeLifecycleFence = KnowledgeVersionFence & Readonly<{
   candidateFencingToken?: string;
   recommendationId?: string;
 }>;
@@ -23,13 +26,17 @@ export type KnowledgeLifecycleTrigger =
   | Readonly<{ kind: "content_refresh"; cardId: string; reason: "source_label" }>
   | Readonly<{ kind: "support_loss"; cardId: string; reason: "source_withdrawn" | "evidence_withdrawn" }>
   | Readonly<{ kind: "archive"; cardId: string }>
-  | Readonly<{ kind: "restore"; recommendationId: string }>;
+  | Readonly<{ kind: "restore"; cardId?: string; recommendationId?: string; target: "active" | "pending_operator" }>;
 
-export type TransitionKnowledgeCardInput = Readonly<{
-  trigger: KnowledgeLifecycleTrigger;
+type TransitionInput<T extends KnowledgeLifecycleTrigger, Fences> = Readonly<{
+  trigger: T;
   actor: AuditActor;
-  fences: KnowledgeLifecycleFence;
+  fences: Fences;
 }>;
+
+export type TransitionKnowledgeCardInput =
+  | TransitionInput<Extract<KnowledgeLifecycleTrigger, { kind: "candidate_relation" }>, Readonly<{ candidateFencingToken: string }>>
+  | TransitionInput<Exclude<KnowledgeLifecycleTrigger, { kind: "candidate_relation" }>, KnowledgeVersionFence & Readonly<{ recommendationId?: string }>>;
 
 export type TransitionKnowledgeCardResult =
   | Readonly<{ status: "resolved"; cardId: string; contentVersion: number; evidenceSetRevision: number }>

@@ -36,8 +36,10 @@ export async function removeKnowledgeSource(
     const links = await tx.select({ knowledgeCardId: knowledgeCardSources.knowledgeCardId }).from(knowledgeCardSources).where(eq(knowledgeCardSources.sourceId, sourceId)).orderBy(knowledgeCardSources.knowledgeCardId);
     const cardIds = [...new Set([...evidence.map((item) => item.knowledgeCardId), ...links.map((item) => item.knowledgeCardId)])].sort();
     await lockAssistantProvenanceWithdrawalAnchors(tx, { evidenceIds: evidence.map((item) => item.id), cardIds });
+    const cards = [] as Array<{ id: string; contentVersion: number; evidenceSetRevision: number }>;
     for (const cardId of cardIds) {
-      await tx.select({ id: knowledgeCards.id }).from(knowledgeCards).where(eq(knowledgeCards.id, cardId)).limit(1).for("update");
+      const [card] = await tx.select({ id: knowledgeCards.id, contentVersion: knowledgeCards.contentVersion, evidenceSetRevision: knowledgeCards.evidenceSetRevision }).from(knowledgeCards).where(eq(knowledgeCards.id, cardId)).limit(1).for("update");
+      if (card) cards.push(card);
     }
     const now = new Date();
     const lockedEvidence = await tx.select({ id: knowledgeCardEvidence.id, state: knowledgeCardEvidence.state }).from(knowledgeCardEvidence).where(eq(knowledgeCardEvidence.sourceId, sourceId)).for("update");
@@ -48,7 +50,7 @@ export async function removeKnowledgeSource(
     await tx.update(sources).set({ eligibility: "withdrawn", removalReason: input.reason, removedByUserId: input.actor.userId, removalCompletedAt: now, currentCaptureVersionId: null }).where(eq(sources.id, sourceId));
     const activeEvidenceIds = lockedEvidence.filter((item) => item.state === "active").map((item) => item.id);
     if (activeEvidenceIds.length > 0) await tx.update(knowledgeCardEvidence).set({ state: "removed", withdrawalReason: input.reason }).where(inArray(knowledgeCardEvidence.id, activeEvidenceIds));
-    for (const cardId of cardIds) await transitionKnowledgeCardInTransaction(tx, { actor: createUserAuditActor({ userId: input.actor.userId, email: input.actor.email.trim().toLowerCase() }), fences: {}, trigger: { kind: "support_loss", cardId, reason: "source_withdrawn" } });
+    for (const card of cards) await transitionKnowledgeCardInTransaction(tx, { actor: createUserAuditActor({ userId: input.actor.userId, email: input.actor.email.trim().toLowerCase() }), fences: card, trigger: { kind: "support_loss", cardId: card.id, reason: "source_withdrawn" } });
 
     await tx.update(sourceCaptureVersions).set({ rawText: null, fileName: null, mimeType: null, byteSize: null, storageKey: null, rawMetadata: null, payloadDeletedAt: now }).where(and(eq(sourceCaptureVersions.sourceId, sourceId), isNull(sourceCaptureVersions.payloadDeletedAt)));
     await tx.update(rawSourceMaterial).set({ rawText: null, fileName: null, mimeType: null, byteSize: null, storageKey: null, rawMetadata: null }).where(eq(rawSourceMaterial.sourceId, sourceId));
@@ -72,12 +74,13 @@ export async function withdrawKnowledgeEvidence(
     const [evidence] = await tx.select({ id: knowledgeCardEvidence.id, sourceId: knowledgeCardEvidence.sourceId, cardId: knowledgeCardEvidence.knowledgeCardId, state: knowledgeCardEvidence.state }).from(knowledgeCardEvidence).where(eq(knowledgeCardEvidence.id, evidenceId)).limit(1).for("update");
     if (!evidence) throw new SourceRemovalError("Evidence does not exist.");
     await tx.select({ id: sources.id }).from(sources).where(eq(sources.id, evidence.sourceId)).limit(1).for("update");
-    await tx.select({ id: knowledgeCards.id }).from(knowledgeCards).where(eq(knowledgeCards.id, evidence.cardId)).limit(1).for("update");
+    const [card] = await tx.select({ id: knowledgeCards.id, contentVersion: knowledgeCards.contentVersion, evidenceSetRevision: knowledgeCards.evidenceSetRevision }).from(knowledgeCards).where(eq(knowledgeCards.id, evidence.cardId)).limit(1).for("update");
+    if (!card) throw new SourceRemovalError("Knowledge card does not exist.");
     const remediation = await withdrawAssistantProvenance(tx, { sourceIds: [evidence.sourceId], evidenceIds: [evidence.id], cardIds: [evidence.cardId] }, input.reason);
     if (evidence.state === "removed") return { status: "already_completed" as const, evidenceId, provenanceCount: remediation.provenanceCount };
     await tx.update(knowledgeCardEvidence).set({ state: "removed", withdrawalReason: input.reason }).where(eq(knowledgeCardEvidence.id, evidence.id));
     const now = new Date();
-    await transitionKnowledgeCardInTransaction(tx, { actor: createUserAuditActor({ userId: input.actor.userId, email: input.actor.email.trim().toLowerCase() }), fences: {}, trigger: { kind: "support_loss", cardId: evidence.cardId, reason: "evidence_withdrawn" } });
+    await transitionKnowledgeCardInTransaction(tx, { actor: createUserAuditActor({ userId: input.actor.userId, email: input.actor.email.trim().toLowerCase() }), fences: card, trigger: { kind: "support_loss", cardId: evidence.cardId, reason: "evidence_withdrawn" } });
     await recordAuditEvent({ actor: createUserAuditActor({ userId: input.actor.userId, email: input.actor.email.trim().toLowerCase() }), operation: "archive", targetType: "knowledge_evidence_withdrawal", targetId: evidence.id, afterSummary: `Evidence withdrawal completed; sourceId=${evidence.sourceId}; cardId=${evidence.cardId}; reason=${input.reason}; provenanceCount=${remediation.provenanceCount}.` }, tx);
     return { status: "completed" as const, evidenceId, provenanceCount: remediation.provenanceCount };
   });

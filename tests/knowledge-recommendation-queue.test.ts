@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from "vitest";
 
-import { knowledgeCards, knowledgeIngestionCandidates, knowledgeIngestionJobs, knowledgeRecommendations, knowledgeSamplingObligations, sources } from "@/db/schema";
+import { knowledgeCardEvidence, knowledgeCardSources, knowledgeCards, knowledgeIngestionCandidates, knowledgeIngestionJobs, knowledgeRecommendations, knowledgeSamplingObligations, sources } from "@/db/schema";
 import { resolveKnowledgeRecommendation, scheduleKnowledgeRecommendation } from "@/features/knowledge/recommendations";
 import { appendSourceCaptureVersion } from "@/features/knowledge/source-captures";
 import { resolveKnowledgeRecommendation as resolveDatabaseKnowledgeRecommendation } from "@xuyenviet/database";
@@ -8,7 +8,7 @@ import { resolveKnowledgeRecommendation as resolveDatabaseKnowledgeRecommendatio
 import { resetTestDatabase, seedTestOperator, testDb } from "./helpers/db";
 
 async function createCard() {
-  await testDb.insert(knowledgeCards).values({ id: "card", lifecycleState: "active", knowledgeState: "community_observation", verificationRequirement: "none", type: "place", title: "Điểm dừng", summary: "Thông tin có bằng chứng.", locationName: "Huế", confidence: "community", aiPromptVersion: "test", createdByUserId: "operator" });
+  await testDb.insert(knowledgeCards).values({ id: "card", lifecycleState: "pending_operator", knowledgeState: "community_observation", verificationRequirement: "operator_required", type: "place", title: "Điểm dừng", summary: "Thông tin có bằng chứng.", locationName: "Huế", confidence: "community", aiPromptVersion: "test", createdByUserId: "operator" });
 }
 
 async function createCompletedCandidate() {
@@ -26,13 +26,11 @@ describe("target knowledge recommendation queue", () => {
     await createCard();
   });
 
-  test("allows one open primary work item and one open sampling item for a card fence", async () => {
+  test("allows one open primary work item for a pending card fence", async () => {
     await scheduleKnowledgeRecommendation({ cardId: "card", contentVersion: 1, evidenceSetRevision: 1, workType: "verification" }, testDb);
     await scheduleKnowledgeRecommendation({ cardId: "card", contentVersion: 1, evidenceSetRevision: 1, workType: "relation" }, testDb);
-    await scheduleKnowledgeRecommendation({ cardId: "card", contentVersion: 1, evidenceSetRevision: 1, workType: "sampling" }, testDb);
-    await scheduleKnowledgeRecommendation({ cardId: "card", contentVersion: 1, evidenceSetRevision: 1, workType: "sampling" }, testDb);
 
-    await expect(testDb.select({ workType: knowledgeRecommendations.workType }).from(knowledgeRecommendations)).resolves.toEqual([{ workType: "verification" }, { workType: "sampling" }]);
+    await expect(testDb.select({ workType: knowledgeRecommendations.workType }).from(knowledgeRecommendations)).resolves.toEqual([{ workType: "verification" }]);
   });
 
   test("enforces sampling-obligation fences and sampled disposition shape", async () => {
@@ -62,6 +60,10 @@ describe("target knowledge recommendation queue", () => {
   });
 
   test("resolves admin work through the central lifecycle transition", async () => {
+    await testDb.insert(sources).values({ id: "support", kind: "pasted_text", label: "Support", sourceType: "curated", verificationStatus: "unverified", official: false, partner: false, submittedByUserId: "operator" });
+    const capture = await appendSourceCaptureVersion(testDb, { sourceId: "support", captureKind: "pasted_text", rawText: "Nguồn hỗ trợ.", metadata: { kind: "submitted" } });
+    await testDb.insert(knowledgeCardSources).values({ knowledgeCardId: "card", sourceId: "support" });
+    await testDb.insert(knowledgeCardEvidence).values({ knowledgeCardId: "card", sourceId: "support", captureVersionId: capture.id, quoteText: "N", spanStart: 0, spanEnd: 1, observedAt: new Date(), capturedAt: new Date(), independenceKey: "support" });
     await scheduleKnowledgeRecommendation({ cardId: "card", contentVersion: 1, evidenceSetRevision: 1, workType: "verification" }, testDb);
     const [recommendation] = await testDb.select().from(knowledgeRecommendations);
     await expect(resolveDatabaseKnowledgeRecommendation({ recommendationId: recommendation!.id, expectedContentVersion: 1, expectedEvidenceSetRevision: 1, action: "verify", actor: { userId: "operator", email: "operator@example.com" } }, testDb)).resolves.toEqual({ status: "resolved", cardId: "card" });

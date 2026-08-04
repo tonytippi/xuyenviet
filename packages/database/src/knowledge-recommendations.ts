@@ -55,7 +55,7 @@ export async function resolveKnowledgeRecommendation(input: { recommendationId: 
   const resolution = input.action ? actionResolution(input.action) : input.resolution;
   if (!resolution && input.action !== "restore") return { status: "invalid_action" as const };
   if (input.action === "restore") {
-    const restored = await transitionKnowledgeCard({ actor: { kind: "user", userId: input.actor.userId, email: input.actor.email }, fences: { contentVersion: input.expectedContentVersion, evidenceSetRevision: input.expectedEvidenceSetRevision, recommendationId: input.recommendationId }, trigger: { kind: "restore", recommendationId: input.recommendationId } }, db);
+    const restored = await transitionKnowledgeCard({ actor: { kind: "user", userId: input.actor.userId, email: input.actor.email }, fences: { contentVersion: input.expectedContentVersion, evidenceSetRevision: input.expectedEvidenceSetRevision, recommendationId: input.recommendationId }, trigger: { kind: "restore", recommendationId: input.recommendationId, target: "pending_operator" } }, db);
     return restored.status === "resolved" ? { status: "resolved" as const, cardId: restored.cardId } : restored.status === "stale" ? { status: "stale" as const } : { status: "invalid_action" as const };
   }
   const result = await transitionKnowledgeCard({

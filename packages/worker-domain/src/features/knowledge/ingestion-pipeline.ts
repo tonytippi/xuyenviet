@@ -29,7 +29,7 @@ export async function runKnowledgeIngestionCandidatePipeline(claim: KnowledgeIng
   if (!candidate) return null;
   const [capture] = await db.select({ id: sourceCaptureVersions.id }).from(sourceCaptureVersions).innerJoin(sources, eq(sources.id, sourceCaptureVersions.sourceId)).where(and(eq(sourceCaptureVersions.id, candidate.captureVersionId), eq(sources.currentCaptureVersionId, candidate.captureVersionId), eq(sources.eligibility, "eligible"), isNull(sourceCaptureVersions.payloadDeletedAt))).limit(1);
   if (!capture) return failKnowledgeIngestionCandidate({ candidateId: claim.candidateId, fencingToken: claim.fencingToken, errorCode: "stale_capture" }, db);
-  const shortlist = await db.select({ id: knowledgeCards.id, title: knowledgeCards.title, summary: knowledgeCards.summary }).from(knowledgeCards).where(and(eq(knowledgeCards.type, candidate.type), inArray(knowledgeCards.lifecycleState, ["draft", "pending_operator", "active"]))).orderBy(asc(knowledgeCards.id)).limit(20);
+  const shortlist = await db.select({ id: knowledgeCards.id, title: knowledgeCards.title, summary: knowledgeCards.summary }).from(knowledgeCards).where(and(eq(knowledgeCards.type, candidate.type), inArray(knowledgeCards.lifecycleState, ["draft", "pending_operator", "active", "suppressed"]))).orderBy(asc(knowledgeCards.id)).limit(20);
   let decision: CandidateRelationDecision;
   try {
     decision = decideRelation ? await decideRelation({ candidate: { id: candidate.id, type: candidate.type, title: candidate.title, summary: candidate.summary }, shortlist }) : await decideCandidateRelation({ candidate: { id: candidate.id, type: candidate.type, title: candidate.title, summary: candidate.summary }, shortlist }, db);

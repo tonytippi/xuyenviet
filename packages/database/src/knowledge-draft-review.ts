@@ -36,7 +36,9 @@ export async function approveKnowledgeDraft(id: string, actor: KnowledgeReviewAc
   if (!draft || expectedUpdatedAt && draft.updatedAt.toISOString() !== expectedUpdatedAt) throw unavailable();
   const result = await getDb().transaction(async (transaction) => {
     await validateKnowledgeDraftApprovalInTransaction(transaction, id);
-    return transitionKnowledgeCard({ actor: { kind: "user", userId: actor.userId, email: actor.email }, fences: {}, trigger: { kind: "draft_publish", cardId: id } }, { transaction: (operation) => operation(transaction) } as ReturnType<typeof getDb>);
+    const [card] = await transaction.select({ contentVersion: knowledgeCards.contentVersion, evidenceSetRevision: knowledgeCards.evidenceSetRevision }).from(knowledgeCards).where(eq(knowledgeCards.id, id)).limit(1);
+    if (!card) throw unavailable();
+    return transitionKnowledgeCard({ actor: { kind: "user", userId: actor.userId, email: actor.email }, fences: card, trigger: { kind: "draft_publish", cardId: id } }, { transaction: (operation) => operation(transaction) } as ReturnType<typeof getDb>);
   });
   if (result.status !== "resolved") throw unavailable();
   return { draftId: id };
@@ -61,11 +63,12 @@ async function loadCards(condition: ReturnType<typeof eq> | ReturnType<typeof an
 }
 function unavailable() { return new KnowledgeDraftReviewError("Knowledge lifecycle transitions require the Story 15.3 command.", "not_reviewable"); }
 export async function validateKnowledgeDraftApprovalInTransaction(transaction: Pick<ReturnType<typeof getDb>, "select" | "execute">, id: string) {
-  const [card] = await transaction.select().from(knowledgeCards).where(and(eq(knowledgeCards.id, id), eq(knowledgeCards.lifecycleState, "draft"))).limit(1).for("update");
-  if (!card || !card.title.trim() || !card.summary.trim() || !card.locationName?.trim() && !card.routeSegment?.trim()) throw unavailable();
   const links = await transaction.select({ sourceId: knowledgeCardSources.sourceId }).from(knowledgeCardSources).where(eq(knowledgeCardSources.knowledgeCardId, id));
   if (!links.length) throw unavailable();
+  // Source locks precede the card lock everywhere provenance and lifecycle meet.
   for (const { sourceId } of links.sort((left, right) => left.sourceId.localeCompare(right.sourceId))) await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${sourceId}, 44))`);
+  const [card] = await transaction.select().from(knowledgeCards).where(and(eq(knowledgeCards.id, id), eq(knowledgeCards.lifecycleState, "draft"))).limit(1).for("update");
+  if (!card || !card.title.trim() || !card.summary.trim() || !card.locationName?.trim() && !card.routeSegment?.trim()) throw unavailable();
   const evidence = await transaction.select({ id: knowledgeCardEvidence.id, rawText: sourceCaptureVersions.rawText, fileName: sourceCaptureVersions.fileName, storageKey: sourceCaptureVersions.storageKey, rawMetadata: sourceCaptureVersions.rawMetadata }).from(knowledgeCardEvidence).innerJoin(sources, eq(sources.id, knowledgeCardEvidence.sourceId)).innerJoin(sourceCaptureVersions, eq(sourceCaptureVersions.id, knowledgeCardEvidence.captureVersionId)).where(and(eq(knowledgeCardEvidence.knowledgeCardId, id), eq(knowledgeCardEvidence.state, "active"), eq(sources.eligibility, "eligible"), eq(sources.currentCaptureVersionId, knowledgeCardEvidence.captureVersionId), isNull(sourceCaptureVersions.payloadDeletedAt)));
   if (!evidence.length || unsafeDraft(card, evidence.flatMap((row) => [row.rawText ?? "", row.fileName ?? "", row.storageKey ?? "", ...flattenStrings(row.rawMetadata)]))) throw unavailable();
 }

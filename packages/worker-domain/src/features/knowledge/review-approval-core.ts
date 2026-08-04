@@ -55,7 +55,9 @@ export async function validateKnowledgeDraftApprovalInTransaction(transaction: R
 async function approveKnowledgeDraftForActorInTransaction(transaction: ReviewMutationDb, actor: { userId: string; email: string } | null, draftId: string, executorSystem?: SystemAuditActorId) {
   await validateKnowledgeDraftApprovalInTransaction(transaction, draftId);
 
-  const result = await transitionKnowledgeCardInTransaction(transaction as any, { actor: executorSystem ? createSystemAuditActor(executorSystem) : toUserAuditActor(actor!), fences: {}, trigger: { kind: "draft_publish", cardId: draftId } });
+  const [card] = await transaction.select({ contentVersion: knowledgeCards.contentVersion, evidenceSetRevision: knowledgeCards.evidenceSetRevision }).from(knowledgeCards).where(eq(knowledgeCards.id, draftId)).limit(1);
+  if (!card) throw new KnowledgeDraftApprovalCoreError("Bản nháp này không còn trong trạng thái cần duyệt.", "not_reviewable");
+  const result = await transitionKnowledgeCardInTransaction(transaction as any, { actor: executorSystem ? createSystemAuditActor(executorSystem) : toUserAuditActor(actor!), fences: card, trigger: { kind: "draft_publish", cardId: draftId } });
   if (result.status !== "resolved") {
     throw new KnowledgeDraftApprovalCoreError("Bản nháp này không còn trong trạng thái cần duyệt.", "not_reviewable");
   }

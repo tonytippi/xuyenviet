@@ -105,10 +105,13 @@ export async function saveYoutubeEvidence(db: YoutubeCaptureDb, input: { sourceI
   return db.transaction(async (transaction) => {
     // Intake sources created before capture material became mandatory need a material row before capture.
     await transaction.insert(rawSourceMaterial).values({ sourceId: input.sourceId, rawMetadata: { kind: "submitted" } }).onConflictDoNothing();
-    const linkedCards = await transaction.select({ id: knowledgeCards.id }).from(knowledgeCardSources).innerJoin(knowledgeCards, eq(knowledgeCards.id, knowledgeCardSources.knowledgeCardId)).where(eq(knowledgeCardSources.sourceId, input.sourceId)).orderBy(asc(knowledgeCards.id));
-    for (const card of linkedCards) {
-      await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${card.id}, 46))`);
-      await transaction.select({ id: knowledgeCards.id }).from(knowledgeCards).where(eq(knowledgeCards.id, card.id)).limit(1).for("update");
+    const linkedCardIds = await transaction.select({ id: knowledgeCards.id }).from(knowledgeCardSources).innerJoin(knowledgeCards, eq(knowledgeCards.id, knowledgeCardSources.knowledgeCardId)).where(eq(knowledgeCardSources.sourceId, input.sourceId)).orderBy(asc(knowledgeCards.id));
+    const linkedCards: { id: string; contentVersion: number; evidenceSetRevision: number }[] = [];
+    for (const linkedCard of linkedCardIds) {
+      const cardId = linkedCard.id;
+      await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${cardId}, 46))`);
+      const [card] = await transaction.select({ id: knowledgeCards.id, contentVersion: knowledgeCards.contentVersion, evidenceSetRevision: knowledgeCards.evidenceSetRevision }).from(knowledgeCards).where(eq(knowledgeCards.id, cardId)).limit(1).for("update");
+      if (card) linkedCards.push(card);
     }
     const [queued] = await transaction
       .select({ rawMaterialId: rawSourceMaterial.id })
@@ -131,7 +134,8 @@ export async function saveYoutubeEvidence(db: YoutubeCaptureDb, input: { sourceI
     if (input.title) {
       await transaction.update(sources).set({ label: input.title }).where(eq(sources.id, input.sourceId));
       for (const card of linkedCards) {
-        await transitionKnowledgeCardInTransaction(transaction, { actor: createSystemAuditActor("system-youtube-capture"), fences: {}, trigger: { kind: "content_refresh", cardId: card.id, reason: "source_label" } });
+        const result = await transitionKnowledgeCardInTransaction(transaction, { actor: createSystemAuditActor("system-youtube-capture"), fences: { contentVersion: card.contentVersion, evidenceSetRevision: card.evidenceSetRevision }, trigger: { kind: "content_refresh", cardId: card.id, reason: "source_label" } });
+        if (result.status !== "resolved") throw new Error(`youtube_capture_lifecycle_transition_${result.status}`);
       }
     }
 
