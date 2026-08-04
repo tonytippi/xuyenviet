@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-08-04 (Action-item review removed completed, superseded, and launch-gate-transferred follow-ups; provider pricing and Tavily monitoring remain open.)
+# last_updated: 2026-08-04 (Epic 15 Stories 15.1-15.7 were prepared as ready-for-dev; provider pricing and Tavily monitoring remain open.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-08-04 (Action-item review removed completed, superseded, and launch-gate-transferred follow-ups; provider pricing and Tavily monitoring remain open.)
+last_updated: 2026-08-04 (Epic 15 Stories 15.1-15.7 were prepared as ready-for-dev; provider pricing and Tavily monitoring remain open.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -365,6 +365,17 @@ development_status:
   # The Story is complete as a fail-closed launch-gate deliverable; public launch remains no-go until all recorded staging and production gates pass.
   14-6-produce-the-direct-api-launch-evidence-gate: done
   epic-14-retrospective: optional
+
+  # Knowledge lifecycle normalization cutover is the next planned implementation epic.
+  epic-15: in-progress
+  15-1-establish-the-target-lifecycle-schema: ready-for-dev
+  15-2-complete-candidate-processing-and-technical-job-accounting: ready-for-dev
+  15-3-centralize-version-fenced-lifecycle-transitions: ready-for-dev
+  15-4-enforce-evidence-safe-retrieval-and-source-removal: ready-for-dev
+  15-5-separate-actionable-work-from-quality-sampling: ready-for-dev
+  15-6-deliver-target-shaped-operator-knowledge-views: ready-for-dev
+  15-7-prove-the-lifecycle-transition-matrix: ready-for-dev
+  epic-15-retrospective: optional
 
 action_items:
   - epic: 5
