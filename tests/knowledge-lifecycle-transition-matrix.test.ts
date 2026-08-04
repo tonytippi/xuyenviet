@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test } from "vitest";
 
-import { knowledgeCardEvidence, knowledgeCardSources, knowledgeCards, knowledgeIngestionCandidates, knowledgeIngestionJobs, knowledgeRecommendations, knowledgeSamplingObligations, sources } from "@/db/schema";
+import { knowledgeCardEvidence, knowledgeCardSources, knowledgeCards, knowledgeIngestionCandidates, knowledgeIngestionJobs, knowledgeRecommendations, knowledgeSamplingObligations, knowledgeSamplingRecommendationObligations, sources } from "@/db/schema";
 import { transitionKnowledgeCard } from "@/db/knowledge-lifecycle";
 import { resolveKnowledgeRecommendation } from "@/db/knowledge-recommendations";
 import { appendSourceCaptureVersion } from "@/features/knowledge/source-captures";
@@ -58,8 +58,9 @@ describe("knowledge lifecycle transition matrix", () => {
     await testDb.insert(sources).values({ id: "source", kind: "pasted_text", label: "Nguồn", sourceType: "curated", verificationStatus: "unverified", official: false, partner: false, eligibility: "eligible", submittedByUserId: "operator" });
     const capture = await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText: "Nguồn an toàn.", metadata: { kind: "submitted" } });
     const [job] = await testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.captureVersionId, capture.id));
-    await testDb.insert(knowledgeIngestionCandidates).values({ id: "candidate", ingestionJobId: job!.id, sourceId: "source", captureVersionId: capture.id, fingerprint: "sampling-candidate", type: "place", title: "Điểm", summary: "Tóm tắt.", conditions: [], spanStart: 0, spanEnd: 1, extractionPromptVersion: "test" });
-    await testDb.insert(knowledgeSamplingObligations).values({ candidateId: "candidate", knowledgeCardId: "card", contentVersion: 1, evidenceSetRevision: 1 });
+    await testDb.insert(knowledgeIngestionCandidates).values({ id: "candidate", ingestionJobId: job!.id, sourceId: "source", captureVersionId: capture.id, fingerprint: "sampling-candidate", type: "place", title: "Điểm", summary: "Tóm tắt.", conditions: [], spanStart: 0, spanEnd: 1, extractionPromptVersion: "test", processingStatus: "completed", aiDisposition: "needs_operator", outcomeReasonCode: "verification_required", knowledgeCardId: "card" });
+    const [obligation] = await testDb.insert(knowledgeSamplingObligations).values({ candidateId: "candidate", knowledgeCardId: "card", contentVersion: 1, evidenceSetRevision: 1 }).returning();
+    await testDb.insert(knowledgeSamplingRecommendationObligations).values({ recommendationId: work!.id, obligationId: obligation!.id });
     await expect(transitionKnowledgeCard({ actor: { kind: "user", userId: "operator", email: "operator@example.com" }, fences: { recommendationId: work!.id, contentVersion: 1, evidenceSetRevision: 1 }, trigger: { kind: "operator_resolution", recommendationId: work!.id, resolution: "sampling_failed" } }, testDb)).resolves.toMatchObject({ status: "resolved" });
     await expect(testDb.select().from(knowledgeSamplingObligations)).resolves.toMatchObject([{ samplingDisposition: "sampling_failed", sampledAt: expect.any(Date) }]);
   });

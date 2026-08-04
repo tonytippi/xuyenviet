@@ -6,7 +6,7 @@ import { recordAuditEvent } from "./audit-writers";
 import { getDb } from "./client";
 import { disableStaleKnowledgeSearchProjection, enqueueKnowledgeIndexWork } from "./knowledge-indexing-queue";
 import { lockKnowledgeIngestionJob, projectAndFinalizeKnowledgeIngestionJob } from "./knowledge-ingestion-accounting";
-import { knowledgeCardEvidence, knowledgeCardSources, knowledgeCards, knowledgeIngestionCandidates, knowledgeRecommendations, knowledgeSamplingObligations, sourceCaptureVersions, sources } from "./schema";
+import { knowledgeCardEvidence, knowledgeCardSources, knowledgeCards, knowledgeIngestionCandidates, knowledgeRecommendations, knowledgeSamplingCohortMembers, knowledgeSamplingObligations, knowledgeSamplingPolicies, knowledgeSamplingRecommendationObligations, sourceCaptureVersions, sources } from "./schema";
 
 type LifecycleDb = ReturnType<typeof getDb>;
 type LifecycleTransaction = Parameters<Parameters<LifecycleDb["transaction"]>[0]>[0];
@@ -25,11 +25,41 @@ export async function transitionKnowledgeCard(input: TransitionKnowledgeCardInpu
 export async function transitionKnowledgeCardInTransaction(transaction: LifecycleTransaction, input: TransitionKnowledgeCardInput): Promise<TransitionKnowledgeCardResult> {
   if (input.trigger.kind === "candidate_relation") return transitionCandidateRelation(transaction, input);
   if (input.trigger.kind === "operator_resolution") return transitionOperatorResolution(transaction, input);
+  if (input.trigger.kind === "sampling_containment") return transitionSamplingContainment(transaction, input);
   if (input.trigger.kind === "draft_publish") return transitionDraftPublish(transaction, input);
   if (input.trigger.kind === "open_work") return transitionOpenWork(transaction, input);
   if (input.trigger.kind === "content_refresh") return transitionContentRefresh(transaction, input);
   if (input.trigger.kind === "archive" || input.trigger.kind === "restore") return transitionArchiveRestore(transaction, input);
   return transitionSupportLoss(transaction, input);
+}
+
+async function transitionSamplingContainment(transaction: LifecycleTransaction, input: TransitionKnowledgeCardInput): Promise<TransitionKnowledgeCardResult> {
+  const trigger = input.trigger as Extract<KnowledgeLifecycleTrigger, { kind: "sampling_containment" }>;
+  const fences = versionFences(input);
+  const [policy] = await transaction.select().from(knowledgeSamplingPolicies).where(and(eq(knowledgeSamplingPolicies.id, trigger.policyId), eq(knowledgeSamplingPolicies.enrollmentDigest, trigger.enrollmentDigest))).limit(1).for("update");
+  if (!policy?.enrollmentSealedAt) return { status: "stale" };
+  const [initiator] = await transaction.select().from(knowledgeRecommendations).where(and(eq(knowledgeRecommendations.id, trigger.recommendationId), eq(knowledgeRecommendations.status, "open"), eq(knowledgeRecommendations.workType, "sampling"), eq(knowledgeRecommendations.policyId, policy.id), eq(knowledgeRecommendations.contentVersion, fences.contentVersion), eq(knowledgeRecommendations.evidenceSetRevision, fences.evidenceSetRevision))).limit(1).for("update");
+  if (!initiator || fences.recommendationId !== initiator.id) return { status: "stale" };
+  const members = await transaction.select({ cardId: knowledgeSamplingCohortMembers.knowledgeCardId, contentVersion: knowledgeSamplingCohortMembers.contentVersion, evidenceSetRevision: knowledgeSamplingCohortMembers.evidenceSetRevision }).from(knowledgeSamplingCohortMembers).where(and(eq(knowledgeSamplingCohortMembers.policyId, policy.id), eq(knowledgeSamplingCohortMembers.selectedForSampling, true))).orderBy(asc(knowledgeSamplingCohortMembers.knowledgeCardId), asc(knowledgeSamplingCohortMembers.contentVersion), asc(knowledgeSamplingCohortMembers.evidenceSetRevision));
+  if (members.length !== trigger.members.length || members.some((member, index) => member.cardId !== trigger.members[index]?.cardId || member.contentVersion !== trigger.members[index]?.contentVersion || member.evidenceSetRevision !== trigger.members[index]?.evidenceSetRevision)) return { status: "stale" };
+  const cards = [] as Array<typeof knowledgeCards.$inferSelect>;
+  for (const member of trigger.members) {
+    const [card] = await transaction.select().from(knowledgeCards).where(eq(knowledgeCards.id, member.cardId)).limit(1).for("update");
+    if (!card || card.lifecycleState !== "active" || card.contentVersion !== member.contentVersion || card.evidenceSetRevision !== member.evidenceSetRevision) return { status: "stale" };
+    cards.push(card);
+  }
+  for (let index = 0; index < cards.length; index += 1) {
+    const card = cards[index]!;
+    const member = trigger.members[index]!;
+    await transaction.update(knowledgeRecommendations).set({ status: "superseded", resolution: "sampling_failed", resolvedAt: new Date(), updatedAt: new Date() }).where(and(eq(knowledgeRecommendations.knowledgeCardId, card.id), eq(knowledgeRecommendations.status, "open"), eq(knowledgeRecommendations.workType, "sampling")));
+    await transaction.update(knowledgeSamplingObligations).set({ samplingDisposition: "sampling_failed", sampledAt: new Date() }).where(and(eq(knowledgeSamplingObligations.knowledgeCardId, card.id), eq(knowledgeSamplingObligations.contentVersion, card.contentVersion), eq(knowledgeSamplingObligations.evidenceSetRevision, card.evidenceSetRevision), isNull(knowledgeSamplingObligations.samplingDisposition)));
+    const [updated] = await transaction.update(knowledgeCards).set({ lifecycleState: member.disposition === "unsafe" ? "suppressed" : "pending_operator", verificationRequirement: member.disposition === "unsafe" ? "none" : "failed", contentVersion: sql`${knowledgeCards.contentVersion} + 1`, updatedAt: new Date() }).where(and(eq(knowledgeCards.id, card.id), eq(knowledgeCards.contentVersion, card.contentVersion), eq(knowledgeCards.evidenceSetRevision, card.evidenceSetRevision))).returning({ contentVersion: knowledgeCards.contentVersion, evidenceSetRevision: knowledgeCards.evidenceSetRevision });
+    if (!updated) throw new StaleLifecycleTransition();
+    if (member.disposition === "remediable") await openWork(transaction, input, card.id, updated.contentVersion, updated.evidenceSetRevision, "risk", { policyId: policy.id, enrollmentDigest: trigger.enrollmentDigest }, policy.id);
+    await lifecycleEffects(transaction, input, card.id, updated.contentVersion, updated.evidenceSetRevision, "sampling_containment", `Contained ${member.disposition} cohort member.`);
+  }
+  await transaction.update(knowledgeSamplingPolicies).set({ escalatedAt: new Date(), suppressedAt: new Date() }).where(eq(knowledgeSamplingPolicies.id, policy.id));
+  return { status: "resolved", cardId: initiator.knowledgeCardId, contentVersion: initiator.contentVersion, evidenceSetRevision: initiator.evidenceSetRevision };
 }
 
 async function transitionCandidateRelation(transaction: LifecycleTransaction, input: TransitionKnowledgeCardInput): Promise<TransitionKnowledgeCardResult> {
@@ -129,21 +159,19 @@ async function transitionOperatorResolution(transaction: LifecycleTransaction, i
   if (!card || card.contentVersion !== recommendation.contentVersion || card.evidenceSetRevision !== recommendation.evidenceSetRevision) return { status: "stale" };
   if (!resolutionMatchesWorkType(recommendation.workType, trigger.resolution)) return { status: "invalid", reason: "invalid_resolution" };
   if (recommendation.workType === "sampling" && card.lifecycleState !== "active" || recommendation.workType !== "sampling" && card.lifecycleState !== "pending_operator") return { status: "stale" };
-  const publish = trigger.resolution === "published_operator_confirmed" || trigger.resolution === "published_community_observation" || trigger.resolution === "relation_resolved" || trigger.resolution === "sampling_passed";
-  const samplingFailed = trigger.resolution === "sampling_failed";
-  if (publish && !(await hasEligibleSupport(transaction, card.id))) return { status: "invalid", reason: "ineligible_support" };
-  if (trigger.resolution === "sampling_passed") {
-    await transaction.update(knowledgeSamplingObligations).set({ samplingDisposition: trigger.resolution, sampledAt: new Date() }).where(and(eq(knowledgeSamplingObligations.knowledgeCardId, card.id), eq(knowledgeSamplingObligations.contentVersion, recommendation.contentVersion), eq(knowledgeSamplingObligations.evidenceSetRevision, recommendation.evidenceSetRevision), isNull(knowledgeSamplingObligations.samplingDisposition)));
+  const publish = trigger.resolution === "published_operator_confirmed" || trigger.resolution === "published_community_observation" || trigger.resolution === "relation_resolved";
+  if (recommendation.workType === "sampling") {
+    await resolveSamplingObligations(transaction, recommendation.id, trigger.resolution as "sampling_passed" | "sampling_failed");
     await resolveWork(transaction, recommendation.id, input, trigger.resolution);
-    await recordAuditEvent({ actor: input.actor, operation: "update", targetType: "knowledge_lifecycle", targetId: card.id, afterSummary: `Operator resolution: recommendationId=${recommendation.id}; resolution=${trigger.resolution}.` }, transaction);
+    await recordAuditEvent({ actor: input.actor, operation: "update", targetType: "knowledge_lifecycle", targetId: card.id, afterSummary: `Sampling outcome: recommendationId=${recommendation.id}; resolution=${trigger.resolution}.` }, transaction);
     return { status: "resolved", cardId: card.id, contentVersion: card.contentVersion, evidenceSetRevision: card.evidenceSetRevision };
   }
-  const [updated] = await transaction.update(knowledgeCards).set({ lifecycleState: publish ? "active" : samplingFailed ? "pending_operator" : trigger.resolution === "suppressed" ? "suppressed" : "pending_operator", verificationRequirement: publish || trigger.resolution === "suppressed" ? "none" : samplingFailed ? "failed" : card.verificationRequirement, contentVersion: sql`${knowledgeCards.contentVersion} + 1`, updatedAt: new Date() }).where(and(eq(knowledgeCards.id, card.id), eq(knowledgeCards.contentVersion, card.contentVersion), eq(knowledgeCards.evidenceSetRevision, card.evidenceSetRevision))).returning({ contentVersion: knowledgeCards.contentVersion, evidenceSetRevision: knowledgeCards.evidenceSetRevision });
+  if (publish && !(await hasEligibleSupport(transaction, card.id))) return { status: "invalid", reason: "ineligible_support" };
+  const [updated] = await transaction.update(knowledgeCards).set({ lifecycleState: publish ? "active" : trigger.resolution === "suppressed" ? "suppressed" : "pending_operator", verificationRequirement: publish || trigger.resolution === "suppressed" ? "none" : card.verificationRequirement, contentVersion: sql`${knowledgeCards.contentVersion} + 1`, updatedAt: new Date() }).where(and(eq(knowledgeCards.id, card.id), eq(knowledgeCards.contentVersion, card.contentVersion), eq(knowledgeCards.evidenceSetRevision, card.evidenceSetRevision))).returning({ contentVersion: knowledgeCards.contentVersion, evidenceSetRevision: knowledgeCards.evidenceSetRevision });
   if (!updated) return { status: "stale" };
-  if (samplingFailed) await transaction.update(knowledgeSamplingObligations).set({ samplingDisposition: trigger.resolution, sampledAt: new Date() }).where(and(eq(knowledgeSamplingObligations.knowledgeCardId, card.id), eq(knowledgeSamplingObligations.contentVersion, recommendation.contentVersion), eq(knowledgeSamplingObligations.evidenceSetRevision, recommendation.evidenceSetRevision), isNull(knowledgeSamplingObligations.samplingDisposition)));
   await supersedeOpenWork(transaction, card.id);
   await resolveWork(transaction, recommendation.id, input, trigger.resolution);
-  if (trigger.resolution === "edited_and_requeued" || samplingFailed) await openWork(transaction, input, card.id, updated.contentVersion, updated.evidenceSetRevision, samplingFailed ? "risk" : recommendation.workType, { predecessorId: recommendation.id });
+  if (trigger.resolution === "edited_and_requeued") await openWork(transaction, input, card.id, updated.contentVersion, updated.evidenceSetRevision, recommendation.workType, { predecessorId: recommendation.id });
   await disableStaleKnowledgeSearchProjection(transaction, card.id, updated.contentVersion);
   await enqueueKnowledgeIndexWork(transaction, { cardId: card.id, contentVersion: updated.contentVersion, evidenceSetRevision: updated.evidenceSetRevision, reason: "lifecycle_transition", executorSystem: input.actor.kind === "system" ? input.actor.system : undefined });
   await recordAuditEvent({ actor: input.actor, operation: "update", targetType: "knowledge_lifecycle", targetId: card.id, afterSummary: `Operator resolution: recommendationId=${recommendation.id}; resolution=${trigger.resolution}.` }, transaction);
@@ -169,7 +197,14 @@ async function transitionOpenWork(transaction: LifecycleTransaction, input: Tran
   const [card] = await transaction.select().from(knowledgeCards).where(eq(knowledgeCards.id, trigger.cardId)).limit(1).for("update");
   if (!card) return { status: "invalid", reason: "target_not_found" };
   if (fences.contentVersion !== card.contentVersion || fences.evidenceSetRevision !== card.evidenceSetRevision) return { status: "stale" };
-  if (trigger.workType === "sampling" && card.lifecycleState !== "active") return { status: "invalid", reason: "invalid_work_state" };
+  if (trigger.workType === "sampling" && (card.lifecycleState !== "active" || card.verificationRequirement !== "none")) return { status: "invalid", reason: "invalid_work_state" };
+  if (trigger.workType === "sampling" && (!trigger.policyId || !trigger.obligationIds?.length)) return { status: "invalid", reason: "invalid_sampling_scope" };
+  if (trigger.workType === "sampling") {
+    const [policy] = await transaction.select({ enrollmentSealedAt: knowledgeSamplingPolicies.enrollmentSealedAt }).from(knowledgeSamplingPolicies).where(eq(knowledgeSamplingPolicies.id, trigger.policyId!)).limit(1);
+    const [member] = await transaction.select({ knowledgeCardId: knowledgeSamplingCohortMembers.knowledgeCardId }).from(knowledgeSamplingCohortMembers).where(and(eq(knowledgeSamplingCohortMembers.policyId, trigger.policyId!), eq(knowledgeSamplingCohortMembers.knowledgeCardId, card.id), eq(knowledgeSamplingCohortMembers.contentVersion, card.contentVersion), eq(knowledgeSamplingCohortMembers.evidenceSetRevision, card.evidenceSetRevision), eq(knowledgeSamplingCohortMembers.selectedForSampling, true))).limit(1);
+    const [primary] = await transaction.select({ id: knowledgeRecommendations.id }).from(knowledgeRecommendations).where(and(eq(knowledgeRecommendations.knowledgeCardId, card.id), eq(knowledgeRecommendations.contentVersion, card.contentVersion), eq(knowledgeRecommendations.evidenceSetRevision, card.evidenceSetRevision), eq(knowledgeRecommendations.status, "open"), inArray(knowledgeRecommendations.workType, ["verification", "relation", "risk", "missing_context"]))).limit(1);
+    if (!policy?.enrollmentSealedAt || !member || primary) return { status: "invalid", reason: "invalid_sampling_scope" };
+  }
   if (trigger.workType !== "sampling" && card.lifecycleState !== "pending_operator" && card.lifecycleState !== "suppressed") return { status: "invalid", reason: "invalid_work_state" };
   let contentVersion = card.contentVersion;
   if (card.lifecycleState === "suppressed") {
@@ -177,7 +212,7 @@ async function transitionOpenWork(transaction: LifecycleTransaction, input: Tran
     if (!reopened) return { status: "stale" };
     contentVersion = reopened.contentVersion;
   }
-  await openWork(transaction, input, card.id, contentVersion, card.evidenceSetRevision, trigger.workType, trigger.policySnapshot ?? {}, trigger.policyId);
+  await openWork(transaction, input, card.id, contentVersion, card.evidenceSetRevision, trigger.workType, trigger.policySnapshot ?? {}, trigger.policyId, trigger.obligationIds);
   if (contentVersion !== card.contentVersion) await lifecycleEffects(transaction, input, card.id, contentVersion, card.evidenceSetRevision, "open_work", `Reopened suppressed card with ${trigger.workType} work.`);
   else await recordAuditEvent({ actor: input.actor, operation: "update", targetType: "knowledge_lifecycle", targetId: card.id, afterSummary: `Opened ${trigger.workType} work at the current fence.` }, transaction);
   return { status: "resolved", cardId: card.id, contentVersion, evidenceSetRevision: card.evidenceSetRevision };
@@ -251,8 +286,13 @@ async function lifecycleEffects(transaction: LifecycleTransaction, input: Transi
   await recordAuditEvent({ actor: input.actor, operation: "update", targetType: "knowledge_lifecycle", targetId: cardId, afterSummary: `${summary} reason=${reason}.` }, transaction);
 }
 
-async function openWork(transaction: LifecycleTransaction, input: TransitionKnowledgeCardInput, cardId: string, contentVersion: number, evidenceSetRevision: number, workType: "verification" | "relation" | "risk" | "missing_context" | "sampling", policySnapshot: Record<string, unknown>, policyId?: string | null) {
-  await transaction.insert(knowledgeRecommendations).values({ knowledgeCardId: cardId, contentVersion, evidenceSetRevision, workType, priority: workPriority(workType), policyId: policyId ?? null, policySnapshot, executorSystem: input.actor.kind === "system" ? input.actor.system : null }).onConflictDoNothing();
+async function openWork(transaction: LifecycleTransaction, input: TransitionKnowledgeCardInput, cardId: string, contentVersion: number, evidenceSetRevision: number, workType: "verification" | "relation" | "risk" | "missing_context" | "sampling", policySnapshot: Record<string, unknown>, policyId?: string | null, obligationIds?: readonly string[]) {
+  const [work] = await transaction.insert(knowledgeRecommendations).values({ knowledgeCardId: cardId, contentVersion, evidenceSetRevision, workType, priority: workPriority(workType), policyId: policyId ?? null, policySnapshot, executorSystem: input.actor.kind === "system" ? input.actor.system : null }).onConflictDoNothing().returning({ id: knowledgeRecommendations.id });
+  if (workType === "sampling" && work && obligationIds?.length) await transaction.insert(knowledgeSamplingRecommendationObligations).values(obligationIds.map((obligationId) => ({ recommendationId: work.id, obligationId }))).onConflictDoNothing();
+}
+
+async function resolveSamplingObligations(transaction: LifecycleTransaction, recommendationId: string, resolution: "sampling_passed" | "sampling_failed") {
+  await transaction.update(knowledgeSamplingObligations).set({ samplingDisposition: resolution, sampledAt: new Date() }).where(and(sql`exists (select 1 from ${knowledgeSamplingRecommendationObligations} association where association.obligation_id = ${knowledgeSamplingObligations.id} and association.recommendation_id = ${recommendationId})`, isNull(knowledgeSamplingObligations.samplingDisposition)));
 }
 
 async function supersedeOpenWork(transaction: LifecycleTransaction, cardId: string) {

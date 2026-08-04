@@ -8,7 +8,7 @@ import postgres from "postgres";
 import { readApprovedSchemaReleasePhasePolicy } from "@xuyenviet/config";
 import { admitsSchemaReleasePhasePolicy, consoleOperationalTelemetrySink, correlationId, emitOperationalTelemetry, evaluateSchemaAdmission, schemaCompatibilityDeclarations, type OperationalTelemetrySink, type SchemaReleasePhasePolicy } from "@xuyenviet/contracts";
 
-const adapterNames = ["knowledge-extraction", "knowledge-ingestion", "knowledge-indexing", "ai-ask-outbox"] as const;
+const adapterNames = ["knowledge-extraction", "knowledge-ingestion", "knowledge-indexing", "knowledge-sampling", "ai-ask-outbox"] as const;
 type AdapterName = (typeof adapterNames)[number];
 
 export type WorkerConfig = { databaseUrl: string; port: number; gracefulShutdownMs: number; pollIntervalMs: number };
@@ -32,6 +32,7 @@ export function createChildProcessAdapters(root = resolve(fileURLToPath(new URL(
     childAdapter("knowledge-extraction", ["node", "apps/worker/dist/adapters/extraction.mjs", "extraction", "--once", `--worker-id=worker-extraction-${process.pid}`], root),
     childAdapter("knowledge-ingestion", ["node", "apps/worker/dist/adapters/ingestion.mjs", "ingestion", "--once", `--worker-id=worker-ingestion-${process.pid}`], root),
     childAdapter("knowledge-indexing", ["node", "apps/worker/dist/adapters/indexing.mjs", "indexing", "--once", `--worker-id=worker-indexing-${process.pid}`], root),
+    childAdapter("knowledge-sampling", ["node", "apps/worker/dist/adapters/sampling.mjs", "sampling", "--once", `--worker-id=worker-sampling-${process.pid}`], root),
     childAdapter("ai-ask-outbox", ["node", "apps/worker/dist/adapters/outbox.mjs", "outbox", "--once", `--worker-id=worker-outbox-${process.pid}`], root),
   ];
 }
@@ -104,7 +105,7 @@ export class WorkerRuntime {
   }
 
   get ready() {
-    return Boolean(this.config) && !this.draining && this.databaseReady && this.schemaReady && this.adapters.length === adapterNames.length && this.adapters.every((adapter) => this.states.get(adapter.name) === "ready");
+    return Boolean(this.config) && !this.draining && this.databaseReady && this.schemaReady && this.adapters.every((adapter) => this.states.get(adapter.name) === "ready");
   }
 
   get healthPort() {
@@ -189,7 +190,7 @@ export class WorkerRuntime {
   }
 
   private emit(capability: string, resultCode: string, startedAt: number) {
-    const workerCapability = ({ "knowledge-extraction": "knowledge.extraction", "knowledge-ingestion": "knowledge.ingestion", "knowledge-indexing": "knowledge.indexing", "ai-ask-outbox": "ai_ask.outbox" } as Record<string, string>)[capability] ?? capability;
+    const workerCapability = ({ "knowledge-extraction": "knowledge.extraction", "knowledge-ingestion": "knowledge.ingestion", "knowledge-indexing": "knowledge.indexing", "knowledge-sampling": "knowledge.sampling", "ai-ask-outbox": "ai_ask.outbox" } as Record<string, string>)[capability] ?? capability;
     emitOperationalTelemetry(this.telemetry, { correlationId: correlationId(), capability: workerCapability, principalClass: "system", resultCode, latencyMs: Math.min(Date.now() - startedAt, 86_400_000) });
   }
 }

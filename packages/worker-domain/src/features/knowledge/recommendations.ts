@@ -1,6 +1,6 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 
-import { getDb, knowledgeCardEvidence, knowledgeCards, knowledgeRecommendations, transitionKnowledgeCard, type KnowledgeRecommendationResolution, type KnowledgeRecommendationWorkType } from "@xuyenviet/database";
+import { getDb, knowledgeCardEvidence, knowledgeCards, knowledgeRecommendations, knowledgeSamplingPolicies, selectKnowledgeSamplingPolicy, transitionKnowledgeCard, type KnowledgeRecommendationResolution, type KnowledgeRecommendationWorkType } from "@xuyenviet/database";
 import { type SystemAuditActorId } from "../audit/actors";
 
 type RecommendationDb = ReturnType<typeof getDb>;
@@ -38,6 +38,14 @@ export async function resolveKnowledgeRecommendation(input: { recommendationId: 
   const [recommendation] = await db.select({ workType: knowledgeRecommendations.workType }).from(knowledgeRecommendations).where(eq(knowledgeRecommendations.id, input.recommendationId)).limit(1);
   if (!recommendation || !resolutionMatchesWorkType(recommendation.workType, input.resolution)) return { status: "invalid" as const };
   return transitionKnowledgeCard({ actor: { kind: "user", userId: input.actor.userId, email: input.actor.email }, fences: { contentVersion: input.expectedContentVersion, evidenceSetRevision: input.expectedEvidenceSetRevision, recommendationId: input.recommendationId }, trigger: { kind: "operator_resolution", recommendationId: input.recommendationId, resolution: input.resolution } }, db);
+}
+
+/** Selection remains a Worker capability; API/admin may only seal a closed cohort. */
+export async function runKnowledgeSamplingSelection(db: RecommendationDb = getDb()) {
+  const policies = await db.select({ id: knowledgeSamplingPolicies.id }).from(knowledgeSamplingPolicies).where(sql`${knowledgeSamplingPolicies.enrollmentSealedAt} is null`).orderBy(asc(knowledgeSamplingPolicies.windowStartsAt), asc(knowledgeSamplingPolicies.id)).limit(25);
+  let selectedCount = 0;
+  for (const policy of policies) selectedCount += (await selectKnowledgeSamplingPolicy(policy.id, db)).selectedCount;
+  return { selectedCount };
 }
 
 function resolutionMatchesWorkType(workType: KnowledgeRecommendationWorkType, resolution: KnowledgeRecommendationResolution) {

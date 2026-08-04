@@ -1,8 +1,9 @@
-import { and, asc, count, eq, inArray } from "drizzle-orm";
+import { createHash } from "node:crypto";
+import { and, asc, count, eq, inArray, isNull, lte, sql } from "drizzle-orm";
 
 import { getDb } from "./client";
-import { transitionKnowledgeCard } from "./knowledge-lifecycle";
-import { facebookCaptureReviews, knowledgeCardEvidence, knowledgeCards, knowledgeRecommendations, sources, type KnowledgeRecommendationAction, type KnowledgeRecommendationWorkType } from "./schema";
+import { transitionKnowledgeCard, transitionKnowledgeCardInTransaction } from "./knowledge-lifecycle";
+import { facebookCaptureReviews, knowledgeCardEvidence, knowledgeCards, knowledgeRecommendations, knowledgeSamplingCohortMembers, knowledgeSamplingObligations, knowledgeSamplingPolicies, sources, type KnowledgeRecommendationAction, type KnowledgeRecommendationWorkType } from "./schema";
 
 type RecommendationDb = ReturnType<typeof getDb>;
 
@@ -71,10 +72,58 @@ function actionResolution(action: KnowledgeRecommendationAction) {
   return ({ accept_wording: "published_operator_confirmed", edit: "edited_and_requeued", suppress: "suppressed", verify: "published_operator_confirmed", promote: "published_community_observation", resolve_relation: "relation_resolved", sampling_pass: "sampling_passed", sampling_fail: "sampling_failed" } as const)[action];
 }
 
-export async function sealClosedKnowledgeSamplingPolicy(_policyId: string) { return { status: "unavailable" as const }; }
-export async function getPublicMvpSamplingReadinessEvidence(_db?: unknown) { return { complete: false, policies: 0, zeroApplicablePolicies: 0, incompletePolicies: 0, pending: 0, failed: 0, highSeverity: 0, obligations: 0 }; }
+export async function sealClosedKnowledgeSamplingPolicy(policyId: string, db: RecommendationDb = getDb()) {
+  return db.transaction(async (transaction) => {
+    const [policy] = await transaction.select().from(knowledgeSamplingPolicies).where(eq(knowledgeSamplingPolicies.id, policyId)).limit(1).for("update");
+    if (!policy) return { status: "unavailable" as const };
+    if (policy.windowEndsAt > new Date()) return { status: "incomplete" as const };
+    const members = await transaction.select({ knowledgeCardId: knowledgeSamplingCohortMembers.knowledgeCardId, contentVersion: knowledgeSamplingCohortMembers.contentVersion, evidenceSetRevision: knowledgeSamplingCohortMembers.evidenceSetRevision, selectedForSampling: knowledgeSamplingCohortMembers.selectedForSampling }).from(knowledgeSamplingCohortMembers).where(eq(knowledgeSamplingCohortMembers.policyId, policy.id)).orderBy(asc(knowledgeSamplingCohortMembers.knowledgeCardId), asc(knowledgeSamplingCohortMembers.contentVersion), asc(knowledgeSamplingCohortMembers.evidenceSetRevision));
+    const digest = digestEnrollment(policy, members);
+    if (policy.enrollmentSealedAt && policy.enrollmentDigest !== digest) return { status: "incomplete" as const };
+    if (!policy.enrollmentSealedAt) await transaction.update(knowledgeSamplingPolicies).set({ enrollmentCandidateCount: members.length, enrollmentSelectedCount: members.filter((member) => member.selectedForSampling).length, enrollmentDigest: digest, enrollmentSealedAt: new Date() }).where(eq(knowledgeSamplingPolicies.id, policy.id));
+    return { status: "sealed" as const, candidateCount: members.length, selectedCount: members.filter((member) => member.selectedForSampling).length };
+  });
+}
+
+/** Worker-owned enrollment: target policy samples auto-active cards only. */
+export async function selectKnowledgeSamplingPolicy(policyId: string, db: RecommendationDb = getDb()) {
+  return db.transaction(async (transaction) => {
+    const [policy] = await transaction.select().from(knowledgeSamplingPolicies).where(eq(knowledgeSamplingPolicies.id, policyId)).limit(1).for("update");
+    if (!policy || policy.enrollmentSealedAt || policy.windowEndsAt > new Date()) return { status: "unavailable" as const, selectedCount: 0 };
+    const cards = await transaction.select({ id: knowledgeCards.id, contentVersion: knowledgeCards.contentVersion, evidenceSetRevision: knowledgeCards.evidenceSetRevision }).from(knowledgeCards).where(and(eq(knowledgeCards.lifecycleState, "active"), eq(knowledgeCards.verificationRequirement, "none"), eq(knowledgeCards.executorSystem, "system-knowledge-pipeline"))).orderBy(asc(knowledgeCards.id));
+    for (const card of cards) {
+      const selected = shouldSampleKnowledgeCard(card.id, card.contentVersion, policy.windowStartsAt, policy.samplingPercent);
+      await transaction.insert(knowledgeSamplingCohortMembers).values({ policyId: policy.id, knowledgeCardId: card.id, contentVersion: card.contentVersion, evidenceSetRevision: card.evidenceSetRevision, selectedForSampling: selected }).onConflictDoNothing();
+    }
+    const members = await transaction.select({ knowledgeCardId: knowledgeSamplingCohortMembers.knowledgeCardId, contentVersion: knowledgeSamplingCohortMembers.contentVersion, evidenceSetRevision: knowledgeSamplingCohortMembers.evidenceSetRevision, selectedForSampling: knowledgeSamplingCohortMembers.selectedForSampling }).from(knowledgeSamplingCohortMembers).where(eq(knowledgeSamplingCohortMembers.policyId, policy.id)).orderBy(asc(knowledgeSamplingCohortMembers.knowledgeCardId), asc(knowledgeSamplingCohortMembers.contentVersion), asc(knowledgeSamplingCohortMembers.evidenceSetRevision));
+    const digest = digestEnrollment(policy, members);
+    await transaction.update(knowledgeSamplingPolicies).set({ enrollmentCandidateCount: members.length, enrollmentSelectedCount: members.filter((member) => member.selectedForSampling).length, enrollmentDigest: digest, enrollmentSealedAt: new Date() }).where(and(eq(knowledgeSamplingPolicies.id, policy.id), isNull(knowledgeSamplingPolicies.enrollmentSealedAt)));
+    for (const member of members) {
+      if (!member.selectedForSampling) continue;
+      const obligations = await transaction.select({ id: knowledgeSamplingObligations.id }).from(knowledgeSamplingObligations).where(and(eq(knowledgeSamplingObligations.knowledgeCardId, member.knowledgeCardId), eq(knowledgeSamplingObligations.contentVersion, member.contentVersion), eq(knowledgeSamplingObligations.evidenceSetRevision, member.evidenceSetRevision), isNull(knowledgeSamplingObligations.samplingDisposition)));
+      if (obligations.length) await transitionKnowledgeCardInTransaction(transaction, { actor: { kind: "system", system: "system-knowledge-pipeline" }, fences: member, trigger: { kind: "open_work", cardId: member.knowledgeCardId, workType: "sampling", policyId: policy.id, policySnapshot: { cohortKey: policy.cohortKey, enrollmentDigest: digest, enrollmentScope: "auto_active" }, obligationIds: obligations.map((obligation) => obligation.id) } });
+    }
+    return { status: "selected" as const, selectedCount: members.filter((member) => member.selectedForSampling).length };
+  });
+}
+
+export async function getPublicMvpSamplingReadinessEvidence(db: Pick<RecommendationDb, "select"> = getDb()) {
+  const [policies, obligations, pending, failed, highSeverity] = await Promise.all([
+    db.select({ sealed: knowledgeSamplingPolicies.enrollmentSealedAt, candidateCount: knowledgeSamplingPolicies.enrollmentCandidateCount }).from(knowledgeSamplingPolicies).where(lte(knowledgeSamplingPolicies.windowEndsAt, new Date())),
+    db.select({ count: count() }).from(knowledgeSamplingObligations),
+    db.select({ count: count() }).from(knowledgeSamplingObligations).where(isNull(knowledgeSamplingObligations.samplingDisposition)),
+    db.select({ count: count() }).from(knowledgeSamplingObligations).where(eq(knowledgeSamplingObligations.samplingDisposition, "sampling_failed")),
+    db.select({ count: count() }).from(knowledgeSamplingPolicies).where(sql`${knowledgeSamplingPolicies.escalatedAt} is not null or ${knowledgeSamplingPolicies.suppressedAt} is not null`),
+  ]);
+  const incompletePolicies = policies.filter((policy) => !policy.sealed).length;
+  return { complete: incompletePolicies === 0 && (pending[0]?.count ?? 0) === 0 && (failed[0]?.count ?? 0) === 0 && (highSeverity[0]?.count ?? 0) === 0, policies: policies.length, zeroApplicablePolicies: policies.filter((policy) => policy.candidateCount === 0).length, incompletePolicies, pending: pending[0]?.count ?? 0, failed: failed[0]?.count ?? 0, highSeverity: highSeverity[0]?.count ?? 0, obligations: obligations[0]?.count ?? 0 };
+}
 export function shouldSampleKnowledgeCard(cardId: string, contentVersion: number, windowStartsAt: Date, percent = 15) {
   let hash = 2166136261;
   for (const char of `${cardId}:${contentVersion}:${windowStartsAt.toISOString().slice(0, 10)}`) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619);
   return (hash >>> 0) % 100 < percent;
+}
+
+function digestEnrollment(policy: typeof knowledgeSamplingPolicies.$inferSelect, members: Array<{ knowledgeCardId: string; contentVersion: number; evidenceSetRevision: number; selectedForSampling: boolean | null }>) {
+  return createHash("sha256").update(JSON.stringify({ cohortKey: policy.cohortKey, windowStartsAt: policy.windowStartsAt.toISOString(), windowEndsAt: policy.windowEndsAt.toISOString(), samplingPercent: policy.samplingPercent, scope: "auto_active", members })).digest("hex");
 }

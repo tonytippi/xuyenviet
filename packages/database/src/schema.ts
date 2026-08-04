@@ -1536,6 +1536,20 @@ export const knowledgeSamplingObligations = pgTable(
   ],
 );
 
+/** Associates an actionable sampling review with only the obligations it measures. */
+export const knowledgeSamplingRecommendationObligations = pgTable(
+  "knowledge_sampling_recommendation_obligations",
+  {
+    recommendationId: text("recommendation_id").notNull().references(() => knowledgeRecommendations.id, { onDelete: "cascade" }),
+    obligationId: text("obligation_id").notNull().references(() => knowledgeSamplingObligations.id, { onDelete: "restrict" }),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (association) => [
+    primaryKey({ columns: [association.recommendationId, association.obligationId] }),
+    index("knowledge_sampling_recommendation_obligations_obligation_idx").on(association.obligationId),
+  ],
+);
+
 export const knowledgeIndexDirtyMarkers = pgTable(
   "knowledge_index_dirty_markers",
   {
@@ -2151,6 +2165,7 @@ export const schema = {
   knowledgeSamplingPolicies,
   knowledgeSamplingCohortMembers,
   knowledgeSamplingObligations,
+  knowledgeSamplingRecommendationObligations,
   knowledgeRecommendations,
   knowledgeIndexDirtyMarkers,
   knowledgeIndexBackfillState,

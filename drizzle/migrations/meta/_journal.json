@@ -41,6 +41,7 @@
     { "idx": 36, "version": "7", "when": 1785763200003, "tag": "0036_protect_browser_oauth_transactions", "breakpoints": true },
     { "idx": 37, "version": "7", "when": 1785763200004, "tag": "0037_browser_oauth_referral_first_touch", "breakpoints": true },
     { "idx": 38, "version": "7", "when": 1785926400000, "tag": "0038_target_knowledge_lifecycle", "breakpoints": true },
-    { "idx": 39, "version": "7", "when": 1785949200000, "tag": "0039_fix_target_knowledge_card_default", "breakpoints": true }
+    { "idx": 39, "version": "7", "when": 1785949200000, "tag": "0039_fix_target_knowledge_card_default", "breakpoints": true },
+    { "idx": 40, "version": "7", "when": 1785952800000, "tag": "0040_protect_sampling_obligations", "breakpoints": true }
   ]
 }

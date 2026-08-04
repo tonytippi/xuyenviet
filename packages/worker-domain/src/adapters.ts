@@ -3,19 +3,20 @@ import {
   runApprovedKnowledgeIndexingWorkerLoop,
   runKnowledgeExtractionWorkerLoop,
   runKnowledgeIngestionWorkerLoop,
+  runKnowledgeSamplingSelection,
 } from "./index";
 import { correlationId, emitOperationalTelemetry, isOperationalTelemetryEvent, type OperationalTelemetrySink, type WorkerPollObservation } from "@xuyenviet/contracts";
 
 export function parseWorkerArguments(argv: string[]) {
-  if (argv.length !== 3 || !["extraction", "ingestion", "indexing", "outbox"].includes(argv[0]) || argv[1] !== "--once" || !argv[2].startsWith("--worker-id=")) {
-    throw new Error("Usage: <extraction|ingestion|indexing|outbox> --once --worker-id=<safe-id>");
+  if (argv.length !== 3 || !["extraction", "ingestion", "indexing", "sampling", "outbox"].includes(argv[0]) || argv[1] !== "--once" || !argv[2].startsWith("--worker-id=")) {
+    throw new Error("Usage: <extraction|ingestion|indexing|sampling|outbox> --once --worker-id=<safe-id>");
   }
   const workerId = argv[2].slice("--worker-id=".length);
   if (!/^[a-zA-Z0-9_.:-]{1,160}$/.test(workerId)) throw new Error("Worker ID is invalid.");
-  return { kind: argv[0] as "extraction" | "ingestion" | "indexing" | "outbox", workerId };
+  return { kind: argv[0] as "extraction" | "ingestion" | "indexing" | "sampling" | "outbox", workerId };
 }
 
-export async function runWorkerAdapter(argv: string[], options: { telemetry?: OperationalTelemetrySink; runPoll?: (kind: "extraction" | "ingestion" | "indexing" | "outbox", workerId: string) => Promise<WorkerPollObservation | WorkerPollObservation[]> } = {}) {
+export async function runWorkerAdapter(argv: string[], options: { telemetry?: OperationalTelemetrySink; runPoll?: (kind: "extraction" | "ingestion" | "indexing" | "sampling" | "outbox", workerId: string) => Promise<WorkerPollObservation | WorkerPollObservation[]> } = {}) {
   const { kind, workerId } = parseWorkerArguments(argv);
   const startedAt = Date.now();
   try {
@@ -41,7 +42,7 @@ function emitPoll(sink: OperationalTelemetrySink | undefined, observation: Worke
   emitOperationalTelemetry(sink, event);
 }
 
-async function runPoll(kind: "extraction" | "ingestion" | "indexing" | "outbox", workerId: string): Promise<WorkerPollObservation | WorkerPollObservation[]> {
+async function runPoll(kind: "extraction" | "ingestion" | "indexing" | "sampling" | "outbox", workerId: string): Promise<WorkerPollObservation | WorkerPollObservation[]> {
   // Each feature owns its observation and derives it while its claim/recovery
   // facts are still available. This adapter only selects the continuous loop.
   const observations: WorkerPollObservation[] = [];
@@ -49,11 +50,15 @@ async function runPoll(kind: "extraction" | "ingestion" | "indexing" | "outbox",
   if (kind === "extraction") await runKnowledgeExtractionWorkerLoop({ once: true, workerId, onObservation: observe });
   else if (kind === "ingestion") await runKnowledgeIngestionWorkerLoop({ once: true, workerId, onObservation: observe });
   else if (kind === "indexing") await runApprovedKnowledgeIndexingWorkerLoop({ once: true, workerId, onObservation: observe });
+  else if (kind === "sampling") {
+    const result = await runKnowledgeSamplingSelection();
+    observe({ capability: "knowledge.sampling", resultCode: result.selectedCount ? "success" : "no_work" });
+  }
   else await processAiAskDomainOutboxBatch({ workerId, onObservation: observe });
   if (!observations.length) throw new Error("Worker poll completed without an observation.");
   return observations.length === 1 ? observations[0]! : observations;
 }
 
-function capabilityFor(kind: "extraction" | "ingestion" | "indexing" | "outbox"): WorkerPollObservation["capability"] {
-  return ({ extraction: "knowledge.extraction", ingestion: "knowledge.ingestion", indexing: "knowledge.indexing", outbox: "ai_ask.outbox" } as const)[kind];
+function capabilityFor(kind: "extraction" | "ingestion" | "indexing" | "sampling" | "outbox"): WorkerPollObservation["capability"] {
+  return ({ extraction: "knowledge.extraction", ingestion: "knowledge.ingestion", indexing: "knowledge.indexing", sampling: "knowledge.sampling", outbox: "ai_ask.outbox" } as const)[kind];
 }

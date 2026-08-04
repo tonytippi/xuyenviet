@@ -16,7 +16,7 @@ async function createCompletedCandidate() {
   const capture = await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText: "Source text", metadata: { kind: "submitted" } });
   const [job] = await testDb.select().from(knowledgeIngestionJobs);
   if (!job) throw new Error("expected job");
-  await testDb.insert(knowledgeIngestionCandidates).values({ id: "candidate", ingestionJobId: job.id, sourceId: "source", captureVersionId: capture.id, fingerprint: "candidate", type: "place", title: "Candidate", summary: "Candidate summary", conditions: [], spanStart: 0, spanEnd: 1, extractionPromptVersion: "test", processingStatus: "completed", aiDisposition: "apply", outcomeReasonCode: "applied" });
+  await testDb.insert(knowledgeIngestionCandidates).values({ id: "candidate", ingestionJobId: job.id, sourceId: "source", captureVersionId: capture.id, fingerprint: "candidate", type: "place", title: "Candidate", summary: "Candidate summary", conditions: [], spanStart: 0, spanEnd: 1, extractionPromptVersion: "test", processingStatus: "completed", aiDisposition: "needs_operator", outcomeReasonCode: "verification_required", knowledgeCardId: "card" });
 }
 
 describe("target knowledge recommendation queue", () => {
