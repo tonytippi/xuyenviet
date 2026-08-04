@@ -79,6 +79,38 @@ describe("target knowledge ingestion pipeline", () => {
     await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, claim.jobId))).resolves.toMatchObject([{ discoveryTerminal: true, candidateCount: 1, status: "running" }]);
   });
 
+  test("rejects duplicate discovery delivery after the parent terminalizes", async () => {
+    const capture = await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText: "Đèo Hải Vân có điểm dừng ngắm cảnh.", metadata: { kind: "submitted" } });
+    const claim = await claimNextKnowledgeIngestionJob({ workerId: "discovery-worker", now: new Date(Date.now() + 1_000) }, testDb);
+    if (!claim) throw new Error("expected job claim");
+    const firstDiscovery = async () => [{ fingerprint: "first", type: "place" as const, title: "Điểm dừng", summary: "Có điểm dừng phù hợp.", spanStart: 0, spanEnd: 1 }];
+    const duplicateDiscovery = async () => [{ fingerprint: "duplicate", type: "place" as const, title: "Khác", summary: "Không được lưu.", spanStart: 0, spanEnd: 1 }];
+
+    await expect(runKnowledgeIngestionPipeline(claim, testDb, firstDiscovery)).resolves.toMatchObject({ outcome: "completed" });
+    await expect(runKnowledgeIngestionPipeline(claim, testDb, duplicateDiscovery)).resolves.toBeNull();
+    await expect(testDb.select().from(knowledgeIngestionCandidates)).resolves.toMatchObject([{ fingerprint: "first" }]);
+    await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.captureVersionId, capture.id))).resolves.toMatchObject([{ candidateCount: 1, discoveryTerminal: true }]);
+  });
+
+  test("does not let an obsolete discovery failure terminalize a newer capture job", async () => {
+    const capture = await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText: "Đèo Hải Vân có điểm dừng ngắm cảnh.", metadata: { kind: "submitted" } });
+    const claim = await claimNextKnowledgeIngestionJob({ workerId: "discovery-worker", now: new Date(Date.now() + 1_000) }, testDb);
+    if (!claim) throw new Error("expected job claim");
+    await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText: "Phiên bản mới.", metadata: { kind: "submitted" } });
+
+    await expect(runKnowledgeIngestionPipeline(claim, testDb, async () => { throw new Error("provider failed"); })).resolves.toBeNull();
+    await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, claim.jobId))).resolves.toMatchObject([{ status: "running", fencingToken: claim.fencingToken, lastErrorCode: null, captureVersionId: capture.id }]);
+  });
+
+  test("records malformed discovery output as a current technical failure", async () => {
+    await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText: "Đèo Hải Vân có điểm dừng ngắm cảnh.", metadata: { kind: "submitted" } });
+    const claim = await claimNextKnowledgeIngestionJob({ workerId: "discovery-worker", now: new Date(Date.now() + 1_000) }, testDb);
+    if (!claim) throw new Error("expected job claim");
+
+    await expect(runKnowledgeIngestionPipeline(claim, testDb, async () => [{ fingerprint: "bad", type: "place" as const, title: "Điểm dừng", summary: "Có điểm dừng phù hợp.", spanStart: 1, spanEnd: 0 }])).resolves.toMatchObject({ outcome: "failed" });
+    await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, claim.jobId))).resolves.toMatchObject([{ status: "failed", lastErrorCode: "discovery_failed", claimedBy: null, fencingToken: null }]);
+  });
+
   test("records discard as a terminal AI outcome without card or lifecycle effects", async () => {
     const capture = await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText: "Đèo Hải Vân có điểm dừng ngắm cảnh.", metadata: { kind: "submitted" } });
     const [job] = await testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.captureVersionId, capture.id));

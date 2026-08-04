@@ -2,6 +2,11 @@ import { sql, type SQL } from "drizzle-orm";
 
 type AccountingTransaction = { execute: (query: SQL) => Promise<unknown> };
 
+/** Serializes candidate terminal paths for one parent before they project counters. */
+export async function lockKnowledgeIngestionJob(transaction: AccountingTransaction, jobId: string) {
+  await transaction.execute(sql`select id from knowledge_ingestion_jobs where id = ${jobId} for update`);
+}
+
 /**
  * Technical ingestion observability is derived from durable candidate rows so
  * retries and duplicate delivery cannot inflate parent counters.
@@ -11,6 +16,7 @@ export async function projectKnowledgeIngestionAccounting(
   jobId: string,
   now = new Date(),
 ) {
+  await lockKnowledgeIngestionJob(transaction, jobId);
   await transaction.execute(sql`
     update knowledge_ingestion_jobs
     set candidate_count = (select count(*)::int from knowledge_ingestion_candidates where ingestion_job_id = ${jobId}),

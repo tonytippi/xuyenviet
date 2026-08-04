@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-08-04 (Story 15.2 candidate processing and technical job accounting is ready for review.)
+# last_updated: 2026-08-04 (Story 15.2 candidate processing and technical job accounting passed code review.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-08-04 (Story 15.2 candidate processing and technical job accounting is ready for review.)
+last_updated: 2026-08-04 (Story 15.2 candidate processing and technical job accounting passed code review.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -373,7 +373,7 @@ development_status:
   epic-15: in-progress
   # 2026-08-04: Review repair made migration 0038 self-consistent with baseline constraints and target recommendation shapes. Confirmed disposable local development and test targets were recreated, migrated, and reseeded. Focused serial Story 15.1 suites passed (4 files, 22 tests); `pnpm typecheck`, `pnpm exec drizzle-kit check`, and diff check pass. Expired candidate recovery remains deferred to Story 15.2.
   15-1-establish-the-target-lifecycle-schema: done
-  15-2-complete-candidate-processing-and-technical-job-accounting: review
+  15-2-complete-candidate-processing-and-technical-job-accounting: done
   # 2026-08-04: BMad code review repaired lifecycle atomicity, matrix, fence, lock-order, support-predicate, and writer-boundary findings. Focused serial suites passed (5 files, 34 tests); `pnpm typecheck` and diff check passed.
   15-3-centralize-version-fenced-lifecycle-transitions: done
   15-4-enforce-evidence-safe-retrieval-and-source-removal: backlog

@@ -5,7 +5,7 @@ import type { KnowledgeLifecycleTrigger, TransitionKnowledgeCardInput, Transitio
 import { recordAuditEvent } from "./audit-writers";
 import { getDb } from "./client";
 import { disableStaleKnowledgeSearchProjection, enqueueKnowledgeIndexWork } from "./knowledge-indexing-queue";
-import { projectAndFinalizeKnowledgeIngestionJob } from "./knowledge-ingestion-accounting";
+import { lockKnowledgeIngestionJob, projectAndFinalizeKnowledgeIngestionJob } from "./knowledge-ingestion-accounting";
 import { knowledgeCardEvidence, knowledgeCardSources, knowledgeCards, knowledgeIngestionCandidates, knowledgeRecommendations, knowledgeSamplingObligations, sourceCaptureVersions, sources } from "./schema";
 
 type LifecycleDb = ReturnType<typeof getDb>;
@@ -37,6 +37,7 @@ async function transitionCandidateRelation(transaction: LifecycleTransaction, in
   const fences = input.fences as Readonly<{ candidateFencingToken: string }>;
   const [candidate] = await transaction.select().from(knowledgeIngestionCandidates).where(and(eq(knowledgeIngestionCandidates.id, trigger.candidateId), eq(knowledgeIngestionCandidates.processingStatus, "processing"), eq(knowledgeIngestionCandidates.fencingToken, fences.candidateFencingToken), gt(knowledgeIngestionCandidates.leaseExpiresAt, new Date()))).limit(1).for("update");
   if (!candidate) return { status: "stale" };
+  await lockKnowledgeIngestionJob(transaction, candidate.ingestionJobId);
   const shortlist = await transaction.select({ id: knowledgeCards.id }).from(knowledgeCards).where(and(eq(knowledgeCards.type, candidate.type), inArray(knowledgeCards.lifecycleState, ["draft", "pending_operator", "active", "suppressed"]), sql`${knowledgeCards.id} <> ${candidate.knowledgeCardId ?? ""}`)).orderBy(asc(knowledgeCards.id)).limit(20);
   if (!isValidRelation(trigger, shortlist.map((card) => card.id))) return { status: "invalid", reason: "invalid_relation" };
 

@@ -4,7 +4,7 @@ baseline_commit: e909c8610679b88429ba5cdd436606287d99a6c3
 
 # Story 15.2: Complete Candidate Processing and Technical Job Accounting
 
-Status: review
+Status: done
 
 ## Story
 
@@ -42,6 +42,15 @@ so that mixed candidate outcomes do not misrepresent a source's processing state
 - [x] Preserve existing `FOR UPDATE SKIP LOCKED`, lease, fencing-token, parent status/CAS, current-capture, source-eligibility, and capture-payload checks. (AC: 4)
 - [x] Run candidate recovery from the Worker polling path and emit safe recovery observations consistently with existing parent-job recovery telemetry. Candidate recovery has no candidate-owned technical-reason column in the target schema: use the safe Worker observation/result code and existing parent technical fields only where a parent-level failure is actually being recorded. Do not add API/admin ingestion ownership or UI/serialization work. (AC: 4)
 - [x] Add serial PostgreSQL coverage for completion gating, mixed outcomes/counters, duplicate delivery, stale fences, supersession, and candidate lease recovery. (AC: 1-4)
+
+### Review Findings
+
+- [x] [Review][Patch] Duplicate delivery can rediscover and add candidates after terminal discovery [packages/worker-domain/src/features/knowledge/ingestion-pipeline.ts:29]
+- [x] [Review][Patch] Parent lease recovery requeues or fails a discovery-terminal job while its candidates are still being processed [packages/worker-domain/src/features/knowledge/ingestion-jobs.ts:85]
+- [x] [Review][Patch] An expired or obsolete discovery claimant can terminally fail its job [packages/worker-domain/src/features/knowledge/ingestion-pipeline.ts:24]
+- [x] [Review][Patch] Production relation evaluation cannot produce the required discard outcome [packages/worker-domain/src/features/knowledge/ingestion-pipeline.ts:87]
+- [x] [Review][Patch] Invalid discovered candidates escape the technical discovery-failure path [packages/worker-domain/src/features/knowledge/ingestion-pipeline.ts:32]
+- [x] [Review][Patch] Concurrent candidate terminalization can overwrite an accurate counter projection with a stale one [packages/database/src/knowledge-ingestion-accounting.ts:14]
 
 ## Dev Notes
 
@@ -197,3 +206,4 @@ gpt-5.6-terra
 
 - 2026-08-04: Implemented transactional candidate accounting, durable discovery, candidate terminal paths, lease recovery, and targeted integration coverage.
 - 2026-08-04: Restored repository-wide validation, added target default migration and type-safe recommendation detail projection, and moved the story to review.
+- 2026-08-04: Resolved six BMad code-review findings: fenced duplicate/stale discovery, excluded discovery-terminal parents from parent recovery, enabled production discard decisions, validated discovery output before persistence, and serialized candidate terminal accounting. Focused serial integration (367 tests), typecheck, and diff check passed.

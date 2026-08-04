@@ -110,4 +110,14 @@ describe("target knowledge ingestion jobs", () => {
     ]);
     await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, job.id))).resolves.toMatchObject([{ status: "running", candidateCount: 2, completedCandidateCount: 0, failedCandidateCount: 1 }]);
   });
+
+  test("does not recover a discovery-terminal parent while candidates own processing", async () => {
+    const { capture, job } = await createJob();
+    const now = new Date();
+    await testDb.update(knowledgeIngestionJobs).set({ status: "running", discoveryTerminal: true, attemptCount: 1, claimedBy: "discovery-worker", claimedAt: new Date(0), leaseExpiresAt: new Date(1), fencingToken: "a".repeat(64) }).where(eq(knowledgeIngestionJobs.id, job.id));
+    await testDb.insert(knowledgeIngestionCandidates).values(candidateValues(job.id, capture.id, { processingStatus: "queued" }));
+
+    await expect(recoverKnowledgeIngestionJobs(testDb, now)).resolves.toMatchObject({ recovered: 0, exhausted: 0 });
+    await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, job.id))).resolves.toMatchObject([{ status: "running", discoveryTerminal: true, claimedBy: "discovery-worker", fencingToken: "a".repeat(64) }]);
+  });
 });
