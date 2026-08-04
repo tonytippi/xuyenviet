@@ -24,7 +24,7 @@ export type KnowledgeLifecycleTrigger =
   | Readonly<{ kind: "draft_publish"; cardId: string }>
   | Readonly<{ kind: "open_work"; cardId: string; workType: "verification" | "relation" | "risk" | "missing_context" | "sampling"; policyId?: string; policySnapshot?: Record<string, unknown> }>
   | Readonly<{ kind: "content_refresh"; cardId: string; reason: "source_label" }>
-  | Readonly<{ kind: "support_loss"; cardId: string; reason: "source_withdrawn" | "evidence_withdrawn" }>
+  | Readonly<{ kind: "support_loss"; cardId: string; reason: "source_withdrawn" | "evidence_withdrawn" | "source_recaptured" }>
   | Readonly<{ kind: "archive"; cardId: string }>
   | Readonly<{ kind: "restore"; cardId?: string; recommendationId?: string; target: "active" | "pending_operator" }>;
 

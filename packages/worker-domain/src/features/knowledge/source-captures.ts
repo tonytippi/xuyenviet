@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 
 import { and, desc, eq, inArray, isNull, lte, sql } from "drizzle-orm";
 
-import { getDb } from "@xuyenviet/database";
+import { getDb, transitionKnowledgeCardInTransaction } from "@xuyenviet/database";
 import { facebookCaptureReviews, knowledgeCardEvidence, knowledgeCards, knowledgeExtractionJobs, knowledgeIngestionJobs, rawSourceMaterial, sourceCaptureVersions, sources, userRoles, users, type SourceKind } from "@xuyenviet/database";
 import { recordAuditEvent } from "../audit/events";
 import { createSystemAuditActor, type SystemAuditActorId } from "../audit/actors";
@@ -134,6 +134,28 @@ export async function appendSourceCaptureVersion(
       storageKey: input.file?.storageKey ?? null,
     }).returning();
     await tx.update(sources).set({ currentCaptureVersionId: version.id }).where(eq(sources.id, input.sourceId));
+    const evidence = await tx
+      .select({ knowledgeCardId: knowledgeCardEvidence.knowledgeCardId })
+      .from(knowledgeCardEvidence)
+      .where(and(eq(knowledgeCardEvidence.sourceId, input.sourceId), eq(knowledgeCardEvidence.state, "active")))
+      .orderBy(knowledgeCardEvidence.knowledgeCardId)
+      .for("update");
+    const cardIds = [...new Set(evidence.map((item) => item.knowledgeCardId))];
+    for (const cardId of cardIds) {
+      const [card] = await tx
+        .select({ id: knowledgeCards.id, contentVersion: knowledgeCards.contentVersion, evidenceSetRevision: knowledgeCards.evidenceSetRevision })
+        .from(knowledgeCards)
+        .where(eq(knowledgeCards.id, cardId))
+        .limit(1)
+        .for("update");
+      if (card) {
+        await transitionKnowledgeCardInTransaction(tx, {
+          actor: createSystemAuditActor(input.executorSystem ?? "system-knowledge-pipeline"),
+          fences: card,
+          trigger: { kind: "support_loss", cardId: card.id, reason: "source_recaptured" },
+        });
+      }
+    }
     await ensureIngestionJobForCaptureVersion(tx, { sourceId: input.sourceId, captureVersionId: version.id });
     return version;
   });

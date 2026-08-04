@@ -4,7 +4,7 @@ baseline_commit: 085e57df6b89e7c90cdde9d8539e682e5b807e74
 
 # Story 15.4: Enforce Evidence-Safe Retrieval and Source Removal
 
-Status: review
+Status: done
 
 ## Story
 
@@ -27,6 +27,10 @@ As a traveler, I want only supported current knowledge used in answers, so that 
 - [x] Make removal idempotent and resumable without a second protocol. Lock source, evidence, provenance anchors, and dependent cards in established deterministic order; revoke source/evidence eligibility before completion; re-evaluate every card at its current fence; and return `completed` only when no removed evidence remains traveler eligible. A duplicate/remedial call is safe; a stale fence/claim leaves card, evidence, work, audit, provenance, dirty-marker, and projection effects unchanged together. (AC: 3)
 - [x] Update the existing indexing queue/Worker and backfill path to recompute target eligibility from current owner rows before writing or retaining a document. Preserve existing lease, fencing-token, content-version, and marker idempotency rules; an old/delayed claim must never activate a stale or newly prohibited document. API requests must not claim or run indexing work. (AC: 4)
 - [x] Add serial PostgreSQL integration coverage for target retrieval eligibility, final-support loss, source/evidence withdrawal, provenance safety, retries, duplicate delivery, stale fences, concurrent ingestion/removal ordering, and delayed index claims. Each clean-table suite calls `resetTestDatabase()` locally and uses `DATABASE_URL_TEST`; do not add a global reset hook or integration parallelism. (AC: 1-4)
+
+### Review Findings
+
+- [x] [Review][Patch] Re-evaluate cards atomically when recapture replaces their final eligible evidence [packages/worker-domain/src/features/knowledge/source-captures.ts:136] — Resolved by locking dependent active-evidence cards after the current-capture pointer changes and delegating `source_recaptured` support-loss transitions to the lifecycle writer within the same transaction. Regression coverage verifies card suppression, stale-document disablement, and a pending marker for the new version. (AC 2, AC 4)
 
 ## Dev Notes
 
@@ -98,13 +102,17 @@ gpt-5.6-terra
 - 2026-08-04: Created and validated after Story 15.2 completed durable AI-first candidate discovery, immutable technical outcomes, and transactional job accounting, and Story 15.3 completed the version-fenced lifecycle writer boundary. Implementation must reuse those seams to fail closed on current evidence/source/capture eligibility, source removal, and delayed indexing.
 - 2026-08-04: Tightened the shared traveler retrieval/projection predicate so supporting evidence must reference the source's current capture version. A recapture therefore immediately fails closed for retrieval and indexing until current eligible evidence exists; old active search documents remain non-authoritative. Existing lifecycle, source-removal, provenance, indexing-claim, and Worker-only ownership seams were preserved.
 - Verification: serial PostgreSQL integration suite passed (42 files, 368 tests), including retrieval, source removal/action, indexing worker, ingestion pipeline, and lifecycle transition matrix coverage. `pnpm typecheck` and `pnpm build` passed. `pnpm lint` completed with 0 errors and 53 pre-existing warnings.
+- 2026-08-04: Code review repair makes recapture atomically suppress cards that lose final eligible support, disables stale search documents, and queues the new card version through the sole lifecycle writer. Focused serial integration verification passed (42 files, 368 tests), along with `pnpm typecheck` and `git diff --check`.
 
 ### File List
 
 - _bmad-output/implementation-artifacts/15-4-enforce-evidence-safe-retrieval-and-source-removal.md
 - packages/database/src/knowledge-search.ts
+- packages/domain/src/knowledge-lifecycle.ts
+- packages/worker-domain/src/features/knowledge/source-captures.ts
 - tests/knowledge-search.test.ts
 
 ### Change Log
 
 - 2026-08-04: Enforced current-capture evidence eligibility for traveler retrieval and indexing; added stale-capture regressions and marked the story ready for review.
+- 2026-08-04: Resolved review finding for atomic lifecycle/projection effects after source recapture; marked the story done.

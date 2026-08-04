@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-08-04 (Story 15.4 enforces current-capture evidence eligibility for fail-closed traveler retrieval and indexing; serial integration, typecheck, lint, and build verification recorded.)
+# last_updated: 2026-08-04 (Story 15.4 review repair atomically suppresses cards that lose final eligible support after recapture, disables stale projections, and queues the new version; focused serial integration, typecheck, and diff verification passed.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-08-04 (Story 15.4 enforces current-capture evidence eligibility for fail-closed traveler retrieval and indexing; serial integration, typecheck, lint, and build verification recorded.)
+last_updated: 2026-08-04 (Story 15.4 review repair atomically suppresses cards that lose final eligible support after recapture, disables stale projections, and queues the new version; focused serial integration, typecheck, and diff verification passed.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -377,7 +377,7 @@ development_status:
   # 2026-08-04: BMad code review repaired lifecycle atomicity, matrix, fence, lock-order, support-predicate, and writer-boundary findings. Focused serial suites passed (5 files, 34 tests); `pnpm typecheck` and diff check passed.
   15-3-centralize-version-fenced-lifecycle-transitions: done
   # 2026-08-04: Current-capture retrieval/projection predicate now rejects evidence tied to superseded captures, so stale active search documents cannot make old evidence traveler-eligible. Existing lifecycle, removal, provenance, Worker, fence, and indexing seams remain canonical. Serial integration suite passed (42 files, 368 tests); typecheck/build pass; lint 0 errors with 53 pre-existing warnings.
-  15-4-enforce-evidence-safe-retrieval-and-source-removal: review
+  15-4-enforce-evidence-safe-retrieval-and-source-removal: done
   15-5-separate-actionable-work-from-quality-sampling: backlog
   15-6-deliver-target-shaped-operator-knowledge-views: backlog
   15-7-prove-the-lifecycle-transition-matrix: backlog

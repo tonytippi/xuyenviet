@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { assistantProvenanceWithdrawalBackfillState, knowledgeCardEvidence, knowledgeCardSearchDocuments, knowledgeCards, knowledgeCardSources, knowledgeIndexDirtyMarkers, rawSourceMaterial, sourceCaptureVersions, sources, userRoles, users, type UserRole } from "@/db/schema";
+import { appendSourceCaptureVersion } from "@/features/knowledge/source-captures";
 
 import { resetTestDatabase, testDb } from "./helpers/db";
 import { seedKnowledgeCardEvidence, seedSourceCaptureVersion } from "./helpers/source-captures";
@@ -201,12 +202,15 @@ describe("knowledge card state-model retrieval safety", () => {
   test("fails closed when an active document is supported only by a superseded capture", async () => {
     await createUser("superseded-capture-operator", ["operator"]);
     const card = await createApprovedCardWithSource("superseded-capture-operator", "superseded-capture-card");
-    const originalCapture = await seedSourceCaptureVersion({ sourceId: `${card.id}-source`, captureKind: "url", rawText: "Bằng chứng capture cũ." });
+    const originalCapture = await appendSourceCaptureVersion(testDb, { sourceId: `${card.id}-source`, captureKind: "url", rawText: "Bằng chứng capture cũ.", metadata: { kind: "submitted" } });
     await seedKnowledgeCardEvidence({ cardId: card.id, sourceId: `${card.id}-source`, captureVersionId: originalCapture.id, quoteText: "Bằng chứng capture cũ." });
     await enqueueAndProcessIndexWork(card.id);
-    await seedSourceCaptureVersion({ sourceId: `${card.id}-source`, captureKind: "url", rawText: "Capture hiện tại đã thay thế.", versionSequence: 2 });
+    await appendSourceCaptureVersion(testDb, { sourceId: `${card.id}-source`, captureKind: "url", rawText: "Capture hiện tại đã thay thế.", metadata: { kind: "submitted" } });
 
     await expect((await import("@/features/knowledge/search")).searchApprovedKnowledge("Huế")).resolves.toEqual([]);
+    await expect(testDb.select({ lifecycleState: knowledgeCards.lifecycleState, contentVersion: knowledgeCards.contentVersion }).from(knowledgeCards).where(eq(knowledgeCards.id, card.id))).resolves.toEqual([{ lifecycleState: "suppressed", contentVersion: 2 }]);
+    await expect(testDb.select({ status: knowledgeCardSearchDocuments.status }).from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, card.id))).resolves.toEqual([{ status: "disabled" }]);
+    await expect(testDb.select({ contentVersion: knowledgeIndexDirtyMarkers.contentVersion, status: knowledgeIndexDirtyMarkers.status }).from(knowledgeIndexDirtyMarkers).where(eq(knowledgeIndexDirtyMarkers.knowledgeCardId, card.id))).resolves.toContainEqual({ contentVersion: 2, status: "pending" });
   });
 
   test("selects evidence deterministically and never projects Facebook or sensitive traveler-visible content", async () => {
