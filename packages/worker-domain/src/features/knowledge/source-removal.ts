@@ -2,12 +2,12 @@ import "server-only";
 
 import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 
-import { getDb } from "@/db/client";
-import { disableStaleKnowledgeSearchProjection, enqueueKnowledgeIndexWork } from "@/features/knowledge/indexing-queue";
-import { knowledgeCardEvidence, knowledgeCardSources, knowledgeCards, knowledgeIngestionJobs, knowledgeRecommendations, knowledgeSourceSuggestions, rawSourceMaterial, sourceCaptureVersions, sources, type SourceRemovalReason } from "@/db/schema";
-import { recordAuditEvent } from "@/features/audit/events";
-import { createUserAuditActor } from "@/features/audit/actors";
-import { lockAssistantProvenanceWithdrawalAnchors, requireCompletedAssistantProvenanceWithdrawalBackfill, withdrawAssistantProvenance } from "@/features/retrieval/provenance";
+import { getDb } from "@xuyenviet/database";
+import { knowledgeCardEvidence, knowledgeCardSources, knowledgeCards, knowledgeIngestionJobs, knowledgeRecommendations, knowledgeSourceSuggestions, rawSourceMaterial, sourceCaptureVersions, sources, type SourceRemovalReason } from "@xuyenviet/database";
+import { recordAuditEvent } from "../audit/events";
+import { createUserAuditActor } from "../audit/actors";
+import { disableStaleKnowledgeSearchProjection, enqueueKnowledgeIndexWork } from "./indexing-queue";
+import { lockAssistantProvenanceWithdrawalAnchors, requireCompletedAssistantProvenanceWithdrawalBackfill, withdrawAssistantProvenance } from "../retrieval/provenance";
 
 export class SourceRemovalError extends Error {
   constructor(message: string) {

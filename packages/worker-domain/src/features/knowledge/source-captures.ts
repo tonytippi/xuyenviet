@@ -4,11 +4,11 @@ import { createHash } from "node:crypto";
 
 import { and, desc, eq, inArray, isNull, lte, sql } from "drizzle-orm";
 
-import { getDb } from "@/db/client";
-import { facebookCaptureReviews, knowledgeCardEvidence, knowledgeCards, knowledgeExtractionJobs, knowledgeIngestionJobs, rawSourceMaterial, sourceCaptureVersions, sources, userRoles, users, type SourceKind } from "@/db/schema";
-import { recordAuditEvent } from "@/features/audit/events";
-import { createSystemAuditActor, type SystemAuditActorId } from "@/features/audit/actors";
-import { ensureIngestionJobForCaptureVersion } from "@/features/knowledge/ingestion-jobs";
+import { getDb } from "@xuyenviet/database";
+import { facebookCaptureReviews, knowledgeCardEvidence, knowledgeCards, knowledgeExtractionJobs, knowledgeIngestionJobs, rawSourceMaterial, sourceCaptureVersions, sources, userRoles, users, type SourceKind } from "@xuyenviet/database";
+import { recordAuditEvent } from "../audit/events";
+import { createSystemAuditActor, type SystemAuditActorId } from "../audit/actors";
+import { ensureIngestionJobForCaptureVersion } from "./ingestion-jobs";
 
 const submittedKinds = new Set<SourceKind>(["url", "copied_post", "pasted_text", "screenshot"]);
 const unsafeMetadataKey = /cookie|token|password|local_?storage|html|hidden|profile|provider|secret/i;

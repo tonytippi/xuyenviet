@@ -17,7 +17,9 @@
     "incremental": true,
     "tsBuildInfoFile": ".cache/tsconfig.tsbuildinfo",
     "paths": {
-      "@/*": ["./src/*"],
+      "@/db/*": ["./packages/database/src/*"],
+      "@/features/*": ["./packages/worker-domain/src/features/*"],
+      "@/server/*": ["./packages/worker-domain/src/server/*"],
       "@xuyenviet/contracts": ["./packages/contracts/src/index.ts"],
       "@xuyenviet/config": ["./packages/config/src/index.ts"],
       "@xuyenviet/database": ["./packages/database/src/index.ts"],

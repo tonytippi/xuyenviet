@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { WebSearchResultSourceType } from "@/db/schema";
+import type { WebSearchResultSourceType } from "@xuyenviet/database";
 
 import type { WebSearchFailureCode } from "./web-search";
 

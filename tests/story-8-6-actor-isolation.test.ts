@@ -163,11 +163,11 @@ describe.sequential("Story 8.6 actor isolation", () => {
 describe("Story 8.6 Audit-owned write boundary", () => {
   test("permits direct protected-table inserts only in Audit-owned writers", () => {
     const allowedFiles = new Set([
-      "src/features/audit/events.ts",
-      "src/features/audit/history.ts",
-      "src/features/audit/usage.ts",
+      "packages/worker-domain/src/features/audit/events.ts",
+      "packages/worker-domain/src/features/audit/history.ts",
+      "packages/worker-domain/src/features/audit/usage.ts",
     ]);
-    for (const file of listTypeScriptFiles("src")) {
+    for (const file of listTypeScriptFiles("packages/worker-domain/src")) {
       if (allowedFiles.has(file)) continue;
       expect(findProtectedTableInserts(readFileSync(file, "utf8")), file).toEqual([]);
     }

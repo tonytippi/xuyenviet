@@ -1,7 +1,7 @@
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
-import { knowledgeCardSources, knowledgeCards, rawSourceMaterial, schema, sourceCaptureVersions, sources } from "../../db/schema";
+import { knowledgeCardSources, knowledgeCards, rawSourceMaterial, schema, sourceCaptureVersions, sources } from "@xuyenviet/database";
 import { recordAuditEvent } from "../audit/events";
 import { createSystemAuditActor } from "../audit/actors";
 import { appendSourceCaptureVersion, type YoutubeCaptureMetadata } from "./source-captures";

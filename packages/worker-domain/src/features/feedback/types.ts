@@ -1,4 +1,4 @@
-import type { AnswerUsefulnessRating } from "@/db/schema";
+import type { AnswerUsefulnessRating } from "@xuyenviet/database";
 
 export const answerUsefulnessCommentMaxLength = 500;
 

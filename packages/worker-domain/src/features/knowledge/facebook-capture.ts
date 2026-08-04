@@ -1,7 +1,7 @@
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
-import { facebookCaptureReviews, rawSourceMaterial, schema, sourceCaptureVersions, sources } from "../../db/schema";
+import { facebookCaptureReviews, rawSourceMaterial, schema, sourceCaptureVersions, sources } from "@xuyenviet/database";
 import { createSystemAuditActor } from "../audit/actors";
 import { recordAuditEvent } from "../audit/events";
 import { canonicalizeFacebookUrl } from "./capture-identity";
