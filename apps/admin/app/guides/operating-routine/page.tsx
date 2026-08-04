@@ -1,10 +1,10 @@
 import Link from "next/link";
 
 const routine = [
-  { title: "Bắt đầu từ tổng quan", body: "Kiểm tra số bản nháp cần duyệt, khuyến nghị đang mở, thẻ cần xác minh và lỗi pipeline. Ưu tiên việc đang chặn chất lượng trước khi tăng số lượng.", href: "/", action: "Mở tổng quan" },
-  { title: "Xử lý hàng đợi cần quyết định", body: "Duyệt bản nháp sau khi kiểm tra claim và bằng chứng. Với khuyến nghị còn hiệu lực, mở chi tiết để đối chiếu trước khi chọn xuất bản, cảnh báo hoặc không xuất bản.", href: "/knowledge/recommendations", action: "Mở khuyến nghị" },
+  { title: "Bắt đầu từ tổng quan", body: "Kiểm tra công việc đang mở, thẻ cần xác minh và lỗi pipeline. Ưu tiên việc đang chặn chất lượng trước khi tăng số lượng.", href: "/", action: "Mở tổng quan" },
+  { title: "Xử lý công việc hiện hành", body: "Với công việc còn hiệu lực, mở chi tiết để đối chiếu bằng chứng rồi chọn quyết định được API cho phép. Candidate AI, vòng đời thẻ và kết quả công việc là các khái niệm riêng.", href: "/knowledge/recommendations", action: "Mở công việc" },
   { title: "Theo dõi tác vụ thất bại", body: "Mở hàng đợi Facebook ở nhóm xử lý thất bại để đọc chi tiết. Không mặc định rằng mọi lỗi đều có thể chạy lại từ UI; chỉ dùng thao tác hiện diện trên màn hình.", href: "/knowledge/facebook-captures?status=failed", action: "Mở lỗi pipeline" },
-  { title: "Kiểm tra tri thức đã xuất bản", body: "Nếu cần AI dùng một thẻ, xem trạng thái chỉ mục và điều kiện bằng chứng. Thẻ đã phê duyệt nhưng chưa index hoặc chưa đủ evidence chưa sẵn sàng để kỳ vọng AI truy xuất.", href: "/knowledge/approved", action: "Mở tri thức đã phê duyệt" },
+  { title: "Kiểm tra thẻ hoạt động", body: "Nếu cần AI dùng một thẻ, xem vòng đời, trạng thái chỉ mục và điều kiện bằng chứng. Thẻ chưa active hoặc chưa đủ evidence chưa sẵn sàng để kỳ vọng AI truy xuất.", href: "/knowledge/cards", action: "Mở thẻ tri thức" },
   { title: "Dùng coverage để chọn việc tiếp theo", body: "Xem các khoảng trống, thẻ cần kiểm tra/xác minh và công việc hiện hành. Nạp nguồn mới chỉ khi nó giúp giải quyết một khoảng trống hoặc khuyến nghị có cơ sở.", href: "/knowledge/progress", action: "Mở coverage" },
 ];
 

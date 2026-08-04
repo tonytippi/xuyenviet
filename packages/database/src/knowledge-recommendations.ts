@@ -16,10 +16,8 @@ export type KnowledgeRecommendationListItem = {
   resolution: string | null;
   workType: KnowledgeRecommendationWorkType;
   priority: number;
-  contentVersion: number;
-  evidenceSetRevision: number;
   createdAt: Date;
-  card: Pick<typeof knowledgeCards.$inferSelect, "id" | "title" | "summary" | "lifecycleState" | "knowledgeState" | "verificationRequirement" | "contentVersion" | "evidenceSetRevision">;
+  card: Pick<typeof knowledgeCards.$inferSelect, "id" | "title" | "summary" | "lifecycleState" | "knowledgeState" | "verificationRequirement">;
 };
 
 export async function getKnowledgeRecommendationWorkStatusCounts(db: RecommendationDb = getDb()) {
@@ -37,14 +35,14 @@ export async function listKnowledgeRecommendations(input: { workStatus?: Knowled
   const statuses = input.workStatus === "completed" ? ["resolved"] as const : input.workStatus === "inactive" ? ["superseded"] as const : ["open"] as const;
   return db.select({
     id: knowledgeRecommendations.id, status: knowledgeRecommendations.status, resolution: knowledgeRecommendations.resolution, workType: knowledgeRecommendations.workType, priority: knowledgeRecommendations.priority,
-    contentVersion: knowledgeRecommendations.contentVersion, evidenceSetRevision: knowledgeRecommendations.evidenceSetRevision, createdAt: knowledgeRecommendations.createdAt,
-    card: { id: knowledgeCards.id, title: knowledgeCards.title, summary: knowledgeCards.summary, lifecycleState: knowledgeCards.lifecycleState, knowledgeState: knowledgeCards.knowledgeState, verificationRequirement: knowledgeCards.verificationRequirement, contentVersion: knowledgeCards.contentVersion, evidenceSetRevision: knowledgeCards.evidenceSetRevision },
+    createdAt: knowledgeRecommendations.createdAt,
+    card: { id: knowledgeCards.id, title: knowledgeCards.title, summary: knowledgeCards.summary, lifecycleState: knowledgeCards.lifecycleState, knowledgeState: knowledgeCards.knowledgeState, verificationRequirement: knowledgeCards.verificationRequirement },
   }).from(knowledgeRecommendations).innerJoin(knowledgeCards, eq(knowledgeCards.id, knowledgeRecommendations.knowledgeCardId)).where(and(inArray(knowledgeRecommendations.status, statuses), input.workType ? eq(knowledgeRecommendations.workType, input.workType) : undefined)).orderBy(asc(knowledgeRecommendations.priority), asc(knowledgeRecommendations.createdAt)).limit(25).offset((page - 1) * 25) as Promise<KnowledgeRecommendationListItem[]>;
 }
 
 export async function getKnowledgeRecommendationDetail(recommendationId: string, db: RecommendationDb = getDb()) {
   const [recommendation] = await db.select({
-    id: knowledgeRecommendations.id, status: knowledgeRecommendations.status, resolution: knowledgeRecommendations.resolution, workType: knowledgeRecommendations.workType, priority: knowledgeRecommendations.priority, contentVersion: knowledgeRecommendations.contentVersion, evidenceSetRevision: knowledgeRecommendations.evidenceSetRevision, createdAt: knowledgeRecommendations.createdAt,
+    id: knowledgeRecommendations.id, status: knowledgeRecommendations.status, resolution: knowledgeRecommendations.resolution, workType: knowledgeRecommendations.workType, priority: knowledgeRecommendations.priority, createdAt: knowledgeRecommendations.createdAt,
     card: { id: knowledgeCards.id, type: knowledgeCards.type, title: knowledgeCards.title, summary: knowledgeCards.summary, locationName: knowledgeCards.locationName, routeSegment: knowledgeCards.routeSegment, tags: knowledgeCards.tags, freshnessSensitive: knowledgeCards.freshnessSensitive, lifecycleState: knowledgeCards.lifecycleState, knowledgeState: knowledgeCards.knowledgeState, verificationRequirement: knowledgeCards.verificationRequirement },
   }).from(knowledgeRecommendations).innerJoin(knowledgeCards, eq(knowledgeCards.id, knowledgeRecommendations.knowledgeCardId)).where(eq(knowledgeRecommendations.id, recommendationId)).limit(1);
   if (!recommendation) return null;

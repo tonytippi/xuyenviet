@@ -4,7 +4,7 @@ baseline_commit: c3949a251bbf8c84a838b644169e73b698a7b18d
 
 # Story 15.6: Deliver Target-Shaped Operator Knowledge Views
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -18,32 +18,32 @@ As an operator, I want clear Knowledge API responses and admin screens, so that 
 
 ## Tasks / Subtasks
 
-- [ ] Start from the completed target-only 15.1-15.5 baseline. Retain the clean break: no legacy stage/status aliases, compatibility response parsing, dual reads, legacy fixtures, or translation from draft/approved queue states. (AC: 1-3)
-- [ ] Inventory every existing `/v1/admin/knowledge/*` read before changing it: drafts/approved/recommendations, intake, coverage/sampling, Facebook capture queue/detail, and YouTube capture queue/detail. For each, define its target safe DTO, explicit field allowlist, capability/role guard, parser, database projection, controller serializer, and consuming admin screen. (AC: 1)
-  - [ ] Keep these concepts structurally independent in every relevant DTO and UI: job `status` plus the four counters; candidate `processingStatus`, immutable `aiDisposition`, and `outcomeReasonCode`; card `lifecycleState`, `knowledgeState`, and `verificationRequirement`; recommendation `workType`, `status`, and `resolution`; immutable sampling obligations separately from actionable sampling work.
-  - [ ] A job is only `queued | running | completed | failed`; a completed job with mixed outcomes may present safe aggregates such as applied/needs-operator counts, but must never become `published`, `suppressed`, `verify_first`, or another business outcome.
-  - [ ] Preserve a completed candidate's immutable AI decision after the operator changes card/work state. Failed, queued, and processing candidates have no business disposition/reason.
-- [ ] Update each selected endpoint atomically across `packages/database` safe projection, `packages/domain` port, `packages/contracts` DTO and exact-key parser, Nest controller parser/serializer, and `apps/admin` consumer. Contract parsers must fail closed for unexpected nested keys; do not add fallback shapes. (AC: 1-3)
-  - [ ] Complete existing parser validation gaps, including the approved-card index projection and recommendation card subshape. Replace `unknown` read-port results with named target DTOs where the current port prevents end-to-end strict typing.
-  - [ ] Retire the current legacy capture/intake/review representations rather than relabeling them: `ingestionJob.stage`, Facebook synthetic `published`/`suppressed` queue statuses, capture `reviewStatus`/`operationState`, and overloaded intake batch states such as `extracted`, `needs_review`, and `approved`.
-  - [ ] Keep index/projection state technical if needed; it cannot stand in for card lifecycle or work state. Do not expose action fences in read DTOs.
-- [ ] Make every database/admin read projection a positive disclosure allowlist. Preserve existing bounded evidence-detail seams only where the endpoint is explicitly authorized, and cap items/strings using established conventions. (AC: 1)
-  - [ ] Always exclude raw capture text/metadata, transcripts, raw provider response/payload, prompts/prompt versions, checkpoints, leases, fencing/CAS values, stack/raw upstream errors, credentials/cookies/tokens, execution secrets, and unredacted sensitive URL components.
-  - [ ] Preserve the recommendation-detail bounded evidence contract (at most four bounded records) and the YouTube detail bounded structured-evidence contract only after validating each field. Do not turn either into a raw-source view.
-  - [ ] Apply the established YouTube safe-URL redaction policy to Facebook URLs. Do not expose source-derived `authorText`, `groupName`, or similar raw metadata without an explicit documented endpoint allowlist and bounded operational need; exclude `promptVersion` and provider-execution detail from YouTube views.
-  - [ ] Keep coverage aggregate-only: do not disclose sampling cohort membership, source-level raw data, candidate IDs, or fences merely to make a dashboard more detailed.
-- [ ] Correct capture/read projections and UI information architecture to express the AI-first lifecycle, not an approval queue. (AC: 1, 3)
-  - [ ] Facebook filtering, counts, and pagination must be computed against the selected target-safe query/projection, not after page retrieval. A completed technical job must not derive a publication label.
-  - [ ] Capture detail may show the technical job, safe candidate processing/disposition/reason, associated card lifecycle/classification/verification, and related work state separately. It must not expose checkpoint internals or raw capture material.
-  - [ ] Replace legacy primary UI framing such as AI drafts versus approved library with explicit card lifecycle and current work. Clearly distinguish technical processing, AI candidate decision, card workflow, actionable operator work, and quality sampling. A low-risk active card is not awaiting approval; sampling neither approves nor re-approves it.
-  - [ ] Use Vietnamese-first accessible copy, visible text labels, readable status descriptions, and non-color-only distinctions. Do not alter the established desktop-optimized admin visual language without a UX need.
-- [ ] Preserve direct API ownership in all admin clients. Retain `NEXT_PUBLIC_API_ORIGIN`, `credentials: "include"`, generated `x-request-id`, API CSRF acquisition before mutations, `401` sign-in handling, parser-before-state assignment, and safe Vietnamese errors. Do not introduce a shared client refactor unless necessary to keep this behavior correct. (AC: 2)
-- [ ] Add focused tests at every boundary. Unit parser/static-boundary tests must not need a database; PostgreSQL projection/controller tests remain serial and locally call `resetTestDatabase()` when clean tables are needed. (AC: 1-3)
-  - [ ] Prove every target response accepts only its exact allowlist and rejects legacy fields, raw source/provider fields, checkpoints, fence/lease values, credentials/secrets, unknown nested keys, and unredacted sensitive URLs.
-  - [ ] Prove anonymous/traveler access is denied; authorized browser-session access preserves existing capability, CSRF, safe-error, and parser-gate behavior; an unsafe adapter projection fails closed rather than serializing.
-  - [ ] Prove a mixed-result completed job reports technical counters/outcomes without a publication result, and a later operator resolution never changes candidate disposition/reason.
-  - [ ] Prove card lifecycle/classification/verification, work type/status/resolution, sampling obligation, and sampling recommendation/outcome remain distinct. Unresolved sampling cannot make an eligible active card appear blocked.
-  - [ ] Add/extend a static admin boundary test proving `apps/admin/app/knowledge/**` has no database, lifecycle command, Worker, BFF/proxy, or server-action imports and retains direct API/contract-parser use.
+- [x] Start from the completed target-only 15.1-15.5 baseline. Retain the clean break: no legacy stage/status aliases, compatibility response parsing, dual reads, legacy fixtures, or translation from draft/approved queue states. (AC: 1-3)
+- [x] Inventory every existing `/v1/admin/knowledge/*` read before changing it: drafts/approved/recommendations, intake, coverage/sampling, Facebook capture queue/detail, and YouTube capture queue/detail. For each, define its target safe DTO, explicit field allowlist, capability/role guard, parser, database projection, controller serializer, and consuming admin screen. (AC: 1)
+  - [x] Keep these concepts structurally independent in every relevant DTO and UI: job `status` plus the four counters; candidate `processingStatus`, immutable `aiDisposition`, and `outcomeReasonCode`; card `lifecycleState`, `knowledgeState`, and `verificationRequirement`; recommendation `workType`, `status`, and `resolution`; immutable sampling obligations separately from actionable sampling work.
+  - [x] A job is only `queued | running | completed | failed`; a completed job with mixed outcomes may present safe aggregates such as applied/needs-operator counts, but must never become `published`, `suppressed`, `verify_first`, or another business outcome.
+  - [x] Preserve a completed candidate's immutable AI decision after the operator changes card/work state. Failed, queued, and processing candidates have no business disposition/reason.
+- [x] Update each selected endpoint atomically across `packages/database` safe projection, `packages/domain` port, `packages/contracts` DTO and exact-key parser, Nest controller parser/serializer, and `apps/admin` consumer. Contract parsers must fail closed for unexpected nested keys; do not add fallback shapes. (AC: 1-3)
+  - [x] Complete existing parser validation gaps, including the approved-card index projection and recommendation card subshape. Replace `unknown` read-port results with named target DTOs where the current port prevents end-to-end strict typing.
+  - [x] Retire the current legacy capture/intake/review representations rather than relabeling them: `ingestionJob.stage`, Facebook synthetic `published`/`suppressed` queue statuses, capture `reviewStatus`/`operationState`, and overloaded intake batch states such as `extracted`, `needs_review`, and `approved`.
+  - [x] Keep index/projection state technical if needed; it cannot stand in for card lifecycle or work state. Do not expose action fences in read DTOs.
+- [x] Make every database/admin read projection a positive disclosure allowlist. Preserve existing bounded evidence-detail seams only where the endpoint is explicitly authorized, and cap items/strings using established conventions. (AC: 1)
+  - [x] Always exclude raw capture text/metadata, transcripts, raw provider response/payload, prompts/prompt versions, checkpoints, leases, fencing/CAS values, stack/raw upstream errors, credentials/cookies/tokens, execution secrets, and unredacted sensitive URL components.
+  - [x] Preserve the recommendation-detail bounded evidence contract (at most four bounded records) and the YouTube detail bounded structured-evidence contract only after validating each field. Do not turn either into a raw-source view.
+  - [x] Apply the established YouTube safe-URL redaction policy to Facebook URLs. Do not expose source-derived `authorText`, `groupName`, or similar raw metadata without an explicit documented endpoint allowlist and bounded operational need; exclude `promptVersion` and provider-execution detail from YouTube views.
+  - [x] Keep coverage aggregate-only: do not disclose sampling cohort membership, source-level raw data, candidate IDs, or fences merely to make a dashboard more detailed.
+- [x] Correct capture/read projections and UI information architecture to express the AI-first lifecycle, not an approval queue. (AC: 1, 3)
+  - [x] Facebook filtering, counts, and pagination must be computed against the selected target-safe query/projection, not after page retrieval. A completed technical job must not derive a publication label.
+  - [x] Capture detail may show the technical job, safe candidate processing/disposition/reason, associated card lifecycle/classification/verification, and related work state separately. It must not expose checkpoint internals or raw capture material.
+  - [x] Replace legacy primary UI framing such as AI drafts versus approved library with explicit card lifecycle and current work. Clearly distinguish technical processing, AI candidate decision, card workflow, actionable operator work, and quality sampling. A low-risk active card is not awaiting approval; sampling neither approves nor re-approves it.
+  - [x] Use Vietnamese-first accessible copy, visible text labels, readable status descriptions, and non-color-only distinctions. Do not alter the established desktop-optimized admin visual language without a UX need.
+- [x] Preserve direct API ownership in all admin clients. Retain `NEXT_PUBLIC_API_ORIGIN`, `credentials: "include"`, generated `x-request-id`, API CSRF acquisition before mutations, `401` sign-in handling, parser-before-state assignment, and safe Vietnamese errors. Do not introduce a shared client refactor unless necessary to keep this behavior correct. (AC: 2)
+- [x] Add focused tests at every boundary. Unit parser/static-boundary tests must not need a database; PostgreSQL projection/controller tests remain serial and locally call `resetTestDatabase()` when clean tables are needed. (AC: 1-3)
+  - [x] Prove every target response accepts only its exact allowlist and rejects legacy fields, raw source/provider fields, checkpoints, fence/lease values, credentials/secrets, unknown nested keys, and unredacted sensitive URLs.
+  - [x] Prove anonymous/traveler access is denied; authorized browser-session access preserves existing capability, CSRF, safe-error, and parser-gate behavior; an unsafe adapter projection fails closed rather than serializing.
+  - [x] Prove a mixed-result completed job reports technical counters/outcomes without a publication result, and a later operator resolution never changes candidate disposition/reason.
+  - [x] Prove card lifecycle/classification/verification, work type/status/resolution, sampling obligation, and sampling recommendation/outcome remain distinct. Unresolved sampling cannot make an eligible active card appear blocked.
+  - [x] Add/extend a static admin boundary test proving `apps/admin/app/knowledge/**` has no database, lifecycle command, Worker, BFF/proxy, or server-action imports and retains direct API/contract-parser use.
 
 ## Dev Notes
 
@@ -111,12 +111,57 @@ pnpm build
 
 gpt-5.6-terra
 
+### Debug Log
+
+- 2026-08-04: Inventory found target-invalid Facebook capture status translation (`completed` to `published`), post-pagination filtering, raw-derived author/group disclosure, YouTube provider execution metadata, and stale `.stage` admin consumers.
+- 2026-08-04: Implemented the capture read-model portion only. Remaining target migration work includes intake, draft/approved-card review, recommendation, and coverage/sampling screens and DTOs; story remains in progress.
+
 ### Completion Notes List
 
 - Ultimate context engine analysis completed - comprehensive developer guide created.
 - 2026-08-04: Created after Stories 15.1-15.5 completed the target-only schema, immutable AI-first candidate processing, sole lifecycle writer, evidence-safe retrieval/source removal, and separated sampling ledger. The implementation must present these as separate operator concepts and must not restore the historical approval-queue model.
 - 2026-08-04: The guide requires strict, positive read-model allowlists across database projection, contracts, Nest serialization, and direct admin UI. It identifies current `stage`/rolled-up capture labels and unsafe raw/execution disclosure as target-invalid behavior to remove rather than support.
+- 2026-08-04: Capture views now report technical jobs as `queued | running | completed | failed`, preserve candidate processing/immutable AI outcomes separately from linked card lifecycle, filter/count before pagination, redact Facebook URLs, and omit Facebook raw-derived metadata and YouTube provider execution fields. Intake now retires legacy batch-state disclosure rather than translating it. Review UI presents lifecycle/current work rather than an AI approval queue. Added strict contract and static admin-boundary coverage. This is partial Story 15.6 progress, not completion.
+- 2026-08-04: Verification for this continuation passed `pnpm typecheck`, `pnpm --filter @xuyenviet/admin typecheck`, `pnpm lint` (0 errors; 45 existing warnings), `pnpm build`, `git diff --check`, and serial integration coverage (43 files, 371 tests). The unit project still has one unrelated baseline failure in `tests/knowledge-state.test.ts:17`; the newly added boundary and capture contract tests pass within that run.
+- 2026-08-04: Retired legacy `/drafts` and `/approved` admin reads in favor of target-shaped `/cards` lifecycle reads, named strict DTOs, and parser-gated controllers. Recommendation reads no longer disclose lifecycle fences. Coverage now reports only aggregate sampling data; the API no longer exposes a false operator sampling-seal action. Updated direct admin UI and operator guides to use card lifecycle/current work vocabulary.
+- 2026-08-04: Final verification: `pnpm typecheck`, `pnpm test:integration -- tests/admin-knowledge-coverage.test.ts tests/admin-facebook-capture-contract.test.ts tests/youtube-capture-review-admin.test.ts tests/knowledge-recommendation-queue.test.ts` (44 files, 373 tests), `pnpm lint` (0 errors, 45 warnings), `pnpm build`, and `git diff --check` passed. Per user direction, the existing unrelated `tests/knowledge-state.test.ts:17` unit assertion failure remains deferred; all new and changed focused tests pass within the unit project.
 
 ### File List
 
 - _bmad-output/implementation-artifacts/15-6-deliver-target-shaped-operator-knowledge-views.md
+- _bmad-output/implementation-artifacts/sprint-status.yaml
+- apps/admin/app/knowledge/facebook-captures/[reviewId]/detail.tsx
+- apps/admin/app/knowledge/facebook-captures/queue.tsx
+- apps/admin/app/knowledge/youtube-captures/[sourceId]/detail.tsx
+- apps/admin/app/knowledge/youtube-captures/queue.tsx
+- apps/admin/app/knowledge/cards/page.tsx
+- apps/admin/app/knowledge/cards/[id]/page.tsx
+- apps/admin/app/knowledge/progress-client.tsx
+- apps/admin/app/knowledge/review-client.tsx
+- apps/admin/app/layout.tsx
+- apps/admin/app/guides/data-flow/page.tsx
+- apps/admin/app/guides/data-states/page.tsx
+- apps/admin/app/guides/operating-routine/page.tsx
+- apps/api/src/admin/admin-knowledge-coverage.controller.ts
+- apps/api/src/admin/admin-knowledge-review.controller.ts
+- packages/database/src/admin-knowledge-coverage.ts
+- packages/database/src/admin-knowledge-review.ts
+- packages/database/src/knowledge-draft-review.ts
+- packages/database/src/knowledge-recommendations.ts
+- packages/domain/src/admin-knowledge-coverage.ts
+- packages/domain/src/knowledge-review.ts
+- tests/admin-knowledge-coverage.test.ts
+- tests/admin-knowledge-review-contract.test.ts
+- packages/contracts/src/index.ts
+- packages/database/src/admin-facebook-capture.ts
+- packages/database/src/admin-knowledge-intake.ts
+- packages/database/src/admin-youtube-capture.ts
+- tests/admin-facebook-capture-contract.test.ts
+- tests/admin-knowledge-views-ui-boundary.test.ts
+- tests/admin-youtube-capture-contract.test.ts
+- tests/youtube-capture-review-admin.test.ts
+
+## Change Log
+
+- 2026-08-04: Reworked target-safe capture, intake, and knowledge review operator reads and admin presentation; kept the story in progress pending remaining API/DTO lifecycle-route retirement and final acceptance coverage.
+- 2026-08-04: Completed target card/read-model and aggregate sampling migrations, retired legacy admin review routes, and moved Story 15.6 to review. The unrelated baseline unit assertion remains deferred by user direction.

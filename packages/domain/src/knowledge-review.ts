@@ -7,18 +7,12 @@ export class KnowledgeDraftReviewPolicyError extends Error {
     this.name = "KnowledgeDraftReviewError";
   }
 }
-import type { RequestPrincipal } from "@xuyenviet/contracts";
+import type { AdminKnowledgeCard, AdminKnowledgeCardList, AdminKnowledgeRecommendationDetail, AdminKnowledgeRecommendationList, AdminKnowledgeRecommendationResult, RequestPrincipal } from "@xuyenviet/contracts";
 
 export type AdminKnowledgeReviewPort = {
-  listDrafts(): Promise<unknown>;
-  getDraft(id: string): Promise<unknown | null>;
-  updateDraft(id: string, input: unknown, actor: RequestPrincipal): Promise<unknown>;
-  rejectDraft(id: string, actor: RequestPrincipal): Promise<unknown>;
-  approveDraft(id: string, actor: RequestPrincipal, expectedUpdatedAt?: string | null): Promise<unknown>;
-  approveDraftBatch(ids: string[], actor: RequestPrincipal): Promise<unknown>;
-  listApproved(query?: string): Promise<unknown>;
-  getApproved(id: string): Promise<unknown | null>;
-  listRecommendations(input: unknown): Promise<unknown>;
-  getRecommendation(id: string): Promise<unknown | null>;
-  resolveRecommendation(id: string, input: unknown, actor: RequestPrincipal): Promise<unknown>;
+  listCards(input: { lifecycleState?: AdminKnowledgeCard["lifecycleState"]; q?: string }): Promise<AdminKnowledgeCardList>;
+  getCard(id: string): Promise<AdminKnowledgeCard | null>;
+  listRecommendations(input: { workStatus?: "actionable" | "completed" | "inactive"; workType?: "risk" | "missing_context" | "verification" | "relation" | "sampling"; page?: number }): Promise<AdminKnowledgeRecommendationList>;
+  getRecommendation(id: string): Promise<AdminKnowledgeRecommendationDetail | null>;
+  resolveRecommendation(id: string, input: { expectedContentVersion: number; expectedEvidenceSetRevision: number; action: "accept_wording" | "edit" | "suppress" | "restore" | "verify" | "promote" | "resolve_relation" | "sampling_pass" | "sampling_fail"; editSummary?: string; highSeverity?: boolean }, actor: RequestPrincipal): Promise<AdminKnowledgeRecommendationResult>;
 };

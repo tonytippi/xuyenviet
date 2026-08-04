@@ -1,29 +1,25 @@
 import { ServiceUnavailableException } from "@nestjs/common";
 import { describe, expect, test, vi } from "vitest";
-import { parseAdminKnowledgeCoverage, parseAdminKnowledgeRecommendationResolve, parseAdminKnowledgeSamplingPolicySealResult } from "@xuyenviet/contracts";
+import { parseAdminKnowledgeCoverage, parseAdminKnowledgeRecommendationResolve } from "@xuyenviet/contracts";
 import type { AdminKnowledgeCoveragePort } from "@xuyenviet/domain";
 import { AdminKnowledgeCoverageController } from "../apps/api/src/admin/admin-knowledge-coverage.controller";
 
 const progress = { targetActiveCards: 100, activeEvidenceGroundedCards: 1, remainingActiveCards: 99, isComplete: false, activeCommunityObservations: 0, activeCommunityPatterns: 0, caveatOnlyHighRiskCards: 0, pendingReviewCards: 0, pendingVerificationCards: 0, actionableWork: [], byType: [], byRouteOrLocation: [] };
+const coverage = { progress, sampling: { closedPolicies: [{ cohortKey: "initial:2026-08-01", enrollmentSealedAt: "2026-08-02T00:00:00.000Z", candidateCount: 2, selectedCount: 1 }], obligations: { pending: 1, passed: 2, failed: 0 }, actionableWork: 1 } };
 
 describe("admin knowledge coverage direct API", () => {
-  test("accepts only the aggregate and closed-policy seal projection", () => {
-    expect(parseAdminKnowledgeCoverage({ progress, closedSamplingPolicies: [{ id: "policy", cohortKey: "initial:2026-08-01", enrollmentSealedAt: null }] })).toEqual({ progress, closedSamplingPolicies: [{ id: "policy", cohortKey: "initial:2026-08-01", enrollmentSealedAt: null }] });
-    expect(parseAdminKnowledgeCoverage({ progress: { ...progress, rawSourceText: "secret" }, closedSamplingPolicies: [] })).toBeNull();
-    expect(parseAdminKnowledgeCoverage({ progress, closedSamplingPolicies: [{ id: "policy", cohortKey: "cohort", enrollmentSealedAt: null, memberId: "secret" }] })).toBeNull();
-    expect(parseAdminKnowledgeSamplingPolicySealResult({ status: "sealed", candidateCount: 2, selectedCount: 1 })).toEqual({ status: "sealed", candidateCount: 2, selectedCount: 1 });
-    expect(parseAdminKnowledgeSamplingPolicySealResult({ status: "incomplete" })).toEqual({ status: "incomplete" });
-    expect(parseAdminKnowledgeSamplingPolicySealResult({ status: "sealed", candidateCount: 1, selectedCount: 2 })).toBeNull();
+  test("accepts aggregate-only sampling and rejects hidden ledger detail", () => {
+    expect(parseAdminKnowledgeCoverage(coverage)).toEqual(coverage);
+    expect(parseAdminKnowledgeCoverage({ ...coverage, rawSourceText: "secret" })).toBeNull();
+    expect(parseAdminKnowledgeCoverage({ ...coverage, sampling: { ...coverage.sampling, closedPolicies: [{ ...coverage.sampling.closedPolicies[0], candidateId: "secret" }] } })).toBeNull();
+    expect(parseAdminKnowledgeCoverage({ ...coverage, sampling: { ...coverage.sampling, obligations: { ...coverage.sampling.obligations, fence: 1 } } })).toBeNull();
     expect(parseAdminKnowledgeRecommendationResolve({ expectedContentVersion: 1, expectedEvidenceSetRevision: 1, action: "sampling_fail", highSeverity: true })).toMatchObject({ highSeverity: true });
-    expect(parseAdminKnowledgeRecommendationResolve({ expectedContentVersion: 1, expectedEvidenceSetRevision: 1, action: "sampling_pass", highSeverity: true })).toBeNull();
   });
 
-  test("validates safe coverage and seal responses before serialization", async () => {
-    const port = { getCoverage: vi.fn(async () => ({ progress, closedSamplingPolicies: [] })), sealClosedSamplingPolicy: vi.fn(async () => ({ status: "sealed" as const, candidateCount: 2, selectedCount: 1 })) } satisfies AdminKnowledgeCoveragePort;
+  test("validates coverage before serialization", async () => {
+    const port = { getCoverage: vi.fn(async () => coverage) } satisfies AdminKnowledgeCoveragePort;
     const controller = new AdminKnowledgeCoverageController(port);
-    await expect(controller.get()).resolves.toEqual({ progress, closedSamplingPolicies: [] });
-    await expect(controller.seal("policy")).resolves.toEqual({ status: "sealed", candidateCount: 2, selectedCount: 1 });
-    await expect(controller.seal("bad/id")).rejects.toBeInstanceOf(Error);
-    await expect(new AdminKnowledgeCoverageController({ ...port, getCoverage: vi.fn(async () => ({ progress, closedSamplingPolicies: [], rawLedger: "secret" })) }).get()).rejects.toBeInstanceOf(ServiceUnavailableException);
+    await expect(controller.get()).resolves.toEqual(coverage);
+    await expect(new AdminKnowledgeCoverageController({ getCoverage: vi.fn(async () => ({ ...coverage, rawLedger: "secret" })) } as AdminKnowledgeCoveragePort).get()).rejects.toBeInstanceOf(ServiceUnavailableException);
   });
 });

@@ -20,6 +20,8 @@ export type ApprovedKnowledgeCardWithIndexStatus = ApprovedKnowledgeCard & { ind
 
 export async function listKnowledgeDraftsForReview() { return loadCards(eq(knowledgeCards.lifecycleState, "draft")); }
 export async function getKnowledgeDraftForReview(id: string) { return (await loadCards(and(eq(knowledgeCards.id, id), eq(knowledgeCards.lifecycleState, "draft"))))[0] ?? null; }
+export async function listKnowledgeCards(lifecycleState: typeof knowledgeCards.$inferSelect.lifecycleState) { return loadCards(eq(knowledgeCards.lifecycleState, lifecycleState)); }
+export async function getKnowledgeCard(id: string) { return (await loadCards(eq(knowledgeCards.id, id)))[0] ?? null; }
 export async function listApprovedKnowledgeCards() { return loadApproved(); }
 export async function getApprovedKnowledgeCard(id: string) { return (await loadApproved(eq(knowledgeCards.id, id)))[0] ?? null; }
 export async function listApprovedKnowledgeCardsWithIndexStatus() { const cards = await loadApproved(); const statuses = await getApprovedKnowledgeIndexStatuses(cards.map((card) => card.id)); return cards.map((card) => ({ ...card, indexStatus: statuses.get(card.id)! })); }
