@@ -85,6 +85,7 @@ FR-22D: Exclude every card other than an evidence-eligible active card from norm
 FR-23: Accept operator source submissions as URL, raw text, copied post, or image/screenshot.
 FR-23A: Queue unreadable Facebook URLs for later operator-run capture.
 FR-23B: Capture only confirmed, operator-only visible Facebook material without browser credentials, cookies, tokens, local storage, full HTML, or hidden data.
+FR-23C: Use canonical ingestion-job technical status as the primary Facebook capture queue status, filter, count, and ordering signal; completed jobs expose aggregate candidate counts without rolling publication outcomes into technical status.
 FR-24: AI-triage source material, extract structured claims, and validate each against a source-text evidence span.
 FR-24A: Classify triaged sources as rejected, context-only, candidate, or verify-first and retain decision reasons.
 FR-24B: Use an independent AI judge, separate from extraction, for publication/suppression/review decisions.
@@ -97,6 +98,7 @@ FR-25B: Quality-sample 15% of auto-active claims for the first four weeks; creat
 FR-26: Support the fixed MVP confidence labels: unverified, community, curated, partner, official.
 FR-27: Mark changing price, schedule, availability, road, hours, weather, or service facts as freshness-sensitive.
 FR-28: Reach a seed set of 100 active, evidence-grounded Hanoi-to-HCMC knowledge cards.
+FR-28A: Provide authorized operators an aggregate-only active-corridor seed-coverage report with complete retrieval metadata/evidence, taxonomy and route/location gaps, and current work signals without raw capture content, URLs, quotes, provider payloads, or removal internals.
 FR-29: Retrieve relevant active cards under publication and knowledge-state guardrails.
 FR-30: Prioritize context: selected trip, current chat, active XuyenViet knowledge, web fallback, then general reasoning.
 FR-31: Use web fallback for missing, sparse, freshness-sensitive, uncertain, or conflicted knowledge.
@@ -118,10 +120,13 @@ FR-43: Provide a traveler-separate operator/admin area.
 FR-44: Support at least one initial admin/operator account.
 FR-45: Permit future multi-operator expansion without workflow redesign.
 FR-45A: Show operators safe aggregate and candidate-level ingestion outcomes without raw provider output, raw captured text, unapproved quotes, or execution secrets.
+FR-45B: Let exact administrators view a paginated safe user roster, grant/revoke only operator/admin roles with audit, and prevent removal of the final administrator or the caller's own final admin role.
+FR-45C: Show each displayed roster user's persisted AI-event count and prompt/completion token totals, including failed events and null-token-as-zero handling, without exposing prompts or provider payloads.
 FR-46: Capture a simple usefulness rating for answers.
 FR-47: Record authenticated AI usage with user/context, purpose, model/provider, timestamp, and available usage/cost metadata.
 FR-48: Capture valid sign-in referral attribution without rewards, rankings, payouts, or credits.
 FR-49: Manage AI Gateway model records with name, purpose, capabilities, active status, and input/output/cache pricing.
+FR-49A: Let exact administrators create, update, select one eligible active default per purpose, and archive AI Gateway model records with versioned currency/effective pricing snapshots and exact non-negative integer-micros prices per 1,000,000 tokens.
 FR-50: Estimate usage cost from configured pricing and available provider token metadata without billing behavior.
 FR-51: Expose versioned domain API contracts for traveler web, operator app, and future mobile clients without client dependence on Next.js internals or Auth.js session serialization.
 FR-52: Let traveler and operator browser clients call documented versioned NestJS APIs directly using only NestJS-managed secure session cookies; never give them database credentials or internal service credentials.
@@ -291,6 +296,7 @@ FR-22C: Epic 3 - Retrieval exclusion states.
 FR-23: Epic 3 - Operator source intake.
 FR-23A: Epic 3 - Queued Facebook capture.
 FR-23B: Epic 3 - Operator-only Facebook capture boundary.
+FR-23C: Epic 15 Story 15.2 - Canonical technical ingestion-job status and idempotent candidate counters; Epic 14 Story 14.4 - Safe direct admin capture queue projections, canonical status, filters, counts, and ordering.
 FR-24: Epic 3 - AI triage, extraction, and evidence validation.
 FR-24A: Epic 3 - Triage classifications and reasons.
 FR-24B: Epic 3 - Independent publication judge.
@@ -303,6 +309,7 @@ FR-25B: Epic 3 - Quality sampling.
 FR-26: Epic 3 - Confidence labels.
 FR-27: Epic 3 - Freshness-sensitive facts.
 FR-28: Epic 3 - Active evidence-grounded seed progress.
+FR-28A: Epic 3 Story 3.11 - Aggregate-only active evidence-grounded seed coverage; Epic 14 Story 14.4 - Direct safe admin projection.
 FR-29: Epic 4 - State-aware active knowledge retrieval.
 FR-30: Epic 4 - Context priority pipeline.
 FR-31: Epic 4 - Web fallback conditions.
@@ -324,10 +331,13 @@ FR-43: Epic 1 - Traveler-separate, role-gated admin access.
 FR-44: Epic 1 - Initial admin/operator capability.
 FR-45: Epic 1 - Extensible operator roles.
 FR-45A: Epic 3 - Safe operator ingestion outcome diagnostics.
+FR-45B: Epic 14 Story 14.4 - Direct exact-admin roster and audited role governance; historical Epic 13 Story 13.2 is completed extraction evidence only.
+FR-45C: Epic 14 Story 14.4 - Direct exact-admin roster usage aggregates; historical Epic 13 Story 13.2 is completed extraction evidence only.
 FR-46: Epic 5 - Answer usefulness feedback.
 FR-47: Epic 4 - Authenticated AI usage events.
 FR-48: Epic 1 - Silent referral attribution.
 FR-49: Epic 4 - Managed AI Gateway model records.
+FR-49A: Epic 14 Story 14.4 - Direct exact-admin AI Gateway model-catalog management.
 FR-50: Epic 4 - Internal cost estimation.
 
 ### Architecture Delta Coverage Map (2026-07-28)
@@ -390,9 +400,11 @@ Authenticated travelers can start, continue, organize, and delete their own road
 
 Operators can turn source submissions and operator-assisted Facebook captures into evidence-grounded, state-aware community knowledge. Qualifying facts become active without mandatory human approval; operators focus on prioritized recommendations, quality samples, verification, conflicts, source removal, and seed coverage.
 
-**FRs covered:** FR-17, FR-18, FR-18A, FR-18B, FR-19, FR-20, FR-21, FR-22, FR-22A, FR-22B, FR-22C, FR-23, FR-23A, FR-23B, FR-24, FR-24A, FR-24B, FR-24C, FR-24D, FR-24E, FR-25, FR-25A, FR-25B, FR-26, FR-27, FR-28, FR-37, FR-37B, FR-45A
+**FRs covered:** FR-17, FR-18, FR-18A, FR-18B, FR-19, FR-20, FR-21, FR-22, FR-22A, FR-22B, FR-22C, FR-23, FR-23A, FR-23B, FR-24, FR-24A, FR-24B, FR-24C, FR-24D, FR-24E, FR-25, FR-25A, FR-25B, FR-26, FR-27, FR-28, FR-28A, FR-37, FR-37B, FR-45A
 
 **Implementation notes:** This is explicitly not an approval queue. It owns immutable source/capture versions; leased ingestion jobs; hard evidence/privacy gates; independent judging; state, evidence, relation, verification, review, retention, and removal commands; transactional dirty markers; operator-only raw material; and active evidence-grounded seed progress. Admin UI must show current fact, conditions, bounded evidence, reasons, card version, and evidence-set revision, then offer state-aware actions rather than a generic approve-only lifecycle.
+
+**Traceability boundary:** Story 3.11 delivers FR-28A's aggregate-only seed coverage. FR-23C's target technical job semantics are finalized by Epic 15 Story 15.2, and its safe direct admin capture queue projection is delivered by Epic 14 Story 14.4.
 
 ### Epic 4: Source-Grounded AI Answers And Trust Signals
 
@@ -401,6 +413,8 @@ Travelers receive responsive, source-aware answers that use their trip/chat cont
 **FRs covered:** FR-6A, FR-29, FR-30, FR-31, FR-32, FR-33, FR-34, FR-35, FR-36, FR-37A, FR-37C, FR-47, FR-49, FR-50
 
 **Implementation notes:** Retrieval must fail closed and emit `contextual_use`, `caveat_only`, or `exclude` per current card/evidence state. Persist final response provenance, retrieval decision, and usage atomically. Search remains provider-adapted, official/provider-preferred, external/unverified, and fails with explicit verification guidance. Persisted annotation descriptors and the responsive detail inspector never parse free-form answer text or expose operator-only material.
+
+**Traceability boundary:** Epic 4 owns AI Gateway model selection and usage-cost estimation (FR-49 and FR-50). Direct exact-admin model-catalog management for FR-49A is delivered by Epic 14 Story 14.4.
 
 ### Epic 5: Family-Aware Planning And Quality Learning
 
@@ -1345,6 +1359,10 @@ So that attribution stays correct as Audit, workers, and user-facing reporting e
 
 ## Epic 9: Trusted Private API Foundation
 
+### Historical Transport Boundary
+
+Epics 9 through 13 are completed historical evidence for API, Worker, and admin capability extraction. Their BFF/Auth.js browser-transport requirements were superseded by the approved 2026-08-03 direct API/session course correction. They are not selectable for new implementation. Epic 14 is the authoritative completed direct-browser transport cutover; Story 14.6 remains the external public-launch evidence gate.
+
 Travelers and operators use BFFs that call documented, protected `/v1` APIs with validated principals and safe responses, without exposing browser credentials or relying on Next.js sessions as API authorization.
 
 ### Story 9.1: Establish BFF Credentials and API Request Principals
@@ -1823,11 +1841,30 @@ As a traveler,
 I want the planning shell and AI Ask stream to call NestJS directly,
 So that their browser transport has one owner without BFF forwarding or legacy fallback.
 
+**Acceptance Criteria:**
+
+**Given** an authenticated traveler uses `/ai-ask`
+**When** they read the shell, stream AI Ask, create or delete a conversation or Trip Project, submit feedback, apply or dismiss a proposal, invoke an annotation-bound action, or preserve first-touch referral attribution
+**Then** the browser uses owner-scoped direct NestJS APIs admitted by the Nest browser session and CSRF policy
+**And** no traveler Auth.js runtime, root server action, BFF credential/client, direct database owner, fallback, selector, or dual writer remains.
+
+**Given** relative browser API paths are used in local development
+**When** `/v1/*` or `/auth/*` is forwarded
+**Then** the forwarding layer performs transport only
+**And** it contains no authentication or domain behavior.
+
 ### Story 14.3: Move Traveler Commands and Remove Root Domain Writers
 
 As a traveler,
 I want trip, conversation, proposal, feedback, and referral commands served by one API owner,
 So that no Next.js server action or direct database path can duplicate product state.
+
+**Acceptance Criteria:**
+
+**Given** traveler aggregate commands, context extraction, proposal persistence or expiry, and referral attribution execute
+**When** their direct API/package ownership is cut over
+**Then** NestJS and the owning shared packages are the only command and persistence path
+**And** matching root direct-database/Auth.js writers are removed without changing transactional, fence, audit, history, ownership, or worker semantics.
 
 ### Story 14.4: Complete Admin Direct API Ownership
 
@@ -1835,17 +1872,48 @@ As an operator,
 I want all operational workflows in the separate admin application through direct protected APIs,
 So that root `/admin` no longer owns a domain read or mutation.
 
+**Acceptance Criteria:**
+
+**Given** an operator or exact administrator uses an admin capability
+**When** the separate `apps/admin` presentation client calls a direct NestJS API with a current browser session and CSRF proof
+**Then** NestJS enforces the established role/capability policy and returns only validated safe projections
+**And** root `/admin`, BFF routes, server bridges, direct database imports, and duplicate writers for that capability are retired.
+
+**Given** an exact administrator views the user roster or changes an `operator` or `admin` role
+**When** the direct API command succeeds
+**Then** the roster is paginated and safely aggregates each displayed user's persisted AI events and prompt/completion tokens, role changes are audited and invalidate authorization only when changed, and the final-admin/self-final-admin safeguards hold
+**And** prompts, provider payloads, credentials, and other protected data are never exposed.
+
+**Given** an exact administrator manages AI Gateway models
+**When** they create, update, set a compatible active default, or archive a model
+**Then** the API preserves audited capability/default/archive policy and exact versioned pricing snapshots in non-negative integer micros per 1,000,000 tokens
+**And** archived records are not deleted or selected as defaults.
+
 ### Story 14.5: Retire Auth.js, BFF Runtime, and Legacy Transport
 
 As a release operator,
 I want an inventory-backed removal of obsolete Auth.js/BFF and root backend code,
 So that no unsupported ownership path survives the consolidation.
 
+**Acceptance Criteria:**
+
+**Given** every migrated browser capability has a verified direct NestJS owner
+**When** retirement runs
+**Then** Auth.js, BFF runtime and credentials, bearer principal admission, root `/admin`, legacy server-action writers, and root direct database readiness are removed
+**And** browser admission remains Nest opaque-session, Origin, and CSRF only, with historical session rows retained as non-live data.
+
 ### Story 14.6: Produce the Direct API Launch Evidence Gate
 
 As a product owner,
 I want direct API deployment, one-writer, OAuth/session, rollback, Worker, and operations evidence to be explicit,
 So that public readiness is based on proof rather than completed-story counts.
+
+**Acceptance Criteria:**
+
+**Given** direct API implementation is complete
+**When** the launch gate is assessed
+**Then** a fail-closed runbook requires evidence for ingress topology, OAuth/session/Origin/CSRF smoke, migration-before-traffic, selected writer, deployed legacy retirement, rollback, API/Worker readiness, monitoring/alerts, backup/restore, and AI-stream concurrency
+**And** public launch remains no-go until the required staging and production evidence is recorded.
 
 ## Epic 15: Trustworthy Knowledge Lifecycle Cutover
 
