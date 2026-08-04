@@ -13,7 +13,7 @@ describe("admin knowledge coverage direct API", () => {
     expect(parseAdminKnowledgeCoverage({ ...coverage, rawSourceText: "secret" })).toBeNull();
     expect(parseAdminKnowledgeCoverage({ ...coverage, sampling: { ...coverage.sampling, closedPolicies: [{ ...coverage.sampling.closedPolicies[0], candidateId: "secret" }] } })).toBeNull();
     expect(parseAdminKnowledgeCoverage({ ...coverage, sampling: { ...coverage.sampling, obligations: { ...coverage.sampling.obligations, fence: 1 } } })).toBeNull();
-    expect(parseAdminKnowledgeRecommendationResolve({ expectedContentVersion: 1, expectedEvidenceSetRevision: 1, action: "sampling_fail", highSeverity: true })).toMatchObject({ highSeverity: true });
+    expect(parseAdminKnowledgeRecommendationResolve({ action: "sampling_fail", highSeverity: true })).toMatchObject({ highSeverity: true });
   });
 
   test("validates coverage before serialization", async () => {

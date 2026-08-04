@@ -4,7 +4,7 @@ baseline_commit: c3949a251bbf8c84a838b644169e73b698a7b18d
 
 # Story 15.6: Deliver Target-Shaped Operator Knowledge Views
 
-Status: review
+Status: done
 
 ## Story
 
@@ -44,6 +44,18 @@ As an operator, I want clear Knowledge API responses and admin screens, so that 
   - [x] Prove a mixed-result completed job reports technical counters/outcomes without a publication result, and a later operator resolution never changes candidate disposition/reason.
   - [x] Prove card lifecycle/classification/verification, work type/status/resolution, sampling obligation, and sampling recommendation/outcome remain distinct. Unresolved sampling cannot make an eligible active card appear blocked.
   - [x] Add/extend a static admin boundary test proving `apps/admin/app/knowledge/**` has no database, lifecycle command, Worker, BFF/proxy, or server-action imports and retains direct API/contract-parser use.
+
+### Review Findings
+
+- [x] [Review][Patch] Intake projection serializes unredacted source URLs [packages/database/src/admin-knowledge-intake.ts:11] — repaired by applying the existing safe display-URL policy and parser rejection coverage. (AC 1)
+- [x] [Review][Patch] Facebook safe-URL policy is weaker than the established YouTube policy [packages/database/src/admin-facebook-capture.ts:39] — repaired by reusing the YouTube safe URL projection and testing unsafe neutral-key values. (AC 1, task 33)
+- [x] [Review][Patch] Capture response parsers do not fail closed on unsafe display URLs [packages/contracts/src/index.ts:137] — repaired with HTTPS/userinfo/unsafe-content validation for capture and intake display URLs. (AC 1, task 42)
+- [x] [Review][Patch] Recommendation resolution is no longer executable from the target read model [packages/contracts/src/index.ts:221] — repaired with server-side fence lookup and a direct API CSRF-protected UI action, without disclosing fences. (AC 2, AC 3)
+- [x] [Review][Patch] Replacement card navigation exposes only draft cards [apps/admin/app/knowledge/cards/page.tsx:2] — repaired with an in-page active/draft lifecycle selector. (AC 3)
+- [x] [Review][Patch] Cards list accepts an omitted lifecycle filter but returns an empty result [packages/database/src/admin-knowledge-review.ts:16] — repaired by requiring `lifecycleState` at the contract boundary. (AC 1)
+- [x] [Review][Patch] Unbounded lifecycle card reads fail at the response gate beyond 200 cards [packages/database/src/admin-knowledge-review.ts:16] — repaired with a bounded 200-item projection before serialization. (AC 1)
+- [x] [Review][Patch] Recommendation UI cannot reach work after the first 25 results [apps/admin/app/knowledge/review-client.tsx:14] — repaired with direct-API page navigation. (AC 3)
+- [x] [Review][Patch] Operator guide regression tests were not migrated with the target vocabulary [tests/admin-operator-guide.test.ts:18] — repaired by asserting the target card/current-work guide terminology; the unrelated `knowledge-state` baseline remains. (Testing requirements)
 
 ## Dev Notes
 
@@ -125,6 +137,7 @@ gpt-5.6-terra
 - 2026-08-04: Verification for this continuation passed `pnpm typecheck`, `pnpm --filter @xuyenviet/admin typecheck`, `pnpm lint` (0 errors; 45 existing warnings), `pnpm build`, `git diff --check`, and serial integration coverage (43 files, 371 tests). The unit project still has one unrelated baseline failure in `tests/knowledge-state.test.ts:17`; the newly added boundary and capture contract tests pass within that run.
 - 2026-08-04: Retired legacy `/drafts` and `/approved` admin reads in favor of target-shaped `/cards` lifecycle reads, named strict DTOs, and parser-gated controllers. Recommendation reads no longer disclose lifecycle fences. Coverage now reports only aggregate sampling data; the API no longer exposes a false operator sampling-seal action. Updated direct admin UI and operator guides to use card lifecycle/current work vocabulary.
 - 2026-08-04: Final verification: `pnpm typecheck`, `pnpm test:integration -- tests/admin-knowledge-coverage.test.ts tests/admin-facebook-capture-contract.test.ts tests/youtube-capture-review-admin.test.ts tests/knowledge-recommendation-queue.test.ts` (44 files, 373 tests), `pnpm lint` (0 errors, 45 warnings), `pnpm build`, and `git diff --check` passed. Per user direction, the existing unrelated `tests/knowledge-state.test.ts:17` unit assertion failure remains deferred; all new and changed focused tests pass within the unit project.
+- 2026-08-05: Code-review repair closed all nine findings: safe URL policy is shared across intake/Facebook/YouTube and validated at parser boundaries; recommendation resolution acquires lifecycle fences server-side while the browser uses API CSRF; active cards and paged work are reachable; guide tests use target vocabulary. `pnpm typecheck`, `pnpm lint` (0 errors, 45 existing warnings), `pnpm build`, `git diff --check`, and targeted integration coverage (44 files, 374 tests) passed. The only unit-project failure remains the deferred baseline assertion at `tests/knowledge-state.test.ts:17`.
 
 ### File List
 

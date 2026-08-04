@@ -22,5 +22,6 @@ describe("admin knowledge view boundary", () => {
     expect(parseAdminKnowledgeIntake({ sources: [source] })).toEqual({ sources: [source] });
     expect(parseAdminKnowledgeIntake({ sources: [source], recentBatches: [] })).toBeNull();
     expect(parseAdminKnowledgeIntake({ sources: [{ ...source, rawText: "secret" }] })).toBeNull();
+    expect(parseAdminKnowledgeIntake({ sources: [{ ...source, displayUrl: "https://user:password@example.com" }] })).toBeNull();
   });
 });

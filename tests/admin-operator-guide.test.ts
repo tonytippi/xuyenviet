@@ -15,14 +15,14 @@ describe("admin operator guide", () => {
     expect(guide).toContain('href: "/guides/operating-routine"');
   });
 
-  test("documents the critical distinction between approval, publication, evidence, and AI retrieval", () => {
+  test("documents the critical distinction between lifecycle, evidence, and AI retrieval", () => {
     const guide = readSource("apps/admin/app/guides/page.tsx");
     const states = readSource("apps/admin/app/guides/data-states/page.tsx");
 
     expect(guide).toContain("Phê duyệt không phải xác minh");
     expect(guide).toContain("Xuất bản không chắc đã được AI dùng");
-    expect(states).toContain("Chờ evidence; chưa thể index / Index không active");
-    expect(states).toContain("không coi thẻ là sẵn sàng truy xuất");
+    expect(states).toContain("Vòng đời thẻ và chỉ mục AI");
+    expect(states).toContain("Chưa index / Index cần refresh");
   });
 
   test("points operators to existing queues without promising unsupported manual actions", () => {
@@ -30,22 +30,21 @@ describe("admin operator guide", () => {
     const routine = readSource("apps/admin/app/guides/operating-routine/page.tsx");
 
     expect(states).toContain('href: "/knowledge/intake"');
-    expect(states).toContain('href: "/knowledge/drafts"');
+    expect(states).toContain('href: "/knowledge/cards"');
     expect(states).toContain('href: "/knowledge/youtube-captures"');
-    expect(states).toContain('href: "/knowledge/approved"');
     expect(states).toContain('href: "/knowledge/recommendations"');
     expect(routine).toContain('href: "/knowledge/facebook-captures?status=failed"');
     expect(routine).toContain('href: "/"');
     expect(routine).toContain("Không tự sửa dữ liệu, bỏ qua xác minh");
   });
 
-  test("keeps approval separate from active publication and links the distinct YouTube workflow", () => {
+  test("keeps lifecycle separate from active retrieval and links the distinct YouTube workflow", () => {
     const flow = readSource("apps/admin/app/guides/data-flow/page.tsx");
     const states = readSource("apps/admin/app/guides/data-states/page.tsx");
 
     expect(flow).toContain('href: "/knowledge/youtube-captures"');
-    expect(states).toContain("Vòng đời bản nháp đã hoàn tất, nhưng thẻ chưa chắc đang được xuất bản cho du khách.");
-    expect(states).toContain("Đã xuất bản");
+    expect(states).toContain("Thẻ có thể được dùng khi bằng chứng còn đủ điều kiện");
+    expect(states).toContain("Có thể được Trợ lý AI truy xuất");
   });
 
   test("explains fact extraction, metadata, and the current bounded prompt retrieval behavior accurately", () => {

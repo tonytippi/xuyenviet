@@ -3,6 +3,7 @@ import { adminFacebookCapturePageSize, type AdminFacebookCapture, type AdminFace
 import type { AdminFacebookCapturePort } from "@xuyenviet/domain";
 import { getDb } from "./client";
 import { facebookCaptureReviews, knowledgeCards, knowledgeIngestionCandidates, knowledgeIngestionJobs, sourceCaptureVersions, sources } from "./schema";
+import { safeAdminDisplayUrl } from "./admin-youtube-capture";
 
 export function createPostgresAdminFacebookCapturePort(): AdminFacebookCapturePort { return { list, detail, recapture, rerunIngestion }; }
 
@@ -36,4 +37,4 @@ async function candidateProjection(jobId: string): Promise<AdminFacebookCaptureC
 function safeText(value: string | null, maximum: number) { const text = value?.replace(/[\u0000-\u001f\u007f]+/g, " ").trim(); return text && text.length <= maximum && !/cookie|token|secret|password|provider|prompt|response/i.test(text) ? text : null; }
 function safeCode(value: string | null) { return value && /^[a-z0-9_:-]{1,120}$/.test(value) ? value : null; }
 function safeTimestamp(value: string | null) { return value && !Number.isNaN(Date.parse(value)) ? new Date(value).toISOString() : null; }
-function safeUrl(value: string | null) { if (!value) return null; try { const url = new URL(value); if (url.protocol !== "https:") return null; url.username = ""; url.password = ""; for (const key of [...url.searchParams.keys()]) if (/token|secret|code|key|signature|password/i.test(key)) url.searchParams.set(key, "[redacted]"); return url.toString().slice(0, 500); } catch { return null; } }
+const safeUrl = safeAdminDisplayUrl;

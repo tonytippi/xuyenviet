@@ -19,6 +19,8 @@ describe("admin Facebook capture direct contract", () => {
     expect(parseAdminFacebookCaptureQueue(queue)).toEqual(queue);
     expect(parseAdminFacebookCaptureQueue({ ...queue, rawText: "secret" })).toBeNull();
     expect(parseAdminFacebookCaptureQueue({ ...queue, items: [{ ...capture, rawDiscoveryResponse: "secret" }] })).toBeNull();
+    expect(parseAdminFacebookCaptureQueue({ ...queue, items: [{ ...capture, displayUrl: "https://user:password@facebook.com/posts/1" }] })).toBeNull();
+    expect(parseAdminFacebookCaptureQueue({ ...queue, items: [{ ...capture, displayUrl: "https://facebook.com/posts/1?continue=provider-payload" }] })).toBeNull();
     expect(parseAdminFacebookCaptureDetail({ ...capture, candidates: [], canRecapture: true, canRerunIngestion: false, rawMetadata: {} })).toBeNull();
     expect(parseAdminFacebookCaptureDetail({ ...capture, candidates: [{ processingStatus: "completed", aiDisposition: "needs_operator", outcomeReasonCode: "verification_required", card: { id: "card-1", lifecycleState: "active", knowledgeState: "community_observation", verificationRequirement: "none" } }], canRecapture: true, canRerunIngestion: false })).not.toBeNull();
   });
