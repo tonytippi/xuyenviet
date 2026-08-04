@@ -52,7 +52,7 @@ export async function getKnowledgeRecommendationDetail(recommendationId: string,
   return { ...recommendation, evidence };
 }
 
-export async function resolveKnowledgeRecommendation(input: { recommendationId: string; expectedContentVersion: number; expectedEvidenceSetRevision: number; action?: KnowledgeRecommendationAction; resolution?: "published_operator_confirmed" | "published_community_observation" | "suppressed" | "edited_and_requeued" | "relation_resolved" | "sampling_passed" | "sampling_failed"; actor: { userId: string; email: string } }, db: RecommendationDb = getDb()) {
+export async function resolveKnowledgeRecommendation(input: { recommendationId: string; expectedContentVersion: number; expectedEvidenceSetRevision: number; action?: KnowledgeRecommendationAction; resolution?: "published_operator_confirmed" | "published_community_observation" | "suppressed" | "edited_and_requeued" | "relation_resolved" | "sampling_passed" | "sampling_failed"; highSeverity?: boolean; actor: { userId: string; email: string } }, db: RecommendationDb = getDb()) {
   const resolution = input.action ? actionResolution(input.action) : input.resolution;
   if (!resolution && input.action !== "restore") return { status: "invalid_action" as const };
   if (input.action === "restore") {
@@ -62,7 +62,7 @@ export async function resolveKnowledgeRecommendation(input: { recommendationId: 
   const result = await transitionKnowledgeCard({
     actor: { kind: "user", userId: input.actor.userId, email: input.actor.email },
     fences: { contentVersion: input.expectedContentVersion, evidenceSetRevision: input.expectedEvidenceSetRevision, recommendationId: input.recommendationId },
-    trigger: { kind: "operator_resolution", recommendationId: input.recommendationId, resolution: resolution! },
+    trigger: { kind: "operator_resolution", recommendationId: input.recommendationId, resolution: resolution!, highSeverity: input.highSeverity },
   }, db);
   return result.status === "resolved" ? { status: "resolved" as const, cardId: result.cardId } : result.status === "stale" ? { status: "stale" as const } : { status: "invalid_action" as const };
 }
@@ -77,10 +77,9 @@ export async function sealClosedKnowledgeSamplingPolicy(policyId: string, db: Re
     const [policy] = await transaction.select().from(knowledgeSamplingPolicies).where(eq(knowledgeSamplingPolicies.id, policyId)).limit(1).for("update");
     if (!policy) return { status: "unavailable" as const };
     if (policy.windowEndsAt > new Date()) return { status: "incomplete" as const };
+    if (!policy.enrollmentSealedAt) return { status: "incomplete" as const };
     const members = await transaction.select({ knowledgeCardId: knowledgeSamplingCohortMembers.knowledgeCardId, contentVersion: knowledgeSamplingCohortMembers.contentVersion, evidenceSetRevision: knowledgeSamplingCohortMembers.evidenceSetRevision, selectedForSampling: knowledgeSamplingCohortMembers.selectedForSampling }).from(knowledgeSamplingCohortMembers).where(eq(knowledgeSamplingCohortMembers.policyId, policy.id)).orderBy(asc(knowledgeSamplingCohortMembers.knowledgeCardId), asc(knowledgeSamplingCohortMembers.contentVersion), asc(knowledgeSamplingCohortMembers.evidenceSetRevision));
-    const digest = digestEnrollment(policy, members);
-    if (policy.enrollmentSealedAt && policy.enrollmentDigest !== digest) return { status: "incomplete" as const };
-    if (!policy.enrollmentSealedAt) await transaction.update(knowledgeSamplingPolicies).set({ enrollmentCandidateCount: members.length, enrollmentSelectedCount: members.filter((member) => member.selectedForSampling).length, enrollmentDigest: digest, enrollmentSealedAt: new Date() }).where(eq(knowledgeSamplingPolicies.id, policy.id));
+    if (policy.enrollmentDigest !== digestEnrollment(policy, members)) return { status: "incomplete" as const };
     return { status: "sealed" as const, candidateCount: members.length, selectedCount: members.filter((member) => member.selectedForSampling).length };
   });
 }
@@ -90,7 +89,7 @@ export async function selectKnowledgeSamplingPolicy(policyId: string, db: Recomm
   return db.transaction(async (transaction) => {
     const [policy] = await transaction.select().from(knowledgeSamplingPolicies).where(eq(knowledgeSamplingPolicies.id, policyId)).limit(1).for("update");
     if (!policy || policy.enrollmentSealedAt || policy.windowEndsAt > new Date()) return { status: "unavailable" as const, selectedCount: 0 };
-    const cards = await transaction.select({ id: knowledgeCards.id, contentVersion: knowledgeCards.contentVersion, evidenceSetRevision: knowledgeCards.evidenceSetRevision }).from(knowledgeCards).where(and(eq(knowledgeCards.lifecycleState, "active"), eq(knowledgeCards.verificationRequirement, "none"), eq(knowledgeCards.executorSystem, "system-knowledge-pipeline"))).orderBy(asc(knowledgeCards.id));
+    const cards = await transaction.select({ id: knowledgeCards.id, contentVersion: knowledgeCards.contentVersion, evidenceSetRevision: knowledgeCards.evidenceSetRevision }).from(knowledgeCards).where(and(eq(knowledgeCards.lifecycleState, "active"), eq(knowledgeCards.verificationRequirement, "none"), eq(knowledgeCards.executorSystem, "system-knowledge-pipeline"), sql`exists (select 1 from ${knowledgeSamplingObligations} obligation where obligation.knowledge_card_id = ${knowledgeCards.id} and obligation.content_version = ${knowledgeCards.contentVersion} and obligation.evidence_set_revision = ${knowledgeCards.evidenceSetRevision} and obligation.sampling_disposition is null)`, sql`not exists (select 1 from ${knowledgeRecommendations} sampling_work where sampling_work.knowledge_card_id = ${knowledgeCards.id} and sampling_work.content_version = ${knowledgeCards.contentVersion} and sampling_work.evidence_set_revision = ${knowledgeCards.evidenceSetRevision} and sampling_work.work_type = 'sampling')`)).orderBy(asc(knowledgeCards.id));
     for (const card of cards) {
       const selected = shouldSampleKnowledgeCard(card.id, card.contentVersion, policy.windowStartsAt, policy.samplingPercent);
       await transaction.insert(knowledgeSamplingCohortMembers).values({ policyId: policy.id, knowledgeCardId: card.id, contentVersion: card.contentVersion, evidenceSetRevision: card.evidenceSetRevision, selectedForSampling: selected }).onConflictDoNothing();

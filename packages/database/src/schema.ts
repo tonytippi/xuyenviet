@@ -660,6 +660,8 @@ export const knowledgeIngestionCandidates = pgTable(
     judgmentSummary: text("judgment_summary"),
     scores: jsonb("scores").$type<Record<string, number>>(),
     knowledgeCardId: text("knowledge_card_id").references(() => knowledgeCards.id, { onDelete: "set null" }),
+    completedContentVersion: integer("completed_content_version"),
+    completedEvidenceSetRevision: integer("completed_evidence_set_revision"),
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
   },
@@ -678,6 +680,7 @@ export const knowledgeIngestionCandidates = pgTable(
     check("knowledge_ingestion_candidates_attempt_check", sql`${candidate.attemptCount} >= 0 and ${candidate.attemptCount} <= ${candidate.maxAttempts} and ${candidate.maxAttempts} between 1 and 10`),
     check("knowledge_ingestion_candidates_claim_shape_check", sql`(${candidate.claimedBy} is null and ${candidate.claimedAt} is null and ${candidate.leaseExpiresAt} is null and ${candidate.fencingToken} is null) or (${candidate.claimedBy} is not null and ${candidate.claimedAt} is not null and ${candidate.leaseExpiresAt} > ${candidate.claimedAt} and ${candidate.fencingToken} ~ '^[a-f0-9]{64}$')`),
     check("knowledge_ingestion_candidates_decision_shape_check", sql`(${candidate.processingStatus} = 'completed' and ${candidate.aiDisposition} is not null and ${candidate.aiDisposition} in ('apply', 'needs_operator', 'discard') and ${candidate.outcomeReasonCode} is not null and ${candidate.outcomeReasonCode} in ('applied', 'verification_required', 'weak_evidence', 'relation_ambiguous', 'missing_context', 'conflict', 'stale_capture', 'policy_rejected') and length(btrim(${candidate.outcomeReasonCode})) > 0) or (${candidate.processingStatus} in ('queued', 'processing', 'failed') and ${candidate.aiDisposition} is null and ${candidate.outcomeReasonCode} is null)`),
+    check("knowledge_ingestion_candidates_completion_fence_check", sql`(${candidate.completedContentVersion} is null and ${candidate.completedEvidenceSetRevision} is null) or (${candidate.processingStatus} = 'completed' and ${candidate.knowledgeCardId} is not null and ${candidate.completedContentVersion} >= 1 and ${candidate.completedEvidenceSetRevision} >= 1)`),
   ],
 );
 

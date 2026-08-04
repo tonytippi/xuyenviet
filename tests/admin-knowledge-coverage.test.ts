@@ -1,6 +1,6 @@
 import { ServiceUnavailableException } from "@nestjs/common";
 import { describe, expect, test, vi } from "vitest";
-import { parseAdminKnowledgeCoverage, parseAdminKnowledgeSamplingPolicySealResult } from "@xuyenviet/contracts";
+import { parseAdminKnowledgeCoverage, parseAdminKnowledgeRecommendationResolve, parseAdminKnowledgeSamplingPolicySealResult } from "@xuyenviet/contracts";
 import type { AdminKnowledgeCoveragePort } from "@xuyenviet/domain";
 import { AdminKnowledgeCoverageController } from "../apps/api/src/admin/admin-knowledge-coverage.controller";
 
@@ -14,6 +14,8 @@ describe("admin knowledge coverage direct API", () => {
     expect(parseAdminKnowledgeSamplingPolicySealResult({ status: "sealed", candidateCount: 2, selectedCount: 1 })).toEqual({ status: "sealed", candidateCount: 2, selectedCount: 1 });
     expect(parseAdminKnowledgeSamplingPolicySealResult({ status: "incomplete" })).toEqual({ status: "incomplete" });
     expect(parseAdminKnowledgeSamplingPolicySealResult({ status: "sealed", candidateCount: 1, selectedCount: 2 })).toBeNull();
+    expect(parseAdminKnowledgeRecommendationResolve({ expectedContentVersion: 1, expectedEvidenceSetRevision: 1, action: "sampling_fail", highSeverity: true })).toMatchObject({ highSeverity: true });
+    expect(parseAdminKnowledgeRecommendationResolve({ expectedContentVersion: 1, expectedEvidenceSetRevision: 1, action: "sampling_pass", highSeverity: true })).toBeNull();
   });
 
   test("validates safe coverage and seal responses before serialization", async () => {

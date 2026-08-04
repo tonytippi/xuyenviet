@@ -48,6 +48,15 @@ export async function runKnowledgeSamplingSelection(db: RecommendationDb = getDb
   return { selectedCount };
 }
 
+/** The Worker executes containment only after its quality classifier marks a sealed cohort high-severity. */
+export async function containHighSeverityKnowledgeSampling(input: { policyId: string; enrollmentDigest: string; recommendationId: string; contentVersion: number; evidenceSetRevision: number; members: readonly { cardId: string; contentVersion: number; evidenceSetRevision: number; disposition: "remediable" | "unsafe" }[] }, db: RecommendationDb = getDb()) {
+  return transitionKnowledgeCard({
+    actor: { kind: "system", system: "system-knowledge-pipeline" },
+    fences: { recommendationId: input.recommendationId, contentVersion: input.contentVersion, evidenceSetRevision: input.evidenceSetRevision },
+    trigger: { kind: "sampling_containment", policyId: input.policyId, enrollmentDigest: input.enrollmentDigest, recommendationId: input.recommendationId, members: input.members },
+  }, db);
+}
+
 function resolutionMatchesWorkType(workType: KnowledgeRecommendationWorkType, resolution: KnowledgeRecommendationResolution) {
   if (resolution === "sampling_passed" || resolution === "sampling_failed") return workType === "sampling";
   if (resolution === "relation_resolved") return workType === "relation";

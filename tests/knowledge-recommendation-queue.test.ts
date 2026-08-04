@@ -16,7 +16,7 @@ async function createCompletedCandidate() {
   const capture = await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText: "Source text", metadata: { kind: "submitted" } });
   const [job] = await testDb.select().from(knowledgeIngestionJobs);
   if (!job) throw new Error("expected job");
-  await testDb.insert(knowledgeIngestionCandidates).values({ id: "candidate", ingestionJobId: job.id, sourceId: "source", captureVersionId: capture.id, fingerprint: "candidate", type: "place", title: "Candidate", summary: "Candidate summary", conditions: [], spanStart: 0, spanEnd: 1, extractionPromptVersion: "test", processingStatus: "completed", aiDisposition: "needs_operator", outcomeReasonCode: "verification_required", knowledgeCardId: "card" });
+  await testDb.insert(knowledgeIngestionCandidates).values({ id: "candidate", ingestionJobId: job.id, sourceId: "source", captureVersionId: capture.id, fingerprint: "candidate", type: "place", title: "Candidate", summary: "Candidate summary", conditions: [], spanStart: 0, spanEnd: 1, extractionPromptVersion: "test", processingStatus: "completed", aiDisposition: "needs_operator", outcomeReasonCode: "verification_required", knowledgeCardId: "card", completedContentVersion: 1, completedEvidenceSetRevision: 1 });
 }
 
 describe("target knowledge recommendation queue", () => {
@@ -39,7 +39,7 @@ describe("target knowledge recommendation queue", () => {
     await expect(testDb.insert(knowledgeSamplingObligations).values({ id: "invalid", candidateId: "candidate", knowledgeCardId: "card", contentVersion: 1, evidenceSetRevision: 1, samplingDisposition: "sampling_passed" })).rejects.toThrow();
     await testDb.insert(knowledgeSamplingObligations).values({ id: "obligation", candidateId: "candidate", knowledgeCardId: "card", contentVersion: 1, evidenceSetRevision: 1 });
     await expect(testDb.insert(knowledgeSamplingObligations).values({ id: "duplicate", candidateId: "candidate", knowledgeCardId: "card", contentVersion: 1, evidenceSetRevision: 1 })).rejects.toThrow();
-    await expect(testDb.insert(knowledgeSamplingObligations).values({ id: "sampled", candidateId: "candidate", knowledgeCardId: "card", contentVersion: 2, evidenceSetRevision: 1, samplingDisposition: "sampling_passed", sampledAt: new Date() })).resolves.toBeDefined();
+    await expect(testDb.insert(knowledgeSamplingObligations).values({ id: "wrong-fence", candidateId: "candidate", knowledgeCardId: "card", contentVersion: 2, evidenceSetRevision: 1, samplingDisposition: "sampling_passed", sampledAt: new Date() })).rejects.toThrow();
   });
 
   test("enforces target recommendation resolution and resolved-row shapes", async () => {

@@ -4,7 +4,7 @@ baseline_commit: 31cfab8ec7dcf365976c8754e4817a94ce33edcd
 
 # Story 15.5: Separate Actionable Work from Quality Sampling
 
-Status: review
+Status: done
 
 ## Story
 
@@ -106,6 +106,8 @@ gpt-5.6-terra
 - _bmad-output/implementation-artifacts/15-5-separate-actionable-work-from-quality-sampling.md
 - apps/worker/package.json
 - apps/worker/src/runtime.ts
+- apps/admin/app/knowledge/review-client.tsx
+- drizzle/migrations/0041_fence_sampling_obligations.sql
 - drizzle/migrations/0040_protect_sampling_obligations.sql
 - drizzle/migrations/meta/_journal.json
 - packages/contracts/src/index.ts
@@ -122,3 +124,14 @@ gpt-5.6-terra
 ### Change Log
 
 - 2026-08-04: Implemented Story 15.5 separated quality sampling lifecycle and verification coverage.
+- 2026-08-04: Review repair added durable candidate completion fences, scoped containment outcomes, Worker-owned enrollment protections, ledger-backed dashboard outcomes, and a Worker-facing high-severity containment seam. Automatic containment invocation remains pending a durable high-severity classifier/input contract.
+- 2026-08-04: High-severity sampling failures are now explicit operator decisions. `sampling_fail` with `highSeverity` atomically contains the sealed cohort into fenced `risk` work; ordinary sampling failures remain quality-only outcomes.
+
+### Review Findings
+
+- [x] [Review][Patch] Wire high-severity sampling containment [packages/database/src/knowledge-lifecycle.ts:165] — an authenticated operator may resolve `sampling_fail` with `highSeverity: true`; the lifecycle atomically loads the sealed cohort and transitions selected members to `pending_operator` with fenced `risk` work. Ordinary sampling failures still resolve quality work only.
+- [x] [Review][Patch] Restrict containment outcomes to associated obligations [packages/database/src/knowledge-lifecycle.ts:54] — containment now locks and supersedes only its policy's same-fence sampling recommendation, then resolves only that recommendation's explicit obligation associations.
+- [x] [Review][Patch] Enforce the candidate completion fence for obligations [drizzle/migrations/0041_fence_sampling_obligations.sql:1] — candidate completion now records immutable card/version/evidence fences; the database trigger rejects obligations outside that fence, with a regression for the formerly accepted version mismatch.
+- [x] [Review][Patch] Prevent Admin sealing an unenrolled policy [packages/database/src/knowledge-recommendations.ts:75] — Admin sealing now returns `incomplete` until the Worker has enrolled and sealed the policy cohort.
+- [x] [Review][Patch] Handle overlapping selected policies without losing sampling work [packages/database/src/knowledge-recommendations.ts:93] — Worker enrollment excludes any card fence that already has sampling work, so a later policy does not seal a selected member without actionable work/outcome.
+- [x] [Review][Patch] Build the dashboard projection from the obligation ledger [packages/database/src/admin-quality.ts:276] — dashboard outcomes now join scoped recommendation-obligation associations with the immutable obligation ledger.
