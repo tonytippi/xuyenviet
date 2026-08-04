@@ -1,6 +1,10 @@
+---
+baseline_commit: 085e57df6b89e7c90cdde9d8539e682e5b807e74
+---
+
 # Story 15.4: Enforce Evidence-Safe Retrieval and Source Removal
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -15,14 +19,14 @@ As a traveler, I want only supported current knowledge used in answers, so that 
 
 ## Tasks / Subtasks
 
-- [ ] Start from Story 15.1's target-only schema, Story 15.2's durable AI-first discovery/candidate accounting, and Story 15.3's sole lifecycle writer. Do not add a migration, legacy field, fallback read, compatibility fixture, alternate lifecycle writer, or a second ingestion/index loop. (AC: 1-4)
-- [ ] Make every traveler-facing retrieval path use one complete target eligibility predicate, extending existing state-policy/read-model seams rather than duplicating checks. A factual premise requires `lifecycle_state = active`, `verification_requirement = none`, permitted non-conflicted classification/use policy, complete safe card metadata, active supporting evidence, validated non-empty code-point span/quote, eligible source, current eligible capture with retained payload, traveler-safe source metadata, and required retrieval metadata. Missing, stale, disabled, operator-only, failed-verification, unsupported, or conflicted data fails closed even if a search document exists. (AC: 1)
-- [ ] Preserve the Story 15.2 AI-first pipeline: Worker-owned discovery and relation judgment remain the only automated path; candidate AI disposition/reason are immutable; job counters/status are technical observations only. Retrieval and removal must never reinterpret `apply`, `needs_operator`, or `discard`, treat a job status as publication state, or expose raw capture/provider material. (AC: 1-3)
-- [ ] Route evidence invalidation, source/capture ineligibility, and final-support loss through `transitionKnowledgeCard` with current card fences and the same transaction. Let the command select the approved matrix outcome, atomically disable current projection, supersede prohibited work, enqueue only the current version, and write lifecycle audit effects. Do not directly update card lifecycle, verification requirement, recommendation state, lifecycle audit, or lifecycle-caused dirty markers. (AC: 2)
-- [ ] Consolidate existing removal entrypoints around the canonical retryable Knowledge removal command. Protected API/admin intake delegates after existing authorization, CSRF, and validation; `removeKnowledgeSource` and `withdrawKnowledgeEvidence` retain Knowledge/Worker-domain ownership. Preserve advisory-lock order, provenance-withdrawal backfill gate, provenance redaction, source/capture payload scrubbing, actor attribution, and completion audit. `apps/admin` remains a direct API presentation client and imports neither database nor Worker/domain commands. (AC: 2-3)
-- [ ] Make removal idempotent and resumable without a second protocol. Lock source, evidence, provenance anchors, and dependent cards in established deterministic order; revoke source/evidence eligibility before completion; re-evaluate every card at its current fence; and return `completed` only when no removed evidence remains traveler eligible. A duplicate/remedial call is safe; a stale fence/claim leaves card, evidence, work, audit, provenance, dirty-marker, and projection effects unchanged together. (AC: 3)
-- [ ] Update the existing indexing queue/Worker and backfill path to recompute target eligibility from current owner rows before writing or retaining a document. Preserve existing lease, fencing-token, content-version, and marker idempotency rules; an old/delayed claim must never activate a stale or newly prohibited document. API requests must not claim or run indexing work. (AC: 4)
-- [ ] Add serial PostgreSQL integration coverage for target retrieval eligibility, final-support loss, source/evidence withdrawal, provenance safety, retries, duplicate delivery, stale fences, concurrent ingestion/removal ordering, and delayed index claims. Each clean-table suite calls `resetTestDatabase()` locally and uses `DATABASE_URL_TEST`; do not add a global reset hook or integration parallelism. (AC: 1-4)
+- [x] Start from Story 15.1's target-only schema, Story 15.2's durable AI-first discovery/candidate accounting, and Story 15.3's sole lifecycle writer. Do not add a migration, legacy field, fallback read, compatibility fixture, alternate lifecycle writer, or a second ingestion/index loop. (AC: 1-4)
+- [x] Make every traveler-facing retrieval path use one complete target eligibility predicate, extending existing state-policy/read-model seams rather than duplicating checks. A factual premise requires `lifecycle_state = active`, `verification_requirement = none`, permitted non-conflicted classification/use policy, complete safe card metadata, active supporting evidence, validated non-empty code-point span/quote, eligible source, current eligible capture with retained payload, traveler-safe source metadata, and required retrieval metadata. Missing, stale, disabled, operator-only, failed-verification, unsupported, or conflicted data fails closed even if a search document exists. (AC: 1)
+- [x] Preserve the Story 15.2 AI-first pipeline: Worker-owned discovery and relation judgment remain the only automated path; candidate AI disposition/reason are immutable; job counters/status are technical observations only. Retrieval and removal must never reinterpret `apply`, `needs_operator`, or `discard`, treat a job status as publication state, or expose raw capture/provider material. (AC: 1-3)
+- [x] Route evidence invalidation, source/capture ineligibility, and final-support loss through `transitionKnowledgeCard` with current card fences and the same transaction. Let the command select the approved matrix outcome, atomically disable current projection, supersede prohibited work, enqueue only the current version, and write lifecycle audit effects. Do not directly update card lifecycle, verification requirement, recommendation state, lifecycle audit, or lifecycle-caused dirty markers. (AC: 2)
+- [x] Consolidate existing removal entrypoints around the canonical retryable Knowledge removal command. Protected API/admin intake delegates after existing authorization, CSRF, and validation; `removeKnowledgeSource` and `withdrawKnowledgeEvidence` retain Knowledge/Worker-domain ownership. Preserve advisory-lock order, provenance-withdrawal backfill gate, provenance redaction, source/capture payload scrubbing, actor attribution, and completion audit. `apps/admin` remains a direct API presentation client and imports neither database nor Worker/domain commands. (AC: 2-3)
+- [x] Make removal idempotent and resumable without a second protocol. Lock source, evidence, provenance anchors, and dependent cards in established deterministic order; revoke source/evidence eligibility before completion; re-evaluate every card at its current fence; and return `completed` only when no removed evidence remains traveler eligible. A duplicate/remedial call is safe; a stale fence/claim leaves card, evidence, work, audit, provenance, dirty-marker, and projection effects unchanged together. (AC: 3)
+- [x] Update the existing indexing queue/Worker and backfill path to recompute target eligibility from current owner rows before writing or retaining a document. Preserve existing lease, fencing-token, content-version, and marker idempotency rules; an old/delayed claim must never activate a stale or newly prohibited document. API requests must not claim or run indexing work. (AC: 4)
+- [x] Add serial PostgreSQL integration coverage for target retrieval eligibility, final-support loss, source/evidence withdrawal, provenance safety, retries, duplicate delivery, stale fences, concurrent ingestion/removal ordering, and delayed index claims. Each clean-table suite calls `resetTestDatabase()` locally and uses `DATABASE_URL_TEST`; do not add a global reset hook or integration parallelism. (AC: 1-4)
 
 ## Dev Notes
 
@@ -92,7 +96,15 @@ gpt-5.6-terra
 
 - Ultimate context engine analysis completed - comprehensive developer guide created.
 - 2026-08-04: Created and validated after Story 15.2 completed durable AI-first candidate discovery, immutable technical outcomes, and transactional job accounting, and Story 15.3 completed the version-fenced lifecycle writer boundary. Implementation must reuse those seams to fail closed on current evidence/source/capture eligibility, source removal, and delayed indexing.
+- 2026-08-04: Tightened the shared traveler retrieval/projection predicate so supporting evidence must reference the source's current capture version. A recapture therefore immediately fails closed for retrieval and indexing until current eligible evidence exists; old active search documents remain non-authoritative. Existing lifecycle, source-removal, provenance, indexing-claim, and Worker-only ownership seams were preserved.
+- Verification: serial PostgreSQL integration suite passed (42 files, 368 tests), including retrieval, source removal/action, indexing worker, ingestion pipeline, and lifecycle transition matrix coverage. `pnpm typecheck` and `pnpm build` passed. `pnpm lint` completed with 0 errors and 53 pre-existing warnings.
 
 ### File List
 
 - _bmad-output/implementation-artifacts/15-4-enforce-evidence-safe-retrieval-and-source-removal.md
+- packages/database/src/knowledge-search.ts
+- tests/knowledge-search.test.ts
+
+### Change Log
+
+- 2026-08-04: Enforced current-capture evidence eligibility for traveler retrieval and indexing; added stale-capture regressions and marked the story ready for review.

@@ -185,7 +185,7 @@ describe("knowledge card state-model retrieval safety", () => {
     expect(result?.sources).toEqual([expect.objectContaining({ id: "validated-source-card-source", url: "https://example.com/card" })]);
   });
 
-  test("keeps evidence valid against its historical capture after a source recapture and redacts Facebook links", async () => {
+  test("fails closed when a source recapture supersedes the capture supporting active evidence", async () => {
     await createUser("historical-capture-operator", ["operator"]);
     const card = await createApprovedCardWithSource("historical-capture-operator", "historical-capture-card");
     await testDb.update(sources).set({ kind: "facebook", url: "https://facebook.com/historical-capture-token", canonicalUrl: "https://facebook.com/historical-canonical-token" }).where(eq(sources.id, "historical-capture-card-source"));
@@ -194,9 +194,19 @@ describe("knowledge card state-model retrieval safety", () => {
     await seedSourceCaptureVersion({ sourceId: "historical-capture-card-source", captureKind: "facebook", rawText: "Capture mới không làm mất provenance cũ.", id: "historical-recapture", versionSequence: 2 });
     const { searchApprovedKnowledge } = await import("@/features/knowledge/search");
 
-    await expect(enqueueAndProcessIndexWork(card.id)).resolves.toMatchObject({ indexedCount: 1 });
-    const [result] = await searchApprovedKnowledge("Huế");
-    expect(result?.sources).toEqual([expect.objectContaining({ id: "historical-capture-card-source", url: null, canonicalUrl: null })]);
+    await expect(enqueueAndProcessIndexWork(card.id)).resolves.toMatchObject({ indexedCount: 0 });
+    await expect(searchApprovedKnowledge("Huế")).resolves.toEqual([]);
+  });
+
+  test("fails closed when an active document is supported only by a superseded capture", async () => {
+    await createUser("superseded-capture-operator", ["operator"]);
+    const card = await createApprovedCardWithSource("superseded-capture-operator", "superseded-capture-card");
+    const originalCapture = await seedSourceCaptureVersion({ sourceId: `${card.id}-source`, captureKind: "url", rawText: "Bằng chứng capture cũ." });
+    await seedKnowledgeCardEvidence({ cardId: card.id, sourceId: `${card.id}-source`, captureVersionId: originalCapture.id, quoteText: "Bằng chứng capture cũ." });
+    await enqueueAndProcessIndexWork(card.id);
+    await seedSourceCaptureVersion({ sourceId: `${card.id}-source`, captureKind: "url", rawText: "Capture hiện tại đã thay thế.", versionSequence: 2 });
+
+    await expect((await import("@/features/knowledge/search")).searchApprovedKnowledge("Huế")).resolves.toEqual([]);
   });
 
   test("selects evidence deterministically and never projects Facebook or sensitive traveler-visible content", async () => {

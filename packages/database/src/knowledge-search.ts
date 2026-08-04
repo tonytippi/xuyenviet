@@ -393,7 +393,11 @@ async function loadActiveSupportingEvidence(db: Pick<KnowledgeSearchDb, "select"
     .from(knowledgeCardEvidence)
      .innerJoin(knowledgeCardSources, and(eq(knowledgeCardSources.knowledgeCardId, knowledgeCardEvidence.knowledgeCardId), eq(knowledgeCardSources.sourceId, knowledgeCardEvidence.sourceId)))
      .innerJoin(sources, and(eq(sources.id, knowledgeCardEvidence.sourceId), eq(sources.eligibility, "eligible")))
-     .innerJoin(sourceCaptureVersions, and(eq(sourceCaptureVersions.id, knowledgeCardEvidence.captureVersionId), eq(sourceCaptureVersions.sourceId, knowledgeCardEvidence.sourceId)))
+      .innerJoin(sourceCaptureVersions, and(
+        eq(sourceCaptureVersions.id, knowledgeCardEvidence.captureVersionId),
+        eq(sourceCaptureVersions.sourceId, knowledgeCardEvidence.sourceId),
+        eq(sources.currentCaptureVersionId, knowledgeCardEvidence.captureVersionId),
+      ))
     .where(and(
       eq(knowledgeCardEvidence.knowledgeCardId, cardId),
        eq(knowledgeCardEvidence.state, "active"),
