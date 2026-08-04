@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-08-04 (Story 15.2 candidate processing and technical job accounting passed code review.)
+# last_updated: 2026-08-04 (Story 15.4 evidence-safe retrieval and source-removal guide created and validated against completed AI-first pipeline and lifecycle boundary work.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-08-04 (Story 15.2 candidate processing and technical job accounting passed code review.)
+last_updated: 2026-08-04 (Story 15.4 evidence-safe retrieval and source-removal guide created and validated against completed AI-first pipeline and lifecycle boundary work.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -376,7 +376,8 @@ development_status:
   15-2-complete-candidate-processing-and-technical-job-accounting: done
   # 2026-08-04: BMad code review repaired lifecycle atomicity, matrix, fence, lock-order, support-predicate, and writer-boundary findings. Focused serial suites passed (5 files, 34 tests); `pnpm typecheck` and diff check passed.
   15-3-centralize-version-fenced-lifecycle-transitions: done
-  15-4-enforce-evidence-safe-retrieval-and-source-removal: backlog
+  # 2026-08-04: Story guide created and validated against Story 15.2 durable AI-first candidate discovery/accounting and Story 15.3's sole version-fenced lifecycle writer. Implementation must preserve Worker-only ingestion/indexing, immutable candidate outcomes, source-removal/provenance safety, and fail-closed current-row retrieval.
+  15-4-enforce-evidence-safe-retrieval-and-source-removal: ready-for-dev
   15-5-separate-actionable-work-from-quality-sampling: backlog
   15-6-deliver-target-shaped-operator-knowledge-views: backlog
   15-7-prove-the-lifecycle-transition-matrix: backlog
