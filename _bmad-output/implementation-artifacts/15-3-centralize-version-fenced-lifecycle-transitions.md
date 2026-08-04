@@ -1,6 +1,6 @@
 # Story 15.3: Centralize Version-Fenced Lifecycle Transitions
 
-Status: ready-for-dev
+Status: backlog
 
 ## Story
 
@@ -15,12 +15,14 @@ As an operator, I want valid lifecycle decisions to apply atomically through one
 
 ## Tasks / Subtasks
 
+- [ ] Do not start until Story 15.1 has merged the target schema, reset/reseed evidence, and target-only fixtures. (AC: 1-4)
 - [ ] Define narrow lifecycle input/output types and a domain port; implement `transitionKnowledgeCard` in `packages/database` transactionally. (AC: 1)
 - [ ] Require named trigger, `AuditActor`, expected card/evidence fence, and candidate/recommendation fence where relevant. Acquire existing advisory and row locks in established order. (AC: 1, 4)
 - [ ] Implement matrix validation, typed stale/invalid outcomes, and atomic card/work/candidate/audit/index updates. (AC: 1-4)
-- [ ] Migrate current direct writers one path at a time: recommendation resolution, draft review, ingestion completion, source removal, and sampling escalation. Delete a direct writer only after replacement tests pass. (AC: 1)
-- [ ] Add static enforcement/regression tests proving lifecycle, verification, and recommendation state are not updated outside this boundary. (AC: 1)
-- [ ] Test low-risk activation, verify-first, conflicts, operator paths, stale fences, supersession, and rollback atomicity. (AC: 2-4)
+- [ ] Inventory and migrate every direct lifecycle/work writer one path at a time: `knowledge-recommendations`, `knowledge-draft-review`, `admin-knowledge-intake`, ingestion pipeline, Worker recommendations, Worker source removal, Facebook/YouTube capture, review approval, sampling escalation, and indexing queue support. Delete each writer only after its replacement test passes. (AC: 1)
+- [ ] Allow only the transition boundary to write lifecycle state, verification requirement, recommendation status/resolution, candidate-card association, lifecycle audit, or lifecycle-caused index invalidation. Explicitly inventory any permitted non-lifecycle content/evidence writer. (AC: 1)
+- [ ] Add static enforcement that detects target-column `insert`, `update`, aliases, and raw SQL outside a small documented boundary allowlist. The check must reject Worker and database direct writers, not merely one Drizzle call spelling. (AC: 1)
+- [ ] Test low-risk activation, verify-first, conflicts, every operator path, stale fences, stale Worker lease/CAS, concurrent resolvers, supersession, and rollback atomicity. Assert stale/invalid operations leave card, evidence, work, audit, dirty marker, and projection unchanged together. (AC: 2-4)
 
 ## Dev Notes
 
@@ -41,7 +43,8 @@ pnpm test:integration -- tests/knowledge-recommendation-queue.test.ts
 pnpm test:integration -- tests/knowledge-ingestion-pipeline.test.ts
 pnpm test:integration -- tests/knowledge-source-removal.test.ts
 pnpm typecheck
-rg 'update\(knowledgeCards\)|update\(knowledgeRecommendations\)' packages apps
+pnpm test:integration -- tests/knowledge-lifecycle-transition-matrix.test.ts
+rg 'lifecycle_state|verification_requirement|knowledge_recommendations' packages apps
 ```
 
 ### References

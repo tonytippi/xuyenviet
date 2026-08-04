@@ -1,6 +1,6 @@
 # Story 15.6: Deliver Target-Shaped Operator Knowledge Views
 
-Status: ready-for-dev
+Status: backlog
 
 ## Story
 
@@ -8,23 +8,25 @@ As an operator, I want clear Knowledge API responses and admin screens, so that 
 
 ## Acceptance Criteria
 
-1. Authorized `/v1/admin/knowledge/*` reads serialize separate technical job status/counters, candidate processing/disposition/reason, card lifecycle/classification/verification, and work type/status/resolution fields without raw capture content, provider output, unapproved quotes, checkpoints, fences, credentials, or execution secrets.
+1. Authorized `/v1/admin/knowledge/*` reads serialize separate technical job status/counters, candidate processing/disposition/reason, card lifecycle/classification/verification, and work type/status/resolution fields. Endpoint-specific allowlists may expose only already-authorized bounded operator evidence quote/span; they never expose raw capture content, provider output, checkpoints, fence values, credentials, or execution secrets.
 2. `apps/admin` uses documented direct NestJS APIs and existing credential/CSRF/safe-error behavior, without database/domain lifecycle imports or BFF/server proxy.
 3. Mixed-result jobs display technical status with safe aggregate/candidate outcomes and no rolled-up publication label; candidate decisions remain intelligible after later operator actions.
 
 ## Tasks / Subtasks
 
-- [ ] Update contracts, domain ports, database safe projections, Nest serializers/controllers, and exact-key parsers together for target representation. (AC: 1)
-- [ ] Replace legacy `stage`/overlapping state/recommendation fields in capture, review, queue, detail, intake, sampling, and progress UI. (AC: 1, 3)
+- [ ] Do not start until Stories 15.1-15.5 have completed target schema, lifecycle command, retrieval/sampling behavior, and target-only fixtures. (AC: 1-3)
+- [ ] Inventory every existing `/v1/admin/knowledge/*` endpoint and each required job/candidate read. For each, specify the target response fields, strict contract parser, database safe projection, Nest serializer/controller, role/capability guard, and evidence quote/span allowlist or exclusion. (AC: 1)
+- [ ] Update contracts, domain ports, database safe projections, Nest serializers/controllers, and exact-key parsers together for target representation. Add positive serializer allowlists and non-disclosure tests for every endpoint. (AC: 1)
+- [ ] Replace legacy `stage`/overlapping state/recommendation fields in draft, approved, recommendations, intake, capture queue, coverage, sampling, and progress routes/components. Remove legacy models/labels rather than providing a response fallback. (AC: 1, 3)
 - [ ] Preserve direct browser API calls (`credentials: "include"`), API-owned CSRF acquisition, safe errors, request IDs, and role/capability guards. (AC: 2)
-- [ ] Add positive serializer allowlists and non-disclosure contract tests for every new read model. (AC: 1)
 - [ ] Prove browser admin components do not import database code, lifecycle commands, BFF routes, server actions, or proxies. (AC: 2)
 
 ## Dev Notes
 
-- Depends on Stories 15.1-15.5. Do not expose technical checkpoint/fence data merely because jobs/candidates become more visible.
+- This story is blocked until Stories 15.1-15.5 are complete. Do not expose technical checkpoint/fence data merely because jobs/candidates become more visible.
 - `apps/admin` is presentation-only. NestJS owns admission, authorization, validation, direct `/v1` transport, and safe errors. The API may synchronously execute authorized operator decisions but never claims jobs or performs ingestion/index loops.
 - Current contract parsers use strict shape validation. Change database projection, contract, controller, parser, and UI in one atomic interface update; do not allow a legacy response fallback.
+- The disclosure boundary is explicit: bounded evidence quote/span is operator-only and must be endpoint/role allowlisted; raw capture, provider payloads, checkpoints, fences, credentials, and secrets are always excluded.
 - Preserve Vietnamese-first accessible UI and existing layout conventions. Keep raw source material operator-only even in operator screens unless the current authorized bounded view already permits it.
 
 ### Project Structure Notes

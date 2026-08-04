@@ -1,6 +1,6 @@
 # Story 15.2: Complete Candidate Processing and Technical Job Accounting
 
-Status: ready-for-dev
+Status: backlog
 
 ## Story
 
@@ -15,17 +15,21 @@ As an operator, I want ingestion jobs to report technical progress and candidate
 
 ## Tasks / Subtasks
 
-- [ ] Update ingestion job/pipeline/worker logic for target technical status and checkpoint semantics. (AC: 2-4)
+- [ ] Do not start until Story 15.1 has merged its target schema, migration-plan admission, reset/reseed, and target-only fixtures, and Story 15.3 has exposed the lifecycle port needed by candidate completion. (AC: 1-4)
+- [ ] Update ingestion job/pipeline/worker logic for target technical status and the Story 15.1 discovery-terminal checkpoint predicate. (AC: 2-4)
 - [ ] Make candidate completion persist the target immutable outcome; keep failed outcomes business-null. (AC: 1)
 - [ ] Derive or transactionally update the four counters idempotently from persisted candidate state, never using counters for lifecycle or retrieval decisions. (AC: 3)
 - [ ] Preserve existing `FOR UPDATE SKIP LOCKED`, lease, fencing-token, expected-version, and capture-supersession checks. (AC: 4)
 - [ ] Prevent job completion when discovery or any candidate remains non-terminal. (AC: 2)
+- [ ] Replace `commitKnowledgeIngestionStage`, `terminalizeKnowledgeIngestionCandidate`, `finalizeV2Parent`, and all pipeline/worker business-stage writers. A completed candidate writes only its immutable target outcome; a failed candidate clears both business fields; a parent job writes only technical completion/failure. (AC: 1-3)
+- [ ] Derive counters from persisted candidate rows in the same transaction. Never increment outcome counters procedurally or use counters to determine card lifecycle or retrieval. (AC: 3)
+- [ ] Route candidate completion through `transitionKnowledgeCard` whenever it attaches a candidate, mutates a card, recommendation, audit, or index marker. This story must not retain a direct card/recommendation writer as an accounting shortcut. (AC: 1, 4)
 - [ ] Replace job stage/counter projections in Worker-facing database adapters; defer admin serialization/UI work to Story 15.6. (AC: 3)
-- [ ] Add mixed-outcome, retry, duplicate, stale-lease, and newer-capture integration coverage. (AC: 1-4)
+- [ ] Add integration coverage for blocked completion while discovery is non-terminal or any candidate is queued/processing; mixed outcomes; retry/duplicate no-double-count; stale lease/fence; and newer capture supersession with no candidate/job/card mutation. (AC: 1-4)
 
 ## Dev Notes
 
-- Start only after Story 15.1 target schema/contracts are ready. Story 15.3 owns the central card lifecycle transition; do not retain direct card/recommendation writers merely to complete this story. Wire candidate completion through the transition boundary where it changes card/work state.
+- This story is blocked until Stories 15.1 and 15.3 satisfy its first task. Story 15.3 owns the central card lifecycle transition; do not retain direct card/recommendation writers merely to complete this story.
 - A job answers only execution state: `queued -> running -> completed | failed`. Discovery/extraction/judgment/relation detail remains checkpoint data, not operator business status.
 - Candidate disposition records the immutable AI outcome. Later human resolution changes recommendation/card state and audit history, never the candidate disposition/reason.
 - Worker remains the only continuous job claimer/processor. API requests and `apps/admin` must not claim jobs or execute ingestion loops.

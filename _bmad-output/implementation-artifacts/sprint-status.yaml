@@ -367,14 +367,17 @@ development_status:
   epic-14-retrospective: optional
 
   # Knowledge lifecycle normalization cutover is the next planned implementation epic.
+  # 2026-08-04: Story-readiness validation found target-contract, dependency, writer-inventory,
+  # and matrix-test gaps. Story 15.1 was amended and remains the first ready implementation step;
+  # Stories 15.2-15.7 return to backlog until their declared prerequisites complete.
   epic-15: in-progress
   15-1-establish-the-target-lifecycle-schema: ready-for-dev
-  15-2-complete-candidate-processing-and-technical-job-accounting: ready-for-dev
-  15-3-centralize-version-fenced-lifecycle-transitions: ready-for-dev
-  15-4-enforce-evidence-safe-retrieval-and-source-removal: ready-for-dev
-  15-5-separate-actionable-work-from-quality-sampling: ready-for-dev
-  15-6-deliver-target-shaped-operator-knowledge-views: ready-for-dev
-  15-7-prove-the-lifecycle-transition-matrix: ready-for-dev
+  15-2-complete-candidate-processing-and-technical-job-accounting: backlog
+  15-3-centralize-version-fenced-lifecycle-transitions: backlog
+  15-4-enforce-evidence-safe-retrieval-and-source-removal: backlog
+  15-5-separate-actionable-work-from-quality-sampling: backlog
+  15-6-deliver-target-shaped-operator-knowledge-views: backlog
+  15-7-prove-the-lifecycle-transition-matrix: backlog
   epic-15-retrospective: optional
 
 action_items:

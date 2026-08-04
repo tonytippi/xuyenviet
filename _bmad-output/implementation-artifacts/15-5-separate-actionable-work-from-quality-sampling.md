@@ -1,6 +1,6 @@
 # Story 15.5: Separate Actionable Work from Quality Sampling
 
-Status: ready-for-dev
+Status: backlog
 
 ## Story
 
@@ -15,15 +15,17 @@ As a knowledge operator, I want review work and quality-control obligations mode
 
 ## Tasks / Subtasks
 
-- [ ] Replace recommendation-coupled verify-first sampling with an immutable target sampling-obligation ledger. (AC: 1)
+- [ ] Do not start until Story 15.1 target schema and Story 15.3 transition boundary are complete. (AC: 1-4)
+- [ ] Replace recommendation-coupled verify-first sampling with an immutable `knowledge_sampling_obligations` ledger. Create exactly one row per `needs_operator` candidate ID and completion fence under a database unique constraint; it must never create sampling recommendation work or block publication. (AC: 1)
 - [ ] Replace legacy recommendation status/action/reason semantics with target work types, statuses, and resolutions. Do not retain `in_review`. (AC: 1-2)
 - [ ] Update selection and resolution flows to use `transitionKnowledgeCard` for every lifecycle/work mutation. (AC: 2-4)
-- [ ] Persist policy digest/definition and exact cohort card/version membership before containment. (AC: 3)
-- [ ] Add cardinality, obligation immutability, containment ordering, remediable/unsafe, and cohort-isolation tests. (AC: 1-4)
+- [ ] Define remediable versus unsafe containment inputs. Persist the policy definition/digest and exact cohort card/version membership before any containment transition. (AC: 3)
+- [ ] Resolve the triggering sampling item through `transitionKnowledgeCard`; for remediable cards supersede same-fence sampling work and atomically open exactly one risk item on `pending_operator`; for unsafe cards suppress/de-index without successor work. Do not alter completed candidate disposition/reason. (AC: 2-4)
+- [ ] Add cardinality, obligation immutability/unique-key, containment ordering, remediable/unsafe, stale/concurrent containment, candidate immutability, and cohort-isolation tests. Assert card/evidence/work/audit/index effects commit or reject together. (AC: 1-4)
 
 ## Dev Notes
 
-- Depends on Stories 15.1 and 15.3. The current `requiredForSampling` recommendation coupling is explicitly prohibited.
+- This story is blocked until Stories 15.1 and 15.3 are complete. The current `requiredForSampling` recommendation coupling is explicitly prohibited.
 - A sampling obligation is durable quality-control evidence, not an operator queue item and never a publication prerequisite. A recommendation is the only durable actionable operator work.
 - At one card content/evidence fence, allow at most one open primary work item and one open sampling item. `active` may have sampling only; `pending_operator` may have one primary item; suppressed/archived/rejected retain no open work.
 - Sampling and human resolution must never rewrite the candidate's completed AI disposition or reason.

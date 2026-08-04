@@ -1,6 +1,6 @@
 # Story 15.4: Enforce Evidence-Safe Retrieval and Source Removal
 
-Status: ready-for-dev
+Status: backlog
 
 ## Story
 
@@ -15,11 +15,13 @@ As a traveler, I want only supported current knowledge used in answers, so that 
 
 ## Tasks / Subtasks
 
-- [ ] Replace legacy-state eligibility in retrieval/search/approved-knowledge paths with target lifecycle plus derived evidence/source predicates. (AC: 1)
+- [ ] Do not start until Story 15.1 target schema and Story 15.3 transition boundary/matrix coverage are complete. (AC: 1-4)
+- [ ] Replace legacy-state eligibility in retrieval/search/approved-knowledge paths with this complete target predicate: current `active` lifecycle, `verification_requirement = none`, permitted classification/use policy, current active support, validated span, eligible source/capture, traveler-safe source metadata, and all required retrieval metadata. (AC: 1)
 - [ ] Route evidence invalidation and final-support loss through `transitionKnowledgeCard`; disable active projections in the same transaction. (AC: 2)
-- [ ] Consolidate source-removal implementations on the retryable Knowledge command and preserve locking, tombstoning, provenance withdrawal/backfill, and safe retention behavior. (AC: 3)
+- [ ] Consolidate `admin-knowledge-intake` removal, Worker `removeKnowledgeSource`, and `withdrawKnowledgeEvidence` on one canonical retryable removal command. Only that command may tombstone source/evidence, call `transitionKnowledgeCard`, clean up/backfill provenance, disable projections, and record completion audit. (AC: 2-3)
+- [ ] Reuse or add durable removal progress so partial failure can resume idempotently. A removal cannot complete while any removed evidence remains traveler eligible. (AC: 3)
 - [ ] Update indexing queue/worker to re-check target eligibility and maintain card/version idempotency. (AC: 4)
-- [ ] Add stale-projection, evidence removal, source withdrawal, retry, and delayed-index regressions. (AC: 1-4)
+- [ ] Add stale-projection coverage for every missing/stale/disabled/operator-only/failed-verification predicate; evidence removal; partial failure and retry across multiple cards; duplicate removal; source withdrawal through API/admin and Worker entrypoints; and delayed indexing. Assert source/evidence/provenance/card/work/audit/index effects are atomic or absent together. (AC: 1-4)
 
 ## Dev Notes
 
