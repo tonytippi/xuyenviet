@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-08-04 (Story 15.4 review repair atomically suppresses cards that lose final eligible support after recapture, disables stale projections, and queues the new version; focused serial integration, typecheck, and diff verification passed.)
+# last_updated: 2026-08-04 (Story 15.5 is ready for development with an AI-first sampling contract: immutable non-actionable obligations, Worker-owned active-card selection, and cohort-scoped containment through the sole fenced lifecycle writer.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-08-04 (Story 15.4 review repair atomically suppresses cards that lose final eligible support after recapture, disables stale projections, and queues the new version; focused serial integration, typecheck, and diff verification passed.)
+last_updated: 2026-08-04 (Story 15.5 is ready for development with an AI-first sampling contract: immutable non-actionable obligations, Worker-owned active-card selection, and cohort-scoped containment through the sole fenced lifecycle writer.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -378,7 +378,7 @@ development_status:
   15-3-centralize-version-fenced-lifecycle-transitions: done
   # 2026-08-04: Current-capture retrieval/projection predicate now rejects evidence tied to superseded captures, so stale active search documents cannot make old evidence traveler-eligible. Existing lifecycle, removal, provenance, Worker, fence, and indexing seams remain canonical. Serial integration suite passed (42 files, 368 tests); typecheck/build pass; lint 0 errors with 53 pre-existing warnings.
   15-4-enforce-evidence-safe-retrieval-and-source-removal: done
-  15-5-separate-actionable-work-from-quality-sampling: backlog
+  15-5-separate-actionable-work-from-quality-sampling: ready-for-dev
   15-6-deliver-target-shaped-operator-knowledge-views: backlog
   15-7-prove-the-lifecycle-transition-matrix: backlog
   epic-15-retrospective: optional
