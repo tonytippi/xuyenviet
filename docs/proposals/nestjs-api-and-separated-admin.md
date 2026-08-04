@@ -2,11 +2,9 @@
 
 ## Trạng Thái
 
-**Hướng kiến trúc đã được phê duyệt, chưa bắt đầu implementation.** Tạo ngày 2026-07-28, cập nhật ngày 2026-07-28 theo Fast path. Các mục mang nhãn `[ASSUMPTION]` còn cần được xác nhận trong spike hoặc trước capability liên quan; chúng không thay đổi quyết định kiến trúc này.
+**Superseded on 2026-08-03.** Đây là hồ sơ proposal lịch sử cho đợt API-first đầu tiên; các quyết định về Auth.js/BFF, private bearer API, và admin BFF không còn là định hướng triển khai. Thay vào đó, dùng [Direct API and NestJS-Owned Session Authentication Course Correction](../../_bmad-output/planning-artifacts/sprint-change-proposal-2026-08-03-direct-api-session-auth.md), [PRD](../../_bmad-output/planning-artifacts/prds/prd-xuyenviet-2026-07-04/prd.md), [Architecture Spine](../../_bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md), và Epic 14.
 
-Kế hoạch triển khai và kết quả rà soát codebase được ghi tại [Kế Hoạch Thực Hiện NestJS API Và Admin Tách Riêng](./nestjs-api-implementation-plan.md). Implementation vẫn chờ BMad baseline và các spike bắt buộc được hoàn tất.
-
-Proposal này thay thế định hướng runtime của MVP hiện tại. PRD và Architecture Spine phải được cập nhật theo Workstream 0 trước implementation; cho đến khi việc cập nhật hoàn tất, chúng vẫn là nguồn chân lý cho product scope và các invariant chưa được proposal này thay thế.
+Giữ tài liệu này làm bằng chứng cho nền tảng NestJS/API/admin đã hoàn tất. Không dùng nó để thiết kế hoặc triển khai browser transport mới.
 
 ## Quyết Định Đề Xuất
 
@@ -23,7 +21,7 @@ Chuyển dần từ Next.js full-stack sang một **modular monolith có API-fir
 ### Các Quyết Định Đã Chốt
 
 - Mobile app là capability cần có trong 6-12 tháng tới; API-first boundary là đầu tư cần thiết, không chỉ là chuẩn bị giả định.
-- Traveler browser không gọi Nest API trực tiếp. Next.js giữ Auth.js session và làm BFF trong phase đầu.
+- [Superseded] Traveler browser không gọi Nest API trực tiếp. Next.js giữ Auth.js session và làm BFF trong phase đầu. Browser hiện gọi NestJS API trực tiếp bằng opaque session do NestJS quản lý.
 - Admin phải tách thành app/deployment riêng trước khi public deployment cho traveler.
 - Railway là deployment target ban đầu cho monorepo, `web`, `admin`, `api`, `worker` và migration job.
 - PostgreSQL dùng Railway PostgreSQL. Services trong cùng Railway environment giao tiếp qua private networking; không dùng public database URL cho traffic nội bộ.

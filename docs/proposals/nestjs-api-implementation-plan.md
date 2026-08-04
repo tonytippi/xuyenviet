@@ -2,9 +2,9 @@
 
 ## Trạng Thái
 
-**Kế hoạch thực hiện; target architecture và pre-launch cutover đã được phê duyệt, implementation vẫn chờ hoàn tất BMad baseline và các spike bắt buộc.** Tạo ngày 2026-07-28 sau khi rà soát lại [proposal kiến trúc](./nestjs-api-and-separated-admin.md), PRD hiện hành, Architecture Spine và codebase.
+**Superseded on 2026-08-03.** Kế hoạch này ghi nhận khảo sát và trình tự BFF/API đã dẫn tới các foundations Epics 9-13. Nó không còn là kế hoạch triển khai, vì browser BFF/Auth.js và private bearer transport đã bị thay thế bởi [Direct API and NestJS-Owned Session Authentication Course Correction](../../_bmad-output/planning-artifacts/sprint-change-proposal-2026-08-03-direct-api-session-auth.md) và Epic 14.
 
-Kế hoạch này không thay thế PRD hoặc Architecture Spine hiện hành. Khi proposal kiến trúc được phê duyệt, phải dùng nó để cập nhật các BMad artifact theo thứ tự `bmad-prd`, `bmad-architecture`, `bmad-create-epics-and-stories`, `bmad-check-implementation-readiness`, rồi mới bắt đầu sprint planning và development story.
+Giữ tài liệu này làm hồ sơ kỹ thuật lịch sử. Dùng PRD, Architecture Spine, `epics.md`, Epic 14 context, và sprint status hiện hành cho mọi quyết định hay implementation mới.
 
 ## Kết Quả Rà Soát
 

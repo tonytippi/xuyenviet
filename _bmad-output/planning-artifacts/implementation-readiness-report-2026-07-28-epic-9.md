@@ -1,5 +1,5 @@
 ---
-status: current
+status: superseded
 scope: Epic 9 Trusted Private API Foundation
 date: 2026-07-28
 sources:
@@ -14,9 +14,11 @@ sources:
 
 # Epic 9 Implementation Readiness Report
 
+> **Historical readiness evidence only.** The Epic 9 BFF/private-bearer transport assessed here was superseded for active planning on 2026-08-03 by the direct NestJS browser-session architecture. Preserve this report as evidence for completed foundation work; use the current PRD, Architecture Spine, Epic 14, and active story/spec artifacts for implementation decisions.
+
 ## Scope And Authority
 
-This is the current readiness assessment for Epic 9 only. The PRD is the product source of truth; the Architecture Spine is the implementation-invariant source of truth; `epics.md` and the four Epic 9 story guides are the active delivery plan.
+This was the readiness assessment for Epic 9 only. The PRD is the product source of truth; the Architecture Spine is the implementation-invariant source of truth. Its four Epic 9 story guides remain completed historical records, not the active delivery plan.
 
 This report replaces the superseded 2026-07-10 Facebook-capture readiness assessment. Historical readiness reports remain historical evidence only and must not override current PRD, architecture, epics, or active story guides.
 

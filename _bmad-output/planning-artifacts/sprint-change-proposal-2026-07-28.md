@@ -2,7 +2,7 @@
 title: API-First Runtime and Launch Readiness Course Correction
 date: 2026-07-28
 project: xuyenviet
-status: approved
+status: superseded
 mode: incremental
 change_scope: major
 source:
@@ -19,6 +19,8 @@ approved_edit_proposals:
 ---
 
 # Sprint Change Proposal: API-First Runtime and Launch Readiness
+
+> **Superseded for active planning on 2026-08-03.** This proposal's NestJS/API/worker foundations and its historical implementation evidence remain useful. Its Auth.js and BFF browser-transport decisions are replaced by `sprint-change-proposal-2026-08-03-direct-api-session-auth.md`, the current PRD, Architecture Spine, and Epic 14. Do not use this document to plan or implement a new browser transport.
 
 ## 1. Issue Summary
 

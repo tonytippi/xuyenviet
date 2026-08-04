@@ -3,12 +3,12 @@ name: XuyenViet
 status: final
 project: xuyenviet
 created: 2026-07-05
-updated: 2026-07-24
+updated: 2026-08-04
 sources:
   - ../../prds/prd-xuyenviet-2026-07-04/prd.md
   - ../../architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md
   - ../../epics.md
-  - ../../implementation-readiness-report-2026-07-28.md
+  - ../../sprint-change-proposal-2026-08-03-direct-api-session-auth.md
 ---
 
 # XuyenViet — Experience Spine
@@ -17,7 +17,7 @@ sources:
 
 ## Foundation
 
-Responsive web app for consumer MVP. Next.js App Router is the traveler/admin presentation and BFF runtime; NestJS owns protected domain API and worker transport. React, shadcn/ui, Tailwind, and PostgreSQL-backed auth/session data follow the architecture. `DESIGN.md` is the visual identity reference; this document owns information architecture, behavior, states, flows, accessibility, and interaction contracts.
+Responsive web app for consumer MVP. Next.js App Router is the traveler presentation layer and the separately deployed admin app is a presentation client; both call NestJS APIs directly. NestJS owns protected domain API, Google OAuth, opaque browser sessions, CSRF, and worker transport. React, shadcn/ui, Tailwind, and PostgreSQL-backed auth/session data follow the architecture. `DESIGN.md` is the visual identity reference; this document owns information architecture, behavior, states, flows, accessibility, and interaction contracts.
 
 The traveler experience uses four canonical states: a logged-out public homepage with a sign-in-gated ask box, a logged-in empty state with a left sidebar plus centered greeting/composer, an active AI Ask workspace with left history/projects, center answer, and right contextual detail panel, and a Trip Project workspace with Trip Home, structured plan, and its primary conversation. Their visual references are [`home-logged-out.html`](./mockups/home-logged-out.html), [`home-logged-in-empty.html`](./mockups/home-logged-in-empty.html), [`three-panel-chat-map.html`](./mockups/three-panel-chat-map.html), and [`trip-project-workspace.html`](./mockups/trip-project-workspace.html). `DESIGN.md` and this experience spine win on conflict with the static mockups.
 
