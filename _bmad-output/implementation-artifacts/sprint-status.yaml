@@ -1,5 +1,5 @@
 # generated: 2026-07-25
-# last_updated: 2026-08-05 (Story 15.6 review findings repaired and verification completed.)
+# last_updated: 2026-08-05 (Story 15.7 created as an AI-first lifecycle verification guide.)
 # project: xuyenviet
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 #   - done: Completed
 
 generated: 2026-07-25
-last_updated: 2026-08-05 (Story 15.6 review findings repaired and verification completed.)
+last_updated: 2026-08-05 (Story 15.7 created as an AI-first lifecycle verification guide.)
 project: xuyenviet
 project_key: NOKEY
 tracking_system: file-system
@@ -380,7 +380,8 @@ development_status:
   15-4-enforce-evidence-safe-retrieval-and-source-removal: done
   15-5-separate-actionable-work-from-quality-sampling: done
   15-6-deliver-target-shaped-operator-knowledge-views: done
-  15-7-prove-the-lifecycle-transition-matrix: backlog
+  # Story guide created 2026-08-05 after 15.1-15.6 completed. It verifies the target-only, AI-first lifecycle rather than restoring approval-queue semantics.
+  15-7-prove-the-lifecycle-transition-matrix: ready-for-dev
   epic-15-retrospective: optional
 
 action_items:
