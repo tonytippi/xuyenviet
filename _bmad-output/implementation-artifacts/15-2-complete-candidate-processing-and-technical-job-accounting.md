@@ -1,58 +1,145 @@
 # Story 15.2: Complete Candidate Processing and Technical Job Accounting
 
-Status: backlog
+Status: ready-for-dev
 
 ## Story
 
-As an operator, I want ingestion jobs to report technical progress and candidate outcomes accurately, so that mixed candidate outcomes do not misrepresent a source's processing state.
+As an operator,
+I want ingestion jobs to report technical progress and candidate outcomes accurately,
+so that mixed candidate outcomes do not misrepresent a source's processing state.
 
 ## Acceptance Criteria
 
-1. Terminal completed candidates persist immutable non-null `apply`, `needs_operator`, or `discard` disposition and reason; failed candidates persist neither.
-2. A job cannot become `completed` until discovery is terminal and every persisted candidate is `completed` or `failed`.
-3. A valid Worker completion records only technical `completed` status and transactional idempotent `candidateCount`, `completedCandidateCount`, `failedCandidateCount`, and `needsOperatorCandidateCount` projections.
-4. Retry, duplicate delivery, or newer-capture stale work cannot mutate candidate/job outcomes or active cards.
+1. Given a Worker discovers candidates from an immutable capture, when candidate processing reaches a terminal outcome, then completed candidates persist immutable non-null `apply`, `needs_operator`, or `discard` disposition and reason, and failed candidates persist neither business field.
+2. Given discovery has not terminalized or any persisted candidate remains `queued` or `processing`, when a job attempts to become `completed`, then the transition is rejected and its technical status remains non-terminal.
+3. Given discovery is terminal and every candidate is `completed` or `failed`, when the Worker completes the job under the existing lease/fence protocol, then it writes only technical `completed` status and the four counters exactly match transactional, idempotent candidate-row projections.
+4. Given retry, duplicate delivery, expired lease, stale fence, or a newer capture, when obsolete work attempts a candidate or job mutation, then existing lease, fencing, and version checks reject it and no active card or immutable candidate outcome changes.
 
 ## Tasks / Subtasks
 
-- [ ] Do not start until Story 15.1 has merged its target schema, migration-plan admission, reset/reseed, and target-only fixtures, and Story 15.3 has exposed the lifecycle port needed by candidate completion. (AC: 1-4)
-- [ ] Update ingestion job/pipeline/worker logic for target technical status and the Story 15.1 discovery-terminal checkpoint predicate. (AC: 2-4)
-- [ ] Make candidate completion persist the target immutable outcome; keep failed outcomes business-null. (AC: 1)
-- [ ] Derive or transactionally update the four counters idempotently from persisted candidate state, never using counters for lifecycle or retrieval decisions. (AC: 3)
-- [ ] Preserve existing `FOR UPDATE SKIP LOCKED`, lease, fencing-token, expected-version, and capture-supersession checks. (AC: 4)
-- [ ] Prevent job completion when discovery or any candidate remains non-terminal. (AC: 2)
-- [ ] Replace `commitKnowledgeIngestionStage`, `terminalizeKnowledgeIngestionCandidate`, `finalizeV2Parent`, and all pipeline/worker business-stage writers. A completed candidate writes only its immutable target outcome; a failed candidate clears both business fields; a parent job writes only technical completion/failure. (AC: 1-3)
-- [ ] Derive counters from persisted candidate rows in the same transaction. Never increment outcome counters procedurally or use counters to determine card lifecycle or retrieval. (AC: 3)
-- [ ] Route candidate completion through `transitionKnowledgeCard` whenever it attaches a candidate, mutates a card, recommendation, audit, or index marker. This story must not retain a direct card/recommendation writer as an accounting shortcut. (AC: 1, 4)
-- [ ] Replace job stage/counter projections in Worker-facing database adapters; defer admin serialization/UI work to Story 15.6. (AC: 3)
-- [ ] Add integration coverage for blocked completion while discovery is non-terminal or any candidate is queued/processing; mixed outcomes; retry/duplicate no-double-count; stale lease/fence; and newer capture supersession with no candidate/job/card mutation. (AC: 1-4)
+- [ ] Replace procedural candidate counter increments with one Database-owned, transaction-scoped technical-accounting helper that projects all four counters from persisted candidate rows in the same transaction. (AC: 3)
+  - [ ] `candidateCount` is every candidate for the job.
+  - [ ] `completedCandidateCount` and `failedCandidateCount` are candidate processing-state counts.
+  - [ ] `needsOperatorCandidateCount` is only completed candidates with `aiDisposition = needs_operator`.
+  - [ ] Do not use counters to decide lifecycle, retrieval, or terminality; terminality must inspect persisted candidate states.
+- [ ] Make successful lifecycle-owned candidate completion reuse that accounting/finalization path without adding a second card, recommendation, audit, or index writer. (AC: 1, 3, 4)
+  - [ ] Keep `transitionKnowledgeCard` as the sole writer for candidate-to-card association and lifecycle-caused effects.
+  - [ ] Preserve its final candidate lease CAS commit point: losing it must roll back earlier lifecycle effects.
+- [ ] Make discovery an AI-first durable pipeline stage before setting `discoveryTerminal`. Under the claimed parent lease and current capture/source/payload checks, extract candidate facts from the immutable capture, validate their code-point spans, and persist them idempotently by `(ingestionJobId, fingerprint)`. A no-candidate result is valid only after that discovery attempt terminalizes successfully. (AC: 1-4)
+- [ ] Define and implement both terminal candidate paths. (AC: 1, 3, 4)
+  - [ ] Relational `apply` and `needs_operator` completions must use `transitionKnowledgeCard`.
+  - [ ] A valid AI `discard` completes the candidate with an immutable permitted reason, then performs technical accounting/finalization only. It must not write a card, evidence, work, audit, or index marker.
+  - [ ] Provider, schema, capture, target-validation, and other technical failures set `processingStatus = failed` with both business fields null; they are not `discard`.
+- [ ] Make technical candidate failure clear its business outcome, project counters, and conditionally finalize the parent in the same transaction. (AC: 1-3)
+- [ ] Add expired processing-candidate lease recovery before claims. Requeue a current expired candidate with attempts remaining; terminalize an exhausted candidate as `failed` with both business fields null; project counters and attempt parent finalization transactionally. (AC: 1-4)
+  - [ ] Recovery must never alter a completed candidate disposition/reason.
+  - [ ] A prior claimant's stale fencing token must be unable to alter the recovered candidate, its job, or any card.
+- [ ] Retain the target discovery-terminal and all-candidates-terminal completion gate. A parent may become `completed` only after `discoveryTerminal = true` and no candidate is `queued` or `processing`; clear parent claim fields when terminalizing. (AC: 2-3)
+- [ ] Preserve existing `FOR UPDATE SKIP LOCKED`, lease, fencing-token, parent status/CAS, current-capture, source-eligibility, and capture-payload checks. (AC: 4)
+- [ ] Run candidate recovery from the Worker polling path and emit safe recovery observations consistently with existing parent-job recovery telemetry. Candidate recovery has no candidate-owned technical-reason column in the target schema: use the safe Worker observation/result code and existing parent technical fields only where a parent-level failure is actually being recorded. Do not add API/admin ingestion ownership or UI/serialization work. (AC: 4)
+- [ ] Add serial PostgreSQL coverage for completion gating, mixed outcomes/counters, duplicate delivery, stale fences, supersession, and candidate lease recovery. (AC: 1-4)
 
 ## Dev Notes
 
-- This story is blocked until Stories 15.1 and 15.3 satisfy its first task. Story 15.3 owns the central card lifecycle transition; do not retain direct card/recommendation writers merely to complete this story.
-- A job answers only execution state: `queued -> running -> completed | failed`. Discovery/extraction/judgment/relation detail remains checkpoint data, not operator business status.
-- Candidate disposition records the immutable AI outcome. Later human resolution changes recommendation/card state and audit history, never the candidate disposition/reason.
-- Worker remains the only continuous job claimer/processor. API requests and `apps/admin` must not claim jobs or execute ingestion loops.
+### Current Baseline and Required Changes
 
-### Project Structure Notes
+- Stories 15.1 and 15.3 are complete. The Story 15.2 dependency block in `bmad-dev-auto-result-15-2-blocked-dependency.md` is stale and must not govern this work.
+- `packages/worker-domain/src/features/knowledge/ingestion-jobs.ts` already claims parent jobs and candidates with `FOR UPDATE SKIP LOCKED`, leases, and fencing tokens. Keep these claim predicates and the `queued -> running -> completed | failed` parent status vocabulary.
+- `finalizeKnowledgeIngestionJob` already prevents completion until discovery is terminal and no candidate is `queued` or `processing`. Extend it or a colocated helper so counter projection and conditional finalization use the same transaction and are safely repeatable.
+- `failKnowledgeIngestionCandidate` currently increments `failedCandidateCount` procedurally. Replace this with row-derived projections for all counters, then conditionally finalize the parent.
+- `packages/database/src/knowledge-lifecycle.ts` currently increments successful-candidate counters in `transitionCandidateRelation`. Replace those increments with the same shared technical accounting path, inside the existing lifecycle transaction. Do not move lifecycle effects into Worker accounting helpers.
+- `recoverKnowledgeIngestionJobs` recovers only expired parent leases. Story 15.2 owns the missing expired `processing` candidate recovery documented in `deferred-work.md`; otherwise such a candidate permanently prevents job completion.
+- `packages/worker-domain/src/features/knowledge/ingestion-worker.ts` polls candidates before discovery jobs. Preserve that priority and run candidate recovery before claims. Extend existing safe Worker observations rather than inventing a second worker loop or telemetry contract.
+- `runKnowledgeIngestionPipeline` must perform durable AI-first candidate discovery before terminalization: invoke the configured extraction/discovery step, validate candidate facts and Unicode code-point spans against the immutable capture, and persist candidates idempotently by `(ingestionJobId, fingerprint)` before it sets `discoveryTerminal = true`. A no-candidate result may terminalize discovery only after a successful discovery attempt persists zero candidates. Counters do not substitute for this check.
+- `runKnowledgeIngestionCandidatePipeline` must remain thin: it validates current capture/source/payload eligibility, gets bounded system-owned relation context, invokes and validates the AI relation decider, and delegates relational persistence to `transitionKnowledgeCard`. The observed shortlist is AI context, not an authority or fence. A current-capture/source/payload failure or invalid relation may technically fail only a still-current candidate. A lifecycle `stale` result or lost final candidate CAS changes no candidate, job, card, work, audit, or index state.
 
-- Primary paths: `packages/worker-domain/src/features/knowledge/ingestion-jobs.ts`, `ingestion-pipeline.ts`, `ingestion-worker.ts`, and `source-captures.ts`.
-- Preserve compilation-safe ownership: Worker adapters use shared domain/database packages; browser applications import neither database code nor Worker loops.
+### Mandatory Invariants
+
+- Job state is technical execution only. Never add a rolled-up publication/business result to `knowledge_ingestion_jobs`.
+- Candidate processing state is `queued | processing | completed | failed`. Only a completed candidate has immutable nonblank `aiDisposition` and `outcomeReasonCode`; failed, queued, and processing candidates have both fields null.
+- Human/operator resolution changes card, work, and audit state only. It never rewrites an AI candidate disposition or reason.
+- Candidate counters are observability projections. They are not authority for card lifecycle, retrieval, recommendation work, or parent completion.
+- `transitionKnowledgeCard` remains the only production writer for card lifecycle, verification requirement, recommendation state, candidate-card association, lifecycle audit, and lifecycle-driven index invalidation. Do not add a direct card/recommendation write as an accounting shortcut.
+- Worker is the only continuous ingestion claimer/processor. API requests and `apps/admin` must not claim jobs or execute ingestion/index loops. `apps/admin` remains presentation-only and must not import database or Worker code.
+- Automated mutations retain the `system-knowledge-pipeline` Audit actor. Source submitter/requester provenance remains a real-user field and is not the automated executor.
+- This is a target-only clean break. Do not restore legacy stages, business statuses, aliases, fallback reads, dual writes, legacy fixtures, or compatibility behavior.
+
+### AI-First Discovery and Relation Semantics
+
+- Candidate discovery and relation evaluation are Worker-owned AI steps. AI never writes database rows or selects an arbitrary card ID outside the bounded system context.
+- The system supplies a deterministic bounded same-type shortlist of cards in `draft`, `pending_operator`, `active`, or `suppressed`. `archived` and `rejected` cards are excluded.
+- Relation output has one canonical mapping: `attach -> apply/applied`, `create -> apply/applied`, `conflict -> needs_operator/conflict`, and `ambiguous -> needs_operator/relation_ambiguous`. Reject blank rationale, malformed output, unknown kinds, forged/missing targets, and non-canonical disposition/reason combinations as technical failure while the candidate lease remains current.
+- At commit, `transitionKnowledgeCard` recomputes the authoritative eligible shortlist. An `attach` or `conflict` target must be in that current shortlist. A concurrent shortlist change alone must not invalidate `create` or `ambiguous`; a no-longer-eligible target is invalid without lifecycle side effects.
+- New evidence associated with a `suppressed` card must reopen it only to `pending_operator` with `operator_required` and one appropriate fenced primary work item. It must never auto-reactivate the card.
+- A valid `discard` is a completed immutable AI business outcome, using an allowed reason such as `weak_evidence` or `policy_rejected`. It has no card association or lifecycle effect. It is distinct from a technical `failed` candidate.
+
+### Candidate Recovery Policy
+
+- Operate only on candidates still `processing` whose lease has expired. Lock/restrict each mutation so an active claimant or completed candidate is unaffected.
+- When `attemptCount < maxAttempts`, move the expired candidate back to `queued`, clear claim/lease/fence fields, set `nextRunAt` to the recovery time, and emit the safe recovery observation. Do not invent candidate reason persistence without an approved schema change.
+- When `attemptCount >= maxAttempts`, move it to `failed`, clear claim/lease/fence fields and both business fields, emit a safe recovery/failure observation, project parent counters, and attempt parent finalization. Update parent `lastErrorCode` or `requeueReasonCode` only when recording a true parent-level technical failure, never as lossy per-candidate state.
+- Recovery must be idempotent: a second recovery pass finds no changed candidate and must not change counters, attempts, job status, card state, work, audit, or index data.
+- Preserve parent-job recovery semantics. Do not allow a parent to complete until discovery and every candidate are terminal, and do not let parent recovery create an alternate candidate completion path.
+
+### File and Boundary Guidance
+
+- Add/update: `packages/database/src/knowledge-ingestion-accounting.ts` (or another narrowly named Database-owned module)
+  - Export the transaction-scoped candidate-row counter projection and conditional technical parent finalization primitive used by both lifecycle and Worker code.
+  - It must accept the existing Database transaction rather than opening a nested transaction, and it must not write cards, recommendations, audits, or index state.
+- Update: `packages/worker-domain/src/features/knowledge/ingestion-jobs.ts`
+  - Keep claim locking and terminal parent claim cleanup.
+  - Call the Database-owned accounting primitive after technical failure and from candidate lease recovery; retain Worker-domain ownership of claiming and continuous recovery orchestration.
+- Update: `packages/database/src/knowledge-lifecycle.ts`
+  - Call the Database-owned accounting/finalization primitive after the final candidate CAS succeeds, without making it a lifecycle writer.
+  - Do not import `@xuyenviet/worker-domain`; Worker-domain already depends on Database.
+- Update: `packages/worker-domain/src/features/knowledge/ingestion-worker.ts`
+  - Invoke candidate recovery before claims and preserve candidate-first polling plus the current observation shape.
+- Update: `packages/worker-domain/src/features/knowledge/ingestion-pipeline.ts`
+  - Implement the required durable AI-first discovery-before-terminal path while preserving current parent lease/fence and capture/source/current-version validation.
+  - Keep relational persistence delegated to `transitionKnowledgeCard`; modify candidate processing only for the canonical AI-decision, discard, stale-result, and shared-accounting rules in this story.
+- Tests: `tests/knowledge-ingestion-jobs.test.ts`, `tests/knowledge-ingestion-pipeline.test.ts`, and, only if observation/runtime behavior changes, `tests/worker-runtime.test.ts` or `tests/worker-adapter-boundary.test.ts`.
+- Do not change schema/migrations for candidate recovery reasons: the target candidate shape intentionally has no technical-reason column, and safe Worker observations provide the operational signal. Story 15.1 intentionally assigns cross-row accounting and terminality to transactional commands, not triggers.
+
+### Required Test Matrix
+
+- A completed candidate persists each valid immutable outcome shape; every failed path leaves `aiDisposition` and `outcomeReasonCode` null.
+- Parent completion is blocked when discovery is false, with a queued candidate, and with a processing candidate.
+- Terminal discovery plus mixed completed (`apply` and `needs_operator`) and failed candidates produces exact values for all four counters and technical `completed` parent status.
+- A no-candidate terminal discovery completes with zero counters.
+- Discovery persists validated candidate facts idempotently before it sets `discoveryTerminal`; a no-candidate result is terminal only after a successful AI discovery attempt. Validate Unicode code-point spans against the immutable capture and reject stale parent/capture/source/payload work before durable persistence.
+- Repeated finalization, retry, and duplicate candidate delivery cannot double-count or rewrite a completed candidate outcome.
+- A stale/expired candidate fencing token cannot mutate the candidate, job counters/status, card, recommendation, audit, or index effects.
+- Newer capture, ineligible source, or deleted payload causes stale candidate technical failure only and cannot mutate a card or immutable outcome from obsolete work.
+- Candidate lease recovery requeues before exhaustion, terminalizes at exhaustion, clears fields correctly, projects counters exactly, and permits eventual parent completion only after discovery and all candidates are terminal.
+- A valid `discard` stores immutable `discard` plus allowed reason, projects counters, can complete the technical parent, and creates no card, evidence, recommendation, audit, or index effect.
+- Canonical AI relation mappings accept only `attach`, `create`, `conflict`, and `ambiguous` with their defined disposition/reason pairs. Provider failure, malformed output, forged target, and unsupported mappings technically fail only the still-current candidate with null business fields.
+- A lifecycle `stale` result, expired/lost candidate lease, or final-CAS loss leaves candidate outcome, parent counters/status, card, evidence, recommendation, audit, and index data unchanged.
+- A changed observed shortlist does not itself fail `create` or `ambiguous`; an `attach` or `conflict` target absent from the command's current shortlist is rejected without lifecycle effects. Cover suppressed-card attachment/reopening without auto-activation and archived/rejected exclusion.
+- Tests are PostgreSQL integration tests: call `resetTestDatabase()` in each suite setup, use `DATABASE_URL_TEST` via existing helpers, and remain serial. Do not add a global reset hook or integration parallelism.
 
 ### Verification
 
 ```bash
 pnpm test:integration -- tests/knowledge-ingestion-jobs.test.ts
 pnpm test:integration -- tests/knowledge-ingestion-pipeline.test.ts
-pnpm test:integration -- tests/worker-runtime.test.ts
+pnpm test:integration -- tests/worker-adapter-boundary.test.ts
+pnpm test:integration -- tests/knowledge-lifecycle-transition-matrix.test.ts
+pnpm typecheck
 pnpm test:integration
 ```
 
 ### References
 
-- [Source: docs/proposals/knowledge-lifecycle-normalization.md#Ingestion Jobs Technical Execution Only]
-- [Source: docs/proposals/knowledge-lifecycle-normalization.md#Ingestion Candidates Immutable AI Outcome]
 - [Source: _bmad-output/planning-artifacts/epics.md#Story 15.2]
+- [Source: _bmad-output/implementation-artifacts/epic-15-context.md#Requirements & Constraints]
+- [Source: _bmad-output/implementation-artifacts/15-1-establish-the-target-lifecycle-schema.md#Completion Notes List]
+- [Source: _bmad-output/implementation-artifacts/15-3-centralize-version-fenced-lifecycle-transitions.md#Dev Notes]
+- [Source: _bmad-output/implementation-artifacts/deferred-work.md#Deferred from spec-15-1-establish-target-lifecycle-schema]
+- [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md#AD-25]
+- [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md#AD-26]
+- [Source: docs/proposals/knowledge-lifecycle-normalization.md#Transition Ownership]
+- [Source: docs/proposals/knowledge-lifecycle-normalization.md#Acceptance Criteria]
+- [Source: _bmad-output/project-context.md#Testing Rules]
 
 ## Dev Agent Record
 
@@ -60,9 +147,12 @@ pnpm test:integration
 
 gpt-5.6-terra
 
+### Debug Log References
+
 ### Completion Notes List
 
 - Ultimate context engine analysis completed - comprehensive developer guide created.
+- 2026-08-04: Prepared after confirming Stories 15.1 and 15.3 are done. The guide specifies target-only accounting, lifecycle-boundary preservation, candidate lease recovery, and serial PostgreSQL regression coverage.
 
 ### File List
 
