@@ -87,7 +87,7 @@ so that API authorization does not trust browser cookies or expose an internal c
 - [Source: _bmad-output/planning-artifacts/epics.md#Story 9.1: Establish BFF Credentials and API Request Principals]
 - [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md#AD-1: API-First Modular Monolith Runtime]
 - [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md#AD-4: Identity Maps Into A Domain-Neutral Request Principal]
-- [Source: docs/proposals/nestjs-api-implementation-plan.md#Kiến Trúc Package Chuyển Tiếp]
+- [Historical source: _bmad-output/planning-artifacts/sprint-change-proposal-2026-07-28.md#Sprint Change Proposal: API-First Runtime and Launch Readiness]
 - [Source: src/auth.ts]
 - [Source: src/server/auth.ts]
 - [Source: src/db/schema.ts#users, sessions, and userRoles]

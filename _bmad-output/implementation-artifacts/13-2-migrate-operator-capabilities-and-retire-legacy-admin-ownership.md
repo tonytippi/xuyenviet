@@ -103,9 +103,7 @@ This story's first capability remains fixed below. Adding or replacing a capabil
 
 - [Source: `_bmad-output/planning-artifacts/epics.md#Story 13.2: Migrate Operator Capabilities and Retire Legacy Admin Ownership`]
 - [Source: `13-1-establish-the-separately-deployed-admin-bff-application.md`]
-- [Source: `docs/proposals/nestjs-api-and-separated-admin.md#API Contract`]
-- [Source: `docs/proposals/nestjs-api-and-separated-admin.md#Admin Tách Riêng`]
-- [Source: `docs/proposals/nestjs-api-and-separated-admin.md#Giai Đoạn 5: Full Pre-Launch API Cutover`]
+- [Historical source: `_bmad-output/planning-artifacts/sprint-change-proposal-2026-07-28.md#Sprint Change Proposal: API-First Runtime and Launch Readiness`]
 - [Source: `_bmad-output/project-context.md#Framework-Specific Rules`]
 - [Source: `src/app/admin/layout.tsx`]
 - [Source: `apps/api/src/app.module.ts`]

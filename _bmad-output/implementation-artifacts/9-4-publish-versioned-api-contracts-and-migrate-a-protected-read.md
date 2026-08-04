@@ -94,7 +94,7 @@ so that the API-first boundary is proven by behavior rather than only by credent
 - [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md#AD-15: Railway Deploys Independently Gated Workloads]
 - [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md#AD-32: Capability Cutovers Have One Writer And Compatible Rollback]
 - [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md#Operational Envelope]
-- [Source: docs/proposals/nestjs-api-implementation-plan.md#Extract Domain Boundary]
+- [Historical source: _bmad-output/planning-artifacts/sprint-change-proposal-2026-07-28.md#Sprint Change Proposal: API-First Runtime and Launch Readiness]
 - [Source: src/features/chat-trips/conversations.ts#listOwnedConversations]
 - [Source: src/app/ai-ask/page.tsx]
 - [Source: src/app/api/health/route.ts]

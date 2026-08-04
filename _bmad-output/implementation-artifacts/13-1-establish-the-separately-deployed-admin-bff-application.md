@@ -93,8 +93,7 @@ Required failure-mode proof: valid sign-in; host-only cookie isolation; root-coo
 ### References
 
 - [Source: `_bmad-output/planning-artifacts/epics.md#Epic 13: Separate Operator Application Cutover`]
-- [Source: `docs/proposals/nestjs-api-and-separated-admin.md#Admin Tách Riêng`]
-- [Source: `docs/proposals/nestjs-api-and-separated-admin.md#Authentication Và Session Boundary`]
+- [Historical source: `_bmad-output/planning-artifacts/sprint-change-proposal-2026-07-28.md#Sprint Change Proposal: API-First Runtime and Launch Readiness`]
 - [Source: `_bmad-output/project-context.md#Critical Don't-Miss Rules`]
 - [Source: `src/app/admin/layout.tsx`]
 - [Source: `src/auth.ts`]

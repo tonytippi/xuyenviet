@@ -80,7 +80,7 @@ so that browser-originated requests cannot bypass CSRF and API authorization con
 - [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md#AD-4: Identity Maps Into A Domain-Neutral Request Principal]
 - [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md#AD-6: Domain Use Cases Own Mutations, Authorization, And Audit]
 - [Source: _bmad-output/planning-artifacts/architecture/architecture-xuyenviet-2026-07-04/ARCHITECTURE-SPINE.md#Operational Envelope]
-- [Source: docs/proposals/nestjs-api-implementation-plan.md#API Error Và Observability]
+- [Historical source: _bmad-output/planning-artifacts/sprint-change-proposal-2026-07-28.md#Sprint Change Proposal: API-First Runtime and Launch Readiness]
 - [Source: src/app/api/health/route.ts]
 
 ## Dev Agent Record

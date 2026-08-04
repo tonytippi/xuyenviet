@@ -24,7 +24,7 @@ Runbooks document implemented commands and their operational limits. They must m
 
 ## Proposals
 
-Proposals record direction outside the approved MVP scope. They do not authorize implementation and must first be promoted through the BMad workflow.
+Proposals record active ideas for future work outside the approved MVP scope. They do not authorize implementation and must first be promoted through the BMad workflow. Superseded plans and historical implementation evidence belong under `_bmad-output/`, not here.
 
 | Document | Status | Planning use |
 |---|---|---|
