@@ -12,7 +12,9 @@ companion_to: ARCHITECTURE-SPINE.md
 
 Turn captured community sources, initially Facebook post text, into short planning facts quickly without making operator review a publication gate. The system publishes only evidence-grounded, policy-safe facts and preserves uncertainty, conditions, and provenance for retrieval.
 
-This document explains the workflow. `ARCHITECTURE-SPINE.md` is the binding engineering contract when they differ.
+This document explains the workflow. `ARCHITECTURE-SPINE.md` is the binding
+engineering contract when they differ; this companion is updated to its normalized
+lifecycle model.
 
 ## Operating Model
 
@@ -33,14 +35,18 @@ flowchart LR
   Conflict --> Index
 ```
 
-The system has one ingestion job per source capture version. It progresses through:
+The system has one ingestion job per source capture version. Its status reports
+technical execution only:
 
 ```text
-queued -> triaging -> extracting -> judging -> relating
-      -> published | suppressed | review_recommended | verify_first | failed
+queued -> running -> completed | failed
 ```
 
-Completed stages are not rerun after a retry. Workers claim each stage with a transaction, lease/fencing token, and expected stage version; every commit uses compare-and-swap so stale workers cannot publish later. A recapture creates a new immutable source version and a new job.
+`checkpoint.step` records resumable discovery, extraction, judgment, or relation
+detail. Completed jobs may contain mixed candidate dispositions and must not use a
+rolled-up business outcome. Workers claim work with a transaction, lease/fencing
+token, and expected version; every commit uses compare-and-swap so stale workers
+cannot publish later. A recapture creates a new immutable source version and job.
 
 ## Canonical Data
 
@@ -48,37 +54,32 @@ Completed stages are not rerun after a retry. Workers claim each stage with a tr
 
 | Record | Holds | Retention intent |
 | --- | --- | --- |
-| `knowledge_cards` | Current short fact, conditions, states, confidence, current judge summary, `content_version` | Card lifecycle |
+| `knowledge_cards` | Current short fact, one lifecycle state, domain classification, verification requirement, confidence, current judge summary, `content_version` | Card lifecycle |
 | `knowledge_card_evidence` | Current bounded quote/span, exact immutable capture version/hash, source, date, conditions, support, display and evidence state | While active; short retention after inactive |
-| `knowledge_ingestion_jobs` | Current pipeline stage/outcome and safe retry details per capture version | Operational retention |
+| `knowledge_ingestion_jobs` | Technical status, checkpoint, aggregate counters, and safe retry details per capture version | Operational retention |
+| `knowledge_ingestion_candidates` | Candidate extraction, processing status, immutable AI disposition/reason, and optional card association | Operational retention |
 | `knowledge_card_relations` | Current duplicate/support/conflict/superseding decision | Operational/current relationship need |
-| `knowledge_review_recommendations` | Priority, reasons, suggested operator action, resolution | Until resolved plus operational retention |
+| `knowledge_recommendations` | Version-fenced primary/sampling work, status, reason, and resolution | Until resolved plus operational retention |
 | `knowledge_card_search_documents` | Rebuildable lexical projection | Rebuildable |
 
 Do not retain full prompts, provider payloads, unlimited extraction JSON histories, or old wording versions by default.
 
 ## Card State Model
 
-The four state dimensions answer different questions and must not be collapsed.
+Each card has exactly one workflow state. Domain classification and verification
+need are separate from workflow.
 
 | Dimension | Values | Meaning |
 | --- | --- | --- |
-| Publication | `active`, `suppressed`, `archived` | May traveler retrieval use it? |
-| Knowledge | `community_observation`, `community_pattern`, `conditional`, `uncertain`, `conflicted`, `confirmed`, `superseded` | How should it be described? |
-| Review | `none`, `ai_recommended`, `in_review`, `reviewed` | Does an operator need or have review? |
-| Verification | `not_required`, `required`, `corroborated`, `failed` | Does the claim require external corroboration? |
+| Lifecycle | `draft`, `pending_operator`, `active`, `suppressed`, `archived`, `rejected` | Current workflow and retrieval eligibility |
+| Domain classification | `community_observation`, `community_pattern`, `conditional`, `conflicted` | How an eligible fact is described |
+| Verification requirement | `none`, `operator_required`, `failed` | Whether publication needs an operator decision or has failed |
 
-Examples:
-
-| Situation | Publication | Knowledge | Review | Verification |
-| --- | --- | --- | --- | --- |
-| First-hand parking observation with clear quote | active | community_observation | none | not_required |
-| Several independent matching reports | active | community_pattern | none | not_required |
-| Road condition reported during rain | active | conditional | ai_recommended | required |
-| Conflicting current EV charger reports | active or suppressed | uncertain/conflicted | ai_recommended | required |
-| Removed source with no remaining evidence | suppressed | superseded or uncertain | reviewed if handled | failed or not_required |
-
-`verification_state = required` permits caveat-only use. It never turns a card into `confirmed` by itself.
+Only `active` cards with `verification_requirement = none` and eligible evidence
+are traveler-retrievable. `pending_operator` is never caveat-only retrieval; it is
+not retrievable. Corroboration is derived from active supporting evidence with
+distinct independence keys. Operator confirmation is a recommendation resolution
+and audit event, not a card state or corroboration flag.
 
 ## Publication Decision
 
@@ -104,7 +105,12 @@ The independent judge then applies current thresholds:
 
 Scores cannot override failed code validation. The extractor never makes the final publication decision for its own output.
 
-High-risk topics include road status, safety, EV charging, prices, hours, availability, booking policy, and promotions. They may be active only as conditional caveats while verification is required; they cannot drive itinerary decisions as settled facts.
+High-risk topics include road status, safety, EV charging, prices, hours,
+availability, booking policy, and promotions. They complete as
+`needs_operator`, transition the card to `pending_operator` with
+`verification_requirement = operator_required`, and open one version-fenced
+verification item. They are not retrievable until the item resolves to an active
+card or a terminal non-active state.
 
 ## Evidence And Relation Rules
 
@@ -127,7 +133,7 @@ Relation matching is scoped before AI comparison:
 3. Ask the relation judge only about the closest scoped candidates.
 4. Attach only when the judge confirms the same fact and equivalent conditions.
 
-Create a new card for materially distinct but compatible conditions. Attach conflicting evidence to the existing card rather than creating an opposite card, unless conditions clearly make the two facts compatible. Ambiguous relation, high-risk topic, state-changing merge, conflict, or absent observed date creates a review recommendation.
+Create a new card for materially distinct but compatible conditions. Attach conflicting evidence to the existing card rather than creating an opposite card, unless conditions clearly make the two facts compatible. Ambiguous relation, high-risk topic, state-changing merge, conflict, or absent observed date completes as `needs_operator` and opens applicable primary work.
 
 ## Transaction And Indexing Rules
 
@@ -147,9 +153,18 @@ sequenceDiagram
   R->>DB: re-check current card/evidence eligibility
 ```
 
-Every meaningful state or operator change must atomically update the card, write a concise audit event, and mark the card version dirty. Suppression, archival, superseding, high-risk conflict, and source withdrawal disable the projection in the same transaction.
+`transitionKnowledgeCard(...)` is the only production writer for card lifecycle,
+verification requirement, primary/sampling work, candidate association, lifecycle
+audit, and lifecycle-caused index invalidation. Worker ingestion, API operator
+commands, source removal, conflict handling, and sampling containment call this
+transactional boundary; the admin presentation application does not.
 
-The indexing worker is idempotent by `(knowledge_card_id, content_version)`. Retrieval always re-checks current publication, knowledge, verification, evidence, and source-safe eligibility. An indexing delay must never re-enable a prohibited card.
+Every meaningful lifecycle change atomically updates the card, writes a concise
+audit event, and marks the card version dirty. Suppression, archival, rejection,
+high-risk conflict, and source withdrawal disable the projection in the same
+transaction.
+
+The indexing worker is idempotent by `(knowledge_card_id, content_version)`. Retrieval always re-checks current lifecycle, domain classification, verification requirement, evidence, and source-safe eligibility. An indexing delay must never re-enable a prohibited card.
 
 ## Retrieval And AI Ask
 
@@ -166,28 +181,26 @@ They must never include raw Facebook text, operator-only evidence, media notes, 
 | `community_observation` | `contextual_use`: State it as one community observation, never broad consensus |
 | `community_pattern` | `contextual_use`: May say multiple independent community reports support it |
 | `conditional` | `contextual_use`: Include material condition in the answer |
-| `uncertain` | `caveat_only` |
 | `conflicted` | `exclude`: ask, warn, search, or select a safer option without using it as a premise |
-| `verification = required` | `caveat_only`; no itinerary-driving recommendation |
-| `suppressed`, `archived`, `superseded` | `exclude` |
+| non-`active` lifecycle or verification requirement not `none` | `exclude` |
 
-Web search runs when active knowledge is sparse, freshness-sensitive, uncertain, or conflicted. If it fails or is low confidence, AI Ask must say updated information could not be verified and recommend user confirmation rather than generate unsupported guidance. Search results remain external/unverified unless ingested through this same pipeline.
+Web search runs when active knowledge is sparse, freshness-sensitive, pending operator work, or conflicted. If it fails or is low confidence, AI Ask must say updated information could not be verified and recommend user confirmation rather than generate unsupported guidance. Search results remain external/unverified unless ingested through this same pipeline.
 
 ## Operator Workflow
 
 Operators do not review every post or every card. The system offers a queue sorted by traveler impact and risk.
 
-1. Operator opens a recommendation.
+1. Operator opens a primary or sampling work item.
 2. The screen shows the current short fact, card content version, evidence-set revision, state, conditions, risk reasons, source metadata, and highlighted bounded evidence.
-3. Operator chooses one action: accept current wording, edit with evidence validation, suppress, restore, request verification, or resolve a relation/conflict.
-4. The Knowledge command resolves the version-bound recommendation with compare-and-swap, then applies the state transition, audit, and index dirty marker atomically. A changed card gets a new recommendation rather than inheriting the prior review result.
+3. Operator chooses one resolution: publish, revise and requeue, suppress, resolve a relation, or record a sampling result.
+4. The Knowledge command resolves version-bound work with compare-and-swap, then applies the lifecycle transition, audit, and index dirty marker atomically. A changed card gets new fenced work rather than inheriting a prior resolution.
 
 Operator actions must never expose raw source material to travelers. Editing wording requires existing or newly added active evidence that validates the changed wording.
 
 Quality sampling is separate from recommendation review:
 
 - Review 15% of auto-active cards during the first four weeks.
-- Review 100% of `verify_first` outcomes.
+- Retain a separate immutable sampling obligation for every `needs_operator` outcome.
 - Increase sampling for new models, prompts, categories, or detected policy failures.
 
 ## Retention And Removal
@@ -211,6 +224,6 @@ Before group-level discovery expands, verify:
 - Every sampled active card has a quote/span that code validates against its source.
 - No PII or raw source text enters traveler bundles.
 - High-risk conflicts de-index immediately.
-- Retrieval never returns suppressed, archived, or superseded cards.
+- Retrieval never returns a card whose lifecycle is not `active`.
 - AI Ask follows state-aware wording in evaluation prompts.
 - Operator recommendations are actionable without requiring a full post read in normal cases.

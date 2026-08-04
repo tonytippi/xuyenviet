@@ -1,12 +1,29 @@
 # Proposal: Normalize the Knowledge Lifecycle
 
-**Status:** Proposed
+**Status:** Proposed - revised for direct API topology
 
-**Scope:** Knowledge ingestion jobs, ingestion candidates, knowledge cards, recommendations, sampling, search eligibility, and related operator views.
+**Scope:** Knowledge ingestion jobs, ingestion candidates, knowledge cards, recommendations, sampling, search eligibility, public retrieval, and related API/operator views.
+
+## Architecture Alignment
+
+This proposal is aligned with the post-BFF deployment topology:
+
+- `apps/api` is the browser-facing NestJS API. It owns browser-session admission,
+  CSRF, authorization, validation, and the `/v1/admin/knowledge/*` contract.
+- `apps/admin` is a presentation application only. It calls the API with browser
+  credentials and must not import domain commands or database code.
+- `apps/worker` is the only continuous owner of extraction, ingestion, and index
+  projection loops. An API request must never claim or execute ingestion work.
+- `packages/domain` owns ports and lifecycle command contracts; `packages/database`
+  provides the transactional Postgres implementation used by the API and Worker.
+
+No BFF adapter, BFF credential, server action, or Next.js route is part of this
+change. The direct API's existing session, origin, CSRF, safe-error, request-ID,
+and capability controls remain unchanged.
 
 ## Decision
 
-Replace the overlapping Knowledge state machines with four narrowly scoped lifecycles. Because the system is still in development, this is a breaking schema and application refactor: reset development data rather than carrying forward inconsistent records or adding permanent compatibility paths.
+Replace the overlapping Knowledge state machines with four narrowly scoped lifecycles. This is a breaking schema and application refactor: migrate shared environments forward under the release-matrix process, and reset only explicitly disposable local development databases rather than carrying forward inconsistent records or adding permanent compatibility paths.
 
 The central rule is:
 
@@ -194,23 +211,31 @@ sampling_failed
 
 ## Transition Ownership
 
-Introduce one Knowledge command boundary:
+Introduce one transactional Knowledge command boundary in `packages/database`,
+exported through a narrow domain port:
 
 ```text
 transitionKnowledgeCard(input, transaction)
 ```
 
-It is the only writer for:
+It is the only writer for lifecycle transitions and recommendation state. Its
+callers are the Worker ingestion loop, API operator commands, source-removal
+operation, conflict handling, and sampling containment. The command must not be
+called from the admin presentation application.
+
+It owns:
 
 - `knowledge_cards.lifecycle_state`
 - `knowledge_cards.verification_requirement`
 - active/superseded/replaced recommendations
 - operator confirmation metadata
-- candidate-to-card association when processing completes
+- candidate-to-card association when a candidate completes
 - search-index dirty markers and search-document invalidation
 - audit events for lifecycle decisions
 
-The ingestion pipeline, operator actions, source removal, conflict handling, and sampling containment call this command. They may not update card lifecycle columns or recommendations directly.
+Draft-content editing remains a separate command because it changes content, not
+the lifecycle. If an edit changes the version fence or requires follow-up work,
+it must delegate the lifecycle/recommendation portion to this boundary.
 
 Candidate completion and card transition happen in one database transaction under the existing card/source advisory locks and version fence.
 
@@ -327,46 +352,133 @@ Sampling is not a card lifecycle state and not a publication approval state.
 - Sampling failure can transition an active card to `suppressed` through `transitionKnowledgeCard` and supersede current sampling work.
 - Sampling does not alter the candidate AI disposition or create verification work by itself.
 
-## Development Data Reset and Migration
+## Migration and Release
 
-No compatibility migration is required for development data.
+The repository requires forward-only Drizzle migrations. This is therefore a
+breaking application contract, but not a reason to use a destructive migration,
+dual write, or a runtime that reads both representations.
 
-1. Create new schema and constraints in a new Drizzle migration.
-2. Remove deprecated state columns and old enum-like checks from schema code.
-3. Update seed data and test helpers to create only valid target-state combinations.
-4. Reset the local development database and test database.
-5. Run source capture seeding and ingestion test fixtures under the new lifecycle.
-6. Remove legacy state-repair branches introduced only to handle current inconsistent data.
+1. Add the target columns, checks, and indexes in an expand migration. Do not
+   drop legacy columns in the same release.
+2. Run one bounded, resumable, idempotent backfill command that derives target
+   state from the existing card, recommendation, candidate, and evidence records.
+   It must report ambiguous records as a safe failure code rather than guessing.
+3. Release target-only API and Worker workloads after the backfill has completed.
+   The API is the selected traffic writer; the Worker remains the operational
+   ingestion/indexing owner. Neither creates legacy state or dual writes.
+4. Update direct API response parsers, admin presentation, retrieval, indexing,
+   fixtures, seeds, and tests in that writer release. Retain legacy columns only
+   as inert rollback data until all active/deployable old binaries are retired.
+5. In a separately approved contract release, remove legacy columns, checks,
+   indexes, repair code, and compatibility test fixtures.
 
-No code may read both legacy and new lifecycle columns after the migration. The reset is deliberate to avoid two competing sources of truth.
+Each production-like release requires the schema release matrix: one declared
+traffic writer, `dualWrite: false`, forward-only journal hashes, compatible API
+and Worker ranges, and retirement evidence before the contract release. A local
+disposable database may be reset only under the existing `db:reset` safeguards;
+the reset is a developer convenience, not the shared-environment migration plan.
 
 ## Implementation Plan
 
-### Phase 1: Contract and Schema
+### Phase 0: Baseline and Decision Record
 
-- Update PRD and architecture state definitions.
-- Create a lifecycle transition matrix and database schema migration.
-- Replace card lifecycle fields and candidate/job state fields.
-- Add constraints and partial unique indexes.
+- Create a current-state inventory query for invalid combinations, open work on
+  non-pending cards, stale version fences, mixed ingestion-job outcomes, and
+  source-removal/sampling edge cases. Store only counts and safe IDs in the
+  release evidence.
+- Turn the state table in this proposal into an explicit transition matrix:
+  trigger, actor, prior lifecycle, target lifecycle, recommendation effect,
+  candidate effect, fence effect, index effect, and audit effect.
+- Update the active PRD, architecture, epics/stories, and sprint status before
+  implementation. Historical BFF artifacts must not be used as authority.
+
+**Exit:** the current architecture, target model, migration strategy, and every
+allowed transition have one authoritative written contract.
+
+### Phase 1: Expand Schema and Contracts
+
+- In `packages/database/src/schema.ts`, add target lifecycle fields and target
+  job/candidate fields while retaining legacy fields for the rollout window.
+- Add target checks and partial indexes, including one open primary work item and
+  one open sampling item per card version fence. Use database checks for
+  row-local invariants and the command for cross-table invariants.
+- Add direct-API contract fields and parsers in `packages/contracts`; update the
+  `AdminKnowledgeReviewPort` in `packages/domain` without exposing persistence
+  internals to `apps/admin`.
+- Generate a forward-only Drizzle migration and release matrix with the selected
+  API traffic writer plus explicit API/Worker capability-owner declarations.
+
+**Exit:** schema validates target-shaped writes, the API contract can represent
+the target model, and no deployed workload writes target data yet.
 
 ### Phase 2: Domain Commands
 
-- Implement `transitionKnowledgeCard` and make it the only lifecycle/recommendation writer.
-- Move ingestion, operator action, source removal, conflict, and sampling mutations to the command.
-- Preserve transaction locks, optimistic version checks, audit events, and indexing behavior.
+- Implement `transitionKnowledgeCard` beside the existing recommendation and
+  indexing commands in `packages/database`. It accepts an explicit trigger and
+  expected version fence, acquires the current card advisory lock, locks the
+  card/recommendation rows, and returns a typed stale/invalid/resolved outcome.
+- Make it atomically update lifecycle state, verification requirement, fenced
+  recommendations, candidate association, audit event, index dirty marker, and
+  search-document invalidation.
+- Preserve existing advisory-lock order, worker lease/fencing/CAS behavior,
+  source provenance withdrawal, and sampling-policy boundary lock. Do not make
+  the command claim Worker jobs.
+- Move writes from `knowledge-recommendations.ts`, ingestion processing,
+  source-removal logic, and sampling escalation one path at a time. Delete a
+  direct lifecycle/recommendation write only after its replacement matrix tests
+  pass.
 
-### Phase 3: Read Models and UI
+**Exit:** static search confirms there is one production writer for card
+lifecycle and recommendation transitions outside the migration/backfill code.
 
-- Update capture queue to job execution state plus candidate outcome counts.
-- Update recommendation queue to work type and work status only.
-- Update card detail and admin pages to show `lifecycle_state`, domain classification, evidence strength, and operator decision separately.
+### Phase 3: Backfill and Single-Writer Cutover
 
-### Phase 4: Verification and Removal
+- Build a finite maintenance command, not a continuous Worker loop. It processes
+  bounded transactions, can resume safely, verifies each derived target state,
+  and fails closed on ambiguity.
+- Quiesce lifecycle writers for the maintenance window, run the backfill, verify
+  invariant counts are zero, then deploy target-only API and Worker workloads.
+  The API traffic writer is selected in the matrix; the admin presentation is
+  deployed only after the API contract it consumes is selected.
+- Record the migration-before-traffic order, selected writer, `dualWrite: false`,
+  and rollback binary in the approved release matrix. Roll back by traffic
+  selection to a compatible old binary; never run a down migration.
 
-- Replace existing lifecycle tests with a transition matrix test suite.
-- Add database constraint tests and concurrency/version-fence tests.
-- Remove legacy repair branches and obsolete status labels.
-- Run integration, typecheck, lint, and a clean database seed/ingestion smoke test.
+**Exit:** every persisted row has a target representation, only one writer is
+reachable, and all release gates retain safe evidence.
+
+### Phase 4: Read Models and Direct API UI
+
+- Update Worker/API projections: the capture queue shows job execution status and
+  aggregate candidate counts, never a rolled-up business outcome.
+- Update retrieval, approved-knowledge, provenance, answer freshness, and search
+  indexing to use `lifecycle_state` and derived evidence support. Traveler reads
+  admit only active cards with valid evidence.
+- Update `/v1/admin/knowledge/*` serializers and contract parsers to expose
+  lifecycle state, domain classification, verification requirement, work type,
+  and resolution separately.
+- Update `apps/admin` screens to call those direct API endpoints and render the
+  separated concepts. It retains browser `credentials: "include"`, API-owned
+  CSRF acquisition, and safe error handling; it gains no server-side proxy.
+
+**Exit:** operator and traveler read paths use the target representation only.
+
+### Phase 5: Verification and Contract Release
+
+- Replace lifecycle tests with a transition-matrix suite covering every trigger
+  and forbidden transition. Run database tests serially under `pnpm
+  test:integration`; keep pure policy tests under `pnpm test:unit`.
+- Add constraint, stale-fence, concurrent resolution, source-withdrawal,
+  sampling-containment, mixed-job-outcome, atomic-index/audit, API authorization,
+  and direct-admin UI contract tests.
+- After old binaries are retired and the contract release matrix is approved,
+  remove legacy columns, old checks/indexes, repair branches, obsolete labels,
+  and compatibility fixtures in one forward-only contract migration.
+- Run focused suites first, then `pnpm test:unit`, `pnpm test:integration`,
+  `pnpm lint`, `pnpm typecheck`, `pnpm build`, and `pnpm exec drizzle-kit check`.
+
+**Exit:** the legacy representation no longer exists and the target invariants
+are enforced by schema, command, and regression suite.
 
 ## Acceptance Criteria
 
@@ -379,6 +491,13 @@ No code may read both legacy and new lifecycle columns after the migration. The 
 - Suppressing a verification recommendation does not recreate verification work unless later evidence explicitly transitions the card back to `pending_operator`.
 - A stale recommendation cannot mutate card, evidence, recommendation, audit, or index data.
 - All development seed data and test fixtures satisfy the database invariants without legacy exceptions.
+- The direct API remains the only browser-facing knowledge owner; `apps/admin`
+  contains no lifecycle command or database import, and no BFF route is added.
+- The Worker remains the only continuous ingestion/indexing owner; lifecycle
+  transition work does not run in an API request or presentation runtime.
+- A shared or production-like rollout is forward-only, has the selected API
+  traffic writer and `dualWrite: false` in its release matrix, and has a
+  compatible rollback binary.
 
 ## Risks and Mitigations
 

@@ -2,7 +2,7 @@
 title: XuyenViet AI Travel Information MVP Architecture Spine
 status: final
 created: 2026-07-04
-updated: 2026-07-31
+updated: 2026-08-04
 altitude: project MVP
 source_prd: ../../prds/prd-xuyenviet-2026-07-04/prd.md
 source_ux: ../../ux-designs/ux-xuyenviet-2026-07-05/EXPERIENCE.md
@@ -143,17 +143,17 @@ Prevents: a second claim aggregate, mandatory operator approval, or raw communit
 
 Rule: An extracted candidate is an operational artifact only. After deterministic validation and an independent AI judge decision, the system creates or updates one canonical `knowledge_card`; no separate persistent claim aggregate exists in the MVP.
 
-Rule: `knowledge_cards` own the current normalized fact, conditions, confidence, freshness risk, a monotonic `content_version`, current judge summary, and separate `publication_state`, `knowledge_state`, `review_state`, and `verification_state`.
+Rule: `knowledge_cards` own the current normalized fact, conditions, confidence, freshness risk, monotonic `content_version`, current judge summary, one `lifecycle_state`, separate domain `knowledge_state`, and `verification_requirement`.
 
-Rule: `publication_state` is `active | suppressed | archived`. `knowledge_state` is `community_observation | community_pattern | conditional | uncertain | conflicted | confirmed | superseded`. `review_state` is `none | ai_recommended | in_review | reviewed`. `verification_state` is `not_required | required | corroborated | failed`. An operator-authorized `verify_first` publication may be active with its available validated evidence and `verification_state = corroborated`; this records the operator decision, not multi-source corroboration or a `community_pattern` upgrade.
+Rule: `lifecycle_state` is exactly `draft | pending_operator | active | suppressed | archived | rejected`. `knowledge_state` is domain-only: `community_observation | community_pattern | conditional | conflicted`. `verification_requirement` is `none | operator_required | failed`. Operator confirmation is recorded by a fenced recommendation resolution and audit metadata; it is not evidence corroboration. Independent corroboration is derived from active supporting evidence with distinct independence keys.
 
-Rule: Only `active` cards may be retrieved. `superseded`, `suppressed`, and `archived` cards are not retrievable. `uncertain` cards are caveat-only. `conflicted` cards cannot support a factual itinerary recommendation. `required` verification is caveat-only until corroborated by independent evidence or resolved through the authorized `verification` recommendation; neither path makes a card `confirmed` by itself.
+Rule: Only an evidence-eligible `active` card may be retrieved. `draft`, `pending_operator`, `suppressed`, `archived`, and `rejected` cards are not retrievable. `conflicted` cards cannot support a factual itinerary recommendation. An active card has `verification_requirement = none` and no open primary operator work.
 
 Rule: Every card has one or more current `knowledge_card_evidence` records. Evidence contains only a bounded validated quote/span, source reference, observed/captured time, conditions, support level, display policy, and active/inactive/removed state. Raw source material remains operator-only and never enters traveler source bundles.
 
 Rule: A card may be active without operator review only when code validates its evidence span and privacy policy and the independent judge meets the PRD hard gates and thresholds. Operator approval records review; it is not a publication prerequisite.
 
-Rule: Every evidence record stores a deterministic `independence_key`: the normalized canonical source identity for a directly authored source, or the known original source identity when the capture is a repost/share. `community_pattern` requires at least two active supporting evidence records with distinct independence keys. Freshness-sensitive road, safety, EV, price, hours, availability, booking, and promotion claims automatically set `verification_state = required` and `review_state = ai_recommended`; automation retains them in `verify_first` rather than auto-publishing. An authorized operator may revise and publish that card as the final operational decision, with a version-fenced audit, without upgrading it to `community_pattern`.
+Rule: Every evidence record stores a deterministic `independence_key`: the normalized canonical source identity for a directly authored source, or the known original source identity when the capture is a repost/share. `community_pattern` requires at least two active supporting evidence records with distinct independence keys. Freshness-sensitive road, safety, EV, price, hours, availability, booking, and promotion candidates complete as `needs_operator`; their card enters `pending_operator` with `verification_requirement = operator_required` and one fenced `verification` work item. An authorized operator may publish, revise and requeue, or suppress the card without upgrading it to `community_pattern`.
 
 ### AD-7A: Facebook Capture Is Operator-Controlled And Raw-Material Only
 
@@ -316,11 +316,11 @@ Prevents: stale or unsafe knowledge entering traveler source bundles, or an inde
 
 Rule: The MVP retrieval path searches active `knowledge_card_search_documents` lexically, then loads and validates current active cards, state-aware retrieval policy, and traveler-safe linked sources before a candidate can enter a source bundle. The indexing worker owns active, stale, and disabled search-document transitions.
 
-Rule: Traveler retrieval is fail-closed. A card is retrievable only when its current `publication_state` is `active`, its knowledge/verification state permits the requested use, linked source metadata is traveler-safe, current active evidence exists, and all required retrieval metadata is present. Unknown, missing, stale, disabled, suppressed, archived, superseded, or operator-only state excludes the item.
+Rule: Traveler retrieval is fail-closed. A card is retrievable only when its current `lifecycle_state` is `active`, its domain classification permits the requested use, `verification_requirement = none`, linked source metadata is traveler-safe, current active evidence exists, and all required retrieval metadata is present. Unknown, missing, stale, disabled, non-active, failed-verification, or operator-only state excludes the item.
 
 Rule: Retrieval eligibility must support current publication/knowledge/review/verification states, current active evidence, source-safe linkage, card type, route segment/location, conditions, tags, freshness-sensitive flag, displayed confidence, and source type. Lexical score may rank eligible candidates but must not override owner-row eligibility.
 
-Rule: Retrieval projects one machine-readable use policy per selected card: `contextual_use`, `caveat_only`, or `exclude`. `active + community_observation/community_pattern/conditional + not_required/corroborated` is `contextual_use` only within stated conditions and with state-appropriate community wording; `uncertain` or `verification_state = required` is `caveat_only`; `conflicted`, `failed`, `superseded`, non-active publication, or missing active evidence is `exclude`. The answer prompt must enforce this policy.
+Rule: Retrieval projects one machine-readable use policy per selected card: `contextual_use` or `exclude`. `active + community_observation/community_pattern/conditional + verification_requirement = none` is `contextual_use` only within stated conditions and with state-appropriate community wording; `conflicted`, a non-active lifecycle, failed verification, or missing active evidence is `exclude`. The answer prompt must enforce this policy.
 
 Rule: Hybrid retrieval is introduced later behind the Retrieval module only after indexed lexical retrieval, source-bundle snapshots, provenance persistence, and fail-closed tests are stable. Full-text/vector scores may add ranking signals later, but they must not bypass current owner-row eligibility filters.
 
@@ -432,7 +432,9 @@ Binds: source triage, extraction, independent judging, relation matching, retrie
 
 Prevents: separate queues re-running completed AI stages, disagreeing about the source lifecycle, or leaving operators unable to identify the current outcome.
 
-Rule: Knowledge owns one stateful ingestion job for each source capture version. For v2 text ingestion, discovery submits the complete immutable redacted capture once and persists scoped semantic candidates; one independent batch grounding-and-judgment call returns exactly one exact-contiguous quote or `evidence:null` for every candidate. The server derives Unicode code-point spans and only grounded candidates enter relation work. Its stages are `queued -> triaging -> extracting -> judging -> relating`, with terminal outcomes `published | suppressed | review_recommended | verify_first | failed`. A retry resumes the failed stage and preserves completed-stage outputs only for short operational retention.
+Rule: Knowledge owns one stateful ingestion job for each source capture version. For v2 text ingestion, discovery submits the complete immutable redacted capture once and persists scoped semantic candidates; one independent batch grounding-and-judgment call returns exactly one exact-contiguous quote or `evidence:null` for every candidate. The server derives Unicode code-point spans and only grounded candidates enter relation work. Job status is technical only: `queued -> running -> completed | failed`; resumable execution detail belongs in a checkpoint, and aggregate counters are observability only.
+
+Rule: A candidate has `processing_status = queued | processing | completed | failed` and an immutable `ai_disposition = apply | needs_operator | discard` once completed. `outcome_reason_code` explains non-apply outcomes. Human action never rewrites the AI disposition. A completed job may contain mixed candidate dispositions without changing its own technical status.
 
 Rule: Recapture creates a new source capture version and ingestion job. It never overwrites a completed job's provenance. The ingestion job records the submitted-by provenance, while automation mutations use the `system-knowledge-pipeline` service actor.
 
@@ -444,9 +446,13 @@ Binds: AI publication, operator edits, verification, conflict handling, source r
 
 Prevents: a stale projection continuing to authorize a card after its source or risk state changes.
 
-Rule: Knowledge transitions card publication/knowledge/review/verification state in one PostgreSQL transaction with a meaningful audit event and a card-version dirty marker. `suppressed`, `archived`, and `superseded` transitions disable the current search document in that transaction; the indexing worker asynchronously rebuilds or disables projections idempotently by `(knowledge_card_id, content_version)`.
+Rule: `transitionKnowledgeCard(...)` is the only production writer for card lifecycle state, verification requirement, primary/sampling recommendation state, candidate-to-card completion association, lifecycle audit metadata, and lifecycle-caused index invalidation. It runs in one PostgreSQL transaction under existing card/source advisory locks and expected version fences. The Worker ingestion loop, API operator command, source removal, conflict handling, and sampling containment invoke it; `apps/admin` never imports it.
 
-Rule: High-risk conflict or source withdrawal immediately downgrades the card to `uncertain` or suppresses it, according to safe-use policy, without waiting for review. Retrieval re-checks current owner-row eligibility before every source-bundle inclusion, so index lag cannot re-enable an ineligible card.
+Rule: A primary work item has type `verification | relation | risk | missing_context`; sampling is separate. Recommendation status is `open | resolved | superseded`. One card version fence may have at most one open primary item and one open sampling item. Opening primary work requires the same-version card to be `pending_operator`; resolving its only primary item atomically activates, suppresses, rejects, or requeues the card. A suppressed card with new operator work transitions to `pending_operator` in the same transaction.
+
+Rule: `suppressed`, `archived`, and `rejected` transitions disable the current search document in the same transaction; the indexing worker asynchronously rebuilds or disables projections idempotently by `(knowledge_card_id, content_version)`.
+
+Rule: High-risk conflict immediately moves an active card to `pending_operator`, classifies it as `conflicted`, opens one fenced relation or risk item, and disables its projection. Source withdrawal suppresses or requeues the card according to remaining eligible support. Neither waits for review. Retrieval re-checks current owner-row eligibility before every source-bundle inclusion, so index lag cannot re-enable an ineligible card.
 
 Rule: Source removal is a retryable Knowledge command. Before deleting or hiding a source/capture artifact, it locks every dependent evidence/card, marks evidence removed and traveler-invisible, re-evaluates each card from remaining active evidence, applies downgrade/suppression and projection disablement, then records a concise removal audit. Partial work resumes idempotently from the removal command state.
 
@@ -456,7 +462,7 @@ Binds: duplicate handling, supporting/conflicting evidence, condition-aware fact
 
 Prevents: semantic similarity joining unrelated locations, volatile evidence silently replacing valid observations, or a duplicate-card explosion.
 
-Rule: Candidate matching is scoped by card type plus normalized location/route. Code validates scope and evidence before an independent relation judge may attach a candidate. Auto-attach requires the same fact and equivalent conditions; materially distinct compatible conditions create a new card; redundant/same-source candidates are suppressed; ambiguous, high-risk, conflict, state-changing, or missing-observed-date relations receive a review recommendation.
+Rule: Candidate matching is scoped by card type plus normalized location/route. Code validates scope and evidence before an independent relation judge may attach a candidate. Auto-attach requires the same fact and equivalent conditions; materially distinct compatible conditions create a new card; redundant/same-source candidates complete as `discard`; ambiguous, high-risk, conflict, state-changing, or missing-observed-date relations complete as `needs_operator` and create the applicable primary work item.
 
 Rule: New evidence supplements active evidence by default. It deactivates older evidence only for time-varying facts or when the older record is no longer suitable. A card retains at most three active supporting and one active conflicting evidence record for retrieval, selected by recency, source independence, and quality. Inactive evidence is operational data with short retention and a deactivation reason.
 
@@ -466,13 +472,13 @@ Binds: audit volume, current judge summary, operational artifact retention, and 
 
 Prevents: a fact-version graph that cannot scale or a submitter being incorrectly attributed with autonomous AI decisions.
 
-Rule: Cards retain current states, `content_version`, current judge summary, and currently effective evidence. Durable audits record only meaningful publication/knowledge/verification/review transitions and operator actions. Failed or superseded extraction/evaluation artifacts retain safe code/version metadata for short operational retention, not unlimited raw AI output.
+Rule: Cards retain current lifecycle/domain/verification-requirement state, `content_version`, current judge summary, and currently effective evidence. Durable audits record meaningful lifecycle transitions and operator actions. Failed candidates and superseded extraction/evaluation artifacts retain safe code/version metadata for short operational retention, not unlimited raw AI output.
 
 Rule: `system-knowledge-pipeline` is the actor for automated triage, judging, relation, publication, conflict, and indexing mutations. The source submitter remains provenance and is linked to the source/job; they are not represented as the actor for automated decisions.
 
-Rule: A review recommendation references the card `content_version`, active evidence-set revision, and recommended action. Resolving it is compare-and-swap against those references; a changed card automatically receives a new recommendation rather than inheriting `reviewed` from an earlier version. A `verification` recommendation grants an authorized operator the final decision to freely revise, publish, or suppress the card; this exception is audit-recorded and does not relax automated evidence validation or other recommendation types.
+Rule: A recommendation references the card `content_version`, active evidence-set revision, and work type. Resolving it is compare-and-swap against those references; a changed card receives new fenced work rather than inheriting an earlier resolution. A `verification` item grants an authorized operator the final decision to publish, revise and requeue, or suppress the card; this is audit-recorded and does not relax automated evidence validation or rewrite the candidate disposition.
 
-Rule: Quality sampling creates card-version-bound review recommendations for 15% of auto-active cards during the first four weeks and 100% of `verify_first` outcomes. Sampling resolution records pass/fail reason codes and raises sampling or suppresses the affected policy cohort when a high-severity failure occurs.
+Rule: Quality sampling creates card-version-bound sampling items for 15% of auto-active cards during the first four weeks. `needs_operator` outcomes retain a separate immutable sampling obligation. Sampling resolution records pass/fail reason codes and raises sampling or suppresses the affected policy cohort through `transitionKnowledgeCard(...)` when a high-severity failure occurs.
 
 Rule: Retention commands delete Facebook source/capture artifacts and dependent operational artifacts after 180 days when they support no active or reviewable card. Inactive evidence and safe failed-stage artifacts expire on the same 180-day schedule unless a shorter operational policy applies; deletion preserves only the concise state/action audit required by AD-28.
 
@@ -607,7 +613,7 @@ Core persisted entities:
 - `trip_projects`, `conversations`, `messages`, `chat_context`, `assistant_response_provenance`
 - `trip_project_constraints`, `trip_plan_items`, `trip_change_proposals`, `trip_plan_change_history`
 - `context_embeddings`
-- `sources`, `raw_source_material`, `source_capture_versions`, `knowledge_ingestion_jobs`, `knowledge_cards`, `knowledge_card_evidence`, `knowledge_card_relations`, `knowledge_review_recommendations`, `knowledge_card_search_documents`
+- `sources`, `raw_source_material`, `source_capture_versions`, `knowledge_ingestion_jobs`, `knowledge_ingestion_candidates`, `knowledge_cards`, `knowledge_card_evidence`, `knowledge_card_relations`, `knowledge_recommendations`, `knowledge_card_search_documents`
 - `ai_gateway_models`, `web_search_results`, `ai_usage_events`, `feedback`, `eval_runs`, `audit_events`
 
 AI usage event minimum fields: nullable real initiating-user ID, required execution actor, conversation ID when applicable, trip project ID when applicable, message ID when applicable, purpose, provider, model, prompt version when applicable, request timestamp, latency, success/failure status, provider usage metadata when available, and estimated cost fields when configured. User-facing/admin roster metrics aggregate the initiating-user field only; system execution metrics use the actor catalog.
@@ -629,11 +635,13 @@ Canonical source linkage:
 - `source_capture_versions`: immutable source ID/version sequence, content hash, bounded operator-only material, safe capture metadata, capture executor/time, and source current-capture pointer relationship
 - `knowledge_card_evidence`: card ID, source ID, bounded quote/span, observed/captured time, conditions, support level, display policy, evidence state, and deactivation reason when inactive
 - `knowledge_card_relations`: source candidate/card relation as `duplicate | supporting | conflicting | superseding | conditionally_compatible`, with safe current decision metadata
-- `knowledge_ingestion_jobs`: one canonical row per source capture version, current stage/outcome, safe retry/failure metadata, submitted-by provenance, and prompt/model references
+- `knowledge_ingestion_jobs`: one canonical row per source capture version, technical status, checkpoint, aggregate candidate counters, safe retry/failure metadata, submitted-by provenance, and prompt/model references
+- `knowledge_ingestion_candidates`: candidate content, processing status, immutable AI disposition/reason, versioned execution facts, and optional canonical card association
+- `knowledge_recommendations`: version-fenced primary or sampling work with `open | resolved | superseded` status and its operator/system resolution metadata
 - `knowledge_card_sources`: compatibility linkage derived from current effective evidence until the existing schema is migrated; it is not sufficient for traveler evidence policy on its own
 - Embedding rows: owner table, owner ID, content hash, embedding model, embedding status as `active | stale | disabled`, owner status snapshot, created/disabled timestamps
 
-Retrieval must join embeddings/search documents back to current owner rows and filter current publication, knowledge, verification, evidence, and source-safe state. Suppressed, archived, or superseded cards must have no active retrievable projections. Updating retrievable text marks previous projections stale or disabled in the same transaction before a new version becomes active.
+Retrieval must join embeddings/search documents back to current owner rows and filter current lifecycle, domain classification, verification requirement, evidence, and source-safe state. Every non-active card must have no active retrievable projection. Updating retrievable text marks previous projections stale or disabled in the same transaction before a new version becomes active.
 
 Knowledge card types are fixed from the PRD unless changed through PRD update: place, food, hotel area, activity, service, route note, warning, cost note, parking, EV charging, kid-friendly tip, discount/promotion, general travel tip.
 
@@ -656,17 +664,17 @@ Trip Planning deletion rule: deleting an owned Trip Project cascades or transact
 Retrieval returns a normalized source bundle:
 
 - `chat_trip_context`: selected trip project context and current chat session context used
-- `knowledge`: active cards with IDs, titles, summaries, conditions, current knowledge/verification state, confidence, safe current evidence/source metadata, freshness flags, and scores
+- `knowledge`: active cards with IDs, titles, summaries, conditions, current domain classification and verification requirement, confidence, safe current evidence/source metadata, freshness flags, and scores
 - `web`: external results with URL, title, snippet/content, checkedAt, provider score, and `unverified` confidence
 - `general`: explicit marker when model reasoning fills gaps without source grounding
 
 Traveler AI Ask source bundles contain traveler-safe snapshots only. They may include selected trip context, current chat context, active knowledge-card summaries, state-aware use instructions, bounded traveler-visible evidence/source metadata, web snippets, and the general-reasoning marker. They must not include `raw_source_material.raw_text`, copied post bodies, image OCR/vision notes, operator-only evidence, or admin-only metadata.
 
-MVP retrieval searches active knowledge-card search documents lexically, then validates current active publication, knowledge/verification states, active traveler-safe evidence, and linked sources before selecting source-bundle items. Candidate selection filters current card rows by state-aware eligibility, card type, route/location, conditions, tags, freshness-sensitive flag, confidence/verification labels, and source type. Broad semantic ranking, Postgres full-text ranking, and pgvector ranking are later hybrid-search enhancements, not MVP requirements.
+MVP retrieval searches active knowledge-card search documents lexically, then validates `lifecycle_state = active`, domain classification, `verification_requirement = none`, active traveler-safe evidence, and linked sources before selecting source-bundle items. Candidate selection filters current card rows by lifecycle-aware eligibility, card type, route/location, conditions, tags, freshness-sensitive flag, confidence/verification labels, and source type. Broad semantic ranking, Postgres full-text ranking, and pgvector ranking are later hybrid-search enhancements, not MVP requirements.
 
 If retrieval eligibility cannot be proven for a candidate, retrieval excludes it and records the exclusion as an implementation-visible reason where practical. Tests for Story 5.1 must prove draft, archived, rejected, stale, disabled, source-missing, and operator-only/raw-source-backed records do not enter traveler source bundles.
 
-Web search triggers when no relevant active cards are retrieved, fewer than three relevant active cards are retrieved for a broad planning question, the user asks about freshness-sensitive facts, or retrieved cards are uncertain or conflict.
+Web search triggers when no relevant active cards are retrieved, fewer than three relevant active cards are retrieved for a broad planning question, the user asks about freshness-sensitive facts, or relevant cards are pending operator work or conflicted.
 
 If web search fails or returns low-confidence results, the orchestrator must state that updated information could not be verified and recommend user confirmation; it must not replace missing verification with unsupported guidance.
 
