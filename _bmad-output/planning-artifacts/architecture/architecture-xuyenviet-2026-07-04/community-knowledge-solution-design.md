@@ -43,10 +43,14 @@ queued -> running -> completed | failed
 ```
 
 `checkpoint.step` records resumable discovery, extraction, judgment, or relation
-detail. Completed jobs may contain mixed candidate dispositions and must not use a
-rolled-up business outcome. Workers claim work with a transaction, lease/fencing
-token, and expected version; every commit uses compare-and-swap so stale workers
-cannot publish later. A recapture creates a new immutable source version and job.
+detail. `candidateCount` counts persisted discoveries; `completedCandidateCount`
+counts completed candidates; `failedCandidateCount` counts failed candidates; and
+`needsOperatorCandidateCount` is the completed `needs_operator` subset. These are
+idempotent observability projections only. A job completes only after discovery is
+terminal and every candidate has completed or failed. Workers claim work with a
+transaction, lease/fencing token, and expected version; every commit uses
+compare-and-swap so stale workers cannot publish later. A recapture creates a new
+immutable source version and job.
 
 ## Canonical Data
 
@@ -59,7 +63,8 @@ cannot publish later. A recapture creates a new immutable source version and job
 | `knowledge_ingestion_jobs` | Technical status, checkpoint, aggregate counters, and safe retry details per capture version | Operational retention |
 | `knowledge_ingestion_candidates` | Candidate extraction, processing status, immutable AI disposition/reason, and optional card association | Operational retention |
 | `knowledge_card_relations` | Current duplicate/support/conflict/superseding decision | Operational/current relationship need |
-| `knowledge_recommendations` | Version-fenced primary/sampling work, status, reason, and resolution | Until resolved plus operational retention |
+| `knowledge_recommendations` | Version-fenced actionable primary/sampling work, status, reason, and resolution | Until resolved plus operational retention |
+| `knowledge_sampling_obligations` | Immutable required later quality control for each `needs_operator` candidate | Operational retention |
 | `knowledge_card_search_documents` | Rebuildable lexical projection | Rebuildable |
 
 Do not retain full prompts, provider payloads, unlimited extraction JSON histories, or old wording versions by default.
@@ -155,13 +160,17 @@ sequenceDiagram
 
 `transitionKnowledgeCard(...)` is the only production writer for card lifecycle,
 verification requirement, primary/sampling work, candidate association, lifecycle
-audit, and lifecycle-caused index invalidation. Worker ingestion, API operator
-commands, source removal, conflict handling, and sampling containment call this
-transactional boundary; the admin presentation application does not.
+audit, and lifecycle-caused index invalidation. Authenticated API commands call it
+synchronously for operator decisions; the Worker calls it for continuous
+ingestion, conflicts, projection work, and scheduled sampling selection. API
+requests never claim jobs or execute ingestion/index loops, and the admin
+presentation application does not call the boundary.
 
 Every meaningful lifecycle change atomically updates the card, writes a concise
-audit event, and marks the card version dirty. Suppression, archival, rejection,
-high-risk conflict, and source withdrawal disable the projection in the same
+audit event, and marks the card version dirty. Activation requires eligible active
+supporting evidence with validated span, source/capture eligibility, and required
+retrieval metadata. Suppression, archival, rejection, high-risk conflict, source
+withdrawal, and loss of final eligible support disable the projection in the same
 transaction.
 
 The indexing worker is idempotent by `(knowledge_card_id, content_version)`. Retrieval always re-checks current lifecycle, domain classification, verification requirement, evidence, and source-safe eligibility. An indexing delay must never re-enable a prohibited card.
@@ -200,14 +209,15 @@ Operator actions must never expose raw source material to travelers. Editing wor
 Quality sampling is separate from recommendation review:
 
 - Review 15% of auto-active cards during the first four weeks.
-- Retain a separate immutable sampling obligation for every `needs_operator` outcome.
+- Persist one immutable `knowledge_sampling_obligations` row for every `needs_operator` outcome; it is not an actionable recommendation or publication gate.
+- Before high-severity containment, persist the exact cohort definition and member card/version set. Requeue remediable cards with one fenced `risk` item or suppress unsafe cards without successor work.
 - Increase sampling for new models, prompts, categories, or detected policy failures.
 
 ## Retention And Removal
 
 - Raw captured Facebook text is operator-only.
 - Delete Facebook source/capture artifacts and dependent operational artifacts after 180 days when they support no active or reviewable claim.
-- When a source is withdrawn, inaccessible, or subject to removal, run a retryable removal command that locks dependent evidence/cards, hides evidence/link immediately, re-evaluates cards using remaining evidence, suppresses when support is insufficient, and only then deletes or hides the artifact.
+- When a source is withdrawn, inaccessible, or subject to removal, run a retryable removal command that locks dependent evidence/cards, hides evidence/link immediately, re-evaluates cards using remaining evidence, suppresses a card that loses final eligible support, and only completes after no removed evidence remains traveler eligible.
 - Keep durable audit only for meaningful state transitions and operator actions.
 - Keep failed or replaced AI artifacts only as safe operational metadata for short retention.
 

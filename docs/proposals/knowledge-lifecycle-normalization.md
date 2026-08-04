@@ -1,6 +1,6 @@
 # Proposal: Normalize the Knowledge Lifecycle
 
-**Status:** Proposed - revised for direct API topology
+**Status:** Proposed - clean-break lifecycle contract
 
 **Scope:** Knowledge ingestion jobs, ingestion candidates, knowledge cards, recommendations, sampling, search eligibility, public retrieval, and related API/operator views.
 
@@ -23,11 +23,11 @@ and capability controls remain unchanged.
 
 ## Decision
 
-Replace the overlapping Knowledge state machines with four narrowly scoped lifecycles. This is a breaking schema and application refactor: migrate shared environments forward under the release-matrix process, and reset only explicitly disposable local development databases rather than carrying forward inconsistent records or adding permanent compatibility paths.
+Replace the overlapping Knowledge state machines with four narrowly scoped lifecycles. All current targets are disposable and have already been reset, so this is a clean schema and application cutover: update schema, contracts, workloads, seeds, and fixtures together, then reset and reseed. No legacy representation, backfill, dual write, or compatibility path is required. If durable shared or customer data exists before this ships, stop and replace this rollout with an approved expand-migrate-contract design.
 
 The central rule is:
 
-> A knowledge card has exactly one workflow state. A recommendation is the sole durable record of operator work. A candidate preserves the AI decision that created the work. A job reports only technical execution.
+> A knowledge card has exactly one workflow state. A recommendation is the sole durable record of actionable operator work. A sampling obligation records required later quality control. A candidate preserves the AI decision that created the work. A job reports only technical execution.
 
 ## Problem
 
@@ -40,13 +40,7 @@ The current model lets several entities answer overlapping versions of “is thi
 | Knowledge card | `status`, `publicationState`, `knowledgeState`, `reviewState`, `verificationState`, and `needsReview` | Several columns jointly encode the workflow and admit contradictory combinations. |
 | Recommendation | Work status, reason, action, and resolution | It overlaps with card review flags and candidate terminal stages. |
 
-The audit found material inconsistency in the current development database:
-
-- 138 open verification recommendations are attached to cards already active, reviewed, and corroborated.
-- 16 suppressed cards requiring verification have contradictory review flags.
-- 188 published candidates belong to jobs rolled up as `verify_first`.
-
-The last category is not necessarily incorrect: one capture may yield several candidates with different outcomes. It proves that the parent job stage cannot be used as a candidate or card lifecycle state.
+One capture may yield several candidates with different outcomes. A parent job status therefore cannot represent a candidate or card lifecycle state.
 
 ## Goals
 
@@ -83,6 +77,8 @@ The job keeps aggregate counters for observability only:
 - `failedCandidateCount`
 - `needsOperatorCandidateCount`
 
+`candidateCount` counts persisted discovered candidates; `completedCandidateCount` counts candidates with `processing_status = completed`; `failedCandidateCount` counts candidates with `processing_status = failed`; and `needsOperatorCandidateCount` is the completed subset with `ai_disposition = needs_operator`. Counters are transactional, idempotent observability projections and never drive lifecycle or retrieval. A job becomes `completed` only after discovery is terminal and every discovered candidate is completed or failed.
+
 The UI reports, for example, “Completed: 37 applied, 3 need operator action,” rather than showing a job as `verify_first`.
 
 ### 2. Ingestion Candidates: Immutable AI Outcome
@@ -94,7 +90,7 @@ processing_status: queued | processing | completed | failed
 ai_disposition: apply | needs_operator | discard
 ```
 
-`ai_disposition` is nullable until `processing_status = completed`, then immutable. `outcome_reason_code` explains `needs_operator` or `discard`, for example:
+`ai_disposition` and `outcome_reason_code` are null unless `processing_status = completed`, then immutable. `outcome_reason_code` records the completed AI decision, including `applied` for `apply`. A failed candidate has no business disposition. Other reason codes include:
 
 ```text
 verification_required
@@ -166,7 +162,7 @@ These are not lifecycle controls.
 
 | Card lifecycle | Retrieval | Allowed open recommendation types | Verification requirement |
 |---|---|---|---|
-| `draft` | No | Draft-review work only | `none` |
+| `draft` | No | None | `none` |
 | `pending_operator` | No | `verification`, `relation`, `risk`, `missing_context` | Usually `operator_required`; may be `none` for relation/context work |
 | `active` | Yes, subject to evidence freshness | `sampling` only | `none` |
 | `suppressed` | No | None | `none` or `failed` |
@@ -175,7 +171,7 @@ These are not lifecycle controls.
 
 Opening new operator work for a suppressed card must transition it to `pending_operator` in the same transaction. No action may create an open recommendation while leaving the card `suppressed`.
 
-### 4. Recommendations: The Single Operator Work Queue
+### 4. Recommendations: The Actionable Operator Work Queue
 
 Simplify recommendation status to:
 
@@ -209,6 +205,10 @@ sampling_failed
 
 `resolved` is terminal. `superseded` means the version fence was replaced and must not imply that a successor necessarily exists.
 
+### 5. Sampling Obligations: Durable Quality-Control Requirements
+
+`knowledge_sampling_obligations` records one immutable obligation for every completed `needs_operator` candidate. It records the candidate, card when associated, creation fence, and later sampling disposition. It is not an actionable recommendation and does not block publication. A `sampling` recommendation may open only for an active card at the same version fence.
+
 ## Transition Ownership
 
 Introduce one transactional Knowledge command boundary in `packages/database`,
@@ -218,10 +218,7 @@ exported through a narrow domain port:
 transitionKnowledgeCard(input, transaction)
 ```
 
-It is the only writer for lifecycle transitions and recommendation state. Its
-callers are the Worker ingestion loop, API operator commands, source-removal
-operation, conflict handling, and sampling containment. The command must not be
-called from the admin presentation application.
+It is the only writer for lifecycle transitions and recommendation state. API operator commands invoke it synchronously after CSRF, authorization, and input validation. The Worker invokes it from continuous ingestion, conflict, indexing, and scheduled sampling-selection loops. Source removal invokes it from its retryable Knowledge command. The command must not be called from the admin presentation application; API requests never claim jobs or execute ingestion.
 
 It owns:
 
@@ -237,20 +234,25 @@ Draft-content editing remains a separate command because it changes content, not
 the lifecycle. If an edit changes the version fence or requires follow-up work,
 it must delegate the lifecycle/recommendation portion to this boundary.
 
+It receives a named trigger, actor, expected card and evidence-set fence, plus the expected recommendation or candidate fence where applicable. It locks the affected rows, validates the transition matrix, and returns `resolved`, `stale`, or `invalid`.
+
 Candidate completion and card transition happen in one database transaction under the existing card/source advisory locks and version fence.
 
 ## Required Database Invariants
 
-Enforce with check constraints, partial unique indexes, and the single command boundary.
+Enforce row-local rules with database constraints, completed candidate immutability with a database trigger, cardinality with partial unique indexes, and cross-table rules with the single command boundary.
 
 ### Check Constraints
 
 - `active` cards require `verification_requirement = none`.
 - `pending_operator` cards cannot be traveler retrievable.
 - `suppressed`, `archived`, and `rejected` cards cannot be traveler retrievable.
-- `rejected` cards cannot have active evidence or active search documents.
-- Candidate `ai_disposition` must be null while processing and non-null when completed.
-- Candidate `ai_disposition` cannot be changed after completion.
+- `rejected` cards cannot have active search documents.
+- Candidate `ai_disposition` and `outcome_reason_code` must be null unless completed and non-null when completed.
+
+### Trigger
+
+A `BEFORE UPDATE` trigger rejects changes to `ai_disposition` or `outcome_reason_code` after candidate completion.
 
 ### Partial Unique Indexes
 
@@ -284,6 +286,8 @@ The transition command must assert:
 - Resolving the only primary operator work must either activate, suppress, reject, or requeue the card in the same transaction.
 - An `active` card cannot retain open primary operator work.
 - A `superseded` recommendation cannot mutate a card, evidence, audit row, or index marker.
+- An active card requires at least one eligible active supporting evidence record with a validated span, eligible source/capture, and required retrieval metadata.
+- Losing the last eligible supporting evidence transitions a card to `pending_operator` with primary work or `suppressed`, as selected by the matrix, and disables the projection in the same transaction.
 
 ## Core Flows
 
@@ -348,68 +352,47 @@ resolved conflict with valid support
 Sampling is not a card lifecycle state and not a publication approval state.
 
 - Auto-active cards may have one version-fenced `sampling` recommendation.
-- Verify-first outcomes retain their immutable sampling obligation ledger.
-- Sampling failure can transition an active card to `suppressed` through `transitionKnowledgeCard` and supersede current sampling work.
+- Every `needs_operator` outcome creates one immutable `knowledge_sampling_obligations` row, independent of later operator resolution.
+- A high-severity sampling failure persists the exact cohort definition and card/version membership before containment. It either transitions a remediable card to `pending_operator` with one fenced `risk` recommendation, or suppresses an unsafe card without a successor work item.
 - Sampling does not alter the candidate AI disposition or create verification work by itself.
 
-## Migration and Release
+## Transition Matrix
 
-The repository requires forward-only Drizzle migrations. This is therefore a
-breaking application contract, but not a reason to use a destructive migration,
-dual write, or a runtime that reads both representations.
+| Trigger | Runtime | From | To | Work effect | Evidence / projection effect |
+|---|---|---|---|---|---|
+| Low-risk candidate completion | Worker | `draft` | `active` | Optional sampling work | Require eligible supporting evidence; mark index dirty |
+| Verify-first candidate completion | Worker | `draft` or `suppressed` | `pending_operator` | Open one primary `verification` item; create immutable sampling obligation | Require validated evidence; disable projection |
+| Primary publish | API | `pending_operator` | `active` | Resolve primary work | Require eligible supporting evidence; mark index dirty |
+| Primary suppress | API | `pending_operator` | `suppressed` | Resolve primary work; no successor | Disable projection |
+| Edit and requeue | API | `pending_operator` | `pending_operator` | Supersede current work; open one newly fenced primary item | Increment applicable content/evidence fence; disable projection |
+| Conflict or invalidating evidence | Worker | `active` | `pending_operator` | Open one `relation` or `risk` item | Set `conflicted` when applicable; disable projection |
+| New evidence for suppressed card | Worker | `suppressed` | `pending_operator` | Open one newly fenced primary item | Require validated evidence; projection remains disabled |
+| Final eligible support removed | Source-removal command | `active` | `suppressed` | Supersede open sampling work; no successor | Disable projection |
+| Archive | API | `draft`, `pending_operator`, `active`, or `suppressed` | `archived` | Supersede all open work | Disable projection |
+| Restore / re-evaluate | API or Worker | `archived` | `active` or `pending_operator` | Open primary work only for `pending_operator` | Require a new fence and target-state evidence predicate |
+| Sampling failure | API or Worker | `active` | `pending_operator` or `suppressed` | Resolve triggering sampling work; open `risk` work only for `pending_operator` | Persist cohort membership; disable projection |
 
-1. Add the target columns, checks, and indexes in an expand migration. Do not
-   drop legacy columns in the same release.
-2. Run one bounded, resumable, idempotent backfill command that derives target
-   state from the existing card, recommendation, candidate, and evidence records.
-   It must report ambiguous records as a safe failure code rather than guessing.
-3. Release target-only API and Worker workloads after the backfill has completed.
-   The API is the selected traffic writer; the Worker remains the operational
-   ingestion/indexing owner. Neither creates legacy state or dual writes.
-4. Update direct API response parsers, admin presentation, retrieval, indexing,
-   fixtures, seeds, and tests in that writer release. Retain legacy columns only
-   as inert rollback data until all active/deployable old binaries are retired.
-5. In a separately approved contract release, remove legacy columns, checks,
-   indexes, repair code, and compatibility test fixtures.
+`rejected` is terminal for its card version. Materially new content starts a new card workflow/version rather than reviving the rejected decision. Every primary-work transition requires exactly one same-fence open primary item while pending; suppressed, archived, and rejected cards retain no open primary or sampling work.
 
-Each production-like release requires the schema release matrix: one declared
-traffic writer, `dualWrite: false`, forward-only journal hashes, compatible API
-and Worker ranges, and retirement evidence before the contract release. A local
-disposable database may be reset only under the existing `db:reset` safeguards;
-the reset is a developer convenience, not the shared-environment migration plan.
+## Clean-Break Migration
+
+Current databases are disposable and the inconsistent records previously observed have already been reset. Create one forward-only Drizzle migration that removes the legacy lifecycle representation and introduces only the target schema, constraints, indexes, trigger, and sampling-obligation table. Update API/domain contracts, Worker and API commands, read models, seeds, fixtures, and tests in the same change; reset and reseed under existing local safeguards. No runtime reads legacy columns and no backfill, dual write, compatibility fixture, release matrix, or rollback binary is required.
+
+If any target becomes durable or shared before this ships, halt this clean-break procedure and design a separate expand-migrate-contract rollout.
 
 ## Implementation Plan
 
-### Phase 0: Baseline and Decision Record
+### Phase 1: Clean Schema and Contracts
 
-- Create a current-state inventory query for invalid combinations, open work on
-  non-pending cards, stale version fences, mixed ingestion-job outcomes, and
-  source-removal/sampling edge cases. Store only counts and safe IDs in the
-  release evidence.
-- Turn the state table in this proposal into an explicit transition matrix:
-  trigger, actor, prior lifecycle, target lifecycle, recommendation effect,
-  candidate effect, fence effect, index effect, and audit effect.
-- Update the active PRD, architecture, epics/stories, and sprint status before
-  implementation. Historical BFF artifacts must not be used as authority.
-
-**Exit:** the current architecture, target model, migration strategy, and every
-allowed transition have one authoritative written contract.
-
-### Phase 1: Expand Schema and Contracts
-
-- In `packages/database/src/schema.ts`, add target lifecycle fields and target
-  job/candidate fields while retaining legacy fields for the rollout window.
+- In `packages/database/src/schema.ts`, replace legacy lifecycle fields with the target lifecycle, job, candidate, recommendation, and sampling-obligation fields.
 - Add target checks and partial indexes, including one open primary work item and
-  one open sampling item per card version fence. Use database checks for
-  row-local invariants and the command for cross-table invariants.
+  one open sampling item per card version fence; add the completed-candidate immutability trigger.
 - Add direct-API contract fields and parsers in `packages/contracts`; update the
   `AdminKnowledgeReviewPort` in `packages/domain` without exposing persistence
   internals to `apps/admin`.
-- Generate a forward-only Drizzle migration and release matrix with the selected
-  API traffic writer plus explicit API/Worker capability-owner declarations.
+- Generate the forward-only migration, reset/reseed the disposable target, and verify all fixtures are target-shaped.
 
-**Exit:** schema validates target-shaped writes, the API contract can represent
-the target model, and no deployed workload writes target data yet.
+**Exit:** a clean database validates target-shaped writes and contracts represent the target model only.
 
 ### Phase 2: Domain Commands
 
@@ -420,34 +403,15 @@ the target model, and no deployed workload writes target data yet.
 - Make it atomically update lifecycle state, verification requirement, fenced
   recommendations, candidate association, audit event, index dirty marker, and
   search-document invalidation.
-- Preserve existing advisory-lock order, worker lease/fencing/CAS behavior,
-  source provenance withdrawal, and sampling-policy boundary lock. Do not make
-  the command claim Worker jobs.
+- Preserve existing advisory-lock order, worker lease/fencing/CAS behavior, source withdrawal, and sampling cohort locks. Do not make the command claim Worker jobs.
 - Move writes from `knowledge-recommendations.ts`, ingestion processing,
   source-removal logic, and sampling escalation one path at a time. Delete a
   direct lifecycle/recommendation write only after its replacement matrix tests
   pass.
 
-**Exit:** static search confirms there is one production writer for card
-lifecycle and recommendation transitions outside the migration/backfill code.
+**Exit:** static search confirms every production lifecycle/recommendation mutation goes through the command, while API and Worker retain their assigned triggers.
 
-### Phase 3: Backfill and Single-Writer Cutover
-
-- Build a finite maintenance command, not a continuous Worker loop. It processes
-  bounded transactions, can resume safely, verifies each derived target state,
-  and fails closed on ambiguity.
-- Quiesce lifecycle writers for the maintenance window, run the backfill, verify
-  invariant counts are zero, then deploy target-only API and Worker workloads.
-  The API traffic writer is selected in the matrix; the admin presentation is
-  deployed only after the API contract it consumes is selected.
-- Record the migration-before-traffic order, selected writer, `dualWrite: false`,
-  and rollback binary in the approved release matrix. Roll back by traffic
-  selection to a compatible old binary; never run a down migration.
-
-**Exit:** every persisted row has a target representation, only one writer is
-reachable, and all release gates retain safe evidence.
-
-### Phase 4: Read Models and Direct API UI
+### Phase 3: Read Models and Direct API UI
 
 - Update Worker/API projections: the capture queue shows job execution status and
   aggregate candidate counts, never a rolled-up business outcome.
@@ -463,7 +427,7 @@ reachable, and all release gates retain safe evidence.
 
 **Exit:** operator and traveler read paths use the target representation only.
 
-### Phase 5: Verification and Contract Release
+### Phase 4: Verification
 
 - Replace lifecycle tests with a transition-matrix suite covering every trigger
   and forbidden transition. Run database tests serially under `pnpm
@@ -471,14 +435,10 @@ reachable, and all release gates retain safe evidence.
 - Add constraint, stale-fence, concurrent resolution, source-withdrawal,
   sampling-containment, mixed-job-outcome, atomic-index/audit, API authorization,
   and direct-admin UI contract tests.
-- After old binaries are retired and the contract release matrix is approved,
-  remove legacy columns, old checks/indexes, repair branches, obsolete labels,
-  and compatibility fixtures in one forward-only contract migration.
 - Run focused suites first, then `pnpm test:unit`, `pnpm test:integration`,
   `pnpm lint`, `pnpm typecheck`, `pnpm build`, and `pnpm exec drizzle-kit check`.
 
-**Exit:** the legacy representation no longer exists and the target invariants
-are enforced by schema, command, and regression suite.
+**Exit:** a reset/reseeded database has only the target representation and the target invariants are enforced by schema, command, and regression suite.
 
 ## Acceptance Criteria
 
@@ -490,14 +450,15 @@ are enforced by schema, command, and regression suite.
 - A verify-first publication completes card, recommendation, audit, candidate association, and index updates atomically.
 - Suppressing a verification recommendation does not recreate verification work unless later evidence explicitly transitions the card back to `pending_operator`.
 - A stale recommendation cannot mutate card, evidence, recommendation, audit, or index data.
-- All development seed data and test fixtures satisfy the database invariants without legacy exceptions.
+- A completed candidate's AI disposition and reason cannot be changed; failed candidates have no business disposition.
+- A job completes only when discovery is terminal and all candidates are completed or failed; its counters match the defined candidate projections.
+- An active card has eligible supporting evidence, and loss of its final eligible support disables retrieval atomically.
+- A source-removal command completes only after every dependent card is re-evaluated and no removed evidence remains traveler eligible.
+- All development seed data and test fixtures satisfy the database invariants without legacy exceptions after reset/reseed.
 - The direct API remains the only browser-facing knowledge owner; `apps/admin`
   contains no lifecycle command or database import, and no BFF route is added.
-- The Worker remains the only continuous ingestion/indexing owner; lifecycle
-  transition work does not run in an API request or presentation runtime.
-- A shared or production-like rollout is forward-only, has the selected API
-  traffic writer and `dualWrite: false` in its release matrix, and has a
-  compatible rollback binary.
+- The Worker remains the only continuous ingestion/indexing owner; API requests may synchronously execute authorized operator lifecycle transitions but never claim jobs or run ingestion/index loops.
+- Every `needs_operator` candidate creates one immutable sampling obligation; sampling containment records exact cohort membership and either opens fenced risk work for remediable cards or suppresses unsafe cards.
 
 ## Risks and Mitigations
 
