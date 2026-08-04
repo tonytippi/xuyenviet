@@ -2,7 +2,7 @@ import { eq, sql } from "drizzle-orm";
 import { beforeEach, describe, expect, test } from "vitest";
 
 import { knowledgeIngestionCandidates, knowledgeIngestionJobs, sources, userRoles } from "@/db/schema";
-import { claimNextKnowledgeIngestionJob, ensureIngestionJobForCaptureVersion } from "@/features/knowledge/ingestion-jobs";
+import { claimNextKnowledgeIngestionJob, ensureIngestionJobForCaptureVersion, finalizeKnowledgeIngestionJob, recoverKnowledgeIngestionJobs } from "@/features/knowledge/ingestion-jobs";
 import { appendSourceCaptureVersion } from "@/features/knowledge/source-captures";
 
 import { resetTestDatabase, seedTestOperator, testDb } from "./helpers/db";
@@ -76,5 +76,38 @@ describe("target knowledge ingestion jobs", () => {
 
     await expect(rejectionMessage(testDb.execute(sql`update knowledge_ingestion_candidates set ai_disposition = 'discard' where id = ${candidate.id}`))).resolves.toContain("Completed candidate AI decision is immutable");
     await expect(rejectionMessage(testDb.execute(sql`update knowledge_ingestion_candidates set outcome_reason_code = 'weak_evidence' where id = ${candidate.id}`))).resolves.toContain("Completed candidate AI decision is immutable");
+  });
+
+  test("derives exact mixed counters and completes only after terminal discovery and candidates", async () => {
+    const { capture, job } = await createJob();
+    await testDb.update(knowledgeIngestionJobs).set({ status: "running" }).where(eq(knowledgeIngestionJobs.id, job.id));
+    await testDb.insert(knowledgeIngestionCandidates).values([
+      candidateValues(job.id, capture.id, { processingStatus: "completed", aiDisposition: "apply", outcomeReasonCode: "applied" }),
+      candidateValues(job.id, capture.id, { processingStatus: "completed", aiDisposition: "needs_operator", outcomeReasonCode: "verification_required" }),
+      candidateValues(job.id, capture.id, { processingStatus: "failed" }),
+    ]);
+
+    await finalizeKnowledgeIngestionJob(testDb, job.id);
+    await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, job.id))).resolves.toMatchObject([{ status: "running", candidateCount: 3, completedCandidateCount: 2, needsOperatorCandidateCount: 1, failedCandidateCount: 1 }]);
+    await testDb.update(knowledgeIngestionJobs).set({ discoveryTerminal: true }).where(eq(knowledgeIngestionJobs.id, job.id));
+    await finalizeKnowledgeIngestionJob(testDb, job.id);
+    await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, job.id))).resolves.toMatchObject([{ status: "completed", candidateCount: 3, completedCandidateCount: 2, needsOperatorCandidateCount: 1, failedCandidateCount: 1, claimedBy: null }]);
+  });
+
+  test("recovers an expired processing candidate and terminalizes an exhausted candidate without a business outcome", async () => {
+    const { capture, job } = await createJob();
+    const now = new Date();
+    await testDb.update(knowledgeIngestionJobs).set({ status: "running", discoveryTerminal: true }).where(eq(knowledgeIngestionJobs.id, job.id));
+    await testDb.insert(knowledgeIngestionCandidates).values([
+      candidateValues(job.id, capture.id, { id: "retry", processingStatus: "processing", attemptCount: 1, maxAttempts: 3, claimedBy: "worker", claimedAt: new Date(0), leaseExpiresAt: new Date(1), fencingToken: "a".repeat(64) }),
+      candidateValues(job.id, capture.id, { id: "exhausted", processingStatus: "processing", attemptCount: 3, maxAttempts: 3, claimedBy: "worker", claimedAt: new Date(0), leaseExpiresAt: new Date(1), fencingToken: "b".repeat(64) }),
+    ]);
+
+    await expect(recoverKnowledgeIngestionJobs(testDb, now)).resolves.toMatchObject({ recoveredCandidates: [{ id: "retry" }], exhaustedCandidates: [{ id: "exhausted" }] });
+    await expect(testDb.select().from(knowledgeIngestionCandidates).where(sql`${knowledgeIngestionCandidates.id} in ('retry', 'exhausted')`).orderBy(knowledgeIngestionCandidates.id)).resolves.toMatchObject([
+      { id: "exhausted", processingStatus: "failed", claimedBy: null, fencingToken: null, aiDisposition: null, outcomeReasonCode: null },
+      { id: "retry", processingStatus: "queued", claimedBy: null, fencingToken: null, aiDisposition: null, outcomeReasonCode: null },
+    ]);
+    await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, job.id))).resolves.toMatchObject([{ status: "running", candidateCount: 2, completedCandidateCount: 0, failedCandidateCount: 1 }]);
   });
 });

@@ -5,7 +5,8 @@ import type { KnowledgeLifecycleTrigger, TransitionKnowledgeCardInput, Transitio
 import { recordAuditEvent } from "./audit-writers";
 import { getDb } from "./client";
 import { disableStaleKnowledgeSearchProjection, enqueueKnowledgeIndexWork } from "./knowledge-indexing-queue";
-import { knowledgeCardEvidence, knowledgeCardSources, knowledgeCards, knowledgeIngestionCandidates, knowledgeIngestionJobs, knowledgeRecommendations, knowledgeSamplingObligations, sourceCaptureVersions, sources } from "./schema";
+import { projectAndFinalizeKnowledgeIngestionJob } from "./knowledge-ingestion-accounting";
+import { knowledgeCardEvidence, knowledgeCardSources, knowledgeCards, knowledgeIngestionCandidates, knowledgeRecommendations, knowledgeSamplingObligations, sourceCaptureVersions, sources } from "./schema";
 
 type LifecycleDb = ReturnType<typeof getDb>;
 type LifecycleTransaction = Parameters<Parameters<LifecycleDb["transaction"]>[0]>[0];
@@ -107,8 +108,7 @@ async function transitionCandidateRelation(transaction: LifecycleTransaction, in
   const [completed] = await transaction.update(knowledgeIngestionCandidates).set({ processingStatus: "completed", aiDisposition: trigger.disposition, outcomeReasonCode: trigger.outcomeReasonCode, knowledgeCardId: cardId, judgmentSummary: trigger.relation.rationale, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, updatedAt: new Date() }).where(and(eq(knowledgeIngestionCandidates.id, candidate.id), eq(knowledgeIngestionCandidates.processingStatus, "processing"), eq(knowledgeIngestionCandidates.fencingToken, fences.candidateFencingToken), gt(knowledgeIngestionCandidates.leaseExpiresAt, new Date()))).returning({ ingestionJobId: knowledgeIngestionCandidates.ingestionJobId });
   // This final lease CAS is the candidate commit point. Roll back every prior effect if it loses.
   if (!completed) throw new StaleLifecycleTransition();
-  await transaction.update(knowledgeIngestionJobs).set({ candidateCount: sql`(select count(*)::int from knowledge_ingestion_candidates where ingestion_job_id = ${completed.ingestionJobId})`, completedCandidateCount: sql`${knowledgeIngestionJobs.completedCandidateCount} + 1`, needsOperatorCandidateCount: trigger.disposition === "needs_operator" ? sql`${knowledgeIngestionJobs.needsOperatorCandidateCount} + 1` : undefined, updatedAt: new Date() }).where(eq(knowledgeIngestionJobs.id, completed.ingestionJobId));
-  await transaction.execute(sql`update knowledge_ingestion_jobs set status = 'completed', claimed_by = null, claimed_at = null, lease_expires_at = null, fencing_token = null, updated_at = now() where id = ${completed.ingestionJobId} and discovery_terminal = true and status in ('queued', 'running') and not exists (select 1 from knowledge_ingestion_candidates where ingestion_job_id = ${completed.ingestionJobId} and processing_status in ('queued', 'processing'))`);
+  await projectAndFinalizeKnowledgeIngestionJob(transaction, completed.ingestionJobId);
   if (trigger.disposition === "needs_operator") {
     if (trigger.relation.kind === "create" || trigger.relation.kind === "ambiguous") await openWork(transaction, input, cardId, contentVersion, evidenceSetRevision, candidateWorkType, { relation: trigger.relation.kind, shortlistCardIds: "shortlistCardIds" in trigger.relation ? trigger.relation.shortlistCardIds : [] });
     await transaction.insert(knowledgeSamplingObligations).values({ candidateId: candidate.id, knowledgeCardId: cardId, contentVersion, evidenceSetRevision }).onConflictDoNothing();

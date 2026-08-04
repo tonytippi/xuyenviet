@@ -1,4 +1,4 @@
-import { describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import { eq } from "drizzle-orm";
 
 import { createAiAskStreamExecution } from "@xuyenviet/domain";
@@ -6,9 +6,13 @@ import { createAiAskStreamExecutionPort, setAiAskStreamTestDependencies } from "
 import { aiAskCommands, aiGatewayModels, aiUsageEvents, assistantResponseProvenance, assistantRetrievalDecisions, conversations, messages, publicMvpEvaluationResults, tripAnswerContextSnapshots, tripProjects, users } from "../packages/database/src/schema";
 import { renderSourceBundlePromptSection, type ContextPrioritySourceBundle } from "../packages/database/src/source-bundle";
 
-import { testDb } from "./helpers/db";
+import { resetTestDatabase, testDb } from "./helpers/db";
 
 describe("AI Ask stream execution", () => {
+  beforeEach(async () => {
+    await resetTestDatabase();
+  });
+
   test("persists the exact rendered snapshot and links every answer-side record after a completed stream", async () => {
     await seedUserAndModel();
     const [project] = await testDb.insert(tripProjects).values({ userId: "user-1", title: "Huế" }).returning({ id: tripProjects.id });

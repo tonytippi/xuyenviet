@@ -181,7 +181,7 @@ describe("compiled worker adapters", () => {
     await runCompiledAdapter("outbox", "compiled-outbox-worker");
 
     await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, ingestion.id))).resolves.toMatchObject([
-      { status: "completed", discoveryTerminal: true, attemptCount: 1, claimedBy: null, fencingToken: null, lastErrorCode: null },
+      { status: "failed", discoveryTerminal: false, attemptCount: 1, claimedBy: null, fencingToken: null, lastErrorCode: "discovery_failed" },
     ]);
     await expect(testDb.select().from(domainOutbox).where(eq(domainOutbox.id, annotation.id))).resolves.toMatchObject([
       { status: "completed", attemptCount: 1, claimedBy: null, fencingToken: null },
@@ -226,16 +226,16 @@ describe("compiled worker adapters", () => {
     await testDb.insert(aiGatewayModels).values({ id: "compiled-candidate-extraction-model", gatewayModelName: "compiled-candidate-extraction-model", displayLabel: "Compiled candidate extraction model", purpose: "extraction", active: false, defaultForPurpose: false, supportsTextInput: true, supportsExtraction: true, pricingUnitTokens: 1_000_000, pricingEffectiveAt: new Date("2026-01-01T00:00:00.000Z") });
     const [candidate] = await testDb.insert(knowledgeIngestionCandidates).values({ ingestionJobId: ingestion.id, sourceId: ingestion.sourceId, captureVersionId: ingestion.captureVersionId, fingerprint: "compiled-terminal-candidate", type: "general_travel_tip", title: "Candidate", summary: "Candidate summary", conditions: [], freshnessSensitive: false, spanStart: 0, spanEnd: 1, extractionModelId: "compiled-candidate-extraction-model", extractionPromptVersion: "test", processingStatus: "queued", nextRunAt: new Date(0) }).returning();
     const candidateEvents = await runCompiledAdapter("ingestion", "compiled-terminal-candidate-worker");
-    expectCompiledWorkerEvent(candidateEvents, { capability: "knowledge.ingestion", resultCode: "success", durableId: candidate.id });
-    await expect(testDb.select().from(knowledgeIngestionCandidates).where(eq(knowledgeIngestionCandidates.id, candidate.id))).resolves.toMatchObject([{ processingStatus: "completed", aiDisposition: "needs_operator", outcomeReasonCode: "missing_context" }]);
+    expectCompiledWorkerEvent(candidateEvents, { capability: "knowledge.ingestion", resultCode: "failure", durableId: candidate.id });
+    await expect(testDb.select().from(knowledgeIngestionCandidates).where(eq(knowledgeIngestionCandidates.id, candidate.id))).resolves.toMatchObject([{ processingStatus: "failed", aiDisposition: null, outcomeReasonCode: null }]);
 
     const recoveryIngestion = await seedIngestionJob("compiled-exhausted-ingestion");
-    await testDb.update(knowledgeIngestionJobs).set({ attemptCount: 3, maxAttempts: 3, claimedBy: "dead-worker", claimedAt: new Date(0), leaseExpiresAt: new Date(1), fencingToken: "b".repeat(64) }).where(eq(knowledgeIngestionJobs.id, recoveryIngestion.id));
+    await testDb.update(knowledgeIngestionJobs).set({ status: "running", attemptCount: 3, maxAttempts: 3, claimedBy: "dead-worker", claimedAt: new Date(0), leaseExpiresAt: new Date(1), fencingToken: "b".repeat(64) }).where(eq(knowledgeIngestionJobs.id, recoveryIngestion.id));
     const recoveryIngestionEvents = await runCompiledAdapter("ingestion", "compiled-exhausted-ingestion-worker");
     expectCompiledWorkerEvent(recoveryIngestionEvents, { capability: "knowledge.ingestion", resultCode: "failure", durableId: recoveryIngestion.id, leaseRecovery: "recovered", leaseRecoveryCount: 1 });
     await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, recoveryIngestion.id))).resolves.toMatchObject([{ status: "failed", lastErrorCode: "retry_exhausted" }]);
 
-    await testDb.insert(knowledgeCards).values({ id: "compiled-exhausted-card", type: "place", title: "Exhausted indexing card", summary: "Indexing recovery fixture.", aiPromptVersion: "test", createdByUserId: "operator" });
+    await testDb.insert(knowledgeCards).values({ id: "compiled-exhausted-card", lifecycleState: "draft", knowledgeState: "community_observation", verificationRequirement: "none", type: "place", title: "Exhausted indexing card", summary: "Indexing recovery fixture.", aiPromptVersion: "test", createdByUserId: "operator" });
     await testDb.insert(knowledgeIndexDirtyMarkers).values({ id: "compiled-exhausted-index", knowledgeCardId: "compiled-exhausted-card", contentVersion: 1, evidenceSetRevision: 1, reason: "test", status: "claimed", attemptCount: 3, maxAttempts: 3, claimedBy: "dead-worker", claimedAt: new Date(0), leaseExpiresAt: new Date(0), fencingToken: "a".repeat(64), nextRunAt: new Date(0) });
     const indexingEvents = await runCompiledAdapter("indexing", "compiled-exhausted-index-worker");
     expectCompiledWorkerEvent(indexingEvents, { capability: "knowledge.indexing", resultCode: "failure", leaseRecovery: "recovered" });
@@ -314,14 +314,14 @@ describe("compiled worker adapters", () => {
         leaseRecoveryCount: 1,
       });
       expectCompiledWorkerEvent(recoveryEvents, {
-        resultCode: "success",
+        resultCode: "failure",
         durableId: second.id,
         leaseRecovery: "none",
       });
       await testDb.update(knowledgeIngestionJobs).set({ nextRunAt: new Date(0) }).where(eq(knowledgeIngestionJobs.id, first.id));
       const retryEvents = await runCompiledAdapter("ingestion", "recovery-worker");
       await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, first.id))).resolves.toMatchObject([
-        { status: "failed", attemptCount: 2, lastErrorCode: "model_unavailable", claimedBy: null, fencingToken: null },
+        { status: "failed", attemptCount: 2, lastErrorCode: "discovery_failed", claimedBy: null, fencingToken: null },
       ]);
       expectCompiledWorkerEvent(retryEvents, {
         resultCode: "failure",

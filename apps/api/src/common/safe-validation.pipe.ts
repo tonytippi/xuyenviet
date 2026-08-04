@@ -15,7 +15,7 @@ export class SafeValidationPipe implements PipeTransform {
     const dto = this.explicitDto ?? metadata.metatype as (Type<unknown> & Partial<SafeRequestDto<unknown>>) | undefined;
     // esbuild erases parameter metadata for some bundled controller methods.
     // Those methods install an explicit SafeValidationPipe at the parameter.
-    if (!this.explicitDto && (!dto || dto === Object)) return value;
+    if (!this.explicitDto && (!dto || dto === Object)) throw invalid();
     const parser = dto as Type<unknown> & SafeRequestDto<unknown>;
     if (typeof parser.parse !== "function") {
       throw invalid();

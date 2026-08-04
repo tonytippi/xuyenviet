@@ -27,6 +27,7 @@ export * from "./domain-outbox";
 export * from "./gateway";
 export * from "./knowledge-search";
 export * from "./knowledge-indexing-queue";
+export * from "./knowledge-ingestion-accounting";
 export * from "./knowledge-lifecycle";
 export * from "./knowledge-corridor";
 export * from "./knowledge-draft-review";

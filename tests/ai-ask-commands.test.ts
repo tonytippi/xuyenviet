@@ -1,12 +1,12 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import { eq } from "drizzle-orm";
 import postgres from "postgres";
-import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { aiAskCommands, conversations, domainOutbox, messages, schema, tripAnswerContextSnapshots, tripProjects, users } from "@/db/schema";
 import { acquireAiAskCommand, aiAskRefreshRequiredMessage, discardAiAskCommandsForDeletedConversations, finalizeAiAskCommand, maxAiAskConsumerStatusMessageIds, readAiAskCommandTerminalResult, readOwnedCompletedAiAskConsumerStatuses, terminalizeAiAskCommand, terminalResultsEqual, validateAiAskIdempotencyKey } from "@/features/ai/ai-ask-commands";
 
-import { testDb } from "./helpers/db";
+import { resetTestDatabase, testDb } from "./helpers/db";
 
 const key = "idempotency_key_123";
 
@@ -29,6 +29,10 @@ async function loadCommandsWithDatabase(database: ReturnType<typeof drizzle<type
 }
 
 describe("AI Ask command ledger", () => {
+  beforeEach(async () => {
+    await resetTestDatabase();
+  });
+
   test("accepts only strict URL-safe idempotency keys", () => {
     expect(validateAiAskIdempotencyKey("a".repeat(16))).toBe(true);
     expect(validateAiAskIdempotencyKey("a".repeat(128))).toBe(true);

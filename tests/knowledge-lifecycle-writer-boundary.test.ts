@@ -14,6 +14,7 @@ describe("knowledge lifecycle writer boundary", () => {
       "packages/database/src/knowledge-indexing-queue.ts", // lifecycle command helper; projection queue only
       "packages/worker-domain/src/features/knowledge/indexing-worker.ts", // documented technical lease/execution only
       "packages/worker-domain/src/features/knowledge/ingestion-jobs.ts", // documented technical candidate lease/failure only
+      "packages/worker-domain/src/features/knowledge/ingestion-pipeline.ts", // documented discovery/discard candidate persistence only
       "packages/worker-domain/src/features/knowledge/extraction.ts", // documented technical draft extraction only
     ]);
     const violations = await Promise.all(files.map(async (file) => {

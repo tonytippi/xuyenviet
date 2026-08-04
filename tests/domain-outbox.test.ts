@@ -1,7 +1,7 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import { and, eq } from "drizzle-orm";
 import postgres from "postgres";
-import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { aiAskCommands, aiUsageEvents, assistantResponseProvenance, conversations, domainOutbox, domainOutboxEffects, messages, schema, tripProjects, users } from "@/db/schema";
 import { acquireAiAskCommand, finalizeAiAskCommand } from "@/features/ai/ai-ask-commands";
@@ -9,7 +9,7 @@ import { acknowledgeDomainOutboxEvent, aiAskOutboxDedupeKey, claimDueDomainOutbo
 import { appendTripChangeProposalActionAnnotation, findAvailableActionMarkerRange, processAiAskDomainOutboxBatch } from "@/features/ai/domain-outbox-worker";
 import { tripChangeProposalActionAnnotationIds } from "@/features/ai/answer-annotations";
 
-import { testDb } from "./helpers/db";
+import { resetTestDatabase, testDb } from "./helpers/db";
 
 let staleWorkerSql: ReturnType<typeof postgres> | null = null;
 let reclaimWorkerSql: ReturnType<typeof postgres> | null = null;
@@ -58,6 +58,10 @@ async function createCompletedCommandSnapshot() {
 }
 
 describe("AI Ask domain outbox contract", () => {
+  beforeEach(async () => {
+    await resetTestDatabase();
+  });
+
   test("chooses the first deterministic free final-answer marker when provider annotations occupy the final marker", () => {
     const answer = "Đề xuất";
     const annotations = [{ id: "provider", start: 1, end: answer.length, text: answer.slice(1), type: "warning" as const, detail: { type: "warning" as const, label: answer.slice(1) } }];

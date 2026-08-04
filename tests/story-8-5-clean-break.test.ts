@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 
 import { eq, inArray, like } from "drizzle-orm";
 import postgres from "postgres";
-import { beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import {
   assistantRetrievalDecisions,
@@ -19,6 +19,8 @@ import {
 import { recordAuditEvent } from "@/features/audit/events";
 
 import { resolveDatabaseTargetIdentity } from "../scripts/db-env";
+import { loadFacebookSeedUrls } from "../scripts/facebook-seed-urls";
+import { loadYoutubeSeedUrls } from "../scripts/youtube-seed-urls";
 import { resetTestDatabase, testDb } from "./helpers/db";
 import { getTestDatabaseUrl } from "./helpers/env-file";
 
@@ -29,6 +31,7 @@ const reservedUserIds = [
   "system-youtube-capture",
 ];
 const testDatabaseUrl = getTestDatabaseUrl();
+const seededSourceIds = [...loadFacebookSeedUrls(), ...loadYoutubeSeedUrls()].map((source) => source.id).sort();
 
 async function resolveTestDatabaseIdentity(): Promise<string> {
   const sql = postgres(testDatabaseUrl, { max: 1 });
@@ -58,6 +61,10 @@ describe("Story 8.5 clean-break seed", () => {
     });
   });
 
+  afterEach(async () => {
+    await resetTestDatabase();
+  });
+
   test("seeds only the operator and preserves source provenance", async () => {
     await expect(testDb.select().from(users).where(inArray(users.id, reservedUserIds))).resolves.toEqual([]);
     await expect(testDb.select().from(users).where(like(users.id, "system-%"))).resolves.toEqual([]);
@@ -65,7 +72,7 @@ describe("Story 8.5 clean-break seed", () => {
       { id: "seed-fixture-operator-user", email: "fixture-operator@xuyenviet.local" },
     ]);
     const seededSources = await testDb.select({ id: sources.id, kind: sources.kind, submittedByUserId: sources.submittedByUserId }).from(sources);
-    expect(seededSources).toHaveLength(18);
+    expect(seededSources.map(({ id }) => id).sort()).toEqual(seededSourceIds);
     expect(seededSources).toEqual(expect.arrayContaining([
       expect.objectContaining({ kind: "facebook", submittedByUserId: "seed-fixture-operator-user" }),
       expect.objectContaining({ kind: "youtube", submittedByUserId: "seed-fixture-operator-user" }),

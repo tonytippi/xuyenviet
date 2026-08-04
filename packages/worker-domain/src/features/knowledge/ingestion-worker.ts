@@ -9,6 +9,8 @@ export async function processNextKnowledgeIngestionJob(workerId: string) {
   const recoveryObservations = [
     ...recovery.exhaustedRows.map((row) => ingestionObservation("failure", { jobId: row.id, attemptCount: row.attemptCount, claimedAt: new Date(0), nextRunAt: new Date(0) }, true)),
     ...recovery.recoveredRows.map((row) => ingestionObservation("retry", { jobId: row.id, attemptCount: row.attemptCount, claimedAt: new Date(0), nextRunAt: new Date(0) }, true)),
+    ...recovery.exhaustedCandidates.map((row) => ingestionObservation("failure", { jobId: row.ingestionJobId, candidateId: row.id, attemptCount: row.attemptCount, claimedAt: new Date(0), nextRunAt: new Date(0) }, true)),
+    ...recovery.recoveredCandidates.map((row) => ingestionObservation("retry", { jobId: row.ingestionJobId, candidateId: row.id, attemptCount: row.attemptCount, claimedAt: new Date(0), nextRunAt: new Date(0) }, true)),
   ];
   const candidate = await claimNextKnowledgeIngestionCandidate({ workerId });
   if (candidate) {

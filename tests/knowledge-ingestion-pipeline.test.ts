@@ -21,7 +21,7 @@ describe("target knowledge ingestion pipeline", () => {
     const claim = await claimNextKnowledgeIngestionJob({ workerId: "discovery-worker", now: new Date(Date.now() + 1_000) }, testDb);
     if (!claim) throw new Error("expected job claim");
 
-    await expect(runKnowledgeIngestionPipeline(claim, testDb)).resolves.toMatchObject({ outcome: "completed", candidateCount: 0 });
+    await expect(runKnowledgeIngestionPipeline(claim, testDb, async () => [])).resolves.toMatchObject({ outcome: "completed", candidateCount: 0 });
     await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.captureVersionId, capture.id))).resolves.toMatchObject([{ status: "completed", discoveryTerminal: true, candidateCount: 0 }]);
   });
 
@@ -66,5 +66,31 @@ describe("target knowledge ingestion pipeline", () => {
     await expect(runKnowledgeIngestionCandidatePipeline(claim, testDb, async ({ shortlist }) => { expect(shortlist).toEqual([]); return { disposition: "apply", outcomeReasonCode: "applied", relation: { kind: "attach", targetCardId: "archived", shortlistCardIds: [], rationale: "Forged." } }; })).resolves.toMatchObject({ ingestionJobId: job!.id });
     await expect(testDb.select().from(knowledgeIngestionCandidates).where(eq(knowledgeIngestionCandidates.id, "candidate"))).resolves.toMatchObject([{ processingStatus: "failed", knowledgeCardId: null, fencingToken: null }]);
     await expect(testDb.select().from(knowledgeCards).where(eq(knowledgeCards.id, "archived"))).resolves.toMatchObject([{ lifecycleState: "archived", contentVersion: 1 }]);
+  });
+
+  test("persists validated discovery candidates idempotently before terminalizing", async () => {
+    const capture = await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText: "Đèo Hải Vân có điểm dừng ngắm cảnh.", metadata: { kind: "submitted" } });
+    const claim = await claimNextKnowledgeIngestionJob({ workerId: "discovery-worker", now: new Date(Date.now() + 1_000) }, testDb);
+    if (!claim) throw new Error("expected job claim");
+    const discovery = async () => [{ fingerprint: "discovered", type: "place" as const, title: "Điểm dừng", summary: "Có điểm dừng phù hợp.", spanStart: 0, spanEnd: 1 }];
+
+    await expect(runKnowledgeIngestionPipeline(claim, testDb, discovery)).resolves.toMatchObject({ outcome: "completed", candidateCount: 1 });
+    await expect(testDb.select().from(knowledgeIngestionCandidates)).resolves.toMatchObject([{ fingerprint: "discovered", processingStatus: "queued", spanStart: 0, spanEnd: 1 }]);
+    await expect(testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.id, claim.jobId))).resolves.toMatchObject([{ discoveryTerminal: true, candidateCount: 1, status: "running" }]);
+  });
+
+  test("records discard as a terminal AI outcome without card or lifecycle effects", async () => {
+    const capture = await appendSourceCaptureVersion(testDb, { sourceId: "source", captureKind: "pasted_text", rawText: "Đèo Hải Vân có điểm dừng ngắm cảnh.", metadata: { kind: "submitted" } });
+    const [job] = await testDb.select().from(knowledgeIngestionJobs).where(eq(knowledgeIngestionJobs.captureVersionId, capture.id));
+    await testDb.update(knowledgeIngestionJobs).set({ status: "running", discoveryTerminal: true }).where(eq(knowledgeIngestionJobs.id, job!.id));
+    await testDb.insert(knowledgeIngestionCandidates).values({ id: "discard", ingestionJobId: job!.id, sourceId: "source", captureVersionId: capture.id, fingerprint: "candidate-discard", type: "place", title: "Điểm dừng", summary: "Có điểm dừng phù hợp.", conditions: [], spanStart: 0, spanEnd: 1, extractionPromptVersion: "test" });
+    const claim = await claimNextKnowledgeIngestionCandidate({ workerId: "candidate-worker", now: new Date(Date.now() + 1_000) }, testDb);
+    if (!claim) throw new Error("expected candidate claim");
+
+    await expect(runKnowledgeIngestionCandidatePipeline(claim, testDb, async () => ({ disposition: "discard", outcomeReasonCode: "weak_evidence" }))).resolves.toMatchObject({ processingStatus: "completed" });
+    await expect(testDb.select().from(knowledgeIngestionCandidates).where(eq(knowledgeIngestionCandidates.id, "discard"))).resolves.toMatchObject([{ processingStatus: "completed", aiDisposition: "discard", outcomeReasonCode: "weak_evidence", knowledgeCardId: null }]);
+    await expect(testDb.select().from(knowledgeCards)).resolves.toEqual([]);
+    await expect(testDb.select().from(knowledgeCardEvidence)).resolves.toEqual([]);
+    await expect(testDb.select().from(knowledgeRecommendations)).resolves.toEqual([]);
   });
 });

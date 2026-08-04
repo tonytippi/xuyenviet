@@ -470,7 +470,7 @@ describe("knowledge card state-model retrieval safety", () => {
     await removeKnowledgeSource({ sourceId: `${card.id}-source`, reason: "withdrawn", actor: { userId: "withdrawal-race-operator", email: "withdrawal-race-operator@example.com" } }, testDb);
     const result = await (await import("@/features/knowledge/search")).projectClaimedKnowledgeIndexWork(claim, testDb);
 
-    expect(result).toMatchObject({ indexed: false, outcome: "disabled" });
+    expect(result).toMatchObject({ indexed: false, outcome: "superseded" });
     await completeKnowledgeIndexWork(claim, result.outcome, testDb);
     await expect(testDb.select().from(knowledgeCardSearchDocuments).where(eq(knowledgeCardSearchDocuments.knowledgeCardId, card.id))).resolves.toMatchObject([{ status: "disabled" }]);
   });

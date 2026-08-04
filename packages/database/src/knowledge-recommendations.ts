@@ -2,7 +2,7 @@ import { and, asc, count, eq, inArray } from "drizzle-orm";
 
 import { getDb } from "./client";
 import { transitionKnowledgeCard } from "./knowledge-lifecycle";
-import { knowledgeCardEvidence, knowledgeCards, knowledgeRecommendations, type KnowledgeRecommendationAction, type KnowledgeRecommendationWorkType } from "./schema";
+import { facebookCaptureReviews, knowledgeCardEvidence, knowledgeCards, knowledgeRecommendations, sources, type KnowledgeRecommendationAction, type KnowledgeRecommendationWorkType } from "./schema";
 
 type RecommendationDb = ReturnType<typeof getDb>;
 
@@ -47,7 +47,7 @@ export async function getKnowledgeRecommendationDetail(recommendationId: string,
     card: { id: knowledgeCards.id, type: knowledgeCards.type, title: knowledgeCards.title, summary: knowledgeCards.summary, locationName: knowledgeCards.locationName, routeSegment: knowledgeCards.routeSegment, tags: knowledgeCards.tags, freshnessSensitive: knowledgeCards.freshnessSensitive, lifecycleState: knowledgeCards.lifecycleState, knowledgeState: knowledgeCards.knowledgeState, verificationRequirement: knowledgeCards.verificationRequirement },
   }).from(knowledgeRecommendations).innerJoin(knowledgeCards, eq(knowledgeCards.id, knowledgeRecommendations.knowledgeCardId)).where(eq(knowledgeRecommendations.id, recommendationId)).limit(1);
   if (!recommendation) return null;
-  const evidence = await db.select({ quoteText: knowledgeCardEvidence.quoteText, conditions: knowledgeCardEvidence.conditions, supportLevel: knowledgeCardEvidence.supportLevel, displayPolicy: knowledgeCardEvidence.displayPolicy, capturedAt: knowledgeCardEvidence.capturedAt }).from(knowledgeCardEvidence).where(and(eq(knowledgeCardEvidence.knowledgeCardId, recommendation.card.id), eq(knowledgeCardEvidence.state, "active"))).limit(4);
+  const evidence = await db.select({ quoteText: knowledgeCardEvidence.quoteText, conditions: knowledgeCardEvidence.conditions, supportLevel: knowledgeCardEvidence.supportLevel, displayPolicy: knowledgeCardEvidence.displayPolicy, capturedAt: knowledgeCardEvidence.capturedAt, sourceLabel: sources.label, sourceKind: sources.kind, facebookReviewId: facebookCaptureReviews.id }).from(knowledgeCardEvidence).innerJoin(sources, eq(sources.id, knowledgeCardEvidence.sourceId)).leftJoin(facebookCaptureReviews, eq(facebookCaptureReviews.captureVersionId, knowledgeCardEvidence.captureVersionId)).where(and(eq(knowledgeCardEvidence.knowledgeCardId, recommendation.card.id), eq(knowledgeCardEvidence.state, "active"))).limit(4);
   return { ...recommendation, evidence };
 }
 

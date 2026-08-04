@@ -2,7 +2,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 
 import { and, asc, eq, gt, isNull, lte, sql } from "drizzle-orm";
 
-import { getDb, knowledgeIngestionCandidates, knowledgeIngestionJobs, sourceCaptureVersions, sources, users } from "@xuyenviet/database";
+import { getDb, knowledgeIngestionCandidates, knowledgeIngestionJobs, projectAndFinalizeKnowledgeIngestionJob, sourceCaptureVersions, sources, users } from "@xuyenviet/database";
 
 type IngestionJobDb = Pick<ReturnType<typeof getDb>, "select" | "insert" | "update" | "execute" | "transaction">;
 
@@ -68,23 +68,26 @@ export async function claimNextKnowledgeIngestionCandidate(input: { workerId: st
 export async function failKnowledgeIngestionCandidate(input: { candidateId: string; fencingToken: string; errorCode: string; now?: Date }, db: IngestionJobDb = getDb()) {
   const now = input.now ?? new Date();
   return db.transaction(async (tx) => {
-    const [candidate] = await tx.update(knowledgeIngestionCandidates).set({ processingStatus: "failed", aiDisposition: null, outcomeReasonCode: null, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, updatedAt: now }).where(and(eq(knowledgeIngestionCandidates.id, input.candidateId), eq(knowledgeIngestionCandidates.processingStatus, "processing"), eq(knowledgeIngestionCandidates.fencingToken, input.fencingToken), gt(knowledgeIngestionCandidates.leaseExpiresAt, now))).returning({ ingestionJobId: knowledgeIngestionCandidates.ingestionJobId });
+    const [candidate] = await tx.update(knowledgeIngestionCandidates).set({ processingStatus: "failed", aiDisposition: null, outcomeReasonCode: null, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, updatedAt: now }).where(and(eq(knowledgeIngestionCandidates.id, input.candidateId), eq(knowledgeIngestionCandidates.processingStatus, "processing"), eq(knowledgeIngestionCandidates.fencingToken, input.fencingToken), gt(knowledgeIngestionCandidates.leaseExpiresAt, now))).returning({ ingestionJobId: knowledgeIngestionCandidates.ingestionJobId, processingStatus: knowledgeIngestionCandidates.processingStatus });
     if (!candidate) return null;
-    await tx.update(knowledgeIngestionJobs).set({ candidateCount: sql`(select count(*)::int from knowledge_ingestion_candidates where ingestion_job_id = ${candidate.ingestionJobId})`, failedCandidateCount: sql`${knowledgeIngestionJobs.failedCandidateCount} + 1`, lastErrorCode: input.errorCode, updatedAt: now }).where(eq(knowledgeIngestionJobs.id, candidate.ingestionJobId));
-    await finalizeKnowledgeIngestionJob(tx, candidate.ingestionJobId, now);
+    await tx.update(knowledgeIngestionJobs).set({ lastErrorCode: input.errorCode, updatedAt: now }).where(eq(knowledgeIngestionJobs.id, candidate.ingestionJobId));
+    await projectAndFinalizeKnowledgeIngestionJob(tx, candidate.ingestionJobId, now);
     return candidate;
   });
 }
 
 export async function finalizeKnowledgeIngestionJob(db: Pick<IngestionJobDb, "update" | "execute">, jobId: string, now = new Date()) {
-  await db.execute(sql`update knowledge_ingestion_jobs set status = 'completed', claimed_by = null, claimed_at = null, lease_expires_at = null, fencing_token = null, updated_at = ${now.toISOString()}::timestamptz where id = ${jobId} and discovery_terminal = true and status in ('queued', 'running') and not exists (select 1 from knowledge_ingestion_candidates where ingestion_job_id = ${jobId} and processing_status in ('queued', 'processing'))`);
+  await projectAndFinalizeKnowledgeIngestionJob(db, jobId, now);
 }
 
 export async function recoverKnowledgeIngestionJobs(db: IngestionJobDb = getDb(), now = new Date()) {
   return db.transaction(async (tx) => {
     const exhaustedRows = await tx.update(knowledgeIngestionJobs).set({ status: "failed", claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, lastErrorCode: "retry_exhausted", requeueReasonCode: "retry_exhausted", updatedAt: now }).where(and(eq(knowledgeIngestionJobs.status, "running"), lte(knowledgeIngestionJobs.leaseExpiresAt, now), sql`${knowledgeIngestionJobs.attemptCount} >= ${knowledgeIngestionJobs.maxAttempts}`)).returning({ id: knowledgeIngestionJobs.id, attemptCount: knowledgeIngestionJobs.attemptCount });
     const recoveredRows = await tx.update(knowledgeIngestionJobs).set({ status: "queued", claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, requeueReasonCode: "lease_expired", nextRunAt: now, updatedAt: now }).where(and(eq(knowledgeIngestionJobs.status, "running"), lte(knowledgeIngestionJobs.leaseExpiresAt, now), sql`${knowledgeIngestionJobs.attemptCount} < ${knowledgeIngestionJobs.maxAttempts}`)).returning({ id: knowledgeIngestionJobs.id, attemptCount: knowledgeIngestionJobs.attemptCount });
-    return { recovered: recoveredRows.length, exhausted: exhaustedRows.length, recoveredRows, exhaustedRows };
+    const exhaustedCandidates = await tx.update(knowledgeIngestionCandidates).set({ processingStatus: "failed", aiDisposition: null, outcomeReasonCode: null, claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, updatedAt: now }).where(and(eq(knowledgeIngestionCandidates.processingStatus, "processing"), lte(knowledgeIngestionCandidates.leaseExpiresAt, now), sql`${knowledgeIngestionCandidates.attemptCount} >= ${knowledgeIngestionCandidates.maxAttempts}`)).returning({ id: knowledgeIngestionCandidates.id, ingestionJobId: knowledgeIngestionCandidates.ingestionJobId, attemptCount: knowledgeIngestionCandidates.attemptCount });
+    const recoveredCandidates = await tx.update(knowledgeIngestionCandidates).set({ processingStatus: "queued", claimedBy: null, claimedAt: null, leaseExpiresAt: null, fencingToken: null, nextRunAt: now, updatedAt: now }).where(and(eq(knowledgeIngestionCandidates.processingStatus, "processing"), lte(knowledgeIngestionCandidates.leaseExpiresAt, now), sql`${knowledgeIngestionCandidates.attemptCount} < ${knowledgeIngestionCandidates.maxAttempts}`)).returning({ id: knowledgeIngestionCandidates.id, ingestionJobId: knowledgeIngestionCandidates.ingestionJobId, attemptCount: knowledgeIngestionCandidates.attemptCount });
+    for (const candidate of exhaustedCandidates) await projectAndFinalizeKnowledgeIngestionJob(tx, candidate.ingestionJobId, now);
+    return { recovered: recoveredRows.length, exhausted: exhaustedRows.length, recoveredRows, exhaustedRows, recoveredCandidates, exhaustedCandidates };
   });
 }
 

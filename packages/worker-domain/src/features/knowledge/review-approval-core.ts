@@ -6,7 +6,7 @@ import { knowledgeCards, knowledgeCardSources, knowledgeSourceSuggestions, sourc
 import { createSystemAuditActor, toUserAuditActor, type SystemAuditActorId } from "../audit/actors";
 
 type ReviewDb = ReturnType<typeof getDb>;
-type ReviewMutationDb = Pick<ReviewDb, "select" | "update" | "insert" | "execute">;
+type ReviewMutationDb = Parameters<Parameters<ReviewDb["transaction"]>[0]>[0];
 
 const emailLikePattern = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
 const phoneLikePattern = /(?:\+?84|0)(?:[\s.-]?\d){8,10}/;
@@ -57,7 +57,7 @@ async function approveKnowledgeDraftForActorInTransaction(transaction: ReviewMut
 
   const [card] = await transaction.select({ contentVersion: knowledgeCards.contentVersion, evidenceSetRevision: knowledgeCards.evidenceSetRevision }).from(knowledgeCards).where(eq(knowledgeCards.id, draftId)).limit(1);
   if (!card) throw new KnowledgeDraftApprovalCoreError("Bản nháp này không còn trong trạng thái cần duyệt.", "not_reviewable");
-  const result = await transitionKnowledgeCardInTransaction(transaction as any, { actor: executorSystem ? createSystemAuditActor(executorSystem) : toUserAuditActor(actor!), fences: card, trigger: { kind: "draft_publish", cardId: draftId } });
+  const result = await transitionKnowledgeCardInTransaction(transaction, { actor: executorSystem ? createSystemAuditActor(executorSystem) : toUserAuditActor(actor!), fences: card, trigger: { kind: "draft_publish", cardId: draftId } });
   if (result.status !== "resolved") {
     throw new KnowledgeDraftApprovalCoreError("Bản nháp này không còn trong trạng thái cần duyệt.", "not_reviewable");
   }

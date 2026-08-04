@@ -5,7 +5,7 @@ import ts from "typescript";
 
 import { eq, inArray, sql } from "drizzle-orm";
 import postgres from "postgres";
-import { beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import {
   accounts,
@@ -26,11 +26,14 @@ import {
 import { recordAuditEvent } from "@/features/audit/events";
 
 import { resolveDatabaseTargetIdentity } from "../scripts/db-env";
-import { testDb } from "./helpers/db";
+import { loadFacebookSeedUrls } from "../scripts/facebook-seed-urls";
+import { loadYoutubeSeedUrls } from "../scripts/youtube-seed-urls";
+import { resetTestDatabase, testDb } from "./helpers/db";
 import { getTestDatabaseUrl } from "./helpers/env-file";
 
 const catalogIds = systemAuditActorCatalog.map(({ id }) => id);
 const testDatabaseUrl = getTestDatabaseUrl();
+const seededSourceCount = loadFacebookSeedUrls().length + loadYoutubeSeedUrls().length;
 
 async function resolveTestDatabaseIdentity(): Promise<string> {
   const sql = postgres(testDatabaseUrl, { max: 1 });
@@ -66,6 +69,10 @@ describe.sequential("Story 8.6 actor isolation", () => {
       },
       stdio: "inherit",
     });
+  });
+
+  afterEach(async () => {
+    await resetTestDatabase();
   });
 
   test("accepts the real user and every catalog executor while rejecting malformed actor shapes before writing", async () => {
@@ -148,7 +155,7 @@ describe.sequential("Story 8.6 actor isolation", () => {
     await expect(testDb.select({ id: users.id }).from(users)).resolves.toEqual([
       { id: "seed-fixture-operator-user" },
     ]);
-    await expect(testDb.select().from(sources).where(eq(sources.submittedByUserId, "seed-fixture-operator-user"))).resolves.toHaveLength(18);
+    await expect(testDb.select().from(sources).where(eq(sources.submittedByUserId, "seed-fixture-operator-user"))).resolves.toHaveLength(seededSourceCount);
     await expect(testDb.select().from(sources).where(eq(sources.removedByUserId, "seed-fixture-operator-user"))).resolves.toEqual([]);
     await expect(testDb.select().from(users).where(eq(users.id, "seed-traveler-user"))).resolves.toEqual([]);
   });
